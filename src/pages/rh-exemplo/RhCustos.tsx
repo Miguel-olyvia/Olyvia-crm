@@ -1,10 +1,15 @@
 /**
- * «Custos» (módulo do RH de exemplo): o custo de cada pessoa num mês — retribuição do «Cálculo do mês», encargos, valores
+ * «Custos» (módulo do RH de exemplo): o custo de cada pessoa num mês — retribuição do processamento salarial, encargos, valores
  * avulsos e equipamentos, cada um contado como foi escolhido —, com os totais da organização, filtros, ordenação e a composição de cada custo.
  * Clicar numa pessoa abre a ficha dela já no separador Custo. Atribuir equipamento e registar um valor avulso funcionam
- * aqui, em memória, e mudam logo os totais. Só dados de exemplo: nada fala com base de dados.
+ * aqui, em memória, e mudam logo os totais.
+ *
+ * LIGADO À BASE: as pessoas e a retribuição do mês (o total bruto estimado do processamento salarial, a mesma conta da
+ * «Visão geral») vêm da base. AINDA EM MEMÓRIA: equipamentos, valores avulsos e as taxas dos encargos (valores de exemplo) —
+ * não existe tabela para eles. Os acumulados não se calculam (precisam de cada mês anterior).
  */
-import { useMemo, useState } from "react";
+import { useState, useMemo } from "react";
+import { TriangleAlert } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import type { PessoaEscolhivel } from "@/components/rh-exemplo/custo/EquipamentoSheet";
@@ -16,24 +21,17 @@ import { FiltrosCustos } from "@/components/rh-exemplo/custo/modulo/FiltrosCusto
 import { PaineisCustos } from "@/components/rh-exemplo/custo/modulo/PaineisCustos";
 import { TabelaCustos, type Ordem } from "@/components/rh-exemplo/custo/modulo/TabelaCustos";
 import { useCustoDaOrganizacao } from "@/components/rh-exemplo/custo/useCustoDaPessoa";
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { definirMesCusto, useCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
 import {
   SEM_FILTRO, filtrarLinhas, ordenarLinhas, totaisDaOrganizacao, type ColunaCusto, type FiltrosCusto,
 } from "@/components/rh-exemplo/lib/custoOrganizacao";
+import { RecolhaDeAssiduidade } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import { useTranslation } from "@/hooks/useTranslation";
 
 const FILTROS_INICIAIS: FiltrosCusto = { texto: "", local: SEM_FILTRO, contrato: SEM_FILTRO };
 const ORDEM_INICIAL: Ordem = { coluna: "nome", sentido: "asc" };
-
-/** As pessoas de que se pode escolher uma nos painéis «Atribuir equipamento» e «Registar valor avulso». */
-function usePessoasEscolhiveis(): PessoaEscolhivel[] {
-  const ordem = useEstadoRh((e) => e.ordem);
-  const fichas = useEstadoRh((e) => e.fichas);
-  return useMemo(() => ordem.flatMap((id) => (fichas[id] ? [{ id, nome: fichas[id].pessoa.nome_completo }] : [])), [ordem, fichas]);
-}
 
 /** A ordem seguinte ao clicar num cabeçalho: inverte a coluna ativa; numa coluna nova, texto a subir e valores a descer. */
 function ordemSeguinte(atual: Ordem, coluna: ColunaCusto): Ordem {
@@ -46,8 +44,11 @@ export default function RhCustos() {
   const { activeCompany, isLoading } = useCompany();
   const minha = useMinhaPessoa();
   const mes = useCusto((e) => e.mes);
-  const linhas = useCustoDaOrganizacao(mes);
-  const pessoas = usePessoasEscolhiveis();
+  const { linhas, calculo, ano, mesNum } = useCustoDaOrganizacao(mes);
+  const pessoas = useMemo<PessoaEscolhivel[]>(
+    () => calculo.pessoasActivas.map((p) => ({ id: p.id, nome: p.nome_completo })),
+    [calculo.pessoasActivas],
+  );
   const [filtros, setFiltros] = useState(FILTROS_INICIAIS);
   const [ordem, setOrdem] = useState(ORDEM_INICIAL);
   const [ficha, setFicha] = useState<{ id: string | null; aberta: boolean }>({ id: null, aberta: false });
@@ -78,6 +79,24 @@ export default function RhCustos() {
 
       <SeletorMesCusto id="rhCustos-mes" />
       <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">{aviso || t("rhCustos.mesVisto", { mes: nomeDoMes(mes, language) })}</p>
+      <RecolhaDeAssiduidade calculo={calculo} ano={ano} mes={mesNum} />
+      {calculo.pessoasErro && (
+        <p role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {t("rhProcReal.custo.erroPessoas", { erro: calculo.pessoasErro })}
+        </p>
+      )}
+      {calculo.retribuicoesHook.recusado && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.semPermissaoRetribuicao")}</p>}
+      {calculo.incompletas > 0 && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.incompleto", { n: calculo.incompletas })}</p>}
+      {!calculo.aCarregar && !calculo.periodoHook.periodo && !calculo.periodoHook.recusado && (
+        <p role="status" className="text-sm text-muted-foreground">{t("rhProcReal.custo.semPeriodo")}</p>
+      )}
+      {(calculo.pessoasACarregar || calculo.aCarregar) && !calculo.pessoasErro && <OlyviaLoader size={16} />}
+      {!calculo.pessoasACarregar && !calculo.aCarregar && calculo.pendentes > 0 && (
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <OlyviaLoader size={16} />{t("rhProcReal.custo.aCalcular", { n: calculo.pendentes })}
+        </div>
+      )}
       <CabecalhoTotais totais={totaisOrganizacao} />
       <FiltrosCustos
         linhas={linhas} filtros={filtros} visiveis={visiveis.length}

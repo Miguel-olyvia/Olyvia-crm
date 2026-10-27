@@ -225,14 +225,15 @@ export function PessoaHorarioTab({
           <TabsContent value="planeado" className="space-y-4">
             {podeVerPlaneado ? (
               <>
-                {pessoaId && (
-                  <HorarioTipoPainel
-                    pessoaId={pessoaId}
-                    podeEditar={podeEditarPlaneado}
-                    podeCorrigir={podeCorrigirPlaneado}
-                    horasContratadasSemanais={horasContratadasSemanais}
-                  />
-                )}
+                <HorarioTipoPainel
+                  planeado={planeado}
+                  podeEditar={podeEditarPlaneado}
+                  podeCorrigir={podeCorrigirPlaneado}
+                  horasContratadasSemanais={horasContratadasSemanais}
+                  saving={saving}
+                  onGuardarPlaneado={onGuardarPlaneado}
+                  onCorrigirLinha={onCorrigirPlaneado ? setCorrigirAlvo : undefined}
+                />
                 {pessoaId && <BancoHorasDaFicha pessoaId={pessoaId} podeAjustar={podeEditarPlaneado} />}
                 <h3 className="text-sm font-medium text-muted-foreground">{t("rhExemplo.hor.linhasTitulo")}</h3>
                 <HorarioEditor

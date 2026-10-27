@@ -1,66 +1,67 @@
-/** Fechar o mês (guarda o recibo) e reabri-lo (autorização perigosa simulada, motivo de 3+ caracteres, fica registado). */
+/**
+ * Abrir e fechar o PERIODO de processamento do mes (`hr_periodos_processamento`, por `rpc_hr_processamento_periodo_abrir`
+ * e `_fechar`). Um periodo fechado nao se volta a abrir: nao existe RPC de reabertura (a migracao 20261207020400 deixa-a
+ * como pendente e um trigger recusa a reabertura), por isso este componente nao oferece «Reabrir». O recibo guardado
+ * tambem nao existe ainda: fechar so fecha o periodo. O resultado das RPCs e um texto de erro, mostrado ao utilizador.
+ */
 import { useState } from "react";
-import { Lock, LockOpen } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { fecharMesNaLoja, reabrirMesNaLoja } from "./lojaFluxosC";
-import { MOTIVO_REABRIR_MINIMO, type ErroReabrir, type ReciboCongelado } from "./salarioFecho";
 import { nomeDoMes } from "./formatosC";
 
 interface Props {
+  /** AAAA-MM. */
   mes: string;
-  fechado: boolean;
-  recibosParaFechar: readonly ReciboCongelado[];
+  /** `null` = o mes ainda nao tem periodo. */
+  periodo: { estado: "aberto" | "fechado" } | null;
+  podeGerir: boolean;
+  aGravar: boolean;
+  /** Devolve o texto do erro, ou `null` se correu bem (o contrato dos hooks reais). */
+  aoAbrir: () => Promise<string | null>;
+  aoFechar: () => Promise<string | null>;
 }
 
-export function FecharReabrirMes({ mes, fechado, recibosParaFechar }: Props) {
+export function FecharReabrirMes({ mes, periodo, podeGerir, aGravar, aoAbrir, aoFechar }: Props) {
   const { t } = useTranslation();
   const [confirmarFecho, setConfirmarFecho] = useState(false);
-  const [reabrirAberto, setReabrirAberto] = useState(false);
-  const [autorizado, setAutorizado] = useState(false);
-  const [motivo, setMotivo] = useState("");
-  const [erro, setErro] = useState<ErroReabrir | null>(null);
 
-  const fechar = () => {
+  if (!podeGerir || periodo?.estado === "fechado") return null;
+
+  const abrir = async () => {
+    const erro = await aoAbrir();
+    if (erro) toast.error(erro);
+    else toast.success(t("hr.vencimento.visaoGeral.periodoAbertoSucesso"));
+  };
+  const fechar = async () => {
     setConfirmarFecho(false);
-    if (fecharMesNaLoja(mes, recibosParaFechar)) toast.success(t("rhFluxosC.proc.fecho.fechado"));
+    const erro = await aoFechar();
+    if (erro) toast.error(erro);
+    else toast.success(t("hr.vencimento.visaoGeral.periodoFechadoSucesso"));
   };
-  const fecharReabrir = () => {
-    setReabrirAberto(false);
-    setAutorizado(false);
-    setMotivo("");
-    setErro(null);
-  };
-  const reabrir = () => {
-    const r = reabrirMesNaLoja(mes, motivo, autorizado);
-    if ("erro" in r) return setErro(r.erro);
-    toast.success(t("rhFluxosC.proc.fecho.reaberto"));
-    fecharReabrir();
-  };
+
+  if (!periodo) {
+    return (
+      <Button type="button" className="min-h-11" onClick={abrir} disabled={aGravar}>
+        {aGravar && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
+        {t("hr.vencimento.visaoGeral.abrirPeriodo")}
+      </Button>
+    );
+  }
 
   return (
     <>
-      {fechado ? (
-        <Button type="button" variant="outline" className="min-h-11" onClick={() => setReabrirAberto(true)}>
-          <LockOpen className="mr-2 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.proc.fecho.reabrir")}
-        </Button>
-      ) : (
-        <Button type="button" className="min-h-11" onClick={() => setConfirmarFecho(true)}>
-          <Lock className="mr-2 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.proc.fecho.fechar")}
-        </Button>
-      )}
-
+      <Button type="button" className="min-h-11" onClick={() => setConfirmarFecho(true)} disabled={aGravar}>
+        {aGravar ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Lock className="mr-2 h-4 w-4" aria-hidden="true" />}
+        {t("rhFluxosC.proc.fecho.fechar")}
+      </Button>
       <AlertDialog open={confirmarFecho} onOpenChange={setConfirmarFecho}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("rhFluxosC.proc.fecho.confirmarTitulo").replace("{mes}", nomeDoMes(mes))}</AlertDialogTitle>
-            <AlertDialogDescription>{t("rhFluxosC.proc.fecho.confirmarTexto")}</AlertDialogDescription>
+            <AlertDialogTitle>{t("rhFluxosC.proc.fecho.confirmarTitulo", { mes: nomeDoMes(mes) })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("hr.vencimento.visaoGeral.confirmarFechoDescricao")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="min-h-11">{t("rhFluxosC.comum.cancelar")}</AlertDialogCancel>
@@ -68,28 +69,6 @@ export function FecharReabrirMes({ mes, fechado, recibosParaFechar }: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <Dialog open={reabrirAberto} onOpenChange={(a) => !a && fecharReabrir()}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("rhFluxosC.proc.reabrir.titulo").replace("{mes}", nomeDoMes(mes))}</DialogTitle>
-            <DialogDescription>{t("rhFluxosC.proc.reabrir.aviso")}</DialogDescription>
-          </DialogHeader>
-          <div className="flex items-start gap-3">
-            <Checkbox id="reabrir-autorizacao" checked={autorizado} onCheckedChange={(v) => { setAutorizado(v === true); setErro(null); }} className="mt-1" />
-            <Label htmlFor="reabrir-autorizacao" className="text-sm leading-snug">{t("rhFluxosC.proc.reabrir.autorizacao")}</Label>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="reabrir-motivo">{t("rhFluxosC.proc.reabrir.motivo")}</Label>
-            <Textarea id="reabrir-motivo" value={motivo} aria-invalid={erro === "motivo_obrigatorio"} onChange={(e) => { setMotivo(e.target.value); setErro(null); }} />
-          </div>
-          {erro && <p role="alert" className="text-sm text-destructive">{t(`rhFluxosC.proc.reabrir.erro.${erro}`).replace("{n}", String(MOTIVO_REABRIR_MINIMO))}</p>}
-          <DialogFooter className="gap-2 sm:gap-2">
-            <Button type="button" variant="outline" className="min-h-11" onClick={fecharReabrir}>{t("rhFluxosC.comum.cancelar")}</Button>
-            <Button type="button" variant="destructive" className="min-h-11" onClick={reabrir}>{t("rhFluxosC.proc.fecho.reabrir")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

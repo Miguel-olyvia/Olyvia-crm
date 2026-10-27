@@ -142,9 +142,11 @@ describe("a navegação do portal", () => {
   );
 
   it("um token desconhecido também não tem navegação", () => {
+    // Um token que não é de demonstração segue o percurso REAL (Edge convite-admissao); o que a pessoa vê quando a Edge o
+    // recusa está em portalColaboradorReal.test.tsx. Aqui basta que nunca apareça a navegação do portal.
     portal("qualquer");
     expect(screen.queryByRole("navigation", { name: "Secções do portal" })).not.toBeInTheDocument();
-    expect(screen.getByText("O que fazer")).toBeInTheDocument();
+    expect(screen.queryByTestId("portal-colaborador")).not.toBeInTheDocument();
   });
 });
 

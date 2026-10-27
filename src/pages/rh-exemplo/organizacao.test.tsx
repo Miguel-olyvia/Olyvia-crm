@@ -1,8 +1,8 @@
 // Arranque da página «Organização» do RH de exemplo: a árvore (Grupo, Empresas, Filiais, Centros), o painel de um nó com
 // «Trabalha noutro centro», «Ligar pessoa» a atualizar contadores e painel, «Desligar» a pedir motivo, e o teclado da árvore.
 // Tudo em memória, sem base.
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { menuSections } from "@/components/sidebar/menuConfig";
@@ -11,6 +11,12 @@ import { repor } from "@/components/rh-exemplo/dados/loja";
 import { ligacoesDoCentro } from "@/components/rh-exemplo/organizacao/arvore";
 import { lerOrganizacao } from "@/components/rh-exemplo/organizacao/lojaOrganizacao";
 import RhOrganizacao from "./RhOrganizacao";
+
+// A leitura e a gravacao reais testam-se em useOrganizacaoReal.test.ts; aqui a pagina corre sobre dados de exemplo em memoria.
+vi.mock("@/components/rh-exemplo/organizacao/useOrganizacaoReal", async () => {
+  const m = await import("@/components/rh-exemplo/organizacao/organizacaoEmMemoria");
+  return { useOrganizacaoReal: m.useOrganizacaoEmMemoria };
+});
 
 const renderPagina = () =>
   render(
@@ -142,67 +148,65 @@ describe("ligar, alterar e desligar a pessoa", () => {
   const escolher = (rotulo: RegExp | string, valor: string) =>
     fireEvent.change(screen.getByLabelText(rotulo), { target: { value: valor } });
 
-  it("«Ligar pessoa» atualiza os contadores e a pessoa aparece nas abas certas", () => {
+  it("«Ligar pessoa» atualiza os contadores e a pessoa aparece no painel da filial", async () => {
     renderPagina();
     fireEvent.click(screen.getByRole("button", { name: "Ligar pessoa" }));
     escolher(/^Pessoa$/, "p-nadia");
     expect((screen.getByLabelText("Filial") as HTMLSelectElement).disabled).toBe(true);
     escolher(/^Empresa$/, "emp-aurora-remodelacoes");
     escolher(/^Filial$/, "fil-porto");
-    escolher(/^Centro$/, "loc-braga");
-    expect(screen.getByText(/O centro pode ser de outra filial/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    expect(screen.getByRole("status").textContent).toBe("Nádia Coelho: ligação criada.");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Nádia Coelho: ligação criada."));
     expect(no(/^Grupo Aurora/).textContent).toContain("16 pessoas");
-    expect(no(/^Loja Braga/).textContent).toContain("2 trabalham aqui");
     abrir("Filial Porto");
-    const nadia = within(painel()).getByText("Nádia Coelho").closest("li") as HTMLElement;
-    expect(within(nadia).getByText("Loja Braga")).toBeTruthy();
-    expect(within(nadia).getByText("Trabalha noutro centro")).toBeTruthy();
+    expect(within(painel()).getByText("Nádia Coelho")).toBeTruthy();
   });
 
-  it("só oferece as filiais da empresa escolhida e a opção «Mesmo centro da filial»", () => {
+  it("o centro não se escolhe aqui: o painel remete para a ficha da pessoa", () => {
+    renderPagina();
+    fireEvent.click(screen.getByRole("button", { name: "Ligar pessoa" }));
+    expect(screen.queryByLabelText(/^Centro$/)).toBeNull();
+    expect(screen.getByText(/O centro de trabalho altera-se na ficha da pessoa/)).toBeTruthy();
+  });
+
+  it("só oferece as filiais da empresa escolhida", () => {
     renderPagina();
     fireEvent.click(screen.getByRole("button", { name: "Ligar pessoa" }));
     escolher(/^Empresa$/, "emp-aurora-climatizacao");
     const filiais = Array.from((screen.getByLabelText("Filial") as HTMLSelectElement).options).map((o) => o.textContent);
     expect(filiais).toEqual(["Escolhe a filial", "Filial Braga", "Filial Faro"]);
-    escolher(/^Filial$/, "fil-faro");
-    expect(screen.getByRole("option", { name: "Mesmo centro da filial (Loja Faro)" })).toBeTruthy();
   });
 
-  it("guardar sem pessoa mostra o erro e não fecha o painel", () => {
+  it("guardar sem pessoa mostra o erro e não fecha o painel", async () => {
     renderPagina();
     fireEvent.click(screen.getByRole("button", { name: "Ligar pessoa" }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    expect(screen.getByRole("alert").textContent).toBe("Escolhe a pessoa.");
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Escolhe a pessoa."));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
-  it("«Alterar ligação» muda o centro e deixa o histórico de/para", () => {
+  it("«Alterar ligação» muda a filial da pessoa", async () => {
     renderPagina();
     abrir("Loja Faro");
     fireEvent.click(within(painel()).getByRole("button", { name: /Alterar ligação: Tiago Pinheiro/ }));
     expect((screen.getByLabelText(/^Pessoa$/) as HTMLSelectElement).value).toBe("p-tiago");
-    escolher(/^Centro$/, "loc-colombo");
+    escolher(/^Filial$/, "fil-porto");
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    expect(screen.getByRole("status").textContent).toBe("Tiago Pinheiro: ligação alterada.");
-    expect(no(/^Loja Faro/).textContent).toContain("1 trabalha aqui");
-    expect(no(/^Loja Colombo/).textContent).toContain("4 trabalham aqui");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Tiago Pinheiro: ligação alterada."));
   });
 
-  it("«Desligar» pede confirmação e um motivo com pelo menos 3 caracteres", () => {
+  it("«Desligar» pede confirmação e um motivo com pelo menos 3 caracteres", async () => {
     renderPagina();
     abrir("Filial Lisboa");
     fireEvent.click(within(painel()).getByRole("button", { name: /Desligar: Tiago Pinheiro/ }));
     const dialogo = screen.getByRole("alertdialog");
     fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: " ab " } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Desligar" }));
-    expect(within(dialogo).getByRole("alert").textContent).toBe("Indica um motivo com pelo menos 3 caracteres.");
+    await waitFor(() => expect(within(dialogo).getByRole("alert").textContent).toBe("Indica um motivo com pelo menos 3 caracteres."));
     expect(no(/^Grupo Aurora/).textContent).toContain("15 pessoas");
     fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "Fim de contrato" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Desligar" }));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(no(/^Grupo Aurora/).textContent).toContain("14 pessoas");
     expect(within(painel()).queryByText("Tiago Pinheiro")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("Tiago Pinheiro: ligação terminada.");

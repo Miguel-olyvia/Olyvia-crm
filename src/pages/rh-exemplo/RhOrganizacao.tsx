@@ -3,7 +3,8 @@
  * PESSOAS. As pessoas estão debaixo do centro onde trabalham (a chefia primeiro, os subordinados por baixo, com «Reporta a»),
  * e quem tem vínculo legal mas ainda não tem centro fica em «Sem centro atribuído». Daqui liga-se, altera-se e desliga-se a
  * pessoa (vínculo legal = empresa e filial; local de trabalho = o centro, que pode ser de outra filial). Clicar numa pessoa
- * abre a ficha de RH; clicar num nó abre o painel do nó. Tudo em memória, sem base.
+ * abre a ficha de RH; clicar num nó abre o painel do nó. Ligado à base: filiais (árvore da organização), centros (locais de
+ * trabalho) e colocação das pessoas no organograma.
  *
  * Os endereços antigos `?vista=chefias` e `?vista=estrutura` (a página já teve duas abas) voltam à página sem parâmetro.
  */
@@ -17,7 +18,6 @@ import { DesligarDialogo } from "@/components/rh-exemplo/organizacao/DesligarDia
 import { FormularioLigacao } from "@/components/rh-exemplo/organizacao/FormularioLigacao";
 import { LegendaOrganizacao } from "@/components/rh-exemplo/organizacao/LegendaOrganizacao";
 import { PainelNo } from "@/components/rh-exemplo/organizacao/PainelNo";
-import { ESTRUTURA_ORGANIZACAO as EST } from "@/components/rh-exemplo/organizacao/lojaOrganizacao";
 import { usePaginaOrganizacao } from "@/components/rh-exemplo/organizacao/usePaginaOrganizacao";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -36,7 +36,7 @@ function PaginaOrganizacao() {
   return (
     <div className="space-y-5 p-6">
       <CabecalhoPagina
-        titulo={t("rhOrg.titulo")} subtitulo={t("rhOrg.sub")} aviso={t("rhOrg.aviso")}
+        titulo={t("rhOrg.titulo")} subtitulo={t("rhOrg.sub")} aviso={null}
         pai={{ to: "/rh-exemplo/pessoas", texto: t("rhOrg.pai") }} acoes={botaoLigar}
       />
       <div className="space-y-5">
@@ -44,7 +44,16 @@ function PaginaOrganizacao() {
         <LegendaOrganizacao />
         <BarraOrganizacao termo={p.termo} aoPesquisar={p.setTermo} aoExpandir={p.expandirTudo} aoRecolher={p.recolherTudo} />
         <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">{p.aviso}</p>
-        {p.visivel ? (
+        {p.semPermissao && <p role="alert" className="text-sm text-destructive">{t("rhOrg.semPermissao")}</p>}
+        {p.falhaLeitura && (
+          <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive">
+            <span>{t("rhOrg.falhaLeitura")}</span>
+            <Button type="button" variant="outline" size="sm" onClick={p.recarregar}>{t("rhOrg.tentarDeNovo")}</Button>
+          </div>
+        )}
+        {p.loading ? (
+          <p role="status" className="py-10 text-center text-muted-foreground">{t("rhOrg.carregar")}</p>
+        ) : p.visivel ? (
           <ArvoreOrganizacao
             raiz={p.visivel} abertos={p.abertos} seleccionado={p.seleccionado} aoAlternar={p.alternar} aoAbrir={p.setSeleccionado}
             aoAbrirPessoa={(id) => navigate(`/rh-exemplo/pessoas/${id}`)}
@@ -53,11 +62,11 @@ function PaginaOrganizacao() {
           <p className="py-10 text-center text-muted-foreground">{t("rhOrg.semResultados")}</p>
         )}
         <PainelNo
-          est={EST} estado={p.estado} pessoas={p.porId} no={p.noAberto} aoFechar={() => p.setSeleccionado(null)}
+          est={p.est} estado={p.estado} pessoas={p.porId} no={p.noAberto} aoFechar={() => p.setSeleccionado(null)}
           aoLigar={() => p.abrirForm(null)} aoAlterar={p.abrirForm} aoDesligar={p.setADesligar}
         />
         <FormularioLigacao
-          aberto={p.form.aberto} est={EST} estado={p.estado} pessoas={p.pessoas} pessoaInicial={p.form.pessoaInicial}
+          aberto={p.form.aberto} est={p.est} estado={p.estado} pessoas={p.pessoas} pessoaInicial={p.form.pessoaInicial}
           aoFechar={p.fecharForm} aoGuardar={p.guardar}
         />
         <DesligarDialogo pessoa={p.pessoaADesligar} aoCancelar={() => p.setADesligar(null)} aoConfirmar={p.desligar} />

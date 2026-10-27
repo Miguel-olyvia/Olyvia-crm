@@ -1,6 +1,6 @@
 // Arranque das duas alterações da frente D: o banco de horas na aba Horário da ficha (só com horário «banco de horas»)
 // e as horas extra pendentes na fila de trabalho do mapa de assiduidade (mesmas ações do store da frente C).
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -21,6 +21,18 @@ import { menuSections } from "@/components/sidebar/menuConfig";
 import { PessoaHorarioTab } from "@/components/rh-exemplo/PessoaHorarioTab";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
 import RhAssiduidadeOrganizacao from "./RhAssiduidadeOrganizacao";
+
+// Os limites e coeficientes vêm da base: aqui os wrappers são simulados (sem Supabase). O que se vê da base fica
+// testado em fluxosC/horasExtraReal.test.tsx.
+vi.mock("@/components/rh-exemplo/hooks/usePessoa", () => ({
+  usePessoa: () => ({ vinculos: [], loading: false, error: null }),
+}));
+vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
+  usePermissions: () => ({ hasPermission: () => true, hasAnyPermission: () => true, permissions: [], loading: false }),
+}));
+vi.mock("@/components/rh-exemplo/hooks/useCodigosProcessamento", () => ({
+  useCodigosProcessamento: () => ({ codigos: [], isLoading: false, isSaving: false, error: null, criar: vi.fn(), actualizar: vi.fn(), definirActivo: vi.fn() }),
+}));
 
 const noRouter = (elemento: JSX.Element) =>
   render(
@@ -150,14 +162,11 @@ describe("horas extra: limites, configuração e histórico", () => {
     expect(screen.getByLabelText(/Horas anuais máximas/i)).toBeEnabled();
   });
 
-  it("o alerta e os coeficientes configuram-se em Processamento salarial > Configuração", () => {
+  it("o alerta configura-se em Processamento salarial > Configuração (os coeficientes são da base, ver horasExtraReal.test)", () => {
     noRouter(<ConfiguracaoHorasExtra />);
     fireEvent.change(screen.getByLabelText(/Alerta a/), { target: { value: "70" } });
-    fireEvent.change(screen.getByLabelText(/1\.ª hora extra/), { target: { value: "130" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Guardar" })[0]);
-    fireEvent.click(screen.getAllByRole("button", { name: "Guardar" })[1]);
     expect(lerFluxosC().limites.alertaPct).toBe(70);
-    expect(lerFluxosC().regras.primeiraHoraPct).toBe(130);
   });
 
   it("o cálculo do mês usa só as confirmadas e os coeficientes configurados", () => {

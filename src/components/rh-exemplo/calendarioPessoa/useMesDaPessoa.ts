@@ -1,47 +1,68 @@
 /**
- * O mes de uma pessoa, lido dos stores em memoria (ficha, gestao, horarios, horas extra e banco). Recalcula quando
- * qualquer um muda: confirmar uma hora extra, marcar uma falta ou corrigir uma picagem mexe logo no dia.
+ * O mes de uma pessoa, dia a dia. Picagens, horas realizadas, faltas e ausencias vem da assiduidade REAL da pessoa
+ * (o hook que a aba Assiduidade ja carregou para esta janela, entregue por quem chama para nao ir duas vezes a base),
+ * tal como o horario planeado (`pessoas_horario_planeado`, que vem na mesma leitura). O minimo de minutos do subsidio
+ * e a regra real da organizacao (`hr_regras_subsidio_alimentacao`). Continuam a vir dos stores de exemplo, por ainda
+ * nao terem tabela, so as horas extra e o banco de horas.
  */
 import { useMemo } from "react";
-import { hojeIso } from "@/components/rh-exemplo/dados/datas";
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
-import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
-import { useGestao } from "@/components/rh-exemplo/dados/lojaGestao";
+import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
+import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao";
+import { horarioPessoaDeLinhas } from "@/components/rh-exemplo/lib/horarioReal";
 import { saldoDoBanco } from "@/components/rh-exemplo/fluxosC/bancoHorasRegras";
 import { useFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
-import { MINIMO_SUBSIDIO_OMISSAO_MIN } from "@/components/rh-exemplo/fluxosC/salarioEntrada";
-import { entradaMesDaFicha } from "./fonteMes";
+import type { AusenciaTipo } from "@/components/rh-exemplo/tiposAusencias";
+import { entradaMesReal, type AssiduidadeDoMes } from "./fonteMes";
 import { montarMes, type DiaCalendario } from "./montarMes";
 import { totaisDoMes, type TotaisMes } from "./totaisMes";
 
 export interface MesDaPessoa {
   dias: DiaCalendario[];
   totais: TotaisMes;
+  /** A regra do subsidio nao se leu: os totais usam o minimo por omissao e o ecra tem de o dizer. */
+  erroRegraSubsidio: boolean;
+  /** O horario planeado foi recusado a quem consulta: o previsto fica vazio e o ecra tem de o dizer. */
+  planeadoRecusado: boolean;
 }
 
-export function useMesDaPessoa(pessoaId: string, ano: number, mes: number): MesDaPessoa | null {
-  const ficha = useEstadoRh((e) => e.fichas[pessoaId] ?? null);
-  const tiposAusencia = useEstadoRh((e) => e.tiposAusencia);
-  const locais = useEstadoRh((e) => e.locais);
-  const picagens = useGestao((g) => g.picagens);
-  const faltas = useGestao((g) => g.faltas);
-  const minimo = useGestao((g) => g.minutosMinimosSubsidio);
-  const horarios = useFluxosB((e) => e.horarios);
+export interface FonteRealDoMes {
+  assiduidade: AssiduidadeDoMes;
+  /** Para dizer que antes da admissao nao ha contrato. Sem ela nao se restringe nenhum dia. */
+  dataAdmissao: string | null;
+  tiposAusencia?: readonly Pick<AusenciaTipo, "id" | "nome">[];
+}
+
+const SEM_TIPOS: readonly Pick<AusenciaTipo, "id" | "nome">[] = [];
+
+export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte: FonteRealDoMes): MesDaPessoa {
+  const { regra, error: erroRegra } = useRegrasSubsidioAlimentacao();
+  const minimo = regra.minutosMinimosDia;
   const horasExtra = useFluxosC((e) => e.horasExtra);
   const banco = useFluxosC((e) => e.banco);
   const podeHE = useFluxosC((e) => e.podeHE);
+  const { assiduidade, dataAdmissao, tiposAusencia = SEM_TIPOS } = fonte;
+  const planeado = assiduidade.planeado;
+  const horario = useMemo(() => horarioPessoaDeLinhas(planeado), [planeado]);
 
   return useMemo(() => {
-    if (!ficha) return null;
     const dias = montarMes(
-      entradaMesDaFicha(ficha, ano, mes, {
-        gestao: { picagens, faltas }, fluxosB: { horarios }, fluxosC: { horasExtra, banco, podeHE }, tiposAusencia, locais, hoje: hojeIso(),
+      entradaMesReal({
+        ano,
+        mes,
+        hoje: hojeIso(),
+        contrato: dataAdmissao ? { desde: dataAdmissao, ate: null } : null,
+        assiduidade,
+        tiposAusencia,
+        horario,
+        horasExtra: horasExtra.filter((h) => h.pessoaId === pessoaId),
+        banco: banco.filter((m) => m.pessoaId === pessoaId),
+        podeHE: podeHE[pessoaId] === true,
       }),
     );
     const totais = totaisDoMes(dias, {
-      minimoSubsidioMin: minimo ?? MINIMO_SUBSIDIO_OMISSAO_MIN,
+      minimoSubsidioMin: minimo,
       bancoSaldoMin: saldoDoBanco(banco, pessoaId),
     });
-    return { dias, totais };
-  }, [ficha, ano, mes, picagens, faltas, minimo, horarios, horasExtra, banco, podeHE, tiposAusencia, locais, pessoaId]);
+    return { dias, totais, erroRegraSubsidio: Boolean(erroRegra), planeadoRecusado: Boolean(assiduidade.planeadoRecusado) };
+  }, [ano, mes, dataAdmissao, assiduidade, tiposAusencia, horario, horasExtra, banco, podeHE, minimo, erroRegra, pessoaId]);
 }

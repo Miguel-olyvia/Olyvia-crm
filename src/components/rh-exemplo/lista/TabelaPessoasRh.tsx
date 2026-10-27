@@ -3,6 +3,7 @@
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { PessoaListItem } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
+import type { EstadoAdmissao } from "@/components/rh-exemplo/hooks/aspectoSelosAdmissao";
 import { LinhaPessoaRh } from "./LinhaPessoaRh";
 
 interface TabelaPessoasRhProps {
@@ -12,11 +13,13 @@ interface TabelaPessoasRhProps {
   /** A pessoa cuja ficha está aberta (a linha fica assinalada). */
   abertaId: string | null;
   aoAbrir: (id: string) => void;
+  /** `pessoaId` → estado da admissão mais recente (um só pedido para a lista toda). */
+  estadoAdmissaoPorPessoa?: ReadonlyMap<string, EstadoAdmissao>;
 }
 
 const CABECALHO = "px-3 text-xs font-medium text-muted-foreground";
 
-export function TabelaPessoasRh({ pessoas, nomeDoLocal, comContrato, abertaId, aoAbrir }: TabelaPessoasRhProps) {
+export function TabelaPessoasRh({ pessoas, nomeDoLocal, comContrato, abertaId, aoAbrir, estadoAdmissaoPorPessoa }: TabelaPessoasRhProps) {
   const { t } = useTranslation();
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -37,6 +40,7 @@ export function TabelaPessoasRh({ pessoas, nomeDoLocal, comContrato, abertaId, a
             <LinhaPessoaRh
               key={pessoa.id} pessoa={pessoa} local={nomeDoLocal(pessoa.local_id)} comContrato={comContrato}
               aberta={abertaId === pessoa.id} aoAbrir={aoAbrir}
+              estadoAdmissao={estadoAdmissaoPorPessoa?.get(pessoa.id)}
             />
           ))}
         </TableBody>

@@ -18,10 +18,13 @@ import { rhExemploMenuTranslations } from "@/translations/rhExemploMenu";
 import { rhExemploFluxosCTranslations } from "@/translations/rhExemploFluxosC";
 import { rhExemploFluxosATranslations } from "@/translations/rhExemploFluxosA";
 import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
+import { rhExemploHorarioRealTranslations } from "@/translations/rhExemploHorarioReal";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
+import { rhExemploHorasExtraRealTranslations } from "@/translations/rhExemploHorasExtraReal";
 import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
 import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
+import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemploProcessamentoReal";
 import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
 import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
 import { rhExemploPortalTranslations } from "@/translations/rhExemploPortal";
@@ -105,6 +108,11 @@ Object.keys(rhExemploFluxosBTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosBTranslations[lang as keyof typeof rhExemploFluxosBTranslations] };
 });
 
+// Horário da ficha ligado à base: o que o painel de versões diz sobre o que a base não guarda (`rhExemplo.hor.real.*`).
+Object.keys(rhExemploHorarioRealTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploHorarioRealTranslations[lang as keyof typeof rhExemploHorarioRealTranslations] };
+});
+
 // Fluxo de admissão: convite como login temporário de 7 dias, aprovação, contrato para assinar e credenciais (`rhAdm.*`).
 Object.keys(rhExemploAdmissaoTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploAdmissaoTranslations[lang as keyof typeof rhExemploAdmissaoTranslations] };
@@ -135,6 +143,11 @@ Object.keys(rhExemploFluxosDTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosDTranslations[lang as keyof typeof rhExemploFluxosDTranslations] };
 });
 
+// Horas extra ligadas à base: coeficientes de pagamento = códigos de processamento (`rhHeReal.*`).
+Object.keys(rhExemploHorasExtraRealTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploHorasExtraRealTranslations[lang as keyof typeof rhExemploHorasExtraRealTranslations] };
+});
+
 // Calendário do mês da pessoa, na aba Assiduidade da ficha de RH de exemplo (`rhCal.*`).
 Object.keys(rhExemploCalendarioTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCalendarioTranslations[lang as keyof typeof rhExemploCalendarioTranslations] };
@@ -148,6 +161,12 @@ Object.keys(rhExemploAbasTranslations).forEach((lang) => {
 // Módulo «Custos» do RH de exemplo e secção «Equipamentos» da aba Custo (`rhCustos.*`).
 Object.keys(rhExemploCustosTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCustosTranslations[lang as keyof typeof rhExemploCustosTranslations] };
+});
+
+// Cálculo do mês, Custos e desconto da falta ligados ao processamento salarial real (`rhProcReal.*`). Vem DEPOIS de
+// Custos e das fluxos A/B de propósito: reescreve três textos que falavam do «Cálculo do mês» de exemplo.
+Object.keys(rhExemploProcessamentoRealTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploProcessamentoRealTranslations[lang as keyof typeof rhExemploProcessamentoRealTranslations] };
 });
 
 // Canal de denúncias de exemplo (`cd.*`) — módulo próprio, mesmo padrão.

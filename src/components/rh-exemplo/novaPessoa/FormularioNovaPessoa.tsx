@@ -3,10 +3,12 @@
 // campo ou de tentar criar; ao tentar com erros, abre-se a aba do primeiro e o foco vai para esse campo.
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { CamposTocadosProvider } from "@/components/rh-exemplo/form/Campos";
-import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { dataDeHojeBase } from "@/components/rh-exemplo/lib/dataBase";
 import { useConfiguracaoObrigatoriosAdmissao } from "@/components/rh-exemplo/hooks/useConfiguracaoObrigatoriosAdmissao";
 import type { NovaPessoaExemplo } from "@/components/rh-exemplo/hooks/usePessoas";
+import { useCargos } from "@/components/rh-exemplo/hooks/useCargos";
 import { useTranslation } from "@/hooks/useTranslation";
+import { toast } from "@/lib/toast";
 import { AbaAcesso } from "./AbaAcesso";
 import { AbaContacto } from "./AbaContacto";
 import { AbaContrato } from "./AbaContrato";
@@ -43,8 +45,9 @@ function visiveisDe(problemas: readonly ProblemaNova[], tentou: boolean, tocados
 
 export function FormularioNovaPessoa({ colegas, aoCriar, aoCancelar, aoSujar }: FormularioNovaPessoaProps) {
   const { t } = useTranslation();
-  const hoje = useMemo(() => hojeIso(), []);
+  const hoje = useMemo(() => dataDeHojeBase(), []);
   const { campos: config } = useConfiguracaoObrigatoriosAdmissao();
+  const { cargos } = useCargos();
   const [valores, setValores] = useState<ValoresNovaPessoa>(() => valoresIniciais(hoje));
   const [aba, setAba] = useState<AbaNova>("dados");
   const [tentou, setTentou] = useState(false);
@@ -86,12 +89,22 @@ export function FormularioNovaPessoa({ colegas, aoCriar, aoCancelar, aoSujar }: 
     return p ? t(p.mensagemKey) : null;
   };
 
+  const entregar = (convite: boolean) => {
+    try {
+      const cargoNome = cargos.find((c) => c.id === valores.laborais.cargo_id)?.nome ?? null;
+      aoCriar(paraNovaPessoa(valores, { config, comConvite: convite, cargoNome }));
+    } catch (e) {
+      // Um cargo escolhido sem nome (catálogo ainda por carregar) recusa-se aqui: nada vai à base.
+      toast.error(e instanceof Error ? e.message : t("hr.erros.guardar"));
+    }
+  };
+
   const tentar = (convite: boolean) => {
     setComConvite(convite);
     setTentou(true);
     const lista = problemasDaNova(valores, { comConvite: convite, config, hoje });
     const primeiro = primeiroProblema(lista);
-    if (primeiro === null) return aoCriar(paraNovaPessoa(valores, { config, comConvite: convite }));
+    if (primeiro === null) return entregar(convite);
     setAba(abaDoCampo(primeiro.campoId));
     setFocoPedido(primeiro.campoId);
   };

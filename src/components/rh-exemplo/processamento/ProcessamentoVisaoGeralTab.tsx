@@ -73,14 +73,9 @@ import {
   type ResultadoProcessamentoPessoa,
 } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
-import { MES_PROCESSAVEL } from "@/components/rh-exemplo/dados/assiduidadeSetembro";
+import { mesPorOmissao } from "@/components/rh-exemplo/processamento/mesPorOmissao";
 import { toast } from "@/lib/toast";
 import { Eye, Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
-
-/** Na apresentacao o periodo por omissao e Setembro de 2026: ja acabou, esta aberto e pode ser processado. */
-function mesPorOmissao(): string {
-  return MES_PROCESSAVEL;
-}
 
 /** Minutos -> horas com no maximo 2 casas decimais, sem zeros a mais. */
 function horasDeMinutos(minutos: number): string {

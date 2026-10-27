@@ -1,17 +1,86 @@
-// Arranque do módulo «Custos» do RH de exemplo: mostra as pessoas e os totais, ordena e filtra, abre a ficha já no separador
-// Custo e atribuir equipamento muda o custo da pessoa e o módulo. Tudo em memória, sem base. Data fixa (14/10/2026).
+// O módulo «Custos» do RH: as pessoas e a retribuição do mês vêm do processamento salarial REAL (aqui entram por
+// argumento, ao nível do hook `useCustoDaOrganizacao`, por isso não há Supabase); equipamentos, avulsos e taxas
+// continuam em memória. A ficha da pessoa é substituída por um painel que mostra só o separador Custo (a ficha real
+// tem testes próprios). Data fixa (14/10/2026).
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
-import { repor } from "@/components/rh-exemplo/dados/loja";
+import type { PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
+
+const estado = vi.hoisted(() => ({
+  pessoas: [] as PessoaParaCusto[],
+  calculo: {} as Record<string, unknown>,
+}));
+
+vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({ useCompany: () => ({ activeCompany: { id: "org-1" }, isLoading: false }) }));
+vi.mock("@/components/rh-exemplo/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => ({ nome: "Sofia" }) }));
+vi.mock("@/components/rh-exemplo/processamento/useCalculoReal", () => ({ RecolhaDeAssiduidade: () => null }));
+vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
+  const { useCusto } = await import("@/components/rh-exemplo/dados/lojaCusto");
+  const { custoDaPessoa, linhasDaOrganizacao } = await import("@/components/rh-exemplo/custo/custoLido");
+  // Recalcula quando o store em memoria dos avulsos, equipamentos e taxas muda (como o hook verdadeiro).
+  const useAssinar = () => {
+    useCusto((e) => e.avulsos);
+    useCusto((e) => e.equipamentos);
+    useCusto((e) => e.definicoes);
+    useCusto((e) => e.excecoes);
+  };
+  return {
+    useCustoDaOrganizacao: (mes: string) => {
+      useAssinar();
+      return { linhas: linhasDaOrganizacao(mes, estado.pessoas), calculo: estado.calculo, ano: Number(mes.slice(0, 4)), mesNum: Number(mes.slice(5, 7)) };
+    },
+    useCustoDaPessoa: (pessoa: { id: string }, mes: string) => {
+      useAssinar();
+      const p = estado.pessoas.find((x) => x.pessoaId === pessoa.id);
+      return { custo: p ? custoDaPessoa(p, mes, 0) : null, aCarregar: false, retribuicaoRecusada: false, incompleta: false };
+    },
+  };
+});
+vi.mock("@/components/rh-exemplo/ficha/FichaPessoaRh", async () => {
+  const { AbaCusto } = await import("@/components/rh-exemplo/custo/AbaCusto");
+  return {
+    FichaPessoaRh: ({ id, aberta }: { id: string | null; aberta: boolean }) =>
+      aberta && id ? (
+        <div role="dialog" aria-label="Ficha">
+          <AbaCusto
+            pessoa={{ id, nome_completo: estado.pessoas.find((p) => p.pessoaId === id)?.nome ?? id } as never}
+            ctx={{ nomePorPessoaId: new Map(), minhaPessoaId: null } as never}
+            ficha={null as never}
+          />
+        </div>
+      ) : null,
+  };
+});
+
 import { lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
-import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
-import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
-import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { repor } from "@/components/rh-exemplo/dados/loja";
 import { valorDoEquipamentoNoMes, type EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
+import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemploProcessamentoReal";
 import RhCustos from "./RhCustos";
+
+const pessoa = (pessoaId: string, nome: string, retribuicaoMes: number | null, extra: Partial<PessoaParaCusto> = {}): PessoaParaCusto => ({
+  pessoaId, nome, cargo: "Cargo", centroId: null, centro: null, filialId: null, filial: null, tipoContrato: null, retribuicaoMes, horasSemanais: 40, ...extra,
+});
+
+const PESSOAS: PessoaParaCusto[] = [
+  pessoa("p-hugo", "Hugo Teixeira", 1400, { centroId: "l-porto", centro: "Loja Porto", filialId: "fil-porto", filial: "Filial Porto", tipoContrato: "sem_termo" }),
+  pessoa("p-ines", "Inês Cardoso", 1100, { centroId: "l-colombo", centro: "Loja Colombo", filialId: "fil-lisboa", filial: "Filial Lisboa", tipoContrato: "sem_termo" }),
+  pessoa("p-tiago", "Tiago Pinheiro", 950.55, { centroId: "l-colombo", centro: "Loja Colombo", filialId: "fil-lisboa", filial: "Filial Lisboa", tipoContrato: "termo_certo" }),
+  pessoa("p-marta", "Marta Figueiredo", 2000, { centroId: "l-porto", centro: "Loja Porto", filialId: "fil-porto", filial: "Filial Porto", tipoContrato: "sem_termo" }),
+];
+
+function calculo(extra: Record<string, unknown> = {}) {
+  return {
+    pessoasActivas: PESSOAS.map((p) => ({ id: p.pessoaId, nome_completo: p.nome })),
+    pessoasACarregar: false, pessoasErro: null, aCarregar: false, pendentes: 0, incompletas: 0,
+    retribuicoesHook: { recusado: false },
+    periodoHook: { periodo: { id: "per", estado: "aberto" }, recusado: false },
+    ...extra,
+  };
+}
 
 const noRouter = () =>
   render(
@@ -37,10 +106,9 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-10-14T12:00:00"));
   window.localStorage.setItem("language", "pt");
   repor();
-  reporGestao();
-  reporFluxosB();
-  reporFluxosC();
   reporCusto();
+  estado.pessoas = PESSOAS;
+  estado.calculo = calculo();
 });
 
 afterEach(() => {
@@ -57,14 +125,27 @@ describe("traduções do módulo Custos", () => {
     const { en, pt } = rhExemploCustosTranslations;
     expect(Object.keys(en).sort()).toEqual(Object.keys(pt).sort());
   });
+
+  it("as do processamento real também, e as que reescrevem textos de outros módulos existem nesses módulos", () => {
+    const { en, pt } = rhExemploProcessamentoRealTranslations;
+    expect(Object.keys(en).sort()).toEqual(Object.keys(pt).sort());
+    expect(Object.keys(pt).filter((k) => k.startsWith("rhCustos.")).every((k) => k in rhExemploCustosTranslations.pt)).toBe(true);
+    // Nenhum texto vazio, e os marcadores {n}, {erro}, {mes}... são os mesmos nas duas línguas.
+    const marcadores = (texto: string) => (texto.match(/\{[a-z]+\}/g) ?? []).sort().join(",");
+    for (const chave of Object.keys(pt)) {
+      expect(pt[chave].trim(), chave).not.toBe("");
+      expect(en[chave].trim(), chave).not.toBe("");
+      expect(marcadores(en[chave]), chave).toBe(marcadores(pt[chave]));
+    }
+  });
 });
 
 describe("o módulo Custos", () => {
-  it("abre em Setembro de 2026 com as pessoas do Cálculo do mês, os totais e os cabeçalhos da tabela", () => {
+  it("abre em Setembro de 2026 com as pessoas do processamento, os totais e os cabeçalhos da tabela", () => {
     noRouter();
     expect(screen.getByRole("heading", { level: 1, name: /Custos/ })).toBeInTheDocument();
     expect(screen.getByLabelText("Mês")).toHaveValue("2026-09");
-    expect(linhas().length).toBeGreaterThanOrEqual(11);
+    expect(linhas()).toHaveLength(PESSOAS.length);
     expect(within(linhaDe("Hugo Teixeira")).getByText("Hugo Teixeira")).toBeInTheDocument();
     const tabela = screen.getByRole("table", { name: /Custo de cada pessoa em setembro de 2026/i });
     const cabecalhos = within(tabela).getAllByRole("columnheader").map((c) => c.textContent);
@@ -74,11 +155,18 @@ describe("o módulo Custos", () => {
     expect(within(tabela).getAllByRole("columnheader")[0]).toHaveAttribute("aria-sort", "ascending");
   });
 
+  it("a retribuição de cada linha é o total do processamento e a soma bate com o cabeçalho", () => {
+    noRouter();
+    expect(totalDoCabecalho("retribuicao")).toMatch(/5.?450,55/);
+    expect(within(linhaDe("Tiago Pinheiro")).getAllByText(/950,55/).length).toBeGreaterThan(0);
+  });
+
   it("o total da linha de totais é o total do cabeçalho, e o texto não mostra chaves por traduzir", () => {
     noRouter();
     expect(screen.getByTestId("rhcustos-linha-total").textContent).toBe(totalDoCabecalho("total"));
     expect(totalDoCabecalho("pessoas")).toBe(String(linhas().length));
     expect(document.body.textContent).not.toMatch(/\brhCustos\.[A-Za-z]+/);
+    expect(document.body.textContent).not.toMatch(/\brhProcReal\.[A-Za-z]+/);
   });
 
   it("ordena por qualquer coluna, nos dois sentidos, e diz a ordem no cabeçalho", () => {
@@ -115,6 +203,13 @@ describe("o módulo Custos", () => {
     expect(linhas().some((l) => l.textContent?.includes("Marta Figueiredo"))).toBe(false);
   });
 
+  it("sem tipo de contrato na base o filtro de contrato só tem «todos» (não há como o saber para toda a organização)", () => {
+    estado.pessoas = PESSOAS.map((p) => ({ ...p, tipoContrato: null }));
+    noRouter();
+    const opcoes = within(screen.getByLabelText("Tipo de contrato")).getAllByRole("option");
+    expect(opcoes).toHaveLength(1);
+  });
+
   it("a composição de cada pessoa tem texto e percentagem, e abre e fecha sem botões dentro de botões", () => {
     noRouter();
     const linha = linhaDe("Hugo Teixeira");
@@ -130,14 +225,56 @@ describe("o módulo Custos", () => {
     expect(screen.queryByRole("list", { name: /Composição do custo de Hugo Teixeira/ })).not.toBeInTheDocument();
   });
 
-  it("clicar numa linha abre a ficha da pessoa já no separador Custo", () => {
+  it("clicar numa linha abre a ficha da pessoa no custo dela", () => {
     noRouter();
     fireEvent.click(within(linhaDe("Tiago Pinheiro")).getByRole("button", { name: /Abrir a ficha de Tiago Pinheiro/ }));
     const ficha = screen.getByRole("dialog");
-    expect(within(ficha).getByRole("tab", { name: "Custo", selected: true })).toBeInTheDocument();
     expect(within(ficha).getByText("Custo total do mês")).toBeInTheDocument();
     expect(within(ficha).getByRole("heading", { name: "Equipamentos" })).toBeInTheDocument();
     expect(within(ficha).getAllByText("Telemóvel").length).toBeGreaterThan(0);
+  });
+});
+
+describe("o que a base diz e o que falta dizer", () => {
+  it("um erro a carregar as pessoas aparece como alerta", () => {
+    estado.pessoas = [];
+    estado.calculo = calculo({ pessoasErro: "falha ao ler", pessoasActivas: [] });
+    noRouter();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Não foi possível carregar as pessoas: falha ao ler/);
+  });
+
+  it("sem permissão para ver retribuições avisa que o custo não se calcula", () => {
+    estado.calculo = calculo({ retribuicoesHook: { recusado: true } });
+    noRouter();
+    expect(screen.getByText("Não tem permissão para ver as retribuições: o custo não se calcula.")).toBeInTheDocument();
+  });
+
+  it("assiduidade lida só em parte e pessoas por calcular são ditas", () => {
+    estado.calculo = calculo({ incompletas: 2, pendentes: 3 });
+    noRouter();
+    expect(screen.getByText(/assiduidade de 2 pessoa\(s\) só se leu em parte/)).toBeInTheDocument();
+    expect(screen.getByText(/A calcular a retribuição de 3 pessoa\(s\)/)).toBeInTheDocument();
+  });
+
+  it("sem período aberto no mês diz que a retribuição é a estimada, sem valores pontuais", () => {
+    estado.calculo = calculo({ periodoHook: { periodo: null, recusado: false } });
+    noRouter();
+    expect(screen.getByText(/ainda não tem período de processamento aberto/)).toBeInTheDocument();
+  });
+
+  it("com período aberto, ou sem permissão para o ver, não diz que falta o período", () => {
+    noRouter();
+    expect(screen.queryByText(/ainda não tem período de processamento aberto/)).not.toBeInTheDocument();
+    cleanup();
+    estado.calculo = calculo({ periodoHook: { periodo: null, recusado: true } });
+    noRouter();
+    expect(screen.queryByText(/ainda não tem período de processamento aberto/)).not.toBeInTheDocument();
+  });
+
+  it("a nota do fundo diz o que está ligado e o que ainda é de exemplo", () => {
+    noRouter();
+    expect(screen.getByText(/total bruto estimado do processamento salarial/)).toBeInTheDocument();
+    expect(screen.getByText(/só existem em memória/)).toBeInTheDocument();
   });
 });
 

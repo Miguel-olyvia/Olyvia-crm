@@ -9,6 +9,7 @@ import { iniciaisDoNome } from "@/components/rh-exemplo/lib/anexosAdmissao";
 import type { PessoaListItem } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import type { EstadoAdmissao } from "@/components/rh-exemplo/hooks/aspectoSelosAdmissao";
 
 interface LinhaPessoaRhProps {
   pessoa: PessoaListItem;
@@ -17,6 +18,8 @@ interface LinhaPessoaRhProps {
   comContrato: boolean;
   aberta: boolean;
   aoAbrir: (id: string) => void;
+  /** O estado do processo de admissão mais recente da pessoa (da lista real), ou `undefined` se não houver. */
+  estadoAdmissao?: EstadoAdmissao;
 }
 
 const CELULA = "px-3 py-1 align-middle text-sm";
@@ -30,7 +33,7 @@ function Vazio({ rotulo }: { rotulo: string }) {
   );
 }
 
-export function LinhaPessoaRh({ pessoa, local, comContrato, aberta, aoAbrir }: LinhaPessoaRhProps) {
+export function LinhaPessoaRh({ pessoa, local, comContrato, aberta, aoAbrir, estadoAdmissao }: LinhaPessoaRhProps) {
   const { t } = useTranslation();
   const vazio = <Vazio rotulo={t("rhForm.lista.semValor")} />;
   return (
@@ -72,7 +75,7 @@ export function LinhaPessoaRh({ pessoa, local, comContrato, aberta, aoAbrir }: L
           <Badge variant={pessoa.estadoAcesso === "ativo" ? "default" : "outline"} className="font-normal">
             {t(`hr.estadoAcesso.${pessoa.estadoAcesso}`)}
           </Badge>
-          <EstadoAdmissaoDaPessoa pessoaId={pessoa.id} />
+          <EstadoAdmissaoDaPessoa estado={estadoAdmissao} />
         </span>
       </TableCell>
       {comContrato && (

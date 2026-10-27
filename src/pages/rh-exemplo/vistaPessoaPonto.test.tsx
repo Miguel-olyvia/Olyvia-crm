@@ -2,6 +2,12 @@
 // e o RH aceita ou recusa. Na vista da própria pessoa não existe «Corrigir» em lado nenhum; na do RH existe. Tudo em memória.
 // A data é fixa (14/10/2026): a Sofia tem uma picagem por emparelhar a 13/10 (dentro do prazo).
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
+vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
+  useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
+}));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -152,11 +158,24 @@ describe("vista do RH: corrige, pede justificação, marca falta e aceita a dife
     expect(screen.getAllByRole("button", { name: "Anular" }).length).toBeGreaterThan(0);
   });
 
-  it("a fila de alertas do fim do dia tem Corrigir, Pedir justificação, Marcar falta e Aceitar diferença", () => {
-    envolver(<FilaAlertasFimDoDia />);
-    const linha = screen.getByTestId("rhb-alerta-alb-sofia");
-    for (const nome of ["Corrigir", "Pedir justificação", "Marcar falta", "Aceitar diferença"]) {
-      expect(within(linha).getByRole("button", { name: nome })).toBeInTheDocument();
+  it("a fila de fim do dia (desvios reais) tem Corrigir, Marcar falta e Anular, e já não tem Pedir justificação nem Aceitar diferença", () => {
+    const base = { organization_id: "org", pessoa_id: "pessoa-real", data: "2026-10-13", planeado_id: null, local_id: null, detalhe: null };
+    envolver(
+      <FilaAlertasFimDoDia
+        desvios={[
+          { ...base, tipo: "planeado_sem_realizado", hora_inicio: "09:00:00", hora_fim: "13:00:00", minutos: 240, referencia_id: null },
+          { ...base, tipo: "realizado_sem_planeado", hora_inicio: "14:00:00", hora_fim: "16:00:00", minutos: 120, referencia_id: "real-1" },
+          { ...base, tipo: "falta_coberta_por_ausencia", hora_inicio: "09:00:00", hora_fim: "13:00:00", minutos: 240, referencia_id: "aus-1" },
+        ]}
+        nomePorPessoaId={new Map([["pessoa-real", "Pessoa Real"]])}
+        locais={[]}
+        permissoes={TUDO}
+        onAlterado={() => undefined}
+      />,
+    );
+    for (const nome of ["Corrigir", "Marcar falta", /Anular/]) {
+      expect(screen.getByRole("button", { name: nome })).toBeInTheDocument();
     }
+    expect(screen.queryByRole("button", { name: /Pedir justificação|Aceitar diferença/ })).not.toBeInTheDocument();
   });
 });

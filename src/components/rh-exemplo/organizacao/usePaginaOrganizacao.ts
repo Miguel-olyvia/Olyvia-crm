@@ -1,12 +1,9 @@
-/** O estado da página «Organização»: árvore (com as pessoas), pesquisa, nó aberto, painel de ligação, confirmação de «Desligar» e aviso. */
+/** O estado da página «Organização»: árvore real (com as pessoas), pesquisa, nó aberto, painel de ligação, confirmação de «Desligar» e aviso. */
 import { useMemo, useState } from "react";
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
-import { desligarPessoa, guardarLigacao } from "@/components/rh-exemplo/organizacao/accoesOrganizacao";
 import { construirArvore, ehNoOrg, filtrarArvore, idsExpansiveis } from "@/components/rh-exemplo/organizacao/arvore";
-import { pessoasDoExemplo } from "@/components/rh-exemplo/organizacao/dadosOrganizacao";
-import { ESTRUTURA_ORGANIZACAO, useOrganizacao } from "@/components/rh-exemplo/organizacao/lojaOrganizacao";
+import { useOrganizacaoReal } from "@/components/rh-exemplo/organizacao/useOrganizacaoReal";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { ErroLigacao, NoArvore, NoOrg, PedidoLigacao, Resultado } from "@/components/rh-exemplo/organizacao/tipos";
+import type { NoArvore, NoOrg, PedidoLigacao, ResultadoGravacao } from "@/components/rh-exemplo/organizacao/tipos";
 
 /** O nó da estrutura com este identificador (as pessoas e «Sem centro atribuído» não abrem painel). */
 function procurar(no: NoArvore, id: string | null): NoOrg | null {
@@ -17,11 +14,10 @@ function procurar(no: NoArvore, id: string | null): NoOrg | null {
 
 export function usePaginaOrganizacao() {
   const { t } = useTranslation();
-  const estado = useOrganizacao();
-  const rh = useEstadoRh((e) => e);
-  const pessoas = useMemo(() => pessoasDoExemplo(rh), [rh]);
+  const real = useOrganizacaoReal();
+  const { est, estado, pessoas } = real;
   const porId = useMemo(() => new Map(pessoas.map((p) => [p.id, p])), [pessoas]);
-  const arvore = useMemo(() => construirArvore(ESTRUTURA_ORGANIZACAO, estado.ligacoes, pessoas), [estado.ligacoes, pessoas]);
+  const arvore = useMemo(() => construirArvore(est, estado.ligacoes, pessoas), [est, estado.ligacoes, pessoas]);
   const todos = useMemo(() => idsExpansiveis(arvore), [arvore]);
 
   // Guardam-se os FECHADOS: um nó que passa a ter filhos (a primeira pessoa de um centro) nasce aberto.
@@ -38,22 +34,25 @@ export function usePaginaOrganizacao() {
     if (!novo.delete(id)) novo.add(id);
     setFechados(novo);
   };
-  const guardar = (pedido: PedidoLigacao): Resultado => {
-    const r = guardarLigacao(pedido);
+  const guardar = async (pedido: PedidoLigacao): Promise<ResultadoGravacao> => {
+    const r = await real.guardar(pedido);
     if (r.ok) setAviso(t(`rhOrg.feito.${r.tipo}`, { nome: nomeDe(pedido.pessoaId) }));
     return r;
   };
-  const desligar = (pessoaId: string, motivo: string): ErroLigacao | null => {
-    const r = desligarPessoa(pessoaId, motivo);
-    if ("erro" in r) return r.erro;
-    setAviso(t("rhOrg.feito.desligar", { nome: nomeDe(pessoaId) }));
-    setADesligar(null);
-    return null;
+  const desligar = async (pessoaId: string, motivo: string): Promise<ResultadoGravacao> => {
+    const r = await real.desligar(pessoaId, motivo);
+    if (r.ok) {
+      setAviso(t("rhOrg.feito.desligar", { nome: nomeDe(pessoaId) }));
+      setADesligar(null);
+    }
+    return r;
   };
 
   const pesquisando = termo.trim() !== "";
   return {
-    estado, pessoas, porId, termo, setTermo, aviso, seleccionado, setSeleccionado, form, aDesligar, setADesligar,
+    est, estado, pessoas, porId, termo, setTermo, aviso, seleccionado, setSeleccionado, form, aDesligar, setADesligar,
+    loading: real.loading, semPermissao: real.semPermissao,
+    falhaLeitura: real.falhaLeitura, recarregar: real.recarregar,
     visivel: filtrarArvore(arvore, termo),
     noAberto: procurar(arvore, seleccionado),
     abertos: pesquisando ? new Set(todos) : new Set(todos.filter((id) => !fechados.has(id))),

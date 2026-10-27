@@ -11,13 +11,13 @@ interface Campo {
 
 function camposDe(est: EstruturaOrg, no: NoOrg, t: (k: string) => string): Campo[] {
   const semResp = t("rhOrg.dados.semResponsavel");
-  const nif = (valor: string): Campo => ({ rotulo: t("rhOrg.dados.nif"), valor });
+  const nif = (valor: string): Campo => ({ rotulo: t("rhOrg.dados.nif"), valor: valor || "—" });
   const grupo = est.grupo.id === no.id ? est.grupo : null;
   const empresa = est.empresas.find((e) => e.id === no.id);
   const filial = est.filiais.find((f) => f.id === no.id);
   const centro = est.centros.find((c) => c.id === no.id);
-  if (grupo) return [nif(grupo.nif), { rotulo: t("rhOrg.dados.moradaFiscal"), valor: grupo.morada }, { rotulo: t("rhOrg.dados.responsavel"), valor: grupo.responsavel || semResp }];
-  if (empresa) return [nif(empresa.nif), { rotulo: t("rhOrg.dados.moradaFiscal"), valor: empresa.morada }, { rotulo: t("rhOrg.dados.responsavel"), valor: empresa.responsavel || semResp }];
+  if (grupo) return [nif(grupo.nif), { rotulo: t("rhOrg.dados.moradaFiscal"), valor: grupo.morada || "—" }, { rotulo: t("rhOrg.dados.responsavel"), valor: grupo.responsavel || semResp }];
+  if (empresa) return [nif(empresa.nif), { rotulo: t("rhOrg.dados.moradaFiscal"), valor: empresa.morada || "—" }, { rotulo: t("rhOrg.dados.responsavel"), valor: empresa.responsavel || semResp }];
   if (filial) {
     return [
       { rotulo: t("rhOrg.dados.empresa"), valor: nomeEmpresa(est, filial.empresaId) },

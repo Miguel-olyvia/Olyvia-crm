@@ -4,9 +4,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
-import { atualizarFicha, lerEstado, repor } from "@/components/rh-exemplo/dados/loja";
+import { repor } from "@/components/rh-exemplo/dados/loja";
 import { lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
-import { aplicarIndicacao } from "@/components/rh-exemplo/fimContrato/indicacaoResponsavel";
 import PessoaRhDetalhe from "./PessoaRhDetalhe";
 import PessoasRh from "./PessoasRh";
 import RhConfiguracaoAdmissao from "./RhConfiguracaoAdmissao";
@@ -68,35 +67,8 @@ describe("frente A: botões de configuração e Cargos", () => {
   });
 });
 
-describe("frente A: janela do responsável (fim de contrato)", () => {
-  it("o sino abre a janela, o responsável indica e a indicação fica visível", () => {
-    renderEm("/rh-exemplo/pessoas?tab=contratos");
-    fireEvent.click(screen.getByRole("button", { name: /Indicações do responsável sobre contratos a terminar/ }));
-    const janela = screen.getByRole("dialog", { name: "Contratos a terminar na tua equipa" });
-    const continuar = within(janela).getAllByRole("button", { name: "Continuar" })[0];
-    expect(continuar).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(continuar);
-    expect(within(janela).getAllByRole("button", { name: /Continuar/ })[0]).toHaveAttribute("aria-pressed", "true");
-    expect(within(janela).getByText(/^Guardado:/)).toBeInTheDocument();
-    expect(within(janela).getByText(/Só indicas/)).toBeInTheDocument();
-    const feitas = Object.values(lerEstado().fichas).filter((f) => Object.keys(f.respostasFim).length > 0);
-    expect(feitas).toHaveLength(1);
-    expect(feitas[0].vinculos.every((v) => v.estado !== "terminado")).toBe(true);
-  });
-
-  it("no cartão «Fim do contrato» o RH vê a indicação, com quem e quando, e continua a poder renovar ou terminar", () => {
-    const beatriz = lerEstado().fichas["p-beatriz"];
-    const vinculo = beatriz.vinculos.find((v) => v.data_fim !== null)?.id ?? "";
-    atualizarFicha("p-beatriz", (f) => aplicarIndicacao(f, vinculo, "nao_pretendo_continuar", new Date().toISOString()));
-    renderEm("/rh-exemplo/pessoas/p-beatriz");
-    const ficha = screen.getByRole("dialog");
-    fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Contratos/ }), { button: 0 });
-    const seccao = within(ficha).getByRole("region", { name: "Indicação do responsável" });
-    expect(within(seccao).getByText("Não pretendo continuar")).toBeInTheDocument();
-    expect(within(seccao).getByText(/Inês Cardoso/)).toBeInTheDocument();
-    expect(within(ficha).getByRole("button", { name: "Renovar" })).toBeInTheDocument();
-  });
-});
+// A janela do responsável e a indicação no cartão «Fim do contrato» já não são de memória: estão testadas, com a base
+// simulada, em components/rh-exemplo/fimContrato/fimContratoResponsavel.test.tsx.
 
 describe("frente A: separador Custo da ficha", () => {
   const abrirCusto = () => {

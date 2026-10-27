@@ -1,17 +1,19 @@
 /**
  * O RH MARCA a falta (fluxo 7): pessoa, dia, hora de inicio e de fim, e o motivo. O sistema so sugere; aqui e
- * que a falta nasce. Recusa se cruza tempo trabalhado, outra falta ou ausencia aprovada, e a mensagem diz qual.
- * A falta nasce «ativa» e «sem justificacao».
+ * que a falta nasce, pela RPC real `rpc_hr_falta_marcar`. A base recusa se cruza tempo trabalhado, outra falta ou
+ * ausencia aprovada, e devolve a razao; antes disso confere-se com o que ja esta lido dessa pessoa nesse dia.
+ * A falta nasce «activa» e «sem justificacao».
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
-import { marcarFaltaDoRh } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
+import { useAssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
+import { LEITOR_FALTAS, LEITOR_REALIZADO, emVigor } from "@/components/rh-exemplo/lib/assiduidade";
+import { validarMarcacaoFalta } from "@/components/rh-exemplo/lib/faltasB";
 import { MOTIVOS_FALTA, type MotivoFalta } from "@/components/rh-exemplo/tiposAssiduidade";
 
 export interface FaltaPreenchida {
@@ -22,15 +24,21 @@ export interface FaltaPreenchida {
   alertaId: string | null;
 }
 
-interface MarcarFaltaFormProps {
-  inicial: FaltaPreenchida | null;
-  onFechar: () => void;
+export interface PessoaDaLista {
+  id: string;
+  nome: string;
 }
 
-export function MarcarFaltaForm({ inicial, onFechar }: MarcarFaltaFormProps) {
+interface MarcarFaltaFormProps {
+  inicial: FaltaPreenchida | null;
+  pessoas: readonly PessoaDaLista[];
+  onFechar: () => void;
+  /** Depois de a falta ficar gravada, para a lista de tras se actualizar. */
+  onMarcada?: () => void;
+}
+
+export function MarcarFaltaForm({ inicial, pessoas, onFechar, onMarcada }: MarcarFaltaFormProps) {
   const { t } = useTranslation();
-  const fichas = useEstadoRh((e) => e.fichas);
-  const ordem = useEstadoRh((e) => e.ordem);
   const [pessoaId, setPessoaId] = useState(inicial?.pessoaId ?? "");
   const [data, setData] = useState(inicial?.data ?? "");
   const [inicio, setInicio] = useState(inicial?.inicio ?? "09:00");
@@ -39,15 +47,31 @@ export function MarcarFaltaForm({ inicial, onFechar }: MarcarFaltaFormProps) {
   const [erro, setErro] = useState<string | null>(null);
   const [avisos, setAvisos] = useState<string[]>([]);
 
-  const marcar = () => {
+  // A assiduidade so da pessoa e do dia escolhidos: nao se le nada antes de haver as duas coisas.
+  const janela = useMemo(() => ({ de: data, ate: data }), [data]);
+  const assiduidade = useAssiduidadeDaPessoa(pessoaId && data ? pessoaId : undefined, janela);
+
+  const marcar = async () => {
     if (!pessoaId) return setErro(t("rhExemplo.fal.erro.semPessoa"));
     if (!motivo) return setErro(t("rhExemplo.fal.erro.semMotivo"));
-    const resultado = marcarFaltaDoRh(pessoaId, { data, inicio, fim }, motivo, motivo, inicial?.alertaId ?? null);
-    if (resultado.erro) return setErro(t(resultado.erro, { detalhe: resultado.detalhe ?? "" }));
+    const conferencia = validarMarcacaoFalta(
+      { data, inicio, fim },
+      motivo,
+      {
+        realizado: emVigor(assiduidade.realizado, LEITOR_REALIZADO).filter((r) => !r.deleted_at),
+        faltas: emVigor(assiduidade.faltas, LEITOR_FALTAS),
+        ausencias: [...assiduidade.ausenciaAprovadaPorDia.values()],
+      },
+    );
+    if (!conferencia.ok) return setErro(t(conferencia.erro, { detalhe: conferencia.detalhe ?? "" }));
+
+    const falhou = await assiduidade.marcarFalta({ data, horaInicio: inicio, horaFim: fim, motivoCodigo: motivo });
+    if (falhou) return setErro(t(falhou));
     setErro(null);
-    setAvisos((resultado.avisos ?? []).map((aviso) => t(aviso)));
+    setAvisos(conferencia.avisos.map((aviso) => t(aviso)));
     toast.success(t("rhExemplo.fal.faltaMarcada"));
-    if ((resultado.avisos ?? []).length === 0) onFechar();
+    onMarcada?.();
+    if (conferencia.avisos.length === 0) onFechar();
   };
 
   return (
@@ -61,7 +85,7 @@ export function MarcarFaltaForm({ inicial, onFechar }: MarcarFaltaFormProps) {
             value={pessoaId}
             placeholder={t("rhExemplo.fal.escolherPessoa")}
             onValueChange={setPessoaId}
-            options={ordem.filter((id) => fichas[id]).map((id) => ({ value: id, label: fichas[id].pessoa.nome_completo }))}
+            options={pessoas.map((p) => ({ value: p.id, label: p.nome }))}
           />
         </div>
         <div className="space-y-1.5">
@@ -98,7 +122,7 @@ export function MarcarFaltaForm({ inicial, onFechar }: MarcarFaltaFormProps) {
         </p>
       ))}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" className="min-h-11" onClick={marcar}>
+        <Button type="button" className="min-h-11" disabled={assiduidade.saving} onClick={() => void marcar()}>
           {t("rhExemplo.fal.marcarBotao")}
         </Button>
         <Button type="button" variant="outline" className="min-h-11" onClick={onFechar}>

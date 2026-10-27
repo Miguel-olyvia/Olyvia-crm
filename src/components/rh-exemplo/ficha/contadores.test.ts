@@ -1,33 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { criarEstadoInicial } from "@/components/rh-exemplo/dados/exemplo";
 import { contadoresDaFicha } from "./contadores";
 
 describe("contadoresDaFicha", () => {
-  it("sem ficha, tudo a zero", () => {
-    expect(contadoresDaFicha(null)).toEqual({ contratos: 0, documentos: 0, ausenciasPorDecidir: 0 });
+  it("sem ficha, o contador de contratos é zero", () => {
+    expect(contadoresDaFicha(null)).toEqual({ contratos: 0 });
   });
 
-  it("conta contratos e documentos, e só os pedidos de ausência por decidir", () => {
-    const base = Object.values(criarEstadoInicial().fichas).find((f) => f.ausencias.pedidos.length > 0);
-    if (!base) throw new Error("os dados de exemplo deviam ter pelo menos uma pessoa com pedidos de ausência");
-    const pedido = base.ausencias.pedidos[0];
-    const ficha = {
-      vinculos: base.vinculos.slice(0, 1),
-      documentos: base.documentos.slice(0, 2),
-      ausencias: {
-        ...base.ausencias,
-        pedidos: [
-          { ...pedido, estado: "pendente_chefia" as const },
-          { ...pedido, estado: "pendente_rh" as const },
-          { ...pedido, estado: "aprovado" as const },
-          { ...pedido, estado: "recusado" as const },
-        ],
-      },
-    };
-    expect(contadoresDaFicha(ficha)).toEqual({
-      contratos: 1,
-      documentos: Math.min(2, base.documentos.length),
-      ausenciasPorDecidir: 2,
-    });
+  it("conta os contratos (vínculos) da ficha real, e mais nada", () => {
+    const ficha = { vinculos: [{ id: "v1" }, { id: "v2" }, { id: "v3" }] };
+    expect(contadoresDaFicha(ficha)).toEqual({ contratos: 3 });
+  });
+
+  it("uma ficha sem vínculos dá zero", () => {
+    expect(contadoresDaFicha({ vinculos: [] })).toEqual({ contratos: 0 });
+  });
+
+  it("não inventa contadores de documentos nem de ausências (sem fonte real)", () => {
+    expect(Object.keys(contadoresDaFicha({ vinculos: [{ id: "v1" }] }))).toEqual(["contratos"]);
   });
 });

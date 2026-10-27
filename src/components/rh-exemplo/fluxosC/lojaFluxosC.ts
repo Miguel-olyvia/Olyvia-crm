@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from "react";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 import { lerEstado } from "@/components/rh-exemplo/dados/loja";
-import { limiteAnualMin } from "./limitePessoa";
+import { limiteAnualMin } from "./limiteAnualPuro";
 import { validarMovimento, type MovimentoBanco, type ResultadoMovimento } from "./bancoHorasRegras";
 import { criarEstadoFluxosC, type EstadoFluxosC } from "./dadosFluxosC";
 import { comFechoDeAgosto } from "./fechoAgostoExemplo";

@@ -26,7 +26,6 @@
  * isso aqui ele bloqueia o botao, enquanto o saldo negativo de um pedido so
  * avisa: prometer um bloqueio que a base nao faz e pior do que nao o ter.
  */
-import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import type {
   AusenciaDecisao,
   AusenciaSaldo,
@@ -50,7 +49,7 @@ export function isoDeData(data: Date): string {
   return data.toISOString().slice(0, 10);
 }
 
-export function hojeIso(agora: Date = agoraExemplo()): string {
+export function hojeIso(agora: Date = new Date()): string {
   const ano = agora.getFullYear();
   const mes = String(agora.getMonth() + 1).padStart(2, "0");
   const dia = String(agora.getDate()).padStart(2, "0");

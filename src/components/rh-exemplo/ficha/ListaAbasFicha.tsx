@@ -48,8 +48,8 @@ export function ListaAbasFicha({ contadores, abaAtiva }: Props) {
   const { haAnteriores, haSeguintes, rolar } = useRolagemAbas(raiz, abaAtiva);
   const numero: Partial<Record<AbaFicha, number>> = {
     contratos: contadores.contratos,
-    documentos: contadores.documentos,
-    ...(contadores.ausenciasPorDecidir > 0 ? { ausencias: contadores.ausenciasPorDecidir } : {}),
+    ...(contadores.documentos !== undefined ? { documentos: contadores.documentos } : {}),
+    ...((contadores.ausenciasPorDecidir ?? 0) > 0 ? { ausencias: contadores.ausenciasPorDecidir } : {}),
   };
   return (
     <div ref={raiz} className="relative shrink-0">

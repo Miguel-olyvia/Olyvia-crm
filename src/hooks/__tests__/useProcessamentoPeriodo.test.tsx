@@ -6,7 +6,7 @@
  * nenhuma.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const ORG_ID = "org-nike";
 
@@ -126,5 +126,37 @@ describe("useProcessamentoPeriodo", () => {
 
     const erro = await result.current.abrir();
     expect(erro).toBeTruthy();
+  });
+
+  it("abrir e fechar relem em silencio: loading nunca volta a true depois do primeiro carregamento", async () => {
+    respostaPeriodo = { data: PERIODO_ABERTO, error: null };
+    const vistos: boolean[] = [];
+    const { result } = renderHook(() => {
+      const hook = useProcessamentoPeriodo(2026, 9);
+      vistos.push(hook.loading);
+      return hook;
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    vistos.length = 0;
+
+    await act(async () => {
+      await result.current.fechar();
+    });
+
+    expect(chamadasRpc).toHaveLength(1);
+    expect(vistos.length).toBeGreaterThan(0);
+    expect(vistos).not.toContain(true);
+  });
+
+  it("mudar de mes volta a mostrar o carregamento (e o primeiro carregamento desse mes)", async () => {
+    const { result, rerender } = renderHook(({ mes }) => useProcessamentoPeriodo(2026, mes), {
+      initialProps: { mes: 9 },
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ mes: 10 });
+
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
   });
 });

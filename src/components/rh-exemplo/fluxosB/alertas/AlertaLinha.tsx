@@ -1,123 +1,61 @@
 /**
- * Uma linha da fila de alertas do fim do dia (fluxo 5): quem, que tipo de diferenca (chip de texto), o detalhe,
- * o estado e, enquanto esta por tratar, as acoes do RH: Corrigir, Pedir justificacao, Marcar falta, Aceitar
- * diferenca. Com a justificacao da pessoa recebida mostra-a e deixa o RH aceitar ou recusar.
+ * Uma linha da fila de fim de dia: um desvio REAL que a base propoe (`hr_assiduidade_desvios`). Quem, que tipo de
+ * diferenca (chip de texto), as horas e, conforme o tipo, as accoes do RH que existem na base: Corrigir (horas
+ * realizadas ou picagem), Marcar falta (periodo planeado sem horas) e Anular a falta coberta por ausencia aprovada.
+ * Pedir justificacao e Aceitar a diferenca nao tem equivalente na base e por isso nao aparecem.
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
-import { formatarData, formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
-import {
-  diasUteisRestantes,
-  prazoDaJustificacao,
-  situacaoDoPrazo,
-  type AccaoAlerta,
-  type AlertaDia,
-  type JustificacaoPicagem,
-} from "@/components/rh-exemplo/lib/alertasFimDia";
+import { formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
+import { horaCurta } from "@/components/rh-exemplo/lib/assiduidade";
+import type { AccaoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
+import type { Desvio } from "@/components/rh-exemplo/tiposAssiduidade";
 
 interface AlertaLinhaProps {
-  alerta: AlertaDia;
+  desvio: Desvio;
   nome: string;
-  justificacao: JustificacaoPicagem | null;
-  hoje: string;
-  onAccao: (alerta: AlertaDia, accao: AccaoAlerta) => void;
-  onDecidir: (justificacao: JustificacaoPicagem, aceitar: boolean) => void;
+  chave: string;
+  /** Ja filtradas pelo tipo do desvio e pelas permissoes de quem esta a ver. */
+  accoes: readonly AccaoDesvio[];
+  onAccao: (desvio: Desvio, accao: AccaoDesvio) => void;
 }
 
-/** Marcar falta so faz sentido onde ha tempo planeado em falta ou uma entrada por fechar. */
-const TIPOS_COM_FALTA = new Set(["planeado_sem_realizado", "parcialmente_realizado", "pendente_par"]);
+const ROTULO_ACCAO: Record<AccaoDesvio, string> = {
+  corrigir: "rhExemplo.pic.accao.corrigir",
+  marcar_falta: "rhExemplo.pic.accao.marcar_falta",
+  anular_por_ausencia: "hr.assiduidade.accao.anularPorAusencia",
+};
 
-function Detalhe({ alerta }: { alerta: AlertaDia }) {
+export function AlertaLinha({ desvio, nome, chave, accoes, onAccao }: AlertaLinhaProps) {
   const { t } = useTranslation();
-  const periodo =
-    alerta.horaInicio && alerta.horaFim ? `${alerta.horaInicio.slice(0, 5)}–${alerta.horaFim.slice(0, 5)}` : (alerta.horaInicio ?? "").slice(0, 5);
-  if (alerta.tipo === "fora_do_local") return <span>{t("rhExemplo.pic.detalheFora", { metros: String(alerta.distanciaM ?? 0) })}</span>;
-  if (alerta.tipo === "pendente_par") return <span>{t("rhExemplo.pic.detalhePar", { hora: periodo })}</span>;
-  if (alerta.tipo === "parcialmente_realizado") {
-    return <span>{t("rhExemplo.pic.detalheParcial", { periodo, falta: formatarHorasMinutos(alerta.minutos ?? 0) })}</span>;
-  }
-  return <span>{`${periodo} · ${formatarHorasMinutos(alerta.minutos ?? 0)}`}</span>;
-}
-
-function EstadoEPrazo({ alerta, hoje }: { alerta: AlertaDia; hoje: string }) {
-  const { t } = useTranslation();
-  const prazo = situacaoDoPrazo(alerta, hoje);
-  return (
-    <>
-      {alerta.estado !== "pendente" && (
-        <Badge variant="secondary" className="font-normal">
-          {t(`rhExemplo.pic.estado.${alerta.estado}`)}
-        </Badge>
-      )}
-      {prazo === "dentro_do_prazo" && (
-        <span className="text-xs text-muted-foreground">
-          {t("rhExemplo.pic.diasRestantes", {
-            dias: String(diasUteisRestantes(alerta.data, hoje)),
-            ate: formatarData(prazoDaJustificacao(alerta.data)),
-          })}
-        </span>
-      )}
-      {prazo === "sem_justificacao" && (
-        <Badge variant="outline" className="border-destructive font-normal text-destructive">
-          {t("rhExemplo.pic.semJustificacaoSugerida")}
-        </Badge>
-      )}
-    </>
-  );
-}
-
-export function AlertaLinha({ alerta, nome, justificacao, hoje, onAccao, onDecidir }: AlertaLinhaProps) {
-  const { t } = useTranslation();
-  const porTratar = alerta.estado === "pendente";
-  const accoes: AccaoAlerta[] = ["corrigir", "pedir_justificacao", "marcar_falta", "aceitar"];
+  const periodo = desvio.hora_inicio
+    ? desvio.hora_fim
+      ? `${horaCurta(desvio.hora_inicio)}–${horaCurta(desvio.hora_fim)}`
+      : horaCurta(desvio.hora_inicio)
+    : "";
 
   return (
-    <li className="space-y-2 py-3 text-sm" data-testid={`rhb-alerta-${alerta.id}`}>
+    <li className="space-y-2 py-3 text-sm" data-testid={`rhb-alerta-${chave}`}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="min-w-40 font-medium">{nome}</span>
         <Badge variant="outline" className="font-normal">
-          {t(`rhExemplo.pic.alerta.${alerta.tipo}`)}
+          {t(`hr.assiduidade.desvios.tipo.${desvio.tipo}`)}
         </Badge>
         <span className="tabular-nums text-muted-foreground">
-          <Detalhe alerta={alerta} />
+          {periodo}
+          {desvio.minutos ? ` · ${formatarHorasMinutos(desvio.minutos)}` : ""}
         </span>
-        <EstadoEPrazo alerta={alerta} hoje={hoje} />
       </div>
-
-      {alerta.estado === "justificacao_recebida" && justificacao && (
-        <div className="space-y-2 rounded-md border bg-muted/40 p-3">
-          <p>
-            <span className="font-medium">{t("rhExemplo.pic.justificacaoDe", { hora: justificacao.horaReal })}</span> {justificacao.motivo}
-            {justificacao.anexoNome ? ` · ${t("rhExemplo.hor.anexo")}: ${justificacao.anexoNome}` : ""}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" className="min-h-11" onClick={() => onDecidir(justificacao, true)}>
-              {t("rhExemplo.pic.aceitarJustificacao")}
-            </Button>
-            <Button type="button" variant="outline" className="min-h-11" onClick={() => onDecidir(justificacao, false)}>
-              {t("rhExemplo.pic.recusarJustificacao")}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {porTratar && (
+      {desvio.detalhe && <p className="text-xs text-muted-foreground">{desvio.detalhe}</p>}
+      {accoes.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {accoes
-            .filter((accao) => accao !== "marcar_falta" || TIPOS_COM_FALTA.has(alerta.tipo))
-            .map((accao) => (
-              <Button key={accao} type="button" size="sm" variant="outline" className="min-h-11" onClick={() => onAccao(alerta, accao)}>
-                {t(`rhExemplo.pic.accao.${accao}`)}
-              </Button>
-            ))}
+          {accoes.map((accao) => (
+            <Button key={accao} type="button" size="sm" variant="outline" className="min-h-11" onClick={() => onAccao(desvio, accao)}>
+              {t(ROTULO_ACCAO[accao])}
+            </Button>
+          ))}
         </div>
-      )}
-
-      {!porTratar && alerta.motivo && alerta.estado !== "justificacao_recebida" && (
-        <p className="text-xs text-muted-foreground">
-          {t("rhExemplo.pic.tratadoPor", { quem: alerta.tratadoPor ?? "", motivo: alerta.motivo })}
-        </p>
       )}
     </li>
   );

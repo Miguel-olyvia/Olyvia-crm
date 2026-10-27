@@ -1,7 +1,8 @@
 // Dos valores do formulário "Nova pessoa" para o que se grava na memória: tudo normalizado como o assistente real o
 // normaliza (vazio é `null`, NIF sem espaços, país em maiúsculas) e nada inventado. Funções puras.
 import type { ExtrasNovaPessoa } from "@/components/rh-exemplo/dados/fichaNovaPessoa";
-import type { NovaPessoaExemplo } from "@/components/rh-exemplo/hooks/usePessoas";
+import { paraPayload, type NovaPessoaPayload } from "@/components/rh-exemplo/hooks/paraPayloadReal";
+import type { NaoGravado, NovaPessoaExemplo } from "@/components/rh-exemplo/hooks/usePessoas";
 import {
   CAMPOS_OBRIGATORIOS_ADMISSAO, pendenciasDoRascunho, type ConfiguracaoCampo, type RascunhoConviteObrigatorios,
 } from "@/components/rh-exemplo/lib/admissaoObrigatorios";
@@ -188,6 +189,31 @@ export function pendenciasDaNova(
 export interface OpcoesGravar {
   config?: readonly ConfiguracaoCampo[] | null;
   comConvite: boolean;
+  /** O nome do cargo escolhido (a legenda `pessoas.cargo`); `null` só quando não há cargo escolhido. */
+  cargoNome?: string | null;
+}
+
+/**
+ * O que o formulário recolhe e NÃO tem coluna onde gravar: o nome de tratamento (ainda sem coluna) e os ficheiros anexos
+ * (aqui só se guardam o nome e o tamanho, nunca o ficheiro). Dizem-se ao utilizador em vez de se descartarem em silêncio.
+ */
+function semEquivalente(v: ValoresNovaPessoa): NaoGravado[] {
+  return [
+    ...(texto(v.extra.nome_tratamento) !== null ? (["nome_tratamento"] as const) : []),
+    ...(v.extra.anexos.length > 0 ? (["anexos"] as const) : []),
+  ];
+}
+
+/**
+ * O payload COMPLETO de `usePessoas.criarPessoa`, o mesmo que o painel real escreve (`paraPayload`: nada se reimplementa
+ * aqui). Saúde e sindicalização seguem tal como foram escritas: se quem cria não tem a permissão, a base recusa o satélite
+ * e a recusa volta como falha por secção, em vez de o dado desaparecer sem aviso. Este formulário não tem campo de conta de
+ * CRM a ligar, por isso `contaALigar` fica sempre `null`.
+ */
+export function payloadDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): NovaPessoaPayload {
+  return paraPayload(v, {
+    podeLigarConta: false, podeSaude: true, podeSindicalizacao: true, cargoNome: o.cargoNome ?? null,
+  });
 }
 
 export function extrasDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): ExtrasNovaPessoa {
@@ -237,5 +263,7 @@ export function paraNovaPessoa(v: ValoresNovaPessoa, o: OpcoesGravar): NovaPesso
     dataFim: dataFimDe(v),
     reportaAId: texto(v.laborais.reporta_a_pessoa_id),
     extras: extrasDeValores(v, o),
+    payload: payloadDeValores(v, o),
+    naoGravado: semEquivalente(v),
   };
 }

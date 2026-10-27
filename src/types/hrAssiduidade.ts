@@ -171,6 +171,7 @@ export interface Desvio {
 
 export const TIPOS_DESVIO = [
   "planeado_sem_realizado",
+  "planeado_parcialmente_realizado",
   "realizado_sem_planeado",
   "pendente_par",
   "falta_coberta_por_ausencia",

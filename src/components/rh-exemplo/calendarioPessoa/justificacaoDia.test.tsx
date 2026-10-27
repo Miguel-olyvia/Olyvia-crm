@@ -2,6 +2,12 @@
 // justifica, o RH vê a linha na fila e decide, e o calendário, a aba Justificações e o desconto acompanham. Tudo em memória,
 // com a data fixa de 14/10/2026 (HOJE_EXEMPLO_RH). O desconto é o da regra das faltas, lido do cálculo do mês.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
+vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
+  useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
+}));
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";

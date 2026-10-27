@@ -5,7 +5,7 @@ import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { useCargos } from "@/components/rh-exemplo/hooks/useCargos";
 import { chaveDoRotuloDaConta, mascaraDaConta, normalizarConta } from "@/components/rh-exemplo/lib/conta";
 import { FORMATOS_CONTA } from "@/components/rh-exemplo/tipos";
-import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { dataDeHojeBase } from "@/components/rh-exemplo/lib/dataBase";
 import { useTranslation } from "@/hooks/useTranslation";
 import { AnexosNova } from "./AnexosNova";
 import { CampoS, CampoT, GRELHA, LinhaCampo } from "./camposNova";
@@ -17,7 +17,7 @@ function Retribuicao() {
   const { t } = useTranslation();
   const { valores } = useNova();
   const { salarioDoCargoEm } = useCargos();
-  const periodo = valores.laborais.cargo_id === "" ? null : salarioDoCargoEm(valores.laborais.cargo_id, hojeIso());
+  const periodo = valores.laborais.cargo_id === "" ? null : salarioDoCargoEm(valores.laborais.cargo_id, dataDeHojeBase());
   const euros = (n: number) => new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(n);
   return (
     <SeccaoNova titulo={t("rhNova.sec.retribuicao")}>

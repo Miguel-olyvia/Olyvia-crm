@@ -3,7 +3,6 @@
  * mês (planeado, realizado e estado de cada dia) e abre-o noutro separador. Sem janela própria: o PDF é gerado
  * no navegador, com os dados de exemplo, e não vai para lado nenhum.
  */
-import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useEffect, useRef } from "react";
 import { useRelatorioAssiduidadeMensal } from "@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal";
 import { formatarDuracao } from "@/components/rh-exemplo/lib/assiduidade";
@@ -24,7 +23,7 @@ interface Props {
 
 export function PessoaRelatorioAssiduidadeMensal({ aberto, onFechar, pessoaId, pessoaNome, cargo, dataAdmissao }: Props) {
   const { t, language } = useTranslation();
-  const hoje = agoraExemplo();
+  const hoje = new Date();
   const relatorio = useRelatorioAssiduidadeMensal(pessoaId, hoje.getFullYear(), hoje.getMonth());
   const emCurso = useRef(false);
 

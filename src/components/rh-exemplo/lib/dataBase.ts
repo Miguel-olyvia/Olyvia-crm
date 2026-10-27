@@ -1,5 +1,3 @@
-import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
-
 /**
  * O "hoje" que o RH envia a base e usa para decidir "em vigor" / "agendado".
  *
@@ -16,6 +14,6 @@ import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
  * hooks. As datas civis que NAO falam com a base (fim do periodo experimental,
  * termo do contrato) continuam locais, em `novaPessoaDatas.ts`.
  */
-export function dataDeHojeBase(agora: Date = agoraExemplo()): string {
+export function dataDeHojeBase(agora: Date = new Date()): string {
   return agora.toISOString().slice(0, 10);
 }

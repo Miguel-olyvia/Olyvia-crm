@@ -7,7 +7,7 @@ import type { EstadoGestao } from "@/components/rh-exemplo/dados/tiposGestao";
 import type { FichaRh } from "@/components/rh-exemplo/dados/tiposLoja";
 import type { EstadoFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import type { EstadoFluxosC } from "@/components/rh-exemplo/fluxosC/dadosFluxosC";
-import { comoRealizadoComCorreccao } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
+import { comoRealizadoComCorreccao, type AssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
 import { LEITOR_FALTAS, LEITOR_PICAGENS, LEITOR_REALIZADO, emVigor } from "@/components/rh-exemplo/lib/assiduidade";
 import { distanciaMetros, foraDoLocal, referenciaDoLocal } from "@/components/rh-exemplo/lib/picagemLocal";
 import type { LocalTrabalho } from "@/components/rh-exemplo/tipos";
@@ -44,6 +44,56 @@ function diasForaDoLocal(picagens: EntradaMes["picagens"], locais: readonly Loca
     if (foraDoLocal(distanciaMetros({ latitude: p.latitude, longitude: p.longitude }, referenciaDoLocal(local)))) dias.add(p.data_local);
   }
   return dias;
+}
+
+/** O que o calendario real le do hook de assiduidade da pessoa (linhas em bruto, com as substituidas). */
+export type AssiduidadeDoMes = Pick<
+  AssiduidadeDaPessoa,
+  "picagens" | "realizado" | "faltas" | "ausenciaAprovadaPorDia" | "planeado" | "planeadoRecusado"
+>;
+
+export interface FonteReal {
+  ano: number;
+  /** 1 a 12. */
+  mes: number;
+  hoje: string;
+  contrato: EntradaMes["contrato"];
+  assiduidade: AssiduidadeDoMes;
+  tiposAusencia: readonly Pick<AusenciaTipo, "id" | "nome">[];
+  /** Do horario planeado real (`horarioPessoaDeLinhas`); `undefined` = a pessoa nao tem horario planeado. */
+  horario: EntradaMes["horario"];
+  horasExtra: EntradaMes["horasExtra"];
+  banco: EntradaMes["banco"];
+  podeHE: boolean;
+}
+
+/**
+ * A entrada do mes a partir da assiduidade REAL: as tabelas leem-se em bruto e o valor em vigor tira-se aqui com
+ * `emVigor`, a mesma regra das vistas. Picagens, horas realizadas, faltas, ausencias e o horario planeado vem da base;
+ * so as horas extra e o banco continuam a vir dos stores (ainda nao tem tabela).
+ */
+export function entradaMesReal(f: FonteReal): EntradaMes {
+  const ausencias = new Map<string, AusenciaDoDiaCal>();
+  for (const [data, dia] of f.assiduidade.ausenciaAprovadaPorDia) {
+    const tipoId = (dia as { tipo_id?: string | null }).tipo_id;
+    ausencias.set(data, { nome: f.tiposAusencia.find((t) => t.id === tipoId)?.nome ?? "", fraccao: dia.fraccao_dia });
+  }
+  return {
+    ano: f.ano,
+    mes: f.mes,
+    hoje: f.hoje,
+    horario: f.horario,
+    contrato: f.contrato,
+    ausencias,
+    realizado: emVigor(f.assiduidade.realizado, LEITOR_REALIZADO).filter((l) => !l.deleted_at),
+    picagens: emVigor(f.assiduidade.picagens, LEITOR_PICAGENS),
+    faltas: emVigor(f.assiduidade.faltas, LEITOR_FALTAS),
+    horasExtra: f.horasExtra,
+    banco: f.banco,
+    podeHE: f.podeHE,
+    // As picagens lidas da base nao trazem coordenadas: nao ha como medir a distancia ao local.
+    diasForaDoLocal: new Set<string>(),
+  };
 }
 
 export function entradaMesDaFicha(ficha: FichaRh, ano: number, mes: number, fonte: FonteDoMes): EntradaMes {

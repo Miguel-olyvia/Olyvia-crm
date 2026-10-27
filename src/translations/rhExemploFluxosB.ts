@@ -240,6 +240,14 @@ export const rhExemploFluxosBTranslations: Record<"en" | "pt", Record<string, st
     "rhExemplo.fal.erro.faltaAnulada": "That absence is cancelled or replaced.",
     "rhExemplo.fal.erro.semTexto": "Write the justification text (at least 3 characters).",
     "rhExemplo.fal.erro.naoPendente": "Only an absence with a pending document can be decided.",
+
+    "rhExemplo.pic.real.ajuda": "What the database proposes to sort out: where the hours done do not match the hours planned. It only proposes; nothing is written until you act.",
+    "rhExemplo.pic.real.aLer": "Reading the day…",
+    "rhExemplo.pic.real.semLinha": "There is nothing left to correct in this item: the record changed since the list was read.",
+    "rhExemplo.pic.real.semAusencia": "This day no longer has an approved leave, so the absence cannot be voided here.",
+    "rhExemplo.pic.real.semFalta": "The absence for this item was not found among the ones in force.",
+    "rhExemplo.pic.real.confirmarAnular": "Void the absence of {nome} on {data}? It is covered by an approved leave.",
+    "rhExemplo.pic.real.confirmarAnularBotao": "Void the absence",
   },
   pt: {
     "rhExemplo.fluxosB.fechar": "Fechar",
@@ -478,5 +486,13 @@ export const rhExemploFluxosBTranslations: Record<"en" | "pt", Record<string, st
     "rhExemplo.fal.erro.faltaAnulada": "Essa falta está anulada ou substituída.",
     "rhExemplo.fal.erro.semTexto": "Escreva o texto da justificação (pelo menos 3 caracteres).",
     "rhExemplo.fal.erro.naoPendente": "Só se decide uma falta pendente de documento.",
+
+    "rhExemplo.pic.real.ajuda": "O que a base propõe que se trate: onde as horas feitas não batem com as planeadas. Só propõe; nada se escreve até agir.",
+    "rhExemplo.pic.real.aLer": "A ler o dia…",
+    "rhExemplo.pic.real.semLinha": "Já não há nada para corrigir neste item: o registo mudou desde que a lista foi lida.",
+    "rhExemplo.pic.real.semAusencia": "Este dia já não tem ausência aprovada, por isso a falta não se anula aqui.",
+    "rhExemplo.pic.real.semFalta": "A falta deste item não foi encontrada entre as que estão em vigor.",
+    "rhExemplo.pic.real.confirmarAnular": "Anular a falta de {nome} em {data}? Está coberta por uma ausência aprovada.",
+    "rhExemplo.pic.real.confirmarAnularBotao": "Anular a falta",
   },
 };

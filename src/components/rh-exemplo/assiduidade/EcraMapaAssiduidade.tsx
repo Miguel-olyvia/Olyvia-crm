@@ -16,7 +16,6 @@
  * picagens sao permissao-dependentes. Quando a leitura foi recusada mostra-se
  * o bloco de sem acesso, nunca uma grelha vazia nem um zero de horas.
  */
-import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,13 +23,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
+import { AvisoDeLeitura } from "@/components/rh-exemplo/AvisoDeLeitura";
 import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
 import { FaltasPainel } from "@/components/rh-exemplo/fluxosB/faltas/FaltasPainel";
 import { FilaJustificacoesDoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/FilaJustificacoesDoDia";
 import { usePendentesJustificacaoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/usePendentesJustificacaoDia";
 import { HorasExtraNaFila, usePendentesHorasExtra } from "@/components/rh-exemplo/fluxosC/HorasExtraNaFila";
-import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
-import { alertasPorTratar } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { MapaAssiduidadeMes } from "@/components/rh-exemplo/assiduidade/MapaAssiduidadeMes";
 import { PainelDoDiaDePessoa } from "@/components/rh-exemplo/assiduidade/PainelDoDiaDePessoa";
 import { useAssiduidadeDaOrganizacao } from "@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao";
@@ -59,7 +57,7 @@ function limitesDoMes(ano: number, mes: number) {
 export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeProps) {
   const { t, language } = useTranslation();
   const [mesVisivel, setMesVisivel] = useState(() => {
-    const agora = agoraExemplo();
+    const agora = new Date();
     return { ano: agora.getFullYear(), mes: agora.getMonth() };
   });
 
@@ -79,12 +77,22 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
 
   const [aberto, setAberto] = useState<{ pessoaId: string; data: string } | null>(null);
   const horasExtraPendentes = usePendentesHorasExtra();
-  const alertasPendentes = useFluxosB((e) => alertasPorTratar(e.alertas).length);
+  // Os desvios REAIS da janela (os mesmos da fila): a bolinha do separador conta o que a base propoe, nao exemplos.
+  const desviosPendentes = organizacao.desvios.length;
   const justificacoesPorDecidir = usePendentesJustificacaoDia();
-  const porTratarNaFila = horasExtraPendentes + alertasPendentes + justificacoesPorDecidir;
+  const porTratarNaFila = horasExtraPendentes + desviosPendentes + justificacoesPorDecidir;
 
   const nomePorPessoaId = useMemo(
     () => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa.nome_completo])),
+    [pessoas],
+  );
+
+  /** Todas as pessoas, por nome: e daqui que se escolhe a quem marcar uma falta. */
+  const pessoasParaFaltas = useMemo(
+    () =>
+      pessoas
+        .map((pessoa) => ({ id: pessoa.id, nome: pessoa.nome_completo }))
+        .sort((a, b) => a.nome.localeCompare(b.nome)),
     [pessoas],
   );
 
@@ -110,6 +118,8 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
       return { ano: proximo.getFullYear(), mes: proximo.getMonth() };
     });
 
+  // `loading` so e true no primeiro carregamento de uma janela: as releituras depois de gravar sao silenciosas e
+  // mantem a arvore montada (separador activo, pedido da fila, painel do dia, foco).
   if (organizacao.loading) return <OlyviaLoader />;
 
   return (
@@ -160,7 +170,11 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
                   </Button>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
+                <AvisoDeLeitura
+                  estado={{ recusado: organizacao.realizadoRecusado, erro: organizacao.realizadoErro }}
+                  onTentarDeNovo={() => void organizacao.recarregar()}
+                />
                 <MapaAssiduidadeMes
                   pessoas={pessoasDoMapa}
                   dias={dias}
@@ -175,11 +189,28 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
           <TabsContent value="fila" className="space-y-4">
             <HorasExtraNaFila />
             <FilaJustificacoesDoDia />
-            <FilaAlertasFimDoDia />
+            <FilaAlertasFimDoDia
+              desvios={organizacao.desvios}
+              nomePorPessoaId={nomePorPessoaId}
+              locais={locais}
+              permissoes={permissoes}
+              onAlterado={() => void organizacao.recarregar()}
+              leitura={{ recusado: organizacao.desviosRecusado, erro: organizacao.desviosErro }}
+              onTentarDeNovo={() => void organizacao.recarregar()}
+            />
           </TabsContent>
 
           <TabsContent value="faltas">
-            <FaltasPainel />
+            <FaltasPainel
+              faltas={organizacao.faltas}
+              desvios={organizacao.desvios}
+              pessoas={pessoasParaFaltas}
+              permissoes={permissoes}
+              onAlterado={() => void organizacao.recarregar()}
+              leituraFaltas={{ recusado: organizacao.faltasRecusado, erro: organizacao.faltasErro }}
+              leituraDesvios={{ recusado: organizacao.desviosRecusado, erro: organizacao.desviosErro }}
+              onTentarDeNovo={() => void organizacao.recarregar()}
+            />
           </TabsContent>
         </Tabs>
       )}

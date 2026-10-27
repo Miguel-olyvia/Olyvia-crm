@@ -16,7 +16,6 @@
  * O separador nao carrega a ficha: carrega o SEU modulo, pelo hook proprio, e
  * recebe da ficha so o que ja estava carregado (a pessoa e o nome).
  */
-import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { CalendarPlus, SlidersHorizontal } from "lucide-react";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
+import { dataDeHojeBase } from "@/components/rh-exemplo/lib/dataBase";
 import { AjusteSaldoSheet } from "@/components/rh-exemplo/ausencias/AjusteSaldoSheet";
 import { AjustesTabela } from "@/components/rh-exemplo/ausencias/AjustesTabela";
 import { AusenciasContador } from "@/components/rh-exemplo/ausencias/AusenciasContador";
@@ -80,13 +80,13 @@ export function PessoaAusenciasTab({
   const [aAjustar, setAAjustar] = useState(false);
   const [tipoDoAjuste, setTipoDoAjuste] = useState<string | null>(null);
   const [ajusteAAnular, setAjusteAAnular] = useState<string | null>(null);
-  const [ano, setAno] = useState(() => agoraExemplo().getFullYear());
+  const [ano, setAno] = useState(() => new Date().getFullYear());
 
   const podeVer = permissoes.view || souAPessoa || permissoes.aprovarChefia;
   const podePedir = permissoes.pedirOutros || (souAPessoa && permissoes.pedir);
 
   const periodoActual = useMemo(() => {
-    const hoje = agoraExemplo().toISOString().slice(0, 10);
+    const hoje = dataDeHojeBase();
     const cobre = dados.direitos.find(
       (direito) => direito.periodo_inicio <= hoje && direito.periodo_fim >= hoje,
     );

@@ -1,10 +1,34 @@
 /**
- * O valor da hora de uma pessoa, para o calculo de exemplo do desconto: retribuicao mensal em vigor a dividir
- * pelas horas planeadas do mes (horas semanais x 4). Sem retribuicao mensal na ficha usa-se o valor do
- * documento (6,25 EUR = 1.000 EUR / 160 h) e diz-se que e de exemplo.
+ * O valor da hora usado no desconto de uma falta.
+ *
+ * `valorHoraDoCalculo` e o valor REAL: o do processamento salarial do mes da falta (base do mes a dividir pelas horas
+ * planeadas do mes), o mesmo que a «Visao geral» e o «Calculo do mes» usam para descontar faltas. Sem retribuicao ou sem
+ * horas planeadas no mes devolve `valorHora: null` e NAO inventa um valor.
+ *
+ * `valorHoraDaFicha` e o valor de EXEMPLO (retribuicao mensal da ficha em memoria a dividir por horas semanais x 4, ou
+ * 6,25 EUR do documento): ja nao serve o cartao do desconto da falta; ainda serve a justificacao do dia, que nao esta
+ * ligada a base.
  */
 import type { FichaRh } from "@/components/rh-exemplo/dados/tiposLoja";
+import type { ResultadoCalculoReal } from "@/components/rh-exemplo/processamento/calculoReal";
 import { valorHoraDeExemplo } from "@/components/rh-exemplo/lib/faltasB";
+
+export interface ValorHoraReal {
+  /** `null` = nao se pode calcular (sem retribuicao ou sem horas planeadas no mes). */
+  valorHora: number | null;
+  /** A base do mes (retribuicao mensal ja com os duodecimos). */
+  baseMes: number | null;
+  horasPlaneadas: number;
+}
+
+export function valorHoraDoCalculo(calculo: ResultadoCalculoReal | null): ValorHoraReal | null {
+  if (!calculo) return null;
+  return {
+    valorHora: calculo.resultado.valorHoraReal,
+    baseMes: calculo.resultado.baseMes,
+    horasPlaneadas: calculo.totais.planeadoMinutos / 60,
+  };
+}
 
 export interface ValorHora {
   valorHora: number;

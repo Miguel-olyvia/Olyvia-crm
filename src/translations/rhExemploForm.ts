@@ -106,6 +106,8 @@ export const rhExemploFormTranslations: Record<"en" | "pt", Record<string, strin
     "rhForm.lista.cabecalho": "People",
     "rhForm.lista.semValor": "No value",
     "rhForm.lista.vazia": "There are no people yet.",
+    "rhForm.lista.admissaoErro": "Could not load the onboarding status of the people.",
+    "rhForm.lista.admissaoIncompleta": "Only the 500 most recent onboardings were read: some people may be missing their status.",
   },
   pt: {
     "rhForm.nova.area": "Recursos Humanos",
@@ -211,5 +213,7 @@ export const rhExemploFormTranslations: Record<"en" | "pt", Record<string, strin
     "rhForm.lista.cabecalho": "Pessoas",
     "rhForm.lista.semValor": "Sem valor",
     "rhForm.lista.vazia": "Ainda não há pessoas.",
+    "rhForm.lista.admissaoErro": "Não foi possível carregar o estado de admissão das pessoas.",
+    "rhForm.lista.admissaoIncompleta": "Só foram lidas as 500 admissões mais recentes: algumas pessoas podem estar sem o estado.",
   },
 };

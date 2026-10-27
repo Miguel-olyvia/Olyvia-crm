@@ -1,64 +1,99 @@
-// O custo lido dos stores de exemplo: o módulo «Custos», as abas Custo das fichas e o «Cálculo do mês» de Setembro têm de
-// bater, ao cêntimo. A data é fixa (14/10/2026) para os dados de exemplo serem os mesmos.
+// O custo sem React: a RETRIBUICAO de cada pessoa vem de fora (o total bruto estimado do processamento salarial real) e
+// o resto (avulsos, equipamentos, taxas) vem do store em memoria do custo. O modulo «Custos» e as abas Custo das fichas
+// tem de bater, ao centimo. A data e fixa (14/10/2026) para os dados de exemplo serem os mesmos.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { repor, lerEstado } from "@/components/rh-exemplo/dados/loja";
 import { atribuirEquipamento, definirMesCusto, devolverEquipamento, lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
-import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
-import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
-import { lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
-import { calcularMes, fichasDoCalculo } from "@/components/rh-exemplo/fluxosC/salarioEntrada";
 import { contaUmaVez } from "@/components/rh-exemplo/lib/comoConta";
-import { totaisDaOrganizacao } from "@/components/rh-exemplo/lib/custoOrganizacao";
+import { totaisDaOrganizacao, type PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import { situacaoDoEquipamento, valorDoEquipamentoNoMes, type EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
-import { custoLidoDaPessoa, linhasDaOrganizacao } from "./custoLido";
+import { custoDaPessoa, linhasDaOrganizacao } from "./custoLido";
 
 const MES = "2026-09";
 const cent = (v: number | null): number => Math.round((v ?? 0) * 100);
+
+const pessoa = (pessoaId: string, retribuicaoMes: number | null = 1000, extra: Partial<PessoaParaCusto> = {}): PessoaParaCusto => ({
+  pessoaId, nome: pessoaId, cargo: null, centroId: null, centro: null, filialId: null, filial: null, tipoContrato: null,
+  retribuicaoMes, horasSemanais: 40, ...extra,
+});
+
+/** As pessoas dos dados de exemplo do custo (os equipamentos e avulsos de exemplo estao ligados a estes ids). */
+const PESSOAS = [pessoa("p-hugo", 1400), pessoa("p-ines", 1100), pessoa("p-tiago", 950.55), pessoa("p-marta", 2000)];
+const fichaDe = (id: string, mes: string, horasFeitas = 0) => custoDaPessoa(PESSOAS.find((p) => p.pessoaId === id) as PessoaParaCusto, mes, horasFeitas);
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-14T12:00:00"));
   repor();
-  reporGestao();
-  reporFluxosB();
-  reporFluxosC();
   reporCusto();
 });
 
 afterEach(() => vi.useRealTimers());
 
-describe("o custo bate com o «Cálculo do mês» de Setembro", () => {
-  it("a retribuição de cada pessoa é o total bruto do cálculo, e entram as mesmas pessoas", () => {
-    const estado = lerEstado();
-    const calculo = calcularMes(fichasDoCalculo(estado.fichas, estado.ordem, 2026, 9), lerFluxosC(), 2026, 9);
-    const linhas = linhasDaOrganizacao(MES);
-    expect(linhas.map((l) => l.pessoaId)).toEqual(calculo.map((c) => c.pessoaId));
-    expect(linhas.length).toBeGreaterThanOrEqual(11);
-    for (const c of calculo) {
-      expect(linhas.find((l) => l.pessoaId === c.pessoaId)?.retribuicao).toBe(c.resultado.totalBruto);
-    }
-    expect(cent(totaisDaOrganizacao(linhas).retribuicao)).toBe(cent(calculo.reduce((s, c) => s + (c.resultado.totalBruto ?? 0), 0)));
+describe("a retribuicao vem de fora e o custo bate entre o modulo e a ficha", () => {
+  it("a retribuicao de cada linha e exactamente a que se passou, sem conta repetida", () => {
+    const linhas = linhasDaOrganizacao(MES, PESSOAS);
+    expect(linhas.map((l) => l.pessoaId)).toEqual(PESSOAS.map((p) => p.pessoaId));
+    for (const p of PESSOAS) expect(linhas.find((l) => l.pessoaId === p.pessoaId)?.retribuicao).toBe(p.retribuicaoMes);
+    expect(cent(totaisDaOrganizacao(linhas).retribuicao)).toBe(cent(PESSOAS.reduce((s, p) => s + (p.retribuicaoMes ?? 0), 0)));
   });
 
-  it("o custo total do módulo é a soma das abas Custo das fichas, pessoa a pessoa e no total", () => {
-    const linhas = linhasDaOrganizacao(MES);
+  it("uma pessoa sem retribuicao fica sem custo (nao zero) e conta como «sem valor»", () => {
+    const linhas = linhasDaOrganizacao(MES, [pessoa("p-tiago", null), pessoa("p-ines", 1100)]);
+    expect(linhas[0].retribuicao).toBeNull();
+    expect(linhas[0].total).toBeNull();
+    expect(linhas[1].total).not.toBeNull();
+    expect(totaisDaOrganizacao(linhas).semValor).toBe(1);
+    const ficha = custoDaPessoa(pessoa("p-tiago", null), MES, 0);
+    expect(ficha.retribuicaoMes).toBeNull();
+    expect(ficha.atual.total).toBeNull();
+    expect(ficha.composicao).toEqual([]);
+  });
+
+  it("sem pessoas nao ha linhas nem totais inventados", () => {
+    expect(linhasDaOrganizacao(MES, [])).toEqual([]);
+    expect(totaisDaOrganizacao([]).total).toBe(0);
+  });
+
+  it("o custo total do modulo e a soma das abas Custo das fichas, pessoa a pessoa e no total", () => {
+    const linhas = linhasDaOrganizacao(MES, PESSOAS);
     for (const l of linhas) {
-      const ficha = custoLidoDaPessoa(l.pessoaId, MES);
-      expect(ficha?.atual.total).toBe(l.total);
-      expect(ficha?.retribuicaoMes).toBe(l.retribuicao);
-      expect(ficha?.atual.outrosCustos).toBe(l.equipamentosMes);
-      expect(ficha?.atual.kmEAjudas).toBe(l.avulsosMes);
+      const ficha = fichaDe(l.pessoaId, MES);
+      expect(ficha.atual.total).toBe(l.total);
+      expect(ficha.retribuicaoMes).toBe(l.retribuicao);
+      expect(ficha.atual.outrosCustos).toBe(l.equipamentosMes);
+      expect(ficha.atual.kmEAjudas).toBe(l.avulsosMes);
     }
-    const somaDasFichas = linhas.reduce((s, l) => s + cent(custoLidoDaPessoa(l.pessoaId, MES)?.atual.total ?? null), 0);
+    const somaDasFichas = linhas.reduce((s, l) => s + cent(fichaDe(l.pessoaId, MES).atual.total), 0);
     expect(cent(totaisDaOrganizacao(linhas).total)).toBe(somaDasFichas);
   });
 
-  it("os totais fecham: retribuição + encargos + seguro + avulsos + equipamentos = custo total", () => {
-    const t = totaisDaOrganizacao(linhasDaOrganizacao(MES));
+  it("os totais fecham: retribuicao + encargos + seguro + avulsos + equipamentos = custo total", () => {
+    const t = totaisDaOrganizacao(linhasDaOrganizacao(MES, PESSOAS));
     expect(t.semValor).toBe(0);
     expect(cent(t.retribuicao) + cent(t.encargos) + cent(t.seguro) + cent(t.avulsos) + cent(t.equipamentos)).toBe(cent(t.total));
     expect(t.avulsos).toBeGreaterThan(0);
     expect(t.equipamentos).toBeGreaterThan(0);
+  });
+
+  it("os acumulados nao se inventam: precisam do calculo de cada mes anterior e ficam sem valor", () => {
+    const ficha = fichaDe("p-tiago", MES);
+    expect(ficha.acumuladoAno).toBeNull();
+    expect(ficha.acumuladoAdmissao).toBeNull();
+  });
+
+  it("as horas feitas do mes sao as passadas (as da assiduidade), e o custo por hora feita acompanha-as", () => {
+    const ficha = fichaDe("p-tiago", MES, 150.5);
+    expect(ficha.atual.horasFeitas).toBe(150.5);
+    expect(cent(ficha.atual.porHoraFeita)).toBe(cent((ficha.atual.total ?? 0) / 150.5));
+    expect(fichaDe("p-tiago", MES, 0).atual.porHoraFeita).toBeNull();
+  });
+
+  it("as horas previstas acompanham as horas semanais dadas (derivadas das horas planeadas do mes)", () => {
+    const meio = custoDaPessoa(pessoa("p-tiago", 1000, { horasSemanais: 20 }), MES, 0);
+    const inteiro = custoDaPessoa(pessoa("p-tiago", 1000, { horasSemanais: 40 }), MES, 0);
+    expect(meio.atual.horasPrevistas * 2).toBeCloseTo(inteiro.atual.horasPrevistas, 1);
+    expect(custoDaPessoa(pessoa("p-tiago", 1000, { horasSemanais: 0 }), MES, 0).atual.porHoraPrevista).toBeNull();
   });
 });
 
@@ -103,8 +138,8 @@ describe("os totais batem mês a mês, qualquer que seja o «como conta»", () =
 
   it("o total do módulo é a soma das abas Custo das fichas, em cada mês", () => {
     for (const mes of MESES) {
-      const linhas = linhasDaOrganizacao(mes);
-      const soma = linhas.reduce((s, l) => s + cent(custoLidoDaPessoa(l.pessoaId, mes)?.atual.total ?? null), 0);
+      const linhas = linhasDaOrganizacao(mes, PESSOAS);
+      const soma = linhas.reduce((s, l) => s + cent(fichaDe(l.pessoaId, mes).atual.total), 0);
       const t = totaisDaOrganizacao(linhas);
       expect(cent(t.total)).toBe(soma);
       expect(cent(t.retribuicao) + cent(t.encargos) + cent(t.seguro) + cent(t.avulsos) + cent(t.equipamentos)).toBe(cent(t.total));
@@ -116,19 +151,19 @@ describe("os totais batem mês a mês, qualquer que seja o «como conta»", () =
     expect(telemovel).toBeDefined();
     const valor = telemovel?.valor ?? 0;
     const mes = (telemovel?.entrega ?? "").slice(0, 7);
-    const naquele = linhasDaOrganizacao(mes).find((l) => l.pessoaId === "p-ines");
+    const naquele = linhasDaOrganizacao(mes, PESSOAS).find((l) => l.pessoaId === "p-ines");
     expect(cent(naquele?.equipamentosMes ?? null)).toBeGreaterThanOrEqual(cent(valor));
-    expect(cent(custoLidoDaPessoa("p-ines", mes)?.atual.outrosCustos ?? null)).toBe(cent(naquele?.equipamentosMes ?? null));
+    expect(cent(fichaDe("p-ines", mes).atual.outrosCustos)).toBe(cent(naquele?.equipamentosMes ?? null));
     const conta = (m: string) => valorDoEquipamentoNoMes(telemovel as EquipamentoPessoa, m);
     expect([conta("2026-08"), conta(mes), conta("2026-10")]).toEqual([0, valor, 0]);
   });
 
   it("um avulso de Setembro não conta em Outubro, na ficha nem no módulo", () => {
-    const set = linhasDaOrganizacao(MES).find((l) => l.pessoaId === "p-tiago");
-    const out = linhasDaOrganizacao("2026-10").find((l) => l.pessoaId === "p-tiago");
+    const set = linhasDaOrganizacao(MES, PESSOAS).find((l) => l.pessoaId === "p-tiago");
+    const out = linhasDaOrganizacao("2026-10", PESSOAS).find((l) => l.pessoaId === "p-tiago");
     expect(set?.avulsosMes).toBeGreaterThan(0);
     expect(out?.avulsosMes).toBe(0);
-    expect(custoLidoDaPessoa("p-tiago", "2026-10")?.atual.kmEAjudas).toBe(0);
+    expect(fichaDe("p-tiago", "2026-10").atual.kmEAjudas).toBe(0);
   });
 });
 
@@ -136,14 +171,14 @@ describe("atribuir e devolver equipamento mexem no custo da pessoa e no módulo"
   const novo = { pessoaId: "p-tiago", tipo: "portatil" as const, descricao: "Portátil de teste", valor: 1800, entrega: "2026-09-01", autor: "Sofia" };
 
   it("atribuir um equipamento de 1800 acrescenta 50 (1800 / 36) ao custo do mês, na ficha e no módulo", () => {
-    const antes = custoLidoDaPessoa("p-tiago", MES);
-    const totalAntes = totaisDaOrganizacao(linhasDaOrganizacao(MES));
+    const antes = fichaDe("p-tiago", MES);
+    const totalAntes = totaisDaOrganizacao(linhasDaOrganizacao(MES, PESSOAS));
     expect(atribuirEquipamento(novo).erro).toBeNull();
-    const depois = custoLidoDaPessoa("p-tiago", MES);
-    expect(depois?.equipamentos).toHaveLength((antes?.equipamentos.length ?? 0) + 1);
-    expect(cent(depois?.atual.outrosCustos ?? null) - cent(antes?.atual.outrosCustos ?? null)).toBe(5000);
-    expect(cent(depois?.atual.total ?? null) - cent(antes?.atual.total ?? null)).toBe(5000);
-    const totalDepois = totaisDaOrganizacao(linhasDaOrganizacao(MES));
+    const depois = fichaDe("p-tiago", MES);
+    expect(depois.equipamentos).toHaveLength(antes.equipamentos.length + 1);
+    expect(cent(depois.atual.outrosCustos) - cent(antes.atual.outrosCustos)).toBe(5000);
+    expect(cent(depois.atual.total) - cent(antes.atual.total)).toBe(5000);
+    const totalDepois = totaisDaOrganizacao(linhasDaOrganizacao(MES, PESSOAS));
     expect(cent(totalDepois.equipamentos) - cent(totalAntes.equipamentos)).toBe(5000);
     expect(cent(totalDepois.total) - cent(totalAntes.total)).toBe(5000);
     expect(totalDepois.nEquipamentos).toBe(totalAntes.nEquipamentos + 1);
@@ -151,11 +186,11 @@ describe("atribuir e devolver equipamento mexem no custo da pessoa e no módulo"
 
   it("pago de uma vez conta o valor todo só no mês da entrega, na ficha e no módulo", () => {
     expect(atribuirEquipamento({ ...novo, conta: contaUmaVez() }).erro).toBeNull();
-    const set = custoLidoDaPessoa("p-tiago", MES);
-    const out = custoLidoDaPessoa("p-tiago", "2026-10");
-    expect(cent(set?.atual.outrosCustos ?? null) - cent(out?.atual.outrosCustos ?? null)).toBeGreaterThanOrEqual(180000);
-    const doMes = linhasDaOrganizacao(MES).find((l) => l.pessoaId === "p-tiago");
-    expect(doMes?.equipamentosMes).toBe(set?.atual.outrosCustos);
+    const set = fichaDe("p-tiago", MES);
+    const out = fichaDe("p-tiago", "2026-10");
+    expect(cent(set.atual.outrosCustos) - cent(out.atual.outrosCustos)).toBeGreaterThanOrEqual(180000);
+    const doMes = linhasDaOrganizacao(MES, PESSOAS).find((l) => l.pessoaId === "p-tiago");
+    expect(doMes?.equipamentosMes).toBe(set.atual.outrosCustos);
   });
 
   it("recusa sem pessoa, sem descrição, com valor 0 e sem data, e não guarda nada", () => {
@@ -173,9 +208,9 @@ describe("atribuir e devolver equipamento mexem no custo da pessoa e no módulo"
     expect(devolverEquipamento(id ?? "", "2026-07-01", "bom").erro).toBe("antesDaEntrega");
     expect(devolverEquipamento(id ?? "", "2026-09-10", "desgaste").erro).toBeNull();
     expect(lerCusto().equipamentos.find((e) => e.id === id)).toMatchObject({ estado: "devolvido", devolucao: "2026-09-10", estadoDevolucao: "desgaste" });
-    const set = custoLidoDaPessoa("p-tiago", "2026-09");
-    const out = custoLidoDaPessoa("p-tiago", "2026-10");
-    expect(cent(set?.atual.outrosCustos ?? null) - cent(out?.atual.outrosCustos ?? null)).toBe(5000);
+    const set = fichaDe("p-tiago", "2026-09");
+    const out = fichaDe("p-tiago", "2026-10");
+    expect(cent(set.atual.outrosCustos) - cent(out.atual.outrosCustos)).toBe(5000);
     expect(devolverEquipamento(id ?? "", "2026-09-11", "bom").erro).not.toBeNull();
   });
 

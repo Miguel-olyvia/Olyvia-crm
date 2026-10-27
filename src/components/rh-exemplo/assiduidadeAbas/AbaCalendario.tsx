@@ -3,6 +3,7 @@ import { CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarioPessoa, type MesVisivel } from "@/components/rh-exemplo/calendarioPessoa/CalendarioPessoa";
+import type { AssiduidadeDoMes } from "@/components/rh-exemplo/calendarioPessoa/fonteMes";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -15,9 +16,13 @@ interface Props {
   permissoes: PermissoesAssiduidade;
   aoAbrirRegisto: (data: string) => void;
   aoAbrirRelatorio: () => void;
+  assiduidade: AssiduidadeDoMes;
+  dataAdmissao?: string | null;
 }
 
-export function AbaCalendario({ pessoaId, pessoaNome, mes, aoMudarMes, souAPessoa, permissoes, aoAbrirRegisto, aoAbrirRelatorio }: Props) {
+export function AbaCalendario({
+  pessoaId, pessoaNome, mes, aoMudarMes, souAPessoa, permissoes, aoAbrirRegisto, aoAbrirRelatorio, assiduidade, dataAdmissao = null,
+}: Props) {
   const { t } = useTranslation();
   return (
     <Card>
@@ -30,7 +35,7 @@ export function AbaCalendario({ pessoaId, pessoaNome, mes, aoMudarMes, souAPesso
       <CardContent>
         <CalendarioPessoa
           pessoaId={pessoaId} pessoaNome={pessoaNome} mes={mes} aoMudarMes={aoMudarMes} souAPessoa={souAPessoa}
-          permissoes={permissoes} aoAbrirRegisto={aoAbrirRegisto}
+          permissoes={permissoes} aoAbrirRegisto={aoAbrirRegisto} assiduidade={assiduidade} dataAdmissao={dataAdmissao}
           acoes={
             <Button type="button" variant="outline" className="min-h-11" onClick={aoAbrirRelatorio}>
               {t("rhExemplo.relatorio.abrir")}

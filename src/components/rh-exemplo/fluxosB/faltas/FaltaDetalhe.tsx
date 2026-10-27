@@ -1,157 +1,104 @@
 /**
- * O detalhe de uma falta (fluxo 7): o periodo, o estado da justificacao (pendente de documento, justificada paga,
- * justificada nao paga, recusada), o prazo da organizacao, o texto de justificacao SENSIVEL (so aparece com «Ver
- * texto», que regista quem leu e quando), as decisoes do RH e o calculo de exemplo do desconto de vencimento.
+ * O detalhe de uma falta ja marcada (fluxo 7), lido e escrito na base REAL: o periodo, o estado da justificacao, o
+ * prazo da organizacao, o documento (dado de saude: so aparece ao clique, e o acesso fica registado), as decisoes
+ * do RH, a anulacao e o calculo de exemplo do desconto de vencimento.
+ *
+ * A falta chega da lista da organizacao (vista em vigor, so algumas colunas). Aqui pede-se a assiduidade DESSA pessoa
+ * nesse dia, que traz a linha completa e as accoes por RPC; o painel desmonta-se ao fechar e os dados vao com ele.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Eye } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
-import { useGestao } from "@/components/rh-exemplo/dados/lojaGestao";
-import {
-  decidirJustificacaoDeFalta,
-  registarJustificacaoDeFalta,
-  verTextoDaFalta,
-} from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
+import { MotivoDialog } from "@/components/rh-exemplo/ausencias/MotivoDialog";
+import { JustificacaoFalta } from "@/components/rh-exemplo/assiduidade/JustificacaoFalta";
 import { DescontoDaFaltaCard } from "@/components/rh-exemplo/fluxosB/faltas/DescontoDaFaltaCard";
-import { MotivoMinimoDialog } from "@/components/rh-exemplo/fluxosB/MotivoMinimoDialog";
-import { formatarData, formatarDataHora, formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
+import { formatarData, formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
+import { useAssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { diasUteisEntre } from "@/components/rh-exemplo/lib/diasUteis";
-import {
-  foraDoPrazoDeJustificar,
-  prazoParaJustificar,
-  rotuloDaJustificacao,
-  type DecisaoJustificacaoFalta,
-} from "@/components/rh-exemplo/lib/faltasB";
-import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
-import type { Falta } from "@/components/rh-exemplo/tiposAssiduidade";
+import { foraDoPrazoDeJustificar, prazoParaJustificar, rotuloDaJustificacao } from "@/components/rh-exemplo/lib/faltasB";
+import { MOTIVO_MINIMO_CARACTERES, motivoValido } from "@/components/rh-exemplo/lib/horarioTipos";
+import type { AssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
+import type { Falta, PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 
 interface FaltaDetalheProps {
-  faltaId: string;
+  /** A linha da lista (pode vir com menos colunas do que a da tabela). */
+  falta: Falta;
+  nome: string;
+  permissoes: PermissoesAssiduidade;
   onFechar: () => void;
+  /** Depois de gravar, para a lista de tras se actualizar. */
+  onAlterado?: () => void;
 }
 
-function TextoSensivel({ falta }: { falta: Falta }) {
-  const { t } = useTranslation();
-  const existe = useFluxosB((e) => falta.id in e.textosFalta);
-  const acessos = useFluxosB((e) => e.acessosTexto);
-  const [texto, setTexto] = useState<string | null>(null);
-  const meusAcessos = acessos.filter((a) => a.faltaId === falta.id);
-  if (!existe) return <p className="text-sm text-muted-foreground">{t("rhExemplo.fal.semTexto")}</p>;
-  return (
-    <div className="space-y-2">
-      {texto === null ? (
-        <Button type="button" variant="outline" className="min-h-11" onClick={() => setTexto(verTextoDaFalta(falta.id))}>
-          <Eye className="mr-2 h-4 w-4" aria-hidden="true" />
-          {t("rhExemplo.fal.verTexto")}
-        </Button>
-      ) : (
-        <p className="rounded-md border bg-muted/40 p-3 text-sm" data-testid="rhb-texto-falta">
-          {texto}
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">{t("rhExemplo.fal.textoSensivel")}</p>
-      {meusAcessos.length > 0 && (
-        <ul className="space-y-0.5 text-xs text-muted-foreground" aria-label={t("rhExemplo.fal.quemLeu")}>
-          {meusAcessos.map((a, i) => (
-            <li key={`${a.quando}-${i}`}>{t("rhExemplo.fal.leuEm", { quem: a.quem, quando: formatarDataHora(a.quando) })}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function RegistarJustificacao({ falta }: { falta: Falta }) {
+function RegistarJustificacao({ falta, assiduidade, onAlterado }: { falta: Falta; assiduidade: AssiduidadeDaPessoa; onAlterado?: () => void }) {
   const { t } = useTranslation();
   const [texto, setTexto] = useState("");
-  const [mensagem, setMensagem] = useState<{ texto: string; erro: boolean } | null>(null);
-  const registar = () => {
-    const resultado = registarJustificacaoDeFalta(falta.id, texto);
-    if (resultado.erro) return setMensagem({ texto: t(resultado.erro), erro: true });
-    setMensagem({ texto: t(resultado.foraDoPrazo ? "rhExemplo.fal.registadaForaDoPrazo" : "rhExemplo.fal.registada"), erro: false });
+  const [erro, setErro] = useState<string | null>(null);
+  const registar = async () => {
+    if (!motivoValido(texto)) return setErro(t("rhExemplo.fal.erro.semTexto"));
+    const falhou = await assiduidade.registarJustificacao({ faltaId: falta.id, texto: texto.trim() });
+    if (falhou) return setErro(t(falhou));
+    setErro(null);
     toast.success(t("rhExemplo.fal.registada"));
+    onAlterado?.();
   };
   return (
     <div className="space-y-2">
       <Label htmlFor={`rhb-just-falta-${falta.id}`}>{t("rhExemplo.fal.textoJustificacao", { minimo: String(MOTIVO_MINIMO_CARACTERES) })}</Label>
       <Textarea id={`rhb-just-falta-${falta.id}`} rows={3} value={texto} onChange={(e) => setTexto(e.target.value)} />
-      <Button type="button" className="min-h-11" onClick={registar}>
+      <Button type="button" className="min-h-11" disabled={assiduidade.saving} onClick={() => void registar()}>
         {t("rhExemplo.fal.registarJustificacao")}
       </Button>
-      {mensagem && (
-        <p role={mensagem.erro ? "alert" : "status"} className={`text-sm font-medium ${mensagem.erro ? "text-destructive" : ""}`}>
-          {mensagem.texto}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function Decisoes({ falta }: { falta: Falta }) {
-  const { t } = useTranslation();
-  const [recusar, setRecusar] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-  const decidir = (decisao: DecisaoJustificacaoFalta, motivo: string): string | null => {
-    const resultado = decidirJustificacaoDeFalta(falta.id, decisao, motivo);
-    setErro(resultado.erro);
-    if (!resultado.erro) toast.success(t(`rhExemplo.fal.decidido.${decisao}`));
-    return resultado.erro;
-  };
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" className="min-h-11" onClick={() => decidir("justificada_paga", "")}>
-          {t("rhExemplo.fal.estado.justificada_paga")}
-        </Button>
-        <Button type="button" variant="outline" className="min-h-11" onClick={() => decidir("justificada_nao_paga", "")}>
-          {t("rhExemplo.fal.estado.justificada_nao_paga")}
-        </Button>
-        <Button type="button" variant="outline" className="min-h-11" onClick={() => setRecusar(true)}>
-          {t("rhExemplo.fal.recusarJustificacao")}
-        </Button>
-      </div>
       {erro && (
         <p role="alert" className="text-sm font-medium text-destructive">
-          {t(erro)}
+          {erro}
         </p>
       )}
-      <MotivoMinimoDialog
-        aberto={recusar}
-        titulo={t("rhExemplo.fal.recusarJustificacao")}
-        descricao={t("rhExemplo.fal.recusarDescricao")}
-        rotuloConfirmar={t("rhExemplo.fal.recusarJustificacao")}
-        onConfirmar={(motivo) => decidir("recusada", motivo)}
-        onFechar={() => setRecusar(false)}
-        idPrefixo="rhb-falta-recusa"
-      />
     </div>
   );
 }
 
-/** Le a falta do store a cada alteracao, para o detalhe refletir a decisao logo que e tomada. */
-export function FaltaDetalhe({ faltaId, onFechar }: FaltaDetalheProps) {
-  const falta = useGestao((g) => g.faltas.find((f) => f.id === faltaId) ?? null);
-  return falta ? <ConteudoDaFalta falta={falta} onFechar={onFechar} /> : null;
-}
+type PedidoDeMotivo = "recusar" | "anular";
 
-function ConteudoDaFalta({ falta, onFechar }: { falta: Falta; onFechar: () => void }) {
+export function FaltaDetalhe({ falta: daLista, nome, permissoes, onFechar, onAlterado }: FaltaDetalheProps) {
   const { t } = useTranslation();
+  const janela = useMemo(() => ({ de: daLista.data, ate: daLista.data }), [daLista.data]);
+  const assiduidade = useAssiduidadeDaPessoa(daLista.pessoa_id, janela);
   const prazoDias = useFluxosB((e) => e.prazoFaltaDias);
-  const nome = useEstadoRh((e) => e.fichas[falta.pessoa_id]?.pessoa.nome_completo ?? falta.pessoa_id);
+  const [pedido, setPedido] = useState<PedidoDeMotivo | null>(null);
+
+  // A linha completa (com a decisao e o motivo) quando ja chegou; ate la, a da lista.
+  const falta = assiduidade.faltas.find((f) => f.id === daLista.id) ?? daLista;
   const hoje = hojeIso();
-  const rotulo = rotuloDaJustificacao(falta);
   const prazo = prazoParaJustificar(falta.data, prazoDias);
   const fora = foraDoPrazoDeJustificar(falta.data, hoje, prazoDias);
   const ativa = falta.estado === "activa";
+
+  const depoisDeGravar = (erro: string | null, sucesso: string) => {
+    if (erro) {
+      toast.error(t(erro));
+      return;
+    }
+    toast.success(sucesso);
+    onAlterado?.();
+  };
+
+  const decidir = async (resultado: "justificada" | "recusada", motivo?: string) =>
+    depoisDeGravar(await assiduidade.decidirJustificacao({ faltaId: falta.id, resultado, motivo }), t("hr.sucesso.guardado"));
+
+  const confirmarMotivo = async (motivo: string) => {
+    const quando = pedido;
+    setPedido(null);
+    if (quando === "recusar") return decidir("recusada", motivo);
+    return depoisDeGravar(await assiduidade.anularFalta(falta.id, motivo), t("hr.sucesso.guardado"));
+  };
 
   return (
     <Sheet open onOpenChange={(aberto) => !aberto && onFechar()}>
@@ -165,16 +112,12 @@ function ConteudoDaFalta({ falta, onFechar }: { falta: Falta; onFechar: () => vo
 
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary" className="font-normal">
-            {ativa ? t(`rhExemplo.fal.estado.${rotulo}`) : t(`rhExemplo.fal.estadoFalta.${falta.estado}`)}
+            {ativa ? t(`rhExemplo.fal.estado.${rotuloDaJustificacao(falta)}`) : t(`rhExemplo.fal.estadoFalta.${falta.estado}`)}
           </Badge>
           <Badge variant="outline" className="font-normal">
             {t(`hr.assiduidade.motivoFalta.${falta.motivo_codigo}`)}
           </Badge>
         </div>
-
-        {falta.justificacao_estado === "recusada" && falta.justificacao_motivo && (
-          <p className="text-sm text-destructive">{t("rhExemplo.pic.motivoRecusa", { motivo: falta.justificacao_motivo })}</p>
-        )}
 
         <section aria-label={t("rhExemplo.fal.prazo")} className="space-y-1 text-sm">
           <h3 className="font-semibold">{t("rhExemplo.fal.prazo")}</h3>
@@ -186,13 +129,43 @@ function ConteudoDaFalta({ falta, onFechar }: { falta: Falta; onFechar: () => vo
 
         <section aria-label={t("rhExemplo.fal.justificacao")} className="space-y-2">
           <h3 className="text-sm font-semibold">{t("rhExemplo.fal.justificacao")}</h3>
-          <TextoSensivel falta={falta} />
-          {ativa && falta.justificacao_estado === "sem_justificacao" && <RegistarJustificacao falta={falta} />}
-          {ativa && falta.justificacao_estado === "pendente_documento" && <Decisoes falta={falta} />}
+          <JustificacaoFalta
+            faltaId={falta.id}
+            estado={falta.justificacao_estado}
+            decididaEm={falta.justificacao_decidida_em ?? null}
+            decididaPorNome={null}
+            motivoDaDecisao={falta.justificacao_motivo ?? null}
+            podeVerDocumento={permissoes.justificacaoView}
+            podeDecidir={permissoes.justificacaoEdit && ativa}
+            aGravar={assiduidade.saving}
+            onRevelar={assiduidade.revelarJustificacao}
+            onDecidir={(resultado) => (resultado === "justificada" ? void decidir("justificada") : setPedido("recusar"))}
+          />
+          {ativa && permissoes.faltasEdit && falta.justificacao_estado === "sem_justificacao" && (
+            <RegistarJustificacao falta={falta} assiduidade={assiduidade} onAlterado={onAlterado} />
+          )}
         </section>
 
-        <DescontoDaFaltaCard falta={falta} />
+        {ativa && permissoes.faltasEdit && (
+          <Button type="button" variant="outline" className="min-h-11" disabled={assiduidade.saving} onClick={() => setPedido("anular")}>
+            {t("hr.assiduidade.accao.anular")}
+          </Button>
+        )}
+
+        <DescontoDaFaltaCard falta={falta} faltasDaPessoa={assiduidade.faltas} />
       </SheetContent>
+
+      <MotivoDialog
+        aberto={pedido !== null}
+        titulo={t(`hr.assiduidade.motivo.${pedido === "recusar" ? "recusarJustificacao" : "anularFalta"}.titulo`)}
+        descricao={t(`hr.assiduidade.motivo.${pedido === "recusar" ? "recusarJustificacao" : "anularFalta"}.descricao`)}
+        rotuloConfirmar={t("hr.assiduidade.accao.confirmar")}
+        destrutivo
+        aGravar={assiduidade.saving}
+        onFechar={() => setPedido(null)}
+        onConfirmar={({ motivo }) => void confirmarMotivo(motivo)}
+        idPrefixo="rhb-falta-motivo"
+      />
     </Sheet>
   );
 }

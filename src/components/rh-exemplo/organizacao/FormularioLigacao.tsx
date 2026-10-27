@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { BlocoLocal, BlocoPessoa, BlocoVinculo } from "@/components/rh-exemplo/organizacao/CamposLigacao";
 import { useFormLigacao } from "@/components/rh-exemplo/organizacao/useFormLigacao";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { EstadoOrganizacao, EstruturaOrg, PedidoLigacao, PessoaOrg, Resultado } from "@/components/rh-exemplo/organizacao/tipos";
+import type { EstadoOrganizacao, EstruturaOrg, PedidoLigacao, PessoaOrg, ResultadoGravacao } from "@/components/rh-exemplo/organizacao/tipos";
 
 export interface FormularioLigacaoProps {
   aberto: boolean;
@@ -20,7 +20,7 @@ export interface FormularioLigacaoProps {
   /** Pessoa já escolhida (ao «Alterar ligação»); `null` deixa escolher. */
   pessoaInicial: string | null;
   aoFechar: () => void;
-  aoGuardar: (pedido: PedidoLigacao) => Resultado;
+  aoGuardar: (pedido: PedidoLigacao) => Promise<ResultadoGravacao>;
 }
 
 function Corpo(p: FormularioLigacaoProps) {
@@ -46,10 +46,10 @@ function Corpo(p: FormularioLigacaoProps) {
         <Label htmlFor="rhOrg-motivo">{t("rhOrg.form.motivo")}</Label>
         <Textarea id="rhOrg-motivo" rows={2} value={f.motivo} onChange={(e) => f.setMotivo(e.target.value)} />
       </div>
-      {f.erro && <p role="alert" className="text-sm text-destructive">{t(`rhOrg.erro.${f.erro}`)}</p>}
+      {f.erro && <p role="alert" className="text-sm text-destructive">{f.mensagemErro ?? t(`rhOrg.erro.${f.erro}`)}</p>}
       <SheetFooter className="mt-auto gap-2 sm:space-x-0">
         <Button type="button" variant="outline" className="min-h-11" onClick={p.aoFechar}>{t("rhOrg.form.cancelar")}</Button>
-        <Button type="submit" className="min-h-11">{t("rhOrg.form.guardar")}</Button>
+        <Button type="submit" className="min-h-11" disabled={f.aGuardar}>{t("rhOrg.form.guardar")}</Button>
       </SheetFooter>
     </form>
   );

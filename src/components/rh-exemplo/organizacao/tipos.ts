@@ -133,9 +133,16 @@ export type ErroLigacao =
   | "dataInvalida"
   | "jaLigada"
   | "naoLigada"
-  | "motivoCurto";
+  | "motivoCurto"
+  | "inicioNaoPosterior"
+  | "falhaBase";
 
 export type Resultado = { ok: true; estado: EstadoOrganizacao } | { ok: false; erro: ErroLigacao };
+
+/** O resultado de uma gravacao na base: `mensagem` e a recusa ja traduzida pela base, quando a ha. */
+export type ResultadoGravacao =
+  | { ok: true; tipo: TipoEvento }
+  | { ok: false; erro: ErroLigacao; mensagem?: string | null };
 
 export interface PedidoLigacao {
   pessoaId: string;

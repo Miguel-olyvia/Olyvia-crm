@@ -7,7 +7,10 @@
  */
 import { useRef } from "react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import type { NovaPessoaExemplo } from "@/components/rh-exemplo/hooks/usePessoas";
+import type { NaoGravado, NovaPessoaExemplo, ResultadoCriacao } from "@/components/rh-exemplo/hooks/usePessoas";
+import { useTranslation } from "@/hooks/useTranslation";
+import { toast } from "@/lib/toast";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { CabecalhoNova } from "@/components/rh-exemplo/novaPessoa/CabecalhoNova";
 import { FormularioNovaPessoa } from "@/components/rh-exemplo/novaPessoa/FormularioNovaPessoa";
 
@@ -15,7 +18,7 @@ interface NovaPessoaDialogoProps {
   open: boolean;
   onOpenChange: (aberto: boolean) => void;
   colegas: Array<{ id: string; nome_completo: string }>;
-  onCriar: (dados: NovaPessoaExemplo) => Promise<{ id: string }>;
+  onCriar: (dados: NovaPessoaExemplo) => Promise<ResultadoCriacao>;
   onCriada: (id: string) => void;
 }
 
@@ -24,13 +27,38 @@ export function NovaPessoaDialogo({ open, onOpenChange, colegas, onCriar, onCria
   const origem = useRef<HTMLElement | null>(null);
   const criou = useRef(false);
   const sujo = useRef(false);
+  /** Uma criação está em curso: dois cliques seguidos não criam duas vezes. */
+  const emCurso = useRef(false);
+  const { t } = useTranslation();
 
-  const criar = (dados: NovaPessoaExemplo) => {
+  const criar = async (dados: NovaPessoaExemplo) => {
+    if (emCurso.current) return;
+    emCurso.current = true;
     criou.current = true;
-    void onCriar(dados).then(({ id }) => {
+    try {
+      const { id, falhas, naoGravado } = await onCriar(dados);
+      anunciarResultado(falhas, naoGravado);
       onOpenChange(false);
       onCriada(id);
-    });
+    } catch (e) {
+      // Recusa total: nada foi criado. O painel fica aberto com o que se escreveu, e o erro diz-se.
+      criou.current = false;
+      toast.error(await getFriendlyErrorMessage(e, t("hr.erros.guardar")));
+    } finally {
+      emCurso.current = false;
+    }
+  };
+
+  /** Sucesso, secções que não ficaram gravadas, e o que o formulário recolheu mas não tem onde gravar. */
+  const anunciarResultado = (falhas: ResultadoCriacao["falhas"], naoGravado: NaoGravado[]) => {
+    const pendenciaDeAcesso = falhas.some((f) => f.seccao === "acesso");
+    const reais = falhas.filter((f) => f.seccao !== "acesso");
+    if (reais.length === 0) toast.success(t("hr.sucesso.criada"));
+    else toast.error(`${t("hr.form.criadaComFalhas")} ${reais.map((f) => t(`hr.form.seccoes.${f.seccao}`)).join(", ")}`);
+    if (pendenciaDeAcesso) toast.warning(t("hr.acesso.convitePendente"));
+    if (naoGravado.length > 0) {
+      toast.warning(`${t("rhNova.naoGravado")} ${naoGravado.map((c) => t(`rhNova.naoGravado.${c}`)).join(", ")}`);
+    }
   };
 
   return (
@@ -53,7 +81,7 @@ export function NovaPessoaDialogo({ open, onOpenChange, colegas, onCriar, onCria
       >
         <CabecalhoNova />
         <FormularioNovaPessoa
-          colegas={colegas} aoCriar={criar} aoCancelar={() => onOpenChange(false)} aoSujar={() => { sujo.current = true; }}
+          colegas={colegas} aoCriar={(dados) => { void criar(dados); }} aoCancelar={() => onOpenChange(false)} aoSujar={() => { sujo.current = true; }}
         />
       </SheetContent>
     </Sheet>

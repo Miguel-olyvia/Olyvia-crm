@@ -1,7 +1,7 @@
 // A página «Organização» num só organograma: a árvore da estrutura com as PESSOAS dentro (debaixo do centro onde trabalham),
 // as chefias como informação da pessoa («Chefia», «Reporta a», subordinados por baixo), a pesquisa que encontra pessoas,
 // a ficha de RH, os redirecionamentos dos endereços antigos e o título «Pessoas» da lista. Tudo em memória, sem base.
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -12,6 +12,12 @@ import { definirOrganizacao, lerOrganizacao } from "@/components/rh-exemplo/orga
 import PessoaRhDetalhe from "./PessoaRhDetalhe";
 import PessoasRh from "./PessoasRh";
 import RhOrganizacao from "./RhOrganizacao";
+
+// A leitura e a gravacao reais testam-se em useOrganizacaoReal.test.ts; aqui a pagina corre sobre dados de exemplo em memoria.
+vi.mock("@/components/rh-exemplo/organizacao/useOrganizacaoReal", async () => {
+  const m = await import("@/components/rh-exemplo/organizacao/organizacaoEmMemoria");
+  return { useOrganizacaoReal: m.useOrganizacaoEmMemoria };
+});
 
 function Sonda() {
   const l = useLocation();

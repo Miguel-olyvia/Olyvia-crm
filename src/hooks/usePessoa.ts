@@ -695,25 +695,73 @@ export function usePessoa(pessoaId: string | undefined) {
         const hoje = hojeIsoServidor();
         const ontem = ontemIso(hoje);
 
+        // O que ja foi alterado nesta gravacao, para repor se o resto falhar. A sequencia (alterar as antigas,
+        // inserir as novas) nao e transacional: sem isto, um insert falhado deixava a pessoa SEM horario.
+        const alteradas: Array<{ id: string; reposicao: Record<string, unknown> }> = [];
+
+        // CONTAR, nao `.select()`: a politica de SELECT exige `deleted_at IS NULL`, e um UPDATE ... RETURNING de uma
+        // linha que acaba de ser apagada falharia por RLS. Com `count: "exact"` a base diz quantas linhas
+        // alterou sem as devolver. Uma RLS que filtre a linha dava 0 linhas e `error: null` -- e o ecra dizia
+        // "versao gravada" com o horario antigo ainda aberto por baixo do novo.
+        const alterarLinha = async (
+          id: string,
+          patch: Record<string, unknown>,
+          reposicao: Record<string, unknown>,
+        ): Promise<unknown> => {
+          const { error, count } = await hrFrom("pessoas_horario_planeado")
+            .update({ ...patch, updated_by: autorId }, { count: "exact" })
+            .eq("id", id);
+          if (error) return error;
+          if (count !== 1) {
+            return new Error(
+              "Nao foi possivel alterar uma linha do horario anterior (a base nao a alterou). O horario nao foi gravado.",
+            );
+          }
+          alteradas.push({ id, reposicao });
+          return null;
+        };
+
+        // Repoe, da mais recente para a mais antiga, o que ja foi alterado. Devolve true se alguma reposicao falhou.
+        const reporAlteradas = async (): Promise<boolean> => {
+          let falhou = false;
+          for (const alterada of [...alteradas].reverse()) {
+            const { error } = await hrFrom("pessoas_horario_planeado")
+              .update({ ...alterada.reposicao, updated_by: autorId })
+              .eq("id", alterada.id);
+            if (error) falhou = true;
+          }
+          return falhou;
+        };
+
+        const falhar = async (erro: unknown) => {
+          const reposicaoFalhou = await reporAlteradas();
+          // Esta falha sai por `guardar` sem reler a ficha: reler aqui para o ecra nao mostrar o estado antigo.
+          await load();
+          if (reposicaoFalhou) {
+            return {
+              error: new Error(
+                "A gravacao do horario falhou e nao foi possivel repor por completo o horario anterior: o horario desta pessoa pode estar incompleto. Confirma-o antes de continuar.",
+              ),
+            };
+          }
+          return { error: erro };
+        };
+
         for (const linha of ficha.horarioPlaneado) {
           if (linhaPlaneadaDecorrida(linha, hoje)) continue;
 
           if (linha.data !== null || !linhaRecorrenteJaEmCurso(linha, hoje)) {
-            const { error } = await hrFrom("pessoas_horario_planeado")
-              .update({
-                deleted_at: new Date().toISOString(),
-                deleted_by: autorId,
-                updated_by: autorId,
-              })
-              .eq("id", linha.id);
-            if (error) return { error };
+            const erro = await alterarLinha(
+              linha.id,
+              { deleted_at: new Date().toISOString(), deleted_by: autorId },
+              { deleted_at: null, deleted_by: null },
+            );
+            if (erro) return falhar(erro);
             continue;
           }
 
-          const { error } = await hrFrom("pessoas_horario_planeado")
-            .update({ valido_ate: ontem, updated_by: autorId })
-            .eq("id", linha.id);
-          if (error) return { error };
+          const erro = await alterarLinha(linha.id, { valido_ate: ontem }, { valido_ate: linha.valido_ate });
+          if (erro) return falhar(erro);
         }
 
         if (linhas.length === 0) return { error: null };
@@ -724,7 +772,7 @@ export function usePessoa(pessoaId: string | undefined) {
         const vinculoActivo = ficha.vinculos.find(
           (vinculo) => vinculo.estado === "activo" || vinculo.estado === "suspenso",
         );
-        return hrFrom("pessoas_horario_planeado").insert(
+        const { error: erroInsert } = await hrFrom("pessoas_horario_planeado").insert(
           linhas.map((linha) => ({
             ...linha,
             pessoa_id: pessoaId,
@@ -738,8 +786,10 @@ export function usePessoa(pessoaId: string | undefined) {
             updated_by: autorId,
           })),
         );
+        if (erroInsert) return falhar(erroInsert);
+        return { error: null };
       }),
-    [guardar, ficha.pessoa?.organization_id, ficha.vinculos, ficha.horarioPlaneado, pessoaId],
+    [guardar, load, ficha.pessoa?.organization_id, ficha.vinculos, ficha.horarioPlaneado, pessoaId],
   );
 
   /**

@@ -21,8 +21,8 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Aba, ListaAbas } from "@/components/ficha-comum/AbasSublinhadas";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
-import { PipelineAdmissoes } from "@/components/rh-exemplo/admissao/PipelineAdmissoes";
-import { useAdmissoes } from "@/components/rh-exemplo/dados/lojaAdmissao";
+import { PipelineAdmissoes } from "@/components/rh-exemplo/hooks/PipelineAdmissoesReal";
+import { useEstadoAdmissaoPorPessoa } from "@/components/rh-exemplo/hooks/useEstadoAdmissaoPorPessoa";
 import { ContratosATerminarTab } from "@/components/rh-exemplo/fimContrato/ContratosATerminarTab";
 import { FichaPessoaRh } from "@/components/rh-exemplo/ficha/FichaPessoaRh";
 import { BarraListaRh } from "@/components/rh-exemplo/lista/BarraListaRh";
@@ -115,7 +115,10 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
   const podeCriar = hasPermission("hr.pessoas.create");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
-  const porAprovar = useAdmissoes((e) => Object.values(e.porPessoa).filter((a) => a.estado === "submetida").length);
+  const podeVerAdmissoes = hasPermission("hr.pessoas.convite.enviar") || hasPermission("hr.onboarding.approve");
+  // Um só pedido à lista real serve o chip de cada linha e a pastilha «por aprovar».
+  const admissoes = useEstadoAdmissaoPorPessoa();
+  const porAprovar = admissoes.porAprovar;
   // So para leitura: uma pessoa cujo local actual ja foi desactivado tem de continuar a mostrar o nome.
   const { locais } = useLocaisTrabalho({ apenasAtivos: false });
   const nomeDoLocal = (localId: string | null) => (localId ? (locais.find((l) => l.id === localId)?.nome ?? null) : null);
@@ -170,7 +173,7 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
         <ListaAbas>
-          {SUBTABS.filter(({ value }) => value !== "contratos" || podeVerVinculos).map(({ value, labelKey }) => (
+          {SUBTABS.filter(({ value }) => (value !== "contratos" || podeVerVinculos) && (value !== "admissoes" || podeVerAdmissoes)).map(({ value, labelKey }) => (
             <Aba
               key={value} value={value} rotulo={t(labelKey)}
               {...(value === "admissoes" && porAprovar > 0 ? { contador: porAprovar, contadorLeitor: t("rhAdm.tabPorAprovar", { n: porAprovar }) } : {})}
@@ -184,6 +187,8 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
             contagens={contagemDosChips} total={filtradas.length}
           />
           {error && <p role="alert" className="text-sm text-destructive">{t("hr.erros.carregarLista")} — {error}</p>}
+          {admissoes.erro && <p role="alert" className="text-sm text-destructive">{t("rhForm.lista.admissaoErro")}</p>}
+          {admissoes.incompleto && <p role="status" className="text-sm text-muted-foreground">{t("rhForm.lista.admissaoIncompleta")}</p>}
           {loading ? (
             <OlyviaLoader />
           ) : filtradas.length === 0 ? (
@@ -195,12 +200,13 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
             <TabelaPessoasRh
               pessoas={filtradas} nomeDoLocal={nomeDoLocal} comContrato={podeVerVinculos}
               abertaId={ficha.aberta ? ficha.id : null} aoAbrir={abrirFicha}
+              estadoAdmissaoPorPessoa={admissoes.estadoPorPessoa}
             />
           )}
         </TabsContent>
 
         <TabsContent value="admissoes" className="mt-0">
-          <PipelineAdmissoes aoAbrirFicha={abrirFicha} />
+          {podeVerAdmissoes && <PipelineAdmissoes key={activeCompany.id} aoAbrirFicha={abrirFicha} />}
         </TabsContent>
         <TabsContent value="cargos" className="mt-0">
           <PessoasFuncoesTab pessoas={pessoas} loading={loading} />

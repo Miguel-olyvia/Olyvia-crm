@@ -7,12 +7,13 @@
  * saldo; para os outros tipos o cabecalho nao mostra saldo nem movimentos.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
+import { useAusenciasTipos } from "@/components/rh-exemplo/hooks/useAusenciasTipos";
 import { permissoesDaVista } from "@/components/rh-exemplo/lib/vistaDaPessoa";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import { CabecalhoMes } from "./CabecalhoMes";
+import type { AssiduidadeDoMes } from "./fonteMes";
 import { CelulaDia } from "./CelulaDia";
 import { DetalheDoDia } from "./DetalheDoDia";
 import { useSituacoesDoMes } from "./situacaoDoMes";
@@ -34,15 +35,31 @@ interface Props {
   /** Abre o registo do dia (picagens, faltas, correccoes e justificacoes). */
   aoAbrirRegisto: (data: string) => void;
   acoes?: ReactNode;
+  /** A assiduidade real do mes, ja carregada pela aba (uma so ida a base). */
+  assiduidade: AssiduidadeDoMes;
+  /** Antes dela os dias ficam «sem contrato». */
+  dataAdmissao?: string | null;
 }
 
 const COLUNA_INICIAL = ["md:col-start-7", "md:col-start-1", "md:col-start-2", "md:col-start-3", "md:col-start-4", "md:col-start-5", "md:col-start-6"];
 /** 2024-01-01 foi uma segunda-feira: serve para dar os nomes dos dias da semana, de segunda a domingo. */
 const SEGUNDA_DE_REFERENCIA = Date.UTC(2024, 0, 1);
 
-export function CalendarioPessoa({ pessoaId, pessoaNome, mes, aoMudarMes, souAPessoa, permissoes, aoAbrirRegisto, acoes }: Props) {
+export function CalendarioPessoa({
+  pessoaId, pessoaNome, mes, aoMudarMes, souAPessoa, permissoes, aoAbrirRegisto, acoes, assiduidade, dataAdmissao = null,
+}: Props) {
   const { t, language } = useTranslation();
-  const dados = useMesDaPessoa(pessoaId, mes.ano, mes.mes);
+  const { tipos } = useAusenciasTipos();
+  const { picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado } = assiduidade;
+  const fonte = useMemo(
+    () => ({
+      assiduidade: { picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado },
+      dataAdmissao,
+      tiposAusencia: tipos,
+    }),
+    [picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado, dataAdmissao, tipos],
+  );
+  const dados = useMesDaPessoa(pessoaId, mes.ano, mes.mes, fonte);
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
   const situacoes = useSituacoesDoMes(pessoaId, dados?.dias);
 
@@ -54,7 +71,6 @@ export function CalendarioPessoa({ pessoaId, pessoaNome, mes, aoMudarMes, souAPe
   const noDia = (iso: string): Date => new Date(`${iso}T00:00:00Z`);
   const nomeDoMes = formatar.mes.format(new Date(Date.UTC(mes.ano, mes.mes - 1, 1)));
 
-  if (!dados) return <OlyviaLoader />;
   const aberto = dados.dias.find((d) => d.data === diaAberto) ?? null;
   const mudar = (passo: number) => {
     const novo = new Date(Date.UTC(mes.ano, mes.mes - 1 + passo, 1));
@@ -70,6 +86,12 @@ export function CalendarioPessoa({ pessoaId, pessoaNome, mes, aoMudarMes, souAPe
   return (
     <div className="space-y-4" data-testid="rhcal-calendario">
       <CabecalhoMes nomeDoMes={nomeDoMes} totais={dados.totais} aoMudar={mudar} aoIrParaHoje={irParaHoje} acoes={acoes} />
+      {dados.erroRegraSubsidio && (
+        <p role="alert" className="text-sm font-medium text-destructive">{t("rhExemplo.hor.real.erroRegraSubsidio")}</p>
+      )}
+      {dados.planeadoRecusado && (
+        <p role="alert" className="text-sm font-medium text-destructive">{t("rhExemplo.hor.real.planeadoRecusado")}</p>
+      )}
       <div aria-hidden="true" className="hidden grid-cols-7 gap-1.5 text-center text-xs font-medium capitalize text-muted-foreground md:grid">
         {Array.from({ length: 7 }, (_, i) => (
           <span key={i}>{formatar.curto.format(new Date(SEGUNDA_DE_REFERENCIA + i * 86_400_000))}</span>

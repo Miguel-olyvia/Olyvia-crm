@@ -1,10 +1,11 @@
 // O conteúdo das três primeiras abas da ficha de RH (Visão geral, Detalhes laborais e Detalhes pessoais): os mesmos componentes
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
-import { CartaoAdmissao } from "@/components/rh-exemplo/admissao/CartaoAdmissao";
+import { CartaoAdmissaoDaFicha } from "@/components/rh-exemplo/hooks/CartaoAdmissaoDaFicha";
+import type { ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
 import { PortalColaboradorRh } from "@/components/rh-exemplo/portal/PortalColaboradorRh";
 import { PessoaLaboraisTab } from "@/components/rh-exemplo/PessoaLaboraisTab";
-import { PessoaOutrosDadosCard } from "@/components/rh-exemplo/PessoaOutrosDadosCard";
+import { PessoaOutrosDadosCard } from "@/components/rh-exemplo/hooks/PessoaOutrosDadosReal";
 import { PessoaPessoaisTab } from "@/components/rh-exemplo/PessoaPessoaisTab";
 import { PessoaVisaoGeralTab } from "@/components/rh-exemplo/PessoaVisaoGeralTab";
 import type { usePessoa } from "@/components/rh-exemplo/hooks/usePessoa";
@@ -27,10 +28,13 @@ export function SemAcesso() {
   );
 }
 
-export function AbaVisaoGeral({ ficha, pessoa, ctx, aoAbrirAba }: AbaProps & { aoAbrirAba: (aba: string) => void }) {
+export function AbaVisaoGeral({ ficha, pessoa, ctx, aoAbrirAba, resumoConvite }: AbaProps & { aoAbrirAba: (aba: string) => void; resumoConvite: ResumoConvite | null }) {
   return (
     <div className="space-y-4">
-      <CartaoAdmissao pessoaId={pessoa.id} />
+      <CartaoAdmissaoDaFicha
+        pessoaId={pessoa.id} nome={pessoa.nome_completo} cargo={ctx.cargos.find((c) => c.id === pessoa.cargo_id)?.nome ?? pessoa.cargo ?? null}
+        resumo={resumoConvite} aoAbrirFicha={() => aoAbrirAba("visaoGeral")}
+      />
       <PortalColaboradorRh pessoaId={pessoa.id} compacto aoGerir={() => aoAbrirAba("documentos")} />
       <PessoaVisaoGeralTab
         pessoa={pessoa} reportaANome={ctx.reportaANome} entidadeLegalNome={ctx.entidadeLegalNome} vinculos={ficha.vinculos}
@@ -73,7 +77,7 @@ export function AbaPessoais({ ficha, pessoa, ctx }: AbaProps) {
       onRevelarNiss={ficha.revelarNiss} onDefinirNiss={ficha.definirNiss} onDefinirConta={ficha.definirConta}
       onDefinirBic={ficha.definirBic}
     />
-    <PessoaOutrosDadosCard pessoaId={pessoa.id} />
+    <PessoaOutrosDadosCard sindicalizacao={ficha.sindicalizacao} />
     </div>
   );
 }

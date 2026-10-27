@@ -23,7 +23,7 @@
  * ecra, e tem de estar escrito por cima da lista -- senao uma lista vazia por
  * causa do filtro passa por uma lista vazia por nao haver nada.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
@@ -36,14 +36,18 @@ const COLUNAS_REALIZADO =
 
 const COLUNAS_FALTA =
   "id, pessoa_id, organization_id, data, local_id, hora_inicio, hora_fim, minutos, " +
-  "motivo_codigo, justificacao_estado, justificada, estado";
+  "motivo_codigo, justificacao_estado, justificada, remunerada, justificacao_decidida_em, " +
+  "justificacao_motivo, estado";
 
 interface Satelite<T> {
   linhas: T[];
   recusado: boolean;
+  /** A leitura falhou por outra razao que nao permissao (rede, 500, timeout): nao e o mesmo que "nao ha nada". */
+  erro: boolean;
 }
 
-const vazio = <T,>(): Satelite<T> => ({ linhas: [], recusado: false });
+const vazio = <T,>(): Satelite<T> => ({ linhas: [], recusado: false, erro: false });
+const comErro = <T,>(): Satelite<T> => ({ linhas: [], recusado: false, erro: true });
 
 async function carregar<T>(
   vista: string,
@@ -52,11 +56,11 @@ async function carregar<T>(
 ): Promise<Satelite<T>> {
   const { data, error } = await aplicar(hrFrom(vista).select(colunas));
   if (error) {
-    if (isPermissionError(error)) return { linhas: [], recusado: true };
+    if (isPermissionError(error)) return { linhas: [], recusado: true, erro: false };
     captureFlowError(error, "hr-assiduidade-load");
-    return { linhas: [], recusado: false };
+    return comErro<T>();
   }
-  return { linhas: (data ?? []) as T[], recusado: false };
+  return { linhas: (data ?? []) as T[], recusado: false, erro: false };
 }
 
 /** O que uma celula do mapa mostra de um dia de uma pessoa. */
@@ -95,10 +99,19 @@ export function useAssiduidadeDaOrganizacao(janela: { de: string; ate: string })
   const [faltas, setFaltas] = useState<Satelite<Falta>>(vazio<Falta>());
   const [desvios, setDesvios] = useState<Satelite<Desvio>>(vazio<Desvio>());
   const [loading, setLoading] = useState(true);
+  // Conta os pedidos: so a resposta do mais recente pode escrever no estado. Sem isto, uma releitura lenta do
+  // mes anterior chegava depois da do mes novo e sobrescrevia-a.
+  const ultimoPedido = useRef(0);
 
   const { de, ate } = janela;
 
-  const load = useCallback(async () => {
+  /**
+   * `silencioso`: reler depois de uma gravacao. NAO poe `loading` a true -- quem consome o hook desmontaria a
+   * arvore inteira (separador activo, formularios abertos, foco) a cada releitura. `loading` e so o primeiro
+   * carregamento de uma organizacao/janela.
+   */
+  const load = useCallback(async (silencioso = false) => {
+    const pedido = ++ultimoPedido.current;
     if (!orgId) {
       setRealizado(vazio<HorarioRealizado>());
       setFaltas(vazio<Falta>());
@@ -106,7 +119,7 @@ export function useAssiduidadeDaOrganizacao(janela: { de: string; ate: string })
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silencioso) setLoading(true);
     try {
       const [oRealizado, asFaltas, osDesvios] = await Promise.all([
         carregar<HorarioRealizado>("v_hr_horario_realizado_em_vigor", COLUNAS_REALIZADO, (q) =>
@@ -122,27 +135,35 @@ export function useAssiduidadeDaOrganizacao(janela: { de: string; ate: string })
             _data_ate: ate,
           });
           if (error) {
-            if (isPermissionError(error)) return { linhas: [], recusado: true };
+            if (isPermissionError(error)) return { linhas: [], recusado: true, erro: false };
             captureFlowError(error, "hr-assiduidade-load");
-            return { linhas: [], recusado: false };
+            return comErro<Desvio>();
           }
-          return { linhas: (data ?? []) as Desvio[], recusado: false };
+          return { linhas: (data ?? []) as Desvio[], recusado: false, erro: false };
         })(),
       ]);
 
+      if (pedido !== ultimoPedido.current) return;
       setRealizado(oRealizado);
       setFaltas(asFaltas);
       setDesvios(osDesvios);
     } catch (e) {
       captureFlowError(e, "hr-assiduidade-load");
+      if (pedido !== ultimoPedido.current) return;
+      // Nao deixar o estado antigo a passar por actual: as tres leituras ficam marcadas com erro.
+      setRealizado(comErro<HorarioRealizado>());
+      setFaltas(comErro<Falta>());
+      setDesvios(comErro<Desvio>());
     } finally {
-      setLoading(false);
+      if (pedido === ultimoPedido.current) setLoading(false);
     }
   }, [orgId, de, ate]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const recarregar = useCallback(() => load(true), [load]);
 
   /**
    * O mapa `pessoa|data -> celula`. Faz-se uma vez por carregamento e nao por
@@ -196,7 +217,14 @@ export function useAssiduidadeDaOrganizacao(janela: { de: string; ate: string })
     celulas,
     pessoasComRegisto,
     recusado: realizado.recusado && faltas.recusado && desvios.recusado,
+    // Por satelite: uma so recusada ou falhada nao pode passar por "nao ha nada" nos ecras que a usam.
+    realizadoRecusado: realizado.recusado,
+    realizadoErro: realizado.erro,
+    faltasRecusado: faltas.recusado,
+    faltasErro: faltas.erro,
+    desviosRecusado: desvios.recusado,
+    desviosErro: desvios.erro,
     loading,
-    recarregar: load,
+    recarregar,
   };
 }

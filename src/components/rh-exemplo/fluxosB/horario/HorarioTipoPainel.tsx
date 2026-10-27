@@ -1,48 +1,57 @@
 /**
- * O tipo de horario e as suas versoes (fluxo 4), no topo do separador Horario da ficha. Mostra o tipo em vigor,
- * as horas planeadas por semana, a regra de tolerancia de atraso e o aviso se o total difere das horas
- * contratadas; deixa criar uma NOVA VERSAO (com motivo), uma excepcao de um dia e CORRIGIR o passado (com
- * autorizacao); e lista o historico de versoes, que nunca se apaga.
+ * O tipo de horario e as suas versoes, no topo do separador Horario da ficha, lidos do horario planeado REAL
+ * (`pessoas_horario_planeado`, entregue pela ficha). Mostra a versao em vigor, as horas planeadas por semana e o aviso
+ * se o total difere das horas contratadas; deixa criar uma NOVA VERSAO (padrao ou repartido, a partir de hoje) e uma
+ * excepcao de um dia, e lista o historico, onde se CORRIGE o passado intervalo a intervalo (com motivo e permissao).
+ *
+ * O que a base nao guarda nao aparece aqui: tipos isencao/livre/banco, anexo e motivo de uma versao, e tolerancia de
+ * atraso (a base nao calcula tolerancias).
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Layers } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { formatarData, formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { ExcecaoDeDia } from "@/components/rh-exemplo/fluxosB/horario/ExcecaoDeDia";
 import { HistoricoVersoes } from "@/components/rh-exemplo/fluxosB/horario/HistoricoVersoes";
 import { NovaVersaoForm } from "@/components/rh-exemplo/fluxosB/horario/NovaVersaoForm";
-import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
+import { hojeIsoServidor, type LinhaPlaneadoParaGravar } from "@/components/rh-exemplo/lib/horario";
 import {
-  TOLERANCIA_ATRASO_MINUTOS,
-  avisoContratadas,
-  configInicial,
-  minutosPlaneadosDaSemana,
-  versaoEmVigor,
-  type HorarioPessoa,
-  type VersaoHorario,
-} from "@/components/rh-exemplo/lib/horarioTipos";
+  avisoContratadasMin,
+  excecoesDoPlaneado,
+  linhasEditaveis,
+  versaoEmVigorReal,
+  versoesDoPlaneado,
+} from "@/components/rh-exemplo/lib/horarioReal";
+import type { HorarioPlaneado } from "@/components/rh-exemplo/tipos";
 
 interface HorarioTipoPainelProps {
-  pessoaId: string;
+  /** As linhas de `pessoas_horario_planeado` da pessoa (`ficha.horarioPlaneado`). */
+  planeado: HorarioPlaneado[];
   podeEditar: boolean;
   podeCorrigir: boolean;
   horasContratadasSemanais: number | null;
+  saving: boolean;
+  /** ALTERAR (`savePlaneado`): devolve `null` em sucesso ou a mensagem do erro. */
+  onGuardarPlaneado: (linhas: LinhaPlaneadoParaGravar[]) => Promise<string | null>;
+  /** Abre a correccao (`corrigirPlaneado`) de um intervalo ja decorrido. Sem isto nao ha botao de corrigir. */
+  onCorrigirLinha?: (linha: HorarioPlaneado) => void;
 }
 
-type Modo = { tipo: "nova" } | { tipo: "corrigir"; versao: VersaoHorario } | { tipo: "excecao" } | null;
+type Modo = "nova" | "excecao" | null;
 
-const SEM_HORARIO: HorarioPessoa = { versoes: [], excecoes: [] };
-
-export function HorarioTipoPainel({ pessoaId, podeEditar, podeCorrigir, horasContratadasSemanais }: HorarioTipoPainelProps) {
+export function HorarioTipoPainel({
+  planeado, podeEditar, podeCorrigir, horasContratadasSemanais, saving, onGuardarPlaneado, onCorrigirLinha,
+}: HorarioTipoPainelProps) {
   const { t } = useTranslation();
-  const horario = useFluxosB((e) => e.horarios[pessoaId]) ?? SEM_HORARIO;
   const [modo, setModo] = useState<Modo>(null);
-  const hoje = hojeIso();
-  const vigente = versaoEmVigor(horario, hoje);
+  const hoje = hojeIsoServidor();
+  const versoes = useMemo(() => versoesDoPlaneado(planeado, hoje), [planeado, hoje]);
+  const editaveis = useMemo(() => linhasEditaveis(planeado, hoje), [planeado, hoje]);
+  const excecoes = useMemo(() => excecoesDoPlaneado(editaveis), [editaveis]);
+  const vigente = versaoEmVigorReal(versoes);
   const fechar = () => setModo(null);
 
   return (
@@ -57,20 +66,15 @@ export function HorarioTipoPainel({ pessoaId, podeEditar, podeCorrigir, horasCon
         {vigente ? (
           <div className="space-y-2" data-testid="rhb-horario-vigente">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="font-normal">{t(`rhExemplo.hor.tipo.${vigente.config.tipo}`)}</Badge>
+              <Badge className="font-normal">{t(`rhExemplo.hor.tipo.${vigente.tipo}`)}</Badge>
               <span className="text-sm text-muted-foreground">
-                {t("rhExemplo.hor.desde", { data: formatarData(vigente.desde) })}
+                {vigente.desde ? t("rhExemplo.hor.desde", { data: formatarData(vigente.desde) }) : t("rhExemplo.hor.real.desdeSempre")}
               </span>
               <span className="text-sm font-medium tabular-nums">
-                {t("rhExemplo.hor.porSemana", { horas: formatarHorasMinutos(minutosPlaneadosDaSemana(vigente.config)) })}
+                {t("rhExemplo.hor.porSemana", { horas: formatarHorasMinutos(vigente.minutosSemana) })}
               </span>
             </div>
-            {vigente.config.tipo === "isencao" && (
-              <Badge variant="outline" className="font-normal">
-                {t("rhExemplo.hor.marcaIsencao")}
-              </Badge>
-            )}
-            {avisoContratadas(vigente.config, horasContratadasSemanais) && (
+            {avisoContratadasMin(vigente.minutosSemana, horasContratadasSemanais) && (
               <p className="text-sm text-amber-800 dark:text-amber-300">
                 {t("rhExemplo.hor.avisoContratadas", { horas: String(horasContratadasSemanais ?? 0) })}
               </p>
@@ -80,37 +84,43 @@ export function HorarioTipoPainel({ pessoaId, podeEditar, podeCorrigir, horasCon
           <p className="text-sm text-muted-foreground">{t("rhExemplo.hor.semVersao")}</p>
         )}
 
-        <p className="rounded-md border border-dashed p-3 text-sm">
-          <span className="font-medium">{t("rhExemplo.hor.tolerancia")}: </span>
-          {t("rhExemplo.hor.toleranciaRegra", { minutos: String(TOLERANCIA_ATRASO_MINUTOS) })}
-        </p>
-
         {podeEditar && modo === null && (
           <div className="flex flex-wrap gap-2">
-            <Button type="button" className="min-h-11" onClick={() => setModo({ tipo: "nova" })}>
+            <Button type="button" className="min-h-11" disabled={saving} onClick={() => setModo("nova")}>
               {t("rhExemplo.hor.novaVersaoBotao")}
             </Button>
-            <Button type="button" variant="outline" className="min-h-11" onClick={() => setModo({ tipo: "excecao" })}>
+            <Button type="button" variant="outline" className="min-h-11" disabled={saving} onClick={() => setModo("excecao")}>
               {t("rhExemplo.hor.excecaoBotao")}
             </Button>
           </div>
         )}
 
-        {modo?.tipo === "nova" && (
-          <NovaVersaoForm key="nova" pessoaId={pessoaId} configBase={vigente?.config ?? configInicial()} onFechar={fechar} idPrefixo="rhb-nova" />
+        {modo === "nova" && (
+          <NovaVersaoForm
+            key="nova"
+            versaoBase={vigente}
+            editaveis={editaveis}
+            aGravar={saving}
+            onGuardar={onGuardarPlaneado}
+            onFechar={fechar}
+            idPrefixo="rhb-nova"
+          />
         )}
-        {modo?.tipo === "corrigir" && (
-          <NovaVersaoForm key={modo.versao.id} pessoaId={pessoaId} configBase={modo.versao.config} corrigir={modo.versao} onFechar={fechar} idPrefixo="rhb-corr" />
-        )}
-        {modo?.tipo === "excecao" && (
-          <ExcecaoDeDia pessoaId={pessoaId} excecoes={horario.excecoes} podeEditar={podeEditar} onFechar={fechar} />
+        {modo === "excecao" && (
+          <ExcecaoDeDia
+            excecoes={excecoes}
+            editaveis={editaveis}
+            podeEditar={podeEditar}
+            aGravar={saving}
+            onGuardar={onGuardarPlaneado}
+            onFechar={fechar}
+          />
         )}
 
         <HistoricoVersoes
-          versoes={horario.versoes}
-          hoje={hoje}
+          versoes={versoes}
           podeCorrigir={podeCorrigir}
-          onCorrigir={(versao) => setModo({ tipo: "corrigir", versao })}
+          onCorrigirLinha={onCorrigirLinha}
         />
       </CardContent>
     </Card>

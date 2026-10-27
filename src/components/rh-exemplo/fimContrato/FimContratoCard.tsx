@@ -25,7 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccaoFimContratoDialog } from "@/components/rh-exemplo/fimContrato/AccaoFimContratoDialog";
 import { ExcepcaoContratoDialog } from "@/components/rh-exemplo/fimContrato/ExcepcaoContratoDialog";
 import { FimContratoHistorico } from "@/components/rh-exemplo/fimContrato/FimContratoHistorico";
-import { IndicacaoDoResponsavel } from "@/components/rh-exemplo/fimContrato/IndicacaoDoResponsavel";
+import { IndicacaoDoResponsavelReal } from "@/components/rh-exemplo/hooks/IndicacaoDoResponsavelReal";
 import { SinoFimContrato } from "@/components/rh-exemplo/fimContrato/SinoFimContrato";
 import { usePessoaContratoFim } from "@/components/rh-exemplo/hooks/usePessoaContratoFim";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -118,7 +118,7 @@ export function FimContratoCard({ organizationId, vinculo, podeEditar, onMudou }
           </Linha>
         </dl>
 
-        <IndicacaoDoResponsavel vinculoId={vinculo.id} />
+        <IndicacaoDoResponsavelReal vinculoId={vinculo.id} dataFim={vinculo.data_fim} indicacoes={fim.indicacoes} />
 
         {podeEditar && (
           <div className="flex flex-wrap gap-2">

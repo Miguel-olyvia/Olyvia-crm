@@ -1,17 +1,15 @@
 // Teste de arranque dos fluxos 4, 5 e 7 de RH de exemplo (frente B): cada ecra novo abre, mostra o que o documento
 // de fluxos pede, e as acoes principais mudam o estado em memoria. Sem base: tudo vive nos stores em memoria.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { lerEstado, repor } from "@/components/rh-exemplo/dados/loja";
 import { lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { lerFluxosB, reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { marcarFaltaDoRh } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
 import { BotaoPicar } from "@/components/rh-exemplo/assiduidade/BotaoPicar";
-import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
 import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
 import { FaltasPainel } from "@/components/rh-exemplo/fluxosB/faltas/FaltasPainel";
-import { HorarioTipoPainel } from "@/components/rh-exemplo/fluxosB/horario/HorarioTipoPainel";
 import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
 
 const noLingua = (elemento: JSX.Element) => render(<LanguageProvider>{elemento}</LanguageProvider>);
@@ -32,85 +30,6 @@ describe("traducoes da frente B", () => {
   it("en e pt tem exatamente as mesmas chaves", () => {
     const { en, pt } = rhExemploFluxosBTranslations;
     expect(Object.keys(en).sort()).toEqual(Object.keys(pt).sort());
-  });
-});
-
-describe("fluxo 4: horario por tipo", () => {
-  const painel = () => noLingua(<HorarioTipoPainel pessoaId="p-sofia" podeEditar podeCorrigir horasContratadasSemanais={40} />);
-
-  it("mostra o tipo em vigor, a tolerancia de 5 minutos e o historico com as duas versoes", () => {
-    painel();
-    expect(screen.getByTestId("rhb-horario-vigente")).toHaveTextContent("Padrão");
-    expect(screen.getByText(/até 5 minutos de atraso não é atraso/)).toBeInTheDocument();
-    expect(screen.getByText(/Horário inicial do contrato/)).toBeInTheDocument();
-    expect(screen.getByText(/acordo-horario\.pdf/)).toBeInTheDocument();
-    semChavesPorTraduzir();
-  });
-
-  it("a nova versao oferece os cinco tipos, cada um com o seu editor", () => {
-    painel();
-    fireEvent.click(screen.getByRole("button", { name: "Nova versão do horário" }));
-    for (const nome of ["Padrão", "Repartido", "Isenção", "Livre", "Banco de horas"]) {
-      expect(screen.getByRole("radio", { name: new RegExp(nome) })).toBeInTheDocument();
-    }
-    fireEvent.click(screen.getByRole("radio", { name: /Livre/ }));
-    expect(screen.getByLabelText("Horas por semana")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: /Banco de horas/ }));
-    expect(screen.getByText("Limites do banco de horas")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: /Repartido/ }));
-    expect(screen.getByText("Segundo período")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: /Isenção/ }));
-    expect(screen.getByText(/não há controlo de pausas/)).toBeInTheDocument();
-    semChavesPorTraduzir();
-  });
-
-  it("sem motivo recusa; com motivo grava a versao nova e a antiga fecha na vespera, sem se apagar", () => {
-    painel();
-    fireEvent.click(screen.getByRole("button", { name: "Nova versão do horário" }));
-    fireEvent.click(screen.getByRole("radio", { name: /Isenção/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Guardar nova versão" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("O motivo é obrigatório");
-    expect(lerFluxosB().horarios["p-sofia"].versoes).toHaveLength(2);
-
-    fireEvent.change(screen.getByLabelText(/Motivo \(obrigatório/), { target: { value: "Passa a isenção de horário" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar nova versão" }));
-    const versoes = lerFluxosB().horarios["p-sofia"].versoes;
-    expect(versoes).toHaveLength(3);
-    expect(versoes[1].ate).not.toBeNull();
-    expect(versoes[2]).toMatchObject({ motivo: "Passa a isenção de horário", ate: null });
-    expect(versoes[2].config.tipo).toBe("isencao");
-    expect(screen.getByTestId("rhb-horario-vigente")).toHaveTextContent("Isenção");
-  });
-
-  it("corrigir o passado pede autorizacao e motivo, e fica marcado", () => {
-    painel();
-    fireEvent.click(screen.getAllByRole("button", { name: "Corrigir" })[0]);
-    const formulario = screen.getByRole("region", { name: "Corrigir uma versão do passado" });
-    fireEvent.click(within(formulario).getByRole("button", { name: "Corrigir" }));
-    const dialogo = screen.getByRole("alertdialog");
-    const confirmar = within(dialogo).getByRole("button", { name: "Corrigir" });
-    expect(confirmar).toBeDisabled();
-    fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "Tipo errado" } });
-    expect(confirmar).toBeDisabled();
-    fireEvent.click(within(dialogo).getByLabelText("Tenho autorização para corrigir o passado"));
-    expect(confirmar).toBeEnabled();
-    fireEvent.click(confirmar);
-    const corrigida = lerFluxosB().horarios["p-sofia"].versoes.find((v) => v.correccao);
-    expect(corrigida).toMatchObject({ motivo: "Tipo errado", autorizadaPor: "Sofia Rebelo" });
-    expect(screen.getByText(/Correção autorizada por Sofia Rebelo/)).toBeInTheDocument();
-  });
-
-  it("a excecao de um dia no passado recusa; no futuro grava", () => {
-    painel();
-    fireEvent.click(screen.getByRole("button", { name: "Exceção de um dia" }));
-    fireEvent.change(screen.getByLabelText("Data"), { target: { value: "2020-01-01" } });
-    fireEvent.change(screen.getByLabelText(/Motivo \(obrigatório/), { target: { value: "Consulta" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar exceção" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("está no passado");
-    fireEvent.change(screen.getByLabelText("Data"), { target: { value: "2099-01-05" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar exceção" }));
-    // A excepcao ja marcada (16 de Outubro) mantem-se e a nova junta-se a ela.
-    expect(lerFluxosB().horarios["p-sofia"].excecoes.map((e) => e.data).sort()).toEqual(["2026-10-16", "2099-01-05"]);
   });
 });
 
@@ -151,65 +70,10 @@ describe("fluxo 5: picagem com localizacao simulada", () => {
   });
 });
 
-describe("fluxo 5: alertas do fim do dia e justificacao", () => {
-  it("lista os cinco tipos com chips de texto", () => {
-    noLingua(<FilaAlertasFimDoDia />);
-    for (const chip of ["Planeado sem realizado", "Parcialmente realizado", "Realizado sem planeado", "Picagem pendente de par", "Fora do local"]) {
-      expect(screen.getAllByText(chip).length).toBeGreaterThan(0);
-    }
-    expect(screen.getAllByText(/Sem justificação: falta sugerida/).length).toBeGreaterThan(0);
-    semChavesPorTraduzir();
-  });
-
-  it("«Aceitar diferença» tira o alerta da lista de por tratar", () => {
-    noLingua(<FilaAlertasFimDoDia />);
-    const linha = screen.getByTestId("rhb-alerta-alb-ines");
-    fireEvent.click(within(linha).getByRole("button", { name: "Aceitar diferença" }));
-    expect(screen.queryByTestId("rhb-alerta-alb-ines")).not.toBeInTheDocument();
-    expect(lerFluxosB().alertas.find((a) => a.id === "alb-ines")?.estado).toBe("aceite");
-  });
-
-  it("«Corrigir» exige motivo de 3 caracteres", () => {
-    noLingua(<FilaAlertasFimDoDia />);
-    fireEvent.click(within(screen.getByTestId("rhb-alerta-alb-rui")).getByRole("button", { name: "Corrigir" }));
-    const dialogo = screen.getByRole("alertdialog");
-    const confirmar = within(dialogo).getByRole("button", { name: "Corrigir" });
-    expect(confirmar).toBeDisabled();
-    fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "ab" } });
-    expect(confirmar).toBeDisabled();
-    fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "Relógio do quiosque atrasado" } });
-    fireEvent.click(confirmar);
-    expect(lerFluxosB().alertas.find((a) => a.id === "alb-rui")).toMatchObject({ estado: "corrigido", motivo: "Relógio do quiosque atrasado" });
-  });
-
-  it("«Pedir justificação» muda o estado sem pedir motivo", () => {
-    noLingua(<FilaAlertasFimDoDia />);
-    fireEvent.click(within(screen.getByTestId("rhb-alerta-alb-tiago")).getByRole("button", { name: "Pedir justificação" }));
-    expect(lerFluxosB().alertas.find((a) => a.id === "alb-tiago")?.estado).toBe("justificacao_pedida");
-  });
-
-  it("o RH aceita a justificacao enviada: a picagem fica lancada a mao", () => {
-    noLingua(<FilaAlertasFimDoDia />);
-    const antes = lerGestao().picagens.length;
-    fireEvent.click(within(screen.getByTestId("rhb-alerta-alb-andre")).getByRole("button", { name: "Aceitar justificação" }));
-    expect(lerFluxosB().alertas.find((a) => a.id === "alb-andre")?.estado).toBe("corrigido");
-    const novas = lerGestao().picagens.slice(antes);
-    expect(novas).toHaveLength(1);
-    expect(novas[0]).toMatchObject({ origem: "manual_rh", pessoa_id: "p-andre", hora_local: "18:00:00" });
-  });
-
-  it("recusar a justificacao exige motivo e a diferenca volta a pendente", () => {
-    noLingua(<FilaAlertasFimDoDia />);
-    fireEvent.click(within(screen.getByTestId("rhb-alerta-alb-andre")).getByRole("button", { name: "Recusar justificação" }));
-    const dialogo = screen.getByRole("alertdialog");
-    const confirmar = within(dialogo).getByRole("button", { name: "Recusar justificação" });
-    expect(confirmar).toBeDisabled();
-    fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "A hora não confere" } });
-    fireEvent.click(confirmar);
-    expect(lerFluxosB().alertas.find((a) => a.id === "alb-andre")?.estado).toBe("pendente");
-    expect(lerFluxosB().justificacoesPicagem[0]).toMatchObject({ estado: "recusada", motivoRecusa: "A hora não confere" });
-  });
-
+describe("fluxo 5: justificacao de falha de marcacao", () => {
+  // A fila de alertas do fim do dia (Corrigir, Marcar falta, Anular) ja nao e de exemplo: le os desvios reais da base e
+  // esta provada em alertas/filaDesviosReais.test.tsx. Pedir justificacao, Aceitar a diferenca e decidir a justificacao
+  // de picagem nao tem equivalente na base e sairam da fila; a justificacao que a pessoa envia continua em memoria.
   it("a pessoa justifica em 5 dias uteis: ve os dias que restam e envia hora real e motivo", () => {
     noLingua(<JustificarFalhaDeMarcacao pessoaId="p-sofia" />);
     expect(screen.getByText(/dias úteis para justificar/)).toBeInTheDocument();
@@ -231,9 +95,32 @@ const linhaDaFalta = (nome: string, data: string): HTMLElement => {
   return li;
 };
 
+// O painel recebe a lista de faltas de fora (na aplicacao, a vista em vigor da base). Aqui alimenta-se com as faltas
+// de exemplo; marcar, anular, registar e decidir sao RPCs reais e estao em faltas/faltasReais.test.tsx.
+const PERMISSOES_FALTAS = {
+  view: true, viewOwn: true, equipaView: true, picar: false, picarOutros: false, gerir: true, corrigir: true, faltasView: true,
+  faltasEdit: true, justificacaoView: true, justificacaoEdit: true, validarRealizado: true, obrasRegistar: false,
+};
+// As sugestoes saem dos desvios reais (aqui um turno planeado sem horas); a lista de faltas, da vista em vigor.
+const DESVIOS_DA_BASE = [
+  {
+    organization_id: "org", pessoa_id: "p-sofia", data: "2099-01-05", tipo: "planeado_sem_realizado" as const, hora_inicio: "09:00:00",
+    hora_fim: "13:00:00", minutos: 240, planeado_id: "plan-1", local_id: null, referencia_id: null, detalhe: null,
+  },
+];
+const painelDeFaltas = () => (
+  <FaltasPainel
+    faltas={lerGestao().faltas}
+    desvios={DESVIOS_DA_BASE}
+    pessoas={Object.values(lerEstado().fichas).map((f) => ({ id: f.pessoa.id, nome: f.pessoa.nome_completo }))}
+    permissoes={PERMISSOES_FALTAS}
+    onAlterado={() => undefined}
+  />
+);
+
 describe("fluxo 7: faltas", () => {
   it("lista as faltas com o estado da justificacao em texto e as sugestoes do sistema", () => {
-    noLingua(<FaltasPainel />);
+    noLingua(painelDeFaltas());
     expect(screen.getAllByText("Pendente de documento").length).toBeGreaterThan(0);
     expect(screen.queryAllByText("Justificada, não paga").length + screen.queryAllByText("Justificada, paga").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sem justificação").length).toBeGreaterThan(0);
@@ -242,37 +129,9 @@ describe("fluxo 7: faltas", () => {
     semChavesPorTraduzir();
   });
 
-  it("o texto de justificacao so aparece com «Ver texto», que regista quem leu", () => {
-    noLingua(<FaltasPainel />);
-    const linha = linhaDaFalta("Tiago Pinheiro", "08/10/2026");
-    fireEvent.click(within(linha).getByRole("button", { name: "Ver detalhe" }));
-    expect(screen.queryByTestId("rhb-texto-falta")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Ver texto" }));
-    expect(screen.getByTestId("rhb-texto-falta")).toHaveTextContent("Consulta de urgência");
-    expect(lerFluxosB().acessosTexto).toHaveLength(1);
-    expect(lerFluxosB().acessosTexto[0].quem).toBe("Sofia Rebelo");
-    expect(screen.getByText(/Sofia Rebelo leu em/)).toBeInTheDocument();
-  });
-
-  it("justificada e paga nao desconta; o detalhe mostra a conta", () => {
-    noLingua(<FaltasPainel />);
-    const linha = linhaDaFalta("Tiago Pinheiro", "08/10/2026");
-    fireEvent.click(within(linha).getByRole("button", { name: "Ver detalhe" }));
-    expect(screen.getByTestId("rhb-desconto")).toHaveTextContent("Pendente de documento: desconta por agora");
-    fireEvent.click(screen.getByRole("button", { name: "Justificada, paga" }));
-    expect(lerGestao().faltas.find((f) => f.id === "fa-tiago")).toMatchObject({ justificacao_estado: "justificada", remunerada: true });
-    expect(screen.getByTestId("rhb-desconto")).toHaveTextContent("Justificada e paga: não desconta");
-  });
-
-  it("recusar a justificacao exige motivo; sem justificacao a falta desconta (4 h x valor da hora)", () => {
-    noLingua(<FaltasPainel />);
-    const linha = linhaDaFalta("Carolina Matos", "06/10/2026");
-    fireEvent.click(within(linha).getByRole("button", { name: "Ver detalhe" }));
-    expect(screen.getByTestId("rhb-desconto")).toHaveTextContent(/4 h × .* = .* a descontar/);
-    fireEvent.change(screen.getByLabelText(/Texto da justificação/), { target: { value: "Assistência à família" } });
-    fireEvent.click(screen.getByRole("button", { name: "Registar justificação" }));
-    expect(lerGestao().faltas.find((f) => f.id === "fa-carolina")?.justificacao_estado).toBe("sem_justificacao");
-  });
+  // Os quatro testes do detalhe que aqui estavam (ver texto, decidir, registar a justificacao e a conta do desconto)
+  // provavam o store em memoria, que o detalhe ja nao usa. O equivalente, contra as RPCs reais, esta em
+  // faltas/faltasReais.test.tsx.
 
   it("marcar falta que cruza tempo trabalhado, ou outra falta, recusa e diz o periodo", () => {
     const trabalhado = lerEstado().fichas["p-rui"].horarioRealizado[0];
@@ -286,7 +145,7 @@ describe("fluxo 7: faltas", () => {
   });
 
   it("o prazo da organizacao e configuravel", () => {
-    noLingua(<FaltasPainel />);
+    noLingua(painelDeFaltas());
     fireEvent.change(screen.getByLabelText(/Prazo para justificar/), { target: { value: "8" } });
     expect(lerFluxosB().prazoFaltaDias).toBe(8);
   });

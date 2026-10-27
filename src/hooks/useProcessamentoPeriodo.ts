@@ -9,7 +9,7 @@
  * `rpc_hr_processamento_periodo_fechar`. Fechar e irreversivel nesta fase --
  * ver o cabecalho da migracao 20261201220000 (sem reabertura auditada ainda).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
@@ -28,19 +28,29 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
   const [recusado, setRecusado] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
+  // Conta os pedidos: so a resposta do mais recente escreve no estado (mudar de mes durante uma releitura).
+  const ultimoPedido = useRef(0);
+
+  /**
+   * `silencioso`: reler depois de abrir/fechar. NAO poe `loading` a true -- o ecra trocaria a tabela por um
+   * loader, desmontaria tudo o que depende do periodo (e repetiria os pedidos de assiduidade) so porque o estado
+   * do periodo mudou. `loading` e so o primeiro carregamento de uma organizacao/mes.
+   */
+  const load = useCallback(async (silencioso = false) => {
+    const pedido = ++ultimoPedido.current;
     if (!orgId) {
       setPeriodo(null);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silencioso) setLoading(true);
     const { data, error } = await hrFrom("hr_periodos_processamento")
       .select(COLUNAS)
       .eq("organization_id", orgId)
       .eq("ano", ano)
       .eq("mes", mes)
       .maybeSingle();
+    if (pedido !== ultimoPedido.current) return;
     if (error) {
       if (isPermissionError(error)) {
         setRecusado(true);
@@ -59,13 +69,15 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
     void load();
   }, [load]);
 
+  const recarregar = useCallback(() => load(true), [load]);
+
   const executar = useCallback(
     async (accao: () => Promise<{ data?: unknown; error: unknown }>): Promise<string | null> => {
       setSaving(true);
       try {
         const { error } = await accao();
         if (error) throw error;
-        await load();
+        await load(true);
         return null;
       } catch (e) {
         if (!isPermissionError(e)) captureFlowError(e, "hr-processamento-periodo-write");
@@ -104,7 +116,7 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
     loading,
     saving,
     recusado,
-    recarregar: load,
+    recarregar,
     abrir,
     fechar,
   };

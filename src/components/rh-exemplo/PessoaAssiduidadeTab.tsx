@@ -14,8 +14,7 @@
  * A aba aberta: quem chama pode controla-la (`aba` + `aoMudarAba`, como «O meu ponto», que a guarda no endereco); sem isso
  * o componente guarda-a sozinho (na ficha).
  */
-import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { CartaoBancoHoras } from "@/components/rh-exemplo/fluxosC/CartaoBancoHoras";
 import { HorasExtraDaPessoa } from "@/components/rh-exemplo/fluxosC/HorasExtraDaPessoa";
 import { useEmBancoDeHoras } from "@/components/rh-exemplo/fluxosC/useEmBancoDeHoras";
@@ -24,6 +23,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useTranslation } from "@/hooks/useTranslation";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
+import { FaltasDaPessoa } from "@/components/rh-exemplo/fluxosB/faltas/FaltasDaPessoa";
 import { PainelDoDia } from "@/components/rh-exemplo/assiduidade/PainelDoDia";
 import type { MesVisivel } from "@/components/rh-exemplo/calendarioPessoa/CalendarioPessoa";
 import { PessoaRelatorioAssiduidadeMensal } from "@/components/rh-exemplo/PessoaRelatorioAssiduidadeMensal";
@@ -59,7 +59,7 @@ function limitesDoMes(ano: number, mes: number): { de: string; ate: string } {
 /** O mes visivel (que e tambem a janela de datas a carregar). */
 function useMesVisivel() {
   const [mesVisivel, setMesVisivel] = useState<MesVisivel>(() => {
-    const agora = agoraExemplo();
+    const agora = new Date();
     return { ano: agora.getFullYear(), mes: agora.getMonth() + 1 };
   });
   const janela = useMemo(() => limitesDoMes(mesVisivel.ano, mesVisivel.mes), [mesVisivel.ano, mesVisivel.mes]);
@@ -78,6 +78,7 @@ interface CorpoProps {
   aoMudarAba?: (aba: string) => void;
   aoAbrirRegisto: (data: string) => void;
   aoAbrirRelatorio: () => void;
+  dataAdmissao: string | null;
 }
 
 /** As abas e o conteudo de cada uma. A aba aberta e a pedida por quem chama, ou a que a pessoa escolheu aqui. */
@@ -100,6 +101,7 @@ function CorpoAbas(p: CorpoProps) {
         <AbaCalendario
           pessoaId={p.pessoaId} pessoaNome={p.pessoaNome} mes={p.mes.mesVisivel} aoMudarMes={p.mes.setMesVisivel}
           souAPessoa={p.souAPessoa} permissoes={p.permissoes} aoAbrirRegisto={p.aoAbrirRegisto} aoAbrirRelatorio={p.aoAbrirRelatorio}
+          assiduidade={p.assiduidade} dataAdmissao={p.dataAdmissao}
         />
       </TabsContent>
       <TabsContent value="horas-extra" className="mt-0" data-testid="rhd-he-ficha">
@@ -109,7 +111,10 @@ function CorpoAbas(p: CorpoProps) {
         <AbaBanco pessoaId={p.pessoaId} podeAjustar={!p.souAPessoa && p.permissoes.gerir} />
       </TabsContent>
       <TabsContent value="justificacoes" className="mt-0">
-        <JustificarFalhaDeMarcacao pessoaId={p.pessoaId} />
+        <div className="space-y-4">
+          <JustificarFalhaDeMarcacao pessoaId={p.pessoaId} />
+          <FaltasDaPessoa pessoaNome={p.pessoaNome} souAPessoa={p.souAPessoa} permissoes={p.permissoes} assiduidade={p.assiduidade} />
+        </div>
       </TabsContent>
     </Tabs>
   );
@@ -122,18 +127,22 @@ export function PessoaAssiduidadeTab({
   const [relatorioAberto, setRelatorioAberto] = useState(false);
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
   const assiduidade = useAssiduidadeDaPessoa(pessoaId, mes.janela);
+  const pessoaJaCarregada = useRef<string | null>(null);
   // So para mostrar o nome de cada picagem -- nunca um selector aqui -- por isso inclui os desactivados.
   const { locais } = useLocaisTrabalho({ apenasAtivos: false });
   const podeVer = permissoes.view || permissoes.equipaView || (souAPessoa && permissoes.viewOwn);
 
   if (!podeVer) return <SemAcessoCard />;
-  if (assiduidade.loading) return <OlyviaLoader />;
+  // O loader so na primeira carga desta pessoa: uma recarga (gravar, mudar de mes) mantem a arvore montada, para nao fechar
+  // a aba escolhida nem a folha aberta a meio de uma gravacao.
+  if (!assiduidade.loading) pessoaJaCarregada.current = pessoaId;
+  if (assiduidade.loading && pessoaJaCarregada.current !== pessoaId) return <OlyviaLoader />;
 
   return (
     <div className="space-y-4">
       <CorpoAbas
         pessoaId={pessoaId} pessoaNome={pessoaNome} souAPessoa={souAPessoa} permissoes={permissoes} assiduidade={assiduidade}
-        locais={locais} mes={mes} aba={aba} aoMudarAba={aoMudarAba} aoAbrirRegisto={setDiaAberto}
+        locais={locais} mes={mes} dataAdmissao={dataAdmissao} aba={aba} aoMudarAba={aoMudarAba} aoAbrirRegisto={setDiaAberto}
         aoAbrirRelatorio={() => setRelatorioAberto(true)}
       />
       {diaAberto && (

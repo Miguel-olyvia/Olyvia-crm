@@ -57,20 +57,13 @@ export function BlocoVinculo({ f, est }: Props) {
 
 export function BlocoLocal({ f, est }: Props) {
   const { t } = useTranslation();
-  const mesmo = f.principal ? `${t("rhOrg.form.centroMesmo")} (${f.principal.nome})` : t("rhOrg.form.centroMesmo");
-  const filialDe = (filialId: string): string => est.filiais.find((x) => x.id === filialId)?.nome ?? "";
-  const centros = [{ value: "", label: mesmo }, ...opcoes(est.centros, (c) => c.id, (c) => `${c.nome} · ${filialDe(c.filialId)}`)];
+  // O centro é o local da ficha (derivado da afectação em aberto): aqui só se mostra, não se escolhe.
+  const actual = est.centros.find((c) => c.id === f.centroId)?.nome ?? t("rhOrg.form.centroNenhum");
   return (
-    <fieldset className="space-y-3 rounded-md border p-3">
+    <fieldset className="space-y-1.5 rounded-md border p-3">
       <legend className="px-1 text-sm font-medium">{t("rhOrg.form.local")}</legend>
-      <div className="space-y-1.5">
-        <Label htmlFor="rhOrg-centro">{t("rhOrg.form.centro")}</Label>
-        <NativeSelect
-          id="rhOrg-centro" className="min-h-11 text-foreground" value={f.centroId} onValueChange={f.setCentroId}
-          options={centros} aria-describedby="rhOrg-centro-ajuda"
-        />
-        <p id="rhOrg-centro-ajuda" className="text-xs text-muted-foreground">{t("rhOrg.form.centroExplica")}</p>
-      </div>
+      {f.ligada && <p className="text-sm"><span className="text-muted-foreground">{t("rhOrg.form.centro")}: </span>{actual}</p>}
+      <p id="rhOrg-centro-ajuda" className="text-xs text-muted-foreground">{t("rhOrg.form.centroNaFicha")}</p>
     </fieldset>
   );
 }

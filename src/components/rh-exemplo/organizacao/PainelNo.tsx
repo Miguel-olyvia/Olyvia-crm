@@ -29,7 +29,7 @@ export function PainelNo({ est, estado, pessoas, no, aoFechar, aoLigar, aoAltera
   const { t } = useTranslation();
   const ehCentro = no?.tipo === "centro";
   const n = no ? (no.locais ?? no.legais) : 0;
-  const comuns = { est, pessoas, historico: estado.historico, aoAlterar, aoDesligar };
+  const comuns = { est, pessoas, aoAlterar, aoDesligar };
   return (
     <Sheet open={no !== null} onOpenChange={(aberto) => !aberto && aoFechar()}>
       <SheetContent className="w-full overflow-y-auto sm:w-1/2 sm:max-w-none">
