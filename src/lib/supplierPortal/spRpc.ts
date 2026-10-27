@@ -236,6 +236,97 @@ export interface SpConfirmOrderResult {
   already_confirmed: boolean;
 }
 
+// ─── Expedição com guia de remessa ──────────────────────────────────────────
+// sp_ship_order / sp_order_shipments / sp_attach_delivery_note_file
+// (migration 20261231850000_sp_expedir_encomenda.sql). Ainda fora dos tipos
+// gerados: argumentos e retornos descritos aqui. Quantidades sempre na unidade
+// da linha da encomenda (a mesma de SpOrderLine.quantity/received_quantity).
+
+export type SpShipmentStatus = "open" | "closed" | "cancelled";
+
+/** Linha de uma guia: quanto desta linha da encomenda vai nessa guia. */
+export interface SpShipmentLine {
+  purchase_order_item_id: string;
+  quantity: number;
+}
+
+export interface SpShipmentFile {
+  path: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
+/** Guia de remessa registada pelo portal (inclui canceladas pela empresa). */
+export interface SpShipment {
+  id: string;
+  note_number: string;
+  /** Data da guia (YYYY-MM-DD). */
+  date: string | null;
+  status: SpShipmentStatus;
+  carrier: string | null;
+  has_file: boolean;
+  /** Último anexo (o que conta); null sem anexo. */
+  file: SpShipmentFile | null;
+  lines: SpShipmentLine[];
+}
+
+/** Por linha de produto da encomenda: já expedido pelo portal e o que falta. */
+export interface SpOrderShipmentLine {
+  id: string;
+  shipped: number;
+  to_ship: number;
+}
+
+export interface SpOrderShipments {
+  lines: SpOrderShipmentLine[];
+  shipments: SpShipment[];
+}
+
+export interface SpShipOrderResult {
+  delivery_note_id: string;
+  /** Organização da encomenda: 1.º segmento do caminho do anexo. */
+  organization_id: string;
+  note_number: string;
+  /** true = o mesmo pedido (requestId) já tinha sido gravado; nada mudou. */
+  already_shipped: boolean;
+  /** to_ship só vem na 1.ª gravação (falta depois desta guia). */
+  lines: (SpShipmentLine & { to_ship?: number })[];
+}
+
+export interface SpShipOrderInput {
+  /** Id da guia gerado no cliente (crypto.randomUUID()); repetir = idempotente. */
+  requestId: string;
+  poId: string;
+  /** SpOrderDetail.publication.revision. */
+  revision: number;
+  noteNumber: string;
+  /** YYYY-MM-DD. */
+  shipDate: string;
+  lines: SpShipmentLine[];
+  carrier?: string | null;
+  notes?: string | null;
+}
+
+export interface SpAttachDeliveryNoteFileResult {
+  delivery_note_id: string;
+  organization_id: string;
+  dry_run: boolean;
+  ok: true;
+  already_attached?: boolean;
+  replaced?: boolean;
+  file?: SpShipmentFile;
+}
+
+/** Tipos aceites no anexo da guia (validados de novo no servidor pelos bytes). */
+export const SP_DELIVERY_NOTE_FILE_TYPES: Readonly<Record<string, string>> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+export const SP_DELIVERY_NOTE_FILE_MAX_BYTES = 10 * 1024 * 1024;
+
 // ─── Dados do fornecedor (os meus dados) ───────────────────────────────────
 // sp_get_my_supplier_data / sp_update_my_supplier_data ainda não estão nos
 // tipos gerados: argumentos e retornos descritos aqui.
@@ -281,7 +372,9 @@ export type SpErrorHint =
   | "too_many_rows"
   | "conflict"
   | "stale_revision"
-  | "order_closed";
+  | "order_closed"
+  | "not_confirmed"
+  | "duplicate_note";
 
 export class SupplierPortalRpcError extends Error {
   readonly code: string | null;
@@ -340,6 +433,10 @@ export function spErrorMessage(err: unknown): string {
       return "A empresa atualizou esta encomenda entretanto. Reveja os dados atualizados e confirme de novo.";
     case "order_closed":
       return raw || "Esta encomenda já foi recebida ou cancelada: já não pode ser confirmada.";
+    case "not_confirmed":
+      return "Confirme a encomenda antes de a expedir.";
+    case "duplicate_note":
+      return raw || "Já existe uma guia com este número para esta empresa. Verifique o número da guia.";
     default:
       break;
   }
@@ -564,4 +661,192 @@ export async function spUpdateMySupplierData(data: Partial<SpSupplierDataInput>)
     await untypedRpc("sp_update_my_supplier_data", { p_data: data }),
     SUPPLIER_DATA_HINT_MESSAGES,
   );
+}
+
+// ─── Expedição com guia de remessa ──────────────────────────────────────────
+
+/** Mensagens próprias da expedição (o genérico fala de confirmar / artigos). */
+const SHIP_HINT_MESSAGES: Partial<Record<SpErrorHint, string>> = {
+  not_found: "A encomenda não existe ou já não está disponível no portal.",
+  order_closed: "Esta encomenda já foi recebida ou cancelada: já não pode ser expedida.",
+};
+
+const ATTACH_HINT_MESSAGES: Partial<Record<SpErrorHint, string>> = {
+  not_found: "A guia não existe ou já não está disponível no portal.",
+  order_closed: "Esta guia foi cancelada pela empresa: já não pode anexar ficheiros.",
+};
+
+const blankToNull = (v: string | null | undefined): string | null => {
+  const t = v?.trim();
+  return t ? t : null;
+};
+
+const toNumber = (v: unknown): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+function normalizeShipment(raw: Partial<SpShipment> | null | undefined): SpShipment {
+  const f = raw?.file;
+  return {
+    id: String(raw?.id ?? ""),
+    note_number: String(raw?.note_number ?? ""),
+    date: raw?.date ?? null,
+    status: (raw?.status ?? "open") as SpShipmentStatus,
+    carrier: raw?.carrier ?? null,
+    has_file: !!raw?.has_file,
+    file:
+      f && typeof f === "object" && f.path
+        ? { path: String(f.path), name: String(f.name ?? ""), mime: String(f.mime ?? ""), size: toNumber(f.size) }
+        : null,
+    lines: Array.isArray(raw?.lines)
+      ? raw.lines.map((l) => ({ purchase_order_item_id: String(l.purchase_order_item_id), quantity: toNumber(l.quantity) }))
+      : [],
+  };
+}
+
+/**
+ * Regista a guia de remessa (expede). `requestId` é o id da guia: gerar uma vez
+ * por submissão e reutilizar nas repetições (rede/duplo clique) — o servidor
+ * devolve `already_shipped: true` sem gravar outra vez.
+ */
+export async function spShipOrder(input: SpShipOrderInput): Promise<SpShipOrderResult> {
+  const carrier = blankToNull(input.carrier);
+  const notes = blankToNull(input.notes);
+  const args: Record<string, unknown> = {
+    p_request_id: input.requestId,
+    p_po_id: input.poId,
+    p_revision: input.revision,
+    p_note_number: input.noteNumber.trim(),
+    p_ship_date: input.shipDate,
+    p_lines: input.lines.map((l) => ({ purchase_order_item_id: l.purchase_order_item_id, quantity: l.quantity })),
+    ...(carrier ? { p_carrier: carrier } : {}),
+    ...(notes ? { p_notes: notes } : {}),
+  };
+  const data = unwrap<SpShipOrderResult>(await untypedRpc("sp_ship_order", args), SHIP_HINT_MESSAGES);
+  return {
+    ...data,
+    lines: Array.isArray(data?.lines)
+      ? data.lines.map((l) => ({
+          purchase_order_item_id: String(l.purchase_order_item_id),
+          quantity: toNumber(l.quantity),
+          ...(l.to_ship !== undefined && l.to_ship !== null ? { to_ship: toNumber(l.to_ship) } : {}),
+        }))
+      : [],
+  };
+}
+
+/** Expedido/em falta por linha e guias do portal desta encomenda. */
+export async function spOrderShipments(poId: string): Promise<SpOrderShipments> {
+  const data = unwrap<Partial<SpOrderShipments> | null>(
+    await untypedRpc("sp_order_shipments", { p_po_id: poId }),
+    SHIP_HINT_MESSAGES,
+  );
+  return {
+    lines: Array.isArray(data?.lines)
+      ? data.lines.map((l) => ({ id: String(l.id), shipped: toNumber(l.shipped), to_ship: toNumber(l.to_ship) }))
+      : [],
+    shipments: Array.isArray(data?.shipments) ? data.shipments.map((s) => normalizeShipment(s)) : [],
+  };
+}
+
+/**
+ * Chamada direta à RPC do anexo. No portal NÃO é preciso chamá-la: a Edge
+ * Function validate-upload chama-a (com o JWT do utilizador) antes e depois de
+ * promover o ficheiro — usar spUploadDeliveryNoteFile. Sem dryRun só funciona
+ * com o ficheiro já no bucket final (que só a Edge escreve).
+ */
+export async function spAttachDeliveryNoteFile(params: {
+  noteId: string;
+  path: string;
+  name: string;
+  mime: string | null;
+  size: number | null;
+  dryRun?: boolean;
+}): Promise<SpAttachDeliveryNoteFileResult> {
+  return unwrap<SpAttachDeliveryNoteFileResult>(
+    await untypedRpc("sp_attach_delivery_note_file", {
+      p_note_id: params.noteId,
+      p_path: params.path,
+      p_name: params.name,
+      p_mime: params.mime,
+      p_size: params.size,
+      p_dry_run: params.dryRun ?? false,
+    }),
+    ATTACH_HINT_MESSAGES,
+  );
+}
+
+/** Erro de tipo/tamanho do anexo antes de carregar; null = serve. */
+export function deliveryNoteFileProblem(file: { type: string; size: number }): string | null {
+  if (!SP_DELIVERY_NOTE_FILE_TYPES[file.type]) return "Tipo de ficheiro não permitido (só PDF, JPEG, PNG ou WEBP).";
+  if (file.size <= 0) return "O ficheiro está vazio.";
+  if (file.size > SP_DELIVERY_NOTE_FILE_MAX_BYTES) return "O ficheiro tem de ter até 10 MB.";
+  return null;
+}
+
+/** Caminho do anexo: {org}/supplier-delivery-notes/{guia}/{uuid}.{ext} (o formato que a RPC aceita). */
+export function deliveryNoteFilePath(orgId: string, noteId: string, mime: string, id: string = crypto.randomUUID()): string {
+  const ext = SP_DELIVERY_NOTE_FILE_TYPES[mime];
+  if (!ext) {
+    throw new SupplierPortalRpcError({ message: "Tipo de ficheiro não permitido (só PDF, JPEG, PNG ou WEBP).", hint: "validation" });
+  }
+  return `${orgId}/supplier-delivery-notes/${noteId}/${id}.${ext}`;
+}
+
+/** Corpo de erro da Edge: em não-2xx o supabase-js põe a Response em error.context. */
+async function readEdgeError(error: unknown, data: unknown): Promise<{ message?: string; hint?: string }> {
+  const pick = (b: unknown): { message?: string; hint?: string } => {
+    if (!b || typeof b !== "object") return {};
+    const o = b as Record<string, unknown>;
+    return {
+      message: typeof o.error === "string" ? o.error : undefined,
+      hint: typeof o.hint === "string" ? o.hint : undefined,
+    };
+  };
+  const fromData = pick(data);
+  if (fromData.message) return fromData;
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context instanceof Response) {
+    try {
+      return pick(await context.clone().json());
+    } catch {
+      // corpo que não é JSON: cai na mensagem do erro
+    }
+  }
+  return { message: error instanceof Error ? error.message : undefined };
+}
+
+/**
+ * Anexa o ficheiro da guia: carrega para documents-quarantine e chama
+ * validate-upload, que confirma o tipo pelos bytes, valida guia/fornecedor
+ * (sp_attach_delivery_note_file em modo de verificação), promove para
+ * documents e grava o anexo no histórico da guia. Substituir = chamar outra
+ * vez com outro ficheiro (o último conta).
+ */
+export async function spUploadDeliveryNoteFile(params: {
+  orgId: string;
+  noteId: string;
+  file: File;
+}): Promise<SpAttachDeliveryNoteFileResult> {
+  const problem = deliveryNoteFileProblem(params.file);
+  if (problem) throw new SupplierPortalRpcError({ message: problem, hint: "validation" });
+  const path = deliveryNoteFilePath(params.orgId, params.noteId, params.file.type);
+
+  const { error: uploadError } = await supabase.storage
+    .from("documents-quarantine")
+    .upload(path, params.file, { contentType: params.file.type, upsert: false });
+  if (uploadError) {
+    throw new SupplierPortalRpcError({ message: `O ficheiro não foi carregado: ${uploadError.message}` });
+  }
+
+  const { data, error } = await supabase.functions.invoke("validate-upload", {
+    body: { quarantineBucket: "documents-quarantine", finalBucket: "documents", path, fileName: params.file.name },
+  });
+  const body = data as { ok?: boolean; attachment?: SpAttachDeliveryNoteFileResult } | null;
+  if (error || !body?.ok || !body.attachment) {
+    const e = await readEdgeError(error, data);
+    throw new SupplierPortalRpcError({ message: e.message || "O ficheiro foi recusado.", hint: e.hint }, ATTACH_HINT_MESSAGES);
+  }
+  return body.attachment;
 }

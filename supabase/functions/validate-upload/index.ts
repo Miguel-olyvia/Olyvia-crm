@@ -1,8 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveCallerIdentity, authErrorResponse, validateOrgScope } from "../_shared/auth.ts";
+import { resolveCallerIdentity, authErrorResponse, validateOrgScope, requireServiceRoleOrCronSecret } from "../_shared/auth.ts";
 import { orgScoped, type OrgScopedQueryBuilder } from "../_shared/orgScopedQuery.ts";
 import { detectSignature, toHex } from "../_shared/fileSignature.ts";
+import {
+  SUPPLIER_DELIVERY_NOTE_MAX_BYTES,
+  httpStatusForSpHint,
+  isSupplierDeliveryNotePath,
+  parseSupplierDeliveryNotePath,
+  supplierDeliveryNoteFileName,
+  supplierDeliveryNoteMime,
+} from "./supplierDeliveryNote.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,6 +31,8 @@ interface ValidateUploadRequestBody {
   quarantineBucket: QuarantineBucket;
   finalBucket: FinalBucket;
   path: string;
+  /** Só no anexo da guia do Portal do Fornecedor: nome original a mostrar. */
+  fileName?: string;
 }
 
 const QUARANTINE_TO_FINAL_BUCKET: Record<QuarantineBucket, FinalBucket> = {
@@ -117,6 +127,145 @@ async function readObjectHeadBytes(
   return merged;
 }
 
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * Anexo da guia de remessa carregado no Portal do Fornecedor:
+ *   {org}/supplier-delivery-notes/{guia}/{ficheiro}  (documents-quarantine → documents)
+ *
+ * Quem carrega é um utilizador do portal (sem anew_users nem membro da
+ * organização), por isso validateOrgScope não se aplica. A autorização é a da
+ * RPC sp_attach_delivery_note_file, chamada com o JWT DO PRÓPRIO UTILIZADOR
+ * (fn_sp_actor() + fn_sp_po_publication() — o mesmo controlo das outras sp_*):
+ *   1. modo de verificação (p_dry_run) ANTES de tocar no bucket final — a guia
+ *      é do portal, de uma encomenda publicada a este fornecedor, não está
+ *      cancelada, e o caminho é dessa guia;
+ *   2. tipo real pelos bytes (só PDF/JPEG/PNG/WEBP) e tamanho real (≤ 10 MB);
+ *   3. promove com upsert:false (nunca escreve por cima de outro objeto);
+ *   4. grava o anexo (mime e tamanho do objeto, não os declarados); se falhar,
+ *      apaga o objeto acabado de promover.
+ * Nunca é aceite com service_role/cron: tem de haver um fornecedor real.
+ */
+async function handleSupplierDeliveryNote(
+  req: Request,
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  body: ValidateUploadRequestBody,
+): Promise<Response> {
+  const { quarantineBucket, finalBucket, path } = body;
+  const removeQuarantined = async () => {
+    const { error } = await supabase.storage.from(quarantineBucket).remove([path]);
+    if (error) console.error("validate-upload[guia]: failed to remove quarantined object:", error);
+  };
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return jsonResponse({ error: "Authorization header required" }, 401);
+  }
+  if (requireServiceRoleOrCronSecret(req)) {
+    return jsonResponse({ error: "O anexo da guia exige um utilizador do portal, não service_role/cron." }, 403);
+  }
+  const { data: userData, error: userError } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+  if (userError || !userData?.user) {
+    return jsonResponse({ error: "Invalid or expired token" }, 401);
+  }
+
+  if (quarantineBucket !== "documents-quarantine" || finalBucket !== "documents") {
+    return jsonResponse({ error: "O anexo da guia vai sempre de documents-quarantine para documents.", hint: "validation" }, 400);
+  }
+  const parsed = parseSupplierDeliveryNotePath(path);
+  if (!parsed) {
+    return jsonResponse({ error: "Caminho inválido para o anexo da guia.", hint: "validation" }, 400);
+  }
+  const fileName = supplierDeliveryNoteFileName(body.fileName, parsed.leaf);
+
+  // Cliente com o JWT do utilizador: auth.uid() dentro da RPC é o do fornecedor.
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!anonKey) {
+    console.error("validate-upload[guia]: SUPABASE_ANON_KEY em falta");
+    return jsonResponse({ error: "Configuração do servidor incompleta." }, 500);
+  }
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // 1. Verificação antes de tocar no bucket final.
+  const { error: checkError } = await userClient.rpc("sp_attach_delivery_note_file", {
+    p_note_id: parsed.noteId,
+    p_path: path,
+    p_name: fileName,
+    p_mime: null,
+    p_size: null,
+    p_dry_run: true,
+  });
+  if (checkError) {
+    await removeQuarantined();
+    return jsonResponse({ error: checkError.message, hint: checkError.hint ?? null }, httpStatusForSpHint(checkError.hint));
+  }
+
+  // 2. Tipo real pelos bytes.
+  let mime: string | null;
+  try {
+    const headBytes = await readObjectHeadBytes(supabaseUrl, supabaseServiceKey, quarantineBucket, path, HEAD_BYTES_TO_READ);
+    mime = supplierDeliveryNoteMime(detectSignature(headBytes));
+  } catch (error) {
+    console.error("validate-upload[guia]: failed to read object head bytes:", error);
+    return jsonResponse({ error: "Não foi possível ler o ficheiro em quarentena." }, 500);
+  }
+  if (!mime) {
+    await removeQuarantined();
+    return jsonResponse({ ok: false, error: "A guia tem de ser PDF, JPEG, PNG ou WEBP.", hint: "validation" }, 422);
+  }
+
+  try {
+    const { data: fileData, error: downloadError } = await supabase.storage.from(quarantineBucket).download(path);
+    if (downloadError || !fileData) throw downloadError || new Error("Empty download result");
+
+    if (fileData.size <= 0 || fileData.size > SUPPLIER_DELIVERY_NOTE_MAX_BYTES) {
+      await removeQuarantined();
+      return jsonResponse({ ok: false, error: "O ficheiro tem de ter até 10 MB.", hint: "validation" }, 422);
+    }
+
+    // 3. Promove sem upsert: o nome final é um uuid novo por carregamento.
+    const { error: uploadError } = await supabase.storage
+      .from(finalBucket)
+      .upload(path, fileData, { upsert: false, contentType: mime });
+    if (uploadError) throw uploadError;
+
+    // 4. Grava o anexo no histórico da guia (mime/tamanho reais).
+    const { data: attachment, error: attachError } = await userClient.rpc("sp_attach_delivery_note_file", {
+      p_note_id: parsed.noteId,
+      p_path: path,
+      p_name: fileName,
+      p_mime: mime,
+      p_size: fileData.size,
+      p_dry_run: false,
+    });
+    if (attachError) {
+      console.error("validate-upload[guia]: sp_attach_delivery_note_file failed:", attachError);
+      // upsert:false → este objeto foi criado agora por nós; removê-lo não apaga bytes de ninguém.
+      const { error: cleanupError } = await supabase.storage.from(finalBucket).remove([path]);
+      if (cleanupError) console.error("validate-upload[guia]: failed to clean up promoted object:", cleanupError);
+      await removeQuarantined();
+      return jsonResponse({ error: attachError.message, hint: attachError.hint ?? null }, httpStatusForSpHint(attachError.hint));
+    }
+
+    await removeQuarantined();
+    return jsonResponse({ ok: true, finalPath: path, attachment });
+  } catch (error) {
+    console.error("validate-upload[guia]: failed to move object to final bucket:", error);
+    return jsonResponse({ error: "Falha ao mover o ficheiro validado para o destino final." }, 500);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -127,6 +276,22 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
+    // O corpo lê-se uma vez, antes da identidade, só para decidir o ramo do
+    // anexo da guia do Portal do Fornecedor: esse utilizador não tem
+    // anew_users, por isso resolveCallerIdentity recusá-lo-ia (403). Um corpo
+    // inválido segue o caminho de sempre (identidade primeiro, depois o erro).
+    let parsedBody: unknown = undefined;
+    let bodyError: unknown = null;
+    try {
+      parsedBody = await req.json();
+    } catch (e) {
+      bodyError = e;
+    }
+
+    if (!bodyError && isValidRequestBody(parsedBody) && isSupplierDeliveryNotePath(parsedBody.path)) {
+      return await handleSupplierDeliveryNote(req, supabase, supabaseUrl, supabaseServiceKey, parsedBody);
+    }
+
     let caller;
     try {
       caller = await resolveCallerIdentity(req, supabase);
@@ -134,7 +299,8 @@ serve(async (req) => {
       return authErrorResponse(e, corsHeaders);
     }
 
-    const body = await req.json();
+    if (bodyError) throw bodyError;
+    const body = parsedBody;
     if (!isValidRequestBody(body)) {
       return new Response(
         JSON.stringify({ error: "quarantineBucket, finalBucket e path são obrigatórios e devem corresponder a um par válido." }),
