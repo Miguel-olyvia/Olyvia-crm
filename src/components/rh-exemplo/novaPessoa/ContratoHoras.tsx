@@ -1,6 +1,7 @@
 // Horas e horário do contrato, na aba "Contrato e local": horas contratadas e a sua unidade, tempo de trabalho (sempre 100%),
-// dias de trabalho, política de feriados, máximos, tipo de horário e isenção. O horário por dia define-se na aba Horário da ficha.
-import { CampoSelect, CampoTexto } from "@/components/rh-exemplo/form/Campos";
+// dias de trabalho, política de feriados, máximos e isenção. O horário por dia define-se na aba Planeamento da ficha: aqui não
+// há «tipo de horário» (fixo ou variável), porque a base não o recebe na criação da pessoa.
+import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { equivalenteSemanal } from "@/components/rh-exemplo/lib/horas";
 import { numeroDe } from "@/components/rh-exemplo/lib/numeros";
 import { DIAS_SEMANA, HORAS_FREQUENCIAS, POLITICAS_FERIADOS, type DiaSemana } from "@/components/rh-exemplo/tipos";
@@ -38,20 +39,6 @@ function DiasDeTrabalho() {
   );
 }
 
-function TipoDeHorario() {
-  const { t } = useTranslation();
-  const { valores, alterar, erro } = useNova();
-  return (
-    <LinhaCampo id="hr-novo-tipo-horario">
-      <CampoSelect
-        id="hr-novo-tipo-horario" label={t("rhNova.f.tipoHorario")} valor={valores.contrato.horario_variavel ? "variavel" : "fixo"}
-        onChange={(v) => alterar("contrato", { horario_variavel: v === "variavel" })} erro={erro("hr-novo-tipo-horario")}
-        opcoes={opcoes(t, "rhNova.tipoHorario", ["fixo", "variavel"])} ajuda={t("rhNova.h.tipoHorario")}
-      />
-    </LinhaCampo>
-  );
-}
-
 export function ContratoHoras() {
   const { t } = useTranslation();
   const { valores } = useNova();
@@ -74,7 +61,6 @@ export function ContratoHoras() {
         <CampoS g="contrato" k="politica_feriados" id="hr-novo-politica-feriados" rotulo={t("hr.contrato.politicaFeriados")} opcoes={opcoes(t, "hr.politicaFeriados", POLITICAS_FERIADOS)} />
         <CampoT g="contrato" k="horas_semanais_maximas" id="hr-novo-horas-semanais-maximas" rotulo={t("hr.contrato.horasSemanaisMaximas")} />
         <CampoT g="contrato" k="horas_anuais_maximas" id="hr-novo-horas-anuais-maximas" rotulo={t("hr.contrato.horasAnuaisMaximas")} />
-        <TipoDeHorario />
         <CampoI g="extra" k="isencao_horario" id="hr-novo-isencao-horario" rotulo={t("hr.contrato.isencaoHorario")} />
         <DiasDeTrabalho />
       </div>

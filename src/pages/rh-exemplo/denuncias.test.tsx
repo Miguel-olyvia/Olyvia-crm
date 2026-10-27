@@ -1,7 +1,8 @@
 // O canal de denúncias DENTRO da app: a página «Denúncias» (A minha área; «Nova denúncia» abre o assistente num painel) e a gestão no RH. Uma denúncia
 // identificada feita na app aparece na lista da pessoa; uma anónima não (só pelo código e PIN); a gestão mostra anónimas
 // e identificadas, nunca a identidade de uma anónima; e tudo é da organização ativa (as de outra não aparecem).
-// Tudo em memória, sem base.
+// As denúncias seguem em memória; a organização, a ficha da sessão e o email vêm dos wrappers ligados à base, aqui simulados
+// (sem Supabase): o email da Sofia sai da ficha (usePessoa) e o ecrã espera pela ficha antes de decidir «Sem ficha».
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
@@ -10,9 +11,17 @@ import { lerDenuncias, repor, submeter } from "@/components/canal-denuncias/dado
 import { ORG_ATIVA, OUTRA_ORG } from "@/components/canal-denuncias/dados/organizacoes";
 import { PaginaDenuncias } from "@/components/canal-denuncias/minhaArea/PaginaDenuncias";
 import { FORMULARIO_VAZIO } from "@/components/canal-denuncias/lib/formulario";
-import { repor as reporRh } from "@/components/rh-exemplo/dados/loja";
 import NovaDenuncia from "@/pages/canal-denuncias/NovaDenuncia";
 import RhDenuncias from "./RhDenuncias";
+const mockEstado = vi.hoisted(() => ({
+  minha: { pessoaId: "p-sofia", nome: "Sofia Rebelo", cargo: null, dataAdmissao: null, loading: false, semFicha: false } as Record<string, unknown>,
+  ficha: { pessoa: { email_trabalho: "sofia.rebelo@olyvia-exemplo.pt" }, loading: false } as Record<string, unknown>,
+}));
+vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({
+  useCompany: () => ({ activeCompany: { id: "org-exemplo-olyvia-retail", name: "Olyvia Retail (exemplo)" }, companies: [], isLoading: false }),
+}));
+vi.mock("@/components/rh-exemplo/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => mockEstado.minha }));
+vi.mock("@/components/rh-exemplo/hooks/usePessoa", () => ({ usePessoa: () => mockEstado.ficha }));
 import RhMinhasDenuncias from "./RhMinhasDenuncias";
 
 function Endereco() {
@@ -73,7 +82,8 @@ beforeEach(() => {
   cleanup();
   window.localStorage.setItem("language", "pt");
   repor();
-  reporRh();
+  mockEstado.minha = { pessoaId: "p-sofia", nome: "Sofia Rebelo", cargo: null, dataAdmissao: null, loading: false, semFicha: false };
+  mockEstado.ficha = { pessoa: { email_trabalho: "sofia.rebelo@olyvia-exemplo.pt" }, loading: false };
   vi.spyOn(Math, "random").mockReturnValue(0.5);
 });
 
@@ -401,3 +411,25 @@ describe("Recursos Humanos > Denúncias", () => {
   });
 });
 
+
+describe("A minha área > Denúncias: a ficha da sessão vem da base", () => {
+  it("enquanto a ficha carrega mostra «A carregar» e não «Sem ficha»", () => {
+    mockEstado.minha = { pessoaId: null, nome: null, cargo: null, dataAdmissao: null, loading: true, semFicha: false };
+    mostrar("/rh-exemplo/minhas-denuncias");
+    expect(screen.getByRole("status")).toHaveTextContent("A carregar a tua ficha");
+    expect(screen.queryByText("Sem ficha ligada à tua sessão")).not.toBeInTheDocument();
+  });
+
+  it("sem ficha ligada à conta, depois de carregar, diz «Sem ficha»", () => {
+    mockEstado.minha = { pessoaId: null, nome: null, cargo: null, dataAdmissao: null, loading: false, semFicha: true };
+    mostrar("/rh-exemplo/minhas-denuncias");
+    expect(screen.getByText("Sem ficha ligada à tua sessão")).toBeInTheDocument();
+  });
+
+  it("com o email por ler não pré-preenche: espera pela ficha", () => {
+    mockEstado.ficha = { pessoa: null, loading: true };
+    mostrar("/rh-exemplo/minhas-denuncias");
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nova denúncia" })).not.toBeInTheDocument();
+  });
+});

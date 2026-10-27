@@ -2,7 +2,8 @@
  * Do formulario "Nova pessoa" do rh-exemplo para o payload COMPLETO de `usePessoas.criarPessoa`.
  *
  * O que estes testes fecham: cada campo que o formulario recolhe chega ao payload (nada se perde em silencio), e o que
- * nao tem coluna na base (nome de tratamento, ficheiros anexos) e dito em `naoGravado` em vez de ser descartado.
+ * nao tem coluna na base (nome de tratamento) e dito em `naoGravado` em vez de ser descartado. Os ficheiros anexos nao
+ * passam por aqui: seguem de verdade, depois de a ficha existir (`useAnexosNovaPessoa`).
  */
 import { describe, expect, it } from "vitest";
 import { intervaloVazio } from "@/components/rh-exemplo/lib/horario";
@@ -10,7 +11,9 @@ import { comPatch, valoresIniciais, type ValoresNovaPessoa } from "./tiposNova";
 import { paraNovaPessoa } from "./paraStore";
 
 const HOJE = "2026-10-14";
-const OPCOES = { comConvite: false, config: null, cargoNome: "Vendedor/a" };
+const OPCOES = {
+  comConvite: false, config: null, cargoNome: "Vendedor/a", podeLigarConta: true, podeSaude: true, podeSindicalizacao: true,
+};
 
 function preenchido(): ValoresNovaPessoa {
   let v = valoresIniciais(HOJE);
@@ -104,12 +107,27 @@ describe("paraNovaPessoa: cada campo do formulario chega ao payload real", () =>
     expect(payload.retribuicao).toEqual({ subsidio: 7.63, subsidioModo: "cartao", duodecimosPct: 50 });
   });
 
-  it("saude e sindicalizacao seguem tal como foram escritas (a base e que decide a permissao)", () => {
+  it("saude e sindicalizacao seguem com a permissao de as escrever", () => {
     expect(payload.saude).toEqual({
       incapacidade_percentagem: 60, incapacidade_comprovativo_valido_ate: "2028-01-01",
       necessidades_adaptacao: "Cadeira", observacoes: "Nada",
     });
     expect(payload.sindicalizacao).toEqual({ sindicalizado: true, sindicato: "SINTAP", quota_percentagem: 1.5 });
+  });
+
+  it("sem a permissao (ou sem a indicar), saude e sindicalizacao nao seguem, mesmo preenchidas no estado", () => {
+    const sem = paraNovaPessoa(preenchido(), { ...OPCOES, podeSaude: false, podeSindicalizacao: false }).payload;
+    expect(sem.saude).toBeNull();
+    expect(sem.sindicalizacao).toBeNull();
+    const omitido = paraNovaPessoa(preenchido(), { comConvite: false, config: null, cargoNome: "Vendedor/a" }).payload;
+    expect(omitido.saude).toBeNull();
+    expect(omitido.sindicalizacao).toBeNull();
+  });
+
+  it("a conta de CRM escolhida so segue ligada com a permissao de ligar", () => {
+    const v = comPatch(preenchido(), "geral", { conta_id: "conta-1" });
+    expect(paraNovaPessoa(v, OPCOES).payload.contaALigar).toBe("conta-1");
+    expect(paraNovaPessoa(v, { ...OPCOES, podeLigarConta: false }).payload.contaALigar).toBeNull();
   });
 });
 
@@ -135,13 +153,10 @@ describe("paraNovaPessoa: horario, acesso e o que nao tem equivalente", () => {
     expect(com).toMatchObject({ role_id: "papel-1", enviar_convite: false, email_convite: "a@x.pt" });
   });
 
-  it("nome de tratamento e anexos nao tem coluna: ficam listados em naoGravado, nao descartados em silencio", () => {
+  it("o nome de tratamento nao tem coluna: fica listado em naoGravado, nao descartado em silencio", () => {
     expect(paraNovaPessoa(preenchido(), OPCOES).naoGravado).toEqual([]);
-    const v = comPatch(preenchido(), "extra", {
-      nome_tratamento: "Tété",
-      anexos: [{ id: "a1", tipo: "fotografia", nome: "foto.jpg", tamanho: 10, mime: "image/jpeg" }],
-    });
-    expect(paraNovaPessoa(v, OPCOES).naoGravado).toEqual(["nome_tratamento", "anexos"]);
+    const v = comPatch(preenchido(), "extra", { nome_tratamento: "Tété" });
+    expect(paraNovaPessoa(v, OPCOES).naoGravado).toEqual(["nome_tratamento"]);
   });
 
   it("um cargo escolhido sem nome recusa-se aqui, e nada vai a base", () => {

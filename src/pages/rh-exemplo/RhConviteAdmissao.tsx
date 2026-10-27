@@ -130,6 +130,7 @@ export function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
     erroInicial,
     motivo,
     submetendo,
+    erroRascunho,
     submeter,
     gravarRascunho,
     gravarRascunhoAoFechar,
@@ -475,6 +476,12 @@ export function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
                 />
               }
             />
+          )}
+
+          {erroRascunho && (
+            <p role="alert" className="text-sm text-destructive">
+              {mensagemErroAdmissao(t, { error: erroRascunho })}
+            </p>
           )}
 
           {erroSubmissao && (

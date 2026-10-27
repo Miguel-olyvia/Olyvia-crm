@@ -11,6 +11,7 @@ import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useR
 import { horarioPessoaDeLinhas } from "@/components/rh-exemplo/lib/horarioReal";
 import { saldoDoBanco } from "@/components/rh-exemplo/fluxosC/bancoHorasRegras";
 import { useFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import type { LocalTrabalho } from "@/components/rh-exemplo/tipos";
 import type { AusenciaTipo } from "@/components/rh-exemplo/tiposAusencias";
 import { entradaMesReal, type AssiduidadeDoMes } from "./fonteMes";
 import { montarMes, type DiaCalendario } from "./montarMes";
@@ -30,9 +31,12 @@ export interface FonteRealDoMes {
   /** Para dizer que antes da admissao nao ha contrato. Sem ela nao se restringe nenhum dia. */
   dataAdmissao: string | null;
   tiposAusencia?: readonly Pick<AusenciaTipo, "id" | "nome">[];
+  /** Os centros de trabalho, para marcar os dias com picagens fora do local. Sem eles nenhum dia se marca. */
+  locais?: readonly LocalTrabalho[];
 }
 
 const SEM_TIPOS: readonly Pick<AusenciaTipo, "id" | "nome">[] = [];
+const SEM_LOCAIS: readonly LocalTrabalho[] = [];
 
 export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte: FonteRealDoMes): MesDaPessoa {
   const { regra, error: erroRegra } = useRegrasSubsidioAlimentacao();
@@ -40,7 +44,7 @@ export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte
   const horasExtra = useFluxosC((e) => e.horasExtra);
   const banco = useFluxosC((e) => e.banco);
   const podeHE = useFluxosC((e) => e.podeHE);
-  const { assiduidade, dataAdmissao, tiposAusencia = SEM_TIPOS } = fonte;
+  const { assiduidade, dataAdmissao, tiposAusencia = SEM_TIPOS, locais = SEM_LOCAIS } = fonte;
   const planeado = assiduidade.planeado;
   const horario = useMemo(() => horarioPessoaDeLinhas(planeado), [planeado]);
 
@@ -53,6 +57,7 @@ export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte
         contrato: dataAdmissao ? { desde: dataAdmissao, ate: null } : null,
         assiduidade,
         tiposAusencia,
+        locais,
         horario,
         horasExtra: horasExtra.filter((h) => h.pessoaId === pessoaId),
         banco: banco.filter((m) => m.pessoaId === pessoaId),
@@ -64,5 +69,5 @@ export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte
       bancoSaldoMin: saldoDoBanco(banco, pessoaId),
     });
     return { dias, totais, erroRegraSubsidio: Boolean(erroRegra), planeadoRecusado: Boolean(assiduidade.planeadoRecusado) };
-  }, [ano, mes, dataAdmissao, assiduidade, tiposAusencia, horario, horasExtra, banco, podeHE, minimo, erroRegra, pessoaId]);
+  }, [ano, mes, dataAdmissao, assiduidade, tiposAusencia, locais, horario, horasExtra, banco, podeHE, minimo, erroRegra, pessoaId]);
 }

@@ -10,3 +10,13 @@ export function SemFichaDenuncias() {
     </div>
   );
 }
+
+/** Enquanto a ficha ligada à sessão se lê: evita piscar «Sem ficha» a quem a tem. */
+export function CarregandoDenuncias() {
+  const { t } = useTranslation();
+  return (
+    <div className="p-6 text-sm text-muted-foreground" role="status" aria-live="polite">
+      {t("cdm.carregandoFicha")}
+    </div>
+  );
+}

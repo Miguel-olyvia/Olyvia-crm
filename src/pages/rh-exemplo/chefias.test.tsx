@@ -19,6 +19,16 @@ vi.mock("@/components/rh-exemplo/organizacao/useOrganizacaoReal", async () => {
   return { useOrganizacaoReal: m.useOrganizacaoEmMemoria };
 });
 
+// «Ligar pessoa» pede `hr.pessoas.colocacao.edit` (o gate de permissão é testado em organizacao.test.tsx).
+vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    hasPermission: (p: string) => p === "hr.pessoas.colocacao.edit",
+    hasAnyPermission: (ps: string[]) => ps.includes("hr.pessoas.colocacao.edit"),
+    permissions: ["hr.pessoas.colocacao.edit"],
+    loading: false,
+  }),
+}));
+
 function Sonda() {
   const l = useLocation();
   return <output data-testid="url">{`${l.pathname}${l.search}`}</output>;

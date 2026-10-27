@@ -2,7 +2,7 @@
 // (o total bruto estimado do processamento) e as horas por semana derivam das horas realmente planeadas do mes.
 import { describe, expect, it } from "vitest";
 import { horasPrevistasDoMes } from "@/components/rh-exemplo/lib/custo";
-import { horasSemanaisDoPlaneado, pessoaParaCusto, SEM_CATALOGOS } from "./pessoaParaCusto";
+import { horasContratuaisNoMes, horasSemanaisDaBase, horasSemanaisDoPlaneado, pessoaParaCusto, SEM_CATALOGOS } from "./pessoaParaCusto";
 
 const PESSOA = { id: "p1", nome_completo: "Ana Real", cargo: "Texto antigo", cargo_id: "c1", local_id: "l1" };
 const CATALOGOS = {
@@ -43,8 +43,17 @@ describe("pessoaParaCusto", () => {
     expect(p.horasSemanais).toBeCloseTo(horasSemanaisDoPlaneado(9600, "2026-09"), 10);
   });
 
-  it("o tipo de contrato fica sem valor: nao ha fonte para toda a organizacao", () => {
+  it("o tipo de contrato fica sem valor quando nao se leu nenhum vinculo, e vem do vinculo quando se leu", () => {
     expect(pessoaParaCusto(PESSOA, CATALOGOS, DADOS, "2026-09").tipoContrato).toBeNull();
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, tipoContrato: null }, "2026-09").tipoContrato).toBeNull();
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, tipoContrato: "termo_certo" }, "2026-09").tipoContrato).toBe("termo_certo");
+  });
+
+  it("as horas por semana do contrato mandam; sem elas (ou a zero) deriva do planeado", () => {
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, horasContratuais: 20 }, "2026-09").horasSemanais).toBe(20);
+    const derivado = horasSemanaisDoPlaneado(9600, "2026-09");
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, horasContratuais: null }, "2026-09").horasSemanais).toBeCloseTo(derivado, 10);
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, horasContratuais: 0 }, "2026-09").horasSemanais).toBeCloseTo(derivado, 10);
   });
 
   it("um cargo fora do catalogo cai para o texto da pessoa, e sem nenhum fica sem cargo", () => {
@@ -66,5 +75,32 @@ describe("pessoaParaCusto", () => {
 
   it("sem retribuicao fica sem retribuicao (nao zero)", () => {
     expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, retribuicaoMes: null }, "2026-09").retribuicaoMes).toBeNull();
+  });
+});
+
+describe("horasSemanaisDaBase", () => {
+  it("o contrato ganha ao planeado, e sem contrato nem planeado fica a 0 (nunca 40 inventadas)", () => {
+    expect(horasSemanaisDaBase(35, 9600, "2026-09")).toBe(35);
+    expect(horasSemanaisDaBase(undefined, 0, "2026-09")).toBe(0);
+    expect(horasSemanaisDaBase(null, 22 * 8 * 60, "2026-09")).toBeCloseTo(40, 6);
+  });
+});
+
+describe("horasContratuaisNoMes", () => {
+  const versoes = [
+    { valido_de: "2025-01-01", valido_ate: "2026-04-01", horas_semanais_equivalentes: 40 },
+    { valido_de: "2026-04-01", valido_ate: null, horas_semanais_equivalentes: 20 },
+  ];
+
+  it("escolhe a versao que cobre o mes, com o fim exclusivo (a de 40 h acaba a 1 de abril)", () => {
+    expect(horasContratuaisNoMes(versoes, "2026-03")).toBe(40);
+    expect(horasContratuaisNoMes(versoes, "2026-04")).toBe(20);
+    expect(horasContratuaisNoMes(versoes, "2026-09")).toBe(20);
+  });
+
+  it("antes de qualquer versao, sem versoes, ou com a versao sem horas equivalentes, fica sem valor", () => {
+    expect(horasContratuaisNoMes(versoes, "2024-12")).toBeNull();
+    expect(horasContratuaisNoMes([], "2026-09")).toBeNull();
+    expect(horasContratuaisNoMes([{ valido_de: "2026-01-01", valido_ate: null, horas_semanais_equivalentes: null }], "2026-09")).toBeNull();
   });
 });

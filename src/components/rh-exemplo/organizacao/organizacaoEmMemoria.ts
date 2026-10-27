@@ -18,6 +18,7 @@ export function useOrganizacaoEmMemoria(): OrganizacaoReal {
     loading: false,
     semPermissao: false,
     falhaLeitura: false,
+    falhaDados: false,
     recarregar: () => undefined,
     guardar: async (p) => {
       const r = guardarLigacao(p);

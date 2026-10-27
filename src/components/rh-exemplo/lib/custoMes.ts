@@ -20,7 +20,8 @@ import {
 import { valorNoMes, type ContaItem, type ItemParaConta } from "./comoConta";
 import { equipamentosDoMes, valorDoEquipamentoNoMes, type EquipamentoPessoa } from "./equipamentos";
 
-export type TipoAvulso = "km" | "ajuda";
+/** `pontual` = o lancamento pontual do processamento salarial (o unico avulso que a base guarda); km e ajuda so existem no store de exemplo. */
+export type TipoAvulso = "km" | "ajuda" | "pontual";
 
 export interface AvulsoCusto {
   id: string;

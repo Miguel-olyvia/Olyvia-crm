@@ -200,6 +200,8 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
   return {
     resultado,
     aCarregar,
+    /** Os dados partilhados do mes (periodo, lancamentos, codigos): o custo regista e anula lancamentos por aqui. */
+    dados,
     retribuicaoRecusada: retribuicoesHook.recusado,
     incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado,
     periodoAberto: dados.periodoHook.periodo?.estado === "aberto",

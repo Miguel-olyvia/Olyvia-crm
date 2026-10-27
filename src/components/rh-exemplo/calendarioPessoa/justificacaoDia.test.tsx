@@ -8,6 +8,21 @@ vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) =
   ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
   useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
 }));
+// Aceitar cria a falta NA BASE (rpc_hr_falta_marcar + rpc_hr_falta_decidir_justificacao): aqui o executor é simulado e
+// responde logo com o id de uma falta da base. A prova do executor e do que ele chama está em fluxosB/justificacaoDia/aceitarComFaltaReal.test.tsx.
+vi.mock("@/components/rh-exemplo/fluxosB/justificacaoDia/AceitarComFaltaReal", async () => {
+  const { useEffect } = await import("react");
+  return {
+    AceitarComFaltaReal: ({ aoConcluir }: { aoConcluir: (r: { erro: string | null; faltaId: string | null; etapa: string }) => void }) => {
+      useEffect(() => {
+        aoConcluir({ erro: null, faltaId: "falta-da-base-1", etapa: "decidir" });
+        // Uma só vez por montagem.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+      return null;
+    },
+  };
+});
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -170,10 +185,14 @@ describe("o RH decide", () => {
     expect(linha).toHaveTextContent("Transporte");
     expect(linha).toHaveTextContent("O autocarro avariou");
     expect(screen.getByTestId("rhjd-fila")).toHaveTextContent("2 por decidir");
+    const faltasEmMemoria = lerGestao().faltas.length;
     fireEvent.click(within(linha).getByRole("button", { name: /Aceitar a justificação de Sofia/ }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Aceitar · paga" }));
     expect(screen.queryByTestId(linha.getAttribute("data-testid") ?? "")).not.toBeInTheDocument();
     expect(screen.getByTestId("rhjd-fila-aviso")).toHaveTextContent("Justificação aceite · paga.");
+    // A falta é a da base: a justificação guarda o id que ela devolveu e não nasce nenhuma falta de exemplo em memória.
+    expect(lerJustificacaoDia().justificacoes.find((j) => j.pessoaId === "p-sofia")?.faltaId).toBe("falta-da-base-1");
+    expect(lerGestao().faltas.length).toBe(faltasEmMemoria);
     cleanup();
 
     ficha("p-sofia", "Sofia Rebelo", true);

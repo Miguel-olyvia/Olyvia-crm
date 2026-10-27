@@ -3,6 +3,8 @@
 // passarem tudo por propriedades.
 import { createContext, useContext, type ReactNode } from "react";
 import type { ConfiguracaoCampo } from "@/components/rh-exemplo/lib/admissaoObrigatorios";
+import type { ResultadoAnexosNovaPessoa } from "@/components/rh-exemplo/hooks/useAnexosNovaPessoa";
+import type { ContaNova } from "./contaNova";
 import { seccaoDoCampo, type SeccaoConvite } from "./ids";
 import type { AlterarNova, ValoresNovaPessoa } from "./tiposNova";
 
@@ -15,6 +17,15 @@ export interface ContextoNova {
   obrigatorio: (campoId: string) => boolean;
   config: readonly ConfiguracaoCampo[] | null;
   colegas: ReadonlyArray<{ id: string; nome_completo: string }>;
+  /** Ligar a uma conta de CRM que já existe (preenche e, com a permissão, liga). */
+  conta: ContaNova;
+  /** Os ficheiros reais escolhidos (seguem depois de a ficha existir). */
+  anexos: ResultadoAnexosNovaPessoa;
+  /** A ficha está a ser criada: nada se escolhe nem se retira. */
+  aCriar: boolean;
+  /** Saúde e sindicalização (art. 9.º do RGPD) só se pedem a quem tem a permissão de as escrever. */
+  podeSaude: boolean;
+  podeSindicalizacao: boolean;
 }
 
 const Contexto = createContext<ContextoNova | null>(null);

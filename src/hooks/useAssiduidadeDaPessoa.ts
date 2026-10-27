@@ -47,7 +47,7 @@ import type { HorarioPlaneado, HorarioRealizado } from "@/types/hr";
  */
 const COLUNAS_PICAGEM =
   "id, pessoa_id, organization_id, momento, data_local, hora_local, sentido, local_id, " +
-  "vinculo_id, planeado_id, origem, estado, " +
+  "vinculo_id, planeado_id, origem, estado, latitude, longitude, precisao_metros, " +
   "realizado_id, corrige_picagem_id, correccao_tipo, correccao_motivo, " +
   "registado_por_pessoa_id, anulado_em, anulacao_motivo, created_at";
 

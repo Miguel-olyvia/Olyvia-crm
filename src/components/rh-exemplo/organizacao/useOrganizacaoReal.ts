@@ -1,6 +1,7 @@
 /**
  * Os dados reais da pagina «Organizacao»: a arvore da organizacao activa (filiais), os centros
- * (`hr_locais_trabalho`), as pessoas e a colocacao de cada uma no organograma. Tambem grava
+ * (`hr_locais_trabalho`), o NIF, a morada e o aninhamento das filiais (`useDadosDasOrganizacoesDaArvore`), as pessoas e a
+ * colocacao de cada uma no organograma. Tambem grava
  * («Ligar», «Alterar ligacao», «Desligar») na colocacao.
  *
  * O CENTRO nao se grava aqui: `pessoas.local_id` e derivado da afectacao em aberto e muda-se na ficha da pessoa.
@@ -11,6 +12,7 @@
 import { useCallback, useMemo } from "react";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { useColocacoesDaOrganizacao } from "@/components/rh-exemplo/hooks/useColocacoesDaOrganizacao";
+import { useDadosDasOrganizacoesDaArvore } from "@/components/rh-exemplo/hooks/useDadosDasOrganizacoesDaArvore";
 import { useFiliaisDaArvore } from "@/components/rh-exemplo/hooks/useFiliaisDaArvore";
 import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabalho";
 import { usePessoas } from "@/components/rh-exemplo/hooks/usePessoas";
@@ -31,6 +33,8 @@ export interface OrganizacaoReal {
   semPermissao: boolean;
   /** A leitura da colocacao falhou (nao por permissao): a pagina avisa e oferece «Tentar de novo» em vez de mostrar «ninguem ligado». */
   falhaLeitura: boolean;
+  /** A leitura do NIF, da morada ou da hierarquia das filiais falhou: a pagina avisa em vez de os mostrar como se nao existissem. */
+  falhaDados: boolean;
   recarregar: () => void;
   guardar: (pedido: PedidoLigacao) => Promise<ResultadoGravacao>;
   desligar: (pessoaId: string, motivo: string) => Promise<ResultadoGravacao>;
@@ -40,14 +44,15 @@ export function useOrganizacaoReal(): OrganizacaoReal {
   const { activeCompany, isLoading: empresaA } = useCompany();
   const { filiais, loading: filiaisA } = useFiliaisDaArvore();
   const { locais, loading: locaisA } = useLocaisTrabalho();
+  const { dados, loading: dadosA, error: dadosErro } = useDadosDasOrganizacoesDaArvore();
   const { pessoas: fichas, loading: pessoasA } = usePessoas();
   const col = useColocacoesDaOrganizacao();
   const empresaId = activeCompany.id;
   const empresaNome = activeCompany.name;
 
   const est = useMemo(
-    () => construirEstruturaReal({ empresa: { id: empresaId, name: empresaNome }, filiais, locais }),
-    [empresaId, empresaNome, filiais, locais],
+    () => construirEstruturaReal({ empresa: { id: empresaId, name: empresaNome }, filiais, locais, dados }),
+    [empresaId, empresaNome, filiais, locais, dados],
   );
   const ligacoes = useMemo(() => ligacoesReais(est, fichas, col.vigentes), [est, fichas, col.vigentes]);
   const estado = useMemo<EstadoOrganizacao>(() => ({ ligacoes, historico: [] }), [ligacoes]);
@@ -78,9 +83,10 @@ export function useOrganizacaoReal(): OrganizacaoReal {
 
   return {
     est, estado, pessoas, guardar, desligar,
-    loading: empresaA || filiaisA || locaisA || pessoasA || col.loading,
+    loading: empresaA || filiaisA || locaisA || dadosA || pessoasA || col.loading,
     semPermissao: col.recusado,
     falhaLeitura: col.erro,
+    falhaDados: dadosErro !== null,
     recarregar: () => void col.recarregar(),
   };
 }

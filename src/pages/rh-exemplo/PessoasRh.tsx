@@ -12,8 +12,8 @@
  * RH e a pessoa como TRABALHADORA (filial, contrato, horario); o "estado do acesso" (tem conta ligada?) e o "estado do
  * contrato" sao ciclos de vida separados. A coluna do contrato so se mostra a quem tem `hr.pessoas.vinculos.view`.
  */
-import { useEffect, useMemo, useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -24,6 +24,7 @@ import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { PipelineAdmissoes } from "@/components/rh-exemplo/hooks/PipelineAdmissoesReal";
 import { useEstadoAdmissaoPorPessoa } from "@/components/rh-exemplo/hooks/useEstadoAdmissaoPorPessoa";
 import { ContratosATerminarTab } from "@/components/rh-exemplo/fimContrato/ContratosATerminarTab";
+import { ehAbaFicha } from "@/components/rh-exemplo/ficha/abas";
 import { FichaPessoaRh } from "@/components/rh-exemplo/ficha/FichaPessoaRh";
 import { BarraListaRh } from "@/components/rh-exemplo/lista/BarraListaRh";
 import { contagens, filtrar, type FiltroAcesso } from "@/components/rh-exemplo/lista/filtros";
@@ -55,28 +56,25 @@ interface FichaAberta {
   aberta: boolean;
 }
 
-/** Acerta o endereco do navegador sem mudar de pagina nem acrescentar entradas ao historico. */
-function sincronizarEndereco(id: string | null): void {
-  const { pathname, search, hash } = window.location;
-  const novo = caminhoDaFicha(pathname, id);
-  if (novo !== pathname) window.history.replaceState(window.history.state, "", `${novo}${search}${hash}`);
-}
+const SUBTAB_INICIAL = "pessoas";
 
 interface CabecalhoProps {
   podeCriar: boolean;
+  podeGerirAdmissao: boolean;
+  podeGerirRegrasFimContrato: boolean;
   resumo: string;
   aoCriar: () => void;
 }
 
-/** Os dois ecrãs de configuração que já não têm entrada no menu: abrem daqui, ao lado de «Nova pessoa». */
-const BOTOES_CONFIGURACAO = [
-  { caminho: "/rh-exemplo/admissao/configuracao", chave: "rhA.pessoas.camposAdmissao" },
-  { caminho: "/rh-exemplo/contratos/configuracao", chave: "rhA.pessoas.regrasFimContrato" },
-] as const;
-
-function CabecalhoPessoasRh({ podeCriar, resumo, aoCriar }: CabecalhoProps) {
+function CabecalhoPessoasRh({ podeCriar, podeGerirAdmissao, podeGerirRegrasFimContrato, resumo, aoCriar }: CabecalhoProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // Os dois ecrãs de configuração não têm entrada no menu: abrem daqui, ao lado de «Nova pessoa», atrás da mesma permissão
+  // que protege cada rota (`hr.admissao.obrigatorios.gerir` e `hr.contratos.regras.gerir`).
+  const botoesConfiguracao = [
+    { mostrar: podeGerirAdmissao, caminho: "/rh-exemplo/admissao/configuracao", chave: "rhA.pessoas.camposAdmissao" },
+    { mostrar: podeGerirRegrasFimContrato, caminho: "/rh-exemplo/contratos/configuracao", chave: "rhA.pessoas.regrasFimContrato" },
+  ].filter((c) => c.mostrar);
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="space-y-1">
@@ -88,7 +86,7 @@ function CabecalhoPessoasRh({ podeCriar, resumo, aoCriar }: CabecalhoProps) {
         <p className="text-sm tabular-nums text-muted-foreground">{resumo}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {BOTOES_CONFIGURACAO.map(({ caminho, chave }) => (
+        {botoesConfiguracao.map(({ caminho, chave }) => (
           <Button key={caminho} type="button" variant="outline" onClick={() => navigate(caminho)} className={cn("min-h-11 gap-2", FOCO)}>
             <Settings className="h-4 w-4" aria-hidden="true" />
             {t(chave)}
@@ -107,15 +105,49 @@ function CabecalhoPessoasRh({ podeCriar, resumo, aoCriar }: CabecalhoProps) {
 
 export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: string }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") || "pessoas";
+  const tabDoUrl = searchParams.get("tab");
+  const abaDoUrl = searchParams.get("aba");
 
-  const { activeCompany, isLoading: companyLoading } = useCompany();
+  // Ligacao antiga com ficha no caminho (`/pessoas/:id?tab=laborais`, `?tab=contratos`): o ?tab= que e aba da ficha escolhe a
+  // aba da ficha, uma so vez (e passa a ?aba=). E o que fazem «Fichas sem cargo» e «Contratos a terminar».
+  const [abaLegada] = useState<string | undefined>(() =>
+    pessoaIdInicial !== undefined && tabDoUrl !== null && ehAbaFicha(tabDoUrl) ? tabDoUrl : undefined,
+  );
+  const abaGasta = useRef(false);
+  const aGastarAba = !abaGasta.current && abaLegada !== undefined && tabDoUrl === abaLegada;
+  useEffect(() => {
+    if (!aGastarAba) return;
+    abaGasta.current = true;
+    setSearchParams(
+      (anterior) => {
+        const proximos = new URLSearchParams(anterior);
+        proximos.delete("tab");
+        if (!proximos.has("aba") && abaLegada !== undefined) proximos.set("aba", abaLegada);
+        return proximos;
+      },
+      { replace: true },
+    );
+  }, [aGastarAba, abaLegada, setSearchParams]);
+  // A aba da ficha: a do URL se for uma aba da ficha; senao, a da ligacao antiga que se esta a gastar; senao, a omissao.
+  const abaDaFicha = abaDoUrl !== null && ehAbaFicha(abaDoUrl) ? abaDoUrl : aGastarAba ? abaLegada : undefined;
+
+  const { activeCompany, isLoading: companyLoading, semOrganizacao } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const podeCriar = hasPermission("hr.pessoas.create");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
+  const podeGerirAdmissao = hasPermission("hr.admissao.obrigatorios.gerir");
+  const podeGerirRegrasFimContrato = hasPermission("hr.contratos.regras.gerir");
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
   const podeVerAdmissoes = hasPermission("hr.pessoas.convite.enviar") || hasPermission("hr.onboarding.approve");
+  // Os separadores que quem olha pode ver; um ?tab= fora deles (desconhecido, ou sem permissao) cai em «Pessoas».
+  const subtabsVisiveis = SUBTABS.filter(
+    ({ value }) => (value !== "contratos" || podeVerVinculos) && (value !== "admissoes" || podeVerAdmissoes),
+  );
+  const tabPedido = aGastarAba ? null : tabDoUrl;
+  const activeTab = subtabsVisiveis.some(({ value }) => value === tabPedido) ? (tabPedido as string) : SUBTAB_INICIAL;
   // Um só pedido à lista real serve o chip de cada linha e a pastilha «por aprovar».
   const admissoes = useEstadoAdmissaoPorPessoa();
   const porAprovar = admissoes.porAprovar;
@@ -137,18 +169,58 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
   const contagemDosChips = useMemo(() => contagens(pessoas, procura), [pessoas, procura]);
   const idsVisiveis = useMemo(() => filtradas.map((p) => p.id), [filtradas]);
 
-  const abrirFicha = (id: string) => {
-    setFicha({ id, aberta: true });
-    sincronizarEndereco(id);
-  };
-  const fecharFicha = () => {
+  /**
+   * Acerta o endereco PELO ROUTER: o caminho da ficha (`id`; `undefined` deixa-o como esta) e os parametros de pesquisa (`aba`).
+   * Substitui a entrada do historico: abrir e fechar a ficha nao enche o botao «voltar».
+   */
+  const atualizarUrl = useCallback(
+    (id: string | null | undefined, editar?: (parametros: URLSearchParams) => void) => {
+      const parametros = new URLSearchParams(location.search);
+      editar?.(parametros);
+      const pesquisa = parametros.toString();
+      navigate(
+        {
+          pathname: id === undefined ? location.pathname : caminhoDaFicha(location.pathname, id),
+          search: pesquisa === "" ? "" : `?${pesquisa}`,
+          hash: location.hash,
+        },
+        { replace: true },
+      );
+    },
+    [location.pathname, location.search, location.hash, navigate],
+  );
+  const abrirFicha = useCallback(
+    (id: string) => {
+      setFicha({ id, aberta: true });
+      atualizarUrl(id);
+    },
+    [atualizarUrl],
+  );
+  const fecharFicha = useCallback(() => {
     setFicha((atual) => ({ ...atual, aberta: false }));
-    sincronizarEndereco(null);
-  };
+    atualizarUrl(null, (parametros) => parametros.delete("aba"));
+  }, [atualizarUrl]);
+  const mudarAbaDaFicha = useCallback(
+    (aba: string) => atualizarUrl(undefined, (parametros) => parametros.set("aba", aba)),
+    [atualizarUrl],
+  );
 
-  if (activeTab === "organograma") return <Navigate to={ORGANIZACAO_URL} replace />;
+  // Mudou a organizacao ativa: a ficha e o painel «Nova pessoa» eram da anterior. A primeira organizacao a carregar (uma
+  // ligacao direta com ficha) nao fecha nada.
+  const organizacaoId = semOrganizacao ? undefined : activeCompany.id;
+  const organizacaoAnterior = useRef(organizacaoId);
+  useEffect(() => {
+    if (organizacaoAnterior.current === organizacaoId) return;
+    const haviaOrganizacao = organizacaoAnterior.current !== undefined;
+    organizacaoAnterior.current = organizacaoId;
+    if (!haviaOrganizacao) return;
+    setNovaAberta(false);
+    fecharFicha();
+  }, [organizacaoId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (tabDoUrl === "organograma") return <Navigate to={ORGANIZACAO_URL} replace />;
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
-  if (!activeCompany) return <NoOrganizationState />;
+  if (semOrganizacao) return <NoOrganizationState />;
 
   const mudarTab = (valor: string) =>
     setSearchParams(
@@ -167,13 +239,14 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
   return (
     <div className="space-y-6">
       <CabecalhoPessoasRh
-        podeCriar={podeCriar} aoCriar={() => setNovaAberta(true)}
+        podeCriar={podeCriar} podeGerirAdmissao={podeGerirAdmissao} podeGerirRegrasFimContrato={podeGerirRegrasFimContrato}
+        aoCriar={() => setNovaAberta(true)}
         resumo={t("rhForm.lista.resumo", { activos: stats.activos, entradas: stats.entradas90d, saidas: stats.saidas90d })}
       />
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
         <ListaAbas>
-          {SUBTABS.filter(({ value }) => (value !== "contratos" || podeVerVinculos) && (value !== "admissoes" || podeVerAdmissoes)).map(({ value, labelKey }) => (
+          {subtabsVisiveis.map(({ value, labelKey }) => (
             <Aba
               key={value} value={value} rotulo={t(labelKey)}
               {...(value === "admissoes" && porAprovar > 0 ? { contador: porAprovar, contadorLeitor: t("rhAdm.tabPorAprovar", { n: porAprovar }) } : {})}
@@ -218,7 +291,9 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
         )}
       </Tabs>
 
-      <FichaPessoaRh id={ficha.id} aberta={ficha.aberta} aoFechar={fecharFicha} idsVisiveis={idsVisiveis} aoIrPara={abrirFicha} />
+      <FichaPessoaRh id={ficha.id} aberta={ficha.aberta} aoFechar={fecharFicha} idsVisiveis={idsVisiveis} aoIrPara={abrirFicha}
+        aba={abaDaFicha} aoMudarAba={mudarAbaDaFicha}
+      />
 
       {podeCriar && (
         <NovaPessoaDialogo

@@ -23,13 +23,15 @@ interface PainelNoProps {
   aoLigar: () => void;
   aoAlterar: (pessoaId: string) => void;
   aoDesligar: (pessoaId: string) => void;
+  /** `hr.pessoas.colocacao.edit`: sem ela não há Ligar, Alterar nem Desligar. Omitido: aparecem. */
+  podeAlterar?: boolean;
 }
 
-export function PainelNo({ est, estado, pessoas, no, aoFechar, aoLigar, aoAlterar, aoDesligar }: PainelNoProps) {
+export function PainelNo({ est, estado, pessoas, no, aoFechar, aoLigar, aoAlterar, aoDesligar, podeAlterar = true }: PainelNoProps) {
   const { t } = useTranslation();
   const ehCentro = no?.tipo === "centro";
   const n = no ? (no.locais ?? no.legais) : 0;
-  const comuns = { est, pessoas, aoAlterar, aoDesligar };
+  const comuns = { est, pessoas, aoAlterar, aoDesligar, podeAlterar };
   return (
     <Sheet open={no !== null} onOpenChange={(aberto) => !aberto && aoFechar()}>
       <SheetContent className="w-full overflow-y-auto sm:w-1/2 sm:max-w-none">
@@ -41,12 +43,14 @@ export function PainelNo({ est, estado, pessoas, no, aoFechar, aoLigar, aoAltera
                 <ChipTipo tipo={no.tipo} />
               </div>
               <SheetDescription>{t("rhOrg.painel.desc", { tipo: t(`rhOrg.tipo.${no.tipo}`), n })}</SheetDescription>
-              <div>
-                <Button type="button" size="sm" className="min-h-11 gap-1.5" onClick={aoLigar}>
-                  <UserPlus className="h-4 w-4" aria-hidden="true" />
-                  {t("rhOrg.ligarPessoa")}
-                </Button>
-              </div>
+              {podeAlterar && (
+                <div>
+                  <Button type="button" size="sm" className="min-h-11 gap-1.5" onClick={aoLigar}>
+                    <UserPlus className="h-4 w-4" aria-hidden="true" />
+                    {t("rhOrg.ligarPessoa")}
+                  </Button>
+                </div>
+              )}
             </SheetHeader>
             <Tabs key={no.id} defaultValue={ehCentro ? "trabalham" : "pessoas"} className="mt-4">
               <TabsList className={LISTA_ABAS}>

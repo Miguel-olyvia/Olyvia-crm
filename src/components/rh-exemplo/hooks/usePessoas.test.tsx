@@ -47,8 +47,8 @@ describe("usePessoas (rh-exemplo).criarPessoa", () => {
     criarReal.mockResolvedValue({ id: "p1", falhas: [{ seccao: "niss", mensagem: "NISS invalido" }] });
     const { result } = renderHook(() => usePessoas());
     let r: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
-    await act(async () => { r = await result.current.criarPessoa(DADOS({ naoGravado: ["anexos"] })); });
-    expect(r).toEqual({ id: "p1", falhas: [{ seccao: "niss", mensagem: "NISS invalido" }], naoGravado: ["anexos"] });
+    await act(async () => { r = await result.current.criarPessoa(DADOS({ naoGravado: ["nome_tratamento"] })); });
+    expect(r).toEqual({ id: "p1", falhas: [{ seccao: "niss", mensagem: "NISS invalido" }], naoGravado: ["nome_tratamento"] });
   });
 
   it("uma recusa do hook real chega a quem chama (nao e engolida)", async () => {

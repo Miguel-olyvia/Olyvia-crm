@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { construirArvore } from "@/components/rh-exemplo/organizacao/arvore";
 import {
   construirEstruturaReal,
   ligacoesReais,
@@ -107,5 +108,57 @@ describe("validarPedidoReal", () => {
     expect(validarPedidoReal(est, { ...ok, filialId: "" })).toBe("filialInvalida");
     expect(validarPedidoReal(est, { ...ok, desde: "26/10/2026" })).toBe("dataInvalida");
     expect(validarPedidoReal(est, { ...ok, desde: "" })).toBe("dataInvalida");
+  });
+});
+
+describe("construirEstruturaReal: NIF, morada e hierarquia da base", () => {
+  const dados = new Map([
+    ["org-1", { nif: "500100200", morada: "Rua Central 1, Porto", paiId: null }],
+    ["org-2", { nif: "", morada: "Rua B 2, Braga", paiId: "org-1" }],
+    ["org-3", { nif: "500300400", morada: "", paiId: "org-2" }],
+  ]);
+  const est = construirEstruturaReal({ empresa, filiais, locais: [], dados });
+
+  it("o grupo e a empresa levam o NIF e a morada fiscal da organizacao activa", () => {
+    expect(est.grupo).toMatchObject({ nif: "500100200", morada: "Rua Central 1, Porto" });
+    expect(est.empresas[0]).toMatchObject({ nif: "500100200", morada: "Rua Central 1, Porto" });
+  });
+
+  it("cada filial leva o seu NIF e a sua morada, vazios quando a base nao os tem", () => {
+    const f = Object.fromEntries(est.filiais.map((x) => [x.id, x]));
+    expect(f["org-2"]).toMatchObject({ nif: "", morada: "Rua B 2, Braga" });
+    expect(f["org-3"]).toMatchObject({ nif: "500300400", morada: "" });
+  });
+
+  it("sem dados da base tudo fica vazio e plano, sem inventar nada", () => {
+    const vazio = construirEstruturaReal({ empresa, filiais, locais: [] });
+    expect(vazio.grupo).toMatchObject({ nif: "", morada: "" });
+    expect(vazio.filiais.every((x) => x.nif === "" && x.morada === "" && x.paiFilialId === null)).toBe(true);
+  });
+
+  it("as filhas directas da organizacao activa ficam planas e as mais fundas dentro da sua mae", () => {
+    const pais = Object.fromEntries(est.filiais.map((x) => [x.id, x.paiFilialId]));
+    expect(pais).toEqual({ "org-1": null, "org-2": null, "org-3": "org-2" });
+  });
+
+  it("a arvore aninha a filial dentro da sua mae e nao a repete ao nivel da empresa", () => {
+    const raiz = construirArvore(est, [], []);
+    const empresaNo = raiz.filhos[0]!;
+    expect(empresaNo.filhos.map((f) => f.id)).toEqual(["org-1", "org-2"]);
+    const porto = empresaNo.filhos.find((f) => f.id === "org-2")!;
+    expect(porto.filhos.map((f) => f.id)).toEqual(["org-3"]);
+  });
+
+  it("uma mae fora da arvore ou um ciclo nunca fazem uma filial desaparecer", () => {
+    const ciclo = new Map([
+      ["org-2", { nif: "", morada: "", paiId: "org-3" }],
+      ["org-3", { nif: "", morada: "", paiId: "org-2" }],
+    ]);
+    const e = construirEstruturaReal({ empresa, filiais, locais: [], dados: ciclo });
+    expect(e.filiais.map((x) => x.paiFilialId)).toEqual([null, null, null]);
+    const fora = construirEstruturaReal({ empresa, filiais, locais: [], dados: new Map([["org-2", { nif: "", morada: "", paiId: "org-99" }]]) });
+    expect(fora.filiais.find((x) => x.id === "org-2")!.paiFilialId).toBeNull();
+    const ids = construirArvore(e, [], []).filhos[0]!.filhos.map((f) => f.id);
+    expect(ids).toEqual(["org-1", "org-2", "org-3"]);
   });
 });

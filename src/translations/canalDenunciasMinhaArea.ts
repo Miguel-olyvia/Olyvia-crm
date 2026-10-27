@@ -13,6 +13,7 @@ const pt: Record<string, string> = {
   "cdm.guardarCodigo": "Guardar o código nesta sessão",
   "cdm.codigoGuardado": "Código guardado",
   "cdm.guardarCodigoNota": "O código ficou guardado só neste ecrã e esquece-se ao recarregar a página. O PIN não se guarda.",
+  "cdm.carregandoFicha": "A carregar a tua ficha...",
   "cdm.semFicha.titulo": "Sem ficha ligada à tua sessão",
   "cdm.semFicha.texto": "Para denunciar ou acompanhar denúncias aqui, a tua sessão tem de estar ligada a uma ficha de Recursos Humanos.",
 
@@ -59,6 +60,7 @@ const en: Record<string, string> = {
   "cdm.guardarCodigo": "Keep the code for this session",
   "cdm.codigoGuardado": "Code kept",
   "cdm.guardarCodigoNota": "The code is kept on this screen only and is forgotten when the page reloads. The PIN is never kept.",
+  "cdm.carregandoFicha": "Loading your profile...",
   "cdm.semFicha.titulo": "No profile linked to your session",
   "cdm.semFicha.texto": "To report or follow reports here, your session must be linked to a Human Resources profile.",
 

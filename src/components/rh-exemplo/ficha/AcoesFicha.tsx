@@ -20,10 +20,17 @@ interface AcoesFichaProps {
   pendencias: number;
   aoCriarAcesso: () => void;
   aoEnviarConvite: () => void;
+  /**
+   * Pode abrir-se outro convite? So sem processo de admissao aberto: a V2 recusa um segundo (`processo_aberto`).
+   * Com processo aberto, as acoes (Reenviar, Prolongar, Cancelar) estao no cartao do estado do convite.
+   */
+  podeEnviarConvite?: boolean;
   aoAbrirAba: (aba: string) => void;
 }
 
-export function AcoesFicha({ temConta, emAdmissao = false, pendencias, aoCriarAcesso, aoEnviarConvite, aoAbrirAba }: AcoesFichaProps) {
+export function AcoesFicha({
+  temConta, emAdmissao = false, pendencias, aoCriarAcesso, aoEnviarConvite, podeEnviarConvite = true, aoAbrirAba,
+}: AcoesFichaProps) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-start gap-2 px-6 pb-4">
@@ -32,7 +39,7 @@ export function AcoesFicha({ temConta, emAdmissao = false, pendencias, aoCriarAc
           <BotaoCriarAcesso reenviar={temConta} pendencias={pendencias} principal={!temConta} onClick={aoCriarAcesso} />
         </PermissionGate>
       )}
-      {!temConta && !emAdmissao && (
+      {!temConta && !emAdmissao && podeEnviarConvite && (
         <PermissionGate permission="hr.pessoas.convite.enviar">
           <Button type="button" variant="outline" className={cn("min-h-11 gap-2", FOCO)} onClick={aoEnviarConvite}>
             <Send className="h-4 w-4" aria-hidden="true" />

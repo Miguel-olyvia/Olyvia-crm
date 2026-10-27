@@ -2,8 +2,9 @@
  * O custo de cada pessoa num mes, sem React: serve os hooks do ecra e os testes.
  *
  * A RETRIBUICAO do mes vem de fora (`PessoaParaCusto.retribuicaoMes` = o total bruto estimado do processamento salarial
- * real), nunca de uma conta repetida aqui. Os valores avulsos, os equipamentos, as taxas e as excecoes continuam a ser
- * do store em memoria do custo (nao ha tabela na base para eles) e as taxas dos encargos sao de exemplo.
+ * real), nunca de uma conta repetida aqui. Os valores avulsos vem da base (os lancamentos pontuais do periodo, passados
+ * por `avulsosReais`); os equipamentos, as taxas e as excecoes continuam a ser do store em memoria do custo (nao ha tabela
+ * na base para eles) e as taxas dos encargos sao de exemplo.
  */
 import { lerCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { arredondar } from "@/components/rh-exemplo/lib/custo";
@@ -33,14 +34,15 @@ export interface CustoDaPessoa {
   composicao: ParteCusto[];
 }
 
-const contextoDe = (mes: string): ContextoCusto => {
+/** `avulsosReais` (os lancamentos da base) substituem os do store de exemplo; sem eles, usa-se o store (so os testes antigos). */
+const contextoDe = (mes: string, avulsosReais?: readonly AvulsoCusto[]): ContextoCusto => {
   const { avulsos, equipamentos, definicoes, excecoes } = lerCusto();
-  return { mes, avulsos, equipamentos, definicoes, excecoes };
+  return { mes, avulsos: avulsosReais ?? avulsos, equipamentos, definicoes, excecoes };
 };
 
 /** O custo de todas as pessoas dadas, num mes. */
-export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCusto[]): LinhaCusto[] {
-  const contexto = contextoDe(mes);
+export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCusto[], avulsosReais?: readonly AvulsoCusto[]): LinhaCusto[] {
+  const contexto = contextoDe(mes, avulsosReais);
   return pessoas.map((pessoa) => montarLinhaCusto(pessoa, contexto));
 }
 
@@ -48,8 +50,9 @@ export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCus
  * O custo de uma pessoa num mes. `horasFeitas` sao as horas realmente trabalhadas no mes (relatorio de assiduidade);
  * o saldo do banco de horas continua a ser o valor de exemplo (o banco de horas nao esta ligado a base).
  */
-export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas: number): CustoDaPessoa {
-  const { avulsos, equipamentos, definicoes, excecoes } = lerCusto();
+export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas: number, avulsosReais?: readonly AvulsoCusto[]): CustoDaPessoa {
+  const { avulsos: avulsosDaLoja, equipamentos, definicoes, excecoes } = lerCusto();
+  const avulsos = avulsosReais ?? avulsosDaLoja;
   const atual = custoDoMes({
     mes,
     salarioMes: pessoa.retribuicaoMes,

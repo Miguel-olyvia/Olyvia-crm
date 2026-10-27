@@ -18,6 +18,17 @@ vi.mock("@/components/rh-exemplo/organizacao/useOrganizacaoReal", async () => {
   return { useOrganizacaoReal: m.useOrganizacaoEmMemoria };
 });
 
+// Ligar, Alterar e Desligar pedem `hr.pessoas.colocacao.edit`; os testes mudam as permissões de quem olha por aqui.
+const permissoes = vi.hoisted(() => ({ concedidas: new Set<string>(["hr.pessoas.colocacao.edit"]) }));
+vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    hasPermission: (p: string) => permissoes.concedidas.has(p),
+    hasAnyPermission: (ps: string[]) => ps.some((p) => permissoes.concedidas.has(p)),
+    permissions: [...permissoes.concedidas],
+    loading: false,
+  }),
+}));
+
 const renderPagina = () =>
   render(
     <LanguageProvider>
@@ -40,7 +51,26 @@ beforeAll(() => {
 beforeEach(() => {
   cleanup();
   window.localStorage.setItem("language", "pt");
+  permissoes.concedidas = new Set(["hr.pessoas.colocacao.edit"]);
   repor();
+});
+
+describe("o acesso a Ligar, Alterar e Desligar", () => {
+  it("sem hr.pessoas.colocacao.edit não há botão Ligar pessoa nem Alterar/Desligar no painel de um nó", () => {
+    permissoes.concedidas = new Set();
+    renderPagina();
+    expect(screen.queryByRole("button", { name: "Ligar pessoa" })).toBeNull();
+    abrir("Filial Faro");
+    expect(painel()).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ligar pessoa" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Alterar:/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Desligar:/ })).toBeNull();
+  });
+
+  it("com hr.pessoas.colocacao.edit o botão Ligar pessoa aparece no cabeçalho", () => {
+    renderPagina();
+    expect(screen.getAllByRole("button", { name: "Ligar pessoa" }).length).toBeGreaterThan(0);
+  });
 });
 
 describe("a árvore da organização", () => {

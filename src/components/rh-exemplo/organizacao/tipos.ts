@@ -26,8 +26,12 @@ export interface FilialOrg {
   id: string;
   empresaId: string;
   nome: string;
+  /** O NIF da propria filial, se a base o tem (vazio/ausente = usa-se o da empresa). */
+  nif?: string;
   morada: string;
   responsavel: string;
+  /** A filial-mae, quando esta filial esta dentro de outra (aninhamento da arvore); ausente = filha direta da empresa. */
+  paiFilialId?: string | null;
 }
 
 export interface CentroOrg {

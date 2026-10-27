@@ -90,7 +90,7 @@ const VARIAVEIS_EDITOR = CATALOGO_VARIAVEIS_RH.map((v) => ({
 
 export default function RhModelosDocumentos() {
   const { t } = useTranslation();
-  const { activeCompany, isLoading: companyLoading } = useCompany();
+  const { isLoading: companyLoading, semOrganizacao } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const podeVer = hasPermission("hr.pessoas.documentos.modelos.view");
   const podeEditar = hasPermission("hr.pessoas.documentos.modelos.edit");
@@ -175,7 +175,7 @@ export default function RhModelosDocumentos() {
   };
 
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
-  if (!activeCompany) return <NoOrganizationState />;
+  if (semOrganizacao) return <NoOrganizationState />;
   if (!podeVer) return <SemAcessoCard className="m-6" />;
 
   return (

@@ -37,11 +37,12 @@ import { CampoSelect } from "@/components/rh-exemplo/form/Campos";
 import { useAusenciasDaOrganizacao } from "@/components/rh-exemplo/hooks/useAusenciasDaOrganizacao";
 import { useAusenciasTipos } from "@/components/rh-exemplo/hooks/useAusenciasTipos";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
+import { useFeriadosDaOrganizacao } from "@/components/rh-exemplo/hooks/useFeriadosDaOrganizacao";
 import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { usePessoas } from "@/components/rh-exemplo/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
-import { indexarFeriados, nomeTipoAusencia } from "@/components/rh-exemplo/lib/ausencias";
+import { nomeTipoAusencia } from "@/components/rh-exemplo/lib/ausencias";
 import type { EstadoPedido } from "@/components/rh-exemplo/tiposAusencias";
 
 const LOCALES: Record<string, Locale> = { en: enUS, pt, es, fr, de };
@@ -95,8 +96,8 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
   const [filtroTipo, setFiltroTipo] = useState("");
   const [filtroTipoMapa, setFiltroTipoMapa] = useState("");
   const [pedidoAberto, setPedidoAberto] = useState<string | null>(null);
-  // Sem calendario de feriados na apresentacao: os dias contam como dias normais.
-  const feriados = useMemo(() => indexarFeriados([]), []);
+  // Os feriados da organizacao (schedule_holidays), como no mapa real: pintam-se nos dois modos (Mes e Ano).
+  const { feriados, erro: erroFeriados, recusado: feriadosRecusados } = useFeriadosDaOrganizacao();
   const [pessoaAnoId, setPessoaAnoId] = useState("");
 
   useEffect(() => {
@@ -298,6 +299,12 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
                     </div>
                   )}
                 </div>
+
+                {(erroFeriados || feriadosRecusados) && (
+                  <p role="alert" className="text-sm font-medium text-destructive">
+                    {t(erroFeriados ? "rhExemplo.aus.feriadosErro" : "rhExemplo.aus.feriadosRecusados")}
+                  </p>
+                )}
 
                 <LegendaMapaAusencias />
 

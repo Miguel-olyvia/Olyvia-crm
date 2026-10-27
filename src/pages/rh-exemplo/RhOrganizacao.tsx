@@ -4,7 +4,7 @@
  * e quem tem vínculo legal mas ainda não tem centro fica em «Sem centro atribuído». Daqui liga-se, altera-se e desliga-se a
  * pessoa (vínculo legal = empresa e filial; local de trabalho = o centro, que pode ser de outra filial). Clicar numa pessoa
  * abre a ficha de RH; clicar num nó abre o painel do nó. Ligado à base: filiais (árvore da organização), centros (locais de
- * trabalho) e colocação das pessoas no organograma.
+ * trabalho), NIF, morada e hierarquia das filiais, e colocação das pessoas no organograma.
  *
  * Os endereços antigos `?vista=chefias` e `?vista=estrutura` (a página já teve duas abas) voltam à página sem parâmetro.
  */
@@ -19,6 +19,7 @@ import { FormularioLigacao } from "@/components/rh-exemplo/organizacao/Formulari
 import { LegendaOrganizacao } from "@/components/rh-exemplo/organizacao/LegendaOrganizacao";
 import { PainelNo } from "@/components/rh-exemplo/organizacao/PainelNo";
 import { usePaginaOrganizacao } from "@/components/rh-exemplo/organizacao/usePaginaOrganizacao";
+import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
 
 const ORGANIZACAO_URL = "/rh-exemplo/organizacao";
@@ -27,7 +28,10 @@ function PaginaOrganizacao() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const p = usePaginaOrganizacao();
-  const botaoLigar = (
+  const { hasPermission } = usePermissions();
+  // Ligar, Alterar e Desligar escrevem a colocação: pedem `hr.pessoas.colocacao.edit` (a RLS recusaria o resto).
+  const podeAlterar = hasPermission("hr.pessoas.colocacao.edit");
+  const botaoLigar = !podeAlterar ? null : (
     <Button type="button" className="min-h-11 gap-1.5" onClick={() => p.abrirForm(null)}>
       <UserPlus className="h-4 w-4" aria-hidden="true" />
       {t("rhOrg.ligarPessoa")}
@@ -45,6 +49,7 @@ function PaginaOrganizacao() {
         <BarraOrganizacao termo={p.termo} aoPesquisar={p.setTermo} aoExpandir={p.expandirTudo} aoRecolher={p.recolherTudo} />
         <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">{p.aviso}</p>
         {p.semPermissao && <p role="alert" className="text-sm text-destructive">{t("rhOrg.semPermissao")}</p>}
+        {p.falhaDados && <p role="alert" className="text-sm text-destructive">{t("rhOrg.falhaDados")}</p>}
         {p.falhaLeitura && (
           <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive">
             <span>{t("rhOrg.falhaLeitura")}</span>
@@ -63,7 +68,7 @@ function PaginaOrganizacao() {
         )}
         <PainelNo
           est={p.est} estado={p.estado} pessoas={p.porId} no={p.noAberto} aoFechar={() => p.setSeleccionado(null)}
-          aoLigar={() => p.abrirForm(null)} aoAlterar={p.abrirForm} aoDesligar={p.setADesligar}
+          aoLigar={() => p.abrirForm(null)} aoAlterar={p.abrirForm} aoDesligar={p.setADesligar} podeAlterar={podeAlterar}
         />
         <FormularioLigacao
           aberto={p.form.aberto} est={p.est} estado={p.estado} pessoas={p.pessoas} pessoaInicial={p.form.pessoaInicial}

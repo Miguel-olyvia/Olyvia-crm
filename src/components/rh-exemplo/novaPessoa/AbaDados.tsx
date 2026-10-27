@@ -5,10 +5,25 @@ import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { CONJUGE_SITUACOES_PROFISSIONAIS, ESTADOS_CIVIS, GENEROS, TIPOS_DOCUMENTO } from "@/components/rh-exemplo/tipos";
 import { temConjuge } from "@/components/rh-exemplo/lib/novaPessoaDetalhes";
 import { useTranslation } from "@/hooks/useTranslation";
-import { AnexosNova } from "./AnexosNova";
+import { CampoConta } from "@/components/rh-exemplo/hooks/novaPessoaReal";
+import { SeccaoAnexos } from "./AnexosNova";
 import { useNova } from "./contextoNova";
 import { opcoes } from "./opcoesNova";
 import { SeccaoNova } from "./SeccaoNova";
+
+/** Escolher uma conta de CRM preenche os campos que ela sabe; só com `hr.pessoas.conta.link` a ficha fica ligada a ela. */
+function LigarConta() {
+  const { t } = useTranslation();
+  const { valores, conta } = useNova();
+  return (
+    <SeccaoNova titulo={t("rhNova.sec.conta")}>
+      <CampoConta
+        id="hr-novo-conta" label={t("hr.conta.label")} contas={conta.contas} valor={valores.geral.conta_id}
+        loading={conta.loading} podeLigar={conta.podeLigar} onChange={conta.aoEscolher}
+      />
+    </SeccaoNova>
+  );
+}
 
 function Identificacao() {
   const { t } = useTranslation();
@@ -99,12 +114,11 @@ export function AbaDados() {
   const { t } = useTranslation();
   return (
     <div className="space-y-4">
+      <LigarConta />
       <Identificacao />
       <Nascimento />
       <Documentos />
-      <SeccaoNova titulo={t("rhNova.sec.anexosDados")}>
-        <AnexosNova tipos={["cartao_cidadao", "fotografia"]} />
-      </SeccaoNova>
+      <SeccaoAnexos titulo={t("rhNova.sec.anexosDados")} tipos={["cartao_cidadao", "fotografia"]} />
     </div>
   );
 }

@@ -3,18 +3,11 @@
 // emergência completo, categorias do contrato, anexos e as secções que se pedem à pessoa no convite. Só forma e funções
 // puras: nada de React nem de acesso a dados.
 import { rascunhoInicial, type RascunhoPessoa } from "@/components/rh-exemplo/lib/novaPessoa";
-import type { TipoAnexoConvite } from "@/components/rh-exemplo/lib/conviteAnexos";
 import type { CategoriaFuncao } from "@/components/rh-exemplo/tipos";
 import type { SeccaoConvite } from "./ids";
 
-/** Um ficheiro escolhido no painel: fica só em memória, nunca se envia. */
-export interface AnexoSimulado {
-  id: string;
-  tipo: TipoAnexoConvite;
-  nome: string;
-  tamanho: number;
-  mime: string;
-}
+/** Quanto tempo vale o link do convite (os mesmos dias que a Edge Function `convite-admissao` dá: `VALIDADE_DIAS`). */
+export const DIAS_DO_CONVITE = 7;
 
 export type SimNao = "" | "sim" | "nao";
 
@@ -37,7 +30,6 @@ export interface ExtrasForm {
   sindicato_quota: string;
   criar_acesso: boolean;
   email_acesso: string;
-  anexos: AnexoSimulado[];
   /** Secções que se pedem à pessoa no convite: aqui não se exigem. */
   noConvite: Partial<Record<SeccaoConvite, boolean>>;
 }
@@ -67,7 +59,6 @@ export const EXTRAS_VAZIOS: Readonly<ExtrasForm> = {
   sindicato_quota: "",
   criar_acesso: false,
   email_acesso: "",
-  anexos: [],
   noConvite: {},
 };
 
@@ -81,7 +72,7 @@ export function valoresIniciais(hoje: string): ValoresNovaPessoa {
     ...base,
     laborais: { ...base.laborais, data_admissao: hoje },
     contrato: { ...base.contrato, data_inicio: hoje },
-    extra: { ...EXTRAS_VAZIOS, anexos: [], noConvite: {} },
+    extra: { ...EXTRAS_VAZIOS, noConvite: {} },
   };
 }
 

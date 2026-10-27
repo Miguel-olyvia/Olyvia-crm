@@ -25,7 +25,7 @@ export function AbaContratos({ ficha, pessoa, ctx }: AbaProps) {
   );
 }
 
-export function AbaPlaneamento({ ficha, ctx }: AbaProps) {
+export function AbaPlaneamento({ ficha, pessoa, ctx }: AbaProps) {
   const w = ctx.trabalho;
   return (
     <PessoaHorarioTab
@@ -33,6 +33,8 @@ export function AbaPlaneamento({ ficha, ctx }: AbaProps) {
       podeVerPlaneado={w.podeVerHorario} podeEditarPlaneado={w.podeEditarHorario} podeCorrigirPlaneado={w.podeCorrigirHorario}
       podeVerRealizado={w.podeVerRealizado} saving={ficha.saving} onGuardarPlaneado={ficha.savePlaneado}
       onCorrigirPlaneado={ficha.corrigirPlaneado} horasContratadasSemanais={ctx.horasContratadasSemanais}
+      pessoaId={pessoa.id} pessoaNome={pessoa.nome_completo} souAPessoa={ctx.minhaPessoaId === pessoa.id}
+      permissoesAssiduidade={ctx.permissoesAssiduidade} cargo={pessoa.cargo} dataAdmissao={pessoa.data_admissao}
     />
   );
 }

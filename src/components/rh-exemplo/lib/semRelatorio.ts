@@ -1,9 +1,5 @@
 /**
- * Na apresentação não se reporta nada a lado nenhum: esta função existe só para os
- * ecrãs copiados continuarem a compilar com a mesma chamada que têm no módulo real.
+ * O reporte de erros dos ecrãs de RH de exemplo é o do módulo real: este ficheiro mantém o caminho de importação de
+ * sempre e reencaminha para o wrapper (a única porta para @/lib/observability, ver semBase.test.ts).
  */
-export type BusinessFlow = string;
-
-export function captureFlowError(_erro: unknown, _fluxo: BusinessFlow): void {
-  // Sem relatório de erros: nenhum dado sai desta apresentação.
-}
+export { captureFlowError, type BusinessFlow } from "@/components/rh-exemplo/hooks/captureFlowError";

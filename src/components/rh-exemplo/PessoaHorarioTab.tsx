@@ -53,9 +53,6 @@ import { HorarioTipoPainel } from "@/components/rh-exemplo/fluxosB/horario/Horar
 import { BancoHorasDaFicha } from "@/components/rh-exemplo/fluxosC/BancoHorasDaFicha";
 import { HistoricoCorreccoes } from "@/components/rh-exemplo/assiduidade/HistoricoCorreccoes";
 import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeTab";
-import { useFichaRh } from "@/components/rh-exemplo/dados/loja";
-import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
-import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
 import { cadeiaDeCorreccoes, emVigor, LEITOR_PLANEADO } from "@/components/rh-exemplo/lib/assiduidade";
 import {
   type HorarioRascunho,
@@ -67,6 +64,7 @@ import {
   rascunhoDeLinhas,
 } from "@/components/rh-exemplo/lib/horario";
 import type { HorarioPlaneado, HorarioRealizado, LocalTrabalho } from "@/components/rh-exemplo/tipos";
+import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 
 interface CorrigirPlaneadoArgs {
   horarioId: string;
@@ -100,11 +98,14 @@ interface PessoaHorarioTabProps {
    * mostra o aviso quando isto vem preenchido.
    */
   horasContratadasSemanais?: number | null;
-  /**
-   * A pessoa a que pertence a aba Assiduidade. Sem isto deduz-se das linhas de horario (planeado ou realizado); uma
-   * pessoa sem nenhuma linha fica sem a aba.
-   */
+  /** A aba Assiduidade. Sem a pessoa e as suas permissoes de assiduidade o separador fica so com o planeado e o realizado. */
   pessoaId?: string;
+  pessoaNome?: string;
+  souAPessoa?: boolean;
+  permissoesAssiduidade?: PermissoesAssiduidade;
+  /** Cabecalho do relatorio mensal de assiduidade, na aba Assiduidade. */
+  cargo?: string | null;
+  dataAdmissao?: string | null;
 }
 
 export function PessoaHorarioTab({
@@ -120,14 +121,18 @@ export function PessoaHorarioTab({
   onGuardarPlaneado,
   onCorrigirPlaneado,
   horasContratadasSemanais = null,
-  pessoaId: pessoaIdPedida,
+  pessoaId,
+  pessoaNome,
+  souAPessoa = false,
+  permissoesAssiduidade,
+  cargo = null,
+  dataAdmissao = null,
 }: PessoaHorarioTabProps) {
   const { t } = useTranslation();
-  const pessoaId = pessoaIdPedida ?? planeado[0]?.pessoa_id ?? realizado[0]?.pessoa_id;
-  const fichaDaAssiduidade = useFichaRh(pessoaId);
-  const { pessoaId: minhaPessoaId } = useMinhaPessoa();
-  const { permissoes: permissoesAssiduidade } = usePermissoesAssiduidade();
-  const podeVerAssiduidade = Boolean(fichaDaAssiduidade) && permissoesAssiduidade.view;
+  // As mesmas tres condicoes do RH real: ver tudo, ver a equipa, ou ver a propria assiduidade.
+  const podeVerAssiduidade =
+    Boolean(pessoaId && permissoesAssiduidade) &&
+    Boolean(permissoesAssiduidade?.view || permissoesAssiduidade?.equipaView || (souAPessoa && permissoesAssiduidade?.viewOwn));
 
   // Duas fatias do MESMO array: o que ainda se ALTERA (em vigor ou futuro,
   // vai para o rascunho editavel) e o que so se CORRIGE (janela ja
@@ -373,15 +378,15 @@ export function PessoaHorarioTab({
             )}
           </TabsContent>
 
-          {podeVerAssiduidade && pessoaId && fichaDaAssiduidade && (
+          {podeVerAssiduidade && pessoaId && permissoesAssiduidade && (
             <TabsContent value="assiduidade">
               <PessoaAssiduidadeTab
                 pessoaId={pessoaId}
-                pessoaNome={fichaDaAssiduidade.pessoa.nome_completo}
-                souAPessoa={minhaPessoaId === pessoaId}
+                pessoaNome={pessoaNome ?? ""}
+                souAPessoa={souAPessoa}
                 permissoes={permissoesAssiduidade}
-                cargo={fichaDaAssiduidade.pessoa.cargo}
-                dataAdmissao={fichaDaAssiduidade.pessoa.data_admissao}
+                cargo={cargo}
+                dataAdmissao={dataAdmissao}
               />
             </TabsContent>
           )}

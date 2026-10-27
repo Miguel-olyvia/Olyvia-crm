@@ -15,6 +15,7 @@
  * O conteudo e o MESMO componente do separador da ficha: sao a mesma coisa
  * vista de dois sitios, e duas copias divergiriam ao segundo ajuste.
  */
+import { useMemo } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { Card, CardContent } from "@/components/ui/card";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -22,6 +23,7 @@ import { PessoaAusenciasTab } from "@/components/rh-exemplo/PessoaAusenciasTab";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
+import { usePessoas } from "@/components/rh-exemplo/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 
 export default function RhMinhasAusencias() {
@@ -29,6 +31,15 @@ export default function RhMinhasAusencias() {
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const minha = useMinhaPessoa();
+  const { pessoas: colegas } = usePessoas();
+
+  // Os mesmos dois nomes que a ficha dá à aba (useContextoFicha): quem aprova pela chefia, e quem decidiu cada passo do
+  // histórico. Vêm de pessoas (reporta_a_pessoa_id e nome_completo), nunca em branco quando a pessoa existe.
+  const nomePorPessoaId = useMemo(() => new Map(colegas.map((c) => [c.id, c.nome_completo])), [colegas]);
+  const aprovadorChefiaNome = useMemo(() => {
+    const chefiaId = colegas.find((c) => c.id === minha.pessoaId)?.reporta_a_pessoa_id ?? null;
+    return chefiaId ? nomePorPessoaId.get(chefiaId) ?? null : null;
+  }, [colegas, minha.pessoaId, nomePorPessoaId]);
 
   if (companyLoading || permissionsLoading || minha.loading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
@@ -53,6 +64,8 @@ export default function RhMinhasAusencias() {
         pessoaId={minha.pessoaId}
         pessoaNome={minha.nome ?? t("hr.ausencias.minhas.eu")}
         souAPessoa
+        aprovadorChefiaNome={aprovadorChefiaNome}
+        nomePorPessoaId={nomePorPessoaId}
         permissoes={{
           view: hasPermission("hr.ausencias.view"),
           pedir: hasPermission("hr.ausencias.pedir"),

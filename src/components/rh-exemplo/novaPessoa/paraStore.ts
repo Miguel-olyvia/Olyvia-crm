@@ -191,28 +191,33 @@ export interface OpcoesGravar {
   comConvite: boolean;
   /** O nome do cargo escolhido (a legenda `pessoas.cargo`); `null` só quando não há cargo escolhido. */
   cargoNome?: string | null;
+  /** `hr.pessoas.conta.link`: só com ela a conta escolhida segue para ser ligada (sem ela só serviu para preencher). */
+  podeLigarConta?: boolean;
+  /** `hr.pessoas.saude.edit`: sem ela a saúde não segue, tenha o formulário o que tiver. Por omissão, não. */
+  podeSaude?: boolean;
+  /** `hr.pessoas.sindicalizacao.edit`: sem ela a sindicalização não segue. Por omissão, não. */
+  podeSindicalizacao?: boolean;
 }
 
 /**
- * O que o formulário recolhe e NÃO tem coluna onde gravar: o nome de tratamento (ainda sem coluna) e os ficheiros anexos
- * (aqui só se guardam o nome e o tamanho, nunca o ficheiro). Dizem-se ao utilizador em vez de se descartarem em silêncio.
+ * O que o formulário recolhe e NÃO tem coluna onde gravar: o nome de tratamento (ainda sem coluna). Diz-se ao utilizador
+ * em vez de se descartar em silêncio. (Os ficheiros anexos já seguem de verdade, depois de a ficha existir.)
  */
 function semEquivalente(v: ValoresNovaPessoa): NaoGravado[] {
-  return [
-    ...(texto(v.extra.nome_tratamento) !== null ? (["nome_tratamento"] as const) : []),
-    ...(v.extra.anexos.length > 0 ? (["anexos"] as const) : []),
-  ];
+  return texto(v.extra.nome_tratamento) !== null ? ["nome_tratamento"] : [];
 }
 
 /**
  * O payload COMPLETO de `usePessoas.criarPessoa`, o mesmo que o painel real escreve (`paraPayload`: nada se reimplementa
- * aqui). Saúde e sindicalização seguem tal como foram escritas: se quem cria não tem a permissão, a base recusa o satélite
- * e a recusa volta como falha por secção, em vez de o dado desaparecer sem aviso. Este formulário não tem campo de conta de
- * CRM a ligar, por isso `contaALigar` fica sempre `null`.
+ * aqui). A conta de CRM só segue ligada com `hr.pessoas.conta.link`; saúde e sindicalização só seguem com a permissão
+ * própria de escrita de cada uma (esconder o campo não basta: o valor pode ter ficado no estado do formulário).
  */
 export function payloadDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): NovaPessoaPayload {
   return paraPayload(v, {
-    podeLigarConta: false, podeSaude: true, podeSindicalizacao: true, cargoNome: o.cargoNome ?? null,
+    podeLigarConta: o.podeLigarConta ?? false,
+    podeSaude: o.podeSaude ?? false,
+    podeSindicalizacao: o.podeSindicalizacao ?? false,
+    cargoNome: o.cargoNome ?? null,
   });
 }
 
@@ -244,7 +249,7 @@ export function extrasDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): ExtrasNo
       duodecimos: Number(v.contrato.duodecimos_pct || 0) as 0 | 50 | 100,
     },
     criarAcesso: v.extra.criar_acesso,
-    anexos: v.extra.anexos.map(({ tipo, nome, tamanho, mime }) => ({ tipo, nome, tamanho, mime })),
+    anexos: [],
     convite: o.comConvite ? { email: texto(v.pessoais.email_pessoal), roleId: texto(v.acesso.role_id) } : null,
     pendencias: pendenciasDaNova(v, o.config),
   };

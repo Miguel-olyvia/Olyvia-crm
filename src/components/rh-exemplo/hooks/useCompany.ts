@@ -20,6 +20,8 @@ export function useCompany(): {
   activeCompany: EmpresaExemplo;
   companies: EmpresaExemplo[];
   isLoading: boolean;
+  /** Verdadeiro quando o contexto já carregou e NÃO há organização ativa (o `activeCompany` vazio não o diz). */
+  semOrganizacao: boolean;
 } {
   const real = useCompanyReal();
   const activeCompany: EmpresaExemplo = real.activeCompany
@@ -29,5 +31,6 @@ export function useCompany(): {
     activeCompany,
     companies: (real as any).companies?.map((c: any) => ({ id: c.id, name: c.name ?? "" })) ?? [],
     isLoading: real.isLoading ?? false,
+    semOrganizacao: !real.activeCompany,
   };
 }

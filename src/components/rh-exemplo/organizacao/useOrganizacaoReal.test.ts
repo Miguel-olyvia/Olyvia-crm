@@ -6,6 +6,14 @@ import { useOrganizacaoReal } from "@/components/rh-exemplo/organizacao/useOrgan
 const guardarMock = vi.fn();
 const desligarMock = vi.fn();
 const recarregarMock = vi.fn();
+const dadosSimulados = {
+  dados: new Map<string, unknown>([
+    ["org-1", { id: "org-1", nif: "500100200", morada: "Rua Central 1, 4000-001, Porto", paiId: null }],
+    ["org-2", { id: "org-2", nif: "", morada: "Rua B 2, Braga", paiId: "org-1" }],
+  ]),
+  loading: false,
+  error: null as string | null,
+};
 const estadoSimulado = {
   loading: false,
   recusado: false,
@@ -15,6 +23,9 @@ const estadoSimulado = {
 
 vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({
   useCompany: () => ({ activeCompany: { id: "org-1", name: "Nike Teste" }, companies: [], isLoading: false }),
+}));
+vi.mock("@/components/rh-exemplo/hooks/useDadosDasOrganizacoesDaArvore", () => ({
+  useDadosDasOrganizacoesDaArvore: () => dadosSimulados,
 }));
 vi.mock("@/components/rh-exemplo/hooks/useFiliaisDaArvore", () => ({
   useFiliaisDaArvore: () => ({ filiais: [{ id: "org-1", name: "Nike Teste" }, { id: "org-2", name: "Filial Porto" }], loading: false }),
@@ -55,6 +66,8 @@ beforeEach(() => {
   estadoSimulado.recusado = false;
   estadoSimulado.erro = false;
   recarregarMock.mockReset();
+  dadosSimulados.loading = false;
+  dadosSimulados.error = null;
 });
 
 describe("useOrganizacaoReal", () => {
@@ -69,6 +82,22 @@ describe("useOrganizacaoReal", () => {
     expect(result.current.estado.historico).toEqual([]);
     expect(result.current.pessoas.map((p) => p.nome)).toEqual(["Ana", "Bruno"]);
     expect(result.current.loading).toBe(false);
+  });
+
+  it("o NIF e a morada da base chegam ao grupo, a empresa e as filiais", () => {
+    const { result } = renderHook(() => useOrganizacaoReal());
+    expect(result.current.est.grupo).toMatchObject({ nif: "500100200", morada: "Rua Central 1, 4000-001, Porto" });
+    expect(result.current.est.empresas[0]).toMatchObject({ nif: "500100200", morada: "Rua Central 1, 4000-001, Porto" });
+    expect(result.current.est.filiais.find((f) => f.id === "org-2")).toMatchObject({ nif: "", morada: "Rua B 2, Braga" });
+    expect(result.current.falhaDados).toBe(false);
+  });
+
+  it("diz quando a leitura do NIF, da morada e da hierarquia falhou, e enquanto le ainda esta a carregar", () => {
+    dadosSimulados.error = "Falhou";
+    expect(renderHook(() => useOrganizacaoReal()).result.current.falhaDados).toBe(true);
+    dadosSimulados.error = null;
+    dadosSimulados.loading = true;
+    expect(renderHook(() => useOrganizacaoReal()).result.current.loading).toBe(true);
   });
 
   it("diz quando a colocacao foi recusada por permissao", () => {

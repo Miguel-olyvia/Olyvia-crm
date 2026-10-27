@@ -27,7 +27,7 @@ import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
 import { useJustificacoesDeDiaDaPessoa } from "@/components/rh-exemplo/calendarioPessoa/situacaoDoMes";
 import { ESTADO_DA_JUSTIFICACAO, type EstadoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
-import { useJustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
+import type { JustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
 
 /** O formulário de justificação (hora real, motivo, anexo); usado aqui e no detalhe do dia do calendário. */
 export function FormularioDeJustificacao({ alerta, onFechar }: { alerta: AlertaDia; onFechar: () => void }) {
@@ -129,13 +129,17 @@ function GrupoEnviadas({ chave, itens, doDia }: { chave: "pendentes" | "aceites"
   );
 }
 
-export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
+/**
+ * As marcações por justificar vêm da base (`hr_assiduidade_desvios`) e quem as lê é o chamador, uma só vez para a aba
+ * inteira (a pastilha da aba usa os mesmos números). Só se lêem, não se justificam aqui: a base não tem onde guardar a
+ * justificação de uma picagem esquecida.
+ */
+export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaId: string; justificacoes: JustificacoesDaPessoa }) {
   const { t } = useTranslation();
-  const { porJustificar: meus, menorPrazoDias, pendentes, aceites, recusadas } = useJustificacoesDaPessoa(pessoaId);
+  const { porJustificar: meus, menorPrazoDias, pendentes, aceites, recusadas, loading, erro, recusado } = justificacoes;
   const doDia = useJustificacoesDeDiaDaPessoa(pessoaId);
-  const [aberto, setAberto] = useState<string | null>(null);
   const hoje = hojeIso();
-  const semNada = meus.length === 0 && pendentes.length + aceites.length + recusadas.length + doDia.length === 0;
+  const semNada = !loading && !erro && !recusado && meus.length === 0 && pendentes.length + aceites.length + recusadas.length + doDia.length === 0;
 
   return (
     <Card>
@@ -152,6 +156,9 @@ export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
         )}
       </CardHeader>
       <CardContent className="space-y-3">
+        {loading && <p role="status" className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.carregando")}</p>}
+        {erro && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.erro")}</p>}
+        {recusado && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.recusado")}</p>}
         {semNada && <p className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.vazio")}</p>}
         <ul className="space-y-3">
           {meus.map((alerta) => {
@@ -177,13 +184,7 @@ export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
                       {t("rhExemplo.pic.prazoAcabou")}
                     </Badge>
                   )}
-                  {dentro && aberto !== alerta.id && (
-                    <Button type="button" size="sm" variant="outline" className="min-h-11" onClick={() => setAberto(alerta.id)}>
-                      {t("rhExemplo.pic.justificar")}
-                    </Button>
-                  )}
                 </div>
-                {aberto === alerta.id && <FormularioDeJustificacao alerta={alerta} onFechar={() => setAberto(null)} />}
               </li>
             );
           })}

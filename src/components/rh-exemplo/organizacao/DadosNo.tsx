@@ -21,7 +21,7 @@ function camposDe(est: EstruturaOrg, no: NoOrg, t: (k: string) => string): Campo
   if (filial) {
     return [
       { rotulo: t("rhOrg.dados.empresa"), valor: nomeEmpresa(est, filial.empresaId) },
-      nif(est.empresas.find((e) => e.id === filial.empresaId)?.nif ?? "—"),
+      nif(filial.nif || est.empresas.find((e) => e.id === filial.empresaId)?.nif || ""),
       { rotulo: t("rhOrg.dados.morada"), valor: filial.morada || "—" },
       { rotulo: t("rhOrg.dados.responsavel"), valor: filial.responsavel || semResp },
     ];

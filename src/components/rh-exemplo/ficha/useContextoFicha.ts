@@ -8,6 +8,7 @@ import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabalho";
 import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
+import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
 import type { usePessoa } from "@/components/rh-exemplo/hooks/usePessoa";
 import { usePessoas } from "@/components/rh-exemplo/hooks/usePessoas";
 import { dataDeHojeISO } from "@/components/rh-exemplo/lib/afectacoes";
@@ -69,6 +70,7 @@ export function useContextoFicha(ficha: Ficha, pessoa: Pessoa) {
   const { t } = useTranslation();
   const { companies, activeCompany } = useCompany();
   const { hasPermission } = usePermissions();
+  const { permissoes: permissoesAssiduidade } = usePermissoesAssiduidade();
   const { pessoas: colegas } = usePessoas();
   const { pessoaId: minhaPessoaId } = useMinhaPessoa();
   const { locais, loading: locaisALoad } = useLocaisTrabalho({ apenasAtivos: false });
@@ -118,7 +120,7 @@ export function useContextoFicha(ficha: Ficha, pessoa: Pessoa) {
 
   return {
     hasPermission, trabalho, permissoes, permissoesAusencias, permissoesDocumentos, permissoesAnexos, permissoesEscritaAnexos,
-    colegas, minhaPessoaId, locais, locaisALoad, cargos, periodosDosCargos, periodosError,
+    permissoesAssiduidade, colegas, minhaPessoaId, locais, locaisALoad, cargos, periodosDosCargos, periodosError,
     cargosPorChegar: isLoading || periodosLoading, pendencias, estadoContratoDerivado, vinculoActivoId: vinculoEmVigor?.id ?? null,
     horasContratadasSemanais, salarioActual, reportaANome, nomePorPessoaId, vinculosOpcoesDocumento, entidadeLegalNome,
     podeVerAfectacoesEfectivo: trabalho.podeVerAfectacoes || minhaPessoaId === pessoa.id,

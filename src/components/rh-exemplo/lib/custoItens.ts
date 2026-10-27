@@ -27,5 +27,5 @@ export function itensDoMes(
   const doAvulso = avulsosAtivos(avulsos)
     .filter((a) => a.pessoaId === pessoaId)
     .map((a): ItemDoMes => ({ id: a.id, tipo: "avulso", descricao: a.descricao, valorMes: valorDoAvulsoNoMes(a, mes), conta: a.conta }));
-  return [...doEquipamento, ...doAvulso].filter((i) => i.valorMes > 0);
+  return [...doEquipamento, ...doAvulso].filter((i) => i.valorMes !== 0);
 }

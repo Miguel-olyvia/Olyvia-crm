@@ -153,12 +153,14 @@ export function abrirLink(token: string | undefined): void {
 }
 
 /** Guarda o rascunho; ao editar uma ficha devolvida, volta a «a preencher» (o mesmo login, o prazo já renovado). */
-export function gravarRascunhoDoLink(token: string | undefined, rascunho: Record<string, unknown>): void {
+export function gravarRascunhoDoLink(token: string | undefined, rascunho: Record<string, unknown>): boolean {
   const { admissao, atual } = admissaoPorToken(token);
-  if (!admissao || !atual) return;
+  if (!admissao || !atual) return false;
   if (admissao.estado === "devolvida") daPessoa(token, "retomar", {});
   const corrente = admissaoPorToken(token).admissao;
-  if (corrente) gravarAdmissao(guardarRascunho(corrente, rascunho, agoraExemplo()));
+  if (!corrente) return false;
+  gravarAdmissao(guardarRascunho(corrente, rascunho, agoraExemplo()));
+  return true;
 }
 
 export const submeterPeloLink = (token: string | undefined, dados: Record<string, unknown>): ResultadoAdmissao =>

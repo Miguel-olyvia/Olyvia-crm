@@ -25,6 +25,8 @@ export interface ListaPessoasProps {
   vazio: string;
   aoAlterar: (pessoaId: string) => void;
   aoDesligar: (pessoaId: string) => void;
+  /** `hr.pessoas.colocacao.edit`: sem ela, Alterar e Desligar não aparecem (a RLS recusaria). Omitido: aparecem. */
+  podeAlterar?: boolean;
 }
 
 /** O destino de uma ligacao no historico: so a empresa e a filial (a colocacao nao guarda o centro). */
@@ -106,12 +108,16 @@ function LinhaPessoa({ p, lig, pessoa }: { p: ListaPessoasProps; lig: Ligacao; p
           <History className="h-4 w-4" aria-hidden="true" />
           {t("rhOrg.historico")}
         </Button>
-        <Button type="button" variant="outline" size="sm" className={`min-h-11 ${FOCO}`} aria-label={`${t("rhOrg.alterar")}: ${nome}`} onClick={() => p.aoAlterar(lig.pessoaId)}>
-          {t("rhOrg.alterar")}
-        </Button>
-        <Button type="button" variant="outline" size="sm" className={`min-h-11 ${FOCO}`} aria-label={`${t("rhOrg.desligar")}: ${nome}`} onClick={() => p.aoDesligar(lig.pessoaId)}>
-          {t("rhOrg.desligar")}
-        </Button>
+        {(p.podeAlterar ?? true) && (
+          <>
+            <Button type="button" variant="outline" size="sm" className={`min-h-11 ${FOCO}`} aria-label={`${t("rhOrg.alterar")}: ${nome}`} onClick={() => p.aoAlterar(lig.pessoaId)}>
+              {t("rhOrg.alterar")}
+            </Button>
+            <Button type="button" variant="outline" size="sm" className={`min-h-11 ${FOCO}`} aria-label={`${t("rhOrg.desligar")}: ${nome}`} onClick={() => p.aoDesligar(lig.pessoaId)}>
+              {t("rhOrg.desligar")}
+            </Button>
+          </>
+        )}
       </div>
       {aberto && <HistoricoDaPessoa key={`${lig.filialId}|${lig.desde}`} est={p.est} pessoaId={lig.pessoaId} />}
     </li>

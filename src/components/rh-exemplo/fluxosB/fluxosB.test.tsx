@@ -9,8 +9,21 @@ import { lerFluxosB, reporFluxosB } from "@/components/rh-exemplo/dados/lojaFlux
 import { marcarFaltaDoRh } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
 import { BotaoPicar } from "@/components/rh-exemplo/assiduidade/BotaoPicar";
 import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
+import {
+  alertasDeDesvios,
+  resumoDosAlertas,
+  type JustificacoesDaPessoa,
+} from "@/components/rh-exemplo/fluxosB/alertas/useJustificacoesDaPessoa";
 import { FaltasPainel } from "@/components/rh-exemplo/fluxosB/faltas/FaltasPainel";
+import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
+import type { Desvio } from "@/components/rh-exemplo/tiposAssiduidade";
 import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
+
+/** Um turno planeado de hoje sem horas: o desvio que a base propoe e que a pessoa ainda pode justificar. */
+const DESVIO_DA_SOFIA: Desvio = {
+  organization_id: "org", pessoa_id: "p-sofia", data: hojeIso(), tipo: "planeado_sem_realizado", hora_inicio: "09:00:00",
+  hora_fim: "13:00:00", minutos: 240, planeado_id: "plan-1", local_id: null, referencia_id: null, detalhe: null,
+};
 
 const noLingua = (elemento: JSX.Element) => render(<LanguageProvider>{elemento}</LanguageProvider>);
 
@@ -72,19 +85,49 @@ describe("fluxo 5: picagem com localizacao simulada", () => {
 
 describe("fluxo 5: justificacao de falha de marcacao", () => {
   // A fila de alertas do fim do dia (Corrigir, Marcar falta, Anular) ja nao e de exemplo: le os desvios reais da base e
-  // esta provada em alertas/filaDesviosReais.test.tsx. Pedir justificacao, Aceitar a diferenca e decidir a justificacao
-  // de picagem nao tem equivalente na base e sairam da fila; a justificacao que a pessoa envia continua em memoria.
-  it("a pessoa justifica em 5 dias uteis: ve os dias que restam e envia hora real e motivo", () => {
-    noLingua(<JustificarFalhaDeMarcacao pessoaId="p-sofia" />);
-    expect(screen.getByText(/dias úteis para justificar/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Justificar" }));
-    fireEvent.click(screen.getByRole("button", { name: "Enviar justificação" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("O motivo é obrigatório");
-    fireEvent.change(screen.getByLabelText(/Motivo \(obrigatório/), { target: { value: "Esqueci-me de picar a saída" } });
-    fireEvent.click(screen.getByRole("button", { name: "Enviar justificação" }));
-    const enviada = lerFluxosB().justificacoesPicagem.find((j) => j.pessoaId === "p-sofia");
-    expect(enviada).toMatchObject({ estado: "pendente", motivo: "Esqueci-me de picar a saída" });
-    expect(lerFluxosB().alertas.find((a) => a.id === "alb-sofia")?.estado).toBe("justificacao_recebida");
+  // esta provada em alertas/filaDesviosReais.test.tsx. A lista «por justificar» da pessoa sai dos MESMOS desvios
+  // (hr_assiduidade_desvios, so os turnos sem horas e as picagens por emparelhar). Enviar uma justificacao de picagem
+  // nao tem onde gravar na base: a lista so se le.
+  const justificacoesDeTeste = (parcial: Partial<JustificacoesDaPessoa> = {}): JustificacoesDaPessoa => ({
+    ...resumoDosAlertas(alertasDeDesvios([DESVIO_DA_SOFIA], "p-sofia"), hojeIso()),
+    pendentes: [], aceites: [], recusadas: [], loading: false, erro: false, recusado: false, ...parcial,
+  });
+
+  it("so entram os desvios da pessoa que sao falhas de marcacao, e a chave de cada um e unica", () => {
+    const alertas = alertasDeDesvios(
+      [
+        DESVIO_DA_SOFIA,
+        { ...DESVIO_DA_SOFIA, tipo: "realizado_sem_planeado" },
+        { ...DESVIO_DA_SOFIA, tipo: "falta_coberta_por_ausencia" },
+        { ...DESVIO_DA_SOFIA, pessoa_id: "p-rui" },
+        { ...DESVIO_DA_SOFIA, tipo: "pendente_par", referencia_id: "pic-1" },
+      ],
+      "p-sofia",
+    );
+    expect(alertas.map((a) => a.tipo)).toEqual(["planeado_sem_realizado", "pendente_par"]);
+    expect(new Set(alertas.map((a) => a.id)).size).toBe(2);
+  });
+
+  it("mostra as marcacoes por justificar da base com os dias que restam, sem oferecer o botao Justificar", () => {
+    noLingua(<JustificarFalhaDeMarcacao pessoaId="p-sofia" justificacoes={justificacoesDeTeste()} />);
+    expect(screen.getByText(/Dias úteis que restam à justificação mais urgente/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Justificar" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Não há marcações por justificar nem justificações enviadas.")).not.toBeInTheDocument();
+  });
+
+  it("uma leitura falhada ou recusada diz-se, em vez de passar por «nao ha nada»", () => {
+    const vazio = { porJustificar: [], menorPrazoDias: null, porFazer: 0 };
+    const { unmount } = noLingua(<JustificarFalhaDeMarcacao pessoaId="p-sofia" justificacoes={justificacoesDeTeste({ ...vazio, erro: true })} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível ler as marcações por justificar");
+    expect(screen.queryByText("Não há marcações por justificar nem justificações enviadas.")).not.toBeInTheDocument();
+    unmount();
+    noLingua(<JustificarFalhaDeMarcacao pessoaId="p-sofia" justificacoes={justificacoesDeTeste({ ...vazio, recusado: true })} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Não tem permissão");
+  });
+
+  it("sem desvios e com a leitura feita, diz que nao ha nada por justificar", () => {
+    noLingua(<JustificarFalhaDeMarcacao pessoaId="p-sofia" justificacoes={justificacoesDeTeste({ porJustificar: [], menorPrazoDias: null, porFazer: 0 })} />);
+    expect(screen.getByText("Não há marcações por justificar nem justificações enviadas.")).toBeInTheDocument();
   });
 });
 

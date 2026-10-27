@@ -9,6 +9,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { useAusenciasTipos } from "@/components/rh-exemplo/hooks/useAusenciasTipos";
+import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabalho";
 import { permissoesDaVista } from "@/components/rh-exemplo/lib/vistaDaPessoa";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
@@ -50,14 +51,17 @@ export function CalendarioPessoa({
 }: Props) {
   const { t, language } = useTranslation();
   const { tipos } = useAusenciasTipos();
-  const { picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado } = assiduidade;
+  // Com os inativos: uma picagem num centro entretanto desativado continua a poder estar fora do local.
+  const { locais } = useLocaisTrabalho({ apenasAtivos: false });
+  const { picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado, recarregar } = assiduidade;
   const fonte = useMemo(
     () => ({
       assiduidade: { picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado },
       dataAdmissao,
       tiposAusencia: tipos,
+      locais,
     }),
-    [picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado, dataAdmissao, tipos],
+    [picagens, realizado, faltas, ausenciaAprovadaPorDia, planeado, planeadoRecusado, dataAdmissao, tipos, locais],
   );
   const dados = useMesDaPessoa(pessoaId, mes.ano, mes.mes, fonte);
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
@@ -119,6 +123,7 @@ export function CalendarioPessoa({
         podeCorrigir={podeCorrigir}
         souAPessoa={souAPessoa}
         pessoaId={pessoaId}
+        aoCriarFalta={recarregar ? () => void recarregar() : undefined}
         aoFechar={() => setDiaAberto(null)}
         aoAbrirRegisto={(data) => { setDiaAberto(null); aoAbrirRegisto(data); }}
       />

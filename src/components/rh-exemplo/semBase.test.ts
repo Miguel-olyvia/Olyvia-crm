@@ -9,7 +9,9 @@
 // a base. Supabase, react-query, hrDb, fetch, .rpc(, .from(, contextos reais e páginas reais seguem proibidos em
 // TODA a pasta, wrappers incluídos (o wrapper usa o hook real, não chama a base). Só as regras marcadas com
 // `permitidoNosWrappers` deixam de se aplicar a rh-exemplo/hooks/: os hooks reais e @/lib/hr, @/components/hr, mais
-// o que os próprios wrappers precisam para ficarem ligados (CompanyContext e usePermissions reais, @/utils/hr e
+// o que os próprios wrappers precisam para ficarem ligados (CompanyContext e usePermissions reais, o reporte de erros
+// @/lib/observability (ALTERADO DE PROPÓSITO, grupo D: o detalhe de ausências, cargo e fim de contrato passaram a reportar
+// como o módulo real, por hooks/captureFlowError.ts), @/utils/hr e
 // @/types/hr, este último só tipos). Fora de hooks/, nada disto é permitido.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -33,7 +35,7 @@ const proibido: { nome: string; padrao: RegExp; permitidoNosWrappers?: boolean }
   { nome: "importação de um hook de dados real (@/hooks/use...Rh/Pessoa/Ausencias/Assiduidade/Processamento...)", padrao: /from\s+["']@\/hooks\/use(?:Pessoa|Ausencias|Assiduidade|Locais|Modelos|Clausulas|Codigos|Processamento|Regras|Convite|Relatorio|Retribuicoes|Configuracao|Cargos)/, permitidoNosWrappers: true },
   { nome: "importação de uma página real (@/pages fora de rh-exemplo)", padrao: /from\s+["']@\/pages\/(?!rh-exemplo\/)/ },
   { nome: "importação do contexto real de permissões ou de organização", padrao: /from\s+["']@\/(?:hooks\/usePermissions|contexts\/(?:CompanyContext|PermissionsContext))["']/, permitidoNosWrappers: true },
-  { nome: "relatório de erros real (posthog, captureFlowError real)", padrao: /from\s+["']@\/lib\/(?:analytics|observability)\// },
+  { nome: "relatório de erros real (posthog, captureFlowError real)", padrao: /from\s+["']@\/lib\/(?:analytics|observability)\//, permitidoNosWrappers: true },
 ];
 
 /** Os wrappers: ficheiros dentro de components/rh-exemplo/hooks/. */

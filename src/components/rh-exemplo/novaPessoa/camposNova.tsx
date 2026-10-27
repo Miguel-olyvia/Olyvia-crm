@@ -36,6 +36,9 @@ function useDefinir(g: GrupoNova, k: string): (valor: string) => void {
   return (valor) => (alterar as (grupo: GrupoNova, patch: Record<string, unknown>) => void)(g, { [k]: valor });
 }
 
+/** O id do texto da posição de um campo (o que `aria-describedby` aponta). */
+const idDaPosicao = (id: string): string => `${id}-posicao`;
+
 /** A linha de um campo: linha fina por cima e as etiquetas "obrigatório" e de posição. */
 export function LinhaCampo({ id, codigo, largo, children }: { id: string; codigo?: string; largo?: boolean; children: ReactNode }) {
   const { t } = useTranslation();
@@ -44,9 +47,10 @@ export function LinhaCampo({ id, codigo, largo, children }: { id: string; codigo
   const posicao = posicaoDoCampo(ctx, codigo, id);
   return (
     <div className={cn("border-t border-border/60 pt-1.5 pb-2", largo && "sm:col-span-2")}>
-      <div aria-hidden="true" className="flex min-h-5 flex-wrap justify-end gap-1.5 text-xs text-muted-foreground">
-        {obrigatorio && <span className="font-medium text-foreground">{t("rhNova.obrigatorio")}</span>}
-        {posicao && <span className="rounded-sm border border-border px-1.5">{t(`rhNova.pos.${posicao}`)}</span>}
+      {/* O «obrigatório» já se ouve no próprio controlo (aria-required); a POSIÇÃO só existe aqui e liga-se ao controlo. */}
+      <div className="flex min-h-5 flex-wrap justify-end gap-1.5 text-xs text-muted-foreground">
+        {obrigatorio && <span aria-hidden="true" className="font-medium text-foreground">{t("rhNova.obrigatorio")}</span>}
+        {posicao && <span id={idDaPosicao(id)} className="rounded-sm border border-border px-1.5">{t(`rhNova.pos.${posicao}`)}</span>}
       </div>
       {children}
     </div>
@@ -61,13 +65,19 @@ interface TextoProps extends BaseProps {
 }
 
 export function CampoT({ g, k, id, rotulo, codigo, ajuda, largo, tipo, placeholder, min, max }: TextoProps) {
+  const { t } = useTranslation();
   const ctx = useNova();
   const definir = useDefinir(g, k);
+  // Um campo que a conta escolhida preencheu leva a nota do que convém confirmar e marca-se como palpite.
+  const aviso = ctx.conta.avisoDoPalpite(id);
+  const descritoPor = posicaoDoCampo(ctx, codigo, id) ? idDaPosicao(id) : undefined;
   return (
     <LinhaCampo id={id} codigo={codigo} largo={largo}>
       <CampoTexto
-        id={id} label={rotulo} valor={useValor(g, k)} onChange={definir} tipo={tipo} ajuda={ajuda} placeholder={placeholder}
-        erro={ctx.erro(id)} obrigatorio={ctx.obrigatorio(id)} min={min} max={max}
+        id={id} label={rotulo} valor={useValor(g, k)} onChange={definir} tipo={tipo}
+        ajuda={aviso ? t(aviso.mensagemKey, aviso.parametros) : ajuda} placeholder={placeholder}
+        erro={ctx.erro(id)} obrigatorio={ctx.obrigatorio(id)} min={min} max={max} marcado={ctx.conta.ePalpite(id)}
+        descritoPor={descritoPor}
       />
     </LinhaCampo>
   );
@@ -88,6 +98,7 @@ export function CampoS({ g, k, id, rotulo, codigo, ajuda, largo, opcoes, vazio, 
       <CampoSelect
         id={id} label={rotulo} valor={useValor(g, k)} onChange={useDefinir(g, k)} opcoes={opcoes} vazioLabel={vazio}
         placeholder={placeholder ?? t("rhNova.escolher")} ajuda={ajuda} erro={ctx.erro(id)} obrigatorio={ctx.obrigatorio(id)}
+        descritoPor={posicaoDoCampo(ctx, codigo, id) ? idDaPosicao(id) : undefined}
       />
     </LinhaCampo>
   );
@@ -99,7 +110,7 @@ export function CampoP({ g, k, id, rotulo, codigo, ajuda, largo }: BaseProps) {
     <LinhaCampo id={id} codigo={codigo} largo={largo}>
       <CampoPais
         id={id} label={rotulo} valor={useValor(g, k)} onChange={useDefinir(g, k)} ajuda={ajuda} erro={ctx.erro(id)}
-        obrigatorio={ctx.obrigatorio(id)}
+        obrigatorio={ctx.obrigatorio(id)} descritoPor={posicaoDoCampo(ctx, codigo, id) ? idDaPosicao(id) : undefined}
       />
     </LinhaCampo>
   );

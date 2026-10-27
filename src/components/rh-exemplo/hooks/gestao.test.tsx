@@ -521,6 +521,25 @@ describe("convite de admissão público", () => {
     expect(result.current.submetendo).toBe(false);
   });
 
+  it("submeter com um link que não serve devolve o motivo real e liberta o botão", async () => {
+    const { result } = renderHook(() => useConviteAdmissaoPublico("qualquer"));
+    let resultado: Awaited<ReturnType<typeof result.current.submeter>> | null = null;
+    await act(async () => {
+      resultado = await result.current.submeter({}, "Beatriz Lopes");
+    });
+    expect(resultado).toEqual({ ok: false, corpoErro: { error: "transicao_invalida" }, avisos: [] });
+    expect(result.current.submetendo).toBe(false);
+  });
+
+  it("gravar rascunho num link que não serve avisa em vez de parecer guardado", async () => {
+    const { result } = renderHook(() => useConviteAdmissaoPublico("qualquer"));
+    expect(result.current.erroRascunho).toBeNull();
+    await act(async () => {
+      await result.current.gravarRascunho({ nif: "1" });
+    });
+    expect(result.current.erroRascunho).toBe("convite_invalido");
+  });
+
   it("os anexos validam formato, tamanho e limites, e guardam só em memória", async () => {
     const { result } = renderHook(() => useConviteAnexos(TOKEN_CONVITE_EXEMPLO));
     const pdf = new File(["x"], "cc.pdf", { type: "application/pdf" });

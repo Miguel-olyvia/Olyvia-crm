@@ -2,9 +2,9 @@
  * Os dados REAIS de uma pessoa de que o custo precisa: nome, cargo, centro, filial, a retribuicao do mes (o total bruto
  * estimado do processamento salarial) e as horas por semana.
  *
- * Duas coisas que nao tem fonte organizacional na base e por isso se dizem aqui:
- *  - `tipoContrato` fica `null`: nao existe hook que devolva o tipo de contrato de toda a organizacao (so o da ficha
- *    de uma pessoa), por isso o filtro «Contrato» dos Custos nao tem opcoes.
+ * O tipo de contrato e as horas por semana vem do vinculo em vigor da pessoa (`pessoas_vinculos`), lido para toda a
+ * organizacao de uma vez. Sem vinculo em vigor (ou sem permissao para o ler):
+ *  - `tipoContrato` fica `null`: a pessoa nao entra em nenhuma opcao do filtro «Contrato».
  *  - `horasSemanais` DERIVA das horas realmente planeadas no mes (relatorio de assiduidade): e escolhida de forma a que
  *    as horas previstas do custo (`horasPrevistasDoMes`) sejam exactamente as horas planeadas do mes. Sem horas
  *    planeadas ficam a 0 e o custo por hora fica «sem valor».
@@ -33,6 +33,16 @@ export interface DadosRetribuicaoDoMes {
   /** O total bruto estimado do mes; `null` = sem retribuicao registada. */
   retribuicaoMes: number | null;
   planeadoMinutos: number;
+  /** O tipo do contrato em vigor; ausente/`null` = sem vinculo em vigor lido. */
+  tipoContrato?: string | null;
+  /** As horas por semana do contrato em vigor; ausente/`null`/0 = o contrato nao as fixa (ou nao se leu). */
+  horasContratuais?: number | null;
+}
+
+/** As horas por semana da base do custo por hora previsto: as do contrato, se as ha; senao as derivadas do planeado. */
+export function horasSemanaisDaBase(horasContratuais: number | null | undefined, planeadoMinutos: number, mes: string): number {
+  if (horasContratuais !== null && horasContratuais !== undefined && horasContratuais > 0) return horasContratuais;
+  return horasSemanaisDoPlaneado(planeadoMinutos, mes);
 }
 
 type PessoaDoCusto = Pick<Pessoa, "id" | "nome_completo" | "cargo" | "cargo_id" | "local_id">;
@@ -54,8 +64,28 @@ export function pessoaParaCusto(
     centro: centro?.nome ?? null,
     filialId: filial?.id ?? null,
     filial: filial?.name ?? null,
-    tipoContrato: null,
+    tipoContrato: dados.tipoContrato ?? null,
     retribuicaoMes: dados.retribuicaoMes,
-    horasSemanais: horasSemanaisDoPlaneado(dados.planeadoMinutos, mes),
+    horasSemanais: horasSemanaisDaBase(dados.horasContratuais, dados.planeadoMinutos, mes),
   };
+}
+
+interface VersaoDeHoras {
+  valido_de: string;
+  /** Fim EXCLUSIVO; `null` = em vigor. */
+  valido_ate: string | null;
+  horas_semanais_equivalentes: number | null;
+}
+
+/** As horas por semana contratadas que cobrem o mes (AAAA-MM): a versao de inicio mais recente. `null` = nenhuma cobre o mes. */
+export function horasContratuaisNoMes(versoes: readonly VersaoDeHoras[], mes: string): number | null {
+  const primeiro = `${mes}-01`;
+  const ultimo = `${mes}-31`;
+  let escolhida: VersaoDeHoras | null = null;
+  for (const v of versoes) {
+    if (v.valido_de > ultimo) continue;
+    if (v.valido_ate !== null && v.valido_ate <= primeiro) continue;
+    if (!escolhida || v.valido_de > escolhida.valido_de) escolhida = v;
+  }
+  return escolhida?.horas_semanais_equivalentes ?? null;
 }

@@ -1,6 +1,6 @@
 // Arranque dos fluxos novos da frente A: botões de configuração e separador Cargos, janela do responsável (fim de contrato)
 // e separador Custo da ficha. Tudo em memória, sem base.
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -10,6 +10,19 @@ import PessoaRhDetalhe from "./PessoaRhDetalhe";
 import PessoasRh from "./PessoasRh";
 import RhConfiguracaoAdmissao from "./RhConfiguracaoAdmissao";
 import RhRegrasFimContrato from "./RhRegrasFimContrato";
+
+// Os dois botões de configuração só aparecem a quem tem a permissão que protege a rota de cada um.
+const permissoes = vi.hoisted(() => ({
+  concedidas: new Set<string>(["hr.pessoas.create", "hr.admissao.obrigatorios.gerir", "hr.contratos.regras.gerir"]),
+}));
+vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    hasPermission: (p: string) => permissoes.concedidas.has(p),
+    hasAnyPermission: (ps: string[]) => ps.some((p) => permissoes.concedidas.has(p)),
+    permissions: [...permissoes.concedidas],
+    loading: false,
+  }),
+}));
 
 const renderEm = (endereco: string) =>
   render(
@@ -32,6 +45,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   window.localStorage.setItem("language", "pt");
+  permissoes.concedidas = new Set(["hr.pessoas.create", "hr.admissao.obrigatorios.gerir", "hr.contratos.regras.gerir"]);
   repor();
   reporCusto();
 });
@@ -44,6 +58,20 @@ describe("frente A: botões de configuração e Cargos", () => {
     expect(screen.getByRole("button", { name: "Nova pessoa" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Cargos" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Funções/ })).not.toBeInTheDocument();
+  });
+
+  it("sem as permissões de configuração, os botões «Campos de admissão» e «Regras de fim de contrato» não aparecem", () => {
+    permissoes.concedidas = new Set(["hr.pessoas.create"]);
+    renderEm("/rh-exemplo/pessoas");
+    expect(screen.queryByRole("button", { name: "Campos de admissão" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Regras de fim de contrato" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nova pessoa" })).toBeInTheDocument();
+  });
+
+  it("um ?tab= desconhecido ou sem permissão (contratos) cai no separador Pessoas", () => {
+    renderEm("/rh-exemplo/pessoas?tab=inexistente");
+    expect(screen.getByRole("tab", { name: "Pessoas", selected: true })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Contratos/ })).not.toBeInTheDocument();
   });
 
   it("«Campos de admissão» abre a página e «Voltar a Pessoas» regressa à lista", () => {

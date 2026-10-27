@@ -33,7 +33,7 @@ import {
   type PoliticaFeriados,
   type RegimeTrabalho,
 } from "@/components/rh-exemplo/tipos";
-import { InterruptorHorasExtra, usePodeHorasExtra } from "@/components/rh-exemplo/fluxosC/InterruptorHorasExtra";
+import { InterruptorHorasExtra } from "@/components/rh-exemplo/fluxosC/InterruptorHorasExtra";
 import { CAMPOS_NUMERICOS, type DefinirCampo, type RascunhoVinculo } from "./rascunhoVinculo";
 
 interface ContratoGrupoTempoTrabalhoProps {
@@ -56,8 +56,9 @@ export function ContratoGrupoTempoTrabalho({
   erroDe,
 }: ContratoGrupoTempoTrabalhoProps) {
   const { t } = useTranslation();
-  const podeHorasExtra = usePodeHorasExtra(pessoaId);
-  const maximosAtivos = podeEditar && (pessoaId === undefined || podeHorasExtra);
+  // Os máximos gravam-se em pessoas_vinculos (saveVinculo), como no RH real: só dependem de quem pode editar o contrato,
+  // e não do interruptor de horas extra, que vive só em memória.
+  const maximosAtivos = podeEditar;
 
   const horasNumero = Number(rascunho.horas_periodo.replace(",", "."));
   const horasLegiveis = rascunho.horas_periodo.trim() !== "" && Number.isFinite(horasNumero);

@@ -46,11 +46,34 @@ function diasForaDoLocal(picagens: EntradaMes["picagens"], locais: readonly Loca
   return dias;
 }
 
+/**
+ * Os dias com alguma picagem a mais de 200 m do centro, com as coordenadas que a base guardou (`pessoas_picagens.latitude`
+ * e `longitude`). Ao contrario da versao de exemplo, aqui nao ha ponto de referencia inventado: sem coordenadas na picagem,
+ * sem centro ou com um centro sem coordenadas, nao ha como medir e o dia nao se marca (calar e melhor do que acusar).
+ */
+export function diasForaDoLocalReal(picagens: EntradaMes["picagens"], locais: readonly LocalTrabalho[]): Set<string> {
+  const dias = new Set<string>();
+  for (const p of picagens) {
+    if (p.latitude === null || p.latitude === undefined || p.longitude === null || p.longitude === undefined) continue;
+    const local = locais.find((l) => l.id === p.local_id);
+    if (!local || local.latitude === null || local.longitude === null) continue;
+    const distancia = distanciaMetros(
+      { latitude: Number(p.latitude), longitude: Number(p.longitude) },
+      { latitude: Number(local.latitude), longitude: Number(local.longitude) },
+    );
+    if (foraDoLocal(distancia)) dias.add(p.data_local);
+  }
+  return dias;
+}
+
 /** O que o calendario real le do hook de assiduidade da pessoa (linhas em bruto, com as substituidas). */
 export type AssiduidadeDoMes = Pick<
   AssiduidadeDaPessoa,
   "picagens" | "realizado" | "faltas" | "ausenciaAprovadaPorDia" | "planeado" | "planeadoRecusado"
->;
+> & {
+  /** Reler o mes da base (por exemplo depois de aceitar uma justificacao, que cria uma falta). Sem ele, o calendario nao se relê. */
+  recarregar?: () => unknown;
+};
 
 export interface FonteReal {
   ano: number;
@@ -65,6 +88,8 @@ export interface FonteReal {
   horasExtra: EntradaMes["horasExtra"];
   banco: EntradaMes["banco"];
   podeHE: boolean;
+  /** Os centros de trabalho, para medir a distancia das picagens. Sem eles nenhum dia fica «fora do local». */
+  locais?: readonly LocalTrabalho[];
 }
 
 /**
@@ -78,6 +103,7 @@ export function entradaMesReal(f: FonteReal): EntradaMes {
     const tipoId = (dia as { tipo_id?: string | null }).tipo_id;
     ausencias.set(data, { nome: f.tiposAusencia.find((t) => t.id === tipoId)?.nome ?? "", fraccao: dia.fraccao_dia });
   }
+  const picagens = emVigor(f.assiduidade.picagens, LEITOR_PICAGENS);
   return {
     ano: f.ano,
     mes: f.mes,
@@ -86,13 +112,12 @@ export function entradaMesReal(f: FonteReal): EntradaMes {
     contrato: f.contrato,
     ausencias,
     realizado: emVigor(f.assiduidade.realizado, LEITOR_REALIZADO).filter((l) => !l.deleted_at),
-    picagens: emVigor(f.assiduidade.picagens, LEITOR_PICAGENS),
+    picagens,
     faltas: emVigor(f.assiduidade.faltas, LEITOR_FALTAS),
     horasExtra: f.horasExtra,
     banco: f.banco,
     podeHE: f.podeHE,
-    // As picagens lidas da base nao trazem coordenadas: nao ha como medir a distancia ao local.
-    diasForaDoLocal: new Set<string>(),
+    diasForaDoLocal: diasForaDoLocalReal(picagens, f.locais ?? []),
   };
 }
 

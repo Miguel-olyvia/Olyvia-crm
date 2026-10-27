@@ -48,14 +48,19 @@ export function construirArvore(est: EstruturaOrg, ligs: readonly Ligacao[], pes
   const centro = (c: CentroOrg): NoOrg => ({
     id: c.id, tipo: "centro", nome: c.nome, filhos: gente(ligacoesDoCentro(c.id, ligs)), legais: 0, locais: cont(c.id).locais,
   });
+  // Uma filial leva dentro os seus centros, as pessoas sem centro e as filiais que estao dentro dela (aninhamento).
   const filial = (id: string, nome: string): NoOrg => ({
     id, tipo: "filial", nome, legais: cont(id).legais, locais: null,
-    filhos: [...est.centros.filter((c) => c.filialId === id).map(centro), ...semCentroDe(id, ligs.filter((l) => l.filialId === id))],
+    filhos: [
+      ...est.centros.filter((c) => c.filialId === id).map(centro),
+      ...semCentroDe(id, ligs.filter((l) => l.filialId === id)),
+      ...est.filiais.filter((f) => f.paiFilialId === id).map((f) => filial(f.id, f.nome)),
+    ],
   });
   const empresas: NoOrg[] = est.empresas.map((e) => ({
     id: e.id, tipo: "empresa", nome: e.nome, legais: cont(e.id).legais, locais: null,
     filhos: [
-      ...est.filiais.filter((f) => f.empresaId === e.id).map((f) => filial(f.id, f.nome)),
+      ...est.filiais.filter((f) => f.empresaId === e.id && !f.paiFilialId).map((f) => filial(f.id, f.nome)),
       ...semCentroDe(e.id, ligs.filter((l) => l.empresaId === e.id && !est.filiais.some((f) => f.id === l.filialId))),
     ],
   }));

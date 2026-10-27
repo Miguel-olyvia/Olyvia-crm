@@ -1,6 +1,7 @@
 // O módulo «Custos» do RH: as pessoas e a retribuição do mês vêm do processamento salarial REAL (aqui entram por
-// argumento, ao nível do hook `useCustoDaOrganizacao`, por isso não há Supabase); equipamentos, avulsos e taxas
-// continuam em memória. A ficha da pessoa é substituída por um painel que mostra só o separador Custo (a ficha real
+// argumento, ao nível do hook `useCustoDaOrganizacao`, por isso não há Supabase); equipamentos e taxas continuam em
+// memória. Os valores avulsos são lançamentos pontuais da base: aqui o `criar` e o `anular` do processamento são
+// simulados e gravam no store de exemplo, só para os totais e as listas se poderem ver mexer. A ficha da pessoa é substituída por um painel que mostra só o separador Custo (a ficha real
 // tem testes próprios). Data fixa (14/10/2026).
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -11,6 +12,8 @@ import type { PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizac
 const estado = vi.hoisted(() => ({
   pessoas: [] as PessoaParaCusto[],
   calculo: {} as Record<string, unknown>,
+  periodoAberto: true,
+  vinculos: { error: null as string | null, recusado: false },
 }));
 
 vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({ useCompany: () => ({ activeCompany: { id: "org-1" }, isLoading: false }) }));
@@ -19,6 +22,24 @@ vi.mock("@/components/rh-exemplo/processamento/useCalculoReal", () => ({ Recolha
 vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
   const { useCusto } = await import("@/components/rh-exemplo/dados/lojaCusto");
   const { custoDaPessoa, linhasDaOrganizacao } = await import("@/components/rh-exemplo/custo/custoLido");
+  const { lerCusto, registarAvulso, anularAvulso } = await import("@/components/rh-exemplo/dados/lojaCusto");
+  const lancamentos = (mes: string) => ({
+    periodoAberto: estado.periodoAberto,
+    aGravar: false,
+    codigos: [{ id: "cod-1", codigo: "PRM", nome: "Prémio" }],
+    criar: async (n: { pessoaId: string; descricao: string; valor: number }) => {
+      const { erro } = registarAvulso({
+        pessoaId: n.pessoaId, tipo: "pontual", data: `${mes}-01`, descricao: n.descricao, quantidade: 1, valorUnitario: n.valor, autor: "", podeProcessar: true,
+      });
+      return erro;
+    },
+    anular: async (id: string, motivo: string) => anularAvulso(id, motivo, "", true).erro,
+  });
+  const porPessoa = () => {
+    const mapa = new Map<string, ReturnType<typeof lerCusto>["avulsos"]>();
+    for (const a of lerCusto().avulsos) mapa.set(a.pessoaId, [...(mapa.get(a.pessoaId) ?? []), a]);
+    return mapa;
+  };
   // Recalcula quando o store em memoria dos avulsos, equipamentos e taxas muda (como o hook verdadeiro).
   const useAssinar = () => {
     useCusto((e) => e.avulsos);
@@ -29,12 +50,15 @@ vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
   return {
     useCustoDaOrganizacao: (mes: string) => {
       useAssinar();
-      return { linhas: linhasDaOrganizacao(mes, estado.pessoas), calculo: estado.calculo, ano: Number(mes.slice(0, 4)), mesNum: Number(mes.slice(5, 7)) };
+      return {
+        linhas: linhasDaOrganizacao(mes, estado.pessoas, lerCusto().avulsos), calculo: estado.calculo, ano: Number(mes.slice(0, 4)), mesNum: Number(mes.slice(5, 7)),
+        vinculosHook: estado.vinculos, avulsosPorPessoa: porPessoa(), lancamentos: lancamentos(mes),
+      };
     },
     useCustoDaPessoa: (pessoa: { id: string }, mes: string) => {
       useAssinar();
       const p = estado.pessoas.find((x) => x.pessoaId === pessoa.id);
-      return { custo: p ? custoDaPessoa(p, mes, 0) : null, aCarregar: false, retribuicaoRecusada: false, incompleta: false };
+      return { custo: p ? custoDaPessoa(p, mes, 0, lerCusto().avulsos) : null, aCarregar: false, retribuicaoRecusada: false, incompleta: false, lancamentos: lancamentos(mes) };
     },
   };
 });
@@ -109,6 +133,8 @@ beforeEach(() => {
   reporCusto();
   estado.pessoas = PESSOAS;
   estado.calculo = calculo();
+  estado.periodoAberto = true;
+  estado.vinculos = { error: null, recusado: false };
 });
 
 afterEach(() => {
@@ -278,7 +304,7 @@ describe("o que a base diz e o que falta dizer", () => {
   });
 });
 
-describe("atribuir equipamento e registar valor avulso, em memória", () => {
+describe("atribuir equipamento (em memória) e registar valor avulso (lançamento pontual)", () => {
   it("atribuir na ficha aparece na lista da pessoa e muda o total de equipamentos do módulo", () => {
     noRouter();
     const antes = totalDoCabecalho("equipamentos");
@@ -332,21 +358,60 @@ describe("atribuir equipamento e registar valor avulso, em memória", () => {
     expect(screen.getByText("Equipamento atribuído a Hugo Teixeira.")).toBeInTheDocument();
   });
 
-  it("registar valor avulso no topo escolhe a pessoa, regista e conta no mês visto (por omissão), sem saltar para outro", () => {
+  it("registar valor avulso no topo escolhe a pessoa, pede descrição e valor, regista e conta no mês visto, sem saltar para outro", async () => {
     noRouter();
     fireEvent.click(screen.getByRole("button", { name: "Registar valor avulso" }));
     const dialogo = screen.getByRole("dialog");
+    // Só o que a base guarda: nada de quilómetros, ajudas de custo, repartido nem «todos os meses».
+    expect(within(dialogo).queryByLabelText("Quilómetros")).not.toBeInTheDocument();
+    expect(within(dialogo).queryByRole("radiogroup", { name: "Como conta" })).not.toBeInTheDocument();
+    expect(within(dialogo).getByText(/Conta de uma vez, em setembro de 2026/)).toBeInTheDocument();
     fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
-    expect(within(dialogo).getByRole("alert")).toHaveTextContent("Escolhe a pessoa.");
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Escolhe a pessoa.");
     fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /Pessoa/ }), { key: "Enter" });
     fireEvent.click(screen.getByRole("option", { name: "Inês Cardoso" }));
-    fireEvent.change(within(dialogo).getByLabelText("Descrição"), { target: { value: "Visita a fornecedor" } });
-    fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "50" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
-    expect(lerCusto().avulsos.at(-1)).toMatchObject({ pessoaId: "p-ines", valor: 20, descricao: "Visita a fornecedor" });
-    expect(lerCusto().avulsos.at(-1)).toMatchObject({ data: "2026-09-01", conta: { modo: "umaVez" } });
-    expect(screen.getByText(/Valor registado\. Conta em setembro de 2026\./)).toBeInTheDocument();
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Escreva uma descrição.");
+    fireEvent.change(within(dialogo).getByLabelText(/^Descrição/), { target: { value: "Prémio de loja" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Escreva um valor diferente de zero.");
+    fireEvent.change(within(dialogo).getByLabelText(/^Valor/), { target: { value: "20" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
+    expect(await screen.findByText(/Valor registado\. Conta em setembro de 2026\./)).toBeInTheDocument();
+    expect(lerCusto().avulsos.at(-1)).toMatchObject({ pessoaId: "p-ines", valor: 20, descricao: "Prémio de loja", data: "2026-09-01", conta: { modo: "umaVez" } });
     expect(screen.getByLabelText("Mês")).toHaveValue("2026-09");
+  });
+
+  it("num período que não está aberto avisa e não deixa registar", () => {
+    estado.periodoAberto = false;
+    noRouter();
+    fireEvent.click(screen.getByRole("button", { name: "Registar valor avulso" }));
+    const dialogo = screen.getByRole("dialog");
+    expect(within(dialogo).getByRole("status")).toHaveTextContent(/não está aberto/);
+    expect(within(dialogo).getByRole("button", { name: "Registar valor" })).toBeDisabled();
+  });
+
+  it("anular na ficha pede o motivo, o valor continua visível mas deixa de contar", async () => {
+    noRouter();
+    fireEvent.click(screen.getByRole("button", { name: "Registar valor avulso" }));
+    const registo = screen.getByRole("dialog");
+    fireEvent.keyDown(within(registo).getByRole("combobox", { name: /Pessoa/ }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("option", { name: "Inês Cardoso" }));
+    fireEvent.change(within(registo).getByLabelText(/^Descrição/), { target: { value: "Prémio por engano" } });
+    fireEvent.change(within(registo).getByLabelText(/^Valor/), { target: { value: "75" } });
+    fireEvent.click(within(registo).getByRole("button", { name: "Registar valor" }));
+    await screen.findByText(/Valor registado\./);
+    fireEvent.click(within(linhaDe("Inês Cardoso")).getByRole("button", { name: /Abrir a ficha de Inês Cardoso/ }));
+    const ficha = screen.getByRole("dialog");
+    const linha = within(ficha).getByText("Prémio por engano").closest("tr") as HTMLElement;
+    fireEvent.click(within(linha).getByRole("button", { name: "Anular" }));
+    const dialogo = screen.getAllByRole("dialog").at(-1) as HTMLElement;
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Anular" }));
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Indica o motivo");
+    fireEvent.change(within(dialogo).getByLabelText(/^Motivo/), { target: { value: "Registado por engano" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Anular" }));
+    await waitFor(() => expect(lerCusto().avulsos.find((a) => a.descricao === "Prémio por engano")?.anulado).toMatchObject({ motivo: "Registado por engano" }));
+    expect(within(within(screen.getByRole("dialog")).getByText("Prémio por engano").closest("tr") as HTMLElement).getByText("Anulado")).toBeInTheDocument();
   });
 
   it("o seletor de mês e «Hoje» mudam o mês mostrado", () => {
@@ -466,24 +531,29 @@ describe("«Como conta» no painel de atribuir e na ficha", () => {
     expect(within(tabela).getByText(/389,00.* por mês/)).toBeInTheDocument();
   });
 
-  it("registar um avulso pede a data, por omissão no mês visto, e repartido por 2 meses conta em dois meses", () => {
+  it("registar um avulso noutro mês regista-o nesse mês (o período que está a ser visto)", async () => {
     noRouter();
     irParaMes("2026-08");
     fireEvent.click(screen.getByRole("button", { name: "Registar valor avulso" }));
     const dialogo = screen.getByRole("dialog");
-    expect(within(dialogo).getByLabelText(/Data/)).toHaveValue("2026-08-01");
-    fireEvent.change(within(dialogo).getByLabelText(/Data/), { target: { value: "" } });
+    expect(within(dialogo).getByText(/Conta de uma vez, em agosto de 2026/)).toBeInTheDocument();
     fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /Pessoa/ }), { key: "Enter" });
     fireEvent.click(screen.getByRole("option", { name: "Inês Cardoso" }));
-    fireEvent.change(within(dialogo).getByLabelText("Descrição"), { target: { value: "Formação" } });
-    fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "100" } });
+    fireEvent.change(within(dialogo).getByLabelText(/^Descrição/), { target: { value: "Formação" } });
+    fireEvent.change(within(dialogo).getByLabelText(/^Valor/), { target: { value: "40" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
-    expect(within(dialogo).getByRole("alert")).toHaveTextContent("Indica a data (o valor conta no mês dela).");
-    fireEvent.change(within(dialogo).getByLabelText(/Data/), { target: { value: "2026-08-12" } });
-    fireEvent.click(within(dialogo).getByRole("radio", { name: /Repartido por N meses/ }));
-    fireEvent.change(within(dialogo).getByLabelText(/Número de meses/), { target: { value: "2" } });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
-    expect(lerCusto().avulsos.at(-1)).toMatchObject({ valor: 40, conta: { modo: "repartido", meses: 2 } });
+    await screen.findByText(/Valor registado\. Conta em agosto de 2026\./);
+    expect(lerCusto().avulsos.at(-1)).toMatchObject({ valor: 40, data: "2026-08-01", conta: { modo: "umaVez" } });
     expect(screen.getByLabelText("Mês")).toHaveValue("2026-08");
+  });
+
+  it("uma falha na leitura dos contratos aparece, e sem permissão diz-se", () => {
+    estado.vinculos = { error: "Sem rede", recusado: false };
+    noRouter();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Não foi possível ler os contratos da organização \(Sem rede\)/);
+    cleanup();
+    estado.vinculos = { error: null, recusado: true };
+    noRouter();
+    expect(screen.getByText(/Não tens permissão para ver os contratos/)).toBeInTheDocument();
   });
 });

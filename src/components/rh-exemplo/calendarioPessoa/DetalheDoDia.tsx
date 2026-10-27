@@ -28,6 +28,8 @@ interface Props {
   /** Quem ve e a propria pessoa: nunca corrige, so justifica (dentro do prazo) e consulta. */
   souAPessoa?: boolean;
   pessoaId: string;
+  /** A aceitação de uma justificação deixou uma falta nova na base: o mês relê-se para a mostrar. */
+  aoCriarFalta?: () => void;
   aoFechar: () => void;
   aoAbrirRegisto: (data: string) => void;
 }
@@ -69,7 +71,7 @@ function LinhaHoraExtra({ hora, dataLonga, podeDecidir, aoDecidir }: {
   );
 }
 
-export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorrigir, souAPessoa = false, pessoaId, aoFechar, aoAbrirRegisto }: Props) {
+export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorrigir, souAPessoa = false, pessoaId, aoCriarFalta, aoFechar, aoAbrirRegisto }: Props) {
   const { t } = useTranslation();
   const [pedido, setPedido] = useState<PedidoDecisao | null>(null);
   if (!dia) return null;
@@ -133,7 +135,7 @@ export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorr
               </>
             ) : (
               <>
-                <JustificacaoDiaRh pessoaId={pessoaId} pessoaNome={pessoaNome} data={dia.data} />
+                <JustificacaoDiaRh pessoaId={pessoaId} pessoaNome={pessoaNome} data={dia.data} aoCriarFalta={aoCriarFalta} />
                 <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => aoAbrirRegisto(dia.data)}>
                   {t(podeCorrigir ? "rhCal.detalhe.corrigir" : "rhCal.detalhe.verRegisto")}
                 </Button>

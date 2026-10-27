@@ -31,8 +31,8 @@ export interface NovaPessoaExemplo {
   naoGravado: NaoGravado[];
 }
 
-/** Campos do formulario sem coluna na base: o nome de tratamento e os ficheiros anexos. */
-export type NaoGravado = "nome_tratamento" | "anexos";
+/** Campos do formulario sem coluna na base: o nome de tratamento. (Os ficheiros anexos seguem de verdade.) */
+export type NaoGravado = "nome_tratamento";
 
 export interface ResultadoCriacao {
   id: string;

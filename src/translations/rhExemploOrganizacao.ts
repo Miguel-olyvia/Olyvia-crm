@@ -111,6 +111,7 @@ export const rhExemploOrganizacaoTranslations: Record<"en" | "pt", Record<string
     "rhOrg.semPermissao": "You do not have permission to see where people are placed in the organization chart.",
     "rhOrg.falhaLeitura": "Could not load where people are placed in the organization chart. What is shown may be out of date.",
     "rhOrg.tentarDeNovo": "Try again",
+    "rhOrg.falhaDados": "Could not read the tax number, address and hierarchy of the branches. They show as empty or flat until you reload the page.",
   },
   pt: {
     "sidebar.rhExemploOrganizacao": "Organização",
@@ -223,5 +224,6 @@ export const rhExemploOrganizacaoTranslations: Record<"en" | "pt", Record<string
     "rhOrg.semPermissao": "Não tens permissão para ver a colocação das pessoas no organograma.",
     "rhOrg.falhaLeitura": "Não foi possível carregar a colocação das pessoas no organograma. O que se vê pode estar desatualizado.",
     "rhOrg.tentarDeNovo": "Tentar de novo",
+    "rhOrg.falhaDados": "Não foi possível ler o NIF, a morada e a hierarquia das filiais. Aparecem vazios ou em lista plana até recarregares a página.",
   },
 };

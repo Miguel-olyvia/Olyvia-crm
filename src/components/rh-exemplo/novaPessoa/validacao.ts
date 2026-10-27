@@ -4,7 +4,7 @@
 // obrigatórios; malformado é sempre erro. Funções puras.
 import type { ConfiguracaoCampo } from "@/components/rh-exemplo/lib/admissaoObrigatorios";
 import { problemasDoRascunho } from "@/components/rh-exemplo/lib/novaPessoa";
-import { codigosObrigatoriosDoFormulario } from "@/components/rh-exemplo/lib/novaPessoaAdmissao";
+import { codigosObrigatoriosDoFormulario, type CodigosIndisponiveis } from "@/components/rh-exemplo/lib/novaPessoaAdmissao";
 import { numeroDe } from "@/components/rh-exemplo/lib/numeros";
 import { ABAS_NOVA, abaDoCampo, CAMPO_DO_CODIGO, ordemDoCampo, seccaoDoCampo, type AbaNova } from "./ids";
 import { textoOuNull, type ValoresNovaPessoa } from "./tiposNova";
@@ -20,6 +20,14 @@ export interface OpcoesValidacao {
   config?: readonly ConfiguracaoCampo[] | null;
   /** AAAA-MM-DD, para decidir o que é "no futuro". */
   hoje: string;
+  /** Os códigos que quem cria não pode escrever (banco e fardamento sem a permissão): não se exigem. */
+  indisponiveis?: CodigosIndisponiveis;
+  /**
+   * Quem cria pode ver os grupos de permissões (`roles.view`) e por isso escolher um. `false` não exige o grupo: o campo
+   * nem está no ecrã, e um erro num campo que não se vê não se corrige. O acesso fica como pendência, a concluir na ficha.
+   * Por omissão (`undefined`) o grupo exige-se.
+   */
+  papelDisponivel?: boolean;
 }
 
 const OBRIGATORIO = "hr.form.erroObrigatorio";
@@ -123,19 +131,40 @@ function problemasDoRh(v: ValoresNovaPessoa, hoje: string): ProblemaNova[] {
   return lista;
 }
 
-function problemasDoAcesso(v: ValoresNovaPessoa): ProblemaNova[] {
+function problemasDoAcesso(v: ValoresNovaPessoa, papelDisponivel: boolean): ProblemaNova[] {
   if (!v.extra.criar_acesso) return [];
   const lista: ProblemaNova[] = [];
-  if (v.acesso.role_id === "") acrescentar(lista, "hr-novo-papel", "hr.acesso.erroPapelObrigatorio");
+  if (papelDisponivel && v.acesso.role_id === "") acrescentar(lista, "hr-novo-papel", "hr.acesso.erroPapelObrigatorio");
   const email = v.extra.email_acesso.trim();
   if (email === "") acrescentar(lista, "hr-novo-email-acesso", OBRIGATORIO);
   else if (!EMAIL.test(email)) acrescentar(lista, "hr-novo-email-acesso", "hr.form.erroEmail");
   return lista;
 }
 
+const algum = (...valores: string[]): boolean => valores.some((valor) => valor.trim() !== "");
+
+/**
+ * Grupos que só se gravam inteiros: o que a base não grava não se perde em silêncio.
+ *  - contacto de emergência: sem nome e telefone não há linha (o telefone alternativo, o e-mail e a relação iam fora);
+ *  - titular, banco e agência da conta: só se gravam com o número (a RPC exige-o).
+ */
+function problemasDeGruposIncompletos(v: ValoresNovaPessoa): ProblemaNova[] {
+  const p = v.pessoais;
+  const e = v.extra;
+  const lista: ProblemaNova[] = [];
+  if (algum(p.emergencia_nome, p.emergencia_relacao, p.emergencia_telefone, e.emergencia_telefone_alt, e.emergencia_email)) {
+    if (p.emergencia_nome.trim() === "") acrescentar(lista, "hr-novo-emergencia-nome", OBRIGATORIO);
+    if (p.emergencia_telefone.trim() === "") acrescentar(lista, "hr-novo-emergencia-telefone", OBRIGATORIO);
+  }
+  if (algum(p.conta_titular, p.conta_banco, e.conta_agencia) && p.conta_numero.trim() === "") {
+    acrescentar(lista, "hr-novo-conta-numero", OBRIGATORIO);
+  }
+  return lista;
+}
+
 /** Os problemas do assistente real, sem os "obrigatório" das secções que se pedem à pessoa no convite. */
 function problemasDoAssistente(v: ValoresNovaPessoa, o: OpcoesValidacao): ProblemaNova[] {
-  return problemasDoRascunho(v, { comConvite: o.comConvite, config: o.config ?? undefined })
+  return problemasDoRascunho(v, { comConvite: o.comConvite, config: o.config ?? undefined, indisponiveis: o.indisponiveis })
     .map((p): ProblemaNova => ({ campoId: p.campoId, mensagemKey: p.mensagemKey }))
     .filter((p) => {
       const seccao = seccaoDoCampo(p.campoId);
@@ -152,7 +181,8 @@ export function problemasDaNova(v: ValoresNovaPessoa, o: OpcoesValidacao): Probl
     ...problemasDeDatasPessoais(v, o.hoje),
     ...problemasDeContactos(v),
     ...problemasDeSaudeESindicato(v),
-    ...problemasDoAcesso(v),
+    ...problemasDeGruposIncompletos(v),
+    ...problemasDoAcesso(v, o.papelDisponivel !== false),
   ];
   const vistos = new Set<string>();
   return todos
@@ -183,13 +213,13 @@ export function primeiroProblema(problemas: readonly ProblemaNova[]): ProblemaNo
  */
 export function idsObrigatorios(v: ValoresNovaPessoa, o: OpcoesValidacao): ReadonlySet<string> {
   const ids = new Set<string>(OBRIGATORIOS_FIXOS);
-  for (const codigo of codigosObrigatoriosDoFormulario(o.comConvite, o.config)) {
+  for (const codigo of codigosObrigatoriosDoFormulario(o.comConvite, o.config, o.indisponiveis)) {
     const campo = CAMPO_DO_CODIGO[codigo];
     if (campo && v.extra.noConvite[campo.seccao] !== true) ids.add(campo.id);
   }
   if (o.comConvite) ids.add("hr-novo-email-pessoal");
   if (v.extra.criar_acesso) {
-    ids.add("hr-novo-papel");
+    if (o.papelDisponivel !== false) ids.add("hr-novo-papel");
     ids.add("hr-novo-email-acesso");
   }
   if (v.contrato.tipo_contrato === "termo_certo") ids.add("hr-novo-data-fim");

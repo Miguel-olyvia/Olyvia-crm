@@ -7,12 +7,11 @@ export const ABAS_NOVA: readonly AbaNova[] = ["dados", "contacto", "contrato", "
 /** Os campos de cada aba, pela ordem do ecra: o primeiro com erro desta ordem recebe o foco. */
 export const CAMPOS_POR_ABA: Readonly<Record<AbaNova, readonly string[]>> = {
   dados: [
-    "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-nome-tratamento", "hr-novo-data-nascimento", "hr-novo-genero",
+    "hr-novo-conta", "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-nome-tratamento", "hr-novo-data-nascimento", "hr-novo-genero",
     "hr-novo-nacionalidade", "hr-novo-estado-civil", "hr-novo-conjuge-situacao", "hr-novo-dependentes",
     "hr-novo-dependentes-deficientes", "hr-novo-naturalidade-freguesia", "hr-novo-naturalidade-concelho",
     "hr-novo-naturalidade-pais", "hr-novo-tipo-documento", "hr-novo-numero-documento", "hr-novo-validade-documento",
     "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero", "hr-novo-carta-categorias", "hr-novo-carta-validade",
-    "hr-novo-anexo-cartao_cidadao", "hr-novo-anexo-fotografia",
   ],
   contacto: [
     "hr-novo-email-pessoal", "hr-novo-telefone-pessoal", "hr-novo-email-trabalho", "hr-novo-telefone-trabalho",
@@ -26,12 +25,11 @@ export const CAMPOS_POR_ABA: Readonly<Record<AbaNova, readonly string[]>> = {
     "hr-novo-regime-contratual", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-data-inicio", "hr-novo-data-fim",
     "hr-novo-duracao-meses", "hr-novo-renovavel", "hr-novo-periodo-experimental-dias", "hr-novo-horas-trabalho",
     "hr-novo-horas-frequencia", "hr-novo-tempo-trabalho-pct", "hr-novo-politica-feriados", "hr-novo-horas-semanais-maximas",
-    "hr-novo-horas-anuais-maximas", "hr-novo-tipo-horario",
+    "hr-novo-horas-anuais-maximas",
   ],
   retribuicao: [
     "hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-formato", "hr-novo-conta-numero",
     "hr-novo-conta-titular", "hr-novo-conta-banco", "hr-novo-conta-agencia", "hr-novo-conta-bic",
-    "hr-novo-anexo-comprovativo_iban",
   ],
   outros: [
     "hr-novo-habilitacao", "hr-novo-habilitacao-data", "hr-novo-saude-incapacidade", "hr-novo-saude-validade",

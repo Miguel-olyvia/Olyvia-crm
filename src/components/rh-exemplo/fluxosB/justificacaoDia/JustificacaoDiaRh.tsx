@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { decidirJustificacaoDeDia, verTextoDaJustificacao } from "@/components/rh-exemplo/dados/accoesJustificacaoDia";
+import { verTextoDaJustificacao } from "@/components/rh-exemplo/dados/accoesJustificacaoDia";
 import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { useJustificacaoDia } from "@/components/rh-exemplo/dados/lojaJustificacaoDia";
 import { valorHoraDaFicha } from "@/components/rh-exemplo/fluxosB/faltas/valorHora";
@@ -15,7 +15,7 @@ import { formatarData, formatarDataHora, formatarEuros, formatarHorasMinutos } f
 import { ESTADO_DA_JUSTIFICACAO, descontoDaDecisao, textoEhSensivel, type DecisaoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { useTranslation } from "@/hooks/useTranslation";
 import { DialogosDecisaoDia, type PedidoDecisaoDia } from "./DialogosDecisaoDia";
-import { textoDaDecisao } from "./textoDaDecisao";
+import { useDecisaoDoDia } from "./useDecisaoDoDia";
 
 function TextoDoMotivo({ j }: { j: JustificacaoDia }) {
   const { t } = useTranslation();
@@ -105,23 +105,21 @@ function Cartao({ j, aoDecidir, aoRecusar }: CartaoProps) {
   );
 }
 
-export function JustificacaoDiaRh({ pessoaId, pessoaNome, data }: { pessoaId: string; pessoaNome: string; data: string }) {
+interface JustificacaoDiaRhProps {
+  pessoaId: string;
+  pessoaNome: string;
+  data: string;
+  /** Chamado quando a aceitação deixou uma falta nova na base: o calendário da pessoa relê o mês para a mostrar. */
+  aoCriarFalta?: () => void;
+}
+
+export function JustificacaoDiaRh({ pessoaId, pessoaNome, data, aoCriarFalta }: JustificacaoDiaRhProps) {
   const { t } = useTranslation();
   const todas = useJustificacaoDia((e) => e.justificacoes);
   const [pedido, setPedido] = useState<PedidoDecisaoDia | null>(null);
-  const [mensagem, setMensagem] = useState<{ texto: string; erro: boolean } | null>(null);
+  const { decidir, mensagem, executor } = useDecisaoDoDia(aoCriarFalta);
   const doDia = todas.filter((j) => j.pessoaId === pessoaId && j.data === data);
-  if (doDia.length === 0) return null;
-
-  const decidir = (j: JustificacaoDia, decisao: DecisaoJustificacaoDia, motivo = ""): string | null => {
-    const resultado = decidirJustificacaoDeDia(j.id, decisao, motivo);
-    if (resultado.erro) {
-      setMensagem({ texto: t(resultado.erro), erro: true });
-      return resultado.erro;
-    }
-    setMensagem({ texto: textoDaDecisao(t, decisao, resultado), erro: false });
-    return null;
-  };
+  if (doDia.length === 0 && !executor) return null;
 
   return (
     <section className="space-y-3" aria-label={t("rhJust.rh.titulo")} data-testid="rhjd-rh">
@@ -133,6 +131,7 @@ export function JustificacaoDiaRh({ pessoaId, pessoaNome, data }: { pessoaId: st
       </ul>
       {mensagem && <p role={mensagem.erro ? "alert" : "status"} className={`text-sm font-medium ${mensagem.erro ? "text-destructive" : ""}`}>{mensagem.texto}</p>}
       <DialogosDecisaoDia pedido={pedido} aoFechar={() => setPedido(null)} aoDecidir={decidir} />
+      {executor}
     </section>
   );
 }

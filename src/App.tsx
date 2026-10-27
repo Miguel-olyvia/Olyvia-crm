@@ -93,7 +93,6 @@ const WelcomeGuide = lazy(() => import("./pages/WelcomeGuide"));
 const PessoasCrm = lazy(() => import("./pages/PessoasCrm"));
 const PessoasPipeline = lazy(() => import("./pages/PessoasPipeline"));
 const UtilizadoresPerfis = lazy(() => import("./pages/UtilizadoresPerfis"));
-const PessoasRh = lazy(() => import("./pages/rh-exemplo/PessoasRh"));
 const PessoaRhDetalhe = lazy(() => import("./pages/rh-exemplo/PessoaRhDetalhe"));
 const RhAssiduidadeEAusencias = lazy(() => import("./pages/rh-exemplo/RhAssiduidadeEAusencias"));
 const RhMinhasAusencias = lazy(() => import("./pages/rh-exemplo/RhMinhasAusencias"));
@@ -295,22 +294,22 @@ const App = () => (
                       <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasCrm /></PessoasRota></ProtectedRoute>} />
                       <Route path="/pipeline" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasPipeline /></PessoasRota></ProtectedRoute>} />
                       <Route path="/utilizadores-perfis" element={<ProtectedRoute permission="users.view"><UtilizadoresPerfis /></ProtectedRoute>} />
-                      <Route path="/rh-exemplo/pessoas" element={<ProtectedRoute permission="users.view"><PessoasRh /></ProtectedRoute>} />
-                      <Route path="/rh-exemplo/pessoas/:id" element={<ProtectedRoute permission="users.view"><PessoaRhDetalhe /></ProtectedRoute>} />
+                      {/* Uma só rota (`:id?`): abrir e fechar a ficha muda o endereço PELO ROUTER sem remontar a página. */}
+                      <Route path="/rh-exemplo/pessoas/:id?" element={<ProtectedRoute permission="users.view"><PessoaRhDetalhe /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/assiduidade-e-ausencias" element={<ProtectedRoute permission="users.view"><RhAssiduidadeEAusencias /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/ausencias" element={<ProtectedRoute permission="users.view"><RhMinhasAusencias /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/assiduidade" element={<ProtectedRoute permission="users.view"><RhMeuPonto /></ProtectedRoute>} />
-                      <Route path="/rh-exemplo/documentos" element={<ProtectedRoute permission="users.view"><RhMeusDocumentos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/documentos" element={<ProtectedRoute permissions={["hr.pessoas.documentos.view.own", "hr.pessoas.documentos.view"]}><RhMeusDocumentos /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/centros" element={<ProtectedRoute permission="users.view"><RhCentrosTrabalho /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/organizacao" element={<ProtectedRoute permission="users.view"><RhOrganizacao /></ProtectedRoute>} />
-                      <Route path="/rh-exemplo/documentos/modelos" element={<ProtectedRoute permission="users.view"><RhModelosDocumentos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/documentos/modelos" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><RhModelosDocumentos /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/processamento-salarial" element={<ProtectedRoute permission="users.view"><RhProcessamentoSalarial /></ProtectedRoute>} />
                       {/* Link antigo: as horas extra da pessoa passaram a ser uma aba de «O meu ponto». */}
                       <Route path="/rh-exemplo/minhas-horas-extra" element={<Navigate to="/rh-exemplo/assiduidade?aba=horas-extra" replace />} />
                       <Route path="/rh-exemplo/custos" element={<ProtectedRoute permission="users.view"><RhCustos /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/admissao" element={<ProtectedRoute permission="users.view"><RhAdmissaoIndice /></ProtectedRoute>} />
-                      <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
-                      <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="hr.contratos.regras.gerir"><RhRegrasFimContrato /></ProtectedRoute>} />
                       {/* Canal de denúncias de exemplo, dentro da app: A minha área (Denúncias: denunciar num painel e acompanhar) e a gestão no RH */}
                       <Route path="/rh-exemplo/denunciar" element={<Navigate to="/rh-exemplo/minhas-denuncias?nova=1" replace />} />
                       <Route path="/rh-exemplo/minhas-denuncias" element={<ProtectedRoute permission="users.view"><RhMinhasDenuncias /></ProtectedRoute>} />

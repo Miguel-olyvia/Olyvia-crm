@@ -52,7 +52,7 @@ export function usePaginaOrganizacao() {
   return {
     est, estado, pessoas, porId, termo, setTermo, aviso, seleccionado, setSeleccionado, form, aDesligar, setADesligar,
     loading: real.loading, semPermissao: real.semPermissao,
-    falhaLeitura: real.falhaLeitura, recarregar: real.recarregar,
+    falhaLeitura: real.falhaLeitura, falhaDados: real.falhaDados, recarregar: real.recarregar,
     visivel: filtrarArvore(arvore, termo),
     noAberto: procurar(arvore, seleccionado),
     abertos: pesquisando ? new Set(todos) : new Set(todos.filter((id) => !fechados.has(id))),

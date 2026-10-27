@@ -77,11 +77,14 @@ function Fardamento() {
 }
 
 export function AbaOutros() {
+  // Saúde e sindicalização (art. 9.º do RGPD) têm permissão própria de escrita: quem não a tem não vê os campos (e
+  // `paraPayload` também deixa de levar o satélite).
+  const { podeSaude, podeSindicalizacao } = useNova();
   return (
     <div className="space-y-4">
       <Habilitacoes />
-      <Saude />
-      <Sindicalizacao />
+      {podeSaude && <Saude />}
+      {podeSindicalizacao && <Sindicalizacao />}
       <Fardamento />
     </div>
   );

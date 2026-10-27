@@ -23,6 +23,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useTranslation } from "@/hooks/useTranslation";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
+import { useJustificacoesDaPessoa } from "@/components/rh-exemplo/fluxosB/alertas/useJustificacoesDaPessoa";
 import { FaltasDaPessoa } from "@/components/rh-exemplo/fluxosB/faltas/FaltasDaPessoa";
 import { PainelDoDia } from "@/components/rh-exemplo/assiduidade/PainelDoDia";
 import type { MesVisivel } from "@/components/rh-exemplo/calendarioPessoa/CalendarioPessoa";
@@ -85,7 +86,9 @@ interface CorpoProps {
 function CorpoAbas(p: CorpoProps) {
   const [abaLocal, setAbaLocal] = useState<string | null>(null);
   const temBanco = useEmBancoDeHoras(p.pessoaId);
-  const contadores = useContadoresAssiduidade(p.pessoaId);
+  // Lido uma só vez: a lista da aba Justificações e a pastilha usam os mesmos desvios da base.
+  const justificacoes = useJustificacoesDaPessoa(p.pessoaId);
+  const contadores = useContadoresAssiduidade(p.pessoaId, justificacoes.porFazer);
   const visiveis = abasVisiveis({ souAPessoa: p.souAPessoa, podePicar: p.permissoes.picar, temBanco });
   const mudar = (nova: string) => {
     setAbaLocal(nova);
@@ -112,7 +115,7 @@ function CorpoAbas(p: CorpoProps) {
       </TabsContent>
       <TabsContent value="justificacoes" className="mt-0">
         <div className="space-y-4">
-          <JustificarFalhaDeMarcacao pessoaId={p.pessoaId} />
+          <JustificarFalhaDeMarcacao pessoaId={p.pessoaId} justificacoes={justificacoes} />
           <FaltasDaPessoa pessoaNome={p.pessoaNome} souAPessoa={p.souAPessoa} permissoes={p.permissoes} assiduidade={p.assiduidade} />
         </div>
       </TabsContent>

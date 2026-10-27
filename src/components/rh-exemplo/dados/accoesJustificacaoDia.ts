@@ -18,6 +18,7 @@ import {
 import { lerFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
 import type { DesvioJustificavel } from "@/components/rh-exemplo/calendarioPessoa/desvioJustificavel";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
+import { MOTIVO_DA_FALTA } from "@/components/rh-exemplo/lib/faltaDaAceitacao";
 import { decidirJustificacaoFalta } from "@/components/rh-exemplo/lib/faltasB";
 import {
   criarJustificacaoDia,
@@ -28,9 +29,8 @@ import {
   type DecisaoJustificacaoDia,
   type ErrosEnvio,
   type JustificacaoDia,
-  type TipoJustificacaoDia,
 } from "@/components/rh-exemplo/lib/justificacaoDia";
-import type { Falta, MotivoFalta } from "@/components/rh-exemplo/tiposAssiduidade";
+import type { Falta } from "@/components/rh-exemplo/tiposAssiduidade";
 
 export interface ResultadoEnvio {
   erros: ErrosEnvio | null;
@@ -42,12 +42,6 @@ export interface ResultadoDecisaoDia {
   mesFechado: boolean;
 }
 
-const MOTIVO_DA_FALTA: Record<TipoJustificacaoDia, MotivoFalta> = {
-  consulta_medica: "doenca",
-  transporte: "outro",
-  assunto_pessoal: "assuntos_pessoais",
-  outro: "outro",
-};
 
 /** A pessoa envia (ou volta a enviar, depois de uma recusa) a justificação de um dia. Valida tudo e devolve erros por campo. */
 export function enviarJustificacaoDeDia(pessoaId: string, data: string, desvio: DesvioJustificavel, dados: DadosEnvio): ResultadoEnvio {
@@ -74,8 +68,19 @@ function faltaDaAceitacao(j: JustificacaoDia, decisao: DecisaoJustificacaoDia, a
   return { ...base, ...patch.patch, justificacao_decidida_por: lerEstado().minhaPessoaId, justificacao_decidida_em: agora };
 }
 
-/** O RH decide. Recusar exige motivo; aceitar marca a falta justificada e o dia, o mapa e o cálculo do mês acompanham. */
-export function decidirJustificacaoDeDia(justificacaoId: string, decisao: DecisaoJustificacaoDia, motivo: string): ResultadoDecisaoDia {
+/**
+ * O RH decide. Recusar exige motivo; aceitar marca a falta justificada e o dia, o mapa e o cálculo do mês acompanham.
+ *
+ * `faltaIdReal`: o id da falta que a BASE criou ao aceitar (`rpc_hr_falta_marcar` + `rpc_hr_falta_decidir_justificacao`, feitos
+ * antes por `AceitarComFaltaReal`). Com ele, a justificação guarda esse id e NÃO se cria falta nenhuma em memória: a falta
+ * é a da base. Sem ele (testes), mantém-se a falta de exemplo em memória.
+ */
+export function decidirJustificacaoDeDia(
+  justificacaoId: string,
+  decisao: DecisaoJustificacaoDia,
+  motivo: string,
+  faltaIdReal: string | null = null,
+): ResultadoDecisaoDia {
   const atual = lerJustificacaoDia().justificacoes.find((j) => j.id === justificacaoId);
   if (!atual) return { erro: "rhJust.erro.jaDecidida", mesFechado: false };
   const mesFechado = Boolean(lerFluxosC().fechos[mesDoDia(atual.data)]);
@@ -83,9 +88,9 @@ export function decidirJustificacaoDeDia(justificacaoId: string, decisao: Decisa
   const agora = momentoDePicagemAgora();
   const resultado = decidirJustificacaoDia(atual, decisao, { motivo, quem, agora, mesFechado });
   if (resultado.ok === false) return { erro: resultado.erro, mesFechado };
-  const falta = decisao === "recusar" ? null : faltaDaAceitacao(atual, decisao, agora);
+  const falta = decisao === "recusar" || faltaIdReal ? null : faltaDaAceitacao(atual, decisao, agora);
   if (falta) definirGestao((g) => ({ ...g, faltas: [...g.faltas, falta] }));
-  const decidida: JustificacaoDia = { ...resultado.valor, faltaId: falta?.id ?? null };
+  const decidida: JustificacaoDia = { ...resultado.valor, faltaId: faltaIdReal ?? falta?.id ?? null };
   definirJustificacaoDia((e) => ({ ...e, justificacoes: e.justificacoes.map((j) => (j.id === justificacaoId ? decidida : j)) }));
   return { erro: null, mesFechado };
 }

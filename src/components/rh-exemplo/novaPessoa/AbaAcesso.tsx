@@ -1,27 +1,48 @@
-// A aba "Acesso e convite" do painel "Nova pessoa": criar ou não o acesso à plataforma (grupo de permissões e e-mail de acesso) e,
-// à parte, o convite de admissão (para a pessoa preencher os seus dados): destinatário, validade e um link de exemplo.
+// A aba "Acesso e convite" do painel "Nova pessoa": pedir ou não o acesso à plataforma (grupo de permissões e e-mail de acesso)
+// e, à parte, o convite de admissão (para a pessoa preencher os seus dados): destinatário e validade. O acesso pedido aqui
+// fica como pendência da ficha e conclui-se nela («Criar acesso»); o convite envia-se com «Criar e enviar convite», e o link
+// só se mostra uma vez, no diálogo de envio (nunca aqui).
+//
+// O seletor do grupo de permissões depende de `roles.view` (quem só tem permissão de RH não lê os grupos): sem ela mostra-se o
+// MOTIVO em vez de um seletor vazio, e o grupo não se exige (ver `papelDisponivel` na validação).
 import { Mail } from "lucide-react";
-import { validadeDoConvite } from "@/components/rh-exemplo/dados/fichaNovaPessoa";
 import { usePapeisDaOrganizacao } from "@/components/rh-exemplo/hooks/usePapeisDaOrganizacao";
+import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
-import { CampoI, CampoS, CampoT, GRELHA } from "./camposNova";
+import { CampoI, CampoS, CampoT, GRELHA, LinhaCampo } from "./camposNova";
 import { useNova } from "./contextoNova";
 import { SeccaoNova } from "./SeccaoNova";
+import { DIAS_DO_CONVITE } from "./tiposNova";
 
-/** O link de exemplo: não aponta para lado nenhum, só mostra o aspeto de um link de convite. */
-export const LINK_CONVITE_EXEMPLO = "https://exemplo.olyvia.pt/convite/k7Qm2xW9";
+/** O seletor só existe (e só pede os grupos à base) para quem pode ver os grupos. */
+function SeletorPapel() {
+  const { t } = useTranslation();
+  const { papeis } = usePapeisDaOrganizacao();
+  return (
+    <CampoS
+      g="acesso" k="role_id" id="hr-novo-papel" rotulo={t("hr.acesso.papel")} placeholder={t("hr.acesso.papelPlaceholder")}
+      opcoes={papeis.map((p) => ({ value: p.id, label: p.name }))}
+    />
+  );
+}
+
+function PapelSemPermissao() {
+  const { t } = useTranslation();
+  return (
+    <LinhaCampo id="hr-novo-papel-motivo">
+      <p id="hr-novo-papel-motivo" className="text-sm text-muted-foreground">{t("rhNova.h.papelSemPermissao")}</p>
+    </LinhaCampo>
+  );
+}
 
 function Plataforma() {
   const { t } = useTranslation();
-  const { papeis } = usePapeisDaOrganizacao();
+  const { hasPermission } = usePermissions();
   return (
     <SeccaoNova titulo={t("rhNova.sec.acesso")}>
       <div className={GRELHA}>
         <CampoI g="extra" k="criar_acesso" id="hr-novo-criar-acesso" rotulo={t("rhNova.f.criarAcesso")} ajuda={t("rhNova.h.criarAcesso")} largo />
-        <CampoS
-          g="acesso" k="role_id" id="hr-novo-papel" rotulo={t("hr.acesso.papel")} placeholder={t("hr.acesso.papelPlaceholder")}
-          opcoes={papeis.map((p) => ({ value: p.id, label: p.name }))}
-        />
+        {hasPermission("roles.view") ? <SeletorPapel /> : <PapelSemPermissao />}
         <CampoT g="extra" k="email_acesso" id="hr-novo-email-acesso" tipo="email" rotulo={t("rhNova.f.emailAcesso")} ajuda={t("rhNova.h.emailAcesso")} />
       </div>
     </SeccaoNova>
@@ -29,9 +50,8 @@ function Plataforma() {
 }
 
 function Convite() {
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const { valores } = useNova();
-  const validade = new Date(`${validadeDoConvite()}T00:00:00Z`).toLocaleDateString(language === "pt" ? "pt-PT" : language, { timeZone: "UTC" });
   const destino = valores.pessoais.email_pessoal.trim();
   return (
     <SeccaoNova titulo={t("hr.convite.estado.titulo")}>
@@ -44,12 +64,8 @@ function Convite() {
           <dt className="text-muted-foreground">{t("hr.convite.email")}</dt>
           <dd>{destino === "" ? t("rhNova.convite.semEmail") : destino}</dd>
           <dt className="text-muted-foreground">{t("rhNova.convite.validade")}</dt>
-          <dd>{t("rhNova.convite.validadeValor", { data: validade })}</dd>
-          <dt className="text-muted-foreground">{t("hr.convite.linkDoConvite")}</dt>
-          <dd><code className="break-all rounded bg-muted px-1.5 py-0.5 text-xs">{LINK_CONVITE_EXEMPLO}</code></dd>
+          <dd>{t("rhNova.convite.validadeDias", { dias: DIAS_DO_CONVITE })}</dd>
         </dl>
-        <p className="text-xs text-muted-foreground">{t("rhNova.convite.exemplo")}</p>
-        <p className="text-xs text-muted-foreground">{t("rhAdm.nova.fluxo")}</p>
       </div>
     </SeccaoNova>
   );

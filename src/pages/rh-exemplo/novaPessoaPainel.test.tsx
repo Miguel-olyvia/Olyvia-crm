@@ -78,7 +78,8 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
     expect(within(nova).getByRole("button", { name: "Criar e enviar convite" })).toBeInTheDocument();
     expect(within(nova).getByRole("button", { name: "Criar pessoa" })).toBeInTheDocument();
     expect(within(nova).getByText(/O link do convite vale 7 dias/)).toBeInTheDocument();
-    expect(within(nova).getByText(/nada fica gravado/)).toBeInTheDocument();
+    // Ligado à base: já não se diz que nada fica gravado.
+    expect(within(nova).queryByText(/nada fica gravado/)).not.toBeInTheDocument();
   });
 
   it("o foco inicial vai para o nome", () => {
@@ -99,10 +100,10 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
   it("todos os campos de cada aba estão no ecrã, sem esconder nenhum", () => {
     const nova = abrirNovaPessoa();
     const abas: Array<[RegExp, string[]]> = [
-      [/Dados pessoais/, ["hr-novo-nome-tratamento", "hr-novo-genero", "hr-novo-nacionalidade", "hr-novo-estado-civil", "hr-novo-dependentes", "hr-novo-data-nascimento", "hr-novo-naturalidade-concelho", "hr-novo-tipo-documento", "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero", "hr-novo-anexo-cartao_cidadao", "hr-novo-anexo-fotografia"]],
+      [/Dados pessoais/, ["hr-novo-nome-tratamento", "hr-novo-genero", "hr-novo-nacionalidade", "hr-novo-estado-civil", "hr-novo-dependentes", "hr-novo-data-nascimento", "hr-novo-naturalidade-concelho", "hr-novo-tipo-documento", "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero", "hr-novo-conta"]],
       [/Contacto e morada/, ["hr-novo-email-pessoal", "hr-novo-email-trabalho", "hr-novo-morada-linha2", "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-telefone-alt"]],
-      [/Contrato e local/, ["hr-novo-local", "hr-novo-reporta-a", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-horas-trabalho", "hr-novo-tipo-horario", "hr-novo-politica-feriados"]],
-      [/Retribuição e bancário/, ["hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic", "hr-novo-anexo-comprovativo_iban"]],
+      [/Contrato e local/, ["hr-novo-local", "hr-novo-reporta-a", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-horas-trabalho", "hr-novo-politica-feriados"]],
+      [/Retribuição e bancário/, ["hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic"]],
       [/Outros dados/, ["hr-novo-habilitacao", "hr-novo-saude-incapacidade", "hr-novo-sindicalizado", "hr-novo-tamanho-cima", "hr-novo-tamanho-calcado"]],
       [/Acesso e convite/, ["hr-novo-criar-acesso", "hr-novo-papel", "hr-novo-email-acesso"]],
     ];
@@ -110,7 +111,10 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
       irParaAba(aba);
       for (const id of ids) expect(campo(id), id).toBeInTheDocument();
     }
-    expect(within(nova).getByText(/https:\/\/exemplo\.olyvia\.pt\/convite\//)).toBeInTheDocument();
+    // O link verdadeiro só existe depois de enviar, e mostra-se uma vez no diálogo de envio: aqui só a validade.
+    expect(within(nova).queryByText(/exemplo\.olyvia\.pt\/convite\//)).not.toBeInTheDocument();
+    // «Tipo de horário» não existe na criação (a base não o recebe): o horário por dia define-se na ficha.
+    expect(campo("hr-novo-tipo-horario")).toBeNull();
   });
 
   it("criar vazio mostra os erros por campo ligados por aria-describedby, conta-os por aba e leva o foco ao primeiro", () => {
@@ -146,18 +150,10 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
     expect(campo("hr-novo-nif")).not.toHaveAttribute("aria-invalid");
   });
 
-  it("os anexos são simulados: escolhe-se um ficheiro, vê-se o nome e retira-se; o máximo é 4", () => {
+  it("os anexos já não são simulados: a zona é a dos ficheiros reais, sem o contador nem o aviso de simulação", () => {
     const nova = abrirNovaPessoa();
-    const entrada = within(nova).getByLabelText(/Ficheiro de Cartão de cidadão/) as HTMLInputElement;
-    const pdf = (nome: string) => new File(["x"], nome, { type: "application/pdf" });
-    fireEvent.change(entrada, { target: { files: [pdf("cc-frente.pdf")] } });
-    fireEvent.change(entrada, { target: { files: [pdf("cc-verso.pdf")] } });
-    expect(within(nova).getByText(/cc-frente\.pdf/)).toBeInTheDocument();
-    expect(within(nova).getByText(/2 de 4 ficheiros/)).toBeInTheDocument();
-    fireEvent.change(entrada, { target: { files: [pdf("cc-outro.pdf")] } });
-    expect(within(nova).getByRole("alert")).toBeInTheDocument();
-    fireEvent.click(within(nova).getByRole("button", { name: "Retirar cc-frente.pdf" }));
-    expect(within(nova).queryByText(/cc-frente\.pdf/)).not.toBeInTheDocument();
+    expect(within(nova).queryByText(/simulad/i)).not.toBeInTheDocument();
+    expect(within(nova).queryByLabelText(/Ficheiro de Cartão de cidadão/)).not.toBeInTheDocument();
   });
 
   it("Cancelar fecha o painel", () => {

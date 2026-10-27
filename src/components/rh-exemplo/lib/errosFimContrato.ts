@@ -3,7 +3,7 @@
  * códigos HRV, mas o ecrã continua a perguntar "que texto mostro para este erro?" com a mesma chamada.
  */
 import { isPermissionError } from "@/components/rh-exemplo/lib/errosDeBase";
-import { captureFlowError, type BusinessFlow } from "@/components/rh-exemplo/lib/semRelatorio";
+import { captureFlowError, type BusinessFlow } from "@/components/rh-exemplo/hooks/captureFlowError";
 import { getFriendlyErrorMessage, getLocalizedFallback } from "@/utils/friendlyError";
 
 /** Código de erro de regra -> chave de tradução. */

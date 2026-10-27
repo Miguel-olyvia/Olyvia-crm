@@ -7,22 +7,15 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { decidirJustificacaoDeDia } from "@/components/rh-exemplo/dados/accoesJustificacaoDia";
 import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { useJustificacaoDia } from "@/components/rh-exemplo/dados/lojaJustificacaoDia";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
-import {
-  diasDesdeEnvio,
-  resumoDoMotivo,
-  textoEhSensivel,
-  type DecisaoJustificacaoDia,
-  type JustificacaoDia,
-} from "@/components/rh-exemplo/lib/justificacaoDia";
+import { diasDesdeEnvio, resumoDoMotivo, textoEhSensivel, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { useTranslation } from "@/hooks/useTranslation";
 import { DialogosDecisaoDia, type PedidoDecisaoDia } from "./DialogosDecisaoDia";
 import { porDecidir } from "./usePendentesJustificacaoDia";
-import { textoDaDecisao } from "./textoDaDecisao";
+import { useDecisaoDoDia } from "./useDecisaoDoDia";
 
 interface LinhaProps {
   j: JustificacaoDia;
@@ -62,16 +55,9 @@ export function FilaJustificacoesDoDia() {
   const todas = useJustificacaoDia((e) => e.justificacoes);
   const fichas = useEstadoRh((e) => e.fichas);
   const [pedido, setPedido] = useState<PedidoDecisaoDia | null>(null);
-  const [aviso, setAviso] = useState<string | null>(null);
+  const { decidir, mensagem: aviso, executor } = useDecisaoDoDia();
   const pendentes = useMemo(() => todas.filter(porDecidir).sort((a, b) => b.data.localeCompare(a.data)), [todas]);
   const nome = (id: string): string => fichas[id]?.pessoa.nome_completo ?? id;
-
-  const decidir = (j: JustificacaoDia, decisao: DecisaoJustificacaoDia, motivo: string): string | null => {
-    const resultado = decidirJustificacaoDeDia(j.id, decisao, motivo);
-    if (resultado.erro) return resultado.erro;
-    setAviso(textoDaDecisao(t, decisao, resultado));
-    return null;
-  };
 
   return (
     <Card aria-labelledby="rhjd-fila-titulo" data-testid="rhjd-fila">
@@ -79,7 +65,11 @@ export function FilaJustificacoesDoDia() {
         <CardTitle id="rhjd-fila-titulo" className="text-base">{t("rhJust.fila.titulo")}</CardTitle>
         <p className="text-sm text-muted-foreground">{t("rhJust.fila.ajuda")}</p>
         <p aria-live="polite" className="text-sm text-muted-foreground">{t("rhJust.fila.contagem", { n: String(pendentes.length) })}</p>
-        {aviso && <p role="status" className="text-sm font-medium" data-testid="rhjd-fila-aviso">{aviso}</p>}
+        {aviso && (
+          <p role={aviso.erro ? "alert" : "status"} className={`text-sm font-medium ${aviso.erro ? "text-destructive" : ""}`} data-testid="rhjd-fila-aviso">
+            {aviso.texto}
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         {pendentes.length === 0 ? (
@@ -96,6 +86,7 @@ export function FilaJustificacoesDoDia() {
         )}
       </CardContent>
       <DialogosDecisaoDia pedido={pedido} aoFechar={() => setPedido(null)} aoDecidir={decidir} />
+      {executor}
     </Card>
   );
 }
