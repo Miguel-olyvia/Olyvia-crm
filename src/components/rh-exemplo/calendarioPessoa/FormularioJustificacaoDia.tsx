@@ -5,9 +5,16 @@
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { enviarJustificacaoDeDia } from "@/components/rh-exemplo/dados/accoesJustificacaoDia";
+import { useAccoesJustificacaoDia } from "@/components/rh-exemplo/hooks/useJustificacoesDoDia";
 import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
-import { MAX_ANEXOS_JUSTIFICACAO, type CampoEnvio, type ErrosEnvio } from "@/components/rh-exemplo/lib/justificacaoDia";
+import {
+  MAX_ANEXOS_JUSTIFICACAO,
+  validarEnvio,
+  type CampoEnvio,
+  type ErrosEnvio,
+  type EstadoDoDia,
+  type TipoJustificacaoDia,
+} from "@/components/rh-exemplo/lib/justificacaoDia";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CampoAnexosSimulados } from "./CampoAnexosSimulados";
 import { CampoHoraReal, CampoMotivo, CampoTipo } from "./CamposDaJustificacao";
@@ -18,11 +25,14 @@ interface Props {
   pessoaId: string;
   data: string;
   desvio: DesvioJustificavel;
+  /** A situação do dia quando o formulário abriu (pode justificar, ou recusada ainda com prazo). */
+  estado: EstadoDoDia;
   aoFechar: () => void;
 }
 
-export function FormularioJustificacaoDia({ pessoaId, data, desvio, aoFechar }: Props) {
+export function FormularioJustificacaoDia({ pessoaId, data, desvio, estado, aoFechar }: Props) {
   const { t } = useTranslation();
+  const { registar, aGravar } = useAccoesJustificacaoDia();
   const [tipo, setTipo] = useState("");
   const [motivo, setMotivo] = useState("");
   const [horaReal, setHoraReal] = useState("");
@@ -38,9 +48,27 @@ export function FormularioJustificacaoDia({ pessoaId, data, desvio, aoFechar }: 
     setErros((e) => ({ ...e, anexos: nomes.length > livres ? "rhJust.erro.anexosMax" : undefined }));
   };
 
-  const enviar = () => {
-    const resultado = enviarJustificacaoDeDia(pessoaId, data, desvio, { tipo, motivo, horaReal, anexos });
-    if (resultado.erros) return setErros(resultado.erros);
+  /**
+   * Valida o que se vê no ecrã (um erro por campo) e só depois fala com a base. Os erros que a base levanta (prazo, falta já
+   * marcada, justificação já enviada, migration por aplicar) aparecem como erro geral, sem fechar o formulário: o texto escrito
+   * não se perde.
+   */
+  const enviar = async () => {
+    const erros = validarEnvio({ tipo, motivo, horaReal, anexos }, estado);
+    if (Object.keys(erros).length > 0) return setErros(erros);
+    setErros({});
+    const resultado = await registar({
+      pessoaId,
+      data,
+      tipo: tipo as TipoJustificacaoDia,
+      deAtraso: desvio.deAtraso,
+      periodoInicio: desvio.periodoInicio,
+      periodoFim: desvio.periodoFim,
+      motivo: motivo.trim(),
+      horaReal: horaReal.trim() === "" ? null : horaReal.trim(),
+      anexosNomes: anexos,
+    });
+    if (resultado.erro) return setErros({ geral: resultado.erro });
     aoFechar();
   };
 
@@ -49,7 +77,7 @@ export function FormularioJustificacaoDia({ pessoaId, data, desvio, aoFechar }: 
       className="grid gap-3 rounded-md border p-3"
       aria-label={t("rhJust.titulo")}
       data-testid="rhjd-form"
-      onSubmit={(e) => { e.preventDefault(); enviar(); }}
+      onSubmit={(e) => { e.preventDefault(); void enviar(); }}
     >
       <CampoTipo base={base} valor={tipo} erro={erros.tipo} descritoPor={ligar("tipo")} aoMudar={setTipo} params={params} />
       <CampoMotivo base={base} valor={motivo} erro={erros.motivo} descritoPor={ligar("motivo", `${base}-contador`)} aoMudar={setMotivo} params={params} />
@@ -60,7 +88,7 @@ export function FormularioJustificacaoDia({ pessoaId, data, desvio, aoFechar }: 
       />
       <MensagemDeErro id={`${base}-geral-erro`} erro={erros.geral} params={params} />
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" className="min-h-11">{t("rhJust.form.enviar")}</Button>
+        <Button type="submit" className="min-h-11" disabled={aGravar} aria-busy={aGravar}>{t("rhJust.form.enviar")}</Button>
         <Button type="button" variant="outline" className="min-h-11" onClick={aoFechar}>{t("rhJust.form.cancelar")}</Button>
       </div>
     </form>

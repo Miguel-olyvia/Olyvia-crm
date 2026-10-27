@@ -81,8 +81,9 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
   const horasExtraPendentes = usePendentesHorasExtra();
   // Os desvios REAIS da janela (os mesmos da fila): a bolinha do separador conta o que a base propoe, nao exemplos.
   const desviosPendentes = organizacao.desvios.length;
-  const justificacoesPorDecidir = usePendentesJustificacaoDia();
-  const porTratarNaFila = horasExtraPendentes + desviosPendentes + justificacoesPorDecidir;
+  // As justificações de dia por decidir vêm da base: lidas aqui UMA vez, para o contador e para a fila.
+  const justificacoesDoDia = usePendentesJustificacaoDia();
+  const porTratarNaFila = horasExtraPendentes + desviosPendentes + justificacoesDoDia.justificacoes.length;
 
   const nomePorPessoaId = useMemo(
     () => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa.nome_completo])),
@@ -212,7 +213,12 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
 
           <TabsContent value="fila" className="space-y-4">
             <HorasExtraNaFila />
-            <FilaJustificacoesDoDia />
+            <FilaJustificacoesDoDia
+              pendentes={justificacoesDoDia}
+              nomePorPessoaId={nomePorPessoaId}
+              minhaPessoaId={minhaPessoaId}
+              aoCriarFalta={() => void organizacao.recarregar()}
+            />
             <FilaAlertasFimDoDia
               desvios={organizacao.desvios}
               nomePorPessoaId={nomePorPessoaId}

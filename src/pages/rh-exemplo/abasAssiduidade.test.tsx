@@ -1,6 +1,8 @@
 // Arranque das abas da assiduidade («O meu ponto» e ficha de RH), da barra de abas da ficha (Custo sempre alcançável) e do
 // menu de «A minha área». Tudo em memória, sem base. A data é fixa (14/10/2026) para os dados de exemplo serem os mesmos.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
+vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 
 // O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
 vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({

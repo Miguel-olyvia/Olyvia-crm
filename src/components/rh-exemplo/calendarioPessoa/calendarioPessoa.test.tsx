@@ -1,6 +1,8 @@
 // Arranque do calendario do mes da pessoa, na aba Assiduidade: abre, ve o mes, clica num dia, confirma uma hora
 // extra e o dia atualiza; e so quem tem banco de horas ve saldo. A data e fixa (14/10/2026) para os dados serem os mesmos.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
+vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 
 // O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
 vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({

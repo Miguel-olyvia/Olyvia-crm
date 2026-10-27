@@ -27,8 +27,8 @@ export interface PedidoDecisaoDia {
 interface Props {
   pedido: PedidoDecisaoDia | null;
   aoFechar: () => void;
-  /** Devolve a chave do erro, ou `null` quando a decisão ficou registada. */
-  aoDecidir: (justificacao: JustificacaoDia, decisao: DecisaoJustificacaoDia, motivo: string) => string | null;
+  /** Devolve a chave do erro, ou `null` quando a decisão ficou registada (uma promessa se ainda vai à base). */
+  aoDecidir: (justificacao: JustificacaoDia, decisao: DecisaoJustificacaoDia, motivo: string) => string | null | Promise<string | null>;
 }
 
 export function DialogosDecisaoDia({ pedido, aoFechar, aoDecidir }: Props) {

@@ -26,8 +26,8 @@ interface MotivoMinimoDialogProps {
   rotuloConfirmar: string;
   /** Se vier, a caixa tem de estar marcada para confirmar (ex.: «Autorizo corrigir o passado»). */
   rotuloAutorizacao?: string;
-  /** Devolve a chave do erro (o dialogo fica aberto) ou `null` (fecha). */
-  onConfirmar: (motivo: string) => string | null;
+  /** Devolve a chave do erro (o dialogo fica aberto) ou `null` (fecha); pode ser uma promessa, e ate responder o botao fica ocupado. */
+  onConfirmar: (motivo: string) => string | null | Promise<string | null>;
   onFechar: () => void;
   idPrefixo?: string;
 }
@@ -46,6 +46,7 @@ export function MotivoMinimoDialog({
   const [motivo, setMotivo] = useState("");
   const [autorizado, setAutorizado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [aEspera, setAEspera] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -56,14 +57,21 @@ export function MotivoMinimoDialog({
     requestAnimationFrame(() => areaRef.current?.focus());
   }, [aberto]);
 
-  const podeConfirmar = motivoValido(motivo) && (!rotuloAutorizacao || autorizado);
+  const podeConfirmar = motivoValido(motivo) && (!rotuloAutorizacao || autorizado) && !aEspera;
   const idMotivo = `${idPrefixo}-texto`;
+
+  const concluir = (resultado: string | null) => {
+    setErro(resultado);
+    if (resultado === null) onFechar();
+  };
 
   const confirmar = (evento: React.MouseEvent) => {
     evento.preventDefault();
     const resultado = onConfirmar(motivo.trim());
-    setErro(resultado);
-    if (resultado === null) onFechar();
+    // Resposta imediata (a maioria dos usos): fecha ou mostra o erro no mesmo instante, como sempre.
+    if (resultado === null || typeof resultado === "string") return concluir(resultado);
+    setAEspera(true);
+    void resultado.then(concluir, () => setErro("friendlyError.unexpected")).finally(() => setAEspera(false));
   };
 
   return (

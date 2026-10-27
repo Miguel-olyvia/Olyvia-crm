@@ -45,12 +45,24 @@ function DetalheEnviado({ situacao }: { situacao: SituacaoDoDia }) {
 
 export function JustificacaoDeDiaPessoa({ dia, pessoaId }: { dia: DiaCalendario; pessoaId: string }) {
   const { t } = useTranslation();
-  const justificacoes = useJustificacoesDeDiaDaPessoa(pessoaId);
+  // Só as justificações deste dia: a leitura é por RPC e limitada ao intervalo pedido.
+  const { justificacoes, loading, erro, recusado, indisponivel } = useJustificacoesDeDiaDaPessoa(pessoaId, { de: dia.data, ate: dia.data });
   const prazoDias = useFluxosB((e) => e.prazoFaltaDias);
   const [aberto, setAberto] = useState(false);
   const botao = useRef<HTMLButtonElement>(null);
   const { situacao, desvio } = situacaoDeUmDia(dia, justificacoes, prazoDias, hojeIso());
-  if (situacao.estado === "nao_aplica") return null;
+  if (situacao.estado === "nao_aplica" || recusado) return null;
+  // Sem a leitura feita não se sabe se já há justificação: não se oferece «Justificar» (poderia duplicar um envio).
+  if (loading || erro || indisponivel) {
+    return (
+      <section className="space-y-3" aria-label={t("rhJust.titulo")} data-testid="rhjd-pessoa">
+        <h4 className="text-sm font-medium text-muted-foreground">{t("rhJust.titulo")}</h4>
+        <p role={erro ? "alert" : "status"} className={`text-sm ${erro ? "font-medium text-destructive" : "text-muted-foreground"}`} data-testid="rhjd-leitura">
+          {t(loading ? "rhJust.carregando" : indisponivel ? "rhJust.erro.indisponivel" : "rhJust.erro.leitura")}
+        </p>
+      </section>
+    );
+  }
 
   const fechar = () => {
     setAberto(false);
@@ -70,7 +82,7 @@ export function JustificacaoDeDiaPessoa({ dia, pessoaId }: { dia: DiaCalendario;
           {t(situacao.estado === "recusada_com_prazo" ? "rhJust.botao.denovo" : "rhJust.botao.justificar")}
         </Button>
       )}
-      {aberto && desvio && <FormularioJustificacaoDia pessoaId={pessoaId} data={dia.data} desvio={desvio} aoFechar={fechar} />}
+      {aberto && desvio && <FormularioJustificacaoDia pessoaId={pessoaId} data={dia.data} desvio={desvio} estado={situacao.estado} aoFechar={fechar} />}
     </section>
   );
 }

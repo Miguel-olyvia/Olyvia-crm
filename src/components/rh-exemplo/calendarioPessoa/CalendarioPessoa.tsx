@@ -65,7 +65,7 @@ export function CalendarioPessoa({
   );
   const dados = useMesDaPessoa(pessoaId, mes.ano, mes.mes, fonte);
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
-  const situacoes = useSituacoesDoMes(pessoaId, dados?.dias);
+  const { situacoes, leitura } = useSituacoesDoMes(pessoaId, dados?.dias);
 
   const formatar = useMemo(() => ({
     mes: new Intl.DateTimeFormat(language, { month: "long", year: "numeric", timeZone: "UTC" }),
@@ -95,6 +95,12 @@ export function CalendarioPessoa({
       )}
       {dados.planeadoRecusado && (
         <p role="alert" className="text-sm font-medium text-destructive">{t("rhExemplo.hor.real.planeadoRecusado")}</p>
+      )}
+      {leitura.indisponivel && (
+        <p role="status" className="text-sm text-muted-foreground" data-testid="rhjd-indisponivel">{t("rhJust.erro.indisponivel")}</p>
+      )}
+      {leitura.erro && (
+        <p role="alert" className="text-sm font-medium text-destructive" data-testid="rhjd-erro-leitura">{t("rhJust.erro.leitura")}</p>
       )}
       <div aria-hidden="true" className="hidden grid-cols-7 gap-1.5 text-center text-xs font-medium capitalize text-muted-foreground md:grid">
         {Array.from({ length: 7 }, (_, i) => (

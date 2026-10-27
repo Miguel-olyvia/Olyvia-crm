@@ -1,6 +1,8 @@
 // Arranque das duas alterações da frente D: o banco de horas na aba Horário da ficha (só com horário «banco de horas»)
 // e as horas extra pendentes na fila de trabalho do mapa de assiduidade (mesmas ações do store da frente C).
 import { beforeEach, describe, expect, it, vi } from "vitest";
+// As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
+vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";

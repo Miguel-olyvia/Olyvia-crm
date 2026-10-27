@@ -1,7 +1,9 @@
 /**
- * O que a base precisa para a falta que a aceitação de uma justificação de dia cria. Funções puras: quem as usa é o
- * executor (`AceitarComFaltaReal`), que chama `rpc_hr_falta_marcar` (com a justificação registada) e depois
- * `rpc_hr_falta_decidir_justificacao` pelo hook real de assiduidade da pessoa.
+ * O que a aceitação de uma justificação de dia precisa de saber da falta que cria. Funções puras.
+ *
+ * Quem cria a falta é a base: `rpc_hr_justificacao_dia_decidir` chama `rpc_hr_falta_marcar`, regista a justificação dela e
+ * decide-a como justificada, numa só transacção (ver `AceitarComFaltaReal`). Já não é o browser que marca, procura o id da
+ * falta recém-criada e decide: por isso `argumentosDaFalta` e `faltaCriada` saíram daqui.
  *
  * «Paga» e «não paga» é a coluna `remunerada` da falta, escolhida ao marcar: a decisão da justificação só diz «justificada»
  * ou «recusada». Aceitar nunca desconta do saldo (`desconta_saldo` fica falso).
@@ -9,6 +11,7 @@
 import type { DecisaoJustificacaoDia, JustificacaoDia, TipoJustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import type { MotivoFalta } from "@/components/rh-exemplo/tiposAssiduidade";
 
+/** O motivo da falta por tipo de justificação (a mesma tabela que a RPC aplica; um atraso usa sempre «atraso»). */
 export const MOTIVO_DA_FALTA: Record<TipoJustificacaoDia, MotivoFalta> = {
   consulta_medica: "doenca",
   transporte: "outro",
@@ -23,48 +26,13 @@ export function criaFalta(decisao: DecisaoJustificacaoDia): decisao is DecisaoQu
   return decisao !== "recusar";
 }
 
-/** Os argumentos de `marcarFalta` do hook real para a falta desta justificação, já com a justificação a registar. */
-export function argumentosDaFalta(j: JustificacaoDia, decisao: DecisaoQueCriaFalta) {
-  return {
-    data: j.data,
-    horaInicio: j.periodoInicio,
-    horaFim: j.periodoFim,
-    motivoCodigo: j.deAtraso ? ("atraso" as const) : MOTIVO_DA_FALTA[j.tipo],
-    remunerada: decisao === "aceitar_paga",
-    descontaSaldo: false,
-    justificacao: {
-      tipoDocumento: null,
-      documentoRef: null,
-      texto: j.motivo,
-      entidadeEmissora: null,
-      dataDocumento: null,
-      diasAtestados: null,
-    },
-  };
-}
-
 /** Compara horas «HH:MM» com «HH:MM:SS»: a base devolve segundos, a justificação guarda só horas e minutos. */
 const hhmm = (hora: string): string => hora.slice(0, 5);
 
 /**
- * A falta que ACABOU de ser criada, entre as faltas lidas depois de marcar: a que não existia antes, no mesmo dia e com a
- * mesma hora de início. `marcarFalta` não devolve o id, por isso é assim que se chega a ele.
- */
-export function faltaCriada<F extends { id: string; data: string; hora_inicio: string; estado: string }>(
-  depois: readonly F[],
-  idsAntes: ReadonlySet<string>,
-  j: Pick<JustificacaoDia, "data" | "periodoInicio">,
-): F | null {
-  return (
-    depois.find(
-      (f) => !idsAntes.has(f.id) && f.estado === "activa" && f.data === j.data && hhmm(f.hora_inicio) === hhmm(j.periodoInicio),
-    ) ?? null
-  );
-}
-
-/**
- * A falta ACTIVA que ja existe no mesmo dia e a mesma hora de inicio: aceitar volta a ela em vez de marcar outra (um recarregar,
- * ou uma aceitacao que ficou a meio depois de marcar, nao pode duplicar a falta nem descontar duas vezes).
+ * A falta ACTIVA que já existe no mesmo dia e a mesma hora de início: aceitar volta a ela em vez de marcar outra (um
+ * recarregar, ou uma aceitação repetida, não pode duplicar a falta nem descontar duas vezes). É a mesma procura que a RPC
+ * de decisão faz do lado da base; aqui serve para o ecrã saber, antes de decidir, que a aceitação vai reutilizar a falta.
  */
 export function faltaActivaDoDia<F extends { id: string; data: string; hora_inicio: string; estado: string }>(
   faltas: readonly F[],
@@ -72,7 +40,3 @@ export function faltaActivaDoDia<F extends { id: string; data: string; hora_inic
 ): F | null {
   return faltas.find((f) => f.estado === "activa" && f.data === j.data && hhmm(f.hora_inicio) === hhmm(j.periodoInicio)) ?? null;
 }
-
-/** So uma pessoa real (id UUID da base) pode receber uma falta; as justificacoes de exemplo em memoria tem ids como "p-ines". */
-export const ehPessoaDaBase = (pessoaId: string): boolean =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pessoaId);

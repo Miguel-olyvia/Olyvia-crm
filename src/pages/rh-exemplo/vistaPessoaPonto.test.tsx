@@ -2,6 +2,8 @@
 // e o RH aceita ou recusa. Na vista da própria pessoa não existe «Corrigir» em lado nenhum; na do RH existe. Tudo em memória.
 // A data é fixa (14/10/2026): a Sofia tem uma picagem por emparelhar a 13/10 (dentro do prazo).
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+// As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
+vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 
 // O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
 vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({

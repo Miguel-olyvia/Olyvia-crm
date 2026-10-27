@@ -22,7 +22,17 @@ export const MAX_ANEXOS_JUSTIFICACAO = 4;
 /** O texto de uma consulta médica é dado de saúde: o RH só o lê com «Ver texto», que regista quem leu. */
 export const TIPO_SENSIVEL: TipoJustificacaoDia = "consulta_medica";
 
+/**
+ * Os estados que o ecrã conhece. A base tem ainda `sem_efeito` (aceite cuja falta foi anulada ou corrigida): o wrapper
+ * `hooks/useJustificacoesDoDia` retira essas linhas antes de chegarem aqui, porque já não contam para a situação do dia.
+ */
 export type EstadoJustificacaoDia = "pendente" | "aceite_paga" | "aceite_nao_paga" | "recusada";
+
+/**
+ * A chave do erro com que a base recusa aceitar num mês fechado sem confirmação (a mesma de `CHAVE_ERRO_MES_FECHADO` em
+ * @/lib/hr/justificacaoDia, que esta pasta não pode importar; um teste confere que são iguais). O ecrã pede confirmação.
+ */
+export const CHAVE_ERRO_MES_FECHADO = "rhJust.erro.mesFechado";
 export type DecisaoJustificacaoDia = "aceitar_paga" | "aceitar_nao_paga" | "recusar";
 
 export interface JustificacaoDia {

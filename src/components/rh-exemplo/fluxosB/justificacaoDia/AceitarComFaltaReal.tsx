@@ -1,81 +1,54 @@
 /**
- * Aceitar uma justificação de dia cria a falta NA BASE: marca-a (`rpc_hr_falta_marcar`, com a justificação registada e a
- * coluna `remunerada` conforme «paga» ou «não paga») e decide-a como justificada (`rpc_hr_falta_decidir_justificacao`),
- * tudo pelo hook real de assiduidade da pessoa.
+ * Aceitar uma justificação de dia cria a falta NA BASE, numa só chamada: `rpc_hr_justificacao_dia_decidir` marca a falta
+ * (`rpc_hr_falta_marcar`, com «paga» ou «não paga» na coluna `remunerada`), regista a justificação dela como declaração
+ * própria e decide-a como justificada (`rpc_hr_falta_decidir_justificacao`), tudo na mesma transacção, e devolve o id da falta
+ * e se o mês do dia já estava fechado. Se qualquer passo falhar (sobreposição, ausência aprovada, horas trabalhadas) nada
+ * fica escrito: já não existe o estado «falta marcada, justificação por decidir» nem a procura do id da falta recém-criada.
  *
- * É um componente (e não uma função) porque o hook real está preso a UMA pessoa e a uma janela de datas, e a fila mostra
- * pessoas diferentes: monta-se enquanto a decisão dura, para essa pessoa e esse dia, e quem o monta recebe o resultado em
- * `aoConcluir` uma só vez. Não desenha nada.
+ * É um componente (e não uma função) para manter o contrato com `useDecisaoDoDia`: monta-se enquanto a decisão dura e quem o
+ * monta recebe o resultado em `aoConcluir` uma só vez. Não desenha nada.
  *
- * Idempotente: se a pessoa ja tem uma falta activa nesse dia e hora, nao marca outra; decide a que existe.
- * O `marcarFalta` não devolve o id da falta; lê-se das faltas do dia, relidas depois de marcar, por quem não existia antes.
+ * Idempotente na base: se a pessoa já tem uma falta activa nesse dia e hora, a RPC decide essa em vez de marcar outra (e recusa
+ * com `justificacao_dia_falta_divergente` se a remuneração ou a hora de fim não coincidirem).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useAssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
-import { argumentosDaFalta, faltaActivaDoDia, faltaCriada, type DecisaoQueCriaFalta } from "@/components/rh-exemplo/lib/faltaDaAceitacao";
+import { useEffect, useRef } from "react";
+import { useAccoesJustificacaoDia } from "@/components/rh-exemplo/hooks/useJustificacoesDoDia";
+import type { DecisaoQueCriaFalta } from "@/components/rh-exemplo/lib/faltaDaAceitacao";
 import type { JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
-
-/** Em que passo acabou: «marcar» (nada ficou na base), «procurar» ou «decidir» (a falta ficou marcada). */
-export type EtapaDaAceitacao = "marcar" | "procurar" | "decidir";
 
 export interface ResultadoDaAceitacao {
   /** Uma chave de tradução ou a mensagem já escrita (o `t` devolve a própria cadeia se não conhece a chave); `null` = tudo feito. */
   erro: string | null;
   faltaId: string | null;
-  etapa: EtapaDaAceitacao;
+  /**
+   * O dia pertence a um mês já fechado e a aceitação foi CONFIRMADA: a falta ficou marcada, mas o desconto só muda se o mês
+   * for reaberto. Sem confirmação a base não aceita (erro `rhJust.erro.mesFechado`, nada escrito).
+   */
+  mesFechado: boolean;
 }
 
 interface Props {
   justificacao: JustificacaoDia;
   decisao: DecisaoQueCriaFalta;
+  /** O RH já confirmou que aceita num mês fechado (a base exige-o). */
+  confirmarMesFechado?: boolean;
   aoConcluir: (resultado: ResultadoDaAceitacao) => void;
 }
 
-type Fase = "espera" | "marcada";
-
-export function AceitarComFaltaReal({ justificacao, decisao, aoConcluir }: Props) {
-  const janela = useMemo(() => ({ de: justificacao.data, ate: justificacao.data }), [justificacao.data]);
-  const assiduidade = useAssiduidadeDaPessoa(justificacao.pessoaId, janela);
-  const [fase, setFase] = useState<Fase>("espera");
-  const idsAntes = useRef<Set<string>>(new Set());
-  // Cada passo corre uma só vez, mesmo que o efeito volte a correr (renderizações extra, modo estrito).
-  const marcou = useRef(false);
-  const decidiu = useRef(false);
+export function AceitarComFaltaReal({ justificacao, decisao, confirmarMesFechado = false, aoConcluir }: Props) {
+  const { decidir } = useAccoesJustificacaoDia();
+  // A chamada corre uma só vez, mesmo que o efeito volte a correr (renderizações extra, modo estrito).
+  const correu = useRef(false);
   const concluir = useRef(aoConcluir);
   concluir.current = aoConcluir;
 
   useEffect(() => {
-    if (assiduidade.loading || assiduidade.saving) return;
-    if (fase === "espera" && !marcou.current) {
-      marcou.current = true;
-      // Ja ha uma falta activa neste dia e hora: continua a partir dela (decidir), sem marcar outra.
-      const existente = faltaActivaDoDia(assiduidade.faltas, justificacao);
-      if (existente) {
-        decidiu.current = true;
-        void assiduidade
-          .decidirJustificacao({ faltaId: existente.id, resultado: "justificada", motivo: null })
-          .then((erro) => concluir.current({ erro, faltaId: existente.id, etapa: "decidir" }));
-        return;
-      }
-      idsAntes.current = new Set(assiduidade.faltas.map((f) => f.id));
-      void assiduidade.marcarFalta(argumentosDaFalta(justificacao, decisao)).then((erro) => {
-        if (erro) concluir.current({ erro, faltaId: null, etapa: "marcar" });
-        else setFase("marcada");
-      });
-      return;
-    }
-    if (fase === "marcada" && !decidiu.current) {
-      decidiu.current = true;
-      const falta = faltaCriada(assiduidade.faltas, idsAntes.current, justificacao);
-      if (!falta) {
-        concluir.current({ erro: "rhJust.erro.faltaNaoEncontrada", faltaId: null, etapa: "procurar" });
-        return;
-      }
-      void assiduidade
-        .decidirJustificacao({ faltaId: falta.id, resultado: "justificada", motivo: null })
-        .then((erro) => concluir.current({ erro, faltaId: falta.id, etapa: "decidir" }));
-    }
-  }, [fase, assiduidade, justificacao, decisao]);
+    if (correu.current) return;
+    correu.current = true;
+    void decidir({ justificacaoId: justificacao.id, decisao, confirmarMesFechado }).then((r) =>
+      concluir.current({ erro: r.erro, faltaId: r.faltaId, mesFechado: r.mesFechado }),
+    );
+  }, [decidir, justificacao.id, decisao, confirmarMesFechado]);
 
   return null;
 }

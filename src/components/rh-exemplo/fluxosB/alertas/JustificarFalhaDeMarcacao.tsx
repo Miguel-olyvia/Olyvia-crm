@@ -26,7 +26,7 @@ import {
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
 import { useJustificacoesDeDiaDaPessoa } from "@/components/rh-exemplo/calendarioPessoa/situacaoDoMes";
-import { ESTADO_DA_JUSTIFICACAO, type EstadoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
+import { ESTADO_DA_JUSTIFICACAO, textoEhSensivel, type EstadoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import type { JustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
 
 /** O formulário de justificação (hora real, motivo, anexo); usado aqui e no detalhe do dia do calendário. */
@@ -101,7 +101,7 @@ function LinhaEnviadaDia({ j }: { j: JustificacaoDia }) {
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`rha-jd-${j.id}`}>
       <Badge variant="secondary" className="font-normal">{t(`rhJust.estado.${ESTADO_DA_JUSTIFICACAO[j.estado]}`)}</Badge>
       <span className="tabular-nums">{t("rhJust.aba.linha", { dia: formatarData(j.data), tipo: t(`rhJust.tipo.${j.tipo}`) })}</span>
-      <span className="text-muted-foreground">{j.motivo}</span>
+      <span className="text-muted-foreground">{j.motivo === "" && textoEhSensivel(j) ? t("rhJust.rh.textoReservadoCurto") : j.motivo}</span>
       {j.estado === "recusada" && j.motivoRecusa && <span className="text-destructive">{t("rhJust.motivoRH", { motivo: j.motivoRecusa })}</span>}
     </li>
   );
@@ -137,9 +137,12 @@ function GrupoEnviadas({ chave, itens, doDia }: { chave: "pendentes" | "aceites"
 export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaId: string; justificacoes: JustificacoesDaPessoa }) {
   const { t } = useTranslation();
   const { porJustificar: meus, menorPrazoDias, pendentes, aceites, recusadas, loading, erro, recusado } = justificacoes;
-  const doDia = useJustificacoesDeDiaDaPessoa(pessoaId);
+  // As justificações de dia vêm da base (últimos 90 dias); a leitura pode demorar, falhar ou ainda não existir nesta base.
+  const { justificacoes: doDia, loading: aLerDia, erro: erroDia, indisponivel: indisponivelDia } = useJustificacoesDeDiaDaPessoa(pessoaId);
   const hoje = hojeIso();
-  const semNada = !loading && !erro && !recusado && meus.length === 0 && pendentes.length + aceites.length + recusadas.length + doDia.length === 0;
+  const semNada =
+    !loading && !erro && !recusado && !aLerDia && !erroDia && !indisponivelDia && meus.length === 0 &&
+    pendentes.length + aceites.length + recusadas.length + doDia.length === 0;
 
   return (
     <Card>
@@ -159,6 +162,8 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
         {loading && <p role="status" className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.carregando")}</p>}
         {erro && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.erro")}</p>}
         {recusado && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.recusado")}</p>}
+        {erroDia && <p role="alert" className="text-sm font-medium text-destructive" data-testid="rha-jd-erro">{t("rhJust.erro.leitura")}</p>}
+        {indisponivelDia && <p role="status" className="text-sm text-muted-foreground" data-testid="rha-jd-indisponivel">{t("rhJust.erro.indisponivel")}</p>}
         {semNada && <p className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.vazio")}</p>}
         <ul className="space-y-3">
           {meus.map((alerta) => {
