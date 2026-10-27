@@ -222,7 +222,7 @@ const prepareValidAddresses = (addresses: UserAddressInput[]) => {
   return prepared;
 };
 
-export default function UsersNew({ embedded = false }: { embedded?: boolean } = {}) {
+export default function UsersNew() {
   const { t } = useTranslation();
   const { language } = useLanguage();
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
@@ -1291,8 +1291,8 @@ export default function UsersNew({ embedded = false }: { embedded?: boolean } = 
       <>
         <div className="space-y-6">
           <div>
-            {!embedded && <h1 className="text-2xl font-bold">{t("users.title")}</h1>}
-            {!embedded && <p className="text-muted-foreground">{t("users.subtitle")}</p>}
+            <h1 className="text-2xl font-bold">{t("users.title")}</h1>
+            <p className="text-muted-foreground">{t("users.subtitle")}</p>
           </div>
           <NoOrganizationState inline />
         </div>
@@ -1316,8 +1316,8 @@ export default function UsersNew({ embedded = false }: { embedded?: boolean } = 
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            {!embedded && <h1 className="text-2xl font-bold">{t("users.title")}</h1>}
-            {!embedded && <p className="text-muted-foreground">{t("users.subtitle")}</p>}
+            <h1 className="text-2xl font-bold">{t("users.title")}</h1>
+            <p className="text-muted-foreground">{t("users.subtitle")}</p>
           </div>
           <div className="flex items-center gap-2">
             <Button 

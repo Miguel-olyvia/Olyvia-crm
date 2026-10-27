@@ -1,194 +1,172 @@
-// "Utilizadores e perfis" real: junta as páginas Utilizadores e Roles em separadores, cada um com a sua permissão.
-// As duas páginas embebidas são simuladas (têm testes próprios); aqui vê-se só a junção, as permissões e o URL.
+// Testes de arranque da página: a lista, a ficha do utilizador e a ficha da role abrem e mostram o essencial.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import UtilizadoresPerfis from "./UtilizadoresPerfis";
-import RedirecionarUtilizadoresPerfis from "./RedirecionarUtilizadoresPerfis";
 import { menuSections } from "@/components/sidebar/menuConfig";
+import { criarRole, repor } from "@/components/utilizadores-perfis/perfisStore";
 
-const estado = vi.hoisted(() => ({ permissoes: new Set<string>() }));
-
-vi.mock("@/hooks/usePermissions", () => ({
-  usePermissions: () => ({
-    hasPermission: (p: string) => estado.permissoes.has(p),
-    hasAnyPermission: (ps: string[]) => ps.some((p) => estado.permissoes.has(p)),
-    loading: false,
-  }),
-}));
-vi.mock("./UsersNew", () => ({
-  default: ({ embedded }: { embedded?: boolean }) => <div data-testid="pagina-utilizadores" data-embedded={String(!!embedded)} />,
-}));
-vi.mock("./Roles", () => ({
-  default: ({ embedded }: { embedded?: boolean }) => <div data-testid="pagina-roles" data-embedded={String(!!embedded)} />,
-}));
 vi.mock("@/hooks/useTranslation", async () => {
   const { utilizadoresPerfisTranslations } = await import("@/translations/utilizadoresPerfis");
   const { negocioMetasTranslations } = await import("@/translations/negocioMetas");
   const { pessoasPaginaTranslations } = await import("@/translations/pessoasPagina");
   const pt: Record<string, string> = { ...negocioMetasTranslations.pt, ...pessoasPaginaTranslations.pt, ...utilizadoresPerfisTranslations.pt };
-  return { useTranslation: () => ({ language: "pt", t: (key: string) => pt[key] ?? key }) };
+  return {
+    useTranslation: () => ({
+      language: "pt",
+      t: (key: string, params?: Record<string, string | number>) =>
+        Object.entries(params ?? {}).reduce((texto, [k, v]) => texto.replace(`{${k}}`, String(v)), pt[key] ?? key),
+    }),
+  };
 });
 
-const Local = () => {
-  const { pathname, search } = useLocation();
-  return <p data-testid="local">{pathname + search}</p>;
-};
+beforeEach(repor);
 
-const renderPage = (permissoes: string[], url = "/utilizadores-perfis") => {
-  estado.permissoes = new Set(permissoes);
-  return render(
-    <MemoryRouter initialEntries={[url]}>
-      <UtilizadoresPerfis />
-      <Local />
-    </MemoryRouter>,
-  );
-};
+const renderPage = () => render(<MemoryRouter><UtilizadoresPerfis /></MemoryRouter>);
 
-beforeEach(() => { estado.permissoes = new Set(); });
-
-describe("UtilizadoresPerfis: separadores e permissões", () => {
-  it("só users.view: um separador, Utilizadores, e o conteúdo real da página de utilizadores", async () => {
-    renderPage(["users.view"]);
-    expect(screen.getAllByRole("tab")).toHaveLength(1);
-    expect(screen.getByRole("tab", { name: "Utilizadores" })).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByTestId("pagina-utilizadores")).toHaveAttribute("data-embedded", "true");
-    expect(screen.queryByTestId("pagina-roles")).not.toBeInTheDocument();
-  });
-
-  it("só roles.view: um separador, Roles, e o conteúdo real da página de roles", async () => {
-    renderPage(["roles.view"]);
-    expect(screen.getAllByRole("tab")).toHaveLength(1);
-    expect(screen.getByRole("tab", { name: "Roles" })).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByTestId("pagina-roles")).toHaveAttribute("data-embedded", "true");
-    expect(screen.queryByTestId("pagina-utilizadores")).not.toBeInTheDocument();
-  });
-
-  it("com as duas permissões vê os dois separadores, Utilizadores primeiro", async () => {
-    renderPage(["users.view", "roles.view"]);
-    expect(screen.getAllByRole("tab").map((a) => a.textContent)).toEqual(["Utilizadores", "Roles"]);
-    expect(screen.getByRole("tablist", { name: "Secções de utilizadores e perfis" })).toBeInTheDocument();
-    expect(await screen.findByTestId("pagina-utilizadores")).toBeInTheDocument();
-  });
-
-  it("tem um único título de nível 1 (as páginas embebidas não repetem o seu)", () => {
-    renderPage(["users.view", "roles.view"]);
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+describe("UtilizadoresPerfis: lista", () => {
+  it("mostra título, aviso de exemplo, abas com contadores e só os utilizadores ativos", () => {
+    renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Utilizadores e perfis" })).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("Dados de exemplo");
+    expect(screen.getByRole("tab", { name: /Utilizadores/ })).toHaveAccessibleName(/12/);
+    expect(screen.getByText("A mostrar 11 de 12 utilizadores")).toBeInTheDocument();
+    expect(screen.queryByText("Duarte Lopes")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Convidar utilizador" })).toBeInTheDocument();
   });
 
-  it("sem nenhuma das duas permissões não mostra separadores nem conteúdo", () => {
-    renderPage(["leads.view"]);
-    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("pagina-utilizadores")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("pagina-roles")).not.toBeInTheDocument();
-  });
-});
-
-describe("UtilizadoresPerfis: o separador vive no URL (?aba=)", () => {
-  const ambas = ["users.view", "roles.view"];
-
-  it("?aba=roles abre o separador Roles", async () => {
-    renderPage(ambas, "/utilizadores-perfis?aba=roles");
-    expect(screen.getByRole("tab", { name: "Roles" })).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByTestId("pagina-roles")).toBeInTheDocument();
+  it("a coluna Organização e role usa o chip de /users: organização com a role entre parênteses, e +N para os outros vínculos", () => {
+    renderPage();
+    const linha = screen.getByRole("button", { name: /Rui Pacheco/ }).closest("tr")!;
+    expect(within(linha).getByText("Grupo Aurora")).toBeInTheDocument();
+    expect(within(linha).getByText("(Administrador da organização)")).toBeInTheDocument();
+    expect(within(linha).getByRole("button", { name: "Ver as outras 2 organizações e roles" })).toHaveTextContent("+2");
+    fireEvent.click(within(linha).getByRole("button", { name: "Abrir a role Administrador da organização em Grupo Aurora" }));
+    expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Administrador da organização" })).toBeInTheDocument();
   });
 
-  it("clicar noutro separador actualiza o URL e guarda os outros parâmetros", async () => {
-    renderPage(ambas, "/utilizadores-perfis?edit=abc");
-    const roles = screen.getByRole("tab", { name: "Roles" });
-    fireEvent.mouseDown(roles);
-    fireEvent.click(roles);
-    expect(await screen.findByTestId("pagina-roles")).toBeInTheDocument();
-    expect(screen.getByTestId("local")).toHaveTextContent("aba=roles");
-    expect(screen.getByTestId("local")).toHaveTextContent("edit=abc");
+  it("não fala de filial, cargo nem local de trabalho: o utilizador tem vínculos com organizações da plataforma", () => {
+    renderPage();
+    expect(document.body.textContent).not.toMatch(/filial|cargo|local de trabalho|Mudelar/i);
+    expect(screen.getByRole("columnheader", { name: "Organização e role" })).toBeInTheDocument();
   });
 
-  it("valor inválido cai no primeiro separador permitido", async () => {
-    renderPage(ambas, "/utilizadores-perfis?aba=portal");
-    expect(screen.getByRole("tab", { name: "Utilizadores" })).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByTestId("pagina-utilizadores")).toBeInTheDocument();
-  });
-
-  it("separador não permitido cai no permitido: só users.view com ?aba=roles não vê Roles", async () => {
-    renderPage(["users.view"], "/utilizadores-perfis?aba=roles");
-    expect(await screen.findByTestId("pagina-utilizadores")).toBeInTheDocument();
-    expect(screen.queryByTestId("pagina-roles")).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Roles" })).not.toBeInTheDocument();
-  });
-
-  it("separador não permitido cai no permitido: só roles.view com ?aba=utilizadores não vê Utilizadores", async () => {
-    renderPage(["roles.view"], "/utilizadores-perfis?aba=utilizadores");
-    expect(await screen.findByTestId("pagina-roles")).toBeInTheDocument();
-    expect(screen.queryByTestId("pagina-utilizadores")).not.toBeInTheDocument();
-  });
-
-  it("teclado: seta para a direita passa ao separador seguinte, Home volta ao primeiro", async () => {
-    renderPage(ambas);
-    const utilizadores = screen.getByRole("tab", { name: "Utilizadores" });
-    utilizadores.focus();
-    fireEvent.keyDown(utilizadores, { key: "ArrowRight" });
-    expect(await screen.findByTestId("pagina-roles")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Roles" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Roles" }), { key: "Home" });
-    expect(await screen.findByTestId("pagina-utilizadores")).toBeInTheDocument();
+  it("filtro sem resultados diz o que fazer", () => {
+    renderPage();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzzz" } });
+    expect(screen.getByText("Nenhum utilizador com estes filtros")).toBeInTheDocument();
   });
 });
 
-describe("redireccionamentos de /users e /roles", () => {
-  const renderRedireccao = (url: string) =>
-    render(
-      <MemoryRouter initialEntries={[url]}>
-        <Routes>
-          <Route path="/users" element={<RedirecionarUtilizadoresPerfis aba="utilizadores" />} />
-          <Route path="/roles" element={<RedirecionarUtilizadoresPerfis aba="roles" />} />
-          <Route path="/utilizadores-perfis" element={<Local />} />
-        </Routes>
-      </MemoryRouter>,
+describe("UtilizadoresPerfis: ficha do utilizador", () => {
+  it("abre ao clicar no nome, com as quatro abas e a navegação", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /Rui Pacheco/ }));
+    const ficha = screen.getByRole("dialog");
+    expect(within(ficha).getByRole("heading", { name: "Rui Pacheco" })).toBeInTheDocument();
+    expect(within(ficha).getAllByRole("tab").map((a) => a.textContent)).toEqual(
+      [expect.stringContaining("Resumo"), expect.stringContaining("Vínculos"), expect.stringContaining("Permissões"), expect.stringContaining("Atividade")],
     );
-
-  it("/users vai para o separador Utilizadores", () => {
-    renderRedireccao("/users");
-    expect(screen.getByTestId("local")).toHaveTextContent("/utilizadores-perfis?aba=utilizadores");
+    expect(within(ficha).getByRole("button", { name: "Repor palavra-passe" })).toBeEnabled();
   });
 
-  it("/roles vai para o separador Roles", () => {
-    renderRedireccao("/roles");
-    expect(screen.getByTestId("local")).toHaveTextContent("/utilizadores-perfis?aba=roles");
+  it("repor a palavra-passe pede confirmação e fica registado na atividade", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /Rui Pacheco/ }));
+    const ficha = screen.getByRole("dialog");
+    fireEvent.click(within(ficha).getByRole("button", { name: "Repor palavra-passe" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Pedir reposição" }));
+    fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Atividade/ }));
+    fireEvent.click(within(ficha).getByRole("tab", { name: /Atividade/ }));
+    expect(within(ficha).getByText(/Reposição da palavra-passe pedida/)).toBeInTheDocument();
   });
 
-  it("preserva os parâmetros que já traziam (ex.: /users?edit=id)", () => {
-    renderRedireccao("/users?edit=42");
-    const local = screen.getByTestId("local").textContent ?? "";
-    expect(local).toContain("aba=utilizadores");
-    expect(local).toContain("edit=42");
+  it("o super administrador abre protegido, com as ações desligadas", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /Helena Marques/ }));
+    const ficha = screen.getByRole("dialog");
+    expect(within(ficha).getByRole("button", { name: "Mudar role" })).toBeDisabled();
+    expect(within(ficha).getByText(/estão protegidos/)).toBeInTheDocument();
+  });
+});
+
+describe("UtilizadoresPerfis: roles", () => {
+  it("a aba Roles lista as roles e a ficha da role abre com a matriz", () => {
+    renderPage();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Comercial" }));
+    const ficha = screen.getByRole("dialog");
+    expect(within(ficha).getByRole("heading", { name: "Comercial" })).toBeInTheDocument();
+    // Uma role com utilizadores não se elimina: o botão fica desligado e a ficha diz porquê.
+    expect(within(ficha).getByRole("button", { name: "Eliminar" })).toBeDisabled();
+    expect(within(ficha).getByText(/tem utilizadores/)).toBeInTheDocument();
+  });
+
+  it("eliminar uma role sem utilizadores pede confirmação e tira-a da lista", () => {
+    criarRole({ nome: "Estagiários", codigo: "estagiarios", descricao: "d", podeAssinar: false, permissoes: [] });
+    renderPage();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Estagiários" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Eliminar" }));
+    const pergunta = screen.getByRole("alertdialog");
+    expect(within(pergunta).getByText("Eliminar a role Estagiários?")).toBeInTheDocument();
+    fireEvent.click(within(pergunta).getByRole("button", { name: "Eliminar" }));
+    expect(screen.queryByRole("button", { name: "Estagiários" })).not.toBeInTheDocument();
+  });
+
+  it("a coluna chama-se Utilizadores e mostra a contagem de permissões e a marca de acesso total", () => {
+    renderPage();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Roles/ }));
+    expect(screen.getByRole("columnheader", { name: "Utilizadores" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /Pessoas/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Acesso total (org)")).toBeInTheDocument();
+    expect(screen.getAllByText(/^\d+ permissões$/).length).toBeGreaterThanOrEqual(6);
+  });
+
+  it("a matriz da role lista todas as permissões em módulos fechados, soma o concedido e pesquisa", () => {
+    renderPage();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Comercial" }));
+    const ficha = screen.getByRole("dialog");
+    fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Permissões/ }));
+    fireEvent.click(within(ficha).getByRole("tab", { name: /Permissões/ }));
+    expect(within(ficha).getByText(/\d+ de \d+ permissões concedidas/)).toBeInTheDocument();
+    expect(within(ficha).getByRole("button", { name: /CRM/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(ficha).queryByText("Ver clientes")).not.toBeInTheDocument();
+    fireEvent.change(within(ficha).getByRole("searchbox"), { target: { value: "eliminar clientes" } });
+    expect(within(ficha).getByText("Eliminar clientes")).toBeInTheDocument();
+    expect(within(ficha).getByText("Perigosa")).toBeInTheDocument();
+    expect(within(ficha).getByText("Não tem")).toBeInTheDocument();
+    fireEvent.change(within(ficha).getByRole("searchbox"), { target: { value: "zzzz" } });
+    expect(within(ficha).getByText(/Nenhuma permissão corresponde/)).toBeInTheDocument();
+  });
+
+  it("a ficha do utilizador mostra todas as permissões, com a role de onde vêm as que tem", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /Carla Mendes/ }));
+    const ficha = screen.getByRole("dialog");
+    fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Permissões/ }));
+    fireEvent.click(within(ficha).getByRole("tab", { name: /Permissões/ }));
+    fireEvent.click(within(ficha).getByRole("button", { name: /CRM/ }));
+    expect(within(ficha).getByText("Ver clientes")).toBeInTheDocument();
+    expect(within(ficha).getByText("Criar clientes")).toBeInTheDocument();
+    expect(within(ficha).getAllByRole("button", { name: "Só leitura" }).length).toBeGreaterThan(0);
+    expect(within(ficha).getAllByText("Não tem").length).toBeGreaterThan(0);
   });
 });
 
 describe("menu", () => {
-  const grupo = menuSections.find((s) => s.id === "users")!;
-
-  it("tem um só item «Utilizadores e perfis», visível com users.view OU roles.view", () => {
-    const entradas = grupo.items.filter((i) => i.to === "/utilizadores-perfis");
-    expect(entradas).toHaveLength(1);
-    expect(entradas[0].labelKey).toBe("sidebar.usersProfiles");
-    expect([...(entradas[0].permissions ?? [])].sort()).toEqual(["roles.view", "users.view"]);
-    expect(entradas[0].requireAll).not.toBe(true);
-    expect(entradas[0].permission).toBeUndefined();
-  });
-
-  it("os itens /users e /roles saíram do menu, mas os caminhos continuam a abrir o grupo", () => {
-    expect(grupo.items.some((i) => i.to === "/users")).toBe(false);
-    expect(grupo.items.some((i) => i.to === "/roles")).toBe(false);
-    for (const p of ["/users", "/roles", "/utilizadores-perfis", "/export-audit"]) expect(grupo.paths).toContain(p);
-  });
-
-  it("a exportação de auditoria fica como estava", () => {
-    const entrada = grupo.items.find((i) => i.to === "/export-audit");
-    expect(entrada?.permission).toBe("exports.audit.view");
-  });
-
-  it("o grupo aparece com qualquer das duas permissões", () => {
-    expect(grupo.permissions).toEqual(expect.arrayContaining(["users.view", "roles.view"]));
+  it("tem a entrada no grupo Utilizadores, com a permissão users.view", () => {
+    const grupo = menuSections.find((s) => s.id === "users")!;
+    const entrada = grupo.items.find((i) => i.to === "/utilizadores-perfis");
+    expect(entrada?.labelKey).toBe("sidebar.usersProfiles");
+    expect(entrada?.permission).toBe("users.view");
+    expect(grupo.paths).toContain("/utilizadores-perfis");
+    expect(grupo.items.some((i) => i.to === "/users")).toBe(true);
+    expect(grupo.items.some((i) => i.to === "/roles")).toBe(true);
   });
 });

@@ -64,7 +64,7 @@ interface RolePermission {
   permission_code: string;
 }
 
-export default function Roles({ embedded = false }: { embedded?: boolean } = {}) {
+export default function Roles() {
   const queryClient = useQueryClient();
   const { activeCompany, userType, isLoading: companyLoading } = useCompany();
   const { hasPermission, permissions: userPermissions, isSystemAdmin } = usePermissions();
@@ -649,8 +649,8 @@ export default function Roles({ embedded = false }: { embedded?: boolean } = {})
       <>
         <div className="space-y-6">
           <div>
-            {!embedded && <h1 className="text-2xl font-bold tracking-tight">Roles</h1>}
-            {!embedded && <p className="text-muted-foreground">Gerir roles e permissões do sistema</p>}
+            <h1 className="text-2xl font-bold tracking-tight">Roles</h1>
+            <p className="text-muted-foreground">Gerir roles e permissões do sistema</p>
           </div>
           <NoOrganizationState inline />
         </div>
@@ -672,12 +672,10 @@ export default function Roles({ embedded = false }: { embedded?: boolean } = {})
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            {!embedded && <h1 className="text-2xl font-bold tracking-tight">Roles</h1>}
-            {!embedded && (
-              <p className="text-muted-foreground">
-                Gerir roles e permissões do sistema
-              </p>
-            )}
+            <h1 className="text-2xl font-bold tracking-tight">Roles</h1>
+            <p className="text-muted-foreground">
+              Gerir roles e permissões do sistema
+            </p>
           </div>
           {canCreate && (
             <Button onClick={openCreateDialog}>
