@@ -6,7 +6,26 @@
 
 ## 1. Retomar noutro PC — fazer isto primeiro
 
-**Pré-requisitos:** Git com o alias SSH `github-olyvia` (repo `git@github-olyvia:Miguel-olyvia/Olyvia-crm.git`; a Olyvia 2.0 é outro repo `Miguel-olyvia/Olyvia2.0`), Node 24, `npm i`, **Supabase CLI** (≥ 2.116, `supabase login` numa conta que vê o projeto **RH `uetjghdkwbywbftedtth`**). **Sem Docker** (pouca RAM; nunca `supabase start`/`db reset`/`db diff`).
+### 1.0 Se o outro PC ainda NÃO tem o repositório (ir buscar tudo de raiz)
+
+1. **Instalar:** Git, Node 24 e a Supabase CLI (≥ 2.116). **Sem Docker** (pouca RAM; nunca `supabase start`/`db reset`/`db diff`).
+2. **Chave SSH da conta GitHub `Miguel-olyvia`:** o repositório é dessa conta, e a chave deste PC chama-se `id_ed25519_olyvia` (pasta `.ssh` do utilizador). Copiar a chave privada para a pasta `.ssh` do outro PC por um meio seguro (pen, nunca pelo chat nem por ficheiro do repositório), **ou** gerar uma nova (`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_olyvia`) e juntar a parte pública em GitHub → Settings → SSH and GPG keys, na conta `Miguel-olyvia`.
+3. **Alias SSH:** acrescentar a `~/.ssh/config` (é o que está neste PC):
+   ```
+   Host github-olyvia
+       HostName github.com
+       User git
+       IdentityFile ~/.ssh/id_ed25519_olyvia
+       IdentitiesOnly yes
+   ```
+   Testar com `ssh -T git@github-olyvia` (deve responder com o nome da conta `Miguel-olyvia`).
+4. **Clonar o repositório** (workspace habitual: `C:\my-crm-dream-main`, repo em `C:\my-crm-dream-main\projeto`):
+   `git clone git@github-olyvia:Miguel-olyvia/Olyvia-crm.git C:\my-crm-dream-main\projeto`
+   (Neste PC existe também o remoto `upstream` = `https://github.com/ricardobelchior1984-code/olyvia.git`, o repositório original; **não é usado para este trabalho**.) A Olyvia 2.0 é **outro** repositório: `git@github-olyvia:Miguel-olyvia/Olyvia2.0.git`.
+5. **Supabase:** `supabase login` (abre o browser; a conta tem de ver o projeto **RH `uetjghdkwbywbftedtth`**). Se o `supabase link` pedir a password da base, está no painel do Supabase (Project Settings → Database); nunca a guardar em ficheiros. Os segredos das Edge Functions já estão no servidor (não há nada a copiar).
+6. Continuar no passo 1 abaixo (worktree do ramo WIP) e fazer `npm i` dentro do worktree.
+
+### 1.1 Se o repositório já existe no outro PC
 
 1. `git fetch origin` e criar um **worktree** do ramo WIP (nunca trabalhar na pasta principal do repo: está ligada à base de **produção/Mudelar**):
    `git worktree add <pasta> -b wip/rh-pessoas-fase8 origin/wip/rh-pessoas-fase8`
