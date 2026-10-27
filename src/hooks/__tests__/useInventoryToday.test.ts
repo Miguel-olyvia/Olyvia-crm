@@ -17,8 +17,12 @@ import {
   getInventoryQueueItems,
   getInventoryQueueTotal,
   getInventoryCounter,
+  getReceiveTarget,
+  getReceivingQueueItem,
+  getReceivingSummary,
   type InventoryTodayPayload,
 } from "@/hooks/useInventoryToday";
+import type { ReceivablePo } from "@/components/receiving/porReceber";
 import { menuSections } from "@/components/sidebar/menuConfig";
 import {
   fetchClientOrderReadiness,
@@ -265,5 +269,101 @@ describe("menu do Inventário", () => {
     expect(items.map((i) => i.to).sort()).toEqual(Object.keys(expected).sort());
     for (const item of items) expect(item.permission).toBe(expected[item.to]);
     expect(section.paths.sort()).toEqual(Object.keys(expected).sort());
+  });
+});
+
+describe("Encomendas por receber no armazém e \"Receber no armazém →\" (como o Hoje do 2.0)", () => {
+  const today = "2026-10-27";
+  const line = (open: number) => ({
+    id: `l-${open}`,
+    productId: "p-1",
+    name: "Produto",
+    sku: null,
+    quantity: open,
+    received: 0,
+    open,
+    uomId: null,
+    uomCode: null,
+    unitsPerUom: 1,
+  });
+  const po = (id: string, over: Partial<ReceivablePo> = {}): ReceivablePo => ({
+    id,
+    orderNumber: id.toUpperCase(),
+    status: "ordered",
+    supplierId: "s-1",
+    supplierName: "Fornecedor",
+    expectedDelivery: "2026-11-15",
+    orderDate: "2026-10-01",
+    contractId: null,
+    origin: null,
+    publication: null,
+    emailSent: false,
+    lines: [line(2)],
+    shipped: null,
+    ...over,
+  });
+  const shipped = { noteId: "n-1", noteNumber: "GR 1", shippedAt: "2026-10-26T10:00:00Z", hasFile: false, count: 1 };
+
+  it("conta só as encomendadas/parciais com linhas por receber e destaca as expedidas no portal", () => {
+    const s = getReceivingSummary(
+      [
+        po("a"),
+        po("b", { status: "partially_received", shipped }),
+        po("c", { status: "pending" }), // por enviar: não conta no cartão
+        po("d", { lines: [line(0)] }), // nada em falta
+        po("e", { status: "received" }),
+      ],
+      today,
+    );
+    expect(s.awaiting).toBe(2);
+    expect(s.shipped).toBe(1);
+  });
+
+  it("chegam hoje/amanhã: a prevista (ou a prometida confirmada) em hoje/amanhã, ou expedida", () => {
+    const s = getReceivingSummary(
+      [
+        po("hoje", { expectedDelivery: today }),
+        po("amanha", { expectedDelivery: "2026-10-28" }),
+        po("depois", { expectedDelivery: "2026-10-29" }),
+        po("prometida", {
+          expectedDelivery: "2026-11-30",
+          publication: { status: "confirmed", viewedAt: null, confirmedAt: "2026-10-20T09:00:00Z", promisedDate: "2026-10-28" },
+        }),
+        po("expedida", { expectedDelivery: "2026-12-01", shipped }),
+        po("atrasada", { expectedDelivery: "2026-10-01" }),
+      ],
+      today,
+    );
+    expect([...s.arrivingIds].sort()).toEqual(["amanha", "expedida", "hoje", "prometida"]);
+  });
+
+  it("com uma só a chegar abre o painel dela na Receção; com zero ou várias, a lista", () => {
+    const one = getReceivingSummary([po("x", { expectedDelivery: today }), po("y")], today);
+    expect(getReceiveTarget(one)).toBe("/receiving?po=x");
+    expect(parseReceivingParams("?po=x")).toMatchObject({ po: "x", tab: "receber", vista: "lista" });
+    const two = getReceivingSummary([po("x", { expectedDelivery: today }), po("y", { expectedDelivery: today })], today);
+    expect(getReceiveTarget(two)).toBe("/receiving");
+    expect(getReceiveTarget(getReceivingSummary([po("y")], today))).toBe("/receiving");
+    expect(getReceiveTarget(null)).toBe("/receiving");
+  });
+
+  it("o cartão abre a lista Por receber; sem dados ou sem receiving.view fica escondido; 0 fica", () => {
+    const s = getReceivingSummary([po("a", { shipped }), po("b")], today);
+    expect(getReceivingQueueItem(s, all)).toMatchObject({
+      key: "po-awaiting-receipt",
+      title: "Encomendas por receber no armazém",
+      tone: "info",
+      to: "/receiving",
+      value: 2,
+      shipped: 1,
+    });
+    expect(getReceivingQueueItem(s, (p) => p !== "receiving.view")).toBeNull();
+    expect(getReceivingQueueItem(null, all)).toBeNull();
+    expect(getReceivingQueueItem(getReceivingSummary([], today), all)).toMatchObject({ value: 0, shipped: 0 });
+  });
+
+  it("não entra no total do menu (no 2.0 o total do Hoje também não o conta)", () => {
+    expect(getInventoryQueueItems(payload, all).some((i) => i.key === "po-awaiting-receipt")).toBe(false);
+    expect(getInventoryQueueTotal(payload, all)).toBe(19);
   });
 });

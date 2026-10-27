@@ -10,6 +10,7 @@ import {
   stocksLink,
   suppliersLink,
 } from "@/components/inventory/ui/inventoryLinks";
+import { grupoRececao, poRecebivel, type ReceivablePo } from "@/components/receiving/porReceber";
 
 // "Hoje" do Inventário: um só pedido (rpc_inventory_today) com os números da
 // fila de trabalho, do fluxo e dos contadores do menu. Cada bloco — e cada
@@ -175,7 +176,7 @@ export function getInventoryQueueItems(
     {
       key: "po-pending",
       title: "POs por aprovar",
-      description: "Rascunhos à espera de aprovação para passarem a encomendadas.",
+      description: "Rascunhos (manuais ou automáticos). Passar a Encomendado exige purchase_orders.approve.",
       tone: "warn",
       to: purchaseOrdersLink({ status: "pending" }),
       permission: "purchase_orders.view",
@@ -193,7 +194,7 @@ export function getInventoryQueueItems(
     {
       key: "ec-ready",
       title: "ECs prontas a expedir",
-      description: "Têm linhas com stock reservado à espera de saída.",
+      description: "Têm linhas com stock reservado (FIFO) à espera de saída.",
       tone: "ok",
       to: clientOrdersLink({ ready: true }),
       permission: "client_orders.view",
@@ -238,7 +239,7 @@ export function getInventoryQueueItems(
     {
       key: "suppliers-awaiting",
       title: "Fornecedores à espera da ficha",
-      description: "Convidados para o portal que ainda não preencheram a ficha.",
+      description: "Convidados para o portal: ainda não preencheram a ficha.",
       tone: "info",
       to: suppliersLink({ filter: "awaiting" }),
       permission: "suppliers.view",
@@ -247,7 +248,7 @@ export function getInventoryQueueItems(
     {
       key: "catalog-unlinked",
       title: "Artigos do portal por ligar",
-      description: "Artigos do catálogo dos fornecedores ainda sem produto nosso ligado.",
+      description: "Catálogo carregado pelos fornecedores, com sugestões.",
       tone: "neutral",
       to: suppliersLink({ filter: "catalog" }),
       permission: "suppliers.view",
@@ -256,7 +257,7 @@ export function getInventoryQueueItems(
     {
       key: "delivery-notes-divergent",
       title: "Guias abertas com divergências",
-      description: "Anunciado pelo fornecedor diferente do recebido.",
+      description: "Anunciado diferente do recebido.",
       tone: "bad",
       to: receivingLink({ notes: "divergent" }),
       permission: "receiving.view",
@@ -265,6 +266,60 @@ export function getInventoryQueueItems(
   ];
   return defs
     .filter((d): d is InventoryQueueItem => d.value !== null && hasPermission(d.permission));
+}
+
+// ─────────────────────────────────────────────────────────────
+// "Encomendas por receber no armazém" e o botão "Receber no armazém →" (como
+// o Hoje do 2.0: contadores.porReceber e chegamHojePos). Calculado das POs da
+// Receção (useReceivablePos — as mesmas linhas e regras da lista Por receber),
+// não da RPC; por isso fica fora de getInventoryQueueItems e do total do menu
+// (no 2.0 o total do Hoje também não conta este cartão).
+// ─────────────────────────────────────────────────────────────
+
+export interface InventoryReceivingSummary {
+  /** POs encomendadas ou parcialmente recebidas com alguma linha de produto por receber. */
+  awaiting: number;
+  /** Dessas, as já expedidas pelo fornecedor no portal (guia do portal ainda aberta). */
+  shipped: number;
+  /** POs por receber que chegam hoje/amanhã ou já expedidas (grupos −1 e 0 da Receção), pela ordem da lista. */
+  arrivingIds: string[];
+}
+
+const AWAITING_STATUSES = new Set(["ordered", "partially_received"]);
+
+/** Resumo das POs por receber; `today` = "YYYY-MM-DD" em hora local (todayIsoLocal). */
+export function getReceivingSummary(pos: readonly ReceivablePo[], today: string): InventoryReceivingSummary {
+  const open = pos.filter(poRecebivel);
+  const awaiting = open.filter((p) => AWAITING_STATUSES.has(p.status));
+  return {
+    awaiting: awaiting.length,
+    shipped: awaiting.filter((p) => !!p.shipped).length,
+    arrivingIds: open.filter((p) => grupoRececao(p, today) <= 0).map((p) => p.id),
+  };
+}
+
+/** "Receber no armazém →": com uma só PO a chegar hoje/amanhã abre logo o painel dela; senão a lista Por receber. */
+export function getReceiveTarget(summary: InventoryReceivingSummary | null | undefined): string {
+  const ids = summary?.arrivingIds ?? [];
+  return ids.length === 1 ? receivingLink({ po: ids[0] }) : receivingLink();
+}
+
+/** Cartão da fila "Encomendas por receber no armazém"; null sem dados ou sem permissão para a Receção. */
+export function getReceivingQueueItem(
+  summary: InventoryReceivingSummary | null | undefined,
+  hasPermission: (permission: string) => boolean,
+): (InventoryQueueItem & { shipped: number }) | null {
+  if (!summary || !hasPermission("receiving.view")) return null;
+  return {
+    key: "po-awaiting-receipt",
+    title: "Encomendas por receber no armazém",
+    description: "Encomendas a fornecedor (encomendadas ou parciais) à espera de entrada em Armazém › Receção.",
+    tone: "info",
+    to: receivingLink(),
+    permission: "receiving.view",
+    value: summary.awaiting,
+    shipped: summary.shipped,
+  };
 }
 
 /** Total da fila (contador "Hoje" do menu); null quando não há nenhum valor. */
