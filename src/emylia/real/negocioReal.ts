@@ -151,7 +151,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       versao: vs.n, estado: "substituido", modelo: o.modelo, desconto: vs.desconto ?? 0, venda_direta: o.vendaDireta, inicio_obra: null, equipa: null,
       verificado: false, aprovacao: null, motivos_versao: vs.motivos, nota_versao: vs.nota ?? null, onde_refeita: vs.onde ?? null, pedido_cliente: null, recusa: null,
       enviado_em: iso(vs.enviada), aceite_em: null, substituido_em: iso(vs.substituida), aceite_antes_em: iso(vs.aceite ?? null),
-      preco_final: vs.total, total_com_iva: vs.totalIva ?? null, prestacoes_por_fases: false, sem_demolicao: false,
+      preco_final: Math.round(vs.total * 100) / 100, total_com_iva: vs.totalIva != null ? Math.round(vs.totalIva * 100) / 100 : null, prestacoes_por_fases: false, sem_demolicao: false,
       linhas: vs.linhas ? vs.linhas.map(linhaParaLinha) : null, zonas: null, prazo: [], prestacoes: [], avisos: [], precos_manuais: null,
       produtos: vs.prod ? vs.prod.map(prodParaLinha) : null, partes_fora: vs.semParte ?? null,
     });
@@ -285,7 +285,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
         n: v.versao, enviada: deIso(v.enviado_em), ...(v.aceite_antes_em ? { aceite: deIso(v.aceite_antes_em) } : {}), substituida: deIso(v.substituido_em),
         total: v.preco_final ?? 0, ...(v.total_com_iva != null ? { totalIva: v.total_com_iva } : {}), motivos: v.motivos_versao, ...(v.nota_versao ? { nota: v.nota_versao } : {}),
         onde: v.onde_refeita ?? "orcamento",
-        ...(v.produtos ? { prod: v.produtos.sort((x, y) => x.ordem - y.ordem).map(linhaParaProd) } : {}), ...(v.partes_fora ? { semParte: v.partes_fora } : {}),
+        ...(v.produtos?.length ? { prod: v.produtos.sort((x, y) => x.ordem - y.ordem).map(linhaParaProd) } : {}), ...(v.partes_fora?.length ? { semParte: v.partes_fora } : {}),
         ...(v.linhas ? { linhas: v.linhas.sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha) } : {}), desconto: v.desconto,
       })) } : {}),
       ...(atual.pedido_cliente ? { pedidoCliente: { motivos: atual.pedido_cliente.motivos, ...(atual.pedido_cliente.nota ? { nota: atual.pedido_cliente.nota } : {}), q: deIso(atual.pedido_cliente.em) } } : {}),
