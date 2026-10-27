@@ -43,7 +43,12 @@ await inserir("anew_organizations", { id: `'${ORG}'` });
 await inserir("anew_users", { id: `'${U}'` });
 await inserir("anew_memberships", { user_id: `'${U}'`, organization_id: `'${ORG}'` });
 await inserir("negocio_workflow_config", { organization_id: `'${ORG}'`, momento_ganho: "'manual'" });
-for (const m of migs) await db.exec(ler(m));
+// as funções do CRM que as migrations ajustam (copiadas da base RH; os corpos não se validam aqui: dependem de muitas tabelas)
+for (const m of migs) {
+  // (a migration da encomenda de cliente volta a criar essas funções: também sem validar os corpos)
+  if ((/(^|[\\/])\d{14}_[^\\/]*\.sql$/.test(m) || m.includes("RASCUNHO-")) && !m.includes("encomenda_cliente")) await db.exec(ler(m));
+  else await db.exec(`set check_function_bodies = off;\n${ler(m)};\nset check_function_bodies = on;`);
+}
 await inserir("schedule_boards", { organization_id: `'${ORG}'`, name: "'visita'", board_type: "'general'", is_active: "true", created_by: `'${U}'` });
 
 // o Catálogo como o ecrã o lê (para as chaves dos serviços)
@@ -82,6 +87,7 @@ async function passo(nome: string) {
   const trocaP = (x: { produto: string; categoria: string | null }) => { x.produto = prodId.get(x.produto)!; x.categoria = x.categoria ? noId.get(x.categoria) ?? null : null; };
   for (const p of L.produtos ?? []) trocaP(p);
   for (const o of L.orcamentos) for (const p of o.produtos ?? []) trocaP(p);
+  for (const o of L.orcamentos) for (const l of o.linhas ?? []) if (l.produto) l.produto = prodId.get(l.produto) ?? null;
   const atual = L.orcamentos.find((o) => o.estado !== "substituido");
   if (atual) { atual.preco_final = Math.round(tot(d(), S).pf * 100) / 100; atual.total_com_iva = Math.round(totaisIva(d(), S).total * 100) / 100; }
   try {
@@ -123,12 +129,28 @@ A.pedirAlteracoesContrato(id, [{ c: "Prazo", nota: "Preciso de mais 15 dias" }])
 A.abrirRevisao(id); A.reverClausula(id, "Prazo", "A obra fica pronta em 45 dias úteis."); A.validarContrato(id); await passo("cláusula revista e validada");
 A.enviarContrato(id);
 A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" }); await passo("contrato assinado por SMS");
+const temEc = await db.query(`select count(*)::int n from pg_proc where proname='fn_ec_emitida'`);
+if ((temEc.rows[0] as { n: number }).n) {
+  const r = (await db.query(`select ec_emitida_em, fn_ec_emitida(id) conta from client_contracts where negocio_id=$1 and replaced_by_contract_id is null`, [NEG])).rows[0] as { ec_emitida_em: unknown; conta: boolean };
+  if (r.ec_emitida_em === null && r.conta === false) { ok++; console.log("  certo: contrato assinado, a encomenda de cliente ainda não conta"); }
+  else { falhas++; console.log("  FALHOU: antes do pagamento a encomenda já conta", JSON.stringify(r)); }
+}
 const TR = tranchesDe(d());
 for (const [k, v] of Object.entries({ nome_fiscal: "Anabela Schroeder", nif_fat: "123456789", serie: "FT 2026", tranche: TR[0].nome, vencimento: "Pronto pagamento", metodo: "Transferência", conta: "Banco A · conta à ordem", comprovativo: "Transferência adjudicação" })) A.campo(id, k, v);
 S.role = "financeiro";
 A.emitir(id); A.validar(id);
 guardarFaturas(S, id, faturasDe(S, d()));
 await passo("1.ª fatura paga, com o recibo");
+if ((temEc.rows[0] as { n: number }).n) {
+  const r = (await db.query(`select ec_emitida_em, fn_ec_emitida(id) conta from client_contracts where negocio_id=$1 and replaced_by_contract_id is null`, [NEG])).rows[0] as { ec_emitida_em: unknown; conta: boolean };
+  if (r.ec_emitida_em !== null && r.conta === true) { ok++; console.log("  certo: 1.º pagamento validado, a encomenda de cliente foi emitida e conta"); }
+  else { falhas++; console.log("  FALHOU: depois do pagamento a encomenda não conta", JSON.stringify(r), "obra.ec:", !!d().obra?.ec); }
+  const pl = (await db.query(`select count(*)::int n, count(*) filter (where product_id is not null and qt >= 1)::int com from quote_lines ql join quotes q on q.id=ql.quote_id where q.negocio_id=$1 and q.estado='aceite' and ql.tipo_emylia='produto' and ql.descricao_snapshot like 'Produto · %'`, [NEG])).rows[0] as { n: number; com: number };
+  if (pl.n > 0 && pl.com === pl.n) { ok++; console.log(`  certo: as ${pl.n} linhas de produto têm o produto e a quantidade real`); }
+  else { falhas++; console.log("  FALHOU: linhas de produto sem produto", JSON.stringify(pl)); }
+  const fns = (await db.query(`select count(*)::int n from pg_proc where proname in ('fn_client_order_line_reservations','rpc_list_client_order_documents','rpc_client_order_list_readiness','fn_client_order_request_missing') and prosrc like '%fn_ec_emitida%'`)).rows[0] as { n: number };
+  if (fns.n === 4) { ok++; console.log("  certo: as 4 funções da encomenda de cliente usam fn_ec_emitida"); } else { falhas++; console.log("  FALHOU: funções ajustadas", fns.n); }
+}
 const c = (await db.query(`select status, signature_method, versao, replaced_by_contract_id is not null substituido from client_contracts where negocio_id=$1 order by versao`, [NEG])).rows;
 console.log("  contratos na base:", JSON.stringify(c));
 const q = (await db.query(`select versao, estado, proposal_id is not null ligado from quotes where negocio_id=$1 order by versao`, [NEG])).rows;

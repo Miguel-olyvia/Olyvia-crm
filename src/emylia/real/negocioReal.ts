@@ -4,7 +4,7 @@
 // formato que o motor entende ("dd/mm hh:mm"; "aaaa-mm-dd" nas faturas e no início da obra).
 // Fora daqui, por agora: a obra (Fase 3), as adendas (Fase 2.5), a demolição e o acesso ao portal (Fase 4).
 import type { Evento, LinhaOrc, Negocio, Orcamento, Papel, PedidoClausula, VersaoProposta } from "../motor";
-import type { ProdVisita } from "../produtosVisita";
+import { PREFIXO_PROD, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
 
@@ -59,6 +59,8 @@ export interface LinhaProdutoVisita {
 export interface LinhaOficio { perfil_chave: string; nome: string; horas_un: number; custo_hora: number; tecnicos: string[] | null }
 export interface LinhaOrcamentoLinha {
   ordem: number; tipo: "servico" | "materiais_modelo" | "produto" | "livre"; servico: string | null; descricao: string; unidade: string | null;
+  /** Linha de produto: o produto escolhido na visita (para a encomenda de cliente do CRM). Não volta ao Negocio (deriva-se da descrição). */
+  produto?: string | null;
   quantidade: number; preco_un: number; parte_iva: "mao_obra" | "materiais"; taxa_iva: number | null; fornecedor: string | null;
   qtd_origem: number | null; preco_un_origem: number | null; custo_un_origem: number | null;
   custo: { custo_un: number; manual: boolean; congelado: boolean; horas_un: number; mao_obra_un: number; equipamentos_un: number; consumiveis_un: number;
@@ -102,6 +104,8 @@ export interface LinhasNegocio {
   contratos: LinhaContrato[];
   faturas: LinhaFatura[] | null;
   historico: { ordem: number; texto: string; tipo: string; ocorrido_em: string | null }[];
+  /** A encomenda de cliente emitida no 1.º pagamento validado (o motor guarda-a em obra.ec). Só vai para a base. */
+  ec?: { emitida_em: string | null; por: string | null } | null;
 }
 
 /* ------------------------------------------------------------------ Negocio → linhas */
@@ -109,7 +113,7 @@ const prodParaLinha = (p: ProdVisita, i: number): LinhaProdutoVisita => ({
   ordem: i, produto: p.id, nome: p.n, unidade: p.un, custo_un: p.custo, pvp_un: p.pvp ?? null, categoria: p.no ?? null, quantidade: p.q,
   cliente_fornece: !!p.cliente, servico: p.svc ?? null, fator: p.fator ?? null, sem_instalacao: !!p.semSvc,
 });
-function linhaParaLinha(l: LinhaOrc, i: number): LinhaOrcamentoLinha {
+function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = []): LinhaOrcamentoLinha {
   if (l.t === "svc") {
     const det = l.det;
     return {
@@ -124,6 +128,7 @@ function linhaParaLinha(l: LinhaOrc, i: number): LinhaOrcamentoLinha {
   }
   return {
     ordem: i, tipo: l.livre ? "livre" : l.prod ? "produto" : "materiais_modelo", servico: null, descricao: l.d, unidade: l.livre?.un ?? null,
+    produto: l.d.startsWith(PREFIXO_PROD) ? prods.find((p) => !p.cliente && PREFIXO_PROD + textoProduto(p) === l.d)?.id ?? null : null,
     quantidade: 1, preco_un: l.preco, parte_iva: "materiais", taxa_iva: l.iva ?? null, fornecedor: l.prod?.forn ?? null,
     qtd_origem: l.livre?.q ?? l.prod?.q ?? null, preco_un_origem: l.livre?.pu ?? l.prod?.precoUn ?? null, custo_un_origem: l.prod?.custoUn ?? null,
     custo: { custo_un: l.custo, manual: false, congelado: false, horas_un: 0, mao_obra_un: 0, equipamentos_un: 0, consumiveis_un: 0, estrutura_hora: 0,
@@ -165,7 +170,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       recusa: o.recusada ? { motivos: o.recusada.motivos, nota: o.recusada.nota ?? null, em: iso(o.recusada.q) } : null,
       enviado_em: iso(o.enviada), aceite_em: iso(o.aceite), substituido_em: null, aceite_antes_em: null, preco_final: null, total_com_iva: null,
       prestacoes_por_fases: pr.porFases, sem_demolicao: !!o.semDemolicao,
-      linhas: o.linhas.map(linhaParaLinha), zonas: o.zonas ?? null,
+      linhas: o.linhas.map((l, i) => linhaParaLinha(l, i, d.visita.prod ?? [])), zonas: o.zonas ?? null,
       prazo: Object.entries(o.prazo ?? {}).map(([tarefa, dias]) => ({ tarefa, dias })),
       prestacoes: pr.L, avisos: Object.entries(o.avisosVistos ?? {}).filter(([, x]) => x).map(([k]) => k),
       precos_manuais: o.precosMan ? Object.entries(o.precosMan).map(([descricao, preco]) => ({ descricao, preco })) : null,
@@ -226,6 +231,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       recibo: f.recibo ?? null,
     })) : null,
     historico: d.hist.map((e, i) => ({ ordem: i, texto: e.t, tipo: e.k, ocorrido_em: iso(e.q) })),
+    ec: d.obra?.ec ? { emitida_em: iso(d.obra.ec.emitida?.q ?? d.obra.ec.criada), por: d.obra.ec.emitida?.por ?? null } : null,
   };
 }
 
