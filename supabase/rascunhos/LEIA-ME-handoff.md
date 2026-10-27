@@ -1,133 +1,112 @@
-# Handoff — Olyvia CRM de RH — atualizado a 26 de Outubro de 2026 (15h)
+# Handoff — Olyvia CRM de RH — atualizado a 27 de Outubro de 2026
 
-**Este ficheiro é autossuficiente.** O `vault` (documentação fora do GitHub) **não viaja** para o outro PC; só este ficheiro e o **git**. Tudo o que é código, migrations por aplicar e testes SQL está num ramo do git (ver §1). O que só existia no `vault` está resumido aqui (§9). Para quem pegar nisto sem contexto: diz **o que estamos a fazer, onde está cada coisa e o que falta**. Datas e números são de 26/10; o que não foi reverificado diz-se.
+**Este ficheiro é autossuficiente.** O `vault` (documentação fora do GitHub) **não viaja** para o outro PC; só este ficheiro e o **git**. Está também no ramo `wip/rh-pessoas-fase8` em `supabase/rascunhos/LEIA-ME-handoff.md`. Tudo o que é código, migrations e desenhos está no git. Datas e números são de 27/10; o que não foi reverificado diz-se.
 
 ---
 
 ## 1. Retomar noutro PC — fazer isto primeiro
 
-**Pré-requisitos:** Git com o alias SSH `github-olyvia` (repos `git@github-olyvia:Miguel-olyvia/Olyvia-crm.git` e `git@github-olyvia:Miguel-olyvia/Olyvia2.0.git`), Node 24, `npm i`, **Supabase CLI** (≥ 2.116) com `supabase login` numa conta que vê os projetos **RH `uetjghdkwbywbftedtth`** e **Olyvia 2.0 `dconylgnqyywjdetytvv`**. **Sem Docker** (a regra do utilizador: nunca arrancar base local nem Docker; há pouca RAM).
+**Pré-requisitos:** Git com o alias SSH `github-olyvia` (repo `git@github-olyvia:Miguel-olyvia/Olyvia-crm.git`; a Olyvia 2.0 é outro repo `Miguel-olyvia/Olyvia2.0`), Node 24, `npm i`, **Supabase CLI** (≥ 2.116, `supabase login` numa conta que vê o projeto **RH `uetjghdkwbywbftedtth`**). **Sem Docker** (pouca RAM; nunca `supabase start`/`db reset`/`db diff`).
 
-**Passos:**
-1. `git fetch origin` e criar um **worktree** do ramo WIP (nunca trabalhar na pasta principal do repo: está ligada à base **principal/Mudelar**): `git worktree add <pasta> -b wip/rh-pessoas-fase8 origin/wip/rh-pessoas-fase8`. Dentro desse worktree: `supabase link --project-ref uetjghdkwbywbftedtth`. **Confirmar** que `supabase/.temp/project-ref` diz `uetjgh…` antes de qualquer comando à base.
-2. Confirmar o estado da base: `supabase migration list --linked` → a última aplicada deve ser **`20261231200000`** e **nada pendente**. Se houver mais, alguém aplicou depois deste handoff.
-3. Ler o §4 (fila) e o §3 (decisões por tomar). **As migrations 300000 e 400000 estão em `supabase/rascunhos/` do ramo WIP, NÃO em `supabase/migrations/`** (a CLI só lê `migrations/`; é de propósito: um `db push` aplicaria tudo o que lá estiver).
-4. A CLI deste PC pode não ter o `CLAUDE.md` do workspace com as regras do utilizador: as essenciais estão no §8.
+1. `git fetch origin` e criar um **worktree** do ramo WIP (nunca trabalhar na pasta principal do repo: está ligada à base de **produção/Mudelar**):
+   `git worktree add <pasta> -b wip/rh-pessoas-fase8 origin/wip/rh-pessoas-fase8`
+2. Dentro do worktree: `supabase link --project-ref uetjghdkwbywbftedtth` e **confirmar** que `supabase/.temp/project-ref` diz `uetjgh…` antes de qualquer comando à base.
+3. `supabase migration list --linked`: a última migration aplicada deve ser **`20261231810000`**. Se houver mais, alguém aplicou depois deste handoff.
+4. Verificação leve do código (substitui o `vite build`, que o utilizador proíbe por RAM): o `esbuild` nativo, 0 erros esperados, ~10 s, sem `node.exe`:
+   `node_modules\@esbuild\win32-x64\esbuild.exe src/main.tsx --bundle --packages=external --format=esm --jsx=automatic --alias:@=./src --loader:.svg=dataurl --loader:.png=dataurl --loader:.jpg=dataurl --loader:.webp=dataurl --loader:.gif=dataurl --loader:.woff=dataurl --loader:.woff2=dataurl --loader:.css=empty --log-level=error --outfile=<ficheiro temporário fora do repo>`
+   Apanha sintaxe, imports que não resolvem e exports em falta (o que parte o deploy do Vercel, que só corre `vite build`). **Não apanha erros de tipos**: `tsc`/`eslint` nunca correram neste trabalho.
+5. **Testes:** só `npx vitest run <um ficheiro> --maxWorkers=1`, **um de cada vez**, e nunca uma pasta inteira (gastam RAM; o utilizador já pediu para não correr nada pesado). Nunca `tsc`, `eslint` nem `vite build`.
+6. O `CLAUDE.md` do workspace (regras do utilizador) não viaja: as essenciais estão no §8. Copiar a regra «comandos à base a partir do worktree» para o `CLAUDE.md` do outro PC.
 
-**Ramos (repo `Olyvia-crm`), ambos enviados:**
-- `feature/rh-pessoas` — HEAD `94123e74`. É o que o Vercel de teste (`olyvia-crm-env-testarh-bmgest.vercel.app`, protegido por login Vercel) publica. **Estável**: tem tudo até «Nova lead» com negócio.
-- **`wip/rh-pessoas-fase8`** — filho do anterior; o trabalho das fases 7 e 8 (60 ficheiros) **mais** `supabase/rascunhos/` (2 migrations por aplicar e 3 testes SQL) e uma cópia deste handoff em `supabase/rascunhos/LEIA-ME-handoff.md`. **Por testar em conjunto e por aplicar.** Quando a fila do §4 estiver feita, fundir em `feature/rh-pessoas`. **Nada vai para o `main`** e a Mudelar nunca é afetada.
-- Olyvia 2.0 é **outro repo** (§6), tudo já em `master`.
+**Ramos (todos enviados):**
+- **`feature/rh-pessoas`** HEAD `5cdec59f`: tudo o que está revisto por leitura e aplicado. É o que o Vercel de teste (`olyvia-crm-env-testarh-bmgest.vercel.app`, protegido por login Vercel) publica. **Nada vai para o `main`** e a Mudelar nunca é afetada.
+- **`wip/rh-pessoas-fase8`** HEAD `ca50197f` = `feature/rh-pessoas` + 1 commit de **trabalho a meio** (40 ficheiros, não verificado): a morada da obra e outros valores do Pipeline, e **cerca de 20 ficheiros de teste do `/rh-exemplo` a meio de serem corrigidos** com o utilitário `src/test/rhExemploProviders.tsx`. Quando os testes estiverem verdes, fundir em `feature/rh-pessoas`.
 
----
-
-## 2. A frente principal: CRM de RH (Pessoas, Pipeline, formulário)
-
-**Base e org.** Base **RH** `uetjghdkwbywbftedtth`; só existe a org **nike** (`b6ffce4f-f630-4933-833a-008649757a33`). Escritas de teste só aí. A base principal (`tzbfgw…`) e a Mudelar **nunca** se tocam nem se consultam.
-
-**O modelo decidido pelo utilizador**
-- **Entidade única** (`anew_entities`; lead = `client_since` vazio). **Negócio desde o início:** cada lead é uma pessoa **com** um negócio (título = nome da pessoa); o Pipeline só mostra negócios. É como a Olyvia 2.0 faz (lido em `motor.ts`: `novoDeal` com `fase: 0`, «Por contactar»); lá, falhar o contacto é «marcar como perdido».
-- **Formulário online:** a submissão **entra sempre** e vai para a fila; pessoa nova nasce com negócio; pessoa conhecida fica na fila (ligar, criar negócio, ignorar). Sem 409 «já existe», sem devolver o id da pessoa (código feito na fase 8, **por provar**).
-- **«Nova lead»** cria pessoa **e** negócio (feito, enviado) e abre a ficha em `?open=<pessoa>&negocio=<negócio>`. A `neg_criar_negocio` é idempotente no `p_id` (`ON CONFLICT`).
-- **Chamadas, visitas e levantamentos ligam-se à pessoa e ao negócio** (colunas `entity_id` e `negocio_id` em `entity_interactions`, `schedule_items`, `levantamentos`, com FK). Auditado no código a 26/10: todos os caminhos do Pipeline real gravam `negocio_id`; alterar/cancelar/dar resultado a uma visita mantém a ligação. O levantamento é **um por negócio** (a base recusa um segundo, NG013).
-- **Ficha:** a página de **Pessoas** abre a ficha **completa** num painel lateral (`FichaReal` sem `comGuia`); o **Pipeline** abre o **ecrã guiado** dentro da página (`comGuia`). «Por contactar» usa o guia de sempre («Registar a chamada»); **Contactado** (5 passos: Chamada, Qualificação, Morada da obra, Preparar a visita, Marcar a visita) e **Visita** (Visitas com «Marcar outra visita» + uma secção por levantamento configurável + «Fechar levantamento») usam o **assistente** (`src/components/pessoas/assistente/`). A fase do negócio no ecrã deriva do que tem ligado (levantamento > visita marcada > chamada > nada), a mesma regra da coluna do quadro.
-- **Fora, por decisão:** necessidades (serviços e produtos), fotografias, o diálogo «Mais sobre a pessoa» no Pipeline.
-
-**Aplicado na base RH (lido na base a 26/10).** Migrations até `20261231200000`: entidade única, RPCs e RGPD, formulário só entidade, permissões de fornecedores, **`20261231100000`** (Qualificação por negócio, `pedido_cliente`, `morada_origem`, `organization_kind`/Condomínio, `neg_guardar_qualificacao`, `neg_guardar_contacto_pessoa`, questionário semeado na nike: **8 secções, 36 perguntas, 109 opções**) e **`20261231200000`** (negócio desde o início: `fn_form_criar_entidade` devolve `negocio_id`, `rpc_resolve_form_submission` reescrita com `p_confirmar_negocio_aberto`, `neg_resumo_quadro` só com negócios, `neg_guardar_origem_pessoa`, CHECK da resolução com 6 valores). **A nike tem 3 negócios abertos** (criados em teste: Miguel tester, Inês Lourenço, Sérgio Matos) e **0 submissões**. As outras «pessoas» da lista (Paulo, Diogo, Marta…) são fichas de utilizadores de teste, **não** leads. A RH já tem **76 Edge Functions publicadas, versões antigas** (ex.: `create-lead` v161, `book-slot` v197).
-
-**NÃO aplicado — rascunhos em `supabase/rascunhos/` (ramo WIP):**
-- `RASCUNHO-20261231300000_nif_e_dono_da_pessoa.sql`: RPC `neg_guardar_nif_pessoa` (hash e cifra vêm do `nif-write-proxy`, que tem as chaves) e gatilho que atribui a pessoa ao dono do negócio. Corrigido na fase 8 (só atribui com âmbito `edit` e `leads.assign` se o responsável não for quem escreve; nunca falha ao criar o negócio; NG031 genérico fora do âmbito).
-- `RASCUNHO-20261231400000_etapa_pela_fase_do_negocio.sql`: a **etapa da pessoa** (lista de Pessoas) passa a ser a fase do **primeiro negócio aberto** (nada ligado = Por contactar; chamada = Contactada; visita = Com visita; levantamento/orçamento = Negócio) e `neg_ficha_pessoa` devolve `nif_ultimos3`. É caminho quente da lista: **medir** na nike (só há 3 negócios). `authenticated` não lê `nif_hash`, por isso `tem_nif` usa o helper `fn_neg_pessoa_tem_nif`.
-- Testes SQL revertidos (escritos, **nunca corridos**): `TESTE-teste-nif-e-dono.sql`, `TESTE-teste-etapa.sql`, `TESTE-teste-negocio-inicio.sql`. **O `supabase db query --file` pode não correr tudo numa só transação**: não os correr sem confirmar, ou a migration aplica-se a meio. Tudo o que se aplicou até hoje foi com guardas e conferência atómicas, sem esse teste. `TESTE-teste-etapa.sql` tem um erro conhecido (H1): usa `anew_users.id` como `sub` do JWT; tem de ser `auth_user_id`.
-
-**Código das fases 7 e 8 (commit `e3a818f1`, só no ramo WIP).** NIF sempre visível no cartão «Cliente» («Por preencher» se vazio) e grupo «Quem pede» (tipo de cliente + NIF) no passo Chamada; `nif-write-proxy` com a RPC nova e redação do NIF; `create-lead` sem 409 e `insert-lead` sem `entity_id`; fila a ler o conflito de reserva (`_meta.dedup.conflito`); `book-slot` com RETRY e `captureError`; «Fechar levantamento» honesto («Nada novo para guardar»); chamada sem negócio aberto avisa; **limpeza do Pipeline** (sai «Sem orçamento escolhido», «Valor», «Comercial», «Fecha no contrato», «Fechar agora»; «Perder negócio» → «Marcar como perdido»); etapa e «Próximo passo» na lista de Pessoas (o frontend só mostra: a etapa vem da migration 400000); `vercel.json` com **geolocalização aberta só no bloco da app** (`geolocation=(self)` + `nominatim.openstreetmap.org` no `connect-src`; faz funcionar «Estou no local»; só afeta este ramo); `vitest.config.ts` com 2 aliases (`npm:zod` e o URL `esm.sh` do supabase-js) para testar `create-lead` e `insert-lead`.
-
-**Nada disto foi visto no browser.** Só testes (jsdom) e leituras da base. O que o utilizador viu e reportou: o assistente antigo (corrigido), «registar a chamada» a saltar para «Negócio · Orçamento» (corrigido em `4b5b7985`: `FichaInterior` chamava sempre `negocio.esquecer()`; teste vermelho→verde), e que o Pipeline devia ter negócio (corrigido por `94123e74` e pela migration 200000).
+**Commits desta sessão em `feature/rh-pessoas`** (por ordem): `51141e41` proxy do NIF + rascunhos · `b0c3c385` `/rh-exemplo` ligado à base · `4b932e8a` Pipeline: um só voltar, scroll no meio · `6566f1a7` NIF opção (a) aplicado · `a70523fa` `/rh-exemplo` 2.ª ronda · `8f3b8ad9` Pipeline: passos preenchidos · `93ce3c3a` portal real com a UI da pré-visualização · `71b9580b` justificação do dia na base · `5cdec59f` portal fase 1 (OTP).
 
 ---
 
-## 3. Decisões do utilizador
+## 2. Estado da base RH e das Edge Functions (lido na base a 27/10)
 
-**Tomadas (26/10)**
+**Base RH `uetjghdkwbywbftedtth`** (única org: nike `b6ffce4f-f630-4933-833a-008649757a33`; escritas de teste só aí). Migrations aplicadas nesta sessão (todas com guardas atómicas e verificação de catálogo; **nenhum teste SQL foi corrido**):
 
-| # | Assunto | Decisão |
-|---|---|---|
-| 1 | «Estou no local» | **Abrir** (feito no WIP) |
-| 2 | NIF em «Quem pede» | **Sim**, e **sempre visível** no cartão («Por preencher» se vazio) |
-| 3 | Condomínio volta a Empresa? | **Não**; fica o que foi escolhido |
-| 4 | Apagar pessoa limpa pedido/respostas? | **Não** (é soft delete) |
-| 5 | Formulário online | **Aceita sempre**, entra na fila; sem avisos de duplicado |
-| 6 | Atribuir a pessoa ao atribuir o negócio | **Sim** (migration 300000) |
-| 7 | «Visita fica feita sozinha» | **Manual** |
-| 8 | Funções do formulário na RH | **Publicar tudo** |
-| 9 | Apagar a admissão de teste do Rafael (Olyvia 2.0, org Olyvia Demo) | **Não** |
-| — | Pipeline vs pessoa | Fica **negócio desde o início**; «Marcar como perdido» |
-| — | Etapa na lista de Pessoas | Pela fase do **primeiro** negócio |
-| — | Morada da obra | O utilizador disse «sim» a gravar **logo no passo** — mas a base **não deixa** (ver abaixo) |
+| Versão | O quê |
+|---|---|
+| `20261231500000` | (do Rafael) preço de embalagem do portal de fornecedor; as 5 funções já estavam vivas, só registou a versão |
+| `20261231600000` | NIF: `neg_guardar_nif_pessoa(p_actor_auth_uid, …)` só `service_role`; tabela `neg_nif_tentativas` (10 tentativas/min, NG032); gatilho do dono da pessoa; `authenticated` sem `UPDATE` direto em `nif_hash/nif_encrypted/nif_last3` |
+| `20261231790000` | `CHECK` de `pessoas_acessos_sensiveis.campo` passa de 10 para **14** valores (as funções «Ver justificação» de faltas e ausências do RH real falhavam sempre; lido no catálogo, **não reproduzido a correr**) |
+| `20261231800000` | justificação do dia: tabela `pessoas_justificacoes_dia` (RLS, `motivo` sem acesso direto), 5 RPCs `rpc_hr_justificacao_dia_*`, gatilho que passa a justificação a `sem_efeito` se a falta for anulada/corrigida |
+| `20261231810000` | portal fase 1: `rpc_hr_convite_admissao_rascunho(p_token_hash, p_sessao_hash, p_rascunho)` e `…_submeter(p_token_hash, p_sessao_hash, p_dados, p_assinatura_nome, p_ip, p_user_agent)` substituem as assinaturas antigas (que escreviam só com o link); exigem sessão OTP; o submeter lê o NISS e o IBAN do Vault |
 
-**POR TOMAR (bloqueiam trabalho)**
-- **(a) Morada da obra no passo.** `neg_guardar_levantamento` não deixa **alterar** um levantamento já ligado ao negócio (devolve `mudou:false` sem escrever; um trigger «congela-o»). Gravar a morada cedo seria um **no-op silencioso**, e ligar o levantamento cedo faz o negócio passar a **Levantamento** (desmonta o assistente de Contacto). Opções: **(i)** migration que deixe alterar o levantamento enquanto o negócio está aberto; **(ii)** manter a morada em rascunho (sessionStorage) até «Fechar levantamento» — é o que está hoje; **(iii)** *recomendada*: guardar a morada **no próprio negócio** (colunas novas em `negocios` + RPC) e copiá-la para o levantamento ao fechar (o utilizador disse que a morada da obra é do negócio). Migration e código entram juntos.
-- **(b) Ganho do negócio no Pipeline.** Tirou-se o «Fechar agora». O ganho é **automático** (contrato assinado)? Se não for, um negócio «pronto a ganhar» fica preso.
+**Edge Functions publicadas na RH:** `nif-write-proxy` **v58**; `convite-admissao` **v12**. Segredos existentes: `NIF_HMAC_KEY`, `NIF_ENC_KEY`, `APP_BASE_URL`, `PORTAL_OTP_PEPPER`, `SUPABASE_*` (nunca ver nem guardar valores).
 
-**Riscos conhecidos aceites:** `SKIP LOCKED` do gatilho pode perder uma atribuição sem retentativa; `authenticated` mantém `GRANT UPDATE` por coluna em `nif_hash`/`nif_encrypted`/`nif_last3` (contorna a RPC → migration própria para revogar); o NIF continua a ser um oráculo de existência (NG031 distingue «gravado» de «recusado»; ~10^8 NIFs; **o proxy não tem limite de tentativas** → recomendado limite por utilizador e registo de segurança sem o NIF); a RPC está concedida a `authenticated` (chamada direta grava hash arbitrário).
+**ARMADILHA DO `db push` (drift):** as versões **`20261231300000` e `20261231400000` estão registadas na base RH sem nome e sem ficheiro** (alguém usou `migration repair` ou equivalente; o conteúdo da 400000 já está na base byte a byte, a 300000 nunca correu — foi substituída pela 600000). O `db push` **recusa** com `LegacyDbPushMissingLocalError`. Solução (está no `CLAUDE.md`, nunca `migration repair`): antes de `migration list`/`push`, criar em `supabase/migrations/` dois ficheiros **vazios** (só um comentário, CRLF) `20261231300000_registo_sem_ficheiro.sql` e `20261231400000_registo_sem_ficheiro.sql`; depois do push **apagá-los** e **nunca os comitar**. Antes do push, `migration list --linked` + `db push --linked --dry-run` e confirmar que o pendente é **exatamente** o que se quer (o `db push` aplica TUDO o que estiver na pasta).
 
-**Por responder do trabalho de RH/recrutamento (de 24/10):** custo anual do RH ÷12 ou ÷14? Salário da oferta de recrutamento: próprio ou do cargo? Primeiro pagamento validado dispara o arranque da obra? Valores por omissão do recrutamento (aprovação para abrir vagas; conservação 6 meses sem consentimento e 2 anos com; triagem cega desligada; candidaturas espontâneas aceites; perguntas eliminatórias só assinalam)?
+**Depois de cada `db push`, publicar a Edge que depende dele** (`supabase functions deploy <nome> --project-ref uetjghdkwbywbftedtth --use-api`, só essa função). Migration, Edge e código entram juntos.
 
 ---
 
-## 4. Fila, por ordem (o que falta)
+## 3. O que foi feito (por área) e o que NÃO está verificado
 
-1. **Decidir (a) e (b)** do §3. Depois corrigir: `TESTE-teste-etapa.sql` (H1 + casos M1/M2: ramo verdadeiro de `fn_neg_pessoa_tem_nif`; `created_at` vs `id` no desempate); 3 MEDIUM da interface (limpar o alerta «Abra primeiro o negócio.» quando o negócio abre; região `status` sempre montada para «Nada novo para guardar»; ligar o erro do NIF ao campo por `aria-describedby`); `redactNif` a redigir também a forma sem separadores; o `proxy` a não calcular `p_nif_tokens` para esta RPC; o teste antigo `nif-write-proxy/index.test.ts` («NIF em branco após trim ⇒ 400») contradiz o handler novo (Deno nunca correu).
-2. **Bateria de testes** (um conjunto de cada vez, `npx vitest run <pasta> --maxWorkers=2`; **confirmar que não há outro vitest a correr**): `src/components/pessoas-lista`, `src/components/pessoas`, `src/components/pessoas-processo`, `src/components/negocio-metas`, `src/translations`, `src/pages`, `src/hooks/pessoas`, `supabase/functions`. Última medida (em `feature/rh-pessoas`): 592, 3280, 138, 922, 190, e 771 verdes. **5 testes falham desde antes** (não são do trabalho): `useContactosPessoas` e `useNomesResponsaveis` («noutra organização»), `AusenciasOrganizacao.ano`, `ObraV2Equipamentos`, `OperacoesV2` — provado num checkout limpo. **Nunca `tsc`, `eslint` nem `vite build`** (regra do utilizador).
-3. **Chaves de servidor na RH:** `NIF_HMAC_KEY` e `NIF_ENC_KEY` **não existem** (só `APP_BASE_URL`, `PORTAL_OTP_PEPPER` e os `SUPABASE_*`). Criar com 32 bytes aleatórios em base64, **diferentes entre si**, definidos pela CLI (`supabase secrets set … --project-ref uetjghdkwbywbftedtth`) sem mostrar nem guardar o valor; `supabase secrets list` mostra só digestos. Sem `NIF_HMAC_KEY`, `create-lead` e `insert-lead` respondem 503 a todos (de propósito, falha em fechado).
-4. **Aplicar as migrations 300000 e 400000**: `migration list --linked` (nada pendente), copiar de `supabase/rascunhos/` para `supabase/migrations/`, listar de novo (**exatamente essas**), `supabase.cmd db push --linked --yes` **do worktree ligado à RH**, verificar na base (assinaturas únicas, ACL, CHECK, gatilho), comitar. Medir `neg_resumo_pessoas` na nike.
-5. **Publicar as Edge Functions do formulário na RH** (autorizado a 26/10): as alteradas neste ramo (`create-lead`, `insert-lead`, `update-lead`, `book-slot`, `nif-write-proxy` e as que dependam das `_shared` alteradas). `supabase.cmd functions deploy <nome> --project-ref uetjghdkwbywbftedtth --use-api` (**sem Docker**); depois `supabase functions list` para ver a versão nova.
-6. **Fundir** o WIP em `feature/rh-pessoas`, enviar e **ver ao vivo na nike** (nada foi visto): «Nova lead» → cartão em «Por contactar» → registar chamada → fica em «Contactado» → assistente → visita → levantamento; lista de Pessoas com a etapa certa; formulário online (com a chave criada); fila; NIF.
-7. Atualizar o registo de trabalho (formato RESOLVIDO / POR FAZER / POR DECIDIR) e dar o aviso de conclusão, se o outro PC tiver `task-done.ps1`.
+**Nada foi visto no browser** (o utilizador testa na nike). O `esbuild` dá 0 erros; os testes escritos só foram medidos onde se diz.
 
----
+- **Pipeline guiado** (`src/components/pessoas`, `pessoas-lista`, `hooks/pessoas`): um só botão «← Pipeline»; scroll só na coluna do meio (≥1024 px e ≥44rem de altura; abaixo, a página); **cada passo feito abre o MESMO ecrã do passo preenchido** (não um resumo em lista), na fase atual e nas «Fases feitas» (modo só de leitura). A morada da obra gravada, quem fez a chamada, a próxima ação e o título do quadro estão **no WIP** (por rever).
+- **`/rh-exemplo`** (protótipo de RH ligado à base): relógio real; Nova pessoa completa (seletor de conta/utilizador, duplicados, permissões, anexos, convite); admissões; assiduidade; organização; processamento; custo; horas extra (só coeficientes de pagamento). Wrappers finos em `src/components/rh-exemplo/hooks/` sobre os hooks/RPCs do RH real (regra do `semBase.test.ts`: só esses wrappers importam de `@/hooks`, `@/lib/hr`, `@/components/hr`). **Princípio do utilizador: reutilizar a lógica e os componentes do RH real em vez de refazer; muita lógica de negócio já está lá.**
+- **Portal do colaborador real** (`rh-exemplo/portal/*`): UI da pré-visualização com dados reais; **fase 1**: gravar exige sessão OTP; rascunho automático (3 s e ao fechar) e Submeter; NISS e IBAN com o formulário (cifrados no Vault); saiu o botão «Guardar NISS». O Submeter **continua a escrever na ficha e a concluir** (opção A como o protótipo; **por confirmar com o utilizador**: não existem «aprovar»/«devolver» na base). Anexos **desativados** (fase 2). «Documentos» escondida (a troca de documentos não existe na base).
+- **NIF:** opção (a): só o proxy chama a RPC com `service_role` e o utilizador do JWT; contador de tentativas na base. **Ninguém gravou um NIF ao vivo.**
+- **Justificação do dia:** código ligado à base; aceitar = uma transação (cria/decide a falta); ninguém decide a própria. As justificações de exemplo foram apagadas.
 
-## 5. Mapa do código (CRM de RH)
-
-- **Assistente de passos:** `src/components/pessoas/assistente/` — `AssistenteDoGuia.tsx` (coluna de passos, «Passo N de M», rodapé), `ContactoDoGuia.tsx` + `PassosContacto.tsx` (5 passos), `VisitaDoGuia.tsx` + `PassosVisita.tsx`, `GrupoQuemPede.tsx` + `quemPedeFormulario.ts` (tipo de cliente + NIF), `modeloAssistente.ts` (passos, «faltam X»), `useAssistente.ts`, `useRascunhoAssistente.ts` + `rascunhoAssistente.ts` (rascunho em sessionStorage por negócio).
-- **Guia e ficha:** `src/components/pessoas/` — `GuiaDoNegocio.tsx`, `GuiaDaPessoa.tsx`, `GuiaDoPasso.tsx` (3 colunas: passos | passo | cliente), `GuiaPecas.tsx` (barra de fases, cartão do cliente), `guiaDados.ts` (`clienteDoGuia`), `processo/abordagemDoNegocio.ts` (fase derivada), `FichaInterior.tsx`, `DetalheNegocioFicha.tsx`, `FormChamada.tsx`, `MarcarVisitaReal.tsx`.
-- **Páginas e quadro:** `src/components/pessoas-lista/` — `FichaReal.tsx` (prop `comGuia`: Pipeline = guia na página; sem ela = painel lateral completo), `PipelineReal.tsx`, `PessoasReal.tsx`, `QuadroReal.tsx`, `usePessoaAberta.ts` (`?open=&negocio=`). Nova lead: `src/components/pessoas-leads/NovaLeadReal.tsx` e `src/hooks/pessoas/novaLead/` (`gravarNovaLead.ts`, `criarNegocioNovaLead.ts`, `atualizarPessoaExistente.ts`, `useNovaLead.ts`).
-- **Dados:** `src/hooks/pessoas/` — `adaptarCartaoQuadro.ts` (só negócios), `useAcoesFichaReal.ts` (chamada/visita com `p_negocio_id`), `useGuardarQualificacao.ts`, `useGuardarNifPessoa.ts`, `useGuardarContactoPessoa.ts`, `adaptarFichaPessoa.ts`, `chamarNeg.ts` (chamada às RPCs `neg_*`). Fila de submissões: `src/pages/PendingFormSubmissions.tsx`. Traduções: `src/translations/pessoas*.ts`.
-- **Edge Functions (formulário):** `supabase/functions/` — `create-lead`, `insert-lead`, `update-lead`, `book-slot` (+ `pessoa.ts`), `nif-write-proxy` (lista fechada `ALLOWED_RPCS`), `_shared/formCaptacao.ts`, `_shared/captacaoPublica.ts` (limites, HMAC da impressão digital, honeypot).
-- **Base:** RPCs `neg_*` (contrato do frontend: **migração e código entram juntos**), `neg_ficha_pessoa`, `neg_resumo_pessoas`, `neg_resumo_quadro`, `neg_criar_negocio` (11 parâmetros), `neg_guardar_levantamento`, `neg_guardar_visita`, `neg_registar_contacto`.
+**Sem tabela na base (ficam em memória no protótipo):** horas extra com aprovação e limites, banco de horas e tipos de horário isenção/livre, justificação de picagem esquecida, custos (equipamentos, encargos, km, ajudas), denúncias (quase tudo), troca de documentos do portal, recibo congelado e reabertura do mês, decisões de admissão (aprovar/devolver/rejeitar: as RPCs «V3b» não existem), nome de tratamento. Horas extra no RH real são **calculadas** (realizado − planeado, `useRelatorioAssiduidadeMensal.ts:536`), sem aprovação.
 
 ---
 
-## 6. Olyvia 2.0 (repo `Miguel-olyvia/Olyvia2.0`, branch `master`, base `dconylgnqyywjdetytvv`)
+## 4. O que falta, por ordem
 
-Outro projeto, **não** o CRM de RH (é o protótipo ligado a uma base; deploy `olyvia2.vercel.app`, com `version.json` público). Em `master`, de hoje: `fbaea79`, `09f371b`, `cf2f45f` (reenvio do convite de admissão: deixou de dar `transicao_invalida`, mostra o motivo, erro traduzido), `4ae0a30` (a `admissao-rh` usa a **organização que o RH tem aberta** e não a 1.ª adesão da conta: a conta `olyvia2` tem 3 organizações, a 1.ª é «Olyvia Demo» sem SMTP; o SMTP está na «Mudelar») e `523c315` (o reenvio segue para o email escrito no diálogo). **`admissao-rh` publicada na versão 3** (`supabase functions deploy admissao-rh --project-ref dconylgnqyywjdetytvv --use-api`). Confirmado pelo utilizador: o reenvio funciona. Por saber: as outras funções (`portal-colaborador`, `criar-utilizador`) podem ter o mesmo defeito da 1.ª adesão; o teste `fonteRealRh.test.ts` pode precisar de ajuste; o email do convite do Rafael tinha uma letra trocada (`bmalr` em vez de `bmlar`); a admissão antiga do Rafael na «Olyvia Demo» fica (decisão 9).
-
----
-
-## 7. Regras e armadilhas (o `CLAUDE.md` do workspace tem tudo; isto é o que mais custou)
-
-- **`db push` aplica TUDO o que estiver pendente.** Listar antes (`migration list --linked`); nunca deixar rascunhos na pasta das migrations. Nunca SQL avulso de escrita ao remoto; nunca `migration repair`; nunca `supabase start`/`db reset`/`db diff`/Docker.
-- **Os comandos à base correm sempre a partir do worktree do ramo, nunca da pasta principal** (a principal está ligada à base de produção). Confirmar `supabase/.temp/project-ref` antes da 1.ª consulta. Consultas só `SELECT` de catálogo e contagens, sem ler dados pessoais.
-- Mudelar: nunca tocar. Escritas de teste só na nike. Credenciais coladas no chat nunca vão para ficheiros; `supabase secrets list` mostra digestos, nunca valores.
-- **Ficheiros CRLF:** Edit/Write ou Python binário (`python -I`); nunca `sed -i`. Num `Edit` barrado pelo GateGuard pode ficar uma sequência **a meio**: repetir o 1.º e confirmar por `grep`.
-- Um `vitest` de cada vez; **confirmar que não há outro a correr** (workflows em paralelo dão falhas falsas). Nunca `git stash`. Comitar só os ficheiros do trabalho (há agentes a escrever no mesmo worktree). Nunca `git push` para `main`.
-- Bash com heredoc/aspas falha («unexpected EOF»): usar PowerShell, ou escrever o script com Write e correr com `python -I`.
-- Publicar o frontend **antes** da migration deixa o Pipeline vazio (o quadro só lê negócios). O endereço de teste do CRM está protegido pelo Vercel: não se vê a versão por fora.
-- Trabalho em equipa de agentes (Workflow, segundo plano, agentes ECC por especialidade, revisão independente, modelo escolhido por camada); quem executa não se avalia a si próprio. O utilizador tem pouco uso por janela de 5 horas: **dizer o custo antes de lançar workflows grandes**.
-- Quando o utilizador pede «tirar X», tira-se em todo o lado do Pipeline e diz-se o que saiu. Quando diz «faz como o protótipo» ou «como a página de Leads», é **ordem**, não opção.
-
-## 8. Como o utilizador trabalha (para o próximo agente)
-
-- Português informal, curto e direto; fica irritado com explicações longas, com suposições e com âmbito alargado. Quer **números medidos** e que **não se afirme o que não foi verificado** (diz-se «não vi no browser»). Responde às decisões **por número**; se não percebe, diz «não percebi»: explicar em simples e não decidir por ele.
-- Pede «pergunta tudo» quando há dúvidas. Não gosta de ver apagado o que funcionava («substituis, não apagas»). Verifica o que lhe digo contra o ecrã: **confirmar antes de afirmar** (já aconteceu dar-lhe diagnósticos errados por não ver a versão publicada).
-- Consulta capturas do protótipo (Olyvia 2.0) como critério: ver o código do protótipo antes de decidir (clone só de leitura: `git clone git@github-olyvia:Miguel-olyvia/Olyvia2.0.git`; `src/pages/prototipo-negocios/`: `motor.ts`, `PaginaNegocio.tsx`, `NegocioSimples.tsx`, `campos.ts`, `Visitas.tsx`).
+1. **Testar ao vivo na nike (só o utilizador):** gravar um NIF em «Quem pede»; justificação do dia (enviar, recarregar, aceitar, recusar, «Ver texto»); portal com um convite (OTP, preencher, **recarregar** para ver o rascunho, submeter); Nova pessoa com utilizador ligado; os passos preenchidos e o scroll do Pipeline; o preço de embalagem do Rafael (aceitar um preço e ver o custo).
+2. **Fechar os testes do `/rh-exemplo` (no WIP):** o utilitário `src/test/rhExemploProviders.tsx` existe; ~20 ficheiros foram tocados. Antes da paragem a medição era **209 de 234 ficheiros a passar, 25 a falhar** (16 por falta de `CompanyProvider`; 2 antigos e não deste trabalho: `useContactosPessoas`, `useNomesResponsaveis`). Faltavam tocar: `abasAssiduidade`, `vistaPessoaPonto`, `justificacaoDiaFila`, `denuncias`, `rhGestao`, `fluxosD`, `cargosDivergencias`, `validacao`. Nunca enfraquecer asserções.
+3. **Testes SQL por correr** (escrevem dados; o desenho previa `BEGIN; migration; teste; ROLLBACK` na nike): `supabase/rascunhos/TESTE-teste-nif-e-dono.sql`, `TESTE-teste-revogar-update-nif.sql`, `TESTE-justificacao-do-dia.sql`, `TESTE-portal-fase1.sql`, `TESTE-teste-etapa.sql`. Precisam de autorização do utilizador (SQL de escrita ao remoto, ainda que revertido).
+4. **Anexos do portal (fase 2):** só há desenho: `supabase/rascunhos/DESENHO-portal-fase2-anexos.md` (701 linhas) com **14 decisões numeradas** no fim para o utilizador (recomendações incluídas, p.ex. anexos obrigatórios = nenhum, criar segredos no Vault, retenção 30 dias, recodificar a fotografia, HEIC não). Sem segredos no Vault e sem prazo de retenção aprovado os anexos não podem abrir ao público.
+5. **Defeitos conhecidos por confirmar:** a Edge `convite-admissao` passava `getClientIp` ao `p_ip` (tipo `inet`; com «unknown» dá 500) — o desenho mandava usar `detectClientIp`; confirmar se ficou corrigido. `src/lib/hr/__tests__/conviteAdmissaoContrato.test.ts` ainda espera NISS/IBAN em `p_dados` (passa porque a lista não mudou; devia passar a «lidos do Vault»). O teste Deno `nif-write-proxy/index.test.ts` foi atualizado por leitura, **nunca corrido** (Deno). ~100 achados menores das revisões por tratar.
+6. **Decisões de produto do utilizador:** fluxo de aprovação de horas extra (precisa de tabela); âmbito do RH por centro/departamento (hoje a organização inteira, como o RH real); «Desligar» no mesmo dia (o `CHECK` não deixa fechar na véspera); prazo de 5 dias úteis fixo ou configurável; o Submeter A ou B.
+7. Atualizar o registo de trabalho (no PC antigo: `vault\registo-trabalho.md`, formato RESOLVIDO / POR FAZER / POR DECIDIR; se o outro PC não o tiver, escrever um novo com o mesmo formato).
 
 ---
 
-## 9. Outras frentes (resumo de 24/10; vivem só no `vault` do PC antigo; **não reverificadas**)
+## 5. Mapa do código
 
-1. **HTML de arquitetura da nova base, v2 por módulos** (`olyvia_arquitetura_nova_base_v2.html`): só a **lógica** de como cada coisa funciona e se liga; 9 módulos, 50 abas; nada de «hoje», «ainda não», código nem tabelas técnicas. Gera-se com `build_html_v2.py` a partir de `logica/final2_<modulo>.json`. Faltavam do menu do protótipo: Hoje e Definições (o utilizador **não** quer as listas Leads e Clientes).
-2. **Estrutura da nova base** (`vault\ficheiros\crm\nova-base\ajustes\`, só para ver, **não são migrations**): parte da base atual e diz o que se ajusta; duas revisões deram 25 achados de base de dados (1 CRITICAL, 7 HIGH, 14 MEDIUM) e 15 de segurança (6 HIGH, 9 MEDIUM); a correção ficou a meio. Regra do utilizador: reaproveitar o que existe, tabela nova só com justificação escrita. Convenções: `organization_id` em todas as tabelas; RLS a testar ver/criar/editar/eliminar em separado; FKs declaradas; estados em CHECK; dados de RH fechados por coluna; vistas sem `SELECT *` e com `security_invoker`.
-3. **Protótipo** (`/prototipo/negocios`): o erro do RH («Algo correu mal») era um `MemoryRouter` dentro do `BrowserRouter` (corrigido em `RhPagina.tsx`, commit `9924fd68` em `feat/negocios-prototipo`; reproduzido só em teste). Cópia do protótipo em `C:\my-crm-dream-main\prototipo-copia\` (1113 ficheiros, sem git).
-4. **Olyvia 2.0 fase 1 da base (23/10):** 3 migrations aplicadas por `db query` (`formularios_campanhas`, `agenda_visitas`, `comunicacoes`), 33 tabelas, **por comitar e sem registo de migrations**; por fechar: confirmar os 3 HIGH de segurança, medir o modo mês, e decidir quem marca uma visita como feita. Rodar a chave `service_role` da base nova (foi colada no chat).
-5. **Outras coisas por tratar:** worktree `negocios-bd` (ramo `feat/negocios-bd`) com 5 migrations antigas apagadas e 11 por comitar — **ver antes de qualquer `db push`**; migration `20261118030000` «POR APLICAR» com reversão ao lado (`20261118040000`); 15 ficheiros por comitar em `feat/negocios-prototipo` (intocáveis: «não descartes nada»); o registo de trabalho do utilizador (`vault\registo-trabalho.md`) tem o relatório de **26 de Outubro** feito, e os de 21 e 22 por fazer; `task-done.ps1` está bloqueado pela política do PowerShell (não contornar).
+- **Pipeline/ficha:** `src/components/pessoas/` (`GuiaDoNegocio`, `GuiaDoPasso`, `GuiaColuna`, `layoutGuia.ts`, `assistente/*`: `AssistenteDoGuia`, `ContactoDoGuia`, `VisitaDoGuia`, `PassosContacto`, `PassosVisita`, `LeituraDoContacto`, `hidratarAssistente.ts`, `rascunhoAssistente.ts`), `src/components/pessoas-lista/` (`FichaReal`, `PipelineReal`), `src/hooks/pessoas/` (adaptadores: `adaptarRegistos.ts`, `adaptarFichaPessoa.ts`; `chamarNeg.ts` chama as RPCs `neg_*`).
+- **`/rh-exemplo`:** `src/components/rh-exemplo/` (+ `hooks/` = wrappers), `src/pages/rh-exemplo/`, `src/pages/prototipo-negocios/rh/RhPagina.tsx`. Hooks reais em `src/hooks/` (`usePessoas`, `usePessoa`, `useAssiduidadeDaPessoa`, `useJustificacoesDoDia`, `useColocacoesDaOrganizacao`, …), lógica em `src/lib/hr/`, componentes reais em `src/components/hr/`.
+- **Portal real:** `src/components/rh-exemplo/portal/` (`PortalReal`, `PortalFichaReal`), `src/components/hr/portal/` (`PortalFormulario`, `useRascunhoAutomatico`, `PortalSucesso`…), `src/hooks/useConviteAdmissaoPublico.ts`, Edge `supabase/functions/convite-admissao/` (`handler.ts`, `accoesPortal.ts`, `accoesAnexos.ts`, `erros.ts`).
+- **NIF:** `supabase/functions/nif-write-proxy/` (`handler.ts`, `handler.vitest.test.ts`, `index.ts`).
+- **Desenhos e rascunhos:** `supabase/rascunhos/` (`DESENHO-*.md`, `NOVO-*.sql` = cópias das migrations aplicadas, `TESTE-*.sql`). **Os rascunhos nunca se põem em `supabase/migrations/`** (o `db push` aplicaria tudo).
+- **Utilitários de teste:** `src/test/rhExemploProviders.tsx`, `src/test/assiduidadeDaPessoaFalso.ts`, `src/hooks/pessoas/fichaTestUtil.ts`, `fichaFabrica.ts`.
+
+---
+
+## 6. Olyvia 2.0 (repo `Miguel-olyvia/Olyvia2.0`, `master`, base `dconylgnqyywjdetytvv`)
+
+Outro projeto (protótipo; `olyvia2.vercel.app`). Em `master` desde 26/10: reenvio do convite de admissão sem `transicao_invalida`, org ativa em vez da 1.ª adesão da conta, email de destino editável; `admissao-rh` publicada na v3. Por saber: `portal-colaborador` e `criar-utilizador` podem ter o defeito da 1.ª adesão. A admissão de teste do Rafael na «Olyvia Demo» fica.
+
+## 7. Outras frentes antigas (de 24/10; só estavam no vault; não reverificadas)
+
+HTML de arquitetura da nova base v2 por módulos (`olyvia_arquitetura_nova_base_v2.html`, gerado por `build_html_v2.py` a partir de `logica/final2_<modulo>.json`; só lógica, sem código nem «hoje»); estrutura da nova base «só para ver» (não são migrations; 25 achados de BD e 15 de segurança por corrigir); protótipo `/prototipo/negocios` (bug do `MemoryRouter` aninhado corrigido em `9924fd68`, ramo `feat/negocios-prototipo`, 15 ficheiros por comitar, «não descartes nada»); Olyvia 2.0 fase 1 da base (3 migrations aplicadas por `db query`, sem registo; por fechar: 3 HIGH de segurança, modo mês, e rodar a chave `service_role`); worktree `negocios-bd` (ramo `feat/negocios-bd`) com 5 migrations antigas apagadas e 11 por comitar — **ver antes de qualquer `db push`**; migration `20261118030000` «POR APLICAR» com reversão ao lado (`20261118040000`). Decisões de RH/recrutamento por responder: custo anual ÷12 ou ÷14; salário da oferta; primeiro pagamento valida arranque da obra; valores por omissão do recrutamento.
+
+---
+
+## 8. Regras e armadilhas (o `CLAUDE.md` do workspace tem tudo; isto é o que mais custou)
+
+- **Base:** só a RH (`uetjgh…`); a principal e a **Mudelar nunca se tocam**. Nunca SQL de escrita avulso ao remoto; schema só por migration + `db push --linked --yes`; nunca `migration repair`; **listar o pendente antes**; nunca `service_role` em ficheiros nem no output; credenciais coladas no chat nunca vão para ficheiros. Os comandos à base correm **sempre do worktree**, nunca da pasta principal.
+- **Verificar antes de corrigir:** nada de migrations só por raciocínio estático; confirmar contra o catálogo real (já houve migrations escritas contra uma função que na base era outra). Erros de tipo em SQL só se apanham a correr: converter `"char"` com `::text`; `tgattr` é `int2vector` (índice 0): comparar com `array_to_string(t.tgattr::int2[], ',')` (a primeira tentativa do NIF falhou por isto e foi desfeita por inteiro).
+- **Ficheiros do projeto usam CRLF** (`autocrlf=true`): editar com Edit/Write, nunca `sed -i`; ficheiros novos em LF são normalizados pelo Git. `deno.lock` fica sempre fora dos commits.
+- **Máquina com pouca RAM:** sem `vite build`/`tsc`/`eslint`; testes um ficheiro de cada vez com `--maxWorkers=1`. Nunca `git stash`.
+- **Trabalho em equipa de agentes** (Workflow, segundo plano, agentes ECC por especialidade, revisão independente; quem executa não se avalia a si próprio). **O modelo escolhe-se por camada** (mapear sonnet/low; desenhar e rever BD/segurança opus; executar sonnet/tdd-guide). Dizer o custo antes de workflows grandes.
+- **Hooks GateGuard:** antes do 1.º Bash/PowerShell e de cada Edit/Write novo apresentar factos (pedido, o que faz, reversão, instrução verbatim) e repetir o **mesmo** comando. PowerShell com heredoc/aspas: usar here-strings `@'…'@`; Python sempre `python -I` (há um `types.py` estranho em `AppData\Local\Temp` que sombreia a biblioteca standard); caminhos Windows com barra normal nos campos de saída estruturada dos agentes.
+- **Um agente que perde a rede devolve erro** (`Can't reach the API server`): retomar o workflow com `resumeFromRunId` (os agentes concluídos voltam do cache).
+- **Os agentes de auditoria só têm leitura** (`ecc:code-explorer`): não gravam ficheiros; o resultado vem na resposta do workflow.
+
+## 9. Como o utilizador trabalha
+
+- Português informal, curto, direto; impaciente com explicações longas e com perguntas repetidas. Quer **números medidos**, que **não se afirme o que não foi verificado**, e que **se faça o que pediu** (já se enervou quando se limitou o âmbito: «liga tudo o que existe na base e deixa o que não existe»). Responde às decisões por número; **nunca assumir a resposta de uma pergunta que não respondeu** (aconteceu com o OTP do portal e com a opção do NIF).
+- Quando pede «tira X», tira-se em todo o lado. Quando diz «faz como o RH real» ou «como o protótipo», é **ordem**. **O ecrã novo mantém a UI do protótipo; a lógica reutiliza a do RH real.**
+- O utilizador faz os testes ao vivo na nike; não lho dizer repetidamente.
+- Consulta capturas do protótipo como critério: ver o código antes de decidir (clone só de leitura da Olyvia 2.0: `git@github-olyvia:Miguel-olyvia/Olyvia2.0.git`, `src/pages/prototipo-negocios/`).
