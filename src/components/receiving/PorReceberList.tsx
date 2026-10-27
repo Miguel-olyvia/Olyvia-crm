@@ -1,12 +1,13 @@
 // Receção › "Por receber" (protótipo EncomendasPorReceber.tsx, dados reais de useReceivablePos): uma linha por encomenda
 // a fornecedor, por ordem de chegada, com cabeçalhos de grupo (Chega hoje / amanhã · Atrasadas · Confirmadas pelo
 // fornecedor · À espera do fornecedor · Por enviar ao fornecedor). Chips Hoje/amanhã · Atrasadas · Para clientes · Para
-// stock (carregar outra vez no ativo volta a todas); "Filtros ▾" (pesquisa, fornecedor, cliente/obra — a PO não tem
+// stock (carregar outra vez no ativo volta a todas); as expedidas pelo fornecedor no portal (guia aberta) ficam no topo,
+// em "Expedidas · a caminho", com o distintivo "Expedida · GR <nº>"; "Filtros ▾" (pesquisa, fornecedor, cliente/obra — a PO não tem
 // armazém); "Agrupar: Não/Fornecedor". "Dar entrada →" fica sempre à vista (coluna fixa à direita; no telemóvel cada
 // encomenda é um cartão com o botão na largura toda). Sem receção (modo consulta) o botão fica desativado com o motivo.
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Filter, Info, Send, Sparkles, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Filter, Info, Send, Sparkles, Truck, XCircle, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FilterPill, InventoryEmptyState, InventoryStatusBadge, clientOrdersLink, type InventoryTone } from "@/components/inventory/ui";
 import { cn } from "@/lib/utils";
+import { noteLabel } from "./deliveryNotes";
 import {
   GRUPOS_REC,
   atrasadaRec,
@@ -62,6 +64,19 @@ export function SeloNova() {
   );
 }
 
+/** "Expedida · GR <nº>": o fornecedor expediu-a no portal e a guia está aberta (a mais antiga, "+n" se houver mais). */
+export function SeloExpedida({ po }: { po: ReceivablePo }) {
+  const s = po.shipped;
+  if (!s) return null;
+  return (
+    <InventoryStatusBadge tone="violet">
+      <Truck className="h-3 w-3" aria-hidden="true" />
+      Expedida · {noteLabel(s.noteNumber)}
+      {s.count > 1 ? ` +${s.count - 1}` : ""}
+    </InventoryStatusBadge>
+  );
+}
+
 const CHIP_CLASS = "inline-flex max-w-[260px] items-center truncate rounded-md border bg-muted px-[7px] py-px text-xs font-[550] text-foreground";
 
 /** "Para": "CT-… · Cliente" (abre a Encomenda Cliente) ou "Stock". */
@@ -102,6 +117,7 @@ const CHIPS: [Exclude<ChipRec, "todas">, string][] = [
 ];
 
 const GRUPO_ROW: Record<number, string> = {
+  [-1]: "bg-violet-500/10 text-violet-800 dark:text-violet-300",
   0: "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
   1: "bg-destructive/10 text-red-700 dark:text-red-400",
   2: "bg-sky-500/10 text-sky-800 dark:text-sky-300",
@@ -176,6 +192,12 @@ export function PorReceberList({
     <TableRow key={po.id} id={`rec-${po.id}`} className={cn("group", po.id === activeId && "bg-primary/5")}>
       <TableCell className="whitespace-nowrap">
         <b className="font-mono">{po.orderNumber}</b>
+        {po.shipped ? (
+          <>
+            {" "}
+            <SeloExpedida po={po} />
+          </>
+        ) : null}
         {novaConfirmacao(po, today) ? (
           <>
             {" "}
@@ -251,7 +273,7 @@ export function PorReceberList({
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-mono font-semibold">
-                      {po.orderNumber} {novaConfirmacao(po, today) ? <SeloNova /> : null}
+                      {po.orderNumber} <SeloExpedida po={po} /> {novaConfirmacao(po, today) ? <SeloNova /> : null}
                     </p>
                     <p className="truncate text-muted-foreground">{po.supplierName}</p>
                   </div>

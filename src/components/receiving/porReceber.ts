@@ -8,6 +8,8 @@
 //   (pode faltar: sem data nunca é "hoje/amanhã" nem "atrasada").
 // - Grupo (grupoRececao), a primeira regra que se aplica: 0 chega hoje/amanhã (ou confirmada desde ontem: "NOVA");
 //   1 atrasada; 2 confirmada pelo fornecedor; 3 à espera do fornecedor (já enviada); 4 por enviar (pendente).
+// - Expedidas (grupo −1, acima de todos): o fornecedor expediu-a no portal e a guia de remessa ainda está aberta
+//   (ReceivablePo.shipped); entre elas, a expedida há mais tempo primeiro. O chip "Hoje/amanhã" inclui-as.
 // - Falta = quantity − received_quantity de cada linha de produto (anular o resto já baixa quantity); em unidades
 //   de stock = × units_per_uom. Linhas de serviço não contam.
 
@@ -43,6 +45,16 @@ export interface ReceivableLine {
   unitsPerUom: number;
 }
 
+/** A guia de remessa mais antiga que o fornecedor expediu no portal para esta PO e que ainda está aberta. */
+export interface ReceivableShipment {
+  noteId: string;
+  noteNumber: string;
+  shippedAt: string | null;
+  hasFile: boolean;
+  /** Quantas guias do portal abertas há para esta PO. */
+  count: number;
+}
+
 export interface ReceivablePo {
   id: string;
   orderNumber: string;
@@ -60,6 +72,8 @@ export interface ReceivablePo {
   emailSent: boolean;
   /** Linhas de produto (as de serviço ficam de fora). */
   lines: ReceivableLine[];
+  /** Expedida pelo fornecedor no portal, com guia aberta (sem = null/ausente). */
+  shipped?: ReceivableShipment | null;
 }
 
 export type RecTone = "ok" | "warn" | "bad" | "info" | "violet" | "neutral";
@@ -108,8 +122,9 @@ export function atrasadaRec(p: ReceivablePo, today: string): boolean {
   return !!d && d < today;
 }
 
-export type GrupoRec = 0 | 1 | 2 | 3 | 4;
+export type GrupoRec = -1 | 0 | 1 | 2 | 3 | 4;
 export const GRUPOS_REC: Record<GrupoRec, string> = {
+  [-1]: "Expedidas · a caminho",
   0: "Chega hoje / amanhã",
   1: "Atrasadas",
   2: "Confirmadas pelo fornecedor",
@@ -117,7 +132,11 @@ export const GRUPOS_REC: Record<GrupoRec, string> = {
   4: "Por enviar ao fornecedor",
 };
 
+/** O fornecedor expediu-a no portal e a guia ainda está aberta. */
+export const expedidaRec = (p: ReceivablePo): boolean => !!p.shipped;
+
 export function grupoRececao(p: ReceivablePo, today: string): GrupoRec {
+  if (expedidaRec(p)) return -1;
   const d = dataEntregaEf(p);
   if ((d && d >= today && d <= addDays(today, 1)) || novaConfirmacao(p, today)) return 0;
   if (d && d < today) return 1;
@@ -131,6 +150,15 @@ export function compararRececao(a: ReceivablePo, b: ReceivablePo, today: string)
   const ga = grupoRececao(a, today);
   const gb = grupoRececao(b, today);
   if (ga !== gb) return ga - gb;
+  if (ga === -1) {
+    const sa = a.shipped?.shippedAt ?? "";
+    const sb = b.shipped?.shippedAt ?? "";
+    if (sa !== sb) {
+      if (!sa) return 1;
+      if (!sb) return -1;
+      return sa.localeCompare(sb);
+    }
+  }
   if (ga === 0) {
     const c = Number(isConfirmed(b)) - Number(isConfirmed(a));
     if (c) return c;
@@ -217,7 +245,7 @@ function doChip(p: ReceivablePo, c: ChipRec, today: string): boolean {
   if (c === "clientes") return !!chaveCliente(p);
   if (c === "stock") return !chaveCliente(p);
   if (c === "atrasadas") return atrasadaRec(p, today);
-  if (c === "hoje") return grupoRececao(p, today) === 0;
+  if (c === "hoje") return grupoRececao(p, today) <= 0;
   return true;
 }
 

@@ -8,7 +8,14 @@
 // da PO, e é o envio de sempre (rpc_receive_by_code com request_id, pendente em localStorage, avisos da guia com
 // confirmação, reservas FIFO) que dá entrada. O painel mostra o progresso (run) e, no fim, o que entrou, "Ver EC-…" e as
 // outras encomendas por receber do mesmo fornecedor.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+//
+// Guias expedidas pelo fornecedor no portal (como no Olyvia 2.0): as guias abertas do fornecedor com history 'shipped'
+// / supplier_portal ligadas a esta PO (supplier_delivery_note_orders ou purchase_order_id do history) aparecem primeiro,
+// com "Enviada pelo fornecedor" e "Ver guia". A mais antiga com alguma coisa por receber fica escolhida e cada linha vem
+// pré-preenchida com "anunciado na guia − já recebido com esta guia" (prefillFromNote: nunca acima do que falta);
+// o utilizador muda a guia ou as quantidades. A entrada continua a ser a do cesto (rpc_receive_by_code com
+// p_delivery_note_id). Sem guias do portal, tudo como antes (vale o que falta).
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Ban, Check, Minus, Plus, RefreshCw, ScanLine } from "lucide-react";
@@ -23,10 +30,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { InventoryStatusBadge, clientOrdersLink } from "@/components/inventory/ui";
 import { cn } from "@/lib/utils";
 import { DeliveryNoteDialog } from "./DeliveryNoteDialog";
-import { noteLabel } from "./deliveryNotes";
-import { OrigemChipRec, SeloNova, SeloRec } from "./PorReceberList";
+import {
+  fmtDay,
+  isPortalNote,
+  noteLabel,
+  notePending,
+  portalMeta,
+  prefillFromNote,
+  type NoteLineLite,
+  type NoteReceiptLite,
+  type PortalNoteMeta,
+} from "./deliveryNotes";
+import { SeloEnviadaFornecedor } from "./DeliveryNotesPanel";
+import { OrigemChipRec, SeloExpedida, SeloNova, SeloRec } from "./PorReceberList";
+import { receivablePosQueryKey } from "./useReceivablePos";
+import { VerGuiaButton } from "./VerGuiaButton";
 import { PoCancelRemainderDialog, type CancelTarget } from "./PoCancelRemainderDialog";
-import { faltaPo, fmtUn, lineUnitLabel, novaConfirmacao, poRecebivel, textoFalta, type ReceivableLine, type ReceivablePo } from "./porReceber";
+import { faltaPo, fmtUn, lineUnitLabel, localDay, novaConfirmacao, poRecebivel, textoFalta, type ReceivableLine, type ReceivablePo } from "./porReceber";
 import { runTotals, textoEntrada, type PoRunView } from "./poRun";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -90,8 +110,25 @@ function parseQty(v: string): number {
   return t === "" ? Number.NaN : Number(t);
 }
 
-function defaultQty(po: ReceivablePo): Record<string, string> {
-  return Object.fromEntries(po.lines.map((l) => [l.id, String(l.open)]));
+function defaultQty(po: ReceivablePo, vem: (l: ReceivableLine) => number = (l) => l.open): Record<string, string> {
+  return Object.fromEntries(po.lines.map((l) => [l.id, String(vem(l))]));
+}
+
+interface OpenNoteRow {
+  id: string;
+  note_number: string;
+  document_date: string | null;
+  created_at?: string | null;
+  history?: unknown;
+}
+
+/** Uma guia do portal desta PO, com o que vem nela por linha (null = não indica linhas desta PO). */
+interface PortalNoteForPo {
+  id: string;
+  number: string;
+  meta: PortalNoteMeta;
+  prefill: Record<string, number> | null;
+  pending: boolean;
 }
 
 export function PoReceivePanel(props: PoReceivePanelProps) {
@@ -159,31 +196,25 @@ function PanelBody({
   const [cancelMsg, setCancelMsg] = useState<string | null>(null);
   const [createNoteOpen, setCreateNoteOpen] = useState(false);
 
-  // As linhas mudam depois de receber/anular (a lista recarrega): os valores passam a ser o que falta agora.
-  const linesSig = po.lines.map((l) => `${l.id}:${l.open}`).join("|");
-  useEffect(() => {
-    setQtd(defaultQty(po));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linesSig]);
-
   const activeRun = run && run.poId === po.id ? run : null;
   const running = !!activeRun && (activeRun.phase === "preparing" || activeRun.phase === "review" || activeRun.phase === "submitting");
   const finished = !!activeRun && (activeRun.phase === "done" || activeRun.phase === "failed");
 
-  // Guias abertas deste fornecedor (RLS: purchase_orders.view ou .receive).
+  // Guias abertas deste fornecedor (RLS: purchase_orders.view ou .receive). A chave fica debaixo da da lista "Por
+  // receber": recarregar a lista (depois de receber, anular ou mexer numa guia) recarrega também estas.
   const notesQuery = useQuery({
-    queryKey: ["receiving-panel-open-notes", orgId, po.supplierId],
+    queryKey: [...receivablePosQueryKey(orgId), "panel-open-notes", po.supplierId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("supplier_delivery_notes")
-        .select("id, note_number, document_date")
+        .select("id, note_number, document_date, created_at, history")
         .eq("organization_id", orgId as string)
         .eq("supplier_id", po.supplierId as string)
         .eq("status", "open")
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      return (data ?? []) as { id: string; note_number: string; document_date: string | null }[];
+      return (data ?? []) as OpenNoteRow[];
     },
     enabled: !!orgId && !!po.supplierId,
     staleTime: 30_000,
@@ -193,9 +224,88 @@ function PanelBody({
     if (initialNoteId && openNotes.some((n) => n.id === initialNoteId)) setNoteId((cur) => cur || initialNoteId);
   }, [initialNoteId, openNotes]);
 
+  // Guias do portal deste fornecedor: as POs, as linhas anunciadas e as receções feitas com cada uma (em lote).
+  const portalOpen = useMemo(() => openNotes.filter((n) => isPortalNote(n.history)), [openNotes]);
+  const portalIds = portalOpen.map((n) => n.id);
+  const portalQuery = useQuery({
+    queryKey: [...receivablePosQueryKey(orgId), "panel-portal-notes", po.id, portalIds.join(",")],
+    queryFn: async () => {
+      const ids = new Set(portalIds);
+      const [orders, lines, receipts] = await Promise.all([
+        supabase
+          .from("supplier_delivery_note_orders")
+          .select("delivery_note_id, purchase_order_id")
+          .eq("organization_id", orgId as string)
+          .in("delivery_note_id", portalIds),
+        supabase
+          .from("supplier_delivery_note_lines")
+          .select("delivery_note_id, product_id, purchase_order_item_id, quantity, units_per_uom")
+          .eq("organization_id", orgId as string)
+          .in("delivery_note_id", portalIds)
+          .limit(5000),
+        supabase
+          .from("purchase_order_receipts")
+          .select("delivery_note_id, purchase_order_item_id, quantity, units_per_uom")
+          .eq("organization_id", orgId as string)
+          .eq("purchase_order_id", po.id)
+          .in("delivery_note_id", portalIds)
+          .eq("kind", "receipt")
+          .is("reverted_at", null)
+          .limit(5000),
+      ]);
+      for (const r of [orders, lines, receipts]) if (r.error) throw r.error;
+      const inSet = (x: { delivery_note_id: string | null }) => !!x.delivery_note_id && ids.has(x.delivery_note_id);
+      return {
+        orders: ((orders.data ?? []) as { delivery_note_id: string; purchase_order_id: string }[]).filter(inSet),
+        lines: ((lines.data ?? []) as NoteLineLite[]).filter(inSet),
+        receipts: ((receipts.data ?? []) as NoteReceiptLite[]).filter(inSet),
+      };
+    },
+    enabled: !!orgId && portalIds.length > 0,
+    staleTime: 10_000,
+  });
+
+  const linesSig = po.lines.map((l) => `${l.id}:${l.open}`).join("|");
+  const poPortalNotes = useMemo((): PortalNoteForPo[] => {
+    const d = portalQuery.data;
+    if (!d) return [];
+    const poLines = po.lines.map((l) => ({ id: l.id, productId: l.productId, open: l.open, unitsPerUom: l.unitsPerUom }));
+    return portalOpen
+      .map((n) => ({ n, meta: portalMeta(n.history) as PortalNoteMeta }))
+      .filter(({ n, meta }) => meta.purchaseOrderId === po.id || d.orders.some((o) => o.delivery_note_id === n.id && o.purchase_order_id === po.id))
+      .map(({ n, meta }) => {
+        const prefill = prefillFromNote(n.id, poLines, d.lines, d.receipts);
+        return { id: n.id, number: n.note_number, meta, prefill, pending: notePending(prefill) };
+      })
+      .sort((a, b) => (a.meta.shippedAt ?? "").localeCompare(b.meta.shippedAt ?? "") || a.number.localeCompare(b.number));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portalQuery.data, portalOpen, po.id, linesSig]);
+
+  // Escolhe uma vez a guia do portal mais antiga com alguma coisa por receber (nunca por cima de uma escolha).
+  const autoPicked = useRef(false);
+  const portalReady = notesQuery.isSuccess && (portalIds.length === 0 || portalQuery.isSuccess || portalQuery.isError);
+  useEffect(() => {
+    if (autoPicked.current || !portalReady) return;
+    autoPicked.current = true;
+    const first = poPortalNotes.find((n) => n.pending);
+    if (first) setNoteId((cur) => cur || first.id);
+  }, [portalReady, poPortalNotes]);
+  const portalLoading = portalIds.length > 0 && portalQuery.isLoading;
+
+  const escolhida = poPortalNotes.find((n) => n.id === noteId) ?? null;
+  /** O que vem de cada linha: com uma guia do portal (com linhas), o que vem nela; senão o que falta. */
+  const vem = (l: ReceivableLine): number => (escolhida?.prefill ? (escolhida.prefill[l.id] ?? 0) : l.open);
+  const vemSig = po.lines.map((l) => `${l.id}:${vem(l)}`).join("|");
+
+  // As linhas mudam depois de receber/anular (a lista recarrega) ou muda a guia: os valores passam a ser o que vem agora.
+  useEffect(() => {
+    setQtd(defaultQty(po, vem));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vemSig]);
+
   const abertas = po.lines.filter((l) => l.open > 0);
   const quanto = (l: ReceivableLine): number => {
-    if (!conferir) return l.open;
+    if (!conferir) return vem(l);
     const n = parseQty(qtd[l.id] ?? "");
     return Number.isFinite(n) && n > 0 ? n : 0;
   };
@@ -270,6 +380,10 @@ function PanelBody({
         return;
       }
     }
+    if (portalLoading) {
+      setErro("A carregar as guias enviadas pelo fornecedor — tente daqui a um instante.");
+      return;
+    }
     const motivo = onReceive(po, itens, noteId);
     if (motivo) setErro(motivo);
   };
@@ -283,6 +397,7 @@ function PanelBody({
   const selos = (
     <div className="flex flex-wrap items-center gap-1.5">
       <SeloRec po={po} />
+      <SeloExpedida po={po} />
       {novaConfirmacao(po, today) ? <SeloNova /> : null}
       {po.status !== "pending" ? <InventoryStatusBadge tone="info">{STATUS_LABEL[po.status] ?? po.status}</InventoryStatusBadge> : null}
       {po.contractId ? (
@@ -448,7 +563,13 @@ function PanelBody({
                     setErro(null);
                     setNoteId(v);
                   }}
-                  options={[{ value: "", label: "Sem guia" }, ...openNotes.map((n) => ({ value: n.id, label: noteLabel(n.note_number) }))]}
+                  options={[
+                    { value: "", label: "Sem guia" },
+                    ...poPortalNotes.map((n) => ({ value: n.id, label: `${noteLabel(n.number)} · enviada pelo fornecedor` })),
+                    ...openNotes
+                      .filter((n) => !poPortalNotes.some((x) => x.id === n.id))
+                      .map((n) => ({ value: n.id, label: noteLabel(n.note_number) })),
+                  ]}
                 />
               </div>
               {canCreateNote && canReceive && po.supplierId ? (
@@ -459,14 +580,70 @@ function PanelBody({
               ) : null}
             </div>
             <p className="text-xs text-muted-foreground">
-              {notesQuery.isLoading
+              {notesQuery.isLoading || portalLoading
                 ? "A carregar guias…"
-                : openNotes.length
-                  ? `${openNotes.length} ${openNotes.length === 1 ? "guia aberta" : "guias abertas"} deste fornecedor.`
-                  : "Sem guias abertas deste fornecedor."}
+                : poPortalNotes.length
+                  ? `${poPortalNotes.length} ${poPortalNotes.length === 1 ? "guia enviada" : "guias enviadas"} pelo fornecedor${
+                      openNotes.length > poPortalNotes.length
+                        ? ` · ${openNotes.length - poPortalNotes.length} ${openNotes.length - poPortalNotes.length === 1 ? "outra aberta" : "outras abertas"}`
+                        : ""
+                    }.`
+                  : openNotes.length
+                    ? `${openNotes.length} ${openNotes.length === 1 ? "guia aberta" : "guias abertas"} deste fornecedor.`
+                    : "Sem guias abertas deste fornecedor."}
             </p>
+            {portalQuery.isError ? (
+              <p className="text-xs text-destructive">Não foi possível ler as guias enviadas pelo fornecedor: vale o que falta.</p>
+            ) : null}
           </div>
         </div>
+
+        {poPortalNotes.length > 0 ? (
+          <ul aria-label="Guias enviadas pelo fornecedor" className="space-y-1.5">
+            {poPortalNotes.map((n) => (
+              <li
+                key={n.id}
+                className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border p-2 text-sm", n.id === noteId && "border-violet-500 bg-violet-500/5")}
+              >
+                <b className="font-mono">{noteLabel(n.number)}</b>
+                <SeloEnviadaFornecedor />
+                <small className="text-muted-foreground">
+                  {n.meta.shippedAt ? `expedida ${fmtDay(localDay(n.meta.shippedAt))}` : "expedida"}
+                  {n.meta.carrier ? ` · ${n.meta.carrier}` : ""}
+                  {n.meta.byName ? ` · por ${n.meta.byName}` : ""}
+                </small>
+                {!n.pending && n.prefill ? <InventoryStatusBadge tone="ok">Já recebida</InventoryStatusBadge> : null}
+                {n.meta.file ? <VerGuiaButton file={n.meta.file} /> : <small className="text-muted-foreground">sem ficheiro</small>}
+                {n.id !== noteId && canReceive ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto"
+                    disabled={running}
+                    aria-label={`Usar a guia ${noteLabel(n.number)}`}
+                    onClick={() => {
+                      setErro(null);
+                      setNoteId(n.id);
+                    }}
+                  >
+                    Usar esta guia
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {escolhida ? (
+          <p role="status" className="rounded-lg border border-violet-500/50 bg-violet-500/10 p-3 text-sm text-violet-900 dark:text-violet-200">
+            {escolhida.prefill
+              ? escolhida.pending
+                ? `Guia de remessa ${noteLabel(escolhida.number)} do fornecedor: as quantidades são as que vêm nesta guia, menos o já recebido com ela (nunca mais do que falta). Pode alterá-las em "Conferir linha a linha".`
+                : `Tudo o que vem na guia ${noteLabel(escolhida.number)} já foi recebido nesta encomenda. Escolha outra guia ou confira linha a linha.`
+              : `A guia ${noteLabel(escolhida.number)} não indica linhas desta encomenda: vale o que falta.`}
+          </p>
+        ) : null}
 
         <div className="space-y-1.5">
           <p className="font-semibold">
@@ -497,6 +674,7 @@ function PanelBody({
                     <th className="px-2 py-1.5 text-right font-medium">Pedido</th>
                     <th className="px-2 py-1.5 text-right font-medium">Recebido</th>
                     <th className="px-2 py-1.5 text-right font-medium">Falta</th>
+                    {escolhida?.prefill ? <th className="px-2 py-1.5 text-right font-medium">Nesta guia</th> : null}
                     <th className="px-2 py-1.5 text-right font-medium">Dar entrada</th>
                   </tr>
                 </thead>
@@ -535,6 +713,7 @@ function PanelBody({
                       <td className="px-2 py-1.5 text-right tabular-nums">{fmtUn(l.quantity)}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{fmtUn(l.received)}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{fmtUn(l.open)}</td>
+                      {escolhida?.prefill ? <td className="px-2 py-1.5 text-right tabular-nums">{fmtUn(vem(l))}</td> : null}
                       <td className="px-2 py-1.5">
                         <div className="flex items-center justify-end gap-1">
                           <Button
@@ -649,7 +828,7 @@ function PanelBody({
       </>
     );
   } else {
-    const blocked = !canReceive || running || !itens.length;
+    const blocked = !canReceive || running || !itens.length || portalLoading;
     rodape = (
       <>
         <Button type="button" variant="outline" onClick={onClose}>

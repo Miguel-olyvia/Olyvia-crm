@@ -8,6 +8,9 @@
 // reabrir e cancelar exigem motivo. Fechar/reabrir/cancelar repetidos são
 // idempotentes no servidor (changed=false), por isso "tentar de novo" depois
 // de uma falha de rede é seguro.
+//
+// Guia expedida pelo fornecedor no portal (portalMeta do history): distintivo "Enviada pelo fornecedor", quem
+// enviou, transportador e "Ver guia" (URL assinado do ficheiro, só se houver). A equipa edita-a como às outras.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,16 +26,20 @@ import { DocumentLink, InventoryStatusBadge, purchaseOrdersLink, type InventoryT
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Ban, CheckCircle2, FileDown, Lock, Pencil, RefreshCw, Unlock } from "lucide-react";
 import { DeliveryNoteDialog } from "./DeliveryNoteDialog";
+import { SeloEnviadaFornecedor } from "./DeliveryNotesPanel";
+import { VerGuiaButton } from "./VerGuiaButton";
 import {
   NOTE_STATUS_LABEL,
   PRODUCT_STATUS_LABEL,
   fetchDeliveryNote,
   fmtDateTime,
   fmtDay,
+  fmtFileSize,
   fmtQty,
   normalizeNote,
   noteErrorMessage,
   noteLabel,
+  portalMeta,
   type DeliveryNoteFull,
   type DeliveryNoteProductStatus,
   type RpcErrorLike,
@@ -77,7 +84,13 @@ const STATUS_TONE: Record<DeliveryNoteProductStatus, string> = {
   nao_encomendado: "border-destructive/60 text-destructive",
 };
 
-const HISTORY_LABEL: Record<string, string> = { close: "Fechada", reopen: "Reaberta", cancel: "Cancelada" };
+const HISTORY_LABEL: Record<string, string> = {
+  close: "Fechada",
+  reopen: "Reaberta",
+  cancel: "Cancelada",
+  shipped: "Expedida pelo fornecedor (portal)",
+  attachment: "Ficheiro da guia anexado",
+};
 
 export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit, canDownloadProof = true, localWork, onChanged, onOpenOther, onUse }: Props) {
   const [note, setNote] = useState<DeliveryNoteFull | null>(null);
@@ -188,6 +201,7 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
     }
   };
 
+  const portal = note ? portalMeta(note.history) : null;
   const summary = note?.summary ?? null;
   const totals = summary?.totals;
   const needsCloseNote = !!summary?.has_divergences;
@@ -280,6 +294,7 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
             note ? (
               <>
                 <InventoryStatusBadge tone={statusTone}>{statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)}</InventoryStatusBadge>
+                {portal && <SeloEnviadaFornecedor />}
                 {totals && totals.divergences > 0 && (
                   <InventoryStatusBadge tone="bad">{totals.divergences} divergência(s)</InventoryStatusBadge>
                 )}
@@ -314,6 +329,30 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
                         </span>
                       ),
                   },
+                  { label: "Origem", value: portal ? "Fornecedor (portal)" : "Registada no armazém" },
+                  portal
+                    ? {
+                        label: "Enviada por",
+                        value: `${portal.byName ?? "Fornecedor"}${portal.shippedAt ? ` · ${fmtDateTime(portal.shippedAt)}` : ""}`,
+                      }
+                    : null,
+                  portal ? { label: "Transportador", value: portal.carrier ?? "—" } : null,
+                  portal
+                    ? {
+                        label: "Ficheiro da guia",
+                        value: portal.file ? (
+                          <span className="inline-flex flex-wrap items-center gap-x-2">
+                            <span className="break-all">
+                              {portal.file.name}
+                              {portal.file.size != null ? <small className="text-muted-foreground"> ({fmtFileSize(portal.file.size)})</small> : null}
+                            </span>
+                            <VerGuiaButton file={portal.file} />
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Sem ficheiro</span>
+                        ),
+                      }
+                    : null,
                   note.notes ? { label: "Nota", value: <span className="whitespace-pre-wrap">{note.notes}</span> } : null,
                 ]}
               />
@@ -467,6 +506,9 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
                     {note.history.map((h, i) => (
                       <li key={i} className="break-words text-muted-foreground">
                         {fmtDateTime(h.at)} · {HISTORY_LABEL[h.action] ?? h.action}
+                        {h.action === "shipped" && h.by_name ? ` por ${h.by_name}` : ""}
+                        {h.action === "shipped" && h.carrier ? ` · ${h.carrier}` : ""}
+                        {h.action === "attachment" && h.name ? ` — ${h.name}` : ""}
                         {h.notes ? ` — ${h.notes}` : ""}
                         {h.reason ? ` — ${h.reason}` : ""}
                       </li>

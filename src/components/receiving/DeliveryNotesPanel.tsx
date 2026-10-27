@@ -18,9 +18,11 @@
 // product_id ou o da linha da PO): divergente = guia com linhas e produto em
 // que não se verifica anunciado > 0 e recebido = anunciado. "Com divergências"
 // = abertas com divergências (como rpc_inventory_today).
-import { useMemo } from "react";
+// Origem: "Fornecedor" = expedida no portal (history 'shipped' / supplier_portal, isPortalNote), "Equipa" = as
+// outras; o filtro de origem fica no ecrã (não no URL). "com ficheiro" = o portal anexou a guia (portalMeta.file).
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, FileText } from "lucide-react";
+import { AlertTriangle, FileText, Paperclip, Truck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,7 +39,7 @@ import {
   type ReceivingNotesFilter,
 } from "@/components/inventory/ui";
 import { cn } from "@/lib/utils";
-import { fmtDay, fmtQty, noteLabel, type DeliveryNoteStatus } from "./deliveryNotes";
+import { fmtDay, fmtQty, noteLabel, portalMeta, type DeliveryNoteStatus } from "./deliveryNotes";
 
 /** Máximo de guias carregadas (as mais recentes). */
 const NOTES_LIMIT = 500;
@@ -69,7 +71,13 @@ export interface DeliveryNoteListItem {
   received: number;
   divergences: number;
   activeReceipts: number;
+  /** Expedida pelo fornecedor no portal. */
+  fromPortal: boolean;
+  /** O fornecedor anexou o ficheiro da guia. */
+  hasFile: boolean;
 }
+
+export type NoteOriginFilter = "all" | "supplier" | "team";
 
 interface NoteRow {
   id: string;
@@ -77,6 +85,7 @@ interface NoteRow {
   document_date: string | null;
   created_at: string;
   status: string;
+  history?: unknown;
   supplier: { name: string | null } | null;
 }
 interface OrderRow {
@@ -128,7 +137,7 @@ async function fetchPanel(orgId: string): Promise<{ items: DeliveryNoteListItem[
   const { data: notesData, error: notesErr } = await supabase
     .from("supplier_delivery_notes")
     .select(
-      "id, note_number, document_date, created_at, status, supplier:suppliers!supplier_delivery_notes_supplier_id_fkey(name)",
+      "id, note_number, document_date, created_at, status, history, supplier:suppliers!supplier_delivery_notes_supplier_id_fkey(name)",
     )
     .eq("organization_id", orgId)
     .order("document_date", { ascending: false, nullsFirst: false })
@@ -227,6 +236,7 @@ async function fetchPanel(orgId: string): Promise<{ items: DeliveryNoteListItem[
       if (hasLines && !(a > 0 && r === a)) divergences += 1;
     }
     const status = (["open", "closed", "cancelled"].includes(n.status) ? n.status : "open") as DeliveryNoteStatus;
+    const meta = portalMeta(n.history);
     return {
       id: n.id,
       noteNumber: n.note_number,
@@ -240,6 +250,8 @@ async function fetchPanel(orgId: string): Promise<{ items: DeliveryNoteListItem[
       received: round(received),
       divergences,
       activeReceipts: recCount.get(n.id) ?? 0,
+      fromPortal: !!meta,
+      hasFile: !!meta?.file,
     };
   });
   return { items, truncated: notes.length >= NOTES_LIMIT };
@@ -251,6 +263,18 @@ function matches(n: DeliveryNoteListItem, f: ReceivingNotesFilter): boolean {
   return n.status === f;
 }
 
+export function matchesOrigin(n: Pick<DeliveryNoteListItem, "fromPortal">, o: NoteOriginFilter): boolean {
+  if (o === "supplier") return n.fromPortal;
+  if (o === "team") return !n.fromPortal;
+  return true;
+}
+
+const ORIGIN_FILTERS: readonly (readonly [NoteOriginFilter, string])[] = [
+  ["all", "Todas"],
+  ["supplier", "Fornecedor"],
+  ["team", "Equipa"],
+];
+
 const FILTERS: readonly (readonly [ReceivingNotesFilter, string])[] = [
   ["all", "Todas"],
   ["open", "Abertas"],
@@ -258,6 +282,16 @@ const FILTERS: readonly (readonly [ReceivingNotesFilter, string])[] = [
   ["closed", "Fechadas"],
   ["cancelled", "Canceladas"],
 ];
+
+/** "Enviada pelo fornecedor": a guia veio do portal (ícone e texto, nunca só cor). */
+export function SeloEnviadaFornecedor({ className }: { className?: string }) {
+  return (
+    <InventoryStatusBadge tone="violet" className={className}>
+      <Truck className="h-3 w-3" aria-hidden="true" />
+      Enviada pelo fornecedor
+    </InventoryStatusBadge>
+  );
+}
 
 interface DeliveryNotesPanelProps {
   orgId: string | null;
@@ -280,12 +314,20 @@ export function DeliveryNotesPanel({ orgId, filter, onFilterChange, onOpen, curr
     staleTime: 30_000,
   });
 
-  const items = useMemo(() => query.data?.items ?? [], [query.data]);
+  const [origin, setOrigin] = useState<NoteOriginFilter>("all");
+  const all = useMemo(() => query.data?.items ?? [], [query.data]);
+  // As contagens de cada filtro contam com o outro filtro aplicado.
+  const items = useMemo(() => all.filter((n) => matchesOrigin(n, origin)), [all, origin]);
   const list = useMemo(() => items.filter((n) => matches(n, filter)), [items, filter]);
   const options: FilterPillOption<ReceivingNotesFilter>[] = FILTERS.map(([value, label]) => ({
     value,
     label,
     count: query.data ? items.filter((n) => matches(n, value)).length : null,
+  }));
+  const originOptions: FilterPillOption<NoteOriginFilter>[] = ORIGIN_FILTERS.map(([value, label]) => ({
+    value,
+    label,
+    count: query.data ? all.filter((n) => matches(n, filter) && matchesOrigin(n, value)).length : null,
   }));
 
   return (
@@ -295,7 +337,8 @@ export function DeliveryNotesPanel({ orgId, filter, onFilterChange, onOpen, curr
           Guias
         </h2>
       </div>
-      <FilterPills ariaLabel="Estado da guia" options={options} value={filter} onChange={onFilterChange} className="mb-2.5" />
+      <FilterPills ariaLabel="Estado da guia" options={options} value={filter} onChange={onFilterChange} className="mb-2" />
+      <FilterPills<NoteOriginFilter> ariaLabel="Origem da guia" options={originOptions} value={origin} onChange={(v) => setOrigin(v)} className="mb-2.5" />
 
       {query.isLoading ? (
         <div className="space-y-2" aria-busy="true" aria-label="A carregar guias">
@@ -315,7 +358,7 @@ export function DeliveryNotesPanel({ orgId, filter, onFilterChange, onOpen, curr
         <InventoryEmptyState
           icon={FileText}
           title="Sem guias"
-          description={items.length > 0 ? "Nenhuma guia neste filtro." : undefined}
+          description={all.length > 0 ? "Nenhuma guia neste filtro." : undefined}
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border bg-card">
@@ -345,8 +388,21 @@ export function DeliveryNotesPanel({ orgId, filter, onFilterChange, onOpen, curr
                       </InventoryStatusBadge>
                     ) : null}
                   </TableCell>
-                  <TableCell className="max-w-[220px] truncate" title={n.supplierName ?? undefined}>
-                    {n.supplierName ?? "—"}
+                  <TableCell className="max-w-[240px]">
+                    <span className="block truncate" title={n.supplierName ?? undefined}>
+                      {n.supplierName ?? "—"}
+                    </span>
+                    {n.fromPortal ? (
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1">
+                        <SeloEnviadaFornecedor />
+                        {n.hasFile ? (
+                          <small className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+                            <Paperclip className="h-3 w-3" aria-hidden="true" />
+                            com ficheiro
+                          </small>
+                        ) : null}
+                      </span>
+                    ) : null}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">{fmtDay(n.documentDate ?? n.createdAt) || "—"}</TableCell>
                   <TableCell className="text-xs">

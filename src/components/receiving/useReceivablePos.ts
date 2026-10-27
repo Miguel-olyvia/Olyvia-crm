@@ -5,7 +5,10 @@
 //   + purchase_order_items (item_type='product': quantity, received_quantity, uom_id, units_per_uom, products, uom)
 //   + supplier_po_publications (fetchPoPublications; falha → sem portal)
 //   + scheduled_emails (entity_type='purchase_orders', status='sent'; falha → "Sem envio registado")
-//   + origem (fetchPoOrigins; falha → sem origem).
+//   + origem (fetchPoOrigins; falha → sem origem)
+//   + guias do portal abertas (fetchPortalShipments: supplier_delivery_notes status='open' com history 'shipped' /
+//     supplier_portal, ligadas à PO por supplier_delivery_note_orders ou pelo purchase_order_id do history; falha →
+//     sem distintivo "Expedida").
 //   A RLS de purchase_orders exige purchase_orders.view — sem ela a leitura viria vazia, por isso quem chama passa
 //   enabled=false e mostra "Sem permissão para ver encomendas" (nunca "nada por receber").
 // useReceivingReceipts(orgId, enabled): purchase_order_receipts kind='receipt' (as mais recentes), com a PO, o produto,
@@ -15,7 +18,8 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchPoPublications, type PoPublicationRow } from "@/components/purchase-orders/poSupplierPortalApi";
 import { fetchPoOrigins, type PoOriginInfo } from "@/components/purchase-orders/usePoOrigins";
-import type { ReceivableLine, ReceivablePo } from "./porReceber";
+import { isPortalNote, portalMeta } from "./deliveryNotes";
+import type { ReceivableLine, ReceivablePo, ReceivableShipment } from "./porReceber";
 
 const PAGE = 1000;
 const CHUNK = 100;
@@ -80,6 +84,7 @@ export function mapPoRow(
     publication?: ReceivablePo["publication"];
     emailSent?: boolean;
     origin?: PoOriginInfo | null;
+    shipped?: ReceivableShipment | null;
   } = {},
 ): ReceivablePo {
   const lines: ReceivableLine[] = (r.purchase_order_items ?? [])
@@ -114,7 +119,73 @@ export function mapPoRow(
     publication: extra.publication ?? null,
     emailSent: !!extra.emailSent,
     lines,
+    shipped: extra.shipped ?? null,
   };
+}
+
+interface PortalNoteRow {
+  id: string;
+  note_number: string;
+  created_at: string | null;
+  status: string;
+  history: unknown;
+}
+
+/**
+ * As guias expedidas no portal ainda abertas, por PO (a mais antiga primeiro). Junta as POs da guia
+ * (supplier_delivery_note_orders) e a do history (purchase_order_id da expedição).
+ */
+export function shipmentsByPo(
+  notes: readonly PortalNoteRow[],
+  orders: readonly { delivery_note_id: string; purchase_order_id: string }[],
+): Map<string, ReceivableShipment> {
+  const posOf = new Map<string, Set<string>>();
+  for (const o of orders) posOf.set(o.delivery_note_id, (posOf.get(o.delivery_note_id) ?? new Set()).add(o.purchase_order_id));
+  const byPo = new Map<string, { list: { noteId: string; noteNumber: string; shippedAt: string | null; hasFile: boolean }[] }>();
+  for (const n of notes) {
+    if (n.status !== "open" || !isPortalNote(n.history)) continue;
+    const m = portalMeta(n.history);
+    const pos = new Set(posOf.get(n.id) ?? []);
+    if (m?.purchaseOrderId) pos.add(m.purchaseOrderId);
+    for (const po of pos) {
+      const e = byPo.get(po) ?? { list: [] };
+      e.list.push({ noteId: n.id, noteNumber: n.note_number, shippedAt: m?.shippedAt ?? n.created_at ?? null, hasFile: !!m?.file });
+      byPo.set(po, e);
+    }
+  }
+  const out = new Map<string, ReceivableShipment>();
+  for (const [po, { list }] of byPo) {
+    list.sort((a, b) => (a.shippedAt ?? "").localeCompare(b.shippedAt ?? "") || a.noteNumber.localeCompare(b.noteNumber));
+    out.set(po, { ...list[0], count: list.length });
+  }
+  return out;
+}
+
+export async function fetchPortalShipments(orgId: string): Promise<Map<string, ReceivableShipment>> {
+  const notes = await fetchAllRows<PortalNoteRow>((from, to) =>
+    supabase
+      .from("supplier_delivery_notes")
+      .select("id, note_number, created_at, status, history")
+      .eq("organization_id", orgId)
+      .eq("status", "open")
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const portal = notes.filter((n) => n.status === "open" && isPortalNote(n.history));
+  if (!portal.length) return new Map();
+  const orders: { delivery_note_id: string; purchase_order_id: string }[] = [];
+  for (const part of chunks(portal.map((n) => n.id))) {
+    const { data, error } = await supabase
+      .from("supplier_delivery_note_orders")
+      .select("delivery_note_id, purchase_order_id")
+      .eq("organization_id", orgId)
+      .in("delivery_note_id", part);
+    if (error) throw error;
+    const ids = new Set(part);
+    for (const o of (data ?? []) as { delivery_note_id: string; purchase_order_id: string }[]) if (ids.has(o.delivery_note_id)) orders.push(o);
+  }
+  return shipmentsByPo(portal, orders);
 }
 
 export async function fetchReceivablePos(orgId: string): Promise<ReceivablePo[]> {
@@ -134,7 +205,7 @@ export async function fetchReceivablePos(orgId: string): Promise<ReceivablePo[]>
   const ids = rows.map((r) => r.id);
   const contractIds = rows.filter((r) => r.source_type === "contract" && r.source_id).map((r) => r.source_id as string);
 
-  const [pubs, emails, origins] = await Promise.all([
+  const [pubs, emails, origins, shipments] = await Promise.all([
     fetchPoPublications(orgId).catch((): PoPublicationRow[] => []),
     (async () => {
       const sent = new Set<string>();
@@ -151,6 +222,7 @@ export async function fetchReceivablePos(orgId: string): Promise<ReceivablePo[]>
       return sent;
     })(),
     fetchPoOrigins(contractIds).catch(() => ({}) as Record<string, PoOriginInfo>),
+    fetchPortalShipments(orgId).catch(() => new Map<string, ReceivableShipment>()),
   ]);
   const pubByPo = new Map<string, PoPublicationRow>(pubs.map((p) => [p.purchase_order_id, p] as const));
   return rows.map((r) => {
@@ -161,6 +233,7 @@ export async function fetchReceivablePos(orgId: string): Promise<ReceivablePo[]>
         : null,
       emailSent: emails.has(r.id),
       origin: r.source_id ? (origins[r.source_id] ?? null) : null,
+      shipped: shipments.get(r.id) ?? null,
     });
   });
 }
