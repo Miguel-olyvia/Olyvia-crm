@@ -41,6 +41,9 @@ import { formatDistanceToNow } from "date-fns";
 import { pt, es, fr, de, enUS } from "date-fns/locale";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
 import { CompanySwitcher } from "@/components/CompanySwitcher";
+import { GlobalSearch } from "@/components/global-search/GlobalSearch";
+import { canUseGlobalSearch } from "@/components/global-search/globalSearchResults";
+import { usePermissions } from "@/hooks/usePermissions";
 import { EditProfileDialog } from "@/components/EditProfileDialog";
 import { SendProposalDialog } from "@/components/proposals/SendProposalDialog";
 import { SendQuoteDialog } from "@/components/quotes/SendQuoteDialog";
@@ -64,10 +67,13 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t, language } = useTranslation();
-  const [searchQuery, setSearchQuery] = useState("");
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const { activeCompany } = useCompany();
+  const { hasPermission } = usePermissions();
+  // Pesquisa global: hoje cobre o Inventário (PO, EC, produto, fornecedor, guia);
+  // sem permissão para nenhuma dessas páginas a caixa fica como estava (desativada).
+  const globalSearchEnabled = canUseGlobalSearch(hasPermission);
   const { notifications, unreadCount, markAsRead, markAllAsRead, dismissNotification } = useNotifications(activeCompany?.id);
 
   const dateLocales = { pt, es, fr, de, en: enUS };
@@ -255,11 +261,6 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
     navigate("/auth");
   };
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    // TODO: implement global search
-  };
-
   const handleNotificationClick = async (notification: Notification) => {
     // For client-question notifications, open a dialog with the full message
     // instead of navigating away — the message itself is what the user needs to read.
@@ -373,20 +374,23 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
       <header className="h-14 border-b border-sidebar-border bg-sidebar fixed top-0 right-0 left-0 md:left-16 z-[450] px-4 flex items-center justify-between gap-4">
         <CompanySwitcher />
 
-        <form onSubmit={handleSearch} className="flex-1 max-w-xl" aria-label="Pesquisa global (brevemente disponível)" aria-disabled="true">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sidebar-foreground/70" />
-            <Input
-              type="search"
-              disabled
-              aria-disabled="true"
-              placeholder={t('header.searchPlaceholder')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-sidebar-accent border-none focus-visible:ring-1 text-sidebar-foreground placeholder:text-sidebar-foreground/50"
-            />
+        {globalSearchEnabled ? (
+          <GlobalSearch hasPermission={hasPermission} className="flex-1 max-w-xl" />
+        ) : (
+          <div className="flex-1 max-w-xl" aria-label="Pesquisa global (sem permissões de pesquisa)" aria-disabled="true">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sidebar-foreground/70" aria-hidden="true" />
+              <Input
+                type="search"
+                disabled
+                aria-disabled="true"
+                aria-label="Pesquisa global"
+                placeholder={t('header.searchPlaceholder')}
+                className="pl-10 bg-sidebar-accent border-none focus-visible:ring-1 text-sidebar-foreground placeholder:text-sidebar-foreground/50"
+              />
+            </div>
           </div>
-        </form>
+        )}
 
         <div className="flex items-center gap-2">
           <LanguageSelector />

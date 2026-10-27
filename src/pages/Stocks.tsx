@@ -226,11 +226,13 @@ const Stocks = () => {
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState("all");
   const [searchParams, setSearchParams] = useSearchParams();
+  // ?q= (pesquisa global do topo → produto) entra já na pesquisa da lista,
+  // sem um primeiro pedido sem filtro.
+  const [searchTerm, setSearchTerm] = useState(() => parseStocksParams(searchParams).q ?? "");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(() => parseStocksParams(searchParams).q ?? "");
   const [warehouseFilter, setWarehouseFilter] = useState(() => parseStocksParams(searchParams).warehouse ?? "all");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -270,6 +272,22 @@ const Stocks = () => {
   useEffect(() => {
     setWarehouseFilter((prev) => (prev === warehouseParam ? prev : warehouseParam));
   }, [warehouseParam]);
+
+  // ?q= é de uso único: passa para a pesquisa e sai do URL (replace), para a
+  // mesma pesquisa global voltar a aplicar-se e para limpar a caixa não ser
+  // desfeito ao recarregar.
+  const qParam = urlParams.q;
+  useEffect(() => {
+    if (!qParam) return;
+    setSearchTerm(qParam);
+    setDebouncedSearchTerm(qParam);
+    const { setSearchParams: writeParams } = searchParamsRef.current;
+    writeParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("q");
+      return next;
+    }, { replace: true });
+  }, [qParam]);
 
   // Estado → URL (replace): limpar o filtro não deixa um ?status=/?warehouse=
   // antigo que voltasse a aplicá-lo ao recarregar.
