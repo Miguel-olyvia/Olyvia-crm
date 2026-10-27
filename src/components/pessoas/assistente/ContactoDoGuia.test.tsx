@@ -230,10 +230,12 @@ describe("Qualificação", () => {
     expect(estado.guardarQual).not.toHaveBeenCalled();
   });
 
-  it("sem permissão de editar diz-o e não deixa escrever", () => {
+  it("sem permissão de editar diz-o e mostra o mesmo ecrã só para ler, sem deixar escrever", () => {
     montar({ podeEditar: false });
     expect(screen.getByText("Não tem permissão para fazer este passo.")).toBeInTheDocument();
-    expect(screen.queryByText("Tipo de imóvel")).not.toBeInTheDocument();
+    expect(screen.getByText("Tipo de imóvel")).toBeInTheDocument();
+    for (const r of screen.getAllByRole("radio")) expect(r).toBeDisabled();
+    expect(screen.getByLabelText("O que o cliente pediu")).toBeDisabled();
   });
 });
 

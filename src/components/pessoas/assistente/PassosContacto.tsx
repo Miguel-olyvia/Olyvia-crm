@@ -21,6 +21,8 @@ import type { ErroResposta } from "@/components/negocio-metas/respostasQuestiona
 import { contarRespostas } from "@/components/negocio-metas/respostasVisita";
 import { CONTACTOS_PREFERIDOS, HORAS_PREFERIDAS, opcoesDeLingua, LINGUAS_GRAVAVEIS } from "@/hooks/pessoas/useGuardarContactoPessoa";
 import type { FormularioContacto } from "@/components/pessoas-lista/contactoFormulario";
+import type { ContactoPessoa } from "@/components/negocio-metas/registosTipos";
+import { textoDiaCompleto } from "../formatoPessoas";
 import type { ContactoPreferido, HoraPreferida } from "../pessoasTipos";
 import { GrupoQuemPede, type CampoQuemPede, type QuemPedeProps } from "./GrupoQuemPede";
 import { DURACOES_PREPARAR, QUEM_VAI_ESTAR, type PrepararVisita } from "./rascunhoAssistente";
@@ -50,6 +52,20 @@ export function SemNegocio({ aoCriar }: { aoCriar?: () => void }) {
   );
 }
 
+/**
+ * O mesmo ecrã do passo, só para ler: os campos ficam desativados (mas legíveis, com a escolha marcada também por um visto e não só pela cor) e uma frase
+ * diz porque não se pode mexer. Sem `ativo` mostra o passo tal como é.
+ */
+export function SoLeitura({ ativo, aviso, children }: { ativo: boolean; aviso: string; children: ReactNode }) {
+  if (!ativo) return <>{children}</>;
+  return (
+    <div className="space-y-4">
+      <p role="note" className="rounded-lg border border-border bg-muted/40 p-3 text-base text-foreground">{aviso}</p>
+      <fieldset disabled className="m-0 min-w-0 space-y-4 border-0 p-0 [&_:disabled]:!cursor-default [&_:disabled]:!opacity-100">{children}</fieldset>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- Chamada
 
 interface CorpoChamadaProps {
@@ -63,12 +79,13 @@ interface CorpoChamadaProps {
   podeRegistar: boolean;
   /** O grupo «Quem pede» (tipo de cliente e NIF) por baixo do contacto; sem isto não aparece. */
   quemPede?: Omit<QuemPedeProps, "podeEditar" | "erroCampo">;
+  /** As chamadas já registadas, pela ordem em que chegam; sem isto só há a contagem. */
+  historico?: readonly ContactoPessoa[];
 }
 
-export function CorpoChamada({ chamadas, form, aoMudar, podeEditar, erroCampo, aoRegistar, podeRegistar, quemPede }: CorpoChamadaProps) {
+export function CorpoChamada({ chamadas, form, aoMudar, podeEditar, erroCampo, aoRegistar, podeRegistar, quemPede, historico }: CorpoChamadaProps) {
   const { t } = useTranslation();
   const id = useId();
-  const linguas = opcoesDeLingua(form.lingua);
   const estado = chamadas === 0 ? t(`${A}chamada.nenhuma`) : t(`${A}chamada.${chamadas === 1 ? "uma" : "varias"}`, { n: chamadas });
   return (
     <div className="space-y-5">
@@ -80,46 +97,121 @@ export function CorpoChamada({ chamadas, form, aoMudar, podeEditar, erroCampo, a
           <Button type="button" className={cn("min-h-11", FOCO)} onClick={(e) => aoRegistar(e.currentTarget)}>{t(`${A}chamada.registar`)}</Button>
         )}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor={`${id}-telefone`}>{t(`${C}phone`)}</Label>
-          <Input
-            id={`${id}-telefone`} type="tel" inputMode="tel" autoComplete="off" maxLength={30} className={cn("min-h-11", FOCO)} value={form.telefone}
-            readOnly={!podeEditar} aria-invalid={erroCampo === "telefone" ? true : undefined} onChange={(e) => aoMudar({ telefone: e.target.value })}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`${id}-email`}>{t(`${C}email`)}</Label>
-          <Input
-            id={`${id}-email`} type="email" autoComplete="off" maxLength={254} className={cn("min-h-11", FOCO)} value={form.email}
-            readOnly={!podeEditar} aria-invalid={erroCampo === "email" ? true : undefined} onChange={(e) => aoMudar({ email: e.target.value })}
-          />
-        </div>
-      </div>
+      {historico && historico.length > 0 && (
+        <section aria-labelledby={`${id}-historico`} className="space-y-1.5">
+          <h4 id={`${id}-historico`} className="text-sm font-semibold text-foreground">{t(`${A}chamada.historico`)}</h4>
+          <ul className="list-none space-y-1 p-0 text-[15px] text-foreground">
+            {historico.map((c) => (
+              <li key={c.id}>
+                {[
+                  [textoDiaCompleto(c.data), c.hora].filter(Boolean).join(" "),
+                  c.resultado ? t(`pessoasPagina.result.${c.resultado}`) : t(`${A}chamada.semResultado`),
+                  c.nota,
+                ].filter(Boolean).join(" · ")}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <CamposTelefoneEmail form={form} aoMudar={aoMudar} podeEditar={podeEditar} erroCampo={erroCampo} />
       <p className="text-sm text-muted-foreground">{t(`${C}hint`)}</p>
       {quemPede && <GrupoQuemPede {...quemPede} podeEditar={podeEditar} erroCampo={erroCampo} />}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="space-y-1.5">
-          <Label htmlFor={`${id}-preferido`}>{t(`${C}preferred`)}</Label>
-          <select id={`${id}-preferido`} className={CAMPO} value={form.contacto} disabled={!podeEditar} onChange={(e) => aoMudar({ contacto: e.target.value as ContactoPreferido | "" })}>
-            <option value="">{t(`${C}preferred.none`)}</option>
-            {CONTACTOS_PREFERIDOS.map((c) => <option key={c} value={c}>{t(`${C}preferred.${c}`)}</option>)}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`${id}-hora`}>{t(`${C}time`)}</Label>
-          <select id={`${id}-hora`} className={CAMPO} value={form.hora} disabled={!podeEditar} onChange={(e) => aoMudar({ hora: e.target.value as HoraPreferida | "" })}>
-            <option value="">{t(`${C}time.none`)}</option>
-            {HORAS_PREFERIDAS.map((h) => <option key={h} value={h}>{t(`${C}time.${h}`)}</option>)}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`${id}-lingua`}>{t(`${C}language`)}</Label>
-          <select id={`${id}-lingua`} className={CAMPO} value={form.lingua} disabled={!podeEditar} onChange={(e) => aoMudar({ lingua: e.target.value })}>
-            <option value="">{t(`${C}notSet`)}</option>
-            {linguas.map((l) => <option key={l} value={l}>{LINGUAS_GRAVAVEIS.includes(l) ? t(`${C}language.${l}`) : l}</option>)}
-          </select>
-        </div>
+      <CamposPreferencias form={form} aoMudar={aoMudar} podeEditar={podeEditar} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Quem pede, Contacto e Origem (a fase Por contactar, que não tem assistente)
+
+/** O passo «Quem pede» sozinho: o mesmo grupo da Chamada (tipo de cliente e NIF). */
+export function CorpoQuemPede({ quemPede, podeEditar, erroCampo = null }: { quemPede: Omit<QuemPedeProps, "podeEditar" | "erroCampo">; podeEditar: boolean; erroCampo?: CampoQuemPede | null }) {
+  return <GrupoQuemPede {...quemPede} podeEditar={podeEditar} erroCampo={erroCampo} />;
+}
+
+/** O passo «Contacto» sozinho: os mesmos campos da Chamada (telefone, email e preferências). */
+export function CorpoContacto({ form, aoMudar, podeEditar, erroCampo = null }: Pick<CorpoChamadaProps, "form" | "aoMudar" | "podeEditar"> & { erroCampo?: CorpoChamadaProps["erroCampo"] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-5">
+      <CamposTelefoneEmail form={form} aoMudar={aoMudar} podeEditar={podeEditar} erroCampo={erroCampo} />
+      <p className="text-sm text-muted-foreground">{t(`${C}hint`)}</p>
+      <CamposPreferencias form={form} aoMudar={aoMudar} podeEditar={podeEditar} />
+    </div>
+  );
+}
+
+/** O passo «Origem»: de que campanha e de que formulário veio a pessoa (os únicos campos de origem que a ficha tem). Só se lê: a origem não se escreve aqui. */
+export function CorpoOrigem({ campanha, formulario }: { campanha: string | null; formulario: string | null }) {
+  const { t } = useTranslation();
+  const id = useId();
+  const vazio = t("pessoasPagina.guia.cliente.vazio");
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-campanha`}>{t("pessoasPagina.guia.resumo.campanha")}</Label>
+        <Input id={`${id}-campanha`} readOnly className={cn("min-h-11", FOCO)} value={campanha ?? ""} placeholder={vazio} />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-formulario`}>{t("pessoasPagina.guia.resumo.formulario")}</Label>
+        <Input id={`${id}-formulario`} readOnly className={cn("min-h-11", FOCO)} value={formulario ?? ""} placeholder={vazio} />
+      </div>
+    </div>
+  );
+}
+
+type CamposDoContacto = Pick<CorpoChamadaProps, "form" | "aoMudar" | "podeEditar">;
+
+function CamposTelefoneEmail({ form, aoMudar, podeEditar, erroCampo }: CamposDoContacto & { erroCampo: CorpoChamadaProps["erroCampo"] }) {
+  const { t } = useTranslation();
+  const id = useId();
+  // Só para ler, o campo vazio diz «Por preencher» (e não fica um campo em branco sem explicação).
+  const vazio = podeEditar ? undefined : t("pessoasPagina.guia.cliente.vazio");
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-telefone`}>{t(`${C}phone`)}</Label>
+        <Input
+          id={`${id}-telefone`} type="tel" inputMode="tel" autoComplete="off" maxLength={30} className={cn("min-h-11", FOCO)} value={form.telefone}
+          readOnly={!podeEditar} placeholder={vazio} aria-invalid={erroCampo === "telefone" ? true : undefined} onChange={(e) => aoMudar({ telefone: e.target.value })}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-email`}>{t(`${C}email`)}</Label>
+        <Input
+          id={`${id}-email`} type="email" autoComplete="off" maxLength={254} className={cn("min-h-11", FOCO)} value={form.email}
+          readOnly={!podeEditar} placeholder={vazio} aria-invalid={erroCampo === "email" ? true : undefined} onChange={(e) => aoMudar({ email: e.target.value })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CamposPreferencias({ form, aoMudar, podeEditar }: CamposDoContacto) {
+  const { t } = useTranslation();
+  const id = useId();
+  const linguas = opcoesDeLingua(form.lingua);
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-preferido`}>{t(`${C}preferred`)}</Label>
+        <select id={`${id}-preferido`} className={CAMPO} value={form.contacto} disabled={!podeEditar} onChange={(e) => aoMudar({ contacto: e.target.value as ContactoPreferido | "" })}>
+          <option value="">{t(`${C}preferred.none`)}</option>
+          {CONTACTOS_PREFERIDOS.map((c) => <option key={c} value={c}>{t(`${C}preferred.${c}`)}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-hora`}>{t(`${C}time`)}</Label>
+        <select id={`${id}-hora`} className={CAMPO} value={form.hora} disabled={!podeEditar} onChange={(e) => aoMudar({ hora: e.target.value as HoraPreferida | "" })}>
+          <option value="">{t(`${C}time.none`)}</option>
+          {HORAS_PREFERIDAS.map((h) => <option key={h} value={h}>{t(`${C}time.${h}`)}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-lingua`}>{t(`${C}language`)}</Label>
+        <select id={`${id}-lingua`} className={CAMPO} value={form.lingua} disabled={!podeEditar} onChange={(e) => aoMudar({ lingua: e.target.value })}>
+          <option value="">{t(`${C}notSet`)}</option>
+          {linguas.map((l) => <option key={l} value={l}>{LINGUAS_GRAVAVEIS.includes(l) ? t(`${C}language.${l}`) : l}</option>)}
+        </select>
       </div>
     </div>
   );
@@ -254,9 +346,11 @@ interface CorpoMarcarProps {
   podeMarcar: boolean;
   /** Uma razão que trava a marcação (a última chamada foi «Sem interesse» ou «Número errado»): o botão fica desativado e a razão diz-se em texto. */
   razaoBloqueio?: string;
+  /** Quando está marcada a visita (dia, hora e quem a faz, já em texto); sem isto só se diz que há uma. */
+  quando?: string;
 }
 
-export function CorpoMarcar({ preparar, marcada, aoMarcar, podeMarcar, razaoBloqueio }: CorpoMarcarProps) {
+export function CorpoMarcar({ preparar, marcada, aoMarcar, podeMarcar, razaoBloqueio, quando }: CorpoMarcarProps) {
   const { t } = useTranslation();
   const idRazao = useId();
   const partes = [
@@ -270,6 +364,7 @@ export function CorpoMarcar({ preparar, marcada, aoMarcar, podeMarcar, razaoBloq
         {partes.length > 0 ? t(`${A}marcar.preparada`, { dados: partes.join(" · ") }) : t(`${A}marcar.semPreparar`)}
       </p>
       {marcada && <p className="text-base font-medium text-foreground">{t(`${A}marcar.jaMarcada`)}</p>}
+      {marcada && quando && <p className="text-base text-foreground">{t(`${A}marcar.quando`, { quando })}</p>}
       {podeMarcar && (
         <Button
           type="button" className={cn("min-h-11", FOCO, razaoBloqueio && "opacity-60")} aria-disabled={razaoBloqueio ? true : undefined}

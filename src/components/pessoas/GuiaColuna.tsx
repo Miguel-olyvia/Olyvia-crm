@@ -1,6 +1,6 @@
 // A coluna da esquerda do guia, como no protótipo: o título da fase que se está a VER, a lista dos seus passos (o escolhido realçado; cada passo é um
 // botão) e, depois de uma linha de separação, «Fases feitas» com cada fase já feita, que se escolhe para a ver. Só apresentação e só leitura: tudo chega
-// por props e nada se grava aqui. Mais `RegistoDoItem`, o que ficou registado num passo, que o centro mostra.
+// por props e nada se grava aqui. Mais `RegistoDoItem`, o registo em texto dos passos que não têm ecrã próprio, que o centro mostra.
 import { Check } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -69,27 +69,16 @@ export function ColunaDoGuia({ faseRotuloChave, itens, escolhido, aoEscolherPass
 }
 
 /**
- * O que ficou registado num passo, em leitura: o nome do passo, o resumo e se está feito. O resumo é uma lista de definições (rótulo e valor; «Por
- * preencher» onde não há nada, dito por texto e não só pela cor); um passo sem resumo mostra o registo em texto (ou «Sem registo»).
+ * O que ficou registado num passo que NÃO tem ecrã próprio (os passos de documento e o levantamento do negócio, que se fazem em diálogos): o nome do
+ * passo, o registo em texto (ou «Sem registo») e se está feito. Os passos que têm ecrã (Quem pede, Contacto, Origem, a Chamada, a Qualificação, a
+ * visita e o levantamento) mostram-se com o MESMO ecrã do passo, preenchido, e não passam por aqui.
  */
 export function RegistoDoItem({ item, comTitulo = true }: { item: ItemChecklist | null; comTitulo?: boolean }) {
   const { t } = useTranslation();
-  const linhas = item?.linhas ?? [];
   return (
     <div className="space-y-1 rounded-lg border border-border/60 bg-muted/40 p-3">
       {item && comTitulo && <p className="text-sm text-muted-foreground">{t(item.rotuloChave)}</p>}
-      {linhas.length > 0 ? (
-        <dl className="grid gap-x-6 gap-y-2 py-1 sm:grid-cols-2">
-          {linhas.map((l, i) => (
-            <div key={`${i}-${l.rotulo}`} className="min-w-0">
-              <dt className="text-sm text-muted-foreground">{l.rotulo}</dt>
-              <dd className={cn("break-words text-[15px]", l.valor ? "font-medium text-foreground" : "text-muted-foreground")}>{l.valor ?? t(`${P}guia.cliente.vazio`)}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <p className={cn("break-words text-base", item?.detalhe ? "font-medium text-foreground" : "text-muted-foreground")}>{item?.detalhe ?? t(`${P}guia.semRegisto`)}</p>
-      )}
+      <p className={cn("break-words text-base", item?.detalhe ? "font-medium text-foreground" : "text-muted-foreground")}>{item?.detalhe ?? t(`${P}guia.semRegisto`)}</p>
       {item && <p className="text-sm text-muted-foreground">{t(`${P}guia.registo.${item.feito ? "feita" : "porFazer"}`)}</p>}
     </div>
   );

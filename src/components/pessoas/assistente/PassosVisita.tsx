@@ -255,16 +255,23 @@ interface CorpoFecharProps {
   erro?: string | null;
   /** A última tentativa não tinha nada novo para gravar. */
   nadaNovo?: boolean;
+  /** O que ficou guardado (quando, por quem, quantas respostas e medidas), já em texto; só se mostra com o levantamento guardado. */
+  detalhe?: readonly string[];
 }
 
-export function CorpoFechar({ guardado, aGuardar, podeGuardar, aoGuardar, razao, erro, nadaNovo = false }: CorpoFecharProps) {
+export function CorpoFechar({ guardado, aGuardar, podeGuardar, aoGuardar, razao, erro, nadaNovo = false, detalhe }: CorpoFecharProps) {
   const { t } = useTranslation();
   const idRazao = useId();
   const desativado = !podeGuardar || aGuardar;
   return (
     <div className="space-y-4">
       <Nota>{t(`${A}fechar.ajuda`)}</Nota>
-      {guardado ? <p className="text-base font-medium text-foreground">{t(`${A}fechar.guardado`)}</p> : (
+      {guardado ? (
+        <div className="space-y-1">
+          <p className="text-base font-medium text-foreground">{t(`${A}fechar.guardado`)}</p>
+          {detalhe?.map((linha) => <p key={linha} className="text-base text-foreground">{linha}</p>)}
+        </div>
+      ) : (
         <>
           <Button
             type="button" className={cn("min-h-11 gap-2", FOCO, desativado && "opacity-60")} aria-disabled={desativado || undefined}

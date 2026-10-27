@@ -39,6 +39,13 @@ export interface AssistenteDoGuiaProps {
   nivel: "h2" | "h3";
   /** O que o guia mostra por baixo do passo (o prazo, «Alterar prazo»...): continua à mão com o assistente. */
   extra?: ReactNode;
+  /**
+   * Quando se VÊ uma fase feita (e não a atual): o assistente abre os passos dessa fase só para ler (sem «Continuar», nada se grava), «Fases feitas»
+   * marca-a e o botão primário é «Voltar ao passo atual». Sem isto é a fase atual, como sempre.
+   */
+  fasePassada?: { id: string; aoVoltar: () => void };
+  /** Verdadeiro quando o assistente remontou por a pessoa ter trocado de fase vista: o foco vai para o título à entrada (senão ficava no body). */
+  focarAoMontar?: boolean;
 }
 
 const nomeDoPasso = (p: PassoAssistente, t: (c: string) => string): string => p.rotulo ?? t(p.rotuloChave ?? "");
@@ -59,7 +66,7 @@ function Circulo({ estado, numero }: { estado: EstadoDoPasso; numero: number }) 
   );
 }
 
-function ColunaDosPassos({ faseRotuloChave, passos, assistente, feitas, aoVerFase }: Pick<AssistenteDoGuiaProps, "faseRotuloChave" | "passos" | "assistente" | "feitas" | "aoVerFase">) {
+function ColunaDosPassos({ faseRotuloChave, passos, assistente, feitas, aoVerFase, fasePassada }: Pick<AssistenteDoGuiaProps, "faseRotuloChave" | "passos" | "assistente" | "feitas" | "aoVerFase" | "fasePassada">) {
   const { t } = useTranslation();
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -87,12 +94,14 @@ function ColunaDosPassos({ faseRotuloChave, passos, assistente, feitas, aoVerFas
           })}
         </ol>
       </nav>
-      <FasesFeitasNav feitas={feitas} faseVista={null} aoVerFase={aoVerFase} />
+      <FasesFeitasNav feitas={feitas} faseVista={fasePassada?.id ?? null} aoVerFase={aoVerFase} />
     </div>
   );
 }
 
-function textoDoCabecalho(passo: PassoAssistente, n: number, m: number, t: (c: string, p?: Record<string, string | number>) => string): string {
+function textoDoCabecalho(passo: PassoAssistente, n: number, m: number, t: (c: string, p?: Record<string, string | number>) => string, passada = false): string {
+  // Numa fase feita não há nada a completar: não se contam respostas em falta nem tempo.
+  if (passada) return [t(`${A}cabecalho.passo`, { n, m }), t(`${A}cabecalho.faseFeita`)].join(" · ");
   const emFalta = faltam(passo);
   const tempo = tempoDoPasso(emFalta);
   const partes = [t(`${A}cabecalho.passo`, { n, m })];
@@ -102,7 +111,7 @@ function textoDoCabecalho(passo: PassoAssistente, n: number, m: number, t: (c: s
   return partes.join(" · ");
 }
 
-export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCorpo, aoContinuar, feitas, aoVerFase, nivel, extra }: AssistenteDoGuiaProps) {
+export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCorpo, aoContinuar, feitas, aoVerFase, nivel, extra, fasePassada, focarAoMontar = false }: AssistenteDoGuiaProps) {
   const { t } = useTranslation();
   const Titulo = nivel;
   const { indice, passo } = assistente;
@@ -124,10 +133,10 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
   // Em ecrã largo o centro é quem rola: ao mudar de passo volta ao topo (o elemento é o mesmo e o scroll ficaria a meio).
   const centro = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (assistente.pedidoFoco === 0) return;
+    if (assistente.pedidoFoco === 0 && !focarAoMontar) return;
     if (centro.current) centro.current.scrollTop = 0;
     titulo.current?.focus();
-  }, [assistente.pedidoFoco]);
+  }, [assistente.pedidoFoco, focarAoMontar]);
   // O erro liga-se ao campo em falta e o foco vai para o primeiro campo inválido do passo.
   useEffect(() => {
     if (!erro) return;
@@ -171,12 +180,12 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
   return (
     <>
       <div className={cn("md:self-start", LATERAL_FIXA)}>
-        <ColunaDosPassos faseRotuloChave={faseRotuloChave} passos={passos} assistente={assistente} feitas={feitas} aoVerFase={aoVerFase} />
+        <ColunaDosPassos faseRotuloChave={faseRotuloChave} passos={passos} assistente={assistente} feitas={feitas} aoVerFase={aoVerFase} fasePassada={fasePassada} />
       </div>
       {/* A única coluna que rola em ecrã largo: região com nome e foco, para o teclado a poder rolar. */}
       <div ref={centro} role="region" aria-label={t(`${P}guia.centro`)} tabIndex={0} data-guia-centro="" className={cn(CENTRO_QUE_ROLA, FOCO)}>
         <div className="space-y-4 py-1 md:px-2">
-          <p id={idCabecalho} className={cn("text-sm", completo(passo) ? "text-primary" : "text-muted-foreground")}>{textoDoCabecalho(passo, indice + 1, passos.length, t)}</p>
+          <p id={idCabecalho} className={cn("text-sm", completo(passo) && !fasePassada ? "text-primary" : "text-muted-foreground")}>{textoDoCabecalho(passo, indice + 1, passos.length, t, fasePassada !== undefined)}</p>
           <div className="flex items-center gap-3">
             <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Icone className="h-5 w-5" />
@@ -192,7 +201,13 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               {t(`${P}guia.anterior`)}
             </Button>
-            {!ultimo && (
+            {fasePassada && (
+              <Button type="button" className={cn("min-h-11 gap-2 rounded-lg px-6 font-semibold motion-reduce:transition-none", FOCO)} onClick={fasePassada.aoVoltar}>
+                {t(`${P}guia.anterior.voltar`)}
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
+            {!ultimo && !fasePassada && (
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {salto !== null && (
                   <Button type="button" variant="outline" className={cn("min-h-11 gap-2", FOCO)} onClick={() => assistente.irPara(salto)}>
@@ -211,7 +226,7 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
             {/* O estado existe sempre (vazio) para o leitor de ecrã anunciar quando passa a «A guardar...». */}
             <span role="status" className="sr-only">{ocupado ? t(`${A}aGuardar`) : ""}</span>
           </div>
-          {extra}
+          {!fasePassada && extra}
         </div>
       </div>
     </>

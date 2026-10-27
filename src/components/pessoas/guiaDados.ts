@@ -3,20 +3,67 @@
 import type { Traduzir } from "@/components/negocio-metas/saudeNegocio";
 import type { AcontecimentoGuia, DadosClienteGuia } from "./GuiaPecas";
 import { textoDiaCompleto } from "./formatoPessoas";
-import { juntar, maisProxima, maisRecente, resumosDoGuia, type NegocioDoGuia, type PessoaDoGuia, type RegistosDoGuia } from "./guiaResumos";
+import type { EstadoRegistos } from "@/components/negocio-metas/registosTipos";
+import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 import type { DadosDoGuia } from "./processo/passoGuiado";
 
 const MAXIMO_ACONTECIMENTOS = 5;
+const P = "pessoasPagina.";
+
+export type RegistosDoGuia = Pick<EstadoRegistos, "contactos" | "visitas" | "levantamentos">;
+
+/** O que se lê da pessoa para os factos da lista da fase. */
+export type PessoaDoGuia = Pick<Pessoa, "nome" | "contacto" | "campanha" | "formulario">;
+
+/** O que se lê do negócio aberto para o registo em texto dos passos de documento (que não têm ecrã de passo); sem ele esses passos ficam sem registo. */
+export type NegocioDoGuia = Partial<Pick<NegocioMes, "orcamentos" | "proposta" | "contrato">>;
+
+export const juntar = (...partes: (string | null | undefined)[]): string => partes.filter(Boolean).join(" · ");
+
+/** O dia e a hora mais recentes primeiro (AAAA-MM-DD e HH:MM, que ordenam como texto). */
+export const maisRecente = <T extends { data: string; hora?: string }>(registos: readonly T[]): T | undefined =>
+  [...registos].sort((a, b) => `${b.data} ${b.hora ?? ""}`.localeCompare(`${a.data} ${a.hora ?? ""}`))[0];
+
+/** O dia e a hora mais próximos primeiro. */
+export const maisProxima = <T extends { data: string; hora?: string }>(registos: readonly T[]): T | undefined =>
+  [...registos].sort((a, b) => `${a.data} ${a.hora ?? ""}`.localeCompare(`${b.data} ${b.hora ?? ""}`))[0];
+
+const euros = (valor: number): string => new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(valor);
+
+/**
+ * O registo em texto dos passos de documento do negócio (orçamento, proposta, contrato). Estes passos não têm um ecrã de passo para mostrar preenchido
+ * (fazem-se em diálogos por cima do guia), por isso, numa fase feita, é a única leitura que existe.
+ */
+function detalhesDosDocumentos(t: Traduzir, n: NegocioDoGuia): Record<string, string> {
+  const detalhes: Record<string, string> = {};
+  const orcamentos = n.orcamentos ?? [];
+  const escolhido = orcamentos.find((o) => o.escolhido);
+  if (orcamentos.length > 0) {
+    detalhes.orcamento = juntar(`${t(`${P}guia.resumo.orcamentos`)}: ${orcamentos.length}`, escolhido ? `${t(`${P}guia.resumo.valorEscolhido`)}: ${euros(escolhido.valor)}` : null);
+  }
+  if (n.proposta) {
+    const estado = `${t(`${P}guia.resumo.estadoProposta`)}: ${t(`${P}guia.resumo.proposta.${n.proposta.estado}`)}`;
+    detalhes.propostaCriada = estado;
+    detalhes.propostaEnviada = estado;
+    if (n.proposta.estado === "aceite") detalhes.respostaCliente = t(`${P}guia.resumo.proposta.aceite`);
+  }
+  if (n.contrato) {
+    const estado = `${t(`${P}guia.resumo.estadoContrato`)}: ${t(`${P}guia.resumo.contrato.${n.contrato.estado}`)}`;
+    detalhes.contratoCriado = estado;
+    if (n.contrato.estado === "assinado") detalhes.contratoAssinado = t(`${P}guia.resumo.contrato.assinado`);
+  }
+  return detalhes;
+}
 
 /**
  * O que ficou registado em cada item da lista da fase, em texto, só do que a ficha já tem: quem pede, o contacto, a origem, a última chamada, a visita
  * marcada, a visita feita e o levantamento. O que a ficha não sabe não aparece (o ecrã diz «Sem registo»).
  */
 export function detalhesDoGuia(
-  t: Traduzir, pessoa: PessoaDoGuia, registos: RegistosDoGuia,
+  t: Traduzir, pessoa: PessoaDoGuia, registos: RegistosDoGuia, negocio?: NegocioDoGuia,
 ): Record<string, string> {
-  const detalhes: Record<string, string> = {};
+  const detalhes: Record<string, string> = negocio ? detalhesDosDocumentos(t, negocio) : {};
   const definir = (id: string, texto: string): void => { if (texto) detalhes[id] = texto; };
   definir("quemPede", pessoa.nome.trim());
   definir("contacto", juntar(pessoa.contacto.telefone, pessoa.contacto.email));
@@ -36,8 +83,8 @@ export function detalhesDoGuia(
 
 /**
  * Os factos da lista da fase: quem pede, contacto, origem e o que há de chamadas, visitas e levantamentos (os registos dados, p. ex. os do negócio).
- * Com o tradutor `t` leva também o que ficou registado em cada passo (`detalhes`, em texto, e `resumos`, em rótulo e valor); `negocio` acrescenta a
- * qualificação e os documentos do negócio ao resumo.
+ * Com o tradutor `t` leva também o que ficou registado em cada passo (`detalhes`, em texto); `negocio` acrescenta os documentos do negócio. O que se
+ * mostra PREENCHIDO num passo (o mesmo ecrã do passo) não vem daqui: vem da pessoa, do negócio e dos registos, nos componentes dos passos.
  */
 export function dadosDoGuia(pessoa: PessoaDoGuia, registos: RegistosDoGuia, t?: Traduzir, negocio?: NegocioDoGuia): DadosDoGuia {
   return {
@@ -48,7 +95,7 @@ export function dadosDoGuia(pessoa: PessoaDoGuia, registos: RegistosDoGuia, t?: 
     visitasAtivas: registos.visitas.filter((v) => v.estado !== "cancelada").length,
     levantamentos: registos.levantamentos.length,
     ultimoResultado: maisRecente(registos.contactos)?.resultado ?? null,
-    ...(t ? { detalhes: detalhesDoGuia(t, pessoa, registos), resumos: resumosDoGuia(t, pessoa, registos, negocio) } : {}),
+    ...(t ? { detalhes: detalhesDoGuia(t, pessoa, registos, negocio) } : {}),
   };
 }
 

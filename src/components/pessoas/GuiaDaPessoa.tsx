@@ -12,6 +12,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { passoDaPerdida, passoAtual } from "./etapaPessoa";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import { GuiaDoPasso } from "./GuiaDoPasso";
+import { leituraDoPasso } from "./assistente/LeituraDoContacto";
 import { acontecimentosDoGuia, clienteDoGuia, dadosDoGuia } from "./guiaDados";
 import { useMarcarVisita } from "./marcarVisitaContexto";
 import { moradaDaLead } from "./moradaVisita";
@@ -107,6 +108,7 @@ export function GuiaDaPessoa({ resumo, hoje, atividade, capacidades, aoRegistarC
     <GuiaDoPasso
       passo={passo} fases={fases} aoAcao={aoAcao} acontecimentos={acontecimentos} cliente={cliente} extra={extra}
       cabecalho={{ nome: pessoa.nome, telefone: cliente.telefone, local }} tituloSecao={t("pessoasPagina.guia.regiao")}
+      leitura={(p) => leituraDoPasso(pessoa, p)}
       {...cabecalhoFicha}
       acaoPerder={aoEncerrar ? (
         <Button type="button" variant="ghost" className={cn("min-h-11", FOCO)} onClick={(e) => aoEncerrar(e.currentTarget)}>

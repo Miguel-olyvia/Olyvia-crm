@@ -28,6 +28,8 @@ export interface QuemPedeProps {
   nifRegistado: boolean;
   podeEditar: boolean;
   erroCampo: string | null;
+  /** Só se lê (uma fase feita, ou a ficha tal como está): não diz «sem permissão», porque o motivo não é esse. */
+  somenteLeitura?: boolean;
 }
 
 const OPCOES: readonly TipoIdentidade[] = ["person", "organization", "condominio"];
@@ -42,7 +44,7 @@ function Opcao({ id, valor, rotulo }: { id: string; valor: TipoIdentidade; rotul
   );
 }
 
-export function GrupoQuemPede({ form, tipoAtual, aoMudarForm, nif, aoMudarNif, nifUltimos3, nifRegistado, podeEditar, erroCampo }: QuemPedeProps) {
+export function GrupoQuemPede({ form, tipoAtual, aoMudarForm, nif, aoMudarNif, nifUltimos3, nifRegistado, podeEditar, erroCampo, somenteLeitura = false }: QuemPedeProps) {
   const { t } = useTranslation();
   const id = useId();
   const mudou = tipoAtual !== null && form.tipo !== tipoAtual;
@@ -65,8 +67,8 @@ export function GrupoQuemPede({ form, tipoAtual, aoMudarForm, nif, aoMudarNif, n
           <Opcao key={o} id={`${id}-${o}`} valor={o} rotulo={t(`${A}tipo.${CHAVE_TIPO[o]}`)} />
         ))}
       </RadioGroup>
-      {(!podeEditar || tipoAtual === null) && (
-        <p className="text-sm text-muted-foreground">{t(`${A}${!podeEditar ? "semPermissao" : "tipoSemFicha"}`)}</p>
+      {(!podeEditar || tipoAtual === null) && !(somenteLeitura && tipoAtual !== null) && (
+        <p className="text-sm text-muted-foreground">{t(`${A}${!podeEditar && !somenteLeitura ? "semPermissao" : "tipoSemFicha"}`)}</p>
       )}
       {pedeEmpresa && (
         <div className="space-y-1.5">

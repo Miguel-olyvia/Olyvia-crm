@@ -14,20 +14,12 @@ export interface FaseGuia {
   estado: EstadoFase;
 }
 
-/** Uma linha do resumo de um passo: o rótulo já traduzido e o valor (`null`: nada guardado, o ecrã diz «Por preencher»). */
-export interface LinhaResumo {
-  rotulo: string;
-  valor: string | null;
-}
-
 export interface ItemChecklist {
   id: string;
   rotuloChave: string;
   feito: boolean;
   /** O que ficou registado neste passo, já em texto («Atendeu · interessado · 25/10/2026»); só existe quando o ecrã sabe o facto. */
   detalhe?: string;
-  /** O resumo de leitura do passo, em rótulo e valor; só existe quando o ecrã sabe ler o passo (`DadosDoGuia.resumos`). */
-  linhas?: readonly LinhaResumo[];
 }
 
 /** O que o ecrã sabe da pessoa e dos seus registos: só factos, para a lista de verificação (nada se inventa). */
@@ -46,8 +38,6 @@ export interface DadosDoGuia {
   ultimoResultado?: ResultadoContacto | null;
   /** O que ficou registado em cada item da lista, por id do item (`quemPede`, `chamada`...), já em texto; falta o que o ecrã não sabe. */
   detalhes?: Readonly<Record<string, string>>;
-  /** O resumo de leitura de cada item (rótulo e valor), por id do item; um item sem entrada não tem resumo e cai no `detalhe`. */
-  resumos?: Readonly<Record<string, readonly LinhaResumo[]>>;
 }
 
 export type EstadoAcaoGuia = "pronta" | "desativada" | "semAcao";
@@ -144,17 +134,14 @@ interface EntradaChecklist {
 function checklistDaFase(fase: string, { item, dados, passada }: EntradaChecklist): ItemChecklist[] {
   const feito = (id: string, ok: boolean): ItemChecklist => {
     const detalhe = dados.detalhes?.[id];
-    const linhas = dados.resumos?.[id];
-    return { id, rotuloChave: chave(`check.${id}`), feito: ok, ...(detalhe ? { detalhe } : {}), ...(linhas ? { linhas } : {}) };
+    return { id, rotuloChave: chave(`check.${id}`), feito: ok, ...(detalhe ? { detalhe } : {}) };
   };
-  // A qualificação não é um item da lista da fase atual (o assistente tem o seu passo): só entra, em leitura, numa fase já feita e se há o que ler.
-  const qualificacao = passada && dados.resumos?.qualificacao ? [feito("qualificacao", true)] : [];
   switch (fase) {
     case "porContactar":
       return [feito("quemPede", dados.nome.trim() !== ""), feito("contacto", dados.temContacto), feito("origem", dados.temOrigem)];
     case "contactado":
     case "contacto":
-      return [feito("chamada", dados.chamadas > 0 || passada), ...qualificacao, feito("visitaMarcada", dados.visitasAtivas > 0 || passada)];
+      return [feito("chamada", dados.chamadas > 0 || passada), feito("visitaMarcada", dados.visitasAtivas > 0 || passada)];
     case "visita":
       return [feito("visitaMarcada", dados.visitasAtivas > 0 || passada), feito("visitaFeita", item.visitaFeita || passada)];
     case "levantamento":

@@ -15,13 +15,15 @@ import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegoci
 import { todosOsBlocos } from "@/components/negocio-metas/questionarioForm";
 import { validarRespostas } from "@/components/negocio-metas/respostasQuestionario";
 import { alternarResposta, mudarResposta } from "@/components/negocio-metas/respostasVisita";
-import type { VisitaPessoa } from "@/components/negocio-metas/registosTipos";
+import type { LevantamentoPessoa, VisitaPessoa } from "@/components/negocio-metas/registosTipos";
 import { textoDoErroGravar } from "@/components/pessoas-processo/textoDoErroGravar";
+import { textoDiaCompleto } from "../formatoPessoas";
 import type { Pessoa } from "../pessoasTipos";
 import type { FaseFeita } from "../processo/passoGuiado";
 import { AssistenteDoGuia } from "./AssistenteDoGuia";
+import { levantamentoMaisRecente } from "./hidratarAssistente";
 import { passosDaVisita, seccoesDoAssistente } from "./modeloAssistente";
-import { SemNegocio } from "./PassosContacto";
+import { SemNegocio, SoLeitura } from "./PassosContacto";
 import { CorpoFechar, CorpoSeccao, CorpoVisitas } from "./PassosVisita";
 import type { PassoAssistente } from "./tiposAssistente";
 import { useAssistente } from "./useAssistente";
@@ -38,6 +40,8 @@ export interface VisitaDoGuiaProps {
   visitas: readonly VisitaPessoa[];
   /** O negócio já tem levantamento: é um por negócio, e já não se guarda outro aqui. */
   levantamentoGuardado: boolean;
+  /** Os levantamentos guardados deste negócio: com o rascunho do navegador já apagado, as secções e as medidas abrem com o que ficou na base. */
+  levantamentos?: readonly LevantamentoPessoa[];
   /** A ficha lida da base, com que se grava; `null` (o exemplo) não deixa guardar. */
   ficha: FichaDb | null;
   podeEditar: boolean;
@@ -50,11 +54,17 @@ export interface VisitaDoGuiaProps {
   nivel: "h2" | "h3";
   /** O que o guia mostra por baixo do passo (o prazo, a saúde do negócio...). */
   extra?: ReactNode;
+  /** Quando se VÊ esta fase já feita (o negócio avançou): os mesmos passos, preenchidos e só para ler, e nada se grava. */
+  fasePassada?: { id: string; aoVoltar: () => void };
+  /** Depois de trocar de fase vista: o foco vai para o título do passo ao montar. */
+  focarAoMontar?: boolean;
 }
 
 export function VisitaDoGuia(props: VisitaDoGuiaProps) {
+  // O texto das perguntas é o que a pessoa viu quando guardou (o questionário pode ter mudado entretanto).
+  const salvo = props.levantamentoGuardado ? levantamentoMaisRecente(props.levantamentos) : undefined;
   return (
-    <QuestionarioFormularioProvider>
+    <QuestionarioFormularioProvider gravadas={salvo?.rascunho.gravadas}>
       {/* A chave é só a pessoa: criar o negócio a meio não remonta o assistente (perdia o que se escreveu); o rascunho migra para a chave do negócio. */}
       <VisitaInterior key={props.pessoa.id} {...props} />
     </QuestionarioFormularioProvider>
@@ -62,9 +72,13 @@ export function VisitaDoGuia(props: VisitaDoGuiaProps) {
 }
 
 function VisitaInterior({
-  pessoa, negocio, visitas, levantamentoGuardado, ficha, podeEditar, aoCriarNegocio, aoMarcarOutra, faseRotuloChave, feitas, aoVerFase, nivel, extra,
+  pessoa, negocio, visitas, levantamentoGuardado, levantamentos, ficha, podeEditar: podeEditarNaFicha, aoCriarNegocio, aoMarcarOutra, faseRotuloChave, feitas, aoVerFase, nivel, extra,
+  fasePassada, focarAoMontar,
 }: VisitaDoGuiaProps) {
   const { t } = useTranslation();
+  // Numa fase feita nada se escreve, tenha a pessoa a permissão que tiver.
+  const podeEditar = podeEditarNaFicha && fasePassada === undefined;
+  const passada = fasePassada !== undefined;
   const { questionario, estado, repetir } = useQuestionario();
   // As visitas novas e o levantamento ficam ligados ao negócio, e o levantamento é sempre um novo (o que a pessoa tinha por ligar não se reescreve).
   const registos = useGuardarRegistos(ficha, { negocioId: negocio?.id ?? null, ignorarLevantamentoLivre: true });
@@ -77,20 +91,24 @@ function VisitaInterior({
   const [guardadoAgora, setGuardadoAgora] = useState(false);
   const [nadaNovo, setNadaNovo] = useState(false);
   const guardado = levantamentoGuardado || guardadoAgora;
+  // Guardado, o que se mostra é o que a base tem (o rascunho do navegador já foi apagado); sem levantamento lido, o que está em memória.
+  const salvo = levantamentoGuardado ? levantamentoMaisRecente(levantamentos) : undefined;
+  const vista = salvo ? { respostas: salvo.rascunho.respostas, linhas: salvo.rascunho.linhas, observacoes: salvo.rascunho.observacoes } : rascunho;
 
   const blocos = useMemo(() => todosOsBlocos(questionario), [questionario]);
-  const seccoes = useMemo(() => seccoesDoAssistente(questionario, rascunho.respostas, rascunho.linhas.length), [questionario, rascunho.respostas, rascunho.linhas.length]);
+  const seccoes = useMemo(() => seccoesDoAssistente(questionario, vista.respostas, vista.linhas.length), [questionario, vista.respostas, vista.linhas.length]);
   // Conta-se fora do memo: `visitas` pode ser um array novo em cada render, e o número é que interessa.
   const visitasMarcadas = visitas.filter((v) => v.estado !== "cancelada").length;
   const passos = useMemo(() => passosDaVisita({ visitas: visitasMarcadas, seccoes, guardado }), [visitasMarcadas, seccoes, guardado]);
   // Com o questionário a carregar não há secções: o passo inicial espera por ele (senão abria em «Fechar levantamento»).
-  const assistente = useAssistente(passos, { pronto: estado === "pronto" });
-  const errosRespostas = useMemo(() => validarRespostas(questionario, rascunho.respostas, "visita"), [questionario, rascunho.respostas]);
-  const errosMedidas = useMemo(() => validarLevantamento({ ...levantamentoVazio("", ""), linhas: rascunho.linhas }), [rascunho.linhas]);
+  const assistente = useAssistente(passos, { pronto: estado === "pronto", ...(passada ? { inicial: 0 } : {}) });
+  // Guardado já não se corrige: não há erros a mostrar num levantamento que se lê.
+  const errosRespostas = useMemo(() => (guardado ? {} : validarRespostas(questionario, rascunho.respostas, "visita")), [guardado, questionario, rascunho.respostas]);
+  const errosMedidas = useMemo(() => validarLevantamento({ ...levantamentoVazio("", ""), linhas: vista.linhas }), [vista.linhas]);
 
   const mudarLinhas = (linhas: LinhaForm[]): void => atualizar({ linhas });
   const medidas = {
-    linhas: rascunho.linhas, observacoes: rascunho.observacoes, erros: tentou ? { linhas: errosMedidas.linhas } : {},
+    linhas: vista.linhas, observacoes: vista.observacoes, erros: tentou && !guardado ? { linhas: errosMedidas.linhas } : {},
     acoes: {
       adicionarLinha: () => mudarLinhas([...rascunho.linhas, novaLinha(novoIdLocal())]),
       mudarLinha: (id: string, parcial: Partial<LinhaForm>) => mudarLinhas(rascunho.linhas.map((l) => {
@@ -140,11 +158,18 @@ function VisitaInterior({
   }
 
   const razaoDeNaoGuardar = ficha === null ? t(`${A}fechar.semFicha`) : !registos.pronto ? t(`${A}fechar.aCarregar`) : undefined;
-  const corpoQueGrava = (corpo: JSX.Element): JSX.Element => {
-    if (!negocio) return <SemNegocio aoCriar={aoCriarNegocio} />;
-    if (!podeEditar) return <p className="rounded-lg border border-border bg-muted/40 p-4 text-base text-foreground">{t("pessoasPagina.guia.razao.semPermissao")}</p>;
-    return corpo;
+  // Sem permissão, ou com o levantamento já guardado, mostra-se o MESMO ecrã do passo, preenchido e só para ler (e uma frase a dizer porquê).
+  const corpoQueGrava = (corpo: JSX.Element, fechadoPorGuardar = false): JSX.Element => {
+    if (!negocio) return <SemNegocio aoCriar={passada ? undefined : aoCriarNegocio} />;
+    const aviso = passada ? t("pessoasPagina.assistente.leitura.faseFeita") : !podeEditar ? t("pessoasPagina.guia.razao.semPermissao") : t(`${A}seccao.somenteLeitura`);
+    return <SoLeitura ativo={!podeEditar || fechadoPorGuardar} aviso={aviso}>{corpo}</SoLeitura>;
   };
+  const detalheDoGuardado: string[] = [];
+  if (salvo) {
+    const quando = textoDiaCompleto(salvo.data);
+    detalheDoGuardado.push(salvo.feitoPor ? t(`${A}fechar.guardadoPor`, { data: quando, quem: salvo.feitoPor }) : t(`${A}fechar.guardadoEm`, { data: quando }));
+    detalheDoGuardado.push(t(`${A}fechar.guardadoContagem`, { r: Object.values(salvo.rascunho.respostas).filter((v) => v !== "").length, m: salvo.rascunho.linhas.length }));
+  }
 
   const renderCorpo = (passo: PassoAssistente): JSX.Element => {
     if (passo.id === "visitas") {
@@ -160,25 +185,27 @@ function VisitaInterior({
       return corpoQueGrava(
         <CorpoFechar
           guardado={guardado} aGuardar={aGuardar} podeGuardar={razaoDeNaoGuardar === undefined} razao={razaoDeNaoGuardar} erro={erroGuardar} nadaNovo={nadaNovo}
-          aoGuardar={() => { void guardar(); }}
+          aoGuardar={() => { void guardar(); }} detalhe={detalheDoGuardado}
         />,
+        passada,
       );
     }
     const seccao = questionario.seccoes.find((s) => `seccao:${s.id}` === passo.id);
     if (!seccao) return <></>;
     return corpoQueGrava(
       <CorpoSeccao
-        seccao={seccao} respostas={rascunho.respostas} erros={errosRespostas} estado={estado} aoRepetir={repetir}
+        seccao={seccao} respostas={vista.respostas} erros={errosRespostas} estado={estado} aoRepetir={repetir}
         aoEscolher={(pergunta, opcao) => atualizar({ respostas: alternarResposta(blocos, rascunho.respostas, pergunta, opcao) })}
         aoEscrever={(pergunta, valor) => atualizar({ respostas: mudarResposta(blocos, rascunho.respostas, pergunta, valor) })}
         medidas={seccao.especial === "medidas" ? medidas : undefined}
       />,
+      guardado || passada,
     );
   };
 
   return (
     <AssistenteDoGuia
-      faseRotuloChave={faseRotuloChave} passos={passos} assistente={assistente} renderCorpo={renderCorpo} feitas={feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extra}
+      faseRotuloChave={faseRotuloChave} passos={passos} assistente={assistente} renderCorpo={renderCorpo} feitas={feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extra} fasePassada={fasePassada} focarAoMontar={focarAoMontar}
     />
   );
 }

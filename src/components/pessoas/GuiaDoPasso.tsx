@@ -4,8 +4,8 @@
 // também o título da ficha (`nomeEl`), os selos, o aviso de estado, a navegação entre pessoas, as ações secundárias (Email, Mais, atalhos) e a faixa
 // fina de alertas, todos passados pelo chamador.
 // Só apresentação: recebe o passo já calculado (`calcularPassoGuiado`) e os callbacks por props; não fala com a base. A coluna da esquerda mostra
-// sempre os passos da fase que se VÊ (a atual, ou uma feita escolhida em «Fases feitas»), e o centro, numa fase feita, lê o que ficou REGISTADO no
-// passo escolhido (nada se grava). «Anterior» recua uma fase e o botão primário passa a ser «Voltar ao passo atual». No telemóvel a coluna empilha
+// sempre os passos da fase que se VÊ (a atual, ou uma feita escolhida em «Fases feitas»), e o centro, numa fase feita, mostra o MESMO ecrã do passo
+// escolhido, preenchido e só para ler (o assistente, ou `leitura`); só os passos sem ecrã próprio ficam com o registo em texto (nada se grava). «Anterior» recua uma fase e o botão primário passa a ser «Voltar ao passo atual». No telemóvel a coluna empilha
 // por cima do centro.
 import { useContext, useEffect, useId, useRef, useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { ArrowLeft, ArrowRight, Loader2, MapPin, Phone, Target } from "lucide-react";
@@ -28,6 +28,16 @@ export interface CabecalhoGuia {
   linha?: string | null;
   telefone?: string | null;
   local?: string | null;
+}
+
+/** O que o guia dá ao assistente: abrir uma fase feita, o que se mostra por baixo, e qual fase feita se VÊ (`null`: a atual) com o caminho de volta. */
+export interface AberturaDoAssistente {
+  aoVerFase: (id: string) => void;
+  extra?: ReactNode;
+  faseVista: string | null;
+  aoVoltarAoAtual: () => void;
+  /** Verdadeiro depois de a pessoa trocar de fase vista: o assistente remonta e o foco tem de ir para o título do passo. */
+  focarAoMontar: boolean;
 }
 
 export interface GuiaDoPassoProps {
@@ -71,7 +81,12 @@ export interface GuiaDoPassoProps {
    * O assistente de passos (o Pipeline): no lugar da coluna e do centro quando se vê a fase atual. Recebe o que só o guia sabe, abrir uma fase feita
    * (que passa a ver-se em leitura, como sempre). Sem isto o guia desenha o «passo seguinte» de sempre.
    */
-  assistente?: (guia: { aoVerFase: (id: string) => void; extra?: ReactNode }) => ReactNode;
+  assistente?: (guia: AberturaDoAssistente) => ReactNode;
+  /**
+   * O MESMO ecrã de um passo, preenchido e só para ler, para os passos da lista que o assistente não cobre (os da fase Por contactar, na atual ou
+   * numa feita). Devolve `null` quando o passo não tem ecrã (os de documento): então vê-se o registo em texto.
+   */
+  leitura?: (passo: { faseId: string; itemId: string; faseFeita: boolean }) => ReactNode;
   /** O que acompanha o passo e não cabe no cabeçalho (a nota do fecho, o bloco de fecho): vai no fim da coluna do meio, a que rola em ecrã largo. */
   rodape?: ReactNode;
 }
@@ -151,11 +166,15 @@ interface CentroProps {
   extra?: ReactNode;
   /** O nível do título do passo: h3 na ficha (o nome da pessoa é o h2), h2 fora dela. */
   nivel: "h2" | "h3";
+  /** O ecrã do passo escolhido, preenchido e só para ler; sem ele (ou `null`) vê-se o registo em texto. */
+  leitura?: GuiaDoPassoProps["leitura"];
 }
 
 /** O centro: a fase, o título (h2, recebe o foco quando o passo muda), o subtítulo e o rodapé com «Anterior» e o botão primário. */
-function CentroDoGuia({ passo, vista, itemEscolhido, pedidoFoco, podeRecuar, aoVerAnterior, aoVoltarAoAtual, aoAcao, atributosAcao, explicacao, ocupado, extra, nivel }: CentroProps) {
+function CentroDoGuia({ passo, vista, itemEscolhido, pedidoFoco, podeRecuar, aoVerAnterior, aoVoltarAoAtual, aoAcao, atributosAcao, explicacao, ocupado, extra, nivel, leitura }: CentroProps) {
   const Titulo = nivel;
+  // O mesmo ecrã do passo escolhido, preenchido (numa fase feita sempre há um passo escolhido; na atual só se o utilizador o escolher).
+  const corpoDoPasso = itemEscolhido && leitura ? leitura({ faseId: vista ? vista.id : passo.faseId, itemId: itemEscolhido.id, faseFeita: vista !== null }) : null;
   const { t } = useTranslation();
   const idRazao = useId();
   const titulo = useRef<HTMLHeadingElement>(null);
@@ -179,8 +198,8 @@ function CentroDoGuia({ passo, vista, itemEscolhido, pedidoFoco, podeRecuar, aoV
         </Titulo>
         {!vista && <p className="text-base text-muted-foreground">{t(passo.subtituloChave)}</p>}
       </div>
-      {vista && <RegistoDoItem item={itemEscolhido} comTitulo={false} />}
-      {!vista && itemEscolhido && <RegistoDoItem item={itemEscolhido} />}
+      {vista && (corpoDoPasso ?? <RegistoDoItem item={itemEscolhido} comTitulo={false} />)}
+      {!vista && itemEscolhido && (corpoDoPasso ? <><p className="text-sm text-muted-foreground">{t(itemEscolhido.rotuloChave)}</p>{corpoDoPasso}</> : <RegistoDoItem item={itemEscolhido} />)}
       {!vendoAnterior && extra}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
         <Button type="button" variant="ghost" className={cn("min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground", FOCO)} disabled={!podeRecuar} onClick={aoVerAnterior}>
@@ -211,7 +230,7 @@ function CentroDoGuia({ passo, vista, itemEscolhido, pedidoFoco, podeRecuar, aoV
 
 export function GuiaDoPasso({
   passo, fases, cabecalho, cliente, acontecimentos, aoAcao, atributosAcao, explicacao, ocupado = false, acaoPerder, extra, tituloSecao,
-  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, assistente, rodape,
+  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, assistente, rodape, leitura,
 }: GuiaDoPassoProps) {
   const { t } = useTranslation();
   // O que vem por baixo do guia (o que o chamador passou e os painéis em linha da ficha) vive no fim da coluna do meio, a que rola em ecrã largo.
@@ -240,6 +259,14 @@ export function GuiaDoPasso({
   // Na ficha o nome da pessoa (o título do painel) é o h2: o resto desce um nível, sem saltos. Fora dela o guia é o ecrã.
   const naFicha = nomeEl !== undefined;
   const Seccao = naFicha ? "h3" : "h4";
+  // O assistente cobre a fase atual e as feitas que tem ecrã (devolve `null` nas outras: vê-se a coluna e o centro de sempre).
+  const doAssistente = passo && assistente
+    ? assistente({
+      aoVerFase: trocarVista, extra: fimDoCentro ? <>{extra}{fimDoCentro}</> : extra, faseVista: vista ? vista.id : null,
+      aoVoltarAoAtual: () => trocarVista(null), focarAoMontar: pedidoFoco > 0,
+    })
+    : null;
+  const comAssistente = doAssistente !== null && doAssistente !== undefined && doAssistente !== false;
   return (
     // Os painéis da ficha são consumidos só por este guia (o de topo): qualquer outro guia montado por baixo (um diálogo, o assistente) não os duplica.
     <RodapeGuiaContext.Provider value={null}>
@@ -258,8 +285,8 @@ export function GuiaDoPasso({
           duas colunas a partir de 768 px (o cliente por baixo, a toda a largura) e três a partir de 1024 px (coluna | passo | cliente). A ordem do DOM é a visual. */}
       {passo && tituloSecao && <Seccao className="sr-only">{tituloSecao}</Seccao>}
       <div className={cn("grid gap-4", GRELHA_DO_GUIA, passo && "md:grid-cols-[200px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)_270px]")}>
-        {passo && assistente && vista === null && assistente({ aoVerFase: verFase, extra: fimDoCentro ? <>{extra}{fimDoCentro}</> : extra })}
-        {passo && !(assistente && vista === null) && (
+        {comAssistente && doAssistente}
+        {passo && !comAssistente && (
           <>
             <div className={cn("md:self-start", LATERAL_FIXA)}>
               <ColunaDoGuia
@@ -272,7 +299,7 @@ export function GuiaDoPasso({
               <CentroDoGuia
                 passo={passo} vista={vista} itemEscolhido={itemEscolhido} pedidoFoco={pedidoFoco} podeRecuar={indiceVista > 0}
                 aoVerAnterior={() => trocarVista(feitas[indiceVista - 1]?.id ?? null)} aoVoltarAoAtual={() => trocarVista(null)}
-                aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra} nivel={naFicha ? "h3" : "h2"}
+                aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra} nivel={naFicha ? "h3" : "h2"} leitura={leitura}
               />
               {fimDoCentro && <div className="space-y-4 pt-4 md:px-2">{fimDoCentro}</div>}
             </div>

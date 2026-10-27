@@ -16,10 +16,12 @@ import { useDocumentosDoNegocio } from "@/components/pessoas-processo/Documentos
 import { ehPassoDeDocumento } from "@/components/pessoas-processo/documentosGuia";
 import { useLevantamentoDoNegocio } from "@/components/pessoas-processo/LevantamentoDoNegocioReal";
 import { ContactoDoGuia } from "./assistente/ContactoDoGuia";
+import { visitaMarcadaMaisRecente } from "./assistente/hidratarAssistente";
 import { VisitaDoGuia } from "./assistente/VisitaDoGuia";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import type { FaseDoNegocio } from "./fasesDoNegocio";
-import { GuiaDoPasso } from "./GuiaDoPasso";
+import { GuiaDoPasso, type AberturaDoAssistente } from "./GuiaDoPasso";
+import { leituraDoPasso } from "./assistente/LeituraDoContacto";
 import { acontecimentosDoGuia, clienteDoGuia, dadosDoGuia } from "./guiaDados";
 import { useMarcarVisita, type AberturaVisita } from "./marcarVisitaContexto";
 import { moradaDaLead } from "./moradaVisita";
@@ -104,29 +106,48 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
       pessoaId: pessoa.id, nome: pessoa.nome, moradaLead: moradaDaLead(pessoa), negocioId: negocio.id, ...(preparar ? { preparar } : {}),
     })
     : undefined;
-  const assistente = doPasso && pessoa && itemGuia?.fase === "contactado"
-    ? ({ aoVerFase, extra: extraDoGuia }: { aoVerFase: (id: string) => void; extra?: ReactNode }) => (
-      <ContactoDoGuia
-        pessoa={pessoa} negocio={{ id: negocio.id, pedidoCliente: negocio.pedidoCliente, qualificacaoGravada: negocio.qualificacaoGravada }}
-        chamadas={ligados.contactos} visitaMarcada={ligados.visitasMarcadas > 0} ultimoResultado={dadosDoGuia(pessoa, doNegocio).ultimoResultado}
-        podeEditar={podeEditar} podeRegistarChamada={aoRegistarChamada !== undefined} aoRegistarChamada={(origem) => aoRegistarChamada?.(origem)}
-        aoMarcarVisita={abrirAgenda ? (preparar) => abrirAgenda(preparar) : undefined}
-        faseRotuloChave={doPasso.faseRotuloChave} feitas={doPasso.feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia}
-      />
-    )
-    : doPasso && pessoa && doPasso.passo === "fazerLevantamento"
-    ? ({ aoVerFase, extra: extraDoGuia }: { aoVerFase: (id: string) => void; extra?: ReactNode }) => (
-      <VisitaDoGuia
-        pessoa={pessoa} negocio={{ id: negocio.id }} visitas={doNegocio.visitas} levantamentoGuardado={doNegocio.levantamentos.length > 0 || Boolean(negocio.levantamento)}
-        ficha={levantamento?.ficha ?? null} podeEditar={podeEditar}
-        aoMarcarOutra={abrirAgenda ? () => abrirAgenda() : undefined}
-        faseRotuloChave={doPasso.faseRotuloChave} feitas={doPasso.feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia}
-      />
-    )
+  // Qual assistente abre: numa fase feita que se VÊ, o dessa fase (só para ler); senão o da fase atual (Contactado, ou a Visita/Levantamento).
+  const assistenteDe = (faseVista: string | null): "contacto" | "visita" | null => {
+    if (faseVista !== null) return faseVista === "contactado" || faseVista === "contacto" ? "contacto" : faseVista === "visita" ? "visita" : null;
+    return itemGuia?.fase === "contactado" ? "contacto" : doPasso?.passo === "fazerLevantamento" ? "visita" : null;
+  };
+  const assistente = doPasso && pessoa
+    ? ({ aoVerFase, extra: extraDoGuia, faseVista, aoVoltarAoAtual, focarAoMontar }: AberturaDoAssistente): ReactNode => {
+      const qual = assistenteDe(faseVista);
+      if (qual === null) return null;
+      const feita = faseVista !== null ? doPasso.feitas.find((f) => f.id === faseVista) : undefined;
+      // Uma fase feita que o guia não tem entre as suas (não devia acontecer) fica com a leitura de sempre.
+      if (faseVista !== null && !feita) return null;
+      const fasePassada = feita ? { id: feita.id, aoVoltar: aoVoltarAoAtual } : undefined;
+      const rotulo = feita ? feita.rotuloChave : doPasso.faseRotuloChave;
+      // A chave separa a fase atual de cada fase feita: o passo escolhido e o que se escreveu não passam de uma para a outra.
+      return qual === "contacto" ? (
+        <ContactoDoGuia
+          key={faseVista ?? "atual"} fasePassada={fasePassada} focarAoMontar={focarAoMontar}
+          pessoa={pessoa} negocio={{ id: negocio.id, pedidoCliente: negocio.pedidoCliente, qualificacaoGravada: negocio.qualificacaoGravada }}
+          chamadas={ligados.contactos} historicoChamadas={doNegocio.contactos} visita={visitaMarcadaMaisRecente(doNegocio.visitas)} visitaMarcada={ligados.visitasMarcadas > 0} ultimoResultado={dadosDoGuia(pessoa, doNegocio).ultimoResultado}
+          podeEditar={podeEditar} podeRegistarChamada={aoRegistarChamada !== undefined} aoRegistarChamada={(origem) => aoRegistarChamada?.(origem)}
+          aoMarcarVisita={abrirAgenda ? (preparar) => abrirAgenda(preparar) : undefined}
+          faseRotuloChave={rotulo} feitas={doPasso.feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia}
+        />
+      ) : (
+        <VisitaDoGuia
+          key={faseVista ?? "atual"} fasePassada={fasePassada} focarAoMontar={focarAoMontar}
+          pessoa={pessoa} negocio={{ id: negocio.id }} visitas={doNegocio.visitas} levantamentoGuardado={doNegocio.levantamentos.length > 0 || Boolean(negocio.levantamento)} levantamentos={doNegocio.levantamentos}
+          ficha={levantamento?.ficha ?? null} podeEditar={podeEditar}
+          aoMarcarOutra={abrirAgenda ? () => abrirAgenda() : undefined}
+          faseRotuloChave={rotulo} feitas={doPasso.feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia}
+        />
+      );
+    }
+    : undefined;
+  // Os passos da fase Por contactar não têm assistente: o centro mostra o MESMO ecrã do passo, preenchido, e não uma lista de rótulo e valor.
+  const leitura = pessoa
+    ? (p: { faseId: string; itemId: string; faseFeita: boolean }): ReactNode => leituraDoPasso(pessoa, p)
     : undefined;
   return (
     <GuiaDoPasso
-      passo={doPasso} fases={fasesDoGuia} aoAcao={aoAcao} atributosAcao={acao.atributos} acaoPerder={acaoPerder} assistente={assistente}
+      passo={doPasso} fases={fasesDoGuia} aoAcao={aoAcao} atributosAcao={acao.atributos} acaoPerder={acaoPerder} assistente={assistente} leitura={leitura}
       explicacao={acao.bloqueio && acao.idBloqueio ? { id: acao.idBloqueio, texto: acao.bloqueio } : null}
       cabecalho={{ nome: pessoa?.nome ?? negocio.pessoa, linha: negocio.servico, telefone: cliente.telefone, local }} cliente={cliente} acontecimentos={acontecimentos}
       tituloSecao={t("pessoasPagina.deal.next")} tituloRef={tituloRef} {...cabecalhoFicha} faixa={faixa ?? cabecalhoFicha?.faixa} rodape={rodape}

@@ -12,7 +12,7 @@ import { useGuardarNifPessoa } from "@/hooks/pessoas/useGuardarNifPessoa";
 import { useGuardarIdentidadePessoa } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
 import { compactar, formularioInicial, pedidoDeIdentidade, type FormularioIdentidade, type IdentidadeAtual } from "@/components/pessoas-lista/identidadeFormulario";
 import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto";
-import { MORADA_VAZIA, validarCodigoPostal, type ChaveMorada, type MoradaObraForm, type OrigemMoradaObra } from "@/components/negocio-metas/moradaObra";
+import { MORADA_VAZIA, temMorada, validarCodigoPostal, type ChaveMorada, type MoradaObraForm, type OrigemMoradaObra } from "@/components/negocio-metas/moradaObra";
 import { blocosDaQualificacao } from "@/components/negocio-metas/questionarioForm";
 import { chavesDaAba, respostasDeGravadas, validarRespostas, type RespostaGravada } from "@/components/negocio-metas/respostasQuestionario";
 import { alternarResposta, contarRespostas, mudarResposta } from "@/components/negocio-metas/respostasVisita";
@@ -20,6 +20,8 @@ import type { Respostas } from "@/components/negocio-metas/perguntasTipos";
 import { formularioDeContacto, pedidoDeContacto, type FormularioContacto } from "@/components/pessoas-lista/contactoFormulario";
 import { entradaQualificacao } from "@/components/pessoas-processo/entradaQualificacao";
 import { textoDoErroGravar } from "@/components/pessoas-processo/textoDoErroGravar";
+import type { ContactoPessoa, VisitaPessoa } from "@/components/negocio-metas/registosTipos";
+import { textoDiaCompleto } from "../formatoPessoas";
 import type { AberturaVisita } from "../marcarVisitaContexto";
 import type { Pessoa, ResultadoContacto } from "../pessoasTipos";
 import type { FaseFeita } from "../processo/passoGuiado";
@@ -29,8 +31,9 @@ import { comAvisoDeParcial } from "./comAvisoDeParcial";
 import { guardarContactoDaPessoa } from "./guardarContactoDaPessoa";
 import type { CampoQuemPede } from "./GrupoQuemPede";
 import { pedidoDeNif, tipoIdentidadeDe } from "./quemPedeFormulario";
+import { moradaHidratada, prepararHidratado } from "./hidratarAssistente";
 import { passosDoContacto } from "./modeloAssistente";
-import { CorpoChamada, CorpoMarcar, CorpoMorada, CorpoPreparar, CorpoQualificacao, SemNegocio } from "./PassosContacto";
+import { CorpoChamada, CorpoMarcar, CorpoMorada, CorpoPreparar, CorpoQualificacao, SemNegocio, SoLeitura } from "./PassosContacto";
 import type { PassoAssistente } from "./tiposAssistente";
 import { useAssistente } from "./useAssistente";
 import { useRascunhoAssistente } from "./useRascunhoAssistente";
@@ -52,7 +55,11 @@ export interface ContactoDoGuiaProps {
   /** Sem negócio, os passos que gravam nele mostram a razão e «Criar o negócio». */
   negocio: NegocioDoAssistente | null;
   chamadas: number;
+  /** As chamadas registadas ao negócio: o passo «Chamada» mostra-as (dia, hora, resultado e nota). */
+  historicoChamadas?: readonly ContactoPessoa[];
   visitaMarcada: boolean;
+  /** A visita marcada do negócio (a mais recente que não foi cancelada): sem rascunho, «Preparar a visita», a morada e «Marcar a visita» abrem com o que ela tem. */
+  visita?: VisitaPessoa | null;
   /** O resultado da última chamada: «Sem interesse» e «Número errado» avisam e travam só «Marcar a visita» (outra chamada regista-se sempre). */
   ultimoResultado?: ResultadoContacto | null;
   /** Pode escrever na pessoa e no negócio. */
@@ -68,6 +75,10 @@ export interface ContactoDoGuiaProps {
   nivel: "h2" | "h3";
   /** O que o guia mostra por baixo do passo (o prazo, «Alterar prazo»...). */
   extra?: ReactNode;
+  /** Quando se VÊ esta fase já feita (o negócio avançou): os mesmos passos, preenchidos e só para ler, e nada se grava. */
+  fasePassada?: { id: string; aoVoltar: () => void };
+  /** Depois de trocar de fase vista: o foco vai para o título do passo ao montar. */
+  focarAoMontar?: boolean;
 }
 
 export function ContactoDoGuia(props: ContactoDoGuiaProps) {
@@ -83,15 +94,25 @@ export function ContactoDoGuia(props: ContactoDoGuiaProps) {
 const moradaDaEntidade = (p: Pessoa): MoradaObraForm | null => (p.moradaCampos ? { ...p.moradaCampos } : null);
 
 function ContactoInterior({
-  pessoa, negocio, chamadas, visitaMarcada, ultimoResultado, podeEditar, podeRegistarChamada, aoRegistarChamada, aoCriarNegocio, aoMarcarVisita, faseRotuloChave, feitas, aoVerFase, nivel, extra,
+  pessoa, negocio, chamadas, historicoChamadas, visitaMarcada, visita, ultimoResultado, podeEditar: podeEditarNaFicha, podeRegistarChamada, aoRegistarChamada, aoCriarNegocio, aoMarcarVisita, faseRotuloChave, feitas, aoVerFase, nivel, extra,
+  fasePassada, focarAoMontar,
 }: ContactoDoGuiaProps) {
   const { t } = useTranslation();
+  // Numa fase feita nada se escreve, tenha a pessoa a permissão que tiver.
+  const podeEditar = podeEditarNaFicha && fasePassada === undefined;
   const { questionario, estado, repetir } = useQuestionario();
   const qualificacao = useGuardarQualificacao();
   const { guardar: substituir } = useSubstituirContactoPessoa(pessoa.id);
   const { guardar: preferencias } = useGuardarContactoPessoa(pessoa.id);
   const [rascunho, atualizar] = useRascunhoAssistente(negocio?.id ?? `pessoa-${pessoa.id}`);
   const idDoNegocio = negocio?.id ?? null;
+  // O que se mostra em «Preparar a visita» e na morada: o rascunho, campo a campo, e o que falta vem da visita já marcada.
+  // «Tocado» separa «nunca mexeu» de «apagou de propósito»: depois de a pessoa escrever (ou esvaziar) um campo, a visita deixa de repor o valor.
+  // Parte de «tocado» se o rascunho guardado já tem alguma coisa nesse passo (o ecrã voltou a montar a meio).
+  const preparaTocado = useRef(rascunho.preparar.duracao !== "" || rascunho.preparar.quem !== "" || rascunho.preparar.nota !== "");
+  const moradaTocada = useRef(temMorada(rascunho.morada));
+  const preparar = useMemo(() => prepararHidratado(rascunho.preparar, visita ?? null, preparaTocado.current), [rascunho.preparar, visita]);
+  const morada = useMemo(() => moradaHidratada(rascunho.morada, visita ?? null, moradaTocada.current), [rascunho.morada, visita]);
 
   // Chamada: o formulário parte do que a pessoa tem; depois de gravar, a ficha refaz-se e o «atual» acompanha.
   const atualContacto = useMemo(() => ({
@@ -99,6 +120,11 @@ function ContactoInterior({
   }), [pessoa.contacto.telefone, pessoa.contacto.email, pessoa.contactoPreferido, pessoa.horaPreferida, pessoa.lingua]);
   const [contacto, setContacto] = useState<FormularioContacto>(() => formularioDeContacto(atualContacto));
   const [erroCampo, setErroCampo] = useState<"email" | "telefone" | CampoQuemPede | null>(null);
+  // Se a ficha chega (ou se refaz) depois de montar, o formulário acompanha-a, a não ser que a pessoa já tenha mexido nele.
+  const contactoTocado = useRef(false);
+  useEffect(() => {
+    if (!contactoTocado.current) setContacto(formularioDeContacto(atualContacto));
+  }, [atualContacto]);
 
   // Quem pede: o tipo de cliente e o NIF, gravados pelos hooks próprios. O NIF abre vazio (nunca se lê da base) e só se grava o que se tocou.
   const { guardar: guardarNif } = useGuardarNifPessoa(pessoa.id);
@@ -149,14 +175,20 @@ function ContactoInterior({
 
   const passos = useMemo(() => passosDoContacto({
     chamadas, visitaMarcada, perguntas: contagem,
-    morada: rascunho.morada, preparar: { duracao: rascunho.preparar.duracao, quem: rascunho.preparar.quem },
-  }), [chamadas, visitaMarcada, contagem, rascunho.morada, rascunho.preparar.duracao, rascunho.preparar.quem]);
+    morada, preparar: { duracao: preparar.duracao, quem: preparar.quem },
+  }), [chamadas, visitaMarcada, contagem, morada, preparar.duracao, preparar.quem]);
   // Com o questionário a carregar não há perguntas (a Qualificação contava como completa): o passo inicial espera por ele.
-  const assistente = useAssistente(passos, { pronto: estado === "pronto" });
+  const assistente = useAssistente(passos, { pronto: estado === "pronto", ...(fasePassada ? { inicial: 0 } : {}) });
 
-  const mudarMorada = (chave: ChaveMorada, valor: string): void => atualizar({ morada: { ...rascunho.morada, [chave]: valor }, moradaOrigem: "manual" });
-  const preencherMorada = (morada: MoradaObraForm, origem: OrigemMoradaObra): void => atualizar({ morada: { ...morada }, moradaOrigem: origem });
-  const erroCodigoPostal = validarCodigoPostal(rascunho.morada.codigoPostal) !== null;
+  const mudarMorada = (chave: ChaveMorada, valor: string): void => {
+    moradaTocada.current = true;
+    atualizar({ morada: { ...morada, [chave]: valor }, moradaOrigem: "manual" });
+  };
+  const preencherMorada = (morada: MoradaObraForm, origem: OrigemMoradaObra): void => {
+    moradaTocada.current = true;
+    atualizar({ morada: { ...morada }, moradaOrigem: origem });
+  };
+  const erroCodigoPostal = validarCodigoPostal(morada.codigoPostal) !== null;
 
   /** Valida o que se escreveu em «Quem pede» antes de gravar fosse o que fosse: o campo em falta e a mensagem, ou os pedidos a fazer. */
   function validarQuemPede() {
@@ -186,6 +218,7 @@ function ContactoInterior({
       let gravou = false;
       if (pedidoContacto.estado === "guardar") {
         await guardarContactoDaPessoa(pedidoContacto.dados, { substituir, preferencias });
+        contactoTocado.current = false;
         gravou = true;
       }
       const { tipo, nif: pedidoNif } = quem;
@@ -234,25 +267,31 @@ function ContactoInterior({
     return null;
   };
 
+  // Sem permissão mostra-se o MESMO ecrã do passo, preenchido e só para ler (e uma frase a dizer porquê), e não só a frase.
+  const aviso = fasePassada ? t("pessoasPagina.assistente.leitura.faseFeita") : t("pessoasPagina.guia.razao.semPermissao");
   const corpoQueGrava = (corpo: JSX.Element): JSX.Element => {
-    if (!negocio) return <SemNegocio aoCriar={aoCriarNegocio} />;
-    if (!podeEditar) return <p className="rounded-lg border border-border bg-muted/40 p-4 text-base text-foreground">{t("pessoasPagina.guia.razao.semPermissao")}</p>;
-    return corpo;
+    if (!negocio) return <SemNegocio aoCriar={fasePassada ? undefined : aoCriarNegocio} />;
+    return <SoLeitura ativo={!podeEditar} aviso={aviso}>{corpo}</SoLeitura>;
   };
+  const quandoDaVisita = visita ? [textoDiaCompleto(visita.data), visita.hora, visita.feitoPor].filter(Boolean).join(" · ") : undefined;
 
   const renderCorpo = (passo: PassoAssistente): JSX.Element => {
     switch (passo.id) {
       case "chamada":
         return (
-          <CorpoChamada
-            chamadas={chamadas} form={contacto} aoMudar={(parcial) => { setErroCampo(null); setContacto((f) => ({ ...f, ...parcial })); }}
-            podeEditar={podeEditar} erroCampo={erroCampo} aoRegistar={aoRegistarChamada} podeRegistar={podeRegistarChamada}
-            quemPede={{
-              form: quemPede, tipoAtual, nif, nifUltimos3: pessoa.nifUltimos3 ?? null, nifRegistado: Boolean(pessoa.nifUltimos3 || pessoa.temNif),
-              aoMudarForm: (parcial) => { setErroCampo(null); reporAposGravar.current = false; setQuemPede((f) => ({ ...f, ...parcial })); },
-              aoMudarNif: (valor) => { setErroCampo(null); setNifTocado(true); setNif(valor); },
-            }}
-          />
+          <SoLeitura ativo={fasePassada !== undefined} aviso={aviso}>
+            <CorpoChamada
+              chamadas={chamadas} historico={historicoChamadas} form={contacto}
+              aoMudar={(parcial) => { setErroCampo(null); contactoTocado.current = true; setContacto((f) => ({ ...f, ...parcial })); }}
+              podeEditar={podeEditar} erroCampo={erroCampo} aoRegistar={aoRegistarChamada} podeRegistar={podeRegistarChamada && fasePassada === undefined}
+              quemPede={{
+                form: quemPede, tipoAtual, nif, nifUltimos3: pessoa.nifUltimos3 ?? null, nifRegistado: Boolean(pessoa.nifUltimos3 || pessoa.temNif),
+                aoMudarForm: (parcial) => { setErroCampo(null); reporAposGravar.current = false; setQuemPede((f) => ({ ...f, ...parcial })); },
+                aoMudarNif: (valor) => { setErroCampo(null); setNifTocado(true); setNif(valor); },
+                somenteLeitura: fasePassada !== undefined,
+              }}
+            />
+          </SoLeitura>
         );
       case "qualificacao":
         return corpoQueGrava((
@@ -265,18 +304,18 @@ function ContactoInterior({
       case "morada":
         return corpoQueGrava((
           <CorpoMorada
-            morada={rascunho.morada ?? MORADA_VAZIA} origem={rascunho.moradaOrigem} aoMudar={mudarMorada} aoPreencherDe={preencherMorada}
+            morada={morada ?? MORADA_VAZIA} origem={rascunho.moradaOrigem} aoMudar={mudarMorada} aoPreencherDe={preencherMorada}
             moradaEntidade={moradaDaEntidade(pessoa)} erroCodigoPostal={erroCodigoPostal}
           />
         ));
       case "preparar":
-        return corpoQueGrava(<CorpoPreparar valor={rascunho.preparar} aoMudar={(parcial) => atualizar({ preparar: { ...rascunho.preparar, ...parcial } })} />);
+        return corpoQueGrava(<CorpoPreparar valor={preparar} aoMudar={(parcial) => { preparaTocado.current = true; atualizar({ preparar: { ...preparar, ...parcial } }); }} />);
       default:
         return (
           <CorpoMarcar
-            preparar={rascunho.preparar} marcada={visitaMarcada} podeMarcar={aoMarcarVisita !== undefined && podeEditar}
+            preparar={preparar} marcada={visitaMarcada} quando={quandoDaVisita} podeMarcar={aoMarcarVisita !== undefined && podeEditar}
             razaoBloqueio={ultimoResultado === "semInteresse" || ultimoResultado === "numeroErrado" ? t(`pessoasPagina.guia.razao.${ultimoResultado}`) : undefined}
-            aoMarcar={(origem) => aoMarcarVisita?.({ duracao: rascunho.preparar.duracao, quemVaiEstar: rascunho.preparar.quem, nota: rascunho.preparar.nota }, origem)}
+            aoMarcar={(origem) => aoMarcarVisita?.({ duracao: preparar.duracao, quemVaiEstar: preparar.quem, nota: preparar.nota }, origem)}
           />
         );
     }
@@ -285,7 +324,7 @@ function ContactoInterior({
   return (
     <AssistenteDoGuia
       faseRotuloChave={faseRotuloChave} passos={passos} assistente={assistente} renderCorpo={renderCorpo} aoContinuar={aoContinuar}
-      feitas={feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extra}
+      feitas={feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extra} fasePassada={fasePassada} focarAoMontar={focarAoMontar}
     />
   );
 }
