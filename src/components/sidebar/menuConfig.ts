@@ -181,11 +181,12 @@ export const menuSections: MenuSection[] = [
     id: "crm",
     icon: UsersRound,
     labelKey: "sidebar.crm",
-    paths: ["/pessoas", "/pipeline", "/leads/pending-submissions"],
+    paths: ["/pessoas", "/pipeline", "/negocios", "/leads/pending-submissions"],
     permissions: ["pessoas.view", "platform.pending_submissions.view"],
     items: [
       { to: "/pessoas", icon: UsersRound, labelKey: "sidebar.people", permission: "pessoas.view", requiresNegociosAtivos: true },
-      { to: "/pipeline", icon: Target, labelKey: "sidebar.pipeline", permission: "pessoas.view", requiresNegociosAtivos: true },
+      // Emylia (decisão 11, 27/10): os Negócios da Emylia desde a lead; o Pipeline do RH continua em /pipeline, pelo endereço
+      { to: "/negocios", icon: Target, labelKey: "sidebar.negociosEmylia", permission: "pessoas.view", requiresNegociosAtivos: true },
       { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "platform.pending_submissions.view" },
     ],
   },

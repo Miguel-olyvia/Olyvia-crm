@@ -72,6 +72,7 @@ const StockCounts = lazy(() => import("./pages/StockCounts"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
 const Services = lazy(() => import("./pages/Services"));
 const CatalogoCustos = lazy(() => import("./pages/CatalogoCustos"));
+const NegociosEmylia = lazy(() => import("./pages/NegociosEmylia"));
 const ServiceCategories = lazy(() => import("./pages/ServiceCategories"));
 const ServiceSubcategories = lazy(() => import("./pages/ServiceSubcategories"));
 const ServiceCatalogItems = lazy(() => import("./pages/ServiceCatalogItems"));
@@ -294,6 +295,7 @@ const App = () => (
                       <Route path="/leads" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasCrm /></PessoasRota></ProtectedRoute>} />
                       <Route path="/pipeline" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasPipeline /></PessoasRota></ProtectedRoute>} />
+                      <Route path="/negocios" element={<ProtectedRoute permission="pessoas.view"><NegociosEmylia /></ProtectedRoute>} />
                       <Route path="/utilizadores-perfis" element={<ProtectedRoute permission="users.view"><UtilizadoresPerfis /></ProtectedRoute>} />
                       {/* Uma só rota (`:id?`): abrir e fechar a ficha muda o endereço PELO ROUTER sem remontar a página. */}
                       <Route path="/rh-exemplo/pessoas/:id?" element={<ProtectedRoute permission="users.view"><PessoaRhDetalhe /></ProtectedRoute>} />

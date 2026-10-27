@@ -1,0 +1,36 @@
+// CRM: lê o Catálogo e custos da organização (cat_ler_catalogo), monta-o e põe-o onde o motor e os ecrãs da Emylia o leem
+// (as stores dos custos e do Catálogo, o Catálogo inteiro, os técnicos e os serviços e as margens do Estado). Usam-no a página do
+// Catálogo e a dos Negócios. Devolve o "antes" das comparações (para gravar o que mudar no Catálogo) e os ids dos serviços.
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { seed, type Estado } from "../motor";
+import { aplicarTodos } from "../v2/custosModelo";
+import { catalogo0 } from "../v2/catalogoModelo";
+import { ligarCustos } from "../v2/custosStore";
+import { porCatalogo } from "../v2/catalogoStore";
+import { substituirCatalogoTodo } from "../catalogo";
+import { usarTecnicos } from "../equipa/tecnicos";
+import { montarCatalogo, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
+import { lerCatalogo } from "./lerCatalogo";
+import { fotografar, type FotoCatalogo } from "./gravarCatalogo";
+
+export interface CatalogoCarregado { org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo }
+
+/** Põe o Catálogo montado nas stores e no Estado; devolve o "antes" das comparações. */
+export function aplicarCatalogo(org: string, M: CatalogoMontado, produtos: LinhaProduto[], S: Estado): CatalogoCarregado {
+  substituirCatalogoTodo(M.itens);
+  usarTecnicos(M.tecnicos);
+  for (const k of Object.keys(S.svc)) if (!M.svc[k]) delete S.svc[k];
+  Object.assign(S.svc, M.svc);
+  S.cfg.min = M.margens.min;
+  S.cfg.alvo = M.margens.alvo;
+  ligarCustos({ custos: M.C });
+  porCatalogo(M.K);
+  aplicarTodos(S, M.C);
+  return { org, M, produtos, foto: fotografar({ C: M.C, K: M.K, svc: S.svc, margens: M.margens }) };
+}
+
+/** Lê da base e aplica. */
+export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estado): Promise<CatalogoCarregado> {
+  const L = await lerCatalogo(sb, org);
+  return aplicarCatalogo(org, montarCatalogo(L, catalogo0(), seed().svc), L.produtos, S);
+}

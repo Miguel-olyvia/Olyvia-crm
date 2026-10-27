@@ -7,13 +7,14 @@ const crm = menuSections.find((s) => s.id === "crm")!;
 const item = (to: string) => crm.items.find((i) => i.to === to)!;
 
 describe("menuConfig: o grupo CRM (Pessoas e Pipeline)", () => {
-  it("tem Pessoas, Pipeline e a fila de submissões, e já não tem Leads nem Clientes", () => {
-    expect(crm.items.map((i) => i.to)).toEqual(["/pessoas", "/pipeline", "/leads/pending-submissions"]);
+  // 27/10 (Emylia, decisão 11): o item do Pipeline passou a ser o dos Negócios da Emylia (/negocios); /pipeline continua pelo endereço
+  it("tem Pessoas, Negócios e a fila de submissões, e já não tem Leads nem Clientes", () => {
+    expect(crm.items.map((i) => i.to)).toEqual(["/pessoas", "/negocios", "/leads/pending-submissions"]);
   });
 
-  it("Pessoas e Pipeline pedem pessoas.view e o interruptor da organização", () => {
+  it("Pessoas e Negócios pedem pessoas.view e o interruptor da organização", () => {
     expect(item("/pessoas")).toMatchObject({ permission: "pessoas.view", requiresNegociosAtivos: true });
-    expect(item("/pipeline")).toMatchObject({ permission: "pessoas.view", requiresNegociosAtivos: true, labelKey: "sidebar.pipeline" });
+    expect(item("/negocios")).toMatchObject({ permission: "pessoas.view", requiresNegociosAtivos: true, labelKey: "sidebar.negociosEmylia" });
   });
 
   it("a fila de submissões fica como estava, sem o interruptor", () => {

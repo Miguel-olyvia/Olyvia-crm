@@ -6,17 +6,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { seed, type Estado } from "@/emylia/motor";
-import { aplicarTodos } from "@/emylia/v2/custosModelo";
-import { catalogo0 } from "@/emylia/v2/catalogoModelo";
-import { ligarCustos, lerCustos, useCustos } from "@/emylia/v2/custosStore";
-import { lerCatalogo as lerCatalogoStore, porCatalogo, useCatalogo } from "@/emylia/v2/catalogoStore";
-import { substituirCatalogoTodo } from "@/emylia/catalogo";
-import { usarTecnicos } from "@/emylia/equipa/tecnicos";
+import { lerCustos, useCustos } from "@/emylia/v2/custosStore";
+import { lerCatalogo as lerCatalogoStore, useCatalogo } from "@/emylia/v2/catalogoStore";
 import { CatalogoV1 } from "@/emylia/CatalogoV1";
 import type { Ctx } from "@/emylia/pecas";
-import { montarCatalogo, type CatalogoMontado, type LinhaProduto } from "@/emylia/real/catalogoReal";
-import { lerCatalogo } from "@/emylia/real/lerCatalogo";
-import { diferencasCatalogo, executarCatalogo, fotografar, type FotoCatalogo, type Rpc } from "@/emylia/real/gravarCatalogo";
+import { carregarCatalogo, type CatalogoCarregado } from "@/emylia/real/carregarCatalogo";
+import { diferencasCatalogo, executarCatalogo, fotografar, type Rpc } from "@/emylia/real/gravarCatalogo";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
@@ -27,22 +22,7 @@ const rpc: Rpc = async (fn, args) => {
   return { data, error };
 };
 
-interface Base { org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo }
-
-/** Põe o Catálogo lido nas stores e no Estado da página; devolve o "antes" das comparações. */
-function aplicar(org: string, M: CatalogoMontado, produtos: LinhaProduto[], S: Estado): Base {
-  substituirCatalogoTodo(M.itens);
-  usarTecnicos(M.tecnicos);
-  for (const k of Object.keys(S.svc)) if (!M.svc[k]) delete S.svc[k];
-  Object.assign(S.svc, M.svc);
-  S.cfg.min = M.margens.min;
-  S.cfg.alvo = M.margens.alvo;
-  const dono = { custos: M.C };
-  ligarCustos(dono);
-  porCatalogo(M.K);
-  aplicarTodos(S, M.C);
-  return { org, M, produtos, foto: fotografar({ C: M.C, K: M.K, svc: S.svc, margens: M.margens }) };
-}
+type Base = CatalogoCarregado;
 
 export default function CatalogoCustos() {
   const { activeCompany, isLoading } = useCompany();
@@ -56,9 +36,7 @@ export default function CatalogoCustos() {
   const aGravar = useRef(false);
 
   const carregar = useCallback(async (o: string) => {
-    const L = await lerCatalogo(supabase, o);
-    const M = montarCatalogo(L, catalogo0(), seed().svc);
-    base.current = aplicar(o, M, L.produtos, S);
+    base.current = await carregarCatalogo(supabase, o, S);
     setTique((t) => t + 1);
   }, [S]);
 

@@ -104,18 +104,18 @@ describe("menu: o item «Pessoas»", () => {
     [{ ativo: false }],
     [{ ativo: false, isLoading: true }],
     [{ ativo: false, isError: true, erroSemResposta: true }],
-  ])("sem interruptor nem Pessoas nem Pipeline, e Leads e Clientes já não existem (%j)", (negocios) => {
+  ])("sem interruptor nem Pessoas nem Negócios, e Leads e Clientes já não existem (%j)", (negocios) => {
     preparar(TODAS, negocios);
     expect(tem("Pessoas")).toBe(false);
-    expect(tem("Pipeline")).toBe(false);
+    expect(tem("Negócios")).toBe(false);
     expect(tem("Leads")).toBe(false);
     expect(tem("Clientes")).toBe(false);
   });
 
-  it("com pessoas.view e o interruptor ligado aparecem Pessoas e Pipeline, sem Leads nem Clientes", () => {
+  it("com pessoas.view e o interruptor ligado aparecem Pessoas e Negócios (o da Emylia, 27/10), sem Leads nem Clientes", () => {
     preparar(TODAS, { ativo: true });
     expect(tem("Pessoas")).toBe(true);
-    expect(tem("Pipeline")).toBe(true);
+    expect(tem("Negócios")).toBe(true);
     expect(tem("Leads")).toBe(false);
     expect(tem("Clientes")).toBe(false);
   });
@@ -129,7 +129,7 @@ describe("menu: o item «Pessoas»", () => {
   it("leads.view e clients.view sozinhos não mostram nada do CRM", () => {
     preparar(["leads.view", "clients.view"], { ativo: true });
     expect(tem("Pessoas")).toBe(false);
-    expect(tem("Pipeline")).toBe(false);
+    expect(tem("Negócios")).toBe(false);
     expect(tem("Leads")).toBe(false);
     expect(tem("Clientes")).toBe(false);
   });
@@ -145,8 +145,9 @@ describe("menu: o item «Pessoas»", () => {
     expect(ultimaOpcao()).toEqual({ habilitado: false });
   });
 
-  it("só os itens /pessoas e /pipeline dependem do interruptor", () => {
+  // 27/10 (Emylia, decisão 11): o item do Pipeline passou a ser o dos Negócios da Emylia (/negocios); /pipeline continua pelo endereço
+  it("só os itens /pessoas e /negocios dependem do interruptor", () => {
     const itens = menuSections.flatMap((s) => [...s.items, ...(s.subSections?.flatMap((x) => x.items) ?? [])]);
-    expect(itens.filter((i) => i.requiresNegociosAtivos).map((i) => i.to)).toEqual(["/pessoas", "/pipeline"]);
+    expect(itens.filter((i) => i.requiresNegociosAtivos).map((i) => i.to)).toEqual(["/pessoas", "/negocios"]);
   });
 });
