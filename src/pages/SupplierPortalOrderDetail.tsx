@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Building2, CheckCircle2, Download, Info, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, Building2, CheckCircle2, Download, Info, Loader2, RefreshCw, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -11,10 +11,13 @@ import { useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import {
   getSpHint,
   isNoSupplierAccess,
+  isSpFunctionMissing,
   isSpNotFound,
   spErrorMessage,
   spGetOrder,
   spMarkOrderViewed,
+  spOrderShipments,
+  spUploadDeliveryNoteFile,
   type SpOrderDetail,
   type SpOrderLine,
 } from "@/lib/supplierPortal/spRpc";
@@ -22,6 +25,9 @@ import { SP_ORDERS_QUERY_KEY } from "@/components/supplier-portal/useSpOrdersToC
 import { SpOrderBadges } from "@/components/supplier-portal/SpOrderBadges";
 import { SpConfirmOrderDialog } from "@/components/supplier-portal/SpConfirmOrderDialog";
 import { downloadSpOrderPdf } from "@/components/supplier-portal/downloadSpOrderPdf";
+import { SpShipOrderDialog } from "@/components/supplier-portal/SpShipOrderDialog";
+import { SpShipmentsCard } from "@/components/supplier-portal/SpShipmentsCard";
+import { spCanShip, spShippingState } from "@/components/supplier-portal/spShipping";
 import {
   formatSpDate,
   formatSpDateTime,
@@ -86,7 +92,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Portal do Fornecedor — detalhe da encomenda (sp_get_order / sp_mark_order_viewed / sp_confirm_order). */
+/** Portal do Fornecedor — detalhe da encomenda (sp_get_order / sp_mark_order_viewed / sp_confirm_order / sp_ship_order). */
 export default function SupplierPortalOrderDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const { account, refresh } = useSupplierPortal();
@@ -98,6 +104,9 @@ export default function SupplierPortalOrderDetail() {
   const [confirmSnapshot, setConfirmSnapshot] = useState<ConfirmSnapshot | null>(null);
   const [changedWhileConfirming, setChangedWhileConfirming] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [shipOpen, setShipOpen] = useState(false);
+  // Revisão da publicação quando o diálogo de expedição abriu (vai no sp_ship_order).
+  const [shipRevision, setShipRevision] = useState<number | null>(null);
   const viewedRef = useRef<string | null>(null);
 
   const accountId = account?.id ?? null;
@@ -107,8 +116,19 @@ export default function SupplierPortalOrderDetail() {
     enabled: !!accountId && !!id,
     staleTime: 0,
     // Com o diálogo de confirmação aberto não se relê ao voltar à janela.
-    refetchOnWindowFocus: !confirmOpen,
+    refetchOnWindowFocus: !confirmOpen && !shipOpen,
     retry: (count, err) => !isNoSupplierAccess(err) && !isSpNotFound(err) && count < 1,
+  });
+
+  // Expedições (guias de remessa) — só existem depois de confirmada.
+  const orderConfirmed = query.data?.publication.status === "confirmed";
+  const shipmentsQuery = useQuery({
+    queryKey: [SP_ORDERS_QUERY_KEY, accountId, "shipments", id],
+    queryFn: () => spOrderShipments(id),
+    enabled: !!accountId && !!id && orderConfirmed,
+    staleTime: 0,
+    refetchOnWindowFocus: !shipOpen,
+    retry: (count, err) => !isNoSupplierAccess(err) && !isSpNotFound(err) && !isSpFunctionMissing(err) && count < 1,
   });
 
   useEffect(() => {
@@ -215,6 +235,18 @@ export default function SupplierPortalOrderDetail() {
   const isConfirmed = pub.status === "confirmed";
   const hasReceipts = order.lines.some((l) => Number(l.received_quantity) > 0);
   const companyAddress = order.company.address;
+  const shipments = isConfirmed ? shipmentsQuery.data ?? null : null;
+  const canShip = !!shipments && spCanShip(order, shipments);
+  const shippingState = spShippingState(order.lines, shipments);
+  const shipmentsError =
+    isConfirmed && shipmentsQuery.error && !isSpFunctionMissing(shipmentsQuery.error) && !isNoSupplierAccess(shipmentsQuery.error)
+      ? shipmentsQuery.error
+      : null;
+
+  const openShip = () => {
+    setShipRevision(pub.revision);
+    setShipOpen(true);
+  };
 
   return (
     <div className="space-y-4">
@@ -243,7 +275,7 @@ export default function SupplierPortalOrderDetail() {
           <div className="min-w-0 space-y-1">
             <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Encomenda {order.order_number}</h1>
             <p className="text-sm text-muted-foreground truncate">{order.company.name}</p>
-            <SpOrderBadges orderStatus={order.order_status} publicationStatus={pub.status} />
+            <SpOrderBadges orderStatus={order.order_status} publicationStatus={pub.status} shippingState={shippingState} />
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:flex gap-2 shrink-0">
@@ -264,6 +296,12 @@ export default function SupplierPortalOrderDetail() {
             <Button className="h-11 gap-2" onClick={() => openConfirm(order)}>
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
               Confirmar encomenda
+            </Button>
+          )}
+          {canShip && (
+            <Button className="h-11 gap-2" onClick={openShip}>
+              <Truck className="h-4 w-4" aria-hidden="true" />
+              Expedir encomenda
             </Button>
           )}
         </div>
@@ -458,6 +496,82 @@ export default function SupplierPortalOrderDetail() {
           </dl>
         </CardContent>
       </Card>
+
+      {shipmentsError && (
+        <Alert variant="destructive">
+          <Info className="h-4 w-4" />
+          <AlertTitle>Não foi possível ler as expedições</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p>{spErrorMessage(shipmentsError)}</p>
+            <Button variant="outline" className="h-11 gap-2" onClick={() => void shipmentsQuery.refetch()}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              Tentar de novo
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {shipments && (shipments.shipments.length > 0 || canShip) && <SpShipmentsCard order={order} data={shipments} />}
+
+      {shipments && shipRevision !== null && (
+        <SpShipOrderDialog
+          open={shipOpen}
+          onOpenChange={setShipOpen}
+          order={order}
+          shipments={shipments}
+          revision={shipRevision}
+          allowAttachment
+          onShipped={(res, file) => {
+            const n = res.lines.length;
+            toast({
+              title: res.already_shipped ? "Expedição já registada" : "Encomenda expedida",
+              description: `Guia de remessa ${res.note_number} · ${n} ${n === 1 ? "linha" : "linhas"}.`,
+            });
+            setShipRevision(null);
+            if (file) {
+              spUploadDeliveryNoteFile({ orgId: res.organization_id, noteId: res.delivery_note_id, file })
+                .then(() => toast({ title: "Ficheiro da guia anexado" }))
+                .catch((err: unknown) =>
+                  toast({
+                    title: "A guia foi registada, mas o ficheiro não foi anexado",
+                    description: err instanceof Error ? err.message : "Tente anexar de novo.",
+                    variant: "destructive",
+                  }),
+                )
+                .finally(() => void reload());
+            } else {
+              void reload();
+            }
+          }}
+          onError={(err) => {
+            const hint = getSpHint(err);
+            if (isNoSupplierAccess(err)) {
+              setShipOpen(false);
+              void refresh();
+              return;
+            }
+            toast({
+              title:
+                hint === "stale_revision"
+                  ? "Encomenda atualizada pela empresa"
+                  : hint === "duplicate_note"
+                    ? "Guia de remessa repetida"
+                    : hint === "order_closed" || hint === "not_confirmed"
+                      ? "Já não é possível expedir"
+                      : "Não foi possível expedir",
+              description: spErrorMessage(err),
+              variant: hint === "stale_revision" ? "default" : "destructive",
+            });
+            // Estes mudam o que se pode expedir: fecha e relê. Validação/guia
+            // repetida ficam no diálogo (mesmo requestId) para corrigir.
+            if (hint === "stale_revision" || hint === "order_closed" || hint === "not_confirmed" || hint === "not_found") {
+              setShipOpen(false);
+              setShipRevision(null);
+              void reload();
+            }
+          }}
+        />
+      )}
 
       {order.can_confirm && confirmSnapshot && confirmSnapshot.purchaseOrderId === order.purchase_order_id && (
         <SpConfirmOrderDialog
