@@ -28,6 +28,8 @@ import RhPortalColaborador from "./RhPortalColaborador";
 
 const TOKEN = "token-ficticio-do-teste-com-mais-de-vinte-caracteres";
 const SESSAO = "T".repeat(43);
+// O botão do cabeçalho da moldura da pré-visualização (`rhPortal.sair`, em pt).
+const BOTAO_SAIR = "Sair";
 const CODIGO_FICTICIO = "000000";
 
 const tabela = translations as unknown as Record<string, Record<string, string>>;
@@ -105,7 +107,7 @@ async function entrarComCodigo() {
   await waitFor(() => expect(campo).toBeEnabled());
   fireEvent.change(campo, { target: { value: CODIGO_FICTICIO } });
   fireEvent.click(screen.getByRole("button", { name: txt("portal.otp.confirmar") }));
-  return screen.findByRole("button", { name: txt("portal.sair") });
+  return screen.findByRole("button", { name: BOTAO_SAIR });
 }
 
 beforeEach(() => {
@@ -174,7 +176,7 @@ describe("Portal do colaborador ligado à Edge convite-admissao", () => {
     await waitFor(() => expect(chamadas("sair")).toHaveLength(1));
     expect(chamadas("sair")[0][1].headers).toEqual({ "x-portal-sessao": SESSAO });
     expect(await screen.findByRole("button", { name: txt("portal.consulta.botao") })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: txt("portal.sair") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: BOTAO_SAIR })).not.toBeInTheDocument();
   });
 
   it("uma sessão recusada pela Edge na leitura acaba a sessão e pede o código de novo", async () => {
@@ -187,7 +189,47 @@ describe("Portal do colaborador ligado à Edge convite-admissao", () => {
     fireEvent.click(screen.getByRole("button", { name: txt("portal.otp.confirmar") }));
     await waitFor(() => expect(chamadas("ler")).toHaveLength(1));
     expect(await screen.findByRole("button", { name: txt("portal.consulta.botao") })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: txt("portal.sair") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: BOTAO_SAIR })).not.toBeInTheDocument();
+  });
+
+  it("desenha a moldura da pré-visualização com dados reais: organização, nome, acesso temporário, navegação e os quatro passos", async () => {
+    abrir(TOKEN);
+    await screen.findByRole("button", { name: txt("portal.consulta.botao") });
+    expect(screen.getByText("Portal do colaborador")).toBeInTheDocument();
+    expect(screen.getByText("Joana", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByTestId("portal-selo")).toHaveTextContent("Acesso temporário · termina a 30/10");
+    expect(screen.getByTestId("convite-faixa-prazo")).toHaveTextContent("O teu acesso temporário termina a 30/10");
+    const nav = screen.getByRole("navigation", { name: "Secções do portal" });
+    expect(nav).toHaveTextContent("Ficha de admissão");
+    expect(nav).toHaveTextContent("A preencher");
+    expect(screen.getByRole("link", { name: /Ficha de admissão/ })).toHaveAttribute("aria-current", "page");
+    // A troca de documentos não existe na base: não há entrada nem números inventados.
+    expect(screen.queryByRole("link", { name: /Documentos/ })).not.toBeInTheDocument();
+    const passos = screen.getByRole("navigation", { name: "Passos da admissão" });
+    expect(passos.querySelectorAll("li")).toHaveLength(4);
+    expect(passos.querySelector('[aria-current="step"]')).toHaveTextContent("Ficha");
+    expect(passos).toHaveTextContent("Neste passo");
+    expect(passos).toHaveTextContent("Por fazer");
+    // Nada de rascunho guardado: nesta fase só o NISS e o IBAN se gravam.
+    expect(screen.queryByText(/Rascunho guardado/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Pré-visualização de exemplo")).not.toBeInTheDocument();
+  });
+
+  it("com sessão, mantém o aviso honesto (só NISS e IBAN) e o botão «Sair» no cabeçalho", async () => {
+    abrir(TOKEN);
+    await entrarComCodigo();
+    expect(await screen.findByText(txt("portal.formulario.aviso"))).toBeInTheDocument();
+    expect(screen.getByTestId("portal-colaborador-real")).toBeInTheDocument();
+    expect(screen.getByText(txt("portal.ligado.aviso"))).toBeInTheDocument();
+  });
+
+  it("um processo submetido mostra a mesma moldura, a Aprovação do RH como passo atual e nenhum formulário", async () => {
+    ligar({ ...base(), estado: { data: { ok: true, convite: convite({ estado: "submetida", precisa_otp: false }) }, error: null } });
+    abrir(TOKEN);
+    const passos = await screen.findByRole("navigation", { name: "Passos da admissão" });
+    expect(passos.querySelector('[aria-current="step"]')).toHaveTextContent("Aprovação do RH");
+    expect(screen.getByText(txt("portal.vista.analise.titulo"))).toBeInTheDocument();
+    expect(document.querySelectorAll("input, select, textarea")).toHaveLength(0);
   });
 
   it("os links de demonstração (as fichas de exemplo em memória) continuam na pré-visualização, sem o percurso do código", () => {

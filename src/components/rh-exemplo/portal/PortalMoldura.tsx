@@ -37,14 +37,26 @@ export function PortalSelo({ admissao }: { admissao: Admissao }) {
   );
 }
 
-function Cabecalho({ nome, selo, aoSair }: { nome: string | null; selo?: ReactNode; aoSair?: () => void }) {
-  const { t } = useTranslation();
+interface CabecalhoPortalProps {
+  organizacao: string | null;
+  nome: string | null;
+  selo?: ReactNode;
+  aoSair?: () => void;
+}
+
+function Cabecalho(props: Omit<CabecalhoPortalProps, "organizacao">) {
   const { activeCompany } = useCompany();
+  return <CabecalhoPortal {...props} organizacao={activeCompany.name} />;
+}
+
+/** O cabeçalho sem hooks de empresa: a organização vem de fora (no portal real, do convite). */
+export function CabecalhoPortal({ organizacao, nome, selo, aoSair }: CabecalhoPortalProps) {
+  const { t } = useTranslation();
   return (
     <header className="border-b bg-background">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{activeCompany.name}</p>
+          {organizacao && <p className="truncate text-sm font-semibold">{organizacao}</p>}
           <p className="text-xs text-muted-foreground">{t("rhPortal.titulo")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -82,6 +94,29 @@ export function PortalMoldura({ nome, admissao, navegacao, aoSair, children }: P
       <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 md:flex-row md:items-start">
         {navegacao}
         <main id="portal-conteudo" className="min-w-0 flex-1 pb-24 md:pb-0">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+interface PortalMolduraRealProps {
+  organizacao: string | null;
+  nome: string | null;
+  selo?: ReactNode;
+  navegacao: ReactNode;
+  /** Só com sessão aberta: sem ele não há botão «Sair». */
+  aoSair?: () => void;
+  children: ReactNode;
+}
+
+/** A MESMA moldura da pré-visualização, alimentada por dados reais (organização e selo vêm de fora; não toca na empresa ativa). */
+export function PortalMolduraReal({ organizacao, nome, selo, navegacao, aoSair, children }: PortalMolduraRealProps) {
+  return (
+    <div className="min-h-screen bg-muted/30 text-foreground" data-testid="portal-colaborador-real">
+      <CabecalhoPortal organizacao={organizacao} nome={nome} selo={selo} aoSair={aoSair} />
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 md:flex-row md:items-start">
+        {navegacao}
+        <main id="portal-conteudo" className="min-w-0 flex-1 space-y-4 pb-24 md:pb-0">{children}</main>
       </div>
     </div>
   );

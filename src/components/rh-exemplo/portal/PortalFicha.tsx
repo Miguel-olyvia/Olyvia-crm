@@ -9,7 +9,7 @@ import { dataEHora } from "@/components/rh-exemplo/admissao/auxiliares";
 import { ConviteDevolvida } from "@/components/rh-exemplo/convite/ConviteDevolvida";
 import { ConviteFaixaPrazo } from "@/components/rh-exemplo/convite/ConviteFaixaPrazo";
 import { camposEditaveis, type Admissao } from "@/components/rh-exemplo/lib/admissaoFluxo";
-import { passosDaAdmissao, type SituacaoPasso } from "@/components/rh-exemplo/lib/portalEstado";
+import { passosDaAdmissao, type PassoPortal, type SituacaoPasso } from "@/components/rh-exemplo/lib/portalEstado";
 import { useIdiomaConvite } from "@/components/rh-exemplo/hooks/useIdiomaConvite";
 import { ConviteAdmissaoEcra } from "@/pages/rh-exemplo/RhConviteAdmissao";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -18,11 +18,16 @@ import { cn } from "@/lib/utils";
 const ICONE: Record<SituacaoPasso, typeof Check> = { feito: Check, atual: CircleDot, falta: Circle, rejeitado: XCircle };
 
 function Passos({ admissao }: { admissao: Admissao }) {
+  return <PassosDoPortal passos={passosDaAdmissao(admissao.estado)} />;
+}
+
+/** A barra dos quatro passos, só desenho: a pré-visualização e o portal real alimentam-na de formas diferentes. */
+export function PassosDoPortal({ passos }: { passos: Array<{ passo: PassoPortal; situacao: SituacaoPasso }> }) {
   const { t } = useTranslation();
   return (
     <nav aria-label={t("rhPortal.passos.aria")}>
       <ol className="grid gap-2 rounded-lg border bg-card p-3 sm:grid-cols-4">
-        {passosDaAdmissao(admissao.estado).map(({ passo, situacao }) => {
+        {passos.map(({ passo, situacao }) => {
           const Icone = ICONE[situacao];
           return (
             <li

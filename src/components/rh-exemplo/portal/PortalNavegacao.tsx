@@ -12,6 +12,8 @@ interface PortalNavegacaoProps {
   seccao: SeccaoPortal;
   etiqueta: EtiquetaFicha;
   pendentes: number;
+  /** Falso no portal real: a troca de documentos ainda não existe na base, por isso a entrada não aparece. */
+  comDocumentos?: boolean;
 }
 
 interface Entrada {
@@ -21,12 +23,14 @@ interface Entrada {
   estado: string | null;
 }
 
-export function PortalNavegacao({ seccao, etiqueta, pendentes }: PortalNavegacaoProps) {
+export function PortalNavegacao({ seccao, etiqueta, pendentes, comDocumentos = true }: PortalNavegacaoProps) {
   const { t } = useTranslation();
-  const entradas: Entrada[] = [
-    { seccao: "ficha", Icone: FileText, rotulo: t("rhPortal.nav.ficha"), estado: t(`rhPortal.ficha.etiqueta.${etiqueta}`) },
-    { seccao: "documentos", Icone: FolderOpen, rotulo: t("rhPortal.nav.documentos"), estado: pendentes > 0 ? t("rhPortal.nav.pendentes", { n: pendentes }) : null },
-  ];
+  const ficha: Entrada = { seccao: "ficha", Icone: FileText, rotulo: t("rhPortal.nav.ficha"), estado: t(`rhPortal.ficha.etiqueta.${etiqueta}`) };
+  const documentos: Entrada = {
+    seccao: "documentos", Icone: FolderOpen, rotulo: t("rhPortal.nav.documentos"),
+    estado: pendentes > 0 ? t("rhPortal.nav.pendentes", { n: pendentes }) : null,
+  };
+  const entradas: Entrada[] = comDocumentos ? [ficha, documentos] : [ficha];
   return (
     <nav
       aria-label={t("rhPortal.nav.aria")}

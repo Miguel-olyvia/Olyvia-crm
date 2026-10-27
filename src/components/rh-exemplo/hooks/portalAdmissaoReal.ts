@@ -12,3 +12,12 @@ export { PortalMoldura } from "@/components/hr/portal/PortalMoldura";
 export { PortalOtpDialogo } from "@/components/hr/portal/PortalOtpDialogo";
 export { PortalEmAnalise } from "@/components/hr/portal/PortalSemAcesso";
 export { PortalSessaoAtiva } from "@/components/hr/portal/PortalSessaoAtiva";
+// Peças e funções para a ficha de admissão REAL desenhada com a moldura da pré-visualização (`portal/PortalFichaReal`).
+export { ConviteSaudacao } from "@/components/hr/convite/ConviteSaudacao";
+export { AvisoSessaoPerdida } from "@/components/hr/portal/PortalConsulta";
+export { PortalDevolvida } from "@/components/hr/portal/PortalDados";
+export { PortalFormulario } from "@/components/hr/portal/PortalFormulario";
+export { PortalProximaFase } from "@/components/hr/portal/PortalProximaFase";
+export { estadoAdmissaoDe } from "@/lib/hr/estadoAdmissao";
+export { mensagemErroPortal, prazoEmAviso, restoDoPrazo, type ConvitePublico, type PortalLer, type RestoDoPrazo } from "@/lib/hr/portalAdmissao";
+export type { AvisoPortal, ResultadoSensiveis } from "@/hooks/useConviteAdmissaoPublico";

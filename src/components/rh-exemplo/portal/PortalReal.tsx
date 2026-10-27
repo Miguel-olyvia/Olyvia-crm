@@ -8,9 +8,13 @@ import { Loader2 } from "lucide-react";
 import { IdiomaForcadoProvider } from "@/contexts/IdiomaForcadoContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
-  ConviteCartaoLinkInvalido, PortalConsulta, PortalEmAnalise, PortalMoldura, PortalOtpDialogo, PortalSessaoAtiva,
+  ConviteCartaoLinkInvalido, PortalOtpDialogo,
   idiomaDoNavegador, motivoDaVista, useConviteAdmissaoPublico, vistaDoConvite, type IdiomaConvite,
 } from "@/components/rh-exemplo/hooks/portalAdmissaoReal";
+import { PortalAnaliseReal, PortalFichaReal, PortalSeloReal } from "./PortalFichaReal";
+import { PortalMolduraReal } from "./PortalMoldura";
+import { PortalNavegacao } from "./PortalNavegacao";
+import { etiquetaDoEstadoReal } from "./portalRealEstado";
 
 export function PortalReal({ token }: { token: string | undefined }) {
   // A pessoa que abre o link não tem sessão nem preferência: a língua é a do navegador, só neste ecrã.
@@ -53,9 +57,12 @@ function PortalRealEcra({ token, idioma }: { token: string | undefined; idioma: 
   const vista = vistaDoConvite(portal.erroInicial, convite);
   if (vista === "analise" && convite) {
     return (
-      <PortalMoldura organizacao={convite.organizacao_nome} nome={convite.primeiro_nome}>
-        <PortalEmAnalise estado={convite.estado} />
-      </PortalMoldura>
+      <PortalMolduraReal
+        organizacao={convite.organizacao_nome} nome={convite.primeiro_nome} selo={<PortalSeloReal validUntil={convite.valid_until} />}
+        navegacao={<PortalNavegacao seccao="ficha" etiqueta={etiquetaDoEstadoReal(convite.estado)} pendentes={0} comDocumentos={false} />}
+      >
+        <PortalAnaliseReal convite={convite} />
+      </PortalMolduraReal>
     );
   }
   if (vista !== "consulta" || !convite) {
@@ -70,25 +77,30 @@ function PortalRealEcra({ token, idioma }: { token: string | undefined; idioma: 
 
   return (
     <>
-      <PortalMoldura
+      <PortalMolduraReal
         organizacao={convite.organizacao_nome}
         nome={convite.primeiro_nome}
+        selo={<PortalSeloReal validUntil={convite.valid_until} />}
         aoSair={sessaoAtiva ? () => void portal.terminarSessao() : undefined}
-      >
-        {sessaoAtiva ? (
-          <PortalSessaoAtiva
-            convite={convite}
-            dados={portal.dados}
-            erroLeitura={portal.erroLeitura}
-            sessaoAExpirar={portal.sessaoAExpirar}
-            aoManterSessao={() => void portal.manterSessao()}
-            aoGravarSensiveis={portal.gravarSensiveis}
-            tituloRef={tituloRef}
+        navegacao={
+          <PortalNavegacao
+            seccao="ficha" etiqueta={etiquetaDoEstadoReal(portal.dados?.estado ?? convite.estado)} pendentes={0} comDocumentos={false}
           />
-        ) : (
-          <PortalConsulta convite={convite} aviso={portal.aviso} aoConfirmarIdentidade={confirmarIdentidade} tituloRef={tituloRef} />
-        )}
-      </PortalMoldura>
+        }
+      >
+        <PortalFichaReal
+          convite={convite}
+          sessaoAtiva={sessaoAtiva}
+          aviso={portal.aviso}
+          dados={portal.dados}
+          erroLeitura={portal.erroLeitura}
+          sessaoAExpirar={portal.sessaoAExpirar}
+          aoManterSessao={() => void portal.manterSessao()}
+          aoConfirmarIdentidade={confirmarIdentidade}
+          aoGravarSensiveis={portal.gravarSensiveis}
+          tituloRef={tituloRef}
+        />
+      </PortalMolduraReal>
       <PortalOtpDialogo
         aberto={dialogoAberto && !sessaoAtiva}
         otp={otp}
