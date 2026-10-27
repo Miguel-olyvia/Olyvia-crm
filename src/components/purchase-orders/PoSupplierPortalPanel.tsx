@@ -76,6 +76,11 @@ interface Props {
    * alterações por gravar); só muda o sítio.
    */
   sendActionTarget?: HTMLElement | null;
+  /**
+   * Mudar este valor (> 0) abre o diálogo "Retirar do portal" — o botão "Retirar do portal para editar" do
+   * aviso de bloqueio nas Linhas. Só abre se o servidor deixar (can_withdraw).
+   */
+  withdrawRequest?: number;
 }
 
 /**
@@ -96,6 +101,7 @@ export function PoSupplierPortalPanel({
   hasUnsavedChanges = false,
   formReadOnly = false,
   sendActionTarget = null,
+  withdrawRequest = 0,
 }: Props) {
   const { toast } = useToast();
   const [status, setStatus] = useState<PoSupplierStatus | null>(null);
@@ -131,6 +137,13 @@ export function PoSupplierPortalPanel({
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
+
+  const canWithdraw = !!status?.can_withdraw;
+  useEffect(() => {
+    if (withdrawRequest > 0 && canWithdraw) setWithdrawOpen(true);
+    // Só reage a um pedido novo (o contador), não a mudanças de can_withdraw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [withdrawRequest]);
 
   // Ao fechar/trocar de encomenda, o formulário deixa de estar bloqueado por este painel.
   useEffect(() => () => onStatusChangeRef.current?.(null), [orderId]);

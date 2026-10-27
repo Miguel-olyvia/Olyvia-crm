@@ -4,12 +4,16 @@
 // existiam na lista (ver comentário de cada entrada).
 //
 // Principal: eliminada → Restaurar · pending → Aprovar e enviar · ordered/
-// partially_received → Receber · senão → Ver.
-import { Ban, Eye, FileDown, PackageCheck, Pencil, Send, Trash2, Undo2 } from "lucide-react";
+// partially_received → Receber no armazém → (Receção) · senão → Ver.
+import { Ban, Eye, FileDown, Pencil, Send, Trash2, Undo2, Warehouse } from "lucide-react";
 import { RowActions, type RowActionEntry, type RowPrimaryAction } from "@/components/inventory/ui";
 
 const RECEIVE_PERMS = ["purchase_orders.receive", "inventory.edit"] as const;
 const REVERT_PERMS = ["purchase_orders.revert_receipt", "inventory.edit"] as const;
+// "Receber no armazém →" (Olyvia 2.0) vai sempre para Armazém › Receção: as permissões de receber de sempre e a
+// da rota /receiving (receiving.view), para nunca levar a um ecrã sem acesso.
+export const RECEIVE_NAV_PERMS = ["purchase_orders.receive", "inventory.edit", "receiving.view"] as const;
+export const RECEIVE_LABEL = "Receber no armazém →";
 
 interface PoRowActionsProps {
   order: { id: string; order_number: string; status: string };
@@ -69,8 +73,8 @@ export function PoRowActions({
     // Antes: botão "Encomendar" só com pending && purchase_orders.approve (PoSendToSupplierButton).
     primary = { label: "Aprovar e enviar", icon: Send, variant: "primary", onClick: onApproveSend, permission: "purchase_orders.approve" };
   } else if (st === "ordered" || st === "partially_received") {
-    // Antes: PackageCheck com PermissionGate receive + inventory.edit (requireAll).
-    primary = { label: "Receber", icon: PackageCheck, onClick: onReceive, permission: RECEIVE_PERMS, requireAllPermissions: true };
+    // Antes: PackageCheck com PermissionGate receive + inventory.edit (requireAll); agora vai para a Receção (+ receiving.view).
+    primary = { label: RECEIVE_LABEL, icon: Warehouse, onClick: onReceive, permission: RECEIVE_NAV_PERMS, requireAllPermissions: true };
   } else {
     primary = { label: "Ver", icon: Eye, onClick: onOpen };
   }
@@ -79,14 +83,13 @@ export function PoRowActions({
     { label: "Abrir detalhe", icon: Eye, onSelect: onOpen },
     // Antes: FileDown, sem PermissionGate.
     { label: "PDF da encomenda", icon: FileDown, onSelect: onPdf },
-    // Antes: PackageCheck em pending/ordered/partially_received, receive + inventory.edit.
-    // Em ordered/parcial já é o botão principal; aqui fica para pending.
+    // Como o MenuPo do 2.0: em todas as recebíveis (pending/ordered/parcial), sempre para a Receção.
     {
-      label: "Receber",
-      icon: PackageCheck,
+      label: RECEIVE_LABEL,
+      icon: Warehouse,
       onSelect: onReceive,
-      hidden: st !== "pending",
-      permission: RECEIVE_PERMS,
+      hidden: !receivable,
+      permission: RECEIVE_NAV_PERMS,
       requireAllPermissions: true,
     },
     // Antes: Ban "Não vou receber" em pending/ordered/partially_received, receive + inventory.edit.

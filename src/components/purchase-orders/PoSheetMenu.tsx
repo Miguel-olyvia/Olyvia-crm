@@ -2,14 +2,15 @@
 // os handlers reais de PurchaseOrders.tsx. Mesmas condições de estado e
 // permissões de PoRowActions (lista) e dos botões que existiam no diálogo:
 //   PDF                       sem permissão própria
-//   Receber                   pending (ordered/parcial têm o botão no rodapé) · receive + inventory.edit
+//   Receber no armazém →      pending/ordered/parcial (vai para a Receção) · receive + inventory.edit + receiving.view
 //   Não vou receber o resto   pending/ordered/parcial · receive + inventory.edit
 //   Reverter receção          recebida/parcial com linhas recebidas · revert_receipt + inventory.edit
 //   Passar para stock         há linhas a libertar (EC inativa) · receive + inventory.edit
 //   Eliminar                  purchase_orders.delete
 // Dentro da folha o DropdownMenu é modal={false} (ver RowActions).
-import { Ban, FileDown, PackageCheck, Trash2, Undo2 } from "lucide-react";
+import { Ban, FileDown, PackageCheck, Trash2, Undo2, Warehouse } from "lucide-react";
 import { RowActions, type RowActionEntry } from "@/components/inventory/ui";
+import { RECEIVE_LABEL, RECEIVE_NAV_PERMS } from "./PoRowActions";
 
 const RECEIVE_PERMS = ["purchase_orders.receive", "inventory.edit"] as const;
 const REVERT_PERMS = ["purchase_orders.revert_receipt", "inventory.edit"] as const;
@@ -47,11 +48,11 @@ export function PoSheetMenu({
   const items: RowActionEntry[] = [
     { label: "PDF da encomenda", icon: FileDown, onSelect: onPdf },
     {
-      label: "Receber",
-      icon: PackageCheck,
+      label: RECEIVE_LABEL,
+      icon: Warehouse,
       onSelect: onReceive,
-      hidden: st !== "pending",
-      permission: RECEIVE_PERMS,
+      hidden: !receivable,
+      permission: RECEIVE_NAV_PERMS,
       requireAllPermissions: true,
     },
     {
