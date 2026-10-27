@@ -274,7 +274,7 @@ export function SupplierSheet({
                     {supplier.deleted_at ? <InventoryStatusBadge tone="bad">Eliminado</InventoryStatusBadge> : null}
                   </>
                 ) : (
-                  <InventoryStatusBadge tone="warn">Novo · por gravar</InventoryStatusBadge>
+                  <InventoryStatusBadge tone="warn">Rascunho · nada gravado</InventoryStatusBadge>
                 )}
               </div>
             </div>

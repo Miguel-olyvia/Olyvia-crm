@@ -50,15 +50,16 @@ import {
 import { Clock, Eye, ShoppingCart, Undo2, Users } from "lucide-react";
 import { SupplierSheet, supplierSheetTabFromParams, type SupplierSheetTab } from "@/components/suppliers/SupplierSheet";
 import { SupplierDataForm, type SupplierFormData } from "@/components/suppliers/SupplierDataForm";
+import { NewSupplierDialog, type NewSupplierDraft } from "@/components/suppliers/NewSupplierDialog";
 
 const SUPPLIER_FORM_ID = "supplier-sheet-form";
 
-// Título e descrição do ecrã (tom do TITULOS.sup do protótipo, ajustado ao que
-// a app faz: a tabela não se edita inline e o convite ao portal é um passo à
-// parte, no separador Portal da ficha).
+// Título e descrição do ecrã (TITULOS.sup do Olyvia 2.0, ajustado ao que a app
+// faz: a tabela não se edita inline — decisão da app real — e "Novo fornecedor"
+// é o diálogo de convite ao portal, NewSupplierDialog).
 const PAGE_TITLE = "Fornecedores";
 const PAGE_DESCRIPTION =
-  "Dados, artigos, preços e portal ficam na ficha do fornecedor. No separador Portal convida-o: ele preenche a ficha e o catálogo.";
+  "Criar um fornecedor é convidá-lo para o portal: ele preenche a ficha e o catálogo. Dados, artigos, preços e portal ficam na ficha.";
 
 /** Tira os caracteres que partem o filtro .or() do PostgREST. */
 const sanitizeSearch = (q: string): string => q.replace(/[,()*%\\]/g, " ").trim();
@@ -99,6 +100,8 @@ const Suppliers = () => {
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const [open, setOpen] = useState(false);
+  // "Novo fornecedor" = diálogo de convite ao portal (NovoFornecedorDialogo do 2.0).
+  const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   // Ficha em edição: o separador Portal usa a empresa/nome gravados.
@@ -1034,6 +1037,12 @@ const Suppliers = () => {
   const rowMenu = (supplier: Supplier): RowActionEntry[] => [
     { label: "Abrir ficha", icon: Eye, onSelect: () => void handleEdit(supplier), permission: "suppliers.edit" },
     {
+      label: "Editar dados",
+      icon: Pencil,
+      onSelect: () => void handleEdit(supplier).then(() => setFormTab("dados")),
+      permission: "suppliers.edit",
+    },
+    {
       label: "Ver encomendas",
       icon: ShoppingCart,
       onSelect: () => navigate(purchaseOrdersLink({ supplier: supplier.id })),
@@ -1169,14 +1178,7 @@ const Suppliers = () => {
                 </Dialog>
               </PermissionGate>
               <PermissionGate permission="suppliers.create">
-                <Button
-                  onClick={() => {
-                    setEditingId(null);
-                    resetForm();
-                    setOpen(true);
-                  }}
-                  className="gap-2"
-                >
+                <Button onClick={() => setNewDialogOpen(true)} className="gap-2">
                   <Plus className="h-4 w-4" />
                   Novo fornecedor
                 </Button>
@@ -1556,6 +1558,42 @@ const Suppliers = () => {
             />
           }
         />
+
+        {newDialogOpen && (
+          <NewSupplierDialog
+            onClose={() => setNewDialogOpen(false)}
+            organizations={filterOrganizations}
+            defaultOrganizationId={
+              companyFilter && companyFilter !== "all" ? companyFilter : activeCompany?.id ?? null
+            }
+            canInvite={canManagePortal}
+            onSupplierCreated={() => {
+              setSuppliers([]);
+              setHasMore(true);
+              loadSuppliers(0, true);
+            }}
+            onOpenSupplier={(id) => {
+              setNewDialogOpen(false);
+              openSupplierVia(id, { tab: "portal" });
+            }}
+            onDraft={(draft: NewSupplierDraft) => {
+              // "Criar sem portal (preencho eu)": a ficha nova (Dados) já com o
+              // que foi escrito; nada fica gravado até "Gravar".
+              setNewDialogOpen(false);
+              setEditingId(null);
+              resetForm();
+              setFormData((prev) => ({
+                ...prev,
+                name: draft.name,
+                tax_id: draft.taxId,
+                email: draft.email,
+                contact_person: draft.contactName,
+              }));
+              setOrganizationSelection((prev) => ({ ...prev, companyId: draft.organizationId }));
+              setOpen(true);
+            }}
+          />
+        )}
 
         {catalogSupplier && (
           <SupplierCatalogDialog
