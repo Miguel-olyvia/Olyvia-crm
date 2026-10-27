@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -33,7 +34,9 @@ import {
   InventoryPageHeader,
   InventoryStatusBadge,
   RowActions,
+  parseClientOrdersOrigin,
   parseClientOrdersParams,
+  type ClientOrderOriginFilter,
   type ClientOrderStatusFilter,
   type FilterPillOption,
   type InventoryTone,
@@ -59,7 +62,17 @@ import {
 import { ClientOrderKpis } from "@/components/client-orders/ClientOrderKpis";
 import { ClientOrderProgress, ClientOrderProgressLegend, clientOrderProgressParts } from "@/components/client-orders/ClientOrderProgress";
 import { ClientOrderOriginChip, type ClientOrderOriginKind } from "@/components/client-orders/ClientOrderOriginChip";
-import { ClientOrderRowActions } from "@/components/client-orders/ClientOrderRowActions";
+import { ClientOrderRowActions, DeletedClientOrderRowActions } from "@/components/client-orders/ClientOrderRowActions";
+import {
+  CLIENT_ORDER_ORIGIN_FILTER_LABELS,
+  deletedRowOrigin,
+  filterDeletedRows,
+  filterRowsByOrigin,
+  mergeWithDeleted,
+  type DeletedClientOrderRow,
+} from "@/components/client-orders/clientOrderFilters";
+import { useDeletedClientOrders } from "@/components/client-orders/useDeletedClientOrders";
+import { ClientOrderHistorySection } from "@/components/client-orders/ClientOrderHistorySection";
 import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
@@ -92,6 +105,8 @@ import {
 const PAGE_SIZE = 30;
 // Filtro "Prontas a expedir": teto de leitura da lista (páginas de 100) para
 // encontrar as encomendas prontas — pára antes assim que as encontra todas.
+// O filtro por origem (?origin=, vindo do Hoje) usa o mesmo teto: a RPC da
+// lista não filtra por origem — lê-se a lista e filtra-se por origin_type.
 const READY_MAX_PAGES = 20;
 
 // IVA por omissão quando o artigo do catálogo não traz taxa definida — mesmo
@@ -642,12 +657,21 @@ const ClientOrders = () => {
   const urlParams = parseClientOrdersParams(searchParams);
   const urlStatus = urlParams.status;
   const urlReady = urlParams.ready;
+  // Origem (?origin=contract|direct_sale|manual): chip "Origem: …" do 2.0.
+  const urlOrigin: ClientOrderOriginFilter = parseClientOrdersOrigin(searchParams);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState<ClientOrderDocumentDetail | null>(null);
+  // Folha de uma encomenda eliminada ("Ver eliminadas"): só o cabeçalho e o
+  // histórico — rpc_get_client_order_document não lê eliminadas.
+  const [deletedDetail, setDeletedDetail] = useState<DeletedClientOrderRow | null>(null);
+  // Muda sempre que o documento é relido (depois de uma ação): o histórico relê.
+  const [detailVersion, setDetailVersion] = useState(0);
+  // "Ver eliminadas" (2.0): junta à lista as eliminadas/anuladas.
+  const [showDeleted, setShowDeleted] = useState(false);
   // "Não vou receber o resto" nas POs ligadas (purchase_order_item_cancellations,
   // só leitura): anulações ativas por linha da EC (lineKey). Best-effort.
   const [poCancellationsByLine, setPoCancellationsByLine] = useState<{
@@ -749,10 +773,11 @@ const ClientOrders = () => {
     dateFrom,
     dateTo,
     ready: urlReady,
+    origin: urlOrigin,
   });
   useEffect(() => {
-    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, ready: urlReady };
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, urlReady]);
+    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, ready: urlReady, origin: urlOrigin };
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, urlReady, urlOrigin]);
 
   // Prontidão por encomenda (rpc_client_order_list_readiness, org ativa):
   // barra de progresso em unidades, "N pronta(s) a sair" e o filtro
@@ -842,7 +867,7 @@ const ClientOrders = () => {
       if (reset) {
         const resetKey = JSON.stringify([
           filters.activeCompanyId, filters.debouncedSearchTerm, filters.statusFilter,
-          filters.dateFrom, filters.dateTo, filters.ready,
+          filters.dateFrom, filters.dateTo, filters.ready, filters.origin,
         ]);
         refresh = resetKey === lastResetKeyRef.current;
         // Outra organização: não mostrar a prontidão da anterior enquanto carrega.
@@ -867,24 +892,28 @@ const ClientOrders = () => {
         setReadiness(readinessMap);
       }
 
-      if (filters.ready) {
-        // "Prontas a expedir": a RPC da lista não filtra por ids — lê-se pela
-        // ordem da lista até ter todas as prontas (ou ao teto), com os mesmos
-        // filtros. Tudo de uma vez: sem paginação a seguir.
+      if (filters.ready || filters.origin !== 'all') {
+        // "Prontas a expedir" e a origem: a RPC da lista não filtra por ids
+        // nem por origem — lê-se pela ordem da lista até ter todas as prontas
+        // (ou ao teto), com os mesmos filtros, e filtra-se a origem aqui.
+        // Tudo de uma vez: sem paginação a seguir.
         if (!reset) return;
-        const { rows: readyRows, truncated } = await fetchClientOrderRowsByIds(
-          filters.activeCompanyId,
-          {
-            search: filters.debouncedSearchTerm,
-            status: filters.statusFilter,
-            dateFrom: filters.dateFrom,
-            dateTo: filters.dateTo,
-          },
-          readyContractIds(readinessMap),
-          READY_MAX_PAGES,
-        );
+        const listFilters = {
+          search: filters.debouncedSearchTerm,
+          status: filters.statusFilter,
+          dateFrom: filters.dateFrom,
+          dateTo: filters.dateTo,
+        };
+        const { rows: fullRows, truncated } = filters.ready
+          ? await fetchClientOrderRowsByIds(
+              filters.activeCompanyId,
+              listFilters,
+              readyContractIds(readinessMap),
+              READY_MAX_PAGES,
+            )
+          : await fetchAllClientOrderRows(filters.activeCompanyId, listFilters, READY_MAX_PAGES);
         if (filtersRef.current !== filters) return;
-        const rows = readyRows as unknown as ClientOrderDocumentRow[];
+        const rows = filterRowsByOrigin(fullRows as unknown as ClientOrderDocumentRow[], filters.origin);
         setOrders(rows);
         setReadyTruncated(truncated);
         void loadOrigins(rows.map((o) => o.contract_id), true);
@@ -941,7 +970,7 @@ const ClientOrders = () => {
     if (!activeCompany?.id) return;
     loadOrders(0, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, urlReady]);
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, urlReady, urlOrigin]);
 
   useEffect(() => {
     if (loading) return;
@@ -976,6 +1005,7 @@ const ClientOrders = () => {
   };
 
   const openDetail = async (contractId: string) => {
+    setDeletedDetail(null);
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailData(null);
@@ -2380,6 +2410,17 @@ const ClientOrders = () => {
     }, { replace: true });
   };
 
+  // Origem (?origin=): o chip "Origem: …" só aparece com ela escolhida (no
+  // Hoje); carregar nele limpa-a, como no 2.0. Mantém estado/prontas.
+  const applyOriginFilter = (next: ClientOrderOriginFilter) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (next === "all") params.delete("origin");
+      else params.set("origin", next);
+      return params;
+    }, { replace: true });
+  };
+
   // Prontas a expedir: nº de encomendas com lines_ready > 0 na prontidão
   // (rpc_client_order_list_readiness — mesma regra de
   // rpc_inventory_today.ready_to_ship). Enquanto não chega ou se falhar, o
@@ -2435,6 +2476,59 @@ const ClientOrders = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailData, detailOpen]);
 
+  // ── Ver eliminadas ───────────────────────────────────────────────────────
+  // Lidas de client_contracts (RLS: client_contracts.view) — sem essa
+  // permissão a opção fica desativada com o porquê. Releem quando a lista
+  // recarrega depois de uma ação (ex.: acabou de eliminar uma).
+  const canSeeDeleted = hasPermission('client_contracts.view');
+  const deletedQuery = useDeletedClientOrders(activeCompany?.id, showDeleted && canSeeDeleted, listDataVersion);
+  const deletedLoaded = deletedQuery.data?.rows;
+  useEffect(() => {
+    // Venda direta de origem (a venda fica 'cancelada', não apagada).
+    if (deletedLoaded && deletedLoaded.length > 0) void loadOrigins(deletedLoaded.map((r) => r.contract_id), false);
+  }, [deletedLoaded, loadOrigins]);
+  const deletedRows: DeletedClientOrderRow[] = showDeleted && canSeeDeleted
+    ? filterDeletedRows(
+        deletedLoaded ?? [],
+        {
+          search: debouncedSearchTerm,
+          dateFrom,
+          dateTo,
+          origin: urlOrigin,
+          statusActive: urlReady || statusFilter !== 'all',
+        },
+        (r) => deletedRowOrigin(r, !!salesByContract[r.contract_id]),
+        (r) => [salesByContract[r.contract_id]?.sale_number, salesByContract[r.contract_id]?.proforma_number],
+      )
+    : [];
+  // Ativas e eliminadas pela ordem da lista (data da encomenda, mais recente primeiro).
+  const listEntries = mergeWithDeleted(orders, deletedRows, !hasMore);
+  const shownDeleted = listEntries.filter((e) => e.kind === 'deleted').length;
+
+  const getDeletedOrigin = (row: DeletedClientOrderRow): { kind: ClientOrderOriginKind; label: string } => {
+    const sale = salesByContract[row.contract_id];
+    const kind = deletedRowOrigin(row, !!sale);
+    if (kind === 'direct_sale') {
+      const number = sale?.sale_number || sale?.proforma_number || '';
+      return { kind, label: `Venda direta${number ? ` ${number}` : ''}` };
+    }
+    if (kind === 'manual') return { kind, label: 'Manual' };
+    return { kind, label: `Contrato ${row.contract_number}` };
+  };
+
+  const openDeletedDetail = (row: DeletedClientOrderRow) => {
+    pendingDetailActionRef.current = null;
+    setDetailData(null);
+    setDetailLoading(false);
+    setDeletedDetail(row);
+    setDetailOpen(true);
+  };
+
+  // O histórico relê sempre que o documento é relido (depois de uma ação).
+  useEffect(() => {
+    if (detailData) setDetailVersion((v) => v + 1);
+  }, [detailData]);
+
   // Origem para o distintivo da lista — mesma regra de getDeletableOrigin/direct_sales.
   const getListOrigin = (order: ClientOrderDocumentRow): { kind: ClientOrderOriginKind; label: string } | null => {
     const sale = salesByContract[order.contract_id];
@@ -2466,7 +2560,7 @@ const ClientOrders = () => {
     try {
       const filters = { search: debouncedSearchTerm, status: statusFilter, dateFrom, dateTo };
       // Com "Prontas a expedir" exporta-se o mesmo conjunto que a lista mostra.
-      const { rows, truncated } = urlReady
+      const { rows: fetchedRows, truncated } = urlReady
         ? await fetchClientOrderRowsByIds(
             activeCompany.id,
             filters,
@@ -2474,6 +2568,8 @@ const ClientOrders = () => {
             EXPORT_MAX_PAGES,
           )
         : await fetchAllClientOrderRows(activeCompany.id, filters, EXPORT_MAX_PAGES);
+      // Com o chip "Origem: …" exporta-se a mesma origem que a lista mostra.
+      const rows = filterRowsByOrigin(fetchedRows, urlOrigin);
       if (rows.length === 0) {
         toast({ title: 'Nada para exportar', description: 'Não há encomendas com estes filtros.' });
         return;
@@ -2715,6 +2811,39 @@ const ClientOrders = () => {
               </Button>
             ) : null}
           </span>
+        ),
+      },
+    ];
+    return <ClientOrderInfoGrid items={items} />;
+  };
+
+  // Grelha de uma encomenda eliminada: os mesmos campos (só leitura) e
+  // "Eliminada: data · motivo", como no 2.0.
+  const renderDeletedInfo = (row: DeletedClientOrderRow) => {
+    const label = row.order_number || row.contract_number;
+    const items: ClientOrderInfoItem[] = [
+      { label: 'Cliente', value: row.client_name || '—' },
+      {
+        label: 'Encomenda · data',
+        value: (
+          <>
+            <span className="font-mono text-[0.92em]">{label}</span>
+            {' · '}
+            {row.signature_date ? new Date(row.signature_date).toLocaleDateString('pt-PT') : '—'}
+          </>
+        ),
+      },
+      { label: 'Valor', value: <span className="tabular-nums">{formatEur(row.total_value)}</span> },
+      { label: 'Morada', value: row.delivery_address || '—' },
+      { label: 'Notas', value: row.notes || '—' },
+      { label: 'Origem', value: getDeletedOrigin(row).label },
+      {
+        label: 'Eliminada',
+        value: (
+          <>
+            {row.deleted_at ? new Date(row.deleted_at).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+            {row.delete_reason ? ` · ${row.delete_reason}` : ''}
+          </>
         ),
       },
     ];
@@ -3022,12 +3151,28 @@ const ClientOrders = () => {
                 aria-label={t('clientOrders.filters.dateTo')}
               />
             </label>
-            {(searchTerm || statusFilter !== "all" || dateFrom || dateTo || urlReady) && (
+            {/* Ver eliminadas (2.0): lê client_contracts, por isso pede client_contracts.view. */}
+            <div
+              className="inline-flex items-center gap-2 text-[13px]"
+              title={canSeeDeleted ? undefined : 'Sem permissão: requer ver contratos (client_contracts.view)'}
+            >
+              <Checkbox
+                id="client-orders-show-deleted"
+                checked={showDeleted && canSeeDeleted}
+                disabled={!canSeeDeleted}
+                onCheckedChange={(checked) => setShowDeleted(checked === true)}
+              />
+              <Label htmlFor="client-orders-show-deleted" className="cursor-pointer font-normal">
+                Ver eliminadas
+              </Label>
+            </div>
+            {(searchTerm || statusFilter !== "all" || dateFrom || dateTo || urlReady || urlOrigin !== "all") && (
               <Button
                 variant="outline"
                 onClick={() => {
                   setSearchTerm("");
                   applyStatusFilter("all");
+                  applyOriginFilter("all");
                   setDateFrom("");
                   setDateTo("");
                 }}
@@ -3036,11 +3181,11 @@ const ClientOrders = () => {
               </Button>
             )}
           </div>
-          <FilterPills<ClientOrderStatusFilter | 'ready'>
+          <FilterPills<ClientOrderStatusFilter | 'ready' | 'origin'>
             ariaLabel="Estado"
             value={statusFilter as ClientOrderStatusFilter}
             onChange={(value) => {
-              if (value !== 'ready') applyStatusFilter(value);
+              if (value !== 'ready' && value !== 'origin') applyStatusFilter(value);
             }}
             options={[
               {
@@ -3062,21 +3207,37 @@ const ClientOrders = () => {
                 'parcialmente_pendente',
                 'a_aguardar_encomenda',
                 'sem_fornecedor',
-              ] as const).map((status): FilterPillOption<ClientOrderStatusFilter | 'ready'> => ({
+              ] as const).map((status): FilterPillOption<ClientOrderStatusFilter | 'ready' | 'origin'> => ({
                 value: status,
                 label: getOverallStatusLabel(status),
                 count: statusSummary ? statusSummary.byStatus[status] : null,
                 pressed: !urlReady && statusFilter === status,
               })),
+              // A origem escolhida no Hoje (Contratos, Vendas diretas,
+              // Encomendas manuais): carregar limpa-a.
+              ...(urlOrigin !== 'all'
+                ? [{
+                    value: 'origin' as const,
+                    label: `Origem: ${CLIENT_ORDER_ORIGIN_FILTER_LABELS[urlOrigin]}`,
+                    pressed: true,
+                    onSelect: () => applyOriginFilter('all'),
+                    hint: 'Carregar limpa o filtro de origem',
+                  }]
+                : []),
             ]}
           />
           <ClientOrderProgressLegend />
         </div>
 
-        {urlReady && readyTruncated && (
+        {(urlReady || urlOrigin !== 'all') && readyTruncated && (
           <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" role="status">
-            Lista de prontas a expedir incompleta: foram lidas as {READY_MAX_PAGES * 100} encomendas mais recentes.
+            Lista {urlReady ? 'de prontas a expedir ' : ''}incompleta: foram lidas as {READY_MAX_PAGES * 100} encomendas mais recentes.
             Use as datas ou a pesquisa para encontrar as restantes.
+          </div>
+        )}
+        {showDeleted && canSeeDeleted && deletedQuery.isError && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm" role="status">
+            Não foi possível ler as encomendas eliminadas.
           </div>
         )}
 
@@ -3101,14 +3262,55 @@ const ClientOrders = () => {
                 <TableRow>
                   <TableCell colSpan={8} className="text-center">{t('clientOrders.loading')}</TableCell>
                 </TableRow>
-              ) : orders.length === 0 ? (
+              ) : listEntries.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                     Sem encomendas com estes filtros
                   </TableCell>
                 </TableRow>
               ) : (
-                orders.map((order) => {
+                listEntries.map((entry) => {
+                  if (entry.kind === 'deleted') {
+                    const row = entry.row;
+                    const label = row.order_number || row.contract_number;
+                    const origin = getDeletedOrigin(row);
+                    return (
+                      <TableRow
+                        key={`deleted:${row.contract_id}`}
+                        className="cursor-pointer [&>td:not(:last-child)]:opacity-60"
+                        onClick={() => openDeletedDetail(row)}
+                      >
+                        <TableCell className="align-top">
+                          <div className="flex flex-col items-start gap-1">
+                            <b className="whitespace-nowrap font-mono text-[0.92em]">{label}</b>
+                            <ClientOrderOriginChip kind={origin.kind} label={origin.label} />
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top">{row.client_name || '-'}</TableCell>
+                        <TableCell className="align-top">
+                          {row.delivery_address ? (
+                            <small className="block max-w-[16rem] truncate text-xs" title={row.delivery_address}>
+                              {row.delivery_address}
+                            </small>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap align-top">
+                          {row.signature_date ? new Date(row.signature_date).toLocaleDateString('pt-PT') : '-'}
+                        </TableCell>
+                        <TableCell className="text-right align-top text-muted-foreground">—</TableCell>
+                        <TableCell className="align-top text-xs text-muted-foreground">—</TableCell>
+                        <TableCell className="align-top">
+                          <InventoryStatusBadge tone="neutral">Eliminada</InventoryStatusBadge>
+                        </TableCell>
+                        <TableCell className="text-right align-top">
+                          <DeletedClientOrderRowActions orderLabel={label} onView={() => openDeletedDetail(row)} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
+                  const order = entry.row;
                   const orderLabel = order.order_number || order.contract_number;
                   const origin = getListOrigin(order);
                   const deletable = !!getDeletableOrigin(order.contract_id, order.origin_type);
@@ -3187,7 +3389,11 @@ const ClientOrders = () => {
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2.5 px-0.5 text-[12.5px] text-muted-foreground">
-          <span>{orders.length} encomenda(s){hasMore && !loading ? ' carregada(s)' : ''}</span>
+          <span>
+            {listEntries.length} encomenda(s){hasMore && !loading ? ' carregada(s)' : ''}
+            {shownDeleted > 0 ? ` · ${shownDeleted} eliminada(s)` : ''}
+            {showDeleted && deletedQuery.data?.truncated ? ' (só as 500 eliminadas mais recentes)' : ''}
+          </span>
         </div>
 
         <div ref={loadMoreRef} className="py-4 flex justify-center">
@@ -3208,8 +3414,18 @@ const ClientOrders = () => {
           setDetailOpen(o);
         }}
         crumbs="Armazém › Saídas para clientes"
-        title={detailData ? (detailData.order_number || detailData.contract_number) : 'Encomenda Cliente'}
-        badges={detailData && !detailLoading ? (() => {
+        title={deletedDetail
+          ? (deletedDetail.order_number || deletedDetail.contract_number)
+          : detailData ? (detailData.order_number || detailData.contract_number) : 'Encomenda Cliente'}
+        badges={deletedDetail ? (() => {
+          const origin = getDeletedOrigin(deletedDetail);
+          return (
+            <>
+              <InventoryStatusBadge tone="neutral">Eliminada</InventoryStatusBadge>
+              <ClientOrderOriginChip kind={origin.kind} label={origin.label} />
+            </>
+          );
+        })() : detailData && !detailLoading ? (() => {
           const status = getDetailOverallStatus(detailData);
           const origin = getDetailOrigin(detailData);
           const ready = detailData.lines.filter(isStockExitConfirmable).length;
@@ -3221,11 +3437,31 @@ const ClientOrders = () => {
             </>
           );
         })() : null}
-        topActions={detailData && !detailLoading ? renderDetailMenu(detailData) : null}
-        info={detailData && !detailLoading ? renderDetailInfo(detailData) : null}
-        footer={detailData && !detailLoading ? renderDetailFooter(detailData) : null}
+        topActions={!deletedDetail && detailData && !detailLoading ? renderDetailMenu(detailData) : null}
+        info={deletedDetail
+          ? renderDeletedInfo(deletedDetail)
+          : detailData && !detailLoading ? renderDetailInfo(detailData) : null}
+        footer={deletedDetail
+          ? <Button variant="outline" onClick={() => setDetailOpen(false)}>Fechar</Button>
+          : detailData && !detailLoading ? renderDetailFooter(detailData) : null}
       >
-        {detailLoading ? (
+        {deletedDetail ? (
+          <>
+            <p className="flex items-start gap-1.5 rounded-lg border bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                Encomenda eliminada: as saídas foram estornadas e as reservas libertadas. As linhas já não se
+                mostram — o documento da encomenda só se lê enquanto está ativa.
+              </span>
+            </p>
+            <ClientOrderHistorySection
+              organizationId={activeCompany?.id}
+              contractId={deletedDetail.contract_id}
+              origin={getDeletedOrigin(deletedDetail).kind}
+              version={listDataVersion}
+            />
+          </>
+        ) : detailLoading ? (
           <div className="flex items-center justify-center py-10">
             <OlyviaLoader size={32} />
           </div>
@@ -3339,6 +3575,13 @@ const ClientOrders = () => {
                 saídas confirmadas aqui se podem estornar. A receção da encomenda ao fornecedor serve esta encomenda.
               </span>
             </p>
+
+            <ClientOrderHistorySection
+              organizationId={activeCompany?.id}
+              contractId={detailData.contract_id}
+              origin={getDetailOrigin(detailData)?.kind ?? 'contract'}
+              version={detailVersion}
+            />
           </>
         ) : null}
       </ClientOrderDetailSheet>

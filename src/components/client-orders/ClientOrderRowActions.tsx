@@ -23,6 +23,20 @@ interface ClientOrderRowActionsProps {
   remove: { deletable: boolean; busy: boolean; onSelect: () => void };
 }
 
+/**
+ * Linha de uma encomenda eliminada ("Ver eliminadas"): só "Ver". O PDF e as
+ * ações precisam de rpc_get_client_order_document, que não lê eliminadas.
+ */
+export function DeletedClientOrderRowActions({ orderLabel, onView }: { orderLabel: string; onView: () => void }) {
+  return (
+    <div className="inline-flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+      <button type="button" className={BTN} onClick={onView} aria-label={`Ver ${orderLabel} (eliminada)`}>
+        Ver
+      </button>
+    </div>
+  );
+}
+
 export function ClientOrderRowActions({
   orderLabel,
   onView,

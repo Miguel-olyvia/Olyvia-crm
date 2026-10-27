@@ -227,9 +227,9 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
       <div className="grid gap-3 lg:grid-cols-2">
         {salesStage ? (
           <Stage n={1} title="Vendas assinadas">
-            {isNum(origin?.contract) ? <FlowCounterButton label="Contratos" value={origin.contract} onClick={go(clientOrdersLink())} /> : null}
-            {isNum(origin?.direct_sale) ? <FlowCounterButton label="Vendas diretas" value={origin.direct_sale} onClick={go(clientOrdersLink())} /> : null}
-            {isNum(origin?.manual) ? <FlowCounterButton label="Encomendas manuais" value={origin.manual} onClick={go(clientOrdersLink())} /> : null}
+            {isNum(origin?.contract) ? <FlowCounterButton label="Contratos" value={origin.contract} onClick={go(clientOrdersLink({ origin: "contract" }))} /> : null}
+            {isNum(origin?.direct_sale) ? <FlowCounterButton label="Vendas diretas" value={origin.direct_sale} onClick={go(clientOrdersLink({ origin: "direct_sale" }))} /> : null}
+            {isNum(origin?.manual) ? <FlowCounterButton label="Encomendas manuais" value={origin.manual} onClick={go(clientOrdersLink({ origin: "manual" }))} /> : null}
             {trigger ? (
               <p className="text-xs text-muted-foreground">
                 Baixa no momento definido:{" "}

@@ -3,10 +3,10 @@
 //
 //   /purchase-orders?status=&supplier=&open=      purchaseOrdersLink / parsePurchaseOrdersParams
 //   /suppliers?filter=&open=&tab=(&prices=pending) suppliersLink / parseSuppliersParams
-//   /client-orders?status=&ready=1&open=           clientOrdersLink / parseClientOrdersParams
+//   /client-orders?status=&ready=1&origin=&open=   clientOrdersLink / parseClientOrdersParams (+ parseClientOrdersOrigin)
 //   /stock-counts?status=&stalled=1&open=          stockCountsLink / parseStockCountsParams
 //   /receiving?guia=&notes=&tab=&po=&vista=        receivingLink / parseReceivingParams
-//   /stocks?status=&warehouse=                     stocksLink / parseStocksParams
+//   /stocks?status=&warehouse=&q=                  stocksLink / parseStocksParams
 //   /stock-movements?product=&warehouse=&doc=      stockMovementsLink / parseStockMovementsParams
 //
 // Regras: valores por omissão ("all", false, vazio) não vão para o URL; valores
@@ -141,15 +141,33 @@ export const CLIENT_ORDER_STATUS_FILTERS = [
 ] as const;
 export type ClientOrderStatusFilter = (typeof CLIENT_ORDER_STATUS_FILTERS)[number];
 
+/**
+ * Origem da encomenda (rpc_list_client_order_documents.origin_type):
+ * contract | direct_sale | manual. "all" = todas. Escolhida no Hoje
+ * ("Vendas assinadas"); a lista mostra-a num chip "Origem: …" que a limpa.
+ */
+export const CLIENT_ORDER_ORIGIN_FILTERS = ["all", "contract", "direct_sale", "manual"] as const;
+export type ClientOrderOriginFilter = (typeof CLIENT_ORDER_ORIGIN_FILTERS)[number];
+
 export interface ClientOrdersLinkParams {
   status?: ClientOrderStatusFilter;
   ready?: boolean;
+  origin?: ClientOrderOriginFilter;
   /** contract_id da encomenda (é o que ClientOrders.tsx abre com ?open=). */
   open?: string | null;
 }
 
 export const clientOrdersLink = (p: ClientOrdersLinkParams = {}): string =>
-  build(INVENTORY_PATHS.clientOrders, { status: p.status, ready: p.ready, open: p.open }, { status: "all" });
+  build(
+    INVENTORY_PATHS.clientOrders,
+    { status: p.status, ready: p.ready, origin: p.origin, open: p.open },
+    { status: "all", origin: "all" },
+  );
+
+/** ?origin= da lista de Encomendas Clientes (desconhecido → "all"). */
+export function parseClientOrdersOrigin(input: ParamsInput): ClientOrderOriginFilter {
+  return oneOf(CLIENT_ORDER_ORIGIN_FILTERS, toParams(input).get("origin"), "all");
+}
 
 export function parseClientOrdersParams(input: ParamsInput) {
   const sp = toParams(input);
@@ -239,10 +257,16 @@ export interface StocksLinkParams {
   status?: StockStatusFilter;
   /** warehouses.id */
   warehouse?: string | null;
+  /** Texto da pesquisa da lista (nome, SKU ou EAN) — usado pela pesquisa global. */
+  q?: string | null;
 }
 
 export const stocksLink = (p: StocksLinkParams = {}): string =>
-  build(INVENTORY_PATHS.stocks, { status: p.status, warehouse: p.warehouse }, { status: "all", warehouse: "all" });
+  build(
+    INVENTORY_PATHS.stocks,
+    { status: p.status, warehouse: p.warehouse, q: p.q?.trim() || null },
+    { status: "all", warehouse: "all" },
+  );
 
 export function parseStocksParams(input: ParamsInput) {
   const sp = toParams(input);
@@ -250,6 +274,7 @@ export function parseStocksParams(input: ParamsInput) {
   return {
     status: oneOf(STOCK_STATUS_FILTERS, sp.get("status"), "all"),
     warehouse: warehouse === "all" ? null : warehouse,
+    q: str(sp, "q"),
   };
 }
 
