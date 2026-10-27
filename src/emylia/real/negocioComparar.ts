@@ -1,13 +1,14 @@
 // O Negocio como fica depois de ir à base e voltar (para comparar nos testes e no script da ida e volta pela base): datas no formato do
-// motor, sem o que ainda não vai para a base (a obra, as adendas, a demolição, o acesso ao portal) nem o que é só do ecrã.
+// motor, sem o que ainda não vai para a base (a obra, a demolição, o acesso ao portal) nem o que é só do ecrã.
 import type { Negocio } from "../motor";
+import { faturasAdenda } from "../adendas";
 import { normalQ } from "./negocioReal";
 
 /** O Negocio como fica depois da ida e volta: datas no formato do motor, sem o que ainda não vai para a base nem o que é só do ecrã. */
 export function normalParaComparar(d0: Negocio, HOJE: Date): unknown {
   const d = structuredClone(d0) as Negocio & Record<string, unknown>;
   const q = (s: string | null | undefined) => normalQ(s, HOJE);
-  delete d.fresh; delete d.valida; delete d.atraso; delete d.adendas; delete d.acesso;
+  delete d.fresh; delete d.valida; delete d.atraso; delete d.acesso;
   d.obra = { plano: null, mats: null, real: null, aprendido: false };
   d.quando = q(d.quando);
   d.hist = d.hist.map((e) => ({ ...e, q: q(e.q) }));
@@ -43,6 +44,30 @@ export function normalParaComparar(d0: Negocio, HOJE: Date): unknown {
     // os opcionais a null são o mesmo que não existirem (o motor põe-nos a null depois de os usar)
     for (const k of ["pedidoCliente", "recusada", "contratoPedido", "contratoRevisto", "assinatura"] as const) if (o[k] === null) delete o[k];
   }
+  // as adendas: as datas no formato do motor; os opcionais a null e as listas vazias são o mesmo que não existirem
+  for (const a of d.adendas ?? []) {
+    const fs = faturasAdenda(a); delete a.fatura; delete a.recibo; delete a.pag;
+    if (fs.length) a.faturas = fs.map((f) => ({ ...f, q: q(f.q), ...(f.recibo ? { recibo: { ...f.recibo, q: q(f.recibo.q) } } : {}) })); else delete a.faturas;
+    a.criada = q(a.criada);
+    if (a.estado === "assinada") a.assinada = q(a.assinada ?? a.criada); else delete a.assinada;
+    if (a.estado === "recusada") a.recusada = q(a.recusada ?? a.criada); else delete a.recusada;
+    a.enviada = a.enviada ? q(a.enviada) : null; a.aceite = a.aceite ? q(a.aceite) : null;
+    a.verif = !!a.verif; a.aprov ??= null;
+    if (a.pedidoCliente) a.pedidoCliente.q = q(a.pedidoCliente.q);
+    if (a.contratoPedido) a.contratoPedido.q = q(a.contratoPedido.q);
+    if (a.contratoRevisto) a.contratoRevisto.q = q(a.contratoRevisto.q);
+    if (a.assinatura) delete a.assinatura.imagem;
+    for (const cv of a.contratoVersoes ?? []) { cv.substituido = q(cv.substituido); if (cv.revisto) cv.revisto.q = q(cv.revisto.q); }
+    for (const v of a.versoes ?? []) { v.enviada = q(v.enviada); v.substituida = q(v.substituida); v.total = Math.round(v.total * 100) / 100; if (!v.desconto) delete v.desconto; }
+    if (!a.desconto) delete a.desconto;
+    if (!a.vista) delete a.vista;
+    if (a.contrato !== "enviado") delete a.contrato;
+    for (const k of ["pedidoCliente", "contratoPedido", "contratoRevisto", "assinatura", "clausulas", "recusa"] as const) if (a[k] == null) delete a[k];
+    if (a.versoes && !a.versoes.length) delete a.versoes;
+    if (a.contratoVersoes && !a.contratoVersoes.length) delete a.contratoVersoes;
+    if (a.clausulas && !Object.keys(a.clausulas).length) delete a.clausulas;
+  }
+  if (d.adendas && !d.adendas.length) delete d.adendas;
   // o que não tem valor não volta (undefined / objetos vazios)
   const v = d.visita as Record<string, unknown>;
   for (const k of ["manter", "clienteCompra"]) if (v[k] && !Object.keys(v[k] as object).length) delete v[k];

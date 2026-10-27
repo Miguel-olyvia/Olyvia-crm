@@ -13,8 +13,8 @@ export interface RefNegocio { id: string; entityId: string }
 
 /** O que conta para gravar (sem o que é só do ecrã nem o que ainda não vai para a base). */
 export function marcaNegocio(d: Negocio): string {
-  const { fresh, valida, atraso, obra, adendas, acesso, ...resto } = d as Negocio & Record<string, unknown>;
-  void fresh; void valida; void atraso; void obra; void adendas; void acesso;
+  const { fresh, valida, atraso, obra, acesso, ...resto } = d as Negocio & Record<string, unknown>;
+  void fresh; void valida; void atraso; void obra; void acesso;
   return JSON.stringify(resto);
 }
 export const fotografarNegocios = (deals: readonly Negocio[]): Map<number, string> => new Map(deals.map((d) => [d.id, marcaNegocio(d)]));

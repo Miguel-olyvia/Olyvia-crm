@@ -20,6 +20,7 @@ function trocarServicos(L: LinhasNegocio, f: (s: string | null) => string | null
     for (const l of o.linhas ?? []) if (l.tipo === "servico") l.servico = f(l.servico);
     for (const p of o.produtos ?? []) p.servico = f(p.servico);
   }
+  for (const a of c.adendas ?? []) for (const v of a.versoes) for (const l of v.linhas) if (!l.livre) l.servico = f(l.servico);
   return c;
 }
 
@@ -40,7 +41,7 @@ export function deBase(j: unknown, ids: IdsServico): NegocioLido {
   const L: LinhasNegocio = {
     negocio: n as unknown as LinhasNegocio["negocio"], respostas: o.respostas ?? [], visitas: o.visitas ?? [], medidas: o.medidas,
     servicos: o.servicos ?? [], produtos: o.produtos ?? null, partes_fora: o.partes_fora ?? null, orcamentos: o.orcamentos ?? [],
-    contratos: o.contratos ?? [], faturas: o.faturas ?? null, historico: o.historico ?? [],
+    contratos: o.contratos ?? [], faturas: o.faturas ?? null, historico: o.historico ?? [], adendas: o.adendas ?? [],
   };
   return { id, entityId, estadoCrm, fluxoEmylia, linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
 }

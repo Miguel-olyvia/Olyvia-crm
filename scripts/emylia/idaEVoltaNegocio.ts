@@ -151,6 +151,32 @@ if ((temEc.rows[0] as { n: number }).n) {
   const fns = (await db.query(`select count(*)::int n from pg_proc where proname in ('fn_client_order_line_reservations','rpc_list_client_order_documents','rpc_client_order_list_readiness','fn_client_order_request_missing') and prosrc like '%fn_ec_emitida%'`)).rows[0] as { n: number };
   if (fns.n === 4) { ok++; console.log("  certo: as 4 funções da encomenda de cliente usam fn_ec_emitida"); } else { falhas++; console.log("  FALHOU: funções ajustadas", fns.n); }
 }
+// a adenda (trabalhos a mais depois do contrato), do rascunho ao recibo da 1.ª parcela
+const temAdendas = ((await db.query(`select count(*)::int n from pg_proc where proname='fn_neg_guardar_adendas'`)).rows[0] as { n: number }).n > 0;
+if (temAdendas) {
+  const SID = d().orc!.linhas.find((l) => l.t === "svc")!.sid as string;
+  S.role = "comercial";
+  const AD = A.criarAdenda(id, [{ sid: SID, q: 2 }], "O cliente pediu");
+  const ad = () => d().adendas?.find((x) => x.n === AD);
+  if (!AD) { falhas++; console.log("  FALHOU: a adenda não nasceu"); }
+  else {
+    await passo("adenda preparada");
+    A.verificarEnviarAdenda(id, AD); await passo(`adenda enviada (${ad()?.estado})`);
+    A.pedirAlteracoesAdenda(id, AD, "Pode baixar o preço?", ["Baixar o preço"]); await passo("o cliente pediu alterações à adenda");
+    A.novaVersaoAdenda(id, AD, [{ sid: SID, q: 1 }], 5); A.verificarEnviarAdenda(id, AD); await passo(`adenda v2 enviada, com desconto (${ad()?.estado})`);
+    A.aceitarAdenda(id, AD); A.enviarContratoAdenda(id, AD); await passo(`contrato da adenda enviado (${ad()?.contrato})`);
+    A.assinarAdendaCom(id, AD, { tipo: "digital", nome: "Anabela Correia", q: "20/10/2026 10:15", id: "CMD-AD-01" }); await passo(`adenda assinada (${ad()?.estado})`);
+    S.role = "financeiro";
+    A.registarFaturaAdenda(id, AD, "FT 2026/900"); await passo(`fatura da 1.ª parcela da adenda (${ad()?.faturas?.length ?? 0})`);
+    A.validarPagamentosAdenda(id, AD); await passo(`1.ª parcela da adenda paga (${ad()?.faturas?.[0]?.recibo?.n ?? "sem recibo"})`);
+    const r = (await db.query(`select a.estado, (select count(*)::int from quotes q where q.adenda_id=a.id) versoes, (select count(*)::int from quotes q where q.adenda_id=a.id and q.negocio_id is not null) com_negocio,
+      (select string_agg(c.status || ':' || (c.ec_emitida_em is not null) || ':' || fn_ec_emitida(c.id), ',' order by c.versao) from client_contracts c where c.adenda_id=a.id) contratos
+      from adendas a where a.negocio_id=$1`, [NEG])).rows[0] as { estado: string; versoes: number; com_negocio: number; contratos: string };
+    console.log("  adenda na base:", JSON.stringify(r));
+    if (r.estado === "assinada" && r.versoes === 2 && r.com_negocio === 0 && r.contratos === "signed:true:true") { ok++; console.log("  certo: a adenda assinada, 2 versões fora do negócio, encomenda emitida com a 1.ª parcela paga"); }
+    else { falhas++; console.log("  FALHOU: a adenda na base não é a esperada"); }
+  }
+}
 const c = (await db.query(`select status, signature_method, versao, replaced_by_contract_id is not null substituido from client_contracts where negocio_id=$1 order by versao`, [NEG])).rows;
 console.log("  contratos na base:", JSON.stringify(c));
 const q = (await db.query(`select versao, estado, proposal_id is not null ligado from quotes where negocio_id=$1 order by versao`, [NEG])).rows;
