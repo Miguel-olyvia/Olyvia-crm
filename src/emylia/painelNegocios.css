@@ -1,0 +1,37 @@
+/* O Painel de Negócios (PainelNegocios.tsx): entrada dos blocos, linhas que se desenham, pulsação do que é urgente e o ponto "ao vivo".
+   Com "reduzir movimento" no sistema, nada se mexe: tudo aparece já no sítio. */
+@keyframes pn-subir { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.pn-subir { animation: pn-subir .6s cubic-bezier(.2, .7, .2, 1) both; }
+
+@keyframes pn-desenhar { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.pn-traco { stroke-dasharray: 1; stroke-dashoffset: 0; animation: pn-desenhar 1.4s cubic-bezier(.3, .7, .2, 1) both; }
+
+@keyframes pn-area { from { opacity: 0; } to { opacity: 1; } }
+.pn-area { animation: pn-area 1.2s ease-out .5s both; }
+
+@keyframes pn-pulso {
+  0% { box-shadow: 0 0 0 0 hsl(var(--destructive) / .45); }
+  70% { box-shadow: 0 0 0 12px hsl(var(--destructive) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--destructive) / 0); }
+}
+.pn-pulso { animation: pn-pulso 2.2s ease-out infinite; }
+
+@keyframes pn-ping { 75%, 100% { transform: scale(2.4); opacity: 0; } }
+.pn-ping { animation: pn-ping 1.6s cubic-bezier(0, 0, .2, 1) infinite; }
+
+/* o brilho que atravessa o cartão da previsão uma vez, ao abrir */
+.pn-brilho { position: relative; overflow: hidden; isolation: isolate; }
+.pn-brilho::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, hsl(var(--primary) / .10) 50%, transparent 65%);
+  transform: translateX(-100%); animation: pn-varrer 2.4s ease-in-out .3s 1 both;
+}
+@keyframes pn-varrer { to { transform: translateX(100%); } }
+
+.pn-barra { transition: width 1s cubic-bezier(.2, .7, .2, 1), opacity .3s; }
+.pn-anel { transition: stroke-dashoffset 1.4s cubic-bezier(.2, .7, .2, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pn-subir, .pn-traco, .pn-area, .pn-pulso, .pn-ping, .pn-brilho::after { animation: none; }
+  .pn-barra, .pn-anel { transition: none; }
+}

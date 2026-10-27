@@ -1,0 +1,682 @@
+// Página do negócio (09/10/2026): só a fase atual está aberta, um passo de
+// cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
+// chega a vez delas. Ao mudar de fase, a nova entra animada.
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  FASES, LINHAS, PAPEIS, SLOTS, nomeLinha, visitaFeita, visitas,
+  alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot, valorSinal,
+  type Estado, type Negocio, type Papel, type SvcId,
+} from "./motor";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
+import { VisitasLista } from "./Visitas";
+import { NovaVersao } from "./VoltarAtras";
+import { RegistarFaturaErp } from "./FaturaErp";
+import { UsarLocalizacao } from "./Localizacao";
+import { orcLinhas } from "./ServicosCatalogo";
+import { NecessidadesCliente } from "./NecessidadesVisita";
+import { FotosEtapa } from "./FotosEtapa";
+import { OrcamentoSimples } from "./OrcamentoSimples";
+import { LinhasOrcamento } from "./LinhasOrcamento";
+import { ProdutosOrcamento } from "./ProdutosOrcamento";
+import { DocumentosSimples, ObraSimples } from "./FasesSimples";
+import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
+import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
+import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
+import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
+import { lerInventario, useInventario } from "./inventario/loja";
+import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra";
+import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
+import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
+import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
+
+const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
+const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
+const QUANDO_ABRE = ["", "abre quando a chamada for registada", "abre quando a visita for marcada", "abre quando o levantamento fechar", "abre quando o contrato for assinado", "abre quando o pagamento for validado"];
+
+export function PaginaNegocio(ctx: Ctx) {
+  const { S, A, go } = ctx;
+  const d = S.deals.find((x) => x.id === S.deal)!;
+  const p = proximo(d, S), L = LINHAS[d.linha], o = d.orc;
+  const T = o ? tot(d, S) : null;
+  const cli = S.clientes.find((c) => c.deal === d.id);
+  const [abertaFeita, setAbertaFeita] = useState<number | null>(null);
+  const [anular, setAnular] = useState(false);
+  const atualRef = useRef<HTMLDivElement>(null);
+  const faseAntes = useRef(d.fase);
+
+  // ao mudar de fase, desce até à fase nova
+  useEffect(() => {
+    if (faseAntes.current !== d.fase) {
+      faseAntes.current = d.fase;
+      setTimeout(() => atualRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+    }
+  }, [d.fase]);
+
+  const titulo = d.servico + (d.local ? " · " + d.local.split(",").pop()!.trim() : "");
+  const progresso = d.perdido ? 0 : Math.min(1, d.fase / (FASES.length - 1));
+
+  return (
+    <div className="mx-auto w-full max-w-6xl space-y-5 px-4 pb-16 pt-4 sm:px-6 sm:pt-6">
+      <button type="button" onClick={go(() => A.nav("negocios"))} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition hover:text-primary">
+        <ArrowLeft className="h-4 w-4" /> Negócios
+      </button>
+
+      {/* Cabeçalho */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm text-muted-foreground">Negócio #{d.id} · {L.n}</p>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">{titulo}</h1>
+          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1"><User className="h-3.5 w-3.5" />{d.nome}</span>
+            <span className="inline-flex items-center gap-1"><Phone className="h-3.5 w-3.5" />{d.tel}</span>
+            <span>comercial: Rúben</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {T && <span key={eur(T.pf)} className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm text-primary animate-in fade-in-0 zoom-in-95"><span className="font-mono font-semibold tabular-nums">{eur(T.pf)} € s/ IVA</span>· margem {pct(T.m)}</span>}
+          {/* 23/10 (2.0): reenviar o acesso ao portal sem um documento novo, como na proposta simples */}
+          <BotaoAcessoPortal ctx={ctx} d={d} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-muted" />
+          {d.fase < 4 && !d.perdido && <Button variant="outline" size="sm" onClick={go(() => A.perder(d.id))}>Marcar perdido</Button>}
+          {/* 19/10: com contrato, a Direção anula o contrato (a encomenda no Inventário vai com ele) */}
+          {podeAnular(d) && <Button variant="outline" size="sm" aria-expanded={anular} onClick={() => setAnular(!anular)}>Anular {oQueAnular(d)}</Button>}
+        </div>
+      </header>
+      <EstadoAcessoPortal ctx={ctx} d={d} />
+      {anular && podeAnular(d) && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
+      {S.confirmPerda === d.id && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/[0.06] p-3 text-sm animate-in fade-in-0 slide-in-from-top-2">
+          <b>Marcar como perdido?</b><span className="text-muted-foreground">Sai do quadro, mas fica no histórico.</span>
+          <span className="flex-1" />
+          <Button variant="outline" size="sm" onClick={go(() => A.perderNao())}>Cancelar</Button>
+          <Button variant="destructive" size="sm" onClick={go(() => A.perderSim(d.id))}>Marcar perdido</Button>
+        </div>
+      )}
+
+      {/* Barra das fases */}
+      <ol className="relative grid grid-cols-6 gap-1 rounded-2xl border border-border/70 bg-card px-2 pb-3 pt-4 shadow-[var(--shadow-sm)]">
+        <span aria-hidden="true" className="absolute left-[8.33%] right-[8.33%] top-8 h-0.5 rounded-full bg-border" />
+        <span aria-hidden="true" className="absolute left-[8.33%] top-8 h-0.5 rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-700 ease-out" style={{ width: `calc(${progresso} * 83.33%)` }} />
+        {FASES.map((f, i) => {
+          const Ic = ICONE_FASE[i];
+          const st = d.fase > i ? "feita" : d.fase === i ? "atual" : "depois";
+          return (
+            <li key={f} className="relative z-10 flex flex-col items-center gap-1.5 text-center">
+              <button type="button" disabled={st === "depois"}
+                onClick={() => { if (st === "feita") setAbertaFeita(i); document.getElementById("sec-" + i)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}
+                className={cn("grid h-8 w-8 place-items-center rounded-full transition-all duration-500",
+                  st === "feita" && "bg-primary text-primary-foreground shadow-md",
+                  st === "atual" && "bg-background text-primary ring-2 ring-primary ring-offset-2 ring-offset-card scale-110",
+                  st === "depois" && "bg-muted text-muted-foreground")}>
+                {st === "feita" ? <Check className="h-4 w-4 animate-in zoom-in-50" /> : <Ic className="h-4 w-4" />}
+              </button>
+              <span className={cn("text-[11px] leading-tight sm:text-xs", st === "atual" ? "font-semibold text-primary" : st === "feita" ? "text-foreground" : "text-muted-foreground")}>{f}</span>
+              {st === "atual" && <span className="absolute top-0 h-8 w-8 animate-ping rounded-full bg-primary/20 [animation-duration:2.2s]" aria-hidden="true" />}
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 space-y-3">
+          {/* Fases feitas: resumo, abre ao clicar */}
+          {FASES.slice(0, d.fase).map((f, i) => (
+            <FaseFeita key={f} ctx={ctx} d={d} i={i} aberta={abertaFeita === i} alternar={() => setAbertaFeita(abertaFeita === i ? null : i)} />
+          ))}
+
+          {/* Fase atual */}
+          <div ref={atualRef} id={"sec-" + d.fase} className="scroll-mt-4">
+            <FaseAtual key={d.id + ":" + d.fase + ":" + (d.perdido ? "x" : "")} ctx={ctx} d={d} />
+          </div>
+
+          {/* Fases seguintes */}
+          {FASES.slice(d.fase + 1).map((f, k) => {
+            const i = d.fase + 1 + k, Ic = ICONE_FASE[i];
+            return (
+              <div key={f} className="flex items-center gap-3 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-muted"><Ic className="h-4 w-4" /></span>
+                <span className="font-medium">{f}</span>
+                <span className="ml-auto inline-flex items-center gap-1.5 text-xs"><Lock className="h-3.5 w-3.5" />{QUANDO_ABRE[i]}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Lado direito: cliente e histórico */}
+        <aside className="space-y-4 lg:sticky lg:top-4">
+          <section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[var(--shadow-sm)]">
+            <div aria-hidden="true" className="h-[3px] w-full bg-gradient-to-r from-primary via-primary/40 to-transparent" />
+            <div className="flex items-center justify-between border-b border-border/60 bg-muted/30 px-4 py-3">
+              <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em]">Cliente</h2>
+              {cli && <span className="rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-semibold text-success animate-in zoom-in-50">em Clientes</span>}
+            </div>
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 p-4 text-sm">
+              <dt className="text-muted-foreground">Nome</dt><dd className="text-right font-medium">{d.nome}</dd>
+              <dt className="text-muted-foreground">Telefone</dt><dd className="text-right font-medium">{d.tel}</dd>
+              {d.f.email && <><dt className="text-muted-foreground">Email</dt><dd className="truncate text-right">{d.f.email}</dd></>}
+              <dt className="text-muted-foreground">Obra</dt><dd className="text-right">{d.f.morada ? `${d.f.morada}, ${d.f.localidade || ""}` : d.local || "—"}</dd>
+              {d.f.imovel && <><dt className="text-muted-foreground">Imóvel</dt><dd className="text-right">{d.f.imovel}{d.f.tipologia ? " " + d.f.tipologia : ""}</dd></>}
+              <dt className="text-muted-foreground">Origem</dt><dd className="text-right">{d.f.origem || d.origem}</dd>
+              {d.f.pref && <><dt className="text-muted-foreground">Contactar</dt><dd className="text-right">{d.f.pref}{d.f.hora ? " · " + d.f.hora.toLowerCase() : ""}</dd></>}
+            </dl>
+          </section>
+          <section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[var(--shadow-sm)]">
+            <div aria-hidden="true" className="h-[3px] w-full bg-gradient-to-r from-info via-info/40 to-transparent" />
+            <div className="flex items-center justify-between border-b border-border/60 bg-muted/30 px-4 py-3">
+              <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em]">Histórico <span className="ml-1 font-mono text-sm text-info">{d.hist.length}</span></h2>
+            </div>
+            <ol className="max-h-[420px] space-y-0.5 overflow-y-auto p-3">
+              {d.hist.map((h, i) => (
+                <li key={d.hist.length - i} className="flex gap-3 rounded-lg px-1.5 py-1.5 text-sm animate-in fade-in-0 slide-in-from-top-1">
+                  <i className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", h.k === "x" ? "bg-destructive" : h.k === "w" ? "bg-warning" : h.t.startsWith("Passou") ? "bg-primary" : "bg-success")} />
+                  <span className="min-w-0">{h.t}<small className="block text-xs text-muted-foreground">{h.q}</small></span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ uma fase feita */
+function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: number; aberta: boolean; alternar: () => void }) {
+  const { S } = ctx;
+  const Ic = ICONE_FASE[i];
+  const gs = (i === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[i]).flatMap((g) => (g === AREA ? gruposArea(S.campos, d.f) : [g]));
+  const c = contagem(gs, d.f);
+  let resumo = resumoGrupos(gs, d.f, 4);
+  if (i === 0) resumo = [d.f.origem || d.origem, d.f.email || "", d.f.tipo_cliente || ""].filter(Boolean);
+  if (i === 1) resumo = [d.f.resultado || "", d.f.orc_cliente || "", d.visita.slot ? "visita " + d.visita.slot : ""].filter(Boolean);
+  if (i === 2) resumo = [d.f.tipologia || "", d.f.andar ? d.f.andar + ".º andar" : "", d.f.tem_elevador === "Sim" ? "com elevador" : "", orcLinhas(d, S).length + " serviços", d.visita.fotos + " fotos"].filter(Boolean);
+  if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " € s/ IVA", "margem " + pct(T.m), d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")]; }
+  if (i === 4) resumo = [d.fin.fatura?.n || "", d.fin.recibo?.n || "", d.f.metodo || ""].filter(Boolean);
+  return (
+    <section id={"sec-" + i} className="scroll-mt-4 overflow-hidden rounded-xl border border-border/70 bg-card animate-in fade-in-0 slide-in-from-top-2 duration-500">
+      <button type="button" onClick={alternar} aria-expanded={aberta} className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-muted/40">
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-success/15 text-success"><Check className="h-4 w-4" /></span>
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold"><Ic className="h-3.5 w-3.5 text-muted-foreground" />{FASES[i]}</span>
+          {!aberta && resumo.map((r) => <span key={r} className="truncate rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{r}</span>)}
+        </span>
+        <span className="hidden font-mono text-xs tabular-nums text-muted-foreground sm:inline">{c.f}/{c.n}</span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-300", aberta && "rotate-180")} />
+      </button>
+      <div className={cn("grid transition-[grid-template-rows] duration-300 ease-out", aberta ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+        <div className="min-h-0 overflow-hidden">
+          {aberta && (
+            <div className="space-y-4 border-t border-border/60 p-4 animate-in fade-in-0">
+              {i === 3 && d.orc && <div className="pg estreito"><Orcamento {...ctx} d={d} /></div>}
+              {i === 4 && <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div>}
+              {gs.map((g) => (
+                <div key={g.titulo} className="space-y-2">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{g.titulo}</h3>
+                  <Campos grupo={g} d={d} A={ctx.A} run={ctx.run} ro />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ a fase atual */
+/** Os passos da fase atual. `simples` desenha os campos maiores, numa coluna (proposta de 09/10). */
+export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
+  const { S, A, run, go } = ctx;
+  const o = d.orc, L = LINHAS[d.linha], v = d.visita;
+  const fx = { d, A, run, simples };
+  const INP = simples ? INPUT_G : INPUT;
+  const ROT = simples ? "grid gap-2 text-sm font-medium text-foreground" : "grid gap-1.5 text-xs font-medium text-muted-foreground";
+  // os grupos como a empresa os definiu no editor de campos
+  const E = (gr: Grupo) => efetivo(S.campos, gr);
+  const g = (gr: Grupo, ic: LucideIcon, ro = false) => { const e = E(gr); return passoDeGrupo(e, ic, <Campos grupo={e} {...fx} ro={ro} />, d.f); };
+
+  // 15/10: um passo cujo documento já saiu (a proposta enviada, o contrato gerado) está feito; os campos ficam só de leitura e
+  // já não contam como "falta 1 resposta" (senão o negócio abria nesse passo em vez de no que há a fazer, ex.: gerar o contrato)
+  const fechadoSe = (p: Passo, sim: boolean): Passo => (sim ? { ...p, conta: undefined, feito: true } : p);
+  let passos: Passo[] = [];
+  if (d.fase === 0) {
+    passos = [
+      { id: "quem", titulo: "Quem pede", icone: User, conta: { f: 2, n: 2 }, resumo: [d.nome, d.tel, nomeLinha(d)], corpo: (
+        <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
+          <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>
+          <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
+          <div className={ROT}>Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{nomeLinha(d)}{d.linhaPorDefinir && <span className="block font-normal text-muted-foreground">Sai da divisão escolhida na visita.</span>}</span></div>
+        </div>
+      ) },
+      g(LEAD[0], Phone), g(LEAD[1], Target), g(LEAD[2], ClipboardList),
+    ];
+  } else if (d.fase === 1) {
+    passos = [
+      // 27/10: no contacto ainda não se está no local: a localização fica para a visita (Exterior)
+      g(CONTACTO[0], Phone), g(CONTACTO[1], Sparkles), g(CONTACTO[2], MapPin),
+      g(CONTACTO[3], CalendarClock),
+      { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}.</p>
+          <div className="flex flex-wrap gap-2">
+            {SLOTS.map((s) => (
+              <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s))}
+                className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
+                <CalendarClock className="mr-1.5 inline h-4 w-4" />{s}
+              </button>
+            ))}
+          </div>
+          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot))()} />
+        </div>
+      ) },
+    ];
+  } else if (d.fase === 2) {
+    const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
+    const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
+    const nMed = CM.length;
+    const gv = visitas(d).map(grupoVisita), cv = contagem(gv, d.f);
+    passos = [
+      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) || visitas(d).some((n) => d.f[`v${n}_estado`] !== "Cancelada") ? 1 : 0), n: cv.n + 1 }, // a visita fica feita sozinha: só falta se todas estão canceladas
+        resumo: [`${visitas(d).length} ${visitas(d).length === 1 ? "visita" : "visitas"}`, visitaFeita(d) ? "feita" : "por fazer"],
+        corpo: <VisitasLista ctx={ctx} d={d} simples={simples} /> },
+      // 27/10 (Rúben): os passos com fotografias não passam sozinhos ao seguinte (saltavam antes de se poder tirar a foto)
+      { ...g(EXTERIOR, Building2), semAvancar: true, corpo: (
+        <div className="space-y-6">
+          {/* 27/10: a morada já está no cabeçalho; aqui só a confirmação no local */}
+          <UsarLocalizacao ctx={ctx} d={d} texto="Confirmar a morada pela localização" />
+          <Campos grupo={E(EXTERIOR)} {...fx} />
+          <FotosEtapa ctx={ctx} d={d} etapa="exterior" simples={simples} />
+        </div>
+      ) },
+      { ...g(INTERIOR, Home), semAvancar: true, corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
+      // várias divisões: um grupo de campos por divisão (gruposArea), contados todos no passo
+      // 27/10: as fotografias contam como uma resposta do passo: feita com fotografias ou com "o cliente não quis"
+      { ...g(AREA, Wrench), semAvancar: true, conta: (({ f, n }) => ({ f: f + (v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim" ? 1 : 0), n: n + 1 }))(contagem(GA, d.f)), corpo: <div className="space-y-6">{GA.map((ga) => <Campos key={ga.titulo} grupo={ga} {...fx} />)}<FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
+      { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
+        <div className="space-y-2">
+          <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>Todas obrigatórias. Água quente pode ser 0.</p>
+          <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-5"}>
+            {CM.map(([k, l]) => {
+              const falta = medidaEmFalta(v.med, k), val = medida(v.med, k);
+              return (
+              <label key={k} className={cn(simples ? ROT : "grid gap-1.5 rounded-xl text-xs font-medium text-muted-foreground transition-all", !simples && falta && CM.find(([x]) => medidaEmFalta(v.med, x))?.[0] === k && "rounded-lg bg-primary/[0.04] ring-2 ring-primary/40 ring-offset-[6px] ring-offset-card")}>
+                {l}
+                <input key={k + val} type="number" min="0" step="0.5" defaultValue={val || ""} id={`med-${k}-${d.id}`}
+                  className={cn(INP, aValidar(d, "medidas") && falta && "border-destructive ring-1 ring-destructive/40")}
+                  aria-invalid={(aValidar(d, "medidas") && falta) || undefined}
+                  onBlur={(e) => { const n = numero(e.target.value), x = isNaN(n) ? 0 : n; if (x !== val) run(() => porMedida(v.med, k, x)); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              </label>
+              );
+            })}
+          </div>
+          {/* notas livres sobre as medidas (opcional): ex. "parede do fundo com 2,4 m até ao teto falso" */}
+          <div className="pt-4">
+            <Campos grupo={{ titulo: "", campos: [{ k: "obs_medidas", l: "Observações", t: "texto_longo", opcional: true }] }} {...fx} />
+          </div>
+        </div>
+      ) },
+      // na versão Atual simples, as "Escolhas do cliente" respondem-se dentro das Necessidades (seleção guiada, 14/10/2026)
+      { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
+        resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
+      ...(simples ? [] : [g(ESCOLHAS, Sparkles)]),
+    ];
+  } else if (d.fase === 3 && o) {
+    passos = [
+      // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
+      { id: "orc", titulo: "Orçamento", icone: o.enviada && !o.aceite && !o.vendaDireta ? Lock : FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)),
+        resumo: o.enviada && !o.aceite && !o.vendaDireta ? ["fechado até o cliente aceitar"] : [eur(tot(d, S).pf) + " € s/ IVA", "margem " + pct(tot(d, S).m)],
+        corpo: simples ? <OrcamentoSimples {...ctx} d={d} /> : <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
+      simples ? fechadoSe({ ...g(PROPOSTA[0], FileSignature, !!o.enviada), corpo: (
+        <div className="space-y-10">
+          <Campos grupo={E(PROPOSTA[0])} {...fx} ro={!!o.enviada} />
+          <Partilhar ctx={ctx} d={d} tipo="proposta" estado={o.aceite ? `aceite ${o.aceite}` : o.enviada ? `enviada ${o.enviada} · à espera do cliente` : "ainda não enviada"}>
+            <PropostaDoc S={S} d={d} />
+          </Partilhar>
+        </div>
+      ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
+      // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial)
+      ...(o.vendaDireta ? [] : [simples && !o.aceite && !o.contrato ? {
+        id: PROPOSTA[1].titulo, titulo: PROPOSTA[1].nome || PROPOSTA[1].titulo, icone: Lock, bloqueado: true, feito: false, resumo: ["à espera da aceitação"],
+        corpo: <ContratoBloqueado d={d} />,
+      } : simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
+        <div className="space-y-10">
+          <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
+          <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
+            <ContratoDoc S={S} d={d} />
+          </Partilhar>
+        </div>
+      ) }, !!o.contrato) : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
+    ];
+  } else if (d.fase === 4) {
+    passos = [
+      { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: simples ? <DocumentosSimples {...ctx} d={d} /> : <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
+      ...FINANCEIRO.map((gr) => g(gr, Euro)),
+    ];
+  } else if (d.fase === 5) {
+    passos = [
+      // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
+      { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
+        corpo: simples ? <ObraSimples {...ctx} d={d} /> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
+      ...(simples ? [(() => {
+        const r = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null, c = contaMateriais(d, r);
+        return { id: "materiais", titulo: "Materiais", icone: Package, feito: materiaisProntos(d, r), resumo: [c ? `${c.ok} de ${c.n} garantidos` : "por encomendar"],
+          corpo: <MateriaisObra {...ctx} d={d} /> };
+      })()] : []),
+      g(OBRA[0], Hammer), g(OBRA[1], Check),
+    ];
+  }
+  // os grupos que a empresa escondeu não aparecem
+  passos = passos.filter((ps) => { const gr = [...LEAD, ...CONTACTO, EXTERIOR, INTERIOR, AREA, ESCOLHAS, ...PROPOSTA, ...FINANCEIRO, ...OBRA].find((x) => x.titulo === ps.id); return !gr || !E(gr).oculto; });
+  // depois de tentar passar de fase: quantos campos faltam em cada passo
+  const TODOS: Grupo[] = [...LEAD, ...CONTACTO, EXTERIOR, INTERIOR, AREA, ESCOLHAS, ...PROPOSTA, ...FINANCEIRO, ...OBRA];
+  for (const ps of passos) {
+    const gr = TODOS.find((x) => x.titulo === ps.id);
+    if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta(gr === AREA ? gruposArea(S.campos, d.f).map(E) : [E(gr)], d.f).length;
+    if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
+    if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
+    if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;
+    if (ps.id === "nec" && simples && aValidar(d, ESCOLHAS.titulo) && !E(ESCOLHAS).oculto) ps.falta = (ps.falta || 0) + emFalta([E(ESCOLHAS)], d.f).length || undefined;
+    // as fotografias contam no total; o aviso fica na área de intervenção (onde está "o cliente não quis")
+    if (ps.id === AREA.titulo && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = (ps.falta || 0) + 1;
+  }
+  return passos;
+}
+
+/** O botão do próximo passo do negócio (ou o simulador do cliente). */
+export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
+  const { S, A, go } = ctx;
+  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
+  if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
+  // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP
+  if (p.act === "registarFaturaErp" && meu) return <RegistarFaturaErp ctx={ctx} d={d} tamanho={tamanho} />;
+  if (p.btn) return meu
+    ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
+    : (
+      <div className="grid justify-items-start gap-1 sm:justify-items-end">
+        <Button size={tamanho} disabled>{p.btn}</Button>
+        <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.role(p.who as Papel))}>Mudar para {PAPEIS[p.who as Papel].n}</button>
+      </div>
+    );
+  // 27/10 (Rúben): sem o "Simular o cliente": quem aceita, recusa e assina é o cliente, no portal (o link da proposta)
+  if (p.sim) return <span className="text-sm text-muted-foreground">À espera do cliente no portal</span>;
+  if (p.wait && p.who === "direcao") return <Button variant="outline" size={tamanho} onClick={go(() => A.role("direcao"))}>Mudar para Direção</Button>;
+  return null;
+}
+export const temBotaoFase = (ctx: Ctx, d: Negocio) => { const p = proximo(d, ctx.S); return !!(p.btn || p.sim || (p.wait && p.who === "direcao")); };
+
+function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const { S } = ctx;
+  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  const passos = passosDaFase(ctx, d);
+  const primeiro = Math.max(0, passos.findIndex((x) => (x.conta ? x.conta.f < x.conta.n : !x.feito)));
+  const [ativo, setAtivo] = useState(primeiro);
+  // tentou passar de fase com campos em falta: abre o primeiro passo com falta e põe o cursor no campo
+  useEffect(() => {
+    if (S.pulse !== "falta") return;
+    const i = passos.findIndex((x) => (x.falta || 0) > 0);
+    if (i >= 0 && i !== ativo) setAtivo(i);
+    irParaCampoEmFalta();
+  });
+  const total = passos.reduce((a, x) => a + (x.conta ? x.conta.n : 1), 0);
+  const feitos = passos.reduce((a, x) => a + (x.conta ? x.conta.f : x.feito ? 1 : 0), 0);
+  const Ic = ICONE_FASE[d.fase];
+
+  const botao = temBotaoFase(ctx, d) ? <BotaoFase ctx={ctx} d={d} /> : null;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-primary/30 bg-card shadow-[var(--shadow-md)] animate-in fade-in-0 slide-in-from-bottom-6 duration-700">
+      <div aria-hidden="true" className="h-1 w-full bg-gradient-to-r from-primary via-accent to-primary/30" />
+      <div className="flex flex-wrap items-center gap-3 border-b border-border/60 bg-gradient-to-r from-primary/[0.07] to-transparent px-4 py-3 sm:px-5">
+        <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground shadow-md"><Ic className="h-5 w-5" /></span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Fase {d.fase + 1} de 6</p>
+          <h2 className="text-lg font-bold leading-tight">{FASES[d.fase]}</h2>
+        </div>
+        <div className="w-full sm:w-48">
+          <div className="flex justify-between text-[11px] text-muted-foreground"><span>{feitos} de {total} preenchidos</span><span className="font-mono">{total ? Math.round((feitos / total) * 100) : 0}%</span></div>
+          <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-700 ease-out" style={{ width: `${total ? (feitos / total) * 100 : 0}%` }} /></div>
+        </div>
+      </div>
+
+      {/* Próximo passo */}
+      <div className={cn("flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3 sm:px-5", p.done ? "bg-success/10" : "bg-muted/30")}>
+        <div className="min-w-0">
+          <p className={cn("text-[11px] font-semibold uppercase tracking-[0.14em]", p.done ? "text-success" : "text-primary")}>
+            {p.done ? "Concluído" : "Próximo passo"}{p.who && p.who !== "cliente" && !p.done ? " · " + PAPEIS[p.who].n.split("·").pop()!.trim() : ""}
+          </p>
+          <p className="font-semibold">{p.t}</p>
+          {p.sub && <p className="text-sm text-muted-foreground">{p.sub}</p>}
+        </div>
+        {botao}
+      </div>
+
+      <div className="space-y-3 p-4 sm:p-5">
+        {d.fase === 2 && <Legenda />}
+        {passos.length > 0 && (
+          <Assistente passos={passos} ativo={ativo} setAtivo={setAtivo} fim={
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-gradient-to-r from-primary/10 to-accent/5 p-4">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-primary text-primary-foreground animate-in zoom-in-50"><Sparkles className="h-4 w-4" /></span>
+                <div><p className="font-semibold">Fase {FASES[d.fase]} pronta</p><p className="text-sm text-muted-foreground">{p.t}</p></div>
+              </div>
+              {botao && <div className="relative">{meu && <span className="absolute inset-0 animate-ping rounded-md bg-primary/30 [animation-duration:1.8s]" aria-hidden="true" />}<div className="relative">{botao}</div></div>}
+            </div>
+          } />
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ peças da fase */
+export function Documentos({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  // 19/10: os documentos levam IVA (a fatura é da 1.ª tranche, o sinal, como no portal); os ecrãs internos é que mostram sem IVA
+  const sinal = d.orc ? valorSinal(d, ctx.S) : null, tranche = `${d.f.tranche || "1.ª tranche"} · com IVA`;
+  return (
+    <div className="withside">
+      <div className="tw"><table><thead><tr><th>Documento</th><th>Estado</th><th className="n">Valor c/ IVA</th></tr></thead><tbody>
+        <tr>
+          <td>{d.fin.fatura ? d.fin.fatura.n : "Fatura"}<small>{d.fin.fatura ? "emitida " + d.fin.fatura.q + " · enviada ao portal do cliente" : "por emitir · só o Financeiro emite"}</small></td>
+          <td>{d.fin.pago ? <span className="pill ok">Paga</span> : d.fin.fatura ? <span className="pill warn">Por pagar</span> : <span className="pill mut">Por emitir</span>}</td>
+          <td className="n">{sinal != null ? <>{eur(sinal)}<small>{tranche}</small></> : ""}</td>
+        </tr>
+        <tr>
+          <td>{d.fin.recibo ? d.fin.recibo.n : "Recibo"}<small>{d.fin.recibo ? "emitido " + d.fin.recibo.q : "emitido ao validar o pagamento"}</small></td>
+          <td>{d.fin.recibo ? <span className="pill ok">Emitido</span> : <span className="pill mut">Ainda não</span>}</td>
+          <td className="n">{d.fin.pago && sinal != null ? <>{eur(sinal)}<small>{tranche}</small></> : ""}</td>
+        </tr>
+      </tbody></table></div>
+      <div className="card">
+        <h3>Ao validar o pagamento</h3>
+        <div className="trig">
+          <div><i className={d.fin.recibo ? "on" : ""}>1</i><span><b>Inventário</b><small>a encomenda de cliente é emitida sozinha: reserva o stock (FIFO) e o que falta vai numa encomenda ao fornecedor, por aprovar</small></span></div>
+          <div><i className={d.fin.recibo ? "on" : ""}>2</i><span><b>Operações</b><small>aprovam o plano da obra (gerado no contrato) e arrancam com os materiais no armazém</small></span></div>
+          <div><i className={d.fin.recibo ? "on" : ""}>3</i><span><b>Cliente</b><small>recebe o recibo no portal</small></span></div>
+        </div>
+        <span className="sub">Por agora a validação é interna. Quando o portal aceitar pagamentos, passa a ser automática.</span>
+      </div>
+    </div>
+  );
+}
+
+export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
+  const o = d.orc!, T = tot(d, S), locked = !!o.enviada;
+  const pt = partes(d, S), mw = Math.max(0, Math.min(1, T.m / 0.5));
+  const mcls = T.m < S.cfg.min / 100 ? "bad" : T.m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
+  const mudou = () => { d.orc!.aprov = null; d.fresh = false; };
+  const AL = o.verif && !locked ? alertas(d, S) : [];
+  const nX = AL.filter((a) => a.k === "x").length, nW = AL.filter((a) => a.k === "w").length;
+  const okLinhas = ["Nenhuma linha abaixo do custo", "Todas as linhas têm custo no Catálogo"].filter((_, i) => !AL.some((a) => (i === 0 ? a.t.startsWith("Preço abaixo") : false)));
+
+  return (
+    <>
+      <div className="row">
+        <span className="sub">Orçamento v1 · modelo "{o.modelo}" · medidas da visita</span>
+        <label className="row" style={{ gap: 6, fontSize: 12.5 }}>
+          <input type="checkbox" checked={o.vendaDireta} disabled={locked}
+            onChange={(e) => { const val = e.target.checked; run(() => A.vendaDireta(d.id, val)); }} />
+          {" "}Venda direta (sem contrato)
+        </label>
+      </div>
+      <div className="withside">
+        <div className="stack">
+          <LinhasOrcamento ctx={{ S, A, go, run }} d={d} />
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-[var(--shadow-sm)]">
+            <label className="flex items-center gap-2 text-sm">Desconto
+              <Campo id={`desc-${d.id}`} ariaLabel="Desconto em percentagem" value={nfmt(o.desconto)} readOnly={locked}
+                onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %
+            </label>
+            <span className="text-sm text-muted-foreground">{nfmt(T.h)} h · custo {eur(T.custo)} €</span>
+            <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span></span>
+          </div>
+          <ProdutosOrcamento S={S} A={A} run={run} d={d} />
+          {o.verif && !locked && (
+            <div className={"card " + (S.pulse === "verif" ? "sec pulse" : "")} id="verif" style={{ borderColor: "var(--pri-line)" }}>
+              <h3>Verificar antes de enviar <span>{nX} bloqueio(s) · {nW} aviso(s)</span></h3>
+              <div className="al">
+                {AL.map((a, k) => (
+                  <div key={k} className={a.k}>
+                    <i>!</i><span><b>{a.t}</b><small>{a.d}</small></span>
+                    <span className="acts">
+                      {a.sug != null && <Btn cls="sm" onClick={go(() => A.sugerido(d.id, a.i!, a.sug!))}>Usar {eur(a.sug)} €</Btn>}
+                      {a.go && <Btn cls="sec sm" onClick={go(() => A.nav(a.go!))}>Abrir Catálogo</Btn>}
+                      {a.key && <Btn cls="sec sm" onClick={go(() => A.vistoAviso(d.id, a.key!))}>Visto</Btn>}
+                    </span>
+                  </div>
+                ))}
+                {okLinhas.map((t) => <div key={t} className="o"><i>✓</i><span><b>{t}</b></span><span /></div>)}
+              </div>
+              {bloqueado(d, S) && AL.filter((a) => a.k === "x").every((a) => a.aprov) && (
+                o.aprov === "pedida"
+                  ? <div className="note">Pedido de aprovação enviado à Direção. Fica registado quem aprovou.</div>
+                  : <div className="row"><span className="sub">Quer mesmo enviar assim? É preciso aprovação.</span><Btn cls="sec sm" onClick={go(() => A.pedirAprov(d.id))}>Pedir aprovação à Direção</Btn></div>
+              )}
+              {o.aprov === "ok" && <div className="note" style={{ background: "var(--ok-bg)", color: "var(--ok)" }}>Exceção aprovada pela Direção.</div>}
+            </div>
+          )}
+          {locked && (
+            <div className="kv">
+              <span>Proposta</span><b>enviada {o.enviada}{o.aceite ? " · aceite " + o.aceite : ""}</b>
+              {o.vendaDireta
+                ? <><span>Contrato</span><b>venda direta, não há</b></>
+                : <><span>Contrato</span><b>{o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "enviado, à espera da assinatura" : "por enviar"}</b></>}
+            </div>
+          )}
+        </div>
+        <div className="card">
+          <h3>Margem <span className={"pill " + mcls}>{pct(T.m)}</span></h3>
+          <div className="meter">
+            <i style={{ width: mw * 100 + "%", background: mcls === "ok" ? "var(--ok)" : mcls === "warn" ? "var(--amber)" : "var(--bad)" }} />
+            <b style={{ left: S.cfg.min * 2 + "%" }} title="mínimo" /><b style={{ left: S.cfg.alvo * 2 + "%" }} title="alvo" />
+          </div>
+          <div className="sub">mínimo {S.cfg.min}% · alvo {S.cfg.alvo}% · em Definições</div>
+          <div className="kv">
+            <span>Mão de obra</span><b>{eur(pt.mo)} €</b><span>Equipamentos</span><b>{eur(pt.eq)} €</b><span>Consumíveis</span><b>{eur(pt.cons)} €</b>
+            {S.cfg.estrutura && <><span>Estrutura</span><b>{eur(pt.estr)} €</b></>}
+            <span>Materiais</span><b>{eur(pt.mat)} €</b>
+            <span className="tot">Custo total</span><b className="tot">{eur(T.custo)} €</b>
+            <span className="tot">Lucro previsto</span><b className="tot">{eur(T.pf - T.custo)} €</b>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ObraResumo({ S, A, go, d }: Ctx & { d: Negocio }) {
+  const pl = d.obra.plano!, T = tot(d, S);
+  // os materiais lidos ao vivo do Inventário (as obras antigas do exemplo já os têm na obra)
+  const db = useInventario();
+  const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const matOk = !!r?.pronta || (!!d.obra.ec && !d.obra.ec.ref);
+  const est = { "por aprovar": "warn", aprovado: "pri", "em curso": "pri", "concluída": "ok" }[pl.estado];
+  const R = d.obra.real;
+  const mx = R ? Math.max(...R.tasks.map((t) => Math.max(t.prev, t.real))) : 1;
+  return (
+    <>
+      <div className="g2">
+        <div className="card">
+          <h3>Plano da obra <span className={"pill " + est}>{pl.estado}</span></h3>
+          <div className="kv"><span>Fases</span><b>{pl.tasks.length}</b><span>Horas previstas</span><b>{nfmt(pl.tasks.reduce((a, t) => a + t.h, 0))} h</b><span>Conflitos</span><b>{conflitos(pl).length}</b></div>
+          <Btn cls="sec sm" onClick={go(() => A.abrirPlano(d.id))}>Abrir nas Operações</Btn>
+        </div>
+        <div className="card">
+          <h3>Materiais <span className={"pill " + (matOk ? "ok" : "warn")}>{r ? (r.pronta ? "prontos" : r.rotulo.toLowerCase()) : d.obra.ec ? "na obra" : "—"}</span></h3>
+          <div className="kv">
+            {r ? r.linhas.slice(0, 4).map((l) => { const st = estadoLinhaNegocio(l); return <Fragment key={l.id}><span>{l.n}</span><b>{(st.ok ? "✓ " : "") + nfmt(l.q) + " " + l.un + " · " + st.t}</b></Fragment>; })
+              : (d.obra.mats || []).slice(0, 4).map((x) => <Fragment key={x.n}><span>{x.n}</span><b>{"✓ " + nfmt(x.q) + " " + x.un}</b></Fragment>)}
+          </div>
+          <Btn cls="sec sm" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário</Btn>
+        </div>
+      </div>
+      {R && (
+        <div className="withside">
+          <div className="card">
+            <h3>Previsto contra real <span>horas de equipa</span></h3>
+            <div className="bars">
+              {R.tasks.map((t) => (
+                <div className="b" key={t.nome}>
+                  <span>{t.nome}</span>
+                  <div className="tr"><i style={{ width: (t.prev / mx) * 100 + "%" }} /><i className={"r " + (t.real > t.prev * 1.05 ? "over" : "")} style={{ width: (t.real / mx) * 100 + "%" }} /></div>
+                  <em>{nfmt(t.real)} h<small>prev. {nfmt(t.prev)}</small></em>
+                </div>
+              ))}
+            </div>
+            <div className="legend"><span><i style={{ background: "var(--pri-line)" }} />previsto</span><span><i style={{ background: "var(--pri)" }} />real</span><span><i style={{ background: "var(--amber)" }} />acima do previsto</span></div>
+          </div>
+          <div className="card">
+            <h3>O que se aprende</h3>
+            <div className="kv">
+              <span>Custo previsto</span><b>{eur(T.custo)} €</b><span>Custo real</span><b>{eur(R.custoReal)} €</b>
+              <span className="tot">Margem orçada</span><b className="tot">{pct(T.m)}</b><span className="tot">Margem real</span><b className="tot">{pct(R.m)}</b>
+            </div>
+            {d.obra.aprendido
+              ? <span className="pill ok">Receita do revestimento atualizada</span>
+              : <>
+                <span className="sub">O revestimento levou mais 23% do que a receita prevê. Proposta: subir de {nfmt(S.svc.revest.h)} para {nfmt(r2(S.svc.revest.h * fatorReal("revest")))} h/m² no Catálogo.</span>
+                <Btn cls="sm" onClick={go(() => A.aprender(d.id))}>Atualizar a receita</Btn>
+              </>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 21/10: o passo Contrato antes de o cliente aceitar a proposta: fechado, com o porquê e o estado da proposta. */
+function ContratoBloqueado({ d }: { d: Negocio }) {
+  const o = d.orc!;
+  const estado = o.pedidoCliente ? `${d.nome.split(" ")[0]} pediu alterações: faça a versão nova e envie-a de novo.`
+    : o.enviada ? `Proposta enviada ${o.enviada === "hoje" ? "hoje" : "a " + o.enviada}: à espera da resposta no portal.`
+    : "A proposta ainda não foi enviada: termine o Orçamento e envie a Proposta.";
+  return (
+    <div className="rounded-2xl border border-dashed border-input bg-muted/40 p-6 text-center">
+      <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground" aria-hidden="true"><Lock className="h-5 w-5" /></span>
+      <p className="mt-3 text-lg font-semibold">O contrato abre quando o cliente aceitar a proposta</p>
+      <p className="mx-auto mt-1 max-w-md text-[15px] text-muted-foreground">{estado}</p>
+    </div>
+  );
+}
+
+const DIA_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+/** "2026-10-22" e "14:30" → "qui 22/10 · 14:30", o mesmo formato das vagas. */
+export const slotDe = (dia: string, hora: string) => {
+  const [a, m, n] = dia.split("-").map(Number);
+  return `${DIA_SEMANA[new Date(a, m - 1, n).getDay()]} ${String(n).padStart(2, "0")}/${String(m).padStart(2, "0")} · ${hora}`;
+};
+
+/** Marcar a visita noutro dia e hora que não as vagas sugeridas. */
+function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (slot: string) => void }) {
+  const [dia, setDia] = useState(""), [hora, setHora] = useState("10:00");
+  return (
+    <div className="flex flex-wrap items-end gap-3 pt-2">
+      <label className={ROT}>Outro dia<input type="date" value={dia} onChange={(e) => setDia(e.target.value)} className={cn(INP, "w-44")} /></label>
+      <label className={ROT}>Hora<input type="time" step={900} value={hora} onChange={(e) => setHora(e.target.value)} className={cn(INP, "w-28")} /></label>
+      <Button type="button" variant="outline" disabled={!dia || !hora} onClick={() => marcar(slotDe(dia, hora))}><CalendarClock className="mr-1.5 h-4 w-4" />Marcar visita</Button>
+    </div>
+  );
+}
