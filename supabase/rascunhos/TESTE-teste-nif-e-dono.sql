@@ -1,7 +1,15 @@
 -- =============================================================================
 -- teste-nif-e-dono.sql — prova da migration 20261231600000_nif_e_dono_da_pessoa
--- (partes A e B; era o rascunho 20261231300000). A parte C, a revogacao do
--- UPDATE por coluna, esta em TESTE-teste-revogar-update-nif.sql.
+-- (partes A, A' e D; B). A parte C, a revogacao do UPDATE por coluna e o
+-- EXECUTE da RPC negado a authenticated, esta em
+-- TESTE-teste-revogar-update-nif.sql.
+--
+-- Contrato novo (opcao (a), decisao do utilizador 26/10): a RPC e
+--   neg_guardar_nif_pessoa(p_actor_auth_uid, p_organization_id, p_entity_id,
+--                          p_nif, p_nif_hash, p_nif_encrypted)
+-- e so service_role a executa. Aqui chama-se como o nif-write-proxy a chama:
+-- papel service_role, claims {role: service_role} sem sub, e o actor por
+-- parametro (o auth.users.id do utilizador que o proxy validou).
 --
 -- NAO CORRER sem autorizacao explicita para escritas REVERTIDAS na org nike.
 -- So base RH (uetjghdkwbywbftedtth). Nunca a principal, nunca a Mudelar.
@@ -12,7 +20,8 @@
 --   <este ficheiro>
 --   ROLLBACK;
 -- O bloco acaba SEMPRE com RAISE EXCEPTION (TESTE_OK ou FALHOU), por isso
--- nada fica gravado mesmo que o ROLLBACK falte.
+-- nada fica gravado mesmo que o ROLLBACK falte. Correr de novo sempre que
+-- mudar o md5 de uma funcao do caminho (guarda 0b/0b2 da migration).
 --
 -- O hash e a cifra aqui sao FALSOS (forma certa, sem segredo): o SQL nao tem
 -- NIF_HMAC_KEY nem NIF_ENC_KEY. A correspondencia hash<->NIF so se prova com a
@@ -26,9 +35,21 @@
 --   comercial acf9f6c3-c3c7-1982-c424-da7ac2add2cb auth 37069e32-c4ce-47f1-f42f-9e2a89eb92a3
 --   outro     42c020c5-cb47-b7de-8246-1a8f2ed0adf4 auth 007a341a-4bce-9626-1efa-4593c7804ea7
 --
--- Casos da revisao de 26/10:
---   A10 NIF repetido numa pessoa fora do ambito 'view' de quem chama -> NG031
+-- Casos do contrato novo (revisao do desenho de 27/10):
+--   A1  ACL: so service_role executa a RPC; authenticated e anon nao.
+--   A2  quem chama: sem claims; authenticated (permission denied da base);
+--       anon; service_role com sub posto; service_role com claim role
+--       'authenticated' -> todos recusados.
+--   A2b actor nulo, actor inexistente, actor que nao e membro da organizacao
+--       -> a MESMA recusa generica (42501, mesma mensagem).
+--   A3  actor sem ambito 'edit' (comercial OWNED) -> recusado.
+--   A3b actor com ambito mas SEM pessoas.edit (o outro) -> 42501.
+--   A5  admin grava: a auditoria regista o admin como autor, e a sessao de
+--       quem chama fica como estava (claims repostos).
+--   A10 NIF repetido numa pessoa fora do ambito 'view' do actor -> NG031
 --       com a mensagem generica fixa; a mesma pessoa dentro do ambito -> NG030.
+--   A11 contador por actor; as recusas NG030/NG031 contam; 11.a -> NG032;
+--       authenticated e anon nao leem a tabela do contador.
 --   B8  comercial (pessoas.create, leads.edit OWNED, sem leads.assign) cria,
 --       autenticado, um negocio sobre uma pessoa sem dono fora do seu ambito,
 --       com assigned_to = ele: o negocio nasce, a pessoa continua sem dono.
@@ -39,22 +60,32 @@
 --       B9 nao passam por o gatilho nunca atribuir com sessao).
 --
 -- Fica por provar aqui (nao se escreve fora da nike nem se abrem duas ligacoes):
+--   * actor membro de OUTRA organizacao real (aqui usa-se uma organizacao
+--     inexistente: para a funcao e o mesmo caso, actor sem membership nela);
+--   * membership inactiva (os valores possiveis de status nao foram lidos);
 --   * entidade partilhada com outra organizacao (A recusa NG003, B ignora);
 --   * SKIP LOCKED do gatilho com a pessoa bloqueada noutra transaccao (risco
 --     aceite: a atribuicao perde-se, sem retentativa);
 --   * a corrida no indice unico do NIF (NG031 pelo unique_violation);
---   * o proxy a chamar a RPC (p_nif_tokens aceite, hash real, erro traduzido).
+--   * o proxy a chamar a RPC (actor tirado do JWT, cliente service_role sem o
+--     Authorization do utilizador, hash real, erros traduzidos): prova-se nos
+--     testes do handler e ao vivo, depois de publicado.
 -- =============================================================================
 DO $teste$
 DECLARE
   k_org        constant uuid := 'b6ffce4f-f630-4933-833a-008649757a33';
+  k_org_inex   constant uuid := '00000000-0000-4000-8000-0000000000fd';
+  k_inexist    constant uuid := '00000000-0000-4000-8000-0000000000fe';
   k_admin_id   constant uuid := 'ba0b0ebf-1bdb-43f9-b82b-a2ade29848e2';
   k_admin_auth constant uuid := '08bb24a2-e11f-4f79-b4f7-c5125332da4a';
   k_com_id     constant uuid := 'acf9f6c3-c3c7-1982-c424-da7ac2add2cb';
   k_com_auth   constant uuid := '37069e32-c4ce-47f1-f42f-9e2a89eb92a3';
   k_out_id     constant uuid := '42c020c5-cb47-b7de-8246-1a8f2ed0adf4';
+  k_out_auth   constant uuid := '007a341a-4bce-9626-1efa-4593c7804ea7';
   k_nif1       constant text := '123456789';
   k_nif2       constant text := '987654322';
+  k_claims_sr  constant text := '{"role": "service_role"}';
+  k_assin      constant text := 'public.neg_guardar_nif_pessoa(uuid, uuid, uuid, text, text, text)';
   v_tag   text := replace(gen_random_uuid()::text, '-', '');
   v_h1    text;
   v_h2    text;
@@ -62,6 +93,7 @@ DECLARE
   v_enc8  text := encode(convert_to(repeat('x', 36), 'UTF8'), 'base64');  -- tamanho errado
   v_enc11 text := encode(convert_to(repeat('x', 39), 'UTF8'), 'base64');  -- NIF aparado com 11 bytes
   v_role  uuid;
+  v_role2 uuid;
   r       record;
   v_e1    uuid;
   v_e2    uuid;
@@ -76,6 +108,8 @@ DECLARE
   v_res   jsonb;
   v_n     bigint;
   v_erro  text;
+  v_msg   text;
+  v_autor uuid;
   v_caso  record;
   v_ts    timestamptz := now();  -- entity_audit_log.created_at e now() da transaccao
 BEGIN
@@ -100,8 +134,18 @@ BEGIN
   IF v_n <> 3 THEN
     RAISE EXCEPTION 'FALHOU 0: esperava 3 membros activos nao clientes na nike, ha %.', v_n;
   END IF;
+  SELECT count(*) INTO v_n FROM public.anew_users u
+  WHERE u.deleted_at IS NULL
+    AND (u.id, u.auth_user_id) IN ((k_admin_id, k_admin_auth), (k_com_id, k_com_auth), (k_out_id, k_out_auth));
+  IF v_n <> 3 THEN
+    RAISE EXCEPTION 'FALHOU 0: os ids auth dos tres utilizadores nao sao os esperados (% de 3).', v_n;
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.anew_users u WHERE u.auth_user_id = k_inexist)
+     OR EXISTS (SELECT 1 FROM public.anew_memberships m WHERE m.organization_id = k_org_inex) THEN
+    RAISE EXCEPTION 'FALHOU 0: os ids inexistentes de teste existem.';
+  END IF;
 
-  -- papel temporario com ambito OWNED para o comercial e o outro (sem
+  -- papel temporario com ambito OWNED para o comercial (sem
   -- membership_permission_scopes, resolve_lead_access_context da OWNED).
   -- leads.edit entra para B8/B9 recusarem pelo AMBITO e nao pela falta da
   -- permissao; leads.assign fica de fora de proposito.
@@ -112,8 +156,18 @@ BEGIN
   SELECT v_role, x.c
   FROM unnest(ARRAY['leads.view', 'leads.edit', 'clients.view', 'pessoas.view',
                     'pessoas.create', 'pessoas.edit']) AS x(c);
+  -- e o mesmo papel SEM pessoas.edit para o outro (A3b)
+  INSERT INTO public.anew_roles (code, name, organization_id, description)
+  VALUES ('teste_sem_edit_' || v_tag, 'TESTE sem pessoas.edit (revertido)', k_org, 'teste revertido')
+  RETURNING id INTO v_role2;
+  INSERT INTO public.anew_role_permissions (role_id, permission_code)
+  SELECT v_role2, x.c
+  FROM unnest(ARRAY['leads.view', 'leads.edit', 'clients.view', 'pessoas.view',
+                    'pessoas.create']) AS x(c);
   UPDATE public.anew_memberships m SET role_id = v_role
-  WHERE m.organization_id = k_org AND m.user_id IN (k_com_id, k_out_id);
+  WHERE m.organization_id = k_org AND m.user_id = k_com_id;
+  UPDATE public.anew_memberships m SET role_id = v_role2
+  WHERE m.organization_id = k_org AND m.user_id = k_out_id;
   DELETE FROM public.anew_membership_permission_scopes s
   WHERE s.membership_id IN (SELECT m.id FROM public.anew_memberships m
                             WHERE m.organization_id = k_org AND m.user_id IN (k_com_id, k_out_id));
@@ -146,51 +200,159 @@ BEGIN
   END IF;
 
   -- ---------------------------------------------------------------------------
-  -- A1. ACL: anon nao executa a RPC; authenticated executa; o gatilho nao e
-  --     executavel por authenticated
+  -- A1. ACL: so service_role executa a RPC; anon e authenticated nao; o
+  --     gatilho nao e executavel por authenticated nem anon
   -- ---------------------------------------------------------------------------
-  IF has_function_privilege('anon', 'public.neg_guardar_nif_pessoa(uuid, uuid, text, text, text, text[])', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.neg_guardar_nif_pessoa(uuid, uuid, text, text, text, text[])', 'EXECUTE')
+  IF has_function_privilege('anon', k_assin, 'EXECUTE')
+     OR has_function_privilege('authenticated', k_assin, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', k_assin, 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.fn_negocios_dono_para_pessoa()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.fn_negocios_dono_para_pessoa()', 'EXECUTE') THEN
     RAISE EXCEPTION 'FALHOU A1: ACL das funcoes novas.';
   END IF;
 
   -- ---------------------------------------------------------------------------
-  -- A2. Sem sessao -> insufficient_privilege
+  -- A2. Quem chama
   -- ---------------------------------------------------------------------------
+  -- sem claims (postgres sem sessao): auth.role() nulo -> recusa
   v_erro := NULL;
   BEGIN
-    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e1, k_nif1, v_h1, v_enc9);
+    PERFORM public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, k_nif1, v_h1, v_enc9);
   EXCEPTION WHEN insufficient_privilege THEN v_erro := 'ok';
   END;
   IF v_erro IS NULL THEN
-    RAISE EXCEPTION 'FALHOU A2: gravou o NIF sem sessao.';
+    RAISE EXCEPTION 'FALHOU A2: gravou o NIF sem claims de service_role.';
   END IF;
 
-  -- ---------------------------------------------------------------------------
-  -- A3. Comercial (OWNED) sem ligacao a pessoa -> recusado (NG003 ou 42501)
-  -- ---------------------------------------------------------------------------
+  -- authenticated (o utilizador directamente, sem o proxy): a base nega o
+  -- EXECUTE antes de a funcao correr, mesmo passando-se a si proprio como actor
   PERFORM set_config('request.jwt.claims',
-                     json_build_object('sub', k_com_auth::text, 'role', 'authenticated')::text, true);
+                     json_build_object('sub', k_admin_auth::text, 'role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
   v_erro := NULL;
   BEGIN
-    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e1, k_nif1, v_h1, v_enc9);
+    PERFORM public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, k_nif1, v_h1, v_enc9);
+  EXCEPTION WHEN insufficient_privilege THEN v_erro := SQLERRM;
+  END;
+  EXECUTE 'RESET ROLE';
+  IF v_erro IS NULL OR v_erro NOT LIKE 'permission denied for function%' THEN
+    RAISE EXCEPTION 'FALHOU A2: authenticated executou a RPC (ou foi recusado por outra razao: %).', COALESCE(v_erro, '-');
+  END IF;
+
+  -- anon: idem
+  PERFORM set_config('request.jwt.claims', '{"role": "anon"}', true);
+  EXECUTE 'SET LOCAL ROLE anon';
+  v_erro := NULL;
+  BEGIN
+    PERFORM public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, k_nif1, v_h1, v_enc9);
+  EXCEPTION WHEN insufficient_privilege THEN v_erro := SQLERRM;
+  END;
+  EXECUTE 'RESET ROLE';
+  IF v_erro IS NULL OR v_erro NOT LIKE 'permission denied for function%' THEN
+    RAISE EXCEPTION 'FALHOU A2: anon executou a RPC (ou foi recusado por outra razao: %).', COALESCE(v_erro, '-');
+  END IF;
+
+  -- service_role com sessao de utilizador (sub posto) e service_role com o
+  -- claim role 'authenticated': a funcao recusa as duas
+  FOR v_caso IN
+    SELECT * FROM (VALUES
+      ('service_role com sub', json_build_object('sub', k_admin_auth::text, 'role', 'service_role')::text),
+      ('claim role authenticated', '{"role": "authenticated"}'::text)
+    ) AS x(nome, claims)
+  LOOP
+    PERFORM set_config('request.jwt.claims', v_caso.claims, true);
+    EXECUTE 'SET LOCAL ROLE service_role';
+    v_erro := NULL;
+    BEGIN
+      PERFORM public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, k_nif1, v_h1, v_enc9);
+    EXCEPTION WHEN insufficient_privilege THEN v_erro := 'ok';
+    END;
+    EXECUTE 'RESET ROLE';
+    IF v_erro IS NULL THEN
+      RAISE EXCEPTION 'FALHOU A2 (%): a funcao aceitou o chamador.', v_caso.nome;
+    END IF;
+  END LOOP;
+
+  -- a partir daqui, quem chama e sempre o proxy: service_role sem sub
+  PERFORM set_config('request.jwt.claims', k_claims_sr, true);
+
+  -- ---------------------------------------------------------------------------
+  -- A2b. Actor nulo, inexistente, ou nao membro da organizacao -> a MESMA
+  --      recusa (42501 e mesma mensagem que a falta de permissao)
+  -- ---------------------------------------------------------------------------
+  v_msg := NULL;
+  FOR v_caso IN
+    SELECT * FROM (VALUES
+      ('actor nulo',        NULL::uuid,   k_org),
+      ('actor inexistente', k_inexist,    k_org),
+      ('actor nao membro',  k_admin_auth, k_org_inex)
+    ) AS x(nome, actor, org)
+  LOOP
+    EXECUTE 'SET LOCAL ROLE service_role';
+    v_erro := NULL;
+    BEGIN
+      PERFORM public.neg_guardar_nif_pessoa(v_caso.actor, v_caso.org, v_e1, k_nif1, v_h1, v_enc9);
+    EXCEPTION WHEN insufficient_privilege THEN v_erro := SQLERRM;
+    END;
+    EXECUTE 'RESET ROLE';
+    IF v_erro IS NULL THEN
+      RAISE EXCEPTION 'FALHOU A2b (%): a funcao aceitou o actor.', v_caso.nome;
+    END IF;
+    IF v_msg IS NOT NULL AND v_erro IS DISTINCT FROM v_msg THEN
+      RAISE EXCEPTION 'FALHOU A2b (%): a mensagem distingue o caso (% / %).', v_caso.nome, v_erro, v_msg;
+    END IF;
+    v_msg := v_erro;
+  END LOOP;
+  IF v_msg IS DISTINCT FROM 'Sem permissao para editar esta pessoa.' THEN
+    RAISE EXCEPTION 'FALHOU A2b: a mensagem nao e a generica de falta de permissao: %.', v_msg;
+  END IF;
+
+  -- ---------------------------------------------------------------------------
+  -- A3. Actor comercial (OWNED) sem ligacao a pessoa -> recusado (NG003 ou
+  --     42501)
+  -- ---------------------------------------------------------------------------
+  EXECUTE 'SET LOCAL ROLE service_role';
+  v_erro := NULL;
+  BEGIN
+    PERFORM public.neg_guardar_nif_pessoa(k_com_auth, k_org, v_e1, k_nif1, v_h1, v_enc9);
   EXCEPTION
     WHEN SQLSTATE 'NG003' THEN v_erro := 'ok';
     WHEN insufficient_privilege THEN v_erro := 'ok';
   END;
   EXECUTE 'RESET ROLE';
-  PERFORM set_config('request.jwt.claims', '', true);
   IF v_erro IS NULL THEN
     RAISE EXCEPTION 'FALHOU A3: o comercial gravou o NIF de uma pessoa fora do ambito.';
   END IF;
 
-  -- a partir daqui, o admin (Super Admin) da nike
+  -- ---------------------------------------------------------------------------
+  -- A3b. Actor com ambito 'edit' sobre a pessoa mas SEM pessoas.edit -> 42501
+  -- ---------------------------------------------------------------------------
+  UPDATE public.anew_entities e SET assigned_to = k_out_id WHERE e.id = v_e1;
   PERFORM set_config('request.jwt.claims',
-                     json_build_object('sub', k_admin_auth::text, 'role', 'authenticated')::text, true);
-  EXECUTE 'SET LOCAL ROLE authenticated';
+                     json_build_object('sub', k_out_auth::text, 'role', 'authenticated')::text, true);
+  IF NOT public.fn_neg_pessoa_no_ambito(k_org, v_e1, 'edit')
+     OR public.fn_neg_tem_permissao_org(k_org, 'pessoas.edit') THEN
+    RAISE EXCEPTION 'FALHOU A3b (pre): o outro nao esta como esperado (v_e1 no ambito, sem pessoas.edit).';
+  END IF;
+  PERFORM set_config('request.jwt.claims', k_claims_sr, true);
+  EXECUTE 'SET LOCAL ROLE service_role';
+  v_erro := NULL;
+  BEGIN
+    PERFORM public.neg_guardar_nif_pessoa(k_out_auth, k_org, v_e1, k_nif1, v_h1, v_enc9);
+  EXCEPTION WHEN insufficient_privilege THEN v_erro := SQLERRM;
+  END;
+  EXECUTE 'RESET ROLE';
+  IF v_erro IS NULL THEN
+    RAISE EXCEPTION 'FALHOU A3b: gravou o NIF sem pessoas.edit.';
+  END IF;
+  UPDATE public.anew_entities e SET assigned_to = NULL WHERE e.id = v_e1;
+  SELECT count(*) INTO v_n FROM public.anew_entities e WHERE e.id = v_e1 AND e.nif_hash IS NOT NULL;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALHOU A3: uma recusa deixou NIF gravado.';
+  END IF;
+
+  -- a partir daqui o actor e o admin (Super Admin) da nike, salvo indicacao
+  EXECUTE 'SET LOCAL ROLE service_role';
 
   -- ---------------------------------------------------------------------------
   -- A4. Valores invalidos -> NG009, e a mensagem nunca traz o NIF
@@ -210,30 +372,39 @@ BEGIN
   LOOP
     v_erro := NULL;
     BEGIN
-      PERFORM public.neg_guardar_nif_pessoa(k_org, v_e1, v_caso.nif, v_caso.h, v_caso.enc);
+      PERFORM public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, v_caso.nif, v_caso.h, v_caso.enc);
     EXCEPTION WHEN SQLSTATE 'NG009' THEN v_erro := SQLERRM;
     END;
     IF v_erro IS NULL THEN
+      EXECUTE 'RESET ROLE';
       RAISE EXCEPTION 'FALHOU A4 (%): aceitou um valor invalido.', v_caso.nome;
     END IF;
     IF regexp_replace(v_caso.nif, '[^0-9]', '', 'g') <> ''
        AND position(regexp_replace(v_caso.nif, '[^0-9]', '', 'g') IN v_erro) > 0 THEN
+      EXECUTE 'RESET ROLE';
       RAISE EXCEPTION 'FALHOU A4 (%): a mensagem de erro traz o NIF.', v_caso.nome;
     END IF;
   END LOOP;
 
   -- ---------------------------------------------------------------------------
-  -- A5. Gravar com espacos e hifen (o proxy cifra o NIF aparado: 11 bytes)
+  -- A5. Gravar com espacos e hifen (o proxy cifra o NIF aparado: 11 bytes);
+  --     a sessao de quem chama fica como estava
   -- ---------------------------------------------------------------------------
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e1, ' 123 456-789 ', v_h1, v_enc11);
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, ' 123 456-789 ', v_h1, v_enc11);
+  EXECUTE 'RESET ROLE';
   IF v_res IS DISTINCT FROM jsonb_build_object('nif_ultimos3', '789', 'mudou', true) THEN
     RAISE EXCEPTION 'FALHOU A5: retorno inesperado: %.', v_res::text;
   END IF;
   IF position(k_nif1 IN v_res::text) > 0 THEN
     RAISE EXCEPTION 'FALHOU A5: o retorno traz o NIF.';
   END IF;
+  IF current_setting('request.jwt.claims', true) IS DISTINCT FROM k_claims_sr
+     OR COALESCE(current_setting('request.jwt.claim.sub', true), '') <> ''
+     OR COALESCE(current_setting('request.jwt.claim.role', true), '') <> ''
+     OR auth.uid() IS NOT NULL THEN
+    RAISE EXCEPTION 'FALHOU A5: a identidade do actor ficou na sessao depois da chamada.';
+  END IF;
 
-  EXECUTE 'RESET ROLE';
   SELECT count(*) INTO v_n FROM public.anew_entities e
   WHERE e.id = v_e1 AND e.nif_hash = v_h1 AND e.nif_encrypted = v_enc11 AND e.nif_last3 = '789';
   IF v_n <> 1 THEN
@@ -247,15 +418,30 @@ BEGIN
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'FALHOU A5: a auditoria guardou o hash, a cifra ou o NIF (% linhas).', v_n;
   END IF;
-  PERFORM set_config('request.jwt.claims',
-                     json_build_object('sub', k_admin_auth::text, 'role', 'authenticated')::text, true);
-  EXECUTE 'SET LOCAL ROLE authenticated';
+  -- auditoria: o autor da gravacao e o actor (o admin), resolvido como o
+  -- gatilho o resolve (current_business_user_id: mapa, senao anew_users.id)
+  v_autor := COALESCE((SELECT m.business_user_id FROM public.auth_to_business_user_map m
+                       WHERE m.auth_user_id = k_admin_auth LIMIT 1), k_admin_id);
+  SELECT count(*) INTO v_n FROM public.entity_audit_log a
+  WHERE a.entity_id = v_e1 AND a.table_name = 'anew_entities' AND a.created_at >= v_ts
+    AND a.changed_fields ? 'nif_last3';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'FALHOU A5: esperava 1 linha de auditoria da gravacao do NIF, ha %.', v_n;
+  END IF;
+  SELECT count(*) INTO v_n FROM public.entity_audit_log a
+  WHERE a.entity_id = v_e1 AND a.table_name = 'anew_entities' AND a.created_at >= v_ts
+    AND a.changed_fields ? 'nif_last3' AND a.changed_by IS NOT DISTINCT FROM v_autor;
+  IF v_n <> 1 OR v_autor IS NULL THEN
+    RAISE EXCEPTION 'FALHOU A5: a auditoria nao registou o actor como autor.';
+  END IF;
+  EXECUTE 'SET LOCAL ROLE service_role';
 
   -- ---------------------------------------------------------------------------
   -- A6. O mesmo NIF outra vez -> mudou false (a cifra nova nao conta)
   -- ---------------------------------------------------------------------------
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e1, k_nif1, v_h1, v_enc9, ARRAY['t1', 't2']);
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, k_nif1, v_h1, v_enc9);
   IF v_res IS DISTINCT FROM jsonb_build_object('nif_ultimos3', '789', 'mudou', false) THEN
+    EXECUTE 'RESET ROLE';
     RAISE EXCEPTION 'FALHOU A6: retorno inesperado: %.', v_res::text;
   END IF;
 
@@ -264,59 +450,65 @@ BEGIN
   --     (nao lancado, para o contador ficar), sem o hash nem o NIF, e a pessoa
   --     continua sem NIF
   -- ---------------------------------------------------------------------------
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e2, k_nif1, v_h1, v_enc9);
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e2, k_nif1, v_h1, v_enc9);
+  EXECUTE 'RESET ROLE';
   IF v_res ->> 'erro' IS DISTINCT FROM 'NG030' THEN
     RAISE EXCEPTION 'FALHOU A7: aceitou o NIF repetido: %.', v_res::text;
   END IF;
   IF position(v_h1 IN v_res::text) > 0 OR position(k_nif1 IN v_res::text) > 0 THEN
     RAISE EXCEPTION 'FALHOU A7: a resposta do repetido traz o hash ou o NIF.';
   END IF;
-  EXECUTE 'RESET ROLE';
+  IF current_setting('request.jwt.claims', true) IS DISTINCT FROM k_claims_sr OR auth.uid() IS NOT NULL THEN
+    RAISE EXCEPTION 'FALHOU A7: a identidade do actor ficou na sessao depois de uma recusa devolvida.';
+  END IF;
   SELECT count(*) INTO v_n FROM public.anew_entities e WHERE e.id = v_e2 AND e.nif_hash IS NOT NULL;
-  EXECUTE 'SET LOCAL ROLE authenticated';
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'FALHOU A7: o NIF repetido ficou gravado.';
   END IF;
+  EXECUTE 'SET LOCAL ROLE service_role';
 
   -- ---------------------------------------------------------------------------
   -- A8. Pessoa apagada (soft delete) nao bloqueia o NIF
   -- ---------------------------------------------------------------------------
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e2, k_nif2, v_h2, v_enc9);
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e2, k_nif2, v_h2, v_enc9);
   IF v_res ->> 'nif_ultimos3' IS DISTINCT FROM '322' THEN
+    EXECUTE 'RESET ROLE';
     RAISE EXCEPTION 'FALHOU A8: nao gravou o segundo NIF: %.', v_res::text;
   END IF;
   EXECUTE 'RESET ROLE';
   UPDATE public.anew_entities e SET deleted_at = now() WHERE e.id = v_e2;
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e1, k_nif2, v_h2, v_enc9);
+  EXECUTE 'SET LOCAL ROLE service_role';
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, k_nif2, v_h2, v_enc9);
   IF v_res IS DISTINCT FROM jsonb_build_object('nif_ultimos3', '322', 'mudou', true) THEN
+    EXECUTE 'RESET ROLE';
     RAISE EXCEPTION 'FALHOU A8: o NIF de uma pessoa apagada bloqueou: %.', v_res::text;
   END IF;
   -- e a pessoa apagada ja nao aceita escrita
   v_erro := NULL;
   BEGIN
-    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e2, '', NULL, NULL);
+    PERFORM public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e2, '', NULL, NULL);
   EXCEPTION
     WHEN SQLSTATE 'NG003' THEN v_erro := 'ok';
     WHEN insufficient_privilege THEN v_erro := 'ok';
   END;
   IF v_erro IS NULL THEN
+    EXECUTE 'RESET ROLE';
     RAISE EXCEPTION 'FALHOU A8: escreveu numa pessoa apagada.';
   END IF;
 
   -- ---------------------------------------------------------------------------
   -- A9. Limpar ('' e NULL) -> colunas a NULL; outra vez -> mudou false
   -- ---------------------------------------------------------------------------
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e1, '   ', NULL, NULL);
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, '   ', NULL, NULL);
   IF v_res IS DISTINCT FROM jsonb_build_object('nif_ultimos3', NULL, 'mudou', true) THEN
+    EXECUTE 'RESET ROLE';
     RAISE EXCEPTION 'FALHOU A9: limpar devolveu %.', v_res::text;
   END IF;
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e1, NULL, NULL, NULL);
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e1, NULL, NULL, NULL);
+  EXECUTE 'RESET ROLE';
   IF v_res IS DISTINCT FROM jsonb_build_object('nif_ultimos3', NULL, 'mudou', false) THEN
     RAISE EXCEPTION 'FALHOU A9: limpar outra vez devolveu %.', v_res::text;
   END IF;
-  EXECUTE 'RESET ROLE';
-  PERFORM set_config('request.jwt.claims', '', true);
   SELECT count(*) INTO v_n FROM public.anew_entities e
   WHERE e.id = v_e1 AND e.nif_hash IS NULL AND e.nif_encrypted IS NULL AND e.nif_last3 IS NULL;
   IF v_n <> 1 THEN
@@ -324,19 +516,16 @@ BEGIN
   END IF;
 
   -- ---------------------------------------------------------------------------
-  -- A10. Repetido numa pessoa que quem chama NAO ve -> NG031 generico; a mesma
-  --      pessoa dentro do ambito -> NG030. Quem chama: o comercial (OWNED), a
+  -- A10. Repetido numa pessoa que o actor NAO ve -> NG031 generico; a mesma
+  --      pessoa dentro do ambito -> NG030. Actor: o comercial (OWNED), a
   --      gravar na v_e4 (que passa a ser dele); o NIF esta na v_e3 (do admin).
   -- ---------------------------------------------------------------------------
-  PERFORM set_config('request.jwt.claims',
-                     json_build_object('sub', k_admin_auth::text, 'role', 'authenticated')::text, true);
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e3, k_nif1, v_h1, v_enc9);
+  EXECUTE 'SET LOCAL ROLE service_role';
+  v_res := public.neg_guardar_nif_pessoa(k_admin_auth, k_org, v_e3, k_nif1, v_h1, v_enc9);
   EXECUTE 'RESET ROLE';
   IF v_res IS DISTINCT FROM jsonb_build_object('nif_ultimos3', '789', 'mudou', true) THEN
     RAISE EXCEPTION 'FALHOU A10 (pre): nao gravou o NIF na v_e3: %.', v_res::text;
   END IF;
-  PERFORM set_config('request.jwt.claims', '', true);
   UPDATE public.anew_entities e SET assigned_to = k_com_id WHERE e.id = v_e4;
 
   PERFORM set_config('request.jwt.claims',
@@ -345,22 +534,19 @@ BEGIN
      OR NOT public.fn_neg_pessoa_no_ambito(k_org, v_e4, 'edit') THEN
     RAISE EXCEPTION 'FALHOU A10 (pre): o ambito do comercial nao e o esperado (v_e3 fora, v_e4 dentro).';
   END IF;
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif1, v_h1, v_enc9);
+  PERFORM set_config('request.jwt.claims', k_claims_sr, true);
+  EXECUTE 'SET LOCAL ROLE service_role';
+  v_res := public.neg_guardar_nif_pessoa(k_com_auth, k_org, v_e4, k_nif1, v_h1, v_enc9);
   EXECUTE 'RESET ROLE';
   IF v_res IS DISTINCT FROM jsonb_build_object('erro', 'NG031', 'mensagem', 'Nao foi possivel gravar este NIF.') THEN
     RAISE EXCEPTION 'FALHOU A10: o repetido fora do ambito nao deu a recusa generica NG031: %.', v_res::text;
   END IF;
 
   -- a mesma pessoa passa a estar no ambito do comercial -> NG030
-  PERFORM set_config('request.jwt.claims', '', true);
   UPDATE public.anew_entities e SET assigned_to = k_com_id WHERE e.id = v_e3;
-  PERFORM set_config('request.jwt.claims',
-                     json_build_object('sub', k_com_auth::text, 'role', 'authenticated')::text, true);
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  v_res := public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif1, v_h1, v_enc9);
+  EXECUTE 'SET LOCAL ROLE service_role';
+  v_res := public.neg_guardar_nif_pessoa(k_com_auth, k_org, v_e4, k_nif1, v_h1, v_enc9);
   EXECUTE 'RESET ROLE';
-  PERFORM set_config('request.jwt.claims', '', true);
   IF v_res ->> 'erro' IS DISTINCT FROM 'NG030' THEN
     RAISE EXCEPTION 'FALHOU A10: o repetido dentro do ambito nao deu NG030: %.', v_res::text;
   END IF;
@@ -370,38 +556,52 @@ BEGIN
 
   -- ---------------------------------------------------------------------------
   -- A11. Limite na base (D): as duas recusas do comercial em A10 CONTARAM (2
-  --      no minuto); levado o contador a 10, a tentativa seguinte da NG032, e
-  --      authenticated nao le nem escreve a tabela do contador.
+  --      no minuto, na linha do actor); as recusas por permissao (A3) nao.
+  --      Levado o contador a 10, a tentativa seguinte da NG032; authenticated
+  --      e anon nao leem a tabela do contador.
   -- ---------------------------------------------------------------------------
   SELECT t.n INTO v_n FROM public.neg_nif_tentativas t
-  WHERE t.user_id = k_com_auth AND t.janela = date_trunc('minute', now());
+  WHERE t.actor = k_com_auth AND t.janela = date_trunc('minute', now());
   IF v_n IS DISTINCT FROM 2 THEN
-    RAISE EXCEPTION 'FALHOU A11: as recusas por repetido nao contaram (contador %).', v_n;
+    RAISE EXCEPTION 'FALHOU A11: o contador do comercial nao e 2 (%).', v_n;
+  END IF;
+  SELECT count(*) INTO v_n FROM public.neg_nif_tentativas t WHERE t.actor = k_out_auth;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALHOU A11: uma recusa por permissao contou como tentativa.';
   END IF;
   UPDATE public.neg_nif_tentativas t SET n = 10
-  WHERE t.user_id = k_com_auth AND t.janela = date_trunc('minute', now());
-  PERFORM set_config('request.jwt.claims',
-                     json_build_object('sub', k_com_auth::text, 'role', 'authenticated')::text, true);
-  EXECUTE 'SET LOCAL ROLE authenticated';
+  WHERE t.actor = k_com_auth AND t.janela = date_trunc('minute', now());
+  EXECUTE 'SET LOCAL ROLE service_role';
   v_erro := NULL;
   BEGIN
-    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif2, v_h2, v_enc9);
+    PERFORM public.neg_guardar_nif_pessoa(k_com_auth, k_org, v_e4, k_nif2, v_h2, v_enc9);
   EXCEPTION WHEN SQLSTATE 'NG032' THEN v_erro := SQLERRM;
   END;
+  EXECUTE 'RESET ROLE';
   IF v_erro IS NULL THEN
-    EXECUTE 'RESET ROLE';
     RAISE EXCEPTION 'FALHOU A11: a 11.a tentativa no minuto nao deu NG032.';
   END IF;
-  v_erro := NULL;
-  BEGIN
-    PERFORM 1 FROM public.neg_nif_tentativas;
-  EXCEPTION WHEN insufficient_privilege THEN v_erro := 'ok';
-  END;
-  EXECUTE 'RESET ROLE';
-  PERFORM set_config('request.jwt.claims', '', true);
-  IF v_erro IS NULL THEN
-    RAISE EXCEPTION 'FALHOU A11: authenticated le a tabela do contador.';
+  -- o NG032 desfez so o seu proprio incremento: a linha fica em 10
+  SELECT t.n INTO v_n FROM public.neg_nif_tentativas t
+  WHERE t.actor = k_com_auth AND t.janela = date_trunc('minute', now());
+  IF v_n IS DISTINCT FROM 10 THEN
+    RAISE EXCEPTION 'FALHOU A11: o NG032 nao desfez o incremento (contador %).', v_n;
   END IF;
+  FOR v_caso IN SELECT * FROM (VALUES ('authenticated'), ('anon')) AS x(papel) LOOP
+    PERFORM set_config('request.jwt.claims',
+                       json_build_object('sub', k_com_auth::text, 'role', v_caso.papel)::text, true);
+    EXECUTE format('SET LOCAL ROLE %I', v_caso.papel);
+    v_erro := NULL;
+    BEGIN
+      PERFORM 1 FROM public.neg_nif_tentativas;
+    EXCEPTION WHEN insufficient_privilege THEN v_erro := 'ok';
+    END;
+    EXECUTE 'RESET ROLE';
+    IF v_erro IS NULL THEN
+      RAISE EXCEPTION 'FALHOU A11: % le a tabela do contador.', v_caso.papel;
+    END IF;
+  END LOOP;
+  PERFORM set_config('request.jwt.claims', '', true);
   SELECT count(*) INTO v_n FROM public.anew_entities e WHERE e.id = v_e4 AND e.nif_hash IS NOT NULL;
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'FALHOU A11: gravou o NIF depois do limite.';

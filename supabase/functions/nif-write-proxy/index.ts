@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
+import { getServiceRoleKey } from "../_shared/auth.ts";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { deriveKeyFromEnv } from "../_shared/nifCrypto.ts";
@@ -26,7 +27,7 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseServiceRoleKey = getServiceRoleKey();
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
@@ -35,6 +36,11 @@ Deno.serve(async (req) => {
 
     return await handleNifWriteProxyRequest(req, {
       supabaseAdmin,
+      // Sem cabecalho de autorizacao do utilizador: so para neg_guardar_nif_pessoa.
+      createServiceClient: () =>
+        createClient(supabaseUrl, supabaseServiceRoleKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        }),
       createUserClient: (authHeader: string) =>
         createClient(supabaseUrl, supabaseAnonKey, {
           auth: { autoRefreshToken: false, persistSession: false },

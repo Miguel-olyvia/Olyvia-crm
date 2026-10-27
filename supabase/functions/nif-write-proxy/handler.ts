@@ -85,6 +85,13 @@ export interface NifWriteProxyDeps {
    */
   // deno-lint-ignore no-explicit-any
   createUserClient: (authHeader: string) => any;
+  /**
+   * Builds a service_role Supabase client WITHOUT any user Authorization header. Used ONLY for
+   * neg_guardar_nif_pessoa, whose EXECUTE is granted to service_role alone: the proxy passes the
+   * already-verified JWT user as `p_actor_auth_uid` and the function re-validates it inside.
+   */
+  // deno-lint-ignore no-explicit-any
+  createServiceClient: () => any;
   /** Resolves the AES-256-GCM encryption key. Must throw a clear error if unavailable. */
   getEncKey: () => NifKey;
   /** Resolves the HMAC-SHA256 key. Must throw a clear error if unavailable. */
@@ -97,6 +104,13 @@ function jsonResponse(req: Request, body: unknown, status: number): Response {
     headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
   });
 }
+
+/** RPCs que correm com service_role e recebem o actor verificado (nunca o do cliente). */
+const SERVICE_ROLE_RPCS: readonly string[] = ["neg_guardar_nif_pessoa"];
+
+/** Parametros de actor: so o proxy os define, a partir do JWT validado. */
+const ACTOR_PARAM_KEY = "p_actor_auth_uid";
+const CLIENT_ACTOR_KEY = /^p_actor/;
 
 function isAllowedRpc(rpc: string): rpc is AllowedRpc {
   return (ALLOWED_RPCS as readonly string[]).includes(rpc);
@@ -113,6 +127,10 @@ function sanitizeClientParams(
   const sanitized = { ...params };
   for (const key of NIF_DERIVED_PARAM_KEYS) {
     delete sanitized[key];
+  }
+  // O actor nunca vem do cliente (p_actor_auth_uid, p_actor, ...).
+  for (const key of Object.keys(sanitized)) {
+    if (CLIENT_ACTOR_KEY.test(key)) delete sanitized[key];
   }
   return sanitized;
 }
@@ -284,6 +302,14 @@ export async function handleNifWriteProxyRequest(
     return jsonResponse(req, { error: "RPC não permitida" }, 400);
   }
 
+  const usaServiceRole = SERVICE_ROLE_RPCS.includes(rpc);
+  // A chave service_role ou o segredo do cron nao sao um utilizador: nao ha actor a validar na
+  // base, por isso nem se chega la.
+  if (usaServiceRole && caller.isServiceRole) {
+    console.warn(`nif-write-proxy: rpc "${rpc}" recusada a chamador interno`);
+    return jsonResponse(req, { error: "Não autorizado" }, 403);
+  }
+
   // Higienização: descarta imediatamente qualquer p_nif_encrypted/p_nif_hash/
   // p_nif_tokens vindo do cliente — só o cálculo interno abaixo pode definir
   // estes três campos.
@@ -384,12 +410,17 @@ export async function handleNifWriteProxyRequest(
       };
   }
 
-  const userClient = deps.createUserClient(authHeader);
+  // neg_guardar_nif_pessoa: cliente service_role sem cabecalho do utilizador; o actor e o auth uid
+  // que o JWT validado acima deu (a funcao revalida-o dentro). As restantes RPCs correm com o JWT.
+  const rpcClient = usaServiceRole ? deps.createServiceClient() : deps.createUserClient(authHeader);
+  const rpcParams = usaServiceRole
+    ? { ...finalParams, [ACTOR_PARAM_KEY]: caller.authUid }
+    : finalParams;
 
   // Transient connection failures (pool exhaustion, 502/503/504) are retried
   // with backoff; the target RPC's own business/permission errors (returned
   // in `error`, never thrown) are never retried — see withRetryResult.
-  const { data, error } = await withRetryResult(() => userClient.rpc(rpc, finalParams));
+  const { data, error } = await withRetryResult(() => rpcClient.rpc(rpc, rpcParams));
 
   if (error) {
     // O NIF nunca vai a log nem a erro devolvido, mesmo que a RPC o ecoe.
@@ -399,8 +430,11 @@ export async function handleNifWriteProxyRequest(
     );
     console.error(`nif-write-proxy: rpc "${rpc}" failed:`, safeMessage);
     // NG032: limite de tentativas da base (o que conta, partilhado por todas as instancias).
+    // 42501: recusa por falta de permissao na base.
     const status = error.code === "NG032"
       ? 429
+      : error.code === "42501"
+      ? 403
       : typeof error.status === "number" ? error.status : 400;
     return jsonResponse(
       req,
