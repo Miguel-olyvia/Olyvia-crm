@@ -1,27 +1,48 @@
 -- =============================================================================
--- teste-etapa.sql  -- teste REVERTIDO (BEGIN ... ROLLBACK) do rascunho
--- 20261231400000_etapa_pela_fase_do_negocio.  ESCRITO, NAO CORRIDO.
+-- teste-etapa.sql  -- teste REVERTIDO (BEGIN ... ROLLBACK) da migration
+-- 20261231700000_etapa_pela_fase_do_negocio (antigo rascunho 20261231400000).
+-- ESCRITO, NAO CORRIDO.
 --
--- Onde e quando correr (ordem obrigatoria, regra do projecto):
---   1. ANTES do db push, contra o remoto RH ainda por corrigir: e o vermelho.
---      Esperado: falham E1 (nova), E2 (emContacto), E3 (visitaMarcada) e E5
---      (dois negocios), porque hoje a etapa de quem tem negocio aberto e
---      sempre «qualificada»; e falha a parte B (nif_ultimos3 nao existe).
---   2. db push da migration.
---   3. de novo, contra o remoto ja corrigido: tudo verde.
---   Nunca se volta a por a versao antiga na base para repetir o vermelho.
+-- Estado da RH (lido a 26/10, so catalogo): o conteudo desta migration ja esta
+-- na base (md5 de neg_resumo_pessoas, neg_ficha_pessoa e fn_neg_pessoa_tem_nif
+-- iguais aos do ficheiro), e a 700000 nao muda nada na RH. Por isso este teste
+-- deve dar VERDE antes e depois do db push; o vermelho contra a versao antiga
+-- ja nao e possivel na RH e NAO se repoe a versao antiga para o mostrar. Se
+-- der vermelho antes do push, o defeito e real e a 700000 nao o corrige.
 --
+-- NAO CORRER sem autorizacao explicita para escritas REVERTIDAS na org nike.
+-- So base RH (uetjghdkwbywbftedtth). Nunca a principal, nunca a Mudelar.
 -- So na org nike (b6ffce4f-f630-4933-833a-008649757a33). Tudo o que se cria
--- fica dentro da transaccao e desaparece no ROLLBACK final. Corre como
--- postgres (cria as pessoas) e depois como authenticated, com o JWT de um
--- membro activo da nike que tenha leads.view com chave «nike:*» (escolhido em
--- tempo de execucao; o teste para se nao houver nenhum).
+-- fica dentro da transaccao e desaparece no ROLLBACK final.
 --
--- NAO VERIFICADO (so se sabe a correr): as validacoes internas de
--- neg_criar_negocio (se aceita dois negocios abertos para a mesma pessoa),
--- neg_registar_contacto, neg_guardar_visita (quadro, horas, recursos) e
--- neg_guardar_levantamento (que chaves exige em p_dados). Se alguma recusar,
--- ajustar os argumentos, nao a asserção.
+-- Identidades (correccao H1 da revisao): anew_memberships.user_id e
+-- anew_users.id; o «sub» do JWT, auth.uid(), has_anew_permission e
+-- crm_scope_keys usam anew_users.auth_user_id. O teste guarda os dois: 'uid'
+-- (anew_users.id, para assigned_to/created_by) e 'auth' (auth_user_id, para o
+-- JWT e as permissoes).
+--
+-- Desempate (correccao M2): neg_criar_negocio e o gatilho de insercao poem
+-- created_at := now(), que e o mesmo em toda a transaccao; o desempate por id
+-- decidiria sozinho e o teste nao provava a regra «o mais antigo por
+-- created_at». Por isso, depois de criados, os negocios de E5/E6 recebem
+-- created_at diferentes (como postgres, com session_replication_role =
+-- replica, porque o gatilho trg_00_negocios_guardar_alteracao repoe o
+-- created_at antigo em qualquer UPDATE), e de proposito ao CONTRARIO da ordem
+-- dos ids: o negocio mais antigo tem o id MAIOR. Uma implementacao que
+-- ordenasse so por id falha E5 e E6.
+--
+-- Ramo verdadeiro de tem_nif (correccao M1): a pessoa E2 recebe um NIF falso
+-- (hash e cifra com a forma certa, sem segredo) como postgres, e a ficha tem
+-- de dar tem_nif true e nif_ultimos3 = '321', e fn_neg_pessoa_tem_nif true.
+--
+-- NAO VERIFICADO (so se sabe a correr):
+--   * as validacoes internas de neg_criar_negocio (se aceita dois negocios
+--     abertos para a mesma pessoa), neg_registar_contacto, neg_guardar_visita
+--     (quadro, horas, recursos) e neg_guardar_levantamento (que chaves exige em
+--     p_dados). Se alguma recusar, ajustar os argumentos, nao a assercao;
+--   * que o role postgres do Supabase pode fazer SET LOCAL
+--     session_replication_role (se nao puder, o passo 2b falha logo e o teste
+--     para sem gravar nada).
 -- =============================================================================
 
 BEGIN;
@@ -35,29 +56,35 @@ CREATE TEMP TABLE t_ctx (k text PRIMARY KEY, v uuid NOT NULL) ON COMMIT DROP;
 DO $ctx$
 DECLARE
   k_org   constant uuid := 'b6ffce4f-f630-4933-833a-008649757a33';
-  v_uid   uuid;
+  v_uid   uuid;   -- anew_users.id
+  v_auth  uuid;   -- anew_users.auth_user_id (sub do JWT)
   v_board uuid;
   r       record;
 BEGIN
   FOR r IN
-    SELECT m.user_id
+    SELECT m.user_id, au.auth_user_id
     FROM public.anew_memberships m
+    JOIN public.anew_users au ON au.id = m.user_id
     WHERE m.organization_id = k_org
       AND m.status = 'active'
       AND m.role_is_client IS NOT TRUE
+      AND au.auth_user_id IS NOT NULL
     ORDER BY m.user_id
   LOOP
     PERFORM set_config('request.jwt.claims',
-                       json_build_object('sub', r.user_id, 'role', 'authenticated')::text, true);
-    IF public.has_anew_permission(r.user_id, 'leads.view')
-       AND public.has_anew_permission(r.user_id, 'pessoas.edit')
+                       json_build_object('sub', r.auth_user_id, 'role', 'authenticated')::text, true);
+    IF public.has_anew_permission(r.auth_user_id, 'leads.view')
+       AND public.has_anew_permission(r.auth_user_id, 'pessoas.view')
+       AND public.has_anew_permission(r.auth_user_id, 'pessoas.edit')
        AND (k_org::text || ':*') = ANY (public.crm_scope_keys('leads.view')) THEN
-      v_uid := r.user_id;
+      v_uid  := r.user_id;
+      v_auth := r.auth_user_id;
       EXIT;
     END IF;
   END LOOP;
+  PERFORM set_config('request.jwt.claims', '', true);
   IF v_uid IS NULL THEN
-    RAISE EXCEPTION 'Teste: nenhum membro activo da nike com leads.view e chave nike:*.';
+    RAISE EXCEPTION 'Teste: nenhum membro activo da nike com leads.view, pessoas.edit e chave nike:*.';
   END IF;
 
   SELECT b.id INTO v_board
@@ -70,18 +97,19 @@ BEGIN
     RAISE EXCEPTION 'Teste: a nike nao tem quadro de visitas.';
   END IF;
 
-  INSERT INTO t_ctx (k, v) VALUES ('org', k_org), ('uid', v_uid), ('board', v_board);
+  INSERT INTO t_ctx (k, v) VALUES ('org', k_org), ('uid', v_uid), ('auth', v_auth), ('board', v_board);
 END
 $ctx$;
 
 -- -----------------------------------------------------------------------------
 -- 1. Pessoas de teste (como postgres), na nike, com o utilizador como dono
 --    E1 negocio vazio                     -> nova
---    E2 negocio + chamada ligada          -> emContacto
+--    E2 negocio + chamada ligada          -> emContacto   (e tem NIF: M1)
 --    E3 negocio + visita ligada           -> visitaMarcada
 --    E4 negocio + levantamento ligado     -> qualificada
---    E5 dois abertos: 1.o vazio, 2.o com chamada  -> nova (conta o primeiro)
---    E6 dois abertos: 1.o com levantamento, 2.o vazio -> qualificada
+--    E5 dois abertos: o MAIS ANTIGO vazio (id maior), o outro com chamada -> nova
+--    E6 dois abertos: o MAIS ANTIGO com levantamento (id maior), o outro vazio
+--       -> qualificada
 --    E7 sem negocio, com chamada solta    -> emContacto (como hoje)
 --    E8 sem negocio, sem nada             -> nova (como hoje)
 -- -----------------------------------------------------------------------------
@@ -100,18 +128,26 @@ FROM (VALUES
 CROSS JOIN (SELECT v FROM t_ctx WHERE k = 'org') c_org
 CROSS JOIN (SELECT v FROM t_ctx WHERE k = 'uid') c_uid;
 
+-- M1: E2 com NIF falso (forma certa; hash aleatorio para nao colidir com o
+-- indice unico uq_anew_entities_org_nif_hash). Como postgres: authenticated ja
+-- nao actualiza nif_* depois da 20261231600000.
+UPDATE public.anew_entities e
+SET nif_hash      = md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text),
+    nif_encrypted = encode(convert_to(repeat('x', 37), 'UTF8'), 'base64'),
+    nif_last3     = '321'
+WHERE e.id = 'e2000000-0000-4000-8000-000000000000'
+  AND e.organization_id = 'b6ffce4f-f630-4933-833a-008649757a33';
+
 GRANT SELECT ON t_ctx TO authenticated;
 
--- a partir daqui, como o utilizador escolhido
+-- a partir daqui, como o utilizador escolhido (sub = auth_user_id)
 SELECT set_config('request.jwt.claims',
-                  json_build_object('sub', (SELECT v FROM t_ctx WHERE k = 'uid'),
+                  json_build_object('sub', (SELECT v FROM t_ctx WHERE k = 'auth'),
                                     'role', 'authenticated')::text, true);
 SET LOCAL ROLE authenticated;
 
 -- -----------------------------------------------------------------------------
--- 2. Negocios e registos ligados (pelas RPCs do Pipeline). Nos pares E5 e E6 o
---    primeiro negocio e criado antes e tem o id menor, por isso e o primeiro
---    tanto por created_at como pelo desempate por id.
+-- 2. Negocios e registos ligados (pelas RPCs do Pipeline)
 -- -----------------------------------------------------------------------------
 DO $dados$
 DECLARE
@@ -129,13 +165,13 @@ BEGIN
   PERFORM public.neg_criar_negocio(p_id => 'a4000000-0000-4000-8000-000000000001', p_organization_id => v_org,
                                    p_entity_id => 'e4000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E4');
   PERFORM public.neg_criar_negocio(p_id => 'a5000000-0000-4000-8000-000000000001', p_organization_id => v_org,
-                                   p_entity_id => 'e5000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E5 primeiro');
+                                   p_entity_id => 'e5000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E5 recente');
   PERFORM public.neg_criar_negocio(p_id => 'a5000000-0000-4000-8000-000000000002', p_organization_id => v_org,
-                                   p_entity_id => 'e5000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E5 segundo');
+                                   p_entity_id => 'e5000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E5 antigo');
   PERFORM public.neg_criar_negocio(p_id => 'a6000000-0000-4000-8000-000000000001', p_organization_id => v_org,
-                                   p_entity_id => 'e6000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E6 primeiro');
+                                   p_entity_id => 'e6000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E6 recente');
   PERFORM public.neg_criar_negocio(p_id => 'a6000000-0000-4000-8000-000000000002', p_organization_id => v_org,
-                                   p_entity_id => 'e6000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E6 segundo');
+                                   p_entity_id => 'e6000000-0000-4000-8000-000000000000', p_titulo => 'TESTE E6 antigo');
 
   -- E2: chamada ligada ao negocio
   PERFORM public.neg_registar_contacto(p_id => 'c2000000-0000-4000-8000-000000000001', p_organization_id => v_org,
@@ -154,17 +190,19 @@ BEGIN
                                           p_dados => jsonb_build_object('data_levantamento', current_date),
                                           p_linhas => '[]'::jsonb, p_respostas => '{}'::jsonb,
                                           p_negocio_id => 'a4000000-0000-4000-8000-000000000001');
-  -- E5: chamada so no SEGUNDO negocio (o primeiro fica vazio)
+  -- E5: chamada so no negocio RECENTE (...001, id menor); o antigo (...002)
+  --     fica vazio
   PERFORM public.neg_registar_contacto(p_id => 'c5000000-0000-4000-8000-000000000001', p_organization_id => v_org,
                                        p_entity_id => 'e5000000-0000-4000-8000-000000000000',
                                        p_resultado => 'atendeuInteressado',
-                                       p_negocio_id => 'a5000000-0000-4000-8000-000000000002');
-  -- E6: levantamento no PRIMEIRO negocio
+                                       p_negocio_id => 'a5000000-0000-4000-8000-000000000001');
+  -- E6: levantamento so no negocio ANTIGO (...002, id maior); o recente
+  --     (...001) fica vazio
   PERFORM public.neg_guardar_levantamento(p_id => 'b6000000-0000-4000-8000-000000000001', p_organization_id => v_org,
                                           p_entity_id => 'e6000000-0000-4000-8000-000000000000',
                                           p_dados => jsonb_build_object('data_levantamento', current_date),
                                           p_linhas => '[]'::jsonb, p_respostas => '{}'::jsonb,
-                                          p_negocio_id => 'a6000000-0000-4000-8000-000000000001');
+                                          p_negocio_id => 'a6000000-0000-4000-8000-000000000002');
   -- E7: chamada solta (sem negocio)
   PERFORM public.neg_registar_contacto(p_id => 'c7000000-0000-4000-8000-000000000001', p_organization_id => v_org,
                                        p_entity_id => 'e7000000-0000-4000-8000-000000000000',
@@ -173,7 +211,44 @@ END
 $dados$;
 
 -- -----------------------------------------------------------------------------
--- 3. Asserções: a etapa da lista, a etapa da ficha, e as duas iguais
+-- 2b. M2: o negocio de id MAIOR passa a ser o mais antigo (como postgres; o
+--     gatilho de UPDATE de negocios repoe created_at, por isso desligam-se os
+--     gatilhos so para este UPDATE, dentro da transaccao)
+-- -----------------------------------------------------------------------------
+RESET ROLE;
+SET LOCAL session_replication_role = replica;
+UPDATE public.negocios n
+SET created_at = n.created_at - interval '2 days'
+WHERE n.organization_id = 'b6ffce4f-f630-4933-833a-008649757a33'
+  AND n.id IN ('a5000000-0000-4000-8000-000000000002', 'a6000000-0000-4000-8000-000000000002');
+SET LOCAL session_replication_role = origin;
+
+DO $m2$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN
+    SELECT x.antigo, x.recente FROM (VALUES
+      ('a5000000-0000-4000-8000-000000000002'::uuid, 'a5000000-0000-4000-8000-000000000001'::uuid),
+      ('a6000000-0000-4000-8000-000000000002'::uuid, 'a6000000-0000-4000-8000-000000000001'::uuid)
+    ) AS x(antigo, recente)
+  LOOP
+    IF NOT ((SELECT n.created_at FROM public.negocios n WHERE n.id = r.antigo)
+            < (SELECT n.created_at FROM public.negocios n WHERE n.id = r.recente)) THEN
+      RAISE EXCEPTION 'Teste M2: o negocio % nao ficou mais antigo que % (o teste nao provaria o desempate).',
+        r.antigo, r.recente;
+    END IF;
+  END LOOP;
+END
+$m2$;
+
+SELECT set_config('request.jwt.claims',
+                  json_build_object('sub', (SELECT v FROM t_ctx WHERE k = 'auth'),
+                                    'role', 'authenticated')::text, true);
+SET LOCAL ROLE authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 3. Assercoes: a etapa da lista, a etapa da ficha, e as duas iguais
 -- -----------------------------------------------------------------------------
 DO $etapa$
 DECLARE
@@ -195,14 +270,14 @@ BEGIN
 
   FOR r IN
     SELECT x.ent, x.caso, x.esperada FROM (VALUES
-      ('e1000000-0000-4000-8000-000000000000'::uuid, 'E1 negocio vazio',                 'nova'),
-      ('e2000000-0000-4000-8000-000000000000'::uuid, 'E2 com chamada',                   'emContacto'),
-      ('e3000000-0000-4000-8000-000000000000'::uuid, 'E3 com visita',                    'visitaMarcada'),
-      ('e4000000-0000-4000-8000-000000000000'::uuid, 'E4 com levantamento',              'qualificada'),
-      ('e5000000-0000-4000-8000-000000000000'::uuid, 'E5 dois abertos, 1.o vazio',       'nova'),
-      ('e6000000-0000-4000-8000-000000000000'::uuid, 'E6 dois abertos, 1.o levantamento','qualificada'),
-      ('e7000000-0000-4000-8000-000000000000'::uuid, 'E7 sem negocio, com chamada',      'emContacto'),
-      ('e8000000-0000-4000-8000-000000000000'::uuid, 'E8 sem negocio, sem nada',         'nova')
+      ('e1000000-0000-4000-8000-000000000000'::uuid, 'E1 negocio vazio',                     'nova'),
+      ('e2000000-0000-4000-8000-000000000000'::uuid, 'E2 com chamada',                       'emContacto'),
+      ('e3000000-0000-4000-8000-000000000000'::uuid, 'E3 com visita',                        'visitaMarcada'),
+      ('e4000000-0000-4000-8000-000000000000'::uuid, 'E4 com levantamento',                  'qualificada'),
+      ('e5000000-0000-4000-8000-000000000000'::uuid, 'E5 dois abertos, o antigo vazio',      'nova'),
+      ('e6000000-0000-4000-8000-000000000000'::uuid, 'E6 dois abertos, o antigo levantamento','qualificada'),
+      ('e7000000-0000-4000-8000-000000000000'::uuid, 'E7 sem negocio, com chamada',          'emContacto'),
+      ('e8000000-0000-4000-8000-000000000000'::uuid, 'E8 sem negocio, sem nada',             'nova')
     ) AS x(ent, caso, esperada)
   LOOP
     SELECT l.etapa INTO v_lista
@@ -270,14 +345,15 @@ END
 $filtro$;
 
 -- -----------------------------------------------------------------------------
--- 5. Parte B: a ficha traz nif_ultimos3 (nulo, as pessoas de teste nao tem NIF)
---    e tem_nif falso; e nunca traz chaves com o NIF, o hash ou a cifra
+-- 5. Parte B: nif_ultimos3 e tem_nif nos dois ramos, e nunca o NIF, o hash ou
+--    a cifra
 -- -----------------------------------------------------------------------------
 DO $nif$
 DECLARE
   v_org uuid := (SELECT v FROM t_ctx WHERE k = 'org');
   v_p   jsonb;
 BEGIN
+  -- ramo falso: E1 sem NIF
   v_p := public.neg_ficha_pessoa(v_org, 'e1000000-0000-4000-8000-000000000000', p_partes => ARRAY['base']) -> 'pessoa';
   IF NOT (v_p ? 'nif_ultimos3') THEN
     RAISE EXCEPTION 'Teste B: a ficha nao traz a chave nif_ultimos3.';
@@ -286,11 +362,31 @@ BEGIN
     RAISE EXCEPTION 'Teste B: nif_ultimos3 devia ser nulo para uma pessoa sem NIF (veio %).', v_p ->> 'nif_ultimos3';
   END IF;
   IF (v_p -> 'tem_nif') IS DISTINCT FROM 'false'::jsonb THEN
-    RAISE EXCEPTION 'Teste B: tem_nif devia ser false (veio %).', v_p ->> 'tem_nif';
+    RAISE EXCEPTION 'Teste B: tem_nif devia ser false sem NIF (veio %).', v_p ->> 'tem_nif';
   END IF;
-  IF v_p ?| ARRAY['nif_hash', 'nif_encrypted', 'nif_completo'] OR (v_p -> 'nif') IS DISTINCT FROM 'null'::jsonb THEN
-    RAISE EXCEPTION 'Teste B: a ficha traz o NIF, o hash ou a cifra.';
+  IF public.fn_neg_pessoa_tem_nif(v_org, 'e1000000-0000-4000-8000-000000000000') IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Teste B: fn_neg_pessoa_tem_nif devia dar false para E1.';
   END IF;
+
+  -- ramo verdadeiro (M1): E2 com NIF
+  v_p := public.neg_ficha_pessoa(v_org, 'e2000000-0000-4000-8000-000000000000', p_partes => ARRAY['base']) -> 'pessoa';
+  IF (v_p ->> 'nif_ultimos3') IS DISTINCT FROM '321' THEN
+    RAISE EXCEPTION 'Teste B: nif_ultimos3 de E2 devia ser 321 (veio %).', COALESCE(v_p ->> 'nif_ultimos3', '(nulo)');
+  END IF;
+  IF (v_p -> 'tem_nif') IS DISTINCT FROM 'true'::jsonb THEN
+    RAISE EXCEPTION 'Teste B: tem_nif devia ser true para E2 (veio %).', COALESCE(v_p ->> 'tem_nif', '(nulo)');
+  END IF;
+  IF public.fn_neg_pessoa_tem_nif(v_org, 'e2000000-0000-4000-8000-000000000000') IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'Teste B: fn_neg_pessoa_tem_nif devia dar true para E2.';
+  END IF;
+  IF v_p ?| ARRAY['nif_hash', 'nif_encrypted', 'nif_completo']
+     OR (v_p -> 'nif') IS DISTINCT FROM 'null'::jsonb THEN
+    RAISE EXCEPTION 'Teste B: a ficha de E2 traz o NIF, o hash ou a cifra.';
+  END IF;
+  IF v_p::text ~ '[0-9a-f]{64}' THEN
+    RAISE EXCEPTION 'Teste B: a ficha de E2 traz um valor com a forma do hash.';
+  END IF;
+
   -- fora do ambito a auxiliar nao revela nada (pessoa inexistente na nike)
   IF public.fn_neg_pessoa_tem_nif(v_org, '00000000-0000-4000-8000-0000000000ff') IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'Teste B: fn_neg_pessoa_tem_nif devia dar false fora do ambito.';

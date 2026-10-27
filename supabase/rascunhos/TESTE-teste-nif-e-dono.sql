@@ -1,12 +1,14 @@
 -- =============================================================================
--- teste-nif-e-dono.sql — prova da migration 20261231300000_nif_e_dono_da_pessoa
+-- teste-nif-e-dono.sql — prova da migration 20261231600000_nif_e_dono_da_pessoa
+-- (partes A e B; era o rascunho 20261231300000). A parte C, a revogacao do
+-- UPDATE por coluna, esta em TESTE-teste-revogar-update-nif.sql.
 --
 -- NAO CORRER sem autorizacao explicita para escritas REVERTIDAS na org nike.
 -- So base RH (uetjghdkwbywbftedtth). Nunca a principal, nunca a Mudelar.
 --
 -- Como correr (so com essa autorizacao, ANTES do db push, numa so ligacao):
 --   BEGIN;
---   <conteudo inteiro da migration 20261231300000>
+--   <conteudo inteiro da migration 20261231600000>
 --   <este ficheiro>
 --   ROLLBACK;
 -- O bloco acaba SEMPRE com RAISE EXCEPTION (TESTE_OK ou FALHOU), por isso
@@ -258,18 +260,22 @@ BEGIN
   END IF;
 
   -- ---------------------------------------------------------------------------
-  -- A7. O mesmo NIF noutra pessoa da organizacao -> NG030, sem o hash na mensagem
+  -- A7. O mesmo NIF noutra pessoa da organizacao -> {erro: NG030} devolvido
+  --     (nao lancado, para o contador ficar), sem o hash nem o NIF, e a pessoa
+  --     continua sem NIF
   -- ---------------------------------------------------------------------------
-  v_erro := NULL;
-  BEGIN
-    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e2, k_nif1, v_h1, v_enc9);
-  EXCEPTION WHEN SQLSTATE 'NG030' THEN v_erro := SQLERRM;
-  END;
-  IF v_erro IS NULL THEN
-    RAISE EXCEPTION 'FALHOU A7: aceitou o NIF repetido.';
+  v_res := public.neg_guardar_nif_pessoa(k_org, v_e2, k_nif1, v_h1, v_enc9);
+  IF v_res ->> 'erro' IS DISTINCT FROM 'NG030' THEN
+    RAISE EXCEPTION 'FALHOU A7: aceitou o NIF repetido: %.', v_res::text;
   END IF;
-  IF position(v_h1 IN v_erro) > 0 OR position(k_nif1 IN v_erro) > 0 THEN
-    RAISE EXCEPTION 'FALHOU A7: a mensagem do repetido traz o hash ou o NIF.';
+  IF position(v_h1 IN v_res::text) > 0 OR position(k_nif1 IN v_res::text) > 0 THEN
+    RAISE EXCEPTION 'FALHOU A7: a resposta do repetido traz o hash ou o NIF.';
+  END IF;
+  EXECUTE 'RESET ROLE';
+  SELECT count(*) INTO v_n FROM public.anew_entities e WHERE e.id = v_e2 AND e.nif_hash IS NOT NULL;
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALHOU A7: o NIF repetido ficou gravado.';
   END IF;
 
   -- ---------------------------------------------------------------------------
@@ -340,14 +346,10 @@ BEGIN
     RAISE EXCEPTION 'FALHOU A10 (pre): o ambito do comercial nao e o esperado (v_e3 fora, v_e4 dentro).';
   END IF;
   EXECUTE 'SET LOCAL ROLE authenticated';
-  v_erro := NULL;
-  BEGIN
-    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif1, v_h1, v_enc9);
-  EXCEPTION WHEN SQLSTATE 'NG031' THEN v_erro := SQLERRM;
-  END;
+  v_res := public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif1, v_h1, v_enc9);
   EXECUTE 'RESET ROLE';
-  IF v_erro IS DISTINCT FROM 'Nao foi possivel gravar este NIF.' THEN
-    RAISE EXCEPTION 'FALHOU A10: o repetido fora do ambito nao deu a recusa generica NG031.';
+  IF v_res IS DISTINCT FROM jsonb_build_object('erro', 'NG031', 'mensagem', 'Nao foi possivel gravar este NIF.') THEN
+    RAISE EXCEPTION 'FALHOU A10: o repetido fora do ambito nao deu a recusa generica NG031: %.', v_res::text;
   END IF;
 
   -- a mesma pessoa passa a estar no ambito do comercial -> NG030
@@ -356,18 +358,53 @@ BEGIN
   PERFORM set_config('request.jwt.claims',
                      json_build_object('sub', k_com_auth::text, 'role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
+  v_res := public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif1, v_h1, v_enc9);
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('request.jwt.claims', '', true);
+  IF v_res ->> 'erro' IS DISTINCT FROM 'NG030' THEN
+    RAISE EXCEPTION 'FALHOU A10: o repetido dentro do ambito nao deu NG030: %.', v_res::text;
+  END IF;
+  IF position(v_h1 IN v_res::text) > 0 OR position(k_nif1 IN v_res::text) > 0 THEN
+    RAISE EXCEPTION 'FALHOU A10: a resposta do repetido traz o hash ou o NIF.';
+  END IF;
+
+  -- ---------------------------------------------------------------------------
+  -- A11. Limite na base (D): as duas recusas do comercial em A10 CONTARAM (2
+  --      no minuto); levado o contador a 10, a tentativa seguinte da NG032, e
+  --      authenticated nao le nem escreve a tabela do contador.
+  -- ---------------------------------------------------------------------------
+  SELECT t.n INTO v_n FROM public.neg_nif_tentativas t
+  WHERE t.user_id = k_com_auth AND t.janela = date_trunc('minute', now());
+  IF v_n IS DISTINCT FROM 2 THEN
+    RAISE EXCEPTION 'FALHOU A11: as recusas por repetido nao contaram (contador %).', v_n;
+  END IF;
+  UPDATE public.neg_nif_tentativas t SET n = 10
+  WHERE t.user_id = k_com_auth AND t.janela = date_trunc('minute', now());
+  PERFORM set_config('request.jwt.claims',
+                     json_build_object('sub', k_com_auth::text, 'role', 'authenticated')::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
   v_erro := NULL;
   BEGIN
-    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif1, v_h1, v_enc9);
-  EXCEPTION WHEN SQLSTATE 'NG030' THEN v_erro := SQLERRM;
+    PERFORM public.neg_guardar_nif_pessoa(k_org, v_e4, k_nif2, v_h2, v_enc9);
+  EXCEPTION WHEN SQLSTATE 'NG032' THEN v_erro := SQLERRM;
+  END;
+  IF v_erro IS NULL THEN
+    EXECUTE 'RESET ROLE';
+    RAISE EXCEPTION 'FALHOU A11: a 11.a tentativa no minuto nao deu NG032.';
+  END IF;
+  v_erro := NULL;
+  BEGIN
+    PERFORM 1 FROM public.neg_nif_tentativas;
+  EXCEPTION WHEN insufficient_privilege THEN v_erro := 'ok';
   END;
   EXECUTE 'RESET ROLE';
   PERFORM set_config('request.jwt.claims', '', true);
   IF v_erro IS NULL THEN
-    RAISE EXCEPTION 'FALHOU A10: o repetido dentro do ambito nao deu NG030.';
+    RAISE EXCEPTION 'FALHOU A11: authenticated le a tabela do contador.';
   END IF;
-  IF position(v_h1 IN v_erro) > 0 OR position(k_nif1 IN v_erro) > 0 THEN
-    RAISE EXCEPTION 'FALHOU A10: a mensagem do repetido traz o hash ou o NIF.';
+  SELECT count(*) INTO v_n FROM public.anew_entities e WHERE e.id = v_e4 AND e.nif_hash IS NOT NULL;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALHOU A11: gravou o NIF depois do limite.';
   END IF;
 
   -- repor: v_e3 e v_e4 sem dono e sem NIF (B1 e B4 partem daqui)

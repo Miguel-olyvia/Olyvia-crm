@@ -117,8 +117,84 @@ function sanitizeClientParams(
   return sanitized;
 }
 
+/**
+ * Limite de tentativas com NIF por utilizador autenticado (janela deslizante, EM MEMORIA).
+ *
+ * ATENCAO: isto NAO e um controlo de seguranca. Vive em cada isolate da Edge Function: com
+ * varias instancias concorrentes e arranques a frio o limite real e 10 x n.o de isolates e
+ * recomeca a cada arranque, e quem chame a RPC directamente por PostgREST nao passa por aqui.
+ * O limite que conta esta na base, dentro de neg_guardar_nif_pessoa (tabela
+ * neg_nif_tentativas, NG032, migration 20261231600000). Este fica so como camada extra, que
+ * poupa a ida a base a um cliente insistente na mesma instancia.
+ */
+export const NIF_RATE_LIMIT_MAX = 10;
+export const NIF_RATE_LIMIT_WINDOW_MS = 60_000;
+/** De quantas em quantas tentativas se varrem as chaves antigas do Map. */
+export const NIF_RATE_LIMIT_SWEEP_EVERY = 100;
+/** Teto de chaves: passado este tamanho, varre-se em cada tentativa. */
+export const NIF_RATE_LIMIT_MAX_KEYS = 5_000;
+
+const nifAttempts = new Map<string, number[]>();
+let attemptsSinceSweep = 0;
+
+/** Apaga as chaves cujas marcas estao todas fora da janela (sem isto o Map cresce sem fim). */
+function sweepNifAttempts(now: number): void {
+  for (const [key, marks] of nifAttempts) {
+    if (marks.every((t) => now - t >= NIF_RATE_LIMIT_WINDOW_MS)) nifAttempts.delete(key);
+  }
+}
+
+/** Regista uma tentativa e devolve false se o utilizador ja esgotou o limite na janela. */
+function consumeNifAttempt(userKey: string, now: number): boolean {
+  attemptsSinceSweep += 1;
+  if (attemptsSinceSweep >= NIF_RATE_LIMIT_SWEEP_EVERY || nifAttempts.size >= NIF_RATE_LIMIT_MAX_KEYS) {
+    attemptsSinceSweep = 0;
+    sweepNifAttempts(now);
+  }
+  const recent = (nifAttempts.get(userKey) ?? []).filter(
+    (t) => now - t < NIF_RATE_LIMIT_WINDOW_MS,
+  );
+  if (recent.length >= NIF_RATE_LIMIT_MAX) {
+    nifAttempts.set(userKey, recent);
+    return false;
+  }
+  nifAttempts.set(userKey, [...recent, now]);
+  return true;
+}
+
+/** Apenas para testes: limpa o estado do limite de tentativas. */
+export function resetNifRateLimitForTests(): void {
+  nifAttempts.clear();
+  attemptsSinceSweep = 0;
+}
+
+/** Apenas para testes: quantas chaves o limite em memoria guarda. */
+export function nifRateLimitKeyCountForTests(): number {
+  return nifAttempts.size;
+}
+
+/** Codigo de erro proprio das funcoes neg_* (NG001..NG999), ou null. */
+const CODIGO_NG = /^NG\d{3}$/;
+
+/**
+ * neg_guardar_nif_pessoa devolve (nao lanca) a recusa por NIF repetido, para o contador de
+ * tentativas da base ficar gravado: {erro: 'NG030'|'NG031', mensagem}. Le essa recusa, ou null.
+ */
+function recusaDevolvida(data: unknown): { codigo: string; mensagem: string } | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const { erro, mensagem } = data as { erro?: unknown; mensagem?: unknown };
+  if (typeof erro !== "string" || !CODIGO_NG.test(erro)) return null;
+  return { codigo: erro, mensagem: typeof mensagem === "string" ? mensagem : "" };
+}
+
+/** A mensagem com o codigo NG a frente (o ecra le o codigo do texto), sem o repetir. */
+function comCodigo(codigo: unknown, mensagem: string): string {
+  if (typeof codigo !== "string" || !CODIGO_NG.test(codigo) || mensagem.includes(codigo)) return mensagem;
+  return `${codigo} ${mensagem}`.trim();
+}
+
 /** Replaces any occurrence of the plaintext NIF (with and without separators) in a message. */
-function redactNif(message: string, nif: string): string {
+export function redactNif(message: string, nif: string): string {
   if (nif === "") return message;
   let result = message.split(nif).join("***");
   const digits = nif.replace(/\D/g, "");
@@ -224,6 +300,21 @@ export async function handleNifWriteProxyRequest(
   const trimmedNif = nif != null ? nif.trim() : "";
   const nifProvided = trimmedNif !== "";
 
+  if (nifProvided || rpc === "neg_guardar_nif_pessoa") {
+    const userKey = caller.authUid || caller.anewUserId || "unknown";
+    if (!consumeNifAttempt(userKey, Date.now())) {
+      // Registo de seguranca: identifica o utilizador e a RPC, nunca o NIF.
+      console.warn(
+        `nif-write-proxy: rate limit exceeded user=${userKey} rpc=${rpc}`,
+      );
+      return jsonResponse(
+        req,
+        { error: "Demasiadas tentativas. Tente novamente dentro de um minuto." },
+        429,
+      );
+    }
+  }
+
   if (nifProvided) {
     let encKey: NifKey;
     let hmacKey: NifKey;
@@ -250,17 +341,19 @@ export async function handleNifWriteProxyRequest(
     }
 
     try {
+      // neg_guardar_nif_pessoa nao usa tokens: nem sequer se calculam.
+      const wantsTokens = rpc !== "neg_guardar_nif_pessoa";
       const [nifEncrypted, nifHash, nifTokens] = await Promise.all([
         encryptNif(trimmedNif, encKey),
         hashNif(trimmedNif, hmacKey),
-        tokenizeNif(trimmedNif, hmacKey),
+        wantsTokens ? tokenizeNif(trimmedNif, hmacKey) : Promise.resolve(null),
       ]);
 
       finalParams = {
         ...sanitizedParams,
         p_nif_encrypted: nifEncrypted,
         p_nif_hash: nifHash,
-        p_nif_tokens: nifTokens,
+        ...(wantsTokens ? { p_nif_tokens: nifTokens } : {}),
       };
     } catch (e: unknown) {
       console.error(
@@ -277,15 +370,17 @@ export async function handleNifWriteProxyRequest(
 
   // neg_guardar_nif_pessoa: p_nif e SEMPRE o NIF aparado que o proxy cifrou (a RPC confere o
   // tamanho da cifra contra ele), e um NIF vazio limpa: hash, cifra e tokens a NULL explicitos.
+  // A RPC ja nao recebe tokens: o proxy nao os calcula nem os passa (os do cliente foram descartados).
   if (rpc === "neg_guardar_nif_pessoa") {
+    const { p_nif_tokens: _tokens, ...semTokens } = finalParams;
+    void _tokens;
     finalParams = nifProvided
-      ? { ...finalParams, p_nif: trimmedNif }
+      ? { ...semTokens, p_nif: trimmedNif }
       : {
-        ...finalParams,
+        ...semTokens,
         p_nif: "",
         p_nif_hash: null,
         p_nif_encrypted: null,
-        p_nif_tokens: null,
       };
   }
 
@@ -298,14 +393,28 @@ export async function handleNifWriteProxyRequest(
 
   if (error) {
     // O NIF nunca vai a log nem a erro devolvido, mesmo que a RPC o ecoe.
-    const safeMessage = redactNif(String(error.message ?? "RPC failed"), trimmedNif);
+    const safeMessage = comCodigo(
+      error.code,
+      redactNif(String(error.message ?? "RPC failed"), trimmedNif),
+    );
     console.error(`nif-write-proxy: rpc "${rpc}" failed:`, safeMessage);
-    const status = typeof error.status === "number" ? error.status : 400;
+    // NG032: limite de tentativas da base (o que conta, partilhado por todas as instancias).
+    const status = error.code === "NG032"
+      ? 429
+      : typeof error.status === "number" ? error.status : 400;
     return jsonResponse(
       req,
       { error: safeMessage },
       status,
     );
+  }
+
+  if (rpc === "neg_guardar_nif_pessoa") {
+    const recusa = recusaDevolvida(data);
+    if (recusa) {
+      const safeMessage = comCodigo(recusa.codigo, redactNif(recusa.mensagem, trimmedNif));
+      return jsonResponse(req, { error: safeMessage }, 409);
+    }
   }
 
   return jsonResponse(req, { data: stripSensitiveFields(data) }, 200);
