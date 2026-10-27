@@ -43,11 +43,11 @@ async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<
   return { ref: { id: r.negocioId, entityId: r.entityId }, numero: Number((data as { numero: number }).numero) };
 }
 
-export interface Sincronizacao { gravados: number; erros: string[] }
+export interface Sincronizacao { gravados: number; erros: string[]; avisos: string[] }
 
 /** Grava os negócios que mudaram. Atualiza `refs` e a fotografia com o que ficou gravado. */
 export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado, refs: Map<number, RefNegocio>, foto: Map<number, string>, ids: IdsServico): Promise<Sincronizacao> {
-  const out: Sincronizacao = { gravados: 0, erros: [] };
+  const out: Sincronizacao = { gravados: 0, erros: [], avisos: [] };
   for (const d of negociosMudados(S.deals, foto)) {
     try {
       if (!refs.has(d.id)) {
@@ -62,7 +62,7 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
         atual.preco_final = Math.round(tot(d, S).pf * 100) / 100;
         atual.total_com_iva = Math.round(totaisIva(d, S).total * 100) / 100;
       }
-      await gravarNegocio(sb, org, refs.get(d.id)!.id, L, ids);
+      for (const a of await gravarNegocio(sb, org, refs.get(d.id)!.id, L, ids)) out.avisos.push(`${d.nome}: ${a}`);
       foto.set(d.id, marcaNegocio(d));
       out.gravados++;
     } catch (e) {

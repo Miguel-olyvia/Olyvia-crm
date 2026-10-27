@@ -44,6 +44,7 @@ await inserir("anew_users", { id: `'${U}'` });
 await inserir("anew_memberships", { user_id: `'${U}'`, organization_id: `'${ORG}'` });
 await inserir("negocio_workflow_config", { organization_id: `'${ORG}'`, momento_ganho: "'manual'" });
 for (const m of migs) await db.exec(ler(m));
+await inserir("schedule_boards", { organization_id: `'${ORG}'`, name: "'visita'", board_type: "'general'", is_active: "true", created_by: `'${U}'` });
 
 // o Catálogo como o ecrã o lê (para as chaves dos serviços)
 const LC = linhasDe(((await db.query(`select cat_ler_catalogo('${ORG}') r`)).rows[0] as { r: unknown }).r);
@@ -132,5 +133,10 @@ const c = (await db.query(`select status, signature_method, versao, replaced_by_
 console.log("  contratos na base:", JSON.stringify(c));
 const q = (await db.query(`select versao, estado, proposal_id is not null ligado from quotes where negocio_id=$1 order by versao`, [NEG])).rows;
 console.log("  orçamentos na base:", JSON.stringify(q));
+const ag = (await db.query(`select visita_numero, status, visit_kind, start_datetime from schedule_items where negocio_id=$1 order by visita_numero`, [NEG])).rows as { visita_numero: number; status: string }[];
+console.log("  visitas na agenda:", JSON.stringify(ag));
+const visEmylia = (d().vis ?? []).filter((n) => d().f[`v${n}_data`] && d().f[`v${n}_hora`]);
+if (ag.length === visEmylia.length && ag.length > 0) { ok++; console.log("  certo: as visitas com dia e hora estão na agenda"); }
+else { falhas++; console.log(`  FALHOU: ${visEmylia.length} visitas com dia e hora na Emylia, ${ag.length} na agenda`); }
 console.log(`\n${ok} certos, ${falhas} falhados`);
 process.exit(falhas ? 1 : 0);

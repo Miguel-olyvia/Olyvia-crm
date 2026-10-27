@@ -60,6 +60,7 @@ export default function NegociosEmylia() {
         const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current);
         if (r.erros.length) { setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
+        for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
       } while (deNovo.current);
     } finally {
       aGravar.current = false;

@@ -51,7 +51,10 @@ export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServi
   return ((data as unknown[]) ?? []).map((j) => deBase(j, ids));
 }
 
-export async function gravarNegocio(sb: SupabaseClient, org: string, negocioId: string, L: LinhasNegocio, ids: IdsServico): Promise<void> {
-  const { error } = await sb.rpc("neg_guardar_negocio" as never, { p_org: org, p_negocio_id: negocioId, p_linhas: paraBase(L, ids) } as never);
+/** Grava e devolve os avisos (ex.: uma visita que a agenda recusou por ser feriado; o resto ficou gravado). */
+export async function gravarNegocio(sb: SupabaseClient, org: string, negocioId: string, L: LinhasNegocio, ids: IdsServico): Promise<string[]> {
+  const { data, error } = await sb.rpc("neg_guardar_negocio" as never, { p_org: org, p_negocio_id: negocioId, p_linhas: paraBase(L, ids) } as never);
   if (error) throw new Error(error.message || "Não foi possível gravar o negócio.");
+  const avisos = (data as { avisos?: unknown } | null)?.avisos;
+  return Array.isArray(avisos) ? avisos.map(String) : [];
 }
