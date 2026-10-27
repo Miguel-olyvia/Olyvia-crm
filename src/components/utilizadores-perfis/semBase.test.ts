@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(process.cwd(), "src");
 const PASTAS = ["components/utilizadores-perfis"];
-const FICHEIROS = ["pages/UtilizadoresPerfis.tsx", "translations/utilizadoresPerfis.ts", "translations/utilizadoresPerfisForm.ts"];
+const FICHEIROS = ["pages/UtilizadoresPerfisExemplo.tsx", "translations/utilizadoresPerfis.ts", "translations/utilizadoresPerfisForm.ts"];
 
 const proibido: { nome: string; padrao: RegExp }[] = [
   { nome: "importação de @/integrations/supabase", padrao: /from\s+["']@\/integrations\/supabase/ },
@@ -32,7 +32,7 @@ const analisados = [...PASTAS.flatMap((p) => ficheirosDe(join(SRC, p))), ...FICH
 describe("Utilizadores e perfis: sem ligação à base de dados", () => {
   it("encontra os ficheiros a vigiar (o teste não passa por estar vazio)", () => {
     expect(analisados.length).toBeGreaterThan(15);
-    expect(analisados.some((f) => f.endsWith("UtilizadoresPerfis.tsx"))).toBe(true);
+    expect(analisados.some((f) => f.endsWith("UtilizadoresPerfisExemplo.tsx"))).toBe(true);
   });
 
   it.each(proibido)("nenhum ficheiro tem $nome", ({ padrao }) => {

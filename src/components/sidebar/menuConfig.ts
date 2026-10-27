@@ -14,7 +14,6 @@ import {
   Crosshair,
   FileText,
   Megaphone,
-  Shield,
   Target,
   FileCheck,
   BookOpen,
@@ -450,12 +449,11 @@ export const menuSections: MenuSection[] = [
     icon: UserCog,
     labelKey: "sidebar.users",
     paths: ["/users", "/roles", "/utilizadores-perfis", "/export-audit"],
-    permissions: ["users.view"],
+    permissions: ["users.view", "roles.view"],
     items: [
-      { to: "/users", icon: Users, labelKey: "sidebar.users", permission: "users.view" },
-      { to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
-      // Exemplo estático por agora (junta Utilizadores e Roles); as páginas reais continuam acima.
-      { to: "/utilizadores-perfis", icon: UserCog, labelKey: "sidebar.usersProfiles", permission: "users.view" },
+      // Um só ecrã com Utilizadores e Roles em separadores; cada separador pede a sua permissão (users.view, roles.view).
+      // /users e /roles continuam a existir como redireccionamento para o separador certo.
+      { to: "/utilizadores-perfis", icon: UserCog, labelKey: "sidebar.usersProfiles", permissions: ["users.view", "roles.view"] },
       { to: "/export-audit", icon: FileDown, labelKey: "sidebar.exportAudit", permission: "exports.audit.view" },
     ],
   },

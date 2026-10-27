@@ -3,7 +3,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import UtilizadoresPerfis from "./UtilizadoresPerfis";
+import UtilizadoresPerfis from "./UtilizadoresPerfisExemplo";
 import { repor } from "@/components/utilizadores-perfis/perfisStore";
 
 vi.mock("@/hooks/useTranslation", async () => {
