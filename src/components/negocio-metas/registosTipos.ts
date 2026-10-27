@@ -17,6 +17,10 @@ export interface ContactoPessoa {
   resultado: ResultadoContacto | null;
   nota: string;
   negocioId: string | null;
+  /** Quem registou a chamada; falta nos registos de exemplo e quando a base não o diz. */
+  criadoPor?: string;
+  /** A próxima ação combinada na chamada (dia AAAA-MM-DD e hora HH:MM, se a base a deu); falta quando não há. */
+  proximaAcao?: { data: string; hora?: string };
 }
 
 /**
@@ -34,6 +38,8 @@ export const resultadoEncerra = (r: ResultadoVisita): r is ResultadoEncerramento
 /** O que a agenda sabe de uma visita da base: o quadro, quem vai e quanto dura. Só nas visitas da ficha real (o exemplo não tem agenda). */
 export interface AgendaDaVisita {
   boardId: string | null;
+  /** O nome do quadro da agenda; `null` quando a base não o dá. */
+  boardNome?: string | null;
   recursos: { id: string; nome: string }[];
   /** O fim menos o início, em minutos; `null` sem fim (ou com um fim que não vem depois do início). */
   duracaoMinutos: number | null;
@@ -62,6 +68,8 @@ export interface LevantamentoPessoa {
   negocioId: string | null;
   /** De onde veio a morada do levantamento; `null` sem morada ou sem a informação. */
   moradaOrigem?: "entidade" | "manual" | "localizacao" | null;
+  /** A morada da obra gravada no levantamento (os quatro campos); falta sem morada ou nos de exemplo. */
+  morada?: { rua: string; codigoPostal: string; localidade: string; andar: string };
 }
 
 export type TipoRegisto = "contacto" | "visita" | "levantamento";

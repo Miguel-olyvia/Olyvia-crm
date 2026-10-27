@@ -12,6 +12,12 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
+
+// Os filhos do painel lêem a organização e as permissões: contextos em memória, e Supabase simulado e vazio.
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
 
 vi.mock("@/hooks/useTranslation", () => ({
   useTranslation: () => ({ language: "pt", t: (chave: string, p?: Record<string, unknown>) => (p ? `${chave}|${JSON.stringify(p)}` : chave) }),
@@ -81,6 +87,8 @@ const PESSOA = {
 };
 
 beforeEach(() => {
+  reporRhTeste();
+  rhTeste.permissoes = new Set(["hr.pessoas.view"]);
   recarregarConvite.mockReset();
   recarregarPendencias.mockReset();
   estadoFicha = { loading: false, notFound: false, pessoa: PESSOA, conta: null, vinculos: [], refresh: vi.fn().mockResolvedValue(undefined) };

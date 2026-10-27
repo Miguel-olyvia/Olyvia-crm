@@ -1,5 +1,8 @@
-// O universo de exemplo de RH tem uma data de referência fixa: o relógio do computador não o move.
-// Corre a mesma fotografia com o relógio simulado em duas datas e exige que seja igual.
+// O universo de exemplo de RH (as fichas, a gestão e as admissões de exemplo) tem uma data de referência fixa: o relógio do
+// computador não o move. Corre a mesma fotografia com o relógio simulado em duas datas e exige que seja igual.
+// Já o «hoje» da assiduidade e o «hoje» enviado à base (`dataDeHojeBase`) seguem o relógio REAL desde a ligação à base:
+// o que a base decide com `current_date` não pode ficar preso a 14/10/2026. Esses dois ficam de fora da fotografia
+// e têm o seu próprio teste.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HOJE_EXEMPLO_RH, agoraExemplo, momentoDePicagemAgora } from "./hojeExemplo";
 
@@ -67,14 +70,23 @@ describe("o relógio do computador não mexe nos dados de exemplo de RH", () => 
   it("a mesma fotografia com o relógio em 14/10/2026 e em 1/3/2027", async () => {
     const emOutubro = await fotografar("2026-10-14T12:00:00Z");
     const emMarco = await fotografar("2027-03-01T12:00:00Z");
-    expect(emMarco).toEqual(emOutubro);
+    const { hojeDaAssiduidade: _a1, hojeDaBase: _b1, ...fixoEmOutubro } = emOutubro;
+    const { hojeDaAssiduidade: _a2, hojeDaBase: _b2, ...fixoEmMarco } = emMarco;
+    expect(fixoEmMarco).toEqual(fixoEmOutubro);
+  });
+
+  it("o «hoje» da assiduidade e o enviado à base seguem o relógio real, não a data de referência do exemplo", async () => {
+    const emOutubro = await fotografar("2026-10-14T12:00:00Z");
+    const emMarco = await fotografar("2027-03-01T12:00:00Z");
+    expect(emOutubro.hojeDaAssiduidade).toBe("2026-10-14");
+    expect(emOutubro.hojeDaBase).toBe("2026-10-14");
+    expect(emMarco.hojeDaAssiduidade).toBe("2027-03-01");
+    expect(emMarco.hojeDaBase).toBe("2027-03-01");
   });
 
   it("fixa Setembro a processar, Agosto fechado, o Pedro a 4/9 e os totais de 14/10", async () => {
     const f = await fotografar("2027-03-01T12:00:00Z");
     expect(f.hoje).toBe(HOJE_EXEMPLO_RH);
-    expect(f.hojeDaAssiduidade).toBe(HOJE_EXEMPLO_RH);
-    expect(f.hojeDaBase).toBe(HOJE_EXEMPLO_RH);
     expect(f.pedroSaida).toBe("2026-09-04");
     expect(f.pedroDiasDeContratoSetembro).toEqual({ dias: 4, doMes: 30 });
     expect(f.totalBrutoSetembro).toBe(18688.01);

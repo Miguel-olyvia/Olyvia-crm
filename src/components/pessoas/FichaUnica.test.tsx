@@ -235,7 +235,9 @@ describe("com um negócio aberto", () => {
   });
 
   it("na página, o painel da chamada aberto pelo «Mais» aparece uma só vez no guia da pessoa (sem negócio aberto)", () => {
-    montar(lead(), { naPagina: true, voltaPara: "pipeline" });
+    // Uma lead por contactar tem o botão «Registar a chamada» no passo e NÃO leva o item no «Mais»; por isso aqui a lead já foi contactada
+    // (o passo é marcar a visita) e a chamada abre-se pelo «Mais».
+    montar(resumoBase(pessoa(), [], HOJE, "lead", registosBase({ contactos: [contactoBase()] })), { naPagina: true, voltaPara: "pipeline" });
     abrirMais();
     fireEvent.click(screen.getByRole("menuitem", { name: "Registar chamada" }));
     expect(screen.getAllByRole("heading", { name: "Registar chamada" })).toHaveLength(1);

@@ -39,8 +39,11 @@ describe("prepararHidratado", () => {
     expect(prepararHidratado({ duracao: "h2", quem: "", nota: "" }, VISITA(), true)).toEqual({ duracao: "h2", quem: "", nota: "" });
     expect(prepararHidratado(VAZIA, VISITA(), true)).toBe(VAZIA);
   });
-  it("uma duração que o passo não oferece (30 min) ou um valor desconhecido ficam vazios, e a nota respeita o limite", () => {
-    const p = prepararHidratado(VAZIA, VISITA({ duracao: "m30", quemVaiEstar: "ninguem", nota: "x".repeat(200) }));
+  it("a duração de 30 min da visita marcada passa para o passo (é uma das opções)", () => {
+    expect(prepararHidratado(VAZIA, VISITA({ duracao: "m30" })).duracao).toBe("m30");
+  });
+  it("uma duração que o passo não oferece ou um valor desconhecido ficam vazios, e a nota respeita o limite", () => {
+    const p = prepararHidratado(VAZIA, VISITA({ duracao: "h3", quemVaiEstar: "ninguem", nota: "x".repeat(200) }));
     expect(p.duracao).toBe("");
     expect(p.quem).toBe("");
     expect(p.nota).toHaveLength(140);
@@ -56,6 +59,29 @@ describe("moradaHidratada", () => {
     expect(moradaHidratada(MORADA_VAZIA, VISITA())).toEqual({ rua: "Rua da Obra 5", codigoPostal: "4000-010", localidade: "Porto", andar: "" });
     expect(moradaHidratada(MORADA_VAZIA, VISITA({ morada: MORADA_VAZIA }))).toBe(MORADA_VAZIA);
     expect(moradaHidratada(MORADA_VAZIA, null)).toBe(MORADA_VAZIA);
+  });
+});
+
+describe("moradaHidratada (morada gravada no levantamento)", () => {
+  const DO_LEV = { rua: "Rua do Levantamento 9", codigoPostal: "1000-100", localidade: "Lisboa", andar: "2.º Esq." };
+  const lev = { ...LEV("l", "2026-10-21"), morada: DO_LEV };
+  it("sem rascunho nem visita, vem a morada do levantamento (uma cópia)", () => {
+    const m = moradaHidratada(MORADA_VAZIA, null, false, lev);
+    expect(m).toEqual(DO_LEV);
+    expect(m).not.toBe(DO_LEV);
+  });
+  it("a visita com morada ganha ao levantamento; sem morada na visita, vale o levantamento", () => {
+    expect(moradaHidratada(MORADA_VAZIA, VISITA(), false, lev).rua).toBe("Rua da Obra 5");
+    expect(moradaHidratada(MORADA_VAZIA, VISITA({ morada: MORADA_VAZIA }), false, lev)).toEqual(DO_LEV);
+  });
+  it("o rascunho ganha, e tocada a morada não reaparece", () => {
+    const m = { ...MORADA_VAZIA, rua: "Rua Nova" };
+    expect(moradaHidratada(m, null, false, lev)).toBe(m);
+    expect(moradaHidratada(MORADA_VAZIA, null, true, lev)).toBe(MORADA_VAZIA);
+  });
+  it("um levantamento sem morada, ou null, deixa o rascunho", () => {
+    expect(moradaHidratada(MORADA_VAZIA, null, false, LEV("x", "2026-10-01"))).toBe(MORADA_VAZIA);
+    expect(moradaHidratada(MORADA_VAZIA, null, false, null)).toBe(MORADA_VAZIA);
   });
 });
 

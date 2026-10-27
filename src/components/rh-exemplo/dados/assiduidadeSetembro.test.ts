@@ -1,8 +1,13 @@
 // O gerador da assiduidade de exemplo: deterministico, um registo coerente por dia, e Setembro completo para
 // todas as pessoas, ligado aos stores que a interface usa (sem duplicar nem partir os totais).
+// A leitura do mapa da organizacao vem da base (vistas em vigor): o Supabase e simulado e alimentado com os dados gerados.
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
 import { HOJE_EXEMPLO_RH } from "@/components/rh-exemplo/dados/hojeExemplo";
-import { beforeEach, describe, expect, it } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
+import { reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
 import { feriadoDe } from "@/components/rh-exemplo/calendarioPessoa/feriados";
 import { montarMes } from "@/components/rh-exemplo/calendarioPessoa/montarMes";
 import { entradaMesDaFicha } from "@/components/rh-exemplo/calendarioPessoa/fonteMes";
@@ -22,6 +27,7 @@ beforeEach(() => {
   reporGestao();
   reporFluxosB();
   reporFluxosC();
+  reporRhTeste();
 });
 
 const SETEMBRO = (d: string): boolean => d.startsWith("2026-09");
@@ -191,10 +197,14 @@ describe("Agosto ja esta fechado e Outubro ainda nao", () => {
 });
 
 describe("o mapa da organizacao navega ate Setembro e mostra tudo preenchido", () => {
-  it("quem pica tem o seu mes (a Marta e de isencao, a Joana esta de baixa e a Lara nao comecou), e o total do mapa e a soma do que foi feito", () => {
-    const { result } = renderHook(() => useAssiduidadeDaOrganizacao({ de: "2026-09-01", ate: "2026-09-30" }));
+  it("quem pica tem o seu mes (a Marta e de isencao, a Joana esta de baixa e a Lara nao comecou), e o total do mapa e a soma do que foi feito", async () => {
     const estado = lerEstado();
-    const emAdmissao = ["p-marco", "p-nadia", "p-vasco", "p-eva", "p-ruben"];
+    // O que a base devolve nas vistas «em vigor» para Setembro: as horas realizadas das fichas e as faltas da gestao.
+    rhTeste.respostas["v_hr_horario_realizado_em_vigor"] = Object.values(estado.fichas).flatMap((f) => f.horarioRealizado).filter((r) => r.data.startsWith("2026-09"));
+    rhTeste.respostas["v_hr_faltas_em_vigor"] = lerGestao().faltas.filter((f) => f.data.startsWith("2026-09"));
+    const { result } = renderHook(() => useAssiduidadeDaOrganizacao({ de: "2026-09-01", ate: "2026-09-30" }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+const emAdmissao = ["p-marco", "p-nadia", "p-vasco", "p-eva", "p-ruben"];
     for (const id of estado.ordem.filter((x) => !["p-marta", "p-joana", "p-lara", ...emAdmissao].includes(x))) {
       expect(result.current.pessoasComRegisto.has(id)).toBe(true);
     }

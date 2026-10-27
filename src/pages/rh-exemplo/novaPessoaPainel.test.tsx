@@ -1,19 +1,38 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
 import { repor } from "@/components/rh-exemplo/dados/loja";
+import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
+import { CAMPOS_OBRIGATORIOS_ADMISSAO } from "@/lib/hr/admissaoObrigatorios";
+import { CAMPOS_RH_OBRIGATORIOS, CAMPOS_RH_OPCIONAIS } from "@/components/rh-exemplo/lib/admissaoCamposRh";
 import PessoasRh from "./PessoasRh";
 
+// A organizacao activa, as permissoes e o Supabase vem de src/test/rhExemploProviders.tsx (organizacao de teste, base vazia).
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
+
+const toastes = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast: toastes }));
+
+// O envio do convite (e-mail, link) tem os seus próprios testes; aqui só interessa que abre a seguir à criação e que fechá-lo segue para a ficha.
+vi.mock("@/components/rh-exemplo/EnviarConviteDialog", () => ({
+  EnviarConviteDialog: ({ open, onOpenChange, pessoaId, emailSugerido }: {
+    open: boolean; onOpenChange: (a: boolean) => void; pessoaId: string; emailSugerido: string | null;
+  }) => (open ? (
+    <div role="dialog" aria-label="convite">
+      <span>{`convite:${pessoaId}:${emailSugerido}`}</span>
+      <button type="button" onClick={() => onOpenChange(false)}>fechar-convite</button>
+    </div>
+  ) : null),
+}));
+
 const renderLista = () =>
-  render(
-    <LanguageProvider>
-      <MemoryRouter initialEntries={["/rh-exemplo/pessoas"]}>
-        <Routes>
-          <Route path="/rh-exemplo/pessoas" element={<PessoasRh />} />
-        </Routes>
-      </MemoryRouter>
-    </LanguageProvider>,
+  renderRh(
+    <Routes>
+      <Route path="/rh-exemplo/pessoas/:id?" element={<PessoasRh />} />
+    </Routes>,
+    { rota: "/rh-exemplo/pessoas" },
   );
 
 beforeAll(() => {
@@ -28,6 +47,24 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  reporRhTeste();
+  rhTeste.isSystemAdmin = true; // quem cria pessoas: todas as permissoes de RH
+  // O que a base devolve ao painel: a posicao de cada campo da admissao (os da pessoa no convite, os do RH fora dele)
+  // e o catalogo de cargos da organizacao.
+  rhTeste.rpcs["rpc_hr_admissao_posicoes_campos"] = {
+    data: [
+      ...CAMPOS_OBRIGATORIOS_ADMISSAO.map((c) => ({
+        codigo: c.codigo, origem: c.origem, condicional: false, posicao: c.origem === "rh" ? "rh" : "convite", configuravel: c.origem === "pessoa",
+      })),
+      ...[...CAMPOS_RH_OBRIGATORIOS, ...CAMPOS_RH_OPCIONAIS].map((c) => ({
+        codigo: c.codigo, origem: "rh", condicional: false, posicao: "rh", configuravel: false,
+      })),
+    ],
+    error: null,
+  };
+  rhTeste.respostas["hr_cargos"] = [
+    { id: "cargo-vendedor", organization_id: "org-teste", nome: "Vendedor", horas_referencia: 40, activo: true, created_at: "2026-01-01", updated_at: "2026-01-01" },
+  ];
   window.localStorage.setItem("language", "pt");
   repor();
 });
@@ -45,24 +82,25 @@ const irParaAba = (nome: RegExp | string) => fireEvent.mouseDown(within(painel()
 const escrever = (id: string, valor: string) => fireEvent.change(campo(id), { target: { value: valor } });
 
 /** Abre o seletor com o teclado e escolhe a opção com esse nome. */
-function escolher(rotulo: RegExp | string, opcao: RegExp | string) {
+async function escolher(rotulo: RegExp | string, opcao: RegExp | string) {
   const gatilho = within(painel()).getByRole("combobox", { name: rotulo });
   fireEvent.keyDown(gatilho, { key: "Enter" });
-  fireEvent.click(screen.getByRole("option", { name: opcao }));
+  // As opções que vêm da base (cargos) chegam depois de o ecrã abrir.
+  fireEvent.click(await screen.findByRole("option", { name: opcao }));
 }
 
 /** O mínimo para criar com convite: nome, e-mail pessoal, cargo, tipo de contrato, subsídio e duodécimos. */
-function preencherMinimo() {
+async function preencherMinimo() {
   escrever("hr-novo-primeiro-nome", "Teresa");
   escrever("hr-novo-apelido", "Nogueira");
   irParaAba(/Contacto e morada/);
   escrever("hr-novo-email-pessoal", "teresa@exemplo.pt");
   irParaAba(/Contrato e local/);
-  escolher(/^Cargo/, /Vendedor/);
-  escolher(/^Tipo de contrato/, /Sem termo/);
+  await escolher(/^Cargo/, /Vendedor/);
+  await escolher(/^Tipo de contrato/, /Sem termo/);
   irParaAba(/Retribuição e bancário/);
   escrever("hr-novo-subsidio", "7,63");
-  escolher(/^Subsidios em duodecimos/, /^50 %/);
+  await escolher(/^Subsidios em duodecimos/, /^50 %/);
 }
 
 describe("RH de exemplo: Nova pessoa em painel lateral", () => {
@@ -87,14 +125,15 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
     expect(campo("hr-novo-primeiro-nome")).toHaveFocus();
   });
 
-  it("cada campo diz se é obrigatório e onde se pede (no convite, na ficha, opcional), e as secções têm o interruptor do convite", () => {
+  it("cada campo diz se é obrigatório e onde se pede (no convite, na ficha, opcional), e as secções têm o interruptor do convite", async () => {
     const nova = abrirNovaPessoa();
     expect(within(nova).getAllByText("obrigatório").length).toBeGreaterThanOrEqual(2);
-    expect(within(nova).getAllByText("no convite").length).toBeGreaterThan(3);
+    // A posição de cada campo vem da configuração da admissão, lida da base: chega depois de o painel abrir.
+    await waitFor(() => expect(within(nova).getAllByText("no convite").length).toBeGreaterThan(3));
     expect(within(nova).getAllByRole("switch", { name: "Pedir à pessoa no convite" }).length).toBeGreaterThanOrEqual(3);
     expect(campo("hr-novo-primeiro-nome")).toHaveAttribute("aria-required", "true");
     irParaAba(/Contrato e local/);
-    expect(within(nova).getAllByText("só do RH").length).toBeGreaterThanOrEqual(3);
+    await waitFor(() => expect(within(nova).getAllByText("só do RH").length).toBeGreaterThanOrEqual(3));
   });
 
   it("todos os campos de cada aba estão no ecrã, sem esconder nenhum", () => {
@@ -164,17 +203,29 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
 
   it("preenche, cria e envia o convite: a pessoa entra na lista, a ficha abre e mostra o que se escreveu", async () => {
     const nova = abrirNovaPessoa();
-    preencherMinimo();
+    await preencherMinimo();
     irParaAba(/Dados pessoais/);
     escrever("hr-novo-nome-tratamento", "Teté");
     escrever("hr-novo-nif", "123456789");
+    // A base devolve a ficha criada: o insert responde com o id e a lista e a ficha voltam a lê-la.
+    rhTeste.respostas["pessoas"] = [{
+      id: "pessoa-teresa", organization_id: "org-teste", primeiro_nome: "Teresa", apelido: "Nogueira", nome_completo: "Teresa Nogueira",
+      email_pessoal: "teresa@exemplo.pt", cargo: "Vendedor", cargo_id: "cargo-vendedor", nif: "123456789",
+      estado_registo: "activo",
+    }];
+    rhTeste.respostas["pessoas_vinculos"] = [{ id: "vinculo-teresa" }];
     fireEvent.click(within(nova).getByRole("button", { name: "Criar e enviar convite" }));
+    // Criada a ficha, abre o envio do convite (o diálogo tem os seus testes); fechá-lo segue para a ficha.
+    expect(await screen.findByText("convite:pessoa-teresa:teresa@exemplo.pt")).toBeInTheDocument();
+    // O nome de tratamento ainda não tem coluna onde gravar: o ecrã di-lo por escrito em vez de o perder em silêncio.
+    expect(toastes.warning).toHaveBeenCalledWith(expect.stringContaining("nome de tratamento"));
+    expect(toastes.error).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "fechar-convite", hidden: true }));
     const titulo = await screen.findByRole("heading", { level: 1, name: "Teresa Nogueira" });
     const ficha = titulo.closest<HTMLElement>('[role="dialog"]') as HTMLElement;
     expect(within(ficha).getAllByRole("tab")).toHaveLength(8);
-    expect(within(ficha).getByText(/^.+ · Vendedor\/a$/)).toBeInTheDocument();
+    expect(within(ficha).getByText(/^.+ · Vendedor$/)).toBeInTheDocument();
     fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Detalhes pessoais/ }), { button: 0 });
-    expect(await within(ficha).findByText("Teté")).toBeInTheDocument();
-    expect(within(ficha).getByText(/teresa@exemplo\.pt/)).toBeInTheDocument();
+    expect(await within(ficha).findByDisplayValue("teresa@exemplo.pt")).toBeInTheDocument();
   });
 });

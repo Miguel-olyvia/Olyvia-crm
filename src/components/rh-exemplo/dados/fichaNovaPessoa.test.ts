@@ -100,14 +100,21 @@ describe("aplicarExtras: o que se escreveu aparece na ficha", () => {
     expect(aplicarExtras(base(), extras(v)).sindicalizacao).toMatchObject({ sindicalizado: false, sindicato: null, quota_percentagem: null });
   });
 
-  it("anexos escolhidos ficam na ficha, e a fotografia liga-se à pessoa", () => {
-    const v = comPatch(minimo(), "extra", {
-      anexos: [
-        { id: "a", tipo: "cartao_cidadao", nome: "cc.pdf", tamanho: 1000, mime: "application/pdf" },
-        { id: "b", tipo: "fotografia", nome: "foto.png", tamanho: 500, mime: "image/png" },
-      ],
-    });
+  const ANEXOS = [
+    { id: "a", tipo: "cartao_cidadao", nome: "cc.pdf", tamanho: 1000, mime: "application/pdf" },
+    { id: "b", tipo: "fotografia", nome: "foto.png", tamanho: 500, mime: "image/png" },
+  ] as const;
+
+  it("os ficheiros escolhidos no formulário não vão nos extras: seguem de verdade, depois de a ficha existir", () => {
+    const v = comPatch(minimo(), "extra", { anexos: [...ANEXOS] });
+    expect(extras(v).anexos).toEqual([]);
     const f = aplicarExtras(base(), extras(v));
+    expect(f.anexos).toEqual([]);
+    expect(f.pessoa.fotografia_anexo_id).toBeNull();
+  });
+
+  it("anexos entregues nos extras ficam na ficha, e a fotografia liga-se à pessoa", () => {
+    const f = aplicarExtras(base(), { ...extras(minimo()), anexos: [...ANEXOS] });
     expect(f.anexos.map((a) => [a.tipo, a.nome_original])).toEqual([["cartao_cidadao", "cc.pdf"], ["fotografia", "foto.png"]]);
     expect(f.pessoa.fotografia_anexo_id).not.toBeNull();
   });
@@ -148,7 +155,8 @@ describe("aplicarExtras: convite e pendências", () => {
 describe("paraNovaPessoa", () => {
   it("passa o essencial a quem cria a pessoa e ignora o fim num contrato sem termo", () => {
     const v = comPatch(minimo(), "contrato", { data_fim: "2027-01-01" });
-    const nova = paraNovaPessoa(v, { config: CONFIG, comConvite: false });
+    // O nome do cargo vem do catálogo da organização: sem ele o payload real recusa o cargo escolhido.
+    const nova = paraNovaPessoa(v, { config: CONFIG, comConvite: false, cargoNome: "Técnica" });
     expect(nova).toMatchObject({ primeiro_nome: "Ana", apelido: "Sousa", cargoId: "cargo-1", localId: "", tipoContrato: "sem_termo", dataFim: null, reportaAId: null });
   });
 });

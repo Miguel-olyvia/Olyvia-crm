@@ -8,7 +8,7 @@ describe("adaptarRegistos: contactos", () => {
   it("o instante passa a dia e hora de Lisboa e a nota nula a texto vazio", () => {
     const { contactos } = adaptarRegistos(fichaDb({ contactos: seccaoDb([contactoDb({ em: "2026-07-01T23:30:00Z", notas: null })]) }));
     expect(contactos).toEqual([{
-      id: "c1", pessoaId: PESSOA_ID, data: "2026-07-02", hora: "00:30", resultado: "atendeuInteressado", nota: "", negocioId: null,
+      id: "c1", pessoaId: PESSOA_ID, data: "2026-07-02", hora: "00:30", resultado: "atendeuInteressado", nota: "", negocioId: null, criadoPor: "Rita Gomes",
     }]);
   });
 

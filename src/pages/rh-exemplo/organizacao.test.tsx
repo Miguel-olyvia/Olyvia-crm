@@ -3,14 +3,18 @@
 // Tudo em memória, sem base.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
+import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
 import { menuSections } from "@/components/sidebar/menuConfig";
 import * as K from "@/components/rh-exemplo/dados/constantes";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { ligacoesDoCentro } from "@/components/rh-exemplo/organizacao/arvore";
 import { lerOrganizacao } from "@/components/rh-exemplo/organizacao/lojaOrganizacao";
 import RhOrganizacao from "./RhOrganizacao";
+
+// A organizacao activa e o Supabase vem de src/test/rhExemploProviders.tsx (organizacao de teste, base vazia).
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
 
 // A leitura e a gravacao reais testam-se em useOrganizacaoReal.test.ts; aqui a pagina corre sobre dados de exemplo em memoria.
 vi.mock("@/components/rh-exemplo/organizacao/useOrganizacaoReal", async () => {
@@ -29,14 +33,7 @@ vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
   }),
 }));
 
-const renderPagina = () =>
-  render(
-    <LanguageProvider>
-      <MemoryRouter initialEntries={["/rh-exemplo/organizacao"]}>
-        <RhOrganizacao />
-      </MemoryRouter>
-    </LanguageProvider>,
-  );
+const renderPagina = () => renderRh(<RhOrganizacao />, { rota: "/rh-exemplo/organizacao" });
 
 // `hidden`: com um painel aberto o Radix esconde o resto da página das tecnologias de apoio.
 const no = (nome: RegExp | string) => screen.getByRole("treeitem", { name: nome, hidden: true });
@@ -50,6 +47,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   cleanup();
+  reporRhTeste();
   window.localStorage.setItem("language", "pt");
   permissoes.concedidas = new Set(["hr.pessoas.colocacao.edit"]);
   repor();
@@ -165,11 +163,17 @@ describe("o painel de um nó: vínculo legal e local de trabalho", () => {
     expect(within(painel()).getByText("Morada fiscal")).toBeTruthy();
   });
 
-  it("o histórico da ligação mostra data e de/para", () => {
+  it("o histórico da ligação mostra data e de/para, lido das colocações da base", async () => {
+    // A base (simulada) devolve as linhas de pessoas_colocacao_organograma do Tiago: Lisboa e, depois, Faro com motivo.
+    const base = { pessoa_id: "p-tiago", organization_id: "org-teste", deleted_at: null };
+    rhTeste.respostas["pessoas_colocacao_organograma"] = [
+      { ...base, id: "c2", organograma_node_id: K.FILIAL_FARO, valido_de: "2026-09-01", valido_ate: null, motivo: "Reforço da loja de Faro" },
+      { ...base, id: "c1", organograma_node_id: K.FILIAL_LISBOA, valido_de: "2026-01-01", valido_ate: "2026-08-31", motivo: null },
+    ];
     renderPagina();
     abrir("Loja Faro");
     fireEvent.click(within(painel()).getByRole("button", { name: /Histórico: Tiago Pinheiro/ }));
-    expect(within(painel()).getByText(/Reforço da loja de Faro/)).toBeTruthy();
+    expect(await within(painel()).findByText(/Reforço da loja de Faro/)).toBeTruthy();
     expect(within(painel()).getAllByText(/^De: /).length).toBeGreaterThan(0);
   });
 });

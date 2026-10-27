@@ -10,21 +10,48 @@ vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) =
   ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
   useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
 }));
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
+// O mes da pessoa, o mapa de desvios da organizacao, os centros, os tipos de ausencia, a regra do subsidio e o relatorio
+// mensal falam com a base por wrappers: aqui entram simulados (mesmo conjunto do calendarioPessoa.test).
+vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", async (importOriginal) =>
+  (await import("@/test/assiduidadeDaPessoaFalso")).wrapperAssiduidadeDaPessoaFalso(
+    await importOriginal<typeof import("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa")>(),
+  ));
+vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao", async (importOriginal) =>
+  (await import("@/test/assiduidadeDaPessoaFalso")).wrapperAssiduidadeDaOrganizacaoFalso(
+    await importOriginal<typeof import("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao")>(),
+  ));
+vi.mock("@/components/rh-exemplo/hooks/useLocaisTrabalho", () => {
+  const resultado = { locais: [] as never[], loading: false, recusado: false };
+  return { useLocaisTrabalho: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/useAusenciasTipos", async () => {
+  const tipos = (await import("@/components/rh-exemplo/dados/catalogos")).catalogos().tiposAusencia;
+  const resultado = { tipos, loading: false, recusado: false, vazio: false };
+  return { useAusenciasTipos: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => {
+  const resultado = { regra: { minutosMinimosDia: 240 }, error: null };
+  return { useRegrasSubsidioAlimentacao: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/PessoaRelatorioAssiduidadeMensalReal", () => ({ PessoaRelatorioAssiduidadeMensal: () => null }));
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderRh, reporRhTeste } from "@/test/rhExemploProviders";
 import { definirPrazoDeJustificacao } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
-import { lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
+import { definirGestao, lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { FilaJustificacoesDoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/FilaJustificacoesDoDia";
 import { usePendentesJustificacaoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/usePendentesJustificacaoDia";
 import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
 import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeTab";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import { rhExemploJustificacoesTranslations } from "@/translations/rhExemploJustificacoes";
+import { reporAssiduidadeFalsa } from "@/test/assiduidadeDaPessoaFalso";
 import { baseFalsa, FALTA_DA_BASE, reporBaseFalsa, semearJustificacao } from "@/test/justificacoesDoDiaFalso";
 
 const TUDO: PermissoesAssiduidade = {
@@ -39,7 +66,7 @@ function FilaLida({ minhaPessoaId = null }: { minhaPessoaId?: string | null }) {
   return <FilaJustificacoesDoDia pendentes={pendentes} nomePorPessoaId={NOMES} minhaPessoaId={minhaPessoaId} />;
 }
 
-const envolver = (conteudo: JSX.Element) => render(<LanguageProvider><MemoryRouter>{conteudo}</MemoryRouter></LanguageProvider>);
+const envolver = (conteudo: JSX.Element) => renderRh(conteudo);
 const ficha = (id: string, nome: string, souAPessoa: boolean, aba = "calendario") =>
   envolver(<PessoaAssiduidadeTab pessoaId={id} pessoaNome={nome} souAPessoa={souAPessoa} permissoes={TUDO} aba={aba} />);
 const celula = (iso: string): HTMLElement => document.getElementById(`cal-dia-${iso}`) as HTMLElement;
@@ -81,6 +108,8 @@ beforeEach(() => {
   reporFluxosB();
   reporFluxosC();
   reporBaseFalsa();
+  reporRhTeste();
+  reporAssiduidadeFalsa();
 });
 
 afterEach(() => {
@@ -250,6 +279,17 @@ describe("o RH decide", () => {
     expect(lerGestao().faltas.length).toBe(faltasEmMemoria);
     cleanup();
 
+    // A base marcou a falta ao aceitar (id FALTA_DA_BASE); ao reler o mês, a assiduidade da pessoa traz essa falta.
+    definirGestao((g) => ({
+      ...g,
+      faltas: [...g.faltas, {
+        id: FALTA_DA_BASE, pessoa_id: "p-sofia", organization_id: "org-teste", data: "2026-10-08", planeado_id: null, vinculo_id: null,
+        local_id: null, hora_inicio: "09:00:00", hora_fim: "09:12:00", minutos: 12, motivo_codigo: "atraso",
+        justificacao_estado: "justificada", justificada: true, remunerada: true, desconta_saldo: false, justificacao_decidida_por: null,
+        justificacao_decidida_em: null, justificacao_motivo: null, ausencia_dia_id: null, corrige_falta_id: null, correccao_motivo: null,
+        estado: "activa", anulado_em: null, anulacao_motivo: null, created_at: "2026-10-14T12:00:00Z",
+      }],
+    }));
     ficha("p-sofia", "Sofia Rebelo", true);
     expect(celula("2026-10-08").getAttribute("aria-label")).toContain("Falta justificada · paga");
     const detalhe = abrirDia("2026-10-08");
@@ -384,7 +424,9 @@ describe("o RH decide", () => {
     baseFalsa.indisponivel = true;
     envolver(<FilaLida />);
     expect(screen.getByTestId("rhjd-fila-indisponivel")).toBeInTheDocument();
-    expect(screen.queryByText(/por decidir/)).not.toBeInTheDocument();
+    // O título da fila continua lá; o que não pode aparecer é a contagem nem o «não há nada».
+    expect(screen.queryByText(/^\d+ por decidir$/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Não há justificações por decidir.")).not.toBeInTheDocument();
   });
 
   it("no painel do dia da ficha, o RH vê as ações e decide; aceitar não paga mostra o efeito no desconto", async () => {
