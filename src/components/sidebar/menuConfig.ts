@@ -19,14 +19,7 @@ import {
   FileCheck,
   BookOpen,
   Package,
-  Layers,
-  LayoutGrid,
-  Ruler,
-  Tag,
-  PackageOpen,
   Wrench,
-  ListTree,
-  DollarSign,
   Truck,
   ShoppingCart,
   Warehouse,
@@ -164,7 +157,7 @@ export const menuSections: MenuSection[] = [
     id: "organizations",
     icon: Building,
     labelKey: "sidebar.organizations",
-    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees"],
+    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees", "/catalogo-custos"],
     permissions: ["organizations.view", "products.view", "services.view"],
     items: [
       { to: "/organizations", icon: Building, labelKey: "sidebar.organizations", permission: "organizations.view" },
@@ -173,27 +166,13 @@ export const menuSections: MenuSection[] = [
       { to: "/org-help", icon: HelpCircle, labelKey: "sidebar.help", permission: "organizations.view" },
     ],
     subSections: [
+      // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços no menu.
+      // As páginas antigas (/products, /services, categorias, marcas, pacotes…) continuam pelo endereço até à limpeza.
       {
-        key: "products",
-        labelKey: "sidebar.products",
+        key: "catalogo",
+        labelKey: "sidebar.catalogoCustos",
         items: [
-          { to: "/products", icon: Package, labelKey: "sidebar.productsList", permission: "products.view" },
-          { to: "/bundles", icon: PackageOpen, labelKey: "sidebar.bundles", permission: "products.view" },
-          { to: "/brands", icon: Tag, labelKey: "sidebar.brands", permission: "products.view" },
-          { to: "/product-categories", icon: Layers, labelKey: "sidebar.productCategories", permission: "products.view" },
-          { to: "/product-subcategories", icon: LayoutGrid, labelKey: "sidebar.productSubcategories", permission: "products.view" },
-          { to: "/product-attributes", icon: Tag, labelKey: "sidebar.productAttributes", permission: "products.view" },
-          { to: "/units-of-measure", icon: Ruler, labelKey: "sidebar.unitsOfMeasure", permission: "products.view" },
-        ],
-      },
-      {
-        key: "services",
-        labelKey: "sidebar.services",
-        items: [
-          { to: "/services", icon: Wrench, labelKey: "sidebar.services", permission: "services.view" },
-          { to: "/service-categories", icon: ListTree, labelKey: "sidebar.serviceCategories", permission: "services.view" },
-          { to: "/service-subcategories", icon: LayoutGrid, labelKey: "sidebar.serviceSubcategories", permission: "services.view" },
-          { to: "/service-fees", icon: DollarSign, labelKey: "sidebar.serviceFees", permission: "services.view" },
+          { to: "/catalogo-custos", icon: Package, labelKey: "sidebar.catalogoCustos", permission: "services.view" },
         ],
       },
     ],

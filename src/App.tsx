@@ -71,6 +71,7 @@ const ClientOrders = lazy(() => import("./pages/ClientOrders"));
 const StockCounts = lazy(() => import("./pages/StockCounts"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
 const Services = lazy(() => import("./pages/Services"));
+const CatalogoCustos = lazy(() => import("./pages/CatalogoCustos"));
 const ServiceCategories = lazy(() => import("./pages/ServiceCategories"));
 const ServiceSubcategories = lazy(() => import("./pages/ServiceSubcategories"));
 const ServiceCatalogItems = lazy(() => import("./pages/ServiceCatalogItems"));
@@ -374,6 +375,7 @@ const App = () => (
                       <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
                       <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
                       <Route path="/services" element={<Services />} />
+                      <Route path="/catalogo-custos" element={<ProtectedRoute permission="services.view"><CatalogoCustos /></ProtectedRoute>} />
                       <Route path="/service-categories" element={<ServiceCategories />} />
                       <Route path="/service-subcategories" element={<ServiceSubcategories />} />
                       <Route path="/service-catalog-items" element={<ServiceCatalogItems />} />

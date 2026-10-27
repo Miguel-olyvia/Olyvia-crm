@@ -119,6 +119,16 @@ export function porServicosCriados(L: readonly ItemCatalogo[] = []): void {
 /** Um serviço criado no Catálogo (e não da Mudelar nem do modelo). */
 export const ehCriado = (sid: string) => criados.some((c) => c.id === sid);
 
+// CRM: o Catálogo da organização vem da base (real/catalogoReal.ts) e substitui o de exemplo, no mesmo array, para quem já o importou o ver.
+const BASE_EXEMPLO = [...CATALOGO_TODO];
+/** Troca o Catálogo inteiro pelo da organização (lido da base). Sem argumento, volta ao de exemplo (os testes). */
+export function substituirCatalogoTodo(L: readonly ItemCatalogo[] = BASE_EXEMPLO): void {
+  criados = [];
+  CATALOGO_TODO.splice(0, CATALOGO_TODO.length, ...L.map((c) => ({ ...c })));
+  POR_ID.clear();
+  for (const c of CATALOGO_TODO) POR_ID.set(c.id, c);
+}
+
 /** Os ofícios do Catálogo inteiro (os de antes primeiro, depois os novos da Mudelar). */
 export const OFICIOS = [...new Set(CATALOGO_TODO.map((c) => c.cat))];
 
