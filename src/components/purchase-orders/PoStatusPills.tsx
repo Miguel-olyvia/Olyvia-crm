@@ -8,7 +8,9 @@ import {
   type InventoryTone,
   type PoStatusFilter,
 } from "@/components/inventory/ui";
+import { Truck } from "lucide-react";
 import { formatPoShortDate, type PoPublicationRow } from "./poSupplierPortalApi";
+import { poShipmentLabel, type PoShipment } from "./poPortalShipments";
 
 export const PO_STATUS_PILL_LABELS: Record<PoStatusFilter, string> = {
   all: "Todas",
@@ -97,6 +99,22 @@ export function PoPortalPill({ publication }: { publication: PoPublicationRow | 
   return (
     <InventoryStatusBadge tone="neutral" className="mt-1">
       No portal · por ver
+    </InventoryStatusBadge>
+  );
+}
+
+/**
+ * "Expedida · GR …" / "Parcialmente expedida · GR …": o fornecedor expediu no portal e a guia está aberta
+ * (selarPortal do Olyvia 2.0 — no lugar do "Confirmada · entrega …"). Use com activeShipment().
+ */
+export function PoShippedPill({ shipment }: { shipment: PoShipment }) {
+  const when = formatPoShortDate(shipment.shippedAt);
+  return (
+    <InventoryStatusBadge tone="violet" className="mt-1">
+      <Truck className="h-3 w-3" aria-hidden="true" />
+      <span title={when ? `Expedida pelo fornecedor em ${when} — receba na Receção com a guia` : "Expedida pelo fornecedor — receba na Receção com a guia"}>
+        {poShipmentLabel(shipment)}
+      </span>
     </InventoryStatusBadge>
   );
 }

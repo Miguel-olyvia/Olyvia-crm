@@ -69,6 +69,7 @@ import { DeliveryNoteDialog } from "@/components/receiving/DeliveryNoteDialog";
 import { DeliveryNoteDetail } from "@/components/receiving/DeliveryNoteDetail";
 import { NOTE_STATUS_LABEL, fetchDeliveryNote, noteLabel, type DeliveryNoteFull } from "@/components/receiving/deliveryNotes";
 import { LearnCodeDialog } from "@/components/receiving/LearnCodeDialog";
+import { pickReceivingWarehouse } from "@/components/receiving/receivingWarehouse";
 import {
   describeLearnResult,
   productCodeErrorMessage,
@@ -1947,9 +1948,11 @@ export default function Receiving() {
     const epoch = orgEpochRef.current;
     setOptionsLoading(true);
     (async () => {
-      const [whRes, supRes] = await Promise.all([
+      const [whRes, supRes, settingsRes] = await Promise.all([
         supabase.from("warehouses").select("id, name").eq("organization_id", orgId).is("deleted_at", null).order("name"),
         supabase.from("suppliers").select("id, name").eq("organization_id", orgId).is("deleted_at", null).order("name"),
+        // Armazém por omissão da organização (RLS inventory.view; sem ela/erro fica null e nada muda).
+        supabase.from("organization_inventory_settings").select("default_warehouse_id").eq("organization_id", orgId).maybeSingle(),
       ]);
       if (cancelled) return;
       setOptionsLoading(false);
@@ -1968,11 +1971,14 @@ export default function Receiving() {
       // Um cesto reposto do sessionStorage já trouxe o armazém: mantém-no se ainda existir.
       const current = warehouseRef.current;
       const remembered = readStorage(warehouseStorageKey(orgId));
-      let nextWh = "";
-      if (whRes.error || (current && whs.some((w) => w.id === current))) {
-        nextWh = current; // mantém (com erro na carga não há como validar)
-      } else if (remembered && whs.some((w) => w.id === remembered)) nextWh = remembered;
-      else if (whs.length === 1) nextWh = whs[0].id;
+      // Atual (com erro na carga mantém-se) → último escolhido → por omissão da organização → o único → nenhum.
+      const nextWh = pickReceivingWarehouse({
+        current,
+        remembered,
+        orgDefault: settingsRes.error ? null : ((settingsRes.data as { default_warehouse_id: string | null } | null)?.default_warehouse_id ?? null),
+        warehouses: whs,
+        loadError: !!whRes.error,
+      });
       if (nextWh !== current) {
         setWarehouseId(nextWh);
         warehouseRef.current = nextWh;
