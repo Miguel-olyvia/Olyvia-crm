@@ -1,5 +1,5 @@
 /**
- * Uma accao que depende da V3b (gravar rascunho, submeter, documentos, contrato, pedidos):
+ * Uma accao que chega numa fase seguinte (enviar documentos, contrato, pedidos de documentos):
  * esta desenhada e DESACTIVADA. `aria-disabled` (e nao `disabled`) para o botao continuar
  * focavel e o leitor de ecra poder dizer a razao, que esta ligada por `aria-describedby`.
  * Clicar nao faz nada: nao chama a Edge.

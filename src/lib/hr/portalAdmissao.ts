@@ -342,7 +342,7 @@ export function comSensiveisGuardados(rascunho: RascunhoConvite, dados: PortalLe
   };
 }
 
-/** A assinatura e a declaracao de veracidade pertencem a SUBMISSAO (V3b): ate la ficam inactivas. */
+/** A assinatura e a declaracao de veracidade pertencem a SUBMISSAO: nao estao em `campos_editaveis`, editam-se sempre que o estado deixa. */
 const CAMPOS_DA_SUBMISSAO: ReadonlySet<string> = new Set(["assinatura_nome", "aceite"]);
 
 /** As chaves, na lista `campos_editaveis` da base, que abrem o mesmo campo do ecra. */
@@ -359,7 +359,8 @@ function chavesDaListaEditavel(campo: string): string[] {
  * base manda (todos em preenchimento; so os devolvidos em `devolvida`; nenhum nos outros estados).
  */
 export function formularioEditavel(dados: PortalLer, campo: keyof RascunhoConvite): boolean {
-  if (!estadoPermiteEditar(dados.estado) || CAMPOS_DA_SUBMISSAO.has(campo)) return false;
+  if (!estadoPermiteEditar(dados.estado)) return false;
+  if (CAMPOS_DA_SUBMISSAO.has(campo)) return true;
   return chavesDaListaEditavel(campo).some((chave) => dados.campos_editaveis.includes(chave));
 }
 
@@ -397,6 +398,16 @@ export const CODIGOS_DE_ERRO_DO_PORTAL: readonly string[] = [
   "iban_invalido",
   "pedido_invalido",
   "portal_em_atualizacao",
+  "rascunho_chave_invalida",
+  "rascunho_demasiado_grande",
+  "rascunho_valor_invalido",
+  "admissao_incompleta",
+  "assinatura_obrigatoria",
+  "nif_invalido",
+  "nif_ja_existe",
+  "niss_ja_existe",
+  "bic_invalido",
+  "pais_invalido",
   "erro_inesperado",
 ];
 

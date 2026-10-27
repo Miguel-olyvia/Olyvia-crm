@@ -1,14 +1,15 @@
 /**
  * `ConviteAdmissao`: o PORTAL temporario da pessoa (pagina PUBLICA /admissao/:token, sem sessao
- * da app), V3a. Substitui o formulario antigo (que gravava rascunho e submetia directo) por:
- * consulta limitada ao abrir o link, passo de OTP por e-mail, sessao activa com o que o estado
- * permite, e vistas sem acesso. Supabase simulado: so se mexe na Edge `convite-admissao`, com os
- * contratos exactos (ver `useConviteAdmissaoPublico.test.tsx`).
+ * da app). Consulta limitada ao abrir o link, passo de OTP por e-mail, sessao activa com o que o
+ * estado permite (formulario que grava o rascunho sozinho, com NISS e IBAN a seguir cifrados, e
+ * submete) e vistas sem acesso. O link sozinho nao escreve. Os anexos ficam para a fase 2. Supabase
+ * simulado: so se mexe na Edge `convite-admissao`, com os contratos exactos (ver
+ * `useConviteAdmissaoPublico.test.tsx`).
  *
  * Os textos lem-se da tabela real de traducoes (pt/en), para o teste dizer o que a pessoa le.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 let idiomaDoTeste: "pt" | "en" = "pt";
@@ -133,6 +134,7 @@ const base = () => ({
   otp_pedir: { data: { ok: true, expira_em: "2099-10-16T10:10:00Z" }, error: null },
   otp_verificar: { data: { ok: true, sessao: SESSAO, sessao_expira_em: "2099-10-16T14:00:00Z" }, error: null },
   ler: lerOk(),
+  rascunho: { data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z" }, error: null },
 });
 const chamadas = (accao: string) =>
   invoke.mock.calls.filter(([, o]) => (o as { body: { action: string } }).body.action === accao) as Array<
@@ -494,7 +496,6 @@ describe("ConviteAdmissao (portal temporario)", () => {
       await screen.findByRole("button", { name: txt("portal.sair") });
       expect(screen.getByText("Reveja o género")).toBeInTheDocument();
       expect(screen.getByText("Falta indicar o género")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: txt("portal.proxima.corrigir") })).toHaveAttribute("aria-disabled", "true");
       // So o campo devolvido (genero) esta activo; o resto diz-se bloqueado, com a razao em texto.
       expect(porId("convite-genero")).toBeEnabled();
       expect(porId("convite-linha1")).toBeDisabled();
@@ -507,9 +508,10 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(screen.queryByText(txt("portal.formulario.bloqueados"))).toBeNull();
     });
 
-    it("o formulario diz que o que se escreve ainda nao se guarda (so o NISS e o IBAN)", async () => {
+    it("o formulario diz que grava sozinho e que o NISS e o IBAN ficam cifrados (sem o aviso antigo)", async () => {
       await abrirSessao();
       expect(screen.getByText(txt("portal.formulario.aviso"))).toBeInTheDocument();
+      expect(txt("portal.formulario.aviso")).toMatch(/automatic/i);
     });
 
     it("Terminar sessao: chama sair com o cabecalho, volta a consulta, avisa e esconde os dados", async () => {
@@ -525,29 +527,6 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(sessionStorage.length).toBe(0);
     });
 
-    it("sessao substituida (outro dispositivo): volta a consulta com a mensagem, anunciada, sem o formulario", async () => {
-      await abrirSessao();
-      ligar({ ...base(), estado: estadoOk(), sensiveis: erroHttp(401, { error: "sessao_substituida" }) });
-      fireEvent.change(porId("convite-niss"), { target: { value: NISS_VALIDO } });
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") }));
-
-      const alerta = await screen.findByRole("alert");
-      expect(alerta).toHaveTextContent(txt("portal.erro.sessaoSubstituida"));
-      expect(await screen.findByRole("button", { name: txt("portal.consulta.botao") })).toBeInTheDocument();
-      expect(porId("convite-linha1")).toBeNull();
-      expect(document.body.innerHTML).not.toContain(NISS_VALIDO);
-    });
-
-    it("sessao expirada: 'confirme de novo o codigo'", async () => {
-      await abrirSessao();
-      ligar({ ...base(), estado: estadoOk(), sensiveis: erroHttp(401, { error: "sessao_expirada" }) });
-      fireEvent.change(porId("convite-niss"), { target: { value: NISS_VALIDO } });
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") }));
-      const alerta = await screen.findByRole("alert");
-      expect(alerta).toHaveTextContent(txt("portal.erro.sessaoExpirada"));
-      expect(alerta.textContent).toMatch(/confirme de novo o código/i);
-    });
-
     it("o aviso discreto de sessao a expirar aparece e 'Manter sessao' volta a pedir a leitura", async () => {
       const dateNow = Date.now();
       await abrirSessao();
@@ -561,75 +540,108 @@ describe("ConviteAdmissao (portal temporario)", () => {
     });
   });
 
-  describe("NISS e IBAN (accao sensiveis), nos campos do formulario onde aparecem", () => {
+  describe("NISS e IBAN seguem com o formulario (sem botao proprio)", () => {
     const irParaPagina2 = async () => {
       fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
       await screen.findByText(txt("hr.pessoais.bancarios"));
     };
+    const irParaPagina1 = async () => {
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.anterior") }));
+      await screen.findByText(txt("hr.pessoais.geral"));
+    };
 
-    it("o NISS esta na pagina 1 e o IBAN na pagina 2, cada um com o seu botao de guardar", async () => {
+    it("o NISS esta na pagina 1 e o IBAN na pagina 2, e nenhum tem botao de guardar nem o aviso antigo", async () => {
       await abrirSessao();
       expect(porId("convite-niss")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: txt("portal.sensiveis.guardarIban") })).toBeNull();
+      expect(screen.queryByRole("button", { name: /guardar (niss|iban)|save (niss|iban)/i })).toBeNull();
       await irParaPagina2();
       expect(porId("convite-conta-numero")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: txt("portal.sensiveis.guardarIban") })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /guardar (niss|iban)|save (niss|iban)/i })).toBeNull();
+      expect(document.body.textContent).not.toMatch(/em separado|separately|só de consulta|view-only/i);
     });
 
-    it("um NISS invalido mostra o erro ligado ao campo, leva-lhe o foco e nao chama a Edge", async () => {
+    it("um NISS escrito segue na gravacao (a parte do rascunho), o campo limpa-se e so os 4 ultimos digitos aparecem", async () => {
+      await abrirSessao();
+      ligar({
+        ...base(),
+        rascunho: { data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z", niss_ultimos4: "8902" }, error: null },
+      });
+      fireEvent.change(porId("convite-niss"), { target: { value: NISS_VALIDO } });
+      // Sair da pagina grava logo, sem esperar pelo debounce.
+      await irParaPagina2();
+
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      const [, opcoes] = chamadas("rascunho")[0];
+      expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
+      expect(opcoes.body.niss).toBe(NISS_VALIDO);
+      expect(opcoes.body).not.toHaveProperty("iban");
+      const rascunho = opcoes.body.rascunho as Record<string, unknown>;
+      expect(rascunho).not.toHaveProperty("niss");
+      expect(rascunho).not.toHaveProperty("conta_numero");
+      expect(rascunho).not.toHaveProperty("aceite");
+      expect(rascunho.linha1).toBe("Rua das Flores 12");
+
+      await irParaPagina1();
+      await waitFor(() => expect(porId("convite-niss")).toHaveValue(""));
+      expect(screen.getByText(txt("hr.convite.jaRegistadoNiss", { ultimos4: "8902" }))).toBeInTheDocument();
+      expect(document.body.innerHTML).not.toContain(NISS_VALIDO);
+    });
+
+    it("o IBAN vai sem espacos e em maiusculas, e tambem se limpa depois de guardado", async () => {
+      await abrirSessao();
+      await irParaPagina2();
+      ligar({
+        ...base(),
+        rascunho: { data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z", iban_ultimos4: "0154" }, error: null },
+      });
+      fireEvent.change(porId("convite-conta-numero"), { target: { value: "pt50 0002 0123 1234 5678 9015 4" } });
+      await irParaPagina1();
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      expect(chamadas("rascunho")[0][1].body.iban).toBe(IBAN_VALIDO);
+      expect((chamadas("rascunho")[0][1].body.rascunho as Record<string, unknown>)).not.toHaveProperty("conta_numero");
+
+      await irParaPagina2();
+      await waitFor(() => expect(porId("convite-conta-numero")).toHaveValue(""));
+      expect(screen.getByText(txt("hr.convite.jaRegistadoConta", { ultimos4: "0154" }))).toBeInTheDocument();
+      expect(document.body.innerHTML).not.toContain(IBAN_VALIDO);
+    });
+
+    it("um NISS invalido mostra o erro ligado ao campo e nunca segue para a Edge", async () => {
       await abrirSessao();
       fireEvent.change(porId("convite-niss"), { target: { value: "12345678901" } });
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") }));
+      fireEvent.blur(porId("convite-niss"));
       expect(await screen.findByText(txt("hr.convite.erro.nissInvalido"))).toBeInTheDocument();
       expect(porId("convite-niss")).toHaveAttribute("aria-invalid", "true");
-      await waitFor(() => expect(porId("convite-niss")).toHaveFocus());
-      expect(chamadas("sensiveis")).toHaveLength(0);
+      await irParaPagina2();
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      expect(chamadas("rascunho")[0][1].body).not.toHaveProperty("niss");
     });
 
     it("um IBAN invalido faz o mesmo", async () => {
       await abrirSessao();
       await irParaPagina2();
       fireEvent.change(porId("convite-conta-numero"), { target: { value: "PT51000201231234567890154" } });
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarIban") }));
+      fireEvent.blur(porId("convite-conta-numero"));
       expect(await screen.findByText(txt("hr.convite.erro.ibanInvalido"))).toBeInTheDocument();
-      expect(chamadas("sensiveis")).toHaveLength(0);
+      await irParaPagina1();
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      expect(chamadas("rascunho")[0][1].body).not.toHaveProperty("iban");
     });
 
-    it("sem escrever nada, diz que falta escrever e nao chama a Edge", async () => {
+    it("se a base recusar o NISS, o rascunho fica gravado mas o erro aparece (anunciado, em texto)", async () => {
       await abrirSessao();
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") }));
-      expect(await screen.findByText(txt("portal.sensiveis.nadaPreenchido"))).toBeInTheDocument();
-      expect(chamadas("sensiveis")).toHaveLength(0);
-    });
-
-    it("grava o NISS so com a chave niss, limpa o campo, mostra so os 4 ultimos digitos e anuncia o resultado", async () => {
-      await abrirSessao();
-      ligar({ ...base(), sensiveis: { data: { ok: true, niss_ultimos4: "8902", iban_ultimos4: null }, error: null } });
+      ligar({
+        ...base(),
+        rascunho: { data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z", sensivel_recusado: "niss_invalido" }, error: null },
+      });
       fireEvent.change(porId("convite-niss"), { target: { value: NISS_VALIDO } });
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") }));
-
-      expect(await screen.findByText(txt("portal.sensiveis.okNiss"))).toBeInTheDocument();
-      expect(chamadas("sensiveis")[0][1].headers).toEqual({ "x-portal-sessao": SESSAO });
-      expect(chamadas("sensiveis")[0][1].body).toEqual({ action: "sensiveis", token: TOKEN, niss: NISS_VALIDO });
-      expect(porId("convite-niss")).toHaveValue("");
-      // A saudacao do convite que ja existia diz o que ja esta registado, so com os 4 ultimos.
-      expect(screen.getByText(txt("hr.convite.jaRegistadoNiss", { ultimos4: "8902" }))).toBeInTheDocument();
-      expect(document.body.innerHTML).not.toContain(NISS_VALIDO);
-    });
-
-    it("grava o IBAN so com a chave iban (sem espacos, como no convite antigo) e limpa o campo", async () => {
-      await abrirSessao();
       await irParaPagina2();
-      ligar({ ...base(), sensiveis: { data: { ok: true, niss_ultimos4: null, iban_ultimos4: "0154" }, error: null } });
-      fireEvent.change(porId("convite-conta-numero"), { target: { value: "PT50 0002 0123 1234 5678 9015 4" } });
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarIban") }));
-
-      expect(await screen.findByText(txt("portal.sensiveis.okIban"))).toBeInTheDocument();
-      expect(chamadas("sensiveis")[0][1].body).toEqual({ action: "sensiveis", token: TOKEN, iban: IBAN_VALIDO });
-      expect(porId("convite-conta-numero")).toHaveValue("");
-      expect(screen.getByText(txt("hr.convite.jaRegistadoConta", { ultimos4: "0154" }))).toBeInTheDocument();
-      expect(document.body.innerHTML).not.toContain(IBAN_VALIDO);
+      const alerta = await screen.findByRole("alert");
+      expect(alerta).toHaveTextContent(txt("hr.convite.erro.nissInvalido"));
+      expect(alerta.textContent).not.toContain("niss_invalido");
+      // O campo nao se limpou: o valor nao ficou guardado.
+      await irParaPagina1();
+      expect(porId("convite-niss")).toHaveValue(NISS_VALIDO);
     });
 
     it("um NISS ja guardado conta como preenchido: basta um de NIF e NISS, por isso o NIF deixa de ser obrigatorio", async () => {
@@ -647,17 +659,7 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(porId("convite-nif")).not.toHaveAttribute("aria-required");
     });
 
-    it("um erro da base (campo_bloqueado) mostra texto traduzido, anunciado, nunca o codigo", async () => {
-      await abrirSessao();
-      ligar({ ...base(), sensiveis: erroHttp(409, { error: "campo_bloqueado" }) });
-      fireEvent.change(porId("convite-niss"), { target: { value: NISS_VALIDO } });
-      fireEvent.click(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") }));
-      const alerta = await screen.findByRole("alert");
-      expect(alerta).toHaveTextContent(txt("portal.erro.campoBloqueado"));
-      expect(alerta.textContent).not.toContain("campo_bloqueado");
-    });
-
-    it("em devolvida sem o NISS devolvido, o campo e o botao do NISS ficam inactivos; o IBAN devolvido fica activo", async () => {
+    it("em devolvida sem o NISS devolvido, o campo do NISS fica inactivo; o IBAN devolvido fica activo", async () => {
       ligar({
         ...base(),
         ler: lerOk({ estado: "devolvida", devolucao: { campos: { iban: "Falta o comprovativo" }, documentos: [], observacao: null }, campos_editaveis: ["iban"] }),
@@ -665,68 +667,342 @@ describe("ConviteAdmissao (portal temporario)", () => {
       await entrarComCodigo();
       await screen.findByRole("button", { name: txt("portal.sair") });
       expect(porId("convite-niss")).toBeDisabled();
-      expect(screen.getByRole("button", { name: txt("portal.sensiveis.guardarNiss") })).toBeDisabled();
       await irParaPagina2();
       expect(porId("convite-conta-numero")).toBeEnabled();
-      expect(screen.getByRole("button", { name: txt("portal.sensiveis.guardarIban") })).toBeEnabled();
     });
   });
 
-  describe("o que fica para a V3b: desenhado e desactivado, com a razao", () => {
-    it.each([
-      "portal.proxima.gravar",
-      "portal.proxima.submeter",
-      "portal.proxima.documentos",
-      "portal.proxima.contrato",
-      "portal.proxima.pedidos",
-    ])("%s esta com aria-disabled e explica 'disponivel na proxima fase'", async (chave) => {
-      await abrirSessao();
-      // Os documentos ficam na pagina 2 do formulario, onde o convite sempre os teve.
-      if (chave === "portal.proxima.documentos") {
-        fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
-        await screen.findByText(txt("hr.pessoais.bancarios"));
-      }
-      const botao = screen.getByRole("button", { name: txt(chave) });
-      expect(botao).toHaveAttribute("aria-disabled", "true");
-      expect(botao).not.toBeDisabled();
-      expect(botao).toHaveAccessibleDescription(txt("portal.proxima.razao"));
+  describe("gravar o rascunho (exige sessao)", () => {
+    const rascunhoOk = { data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z" }, error: null };
+    const horaDe = (iso: string) => {
+      const d = new Date(iso);
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    };
+    const fetchMock = vi.fn();
+
+    beforeEach(() => {
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubEnv("VITE_SUPABASE_URL", "https://exemplo.supabase.co");
+      vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "chave-publicavel");
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
     });
 
-    it("clicar nao chama a Edge (nem rascunho, nem submeter, nem anexos)", async () => {
+    it("sem alteracoes nao grava nada (nem ao mudar de pagina, nem ao fechar, nem ao fim do debounce)", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      await abrirSessao();
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      await screen.findByText(txt("hr.pessoais.bancarios"));
+      await act(async () => {
+        vi.advanceTimersByTime(3500);
+      });
+      window.dispatchEvent(new Event("pagehide"));
+      expect(chamadas("rascunho")).toHaveLength(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("grava sozinho 3 s depois de escrever e diz «Rascunho guardado as HH:MM» com a hora que a Edge devolveu", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      await abrirSessao();
+      ligar({ ...base(), rascunho: rascunhoOk });
+      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
+      await act(async () => {
+        vi.advanceTimersByTime(2500);
+      });
+      expect(chamadas("rascunho")).toHaveLength(0);
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      const [, opcoes] = chamadas("rascunho")[0];
+      expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
+      expect((opcoes.body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("913000000");
+      const estado = await screen.findByTestId("portal-rascunho-estado");
+      await waitFor(() => expect(estado).toHaveTextContent(txt("portal.rascunho.guardado", { hora: horaDe("2099-10-16T10:42:00.000Z") })));
+    });
+
+    it("varias teclas seguidas dao uma so gravacao", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      await abrirSessao();
+      ligar({ ...base(), rascunho: rascunhoOk });
+      for (const v of ["9", "91", "913", "9130"]) {
+        fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: v } });
+        await act(async () => {
+          vi.advanceTimersByTime(1000);
+        });
+      }
+      await act(async () => {
+        vi.advanceTimersByTime(3200);
+      });
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      expect((chamadas("rascunho")[0][1].body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("9130");
+    });
+
+    it("mudar de pagina grava logo o que foi alterado", async () => {
+      await abrirSessao();
+      ligar({ ...base(), rascunho: rascunhoOk });
+      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+    });
+
+    it("ao fechar a pagina segue um pedido com keepalive, sem NISS nem IBAN, e a sessao so no cabecalho", async () => {
+      await abrirSessao();
+      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
+      fireEvent.change(porId("convite-niss"), { target: { value: NISS_VALIDO } });
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("https://exemplo.supabase.co/functions/v1/convite-admissao");
+      expect(init.keepalive).toBe(true);
+      expect((init.headers as Record<string, string>)["x-portal-sessao"]).toBe(SESSAO);
+      expect(String(init.body)).not.toContain(NISS_VALIDO);
+      expect(String(init.body)).not.toContain(SESSAO);
+      expect(JSON.parse(String(init.body)).rascunho.telefone_pessoal).toBe("913000000");
+    });
+
+    it("ao fechar com uma gravacao ainda em curso (sem resposta), o rascunho segue mesmo assim por keepalive", async () => {
+      await abrirSessao();
+      // A gravacao fica pendurada: o servidor nunca confirma, como um pedido que morre com a pagina.
+      ligar({ ...base(), rascunho: (() => new Promise(() => undefined)) as unknown as () => Resposta });
+      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(init.keepalive).toBe(true);
+      expect(JSON.parse(String(init.body)).rascunho.telefone_pessoal).toBe("913000000");
+    });
+
+    it("depois de o servidor confirmar, fechar sem mais alteracoes nao reenvia nada", async () => {
+      await abrirSessao();
+      ligar({ ...base(), rascunho: rascunhoOk });
+      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+      await screen.findByText(txt("portal.rascunho.guardado", { hora: horaDe("2099-10-16T10:42:00.000Z") }), { exact: false });
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("uma falha ao gravar fica visivel, anunciada e em texto (nunca engolida) e a sessao continua", async () => {
+      await abrirSessao();
+      ligar({ ...base(), rascunho: erroHttp(409, { error: "estado_invalido" }) });
+      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      const alerta = await screen.findByRole("alert");
+      expect(alerta).toHaveTextContent(txt("portal.rascunho.falha"));
+      expect(alerta).toHaveTextContent(txt("hr.convite.erro.estadoInvalido"));
+      expect(alerta.textContent).not.toContain("estado_invalido");
+      expect(screen.getByRole("button", { name: txt("portal.sair") })).toBeInTheDocument();
+    });
+
+    it("sessao substituida ao gravar: volta a consulta com a mensagem, sem o formulario nem o que estava escrito", async () => {
+      await abrirSessao();
+      ligar({ ...base(), estado: estadoOk(), rascunho: erroHttp(401, { error: "sessao_substituida" }) });
+      fireEvent.change(porId("convite-niss"), { target: { value: NISS_VALIDO } });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+
+      const alerta = await screen.findByRole("alert");
+      expect(alerta).toHaveTextContent(txt("portal.erro.sessaoSubstituida"));
+      expect(await screen.findByRole("button", { name: txt("portal.consulta.botao") })).toBeInTheDocument();
+      expect(porId("convite-linha1")).toBeNull();
+      expect(document.body.innerHTML).not.toContain(NISS_VALIDO);
+    });
+
+    it("sessao expirada ao gravar: 'confirme de novo o codigo'", async () => {
+      await abrirSessao();
+      ligar({ ...base(), estado: estadoOk(), rascunho: erroHttp(401, { error: "sessao_expirada" }) });
+      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      const alerta = await screen.findByRole("alert");
+      expect(alerta).toHaveTextContent(txt("portal.erro.sessaoExpirada"));
+      expect(alerta.textContent).toMatch(/confirme de novo o código/i);
+    });
+  });
+
+  describe("submeter", () => {
+    // Sem obrigatorios em falta: o rascunho lido traz a morada; so faltam a assinatura e a declaracao.
+    const lerCompleto = () => lerOk({ campos_obrigatorios: ["linha1"] });
+    const abrirNaPagina2 = async (extra: Record<string, unknown> = {}) => {
+      ligar({ ...base(), ler: lerCompleto(), ...extra });
+      await entrarComCodigo();
+      await screen.findByRole("button", { name: txt("portal.sair") });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      await screen.findByText(txt("hr.pessoais.bancarios"));
+    };
+    const assinarEAceitar = () => {
+      fireEvent.change(porId("convite-assinatura-nome"), { target: { value: "Joana Silva" } });
+      fireEvent.click(porId("convite-aceite"));
+    };
+    const botaoSubmeter = () => screen.getByRole("button", { name: txt("hr.convite.submeter") });
+
+    it("a pagina 2 tem o botao Submeter e a assinatura e a declaracao activas", async () => {
+      await abrirNaPagina2();
+      expect(botaoSubmeter()).toBeEnabled();
+      expect(porId("convite-assinatura-nome")).toBeEnabled();
+      expect(porId("convite-aceite")).toBeEnabled();
+      expect(screen.queryByRole("button", { name: /para análise|for review/i })).toBeNull();
+    });
+
+    it("sem assinatura e sem declaracao diz-o junto dos campos, leva-lhes o foco e nao chama a Edge", async () => {
+      await abrirNaPagina2();
+      fireEvent.click(botaoSubmeter());
+      expect(await screen.findByText(txt("hr.convite.erro.assinatura"))).toBeInTheDocument();
+      expect(porId("convite-assinatura-nome")).toHaveAttribute("aria-invalid", "true");
+      expect(porId("convite-aceite")).toHaveAttribute("aria-invalid", "true");
+      await waitFor(() => expect(porId("convite-assinatura-nome")).toHaveFocus());
+      expect(chamadas("submeter")).toHaveLength(0);
+    });
+
+    it("com um obrigatorio em falta volta a pagina 1, mostra o erro no campo e nao chama a Edge", async () => {
+      ligar({ ...base(), ler: lerOk({ campos_obrigatorios: ["linha1", "telefone_pessoal"], rascunho: { morada_linha1: "Rua das Flores 12" } }) });
+      await entrarComCodigo();
+      await screen.findByRole("button", { name: txt("portal.sair") });
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      await screen.findByText(txt("hr.pessoais.bancarios"));
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+      expect(await screen.findByText(txt("hr.pessoais.geral"))).toBeInTheDocument();
+      expect(porId("convite-telefone-pessoal")).toHaveAttribute("aria-invalid", "true");
+      expect(chamadas("submeter")).toHaveLength(0);
+    });
+
+    it("sucesso: manda dados, assinatura e declaracao com a sessao no cabecalho e mostra o ecra de sucesso com o foco no titulo", async () => {
+      await abrirNaPagina2({ submeter: { data: { ok: true }, error: null }, sair: { data: { ok: true }, error: null } });
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+
+      const titulo = await screen.findByRole("heading", { level: 1, name: txt("portal.sucesso.titulo") });
+      await waitFor(() => expect(titulo).toHaveFocus());
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(screen.getByText(txt("portal.sucesso.texto"))).toBeInTheDocument();
+      // Dentro da moldura do portal, sem formulario nem sessao.
+      expect(screen.getByText("Mudelar Teste")).toBeInTheDocument();
+      expect(document.querySelectorAll("input, select, textarea")).toHaveLength(0);
+      expect(screen.queryByRole("button", { name: txt("portal.sair") })).toBeNull();
+
+      const [, opcoes] = chamadas("submeter")[0];
+      expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
+      expect(opcoes.body.action).toBe("submeter");
+      expect(opcoes.body.token).toBe(TOKEN);
+      expect(opcoes.body.assinatura_nome).toBe("Joana Silva");
+      expect(opcoes.body.declaracao).toBe(true);
+      expect((opcoes.body.dados as Record<string, unknown>).morada_linha1).toBe("Rua das Flores 12");
+      // Nao ha NISS nem IBAN para mandar: as chaves nem existem.
+      expect(opcoes.body.dados).not.toHaveProperty("niss");
+      expect(opcoes.body.dados).not.toHaveProperty("iban");
+      // A base ja fechou o portal: nao se chama `sair` e a sessao acabou.
+      expect(chamadas("sair")).toHaveLength(0);
+      expect(sessionStorage.length).toBe(0);
+    });
+
+    it("um IBAN escrito e valido segue na submissao, nunca no rascunho, e nao fica no ecra de sucesso", async () => {
+      await abrirNaPagina2({ submeter: { data: { ok: true }, error: null } });
+      fireEvent.change(porId("convite-conta-numero"), { target: { value: IBAN_VALIDO } });
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+      await screen.findByRole("heading", { level: 1, name: txt("portal.sucesso.titulo") });
+      expect((chamadas("submeter")[0][1].body.dados as Record<string, unknown>).iban).toBe(IBAN_VALIDO);
+      expect(document.body.innerHTML).not.toContain(IBAN_VALIDO);
+    });
+
+    it("admissao_incompleta diz o que falta (em texto), leva a pagina do primeiro campo e a sessao continua", async () => {
+      await abrirNaPagina2({ submeter: erroHttp(400, { error: "admissao_incompleta", campos: ["telefone_pessoal"] }) });
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+      const alerta = await screen.findByRole("alert");
+      expect(alerta.textContent).not.toContain("admissao_incompleta");
+      expect(alerta.textContent).not.toContain("telefone_pessoal");
+      expect(await screen.findByText(txt("hr.pessoais.geral"))).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: txt("portal.sair") })).toBeInTheDocument();
+    });
+
+    it("nif_ja_existe marca o campo do NIF (pagina 1) com o texto traduzido", async () => {
+      await abrirNaPagina2({ submeter: erroHttp(409, { error: "nif_ja_existe" }) });
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+      expect(await screen.findByText(txt("hr.convite.erro.nifJaExiste"))).toBeInTheDocument();
+      expect(porId("convite-nif")).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("uma recusa generica fica visivel e o botao volta a estar disponivel", async () => {
+      await abrirNaPagina2({ submeter: erroHttp(409, { error: "estado_invalido" }) });
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+      const alerta = await screen.findByRole("alert");
+      expect(alerta).toHaveTextContent(txt("hr.convite.erro.estadoInvalido"));
+      expect(botaoSubmeter()).toBeEnabled();
+      expect(screen.queryByTestId("portal-sucesso")).toBeNull();
+    });
+
+    it("sessao expirada ao submeter: volta a consulta com a mensagem e sem sucesso", async () => {
+      await abrirNaPagina2({ submeter: erroHttp(401, { error: "sessao_expirada" }) });
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+      expect(await screen.findByRole("button", { name: txt("portal.consulta.botao") })).toBeInTheDocument();
+      expect(screen.queryByTestId("portal-sucesso")).toBeNull();
+    });
+
+    it("recarregar depois de submeter mostra o link fechado (o portal encerrado), nunca o formulario", async () => {
+      await abrirNaPagina2({ submeter: { data: { ok: true }, error: null } });
+      assinarEAceitar();
+      fireEvent.click(botaoSubmeter());
+      await screen.findByTestId("portal-sucesso");
+      cleanup();
+      ligar({ ...base(), estado: estadoOk({ estado: "concluida", estado_portal: "encerrado", precisa_otp: false }) });
+      renderPortal();
+      expect(await screen.findByText(txt("hr.convite.motivo.usado"))).toBeInTheDocument();
+      expect(screen.queryByTestId("portal-sucesso")).toBeNull();
+    });
+  });
+
+  describe("o que fica para uma fase seguinte: desenhado e desactivado, com a razao", () => {
+    it.each(["portal.proxima.documentos", "portal.proxima.contrato", "portal.proxima.pedidos"])(
+      "%s esta com aria-disabled e explica que chega numa proxima fase",
+      async (chave) => {
+        await abrirSessao();
+        // Os documentos ficam na pagina 2 do formulario, onde o convite sempre os teve.
+        if (chave === "portal.proxima.documentos") {
+          fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+          await screen.findByText(txt("hr.pessoais.bancarios"));
+        }
+        const botao = screen.getByRole("button", { name: txt(chave) });
+        expect(botao).toHaveAttribute("aria-disabled", "true");
+        expect(botao).not.toBeDisabled();
+        expect(botao).toHaveAccessibleDescription(txt("portal.proxima.razao"));
+      },
+    );
+
+    it("os botoes de gravar, corrigir e «submeter para analise» da fase anterior ja nao existem", async () => {
+      await abrirSessao();
+      expect(screen.queryByRole("button", { name: /gravar rascunho|save draft/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /corrigir os campos|correct the returned/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /submeter para análise|submit for review/i })).toBeNull();
+    });
+
+    it("a pagina 2 diz com franqueza que o envio de documentos chega numa proxima fase", async () => {
+      await abrirSessao();
+      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+      await screen.findByText(txt("hr.pessoais.bancarios"));
+      expect(screen.getByText(txt("portal.documentos.proximaFase"))).toBeInTheDocument();
+    });
+
+    it("clicar nos documentos, no contrato e nos pedidos nao chama a Edge (nem anexos)", async () => {
       await abrirSessao();
       fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
       await screen.findByText(txt("hr.pessoais.bancarios"));
       const antes = invoke.mock.calls.length;
-      for (const chave of ["portal.proxima.gravar", "portal.proxima.submeter", "portal.proxima.documentos"]) {
+      for (const chave of ["portal.proxima.documentos", "portal.proxima.contrato", "portal.proxima.pedidos"]) {
         fireEvent.click(screen.getByRole("button", { name: txt(chave) }));
       }
       expect(invoke.mock.calls.length).toBe(antes);
-      for (const accao of ["rascunho", "submeter", "anexo_pedir", "anexo_confirmar"]) expect(chamadas(accao)).toHaveLength(0);
-    });
-
-    it("nunca se chama rascunho nem submeter em todo o percurso (a Edge actual nao exige sessao nelas)", async () => {
-      await abrirSessao();
-      // Nem a escrever no formulario, nem a mudar de pagina, nem a fechar a aba.
-      fireEvent.change(porId("convite-telefone-pessoal"), { target: { value: "913000000" } });
-      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
-      await screen.findByText(txt("hr.pessoais.bancarios"));
-      window.dispatchEvent(new Event("pagehide"));
-      expect(chamadas("rascunho")).toHaveLength(0);
-      expect(chamadas("submeter")).toHaveLength(0);
-    });
-
-    it("a assinatura e a declaracao de veracidade (da submissao) estao inactivas na pagina 2", async () => {
-      await abrirSessao();
-      fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
-      await screen.findByText(txt("hr.pessoais.bancarios"));
-      expect(porId("convite-assinatura-nome")).toBeDisabled();
-      expect(porId("convite-aceite")).toBeDisabled();
-    });
-
-    it("o botao de submeter do convite antigo nao existe: so o desactivado, com a razao", async () => {
-      await abrirSessao();
-      expect(screen.queryByRole("button", { name: txt("hr.convite.submeter") })).toBeNull();
-      expect(screen.getByRole("button", { name: txt("portal.proxima.submeter") })).toHaveAttribute("aria-disabled", "true");
+      for (const accao of ["anexo_pedir", "anexo_confirmar", "anexo_remover"]) expect(chamadas(accao)).toHaveLength(0);
     });
   });
 

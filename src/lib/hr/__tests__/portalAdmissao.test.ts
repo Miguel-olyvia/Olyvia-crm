@@ -215,8 +215,15 @@ describe("formularioEditavel: o que o estado permite editar", () => {
     expect(formularioEditavel(d, "niss")).toBe(false);
   });
 
-  it("a assinatura e a declaracao pertencem a submissao (V3b): ficam inactivas mesmo em preenchimento", () => {
-    const d = em("em_preenchimento", ["assinatura_nome", "genero"]);
+  it("a assinatura e a declaracao pertencem a submissao: editam-se sempre que o estado deixa, mesmo fora de campos_editaveis", () => {
+    const d = em("em_preenchimento", ["genero"]);
+    expect(formularioEditavel(d, "assinatura_nome")).toBe(true);
+    expect(formularioEditavel(d, "aceite")).toBe(true);
+    expect(formularioEditavel(em("devolvida", ["genero"]), "assinatura_nome")).toBe(true);
+  });
+
+  it("a assinatura e a declaracao ficam inactivas nos estados que nao se editam", () => {
+    const d = em("submetida", ["assinatura_nome", "genero"]);
     expect(formularioEditavel(d, "assinatura_nome")).toBe(false);
     expect(formularioEditavel(d, "aceite")).toBe(false);
   });

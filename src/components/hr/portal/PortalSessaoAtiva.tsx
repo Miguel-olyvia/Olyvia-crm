@@ -1,14 +1,15 @@
 /**
- * O portal com sessao activa (V3a): o formulario do convite (reutilizado, ver `PortalFormulario`)
- * preenchido com o que o estado do processo permite ver e editar, a nota do RH em processos
- * devolvidos e, desenhado mas DESACTIVADO, o que depende da V3b. O aviso discreto de sessao a
- * expirar (30 min sem actividade; 4 h no maximo) oferece "Manter sessao".
+ * O portal com sessao activa: o formulario do convite (reutilizado, ver `PortalFormulario`) preenchido
+ * com o que o estado do processo permite ver e editar, que grava o rascunho e submete, a nota do RH em
+ * processos devolvidos e, desenhado mas DESACTIVADO, o que fica para uma fase seguinte (contrato, pedidos,
+ * envio de documentos). O aviso discreto de sessao a expirar (30 min sem actividade; 4 h no maximo)
+ * oferece "Manter sessao".
  */
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Clock3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { ResultadoSensiveis } from "@/hooks/useConviteAdmissaoPublico";
+import type { EscritaPortal } from "@/hooks/useConviteAdmissaoPublico";
 import { mensagemErroPortal, type ConvitePublico, type PortalLer } from "@/lib/hr/portalAdmissao";
 import { PortalDevolvida } from "./PortalDados";
 import { TopoPortal } from "./PortalConsulta";
@@ -23,7 +24,7 @@ interface PortalSessaoAtivaProps {
   erroLeitura: string | null;
   sessaoAExpirar: boolean;
   aoManterSessao: () => void;
-  aoGravarSensiveis: (valores: { niss?: string; iban?: string }) => Promise<ResultadoSensiveis>;
+  escrita: EscritaPortal;
   tituloRef: RefObject<HTMLDivElement>;
 }
 
@@ -33,7 +34,7 @@ export function PortalSessaoAtiva({
   erroLeitura,
   sessaoAExpirar,
   aoManterSessao,
-  aoGravarSensiveis,
+  escrita,
   tituloRef,
 }: PortalSessaoAtivaProps) {
   const { t } = useTranslation();
@@ -93,8 +94,8 @@ export function PortalSessaoAtiva({
       {dados && (
         <>
           {dados.devolucao && dados.estado === "devolvida" && <PortalDevolvida devolucao={dados.devolucao} />}
-          <PortalFormulario dados={dados} pagina={pagina} aoMudarPagina={setPagina} aoGravarSensiveis={aoGravarSensiveis} />
-          <PortalProximaFase devolvida={dados.estado === "devolvida"} />
+          <PortalFormulario dados={dados} pagina={pagina} aoMudarPagina={setPagina} escrita={escrita} />
+          <PortalProximaFase />
         </>
       )}
     </>

@@ -7,7 +7,8 @@
  *  - otp_verificar: { ok, sessao, sessao_expira_em } | erro otp_invalido (401, restantes),
  *    otp_bloqueado (429), otp_expirado (410)
  *  - ler: { ok, estado, rascunho, campos_obrigatorios, ... } | sessao_* (401)
- *  - sensiveis: { ok, niss_ultimos4, iban_ultimos4 }
+ *  - rascunho: { ok, guardado_em, niss_ultimos4?, iban_ultimos4?, sensivel_recusado? } (exige sessao)
+ *  - submeter: { ok } (exige sessao; NISS e IBAN so chegam a Edge por ela, nunca em claro no rascunho)
  *  - sair: { ok, terminada }
  * A sessao vai no cabecalho `x-portal-sessao`, nunca no corpo nem no URL, e vive so em memoria
  * (nem localStorage nem sessionStorage): recarregar ou fechar o separador obriga a novo codigo.
@@ -29,6 +30,8 @@ import { lerSessao, limparSessao } from "@/lib/hr/portalSessao";
 
 const TOKEN = "token-do-link-com-mais-de-vinte-caracteres";
 const SESSAO = "S".repeat(43);
+const NISS_VALIDO = "12345678902";
+const IBAN_VALIDO = "PT50000201231234567890154";
 
 const erroHttp = (status: number, corpo: Record<string, unknown>) => ({
   data: null,
@@ -440,16 +443,27 @@ describe("useConviteAdmissaoPublico", () => {
       expect(ultimoEstado?.[1].headers).toBeUndefined();
     });
 
-    it("sessao_substituida ao gravar NISS/IBAN tambem volta a consulta", async () => {
+    it("sessao_substituida ao gravar o rascunho tambem volta a consulta", async () => {
       const r = await comSessao();
-      ligar({ estado: estadoOk(), sensiveis: erroHttp(401, { error: "sessao_substituida" }) });
-      let resultado: unknown;
+      ligar({ estado: estadoOk(), rascunho: erroHttp(401, { error: "sessao_substituida" }) });
+      let resultado: { ok: boolean; codigo?: string } | undefined;
       await act(async () => {
-        resultado = await r.result.current.gravarSensiveis({ niss: "12345678901" });
+        resultado = await r.result.current.gravarRascunho({ genero: "f" });
       });
-      expect(resultado).toEqual({ ok: false, codigo: "sessao_substituida" });
+      expect(resultado).toMatchObject({ ok: false, codigo: "sessao_substituida" });
       expect(r.result.current.sessaoAtiva).toBe(false);
       expect(r.result.current.aviso).toBe("substituida");
+    });
+
+    it("sessao_expirada ao submeter tambem volta a consulta e nao marca concluido", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), submeter: erroHttp(401, { error: "sessao_expirada" }) });
+      await act(async () => {
+        await r.result.current.submeter({ genero: "f" }, "Joana Silva");
+      });
+      expect(r.result.current.sessaoAtiva).toBe(false);
+      expect(r.result.current.aviso).toBe("expirada");
+      expect(r.result.current.concluido).toBe(false);
     });
 
     it("uma sessao recusada logo na leitura que se segue ao codigo (sessao_substituida) nao deixa sessao activa", async () => {
@@ -569,68 +583,43 @@ describe("useConviteAdmissaoPublico", () => {
     });
   });
 
-  describe("NISS e IBAN (sensiveis)", () => {
-    async function comSessao() {
-      ligar({ estado: estadoOk(), otp_pedir: otpPedirOk, otp_verificar: otpVerificarOk(), ler: { data: lerOk(), error: null } });
+  describe("gravar o rascunho (accao rascunho, exige sessao)", () => {
+    async function comSessao(extra: Respostas = {}) {
+      ligar({ estado: estadoOk(), otp_pedir: otpPedirOk, otp_verificar: otpVerificarOk(), ler: { data: lerOk(), error: null }, ...extra });
       const r = await abrir();
       await entrar(r);
       return r;
     }
+    const guardadoOk = (extra: Record<string, unknown> = {}) => ({
+      data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z", ...extra },
+      error: null,
+    });
 
-    it("grava com o cabecalho, so as chaves pedidas, e fica com os 4 ultimos digitos", async () => {
+    it("manda o rascunho com o cabecalho da sessao, sem niss nem iban, e expoe a hora que a Edge devolveu", async () => {
       const r = await comSessao();
-      ligar({
-        estado: estadoOk(),
-        sensiveis: { data: { ok: true, niss_ultimos4: "8901", iban_ultimos4: "4321" }, error: null },
-      });
-      let resultado: unknown;
+      ligar({ estado: estadoOk(), rascunho: guardadoOk() });
+      let resultado: { ok: boolean; guardadoEm?: string } | undefined;
       await act(async () => {
-        resultado = await r.result.current.gravarSensiveis({ niss: "12345678901", iban: "PT50000201231234567890154" });
+        resultado = await r.result.current.gravarRascunho({ genero: "f", nif: "123456789" });
       });
-      expect(resultado).toEqual({ ok: true });
-      const [, opcoes] = chamadas("sensiveis")[0];
+      expect(resultado).toMatchObject({ ok: true, guardadoEm: "2099-10-16T10:42:00.000Z" });
+      const [nome, opcoes] = chamadas("rascunho")[0];
+      expect(nome).toBe("convite-admissao");
       expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
-      expect(opcoes.body).toEqual({ action: "sensiveis", token: TOKEN, niss: "12345678901", iban: "PT50000201231234567890154" });
-      expect(r.result.current.dados?.niss_ultimos4).toBe("8901");
-      expect(r.result.current.dados?.iban_ultimos4).toBe("4321");
-      // os valores completos nunca ficam no estado do hook
-      expect(JSON.stringify(r.result.current.dados)).not.toContain("12345678901");
-      expect(JSON.stringify(r.result.current.dados)).not.toContain("PT5000020123");
+      expect(opcoes.body).toEqual({ action: "rascunho", token: TOKEN, rascunho: { genero: "f", nif: "123456789" } });
+      expect(r.result.current.rascunhoGuardadoEm).toBe("2099-10-16T10:42:00.000Z");
+      expect(r.result.current.erroRascunho).toBeNull();
+      expect(r.result.current.aGravar).toBe(false);
     });
 
-    it("so o NISS: nao manda a chave iban", async () => {
+    it("nunca manda niss, iban nem conta_numero dentro do rascunho, mesmo que o ecra os entregue", async () => {
       const r = await comSessao();
-      ligar({ estado: estadoOk(), sensiveis: { data: { ok: true, niss_ultimos4: "8901", iban_ultimos4: null }, error: null } });
+      ligar({ estado: estadoOk(), rascunho: guardadoOk() });
       await act(async () => {
-        await r.result.current.gravarSensiveis({ niss: "12345678901" });
+        await r.result.current.gravarRascunho({ genero: "f", niss: NISS_VALIDO, iban: IBAN_VALIDO, conta_numero: IBAN_VALIDO, aceite: true });
       });
-      expect(chamadas("sensiveis")[0][1].body).toEqual({ action: "sensiveis", token: TOKEN, niss: "12345678901" });
-    });
-
-    it("sem nenhum dos dois nem chega a Edge", async () => {
-      const r = await comSessao();
-      let resultado: unknown;
-      await act(async () => {
-        resultado = await r.result.current.gravarSensiveis({});
-      });
-      expect(resultado).toEqual({ ok: false, codigo: "pedido_invalido" });
-      expect(chamadas("sensiveis")).toHaveLength(0);
-    });
-
-    it.each([
-      [400, "niss_invalido"],
-      [400, "iban_invalido"],
-      [409, "campo_bloqueado"],
-      [409, "estado_invalido"],
-    ])("o erro %i %s volta como codigo e a sessao continua", async (status, codigo) => {
-      const r = await comSessao();
-      ligar({ estado: estadoOk(), sensiveis: erroHttp(status, { error: codigo }) });
-      let resultado: unknown;
-      await act(async () => {
-        resultado = await r.result.current.gravarSensiveis({ niss: "1" });
-      });
-      expect(resultado).toEqual({ ok: false, codigo });
-      expect(r.result.current.sessaoAtiva).toBe(true);
+      const rascunho = chamadas("rascunho")[0][1].body.rascunho as Record<string, unknown>;
+      expect(Object.keys(rascunho)).toEqual(["genero"]);
     });
 
     it("sem sessao nao ha chamada", async () => {
@@ -638,10 +627,382 @@ describe("useConviteAdmissaoPublico", () => {
       const r = await abrir();
       let resultado: unknown;
       await act(async () => {
-        resultado = await r.result.current.gravarSensiveis({ niss: "12345678901" });
+        resultado = await r.result.current.gravarRascunho({ genero: "f" });
       });
-      expect(resultado).toEqual({ ok: false, codigo: "sessao_ausente" });
-      expect(chamadas("sensiveis")).toHaveLength(0);
+      expect(resultado).toMatchObject({ ok: false, codigo: "sessao_ausente" });
+      expect(chamadas("rascunho")).toHaveLength(0);
+    });
+
+    it("com NISS e IBAN validos manda-os a parte, fica com os 4 ultimos digitos e diz que ficaram guardados", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: guardadoOk({ niss_ultimos4: "8902", iban_ultimos4: "0154" }) });
+      let resultado: { ok: boolean; nissGuardado?: boolean; ibanGuardado?: boolean } | undefined;
+      await act(async () => {
+        resultado = await r.result.current.gravarRascunho({ genero: "f" }, { niss: ` ${NISS_VALIDO} `, iban: IBAN_VALIDO });
+      });
+      const body = chamadas("rascunho")[0][1].body;
+      expect(body.niss).toBe(NISS_VALIDO);
+      expect(body.iban).toBe(IBAN_VALIDO);
+      expect(body.rascunho).toEqual({ genero: "f" });
+      expect(resultado).toMatchObject({ ok: true, nissGuardado: true, ibanGuardado: true });
+      expect(r.result.current.dados?.niss_ultimos4).toBe("8902");
+      expect(r.result.current.dados?.iban_ultimos4).toBe("0154");
+      // os valores completos nunca ficam no estado do hook nem em nenhum armazenamento
+      const estado = JSON.stringify(r.result.current);
+      expect(estado).not.toContain(NISS_VALIDO);
+      expect(estado).not.toContain(IBAN_VALIDO);
+      expect(JSON.stringify({ ...sessionStorage })).not.toContain(NISS_VALIDO);
+      expect(JSON.stringify({ ...localStorage })).not.toContain(IBAN_VALIDO);
+    });
+
+    it("um NISS ou IBAN com formato errado nao segue (o ecra ja mostra o erro no campo)", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: guardadoOk() });
+      let resultado: { nissGuardado?: boolean; ibanGuardado?: boolean } | undefined;
+      await act(async () => {
+        resultado = await r.result.current.gravarRascunho({ genero: "f" }, { niss: "12345678901", iban: "PT50123" });
+      });
+      const body = chamadas("rascunho")[0][1].body;
+      expect(body).not.toHaveProperty("niss");
+      expect(body).not.toHaveProperty("iban");
+      expect(resultado?.nissGuardado).toBeFalsy();
+      expect(resultado?.ibanGuardado).toBeFalsy();
+    });
+
+    it("o IBAN vai sem espacos e em maiusculas", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: guardadoOk({ iban_ultimos4: "0154" }) });
+      await act(async () => {
+        await r.result.current.gravarRascunho({}, { iban: "pt50 0002 0123 1234 5678 9015 4" });
+      });
+      expect(chamadas("rascunho")[0][1].body.iban).toBe(IBAN_VALIDO);
+    });
+
+    it("um valor igual ao ultimo enviado nao volta a ser enviado, mas continua a contar como guardado", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: guardadoOk({ niss_ultimos4: "8902" }) });
+      await act(async () => {
+        await r.result.current.gravarRascunho({ genero: "f" }, { niss: NISS_VALIDO });
+      });
+      let segunda: { nissGuardado?: boolean } | undefined;
+      await act(async () => {
+        segunda = await r.result.current.gravarRascunho({ genero: "m" }, { niss: NISS_VALIDO });
+      });
+      expect(chamadas("rascunho")).toHaveLength(2);
+      expect(chamadas("rascunho")[1][1].body).not.toHaveProperty("niss");
+      expect(segunda?.nissGuardado).toBe(true);
+    });
+
+    it("sensivel recusado pela base: o rascunho fica gravado, mas o erro aparece (nunca engolido)", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: guardadoOk({ sensivel_recusado: "niss_invalido" }) });
+      let resultado: { ok: boolean; sensivelRecusado?: string; nissGuardado?: boolean } | undefined;
+      await act(async () => {
+        resultado = await r.result.current.gravarRascunho({ genero: "f" }, { niss: NISS_VALIDO });
+      });
+      expect(resultado).toMatchObject({ ok: true, sensivelRecusado: "niss_invalido" });
+      expect(resultado?.nissGuardado).toBeFalsy();
+      expect(r.result.current.rascunhoGuardadoEm).toBe("2099-10-16T10:42:00.000Z");
+      expect(r.result.current.erroRascunho).toBe("niss_invalido");
+    });
+
+    it.each([
+      [409, "estado_invalido"],
+      [409, "campo_bloqueado"],
+      [400, "rascunho_demasiado_grande"],
+      [429, "demasiadas_tentativas"],
+    ])("o erro %i %s fica em erroRascunho, devolve o codigo e a sessao continua", async (status, codigo) => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: erroHttp(status, { error: codigo }) });
+      let resultado: unknown;
+      await act(async () => {
+        resultado = await r.result.current.gravarRascunho({ genero: "f" });
+      });
+      expect(resultado).toMatchObject({ ok: false, codigo });
+      expect(r.result.current.erroRascunho).toBe(codigo);
+      expect(r.result.current.sessaoAtiva).toBe(true);
+      expect(r.result.current.aGravar).toBe(false);
+    });
+
+    it("um erro sem corpo (rede) tambem fica visivel e vai para o registo sem dados", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: { data: null, error: { message: "falha", context: new Response("", { status: 500 }) } } });
+      await act(async () => {
+        await r.result.current.gravarRascunho({ genero: "f" });
+      });
+      expect(r.result.current.erroRascunho).toBe("erro_inesperado");
+      expect(captureFlowError).toHaveBeenCalled();
+      expect(String(captureFlowError.mock.calls[0][0])).not.toContain(TOKEN);
+    });
+
+    it("uma gravacao com sucesso limpa o erro anterior", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), rascunho: erroHttp(409, { error: "estado_invalido" }) });
+      await act(async () => {
+        await r.result.current.gravarRascunho({ genero: "f" });
+      });
+      expect(r.result.current.erroRascunho).toBe("estado_invalido");
+      ligar({ estado: estadoOk(), rascunho: guardadoOk() });
+      await act(async () => {
+        await r.result.current.gravarRascunho({ genero: "f" });
+      });
+      expect(r.result.current.erroRascunho).toBeNull();
+    });
+
+    it("fila de um: com uma gravacao em curso, as seguintes esperam e so a ultima vai", async () => {
+      const r = await comSessao();
+      let libertar: (v: Resposta) => void = () => undefined;
+      const primeira = new Promise<Resposta>((res) => {
+        libertar = res;
+      });
+      let n = 0;
+      invoke.mockImplementation(async (_nome: string, opcoes: { body: { action: string } }) => {
+        if (opcoes.body.action !== "rascunho") return estadoOk();
+        n += 1;
+        return n === 1 ? primeira : guardadoOk();
+      });
+      let p1: Promise<unknown> = Promise.resolve();
+      let p2: Promise<unknown> = Promise.resolve();
+      let p3: Promise<unknown> = Promise.resolve();
+      await act(async () => {
+        p1 = r.result.current.gravarRascunho({ genero: "a" });
+        p2 = r.result.current.gravarRascunho({ genero: "b" });
+        p3 = r.result.current.gravarRascunho({ genero: "c" });
+      });
+      expect(chamadas("rascunho")).toHaveLength(1);
+      expect(r.result.current.aGravar).toBe(true);
+      await act(async () => {
+        libertar(guardadoOk());
+        await Promise.all([p1, p2, p3]);
+      });
+      const enviados = chamadas("rascunho").map(([, o]) => o.body.rascunho);
+      expect(enviados).toEqual([{ genero: "a" }, { genero: "c" }]);
+      expect(r.result.current.aGravar).toBe(false);
+    });
+
+    it("na fila, o NISS pedido numa gravacao ultrapassada nao se perde", async () => {
+      const r = await comSessao();
+      let libertar: (v: Resposta) => void = () => undefined;
+      const primeira = new Promise<Resposta>((res) => {
+        libertar = res;
+      });
+      let n = 0;
+      invoke.mockImplementation(async (_nome: string, opcoes: { body: { action: string } }) => {
+        if (opcoes.body.action !== "rascunho") return estadoOk();
+        n += 1;
+        return n === 1 ? primeira : guardadoOk({ niss_ultimos4: "8902" });
+      });
+      let ps: Array<Promise<unknown>> = [];
+      await act(async () => {
+        ps = [
+          r.result.current.gravarRascunho({ genero: "a" }),
+          r.result.current.gravarRascunho({ genero: "b" }, { niss: NISS_VALIDO }),
+          r.result.current.gravarRascunho({ genero: "c" }),
+        ];
+      });
+      await act(async () => {
+        libertar(guardadoOk());
+        await Promise.all(ps);
+      });
+      expect(chamadas("rascunho")[1][1].body.niss).toBe(NISS_VALIDO);
+    });
+  });
+
+  describe("gravar ao fechar a pagina", () => {
+    const fetchMock = vi.fn();
+    beforeEach(() => {
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubEnv("VITE_SUPABASE_URL", "https://exemplo.supabase.co");
+      vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "chave-publicavel");
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    });
+
+    async function comSessao() {
+      ligar({ estado: estadoOk(), otp_pedir: otpPedirOk, otp_verificar: otpVerificarOk(), ler: { data: lerOk(), error: null } });
+      const r = await abrir();
+      await entrar(r);
+      return r;
+    }
+
+    it("faz um fetch com keepalive, a sessao no cabecalho e o rascunho sem niss nem iban no corpo", async () => {
+      const r = await comSessao();
+      act(() => {
+        r.result.current.gravarRascunhoAoFechar({ genero: "f", niss: NISS_VALIDO, conta_numero: IBAN_VALIDO });
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("https://exemplo.supabase.co/functions/v1/convite-admissao");
+      expect(init.method).toBe("POST");
+      expect(init.keepalive).toBe(true);
+      const cabecalhos = init.headers as Record<string, string>;
+      expect(cabecalhos["x-portal-sessao"]).toBe(SESSAO);
+      expect(cabecalhos.apikey).toBe("chave-publicavel");
+      const corpo = JSON.parse(String(init.body));
+      expect(corpo).toEqual({ action: "rascunho", token: TOKEN, rascunho: { genero: "f" } });
+      expect(String(init.body)).not.toContain(NISS_VALIDO);
+      expect(String(init.body)).not.toContain(SESSAO);
+      expect(String(url)).not.toContain(SESSAO);
+    });
+
+    it("sem sessao nao envia nada", async () => {
+      ligar({ estado: estadoOk() });
+      const r = await abrir();
+      act(() => {
+        r.result.current.gravarRascunhoAoFechar({ genero: "f" });
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("um fetch que falha ao fechar nao rebenta (ninguem ficou para ver o erro)", async () => {
+      const r = await comSessao();
+      fetchMock.mockRejectedValue(new Error("rede"));
+      expect(() =>
+        act(() => {
+          r.result.current.gravarRascunhoAoFechar({ genero: "f" });
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("submeter", () => {
+    async function comSessao(extra: Respostas = {}) {
+      ligar({ estado: estadoOk(), otp_pedir: otpPedirOk, otp_verificar: otpVerificarOk(), ler: { data: lerOk(), error: null }, ...extra });
+      const r = await abrir();
+      await entrar(r);
+      return r;
+    }
+
+    it("manda dados, assinatura e declaracao com a sessao no cabecalho; no sucesso conclui sem chamar sair", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), submeter: { data: { ok: true }, error: null }, sair: { data: { ok: true }, error: null } });
+      let resultado: { ok: boolean } | undefined;
+      await act(async () => {
+        resultado = await r.result.current.submeter({ genero: "f", nif: "123456789" }, "  Joana Silva ");
+      });
+      expect(resultado).toEqual({ ok: true });
+      const [, opcoes] = chamadas("submeter")[0];
+      expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
+      expect(opcoes.body).toEqual({
+        action: "submeter",
+        token: TOKEN,
+        dados: { genero: "f", nif: "123456789" },
+        assinatura_nome: "Joana Silva",
+        declaracao: true,
+      });
+      expect(r.result.current.concluido).toBe(true);
+      expect(r.result.current.sessaoAtiva).toBe(false);
+      expect(r.result.current.dados).toBeNull();
+      expect(lerSessao()).toBeNull();
+      expect(chamadas("sair")).toHaveLength(0);
+    });
+
+    it("depois de concluir, uma gravacao de rascunho atrasada nao chega a Edge", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), submeter: { data: { ok: true }, error: null }, rascunho: { data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z" }, error: null } });
+      await act(async () => {
+        await r.result.current.submeter({ genero: "f" }, "Joana Silva");
+      });
+      let resultado: unknown;
+      await act(async () => {
+        resultado = await r.result.current.gravarRascunho({ genero: "m" });
+      });
+      expect(resultado).toMatchObject({ ok: false });
+      expect(chamadas("rascunho")).toHaveLength(0);
+    });
+
+    it("NISS e IBAN validos e novos seguem dentro de dados; os invalidos e os ja enviados ficam de fora", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), submeter: { data: { ok: true }, error: null } });
+      await act(async () => {
+        await r.result.current.submeter({ genero: "f", niss: NISS_VALIDO, iban: "PT50123" }, "Joana Silva");
+      });
+      const dados = chamadas("submeter")[0][1].body.dados as Record<string, unknown>;
+      expect(dados.niss).toBe(NISS_VALIDO);
+      expect(dados).not.toHaveProperty("iban");
+    });
+
+    it("NISS ou IBAN a null ou vazios (ja guardados no cofre) nao vao no pedido", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), submeter: { data: { ok: true }, error: null } });
+      await act(async () => {
+        await r.result.current.submeter({ genero: "f", niss: null, iban: "" }, "Joana Silva");
+      });
+      const dados = chamadas("submeter")[0][1].body.dados as Record<string, unknown>;
+      expect(dados).not.toHaveProperty("niss");
+      expect(dados).not.toHaveProperty("iban");
+    });
+
+    it("admissao_incompleta devolve os campos em falta e a sessao continua", async () => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), submeter: erroHttp(400, { error: "admissao_incompleta", campos: ["nif", "genero"] }) });
+      let resultado: { ok: boolean; codigo?: string; campos?: string[] } | undefined;
+      await act(async () => {
+        resultado = await r.result.current.submeter({ genero: null }, "Joana Silva");
+      });
+      expect(resultado).toEqual({ ok: false, codigo: "admissao_incompleta", campos: ["nif", "genero"] });
+      expect(r.result.current.sessaoAtiva).toBe(true);
+      expect(r.result.current.concluido).toBe(false);
+    });
+
+    it.each([
+      [400, "assinatura_obrigatoria"],
+      [400, "niss_invalido"],
+      [409, "nif_ja_existe"],
+      [409, "estado_invalido"],
+    ])("o erro %i %s volta como codigo", async (status, codigo) => {
+      const r = await comSessao();
+      ligar({ estado: estadoOk(), submeter: erroHttp(status, { error: codigo }) });
+      let resultado: unknown;
+      await act(async () => {
+        resultado = await r.result.current.submeter({ genero: "f" }, "Joana Silva");
+      });
+      expect(resultado).toMatchObject({ ok: false, codigo });
+      expect(r.result.current.concluido).toBe(false);
+    });
+
+    it("sem sessao nao ha chamada; assinatura vazia nem chega a Edge", async () => {
+      ligar({ estado: estadoOk() });
+      const r = await abrir();
+      let a: unknown;
+      await act(async () => {
+        a = await r.result.current.submeter({ genero: "f" }, "Joana");
+      });
+      expect(a).toMatchObject({ ok: false, codigo: "sessao_ausente" });
+
+      const r2 = await comSessao();
+      let b: unknown;
+      await act(async () => {
+        b = await r2.result.current.submeter({ genero: "f" }, "   ");
+      });
+      expect(b).toMatchObject({ ok: false, codigo: "assinatura_obrigatoria" });
+      expect(chamadas("submeter")).toHaveLength(0);
+    });
+
+    it("duas submissoes ao mesmo tempo: so a primeira chega a Edge", async () => {
+      const r = await comSessao();
+      let libertar: (v: Resposta) => void = () => undefined;
+      const espera = new Promise<Resposta>((res) => {
+        libertar = res;
+      });
+      invoke.mockImplementation(async (_nome: string, opcoes: { body: { action: string } }) =>
+        opcoes.body.action === "submeter" ? espera : estadoOk(),
+      );
+      let p1: Promise<unknown> = Promise.resolve();
+      let p2: Promise<unknown> = Promise.resolve();
+      await act(async () => {
+        p1 = r.result.current.submeter({ genero: "f" }, "Joana Silva");
+        p2 = r.result.current.submeter({ genero: "f" }, "Joana Silva");
+      });
+      await act(async () => {
+        libertar({ data: { ok: true }, error: null });
+        await Promise.all([p1, p2]);
+      });
+      expect(chamadas("submeter")).toHaveLength(1);
     });
   });
 

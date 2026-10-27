@@ -938,18 +938,35 @@ describe("reenviar (RH)", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("entre a V3a e a V3b o link sozinho nao escreve (portal_em_atualizacao)", () => {
-  const ANTIGAS = ["rascunho", "submeter", "anexo_url", "anexo_confirmar", "anexo_remover"];
+describe("fase 1 do portal: o link sozinho nao escreve; rascunho e submeter exigem sessao; os anexos ficam para a fase 2 (410)", () => {
+  const ANEXOS = ["anexo_url", "anexo_confirmar", "anexo_remover"];
 
-  it("rascunho, submeter e os anexos respondem 410 com corpo fixo e NENHUMA chega a uma RPC, ao storage, ao limite nem ao correio", async () => {
+  it("rascunho e submeter SEM sessao respondem 401 sessao_ausente e NENHUMA chega a uma RPC, ao storage nem ao correio", async () => {
     const m = montar();
-    for (const action of ANTIGAS) {
+    for (const action of ["rascunho", "submeter"]) {
       const r = await m.chamar(
-        { action, token: TOKEN, rascunho: { nif: "123456789" }, dados: { nif: "123456789" }, assinatura_nome: "Ana", tipo: "fotografia", anexo_id: CONVITE },
+        { action, token: TOKEN, rascunho: { nif: "123456789" }, dados: { nif: "123456789", niss: "12345678901" }, assinatura_nome: "Ana", declaracao: true, niss: "12345678901" },
         { "x-forwarded-for": "203.0.113.9" },
       );
-      expect([r.status, r.corpo]).toEqual([410, { error: "portal_em_atualizacao" }]);
+      expect([r.status, r.corpo]).toEqual([401, { error: "sessao_ausente" }]);
       expect(r.texto).not.toContain("123456789");
+    }
+    expect(m.rpcs).toHaveLength(0);
+    expect(m.correio).toHaveLength(0);
+    expect(m.invocacoes).toEqual([]);
+  });
+
+  it("os anexos continuam 410 com corpo fixo e NENHUM chega a uma RPC, ao storage, ao limite nem ao correio, nem com sessao valida", async () => {
+    const m = montar();
+    for (const action of ANEXOS) {
+      for (const cab of [{ "x-forwarded-for": "203.0.113.9" }, { "x-portal-sessao": SESSAO }]) {
+        const r = await m.chamar(
+          { action, token: TOKEN, sessao: SESSAO, tipo: "fotografia", anexo_id: CONVITE, dados: { nif: "123456789" } },
+          cab,
+        );
+        expect([r.status, r.corpo]).toEqual([410, { error: "portal_em_atualizacao" }]);
+        expect(r.texto).not.toContain("123456789");
+      }
     }
     expect(m.rpcs).toHaveLength(0);
     expect(m.limites).toHaveLength(0);
@@ -958,13 +975,40 @@ describe("entre a V3a e a V3b o link sozinho nao escreve (portal_em_atualizacao)
     expect(m.invocacoes).toEqual([]);
   });
 
-  it("nem com sessao valida (a V3a nao as liga a sessao): continuam 410", async () => {
-    const m = montar();
-    for (const action of ANTIGAS) {
-      const r = await m.chamar({ action, token: TOKEN, sessao: SESSAO }, { "x-portal-sessao": SESSAO });
-      expect(r.status).toBe(410);
-    }
-    expect(m.rpcs).toHaveLength(0);
+  it("rascunho e submeter COM sessao escrevem: chamam as RPCs novas com o SHA-256 da sessao, nunca com a sessao", async () => {
+    const m = montar({
+      rpc: {
+        rpc_hr_convite_admissao_rascunho: () => ({ data: { ok: true, guardado_em: "2026-10-27T10:00:00Z" }, error: null }),
+        rpc_hr_convite_admissao_submeter: () => ({ data: "44444444-4444-4444-8444-444444444444", error: null }),
+      },
+    });
+    const hash = await sha256Hex(TOKEN);
+    const hashSessao = await sha256Hex(SESSAO);
+    const a = await m.chamar({ action: "rascunho", token: TOKEN, rascunho: { nif: "123456789" } }, { "x-portal-sessao": SESSAO });
+    expect([a.status, a.corpo]).toEqual([200, { ok: true, guardado_em: "2026-10-27T10:00:00Z" }]);
+    const b = await m.chamar(
+      { action: "submeter", token: TOKEN, dados: { nif: "123456789" }, assinatura_nome: "Ana", declaracao: true },
+      { "x-portal-sessao": SESSAO },
+    );
+    expect([b.status, b.corpo]).toEqual([200, { ok: true }]);
+    expect(m.chamadas("rpc_hr_convite_admissao_rascunho")[0].args).toEqual({
+      p_token_hash: hash,
+      p_sessao_hash: hashSessao,
+      p_rascunho: { nif: "123456789" },
+    });
+    expect(m.chamadas("rpc_hr_convite_admissao_submeter")[0].args).toMatchObject({ p_token_hash: hash, p_sessao_hash: hashSessao, p_dados: { nif: "123456789" }, p_ip: null });
+    expect(JSON.stringify(m.rpcs)).not.toContain(SESSAO);
+    semNada(m, a.texto + b.texto, [SESSAO]);
+  });
+
+  it("um defeito da base na gravacao reporta so tipo e SQLSTATE: nem a linha do CHECK nem o NISS chegam ao registo", async () => {
+    const m = montar({ rpc: { rpc_hr_convite_admissao_submeter: () => ({ data: null, error: ERRO_CHECK }) } });
+    const r = await m.chamar(
+      { action: "submeter", token: TOKEN, dados: { niss: "12345678901" }, assinatura_nome: "Ana", declaracao: true },
+      { "x-portal-sessao": SESSAO },
+    );
+    expect([r.status, r.corpo]).toEqual([500, { error: "erro_inesperado" }]);
+    semNada(m, r.texto, ["SEGREDO", "12345678901", "Failing row"]);
   });
 
   it("nem por sinonimo, caixa diferente ou accao inventada: o portal antigo nao tem outro caminho de escrita", async () => {

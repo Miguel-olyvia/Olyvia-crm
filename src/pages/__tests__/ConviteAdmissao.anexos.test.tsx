@@ -1,8 +1,8 @@
 /**
  * `ConviteAdmissao`: os documentos (cartao de cidadao, comprovativo de IBAN, fotografia) no
- * portal temporario da V3a. As accoes de anexos da Edge ainda nao exigem sessao (so a V3b as
- * fecha), por isso o portal NAO as liga: a zona de documentos esta desenhada e desactivada,
- * com a razao, e nunca chama `anexo_*`. Os anexos que a `ler` devolve mostram-se so como lista
+ * portal temporario. Os anexos ficam para a fase 2 (a Edge responde 410 `portal_em_atualizacao`),
+ * por isso o portal NAO os liga: a zona de documentos esta desenhada e desactivada, com a razao
+ * ("chega numa proxima fase"), e nunca chama `anexo_*`. Os anexos que a `ler` devolve mostram-se so como lista
  * (so o nome), sem abrir nem descarregar nada.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";

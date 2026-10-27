@@ -59,6 +59,8 @@ const DINAMICAS = [
     "campoBloqueado",
     "emAtualizacao",
     "pedidoInvalido",
+    // Usado por `errosAdmissao.ts` (catalogo de erros do convite), que esta fora da lista de fontes acima.
+    "rascunhoGrande",
   ].map((k) => `portal.erro.${k}`),
 ];
 
@@ -73,7 +75,8 @@ describe("traducoes do portal da admissao (pt e en)", () => {
         "portal.otp.rotulo",
         "portal.sair",
         "portal.proxima.razao",
-        "portal.sensiveis.guardarNiss",
+        "portal.rascunho.guardado",
+        "portal.sucesso.titulo",
         "portal.sessao.terminada",
       ]),
     );
@@ -136,6 +139,7 @@ describe("traducoes do portal da admissao (pt e en)", () => {
       "portal.otp.reenviarEm": ["n"],
       "portal.otp.enviado": ["n"],
       "portal.erro.otpInvalido": ["n"],
+      "portal.rascunho.guardado": ["hora"],
       "portal.vista.analise.estado": ["estado"],
     };
     for (const [chave, parametros] of Object.entries(esperados)) {

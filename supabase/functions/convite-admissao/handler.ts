@@ -13,7 +13,8 @@
  *    validar tudo por dentro: esta funcao nao e a unica fronteira.
  *  - "cancelar" e "prolongar": RH autenticado, sem segredos. Correm com o JWT
  *    REENCAMINHADO (cliente com o Authorization do pedido): a RPC usa auth.uid().
- *  - "estado", "rascunho", "submeter" e anexos: sem sessao, so com o token.
+ *  - "estado": sem sessao, so com o token. "rascunho" e "submeter" (fase 1 do portal) exigem a
+ *    SESSAO do OTP (o link sozinho nao escreve); os anexos respondem 410 ate a fase 2.
  *    Limites por IP E por token_hash (o IP nao e fiavel: x-forwarded-for forja-se).
  *  - V3a: "otp_pedir", "otp_verificar", "sair", "ler" e "sensiveis" (ver `accoesPortal.ts`;
  *    so estes nomes: os das RPCs, como sessao_terminar, dao accao_desconhecida) com o
@@ -25,14 +26,21 @@
  * email, rascunho). Para o Sentry vai so `erroSemDados` (tipo e SQLSTATE); para
  * o cliente, codigos do catalogo e mensagens fixas.
  */
-import { detectClientIp } from "../_shared/clientIp.ts";
+import { detectClientIp, detectUserAgent } from "../_shared/clientIp.ts";
 import { erroSemDados } from "../_shared/erroSemDados.ts";
 import { orgScoped, type OrgScopedQueryBuilder } from "../_shared/orgScopedQuery.ts";
 import { getClientIp, type RateLimitOptions, type RateLimitResult } from "../_shared/rateLimit.ts";
 import { eAccaoAnexo, tratarAccaoAnexo, type ClienteAnexos } from "./accoesAnexos.ts";
 import {
+  IBAN_MAX,
+  NISS_MAX,
+  codigoParaOVisitante,
   eAccaoPortal,
+  gravarSensiveisNoVault,
+  respostaErroRpc,
+  respostaInvalidaDaRpc,
   tectoPortalPorHora,
+  textoOpcional,
   tratarAccaoPortal,
   type AccaoPortal,
 } from "./accoesPortal.ts";
@@ -111,6 +119,13 @@ const CAMPOS_CONVITE = [
   "validade_documento",
 ] as const;
 
+/**
+ * O que vai em `p_dados` ao submeter: a lista acima SEM `niss` e `iban`. Esses dois seguem
+ * pelo Vault (`sensiveis_gravar`) e a base recusa-os em texto (HRA10). A lista acima mantem-se
+ * igual porque o teste de contrato a amarra a do ecra e a da RPC.
+ */
+const CAMPOS_SUBMETER: readonly string[] = CAMPOS_CONVITE.filter((c) => c !== "niss" && c !== "iban");
+
 // -- tipos ----------------------------------------------------------------------
 
 type ResultadoRpc = PromiseLike<{ data: unknown; error: unknown }>;
@@ -148,11 +163,6 @@ export interface DepsConvite {
   otpPepper?: string | null;
   /** Correio directo pelo SMTP da organizacao do processo, SEM `send-email` nem `email_logs`. */
   enviarCorreio?: (pedido: PedidoCorreio) => Promise<ResultadoCorreio>;
-  /**
-   * So a V3b liga isto. Ate la as accoes ANTIGAS de escrita (rascunho, submeter e os anexos)
-   * respondem 410 portal_em_atualizacao sem tocar na base: o link sozinho nao escreve.
-   */
-  portalAntigoAtivo?: boolean;
   verificarLimite(svc: ClienteConvite, opcoes: RateLimitOptions): Promise<RateLimitResult>;
   registarTentativa(svc: ClienteConvite, bucket: string, identifier: string): Promise<void>;
   /** Recebe SO erros ja sem dados (ver `erroSemDados`). */
@@ -602,38 +612,76 @@ async function tratarEstado(ctx: Contexto, svc: ClienteConvite, tokenHash: strin
   return responder({ ok: true, convite: soCampos(data, CHAVES_ESTADO_PUBLICO) });
 }
 
-async function tratarRascunho(ctx: Contexto, svc: ClienteConvite, tokenHash: string, payload: Record<string, unknown>) {
+/** Recusas do NISS/IBAN que nao deitam fora o rascunho que acabou de ficar gravado. */
+const RECUSAS_DE_SENSIVEL = ["niss_invalido", "iban_invalido", "campo_bloqueado"] as const;
+
+/**
+ * Fase 1: o rascunho exige a sessao do OTP (a base verifica-a). O NISS e o IBAN, se vierem
+ * (chaves de topo, FORA do rascunho), vao para o Vault por `sensiveis_gravar` DEPOIS do
+ * rascunho: se o Vault os recusar, o rascunho ja ficou gravado e a resposta e 200 com
+ * `sensivel_recusado`. Nunca o valor numa resposta, registo ou erro: so os ultimos 4.
+ */
+async function tratarRascunho(
+  ctx: Contexto,
+  svc: ClienteConvite,
+  tokenHash: string,
+  sessaoHash: string,
+  payload: Record<string, unknown>,
+) {
   const { responder } = ctx;
-  // Retira niss, iban e conta_numero e recusa o resto fora da lista ANTES da RPC:
-  // o CHECK da V2 recusaria o rascunho inteiro (23514).
+  // Retira niss, iban e conta_numero e recusa o resto fora da lista ANTES da RPC.
   const preparado = prepararRascunho(payload.rascunho);
   if (!preparado.ok) return responder({ error: preparado.codigo }, statusDoCodigo(preparado.codigo));
+  const niss = textoOpcional(payload.niss, NISS_MAX);
+  const iban = textoOpcional(payload.iban, IBAN_MAX);
+  if (niss === undefined || iban === undefined) return responder({ error: "pedido_invalido" }, 400);
 
   const { data, error } = await svc.rpc("rpc_hr_convite_admissao_rascunho", {
     p_token_hash: tokenHash,
+    p_sessao_hash: sessaoHash,
     p_rascunho: preparado.rascunho,
   });
   if (error) {
-    if (mapearErroRpc(error as { code?: string; message?: string }).codigo === "rascunho_demasiado_grande") {
-      return responder({ error: "rascunho_demasiado_grande" }, 400);
+    const r = respostaErroRpc(ctx, "rascunho", error);
+    // Um defeito da base (ex.: CHECK) nao perde a conversa: o ecra ja traduz rascunho_nao_gravado.
+    if (r.body.error === "erro_inesperado") return responder({ error: "rascunho_nao_gravado" }, 400);
+    return responder(r.body, r.status);
+  }
+  if (!eObjecto(data) || data.ok !== true) {
+    const r = respostaInvalidaDaRpc(ctx.deps, "rascunho");
+    return responder(r.body, r.status);
+  }
+
+  const corpo: Record<string, unknown> = { ok: true, guardado_em: typeof data.guardado_em === "string" ? data.guardado_em : null };
+  if (niss !== null || iban !== null) {
+    const v = await gravarSensiveisNoVault(svc, tokenHash, sessaoHash, niss, iban);
+    if (v.ok) {
+      corpo.niss_ultimos4 = v.niss_ultimos4;
+      corpo.iban_ultimos4 = v.iban_ultimos4;
+    } else if ("error" in v) {
+      const r = respostaErroRpc(ctx, "rascunho sensiveis", v.error);
+      if (!(RECUSAS_DE_SENSIVEL as readonly string[]).includes(String(r.body.error))) return responder(r.body, r.status);
+      corpo.sensivel_recusado = r.body.error;
+    } else {
+      const r = respostaInvalidaDaRpc(ctx.deps, "rascunho sensiveis");
+      return responder(r.body, r.status);
     }
-    ctx.reportar("rascunho", error);
-    return responder({ error: "rascunho_nao_gravado" }, 400);
   }
-  const motivo = eObjecto(data) ? data.erro : undefined;
-  if (typeof motivo === "string") {
-    const codigo = eCodigoPublico(motivo) ? motivo : "convite_invalido";
-    return responder({ error: codigo }, statusDoCodigo(codigo));
-  }
-  return responder({ ok: true });
+  return responder(corpo);
 }
 
+/**
+ * Fase 1: submeter exige a sessao do OTP e `declaracao: true`. NISS e IBAN saem de `dados` e
+ * gravam-se primeiro no Vault (a RPC le-os de la; recusa-os em texto). A ordem das recusas previas
+ * (sem sessao, sem dados, sem assinatura, sem declaracao) NAO regista a recusa no convite: so a
+ * base, ja com a sessao aceite, o faz.
+ */
 async function tratarSubmeter(
   ctx: Contexto,
   svc: ClienteConvite,
   tokenHash: string,
+  sessaoHash: string,
   payload: Record<string, unknown>,
-  ip: string,
 ) {
   const { req, responder } = ctx;
   // Regista a ultima recusa no convite para o RH a ver. Melhor-esforco: nunca
@@ -653,39 +701,54 @@ async function tratarSubmeter(
     }
   };
 
+  // Recusas previas: a sessao ja foi exigida, mas a base ainda nao a aceitou; nao se escreve nada.
   const dados = payload.dados;
-  if (!dados || typeof dados !== "object") {
-    await registarRecusa("pedido_invalido", [], []);
-    return responder({ error: "pedido_invalido" }, 400);
-  }
+  if (!eObjecto(dados)) return responder({ error: "pedido_invalido" }, 400);
   const assinaturaNome = typeof payload.assinatura_nome === "string" ? payload.assinatura_nome.trim() : "";
-  if (assinaturaNome === "") {
-    await registarRecusa("assinatura_obrigatoria", [], []);
-    return responder({ error: "assinatura_obrigatoria" }, 400);
+  if (assinaturaNome === "") return responder({ error: "assinatura_obrigatoria" }, 400);
+  if (payload.declaracao !== true) return responder({ error: "pedido_invalido" }, 400);
+  const niss = textoOpcional(dados.niss, NISS_MAX);
+  const iban = textoOpcional(dados.iban, IBAN_MAX);
+  if (niss === undefined || iban === undefined) return responder({ error: "pedido_invalido" }, 400);
+
+  // Traduz o erro de uma RPC (sessao incluida) e regista a recusa quando e do catalogo de submissao.
+  const recusar = async (error: unknown) => {
+    const mapeado = mapearErroRpc(error as { code?: string; message?: string; details?: string });
+    const codigo = codigoParaOVisitante(mapeado.codigo);
+    if (codigo === "erro_inesperado") ctx.reportar("submeter", error);
+    await registarRecusa(codigo, mapeado.campos ?? [], mapeado.conflitos ?? []);
+    return responder(
+      {
+        error: codigo,
+        // Os campos em falta so saem em `admissao_incompleta`; os conflitos NUNCA.
+        ...(codigo === "admissao_incompleta" ? { campos: mapeado.campos ?? [] } : {}),
+      },
+      statusDoCodigo(codigo),
+    );
+  };
+
+  // NISS e IBAN primeiro, cifrados no Vault: a RPC le-os de la e recusa-os em texto.
+  if (niss !== null || iban !== null) {
+    const v = await gravarSensiveisNoVault(svc, tokenHash, sessaoHash, niss, iban);
+    if (!v.ok) {
+      if ("error" in v) return await recusar(v.error);
+      const r = respostaInvalidaDaRpc(ctx.deps, "submeter sensiveis");
+      return responder(r.body, r.status);
+    }
   }
 
   const { error } = await svc.rpc("rpc_hr_convite_admissao_submeter", {
     p_token_hash: tokenHash,
-    // PLANO, sem reagrupar por tabela: a RPC le `p_dados ->> '<chave>'` directamente.
-    p_dados: soCampos(dados as Record<string, unknown>, CAMPOS_CONVITE),
+    p_sessao_hash: sessaoHash,
+    // PLANO, sem reagrupar por tabela. Sem niss nem iban: ja estao no Vault.
+    p_dados: soCampos(dados, CAMPOS_SUBMETER),
     p_assinatura_nome: assinaturaNome,
-    p_ip: ip,
-    p_user_agent: req.headers.get("user-agent") ?? null,
+    // So um IP valido ou null (a coluna e inet): nunca o "unknown" do rate limit nem texto forjado.
+    p_ip: detectClientIp(req),
+    p_user_agent: detectUserAgent(req),
   });
-  if (error) {
-    const mapeado = mapearErroRpc(error as { code?: string; message?: string; details?: string });
-    if (mapeado.codigo === "erro_inesperado") ctx.reportar("submeter", error);
-    await registarRecusa(mapeado.codigo, mapeado.campos ?? [], mapeado.conflitos ?? []);
-    return responder(
-      {
-        error: mapeado.codigo,
-        // Os campos em falta so saem em `admissao_incompleta`; os conflitos NUNCA.
-        ...(mapeado.codigo === "admissao_incompleta" ? { campos: mapeado.campos ?? [] } : {}),
-      },
-      statusDoCodigo(mapeado.codigo),
-    );
-  }
-  return responder({ ok: true, avisos: [] as string[] });
+  if (error) return await recusar(error);
+  return responder({ ok: true });
 }
 
 async function tratarPortal(
@@ -743,8 +806,14 @@ async function tratarPublica(ctx: Contexto, accao: string, payload: Record<strin
   }
   if (eAccaoPortal(accao)) return tratarPortal(ctx, svc, accao, tokenHash, payload);
   if (accao === "estado") return tratarEstado(ctx, await clienteDoEstado(ctx, svc, payload), tokenHash);
-  if (accao === "rascunho") return tratarRascunho(ctx, svc, tokenHash, payload);
-  return tratarSubmeter(ctx, svc, tokenHash, payload, ip);
+
+  // Rascunho e submeter ESCREVEM: exigem a sessao que o OTP abriu. O link sozinho nao escreve.
+  // A base verifica-a (hr_convite_sessao_exigir); aqui poupa-se a viagem a sessao ausente ou mal formada.
+  const sessao = lerSessaoDoPedido(req, payload);
+  if (!sessao) return responder({ error: "sessao_ausente" }, statusDoCodigo("sessao_ausente"));
+  const sessaoHash = await sha256Hex(sessao);
+  if (accao === "rascunho") return tratarRascunho(ctx, svc, tokenHash, sessaoHash, payload);
+  return tratarSubmeter(ctx, svc, tokenHash, sessaoHash, payload);
 }
 
 // -- entrada --------------------------------------------------------------------
@@ -773,11 +842,8 @@ export function criarHandler(deps: DepsConvite): (req: Request) => Promise<Respo
       if (accao === "criar") return await tratarCriar(ctx, payload);
       if (accao === "cancelar" || accao === "prolongar") return await tratarAccaoRh(ctx, accao, payload);
       if (accao === "reenviar") return await tratarReenviar(ctx, payload);
-      // Ate a V3b, o link sozinho nao escreve: as accoes antigas de escrita nem chegam a base,
-      // ao rate limit ou ao token. Corpo fixo, sem dados.
-      if ((accao === "rascunho" || accao === "submeter" || eAccaoAnexo(accao)) && !deps.portalAntigoAtivo) {
-        return responder({ error: "portal_em_atualizacao" }, 410);
-      }
+      // Os anexos ficam para a fase 2: nem chegam a base, ao rate limit ou ao token. Corpo fixo, sem dados.
+      if (eAccaoAnexo(accao)) return responder({ error: "portal_em_atualizacao" }, 410);
       if (accao !== "estado" && accao !== "submeter" && accao !== "rascunho" && !eAccaoAnexo(accao) && !eAccaoPortal(accao)) {
         return responder({ error: "accao_desconhecida" }, 400);
       }

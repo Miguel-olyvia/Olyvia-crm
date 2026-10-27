@@ -1,6 +1,6 @@
 // A «Ficha de admissão» do portal REAL, com o desenho da pré-visualização (título, barra dos quatro passos, faixa do acesso
 // temporário) alimentada pelo que a Edge `convite-admissao` devolve. O conteúdo é o do portal real, sem o reescrever: a saudação,
-// o formulário (só o NISS e o IBAN se gravam, com o botão junto de cada campo), a nota de devolução e o que fica para a fase seguinte.
+// o formulário (grava o rascunho sozinho e submete, NISS e IBAN incluídos), a nota de devolução e o que fica para a fase seguinte.
 // Documentos: a troca com o RH não existe na base, por isso a entrada não aparece (ver `PortalNavegacao`, `comDocumentos`).
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { AlertTriangle, Clock3, Hourglass, Info, ShieldCheck } from "lucide-react";
@@ -10,7 +10,7 @@ import { dataEHora } from "@/components/rh-exemplo/admissao/auxiliares";
 import {
   AvisoSessaoPerdida, ConviteSaudacao, PortalDevolvida, PortalFormulario, PortalProximaFase, estadoAdmissaoDe, mensagemErroPortal,
   prazoEmAviso, restoDoPrazo,
-  type AvisoPortal, type ConvitePublico, type PortalLer, type ResultadoSensiveis, type RestoDoPrazo,
+  type AvisoPortal, type ConvitePublico, type EscritaPortal, type PortalLer, type RestoDoPrazo,
 } from "@/components/rh-exemplo/hooks/portalAdmissaoReal";
 import { passosDoEstadoReal } from "@/components/rh-exemplo/portal/portalRealEstado";
 import { PassosDoPortal } from "@/components/rh-exemplo/portal/PortalFicha";
@@ -68,7 +68,7 @@ interface FaixaAcessoProps {
   sessaoAtiva: boolean;
 }
 
-/** A faixa do acesso temporário. Não há «Rascunho guardado»: nesta fase o rascunho não se grava, e não se finge o contrário. */
+/** A faixa do acesso temporário. O «Rascunho guardado às…» vive junto aos botões do formulário (`PortalEstadoRascunho`), com a hora que a Edge devolve. */
 function FaixaAcessoReal({ convite, sessaoAtiva }: FaixaAcessoProps) {
   const { t } = useTranslation();
   const valida = convite.valid_until !== null && !Number.isNaN(Date.parse(convite.valid_until));
@@ -111,7 +111,7 @@ interface PortalFichaRealProps {
   sessaoAExpirar: boolean;
   aoManterSessao: () => void;
   aoConfirmarIdentidade: () => void;
-  aoGravarSensiveis: (valores: { niss?: string; iban?: string }) => Promise<ResultadoSensiveis>;
+  escrita: EscritaPortal;
   tituloRef: RefObject<HTMLDivElement>;
 }
 
@@ -166,7 +166,7 @@ function FichaEmConsulta({ convite, dados, tituloRef, aoConfirmarIdentidade }: P
   );
 }
 
-function FichaComSessao({ convite, dados, erroLeitura, sessaoAExpirar, aoManterSessao, aoGravarSensiveis, tituloRef }: PortalFichaRealProps) {
+function FichaComSessao({ convite, dados, erroLeitura, sessaoAExpirar, aoManterSessao, escrita, tituloRef }: PortalFichaRealProps) {
   const { t } = useTranslation();
   const [pagina, setPagina] = useState<1 | 2>(1);
   // Ao mudar de página o botão que tinha o foco desaparece: leva-se o foco à saudação (focável sem entrar na ordem de tabulação).
@@ -205,8 +205,8 @@ function FichaComSessao({ convite, dados, erroLeitura, sessaoAExpirar, aoManterS
       {dados && (
         <>
           {dados.devolucao && dados.estado === "devolvida" && <PortalDevolvida devolucao={dados.devolucao} />}
-          <PortalFormulario dados={dados} pagina={pagina} aoMudarPagina={setPagina} aoGravarSensiveis={aoGravarSensiveis} />
-          <PortalProximaFase devolvida={dados.estado === "devolvida"} />
+          <PortalFormulario dados={dados} pagina={pagina} aoMudarPagina={setPagina} escrita={escrita} />
+          <PortalProximaFase />
         </>
       )}
     </>

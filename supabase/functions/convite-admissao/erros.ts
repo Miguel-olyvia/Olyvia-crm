@@ -94,7 +94,7 @@ export const CODIGOS_V2 = [
   // So da Edge (sem SQLSTATE): sem pepper de OTP ou sem correio, e o SMTP a falhar.
   "otp_indisponivel",
   "email_nao_enviado",
-  // Entre a V3a e a V3b o link sozinho nao escreve: as accoes antigas respondem 410.
+  // Os anexos ficam para a fase 2 do portal: respondem 410 (o link sozinho nao escreve).
   "portal_em_atualizacao",
 ] as const;
 

@@ -1,8 +1,8 @@
 /**
- * Os documentos no portal da V3a: so a lista do que a `ler` devolveu (nome do ficheiro, sem
- * abrir nem descarregar) e o botao de enviar, desactivado. As accoes de anexos da Edge ainda
- * nao exigem sessao (so a V3b as fecha), por isso o portal nao as liga: nao ha seletor de
- * ficheiros nem chamada `anexo_*`.
+ * Os documentos no portal: so a lista do que a `ler` devolveu (nome do ficheiro, sem abrir nem
+ * descarregar) e o botao de enviar, desactivado, com o aviso de que o envio chega numa proxima fase (fase 2).
+ * As accoes de anexos da Edge respondem 410 `portal_em_atualizacao`, por isso o portal nao as liga: nao ha
+ * seletor de ficheiros nem chamada `anexo_*`.
  */
 import { useTranslation } from "@/hooks/useTranslation";
 import type { AnexoPortal } from "@/lib/hr/portalAdmissao";
@@ -24,6 +24,7 @@ export function PortalDocumentos({ anexos }: { anexos: AnexoPortal[] }) {
           ))}
         </ul>
       )}
+      <p className="text-sm text-muted-foreground">{t("portal.documentos.proximaFase")}</p>
       <BotaoProximaFase id="portal-documentos" rotulo={t("portal.proxima.documentos")} />
     </section>
   );

@@ -3,19 +3,20 @@
  * fora do layout, aberta pelo link que o e-mail do convite leva. Substitui o formulario
  * antigo, que gravava rascunho e submetia directo sem confirmar quem era a pessoa.
  *
- * O PERCURSO (V3a)
+ * O PERCURSO
  *  1. Ao abrir o link so ha CONSULTA LIMITADA: organizacao, primeiro nome, estado do processo e
  *     prazo. Nenhum dado pessoal. A Edge (`estado`) nao devolve mais do que isso sem sessao.
  *  2. "Confirmar identidade para editar" pede um codigo de 6 algarismos ao e-mail do convite
  *     (OTP) e abre o passo do codigo.
  *  3. Com o codigo certo abre-se uma SESSAO (30 min sem actividade, 4 h no maximo): a pessoa ve
- *     o que o estado permite, guarda o NISS e o IBAN e pode terminar a sessao.
- *  4. Sem acesso (link invalido, revogado, encerrado, expirado, bloqueado) ou com o processo em
+ *     o que o estado permite, preenche o formulario (que se grava sozinho como rascunho, NISS e IBAN
+ *     incluidos, cifrados), submete e pode terminar a sessao. O link sozinho NAO escreve.
+ *  4. Depois de submeter ve o ecra de sucesso e o link fica fechado.
+ *  5. Sem acesso (link invalido, revogado, encerrado, expirado, bloqueado) ou com o processo em
  *     analise, a pessoa ve so o estado e e mandada contactar o RH.
  *
- * O QUE FICA PARA A V3b (desenhado e desactivado, com a razao): gravar rascunho, submeter,
- * corrigir campos devolvidos, documentos, contrato e assinatura, pedidos. Enquanto a Edge nao
- * exigir sessao nessas accoes, o portal nao as liga.
+ * O QUE FICA PARA UMA FASE SEGUINTE (desenhado e desactivado, com a razao): enviar documentos (anexos),
+ * contrato e assinatura, pedidos de documentos.
  *
  * O token do link vem do caminho e nao se copia para outro sitio; a sessao so vive em MEMORIA (ver
  * `lib/hr/portalSessao.ts`): recarregar ou fechar o separador pede o codigo de novo. A lingua escolhe-se
@@ -40,6 +41,7 @@ import { PortalMoldura } from "@/components/hr/portal/PortalMoldura";
 import { PortalOtpDialogo } from "@/components/hr/portal/PortalOtpDialogo";
 import { PortalEmAnalise } from "@/components/hr/portal/PortalSemAcesso";
 import { PortalSessaoAtiva } from "@/components/hr/portal/PortalSessaoAtiva";
+import { PortalSucesso } from "@/components/hr/portal/PortalSucesso";
 
 export default function ConviteAdmissao() {
   // O provider faz com que os componentes da arvore (que chamam useTranslation() sem
@@ -57,6 +59,14 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
   const { token } = useParams<{ token: string }>();
   const portal = useConviteAdmissaoPublico(token);
   const { sessaoAtiva, otp, pedirCodigo } = portal;
+  const escrita = {
+    gravarRascunho: portal.gravarRascunho,
+    gravarRascunhoAoFechar: portal.gravarRascunhoAoFechar,
+    submeter: portal.submeter,
+    rascunhoGuardadoEm: portal.rascunhoGuardadoEm,
+    aGravar: portal.aGravar,
+    erroRascunho: portal.erroRascunho,
+  };
 
   const [dialogoAberto, setDialogoAberto] = useState(false);
   const tituloRef = useRef<HTMLDivElement>(null);
@@ -83,6 +93,14 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
   }
 
   const { convite } = portal;
+  // Submetido: a base fechou o portal; o ecra de sucesso fica no lugar, sem voltar a perguntar pelo estado.
+  if (portal.concluido && convite) {
+    return (
+      <PortalMoldura organizacao={convite.organizacao_nome} nome={convite.primeiro_nome}>
+        <PortalSucesso />
+      </PortalMoldura>
+    );
+  }
   const vista = vistaDoConvite(portal.erroInicial, convite);
   // Em analise: so o estado (sem dados nem nome), dentro da moldura do portal.
   if (vista === "analise" && convite) {
@@ -117,7 +135,7 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
             erroLeitura={portal.erroLeitura}
             sessaoAExpirar={portal.sessaoAExpirar}
             aoManterSessao={() => void portal.manterSessao()}
-            aoGravarSensiveis={portal.gravarSensiveis}
+            escrita={escrita}
             tituloRef={tituloRef}
           />
         ) : (

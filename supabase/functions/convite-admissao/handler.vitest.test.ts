@@ -83,6 +83,7 @@ function montar(opcoes: Opcoes = {}) {
     rpc_hr_convite_admissao_rascunho: () => ({ data: { ok: true }, error: null }),
     rpc_hr_convite_admissao_submeter: () => ({ data: { ok: true }, error: null }),
     rpc_hr_convite_admissao_registar_recusa: () => ({ data: true, error: null }),
+    rpc_hr_convite_admissao_sensiveis_gravar: () => ({ data: { niss_ultimos4: "2109", iban_ultimos4: "0154" }, error: null }),
   };
   const manipuladores = { ...padrao, ...(opcoes.rpc ?? {}) };
 
@@ -155,9 +156,6 @@ function montar(opcoes: Opcoes = {}) {
       erros.push(e);
     },
     corsHeaders: () => ({}),
-    // As accoes antigas de escrita ficam ligadas aqui para os testes do seu comportamento continuarem
-    // a valer; sem esta marca respondem 410 (ver portal.vitest.test.ts).
-    portalAntigoAtivo: true,
     // Correio directo simulado: guarda no mesmo formato que os testes ja liam ({to, subject, html, organization_id}).
     enviarCorreio: async (p) => {
       emails.push({ headers: {}, body: { to: p.para, subject: p.assunto, html: p.html, organization_id: p.organizationId } });
@@ -185,6 +183,10 @@ function montar(opcoes: Opcoes = {}) {
 }
 
 const AUTH = { Authorization: `Bearer ${JWT}` };
+/** Fase 1 do portal: rascunho e submeter exigem a sessao que o OTP abriu (o link sozinho nao escreve). */
+const SESSAO = "S".repeat(43);
+const COM_SESSAO = { "x-portal-sessao": SESSAO };
+const SUBMETER = { action: "submeter", token: TOKEN_PUBLICO, assinatura_nome: "A", dados: {}, declaracao: true };
 const PEDIDO_CRIAR = { action: "criar", pessoa_id: PESSOA, organization_id: ORG, email: "ana@exemplo.pt" };
 
 let consola: ReturnType<typeof vi.spyOn>[];
@@ -261,37 +263,118 @@ describe("despacho por accao", () => {
     expect(r2.texto).not.toContain("SEGREDO");
   });
 
-  it("submeter continua a funcionar: so a lista branca vai em p_dados e o IP vem do pedido", async () => {
+  it("submeter com sessao: so a lista branca vai em p_dados (sem niss nem iban), com o hash da sessao e o IP do pedido", async () => {
     const m = montar();
     const r = await m.chamar(
       {
         action: "submeter",
         token: TOKEN_PUBLICO,
         assinatura_nome: "  Ana Silva ",
-        dados: { nif: "123456789", niss: "98765432109", campo_inventado: "x" },
+        declaracao: true,
+        dados: { nif: "123456789", niss: "98765432109", iban: "PT50000201231234567890154", campo_inventado: "x" },
       },
-      { "x-forwarded-for": "203.0.113.9", "user-agent": "vitest" },
+      { ...COM_SESSAO, "x-forwarded-for": "203.0.113.9", "user-agent": "vitest" },
     );
-    expect(r).toMatchObject({ status: 200, corpo: { ok: true, avisos: [] } });
+    expect(r).toMatchObject({ status: 200, corpo: { ok: true } });
     const c = m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_submeter");
     expect(c?.cliente).toBe("svc");
-    expect(c?.args.p_dados).toEqual({ nif: "123456789", niss: "98765432109" });
-    expect(c?.args.p_assinatura_nome).toBe("Ana Silva");
-    expect(c?.args.p_user_agent).toBe("vitest");
+    expect(c?.args).toEqual({
+      p_token_hash: await sha256Hex(TOKEN_PUBLICO),
+      p_sessao_hash: await sha256Hex(SESSAO),
+      p_dados: { nif: "123456789" },
+      p_assinatura_nome: "Ana Silva",
+      p_ip: "203.0.113.9",
+      p_user_agent: "vitest",
+    });
+    // NISS e IBAN seguem pelo Vault (sensiveis_gravar) e nunca em p_dados nem na resposta.
+    const s = m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_sensiveis_gravar");
+    expect(s?.args).toEqual({
+      p_token_hash: await sha256Hex(TOKEN_PUBLICO),
+      p_sessao_hash: await sha256Hex(SESSAO),
+      p_niss: "98765432109",
+      p_iban: "PT50000201231234567890154",
+    });
+    expect(m.rpcs.map((x) => x.fn).indexOf("rpc_hr_convite_admissao_sensiveis_gravar")).toBeLessThan(
+      m.rpcs.map((x) => x.fn).indexOf("rpc_hr_convite_admissao_submeter"),
+    );
+    expect(r.texto).not.toContain("98765432109");
+    expect(r.texto).not.toContain("PT5000");
+    expect(JSON.stringify(m.rpcs.filter((x) => x.fn !== "rpc_hr_convite_admissao_sensiveis_gravar"))).not.toContain("98765432109");
+  });
+
+  it("submeter: p_ip e null (nunca 'unknown' nem texto forjado) com x-forwarded-for invalido, e sem cabecalho", async () => {
+    for (const cab of [{ "x-forwarded-for": "lixo; drop table" }, {}]) {
+      const m = montar();
+      const r = await m.chamar(SUBMETER, { ...COM_SESSAO, ...cab });
+      expect(r.status).toBe(200);
+      expect(m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_submeter")?.args.p_ip).toBeNull();
+    }
+  });
+
+  it("submeter sem sessao (ou com sessao mal formada): 401 sessao_ausente, nenhuma RPC e nenhuma recusa registada", async () => {
+    for (const cab of [{}, { "x-portal-sessao": "curta" }]) {
+      const m = montar();
+      const r = await m.chamar(SUBMETER, cab);
+      expect([r.status, r.corpo]).toEqual([401, { error: "sessao_ausente" }]);
+      expect(m.rpcs).toHaveLength(0);
+    }
+  });
+
+  it("submeter: as recusas previas (sem dados, sem assinatura, sem declaracao) nao chamam a base nem registar_recusa", async () => {
+    const casos: Array<[Record<string, unknown>, string]> = [
+      [{ ...SUBMETER, dados: undefined }, "pedido_invalido"],
+      [{ ...SUBMETER, dados: [] }, "pedido_invalido"],
+      [{ ...SUBMETER, assinatura_nome: "   " }, "assinatura_obrigatoria"],
+      [{ ...SUBMETER, declaracao: false }, "pedido_invalido"],
+      [{ ...SUBMETER, declaracao: "true" }, "pedido_invalido"],
+      [{ ...SUBMETER, dados: { niss: 5 } }, "pedido_invalido"],
+    ];
+    for (const [pedido, codigo] of casos) {
+      const m = montar();
+      const r = await m.chamar(pedido, COM_SESSAO);
+      expect([r.status, r.corpo.error]).toEqual([400, codigo]);
+      expect(m.rpcs).toHaveLength(0);
+    }
+  });
+
+  it("submeter: sessao_substituida sai como sessao_expirada e HRA31 como convite_invalido; nada e registado como recusa", async () => {
+    const substituida = montar({
+      rpc: { rpc_hr_convite_admissao_submeter: () => ({ data: null, error: { message: "x", code: "HRA53" } }) },
+    });
+    const a = await substituida.chamar(SUBMETER, COM_SESSAO);
+    expect([a.status, a.corpo]).toEqual([401, { error: "sessao_expirada" }]);
+    expect(substituida.rpcs.some((x) => x.fn === "rpc_hr_convite_admissao_registar_recusa")).toBe(false);
+
+    const desconhecido = montar({
+      rpc: { rpc_hr_convite_admissao_submeter: () => ({ data: null, error: { message: "nao_encontrado", code: "HRA31" } }) },
+    });
+    const b = await desconhecido.chamar(SUBMETER, COM_SESSAO);
+    expect([b.status, b.corpo]).toEqual([401, { error: "convite_invalido" }]);
+  });
+
+  it("submeter: NISS ou IBAN recusados pelo Vault param a submissao, ficam registados como recusa e o valor nunca sai", async () => {
+    const m = montar({
+      rpc: { rpc_hr_convite_admissao_sensiveis_gravar: () => ({ data: null, error: { message: "niss_invalido", details: "98765432109", code: "HRA12" } }) },
+    });
+    const r = await m.chamar({ ...SUBMETER, dados: { niss: "98765432109" } }, COM_SESSAO);
+    expect([r.status, r.corpo]).toEqual([400, { error: "niss_invalido" }]);
+    expect(m.rpcs.some((x) => x.fn === "rpc_hr_convite_admissao_submeter")).toBe(false);
+    expect(m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_registar_recusa")?.args.p_codigo).toBe("niss_invalido");
+    expect(r.texto).not.toContain("98765432109");
   });
 
   it("submeter: admissao_incompleta traz os campos; um ja_existe nunca traz os conflitos", async () => {
     const incompleta = montar({
       rpc: { rpc_hr_convite_admissao_submeter: () => ({ data: null, error: { message: "admissao_incompleta", details: "nif,niss", code: "HRA17" } }) },
     });
-    const a = await incompleta.chamar({ action: "submeter", token: TOKEN_PUBLICO, assinatura_nome: "A", dados: {} });
+    const a = await incompleta.chamar(SUBMETER, COM_SESSAO);
     expect(a.corpo).toEqual({ error: "admissao_incompleta", campos: ["nif", "niss"] });
 
     const U = "44444444-4444-4444-8444-444444444444";
     const conflito = montar({
       rpc: { rpc_hr_convite_admissao_submeter: () => ({ data: null, error: { message: "nif_ja_existe", details: U, code: "HRA13" } }) },
     });
-    const c = await conflito.chamar({ action: "submeter", token: TOKEN_PUBLICO, assinatura_nome: "A", dados: {} });
+    const c = await conflito.chamar(SUBMETER, COM_SESSAO);
     expect([c.status, c.corpo]).toEqual([409, { error: "nif_ja_existe" }]);
     expect(c.texto).not.toContain(U);
     // os conflitos vao so para a base (registar_recusa), nunca para o erro nem para a resposta
@@ -302,7 +385,7 @@ describe("despacho por accao", () => {
 
   it("submeter: um CHECK violado nunca mostra a linha (resposta, Sentry e consola)", async () => {
     const m = montar({ rpc: { rpc_hr_convite_admissao_submeter: () => ({ data: null, error: ERRO_CHECK }) } });
-    const r = await m.chamar({ action: "submeter", token: TOKEN_PUBLICO, assinatura_nome: "A", dados: {} });
+    const r = await m.chamar(SUBMETER, COM_SESSAO);
     expect([r.status, r.corpo]).toEqual([500, { error: "erro_inesperado" }]);
     expect(m.erros.length).toBeGreaterThan(0);
     semSegredo([], m, r.texto);
@@ -669,70 +752,184 @@ describe("prolongar", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("rascunho (publico)", () => {
-  it("retira niss, iban e conta_numero ANTES de chamar a RPC", async () => {
+describe("rascunho (publico, com sessao)", () => {
+  const NISS = "98765432109";
+  const IBAN = "PT50000201231234567890154";
+  const rasc = (rascunho: unknown, extra: Record<string, unknown> = {}) => ({
+    action: "rascunho",
+    token: TOKEN_PUBLICO,
+    rascunho,
+    ...extra,
+  });
+  const gravou = (m: ReturnType<typeof montar>) => m.rpcs.some((x) => x.fn === "rpc_hr_convite_admissao_rascunho");
+
+  it("chama a RPC nova com o hash da sessao e retira niss, iban e conta_numero ANTES dela", async () => {
     const m = montar();
-    const r = await m.chamar({
-      action: "rascunho",
-      token: TOKEN_PUBLICO,
-      rascunho: { nif: "123", niss: "9", iban: "PT50", conta_numero: "PT50", conta_bic: "BCOMPTPL", genero: "f" },
-    });
+    const r = await m.chamar(
+      rasc({ nif: "123", niss: "9", iban: "PT50", conta_numero: "PT50", conta_bic: "BCOMPTPL", genero: "f" }),
+      COM_SESSAO,
+    );
     expect(r).toMatchObject({ status: 200, corpo: { ok: true } });
     const c = m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_rascunho");
     expect(c?.cliente).toBe("svc");
-    expect(c?.args.p_rascunho).toEqual({ nif: "123", conta_bic: "BCOMPTPL", genero: "f" });
-    expect(c?.args.p_token_hash).toBe(await sha256Hex(TOKEN_PUBLICO));
+    expect(c?.args).toEqual({
+      p_token_hash: await sha256Hex(TOKEN_PUBLICO),
+      p_sessao_hash: await sha256Hex(SESSAO),
+      p_rascunho: { nif: "123", conta_bic: "BCOMPTPL", genero: "f" },
+    });
+    // nada de sensivel foi pedido: o Vault nao e tocado
+    expect(m.rpcs.some((x) => x.fn === "rpc_hr_convite_admissao_sensiveis_gravar")).toBe(false);
+  });
+
+  it("devolve guardado_em quando a base o da", async () => {
+    const m = montar({ rpc: { rpc_hr_convite_admissao_rascunho: () => ({ data: { ok: true, guardado_em: "2026-10-27T10:00:00Z" }, error: null }) } });
+    const r = await m.chamar(rasc({ nif: "1" }), COM_SESSAO);
+    expect([r.status, r.corpo]).toEqual([200, { ok: true, guardado_em: "2026-10-27T10:00:00Z" }]);
+  });
+
+  it("a sessao tambem vale no corpo (campo sessao), como nas outras accoes", async () => {
+    const m = montar();
+    const r = await m.chamar(rasc({ nif: "1" }, { sessao: SESSAO }));
+    expect(r.status).toBe(200);
+    expect(m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_rascunho")?.args.p_sessao_hash).toBe(await sha256Hex(SESSAO));
+  });
+
+  it("o link sozinho nao escreve: sem sessao ou com sessao mal formada, 401 sessao_ausente e nenhuma RPC", async () => {
+    for (const cab of [{}, { "x-portal-sessao": "curta" }, { "x-portal-sessao": "!".repeat(43) }]) {
+      const m = montar();
+      const r = await m.chamar(rasc({ nif: "1" }, { niss: NISS }), cab);
+      expect([r.status, r.corpo]).toEqual([401, { error: "sessao_ausente" }]);
+      expect(m.rpcs).toHaveLength(0);
+      expect(r.texto).not.toContain(NISS);
+    }
+  });
+
+  it("NISS e IBAN de topo vao ao Vault pelo caminho existente, nunca no rascunho, e so os ultimos 4 voltam", async () => {
+    const m = montar({
+      rpc: {
+        rpc_hr_convite_admissao_rascunho: () => ({ data: { ok: true, guardado_em: "2026-10-27T10:00:00Z" }, error: null }),
+        rpc_hr_convite_admissao_sensiveis_gravar: () => ({ data: { niss_ultimos4: "2109", iban_ultimos4: "0154" }, error: null }),
+      },
+    });
+    const r = await m.chamar(rasc({ nif: "1", niss: NISS, iban: IBAN }, { niss: NISS, iban: IBAN }), COM_SESSAO);
+    expect([r.status, r.corpo]).toEqual([
+      200,
+      { ok: true, guardado_em: "2026-10-27T10:00:00Z", niss_ultimos4: "2109", iban_ultimos4: "0154" },
+    ]);
+    const fns = m.rpcs.map((x) => x.fn);
+    expect(fns.indexOf("rpc_hr_convite_admissao_rascunho")).toBeLessThan(fns.indexOf("rpc_hr_convite_admissao_sensiveis_gravar"));
+    expect(m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_sensiveis_gravar")?.args).toEqual({
+      p_token_hash: await sha256Hex(TOKEN_PUBLICO),
+      p_sessao_hash: await sha256Hex(SESSAO),
+      p_niss: NISS,
+      p_iban: IBAN,
+    });
+    const rascunhoRpc = m.rpcs.find((x) => x.fn === "rpc_hr_convite_admissao_rascunho");
+    expect(JSON.stringify(rascunhoRpc?.args)).not.toContain(NISS);
+    expect(JSON.stringify(rascunhoRpc?.args)).not.toContain(IBAN);
+    expect(r.texto).not.toContain(NISS);
+    expect(r.texto).not.toContain(IBAN);
+  });
+
+  it("um NISS recusado pelo Vault nao perde o rascunho: 200 com sensivel_recusado e o codigo, sem o valor", async () => {
+    for (const [msg, sqlstate] of [["niss_invalido", "HRA12"], ["iban_invalido", "HRA16"], ["campo_bloqueado", "HRA47"]]) {
+      const m = montar({
+        rpc: { rpc_hr_convite_admissao_sensiveis_gravar: () => ({ data: null, error: { message: msg, details: NISS, code: sqlstate } }) },
+      });
+      const r = await m.chamar(rasc({ nif: "1" }, { niss: NISS }), COM_SESSAO);
+      expect([r.status, r.corpo.ok, r.corpo.sensivel_recusado]).toEqual([200, true, msg]);
+      expect(gravou(m)).toBe(true);
+      expect(r.texto).not.toContain(NISS);
+      expect(m.erros).toHaveLength(0);
+    }
+  });
+
+  it("outro erro do Vault (sessao expirada) sai como codigo do catalogo e nao finge sucesso", async () => {
+    const m = montar({
+      rpc: { rpc_hr_convite_admissao_sensiveis_gravar: () => ({ data: null, error: { message: "x", code: "HRA53" } }) },
+    });
+    const r = await m.chamar(rasc({ nif: "1" }, { iban: IBAN }), COM_SESSAO);
+    expect([r.status, r.corpo]).toEqual([401, { error: "sessao_expirada" }]);
+  });
+
+  it("niss ou iban de topo que nao sao texto: 400 pedido_invalido e nada e gravado", async () => {
+    for (const extra of [{ niss: 5 }, { iban: {} }, { niss: "9".repeat(33) }, { iban: "P".repeat(65) }]) {
+      const m = montar();
+      const r = await m.chamar(rasc({ nif: "1" }, extra), COM_SESSAO);
+      expect([r.status, r.corpo.error]).toEqual([400, "pedido_invalido"]);
+      expect(m.rpcs).toHaveLength(0);
+    }
   });
 
   it("recusa valores aninhados e textos de mais de 500 caracteres, sem chamar a RPC", async () => {
     const m = montar();
     for (const rascunho of [{ nif: { a: 1 } }, { nif: ["1"] }, { genero: "x".repeat(501) }]) {
-      const r = await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho });
+      const r = await m.chamar(rasc(rascunho), COM_SESSAO);
       expect([r.status, r.corpo]).toEqual([400, { error: "rascunho_valor_invalido" }]);
     }
-    expect(m.rpcs.some((x) => x.fn === "rpc_hr_convite_admissao_rascunho")).toBe(false);
-    const ok = await m.chamar({
-      action: "rascunho",
-      token: TOKEN_PUBLICO,
-      rascunho: { genero: "x".repeat(500), dependentes: 2, nif: null, linha1: "a" },
-    });
+    expect(gravou(m)).toBe(false);
+    const ok = await m.chamar(rasc({ genero: "x".repeat(500), dependentes: 2, nif: null, linha1: "a" }), COM_SESSAO);
     expect(ok.status).toBe(200);
   });
 
   it("recusa chaves fora da lista branca com um codigo claro e nao chama a RPC", async () => {
     const m = montar();
-    const r = await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho: { nif: "1", aceite: true } });
+    const r = await m.chamar(rasc({ nif: "1", aceite: true }), COM_SESSAO);
     expect([r.status, r.corpo]).toEqual([400, { error: "rascunho_chave_invalida" }]);
-    expect(m.rpcs.some((x) => x.fn === "rpc_hr_convite_admissao_rascunho")).toBe(false);
+    expect(gravou(m)).toBe(false);
   });
 
   it("mantem o limite de 20 000 bytes (400 rascunho_demasiado_grande)", async () => {
     const m = montar();
-    const r = await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho: Object.fromEntries(CHAVES_RASCUNHO_PERMITIDAS.map((k) => [k, "x".repeat(500)])) });
+    const r = await m.chamar(rasc(Object.fromEntries(CHAVES_RASCUNHO_PERMITIDAS.map((k) => [k, "x".repeat(500)]))), COM_SESSAO);
     expect([r.status, r.corpo]).toEqual([400, { error: "rascunho_demasiado_grande" }]);
-    expect(m.rpcs.some((x) => x.fn === "rpc_hr_convite_admissao_rascunho")).toBe(false);
+    expect(gravou(m)).toBe(false);
   });
 
   it("pedido sem objecto: 400 pedido_invalido", async () => {
     const m = montar();
     for (const rascunho of [null, [], "x", 5, undefined]) {
-      const r = await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho });
+      const r = await m.chamar(rasc(rascunho), COM_SESSAO);
       expect([r.status, r.corpo.error]).toEqual([400, "pedido_invalido"]);
     }
+    expect(m.rpcs).toHaveLength(0);
   });
 
   it("um CHECK violado (23514) nao perde a conversa: rascunho_nao_gravado, sem linha na resposta nem no log", async () => {
     const m = montar({ rpc: { rpc_hr_convite_admissao_rascunho: () => ({ data: null, error: ERRO_CHECK }) } });
-    const r = await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho: { nif: "1" } });
+    const r = await m.chamar(rasc({ nif: "1" }), COM_SESSAO);
     expect([r.status, r.corpo]).toEqual([400, { error: "rascunho_nao_gravado" }]);
     expect(m.erros.length).toBe(1);
     semSegredo([], m, r.texto);
   });
 
-  it("o motivo em jsonb so sai se for um codigo do catalogo", async () => {
-    const m = montar({ rpc: { rpc_hr_convite_admissao_rascunho: () => ({ data: { erro: "convite_expirado" }, error: null }) } });
-    const r = await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho: { nif: "1" } });
-    expect([r.status, r.corpo.error]).toEqual([401, "convite_expirado"]);
+  it("as recusas da base saem como codigos do catalogo (estado, bloqueio de campo, sessao, convite)", async () => {
+    const casos: Array<[string, string, number, string]> = [
+      ["x", "HRA02", 401, "convite_ja_usado"],
+      ["x", "HRA03", 401, "convite_revogado"],
+      ["x", "HRA04", 401, "convite_expirado"],
+      ["x", "HRA38", 409, "estado_invalido"],
+      ["x", "HRA47", 409, "campo_bloqueado"],
+      ["x", "HRA51", 401, "sessao_ausente"],
+      ["x", "HRA52", 401, "sessao_expirada"],
+      ["x", "HRA53", 401, "sessao_expirada"],
+      ["x", "HRA31", 401, "convite_invalido"],
+      ["rascunho_demasiado_grande", "HRA10", 400, "rascunho_demasiado_grande"],
+      ["rascunho_chave_invalida", "HRA10", 400, "rascunho_chave_invalida"],
+    ];
+    for (const [message, code, status, esperado] of casos) {
+      const m = montar({ rpc: { rpc_hr_convite_admissao_rascunho: () => ({ data: null, error: { message, code, details: "SEGREDO" } }) } });
+      const r = await m.chamar(rasc({ nif: "1" }), COM_SESSAO);
+      expect([r.status, r.corpo], code).toEqual([status, { error: esperado }]);
+      semSegredo([], m, r.texto);
+    }
+  });
+
+  it("uma resposta da base sem ok:true da erro_inesperado e reporta sem dados", async () => {
+    const m = montar({ rpc: { rpc_hr_convite_admissao_rascunho: () => ({ data: { erro: "texto livre SEGREDO" }, error: null }) } });
+    const r = await m.chamar(rasc({ nif: "1" }), COM_SESSAO);
+    expect([r.status, r.corpo]).toEqual([500, { error: "erro_inesperado" }]);
+    semSegredo([], m, r.texto);
   });
 });
 
@@ -750,7 +947,7 @@ describe("limites das accoes publicas", () => {
 
   it("limita por IP (como ate aqui) E por token_hash, com a mesma tabela de tectos", async () => {
     const m = montar();
-    await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho: {} }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" });
+    await m.chamar({ action: "rascunho", token: TOKEN_PUBLICO, rascunho: {} }, { ...COM_SESSAO, "x-forwarded-for": "203.0.113.9, 10.0.0.1" });
     const hash = await sha256Hex(TOKEN_PUBLICO);
     expect(m.limites).toContainEqual({ bucket: "convite-admissao-rascunho", identifier: "203.0.113.9", maxAttempts: 240 });
     expect(m.limites).toContainEqual({ bucket: "convite-admissao-token-rascunho", identifier: hash, maxAttempts: 240 });
@@ -763,7 +960,7 @@ describe("limites das accoes publicas", () => {
   it("tectos por accao: estado 30, submeter 10, anexos 30", async () => {
     const m = montar();
     await m.chamar({ action: "estado", token: TOKEN_PUBLICO });
-    await m.chamar({ action: "submeter", token: TOKEN_PUBLICO, assinatura_nome: "A", dados: {} });
+    await m.chamar(SUBMETER, COM_SESSAO);
     const max = (b: string) => m.limites.find((l) => l.bucket === b)?.maxAttempts;
     expect(max("convite-admissao-token-estado")).toBe(30);
     expect(max("convite-admissao-token-submeter")).toBe(10);
@@ -771,12 +968,12 @@ describe("limites das accoes publicas", () => {
 
   it("um IP forjado (x-forwarded-for diferente em cada pedido) nao escapa ao limite por token", async () => {
     const m = montar();
-    const pedido = { action: "submeter", token: TOKEN_PUBLICO, assinatura_nome: "A", dados: {} };
+    const pedido = SUBMETER;
     for (let i = 0; i < 10; i++) {
-      const r = await m.chamar(pedido, { "x-forwarded-for": `198.51.100.${i + 1}` });
+      const r = await m.chamar(pedido, { ...COM_SESSAO, "x-forwarded-for": `198.51.100.${i + 1}` });
       expect(r.status).toBe(200);
     }
-    const onze = await m.chamar(pedido, { "x-forwarded-for": "198.51.100.200" });
+    const onze = await m.chamar(pedido, { ...COM_SESSAO, "x-forwarded-for": "198.51.100.200" });
     expect([onze.status, onze.corpo.error]).toEqual([429, "demasiadas_tentativas"]);
     expect(m.rpcs.filter((x) => x.fn === "rpc_hr_convite_admissao_submeter")).toHaveLength(10);
   });
@@ -790,10 +987,10 @@ describe("limites das accoes publicas", () => {
 
   it("outro token tem o seu proprio contador", async () => {
     const m = montar();
-    const pedido = (token: string) => ({ action: "submeter", token, assinatura_nome: "A", dados: {} });
-    for (let i = 0; i < 10; i++) await m.chamar(pedido(TOKEN_PUBLICO));
-    expect((await m.chamar(pedido(TOKEN_PUBLICO))).status).toBe(429);
-    const outro = await m.chamar(pedido("u".repeat(43)), { "x-forwarded-for": "198.51.100.77" });
+    const pedido = (token: string) => ({ ...SUBMETER, token });
+    for (let i = 0; i < 10; i++) await m.chamar(pedido(TOKEN_PUBLICO), COM_SESSAO);
+    expect((await m.chamar(pedido(TOKEN_PUBLICO), COM_SESSAO)).status).toBe(429);
+    const outro = await m.chamar(pedido("u".repeat(43)), { ...COM_SESSAO, "x-forwarded-for": "198.51.100.77" });
     expect(outro.status).toBe(200);
   });
 });

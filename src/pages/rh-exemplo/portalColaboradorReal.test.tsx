@@ -1,5 +1,5 @@
 // O Portal do colaborador LIGADO: um link que não é de demonstração fala com a Edge Function `convite-admissao` (estado, otp_pedir,
-// otp_verificar, ler, sair). Supabase simulado: só se mexe em `functions.invoke`. A página é pública, por isso o simulado não tem
+// otp_verificar, ler, rascunho, submeter, sair). Supabase simulado: só se mexe em `functions.invoke`. A página é pública, por isso o simulado não tem
 // `auth` nenhum: se o código tentasse ler a sessão da aplicação, o teste rebentava (é a prova de que corre como visitante).
 // Os valores (token, sessão, código) são inventados para o teste e não valem em lado nenhum.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -210,17 +210,52 @@ describe("Portal do colaborador ligado à Edge convite-admissao", () => {
     expect(passos.querySelector('[aria-current="step"]')).toHaveTextContent("Ficha");
     expect(passos).toHaveTextContent("Neste passo");
     expect(passos).toHaveTextContent("Por fazer");
-    // Nada de rascunho guardado: nesta fase só o NISS e o IBAN se gravam.
+    // Sem sessão não se escreve: não há rascunho guardado nem se finge que há.
     expect(screen.queryByText(/Rascunho guardado/)).not.toBeInTheDocument();
     expect(screen.queryByText("Pré-visualização de exemplo")).not.toBeInTheDocument();
   });
 
-  it("com sessão, mantém o aviso honesto (só NISS e IBAN) e o botão «Sair» no cabeçalho", async () => {
+  it("com sessão, diz que o formulário grava sozinho (sem o aviso antigo nem o botão do NISS) e mostra o botão «Sair» no cabeçalho", async () => {
     abrir(TOKEN);
     await entrarComCodigo();
     expect(await screen.findByText(txt("portal.formulario.aviso"))).toBeInTheDocument();
     expect(screen.getByTestId("portal-colaborador-real")).toBeInTheDocument();
     expect(screen.getByText(txt("portal.ligado.aviso"))).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /guardar niss|guardar iban/i })).not.toBeInTheDocument();
+  });
+
+  it("grava o rascunho com a sessão e mostra «Rascunho guardado às» com a hora que a Edge devolveu", async () => {
+    ligar({ ...base(), rascunho: { data: { ok: true, guardado_em: "2099-10-16T10:42:00.000Z" }, error: null } });
+    abrir(TOKEN);
+    await entrarComCodigo();
+    fireEvent.change(document.getElementById("convite-telefone-pessoal") as HTMLInputElement, { target: { value: "913000000" } });
+    fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+    await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
+    const [, opcoes] = chamadas("rascunho")[0];
+    expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
+    expect((opcoes.body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("913000000");
+    const d = new Date("2099-10-16T10:42:00.000Z");
+    const hora = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    await waitFor(() => expect(screen.getByTestId("portal-rascunho-estado")).toHaveTextContent(txt("portal.rascunho.guardado").replace("{{hora}}", hora)));
+  });
+
+  it("submete e mostra o ecrã de sucesso na moldura do portal, sem formulário nem sessão", async () => {
+    ligar({ ...base(), submeter: { data: { ok: true }, error: null } });
+    abrir(TOKEN);
+    await entrarComCodigo();
+    fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
+    await screen.findByText(txt("hr.pessoais.bancarios"));
+    fireEvent.change(document.getElementById("convite-assinatura-nome") as HTMLInputElement, { target: { value: "Joana Silva" } });
+    fireEvent.click(document.getElementById("convite-aceite") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.submeter") }));
+
+    const titulo = await screen.findByRole("heading", { level: 1, name: txt("portal.sucesso.titulo") });
+    await waitFor(() => expect(titulo).toHaveFocus());
+    expect(screen.getByText("Portal do colaborador")).toBeInTheDocument();
+    expect(document.querySelectorAll("input, select, textarea")).toHaveLength(0);
+    expect(chamadas("submeter")).toHaveLength(1);
+    expect(chamadas("submeter")[0][1].body).toMatchObject({ assinatura_nome: "Joana Silva", declaracao: true });
+    expect(chamadas("sair")).toHaveLength(0);
   });
 
   it("um processo submetido mostra a mesma moldura, a Aprovação do RH como passo atual e nenhum formulário", async () => {

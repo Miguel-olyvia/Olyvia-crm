@@ -1,9 +1,12 @@
 /**
- * O lado PUBLICO do portal temporario da admissao (V3a): abrir o link em modo de consulta,
- * pedir e confirmar o codigo enviado por e-mail (OTP), ler o que a sessao permite, gravar
- * NISS e IBAN e terminar a sessao. Tudo pela Edge Function `convite-admissao`, nunca
- * directamente com a base (as RPCs sao so `service_role`). Os contratos exactos estao em
- * `supabase/functions/convite-admissao/accoesPortal.ts` e `handler.ts`.
+ * O lado PUBLICO do portal temporario da admissao: abrir o link em modo de consulta, pedir e
+ * confirmar o codigo enviado por e-mail (OTP), ler o que a sessao permite, gravar o rascunho (com
+ * NISS e IBAN a seguir com o formulario), submeter e terminar a sessao. Tudo pela Edge Function
+ * `convite-admissao`, nunca directamente com a base (as RPCs sao so `service_role`). Os contratos
+ * exactos estao em `supabase/functions/convite-admissao/accoesPortal.ts` e `handler.ts`.
+ *
+ * ESCREVER EXIGE SESSAO. O link sozinho nao escreve: `gravarRascunho` e `submeter` sem sessao nem
+ * chegam a Edge. Os anexos continuam desactivados (a Edge responde 410 `portal_em_atualizacao`).
  *
  * A SESSAO
  *  - nasce em `otp_verificar` (o segredo vem no corpo da resposta, uma so vez) e volta nos
@@ -19,7 +22,10 @@
  *  - nada com token, sessao ou corpo de resposta vai para o registo de erros (so
  *    `operacao: codigo`); nunca `error.details`;
  *  - o codigo OTP nao fica em nenhum estado: passa por `verificarCodigo` e acaba;
- *  - NISS e IBAN completos nao ficam em nenhum estado: so os 4 ultimos digitos que a Edge devolve.
+ *  - NISS e IBAN completos nao ficam em nenhum estado do hook: so os 4 ultimos digitos que a Edge
+ *    devolve. Seguem no pedido de gravacao (e na submissao) apenas quando passam a validacao de
+ *    formato e mudaram desde o ultimo envio; nunca dentro do rascunho, nunca em armazenamento, nunca
+ *    no registo de erros, e nunca no pedido de `gravarRascunhoAoFechar` (ninguem o confirma).
  *
  * Os motivos de recusa chegam em `error.context` (supabase-js devolve `data = null` em
  * 401/409/429): `corpoDeErroEdge` le os dois sitios.
@@ -27,7 +33,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
-import { corpoDeErroEdge, type CorpoErroEdge } from "@/lib/hr/errosAdmissao";
+import { camposDeAdmissaoIncompleta, corpoDeErroEdge, type CorpoErroEdge } from "@/lib/hr/errosAdmissao";
+import { contaValida } from "@/lib/hr/conta";
+import { nissValido } from "@/lib/hr/identificadoresPt";
 import {
   AVISO_EXPIRAR_MS,
   CODIGOS_DE_SESSAO_PERDIDA,
@@ -79,10 +87,82 @@ const OTP_INICIAL: EstadoOtp = {
   erro: null,
 };
 
+/** O que o ecra entrega a par do rascunho: o valor tal como esta no campo; o hook valida e decide o que segue. */
+export interface SensiveisParaGravar {
+  niss?: string;
+  iban?: string;
+}
+
 /** `codigo` so existe quando `ok` e falso (o tsconfig nao tem `strictNullChecks`: sem uniao discriminada). */
-export interface ResultadoSensiveis {
+export interface ResultadoRascunho {
   ok: boolean;
   codigo?: string;
+  /** A hora que a Edge devolveu (ISO); nunca a do relogio do browser. */
+  guardadoEm?: string;
+  /** A base recusou o NISS ou o IBAN (`niss_invalido`, `iban_invalido`, `campo_bloqueado`); o rascunho ficou gravado. */
+  sensivelRecusado?: string;
+  /** O NISS (IBAN) esta no cofre: o ecra ja pode limpar o campo e mostrar so os 4 ultimos digitos. */
+  nissGuardado?: boolean;
+  ibanGuardado?: boolean;
+}
+
+export interface ResultadoSubmissao {
+  ok: boolean;
+  codigo?: string;
+  /** Em `admissao_incompleta`: os codigos dos campos em falta. */
+  campos?: string[];
+}
+
+/** O que o formulario do portal precisa do hook para escrever (as paginas passam-no tal como o hook o devolve). */
+export interface EscritaPortal {
+  gravarRascunho: (rascunho: Record<string, unknown>, sensiveis?: SensiveisParaGravar) => Promise<ResultadoRascunho>;
+  gravarRascunhoAoFechar: (rascunho: Record<string, unknown>) => void;
+  submeter: (dados: Record<string, unknown>, assinaturaNome: string) => Promise<ResultadoSubmissao>;
+  rascunhoGuardadoEm: string | null;
+  aGravar: boolean;
+  erroRascunho: string | null;
+}
+
+/** O que nunca viaja dentro do rascunho: vive no cofre (NISS, IBAN) ou nunca se grava (a declaracao). */
+const FORA_DO_RASCUNHO: readonly string[] = ["niss", "iban", "conta_numero", "aceite"];
+
+function semSensiveis(rascunho: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(rascunho).filter(([chave]) => !FORA_DO_RASCUNHO.includes(chave)));
+}
+
+interface UltimosEnviados {
+  niss: string | null;
+  iban: string | null;
+}
+
+interface SensiveisPreparados {
+  /** So o que e valido e diferente do ultimo envio. */
+  aEnviar: { niss?: string; iban?: string };
+  /** Valido e igual ao ultimo envio: ja esta no cofre. */
+  nissJaGuardado: boolean;
+  ibanJaGuardado: boolean;
+}
+
+/** O NISS sem espacos; o IBAN sem espacos e em maiusculas (como o convite antigo). */
+function prepararSensiveis(entrada: SensiveisParaGravar | undefined, enviados: UltimosEnviados): SensiveisPreparados {
+  const preparados: SensiveisPreparados = { aEnviar: {}, nissJaGuardado: false, ibanJaGuardado: false };
+  const niss = (entrada?.niss ?? "").replace(/\s+/g, "");
+  if (niss !== "" && nissValido(niss)) {
+    if (niss === enviados.niss) preparados.nissJaGuardado = true;
+    else preparados.aEnviar.niss = niss;
+  }
+  const iban = (entrada?.iban ?? "").replace(/\s+/g, "").toUpperCase();
+  if (iban !== "" && contaValida("iban", iban)) {
+    if (iban === enviados.iban) preparados.ibanJaGuardado = true;
+    else preparados.aEnviar.iban = iban;
+  }
+  return preparados;
+}
+
+interface PedidoRascunho {
+  rascunho: Record<string, unknown>;
+  sensiveis: SensiveisParaGravar | undefined;
+  resolvers: Array<(r: ResultadoRascunho) => void>;
 }
 
 interface RespostaOk {
@@ -120,6 +200,18 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
   const [aviso, setAviso] = useState<AvisoPortal | null>(null);
   const [otp, setOtp] = useState<EstadoOtp>(OTP_INICIAL);
   const [sessaoAExpirar, setSessaoAExpirar] = useState(false);
+  const [rascunhoGuardadoEm, setRascunhoGuardadoEm] = useState<string | null>(null);
+  const [aGravar, setAGravar] = useState(false);
+  const [erroRascunho, setErroRascunho] = useState<string | null>(null);
+  const [concluido, setConcluido] = useState(false);
+
+  // Fila de uma gravacao de cada vez: a que esta em curso, e a ultima que ficou a espera.
+  const emCursoRef = useRef(false);
+  const pendenteRef = useRef<PedidoRascunho | null>(null);
+  const submetendoRef = useRef(false);
+  const concluidoRef = useRef(false);
+  // O ultimo NISS/IBAN que a Edge aceitou, so em memoria (para nao os reenviar sem mudarem).
+  const enviadosRef = useRef<UltimosEnviados>({ niss: null, iban: null });
 
   const inicioRef = useRef(0);
   const atividadeRef = useRef(0);
@@ -185,6 +277,8 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
       setDados(null);
       setErroLeitura(null);
       setOtp(OTP_INICIAL);
+      setErroRascunho(null);
+      setRascunhoGuardadoEm(null);
       setAviso(motivo);
       // O estado volta a pedir-se SEM a sessao morta: `precisa_otp` passa a verdadeiro.
       await carregarEstado(false);
@@ -236,6 +330,14 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     setErroLeitura(null);
     setAviso(null);
     setOtp(OTP_INICIAL);
+    setRascunhoGuardadoEm(null);
+    setErroRascunho(null);
+    setAGravar(false);
+    setConcluido(false);
+    concluidoRef.current = false;
+    submetendoRef.current = false;
+    pendenteRef.current = null;
+    enviadosRef.current = { niss: null, iban: null };
     (async () => {
       if (!token) {
         setErroInicial("convite_invalido");
@@ -348,34 +450,170 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     await lerComSessao();
   }, [lerComSessao]);
 
-  const gravarSensiveis = useCallback(
-    async (valores: { niss?: string; iban?: string }): Promise<ResultadoSensiveis> => {
-      if (!lerSessao()) return { ok: false, codigo: "sessao_ausente" };
-      const niss = valores.niss?.trim() ?? "";
-      const iban = valores.iban?.trim() ?? "";
-      if (niss === "" && iban === "") return { ok: false, codigo: "pedido_invalido" };
-      const extra: Record<string, unknown> = {};
-      if (niss !== "") extra.niss = niss;
-      if (iban !== "") extra.iban = iban;
+  /** Uma recusa que acaba a sessao: limpa tudo no cliente e volta a consulta. */
+  const tratarSessaoPerdida = useCallback(
+    async (codigo: string): Promise<boolean> => {
+      if (!CODIGOS_DE_SESSAO_PERDIDA.includes(codigo)) return false;
+      await encerrarLocalmente(codigo === "sessao_substituida" ? "substituida" : "expirada");
+      return true;
+    },
+    [encerrarLocalmente],
+  );
 
-      const r = await chamar("sensiveis", extra, true);
+  /** Um pedido `rascunho` (o rascunho e, se for caso disso, o NISS e o IBAN). Nunca lanca. */
+  const enviarRascunho = useCallback(
+    async (rascunho: Record<string, unknown>, sensiveis: SensiveisParaGravar | undefined): Promise<ResultadoRascunho> => {
+      const preparados = prepararSensiveis(sensiveis, enviadosRef.current);
+      const r = await chamar("rascunho", { rascunho: semSensiveis(rascunho), ...preparados.aEnviar }, true);
       if (!montadoRef.current) return { ok: false, codigo: "erro_inesperado" };
       if (deuErro(r)) {
-        if (CODIGOS_DE_SESSAO_PERDIDA.includes(r.codigo)) {
-          await encerrarLocalmente(r.codigo === "sessao_substituida" ? "substituida" : "expirada");
-        }
+        if (await tratarSessaoPerdida(r.codigo)) return { ok: false, codigo: r.codigo };
+        setErroRascunho(r.codigo);
         return { ok: false, codigo: r.codigo };
       }
       atividadeRef.current = Date.now();
       setSessaoAExpirar(false);
+      const guardadoEm =
+        typeof r.data.guardado_em === "string" && !Number.isNaN(Date.parse(r.data.guardado_em)) ? r.data.guardado_em : undefined;
+      const sensivelRecusado = typeof r.data.sensivel_recusado === "string" ? r.data.sensivel_recusado : undefined;
       const nissUltimos4 = typeof r.data.niss_ultimos4 === "string" ? r.data.niss_ultimos4 : null;
       const ibanUltimos4 = typeof r.data.iban_ultimos4 === "string" ? r.data.iban_ultimos4 : null;
+      const nissGuardado =
+        preparados.nissJaGuardado || (preparados.aEnviar.niss !== undefined && !sensivelRecusado && nissUltimos4 !== null);
+      const ibanGuardado =
+        preparados.ibanJaGuardado || (preparados.aEnviar.iban !== undefined && !sensivelRecusado && ibanUltimos4 !== null);
+      if (nissGuardado && preparados.aEnviar.niss !== undefined) enviadosRef.current.niss = preparados.aEnviar.niss;
+      if (ibanGuardado && preparados.aEnviar.iban !== undefined) enviadosRef.current.iban = preparados.aEnviar.iban;
+      if (guardadoEm) setRascunhoGuardadoEm(guardadoEm);
+      // O rascunho ficou gravado mesmo que o NISS/IBAN tenha sido recusado: o erro dele aparece, nao se engole.
+      setErroRascunho(sensivelRecusado ?? null);
       setDados((d) =>
         d ? { ...d, niss_ultimos4: nissUltimos4 ?? d.niss_ultimos4, iban_ultimos4: ibanUltimos4 ?? d.iban_ultimos4 } : d,
       );
-      return { ok: true };
+      return { ok: true, guardadoEm, sensivelRecusado, nissGuardado, ibanGuardado };
     },
-    [chamar, encerrarLocalmente],
+    [chamar, tratarSessaoPerdida],
+  );
+
+  /** Despacha a fila: corre o pedido e, enquanto houver um a esperar, o ultimo que ficou. */
+  const correrFila = useCallback(
+    async (primeiro: PedidoRascunho): Promise<void> => {
+      emCursoRef.current = true;
+      setAGravar(true);
+      try {
+        let atual: PedidoRascunho | null = primeiro;
+        while (atual) {
+          const resultado = await enviarRascunho(atual.rascunho, atual.sensiveis);
+          atual.resolvers.forEach((resolver) => resolver(resultado));
+          const seguinte: PedidoRascunho | null = pendenteRef.current;
+          pendenteRef.current = null;
+          if (seguinte && (concluidoRef.current || !lerSessao() || !montadoRef.current)) {
+            seguinte.resolvers.forEach((resolver) => resolver({ ok: false, codigo: "sessao_ausente" }));
+            atual = null;
+          } else {
+            atual = seguinte;
+          }
+        }
+      } finally {
+        emCursoRef.current = false;
+        if (montadoRef.current) setAGravar(false);
+      }
+    },
+    [enviarRascunho],
+  );
+
+  /**
+   * Grava o rascunho (e o NISS e o IBAN que tenham passado a validacao). Uma de cada vez: se ja ha uma em
+   * curso, esta espera e, havendo varias, so a ultima vai (o NISS/IBAN das ultrapassadas junta-se-lhe).
+   */
+  const gravarRascunho = useCallback(
+    (rascunho: Record<string, unknown>, sensiveis?: SensiveisParaGravar): Promise<ResultadoRascunho> => {
+      if (!lerSessao()) return Promise.resolve({ ok: false, codigo: "sessao_ausente" });
+      if (concluidoRef.current) return Promise.resolve({ ok: false, codigo: "convite_ja_usado" });
+      return new Promise<ResultadoRascunho>((resolve) => {
+        if (emCursoRef.current) {
+          const anterior = pendenteRef.current;
+          pendenteRef.current = {
+            rascunho,
+            sensiveis: anterior?.sensiveis || sensiveis ? { ...anterior?.sensiveis, ...sensiveis } : undefined,
+            resolvers: [...(anterior?.resolvers ?? []), resolve],
+          };
+          return;
+        }
+        void correrFila({ rascunho, sensiveis, resolvers: [resolve] });
+      });
+    },
+    [correrFila],
+  );
+
+  /**
+   * Ao fechar o separador: um pedido com `keepalive`, que sobrevive a pagina. Sem NISS nem IBAN (ninguem
+   * confirma este pedido) e sem fila. Se falhar nao ha ninguem para o ver: o proximo rascunho volta a tentar.
+   * A sessao vai no cabecalho `x-portal-sessao`, nunca no corpo nem no URL.
+   */
+  const gravarRascunhoAoFechar = useCallback(
+    (rascunho: Record<string, unknown>): void => {
+      const sessao = lerSessao();
+      const base = import.meta.env.VITE_SUPABASE_URL;
+      const chave = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      if (!sessao || !token || !base || !chave || concluidoRef.current) return;
+      void fetch(`${base}/functions/v1/convite-admissao`, {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json", apikey: chave, Authorization: `Bearer ${chave}`, [CABECALHO_SESSAO]: sessao },
+        body: JSON.stringify({ action: "rascunho", token, rascunho: semSensiveis(rascunho) }),
+      }).catch(() => undefined);
+    },
+    [token],
+  );
+
+  /**
+   * Submete a admissao. `dados` e o payload do contrato; o NISS e o IBAN que la venham so seguem se forem
+   * validos e novos (os que ja estao no cofre nao se reenviam). Sucesso: a base fechou o portal, por isso a
+   * sessao acaba aqui sem chamar `sair` (daria `convite_ja_usado`).
+   */
+  const submeter = useCallback(
+    async (dados: Record<string, unknown>, assinaturaNome: string): Promise<ResultadoSubmissao> => {
+      if (!lerSessao()) return { ok: false, codigo: "sessao_ausente" };
+      if (submetendoRef.current || concluidoRef.current) return { ok: false, codigo: "pedido_invalido" };
+      const assinatura = assinaturaNome.trim();
+      if (assinatura === "") return { ok: false, codigo: "assinatura_obrigatoria" };
+      submetendoRef.current = true;
+      try {
+        const { niss, iban, ...resto } = dados;
+        const preparados = prepararSensiveis(
+          { niss: typeof niss === "string" ? niss : undefined, iban: typeof iban === "string" ? iban : undefined },
+          enviadosRef.current,
+        );
+        const r = await chamar(
+          "submeter",
+          { dados: { ...resto, ...preparados.aEnviar }, assinatura_nome: assinatura, declaracao: true },
+          true,
+        );
+        if (!montadoRef.current) return { ok: false, codigo: "erro_inesperado" };
+        if (deuErro(r)) {
+          if (await tratarSessaoPerdida(r.codigo)) return { ok: false, codigo: r.codigo };
+          const campos = r.codigo === "admissao_incompleta" ? camposDeAdmissaoIncompleta(r.corpo ?? {}) : undefined;
+          return campos ? { ok: false, codigo: r.codigo, campos } : { ok: false, codigo: r.codigo };
+        }
+        concluidoRef.current = true;
+        const esperando = pendenteRef.current;
+        pendenteRef.current = null;
+        esperando?.resolvers.forEach((resolver) => resolver({ ok: false, codigo: "convite_ja_usado" }));
+        limparSessao();
+        setConcluido(true);
+        setSessaoAtiva(false);
+        setSessaoAExpirar(false);
+        setDados(null);
+        setErroLeitura(null);
+        setErroRascunho(null);
+        setOtp(OTP_INICIAL);
+        return { ok: true };
+      } finally {
+        submetendoRef.current = false;
+      }
+    },
+    [chamar, tratarSessaoPerdida],
   );
 
   const limparAviso = useCallback(() => setAviso(null), []);
@@ -394,7 +632,13 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     verificarCodigo,
     terminarSessao,
     manterSessao,
-    gravarSensiveis,
+    rascunhoGuardadoEm,
+    aGravar,
+    erroRascunho,
+    concluido,
+    gravarRascunho,
+    gravarRascunhoAoFechar,
+    submeter,
     limparAviso,
   };
 }

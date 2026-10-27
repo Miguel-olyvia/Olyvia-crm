@@ -10,6 +10,8 @@
  *   sair           -> rpc_hr_convite_admissao_sessao_terminar(p_token_hash, p_sessao_hash)
  *   ler            -> rpc_hr_convite_admissao_portal_ler(p_token_hash, p_sessao_hash)
  *   sensiveis      -> rpc_hr_convite_admissao_sensiveis_gravar(p_token_hash, p_sessao_hash, p_niss, p_iban)
+ * Fase 1: `rascunho` e `submeter` (handler.ts) exigem a mesma sessao e reutilizam daqui
+ * `gravarSensiveisNoVault` para o NISS e o IBAN, que nunca vao no rascunho nem em `p_dados`.
  * A sessao verifica-se DENTRO da RPC (`hr_convite_sessao_exigir`); a Edge so
  * recusa de imediato uma sessao ausente ou mal formada, que a base recusaria.
  *
@@ -97,14 +99,22 @@ export function respostaErroRpc(
   error: unknown,
   publica = true,
 ): RespostaAccaoPortal {
-  let { codigo }: { codigo: string } = mapearErroRpc(error as ErroRpc);
-  // Nas accoes do RH (publica = false) o HRA31 fica nao_encontrado.
-  if (codigo === "nao_encontrado" && publica) codigo = "convite_invalido";
-  // HRA52 e HRA53 dao o MESMO erro ao visitante: nao se revela se alguem abriu sessao noutro
-  // dispositivo. O dispositivo antigo ve sempre "sessao terminada, confirme de novo o codigo".
-  if (codigo === "sessao_substituida") codigo = "sessao_expirada";
-  if (codigo === "erro_inesperado") deps.reportar(origem, error);
-  return respostaErro(codigo);
+  const { codigo } = mapearErroRpc(error as ErroRpc);
+  const publico = codigoParaOVisitante(codigo, publica);
+  if (publico === "erro_inesperado") deps.reportar(origem, error);
+  return respostaErro(publico);
+}
+
+/**
+ * O codigo que o visitante ve. HRA31 (token desconhecido) sai como `convite_invalido`
+ * (nas accoes do RH, `publica = false`, fica nao_encontrado). HRA52 e HRA53 dao o MESMO erro:
+ * nao se revela se alguem abriu sessao noutro dispositivo. O dispositivo antigo ve sempre
+ * "sessao terminada, confirme de novo o codigo".
+ */
+export function codigoParaOVisitante(codigo: string, publica = true): string {
+  if (codigo === "nao_encontrado" && publica) return "convite_invalido";
+  if (codigo === "sessao_substituida") return "sessao_expirada";
+  return codigo;
 }
 
 function soChaves(origem: Record<string, unknown>, chaves: readonly string[]): Record<string, unknown> {
@@ -126,12 +136,12 @@ const CHAVES_LER = [
   "rejeicao_mensagem",
 ] as const;
 
-const NISS_MAX = 32;
-const IBAN_MAX = 64;
+export const NISS_MAX = 32;
+export const IBAN_MAX = 64;
 /** A validade do OTP e da RPC (10 min); se a resposta nao a trouxer, diz-se isto. */
 const VALIDADE_OTP_MINUTOS = 10;
 
-function respostaInvalidaDaRpc(deps: DepsPortal, origem: string): RespostaAccaoPortal {
+export function respostaInvalidaDaRpc(deps: Pick<DepsPortal, "registarErro">, origem: string): RespostaAccaoPortal {
   deps.registarErro(new Error(`convite-admissao ${origem}: resposta da RPC invalida`));
   return respostaErro("erro_inesperado");
 }
@@ -250,7 +260,7 @@ async function ler(deps: DepsPortal, sessao: string): Promise<RespostaAccaoPorta
 }
 
 /** Texto aparado, ou null se ausente/vazio; `undefined` se nao for texto nem nulo. */
-function textoOpcional(valor: unknown, maximo: number): string | null | undefined {
+export function textoOpcional(valor: unknown, maximo: number): string | null | undefined {
   if (valor === undefined || valor === null) return null;
   if (typeof valor !== "string") return undefined;
   const aparado = valor.trim();
@@ -260,21 +270,43 @@ function textoOpcional(valor: unknown, maximo: number): string | null | undefine
 
 const mascara = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
+export type ResultadoVault =
+  | { ok: true; niss_ultimos4: string | null; iban_ultimos4: string | null }
+  | { ok: false; error: unknown }
+  | { ok: false; respostaInvalida: true };
+
+/**
+ * Grava o NISS e/ou o IBAN cifrados no Vault (`sensiveis_gravar`, que verifica a sessao). Usada pela
+ * accao `sensiveis`, pelo `rascunho` e pelo `submeter`. O valor nunca se regista nem volta: so os
+ * ultimos 4 (mascara) saem. Quem chama decide como traduzir o erro (nunca `error.message`/`details`).
+ */
+export async function gravarSensiveisNoVault(
+  svc: ClienteRpc,
+  tokenHash: string,
+  sessaoHash: string,
+  niss: string | null,
+  iban: string | null,
+): Promise<ResultadoVault> {
+  const { data, error } = await svc.rpc("rpc_hr_convite_admissao_sensiveis_gravar", {
+    p_token_hash: tokenHash,
+    p_sessao_hash: sessaoHash,
+    p_niss: niss,
+    p_iban: iban,
+  });
+  if (error) return { ok: false, error };
+  if (!eObjecto(data)) return { ok: false, respostaInvalida: true };
+  return { ok: true, niss_ultimos4: mascara(data.niss_ultimos4), iban_ultimos4: mascara(data.iban_ultimos4) };
+}
+
 async function sensiveis(deps: DepsPortal, sessao: string): Promise<RespostaAccaoPortal> {
   const niss = textoOpcional(deps.payload.niss, NISS_MAX);
   const iban = textoOpcional(deps.payload.iban, IBAN_MAX);
   // Pelo menos um dos dois; o valor nunca se regista nem volta na resposta.
   if (niss === undefined || iban === undefined || (niss === null && iban === null)) return respostaErro("pedido_invalido");
 
-  const { data, error } = await deps.svc.rpc("rpc_hr_convite_admissao_sensiveis_gravar", {
-    p_token_hash: deps.tokenHash,
-    p_sessao_hash: await sha256Hex(sessao),
-    p_niss: niss,
-    p_iban: iban,
-  });
-  if (error) return respostaErroRpc(deps, "sensiveis", error);
-  if (!eObjecto(data)) return respostaInvalidaDaRpc(deps, "sensiveis");
-  return { status: 200, body: { ok: true, niss_ultimos4: mascara(data.niss_ultimos4), iban_ultimos4: mascara(data.iban_ultimos4) } };
+  const r = await gravarSensiveisNoVault(deps.svc, deps.tokenHash, await sha256Hex(sessao), niss, iban);
+  if (!r.ok) return "error" in r ? respostaErroRpc(deps, "sensiveis", r.error) : respostaInvalidaDaRpc(deps, "sensiveis");
+  return { status: 200, body: { ok: true, niss_ultimos4: r.niss_ultimos4, iban_ultimos4: r.iban_ultimos4 } };
 }
 
 export async function tratarAccaoPortal(accao: AccaoPortal, deps: DepsPortal): Promise<RespostaAccaoPortal> {

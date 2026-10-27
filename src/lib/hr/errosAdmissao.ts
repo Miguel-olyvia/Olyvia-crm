@@ -164,8 +164,10 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   sessao_ausente: "portal.erro.sessaoExpirada",
   sessao_expirada: "portal.erro.sessaoExpirada",
   sessao_substituida: "portal.erro.sessaoSubstituida",
-  // Entre a V3a e a V3b a Edge responde 410 as accoes que ainda nao exigem sessao.
+  // Os anexos so chegam na fase 2: ate la a Edge responde 410 a essas accoes.
   portal_em_atualizacao: "portal.erro.emAtualizacao",
+  // O rascunho automatico passou a ser mostrado ao utilizador (fase 1 do portal): ja nao e excepcao.
+  rascunho_demasiado_grande: "portal.erro.rascunhoGrande",
 };
 
 /**
@@ -179,7 +181,6 @@ export const CODIGOS_SEM_TEXTO_PROPRIO: readonly string[] = [
   "pedido_invalido", // erro de programacao do cliente: texto generico
   "accao_desconhecida", // erro de programacao do cliente: texto generico
   "rascunho_nao_gravado", // nunca mostrado: o rascunho nao interrompe o preenchimento
-  "rascunho_demasiado_grande", // idem
 ];
 
 /**
