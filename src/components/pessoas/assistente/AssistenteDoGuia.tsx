@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { FasesFeitasNav } from "../GuiaColuna";
+import { CENTRO_QUE_ROLA, LATERAL_FIXA } from "../layoutGuia";
 import type { FaseFeita } from "../processo/passoGuiado";
 import { completo, estadoDoPasso, faltam, proximoRelevante, tempoDoPasso } from "./modeloAssistente";
 import type { EstadoDoPasso, IconeDoPasso, PassoAssistente } from "./tiposAssistente";
@@ -120,8 +121,11 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
   const passoAgora = useRef<string | null>(passo?.id ?? null);
   passoAgora.current = passo?.id ?? null;
   // O foco vai para o título quando o passo muda, e nunca à entrada: o pedido só cresce quando se muda de passo (sem flag que o StrictMode estrague).
+  // Em ecrã largo o centro é quem rola: ao mudar de passo volta ao topo (o elemento é o mesmo e o scroll ficaria a meio).
+  const centro = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (assistente.pedidoFoco === 0) return;
+    if (centro.current) centro.current.scrollTop = 0;
     titulo.current?.focus();
   }, [assistente.pedidoFoco]);
   // O erro liga-se ao campo em falta e o foco vai para o primeiro campo inválido do passo.
@@ -166,10 +170,11 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
   };
   return (
     <>
-      <div className="md:self-start">
+      <div className={cn("md:self-start", LATERAL_FIXA)}>
         <ColunaDosPassos faseRotuloChave={faseRotuloChave} passos={passos} assistente={assistente} feitas={feitas} aoVerFase={aoVerFase} />
       </div>
-      <div>
+      {/* A única coluna que rola em ecrã largo: região com nome e foco, para o teclado a poder rolar. */}
+      <div ref={centro} role="region" aria-label={t(`${P}guia.centro`)} tabIndex={0} data-guia-centro="" className={cn(CENTRO_QUE_ROLA, FOCO)}>
         <div className="space-y-4 py-1 md:px-2">
           <p id={idCabecalho} className={cn("text-sm", completo(passo) ? "text-primary" : "text-muted-foreground")}>{textoDoCabecalho(passo, indice + 1, passos.length, t)}</p>
           <div className="flex items-center gap-3">

@@ -218,13 +218,34 @@ describe("com um negócio aberto", () => {
     expect(document.querySelector("[data-negocio-titulo]")).toHaveTextContent("WC social");
   });
 
-  it("«← Negócios» (discreto, por cima do cabeçalho) devolve o guia da pessoa, sem abas nem lista por baixo", () => {
-    montar(resumoComNegocio(), { negocioInicial: "n1" });
-    fireEvent.click(screen.getByRole("button", { name: /Voltar aos negócios/ }));
+  it("o guia do negócio não tem «← Negócios» nem outro botão de voltar por cima do cabeçalho, e não há abas nem lista de negócios", () => {
+    montar(resumoComNegocio(), { negocioInicial: "n1", naPagina: true, voltaPara: "pipeline" });
+    expect(screen.queryByRole("button", { name: /Voltar aos negócios/ })).toBeNull();
     expect(screen.queryByRole("tablist")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "WC social" })).toBeNull();
-    expect(screen.getAllByRole("heading", { name: /Pedro Lopes/ })).toHaveLength(1);
-    expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Negócios" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Voltar ao Pipeline" })).toBeInTheDocument();
+  });
+
+  it("no painel lateral (sem a ligação «← Pipeline») o negócio aberto mantém «Voltar aos negócios» e volta ao guia da pessoa", () => {
+    montar(resumoComNegocio(), { negocioInicial: "n1", naPagina: false });
+    expect(document.querySelector("[data-negocio-titulo]")).toHaveTextContent("WC social");
+    fireEvent.click(screen.getByRole("button", { name: /Voltar aos negócios/ }));
+    expect(document.querySelector("[data-negocio-titulo]")).toBeNull();
+    expect(screen.getByRole("heading", { name: /Pedro Lopes/ })).toBeInTheDocument();
+  });
+
+  it("na página, o painel da chamada aberto pelo «Mais» aparece uma só vez no guia da pessoa (sem negócio aberto)", () => {
+    montar(lead(), { naPagina: true, voltaPara: "pipeline" });
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Registar chamada" }));
+    expect(screen.getAllByRole("heading", { name: "Registar chamada" })).toHaveLength(1);
+  });
+
+  it("na página, o painel da chamada aberto pelo «Mais» aparece uma só vez no guia do negócio aberto", () => {
+    montar(resumoComNegocio(), { negocioInicial: "n1", naPagina: true, voltaPara: "pipeline" });
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Registar chamada" }));
+    expect(screen.getAllByRole("heading", { name: "Registar chamada" })).toHaveLength(1);
   });
 
   it("o negócio aberto não deixa por baixo do guia as secções recolhíveis (Percurso, Orçamentos...) nem as ações de editar: vivem em «Detalhes do negócio»", () => {

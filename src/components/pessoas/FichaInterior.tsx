@@ -28,6 +28,7 @@ import { GuiaDaPessoa } from "./GuiaDaPessoa";
 import { PainelAcaoFicha, type AcaoPainel } from "./PainelAcaoFicha";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { COLUNA_DO_PAI, RESTO_EM_COLUNA, RodapeGuiaContext } from "./layoutGuia";
 import { LigacaoVoltarFicha } from "./pecasFicha";
 import { PercursoPessoa } from "./PercursoPessoa";
 import { itensDaPessoa } from "./processo/itensProcesso";
@@ -123,6 +124,7 @@ function NegocioAbertoNoTopo(
       negocio={p.negocio} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} pessoa={p.resumo.pessoa} atividade={p.atividade} comGuia
       cabecalhoFicha={p.cabecalhoFicha} aoApagado={p.aoVoltarNegocio} aoRegistarChamada={p.aoRegistarChamada}
       apoioAberto={p.detalhesAbertos} aoFecharApoio={p.aoFecharDetalhes} origemApoio={p.origemApoio}
+      comSaidaNaPagina={!!(p.naPagina && p.voltaPara)}
     />
   );
 }
@@ -250,17 +252,21 @@ export function FichaInterior(p: FichaInteriorProps) {
       aoConcluir={(mensagem) => { anunciar(mensagem); if (!p.comGuia) { negocio.esquecer(); setAba("resumo"); } fechar(true); }}
     />
   );
+  // Os painéis em linha abertos, para o guia os desenhar no fim da coluna que rola (só na página; ver `RodapeGuiaContext`).
+  const rodapeDaPagina = paineis.length > 0 || acao === "chamada" ? <>{paineis}{acao === "chamada" && formChamada}</> : null;
   return (
     <AnuncioFichaContext.Provider value={anunciar}>
-      <div className={p.naPagina ? "rounded-xl bg-muted/30" : cn("flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto", p.comGuia && "bg-muted/30")}>
+      <div className={p.naPagina ? cn("rounded-xl bg-muted/30", p.comGuia && COLUNA_DO_PAI) : cn("flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto", p.comGuia && "bg-muted/30")}>
         {p.comGuia ? (
           // Uma coluna centrada (até 1120 px) sobre o fundo suave; na página, com a ligação de volta ao quadro no topo.
-          <div data-ficha-coluna className="mx-auto w-full max-w-[1120px] pb-6">
+          // Na página, em ecrã largo, a coluna tem a altura da ficha: o guia fica com o que sobra e só o meio rola (ver layoutGuia).
+          <div data-ficha-coluna className={cn("mx-auto w-full max-w-[1120px] pb-6", p.naPagina && COLUNA_DO_PAI)}>
             {p.naPagina && p.voltaPara && <LigacaoVoltarFicha voltaPara={p.voltaPara} />}
             <div className="px-4 empty:hidden sm:px-6"><ErroAcao chave={reabrir.erro} chaveExtra={reabrir.erroExtra} className="pb-3" /></div>
             {aviso && <div className="pt-3">{aviso}</div>}
             {/* O topo: o guia do negócio aberto, ou o da pessoa. É o único cabeçalho, a única barra de fases e o único cartão do cliente. */}
-            <div className="px-4 pb-4 pt-4 sm:px-6">
+            <RodapeGuiaContext.Provider value={p.naPagina ? rodapeDaPagina : null}>
+            <div className={cn("px-4 pb-4 pt-4 sm:px-6", p.naPagina && RESTO_EM_COLUNA)}>
               {negocioDoTopo ? (
                 <NegocioAbertoNoTopo
                   key={negocioDoTopo.id} {...abasProps} negocio={negocioDoTopo} cabecalhoFicha={cabecalhoFicha}
@@ -274,9 +280,11 @@ export function FichaInterior(p: FichaInteriorProps) {
                 />
               )}
             </div>
-            {/* Por baixo do guia só ficam os painéis em linha abertos (Nota, Adiar, Encerrar, Visita, chamada): nunca uma segunda ficha empilhada. */}
-            {paineis}
-            {acao === "chamada" && formChamada}
+            </RodapeGuiaContext.Provider>
+            {/* Por baixo do guia só ficam os painéis em linha abertos (Nota, Adiar, Encerrar, Visita, chamada): nunca uma segunda ficha empilhada.
+                Na página vão para o fim da coluna do meio do guia (que rola em ecrã largo): senão ficavam cortados pela altura fixa. */}
+            {!p.naPagina && paineis}
+            {!p.naPagina && acao === "chamada" && formChamada}
           </div>
         ) : (
           <>

@@ -18,6 +18,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { useAlteracoesNegocios } from "@/components/negocio-metas/negociosAlterados";
 import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { RESTO_EM_COLUNA } from "./layoutGuia";
 import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { AcoesEdicaoNegocio } from "./AcoesEdicaoNegocio";
@@ -73,6 +74,8 @@ interface DetalheNegocioFichaProps {
   origemApoio?: MutableRefObject<HTMLElement | null>;
   /** Com o guia: abre o registo da chamada da ficha (um negócio por contactar, e o passo Chamada do assistente). */
   aoRegistarChamada?: (origem: HTMLElement | null) => void;
+  /** Com o guia: a ficha está na página e tem a ligação «← Pipeline» / «← Pessoas» no topo, por isso não há segundo botão de voltar. No painel lateral não há essa ligação e o botão fica. */
+  comSaidaNaPagina?: boolean;
 }
 
 /**
@@ -121,7 +124,7 @@ function PerdaDoNegocio({ negocio, fase, motivo, podeAnular }: { negocio: Negoci
   );
 }
 
-export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia, cabecalhoFicha, apoioAberto = false, aoFecharApoio, origemApoio, aoRegistarChamada }: DetalheNegocioFichaProps) {
+export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia, cabecalhoFicha, apoioAberto = false, aoFecharApoio, origemApoio, aoRegistarChamada, comSaidaNaPagina = false }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
   // Fecho na proposta: os contratos são ignorados, por isso o ecrã vê o negócio sem contrato (sem secção, sem fase, sem passo de contrato).
   const negocio = semContratosSeProposta(negocioDaFicha);
@@ -161,18 +164,23 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
       <AlertasNegocio negocio={negocio} semFecharAgora />
     </div>
   ) : undefined;
+  // Com o guia, a nota do fecho na proposta e o bloco de fecho vão no fim da coluna do meio (a que rola em ecrã largo), e não por baixo do guia.
+  const rodapeDoGuia = comGuia ? (
+    <>
+      {/* Só a venda directa (fecho na proposta) leva selo e nota: «Fecha no contrato» é a omissão. */}
+      {negocio.fecho === "proposta" && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2"><EtiquetaFecho fecho={negocio.fecho} /></div>
+          <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>
+        </div>
+      )}
+      <BlocoFechoNegocio negocio={negocio} semFecharAgora />
+    </>
+  ) : undefined;
   return (
-    <div className="space-y-4">
-      {comGuia ? (
-        // Com o guia: uma ligação discreta por cima do cabeçalho. O nome visível («Negócios») está contido no nome acessível («Voltar aos negócios»).
-        <Button
-          type="button" variant="ghost" aria-label={t(`${P}deal.back`)}
-          className={cn("-ml-3 min-h-11 gap-2 px-3 text-sm text-muted-foreground hover:text-foreground", FOCO)} onClick={aoVoltar}
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          {t(`${P}deal.backShort`)}
-        </Button>
-      ) : (
+    <div className={cn("space-y-4", comGuia && RESTO_EM_COLUNA)}>
+      {/* Com o guia na página a única saída é «← Pipeline» da ficha: aqui não há segundo botão de voltar. No painel lateral (sem essa ligação) o botão fica. */}
+      {!(comGuia && comSaidaNaPagina) && (
         <Button type="button" variant="ghost" className={cn("-ml-3 min-h-11 gap-2", FOCO)} onClick={aoVoltar}>
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           {t(`${P}deal.back`)}
@@ -180,7 +188,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
       )}
       {/* O estado do negócio, num só bloco: o que é, em que fase está e o que fazer agora. Com o guia (a ficha real) o cabeçalho do guia é o único: o serviço
           é a linha, o valor e o comercial vão no passo e a fase já está na barra; só o tipo de fecho continua à vista. */}
-      <div className={cn("space-y-4", !comGuia && "rounded-xl border border-border bg-card p-4")}>
+      <div className={cn("space-y-4", comGuia ? RESTO_EM_COLUNA : "rounded-xl border border-border bg-card p-4")}>
         {!comGuia && (
           <div className="space-y-3">
             <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold text-foreground outline-none">{negocio.servico}</h3>
@@ -205,14 +213,8 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
               negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
               cabecalhoFicha={cabecalhoFicha} faixa={faixaNegocio} tituloRef={titulo} semPasso={!comPasso} aoRegistarChamada={aoRegistarChamada}
               acaoPerder={comPasso && podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" rotuloChave="pessoasPagina.guia.perder" /> : undefined}
+              rodape={rodapeDoGuia}
             />
-            {/* Só a venda directa (fecho na proposta) leva selo e nota: «Fecha no contrato» é a omissão. */}
-            {negocio.fecho === "proposta" && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2"><EtiquetaFecho fecho={negocio.fecho} /></div>
-                <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>
-              </div>
-            )}
           </>
         ) : (
           <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fases} /><FasesDoNegocioLista fases={fases} /></div></Seccao>
@@ -226,7 +228,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
             <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
           </div>
         )}
-        <BlocoFechoNegocio negocio={negocio} semFecharAgora={comGuia} />
+        {!comGuia && <BlocoFechoNegocio negocio={negocio} />}
         {/* Mudar o tipo de fecho: só na ficha real, com permissão de editar e com o negócio aberto. Com o guia vive nos «Detalhes do negócio». */}
         {!comGuia && <MudarFechoNegocio negocio={negocio} aoSemBotao={() => titulo.current?.focus()} />}
         {/* Editar o título, as notas e o comercial, e mandar para o lixo: só na ficha real, com a permissão certa. Com o guia vive nos «Detalhes do negócio». */}

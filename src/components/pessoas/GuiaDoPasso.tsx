@@ -7,7 +7,7 @@
 // sempre os passos da fase que se VÊ (a atual, ou uma feita escolhida em «Fases feitas»), e o centro, numa fase feita, lê o que ficou REGISTADO no
 // passo escolhido (nada se grava). «Anterior» recua uma fase e o botão primário passa a ser «Voltar ao passo atual». No telemóvel a coluna empilha
 // por cima do centro.
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode, type Ref } from "react";
+import { useContext, useEffect, useId, useRef, useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { ArrowLeft, ArrowRight, Loader2, MapPin, Phone, Target } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ligacoes } from "@/components/ficha-comum/ligacoesContacto";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { BarraFasesGuia, CartaoClienteGuia, type AcontecimentoGuia, type DadosClienteGuia } from "./GuiaPecas";
 import { ColunaDoGuia, RegistoDoItem } from "./GuiaColuna";
+import { CENTRO_QUE_ROLA, FIXO_NO_TOPO, GRELHA_DO_GUIA, LATERAL_FIXA, RESTO_EM_COLUNA, RODAPE_SEM_PASSO, RodapeGuiaContext } from "./layoutGuia";
 import type { FaseFeita, FaseGuia, ItemChecklist, PassoGuiado } from "./processo/passoGuiado";
 import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
 
@@ -71,6 +72,8 @@ export interface GuiaDoPassoProps {
    * (que passa a ver-se em leitura, como sempre). Sem isto o guia desenha o «passo seguinte» de sempre.
    */
   assistente?: (guia: { aoVerFase: (id: string) => void; extra?: ReactNode }) => ReactNode;
+  /** O que acompanha o passo e não cabe no cabeçalho (a nota do fecho, o bloco de fecho): vai no fim da coluna do meio, a que rola em ecrã largo. */
+  rodape?: ReactNode;
 }
 
 /** O ícone da fase atual, como no desenho (círculos concêntricos), num quadrado suave na cor primária da Olyvia. */
@@ -208,15 +211,21 @@ function CentroDoGuia({ passo, vista, itemEscolhido, pedidoFoco, podeRecuar, aoV
 
 export function GuiaDoPasso({
   passo, fases, cabecalho, cliente, acontecimentos, aoAcao, atributosAcao, explicacao, ocupado = false, acaoPerder, extra, tituloSecao,
-  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, assistente,
+  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, assistente, rodape,
 }: GuiaDoPassoProps) {
   const { t } = useTranslation();
+  // O que vem por baixo do guia (o que o chamador passou e os painéis em linha da ficha) vive no fim da coluna do meio, a que rola em ecrã largo.
+  const rodapeDaFicha = useContext(RodapeGuiaContext);
+  const fimDoCentro = rodape || rodapeDaFicha ? <>{rodape}{rodapeDaFicha}</> : null;
+  const centro = useRef<HTMLDivElement>(null);
   // A fase que se vê: `null` é a atual; senão o id de uma fase feita (só leitura). O passo escolhido na coluna é próprio de cada fase.
   const [faseVista, setFaseVista] = useState<string | null>(null);
   const [escolhido, setEscolhido] = useState<string | null>(null);
   const [pedidoFoco, setPedidoFoco] = useState(0);
   // Quando o passo muda (a gravação avançou a fase), volta-se a ver o passo atual.
   useEffect(() => { setFaseVista(null); setEscolhido(null); }, [passo?.passo, passo?.faseId]);
+  // Em ecrã largo o centro é quem rola: ao mudar de passo ou de fase vista volta ao topo (o elemento é o mesmo e o scroll ficaria a meio).
+  useEffect(() => { if (centro.current) centro.current.scrollTop = 0; }, [passo?.passo, passo?.faseId, faseVista, pedidoFoco]);
   const feitas = passo?.feitas ?? [];
   const vista = feitas.find((f) => f.id === faseVista) ?? null;
   const itensVistos: readonly ItemChecklist[] = vista ? vista.itens : passo?.itens ?? [];
@@ -232,9 +241,11 @@ export function GuiaDoPasso({
   const naFicha = nomeEl !== undefined;
   const Seccao = naFicha ? "h3" : "h4";
   return (
-    <section aria-label={t(`${P}guia.regiao`)} className="space-y-4">
-      {/* O cartão do topo: o cabeçalho, a faixa fina de alertas (só quando existem) e a barra de fases. */}
-      <div className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm md:p-5">
+    // Os painéis da ficha são consumidos só por este guia (o de topo): qualquer outro guia montado por baixo (um diálogo, o assistente) não os duplica.
+    <RodapeGuiaContext.Provider value={null}>
+    <section aria-label={t(`${P}guia.regiao`)} className={cn("space-y-4", RESTO_EM_COLUNA)}>
+      {/* O cartão do topo: o cabeçalho, a faixa fina de alertas (só quando existem) e a barra de fases. Fixo: em ecrã largo não rola. */}
+      <div className={cn("space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm md:p-5", FIXO_NO_TOPO)}>
         <CabecalhoDoGuia
           cabecalho={cabecalho} acaoPerder={acaoPerder} nomeEl={nomeEl} descricaoEl={descricaoEl} selos={selos} aviso={aviso}
           navegacao={navegacao} acoesSecundarias={acoesSecundarias} tituloRef={tituloRef}
@@ -246,31 +257,36 @@ export function GuiaDoPasso({
       {/* O passo (a coluna da fase que se vê e o centro) e o cartão do cliente, sobre o fundo suave: empilhados no telemóvel (a coluna por cima do centro),
           duas colunas a partir de 768 px (o cliente por baixo, a toda a largura) e três a partir de 1024 px (coluna | passo | cliente). A ordem do DOM é a visual. */}
       {passo && tituloSecao && <Seccao className="sr-only">{tituloSecao}</Seccao>}
-      <div className={cn("grid gap-4", passo && "md:grid-cols-[200px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)_270px]")}>
-        {passo && assistente && vista === null && assistente({ aoVerFase: verFase, extra })}
+      <div className={cn("grid gap-4", GRELHA_DO_GUIA, passo && "md:grid-cols-[200px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)_270px]")}>
+        {passo && assistente && vista === null && assistente({ aoVerFase: verFase, extra: fimDoCentro ? <>{extra}{fimDoCentro}</> : extra })}
         {passo && !(assistente && vista === null) && (
           <>
-            <div className="md:self-start">
+            <div className={cn("md:self-start", LATERAL_FIXA)}>
               <ColunaDoGuia
                 faseRotuloChave={vista ? vista.rotuloChave : passo.faseRotuloChave} itens={itensVistos} escolhido={idEscolhido} aoEscolherPasso={escolherPasso}
                 feitas={feitas} faseVista={faseVista} aoVerFase={verFase}
               />
             </div>
-            <div>
+            {/* A única coluna que rola em ecrã largo: região com nome e foco, para o teclado a poder rolar. */}
+            <div ref={centro} role="region" aria-label={t(`${P}guia.centro`)} tabIndex={0} data-guia-centro="" className={cn(CENTRO_QUE_ROLA, FOCO)}>
               <CentroDoGuia
                 passo={passo} vista={vista} itemEscolhido={itemEscolhido} pedidoFoco={pedidoFoco} podeRecuar={indiceVista > 0}
                 aoVerAnterior={() => trocarVista(feitas[indiceVista - 1]?.id ?? null)} aoVoltarAoAtual={() => trocarVista(null)}
                 aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra} nivel={naFicha ? "h3" : "h2"}
               />
+              {fimDoCentro && <div className="space-y-4 pt-4 md:px-2">{fimDoCentro}</div>}
             </div>
           </>
         )}
-        <div className={cn(passo && "md:col-span-2 md:self-start lg:col-span-1 lg:col-start-3 lg:row-start-1")}>
+        <div className={cn(passo && "md:col-span-2 md:self-start lg:col-span-1 lg:col-start-3 lg:row-start-1", LATERAL_FIXA)}>
           <CartaoClienteGuia
             cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} nivel={naFicha ? "h3" : "h4"}
           />
         </div>
       </div>
+      {/* Sem passo (um negócio ganho ou perdido) não há coluna do meio: o que acompanha o guia vai aqui, também a rolar em ecrã largo. */}
+      {!passo && fimDoCentro && <div className={cn("space-y-4", CENTRO_QUE_ROLA, RODAPE_SEM_PASSO)}>{fimDoCentro}</div>}
     </section>
+    </RodapeGuiaContext.Provider>
   );
 }

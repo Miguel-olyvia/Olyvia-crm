@@ -365,3 +365,73 @@ describe("GuiaDoPasso: a estrutura do desenho (cartão do cabeçalho, barra gros
     expect(screen.queryByText("Faixa de teste")).toBeNull();
   });
 });
+
+describe("GuiaDoPasso: em ecrã largo só a coluna do meio rola", () => {
+  const centro = () => screen.getByRole("region", { name: "Conteúdo do passo" });
+
+  it("o meio é uma região com nome, focável pelo teclado, com overflow-y-auto, min-h-0 e folga de scroll para o foco", () => {
+    guia();
+    expect(centro()).toHaveAttribute("tabindex", "0");
+    expect(centro().className).toMatch(/overflow-y-auto/);
+    expect(centro().className).toMatch(/min-h-0/);
+    expect(centro().className).toMatch(/scroll-py-/);
+  });
+
+  it("o título do passo e o botão primário vivem dentro do que rola; o cabeçalho, a barra de fases e o cartão do cliente não", () => {
+    guia();
+    const dentro = within(centro());
+    expect(dentro.getByRole("heading", { level: 2, name: "Está tudo. Registar a chamada." })).toBeInTheDocument();
+    expect(dentro.getByRole("button", { name: "Anterior" })).toBeInTheDocument();
+    expect(centro().contains(screen.getByRole("heading", { level: 3, name: "Pedro Lopes" }))).toBe(false);
+    expect(centro().contains(screen.getByRole("list", { name: "Fases" }))).toBe(false);
+    expect(centro().contains(screen.getByRole("heading", { level: 4, name: "Cliente" }))).toBe(false);
+  });
+
+  it("o cartão do topo não encolhe e a grelha ocupa o que sobra com uma só linha limitada", () => {
+    guia();
+    const secao = screen.getByRole("region", { name: "Passo seguinte" });
+    expect((secao.firstElementChild as HTMLElement).className).toMatch(/shrink-0/);
+    const grelha = centro().parentElement as HTMLElement;
+    expect(grelha.className).toMatch(/flex-1/);
+    expect(grelha.className).toMatch(/grid-rows-\[minmax\(0,1fr\)\]/);
+  });
+
+  it("só em ecrã largo e alto: todas as classes de altura levam a condição de media, e abaixo dela nada rola no guia", () => {
+    guia();
+    const secao = screen.getByRole("region", { name: "Passo seguinte" });
+    for (const el of [secao, centro(), centro().parentElement as HTMLElement]) {
+      for (const c of el.className.split(/\s+/).filter((x) => /(^|:)(flex-1|h-full|overflow-y-auto|grid-rows)/.test(x))) {
+        expect(c, c).toMatch(/^\[@media\(min-width:1024px\)_and_\(min-height:44rem\)\]:/);
+      }
+    }
+  });
+
+  it("o rodapé (a nota e o bloco de fecho) vai no fim do que rola, depois do botão do passo", () => {
+    guia({ rodape: <p>Nota do fecho</p> });
+    const nota = within(centro()).getByText("Nota do fecho");
+    const anterior = within(centro()).getByRole("button", { name: "Anterior" });
+    expect(anterior.compareDocumentPosition(nota) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("sem passo (negócio fechado) o rodapé continua à vista, fora de qualquer coluna do passo", () => {
+    guia({ rodape: <p>Bloco de fecho</p> }, null);
+    expect(screen.getByText("Bloco de fecho")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Conteúdo do passo" })).toBeNull();
+  });
+
+  it("mudar de passo repõe o scroll do meio no topo", () => {
+    const { rerender } = render(<GuiaDoPasso {...propsBase(passo())} />);
+    centro().scrollTop = 120;
+    rerender(<GuiaDoPasso {...propsBase(passo(item({ fase: "contactado" })))} />);
+    expect(centro().scrollTop).toBe(0);
+  });
+});
+
+function propsBase(p: PassoGuiado): GuiaDoPassoProps {
+  return {
+    passo: p, fases: fasesDaPessoa("porContactar"),
+    cabecalho: { nome: "Pedro Lopes", linha: "WC social", telefone: "927 118 300", local: "Amadora" },
+    cliente: { telefone: "927 118 300", email: "pedro.lopes@exemplo.pt", morada: "Amadora", linha: "WC social" },
+    acontecimentos: [], aoAcao: vi.fn(),
+  };
+}

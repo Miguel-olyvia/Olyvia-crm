@@ -1,34 +1,20 @@
 // O que o guia do passo mostra da pessoa, tirado só de dados reais da ficha: os factos da lista da fase, o cartão do cliente e os últimos
 // acontecimentos. Funções puras (a tradução chega por parâmetro).
 import type { Traduzir } from "@/components/negocio-metas/saudeNegocio";
-import type { EstadoRegistos } from "@/components/negocio-metas/registosTipos";
 import type { AcontecimentoGuia, DadosClienteGuia } from "./GuiaPecas";
 import { textoDiaCompleto } from "./formatoPessoas";
+import { juntar, maisProxima, maisRecente, resumosDoGuia, type NegocioDoGuia, type PessoaDoGuia, type RegistosDoGuia } from "./guiaResumos";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 import type { DadosDoGuia } from "./processo/passoGuiado";
 
 const MAXIMO_ACONTECIMENTOS = 5;
-
-type RegistosDoGuia = Pick<EstadoRegistos, "contactos" | "visitas" | "levantamentos">;
-
-const SEPARADOR = " · ";
-
-const juntar = (...partes: (string | null | undefined)[]): string => partes.filter(Boolean).join(SEPARADOR);
-
-/** O dia e a hora mais recentes primeiro (AAAA-MM-DD e HH:MM, que ordenam como texto). */
-const maisRecente = <T extends { data: string; hora?: string }>(registos: readonly T[]): T | undefined =>
-  [...registos].sort((a, b) => `${b.data} ${b.hora ?? ""}`.localeCompare(`${a.data} ${a.hora ?? ""}`))[0];
-
-/** O dia e a hora mais próximos primeiro. */
-const maisProxima = <T extends { data: string; hora?: string }>(registos: readonly T[]): T | undefined =>
-  [...registos].sort((a, b) => `${a.data} ${a.hora ?? ""}`.localeCompare(`${b.data} ${b.hora ?? ""}`))[0];
 
 /**
  * O que ficou registado em cada item da lista da fase, em texto, só do que a ficha já tem: quem pede, o contacto, a origem, a última chamada, a visita
  * marcada, a visita feita e o levantamento. O que a ficha não sabe não aparece (o ecrã diz «Sem registo»).
  */
 export function detalhesDoGuia(
-  t: Traduzir, pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha" | "formulario">, registos: RegistosDoGuia,
+  t: Traduzir, pessoa: PessoaDoGuia, registos: RegistosDoGuia,
 ): Record<string, string> {
   const detalhes: Record<string, string> = {};
   const definir = (id: string, texto: string): void => { if (texto) detalhes[id] = texto; };
@@ -50,9 +36,10 @@ export function detalhesDoGuia(
 
 /**
  * Os factos da lista da fase: quem pede, contacto, origem e o que há de chamadas, visitas e levantamentos (os registos dados, p. ex. os do negócio).
- * Com o tradutor `t` leva também o que ficou registado em cada passo (`detalhes`).
+ * Com o tradutor `t` leva também o que ficou registado em cada passo (`detalhes`, em texto, e `resumos`, em rótulo e valor); `negocio` acrescenta a
+ * qualificação e os documentos do negócio ao resumo.
  */
-export function dadosDoGuia(pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha" | "formulario">, registos: RegistosDoGuia, t?: Traduzir): DadosDoGuia {
+export function dadosDoGuia(pessoa: PessoaDoGuia, registos: RegistosDoGuia, t?: Traduzir, negocio?: NegocioDoGuia): DadosDoGuia {
   return {
     nome: pessoa.nome,
     temContacto: Boolean(pessoa.contacto.telefone || pessoa.contacto.email),
@@ -61,7 +48,7 @@ export function dadosDoGuia(pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha
     visitasAtivas: registos.visitas.filter((v) => v.estado !== "cancelada").length,
     levantamentos: registos.levantamentos.length,
     ultimoResultado: maisRecente(registos.contactos)?.resultado ?? null,
-    ...(t ? { detalhes: detalhesDoGuia(t, pessoa, registos) } : {}),
+    ...(t ? { detalhes: detalhesDoGuia(t, pessoa, registos), resumos: resumosDoGuia(t, pessoa, registos, negocio) } : {}),
   };
 }
 

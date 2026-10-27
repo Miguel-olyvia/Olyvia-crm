@@ -169,7 +169,50 @@ describe("o Esc", () => {
   });
 });
 
+describe("a altura da ficha na página: só o meio do guia rola", () => {
+  const centro = () => screen.getByRole("region", { name: "Conteúdo do passo" });
+
+  it("a cadeia de contentores ocupa a altura do ecrã largo (h-full na secção, colunas flex), sem rolar nada fora do meio", () => {
+    montar({ voltaPara: "pipeline" });
+    expect(raiz().className).toMatch(/h-full/);
+    const coluna = guia().closest("[data-ficha-coluna]") as HTMLElement;
+    expect(coluna.className).toMatch(/flex-col/);
+    expect(coluna.className).not.toMatch(/overflow-y-auto/);
+    expect(centro().className).toMatch(/overflow-y-auto/);
+  });
+
+  it("o cabeçalho com o nome fica fora do que rola e o botão do passo dentro", () => {
+    montar({ voltaPara: "pipeline" });
+    expect(centro().contains(nome())).toBe(false);
+    expect(within(centro()).getByRole("button", { name: "Anterior" })).toBeInTheDocument();
+  });
+
+  it("um painel em linha aberto (Nota) fica dentro do que rola, e não por baixo do guia, cortado pela altura fixa", async () => {
+    montar({ acoes: { ...acoesBase(), capacidades: { chamada: true, encerrar: true, adiar: true, nota: true, visita: false, negocios: false } } });
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Nota" }));
+    const campo = await screen.findByLabelText("Escreva a nota");
+    expect(centro().contains(campo)).toBe(true);
+  });
+
+  it("o botão «← Pipeline» é o único de voltar: não há «← Negócios»", () => {
+    montar({ voltaPara: "pipeline" });
+    expect(screen.getAllByRole("button", { name: /^Voltar/ })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /negócios/i })).toBeNull();
+  });
+});
+
 describe("sem naPagina a ficha continua num painel lateral (Sheet)", () => {
+  it("o meio não depende da altura da página: os painéis em linha ficam fora do guia, como sempre", async () => {
+    montar({ naPagina: false, acoes: { ...acoesBase(), capacidades: { chamada: true, encerrar: true, adiar: true, nota: true, visita: false, negocios: false } } });
+    const painel = screen.getByRole("dialog", { name: /Pedro Lopes/ });
+    expect(painel.className).not.toMatch(/h-\[calc/);
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Nota" }));
+    const campo = await screen.findByLabelText("Escreva a nota");
+    expect(screen.getByRole("region", { name: "Conteúdo do passo" }).contains(campo)).toBe(false);
+  });
+
   it("com o guia: painel de metade do ecrã, sem ecrã inteiro, e o Esc fecha-o", async () => {
     const props = montar({ naPagina: false });
     const painel = screen.getByRole("dialog", { name: /Pedro Lopes/ });

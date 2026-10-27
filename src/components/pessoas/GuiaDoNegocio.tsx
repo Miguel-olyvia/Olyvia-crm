@@ -55,9 +55,11 @@ interface GuiaDoNegocioProps {
   faixa?: ReactNode;
   /** Abre o registo da chamada da ficha (o passo «Registar a chamada» de um negócio por contactar e o botão do assistente); `origem` é o botão a que o foco volta. */
   aoRegistarChamada?: (origem: HTMLElement | null) => void;
+  /** O que acompanha o guia (a nota do fecho, o bloco de fecho): vai no fim da coluna do meio, a que rola em ecrã largo. */
+  rodape?: ReactNode;
 }
 
-export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, atividade, acaoPerder, cabecalhoFicha, tituloRef, semPasso = false, faixa, aoRegistarChamada }: GuiaDoNegocioProps) {
+export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, atividade, acaoPerder, cabecalhoFicha, tituloRef, semPasso = false, faixa, aoRegistarChamada, rodape }: GuiaDoNegocioProps) {
   const { t } = useTranslation();
   const fonte = useFontePessoas();
   const registos = useRegistosPessoa();
@@ -78,7 +80,7 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
   const naAbordagem = itemGuia !== undefined && ehFaseDeAbordagem(itemGuia.fase) && itemGuia.fase !== "levantamento";
   const fasesDoGuia = naAbordagem && itemGuia ? fasesDaPessoa(itemGuia.fase) : fasesDoNegocioParaGuia(fases);
   const doPasso = itemGuia && !semPasso ? calcularPassoGuiado(itemGuia, {
-    dados: dadosDoGuia(pessoa ?? { nome: negocio.pessoa, contacto: negocio.contacto }, doNegocio, t),
+    dados: dadosDoGuia(pessoa ?? { nome: negocio.pessoa, contacto: negocio.contacto }, doNegocio, t, negocio),
     fases: fasesDoGuia,
     podeEditar, podeCriar: false, permissoesFecho, pessoaFechada: false,
     ligados: ligadosDoNegocio(itemGuia, acao.executa, levantamento?.pode === true && pessoa !== undefined, comDocumento, aoRegistarChamada !== undefined),
@@ -127,7 +129,7 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
       passo={doPasso} fases={fasesDoGuia} aoAcao={aoAcao} atributosAcao={acao.atributos} acaoPerder={acaoPerder} assistente={assistente}
       explicacao={acao.bloqueio && acao.idBloqueio ? { id: acao.idBloqueio, texto: acao.bloqueio } : null}
       cabecalho={{ nome: pessoa?.nome ?? negocio.pessoa, linha: negocio.servico, telefone: cliente.telefone, local }} cliente={cliente} acontecimentos={acontecimentos}
-      tituloSecao={t("pessoasPagina.deal.next")} tituloRef={tituloRef} {...cabecalhoFicha} faixa={faixa ?? cabecalhoFicha?.faixa}
+      tituloSecao={t("pessoasPagina.deal.next")} tituloRef={tituloRef} {...cabecalhoFicha} faixa={faixa ?? cabecalhoFicha?.faixa} rodape={rodape}
       extra={(
         <div className="space-y-2">
           <Prazo prazo={negocio.proximoPrazo} hoje={hoje} />

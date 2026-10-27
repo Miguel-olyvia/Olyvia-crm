@@ -70,12 +70,12 @@ const nomeDaPessoa = () => screen.getByRole("heading", { level: 2, name: /Pedro 
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("o foco ao voltar de um negócio aberto no topo", () => {
-  it("«← Negócios» leva o foco para o nome da pessoa (já não há lista de negócios na ficha)", async () => {
-    montar(comUm(), { negocioInicial: "n1" });
-    fireEvent.click(screen.getByRole("button", { name: /Voltar aos negócios/ }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "WC social" })).toBeNull());
-    await waitFor(() => expect(nomeDaPessoa()).toHaveFocus());
-    expect(document.activeElement).not.toBe(document.body);
+  it("com um negócio aberto no guia já não existe «← Negócios»: a saída é «← Pipeline», que fecha a ficha", () => {
+    const props = montar(comUm(), { negocioInicial: "n1", naPagina: true, voltaPara: "pipeline" });
+    expect(screen.queryByRole("button", { name: /Voltar aos negócios/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Negócios" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Voltar ao Pipeline" }));
+    expect(props.aoFechar).toHaveBeenCalledTimes(1);
   });
 
   it("mandar o negócio aberto para o lixo, nos «Detalhes do negócio», também deixa o foco no nome da pessoa", async () => {

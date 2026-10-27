@@ -25,6 +25,7 @@ import { useQualificarLeadPessoa } from "@/hooks/pessoas/useQualificarLeadPessoa
 import { useSubmissoesPessoa } from "@/hooks/pessoas/useSubmissoesPessoa";
 import type { MaisItensFicha } from "@/components/pessoas/CarregarMais";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
+import { ZONA_FICHA_ALTA } from "@/components/pessoas/layoutGuia";
 import type { SeparadorSubmissoesReal } from "@/components/pessoas/FichaInterior";
 import type { ItemAtividade, NotaPessoa, Pessoa, Submissao } from "@/components/pessoas/pessoasTipos";
 import { type DadosContactoFormulario } from "./contactoFormulario";
@@ -200,7 +201,7 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
             {t(`${F}opening`)}
           </div>
         )}
-        <div ref={zonaFicha} hidden={!fichaNaPagina && comGuia} className={comGuia ? "mx-auto w-full max-w-[1536px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6" : undefined}>
+        <div ref={zonaFicha} hidden={!fichaNaPagina && comGuia} className={comGuia ? `mx-auto w-full max-w-[1536px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6 ${ZONA_FICHA_ALTA}` : undefined}>
           {fichaNaPagina && tituloPagina && <h1 className="sr-only">{tituloPagina}</h1>}
           {acoes.capacidades?.negocios === false ? ficha() : (
             <NegociosDaFichaReal ficha={mostrada} pessoaAberta={pessoaId} negocioDoEndereco={negocioInicial} aoAbrirNegocio={aoAbrirNegocio} aoFecharFicha={aoLimpar}>

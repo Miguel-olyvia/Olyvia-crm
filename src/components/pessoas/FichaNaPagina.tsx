@@ -6,6 +6,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { FichaInterior, type FichaInteriorProps } from "./FichaInterior";
 import { focoDeRegresso } from "./focoDeRegresso";
+import { ALTURA_DO_PAI } from "./layoutGuia";
 import { vizinhas } from "./navegacaoFicha";
 import { LigacaoVoltarFicha, ProvedorFichaNaPagina } from "./pecasFicha";
 import type { ResumoPessoa } from "./pessoasTipos";
@@ -67,7 +68,7 @@ export function FichaNaPagina({ resumo, aberto, aoFechar, idsVisiveis, aoIrPara,
   if (!aberto) return null;
   return (
     <ProvedorFichaNaPagina aoFechar={aoFechar}>
-      <section data-ficha-raiz="" aria-label={resumo?.pessoa.nome}>
+      <section data-ficha-raiz="" aria-label={resumo?.pessoa.nome} className={ALTURA_DO_PAI}>
         {resumo ? (
           <FichaInterior key={resumo.pessoa.id} {...resto} naPagina resumo={resumo} fecharPainel={fecharPainel} vizinhas={viz} aoIr={ir} />
         ) : (

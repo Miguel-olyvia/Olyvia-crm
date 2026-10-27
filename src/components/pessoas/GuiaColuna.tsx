@@ -68,13 +68,28 @@ export function ColunaDoGuia({ faseRotuloChave, itens, escolhido, aoEscolherPass
   );
 }
 
-/** O que ficou registado num passo, em leitura: o nome do passo, o registo (ou «Sem registo») e se está feito. */
+/**
+ * O que ficou registado num passo, em leitura: o nome do passo, o resumo e se está feito. O resumo é uma lista de definições (rótulo e valor; «Por
+ * preencher» onde não há nada, dito por texto e não só pela cor); um passo sem resumo mostra o registo em texto (ou «Sem registo»).
+ */
 export function RegistoDoItem({ item, comTitulo = true }: { item: ItemChecklist | null; comTitulo?: boolean }) {
   const { t } = useTranslation();
+  const linhas = item?.linhas ?? [];
   return (
     <div className="space-y-1 rounded-lg border border-border/60 bg-muted/40 p-3">
       {item && comTitulo && <p className="text-sm text-muted-foreground">{t(item.rotuloChave)}</p>}
-      <p className={cn("break-words text-base", item?.detalhe ? "font-medium text-foreground" : "text-muted-foreground")}>{item?.detalhe ?? t(`${P}guia.semRegisto`)}</p>
+      {linhas.length > 0 ? (
+        <dl className="grid gap-x-6 gap-y-2 py-1 sm:grid-cols-2">
+          {linhas.map((l, i) => (
+            <div key={`${i}-${l.rotulo}`} className="min-w-0">
+              <dt className="text-sm text-muted-foreground">{l.rotulo}</dt>
+              <dd className={cn("break-words text-[15px]", l.valor ? "font-medium text-foreground" : "text-muted-foreground")}>{l.valor ?? t(`${P}guia.cliente.vazio`)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className={cn("break-words text-base", item?.detalhe ? "font-medium text-foreground" : "text-muted-foreground")}>{item?.detalhe ?? t(`${P}guia.semRegisto`)}</p>
+      )}
       {item && <p className="text-sm text-muted-foreground">{t(`${P}guia.registo.${item.feito ? "feita" : "porFazer"}`)}</p>}
     </div>
   );
