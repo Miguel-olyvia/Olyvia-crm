@@ -353,7 +353,7 @@ export const minimoLinha = (C: Custos, l: LinhaCat, minGeral: number) => C.minLi
 export type IdAlerta = "sem-receita" | "sem-custo-hora" | "sem-tecnicos" | "subempreitada" | "desatualizado" | "abaixo-custo" | "abaixo-minimo" | "justificacao";
 /** 22/10: os textos dos avisos do €/h (o Catálogo e o orçamento dizem o mesmo). */
 export const textoSemCustoHora = (nomes: string[]) =>
-  `${nomes.join(", ")}: sem técnicos no RH e sem salário no perfil. A mão de obra destes passos conta 0 €: ligue um técnico a este ofício (RH › ficha da pessoa › Obra) ou ponha o salário do perfil.`;
+  `${nomes.join(", ")}: sem técnicos no RH e sem salário no perfil. A mão de obra destes passos conta 0 €: ligue um técnico a este ofício (RH › ficha da pessoa › Detalhes laborais › Ofícios de obra) ou ponha o salário do perfil.`;
 export const textoSemTecnicos = (nomes: string[]) => `${nomes.join(", ")}: sem técnicos no RH. Usa o €/h do salário do perfil.`;
 export const TEXTO_SUBEMPREITADA = "Subempreitada sem custo: o custo e o preço ficam a 0 €. Ponha o preço do subempreiteiro (pedido por obra) na receita do Catálogo antes de o vender.";
 /** 26/10: o aviso no orçamento: o custo da subempreitada escreve-se na linha (é um preço por obra). */

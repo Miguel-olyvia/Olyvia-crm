@@ -32,6 +32,7 @@ import { rhExemploOrganizacaoTranslations } from "@/translations/rhExemploOrgani
 import { rhExemploJustificacoesTranslations } from "@/translations/rhExemploJustificacoes";
 import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
 import { canalDenunciasMinhaAreaTranslations } from "@/translations/canalDenunciasMinhaArea";
+import { rhOficiosObraTranslations } from "@/translations/rhOficiosObra";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -177,6 +178,11 @@ Object.keys(canalDenunciasTranslations).forEach((lang) => {
 // Canal de denúncias dentro da app (`cdm.*`, `sidebar.rhExemploDenunc*`, `sidebar.rhExemploMinhasDenuncias`) — A minha área e RH.
 Object.keys(canalDenunciasMinhaAreaTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...canalDenunciasMinhaAreaTranslations[lang as keyof typeof canalDenunciasMinhaAreaTranslations] };
+});
+
+// Ficha de RH › "Ofícios de obra" (`hr.oficiosObra.*`) — módulo próprio, mesmo padrão.
+Object.keys(rhOficiosObraTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhOficiosObraTranslations[lang as keyof typeof rhOficiosObraTranslations] };
 });
 
 /**

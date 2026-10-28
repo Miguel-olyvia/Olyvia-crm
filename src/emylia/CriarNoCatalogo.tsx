@@ -577,7 +577,7 @@ function FormTecnico({ S, C, onCriado }: { S: Estado; C: Custos; onCriado: (id: 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="grid min-w-0 content-start gap-5">
-        <Secao i={1} titulo="O tipo de técnico" texto="Um ofício para os passos das receitas (ex.: Estucador). As pessoas ligam-se a ele no RH, na ficha da pessoa › Obra.">
+        <Secao i={1} titulo="O tipo de técnico" texto="Um ofício para os passos das receitas (ex.: Estucador). As pessoas ligam-se a ele no RH, na ficha da pessoa › Detalhes laborais › Ofícios de obra.">
           <Campo rot="Nome">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Estucador" className={CAMPO} autoFocus />}</Campo>
           {direcao
             ? <Campo rot="Salário base (opcional)" dica="Só conta enquanto não houver técnicos do RH com este perfil.">{(id) => <Num id={id} v={salario} set={setSalario} suf="€/mês" ph="" />}</Campo>
