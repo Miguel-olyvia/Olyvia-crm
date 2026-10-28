@@ -1038,6 +1038,12 @@ export function partes(d: Negocio, S: Estado) {
   return o;
 }
 
+/** Os ofícios da receita do serviço sem €/h (sem técnicos no RH nem salário no perfil); sem receita, o perfil do serviço. */
+function oficiosSemCusto(S: Estado, sid: SvcId, s: Servico): string[] {
+  const C = custosDe(S), rec = receitaDe(C, sid, s, S.cfg.alvo);
+  const nomes = rec ? custoReceita(rec, C, false).semCustoHora : [];
+  return nomes.length ? nomes : [s.perfil];
+}
 export interface Alerta { k: "x" | "w"; t: string; d: string; fix?: boolean; i?: number; sug?: number; aprov?: boolean; go?: Vista; key?: string }
 export function alertas(d: Negocio, S: Estado): Alerta[] {
   const A: Alerta[] = [], min = S.cfg.min / 100, alvo = S.cfg.alvo / 100, o = d.orc!, vistos = o.avisosVistos || {};
@@ -1052,7 +1058,8 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
     else if (x.preco < x.custo) A.push({ k: "x", fix: true, t: s.n, d: `${eur(l.pu)} € por ${s.un} · custo ${eur(l.cu)} €`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
     else if (m < min) A.push({ k: "x", fix: true, t: s.n, d: `Margem ${pct(m)} · mínimo ${S.cfg.min}%`, i, sug: r2(l.cu / (1 - alvo)), aprov: true });
     // 22/10: um ofício sem €/h (sem técnicos no RH e sem salário) não usa a média dos outros: a mão de obra conta 0 € e não se envia assim
-    if (s.semCusto) A.push({ k: "x", t: `Ofício sem custo/hora em ${s.n}`, d: textoSemCustoHora([s.perfil]), i, aprov: false, go: "catalogo", key: "sc" + l.sid });
+    // 28/10: o aviso nomeia os ofícios da receita sem €/h (num serviço do Catálogo, s.perfil é a categoria: "Revestimentos")
+    if (s.semCusto) A.push({ k: "x", t: `Ofício sem custo/hora em ${s.n}`, d: textoSemCustoHora(oficiosSemCusto(S, l.sid, s)), i, aprov: false, go: "catalogo", key: "sc" + l.sid });
     // 22/10: a subempreitada sem custo (receita vazia, linha a 0 €): só o aviso, para pôr o custo do subempreiteiro
     if (l.cu === 0 && !vistos["se" + l.sid] && subempreitadaSemCusto(receitaDe(custosDe(S), l.sid, s, S.cfg.alvo) ?? { origem: "estimada", mo: [], equip: [], cons: [] }))
       // 26/10: o subempreiteiro dá um preço por obra: o custo escreve-se nesta linha, não na receita do Catálogo
