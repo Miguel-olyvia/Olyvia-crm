@@ -75,6 +75,20 @@ describe("o €/h de cada ofício", () => {
     expect(bloqueado(d, S)).toBe(true); // nem com a aprovação da Direção
   });
 
+  it("28/10: num serviço do Catálogo, o aviso nomeia o ofício sem €/h e não a categoria do serviço", () => {
+    const { S, A } = comAcoes();
+    A.editarTecnico("hn", { perfilId: "montador" });
+    A.editarTecnico("sf", { perfilId: "montador" });
+    const sid = "c6"; // Instalação de Pavimento m2, categoria "Revestimentos"
+    garantirServico(S, sid);
+    expect(S.svc[sid]).toMatchObject({ perfil: "Revestimentos", semCusto: true });
+    const d = S.deals.find((x) => x.id === 1031)!;
+    d.orc!.linhas.push({ t: "svc", sid, q: 3, cu: custoUn(S.svc[sid], S), pu: 40 });
+    const al = alertas(d, S).find((a) => a.t === `Ofício sem custo/hora em ${S.svc[sid].n}`)!;
+    expect(al.d.startsWith("Ladrilhador: sem técnicos no RH")).toBe(true);
+    expect(al.d).not.toContain("Revestimentos");
+  });
+
   it("mexer no salário de um perfil não muda o custo de outro ofício (já não há média dos perfis)", () => {
     const C = custos0(), S = seed();
     const antes = custoReceita(receitaDe(C, "revest", S.svc.revest)!, C, true).total;
