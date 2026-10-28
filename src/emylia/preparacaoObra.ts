@@ -16,6 +16,7 @@ import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } 
 import { precoProduto } from "./produtosVisita";
 import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { lerInventario } from "./inventario/loja";
+import { faltaMateriaisReal, prontidaoDe, textoProntidaoReal, usarProntidao } from "./inventario/prontidaoReal";
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
 import { assinadas, diasAdenda, faturasAdenda, nomeParcela, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
@@ -46,6 +47,9 @@ export interface EncCliente {
   ref?: string;
   /** Quem a emitiu (ao validar o pagamento) e quando. */
   emitida?: { por: string; q: string };
+  /** F3 (28/10): numa organização real, a encomenda de cliente do CRM (client_contracts.id; n é o order_number). Vive nas Encomendas de
+   *  cliente da Olyvia, não no Inventário de exemplo: a prontidão lê-se de lá (inventario/prontidaoReal.ts). */
+  contrato?: string;
 }
 /** 21/10: uma encomenda de cliente de ajuste (EC-<id>-A1): os materiais novos de uma tarefa nova, de uma adenda ou mudados à mão
  *  depois da inicial (encomendasAjuste.ts). Vive no Inventário como a inicial; anulada se as tarefas dela saíram antes de alguma coisa sair. */
@@ -177,6 +181,7 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] 
   const p = d.obra.plano, F: string[] = [];
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "registar a fatura do ERP e receber o pagamento");
   else if (!d.obra.ec) F.push("emitir a encomenda de cliente");
+  else if (usarProntidao(d.obra.ec)) F.push(...faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)));
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   // 21/10 (decisão B): as adendas assinadas antes do arranque também: o pagamento de cada uma e a encomenda dos materiais dela (como as
   // outras de ajuste, as encomendas a fornecedor dela não seguram o arranque: as tarefas esperam no plano). Com a obra a andar, não bloqueiam nada.
@@ -197,6 +202,7 @@ export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parce
 /** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
 export function textoMateriais(d: Negocio, r: ResumoEcNeg | null): string {
   if (!d.obra.ec) return d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.";
+  if (usarProntidao(d.obra.ec)) return textoProntidaoReal(d.obra.ec.n, prontidaoDe(d.obra.ec.contrato));
   if (!d.obra.ec.ref) return "Obra do exemplo: os materiais já estão na obra.";
   return r ? `Encomenda de cliente ${r.id}: ${textoResumoEc(r)}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`;
 }

@@ -61,7 +61,9 @@ async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<
   return { ref: { id: r.negocioId, entityId: r.entityId }, numero: Number((data as { numero: number }).numero) };
 }
 
-export interface Sincronizacao { gravados: number; erros: string[]; avisos: string[] }
+/** F3: `reler`: houve fatura, pagamento ou anulação no servidor (a encomenda de cliente pode ter nascido ou sido cancelada): quem chama relê
+ *  a organização para o ecrã ter a encomenda da base (o contrato, o número) e a ligação ao Inventário. */
+export interface Sincronizacao { gravados: number; erros: string[]; avisos: string[]; reler?: boolean }
 
 /** Grava os negócios que mudaram. Atualiza `refs` e a fotografia com o que ficou gravado. Os de `soLeitura` (negócios do CRM, com
  *  documentos do CRM) nunca se gravam: a base recusa-os (NE005) e um que faltasse em `refs` criava uma lead nova. */
@@ -82,7 +84,7 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
       // chave da fatura) fica no negócio, para o JSON que se grava a seguir bater com a base
       const antes = foto.get(d.id);
       const ops = novasNoFinanceiro(antes ? (JSON.parse(antes) as Negocio) : null, d);
-      if (ops.length) for (const a of await gravarFinanceiro(sb, org, refs.get(d.id)!.id, d, ops)) out.avisos.push(`${d.nome}: ${a}`);
+      if (ops.length) { out.reler = true; for (const a of await gravarFinanceiro(sb, org, refs.get(d.id)!.id, d, ops)) out.avisos.push(`${d.nome}: ${a}`); }
       const L = paraLinhas(d);
       const atual = L.orcamentos.find((o) => o.estado !== "substituido");
       if (atual && d.orc) {

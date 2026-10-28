@@ -35,7 +35,7 @@ describe("financeiroDe", () => {
       ] } as Negocio["fin"],
       adendas: [{ n: "AD-1001-1", faturas: [{ n: "FT 8", q: "2026-10-09", i: 0, l: "50%", p: 0.5, v: 80, recibo: { n: "RC 2026/9", q: "x" } }] }] as unknown as Negocio["adendas"],
     });
-    expect(financeiroDe(d).map((o) => (o.k === "fatura" ? `F ${o.chave} ${o.numero}` : `P ${o.fatura}`))).toEqual(
+    expect(financeiroDe(d).map((o) => (o.k === "fatura" ? `F ${o.chave} ${o.numero}` : o.k === "pagamento" ? `P ${o.fatura}` : `A ${o.motivo}`))).toEqual(
       ["F t1 FT 1", "F t2 FT 2", "F AD-1001-1#0 FT 8", "P FT 1", "P FT 8"]);
   });
 

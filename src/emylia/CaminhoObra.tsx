@@ -18,6 +18,7 @@ import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { TRILHOS, faltaParaArrancar, passosPreparacao, type PassoPrep, type Trilho } from "./preparacaoObra";
 import { useInventario } from "./inventario/loja";
+import { prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import { useFrota } from "./frota/loja";
 import { ligacoesObra } from "./frota/transporteObra";
 import { ProximoRececaoNegocio } from "./RececaoNegocio";
@@ -147,7 +148,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
             <div>
               <p className="text-[15px] font-semibold">{go1.t}</p>
               <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Condições para arrancar">
-                {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)],
+                {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", usarProntidao(d.obra.ec) ? prontaReal(prontidaoDe(d.obra.ec.contrato)) : !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)],
                   // 21/10 (decisão B): antes do arranque, cada adenda assinada: a 1.ª parcela paga e, com materiais, a encomenda dela (emitida com esse pagamento)
                   ...(go1.estado === "feito" ? [] : assinadas(d).flatMap((a) => [[`1.ª parcela da adenda ${a.n} paga`, primeiraPaga(a)],
                     ...(ecDaAdenda(d, a.n) || porEncomendarDe(d, a.n).length ? [[`Encomenda da adenda ${a.n}`, !!ecDaAdenda(d, a.n)]] : [])])),
@@ -183,7 +184,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
 
       {/* primeiro, o que falta: o arranque (as condições à vista) e o próximo passo da Receção */}
       {!arrancou && <div className="mt-4">{blocoArranque}</div>}
-      {!arrancou && d.obra.ec?.ref && <ProximoRececaoNegocio d={d} A={A} go={go} />}
+      {!arrancou && (d.obra.ec?.ref || d.obra.ec?.contrato) && <ProximoRececaoNegocio d={d} A={A} go={go} />}
 
       {/* o que já está feito, numa linha; abre-se para ver o percurso todo */}
       {contratoEPago && (
@@ -218,7 +219,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
                     className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
                     {k === "ec" ? "Ver a encomenda" : "Ver o plano"}<ChevronDown className={cn("h-4 w-4 transition-transform", aberto === k && "rotate-180")} aria-hidden="true" />
                   </button>
-                  {k === "ec" && d.obra.ec?.ref && (
+                  {k === "ec" && (d.obra.ec?.ref || d.obra.ec?.contrato) && (
                     <button type="button" onClick={go(() => A.abrirInv(d.id))} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
                       Abrir no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
                     </button>

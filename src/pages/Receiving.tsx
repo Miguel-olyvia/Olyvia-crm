@@ -1475,6 +1475,7 @@ export default function Receiving() {
     vistaParam,
     tab: listTab,
     po: poParam,
+    ec: ecParam,
   } = parseReceivingParams(searchParams);
   // Sem purchase_orders.view a lista não mostra nada: o ecrã abre no leitor (salvo ?vista= explícito).
   const defaultVista: "lista" | "leitor" = permissionsLoading || poListGate.allowed ? "lista" : "leitor";
@@ -3834,7 +3835,8 @@ export default function Receiving() {
   const openNotesQuery = useOpenNotesCount(orgId, canSeeNotesPanel && listOn);
   const receivablePos = receivableQuery.data ?? [];
   const today = todayIsoLocal();
-  const [listFilters, setListFilters] = useState<FiltrosRec>(FILTROS_REC);
+  // ?ec=<contrato> (vindo do negócio): a lista abre filtrada por essa encomenda de cliente (o filtro "Cliente/obra" da lista)
+  const [listFilters, setListFilters] = useState<FiltrosRec>(() => (ecParam ? { ...FILTROS_REC, cli: ecParam } : FILTROS_REC));
   /** Guia lida na barra (fica escolhida no painel) e artigo lido (linha destacada). */
   const [readNoteId, setReadNoteId] = useState<string | null>(null);
   const [highlightProductId, setHighlightProductId] = useState<string | null>(null);

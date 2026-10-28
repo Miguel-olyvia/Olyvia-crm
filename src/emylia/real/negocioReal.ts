@@ -8,6 +8,7 @@ import { PREFIXO_PROD, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
 import { faturasAdenda, totaisLinhas, type Adenda, type EstadoAdenda, type FaturaAdenda, type LinhaAdenda as LinhaAdendaEmylia } from "../adendas";
+import type { EcAjuste, EncCliente } from "../preparacaoObra";
 
 /* ------------------------------------------------------------------ datas */
 const ANO = 2026;
@@ -106,10 +107,15 @@ export interface LinhasNegocio {
   contratos: LinhaContrato[];
   faturas: LinhaFatura[] | null;
   historico: { ordem: number; texto: string; tipo: string; ocorrido_em: string | null }[];
-  /** A encomenda de cliente emitida no 1.º pagamento validado (o motor guarda-a em obra.ec). Só vai para a base. */
-  ec?: { emitida_em: string | null; por: string | null } | null;
+  /** F3 (20261231999700): a encomenda de cliente emitida no servidor (fatura registada e pagamento validado), só de leitura: o contrato do
+   *  CRM (o em vigor ou, na venda direta, o de suporte) e as das adendas. Nunca vai para a base (é ela que a emite). */
+  ec?: LinhaEcLida | null;
   /** As adendas (trabalhos a mais depois do contrato). */
   adendas?: LinhaAdendaNegocio[];
+}
+export interface LinhaEcLida {
+  contract_id: string; order_number: string | null; emitida_em: string | null; emitida_por: string | null; venda_direta?: boolean;
+  adendas?: { referencia: string; contract_id: string; order_number: string | null; emitida_em: string | null; emitida_por: string | null }[];
 }
 export interface LinhaAdendaLinha {
   ordem: number; servico: string | null; chave: string; livre: boolean; descricao: string; unidade: string; quantidade: number; preco_un: number;
@@ -355,12 +361,23 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       recibo: f.recibo ?? null,
     })) : null,
     historico: d.hist.map((e, i) => ({ ordem: i, texto: e.t, tipo: e.k, ocorrido_em: iso(e.q) })),
-    ec: d.obra?.ec ? { emitida_em: iso(d.obra.ec.emitida?.q ?? d.obra.ec.criada), por: d.obra.ec.emitida?.por ?? null } : null,
     adendas: (d.adendas ?? []).map((a, i) => adendaParaLinhas(a, Number(/-(\d+)$/.exec(a.n)?.[1]) || i + 1, iso)),
   };
 }
 
 /* ------------------------------------------------------------------ linhas → Negocio */
+/** F3: a encomenda de cliente do servidor no formato do motor (obra.ec e, as das adendas, obra.ecsAjuste). As linhas vivem nas Encomendas
+ *  de cliente da Olyvia (contrato), não aqui; a prontidão lê-se de lá (inventario/prontidaoReal.ts). Sem EC emitida: nada. */
+export function obraDaEc(e: LinhaEcLida | null | undefined): { ec?: EncCliente; ecsAjuste?: EcAjuste[] } {
+  if (!e?.contract_id) return {};
+  const q = deIso(e.emitida_em);
+  const ec: EncCliente = { n: e.order_number ?? "Encomenda de cliente", estado: "emitida", criada: q, linhas: [], valor: 0, custo: 0, contrato: e.contract_id,
+    emitida: { por: e.emitida_por ?? "Financeiro", q } };
+  const ads = (e.adendas ?? []).map((a): EcAjuste => ({ n: a.order_number ?? "Encomenda da adenda", estado: "emitida", criada: deIso(a.emitida_em), linhas: [], valor: 0, custo: 0,
+    contrato: a.contract_id, emitida: { por: a.emitida_por ?? "Financeiro", q: deIso(a.emitida_em) }, motivo: "adenda " + a.referencia, adenda: a.referencia }));
+  return { ec, ...(ads.length ? { ecsAjuste: ads } : {}) };
+}
+
 const linhaParaProd = (p: LinhaProdutoVisita): ProdVisita => ({
   id: p.produto, n: p.nome, un: p.unidade, custo: p.custo_un, q: p.quantidade, no: p.categoria,
   ...(p.cliente_fornece ? { cliente: true } : {}), ...(p.servico ? { svc: p.servico } : {}), ...(p.fator != null ? { fator: p.fator } : {}),
@@ -459,7 +476,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
         ...(x.recibo ? { recibo: x.recibo } : {}),
       })) } : {}),
     },
-    obra: { plano: null, mats: null, real: null, aprendido: false },
+    obra: { plano: null, mats: null, real: null, aprendido: false, ...obraDaEc(L.ec) },
     hist: [...L.historico].sort((a, b) => a.ordem - b.ordem).map((e): Evento => ({ t: e.texto, q: deIso(e.ocorrido_em), k: e.tipo as Evento["k"] })),
     ...(L.adendas?.length ? { adendas: [...L.adendas].sort((x, y) => x.numero - y.numero).map(adendaDeLinhas) } : {}),
   };

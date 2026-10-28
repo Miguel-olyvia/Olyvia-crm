@@ -32,6 +32,9 @@ import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
+import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
+import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
+import { definirOrgErp } from "@/emylia/erpEticadata";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
@@ -91,16 +94,29 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     if (a.atraso) setTimeout(mostra, a.atraso); else mostra();
   }, []);
 
+  // o que a base devolveu passa a ser o estado (a leitura ao abrir e a releitura depois do Financeiro)
+  const aplicarLidos = useCallback((lidos: Awaited<ReturnType<typeof lerNegocios>>) => {
+    refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
+    soLeitura.current = new Set(lidos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
+    S.deals = lidos.map(negocioDoLido);
+    // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
+    garantirServicosDosNegocios(S, S.deals);
+    S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
+    foto.current = fotografarNegocios(S.deals);
+  }, [S]);
+
   // grava o que mudou; se mudar outra vez enquanto grava, volta a gravar no fim
   const gravar = useCallback(async () => {
     if (!org || !ids.current) return;
     if (aGravar.current) { deNovo.current = true; return; }
     aGravar.current = true;
     setGravacao({ k: "a-gravar" });
+    let relerFinanceiro = false;
     try {
       do {
         deNovo.current = false;
         const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current);
+        if (r.reler) relerFinanceiro = true;
         if (r.erros.length) { setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
@@ -119,11 +135,20 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
           ? { msg: r.nova ? "Conta do portal criada" : "Documento no portal do cliente", sub: `Email enviado para ${r.email.para ?? email}`, kind: "ok" }
           : { msg: "O email do portal não seguiu", sub: `${r.email?.motivo ? r.email.motivo + ". " : ""}${r.password ? `Entregue ao cliente: ${email} · password ${r.password}` : "Contacte o cliente por outro canal."}`, kind: "bad" });
       }
+      // F3: com fatura, pagamento ou anulação no servidor, relê-se: a encomenda de cliente da base (contrato e número), a fase e a prontidão
+      if (relerFinanceiro) {
+        const relidos = await lerNegocios(supabase, org, ids.current);
+        aplicarLidos(relidos);
+        await carregarEncomendas(relidos);
+        await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
+      }
+    } catch (e) {
+      avisar({ msg: "Não foi possível atualizar os negócios", sub: (e as Error).message, kind: "bad" });
     } finally {
       aGravar.current = false;
       redesenhar();
     }
-  }, [org, S, avisar, redesenhar]);
+  }, [org, S, avisar, redesenhar, aplicarLidos]);
 
   // 28/10: a encomenda de cliente e as encomendas a fornecedor de cada negócio, da base (as emitidas no servidor)
   const carregarEncomendas = useCallback(async (lidos: readonly NegocioLido[]) => {
@@ -151,7 +176,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     if (fora) navigate(fora);
   }, [S, avisar, redesenhar, gravar, navigate]);
   const go = useCallback((fn: () => void) => () => run(fn), [run]);
-  const A = useMemo(() => acoes(S, avisar, run), [S, avisar, run]);
+  // F3: abrir a encomenda de cliente, a Receção e as compras vai às páginas reais, filtradas pela encomenda do negócio
+  const A = useMemo(() => acoes(S, avisar, run, ligacaoInventario((url) => navigate(url))), [S, avisar, run, navigate]);
+  useEffect(() => { definirOrgErp(org); return () => definirOrgErp(null); }, [org]);
+  useEffect(() => aoMudarProntidao(redesenhar), [redesenhar]);
 
   useEffect(() => {
     if (!org) return;
@@ -165,18 +193,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       ids.current = idsServico(cat.M.ids.servico);
       const lidos = await lerNegocios(supabase, org, ids.current);
       if (!vivo) return;
-      refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
-      soLeitura.current = new Set(lidos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
-      S.deals = lidos.map(negocioDoLido);
-      // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
-      garantirServicosDosNegocios(S, S.deals);
-      S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
-      foto.current = fotografarNegocios(S.deals);
+      aplicarLidos(lidos);
+      // F3: a prontidão das encomendas de cliente emitidas (o passo «À espera dos materiais»)
+      await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
+      if (!vivo) return;
       setPronto(true);
       void carregarEncomendas(lidos);
     })().catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
-  }, [org, S, avisar, carregarEncomendas]);
+  }, [org, S, avisar, carregarEncomendas, aplicarLidos]);
 
   // a letra da Emylia (Lexend)
   useEffect(() => {
