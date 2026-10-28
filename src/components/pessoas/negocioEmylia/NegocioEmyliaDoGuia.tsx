@@ -33,6 +33,8 @@ import { FaseDaEmylia } from "./FaseDaEmylia";
 import { podeMontarObra } from "./protegerObra";
 import { SoParaLer } from "./SoParaLer";
 import { usePermissoesPosContrato } from "./permissoesPosContrato";
+import { AvisoQuestionario } from "./visitaConfiguravel/AvisoQuestionario";
+import { useCtxComEfeitos } from "./visitaConfiguravel/useCtxComEfeitos";
 import { linhasDaPonte, type FactosDaAbordagem } from "./ponteDaAbordagem";
 import type { NegocioEmylia } from "./useNegocioEmylia";
 
@@ -83,7 +85,7 @@ function PonteDaAbordagem({ d, abordagem }: { d: Negocio | undefined; abordagem:
 }
 
 /** Os avisos do motor (porque é que uma ação foi recusada, o que ficou feito): uma região viva; os maus avisam logo (alert). */
-function Avisos({ avisos }: { avisos: readonly AvisoEmylia[] }) {
+export function Avisos({ avisos }: { avisos: readonly AvisoEmylia[] }) {
   const { t } = useTranslation();
   if (avisos.length === 0) return null;
   return (
@@ -142,7 +144,7 @@ function FaseLida({ ctx, d, fase }: { ctx: Ctx; d: Negocio; fase: FaseEmylia }) 
  * O que a Emylia mostra no cabeçalho do negócio e que a ficha do Pipeline ainda não tinha, só com o que existe nos dados (nada se inventa): o email, a morada,
  * o WhatsApp, «€ x s/ IVA · margem y%», o estado da conta do cliente no portal, «Ver como o cliente», o acesso ao portal e o aviso de contrato anulado.
  */
-function CabecalhoDoNegocio({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+export function CabecalhoDoNegocio({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { t } = useTranslation();
   const [portal, setPortal] = useState(false);
   const email = (d.f.email || (d.tel.includes("@") ? d.tel : "")).trim();
@@ -192,7 +194,9 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
   const Titulo = nivel;
   const pode = usePermissoesPosContrato(org, e.ctx?.S ?? null, podeEditar);
   const verFeita = faseVista !== null;
-  const { d, ctx } = e;
+  const { d } = e;
+  // as ações do orçamento mantêm as linhas do levantamento configurável (os efeitos que a organização definiu); sem configuração é o ctx de sempre
+  const ctx = useCtxComEfeitos(e.ctx);
   const soLeitura = e.docsCrm || !pode.gravar;
   const botaoTentar = (aoClicar: () => void, rotulo: string): ReactNode => (
     <button type="button" onClick={aoClicar} className={cn("min-h-11 rounded-lg border border-input px-4 font-medium", FOCO)}>{rotulo}</button>
@@ -236,6 +240,7 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
         </div>
       )}
       <Avisos avisos={e.avisos} />
+      {d && !e.docsCrm && !verFeita && <AvisoQuestionario />}
       {d && !e.docsCrm && pode.falhou && (
         <div role="alert" className="space-y-2 rounded-xl border border-destructive/30 p-3 text-[15px]">
           <p className="text-destructive">{t(`${N}permissoesFalharam`)}</p>

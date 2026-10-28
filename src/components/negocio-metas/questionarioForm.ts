@@ -1,7 +1,8 @@
 // O questionário do formulário do levantamento: as secções e perguntas que o formulário desenha. Vem de neg_questionario_levantamento (sem as
 // inativas, para quem preenche de novo) ou, no protótipo sem base, do catálogo do código. Em ambos os casos é a mesma forma (SeccaoDef), para
 // os mesmos componentes servirem os dois. Só lógica pura: a leitura da base vive em `@/hooks/pessoas` (esta pasta não fala com a base).
-import type { BlocoDef, NumeroDef, OpcaoDef, PerguntaDef, SeccaoDef, TipoPergunta } from "./perguntasTipos";
+import { lerItensEfeito, type ItemEfeito } from "@/hooks/pessoas/workflow/efeitosQuestionario";
+import type { BlocoDef, EfeitoCfgPergunta, NumeroDef, OpcaoDef, PerguntaDef, SeccaoDef, TipoPergunta } from "./perguntasTipos";
 import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { SECCOES_VISITA } from "./visitaExemplo";
 
@@ -57,6 +58,24 @@ function lerOpcoes(cru: unknown): OpcaoDef[] {
   });
 }
 
+/** O que a organização configurou no orçamento (campo da Emylia, modo, efeitos por unidade e por opção); `undefined` se a base não devolve nada disto. */
+function lerEfeitoCfg(cru: Obj): EfeitoCfgPergunta | undefined {
+  const campoEmylia = texto(cru.campo_emylia) ?? "";
+  const modoCru = texto(cru.efeito_modo);
+  const modo = modoCru === "nenhum" || modoCru === "emylia" || modoCru === "proprio" ? modoCru : "";
+  const itens = lerItensEfeito(cru.efeito);
+  const porOpcao: Record<string, { valorEmylia: string; itens: ItemEfeito[] }> = {};
+  for (const o of lista(cru.opcoes)) {
+    if (!ehObjeto(o) || o.activa === false) continue;
+    const chave = texto(o.chave);
+    const valorEmylia = texto(o.valor_emylia) ?? "";
+    const dosItens = lerItensEfeito(o.efeito);
+    if (chave && (valorEmylia !== "" || dosItens.length > 0)) porOpcao[chave] = { valorEmylia, itens: dosItens };
+  }
+  if (campoEmylia === "" && modo === "" && itens.length === 0 && Object.keys(porOpcao).length === 0) return undefined;
+  return { campoEmylia, modo, itens, porOpcao };
+}
+
 /** O tipo e as opções, o limite de caracteres e os limites do número de uma pergunta (só o que o tipo usa). */
 function lerPergunta(cru: Obj, chave: string, tipo: TipoPergunta, rotulo: string, conhecidas: ReadonlySet<string>): PerguntaDef {
   const pergunta: PerguntaDef = { id: chave, rotulo: [rotulo, rotulo], literal: true, tipo, opcoes: tipo.startsWith("escolha") ? lerOpcoes(cru.opcoes) : [] };
@@ -66,6 +85,8 @@ function lerPergunta(cru: Obj, chave: string, tipo: TipoPergunta, rotulo: string
     const numero: NumeroDef = { min: numeroOuNull(n.min), max: numeroOuNull(n.max), casas: numeroOuNull(n.casas), unidade: texto(n.unidade) };
     pergunta.numero = numero;
   }
+  const efeitoCfg = lerEfeitoCfg(cru);
+  if (efeitoCfg) pergunta.efeitoCfg = efeitoCfg;
   const dep = ehObjeto(cru.depende) ? cru.depende : null;
   const alvo = dep ? texto(dep.pergunta_chave) : null;
   // Sem pergunta de que depender (ou uma que a configuração nem tem), a pergunta vê-se: nunca se esconde uma pergunta por uma condição que não se cumpre.

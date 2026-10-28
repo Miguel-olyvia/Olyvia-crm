@@ -45,13 +45,16 @@ interface FaseDaEmyliaProps {
   /** O que vem por baixo dos passos (caminho da obra, trabalhos a mais, anular, histórico). */
   depois?: ReactNode;
   extra?: ReactNode;
+  /** Muda a lista de passos da Emylia antes de se desenhar (a visita acrescenta os passos do questionário configurável); sem isto, são os da Emylia. */
+  ajustarPassos?: (passos: Passo[]) => Passo[];
 }
 
-export function FaseDaEmylia({ ctx, d, soLeitura, topo, fasesFeitas, depois, extra }: FaseDaEmyliaProps) {
+export function FaseDaEmylia({ ctx, d, soLeitura, topo, fasesFeitas, depois, extra, ajustarPassos }: FaseDaEmyliaProps) {
   const { t } = useTranslation();
   const { S } = ctx;
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
-  const passos = passosDaFase(ctx, d, true);
+  const passosDaEmylia = passosDaFase(ctx, d, true);
+  const passos = ajustarPassos ? ajustarPassos(passosDaEmylia) : passosDaEmylia;
   const comFim = temBotaoFase(ctx, d);
   // abre no primeiro passo por fazer; se está tudo feito, abre logo no passo do negócio (o «Fim»)
   const idx = passos.findIndex((x) => !completo(x));

@@ -3,6 +3,7 @@
 import {
   ehEscolha, LIMITES, type CondicaoEd, type OpcaoEd, type PerguntaEd, type QuestionarioEd, type SeccaoEd,
 } from "./questionario";
+import { problemaDosItens } from "./efeitosQuestionario";
 
 // ---------------------------------------------------------------- listas
 
@@ -124,7 +125,7 @@ export function moverPergunta(seccoes: readonly SeccaoEd[], k: string, delta: -1
 export const adicionarOpcao = (seccoes: readonly SeccaoEd[], perguntaK: string, opcao: OpcaoEd): SeccaoEd[] =>
   mapPergunta(seccoes, perguntaK, (p) => ({ ...p, opcoes: [...p.opcoes, opcao] }));
 
-export const alterarOpcao = (seccoes: readonly SeccaoEd[], perguntaK: string, opcaoK: string, patch: Partial<Pick<OpcaoEd, "texto" | "activa">>): SeccaoEd[] =>
+export const alterarOpcao = (seccoes: readonly SeccaoEd[], perguntaK: string, opcaoK: string, patch: Partial<Pick<OpcaoEd, "texto" | "activa" | "valorEmylia" | "efeito">>): SeccaoEd[] =>
   mapPergunta(seccoes, perguntaK, (p) => ({ ...p, opcoes: p.opcoes.map((o) => (o.k === opcaoK ? { ...o, ...patch } : o)) }));
 
 export const removerOpcao = (seccoes: readonly SeccaoEd[], perguntaK: string, opcaoK: string): SeccaoEd[] =>
@@ -145,12 +146,12 @@ export const mudarCondicao = (seccoes: readonly SeccaoEd[], perguntaK: string, d
 
 export const CODIGOS_PROBLEMA = [
   "tituloSeccao", "textoPergunta", "blocoLongo", "poucasOpcoes", "muitasOpcoes", "textoOpcao", "limitesNumero", "casasNumero",
-  "unidadeLonga", "textoMaxInvalido", "condicaoInvalida", "demasiadasSeccoes", "demasiadasPerguntas", "caracteresControlo",
+  "unidadeLonga", "textoMaxInvalido", "condicaoInvalida", "demasiadasSeccoes", "demasiadasPerguntas", "caracteresControlo", "efeitoInvalido",
 ] as const;
 export type CodigoProblema = (typeof CODIGOS_PROBLEMA)[number];
 
 /** O campo do item `k` onde está o problema (o ecrã assinala-o e leva o foco até lá). */
-export type CampoProblema = "titulo" | "texto" | "bloco" | "opcoes" | "opcao" | "min" | "casas" | "unidade" | "textoMax" | "condicao" | "geral";
+export type CampoProblema = "titulo" | "texto" | "bloco" | "opcoes" | "opcao" | "min" | "casas" | "unidade" | "textoMax" | "condicao" | "efeito" | "geral";
 
 export interface Problema {
   codigo: CodigoProblema;
@@ -200,6 +201,11 @@ function problemasDaPergunta(p: PerguntaEd, alvos: ReadonlyMap<string, PerguntaE
   if (p.tipo === "texto") {
     const max = p.textoMax.trim();
     if (max !== "" && !(/^\d+$/.test(max) && Number(max) >= 1 && Number(max) <= LIMITES.textoMaxOmissao)) out.push(dado("textoMaxInvalido", "textoMax"));
+  }
+  // Os efeitos no orçamento só contam com o modo «próprio»; por preencher não se grava (nada de zeros por omissão).
+  if (p.efeitoModo === "proprio") {
+    if (p.tipo === "numero" && problemaDosItens(p.efeito ?? []) !== null) out.push(dado("efeitoInvalido", "efeito"));
+    if (ehEscolha(p.tipo)) for (const o of p.opcoes) if (problemaDosItens(o.efeito ?? []) !== null) out.push(dado("efeitoInvalido", "efeito", o.k));
   }
   if (p.depende) {
     const alvo = alvos.get(p.depende.pergunta);

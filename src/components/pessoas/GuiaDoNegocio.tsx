@@ -18,6 +18,8 @@ import { useLevantamentoDoNegocio } from "@/components/pessoas-processo/Levantam
 import { ContactoDoGuia } from "./assistente/ContactoDoGuia";
 import { levantamentoMaisRecente, visitaMarcadaMaisRecente } from "./assistente/hidratarAssistente";
 import { VisitaDoGuia } from "./assistente/VisitaDoGuia";
+import { QuestionarioFormularioProvider } from "@/hooks/pessoas/QuestionarioFormularioProvider";
+import { podeFazerVisitaNaEmylia, VisitaDaEmylia } from "./negocioEmylia/VisitaDaEmylia";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import type { FaseDoNegocio } from "./fasesDoNegocio";
 import { GuiaDoPasso, type AberturaDoAssistente } from "./GuiaDoPasso";
@@ -153,15 +155,29 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
     ? ({ aoVerFase, extra: extraDoGuia, faseVista, aoVoltarAoAtual, focarAoMontar }: AberturaDoAssistente): ReactNode => {
       const daEmylia = faseEmyliaVista(faseVista);
       if (daEmylia !== null && faseNova !== null) {
-        return (
+        const doNegocioEmylia = (
           <NegocioEmyliaDoGuia
             fase={daEmylia} atual={faseNova} e={emylia.e} org={emylia.org} podeEditar={podeEditar} feitas={doPasso.feitas} faseVista={faseVista}
             aoVerFase={aoVerFase} aoVoltarAoAtual={aoVoltarAoAtual} nivel={nivel} extra={extraDoGuia} aPassar={emylia.aPassar} repetirGravacao={emylia.repetirGravacao}
             abordagem={{ email: dadosDaAbordagem.email, chamadas: ligados.contactos, visitasMarcadas: ligados.visitasMarcadas, levantamentos: ligados.levantamentos }}
           />
         );
+        // com a organização real, o orçamento mantém os efeitos do levantamento configurável: o questionário vem por contexto
+        return emylia.org !== null ? <QuestionarioFormularioProvider>{doNegocioEmylia}</QuestionarioFormularioProvider> : doNegocioEmylia;
       }
       const qual = assistenteDe(faseVista);
+      // A fase Visita com a lógica da Emylia (as escolhas mexem no orçamento ao vivo) e o levantamento configurável da organização. Só na fase atual e com a
+      // organização real; com a leitura em erro, sem o negócio ou com documentos do CRM fica o assistente de sempre, logo abaixo.
+      if (qual === "visita" && faseVista === null && emylia.org !== null && podeFazerVisitaNaEmylia(emylia.e)) {
+        return (
+          <QuestionarioFormularioProvider>
+            <VisitaDaEmylia
+              key="visita-emylia" e={emylia.e} org={emylia.org} podeEditar={podeEditar} faseRotuloChave={doPasso.faseRotuloChave} feitas={doPasso.feitas}
+              aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia} repetirGravacao={emylia.repetirGravacao}
+            />
+          </QuestionarioFormularioProvider>
+        );
+      }
       if (qual === null) return null;
       const feita = faseVista !== null ? doPasso.feitas.find((f) => f.id === faseVista) : undefined;
       // Uma fase feita que o guia não tem entre as suas (não devia acontecer) fica com a leitura de sempre.

@@ -29,6 +29,31 @@ export interface PerguntaDef {
   numero?: NumeroDef;
   /** O máximo de caracteres de uma resposta de texto (a base aplica 2000 quando falta). */
   textoMax?: number;
+  /** O que a organização configurou para esta pergunta no orçamento e na ligação à Emylia; sem isto a pergunta é só uma nota do levantamento. */
+  efeitoCfg?: EfeitoCfgPergunta;
+}
+
+/** O efeito no orçamento de uma pergunta da base, como o questionário o devolve (os itens em números; ver workflow/efeitosQuestionario.ts). */
+export interface EfeitoCfgPergunta {
+  /** O campo da Emylia que a pergunta preenche (vazio = nenhum). */
+  campoEmylia: string;
+  /** Vazio = omissão: o efeito que a Emylia já tem no campo ligado, se o tiver. */
+  modo: "" | "nenhum" | "emylia" | "proprio";
+  /** O efeito por unidade (perguntas numéricas). */
+  itens: readonly ItemEfeitoCfg[];
+  /** Por chave de opção: o valor que tem no campo da Emylia e o efeito de ser a escolhida. */
+  porOpcao: Readonly<Record<string, { valorEmylia: string; itens: readonly ItemEfeitoCfg[] }>>;
+}
+
+export interface ItemEfeitoCfg {
+  tipo: "valor" | "horas" | "percentagem";
+  descricao: string;
+  custo?: number;
+  preco?: number;
+  horas?: number;
+  custo_hora?: number;
+  preco_hora?: number;
+  pct?: number;
 }
 
 export interface BlocoDef {

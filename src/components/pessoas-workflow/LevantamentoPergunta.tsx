@@ -6,6 +6,7 @@ import { criarOpcao, ehEscolha, LIMITES, TIPOS_PERGUNTA, type PerguntaEd, type T
 import { alterarPergunta, moverPergunta, removerPergunta } from "@/hooks/pessoas/workflow/questionarioEdicao";
 import { useTranslation } from "@/hooks/useTranslation";
 import { LevantamentoCondicao } from "./LevantamentoCondicao";
+import { LevantamentoEfeito } from "./LevantamentoEfeito";
 import { LevantamentoOpcoes } from "./LevantamentoOpcoes";
 import { BotaoIcone, Campo, Caixa, W, type ContextoEditor } from "./LevantamentoPecas";
 
@@ -85,6 +86,7 @@ function EditorPergunta({ pergunta, ctx }: { pergunta: PerguntaEd; ctx: Contexto
         aoMudar={(activa) => mudar({ activa })}
       />
       <CamposDoTipo pergunta={pergunta} ctx={ctx} />
+      <LevantamentoEfeito pergunta={pergunta} ctx={ctx} />
       {ehEscolha(pergunta.tipo) && <LevantamentoOpcoes pergunta={pergunta} ctx={ctx} />}
       <LevantamentoCondicao pergunta={pergunta} ctx={ctx} />
     </div>

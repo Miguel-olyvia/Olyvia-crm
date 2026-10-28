@@ -2,6 +2,8 @@
 // (migration 20261226090000). Em cada item há uma chave interna `k`: o id da base nos itens que já existem e uma ref temporária (`n1`, `n2`...)
 // nos novos. A base aceita as duas nas condições (`depende`), por isso a condição guarda sempre `k`. O cliente nunca manda chaves de negócio.
 
+import { itemParaEditor, itemParaEnvio, lerItensEfeito, modoDeEfeito, type ItemEfeitoEd, type ModoEfeito } from "./efeitosQuestionario";
+
 export type TipoPergunta = "escolha_unica" | "escolha_multipla" | "texto" | "numero";
 export const TIPOS_PERGUNTA: readonly TipoPergunta[] = ["escolha_unica", "escolha_multipla", "texto", "numero"];
 export const TIPOS_ESCOLHA: readonly TipoPergunta[] = ["escolha_unica", "escolha_multipla"];
@@ -30,6 +32,10 @@ export interface OpcaoEd {
   chave: string | null;
   texto: string;
   activa: boolean;
+  /** O valor que esta opção tem no campo da Emylia a que a pergunta está ligada (vazio = sem ligação). */
+  valorEmylia?: string;
+  /** O que esta opção acrescenta ao orçamento quando é a escolhida (só conta com o efeito «próprio» na pergunta). */
+  efeito?: ItemEfeitoEd[];
 }
 
 /** A condição de visibilidade: `pergunta` e `opcoes` são chaves internas (`k`) da pergunta e das opções de que depende. */
@@ -55,6 +61,12 @@ export interface PerguntaEd {
   textoMax: string;
   depende: CondicaoEd | null;
   opcoes: OpcaoEd[];
+  /** O campo da Emylia (chave de src/emylia/campos.ts) que esta pergunta preenche; vazio = só nota do levantamento. */
+  campoEmylia?: string;
+  /** Se a pergunta mexe no orçamento: vazio = omissão (o efeito da Emylia se há campo ligado que o tenha, senão nenhum). */
+  efeitoModo?: ModoEfeito | "";
+  /** O efeito por unidade, nas perguntas numéricas com o efeito «próprio». */
+  efeito?: ItemEfeitoEd[];
 }
 
 export interface SeccaoEd {
@@ -100,7 +112,10 @@ const lista = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 
 function lerOpcao(cru: unknown): OpcaoEd | null {
   if (!ehObjeto(cru) || typeof cru.id !== "string") return null;
-  return { k: cru.id, id: cru.id, chave: typeof cru.chave === "string" ? cru.chave : null, texto: texto(cru.texto), activa: cru.activa !== false };
+  return {
+    k: cru.id, id: cru.id, chave: typeof cru.chave === "string" ? cru.chave : null, texto: texto(cru.texto), activa: cru.activa !== false,
+    valorEmylia: texto(cru.valor_emylia), efeito: lerItensEfeito(cru.efeito).map(itemParaEditor),
+  };
 }
 
 function lerPergunta(cru: unknown): PerguntaEd | null {
@@ -113,6 +128,7 @@ function lerPergunta(cru: unknown): PerguntaEd | null {
     min: numeroTexto(numero.min), max: numeroTexto(numero.max), casas: numeroTexto(numero.casas), unidade: texto(numero.unidade),
     textoMax: tipo === "texto" ? numeroTexto(cru.texto_max) : "", depende: null,
     opcoes: lista(cru.opcoes).map(lerOpcao).filter((o): o is OpcaoEd => o !== null),
+    campoEmylia: texto(cru.campo_emylia), efeitoModo: modoDeEfeito(cru.efeito_modo), efeito: lerItensEfeito(cru.efeito).map(itemParaEditor),
   };
 }
 
@@ -165,6 +181,14 @@ const ouNull = (v: string): string | null => (aparar(v) === "" ? null : aparar(v
 const numeroOuNull = (v: string): number | null => (aparar(v) === "" ? null : Number(aparar(v)));
 const identidade = (item: { k: string; id: string | null }): { id: string } | { ref: string } => (item.id ? { id: item.id } : { ref: item.k });
 
+function paraEnvioOpcao(o: OpcaoEd, comEfeito: boolean): Obj {
+  const base: Obj = { ...identidade(o), texto: aparar(o.texto), activa: o.activa };
+  if (aparar(o.valorEmylia ?? "") !== "") base.valor_emylia = aparar(o.valorEmylia ?? "");
+  // O efeito de uma opção só conta (e só se valida) com o modo «próprio» na pergunta.
+  if (comEfeito && (o.efeito ?? []).length > 0) base.efeito = (o.efeito ?? []).map(itemParaEnvio);
+  return base;
+}
+
 function paraEnvioPergunta(p: PerguntaEd): Obj {
   const base: Obj = { ...identidade(p), texto: aparar(p.texto), tipo: p.tipo, bloco: ouNull(p.bloco), activa: p.activa };
   if (p.tipo === "numero") {
@@ -175,7 +199,11 @@ function paraEnvioPergunta(p: PerguntaEd): Obj {
     // 2000 é o tamanho de omissão (a base guarda null): mandar 2000 faria de cada gravação uma «alteração».
     base.texto_max = max === null || max === LIMITES.textoMaxOmissao ? null : max;
   }
-  base.opcoes = ehEscolha(p.tipo) ? p.opcoes.map((o) => ({ ...identidade(o), texto: aparar(o.texto), activa: o.activa })) : [];
+  base.opcoes = ehEscolha(p.tipo) ? p.opcoes.map((o) => paraEnvioOpcao(o, p.efeitoModo === "proprio")) : [];
+  // Só se manda o que foi definido: sem efeitos nem ligação a pergunta fica exatamente como a base já a aceita.
+  if (aparar(p.campoEmylia ?? "") !== "") base.campo_emylia = aparar(p.campoEmylia ?? "");
+  if (p.efeitoModo) base.efeito_modo = p.efeitoModo;
+  if (p.efeitoModo === "proprio" && p.tipo === "numero" && (p.efeito ?? []).length > 0) base.efeito = (p.efeito ?? []).map(itemParaEnvio);
   if (p.depende) base.depende = { pergunta: p.depende.pergunta, opcoes: p.depende.opcoes, sem_resposta: p.depende.semResposta };
   return base;
 }

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { criarOpcao, LIMITES, type PerguntaEd } from "@/hooks/pessoas/workflow/questionario";
 import { adicionarOpcao, alterarOpcao, moverOpcao, removerOpcao } from "@/hooks/pessoas/workflow/questionarioEdicao";
 import { useTranslation } from "@/hooks/useTranslation";
+import { LevantamentoEfeitoOpcao } from "./LevantamentoEfeito";
 import { BotaoIcone, BotaoTexto, Caixa, W, type ContextoEditor } from "./LevantamentoPecas";
 
 /** As opções de resposta de uma pergunta de escolha: texto, ativa, posição e apagar, e «Adicionar opção» (até 30). */
@@ -40,6 +41,7 @@ export function LevantamentoOpcoes({ pergunta, ctx }: { pergunta: PerguntaEd; ct
                 icone={Trash2} rotulo={t(`${W}lev.options.remove`, { n })} inativo={ctx.desativado}
                 aoClicar={() => ctx.mudar((s) => removerOpcao(s, pergunta.k, o.k), { foco: `lev-${pergunta.k}-add-opcao`, anuncio: t(`${W}lev.options.removed`, { n }) })}
               />
+              <LevantamentoEfeitoOpcao pergunta={pergunta} opcao={o} ctx={ctx} n={n} />
             </li>
           );
         })}
