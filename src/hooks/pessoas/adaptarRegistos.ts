@@ -19,8 +19,13 @@ const FORMATO_DIA = /^\d{4}-\d{2}-\d{2}$/;
 /** Um resultado que a ficha não conhece NÃO descarta o contacto (os totais deixavam de bater): fica sem resultado e a ficha mostra um texto neutro. */
 function adaptarContacto(c: ContactoFichaDb, pessoaId: string): ContactoPessoa {
   const resultado = escolher(c.resultado, RESULTADOS_CONTACTO);
+  const criadoPor = textoOuNull(c.criado_por_nome);
+  const diaProxima = c.proxima_acao_em ? diaLisboa(c.proxima_acao_em) : null;
+  const horaProxima = c.proxima_acao_em ? horaLisboa(c.proxima_acao_em) : null;
   return {
     id: c.id, pessoaId, data: diaLisboa(c.em) ?? "", hora: horaLisboa(c.em) ?? undefined, resultado, nota: c.notas?.trim() ?? "", negocioId: c.negocio_id,
+    ...(criadoPor ? { criadoPor } : {}),
+    ...(diaProxima ? { proximaAcao: { data: diaProxima, ...(horaProxima ? { hora: horaProxima } : {}) } } : {}),
   };
 }
 
@@ -45,8 +50,10 @@ function duracaoEmMinutos(inicio: string, fim: string | null): number | null {
 
 /** O quadro, quem vai e a duração: o que «Alterar visita» precisa de reenviar à base. */
 function agendaDaVisita(v: VisitaFichaDb, minutos: number | null): AgendaDaVisita {
+  const boardNome = textoOuNull(v.board_nome);
   return {
     boardId: v.board_id ?? null,
+    ...(boardNome ? { boardNome } : {}),
     recursos: (v.recursos ?? []).map((r) => ({ id: r.id, nome: r.nome?.trim() ?? "" })),
     duracaoMinutos: minutos,
   };
@@ -103,8 +110,18 @@ const ORIGENS_MORADA: readonly OrigemMorada[] = ["entidade", "manual", "localiza
 /** A origem da morada de um levantamento; fora da lista, ou em falta, `null`. */
 export const origemDaMorada = (origem: string | null | undefined): OrigemMorada | null => escolher(origem, ORIGENS_MORADA);
 
+/** A morada gravada no levantamento; `undefined` sem nenhum dos quatro campos (o passo não pré-preenche com uma morada vazia). */
+function moradaDoLevantamento(m: LevantamentoFichaDb["morada"]): LevantamentoPessoa["morada"] {
+  if (!m) return undefined;
+  const morada = {
+    rua: textoOuNull(m.rua) ?? "", codigoPostal: textoOuNull(m.codigo_postal) ?? "", localidade: textoOuNull(m.localidade) ?? "", andar: textoOuNull(m.andar) ?? "",
+  };
+  return Object.values(morada).some((v) => v !== "") ? morada : undefined;
+}
+
 function adaptarLevantamento(l: LevantamentoFichaDb, pessoaId: string): LevantamentoPessoa {
   const gravadas = lerRespostasGravadas(l.respostas);
+  const morada = moradaDoLevantamento(l.morada);
   return {
     id: l.id,
     pessoaId,
@@ -118,6 +135,7 @@ function adaptarLevantamento(l: LevantamentoFichaDb, pessoaId: string): Levantam
     },
     negocioId: l.negocio_id,
     moradaOrigem: origemDaMorada(l.morada?.origem),
+    ...(morada ? { morada } : {}),
   };
 }
 

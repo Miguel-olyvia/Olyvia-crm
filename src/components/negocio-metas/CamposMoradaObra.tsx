@@ -29,6 +29,8 @@ interface Props {
   real?: AtalhosMoradaReal;
   /** O título «Morada da obra» já está noutro sítio (o título do passo do assistente): a secção fica nomeada por aria-label e não repete o título. */
   semTitulo?: boolean;
+  /** Só para ler: o texto que os campos vazios mostram («Por preencher») em vez do exemplo de preenchimento. */
+  vazio?: string;
 }
 
 export interface AtalhosMoradaReal {
@@ -99,7 +101,7 @@ function AtalhosReais({ id, real, moradaAtual }: { id: string; real: AtalhosMora
 const CAMPO = cn("min-h-11", FOCO);
 
 /** A morada da obra (fica no negócio, não na pessoa): rua, código postal 0000-000, localidade e andar, com o atalho de usar a morada do contacto. */
-export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, origem = null, aoMudar, aoPreencher, origemObra = null, real, semTitulo = false }: Props) {
+export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, origem = null, aoMudar, aoPreencher, origemObra = null, real, semTitulo = false, vazio }: Props) {
   const { t } = useTranslation();
   const usarContacto = () => {
     if (moradaContacto.trim() === "") {
@@ -131,13 +133,13 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, orig
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5 sm:col-span-2">
           <Rotulo para={`${id}-rua`} texto={t(`${N}address.street`)} />
-          <Input id={`${id}-rua`} value={valores.rua} maxLength={MAX_RUA} autoComplete="off" className={CAMPO} onChange={(e) => aoMudar("rua", e.target.value)} />
+          <Input id={`${id}-rua`} value={valores.rua} maxLength={MAX_RUA} autoComplete="off" placeholder={vazio} className={CAMPO} onChange={(e) => aoMudar("rua", e.target.value)} />
         </div>
         <div className="space-y-1.5">
           <Rotulo para={`${id}-cp`} texto={t(`${N}address.postal`)} />
           <Input
             id={`${id}-cp`} value={valores.codigoPostal} inputMode="numeric" autoComplete="off" maxLength={8}
-            placeholder={t(`${N}address.postal.placeholder`)} aria-invalid={erroCodigoPostal ? true : undefined}
+            placeholder={vazio ?? t(`${N}address.postal.placeholder`)} aria-invalid={erroCodigoPostal ? true : undefined}
             aria-describedby={erroCodigoPostal ? `${id}-cp-ajuda ${id}-cp-erro` : `${id}-cp-ajuda`} className={cn(CAMPO, erroCodigoPostal && "border-destructive")}
             onChange={(e) => aoMudar("codigoPostal", e.target.value)}
           />
@@ -146,12 +148,12 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, orig
         </div>
         <div className="space-y-1.5">
           <Rotulo para={`${id}-localidade`} texto={t(`${N}address.city`)} />
-          <Input id={`${id}-localidade`} value={valores.localidade} maxLength={MAX_LOCALIDADE} autoComplete="off" className={CAMPO} onChange={(e) => aoMudar("localidade", e.target.value)} />
+          <Input id={`${id}-localidade`} value={valores.localidade} maxLength={MAX_LOCALIDADE} autoComplete="off" placeholder={vazio} className={CAMPO} onChange={(e) => aoMudar("localidade", e.target.value)} />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Rotulo para={`${id}-andar`} texto={t(`${N}address.unit`)} />
           <Input
-            id={`${id}-andar`} value={valores.andar} maxLength={MAX_ANDAR} autoComplete="off" placeholder={t(`${N}address.unit.placeholder`)}
+            id={`${id}-andar`} value={valores.andar} maxLength={MAX_ANDAR} autoComplete="off" placeholder={vazio ?? t(`${N}address.unit.placeholder`)}
             className={CAMPO} onChange={(e) => aoMudar("andar", e.target.value)}
           />
         </div>

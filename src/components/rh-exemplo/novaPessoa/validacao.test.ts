@@ -113,7 +113,8 @@ describe("problemasDaNova: datas, contactos e acesso", () => {
   });
 
   it("valida telefones, código postal e e-mails só quando preenchidos", () => {
-    let v = comPatch(minimo(), "pessoais", { telefone_pessoal: "123", morada_codigo_postal: "1000", emergencia_telefone: "12" });
+    // O nome do contacto de emergência está preenchido: aqui só interessa o formato (a regra do contacto completo vem abaixo).
+    let v = comPatch(minimo(), "pessoais", { telefone_pessoal: "123", morada_codigo_postal: "1000", emergencia_nome: "Rui", emergencia_telefone: "12" });
     v = comPatch(v, "geral", { email_trabalho: "x@", telefone_trabalho: "abc" });
     v = comPatch(v, "extra", { emergencia_email: "y@" });
     expect(new Set(ids(v))).toEqual(new Set([
@@ -122,6 +123,18 @@ describe("problemasDaNova: datas, contactos e acesso", () => {
     ]));
     const bem = comPatch(minimo(), "pessoais", { telefone_pessoal: "912 345 678", morada_codigo_postal: "1000-001" });
     expect(ids(bem)).toEqual([]);
+  });
+
+  it("o contacto de emergência é tudo ou nada: com qualquer dado pede o nome e o telefone; sem nada, não pede nada", () => {
+    expect(ids(minimo())).toEqual([]);
+    const soTelefone = comPatch(minimo(), "pessoais", { emergencia_telefone: "912 345 678" });
+    expect(ids(soTelefone)).toEqual(["hr-novo-emergencia-nome"]);
+    const soNome = comPatch(minimo(), "pessoais", { emergencia_nome: "Rui" });
+    expect(ids(soNome)).toEqual(["hr-novo-emergencia-telefone"]);
+    const soEmail = comPatch(minimo(), "extra", { emergencia_email: "rui@x.pt" });
+    expect(new Set(ids(soEmail))).toEqual(new Set(["hr-novo-emergencia-nome", "hr-novo-emergencia-telefone"]));
+    const completo = comPatch(minimo(), "pessoais", { emergencia_nome: "Rui", emergencia_telefone: "912 345 678" });
+    expect(ids(completo)).toEqual([]);
   });
 
   it("com acesso à plataforma pede o grupo e um e-mail válido; sem acesso, não", () => {

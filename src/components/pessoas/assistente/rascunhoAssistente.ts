@@ -5,7 +5,7 @@ import { CHAVES_MORADA, MORADA_VAZIA, type MoradaObraForm, type OrigemMoradaObra
 import type { LinhaForm } from "@/components/negocio-metas/levantamento";
 
 /** As durações do passo «Preparar a visita» (as chaves são as da agenda de visitas). */
-export const DURACOES_PREPARAR = ["h1", "h1m30", "h2"] as const;
+export const DURACOES_PREPARAR = ["m30", "h1", "h1m30", "h2"] as const;
 /** Quem vai estar na visita (as chaves são as da marcação). */
 export const QUEM_VAI_ESTAR = ["cliente", "casal", "familia", "outra"] as const;
 

@@ -49,13 +49,14 @@ describe("rascunho do assistente", () => {
     window.sessionStorage.setItem = original;
   });
 
-  it("as opções são as do protótipo: 1 h, 1 h 30, 2 h e o cliente, o casal, a família, outra pessoa", () => {
-    expect(DURACOES_PREPARAR).toEqual(["h1", "h1m30", "h2"]);
+  it("as opções são as do protótipo mais os 30 min da agenda: 30 min, 1 h, 1 h 30, 2 h e o cliente, o casal, a família, outra pessoa", () => {
+    expect(DURACOES_PREPARAR).toEqual(["m30", "h1", "h1m30", "h2"]);
     expect(QUEM_VAI_ESTAR).toEqual(["cliente", "casal", "familia", "outra"]);
   });
 
   it("a duração segue para a agenda com as chaves que ela já usa, e vazia não escolhe nada", () => {
     expect(duracaoParaAgenda("h1m30")).toBe("h1m30");
+    expect(duracaoParaAgenda("m30")).toBe("m30");
     expect(duracaoParaAgenda("")).toBeUndefined();
   });
 });

@@ -2,16 +2,20 @@
 // as chefias como informação da pessoa («Chefia», «Reporta a», subordinados por baixo), a pesquisa que encontra pessoas,
 // a ficha de RH, os redirecionamentos dos endereços antigos e o título «Pessoas» da lista. Tudo em memória, sem base.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { itemAtivo } from "@/components/sidebar/itemAtivo";
 import { menuSections } from "@/components/sidebar/menuConfig";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { definirOrganizacao, lerOrganizacao } from "@/components/rh-exemplo/organizacao/lojaOrganizacao";
 import PessoaRhDetalhe from "./PessoaRhDetalhe";
-import PessoasRh from "./PessoasRh";
 import RhOrganizacao from "./RhOrganizacao";
+import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
+
+// A organização activa, as permissões e o Supabase são os do ambiente simulado de RH (sem base).
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
 
 // A leitura e a gravacao reais testam-se em useOrganizacaoReal.test.ts; aqui a pagina corre sobre dados de exemplo em memoria.
 vi.mock("@/components/rh-exemplo/organizacao/useOrganizacaoReal", async () => {
@@ -19,15 +23,8 @@ vi.mock("@/components/rh-exemplo/organizacao/useOrganizacaoReal", async () => {
   return { useOrganizacaoReal: m.useOrganizacaoEmMemoria };
 });
 
-// «Ligar pessoa» pede `hr.pessoas.colocacao.edit` (o gate de permissão é testado em organizacao.test.tsx).
-vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
-  usePermissions: () => ({
-    hasPermission: (p: string) => p === "hr.pessoas.colocacao.edit",
-    hasAnyPermission: (ps: string[]) => ps.includes("hr.pessoas.colocacao.edit"),
-    permissions: ["hr.pessoas.colocacao.edit"],
-    loading: false,
-  }),
-}));
+// «Ligar pessoa» pede `hr.pessoas.colocacao.edit` (o gate de permissão é testado em organizacao.test.tsx); as permissões vêm
+// de `rhTeste.permissoes` (o wrapper de rh-exemplo delega ao contexto simulado).
 
 function Sonda() {
   const l = useLocation();
@@ -35,17 +32,15 @@ function Sonda() {
 }
 
 const renderEm = (endereco: string) =>
-  render(
-    <LanguageProvider>
-      <MemoryRouter initialEntries={[endereco]}>
-        <Routes>
-          <Route path="/rh-exemplo/organizacao" element={<RhOrganizacao />} />
-          <Route path="/rh-exemplo/pessoas" element={<PessoasRh />} />
-          <Route path="/rh-exemplo/pessoas/:id" element={<PessoaRhDetalhe />} />
-        </Routes>
-        <Sonda />
-      </MemoryRouter>
-    </LanguageProvider>,
+  renderRh(
+    <>
+      <Routes>
+        <Route path="/rh-exemplo/organizacao" element={<RhOrganizacao />} />
+        <Route path="/rh-exemplo/pessoas/:id?" element={<PessoaRhDetalhe />} />
+      </Routes>
+      <Sonda />
+    </>,
+    { rota: endereco },
   );
 
 const item = (nome: RegExp | string) => screen.getByRole("treeitem", { name: nome });
@@ -62,6 +57,8 @@ beforeAll(() => {
 beforeEach(() => {
   cleanup();
   window.localStorage.setItem("language", "pt");
+  reporRhTeste();
+  rhTeste.permissoes = new Set(["hr.pessoas.colocacao.edit", "hr.pessoas.convite.enviar", "hr.onboarding.approve", "hr.pessoas.vinculos.view"]);
   repor();
 });
 
@@ -154,7 +151,9 @@ describe("Organização: um só organograma, sem abas", () => {
     renderEm("/rh-exemplo/organizacao");
     fireEvent.click(screen.getByText("Rui Amaral"));
     expect(screen.getByTestId("url")).toHaveTextContent("/rh-exemplo/pessoas/p-rui");
-    expect(within(screen.getByRole("dialog")).getByRole("heading", { level: 1, name: /Rui Amaral/ })).toBeInTheDocument();
+    // A ficha abre num painel e lê a pessoa da base (a ficha em si testa-se em ConteudoFichaRh.test.tsx); aqui a base está vazia.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(rhTeste.chamadas.some((c) => c.tabela === "pessoas")).toBe(true);
     cleanup();
     renderEm("/rh-exemplo/organizacao");
     fireEvent.click(screen.getByText("Loja Faro"));
@@ -202,12 +201,17 @@ describe("a lista de Pessoas", () => {
     expect(nomes.some((n) => /organograma/i.test(n))).toBe(false);
   });
 
-  it("o separador «Admissões» mostra o contador de admissões por aprovar", () => {
+  it("o separador do pipeline de admissões mostra o contador de admissões por aprovar que a base devolve", async () => {
+    // A lista e os contadores vêm da base (`rpc_hr_admissao_listar`); aqui o Supabase simulado devolve uma submetida.
+    rhTeste.rpcs["rpc_hr_admissao_listar"] = {
+      data: { itens: [], contadores: { submetida: 1 }, seguinte: null },
+      error: null,
+    };
     renderEm("/rh-exemplo/pessoas?tab=admissoes");
-    const aba = screen.getByRole("tab", { name: /Admissões/ });
+    const aba = screen.getByRole("tab", { name: /Pipeline de admissões/ });
     expect(aba).toHaveAttribute("aria-selected", "true");
+    expect(await within(aba).findByText(", 1 por aprovar")).toBeInTheDocument();
     expect(aba.textContent).toContain("1");
-    expect(within(aba).getByText(", 1 por aprovar")).toBeInTheDocument();
   });
 });
 

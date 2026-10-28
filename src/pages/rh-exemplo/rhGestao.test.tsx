@@ -1,9 +1,9 @@
 // Teste de arranque de cada ecrã de gestão de RH de exemplo: abre sem rebentar, mostra o título e conteúdo da
 // organização de exemplo, e não deixa chaves de tradução por traduzir à vista.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
+import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import RhAssiduidadeEAusencias from "./RhAssiduidadeEAusencias";
@@ -17,15 +17,29 @@ import RhModelosDocumentos from "./RhModelosDocumentos";
 import RhProcessamentoSalarial from "./RhProcessamentoSalarial";
 import RhRegrasFimContrato from "./RhRegrasFimContrato";
 
+// A organizacao activa, as permissoes e o Supabase vem de src/test/rhExemploProviders.tsx (organizacao de teste, base vazia).
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
+
+// Quem olha tem sessao e uma conta de CRM; a ficha ligada a essa conta (Sofia) vem de `pessoas_contas` e `pessoas`.
+vi.mock("@/lib/identity/resolveBusinessUserId", () => ({
+  resolveCurrentBusinessUserId: async () => "u-sofia",
+  resolveBusinessUserId: async () => "u-sofia",
+  __clearResolveBusinessUserIdCache: () => undefined,
+}));
+
+const SOFIA = {
+  id: "p-sofia", organization_id: "org-teste", primeiro_nome: "Sofia", apelido: "Marques", nome_completo: "Sofia Marques",
+  cargo: "Vendedor", cargo_id: null, data_admissao: "2024-03-01", estado_registo: "activo", local_id: null, reporta_a_pessoa_id: null,
+};
+
 const renderEm = (caminho: string, padrao: string, elemento: JSX.Element) =>
-  render(
-    <LanguageProvider>
-      <MemoryRouter initialEntries={[caminho]}>
-        <Routes>
-          <Route path={padrao} element={elemento} />
-        </Routes>
-      </MemoryRouter>
-    </LanguageProvider>,
+  renderRh(
+    <Routes>
+      <Route path={padrao} element={elemento} />
+    </Routes>,
+    { rota: caminho },
   );
 
 /** Uma chave por traduzir aparece como o próprio identificador, por exemplo `hr.ausencias.minhas.titulo`. */
@@ -36,6 +50,10 @@ function semChavesPorTraduzir(): void {
 }
 
 beforeEach(() => {
+  reporRhTeste();
+  rhTeste.isSystemAdmin = true;
+  rhTeste.respostas["pessoas_contas"] = [{ pessoa_id: "p-sofia", estado: "activa" }];
+  rhTeste.respostas["pessoas"] = [SOFIA];
   window.localStorage.setItem("language", "pt");
   repor();
   reporGestao();
@@ -60,23 +78,24 @@ describe("RH de exemplo: assiduidade e ausências (gestão)", () => {
 });
 
 describe("RH de exemplo: a minha área", () => {
-  it("as minhas ausências abrem na ficha da Sofia, com o botão de pedir", () => {
+  it("as minhas ausências abrem na ficha da Sofia, com o botão de pedir", async () => {
     renderEm("/rh-exemplo/ausencias", "/rh-exemplo/ausencias", <RhMinhasAusencias />);
-    expect(screen.getByRole("heading", { level: 1, name: "As minhas ausências" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "As minhas ausências" })).toBeInTheDocument();
+    expect(await screen.findByText(/Sofia Marques|Sofia/)).toBeInTheDocument();
     expect(screen.getAllByRole("button").length).toBeGreaterThan(0);
     semChavesPorTraduzir();
   });
 
-  it("o meu ponto mostra o painel do dia e o mapa do mês", () => {
+  it("o meu ponto mostra o painel do dia e o mapa do mês", async () => {
     renderEm("/rh-exemplo/assiduidade?aba=calendario", "/rh-exemplo/assiduidade", <RhMeuPonto />);
-    expect(screen.getByRole("heading", { level: 1, name: "O meu ponto" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Mês anterior|Mes anterior/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "O meu ponto" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Mês anterior|Mes anterior/i })).toBeInTheDocument();
     semChavesPorTraduzir();
   });
 
-  it("os meus documentos abrem sem acesso a gestão de RH", () => {
+  it("os meus documentos abrem sem acesso a gestão de RH", async () => {
     renderEm("/rh-exemplo/documentos", "/rh-exemplo/documentos", <RhMeusDocumentos />);
-    expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
     semChavesPorTraduzir();
   });
 });
@@ -112,15 +131,15 @@ describe("RH de exemplo: processamento salarial", () => {
 });
 
 describe("RH de exemplo: configuração", () => {
-  it("a configuração da admissão lista os campos", () => {
+  it("a configuração da admissão lista os campos", async () => {
     renderEm("/rh-exemplo/admissao/configuracao", "/rh-exemplo/admissao/configuracao", <RhConfiguracaoAdmissao />);
-    expect(screen.getAllByRole("heading").length).toBeGreaterThan(0);
+    expect((await screen.findAllByRole("heading")).length).toBeGreaterThan(0);
     semChavesPorTraduzir();
   });
 
-  it("as regras de fim de contrato mostram a regra de exemplo", () => {
+  it("as regras de fim de contrato mostram a regra de exemplo", async () => {
     renderEm("/rh-exemplo/contratos/configuracao", "/rh-exemplo/contratos/configuracao", <RhRegrasFimContrato />);
-    expect(screen.getAllByRole("heading").length).toBeGreaterThan(0);
+    expect((await screen.findAllByRole("heading")).length).toBeGreaterThan(0);
     semChavesPorTraduzir();
   });
 });

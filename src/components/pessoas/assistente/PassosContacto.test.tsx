@@ -142,11 +142,11 @@ describe("CorpoMorada", () => {
 describe("CorpoPreparar", () => {
   const props = { valor: { duracao: "", quem: "", nota: "" }, aoMudar: vi.fn() };
 
-  it("oferece 1 h, 1 h 30 e 2 h, e o cliente, o casal, a família e outra pessoa, sem nada escolhido", () => {
+  it("oferece 30 min, 1 h, 1 h 30 e 2 h, e o cliente, o casal, a família e outra pessoa, sem nada escolhido", () => {
     render(<CorpoPreparar {...props} />);
     const duracoes = screen.getByRole("group", { name: "Duração prevista" });
-    expect(duracoes.querySelectorAll("button")).toHaveLength(3);
-    for (const texto of ["1 h", "1 h 30", "2 h"]) expect(screen.getByRole("button", { name: texto })).toHaveAttribute("aria-pressed", "false");
+    expect(duracoes.querySelectorAll("button")).toHaveLength(4);
+    for (const texto of ["30 min", "1 h", "1 h 30", "2 h"]) expect(screen.getByRole("button", { name: texto })).toHaveAttribute("aria-pressed", "false");
     const quem = screen.getByRole("group", { name: "Quem vai estar" });
     expect(quem.querySelectorAll("button")).toHaveLength(4);
     for (const texto of ["O cliente", "O casal", "A família", "Outra pessoa"]) expect(screen.getByRole("button", { name: texto })).toHaveAttribute("aria-pressed", "false");

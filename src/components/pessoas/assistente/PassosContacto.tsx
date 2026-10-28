@@ -106,6 +106,8 @@ export function CorpoChamada({ chamadas, form, aoMudar, podeEditar, erroCampo, a
                 {[
                   [textoDiaCompleto(c.data), c.hora].filter(Boolean).join(" "),
                   c.resultado ? t(`pessoasPagina.result.${c.resultado}`) : t(`${A}chamada.semResultado`),
+                  c.criadoPor ? t(`${A}chamada.por`, { nome: c.criadoPor }) : "",
+                  c.proximaAcao ? t(`${A}chamada.proxima`, { quando: [textoDiaCompleto(c.proximaAcao.data), c.proximaAcao.hora].filter(Boolean).join(" ") }) : "",
                   c.nota,
                 ].filter(Boolean).join(" · ")}
               </li>
@@ -261,9 +263,11 @@ interface CorpoMoradaProps {
   /** A morada da entidade (a da pessoa) para o atalho; `null` se não tem. */
   moradaEntidade: MoradaObraForm | null;
   erroCodigoPostal: boolean;
+  /** Só para ler (fase feita ou sem permissão): um campo vazio diz «Por preencher». */
+  somenteLeitura?: boolean;
 }
 
-export function CorpoMorada({ morada, origem, aoMudar, aoPreencherDe, moradaEntidade, erroCodigoPostal }: CorpoMoradaProps) {
+export function CorpoMorada({ morada, origem, aoMudar, aoPreencherDe, moradaEntidade, erroCodigoPostal, somenteLeitura = false }: CorpoMoradaProps) {
   const { t } = useTranslation();
   const id = useId();
   return (
@@ -271,7 +275,7 @@ export function CorpoMorada({ morada, origem, aoMudar, aoPreencherDe, moradaEnti
       <Ajuda>{t(`${A}morada.ajuda`)}</Ajuda>
       <MoradaObra
         id={id} valores={morada} erroCodigoPostal={erroCodigoPostal} moradaContacto="" origem={null} origemObra={origem} semTitulo
-        aoMudar={aoMudar} aoPreencher={(m) => aoPreencherDe(m, "manual")} real={{ moradaEntidade, aoPreencherDe }}
+        vazio={somenteLeitura ? t("pessoasPagina.guia.cliente.vazio") : undefined} aoMudar={aoMudar} aoPreencher={(m) => aoPreencherDe(m, "manual")} real={{ moradaEntidade, aoPreencherDe }}
       />
     </div>
   );

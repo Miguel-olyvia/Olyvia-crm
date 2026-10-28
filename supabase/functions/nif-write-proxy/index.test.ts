@@ -19,6 +19,7 @@ import {
   ALLOWED_RPCS,
   handleNifWriteProxyRequest,
   type NifWriteProxyDeps,
+  resetNifRateLimitForTests,
 } from "./handler.ts";
 
 const TEST_NIF = "123456789";
@@ -119,6 +120,35 @@ function makeMockUserClientFactory(options: {
   return { createUserClient, createUserClientCalls, rpcCalls };
 }
 
+// ── mock service_role client (sem cabecalho do utilizador; so neg_guardar_nif_pessoa) ──
+
+function makeMockServiceClientFactory(options: {
+  rpcError?: { message: string; status?: number; code?: string };
+  rpcData?: unknown;
+} = {}) {
+  let createServiceClientCalls = 0;
+  const rpcCalls: RpcCall[] = [];
+
+  const createServiceClient = () => {
+    createServiceClientCalls += 1;
+    return {
+      rpc: async (rpc: string, params: Record<string, unknown>) => {
+        rpcCalls.push({ rpc, params });
+        if (options.rpcError) {
+          return { data: null, error: options.rpcError };
+        }
+        return { data: options.rpcData ?? { mudou: true }, error: null };
+      },
+    };
+  };
+
+  return {
+    createServiceClient,
+    rpcCalls,
+    callCount: () => createServiceClientCalls,
+  };
+}
+
 function makeRequest(body: unknown, authHeader?: string): Request {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (authHeader !== undefined) headers["Authorization"] = authHeader;
@@ -130,13 +160,17 @@ function makeRequest(body: unknown, authHeader?: string): Request {
 }
 
 function baseDeps(overrides: Partial<NifWriteProxyDeps> = {}): NifWriteProxyDeps {
+  // O limite de tentativas em memoria vive no modulo: cada teste parte de zero.
+  resetNifRateLimitForTests();
   const { createUserClient } = makeMockUserClientFactory();
+  const { createServiceClient } = makeMockServiceClientFactory();
   return {
     supabaseAdmin: makeMockSupabaseAdmin({
       authUser: { id: "auth-user-1" },
       anewUser: { id: "anew-user-1" },
     }),
     createUserClient,
+    createServiceClient,
     getEncKey: () => randomKey(),
     getHmacKey: () => randomKey(),
     ...overrides,
@@ -364,4 +398,177 @@ Deno.test("rpc call uses the caller's own JWT via createUserClient, never a fixe
   assertEquals(createUserClientCalls.length, 1);
   assertEquals(createUserClientCalls[0], `Bearer ${CALLER_JWT}`);
   assertEquals(rpcCalls.length, 1);
+});
+
+// ── neg_guardar_nif_pessoa: service_role + actor verificado, sem tokens ──
+
+const ORG_ID = "b6ffce4f-f630-4933-833a-008649757a33";
+const PESSOA_ID = "aaaaaaaa-0000-4000-8000-000000000009";
+
+Deno.test("neg_guardar_nif_pessoa => cliente de servico com p_actor_auth_uid do JWT, sem p_nif_tokens, e o cliente do utilizador nao e usado", async () => {
+  const user = makeMockUserClientFactory();
+  const service = makeMockServiceClientFactory();
+  const hmacKey = randomKey();
+  const deps = baseDeps({
+    createUserClient: user.createUserClient,
+    createServiceClient: service.createServiceClient,
+    getHmacKey: () => hmacKey,
+  });
+
+  const req = makeRequest(
+    {
+      rpc: "neg_guardar_nif_pessoa",
+      nif: ` ${TEST_NIF} `,
+      params: {
+        p_organization_id: ORG_ID,
+        p_entity_id: PESSOA_ID,
+        p_actor_auth_uid: "outro-utilizador",
+        p_nif_tokens: ["falso"],
+      },
+    },
+    `Bearer ${CALLER_JWT}`,
+  );
+  const res = await handleNifWriteProxyRequest(req, deps);
+
+  assertEquals(res.status, 200);
+  assertEquals(user.rpcCalls.length, 0);
+  assertEquals(user.createUserClientCalls.length, 0);
+  assertEquals(service.callCount(), 1);
+  assertEquals(service.rpcCalls.length, 1);
+
+  const { rpc, params } = service.rpcCalls[0];
+  assertEquals(rpc, "neg_guardar_nif_pessoa");
+  assertEquals(params.p_actor_auth_uid, "auth-user-1");
+  assertEquals(params.p_organization_id, ORG_ID);
+  assertEquals(params.p_entity_id, PESSOA_ID);
+  assertEquals(params.p_nif, TEST_NIF);
+  assertEquals(params.p_nif_hash, await hashNif(TEST_NIF, hmacKey));
+  assertEquals("p_nif_tokens" in params, false);
+});
+
+Deno.test("neg_guardar_nif_pessoa com NIF vazio => limpa hash e cifra (null), p_nif vazio e o actor verificado", async () => {
+  const service = makeMockServiceClientFactory();
+  const deps = baseDeps({ createServiceClient: service.createServiceClient });
+
+  const req = makeRequest(
+    {
+      rpc: "neg_guardar_nif_pessoa",
+      nif: "   ",
+      params: { p_organization_id: ORG_ID, p_entity_id: PESSOA_ID },
+    },
+    `Bearer ${CALLER_JWT}`,
+  );
+  const res = await handleNifWriteProxyRequest(req, deps);
+
+  assertEquals(res.status, 200);
+  const { params } = service.rpcCalls[0];
+  assertEquals(params.p_nif, "");
+  assertEquals(params.p_nif_hash, null);
+  assertEquals(params.p_nif_encrypted, null);
+  assertEquals("p_nif_tokens" in params, false);
+  assertEquals(params.p_actor_auth_uid, "auth-user-1");
+});
+
+Deno.test("neg_guardar_nif_pessoa: recusa devolvida (NG030) => 409 com o codigo e sem o NIF", async () => {
+  const service = makeMockServiceClientFactory({
+    rpcData: { erro: "NG030", mensagem: `Repetido ${TEST_NIF}` },
+  });
+  const deps = baseDeps({ createServiceClient: service.createServiceClient });
+
+  const req = makeRequest(
+    {
+      rpc: "neg_guardar_nif_pessoa",
+      nif: TEST_NIF,
+      params: { p_organization_id: ORG_ID, p_entity_id: PESSOA_ID },
+    },
+    `Bearer ${CALLER_JWT}`,
+  );
+  const res = await handleNifWriteProxyRequest(req, deps);
+
+  assertEquals(res.status, 409);
+  const text = await res.text();
+  assert(text.includes("NG030"));
+  assertEquals(text.includes(TEST_NIF), false);
+});
+
+Deno.test("neg_guardar_nif_pessoa: NG032 lancado => 429 com o codigo e sem o NIF", async () => {
+  const captured = captureLogs();
+  let res: Response;
+  try {
+    const service = makeMockServiceClientFactory({
+      rpcError: { message: `Demasiadas ${TEST_NIF}`, code: "NG032" },
+    });
+    const deps = baseDeps({ createServiceClient: service.createServiceClient });
+    res = await handleNifWriteProxyRequest(
+      makeRequest(
+        {
+          rpc: "neg_guardar_nif_pessoa",
+          nif: TEST_NIF,
+          params: { p_organization_id: ORG_ID, p_entity_id: PESSOA_ID },
+        },
+        `Bearer ${CALLER_JWT}`,
+      ),
+      deps,
+    );
+  } finally {
+    captured.restore();
+  }
+
+  assertEquals(res.status, 429);
+  const text = await res.text();
+  assert(text.includes("NG032"));
+  assertEquals(text.includes(TEST_NIF), false);
+  for (const line of captured.lines) {
+    assertEquals(line.includes(TEST_NIF), false);
+  }
+});
+
+Deno.test("as outras RPCs nao criam o cliente de servico e descartam p_actor_auth_uid do cliente", async () => {
+  const user = makeMockUserClientFactory();
+  const service = makeMockServiceClientFactory();
+  const deps = baseDeps({
+    createUserClient: user.createUserClient,
+    createServiceClient: service.createServiceClient,
+  });
+
+  const req = makeRequest(
+    { rpc: "rpc_update_user", params: { p_id: "u-1", p_actor_auth_uid: "outro" } },
+    `Bearer ${CALLER_JWT}`,
+  );
+  const res = await handleNifWriteProxyRequest(req, deps);
+
+  assertEquals(res.status, 200);
+  assertEquals(service.callCount(), 0);
+  assertEquals(user.rpcCalls.length, 1);
+  assertEquals(user.rpcCalls[0].params, { p_id: "u-1" });
+});
+
+Deno.test("limite de tentativas com NIF: a 11.a tentativa do mesmo utilizador => 429 e nao chega a RPC", async () => {
+  const service = makeMockServiceClientFactory();
+  const deps = baseDeps({ createServiceClient: service.createServiceClient });
+  const captured = captureLogs();
+  const statuses: number[] = [];
+  try {
+    for (let i = 0; i < 11; i++) {
+      const res = await handleNifWriteProxyRequest(
+        makeRequest(
+          {
+            rpc: "neg_guardar_nif_pessoa",
+            nif: TEST_NIF,
+            params: { p_organization_id: ORG_ID, p_entity_id: PESSOA_ID },
+          },
+          `Bearer ${CALLER_JWT}`,
+        ),
+        deps,
+      );
+      statuses.push(res.status);
+      await res.text();
+    }
+  } finally {
+    captured.restore();
+  }
+
+  assertEquals(statuses.slice(0, 10).every((s) => s === 200), true);
+  assertEquals(statuses[10], 429);
+  assertEquals(service.rpcCalls.length, 10);
 });

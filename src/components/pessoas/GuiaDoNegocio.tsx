@@ -16,7 +16,7 @@ import { useDocumentosDoNegocio } from "@/components/pessoas-processo/Documentos
 import { ehPassoDeDocumento } from "@/components/pessoas-processo/documentosGuia";
 import { useLevantamentoDoNegocio } from "@/components/pessoas-processo/LevantamentoDoNegocioReal";
 import { ContactoDoGuia } from "./assistente/ContactoDoGuia";
-import { visitaMarcadaMaisRecente } from "./assistente/hidratarAssistente";
+import { levantamentoMaisRecente, visitaMarcadaMaisRecente } from "./assistente/hidratarAssistente";
 import { VisitaDoGuia } from "./assistente/VisitaDoGuia";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import type { FaseDoNegocio } from "./fasesDoNegocio";
@@ -125,7 +125,7 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
         <ContactoDoGuia
           key={faseVista ?? "atual"} fasePassada={fasePassada} focarAoMontar={focarAoMontar}
           pessoa={pessoa} negocio={{ id: negocio.id, pedidoCliente: negocio.pedidoCliente, qualificacaoGravada: negocio.qualificacaoGravada }}
-          chamadas={ligados.contactos} historicoChamadas={doNegocio.contactos} visita={visitaMarcadaMaisRecente(doNegocio.visitas)} visitaMarcada={ligados.visitasMarcadas > 0} ultimoResultado={dadosDoGuia(pessoa, doNegocio).ultimoResultado}
+          chamadas={ligados.contactos} historicoChamadas={doNegocio.contactos} visita={visitaMarcadaMaisRecente(doNegocio.visitas)} levantamento={levantamentoMaisRecente(doNegocio.levantamentos) ?? null} visitaMarcada={ligados.visitasMarcadas > 0} ultimoResultado={dadosDoGuia(pessoa, doNegocio).ultimoResultado}
           podeEditar={podeEditar} podeRegistarChamada={aoRegistarChamada !== undefined} aoRegistarChamada={(origem) => aoRegistarChamada?.(origem)}
           aoMarcarVisita={abrirAgenda ? (preparar) => abrirAgenda(preparar) : undefined}
           faseRotuloChave={rotulo} feitas={doPasso.feitas} aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia}

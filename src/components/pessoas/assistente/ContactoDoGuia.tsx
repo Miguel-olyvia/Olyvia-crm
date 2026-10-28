@@ -12,7 +12,7 @@ import { useGuardarNifPessoa } from "@/hooks/pessoas/useGuardarNifPessoa";
 import { useGuardarIdentidadePessoa } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
 import { compactar, formularioInicial, pedidoDeIdentidade, type FormularioIdentidade, type IdentidadeAtual } from "@/components/pessoas-lista/identidadeFormulario";
 import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto";
-import { MORADA_VAZIA, temMorada, validarCodigoPostal, type ChaveMorada, type MoradaObraForm, type OrigemMoradaObra } from "@/components/negocio-metas/moradaObra";
+import { CHAVES_MORADA, MORADA_VAZIA, temMorada, validarCodigoPostal, type ChaveMorada, type MoradaObraForm, type OrigemMoradaObra } from "@/components/negocio-metas/moradaObra";
 import { blocosDaQualificacao } from "@/components/negocio-metas/questionarioForm";
 import { chavesDaAba, respostasDeGravadas, validarRespostas, type RespostaGravada } from "@/components/negocio-metas/respostasQuestionario";
 import { alternarResposta, contarRespostas, mudarResposta } from "@/components/negocio-metas/respostasVisita";
@@ -20,7 +20,7 @@ import type { Respostas } from "@/components/negocio-metas/perguntasTipos";
 import { formularioDeContacto, pedidoDeContacto, type FormularioContacto } from "@/components/pessoas-lista/contactoFormulario";
 import { entradaQualificacao } from "@/components/pessoas-processo/entradaQualificacao";
 import { textoDoErroGravar } from "@/components/pessoas-processo/textoDoErroGravar";
-import type { ContactoPessoa, VisitaPessoa } from "@/components/negocio-metas/registosTipos";
+import type { ContactoPessoa, LevantamentoPessoa, VisitaPessoa } from "@/components/negocio-metas/registosTipos";
 import { textoDiaCompleto } from "../formatoPessoas";
 import type { AberturaVisita } from "../marcarVisitaContexto";
 import type { Pessoa, ResultadoContacto } from "../pessoasTipos";
@@ -60,6 +60,8 @@ export interface ContactoDoGuiaProps {
   visitaMarcada: boolean;
   /** A visita marcada do negócio (a mais recente que não foi cancelada): sem rascunho, «Preparar a visita», a morada e «Marcar a visita» abrem com o que ela tem. */
   visita?: VisitaPessoa | null;
+  /** O levantamento mais recente do negócio: a morada da obra que ficou gravada nele pré-preenche o passo «Morada da obra» quando não há rascunho nem morada na visita. */
+  levantamento?: LevantamentoPessoa | null;
   /** O resultado da última chamada: «Sem interesse» e «Número errado» avisam e travam só «Marcar a visita» (outra chamada regista-se sempre). */
   ultimoResultado?: ResultadoContacto | null;
   /** Pode escrever na pessoa e no negócio. */
@@ -94,7 +96,7 @@ export function ContactoDoGuia(props: ContactoDoGuiaProps) {
 const moradaDaEntidade = (p: Pessoa): MoradaObraForm | null => (p.moradaCampos ? { ...p.moradaCampos } : null);
 
 function ContactoInterior({
-  pessoa, negocio, chamadas, historicoChamadas, visitaMarcada, visita, ultimoResultado, podeEditar: podeEditarNaFicha, podeRegistarChamada, aoRegistarChamada, aoCriarNegocio, aoMarcarVisita, faseRotuloChave, feitas, aoVerFase, nivel, extra,
+  pessoa, negocio, chamadas, historicoChamadas, visitaMarcada, visita, levantamento, ultimoResultado, podeEditar: podeEditarNaFicha, podeRegistarChamada, aoRegistarChamada, aoCriarNegocio, aoMarcarVisita, faseRotuloChave, feitas, aoVerFase, nivel, extra,
   fasePassada, focarAoMontar,
 }: ContactoDoGuiaProps) {
   const { t } = useTranslation();
@@ -112,7 +114,11 @@ function ContactoInterior({
   const preparaTocado = useRef(rascunho.preparar.duracao !== "" || rascunho.preparar.quem !== "" || rascunho.preparar.nota !== "");
   const moradaTocada = useRef(temMorada(rascunho.morada));
   const preparar = useMemo(() => prepararHidratado(rascunho.preparar, visita ?? null, preparaTocado.current), [rascunho.preparar, visita]);
-  const morada = useMemo(() => moradaHidratada(rascunho.morada, visita ?? null, moradaTocada.current), [rascunho.morada, visita]);
+  const morada = useMemo(() => moradaHidratada(rascunho.morada, visita ?? null, moradaTocada.current, levantamento ?? null), [rascunho.morada, visita, levantamento]);
+  // De onde veio a morada: a que se escolheu agora; ou, se vem do levantamento, a origem que ele guardou.
+  const moradaDoLev = levantamento?.morada;
+  const origemDaMoradaMostrada = rascunho.moradaOrigem
+    ?? (moradaDoLev && CHAVES_MORADA.every((c) => morada[c] === moradaDoLev[c]) ? levantamento?.moradaOrigem ?? null : null);
 
   // Chamada: o formulário parte do que a pessoa tem; depois de gravar, a ficha refaz-se e o «atual» acompanha.
   const atualContacto = useMemo(() => ({
@@ -273,7 +279,7 @@ function ContactoInterior({
     if (!negocio) return <SemNegocio aoCriar={fasePassada ? undefined : aoCriarNegocio} />;
     return <SoLeitura ativo={!podeEditar} aviso={aviso}>{corpo}</SoLeitura>;
   };
-  const quandoDaVisita = visita ? [textoDiaCompleto(visita.data), visita.hora, visita.feitoPor].filter(Boolean).join(" · ") : undefined;
+  const quandoDaVisita = visita ? [textoDiaCompleto(visita.data), visita.hora, visita.feitoPor, visita.agenda?.boardNome].filter(Boolean).join(" · ") : undefined;
 
   const renderCorpo = (passo: PassoAssistente): JSX.Element => {
     switch (passo.id) {
@@ -304,7 +310,7 @@ function ContactoInterior({
       case "morada":
         return corpoQueGrava((
           <CorpoMorada
-            morada={morada ?? MORADA_VAZIA} origem={rascunho.moradaOrigem} aoMudar={mudarMorada} aoPreencherDe={preencherMorada}
+            morada={morada ?? MORADA_VAZIA} origem={origemDaMoradaMostrada} somenteLeitura={!podeEditar} aoMudar={mudarMorada} aoPreencherDe={preencherMorada}
             moradaEntidade={moradaDaEntidade(pessoa)} erroCodigoPostal={erroCodigoPostal}
           />
         ));

@@ -7,7 +7,6 @@ import { MemoryRouter, Navigate, Route, Routes, UNSAFE_LocationContext, UNSAFE_R
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { ABAS_RH, CAMINHO_DE, TITULO_RH, abaDeCaminho, idioma, type AbaRh } from "./abas";
 
-const PessoasRh = lazy(() => import("@/pages/rh-exemplo/PessoasRh"));
 const PessoaRhDetalhe = lazy(() => import("@/pages/rh-exemplo/PessoaRhDetalhe"));
 const RhAssiduidadeEAusencias = lazy(() => import("@/pages/rh-exemplo/RhAssiduidadeEAusencias"));
 const RhMinhasAusencias = lazy(() => import("@/pages/rh-exemplo/RhMinhasAusencias"));
@@ -72,8 +71,8 @@ export default function RhPagina({ aba, aoMudarAba }: Props) {
           <SincronizaMenu aba={aba} aoMudarAba={aoMudarAba} origemInterna={origemInterna} />
           <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">{A_ABRIR[lg]}</p>}>
             <Routes>
-              <Route path="/rh-exemplo/pessoas" element={<PessoasRh />} />
-              <Route path="/rh-exemplo/pessoas/:id" element={<PessoaRhDetalhe />} />
+              {/* Uma só rota (id opcional): abrir e fechar a ficha muda o endereço mas não remonta a página, e a pesquisa e os filtros mantêm-se. */}
+              <Route path="/rh-exemplo/pessoas/:id?" element={<PessoaRhDetalhe />} />
               <Route path="/rh-exemplo/assiduidade-e-ausencias" element={<RhAssiduidadeEAusencias />} />
               <Route path="/rh-exemplo/ausencias" element={<RhMinhasAusencias />} />
               <Route path="/rh-exemplo/assiduidade" element={<RhMeuPonto />} />

@@ -4,6 +4,7 @@
  * se escreveu, ignora o fecho a meio de uma criacao, e «Criar e enviar convite» abre o envio do convite antes da ficha.
  * O Supabase e simulado: os hooks de dados (anexos) e o dialogo de envio sao trocados por dobles.
  */
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -53,7 +54,17 @@ import { NovaPessoaDialogo } from "./NovaPessoaDialogo";
 function montar(onCriar: (d: never) => Promise<unknown>, botao = "criar") {
   const onCriada = vi.fn();
   const onOpenChange = vi.fn();
-  render(<NovaPessoaDialogo open onOpenChange={onOpenChange} colegas={[]} onCriar={onCriar as never} onCriada={onCriada} />);
+  // O pai controla `open` como na aplicacao: ao fechar o painel deixa de bloquear (aria-hidden) o dialogo do convite.
+  function Pai() {
+    const [aberto, setAberto] = useState(true);
+    return (
+      <NovaPessoaDialogo
+        open={aberto} onOpenChange={(a) => { onOpenChange(a); setAberto(a); }} colegas={[]}
+        onCriar={onCriar as never} onCriada={onCriada}
+      />
+    );
+  }
+  render(<Pai />);
   if (botao !== "") fireEvent.click(screen.getByRole("button", { name: botao }));
   return { onCriada, onOpenChange };
 }

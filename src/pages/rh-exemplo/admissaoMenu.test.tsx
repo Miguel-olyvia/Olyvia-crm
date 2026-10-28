@@ -1,14 +1,18 @@
 // Arranque do acesso às admissões de exemplo: o menu sem entrada «Admissões» (o separador da lista de Pessoas continua a abrir
 // por `?tab=admissoes` e a mostrar o contador), o realce de «Pessoas», o índice «Ver o Portal do colaborador (exemplo)» com os
 // oito estados, o endereço antigo que redireciona e a faixa de volta. Tudo em memória, sem base.
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
+
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
+
+import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
 import { menuSections } from "@/components/sidebar/menuConfig";
 import { itemAtivo } from "@/components/sidebar/itemAtivo";
 import { ESTADOS_CONVITE } from "@/components/rh-exemplo/convite/estadosConvite";
-import { aprovarFicha } from "@/components/rh-exemplo/dados/accoesAdmissao";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import PessoasRh from "./PessoasRh";
 import RhAdmissaoIndice from "./RhAdmissaoIndice";
@@ -18,19 +22,15 @@ import RhPortalColaborador from "./RhPortalColaborador";
 const grupo = () => menuSections.find((s) => s.id === "rh-exemplo")!;
 const entrada = (to: string) => grupo().items.find((i) => i.to === to)!;
 
-const renderEm = (endereco: string, extra?: JSX.Element) =>
-  render(
-    <LanguageProvider>
-      <MemoryRouter initialEntries={[endereco]}>
-        <Routes>
-          <Route path="/rh-exemplo/pessoas" element={<PessoasRh />} />
-          <Route path="/rh-exemplo/admissao" element={<RhAdmissaoIndice />} />
-          <Route path="/rh-exemplo/admissao/:token" element={<RhConviteAdmissao />} />
-          <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
-        </Routes>
-        {extra}
-      </MemoryRouter>
-    </LanguageProvider>,
+const renderEm = (endereco: string) =>
+  renderRh(
+    <Routes>
+      <Route path="/rh-exemplo/pessoas" element={<PessoasRh />} />
+      <Route path="/rh-exemplo/admissao" element={<RhAdmissaoIndice />} />
+      <Route path="/rh-exemplo/admissao/:token" element={<RhConviteAdmissao />} />
+      <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
+    </Routes>,
+    { rota: endereco },
   );
 
 beforeAll(() => {
@@ -38,9 +38,26 @@ beforeAll(() => {
   (window.HTMLElement.prototype as unknown as Record<string, unknown>).scrollIntoView ??= () => undefined;
 });
 
+// A lista do pipeline vem da base (`rpc_hr_admissao_listar`); aqui o Supabase é simulado e devolve uma submetida e uma convidada.
+const servirPipeline = () => {
+  rhTeste.rpcs["rpc_hr_admissao_listar"] = {
+    data: {
+      itens: [
+        { convite_id: "c-marco", pessoa_id: "p-marco", nome: "Marco Ventura", cargo: "Vendedor", estado: "submetida", estado_portal: "ativo", valid_until: "2099-01-01T10:00:00Z", submetido_em: null, devolvida_em: null, atualizado_em: null },
+        { convite_id: "c-lara", pessoa_id: "p-lara", nome: "Lara Mendes", cargo: "Vendedor", estado: "convidada", estado_portal: "ativo", valid_until: "2099-01-01T10:00:00Z", submetido_em: null, devolvida_em: null, atualizado_em: null },
+      ],
+      contadores: { submetida: 1, convidada: 1 },
+      seguinte: null,
+    },
+    error: null,
+  };
+};
+
 beforeEach(() => {
   cleanup();
   window.localStorage.setItem("language", "pt");
+  reporRhTeste();
+  rhTeste.permissoes = new Set(["hr.pessoas.convite.enviar", "hr.onboarding.approve"]);
   repor();
 });
 
@@ -59,17 +76,21 @@ describe("o menu de RH de exemplo", () => {
     expect(grupo().items.every((i) => i.permission === "users.view")).toBe(true);
   });
 
-  it("a ligação direta ?tab=admissoes continua a abrir o separador «Admissões», e a de «Pessoas» o separador Pessoas", () => {
+  it("a ligação direta ?tab=admissoes continua a abrir o pipeline de admissões (lido da base), e a de «Pessoas» o separador Pessoas", async () => {
+    servirPipeline();
     renderEm("/rh-exemplo/pessoas?tab=admissoes");
-    expect(screen.getByRole("tab", { selected: true, name: /Admissões/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Por aprovar (1)" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { selected: true, name: /Pipeline de admissões/ })).toBeInTheDocument();
+    expect(await screen.findByRole("list", { name: "Admissões" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Por rever\s*1$/ })).toBeInTheDocument();
     cleanup();
     renderEm(entrada("/rh-exemplo/pessoas").to);
     expect(screen.getByRole("tab", { selected: true, name: /Pessoas/ })).toBeInTheDocument();
   });
 
-  it("trocar de separador mantém o parâmetro do endereço", () => {
+  it("trocar de separador mantém o parâmetro do endereço", async () => {
+    servirPipeline();
     renderEm("/rh-exemplo/pessoas?tab=admissoes");
+    await screen.findByRole("list", { name: "Admissões" });
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Cargos/ }), { button: 0 });
     expect(screen.getByRole("tab", { selected: true, name: /Cargos/ })).toBeInTheDocument();
   });
@@ -105,12 +126,17 @@ describe("o menu de RH de exemplo", () => {
     expect(itemAtivo(centros, "/rh-exemplo/centros-outros")).toBe(false);
   });
 
-  it("o separador «Admissões» da lista de Pessoas mostra o contador em texto e acompanha as admissões por aprovar", () => {
+  it("o separador do pipeline mostra o contador em texto, vindo dos contadores da base, e só a quem pode ver admissões", async () => {
+    servirPipeline();
     renderEm("/rh-exemplo/pessoas?tab=admissoes");
-    const aba = () => screen.getByRole("tab", { name: /Admissões/ });
-    expect(within(aba()).getByText(", 1 por aprovar")).toBeInTheDocument();
-    act(() => void aprovarFicha("p-marco"));
-    expect(within(aba()).queryByText(/por aprovar/)).not.toBeInTheDocument();
+    const aba = () => screen.getByRole("tab", { name: /Pipeline de admissões/ });
+    expect(await within(aba()).findByText(", 1 por aprovar")).toBeInTheDocument();
+    cleanup();
+    // Sem nenhuma das permissões de admissão o separador nem existe e o contador não aparece, mesmo que a base respondesse.
+    rhTeste.permissoes = new Set();
+    renderEm("/rh-exemplo/pessoas?tab=admissoes");
+    expect(screen.queryByRole("tab", { name: /Pipeline de admissões/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/por aprovar/)).not.toBeInTheDocument();
   });
 });
 

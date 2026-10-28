@@ -1,15 +1,19 @@
 // Arranque dos fluxos novos da frente A: botões de configuração e separador Cargos, janela do responsável (fim de contrato)
 // e separador Custo da ficha. Tudo em memória, sem base.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
 import { repor } from "@/components/rh-exemplo/dados/loja";
-import { lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
+import { reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import PessoaRhDetalhe from "./PessoaRhDetalhe";
-import PessoasRh from "./PessoasRh";
 import RhConfiguracaoAdmissao from "./RhConfiguracaoAdmissao";
 import RhRegrasFimContrato from "./RhRegrasFimContrato";
+import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
+
+// A organização activa e o Supabase são os do ambiente simulado de RH (sem base).
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
 
 // Os dois botões de configuração só aparecem a quem tem a permissão que protege a rota de cada um.
 const permissoes = vi.hoisted(() => ({
@@ -25,17 +29,13 @@ vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
 }));
 
 const renderEm = (endereco: string) =>
-  render(
-    <LanguageProvider>
-      <MemoryRouter initialEntries={[endereco]}>
-        <Routes>
-          <Route path="/rh-exemplo/pessoas" element={<PessoasRh />} />
-          <Route path="/rh-exemplo/pessoas/:id" element={<PessoaRhDetalhe />} />
-          <Route path="/rh-exemplo/admissao/configuracao" element={<RhConfiguracaoAdmissao />} />
-          <Route path="/rh-exemplo/contratos/configuracao" element={<RhRegrasFimContrato />} />
-        </Routes>
-      </MemoryRouter>
-    </LanguageProvider>,
+  renderRh(
+    <Routes>
+      <Route path="/rh-exemplo/pessoas/:id?" element={<PessoaRhDetalhe />} />
+      <Route path="/rh-exemplo/admissao/configuracao" element={<RhConfiguracaoAdmissao />} />
+      <Route path="/rh-exemplo/contratos/configuracao" element={<RhRegrasFimContrato />} />
+    </Routes>,
+    { rota: endereco },
   );
 
 beforeAll(() => {
@@ -45,7 +45,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   window.localStorage.setItem("language", "pt");
-  permissoes.concedidas = new Set(["hr.pessoas.create", "hr.admissao.obrigatorios.gerir", "hr.contratos.regras.gerir"]);
+  reporRhTeste();
+  permissoes.concedidas = new Set(["hr.pessoas.create", "hr.admissao.obrigatorios.gerir", "hr.contratos.regras.gerir", "hr.pessoas.laborais.view"]);
   repor();
   reporCusto();
 });
@@ -82,16 +83,16 @@ describe("frente A: botões de configuração e Cargos", () => {
     expect(screen.getByRole("button", { name: "Nova pessoa" })).toBeInTheDocument();
   });
 
-  it("«Regras de fim de contrato» abre a página, também com «Voltar a Pessoas»", () => {
+  it("«Regras de fim de contrato» abre a página (lida da base), também com «Voltar a Pessoas»", async () => {
     renderEm("/rh-exemplo/pessoas");
     fireEvent.click(screen.getByRole("button", { name: "Regras de fim de contrato" }));
-    expect(screen.getByRole("link", { name: "Voltar a Pessoas" })).toHaveAttribute("href", "/rh-exemplo/pessoas");
+    expect(await screen.findByRole("link", { name: "Voltar a Pessoas" })).toHaveAttribute("href", "/rh-exemplo/pessoas");
   });
 
-  it("o separador Cargos mostra que os cargos só se desativam", () => {
+  it("o separador Cargos mostra que os cargos só se desativam", async () => {
     renderEm("/rh-exemplo/pessoas?tab=cargos");
     expect(screen.getByRole("tab", { name: "Cargos", selected: true })).toBeInTheDocument();
-    expect(screen.getByText(/Os cargos nunca se apagam/)).toBeInTheDocument();
+    expect(await screen.findByText(/Os cargos nunca se apagam/)).toBeInTheDocument();
   });
 });
 
@@ -99,49 +100,41 @@ describe("frente A: botões de configuração e Cargos", () => {
 // simulada, em components/rh-exemplo/fimContrato/fimContratoResponsavel.test.tsx.
 
 describe("frente A: separador Custo da ficha", () => {
-  const abrirCusto = () => {
-    renderEm("/rh-exemplo/pessoas/p-tiago");
-    fireEvent.mouseDown(within(screen.getByRole("dialog")).getByRole("tab", { name: "Custo" }), { button: 0 });
-    return screen.getByRole("dialog");
+  // A ficha e o custo lêem-se da base (Supabase simulado): a pessoa vem de `pessoas`; o resto da base está vazio.
+  const TIAGO = {
+    id: "p-tiago", organization_id: "org-teste", numero_interno: "T1", primeiro_nome: "Tiago", apelido: "Pinheiro",
+    nome_completo: "Tiago Pinheiro", email_trabalho: null, email_pessoal: null, telefone_trabalho: null, cargo: "Vendedor",
+    cargo_id: null, local_trabalho: null, local_id: null, entidade_legal_org_id: null, reporta_a_pessoa_id: null,
+    data_admissao: "2024-01-02", data_antiguidade: "2024-01-02", data_saida: null, fotografia_anexo_id: null,
+    estado_registo: "activo", notas: null, created_at: "2024-01-02T00:00:00Z", updated_at: "2024-01-02T00:00:00Z",
   };
 
-  it("mostra o custo do mês, ao lado, acumulados e os valores avulsos do exemplo", () => {
-    const ficha = abrirCusto();
-    expect(within(ficha).getByText("Custo total do mês")).toBeInTheDocument();
+  const abrirCusto = async () => {
+    rhTeste.respostas["pessoas"] = [TIAGO];
+    renderEm("/rh-exemplo/pessoas/p-tiago");
+    const ficha = await screen.findByRole("dialog");
+    fireEvent.mouseDown(await within(ficha).findByRole("tab", { name: "Custo" }), { button: 0 });
+    return ficha;
+  };
+
+  it("a ficha da pessoa lida da base abre no separador Custo, com o seletor do mês", async () => {
+    const ficha = await abrirCusto();
+    expect(within(ficha).getByRole("heading", { level: 1, name: /Tiago Pinheiro/ })).toBeInTheDocument();
+    expect(within(ficha).getByRole("tab", { name: "Custo", selected: true })).toBeInTheDocument();
+  });
+
+  it("com a base vazia o separador mostra o custo do mês e os valores avulsos sem nada inventado", async () => {
+    const ficha = await abrirCusto();
+    expect(await within(ficha).findByText("Custo total do mês")).toBeInTheDocument();
     expect(within(ficha).getByText("Custo com os subsídios repartidos por 12 meses")).toBeInTheDocument();
-    expect(within(ficha).getByText(/Saldo do banco de horas/)).toBeInTheDocument();
-    expect(within(ficha).getByText("Desde a admissão")).toBeInTheDocument();
-    expect(within(ficha).getByText("Visita ao cliente do Porto")).toBeInTheDocument();
-  });
-
-  it("recusa um registo sem descrição, aceita um válido e anula só com motivo (o valor continua visível)", () => {
-    const ficha = abrirCusto();
-    fireEvent.click(within(ficha).getByRole("button", { name: "Registar valor" }));
-    const registo = screen.getByRole("dialog", { name: "Registar um valor avulso" });
-    fireEvent.change(within(registo).getByLabelText("Quilómetros"), { target: { value: "50" } });
-    fireEvent.click(within(registo).getByRole("button", { name: "Registar valor" }));
-    expect(within(registo).getByRole("alert")).toHaveTextContent("Preenche a descrição.");
-    fireEvent.change(within(registo).getByLabelText("Descrição"), { target: { value: "Entrega em Setúbal" } });
-    fireEvent.click(within(registo).getByRole("button", { name: "Registar valor" }));
-    expect(within(screen.getByRole("dialog")).getByText("Entrega em Setúbal")).toBeInTheDocument();
-    expect(lerCusto().avulsos.at(-1)).toMatchObject({ descricao: "Entrega em Setúbal", valor: 20 });
-
-    const linha = within(screen.getByRole("dialog")).getByText("Entrega em Setúbal").closest("tr") as HTMLElement;
-    fireEvent.click(within(linha).getByRole("button", { name: "Anular" }));
-    const anular = screen.getByRole("dialog", { name: "Anular valor" });
-    fireEvent.click(within(anular).getByRole("button", { name: "Anular" }));
-    expect(within(anular).getByRole("alert")).toHaveTextContent("Indica o motivo");
-    fireEvent.change(within(anular).getByLabelText("Motivo"), { target: { value: "Registado por engano" } });
-    fireEvent.click(within(anular).getByRole("button", { name: "Anular" }));
-    const depois = within(screen.getByRole("dialog")).getByText("Entrega em Setúbal").closest("tr") as HTMLElement;
-    expect(within(depois).getByText("Anulado")).toBeInTheDocument();
-    expect(within(depois).queryByRole("button", { name: "Anular" })).not.toBeInTheDocument();
-  });
-
-  it("não há «visão da pessoa» do custo: a pessoa não vê o seu custo e a ficha só tem a vista do RH", () => {
-    const ficha = abrirCusto();
-    expect(within(ficha).queryByRole("button", { name: "Visão da pessoa" })).not.toBeInTheDocument();
     expect(within(ficha).getByRole("button", { name: "Registar valor" })).toBeInTheDocument();
-    expect(within(ficha).getByText("Custo total do mês")).toBeInTheDocument();
+    expect(within(ficha).queryByText("Visita ao cliente do Porto")).not.toBeInTheDocument();
+    expect(within(ficha).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("não há «visão da pessoa» do custo: a ficha só tem a vista do RH", async () => {
+    const ficha = await abrirCusto();
+    await within(ficha).findByText("Custo total do mês");
+    expect(within(ficha).queryByRole("button", { name: "Visão da pessoa" })).not.toBeInTheDocument();
   });
 });

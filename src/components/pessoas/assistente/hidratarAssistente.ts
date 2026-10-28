@@ -30,12 +30,18 @@ export function prepararHidratado(rascunho: PrepararVisita, visita: VisitaPessoa
   };
 }
 
-/** A morada mostrada: a do rascunho se tem alguma coisa; senão a da visita marcada; senão a vazia do rascunho. */
-export function moradaHidratada(rascunho: MoradaObraForm, visita: VisitaPessoa | null, tocado = false): MoradaObraForm {
-  if (tocado || temMorada(rascunho) || !visita) return rascunho;
-  const { rua, codigoPostal, localidade, andar } = visita.morada;
-  const daVisita: MoradaObraForm = { rua, codigoPostal, localidade, andar };
-  return temMorada(daVisita) ? daVisita : rascunho;
+/**
+ * A morada mostrada: a do rascunho se tem alguma coisa; senão a da visita marcada; senão a gravada no levantamento (`levantamento`); senão a vazia do rascunho.
+ */
+export function moradaHidratada(rascunho: MoradaObraForm, visita: VisitaPessoa | null, tocado = false, levantamento?: LevantamentoPessoa | null): MoradaObraForm {
+  if (tocado || temMorada(rascunho)) return rascunho;
+  if (visita) {
+    const { rua, codigoPostal, localidade, andar } = visita.morada;
+    const daVisita: MoradaObraForm = { rua, codigoPostal, localidade, andar };
+    if (temMorada(daVisita)) return daVisita;
+  }
+  const doLevantamento = levantamento?.morada;
+  return doLevantamento && temMorada(doLevantamento) ? { ...doLevantamento } : rascunho;
 }
 
 /** O levantamento guardado mais recente do negócio (por data; em empate, o último da lista); `undefined` sem nenhum. */

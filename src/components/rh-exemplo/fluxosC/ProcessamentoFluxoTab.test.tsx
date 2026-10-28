@@ -297,7 +297,7 @@ describe("«Como chegamos a este valor» e a anulacao", () => {
   it("lista os valores pontuais da pessoa e deixa anular com motivo (RPC de anular)", async () => {
     const dialogo = abrirDetalhe();
     expect(dialogo).toHaveTextContent(/Prémio de equipa/);
-    fireEvent.click(within(dialogo).getByRole("button", { name: /Anular Prémio de equipa/ }));
+    fireEvent.click(within(dialogo).getByRole("button", { name: /Anular\s*Prémio de equipa/ }));
     const anulacao = screen.getByRole("dialog");
     fireEvent.click(within(anulacao).getByRole("button", { name: "Anular" }));
     expect(await within(anulacao).findByRole("alert")).toHaveTextContent("Escreva o motivo da anulação.");
@@ -311,7 +311,7 @@ describe("«Como chegamos a este valor» e a anulacao", () => {
   it("uma recusa ao anular fica no dialogo", async () => {
     fn.anular.mockResolvedValue("Já está anulado.");
     const dialogo = abrirDetalhe();
-    fireEvent.click(within(dialogo).getByRole("button", { name: /Anular Prémio de equipa/ }));
+    fireEvent.click(within(dialogo).getByRole("button", { name: /Anular\s*Prémio de equipa/ }));
     const anulacao = screen.getByRole("dialog");
     fireEvent.change(within(anulacao).getByLabelText("Motivo da anulação"), { target: { value: "Engano" } });
     fireEvent.click(within(anulacao).getByRole("button", { name: "Anular" }));
