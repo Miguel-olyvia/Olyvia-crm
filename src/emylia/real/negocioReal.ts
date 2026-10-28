@@ -3,7 +3,7 @@
 // os ramos pelo id do Catálogo: trocar por uuid é da camada da base (lerNegocios/gravarNegocios). As datas vão em ISO; na volta saem no
 // formato que o motor entende ("dd/mm hh:mm"; "aaaa-mm-dd" nas faturas e no início da obra).
 // As adendas vão também (migration 20261231990000). Fora daqui, por agora: a obra (Fase 3), a demolição e o acesso ao portal (Fase 4).
-import type { Evento, LinhaOrc, Negocio, Orcamento, Papel, PedidoClausula, VersaoProposta } from "../motor";
+import { garantirServico, type Estado, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
 import { PREFIXO_PROD, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
@@ -462,4 +462,25 @@ export function deLinhas(L: LinhasNegocio): Negocio {
     hist: [...L.historico].sort((a, b) => a.ordem - b.ordem).map((e): Evento => ({ t: e.texto, q: deIso(e.ocorrido_em), k: e.tipo as Evento["k"] })),
     ...(L.adendas?.length ? { adendas: [...L.adendas].sort((x, y) => x.numero - y.numero).map(adendaDeLinhas) } : {}),
   };
+}
+
+/* ------------------------------------------------------------------ os serviços dos negócios lidos */
+/** 28/10: os serviços a que um negócio se refere: as linhas do orçamento (a atual e as versões), a visita (fora, à mão, trazidos
+ *  pelos produtos, também os das versões) e as linhas das adendas (e das suas versões). As linhas livres das adendas ficam de fora. */
+export function sidsDoNegocio(d: Negocio): SvcId[] {
+  const r = new Set<SvcId>();
+  const deLinhasOrc = (L: LinhaOrc[] | undefined) => { for (const l of L ?? []) if (l.t === "svc") r.add(l.sid); };
+  const deProdutos = (P: ProdVisita[] | undefined) => { for (const p of P ?? []) if (p.svc) r.add(p.svc); };
+  deLinhasOrc(d.orc?.linhas);
+  for (const v of d.orc?.versoes ?? []) { deLinhasOrc(v.linhas); deProdutos(v.prod); }
+  for (const s of d.visita.off) r.add(s);
+  for (const s of Object.keys(d.visita.extra)) r.add(s);
+  deProdutos(d.visita.prod);
+  for (const a of d.adendas ?? []) for (const l of [...a.linhas, ...(a.versoes ?? []).flatMap((v) => v.linhas)]) if (!l.livre) r.add(l.sid);
+  return [...r];
+}
+/** 28/10: o Catálogo montado só põe em S.svc os serviços do modelo; os outros entravam ao serem usados. Ao recarregar, os negócios
+ *  lidos trazem-nos já nas linhas: põem-se aqui (os que o Catálogo não conhece ficam de fora). */
+export function garantirServicosDosNegocios(S: Estado, deals: Negocio[]): void {
+  for (const d of deals) for (const sid of sidsDoNegocio(d)) garantirServico(S, sid);
 }
