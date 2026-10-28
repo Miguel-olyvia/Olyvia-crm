@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { acoes, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -17,6 +18,9 @@ import { HojeTecnico } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
+import { aplicarAgenda, carregarAgendaReal, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
+import { definirEquipaReal } from "@/emylia/equipa/membros";
+import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
@@ -117,6 +121,9 @@ export default function NegociosEmylia() {
     setPronto(false); setErroLer(null);
     (async () => {
       const cat = await carregarCatalogo(supabase, org, S);
+      // 28/10: as ausências aprovadas no RH dos técnicos (plano e agenda); um erro aqui não impede os negócios de abrir
+      const ag = await carregarAgendaReal(supabase, org);
+      if (ag.erro) avisar({ msg: "A agenda do RH não carregou", sub: ag.erro, kind: "bad" });
       ids.current = idsServico(cat.M.ids.servico);
       const lidos = await lerNegocios(supabase, org, ids.current);
       if (!vivo) return;
@@ -130,7 +137,7 @@ export default function NegociosEmylia() {
       setPronto(true);
     })().catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
-  }, [org, S]);
+  }, [org, S, avisar]);
 
   // a letra da Emylia (Lexend)
   useEffect(() => {
@@ -141,7 +148,18 @@ export default function NegociosEmylia() {
     document.head.appendChild(l);
   }, []);
 
-  const ctx: Ctx = { S, A, run, go, q, setQ };
+  // 28/10: a equipa da agenda (os técnicos do RH e quem entrou, com o papel do "A ver como") e o técnico da conta (o Hoje do técnico fica
+  // no dele). Ao sair da página, a agenda volta a não ter equipa real nem ausências.
+  const minha = useMinhaPessoa();
+  const eu = minha.loading ? null : { pessoaId: minha.pessoaId, nome: minha.nome ?? "Eu" };
+  const tecConta = pronto ? tecnicoDaConta(S.tecnicos ?? [], eu) : null;
+  useEffect(() => {
+    if (!pronto) return;
+    definirEquipaReal(equipaReal(S.tecnicos ?? [], eu, S.role));
+  }, [pronto, S, S.role, eu?.pessoaId, eu?.nome]); // eslint-disable-line react-hooks/exhaustive-deps -- eu é recriado a cada render
+  useEffect(() => () => { definirEquipaReal(null); aplicarAgenda([]); definirRhDaAgenda(null); }, []);
+  if (tecConta && S.tec !== tecConta) S.tec = tecConta;
+  const ctx: Ctx = { S, A, run, go, q, setQ, ...(tecConta ? { tecnicoFixo: { ref: tecConta } } : {}) };
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
 
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;

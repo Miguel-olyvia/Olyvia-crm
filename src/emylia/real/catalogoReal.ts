@@ -227,7 +227,8 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     if (!p) return [];
     const nome = C.perfis.find((x) => x.id === p)?.n ?? "";
     const custo = t.custo_hora == null ? (veCusto ? { semCustoRh: true as const } : { custoOculto: true as const }) : {};
-    return [{ id: t.id, n: t.nome, sk: nome, perfilId: p, perfis, ferias: [], custoHora: n(t.custo_hora), tel: "", desde: "", ...custo }];
+    // 28/10: pessoaRhId = a própria pessoa do RH (a agenda e as ausências leem-se por ela)
+    return [{ id: t.id, pessoaRhId: t.id, n: t.nome, sk: nome, perfilId: p, perfis, ferias: [], custoHora: n(t.custo_hora), tel: "", desde: "", ...custo }];
   });
 
   return { C, K, svc, itens, tecnicos, margens, ids: { servico: svcId, perfil: perfilId } };

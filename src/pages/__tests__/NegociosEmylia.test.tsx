@@ -16,6 +16,8 @@ vi.mock("@/integrations/supabase/client", () => ({
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: ORG }, isLoading: false }) }));
 vi.mock("@/hooks/pessoas/novaLead/gravarNovaLead", () => ({ gravarNovaLead: (...a: unknown[]) => gravarNovaLead(...a) }));
 vi.mock("@/hooks/pessoas/novaLead/comerciaisNovaLead", () => ({ resolverOrgRaiz: async () => ORG }));
+const minha = vi.hoisted(() => ({ pessoaId: null as string | null, nome: "Rúben Carvalho" }));
+vi.mock("@/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => ({ ...minha, cargo: null, dataAdmissao: null, loading: false, semFicha: !minha.pessoaId }) }));
 
 import NegociosEmylia from "../NegociosEmylia";
 
@@ -41,6 +43,8 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
       if (fn === "neg_ler_negocios") return { data: [NEGOCIO], error: null };
       // 20261231999000: as obras dos negócios lêem-se ao lado (aqui, nenhuma)
       if (fn === "obra_ler_negocios") return { data: [], error: null };
+      // 28/10: a agenda do RH (as ausências aprovadas dos técnicos)
+      if (fn === "rh_agenda_tecnicos") return { data: [], error: null };
       if (fn === "neg_guardar_negocio") return { data: { negocio_id: "x" }, error: null };
       return { data: null, error: { message: "inesperado: " + fn } };
     });
