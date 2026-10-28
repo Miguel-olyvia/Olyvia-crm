@@ -4,8 +4,25 @@
 // ligam-se aqui quando existirem na base.
 import { useCallback, useEffect, useState } from "react";
 import { definirPermissoesReais } from "@/emylia/permissoes";
-import { lerPermissoesNegocios } from "@/emylia/permissoesReais";
+import { CODIGOS_NEGOCIOS } from "@/emylia/permissoesReais";
 import type { Estado } from "@/emylia/motor";
+import { supabase } from "@/integrations/supabase/client";
+
+/**
+ * As permissões de quem entrou, lidas por `fn_neg_tem_permissao_org(org, código)`, a função que a base RH tem e que as RPCs do Pipeline já usam. O
+ * `tem_permissao(org, perm)` que o código da Emylia pergunta não existe nesta base (a leitura falhava sempre). `null`: a leitura falhou.
+ */
+export async function lerPermissoesDaFicha(org: string): Promise<ReadonlySet<string> | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any;
+  try {
+    const r = await Promise.all(CODIGOS_NEGOCIOS.map((codigo) => db.rpc("fn_neg_tem_permissao_org", { p_organization_id: org, p_codigo: codigo }) as Promise<{ data: unknown; error: unknown }>));
+    if (r.some((x) => x.error)) return null;
+    return new Set(CODIGOS_NEGOCIOS.filter((_, i) => r[i].data === true));
+  } catch {
+    return null;
+  }
+}
 
 export type LeituraDePermissoes = { k: "a-ler" } | { k: "falhou" } | { k: "lidas"; codigos: ReadonlySet<string> };
 
@@ -30,7 +47,7 @@ export function usePermissoesPosContrato(org: string | null, S: Estado | null, p
   useEffect(() => {
     if (!org) return;
     let cancelado = false;
-    void lerPermissoesNegocios(org).then((codigos) => {
+    void lerPermissoesDaFicha(org).then((codigos) => {
       if (!cancelado) setLida({ org, tentativa, leitura: codigos ? { k: "lidas", codigos } : { k: "falhou" } });
     });
     return () => { cancelado = true; };

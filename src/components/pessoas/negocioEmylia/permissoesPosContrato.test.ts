@@ -3,7 +3,16 @@ import { cleanup, renderHook, waitFor, act } from "@testing-library/react";
 import { seed } from "@/emylia/motor";
 
 const m = vi.hoisted(() => ({ ler: vi.fn(), definir: vi.fn() }));
-vi.mock("@/emylia/permissoesReais", () => ({ lerPermissoesNegocios: m.ler }));
+vi.mock("@/emylia/permissoesReais", () => ({ CODIGOS_NEGOCIOS: ["negocios.validar_pagamento"] }));
+// a leitura é fn_neg_tem_permissao_org(org, código), uma chamada por código: `m.ler` devolve o conjunto concedido, ou null para uma leitura que falha
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    rpc: async (_nome: string, args: { p_codigo: string }) => {
+      const concedidas = (await m.ler()) as Set<string> | null;
+      return concedidas === null ? { data: null, error: { message: "falhou" } } : { data: concedidas.has(args.p_codigo), error: null };
+    },
+  },
+}));
 vi.mock("@/emylia/permissoes", () => ({ definirPermissoesReais: m.definir }));
 
 import { podeNoPosContrato, usePermissoesPosContrato } from "./permissoesPosContrato";
