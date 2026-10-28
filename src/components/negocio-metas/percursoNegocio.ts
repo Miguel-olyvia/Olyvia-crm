@@ -32,9 +32,12 @@ function temLevantamentoLigado(negocio: NegocioMes, registos: EstadoRegistos | u
  * Sem orçamentos nem proposta, o negócio está em Levantamento enquanto o levantamento está por decidir, ou ligado mas ainda sem
  * nenhum levantamento ligado. Dispensado, ou com um levantamento ligado, passa a Orçamento. Os negócios antigos, sem decisão,
  * contam como Orçamento (o que sempre foram).
+ * Um negócio DA BASE (`estadoReal`) com registos à mão segue a regra da base para a coluna do Quadro (neg_resumo_quadro): sem orçamentos, está em
+ * Levantamento se tem um levantamento ligado (feito ou por fazer) e, se não tem, não está (a abordagem trata do resto); a decisão não conta.
  */
 function aindaEmLevantamento(negocio: NegocioMes, registos: EstadoRegistos | undefined): boolean {
   if (negocio.orcamentos.length > 0) return false;
+  if (negocio.estadoReal !== undefined && registos !== undefined) return registos.levantamentos.some((l) => l.negocioId === negocio.id);
   const decisao = negocio.decisaoLevantamento;
   if (decisao === "porDecidir") return true;
   return decisao === "ligado" && !temLevantamentoLigado(negocio, registos);
