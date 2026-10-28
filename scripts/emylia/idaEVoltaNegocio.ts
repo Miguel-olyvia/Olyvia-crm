@@ -23,7 +23,8 @@ import { deBase, idsServico, paraBase } from "@/emylia/real/negocioBase";
 
 const [pglite, base, ...migs] = process.argv.slice(2);
 const ORG = "b6ffce4f-f630-4933-833a-008649757a33", U = "33333333-3333-3333-3333-333333333333";
-const HOJE = new Date(2026, 9, 27, 10, 0);
+// o dia de hoje a sério: a base carimba algumas datas com now() (contrato substituído: cancelled_at), e um dia fixo falhava no dia seguinte
+const HOJE = (() => { const d = new Date(); d.setHours(10, 0, 0, 0); return d; })();
 const uid = (tipo: string, chave: string) => { const h = createHash("md5").update(`${ORG}:${tipo}:${chave}`).digest("hex"); return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`; };
 const { PGlite } = await import(pathToFileURL(pglite).href);
 const db = new PGlite();

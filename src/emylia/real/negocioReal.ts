@@ -256,7 +256,7 @@ const prodParaLinha = (p: ProdVisita, i: number): LinhaProdutoVisita => ({
   ordem: i, produto: p.id, nome: p.n, unidade: p.un, custo_un: p.custo, pvp_un: p.pvp ?? null, categoria: p.no ?? null, quantidade: p.q,
   cliente_fornece: !!p.cliente, servico: p.svc ?? null, fator: p.fator ?? null, sem_instalacao: !!p.semSvc,
 });
-function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = []): LinhaOrcamentoLinha {
+function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = [], hoje: Date = new Date()): LinhaOrcamentoLinha {
   if (l.t === "svc") {
     const det = l.det;
     return {
@@ -264,7 +264,7 @@ function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = [
       taxa_iva: l.iva ?? null, fornecedor: null, qtd_origem: null, preco_un_origem: null, custo_un_origem: null,
       custo: { custo_un: l.cu, manual: !!l.cuMan, congelado: !!det, horas_un: det?.h ?? 0, mao_obra_un: det?.mo ?? 0, equipamentos_un: det?.eq ?? 0,
         consumiveis_un: det?.cons ?? 0, estrutura_hora: det?.taxaEstr ?? 0, estrutura_un: det?.estr ?? 0, ajuste_un: det?.ajuste ?? 0,
-        congelado_em: det ? paraIso(det.q) : null,
+        congelado_em: det ? paraIso(det.q, hoje) : null,
         oficios: (det?.oficios ?? []).map((o) => ({ perfil_chave: o.perfil, nome: o.n, horas_un: o.h, custo_hora: o.eh, tecnicos: o.tecnicos ?? null })) },
       zonas: l.zonas ? l.zonas.map((z) => ({ zona: z.z, quantidade: z.q, valor: z.preco ?? null })) : null,
     };
@@ -300,7 +300,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       verificado: false, aprovacao: null, motivos_versao: vs.motivos, nota_versao: vs.nota ?? null, onde_refeita: vs.onde ?? null, pedido_cliente: null, recusa: null,
       enviado_em: iso(vs.enviada), aceite_em: null, substituido_em: iso(vs.substituida), aceite_antes_em: iso(vs.aceite ?? null),
       preco_final: Math.round(vs.total * 100) / 100, total_com_iva: vs.totalIva != null ? Math.round(vs.totalIva * 100) / 100 : null, prestacoes_por_fases: false, sem_demolicao: false,
-      linhas: vs.linhas ? vs.linhas.map(linhaParaLinha) : null, zonas: null, prazo: [], prestacoes: [], avisos: [], precos_manuais: null,
+      linhas: vs.linhas ? vs.linhas.map((l, i, a) => linhaParaLinha(l, i, a, hoje)) : null, zonas: null, prazo: [], prestacoes: [], avisos: [], precos_manuais: null,
       produtos: vs.prod ? vs.prod.map(prodParaLinha) : null, partes_fora: vs.semParte ?? null,
     });
     const pr = prestacoesDe(d);
@@ -313,7 +313,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       recusa: o.recusada ? { motivos: o.recusada.motivos, nota: o.recusada.nota ?? null, em: iso(o.recusada.q) } : null,
       enviado_em: iso(o.enviada), aceite_em: iso(o.aceite), substituido_em: null, aceite_antes_em: null, preco_final: null, total_com_iva: null,
       prestacoes_por_fases: pr.porFases, sem_demolicao: !!o.semDemolicao,
-      linhas: o.linhas.map((l, i) => linhaParaLinha(l, i, d.visita.prod ?? [])), zonas: o.zonas ?? null,
+      linhas: o.linhas.map((l, i) => linhaParaLinha(l, i, d.visita.prod ?? [], hoje)), zonas: o.zonas ?? null,
       prazo: Object.entries(o.prazo ?? {}).map(([tarefa, dias]) => ({ tarefa, dias })),
       prestacoes: pr.L, avisos: Object.entries(o.avisosVistos ?? {}).filter(([, x]) => x).map(([k]) => k),
       precos_manuais: o.precosMan ? Object.entries(o.precosMan).map(([descricao, preco]) => ({ descricao, preco })) : null,
