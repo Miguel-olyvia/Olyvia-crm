@@ -87,7 +87,8 @@ export interface LinhaContrato {
   revisto_por: string | null; revisto_em: string | null; assinado_em: string | null;
   pedidos: { clausula: string; nota: string; pedido_em: string | null }[];
   clausulas: { titulo: string; texto: string }[];
-  assinatura: { metodo: "digital" | "sms" | "desenho"; nome: string; identificador: string | null; telefone_mascarado: string | null; assinado_em: string | null } | null;
+  /** "portal_sms": assinado no portal do cliente com o código por SMS (signature_image na base, sem método) (20261231994000). */
+  assinatura: { metodo: "digital" | "sms" | "desenho" | "portal_sms"; nome: string; identificador: string | null; telefone_mascarado: string | null; assinado_em: string | null } | null;
 }
 export interface LinhaFatura {
   chave: string; numero: string; emitida_em: string | null; total: number; prestacao_ordem: number; pdf_caminho: string | null;
@@ -164,7 +165,7 @@ function docDeContratos(L: LinhaContrato[]): { cAtual: LinhaContrato | undefined
   const cAntigas = L.filter((c) => c.estado === "substituido").sort((a, b) => a.versao - b.versao);
   const a = cAtual?.assinatura;
   return { cAtual, campos: {
-    ...(a ? { assinatura: { tipo: a.metodo, nome: a.nome, q: deIsoAno(a.assinado_em), ...(a.identificador ? { id: a.identificador } : {}), ...(a.telefone_mascarado ? { telemovel: a.telefone_mascarado } : {}) } } : {}),
+    ...(a ? { assinatura: { tipo: a.metodo === "portal_sms" ? "sms" : a.metodo, nome: a.nome, q: deIsoAno(a.assinado_em), ...(a.identificador ? { id: a.identificador } : {}), ...(a.telefone_mascarado ? { telemovel: a.telefone_mascarado } : {}) } } : {}),
     ...(cAtual && cAtual.pedidos.length ? { contratoPedido: { clausulas: cAtual.pedidos.map((p) => ({ c: p.clausula, nota: p.nota })), q: deIso(cAtual.pedidos[0]?.pedido_em) } } : {}),
     ...(cAntigas.length ? { contratoVersoes: cAntigas.map((c) => ({ n: c.versao, substituido: deIso(c.substituido_em), pedido: c.pedidos.map((p) => ({ c: p.clausula, nota: p.nota })), ...(c.revisto_por ? { revisto: { por: c.revisto_por, q: deIso(c.revisto_em) } } : {}) })) } : {}),
     ...(cAtual?.clausulas.length ? { clausulas: Object.fromEntries(cAtual.clausulas.map((c) => [c.titulo, c.texto])) } : {}),

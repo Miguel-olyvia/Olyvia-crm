@@ -33,6 +33,8 @@ export default function NegociosEmylia() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const tid = useRef(0);
   const refs = useRef(new Map<number, RefNegocio>());
+  // os negócios do CRM (com documentos do CRM): lêem-se, mas nunca se gravam por aqui
+  const soLeitura = useRef(new Set<number>());
   const foto = useRef(new Map<number, string>());
   const ids = useRef<IdsServico | null>(null);
   const aGravar = useRef(false);
@@ -57,7 +59,7 @@ export default function NegociosEmylia() {
     try {
       do {
         deNovo.current = false;
-        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current);
+        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current);
         if (r.erros.length) { setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
@@ -90,6 +92,7 @@ export default function NegociosEmylia() {
       const lidos = await lerNegocios(supabase, org, ids.current);
       if (!vivo) return;
       refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
+      soLeitura.current = new Set(lidos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
       S.deals = lidos.map((n) => deLinhas(n.linhas));
       // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
       garantirServicosDosNegocios(S, S.deals);
@@ -110,6 +113,7 @@ export default function NegociosEmylia() {
   }, []);
 
   const ctx: Ctx = { S, A, run, go, q, setQ };
+  const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
 
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver os negócios.</div>;
@@ -131,7 +135,14 @@ export default function NegociosEmylia() {
       </div>
       {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>
         : !pronto ? <p className="p-6 text-muted-foreground">A ler os negócios…</p>
-        : S.view === "negocio" && S.deal && S.deals.some((d) => d.id === S.deal) ? <NegocioSimples {...ctx} />
+        : S.view === "negocio" && S.deal && S.deals.some((d) => d.id === S.deal) ? <>
+            {doCrm && (
+              <p role="alert" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">
+                Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava.
+              </p>
+            )}
+            <NegocioSimples {...ctx} />
+          </>
         : <NegociosSimples {...ctx} />}
       <div className="toasts" aria-live="polite">
         {toasts.slice(-2).map((t) => (

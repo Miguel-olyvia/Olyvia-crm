@@ -45,10 +45,13 @@ async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<
 
 export interface Sincronizacao { gravados: number; erros: string[]; avisos: string[] }
 
-/** Grava os negócios que mudaram. Atualiza `refs` e a fotografia com o que ficou gravado. */
-export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado, refs: Map<number, RefNegocio>, foto: Map<number, string>, ids: IdsServico): Promise<Sincronizacao> {
+/** Grava os negócios que mudaram. Atualiza `refs` e a fotografia com o que ficou gravado. Os de `soLeitura` (negócios do CRM, com
+ *  documentos do CRM) nunca se gravam: a base recusa-os (NE005) e um que faltasse em `refs` criava uma lead nova. */
+export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado, refs: Map<number, RefNegocio>, foto: Map<number, string>, ids: IdsServico,
+  soLeitura: ReadonlySet<number> = new Set()): Promise<Sincronizacao> {
   const out: Sincronizacao = { gravados: 0, erros: [], avisos: [] };
   for (const d of negociosMudados(S.deals, foto)) {
+    if (soLeitura.has(d.id)) continue;
     try {
       if (!refs.has(d.id)) {
         const antigo = d.id;
