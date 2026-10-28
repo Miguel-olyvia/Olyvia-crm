@@ -6,6 +6,7 @@ import { useCargos as useCargosReal } from "@/hooks/useCargos";
 
 export type {
   HrCargo,
+  HrCargoOficio,
   NovoCargoRH,
   EdicaoCargoRH,
   ResultadoDefinirSalario,

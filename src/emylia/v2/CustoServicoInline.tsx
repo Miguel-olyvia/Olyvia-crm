@@ -56,7 +56,9 @@ export function CustoServicoInline({ S, C, sid, s, q, pu }: { S: Estado; C: Cust
             {perfis.map((p) => {
               const hp = horaPerfil(C, p.id), eh = hp.eh, a = anoPerfil(p, C.par);
               if (eh == null) return <li key={p.id}>{p.n}: sem técnicos no RH nem salário no perfil; a mão de obra conta 0 €.</li>;
-              if (hp.fonte === "rh") return <li key={p.id}><span className="text-foreground">{p.n}: {eur(eh)} €/h</span> · {origemHora(hp)}: {hp.tecnicos.map((t) => `${t.n} ${eur(t.custoHora)} €/h`).join(", ")}.</li>;
+              if (hp.fonte === "rh") return <li key={p.id}><span className="text-foreground">{p.n}: {eur(eh)} €/h</span> · {origemHora(hp)}{hp.tecnicos.length ? `: ${hp.tecnicos.map((t) => `${t.n} ${eur(t.custoHora)} €/h`).join(", ")}` : ""}.</li>;
+              // 28/10: o salário do cargo técnico do RH (calculado na base)
+              if (hp.fonte === "cargo") return <li key={p.id}><span className="text-foreground">{p.n}: {eur(eh)} €/h</span> · {origemHora(hp)}.</li>;
               return (
                 <li key={p.id}>
                   <span className="text-foreground">{p.n}: {eur(eh)} €/h</span>

@@ -125,3 +125,39 @@ describe("diferencasCatalogo: o que mudou, em chamadas às funções cat_*", () 
     expect(r.erro).toBe("Parâmetros de custo: Sem permissão (services.manage_prices).");
   });
 });
+
+describe("montarCatalogo: técnicos do RH e o €/h da base (28/10, cargos técnicos)", () => {
+  const PERFIL2 = "99999999-0000-4000-8000-000000000002";
+  const comRh = (veCusto = true) => {
+    const L = linhas();
+    L.perfis = [
+      { id: ID.perfil, chave: "canalizador", nome: "Canalizador", salario_referencia: 1100, ativo: true,
+        custo_hora: 21.5, fonte: "rh", n: 1, nomes: ["Ana Sousa"], cargos: ["Técnico"] },
+      { id: PERFIL2, chave: null, nome: "Ladrilhador", salario_referencia: null, ativo: true,
+        custo_hora: 19.9, fonte: "cargo", n: 1, nomes: [], cargos: ["Ladrilhador de 1.ª"] },
+    ];
+    L.tecnicos = [{ id: "pessoa-1", nome: "Ana Sousa", custo_hora: veCusto ? 21.5 : null, perfis: [ID.perfil, PERFIL2] }];
+    L.ve_custo_tecnicos = veCusto;
+    return L;
+  };
+  const montarRh = (veCusto = true) => montarCatalogo(comRh(veCusto), catalogo0(), {});
+
+  it("um técnico com vários ofícios conta em todos (perfis), com o primeiro como perfilId", () => {
+    const [t] = montarRh().tecnicos;
+    expect(t).toMatchObject({ id: "pessoa-1", n: "Ana Sousa", perfilId: "canalizador", perfis: ["canalizador", PERFIL2], custoHora: 21.5 });
+    expect(t.semCustoRh).toBeUndefined();
+  });
+  it("o perfil traz horaBd com o €/h, a fonte e os nomes da base", () => {
+    const M = montarRh();
+    expect(M.C.perfis[0].horaBd).toEqual({ custoHora: 21.5, fonte: "rh", n: 1, nomes: ["Ana Sousa"], cargos: ["Técnico"] });
+    expect(M.C.perfis[1].horaBd).toMatchObject({ custoHora: 19.9, fonte: "cargo", cargos: ["Ladrilhador de 1.ª"] });
+  });
+  it("sem retribuicao.view o custo do técnico vem escondido (custoOculto), não 'sem custo no RH'", () => {
+    const [t] = montarRh(false).tecnicos;
+    expect(t.custoOculto).toBe(true);
+    expect(t.semCustoRh).toBeUndefined();
+  });
+  it("as linhas de uma base antiga (sem fonte) não dão horaBd", () => {
+    expect(montar().C.perfis[0].horaBd).toBeUndefined();
+  });
+});

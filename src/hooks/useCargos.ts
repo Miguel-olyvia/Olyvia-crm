@@ -20,6 +20,14 @@
  * devolve linhas a quem tem `hr.pessoas.retribuicao.view`: sem essa permissao a
  * lista vem vazia, sem erro, e o ecra mostra o cargo sem valores.
  *
+ * CARGO TECNICO DE OBRA (20261231998000)
+ * -----------------------------------------
+ * `tecnico_obra` marca os cargos cujas pessoas sao tecnicos no Catalogo e no
+ * orcamento; `hr_cargos_oficios` diz os oficios (`ops_skill`) do cargo, que as
+ * pessoas herdam. Le-se pela tabela (RLS: hr.pessoas.laborais.view); grava-se so
+ * por `rh_guardar_cargo_tecnico` (a marca e os oficios de uma vez): a base
+ * recusa mudar a marca por UPDATE directo.
+ *
  * NUNCA SE APAGA UM CARGO
  * -------------------------
  * A RLS bloqueia DELETE por politica RESTRICTIVE (pessoas.cargo_id pode
@@ -45,13 +53,22 @@ export interface HrCargo {
   nome: string;
   horas_referencia: number | null;
   activo: boolean;
+  /** Cargo tecnico de obra (20261231998000): as pessoas com ele sao tecnicos no Catalogo e no orcamento.
+   *  A base devolve-o sempre; opcional para os cargos montados a mao (testes, ecras antigos). */
+  tecnico_obra?: boolean;
   created_at: string;
   updated_at: string;
 }
 
+/** Um oficio de obra (`ops_skill`) ligado a um cargo tecnico. */
+export interface HrCargoOficio {
+  cargo_id: string;
+  skill_id: string;
+}
+
 // Nunca `*` nem salario_base/periodicidade: ver o cabecalho.
 const COLUNAS =
-  "id, organization_id, nome, horas_referencia, activo, deleted_at, deleted_by, created_at, updated_at, created_by, updated_by";
+  "id, organization_id, nome, horas_referencia, activo, tecnico_obra, deleted_at, deleted_by, created_at, updated_at, created_by, updated_by";
 
 const COLUNAS_PERIODOS =
   "id, cargo_id, salario_base, periodicidade, valido_de, valido_ate, motivo";
@@ -79,6 +96,7 @@ export function useCargos() {
   const orgId = activeCompany?.id;
   const queryKey = ["hr-cargos", orgId];
   const queryKeyPeriodos = ["hr-cargos-periodos", orgId];
+  const queryKeyOficios = ["hr-cargos-oficios", orgId];
 
   const { data, isLoading, error } = useQuery({
     queryKey,
@@ -126,6 +144,21 @@ export function useCargos() {
   });
   const periodos = periodosData ?? [];
 
+  // Os oficios dos cargos tecnicos (poucos por cargo: uma pagina chega).
+  const { data: oficiosData } = useQuery({
+    queryKey: queryKeyOficios,
+    queryFn: async (): Promise<HrCargoOficio[]> => {
+      if (!orgId) return [];
+      const { data: linhas, error: erro } = await hrFrom("hr_cargos_oficios")
+        .select("cargo_id, skill_id")
+        .eq("organization_id", orgId);
+      if (erro) throw erro;
+      return (linhas ?? []) as HrCargoOficio[];
+    },
+    enabled: !!orgId,
+  });
+  const oficios = oficiosData ?? [];
+
   const salarioDoCargoEm = useCallback(
     (cargoId: string, data: string): HrCargoPeriodo | null => periodoDoCargoEm(periodos, cargoId, data),
     // `periodosData` e estavel entre renders enquanto nao muda.
@@ -148,7 +181,7 @@ export function useCargos() {
     mutationFn: async (novo: NovoCargoRH) => {
       if (!orgId) throw new Error("Sem organizacao activa");
       const businessUserId = await resolveCurrentBusinessUserId();
-      const { error: erro } = await hrFrom("hr_cargos").insert({
+      const { data: criado, error: erro } = await hrFrom("hr_cargos").insert({
         organization_id: orgId,
         nome: novo.nome,
         salario_base: novo.salario_base,
@@ -156,8 +189,10 @@ export function useCargos() {
         horas_referencia: novo.horas_referencia,
         created_by: businessUserId,
         updated_by: businessUserId,
-      });
+      }).select("id").single();
       if (erro) throw erro;
+      // O id do cargo novo: o ecra grava a seguir a marca de tecnico e os oficios.
+      return (criado as { id: string } | null)?.id ?? null;
     },
     // O trigger de criacao abre o primeiro periodo: os periodos mudam tambem.
     onSuccess: invalidarSalario,
@@ -187,6 +222,24 @@ export function useCargos() {
       if (erro) throw erro;
     },
     onSuccess: invalidar,
+  });
+
+  /** A marca de tecnico de obra e os oficios do cargo, de uma vez (sem marca, sem oficios). */
+  const definirTecnicoMutation = useMutation({
+    mutationFn: async (args: { cargoId: string; tecnico: boolean; skills: string[] }) => {
+      if (!orgId) throw new Error("Sem organizacao activa");
+      const { error: erro } = await hrRpc("rh_guardar_cargo_tecnico", {
+        p_org: orgId,
+        p_cargo: args.cargoId,
+        p_tecnico: args.tecnico,
+        p_skills: args.tecnico ? args.skills : [],
+      });
+      if (erro) throw erro;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: queryKeyOficios });
+    },
   });
 
   const definirSalarioMutation = useMutation({
@@ -223,17 +276,24 @@ export function useCargos() {
     /** A leitura dos periodos falhou: `periodos` esta vazio por erro, nao por nao haver. */
     periodosError,
     salarioDoCargoEm,
+    /** Os oficios de obra dos cargos tecnicos (`hr_cargos_oficios`). */
+    oficios,
     isLoading,
     error,
     isSaving:
       criarMutation.isPending ||
       editarMutation.isPending ||
       alternarActivoMutation.isPending ||
+      definirTecnicoMutation.isPending ||
       definirSalarioMutation.isPending,
+    /** Cria o cargo e devolve o id (null se a base nao o devolver). */
     criar: criarMutation.mutateAsync,
     editar: editarMutation.mutateAsync,
     /** Nunca `eliminar` -- so activar/desactivar. Ver nota no cabecalho. */
     definirActivo: (id: string, activo: boolean) => alternarActivoMutation.mutateAsync({ id, activo }),
+    /** Grava a marca de tecnico de obra e os oficios do cargo (`rh_guardar_cargo_tecnico`). */
+    definirTecnico: (cargoId: string, tecnico: boolean, skills: string[]) =>
+      definirTecnicoMutation.mutateAsync({ cargoId, tecnico, skills }),
     /** Muda o salario do cargo a partir de `validoDe` (hoje ou futuro). Lanca o erro da base para o ecra o traduzir. */
     definirSalario: (
       cargoId: string,

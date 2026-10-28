@@ -31,7 +31,18 @@ export interface Parametros {
   /** Ao fim de quantos meses o preço de um consumível fica desatualizado. */
   mesesDesatualizado: number;
 }
-export interface Perfil { id: string; n: string; salario: number | null }
+/** 28/10 (20261231998000): o €/h do ofício que a base calculou (cat_ler_catalogo › perfis). Só existe numa conta real. */
+export interface HoraBd {
+  custoHora: number | null;
+  fonte: "rh" | "cargo" | "referencia" | "sem";
+  /** As pessoas (rh) ou os cargos (cargo) que entram na média. */
+  n: number;
+  /** rh: as pessoas da média; nas outras fontes, as pessoas técnicas com o ofício mas sem custo. */
+  nomes: string[];
+  /** Os cargos técnicos ativos ligados ao ofício (na fonte cargo, os que têm salário). */
+  cargos: string[];
+}
+export interface Perfil { id: string; n: string; salario: number | null; horaBd?: HoraBd }
 export interface Equip { id: string; n: string; compra: number; vida: number; residual: number; manutAno: number; usoAno: number }
 export type CategoriaEstrutura = "Renda" | "Viaturas" | "Seguros" | "Pessoal não operacional" | "Licenças e software" | "Energia e água" | "Outro";
 export const CATEGORIAS_ESTRUTURA: CategoriaEstrutura[] = ["Renda", "Viaturas", "Seguros", "Pessoal não operacional", "Licenças e software", "Energia e água", "Outro"];
@@ -172,7 +183,7 @@ export const taxaEstrutura = (C: Custos) => (C.par.horasMes > 0 ? totalEstrutura
 
 /* ------------------------------------------------------------------ o €/h de cada perfil (22/10) */
 /** De onde vem o €/h de um perfil: a média dos técnicos do RH, o salário do perfil (sem técnicos), ou nenhum. */
-export type FonteHora = "rh" | "salario" | "sem";
+export type FonteHora = "rh" | "cargo" | "salario" | "sem";
 export interface HoraPerfil {
   perfil: string; n: string;
   /** €/h (null: sem técnicos e sem salário). */
@@ -184,6 +195,8 @@ export interface HoraPerfil {
   salario: number | null;
   /** 22/10: os técnicos do perfil sem dados de custo no RH (ficam fora da média). */
   semCustoRh: string[];
+  /** 28/10: o que a base calculou (conta real); nas fontes rh e cargo o €/h vem daqui. */
+  bd?: HoraBd;
 }
 /** O €/h de um perfil: a média do custo/hora dos técnicos com esse perfil (`tecs`, por omissão o registo vivo, S.tecnicos);
  *  sem técnicos, o €/h do salário do perfil; sem nenhum dos dois, null (nunca a média dos outros perfis). */
@@ -191,16 +204,30 @@ export function horaPerfil(C: Custos, perfilId: string, tecs: readonly FichaTecn
   const p = C.perfis.find((x) => x.id === perfilId);
   // 22/10: o custo/hora de cada técnico é o calculado nos Custos do RH (equipa/pontes.ts: custosDoRh); sem dados de custo no RH, fica de fora
   const doPerfil = tecnicosDoPerfil(perfilId, tecs);
-  const tecnicos = doPerfil.filter((t) => !t.semCustoRh && t.custoHora > 0).map((t) => ({ id: t.id, n: t.n, custoHora: t.custoHora }));
+  const tecnicos = doPerfil.filter((t) => !t.semCustoRh && !t.custoOculto && t.custoHora > 0).map((t) => ({ id: t.id, n: t.n, custoHora: t.custoHora }));
   const semCustoRh = doPerfil.filter((t) => t.semCustoRh).map((t) => t.n);
   const salario = p ? custoHoraPerfil(p, C.par) : null;
-  const base = { perfil: perfilId, n: p?.n ?? (perfilId || "Sem perfil"), tecnicos, salario, semCustoRh };
+  // 28/10: numa conta real o €/h do RH e do cargo técnico vem da base (o mesmo para todos, com ou sem permissão de ver os salários);
+  // com "referencia" ou "sem" fica a conta de cá, porque o salário de referência edita-se no Catálogo.
+  const bd = p?.horaBd;
+  const base = { perfil: perfilId, n: p?.n ?? (perfilId || "Sem perfil"), tecnicos, salario, semCustoRh, ...(bd ? { bd } : {}) };
+  if (bd && bd.custoHora != null && (bd.fonte === "rh" || bd.fonte === "cargo")) return { ...base, eh: bd.custoHora, fonte: bd.fonte };
   if (tecnicos.length) return { ...base, eh: tecnicos.reduce((a, t) => a + t.custoHora, 0) / tecnicos.length, fonte: "rh" };
   if (salario != null) return { ...base, eh: salario, fonte: "salario" };
   return { ...base, eh: null, fonte: "sem" };
 }
 /** A origem do €/h, para mostrar: "Média de 2 técnicos no RH (Sérgio Faria, Hugo Neves)". */
 export function origemHora(h: HoraPerfil): string {
+  // 28/10: os textos da base (conta real)
+  if (h.bd && h.fonte === "rh") {
+    const nomes = h.bd.nomes.join(", ");
+    return h.bd.n === 1 ? `Custo/hora de ${nomes || "1 técnico"} no RH` : `Média de ${h.bd.n} técnicos no RH${nomes ? ` (${nomes})` : ""}`;
+  }
+  if (h.bd && h.fonte === "cargo") {
+    const cargos = h.bd.cargos.join(", ");
+    return `Sem técnicos: usa o salário do cargo ${cargos}`;
+  }
+  if (h.bd && h.fonte === "salario") return "Sem técnicos nem cargo: usa o salário de referência";
   if (h.fonte === "rh") {
     const nomes = h.tecnicos.map((t) => t.n).join(", ");
     return h.tecnicos.length === 1 ? `Custo/hora de ${nomes} no RH` : `Média de ${h.tecnicos.length} técnicos no RH (${nomes})`;

@@ -15,7 +15,12 @@ export interface LinhaParametros {
   margem_minima: number; margem_alvo: number;
 }
 export interface LinhaCategoria { id: string; name: string; parent_id: string | null; sort_order: number | null }
-export interface LinhaPerfil { id: string; chave: string | null; nome: string; salario_referencia: number | null; ativo: boolean }
+export interface LinhaPerfil {
+  id: string; chave: string | null; nome: string; salario_referencia: number | null; ativo: boolean;
+  /** 20261231998000: o €/h do ofício calculado na base (fn_cat_custo_hora_oficio_det) e de onde vem. Sem estes campos (base antiga),
+   *  o perfil fica sem horaBd e o €/h faz-se como antes. */
+  custo_hora?: number | null; fonte?: "rh" | "cargo" | "referencia" | "sem" | null; n?: number | null; nomes?: string[] | null; cargos?: string[] | null;
+}
 export interface LinhaEquipamento {
   id: string; nome: string; compra: number; vida_anos: number; vida_horas: number | null; residual: number; manutencao_ano: number;
   uso_ano_horas: number; ativo: boolean;
@@ -58,6 +63,8 @@ export interface LinhasCatalogo {
   precosProduto: LinhaPrecoProduto[];
   fornecedores: LinhaFornecedorProduto[];
   tecnicos: LinhaTecnico[];
+  /** 20261231998000: a base mandou o custo/hora de cada técnico (só com hr.pessoas.retribuicao.view). Sem o campo: true (base antiga). */
+  ve_custo_tecnicos?: boolean;
 }
 
 /* ------------------------------------------------------------------ o resultado */
@@ -198,7 +205,9 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
 
   const C: Custos = {
     par,
-    perfis: L.perfis.filter((p) => p.ativo).map((p) => ({ id: perfilChave.get(p.id)!, n: p.nome, salario: p.salario_referencia != null ? n(p.salario_referencia) : null })),
+    perfis: L.perfis.filter((p) => p.ativo).map((p) => ({ id: perfilChave.get(p.id)!, n: p.nome, salario: p.salario_referencia != null ? n(p.salario_referencia) : null,
+      // 20261231998000: o €/h que a base calculou (média do RH, salário do cargo técnico ou de referência)
+      ...(p.fonte ? { horaBd: { custoHora: p.custo_hora != null ? n(p.custo_hora) : null, fonte: p.fonte, n: n(p.n), nomes: p.nomes ?? [], cargos: p.cargos ?? [] } } : {}) })),
     equip: L.equipamentos.filter((e) => e.ativo).map((e) => ({
       id: e.id, n: e.nome, compra: n(e.compra), vida: e.vida_horas != null ? n(e.vida_horas) : n(e.vida_anos) * n(e.uso_ano_horas),
       residual: n(e.residual), manutAno: n(e.manutencao_ano), usoAno: n(e.uso_ano_horas),
@@ -209,11 +218,16 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     receitas,
   };
 
+  // 20261231998000: um técnico com vários ofícios conta em todos (perfis); perfilId fica o primeiro (os ecrãs de um só ofício).
+  // Sem hr.pessoas.retribuicao.view a base não manda o custo de cada um: não é "sem custo no RH", é custo escondido (custoOculto).
+  const veCusto = L.ve_custo_tecnicos !== false;
   const tecnicos: FichaTecnico[] = L.tecnicos.flatMap((t) => {
-    const p = t.perfis.map((id) => perfilChave.get(id)).find(Boolean);
+    const perfis = [...new Set(t.perfis.map((id) => perfilChave.get(id)).filter((k): k is string => !!k))];
+    const p = perfis[0];
     if (!p) return [];
     const nome = C.perfis.find((x) => x.id === p)?.n ?? "";
-    return [{ id: t.id, n: t.nome, sk: nome, perfilId: p, ferias: [], custoHora: n(t.custo_hora), tel: "", desde: "", ...(t.custo_hora == null ? { semCustoRh: true as const } : {}) }];
+    const custo = t.custo_hora == null ? (veCusto ? { semCustoRh: true as const } : { custoOculto: true as const }) : {};
+    return [{ id: t.id, n: t.nome, sk: nome, perfilId: p, perfis, ferias: [], custoHora: n(t.custo_hora), tel: "", desde: "", ...custo }];
   });
 
   return { C, K, svc, itens, tecnicos, margens, ids: { servico: svcId, perfil: perfilId } };

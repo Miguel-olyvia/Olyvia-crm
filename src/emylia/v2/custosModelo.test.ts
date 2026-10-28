@@ -4,7 +4,9 @@ import { alertas, custoUn, seed, type Estado } from "../motor";
 import {
   HOJE, aplicarAoServico, alertasOrcamentoV2, alertasServico, custoHoraPerfil, custoReceita, custos0, equipHora, listaCatalogo, margemSobrePreco,
   mediaHora, mesesAntes, mesesEntre, minimoLinha, minimoServico, ordenar, passaFiltro, pesquisar, precoReceita, receitaDe, taxaEstrutura, totalEstrutura,
+  horaPerfil, origemHora, type HoraBd,
 } from "./custosModelo";
+import type { FichaTecnico } from "../equipa/tecnicos";
 
 // Um serviço do Catálogo sem receita, criado só para estes testes: desde 14/10 todos os do Catálogo (os c1..c41
 // incluídos) têm a receita da Mudelar, e os testes do "sem receita" precisam de um que não a tenha.
@@ -187,5 +189,49 @@ describe("custos · passar para o motor e alertas do orçamento", () => {
     for (const l of lin) { if (l.t === "svc") l.pu = l.cu / (1 - 0.31); else { l.preco = l.custo / (1 - 0.31); } }
     expect(alertasOrcamentoV2(d, S, C).some((a) => a.key === "just")).toBe(true);
     expect(alertasOrcamentoV2(d, S, C, { justificacao: "Campanha em curso" }).some((a) => a.key === "just")).toBe(false);
+  });
+});
+
+describe("custos · o €/h calculado na base (28/10, cargos técnicos)", () => {
+  const tec = (id: string, n: string, perfis: string[], custoHora: number, extra: Partial<FichaTecnico> = {}): FichaTecnico =>
+    ({ id, n, sk: "", perfilId: perfis[0], perfis, ferias: [], custoHora, tel: "", desde: "", ...extra });
+  const comBd = (bd: HoraBd) => { const C = custos0(); C.perfis.find((x) => x.id === "canalizador")!.horaBd = bd; return C; };
+
+  it("fonte rh da base: usa o valor da base (não a média de cá) e diz quem entra", () => {
+    const C = comBd({ custoHora: 21.5, fonte: "rh", n: 2, nomes: ["Ana", "Rui"], cargos: ["Canalizador"] });
+    const h = horaPerfil(C, "canalizador", [tec("a", "Ana", ["canalizador"], 30), tec("r", "Rui", ["canalizador"], 10)]);
+    expect(h).toMatchObject({ eh: 21.5, fonte: "rh" });
+    expect(origemHora(h)).toBe("Média de 2 técnicos no RH (Ana, Rui)");
+  });
+  it("fonte cargo: o salário do cargo técnico, com o nome do cargo", () => {
+    const C = comBd({ custoHora: 19.9, fonte: "cargo", n: 1, nomes: [], cargos: ["Canalizador de 1.ª"] });
+    const h = horaPerfil(C, "canalizador", []);
+    expect(h).toMatchObject({ eh: 19.9, fonte: "cargo" });
+    expect(origemHora(h)).toBe("Sem técnicos: usa o salário do cargo Canalizador de 1.ª");
+  });
+  it("fonte referencia: a conta de cá com o salário do perfil (editável no Catálogo)", () => {
+    const C = comBd({ custoHora: 25, fonte: "referencia", n: 0, nomes: [], cargos: [] });
+    C.perfis.find((x) => x.id === "canalizador")!.salario = 2000;
+    const h = horaPerfil(C, "canalizador", []);
+    expect(h.fonte).toBe("salario");
+    expect(h.eh).toBeCloseTo((2000 * 14 * 1.2375 + 713) / 1345, 6);
+    expect(origemHora(h)).toBe("Sem técnicos nem cargo: usa o salário de referência");
+  });
+  it("um técnico com dois ofícios conta nos dois; sem permissão o custo dele fica escondido (fora da lista, sem 'sem custo')", () => {
+    const L = [tec("a", "Ana", ["canalizador", "ladrilhador"], 20), tec("o", "Oculto", ["canalizador"], 0, { custoOculto: true })];
+    const C = custos0();
+    expect(horaPerfil(C, "ladrilhador", L)).toMatchObject({ eh: 20, fonte: "rh" });
+    const h = horaPerfil(C, "canalizador", L);
+    expect(h.tecnicos.map((t) => t.n)).toEqual(["Ana"]);
+    expect(h.semCustoRh).toEqual([]);
+  });
+  it("sem horaBd (o protótipo) fica tudo como antes", () => {
+    const C = custos0();
+    const L = [tec("a", "Ana", ["canalizador"], 20)];
+    const h = horaPerfil(C, "canalizador", L);
+    expect(h).toMatchObject({ eh: 20, fonte: "rh" });
+    expect(h.bd).toBeUndefined();
+    expect(origemHora(h)).toBe("Custo/hora de Ana no RH");
+    expect(origemHora(horaPerfil(C, "canalizador", []))).toBe("Sem técnicos no RH: usa o salário do perfil");
   });
 });

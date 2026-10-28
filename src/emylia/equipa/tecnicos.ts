@@ -35,6 +35,11 @@ export interface FichaTecnico extends Tecnico {
   /** 22/10: o ofício pelo id do perfil do Catálogo (v2/custosModelo.ts: Custos.perfis). É o que liga o técnico às receitas: o €/h de
    *  cada perfil é a média do custo/hora dos técnicos com esse perfil. `sk` fica com o nome do perfil (o que os ecrãs mostram). */
   perfilId?: string;
+  /** 28/10 (20261231998000): todos os ofícios do técnico (os do cargo técnico do RH e os extras). Com eles, conta em cada um;
+   *  sem eles (o protótipo), só o perfilId. */
+  perfis?: string[];
+  /** 28/10: quem lê não vê o custo de cada técnico (sem hr.pessoas.retribuicao.view): fica fora das listas de custos, sem aviso. */
+  custoOculto?: true;
 }
 
 /** Os ofícios dos técnicos de exemplo (os nomes dos perfis; a lista completa está nos perfis do Catálogo). */
@@ -87,9 +92,9 @@ function completar(t: FichaTecnico): boolean {
 
 /** O id do perfil do Catálogo de um técnico (o da ficha; nas de antes, pelo ofício); "" sem perfil. */
 export const perfilDoTecnico = (t: Pick<FichaTecnico, "sk"> & { perfilId?: string }): string => t.perfilId ?? PERFIL_DO_SK[t.sk] ?? "";
-/** Os técnicos (do registo vivo, ou de `L`) com o perfil `perfilId`. */
+/** Os técnicos (do registo vivo, ou de `L`) com o perfil `perfilId` (28/10: um técnico com vários ofícios conta em todos). */
 export const tecnicosDoPerfil = (perfilId: string, L: readonly FichaTecnico[] = TECNICOS): FichaTecnico[] =>
-  perfilId ? L.filter((t) => perfilDoTecnico(t) === perfilId) : [];
+  perfilId ? L.filter((t) => (t.perfis?.length ? t.perfis.includes(perfilId) : perfilDoTecnico(t) === perfilId)) : [];
 
 /**
  * Garante a ficha dos técnicos no Estado e liga-lhe o registo vivo. Um estado sem `tecnicos` (guardado antes de 22/10) fica com os seis

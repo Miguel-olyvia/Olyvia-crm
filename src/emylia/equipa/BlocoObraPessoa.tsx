@@ -62,8 +62,11 @@ function FichaObra({ t, pessoaId, ctx }: { t: FichaTecnico; pessoaId: string; ct
         <h4 className="text-[15px] font-medium">Custo/hora (calculado nos Custos do RH)</h4>
         {t.semCustoRh ? (
           <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px]" role="note">
-            Sem custo no RH: falta a retribuição ou o vínculo desta pessoa. Fica fora da média do ofício{hp?.fonte === "salario" ? ", que usa o salário do perfil" : ""}.
+            Sem custo no RH: falta a retribuição ou o vínculo desta pessoa. Fica fora da média do ofício{hp?.fonte === "salario" ? ", que usa o salário do perfil" : hp?.fonte === "cargo" ? ", que usa o salário do cargo" : ""}.
           </p>
+        ) : t.custoOculto ? (
+          // 28/10: o custo de cada técnico só vai a quem vê as retribuições no RH (o €/h do ofício, mais abaixo, vê-se sempre)
+          <p className="text-[15px] text-muted-foreground" role="note">O custo/hora de cada técnico só se mostra a quem vê as retribuições no RH.</p>
         ) : (
           <div className="flex min-w-0 max-w-xl gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
             <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />

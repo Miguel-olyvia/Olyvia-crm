@@ -1,7 +1,7 @@
 // O conteúdo das três primeiras abas da ficha de RH (Visão geral, Detalhes laborais e Detalhes pessoais): os mesmos componentes
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
-import { PessoaOficiosObraCard } from "@/components/hr/PessoaOficiosObraCard";
+import { PessoaOficiosObraCard } from "@/components/rh-exemplo/hooks/PessoaOficiosObraCardReal";
 import { CartaoAdmissaoDaFicha } from "@/components/rh-exemplo/hooks/CartaoAdmissaoDaFicha";
 import type { ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
 import { PortalColaboradorRh } from "@/components/rh-exemplo/portal/PortalColaboradorRh";
@@ -63,8 +63,12 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo }: AbaProps & { a
       podeCorrigirAfectacoes={w.podeCorrigirAfectacoes} podeVerColocacao={w.podeVerColocacao}
       podeEditarColocacao={w.podeEditarColocacao} podeCorrigirColocacao={w.podeCorrigirColocacao}
     />
-    {/* 28/10: os ofícios de obra da pessoa (o mesmo cartão do /rh): é daqui que o Catálogo e o orçamento tiram os técnicos */}
-    <PessoaOficiosObraCard pessoaId={pessoa.id} organizationId={pessoa.organization_id} podeEditar={w.podeEditarLaborais} />
+    {/* 28/10: os ofícios de obra da pessoa (o mesmo cartão do /rh): é daqui que o Catálogo e o orçamento tiram os técnicos.
+        A chave com o cargo relê o cartão quando o cargo muda (os ofícios herdados e se é técnica vêm do cargo, 20261231998000). */}
+    <PessoaOficiosObraCard
+      key={`${pessoa.id}:${pessoa.cargo_id ?? ""}`}
+      pessoaId={pessoa.id} organizationId={pessoa.organization_id} podeEditar={w.podeEditarLaborais}
+    />
     </div>
   );
 }

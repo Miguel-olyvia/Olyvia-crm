@@ -9796,6 +9796,52 @@ export type Database = {
         }
         Relationships: []
       }
+      hr_cargos_oficios: {
+        Row: {
+          cargo_id: string
+          created_at: string
+          created_by: string | null
+          organization_id: string
+          skill_id: string
+        }
+        Insert: {
+          cargo_id: string
+          created_at?: string
+          created_by?: string | null
+          organization_id: string
+          skill_id: string
+        }
+        Update: {
+          cargo_id?: string
+          created_at?: string
+          created_by?: string | null
+          organization_id?: string
+          skill_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_cargos_oficios_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_cargos_oficios_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_cargos_oficios_skill_fkey"
+            columns: ["skill_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "ops_skill"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
       incidents: {
         Row: {
           actual_cost: number | null
@@ -27559,6 +27605,16 @@ export type Database = {
         Args: { p_contact_id: string }
         Returns: boolean
       }
+      rh_guardar_cargo_tecnico: {
+        Args: {
+          p_cargo: string
+          p_org: string
+          p_skills: string[]
+          p_tecnico: boolean
+        }
+        Returns: undefined
+      }
+      rh_ler_custo_hora_pessoas: { Args: { p_org: string }; Returns: Json }
       rpc_add_bundle_components: {
         Args: { p_bundle_id: string; p_items: Json }
         Returns: {

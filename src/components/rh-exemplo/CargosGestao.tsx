@@ -36,6 +36,14 @@
  * legado (`pessoas.cargo`) com mais do que um salario. Nao ha nenhum botao para
  * "corrigir tudo".
  *
+ * CARGO TECNICO DE OBRA (20261231998000)
+ * -----------------------------------------
+ * A coluna "Tecnico de obra / Oficios" mostra a marca e os oficios do cargo. No
+ * dialogo de criar/editar, o interruptor "Tecnico de obra" e, so com ele ligado,
+ * as caixas dos oficios do Catalogo (`useOficiosObra`). Grava-se depois de
+ * criar ou editar o cargo, por `rh_guardar_cargo_tecnico` (so se mudou). As
+ * pessoas com o cargo herdam os oficios (ficha › Detalhes laborais).
+ *
  * NUNCA SE APAGA -- SO SE (DES)ACTIVA
  * -------------------------------------
  * A RLS bloqueia DELETE por politica RESTRICTIVE; este componente nem mostra
@@ -51,6 +59,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { CargoPeriodosLista } from "@/components/rh-exemplo/CargoPeriodosLista";
@@ -82,6 +92,7 @@ import {
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCargos, type HrCargo, type NovoCargoRH } from "@/components/rh-exemplo/hooks/useCargos";
+import { useOficiosObra } from "@/components/rh-exemplo/hooks/useOficiosObra";
 import { useCargosSalariosDivergentes } from "@/components/rh-exemplo/hooks/useCargosSalariosDivergentes";
 import { useCargosRetribuicoesDivergentes } from "@/components/rh-exemplo/hooks/useCargosRetribuicoesDivergentes";
 import { dataDeHojeISO } from "@/components/rh-exemplo/lib/afectacoes";
@@ -101,6 +112,7 @@ import {
   Ban,
   Briefcase,
   ChevronDown,
+  HardHat,
   ChevronRight,
   Loader2,
   Pencil,
@@ -134,7 +146,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   const podeAlterarSalario = hasPermission("hr.cargos.salario.alterar");
   const podeVerRetribuicao = hasPermission("hr.pessoas.retribuicao.view");
 
-  const { cargos, periodos, isLoading, isSaving, criar, editar, definirActivo, definirSalario } =
+  const { cargos, periodos, oficios, isLoading, isSaving, criar, editar, definirActivo, definirSalario, definirTecnico } =
     useCargos();
   const { divergencias, isLoading: divergenciasALoad } = useCargosSalariosDivergentes();
   const { divergencias: divergenciasPeriodo, isLoading: divergenciasPeriodoALoad } =
@@ -149,6 +161,24 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   const [form, setForm] = useState<NovoCargoRH>(FORM_VAZIO);
   const [cargoSalario, setCargoSalario] = useState<HrCargo | null>(null);
   const [expandidos, setExpandidos] = useState<ReadonlySet<string>>(() => new Set());
+  // A marca de tecnico de obra e os oficios escolhidos no dialogo (gravam-se a parte: rh_guardar_cargo_tecnico).
+  const [tecnico, setTecnico] = useState(false);
+  const [skills, setSkills] = useState<ReadonlySet<string>>(() => new Set());
+  const { oficios: oficiosObra, semAcesso: semAcessoOficios } = useOficiosObra(dialogoAberto || oficios.length > 0);
+
+  /** Os nomes dos oficios de cada cargo (os que o Catalogo nao devolver ficam de fora). */
+  const oficiosDoCargo = useMemo(() => {
+    const nomes = new Map(oficiosObra.map((o) => [o.id, o.nome]));
+    const mapa = new Map<string, string[]>();
+    for (const o of oficios) {
+      const nome = nomes.get(o.skill_id);
+      if (!nome) continue;
+      mapa.set(o.cargo_id, [...(mapa.get(o.cargo_id) ?? []), nome]);
+    }
+    for (const lista of mapa.values()) lista.sort((a, b) => a.localeCompare(b, "pt"));
+    return mapa;
+  }, [oficios, oficiosObra]);
+  const skillsDoCargo = (id: string) => new Set(oficios.filter((o) => o.cargo_id === id).map((o) => o.skill_id));
 
   const { porCargo, semCargo, fichasSemCargo } = useMemo(() => {
     const mapa = new Map<string, Contagem>();
@@ -215,6 +245,8 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   const abrirNovo = () => {
     setCargoAEditar(null);
     setForm(FORM_VAZIO);
+    setTecnico(false);
+    setSkills(new Set());
     setDialogoAberto(true);
   };
 
@@ -226,6 +258,8 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
       periodicidade: "mensal",
       horas_referencia: cargo.horas_referencia,
     });
+    setTecnico(!!cargo.tecnico_obra);
+    setSkills(skillsDoCargo(cargo.id));
     setDialogoAberto(true);
   };
 
@@ -233,24 +267,58 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
     setDialogoAberto(false);
     setCargoAEditar(null);
     setForm(FORM_VAZIO);
+    setTecnico(false);
+    setSkills(new Set());
+  };
+
+  const alternarSkill = (id: string, marcado: boolean) =>
+    setSkills((anterior) => {
+      const proximo = new Set(anterior);
+      if (marcado) proximo.add(id);
+      else proximo.delete(id);
+      return proximo;
+    });
+
+  /** A marca ou os oficios mudaram em relacao ao que o cargo tem (num cargo novo: so se for tecnico). */
+  const tecnicoMudou = (cargo: HrCargo | undefined) => {
+    if (!cargo) return tecnico;
+    if (!!cargo.tecnico_obra !== tecnico) return true;
+    if (!tecnico) return false;
+    const antes = skillsDoCargo(cargo.id);
+    return antes.size !== skills.size || [...skills].some((id) => !antes.has(id));
   };
 
   const submeter = async () => {
     if (!form.nome.trim() || nomeRepetido) return;
     if (!cargoAEditar && form.salario_base < 0) return;
+    let cargoId: string | null = null;
+    const mudouTecnico = tecnicoMudou(cargoAEditar ? cargos.find((c) => c.id === cargoAEditar) : undefined);
     try {
       if (cargoAEditar) {
         // So nome e horas: o salario muda por "Alterar salario".
         await editar({ id: cargoAEditar, nome: form.nome, horas_referencia: form.horas_referencia });
-        toast.success(t("hr.cargos.actualizarSucesso"));
+        cargoId = cargoAEditar;
       } else {
-        await criar(form);
-        toast.success(t("hr.cargos.criarSucesso"));
+        cargoId = await criar(form);
       }
-      fecharDialogo();
     } catch (erro) {
       toast.error(await mensagemDeErroCargo(erro, "hr-cargo-definir-salario"));
+      return;
     }
+    // A marca de tecnico de obra e os oficios, depois do cargo (so se mudaram).
+    if (mudouTecnico && cargoId) {
+      try {
+        await definirTecnico(cargoId, tecnico, tecnico ? [...skills] : []);
+      } catch (erro) {
+        const e = erro as { code?: string; message?: string } | null;
+        const motivo = e?.code?.startsWith("CT") && e.message ? e.message : await getFriendlyErrorMessage(erro);
+        toast.error(`${t("hr.cargos.tecnico.erroGravar")} ${motivo}`);
+        fecharDialogo();
+        return;
+      }
+    }
+    toast.success(cargoAEditar ? t("hr.cargos.actualizarSucesso") : t("hr.cargos.criarSucesso"));
+    fecharDialogo();
   };
 
   const alternarActivo = async (cargo: HrCargo) => {
@@ -266,7 +334,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   if (!podeVer) return <SemAcessoCard />;
 
   const mostrarColunaAccoes = podeEditar || podeAlterarSalario;
-  const nColunas = 3 + (podeVerVinculos ? 1 : 0) + (mostrarColunaAccoes ? 1 : 0);
+  const nColunas = 4 + (podeVerVinculos ? 1 : 0) + (mostrarColunaAccoes ? 1 : 0);
   const cargoEmEdicao = cargoAEditar ? cargos.find((c) => c.id === cargoAEditar) : undefined;
 
   return (
@@ -433,6 +501,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                   <TableRow>
                     <TableHead>{t("hr.columns.cargo")}</TableHead>
                     <TableHead>{t("hr.cargos.coluna.salario")}</TableHead>
+                    <TableHead>{t("hr.cargos.tecnico.coluna")}</TableHead>
                     <TableHead className="w-28">{t("hr.funcoes.pessoas")}</TableHead>
                     {podeVerVinculos && (
                       <TableHead className="w-28">{t("hr.estadoContrato.em_curso")}</TableHead>
@@ -479,6 +548,21 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                             <div>{salario.vigente ?? "—"}</div>
                             {salario.agendado && (
                               <div className="text-xs text-muted-foreground">{salario.agendado}</div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {cargo.tecnico_obra ? (
+                              <div className="space-y-1">
+                                <Badge variant="outline" className="gap-1 text-[10px]">
+                                  <HardHat className="h-3 w-3" aria-hidden="true" />
+                                  {t("hr.cargos.tecnico.marca")}
+                                </Badge>
+                                <div className="text-xs text-muted-foreground">
+                                  {(oficiosDoCargo.get(cargo.id) ?? []).join(", ") || t("hr.cargos.tecnico.nenhumOficio")}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
                           <TableCell className="tabular-nums">{contagem.total}</TableCell>
@@ -554,6 +638,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                       <TableCell>
                         <span className="text-muted-foreground">{t("hr.funcoes.semCargo")}</span>
                       </TableCell>
+                      <TableCell />
                       <TableCell />
                       <TableCell className="tabular-nums">{semCargo.total}</TableCell>
                       {podeVerVinculos && (
@@ -676,6 +761,40 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                 }
               />
               <p className="text-xs text-muted-foreground">{t("hr.cargos.horasReferenciaAjuda")}</p>
+            </div>
+
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label htmlFor="cargo-tecnico">{t("hr.cargos.tecnico.marca")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("hr.cargos.tecnico.ajuda")}</p>
+                </div>
+                <Switch id="cargo-tecnico" checked={tecnico} onCheckedChange={setTecnico} />
+              </div>
+              {tecnico && (
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">{t("hr.cargos.tecnico.oficios")}</legend>
+                  {semAcessoOficios ? (
+                    <p className="text-xs text-muted-foreground">{t("hr.cargos.tecnico.semAcesso")}</p>
+                  ) : oficiosObra.filter((o) => o.ativo || skills.has(o.id)).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">{t("hr.oficiosObra.semOficios")}</p>
+                  ) : (
+                    <div className="grid max-h-48 gap-2 overflow-y-auto sm:grid-cols-2">
+                      {oficiosObra
+                        .filter((o) => o.ativo || skills.has(o.id))
+                        .map((o) => {
+                          const id = `cargo-oficio-${o.id}`;
+                          return (
+                            <label key={o.id} htmlFor={id} className="flex items-center gap-2 text-sm">
+                              <Checkbox id={id} checked={skills.has(o.id)} onCheckedChange={(v) => alternarSkill(o.id, v === true)} />
+                              {o.nome}
+                            </label>
+                          );
+                        })}
+                    </div>
+                  )}
+                </fieldset>
+              )}
             </div>
 
             <p className="text-xs text-muted-foreground">{t("hr.cargos.avisoSalarioObrigatorio")}</p>

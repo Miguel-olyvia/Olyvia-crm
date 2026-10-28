@@ -104,8 +104,13 @@ export function CustoServico({ S, sid, s, q, pu, det, onClose, children }: { S: 
                   ) : o.fonte === "rh" ? (
                     <div className="mt-1.5 space-y-1 text-muted-foreground">
                       {o.tecnicos.map((t) => <Linha key={t.id} a={t.n} b={`${eur(t.custoHora)} €/h`} sub="Calculado nos Custos do RH (salário, encargos, horas do contrato)" />)}
-                      <Linha a={<b className="text-foreground">Média de {o.tecnicos.length} {o.tecnicos.length === 1 ? "técnico" : "técnicos"}</b>} b={<b className="text-foreground">{eur(o.eh!)} €/h</b>} />
+                      {/* 28/10: sem permissão de ver as retribuições, a lista vem vazia: conta-se pelo que a base diz (bd.n) */}
+                      {(() => { const k = o.tecnicos.length || o.bd?.n || 0; return (
+                        <Linha a={<b className="text-foreground">Média de {k} {k === 1 ? "técnico" : "técnicos"}</b>} b={<b className="text-foreground">{eur(o.eh!)} €/h</b>} />
+                      ); })()}
                     </div>
+                  ) : o.fonte === "cargo" ? (
+                    <p className="mt-1 text-muted-foreground">{origemHora(o)}: o salário do cargo pela mesma conta do perfil (meses, TSU, seguros ÷ horas produtivas).</p>
                   ) : o.fonte === "salario" ? (
                     direcao ? (() => { const p = C.perfis.find((x) => x.id === o.perfil)!, a = anoPerfil(p, C.par); return (
                       <div className="mt-1.5 space-y-1 text-muted-foreground">
