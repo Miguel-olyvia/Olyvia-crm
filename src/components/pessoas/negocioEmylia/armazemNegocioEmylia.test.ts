@@ -9,7 +9,9 @@ const m = vi.hoisted(() => ({
   deLinhas: vi.fn(),
 }));
 vi.mock("@/emylia/real/carregarCatalogo", () => ({ carregarCatalogo: m.carregarCatalogo }));
-vi.mock("@/emylia/real/negocioBase", () => ({ idsServico: () => ({ paraId: new Map(), paraChave: new Map() }), lerNegocios: m.lerNegocios }));
+// 20261231999000: o negócio monta-se com negocioDoLido (as linhas e a obra); aqui, só as linhas, como antes
+vi.mock("@/emylia/real/negocioBase", () => ({ idsServico: () => ({ paraId: new Map(), paraChave: new Map() }), lerNegocios: m.lerNegocios,
+  negocioDoLido: (n: { linhas: unknown }) => m.deLinhas(n.linhas) }));
 vi.mock("@/emylia/real/negocioReal", () => ({ deLinhas: m.deLinhas, garantirServicosDosNegocios: vi.fn() }));
 // a marca é só o que o teste muda (id, fase, nome); negociosMudados faz o mesmo que o verdadeiro: o que difere da fotografia
 const { marca } = vi.hoisted(() => ({ marca: (d: { id: number; fase: number; nome: string }): string => JSON.stringify([d.id, d.fase, d.nome]) }));

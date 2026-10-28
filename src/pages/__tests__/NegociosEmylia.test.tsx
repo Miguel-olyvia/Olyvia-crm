@@ -39,6 +39,8 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     rpc.mockImplementation(async (fn: string) => {
       if (fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
       if (fn === "neg_ler_negocios") return { data: [NEGOCIO], error: null };
+      // 20261231999000: as obras dos negócios lêem-se ao lado (aqui, nenhuma)
+      if (fn === "obra_ler_negocios") return { data: [], error: null };
       if (fn === "neg_guardar_negocio") return { data: { negocio_id: "x" }, error: null };
       return { data: null, error: { message: "inesperado: " + fn } };
     });
@@ -52,6 +54,7 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     fireEvent.click(screen.getAllByText("Marta Lima")[0]);
     await new Promise((r) => setTimeout(r, 300));
     expect(rpc.mock.calls.filter(([fn]) => fn === "neg_guardar_negocio")).toHaveLength(0);
+    expect(rpc.mock.calls.filter(([fn]) => fn === "obra_guardar_negocio")).toHaveLength(0);
   });
 
   it("um negócio novo nasce pela Nova lead do CRM, fica com o número da base e grava", async () => {

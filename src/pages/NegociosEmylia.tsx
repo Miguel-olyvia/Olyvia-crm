@@ -11,8 +11,8 @@ import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
-import { deLinhas, garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
-import { idsServico, lerNegocios, type IdsServico } from "@/emylia/real/negocioBase";
+import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
+import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
@@ -93,7 +93,7 @@ export default function NegociosEmylia() {
       if (!vivo) return;
       refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
       soLeitura.current = new Set(lidos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
-      S.deals = lidos.map((n) => deLinhas(n.linhas));
+      S.deals = lidos.map(negocioDoLido);
       // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
       garantirServicosDosNegocios(S, S.deals);
       S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;

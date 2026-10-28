@@ -7,7 +7,8 @@ import { tot, totaisIva, type Estado, type Negocio } from "../motor";
 import { gravarNovaLead } from "@/hooks/pessoas/novaLead/gravarNovaLead";
 import { resolverOrgRaiz } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { paraLinhas } from "./negocioReal";
-import { gravarNegocio, type IdsServico } from "./negocioBase";
+import { gravarNegocio, gravarObra, type IdsServico } from "./negocioBase";
+import { obraVazia, paraObra } from "./obraReal";
 
 export interface RefNegocio { id: string; entityId: string }
 
@@ -17,7 +18,23 @@ export function marcaNegocio(d: Negocio): string {
   void fresh; void valida; void atraso; void obra; void acesso;
   return JSON.stringify(resto);
 }
-export const fotografarNegocios = (deals: readonly Negocio[]): Map<number, string> => new Map(deals.map((d) => [d.id, marcaNegocio(d)]));
+/** 28/10 (20261231999000): a obra grava-se à parte (obra_guardar_negocio), quando muda. A fotografia dela vive ao lado da fotografia do
+ *  negócio, presa ao mesmo Map: quem chama não muda. Um negócio sem fotografia da obra compara com a obra vazia (sem plano, nada a gravar). */
+const fotosObra = new WeakMap<Map<number, string>, Map<number, string>>();
+export const marcaObra = (d: Negocio): string => JSON.stringify(d.obra ?? null);
+const OBRA_VAZIA = JSON.stringify(obraVazia());
+const fotoObraDe = (foto: Map<number, string>): Map<number, string> => {
+  let m = fotosObra.get(foto);
+  if (!m) { m = new Map(); fotosObra.set(foto, m); }
+  return m;
+};
+export const obraMudou = (d: Negocio, foto: Map<number, string>): boolean => marcaObra(d) !== (fotoObraDe(foto).get(d.id) ?? OBRA_VAZIA);
+
+export const fotografarNegocios = (deals: readonly Negocio[]): Map<number, string> => {
+  const foto = new Map(deals.map((d) => [d.id, marcaNegocio(d)]));
+  fotosObra.set(foto, new Map(deals.map((d) => [d.id, marcaObra(d)])));
+  return foto;
+};
 export const negociosMudados = (deals: readonly Negocio[], foto: ReadonlyMap<number, string>): Negocio[] =>
   deals.filter((d) => foto.get(d.id) !== marcaNegocio(d));
 
@@ -50,6 +67,7 @@ export interface Sincronizacao { gravados: number; erros: string[]; avisos: stri
 export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado, refs: Map<number, RefNegocio>, foto: Map<number, string>, ids: IdsServico,
   soLeitura: ReadonlySet<number> = new Set()): Promise<Sincronizacao> {
   const out: Sincronizacao = { gravados: 0, erros: [], avisos: [] };
+  const falhados = new Set<number>(), contados = new Set<number>();
   for (const d of negociosMudados(S.deals, foto)) {
     if (soLeitura.has(d.id)) continue;
     try {
@@ -67,9 +85,22 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
       }
       for (const a of await gravarNegocio(sb, org, refs.get(d.id)!.id, L, ids)) out.avisos.push(`${d.nome}: ${a}`);
       foto.set(d.id, marcaNegocio(d));
-      out.gravados++;
+      out.gravados++; contados.add(d.id);
     } catch (e) {
+      falhados.add(d.id);
       out.erros.push(`${d.nome}: ${(e as Error).message}`);
+    }
+  }
+  // a obra (depois do negócio: um negócio novo já tem o id da base)
+  const fotoObra = fotoObraDe(foto);
+  for (const d of S.deals) {
+    if (soLeitura.has(d.id) || falhados.has(d.id) || !refs.has(d.id) || !obraMudou(d, foto)) continue;
+    try {
+      for (const a of await gravarObra(sb, org, refs.get(d.id)!.id, paraObra(d))) out.avisos.push(`${d.nome}: ${a}`);
+      fotoObra.set(d.id, marcaObra(d));
+      if (!contados.has(d.id)) out.gravados++;
+    } catch (e) {
+      out.erros.push(`${d.nome} (obra): ${(e as Error).message}`);
     }
   }
   return out;

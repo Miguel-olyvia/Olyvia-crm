@@ -2,6 +2,7 @@
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
 import { PessoaOficiosObraCard } from "@/components/rh-exemplo/hooks/PessoaOficiosObraCardReal";
+import { PessoaAgendaObraCard } from "@/components/rh-exemplo/hooks/PessoaAgendaObraCardReal";
 import { CartaoAdmissaoDaFicha } from "@/components/rh-exemplo/hooks/CartaoAdmissaoDaFicha";
 import type { ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
 import { PortalColaboradorRh } from "@/components/rh-exemplo/portal/PortalColaboradorRh";
@@ -69,6 +70,8 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo }: AbaProps & { a
       key={`${pessoa.id}:${pessoa.cargo_id ?? ""}`}
       pessoaId={pessoa.id} organizationId={pessoa.organization_id} podeEditar={w.podeEditarLaborais}
     />
+    {/* 28/10 (20261231999000): as tarefas de obra da pessoa, do plano da obra de cada negócio. */}
+    <PessoaAgendaObraCard pessoaId={pessoa.id} organizationId={pessoa.organization_id} />
     </div>
   );
 }

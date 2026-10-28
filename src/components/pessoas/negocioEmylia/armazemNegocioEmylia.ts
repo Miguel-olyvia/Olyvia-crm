@@ -13,7 +13,7 @@ import { acoes, type Aviso, type Estado, type Negocio } from "@/emylia/motor";
 import { estadoVazio } from "@/emylia/estadoOrganizacao";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { deLinhas, garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
-import { idsServico, lerNegocios, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
+import { idsServico, lerNegocios, negocioDoLido, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
 
 export type LeituraEmylia = { k: "a-ler" } | { k: "erro"; t: string } | { k: "pronto" };
@@ -115,7 +115,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     lidos = new Map(novos.map((n) => [n.linhas.negocio.numero, n]));
     soLeitura = new Set(novos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
     docsPorId = new Set(novos.filter((n) => n.docsCrm).map((n) => n.id));
-    S.deals = novos.map((n) => deLinhas(n.linhas));
+    S.deals = novos.map(negocioDoLido);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
@@ -130,7 +130,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     for (const d of mudados) {
       const lido = lidos.get(d.id);
       const i = S.deals.findIndex((x) => x.id === d.id);
-      if (lido && i >= 0) S.deals[i] = deLinhas(lido.linhas);
+      if (lido && i >= 0) S.deals[i] = negocioDoLido(lido);
     }
     avisar({ msg: "Este negócio é do CRM: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ". Faz-se em Contratos e Propostas.", kind: "bad" });
   };

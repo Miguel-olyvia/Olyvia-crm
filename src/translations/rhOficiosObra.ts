@@ -1,5 +1,6 @@
 // Ficha da pessoa do RH › Detalhes laborais › "Ofícios de obra" (PessoaOficiosObraCard, migration 20261231996000) e, desde a
-// 20261231998000, o cargo técnico de obra em Cargos (rh-exemplo/CargosGestao).
+// 20261231998000, o cargo técnico de obra em Cargos (rh-exemplo/CargosGestao). Desde a 20261231999000, a "Agenda de obra" da pessoa
+// (PessoaAgendaObraCard).
 // Módulo próprio, no mesmo padrão de `frotaNav.ts`: o merge é feito em `useTranslation.ts`. Apenas en/pt: o `t()` cai para `en`.
 export const rhOficiosObraTranslations: Record<string, Record<string, string>> = {
   en: {
@@ -20,6 +21,12 @@ export const rhOficiosObraTranslations: Record<string, Record<string, string>> =
     'hr.cargos.tecnico.nenhumOficio': 'No trades yet',
     'hr.cargos.tecnico.semAcesso': 'You cannot see the Catalogue trades (operations or services permission needed).',
     'hr.cargos.tecnico.erroGravar': 'The role was saved, but not the site technician mark and trades.',
+    'hr.agendaObra.titulo': 'Site schedule',
+    'hr.agendaObra.semTarefas': 'No site tasks in the next {dias} days.',
+    'hr.agendaObra.horasDia': '{horas} h per day',
+    'hr.agendaObra.indisponivel': 'Unavailable: {dias}.',
+    'hr.agendaObra.ajuda': 'Tasks are assigned in the site plan, in the deal (Deals › Site).',
+    'hr.agendaObra.erroLer': 'Could not read the site schedule.',
   },
   pt: {
     'hr.oficiosObra.titulo': 'Ofícios de obra',
@@ -39,5 +46,11 @@ export const rhOficiosObraTranslations: Record<string, Record<string, string>> =
     'hr.cargos.tecnico.nenhumOficio': 'Ainda sem ofícios',
     'hr.cargos.tecnico.semAcesso': 'Sem acesso aos ofícios do Catálogo (precisa da permissão de Operações ou de Serviços).',
     'hr.cargos.tecnico.erroGravar': 'O cargo foi gravado, mas não a marca de técnico de obra e os ofícios.',
+    'hr.agendaObra.titulo': 'Agenda de obra',
+    'hr.agendaObra.semTarefas': 'Sem tarefas de obra nos próximos {dias} dias.',
+    'hr.agendaObra.horasDia': '{horas} h por dia',
+    'hr.agendaObra.indisponivel': 'Indisponível: {dias}.',
+    'hr.agendaObra.ajuda': 'As tarefas atribuem-se no plano da obra, no negócio (Negócios › Obra).',
+    'hr.agendaObra.erroLer': 'Não foi possível ler a agenda de obra.',
   },
 };
