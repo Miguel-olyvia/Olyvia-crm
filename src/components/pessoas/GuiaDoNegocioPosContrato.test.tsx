@@ -1,4 +1,4 @@
-// A ficha do Pipeline cobre o percurso todo com UMA só barra (Por contactar, Contactado, Visita, Orçamento, Proposta, Contrato, Financeiro, Obra): do Negócio
+// A ficha do Pipeline cobre o percurso todo com UMA só barra (Por contactar, Contactado, Visita, Negócio, Financeiro, Obra: as seis fases de /negocios; Orçamento, Proposta e Contrato são passos dentro de Negócio): do Negócio
 // em diante o conteúdo é o da Emylia, na mesma barra e com as mesmas «Fases feitas». O negócio da Emylia e o seu ecrã estão simulados (têm os seus testes): aqui
 // prova-se a ligação ao guia.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -76,10 +76,10 @@ const fase = (nome: string) => barra().getByText(nome).closest("li") as HTMLElem
 const nomes = () => screen.getByRole("list", { name: "Fases" }).querySelectorAll("li > span:first-of-type");
 
 describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () => {
-  it("há UMA só barra de fases, com as oito fases pela ordem do percurso", () => {
+  it("há UMA só barra de fases, com as seis fases de /negocios; Orçamento, Proposta e Contrato não são fases", () => {
     abrir(aberto, itemDe("orcamento"));
     expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
-    expect([...nomes()].map((n) => n.textContent)).toEqual(["Por contactar", "Contactado", "Visita", "Orçamento", "Proposta", "Contrato", "Financeiro", "Obra"]);
+    expect([...nomes()].map((n) => n.textContent)).toEqual(["Por contactar", "Contactado", "Visita", "Negócio", "Financeiro", "Obra"]);
   });
 
   it("numa pessoa em Contactado a barra é a mesma, com Por contactar feito e o resto por fazer", () => {
@@ -100,7 +100,7 @@ describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () 
     abrir(ganhoComContrato, undefined);
     expect(fase("Financeiro")).toHaveAttribute("aria-current", "step");
     expect(screen.getByTestId("emylia").textContent).toBe("EMYLIA fase=financeiro atual=financeiro vista=null passa=false");
-    expect(within(fase("Contrato")).getByText(/conclu/i)).toBeInTheDocument();
+    expect(within(fase("Negócio")).getByText(/conclu/i)).toBeInTheDocument();
     expect(within(fase("Visita")).getByText(/conclu/i)).toBeInTheDocument();
     expect(barra().queryByText("Ganho")).toBeNull();
   });
@@ -112,19 +112,20 @@ describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () 
     expect(within(fase("Financeiro")).getByText(/conclu/i)).toBeInTheDocument();
   });
 
-  it("um negócio que a Emylia tem em Proposta abre na Proposta, com o Orçamento feito", () => {
-    m.estado.faseEmylia = "proposta";
+  it("um negócio que a Emylia tem na fase Negócio abre em Negócio (Proposta é um passo da lista, não uma fase), com a abordagem feita", () => {
+    m.estado.faseEmylia = "negocio";
     abrir(aberto, itemDe("proposta"));
-    expect(fase("Proposta")).toHaveAttribute("aria-current", "step");
-    expect(within(fase("Orçamento")).getByText(/conclu/i)).toBeInTheDocument();
+    expect(fase("Negócio")).toHaveAttribute("aria-current", "step");
+    expect(within(fase("Visita")).getByText(/conclu/i)).toBeInTheDocument();
+    expect(barra().queryByText("Proposta")).toBeNull();
   });
 
   it("a passagem Visita → Negócio: levantamento fechado, o seguinte é o Orçamento da Emylia (não o «Criar orçamento» do CRM)", () => {
-    m.estado.faseEmylia = "orcamento"; m.estado.aPassar = true;
+    m.estado.faseEmylia = "negocio"; m.estado.aPassar = true;
     abrir(aberto, itemDe("orcamento"));
-    expect(screen.getByTestId("emylia").textContent).toBe("EMYLIA fase=orcamento atual=orcamento vista=null passa=true");
+    expect(screen.getByTestId("emylia").textContent).toBe("EMYLIA fase=negocio atual=negocio vista=null passa=true");
     expect(screen.queryByRole("heading", { name: "Criar o orçamento." })).toBeNull();
-    expect(fase("Orçamento")).toHaveAttribute("aria-current", "step");
+    expect(fase("Negócio")).toHaveAttribute("aria-current", "step");
     expect(within(fase("Visita")).getByText(/conclu/i)).toBeInTheDocument();
   });
 
@@ -140,9 +141,9 @@ describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () 
     m.estado.faseEmylia = "financeiro";
     abrir(ganhoComContrato, undefined);
     const feitas = within(screen.getByRole("navigation", { name: "Fases feitas" }));
-    for (const id of ["porContactar", "contactado", "visita", "orcamento", "proposta", "contrato"]) expect(feitas.getByRole("button", { name: id })).toBeInTheDocument();
-    fireEvent.click(feitas.getByRole("button", { name: "orcamento" }));
-    expect(screen.getByTestId("emylia").textContent).toBe("EMYLIA fase=orcamento atual=financeiro vista=orcamento passa=false");
+    for (const id of ["porContactar", "contactado", "visita", "negocio"]) expect(feitas.getByRole("button", { name: id })).toBeInTheDocument();
+    fireEvent.click(feitas.getByRole("button", { name: "negocio" }));
+    expect(screen.getByTestId("emylia").textContent).toBe("EMYLIA fase=negocio atual=financeiro vista=negocio passa=false");
   });
 
   it("com documentos do CRM (sem fase da Emylia) fica o fluxo do CRM, como estava", () => {
@@ -152,9 +153,9 @@ describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () 
   });
 
   it("enquanto a leitura da Emylia não acaba (ou falhou) mostra o ecrã da Emylia com «a ler» ou o erro, e não o do CRM", () => {
-    m.estado.leituraBloqueia = true; m.estado.faseDoCrm = "orcamento";
+    m.estado.leituraBloqueia = true; m.estado.faseDoCrm = "negocio";
     abrir(aberto, itemDe("orcamento"));
-    expect(screen.getByTestId("emylia").textContent).toContain("fase=orcamento atual=orcamento");
+    expect(screen.getByTestId("emylia").textContent).toContain("fase=negocio atual=negocio");
     expect(screen.queryByRole("heading", { name: "Criar o orçamento." })).toBeNull();
   });
 

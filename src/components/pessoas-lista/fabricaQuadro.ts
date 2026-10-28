@@ -35,7 +35,7 @@ export function moduloSemQuadro() {
 export function quadroPosContratoBase(sobre: Partial<QuadroPosContratoEstado> = {}): QuadroPosContratoEstado {
   const vazia = { cartoes: [], cursor: null, haMais: false, total: 0, valor: 0 };
   return {
-    colunas: { financeiro: { ...vazia }, obra: { ...vazia } }, cartoes: [], isLoading: false, isError: false, erro: null, indisponivel: false,
+    colunas: { financeiro: { ...vazia }, obra: { ...vazia } }, cartoes: [], isLoading: false, isError: false, erro: null,
     aCarregarMais: new Set(), errosAoCarregarMais: {}, carregarMais: () => false, recarregar: () => undefined, ...sobre,
   };
 }

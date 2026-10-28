@@ -114,8 +114,8 @@ export function QuadroReal({ quadro, temFiltros, aoAbrir, aoLimpar, posContrato 
     );
   }
   if (quadro.isLoading) return <>{regiaoViva}<p className="p-4 text-sm text-muted-foreground">{t(`${R}board.loading`)}</p></>;
-  // Financeiro e Obra ainda a carregar, em erro ou sem a coluna na base: não se diz «vazio» (podem ter cartões que ainda não se sabe).
-  const posIncompleto = posContrato !== undefined && (posContrato.isLoading || posContrato.isError || posContrato.indisponivel);
+  // Financeiro e Obra ainda a carregar ou em erro: não se diz «vazio» (podem ter cartões que ainda não se sabe).
+  const posIncompleto = posContrato !== undefined && (posContrato.isLoading || posContrato.isError);
   const vazio = cartoes.length === 0 && (posContrato?.cartoes.length ?? 0) === 0 && !posIncompleto && !quadro.aMostrarAnterior;
   return (
     <div ref={raiz} onKeyDown={aoTeclar} className="space-y-3">

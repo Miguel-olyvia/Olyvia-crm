@@ -201,6 +201,18 @@ describe("armazemNegocioEmylia", () => {
     relogio.mockRestore();
   });
 
+  it("negociosLidos dá os negócios da MESMA leitura (id da base, pessoa e negócio), os mais recentes primeiro", async () => {
+    m.lerNegocios.mockResolvedValue([
+      { id: "uuid-1", entityId: "e1", docsCrm: false, linhas: { negocio: { numero: 1001 } } },
+      { id: "uuid-2", entityId: "e2", docsCrm: false, linhas: { negocio: { numero: 1002 } } },
+    ]);
+    m.deLinhas.mockImplementation((l: { negocio: { numero: number } }) => ({ ...dealFase4(), id: l.negocio.numero }));
+    const a = obterArmazem(sb, ORG);
+    await esperar();
+    expect(a.negociosLidos().map((n) => [n.id, n.entityId, n.d.id])).toEqual([["uuid-2", "e2", 1002], ["uuid-1", "e1", 1001]]);
+    expect(m.lerNegocios).toHaveBeenCalledTimes(1);
+  });
+
   it("outro utilizador não herda o armazém do anterior", () => {
     const u1 = obterArmazem(sb, ORG, "u1");
     expect(obterArmazem(sb, ORG, "u1")).toBe(u1);

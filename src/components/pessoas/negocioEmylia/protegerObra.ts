@@ -14,7 +14,7 @@ export const podeMontarObra = (d: Negocio): boolean => d.fase === 5 && temPlanoD
 /** `proximo(d, S)` sem rebentar: um negócio na Obra sem plano devolve um passo de espera, honesto, em vez de ler `plano!`. */
 export function proximoSeguro(d: Negocio, S: Estado): Proximo {
   if (d.fase === 5 && !temPlanoDaObra(d)) {
-    return { t: "A obra ainda não tem plano", sub: "O plano gera-se nas Operações, que ainda não estão ligadas à base.", who: "operacoes", wait: true } as Proximo;
+    return { t: "A obra ainda não tem plano", sub: "As funções das Operações (ops_obra_*) existem na base, mas ainda não estão ligadas a este ecrã.", who: "operacoes", wait: true } as Proximo;
   }
   return proximo(d, S);
 }

@@ -8,7 +8,6 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { LINHA_PESSOA } from "../useAtalhosPessoas";
 import { COLUNAS_POS_CONTRATO, type DefColunaPosContrato } from "./colunasPosContrato";
-// (as duas colunas dizem o erro e deixam tentar outra vez; a contagem só aparece quando se sabe)
 import { ATRIBUTO_NEGOCIO } from "./cartoesQuadroPessoas";
 import { RodapeColuna } from "./RodapeColuna";
 
@@ -37,8 +36,8 @@ function CartaoPos({ cartao, aoAbrir }: { cartao: CartaoPosContrato; aoAbrir: Qu
       </div>
       {cartao.trabalho && <p className="text-muted-foreground">{cartao.trabalho}</p>}
       {cartao.valor !== null && <p className="font-medium tabular-nums text-foreground">{formatarMeta("euro", cartao.valor)}</p>}
-      {/* Só texto, não botão: a ação (validar o pagamento, abrir a obra) ainda não existe na base; o estado diz-se, não se finge. */}
-      <p className="text-xs text-muted-foreground">{t(`${R}pos.step.${cartao.passo}`)}</p>
+      {/* O passo seguinte, como a Emylia o diz no seu cartão. Só texto: não se arrasta nem se faz a ação daqui; abre-se a ficha. */}
+      <p className="text-xs text-muted-foreground">{cartao.passo}</p>
     </li>
   );
 }
@@ -54,8 +53,7 @@ function CorpoColuna({ estado, aoAbrir, def, dados, rotulo }: CorpoProps) {
   const { id } = def;
   const semCartoes = dados.cartoes.length === 0;
   let aviso: string | null = null;
-  if (estado.indisponivel) aviso = t(`${R}pos.unavailable`);
-  else if (estado.isLoading) aviso = t(`${R}pos.loading`);
+  if (estado.isLoading) aviso = t(`${R}pos.loading`);
   else if (semCartoes && !estado.isError) aviso = t("pessoasPagina.board.empty");
   return (
     <div className="flex flex-1 flex-col">
@@ -63,7 +61,7 @@ function CorpoColuna({ estado, aoAbrir, def, dados, rotulo }: CorpoProps) {
         {dados.cartoes.map((c) => <CartaoPos key={c.id} cartao={c} aoAbrir={aoAbrir} />)}
         {aviso && <li className="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">{aviso}</li>}
       </ul>
-      {estado.isError && !estado.indisponivel && (
+      {estado.isError && (
         <div role="alert" className="flex flex-wrap items-center gap-2 border-t border-border p-2 text-xs">
           <p>{t(`${R}pos.error`)}</p>
           <Button type="button" variant="outline" className={`min-h-11 ${FOCO}`} onClick={estado.recarregar}>{t(`${R}retry`)}</Button>
@@ -83,7 +81,7 @@ function Coluna(props: QuadroPosContratoProps & { def: DefColunaPosContrato }) {
   const dados = estado.colunas[def.id];
   const rotulo = t(`pessoasPagina.board.col.${def.id}`);
   // A contagem só se diz quando se sabe: a carregar, em erro ou sem a coluna na base não se mostra «0».
-  const conhecida = !estado.isLoading && !estado.isError && !estado.indisponivel;
+  const conhecida = !estado.isLoading && !estado.isError;
   const contagem = dados.total;
   const valor = formatarMeta("euro", dados.valor);
   return (

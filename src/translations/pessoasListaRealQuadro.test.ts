@@ -9,7 +9,8 @@ const MARCADORES: Record<string, string[]> = {
   colNew: [], subtitle: ["{n}"], loading: [], updating: [], error: [], refreshWarn: [], emptyAll: [], emptyFiltered: [],
   showing: ["{shown}", "{total}"], loadMore: ["{n}"], loadMoreLabel: ["{column}", "{n}"], loadingMore: ["{column}"],
   loadedMore: ["{column}", "{n}", "{shown}", "{total}"], loadMoreError: [], retry: [], stalled: ["{n}"],
-  "pos.loading": [], "pos.unavailable": [], "pos.error": [], "pos.step.pagamentoPorValidar": [], "pos.step.obraPorAbrir": [],
+  // (Financeiro e Obra lêem de neg_ler_negocios: já não há «indisponível» nem os textos fixos do passo, que vêm do motor da Emylia)
+  "pos.loading": [], "pos.error": [],
 };
 
 describe("traduções do Quadro real das Pessoas", () => {

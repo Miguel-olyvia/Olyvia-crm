@@ -3,16 +3,17 @@
 //
 // De onde vem a fase (a regra, dita num só sítio):
 //  - negócio lido da base pelo caminho do Ben (neg_ler_negocios), sem documentos do CRM: a fase é a do motor (`negocios.fase` gravada pela Emylia e,
-//    na fase 3, o que o orçamento tem: sem proposta enviada é Orçamento, enviada é Proposta, aceite é Contrato);
+//    a fase 3 é o Negócio, cujos passos (Orçamento, Proposta, Contrato, Fim) são da lista da fase, não fases);
 //  - negócio com documentos do CRM, ou ainda por ler: a base da Emylia não os vê (fase 0, sem orçamento), por isso vale o que o CRM prova: um
 //    contrato assinado põe-no em Financeiro. A Obra só se prova pela fase gravada da Emylia.
 import type { Negocio } from "@/emylia/motor";
 import type { ItemProcesso } from "../processo/tiposProcesso";
 
-export type FaseEmylia = "orcamento" | "proposta" | "contrato" | "financeiro" | "obra";
+/** As fases da Emylia depois da Visita (FASES de /negocios): Negócio (com os passos Orçamento, Proposta, Contrato e Fim), Financeiro e Obra. */
+export type FaseEmylia = "negocio" | "financeiro" | "obra";
 
 /** Pela ordem do percurso da Emylia depois da Visita. */
-export const FASES_EMYLIA: readonly FaseEmylia[] = ["orcamento", "proposta", "contrato", "financeiro", "obra"];
+export const FASES_EMYLIA: readonly FaseEmylia[] = ["negocio", "financeiro", "obra"];
 
 const FASE_NEGOCIO = 3;
 const FASE_FINANCEIRO = 4;
@@ -23,9 +24,7 @@ export function faseEmyliaDoNegocio(d: Negocio): FaseEmylia | null {
   if (d.perdido) return null;
   if (d.fase === FASE_OBRA) return "obra";
   if (d.fase === FASE_FINANCEIRO) return "financeiro";
-  if (d.fase !== FASE_NEGOCIO) return null;
-  if (!d.orc?.enviada) return "orcamento";
-  return d.orc.aceite ? "contrato" : "proposta";
+  return d.fase === FASE_NEGOCIO ? "negocio" : null;
 }
 
 interface EntradaFaseDaFicha {

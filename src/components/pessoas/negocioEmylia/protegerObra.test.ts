@@ -16,6 +16,9 @@ describe("protegerObra", () => {
     const p = proximoSeguro(d, S);
     expect(p.wait).toBe(true);
     expect(p.t).toMatch(/sem plano|não tem plano/i);
+    // diz a verdade sobre as Operações: as funções existem, só não estão ligadas a este ecrã
+    expect(p.sub).toMatch(/existem na base/);
+    expect(p.sub).not.toMatch(/não existe/i);
   });
 
   it("o motor a seco rebenta sem plano (a razão da guarda)", async () => {

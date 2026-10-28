@@ -9,7 +9,7 @@ import { QuadroPosContrato } from "./QuadroPosContrato";
 vi.mock("@/hooks/useTranslation", async () => (await import("../../pessoas-lista/traducaoTeste")).moduloTraducao());
 
 const cartao = (id: string, sobre: Partial<CartaoPosContrato> = {}): CartaoPosContrato => ({
-  id: `neg-${id}`, pessoaId: id, nome: `Pessoa ${id}`, papel: "cliente", coluna: "financeiro", trabalho: `Trabalho ${id}`, valor: null, passo: "pagamentoPorValidar", ...sobre,
+  id: `neg-${id}`, pessoaId: id, nome: `Pessoa ${id}`, papel: "cliente", coluna: "financeiro", trabalho: `Trabalho ${id}`, valor: null, passo: "Validar o pagamento", ...sobre,
 });
 const vazia = (): EstadoColunaPosContrato => ({ cartoes: [], cursor: null, haMais: false, total: 0, valor: 0 });
 
@@ -19,7 +19,7 @@ function estado(cartoes: CartaoPosContrato[] = [], sobre: Partial<QuadroPosContr
     return { ...vazia(), cartoes: dela, total: dela.length, ...extras[id] };
   };
   return {
-    colunas: { financeiro: col("financeiro"), obra: col("obra") }, cartoes, isLoading: false, isError: false, erro: null, indisponivel: false,
+    colunas: { financeiro: col("financeiro"), obra: col("obra") }, cartoes, isLoading: false, isError: false, erro: null,
     aCarregarMais: new Set(), errosAoCarregarMais: {}, carregarMais: () => false, recarregar: () => undefined, ...sobre,
   };
 }
@@ -38,17 +38,17 @@ describe("QuadroPosContrato: as colunas", () => {
   });
 
   it("cada cartão está na sua coluna e a contagem vem em texto para o leitor de ecrã", () => {
-    desenhar(estado([cartao("a"), cartao("b", { coluna: "obra", passo: "obraPorAbrir" })]));
+    desenhar(estado([cartao("a"), cartao("b", { coluna: "obra", passo: "Operações: arrancar a obra" })]));
     expect(within(coluna(/^Financeiro/)).getByText("Trabalho a")).toBeInTheDocument();
     expect(within(coluna(/^Obra/)).getByText("Trabalho b")).toBeInTheDocument();
     expect(within(coluna(/^Financeiro/)).queryByText("Trabalho b")).toBeNull();
     expect(coluna(/^Financeiro/)).toHaveTextContent(/1 cartão/);
   });
 
-  it("o cartão de Financeiro diz «pagamento por validar» e o de Obra diz «Obra por abrir», por texto", () => {
-    desenhar(estado([cartao("a"), cartao("b", { coluna: "obra", passo: "obraPorAbrir" })]));
-    expect(within(coluna(/^Financeiro/)).getByText("Pagamento por validar")).toBeInTheDocument();
-    expect(within(coluna(/^Obra/)).getByText("Obra por abrir")).toBeInTheDocument();
+  it("o cartão diz o passo seguinte COMO A EMYLIA o diz (texto do motor, não inventado)", () => {
+    desenhar(estado([cartao("a"), cartao("b", { coluna: "obra", passo: "Operações: arrancar a obra" })]));
+    expect(within(coluna(/^Financeiro/)).getByText("Validar o pagamento")).toBeInTheDocument();
+    expect(within(coluna(/^Obra/)).getByText("Operações: arrancar a obra")).toBeInTheDocument();
   });
 
   it("o valor do cartão e o da coluna mostram-se em euros", () => {
@@ -83,20 +83,13 @@ describe("QuadroPosContrato: abrir", () => {
     expect(screen.getByRole("button", { name: "Abrir a ficha de Sem nome" })).toHaveTextContent("Sem nome");
   });
 
-  it("o passo não é um botão: não finge uma ação que ainda não existe", () => {
-    desenhar(estado([cartao("a"), cartao("b", { coluna: "obra", passo: "obraPorAbrir" })]));
+  it("o passo não é um botão: não se faz a ação daqui nem se arrasta; abre-se a ficha", () => {
+    desenhar(estado([cartao("a"), cartao("b", { coluna: "obra", passo: "Operações: arrancar a obra" })]));
     expect(screen.getAllByRole("button")).toHaveLength(2);
   });
 });
 
 describe("QuadroPosContrato: estados honestos", () => {
-  it("indisponível (a base ainda não tem as colunas): explica-o em ambas e não mostra «Sem cartões»", () => {
-    desenhar(estado([], { indisponivel: true }));
-    expect(screen.getAllByText(/ainda não está disponível/i)).toHaveLength(2);
-    expect(screen.queryByText("Nada nesta fase")).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
   it("a carregar: diz-o, com aria-busy, e não diz que está vazio", () => {
     desenhar(estado([], { isLoading: true }));
     expect(within(coluna(/^Financeiro/)).getByText("A carregar...")).toBeInTheDocument();
@@ -114,8 +107,8 @@ describe("QuadroPosContrato: estados honestos", () => {
     expect(recarregar).toHaveBeenCalledTimes(1);
   });
 
-  it("a carregar, em erro ou sem a coluna na base não mostra «0» como contagem", () => {
-    for (const parcial of [{ isLoading: true }, { isError: true }, { indisponivel: true }]) {
+  it("a carregar ou em erro não mostra «0» como contagem", () => {
+    for (const parcial of [{ isLoading: true }, { isError: true }]) {
       desenhar(estado([], parcial));
       const col = coluna(/^Financeiro/);
       expect(within(col).queryByText("0")).toBeNull();

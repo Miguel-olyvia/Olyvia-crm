@@ -1,19 +1,23 @@
-// O conteúdo do negócio da Emylia depois do contrato, montado no Pipeline: Financeiro (fatura, pagamento, prestações, adendas) e Obra (plano,
-// caminho, trabalhos a mais). Os componentes são os da Emylia, sem os alterar; o que a base ainda não faz (as fases 2 a 5 do plano do Ben) diz-se
-// em texto (EstadoHonesto) e os botões que dependiam disso não aparecem. Sem permissão fica em leitura: um `fieldset disabled` desliga os controlos
-// de escrita e deixa o resto lido pelo leitor de ecrã (nunca `inert`). O estado da gravação, os avisos e as permissões são do wrapper (NegocioEmyliaDoGuia).
-import type { ReactNode } from "react";
+// O que a página /negocios põe à volta dos passos do Financeiro e da Obra, montado no Pipeline: o caminho da obra, os trabalhos a mais, anular o contrato e o histórico
+// (os passos em si, com a fatura, o pagamento e o plano, são da FaseDaEmylia). Os componentes e as regras são os da Emylia, sem os alterar, e a gravação é a mesma
+// (neg_guardar_negocio, pelo armazém do Ben): o motor regista a fatura, o pagamento e o recibo no próprio negócio. Só o que a Emylia já mostra como não ligado fica como
+// ela mostra: na Obra, o plano só vive em memória (e sem plano diz-se). Sem permissão fica em leitura (`fieldset disabled`: o conteúdo continua lido).
+import { useState, type ReactNode } from "react";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 import { FASES, type Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
-import { DocumentosSimples, ObraSimples } from "@/emylia/FasesSimples";
+import { DocumentosSimples } from "@/emylia/FasesSimples";
 import { CaminhoObra } from "@/emylia/CaminhoObra";
 import { TrabalhosAMais } from "@/emylia/TrabalhosAMais";
-import { BotaoFase, temBotaoFase } from "@/emylia/PaginaNegocio";
+import { ConfirmarAnulacao, oQueAnular, podeAnular } from "@/emylia/AnularContrato";
+import { Button } from "@/components/ui/button";
+import { FOCO } from "@/components/negocio-metas/estilos";
 import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
 import { EstadoHonesto } from "./EstadoHonesto";
-import { podeMontarObra, proximoSeguro, temPlanoDaObra } from "./protegerObra";
+import { podeMontarObra, temPlanoDaObra } from "./protegerObra";
+import { SoParaLer } from "./SoParaLer";
 
 const R = "pessoasPagina.real.neg.painel.";
 
@@ -36,59 +40,55 @@ function Bloco({ id, titulo, children }: { id: string; titulo: string; children:
   );
 }
 
-/** Só leitura sem esconder: os controlos de escrita ficam desligados e o conteúdo continua à vista e lido. */
-export function SoParaLer({ ativo, children }: { ativo: boolean; children: ReactNode }) {
-  return <fieldset disabled={ativo} className="m-0 min-w-0 space-y-8 border-0 p-0">{children}</fieldset>;
+/** O histórico do negócio («Últimos acontecimentos» da página de Negócios). */
+export function HistoricoDoNegocio({ d }: { d: Negocio }) {
+  const { t } = useTranslation();
+  return (
+    <Bloco id="pn-hist" titulo={t(`${R}historico`)}>
+      {d.hist.length === 0 ? <p className="text-[15px] text-muted-foreground">{t(`${R}semHistorico`)}</p> : (
+        <ol className="space-y-2">
+          {d.hist.slice(0, 8).map((h, i) => (
+            <li key={d.hist.length - i} className="text-[15px] leading-snug">{h.t}<span className="block text-sm text-muted-foreground">{h.q}</span></li>
+          ))}
+        </ol>
+      )}
+    </Bloco>
+  );
 }
 
 export function PainelPosContrato({ ctx, d, podeGravar }: PainelPosContratoProps) {
   const { t } = useTranslation();
-  const noFinanceiro = d.fase === 4;
+  const [anular, setAnular] = useState(false);
   const noObra = d.fase >= 5;
-  const p = proximoSeguro(d, ctx.S);
-  const comBotao = (noFinanceiro || podeMontarObra(d)) && temBotaoFase(ctx, d) && !p.wait;
   return (
     <div className="pn pg-root space-y-8" aria-label={t(`${R}regiao`, { fase: FASES[d.fase] })} role="region">
       <SoParaLer ativo={!podeGravar}>
-        {noFinanceiro && (
-          <Bloco id="pn-fin" titulo={t(`${R}fatura`)}>
-            <DocumentosSimples {...ctx} d={d} />
-            {comBotao && <BotaoFase ctx={ctx} d={d} tamanho="default" />}
-            <EstadoHonesto titulo={t(`${R}encomenda.titulo`)}>{t(`${R}encomenda.texto`)}</EstadoHonesto>
-          </Bloco>
-        )}
         {noObra && (
           <>
             {/* a fase já feita abre em leitura: sempre desligada, mas lida */}
             <SoParaLer ativo>
               <Bloco id="pn-fin-feito" titulo={t(`${R}financeiroFeito`)}><DocumentosSimples {...ctx} d={d} /></Bloco>
             </SoParaLer>
-            <Bloco id="pn-obra" titulo={t(`${R}obra`)}>
-              {podeMontarObra(d) ? (
-                <>
-                  <EstadoHonesto titulo={t(`${R}planoNoEcra.titulo`)}>{t(`${R}planoNoEcra.texto`)}</EstadoHonesto>
-                  <ObraSimples {...ctx} d={d} />
-                  {temPlanoDaObra(d) && <CaminhoObra {...ctx} d={d} />}
-                  {comBotao && <BotaoFase ctx={ctx} d={d} tamanho="default" />}
-                </>
-              ) : <EstadoHonesto titulo={t(`${R}semPlano.titulo`)}>{t(`${R}semPlano.texto`)}</EstadoHonesto>}
-            </Bloco>
+            {podeMontarObra(d)
+              ? <EstadoHonesto titulo={t(`${R}planoNoEcra.titulo`)}>{t(`${R}planoNoEcra.texto`)}</EstadoHonesto>
+              : <Bloco id="pn-obra" titulo={t(`${R}obra`)}><EstadoHonesto titulo={t(`${R}semPlano.titulo`)}>{t(`${R}semPlano.texto`)}</EstadoHonesto></Bloco>}
           </>
         )}
+        {temPlanoDaObra(d) && <CaminhoObra {...ctx} d={d} />}
         <Bloco id="pn-adendas" titulo={t(`${R}adendas`)}>
           <TrabalhosAMais {...ctx} d={d} />
         </Bloco>
-      </SoParaLer>
-      <Bloco id="pn-anular" titulo={t(`${R}anular`)}><EstadoHonesto titulo={t(`${R}anular.titulo`)}>{t(`${R}anular.texto`)}</EstadoHonesto></Bloco>
-      <Bloco id="pn-hist" titulo={t(`${R}historico`)}>
-        {d.hist.length === 0 ? <p className="text-[15px] text-muted-foreground">{t(`${R}semHistorico`)}</p> : (
-          <ol className="space-y-2">
-            {d.hist.slice(0, 8).map((h, i) => (
-              <li key={d.hist.length - i} className="text-[15px] leading-snug">{h.t}<span className="block text-sm text-muted-foreground">{h.q}</span></li>
-            ))}
-          </ol>
+        {/* anular o contrato (ou a venda), como no menu «Mais» da página de Negócios: a Emylia diz quando se pode e pede o motivo */}
+        {podeAnular(d) && (
+          <Bloco id="pn-anular" titulo={t(`${R}anular`)}>
+            <Button type="button" variant="outline" aria-expanded={anular} onClick={() => setAnular(!anular)} className={cn("min-h-11 text-destructive", FOCO)}>
+              {t(`${R}anularBotao`, { oque: oQueAnular(d) })}
+            </Button>
+            {anular && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
+          </Bloco>
         )}
-      </Bloco>
+      </SoParaLer>
+      <HistoricoDoNegocio d={d} />
     </div>
   );
 }

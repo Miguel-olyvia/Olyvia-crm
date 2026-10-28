@@ -23,7 +23,7 @@ export interface NegocioEmyliaDoGuiaEstado {
   leituraBloqueia: boolean;
   /** A leitura acabou mas a organização não devolveu o negócio (por exemplo, sem número): fica o fluxo do CRM, com aviso. */
   semNegocioNaEmylia: boolean;
-  /** O negócio está a passar de Visita a Negócio (a gravar a fase 3). */
+  /** O negócio está a passar de Visita a Negócio (a gravar a fase 3). Enquanto passa, a fase Negócio já está à vista. */
   aPassar: boolean;
   /** Tentar outra vez: refaz a passagem (se ainda não gravou) ou volta a gravar. */
   repetirGravacao: () => void;
@@ -74,8 +74,8 @@ export function useNegocioEmyliaDoGuia(negocio: NegocioMes, { faseDoItem, podeEd
   const aPassar = precisaPassar && podeEditar;
   const doMotor = ativo ? faseEmyliaDaFicha({ d, docsCrm: e.docsCrm, contratoAssinado }) : null;
   // enquanto passa, o Orçamento da Emylia já está à vista (a gravação mostra-se lá)
-  const faseEmylia: FaseEmylia | null = doMotor ?? (aPassar ? "orcamento" : null);
-  const faseDoCrm: FaseEmylia | null = !ativo ? null : contratoAssinado ? "financeiro" : (faseDoItem as FaseEmylia);
+  const faseEmylia: FaseEmylia | null = doMotor ?? (aPassar ? "negocio" : null);
+  const faseDoCrm: FaseEmylia | null = !ativo ? null : contratoAssinado ? "financeiro" : "negocio";
   const leituraBloqueia = ativo && (e.leitura.k === "a-ler" || e.leitura.k === "erro");
   const semNegocioNaEmylia = ativo && e.leitura.k === "pronto" && d === undefined;
   return { e, org, faseEmylia, faseDoCrm, leituraBloqueia, semNegocioNaEmylia, aPassar, repetirGravacao };

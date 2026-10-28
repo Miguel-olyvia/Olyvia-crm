@@ -1,47 +1,57 @@
-// Passa uma linha de neg_resumo_quadro das colunas Financeiro e Obra para o cartão (puro, sem rede). Nunca rebenta com o que a base acrescente:
-// uma coluna ou um tipo desconhecidos descartam o cartão. O estado do cartão só diz o que a coluna prova (nada de estados de obra inventados).
+// Os cartões das colunas Financeiro e Obra do Pipeline: vêm da MESMA leitura que a página de Negócios e a ficha usam (neg_ler_negocios, pelo armazém do Ben em
+// negocioEmylia/armazemNegocioEmylia.ts), e não de uma função da base própria do quadro. `negocios.fase` 4 é Financeiro e 5 é Obra (as FASES da Emylia). O que o
+// cartão diz do passo é o texto do motor da Emylia (o seu passo seguinte); o valor é o do orçamento (sem IVA), e sem orçamento fica vazio. Puro, sem rede.
+import { tot, type Estado, type Negocio } from "@/emylia/motor";
+import { proximoSeguro } from "@/components/pessoas/negocioEmylia/protegerObra";
 import type { PapelPessoa } from "@/components/pessoas/pessoasTipos";
-import { COLUNAS_POS_CONTRATO, type ColunaPosContrato } from "@/components/pessoas/quadro/colunasPosContrato";
-import type { CursorQuadro, LinhaQuadroDb } from "./quadroPessoasTipos";
+import type { ColunaPosContrato } from "@/components/pessoas/quadro/colunasPosContrato";
+import { MIN_PESQUISA } from "./listaPessoasTipos";
+import type { FiltrosQuadro } from "./quadroPessoasTipos";
 
-/** Financeiro: contrato assinado e pagamento por validar. Obra: pagamento validado e ainda sem plano de obra lido (a abertura da obra é a fase 3 do plano). */
-export type PassoPosContrato = "pagamentoPorValidar" | "obraPorAbrir";
+const FASE_FINANCEIRO = 4;
+const FASE_OBRA = 5;
 
 export interface CartaoPosContrato {
-  /** O id do negócio. */
+  /** O id do negócio na base (`negocios.id`). */
   id: string;
+  /** A pessoa (`anew_entities.id`), para abrir a ficha já no negócio. */
   pessoaId: string;
   nome: string;
+  /** Um negócio com contrato e pagamento já é de um cliente. */
   papel: PapelPessoa;
   coluna: ColunaPosContrato;
   trabalho: string | null;
   valor: number | null;
-  passo: PassoPosContrato;
+  /** O passo seguinte, como a Emylia o diz no seu cartão. */
+  passo: string;
 }
 
-export interface CartaoPosContratoComCursor {
-  cartao: CartaoPosContrato;
-  cursor: CursorQuadro | null;
+export interface NegocioLidoParaCartao {
+  id: string;
+  entityId: string;
+  d: Negocio;
 }
 
-const COLUNAS: readonly string[] = COLUNAS_POS_CONTRATO.map((c) => c.id);
-const PASSO_DA_COLUNA: Record<ColunaPosContrato, PassoPosContrato> = { financeiro: "pagamentoPorValidar", obra: "obraPorAbrir" };
-
-function valorDoCartao(valor: number | string | null): number | null {
-  if (valor === null) return null;
-  const n = Number(valor);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** `null`: a linha não é um cartão do pós-contrato. */
-export function adaptarLinhaPosContrato(l: LinhaQuadroDb): CartaoPosContratoComCursor | null {
-  if (!COLUNAS.includes(l.coluna) || l.tipo !== "negocio") return null;
-  const coluna = l.coluna as ColunaPosContrato;
+/** `null`: o negócio não pertence a estas colunas (outra fase, perdido ou anulado). */
+export function cartaoPosContratoDe({ id, entityId, d }: NegocioLidoParaCartao, S: Estado): CartaoPosContrato | null {
+  if (d.perdido || d.anulado) return null;
+  const coluna: ColunaPosContrato | null = d.fase === FASE_FINANCEIRO ? "financeiro" : d.fase === FASE_OBRA ? "obra" : null;
+  if (coluna === null) return null;
   return {
-    cartao: {
-      id: l.cartao_id, pessoaId: l.entity_id, nome: l.nome ?? "", papel: l.papel === "cliente" ? "cliente" : "lead", coluna, trabalho: l.titulo,
-      valor: valorDoCartao(l.valor), passo: PASSO_DA_COLUNA[coluna],
-    },
-    cursor: l.chave_ordem === null ? null : { chave: l.chave_ordem, id: l.cartao_id },
+    id, pessoaId: entityId, nome: d.nome, papel: "cliente", coluna, trabalho: d.servico || null,
+    valor: d.orc ? Math.round(tot(d, S).pf * 100) / 100 : null,
+    passo: proximoSeguro(d, S).t,
   };
+}
+
+const semAcentos = (texto: string): string => texto.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** O mesmo filtro do Pipeline: o papel, a pesquisa (nome ou serviço, a partir de 2 letras) e a ordem. A entrada já vem por mais recentes. */
+export function filtrarCartoesPosContrato(cartoes: readonly CartaoPosContrato[], filtros: FiltrosQuadro): CartaoPosContrato[] {
+  const termo = semAcentos(filtros.pesquisa.trim());
+  const filtrados = cartoes.filter((c) => {
+    if (filtros.papel !== null && c.papel !== filtros.papel) return false;
+    return termo.length < MIN_PESQUISA || semAcentos(`${c.nome} ${c.trabalho ?? ""}`).includes(termo);
+  });
+  return filtros.ordem === "nome" ? [...filtrados].sort((a, b) => a.nome.localeCompare(b.nome, "pt")) : filtrados;
 }

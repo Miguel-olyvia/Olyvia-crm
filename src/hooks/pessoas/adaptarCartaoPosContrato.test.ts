@@ -1,48 +1,58 @@
 import { describe, expect, it } from "vitest";
-import { adaptarLinhaPosContrato } from "./adaptarCartaoPosContrato";
-import { linhaNegocio } from "./quadroPessoasTestUtil";
+import { seed, type Negocio } from "@/emylia/motor";
+import { cartaoPosContratoDe, filtrarCartoesPosContrato, type CartaoPosContrato } from "./adaptarCartaoPosContrato";
 
-describe("adaptarLinhaPosContrato", () => {
-  it("uma linha financeiro dá um cartão de Financeiro com o passo «pagamento por validar»", () => {
-    const r = adaptarLinhaPosContrato(linhaNegocio("n1", "financeiro", { valor: "1500.5", chave_ordem: "K1", papel: "cliente", nome: "Ana", titulo: "Cozinha" }));
-    expect(r?.cartao).toEqual({
-      id: "n1", pessoaId: "pessoa-de-n1", nome: "Ana", papel: "cliente", coluna: "financeiro", trabalho: "Cozinha", valor: 1500.5, passo: "pagamentoPorValidar",
-    });
-    expect(r?.cursor).toEqual({ chave: "K1", id: "n1" });
+const S = seed();
+const deal = (fase: number, extra: Partial<Negocio> = {}): Negocio => ({ ...structuredClone(seed().deals[0]), fase, perdido: false, anulado: undefined, ...extra });
+const lido = (d: Negocio, id = "uuid-1", entityId = "ent-1") => ({ id, entityId, d });
+
+describe("cartaoPosContratoDe (um negócio lido por neg_ler_negocios vira cartão de Financeiro ou de Obra)", () => {
+  it("fase 4 é Financeiro e fase 5 é Obra, com o id do negócio na base e a pessoa (entity) para abrir a ficha", () => {
+    expect(cartaoPosContratoDe(lido(deal(4)), S)).toMatchObject({ id: "uuid-1", pessoaId: "ent-1", coluna: "financeiro" });
+    expect(cartaoPosContratoDe(lido(deal(5)), S)?.coluna).toBe("obra");
   });
-
-  it("uma linha obra dá o passo «obra por abrir» e nunca um estado de obra inventado", () => {
-    const r = adaptarLinhaPosContrato(linhaNegocio("n2", "obra", { valor: 900 }));
-    expect(r?.cartao.coluna).toBe("obra");
-    expect(r?.cartao.passo).toBe("obraPorAbrir");
-    expect(Object.keys(r!.cartao)).not.toContain("estadoObra");
+  it("fora das fases 4 e 5, perdido ou anulado não é cartão destas colunas", () => {
+    for (const f of [0, 1, 2, 3, 6]) expect(cartaoPosContratoDe(lido(deal(f)), S)).toBeNull();
+    expect(cartaoPosContratoDe(lido(deal(4, { perdido: true })), S)).toBeNull();
+    expect(cartaoPosContratoDe(lido(deal(4, { anulado: { q: "x", por: "y", motivo: "z", origem: "negocio" } })), S)).toBeNull();
   });
-
-  it.each(["porContactar", "contactado", "visita", "levantamento", "orcamento", "proposta", "contrato", "nova-do-futuro", ""])(
-    "a coluna %s não é do pós-contrato e descarta-se", (coluna) => {
-      expect(adaptarLinhaPosContrato(linhaNegocio("x", coluna))).toBeNull();
-    },
-  );
-
-  it("uma linha que não é de negócio descarta-se", () => {
-    expect(adaptarLinhaPosContrato(linhaNegocio("x", "financeiro", { tipo: "pessoa" }))).toBeNull();
+  it("mostra o nome, o serviço e o passo seguinte que a Emylia diz (texto dela, não inventado)", () => {
+    const c = cartaoPosContratoDe(lido(deal(4, { nome: "Ana Lopes", servico: "WC social" })), S);
+    expect(c?.nome).toBe("Ana Lopes");
+    expect(c?.trabalho).toBe("WC social");
+    expect(typeof c?.passo).toBe("string");
+    expect(c?.passo.length).toBeGreaterThan(0);
   });
-
-  it("valor nulo, ilegível ou infinito fica sem valor; zero é um valor", () => {
-    expect(adaptarLinhaPosContrato(linhaNegocio("a", "obra", { valor: null }))?.cartao.valor).toBeNull();
-    expect(adaptarLinhaPosContrato(linhaNegocio("b", "obra", { valor: "abc" }))?.cartao.valor).toBeNull();
-    expect(adaptarLinhaPosContrato(linhaNegocio("c", "obra", { valor: Infinity }))?.cartao.valor).toBeNull();
-    expect(adaptarLinhaPosContrato(linhaNegocio("d", "obra", { valor: 0 }))?.cartao.valor).toBe(0);
+  it("na Obra sem plano o passo diz-o em vez de rebentar", () => {
+    const d = deal(5);
+    d.obra.plano = null;
+    expect(cartaoPosContratoDe(lido(d), S)?.passo).toMatch(/plano/i);
   });
-
-  it("sem chave de ordem não há cursor; nome em falta fica vazio; papel desconhecido é lead", () => {
-    const r = adaptarLinhaPosContrato(linhaNegocio("e", "financeiro", { chave_ordem: null, nome: null, papel: "outro" }));
-    expect(r?.cursor).toBeNull();
-    expect(r?.cartao.nome).toBe("");
-    expect(r?.cartao.papel).toBe("lead");
+  it("sem orçamento o valor é nulo (nada de valor de exemplo)", () => {
+    expect(cartaoPosContratoDe(lido(deal(4, { orc: null })), S)?.valor).toBeNull();
   });
+});
 
-  it("título em falta fica sem trabalho", () => {
-    expect(adaptarLinhaPosContrato(linhaNegocio("f", "financeiro", { titulo: null }))?.cartao.trabalho).toBeNull();
+const c = (id: string, nome: string, trabalho: string | null = null, papel: CartaoPosContrato["papel"] = "cliente"): CartaoPosContrato =>
+  ({ id, pessoaId: `p-${id}`, nome, papel, coluna: "financeiro", trabalho, valor: null, passo: "x" });
+
+describe("filtrarCartoesPosContrato (o mesmo filtro do Pipeline)", () => {
+  const todos = [c("1", "Ana Lopes", "WC social"), c("2", "Bruno Dias", "Cozinha"), c("3", "Ângela Reis", "Cozinha")];
+  it("sem filtros devolve todos, por mais recentes (a ordem de entrada)", () => {
+    expect(filtrarCartoesPosContrato(todos, { papel: null, pesquisa: "", ordem: "recentes" }).map((x) => x.id)).toEqual(["1", "2", "3"]);
+  });
+  it("a pesquisa vale pelo nome ou pelo serviço, sem maiúsculas nem acentos, e só a partir de 2 letras", () => {
+    const f = (pesquisa: string) => filtrarCartoesPosContrato(todos, { papel: null, pesquisa, ordem: "recentes" }).map((x) => x.id);
+    expect(f("ana")).toEqual(["1"]);
+    expect(f("angela")).toEqual(["3"]);
+    expect(f("COZINHA")).toEqual(["2", "3"]);
+    expect(f("a")).toEqual(["1", "2", "3"]);
+  });
+  it("o papel «lead» não tem cartões aqui (um negócio com contrato é de cliente); «cliente» tem todos", () => {
+    expect(filtrarCartoesPosContrato(todos, { papel: "lead", pesquisa: "", ordem: "recentes" })).toEqual([]);
+    expect(filtrarCartoesPosContrato(todos, { papel: "cliente", pesquisa: "", ordem: "recentes" })).toHaveLength(3);
+  });
+  it("ordenar por nome", () => {
+    expect(filtrarCartoesPosContrato(todos, { papel: null, pesquisa: "", ordem: "nome" }).map((x) => x.id)).toEqual(["1", "3", "2"]);
   });
 });

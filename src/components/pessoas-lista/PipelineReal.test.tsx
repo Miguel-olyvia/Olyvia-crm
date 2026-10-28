@@ -86,7 +86,7 @@ describe("PipelineReal: só o quadro", () => {
     expect(nomes).toHaveLength(6);
   });
 
-  it("o anúncio da página diz o estado de Financeiro e Obra (a carregar, em erro, sem a coluna na base)", () => {
+  it("o anúncio da página diz o estado de Financeiro e Obra (a carregar, em erro)", () => {
     const regiao = () => document.querySelector("[role='status'][aria-live='polite'].sr-only")?.textContent ?? "";
     posMock.mockReturnValue(quadroPosContratoBase({ isLoading: true }));
     const { unmount } = desenhar();
@@ -95,10 +95,8 @@ describe("PipelineReal: só o quadro", () => {
     posMock.mockReturnValue(quadroPosContratoBase({ isError: true }));
     const outra = desenhar();
     expect(regiao()).toMatch(/Não foi possível carregar as colunas Financeiro e Obra/);
+    expect(regiao()).not.toMatch(/ainda não está disponível/);
     outra.unmount();
-    posMock.mockReturnValue(quadroPosContratoBase({ indisponivel: true }));
-    desenhar();
-    expect(regiao()).toMatch(/ainda não está disponível/);
   });
 
   it("usa useQuadroPosContrato com os mesmos filtros do quadro e ativo", () => {

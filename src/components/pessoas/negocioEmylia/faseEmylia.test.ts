@@ -18,11 +18,11 @@ describe("faseEmyliaDoNegocio (a fase que o motor da Emylia diz)", () => {
     expect(faseEmyliaDoNegocio(comFase(1))).toBeNull();
     expect(faseEmyliaDoNegocio(comFase(2))).toBeNull();
   });
-  it("no Negócio: sem proposta enviada é Orçamento; enviada e por aceitar é Proposta; aceite é Contrato", () => {
-    expect(faseEmyliaDoNegocio(comFase(3, null))).toBe("orcamento");
-    expect(faseEmyliaDoNegocio(comFase(3, {}))).toBe("orcamento");
-    expect(faseEmyliaDoNegocio(comFase(3, { enviada: "20/10" }))).toBe("proposta");
-    expect(faseEmyliaDoNegocio(comFase(3, { enviada: "20/10", aceite: "21/10" }))).toBe("contrato");
+  it("a fase 3 é UMA só fase, Negócio, seja qual for o passo (Orçamento, Proposta, Contrato): esses são passos da lista, não fases", () => {
+    expect(faseEmyliaDoNegocio(comFase(3, null))).toBe("negocio");
+    expect(faseEmyliaDoNegocio(comFase(3, {}))).toBe("negocio");
+    expect(faseEmyliaDoNegocio(comFase(3, { enviada: "20/10" }))).toBe("negocio");
+    expect(faseEmyliaDoNegocio(comFase(3, { enviada: "20/10", aceite: "21/10" }))).toBe("negocio");
   });
   it("Financeiro (4) e Obra (5) vêm da fase gravada", () => {
     expect(faseEmyliaDoNegocio(comFase(4, {}))).toBe("financeiro");

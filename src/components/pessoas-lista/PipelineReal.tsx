@@ -41,7 +41,7 @@ export function PipelineReal() {
   const contagem = t(`${R}board.subtitle`, { n: quadro.cartoes.length + posContrato.cartoes.length });
   const dicaPendente = f.pesquisa.trim().length > 0 && f.pesquisa.trim().length < MIN_PESQUISA;
   // O estado de Financeiro e Obra entra no anúncio (a contagem da página só soma o que já se leu).
-  const estadoPos = posContrato.indisponivel ? t(`${R}board.pos.unavailable`) : posContrato.isError ? t(`${R}board.pos.error`) : posContrato.isLoading ? t(`${R}board.pos.loading`) : "";
+  const estadoPos = posContrato.isError ? t(`${R}board.pos.error`) : posContrato.isLoading ? t(`${R}board.pos.loading`) : "";
   const anuncio = [
     contagem,
     t(`${R}orderAnnounce`, { ordem: t(`${R}order.${f.filtros.ordem}`) }),

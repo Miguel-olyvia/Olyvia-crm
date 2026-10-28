@@ -41,6 +41,8 @@ export interface ArmazemEmylia {
   aoGravar(fn: () => void): () => void;
   /** O negócio da base (`negocios.id`) como a Emylia o vê; `undefined` se a organização não o devolveu. */
   negocioDaBase(id: string): Negocio | undefined;
+  /** Todos os negócios da última leitura (a mesma leitura da ficha e de /negocios), os mais recentes primeiro: para as colunas Financeiro e Obra do quadro. */
+  negociosLidos(): { id: string; entityId: string; d: Negocio }[];
   /** O negócio tem orçamentos, contratos ou vendas diretas do CRM: lê-se, mas não se grava por aqui (a base recusa-o, NE005). */
   docsCrm(id: string): boolean;
   /** Abre o negócio no motor (S.deal e S.view), para as ações que olham para S.deal. */
@@ -215,6 +217,9 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
       for (const [numero, r] of refs) if (r.id === id) return S.deals.find((d) => d.id === numero);
       return undefined;
     },
+    negociosLidos: () => [...refs]
+      .flatMap(([numero, r]) => { const d = S.deals.find((x) => x.id === numero); return d ? [{ id: r.id, entityId: r.entityId, d }] : []; })
+      .sort((a, b) => b.d.id - a.d.id),
     docsCrm: (id) => docsPorId.has(id),
     abrir: (d) => { S.deal = d.id; S.view = "negocio"; },
     reler: () => {

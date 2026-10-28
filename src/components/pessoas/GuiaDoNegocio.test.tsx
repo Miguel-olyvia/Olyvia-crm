@@ -231,7 +231,8 @@ describe("o negócio aberto com o guia é um só ecrã (sem o bloco de título d
   it("o serviço é a linha do cabeçalho do guia: já não há o título do negócio nem os selos «Negócio» e da fase", () => {
     abrir(itemDe());
     expect(screen.getAllByText("WC social")).not.toHaveLength(0);
-    expect(screen.queryByText("Negócio", { selector: "span" })).toBeNull();
+    // (a barra única tem agora a fase «Negócio»: o selo que já não existe é o que estava FORA da barra)
+    expect(screen.queryAllByText("Negócio", { selector: "span" }).filter((el) => !el.closest("ol"))).toHaveLength(0);
     expect(screen.getAllByRole("heading", { name: "Pedro Lopes" })).toHaveLength(1);
     expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
   });

@@ -25,7 +25,7 @@ vi.mock("@/hooks/pessoas/useQuadroPessoas", () => ({ useQuadroPessoas: (f: Filtr
 const colunaVazia = { cartoes: [], cursor: null, haMais: false, total: 0, valor: 0 };
 vi.mock("@/hooks/pessoas/useQuadroPosContrato", () => ({
   useQuadroPosContrato: () => ({
-    colunas: { financeiro: colunaVazia, obra: colunaVazia }, cartoes: [], isLoading: false, isError: false, erro: null, indisponivel: false,
+    colunas: { financeiro: colunaVazia, obra: colunaVazia }, cartoes: [], isLoading: false, isError: false, erro: null,
     aCarregarMais: new Set(), errosAoCarregarMais: {}, carregarMais: () => false, recarregar: () => undefined,
   }),
 }));

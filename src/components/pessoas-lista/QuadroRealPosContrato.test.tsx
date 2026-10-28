@@ -10,7 +10,7 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
 const cartaoPos = (id: string, sobre: Partial<CartaoPosContrato> = {}): CartaoPosContrato => ({
-  id: `neg-${id}`, pessoaId: id, nome: `Pessoa ${id}`, papel: "cliente", coluna: "financeiro", trabalho: `Trabalho ${id}`, valor: null, passo: "pagamentoPorValidar", ...sobre,
+  id: `neg-${id}`, pessoaId: id, nome: `Pessoa ${id}`, papel: "cliente", coluna: "financeiro", trabalho: `Trabalho ${id}`, valor: null, passo: "Validar o pagamento", ...sobre,
 });
 
 function pos(cartoes: CartaoPosContrato[] = [], sobre: Partial<QuadroPosContratoEstado> = {}): QuadroPosContratoEstado {
@@ -18,7 +18,7 @@ function pos(cartoes: CartaoPosContrato[] = [], sobre: Partial<QuadroPosContrato
   const dela = (id: "financeiro" | "obra") => cartoes.filter((c) => c.coluna === id);
   return {
     colunas: { financeiro: { ...vazia, cartoes: dela("financeiro"), total: dela("financeiro").length }, obra: { ...vazia, cartoes: dela("obra"), total: dela("obra").length } },
-    cartoes, isLoading: false, isError: false, erro: null, indisponivel: false, aCarregarMais: new Set(), errosAoCarregarMais: {},
+    cartoes, isLoading: false, isError: false, erro: null, aCarregarMais: new Set(), errosAoCarregarMais: {},
     carregarMais: () => false, recarregar: () => undefined, ...sobre,
   };
 }
@@ -50,7 +50,7 @@ describe("QuadroReal com as colunas Financeiro e Obra", () => {
 
   it("o atalho «o» abre a ficha do cartão de Obra focado (j/k percorrem também as colunas novas)", () => {
     const { aoAbrir, ...resto } = props();
-    render(<QuadroReal quadro={quadroBase({}, CARTOES)} posContrato={pos([cartaoPos("o", { coluna: "obra", passo: "obraPorAbrir" })])} aoAbrir={aoAbrir} {...resto} />);
+    render(<QuadroReal quadro={quadroBase({}, CARTOES)} posContrato={pos([cartaoPos("o", { coluna: "obra", passo: "Operações: arrancar a obra" })])} aoAbrir={aoAbrir} {...resto} />);
     const a = screen.getByRole("button", { name: "Abrir a ficha de Ana Lopes" });
     a.focus();
     fireEvent.keyDown(a, { key: "j" });
@@ -70,18 +70,12 @@ describe("QuadroReal com as colunas Financeiro e Obra", () => {
     expect(screen.getByRole("region", { name: /^Obra/ })).toBeInTheDocument();
   });
 
-  it("com Financeiro e Obra ainda a carregar, em erro ou sem a coluna na base, não se diz que o quadro está vazio", () => {
-    for (const parcial of [{ isLoading: true }, { isError: true }, { indisponivel: true }]) {
+  it("com Financeiro e Obra ainda a carregar ou em erro, não se diz que o quadro está vazio", () => {
+    for (const parcial of [{ isLoading: true }, { isError: true }]) {
       const { unmount } = render(<QuadroReal quadro={quadroBase()} posContrato={pos([], parcial)} {...props()} />);
       expect(screen.queryByText("Ainda não há cartões no quadro.")).toBeNull();
       unmount();
     }
-  });
-
-  it("base sem as colunas novas: o quadro das 4 colunas funciona e as duas novas explicam que ainda não estão disponíveis", () => {
-    render(<QuadroReal quadro={quadroBase({}, CARTOES)} posContrato={pos([], { indisponivel: true })} {...props()} />);
-    expect(screen.getByRole("button", { name: "Abrir a ficha de Ana Lopes" })).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: /^Obra/ })).getByText(/ainda não está disponível/)).toBeInTheDocument();
   });
 
   it("erro do quadro principal sem dados continua a bloquear só o quadro, sem desenhar as colunas novas", () => {
