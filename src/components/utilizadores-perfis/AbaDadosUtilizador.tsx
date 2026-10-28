@@ -1,19 +1,17 @@
-// A aba "Dados" do formulário de utilizador: os campos que o ecrã atual (/users) pede (nome, email, telefone, morada,
-// posição, palavra-passe, estado). Sem filial nem local de trabalho: o utilizador da plataforma não é a pessoa do RH.
+// A aba "Dados" do formulário de utilizador: os campos que o ecrã atual (/users) pede (nome, email, telefone, posição,
+// palavra-passe). Sem filial nem local de trabalho: o utilizador da plataforma não é a pessoa do RH. A morada (estruturada
+// na base), o NIF e o modelo guardam-se e reenviam-se ao gravar, mas não se editam aqui. O estado muda-se na ficha.
 import { useState } from "react";
 import { Eye, EyeOff, Lock, Wand2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AJUDA_CAMPO, ErroCampo, RotuloCampo } from "./CampoForm";
-import type { EstadoUtilizador } from "./perfisStore";
 import type { ValoresFormUtilizador } from "./utilizadorForm";
 import type { ErrosUtilizador } from "./validacoes";
 
-const ESTADOS: EstadoUtilizador[] = ["convidado", "ativo", "inativo"];
 const CAMPO = (invalido: boolean) => cn("min-h-11", FOCO, invalido && "border-destructive");
 
 interface AbaDadosUtilizadorProps {
@@ -111,23 +109,10 @@ export function AbaDadosUtilizador(p: AbaDadosUtilizadorProps) {
       {campo("email", t("usersProfiles.form.user.email"), { obrigatorio: true, tipo: "email", autoComplete: "off" })}
       {campo("telefone", t("usersProfiles.form.user.phone"), { tipo: "tel" })}
       <div className="space-y-1.5">
-        <RotuloCampo para={`${id}-morada`} texto={t("usersProfiles.form.user.address")} />
-        <Input id={`${id}-morada`} value={valores.morada} readOnly={bloqueado} className={CAMPO(false)} onChange={(e) => aoMudar({ morada: e.target.value })} />
-      </div>
-      <div className="space-y-1.5">
         <RotuloCampo para={`${id}-posicao`} texto={t("usersProfiles.form.user.position")} />
         <Input id={`${id}-posicao`} value={valores.posicao} readOnly={bloqueado} className={CAMPO(false)} onChange={(e) => aoMudar({ posicao: e.target.value })} />
       </div>
       <CampoPalavraPasse {...p} erro={erros.palavraPasse} />
-      <div className="space-y-1.5">
-        <RotuloCampo para={`${id}-estado`} texto={t("usersProfiles.form.user.status")} />
-        <Select value={valores.estado} disabled={bloqueado} onValueChange={(estado) => aoMudar({ estado: estado as EstadoUtilizador })}>
-          <SelectTrigger id={`${id}-estado`} className={cn(CAMPO(false), "sm:max-w-xs")}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {ESTADOS.map((e) => <SelectItem key={e} value={e} className="min-h-11">{t(`usersProfiles.form.user.status.${e}`)}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
     </div>
   );
 }

@@ -19,6 +19,36 @@ export function podeAtribuirRole(role: Pick<Role, "permissoes">, editor: Editor)
 export const rolesOferecidas = (roles: readonly Role[], editor: Editor): Role[] =>
   roles.filter((r) => r.codigo !== "super_admin" && podeAtribuirRole(r, editor));
 
+/** A organização e as ascendentes (as roles da holding também valem nas empresas dela), da mais próxima para cima. */
+function organizacaoEAscendentes(organizacaoId: string, organizacoes: readonly Organizacao[]): Set<string> {
+  const ids = new Set<string>();
+  let atual: string | undefined = organizacaoId;
+  while (atual && !ids.has(atual)) {
+    ids.add(atual);
+    atual = organizacoes.find((o) => o.id === atual)?.paiId;
+  }
+  return ids;
+}
+
+/**
+ * As roles que uma organização oferece (UserFormEnhanced): as dela e as das ascendentes, nunca as eliminadas. Sem organização
+ * escolhida não há roles para escolher. As roles de sistema (sem organização) só aparecem se já estiverem atribuídas (ver `rolesDoVinculo`).
+ */
+export function rolesDaOrganizacao(roles: readonly Role[], organizacaoId: string, organizacoes: readonly Organizacao[]): Role[] {
+  if (!organizacaoId) return [];
+  const ids = organizacaoEAscendentes(organizacaoId, organizacoes);
+  return roles.filter((r) => !r.eliminada && !!r.organizacaoId && ids.has(r.organizacaoId));
+}
+
+/** As roles de um vínculo: as que a organização oferece e quem edita pode atribuir, mais a que o vínculo já tem (que nunca fica em branco). */
+export function rolesDoVinculo(
+  roles: readonly Role[], vinculo: Pick<Vinculo, "organizacaoId" | "roleId">, organizacoes: readonly Organizacao[], editor: Editor,
+): Role[] {
+  const oferecidas = rolesOferecidas(rolesDaOrganizacao(roles, vinculo.organizacaoId, organizacoes), editor);
+  const atual = roles.find((r) => r.id === vinculo.roleId);
+  return atual && !oferecidas.some((r) => r.id === atual.id) ? [atual, ...oferecidas] : oferecidas;
+}
+
 /** As organizações que ainda se podem escolher nesta linha: as livres mais a que a própria linha já tem. */
 export function organizacoesLivres(
   organizacoes: readonly Organizacao[], vinculos: readonly Pick<Vinculo, "organizacaoId">[], indice: number,

@@ -1,26 +1,28 @@
-// Um vínculo no formulário de utilizador: organização (sem repetir), role (só as que se podem atribuir), estado do vínculo,
-// remover, e o âmbito das permissões sensíveis.
+// Um vínculo no formulário de utilizador: organização (sem repetir), role (só as que a organização oferece e se podem
+// atribuir), remover, e o âmbito das permissões sensíveis. Não há «vínculo inativo» aqui: como em /users, tirar o vínculo
+// da lista é o que o desativa. Os âmbitos só se gravam num vínculo que já existe (rpc_update_user).
 import { Trash2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AmbitosVinculoForm } from "./AmbitosVinculoForm";
-import { RotuloCampo } from "./CampoForm";
-import { PERMISSOES } from "./catalogoExemplo";
+import { AJUDA_CAMPO, RotuloCampo } from "./CampoForm";
 import { permissoesComAmbito } from "./regrasVinculos";
-import type { Organizacao, Role, Vinculo } from "./tipos";
+import type { Organizacao, Permissao, Role, Vinculo } from "./tipos";
 
 interface CartaoVinculoFormProps {
   id: string;
   indice: number;
   vinculo: Vinculo;
   organizacoes: Organizacao[];
-  /** As roles que se podem escolher aqui (mais a que o vínculo já tem, se saiu da lista). */
+  /** As roles que se podem escolher aqui (já com a que o vínculo tem, se saiu da lista). */
   roles: Role[];
-  todasAsRoles: Role[];
+  /** As permissões do catálogo real, para mostrar as que têm âmbito. */
+  catalogo: Permissao[];
+  /** Sem users.manage_roles os âmbitos só se veem. */
+  podeEditarAmbitos: boolean;
   desativado: boolean;
   podeRemover: boolean;
   comErro: boolean;
@@ -62,8 +64,8 @@ export function CartaoVinculoForm(p: CartaoVinculoFormProps) {
   const { t } = useTranslation();
   const { id, indice, vinculo: v } = p;
   const n = indice + 1;
-  const atual = p.todasAsRoles.find((r) => r.id === v.roleId);
-  const opcoes = atual && !p.roles.some((r) => r.id === atual.id) ? [atual, ...p.roles] : p.roles;
+  const atual = p.roles.find((r) => r.id === v.roleId);
+  const existe = !!v.membershipId;
   return (
     <section aria-labelledby={`${id}-titulo`} className="space-y-4 rounded-md border p-4">
       <div className="flex items-center justify-between gap-2">
@@ -84,18 +86,15 @@ export function CartaoVinculoForm(p: CartaoVinculoFormProps) {
         />
         <Seletor
           id={`${id}-role`} texto={t("usersProfiles.form.links.role")} placeholder={t("usersProfiles.form.links.role.placeholder")}
-          valor={v.roleId} opcoes={opcoes} desativado={p.desativado} invalido={p.comErro && !v.roleId}
+          valor={v.roleId} opcoes={p.roles} desativado={p.desativado} invalido={p.comErro && !v.roleId}
           aoMudar={(roleId) => p.aoMudar({ roleId })}
         />
       </div>
-      <div className="flex min-h-11 items-center justify-between gap-3">
-        <RotuloCampo para={`${id}-ativo`} texto={t("usersProfiles.form.links.active")} />
-        <Switch id={`${id}-ativo`} checked={v.ativo} disabled={p.desativado} className={FOCO} onCheckedChange={(ativo) => p.aoMudar({ ativo })} />
-      </div>
       <AmbitosVinculoForm
-        permissoes={permissoesComAmbito(atual, PERMISSOES)} ambitos={v.ambitos} desativado={p.desativado}
+        permissoes={permissoesComAmbito(atual, p.catalogo)} ambitos={v.ambitos} desativado={p.desativado || !p.podeEditarAmbitos || !existe}
         aoMudar={(ambitos) => p.aoMudar({ ambitos })}
       />
+      {!existe && <p className={AJUDA_CAMPO}>{t("usersProfiles.form.links.scopeAfterCreate")}</p>}
     </section>
   );
 }

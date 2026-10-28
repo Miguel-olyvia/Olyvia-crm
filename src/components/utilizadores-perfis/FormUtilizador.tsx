@@ -1,30 +1,39 @@
 // O formulário de utilizador (convidar/criar e editar), num painel lateral no estilo de "Novo negócio": abas Dados, Vínculos e
-// Permissões (só leitura, com a origem). Grava na memória (`perfisStore`), nunca na base, e nunca guarda a palavra-passe.
+// Permissões (só leitura, com a origem). Grava na base pela função `aoGravar` (create-user e rpc_update_user), que a página
+// liga aos wrappers; a palavra-passe vive só aqui e vai na gravação. Um erro de gravação aparece no painel e o painel não fecha.
 import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { AbaDadosUtilizador } from "./AbaDadosUtilizador";
 import { AbaForm, ListaAbasForm, Tabs, TabsContent } from "./AbaForm";
 import { AbaVinculosForm, type AcoesVinculos } from "./AbaVinculosForm";
-import { EDITOR_EXEMPLO } from "./catalogoExemplo";
 import type { ResultadoForm } from "./FormRole";
-import { ehProtegido } from "./logica";
+import type { Editor } from "./logica";
 import { PainelFormulario } from "./PainelFormulario";
-import { criarUtilizador, guardarUtilizador, utilizadoresAtuais } from "./perfisStore";
 import { RodapeForm } from "./RodapeForm";
 import { SeparadorPermissoesUtilizador } from "./SeparadorPermissoesUtilizador";
-import { CHAVE_MODO, type AbaFormUtilizador, type FormAberto, type Organizacao, type Role, type Utilizador } from "./tipos";
-import { gerarPalavraPasse, paraDados, utilizadorDeValores, valoresIniciaisUtilizador, vinculoVazio, type ValoresFormUtilizador } from "./utilizadorForm";
+import {
+  CHAVE_MODO, type AbaFormUtilizador, type FormAberto, type Organizacao, type Permissao, type ResultadoMutacao, type Role, type Utilizador,
+} from "./tipos";
+import { gerarPalavraPasse, utilizadorDeValores, valoresIniciaisUtilizador, vinculoVazio, type ValoresFormUtilizador } from "./utilizadorForm";
 import { useFocoCampo } from "./useFocoCampo";
 import { useUltimo } from "./useUltimo";
 import { abasComErroUtilizador, primeiroErroUtilizador, validarUtilizador, type CampoUtilizador } from "./validacoes";
 
-type FormUtilizadorAberto = Extract<NonNullable<FormAberto>, { tipo: "utilizador" }>;
+export type FormUtilizadorAberto = Extract<NonNullable<FormAberto>, { tipo: "utilizador" }>;
 
 interface FormUtilizadorProps {
   form: FormAberto;
   utilizadores: Utilizador[];
   roles: Role[];
   organizacoes: Organizacao[];
+  catalogo: Permissao[];
+  editor: Editor;
+  /** users.edit com âmbito e sem as proteções de /users, para este utilizador. */
+  podeEditar: (u: Utilizador) => boolean;
+  /** users.manage_roles: sem ele, ao editar, os vínculos e âmbitos só se veem. */
+  podeGerirRoles: boolean;
+  /** Cria ou guarda na base. Devolve o erro (nunca o engole). */
+  aoGravar: (form: FormUtilizadorAberto, valores: ValoresFormUtilizador, original: Utilizador | undefined) => Promise<ResultadoMutacao>;
   aoFechar: () => void;
   aoConcluir: (r: ResultadoForm) => void;
 }
@@ -41,65 +50,70 @@ const ID_DO_CAMPO: Record<CampoUtilizador, string> = {
 
 function acoesDeVinculos(valores: ValoresFormUtilizador, mudar: (p: Partial<ValoresFormUtilizador>) => void): AcoesVinculos {
   return {
-    mudar: (indice, parcial) => mudar({ vinculos: valores.vinculos.map((v, i) => (i === indice ? { ...v, ...parcial } : v)) }),
+    // Mudar a organização limpa a role (cada organização oferece as suas).
+    mudar: (indice, parcial) => mudar({
+      vinculos: valores.vinculos.map((v, i) => {
+        if (i !== indice) return v;
+        const mudouOrg = parcial.organizacaoId !== undefined && parcial.organizacaoId !== v.organizacaoId;
+        return { ...v, ...(mudouOrg ? { roleId: "", ambitos: {} } : {}), ...parcial };
+      }),
+    }),
     adicionar: () => mudar({ vinculos: [...valores.vinculos, vinculoVazio()] }),
     remover: (indice) => mudar({ vinculos: valores.vinculos.filter((_, i) => i !== indice) }),
   };
 }
 
-type Traduzir = (chave: string, params?: Record<string, string | number>) => string;
-
-/** Grava o utilizador no store (cria ou guarda; sem a palavra-passe) e diz o que o ecrã deve avisar. */
-function gravarUtilizador(form: FormUtilizadorAberto, valores: ValoresFormUtilizador, t: Traduzir): ResultadoForm {
-  const criar = form.modo === "criar";
-  const nome = valores.nome.trim();
-  if (criar) criarUtilizador(paraDados(valores));
-  else if (form.id) guardarUtilizador(form.id, paraDados(valores));
-  return {
-    aviso: t(criar ? "usersProfiles.form.user.created" : "usersProfiles.form.user.saved"),
-    anuncio: criar
-      ? t("usersProfiles.form.user.announce.created", { name: nome, state: t(`usersProfiles.form.user.status.${valores.estado}`), total: utilizadoresAtuais().length })
-      : t("usersProfiles.form.user.announce.saved", { name: nome }),
-  };
-}
-
 /** Os valores do formulário, os erros (só depois de tentar enviar) e o que deles se deriva. */
-function useEstadoUtilizador({ form, utilizador, utilizadores, roles, aoSujar }: InteriorProps, tentou: boolean) {
+function useEstadoUtilizador({ form, utilizador, utilizadores, podeEditar, aoSujar }: InteriorProps, tentou: boolean) {
   const criar = form.modo === "criar";
   const [valores, setValores] = useState<ValoresFormUtilizador>(() => valoresIniciaisUtilizador(utilizador));
   const erros = validarUtilizador(valores, utilizadores, { criar, idAtual: form.id });
   const mudar = (parcial: Partial<ValoresFormUtilizador>) => { aoSujar(); setValores((v) => ({ ...v, ...parcial })); };
   return {
     criar, valores, mudar, erros, mostrados: tentou ? erros : {}, acoes: acoesDeVinculos(valores, mudar),
-    bloqueado: !criar && !!utilizador && ehProtegido(utilizador, roles),
+    bloqueado: !criar && !!utilizador && !podeEditar(utilizador),
     previsao: useMemo(() => utilizadorDeValores(valores, form.id ?? "novo"), [valores, form.id]),
   };
 }
 
 function Interior(props: InteriorProps) {
-  const { form, roles, organizacoes, aoConcluir } = props;
+  const { form, roles, organizacoes, catalogo, editor, podeGerirRoles, utilizador, aoConcluir, aoGravar } = props;
   const { t } = useTranslation();
   const id = useId();
   const pedirFoco = useFocoCampo();
   const [aba, setAba] = useState<AbaFormUtilizador>(form.aba ?? "dados");
   const [tentou, setTentou] = useState(false);
+  const [aGravar, setAGravar] = useState(false);
+  const [erroGravar, setErroGravar] = useState<string | null>(null);
   const { criar, valores, mudar, erros, mostrados, acoes, bloqueado, previsao } = useEstadoUtilizador(props, tentou);
   const marcas = abasComErroUtilizador(mostrados);
+  // Ao criar, o criador escolhe os vínculos (o servidor valida); ao editar, gerir roles é users.manage_roles, como em /users.
+  const vinculosBloqueados = bloqueado || (!criar && !podeGerirRoles);
 
-  const enviar = (e: FormEvent) => {
+  const enviar = async (e: FormEvent) => {
     e.preventDefault();
+    if (aGravar) return;
     setTentou(true);
+    setErroGravar(null);
     const primeiro = primeiroErroUtilizador(erros);
     if (primeiro) {
       setAba(primeiro.aba);
       pedirFoco(`${id}-${ID_DO_CAMPO[primeiro.campo]}`);
       return;
     }
-    aoConcluir(gravarUtilizador(form, valores, t));
+    setAGravar(true);
+    const r = await aoGravar(form, valores, utilizador);
+    setAGravar(false);
+    if (!r.ok) { setErroGravar(r.erro); return; }
+    const nome = valores.nome.trim();
+    aoConcluir({
+      aviso: t(criar ? "usersProfiles.form.user.created" : "usersProfiles.form.user.saved"),
+      anuncio: t(criar ? "usersProfiles.form.user.announce.created" : "usersProfiles.form.user.announce.saved", { name: nome }),
+    });
   };
 
   return (
-    <form onSubmit={enviar} noValidate className="flex min-h-0 flex-1 flex-col">
+    <form onSubmit={(e) => { void enviar(e); }} noValidate className="flex min-h-0 flex-1 flex-col">
       <Tabs value={aba} onValueChange={(v) => setAba(v as AbaFormUtilizador)} className="flex min-h-0 flex-1 flex-col">
         <ListaAbasForm aria-label={t("usersProfiles.form.tabs")}>
           <AbaForm value="dados" rotulo={t("usersProfiles.form.user.tab.data")} comErros={marcas.dados} />
@@ -116,16 +130,24 @@ function Interior(props: InteriorProps) {
           <TabsContent value="vinculos" className="mt-0">
             <AbaVinculosForm
               id={id} vinculos={valores.vinculos} erro={mostrados.vinculos} organizacoes={organizacoes} roles={roles}
-              editor={EDITOR_EXEMPLO} bloqueado={bloqueado} acoes={acoes}
+              editor={editor} catalogo={catalogo} podeEditarAmbitos={podeGerirRoles} bloqueado={vinculosBloqueados} acoes={acoes}
             />
           </TabsContent>
           <TabsContent value="permissoes" className="mt-0 space-y-3">
             <p className="text-sm text-muted-foreground">{t("usersProfiles.form.perms.note")}</p>
-            <SeparadorPermissoesUtilizador utilizador={previsao} roles={roles} />
+            <SeparadorPermissoesUtilizador utilizador={previsao} roles={roles} catalogo={catalogo} editor={editor} />
           </TabsContent>
         </div>
       </Tabs>
-      <RodapeForm submeter={bloqueado ? null : t(criar ? "usersProfiles.form.user.submit.create" : "usersProfiles.form.user.submit.save")} />
+      {erroGravar && (
+        <p role="alert" className="border-t border-destructive/40 bg-destructive/5 px-6 py-3 text-sm text-destructive">
+          {t("usersProfiles.form.user.saveError", { message: erroGravar })}
+        </p>
+      )}
+      <RodapeForm
+        submeter={bloqueado ? null : t(aGravar ? "usersProfiles.form.user.saving" : criar ? "usersProfiles.form.user.submit.create" : "usersProfiles.form.user.submit.save")}
+        desativado={aGravar}
+      />
     </form>
   );
 }
@@ -139,7 +161,7 @@ export function FormUtilizador({ form, aoFechar, ...resto }: FormUtilizadorProps
   useEffect(() => { if (aberto) setSujo(false); }, [aberto]);
   const utilizador = ultimo?.id ? resto.utilizadores.find((u) => u.id === ultimo.id) : undefined;
   const modo = ultimo?.modo ?? "criar";
-  const protegido = modo === "editar" && !!utilizador && ehProtegido(utilizador, resto.roles);
+  const protegido = modo === "editar" && !!utilizador && !resto.podeEditar(utilizador);
   const selo = modo === "criar" ? "new" : protegido ? "viewing" : "editing";
   return (
     <PainelFormulario

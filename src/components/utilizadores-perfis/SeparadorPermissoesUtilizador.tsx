@@ -2,25 +2,28 @@ import { useMemo } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import { EDITOR_EXEMPLO, PERMISSOES } from "./catalogoExemplo";
 import { ArvorePermissoes } from "./ArvorePermissoes";
-import { permissoesEfetivas, permissoesVisiveis } from "./logica";
-import type { Role, Utilizador } from "./tipos";
+import { permissoesEfetivas, permissoesVisiveis, type Editor } from "./logica";
+import type { Permissao, Role, Utilizador } from "./tipos";
 
 interface SeparadorPermissoesUtilizadorProps {
   utilizador: Utilizador;
   roles: Role[];
+  /** As permissões do catálogo real (anew_permissions). */
+  catalogo: Permissao[];
+  /** Quem vê: só vê as permissões que ele próprio tem (regra de Roles.tsx), salvo administrador de sistema. */
+  editor: Editor;
   /** Sem isto (no formulário) a role de origem é só texto, não um botão que abre outra ficha. */
   aoAbrirRole?: (id: string) => void;
 }
 
 /** Todas as permissões, no mesmo desenho das roles; as que o utilizador tem dizem de que role vêm (a role abre-se ao clicar). */
-export function SeparadorPermissoesUtilizador({ utilizador, roles, aoAbrirRole }: SeparadorPermissoesUtilizadorProps) {
+export function SeparadorPermissoesUtilizador({ utilizador, roles, catalogo, editor, aoAbrirRole }: SeparadorPermissoesUtilizadorProps) {
   const { t } = useTranslation();
-  const visiveis = useMemo(() => permissoesVisiveis(PERMISSOES, EDITOR_EXEMPLO), []);
+  const visiveis = useMemo(() => permissoesVisiveis(catalogo, editor), [catalogo, editor]);
   const efetivas = useMemo(
-    () => new Map(permissoesEfetivas(utilizador, roles).map((e) => [e.permissao.codigo, e.origens])),
-    [utilizador, roles],
+    () => new Map(permissoesEfetivas(utilizador, roles, visiveis).map((e) => [e.permissao.codigo, e.origens])),
+    [utilizador, roles, visiveis],
   );
   if (efetivas.size === 0) return <p role="status" className="text-sm text-muted-foreground">{t("usersProfiles.perms.none")}</p>;
   return (

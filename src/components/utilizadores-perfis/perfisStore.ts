@@ -4,18 +4,12 @@
 import { useSyncExternalStore } from "react";
 import { ROLES_EXEMPLO } from "./catalogoExemplo";
 import { ehProtegido } from "./logica";
-import type { Role, Utilizador, Vinculo } from "./tipos";
+import type { DadosRole, Role, Utilizador, Vinculo } from "./tipos";
 import { HOJE_EXEMPLO, UTILIZADORES_EXEMPLO } from "./utilizadoresExemplo";
 
 export type EstadoUtilizador = "convidado" | "ativo" | "inativo";
 
-export interface DadosRole {
-  nome: string;
-  codigo: string;
-  descricao: string;
-  podeAssinar: boolean;
-  permissoes: string[];
-}
+export type { DadosRole };
 
 export interface DadosUtilizador {
   nome: string;

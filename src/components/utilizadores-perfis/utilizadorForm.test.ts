@@ -1,40 +1,39 @@
-// Valores iniciais, o que se guarda e a palavra-passe gerada do formulário de utilizador.
+// Valores iniciais, pré-visualização e palavra-passe gerada do formulário de utilizador.
 import { describe, expect, it } from "vitest";
 import { UTILIZADORES_EXEMPLO } from "./utilizadoresExemplo";
-import {
-  gerarPalavraPasse, paraDados, TAMANHO_GERADA, utilizadorDeValores, valoresIniciaisUtilizador, vinculoVazio,
-} from "./utilizadorForm";
+import { gerarPalavraPasse, TAMANHO_GERADA, utilizadorDeValores, valoresIniciaisUtilizador, vinculoVazio } from "./utilizadorForm";
 
 describe("valoresIniciaisUtilizador", () => {
-  it("um convite começa em branco, Convidado e com uma linha de vínculo por escolher", () => {
+  it("um utilizador novo começa em branco e com uma linha de vínculo por escolher", () => {
     const v = valoresIniciaisUtilizador();
-    expect(v).toMatchObject({ nome: "", email: "", palavraPasse: "", estado: "convidado" });
+    expect(v).toMatchObject({ nome: "", email: "", palavraPasse: "" });
+    expect(Object.keys(v)).not.toContain("estado");
+    expect(Object.keys(v)).not.toContain("morada");
     expect(v.vinculos).toEqual([vinculoVazio()]);
   });
 
   it("editar traz os dados do utilizador, sem palavra-passe, e copia os vínculos", () => {
     const rui = UTILIZADORES_EXEMPLO.find((u) => u.id === "u-02")!;
     const v = valoresIniciaisUtilizador(rui);
-    expect(v).toMatchObject({ nome: "Rui Pacheco", estado: "ativo", palavraPasse: "" });
+    expect(v).toMatchObject({ nome: "Rui Pacheco", palavraPasse: "" });
     expect(v.vinculos).toHaveLength(3);
     expect(v.vinculos[0]).not.toBe(rui.vinculos[0]);
     expect(v.vinculos[0].ambitos).not.toBe(rui.vinculos[0].ambitos);
-    expect(valoresIniciaisUtilizador(UTILIZADORES_EXEMPLO.find((u) => u.id === "u-08")).estado).toBe("inativo");
+  });
+
+  it("só traz os vínculos ativos, como /users (os outros ficam como estão na base)", () => {
+    const rui = UTILIZADORES_EXEMPLO.find((u) => u.id === "u-02")!;
+    const v = valoresIniciaisUtilizador({ ...rui, vinculos: [rui.vinculos[0], { ...rui.vinculos[1], ativo: false }] });
+    expect(v.vinculos).toHaveLength(1);
   });
 });
 
-describe("paraDados e utilizadorDeValores", () => {
-  it("paraDados nunca leva a palavra-passe", () => {
-    const dados = paraDados({ ...valoresIniciaisUtilizador(), palavraPasse: "segredo123" });
-    expect(JSON.stringify(dados)).not.toContain("segredo123");
-    expect(Object.keys(dados)).not.toContain("palavraPasse");
-  });
-
-  it("a pré-visualização só leva os vínculos completos e reflete o estado", () => {
-    const v = { ...valoresIniciaisUtilizador(), estado: "inativo" as const, vinculos: [vinculoVazio(), { ...vinculoVazio(), organizacaoId: "o-grupo", roleId: "r-leitura" }] };
+describe("utilizadorDeValores", () => {
+  it("a pré-visualização só leva os vínculos completos e nunca a palavra-passe", () => {
+    const v = { ...valoresIniciaisUtilizador(), palavraPasse: "segredo123", vinculos: [vinculoVazio(), { ...vinculoVazio(), organizacaoId: "o-grupo", roleId: "r-leitura" }] };
     const u = utilizadorDeValores(v, "novo");
     expect(u.vinculos).toHaveLength(1);
-    expect(u).toMatchObject({ ativo: false, convidado: false });
+    expect(JSON.stringify(u)).not.toContain("segredo123");
   });
 });
 

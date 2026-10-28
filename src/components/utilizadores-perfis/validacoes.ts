@@ -5,7 +5,8 @@ import type { Role, Utilizador, Vinculo } from "./tipos";
 
 export const MAX_NOME_ROLE = 100;
 export const MAX_CODIGO_ROLE = 50;
-export const MIN_PALAVRA_PASSE = 8;
+/** Como em /users (users.passwordMinLength): 6 caracteres. */
+export const MIN_PALAVRA_PASSE = 6;
 export const MAX_PALAVRA_PASSE = 72;
 /** O código de uma role: minúsculas, algarismos e sublinhado, a começar por uma letra. */
 export const FORMATO_CODIGO = /^[a-z][a-z0-9_]*$/;

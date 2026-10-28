@@ -7,8 +7,8 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { AJUDA_CAMPO, ErroCampo } from "./CampoForm";
 import { CartaoVinculoForm } from "./CartaoVinculoForm";
 import type { Editor } from "./logica";
-import { haOrganizacaoLivre, organizacoesLivres, rolesOferecidas } from "./regrasVinculos";
-import type { Organizacao, Role, Vinculo } from "./tipos";
+import { haOrganizacaoLivre, organizacoesLivres, rolesDoVinculo } from "./regrasVinculos";
+import type { Organizacao, Permissao, Role, Vinculo } from "./tipos";
 
 export interface AcoesVinculos {
   mudar: (indice: number, parcial: Partial<Vinculo>) => void;
@@ -24,14 +24,16 @@ interface AbaVinculosFormProps {
   organizacoes: Organizacao[];
   roles: Role[];
   editor: Editor;
-  /** Super administrador: só se vê. */
+  catalogo: Permissao[];
+  /** users.manage_roles: sem ele os âmbitos só se veem. */
+  podeEditarAmbitos: boolean;
+  /** Utilizador protegido (ou sem permissão): só se vê. */
   bloqueado: boolean;
   acoes: AcoesVinculos;
 }
 
-export function AbaVinculosForm({ id, vinculos, erro, organizacoes, roles, editor, bloqueado, acoes }: AbaVinculosFormProps) {
+export function AbaVinculosForm({ id, vinculos, erro, organizacoes, roles, editor, catalogo, podeEditarAmbitos, bloqueado, acoes }: AbaVinculosFormProps) {
   const { t } = useTranslation();
-  const oferecidas = rolesOferecidas(roles, editor);
   const livre = haOrganizacaoLivre(organizacoes, vinculos);
   return (
     <div className="space-y-4">
@@ -39,7 +41,7 @@ export function AbaVinculosForm({ id, vinculos, erro, organizacoes, roles, edito
       <ErroCampo id={`${id}-vinculos-erro`} campo="vinculos" codigo={erro} />
       {vinculos.map((v, i) => (
         <CartaoVinculoForm
-          key={i} id={`${id}-v${i}`} indice={i} vinculo={v} roles={oferecidas} todasAsRoles={roles}
+          key={i} id={`${id}-v${i}`} indice={i} vinculo={v} roles={rolesDoVinculo(roles, v, organizacoes, editor)} catalogo={catalogo} podeEditarAmbitos={podeEditarAmbitos}
           organizacoes={organizacoesLivres(organizacoes, vinculos, i)} desativado={bloqueado}
           podeRemover={vinculos.length > 1} comErro={!!erro} aoMudar={(parcial) => acoes.mudar(i, parcial)} aoRemover={() => acoes.remover(i)}
         />

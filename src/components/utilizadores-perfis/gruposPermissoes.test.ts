@@ -42,11 +42,19 @@ describe("agruparPorMenu", () => {
     const todas = grupos.flatMap((g) => g.permissoes.map((p) => p.codigo));
     expect(todas).toHaveLength(PERMISSOES.length);
     expect(new Set(todas).size).toBe(PERMISSOES.length);
-    expect(grupos.map((g) => g.rotulo)).toEqual(GRUPOS_MENU.map((g) => g.rotulo));
+    // O catálogo de exemplo não tem permissões hr.*, por isso o grupo de RH não aparece (grupos sem permissões omitem-se).
+    expect(grupos.map((g) => g.rotulo)).toEqual(GRUPOS_MENU.filter((g) => g.rotulo !== "Recursos Humanos").map((g) => g.rotulo));
     grupos.forEach((g) => {
       const soma = g.blocos.flatMap((b) => b.permissoes).length + g.subgrupos.flatMap((s) => s.permissoes).length;
       expect(soma).toBe(g.permissoes.length);
     });
+  });
+
+  it("as permissões hr.* da base têm grupo próprio (Roles.tsx aceitava a categoria mas não a mostrava)", () => {
+    const grupos = agruparPorMenu([perm("hr.people.view", "hr")]);
+    expect(grupos.map((g) => g.rotulo)).toEqual(["Recursos Humanos"]);
+    expect(grupos[0].blocos[0].rotulo).toBe("Recursos Humanos");
+    expect(permissoesForaDoMenu([perm("hr.people.view", "hr")])).toEqual([]);
   });
 
   it("omite grupos e subgrupos sem permissões e devolve vazio para uma lista vazia", () => {

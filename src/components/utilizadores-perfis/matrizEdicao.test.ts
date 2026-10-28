@@ -4,7 +4,7 @@ import { EDITOR_EXEMPLO, PERMISSOES, ROLES_EXEMPLO } from "./catalogoExemplo";
 import {
   alternarPermissao, contarConcedidas, definirModulo, fundirPermissoes, moduloDe, perigosasNovas, podeAlterar,
 } from "./matriz";
-import { aplicarOrigem, MODELOS_EXEMPLO, ROLE_EM_BRANCO, valoresIniciaisRole } from "./modelosRole";
+import { aplicarOrigem, ROLE_EM_BRANCO, valoresIniciaisRole } from "./modelosRole";
 import {
   ajustarAmbito, haOrganizacaoLivre, organizacoesLivres, permissoesComAmbito, podeAtribuirRole, rolesOferecidas,
 } from "./regrasVinculos";
@@ -144,7 +144,7 @@ describe("modelos de role", () => {
   });
 
   it("aplicar um modelo leva descrição e permissões, e só dá nome se estiver vazio", () => {
-    const modelo = MODELOS_EXEMPLO[0];
+    const modelo = { id: "m", nome: "Gestor de vendas", descricao: "Trabalha leads.", permissoes: ["leads.view", "leads.edit"] };
     expect(aplicarOrigem(ROLE_EM_BRANCO, modelo).nome).toBe(modelo.nome);
     expect(aplicarOrigem({ ...ROLE_EM_BRANCO, nome: "O meu" }, modelo)).toMatchObject({ nome: "O meu", permissoes: modelo.permissoes });
     expect(aplicarOrigem(ROLE_EM_BRANCO, null)).toEqual(ROLE_EM_BRANCO);

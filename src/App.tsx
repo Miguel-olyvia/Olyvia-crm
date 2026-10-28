@@ -41,6 +41,7 @@ const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const CatalogItems = lazy(() => import("./pages/CatalogItems"));
 
 
+const Roles = lazy(() => import("./pages/Roles"));
 const ApiKeys = lazy(() => import("./pages/ApiKeys"));
 const Campaigns = lazy(() => import("./pages/Campaigns"));
 const CampaignDetail = lazy(() => import("./pages/CampaignDetail"));
@@ -159,7 +160,7 @@ const Vencimento = lazy(() => import("./pages/Vencimento"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
 const NeedsAssessmentConfig = lazy(() => import("./pages/NeedsAssessmentConfig"));
-const RedirecionarUtilizadoresPerfis = lazy(() => import("./pages/RedirecionarUtilizadoresPerfis"));
+const UsersNew = lazy(() => import("./pages/UsersNew"));
 const SmtpManagement = lazy(() => import("./pages/SmtpManagement"));
 const EmailTemplates = lazy(() => import("./pages/EmailTemplates"));
 const Trash = lazy(() => import("./pages/Trash"));
@@ -330,8 +331,8 @@ const App = () => (
                       {/* Venda Direta (Fase 2) — fluxo alternativo ao Orçamento -> Proposta -> Contrato. Permissões próprias: direct_sales.view/create/edit (migration 20261130230000). */}
                       <Route path="/direct-sales" element={<ProtectedRoute permission="direct_sales.view"><DirectSales /></ProtectedRoute>} />
                       <Route path="/catalog-items" element={<CatalogItems />} />
-                      <Route path="/users" element={<RedirecionarUtilizadoresPerfis aba="utilizadores" />} />
-                      <Route path="/roles" element={<RedirecionarUtilizadoresPerfis aba="roles" />} />
+                      <Route path="/users" element={<ProtectedRoute permission="users.view"><UsersNew /></ProtectedRoute>} />
+                      <Route path="/roles" element={<ProtectedRoute permission="roles.view"><Roles /></ProtectedRoute>} />
                       <Route path="/api-keys" element={<ProtectedRoute permission="settings.update"><ApiKeys /></ProtectedRoute>} />
                       <Route path="/forms" element={<ProtectedRoute permission="forms.view"><Forms /></ProtectedRoute>} />
                       <Route path="/campaigns" element={<ProtectedRoute permission="campaigns.view"><Campaigns /></ProtectedRoute>} />

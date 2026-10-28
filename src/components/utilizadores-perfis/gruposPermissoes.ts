@@ -13,7 +13,7 @@ export const ROTULOS_CATEGORIA: Record<string, string> = {
   contracts: "Contratos", client_contracts: "Contratos de Cliente", campaigns: "Campanhas", forms: "Formulários", lead_sources: "Origens",
   suppliers: "Fornecedores", warehouses: "Armazéns", purchase_orders: "Encomendas", receiving: "Receção no armazém", stocks: "Stocks",
   inventory: "Acesso a Stock", client_orders: "Encomendas Clientes", scheduling: "Agendamentos", users: "Utilizadores", roles: "Funções",
-  settings: "Definições", smtp: "SMTP", email_templates: "Templates de Email",
+  settings: "Definições", smtp: "SMTP", email_templates: "Templates de Email", hr: "Recursos Humanos",
 };
 
 interface DefinicaoGrupo {
@@ -66,6 +66,8 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   },
   { rotulo: "Utilizadores", categorias: ["users", "roles"] },
   { rotulo: "Definições", categorias: ["settings", "smtp", "email_templates"] },
+  // Roles.tsx aceita a categoria hr no filtro mas não a põe em nenhum grupo, e as permissões hr.* não se viam. Aqui ganham grupo.
+  { rotulo: "Recursos Humanos", categorias: ["hr"] },
 ];
 
 const ROTULOS_VIRTUAIS: Record<string, string> = {

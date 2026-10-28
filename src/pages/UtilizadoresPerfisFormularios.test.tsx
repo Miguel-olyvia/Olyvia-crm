@@ -6,6 +6,15 @@ import { MemoryRouter } from "react-router-dom";
 import UtilizadoresPerfis from "./UtilizadoresPerfis";
 import { repor } from "@/components/utilizadores-perfis/perfisStore";
 
+// Quem testa a lista e os formulários tem todas as permissões; as permissões por separador estão em
+// UtilizadoresPerfisSeparadores.test.tsx.
+vi.mock("@/components/utilizadores-perfis/hooks/usePermissoesPerfis", () => ({
+  usePermissoesPerfis: () => ({ carregando: false, permitidos: ["utilizadores", "roles", "portal"], tem: () => true }),
+}));
+
+// Os utilizadores vêm da base (testados em UtilizadoresPerfisUtilizadores.test.tsx): aqui o wrapper é simulado e vazio.
+vi.mock("@/components/utilizadores-perfis/hooks/useUtilizadoresPerfis", async () => (await import("./utilizadoresPerfisFalso")).moduloFalso());
+
 vi.mock("@/hooks/useTranslation", async () => {
   const { utilizadoresPerfisTranslations } = await import("@/translations/utilizadoresPerfis");
   const { negocioMetasTranslations } = await import("@/translations/negocioMetas");
@@ -144,82 +153,5 @@ describe("formulário de role", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Duplicar" }));
     const copia = await screen.findByRole("dialog", { name: "Duplicar role" });
     expect(within(copia).getByRole("textbox", { name: /^Nome/ })).toHaveValue("Comercial Sénior (cópia)");
-  });
-});
-
-describe("formulário de utilizador", () => {
-  const abrirConvite = () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Convidar utilizador" }));
-    return screen.getByRole("dialog", { name: "Convidar utilizador" });
-  };
-
-  it("abre com as abas Dados, Vínculos e Permissões e os campos do ecrã atual, sem filial nem local de trabalho", () => {
-    const form = abrirConvite();
-    expect(within(form).getByText("Novo · por gravar")).toBeInTheDocument();
-    expect(within(form).getAllByRole("tab").map((a) => a.textContent)).toEqual(
-      [expect.stringContaining("Dados"), expect.stringContaining("Vínculos"), expect.stringContaining("Permissões")],
-    );
-    for (const campo of [/^Nome/, /^Email/, /^Telefone/, /^Morada/, /^Posição na plataforma/]) {
-      expect(within(form).getByRole("textbox", { name: campo })).toBeInTheDocument();
-    }
-    expect(within(form).getByLabelText(/^Palavra-passe/)).toHaveAttribute("type", "password");
-    expect(within(form).getByRole("combobox", { name: "Estado" })).toHaveTextContent("Convidado");
-    expect(within(form).queryByRole("textbox", { name: /filial|local de trabalho|cargo/i })).not.toBeInTheDocument();
-    expect(within(form).queryByRole("combobox", { name: /filial|local de trabalho|cargo/i })).not.toBeInTheDocument();
-    expect(within(form).getByRole("textbox", { name: /^Nome/ })).toHaveFocus();
-  });
-
-  it("valida por campo e leva à aba com erros", () => {
-    const form = abrirConvite();
-    fireEvent.click(within(form).getByRole("button", { name: "Criar utilizador" }));
-    expect(within(form).getByText("Indique o nome do utilizador.")).toBeInTheDocument();
-    expect(within(form).getByText("Indique o email.")).toBeInTheDocument();
-    expect(within(form).getByText("Defina uma palavra-passe.")).toBeInTheDocument();
-    expect(within(form).getByRole("tab", { name: /Dados.*tem erros/ })).toBeInTheDocument();
-  });
-
-  it("cria o utilizador (13.º), como Convidado, e aparece na lista", async () => {
-    const form = abrirConvite();
-    escrever(form, /^Nome/, "Ana Prata");
-    escrever(form, /^Email/, "ana.prata@exemplo.pt");
-    fireEvent.change(within(form).getByLabelText(/^Palavra-passe/), { target: { value: "segredo123" } });
-    irParaTab(/^Vínculos/, form);
-    await escolher(form, /^Organização/, "Grupo Aurora");
-    await escolher(form, /^Role/, "Comercial");
-    fireEvent.click(within(form).getByRole("button", { name: "Criar utilizador" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Convidar utilizador" })).not.toBeInTheDocument());
-    expect(screen.getByRole("tab", { name: /^Utilizadores/ })).toHaveAccessibleName(/13/);
-    expect(screen.getByText("A mostrar 12 de 13 utilizadores")).toBeInTheDocument();
-    const linha = screen.getByRole("button", { name: /Ana Prata/ }).closest("tr")!;
-    expect(within(linha).getByText("Convidado")).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain("segredo123");
-  });
-
-  it("editar abre a partir da ficha, no separador pedido, e guarda; o super administrador não se edita", async () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /Marta Silveira/ }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Editar utilizador" }));
-    const form = await screen.findByRole("dialog", { name: "Editar utilizador" });
-    expect(within(form).getByRole("textbox", { name: /^Email/ })).toHaveValue("marta.silveira@exemplo.pt");
-    escrever(form, /^Nome/, "Marta S. Silveira");
-    fireEvent.click(within(form).getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Editar utilizador" })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /Marta S\. Silveira/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Helena Marques/ }));
-    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Editar utilizador" })).toBeDisabled();
-  });
-
-  it("desativar pede confirmação, muda o estado e o filtro Ativos reage; reativar volta", async () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /Tiago Valente/ }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Desativar" }));
-    const confirmar = await screen.findByRole("alertdialog");
-    expect(within(confirmar).getByText("Desativar Tiago Valente?")).toBeInTheDocument();
-    fireEvent.click(within(confirmar).getByRole("button", { name: "Desativar" }));
-    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Reativar" })).toBeInTheDocument());
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-    await waitFor(() => expect(screen.getByText("A mostrar 10 de 12 utilizadores")).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: /Tiago Valente/ })).not.toBeInTheDocument();
   });
 });

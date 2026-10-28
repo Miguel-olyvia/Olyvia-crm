@@ -4,15 +4,18 @@ import { cn } from "@/lib/utils";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AvatarPessoa } from "@/components/pessoas/AvatarPessoa";
-import { ehProtegido, resumoAmbito } from "./logica";
+import { resumoAmbito } from "./logica";
 import { ChipVinculo, MaisVinculos, TagEstado, type VinculoVisivel } from "./pecas";
-import { textoAcesso, textoAmbito } from "./textos";
-import type { Organizacao, Role, Utilizador } from "./tipos";
+import { textoAmbito } from "./textos";
+import type { Organizacao, Permissao, Role, Utilizador } from "./tipos";
 
 interface LinhaUtilizadorProps {
   utilizador: Utilizador;
   roles: Role[];
   organizacoes: Organizacao[];
+  catalogo: Permissao[];
+  /** Quem vê não pode alterar este utilizador (a regra de proteção de /users): mostra o cadeado. */
+  protegido: boolean;
   aoAbrir: (id: string) => void;
   aoAbrirRole: (id: string) => void;
 }
@@ -30,7 +33,7 @@ function vinculosVisiveis(u: Utilizador, roles: Role[], organizacoes: Organizaca
 }
 
 /** Uma linha compacta (cerca de 45 px). O nome é o botão que abre a ficha; o chip de organização e role abre a role. */
-export function LinhaUtilizador({ utilizador: u, roles, organizacoes, aoAbrir, aoAbrirRole }: LinhaUtilizadorProps) {
+export function LinhaUtilizador({ utilizador: u, roles, organizacoes, catalogo, protegido, aoAbrir, aoAbrirRole }: LinhaUtilizadorProps) {
   const { t } = useTranslation();
   const vinculos = vinculosVisiveis(u, roles, organizacoes);
   const resto = vinculos.length - MAX_CHIPS;
@@ -45,7 +48,7 @@ export function LinhaUtilizador({ utilizador: u, roles, organizacoes, aoAbrir, a
           <span className="min-w-0">
             <span className="flex items-center gap-1 truncate font-medium text-foreground">
               {u.nome}
-              {ehProtegido(u, roles) && (
+              {protegido && (
                 <>
                   <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="sr-only">{t("usersProfiles.protected")}</span>
@@ -63,11 +66,8 @@ export function LinhaUtilizador({ utilizador: u, roles, organizacoes, aoAbrir, a
           {resto > 0 && <MaisVinculos vinculos={vinculos} restantes={resto} />}
         </div>
       </TableCell>
-      <TableCell className={cn(CELULA, "hidden md:table-cell")}>{textoAmbito(t, resumoAmbito(u, roles))}</TableCell>
-      <TableCell className={CELULA}><TagEstado ativo={u.ativo} convidado={u.convidado} /></TableCell>
-      <TableCell className={cn(CELULA, "hidden whitespace-nowrap text-muted-foreground lg:table-cell")}>
-        {textoAcesso(t, u.ultimoAcesso)}
-      </TableCell>
+      <TableCell className={cn(CELULA, "hidden md:table-cell")}>{textoAmbito(t, resumoAmbito(u, roles, catalogo))}</TableCell>
+      <TableCell className={CELULA}><TagEstado ativo={u.ativo} /></TableCell>
     </TableRow>
   );
 }

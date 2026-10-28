@@ -4,13 +4,18 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BarraFiltros } from "./BarraFiltros";
 import { LinhaUtilizador } from "./LinhaUtilizador";
-import type { FiltrosUtilizadores, Organizacao, Role, Utilizador } from "./tipos";
+import type { FiltrosUtilizadores, Organizacao, Permissao, Role, Utilizador } from "./tipos";
 
 interface AbaUtilizadoresProps {
   visiveis: Utilizador[];
   total: number;
   roles: Role[];
   organizacoes: Organizacao[];
+  catalogo: Permissao[];
+  /** Quem vê não pode alterar este utilizador (mostra o cadeado). */
+  protegidoDe: (u: Utilizador) => boolean;
+  /** Pode convidar (users.create): sem isto o vazio não oferece o botão. */
+  podeConvidar: boolean;
   filtros: FiltrosUtilizadores;
   aoMudarFiltros: (f: FiltrosUtilizadores) => void;
   aoLimparFiltros: () => void;
@@ -21,7 +26,7 @@ interface AbaUtilizadoresProps {
 
 const CABECA = "h-11 px-3 text-xs font-medium text-muted-foreground";
 
-function SemResultados({ total, aoLimpar, aoConvidar }: { total: number; aoLimpar: () => void; aoConvidar: () => void }) {
+function SemResultados({ total, podeConvidar, aoLimpar, aoConvidar }: { total: number; podeConvidar: boolean; aoLimpar: () => void; aoConvidar: () => void }) {
   const { t } = useTranslation();
   const Icone = total === 0 ? UserX : SearchX;
   return (
@@ -31,9 +36,11 @@ function SemResultados({ total, aoLimpar, aoConvidar }: { total: number; aoLimpa
       <p className="max-w-md text-sm text-muted-foreground">
         {total === 0 ? t("usersProfiles.empty.text") : t("usersProfiles.noResults.text")}
       </p>
-      <Button type="button" variant="outline" className="min-h-11" onClick={total === 0 ? aoConvidar : aoLimpar}>
-        {total === 0 ? t("usersProfiles.invite") : t("usersProfiles.filters.clear")}
-      </Button>
+      {(total > 0 || podeConvidar) && (
+        <Button type="button" variant="outline" className="min-h-11" onClick={total === 0 ? aoConvidar : aoLimpar}>
+          {total === 0 ? t("usersProfiles.invite") : t("usersProfiles.filters.clear")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -48,7 +55,7 @@ export function AbaUtilizadores(p: AbaUtilizadoresProps) {
         {t("usersProfiles.count", { shown: p.visiveis.length, total: p.total })}
       </p>
       {p.visiveis.length === 0 ? (
-        <SemResultados total={p.total} aoLimpar={p.aoLimparFiltros} aoConvidar={p.aoConvidar} />
+        <SemResultados total={p.total} podeConvidar={p.podeConvidar} aoLimpar={p.aoLimparFiltros} aoConvidar={p.aoConvidar} />
       ) : (
         <div className="overflow-x-auto rounded-md border">
           <Table>
@@ -58,12 +65,11 @@ export function AbaUtilizadores(p: AbaUtilizadoresProps) {
                 <TableHead className={CABECA}>{t("usersProfiles.col.links")}</TableHead>
                 <TableHead className={`${CABECA} hidden md:table-cell`}>{t("usersProfiles.col.scope")}</TableHead>
                 <TableHead className={CABECA}>{t("usersProfiles.col.state")}</TableHead>
-                <TableHead className={`${CABECA} hidden lg:table-cell`}>{t("usersProfiles.col.lastAccess")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {p.visiveis.map((u) => (
-                <LinhaUtilizador key={u.id} utilizador={u} roles={p.roles} organizacoes={p.organizacoes} aoAbrir={p.aoAbrir} aoAbrirRole={p.aoAbrirRole} />
+                <LinhaUtilizador key={u.id} utilizador={u} roles={p.roles} organizacoes={p.organizacoes} catalogo={p.catalogo} protegido={p.protegidoDe(u)} aoAbrir={p.aoAbrir} aoAbrirRole={p.aoAbrirRole} />
               ))}
             </TableBody>
           </Table>

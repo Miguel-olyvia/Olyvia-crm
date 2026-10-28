@@ -2,11 +2,13 @@
 // juntado em `useTranslation.ts`. Apenas en/pt: nas outras línguas o `t()` cai para `en`.
 import { acoesEn, acoesPt } from './utilizadoresPerfisAcoes';
 import { formularioEn, formularioPt } from './utilizadoresPerfisForm';
+import { utilizadoresReaisEn, utilizadoresReaisPt } from './utilizadoresPerfisUtilizadores';
 
 export const utilizadoresPerfisTranslations: Record<"en" | "pt", Record<string, string>> = {
   en: {
     ...formularioEn,
     ...acoesEn,
+    ...utilizadoresReaisEn,
     'sidebar.usersProfiles': 'Users and profiles',
     'usersProfiles.title': 'Users and profiles',
     'usersProfiles.summary': '{users} active users · {roles} roles · {orgs} platform organizations',
@@ -117,6 +119,7 @@ export const utilizadoresPerfisTranslations: Record<"en" | "pt", Record<string, 
   pt: {
     ...formularioPt,
     ...acoesPt,
+    ...utilizadoresReaisPt,
     'sidebar.usersProfiles': 'Utilizadores e perfis',
     'usersProfiles.title': 'Utilizadores e perfis',
     'usersProfiles.summary': '{users} utilizadores ativos · {roles} roles · {orgs} organizações da plataforma',

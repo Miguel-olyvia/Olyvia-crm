@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AJUDA_CAMPO, ErroCampo, RotuloCampo } from "./CampoForm";
-import { MODELOS_EXEMPLO, type ValoresFormRole } from "./modelosRole";
+import type { ModeloRole, ValoresFormRole } from "./modelosRole";
 import type { Role } from "./tipos";
 import type { ErrosRole } from "./validacoes";
 
@@ -36,12 +36,18 @@ interface AbaGeralRoleProps {
   modelo: string;
   fonteId: string;
   roles: Role[];
+  /** Os modelos da base (role_templates). */
+  modelos: ModeloRole[];
+  /** A mensagem da falha ao ler os modelos, ou `null`. */
+  erroModelos: string | null;
+  /** Aviso a mostrar no topo (por exemplo, sem permissão para editar), além do de role de sistema. */
+  aviso?: string | null;
   acoes: AcoesGeralRole;
 }
 
 const CAMPO = (invalido: boolean) => cn("min-h-11", FOCO, invalido && "border-destructive");
 
-function SeletorModelo({ id, modelo, fonteId, roles, acoes }: Pick<AbaGeralRoleProps, "id" | "modelo" | "fonteId" | "roles" | "acoes">) {
+function SeletorModelo({ id, modelo, fonteId, roles, modelos, erroModelos, acoes }: Pick<AbaGeralRoleProps, "id" | "modelo" | "fonteId" | "roles" | "modelos" | "erroModelos" | "acoes">) {
   const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
@@ -51,10 +57,11 @@ function SeletorModelo({ id, modelo, fonteId, roles, acoes }: Pick<AbaGeralRoleP
         <SelectContent>
           <SelectItem value={MODELO_EM_BRANCO} className="min-h-11">{t("usersProfiles.form.role.template.blank")}</SelectItem>
           <SelectItem value={MODELO_DUPLICAR} className="min-h-11">{t("usersProfiles.form.role.template.duplicate")}</SelectItem>
-          {MODELOS_EXEMPLO.map((m) => <SelectItem key={m.id} value={m.id} className="min-h-11">{m.nome}</SelectItem>)}
+          {modelos.map((m) => <SelectItem key={m.id} value={m.id} className="min-h-11">{m.nome}</SelectItem>)}
         </SelectContent>
       </Select>
       <p id={`${id}-modelo-ajuda`} className={AJUDA_CAMPO}>{t("usersProfiles.form.role.template.hint")}</p>
+      {erroModelos && <p role="alert" className="text-sm text-destructive">{t("usersProfiles.form.role.template.error", { message: erroModelos })}</p>}
       {modelo === MODELO_DUPLICAR && (
         <div className="space-y-1.5 pt-1">
           <RotuloCampo para={`${id}-fonte`} texto={t("usersProfiles.form.role.template.source")} />
@@ -93,10 +100,10 @@ export function AbaGeralRole(p: AbaGeralRoleProps) {
       {bloqueado && (
         <p className="flex items-center gap-2 rounded-md border bg-muted/40 p-3 text-sm text-foreground">
           <Lock className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {t("usersProfiles.form.role.systemNote")}
+          {p.aviso ?? t("usersProfiles.form.role.systemNote")}
         </p>
       )}
-      {p.comModelo && <SeletorModelo id={id} modelo={p.modelo} fonteId={p.fonteId} roles={p.roles} acoes={acoes} />}
+      {p.comModelo && <SeletorModelo id={id} modelo={p.modelo} fonteId={p.fonteId} roles={p.roles} modelos={p.modelos} erroModelos={p.erroModelos} acoes={acoes} />}
       <div className="space-y-1.5">
         <RotuloCampo para={`${id}-nome`} texto={t("usersProfiles.form.role.name")} obrigatorio />
         <Input

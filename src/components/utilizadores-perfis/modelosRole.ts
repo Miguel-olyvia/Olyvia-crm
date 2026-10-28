@@ -1,6 +1,5 @@
-// "Começar de um modelo" do formulário de role. O ecrã de Roles atual lê os modelos da tabela role_templates (nome, descrição e
-// permissões vêm da base, não do código), por isso os modelos de exemplo são inventados aqui, a partir das roles de exemplo.
-import { ROLES_EXEMPLO } from "./catalogoExemplo";
+// "Começar de um modelo" do formulário de role. Os modelos vêm da tabela role_templates (nome, descrição e permissões são da
+// base, não do código): lê-os `hooks/useModelosRole.ts` e a página passa-os ao formulário.
 import { gerarCodigo } from "./validacoes";
 import type { Role } from "./tipos";
 
@@ -10,14 +9,6 @@ export interface ModeloRole {
   descricao: string;
   permissoes: string[];
 }
-
-const daRole = (roleId: string): string[] => ROLES_EXEMPLO.find((r) => r.id === roleId)?.permissoes ?? [];
-
-export const MODELOS_EXEMPLO: ModeloRole[] = [
-  { id: "m-vendas", nome: "Gestor de vendas", descricao: "Trabalha leads, clientes, propostas e contratos; não elimina nem exporta dados sensíveis.", permissoes: daRole("r-comercial") },
-  { id: "m-armazem", nome: "Operador de armazém", descricao: "Compras, receção, stock e encomendas de cliente.", permissoes: daRole("r-operacoes") },
-  { id: "m-consulta", nome: "Consulta", descricao: "Só vê a atividade comercial e de inventário.", permissoes: daRole("r-leitura") },
-];
 
 export interface ValoresFormRole {
   nome: string;

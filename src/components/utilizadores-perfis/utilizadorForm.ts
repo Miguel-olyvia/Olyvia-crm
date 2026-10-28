@@ -1,45 +1,35 @@
-// Lógica pura do formulário de utilizador: valores iniciais, o que se guarda e o utilizador de pré-visualização das permissões.
-// A palavra-passe vive só no formulário: nunca vai para o utilizador nem para o store.
-import { estadoDe, type DadosUtilizador, type EstadoUtilizador } from "./perfisStore";
+// Lógica pura do formulário de utilizador: valores iniciais e o utilizador de pré-visualização das permissões.
+// A palavra-passe vive só no formulário: nunca vai para o utilizador. O estado (ativo/inativo) não se escolhe aqui:
+// muda-se com Desativar/Reativar na ficha, que revogam e repõem o login a sério, como em /users.
 import type { Utilizador, Vinculo } from "./tipos";
 
 export interface ValoresFormUtilizador {
   nome: string;
   email: string;
   telefone: string;
-  morada: string;
   posicao: string;
   palavraPasse: string;
-  estado: EstadoUtilizador;
   vinculos: Vinculo[];
 }
 
 /** Uma linha de vínculo por escolher (organização e role vazias), ativa e sem âmbitos alterados. */
 export const vinculoVazio = (): Vinculo => ({ organizacaoId: "", roleId: "", ativo: true, ambitos: {} });
 
-/** Os valores com que o formulário abre: um convite em branco (Convidado, uma linha de vínculo) ou os do utilizador. */
-export function valoresIniciaisUtilizador(u?: Utilizador): ValoresFormUtilizador {
-  if (!u) {
-    return { nome: "", email: "", telefone: "", morada: "", posicao: "", palavraPasse: "", estado: "convidado", vinculos: [vinculoVazio()] };
-  }
-  return {
-    nome: u.nome, email: u.email, telefone: u.telefone ?? "", morada: u.morada ?? "", posicao: u.posicao ?? "", palavraPasse: "",
-    estado: estadoDe(u), vinculos: u.vinculos.map((v) => ({ ...v, ambitos: { ...v.ambitos } })),
-  };
-}
+const copiar = (v: Vinculo): Vinculo => ({ ...v, ambitos: { ...v.ambitos } });
 
-/** O que se guarda: tudo menos a palavra-passe. */
-export function paraDados(v: ValoresFormUtilizador): DadosUtilizador {
+/** Os valores com que o formulário abre: um utilizador novo em branco (uma linha de vínculo) ou os do utilizador (só os vínculos ativos, como /users). */
+export function valoresIniciaisUtilizador(u?: Utilizador): ValoresFormUtilizador {
+  if (!u) return { nome: "", email: "", telefone: "", posicao: "", palavraPasse: "", vinculos: [vinculoVazio()] };
   return {
-    nome: v.nome, email: v.email, telefone: v.telefone, morada: v.morada, posicao: v.posicao, estado: v.estado,
-    vinculos: v.vinculos.map((x) => ({ ...x, ambitos: { ...x.ambitos } })),
+    nome: u.nome, email: u.email, telefone: u.telefone ?? "", posicao: u.posicao ?? "", palavraPasse: "",
+    vinculos: u.vinculos.filter((v) => v.ativo).map(copiar),
   };
 }
 
 /** O utilizador tal como ficaria, só com os vínculos completos: serve a aba Permissões (efetivas e origem). */
 export function utilizadorDeValores(v: ValoresFormUtilizador, id: string): Utilizador {
   return {
-    id, nome: v.nome, email: v.email, ativo: v.estado !== "inativo", convidado: v.estado === "convidado", ultimoAcesso: null,
+    id, nome: v.nome, email: v.email, ativo: true, ultimoAcesso: null,
     vinculos: v.vinculos.filter((x) => x.organizacaoId && x.roleId), atividade: [],
   };
 }

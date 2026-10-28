@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Pencil, Trash2, X } from "lucide-react";
+import { Copy, Pencil, RotateCcw, Trash2, X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -10,32 +10,45 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { AvatarPessoa } from "@/components/pessoas/AvatarPessoa";
 import { ConfirmarAcao } from "./ConfirmarAcao";
 import { FichaLateral } from "./FichaLateral";
-import { EDITOR_EXEMPLO, PERMISSOES } from "./catalogoExemplo";
-import { contarPermissoesPorRole, permissoesVisiveis, podeEliminarRole } from "./logica";
+import { contarPermissoesPorRole } from "./logica";
 import { SimNao } from "./AbaRoles";
 import { Linha } from "./SeparadoresSimples";
 import { MatrizPermissoes } from "./MatrizPermissoes";
-import { eliminarRole } from "./perfisStore";
 import { TagEstado } from "./pecas";
-import type { Role, Utilizador } from "./tipos";
+import type { Permissao, ResultadoMutacao, Role, Utilizador } from "./tipos";
 
 type AbaRole = "resumo" | "permissoes" | "utilizadores";
+
+/** O que quem está ligado pode fazer a esta role (decidido pelos hooks de autorização, com as regras de Roles.tsx). */
+export interface PermissoesDaRole {
+  criar: boolean;
+  eliminar: (r: Role) => boolean;
+  restaurar: (r: Role) => boolean;
+}
 
 interface FichaRoleProps {
   role: Role | null;
   aberto: boolean;
+  /** As permissões que quem edita pode ver (da base). */
+  visiveis: Permissao[];
   /** Os utilizadores que têm a role (já calculado pela página). */
   utilizadores: Utilizador[];
+  /** Quantos utilizadores ativos tem a role, lido da base; `null` se não foi possível (então não se elimina). */
+  utilizadoresNaBase: number | null;
+  autorizado: PermissoesDaRole;
   aoFechar: () => void;
   aoAbrirUtilizador: (id: string) => void;
   aoFiltrarUtilizadores: (roleId: string) => void;
-  /** Abre o formulário de edição (uma role de sistema abre só para ver). */
+  /** Abre o formulário de edição (uma role de sistema, ou sem permissão, abre só para ver). */
   aoEditar: (roleId: string) => void;
   /** Abre o formulário com os dados desta role e "(cópia)" no nome. */
   aoDuplicar: (roleId: string) => void;
+  /** Elimina (soft delete) na base; devolve o erro real se falhar. */
+  aoEliminar: (role: Role) => Promise<ResultadoMutacao>;
+  aoRestaurar: (role: Role) => Promise<ResultadoMutacao>;
 }
 
-function SeparadorUtilizadores({ role, utilizadores, aoAbrirUtilizador, aoFiltrarUtilizadores }: Omit<InteriorProps, "aoFechar">) {
+function SeparadorUtilizadores({ role, utilizadores, aoAbrirUtilizador, aoFiltrarUtilizadores }: Pick<InteriorProps, "role" | "utilizadores" | "aoAbrirUtilizador" | "aoFiltrarUtilizadores">) {
   const { t } = useTranslation();
   if (utilizadores.length === 0) return <p role="status" className="text-sm text-muted-foreground">{t("usersProfiles.roles.noUsers")}</p>;
   return (
@@ -63,21 +76,62 @@ function SeparadorUtilizadores({ role, utilizadores, aoAbrirUtilizador, aoFiltra
 
 type InteriorProps = Omit<FichaRoleProps, "role" | "aberto"> & { role: Role };
 
+function Acoes({ p, aOcupar, aoPedirEliminar, aoRestaurar }: { p: InteriorProps; aOcupar: boolean; aoPedirEliminar: () => void; aoRestaurar: () => void }) {
+  const { t } = useTranslation();
+  const { role, autorizado } = p;
+  if (role.eliminada) {
+    return autorizado.restaurar(role) ? (
+      <Button type="button" variant="outline" className="min-h-11" disabled={aOcupar} onClick={aoRestaurar}>
+        <RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />
+        {t("usersProfiles.roles.restore")}
+      </Button>
+    ) : null;
+  }
+  const eliminavel = autorizado.eliminar(role);
+  const bloqueadoPorUso = p.utilizadoresNaBase === null || p.utilizadoresNaBase > 0;
+  return (
+    <>
+      <Button type="button" variant="outline" className="min-h-11" onClick={() => p.aoEditar(role.id)}>
+        <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
+        {t("usersProfiles.actions.edit")}
+      </Button>
+      {autorizado.criar && (
+        <Button type="button" variant="outline" className="min-h-11" onClick={() => p.aoDuplicar(role.id)}>
+          <Copy className="mr-1.5 h-4 w-4" aria-hidden="true" />
+          {t("usersProfiles.actions.duplicate")}
+        </Button>
+      )}
+      {(role.sistema || eliminavel) && (
+        <Button type="button" variant="outline" className="min-h-11" disabled={!eliminavel || bloqueadoPorUso || aOcupar} onClick={aoPedirEliminar}>
+          <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
+          {t("usersProfiles.actions.delete")}
+        </Button>
+      )}
+    </>
+  );
+}
+
 function Interior(p: InteriorProps) {
   const { t } = useTranslation();
   const [aba, setAba] = useState<AbaRole>("resumo");
-  const { role } = p;
-  const eliminavel = podeEliminarRole(role);
-  const nPermissoes = contarPermissoesPorRole([role], permissoesVisiveis(PERMISSOES, EDITOR_EXEMPLO))[role.id];
   const [confirmar, setConfirmar] = useState(false);
-  // Uma role com utilizadores não se elimina: a ficha diz porquê em vez de deixar o botão sem explicação.
-  const emUso = p.utilizadores.length > 0;
-  const eliminar = () => {
-    setConfirmar(false);
-    if (!eliminarRole(role.id)) return;
-    toast.success(t("usersProfiles.roles.deleteConfirm.done", { name: role.nome }));
+  const [aOcupar, setAOcupar] = useState(false);
+  const { role } = p;
+  const nPermissoes = contarPermissoesPorRole([role], p.visiveis)[role.id];
+  const nUtilizadores = p.utilizadoresNaBase ?? p.utilizadores.length;
+  const eliminavel = p.autorizado.eliminar(role);
+
+  const correr = async (acao: () => Promise<ResultadoMutacao>, aviso: string) => {
+    setAOcupar(true);
+    const r = await acao();
+    setAOcupar(false);
+    if (!r.ok) { toast.error(r.erro); return; }
+    toast.success(aviso);
     p.aoFechar();
   };
+  const eliminar = () => { setConfirmar(false); void correr(() => p.aoEliminar(role), t("usersProfiles.roles.deleteConfirm.done", { name: role.nome })); };
+  const restaurar = () => void correr(() => p.aoRestaurar(role), t("usersProfiles.roles.restore.done", { name: role.nome }));
+
   return (
     <>
       <SheetHeader className="flex-row flex-wrap items-start gap-x-3 gap-y-2 space-y-0 p-6 pb-4 text-left">
@@ -85,6 +139,7 @@ function Interior(p: InteriorProps) {
           <SheetTitle tabIndex={-1} className="text-xl outline-none">{role.nome}</SheetTitle>
           <SheetDescription className="text-[15px]">
             {role.sistema ? t("usersProfiles.roles.system") : t("usersProfiles.roles.custom")} · {role.codigo}
+            {role.eliminada && ` · ${t("usersProfiles.roles.deletedTag")}`}
           </SheetDescription>
         </div>
         <SheetClose asChild>
@@ -95,21 +150,11 @@ function Interior(p: InteriorProps) {
       </SheetHeader>
       <div className="space-y-2 px-6 pb-3">
         <div role="group" aria-label={t("usersProfiles.actions.label")} className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => p.aoEditar(role.id)}>
-            <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
-            {t("usersProfiles.actions.edit")}
-          </Button>
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => p.aoDuplicar(role.id)}>
-            <Copy className="mr-1.5 h-4 w-4" aria-hidden="true" />
-            {t("usersProfiles.actions.duplicate")}
-          </Button>
-          <Button type="button" variant="outline" className="min-h-11" disabled={!eliminavel || emUso} onClick={() => setConfirmar(true)}>
-            <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
-            {t("usersProfiles.actions.delete")}
-          </Button>
+          <Acoes p={p} aOcupar={aOcupar} aoPedirEliminar={() => setConfirmar(true)} aoRestaurar={restaurar} />
         </div>
-        {!eliminavel && <p className="text-sm text-muted-foreground">{t("usersProfiles.roles.systemNote")}</p>}
-        {eliminavel && emUso && <p className="text-sm text-muted-foreground">{t("usersProfiles.roles.inUseNote")}</p>}
+        {!role.eliminada && role.sistema && <p className="text-sm text-muted-foreground">{t("usersProfiles.roles.systemNote")}</p>}
+        {!role.eliminada && eliminavel && p.utilizadoresNaBase === null && <p role="alert" className="text-sm text-destructive">{t("usersProfiles.roles.countUnavailable")}</p>}
+        {!role.eliminada && eliminavel && (p.utilizadoresNaBase ?? 0) > 0 && <p className="text-sm text-muted-foreground">{t("usersProfiles.roles.inUseNote")}</p>}
         <ConfirmarAcao
           aberto={confirmar} titulo={t("usersProfiles.roles.deleteConfirm.title", { name: role.nome })}
           texto={t("usersProfiles.roles.deleteConfirm.text")} confirmar={t("usersProfiles.roles.deleteConfirm.yes")}
@@ -120,7 +165,7 @@ function Interior(p: InteriorProps) {
         <ListaAbas aria-label={t("usersProfiles.sheet.tabs")} className="px-6">
           <Aba value="resumo" rotulo={t("usersProfiles.sheet.summary")} />
           <Aba value="permissoes" rotulo={t("usersProfiles.sheet.permissions")} contador={nPermissoes} />
-          <Aba value="utilizadores" rotulo={t("usersProfiles.sheet.users")} contador={p.utilizadores.length} />
+          <Aba value="utilizadores" rotulo={t("usersProfiles.sheet.users")} contador={nUtilizadores} />
         </ListaAbas>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
           <TabsContent value="resumo" className="mt-0">
@@ -128,11 +173,11 @@ function Interior(p: InteriorProps) {
               <Linha rotulo={t("usersProfiles.roles.col.code")}><span className="font-mono text-xs">{role.codigo}</span></Linha>
               <Linha rotulo={t("usersProfiles.roles.description")}>{role.descricao}</Linha>
               <Linha rotulo={t("usersProfiles.roles.col.signs")}><SimNao sim={role.podeAssinar} /></Linha>
-              <Linha rotulo={t("usersProfiles.roles.col.users")}>{p.utilizadores.length}</Linha>
+              <Linha rotulo={t("usersProfiles.roles.col.users")}>{nUtilizadores}</Linha>
               <Linha rotulo={t("usersProfiles.roles.col.permissions")}>{nPermissoes}</Linha>
             </dl>
           </TabsContent>
-          <TabsContent value="permissoes" className="mt-0"><MatrizPermissoes role={role} /></TabsContent>
+          <TabsContent value="permissoes" className="mt-0"><MatrizPermissoes role={role} visiveis={p.visiveis} /></TabsContent>
           <TabsContent value="utilizadores" className="mt-0"><SeparadorUtilizadores {...p} /></TabsContent>
         </div>
       </Tabs>

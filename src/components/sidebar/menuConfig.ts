@@ -452,7 +452,7 @@ export const menuSections: MenuSection[] = [
     permissions: ["users.view", "roles.view"],
     items: [
       // Um só ecrã com Utilizadores e Roles em separadores; cada separador pede a sua permissão (users.view, roles.view).
-      // /users e /roles continuam a existir como redireccionamento para o separador certo.
+      // /users e /roles continuam a existir como rotas das páginas antigas, sem redireccionamento, mas já não têm item no menu.
       { to: "/utilizadores-perfis", icon: UserCog, labelKey: "sidebar.usersProfiles", permissions: ["users.view", "roles.view"] },
       { to: "/export-audit", icon: FileDown, labelKey: "sidebar.exportAudit", permission: "exports.audit.view" },
     ],

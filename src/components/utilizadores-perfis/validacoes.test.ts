@@ -80,7 +80,7 @@ describe("validarUtilizador", () => {
     expect(validarUtilizador({ ...BOM, email: "rui.pacheco@exemplo.pt" }, UTILIZADORES_EXEMPLO, { criar: false, idAtual: "u-02" }).email).toBeUndefined();
   });
 
-  it("a palavra-passe tem de ter entre 8 e 72 caracteres quando é dada", () => {
+  it("a palavra-passe tem de ter entre 6 e 72 caracteres quando é dada", () => {
     expect(validarUtilizador({ ...BOM, palavraPasse: "curta" }, [], ao).palavraPasse).toBe("short");
     expect(validarUtilizador({ ...BOM, palavraPasse: "p".repeat(73) }, [], ao).palavraPasse).toBe("long");
     expect(validarUtilizador({ ...BOM, palavraPasse: "p".repeat(72) }, [], ao).palavraPasse).toBeUndefined();
