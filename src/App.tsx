@@ -8,6 +8,7 @@ import { CompanyProvider } from "@/contexts/CompanyContext";
 import { PortalCompanyProvider } from "@/contexts/PortalCompanyContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { SidebarExpandProvider } from "@/contexts/SidebarContext";
+import { FornecedorFonteDenunciasReal } from "@/components/canal-denuncias/hooks/FonteDenunciasReal";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { PessoasRota } from "@/components/pessoas-lista/PessoasRota";
@@ -225,6 +226,9 @@ const App = () => (
           <SidebarExpandProvider>
             <CompanyProvider>
               <PermissionsProvider>
+              {/* Canal de denúncias: a fonte REAL (RPCs e Edge) por baixo de tudo, menu incluído. Sem ela os ecrãs do canal
+                  usariam a loja de exemplo: nunca se monta o canal real sem este fornecedor (ver FonteDenunciasReal.tsx). */}
+              <FornecedorFonteDenunciasReal>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   {/* Public routes */}
@@ -497,6 +501,7 @@ const App = () => (
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
+              </FornecedorFonteDenunciasReal>
               </PermissionsProvider>
             </CompanyProvider>
           </SidebarExpandProvider>

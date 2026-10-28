@@ -3,20 +3,22 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { EstadoChip, OrigemChip, PrazoTexto } from "../comum/Etiquetas";
-import { nomeDoResponsavel } from "../dados/exemplo";
 import { prazoAtual } from "../lib/prazos";
-import type { Denuncia } from "../lib/tipos";
+import type { Denuncia, Responsavel } from "../lib/tipos";
 
 interface ListaDenunciasProps {
   denuncias: readonly Denuncia[];
   hoje: string;
+  /** Para escrever o nome do responsável de cada linha (a lista do canal). */
+  responsaveis: readonly Responsavel[];
   onAbrir: (id: string) => void;
 }
 
 const COLUNAS = ["codigo", "tipo", "resumo", "origem", "estado", "prazo", "responsavel"] as const;
 
-export function ListaDenuncias({ denuncias, hoje, onAbrir }: ListaDenunciasProps) {
+export function ListaDenuncias({ denuncias, hoje, responsaveis, onAbrir }: ListaDenunciasProps) {
   const { t } = useTranslation();
+  const nomeDoResponsavel = (id: string | null): string | null => responsaveis.find((r) => r.id === id)?.nome ?? null;
   if (denuncias.length === 0) {
     return <p role="status" className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">{t("cd.lista.vazia")}</p>;
   }

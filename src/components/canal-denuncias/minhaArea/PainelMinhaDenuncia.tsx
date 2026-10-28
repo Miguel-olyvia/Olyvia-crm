@@ -3,7 +3,8 @@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useTranslation } from "@/hooks/useTranslation";
 import { VistaAcompanhamento } from "../acompanhar/VistaAcompanhamento";
-import { useDenuncia } from "../dados/loja";
+import { AvisoLeitura } from "../comum/AvisoLeitura";
+import { useFonte } from "../dados/fonte";
 
 interface PainelMinhaDenunciaProps {
   id: string | null;
@@ -12,11 +13,12 @@ interface PainelMinhaDenunciaProps {
 
 export function PainelMinhaDenuncia({ id, onFechar }: PainelMinhaDenunciaProps) {
   const { t } = useTranslation();
-  const d = useDenuncia(id);
+  const leitura = useFonte().useDenuncia(id, "denunciante");
+  const d = leitura.dados;
   return (
-    <Sheet open={d !== undefined} onOpenChange={(aberto) => !aberto && onFechar()}>
+    <Sheet open={id !== null} onOpenChange={(aberto) => !aberto && onFechar()}>
       <SheetContent className="w-full space-y-4 overflow-y-auto sm:w-1/2 sm:max-w-none">
-        {d && (
+        {d ? (
           <>
             <SheetHeader className="space-y-1 text-left">
               <SheetTitle className="font-mono">{d.codigo}</SheetTitle>
@@ -24,6 +26,16 @@ export function PainelMinhaDenuncia({ id, onFechar }: PainelMinhaDenunciaProps) 
             </SheetHeader>
             <p role="note" className="text-xs text-muted-foreground">{t("cdm.identificadas.painelNota")}</p>
             <VistaAcompanhamento key={d.id} id={d.id} semCabecalho />
+          </>
+        ) : (
+          <>
+            <SheetHeader className="text-left">
+              <SheetTitle className="sr-only">{t("cdm.minhas.titulo")}</SheetTitle>
+              <SheetDescription className="sr-only">{t("cd.leitura.carregando")}</SheetDescription>
+            </SheetHeader>
+            {leitura.estado === "ok"
+              ? <p role="status" className="text-sm text-muted-foreground">{t("cd.leitura.naoEncontrada")}</p>
+              : <AvisoLeitura estado={leitura.estado} onTentar={leitura.recarregar} />}
           </>
         )}
       </SheetContent>

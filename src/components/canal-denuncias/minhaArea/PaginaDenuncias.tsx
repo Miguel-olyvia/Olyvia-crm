@@ -9,8 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CabecalhoPagina } from "../comum/CabecalhoPagina";
-import { useDenunciasDaOrganizacao } from "../dados/loja";
-import { denunciasDaPessoa } from "../lib/organizacao";
+import { useFonte } from "../dados/fonte";
 import type { PessoaLigada } from "../lib/pessoaLigada";
 import { AbaAnonimas } from "./AbaAnonimas";
 import { AbaIdentificadas } from "./AbaIdentificadas";
@@ -30,8 +29,8 @@ export function PaginaDenuncias({ organizacaoId, organizacaoNome, pessoa }: Pagi
   const [params, setParams] = useSearchParams();
   const [painelAberto, setPainelAberto] = useState(params.get("nova") === "1");
   const botao = useRef<HTMLButtonElement>(null);
-  const daOrganizacao = useDenunciasDaOrganizacao(organizacaoId);
-  const minhas = denunciasDaPessoa(daOrganizacao, organizacaoId, pessoa.id);
+  const leitura = useFonte().useMinhas(organizacaoId, pessoa.id);
+  const minhas = leitura.dados;
   const aba: AbaDenuncias = ABAS.find((a) => a === params.get("aba")) ?? "identificadas";
 
   const mudarAba = (v: string): void => setParams({ aba: v }, { replace: true });
@@ -61,10 +60,10 @@ export function PaginaDenuncias({ organizacaoId, organizacaoNome, pessoa }: Pagi
       />
       <Tabs value={aba} onValueChange={mudarAba} className="max-w-3xl space-y-4">
         <ListaAbas aria-label={t("cdm.minhas.abas")}>
-          <Aba value="identificadas" rotulo={t("cdm.minhas.identificadas")} contador={minhas.length} />
+          <Aba value="identificadas" rotulo={t("cdm.minhas.identificadas")} contador={leitura.estado === "ok" ? minhas.length : undefined} />
           <Aba value="anonimas" rotulo={t("cdm.minhas.anonimas")} />
         </ListaAbas>
-        <TabsContent value="identificadas" className="mt-0"><AbaIdentificadas denuncias={minhas} onNova={abrirPainel} /></TabsContent>
+        <TabsContent value="identificadas" className="mt-0"><AbaIdentificadas denuncias={minhas} estado={leitura.estado} onTentar={leitura.recarregar} onNova={abrirPainel} /></TabsContent>
         <TabsContent value="anonimas" className="mt-0"><AbaAnonimas organizacaoId={organizacaoId} /></TabsContent>
       </Tabs>
       <PainelNovaDenuncia

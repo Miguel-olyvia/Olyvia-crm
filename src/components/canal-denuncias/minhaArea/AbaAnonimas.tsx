@@ -5,10 +5,11 @@ import { EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
+import { AvisoLeitura } from "../comum/AvisoLeitura";
 import { FormularioAcesso } from "../acompanhar/FormularioAcesso";
 import { VistaAcompanhamento } from "../acompanhar/VistaAcompanhamento";
 import { guardarCodigo, useCodigosGuardados } from "../dados/codigosGuardados";
-import { useDenuncia } from "../dados/loja";
+import { useFonte } from "../dados/fonte";
 
 function CodigosGuardados({ codigos, onUsar }: { codigos: readonly string[]; onUsar: (codigo: string) => void }) {
   const { t } = useTranslation();
@@ -42,9 +43,13 @@ function CodigosGuardados({ codigos, onUsar }: { codigos: readonly string[]; onU
 
 function Aberta({ id, onSair }: { id: string; onSair: () => void }) {
   const { t } = useTranslation();
-  const d = useDenuncia(id);
+  const leitura = useFonte().useDenuncia(id, "denunciante");
+  const d = leitura.dados;
   const guardados = useCodigosGuardados();
-  if (!d) return null;
+  if (!d) {
+    if (leitura.estado === "ok") return <p role="status" className="text-sm text-muted-foreground">{t("cd.acomp.sessaoAcabou")}</p>;
+    return <AvisoLeitura estado={leitura.estado} onTentar={leitura.recarregar} />;
+  }
   const jaGuardado = guardados.includes(d.codigo);
   return (
     <div className="space-y-3">
@@ -64,6 +69,7 @@ export function AbaAnonimas({ organizacaoId }: { organizacaoId: string }) {
   const [aberta, setAberta] = useState<string | null>(null);
   const [codigo, setCodigo] = useState("");
   const guardados = useCodigosGuardados();
+  const fonte = useFonte();
   return (
     <div className="space-y-4">
       <div role="note" className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3 text-sm">
@@ -73,7 +79,7 @@ export function AbaAnonimas({ organizacaoId }: { organizacaoId: string }) {
       {aberta === null ? (
         <FormularioAcesso key={codigo} organizacaoId={organizacaoId} codigoInicial={codigo} onAcesso={setAberta} />
       ) : (
-        <Aberta id={aberta} onSair={() => { setAberta(null); setCodigo(""); }} />
+        <Aberta id={aberta} onSair={() => { fonte.sair(aberta); setAberta(null); setCodigo(""); }} />
       )}
       {aberta === null && <CodigosGuardados codigos={guardados} onUsar={setCodigo} />}
     </div>

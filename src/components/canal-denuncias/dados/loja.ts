@@ -3,7 +3,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import {
   adicionarNota, alterarGravidade, arquivar, atribuirResponsavel, concluir, confirmarRececao, declararConflito,
-  enviarMensagem, pedirInformacao, reabrir, responderDenunciante,
+  enviarMensagem, marcarVisado, pedirInformacao, reabrir, responderDenunciante,
   type ContextoAcao, type DadosDecisao, type ResultadoAcao,
 } from "../lib/acoes";
 import { registarVerIdentidade } from "../lib/anonimizacao";
@@ -112,6 +112,11 @@ export function atribuirA(id: string, responsavelId: string): ResultadoAcao {
 export function declararConflitoDe(id: string, responsavelId: string): ResultadoAcao {
   const r = responsavelPorId(responsavelId);
   return r ? atualizar(id, (d) => declararConflito(d, r, contexto(eu()))) : { ok: false, erro: "transicao_invalida" };
+}
+
+export function marcarVisadoDe(id: string, responsavelId: string): ResultadoAcao {
+  const r = responsavelPorId(responsavelId);
+  return r ? atualizar(id, (d) => marcarVisado(d, r, contexto(eu()))) : { ok: false, erro: "transicao_invalida" };
 }
 
 export const enviarMensagemA = (id: string, texto: string): ResultadoAcao =>

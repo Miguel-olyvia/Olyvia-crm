@@ -29,9 +29,15 @@ const dinamicas = [
   ...["desconhecida", "protegida", "revelada"].map((i) => `cd.identidade.${i}`),
   ...["codigo", "tipo", "resumo", "origem", "estado", "prazo", "responsavel"].map((c) => `cd.coluna.${c}`),
   ...["denunciado", "conflito"].map((m) => `cd.conflito.${m}`),
-  ...["transicao_invalida", "denunciado", "conflito", "texto_vazio", "motivo_curto", "resultado_em_falta", "fundamentacao_em_falta", "fechada"].map((e) => `cd.erroAcao.${e}`),
+  ...["transicao_invalida", "denunciado", "conflito", "texto_vazio", "motivo_curto", "resultado_em_falta", "fundamentacao_em_falta", "fechada",
+    // os da base real (HRD09..HRD20) e os do cliente: têm de ter texto, porque a base devolve-os e o ecrã di-los
+    "nao_encontrada", "confirmar_primeiro", "anonima", "motivo_identidade", "limite_anexos", "nao_e_responsavel", "impedimento_invalido",
+    "so_responsavel", "sem_permissao", "slug_em_uso", "canal_inativo", "anonima_imutavel", "indisponivel", "sessao_expirada",
+    // os da Edge pública (demasiadas_tentativas e pedido_invalido)
+    "limite", "pedido_invalido"].map((e) => `cd.erroAcao.${e}`),
   ...["recebida", "rececao_confirmada", "responsavel_atribuido", "conflito_declarado", "mensagem_enviada", "informacao_pedida",
-    "denunciante_respondeu", "gravidade_alterada", "nota_adicionada", "concluida", "arquivada", "reaberta", "identidade_vista"].map((a) => `cd.hist.${a}`),
+    "denunciante_respondeu", "gravidade_alterada", "nota_adicionada", "concluida", "arquivada", "reaberta", "identidade_vista",
+    "responsavel_libertado", "visado_registado", "exportada", "anexo_aberto"].map((a) => `cd.hist.${a}`),
 ];
 
 describe("traduções do canal de denúncias", () => {

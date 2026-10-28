@@ -17,7 +17,26 @@ export type ErroAcao =
   | "motivo_curto"
   | "resultado_em_falta"
   | "fundamentacao_em_falta"
-  | "fechada";
+  | "fechada"
+  // Códigos que só existem com a base real (HRD09..HRD20 do desenho) e dois do cliente: a base ou a Edge não responderam
+  // («indisponivel») e a sessão de acompanhamento acabou («sessao_expirada»).
+  | "nao_encontrada"
+  | "confirmar_primeiro"
+  | "anonima"
+  | "motivo_identidade"
+  | "limite_anexos"
+  | "nao_e_responsavel"
+  | "impedimento_invalido"
+  | "so_responsavel"
+  | "sem_permissao"
+  | "slug_em_uso"
+  | "canal_inativo"
+  | "anonima_imutavel"
+  | "indisponivel"
+  | "sessao_expirada"
+  // Da Edge pública: demasiados pedidos («demasiadas_tentativas») e um pedido que ela recusou («pedido_invalido»).
+  | "limite"
+  | "pedido_invalido";
 
 export type ResultadoAcao = { ok: true; denuncia: Denuncia } | { ok: false; erro: ErroAcao };
 
@@ -128,4 +147,11 @@ export function arquivar(d: Denuncia, motivo: string, c: ContextoAcao): Resultad
 export function reabrir(d: Denuncia, c: ContextoAcao): ResultadoAcao {
   const retoma = { decisao: null, motivoArquivo: null, confirmadaEm: d.confirmadaEm ?? c.hoje };
   return mudarEstado(d, "em_analise", retoma, c, "reaberta");
+}
+
+/** Marca alguém como visado pela denúncia: deixa de poder ficar com o caso (e, se o tinha, o caso fica sem responsável). */
+export function marcarVisado(d: Denuncia, r: Responsavel, c: ContextoAcao): ResultadoAcao {
+  if (d.denunciados.includes(r.id)) return ok(d);
+  const libertar = d.responsavelId === r.id ? { responsavelId: null } : {};
+  return ok(comEvento({ ...d, ...libertar, denunciados: [...d.denunciados, r.id] }, c, "visado_registado", r.nome));
 }

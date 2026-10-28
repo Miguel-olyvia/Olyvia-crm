@@ -1,6 +1,6 @@
 // O painel lateral «Nova denúncia»: o MESMO assistente do formulário público, montado dentro de um Sheet de metade do ecrã
 // (em estreito, largura total). Cabeçalho com migalhas, corpo que rola e rodapé fixo (Cancelar e o botão do passo).
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -21,12 +21,20 @@ interface PainelNovaDenunciaProps {
 export function PainelNovaDenuncia({ aberto, onFechar, onAcompanhar, organizacaoId, pessoa, devolverFoco }: PainelNovaDenunciaProps) {
   const { t } = useTranslation();
   const conteudo = useRef<HTMLDivElement>(null);
+  // Enquanto o envio está pendente, e numa anónima enviada até a pessoa confirmar que guardou o código e o PIN, o painel
+  // não se fecha (Esc, clique fora, X): fechar desmontava o formulário e o código e o PIN perdiam-se sem rasto.
+  const [bloqueado, setBloqueado] = useState(false);
+  const travar = (e: Event): void => {
+    if (bloqueado) e.preventDefault();
+  };
   return (
-    <Sheet open={aberto} onOpenChange={(a) => !a && onFechar()}>
+    <Sheet open={aberto} onOpenChange={(a) => { if (!a && !bloqueado) onFechar(); }}>
       <SheetContent
         ref={conteudo}
         onOpenAutoFocus={(e) => { e.preventDefault(); conteudo.current?.querySelector<HTMLElement>("form h2")?.focus(); }}
         onCloseAutoFocus={(e) => { e.preventDefault(); devolverFoco(); }}
+        onEscapeKeyDown={travar}
+        onInteractOutside={travar}
         className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[560px] sm:max-w-none motion-reduce:!animate-none motion-reduce:!duration-0"
       >
         <SheetHeader className="space-y-2 border-b border-border p-6 pr-14 text-left">
@@ -40,7 +48,11 @@ export function PainelNovaDenuncia({ aberto, onFechar, onAcompanhar, organizacao
           <SheetTitle className="text-lg">{t("cdm.denunciar.botao")}</SheetTitle>
           <SheetDescription>{t("cdm.denunciar.subtitulo")}</SheetDescription>
         </SheetHeader>
-        <FormularioDenuncia organizacaoId={organizacaoId} pessoa={pessoa} painel={{ onCancelar: onFechar, onAcompanhar }} />
+        <FormularioDenuncia
+          organizacaoId={organizacaoId}
+          pessoa={pessoa}
+          painel={{ onCancelar: onFechar, onAcompanhar, onBloquear: setBloqueado }}
+        />
       </SheetContent>
     </Sheet>
   );

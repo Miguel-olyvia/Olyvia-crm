@@ -7,13 +7,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useTranslation } from "@/hooks/useTranslation";
-import { RESPONSAVEIS } from "../dados/exemplo";
 import { SEM_FILTROS, SEM_RESPONSAVEL, TODOS, haFiltros, type FiltrosGestao } from "../lib/filtros";
-import { ESTADOS, TIPOS } from "../lib/tipos";
+import { ESTADOS, TIPOS, type Responsavel } from "../lib/tipos";
 
 interface BarraFiltrosProps {
   filtros: FiltrosGestao;
   onChange: (f: FiltrosGestao) => void;
+  /** Quem se pode escolher no filtro «Responsável» (a lista do canal). */
+  responsaveis: readonly Responsavel[];
 }
 
 interface SeletorProps {
@@ -33,7 +34,7 @@ function Seletor({ id, rotulo, valor, opcoes, onValor }: SeletorProps) {
   );
 }
 
-export function BarraFiltros({ filtros, onChange }: BarraFiltrosProps) {
+export function BarraFiltros({ filtros, onChange, responsaveis }: BarraFiltrosProps) {
   const { t } = useTranslation();
   const mudar = (parcial: Partial<FiltrosGestao>): void => onChange({ ...filtros, ...parcial });
   const todos = (chave: string) => ({ value: TODOS, label: t(chave) });
@@ -51,7 +52,7 @@ export function BarraFiltros({ filtros, onChange }: BarraFiltrosProps) {
         opcoes={[todos("cd.filtros.todosTipos"), ...TIPOS.map((v) => ({ value: v, label: t(`cd.tipo.${v}`) }))]}
         onValor={(v) => mudar({ tipo: v as FiltrosGestao["tipo"] })} />
       <Seletor id="den-f-resp" rotulo={t("cd.filtros.responsavel")} valor={filtros.responsavel}
-        opcoes={[todos("cd.filtros.todosResponsaveis"), { value: SEM_RESPONSAVEL, label: t("cd.semResponsavel") }, ...RESPONSAVEIS.map((r) => ({ value: r.id, label: r.nome }))]}
+        opcoes={[todos("cd.filtros.todosResponsaveis"), { value: SEM_RESPONSAVEL, label: t("cd.semResponsavel") }, ...responsaveis.map((r) => ({ value: r.id, label: r.nome }))]}
         onValor={(v) => mudar({ responsavel: v })} />
       <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
         <Checkbox checked={filtros.soPrazo} onCheckedChange={(v) => mudar({ soPrazo: v === true })} />

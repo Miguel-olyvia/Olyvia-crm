@@ -21,8 +21,15 @@ export function lerRascunho(chave: string = CHAVE_PUBLICA): Rascunho | null {
   return guardado && (guardado.chave ?? CHAVE_PUBLICA) === chave ? guardado : null;
 }
 
+/**
+ * Guarda o rascunho SEM o modo (anónima ou identificada) nem a identidade (nome, email, telefone, contacto): o rascunho nunca
+ * leva quem é a pessoa, nem sequer em memória (desenho do canal, 6.3). Ao voltar, o passo 0 pergunta outra vez.
+ */
 export function guardarRascunho(r: Rascunho): void {
-  guardado = r;
+  guardado = {
+    ...r,
+    dados: { ...r.dados, anonima: null, nome: "", email: "", telefone: "", podemContactar: false, soResponsavel: true },
+  };
 }
 
 export function limparRascunho(): void {

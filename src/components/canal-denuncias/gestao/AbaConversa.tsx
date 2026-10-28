@@ -5,19 +5,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Campo } from "../comum/Campo";
 import { ListaMensagens } from "../comum/ListaMensagens";
-import { enviarMensagemA, pedirInformacaoEm } from "../dados/loja";
-import { erroDe } from "../lib/acoes";
+import { erroDoResultado, useExecutar } from "../comum/useExecutar";
+import { useFonte } from "../dados/fonte";
+import type { ResultadoSimples } from "../dados/fonte";
 import { estaFechada } from "../lib/estados";
 import type { Denuncia } from "../lib/tipos";
 
 export function AbaConversa({ d }: { d: Denuncia }) {
   const { t } = useTranslation();
+  const fonte = useFonte();
+  const { pendente, executar: correr } = useExecutar();
   const [texto, setTexto] = useState("");
   const [erro, setErro] = useState<string | null>(null);
+  // Ainda não confirmada a receção, a base recusa mensagens ao denunciante (decisão D5): o botão diz porquê, em texto.
+  const semConfirmar = d.estado === "recebida" && fonte.modo === "real";
 
-  const executar = (fazer: (id: string, texto: string) => ReturnType<typeof enviarMensagemA>): void => {
-    const r = fazer(d.id, texto);
-    const e = erroDe(r);
+  const executar = async (fazer: (id: string, texto: string) => Promise<ResultadoSimples>): Promise<void> => {
+    const r = await correr(() => fazer(d.id, texto));
+    const e = erroDoResultado(r);
     setErro(e ? t(`cd.erroAcao.${e}`) : null);
     if (r.ok) setTexto("");
   };
@@ -34,8 +39,8 @@ export function AbaConversa({ d }: { d: Denuncia }) {
             {(a) => <Textarea {...a} rows={3} value={texto} onChange={(e) => { setTexto(e.target.value); setErro(null); }} />}
           </Campo>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" className="min-h-11" onClick={() => executar(enviarMensagemA)}>{t("cd.conversa.enviar")}</Button>
-            <Button type="button" variant="outline" className="min-h-11" disabled={d.estado !== "em_analise"} onClick={() => executar(pedirInformacaoEm)}>
+            <Button type="button" className="min-h-11" disabled={pendente || semConfirmar} onClick={() => executar(fonte.enviarMensagemA)}>{t("cd.conversa.enviar")}</Button>
+            <Button type="button" variant="outline" className="min-h-11" disabled={pendente || d.estado !== "em_analise"} onClick={() => executar(fonte.pedirInformacaoEm)}>
               {t("cd.conversa.pedirInfo")}
             </Button>
           </div>

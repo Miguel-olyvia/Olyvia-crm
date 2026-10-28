@@ -129,3 +129,10 @@ verify_jwt = false
 # requireServiceRoleOrCronSecret(); sem esse segredo responde 401.
 [functions.convite-admissao-limpeza]
 verify_jwt = false
+
+# Canal de denuncias publico (Lei 93/2021): a denuncia anonima abre-se sem sessao,
+# por isso sem verify_jwt. A funcao autentica-se sozinha (service_role), limita pedidos
+# na base e falha fechada sem os segredos DENUNCIAS_PIN_PEPPER e DENUNCIAS_IP_PEPPER.
+# NAO PUBLICAR antes das RPCs rpc_denuncia_publica_* existirem na base.
+[functions.denuncia-publica]
+verify_jwt = false

@@ -117,6 +117,10 @@ export type BusinessFlow =
   | "hr-convite-admissao-reenviar"
   // Pipeline e revisao do RH (V3a): a lista, a leitura da revisao e a segunda leitura (NISS/IBAN). So defeitos; o
   // Error sintetico nunca leva corpo da base nem valores sensiveis.
+  // Canal de denúncias (RPCs rpc_denuncia* e Edge denuncia-publica). O Error sintético leva só a operação e o código
+  // («denuncias:<operacao>:<codigo>»): nunca texto do caso, identidade, código de acompanhamento, PIN nem sessão. Uma regra do
+  // canal (HRDxx) ou uma recusa por permissão são respostas corretas e não vêm para aqui.
+  | "hr-denuncias"
   | "hr-admissao-pipeline"
   | "hr-admissao-revisao"
   | "hr-admissao-revisao-sensivel"

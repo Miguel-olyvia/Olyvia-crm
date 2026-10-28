@@ -5,8 +5,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
+import { AvisoLeitura } from "../comum/AvisoLeitura";
 import { EstadoChip, PrazoTexto } from "../comum/Etiquetas";
-import { HOJE_EXEMPLO, dataCurta } from "../lib/datas";
+import { useFonte, type EstadoLeitura } from "../dados/fonte";
+import { dataCurta } from "../lib/datas";
 import { prazoAtual } from "../lib/prazos";
 import type { Denuncia } from "../lib/tipos";
 import { PainelMinhaDenuncia } from "./PainelMinhaDenuncia";
@@ -24,6 +26,7 @@ function SemDenuncias({ onNova }: { onNova: () => void }) {
 
 function Cartao({ d, onAbrir }: { d: Denuncia; onAbrir: (id: string) => void }) {
   const { t } = useTranslation();
+  const hoje = useFonte().hoje();
   return (
     <li>
       <button
@@ -38,19 +41,28 @@ function Cartao({ d, onAbrir }: { d: Denuncia; onAbrir: (id: string) => void }) 
           <span className="text-xs text-muted-foreground">{t("cdm.identificadas.recebidaEm", { data: dataCurta(d.recebidaEm, true) })}</span>
         </span>
         <span className="break-words text-sm">{d.resumo}</span>
-        <span className="text-sm text-muted-foreground"><PrazoTexto prazo={prazoAtual(d, HOJE_EXEMPLO)} /></span>
+        <span className="text-sm text-muted-foreground"><PrazoTexto prazo={prazoAtual(d, hoje)} /></span>
       </button>
     </li>
   );
 }
 
-export function AbaIdentificadas({ denuncias, onNova }: { denuncias: readonly Denuncia[]; onNova: () => void }) {
+interface AbaIdentificadasProps {
+  denuncias: readonly Denuncia[];
+  estado: EstadoLeitura;
+  onTentar: () => void;
+  onNova: () => void;
+}
+
+export function AbaIdentificadas({ denuncias, estado, onTentar, onNova }: AbaIdentificadasProps) {
   const { t } = useTranslation();
   const [aberta, setAberta] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{t("cdm.identificadas.intro")}</p>
-      {denuncias.length === 0 ? (
+      {estado !== "ok" ? (
+        <AvisoLeitura estado={estado} onTentar={onTentar} />
+      ) : denuncias.length === 0 ? (
         <SemDenuncias onNova={onNova} />
       ) : (
         <ul aria-label={t("cdm.identificadas.lista")} className="space-y-2">

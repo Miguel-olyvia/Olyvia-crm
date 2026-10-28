@@ -6,8 +6,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { EstadoChip, GravidadeChip, OrigemChip } from "../comum/Etiquetas";
-import { confirmarRececaoDe, reabrirDenuncia, useDenuncia } from "../dados/loja";
-import { erroDe } from "../lib/acoes";
+import { AvisoLeitura } from "../comum/AvisoLeitura";
+import { erroDoResultado, useExecutar } from "../comum/useExecutar";
+import { useFonte } from "../dados/fonte";
 import { estaFechada } from "../lib/estados";
 import type { Denuncia } from "../lib/tipos";
 import { AbaConversa } from "./AbaConversa";
@@ -18,20 +19,21 @@ import { AbaResumo } from "./AbaResumo";
 
 function AcoesDeEstado({ d }: { d: Denuncia }) {
   const { t } = useTranslation();
+  const fonte = useFonte();
+  const { pendente, executar } = useExecutar();
   const [erro, setErro] = useState<string | null>(null);
-  const correr = (fazer: (id: string) => ReturnType<typeof confirmarRececaoDe>): void => {
-    const r = fazer(d.id);
-    const e = erroDe(r);
+  const correr = async (fazer: (id: string) => ReturnType<typeof fonte.confirmarRececaoDe>): Promise<void> => {
+    const e = erroDoResultado(await executar(() => fazer(d.id)));
     setErro(e ? t(`cd.erroAcao.${e}`) : null);
   };
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
         {d.estado === "recebida" && (
-          <Button type="button" className="min-h-11" onClick={() => correr(confirmarRececaoDe)}>{t("cd.acao.confirmarRececao")}</Button>
+          <Button type="button" className="min-h-11" disabled={pendente} onClick={() => correr(fonte.confirmarRececaoDe)}>{t("cd.acao.confirmarRececao")}</Button>
         )}
         {estaFechada(d.estado) && (
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => correr(reabrirDenuncia)}>
+          <Button type="button" variant="outline" className="min-h-11" disabled={pendente} onClick={() => correr(fonte.reabrirDenuncia)}>
             <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />{t("cd.acao.reabrir")}
           </Button>
         )}
@@ -74,11 +76,25 @@ function Conteudo({ d }: { d: Denuncia }) {
 }
 
 export function PainelDenuncia({ id, onFechar }: { id: string | null; onFechar: () => void }) {
-  const d = useDenuncia(id);
+  const { t } = useTranslation();
+  const leitura = useFonte().useDenuncia(id, "gestao");
+  const d = leitura.dados;
   return (
-    <Sheet open={d !== undefined} onOpenChange={(aberto) => !aberto && onFechar()}>
+    <Sheet open={id !== null} onOpenChange={(aberto) => !aberto && onFechar()}>
       <SheetContent className="w-full space-y-3 overflow-y-auto sm:w-1/2 sm:max-w-none">
-        {d && <Conteudo key={d.id} d={d} />}
+        {d ? (
+          <Conteudo key={d.id} d={d} />
+        ) : (
+          <>
+            <SheetHeader className="text-left">
+              <SheetTitle className="sr-only">{t("cd.abas.titulo")}</SheetTitle>
+              <SheetDescription className="sr-only">{t("cd.leitura.carregando")}</SheetDescription>
+            </SheetHeader>
+            {leitura.estado === "ok"
+              ? <p role="status" className="text-sm text-muted-foreground">{t("cd.leitura.naoEncontrada")}</p>
+              : <AvisoLeitura estado={leitura.estado} onTentar={leitura.recarregar} />}
+          </>
+        )}
       </SheetContent>
     </Sheet>
   );

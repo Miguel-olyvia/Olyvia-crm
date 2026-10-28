@@ -8,7 +8,10 @@ import { Campo } from "../comum/Campo";
 import { EstadoChip } from "../comum/Etiquetas";
 import { ListaMensagens } from "../comum/ListaMensagens";
 import { SeletorFicheiros } from "../comum/SeletorFicheiros";
-import { responderComoDenunciante, useDenuncia } from "../dados/loja";
+import { AvisoLeitura } from "../comum/AvisoLeitura";
+import { erroDoResultado, useExecutar } from "../comum/useExecutar";
+import { useFonte } from "../dados/fonte";
+import type { ErroAcao } from "../lib/acoes";
 import { dataCurta } from "../lib/datas";
 import { prazoConfirmacao, prazoResposta } from "../lib/prazos";
 import { estaFechada } from "../lib/estados";
@@ -53,26 +56,32 @@ function Resposta({ d }: { d: Denuncia }) {
   const { t } = useTranslation();
   const [texto, setTexto] = useState("");
   const [anexos, setAnexos] = useState<Anexo[]>([]);
-  const [erro, setErro] = useState(false);
+  const [erro, setErro] = useState<ErroAcao | null>(null);
+  const fonte = useFonte();
+  const { pendente, executar } = useExecutar();
 
   if (estaFechada(d.estado)) return <p className="text-sm text-muted-foreground">{t("cd.acomp.fechada")}</p>;
 
-  const enviar = (): void => {
-    const r = responderComoDenunciante(d.id, texto, anexos);
-    setErro(!r.ok);
+  const enviar = async (): Promise<void> => {
+    const r = await executar(() => fonte.responderComoDenunciante(d.id, texto, anexos));
+    setErro(erroDoResultado(r));
     if (r.ok) {
       setTexto("");
       setAnexos([]);
     }
   };
+  // O texto vazio mantém a mensagem própria do formulário; os outros erros (sessão acabada, base indisponível) dizem-se como são.
+  const mensagemErro = erro === null ? undefined : erro === "texto_vazio" ? t("cd.erro.mensagemVazia") : t(`cd.erroAcao.${erro}`);
 
   return (
     <div className="space-y-3">
-      <Campo id="acomp-resposta" rotulo={t("cd.acomp.responder")} erro={erro ? t("cd.erro.mensagemVazia") : undefined} ajuda={d.anonima ? t("cd.acomp.anonimaNota") : undefined}>
-        {(a) => <Textarea {...a} rows={4} value={texto} onChange={(e) => setTexto(e.target.value)} />}
+      <Campo id="acomp-resposta" rotulo={t("cd.acomp.responder")} erro={mensagemErro} ajuda={d.anonima ? t("cd.acomp.anonimaNota") : undefined}>
+        {(a) => <Textarea {...a} rows={4} value={texto} onChange={(e) => { setTexto(e.target.value); setErro(null); }} />}
       </Campo>
-      <SeletorFicheiros idBase="acomp-anexos" max={3} anexos={anexos} onChange={setAnexos} />
-      <Button type="button" className="min-h-11" onClick={enviar}>{t("cd.acomp.enviar")}</Button>
+      {fonte.anexosReais
+        ? <SeletorFicheiros idBase="acomp-anexos" max={3} anexos={anexos} onChange={setAnexos} />
+        : <p role="note" className="text-xs text-muted-foreground">{t("cd.provas.depois")}</p>}
+      <Button type="button" className="min-h-11" disabled={pendente} onClick={enviar}>{t("cd.acomp.enviar")}</Button>
     </div>
   );
 }
@@ -87,8 +96,12 @@ interface VistaAcompanhamentoProps {
 
 export function VistaAcompanhamento({ id, onSair, semCabecalho = false }: VistaAcompanhamentoProps) {
   const { t } = useTranslation();
-  const d = useDenuncia(id);
-  if (!d) return null;
+  const leitura = useFonte().useDenuncia(id, "denunciante");
+  const d = leitura.dados;
+  if (!d) {
+    if (leitura.estado === "ok") return <p role="status" className="text-sm text-muted-foreground">{t("cd.acomp.sessaoAcabou")}</p>;
+    return <AvisoLeitura estado={leitura.estado} onTentar={leitura.recarregar} />;
+  }
   return (
     <section aria-label={t("cd.acomp.denuncia", { codigo: d.codigo })} className="space-y-5 rounded-lg border bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">

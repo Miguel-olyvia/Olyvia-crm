@@ -101,13 +101,27 @@ describe("a pessoa ligada ao formulário dentro da app", () => {
 
   it("o rascunho de dentro da app nunca aparece no formulário público (e vice-versa)", () => {
     const daApp = chaveRascunho(ORG_ATIVA.id, pessoa);
-    guardarRascunho({ dados: { ...FORMULARIO_VAZIO, anonima: false, nome: "Sofia Rebelo" }, passo: 1, chave: daApp });
-    expect(lerRascunho(daApp)?.dados.nome).toBe("Sofia Rebelo");
+    guardarRascunho({ dados: { ...FORMULARIO_VAZIO, anonima: false, nome: "Sofia Rebelo", descricao: "Um texto a meio" }, passo: 1, chave: daApp });
+    expect(lerRascunho(daApp)?.dados.descricao).toBe("Um texto a meio");
     expect(lerRascunho(chaveRascunho(ORG_ATIVA.id))).toBeNull();
     expect(lerRascunho()).toBeNull();
     limparRascunho();
     guardarRascunho({ dados: FORMULARIO_VAZIO, passo: 0, chave: chaveRascunho(ORG_ATIVA.id) });
     expect(lerRascunho(daApp)).toBeNull();
+  });
+});
+
+describe("o rascunho nunca guarda quem é a pessoa (desenho do canal, 6.3: alterado de propósito a 28/10)", () => {
+  it("guardar remove o modo (anónima ou identificada) e a identidade, e mantém o resto do que foi escrito", () => {
+    guardarRascunho({
+      dados: { ...FORMULARIO_VAZIO, anonima: false, nome: "Sofia Rebelo", email: "sofia@exemplo.pt", telefone: "910000000", podemContactar: true, soResponsavel: false, descricao: "Texto" },
+      passo: 2,
+    });
+    expect(lerRascunho()?.dados).toMatchObject({
+      anonima: null, nome: "", email: "", telefone: "", podemContactar: false, soResponsavel: true, descricao: "Texto",
+    });
+    expect(lerRascunho()?.passo).toBe(2);
+    limparRascunho();
   });
 });
 

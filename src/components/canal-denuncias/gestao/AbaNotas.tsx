@@ -5,18 +5,22 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Campo } from "../comum/Campo";
-import { notaEm } from "../dados/loja";
+import { erroDoResultado, useExecutar } from "../comum/useExecutar";
+import { useFonte } from "../dados/fonte";
+import type { ErroAcao } from "../lib/acoes";
 import { dataHora } from "../lib/datas";
 import type { Denuncia } from "../lib/tipos";
 
 export function AbaNotas({ d }: { d: Denuncia }) {
   const { t } = useTranslation();
+  const fonte = useFonte();
+  const { pendente, executar } = useExecutar();
   const [texto, setTexto] = useState("");
-  const [erro, setErro] = useState(false);
+  const [erro, setErro] = useState<ErroAcao | null>(null);
 
-  const adicionar = (): void => {
-    const r = notaEm(d.id, texto);
-    setErro(!r.ok);
+  const adicionar = async (): Promise<void> => {
+    const r = await executar(() => fonte.notaEm(d.id, texto));
+    setErro(erroDoResultado(r));
     if (r.ok) setTexto("");
   };
 
@@ -38,10 +42,10 @@ export function AbaNotas({ d }: { d: Denuncia }) {
         </ul>
       )}
       <div className="space-y-3 border-t pt-4">
-        <Campo id="den-nota" rotulo={t("cd.notas.escrever")} erro={erro ? t("cd.erroAcao.texto_vazio") : undefined}>
-          {(a) => <Textarea {...a} rows={3} value={texto} onChange={(e) => { setTexto(e.target.value); setErro(false); }} />}
+        <Campo id="den-nota" rotulo={t("cd.notas.escrever")} erro={erro ? t(`cd.erroAcao.${erro}`) : undefined}>
+          {(a) => <Textarea {...a} rows={3} value={texto} onChange={(e) => { setTexto(e.target.value); setErro(null); }} />}
         </Campo>
-        <Button type="button" className="min-h-11" onClick={adicionar}>{t("cd.notas.adicionar")}</Button>
+        <Button type="button" className="min-h-11" disabled={pendente} onClick={adicionar}>{t("cd.notas.adicionar")}</Button>
       </div>
     </div>
   );

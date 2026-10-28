@@ -7,8 +7,9 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Campo } from "../comum/Campo";
-import { arquivarDenuncia, concluirDenuncia } from "../dados/loja";
-import { MIN_MOTIVO_ARQUIVO, erroDe, type ErroAcao } from "../lib/acoes";
+import { erroDoResultado, useExecutar } from "../comum/useExecutar";
+import { useFonte } from "../dados/fonte";
+import { MIN_MOTIVO_ARQUIVO, type ErroAcao } from "../lib/acoes";
 import { dataHora } from "../lib/datas";
 import { estaEmTratamento } from "../lib/estados";
 import { RESULTADOS, type Denuncia, type ResultadoDenuncia } from "../lib/tipos";
@@ -38,11 +39,13 @@ function FormConcluir({ d }: { d: Denuncia }) {
   const [medidas, setMedidas] = useState("");
   const [fundamentacao, setFundamentacao] = useState("");
   const [erro, setErro] = useState<ErroAcao | null>(null);
+  const fonte = useFonte();
+  const { pendente, executar } = useExecutar();
   const pode = estaEmTratamento(d.estado);
 
-  const concluir = (): void => {
-    const r = concluirDenuncia(d.id, { resultado, medidas, fundamentacao });
-    setErro(erroDe(r));
+  const concluir = async (): Promise<void> => {
+    const r = await executar(() => fonte.concluirDenuncia(d.id, { resultado, medidas, fundamentacao }));
+    setErro(erroDoResultado(r));
   };
   const msg = (k: ErroAcao) => (erro === k ? t(`cd.erroAcao.${k}`) : undefined);
 
@@ -62,8 +65,10 @@ function FormConcluir({ d }: { d: Denuncia }) {
       <Campo id="den-fundamentacao" rotulo={t("cd.decisao.fundamentacao")} obrigatorio erro={msg("fundamentacao_em_falta")}>
         {(a) => <Textarea {...a} rows={4} disabled={!pode} value={fundamentacao} onChange={(e) => setFundamentacao(e.target.value)} />}
       </Campo>
-      {erro === "transicao_invalida" && <p role="alert" className="text-sm text-destructive">{t("cd.erroAcao.transicao_invalida")}</p>}
-      <Button type="button" className="min-h-11" disabled={!pode} onClick={concluir}>{t("cd.decisao.concluir")}</Button>
+      {erro !== null && erro !== "resultado_em_falta" && erro !== "fundamentacao_em_falta" && (
+        <p role="alert" className="text-sm text-destructive">{t(`cd.erroAcao.${erro}`)}</p>
+      )}
+      <Button type="button" className="min-h-11" disabled={!pode || pendente} onClick={concluir}>{t("cd.decisao.concluir")}</Button>
     </section>
   );
 }
@@ -71,17 +76,21 @@ function FormConcluir({ d }: { d: Denuncia }) {
 function FormArquivar({ d }: { d: Denuncia }) {
   const { t } = useTranslation();
   const [motivo, setMotivo] = useState("");
-  const [erro, setErro] = useState(false);
+  const [erro, setErro] = useState<ErroAcao | null>(null);
+  const fonte = useFonte();
+  const { pendente, executar } = useExecutar();
 
-  const arquivar = (): void => setErro(!arquivarDenuncia(d.id, motivo).ok);
+  const arquivar = async (): Promise<void> => {
+    setErro(erroDoResultado(await executar(() => fonte.arquivarDenuncia(d.id, motivo))));
+  };
 
   return (
     <section aria-labelledby="den-arquivar" className="space-y-3 border-t pt-4">
       <h3 id="den-arquivar" className="text-sm font-semibold">{t("cd.decisao.arquivarTitulo")}</h3>
-      <Campo id="den-motivo" rotulo={t("cd.decisao.motivoArquivo")} ajuda={t("cd.decisao.motivoAjuda", { min: MIN_MOTIVO_ARQUIVO })} erro={erro ? t("cd.erroAcao.motivo_curto") : undefined}>
-        {(a) => <Input {...a} value={motivo} onChange={(e) => { setMotivo(e.target.value); setErro(false); }} />}
+      <Campo id="den-motivo" rotulo={t("cd.decisao.motivoArquivo")} ajuda={t("cd.decisao.motivoAjuda", { min: MIN_MOTIVO_ARQUIVO })} erro={erro ? t(`cd.erroAcao.${erro}`) : undefined}>
+        {(a) => <Input {...a} value={motivo} onChange={(e) => { setMotivo(e.target.value); setErro(null); }} />}
       </Campo>
-      <Button type="button" variant="outline" className="min-h-11" onClick={arquivar}>{t("cd.decisao.arquivar")}</Button>
+      <Button type="button" variant="outline" className="min-h-11" disabled={pendente} onClick={arquivar}>{t("cd.decisao.arquivar")}</Button>
     </section>
   );
 }
