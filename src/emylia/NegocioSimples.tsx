@@ -60,7 +60,8 @@ function ContactosCliente({ d }: { d: Negocio }) {
   );
 }
 
-export function NegocioSimples(ctx: Ctx) {
+/** `ajustarPassos` (opcional): muda a lista de passos antes de se desenhar (a página de Negócios liga aqui os templates); sem ele, é como sempre. */
+export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[] }) {
   const { S, A, go } = ctx;
   const d = S.deals.find((x) => x.id === S.deal)!;
   const T = d.orc ? tot(d, S) : null;
@@ -232,7 +233,7 @@ export function NegocioSimples(ctx: Ctx) {
 
       <div className={cn("mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)]", !largo && "2xl:grid-cols-[260px_minmax(0,1fr)_240px]")}>
         {ver === null
-          ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} lateral={(passos, ativo, setAtivo, comFim) => (
+          ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} lateral={(passos, ativo, setAtivo, comFim) => (
             <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} comFim={comFim} />
           )} />
           : <>
@@ -372,10 +373,11 @@ function Lateral({ d, passos, ativo, setAtivo, comFim }: { d: Negocio; passos: P
   );
 }
 
-function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }) {
+function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio; lateral: Lat; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[] }) {
   const { S } = ctx;
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
-  const passos = passosDaFase(ctx, d, true);
+  const passosBase = passosDaFase(ctx, d, true);
+  const passos = ajustarPassos ? ajustarPassos(passosBase, d) : passosBase;
   // abre no primeiro passo por fazer; se está tudo feito, abre logo no passo do negócio
   const idx = passos.findIndex((x) => !completo(x));
   const primeiro = idx === -1 ? passos.length : idx;

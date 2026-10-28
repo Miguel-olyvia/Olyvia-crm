@@ -12,6 +12,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { acoes, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
+import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
 import { HojeSimples } from "@/emylia/HojeSimples";
 import { HojeTecnico } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
@@ -186,7 +187,7 @@ export default function NegociosEmylia() {
                 Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava.
               </p>
             )}
-            <NegocioSimples {...ctx} />
+            <NegocioSimples {...ctx} ajustarPassos={(passos, d) => comTemplatesNosPassos(passos, { negocioId: refs.current.get(d.id)?.id ?? null, ctx, d, podeEditar: !doCrm })} />
           </>
         : <NegociosSimples {...ctx} />}
       <div className="toasts" aria-live="polite">
