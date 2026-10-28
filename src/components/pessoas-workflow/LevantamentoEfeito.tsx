@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { camposLigaveis, campoLigavel } from "@/hooks/pessoas/workflow/camposEmylia";
 import {
-  criarItemEfeito, LIMITES_EFEITO, MODOS_EFEITO, problemaDoItem, TIPOS_ITEM_EFEITO, type ItemEfeitoEd, type ModoEfeito, type TipoItemEfeito,
+  criarItemEfeito, LIMITES_EFEITO, problemaDoItem, TIPOS_ITEM_EFEITO, type ItemEfeitoEd, type TipoItemEfeito,
 } from "@/hooks/pessoas/workflow/efeitosQuestionario";
 import { ehEscolha, type OpcaoEd, type PerguntaEd } from "@/hooks/pessoas/workflow/questionario";
 import { alterarOpcao, alterarPergunta } from "@/hooks/pessoas/workflow/questionarioEdicao";
@@ -36,6 +36,7 @@ interface ItensProps {
 function ItensDoEfeito({ id, itens, aoMudar, desativado, rotulo }: ItensProps) {
   const { t } = useTranslation();
   const cheia = itens.length >= LIMITES_EFEITO.itens;
+  const falta = (v: string) => v.trim() === "";
   const mudarItem = (i: number, patch: Partial<ItemEfeitoEd>) => aoMudar(itens.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const tipos = TIPOS_ITEM_EFEITO.map((tipo) => ({ value: tipo, label: t(`${E}tipo.${tipo}`) }));
   return (
@@ -57,29 +58,30 @@ function ItensDoEfeito({ id, itens, aoMudar, desativado, rotulo }: ItensProps) {
                     onValueChange={(v) => mudarItem(i, { tipo: v as TipoItemEfeito })}
                   />
                 </div>
-                <div className="min-w-48 flex-1">
-                  <Campo id={`${base}-motivo`} rotulo={t(`${E}motivo`)} valor={item.descricao} desativado={desativado} invalido={problema !== null && item.descricao.trim() === ""} aoMudar={(descricao) => mudarItem(i, { descricao })} />
-                </div>
                 <BotaoIcone icone={Trash2} rotulo={t(`${E}remover`, { n })} inativo={desativado} aoClicar={() => aoMudar(itens.filter((_, j) => j !== i))} />
               </div>
               <div className="grid gap-2 sm:grid-cols-3">
                 {item.tipo === "valor" && (
                   <>
-                    <Campo id={`${base}-custo`} tipo="number" rotulo={t(`${E}custo`)} valor={item.custo} desativado={desativado} aoMudar={(custo) => mudarItem(i, { custo })} />
-                    <Campo id={`${base}-preco`} tipo="number" rotulo={t(`${E}preco`)} valor={item.preco} desativado={desativado} aoMudar={(preco) => mudarItem(i, { preco })} />
+                    <Campo id={`${base}-custo`} tipo="number" rotulo={t(`${E}custo`)} valor={item.custo} desativado={desativado} invalido={falta(item.custo)} aoMudar={(custo) => mudarItem(i, { custo })} />
+                    <Campo id={`${base}-preco`} tipo="number" rotulo={t(`${E}preco`)} valor={item.preco} desativado={desativado} invalido={falta(item.preco)} aoMudar={(preco) => mudarItem(i, { preco })} />
                   </>
                 )}
                 {item.tipo === "horas" && (
                   <>
-                    <Campo id={`${base}-horas`} tipo="number" rotulo={t(`${E}horas`)} valor={item.horas} desativado={desativado} aoMudar={(horas) => mudarItem(i, { horas })} />
-                    <Campo id={`${base}-custoh`} tipo="number" rotulo={t(`${E}custoHora`)} valor={item.custoHora} desativado={desativado} aoMudar={(custoHora) => mudarItem(i, { custoHora })} />
-                    <Campo id={`${base}-precoh`} tipo="number" rotulo={t(`${E}precoHora`)} valor={item.precoHora} desativado={desativado} aoMudar={(precoHora) => mudarItem(i, { precoHora })} />
+                    <Campo id={`${base}-horas`} tipo="number" rotulo={t(`${E}horas`)} valor={item.horas} desativado={desativado} invalido={falta(item.horas)} aoMudar={(horas) => mudarItem(i, { horas })} />
+                    <Campo id={`${base}-custoh`} tipo="number" rotulo={t(`${E}custoHora`)} valor={item.custoHora} desativado={desativado} invalido={falta(item.custoHora)} aoMudar={(custoHora) => mudarItem(i, { custoHora })} />
+                    <Campo id={`${base}-precoh`} tipo="number" rotulo={t(`${E}precoHora`)} valor={item.precoHora} desativado={desativado} invalido={falta(item.precoHora)} aoMudar={(precoHora) => mudarItem(i, { precoHora })} />
                   </>
                 )}
                 {item.tipo === "percentagem" && (
-                  <Campo id={`${base}-pct`} tipo="number" rotulo={t(`${E}pct`)} valor={item.pct} desativado={desativado} aoMudar={(pct) => mudarItem(i, { pct })} />
+                  <Campo id={`${base}-pct`} tipo="number" rotulo={t(`${E}pct`)} valor={item.pct} desativado={desativado} invalido={falta(item.pct)} aoMudar={(pct) => mudarItem(i, { pct })} />
                 )}
               </div>
+              <Campo
+                id={`${base}-motivo`} rotulo={t(`${E}motivo`)} valor={item.descricao} desativado={desativado} ajuda={t(`${E}motivoAjuda`)}
+                invalido={problema !== null && item.descricao.trim() === ""} aoMudar={(descricao) => mudarItem(i, { descricao })}
+              />
               {problema && <p role="alert" className="text-xs text-destructive">{problema}</p>}
             </li>
           );
@@ -99,14 +101,38 @@ export function LevantamentoEfeito({ pergunta, ctx }: { pergunta: PerguntaEd; ct
   const modo = pergunta.efeitoModo ?? "";
   const mudar = (patch: Partial<PerguntaEd>) => ctx.mudar((s) => alterarPergunta(s, k, patch));
   const campos = camposLigaveis();
-  const opcoesCampo = [{ value: "", label: t(`${E}campoNenhum`) }, ...campos.map((c) => ({ value: c.k, label: `${c.rotulo} (${c.k})` }))];
-  // um campo que a Emylia já não tem continua à vista (nunca desaparece em silêncio)
+  const opcoesCampo = [{ value: "", label: t(`${E}campoNenhum`) }, ...campos.map((c) => ({ value: c.k, label: c.rotulo }))];
+  // um campo que já não existe continua à vista (nunca desaparece em silêncio)
   const campoAtual = pergunta.campoEmylia ?? "";
   if (campoAtual !== "" && !campos.some((c) => c.k === campoAtual)) opcoesCampo.push({ value: campoAtual, label: campoAtual });
-  const opcoesModo = [
-    { value: "", label: t(`${E}modo.omissao`) },
-    ...MODOS_EFEITO.map((m) => ({ value: m, label: t(`${E}modo.${m}`) })),
-  ];
+  // «emylia» é uma regra automática do sistema: mostra-se como Sim fixo e o valor guarda-se tal como está.
+  const automatico = modo === "emylia";
+  const sim = automatico || modo === "proprio";
+  const escolher = (proprio: boolean) => {
+    if (automatico || ctx.desativado) return;
+    mudar({ efeitoModo: proprio ? "proprio" : "nenhum" });
+  };
+  const idNota = `lev-${k}-efeito-auto`;
+  const botao = (valor: boolean, texto: string) => {
+    const marcado = sim === valor;
+    return (
+      <button
+        type="button" role="radio" aria-checked={marcado} aria-disabled={automatico || ctx.desativado || undefined}
+        aria-describedby={automatico ? idNota : undefined} tabIndex={marcado ? 0 : -1}
+        id={`lev-${k}-efeito-${valor ? "sim" : "nao"}`} onClick={() => escolher(valor)}
+        onKeyDown={(e) => {
+          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+            e.preventDefault();
+            escolher(!valor);
+            document.getElementById(`lev-${k}-efeito-${valor ? "nao" : "sim"}`)?.focus();
+          }
+        }}
+        className={`min-h-11 min-w-20 rounded-md border px-4 text-sm font-medium ${FOCO} ${marcado ? "border-primary bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-muted"} ${automatico || ctx.desativado ? "cursor-not-allowed opacity-60" : ""}`}
+      >
+        {marcado ? "✓ " : ""}{texto}
+      </button>
+    );
+  };
   return (
     <div role="group" aria-label={t(`${E}titulo`)} className="space-y-3 rounded-md border border-dashed p-3">
       <div className="space-y-1">
@@ -118,11 +144,12 @@ export function LevantamentoEfeito({ pergunta, ctx }: { pergunta: PerguntaEd; ct
         <p className="text-xs text-muted-foreground">{t(`${E}campoAjuda`)}</p>
       </div>
       <div className="space-y-1">
-        <Label htmlFor={`lev-${k}-efeitomodo`} className="text-sm">{t(`${E}titulo`)}</Label>
-        <NativeSelect
-          id={`lev-${k}-efeitomodo`} options={opcoesModo} value={modo} disabled={ctx.desativado} className={FOCO}
-          onValueChange={(v) => mudar({ efeitoModo: v === "" ? "" : (v as ModoEfeito) })}
-        />
+        <p id={`lev-${k}-efeito-rotulo`} className="text-sm font-medium">{t(`${E}titulo`)}</p>
+        <div role="radiogroup" aria-labelledby={`lev-${k}-efeito-rotulo`} className="flex gap-2">
+          {botao(false, t(`${E}nao`))}
+          {botao(true, t(`${E}sim`))}
+        </div>
+        {automatico && <p id={idNota} className="text-xs text-muted-foreground">{t(`${E}automatico`)}</p>}
       </div>
       {modo === "proprio" && pergunta.tipo === "numero" && (
         <ItensDoEfeito
