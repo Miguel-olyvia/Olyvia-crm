@@ -1,10 +1,9 @@
 // Arranque dos formulários de "Utilizadores e perfis": o de role e o de utilizador abrem, têm os campos, validam, criam e o
 // resultado aparece na lista (em memória). Sem testes de interação exaustivos.
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import UtilizadoresPerfis from "./UtilizadoresPerfis";
-import { repor } from "@/components/utilizadores-perfis/perfisStore";
 
 // Quem testa a lista e os formulários tem todas as permissões; as permissões por separador estão em
 // UtilizadoresPerfisSeparadores.test.tsx.
@@ -14,6 +13,39 @@ vi.mock("@/components/utilizadores-perfis/hooks/usePermissoesPerfis", () => ({
 
 // Os utilizadores vêm da base (testados em UtilizadoresPerfisUtilizadores.test.tsx): aqui o wrapper é simulado e vazio.
 vi.mock("@/components/utilizadores-perfis/hooks/useUtilizadoresPerfis", async () => (await import("./utilizadoresPerfisFalso")).moduloFalso());
+
+// As roles vêm da base (testadas em UtilizadoresPerfisRoles.test.tsx e em hooks/): aqui o wrapper é simulado, com as roles e as
+// 229 permissões de exemplo, e as ações de criar e guardar mexem numa lista em estado (nova a cada montagem da página).
+vi.mock("@/components/utilizadores-perfis/hooks/useRolesPerfis", async () => {
+  const { useState } = await import("react");
+  const { ROLES_EXEMPLO, PERMISSOES, EDITOR_EXEMPLO } = await import("@/components/utilizadores-perfis/catalogoExemplo");
+  return {
+    useRolesPerfis: () => {
+      const [roles, setRoles] = useState(ROLES_EXEMPLO);
+      const ok = { ok: true as const };
+      return {
+        roles, lista: roles, estado: { carregando: false, erro: null, semOrganizacao: false }, recarregar: () => {},
+        verEliminadas: false, mudarVerEliminadas: () => {},
+        catalogo: { catalogo: PERMISSOES, editor: EDITOR_EXEMPLO, visiveis: PERMISSOES, carregando: false, erro: null },
+        modelos: { modelos: [], carregando: false, erro: null },
+        contagem: { contagem: Object.fromEntries(roles.map((r) => [r.id, 0])), disponivel: true, erro: null },
+        permissoesPorRole: Object.fromEntries(roles.map((r) => [r.id, r.permissoes.length])),
+        autorizacoes: { podeCriar: true, podeEditar: () => true, podeEliminar: () => true, podeRestaurar: () => true },
+        acoes: {
+          criar: async (d: { nome: string; codigo: string; descricao: string; podeAssinar: boolean; permissoes: string[] }) => {
+            setRoles((rs) => [...rs, { id: `nova-${d.codigo}`, codigo: d.codigo, nome: d.nome, descricao: d.descricao, sistema: false, podeAssinar: d.podeAssinar, permissoes: d.permissoes }]);
+            return ok;
+          },
+          guardar: async (id: string, d: { nome: string; codigo: string; descricao: string; podeAssinar: boolean; permissoes: string[] }) => {
+            setRoles((rs) => rs.map((r) => (r.id === id ? { ...r, ...d } : r)));
+            return ok;
+          },
+          eliminar: async () => ok, restaurar: async () => ok, aGravar: false,
+        },
+      };
+    },
+  };
+});
 
 vi.mock("@/hooks/useTranslation", async () => {
   const { utilizadoresPerfisTranslations } = await import("@/translations/utilizadoresPerfis");
@@ -37,8 +69,6 @@ beforeAll(() => {
   // O Switch do Radix, dentro de um formulário, mede-se com um ResizeObserver, que o jsdom não tem.
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
 });
-beforeEach(repor);
-afterEach(repor);
 
 const renderPage = () => render(<MemoryRouter><UtilizadoresPerfis /></MemoryRouter>);
 const irParaTab = (nome: RegExp, dentro: HTMLElement | Document = document.body) => {
@@ -64,7 +94,8 @@ describe("formulário de role", () => {
   it("abre com cabeçalho, selo, aviso de exemplo, abas e rodapé com Cancelar e Criar role", () => {
     const form = abrirNovaRole();
     expect(within(form).getByText("Novo · por gravar")).toBeInTheDocument();
-    expect(within(form).getByText(/Só exemplo: nada é gravado/)).toBeInTheDocument();
+    // Comportamento que mudou de propósito: o formulário já grava na base, por isso deixou de avisar que é só exemplo.
+    expect(within(form).queryByText(/Só exemplo/)).not.toBeInTheDocument();
     expect(within(form).getByRole("navigation", { name: "Onde está" })).toBeInTheDocument();
     expect(within(form).getAllByRole("tab").map((a) => a.textContent)).toEqual(["Geral", expect.stringContaining("Permissões")]);
     expect(within(form).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
@@ -122,7 +153,7 @@ describe("formulário de role", () => {
     expect(within(linha).getByText("gestor_de_parceiros")).toBeInTheDocument();
     expect(within(linha).getByText("0")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /^Roles/ })).toHaveAccessibleName(/8/);
-    expect(document.body.textContent).toContain("Role Gestor de Parceiros criada. Está na lista com 0 utilizadores.");
+    expect(document.body.textContent).toContain("Role Gestor de Parceiros criada. Está na lista.");
   });
 
   it("editar abre a partir da linha com os dados da role; as de sistema abrem só para ver", () => {
