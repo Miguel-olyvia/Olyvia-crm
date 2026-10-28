@@ -5,8 +5,8 @@
  */
 import { useMemo } from "react";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
-import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { useJustificacoesDoDia } from "@/components/rh-exemplo/hooks/useJustificacoesDoDia";
+import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { somarDias } from "@/components/rh-exemplo/lib/ausencias";
 import { situacaoDoDia, type JustificacaoDia, type SituacaoDoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { desvioJustificavel, type DesvioJustificavel } from "./desvioJustificavel";
@@ -71,7 +71,9 @@ export function useSituacoesDoMes(
   const ultimo = dias && dias.length > 0 ? dias[dias.length - 1].data : null;
   const janela = useMemo(() => (primeiro && ultimo ? { de: primeiro, ate: ultimo } : null), [primeiro, ultimo]);
   const { justificacoes, loading, recusado, erro, indisponivel } = useJustificacoesDeDiaDaPessoa(pessoaId, janela, janela !== null);
-  const prazoDias = useFluxosB((e) => e.prazoFaltaDias);
+  // O prazo da organizacao, lido UMA vez (o mes inteiro calcula com o mesmo numero); se a leitura falhar e a omissao (5)
+  // e o ecra di-lo onde o prazo e mostrado (AvisoDoPrazo).
+  const { dias: prazoDias } = usePrazoJustificacao();
   const situacoes = useMemo(() => situacoesDosDias(dias ?? [], justificacoes, prazoDias, hojeIso()), [dias, justificacoes, prazoDias]);
   return { situacoes, leitura: { loading, recusado, erro, indisponivel } };
 }

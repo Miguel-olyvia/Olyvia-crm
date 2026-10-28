@@ -3,11 +3,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 // As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
+// O prazo para justificar e da organizacao e vem da base: aqui e simulado (5 dias, a omissao).
+vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
 import { fireEvent, render, screen } from "@testing-library/react";
+import { reporPrazoFalso } from "@/test/prazoJustificacaoFalso";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { lerEstado, repor } from "@/components/rh-exemplo/dados/loja";
 import { lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
-import { lerFluxosB, reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
+import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { marcarFaltaDoRh } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
 import { BotaoPicar } from "@/components/rh-exemplo/assiduidade/BotaoPicar";
 import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
@@ -39,6 +42,7 @@ beforeEach(() => {
   repor();
   reporGestao();
   reporFluxosB();
+  reporPrazoFalso();
 });
 
 describe("traducoes da frente B", () => {
@@ -91,7 +95,7 @@ describe("fluxo 5: justificacao de falha de marcacao", () => {
   // (hr_assiduidade_desvios, so os turnos sem horas e as picagens por emparelhar). Enviar uma justificacao de picagem
   // nao tem onde gravar na base: a lista so se le.
   const justificacoesDeTeste = (parcial: Partial<JustificacoesDaPessoa> = {}): JustificacoesDaPessoa => ({
-    ...resumoDosAlertas(alertasDeDesvios([DESVIO_DA_SOFIA], "p-sofia"), hojeIso()),
+    ...resumoDosAlertas(alertasDeDesvios([DESVIO_DA_SOFIA], "p-sofia"), hojeIso(), 5),
     pendentes: [], aceites: [], recusadas: [], loading: false, erro: false, recusado: false, ...parcial,
   });
 
@@ -189,9 +193,6 @@ describe("fluxo 7: faltas", () => {
     expect(cruzaFalta).toMatchObject({ erro: "rhExemplo.fal.erro.outra_falta", detalhe: "09:00-10:00" });
   });
 
-  it("o prazo da organizacao e configuravel", () => {
-    noLingua(painelDeFaltas());
-    fireEvent.change(screen.getByLabelText(/Prazo para justificar/), { target: { value: "8" } });
-    expect(lerFluxosB().prazoFaltaDias).toBe(8);
-  });
+  // O prazo da organizacao (configuravel, gravado na base) esta provado em faltas/prazoDaOrganizacao.test.tsx: ja nao
+  // e um valor em memoria que o painel altere.
 });

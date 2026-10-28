@@ -41,10 +41,12 @@ export function justificacoesDoDia(
   pessoaId: string,
   data: string,
   hoje: string,
+  /** O prazo da organizacao, em dias uteis (obrigatorio: nao ha 5 fixo). */
+  prazoDias: number,
 ): JustificacoesDoDia {
   const doDia = alertas.filter((a) => a.pessoaId === pessoaId && a.data === data);
   return {
-    porJustificar: doDia.filter((a) => situacaoDoPrazo(a, hoje) === "dentro_do_prazo"),
+    porJustificar: doDia.filter((a) => situacaoDoPrazo(a, hoje, prazoDias) === "dentro_do_prazo"),
     enviadas: justificacoes
       .filter((j) => j.pessoaId === pessoaId)
       .flatMap((justificacao) => {

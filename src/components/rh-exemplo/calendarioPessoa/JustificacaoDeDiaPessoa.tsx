@@ -12,7 +12,8 @@ import { FormularioJustificacaoDia } from "./FormularioJustificacaoDia";
 import { IndicadorJustificacao } from "./IndicadorJustificacao";
 import { useJustificacoesDeDiaDaPessoa, situacaoDeUmDia } from "./situacaoDoMes";
 import type { DiaCalendario } from "./montarMes";
-import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
+import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
+import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 
 function TextoDoPrazo({ situacao }: { situacao: SituacaoDoDia }) {
@@ -47,7 +48,8 @@ export function JustificacaoDeDiaPessoa({ dia, pessoaId }: { dia: DiaCalendario;
   const { t } = useTranslation();
   // Só as justificações deste dia: a leitura é por RPC e limitada ao intervalo pedido.
   const { justificacoes, loading, erro, recusado, indisponivel } = useJustificacoesDeDiaDaPessoa(pessoaId, { de: dia.data, ate: dia.data });
-  const prazoDias = useFluxosB((e) => e.prazoFaltaDias);
+  const prazoOrganizacao = usePrazoJustificacao();
+  const prazoDias = prazoOrganizacao.dias;
   const [aberto, setAberto] = useState(false);
   const botao = useRef<HTMLButtonElement>(null);
   const { situacao, desvio } = situacaoDeUmDia(dia, justificacoes, prazoDias, hojeIso());
@@ -76,6 +78,7 @@ export function JustificacaoDeDiaPessoa({ dia, pessoaId }: { dia: DiaCalendario;
         {situacao.estado === "prazo_terminado" && <span className="text-sm font-medium">{t("rhJust.semJustificacao")}</span>}
       </div>
       <DetalheEnviado situacao={situacao} />
+      <AvisoDoPrazo leitura={prazoOrganizacao.leitura} dias={prazoDias} onTentarDeNovo={prazoOrganizacao.recarregar} />
       <TextoDoPrazo situacao={situacao} />
       {podeEnviar(situacao.estado) && desvio && !aberto && (
         <Button ref={botao} type="button" variant="outline" className="min-h-11 w-full" onClick={() => setAberto(true)}>

@@ -1,6 +1,6 @@
 /**
  * O detalhe de uma falta ja marcada (fluxo 7), lido e escrito na base REAL: o periodo, o estado da justificacao, o
- * prazo da organizacao, o documento (dado de saude: so aparece ao clique, e o acesso fica registado), as decisoes
+ * prazo da organizacao (o configurado; se a leitura falhar mostra-se a omissao e di-lo), o documento (dado de saude: so aparece ao clique, e o acesso fica registado), as decisoes
  * do RH, a anulacao e o calculo de exemplo do desconto de vencimento.
  *
  * A falta chega da lista da organizacao (vista em vigor, so algumas colunas). Aqui pede-se a assiduidade DESSA pessoa
@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
+import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
+import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { MotivoDialog } from "@/components/rh-exemplo/ausencias/MotivoDialog";
 import { JustificacaoFalta } from "@/components/rh-exemplo/assiduidade/JustificacaoFalta";
 import { DescontoDaFaltaCard } from "@/components/rh-exemplo/fluxosB/faltas/DescontoDaFaltaCard";
@@ -71,7 +72,8 @@ export function FaltaDetalhe({ falta: daLista, nome, permissoes, onFechar, onAlt
   const { t } = useTranslation();
   const janela = useMemo(() => ({ de: daLista.data, ate: daLista.data }), [daLista.data]);
   const assiduidade = useAssiduidadeDaPessoa(daLista.pessoa_id, janela);
-  const prazoDias = useFluxosB((e) => e.prazoFaltaDias);
+  const prazoOrganizacao = usePrazoJustificacao();
+  const prazoDias = prazoOrganizacao.dias;
   const [pedido, setPedido] = useState<PedidoDeMotivo | null>(null);
 
   // A linha completa (com a decisao e o motivo) quando ja chegou; ate la, a da lista.
@@ -121,6 +123,7 @@ export function FaltaDetalhe({ falta: daLista, nome, permissoes, onFechar, onAlt
 
         <section aria-label={t("rhExemplo.fal.prazo")} className="space-y-1 text-sm">
           <h3 className="font-semibold">{t("rhExemplo.fal.prazo")}</h3>
+          <AvisoDoPrazo leitura={prazoOrganizacao.leitura} dias={prazoDias} onTentarDeNovo={prazoOrganizacao.recarregar} />
           <p>{t("rhExemplo.fal.prazoDaOrganizacao", { dias: String(prazoDias), ate: formatarData(prazo) })}</p>
           <p className="text-muted-foreground">
             {fora ? t("rhExemplo.fal.prazoAcabou") : t("rhExemplo.fal.prazoRestam", { dias: String(diasUteisEntre(hoje, prazo)) })}

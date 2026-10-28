@@ -15,7 +15,8 @@ import {
 import type { AlertaDia } from "@/components/rh-exemplo/lib/alertasFimDia";
 import type { EstadoFalta, EstadoJustificacao, MotivoFalta } from "@/components/rh-exemplo/tiposAssiduidade";
 
-export const PRAZO_JUSTIFICACAO_FALTA_DIAS_UTEIS = 5;
+/** A omissao (5), de um so sitio: o prazo REAL e o da organizacao (`usePrazoJustificacao`), nao esta constante. */
+export { PRAZO_JUSTIFICACAO_OMISSAO as PRAZO_JUSTIFICACAO_FALTA_DIAS_UTEIS } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 /** Convencao de exemplo: um meio dia de ausencia aprovado cobre a manha (ate as 13:00). */
 const FIM_DA_MANHA_MINUTOS = 13 * 60;
 

@@ -125,10 +125,13 @@ export function tratarAlerta(alertaId: string, accao: AccaoAlerta, motivo: strin
   return OK;
 }
 
-/** A pessoa justifica a falha de marcacao (hora real + motivo + anexo opcional), em 5 dias uteis. */
+/**
+ * A pessoa justifica a falha de marcacao (hora real + motivo + anexo opcional), dentro do prazo da organizacao
+ * (`prazoDias`, obrigatorio: vem de `usePrazoJustificacao`, nao ha 5 fixo).
+ */
 export function enviarJustificacaoDePicagem(
   alertaId: string,
-  dados: { horaReal: string; motivo: string; anexoNome: string | null },
+  dados: { horaReal: string; motivo: string; anexoNome: string | null; prazoDias: number },
 ): ResultadoAccao {
   const alerta = lerFluxosB().alertas.find((a) => a.id === alertaId);
   if (!alerta) return { erro: "rhExemplo.pic.erro.jaTratado" };
@@ -197,11 +200,11 @@ function atualizarFalta(faltaId: string, patch: Partial<Falta>): void {
   definirGestao((g) => ({ ...g, faltas: g.faltas.map((f) => (f.id === faltaId ? { ...f, ...patch } : f)) }));
 }
 
-/** Registar a justificacao (texto sensivel): pendente de documento dentro do prazo da organizacao. */
-export function registarJustificacaoDeFalta(faltaId: string, texto: string): ResultadoAccao & { foraDoPrazo?: boolean } {
+/** Registar a justificacao (texto sensivel): pendente de documento dentro do prazo da organizacao (`prazoDias`, obrigatorio). */
+export function registarJustificacaoDeFalta(faltaId: string, texto: string, prazoDias: number): ResultadoAccao & { foraDoPrazo?: boolean } {
   const falta = lerGestao().faltas.find((f) => f.id === faltaId);
   if (!falta) return { erro: "rhExemplo.fal.erro.faltaAnulada" };
-  const resultado = registarJustificacao(falta, { texto, hoje: hojeIso(), prazoDias: lerFluxosB().prazoFaltaDias });
+  const resultado = registarJustificacao(falta, { texto, hoje: hojeIso(), prazoDias });
   if (resultado.ok === false) return { erro: resultado.erro };
   definirFluxosB((e) => ({ ...e, textosFalta: { ...e.textosFalta, [faltaId]: texto.trim() } }));
   atualizarFalta(faltaId, { justificacao_estado: resultado.estado });
@@ -230,9 +233,4 @@ export function verTextoDaFalta(faltaId: string): string | null {
     acessosTexto: [...e.acessosTexto, { faltaId, quem: nomeDeQuemUsa(), quando: new Date().toISOString() }],
   }));
   return texto;
-}
-
-export function definirPrazoDeJustificacao(dias: number): void {
-  const valido = Number.isFinite(dias) ? Math.min(30, Math.max(1, Math.round(dias))) : 5;
-  definirFluxosB((e) => ({ ...e, prazoFaltaDias: valido }));
 }

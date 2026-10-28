@@ -1,14 +1,14 @@
 /**
  * O store dos fluxos 4, 5 e 7 de RH de exemplo (horario por tipo e versoes, alertas do fim do dia,
  * justificacoes, texto sensivel das faltas), a parte das fichas (`loja.ts`) e da gestao (`lojaGestao.ts`).
- * Em memoria; recarregar repoe tudo. `reporFluxosB()` volta ao inicial a partir das fichas actuais.
+ * Em memoria; recarregar repoe tudo. O PRAZO para justificar ja nao vive aqui: e da organizacao, vem da base
+ * (`usePrazoJustificacao`). `reporFluxosB()` volta ao inicial a partir das fichas actuais.
  */
 import { useSyncExternalStore } from "react";
 import { diaDaSemana, diaIso } from "@/components/rh-exemplo/dados/datas";
 import { lerEstado } from "@/components/rh-exemplo/dados/loja";
 import type { EstadoRh } from "@/components/rh-exemplo/dados/tiposLoja";
 import { horariosIniciais } from "@/components/rh-exemplo/dados/horariosIniciaisB";
-import { PRAZO_JUSTIFICACAO_FALTA_DIAS_UTEIS } from "@/components/rh-exemplo/lib/faltasB";
 import type { AlertaDia, JustificacaoPicagem } from "@/components/rh-exemplo/lib/alertasFimDia";
 import type { HorarioPessoa } from "@/components/rh-exemplo/lib/horarioTipos";
 
@@ -22,8 +22,6 @@ export interface EstadoFluxosB {
   horarios: Record<string, HorarioPessoa>;
   alertas: AlertaDia[];
   justificacoesPicagem: JustificacaoPicagem[];
-  /** Prazo da organizacao para justificar uma falta, em dias uteis. */
-  prazoFaltaDias: number;
   /** O texto de justificacao de cada falta: sensivel, so se le com «Ver texto», que regista o acesso. */
   textosFalta: Record<string, string>;
   acessosTexto: AcessoTexto[];
@@ -96,7 +94,6 @@ export function criarFluxosBInicial(estado: EstadoRh): EstadoFluxosB {
     horarios: horariosIniciais(estado),
     alertas: alertasIniciais(estado),
     justificacoesPicagem: justificacoesIniciais(),
-    prazoFaltaDias: PRAZO_JUSTIFICACAO_FALTA_DIAS_UTEIS,
     textosFalta: {
       "fa-tiago": "Consulta de urgência no centro de saúde. O atestado vai entregue ao RH.",
       "fa-hugo": "Acompanhei um familiar a uma consulta marcada há meses.",

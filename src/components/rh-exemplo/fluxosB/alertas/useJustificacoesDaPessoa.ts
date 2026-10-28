@@ -1,6 +1,7 @@
 /**
  * As marcações por justificar de uma pessoa, lidas da base: os desvios que `hr_assiduidade_desvios` propõe (turno
- * planeado sem horas, ou picagem por emparelhar) dos últimos 30 dias, filtrados para a pessoa. É a mesma leitura do mapa
+ * planeado sem horas, ou picagem por emparelhar) dos últimos 30 dias ou mais (a janela acompanha o prazo da
+ * organização para justificar), filtrados para a pessoa. É a mesma leitura do mapa
  * de assiduidade da organização (`useAssiduidadeDaOrganizacao`), por isso quem não tem permissão para a fila de desvios
  * também não vê esta lista (a base recusa e o ecrã di-lo, em vez de mostrar «não há nada»).
  *
@@ -8,7 +9,9 @@
  * sempre vazias aqui, e o ecrã não oferece enviar uma.
  */
 import { useMemo } from "react";
+import { janelaDeDesviosDias } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { useAssiduidadeDaOrganizacao } from "@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao";
+import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { diasUteisRestantes, situacaoDoPrazo, type AlertaDia, type JustificacaoPicagem, type TipoAlerta } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import type { Desvio, TipoDesvio } from "@/components/rh-exemplo/tiposAssiduidade";
@@ -30,8 +33,10 @@ export interface JustificacoesDaPessoa {
   recusado: boolean;
 }
 
-/** Quantos dias para trás se procuram marcações por justificar (o prazo de justificação é de 5 dias úteis). */
-export const JANELA_DE_DESVIOS_DIAS = 30;
+/*
+ * Quantos dias para trás se procuram marcações por justificar: deriva do prazo da organização (`janelaDeDesviosDias`: nunca
+ * menos de 30, e 49 com o prazo máximo de 30 dias úteis), para que um prazo longo não fique cortado pela janela.
+ */
 
 /** Só estes dois desvios são «falha de marcação»: o resto (horas sem turno, falta coberta por ausência) tem outro tratamento. */
 const TIPO_DO_ALERTA: Partial<Record<TipoDesvio, TipoAlerta>> = {
@@ -69,11 +74,16 @@ export function alertasDeDesvios(desvios: readonly Desvio[], pessoaId: string): 
 }
 
 /** O resumo pronto a mostrar: os alertas, o prazo mais urgente e quantos há dentro do prazo. Função pura. */
-export function resumoDosAlertas(alertas: readonly AlertaDia[], hoje: string): Pick<JustificacoesDaPessoa, "porJustificar" | "menorPrazoDias" | "porFazer"> {
-  const dentro = alertas.filter((a) => situacaoDoPrazo(a, hoje) === "dentro_do_prazo");
+export function resumoDosAlertas(
+  alertas: readonly AlertaDia[],
+  hoje: string,
+  /** O prazo da organização, em dias úteis (obrigatório: não há 5 fixo). */
+  prazoDias: number,
+): Pick<JustificacoesDaPessoa, "porJustificar" | "menorPrazoDias" | "porFazer"> {
+  const dentro = alertas.filter((a) => situacaoDoPrazo(a, hoje, prazoDias) === "dentro_do_prazo");
   return {
     porJustificar: [...alertas].sort((a, b) => b.data.localeCompare(a.data)),
-    menorPrazoDias: dentro.length === 0 ? null : Math.min(...dentro.map((a) => diasUteisRestantes(a.data, hoje))),
+    menorPrazoDias: dentro.length === 0 ? null : Math.min(...dentro.map((a) => diasUteisRestantes(a.data, hoje, prazoDias))),
     porFazer: dentro.length,
   };
 }
@@ -82,11 +92,13 @@ const SEM_ENVIADAS: JustificacaoPicagem[] = [];
 
 export function useJustificacoesDaPessoa(pessoaId: string): JustificacoesDaPessoa {
   const hoje = hojeIso();
-  const janela = useMemo(() => ({ de: diaIsoAntes(hoje, JANELA_DE_DESVIOS_DIAS), ate: hoje }), [hoje]);
+  // Sem o prazo lido a base não diz quantos dias valem: calcula-se com a omissão (5) e o ecrã di-lo (AvisoDoPrazo).
+  const { dias: prazoDias } = usePrazoJustificacao();
+  const janela = useMemo(() => ({ de: diaIsoAntes(hoje, janelaDeDesviosDias(prazoDias)), ate: hoje }), [hoje, prazoDias]);
   const { desvios, desviosErro, desviosRecusado, loading } = useAssiduidadeDaOrganizacao(janela);
   return useMemo(
     () => ({
-      ...resumoDosAlertas(alertasDeDesvios(desvios, pessoaId), hoje),
+      ...resumoDosAlertas(alertasDeDesvios(desvios, pessoaId), hoje, prazoDias),
       pendentes: SEM_ENVIADAS,
       aceites: SEM_ENVIADAS,
       recusadas: SEM_ENVIADAS,
@@ -94,6 +106,6 @@ export function useJustificacoesDaPessoa(pessoaId: string): JustificacoesDaPesso
       erro: desviosErro,
       recusado: desviosRecusado,
     }),
-    [desvios, pessoaId, hoje, loading, desviosErro, desviosRecusado],
+    [desvios, pessoaId, hoje, prazoDias, loading, desviosErro, desviosRecusado],
   );
 }

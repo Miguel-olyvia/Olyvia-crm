@@ -14,7 +14,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { MessageSquareWarning } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
+import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
 import { enviarJustificacaoDePicagem } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
+import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import {
   diasUteisRestantes,
@@ -38,8 +40,10 @@ export function FormularioDeJustificacao({ alerta, onFechar }: { alerta: AlertaD
   const [erro, setErro] = useState<string | null>(null);
   const id = `rhb-just-${alerta.id}`;
 
+  const { dias: prazoDias } = usePrazoJustificacao();
+
   const enviar = () => {
-    const resultado = enviarJustificacaoDePicagem(alerta.id, { horaReal, motivo, anexoNome });
+    const resultado = enviarJustificacaoDePicagem(alerta.id, { horaReal, motivo, anexoNome, prazoDias });
     setErro(resultado.erro);
     if (!resultado.erro) {
       toast.success(t("rhExemplo.pic.justificacaoEnviada"));
@@ -140,6 +144,8 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
   // As justificações de dia vêm da base (últimos 90 dias); a leitura pode demorar, falhar ou ainda não existir nesta base.
   const { justificacoes: doDia, loading: aLerDia, erro: erroDia, indisponivel: indisponivelDia } = useJustificacoesDeDiaDaPessoa(pessoaId);
   const hoje = hojeIso();
+  const prazoOrganizacao = usePrazoJustificacao();
+  const prazoDias = prazoOrganizacao.dias;
   const semNada =
     !loading && !erro && !recusado && !aLerDia && !erroDia && !indisponivelDia && meus.length === 0 &&
     pendentes.length + aceites.length + recusadas.length + doDia.length === 0;
@@ -159,6 +165,7 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
         )}
       </CardHeader>
       <CardContent className="space-y-3">
+        <AvisoDoPrazo leitura={prazoOrganizacao.leitura} dias={prazoDias} onTentarDeNovo={prazoOrganizacao.recarregar} />
         {loading && <p role="status" className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.carregando")}</p>}
         {erro && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.erro")}</p>}
         {recusado && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.recusado")}</p>}
@@ -167,7 +174,7 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
         {semNada && <p className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.vazio")}</p>}
         <ul className="space-y-3">
           {meus.map((alerta) => {
-            const dentro = situacaoDoPrazo(alerta, hoje) === "dentro_do_prazo";
+            const dentro = situacaoDoPrazo(alerta, hoje, prazoDias) === "dentro_do_prazo";
             return (
               <li key={alerta.id} className="space-y-1 text-sm">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -182,7 +189,7 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
                   )}
                   {dentro ? (
                     <span className="text-xs text-muted-foreground">
-                      {t("rhExemplo.pic.diasRestantes", { dias: String(diasUteisRestantes(alerta.data, hoje)), ate: formatarData(prazoDaJustificacao(alerta.data)) })}
+                      {t("rhExemplo.pic.diasRestantes", { dias: String(diasUteisRestantes(alerta.data, hoje, prazoDias)), ate: formatarData(prazoDaJustificacao(alerta.data, prazoDias)) })}
                     </span>
                   ) : (
                     <Badge variant="outline" className="border-destructive font-normal text-destructive">

@@ -36,6 +36,9 @@ vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", () => ({
   comoRealizadoComCorreccao: (l: unknown) => l,
 }));
 
+// O prazo para justificar e da organizacao e vem da base: aqui e simulado (5 dias, a omissao).
+vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
+
 // O valor da hora do desconto vem do processamento salarial real da pessoa; aqui entra por argumento (sem Supabase).
 const calculo = vi.hoisted(() => ({
   estado: {} as Record<string, unknown>,

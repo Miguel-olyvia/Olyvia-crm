@@ -11,11 +11,12 @@ vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) =
   useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
 }));
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
+// O prazo para justificar e da organizacao e vem da base: aqui e simulado, e o teste escolhe os dias.
+vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
-import { definirPrazoDeJustificacao } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
@@ -26,6 +27,7 @@ import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeT
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import { rhExemploJustificacoesTranslations } from "@/translations/rhExemploJustificacoes";
 import { baseFalsa, FALTA_DA_BASE, reporBaseFalsa, semearJustificacao } from "@/test/justificacoesDoDiaFalso";
+import { prazoFalso, reporPrazoFalso } from "@/test/prazoJustificacaoFalso";
 
 const TUDO: PermissoesAssiduidade = {
   view: true, viewOwn: true, equipaView: true, picar: true, picarOutros: true, gerir: true, corrigir: true, faltasView: true,
@@ -81,6 +83,7 @@ beforeEach(() => {
   reporFluxosB();
   reporFluxosC();
   reporBaseFalsa();
+  reporPrazoFalso();
 });
 
 afterEach(() => {
@@ -204,7 +207,7 @@ describe("vista da própria pessoa", () => {
   });
 
   it("depois do prazo da organização mostra «Prazo terminado» e «Sem justificação», sem botão", () => {
-    definirPrazoDeJustificacao(1);
+    prazoFalso.dias = 1;
     ficha("p-sofia", "Sofia Rebelo", true);
     expect(celula("2026-10-08").getAttribute("aria-label")).toContain("Sem justificação");
     const detalhe = abrirDia("2026-10-08");

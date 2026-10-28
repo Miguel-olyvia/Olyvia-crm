@@ -40,6 +40,8 @@ vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", () => ({
   comoRealizadoComCorreccao: (l: unknown) => l,
 }));
 vi.mock("@/lib/toast", () => ({ toast: { error: acoes.toastErro, success: acoes.toastOk } }));
+// O prazo para justificar e da organizacao e vem da base: aqui e simulado (5 dias, a omissao).
+vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
 
 import { FilaAlertasFimDoDia } from "./FilaAlertasFimDoDia";
 import { FaltasPainel } from "../faltas/FaltasPainel";

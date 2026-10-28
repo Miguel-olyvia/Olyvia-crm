@@ -25,7 +25,13 @@ vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao", () => ({
   },
 }));
 
-import { diaIsoAntes, JANELA_DE_DESVIOS_DIAS, useJustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
+// O prazo da organizacao: o wrapper do hook real esta simulado, o teste escolhe os dias.
+const prazo = vi.hoisted(() => ({ dias: 5 }));
+vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", () => ({
+  usePrazoJustificacao: () => ({ dias: prazo.dias, leitura: { falhou: false }, podeAlterar: true }),
+}));
+
+import { diaIsoAntes, useJustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
 
 const HOJE = "2026-10-14";
 
@@ -42,6 +48,7 @@ beforeEach(() => {
   organizacao.desviosErro = false;
   organizacao.desviosRecusado = false;
   organizacao.loading = false;
+  prazo.dias = 5;
 });
 afterEach(() => vi.useRealTimers());
 
@@ -55,10 +62,26 @@ describe("diaIsoAntes", () => {
 });
 
 describe("useJustificacoesDaPessoa", () => {
-  it("pede os desvios dos ultimos 30 dias ate hoje", () => {
+  it("com o prazo de 5 dias uteis pede os desvios dos ultimos 30 dias ate hoje", () => {
     renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
-    expect(JANELA_DE_DESVIOS_DIAS).toBe(30);
     expect(organizacao.janelas[0]).toEqual({ de: "2026-09-14", ate: HOJE });
+  });
+
+  it("a janela acompanha o prazo da organizacao: com 30 dias uteis recua 49 dias de calendario", () => {
+    prazo.dias = 30;
+    renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
+    expect(organizacao.janelas[0]).toEqual({ de: diaIsoAntes(HOJE, 49), ate: HOJE });
+    expect(diaIsoAntes(HOJE, 49)).toBe("2026-08-26");
+  });
+
+  it("o prazo da organizacao decide o que ainda esta dentro do prazo: 20/09 so conta com 30 dias uteis", () => {
+    organizacao.desvios = [desvio({ data: "2026-09-20" })];
+    const com5 = renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
+    expect(com5.result.current.porFazer).toBe(0);
+    prazo.dias = 30;
+    const com30 = renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
+    expect(com30.result.current.porFazer).toBe(1);
+    expect(com30.result.current.menorPrazoDias).toBeGreaterThan(0);
   });
 
   it("lista so os desvios da pessoa que sao falhas de marcacao, e conta os que estao dentro do prazo", () => {
