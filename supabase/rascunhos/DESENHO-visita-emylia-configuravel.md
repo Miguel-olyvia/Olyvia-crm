@@ -36,8 +36,9 @@ Modulo puro efeitosDaVisita(questionario, f): Efeito[] (mesmo tipo da Emylia) = 
   Esse passo refaz as linhas Levantamento · (nativas permitidas + configuradas) e sincroniza os servicos do Catalogo em d.visita.extra via A.extra (q=0 remove); as chaves nossas ficam em d.f.cfg_extras.
 - Gravacao: nada de novo (neg_guardar_negocio). As linhas refazem-se sempre de d.f + configuracao. Antes de haver orcamento so ha nota ao vivo; as linhas aparecem ao fechar a visita (criarOrc + aplicarEfeitosConfigurados).
 
-## 6. Base de dados (rascunho NOVO-20261231998000_levantamento_efeitos.sql; nada aplicado)
-- levantamento_perguntas: campo_emylia, efeito_modo (default nenhum), efeito jsonb. levantamento_opcoes: valor_emylia, efeito jsonb.
+## 6. Base de dados (rascunho NOVO-20261231999000_levantamento_efeitos.sql; nada aplicado. O carimbo 20261231998000 ficou ocupado no remoto por rh_cargos_tecnicos_oficios)
+- levantamento_perguntas: campo_emylia, efeito_modo, efeito jsonb. levantamento_opcoes: valor_emylia, efeito jsonb. Todas NULL, sem valor por omissao (efeito_modo nulo = omissao).
+- campo_emylia unico por organizacao entre perguntas nao apagadas (indice unico parcial; o questionario e um por organizacao).
 - Reescrever a partir da versao mais recente de fn_neg_questionario_normalizar (hoje recusa chaves novas, NG009), neg_guardar_questionario (mudar so o efeito sobe a versao) e neg_questionario_levantamento.
 - Validacao da forma do efeito na base; campo_emylia unico por questionario. Custo passa a viajar na leitura do questionario: database-reviewer confirma. Migration e codigo entram juntos; testes antes do push; nunca Mudelar.
 
@@ -45,7 +46,7 @@ Modulo puro efeitosDaVisita(questionario, f): Efeito[] (mesmo tipo da Emylia) = 
 - src/hooks/pessoas/workflow/efeitosQuestionario.ts (tipos e validacao)
 - src/components/pessoas/negocioEmylia/visitaConfiguravel/: camposOrigem.ts, efeitosConfigurados.ts, aplicarEfeitos.ts, respostasConfiguraveis.ts, NotaOrcamento.tsx, CorpoSeccaoConfiguravel.tsx, passosVisitaConfiguravel.ts
 - src/components/pessoas-workflow/LevantamentoEfeito.tsx e LevantamentoLigacao.tsx (ecra de configuracao)
-- supabase/rascunhos/NOVO-20261231998000_levantamento_efeitos.sql
+- supabase/rascunhos/NOVO-20261231999000_levantamento_efeitos.sql
 ## 8. Ficheiros a alterar
 - workflow/questionario.ts, questionarioEdicao.ts (tipos, lerQuestionario, paraEnvio); LevantamentoOpcoes.tsx, LevantamentoPergunta.tsx, errosQuestionario.ts
 - negocio-metas/questionarioForm.ts e perguntasTipos.ts (levar campo, valor e efeito ao preenchimento)

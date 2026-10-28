@@ -21,7 +21,7 @@ const E = `${W}lev.efeito.`;
  * está incompleto (faltam fn_neg_questionario_normalizar, neg_guardar_questionario e neg_questionario_levantamento) e a base devolve NG009 ao guardar; com os controlos
  * à vista a pessoa configuraria um efeito que não se grava. Passa a `true` NO MESMO DIA em que a migração completa for aplicada (migração e código juntos).
  */
-export const EFEITOS_NA_BASE = false;
+export const EFEITOS_NA_BASE = true;
 
 interface ItensProps {
   id: string;
