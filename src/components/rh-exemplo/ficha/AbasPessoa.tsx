@@ -1,6 +1,7 @@
 // O conteúdo das três primeiras abas da ficha de RH (Visão geral, Detalhes laborais e Detalhes pessoais): os mesmos componentes
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
+import { PessoaOficiosObraCard } from "@/components/hr/PessoaOficiosObraCard";
 import { CartaoAdmissaoDaFicha } from "@/components/rh-exemplo/hooks/CartaoAdmissaoDaFicha";
 import type { ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
 import { PortalColaboradorRh } from "@/components/rh-exemplo/portal/PortalColaboradorRh";
@@ -49,6 +50,7 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo }: AbaProps & { a
   const w = ctx.trabalho;
   if (!w.podeVerLaborais) return <SemAcesso />;
   return (
+    <div className="space-y-4">
     <PessoaLaboraisTab
       pessoa={pessoa} colegas={ctx.colegas.map((c) => ({ id: c.id, nome_completo: c.nome_completo }))}
       locais={ctx.locais} locaisALoad={ctx.locaisALoad} cargos={ctx.cargos} periodosDosCargos={ctx.periodosDosCargos}
@@ -61,6 +63,9 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo }: AbaProps & { a
       podeCorrigirAfectacoes={w.podeCorrigirAfectacoes} podeVerColocacao={w.podeVerColocacao}
       podeEditarColocacao={w.podeEditarColocacao} podeCorrigirColocacao={w.podeCorrigirColocacao}
     />
+    {/* 28/10: os ofícios de obra da pessoa (o mesmo cartão do /rh): é daqui que o Catálogo e o orçamento tiram os técnicos */}
+    <PessoaOficiosObraCard pessoaId={pessoa.id} organizationId={pessoa.organization_id} podeEditar={w.podeEditarLaborais} />
+    </div>
   );
 }
 

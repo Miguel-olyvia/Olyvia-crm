@@ -335,7 +335,7 @@ function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (
           </li>
         ))}
       </ul>
-      <ComoSeCalcula>O custo/hora de cada ofício é a média do custo/hora dos técnicos dele no RH (ficha da pessoa › Detalhes laborais › Ofícios de obra). Sem técnicos, usa o salário do perfil: salário × {nfmt(C.par.meses)} meses + TSU de {nfmt(C.par.tsu)}% + seguros, a dividir por {nfmt(C.par.horasAno)} h produtivas por ano.</ComoSeCalcula>
+      <ComoSeCalcula>O custo/hora de cada ofício é a média do custo/hora dos técnicos dele no RH (Recursos Humanos (exemplo) › Pessoas › ficha › Detalhes laborais › Ofícios de obra). Sem técnicos, usa o salário do perfil: salário × {nfmt(C.par.meses)} meses + TSU de {nfmt(C.par.tsu)}% + seguros, a dividir por {nfmt(C.par.horasAno)} h produtivas por ano.</ComoSeCalcula>
     </>
   );
 }
