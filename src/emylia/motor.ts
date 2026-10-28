@@ -1005,7 +1005,7 @@ export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: numbe
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
   const s = S.svc[l.sid];
   // 22/10 (fase 2): enviada, as horas são as congeladas na linha
-  return { custo: l.cu * l.q, preco: l.pu * l.q, h: (l.det?.h ?? s.h) * l.q, s };
+  return { custo: l.cu * l.q, preco: l.pu * l.q, h: (l.det?.h ?? s?.h ?? 0) * l.q, s };
 }
 /** 26/10: a quantidade de uma linha, a que as zonas repartem: a do serviço, a da linha livre, a do produto da visita; senão 1. */
 export function qtdLinhaOrc(d: Negocio, l: LinhaOrc): number {
