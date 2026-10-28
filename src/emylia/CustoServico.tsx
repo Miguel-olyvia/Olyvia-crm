@@ -116,7 +116,7 @@ export function CustoServico({ S, sid, s, q, pu, det, onClose, children }: { S: 
                         <Linha a={<b className="text-foreground">Custo por ano ÷ {nfmt(a.horas)} h produtivas</b>} b={<b className="text-foreground">{eur(o.eh!)} €/h</b>} />
                       </div>
                     ); })() : <p className="mt-1 inline-flex items-center gap-1.5 text-muted-foreground"><Lock className="h-3.5 w-3.5" aria-hidden="true" />Sem técnicos com este ofício no RH: usa o salário do perfil, que só a Direção vê.</p>
-                  ) : <p className="mt-1 text-destructive">Sem técnicos no RH nem salário no perfil: a mão de obra conta 0 €. Ligue um técnico a este ofício (RH › ficha da pessoa › Detalhes laborais › Ofícios de obra).</p>}
+                  ) : <p className="mt-1 text-destructive">Sem técnicos no RH nem salário no perfil: a mão de obra conta 0 €. Ligue um técnico a este ofício (Recursos Humanos (exemplo) › Pessoas › ficha › Detalhes laborais › Ofícios de obra).</p>}
                 </div>
               </div>
             ))}
