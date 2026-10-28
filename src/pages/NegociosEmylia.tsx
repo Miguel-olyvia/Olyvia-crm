@@ -22,6 +22,9 @@ import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { aplicarAgenda, carregarAgendaReal, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
 import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
+import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFicha, type EnvioAcesso, type ResultadoConta } from "@/emylia/acessosPortal";
+import { marcarContaPortal } from "@/emylia/estadoContaPortal";
+import { enviarAoPortal } from "@/emylia/real/portalReal";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
@@ -69,6 +72,8 @@ export default function NegociosEmylia() {
   const foto = useRef(new Map<number, string>());
   const ids = useRef<IdsServico | null>(null);
   const aGravar = useRef(false);
+  // 28/10: os envios ao portal do cliente à espera de a gravação acabar (a proposta e o contrato têm de estar na base)
+  const filaPortal = useRef<EnvioAcesso[]>([]);
   const deNovo = useRef(false);
   const [q, setQ] = useState("");
 
@@ -95,6 +100,19 @@ export default function NegociosEmylia() {
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
       } while (deNovo.current);
+      // 28/10: o portal do cliente, depois de gravar (o documento já está na base): a conta real e o email de acesso
+      for (const e of filaPortal.current.splice(0)) {
+        const id = Number(e.conta.ref), ref = refs.current.get(id), d = S.deals.find((x) => x.id === id), email = d ? emailDaFicha(d) : null;
+        const r: ResultadoConta = !email ? { fase: "erro", msg: "Falta um email válido na ficha do cliente." }
+          : !ref ? { fase: "erro", msg: "O negócio ainda não está gravado na base." }
+          : await enviarAoPortal(supabase, org, ref, email, e);
+        definirResultadoConta(e.n, r);
+        marcarContaPortal(S, e, r);
+        if (r.fase === "erro") avisar({ msg: "O portal do cliente não recebeu o documento", sub: r.msg, kind: "bad" });
+        else if (r.fase === "pronta") avisar(r.email?.enviado
+          ? { msg: r.nova ? "Conta do portal criada" : "Documento no portal do cliente", sub: `Email enviado para ${r.email.para ?? email}`, kind: "ok" }
+          : { msg: "O email do portal não seguiu", sub: `${r.email?.motivo ? r.email.motivo + ". " : ""}${r.password ? `Entregue ao cliente: ${email} · password ${r.password}` : "Contacte o cliente por outro canal."}`, kind: "bad" });
+      }
     } finally {
       aGravar.current = false;
       redesenhar();
@@ -159,6 +177,18 @@ export default function NegociosEmylia() {
     definirEquipaReal(equipaReal(S.tecnicos ?? [], eu, S.role));
   }, [pronto, S, S.role, eu?.pessoaId, eu?.nome]); // eslint-disable-line react-hooks/exhaustive-deps -- eu é recriado a cada render
   useEffect(() => () => { definirEquipaReal(null); aplicarAgenda([]); definirRhDaAgenda(null); }, []);
+  // 28/10: o modo real da V1 (2.0): o portal com a conta real e o email do cliente obrigatório, e a leitura do Eticadata pela ponte
+  useEffect(() => {
+    if (!org) return;
+    definirModoReal(org, activeCompany?.name ?? "");
+    const desligar = definirCriadorContas((e) => {
+      if (e.conta.tipo !== "cliente") return;
+      definirResultadoConta(e.n, { fase: "a criar" });
+      marcarContaPortal(S, e, { fase: "a criar" });
+      filaPortal.current.push(e);
+    });
+    return () => { desligar(); definirModoReal(null); };
+  }, [org, activeCompany?.name, S]);
   if (tecConta && S.tec !== tecConta) S.tec = tecConta;
   const ctx: Ctx = { S, A, run, go, q, setQ, ...(tecConta ? { tecnicoFixo: { ref: tecConta } } : {}) };
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
