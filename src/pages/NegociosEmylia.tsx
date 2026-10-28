@@ -25,6 +25,9 @@ import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
 import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFicha, type EnvioAcesso, type ResultadoConta } from "@/emylia/acessosPortal";
 import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { enviarAoPortal } from "@/emylia/real/portalReal";
+import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
+import { refNegocio } from "@/emylia/inventario/ponteNegocios";
+import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
@@ -100,6 +103,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         if (r.erros.length) { setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
+        if (r.avisos.some((a) => a.includes("encomenda de cliente foi emitida"))) void lerNegocios(supabase, org, ids.current).then(carregarEncomendas).catch(() => undefined);
       } while (deNovo.current);
       // 28/10: o portal do cliente, depois de gravar (o documento já está na base): a conta real e o email de acesso
       for (const e of filaPortal.current.splice(0)) {
@@ -118,6 +122,19 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       aGravar.current = false;
       redesenhar();
     }
+  }, [org, S, avisar, redesenhar]);
+
+  // 28/10: a encomenda de cliente e as encomendas a fornecedor de cada negócio, da base (as emitidas no servidor)
+  const carregarEncomendas = useCallback(async (lidos: readonly NegocioLido[]) => {
+    if (!org) return;
+    const pares = lidos.flatMap((n) => {
+      const d = S.deals.find((x) => x.id === n.linhas.negocio.numero);
+      return n.ec?.emitida_em && d ? [{ ref: refNegocio(d), contrato: n.ec.contract_id }] : [];
+    });
+    const r = await lerEncomendasReais(supabase, org, pares);
+    definirEncomendasReais(r.mapa);
+    if (r.erros.length) avisar({ msg: "A encomenda de cliente não carregou", sub: r.erros[0], kind: "bad" });
+    redesenhar();
   }, [org, S, avisar, redesenhar]);
 
   const run = useCallback((fn: () => void) => {
@@ -155,9 +172,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
       foto.current = fotografarNegocios(S.deals);
       setPronto(true);
+      void carregarEncomendas(lidos);
     })().catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
-  }, [org, S, avisar]);
+  }, [org, S, avisar, carregarEncomendas]);
 
   // a letra da Emylia (Lexend)
   useEffect(() => {
@@ -177,7 +195,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     if (!pronto) return;
     definirEquipaReal(equipaReal(S.tecnicos ?? [], eu, S.role));
   }, [pronto, S, S.role, eu?.pessoaId, eu?.nome]); // eslint-disable-line react-hooks/exhaustive-deps -- eu é recriado a cada render
-  useEffect(() => () => { definirEquipaReal(null); aplicarAgenda([]); definirRhDaAgenda(null); }, []);
+  useEffect(() => () => { definirEquipaReal(null); aplicarAgenda([]); definirRhDaAgenda(null); definirEncomendasReais(null); }, []);
   // 28/10: o modo real da V1 (2.0): o portal com a conta real e o email do cliente obrigatório, e a leitura do Eticadata pela ponte
   useEffect(() => {
     if (!org) return;

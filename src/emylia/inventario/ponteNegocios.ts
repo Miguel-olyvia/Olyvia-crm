@@ -17,6 +17,7 @@ import { aplicarMovimentos, linhaStock } from "./stock";
 import type { Ec, Fornecedor, Inventario, Po } from "./tipos";
 import type { Negocio, StockKey } from "../motor";
 import type { EncCliente } from "../preparacaoObra";
+import { encomendaReal } from "../real/encomendaReal";
 
 /** O armazém de onde saem as obras (o Armazém Central). */
 export const ARMAZEM_OBRAS = "LIS";
@@ -270,6 +271,9 @@ function linhasDoResumo(db: Inventario, e: Ec, pos: Map<string, PoResumoNeg>): L
 /** O estado da encomenda de cliente de um negócio, lido do Inventário (null se lá não existe). 21/10: com as linhas das de ajuste. */
 export function resumoEcNegocio(db: Inventario, ref: string | null | undefined): ResumoEcNeg | null {
   if (!ref) return null;
+  // 28/10: na Olyvia, a encomenda de cliente que está na base (real/encomendaReal.ts) vale mais do que a do Inventário do browser
+  const real = encomendaReal(ref);
+  if (real) return real;
   const e = ecDoNegocio(db, ref);
   if (!e) return null;
   const pos = new Map<string, LinhaResumoNeg["pos"][number]>();

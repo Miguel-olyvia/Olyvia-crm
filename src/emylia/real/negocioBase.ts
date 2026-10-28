@@ -17,7 +17,10 @@ export const idsServico = (chaveParaId: ReadonlyMap<string, string>): IdsServico
  *  recusa-o (NE005) e abre-se em Contratos/Propostas. */
 export interface NegocioLido { id: string; entityId: string; estadoCrm: string; fluxoEmylia: boolean; docsCrm: boolean; linhas: LinhasNegocio;
   /** A obra gravada (20261231999000). Sem ela, o negócio ainda não tem obra na base. */
-  obra?: Negocio["obra"] }
+  obra?: Negocio["obra"];
+  /** 28/10: a encomenda de cliente emitida no servidor (20261231999700, fn_neg_ler_ec): o contrato e quando. Sem ela, ainda não há. */
+  ec?: EcBase | null }
+export interface EcBase { contract_id: string; order_number: string | null; emitida_em: string | null }
 
 /** O negócio do motor a partir do que se leu: as linhas e, se houver, a obra. */
 export function negocioDoLido(n: NegocioLido): Negocio {
@@ -52,7 +55,8 @@ export function paraBase(L: LinhasNegocio, ids: IdsServico): LinhasNegocio {
 
 /** O que a base devolve, para um negócio, de volta às linhas com as chaves da Emylia. */
 export function deBase(j: unknown, ids: IdsServico): NegocioLido {
-  const o = j as LinhasNegocio & { negocio: LinhasNegocio["negocio"] & { id: string; entity_id: string; estado_crm: string; fluxo_emylia: boolean; docs_crm?: boolean } };
+  const o = j as LinhasNegocio & { negocio: LinhasNegocio["negocio"] & { id: string; entity_id: string; estado_crm: string; fluxo_emylia: boolean; docs_crm?: boolean };
+    ec?: Partial<EcBase> | null };
   const n = { ...o.negocio } as Record<string, unknown>;
   const id = String(n.id), entityId = String(n.entity_id), estadoCrm = String(n.estado_crm), fluxoEmylia = !!n.fluxo_emylia, docsCrm = n.docs_crm === true;
   for (const k of ["id", "entity_id", "estado_crm", "fluxo_emylia", "docs_crm"]) delete n[k];
@@ -61,7 +65,8 @@ export function deBase(j: unknown, ids: IdsServico): NegocioLido {
     servicos: o.servicos ?? [], produtos: o.produtos ?? null, partes_fora: o.partes_fora ?? null, orcamentos: o.orcamentos ?? [],
     contratos: o.contratos ?? [], faturas: o.faturas ?? null, historico: o.historico ?? [], adendas: o.adendas ?? [],
   };
-  return { id, entityId, estadoCrm, fluxoEmylia, docsCrm, linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
+  const ec: EcBase | null = o.ec?.contract_id ? { contract_id: String(o.ec.contract_id), order_number: o.ec.order_number ?? null, emitida_em: o.ec.emitida_em ?? null } : null;
+  return { id, entityId, estadoCrm, fluxoEmylia, docsCrm, ec, linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
 }
 
 export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico): Promise<NegocioLido[]> {
