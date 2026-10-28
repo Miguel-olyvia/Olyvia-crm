@@ -158,7 +158,7 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
         const doNegocioEmylia = (
           <NegocioEmyliaDoGuia
             fase={daEmylia} atual={faseNova} e={emylia.e} org={emylia.org} podeEditar={podeEditar} feitas={doPasso.feitas} faseVista={faseVista}
-            aoVerFase={aoVerFase} aoVoltarAoAtual={aoVoltarAoAtual} nivel={nivel} extra={extraDoGuia} aPassar={emylia.aPassar} repetirGravacao={emylia.repetirGravacao}
+            aoVerFase={aoVerFase} aoVoltarAoAtual={aoVoltarAoAtual} nivel={nivel} extra={extraDoGuia} aPassar={emylia.aPassar} repetirGravacao={emylia.repetirGravacao} negocioId={negocio.id}
             abordagem={{ email: dadosDaAbordagem.email, chamadas: ligados.contactos, visitasMarcadas: ligados.visitasMarcadas, levantamentos: ligados.levantamentos }}
           />
         );

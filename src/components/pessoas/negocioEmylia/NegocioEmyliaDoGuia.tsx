@@ -32,6 +32,7 @@ import { HistoricoDoNegocio, PainelPosContrato } from "./PainelPosContrato";
 import { FaseDaEmylia } from "./FaseDaEmylia";
 import { podeMontarObra } from "./protegerObra";
 import { SoParaLer } from "./SoParaLer";
+import { comTemplatesNosPassos } from "./templatesDosPassos";
 import { usePermissoesPosContrato } from "./permissoesPosContrato";
 import { AvisoQuestionario } from "./visitaConfiguravel/AvisoQuestionario";
 import { useCtxComEfeitos } from "./visitaConfiguravel/useCtxComEfeitos";
@@ -58,6 +59,8 @@ interface NegocioEmyliaDoGuiaProps {
   extra?: ReactNode;
   /** O que a abordagem tem, para dizer o que chega ao negócio. */
   abordagem: FactosDaAbordagem;
+  /** O id do negócio na base (para guardar o template e a minuta escolhidos). */
+  negocioId?: string;
   /** O negócio está a passar de Visita a Negócio (a gravar a fase 3). */
   aPassar?: boolean;
   /** Tentar outra vez a passagem ou a gravação que falhou. */
@@ -189,7 +192,7 @@ export function CabecalhoDoNegocio({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 /** O nome da fase da Emylia no ecrã: a fase Negócio tem o nome da barra (os passos dela é que se chamam Orçamento, Proposta e Contrato). */
 const chaveDaFase = (f: FaseEmylia): string => (f === "negocio" ? "pessoasPagina.guia.fase.negocio" : `${P}phases.${f}`);
 
-export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, faseVista, aoVerFase, aoVoltarAoAtual, nivel, extra, abordagem, aPassar = false, repetirGravacao }: NegocioEmyliaDoGuiaProps) {
+export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, faseVista, aoVerFase, aoVoltarAoAtual, nivel, extra, abordagem, aPassar = false, repetirGravacao, negocioId }: NegocioEmyliaDoGuiaProps) {
   const { t } = useTranslation();
   const Titulo = nivel;
   const pode = usePermissoesPosContrato(org, e.ctx?.S ?? null, podeEditar);
@@ -258,6 +261,7 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
     return (
       <FaseDaEmylia
         key={`${fase}:${d.fase}`} ctx={ctx} d={d} soLeitura={soLeitura} topo={topo} fasesFeitas={fasesFeitas} extra={extra}
+        ajustarPassos={(passos) => comTemplatesNosPassos(passos, { negocioId: negocioId ?? null, ctx, d, podeEditar: pode.gravar })}
         depois={fase === "negocio" ? <HistoricoDoNegocio d={d} /> : <PainelPosContrato ctx={ctx} d={d} podeGravar={pode.gravar} />}
       />
     );

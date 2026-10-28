@@ -1,0 +1,8 @@
+/* O aspeto do template escolhido sobre a proposta da Emylia (DocsCliente.tsx, que não se altera): cores e fontes por variáveis CSS postas no
+   invólucro .tpl-proposta; sem template escolhido as variáveis não existem e fica o aspeto de sempre. */
+.tpl-proposta .folha { font-family: var(--tpl-fonte, inherit); color: var(--tpl-texto, inherit); }
+.tpl-proposta .folha h1, .tpl-proposta .folha h2, .tpl-proposta .folha h3 { font-family: var(--tpl-fonte-titulos, inherit); }
+.tpl-proposta .folha .bg-\[\#24204a\] { background-color: var(--tpl-primaria, #24204a); }
+.tpl-proposta .folha .text-emerald-700 { color: var(--tpl-destaque, #047857); }
+.tpl-proposta .folha .border-emerald-600 { border-color: var(--tpl-destaque, #059669); }
+.tpl-proposta .folha .bg-slate-200 { background-color: var(--tpl-secundaria, #e2e8f0); }
