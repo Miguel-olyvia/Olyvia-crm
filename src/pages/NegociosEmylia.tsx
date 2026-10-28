@@ -10,6 +10,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { acoes, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -189,7 +190,20 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // 28/10: a equipa da agenda (os técnicos do RH e quem entrou, com o papel do "A ver como") e o técnico da conta (o Hoje do técnico fica
   // no dele). Ao sair da página, a agenda volta a não ter equipa real nem ausências.
   const minha = useMinhaPessoa();
-  const eu = minha.loading ? null : { pessoaId: minha.pessoaId, nome: minha.nome ?? "Eu" };
+  // o nome de quem entrou: o da ficha do RH; sem ficha, o da conta (anew_users), para as visitas com o nome dele lhe aparecerem na agenda
+  const [nomeConta, setNomeConta] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      const id = await resolveCurrentBusinessUserId();
+      if (!id) return;
+      const { data } = await (supabase.from("anew_users" as never) as unknown as { select: (c: string) => { eq: (c: string, v: string) => { maybeSingle: () => Promise<{ data: { name: string | null; email: string | null } | null }> } } })
+        .select("name, email").eq("id", id).maybeSingle();
+      if (vivo && data) setNomeConta(data.name?.trim() || data.email?.split("@")[0] || null);
+    })().catch(() => undefined);
+    return () => { vivo = false; };
+  }, []);
+  const eu = minha.loading ? null : { pessoaId: minha.pessoaId, nome: minha.nome ?? nomeConta ?? "Eu" };
   const tecConta = pronto ? tecnicoDaConta(S.tecnicos ?? [], eu) : null;
   useEffect(() => {
     if (!pronto) return;
