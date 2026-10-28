@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Car, ChevronLeft, ChevronRight, Palmtree } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
+import { useRhDaAgenda } from "./rhDaAgenda";
 import { useFrota } from "../frota/loja";
 import { isoDia } from "../planoObra";
 import {
@@ -45,7 +45,8 @@ export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa, ambi
   const [vista, setVista] = useState<VistaAgenda>("semana");
   const [ref, setRef] = useState(hoje);
   const F = useFrota();
-  const rh = useEstadoRh((e) => e);
+  // 28/10: o RH da base numa organização real (rhDaAgenda.ts); a loja de exemplo no protótipo
+  const rh = useRhDaAgenda();
   const R = useEquipaReal();
   const dias = diasDoPeriodo(vista, ref);
   if (R?.carregando) return <AgendaACarregar texto="A carregar a agenda da equipa…" />;

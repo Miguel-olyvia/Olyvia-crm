@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Car, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
+import { useRhDaAgenda } from "./rhDaAgenda";
 import { useFrota } from "../frota/loja";
 import { isoDia } from "../planoObra";
 import { HORAS_DIA, diasDoPeriodo, fimDeSemana, moverPeriodo, rotuloCurto, tituloPeriodo } from "./regrasAgenda";
@@ -45,7 +45,8 @@ export default function MinhaAgenda({ S, irObra, irNegocio, tecnico, id = "minha
   const ambito = ambitoFora ?? ambitoDentro;
   const setAmbito = (a: AmbitoAgenda): void => { setAmbitoDentro(a); aoMudarAmbito?.(a); };
   const F = useFrota();
-  const rh = useEstadoRh((e) => e);
+  // 28/10: o RH da base numa organização real (rhDaAgenda.ts); a loja de exemplo no protótipo
+  const rh = useRhDaAgenda();
   const R = useEquipaReal();
   const dias = diasDoPeriodo("semana", ref);
   if (R?.carregando) {
