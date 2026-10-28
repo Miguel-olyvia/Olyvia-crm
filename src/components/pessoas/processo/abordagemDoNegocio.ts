@@ -32,6 +32,19 @@ export function faseDaAbordagem(item: ItemProcesso, ligados: LigadosDoNegocio): 
   return "porContactar";
 }
 
+const ORDEM_DA_ABORDAGEM: readonly ColunaQuadro[] = ["porContactar", "contactado", "visita", "levantamento"];
+
+/**
+ * Quando uma fase da abordagem se conclui (uma chamada registada, uma visita marcada, o levantamento guardado) o negócio passa à seguinte NO MOMENTO, sem esperar que
+ * o quadro volte a ler: o item avança para a fase que o que tem ligado diz (a mesma ordem da base). Só avança, e só na abordagem; o mesmo objeto se nada muda.
+ */
+export function itemComFaseConcluida(item: ItemProcesso, ligados: LigadosDoNegocio): ItemProcesso {
+  if (item.tipo !== "negocio" || !ehFaseDeAbordagem(item.fase)) return item;
+  const concluida: ColunaQuadro = ligados.levantamentos > 0 || ligados.comLevantamentoEscrito ? "levantamento"
+    : ligados.visitasMarcadas > 0 ? "visita" : ligados.contactos > 0 ? "contactado" : "porContactar";
+  return ORDEM_DA_ABORDAGEM.indexOf(concluida) > ORDEM_DA_ABORDAGEM.indexOf(item.fase) ? { ...item, fase: concluida } : item;
+}
+
 /** O item com a fase da abordagem; o mesmo objeto se a fase não muda. */
 export function itemComFaseDaAbordagem(item: ItemProcesso, ligados: LigadosDoNegocio): ItemProcesso {
   const fase = faseDaAbordagem(item, ligados);

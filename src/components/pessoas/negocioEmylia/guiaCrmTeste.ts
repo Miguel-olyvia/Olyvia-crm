@@ -6,6 +6,7 @@ export function moduloGuiaCrm() {
     useNegocioEmyliaDoGuia: () => ({
       e: { leitura: { k: "pronto" }, gravacao: { k: "parado" }, avisos: [], d: undefined, docsCrm: true, ctx: null, reler: () => true, regravar: () => undefined },
       org: "org-1", faseEmylia: null, faseDoCrm: null, leituraBloqueia: false, semNegocioNaEmylia: false, aPassar: false, repetirGravacao: () => undefined,
+      passar: { visivel: false, razao: null, aFazer: false, fazer: () => undefined },
     }),
   };
 }

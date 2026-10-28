@@ -2,14 +2,13 @@
 // negocioEmylia/armazemNegocioEmylia.ts), e não de uma função da base própria do quadro. `negocios.fase` 4 é Financeiro e 5 é Obra (as FASES da Emylia). O que o
 // cartão diz do passo é o texto do motor da Emylia (o seu passo seguinte); o valor é o do orçamento (sem IVA), e sem orçamento fica vazio. Puro, sem rede.
 import { tot, type Estado, type Negocio } from "@/emylia/motor";
+import { fasePipelineDaGravada } from "@/components/pessoas/negocioEmylia/faseDoPipeline";
 import { proximoSeguro } from "@/components/pessoas/negocioEmylia/protegerObra";
 import type { PapelPessoa } from "@/components/pessoas/pessoasTipos";
 import type { ColunaPosContrato } from "@/components/pessoas/quadro/colunasPosContrato";
 import { MIN_PESQUISA } from "./listaPessoasTipos";
 import type { FiltrosQuadro } from "./quadroPessoasTipos";
 
-const FASE_FINANCEIRO = 4;
-const FASE_OBRA = 5;
 
 export interface CartaoPosContrato {
   /** O id do negócio na base (`negocios.id`). */
@@ -35,7 +34,9 @@ export interface NegocioLidoParaCartao {
 /** `null`: o negócio não pertence a estas colunas (outra fase, perdido ou anulado). */
 export function cartaoPosContratoDe({ id, entityId, d }: NegocioLidoParaCartao, S: Estado): CartaoPosContrato | null {
   if (d.perdido || d.anulado) return null;
-  const coluna: ColunaPosContrato | null = d.fase === FASE_FINANCEIRO ? "financeiro" : d.fase === FASE_OBRA ? "obra" : null;
+  // a fase gravada, pela mesma função que a ficha usa (faseDoPipeline): 4 é Financeiro e 5 é Obra
+  const fase = fasePipelineDaGravada(d.fase);
+  const coluna: ColunaPosContrato | null = fase === "financeiro" ? "financeiro" : fase === "obra" ? "obra" : null;
   if (coluna === null) return null;
   return {
     id, pessoaId: entityId, nome: d.nome, papel: "cliente", coluna, trabalho: d.servico || null,

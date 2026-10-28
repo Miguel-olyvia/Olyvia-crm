@@ -89,11 +89,12 @@ describe("QuadroPessoas", () => {
     expect(within(coluna("Negócio")).queryByText("Nada nesta fase")).not.toBeInTheDocument();
   });
 
-  it("um negócio em Levantamento mostra-se na coluna Negócio, com o passo de fazer o levantamento e sem valor (ainda não há orçamento)", () => {
+  it("um negócio em Levantamento mostra-se na coluna Negócio, com o passo «Criar o orçamento» (o levantamento já está guardado: a base só o põe aí com levantamento) e sem valor", () => {
     mostrar([deNegocio({ id: "n0", pessoaId: "f", nome: "Filipa Reis", coluna: "levantamento", trabalho: "Janelas", passo: "fazerLevantamento" })]);
     const neg = within(coluna("Negócio"));
     expect(neg.getByText("Janelas")).toBeInTheDocument();
-    expect(neg.getByRole("button", { name: /Fazer o levantamento/ })).toBeInTheDocument();
+    expect(neg.getByRole("button", { name: /Criar o orçamento/ })).toBeInTheDocument();
+    expect(neg.queryByRole("button", { name: /Fazer o levantamento/ })).toBeNull();
     // O Levantamento não tem valor: o cartão não mostra nenhum e o agregado da coluna fica em 0.
     expect(neg.getAllByText(/€/, { selector: "span[aria-hidden='true']" })).toHaveLength(1);
     expect(neg.getByText(formatarMeta("euro", 0), { selector: "span[aria-hidden='true']" })).toBeInTheDocument();

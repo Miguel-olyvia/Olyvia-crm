@@ -26,7 +26,7 @@ import { acontecimentosDoGuia, clienteDoGuia, dadosDoGuia } from "./guiaDados";
 import { useMarcarVisita, type AberturaVisita } from "./marcarVisitaContexto";
 import { moradaDaLead } from "./moradaVisita";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
-import { itemComFaseDaAbordagem, type LigadosDoNegocio } from "./processo/abordagemDoNegocio";
+import { itemComFaseConcluida, itemComFaseDaAbordagem, type LigadosDoNegocio } from "./processo/abordagemDoNegocio";
 import { calcularPassoGuiado } from "./processo/passoGuiado";
 import { passoDoItem } from "./processo/passosProcesso";
 import { useAcaoDoPasso } from "./processo/processoContexto";
@@ -35,6 +35,7 @@ import { Prazo } from "./SeccoesResumo";
 import { barraUnica } from "./negocioEmylia/barraUnica";
 import { EstadoHonesto } from "./negocioEmylia/EstadoHonesto";
 import { FASES_EMYLIA, itemDoPosContrato, type FaseEmylia } from "./negocioEmylia/faseEmylia";
+import { PassarParaNegocio } from "./negocioEmylia/PassarParaNegocio";
 import { NegocioEmyliaDoGuia } from "./negocioEmylia/NegocioEmyliaDoGuia";
 import type { DadosDaAbordagem } from "./negocioEmylia/passagemParaNegocio";
 import { useNegocioEmyliaDoGuia } from "./negocioEmylia/useNegocioEmyliaDoGuia";
@@ -79,7 +80,8 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
     contactos: doNegocio.contactos.length, visitasMarcadas: doNegocio.visitas.filter((v) => v.estado !== "cancelada").length,
     levantamentos: doNegocio.levantamentos.length, comLevantamentoEscrito: Boolean(negocio.levantamento),
   };
-  const itemDaAbordagem = item ? itemComFaseDaAbordagem(item, ligados) : item;
+  // E a fase que se conclui com a ficha aberta (uma chamada registada, uma visita marcada, o levantamento guardado) passa à seguinte no momento, sem esperar pelo quadro.
+  const itemDaAbordagem = item ? itemComFaseConcluida(itemComFaseDaAbordagem(item, ligados), ligados) : item;
   // Do Negócio em diante (Orçamento, Proposta, Contrato, Financeiro, Obra) o conteúdo e as regras são os da Emylia, lidos e gravados pelo caminho do Ben
   // (negocioEmylia/): a fase vem do negócio lido da base e, com documentos do CRM ou por ler, do que o CRM prova (contrato assinado = Financeiro).
   // A ponte da abordagem: o que a passagem Visita → Negócio leva para a Emylia (pedido, email) e as contagens que ficam como referência.
@@ -87,7 +89,11 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
     pedidoCliente: negocio.pedidoCliente ?? "", email: pessoa?.contacto.email ?? "",
     chamadas: ligados.contactos, visitas: ligados.visitasMarcadas, levantamentos: ligados.levantamentos,
   };
-  const emylia = useNegocioEmyliaDoGuia(negocio, { faseDoItem: itemDaAbordagem?.fase ?? null, podeEditar, dados: dadosDaAbordagem });
+  const emylia = useNegocioEmyliaDoGuia(negocio, {
+    faseDoItem: itemDaAbordagem?.fase ?? null, podeEditar, dados: dadosDaAbordagem,
+    // o levantamento guardado (ligado ou escrito) é o que abre a saída «Passar para o Negócio»
+    levantamentoGuardado: ligados.levantamentos > 0 || ligados.comLevantamentoEscrito,
+  });
   const faseEmylia = emylia.faseEmylia;
   // A fase do Negócio em diante que o guia mostra: a da Emylia ou, enquanto a leitura não acaba (ou falhou), a que o CRM mostra, com o estado dito.
   const faseNova = faseEmylia ?? (emylia.leituraBloqueia ? emylia.faseDoCrm : null);
@@ -98,7 +104,13 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
   const passoAtual = itemGuia ? passoDoItem(itemGuia).id : null;
   const comDocumento = passoAtual !== null && ehPassoDeDocumento(passoAtual) && documentos?.pode(passoAtual, negocio.id) === true;
   // UMA só barra: Por contactar, Contactado, Visita, Orçamento, Proposta, Contrato, Financeiro, Obra (o Levantamento é o fim da Visita).
-  const fasesDoGuia = barraUnica({ faseDoItem: itemGuia?.fase ?? null, fasesDoNegocio: fases, faseEmylia: faseNova, perdido: negocio.estadoReal === "perdido" });
+  const contratoAssinado = negocio.contrato?.estado === "assinado" && negocio.estadoReal !== "perdido";
+  // A fase atual vem da MESMA função que o quadro usa (faseDoPipeline): a mais avançada entre a da Emylia, a da coluna, a do que o negócio tem e a gravada em negocios.fase.
+  const fasesDoGuia = barraUnica({
+    faseDoItem: itemGuia?.fase ?? null, fasesDoNegocio: fases, faseEmylia: faseNova, perdido: negocio.estadoReal === "perdido",
+    tem: { chamadas: ligados.contactos, visitas: ligados.visitasMarcadas, levantamento: ligados.levantamentos > 0 || ligados.comLevantamentoEscrito, orcamentos: itemGuia?.orcamentos ?? 0, proposta: false, contrato: contratoAssinado },
+    faseGravada: emylia.e.d?.fase ?? null,
+  });
   const doPassoBase = itemGuia && (!semPasso || faseNova !== null) ? calcularPassoGuiado(itemGuia, {
     dados: dadosDoGuia(pessoa ?? { nome: negocio.pessoa, contacto: negocio.contacto }, doNegocio, t, negocio),
     fases: fasesDoGuia,
@@ -192,6 +204,9 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
           <Prazo prazo={negocio.proximoPrazo} hoje={hoje} />
           {/* «Sem orçamento escolhido» é o normal de um negócio ainda na abordagem: não é um alerta a mostrar no guia. */}
           {saudeDoNegocio(negocio, hoje) !== "semOrcamento" && <SaudeTag negocio={negocio} hoje={hoje} />}
+          {/* A saída da Visita: com o levantamento guardado, «Passar para o Negócio» (o que falta responder é opcional e não bloqueia). Acrescenta-se ao que o
+              assistente mostra; não muda nenhum passo da Visita nem do Levantamento. */}
+          <PassarParaNegocio acao={emylia.passar} erro={emylia.e.gravacao.k === "erro" ? emylia.e.gravacao.t : null} />
           {/* A leitura acabou e a organização não devolveu o negócio: fica o fluxo do CRM, mas diz-se (e deixa tentar outra vez). */}
           {emylia.semNegocioNaEmylia && (
             <EstadoHonesto titulo={t("pessoasPagina.real.neg.porLer.titulo")}>

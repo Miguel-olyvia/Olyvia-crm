@@ -35,7 +35,10 @@ export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoa
   // Um cartão de negócio abre a pessoa com ESSE negócio aberto; um de pessoa em abordagem abre só a pessoa.
   const negocioId = cartao.tipo === "negocio" ? cartao.id : undefined;
   const acao = useAcaoDoPasso(item, () => aoAbrir(cartao.pessoaId, negocioId));
-  const passo = cartao.passo === "nenhum" ? null : t(item ? passoDoItem(item).chave : `pessoasPagina.next.${cartao.passo}`);
+  // Na coluna «Levantamento» (grupo Negócio) o levantamento já está guardado (a base só põe lá negócios com levantamento): o passo é o seguinte da Emylia, «Criar o
+  // orçamento», e o botão abre a ficha (que abre em Negócio) em vez de abrir o painel do levantamento.
+  const jaComLevantamento = cartao.tipo === "negocio" && cartao.coluna === "levantamento";
+  const passo = cartao.passo === "nenhum" ? null : t(jaComLevantamento ? "pessoasPagina.todo.step.criarOrcamento" : item ? passoDoItem(item).chave : `pessoasPagina.next.${cartao.passo}`);
   const prazo = textoPrazoPasso(t, cartao.prazo, hoje);
   const trabalho = trabalhoDoItem(t, cartao);
   return (
@@ -65,8 +68,8 @@ export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoa
         <Button
           type="button" variant="outline" className={cn("h-auto min-h-11 w-full justify-start py-2 whitespace-normal text-left motion-reduce:transition-none", FOCO)}
           // Começa pelo texto visível (WCAG 2.5.3) e diz de que trabalho é; "(abre a ficha)" só nos passos que ainda não executam.
-          aria-label={t(acao.executa ? "pessoasPagina.board.step" : "pessoasPagina.board.stepOpens", { step: passo, work: trabalho, name: cartao.nome })}
-          onClick={acao.aoClicar} {...acao.atributos}
+          aria-label={t(acao.executa && !jaComLevantamento ? "pessoasPagina.board.step" : "pessoasPagina.board.stepOpens", { step: passo, work: trabalho, name: cartao.nome })}
+          onClick={jaComLevantamento ? () => aoAbrir(cartao.pessoaId, negocioId) : acao.aoClicar} {...(jaComLevantamento ? {} : acao.atributos)}
         >
           {passo}
         </Button>

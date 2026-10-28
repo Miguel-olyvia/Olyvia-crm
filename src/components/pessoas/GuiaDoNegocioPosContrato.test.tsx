@@ -16,7 +16,7 @@ import { ProcessoContext, type ProcessoValor } from "./processo/processoContexto
 import type { ItemProcesso } from "./processo/tiposProcesso";
 
 const m = vi.hoisted(() => ({
-  estado: { faseEmylia: null as string | null, faseDoCrm: null as string | null, leituraBloqueia: false, semNegocioNaEmylia: false, aPassar: false },
+  estado: { faseEmylia: null as string | null, faseDoCrm: null as string | null, leituraBloqueia: false, semNegocioNaEmylia: false, aPassar: false, passar: { visivel: false, razao: null as string | null, aFazer: false, fazer: () => undefined } as { visivel: boolean; razao: string | null; aFazer: boolean; fazer: () => void } },
   pedidos: [] as { faseDoItem: string | null; podeEditar: boolean; dados: Record<string, unknown> }[],
   reler: vi.fn(),
 }));
@@ -29,7 +29,7 @@ vi.mock("@/components/pessoas-processo/DocumentosDoNegocioReal", () => ({ useDoc
 vi.mock("./negocioEmylia/useNegocioEmyliaDoGuia", () => ({
   useNegocioEmyliaDoGuia: (_n: unknown, opcoes: { faseDoItem: string | null; podeEditar: boolean; dados: Record<string, unknown> }) => {
     m.pedidos.push(opcoes);
-    return { e: { reler: m.reler, leitura: { k: "pronto" } }, org: "org-1", repetirGravacao: vi.fn(), ...m.estado };
+    return { e: { reler: m.reler, leitura: { k: "pronto" }, gravacao: { k: "parado" } }, org: "org-1", repetirGravacao: vi.fn(), ...m.estado };
   },
 }));
 vi.mock("./negocioEmylia/NegocioEmyliaDoGuia", () => ({
@@ -44,7 +44,7 @@ vi.mock("./negocioEmylia/NegocioEmyliaDoGuia", () => ({
 beforeAll(prepararRadixNoJsdom);
 afterEach(() => {
   cleanup(); repor(); reporRegistos(); vi.clearAllMocks();
-  m.estado = { faseEmylia: null, faseDoCrm: null, leituraBloqueia: false, semNegocioNaEmylia: false, aPassar: false }; m.pedidos = [];
+  m.estado = { faseEmylia: null, faseDoCrm: null, leituraBloqueia: false, semNegocioNaEmylia: false, aPassar: false, passar: { visivel: false, razao: null, aFazer: false, fazer: () => undefined } }; m.pedidos = [];
 });
 
 const HOJE = "2026-10-28";
@@ -89,9 +89,10 @@ describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () 
     expect(within(fase("Financeiro")).getByText(/por fazer/i)).toBeInTheDocument();
   });
 
-  it("o Levantamento é o fim da Visita: a barra marca Visita como atual", () => {
+  it("um negócio na coluna Levantamento do quadro (levantamento guardado) abre com a fase NEGÓCIO destacada na barra, como o quadro o põe; a Visita fica nas «Fases feitas»", () => {
     abrir({ ...aberto, levantamento: undefined } as unknown as typeof aberto, itemDe("levantamento"));
-    expect(fase("Visita")).toHaveAttribute("aria-current", "step");
+    expect(fase("Negócio")).toHaveAttribute("aria-current", "step");
+    expect(within(fase("Visita")).getByText(/conclu/i)).toBeInTheDocument();
     expect(screen.queryByTestId("emylia")).toBeNull();
   });
 
@@ -133,6 +134,7 @@ describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () 
     abrir(aberto, itemDe("orcamento"));
     const o = m.pedidos.at(-1);
     expect(o?.faseDoItem).toBe("orcamento");
+    expect((o as { levantamentoGuardado?: boolean } | undefined)?.levantamentoGuardado).toBe(true);
     expect(o?.podeEditar).toBe(true);
     expect(o?.dados).toMatchObject({ pedidoCliente: "Trocar a banheira", email: "pedro@x.pt", chamadas: 0, visitas: 0, levantamentos: 0 });
   });
@@ -172,5 +174,46 @@ describe("a ficha do Pipeline, com uma só barra, do Por contactar à Obra", () 
     abrir({ ...aberto, estadoReal: "perdido" } as unknown as typeof aberto, undefined);
     expect(barra().queryByText("Financeiro")).toBeNull();
     expect(barra().queryByText("Obra")).toBeNull();
+  });
+});
+
+describe("a saída da Visita na ficha: «Passar para o Negócio»", () => {
+  const semLevantamento = { ...aberto, levantamento: undefined } as unknown as typeof aberto;
+
+  it("com o levantamento guardado e o assistente da Visita, a ficha (já na fase Negócio) oferece «Passar para o Negócio», e clicar faz a passagem", () => {
+    const fazer = vi.fn();
+    m.estado.passar = { visivel: true, razao: null, aFazer: false, fazer };
+    abrir(aberto, itemDe("levantamento"));
+    expect(fase("Negócio")).toHaveAttribute("aria-current", "step");
+    fireEvent.click(screen.getByRole("button", { name: /Passar para o Negócio/ }));
+    expect(fazer).toHaveBeenCalledTimes(1);
+  });
+
+  it("depois de passar a ficha fica em Negócio: a barra em Negócio e o ecrã da Emylia (Orçamento, Proposta, Contrato, Fim)", () => {
+    m.estado.faseEmylia = "negocio";
+    abrir(aberto, itemDe("levantamento"));
+    expect(fase("Negócio")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByTestId("emylia").textContent).toBe("EMYLIA fase=negocio atual=negocio vista=null passa=false");
+    expect(screen.queryByRole("button", { name: /Passar para o Negócio/ })).toBeNull();
+  });
+
+  it("com documentos do CRM ou sem permissão a saída aparece DESATIVADA, com a razão, e não faz nada", () => {
+    const fazer = vi.fn();
+    for (const razao of ["docsCrm", "semPermissao"]) {
+      m.estado.passar = { visivel: true, razao, aFazer: false, fazer };
+      abrir(aberto, itemDe("levantamento"));
+      const botao = screen.getByRole("button", { name: /Passar para o Negócio/ });
+      expect(botao).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByText(razao === "docsCrm" ? /orçamentos ou contratos do CRM/ : /permissão/i)).toBeInTheDocument();
+      fireEvent.click(botao);
+      cleanup();
+    }
+    expect(fazer).not.toHaveBeenCalled();
+  });
+
+  it("sem levantamento guardado não há saída", () => {
+    abrir(semLevantamento, itemDe("levantamento"));
+    expect(screen.queryByRole("button", { name: /Passar para o Negócio/ })).toBeNull();
+    expect((m.pedidos.at(-1) as { levantamentoGuardado?: boolean } | undefined)?.levantamentoGuardado).toBe(false);
   });
 });

@@ -15,8 +15,20 @@ describe("barraUnica (uma só barra, como a de /negocios: seis fases)", () => {
       "porContactar:feita", "contactado:atual", "visita:porFazer", "negocio:porFazer", "financeiro:porFazer", "obra:porFazer",
     ]);
   });
-  it("o Levantamento é o fim da fase Visita: a barra marca Visita como atual", () => {
-    expect(barraUnica({ ...base, faseDoItem: "levantamento" }).find((x) => x.estado === "atual")?.id).toBe("visita");
+  it("um negócio na coluna Levantamento do quadro (levantamento guardado) está na fase NEGÓCIO: a ficha e o quadro concordam", () => {
+    expect(barraUnica({ ...base, faseDoItem: "levantamento" }).find((x) => x.estado === "atual")?.id).toBe("negocio");
+  });
+  it("a barra avança assim que uma fase se conclui (pelo que o negócio tem), sem esperar pelo quadro", () => {
+    const tem = { chamadas: 0, visitas: 0, levantamento: false, orcamentos: 0, proposta: false, contrato: false };
+    const atual = (sobre: Partial<typeof tem>, item: string | null = "porContactar") => barraUnica({ ...base, faseDoItem: item, tem: { ...tem, ...sobre } }).find((x) => x.estado === "atual")?.id;
+    expect(atual({})).toBe("porContactar");
+    expect(atual({ chamadas: 1 })).toBe("contactado");
+    expect(atual({ chamadas: 1, visitas: 1 }, "contactado")).toBe("visita");
+    expect(atual({ chamadas: 1, visitas: 1, levantamento: true }, "visita")).toBe("negocio");
+  });
+  it("a fase gravada em negocios.fase conta, e nunca atrasa o que o negócio já tem", () => {
+    expect(barraUnica({ ...base, faseGravada: 2 }).find((x) => x.estado === "atual")?.id).toBe("visita");
+    expect(barraUnica({ ...base, faseGravada: 1, tem: { chamadas: 0, visitas: 0, levantamento: true, orcamentos: 0, proposta: false, contrato: false } }).find((x) => x.estado === "atual")?.id).toBe("negocio");
   });
   it("Orçamento, Proposta e Contrato do CRM são todos a fase Negócio", () => {
     for (const fase of ["orcamento", "proposta", "contrato"]) {
