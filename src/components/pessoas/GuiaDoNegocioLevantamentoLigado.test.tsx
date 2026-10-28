@@ -18,6 +18,8 @@ import { itensDaPessoa } from "./processo/itensProcesso";
 import { ProcessoContext, type ProcessoValor } from "./processo/processoContexto";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
+// Estes testes cobrem o fluxo do CRM, que se mantém para negócios com documentos do CRM: a leitura da Emylia fica simulada.
+vi.mock("./negocioEmylia/useNegocioEmyliaDoGuia", async () => (await import("./negocioEmylia/guiaCrmTeste")).moduloGuiaCrm());
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/hooks/pessoas/useComerciaisNegocio", () => ({
@@ -80,10 +82,11 @@ describe("negócio da base com chamada e levantamento ligado, sem orçamentos: a
     expect(screen.queryByText(/Criar o orçamento/)).toBeNull();
   });
 
-  it("a fase feita «Contacto» abre a chamada, só para ler, com o que ficou registado", () => {
+  it("a fase feita «Contactado» abre a chamada, só para ler, com o que ficou registado", () => {
     abrir();
     const feitas = screen.getByRole("navigation", { name: "Fases feitas" });
-    fireEvent.click(within(feitas).getByRole("button", { name: /^Contacto/ }));
+    // com a barra única a fase feita chama-se como a coluna do quadro (Contactado); abre o mesmo ecrã de sempre
+    fireEvent.click(within(feitas).getByRole("button", { name: /^Contactado/ }));
     expect(screen.getByText(/fase feita/)).toBeInTheDocument();
     expect(screen.getByDisplayValue("927 118 300")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Voltar ao passo atual" })).toBeInTheDocument();

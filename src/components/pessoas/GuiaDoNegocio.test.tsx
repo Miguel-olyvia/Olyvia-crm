@@ -17,6 +17,8 @@ import type { ItemProcesso } from "./processo/tiposProcesso";
 
 const { levantamentoPode } = vi.hoisted(() => ({ levantamentoPode: { valor: true } }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
+// Estes testes cobrem o fluxo do CRM (criar orçamento, proposta, contrato), que se mantém para negócios com documentos do CRM: a leitura da Emylia fica simulada.
+vi.mock("./negocioEmylia/useNegocioEmyliaDoGuia", async () => (await import("./negocioEmylia/guiaCrmTeste")).moduloGuiaCrm());
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/hooks/pessoas/useComerciaisNegocio", () => ({

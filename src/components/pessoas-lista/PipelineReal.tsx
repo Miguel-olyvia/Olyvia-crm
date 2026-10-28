@@ -3,6 +3,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { MIN_PESQUISA } from "@/hooks/pessoas/listaPessoasTipos";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useQuadroPessoas } from "@/hooks/pessoas/useQuadroPessoas";
+import { useQuadroPosContrato } from "@/hooks/pessoas/useQuadroPosContrato";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { AcoesCabecalhoPessoas } from "./AcoesCabecalhoPessoas";
 import { BarraListaReal } from "./BarraListaReal";
@@ -23,21 +24,29 @@ export function PipelineReal() {
   const utilizadorId = fonte.modo === "real" ? (fonte.utilizadorId ?? null) : null;
   const f = useFiltrosLista(utilizadorId);
   const quadro = useQuadroPessoas({ papel: f.filtros.papel, pesquisa: f.filtros.pesquisa, ordem: f.filtros.ordem }, true);
+  // Financeiro e Obra: leitura à parte, com os mesmos filtros (o Quadro das sete colunas não muda).
+  const posContrato = useQuadroPosContrato({ papel: f.filtros.papel, pesquisa: f.filtros.pesquisa, ordem: f.filtros.ordem }, true);
   const aberta = usePessoaAberta();
   // As setas da ficha seguem as pessoas únicas pela ordem das colunas (só as carregadas).
-  const idsVisiveis = useMemo(() => [...new Set(quadro.cartoes.map((c) => c.pessoaId))], [quadro.cartoes]);
+  const idsVisiveis = useMemo(
+    () => [...new Set([...quadro.cartoes, ...posContrato.cartoes].map((c) => c.pessoaId))],
+    [quadro.cartoes, posContrato.cartoes],
+  );
   // O quadro só tem negócios: passar à pessoa seguinte (`[` e `]`) abre o primeiro negócio dela que está no quadro, nunca só a pessoa.
   const { aoIrPara } = aberta;
   const irParaPessoa = useCallback(
-    (id: string) => aoIrPara(id, quadro.cartoes.find((c) => c.pessoaId === id)?.id),
-    [aoIrPara, quadro.cartoes],
+    (id: string) => aoIrPara(id, [...quadro.cartoes, ...posContrato.cartoes].find((c) => c.pessoaId === id)?.id),
+    [aoIrPara, quadro.cartoes, posContrato.cartoes],
   );
-  const contagem = t(`${R}board.subtitle`, { n: quadro.cartoes.length });
+  const contagem = t(`${R}board.subtitle`, { n: quadro.cartoes.length + posContrato.cartoes.length });
   const dicaPendente = f.pesquisa.trim().length > 0 && f.pesquisa.trim().length < MIN_PESQUISA;
+  // O estado de Financeiro e Obra entra no anúncio (a contagem da página só soma o que já se leu).
+  const estadoPos = posContrato.indisponivel ? t(`${R}board.pos.unavailable`) : posContrato.isError ? t(`${R}board.pos.error`) : posContrato.isLoading ? t(`${R}board.pos.loading`) : "";
   const anuncio = [
     contagem,
     t(`${R}orderAnnounce`, { ordem: t(`${R}order.${f.filtros.ordem}`) }),
     textoEstadoQuadro(t, quadro),
+    estadoPos,
     dicaPendente ? t(`${R}searchHint`) : "",
   ].filter(Boolean).join(". ");
   const conteudo = (
@@ -55,7 +64,7 @@ export function PipelineReal() {
       <div role="status" aria-live="polite" className="sr-only">{anuncio}</div>
       <div aria-live="polite" className="sr-only">{aberta.mensagemAcao}</div>
       <QuadroReal
-        quadro={quadro} aoAbrir={aberta.aoAbrirQuadro} aoLimpar={f.limpar}
+        quadro={quadro} posContrato={posContrato} aoAbrir={aberta.aoAbrirQuadro} aoLimpar={f.limpar}
         temFiltros={f.filtros.papel !== null || f.filtros.pesquisa.trim().length >= MIN_PESQUISA}
       />
     </div>

@@ -5,7 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import type { FiltrosQuadro } from "@/hooks/pessoas/quadroPessoasTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
-import { cartaoQuadro, quadroBase } from "./fabricaQuadro";
+import { cartaoQuadro, quadroBase, quadroPosContratoBase } from "./fabricaQuadro";
 import { PipelineReal } from "./PipelineReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
@@ -25,6 +25,8 @@ const quadroMock = vi.hoisted(() => vi.fn());
 const fichaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (...a: unknown[]) => listaMock(...a) }));
 vi.mock("@/hooks/pessoas/useQuadroPessoas", () => ({ useQuadroPessoas: (f: FiltrosQuadro, ativo?: boolean) => quadroMock(f, ativo) }));
+const posMock = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/pessoas/useQuadroPosContrato", () => ({ useQuadroPosContrato: (f: FiltrosQuadro, ativo?: boolean) => posMock(f, ativo) }));
 vi.mock("./FichaReal", () => ({
   FichaReal: (p: { pessoaId: string | null; idsVisiveis: string[]; negocioInicial: string | null; children?: unknown }) => { fichaMock(p); return p.children; },
 }));
@@ -60,25 +62,51 @@ beforeEach(() => {
   listaMock.mockReset();
   quadroMock.mockReset().mockReturnValue(quadroBase({}, CARTOES));
   fichaMock.mockReset();
+  posMock.mockReset().mockReturnValue(quadroPosContratoBase());
 });
 
 describe("PipelineReal: só o quadro", () => {
-  it("mostra as 3 colunas da abordagem e a coluna Negócio (sem sub-fases), sem tabela nem seletor de vista, e o título Pipeline", () => {
+  it("mostra as 3 colunas da abordagem, a coluna Negócio (sem sub-fases) e as colunas Financeiro e Obra, sem tabela nem seletor de vista, e o título Pipeline", () => {
     desenhar();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByRole("button", { name: "Lista" })).toBeNull();
-    // 3 colunas de abordagem + a coluna única Negócio.
-    expect(screen.getAllByRole("region")).toHaveLength(4);
+    // 3 colunas de abordagem + a coluna única Negócio + Financeiro e Obra.
+    expect(screen.getAllByRole("region")).toHaveLength(6);
     expect(screen.getByRole("heading", { name: "Pipeline" })).toBeInTheDocument();
   });
 
-  it("as colunas vêm por ordem: Novo, Contactado, Visita e Negócio", () => {
+  it("as colunas vêm por ordem: Novo, Contactado, Visita, Negócio, Financeiro e Obra", () => {
     desenhar();
     const nomes = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label") ?? r.textContent ?? "");
     expect(nomes[0]).toMatch(/^Novo/);
     expect(nomes[2]).toMatch(/^Visita/);
     expect(nomes[3]).toMatch(/^Negócio/);
-    expect(nomes).toHaveLength(4);
+    expect(nomes[4]).toMatch(/^Financeiro/);
+    expect(nomes[5]).toMatch(/^Obra/);
+    expect(nomes).toHaveLength(6);
+  });
+
+  it("o anúncio da página diz o estado de Financeiro e Obra (a carregar, em erro, sem a coluna na base)", () => {
+    const regiao = () => document.querySelector("[role='status'][aria-live='polite'].sr-only")?.textContent ?? "";
+    posMock.mockReturnValue(quadroPosContratoBase({ isLoading: true }));
+    const { unmount } = desenhar();
+    expect(regiao()).toMatch(/A carregar/);
+    unmount();
+    posMock.mockReturnValue(quadroPosContratoBase({ isError: true }));
+    const outra = desenhar();
+    expect(regiao()).toMatch(/Não foi possível carregar as colunas Financeiro e Obra/);
+    outra.unmount();
+    posMock.mockReturnValue(quadroPosContratoBase({ indisponivel: true }));
+    desenhar();
+    expect(regiao()).toMatch(/ainda não está disponível/);
+  });
+
+  it("usa useQuadroPosContrato com os mesmos filtros do quadro e ativo", () => {
+    desenhar();
+    expect(ultima(posMock)[1]).toBe(true);
+    expect(ultima(posMock)[0]).toEqual({ papel: null, pesquisa: "", ordem: "recentes" });
+    fireEvent.click(screen.getByRole("button", { name: "Clientes" }));
+    expect(ultima(posMock)[0]).toEqual({ papel: "cliente", pesquisa: "", ordem: "recentes" });
   });
 
   it("usa useQuadroPessoas(filtros, true) e nunca a lista", () => {

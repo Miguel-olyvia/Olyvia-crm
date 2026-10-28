@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,8 @@ interface QuadroPessoasProps {
   rotulosColuna?: Partial<Record<ColunaQuadro, string>>;
   /** O aviso de quadro vazio é de quem usa o quadro (o real tem os seus textos). */
   semAvisoVazio?: boolean;
+  /** Colunas a acrescentar a seguir à coluna Negócio, dentro do mesmo grupo (no Pipeline real: Financeiro e Obra). */
+  colunasExtra?: ReactNode;
 }
 
 /** A faixa de cada coluna: as de negócio usam a cor da fase; as da abordagem, tons do texto secundário (a fase diz-se sempre por texto). */
@@ -231,7 +233,7 @@ function ColunaNegocios({ cartoes, totais, aCarregarMais, carregarMaisDesativado
  */
 export function QuadroPessoas({
   cartoes, hoje, chip, aoAbrir, aoLimpar, itens, totais, aoCarregarMais, aCarregarMais, carregarMaisDesativado, colunasComErro, rotulosColuna,
-  semAvisoVazio,
+  semAvisoVazio, colunasExtra,
 }: QuadroPessoasProps) {
   const { t } = useTranslation();
   return (
@@ -249,6 +251,7 @@ export function QuadroPessoas({
           cartoes={cartoes} hoje={hoje} itens={itens} aoAbrir={aoAbrir} totais={totais} aoCarregarMais={aoCarregarMais}
           aCarregarMais={aCarregarMais} carregarMaisDesativado={carregarMaisDesativado} colunasComErro={colunasComErro}
         />
+        {colunasExtra}
       </div>
     </div>
   );

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { ATRIBUTO_NEGOCIO, COLUNAS_QUADRO, type ColunaQuadro } from "@/components/pessoas/quadro/cartoesQuadroPessoas";
 import { QuadroPessoas, type TotaisColuna } from "@/components/pessoas/quadro/QuadroPessoas";
+import { QuadroPosContrato } from "@/components/pessoas/quadro/QuadroPosContrato";
+import type { QuadroPosContratoEstado } from "@/hooks/pessoas/useQuadroPosContrato";
 import { useAtalhosPessoas } from "@/components/pessoas/useAtalhosPessoas";
 
 const R = "pessoasPagina.real.";
@@ -17,6 +19,8 @@ interface QuadroRealProps {
   /** Abre a ficha da pessoa JÁ no negócio do cartão: o quadro só tem negócios, por isso o negócio vai sempre. */
   aoAbrir: (pessoaId: string, negocioId: string) => void;
   aoLimpar: () => void;
+  /** Só no Pipeline: as colunas Financeiro e Obra (depois do contrato). Sem isto o quadro tem as 4 colunas de sempre. */
+  posContrato?: QuadroPosContratoEstado;
 }
 
 /** O texto de estado que o contentor live da PÁGINA anuncia (uma região só, por ordem de importância). */
@@ -70,7 +74,7 @@ function useAnuncioCarregarMais(quadro: QuadroPessoasEstado, nomeDe: (c: ColunaQ
  * estados de carregamento, vazio e erro. Não se arrastam cartões (a coluna deriva dos documentos do negócio); o nome e o botão do passo
  * abrem a ficha. Atalhos j/k/setas, `o` e `/` como na Lista do exemplo. Os dados vêm de `useQuadroPessoas`.
  */
-export function QuadroReal({ quadro, temFiltros, aoAbrir, aoLimpar }: QuadroRealProps) {
+export function QuadroReal({ quadro, temFiltros, aoAbrir, aoLimpar, posContrato }: QuadroRealProps) {
   const { t } = useTranslation();
   const raiz = useRef<HTMLDivElement>(null);
   const nomeDe = (c: ColunaQuadro): string => t(c === "porContactar" ? `${R}board.colNew` : `pessoasPagina.board.col.${c}`);
@@ -110,7 +114,9 @@ export function QuadroReal({ quadro, temFiltros, aoAbrir, aoLimpar }: QuadroReal
     );
   }
   if (quadro.isLoading) return <>{regiaoViva}<p className="p-4 text-sm text-muted-foreground">{t(`${R}board.loading`)}</p></>;
-  const vazio = cartoes.length === 0 && !quadro.aMostrarAnterior;
+  // Financeiro e Obra ainda a carregar, em erro ou sem a coluna na base: não se diz «vazio» (podem ter cartões que ainda não se sabe).
+  const posIncompleto = posContrato !== undefined && (posContrato.isLoading || posContrato.isError || posContrato.indisponivel);
+  const vazio = cartoes.length === 0 && (posContrato?.cartoes.length ?? 0) === 0 && !posIncompleto && !quadro.aMostrarAnterior;
   return (
     <div ref={raiz} onKeyDown={aoTeclar} className="space-y-3">
       {regiaoViva}
@@ -130,6 +136,7 @@ export function QuadroReal({ quadro, temFiltros, aoAbrir, aoLimpar }: QuadroReal
         cartoes={cartoes} hoje={hojeLisboa()} chip="todas" aoAbrir={abrirNegocio} aoLimpar={aoLimpar} semAvisoVazio
         totais={totais} aoCarregarMais={quadro.carregarMais} aCarregarMais={quadro.aCarregarMais} carregarMaisDesativado={quadro.aMostrarAnterior}
         colunasComErro={comErro} rotulosColuna={rotulos}
+        colunasExtra={posContrato ? <QuadroPosContrato estado={posContrato} aoAbrir={abrirNegocio} /> : undefined}
       />
     </div>
   );

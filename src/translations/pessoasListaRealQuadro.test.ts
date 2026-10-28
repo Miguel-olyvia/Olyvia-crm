@@ -9,6 +9,7 @@ const MARCADORES: Record<string, string[]> = {
   colNew: [], subtitle: ["{n}"], loading: [], updating: [], error: [], refreshWarn: [], emptyAll: [], emptyFiltered: [],
   showing: ["{shown}", "{total}"], loadMore: ["{n}"], loadMoreLabel: ["{column}", "{n}"], loadingMore: ["{column}"],
   loadedMore: ["{column}", "{n}", "{shown}", "{total}"], loadMoreError: [], retry: [], stalled: ["{n}"],
+  "pos.loading": [], "pos.unavailable": [], "pos.error": [], "pos.step.pagamentoPorValidar": [], "pos.step.obraPorAbrir": [],
 };
 
 describe("traduções do Quadro real das Pessoas", () => {
@@ -23,6 +24,17 @@ describe("traduções do Quadro real das Pessoas", () => {
   it("a coluna «Novo» chama-se Novo em português e New em inglês", () => {
     expect(pt["pessoasPagina.real.board.colNew"]).toBe("Novo");
     expect(en["pessoasPagina.real.board.colNew"]).toBe("New");
+  });
+
+  it("as colunas Financeiro e Obra têm título nas duas línguas e chegam à página", () => {
+    for (const k of ["pessoasPagina.board.col.financeiro", "pessoasPagina.board.col.obra"]) {
+      expect(pt[k]?.trim(), k).toBeTruthy();
+      expect(en[k]?.trim(), k).toBeTruthy();
+      expect(pessoasPaginaTranslations.pt[k]).toBe(pt[k]);
+      expect(pessoasPaginaTranslations.en[k]).toBe(en[k]);
+    }
+    expect(pt["pessoasPagina.board.col.financeiro"]).toBe("Financeiro");
+    expect(pt["pessoasPagina.board.col.obra"]).toBe("Obra");
   });
 
   it("chegam à página nas duas línguas", () => {

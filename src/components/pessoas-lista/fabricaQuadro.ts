@@ -3,6 +3,7 @@ import type { CartaoQuadro, ColunaQuadro } from "@/components/pessoas/quadro/car
 import { COLUNAS_QUADRO } from "@/components/pessoas/quadro/cartoesQuadroPessoas";
 import type { ColunasQuadro, EstadoColuna } from "@/hooks/pessoas/quadroPessoasTipos";
 import type { QuadroPessoasEstado } from "@/hooks/pessoas/useQuadroPessoas";
+import type { QuadroPosContratoEstado } from "@/hooks/pessoas/useQuadroPosContrato";
 
 export function cartaoQuadro(id: string, sobre: Partial<CartaoQuadro> = {}): CartaoQuadro {
   return {
@@ -28,6 +29,15 @@ export function colunasDe(cartoes: readonly CartaoQuadro[], extras: Partial<Reco
 export function moduloSemQuadro() {
   const calmo = quadroBase();
   return { useQuadroPessoas: () => calmo };
+}
+
+/** O estado calmo das colunas Financeiro e Obra (o que useQuadroPosContrato devolve), sem cartões. */
+export function quadroPosContratoBase(sobre: Partial<QuadroPosContratoEstado> = {}): QuadroPosContratoEstado {
+  const vazia = { cartoes: [], cursor: null, haMais: false, total: 0, valor: 0 };
+  return {
+    colunas: { financeiro: { ...vazia }, obra: { ...vazia } }, cartoes: [], isLoading: false, isError: false, erro: null, indisponivel: false,
+    aCarregarMais: new Set(), errosAoCarregarMais: {}, carregarMais: () => false, recarregar: () => undefined, ...sobre,
+  };
 }
 
 export function quadroBase(sobre: Partial<QuadroPessoasEstado> = {}, cartoes: readonly CartaoQuadro[] = [], extras: Parameters<typeof colunasDe>[1] = {}): QuadroPessoasEstado {

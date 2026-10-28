@@ -21,6 +21,14 @@ const quadroMock = vi.hoisted(() => vi.fn());
 const fichaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: () => ({}) }));
 vi.mock("@/hooks/pessoas/useQuadroPessoas", () => ({ useQuadroPessoas: (f: FiltrosQuadro, ativo?: boolean) => quadroMock(f, ativo) }));
+// Financeiro e Obra: sem cartões (este teste é da ficha, não das colunas do pós-contrato, que têm os seus).
+const colunaVazia = { cartoes: [], cursor: null, haMais: false, total: 0, valor: 0 };
+vi.mock("@/hooks/pessoas/useQuadroPosContrato", () => ({
+  useQuadroPosContrato: () => ({
+    colunas: { financeiro: colunaVazia, obra: colunaVazia }, cartoes: [], isLoading: false, isError: false, erro: null, indisponivel: false,
+    aCarregarMais: new Set(), errosAoCarregarMais: {}, carregarMais: () => false, recarregar: () => undefined,
+  }),
+}));
 vi.mock("@/hooks/pessoas/useFichaPessoa", () => ({ useFichaPessoa: (id: string | null) => fichaMock(id) }));
 vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({
   useAcoesFichaReal: () => ({
