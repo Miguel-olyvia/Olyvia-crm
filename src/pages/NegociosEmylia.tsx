@@ -43,13 +43,14 @@ const PAGINA_REAL: Partial<Record<Vista, string>> = {
 /** As mesmas ligações, ao lado dos separadores (como o menu do protótipo). */
 const LIGACOES: [string, string][] = [["Pessoas", "/pessoas"], ["Inventário", "/client-orders"], ["Catálogo e custos", "/catalogo-custos"]];
 
-export default function NegociosEmylia() {
+/** `vistaInicial`: a vista ao abrir sem ?vista= (a primeira página, /home, abre no Hoje). */
+export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje" | "operacoes" } = {}) {
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
   // ?vista=operacoes (o "Operações" do menu) ou ?vista=hoje abre logo essa vista; o resto abre os Negócios
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const vistaPedida = params.get("vista");
+  const vistaPedida = params.get("vista") ?? vistaInicial ?? null;
   const S = useMemo<Estado>(() => {
     const s = seed(); s.deals = []; s.clientes = []; s.deal = null;
     s.view = vistaPedida === "operacoes" || vistaPedida === "hoje" ? vistaPedida : "negocios";
