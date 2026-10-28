@@ -142,12 +142,21 @@ export const topLevelItems: TopLevelItem[] = [
     permissions: ["scheduling.items.view"],
   },
   {
+    // Emylia (decisão de 27/10): as Operações vivem no CRM e a operacao-app deixa de se usar. Abre as Obras do /negocios.
     id: "operacao",
-    to: "/operacao",
+    to: "/negocios?vista=operacoes",
     icon: Wrench,
     labelKey: "sidebar.operations",
     permissions: ["operations.view"],
-    external: true,
+  },
+  {
+    // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços. 28/10: sai de Organizações para o topo, como no
+    // protótipo. As páginas antigas (/products, /services, categorias, marcas, pacotes…) continuam pelo endereço até à limpeza.
+    id: "catalogo",
+    to: "/catalogo-custos",
+    icon: Package,
+    labelKey: "sidebar.catalogoCustos",
+    permissions: ["services.view"],
   },
 ];
 
@@ -156,7 +165,7 @@ export const menuSections: MenuSection[] = [
     id: "organizations",
     icon: Building,
     labelKey: "sidebar.organizations",
-    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees", "/catalogo-custos"],
+    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees"],
     permissions: ["organizations.view", "products.view", "services.view"],
     items: [
       { to: "/organizations", icon: Building, labelKey: "sidebar.organizations", permission: "organizations.view" },
@@ -164,28 +173,16 @@ export const menuSections: MenuSection[] = [
       { to: "/flow-builder", icon: Zap, labelKey: "sidebar.flowBuilder", permission: "flow_builder.view" },
       { to: "/org-help", icon: HelpCircle, labelKey: "sidebar.help", permission: "organizations.view" },
     ],
-    subSections: [
-      // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços no menu.
-      // As páginas antigas (/products, /services, categorias, marcas, pacotes…) continuam pelo endereço até à limpeza.
-      {
-        key: "catalogo",
-        labelKey: "sidebar.catalogoCustos",
-        items: [
-          { to: "/catalogo-custos", icon: Package, labelKey: "sidebar.catalogoCustos", permission: "services.view" },
-        ],
-      },
-    ],
   },
   {
     id: "crm",
     icon: UsersRound,
     labelKey: "sidebar.crm",
-    paths: ["/pessoas", "/pipeline", "/negocios", "/leads/pending-submissions"],
+    paths: ["/pessoas", "/negocios", "/leads/pending-submissions"],
     permissions: ["pessoas.view", "platform.pending_submissions.view"],
     items: [
       { to: "/pessoas", icon: UsersRound, labelKey: "sidebar.people", permission: "pessoas.view", requiresNegociosAtivos: true },
-      { to: "/pipeline", icon: Target, labelKey: "sidebar.pipeline", permission: "pessoas.view", requiresNegociosAtivos: true },
-      // Emylia (decisão 11, 27/10): os Negócios da Emylia desde a lead, ao lado do Pipeline (que voltou ao menu a 28/10)
+      // Emylia (decisão 11, 27/10): os Negócios da Emylia desde a lead. 28/10 (noite, Rúben): o Pipeline sai do menu; /pipeline fica pelo endereço
       { to: "/negocios", icon: Target, labelKey: "sidebar.negociosEmylia", permission: "pessoas.view", requiresNegociosAtivos: true },
       { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "platform.pending_submissions.view" },
     ],

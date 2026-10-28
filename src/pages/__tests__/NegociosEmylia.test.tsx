@@ -57,6 +57,20 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     expect(rpc.mock.calls.filter(([fn]) => fn === "obra_guardar_negocio")).toHaveLength(0);
   });
 
+  it("o Hoje e as Operações abrem na página (Fase 3), também como técnico, sem o aviso de ecrã por ligar e sem gravar", async () => {
+    render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+    fireEvent.click(screen.getByRole("button", { name: "Operações" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Operações" }).getAttribute("aria-current")).toBe("page"));
+    fireEvent.click(screen.getByRole("button", { name: "Hoje" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Hoje" }).getAttribute("aria-current")).toBe("page"));
+    fireEvent.change(screen.getByLabelText("A ver como"), { target: { value: "tecnico" } });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.getByRole("button", { name: "Hoje" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByText("Este ecrã ainda não está ligado")).toBeNull();
+    expect(rpc.mock.calls.filter(([fn]) => fn === "neg_guardar_negocio" || fn === "obra_guardar_negocio")).toHaveLength(0);
+  });
+
   it("um negócio novo nasce pela Nova lead do CRM, fica com o número da base e grava", async () => {
     render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
     await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });

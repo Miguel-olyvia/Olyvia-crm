@@ -6,15 +6,14 @@ import { menuSections } from "./menuConfig";
 const crm = menuSections.find((s) => s.id === "crm")!;
 const item = (to: string) => crm.items.find((i) => i.to === to)!;
 
-describe("menuConfig: o grupo CRM (Pessoas e Pipeline)", () => {
-  // 28/10: o Pipeline voltou ao menu, ao lado dos Negócios da Emylia (/negocios)
-  it("tem Pessoas, Pipeline, Negócios e a fila de submissões, e já não tem Leads nem Clientes", () => {
-    expect(crm.items.map((i) => i.to)).toEqual(["/pessoas", "/pipeline", "/negocios", "/leads/pending-submissions"]);
+describe("menuConfig: o grupo CRM (Pessoas e Negócios)", () => {
+  // 28/10 (noite, Rúben): o Pipeline sai do menu; /pipeline fica pelo endereço
+  it("tem Pessoas, Negócios e a fila de submissões, e já não tem Pipeline, Leads nem Clientes", () => {
+    expect(crm.items.map((i) => i.to)).toEqual(["/pessoas", "/negocios", "/leads/pending-submissions"]);
   });
 
-  it("Pessoas, Pipeline e Negócios pedem pessoas.view e o interruptor da organização", () => {
+  it("Pessoas e Negócios pedem pessoas.view e o interruptor da organização", () => {
     expect(item("/pessoas")).toMatchObject({ permission: "pessoas.view", requiresNegociosAtivos: true });
-    expect(item("/pipeline")).toMatchObject({ permission: "pessoas.view", requiresNegociosAtivos: true, labelKey: "sidebar.pipeline" });
     expect(item("/negocios")).toMatchObject({ permission: "pessoas.view", requiresNegociosAtivos: true, labelKey: "sidebar.negociosEmylia" });
   });
 
@@ -24,7 +23,8 @@ describe("menuConfig: o grupo CRM (Pessoas e Pipeline)", () => {
   });
 
   it("os caminhos e as permissões do grupo seguem os itens", () => {
-    expect(crm.paths).toEqual(expect.arrayContaining(["/pessoas", "/pipeline", "/leads/pending-submissions"]));
+    expect(crm.paths).toEqual(expect.arrayContaining(["/pessoas", "/negocios", "/leads/pending-submissions"]));
+    expect(crm.paths).not.toContain("/pipeline");
     expect(crm.paths).not.toContain("/leads");
     expect(crm.paths).not.toContain("/clients");
     expect(crm.permissions).toEqual(expect.arrayContaining(["pessoas.view", "platform.pending_submissions.view"]));

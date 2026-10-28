@@ -847,7 +847,7 @@ export const translations = {
     'sidebar.organizations': 'Organizations',
     'sidebar.productsList': 'Products',
     'sidebar.catalogoCustos': 'Catalog and costs',
-    'sidebar.negociosEmylia': 'Deals',
+    'sidebar.negociosEmylia': 'Negócios',
     'organizations.title': 'Organizations',
     'organizations.subtitle': 'Manage your organizational structure',
     'organizations.create': 'Create Organization',

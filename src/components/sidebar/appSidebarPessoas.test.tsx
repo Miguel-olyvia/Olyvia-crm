@@ -145,9 +145,9 @@ describe("menu: o item «Pessoas»", () => {
     expect(ultimaOpcao()).toEqual({ habilitado: false });
   });
 
-  // 28/10: o Pipeline voltou ao menu, ao lado dos Negócios da Emylia (/negocios)
-  it("só os itens /pessoas, /pipeline e /negocios dependem do interruptor", () => {
+  // 28/10 (noite, Rúben): o Pipeline sai do menu
+  it("só os itens /pessoas e /negocios dependem do interruptor", () => {
     const itens = menuSections.flatMap((s) => [...s.items, ...(s.subSections?.flatMap((x) => x.items) ?? [])]);
-    expect(itens.filter((i) => i.requiresNegociosAtivos).map((i) => i.to)).toEqual(["/pessoas", "/pipeline", "/negocios"]);
+    expect(itens.filter((i) => i.requiresNegociosAtivos).map((i) => i.to)).toEqual(["/pessoas", "/negocios"]);
   });
 });
