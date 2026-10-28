@@ -9,7 +9,9 @@ export interface IdsServico { paraId: ReadonlyMap<string, string>; paraChave: Re
 export const idsServico = (chaveParaId: ReadonlyMap<string, string>): IdsServico =>
   ({ paraId: chaveParaId, paraChave: new Map([...chaveParaId].map(([k, v]) => [v, k])) });
 
-export interface NegocioLido { id: string; entityId: string; estadoCrm: string; fluxoEmylia: boolean; linhas: LinhasNegocio }
+/** docsCrm: o negócio tem orçamentos, contratos ou vendas diretas do CRM (20261231994000). Lê-se, mas não se grava por aqui: a base
+ *  recusa-o (NE005) e abre-se em Contratos/Propostas. */
+export interface NegocioLido { id: string; entityId: string; estadoCrm: string; fluxoEmylia: boolean; docsCrm: boolean; linhas: LinhasNegocio }
 
 /** Troca os serviços de cada sítio onde aparecem (lista dos serviços da visita, produtos, linhas e produtos de cada versão). */
 function trocarServicos(L: LinhasNegocio, f: (s: string | null) => string | null): LinhasNegocio {
@@ -34,16 +36,16 @@ export function paraBase(L: LinhasNegocio, ids: IdsServico): LinhasNegocio {
 
 /** O que a base devolve, para um negócio, de volta às linhas com as chaves da Emylia. */
 export function deBase(j: unknown, ids: IdsServico): NegocioLido {
-  const o = j as LinhasNegocio & { negocio: LinhasNegocio["negocio"] & { id: string; entity_id: string; estado_crm: string; fluxo_emylia: boolean } };
+  const o = j as LinhasNegocio & { negocio: LinhasNegocio["negocio"] & { id: string; entity_id: string; estado_crm: string; fluxo_emylia: boolean; docs_crm?: boolean } };
   const n = { ...o.negocio } as Record<string, unknown>;
-  const id = String(n.id), entityId = String(n.entity_id), estadoCrm = String(n.estado_crm), fluxoEmylia = !!n.fluxo_emylia;
-  for (const k of ["id", "entity_id", "estado_crm", "fluxo_emylia"]) delete n[k];
+  const id = String(n.id), entityId = String(n.entity_id), estadoCrm = String(n.estado_crm), fluxoEmylia = !!n.fluxo_emylia, docsCrm = n.docs_crm === true;
+  for (const k of ["id", "entity_id", "estado_crm", "fluxo_emylia", "docs_crm"]) delete n[k];
   const L: LinhasNegocio = {
     negocio: n as unknown as LinhasNegocio["negocio"], respostas: o.respostas ?? [], visitas: o.visitas ?? [], medidas: o.medidas,
     servicos: o.servicos ?? [], produtos: o.produtos ?? null, partes_fora: o.partes_fora ?? null, orcamentos: o.orcamentos ?? [],
     contratos: o.contratos ?? [], faturas: o.faturas ?? null, historico: o.historico ?? [], adendas: o.adendas ?? [],
   };
-  return { id, entityId, estadoCrm, fluxoEmylia, linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
+  return { id, entityId, estadoCrm, fluxoEmylia, docsCrm, linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
 }
 
 export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico): Promise<NegocioLido[]> {
