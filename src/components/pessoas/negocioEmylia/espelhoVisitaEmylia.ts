@@ -1,7 +1,7 @@
 // O ESPELHO derivado das visitas do CRM dentro do negócio da Emylia. A visita verdadeira é o schedule_item (neg_guardar_visita com p_negocio_id): o passo
 // lê, mostra e age só sobre esse. O motor da Emylia, porém, lê as visitas de d.vis e das chaves v<n>_ de d.f (fecharVisita, extrasVisita, visitaFeita), e este
 // ficheiro põe lá uma cópia, que só este componente escreve e que ninguém edita à mão. Se discordarem, ganha o CRM e a cópia reescreve-se.
-//  · A marca v<n>_crm guarda o id da visita do CRM: é o que separa o espelho das visitas antigas só da Emylia (sem marca; essas ficam como estão, só de leitura).
+//  · O n de v<n>_* é o visita_numero real da visita na agenda (neg_numerar_visita ao criar). A marca v<n>_crm guarda o id da visita do CRM e só serve para separar o espelho das visitas antigas só da Emylia (sem marca; ficam só de leitura); a função da base não a conhece.
 //  · Nunca se apaga nada: uma visita cancelada no CRM fica «Cancelada» no espelho.
 //  · «Quem vai estar» e «O que ficou combinado» não vêm do CRM: só se escrevem na hora de marcar, e a leitura não lhes toca.
 import { visitas as numerosDe, type Negocio } from "@/emylia/motor";
@@ -30,7 +30,7 @@ export const visitasSoDaEmylia = (d: Negocio): number[] => numerosDe(d).filter((
 
 interface Ligacao {
   visitaId: string;
-  /** O número que a visita acabou de receber do motor (a primeira visita: marcarVisita cria a 1); sem ele, recebe o seguinte. */
+  /** O visita_numero real da visita acabada de criar (neg_numerar_visita). */
   numero?: number;
 }
 
@@ -39,18 +39,15 @@ export function calcularEspelho(d: Negocio, visitas: readonly VisitaDoNegocio[],
   const numeroDe = new Map<string, number>([...marcas].map(([n, id]) => [id, n]));
   if (ligar?.numero !== undefined) numeroDe.set(ligar.visitaId, ligar.numero);
   const vis = [...numerosDe(d)];
-  let seguinte = Math.max(0, ...vis, ...numeroDe.values()) + 1;
   const f: Record<string, string> = {};
   const pedir = (n: number, k: string, valor: string): void => {
     if (valor !== "" && (d.f[`v${n}_${k}`] ?? "") !== valor) f[`v${n}_${k}`] = valor;
   };
   for (const v of visitas) {
-    let n = numeroDe.get(v.id);
-    if (n === undefined) {
-      if (v.estado === "cancelada") continue; // uma visita cancelada que o espelho nunca viu não entra
-      n = seguinte++;
-      numeroDe.set(v.id, n);
-    }
+    // O n é SEMPRE o visita_numero real da agenda (a visita nasce numerada), para a função da base que sincroniza as visitas a encontrar e só a atualizar.
+    // Sem número (a numeração falhou ou ainda não existe na base) não se inventa um: a visita fica fora do espelho.
+    const n = v.numeroEmylia ?? numeroDe.get(v.id);
+    if (n === undefined) continue;
     if (!vis.includes(n)) vis.push(n);
     pedir(n, "crm", v.id);
     if (v.tipo) pedir(n, "tipo", TEXTO_DO_TIPO[v.tipo]);
