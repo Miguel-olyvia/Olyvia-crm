@@ -12,6 +12,7 @@ import { usarTecnicos } from "../equipa/tecnicos";
 import { montarCatalogo, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
 import { lerCatalogo } from "./lerCatalogo";
 import { fotografar, type FotoCatalogo } from "./gravarCatalogo";
+import { carregarLinhasModelo } from "./linhasModelo";
 
 export interface CatalogoCarregado { org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo }
 
@@ -35,8 +36,8 @@ export function aplicarCatalogo(org: string, M: CatalogoMontado, produtos: Linha
   return { org, M, produtos, foto: fotografar({ C: M.C, K: M.K, svc: S.svc, margens: M.margens }) };
 }
 
-/** Lê da base e aplica. */
+/** Lê da base e aplica. 29/10: também as linhas de negócio (linhasModelo.ts); se falharem, ficam as do código. */
 export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estado): Promise<CatalogoCarregado> {
-  const L = await lerCatalogo(sb, org);
+  const [L] = await Promise.all([lerCatalogo(sb, org), carregarLinhasModelo(sb, org).catch(() => [])]);
   return aplicarCatalogo(org, montarCatalogo(L, catalogo0(), seed().svc), L.produtos, S);
 }

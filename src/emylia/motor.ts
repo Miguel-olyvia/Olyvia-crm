@@ -106,14 +106,16 @@ export type StockKey = "cp" | "pv" | "san" | "base" | "cim" | "mov" | "banc";
 /** 26/10: "geral", a remodelação de várias zonas (a casa, as casas de banho, a cozinha) sem modelo: tudo sai do Catálogo. */
 export type LinhaId = "wc" | "coz" | "geral";
 
-interface LinhaServico {
+/** 29/10: o que a base diz de um material do modelo (neg_linha_modelo_materiais): o produto do Catálogo e a parte da estimativa. */
+export interface MaterialModeloBase { produto: string | null; parte: string | null }
+export interface LinhaServico {
   n: string;
   modelo: string;
   nec: string[];
   mat: MateriaisModelo;
   map: [SvcId, MedKey][];
   med: Partial<Record<MedKey, string>>;
-  mats: [string, string, (m: Medidas) => number, StockKey][];
+  mats: [string, string, (m: Medidas) => number, StockKey, MaterialModeloBase?][];
 }
 
 /** Uma parte da estimativa de materiais do modelo: o peso no total, o ramo do Catálogo cujos produtos a cobrem
@@ -121,6 +123,7 @@ interface LinhaServico {
 export interface ParteMateriais { d: string; peso: number; ramo?: [string, string?]; manter?: SvcId[] }
 export interface MateriaisModelo { d: string; custo: number; preco: number; partes?: ParteMateriais[] }
 
+/** As linhas de negócio. No CRM vêm da base (real/linhasModelo.ts substitui estas, que ficam como as de omissão). */
 export const LINHAS: Record<LinhaId, LinhaServico> = {
   wc: {
     n: "Casa de banho", modelo: "WC com base de duche", nec: ["Base de duche", "Sanita suspensa", "Banheira", "Móvel 80 cm"],
@@ -245,6 +248,9 @@ export interface Orcamento {
   /** 15/10: como o cliente assinou o contrato no portal (desenho no ecrã ou Chave Móvel Digital). Os exemplos antigos não a têm. */
   assinatura?: Assinatura | null;
   avisosVistos: Record<string, boolean>;
+  /** 29/10 (CRM): os materiais do modelo que a base tem neste orçamento (as linhas "material_modelo"). Um orçamento aceite não se
+   *  reescreve: grava-se com estes e não com os calculados (real/negocioReal.ts). */
+  matsModelo?: { n: string; un: string; q: number }[];
   /** Preços de linhas de materiais mudados à mão, pela descrição: as linhas refeitas (levantamento, modelo, produtos) guardam-nos. */
   precosMan?: Record<string, number>;
   /** Demolição e entulho (orçamentos novos, com o Catálogo ligado): os artigos, os ajustes à mão e o último cálculo (entulho.ts). */

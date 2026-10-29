@@ -32,6 +32,7 @@ import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { BarraSelecao, CaixaLinha, useSelecao } from "./MarcarArmazens";
 import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatalogo";
 import { ehCriado } from "./catalogo";
+import { MateriaisModelo } from "./MateriaisModelo";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
@@ -501,7 +502,13 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   );
   const corpo: Record<Seccao, () => ReactNode> = {
     servicos: () => <Servicos S={S} itens={itens} K={K} onAbrir={abrir} min={S.cfg.min} alvo={S.cfg.alvo} />,
-    produtos: () => <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar} />,
+    produtos: () => (
+      <>
+        <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar} />
+        {/* 29/10: o produto de cada material do modelo (o que vai à encomenda de cliente); só na página real */}
+        {real && <MateriaisModelo K={K} real={real} anunciar={anunciar} />}
+      </>
+    ),
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} onAbrirConsumivel={(id) => setConsAberto(id)} real={real} anunciar={anunciar} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} novo={realce?.t === "tecnico" ? realce.id : undefined} />,

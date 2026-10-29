@@ -3,8 +3,8 @@
 // os ramos pelo id do Catálogo: trocar por uuid é da camada da base (lerNegocios/gravarNegocios). As datas vão em ISO; na volta saem no
 // formato que o motor entende ("dd/mm hh:mm"; "aaaa-mm-dd" nas faturas e no início da obra).
 // As adendas vão também (migration 20261231990000). Fora daqui, por agora: a obra (Fase 3), a demolição e o acesso ao portal (Fase 4).
-import { garantirServico, type Estado, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
-import { PREFIXO_PROD, textoProduto, type ProdVisita } from "../produtosVisita";
+import { LINHAS, garantirServico, type Estado, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
+import { PREFIXO_PROD, partesDoModelo, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
 import { faturasAdenda, totaisLinhas, type Adenda, type EstadoAdenda, type FaturaAdenda, type LinhaAdenda as LinhaAdendaEmylia } from "../adendas";
@@ -60,7 +60,7 @@ export interface LinhaProdutoVisita {
 }
 export interface LinhaOficio { perfil_chave: string; nome: string; horas_un: number; custo_hora: number; tecnicos: string[] | null }
 export interface LinhaOrcamentoLinha {
-  ordem: number; tipo: "servico" | "materiais_modelo" | "produto" | "livre"; servico: string | null; descricao: string; unidade: string | null;
+  ordem: number; tipo: "servico" | "materiais_modelo" | "material_modelo" | "produto" | "livre"; servico: string | null; descricao: string; unidade: string | null;
   /** Linha de produto: o produto escolhido na visita (para a encomenda de cliente do CRM). Não volta ao Negocio (deriva-se da descrição). */
   produto?: string | null;
   quantidade: number; preco_un: number; parte_iva: "mao_obra" | "materiais"; taxa_iva: number | null; fornecedor: string | null;
@@ -285,6 +285,29 @@ function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = [
     zonas: l.zonas ? l.zonas.map((z) => ({ zona: z.z, quantidade: z.q, valor: z.preco ?? null })) : null,
   };
 }
+/** 29/10: os materiais do modelo que vão à encomenda de cliente (migration 20270101300000), um por material, com o produto do Catálogo.
+ *  Só com a linha "Materiais" do modelo no orçamento. Sai o material cuja parte da estimativa os produtos escolhidos cobrem, o cliente
+ *  mantém ou se tirou à mão. Um orçamento aceite não se reescreve na base: vai com os que ela já tem (matsModelo). */
+export function materiaisDoOrcamento(d: Negocio): { n: string; un: string; q: number; produto: string | null }[] {
+  const o = d.orc, L = LINHAS[d.linha];
+  if (!o || !L) return [];
+  if (o.aceite) return (o.matsModelo ?? []).map((m) => ({ ...m, produto: null }));
+  if (!o.linhas.some((l) => l.t === "mat" && !l.prod && !l.livre && l.d === L.mat.d)) return [];
+  const partes = partesDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, d.visita.semParte);
+  const sai = new Set(partes.filter((p) => p.mantida || p.fora || p.por.length > 0).map((p) => p.d));
+  return L.mats.flatMap(([n, un, f, , b]) => {
+    const q = f(d.visita.med);
+    // só os da base (b): as linhas do código não têm produto e, sem a migration, a base recusa o tipo "material_modelo"
+    return b && q > 0 && !(b.parte && sai.has(b.parte)) ? [{ n, un, q, produto: b.produto }] : [];
+  });
+}
+const linhaMaterial = (m: { n: string; un: string; q: number; produto: string | null }, i: number): LinhaOrcamentoLinha => ({
+  ordem: i, tipo: "material_modelo", servico: null, descricao: m.n, unidade: m.un, produto: m.produto, quantidade: m.q, preco_un: 0,
+  parte_iva: "materiais", taxa_iva: null, fornecedor: null, qtd_origem: null, preco_un_origem: null, custo_un_origem: null,
+  custo: { custo_un: 0, manual: false, congelado: false, horas_un: 0, mao_obra_un: 0, equipamentos_un: 0, consumiveis_un: 0, estrutura_hora: 0,
+    estrutura_un: 0, ajuste_un: 0, congelado_em: null, oficios: [] },
+  zonas: null,
+});
 const marcoDe = (p: Prestacao, i: number): LinhaPrestacao["marco"] => (p.fase === "fim" ? "fim" : p.fase === 0 ? (i === 0 ? "adjudicacao" : "antes") : "fase");
 const prestacoesDe = (d: Negocio): { L: LinhaPrestacao[]; porFases: boolean } => {
   const P = prestacoes(d.f.pagamento?.trim() || undefined, d.orc?.pagFases);
@@ -319,7 +342,8 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       recusa: o.recusada ? { motivos: o.recusada.motivos, nota: o.recusada.nota ?? null, em: iso(o.recusada.q) } : null,
       enviado_em: iso(o.enviada), aceite_em: iso(o.aceite), substituido_em: null, aceite_antes_em: null, preco_final: null, total_com_iva: null,
       prestacoes_por_fases: pr.porFases, sem_demolicao: !!o.semDemolicao,
-      linhas: o.linhas.map((l, i) => linhaParaLinha(l, i, d.visita.prod ?? [], hoje)), zonas: o.zonas ?? null,
+      linhas: [...o.linhas.map((l, i) => linhaParaLinha(l, i, d.visita.prod ?? [], hoje)),
+        ...materiaisDoOrcamento(d).map((m, i) => linhaMaterial(m, o.linhas.length + i))], zonas: o.zonas ?? null,
       prazo: Object.entries(o.prazo ?? {}).map(([tarefa, dias]) => ({ tarefa, dias })),
       prestacoes: pr.L, avisos: Object.entries(o.avisosVistos ?? {}).filter(([, x]) => x).map(([k]) => k),
       precos_manuais: o.precosMan ? Object.entries(o.precosMan).map(([descricao, preco]) => ({ descricao, preco })) : null,
@@ -413,8 +437,13 @@ export function deLinhas(L: LinhasNegocio): Negocio {
   for (const r of L.respostas) { f[r.campo_chave] = r.valor; if (r.sugerido) sug[r.campo_chave] = true; }
   let orc: Orcamento | null = null;
   if (atual) {
+    // 29/10: as linhas dos materiais do modelo não são linhas do orçamento da Emylia (o preço está na linha "Materiais"). Só as do orçamento
+    // aceite se guardam (não se reescreve: grava-se com elas); as outras calculam-se outra vez em cada gravação
+    const mats = (atual.linhas ?? []).filter((l) => l.tipo === "material_modelo").sort((x, y) => x.ordem - y.ordem);
     orc = {
-      modelo: atual.modelo, linhas: (atual.linhas ?? []).sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha), desconto: atual.desconto,
+      modelo: atual.modelo, linhas: (atual.linhas ?? []).filter((l) => l.tipo !== "material_modelo").sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha),
+      desconto: atual.desconto,
+      ...(mats.length && atual.aceite_em ? { matsModelo: mats.map((l) => ({ n: l.descricao, un: l.unidade ?? "", q: l.quantidade })) } : {}),
       vendaDireta: atual.venda_direta, verif: atual.verificado, aprov: atual.aprovacao === "aprovada" ? "ok" : atual.aprovacao === "pedida" ? "pedida" : null,
       enviada: atual.enviado_em ? deIso(atual.enviado_em) : null, aceite: atual.aceite_em ? deIso(atual.aceite_em) : null,
       contrato: cAtual?.estado === "assinado" ? "assinado" : cAtual?.estado === "enviado" ? "enviado" : null,
@@ -432,7 +461,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
         total: v.preco_final ?? 0, ...(v.total_com_iva != null ? { totalIva: v.total_com_iva } : {}), motivos: v.motivos_versao, ...(v.nota_versao ? { nota: v.nota_versao } : {}),
         onde: v.onde_refeita ?? "orcamento",
         ...(v.produtos?.length ? { prod: v.produtos.sort((x, y) => x.ordem - y.ordem).map(linhaParaProd) } : {}), ...(v.partes_fora?.length ? { semParte: v.partes_fora } : {}),
-        ...(v.linhas ? { linhas: v.linhas.sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha) } : {}), desconto: v.desconto,
+        ...(v.linhas ? { linhas: v.linhas.filter((l) => l.tipo !== "material_modelo").sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha) } : {}), desconto: v.desconto,
       })) } : {}),
       ...(atual.pedido_cliente ? { pedidoCliente: { motivos: atual.pedido_cliente.motivos, ...(atual.pedido_cliente.nota ? { nota: atual.pedido_cliente.nota } : {}), q: deIso(atual.pedido_cliente.em) } } : {}),
       ...(atual.recusa ? { recusada: { motivos: atual.recusa.motivos, ...(atual.recusa.nota ? { nota: atual.recusa.nota } : {}), q: deIso(atual.recusa.em) } } : {}),
