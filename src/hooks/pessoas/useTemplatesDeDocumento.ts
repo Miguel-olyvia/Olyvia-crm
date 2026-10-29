@@ -44,6 +44,8 @@ export interface MinutaDeContrato {
   language: string | null;
   body_html: string;
   is_default: boolean;
+  /** O signatário da empresa configurado na minuta (id de um utilizador, em texto); o contrato nasce assinado por ele. */
+  signatory_user_id: string | null;
 }
 
 export interface PerguntaDaMinuta { key: string; label: string; description: string | null; promptType: "text" | "textarea" | "number" | "date" }
@@ -80,11 +82,25 @@ export function useMinutasDeContrato() {
     enabled: org !== null,
     staleTime: 60_000,
     queryFn: async (): Promise<MinutaDeContrato[]> => {
-      const { data, error } = await tabela("client_contract_templates").select("id, name, description, language, body_html, is_default")
+      const { data, error } = await tabela("client_contract_templates").select("id, name, description, language, body_html, is_default, signatory_user_id")
         .eq("organization_id", org).eq("is_active", true)
         .order("is_default", { ascending: false }).order("name", { ascending: true });
       if (error) throw new Error(error.message);
-      return ((data ?? []) as MinutaDeContrato[]).map((m) => ({ ...m, body_html: m.body_html ?? "", is_default: m.is_default === true }));
+      return ((data ?? []) as MinutaDeContrato[]).map((m) => ({ ...m, body_html: m.body_html ?? "", is_default: m.is_default === true, signatory_user_id: m.signatory_user_id ?? null }));
+    },
+  });
+}
+
+/** O nome do signatário de uma minuta (anew_users); sem id não lê. Uma falha devolve erro, nunca um nome inventado. */
+export function useNomeDoSignatario(id: string | null) {
+  return useQuery({
+    queryKey: ["pessoas-signatario-minuta", id],
+    enabled: id !== null,
+    staleTime: 60_000,
+    queryFn: async (): Promise<string | null> => {
+      const { data, error } = await tabela("anew_users").select("name").eq("id", id).is("deleted_at", null);
+      if (error) throw new Error(error.message);
+      return ((data as { name?: string | null }[] | null) ?? [])[0]?.name?.trim() || null;
     },
   });
 }

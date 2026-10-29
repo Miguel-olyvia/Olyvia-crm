@@ -13,7 +13,7 @@ import type { Passo } from "@/emylia/CamposFase";
 import type { Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { useCompany } from "@/contexts/CompanyContext";
-import { useMinutasDeContrato, usePerguntasDeContrato, useTemplatesDeAspeto, type MinutaDeContrato, type TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
+import { useMinutasDeContrato, useNomeDoSignatario, usePerguntasDeContrato, useTemplatesDeAspeto, type MinutaDeContrato, type TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
 import { useTemplatesDoNegocio, type UseTemplatesDoNegocio } from "@/hooks/pessoas/useTemplatesDoNegocio";
 import { extractPromptTokens, substituteVariables, type ContractVariableData } from "@/utils/contractVariables";
 import { sanitizeRichHtml } from "@/utils/sanitize";
@@ -209,7 +209,27 @@ function MinutaDoContrato({ minuta, valores, aoEscrever, aoGuardar, desativado, 
   );
 }
 
-function MinutaDoNegocio({ c, children, bloqueado }: { c: ContextoDosTemplates; children: ReactNode; bloqueado: boolean }) {
+/** Quem assina pela empresa o contrato desta minuta: o contrato nasce já assinado por essa pessoa (a assinatura é posta pela base ao nascer o contrato). */
+function AssinaturaDaMinuta({ minuta }: { minuta: MinutaDeContrato }) {
+  const id = minuta.signatory_user_id?.trim() || null;
+  const nome = useNomeDoSignatario(id);
+  if (!id) {
+    return (
+      <p role="status" className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-[15px]">
+        Esta minuta não tem signatário: o contrato nasce sem a assinatura da empresa. Escolha-o em <a className={cn("font-medium underline underline-offset-4", FOCO)} href="/contract-templates">Minutas de contrato</a>.
+      </p>
+    );
+  }
+  if (nome.isLoading) return <p role="status" className="text-sm text-muted-foreground">A ver quem assina pela empresa…</p>;
+  if (nome.isError) return <p role="alert" className="text-[15px] text-destructive">Não foi possível ler o signatário da minuta: {nome.error instanceof Error ? nome.error.message : "erro desconhecido"}.</p>;
+  return (
+    <p role="status" className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[15px]">
+      O contrato nasce assinado pela empresa por <strong>{nome.data ?? "o signatário da minuta"}</strong>, o signatário desta minuta.
+    </p>
+  );
+}
+
+function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: ContextoDosTemplates; children: ReactNode; bloqueado: boolean; soEscolher?: boolean }) {
   const org = useNomeRealDaOrganizacao();
   const lista = useMinutasDeContrato();
   const neg = useTemplatesDoNegocio(c.negocioId);
@@ -246,7 +266,8 @@ function MinutaDoNegocio({ c, children, bloqueado }: { c: ContextoDosTemplates; 
           paginaDeCriacao={{ para: "/contract-templates", texto: "Criar minutas de contrato" }} vazio="Ainda não há minutas de contrato ativas nesta organização."
         />
         <AvisosDaGravacao t={neg} />
-        {minuta && (
+        {minuta && <AssinaturaDaMinuta minuta={minuta} />}
+        {minuta && !soEscolher && (
           <MinutaDoContrato
             minuta={minuta} valores={valores} d={c.d} c={c} nome={org.nome} desativado={bloqueado || !podeEscolher(neg, c)}
             aoEscrever={(k, v) => setValores((x) => ({ ...x, [k]: v }))}
@@ -255,7 +276,7 @@ function MinutaDoNegocio({ c, children, bloqueado }: { c: ContextoDosTemplates; 
         )}
       </section>
       <div key={org.chave}>{children}</div>
-      <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar} />
+      {!soEscolher && <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar} />}
     </div>
   );
 }
@@ -266,8 +287,9 @@ export function comTemplatesNosPassos(passos: Passo[], c: ContextoDosTemplates):
   return passos.map((p) => {
     if (p.id === "orc") return { ...p, corpo: <TemplateDoOrcamento c={c}>{p.corpo}</TemplateDoOrcamento> };
     if (p.id === "Proposta") return { ...p, corpo: <TemplateDaProposta c={c}>{p.corpo}</TemplateDaProposta> };
-    // o contrato ainda bloqueado (o cliente não aceitou a proposta) fica como a Emylia o diz: sem minuta nem envio
-    if (p.id === "Contrato" && p.bloqueado !== true) return { ...p, corpo: <MinutaDoNegocio c={c} bloqueado={false}>{p.corpo}</MinutaDoNegocio> };
+    // o contrato ainda bloqueado (o cliente não aceitou a proposta) deixa já escolher a minuta, que o contrato leva ao nascer (com o
+    // signatário da minuta); o texto preenchido e o envio só abrem depois de o cliente aceitar
+    if (p.id === "Contrato") return { ...p, corpo: <MinutaDoNegocio c={c} bloqueado={false} soEscolher={p.bloqueado === true}>{p.corpo}</MinutaDoNegocio> };
     return p;
   });
 }
