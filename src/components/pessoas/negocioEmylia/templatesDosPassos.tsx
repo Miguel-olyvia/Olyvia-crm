@@ -73,6 +73,17 @@ function AvisosDaGravacao({ t }: { t: UseTemplatesDoNegocio }) {
 const podeEscolher = (t: UseTemplatesDoNegocio, c: ContextoDosTemplates): boolean => c.podeEditar && t.estado === "pronto" && !t.aGuardar && c.negocioId !== null;
 
 /* ------------------------------------------------------------------------------------------------ passo Orçamento */
+/** O documento do orçamento (PDF), recolhido: só se gera quando se abre, para não pesar no passo. */
+function DocumentoPdfRecolhido(props: Parameters<typeof OrcamentoPdf>[0]) {
+  const [aberto, setAberto] = useState(false);
+  return (
+    <details className="rounded-2xl border border-border bg-card p-4 text-[15px]" onToggle={(e) => setAberto((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary className={cn("min-h-11 cursor-pointer py-2 font-medium", FOCO)}>Ver o documento do orçamento (PDF)</summary>
+      {aberto && <div className="mt-2"><OrcamentoPdf {...props} /></div>}
+    </details>
+  );
+}
+
 function TemplateDoOrcamento({ c, children }: { c: ContextoDosTemplates; children: ReactNode }) {
   const org = useNomeRealDaOrganizacao();
   const { activeCompany } = useCompany();
@@ -85,20 +96,16 @@ function TemplateDoOrcamento({ c, children }: { c: ContextoDosTemplates; childre
       <section aria-label="Template do orçamento" className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <SeletorDeTemplate
           rotulo="Template do orçamento" valor={neg.dados.template_orcamento_id} opcoes={opcoesDe(lista.data)}
-          ajuda={omissao && !neg.dados.template_orcamento_id ? `O da organização por omissão é «${omissao.name}».` : "Define o aspeto do documento do orçamento (cores, logótipo, textos). Cada versão nova do orçamento começa sem template: volte a escolher."}
+          ajuda={omissao && !neg.dados.template_orcamento_id ? `O da organização por omissão é «${omissao.name}».` : "Define o aspeto do documento do orçamento (cores, logótipo, textos)."}
           aLer={lista.isLoading} erro={lista.error instanceof Error ? lista.error.message : null} aoTentar={() => { void lista.refetch(); }}
           aoEscolher={(id) => { void neg.guardar({ template_orcamento_id: id }); }} desativado={!podeEscolher(neg, c)}
           paginaDeCriacao={{ para: "/quote-templates", texto: "Criar templates de orçamento" }} vazio="Ainda não há templates do tipo orçamento nesta organização."
         />
         <AvisosDaGravacao t={neg} />
-        {(
-          <details className="text-[15px]" open>
-            <summary className={cn("min-h-11 cursor-pointer py-2 font-medium", FOCO)}>Ver o documento do orçamento</summary>
-            <div className="mt-2"><OrcamentoPdf d={c.d} S={c.ctx.S} tpl={escolhido} orgId={activeCompany?.id ?? null} nome={org.nome} logoOrg={org.logo} /></div>
-          </details>
-        )}
       </section>
       <div key={org.chave}>{children}</div>
+      {/* como na Proposta: o cartão de cima só tem o seletor; o documento (PDF) fica no fim do passo, fechado, e só se gera ao abrir */}
+      <DocumentoPdfRecolhido d={c.d} S={c.ctx.S} tpl={escolhido} orgId={activeCompany?.id ?? null} nome={org.nome} logoOrg={org.logo} />
     </div>
   );
 }
