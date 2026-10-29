@@ -21,7 +21,8 @@ import { HojeTecnico } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
-import { aplicarAgenda, carregarAgendaReal, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
+import { aplicarAgenda, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
+import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
 import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
 import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFicha, type EnvioAcesso, type ResultadoConta } from "@/emylia/acessosPortal";
@@ -192,6 +193,9 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       // 28/10: as ausências aprovadas no RH dos técnicos (plano e agenda); um erro aqui não impede os negócios de abrir
       const ag = await carregarAgendaReal(supabase, org);
       if (ag.erro) avisar({ msg: "A agenda do RH não carregou", sub: ag.erro, kind: "bad" });
+      // 29/10: as visitas marcadas no CRM (Pipeline, agenda) também na agenda da Emylia
+      const vc = await carregarVisitasCrm(supabase, org);
+      if (vc.erro) avisar({ msg: "As visitas da agenda do CRM não carregaram", sub: vc.erro, kind: "bad" });
       ids.current = idsServico(cat.M.ids.servico);
       const lidos = await lerNegocios(supabase, org, ids.current);
       if (!vivo) return;
@@ -266,7 +270,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     if (!pronto) return;
     definirEquipaReal(equipaReal(S.tecnicos ?? [], eu, S.role));
   }, [pronto, S, S.role, eu?.pessoaId, eu?.nome]); // eslint-disable-line react-hooks/exhaustive-deps -- eu é recriado a cada render
-  useEffect(() => () => { definirEquipaReal(null); aplicarAgenda([]); definirRhDaAgenda(null); definirEncomendasReais(null); }, []);
+  useEffect(() => () => { definirEquipaReal(null); aplicarAgenda([]); definirRhDaAgenda(null); definirEncomendasReais(null); definirVisitasCrm(null); }, []);
   // 28/10: o modo real da V1 (2.0): o portal com a conta real e o email do cliente obrigatório, e a leitura do Eticadata pela ponte
   useEffect(() => {
     if (!org) return;

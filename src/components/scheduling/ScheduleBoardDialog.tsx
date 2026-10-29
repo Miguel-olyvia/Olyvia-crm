@@ -14,9 +14,8 @@ import { scheduleBoardSchema } from '@/lib/validations';
 import type { ScheduleBoard, BoardModule } from '@/types/scheduling';
 
 const ALL_MODULES: { value: BoardModule; labelKey: string }[] = [
-  { value: 'client', labelKey: 'scheduling.item.client' },
+  // «Cliente» e «Lead» já não existem: a agenda liga-se à entidade (entity_id), por isso deixam de ser opções do board.
   { value: 'contact', labelKey: 'scheduling.item.contact' },
-  { value: 'lead', labelKey: 'scheduling.item.lead' },
   { value: 'location', labelKey: 'scheduling.item.location' },
   { value: 'priority', labelKey: 'scheduling.item.priority' },
   { value: 'resources', labelKey: 'scheduling.item.assignedResources' },
@@ -67,7 +66,9 @@ export function ScheduleBoardDialog({
       });
       const settings = board?.settings as any;
       const modules = settings?.allowed_modules as BoardModule[] | undefined;
-      setAllowedModules(modules || ALL_MODULES.map(m => m.value));
+      // os valores antigos «client» e «lead» já não existem: descartam-se ao abrir, e deixam de ser gravados
+      const validos = ALL_MODULES.map(m => m.value);
+      setAllowedModules(modules ? modules.filter(m => validos.includes(m)) : validos);
       setAutoFillAddress(settings?.auto_fill_address === true);
       setMaxDailySlots(settings?.max_daily_slots ?? null);
       setFieldErrors({});
@@ -293,7 +294,7 @@ export function ScheduleBoardDialog({
                   {t('scheduling.board.maxDailySlotsDescription') || 'Número máximo de agendamentos por dia neste board.'}
                 </p>
               </div>
-              {allowedModules.includes('client') && (
+              {allowedModules.includes('location') && (
                 <label className="flex items-center gap-2 cursor-pointer text-sm p-1.5 rounded hover:bg-accent transition-colors border-t pt-2">
                   <Checkbox
                     checked={autoFillAddress}
