@@ -15,6 +15,7 @@ import { diasDaObra, isoDia } from "../planoObra";
 import { cobre } from "../frota/regras";
 import type { Atribuicao, Frota } from "../frota/tipos";
 import type { FichaTecnico } from "./tecnicos";
+import { lerVisitasCrm } from "./visitasCrm";
 
 /** As horas de um dia de trabalho. */
 export const HORAS_DIA = 8;
@@ -147,6 +148,11 @@ export function visitasDaAgenda(deals: readonly Negocio[], semQuem = "Rúben (co
         hora: f("hora") || undefined, horas: h, negocio: d.id, feito: estado === "Feita" || undefined,
       } });
     }
+  }
+  // 29/10: as visitas marcadas no CRM (Pipeline, agenda), que não têm respostas no negócio (equipa/visitasCrm.ts)
+  for (const v of lerVisitasCrm()) {
+    L.push({ nome: v.nome, papel: v.papel, data: v.data, item: { tipo: "visita", titulo: v.titulo, sub: v.sub, hora: v.hora, horas: v.horas,
+      ...(v.negocio != null ? { negocio: v.negocio } : {}), ...(v.feito ? { feito: true } : {}) } });
   }
   return L;
 }

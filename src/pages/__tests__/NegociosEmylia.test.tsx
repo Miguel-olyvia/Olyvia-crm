@@ -10,7 +10,10 @@ const gravarNovaLead = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     rpc: (...a: unknown[]) => rpc(...a),
-    from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { numero: 1201 }, error: null }) }) }) }),
+    from: (t: string) => (t === "schedule_items"
+      // 29/10: as visitas do CRM (nenhuma, aqui)
+      ? { select: () => { const q: Record<string, unknown> = {}; for (const m of ["eq", "neq", "not", "is", "gte"]) q[m] = () => q; q.lte = async () => ({ data: [], error: null }); return q; } }
+      : { select: () => ({ eq: () => ({ single: async () => ({ data: { numero: 1201 }, error: null }), maybeSingle: async () => ({ data: null, error: null }) }) }) }),
   },
 }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: ORG }, isLoading: false }) }));
