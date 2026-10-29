@@ -1,6 +1,6 @@
 -- =============================================================================
 -- POR APLICAR — não foi feito db push. Rever antes de aplicar em produção.
--- Depende de: 20261213100000_um_so_contacto_primario_por_entidade.sql
+-- Depende de: 20261229500000_um_so_contacto_primario_por_entidade.sql
 -- =============================================================================
 -- Um só email/telefone primário por entidade, garantido pela BD — "a última
 -- alteração ganha" — seja qual for o caminho que escreve (book-slot,
@@ -57,7 +57,7 @@ BEGIN
     IN SHARE ROW EXCLUSIVE MODE;
 
   -- Identifica as linhas de auditoria geradas por esta limpeza.
-  PERFORM set_config('app.audit_source', 'migration_20261213110000_limpeza_primarios', true);
+  PERFORM set_config('app.audit_source', 'migration_20261229510000_limpeza_primarios', true);
 
   WITH ordenados AS (
     SELECT id,
