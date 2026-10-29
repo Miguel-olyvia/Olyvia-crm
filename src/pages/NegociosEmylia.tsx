@@ -243,7 +243,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
 
   // 29/10: "Editar os dados do cliente" (menu do negócio) também muda o contacto do CRM: o nome, o email e o telefone principais da ficha
   // da pessoa (anew_entities). O resto (NIF, morada da obra) fica no negócio e grava-se com ele.
-  useEffect(() => definirGuardarCliente((d, x, mudou) => {
+  useEffect(() => definirGuardarCliente((d, x, mudou, o) => {
     const ref = refs.current.get(d.id);
     if (!ref) return;
     void (async () => {
@@ -252,7 +252,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
           .update({ display_name: x.nome.trim() }).eq("id", ref.entityId);
         if (error) throw new Error(error.message);
       }
-      if (mudou.includes("email") && x.email.trim()) await linkEntityEmail(ref.entityId, x.email.trim().toLowerCase());
+      // com o acesso a seguir para o portal, é esse envio que põe o email no contacto (garantirEmailDoContacto)
+      if (mudou.includes("email") && x.email.trim() && !o.portal) await linkEntityEmail(ref.entityId, x.email.trim().toLowerCase());
       if (mudou.includes("telefone") && x.telefone.trim()) await linkEntityPhone(ref.entityId, x.telefone.trim());
       avisar({ msg: "Dados do cliente gravados", sub: "No negócio e no contacto do CRM", kind: "ok" });
     })().catch((e: Error) => avisar({ msg: "O contacto do CRM não ficou atualizado", sub: e.message, kind: "bad" }));

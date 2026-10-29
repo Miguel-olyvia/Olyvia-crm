@@ -45,7 +45,9 @@ export function aplicarDados(d: Negocio, x: DadosCliente): (keyof DadosCliente)[
 }
 
 /* ------------------------------------------------------------------ quem grava no contacto do CRM */
-type Guardar = (d: Negocio, x: DadosCliente, mudou: readonly (keyof DadosCliente)[]) => void;
+/** `portal`: o acesso ao portal vai seguir para o email novo, e é esse envio que o põe no contacto (29/10: as duas escritas ao mesmo
+ *  tempo deixavam o email duas vezes como principal). */
+type Guardar = (d: Negocio, x: DadosCliente, mudou: readonly (keyof DadosCliente)[], o: { portal: boolean }) => void;
 let guardar: Guardar | null = null;
 /** A página regista quem grava os dados no contacto do CRM. Devolve como desligar. */
 export function definirGuardarCliente(fn: Guardar): () => void { guardar = fn; return () => { if (guardar === fn) guardar = null; }; }
@@ -67,8 +69,9 @@ export function EditarCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     if (e.length) return;
     ctx.run(() => {
       const mudou = aplicarDados(d, x);
-      if (mudou.length) guardar?.(d, x, mudou);
-      if (mudou.includes("email") && comPortal && reenviar) ctx.A.acessoPortal(d.id);
+      const portal = mudou.includes("email") && comPortal && reenviar;
+      if (mudou.length) guardar?.(d, x, mudou, { portal });
+      if (portal) ctx.A.acessoPortal(d.id);
     });
     fechar();
   };

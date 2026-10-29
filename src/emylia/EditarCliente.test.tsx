@@ -50,7 +50,7 @@ describe("dados do cliente", () => {
     expect(screen.getByLabelText("Enviar o acesso ao portal para o email novo")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     expect(d.f.email).toBe("ruben+cliente@gmail.com");
-    expect(guardar).toHaveBeenCalledWith(d, expect.objectContaining({ email: "ruben+cliente@gmail.com" }), ["email"]);
+    expect(guardar).toHaveBeenCalledWith(d, expect.objectContaining({ email: "ruben+cliente@gmail.com" }), ["email"], { portal: true });
     expect(acessoPortal).toHaveBeenCalledWith(d.id);
     expect(fechar).toHaveBeenCalled();
     desligar();
