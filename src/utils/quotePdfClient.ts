@@ -73,8 +73,8 @@ export async function resolveQuotePdfEntityId(input: QuotePdfClientInput) {
 async function buildEntityClientForPdf(entityId: string, quoteId?: string | null) {
   const [entityRes, emailsRes, phonesRes, fiscalRes, addressesRes] = await Promise.all([
     (supabase as any).from("anew_entities").select("id, display_name, first_name, last_name, type").eq("id", entityId).maybeSingle(),
-    (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).limit(1),
-    (supabase as any).from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).limit(1),
+    (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", entityId).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
+    (supabase as any).from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
     (supabase as any).from("anew_entity_fiscal_entities").select("fiscal_entity_id").eq("entity_id", entityId).eq("is_primary", true).limit(1),
     (supabase as any).from("anew_entity_addresses").select("address_id, is_primary, address_type, valid_to, anew_addresses(*)").eq("entity_id", entityId),
   ]);

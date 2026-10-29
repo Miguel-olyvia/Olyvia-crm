@@ -10,6 +10,7 @@ import { PortalCompanySwitcher } from "@/components/portal/PortalCompanySwitcher
 import { PORTAL_ORGS_QUERY_KEY, usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
+import { usePortalEntityName } from "@/hooks/usePortalEntityName";
 
 interface ClientPortalLayoutProps {
   children: ReactNode;
@@ -67,6 +68,10 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const [badgeCounts, setBadgeCounts] = useState<{ proposals: number; contracts: number }>({ proposals: 0, contracts: 0 });
 
   const orgName = activeOrg?.name || "";
+  // Nome atual da ficha do cliente; os metadados da conta só como recurso
+  // (podem ter ficado com o nome de quem criou o acesso).
+  const entityName = usePortalEntityName(activeOrg?.entityId);
+  const displayName = entityName || userName;
   const orgLogo = activeOrg?.logoUrl ?? null;
 
   useEffect(() => {
@@ -208,7 +213,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     setShowFirstLogin(false);
   };
 
-  const initials = getInitials(userName);
+  const initials = getInitials(displayName);
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: "#F8F7FC" }}>
@@ -249,7 +254,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
               {initials || "?"}
             </div>
             <div className="hidden sm:block text-right">
-              <p className="text-sm font-medium text-foreground leading-tight">{userName}</p>
+              <p className="text-sm font-medium text-foreground leading-tight">{displayName}</p>
               <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Cliente</p>
             </div>
           </div>

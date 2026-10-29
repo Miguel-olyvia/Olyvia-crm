@@ -45,52 +45,71 @@ export async function linkEntityAddress(
   if (error) throw error;
 }
 
-/** Replaces an entity's primary email — same overwrite semantics as linkEntityAddress. */
+const DEFAULT_PHONE_COUNTRY_CODE = "+351";
+
+/**
+ * Splits a free-text phone (as typed in the lead's field_values) into
+ * country code + number. "00" is read as "+". "+351..." (with or without a
+ * separator) and plain national numbers default to +351; any other "+NN"
+ * prefix is only split when followed by a separator ("+44 7700 900123"),
+ * otherwise the full international number is kept as is with no country
+ * code, so a foreign number is never mislabelled as Portuguese.
+ */
+export function splitPhoneCountryCode(raw: string): { phone: string; countryCode: string | null } {
+  const value = raw.trim().replace(/^00(?=\d)/, "+");
+
+  const pt = value.match(/^\+351[\s.\-]*(.+)$/);
+  if (pt) return { phone: pt[1].trim(), countryCode: DEFAULT_PHONE_COUNTRY_CODE };
+
+  const intl = value.match(/^\+(\d{1,4})[\s.\-]+(.+)$/);
+  if (intl) return { phone: intl[2].trim(), countryCode: `+${intl[1]}` };
+
+  if (value.startsWith("+")) return { phone: value, countryCode: null };
+
+  return { phone: value, countryCode: DEFAULT_PHONE_COUNTRY_CODE };
+}
+
+/**
+ * Sets an entity's primary email. Delegates to rpc_set_entity_primary_email
+ * (SECURITY DEFINER, same authorization as the anew_entity_emails UPDATE RLS
+ * policy, atomic): every current primary is demoted (is_primary=false, rows
+ * are kept as history), an existing row with the same email is promoted, or
+ * a new primary row is inserted. Previously this did a browser-side DELETE of
+ * the primaries + INSERT — not atomic, and a DELETE silently filtered by RLS
+ * left the old primary next to the new one.
+ *
+ * `_createdBy` is kept for call-site compatibility only: created_by is now
+ * resolved server-side (current_business_user_id), never trusted from the client.
+ */
 export async function linkEntityEmail(
   entityId: string,
   email: string,
-  createdBy: string | null = null,
+  _createdBy: string | null = null,
 ): Promise<void> {
   if (!entityId || !email.trim()) return;
 
-  const { error: deleteError } = await supabase
-    .from("anew_entity_emails")
-    .delete()
-    .eq("entity_id", entityId)
-    .eq("is_primary", true);
-  if (deleteError) throw deleteError;
-
-  const { error: insertError } = await supabase.from("anew_entity_emails").insert({
-    entity_id: entityId,
-    email: email.trim(),
-    email_type: "personal",
-    is_primary: true,
-    created_by: createdBy,
+  const { error } = await (supabase as any).rpc("rpc_set_entity_primary_email", {
+    p_entity_id: entityId,
+    p_email: email.trim(),
   });
-  if (insertError) throw insertError;
+  if (error) throw error;
 }
 
-/** Replaces an entity's primary phone — same overwrite semantics as linkEntityAddress. */
+/** Sets an entity's primary phone — same semantics as linkEntityEmail (rpc_set_entity_primary_phone). */
 export async function linkEntityPhone(
   entityId: string,
   phone: string,
-  createdBy: string | null = null,
+  _createdBy: string | null = null,
 ): Promise<void> {
   if (!entityId || !phone.trim()) return;
 
-  const { error: deleteError } = await supabase
-    .from("anew_entity_phones")
-    .delete()
-    .eq("entity_id", entityId)
-    .eq("is_primary", true);
-  if (deleteError) throw deleteError;
+  const { phone: phoneNumber, countryCode } = splitPhoneCountryCode(phone);
+  if (!phoneNumber) return;
 
-  const { error: insertError } = await supabase.from("anew_entity_phones").insert({
-    entity_id: entityId,
-    phone_number: phone.trim(),
-    phone_type: "mobile",
-    is_primary: true,
-    created_by: createdBy,
+  const { error } = await (supabase as any).rpc("rpc_set_entity_primary_phone", {
+    p_entity_id: entityId,
+    p_phone: phoneNumber,
+    p_country_code: countryCode ?? "",
   });
-  if (insertError) throw insertError;
+  if (error) throw error;
 }

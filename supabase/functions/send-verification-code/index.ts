@@ -311,11 +311,17 @@ const handler = async (req: Request): Promise<Response> => {
       // do email primario da ficha da proposta -- NUNCA o "destination" do corpo,
       // que o chamador controla. Sem isto, qualquer um que abrisse o link publico
       // punha o seu proprio email, recebia o OTP e aceitava/recusava a proposta.
+      // Email principal mais recente da ficha (editar a ficha nao desmarca os
+      // principais antigos; sem ordem saia um qualquer, as vezes o da pessoa
+      // anterior). Sem principal, o mais recente. Continua a ser sempre um
+      // email da propria ficha da proposta.
       const { data: primaryEmail } = await supabaseClient
         .from("anew_entity_emails")
         .select("email")
         .eq("entity_id", proposal.entity_id)
-        .eq("is_primary", true)
+        .order("is_primary", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(1)
         .maybeSingle();
       const recipient = (primaryEmail?.email || "").trim();

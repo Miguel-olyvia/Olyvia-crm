@@ -319,8 +319,9 @@ serve(async (req: Request) => {
         .from("anew_entity_emails")
         .select("email, is_primary, created_at")
         .eq("entity_id", entityId)
-        .order("is_primary", { ascending: false })
+        .order("is_primary", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(1);
       email = primaryEmails?.[0]?.email;
     }
@@ -432,14 +433,44 @@ serve(async (req: Request) => {
         .order("created_at", { ascending: false })
         .limit(1);
 
-      const priorAuthUserId = entityPortalRows?.[0]?.auth_user_id;
+      let priorAuthUserId: string | null = entityPortalRows?.[0]?.auth_user_id ?? null;
+
+      // Só se muda o email de uma conta que é exclusivamente desta ficha. Se a
+      // conta antiga também dá acesso a OUTRA ficha (ex.: a mulher é cliente de
+      // outra empresa com a ficha dela), mudar-lhe o email entregava ao novo
+      // endereço os documentos dessa outra ficha e tirava-lhe o acesso a ela.
+      // Nesse caso cria-se uma conta nova (o handle_new_user liga-a a esta
+      // ficha via user_metadata.entity_id, sem duplicar a pessoa) e a conta
+      // antiga perde só o acesso a esta ficha, mais abaixo.
       if (priorAuthUserId) {
-        const { data: priorAuth } = await supabase.auth.admin.getUserById(priorAuthUserId);
+        const { data: otherEntityRows, error: otherEntityErr } = await supabase
+          .from("client_portal_users")
+          .select("id")
+          .eq("auth_user_id", priorAuthUserId)
+          .not("entity_id", "is", null)
+          .neq("entity_id", entityId)
+          .limit(1);
+        if (otherEntityErr) {
+          console.error("Failed to check prior portal account scope:", otherEntityErr);
+          return new Response(
+            JSON.stringify({ error: "Não foi possível verificar a conta de portal existente. Tente novamente." }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        if ((otherEntityRows?.length ?? 0) > 0) {
+          console.log("Prior portal account is shared with another entity — not migrating its email", { entityId, organization_id, priorAuthUserId });
+          priorAuthUserId = null;
+        }
+      }
+
+      if (priorAuthUserId) {
+        const priorId: string = priorAuthUserId;
+        const { data: priorAuth } = await supabase.auth.admin.getUserById(priorId);
         const priorEmail = priorAuth?.user?.email ?? null;
 
         if (priorEmail && priorEmail.toLowerCase() !== email.toLowerCase()) {
           const { error: emailMigrateError } = await withRetryResult(() =>
-            supabase.auth.admin.updateUserById(priorAuthUserId, { email, email_confirm: true })
+            supabase.auth.admin.updateUserById(priorId, { email, email_confirm: true })
           );
 
           if (emailMigrateError) {
@@ -456,7 +487,7 @@ serve(async (req: Request) => {
           portalEmailMigratedFrom = priorEmail;
         }
 
-        existingUser = priorAuth?.user ?? { id: priorAuthUserId };
+        existingUser = priorAuth?.user ?? { id: priorId };
       }
     }
 
@@ -549,7 +580,6 @@ serve(async (req: Request) => {
           { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-
 
       authUserId = existingUser.id;
 
@@ -762,7 +792,8 @@ serve(async (req: Request) => {
     }
 
     // Publish document visibility for portal (required by RLS portal_user_can_see_document)
-    async function publishPortalDocument(docType: "proposal" | "quote" | "contract", docId: string) {
+    // Devolve true só quando a linha de client_portal_documents ficou publicada.
+    async function publishPortalDocument(docType: "proposal" | "quote" | "contract", docId: string): Promise<boolean> {
       try {
         // Re-activate if previously revoked, or insert fresh
         const { data: existingDoc } = await supabase
@@ -806,7 +837,7 @@ serve(async (req: Request) => {
           // sent), but now it is visible in the logs AND it stops the contract
           // status transition below from claiming a publication that failed.
           console.error("Error publishing document to portal:", publishError);
-          return;
+          return false;
         }
 
         // ── Contract sent to the portal ⇒ status draft → pending_signature ────
@@ -855,13 +886,16 @@ serve(async (req: Request) => {
             console.error("Error moving contract to pending_signature:", statusErr);
           }
         }
+        return true;
       } catch (e) {
         console.error("Error publishing document to portal:", e);
+        return false;
       }
     }
 
+    let mainDocumentPublished = false;
     if (portalUserId) {
-      await publishPortalDocument(document_type, document_id);
+      mainDocumentPublished = await publishPortalDocument(document_type, document_id);
 
       // A proposal's quotes are rendered inline in the portal (subtotal/IVA/total
       // per orçamento), but RLS on quotes/quote_lines/quote_fees is gated by their
@@ -895,6 +929,144 @@ serve(async (req: Request) => {
         } catch (e) {
           console.error("Error publishing proposal's quotes to portal:", e);
         }
+      }
+    }
+
+    // ── Outra conta de portal desta ficha, nesta organização, perde o acesso ──
+    // O destinatário é sempre o email principal ATUAL da ficha. Se a ficha foi
+    // corrigida (ex.: contrato feito com os dados da mulher, ficha passada para
+    // o marido) e o novo email já tinha conta própria, a conta antiga continuava
+    // ligada à mesma ficha e a ver/assinar os documentos dela: o acesso do
+    // portal é dado pela própria linha de client_portal_users (entity_id e
+    // proposal_id/quote_id/contract_id em assertOwnership, portal_user_can_see_doc
+    // e portal_contact_entity_ids_for), não só por client_portal_documents, e
+    // essa tabela não tem estado ativo/revogado que essas verificações respeitem.
+    //
+    // Por isso, para cada linha antiga: os seus documentos publicados e o
+    // histórico de acessos passam para a linha da conta atual (o cliente não
+    // perde documentos e o CRM não perde o enviado/visto), e só depois a linha
+    // antiga é apagada. Se algum passo falhar, a linha antiga fica como está.
+    //
+    // Regras:
+    //  - só depois de o documento ter ficado publicado na conta atual (nunca
+    //    deixar a ficha sem acesso);
+    //  - só para fichas de pessoa: numa empresa (anew_entities.type =
+    //    'organization') vários funcionários podem ter acesso legítimo;
+    //  - cada linha é de uma só organização (UNIQUE auth_user_id+organization_id),
+    //    por isso o acesso da conta antiga a outras empresas/fichas fica intacto.
+    const revokedPortalEmails: string[] = [];
+    if (portalUserId && mainDocumentPublished) {
+      try {
+        const { data: entityTypeRow, error: entityTypeErr } = await supabase
+          .from("anew_entities")
+          .select("type")
+          .eq("id", entityId)
+          .maybeSingle();
+        const isPerson = !entityTypeErr && !!entityTypeRow && entityTypeRow.type !== "organization";
+
+        if (isPerson) {
+          const { data: staleRows, error: staleErr } = await supabase
+            .from("client_portal_users")
+            .select("id, auth_user_id")
+            .eq("entity_id", entityId)
+            .eq("organization_id", organization_id)
+            .neq("id", portalUserId)
+            .neq("auth_user_id", authUserId);
+
+          if (staleErr) {
+            console.error("Failed to look up stale portal accounts for entity:", staleErr);
+          }
+
+          for (const stale of staleRows || []) {
+            try {
+              // 1) Documentos: passam para a linha atual; os que ela já tem
+              //    (cpd_unique_pu_doc) ficam só na linha atual.
+              const { data: currentDocs, error: currentDocsErr } = await supabase
+                .from("client_portal_documents")
+                .select("document_type, document_id")
+                .eq("portal_user_id", portalUserId);
+              const { data: staleDocs, error: staleDocsErr } = await supabase
+                .from("client_portal_documents")
+                .select("id, document_type, document_id")
+                .eq("portal_user_id", stale.id);
+              if (currentDocsErr || staleDocsErr) {
+                console.error("Failed to read portal documents for revocation:", currentDocsErr || staleDocsErr);
+                continue;
+              }
+
+              const currentKeys = new Set((currentDocs || []).map((d: any) => `${d.document_type}:${d.document_id}`));
+              const duplicateIds: string[] = [];
+              const moveIds: string[] = [];
+              for (const d of staleDocs || []) {
+                if (currentKeys.has(`${d.document_type}:${d.document_id}`)) duplicateIds.push(d.id);
+                else moveIds.push(d.id);
+              }
+
+              if (duplicateIds.length > 0) {
+                const { error: dupErr } = await supabase
+                  .from("client_portal_documents")
+                  .delete()
+                  .eq("portal_user_id", stale.id)
+                  .in("id", duplicateIds);
+                if (dupErr) {
+                  console.error("Failed to drop duplicate portal documents:", { portal_user_id: stale.id, error: dupErr });
+                  continue;
+                }
+              }
+              if (moveIds.length > 0) {
+                const { error: moveErr } = await supabase
+                  .from("client_portal_documents")
+                  .update({ portal_user_id: portalUserId, updated_at: new Date().toISOString() })
+                  .eq("portal_user_id", stale.id)
+                  .in("id", moveIds);
+                if (moveErr) {
+                  console.error("Failed to move portal documents:", { portal_user_id: stale.id, error: moveErr });
+                  continue;
+                }
+              }
+
+              // 2) Histórico de acessos (enviado/visto/perguntas) passa também.
+              const { error: logMoveErr } = await supabase
+                .from("client_portal_access_log")
+                .update({ portal_user_id: portalUserId })
+                .eq("portal_user_id", stale.id);
+              if (logMoveErr) {
+                console.error("Failed to move portal access log:", { portal_user_id: stale.id, error: logMoveErr });
+                continue;
+              }
+
+              // 3) Só agora a linha antiga sai (já sem filhos a perder).
+              let staleEmail: string | null = null;
+              try {
+                const { data: staleAuth } = await supabase.auth.admin.getUserById(stale.auth_user_id);
+                staleEmail = staleAuth?.user?.email ?? null;
+              } catch {
+                // só serve para informar quem enviou; não bloqueia a revogação
+              }
+
+              const { error: delErr } = await withRetryResult(() => supabase
+                .from("client_portal_users")
+                .delete()
+                .eq("id", stale.id)
+                .eq("entity_id", entityId)
+                .eq("organization_id", organization_id));
+
+              if (delErr) {
+                console.error("Failed to revoke stale portal account:", { portal_user_id: stale.id, error: delErr });
+                continue;
+              }
+              console.log("Stale portal account revoked for entity", {
+                entityId, organization_id, portal_user_id: stale.id, auth_user_id: stale.auth_user_id,
+                moved_documents: moveIds.length, dropped_duplicates: duplicateIds.length, email: staleEmail,
+              });
+              if (staleEmail) revokedPortalEmails.push(staleEmail);
+            } catch (staleRowErr) {
+              console.error("Error revoking stale portal account:", { portal_user_id: stale.id, error: staleRowErr });
+            }
+          }
+        }
+      } catch (revokeErr) {
+        console.error("Error revoking stale portal accounts:", revokeErr);
       }
     }
 
@@ -953,6 +1125,8 @@ serve(async (req: Request) => {
           : `Acesso atualizado para ${email}. ${safeMessage}`,
         smtp_status: "not_found",
         smtp_warning: true,
+        ...(portalEmailMigratedFrom ? { portal_email_migrated_from: portalEmailMigratedFrom } : {}),
+        ...(revokedPortalEmails.length > 0 ? { portal_access_revoked_from: revokedPortalEmails } : {}),
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -1035,6 +1209,10 @@ serve(async (req: Request) => {
     // the old address no longer gets in.
     if (portalEmailMigratedFrom) {
       response.portal_email_migrated_from = portalEmailMigratedFrom;
+    }
+    // Idem para contas antigas desta ficha que deixaram de ter acesso.
+    if (revokedPortalEmails.length > 0) {
+      response.portal_access_revoked_from = revokedPortalEmails;
     }
 
     if (emailSent) {

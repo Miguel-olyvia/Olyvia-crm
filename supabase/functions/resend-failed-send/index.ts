@@ -10,15 +10,89 @@ initSentry();
  * Resend Failed Send API (Regra 11)
  *
  * AUTHENTICATED endpoint — real user JWT required. Reuses the exact
- * to/subject/body stored on the failed email_logs/sms_logs row (no
+ * subject/body stored on the failed email_logs/sms_logs row (no
  * editing before resend, by explicit decision) and inserts a fresh log
  * row with the new attempt's outcome, leaving the original failed row
  * untouched as history.
+ *
+ * Destinatário: o contacto principal ATUAL da ficha ligada ao registo, mas
+ * só quando o destino guardado era comprovadamente dessa ficha (é um dos
+ * emails/telefones dela). O entity_id dos logs nem sempre é o destinatário
+ * (há emails a comerciais e SMS a técnicos ligados à ficha/lead do cliente);
+ * nesses casos, e sem ficha, vai para o destino original.
  *
  * POST /resend-failed-send
  * Body: { type: 'email' | 'sms', log_id: string }
  * Returns: { success: true } | { error: string }
  */
+// Ordem da regra de contactos: principal primeiro, depois o mais recente.
+const CONTACT_ORDER = [
+  ["is_primary", { ascending: false, nullsFirst: false }],
+  ["created_at", { ascending: false }],
+  ["id", { ascending: false }],
+] as const;
+
+/**
+ * Email atual da ficha, se o email guardado for um dos dela; senão null.
+ */
+async function currentEmailForEntity(supabase: any, entityId: string | null, organizationId: string | null, storedEmail: string | null): Promise<string | null> {
+  if (!entityId || !storedEmail) return null;
+  const loadEmails = async (eId: string) => {
+    let q = supabase.from("anew_entity_emails").select("email").eq("entity_id", eId);
+    for (const [col, opts] of CONTACT_ORDER) q = q.order(col, opts);
+    return await q;
+  };
+  let { data, error } = await loadEmails(entityId);
+  // email_logs não tem entity_type: há registos cujo entity_id é o id de uma
+  // lead. Sem emails nessa "ficha", tenta-se a ficha da lead (como no SMS).
+  if (!error && !data?.length) {
+    let lq = supabase.from("anew_leads").select("entity_id").eq("id", entityId);
+    if (organizationId) lq = lq.eq("organization_id", organizationId);
+    const { data: lead } = await lq.maybeSingle();
+    if (lead?.entity_id) ({ data, error } = await loadEmails(lead.entity_id));
+  }
+  if (error || !data?.length) return null;
+  const stored = storedEmail.trim().toLowerCase();
+  const belongs = data.some((r: any) => (r.email || "").trim().toLowerCase() === stored);
+  if (!belongs) return null;
+  const current = (data[0].email || "").trim();
+  return current || null;
+}
+
+// Só dígitos, últimos 9 (número nacional), para comparar "+351 912…" com "912…".
+function phoneKey(raw: string | null | undefined): string {
+  const digits = (raw || "").replace(/[^0-9]/g, "");
+  return digits.slice(-9);
+}
+
+/**
+ * Telefone atual da ficha da lead (sms_logs.entity_type = 'leads'), se o
+ * telefone guardado for um dos dela; senão null.
+ */
+async function currentPhoneForLog(supabase: any, entityType: string | null, entityId: string | null, organizationId: string | null, storedPhone: string | null): Promise<string | null> {
+  if (!entityId || !storedPhone) return null;
+  let personEntityId: string | null = null;
+  if (entityType === "leads") {
+    let lq = supabase.from("anew_leads").select("entity_id").eq("id", entityId);
+    if (organizationId) lq = lq.eq("organization_id", organizationId);
+    const { data: lead } = await lq.maybeSingle();
+    personEntityId = lead?.entity_id || null;
+  }
+  if (!personEntityId) return null;
+
+  let q = supabase.from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", personEntityId);
+  for (const [col, opts] of CONTACT_ORDER) q = q.order(col, opts);
+  const { data, error } = await q;
+  if (error || !data?.length) return null;
+  const storedKey = phoneKey(storedPhone);
+  if (!storedKey || !data.some((r: any) => phoneKey(r.phone_number) === storedKey)) return null;
+
+  const top = data[0];
+  const num = (top.phone_number || "").replace(/\s+/g, "").replace(/^0+/, "");
+  if (!num) return null;
+  return num.startsWith("+") ? num : `${top.country_code || "+351"}${num}`;
+}
+
 Deno.serve(async (req: Request) => {
   const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
@@ -113,6 +187,8 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      const toEmail = (await currentEmailForEntity(serviceClient, logRow.entity_id, logRow.organization_id, logRow.to_email)) || logRow.to_email;
+
       const sendResponse = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getServiceRoleKey()}` },
@@ -121,7 +197,7 @@ Deno.serve(async (req: Request) => {
           user_id: logRow.user_id,
           entity_id: logRow.entity_id,
           smtp_id: logRow.smtp_id,
-          to: logRow.to_email,
+          to: toEmail,
           subject: logRow.subject,
           html: logRow.body_html,
         }),
@@ -170,13 +246,17 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const smsResult = await sendSmsNow({ toPhone: logRow.to_phone, message: logRow.message });
+    const toPhone = (await currentPhoneForLog(
+      serviceClient, logRow.entity_type, logRow.entity_id, logRow.organization_id, logRow.to_phone,
+    )) || logRow.to_phone;
+
+    const smsResult = await sendSmsNow({ toPhone, message: logRow.message });
     await serviceClient.from("sms_logs").insert({
       organization_id: logRow.organization_id,
       created_by: logRow.created_by,
       entity_type: logRow.entity_type,
       entity_id: logRow.entity_id,
-      to_phone: logRow.to_phone,
+      to_phone: toPhone,
       message: logRow.message,
       status: smsResult.ok ? "sent" : "failed",
       error_message: smsResult.ok ? null : smsResult.error,

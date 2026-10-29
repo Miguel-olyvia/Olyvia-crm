@@ -172,6 +172,15 @@ serve(async (req) => {
         }
         const linked = decision.content;
 
+        // Emails das automações por fase (trigger-email-template): o destinatário
+        // é o email principal ATUAL da ficha, não o que ficou gravado quando o
+        // envio foi agendado (a ficha pode ter sido corrigida entretanto para
+        // outra pessoa). Sem ficha/email resolvido, vai o email guardado.
+        const toEmail = (await resolveCurrentRecipient(supabase, email)) || email.to_email;
+        if (toEmail !== email.to_email) {
+          console.log("[process-scheduled-emails] destinatário atualizado pela ficha:", email.id);
+        }
+
         const sendResponse = await fetch(
           `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-email`,
           {
@@ -184,7 +193,7 @@ serve(async (req) => {
               user_id: email.user_id,
               organization_id: email.organization_id,
               ...(email.smtp_id ? { smtp_id: email.smtp_id } : {}),
-              to: email.to_email,
+              to: toEmail,
               subject: linked?.subject ?? email.subject,
               html: linked?.html ?? email.body_html,
             }),
@@ -209,7 +218,7 @@ serve(async (req) => {
 
         await maybeNotify(email.user_id, email.organization_id, "email_sent", {
           title: "✉️ Email automático enviado",
-          message: `"${email.subject}" → ${email.to_email}`,
+          message: `"${email.subject}" → ${toEmail}`,
           data: { scheduled_email_id: email.id, entity_type: email.entity_type, entity_id: email.entity_id },
         });
 
@@ -278,4 +287,77 @@ async function checkIfShouldCancel(supabase: any, email: any): Promise<boolean> 
   }
 
   return false;
+}
+
+// Email principal mais recente de uma ficha; sem principal, o mais recente.
+async function currentEntityEmail(supabase: any, entityId: string | null | undefined): Promise<string | null> {
+  if (!entityId) return null;
+  const { data } = await supabase
+    .from("anew_entity_emails")
+    .select("email")
+    .eq("entity_id", entityId)
+    .order("is_primary", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1);
+  const em = (data?.[0]?.email || "").trim();
+  return em || null;
+}
+
+/**
+ * Destinatário atual de um email agendado pelas automações por fase
+ * (trigger-email-template), resolvido como lá: lead/proposta/orçamento/contrato
+ * → ficha → email principal mais recente. Só para essas linhas (modelo
+ * automatic/semi_automatic com fase, sem audience/visita/formulário): os
+ * lembretes de visita e de formulário têm destinatários próprios (técnicos,
+ * convidados) e são acertados pelo reminderRunner. Devolve null quando não há
+ * nada melhor — o chamador usa o to_email guardado.
+ */
+async function resolveCurrentRecipient(supabase: any, email: any): Promise<string | null> {
+  try {
+    if (!email.template_id || email.audience || email.schedule_item_id || email.form_id) return null;
+    if (!email.entity_id || !email.organization_id) return null;
+
+    const { data: template } = await supabase
+      .from("email_templates")
+      .select("trigger_type, trigger_phase")
+      .eq("id", email.template_id)
+      .maybeSingle();
+    if (!template?.trigger_phase || !["automatic", "semi_automatic"].includes(template.trigger_type)) return null;
+
+    const orgId = email.organization_id;
+    if (email.entity_type === "leads") {
+      const { data: lead } = await supabase.from("anew_leads")
+        .select("entity_id, field_values").eq("id", email.entity_id).eq("organization_id", orgId).maybeSingle();
+      if (!lead) return null;
+      if (lead.entity_id) return await currentEntityEmail(supabase, lead.entity_id);
+      const fvEmail = ((lead.field_values || {}) as Record<string, string>).email;
+      return typeof fvEmail === "string" && fvEmail.trim() ? fvEmail.trim() : null;
+    }
+    if (email.entity_type === "proposals") {
+      const { data: p } = await supabase.from("proposals")
+        .select("entity_id").eq("id", email.entity_id).eq("organization_id", orgId).maybeSingle();
+      return await currentEntityEmail(supabase, p?.entity_id);
+    }
+    if (email.entity_type === "quotes") {
+      const { data: q } = await supabase.from("quotes")
+        .select("entity_id, cliente_id").eq("id", email.entity_id).eq("organization_id", orgId).maybeSingle();
+      if (!q) return null;
+      if (q.entity_id) return await currentEntityEmail(supabase, q.entity_id);
+      if (q.cliente_id) {
+        const { data: cl } = await supabase.from("anew_clients").select("entity_id").eq("id", q.cliente_id).maybeSingle();
+        return await currentEntityEmail(supabase, cl?.entity_id);
+      }
+      return null;
+    }
+    if (email.entity_type === "contracts") {
+      const { data: c } = await supabase.from("client_contracts")
+        .select("entity_id").eq("id", email.entity_id).eq("organization_id", orgId).maybeSingle();
+      return await currentEntityEmail(supabase, c?.entity_id);
+    }
+    return null;
+  } catch (err) {
+    console.error("[process-scheduled-emails] resolveCurrentRecipient failed (usa o email guardado):", err);
+    return null;
+  }
 }

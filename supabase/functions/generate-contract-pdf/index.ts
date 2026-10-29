@@ -136,12 +136,14 @@ const handler = async (req: Request): Promise<Response> => {
         .single();
       clientName = entity?.display_name || 'N/A';
 
-      // Get email
+      // Email principal mais recente da ficha (sem principal, o mais recente)
       const { data: emails } = await supabase
         .from('anew_entity_emails')
         .select('email')
         .eq('entity_id', contract.entity_id)
-        .eq('is_primary', true)
+        .order('is_primary', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(1);
       clientEmail = emails?.[0]?.email || '';
 

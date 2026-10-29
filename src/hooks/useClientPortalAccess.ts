@@ -158,6 +158,22 @@ Apenas o link de login foi copiado para a área de transferência.`,
           duration: 15000,
         });
       }
+      // Contas de portal antigas desta ficha (ex.: email de outra pessoa da
+      // casa) a que o backend retirou o acesso a este registo. Dizer sempre:
+      // quem entrava com esses emails deixa de ver estes documentos.
+      const revokedFrom: string[] = Array.isArray(data.portal_access_revoked_from)
+        ? data.portal_access_revoked_from.filter((e: unknown): e is string => typeof e === "string" && e.length > 0)
+        : [];
+      if (revokedFrom.length > 0) {
+        const list = revokedFrom.join(", ");
+        sonnerToast.info(
+          revokedFrom.length === 1 ? "Acesso ao portal retirado" : "Acessos ao portal retirados",
+          {
+            description: `O acesso ao portal de ${list} foi retirado desta ficha. Quem entrava com esse email deixa de ver os documentos deste cliente.`,
+            duration: 15000,
+          },
+        );
+      }
 
       options?.onSuccess?.();
     } catch (err: any) {

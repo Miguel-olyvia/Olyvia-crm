@@ -242,8 +242,15 @@ async function resolveEntityData(
   async function resolveEntity(eId: string) {
     const [entityRes, emailRes, phoneRes] = await Promise.all([
       supabase.from("anew_entities").select("display_name, first_name").eq("id", eId).single(),
-      supabase.from("anew_entity_emails").select("email").eq("entity_id", eId).eq("is_primary", true).maybeSingle(),
-      supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", eId).eq("is_primary", true).maybeSingle(),
+      // Contacto principal mais recente (sem principal, o mais recente). Com
+      // vários is_primary=true o maybeSingle() dava erro e o email ficava
+      // vazio — o envio era saltado em silêncio.
+      supabase.from("anew_entity_emails").select("email").eq("entity_id", eId)
+        .order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false })
+        .limit(1).maybeSingle(),
+      supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", eId)
+        .order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false })
+        .limit(1).maybeSingle(),
     ]);
     return {
       name: entityRes.data?.display_name || "",
