@@ -33,27 +33,44 @@ const ENVIO: Record<string, string> = {
 export function EstadoAcessoPortal({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const pedido = usePedidoEmail();
   const [email, setEmail] = useState(d.f.email || "");
+  // 29/10: o telefone (com indicativo do país) também se pede quando falta: o código de assinatura vai por SMS.
+  const [telefone, setTelefone] = useState(d.tel && !d.tel.includes("@") ? d.tel : "");
   const a = d.acesso;
   const pedeEmail = pedido?.deal === d.id;
   if (!pedeEmail && !a) return null;
+  const mostraEmail = pedeEmail && pedido.semEmail !== false, mostraTelefone = pedeEmail && !!pedido.semTelefone;
   return (
     <div className="space-y-2">
       {pedeEmail && (
-        <form role="group" aria-label="Email do cliente para o portal"
-          onSubmit={(e) => { e.preventDefault(); ctx.run(() => { ctx.A.emailPortal(d.id, email); }); }}
+        <form role="group" aria-label={mostraTelefone ? "Contacto do cliente para o portal" : "Email do cliente para o portal"}
+          onSubmit={(e) => { e.preventDefault(); ctx.run(() => { ctx.A.emailPortal(d.id, email, telefone); }); }}
           className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-[15px]">
           <p className="flex items-start gap-2 font-medium text-foreground">
             <Mail className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
             {pedido.mudar
               ? "Mudar o email do cliente: fica na ficha e o acesso ao portal segue para o email novo."
-              : <>Falta o email do cliente: {ENVIO[pedido.acao] ?? "o envio"} só segue para o portal com um email verdadeiro.</>}
+              : mostraEmail && mostraTelefone
+                ? <>Falta o email e o telefone do cliente: {ENVIO[pedido.acao] ?? "o envio"} só segue com um email verdadeiro e um telefone com indicativo do país.</>
+                : mostraTelefone
+                  ? <>Falta o telefone do cliente com indicativo do país: o código para {ENVIO[pedido.acao] ?? "o envio"} vai por SMS.</>
+                  : <>Falta o email do cliente: {ENVIO[pedido.acao] ?? "o envio"} só segue para o portal com um email verdadeiro.</>}
           </p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
-            <label className="grid min-w-0 flex-1 gap-1 text-sm text-muted-foreground">
-              Email do cliente
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" required
-                className="h-11 rounded-lg border border-input bg-card px-3 text-[15px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30" />
-            </label>
+            {mostraEmail && (
+              <label className="grid min-w-0 flex-1 gap-1 text-sm text-muted-foreground">
+                Email do cliente
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" required
+                  className="h-11 rounded-lg border border-input bg-card px-3 text-[15px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30" />
+              </label>
+            )}
+            {mostraTelefone && (
+              <label className="grid min-w-0 flex-1 gap-1 text-sm text-muted-foreground">
+                Telefone do cliente (com indicativo)
+                <input type="tel" inputMode="tel" value={telefone} onChange={(e) => setTelefone(e.target.value)} autoComplete="off" required
+                  placeholder="+351 912 345 678" title="Telefone com o indicativo do país, por exemplo +351 912 345 678"
+                  className="h-11 rounded-lg border border-input bg-card px-3 text-[15px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30" />
+              </label>
+            )}
             <Button type="submit" className="h-11">Guardar e enviar</Button>
             <Button type="button" variant="ghost" className="h-11" onClick={() => pedirEmailPortal(null)}>Agora não</Button>
           </div>

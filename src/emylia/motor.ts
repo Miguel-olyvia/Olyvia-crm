@@ -38,7 +38,7 @@ import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivi
 import { quemVaiPorOmissao } from "./equipa/membros";
 import { TECNICOS, ausenteNoRh, custoHoraDe, garantirTecnicos, perfilDoTecnico, temAusenciasRh, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
 import { custoObra } from "./custoObra";
-import { contaCliente, emailDaFicha, emailOk, enviarAcesso, lerPedidoEmail, modoReal, pedirEmailPortal, type ContaPortal, type DocPortal, type EnvioPortal, type EstadoContaPortal } from "./acessosPortal";
+import { contaCliente, emailDaFicha, emailOk, enviarAcesso, lerPedidoEmail, modoReal, pedirEmailPortal, telefoneDaFicha, telefoneNormal, telefoneOk, type ContaPortal, type DocPortal, type EnvioPortal, type EstadoContaPortal } from "./acessosPortal";
 // 22/10: os custos (perfis, €/h dos técnicos, estrutura, receitas) vivem no Estado (S.custos). Só se usam dentro de funções (o
 // custosModelo também importa o motor: a ordem de carga não importa).
 import {
@@ -1599,10 +1599,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   /** 23/10 (2.0): sem um email válido na ficha, nada segue para o portal: criava-se uma conta real com um email inventado. O negócio
    *  abre e pede o email (PedirEmailPortal); gravado, o envio repete-se (emailPortal). No protótipo sem base fica a conta de teste. */
   const comEmail = (d: Negocio, acao: EnvioPortal, n?: string): boolean => {
-    if (!modoReal() || emailDaFicha(d)) return true;
-    pedirEmailPortal({ deal: d.id, acao, n });
+    if (!modoReal()) return true;
+    // 29/10: o código de assinatura vai por SMS: sem telefone com indicativo de país também não segue.
+    const semEmail = !emailDaFicha(d), semTelefone = !telefoneDaFicha(d);
+    if (!semEmail && !semTelefone) return true;
+    pedirEmailPortal({ deal: d.id, acao, n, semEmail, semTelefone });
     S.view = "negocio"; S.deal = d.id;
-    avisar({ msg: "Falta o email do cliente", sub: "O acesso ao portal segue para o email: escreva-o no negócio e o envio continua", kind: "bad" });
+    avisar(semEmail && semTelefone
+      ? { msg: "Falta o email e o telefone do cliente", sub: "O acesso segue para o email e o código de assinatura por SMS: escreva-os no negócio (telefone com indicativo, +351…) e o envio continua", kind: "bad" }
+      : semEmail
+        ? { msg: "Falta o email do cliente", sub: "O acesso ao portal segue para o email: escreva-o no negócio e o envio continua", kind: "bad" }
+        : { msg: "Falta o telefone do cliente com indicativo do país", sub: "O código de assinatura vai por SMS: escreva-o no negócio, por exemplo +351 912 345 678, e o envio continua", kind: "bad" });
     return false;
   };
   const obraDe = (d: Negocio) => d.servico || LINHAS[d.linha].n;
@@ -2188,11 +2195,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       acessoCliente(d, d.orc?.contrato ? "contrato" : "proposta", "Acesso ao portal · " + obraDe(d));
     },
     /** 23/10 (2.0): o email pedido no envio ao portal: fica na ficha do cliente e o envio que esperava por ele segue. */
-    emailPortal(id: number, email: string): boolean {
+    emailPortal(id: number, email: string, telefone?: string): boolean {
       const d = deal(id), e = email.trim().toLowerCase();
-      if (!emailOk(e)) { avisar({ msg: "Email inválido", sub: "Escreva o email completo, por exemplo nome@exemplo.pt", kind: "bad" }); return false; }
-      d.f.email = e;
-      log(d, "Email do cliente para o portal: " + e);
+      const ped = lerPedidoEmail(), pedeTel = ped?.deal === id && !!ped.semTelefone, pedeEmail = !(ped?.deal === id && ped.semEmail === false);
+      if (pedeEmail && !emailOk(e)) { avisar({ msg: "Email inválido", sub: "Escreva o email completo, por exemplo nome@exemplo.pt", kind: "bad" }); return false; }
+      if (pedeTel && !telefoneOk(telefone ?? "")) { avisar({ msg: "Telefone inválido", sub: "Escreva o telefone com o indicativo do país, por exemplo +351 912 345 678", kind: "bad" }); return false; }
+      if (pedeEmail) { d.f.email = e; log(d, "Email do cliente para o portal: " + e); }
+      if (pedeTel) { d.tel = telefoneNormal(telefone ?? ""); log(d, "Telefone do cliente para o portal: " + d.tel); }
       const p = lerPedidoEmail();
       pedirEmailPortal(null);
       if (p?.deal !== id) return true;

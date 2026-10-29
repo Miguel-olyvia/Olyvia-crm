@@ -25,7 +25,7 @@ import { aplicarAgenda, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecn
 import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
 import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
-import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFicha, type EnvioAcesso, type ResultadoConta } from "@/emylia/acessosPortal";
+import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFicha, telefoneDaFicha, type EnvioAcesso, type ResultadoConta } from "@/emylia/acessosPortal";
 import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { enviarAoPortal } from "@/emylia/real/portalReal";
 import { definirGuardarCliente } from "@/emylia/EditarCliente";
@@ -130,9 +130,11 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       // 28/10: o portal do cliente, depois de gravar (o documento já está na base): a conta real e o email de acesso
       for (const e of filaPortal.current.splice(0)) {
         const id = Number(e.conta.ref), ref = refs.current.get(id), d = S.deals.find((x) => x.id === id), email = d ? emailDaFicha(d) : null;
+        const telefone = d ? telefoneDaFicha(d) : null;
         const r: ResultadoConta = !email ? { fase: "erro", msg: "Falta um email válido na ficha do cliente." }
+          : !telefone ? { fase: "erro", msg: "Falta o telefone do cliente com indicativo do país (por exemplo +351 912 345 678)." }
           : !ref ? { fase: "erro", msg: "O negócio ainda não está gravado na base." }
-          : await enviarAoPortal(supabase, org, ref, email, e);
+          : await enviarAoPortal(supabase, org, ref, email, e, undefined, telefone);
         definirResultadoConta(e.n, r);
         marcarContaPortal(S, e, r);
         if (r.fase === "erro") avisar({ msg: "O portal do cliente não recebeu o documento", sub: r.msg, kind: "bad" });

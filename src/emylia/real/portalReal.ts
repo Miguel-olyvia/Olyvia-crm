@@ -54,6 +54,28 @@ export async function garantirEmailDoContacto(sb: SupabaseClient, entityId: stri
   if (novo.error) throw new Error(novo.error.message);
 }
 
+/** Os indicativos mais comuns, do mais longo para o mais curto, para guardar o `country_code` ao lado do número internacional. */
+const INDICATIVOS = ["+351", "+352", "+244", "+258", "+238", "+34", "+33", "+39", "+41", "+44", "+49", "+55", "+1"];
+
+/** 29/10: o telefone do contacto passa a ser o da ficha (o principal), em formato internacional («+351912345678»): o código de assinatura vai por SMS para ele. */
+export async function garantirTelefoneDoContacto(sb: SupabaseClient, entityId: string, telefone: string): Promise<void> {
+  type Linha = { id: string; phone_number: string };
+  const tab = () => sb.from("anew_entity_phones" as never) as unknown as {
+    select: (c: string) => { eq: (c: string, v: unknown) => { eq: (c: string, v: unknown) => Promise<{ data: Linha[] | null; error: { message: string } | null }> } };
+    update: (r: object) => { eq: (c: string, v: unknown) => Promise<{ error: { message: string } | null }> };
+    insert: (r: object) => Promise<{ error: { message: string } | null }>;
+  };
+  const lido = await tab().select("id, phone_number").eq("entity_id", entityId).eq("is_primary", true);
+  if (lido.error) throw new Error(lido.error.message);
+  const atual = lido.data?.[0];
+  if (atual && atual.phone_number === telefone) return;
+  const country_code = INDICATIVOS.find((c) => telefone.startsWith(c)) ?? null;
+  const resultado = atual
+    ? await tab().update({ phone_number: telefone, country_code }).eq("id", atual.id)
+    : await tab().insert({ entity_id: entityId, phone_number: telefone, country_code, phone_type: "mobile", is_primary: true });
+  if (resultado.error) throw new Error(resultado.error.message);
+}
+
 /** A resposta da Edge Function no formato do cartão da V1 (AcessoPortalNegocio). */
 export function resultadoDaFuncao(data: Record<string, unknown> | null): ResultadoConta {
   if (!data) return { fase: "erro", msg: "Sem resposta do portal." };
@@ -77,11 +99,12 @@ async function erroDaFuncao(error: unknown): Promise<string> {
 
 /** Envia ao portal o documento do envio e devolve o resultado para o cartão. */
 export async function enviarAoPortal(sb: SupabaseClient, org: string, ref: { id: string; entityId: string }, email: string, e: Pick<EnvioAcesso, "doc">,
-  origem = typeof window !== "undefined" ? window.location.origin : ""): Promise<ResultadoConta> {
+  origem = typeof window !== "undefined" ? window.location.origin : "", telefone?: string): Promise<ResultadoConta> {
   const tipo = tipoDoEnvio(e.doc);
   if (!tipo) return { fase: "erro", msg: "Este documento ainda não vai para o portal do cliente." };
   try {
     await garantirEmailDoContacto(sb, ref.entityId, email);
+    if (telefone) await garantirTelefoneDoContacto(sb, ref.entityId, telefone);
     const docs = await documentosDoNegocio(sb, ref.id);
     const document_type = tipo, document_id = docs[tipo];
     if (!document_id) return { fase: "erro", msg: document_type === "proposal" ? "A proposta ainda não está gravada na base: tente de novo daqui a pouco." : "O contrato ainda não está gravado na base: tente de novo daqui a pouco." };

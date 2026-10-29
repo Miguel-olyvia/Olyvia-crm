@@ -81,6 +81,17 @@ export const emailDaFicha = (d: Negocio): string | null => {
   const e = normal(d.f.email || "");
   return emailOk(e) ? e : null;
 };
+/** 29/10: o telefone de contacto sem espaços, pontos, hífenes nem parêntesis; «00» à frente vira «+». */
+export const telefoneNormal = (t: string): string => t.trim().replace(/[\s.()-]/g, "").replace(/^00/, "+");
+/** 29/10: o telefone do cliente tem de levar o indicativo do país («+351912345678»): o código por SMS segue para este número. */
+export const telefoneOk = (t: string): boolean => /^\+[1-9]\d{7,14}$/.test(telefoneNormal(t));
+/** 29/10: o telefone da ficha (o contacto do negócio, quando não é um email), se tiver indicativo de país (senão null). */
+export const telefoneDaFicha = (d: Negocio): string | null => {
+  const t = d.tel || "";
+  if (t.includes("@")) return null;
+  const n = telefoneNormal(t);
+  return telefoneOk(n) ? n : null;
+};
 /** O email de acesso do cliente: o da ficha; sem ele, um de teste (só no protótipo de sempre: na 2.0 o envio pede o email antes,
  *  pedirEmailPortal, para nunca criar uma conta real com um email inventado). */
 export const emailCliente = (d: Negocio): string => emailDaFicha(d) ?? `cliente-${d.id}@teste.olyvia.pt`;
@@ -243,7 +254,11 @@ export function useResultadoConta(n: number | undefined): ResultadoConta | undef
 /** O envio que ficou à espera do email do cliente: qual negócio, o que se ia enviar (e a adenda). Só neste separador. */
 export type EnvioPortal = "proposta" | "contrato" | "adenda" | "contratoAdenda" | "acesso";
 /** `mudar` (29/10): o email pede-se para o trocar ("Mudar o email do cliente", no menu do negócio), e não porque falta. */
-export interface PedidoEmail { deal: number; acao: EnvioPortal; n?: string; mudar?: boolean }
+export interface PedidoEmail {
+  deal: number; acao: EnvioPortal; n?: string; mudar?: boolean;
+  /** 29/10: o que falta na ficha. Sem indicar, falta o email (como sempre); `semTelefone` pede também o telefone, com indicativo de país. */
+  semEmail?: boolean; semTelefone?: boolean;
+}
 let pedidoEmail: PedidoEmail | null = null;
 export function pedirEmailPortal(p: PedidoEmail | null): void { pedidoEmail = p; avisarOuvintes(); }
 export const lerPedidoEmail = (): PedidoEmail | null => pedidoEmail;
