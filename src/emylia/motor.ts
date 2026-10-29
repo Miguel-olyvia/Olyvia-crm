@@ -1941,7 +1941,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       return !!o.enviada;
     },
     /** Produtos do Catálogo na visita: escolher (com a quantidade sugerida), mudar a quantidade, "o cliente fornece", tirar. */
-    produto(id: number, p: Produto, q: number) { const v = deal(id).visita; if (p.servico) garantirServico(S, p.servico); v.prod = juntarProduto(v.prod ?? [], fotografia(p, q)); },
+    produto(id: number, p: Produto, q: number) { const v = deal(id).visita; if (p.servico) garantirServico(S, p.servico); v.prod = juntarProduto(v.prod ?? [], fotografia(p, q, false, S.cfg.alvo)); },
     produtoQtd(id: number, pid: string, q: number) { const v = deal(id).visita; v.prod = mudarQtd(v.prod ?? [], pid, q); },
     /** 26/10: vende o produto sem a instalação que ele traz (a mão de obra escolhe-se à parte, noutro serviço). */
     produtoSemServico(id: number, pid: string, sem: boolean) { const v = deal(id).visita; v.prod = marcarSemServico(v.prod ?? [], pid, sem); },
@@ -1953,7 +1953,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (i < 0) return;
       const velho = v.prod![i];
       if (p.servico) garantirServico(S, p.servico);
-      const novo = fotografia(p, velho.q, velho.cliente);
+      const novo = fotografia(p, velho.q, velho.cliente, S.cfg.alvo);
       v.prod = v.prod!.filter((x, k) => k === i || x.id !== p.id).map((x) => (x.id === pid ? novo : x));
     },
     /** 21/10: tirar (ou repor) uma parte da estimativa de materiais do modelo (ex.: o cliente já tem o pavimento). */

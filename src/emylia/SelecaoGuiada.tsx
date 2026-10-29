@@ -519,7 +519,7 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
     const daMedida = !!ja && quantidadeDaRegra(K, p, sids) && !contavel(p.un) && ja.q === qtdSugerida(K, p, sids, d.visita.med);
     const j = idx++;
     return (
-      <CartaoProduto key={p.id} nome={nome} nomeCompleto={p.n} detalhe={[detalhe, p.marca].filter(Boolean).join(" · ")} preco={precoUnitario(p)} un={p.un}
+      <CartaoProduto key={p.id} nome={nome} nomeCompleto={p.n} detalhe={[detalhe, p.marca].filter(Boolean).join(" · ")} preco={precoUnitario(p, ctx.S.cfg.alvo)} un={p.un}
         img={ilustracaoDoCatalogo(K.arvore, p)} on={!!ja} trazInstalacao={!!p.servico} animar={animar} entrada={cascata(j, reduzir)}
         onTocar={() => { if (onTocar(p) === "juntou") vibrar(10, reduzir); }}>
         {ja && (

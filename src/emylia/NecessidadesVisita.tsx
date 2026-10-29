@@ -35,7 +35,8 @@ const ilustracaoNo = (K: Catalogo, p: Produto) => ilustracaoDoCatalogo(K.arvore,
 
 /* ------------------------------------------------------------------ peças */
 /** Um produto do Catálogo para escolher: ilustração, nome, marca, preço por unidade e "traz instalação". */
-function CartaoProduto({ p, K, ja, onTocar, compacto }: { p: Produto; K: Catalogo; ja: boolean; onTocar: () => void; compacto?: boolean }) {
+// 29/10: alvo = margem-alvo do Catálogo (S.cfg.alvo), para o preço sem PVP ser o mesmo do Catálogo
+function CartaoProduto({ p, K, alvo, ja, onTocar, compacto }: { p: Produto; K: Catalogo; alvo: number; ja: boolean; onTocar: () => void; compacto?: boolean }) {
   return (
     <button type="button" aria-pressed={ja} onClick={onTocar} title={p.n}
       className={cn("relative flex h-full w-full flex-col rounded-xl border bg-card p-2.5 text-left transition-colors duration-150",
@@ -45,7 +46,7 @@ function CartaoProduto({ p, K, ja, onTocar, compacto }: { p: Produto; K: Catalog
       </span>
       <span className="mt-2 line-clamp-2 text-[15px] font-medium leading-snug text-foreground">{p.n}</span>
       {p.marca && <span className="text-sm text-muted-foreground">{p.marca}</span>}
-      <span className="mt-auto pt-1.5 text-[15px] tabular-nums text-foreground">{eur(precoUnitario(p))} €<span className="text-sm text-muted-foreground"> / {p.un}</span></span>
+      <span className="mt-auto pt-1.5 text-[15px] tabular-nums text-foreground">{eur(precoUnitario(p, alvo))} €<span className="text-sm text-muted-foreground"> / {p.un}</span></span>
       {p.servico && <span className="mt-0.5 inline-flex items-center gap-1 text-sm text-muted-foreground"><Link2 className="h-3.5 w-3.5" aria-hidden="true" />traz instalação</span>}
       <span aria-hidden="true" className={cn("absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full border bg-card transition-colors",
         ja ? "border-primary bg-primary text-primary-foreground" : "border-input text-muted-foreground")}>
@@ -101,8 +102,8 @@ function Escolhido({ p, ctx, K, ro, clienteFornece }: { p: ProdVisita; ctx: P; K
 }
 
 /** A escolha de produtos de uma lista: pesquisa e marca só quando a lista é grande; em fila (telemóvel) ou grelha; às páginas. */
-function Escolher({ produtos, K, ja, onTocar, rotulo, focoRef }: {
-  produtos: Produto[]; K: Catalogo; ja: (id: string) => boolean; onTocar: (p: Produto) => void; rotulo: string; focoRef?: React.Ref<HTMLParagraphElement>;
+function Escolher({ produtos, K, alvo, ja, onTocar, rotulo, focoRef }: {
+  produtos: Produto[]; K: Catalogo; alvo: number; ja: (id: string) => boolean; onTocar: (p: Produto) => void; rotulo: string; focoRef?: React.Ref<HTMLParagraphElement>;
 }) {
   const [q, setQ] = useState("");
   const [marca, setMarca] = useState<string | null>(null);
@@ -139,7 +140,7 @@ function Escolher({ produtos, K, ja, onTocar, rotulo, focoRef }: {
         className="mt-3 flex snap-x gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0 lg:grid-cols-4">
         {lista.slice(0, n).map((p) => (
           <li key={p.id} className="w-40 shrink-0 snap-start sm:w-auto">
-            <CartaoProduto p={p} K={K} ja={ja(p.id)} onTocar={() => onTocar(p)} compacto />
+            <CartaoProduto p={p} K={K} alvo={alvo} ja={ja(p.id)} onTocar={() => onTocar(p)} compacto />
           </li>
         ))}
         {lista.length > n && (
@@ -233,7 +234,7 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
       )}
 
       {mostraEscolha && (
-        <Escolher produtos={produtos} K={K} ja={(id) => prodPorId.has(id)} onTocar={tocar} focoRef={focoEscolher}
+        <Escolher produtos={produtos} K={K} alvo={S.cfg.alvo} ja={(id) => prodPorId.has(id)} onTocar={tocar} focoRef={focoEscolher}
           rotulo={obj ? `Escolha ${obj.comArtigo}` : `Escolha o produto de ${(o.caminho.split(" › ").pop() ?? "").toLowerCase()}`} />
       )}
 
@@ -305,7 +306,7 @@ function OutrosProdutos({ ctx, K }: { ctx: P; K: Catalogo }) {
       </div>
       <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">{lista.length ? `${lista.length} produto${lista.length === 1 ? "" : "s"}` : "Nada no Catálogo com esse nome."}</p>
       <ul className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" aria-label="Produtos do Catálogo">
-        {lista.slice(0, n).map((p) => <li key={p.id}><CartaoProduto p={p} K={K} ja={prodPorId.has(p.id)} onTocar={() => tocar(p)} /></li>)}
+        {lista.slice(0, n).map((p) => <li key={p.id}><CartaoProduto p={p} K={K} alvo={ctx.S.cfg.alvo} ja={prodPorId.has(p.id)} onTocar={() => tocar(p)} /></li>)}
       </ul>
       {lista.length > n && (
         <button type="button" onClick={() => setN((x) => x + PAGINA)}

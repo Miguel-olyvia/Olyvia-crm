@@ -11,8 +11,8 @@ import type { LinhaOrc, MedKey, Medidas, SvcId } from "./motor";
 
 export const PREFIXO_PROD = "Produto · ";
 export const PREFIXO_CLIENTE = "Fornecido pelo cliente · ";
-/** Margem sobre o custo dos produtos (exemplo; na app real vem do pacote ou das Definições). */
-export const MARGEM_PROD = 0.25;
+/** 29/10: só para fotografias antigas sem preço; o novo vem da margem-alvo do Catálogo (S.cfg.alvo, margem sobre o preço de venda). */
+export const MARGEM_PROD_ANTIGA = 0.25;
 
 /** Um produto escolhido na visita (fotografia do Catálogo no momento da escolha). */
 export interface ProdVisita {
@@ -30,7 +30,7 @@ export interface ProdVisita {
   /** O serviço que o produto traz e o fator (quantidade do serviço = q × fator). */
   svc?: SvcId;
   fator?: number;
-  /** O preço de venda real por unidade (do Catálogo, quando o tem): manda sobre a margem. */
+  /** O preço de venda por unidade, fixo no momento da escolha: o PVP do Catálogo, senão o custo com a margem-alvo (29/10). */
   pvp?: number;
   /** 26/10: vendido sem a instalação que traz (a mão de obra entra por outro serviço, escolhido à parte). */
   semSvc?: true;
@@ -174,12 +174,17 @@ export function qtdSugerida(K: Catalogo, p: Produto, sids: SvcId[], med: Medidas
 }
 
 /* ------------------------------------------------------------------ mexer na lista */
-/** A fotografia de um produto do Catálogo, com a relação de serviço que ele tem hoje. */
-export function fotografia(p: Produto, q: number, cliente = false): ProdVisita {
+/** 29/10: o preço de venda por unidade como no Catálogo (fichaServico.precoProduto): o PVP, senão custo / (1 − alvo/100). */
+const venda = (p: { custo: number; pvp?: number }, alvo?: number): number | undefined =>
+  p.pvp != null && p.pvp > 0 ? p.pvp : alvo != null && alvo < 100 ? r2(p.custo / (1 - alvo / 100)) : undefined;
+/** A fotografia de um produto do Catálogo, com a relação de serviço que ele tem hoje.
+ * 29/10: guarda o preço de venda do momento: o PVP, senão o custo com a margem-alvo (alvo, em %) — o mesmo do Catálogo. */
+export function fotografia(p: Produto, q: number, cliente = false, alvo?: number): ProdVisita {
   const v: ProdVisita = { id: p.id, n: p.n, un: p.un, custo: p.custo, q, no: p.no };
   if (cliente) v.cliente = true;
   if (p.servico) { v.svc = p.servico; v.fator = p.fatorServico ?? 1; }
-  if (p.pvp != null && p.pvp > 0) v.pvp = p.pvp;
+  const pvp = venda(p, alvo);
+  if (pvp != null) v.pvp = pvp;
   return v;
 }
 /** Junta (ou substitui) um produto na lista. */
@@ -197,9 +202,9 @@ export const marcarCliente = (prod: ProdVisita[], id: string, cliente: boolean):
 /* ------------------------------------------------------------------ no orçamento */
 /** O texto de um produto numa linha: "Sanita suspensa com estrutura" ou "Pavimento cerâmico 60×60 · 6 m²". */
 export const textoProduto = (p: ProdVisita) => (p.q === 1 && p.un === "un" ? p.n : `${p.n} · ${String(p.q).replace(".", ",")} ${p.un}`);
-export const precoProduto = (p: ProdVisita) => (p.pvp != null ? r2(p.pvp * p.q) : r2((p.custo * p.q) / (1 - MARGEM_PROD)));
-/** O preço de venda por unidade de um produto do Catálogo: o PVP real, senão o custo com a margem. */
-export const precoUnitario = (p: { custo: number; pvp?: number }) => (p.pvp != null && p.pvp > 0 ? p.pvp : r2(p.custo / (1 - MARGEM_PROD)));
+export const precoProduto = (p: ProdVisita) => (p.pvp != null ? r2(p.pvp * p.q) : r2((p.custo * p.q) / (1 - MARGEM_PROD_ANTIGA)));
+/** O preço de venda por unidade: o PVP real, senão o custo com a margem-alvo (alvo, em %); sem alvo (fotografias antigas), a margem antiga. */
+export const precoUnitario = (p: { custo: number; pvp?: number }, alvo?: number) => venda(p, alvo) ?? r2(p.custo / (1 - MARGEM_PROD_ANTIGA));
 
 /** As linhas de materiais dos produtos da visita: "Produto · …" (com custo e preço) ou "Fornecido pelo cliente · …" (a zero). */
 export function linhasDosProdutos(prod: ProdVisita[]): LinhaOrc[] {

@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LINHAS, acoes, criarOrc, seed, tot, type Negocio } from "./motor";
 import { catalogo0, retirarNo, type Catalogo } from "./v2/catalogoModelo";
 import {
-  PREFIXO_CLIENTE, PREFIXO_PROD, fotografia, juntarProduto, ligarCatalogo, materiaisDoModelo, partesDoModelo, obrigacoes, qtdSugerida, servicosTrazidos,
-  tirarProduto, trazidosParaOrc,
+  PREFIXO_CLIENTE, PREFIXO_PROD, fotografia, juntarProduto, ligarCatalogo, linhasDosProdutos, materiaisDoModelo, partesDoModelo, obrigacoes, precoProduto,
+  precoUnitario, qtdSugerida, servicosTrazidos, tirarProduto, trazidosParaOrc,
 } from "./produtosVisita";
+import { precoProduto as precoCatalogo } from "./fichaServico";
 import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, type Grupo } from "./campos";
 
 const K0 = catalogo0();
@@ -176,7 +177,8 @@ describe("na visita: portão, orçamento e reabrir", () => {
     expect(svc).not.toContain("c13");
     expect(S.svc["s-moissusp"].n).toBe("Instalação de Sanita Suspensa");
     const mats = o.linhas.flatMap((l) => (l.t === "mat" ? [l] : []));
-    expect(mats.find((l) => l.d === PREFIXO_PROD + "Sanita suspensa com estrutura")).toMatchObject({ custo: 285, preco: 380 });
+    // 29/10: sem PVP, o preço é o do Catálogo: 285 / (1 − 35%) (antes, 25% fixos: 380)
+    expect(mats.find((l) => l.d === PREFIXO_PROD + "Sanita suspensa com estrutura")).toMatchObject({ custo: 285, preco: 438.46 });
     expect(mats.find((l) => l.d === PREFIXO_PROD + "Espelho simples 60×80")).toBeTruthy();
     // a estimativa do modelo por partes: parede 350 + pavimento 0 (o cliente mantém) + louças 700 − 285 (a sanita)
     // + colas 140; o espelho não é do modelo e não desconta nada
@@ -237,5 +239,49 @@ describe("as partes da estimativa do modelo (21/10, a versão nova da proposta)"
   it("tirar uma parte à mão desce a estimativa; tirar todas, a linha sai", () => {
     expect(materiaisDoModelo(mat, [], {}, K0.arvore, ["pavimento"])!.custo).toBe(1400 - 210);
     expect(materiaisDoModelo(mat, [], {}, K0.arvore, mat.partes!.map((p) => p.d))).toBeNull();
+  });
+});
+
+describe("29/10: o preço de um produto sem PVP é o mesmo no Catálogo e no orçamento (margem-alvo, sobre o preço de venda)", () => {
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const semPvp = prodN(K0, "Sanita suspensa com estrutura"); // custo 285, sem PVP
+  it("a fotografia guarda o preço do Catálogo e a linha do orçamento usa-o", () => {
+    expect(semPvp.pvp).toBeUndefined();
+    for (const alvo of [35, 28, 40]) {
+      const cat = r2(precoCatalogo(semPvp, alvo));
+      const f = fotografia(semPvp, 1, false, alvo);
+      expect(f.pvp).toBe(cat);
+      expect(precoUnitario(semPvp, alvo)).toBe(cat);
+      expect(precoProduto(f)).toBe(cat);
+      expect(linhasDosProdutos([f])[0]).toMatchObject({ custo: 285, preco: cat });
+    }
+    expect(precoProduto(fotografia(semPvp, 3, false, 35))).toBe(r2(438.46 * 3));
+    // o cliente fornece: fica a zero, como antes
+    expect(linhasDosProdutos([fotografia(semPvp, 1, true, 35)])[0]).toMatchObject({ custo: 0, preco: 0 });
+  });
+  it("com PVP fica o PVP, seja qual for a margem-alvo", () => {
+    const comPvp = { ...semPvp, pvp: 399 };
+    expect(fotografia(comPvp, 2, false, 35).pvp).toBe(399);
+    expect(precoUnitario(comPvp, 35)).toBe(399);
+    expect(precoProduto(fotografia(comPvp, 2, false, 35))).toBe(798);
+    expect(precoCatalogo(comPvp, 35)).toBe(399);
+  });
+  it("uma fotografia antiga, sem preço guardado, fica com a margem antiga (25%): não muda de preço sozinha", () => {
+    const velha = fotografia(semPvp, 2); // como se guardava antes de 29/10
+    expect(velha.pvp).toBeUndefined();
+    expect(precoProduto(velha)).toBe(760);
+    expect(precoUnitario(velha)).toBe(380);
+  });
+  it("no motor: escolher e trocar na visita usam a margem-alvo das Definições", () => {
+    const S = seed();
+    ligarCatalogo(() => K0);
+    S.cfg.alvo = 40;
+    const A = acoes(S, () => {}, (fn) => fn());
+    const d = S.deals.find((x) => x.id === 1035)!;
+    A.produto(d.id, semPvp, 1);
+    expect(d.visita.prod!.find((p) => p.id === semPvp.id)!.pvp).toBe(r2(precoCatalogo(semPvp, 40)));
+    const compacta = prodN(K0, "Sanita compacta");
+    A.trocarProduto(d.id, semPvp.id, compacta);
+    expect(d.visita.prod!.find((p) => p.id === compacta.id)!.pvp).toBe(r2(precoCatalogo(compacta, 40)));
   });
 });

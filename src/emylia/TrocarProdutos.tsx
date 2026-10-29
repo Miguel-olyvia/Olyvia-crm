@@ -145,7 +145,7 @@ export function ProdutosDaVersao({ ctx, d, ant }: { ctx: Ctx; d: Negocio; ant: V
         </span>
       </button>
 
-      <JanelaCatalogo K={K} janela={janela} fechar={() => setJanela(null)} escolher={escolher} jaTem={idsAgora} />
+      <JanelaCatalogo K={K} alvo={ctx.S.cfg.alvo} janela={janela} fechar={() => setJanela(null)} escolher={escolher} jaTem={idsAgora} />
     </div>
   );
 }
@@ -239,8 +239,9 @@ function LinhaParte({ pt, preco, escolher, tirar, repor }: { pt: ParteEstimativa
 }
 
 /* ------------------------------------------------------------------ a janela do Catálogo */
-function JanelaCatalogo({ K, janela, fechar, escolher, jaTem }: {
-  K: Catalogo; janela: Janela; fechar: () => void; escolher: (p: Produto) => void; jaTem: Set<string>;
+// 29/10: alvo = margem-alvo do Catálogo (S.cfg.alvo): os produtos sem PVP com o mesmo preço do Catálogo; o atual é fotografia (já tem o preço)
+function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
+  K: Catalogo; alvo: number; janela: Janela; fechar: () => void; escolher: (p: Produto) => void; jaTem: Set<string>;
 }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string | null>(null);
@@ -270,8 +271,8 @@ function JanelaCatalogo({ K, janela, fechar, escolher, jaTem }: {
     const L = filtrarProdutos(base, K.arvore, { q, cat });
     // na troca, os de preço mais perto do atual primeiro; nos outros, do mais barato ao mais caro
     const pa = atual ? precoUnitario(atual) : 0;
-    return [...L].sort((a, b) => (atual ? Math.abs(precoUnitario(a) - pa) - Math.abs(precoUnitario(b) - pa) : precoUnitario(a) - precoUnitario(b)));
-  }, [base, K.arvore, q, cat, atual]);
+    return [...L].sort((a, b) => (atual ? Math.abs(precoUnitario(a, alvo) - pa) - Math.abs(precoUnitario(b, alvo) - pa) : precoUnitario(a, alvo) - precoUnitario(b, alvo)));
+  }, [base, K.arvore, q, cat, atual, alvo]);
 
   const titulo = !janela ? "" : janela.k === "trocar" ? `Trocar ${janela.p.n}` : janela.k === "parte" ? maiuscula(janela.parte.d) : "Juntar um produto";
   const sub = !janela ? "" : janela.k === "trocar" ? "Toque no produto que fica no lugar dele: a quantidade mantém-se."
@@ -319,7 +320,7 @@ function JanelaCatalogo({ K, janela, fechar, escolher, jaTem }: {
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {lista.slice(0, n).map((p) => {
                 const eAtual = atual?.id === p.id, ja = !atual && jaTem.has(p.id);
-                const dif = atual ? (precoUnitario(p) - precoUnitario(atual)) * atual.q : 0;
+                const dif = atual ? (precoUnitario(p, alvo) - precoUnitario(atual)) * atual.q : 0;
                 return (
                   <li key={p.id}>
                     <button type="button" disabled={eAtual || ja} onClick={() => escolher(p)}
@@ -332,7 +333,7 @@ function JanelaCatalogo({ K, janela, fechar, escolher, jaTem }: {
                       <span className="mt-2 line-clamp-2 text-[15px] font-medium leading-snug">{p.n}</span>
                       {p.marca && <span className="truncate text-sm text-muted-foreground">{p.marca}</span>}
                       <span className="mt-auto flex items-end justify-between gap-1 pt-2">
-                        <span className="text-[15px] tabular-nums">{eur(precoUnitario(p))} €<span className="text-xs text-muted-foreground"> / {p.un}</span></span>
+                        <span className="text-[15px] tabular-nums">{eur(precoUnitario(p, alvo))} €<span className="text-xs text-muted-foreground"> / {p.un}</span></span>
                         {atual && !eAtual && (
                           <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
                             Math.abs(dif) < 0.005 ? "bg-muted text-muted-foreground" : dif < 0 ? "bg-success/15 text-success" : "bg-warning/15 text-warning")}>
