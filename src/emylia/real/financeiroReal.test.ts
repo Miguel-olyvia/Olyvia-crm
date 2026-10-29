@@ -72,6 +72,28 @@ describe("gravarFinanceiro", () => {
     expect(avisos).toEqual([]);
   });
 
+  it("29/10: tranche registada e pagamento validado pelo cartão Pagamento: o pagamento vai à base (a EC nasce lá) e o recibo é o da base", async () => {
+    const d = neg({ f: { data_pag: "2026-10-29", conta: "Banco A", comprovativo: "TRF 7" } as Negocio["f"],
+      fin: { fatura: { n: "gvgvv", q: "29/10" }, pago: true, recibo: { n: "RC 2026/301", q: "hoje" }, tranches: [
+        { id: "f1-t1", numero: "gvgvv", data: "2026-10-29", valor: 2574.85, tranche: "t1" },
+        { id: "f2-t2", numero: "FT 2", data: "2026-10-29", valor: 100, tranche: "t2" },
+      ] } as Negocio["fin"] });
+    const antes = structuredClone(d); antes.fin.pago = false; antes.fin.recibo = null;
+    expect(novasNoFinanceiro(antes, d)).toEqual([
+      { k: "pagamento", fatura: "gvgvv", valor: 2574.85, data: "2026-10-29", referencia: "TRF 7", conta: "Banco A", reciboErp: null },
+    ]);
+    const rpc = vi.fn(async () => ({ data: { recibo: "RC 2026/3", ec: { emitida: true, nova: true } }, error: null }));
+    const avisos = await gravarFinanceiro({ rpc } as never, ORG, NEG, d, novasNoFinanceiro(antes, d));
+    expect(rpc.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["neg_validar_pagamento"]);
+    expect(d.fin.tranches![0]).toMatchObject({ recibo: "RC 2026/3", pagamento: { data: "2026-10-29", conta: "Banco A", ref: "TRF 7" } });
+    expect(d.fin.tranches![1].pagamento).toBeUndefined();
+    expect(d.fin.recibo).toEqual({ n: "RC 2026/3", q: "hoje" });
+    expect(avisos).toEqual(["A encomenda de cliente foi emitida no Inventário e o que falta foi pedido ao fornecedor."]);
+    // gravado: nada de novo, e a outra tranche não passa a paga
+    expect(novasNoFinanceiro(structuredClone(d), d)).toEqual([]);
+    expect(financeiroDe(d).filter((o) => o.k === "pagamento")).toHaveLength(1);
+  });
+
   it("um erro da base (ex.: sem contrato assinado) para e lança a mensagem; a função ausente só avisa", async () => {
     const d = neg({ fin: { fatura: { n: "FAT 1", q: "x" }, pago: true, recibo: null } });
     const recusa = vi.fn(async () => ({ data: null, error: { code: "P0001", message: "Ainda não há contrato assinado nem venda direta aceite: a fatura regista-se depois." } }));

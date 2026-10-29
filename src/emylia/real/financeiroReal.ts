@@ -25,9 +25,15 @@ export function financeiroDe(d: Pick<Negocio, "fin" | "f" | "adendas"> & { anula
   const fin = d.fin ?? { fatura: null, pago: false, recibo: null };
   const tranches = (fin.tranches ?? []).filter((t) => !t.daDemo && txt(t.numero));
   if (tranches.length) {
+    // 29/10: validado pelo cartão Pagamento (A.validar) o negócio fica pago mas a tranche não: a da fatura do negócio (ou a 1.ª por pagar)
+    // conta como paga, com os dados do passo Pagamento (a regra do ecrã, v2/estadoV2.ts: faturasDe). Senão o pagamento nunca ia à base.
+    const alvo = fin.pago && fin.recibo && !tranches.some((t) => t.pagamento)
+      ? tranches.find((t) => t.numero.trim() === fin.fatura?.n.trim()) ?? tranches[0] : undefined;
+    const rcErp = fin.erp?.recibos?.length ? fin.erp.recibos[fin.erp.recibos.length - 1].n : null;
     for (const t of tranches) {
       faturas.push({ k: "fatura", chave: t.tranche, numero: t.numero.trim(), erp: null });
       if (t.pagamento) pagamentos.push({ k: "pagamento", fatura: t.numero.trim(), valor: num(t.valor), data: dia(t.pagamento.data), referencia: txt(t.pagamento.ref), conta: txt(t.pagamento.conta), reciboErp: null });
+      else if (t === alvo) pagamentos.push({ k: "pagamento", fatura: t.numero.trim(), valor: num(t.valor), data: dia(d.f?.data_pag), referencia: txt(d.f?.comprovativo), conta: txt(d.f?.conta), reciboErp: txt(rcErp) });
     }
   } else if (fin.fatura && txt(fin.fatura.n)) {
     // a V1: uma fatura, a da 1.ª prestação ("unica" é a ordem 1 para a base)
@@ -69,7 +75,13 @@ function aplicarResposta(d: Negocio, o: OpFinanceira, r: Record<string, unknown>
   const rc = typeof r.recibo === "string" ? r.recibo : null;
   if (!rc) return;
   const t = d.fin.tranches?.find((x) => x.numero.trim() === o.fatura);
-  if (t) { t.recibo = rc; return; }
+  if (t) {
+    // 29/10: a tranche paga pelo cartão Pagamento fica com o pagamento; a 1.ª paga é a do negócio, que fica com o recibo da base
+    t.pagamento ??= { data: o.data ?? "", conta: o.conta ?? "", ref: o.referencia ?? "" };
+    t.recibo = rc;
+    if (d.fin.pago && d.fin.tranches!.find((x) => x.pagamento) === t) d.fin.recibo = { n: rc, q: d.fin.recibo?.q ?? "hoje" };
+    return;
+  }
   if (d.fin.fatura?.n.trim() === o.fatura) { d.fin.recibo = { n: rc, q: d.fin.recibo?.q ?? "hoje" }; return; }
   for (const a of d.adendas ?? []) for (const f of faturasAdenda(a)) if (f.n.trim() === o.fatura && f.recibo) f.recibo = { ...f.recibo, n: rc };
 }
