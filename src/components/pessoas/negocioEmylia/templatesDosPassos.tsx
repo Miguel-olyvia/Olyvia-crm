@@ -21,6 +21,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { cn } from "@/lib/utils";
 import { EnviarParaPortal } from "./EnviarParaPortal";
 import { SeletorDeTemplate } from "./SeletorDeTemplate";
+import { OrcamentoDocumento } from "./OrcamentoDocumento";
 
 export interface ContextoDosTemplates { negocioId: string | null; ctx: Ctx; d: Negocio; podeEditar: boolean }
 
@@ -110,10 +111,10 @@ function TemplateDoOrcamento({ c, children }: { c: ContextoDosTemplates; childre
           paginaDeCriacao={{ para: "/quote-templates", texto: "Criar templates de orçamento" }} vazio="Ainda não há templates do tipo orçamento nesta organização."
         />
         <AvisosDaGravacao t={neg} />
-        {escolhido && (
-          <details className="text-[15px]">
-            <summary className={cn("min-h-11 cursor-pointer py-2 font-medium", FOCO)}>Ver o aspeto do documento</summary>
-            <div className="mt-2"><AspetoDoDocumento tpl={escolhido} nome={org.nome} logoOrg={org.logo} /></div>
+        {(
+          <details className="text-[15px]" open>
+            <summary className={cn("min-h-11 cursor-pointer py-2 font-medium", FOCO)}>Ver o documento do orçamento</summary>
+            <div className="mt-2"><OrcamentoDocumento d={c.d} S={c.ctx.S} tpl={escolhido} nome={org.nome} logoOrg={org.logo} /></div>
           </details>
         )}
       </section>
