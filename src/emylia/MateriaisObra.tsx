@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { useInventario } from "./inventario/loja";
+import { faltaMateriaisReal, prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { entregaTarde, textoMateriais } from "./preparacaoObra";
 import { ecDaAdenda, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
@@ -28,11 +29,13 @@ const ddmm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 export function contaMateriais(d: Negocio, r: ResumoEcNeg | null): { ok: number; n: number } | null {
   const ec = d.obra.ec;
   if (!ec) return null;
+  // F3: a encomenda real conta-se pelas unidades da prontidão das Encomendas de cliente
+  if (usarProntidao(ec)) { const p = prontidaoDe(ec.contrato); return p ? { ok: Math.min(p.precisas, p.reservadas + p.servidas), n: p.precisas } : { ok: 0, n: 0 }; }
   if (!ec.ref) return { ok: ec.linhas.length, n: ec.linhas.length };
   if (!r || r.eliminada) return { ok: 0, n: ec.linhas.length };
   return { ok: r.linhas.filter((l) => estadoLinhaNegocio(l).ok).length, n: r.linhas.length };
 }
-export const materiaisProntos = (d: Negocio, r: ResumoEcNeg | null) => !!d.obra.ec && (!d.obra.ec.ref || !!r?.pronta);
+export const materiaisProntos = (d: Negocio, r: ResumoEcNeg | null) => !!d.obra.ec && (usarProntidao(d.obra.ec) ? prontaReal(prontidaoDe(d.obra.ec.contrato)) : !d.obra.ec.ref || !!r?.pronta);
 
 export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   const { A, go, d } = ctx;
@@ -48,7 +51,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
     </div>
   );
 
-  const exemplo = !ec.ref, c = contaMateriais(d, r)!, pronto = materiaisProntos(d, r);
+  const exemplo = !ec.ref && !ec.contrato, c = contaMateriais(d, r)!, pronto = materiaisProntos(d, r);
   const todosNaObra = exemplo || (!!r && r.linhas.length > 0 && r.linhas.every((l) => l.st === "served"));
   // 21/10: com as linhas das encomendas de ajuste (materiais novos de tarefas novas, adendas ou mudados à mão)
   const linhas = linhasDaObra(d).map(({ x, ec: n, motivo }) => { const l = linhaDoResumo(r, x.n, n); return { x, l, n, motivo, g: grupoDe(l, exemplo) }; });
@@ -57,7 +60,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   const pendentes = porEncomendarDe(d);
   const retidos = assinadas(d).filter((a) => !ecDaAdenda(d, a.n)).map((a) => ({ a, L: porEncomendarDe(d, a.n) })).filter((x) => x.L.length);
   const nCaminho = linhas.filter((y) => y.g === "caminho").length, nResolver = linhas.filter((y) => y.g === "resolver").length;
-  const falta = exemplo ? [] : faltaMateriais(r);
+  const falta = exemplo ? [] : usarProntidao(ec) ? faltaMateriaisReal(prontidaoDe(ec.contrato)) : faltaMateriais(r);
   const tarde = entregaTarde(d, db);
   const titulo = r?.eliminada ? "Encomenda eliminada no Inventário"
     : todosNaObra ? "Materiais todos na obra"
@@ -82,7 +85,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           {!exemplo && (
             <div className="flex flex-wrap gap-2">
               {/* 26/10: as duas portas para o Inventário, já filtradas pela obra (e com "Voltar à obra" lá) */}
-              {pos.length > 0 && <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirComprasObra(d.id))}>Ver as compras desta obra<ArrowRight className="ml-1.5 h-4 w-4" /></Button>}
+              {(pos.length > 0 || !!ec.contrato) && <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirComprasObra(d.id))}>Ver as compras desta obra<ArrowRight className="ml-1.5 h-4 w-4" /></Button>}
               <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirInv(d.id))}>Ver a encomenda de cliente<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
             </div>
           )}

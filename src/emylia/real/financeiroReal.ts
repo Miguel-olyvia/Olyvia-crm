@@ -11,14 +11,16 @@ import { faturasAdenda } from "../adendas";
 
 export type OpFinanceira =
   | { k: "fatura"; chave: string; numero: string; erp: Record<string, unknown> | null }
-  | { k: "pagamento"; fatura: string; valor: number | null; data: string | null; referencia: string | null; conta: string | null; reciboErp: string | null };
+  | { k: "pagamento"; fatura: string; valor: number | null; data: string | null; referencia: string | null; conta: string | null; reciboErp: string | null }
+  // F3: anular o contrato (ou a venda direta) no negócio: neg_anular_contrato cancela a encomenda de cliente (os gatilhos estornam)
+  | { k: "anular"; motivo: string };
 
 const dia = (s: string | null | undefined): string | null => (s && /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null);
 const num = (s: unknown): number | null => { const n = typeof s === "number" ? s : Number(String(s ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
 const txt = (s: unknown): string | null => { const t = String(s ?? "").trim(); return t ? t : null; };
 
 /** Tudo o que o negócio tem registado no Financeiro, pela ordem em que se grava (faturas antes dos pagamentos). */
-export function financeiroDe(d: Pick<Negocio, "fin" | "f" | "adendas">): OpFinanceira[] {
+export function financeiroDe(d: Pick<Negocio, "fin" | "f" | "adendas"> & { anulado?: Negocio["anulado"] }): OpFinanceira[] {
   const faturas: OpFinanceira[] = [], pagamentos: OpFinanceira[] = [];
   const fin = d.fin ?? { fatura: null, pago: false, recibo: null };
   const tranches = (fin.tranches ?? []).filter((t) => !t.daDemo && txt(t.numero));
@@ -41,12 +43,14 @@ export function financeiroDe(d: Pick<Negocio, "fin" | "f" | "adendas">): OpFinan
     faturas.push({ k: "fatura", chave: `${a.n}#${f.i}`, numero: f.n.trim(), erp: null });
     if (f.recibo) pagamentos.push({ k: "pagamento", fatura: f.n.trim(), valor: num(f.v), data: null, referencia: null, conta: null, reciboErp: null });
   }
-  return [...faturas, ...pagamentos];
+  // F3: a anulação feita no negócio (a do Inventário vem de lá) vai depois de tudo
+  const anular: OpFinanceira[] = d.anulado && d.anulado.origem === "negocio" && txt(d.anulado.motivo) ? [{ k: "anular", motivo: d.anulado.motivo.trim() }] : [];
+  return [...faturas, ...pagamentos, ...anular];
 }
 
-const chaveOp = (o: OpFinanceira) => (o.k === "fatura" ? `f|${o.chave}|${o.numero}` : `p|${o.fatura}`);
+const chaveOp = (o: OpFinanceira) => (o.k === "fatura" ? `f|${o.chave}|${o.numero}` : o.k === "anular" ? "a|" : `p|${o.fatura}`);
 /** O que há de novo no Financeiro entre a última gravação e agora. */
-export function novasNoFinanceiro(antes: Pick<Negocio, "fin" | "f" | "adendas"> | null, depois: Pick<Negocio, "fin" | "f" | "adendas">): OpFinanceira[] {
+export function novasNoFinanceiro(antes: (Pick<Negocio, "fin" | "f" | "adendas"> & { anulado?: Negocio["anulado"] }) | null, depois: Pick<Negocio, "fin" | "f" | "adendas"> & { anulado?: Negocio["anulado"] }): OpFinanceira[] {
   const ja = new Set((antes ? financeiroDe(antes) : []).map(chaveOp));
   return financeiroDe(depois).filter((o) => !ja.has(chaveOp(o)));
 }
@@ -56,6 +60,7 @@ const semFuncao = (e: { code?: string } | null) => e?.code === "PGRST202" || e?.
 
 /** Põe no negócio o que a base devolveu: o recibo (o da base) e a chave da fatura. */
 function aplicarResposta(d: Negocio, o: OpFinanceira, r: Record<string, unknown>): void {
+  if (o.k === "anular") return;
   if (o.k === "fatura") {
     const t = d.fin.tranches?.find((x) => x.numero.trim() === o.numero);
     if (t && typeof r.chave === "string") t.id = r.chave;
@@ -73,13 +78,15 @@ function aplicarResposta(d: Negocio, o: OpFinanceira, r: Record<string, unknown>
 export async function gravarFinanceiro(sb: SupabaseClient, org: string, negocioId: string, d: Negocio, ops: readonly OpFinanceira[]): Promise<string[]> {
   const avisos: string[] = [];
   for (const o of ops) {
-    const { data, error } = o.k === "fatura"
+    const { data, error } = o.k === "anular"
+      ? await sb.rpc("neg_anular_contrato" as never, { p_org: org, p_negocio: negocioId, p_motivo: o.motivo } as never)
+      : o.k === "fatura"
       ? await sb.rpc("neg_registar_fatura" as never, { p_org: org, p_negocio: negocioId, p_chave: o.chave, p_numero: o.numero, p_erp: o.erp } as never)
       : await sb.rpc("neg_validar_pagamento" as never, { p_org: org, p_negocio: negocioId, p_fatura: o.fatura, p_valor: o.valor, p_data: o.data,
           p_referencia: o.referencia, p_recibo_erp: o.reciboErp, p_conta: o.conta } as never);
     if (error) {
       if (semFuncao(error)) { avisos.push("O Financeiro ainda não está na base: a fatura e o pagamento ficam só neste ecrã."); return avisos; }
-      throw new Error(error.message || (o.k === "fatura" ? `Não foi possível registar a fatura ${o.numero}.` : `Não foi possível validar o pagamento da ${o.fatura}.`));
+      throw new Error(error.message || (o.k === "anular" ? "Não foi possível anular o contrato." : o.k === "fatura" ? `Não foi possível registar a fatura ${o.numero}.` : `Não foi possível validar o pagamento da ${o.fatura}.`));
     }
     aplicarResposta(d, o, (data ?? {}) as Record<string, unknown>);
     // a encomenda de cliente nasceu agora (nova): a base já pediu ao fornecedor o que falta

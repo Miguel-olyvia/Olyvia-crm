@@ -15,6 +15,16 @@ import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { deLinhas, garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
+import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
+import { definirOrgErp } from "@/emylia/erpEticadata";
+
+// F3 (28/10): a encomenda de cliente é a do servidor (financeiroReal.ts grava a fatura, o pagamento e a anulação antes do negócio; depois disso
+// relê-se) e o Inventário é o real (inventarioReal.ts). A navegação para as páginas reais é a do react-router, registada pela ficha
+// (LigarNavegacao, em NegocioEmyliaDoGuia.tsx); sem ela, muda-se o endereço.
+let navegarEmylia: (url: string) => void = (url) => { window.location.assign(url); };
+export function definirNavegacaoEmylia(f: ((url: string) => void) | null): void {
+  navegarEmylia = f ?? ((url) => { window.location.assign(url); });
+}
 
 export type LeituraEmylia = { k: "a-ler" } | { k: "erro"; t: string } | { k: "pronto" };
 export type GravacaoEmylia = { k: "parado" } | { k: "a-gravar" } | { k: "gravado"; n: number } | { k: "erro"; t: string };
@@ -69,6 +79,7 @@ export function obterArmazem(sb: SupabaseClient, org: string, utilizador = ""): 
   // outro utilizador (ou outra sessão): nada do que o anterior leu serve
   if (utilizadorAtual !== null && utilizadorAtual !== utilizador) armazens.clear();
   utilizadorAtual = utilizador;
+  definirOrgErp(org);
   const existente = armazens.get(org);
   if (existente) return existente;
   const novo = criarArmazem(sb, org);
@@ -157,6 +168,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     emGravacao = true;
     gravacao = { k: "a-gravar" }; mudou();
     let gravados = 0;
+    let relerFinanceiro = false;
     try {
       do {
         deNovo = false;
@@ -165,6 +177,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
         if (choque) { gravacao = { k: "erro", t: choque }; avisar({ msg: "Não gravou: o negócio mudou", sub: choque, kind: "bad" }); break; }
         const r = await gravarMudancas(sb, org, S, refs, foto, ids, soLeitura);
         gravados += r.gravados;
+        if (r.reler) relerFinanceiro = true;
         if (r.erros.length) { gravacao = { k: "erro", t: r.erros.join(" · ") }; avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else gravacao = { k: "gravado", n: r.gravados };
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
@@ -176,6 +189,11 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     } finally {
       emGravacao = false;
       mudou();
+    }
+    // F3: com fatura, pagamento ou anulação no servidor, relê-se: a encomenda de cliente da base (contrato e número), a fase e a prontidão
+    if (relerFinanceiro && !porGravar()) {
+      try { await lerAgora(false); mudou(); }
+      catch (e) { avisar({ msg: "Não foi possível atualizar o negócio", sub: (e as Error).message, kind: "bad" }); }
     }
     if (gravados > 0) for (const f of [...aposGravar]) f();
   };
@@ -190,15 +208,22 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     void gravar();
   };
   const go = (fn: () => void) => () => run(fn);
-  const A = acoes(S, avisar, run);
+  // a leitura que se espera (a releitura depois de uma ação no servidor)
+  const lerAgora = async (catalogo: boolean): Promise<void> => {
+    if (catalogo || !ids) {
+      const cat = await carregarCatalogo(sb, org, S);
+      ids = idsServico(cat.M.ids.servico);
+    }
+    aplicarLeitura(await lerNegocios(sb, org, ids));
+    await lerProntidoes(sb, org, contratosDasEcs(S.deals));
+  };
+  const A = acoes(S, avisar, run, ligacaoInventario((url) => navegarEmylia(url)));
   const porGravar = (): boolean => emGravacao || negociosMudados(S.deals, foto).length > 0;
 
   const ler = (silencioso: boolean): void => {
     if (!silencioso) { leitura = { k: "a-ler" }; mudou(); }
     void (async () => {
-      const cat = await carregarCatalogo(sb, org, S);
-      ids = idsServico(cat.M.ids.servico);
-      aplicarLeitura(await lerNegocios(sb, org, ids));
+      await lerAgora(true);
       leitura = { k: "pronto" }; mudou();
     })().catch((e: Error) => {
       const texto = e.message || "Não foi possível ler os negócios.";
