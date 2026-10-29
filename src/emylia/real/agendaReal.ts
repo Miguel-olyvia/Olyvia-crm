@@ -8,6 +8,7 @@ import type { Papel } from "../motor";
 import { definirAusenciasRh, type FichaTecnico } from "../equipa/tecnicos";
 import { definirRhDaAgenda, TIPO_AUSENCIA_REAL, type PessoaAgendaRh } from "../equipa/rhDaAgenda";
 import type { EquipaReal, MembroAgenda } from "../equipa/membros";
+import { definirVisitasCrm, type VisitaCrm } from "../equipa/visitasCrm";
 
 /** O nome de cada papel na agenda ("Comercial", "Técnico"…). */
 export const NOME_PAPEL: Record<Papel, string> = {
@@ -66,3 +67,53 @@ export function equipaReal(tecnicos: readonly FichaTecnico[], eu: QuemEntrou | n
 /** O técnico fixo do Hoje do técnico: só quando quem entrou é um técnico do RH (os outros podem ver como qualquer técnico). */
 export const tecnicoDaConta = (tecnicos: readonly FichaTecnico[], eu: QuemEntrou | null): string | null =>
   eu?.pessoaId && tecnicos.some((t) => t.id === eu.pessoaId) ? eu.pessoaId : null;
+
+/* ------------------------------------------------------------------ 29/10: as visitas marcadas no CRM */
+interface LinhaVisitaCrm {
+  id: string; title: string | null; start_datetime: string; end_datetime: string | null; status: string; visit_kind: string | null;
+  negocios?: { numero: number | null; titulo: string | null } | null;
+  schedule_item_assignees?: { schedule_resources?: { name: string | null } | null }[] | null;
+}
+const LISBOA = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Lisbon", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+/** Dia ("aaaa-mm-dd") e hora ("hh:mm") de Lisboa de um instante. */
+export function diaEHoraDeLisboa(instante: string): { data: string; hora: string } {
+  const p = Object.fromEntries(LISBOA.formatToParts(new Date(instante)).map((x) => [x.type, x.value]));
+  return { data: `${p.year}-${p.month}-${p.day}`, hora: `${p.hour}:${p.minute}` };
+}
+const TIPO_VISITA: Record<string, string> = { levantamento: "Levantamento", medicao: "Medição técnica", materiais: "Escolha de materiais", revisita: "Revisita" };
+
+/** As visitas do CRM no formato da agenda: quem vai é o recurso atribuído (sem ele, "Por atribuir"). */
+export function visitasCrmDe(linhas: readonly LinhaVisitaCrm[]): VisitaCrm[] {
+  return linhas.map((l) => {
+    const { data, hora } = diaEHoraDeLisboa(l.start_datetime);
+    const horas = l.end_datetime ? Math.max(0.25, Math.round(((new Date(l.end_datetime).getTime() - new Date(l.start_datetime).getTime()) / 3_600_000) * 10) / 10) : 1.5;
+    const quem = l.schedule_item_assignees?.map((a) => a.schedule_resources?.name).find((x) => !!x) ?? "Por atribuir";
+    const tipo = TIPO_VISITA[l.visit_kind ?? ""] ?? "Visita";
+    return { nome: quem, papel: "comercial", data, hora, horas, titulo: `${tipo} · ${l.negocios?.titulo ?? l.title ?? "CRM"}`, sub: l.title ?? "Marcada no CRM",
+      ...(l.negocios?.numero != null ? { negocio: Number(l.negocios.numero) } : {}), ...(l.status === "completed" ? { feito: true } : {}) };
+  });
+}
+
+type ConsultaVisitas = {
+  eq: (c: string, v: string) => ConsultaVisitas; neq: (c: string, v: string) => ConsultaVisitas; not: (c: string, o: string, v: null) => ConsultaVisitas;
+  is: (c: string, v: null) => ConsultaVisitas; gte: (c: string, v: string) => ConsultaVisitas;
+  lte: (c: string, v: string) => Promise<{ data: LinhaVisitaCrm[] | null; error: { message: string } | null }>;
+};
+/** Lê e define as visitas marcadas no CRM (com negócio, sem número de visita da Emylia, não canceladas), na janela da agenda. */
+export async function carregarVisitasCrm(sb: SupabaseClient, org: string, hoje = new Date()): Promise<{ n: number; erro: string | null }> {
+  const { de, ate } = janelaAgenda(hoje);
+  // uma falha aqui nunca impede a página de abrir: a agenda fica sem as visitas do CRM e diz porquê
+  try {
+  const t = sb.from("schedule_items" as never) as unknown as { select: (c: string) => ConsultaVisitas };
+  const { data, error } = await t.select("id, title, start_datetime, end_datetime, status, visit_kind, negocios(numero, titulo), schedule_item_assignees(schedule_resources(name))")
+    .eq("organization_id", org).not("negocio_id", "is", null).is("visita_numero", null).neq("status", "cancelled")
+    .gte("start_datetime", `${de}T00:00:00Z`).lte("start_datetime", `${ate}T23:59:59Z`);
+  if (error) { definirVisitasCrm([]); return { n: 0, erro: error.message }; }
+  const v = visitasCrmDe(data ?? []);
+  definirVisitasCrm(v);
+  return { n: v.length, erro: null };
+  } catch (e) {
+    definirVisitasCrm([]);
+    return { n: 0, erro: e instanceof Error ? e.message : String(e) };
+  }
+}
