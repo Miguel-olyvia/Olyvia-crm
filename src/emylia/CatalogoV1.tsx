@@ -27,6 +27,8 @@ import {
 } from "./fichaServico";
 import { useParamUrl } from "./usarParamUrl";
 import { CriarNoCatalogo } from "./CriarNoCatalogo";
+import { FichaProduto } from "./FichaProduto";
+import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatalogo";
 import { ehCriado } from "./catalogo";
 
@@ -196,7 +198,7 @@ function oficioDe(K: Catalogo, no: string | null): string | null {
 }
 
 /* ------------------------------------------------------------------ produtos */
-function Produtos({ K, nomeServico, onAbrir, margem, novo }: { K: Catalogo; nomeServico: (sid: SvcId) => string; onAbrir: (sid: SvcId) => void; margem: number; novo?: string }) {
+function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo }: { K: Catalogo; nomeServico: (sid: SvcId) => string; onAbrir: (sid: SvcId) => void; onAbrirProduto: (id: string) => void; margem: number; novo?: string }) {
   const [q, setQ] = useState("");
   const [of, setOf] = useState("");
   const [n, setN] = useState(POR_PAGINA);
@@ -209,14 +211,15 @@ function Produtos({ K, nomeServico, onAbrir, margem, novo }: { K: Catalogo; nome
       </div>
       <p className={cn(NOTA, "mt-4")} aria-live="polite">{L.length === 1 ? "1 produto" : `${L.length} produtos`}</p>
       <ul className={cn(LISTA, "mt-2")}>
+        {/* 29/10: tocar na linha abre a ficha do produto; o nome é o botão (teclado e leitor de ecrã); o «Traz:» abre o serviço */}
         {L.slice(0, n).map((p) => (
-          <li key={p.id} className={cn("flex min-h-[4.5rem] flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", p.id === novo && REALCE)}>
+          <li key={p.id} onClick={() => onAbrirProduto(p.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", p.id === novo && REALCE)}>
             <Ilustracao k={p.img ?? "generico"} />
             <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-medium">{p.n}{p.id === novo && <Novo />}</span>
+              <button id={`prod-${p.id}`} type="button" onClick={(e) => { e.stopPropagation(); onAbrirProduto(p.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{p.n}{p.id === novo && <Novo />}</button>
               {(p.marca || p.sku) && <span className={cn(NOTA, "block")}>{[p.marca, p.sku ? `ref. ${p.sku}` : ""].filter(Boolean).join(" · ")}</span>}
               {p.servico && (
-                <button type="button" onClick={() => onAbrir(p.servico!)} className="mt-0.5 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">
+                <button type="button" onClick={(e) => { e.stopPropagation(); onAbrir(p.servico!); }} className="mt-0.5 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">
                   Traz: {nomeServico(p.servico)}
                 </button>
               )}
@@ -343,7 +346,8 @@ function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (
 /* ------------------------------------------------------------------ a página */
 const SECCAO_DO_TIPO: Record<TipoCriar, Seccao> = { servico: "servicos", produto: "produtos", equipamento: "equipamentos", consumivel: "consumiveis", tecnico: "tecnicos" };
 const NOME_TIPO: Record<TipoCriar, string> = { servico: "Serviço", produto: "Produto", equipamento: "Equipamento", consumivel: "Consumível", tecnico: "Técnico" };
-export function CatalogoV1({ S, run }: Ctx) {
+/** real (29/10): só na página real (CatalogoCustos), para a ficha do produto ler e ligar fornecedores. */
+export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) {
   const C = useCustos();
   const K = useCatalogo();
   // 26/10: a secção e a ficha aberta vão para o endereço (?sec=…, ?servico=…): o "voltar" do browser fecha a ficha e volta à secção
@@ -353,6 +357,9 @@ export function CatalogoV1({ S, run }: Ctx) {
   const [servicoUrl, setServicoUrl] = useParamUrl<string>("servico", "");
   const aberto: SvcId | null = (servicoUrl || null) as SvcId | null;
   const setAberto = useCallback((sid: SvcId | null) => setServicoUrl(sid ?? ""), [setServicoUrl]);
+  // 29/10: a ficha do produto também vai para o endereço (?produto=…)
+  const [produtoAberto, setProdutoAberto] = useParamUrl<string>("produto", "");
+  const voltarProduto = useRef<string | null>(null);
   // vindo do orçamento ("Abrir a ficha do serviço"): a ficha abre na entrada do Catálogo (depois de a moldura a juntar ao histórico)
   useEffect(() => { if (pendente) { const t = window.setTimeout(() => setServicoUrl(pendente, { substituir: true }), 0); return () => window.clearTimeout(t); } return undefined; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 27/10: o Criar no Catálogo abre no lugar da lista (?criar=servico|produto|…): o "voltar" do browser fecha-o
@@ -379,6 +386,11 @@ export function CatalogoV1({ S, run }: Ctx) {
     document.getElementById(`svc-${voltarPara.current}`)?.focus();
     voltarPara.current = null;
   }, [aberto]);
+  useEffect(() => {
+    if (produtoAberto || !voltarProduto.current) return;
+    document.getElementById(`prod-${voltarProduto.current}`)?.focus();
+    voltarProduto.current = null;
+  }, [produtoAberto]);
 
   // S muda no sítio: a chave do que as contas leem (serviços e regras), para o useMemo.
   const chave = JSON.stringify(S.svc) + S.cfg.min + ":" + S.cfg.alvo + ":" + S.cfg.estrutura + ":" + S.deals.length;
@@ -431,6 +443,17 @@ export function CatalogoV1({ S, run }: Ctx) {
     );
   }
 
+  if (produtoAberto) {
+    return (
+      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
+        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real}
+          voltar={() => { voltarProduto.current = produtoAberto; setProdutoAberto(""); }} anunciar={anunciar} nomeServico={nomeServico}
+          onAbrirServico={(sid) => { setProdutoAberto("", { substituir: true }); setAberto(sid); }} />
+        {regiao}
+      </div>
+    );
+  }
+
   const tab = (s: Seccao, t: string) => (
     <button key={s} id={`tab-${s}`} type="button" role="tab" aria-selected={seccao === s} aria-controls={`painel-${s}`} tabIndex={seccao === s ? 0 : -1}
       onClick={() => setSeccao(s)}
@@ -447,7 +470,7 @@ export function CatalogoV1({ S, run }: Ctx) {
   );
   const corpo: Record<Seccao, () => ReactNode> = {
     servicos: () => <Servicos S={S} itens={itens} K={K} onAbrir={abrir} min={S.cfg.min} alvo={S.cfg.alvo} />,
-    produtos: () => <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} />,
+    produtos: () => <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} />,
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} novo={realce?.t === "tecnico" ? realce.id : undefined} />,

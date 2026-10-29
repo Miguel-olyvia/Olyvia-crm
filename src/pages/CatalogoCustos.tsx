@@ -5,6 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissions } from "@/hooks/usePermissions";
+import type { FichaProdutoReal } from "@/emylia/fichaProdutoDados";
 import { seed, type Estado } from "@/emylia/motor";
 import { lerCustos, useCustos } from "@/emylia/v2/custosStore";
 import { lerCatalogo as lerCatalogoStore, useCatalogo } from "@/emylia/v2/catalogoStore";
@@ -73,6 +75,10 @@ export default function CatalogoCustos() {
   }, [C, K, mexido, pronto, S, carregar]);
 
   const ctx = { S, A: {} as Ctx["A"], run, go, q: "" } as Ctx;
+  // 29/10: a ficha do produto lê os fornecedores ligados e liga a artigos do portal; mexer exige products.edit (o can_link de Compras); a estrela também products.manage_prices
+  const { hasPermission } = usePermissions();
+  const podeEditar = hasPermission("products.edit"), podeMudarPrecos = hasPermission("products.manage_prices");
+  const real = useMemo<FichaProdutoReal | undefined>(() => (org ? { org, podeEditar, podeMudarPrecos, recarregar: () => carregar(org) } : undefined), [org, podeEditar, podeMudarPrecos, carregar]);
 
   if (isLoading || (!org && !erroLer)) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver o Catálogo e custos.</div>;
@@ -85,7 +91,7 @@ export default function CatalogoCustos() {
       </div>
       {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>
         : !pronto ? <p className="p-6 text-muted-foreground">A ler o Catálogo…</p>
-        : <CatalogoV1 {...ctx} />}
+        : <CatalogoV1 {...ctx} real={real} />}
     </div>
   );
 }
