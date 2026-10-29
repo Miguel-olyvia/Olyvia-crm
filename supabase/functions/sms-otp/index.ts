@@ -37,9 +37,7 @@ serve(async (req) => {
     const smsApiToken = Deno.env.get("SMSAPI_TOKEN");
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    // Modo de teste (só onde o segredo OTP_SEM_SMS=true existe, hoje a RH): sem token da SMSAPI não se envia SMS, o código fica em sms_otp_codes.
-    const semSms = !smsApiToken && Deno.env.get("OTP_SEM_SMS") === "true";
-    if (!smsApiToken && !semSms) {
+    if (!smsApiToken) {
       return new Response(JSON.stringify({ error: "SMSAPI_TOKEN not configured" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -303,27 +301,22 @@ serve(async (req) => {
       const smsMessage = `O seu código de verificação é: ${code}. Válido por 5 minutos.`;
       const cleanPhone = phoneNumber.replace("+", "");
 
-      let smsResult: { error?: unknown; message?: unknown } = {};
-      if (semSms) {
-        console.log("[sms-otp] OTP_SEM_SMS: SMS não enviado; o código está em sms_otp_codes.");
-      } else {
-        const smsRes = await fetch("https://api.smsapi.com/sms.do", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${smsApiToken}`,
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: new URLSearchParams({
-            to: cleanPhone,
-            message: smsMessage,
-            format: "json",
-            encoding: "utf-8",
-          }),
-        });
+      const smsRes = await fetch("https://api.smsapi.com/sms.do", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${smsApiToken}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          to: cleanPhone,
+          message: smsMessage,
+          format: "json",
+          encoding: "utf-8",
+        }),
+      });
 
-        smsResult = await smsRes.json();
-        console.log("[sms-otp] SMSAPI response:", JSON.stringify(smsResult));
-      }
+      const smsResult = await smsRes.json();
+      console.log("[sms-otp] SMSAPI response:", JSON.stringify(smsResult));
 
       if (smsResult.error) {
         console.error("[sms-otp] SMSAPI error:", smsResult.error, smsResult.message);
