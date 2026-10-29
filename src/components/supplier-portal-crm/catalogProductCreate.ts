@@ -169,6 +169,11 @@ export function normalizeSkuBase(ref: string): string {
   return base.slice(0, SKU_MAX);
 }
 
+/** 29/10: o SKU sugerido para o produto: o que o portal gerou (REV-PAR-30X60-BRA); sem ele, a ref. do fornecedor normalizada. */
+export function skuSugerido(item: Pick<CrmCatalogItem, "sku" | "supplier_ref">): string {
+  return item.sku ? normalizeSkuBase(item.sku) : normalizeSkuBase(item.supplier_ref);
+}
+
 /** Candidatos por ordem: BASE, BASE-2, …, BASE-9 (cortados a SKU_MAX). */
 export function skuCandidates(base: string): string[] {
   if (!base) return [];

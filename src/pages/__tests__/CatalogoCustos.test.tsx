@@ -6,6 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 const rpc = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...a: unknown[]) => rpc(...a) } }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "11111111-1111-4111-a111-111111111111" }, isLoading: false }) }));
+// 29/10: a página lê as permissões (ficha do produto, armazéns em lote)
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => false }) }));
 
 import CatalogoCustos from "../CatalogoCustos";
 
@@ -31,9 +33,9 @@ describe("Catálogo e custos (ligado à base)", () => {
     render(<MemoryRouter><CatalogoCustos /></MemoryRouter>);
     expect(await screen.findByText("Ponto de água de teste", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(rpc).toHaveBeenCalledWith("cat_ler_catalogo", { p_org: "11111111-1111-4111-a111-111111111111" });
-    // abrir não grava nada (nada mudou)
+    // abrir não grava nada (nada mudou): só as leituras do Catálogo e das linhas do modelo (29/10)
     await new Promise((r) => setTimeout(r, 1200));
-    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc.mock.calls.map((c) => c[0]).sort()).toEqual(["cat_ler_catalogo", "neg_ler_linhas_modelo"]);
   });
   it("sem permissão, diz porquê", async () => {
     rpc.mockResolvedValue({ data: null, error: { code: "CT001", message: "Sem permissão (services.view)." } });

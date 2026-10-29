@@ -7,12 +7,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
+  spCatalogCategorias,
+  spCatalogClassificarItem,
   spCatalogUpsertItem,
   spErrorMessage,
   isNoSupplierAccess,
   type SpCatalogItem,
   type SpCatalogRowInput,
+  type SpCategoria,
 } from "@/lib/supplierPortal/spRpc";
+import { skuBase } from "@/lib/supplierPortal/skuPortal";
 
 interface SupplierCatalogItemDialogProps {
   open: boolean;
@@ -36,6 +40,11 @@ interface FormState {
   moq: string;
   lead_time_days: string;
   is_active: boolean;
+  // 29/10: a classificação que dá o SKU (categoria-subcategoria-medida-cor)
+  categoria_id: string;
+  subcategoria_id: string;
+  medida: string;
+  cor: string;
 }
 
 const numToText = (n: number | null | undefined): string =>
@@ -55,8 +64,14 @@ function toForm(item: SpCatalogItem | null): FormState {
     moq: numToText(item?.moq),
     lead_time_days: item?.lead_time_days === null || item?.lead_time_days === undefined ? "" : String(item.lead_time_days),
     is_active: item?.is_active ?? true,
+    categoria_id: item?.categoria_id ?? "",
+    subcategoria_id: item?.subcategoria_id ?? "",
+    medida: item?.medida ?? "",
+    cor: item?.cor ?? "",
   };
 }
+
+const SELECT = "h-11 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50";
 
 const TEXT_FIELDS = [
   "supplier_ref", "name", "barcode", "brand", "description", "unit_label",
@@ -69,6 +84,8 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isEdit = !!item;
+  // null: a lista ainda não veio ou a base não a tem (migration por aplicar): o formulário fica como antes, sem SKU
+  const [categorias, setCategorias] = useState<SpCategoria[] | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -76,6 +93,16 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
       setError(null);
     }
   }, [open, item]);
+  useEffect(() => {
+    if (!open || categorias) return;
+    let vivo = true;
+    spCatalogCategorias().then((c) => { if (vivo) setCategorias(c.length ? c : null); }).catch(() => { /* sem a lista, sem SKU */ });
+    return () => { vivo = false; };
+  }, [open, categorias]);
+
+  const categoria = categorias?.find((c) => c.id === form.categoria_id);
+  const subcategoria = categoria?.subcategorias.find((s) => s.id === form.subcategoria_id);
+  const skuPrevisto = skuBase(categoria?.codigo, subcategoria?.codigo, form.medida, form.cor);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -84,6 +111,14 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
     setError(null);
     if (!form.supplier_ref.trim() || !form.name.trim()) {
       setError("A referência e o nome são obrigatórios.");
+      return;
+    }
+    if (categorias && !categoria) {
+      setError("Escolha a categoria. O SKU faz-se com ela.");
+      return;
+    }
+    if (categorias && categoria && categoria.subcategorias.length && !subcategoria) {
+      setError("Escolha a subcategoria. O SKU faz-se com ela.");
       return;
     }
 
@@ -101,7 +136,22 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
     setSaving(true);
     try {
       const res = await spCatalogUpsertItem(payload);
-      onSaved(res.item, res.created);
+      let saved = res.item;
+      // 29/10: a classificação grava-se a seguir; a base gera o SKU e devolve o artigo com ele
+      if (categorias && categoria) {
+        try {
+          saved = (await spCatalogClassificarItem(saved.id, {
+            categoria_id: categoria.id, subcategoria_id: subcategoria?.id ?? null, medida: form.medida.trim(), cor: form.cor.trim(),
+          })).item;
+        } catch (err) {
+          if (isNoSupplierAccess(err)) { onNoAccess(); return; }
+          // o artigo ficou gravado; falta a classificação
+          setError(`O artigo foi gravado, mas a categoria não: ${spErrorMessage(err)}`);
+          onSaved(saved, res.created);
+          return;
+        }
+      }
+      onSaved(saved, res.created);
     } catch (err) {
       if (isNoSupplierAccess(err)) {
         onNoAccess();
@@ -170,6 +220,39 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
             <Input id="sp-lead" className="h-11" inputMode="numeric" value={form.lead_time_days}
               onChange={(e) => set("lead_time_days", e.target.value)} />
           </Field>
+          {categorias && (
+            <>
+              <Field id="sp-cat" label="Categoria *">
+                <select id="sp-cat" className={SELECT} value={form.categoria_id}
+                  onChange={(e) => setForm((f) => ({ ...f, categoria_id: e.target.value, subcategoria_id: "" }))}>
+                  <option value="">Escolha a categoria</option>
+                  {categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+              </Field>
+              <Field id="sp-subcat" label={categoria?.subcategorias.length ? "Subcategoria *" : "Subcategoria"}>
+                <select id="sp-subcat" className={SELECT} value={form.subcategoria_id} disabled={!categoria?.subcategorias.length}
+                  onChange={(e) => set("subcategoria_id", e.target.value)}>
+                  <option value="">{categoria && !categoria.subcategorias.length ? "Esta categoria não tem" : "Escolha a subcategoria"}</option>
+                  {categoria?.subcategorias.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+                </select>
+              </Field>
+              <Field id="sp-medida" label="Medida" hint="ex.: 30x60, 80x120, 1,5">
+                <Input id="sp-medida" className="h-11" maxLength={40} value={form.medida}
+                  onChange={(e) => set("medida", e.target.value)} autoComplete="off" />
+              </Field>
+              <Field id="sp-cor" label="Cor" hint="ex.: Branco, Antracite">
+                <Input id="sp-cor" className="h-11" maxLength={40} value={form.cor}
+                  onChange={(e) => set("cor", e.target.value)} autoComplete="off" />
+              </Field>
+              <div className="sm:col-span-2 rounded-md border bg-muted/40 p-3" aria-live="polite">
+                <p className="text-sm text-muted-foreground">SKU</p>
+                <p className="font-mono text-base">
+                  {item?.sku && skuPrevisto && (item.sku === skuPrevisto || (item.sku.startsWith(skuPrevisto) && /^-\d+$/.test(item.sku.slice(skuPrevisto.length)))) ? item.sku : skuPrevisto ?? "Escolha a categoria"}
+                </p>
+                <p className="text-xs text-muted-foreground">Gera-se ao gravar. Se já existir, fica com -2, -3 no fim.</p>
+              </div>
+            </>
+          )}
           {isEdit && (
             <div className="sm:col-span-2 flex items-center justify-between rounded-md border p-3 min-h-11">
               <Label htmlFor="sp-active" className="cursor-pointer">Artigo ativo</Label>

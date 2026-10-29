@@ -71,6 +71,12 @@ export interface SpCatalogItem {
   lead_time_days: number | null;
   is_active: boolean;
   updated_at: string;
+  /** 29/10 (migration 20270101310000): a classificação e o SKU gerado pela base. Ausentes antes da migration. */
+  categoria_id?: string | null;
+  subcategoria_id?: string | null;
+  medida?: string | null;
+  cor?: string | null;
+  sku?: string | null;
 }
 
 export interface SpCatalogListResult {
@@ -527,6 +533,21 @@ export async function spCatalogImport(
 export async function spCatalogUpsertItem(item: SpCatalogRowInput & { id?: string }): Promise<SpUpsertResult> {
   const args: SpFunctions["sp_catalog_upsert_item"]["Args"] = { p_item: item as unknown as Json };
   return unwrap<SpUpsertResult>(await supabase.rpc("sp_catalog_upsert_item", args));
+}
+
+/** 29/10 (migration 20270101310000): a lista única de categorias e subcategorias do portal, com o código que entra no SKU. */
+export interface SpCategoria { id: string; codigo: string; nome: string; subcategorias: { id: string; codigo: string; nome: string }[] }
+
+export async function spCatalogCategorias(): Promise<SpCategoria[]> {
+  return unwrap<SpCategoria[]>(await supabase.rpc("sp_catalog_categorias" as never) as never) ?? [];
+}
+
+/** Põe a categoria, a subcategoria, a medida e a cor no artigo; a base gera o SKU (devolve o artigo com ele). */
+export async function spCatalogClassificarItem(
+  id: string, c: { categoria_id: string; subcategoria_id: string | null; medida: string; cor: string },
+): Promise<{ item: SpCatalogItem }> {
+  const args = { p_id: id, p_categoria: c.categoria_id, p_subcategoria: c.subcategoria_id, p_medida: c.medida, p_cor: c.cor };
+  return unwrap<{ item: SpCatalogItem }>(await supabase.rpc("sp_catalog_classificar_item" as never, args as never) as never);
 }
 
 export async function spCatalogSetActive(itemIds: string[], active: boolean): Promise<{ updated: number }> {

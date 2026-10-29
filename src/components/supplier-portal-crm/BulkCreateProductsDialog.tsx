@@ -17,7 +17,7 @@ import {
   loadCreateMeta,
   matchBrand,
   matchUom,
-  normalizeSkuBase,
+  skuSugerido,
   pickFreeSku,
   skuCandidates,
   validateSku,
@@ -103,7 +103,7 @@ export default function BulkCreateProductsDialog({
       setSkuErrors({});
       setProgress({ done: 0, total: 0 });
       const { meta, error } = await loadCreateMeta(organizationId);
-      const bases = items.map((i) => normalizeSkuBase(i.supplier_ref));
+      const bases = items.map((i) => skuSugerido(i));
       const { taken, error: takenError } = await findTakenSkus(organizationId, bases.flatMap(skuCandidates));
       if (cancelled) return;
       setPreparing(false);

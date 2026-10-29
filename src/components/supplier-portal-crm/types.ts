@@ -101,6 +101,8 @@ export interface CrmCatalogItem {
   lead_time_days: number | null;
   is_active: boolean;
   updated_at: string;
+  /** 29/10 (migration 20270101310000): o SKU que a base gerou no portal (categoria-subcategoria-medida-cor). Ausente antes. */
+  sku?: string | null;
   is_linked: boolean;
   is_dismissed: boolean;
   links: CatalogItemLink[];

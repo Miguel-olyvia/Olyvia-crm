@@ -313,6 +313,7 @@ export default function SupplierPortalCatalog() {
                     </TableHead>
                   )}
                   <TableHead>Ref.</TableHead>
+                  <TableHead>SKU</TableHead>
                   <TableHead>Nome</TableHead>
                   <TableHead>Cód. barras</TableHead>
                   <TableHead>Unidade</TableHead>
@@ -336,6 +337,7 @@ export default function SupplierPortalCatalog() {
                       </TableCell>
                     )}
                     <TableCell className="font-mono text-xs whitespace-nowrap">{item.supplier_ref}</TableCell>
+                    <TableCell className="font-mono text-xs whitespace-nowrap">{item.sku ?? <span className="text-muted-foreground">Sem categoria</span>}</TableCell>
                     <TableCell className="max-w-[28ch]">
                       <p className="truncate" title={item.name}>{item.name}</p>
                       {item.brand && <p className="text-xs text-muted-foreground truncate">{item.brand}</p>}
@@ -392,7 +394,7 @@ export default function SupplierPortalCatalog() {
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-xs text-muted-foreground break-all">{item.supplier_ref}</p>
+                    <p className="font-mono text-xs text-muted-foreground break-all">{item.supplier_ref}{item.sku ? ` · SKU ${item.sku}` : ""}</p>
                     <p className="font-medium break-words">{item.name}</p>
                     {item.brand && <p className="text-xs text-muted-foreground">{item.brand}</p>}
                   </div>

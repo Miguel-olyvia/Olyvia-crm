@@ -22,7 +22,7 @@ import {
   loadCreateMeta,
   matchBrand,
   matchUom,
-  normalizeSkuBase,
+  skuSugerido,
   parseMoneyInput,
   pickFreeSku,
   skuCandidates,
@@ -134,7 +134,7 @@ export default function CreateProductFromCatalogDialog({
       setErrors({});
       setSkuTaken(false);
       const { meta: m, error } = await loadCreateMeta(organizationId);
-      const base = normalizeSkuBase(item.supplier_ref);
+      const base = skuSugerido(item);
       const { taken } = await findTakenSkus(organizationId, skuCandidates(base));
       if (cancelled) return;
       setPreparing(false);
