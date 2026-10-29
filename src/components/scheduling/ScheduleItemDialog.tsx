@@ -12,8 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { X, ChevronDown, Send, Check, XCircle, HelpCircle, User, Mail, Phone } from 'lucide-react';
 import { extractLeadContactInfo } from '@/utils/leadContactInfo';
-import { ClientMentionInput } from './ClientMentionInput';
-import { LeadMentionInput } from './LeadMentionInput';
+import { PessoaPicker } from './PessoaPicker';
 import { InviteeSelector } from './InviteeSelector';
 import { useScheduleInvitations } from '@/hooks/useScheduleInvitations';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -152,8 +151,7 @@ export function ScheduleItemDialog({
       ? format(new Date(item.end_datetime), "yyyy-MM-dd'T'HH:mm")
       : format(defaultEnd, "yyyy-MM-dd'T'HH:mm"),
     all_day: item?.all_day || false,
-    client_id: item?.client_id || defaultClientId || '',
-    lead_id: item?.lead_id || '',
+    entity_id: item?.entity_id || '',
     location: item?.location || '',
     priority: item?.priority || 0,
     notes: item?.notes || '',
@@ -185,8 +183,7 @@ export function ScheduleItemDialog({
           ? format(new Date(item.end_datetime), "yyyy-MM-dd'T'HH:mm")
           : format(end, "yyyy-MM-dd'T'HH:mm"),
         all_day: item?.all_day || false,
-        client_id: item?.client_id || defaultClientId || '',
-        lead_id: item?.lead_id || '',
+        entity_id: item?.entity_id || '',
         location: item?.location || '',
         priority: item?.priority || 0,
         notes: item?.notes || '',
@@ -200,7 +197,32 @@ export function ScheduleItemDialog({
       setSelectedInvitees([]);
       setFieldErrors({});
     }
-  }, [open, item, boards, defaultDate, defaultTitle, defaultClientId]);
+  }, [open, item, boards, defaultDate, defaultTitle]);
+
+  // Marcação nova que traz um cliente pré-seleccionado: a agenda liga-se à pessoa
+  // (entity_id), por isso traduz-se o cliente para a pessoa dele.
+  useEffect(() => {
+    if (!open || item || !defaultClientId) return;
+    let cancelado = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('anew_clients')
+        .select('entity_id')
+        .eq('id', defaultClientId)
+        .maybeSingle();
+      if (cancelado) return;
+      if (error) {
+        console.error('Erro ao obter a pessoa do cliente pré-seleccionado:', error);
+        toast.error(t('scheduling.item.pessoaErro'));
+        return;
+      }
+      if (data?.entity_id) setFormData(f => (f.entity_id ? f : { ...f, entity_id: data.entity_id as string }));
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, item, defaultClientId]);
 
   // Check if selected board is a time-off board
   const selectedBoard = useMemo(() => 
@@ -212,8 +234,7 @@ export function ScheduleItemDialog({
   // Read board module configuration from settings
   const boardModules = (selectedBoard?.settings as any)?.allowed_modules as BoardModule[] | undefined;
   const autoFillAddress = (selectedBoard?.settings as any)?.auto_fill_address === true;
-  const showClient    = !isTimeOffBoard && (!boardModules || boardModules.includes('client'));
-  const showLead      = !isTimeOffBoard && (!boardModules || boardModules.includes('contact'));
+  const showPessoa    = !isTimeOffBoard && (!boardModules || boardModules.includes('pessoa'));
   const showLocation  = !isTimeOffBoard && (!boardModules || boardModules.includes('location'));
   const showPriority  = !isTimeOffBoard && (!boardModules || boardModules.includes('priority'));
   const showResources = !isTimeOffBoard && (!boardModules || boardModules.includes('resources'));
@@ -326,8 +347,9 @@ export function ScheduleItemDialog({
         id: item?.id,
         start_datetime: new Date(formData.start_datetime).toISOString(),
         end_datetime: new Date(formData.end_datetime).toISOString(),
-        client_id: formData.client_id || null,
-        lead_id: formData.lead_id || null,
+        // A visita liga-se à pessoa (entity_id); client_id e lead_id já não são colunas.
+        // Num board sem este módulo mantém-se a pessoa que o item já tinha, em vez de a apagar.
+        entity_id: showPessoa ? (formData.entity_id || null) : (item?.entity_id ?? null),
         employee_id: formData.employee_id || null,
         user_id: isTimeOffBoard ? (formData.user_id || null) : null,
         time_off_type: isTimeOffBoard ? formData.time_off_type : null,
@@ -729,74 +751,52 @@ export function ScheduleItemDialog({
                 {fieldErrors.end_datetime && <p className="text-sm text-destructive mt-1">{fieldErrors.end_datetime}</p>}
             </div>
 
-            {/* Client - hide for time-off */}
-            {showClient && (
-              <div className={showClient && !showLead ? "col-span-2 space-y-2" : "space-y-2"}>
-                <Label>{t('scheduling.item.client')}</Label>
-                <ClientMentionInput
-                  selectedClientId={formData.client_id}
-                  onClientSelect={async (clientId) => {
-                    setFormData(f => ({ ...f, client_id: clientId }));
+            {/* Pessoa - liga o agendamento a uma entidade (entity_id); escondida nas ausências */}
+            {showPessoa && (
+              <div className="col-span-2 space-y-2">
+                <Label>{t('scheduling.item.pessoa')}</Label>
+                <PessoaPicker
+                  value={formData.entity_id}
+                  organizationId={companyId}
+                  disabled={isViewOnly}
+                  onChange={async (entityId) => {
+                    setFormData(f => ({ ...f, entity_id: entityId ?? '' }));
                     setAddressOptions([]);
                     setShowAddressPicker(false);
-                    if (autoFillAddress && clientId) {
-                      try {
-                        const { data: clientData } = await supabase
-                          .from('anew_clients')
-                          .select('entity_id')
-                          .eq('id', clientId)
-                          .maybeSingle();
-                        if (clientData?.entity_id) {
-                          const { data: addrLinks } = await supabase
-                            .from('anew_entity_addresses')
-                            .select('address_id')
-                            .eq('entity_id', clientData.entity_id);
-                          if (!addrLinks || addrLinks.length === 0) {
-                            toast.info('Este cliente não tem moradas registadas.');
-                            setFormData(f => ({ ...f, location: '' }));
-                          } else {
-                            const addrIds = addrLinks.map(a => a.address_id);
-                            const { data: addresses } = await supabase
-                              .from('anew_addresses')
-                              .select('id, street, number, city, postal_code, district')
-                              .in('id', addrIds);
-                            if (addresses && addresses.length === 1) {
-                              const addr = addresses[0];
-                              const loc = [addr.street, addr.number, addr.postal_code, addr.city, addr.district].filter(Boolean).join(', ');
-                              setFormData(f => ({ ...f, location: loc }));
-                            } else if (addresses && addresses.length > 1) {
-                              const opts = addresses.map(addr => ({
-                                id: addr.id,
-                                label: [addr.street, addr.number, addr.postal_code, addr.city, addr.district].filter(Boolean).join(', '),
-                              }));
-                              setAddressOptions(opts);
-                              setShowAddressPicker(true);
-                            }
-                          }
-                        }
-                      } catch (e) {
-                        console.error('Error fetching client address:', e);
-                      }
-                    }
-                    if (!clientId) {
+                    if (!entityId) {
                       if (autoFillAddress) setFormData(f => ({ ...f, location: '' }));
+                      return;
+                    }
+                    if (!autoFillAddress) return;
+                    try {
+                      const { data: addrLinks, error: linksError } = await supabase
+                        .from('anew_entity_addresses')
+                        .select('address_id')
+                        .eq('entity_id', entityId);
+                      if (linksError) throw linksError;
+                      if (!addrLinks || addrLinks.length === 0) {
+                        toast.info('Esta pessoa não tem moradas registadas.');
+                        setFormData(f => ({ ...f, location: '' }));
+                        return;
+                      }
+                      const { data: addresses, error: addrError } = await supabase
+                        .from('anew_addresses')
+                        .select('id, street, number, city, postal_code, district')
+                        .in('id', addrLinks.map(a => a.address_id));
+                      if (addrError) throw addrError;
+                      const etiqueta = (addr: { street: string | null; number: string | null; city: string | null; postal_code: string | null; district: string | null }) =>
+                        [addr.street, addr.number, addr.postal_code, addr.city, addr.district].filter(Boolean).join(', ');
+                      if (addresses && addresses.length === 1) {
+                        setFormData(f => ({ ...f, location: etiqueta(addresses[0]!) }));
+                      } else if (addresses && addresses.length > 1) {
+                        setAddressOptions(addresses.map(addr => ({ id: addr.id, label: etiqueta(addr) })));
+                        setShowAddressPicker(true);
+                      }
+                    } catch (e) {
+                      console.error('Erro ao obter as moradas da pessoa:', e);
+                      toast.error(t('scheduling.item.pessoaErro'));
                     }
                   }}
-                  placeholder={t('scheduling.item.clientPlaceholder')}
-                  disabled={isViewOnly}
-                />
-              </div>
-            )}
-
-            {/* Lead - hide for time-off and construction boards */}
-            {showLead && (
-              <div className="space-y-2">
-                <Label>{t('scheduling.item.contact')}</Label>
-                <LeadMentionInput
-                  selectedLeadId={formData.lead_id}
-                  onLeadSelect={(leadId) => setFormData(f => ({ ...f, lead_id: leadId }))}
-                  placeholder={t('scheduling.item.selectContact')}
-                  disabled={isViewOnly}
                 />
               </div>
             )}

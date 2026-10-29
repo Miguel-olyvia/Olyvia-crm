@@ -366,6 +366,9 @@ export function ScheduleCalendarView({
                           <span className="truncate font-medium">{item.title}</span>
                         </div>
                         {isFleet(item) && <FleetItemBadge className="mt-0.5" />}
+                        {item.pessoa_nome && (
+                          <span className="block truncate text-[10px] opacity-80" title={item.pessoa_nome}>{item.pessoa_nome}</span>
+                        )}
                         <span className="text-[10px] opacity-70">
                           {format(new Date(item.start_datetime), 'HH:mm')}
                         </span>
@@ -486,6 +489,9 @@ export function ScheduleCalendarView({
                           <span className="text-sm font-medium truncate">{item.title}</span>
                         </div>
                         {isFleet(item) && <FleetItemBadge className="mb-1" />}
+                        {item.pessoa_nome && (
+                          <div className="mb-1 truncate text-xs opacity-80" title={item.pessoa_nome}>{item.pessoa_nome}</div>
+                        )}
                         <div className="text-xs opacity-70">
                           {format(new Date(item.start_datetime), 'HH:mm')} - {format(new Date(item.end_datetime), 'HH:mm')}
                         </div>
@@ -575,6 +581,9 @@ export function ScheduleCalendarView({
                             <div className="flex-1">
                               <div className="font-medium">{item.title}</div>
                               {isFleet(item) && <FleetItemBadge />}
+                              {item.pessoa_nome && (
+                                <div className="truncate text-sm opacity-80">{item.pessoa_nome}</div>
+                              )}
                               <div className="text-xs opacity-70">
                                 {format(new Date(item.start_datetime), 'HH:mm')} - {format(new Date(item.end_datetime), 'HH:mm')}
                                 {item.duration_minutes && ` (${item.duration_minutes}min)`}

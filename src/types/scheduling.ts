@@ -83,6 +83,10 @@ export interface ScheduleItem {
   confirmed_at?: string | null;
   client_id?: string;
   lead_id?: string;
+  /** Pessoa (anew_entities) a que a visita se liga. */
+  entity_id?: string | null;
+  /** Nome da pessoa ligada, preenchido ao carregar a lista (não é coluna). */
+  pessoa_nome?: string | null;
   deal_id?: string;
   employee_id?: string;
   user_id?: string;
@@ -204,7 +208,7 @@ export interface ScheduleItemEvent {
 }
 
 // Board module configuration types
-export type BoardModule = 'client' | 'contact' | 'lead' | 'location' | 'priority' | 'resources';
+export type BoardModule = 'pessoa' | 'client' | 'contact' | 'lead' | 'location' | 'priority' | 'resources';
 
 export interface BoardModuleSettings {
   allowed_modules?: BoardModule[];

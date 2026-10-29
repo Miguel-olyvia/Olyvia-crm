@@ -13,8 +13,9 @@ import { useToast } from '@/hooks/use-toast';
 import { scheduleBoardSchema } from '@/lib/validations';
 import type { ScheduleBoard, BoardModule } from '@/types/scheduling';
 
-const ALL_MODULES: { value: BoardModule; labelKey: string }[] = [
+const ALL_MODULES: { value: BoardModule; labelKey: string; descKey?: string }[] = [
   // «Cliente» e «Lead» já não existem: a agenda liga-se à entidade (entity_id), por isso deixam de ser opções do board.
+  { value: 'pessoa', labelKey: 'scheduling.item.pessoa', descKey: 'scheduling.item.pessoaDescricao' },
   { value: 'contact', labelKey: 'scheduling.item.contact' },
   { value: 'location', labelKey: 'scheduling.item.location' },
   { value: 'priority', labelKey: 'scheduling.item.priority' },
@@ -272,7 +273,12 @@ export function ScheduleBoardDialog({
                       checked={allowedModules.includes(mod.value)}
                       onCheckedChange={() => toggleModule(mod.value)}
                     />
-                    {t(mod.labelKey) || mod.value}
+                    <span className="flex flex-col">
+                      <span>{t(mod.labelKey) || mod.value}</span>
+                      {mod.descKey && (
+                        <span className="text-xs text-muted-foreground">{t(mod.descKey)}</span>
+                      )}
+                    </span>
                   </label>
                 ))}
               </div>

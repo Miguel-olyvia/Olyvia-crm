@@ -375,6 +375,25 @@ export function useScheduling(companyId?: string) {
         );
       }
 
+      // Nome da pessoa ligada: uma só consulta para todos os itens (não uma por item).
+      const entityIds = Array.from(new Set(items.map(i => i.entity_id).filter((id): id is string => !!id)));
+      if (entityIds.length > 0) {
+        const { data: ents, error: entsError } = await supabase
+          .from('anew_entities')
+          .select('id, display_name, first_name, last_name')
+          .in('id', entityIds);
+        if (entsError) {
+          // O nome é só informativo: a lista carrega na mesma, mas o erro não se esconde.
+          console.error('Erro ao carregar o nome das pessoas ligadas à agenda:', entsError);
+        } else {
+          const nomes = new Map((ents || []).map((e: any) => [
+            e.id as string,
+            (e.display_name || [e.first_name, e.last_name].filter(Boolean).join(' ').trim() || null) as string | null,
+          ]));
+          items = items.map(i => (i.entity_id ? { ...i, pessoa_nome: nomes.get(i.entity_id) ?? null } : i));
+        }
+      }
+
       return items;
     } catch (error: any) {
       toast.error(t('scheduling.item.loadError') + ': ' + error.message);
@@ -405,6 +424,7 @@ export function useScheduling(companyId?: string) {
         p_start_datetime: item.start_datetime!,
         p_end_datetime: item.end_datetime!,
         p_all_day: item.all_day ?? false,
+        p_entity_id: item.entity_id ?? undefined,
         p_client_id: item.client_id,
         p_lead_id: item.lead_id,
         p_deal_id: item.deal_id,
@@ -448,7 +468,7 @@ export function useScheduling(companyId?: string) {
       // mirroring the previous cleanUpdates whitelist-and-presence semantics.
       const validColumns = [
         'board_id', 'title', 'description', 'location', 'start_datetime', 'end_datetime',
-        'status', 'origin', 'lead_id', 'client_id', 'employee_id', 'user_id',
+        'status', 'origin', 'entity_id', 'lead_id', 'client_id', 'employee_id', 'user_id',
         'notes', 'metadata', 'time_off_type',
         'approval_status', 'approved_by', 'approved_at',
       ] as const;
