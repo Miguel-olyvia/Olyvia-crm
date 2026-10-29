@@ -21,7 +21,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { cn } from "@/lib/utils";
 import { EnviarParaPortal } from "./EnviarParaPortal";
 import { SeletorDeTemplate } from "./SeletorDeTemplate";
-import { OrcamentoDocumento } from "./OrcamentoDocumento";
+import { OrcamentoPdf } from "./OrcamentoPdf";
 
 export interface ContextoDosTemplates { negocioId: string | null; ctx: Ctx; d: Negocio; podeEditar: boolean }
 
@@ -72,30 +72,10 @@ function AvisosDaGravacao({ t }: { t: UseTemplatesDoNegocio }) {
 
 const podeEscolher = (t: UseTemplatesDoNegocio, c: ContextoDosTemplates): boolean => c.podeEditar && t.estado === "pronto" && !t.aGuardar && c.negocioId !== null;
 
-/* ------------------------------------------------------------------------------------------------ o aspeto de um template (orçamento) */
-function AspetoDoDocumento({ tpl, nome, logoOrg }: { tpl: TemplateDeAspeto; nome: string; logoOrg: string | null }) {
-  const logo = linkSeguro(tpl.logo_url) ?? logoOrg;
-  const estilo: CSSProperties = { fontFamily: fonte(tpl.font_family), color: cor(tpl.text_color), backgroundColor: cor(tpl.background_color) };
-  return (
-    <div className="overflow-hidden rounded-xl border border-border text-[15px]" style={estilo}>
-      <div className="flex items-center justify-between gap-4 px-4 py-3 text-white" style={{ backgroundColor: cor(tpl.primary_color) ?? "#24204a", fontFamily: fonte(tpl.heading_font_family) }}>
-        {tpl.show_company_info !== false && <span className="font-semibold tracking-wide">{nome}</span>}
-        {logo && <img src={logo} alt={`Logótipo de ${nome}`} width={96} height={32} className="h-8 w-auto max-w-[8rem] object-contain" />}
-      </div>
-      <div className="space-y-2 px-4 py-3">
-        {tpl.header_text && <p>{tpl.header_text}</p>}
-        <p className="text-sm opacity-70">As linhas e os valores do orçamento aparecem aqui, como no documento.</p>
-        {tpl.show_terms !== false && tpl.terms_conditions && <p className="text-sm"><b>Termos e condições. </b>{tpl.terms_conditions}</p>}
-        {tpl.thank_you_message && <p>{tpl.thank_you_message}</p>}
-      </div>
-      {tpl.footer_text && <p className="border-t px-4 py-2 text-sm opacity-80" style={{ borderColor: cor(tpl.secondary_color) }}>{tpl.footer_text}</p>}
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------------------------------------------ passo Orçamento */
 function TemplateDoOrcamento({ c, children }: { c: ContextoDosTemplates; children: ReactNode }) {
   const org = useNomeRealDaOrganizacao();
+  const { activeCompany } = useCompany();
   const lista = useTemplatesDeAspeto("quote");
   const neg = useTemplatesDoNegocio(c.negocioId);
   const escolhido = lista.data?.find((x) => x.id === neg.dados.template_orcamento_id) ?? null;
@@ -114,7 +94,7 @@ function TemplateDoOrcamento({ c, children }: { c: ContextoDosTemplates; childre
         {(
           <details className="text-[15px]" open>
             <summary className={cn("min-h-11 cursor-pointer py-2 font-medium", FOCO)}>Ver o documento do orçamento</summary>
-            <div className="mt-2"><OrcamentoDocumento d={c.d} S={c.ctx.S} tpl={escolhido} nome={org.nome} logoOrg={org.logo} /></div>
+            <div className="mt-2"><OrcamentoPdf d={c.d} S={c.ctx.S} tpl={escolhido} orgId={activeCompany?.id ?? null} nome={org.nome} logoOrg={org.logo} /></div>
           </details>
         )}
       </section>
