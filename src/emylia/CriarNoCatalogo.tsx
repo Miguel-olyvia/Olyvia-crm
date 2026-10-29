@@ -148,7 +148,7 @@ function Pronto({ itens, faltas, botao, onCriar }: { itens: string[]; faltas: st
     </div>
   );
 }
-function BarraMargem({ m, min, alvo }: { m: number; min: number; alvo: number }) {
+export function BarraMargem({ m, min, alvo }: { m: number; min: number; alvo: number }) {
   const esc = Math.max(alvo * 1.5, 60) / 100, w = Math.max(0, Math.min(1, m / esc));
   const cor = m < min / 100 - 0.005 ? "bg-destructive" : m < alvo / 100 - 0.005 ? "bg-warning" : "bg-success";
   return (
