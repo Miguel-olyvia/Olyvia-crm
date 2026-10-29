@@ -6,7 +6,7 @@ import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { filtrarComerciaisPorAmbito } from "./ambitoComerciais";
 import { lerComerciais, type ComercialLido, type NoArvoreOrg } from "./comerciaisNovaLead";
 import type { DefinicaoCampo } from "./fluxoNovaLead";
-import { lerCamposDaCampanha, lerCampanhas, lerFormularios, lerOrigens, type CampanhaLida, type FormularioLido, type OrigemLida } from "./leituraNovaLead";
+import { lerCamposDoFormulario, lerCampanhas, lerFormularios, lerOrigens, type CampanhaLida, type FormularioLido, type OrigemLida } from "./leituraNovaLead";
 
 const CINCO_MINUTOS = 5 * 60 * 1000;
 const K = "pessoas-nova-lead";
@@ -18,7 +18,7 @@ export const chavesNovaLead = {
   origens: (org: string | null) => [K, "origens", org] as const,
   formularios: (org: string | null) => [K, "formularios", org] as const,
   comerciais: (org: string | null) => [K, "comerciais", org] as const,
-  campos: (org: string | null, campanha: string | null) => [K, "campos", org, campanha] as const,
+  campos: (org: string | null, formulario: string | null) => [K, "campos-formulario", org, formulario] as const,
 };
 
 export interface DadosNovaLead {
@@ -29,10 +29,12 @@ export interface DadosNovaLead {
   comerciais: ComercialLido[];
   arvore: NoArvoreOrg[];
   camposCampanha: DefinicaoCampo[];
-  formularioId: string;
-  /** Há campanha escolhida e os campos dela ainda não chegaram: não se pode criar a lead (sairia sem os campos obrigatórios). */
+  /** A campanha ativa ligada ao formulário escolhido (vazio quando o formulário não tem campanha) e o nome dela. */
+  campanhaId: string;
+  campanhaNome: string;
+  /** Há formulário escolhido e os campos dele ainda não chegaram: não se pode criar a lead (sairia sem os campos obrigatórios). */
   camposACarregar: boolean;
-  /** Há campanha escolhida e os campos dela não se leram: não se pode criar a lead. */
+  /** Há formulário escolhido e os campos dele não se leram: não se pode criar a lead. */
   camposErro: boolean;
   /** Falhou a leitura das campanhas, das origens ou dos comerciais (as listas aparecem vazias, mas não é porque não haja nada). */
   erroApoio: boolean;
@@ -40,7 +42,7 @@ export interface DadosNovaLead {
   repetir: () => void;
 }
 
-export function useDadosNovaLead(organizationId: string | null, campanhaId: string | null, aberto: boolean): DadosNovaLead {
+export function useDadosNovaLead(organizationId: string | null, formularioId: string | null, aberto: boolean): DadosNovaLead {
   const ativo = aberto && Boolean(organizationId);
   const scope = usePermissionScope();
   const org = organizationId ?? "";
@@ -49,9 +51,9 @@ export function useDadosNovaLead(organizationId: string | null, campanhaId: stri
   const formularios = useQuery({ queryKey: chavesNovaLead.formularios(organizationId), queryFn: () => lerFormularios(org), enabled: ativo, staleTime: CINCO_MINUTOS, retry: REPETICOES });
   const comerciais = useQuery({ queryKey: chavesNovaLead.comerciais(organizationId), queryFn: () => lerComerciais(org), enabled: ativo, staleTime: CINCO_MINUTOS, retry: REPETICOES });
   const campos = useQuery({
-    queryKey: chavesNovaLead.campos(organizationId, campanhaId),
-    queryFn: () => lerCamposDaCampanha(campanhaId),
-    enabled: ativo && campanhaId !== null,
+    queryKey: chavesNovaLead.campos(organizationId, formularioId),
+    queryFn: () => lerCamposDoFormulario(formularioId),
+    enabled: ativo && formularioId !== null,
     staleTime: CINCO_MINUTOS,
     retry: REPETICOES,
   });
@@ -62,7 +64,8 @@ export function useDadosNovaLead(organizationId: string | null, campanhaId: stri
     [comerciais.data, getPermissionScope, anewUserId, teamMemberIds],
   );
 
-  const comCampanha = ativo && campanhaId !== null;
+  const comFormulario = ativo && formularioId !== null;
+  const campanhaDoFormulario = formularioId !== null ? campanhas.data?.find((c) => c.form_id === formularioId) : undefined;
   // Repete só o que falhou.
   const repetir = () => {
     if (campanhas.isError) void campanhas.refetch();
@@ -72,8 +75,8 @@ export function useDadosNovaLead(organizationId: string | null, campanhaId: stri
   };
 
   return {
-    camposACarregar: comCampanha && campos.isLoading,
-    camposErro: comCampanha && campos.isError,
+    camposACarregar: comFormulario && campos.isLoading,
+    camposErro: comFormulario && campos.isError,
     erroApoio: ativo && (campanhas.isError || origens.isError || comerciais.isError),
     repetir,
     campanhas: campanhas.data ?? [],
@@ -81,8 +84,9 @@ export function useDadosNovaLead(organizationId: string | null, campanhaId: stri
     formularios: formularios.data ?? [],
     comerciais: atribuiveis,
     arvore: comerciais.data?.tree ?? [],
-    // Sem campanha escolhida não há campos extra, mesmo que a leitura anterior ainda esteja em cache.
-    camposCampanha: campanhaId !== null ? (campos.data?.campos ?? []) : [],
-    formularioId: campanhaId !== null ? (campos.data?.formId ?? "") : "",
+    // Sem formulário escolhido não há campos extra, mesmo que a leitura anterior ainda esteja em cache.
+    camposCampanha: formularioId !== null ? (campos.data?.campos ?? []) : [],
+    campanhaId: campanhaDoFormulario?.id ?? "",
+    campanhaNome: campanhaDoFormulario?.name ?? "",
   };
 }

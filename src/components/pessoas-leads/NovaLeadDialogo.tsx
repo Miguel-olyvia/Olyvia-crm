@@ -6,7 +6,7 @@ import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { ComercialLido, NoArvoreOrg } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import type { DefinicaoCampo } from "@/hooks/pessoas/novaLead/fluxoNovaLead";
-import type { CampanhaLida, OrigemLida } from "@/hooks/pessoas/novaLead/leituraNovaLead";
+import type { FormularioLido, OrigemLida } from "@/hooks/pessoas/novaLead/leituraNovaLead";
 import type { ErroDialogo } from "@/hooks/pessoas/novaLead/useNovaLead";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CampanhaOrigemNovaLead } from "./CampanhaOrigemNovaLead";
@@ -23,11 +23,12 @@ export interface NovaLeadDialogoProps {
   valores: Readonly<Record<string, unknown>>;
   errosCampo: Readonly<Record<string, string>>;
   aoMudarValor: (chave: string, valor: unknown) => void;
-  campanhas: readonly CampanhaLida[];
+  formularios: readonly FormularioLido[];
+  formularioId: string;
+  aoMudarFormulario: (id: string) => void;
+  /** A campanha ligada ao formulário escolhido (derivada): serve aos distritos e ao nome mostrado; vazia sem campanha. */
   campanhaId: string;
-  aoMudarCampanha: (id: string) => void;
-  formularioNome: string;
-  temFormulario: boolean;
+  campanhaNome: string;
   origens: readonly OrigemLida[];
   origemId: string;
   aoMudarOrigem: (id: string) => void;
@@ -84,7 +85,7 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
   };
   // Sem campos da campanha, ou sem campanhas, origens ou comerciais, não se cria: a lead sairia sem campanha ou sem comercial sem se querer.
   // Com o que se escreveu por gravar, um clique fora não fecha o painel (Escape e «Fechar» fecham): perder o formulário por um toque ao lado custa caro.
-  const sujo = Object.values(p.valores).some((v) => v !== undefined && v !== null && v !== "") || p.campanhaId !== "" || p.origemId !== "";
+  const sujo = Object.values(p.valores).some((v) => v !== undefined && v !== null && v !== "") || p.formularioId !== "" || p.origemId !== "";
   const semCampos = p.camposACarregar || p.camposErro || p.erroApoio;
   const distrito = [p.valores.distrito, p.valores.district].find((v) => typeof v === "string" && v) as string | undefined;
   return (
@@ -135,8 +136,8 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
           {/* Enquanto grava, os campos ficam bloqueados: o pedido em curso leva o que estava escrito ao clicar, e o ecrã não pode mostrar outra coisa. */}
           <fieldset disabled={p.aCriar} aria-busy={p.aCriar || undefined} className="m-0 min-w-0 space-y-4 border-0 p-0">
           <CampanhaOrigemNovaLead
-            campanhas={p.campanhas} campanhaId={p.campanhaId} aoMudarCampanha={p.aoMudarCampanha} formularioNome={p.formularioNome}
-            temFormulario={p.temFormulario} nCamposExtra={p.camposCampanha.length} origens={p.origens} origemId={p.origemId}
+            formularios={p.formularios} formularioId={p.formularioId} aoMudarFormulario={p.aoMudarFormulario} campanhaNome={p.campanhaNome}
+            nCamposExtra={p.camposCampanha.length} origens={p.origens} origemId={p.origemId}
             aoMudarOrigem={p.aoMudarOrigem} aoCriarFormulario={p.aoCriarFormulario}
           />
           <CamposNovaLead

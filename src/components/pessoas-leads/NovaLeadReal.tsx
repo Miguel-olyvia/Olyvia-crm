@@ -34,12 +34,14 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const [aberto, setAberto] = useState(false);
   const [valores, setValores] = useState<Record<string, unknown>>({});
-  const [campanhaId, setCampanhaId] = useState("");
+  const [formularioId, setFormularioId] = useState("");
   const [origemId, setOrigemId] = useState("");
   const [orgFiltro, setOrgFiltro] = useState("all");
   const botao = useRef<HTMLButtonElement>(null);
 
-  const dados = useDadosNovaLead(organizationId, campanhaId || null, aberto);
+  const dados = useDadosNovaLead(organizationId, formularioId || null, aberto);
+  // A campanha não se escolhe: é a do formulário, quando tem.
+  const campanhaId = dados.campanhaId;
   const base = useMemo(() => camposBase(t), [t]);
   const baseVisivel = useMemo(
     () => base.filter((b) => !isBaseFieldCoveredByCampaignFields(b.field_key, dados.camposCampanha)),
@@ -49,7 +51,7 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
   const concluir = useCallback((c: ConclusaoNovaLead) => {
     setAberto(false);
     setValores({});
-    setCampanhaId("");
+    setFormularioId("");
     setOrigemId("");
     setOrgFiltro("all");
     // Com negócio (a «Nova lead» cria pessoa e negócio) a ficha abre já nele; «Abrir existente» só abre a pessoa.
@@ -68,12 +70,12 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
   /** O formulário de agora, ou null quando não se pode criar: sem os campos da campanha (a lead sairia sem os obrigatórios) ou sem as leituras de apoio. */
   const entradaAtual = useCallback((): EntradaNovaLead | null => {
     if (dados.erroApoio) return null;
-    if (campanhaId && (dados.camposACarregar || dados.camposErro)) return null;
+    if (formularioId && (dados.camposACarregar || dados.camposErro)) return null;
     const origem = origemId && origemId !== SEM_ORIGEM ? dados.origens.find((o) => o.id === origemId) : undefined;
     return {
       base, campanha: dados.camposCampanha, valores, origemId: origem ? origem.id : null, origemNome: origem?.name ?? "manual", campanhaId: campanhaId || null,
     };
-  }, [base, dados.camposCampanha, dados.camposACarregar, dados.camposErro, dados.erroApoio, dados.origens, valores, origemId, campanhaId]);
+  }, [base, dados.camposCampanha, dados.camposACarregar, dados.camposErro, dados.erroApoio, dados.origens, valores, origemId, campanhaId, formularioId]);
   const { submeter, tentarDeNovo } = nova;
   const criar = useCallback(() => {
     const entrada = entradaAtual();
@@ -92,7 +94,6 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
     navigate("/forms");
   }, [valores, t, navigate]);
 
-  const formularioNome = dados.formularios.find((f) => f.id === dados.formularioId)?.name ?? "";
   return (
     <>
       <Button ref={botao} type="button" className={`min-h-11 gap-2 ${FOCO}`} onClick={() => setAberto(true)}>
@@ -101,8 +102,8 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
       </Button>
       <NovaLeadDialogo
         aberto={aberto} organizationId={organizationId} aoMudarAberto={setAberto} baseVisivel={baseVisivel} camposCampanha={dados.camposCampanha}
-        valores={valores} errosCampo={nova.errosCampo} aoMudarValor={mudarValor} campanhas={dados.campanhas} campanhaId={campanhaId}
-        aoMudarCampanha={setCampanhaId} formularioNome={formularioNome} temFormulario={dados.formularioId !== ""} origens={dados.origens}
+        valores={valores} errosCampo={nova.errosCampo} aoMudarValor={mudarValor} formularios={dados.formularios} formularioId={formularioId}
+        aoMudarFormulario={setFormularioId} campanhaId={campanhaId} campanhaNome={dados.campanhaNome} origens={dados.origens}
         origemId={origemId} aoMudarOrigem={setOrigemId} comerciais={dados.comerciais} arvore={dados.arvore} orgFiltro={orgFiltro}
         aoMudarOrgFiltro={setOrgFiltro} aCriar={nova.aCriar && nova.duplicados === null} erro={nova.erro?.tipo === "verificar" || nova.erro?.tipo === "negocio" ? nova.erro : null}
         aoCriar={criar} aoCriarFormulario={irParaFormularios} aoTentarDeNovo={repetir}

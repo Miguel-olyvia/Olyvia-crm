@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import type { CampanhaLida, OrigemLida } from "@/hooks/pessoas/novaLead/leituraNovaLead";
+import type { FormularioLido, OrigemLida } from "@/hooks/pessoas/novaLead/leituraNovaLead";
 import { useTranslation } from "@/hooks/useTranslation";
 
 const N = "pessoasPagina.real.newLead.";
@@ -12,12 +12,11 @@ const N = "pessoasPagina.real.newLead.";
 export const SEM_ORIGEM = "none";
 
 interface CampanhaOrigemProps {
-  campanhas: readonly CampanhaLida[];
-  campanhaId: string;
-  aoMudarCampanha: (id: string) => void;
-  /** O nome do formulário da campanha escolhida, quando tem; vazio sem formulário. */
-  formularioNome: string;
-  temFormulario: boolean;
+  formularios: readonly FormularioLido[];
+  formularioId: string;
+  aoMudarFormulario: (id: string) => void;
+  /** O nome da campanha ligada ao formulário escolhido; vazio quando o formulário não tem campanha. */
+  campanhaNome: string;
   nCamposExtra: number;
   origens: readonly OrigemLida[];
   origemId: string;
@@ -39,27 +38,29 @@ export function CampanhaOrigemNovaLead(p: CampanhaOrigemProps) {
             <ExternalLink className="ml-0.5 h-3 w-3" aria-hidden="true" />
           </Button>
         </div>
-        <Label htmlFor="nl-campanha" className="sr-only">{t(`${N}campaign.label`)}</Label>
+        <Label htmlFor="nl-formulario" className="sr-only">{t(`${N}campaign.label`)}</Label>
         <NativeSelect
-          id="nl-campanha"
-          value={p.campanhaId}
+          id="nl-formulario"
+          value={p.formularioId}
           placeholder={t(`${N}campaign.placeholder`)}
-          onValueChange={p.aoMudarCampanha}
+          onValueChange={p.aoMudarFormulario}
           options={[
-            ...(p.campanhaId ? [{ value: "", label: t(`${N}campaign.noCampaign`) }] : []),
-            ...p.campanhas.map((c) => ({ value: c.id, label: c.form_id ? `${c.name} (${t(`${N}campaign.formBadge`)})` : c.name })),
+            ...(p.formularioId ? [{ value: "", label: t(`${N}campaign.noCampaign`) }] : []),
+            ...p.formularios.map((f) => ({ value: f.id, label: f.name })),
           ]}
         />
-        {!p.campanhaId && <p className="text-xs text-muted-foreground">{t(`${N}campaign.none`)}</p>}
+        {!p.formularioId && <p className="text-xs text-muted-foreground">{t(`${N}campaign.none`)}</p>}
       </section>
 
-      {p.campanhaId && p.temFormulario && (
-        <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
+      {p.formularioId && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
           <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-          <p className="flex-1 text-sm">
-            <span className="text-muted-foreground">{t(`${N}campaign.usingForm`)}:</span>
-            <span className="ml-2 font-medium">{p.formularioNome || t(`${N}campaign.fallbackForm`)}</span>
-          </p>
+          {p.campanhaNome && (
+            <p className="flex-1 text-sm">
+              <span className="text-muted-foreground">{t(`${N}campaign.linkedCampaign`)}:</span>
+              <span className="ml-2 font-medium">{p.campanhaNome}</span>
+            </p>
+          )}
           <Badge variant="secondary" className="text-xs">{t(`${N}campaign.extraCount`, { n: p.nCamposExtra })}</Badge>
         </div>
       )}

@@ -78,7 +78,21 @@ export async function lerCamposDaCampanha(campanhaId: string | null): Promise<{ 
   return { formId, campos };
 }
 
-const semRepetidos = (distritos: DistritoLido[]): DistritoLido[] =>
+/** Os campos extra de um formulário (uma falha lança, como nos da campanha). */
+export async function lerCamposDoFormulario(formId: string | null): Promise<{ formId: string; campos: DefinicaoCampo[] }> {
+  if (!formId) return { formId: "", campos: [] };
+  const { data, error } = await ler(db().from("form_fields").select("*").eq("form_id", formId).eq("is_active", true).order("step_number").order("sort_order"));
+  if (error) falhou(error);
+  const campos = data.map((f): DefinicaoCampo => ({
+    id: f.id, field_key: f.field_key, field_label: f.field_label, field_type: f.field_type, is_required: Boolean(f.is_required),
+    options: f.options ?? null, contact_field_mapping: f.contact_field_mapping ?? null, client_field_mapping: f.client_field_mapping ?? null,
+    placeholder: f.placeholder ?? null, help_text: f.help_text ?? null, display_style: f.display_style ?? null,
+    pattern: f.pattern ?? null, pattern_message: f.pattern_message ?? null, min_length: f.min_length ?? null, max_length: f.max_length ?? null,
+  }));
+  return { formId, campos };
+}
+
+const semRepetidos =(distritos: DistritoLido[]): DistritoLido[] =>
   distritos.reduce<DistritoLido[]>((acc, d) => (acc.some((x) => x.name === d.name) ? acc : [...acc, d]), []);
 
 /** Os distritos de um campo «distrito»: os da campanha, ou, sem eles, os distritos de Portugal. */
