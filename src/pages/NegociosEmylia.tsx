@@ -122,7 +122,6 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         if (r.erros.length) { setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
-        if (r.avisos.some((a) => a.includes("encomenda de cliente foi emitida"))) void lerNegocios(supabase, org, ids.current).then(carregarEncomendas).catch(() => undefined);
       } while (deNovo.current);
       // 28/10: o portal do cliente, depois de gravar (o documento já está na base): a conta real e o email de acesso
       for (const e of filaPortal.current.splice(0)) {
