@@ -17,6 +17,8 @@ export interface FichaProdutoReal {
   org: string; podeEditar: boolean;
   /** products.manage_prices: o preferido muda o custo do produto (cat_definir_fornecedor_preferido exige-o). Sem ela a estrela só se vê. */
   podeMudarPrecos: boolean;
+  /** inventory.edit: marcar armazéns em lote no Catálogo (na ficha manda o pode_editar de cat_produto_stock). */
+  podeStock?: boolean;
   recarregar: () => Promise<void>;
 }
 
@@ -146,4 +148,73 @@ export async function ligarArtigo(o: { supplierId: string; item: CrmCatalogItem;
     ...(data.warnings ?? []),
   ].filter(Boolean).join(" ");
   return { ok: true, r: data, frase };
+}
+
+/* ------------------------------------------------------------------ stock e armazéns (29/10) */
+// Os armazéns de cada produto/consumível dizem onde está ou pode estar (o stock gere-se sempre; gere_stock na resposta ignora-se).
+// cat_produto_stock lê; cat_definir_armazem_produto(s) gravam (inventory.edit). A base explica em português porque não desmarca.
+
+export interface ArmazemProduto {
+  warehouse_id: string; nome: string; codigo: string | null; ativo: boolean; quantidade: number | null; reservado: number | null;
+  minimo: number | null; maximo: number | null; ponto_encomenda: number | null; localizacao: string | null;
+}
+export interface StockProduto { gere_stock: boolean; pode_editar: boolean; armazens: ArmazemProduto[] }
+/** Um armazém da organização (tabela warehouses, pela RLS): serves_customers é o "Serve clientes" do Inventário. */
+export interface ArmazemOrg { id: string; name: string; code: string | null; is_active: boolean; serves_customers: boolean }
+export interface ResArmazens { ok: boolean; alterados: number; gere_stock_ligados: number; gere_stock_desligados: number; recusados: { product_id: string; nome: string; motivo: string }[] }
+
+export async function lerStockProduto(productId: string): Promise<Res<StockProduto>> {
+  try {
+    const { data, error } = await rpcLivre("cat_produto_stock", { p_product_id: productId });
+    if (error || !data) return { ok: false, erro: erroAmigavel(error, "Não foi possível ler os armazéns.") };
+    const d = data as StockProduto;
+    return { ok: true, v: { gere_stock: !!d.gere_stock, pode_editar: !!d.pode_editar, armazens: Array.isArray(d.armazens) ? d.armazens : [] } };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível ler os armazéns." };
+  }
+}
+
+export async function definirArmazemProduto(o: {
+  productId: string; warehouseId: string; ativo: boolean; minimo: number | null; maximo: number | null; pontoEncomenda: number | null; localizacao: string | null;
+}): Promise<Res<{ ok: boolean; motivo: string | null; gere_stock: boolean }>> {
+  try {
+    const { data, error } = await rpcLivre("cat_definir_armazem_produto", {
+      p_product_id: o.productId, p_warehouse_id: o.warehouseId, p_ativo: o.ativo,
+      p_minimo: o.minimo, p_maximo: o.maximo, p_ponto_encomenda: o.pontoEncomenda, p_localizacao: o.localizacao,
+    });
+    if (error || !data) return { ok: false, erro: erroAmigavel(error, "Não foi possível gravar o armazém.") };
+    return { ok: true, v: data as { ok: boolean; motivo: string | null; gere_stock: boolean } };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível gravar o armazém." };
+  }
+}
+
+export async function definirArmazemProdutos(productIds: string[], warehouseId: string, ativo: boolean): Promise<Res<ResArmazens>> {
+  try {
+    const { data, error } = await rpcLivre("cat_definir_armazem_produtos", { p_product_ids: productIds, p_warehouse_id: warehouseId, p_ativo: ativo });
+    if (error || !data) return { ok: false, erro: erroAmigavel(error, "Não foi possível marcar os armazéns.") };
+    const d = data as ResArmazens;
+    return { ok: true, v: { ...d, recusados: Array.isArray(d.recusados) ? d.recusados : [] } };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível marcar os armazéns." };
+  }
+}
+
+/** Os armazéns da organização (como a Frota, components/frota/dados/consultas.ts). */
+export async function lerArmazensOrg(org: string): Promise<Res<ArmazemOrg[]>> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await ((await cliente()) as any).from("warehouses").select("id, name, code, is_active, serves_customers").eq("organization_id", org).is("deleted_at", null).order("name");
+    if (error) return { ok: false, erro: (error as RpcError).message || "Não foi possível ler os armazéns." };
+    return { ok: true, v: (data ?? []) as ArmazemOrg[] };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível ler os armazéns." };
+  }
+}
+
+/** Inteiro ≥ 0, ou null (vazio). NaN = inválido. */
+export function lerInteiro(t: string): number | null {
+  const s = t.trim();
+  if (!s) return null;
+  return /^\d+$/.test(s) ? Number(s) : NaN;
 }

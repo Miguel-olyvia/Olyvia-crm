@@ -45,7 +45,8 @@ const ficha = (p: Produto = PROD, r: FichaProdutoReal | undefined = real(), anun
   return anunciar;
 };
 
-beforeEach(() => { base.chamadas = []; base.respostas = {}; base.tabelas = {}; });
+// 29/10: a secção «Stock e armazéns» lê cat_produto_stock em todas as fichas reais (os testes dela estão em StockArmazens.test.tsx)
+beforeEach(() => { base.chamadas = []; base.respostas = { cat_produto_stock: { data: { gere_stock: true, pode_editar: true, armazens: [] }, error: null } }; base.tabelas = {}; });
 afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); });
 
 describe("FichaProduto · abrir pela linha", () => {
@@ -90,7 +91,7 @@ describe("FichaProduto · preço e fornecedores", () => {
     const r = real();
     const anunciar = ficha(PROD, r);
     const linha = (await screen.findByText("Fornecedor A")).closest("tr")!;
-    expect(base.chamadas[0]).toEqual({ f: "cat_produto_fornecedores", a: { p_product_id: PID } });
+    expect(base.chamadas.find((c) => c.f === "cat_produto_fornecedores")).toEqual({ f: "cat_produto_fornecedores", a: { p_product_id: PID } });
     expect(linha).toHaveTextContent("A-77");
     expect(linha).toHaveTextContent("60,00 €");
     expect(linha).toHaveTextContent("3 d");

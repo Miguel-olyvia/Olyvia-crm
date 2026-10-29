@@ -190,7 +190,7 @@ export function consumiveisComCriados(S: Estado, C: Custos, K: Pick<Catalogo, "c
   const L = consumiveisCatalogo(S, C, hoje);
   const ja = new Set(L.map((x) => normal(x.n)));
   for (const c of K.consumiveisCriados ?? []) if (!ja.has(normal(c.n))) {
-    L.push({ n: c.n, un: c.un, preco: c.preco, fornecedor: c.fornecedor, data: c.data, servicos: [], opcionalEm: 0, desatualizado: mesesEntre(c.data, hoje) >= C.par.mesesDesatualizado });
+    L.push({ id: c.id, n: c.n, un: c.un, preco: c.preco, fornecedor: c.fornecedor, data: c.data, servicos: [], opcionalEm: 0, desatualizado: mesesEntre(c.data, hoje) >= C.par.mesesDesatualizado });
   }
   return L.sort((a, b) => a.n.localeCompare(b.n, "pt"));
 }

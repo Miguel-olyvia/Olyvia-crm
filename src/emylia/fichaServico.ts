@@ -171,6 +171,8 @@ export function perguntasPossiveis(atual: string | undefined, coisa: string): st
 /* ------------------------------------------------------------------ consumíveis */
 export interface ConsCatalogo {
   n: string; un: string; preco: number; fornecedor: string; data: string;
+  /** 29/10: o id do produto (na página real, products.id) — para a ficha do consumível e os armazéns. */
+  id?: string;
   /** Os serviços cuja receita o usa. */
   servicos: SvcId[];
   /** Em quantas receitas é opcional. */
@@ -188,7 +190,7 @@ export function consumiveisCatalogo(S: Estado, C: Custos, hoje = HOJE): ConsCata
     if (!rec) continue;
     for (const c of rec.cons) {
       const k = normal(c.n), x = m.get(k);
-      if (!x) { m.set(k, { n: c.n, un: c.un, preco: c.preco, fornecedor: c.fornecedor, data: c.data, servicos: [sid], opcionalEm: c.opcional ? 1 : 0, desatualizado: false }); continue; }
+      if (!x) { m.set(k, { id: c.id, n: c.n, un: c.un, preco: c.preco, fornecedor: c.fornecedor, data: c.data, servicos: [sid], opcionalEm: c.opcional ? 1 : 0, desatualizado: false }); continue; }
       if (!x.servicos.includes(sid)) x.servicos.push(sid);
       if (c.opcional) x.opcionalEm++;
       if (c.data > x.data) Object.assign(x, { un: c.un, preco: c.preco, fornecedor: c.fornecedor, data: c.data });

@@ -110,7 +110,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { NativeSelect } from "@/components/ui/native-select";
-import { Switch } from "@/components/ui/switch";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -216,7 +215,7 @@ export default function Products() {
     subcategory_id: "",
     brand_id: "",
     product_type: "sale", // "sale", "purchase", or "both"
-    manages_stock: false,
+    manages_stock: true, // 29/10: os produtos gerem sempre stock (avalia-se na encomenda de cliente; o que falta vai ao fornecedor)
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -879,7 +878,7 @@ export default function Products() {
           p_status: formData.status,
           p_is_sellable: isSellable,
           p_is_purchasable: isPurchasable,
-          p_manages_stock: formData.manages_stock,
+          p_manages_stock: true, // 29/10: sempre (sem o interruptor "Gere stock")
           p_category_id: formData.category_id || null,
           p_subcategory_id: formData.subcategory_id || null,
           p_primary_org_id: primaryOrgId,
@@ -931,7 +930,7 @@ export default function Products() {
           p_status: formData.status,
           p_is_sellable: isSellable,
           p_is_purchasable: isPurchasable,
-          p_manages_stock: formData.manages_stock,
+          p_manages_stock: true, // 29/10: sempre (sem o interruptor "Gere stock")
           p_category_id: formData.category_id || null,
           p_subcategory_id: formData.subcategory_id || null,
           p_primary_org_id: primaryOrgId,
@@ -1182,7 +1181,7 @@ export default function Products() {
       subcategory_id: "",
       brand_id: "",
       product_type: "sale",
-      manages_stock: false,
+      manages_stock: true,
     });
     setProductImages([]);
     setViewerIndex(null);
@@ -2436,22 +2435,6 @@ export default function Products() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-
-                <div className="space-y-2 rounded-md border p-4">
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="manages_stock"
-                      checked={formData.manages_stock}
-                      onCheckedChange={(checked) => setFormData({ ...formData, manages_stock: checked })}
-                    />
-                    <Label htmlFor="manages_stock" className="cursor-pointer">
-                      {t('products.form.manageStock')}
-                    </Label>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {t('products.form.manageStockHelp')}
-                  </p>
                 </div>
 
                 {/* F3.4b: preço do fornecedor por aprovar. Aceitar já grava o custo;

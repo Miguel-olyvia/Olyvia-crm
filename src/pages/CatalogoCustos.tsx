@@ -78,7 +78,9 @@ export default function CatalogoCustos() {
   // 29/10: a ficha do produto lê os fornecedores ligados e liga a artigos do portal; mexer exige products.edit (o can_link de Compras); a estrela também products.manage_prices
   const { hasPermission } = usePermissions();
   const podeEditar = hasPermission("products.edit"), podeMudarPrecos = hasPermission("products.manage_prices");
-  const real = useMemo<FichaProdutoReal | undefined>(() => (org ? { org, podeEditar, podeMudarPrecos, recarregar: () => carregar(org) } : undefined), [org, podeEditar, podeMudarPrecos, carregar]);
+  // 29/10: marcar armazéns em lote (Produtos/Consumíveis) só com inventory.edit, como cat_definir_armazem_produtos
+  const podeStock = hasPermission("inventory.edit");
+  const real = useMemo<FichaProdutoReal | undefined>(() => (org ? { org, podeEditar, podeMudarPrecos, podeStock, recarregar: () => carregar(org) } : undefined), [org, podeEditar, podeMudarPrecos, podeStock, carregar]);
 
   if (isLoading || (!org && !erroLer)) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver o Catálogo e custos.</div>;

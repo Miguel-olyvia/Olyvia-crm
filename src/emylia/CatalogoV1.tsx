@@ -29,6 +29,7 @@ import { useParamUrl } from "./usarParamUrl";
 import { CriarNoCatalogo } from "./CriarNoCatalogo";
 import { FichaProduto } from "./FichaProduto";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
+import { BarraSelecao, CaixaLinha, useSelecao } from "./MarcarArmazens";
 import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatalogo";
 import { ehCriado } from "./catalogo";
 
@@ -198,7 +199,10 @@ function oficioDe(K: Catalogo, no: string | null): string | null {
 }
 
 /* ------------------------------------------------------------------ produtos */
-function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo }: { K: Catalogo; nomeServico: (sid: SvcId) => string; onAbrir: (sid: SvcId) => void; onAbrirProduto: (id: string) => void; margem: number; novo?: string }) {
+function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real, anunciar }: { K: Catalogo; nomeServico: (sid: SvcId) => string; onAbrir: (sid: SvcId) => void; onAbrirProduto: (id: string) => void; margem: number; novo?: string; real?: FichaProdutoReal; anunciar: (msg: string) => void }) {
+  const sl = useSelecao();
+  // 29/10: no modo Selecionar, tocar na linha (ou no nome) marca-a em vez de abrir a ficha
+  const tocar = (id: string) => (sl.sel ? sl.alternar(id) : onAbrirProduto(id));
   const [q, setQ] = useState("");
   const [of, setOf] = useState("");
   const [n, setN] = useState(POR_PAGINA);
@@ -208,15 +212,18 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo }: { K
       <div className="flex flex-wrap items-center gap-3">
         <Procurar v={q} onChange={(v) => { setQ(v); setN(POR_PAGINA); }} rotulo="Procurar produto" ph="Nome, marca, referência ou subcategoria" />
         <Escolha rotulo="Ofício" w="w-full sm:w-64" v={of} opcoes={[{ v: "", t: "Todos os ofícios" }, ...oficios(K.arvore).map((o) => ({ v: o.id, t: o.n }))]} onSet={(v) => { setOf(v); setN(POR_PAGINA); }} />
+        {!sl.sel && <BarraSelecao s={sl} filtrados={L} real={real} anunciar={anunciar} tipo="produtos" />}
       </div>
+      {sl.sel && <BarraSelecao s={sl} filtrados={L} real={real} anunciar={anunciar} tipo="produtos" />}
       <p className={cn(NOTA, "mt-4")} aria-live="polite">{L.length === 1 ? "1 produto" : `${L.length} produtos`}</p>
       <ul className={cn(LISTA, "mt-2")}>
         {/* 29/10: tocar na linha abre a ficha do produto; o nome é o botão (teclado e leitor de ecrã); o «Traz:» abre o serviço */}
         {L.slice(0, n).map((p) => (
-          <li key={p.id} onClick={() => onAbrirProduto(p.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", p.id === novo && REALCE)}>
+          <li key={p.id} onClick={() => tocar(p.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", p.id === novo && REALCE)}>
+            <CaixaLinha id={p.id} nome={p.n} s={sl} />
             <Ilustracao k={p.img ?? "generico"} />
             <span className="min-w-0 flex-1">
-              <button id={`prod-${p.id}`} type="button" onClick={(e) => { e.stopPropagation(); onAbrirProduto(p.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{p.n}{p.id === novo && <Novo />}</button>
+              <button id={`prod-${p.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(p.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{p.n}{p.id === novo && <Novo />}</button>
               {(p.marca || p.sku) && <span className={cn(NOTA, "block")}>{[p.marca, p.sku ? `ref. ${p.sku}` : ""].filter(Boolean).join(" · ")}</span>}
               {p.servico && (
                 <button type="button" onClick={(e) => { e.stopPropagation(); onAbrir(p.servico!); }} className="mt-0.5 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">
@@ -281,18 +288,28 @@ function Equipamentos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (f
 }
 
 /* ------------------------------------------------------------------ consumíveis */
-function Consumiveis({ todos, C, nomeServico, novo }: { todos: ConsCatalogo[]; C: Custos; nomeServico: (sid: SvcId) => string; novo?: string }) {
+function Consumiveis({ todos, C, nomeServico, novo, onAbrirConsumivel, real, anunciar }: { todos: ConsCatalogo[]; C: Custos; nomeServico: (sid: SvcId) => string; novo?: string; onAbrirConsumivel: (id: string) => void; real?: FichaProdutoReal; anunciar: (msg: string) => void }) {
+  const sl = useSelecao();
+  // 29/10: tocar na linha abre a ficha do consumível (se tem id de produto); no modo Selecionar, marca-a
+  const tocar = (id?: string) => { if (!id) return; if (sl.sel) sl.alternar(id); else onAbrirConsumivel(id); };
   const [q, setQ] = useState("");
   const [n, setN] = useState(POR_PAGINA);
   const L = useMemo(() => { const qq = q.trim().toLowerCase(); return primeiro(qq ? todos.filter((x) => `${x.n} ${x.fornecedor}`.toLowerCase().includes(qq)) : todos, (x) => x.n === novo); }, [todos, q, novo]);
   return (
     <>
-      <div><Procurar v={q} onChange={(v) => { setQ(v); setN(POR_PAGINA); }} rotulo="Procurar consumível" ph="Nome ou fornecedor" /></div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Procurar v={q} onChange={(v) => { setQ(v); setN(POR_PAGINA); }} rotulo="Procurar consumível" ph="Nome ou fornecedor" />
+        {!sl.sel && <BarraSelecao s={sl} filtrados={L} real={real} anunciar={anunciar} tipo="consumíveis" />}
+      </div>
+      {sl.sel && <BarraSelecao s={sl} filtrados={L} real={real} anunciar={anunciar} tipo="consumíveis" />}
       <ul className={cn(LISTA, "mt-4")}>
         {L.slice(0, n).map((x) => (
-          <li key={x.n} className={cn("flex min-h-16 flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap", x.n === novo && REALCE)}>
+          <li key={x.n} onClick={() => tocar(x.id)} className={cn("group flex min-h-16 flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap", x.id && "cursor-pointer", x.n === novo && REALCE)}>
+            {x.id && <CaixaLinha id={x.id} nome={x.n} s={sl} />}
             <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-medium">{x.n}{x.n === novo && <Novo />}</span>
+              {x.id
+                ? <button id={`cons-${x.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(x.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{x.n}{x.n === novo && <Novo />}</button>
+                : <span className="block text-[15px] font-medium">{x.n}{x.n === novo && <Novo />}</span>}
               <span className={cn(NOTA, "block")}>{x.fornecedor} · {x.servicos.length === 0 ? "ainda em nenhum serviço" : `em ${x.servicos.length === 1 ? nomeServico(x.servicos[0]) : `${x.servicos.length} serviços`}`}{x.opcionalEm ? ` · opcional em ${x.opcionalEm}` : ""}</span>
             </span>
             <span className={VALORES}>
@@ -359,6 +376,8 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   const setAberto = useCallback((sid: SvcId | null) => setServicoUrl(sid ?? ""), [setServicoUrl]);
   // 29/10: a ficha do produto também vai para o endereço (?produto=…)
   const [produtoAberto, setProdutoAberto] = useParamUrl<string>("produto", "");
+  // 29/10: e a do consumível (?consumivel=…), a mesma ficha na variante consumível
+  const [consAberto, setConsAberto] = useParamUrl<string>("consumivel", "");
   const voltarProduto = useRef<string | null>(null);
   // vindo do orçamento ("Abrir a ficha do serviço"): a ficha abre na entrada do Catálogo (depois de a moldura a juntar ao histórico)
   useEffect(() => { if (pendente) { const t = window.setTimeout(() => setServicoUrl(pendente, { substituir: true }), 0); return () => window.clearTimeout(t); } return undefined; }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -387,10 +406,10 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
     voltarPara.current = null;
   }, [aberto]);
   useEffect(() => {
-    if (produtoAberto || !voltarProduto.current) return;
-    document.getElementById(`prod-${voltarProduto.current}`)?.focus();
+    if (produtoAberto || consAberto || !voltarProduto.current) return;
+    (document.getElementById(`prod-${voltarProduto.current}`) ?? document.getElementById(`cons-${voltarProduto.current}`))?.focus();
     voltarProduto.current = null;
-  }, [produtoAberto]);
+  }, [produtoAberto, consAberto]);
 
   // S muda no sítio: a chave do que as contas leem (serviços e regras), para o useMemo.
   const chave = JSON.stringify(S.svc) + S.cfg.min + ":" + S.cfg.alvo + ":" + S.cfg.estrutura + ":" + S.deals.length;
@@ -454,6 +473,18 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
     );
   }
 
+  if (consAberto) {
+    const x = consumiveis.find((c) => c.id === consAberto);
+    return (
+      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
+        <FichaProduto key={consAberto} tipo="consumivel" min={S.cfg.min} alvo={S.cfg.alvo} real={real} anunciar={anunciar} nomeServico={nomeServico} onAbrirServico={(sid) => { setConsAberto("", { substituir: true }); setAberto(sid); }}
+          p={x && x.id ? { id: x.id, n: x.n, custo: x.preco, un: x.un, marca: "", fornecedor: x.fornecedor, data: x.data, no: null } : undefined}
+          voltar={() => { voltarProduto.current = consAberto; setConsAberto(""); }} />
+        {regiao}
+      </div>
+    );
+  }
+
   const tab = (s: Seccao, t: string) => (
     <button key={s} id={`tab-${s}`} type="button" role="tab" aria-selected={seccao === s} aria-controls={`painel-${s}`} tabIndex={seccao === s ? 0 : -1}
       onClick={() => setSeccao(s)}
@@ -470,9 +501,9 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   );
   const corpo: Record<Seccao, () => ReactNode> = {
     servicos: () => <Servicos S={S} itens={itens} K={K} onAbrir={abrir} min={S.cfg.min} alvo={S.cfg.alvo} />,
-    produtos: () => <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} />,
+    produtos: () => <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar} />,
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} />,
-    consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} />,
+    consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} onAbrirConsumivel={(id) => setConsAberto(id)} real={real} anunciar={anunciar} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} novo={realce?.t === "tecnico" ? realce.id : undefined} />,
     ligacoes: () => <LigacoesCatalogo K={catLig} onAbrirFicha={abrir} S={S} run={run} />,
   };

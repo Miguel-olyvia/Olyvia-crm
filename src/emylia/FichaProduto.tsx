@@ -11,6 +11,7 @@ import type { Produto } from "./v2/catalogoModelo";
 import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
+import { StockArmazens } from "./StockArmazens";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
   definirPreferido, definirPvp, eUuid, lerNumero, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
@@ -34,9 +35,12 @@ function Seccao({ id, titulo, children }: { id: string; titulo: string; children
 type Props = {
   p: Produto | undefined; min: number; alvo: number; voltar: () => void; anunciar: (msg: string) => void;
   nomeServico: (sid: SvcId) => string; onAbrirServico: (sid: SvcId) => void; real?: FichaProdutoReal;
+  /** 29/10: "consumivel" = a ficha do consumível (sem PVP nem margem: é custo dos serviços). */
+  tipo?: "produto" | "consumivel";
 };
 
-export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real }: Props) {
+export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto" }: Props) {
+  const cons = tipo === "consumivel";
   const titulo = useRef<HTMLHeadingElement>(null);
   useEffect(() => { titulo.current?.focus(); }, []);
   const topo = (
@@ -48,8 +52,8 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
     return (
       <article aria-labelledby="ficha-t">
         {topo}
-        <h1 id="ficha-t" ref={titulo} tabIndex={-1} className="mt-3 text-3xl font-semibold tracking-tight outline-none">Produto sem ficha</h1>
-        <p className={cn(NOTA, "mt-2")}>Este produto já não está no Catálogo.</p>
+        <h1 id="ficha-t" ref={titulo} tabIndex={-1} className="mt-3 text-3xl font-semibold tracking-tight outline-none">{cons ? "Consumível sem ficha" : "Produto sem ficha"}</h1>
+        <p className={cn(NOTA, "mt-2")}>{cons ? "Este consumível" : "Este produto"} já não está no Catálogo.</p>
       </article>
     );
   }
@@ -57,7 +61,7 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
     <article aria-labelledby="ficha-t">
       {topo}
       <header className="mt-3">
-        <p className={NOTA}>{[p.marca, p.sku ? `ref. ${p.sku}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
+        <p className={NOTA}>{[cons ? "Consumível" : "", p.marca, p.sku ? `ref. ${p.sku}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
         <h1 id="ficha-t" ref={titulo} tabIndex={-1} className="text-3xl font-semibold tracking-tight outline-none">{p.n}</h1>
         {p.servico && (
           <button type="button" onClick={() => onAbrirServico(p.servico!)} className={LINK}>Traz: {nomeServico(p.servico)}</button>
@@ -65,11 +69,19 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       </header>
 
       {/* 29/10: a chave inclui o PVP: depois de gravar e reler, o campo volta ao que ficou na base */}
-      <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} />
+      {cons
+        ? (
+          <Seccao id="fp-preco" titulo="Custo">
+            <p className="mt-3 text-2xl font-semibold tabular-nums">{eur(p.custo)} €/{p.un}</p>
+            <p className={NOTA}>{p.data ? `de ${dataPT(p.data)} · ` : ""}entra no custo dos serviços que o usam; o custo vem do fornecedor.</p>
+          </Seccao>
+        )
+        : <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} />}
 
       {real && eUuid(p.id)
         ? <Fornecedores key={p.id} p={p} real={real} anunciar={anunciar} />
         : <Seccao id="fp-forn" titulo="Fornecedores"><p className={cn(NOTA, "mt-3")}>{p.fornecedor || "Sem fornecedor indicado."}</p></Seccao>}
+      {real && eUuid(p.id) && <StockArmazens key={`stock-${p.id}`} productId={p.id} nome={p.n} real={real} anunciar={anunciar} />}
     </article>
   );
 }

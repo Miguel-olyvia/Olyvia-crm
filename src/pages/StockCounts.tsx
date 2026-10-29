@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   type FilterPillOption,
   type StockCountStatusFilter,
 } from "@/components/inventory/ui";
+import { CATALOGO_CUSTOS_PATH, countInitialLines } from "@/components/inventory/counts/initialCountPreview";
 import { StockCountsTable, STALLED_AFTER_DAYS, stalledDays, type StockCountRow } from "@/components/inventory/counts/StockCountsTable";
 
 // Título e descrição palavra por palavra de TITULOS.cont (menuInv.ts do protótipo).
@@ -170,21 +171,14 @@ const StockCounts = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [createWarehouseId, setCreateWarehouseId] = useState("");
   const [createCategoryId, setCreateCategoryId] = useState("all");
-  // "Contagem inicial": semeia TODOS os produtos do catálogo (filtrados pela
-  // categoria, se houver), incluindo os que ainda não têm linha de stock neste
-  // armazém — é o arranque de um armazém novo, em que o sistema ainda não sabe
-  // nada. Fora deste caso, a contagem só semeia o que já tem stock registado.
+  // "Contagem inicial" (29/10/2026, migration 20270101240000): semeia os produtos MARCADOS neste armazém (linha de stocks não
+  // apagada, mesmo a 0), filtrados pela categoria, com a quantidade do sistema; não cria linhas de stocks. Os armazéns de cada
+  // produto marcam-se em Catálogo e custos (um a um ou em massa). A de rotina fica igual.
   const [createInitial, setCreateInitial] = useState(false);
   const [creating, setCreating] = useState(false);
-  // O armazém escolhido tem linhas em public.stocks? null = ainda não sabemos
-  // (ou a consulta falhou). Um armazém sem stock nenhum faz com que a contagem
-  // de rotina semeie ZERO linhas em silêncio — foi assim que se criaram
-  // documentos vazios — por isso é este facto que decide o interruptor.
+  // O armazém escolhido tem produtos marcados (linhas em public.stocks)? null = ainda não sabemos (ou a consulta falhou).
+  // Sem nenhum, nem a de rotina nem a inicial têm o que semear: mostra-se o caminho para os marcar e não se cria.
   const [warehouseHasNoStock, setWarehouseHasNoStock] = useState<boolean | null>(null);
-  // Assim que o utilizador mexe no interruptor, a escolha dele manda: a
-  // decisão automática deixa de se sobrepor até ele trocar de armazém (ou
-  // reabrir o diálogo). Num ref porque não afeta a renderização.
-  const initialTouchedByUser = useRef(false);
   // Pré-visualização da dimensão da contagem inicial (nº de linhas que vão ser
   // semeadas). Sem isto o utilizador liga o interruptor, cria, e só descobre
   // que semeou o catálogo inteiro quando o diálogo de detalhe abre com
@@ -463,17 +457,10 @@ const StockCounts = () => {
     return () => observerRef.current?.disconnect();
   }, [loading, hasMore, loadingMore, page, loadCounts]);
 
-  // Conta as linhas que rpc_create_inventory_count(p_initial => true) vai
-  // semear. Tem de espelhar EXATAMENTE os filtros da migration
-  // 20261204000000: universo = product_organizations (products.organization_id
-  // não é fiável, facto F2 da migration), produtos não apagados
-  // (is_deleted = false E deleted_at IS NULL) e status <> 'draft'
-  // ('discontinued' entra de propósito), mais a categoria escolhida — com as
-  // suas subcategorias, em category_id OU subcategory_id (migration
-  // 20261204430000). O armazém não entra: no modo inicial o universo é o
-  // catálogo, não o stock.
+  // Conta as linhas que rpc_create_inventory_count(p_initial => true) vai semear: os produtos marcados no armazém escolhido,
+  // com os mesmos filtros da base (initialCountPreview.ts, migration 20270101240000).
   useEffect(() => {
-    if (!createOpen || !createInitial || !activeCompany?.id) {
+    if (!createOpen || !createInitial || !activeCompany?.id || !createWarehouseId) {
       setInitialLineCount(null);
       setInitialCountError(false);
       setInitialCountLoading(false);
@@ -484,22 +471,9 @@ const StockCounts = () => {
     setInitialCountError(false);
     (async () => {
       try {
-        let query = supabase
-          .from("product_organizations")
-          .select("product_id, products!inner(id)", { count: "exact", head: true })
-          .eq("organization_id", activeCompany.id)
-          .eq("products.is_deleted", false)
-          .is("products.deleted_at", null)
-          .neq("products.status", "draft");
-        const categoryIds = resolveFilterIds(createCategoryId, "all");
-        if (categoryIds && categoryIds.length > 0) {
-          const ids = categoryIds.join(",");
-          query = (query as any).or(`category_id.in.(${ids}),subcategory_id.in.(${ids})`, { referencedTable: "products" });
-        }
-        const { count, error } = await query;
-        if (error) throw error;
+        const count = await countInitialLines(supabase, activeCompany.id, createWarehouseId, resolveFilterIds(createCategoryId, "all"));
         if (cancelled) return;
-        setInitialLineCount(count ?? 0);
+        setInitialLineCount(count);
       } catch (error) {
         if (cancelled) return;
         // Só informativo — não bloqueia a criação nem merece um toast.
@@ -511,13 +485,10 @@ const StockCounts = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [createOpen, createInitial, createCategoryId, activeCompany?.id, resolveFilterIds]);
+  }, [createOpen, createInitial, createCategoryId, createWarehouseId, activeCompany?.id, resolveFilterIds]);
 
-  // Decide o interruptor "Contagem inicial" a partir do armazém escolhido: sem
-  // linhas em stocks, a contagem de rotina não teria nada para semear, logo o
-  // modo inicial (catálogo) é o único que produz uma folha utilizável. Nunca
-  // se sobrepõe a uma escolha manual (initialTouchedByUser) e, se a consulta
-  // falhar, deixa tudo como está — isto informa, não bloqueia.
+  // O armazém escolhido tem produtos marcados? 29/10: deixou de ligar sozinho a contagem inicial (que agora também só usa os
+  // marcados e daria erro); sem marcados, o diálogo manda marcar o armazém em Catálogo e custos. Se a consulta falhar, não bloqueia.
   useEffect(() => {
     if (!createOpen || !createWarehouseId) {
       setWarehouseHasNoStock(null);
@@ -538,7 +509,6 @@ const StockCounts = () => {
         if (cancelled) return;
         const empty = (count ?? 0) === 0;
         setWarehouseHasNoStock(empty);
-        if (!initialTouchedByUser.current) setCreateInitial(empty);
       } catch (error) {
         if (cancelled) return;
         console.error("Error checking warehouse stock coverage:", error);
@@ -553,7 +523,6 @@ const StockCounts = () => {
     setCreateCategoryId("all");
     setCreateInitial(false);
     setWarehouseHasNoStock(null);
-    initialTouchedByUser.current = false;
   };
 
   const handleCreate = async () => {
@@ -767,11 +736,7 @@ const StockCounts = () => {
             <div>
               <Select
                 value={createWarehouseId}
-                onValueChange={(value) => {
-                  // Armazém novo, decisão nova: a automática volta a mandar.
-                  initialTouchedByUser.current = false;
-                  setCreateWarehouseId(value);
-                }}
+                onValueChange={setCreateWarehouseId}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={t('stockCounts.create.selectWarehouse')} />
@@ -804,30 +769,20 @@ const StockCounts = () => {
                 <Switch
                   id="stock-count-initial"
                   checked={createInitial}
-                  onCheckedChange={(checked) => {
-                    initialTouchedByUser.current = true;
-                    setCreateInitial(checked);
-                  }}
+                  onCheckedChange={setCreateInitial}
                   disabled={creating}
                 />
               </div>
-              {/* Uma só linha explicativa: quando o armazém não tem stock, a
-                  razão concreta substitui a ajuda genérica (que passaria a ser
-                  ruído) — evita empilhar três parágrafos dentro da caixa. */}
-              <p
-                className={
-                  warehouseHasNoStock === true && !createInitial
-                    ? "text-xs font-medium text-warning"
-                    : "text-xs text-muted-foreground"
-                }
-              >
-                {warehouseHasNoStock === true
-                  ? createInitial
-                    ? t('stockCounts.create.initialAutoReason')
-                    : t('stockCounts.create.initialEmptyWarehouseWarning')
-                  : t('stockCounts.create.initialHelp')}
-              </p>
-              {createInitial && (initialCountLoading || initialCountError || initialLineCount !== null) && (
+              {/* Uma só linha explicativa: sem produtos marcados no armazém, o caminho para os marcar substitui a ajuda genérica. */}
+              {warehouseHasNoStock === true ? (
+                <p className="text-xs font-medium text-warning" role="status">
+                  {t('stockCounts.create.initialEmptyWarehouseWarning')}{" "}
+                  <Link to={CATALOGO_CUSTOS_PATH} className="underline underline-offset-2">{t('stockCounts.create.openCatalogue')}</Link>
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">{t('stockCounts.create.initialHelp')}</p>
+              )}
+              {createInitial && warehouseHasNoStock !== true && (initialCountLoading || initialCountError || initialLineCount !== null) && (
                 <p
                   className={
                     !initialCountLoading && initialLineCount !== null && initialLineCount > LARGE_INITIAL_COUNT
@@ -850,7 +805,7 @@ const StockCounts = () => {
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
               {t('stockCounts.create.cancel')}
             </Button>
-            <Button onClick={handleCreate} disabled={creating || !createWarehouseId}>
+            <Button onClick={handleCreate} disabled={creating || !createWarehouseId || warehouseHasNoStock === true}>
               {creating ? t('stockCounts.create.submitting') : t('stockCounts.create.submit')}
             </Button>
           </DialogFooter>
