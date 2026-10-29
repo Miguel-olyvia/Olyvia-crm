@@ -19,6 +19,11 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { useCompany } from "@/contexts/CompanyContext";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import PlanoFaturacaoCard from "@/components/settings/PlanoFaturacaoCard";
+import {
+  normalizeStockDeductionTrigger,
+  stockDeductionTriggerOptions,
+  type StockDeductionTrigger,
+} from "@/components/inventory/InventorySettingsCard";
 
 interface CustomField {
   id: string;
@@ -69,6 +74,13 @@ interface ChannelType {
   icon: string | null;
   is_active: boolean;
 }
+
+// 29/10: rótulos dos modos de baixa de stock (o mesmo que InventorySettingsCard, traduzido)
+const DEDUCTION_TRIGGER_I18N: Record<StockDeductionTrigger, string> = {
+  contract_signed: 'settingsPage.inventory.deductionTriggerAutomatic',
+  manual: 'settingsPage.inventory.deductionTriggerManual',
+  proposal_accepted: 'settingsPage.inventory.deductionTriggerProposalAcceptedLegacy',
+};
 
 const Settings = () => {
   const { t } = useTranslation();
@@ -669,7 +681,8 @@ const Settings = () => {
       if (warehousesRes.error) throw warehousesRes.error;
 
       setInventoryWarehouses(warehousesRes.data || []);
-      setStockDeductionTrigger(settingsRes.data?.stock_deduction_trigger || "contract_signed");
+      // 29/10: o valor tal como está ('manual' incluído; sem linha = contract_signed)
+      setStockDeductionTrigger(normalizeStockDeductionTrigger(settingsRes.data?.stock_deduction_trigger));
       setDefaultWarehouseId(settingsRes.data?.default_warehouse_id || "");
     } catch (error: any) {
       const friendlyMessage = await getFriendlyErrorMessage(error);
@@ -1517,12 +1530,12 @@ const Settings = () => {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="contract_signed">
-                            {t('settingsPage.inventory.deductionTriggerContractSigned')}
-                          </SelectItem>
-                          <SelectItem value="proposal_accepted">
-                            {t('settingsPage.inventory.deductionTriggerProposalAccepted')}
-                          </SelectItem>
+                          {/* 29/10: automático (na emissão da EC) ou manual; a antiga «Proposta aceite» só aparece, desativada, se for a atual */}
+                          {stockDeductionTriggerOptions(normalizeStockDeductionTrigger(stockDeductionTrigger)).map((option) => (
+                            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+                              {t(DEDUCTION_TRIGGER_I18N[option.value])}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1549,6 +1562,10 @@ const Settings = () => {
                       </Select>
                     </div>
                   </div>
+
+                  <p className="text-sm text-muted-foreground">
+                    {t('settingsPage.inventory.deductionTriggerHelp')}
+                  </p>
 
                   <p className="text-sm text-muted-foreground">
                     {t('settingsPage.inventory.defaultWarehouseHelp')}

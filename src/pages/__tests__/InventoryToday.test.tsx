@@ -88,7 +88,9 @@ describe("Hoje do Inventário (igual ao 2.0)", () => {
     expect(within(fluxo).getByText("Sim")).toBeInTheDocument();
     expect(within(fluxo).getByText("Não")).toBeInTheDocument();
     expect(within(fluxo).getByText(/Falta → encomenda ao fornecedor preferencial/)).toBeInTheDocument();
-    expect(within(fluxo).getByText(/Baixa no momento definido:/)).toBeInTheDocument();
+    expect(within(fluxo).getByText(/Baixa de stock por venda:/)).toBeInTheDocument();
+    // 29/10: o mesmo rótulo das definições
+    expect(within(fluxo).getByText("Automático — quando a encomenda de cliente é emitida")).toBeInTheDocument();
     expect(within(fluxo).getByRole("button", { name: "3 por aprovar" })).toBeInTheDocument();
     expect(within(fluxo).getByRole("button", { name: "4 guias abertas" })).toBeInTheDocument();
     // sem products.view_cost a RPC manda value = null: "—", como o 2.0 sem permissão de preços

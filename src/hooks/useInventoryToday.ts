@@ -63,7 +63,7 @@ export interface InventoryTodayCounts {
 }
 
 export interface InventoryTodaySettings {
-  stock_deduction_trigger: "contract_signed" | "proposal_accepted" | string | null;
+  stock_deduction_trigger: "contract_signed" | "manual" | "proposal_accepted" | string | null;
 }
 
 export interface InventoryTodayPayload {

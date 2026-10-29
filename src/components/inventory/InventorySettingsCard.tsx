@@ -31,7 +31,32 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export type StockDeductionTrigger = "contract_signed" | "proposal_accepted";
+// 29/10: 'contract_signed' = automático (a baixa e o pedido ao fornecedor acontecem quando a encomenda de cliente é emitida —
+// nos Negócios depois da fatura e do pagamento validados); 'manual' = só pela Saída para clientes. 'proposal_accepted' é o modo
+// antigo: já não se escolhe, mas se uma organização o tiver continua a aparecer (só leitura) para nada mudar sem ninguém ver.
+export type StockDeductionTrigger = "contract_signed" | "manual" | "proposal_accepted";
+
+/** Modos que se podem escolher (aqui e em Definições). */
+export const SELECTABLE_STOCK_DEDUCTION_TRIGGERS = ["contract_signed", "manual"] as const;
+
+/**
+ * Valor da BD → modo do ecrã. Sem linha (null/undefined) = 'contract_signed', o padrão da BD. Os três valores do CHECK passam tal
+ * como estão (antes 'manual' aparecia como "Contrato assinado"); um valor desconhecido cai no padrão.
+ */
+export function normalizeStockDeductionTrigger(raw: string | null | undefined): StockDeductionTrigger {
+  return raw === "manual" || raw === "proposal_accepted" ? raw : "contract_signed";
+}
+
+/** Opções a mostrar: as escolhíveis e, só se for o valor atual, a antiga «Proposta aceite» (desativada). */
+export function stockDeductionTriggerOptions(
+  current: StockDeductionTrigger | null | undefined,
+): { value: StockDeductionTrigger; disabled: boolean }[] {
+  const options: { value: StockDeductionTrigger; disabled: boolean }[] = SELECTABLE_STOCK_DEDUCTION_TRIGGERS.map(
+    (value) => ({ value, disabled: false }),
+  );
+  if (current === "proposal_accepted") options.push({ value: "proposal_accepted", disabled: true });
+  return options;
+}
 
 export interface InventorySettingsValue {
   stock_deduction_trigger: StockDeductionTrigger;
@@ -57,8 +82,7 @@ export function useInventorySettings(organizationId: string | null | undefined) 
       if (error) throw error;
       // Sem linha ainda = valores por omissão (como em Settings.tsx).
       return {
-        stock_deduction_trigger:
-          data?.stock_deduction_trigger === "proposal_accepted" ? "proposal_accepted" : "contract_signed",
+        stock_deduction_trigger: normalizeStockDeductionTrigger(data?.stock_deduction_trigger),
         default_warehouse_id: data?.default_warehouse_id || null,
       };
     },
@@ -67,9 +91,16 @@ export function useInventorySettings(organizationId: string | null | undefined) 
 
 const NONE = "none";
 
-const TRIGGER_LABEL: Record<StockDeductionTrigger, string> = {
-  contract_signed: "Contrato assinado",
-  proposal_accepted: "Proposta aceite",
+export const TRIGGER_LABEL: Record<StockDeductionTrigger, string> = {
+  contract_signed: "Automático — quando a encomenda de cliente é emitida",
+  manual: "Manual — só pela Saída para clientes",
+  proposal_accepted: "Proposta aceite (antigo)",
+};
+
+const TRIGGER_SAVED: Record<StockDeductionTrigger, string> = {
+  contract_signed: "Baixa automática na emissão da encomenda de cliente.",
+  manual: "Baixa manual, só pela Saída para clientes.",
+  proposal_accepted: "Baixa na proposta aceite.",
 };
 
 function SettingsBody({ organizationId }: { organizationId: string }) {
@@ -169,31 +200,36 @@ function SettingsBody({ organizationId }: { organizationId: string }) {
             </small>
           </div>
           <fieldset className="m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0" disabled={disabled}>
-            <legend className="mb-1.5 text-sm font-medium leading-none">Momento da baixa de stock por venda</legend>
+            <legend className="mb-1.5 text-sm font-medium leading-none">Baixa de stock por venda</legend>
             <RadioGroup
               value={current?.stock_deduction_trigger ?? "contract_signed"}
               disabled={disabled}
               onValueChange={(value) => {
                 if (!current || value === current.stock_deduction_trigger) return;
-                setPendingTrigger(value === "proposal_accepted" ? "proposal_accepted" : "contract_signed");
+                // 29/10: só os modos escolhíveis (a antiga «Proposta aceite» está desativada)
+                const next = normalizeStockDeductionTrigger(value);
+                if (next === "proposal_accepted") return;
+                setPendingTrigger(next);
               }}
               className="gap-2"
             >
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id={`${selectId}-contract`} value="contract_signed" />
-                <Label htmlFor={`${selectId}-contract`} className="font-normal">
-                  Contrato assinado
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem id={`${selectId}-proposal`} value="proposal_accepted" />
-                <Label htmlFor={`${selectId}-proposal`} className="font-normal">
-                  Proposta aceite
-                </Label>
-              </div>
+              {stockDeductionTriggerOptions(current?.stock_deduction_trigger).map((option) => (
+                <div key={option.value} className="flex items-center gap-2">
+                  <RadioGroupItem
+                    id={`${selectId}-${option.value}`}
+                    value={option.value}
+                    disabled={disabled || option.disabled}
+                  />
+                  <Label htmlFor={`${selectId}-${option.value}`} className="font-normal">
+                    {TRIGGER_LABEL[option.value]}
+                  </Label>
+                </div>
+              ))}
             </RadioGroup>
             <small className="text-xs text-muted-foreground">
-              Nunca os dois. Só se aplica aos produtos com «Gere stock automaticamente».
+              Automático: quando a encomenda de cliente é emitida (nos Negócios, depois da fatura e do pagamento validados), o que
+              há em stock sai pela reserva por ordem de chegada e o que falta é pedido ao fornecedor. Manual: nada sai nem é
+              pedido sozinho. Só se aplica aos produtos com «Gere stock automaticamente».
             </small>
           </fieldset>
         </div>
@@ -202,10 +238,10 @@ function SettingsBody({ organizationId }: { organizationId: string }) {
       <AlertDialog open={pendingTrigger !== null} onOpenChange={(open) => !open && setPendingTrigger(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Mudar o momento da baixa de stock?</AlertDialogTitle>
+            <AlertDialogTitle>Mudar a baixa de stock por venda?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingTrigger
-                ? `A baixa de stock por venda passa a acontecer em «${TRIGGER_LABEL[pendingTrigger]}». `
+                ? `A baixa de stock por venda passa a «${TRIGGER_LABEL[pendingTrigger]}». `
                 : null}
               Afeta toda a organização a partir de agora, em todos os produtos com «Gere stock automaticamente».
             </AlertDialogDescription>
@@ -217,10 +253,7 @@ function SettingsBody({ organizationId }: { organizationId: string }) {
                 const trigger = pendingTrigger;
                 setPendingTrigger(null);
                 if (!current || !trigger || trigger === current.stock_deduction_trigger) return;
-                save(
-                  { ...current, stock_deduction_trigger: trigger },
-                  trigger === "contract_signed" ? "Baixa no contrato assinado." : "Baixa na proposta aceite.",
-                );
+                save({ ...current, stock_deduction_trigger: trigger }, TRIGGER_SAVED[trigger]);
               }}
             >
               Mudar

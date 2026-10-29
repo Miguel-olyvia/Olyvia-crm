@@ -45,6 +45,7 @@ import { useReceivablePos } from "@/components/receiving/useReceivablePos";
 import { todayIsoLocal } from "@/components/purchase-orders/poListUtils";
 import { useMovementDocumentLinks, type MovementDocumentLinks } from "@/hooks/useMovementDocumentLinks";
 import { cn } from "@/lib/utils";
+import { TRIGGER_LABEL, normalizeStockDeductionTrigger } from "@/components/inventory/InventorySettingsCard";
 
 // "Hoje" do Inventário, como o Hoje do 2.0 (HojeInv.tsx): o fluxo em cinco
 // passos (venda assinada → encomenda cliente → Sim/Não: stock ou PO → receção
@@ -232,8 +233,8 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
             {isNum(origin?.manual) ? <FlowCounterButton label="Encomendas manuais" value={origin.manual} onClick={go(clientOrdersLink({ origin: "manual" }))} /> : null}
             {trigger ? (
               <p className="text-xs text-muted-foreground">
-                Baixa no momento definido:{" "}
-                <b>{trigger === "proposal_accepted" ? "proposta aceite" : "contrato assinado"}</b> (nunca os dois).
+                {/* 29/10: o mesmo rótulo das definições ('manual' aparecia como "contrato assinado") */}
+                Baixa de stock por venda: <b>{TRIGGER_LABEL[normalizeStockDeductionTrigger(trigger)]}</b>.
               </p>
             ) : null}
           </Stage>
