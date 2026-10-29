@@ -24,7 +24,6 @@ import {
   aplicarEspelho, calcularEspelho, escreverDoFormulario, marcasDoEspelho, vagaDoMotor, visitasSoDaEmylia,
 } from "./espelhoVisitaEmylia";
 import { MarcarVisitaNegocio, type VisitaGravada } from "./MarcarVisitaNegocio";
-import { AVISO_VISITA_SEM_NUMERO } from "@/hooks/pessoas/numerarVisita";
 
 /** O que o passo precisa de saber do negócio. `entityId` pode faltar (a ficha só sabe o negócio): lê-se da base. */
 export interface ContextoDasVisitas {
@@ -90,9 +89,6 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
   // sem useMemo: o negócio da Emylia é mutado no sítio e as marcas do espelho mudam sem mudar de identidade
   const visitasCrm = semSombras(lidas.visitas, marcasDoEspelho(d));
   const ativas = visitasCrm.filter((v) => v.estado !== "cancelada");
-  // Visitas do CRM sem visita_numero e sem espelho: a numeração falhou (ou a base ainda não a tem) e a função da base pode duplicá-las. Diz-se sempre, não só ao marcar.
-  const ligadas = new Set(marcasDoEspelho(d).values());
-  const semLigacao = ativas.filter((v) => v.numeroEmylia === null && !ligadas.has(v.id));
   const lido = !lidas.isLoading && !lidas.isError && !agenda.isLoading && c.negocioId !== null;
 
   // O espelho acompanha o CRM (se discordar, o CRM ganha): só escreve quando há diferença e a pessoa pode editar; nunca em loop com o mesmo plano.
@@ -107,34 +103,32 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     ctx.run(() => aplicarEspelho(d, plano));
   });
 
-  const refletir = (lista: VisitaDoNegocio[], ligar: { visitaId: string; numero?: number } | null, antes?: () => void, presentes?: string): void => {
+  const refletir = (lista: VisitaDoNegocio[], ligar: { visitaId: string; numero?: number } | null, antes?: () => number | undefined, presentes?: string): void => {
     ctx.run(() => {
-      antes?.();
-      const plano = calcularEspelho(d, lista, nomes, ligar);
+      const numero = antes?.();
+      const plano = calcularEspelho(d, lista, nomes, ligar ? { ...ligar, ...(numero !== undefined ? { numero } : {}) } : null);
       if (plano) aplicarEspelho(d, plano);
-      const n = ligar ? (ligar.numero ?? [...marcasDoEspelho(d)].find(([, id]) => id === ligar.visitaId)?.[0]) : undefined;
+      const n = ligar ? [...marcasDoEspelho(d)].find(([, id]) => id === ligar.visitaId)?.[0] : undefined;
       if (n !== undefined && presentes !== undefined) escreverDoFormulario(d, n, presentes, "");
     });
     if (org) void cliente.invalidateQueries({ queryKey: visitasDoNegocioQueryKey(org, c.negocioId) });
   };
   // a primeira visita leva o negócio da fase Contacto para a Visita: o motor aplica os portões dele (as respostas do Contacto) e a visita fica no CRM de qualquer forma
-  // Só se a visita tem o seu visita_numero (o espelho é o dela): sem número o motor ficaria com uma visita inventada.
-  const passarAVisita = (g: VisitaGravada): void => {
-    if (modo !== "primeira" || d.fase !== 1 || g.remarcada || g.numero === null) return;
+  const passarAVisita = (g: VisitaGravada): number | undefined => {
+    if (modo !== "primeira" || d.fase !== 1 || g.remarcada) return undefined;
+    const antes = numerosDe(d).length;
     ctx.A.marcarVisita(d.id, vagaDoMotor(g.visita.dia, g.visita.hora));
+    return antes === 0 && d.fase >= 2 ? numerosDe(d).find((n) => !d.f[`v${n}_crm`]) : undefined;
   };
   const aposGravar = (g: VisitaGravada): void => {
     setAMarcar(false); setARemarcar(null); setAviso(null);
     const lista = [...visitasCrm.filter((v) => v.id !== g.visita.id), ...(g.visita.id ? [g.visita] : [])];
-    const numerada = g.visita.id !== "" && g.numero !== null;
-    refletir(lista, numerada ? { visitaId: g.visita.id, ...(g.numero !== null ? { numero: g.numero } : {}) } : null, () => passarAVisita(g), numerada ? g.presentes : undefined);
-    if (!g.remarcada && g.numero === null) { setAviso(AVISO_VISITA_SEM_NUMERO); return; }
+    refletir(lista, g.visita.id ? { visitaId: g.visita.id } : null, () => passarAVisita(g), g.presentes);
     if (modo === "primeira" && d.fase < 2) setAviso("A visita ficou marcada no CRM, mas o negócio ainda não passou à fase da visita: faltam respostas do Contacto (veja o aviso). Complete-as e use «Passar à visita».");
   };
   const passarComAMarcada = (v: VisitaDoNegocio): void => {
     setAviso(null);
-    if (v.numeroEmylia === null && !ligadas.has(v.id)) { setAviso(AVISO_VISITA_SEM_NUMERO); return; }
-    refletir(visitasCrm, { visitaId: v.id }, () => passarAVisita({ visitaId: v.id, numero: v.numeroEmylia, visita: v, presentes: "", remarcada: false }));
+    refletir(visitasCrm, { visitaId: v.id }, () => passarAVisita({ visitaId: v.id, visita: v, presentes: "", remarcada: false }));
     if (d.fase < 2) setAviso("O negócio ainda não passou à fase da visita: faltam respostas do Contacto (veja o aviso).");
   };
   const cancelar = (v: VisitaDoNegocio): void => {
@@ -176,7 +170,6 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
           <Button type="button" className={cn("mt-2 min-h-11", FOCO)} onClick={() => passarComAMarcada(ativas[0] as VisitaDoNegocio)}>Passar à visita</Button>
         </EstadoHonesto>
       )}
-      {semLigacao.length > 0 && aviso !== AVISO_VISITA_SEM_NUMERO && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{AVISO_VISITA_SEM_NUMERO}</p>}
       {aviso && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{aviso}</p>}
       <ErroAcao chave={acao.erro} chaveExtra={acao.erroExtra} />
       {semVisitas && !aMarcar && <EstadoHonesto titulo="Ainda não há visitas marcadas neste negócio." />}

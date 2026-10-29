@@ -14,7 +14,6 @@ import { Label } from "@/components/ui/label";
 import { minutosDaDuracao } from "@/hooks/pessoas/visitaDb";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { TEXTO_DO_TIPO, TIPOS_DE_VISITA } from "@/hooks/pessoas/tipoVisitaChave";
-import { numerarVisita } from "@/hooks/pessoas/numerarVisita";
 import { useAcoesVisita } from "@/hooks/pessoas/useAcoesVisita";
 import { useHorarioOrganizacao } from "@/hooks/pessoas/useHorarioOrganizacao";
 import { useHorasLivresVisita } from "@/hooks/pessoas/useHorasLivresVisita";
@@ -39,8 +38,6 @@ const CHIP = "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4
 export interface VisitaGravada {
   /** O id da visita do CRM; `null` se a base não o devolveu (o ecrã volta a ler). */
   visitaId: string | null;
-  /** O visita_numero real da agenda (de neg_numerar_visita ao criar; da própria linha ao remarcar); `null` se a numeração falhou: o espelho não se escreve. */
-  numero: number | null;
   visita: VisitaDoNegocio;
   /** A chave de «quem vai estar» (cliente, casal, familia, outra). */
   presentes: string;
@@ -134,23 +131,15 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
       agenda: valor, nome, tipo, tituloTipo: TEXTO_DO_TIPO[tipo], destino, moradaLead, nota, quemVaiEstar: valor.quemVaiEstar ?? "", ...(visita ? {} : { negocioId }),
     });
     const iv = intervaloDaVisita(valor);
-    const montar = (visitaId: string | null, numero: number | null): VisitaGravada => ({
-      visitaId, numero, remarcada: visita !== undefined, presentes: valor.quemVaiEstar ?? "",
+    const montar = (visitaId: string | null): VisitaGravada => ({
+      visitaId, remarcada: visita !== undefined, presentes: valor.quemVaiEstar ?? "",
       visita: {
-        id: visitaId ?? visita?.id ?? "", boardId: valor.boardId, inicio: iv?.inicio ?? "", fim: iv?.fim ?? "", minutos, estado: "marcada", tipo, numeroEmylia: visita ? visita.numeroEmylia : numero,
+        id: visitaId ?? visita?.id ?? "", boardId: valor.boardId, inicio: iv?.inicio ?? "", fim: iv?.fim ?? "", minutos, estado: "marcada", tipo, numeroEmylia: visita?.numeroEmylia ?? null,
         titulo: entrada.titulo, notas: entrada.nota || null, local: textoMoradaVisita(entrada.morada) || null, recursos: [...valor.recursos], dia: valor.data, hora: valor.hora,
       },
     });
-    if (visita) envio.enviar(() => acoes.alterar(visita.id, entrada, visita.recursos), () => aoGuardada(montar(visita.id, visita.numeroEmylia)));
-    else {
-      // A visita nasce numerada: logo a seguir a criá-la na agenda pede-se o visita_numero real, que é o n do espelho. Se a numeração falhar a visita fica criada
-      // (não se desfaz), o espelho não se escreve e o passo avisa (a falha não se engole: `numero` fica null e o aviso aparece).
-      envio.enviar(async () => {
-        const r = await acoes.marcar(entrada);
-        if (r.visitaId === null) return { r, numero: null };
-        try { return { r, numero: await numerarVisita(negocioId, r.visitaId) }; } catch { return { r, numero: null }; }
-      }, ({ r, numero }) => aoGuardada(montar(r.visitaId, numero)));
-    }
+    if (visita) envio.enviar(() => acoes.alterar(visita.id, entrada, visita.recursos), () => aoGuardada(montar(visita.id)));
+    else envio.enviar(() => acoes.marcar(entrada), (r) => aoGuardada(montar(r.visitaId)));
   };
 
   const rotuloTipo = `${id}-tipo`;
