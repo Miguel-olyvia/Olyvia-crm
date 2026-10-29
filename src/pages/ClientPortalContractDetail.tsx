@@ -329,7 +329,7 @@ const ClientPortalContractDetail = () => {
       <ClientPortalLayout>
         <div className="text-center py-12">
           <p className="text-muted-foreground">Contrato não encontrado.</p>
-          <Button variant="ghost" onClick={() => navigate("/client-portal/contracts")} className="mt-4">
+          <Button variant="ghost" onClick={() => navigate("/client-portal/negocios")} className="mt-4">
             <ArrowLeft className="h-4 w-4 mr-2" /> Voltar
           </Button>
         </div>
@@ -340,7 +340,7 @@ const ClientPortalContractDetail = () => {
   return (
     <ClientPortalLayout>
       <div className="space-y-5 max-w-4xl mx-auto py-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/contracts")} className="gap-1">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/negocios")} className="gap-1">
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
 

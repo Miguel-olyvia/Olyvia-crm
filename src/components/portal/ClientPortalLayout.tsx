@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LogOut, FileText, ScrollText, FolderOpen, Home, ArrowLeftRight, Briefcase } from "lucide-react";
+import { LogOut, FolderOpen, Home, ArrowLeftRight, Briefcase } from "lucide-react";
 import { useClientSupplierSwitch } from "@/hooks/useClientRole";
 import { cn } from "@/lib/utils";
 import { FirstLoginModal } from "@/components/portal/FirstLoginModal";
@@ -17,9 +17,8 @@ interface ClientPortalLayoutProps {
 
 const NAV_ITEMS = [
   { label: "Início", icon: Home, path: "/client-portal", matchPaths: ["/client-portal"], badgeKey: null },
-  { label: "Negócios", icon: Briefcase, path: "/client-portal/negocios", matchPaths: ["/client-portal/negocios"], badgeKey: null },
-  { label: "Propostas", icon: FileText, path: "/client-portal/proposals", matchPaths: ["/client-portal/proposals"], badgeKey: "proposals" as const },
-  { label: "Contratos", icon: ScrollText, path: "/client-portal/contracts", matchPaths: ["/client-portal/contracts"], badgeKey: "contracts" as const },
+  // A proposta e o contrato abrem-se por aqui: ficam dentro de «Negócios», sem separadores próprios.
+  { label: "Negócios", icon: Briefcase, path: "/client-portal/negocios", matchPaths: ["/client-portal/negocios"], extraPrefixes: ["/client-portal/proposals", "/client-portal/contracts"], badgeKey: "negocios" as const },
   { label: "Documentos", icon: FolderOpen, path: "/client-portal/documents", matchPaths: ["/client-portal/documents"], badgeKey: null },
 ];
 
@@ -284,8 +283,10 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       <nav className="border-b bg-white px-4 md:px-6">
         <div className="flex gap-0.5 overflow-x-auto">
           {NAV_ITEMS.map((item) => {
-            const isActive = item.matchPaths?.some(p => location.pathname === p) || (item.path !== "/client-portal" && location.pathname.startsWith(item.path));
-            const badgeCount = item.badgeKey ? badgeCounts[item.badgeKey] : 0;
+            const isActive = item.matchPaths?.some(p => location.pathname === p) || (item.path !== "/client-portal" && location.pathname.startsWith(item.path))
+              || Boolean("extraPrefixes" in item && item.extraPrefixes?.some((p) => location.pathname.startsWith(p)));
+            // Propostas por decidir e contratos por assinar contam todos para «Negócios».
+            const badgeCount = item.badgeKey === "negocios" ? badgeCounts.proposals + badgeCounts.contracts : 0;
 
             return (
               <button

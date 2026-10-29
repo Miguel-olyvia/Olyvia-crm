@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Briefcase } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,7 +22,8 @@ interface NegocioDoCliente {
   passo: PassoPortal;
 }
 
-const COLUNAS = "id, title, proposal_number, value, status, negocio_id, created_at";
+const ATUALIZAR_CADA_MS = 20_000;
+const COLUNAS ="id, title, proposal_number, value, status, negocio_id, created_at";
 
 /** Os negócios do cliente na empresa ativa: uma linha por negócio, com a proposta mais recente e o contrato dela. Só lê o que a RLS já deixa ao cliente. */
 async function lerNegocios(org: PortalOrg): Promise<NegocioDoCliente[]> {
@@ -61,22 +62,19 @@ async function lerNegocios(org: PortalOrg): Promise<NegocioDoCliente[]> {
 const ClientPortalNegocios = () => {
   const navigate = useNavigate();
   const { activeOrg, isLoading: orgsLoading, isError: orgsError, hasMultiple } = usePortalCompany();
-  const [negocios, setNegocios] = useState<NegocioDoCliente[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [falhou, setFalhou] = useState(false);
-
-  useEffect(() => {
-    if (orgsLoading) return;
-    if (!activeOrg) { setNegocios([]); setLoading(false); return; }
-    let cancelado = false;
-    setLoading(true);
-    setFalhou(false);
-    lerNegocios(activeOrg)
-      .then((l) => { if (!cancelado) setNegocios(l); })
-      .catch(() => { if (!cancelado) setFalhou(true); })
-      .finally(() => { if (!cancelado) setLoading(false); });
-    return () => { cancelado = true; };
-  }, [activeOrg, orgsLoading]);
+  // Acompanha as mudanças: lê ao abrir, de 20 em 20 segundos e ao voltar ao separador (o contrato nasce quando o cliente aceita; a proposta nova chega do CRM).
+  const consulta = useQuery({
+    queryKey: ["portal-negocios", activeOrg?.organizationId ?? null, activeOrg?.entityId ?? null, activeOrg?.proposalId ?? null],
+    queryFn: () => lerNegocios(activeOrg as PortalOrg),
+    enabled: !orgsLoading && Boolean(activeOrg),
+    refetchInterval: ATUALIZAR_CADA_MS,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    staleTime: 0,
+  });
+  const negocios = consulta.data ?? [];
+  const loading = orgsLoading || (Boolean(activeOrg) && consulta.isLoading);
+  const falhou = consulta.isError && !consulta.data;
 
   // Proposta por decidir: abre a proposta; depois de aceite e com contrato, abre o contrato.
   const abrir = (n: NegocioDoCliente) =>

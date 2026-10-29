@@ -84,6 +84,13 @@ const ClientPortalProposalDetail = () => {
       setLoading(false);
   }, [id]);
 
+  // Ao voltar a este separador, a proposta (e o passo do negócio por cima dela) acompanha o que mudou entretanto.
+  useEffect(() => {
+    const aoVoltar = () => { if (document.visibilityState === "visible") void reloadPortalData(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    return () => document.removeEventListener("visibilitychange", aoVoltar);
+  }, [reloadPortalData]);
+
   const loadAttachments = useCallback(async () => {
     if (!id) return;
     const { data } = await (supabase as any)
@@ -401,7 +408,7 @@ const ClientPortalProposalDetail = () => {
       <ClientPortalLayout>
         <div className="py-12 text-center">
           <p className="text-muted-foreground">Proposta não encontrada.</p>
-          <Button variant="ghost" onClick={() => navigate("/client-portal/proposals")} className="mt-4">
+          <Button variant="ghost" onClick={() => navigate("/client-portal/negocios")} className="mt-4">
             <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
           </Button>
         </div>
@@ -416,7 +423,7 @@ const ClientPortalProposalDetail = () => {
   return (
     <ClientPortalLayout>
       <div className="mx-auto w-full max-w-4xl space-y-5 py-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/proposals")} className="w-fit gap-1">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/negocios")} className="w-fit gap-1">
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
 

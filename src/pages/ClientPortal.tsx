@@ -254,7 +254,7 @@ const ClientPortal = () => {
               borderRadius: 12,
               borderLeft: portal.pendingProposals > 0 ? "3px solid #7C3AED" : undefined,
             }}
-            onClick={() => navigate("/client-portal/proposals")}
+            onClick={() => navigate("/client-portal/negocios")}
           >
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-3">
@@ -283,7 +283,7 @@ const ClientPortal = () => {
               borderRadius: 12,
               borderLeft: portal.activeContracts > 0 ? "3px solid #3B82F6" : undefined,
             }}
-            onClick={() => navigate("/client-portal/contracts")}
+            onClick={() => navigate("/client-portal/negocios")}
           >
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-3">
@@ -410,7 +410,7 @@ const ClientPortal = () => {
                     size="sm"
                     className="text-xs gap-1"
                     style={{ color: "#7C3AED" }}
-                    onClick={() => navigate("/client-portal/proposals")}
+                    onClick={() => navigate("/client-portal/negocios")}
                   >
                     Ver todas <ArrowRight className="h-3 w-3" />
                   </Button>

@@ -178,10 +178,8 @@ const ConviteAdmissao = lazy(() => import("./pages/ConviteAdmissao"));
 const BookingConfirm = lazy(() => import("./pages/BookingConfirm"));
 const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/PrototipoNegocios"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
-const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
 const ClientPortalNegocios = lazy(() => import("./pages/ClientPortalNegocios"));
-const ClientPortalContracts = lazy(() => import("./pages/ClientPortalContracts"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
 // Portal do Fornecedor (F3.1): contexto sp_whoami + layout montados uma vez.
@@ -266,9 +264,9 @@ const App = () => (
                     <Route element={<PortalCompanyRoute />}>
                       <Route path="/client-portal" element={<ClientPortal />} />
                       <Route path="/client-portal/negocios" element={<ClientPortalNegocios />} />
-                      <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
+                      <Route path="/client-portal/proposals" element={<Navigate to="/client-portal/negocios" replace />} />
                       <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
-                      <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
+                      <Route path="/client-portal/contracts" element={<Navigate to="/client-portal/negocios" replace />} />
                       <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
                       <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
                     </Route>
