@@ -28,6 +28,8 @@ import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { enviarAoPortal } from "@/emylia/real/portalReal";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
+import { lerFaturaErp } from "@/emylia/erpEticadata";
+import { podeNeg } from "@/emylia/permissoes";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
@@ -177,6 +179,36 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     })().catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
   }, [org, S, avisar, carregarEncomendas]);
+
+  // 29/10 (visto no teste no browser): como na V1 (PrototipoNegocios), o "pulse" acende a secção uma vez e desliga-se. Sem isto, um
+  // "Fechar levantamento" com campos em falta deixava o pulse "falta" ligado e a página voltava sempre ao primeiro passo com falta
+  // (não se conseguia abrir outro passo); e os negócios novos deixam de estar marcados como "frescos" depois de se mostrarem.
+  useEffect(() => {
+    const alvo = S.pulse;
+    if (!alvo) return;
+    S.pulse = null;
+    document.getElementById(alvo)?.scrollIntoView({ behavior: "smooth", block: alvo === "verif" ? "center" : "start" });
+  });
+  useEffect(() => { S.deals.forEach((d) => (d.fresh = false)); });
+
+  // 29/10: como na V1, o pagamento valida-se sozinho a partir do Eticadata (a ponte erp-fatura): as faturas por pagar leem-se a cada
+  // 2 minutos; sem o ERP ao alcance, volta a tentar de 10 em 10 minutos, sem avisos. Só para quem pode validar pagamentos e nunca no técnico.
+  useEffect(() => {
+    if (!pronto) return;
+    let t = 0, parado = false;
+    const volta = async () => {
+      const porPagar = S.deals.filter((d) => d.fin.fatura?.n && !d.fin.pago && !d.perdido);
+      let proxima = 10 * 60_000;
+      if (porPagar.length && S.role !== "tecnico" && podeNeg(S.role, "finance.validate_payment")) {
+        const r = await lerFaturaErp(porPagar[0].fin.fatura!.n);
+        if (parado) return;
+        if ("info" in r || r.motivo === "nao_existe") { run(() => porPagar.forEach((d) => A.verificarErp(d.id, true))); proxima = 2 * 60_000; }
+      }
+      t = window.setTimeout(() => { void volta(); }, proxima);
+    };
+    t = window.setTimeout(() => { void volta(); }, 5_000);
+    return () => { parado = true; window.clearTimeout(t); };
+  }, [A, S, pronto, run]);
 
   // a letra da Emylia (Lexend)
   useEffect(() => {

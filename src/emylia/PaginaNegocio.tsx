@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, Cl
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  FASES, LINHAS, PAPEIS, SLOTS, nomeLinha, visitaFeita, visitas,
+  FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
   alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
@@ -15,6 +15,7 @@ import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
+import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
 import { FotosEtapa } from "./FotosEtapa";
@@ -263,7 +264,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}.</p>
           <div className="flex flex-wrap gap-2">
-            {SLOTS.map((s) => (
+            {vagasVisita().map((s) => (
               <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s))}
                 className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
                 <CalendarClock className="mr-1.5 inline h-4 w-4" />{s}
