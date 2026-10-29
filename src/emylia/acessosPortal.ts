@@ -7,6 +7,7 @@
 //   "Reenviar" gera outra (como "Reenviar credenciais").
 // · O popup pendente vive só neste separador (fora do Estado): quem está a ver noutro aparelho não o recebe.
 import { useSyncExternalStore } from "react";
+import { indicativoDoNumero } from "@/lib/phone/indicativosPais";
 import type { Estado, Negocio } from "./motor";
 
 /** A empresa que envia (a mesma das folhas dos documentos, DocsCliente.tsx). */
@@ -84,7 +85,10 @@ export const emailDaFicha = (d: Negocio): string | null => {
 /** 29/10: o telefone de contacto sem espaços, pontos, hífenes nem parêntesis; «00» à frente vira «+». */
 export const telefoneNormal = (t: string): string => t.trim().replace(/[\s.()-]/g, "").replace(/^00/, "+");
 /** 29/10: o telefone do cliente tem de levar o indicativo do país («+351912345678»): o código por SMS segue para este número. */
-export const telefoneOk = (t: string): boolean => /^\+[1-9]\d{7,14}$/.test(telefoneNormal(t));
+export const telefoneOk = (t: string): boolean => {
+  const n = telefoneNormal(t);
+  return /^\+[1-9]\d{7,14}$/.test(n) && indicativoDoNumero(n) !== null;
+};
 /** 29/10: o telefone da ficha (o contacto do negócio, quando não é um email), se tiver indicativo de país (senão null). */
 export const telefoneDaFicha = (d: Negocio): string | null => {
   const t = d.tel || "";

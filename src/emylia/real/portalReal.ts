@@ -9,6 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DocPortal, EnvioAcesso, ResultadoConta } from "../acessosPortal";
 import { lerTemplates } from "@/hooks/pessoas/useTemplatesDoNegocio";
+import { indicativoDoNumero } from "@/lib/phone/indicativosPais";
 
 export type TipoDocPortal = "proposal" | "contract";
 
@@ -54,9 +55,6 @@ export async function garantirEmailDoContacto(sb: SupabaseClient, entityId: stri
   if (novo.error) throw new Error(novo.error.message);
 }
 
-/** Os indicativos mais comuns, do mais longo para o mais curto, para guardar o `country_code` ao lado do número internacional. */
-const INDICATIVOS = ["+351", "+352", "+244", "+258", "+238", "+34", "+33", "+39", "+41", "+44", "+49", "+55", "+1"];
-
 /** 29/10: o telefone do contacto passa a ser o da ficha (o principal), em formato internacional («+351912345678»): o código de assinatura vai por SMS para ele. */
 export async function garantirTelefoneDoContacto(sb: SupabaseClient, entityId: string, telefone: string): Promise<void> {
   type Linha = { id: string; phone_number: string };
@@ -69,7 +67,7 @@ export async function garantirTelefoneDoContacto(sb: SupabaseClient, entityId: s
   if (lido.error) throw new Error(lido.error.message);
   const atual = lido.data?.[0];
   if (atual && atual.phone_number === telefone) return;
-  const country_code = INDICATIVOS.find((c) => telefone.startsWith(c)) ?? null;
+  const country_code = indicativoDoNumero(telefone);
   const resultado = atual
     ? await tab().update({ phone_number: telefone, country_code }).eq("id", atual.id)
     : await tab().insert({ entity_id: entityId, phone_number: telefone, country_code, phone_type: "mobile", is_primary: true });
