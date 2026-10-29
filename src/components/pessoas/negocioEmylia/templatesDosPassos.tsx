@@ -73,11 +73,11 @@ function AvisosDaGravacao({ t }: { t: UseTemplatesDoNegocio }) {
 const podeEscolher = (t: UseTemplatesDoNegocio, c: ContextoDosTemplates): boolean => c.podeEditar && t.estado === "pronto" && !t.aGuardar && c.negocioId !== null;
 
 /* ------------------------------------------------------------------------------------------------ passo Orçamento */
-/** O documento do orçamento (PDF), recolhido: só se gera quando se abre, para não pesar no passo. */
+/** O documento do orçamento (PDF), logo por baixo do seletor do template: aberto por omissão; o PDF só se gera enquanto está aberto. */
 function DocumentoPdfRecolhido(props: Parameters<typeof OrcamentoPdf>[0]) {
-  const [aberto, setAberto] = useState(false);
+  const [aberto, setAberto] = useState(true);
   return (
-    <details className="rounded-2xl border border-border bg-card p-4 text-[15px]" onToggle={(e) => setAberto((e.currentTarget as HTMLDetailsElement).open)}>
+    <details className="rounded-2xl border border-border bg-card p-4 text-[15px]" open={aberto} onToggle={(e) => setAberto((e.currentTarget as HTMLDetailsElement).open)}>
       <summary className={cn("min-h-11 cursor-pointer py-2 font-medium", FOCO)}>Ver o documento do orçamento (PDF)</summary>
       {aberto && <div className="mt-2"><OrcamentoPdf {...props} /></div>}
     </details>
@@ -103,9 +103,9 @@ function TemplateDoOrcamento({ c, children }: { c: ContextoDosTemplates; childre
         />
         <AvisosDaGravacao t={neg} />
       </section>
-      <div key={org.chave}>{children}</div>
-      {/* como na Proposta: o cartão de cima só tem o seletor; o documento (PDF) fica no fim do passo, fechado, e só se gera ao abrir */}
+      {/* o orçamento em PDF, logo por baixo da escolha do template (fora do cartão do seletor, que só tem o seletor, como na Proposta) */}
       <DocumentoPdfRecolhido d={c.d} S={c.ctx.S} tpl={escolhido} orgId={activeCompany?.id ?? null} nome={org.nome} logoOrg={org.logo} />
+      <div key={org.chave}>{children}</div>
     </div>
   );
 }
