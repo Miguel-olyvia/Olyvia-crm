@@ -63,7 +63,8 @@ export function pedidoDeContacto(form: FormularioContacto, atual: ContactoAtual)
     dados.email = email;
   }
   if (telefone !== "" && telefone !== (atual.telefone ?? "").trim()) {
-    if (!telefoneValido(telefone)) return { estado: "falta", campo: "telefone", chaveErro: "errorPhone" };
+    // O telefone novo leva sempre o indicativo do país («+351…»): o seletor do formulário trata disso.
+    if (!telefoneValido(telefone) || !telefone.startsWith("+")) return { estado: "falta", campo: "telefone", chaveErro: "errorPhone" };
     dados.telefone = telefone;
   }
   if (form.contacto !== (atual.contacto ?? "")) dados.contacto = form.contacto;

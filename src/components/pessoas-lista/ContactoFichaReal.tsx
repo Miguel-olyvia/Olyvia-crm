@@ -11,6 +11,7 @@ import { useAnunciar } from "@/components/ficha-comum/anuncioFicha";
 import { LinhaCampo, ListaCampos } from "@/components/ficha-comum/ListaCampos";
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import { FOCO } from "@/components/negocio-metas/estilos";
+import { TelefoneNovaLead } from "@/components/pessoas-leads/TelefoneNovaLead";
 import { ErroAcao } from "@/components/pessoas/ErroAcao";
 import type { ContactoPreferido, HoraPreferida } from "@/components/pessoas/pessoasTipos";
 import { useExecutarAcao } from "@/components/pessoas/useExecutarAcao";
@@ -52,7 +53,7 @@ interface ContactoFichaRealProps {
 function Campo({ id, rotulo, children }: { id: string; rotulo: string; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{rotulo}</Label>
+      <Label id={`${id}-rotulo`} htmlFor={id}>{rotulo}</Label>
       {children}
     </div>
   );
@@ -135,9 +136,11 @@ export function ContactoFichaReal({ telefone, email, contactoPreferido, horaPref
         <form className="space-y-3" noValidate onSubmit={(e) => { e.preventDefault(); if (!executar.aGuardar) guardar(); }}>
           <div className="grid gap-3 sm:grid-cols-2">
             <Campo id={`${id}-telefone`} rotulo={t(`${C}phone`)}>
-              <Input
-                id={`${id}-telefone`} ref={campoTelefone} type="tel" inputMode="tel" autoComplete="off" className="min-h-11" maxLength={30}
-                value={form.telefone} onChange={(e) => mudar({ telefone: e.target.value })} {...ligar("telefone")}
+              {/* Com o seletor do indicativo do país: o valor é «+<indicativo><número>». */}
+              <TelefoneNovaLead
+                id={`${id}-telefone`} idRotulo={`${id}-telefone-rotulo`} campoRef={campoTelefone} maxLength={30}
+                valor={form.telefone} aoMudar={(telefone) => mudar({ telefone })}
+                invalido={invalido === "telefone"} idDescricao={ligar("telefone")["aria-describedby"]}
               />
             </Campo>
             <Campo id={`${id}-email`} rotulo={t(`${C}email`)}>

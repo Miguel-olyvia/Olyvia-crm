@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type Ref } from "react";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { COUNTRY_CODES } from "@/constants/countryCodes";
@@ -17,6 +17,9 @@ interface TelefoneProps {
   placeholder?: string | null;
   idDescricao?: string;
   invalido?: boolean;
+  /** Para quem precisa de focar o campo do número (por exemplo a ficha da pessoa). */
+  campoRef?: Ref<HTMLInputElement>;
+  maxLength?: number;
 }
 
 /**
@@ -24,7 +27,7 @@ interface TelefoneProps {
  * «+<indicativo><dígitos>». Sem dígitos o valor é vazio e não leva o indicativo, por isso a escolha fica em estado local até haver número.
  * Em vez do PhoneInput partilhado (que não liga o rótulo ao campo) usa dois controlos nativos com nome: o indicativo e o número.
  */
-export function TelefoneNovaLead({ idRotulo, id, valor, aoMudar, obrigatorio, placeholder, idDescricao, invalido }: TelefoneProps) {
+export function TelefoneNovaLead({ idRotulo, id, valor, aoMudar, obrigatorio, placeholder, idDescricao, invalido, campoRef, maxLength }: TelefoneProps) {
   const { t } = useTranslation();
   const [escolhido, setEscolhido] = useState(DEFAULT_DIAL_CODE);
   const partido = splitInternationalPhone(valor);
@@ -50,6 +53,8 @@ export function TelefoneNovaLead({ idRotulo, id, valor, aoMudar, obrigatorio, pl
       </div>
       <Input
         id={id}
+        ref={campoRef}
+        maxLength={maxLength}
         type="tel"
         inputMode="tel"
         autoComplete="tel-national"
