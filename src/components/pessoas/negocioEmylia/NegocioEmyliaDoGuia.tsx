@@ -4,7 +4,8 @@
 // contrato, da fatura e da obra. Lê e grava pelo armazém (neg_ler_negocios, neg_guardar_negocio). Nada de exemplo: sem o negócio lido, ou com documentos
 // do CRM, diz-se em texto. Só leitura = `fieldset disabled` nos controlos de escrita: o conteúdo continua lido pelo leitor de ecrã e os passos navegam-se.
 // O estado da gravação e os avisos do motor (porque é que um clique foi recusado) têm a sua região viva aqui.
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useInRouterContext, useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
@@ -25,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { FasesFeitasNav } from "../GuiaColuna";
 import { CENTRO_QUE_ROLA, LATERAL_FIXA } from "../layoutGuia";
 import type { FaseFeita } from "../processo/passoGuiado";
-import type { AvisoEmylia } from "./armazemNegocioEmylia";
+import { definirNavegacaoEmylia, type AvisoEmylia } from "./armazemNegocioEmylia";
 import { EstadoHonesto } from "./EstadoHonesto";
 import type { FaseEmylia } from "./faseEmylia";
 import { HistoricoDoNegocio, PainelPosContrato } from "./PainelPosContrato";
@@ -189,6 +190,13 @@ export function CabecalhoDoNegocio({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   );
 }
 
+/** F3: a navegação do react-router para o armazém (abrir as Encomendas de cliente, a Receção e as Compras reais a partir do negócio). */
+function LigarNavegacao() {
+  const navegar = useNavigate();
+  useEffect(() => { definirNavegacaoEmylia((url) => navegar(url)); return () => definirNavegacaoEmylia(null); }, [navegar]);
+  return null;
+}
+
 /** O nome da fase da Emylia no ecrã: a fase Negócio tem o nome da barra (os passos dela é que se chamam Orçamento, Proposta e Contrato). */
 const chaveDaFase = (f: FaseEmylia): string => (f === "negocio" ? "pessoasPagina.guia.fase.negocio" : `${P}phases.${f}`);
 
@@ -201,6 +209,7 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
   // as ações do orçamento mantêm as linhas do levantamento configurável (os efeitos que a organização definiu); sem configuração é o ctx de sempre
   const ctx = useCtxComEfeitos(e.ctx);
   const soLeitura = e.docsCrm || !pode.gravar;
+  const dentroDoRouter = useInRouterContext();
   const botaoTentar = (aoClicar: () => void, rotulo: string): ReactNode => (
     <button type="button" onClick={aoClicar} className={cn("min-h-11 rounded-lg border border-input px-4 font-medium", FOCO)}>{rotulo}</button>
   );
@@ -227,6 +236,7 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
   // o que vem por cima dos passos no centro: a fase, o cabeçalho do negócio, o estado da gravação, os avisos do motor e a ponte da abordagem
   const topo = (
     <>
+      {dentroDoRouter && <LigarNavegacao />}
       <p className="text-sm text-muted-foreground">{verFeita ? t(`${N}faseFeita`) : t(`${N}negocio`)}</p>
       <Titulo tabIndex={-1} className="text-2xl font-bold leading-tight tracking-tight text-foreground outline-none md:text-[28px]">{t(chaveDaFase(fase))}</Titulo>
       {d && ctx && !e.docsCrm && <CabecalhoDoNegocio ctx={ctx} d={d} />}

@@ -5,7 +5,7 @@
 //   /suppliers?filter=&open=&tab=(&prices=pending) suppliersLink / parseSuppliersParams
 //   /client-orders?status=&ready=1&origin=&open=   clientOrdersLink / parseClientOrdersParams (+ parseClientOrdersOrigin)
 //   /stock-counts?status=&stalled=1&open=          stockCountsLink / parseStockCountsParams
-//   /receiving?guia=&notes=&tab=&po=&vista=        receivingLink / parseReceivingParams
+//   /receiving?guia=&notes=&tab=&po=&vista=&ec=    receivingLink / parseReceivingParams
 //   /stocks?status=&warehouse=&q=                  stocksLink / parseStocksParams
 //   /stock-movements?product=&warehouse=&doc=      stockMovementsLink / parseStockMovementsParams
 //
@@ -222,12 +222,14 @@ export interface ReceivingLinkParams {
   /** purchase_orders.id — abre o painel "Dar entrada" dessa encomenda. */
   po?: string | null;
   vista?: ReceivingView;
+  /** client_contracts.id — a lista "Por receber" já filtrada pelas encomendas a fornecedor dessa encomenda de cliente (o negócio). */
+  ec?: string | null;
 }
 
 export const receivingLink = (p: ReceivingLinkParams = {}): string =>
   build(
     INVENTORY_PATHS.receiving,
-    { guia: p.guia, notes: p.notes, tab: p.tab, po: p.po, vista: p.vista },
+    { guia: p.guia, notes: p.notes, tab: p.tab, po: p.po, vista: p.vista, ec: p.ec },
     { notes: "all", tab: "receber", vista: "lista" },
   );
 
@@ -242,6 +244,7 @@ export function parseReceivingParams(input: ParamsInput) {
     // Links antigos só com ?notes= (Hoje do Inventário) querem a lista das guias.
     tab: rawTab === null && sp.get("notes") !== null ? ("guias" as ReceivingTab) : oneOf(RECEIVING_TABS, rawTab, "receber"),
     po: str(sp, "po"),
+    ec: str(sp, "ec"),
     vista: oneOf(RECEIVING_VIEWS, rawVista, "lista"),
     /** A vista pedida no URL (null = a do ecrã por omissão, que depende das permissões). */
     vistaParam: rawVista !== null && (RECEIVING_VIEWS as readonly string[]).includes(rawVista) ? (rawVista as ReceivingView) : null,

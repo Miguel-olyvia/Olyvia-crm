@@ -89,6 +89,7 @@ const Countries = lazy(() => import("./pages/Countries"));
 
 const OrgChart = lazy(() => import("./pages/OrgChart"));
 const Home = lazy(() => import("./pages/Home"));
+const HojeInicio = lazy(() => import("./pages/HojeInicio"));
 
 const WelcomeGuide = lazy(() => import("./pages/WelcomeGuide"));
 
@@ -285,7 +286,7 @@ const App = () => (
                   {/* CRM routes — guard + Layout mount once; pages render via Outlet */}
                   <Route element={<CrmRouteGuard />}>
                     <Route element={<LayoutRoute />}>
-                      <Route path="/home" element={<Home />} />
+                      <Route path="/home" element={<HojeInicio />} />
                       <Route path="/dashboard" element={<Dashboard />} />
                       <Route path="/anew-clients" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/company-groups" element={<Navigate to="/organizations" replace />} />

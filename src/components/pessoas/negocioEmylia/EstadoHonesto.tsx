@@ -1,5 +1,6 @@
-// O que o Pipeline não pode mostrar ainda, dito em texto: sem números de exemplo a parecerem reais. As funções das fases 2 a 5 do plano do Ben
-// (neg_registar_fatura, neg_anular_contrato, abrir a obra) ainda não estão na base; até existirem, o que depende delas diz que não está disponível.
+// O que o Pipeline não pode mostrar, dito em texto: sem números de exemplo a parecerem reais (sem orçamento, sem contrato, só de leitura…).
+// F3 (28/10, 20261231999700): o Financeiro já está na base (neg_registar_fatura, neg_validar_pagamento, neg_anular_contrato): a fatura, o
+// pagamento, o recibo, a encomenda de cliente e a anulação mostram-se pelos passos da Emylia, já não por aqui.
 // Os textos são das traduções (pessoasPagina.real.neg.*); o chamador passa-os já traduzidos.
 import type { ReactNode } from "react";
 

@@ -1,6 +1,7 @@
 // O que a página /negocios põe à volta dos passos do Financeiro e da Obra, montado no Pipeline: o caminho da obra, os trabalhos a mais, anular o contrato e o histórico
 // (os passos em si, com a fatura, o pagamento e o plano, são da FaseDaEmylia). Os componentes e as regras são os da Emylia, sem os alterar, e a gravação é a mesma
-// (neg_guardar_negocio, pelo armazém do Ben): o motor regista a fatura, o pagamento e o recibo no próprio negócio. Só o que a Emylia já mostra como não ligado fica como
+// (neg_guardar_negocio, pelo armazém do Ben); a fatura, o pagamento, o recibo, a encomenda de cliente e a anulação são do servidor (F3: neg_registar_fatura,
+// neg_validar_pagamento, neg_anular_contrato, por real/financeiroReal.ts), e o negócio relê-se depois de cada um. Só o que a Emylia já mostra como não ligado fica como
 // ela mostra: na Obra, o plano só vive em memória (e sem plano diz-se). Sem permissão fica em leitura (`fieldset disabled`: o conteúdo continua lido).
 import { useState, type ReactNode } from "react";
 import "@/emylia/prototipo.css";

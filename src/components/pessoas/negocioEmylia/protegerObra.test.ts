@@ -21,9 +21,11 @@ describe("protegerObra", () => {
     expect(p.sub).not.toMatch(/não existe/i);
   });
 
-  it("o motor a seco rebenta sem plano (a razão da guarda)", async () => {
+  it("o motor a seco, sem plano, já não rebenta: pede às Operações que gerem o plano (F3: a EC emitida no servidor)", async () => {
     const { proximo } = await import("@/emylia/motor");
-    expect(() => proximo(negocio(5), seed())).toThrow();
+    const p = proximo(negocio(5), seed());
+    expect(p.act).toBe("gerarPlano");
+    expect(p.who).toBe("operacoes");
   });
 
   it("fora da Obra não olha para o plano", () => {

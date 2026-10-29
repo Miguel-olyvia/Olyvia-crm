@@ -29,7 +29,7 @@ import { anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe }
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
-import { lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadata";
+import { lembrarErp, lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadata";
 import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./inventario/loja";
 import { origemAtual, pedirRota } from "./navegacao";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
@@ -1322,7 +1322,9 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (d.fin.erp) return { t: "À espera do pagamento", sub: `${d.fin.fatura.n}: ${resumoErp(d.fin.erp)}. A Olyvia vê no Eticadata quando for paga.`, btn: "Verificar no ERP", act: "verificarErp", who: "financeiro" };
       return { t: "Validar o pagamento", sub: `Confirmar que o valor da ${d.fin.fatura.n} entrou na conta. O recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
     case 5: {
-      const p = d.obra.plano!;
+      const p = d.obra.plano;
+      // F3: a encomenda emitida no servidor e o plano ainda por gerar (gera-se do orçamento, como no pagamento do protótipo)
+      if (!p) return { t: "Operações: gerar o plano da obra", sub: "A encomenda de cliente já foi emitida. O plano nasce do orçamento.", btn: "Gerar o plano", act: "gerarPlano", who: "operacoes" };
       // do pagamento ao arranque: o passo à espera, pela ordem (encomenda, plano, arranque)
       if (p.estado === "por aprovar" || p.estado === "aprovado") {
         const a = passosAgora(d, S)[0];
@@ -1561,7 +1563,16 @@ let noPortalReal = false;
 export function definirNoPortalReal(sim: boolean): void { noPortalReal = sim; }
 
 // Cada ação muda o estado no sítio. `run` (no ecrã) repõe o desenho a seguir.
-export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) {
+/** F3 (28/10): numa organização real (Pipeline e /negocios), a encomenda de cliente é a do servidor (emitida com a fatura registada e o pagamento
+ *  validado: real/financeiroReal.ts grava-os antes do negócio) e o Inventário é o da Olyvia: abrir a encomenda, a Receção ou as compras vai às
+ *  páginas reais, filtradas pela encomenda do negócio (real/inventarioReal.ts). Sem ligação fica o protótipo de sempre (o Inventário de exemplo). */
+export type DestinoInventario = "ec" | "rececao" | "compras" | "inventario";
+export interface LigacaoReal {
+  /** Abre a página real do Inventário (a encomenda de cliente pelo contrato, a receção filtrada por ela ou as compras dela). */
+  abrir(destino: DestinoInventario, contrato: string | null): void;
+}
+
+export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, real?: LigacaoReal) {
   // 22/10: os técnicos (TECS) passam a ser os da ficha deste Estado; um estado de antes fica com os seis de sempre
   garantirTecnicos(S);
   // 22/10: e os custos (um estado de antes fica com os de arranque)
@@ -1629,6 +1640,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     fase(d, 5);
     const F = faltaParaArrancar(d);
     avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
+    if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Com a fatura registada e o pagamento validado, vai para as Encomendas de cliente: stock reservado; o que falta vai numa encomenda a fornecedor", kind: "auto", atraso: 500 });
     if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta vai numa encomenda a fornecedor, por aprovar no Inventário", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
   };
   /** 22/10: a fatura está paga no Eticadata: o recibo é o do ERP (o último) e os dados do pagamento vêm de lá. */
@@ -1644,6 +1656,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
   };
   const emitirEc = (d: Negocio): boolean => {
     if (d.obra.ec) return true;
+    // F3: numa organização real é a base que a emite (fn_neg_emitir_ec_se_pronta, ao gravar o pagamento); o Inventário de exemplo não entra
+    if (real) return false;
     const ec = gerarEncCliente(d, S, idEcNegocio(d), agora());
     ec.ref = refNegocio(d); ec.emitida = { por: PAPEIS[S.role].n, q: agora() };
     const r = emitirNoInventario(pedidoDoNegocio(d, ec));
@@ -1825,7 +1839,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       n.nome = nome.trim(); n.tel = tel.trim();
       if (!n.nome || !n.tel) { n.err = "Falta " + (!n.nome ? "o nome" : "o telefone ou o email") + "."; return; }
       const id = S.seq++;
-      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, linha: linha ?? "geral", ...(linha ? {} : { linhaPorDefinir: true }), servico: linha ? LINHAS[linha].n : "Por definir", local: "", origem: "à mão", quando: agora(), f: { origem: "Telefone" }, hist: [{ t: "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
+      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, linha: linha ?? "geral", ...(linha ? {} : { linhaPorDefinir: true }), servico: linha ? LINHAS[linha].n : "Por definir", local: "", origem: "à mão", quando: agora(), f: { origem: "Telefone", ...(emailOk(n.tel.toLowerCase()) ? { email: n.tel.toLowerCase(), origem: "Email" } : {}) }, hist: [{ t: "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
       S.novo = null;
       // abre logo o negócio novo: o próximo passo (registar a chamada) fica à vista, sem ter de o procurar na lista
       S.view = "negocio"; S.deal = id; S.confirmPerda = null;
@@ -2485,6 +2499,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const n = numero.trim(), hoje = new Date();
       d.fin.fatura = { n, q: info?.data ? info.data.slice(8, 10) + "/" + info.data.slice(5, 7) : String(hoje.getDate()).padStart(2, "0") + "/" + String(hoje.getMonth() + 1).padStart(2, "0") };
       d.fin.erp = info ?? null;
+      if (info) lembrarErp(n, info);
       // 26/10: sem leitura do ERP, a fatura fica registada sem confirmar (antes dizia "emitida no Eticadata" na mesma)
       log(d, info ? `Fatura ${n} registada · confirmada no Eticadata · ${resumoErp(info)}` : `Fatura ${n} registada sem confirmar no Eticadata (sem ligação ao ERP)`);
       avisarDocumento(d, "fatura", "Fatura " + n);
@@ -2504,6 +2519,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
         if (!("info" in r)) { if (!calado) avisar({ msg: "Não deu para ler o Eticadata", sub: r.msg, kind: "bad" }); return; }
         const antes = d.fin.erp?.estado;
         d.fin.erp = r.info;
+        lembrarErp(n, r.info);
         if (r.info.estado === "paga" && nifDiferente(d, r.info)) {
           // 23/10: paga no ERP, mas com outro NIF: não se valida sozinha; avisa (uma vez, se for a verificação em segundo plano)
           if (!calado || antes !== r.info.estado) avisar({ msg: `${n}: paga no ERP, mas com outro NIF`, sub: `ERP: ${r.info.nif} · negócio: ${d.f.nif_fat}. Confirme o número da fatura e valide à mão.`, kind: "bad" });
@@ -2515,26 +2531,39 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     /** Abre o Inventário; com um negócio, abre a encomenda de cliente dele (Saídas para clientes). */
     /** Abre Armazém › Receção do Inventário, filtrada pelo cliente/obra deste negócio (as encomendas a fornecedor da EC dele). */
     // 26/10: ir para o Inventário leva o contexto (navegacao.ts): a lista já filtrada pela obra, e "Voltar a …" para onde se estava
+    /** F3: o plano da obra de um negócio que já tem a encomenda de cliente (emitida no servidor) e ainda não tem plano: do orçamento, por aprovar. */
+    gerarPlano(id: number) {
+      const d = deal(id);
+      if (!d || d.obra.plano || !d.orc || d.fase < 5) return;
+      d.obra.plano = planoDoOrcamento(d, S);
+      log(d, "Plano da obra gerado do orçamento · " + d.obra.plano.tasks.length + " tarefas · por aprovar (Operações)");
+    },
     abrirRececao(id: number) {
       const ec = S.deals.find((x) => x.id === id)?.obra.ec, o = origemAtual(S);
+      // F3: a Receção real, filtrada pela encomenda de cliente do negócio
+      if (real) { real.abrir("rececao", ec?.contrato ?? null); return; }
       if (ec?.ref) pedirRececaoClienteInv(ec.ref);
       pedirRota({ mod: "inv", aba: "guia", ...o });
       S.view = "inventario"; S.deal = null;
     },
     abrirInv(id?: number) {
       const ec = id != null ? S.deals.find((x) => x.id === id)?.obra.ec : null, o = origemAtual(S);
+      // F3: as Encomendas de cliente reais, abertas na deste negócio
+      if (real) { real.abrir(ec?.contrato ? "ec" : "inventario", ec?.contrato ?? null); return; }
       if (ec?.ref) pedirAbrirEcInv(ec.n);
       pedirRota({ mod: "inv", aba: "ec", q: ec?.ref ? ec.n : "", det: ec?.ref ? "ec:" + ec.n : "", ...o });
       S.view = "inventario"; S.deal = null;
     },
     /** 26/10: uma lista do Inventário já filtrada (o "Hoje": "2 encomendas ao fornecedor atrasadas" abre só essas). */
     abrirInvLista(aba: string, f: Record<string, unknown>) {
+      if (real) { real.abrir(aba === "po" ? "compras" : "inventario", null); return; }
       pedirRota({ mod: "inv", aba, f: JSON.stringify(f), de: "Hoje", volta: "/hoje" });
       S.view = "inventario"; S.deal = null;
     },
     /** 26/10: as encomendas a fornecedor de uma obra (as que trazem os materiais da encomenda de cliente dela), já filtradas. */
     abrirComprasObra(id: number) {
       const ec = S.deals.find((x) => x.id === id)?.obra.ec, o = origemAtual(S);
+      if (real) { real.abrir("compras", ec?.contrato ?? null); return; }
       pedirRota({ mod: "inv", aba: "po", q: ec?.ref ? ec.n : "", ...o });
       S.view = "inventario"; S.deal = null;
     },

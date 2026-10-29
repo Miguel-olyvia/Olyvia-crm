@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, Cl
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  FASES, LINHAS, PAPEIS, SLOTS, nomeLinha, visitaFeita, visitas,
+  FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
   alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
@@ -15,6 +15,7 @@ import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
+import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
 import { FotosEtapa } from "./FotosEtapa";
@@ -255,13 +256,15 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   } else if (d.fase === 1) {
     passos = [
       // 27/10: no contacto ainda não se está no local: a localização fica para a visita (Exterior)
-      g(CONTACTO[0], Phone), g(CONTACTO[1], Sparkles), g(CONTACTO[2], MapPin),
+      // 28/10 (Rúben): a morada da obra também se preenche pela localização do dispositivo (quem está no local)
+      g(CONTACTO[0], Phone), g(CONTACTO[1], Sparkles),
+      { ...g(CONTACTO[2], MapPin), corpo: <div className="space-y-4"><UsarLocalizacao ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[2])} {...fx} /></div> },
       g(CONTACTO[3], CalendarClock),
       { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}.</p>
           <div className="flex flex-wrap gap-2">
-            {SLOTS.map((s) => (
+            {vagasVisita().map((s) => (
               <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s))}
                 className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
                 <CalendarClock className="mr-1.5 inline h-4 w-4" />{s}
@@ -294,7 +297,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       // várias divisões: um grupo de campos por divisão (gruposArea), contados todos no passo
       // 27/10: as fotografias contam como uma resposta do passo: feita com fotografias ou com "o cliente não quis"
       { ...g(AREA, Wrench), semAvancar: true, conta: (({ f, n }) => ({ f: f + (v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim" ? 1 : 0), n: n + 1 }))(contagem(GA, d.f)), corpo: <div className="space-y-6">{GA.map((ga) => <Campos key={ga.titulo} grupo={ga} {...fx} />)}<FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
-      { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
+      // 28/10: uma linha sem medidas (a "geral": as quantidades escrevem-se em cada serviço) não mostra um passo vazio
+      ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
         <div className="space-y-2">
           <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>Todas obrigatórias. Água quente pode ser 0.</p>
           <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-5"}>
@@ -317,7 +321,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
             <Campos grupo={{ titulo: "", campos: [{ k: "obs_medidas", l: "Observações", t: "texto_longo", opcional: true }] }} {...fx} />
           </div>
         </div>
-      ) },
+      ) }]),
       // na versão Atual simples, as "Escolhas do cliente" respondem-se dentro das Necessidades (seleção guiada, 14/10/2026)
       { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
         resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },

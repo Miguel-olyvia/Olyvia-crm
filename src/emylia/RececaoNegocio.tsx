@@ -4,6 +4,7 @@ import { Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
+import { prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
@@ -15,6 +16,18 @@ export function posPorReceber(d: Negocio, inv: ReturnType<typeof useInventario>)
 
 export function ProximoRececaoNegocio({ d, A, go }: { d: Negocio; A: Ctx["A"]; go: Ctx["go"] }) {
   const ids = posPorReceber(d, useInventario());
+  // F3 (28/10): a encomenda de cliente real (Encomendas de cliente da Olyvia): o que está a chegar do fornecedor, lido da prontidão
+  const real = usarProntidao(d.obra.ec) ? prontidaoDe(d.obra.ec.contrato) : undefined;
+  if (usarProntidao(d.obra.ec)) {
+    if (!real || real.aChegar <= 0) return null;
+    return (
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3" role="note" aria-label="Próximo passo da encomenda">
+        <p className="flex items-start gap-2 text-[15px]"><Warehouse className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          <span><b className="font-semibold">Próximo passo: receber na Receção do armazém.</b> <span className="text-muted-foreground">{real.aChegar.toLocaleString("pt-PT")} {real.aChegar === 1 ? "unidade" : "unidades"} a chegar do fornecedor ({d.obra.ec.n}).</span></span></p>
+        <Button size="sm" variant="outline" className="min-h-10" onClick={go(() => A.abrirRececao(d.id))}>Abrir Receção</Button>
+      </div>
+    );
+  }
   if (!ids.length) return null;
   return (
     <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3" role="note" aria-label="Próximo passo da encomenda">
