@@ -8,7 +8,6 @@
 import type { ReactNode } from "react";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
-import { Button } from "@/components/ui/button";
 import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -24,6 +23,8 @@ import type { NegocioEmylia } from "./useNegocioEmylia";
 import { comPassosConfiguraveis } from "./visitaConfiguravel/passosVisitaConfiguravel";
 import { AvisoQuestionario } from "./visitaConfiguravel/AvisoQuestionario";
 import { useCtxComEfeitos } from "./visitaConfiguravel/useCtxComEfeitos";
+import { VisitasDoCrm } from "./VisitasDoCrm";
+import { comVisitasDoCrm } from "./visitasDosPassos";
 
 const N = "pessoasPagina.real.neg.";
 /** A fase da Emylia em que se faz a visita (o motor chama-lhe Visita). */
@@ -41,6 +42,8 @@ interface VisitaDaEmyliaProps {
   extra?: ReactNode;
   /** Tentar outra vez a gravação que falhou. */
   repetirGravacao?: () => void;
+  /** O id do negócio na base (neg_guardar_visita liga a visita a ele). Sem ele o passo diz que o negócio ainda não está gravado. */
+  negocioId?: string | null;
 }
 
 /**
@@ -52,7 +55,7 @@ export const podeFazerVisitaNaEmylia = (e: NegocioEmylia): boolean => {
   return e.leitura.k === "pronto" && e.d !== undefined && e.ctx !== null && !e.docsCrm && !e.d.perdido && e.d.fase <= FASE_VISITA;
 };
 
-export function VisitaDaEmylia({ e, org, podeEditar, faseRotuloChave, feitas, aoVerFase, nivel, extra, repetirGravacao }: VisitaDaEmyliaProps) {
+export function VisitaDaEmylia({ e, org, podeEditar, faseRotuloChave, feitas, aoVerFase, nivel, extra, repetirGravacao, negocioId }: VisitaDaEmyliaProps) {
   const { t } = useTranslation();
   const Titulo = nivel;
   const pode = usePermissoesPosContrato(org, e.ctx?.S ?? null, podeEditar);
@@ -118,12 +121,9 @@ export function VisitaDaEmylia({ e, org, podeEditar, faseRotuloChave, feitas, ao
         <div role="region" aria-label={t("pessoasPagina.guia.centro")} tabIndex={0} data-guia-centro="" className={cn(CENTRO_QUE_ROLA, FOCO)}>
           <div className="pn pg-root space-y-4 py-1 md:px-2">
             {topo}
-            <EstadoHonesto titulo={t(`${N}visita.comecar.titulo`)}>
-              {t(`${N}visita.comecar.texto`)}{" "}
-              <Button type="button" size="lg" disabled={soLeitura} onClick={() => ctx.run(() => { if (d.fase < FASE_VISITA) ctx.A.marcarVisita(d.id); })}>
-                {t(`${N}visita.comecar.botao`)}
-              </Button>
-            </EstadoHonesto>
+            <EstadoHonesto titulo={t(`${N}visita.comecar.titulo`)}>{t(`${N}visita.comecar.texto`)}</EstadoHonesto>
+            {/* «Começar a visita» é marcar a primeira visita no agendamento do CRM (quadro, horas livres, só pessoas com recurso); o negócio passa à visita ao gravar */}
+            <VisitasDoCrm c={{ negocioId: negocioId ?? null, ctx, d, podeEditar: !soLeitura }} modo="primeira" />
             {extra}
           </div>
         </div>
@@ -133,7 +133,7 @@ export function VisitaDaEmylia({ e, org, podeEditar, faseRotuloChave, feitas, ao
   return (
     <FaseDaEmylia
       key={`visita:${d.fase}`} ctx={ctx} d={d} soLeitura={soLeitura} topo={topo} fasesFeitas={fasesFeitas} extra={extra}
-      ajustarPassos={(passos) => comPassosConfiguraveis(passos, ctx, d, estado === "pronto" ? questionario : null)}
+      ajustarPassos={(passos) => comVisitasDoCrm(comPassosConfiguraveis(passos, ctx, d, estado === "pronto" ? questionario : null), { negocioId: negocioId ?? null, ctx, d, podeEditar: !soLeitura })}
     />
   );
 }

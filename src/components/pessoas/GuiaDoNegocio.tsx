@@ -173,7 +173,7 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
           <QuestionarioFormularioProvider>
             <VisitaDaEmylia
               key="visita-emylia" e={emylia.e} org={emylia.org} podeEditar={podeEditar} faseRotuloChave={doPasso.faseRotuloChave} feitas={doPasso.feitas}
-              aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia} repetirGravacao={emylia.repetirGravacao}
+              aoVerFase={aoVerFase} nivel={nivel} extra={extraDoGuia} repetirGravacao={emylia.repetirGravacao} negocioId={negocio.id}
             />
           </QuestionarioFormularioProvider>
         );

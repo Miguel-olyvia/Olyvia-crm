@@ -1,7 +1,7 @@
 // Os campos da agenda de uma visita ligada à base: o quadro, quem vai (chips), o dia e a hora (obrigatória), a duração, o aviso de conflito de
 // horário e a morada da visita. É controlado: quem o usa (Marcar e Alterar) guarda os valores, valida e grava. O aviso de conflito é só um
 // pré-aviso de leitura (falha aberto e nunca diz «disponível»); a recusa verdadeira vem da base ao gravar.
-import { useId, type Ref } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 import { Check } from "lucide-react";
 import type { AgendaVisitaLida } from "@/hooks/pessoas/useAgendaVisita";
 import type { ConflitoVisita } from "@/hooks/pessoas/useConflitoVisita";
@@ -44,6 +44,24 @@ interface CamposAgendaVisitaProps {
   desativado?: boolean;
   /** Mostra «Quem vai estar» (marcar a visita); sem isto o campo nao existe e a visita segue como estava. */
   comQuemVaiEstar?: boolean;
+  /**
+   * Troca o dia e a hora (dois campos soltos) por outra peça, como as horas livres do passo Visitas do negócio. Sem isto são os de sempre.
+   * Recebe o que `CamposDataHora` receberia.
+   */
+  renderDataHora?: (p: ArgsDataHora) => ReactNode;
+}
+
+/** O que `CamposDataHora` recebe, para quem o troca por `renderDataHora`. */
+export interface ArgsDataHora {
+  id: string;
+  data: string;
+  hora: string;
+  hoje: string;
+  campoData: Ref<HTMLInputElement> | undefined;
+  erroData: string | null;
+  erroHora: string | null;
+  somenteLeitura: boolean | undefined;
+  aoMudar: (parcial: { data?: string; hora?: string }) => void;
 }
 
 function EstadoDaAgenda({ agenda }: { agenda: CamposAgendaVisitaProps["agenda"] }) {
@@ -189,10 +207,14 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
         erro={p.erro === "recursoEmFalta" ? t(`${E}noResource`) : null} grupoRef={p.grupoRecursos}
         aoMudar={(recursos) => p.aoMudar({ recursos })}
       />
-      <CamposDataHora
-        id={p.id} data={p.valor.data} hora={p.valor.hora} hoje={p.hoje} campoData={p.campoData} rotuloData={t(`${A}date`)} rotuloHora={t(`${A}time`)}
-        erroData={erroData} erroHora={erroHora} somenteLeitura={p.desativado} aoMudar={p.aoMudar}
-      />
+      {p.renderDataHora ? p.renderDataHora({
+        id: p.id, data: p.valor.data, hora: p.valor.hora, hoje: p.hoje, campoData: p.campoData, erroData, erroHora, somenteLeitura: p.desativado, aoMudar: p.aoMudar,
+      }) : (
+        <CamposDataHora
+          id={p.id} data={p.valor.data} hora={p.valor.hora} hoje={p.hoje} campoData={p.campoData} rotuloData={t(`${A}date`)} rotuloHora={t(`${A}time`)}
+          erroData={erroData} erroHora={erroHora} somenteLeitura={p.desativado} aoMudar={p.aoMudar}
+        />
+      )}
       <Duracao id={p.id} valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />
       {p.comQuemVaiEstar && <QuemVaiEstar valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />}
       <AvisoConflito conflito={p.conflito} nomes={nomes} semVerificar={semVerificar} />

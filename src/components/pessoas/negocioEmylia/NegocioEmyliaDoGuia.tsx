@@ -34,6 +34,7 @@ import { FaseDaEmylia } from "./FaseDaEmylia";
 import { podeMontarObra } from "./protegerObra";
 import { SoParaLer } from "./SoParaLer";
 import { comTemplatesNosPassos } from "./templatesDosPassos";
+import { comVisitasDoCrm } from "./visitasDosPassos";
 import { usePermissoesPosContrato } from "./permissoesPosContrato";
 import { AvisoQuestionario } from "./visitaConfiguravel/AvisoQuestionario";
 import { useCtxComEfeitos } from "./visitaConfiguravel/useCtxComEfeitos";
@@ -271,7 +272,10 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
     return (
       <FaseDaEmylia
         key={`${fase}:${d.fase}`} ctx={ctx} d={d} soLeitura={soLeitura} topo={topo} fasesFeitas={fasesFeitas} extra={extra}
-        ajustarPassos={(passos) => comTemplatesNosPassos(passos, { negocioId: negocioId ?? null, ctx, d, podeEditar: pode.gravar })}
+        ajustarPassos={(passos) => {
+          const c = { negocioId: negocioId ?? null, ctx, d, podeEditar: pode.gravar };
+          return comVisitasDoCrm(comTemplatesNosPassos(passos, c), c);
+        }}
         depois={fase === "negocio" ? <HistoricoDoNegocio d={d} /> : <PainelPosContrato ctx={ctx} d={d} podeGravar={pode.gravar} />}
       />
     );

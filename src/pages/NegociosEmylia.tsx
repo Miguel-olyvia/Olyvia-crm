@@ -15,6 +15,7 @@ import { acoes, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } 
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
+import { comVisitasDoCrm } from "@/components/pessoas/negocioEmylia/visitasDosPassos";
 import { HojeSimples } from "@/emylia/HojeSimples";
 import { HojeTecnico } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
@@ -324,7 +325,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
                 Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava.
               </p>
             )}
-            <NegocioSimples {...ctx} ajustarPassos={(passos, d) => comTemplatesNosPassos(passos, { negocioId: refs.current.get(d.id)?.id ?? null, ctx, d, podeEditar: !doCrm })} />
+            <NegocioSimples {...ctx} ajustarPassos={(passos, d) => {
+              const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm };
+              return comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null });
+            }} />
           </>
         : <NegociosSimples {...ctx} />}
       <div className="toasts" aria-live="polite">
