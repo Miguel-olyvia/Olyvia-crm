@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LogOut, FileText, ScrollText, FolderOpen, Home, ArrowLeftRight } from "lucide-react";
+import { LogOut, FileText, ScrollText, FolderOpen, Home, ArrowLeftRight, Briefcase } from "lucide-react";
 import { useClientSupplierSwitch } from "@/hooks/useClientRole";
 import { cn } from "@/lib/utils";
 import { FirstLoginModal } from "@/components/portal/FirstLoginModal";
@@ -17,6 +17,7 @@ interface ClientPortalLayoutProps {
 
 const NAV_ITEMS = [
   { label: "Início", icon: Home, path: "/client-portal", matchPaths: ["/client-portal"], badgeKey: null },
+  { label: "Negócios", icon: Briefcase, path: "/client-portal/negocios", matchPaths: ["/client-portal/negocios"], badgeKey: null },
   { label: "Propostas", icon: FileText, path: "/client-portal/proposals", matchPaths: ["/client-portal/proposals"], badgeKey: "proposals" as const },
   { label: "Contratos", icon: ScrollText, path: "/client-portal/contracts", matchPaths: ["/client-portal/contracts"], badgeKey: "contracts" as const },
   { label: "Documentos", icon: FolderOpen, path: "/client-portal/documents", matchPaths: ["/client-portal/documents"], badgeKey: null },

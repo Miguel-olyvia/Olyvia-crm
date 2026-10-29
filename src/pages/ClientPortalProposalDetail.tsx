@@ -43,6 +43,8 @@ const REJECTION_REASONS = [
   "Outro",
 ];
 
+import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/PassosDoNegocio";
+
 const ClientPortalProposalDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -417,6 +419,10 @@ const ClientPortalProposalDetail = () => {
         <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/proposals")} className="w-fit gap-1">
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
+
+        {proposal.negocio_id && (
+          <PassosDoNegocio passo={passoDoNegocio(proposal.status)} titulo={proposal.title} total={proposal.value} />
+        )}
 
         <ProposalPortalDocument
           proposal={proposal}

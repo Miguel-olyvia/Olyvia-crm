@@ -24,6 +24,7 @@ import { pt } from "date-fns/locale";
 import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
+import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/PassosDoNegocio";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
@@ -342,6 +343,10 @@ const ClientPortalContractDetail = () => {
         <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/contracts")} className="gap-1">
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
+
+        {contract.negocio_id && (
+          <PassosDoNegocio passo={passoDoNegocio("accepted", contract.status)} titulo={contract.contract_number || "Contrato"} total={contract.total_value} />
+        )}
 
         {/* Decision Banner */}
         {canSign && otpStep !== "verified" && (
