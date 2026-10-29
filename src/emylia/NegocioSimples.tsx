@@ -4,8 +4,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pessoaDeOrigem } from "./PessoasV1";
 import { clienteDeOrigem } from "./ClientesV1";
-import { ArrowLeft, Check, Euro, Lock, Mail, MapPin, MessageCircle, MoreHorizontal, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
+import { ArrowLeft, Check, Euro, Lock, Mail, MapPin, MessageCircle, MoreHorizontal, Pencil, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { BotaoAcessoPortal, EstadoAcessoPortal, temPortal } from "./AcessoPortalNegocio";
+import { EditarCliente } from "./EditarCliente";
 import { modoReal } from "./acessosPortal";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
@@ -83,6 +84,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   }, [d.fase]);
   // o menu "Mais" do cabeçalho: fecha ao clicar fora
   const [mais, setMais] = useState(false);
+  // 29/10: a ficha "Editar os dados do cliente" (EditarCliente.tsx), aberta do menu
+  const [editar, setEditar] = useState(false);
   const maisRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!mais) return;
@@ -122,7 +125,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
             </div>
           </div>
           {/* 27/10: as ações de vez em quando ficam no "Mais"; o cabeçalho fica com o cliente e o progresso */}
-          {(verCliente || portalReal || perder || podeAnular(d)) && (
+          {/* 29/10: o menu existe sempre: tem "Editar os dados do cliente" */}
+          {/* (antes só aparecia com alguma destas ações: ver como o cliente, portal, perder, anular) */}
             <div ref={maisRef} className="relative self-start" onKeyDown={(e) => { if (e.key === "Escape" && mais) { setMais(false); maisRef.current?.querySelector("button")?.focus(); } }}>
               <button type="button" onClick={() => setMais(!mais)} aria-label="Mais ações" aria-expanded={mais} aria-controls="mais-acoes"
                 className="grid h-11 w-11 place-items-center rounded-lg border border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
@@ -138,6 +142,10 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
                   )}
                   {/* 23/10 (2.0): reenviar o acesso ao portal (ou gerar uma password nova) sem mandar um documento novo */}
                   <BotaoAcessoPortal ctx={ctx} d={d} className="inline-flex min-h-11 items-center gap-2 text-[15px] text-foreground" />
+                  {/* 29/10 (Rúben): os dados do cliente mudam-se aqui (a fase do contacto fica só de leitura) */}
+                  <button type="button" onClick={() => { setMais(false); setEditar(true); }} aria-expanded={editar} className="inline-flex min-h-11 items-center gap-2 text-[15px] text-foreground">
+                    <Pencil className="h-4 w-4" aria-hidden="true" />Editar os dados do cliente
+                  </button>
                   {perder && (
                     <button type="button" onClick={() => { setMais(false); go(() => A.perder(d.id))(); }} className="min-h-11 text-[15px] text-foreground">
                       Marcar como perdido
@@ -152,7 +160,6 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
                 </div>
               )}
             </div>
-          )}
         </div>
         {T && (
           <dl className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[15px]">
@@ -184,6 +191,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
         </div>
       </header>
       {/* 23/10 (2.0): o email que falta para enviar ao portal e o estado da conta do cliente */}
+      {editar && <EditarCliente ctx={ctx} d={d} fechar={() => setEditar(false)} />}
       <div className="mt-4 empty:hidden"><EstadoAcessoPortal ctx={ctx} d={d} /></div>
       {S.confirmPerda === d.id && (
         <div role="alertdialog" aria-label="Confirmar" className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 animate-in fade-in-0">

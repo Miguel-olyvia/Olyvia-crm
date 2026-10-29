@@ -44,7 +44,9 @@ export function EstadoAcessoPortal({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-[15px]">
           <p className="flex items-start gap-2 font-medium text-foreground">
             <Mail className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
-            Falta o email do cliente: {ENVIO[pedido.acao] ?? "o envio"} só segue para o portal com um email verdadeiro.
+            {pedido.mudar
+              ? "Mudar o email do cliente: fica na ficha e o acesso ao portal segue para o email novo."
+              : <>Falta o email do cliente: {ENVIO[pedido.acao] ?? "o envio"} só segue para o portal com um email verdadeiro.</>}
           </p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <label className="grid min-w-0 flex-1 gap-1 text-sm text-muted-foreground">

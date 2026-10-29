@@ -242,7 +242,8 @@ export function useResultadoConta(n: number | undefined): ResultadoConta | undef
 /* ------------------------------------------------------------------ 23/10 (2.0): sem email válido não se envia ao portal */
 /** O envio que ficou à espera do email do cliente: qual negócio, o que se ia enviar (e a adenda). Só neste separador. */
 export type EnvioPortal = "proposta" | "contrato" | "adenda" | "contratoAdenda" | "acesso";
-export interface PedidoEmail { deal: number; acao: EnvioPortal; n?: string }
+/** `mudar` (29/10): o email pede-se para o trocar ("Mudar o email do cliente", no menu do negócio), e não porque falta. */
+export interface PedidoEmail { deal: number; acao: EnvioPortal; n?: string; mudar?: boolean }
 let pedidoEmail: PedidoEmail | null = null;
 export function pedirEmailPortal(p: PedidoEmail | null): void { pedidoEmail = p; avisarOuvintes(); }
 export const lerPedidoEmail = (): PedidoEmail | null => pedidoEmail;
