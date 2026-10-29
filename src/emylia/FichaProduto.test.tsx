@@ -123,6 +123,63 @@ describe("FichaProduto · preço e fornecedores", () => {
   });
 });
 
+describe("FichaProduto · o PVP (o custo vem do fornecedor)", () => {
+  beforeEach(() => { base.respostas.cat_produto_fornecedores = { data: [], error: null }; });
+  const campo = () => screen.getByRole("textbox", { name: "PVP" });
+  it("ao escrever, a margem acompanha; abaixo da mínima avisa sem bloquear; Guardar chama cat_definir_pvp com o número e relê", async () => {
+    base.respostas.cat_definir_pvp = { data: { ok: true, pvp: 80 }, error: null };
+    const r = real();
+    const anunciar = ficha(PROD, r);
+    expect(screen.getByTestId("margem-produto")).toHaveTextContent("40,0%");
+    fireEvent.change(campo(), { target: { value: "80" } });
+    expect(screen.getByTestId("margem-produto")).toHaveTextContent("25,0%");
+    expect(screen.getByText("Abaixo da margem mínima (28%).")).toBeInTheDocument();
+    fireEvent.change(campo(), { target: { value: "120,5" } });
+    expect(screen.getByTestId("venda-produto")).toHaveTextContent("120,50 €");
+    expect(screen.queryByText(/Abaixo da margem mínima/)).toBeNull();
+    fireEvent.change(campo(), { target: { value: "50" } });
+    expect(screen.getByText(/Abaixo do custo/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Guardar PVP" }));
+    await waitFor(() => expect(r.recarregar).toHaveBeenCalled());
+    expect(base.chamadas.find((c) => c.f === "cat_definir_pvp")?.a).toEqual({ p_product_id: PID, p_pvp: 50 });
+    expect(anunciar).toHaveBeenCalledWith(expect.stringContaining("50,00 €"));
+    expect(base.chamadas.some((c) => c.f === "cat_guardar_produto")).toBe(false);
+  });
+  it("vazio mostra «Sem PVP: custo + alvo»; 0 ou texto não se grava", () => {
+    ficha();
+    fireEvent.change(campo(), { target: { value: "" } });
+    expect(screen.getByTestId("margem-produto")).toHaveTextContent("35,0%");
+    expect(screen.getByText(/Sem PVP: custo \+ 35% de margem/)).toBeInTheDocument();
+    fireEvent.change(campo(), { target: { value: "0" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("maior que 0");
+    expect(screen.getByRole("button", { name: "Guardar PVP" })).toBeDisabled();
+  });
+  it("Limpar PVP chama cat_definir_pvp com null", async () => {
+    base.respostas.cat_definir_pvp = { data: { ok: true, pvp: null }, error: null };
+    const r = real();
+    ficha(PROD, r);
+    fireEvent.click(screen.getByRole("button", { name: "Limpar PVP" }));
+    await waitFor(() => expect(r.recarregar).toHaveBeenCalled());
+    expect(base.chamadas.find((c) => c.f === "cat_definir_pvp")?.a).toEqual({ p_product_id: PID, p_pvp: null });
+  });
+  it("sem products.edit ou sem products.manage_prices o PVP só se lê", async () => {
+    ficha(PROD, real(false, true));
+    expect(screen.queryByRole("textbox", { name: "PVP" })).toBeNull();
+    cleanup();
+    ficha(PROD, real(true, false));
+    expect(screen.queryByRole("textbox", { name: "PVP" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Guardar PVP" })).toBeNull();
+    expect(screen.getByTestId("margem-produto")).toHaveTextContent("40,0%");
+  });
+  it("sem a função na base diz «Ainda não disponível nesta base»", async () => {
+    base.respostas.cat_definir_pvp = { data: null, error: { code: "PGRST202", message: "Could not find the function public.cat_definir_pvp" } };
+    ficha();
+    fireEvent.change(campo(), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar PVP" }));
+    expect(await screen.findByText("Ainda não disponível nesta base")).toBeInTheDocument();
+  });
+});
+
 describe("FichaProduto · ligar a artigo do fornecedor", () => {
   it("o fornecedor indicado preenche a procura; ligar chama rpc_catalog_link com os argumentos de Compras", async () => {
     base.respostas.cat_produto_fornecedores = { data: [], error: null };

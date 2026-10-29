@@ -72,6 +72,13 @@ describe("montarCatalogo: as tabelas nos objetos dos ecrãs da Emylia", () => {
     const p = montar().K.produtos[0];
     expect(p).toMatchObject({ id: ID.prod, n: "Torneira", servico: "canal", marca: "Grohe", fornecedor: "Beta", custo: 40, pvp: 75, no: ID.sub });
   });
+  it("29/10: o PVP mais recente manda; limpo (null) volta a não ter PVP (custo + alvo)", () => {
+    const L = linhas();
+    L.precosProduto.push({ product_id: ID.prod, price_type: "retail", price: 90, valid_from: "2026-10-29T10:00:00" });
+    expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].pvp).toBe(90);
+    L.precosProduto.push({ product_id: ID.prod, price_type: "retail", price: null as unknown as number, valid_from: "2026-10-29T11:00:00" });
+    expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].pvp).toBeUndefined();
+  });
   it("uma organização sem Catálogo dá listas vazias e os parâmetros por omissão", () => {
     const M = montarCatalogo(linhasDe(null), catalogo0(), {});
     expect(Object.keys(M.C.receitas)).toHaveLength(0);

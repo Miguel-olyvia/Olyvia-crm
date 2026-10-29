@@ -13,7 +13,7 @@ import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
-  definirPreferido, eUuid, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
+  definirPreferido, definirPvp, eUuid, lerNumero, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
   type FichaProdutoReal, type FornecedorLigado,
 } from "./fichaProdutoDados";
 
@@ -53,9 +53,6 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       </article>
     );
   }
-  const { venda, m, semPvp } = margemProduto(p, alvo);
-  const baixa = m < min / 100 - 0.005;
-  const cor = baixa ? "text-destructive" : m < alvo / 100 - 0.005 ? "text-warning" : "text-success";
   return (
     <article aria-labelledby="ficha-t">
       {topo}
@@ -67,27 +64,78 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
         )}
       </header>
 
-      <Seccao id="fp-preco" titulo="Preço">
-        <dl className="mt-4 grid grid-cols-3 gap-3">
-          <div><dt className={NOTA}>Custo por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums">{eur(p.custo)} €</dd>{p.data && <dd className={NOTA}>de {dataPT(p.data)}</dd>}</div>
-          <div><dt className={NOTA}>{semPvp ? "Preço" : "PVP"} por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums">{eur(venda)} €</dd></div>
-          <div>
-            <dt className={NOTA}>Margem</dt>
-            <dd className={cn("text-2xl font-semibold tabular-nums", cor)} data-testid="margem-produto">{pct(m)}</dd>
-            <dd className={NOTA}>{margemEmPalavras(m, min, alvo)} · mínimo {min}%</dd>
-          </div>
-        </dl>
-        <BarraMargem m={m} min={min} alvo={alvo} />
-        <p className={cn(NOTA, "mt-3")}>
-          {semPvp ? `Sem PVP: custo + ${alvo}% de margem (alvo).` : "Margem = (PVP − custo) ÷ PVP."}
-          {p.fornecedor ? ` Fornecedor: ${p.fornecedor}.` : ""}
-        </p>
-      </Seccao>
+      {/* 29/10: a chave inclui o PVP: depois de gravar e reler, o campo volta ao que ficou na base */}
+      <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} />
 
       {real && eUuid(p.id)
         ? <Fornecedores key={p.id} p={p} real={real} anunciar={anunciar} />
         : <Seccao id="fp-forn" titulo="Fornecedores"><p className={cn(NOTA, "mt-3")}>{p.fornecedor || "Sem fornecedor indicado."}</p></Seccao>}
     </article>
+  );
+}
+
+/* ------------------------------------------------------------------ preço */
+// 29/10 (regra do Rafael): o custo vem só do catálogo do fornecedor (aqui só se lê); o PVP é nosso e a margem acompanha.
+// Gravar vai direto a cat_definir_pvp (não pelo autosave do Catálogo, que também grava custo).
+const texto = (v: number | undefined) => (v == null ? "" : String(v).replace(".", ","));
+
+function Preco({ p, min, alvo, real, anunciar }: { p: Produto; min: number; alvo: number; real?: FichaProdutoReal; anunciar: (msg: string) => void }) {
+  const pode = !!real && real.podeEditar && real.podeMudarPrecos && eUuid(p.id);
+  const [t, setT] = useState(texto(p.pvp));
+  const [aGravar, setAGravar] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const lido = lerNumero(t);
+  const invalido = lido != null && (Number.isNaN(lido) || lido <= 0);
+  // pré-visualização: o que está escrito (válido), vazio = sem PVP; inválido = fica o atual
+  const prev: Produto = invalido ? p : lido == null ? { ...p, pvp: undefined } : { ...p, pvp: lido };
+  const { venda, m, semPvp } = margemProduto(prev, alvo);
+  const baixa = m < min / 100 - 0.005;
+  const cor = baixa ? "text-destructive" : m < alvo / 100 - 0.005 ? "text-warning" : "text-success";
+  const mudou = !invalido && (lido ?? null) !== (p.pvp ?? null);
+  const avisos = !semPvp && !invalido ? [venda < p.custo ? "Abaixo do custo: vende-se com prejuízo." : baixa ? `Abaixo da margem mínima (${min}%).` : ""].filter(Boolean) : [];
+
+  const gravar = async (v: number | null) => {
+    if (!real) return;
+    setAGravar(true); setErro(null);
+    const r = await definirPvp(p.id, v);
+    if (!r.ok || !r.v.ok) { setAGravar(false); setErro(r.ok ? "Não foi possível gravar o PVP." : r.erro); return; }
+    anunciar(v == null ? `PVP de ${p.n} limpo: o preço volta a custo + ${alvo}%.` : `PVP de ${p.n}: ${eur(v)} €/${p.un}.`);
+    try { await real.recarregar(); } catch { /* fica o que está */ }
+    setAGravar(false);
+  };
+
+  return (
+    <Seccao id="fp-preco" titulo="Preço">
+      <dl className="mt-4 grid grid-cols-3 gap-3">
+        <div><dt className={NOTA}>Custo por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums">{eur(p.custo)} €</dd>{p.data && <dd className={NOTA}>de {dataPT(p.data)}</dd>}</div>
+        <div><dt className={NOTA}>{semPvp ? "Preço" : "PVP"} por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums" data-testid="venda-produto">{eur(venda)} €</dd></div>
+        <div>
+          <dt className={NOTA}>Margem</dt>
+          <dd className={cn("text-2xl font-semibold tabular-nums", cor)} data-testid="margem-produto">{pct(m)}</dd>
+          <dd className={NOTA}>{margemEmPalavras(m, min, alvo)} · mínimo {min}%</dd>
+        </div>
+      </dl>
+      <BarraMargem m={m} min={min} alvo={alvo} />
+      <p className={cn(NOTA, "mt-3")}>
+        {semPvp ? `Sem PVP: custo + ${alvo}% de margem (alvo).` : "Margem = (PVP − custo) ÷ PVP."}
+        {p.fornecedor ? ` Fornecedor: ${p.fornecedor}.` : ""} O custo vem do fornecedor.
+      </p>
+      {pode && (
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="grid gap-1"><span className="text-[15px] font-medium">PVP (€/{p.un}, sem IVA)</span>
+            <input type="text" inputMode="decimal" value={t} onChange={(e) => { setT(e.target.value); setErro(null); }} placeholder="vazio = custo + alvo"
+              aria-label="PVP" aria-invalid={invalido} disabled={aGravar} className={cn(ENTRADA_TXT, "w-44 tabular-nums")} />
+          </label>
+          <Button className="min-h-11 text-[15px]" disabled={aGravar || !mudou || lido == null} onClick={() => void gravar(lido as number)}>
+            {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}Guardar PVP
+          </Button>
+          <Button variant="outline" className="min-h-11 text-[15px]" disabled={aGravar || p.pvp == null} onClick={() => { setT(""); void gravar(null); }}>Limpar PVP</Button>
+        </div>
+      )}
+      {pode && invalido && <p className="mt-2 text-[15px] text-destructive" role="alert">O PVP tem de ser um número maior que 0.</p>}
+      {pode && avisos.map((a) => <p key={a} className="mt-2 text-[15px] text-warning" role="status">{a}</p>)}
+      {erro && <p className="mt-2 text-[15px] text-destructive" role="alert">{erro}</p>}
+    </Seccao>
   );
 }
 

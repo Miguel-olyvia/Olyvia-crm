@@ -185,12 +185,13 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   const usados = new Set(L.usosCons.map((u) => u.product_id));
   for (const p of L.produtos) {
     const c = custoDe(p.id), pvp = ultimo(p.id, "retail");
+    // 29/10: PVP limpo (cat_definir_pvp com null) ou a 0 não conta: o preço volta a ser custo + alvo
     if (p.tipo_catalogo === "produto") {
       const prod: Produto = {
         id: p.id, n: p.name, custo: c.custo, un: p.unidade ?? "un", marca: p.marca_livre ?? "", fornecedor: c.fornecedor || p.fornecedor_livre || "",
         data: c.data, no: p.catalogo_categoria_id,
         ...(p.servico_id && svcChave.has(p.servico_id) ? { servico: svcChave.get(p.servico_id)!, fatorServico: n(p.fator_servico) || 1 } : {}),
-        ...(p.sku ? { sku: p.sku } : {}), ...(pvp ? { pvp: n(pvp.price) } : {}), ...(p.short_description ? { desc: p.short_description } : {}),
+        ...(p.sku ? { sku: p.sku } : {}), ...(pvp && n(pvp.price) > 0 ? { pvp: n(pvp.price) } : {}), ...(p.short_description ? { desc: p.short_description } : {}),
         ...(p.entulho_m3 != null ? { entulho: { m3: n(p.entulho_m3), ...(p.entulho_kg != null ? { kg: n(p.entulho_kg) } : {}) } } : {}),
       };
       K.produtos.push(prod);

@@ -7,7 +7,9 @@ import { precoProduto } from "./fichaServico";
 import type { Produto } from "./v2/catalogoModelo";
 
 // o cliente e as funções de Compras carregam-se só quando a ficha os usa (o CatalogoV1 também corre no protótipo e nos testes sem base)
-const cliente = async () => (await import("@/integrations/supabase/client")).supabase;
+// (uma só promessa: dois imports ao mesmo tempo davam, nos testes, o módulo verdadeiro em vez do simulado)
+let pCliente: Promise<typeof import("@/integrations/supabase/client")["supabase"]> | null = null;
+const cliente = () => (pCliente ??= import("@/integrations/supabase/client").then((m) => m.supabase, (e) => { pCliente = null; throw e; }));
 const compras = () => import("@/components/supplier-portal-crm/types");
 
 /** O que a página real dá à ficha: a organização, se pode mexer (products.edit, como o can_link de Compras) e como relê o Catálogo. */
@@ -54,7 +56,8 @@ export function moeda(v: number | null | undefined, currency: string | null | un
 
 // as duas RPCs novas não estão nos tipos gerados
 const rpcLivre = async (fn: string, args: Record<string, unknown>) => {
-  const { data, error } = await (await cliente()).rpc(fn as never, args as never);
+  const sb = await cliente();
+  const { data, error } = await sb.rpc(fn as never, args as never);
   return { data: data as unknown, error: (error ?? null) as RpcError | null };
 };
 
@@ -76,6 +79,25 @@ export async function definirPreferido(itemSupplierId: string): Promise<Res<ResP
   } catch (e) {
     return { ok: false, erro: (e as Error).message || "Não foi possível mudar o preferido." };
   }
+}
+
+/** 29/10: o PVP do produto (null = limpar: volta a custo + alvo). Só o PVP: o custo vem do fornecedor e não passa por aqui
+ *  (nem pelo cat_guardar_produto do Catálogo, que grava também o custo). */
+export async function definirPvp(productId: string, pvp: number | null): Promise<Res<{ ok: boolean; pvp: number | null }>> {
+  try {
+    const { data, error } = await rpcLivre("cat_definir_pvp", { p_product_id: productId, p_pvp: pvp });
+    if (error || !data) return { ok: false, erro: erroAmigavel(error, "Não foi possível gravar o PVP.") };
+    return { ok: true, v: data as { ok: boolean; pvp: number | null } };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível gravar o PVP." };
+  }
+}
+
+/** "12,5" ou "12.5" → 12.5; vazio → null; o resto → NaN. */
+export function lerNumero(t: string): number | null {
+  const s = t.trim().replace(/\s/g, "").replace(",", ".");
+  if (!s) return null;
+  return /^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
 }
 
 /** Os fornecedores da organização (como ItemSuppliersTable.tsx, em Compras). */
