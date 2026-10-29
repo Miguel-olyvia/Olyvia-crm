@@ -800,7 +800,11 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     linhas.push(linhaSvc(d, S, sid, m[k], s));
   }
   // os juntados do Catálogo, pela ordem em que foram juntados
+  // 29/10 (teste no browser): um serviço que já vem no pacote da linha não entra outra vez. Escolhido com a linha "geral" (quantidade 1)
+  // e a linha passou depois a WC pela divisão da visita: ficava duas vezes no orçamento (5 pt do pacote e mais 1 pt)
+  const doPacote = new Set(linhas.map((l) => (l.t === "svc" ? l.sid : "")));
   for (const [sid, q] of Object.entries(d.visita.extra)) {
+    if (doPacote.has(sid)) continue;
     const sv = garantirServico(S, sid);
     if (sv && (q || 0) > 0) linhas.push(linhaSvc(d, S, sid, q!, sv));
   }

@@ -28,6 +28,8 @@ import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
 import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFicha, type EnvioAcesso, type ResultadoConta } from "@/emylia/acessosPortal";
 import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { enviarAoPortal } from "@/emylia/real/portalReal";
+import { definirGuardarCliente } from "@/emylia/EditarCliente";
+import { linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
@@ -238,6 +240,24 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     t = window.setTimeout(() => { void volta(); }, 5_000);
     return () => { parado = true; window.clearTimeout(t); };
   }, [A, S, pronto, run]);
+
+  // 29/10: "Editar os dados do cliente" (menu do negócio) também muda o contacto do CRM: o nome, o email e o telefone principais da ficha
+  // da pessoa (anew_entities). O resto (NIF, morada da obra) fica no negócio e grava-se com ele.
+  useEffect(() => definirGuardarCliente((d, x, mudou, o) => {
+    const ref = refs.current.get(d.id);
+    if (!ref) return;
+    void (async () => {
+      if (mudou.includes("nome")) {
+        const { error } = await (supabase.from("anew_entities" as never) as unknown as { update: (r: object) => { eq: (c: string, v: string) => Promise<{ error: { message: string } | null }> } })
+          .update({ display_name: x.nome.trim() }).eq("id", ref.entityId);
+        if (error) throw new Error(error.message);
+      }
+      // com o acesso a seguir para o portal, é esse envio que põe o email no contacto (garantirEmailDoContacto)
+      if (mudou.includes("email") && x.email.trim() && !o.portal) await linkEntityEmail(ref.entityId, x.email.trim().toLowerCase());
+      if (mudou.includes("telefone") && x.telefone.trim()) await linkEntityPhone(ref.entityId, x.telefone.trim());
+      avisar({ msg: "Dados do cliente gravados", sub: "No negócio e no contacto do CRM", kind: "ok" });
+    })().catch((e: Error) => avisar({ msg: "O contacto do CRM não ficou atualizado", sub: e.message, kind: "bad" }));
+  }), [avisar]);
 
   // a letra da Emylia (Lexend)
   useEffect(() => {
