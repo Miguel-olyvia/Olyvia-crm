@@ -214,11 +214,69 @@ serve(async (req) => {
         }
       }
     } else {
-      // Portal user (original flow)
+      // Portal user
+      //
+      // O telefone do OTP é o da ficha ATUAL do documento que vai ser assinado
+      // (mesma regra do resolveDocEntity em client-portal-action). Antes ia-se
+      // à primeira linha de client_portal_users da conta, sem ordem: com acesso
+      // a várias fichas/empresas, ou com a ficha corrigida para outra pessoa
+      // (contrato feito com os dados da mulher e passado para o marido), o SMS
+      // podia ir para o número errado.
+      type DocColumn = "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id";
+      const DOC_COLUMN_BY_TYPE: Record<string, DocColumn> = {
+        proposal: "proposal_id",
+        quote: "quote_id",
+        contract: "contract_id",
+        direct_sale: "direct_sale_id",
+      };
+
+      const resolveDocEntity = async (
+        column: DocColumn,
+        id: string,
+      ): Promise<{ entityId: string | null; orgId: string | null }> => {
+        let entityId: string | null = null;
+        let orgId: string | null = null;
+        if (column === "proposal_id") {
+          const { data: p } = await supabase.from("proposals")
+            .select("entity_id, organization_id").eq("id", id).maybeSingle();
+          entityId = (p as any)?.entity_id || null;
+          orgId = (p as any)?.organization_id || null;
+        } else if (column === "contract_id") {
+          const { data: c } = await supabase.from("client_contracts")
+            .select("entity_id, organization_id").eq("id", id).maybeSingle();
+          entityId = (c as any)?.entity_id || null;
+          orgId = (c as any)?.organization_id || null;
+        } else if (column === "direct_sale_id") {
+          const { data: ds } = await supabase.from("direct_sales")
+            .select("entity_id, organization_id").eq("id", id).maybeSingle();
+          entityId = (ds as any)?.entity_id || null;
+          orgId = (ds as any)?.organization_id || null;
+        } else if (column === "quote_id") {
+          const { data: q } = await supabase.from("quotes")
+            .select("entity_id, organization_id, deal_id, proposal_id").eq("id", id).maybeSingle();
+          entityId = (q as any)?.entity_id || null;
+          orgId = (q as any)?.organization_id || null;
+          if (!entityId && (q as any)?.proposal_id) {
+            const { data: pp } = await supabase.from("proposals")
+              .select("entity_id, organization_id").eq("id", (q as any).proposal_id).maybeSingle();
+            entityId = entityId || (pp as any)?.entity_id || null;
+            orgId = orgId || (pp as any)?.organization_id || null;
+          }
+          if (!entityId && (q as any)?.deal_id) {
+            const { data: d } = await supabase.from("deals")
+              .select("entity_id, organization_id").eq("id", (q as any).deal_id).maybeSingle();
+            entityId = entityId || (d as any)?.entity_id || null;
+            orgId = orgId || (d as any)?.organization_id || null;
+          }
+        }
+        return { entityId, orgId };
+      };
+
       const { data: portalUser } = await supabase
         .from("client_portal_users")
         .select("id, entity_id, organization_id, created_by")
         .eq("auth_user_id", user.id)
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -228,30 +286,68 @@ serve(async (req) => {
         });
       }
 
-      // Get phone from entity
-      if (portalUser.entity_id) {
+      // Ficha de onde sai o telefone: por omissão a da linha do portal
+      // (comportamento anterior); se o pedido traz o documento e esta conta
+      // tem acesso a ele (mesmas regras do assertOwnership de
+      // client-portal-action: linha direta do documento, ou mesma ficha +
+      // organização), passa a ser a ficha do documento. Sem acesso não se
+      // usa a ficha do documento — nunca se envia o OTP para o telefone de
+      // uma ficha a que esta conta não tem direito.
+      let phoneEntityId: string | null = portalUser.entity_id || null;
+      const refType = typeof body?.reference_type === "string" ? body.reference_type : "";
+      const refId = typeof body?.reference_id === "string" ? body.reference_id : "";
+      const refColumn = DOC_COLUMN_BY_TYPE[refType];
+      if (refColumn && refId) {
+        try {
+          const { entityId: docEntityId, orgId: docOrgId } = await resolveDocEntity(refColumn, refId);
+          if (docEntityId) {
+            const { data: directAccess } = await supabase
+              .from("client_portal_users")
+              .select("id")
+              .eq("auth_user_id", user.id)
+              .eq(refColumn, refId)
+              .limit(1);
+            let hasAccess = (directAccess?.length ?? 0) > 0;
+            if (!hasAccess && docOrgId) {
+              const { data: scopedAccess } = await supabase
+                .from("client_portal_users")
+                .select("id")
+                .eq("auth_user_id", user.id)
+                .eq("entity_id", docEntityId)
+                .eq("organization_id", docOrgId)
+                .limit(1);
+              hasAccess = (scopedAccess?.length ?? 0) > 0;
+            }
+            if (hasAccess) phoneEntityId = docEntityId;
+          }
+        } catch (e) {
+          console.error("[sms-otp] resolve document entity failed:", e);
+        }
+      }
+
+      // Telefone principal mais recente da ficha (ver nota em
+      // resolveAnewUserPhone); sem principal, o mais recente de todos.
+      if (phoneEntityId) {
         const { data: phone } = await supabase
           .from("anew_entity_phones")
           .select("phone_number, country_code")
-          .eq("entity_id", portalUser.entity_id)
-          .eq("is_primary", true)
-          // Principal mais recente (ver nota em resolveAnewUserPhone): com
-          // vários is_primary=true o SMS ia para um número antigo.
+          .eq("entity_id", phoneEntityId)
+          .order("is_primary", { ascending: false, nullsFirst: false })
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        if (phone) {
+        if (phone?.phone_number) {
           const cc = phone.country_code || "+351";
           const num = phone.phone_number.replace(/\s+/g, "").replace(/^0+/, "");
           phoneNumber = num.startsWith("+") ? num : `${cc}${num}`;
         }
       }
 
-      if (!phoneNumber) {
-        phoneNumber = user.phone || user.user_metadata?.phone || null;
-      }
+      // Sem fallback para user.phone / user_metadata.phone: são gravados na
+      // criação da conta e não acompanham a ficha (podem ser da pessoa
+      // anterior). Sem telefone na ficha, o send_otp devolve no_phone.
     }
 
     const clientIp = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown";

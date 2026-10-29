@@ -153,6 +153,9 @@ export async function resolveEntityVariables(
   let resolvedOrganizationId: string | null = organizationId || null;
 
   async function resolveEntity(eId: string) {
+    // Email/telefone = o dado mais recente da ficha: entre os principais, o
+    // último criado (pode haver vários principais antigos por despromover);
+    // sem principal, o mais recente de todos.
     const [entityRes, emailRes, phoneRes] = await Promise.all([
       (supabase as any)
         .from("anew_entities")
@@ -163,15 +166,17 @@ export async function resolveEntityVariables(
         .from("anew_entity_emails")
         .select("email, is_primary, created_at")
         .eq("entity_id", eId)
-        .order("is_primary", { ascending: false })
-        .order("created_at", { ascending: true })
+        .order("is_primary", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(1),
       (supabase as any)
         .from("anew_entity_phones")
         .select("phone_number, is_primary, created_at")
         .eq("entity_id", eId)
-        .order("is_primary", { ascending: false })
-        .order("created_at", { ascending: true })
+        .order("is_primary", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(1),
     ]);
 

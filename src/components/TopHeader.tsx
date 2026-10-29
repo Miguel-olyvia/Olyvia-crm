@@ -168,8 +168,8 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
         if (entityId) {
           const [{ data: ent }, { data: emails }, { data: phones }] = await Promise.all([
             supabase.from("anew_entities").select("display_name, first_name, last_name").eq("id", entityId).maybeSingle(),
-            supabase.from("anew_entity_emails").select("email, is_primary").eq("entity_id", entityId).order("is_primary", { ascending: false }).limit(1),
-            supabase.from("anew_entity_phones").select("phone_number, country_code, is_primary").eq("entity_id", entityId).order("is_primary", { ascending: false }).limit(1),
+            supabase.from("anew_entity_emails").select("email, is_primary").eq("entity_id", entityId).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
+            supabase.from("anew_entity_phones").select("phone_number, country_code, is_primary").eq("entity_id", entityId).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
           ]);
           name = (ent as any)?.display_name
             || [((ent as any)?.first_name), ((ent as any)?.last_name)].filter(Boolean).join(" ").trim()

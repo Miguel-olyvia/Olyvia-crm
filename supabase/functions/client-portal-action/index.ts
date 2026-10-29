@@ -143,8 +143,11 @@ serve(async (req) => {
     // o "assinado por" ficava com o nome antigo. Usa-se o display_name atual da
     // ficha ligada ao documento; o nome da conta só entra se a ficha não tiver
     // nome. Só é chamado depois de assertOwnership + OTP, não autoriza nada.
+    // Também dá o nome do cliente nas notificações ao comercial (aceitou,
+    // rejeitou, dúvida, visualizou) — sempre depois da verificação de acesso
+    // de cada ação; o nome da conta (clientName) é só o último recurso.
     async function resolveSignerName(
-      column: "proposal_id" | "contract_id",
+      column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id",
       id: string,
     ): Promise<string> {
       try {
@@ -435,9 +438,10 @@ serve(async (req) => {
         // Notify commercial
         const { data: acceptedQuote } = await supabase.from("quotes").select("quote_number").eq("id", quote_id).maybeSingle();
         const proposalNote = createdProposalId ? " Uma proposta foi gerada automaticamente." : "";
+        const acceptedQuoteClientName = await resolveSignerName("quote_id", quote_id);
         await maybeNotify("client_accepted_quote", {
           title: "🎉 Orçamento aceite no portal!",
-          message: `O cliente ${clientName} aceitou o orçamento ${acceptedQuote?.quote_number || ""} no portal.${proposalNote}`,
+          message: `O cliente ${acceptedQuoteClientName} aceitou o orçamento ${acceptedQuote?.quote_number || ""} no portal.${proposalNote}`,
           priority: "urgent",
           link: createdProposalId ? `/proposals` : `/quotes`,
         }, { column: "quote_id", id: quote_id });
@@ -463,9 +467,10 @@ serve(async (req) => {
         }).eq("id", quote_id));
 
         const { data: rejQuote } = await supabase.from("quotes").select("quote_number").eq("id", quote_id).maybeSingle();
+        const rejQuoteClientName = await resolveSignerName("quote_id", quote_id);
         await maybeNotify("client_rejected_quote", {
           title: "Orçamento rejeitado no portal",
-          message: `O cliente ${clientName} rejeitou o orçamento ${rejQuote?.quote_number || ""}.${safeReason ? ` Motivo: ${safeReason}` : ""}`,
+          message: `O cliente ${rejQuoteClientName} rejeitou o orçamento ${rejQuote?.quote_number || ""}.${safeReason ? ` Motivo: ${safeReason}` : ""}`,
           priority: "high",
         }, { column: "quote_id", id: quote_id });
 
@@ -804,9 +809,10 @@ serve(async (req) => {
         }
 
         const { data: rejProp } = await supabase.from("proposals").select("proposal_number, title").eq("id", proposal_id).maybeSingle();
+        const rejPropClientName = await resolveSignerName("proposal_id", proposal_id);
         await maybeNotify("client_rejected_proposal", {
           title: "Proposta rejeitada no portal",
-          message: `O cliente ${clientName} rejeitou a proposta ${rejProp?.proposal_number || rejProp?.title || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
+          message: `O cliente ${rejPropClientName} rejeitou a proposta ${rejProp?.proposal_number || rejProp?.title || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
           priority: "high",
           link: `/proposals`,
         }, { column: "proposal_id", id: proposal_id });
@@ -921,9 +927,10 @@ serve(async (req) => {
         }).eq("id", contract_id));
 
         const { data: rejContract } = await supabase.from("client_contracts").select("contract_number").eq("id", contract_id).maybeSingle();
+        const rejContractClientName = await resolveSignerName("contract_id", contract_id);
         await maybeNotify("client_rejected_contract", {
           title: "Contrato rejeitado no portal",
-          message: `O cliente ${clientName} rejeitou o contrato ${rejContract?.contract_number || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
+          message: `O cliente ${rejContractClientName} rejeitou o contrato ${rejContract?.contract_number || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
           priority: "high",
           link: `/client-contracts`,
         }, { column: "contract_id", id: contract_id });
@@ -983,9 +990,10 @@ serve(async (req) => {
           docRef = c?.contract_number || "";
         }
 
+        const questionClientName = await resolveSignerName(filterCol as any, document_id);
         await maybeNotify("client_question", {
           title: `💬 Dúvida sobre ${docLabel}`,
-          message: `O cliente ${clientName} tem uma dúvida sobre a ${docLabel} ${docRef}: "${safeMessage}"`,
+          message: `O cliente ${questionClientName} tem uma dúvida sobre a ${docLabel} ${docRef}: "${safeMessage}"`,
           priority: "high",
           link: document_type === "proposal" ? `/proposals` : document_type === "quote" ? `/quotes` : `/client-contracts`,
           entity_type: document_type,
@@ -1073,9 +1081,10 @@ serve(async (req) => {
         };
         const docLabel = DOC_TYPE_LABEL[document_type as string] ?? "contrato";
 
+        const viewerClientName = await resolveSignerName(filterCol, document_id);
         await maybeNotify(`client_viewed_${document_type}`, {
           title: `Cliente visualizou ${docLabel}`,
-          message: `O cliente ${clientName} visualizou um(a) ${docLabel} no portal.`,
+          message: `O cliente ${viewerClientName} visualizou um(a) ${docLabel} no portal.`,
           priority: "low",
         }, { column: filterCol as "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id", id: document_id });
 

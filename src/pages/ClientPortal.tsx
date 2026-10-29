@@ -9,6 +9,7 @@ import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { useClientPortalData } from "@/hooks/useClientPortalData";
+import { usePortalEntityName } from "@/hooks/usePortalEntityName";
 import { formatCurrency } from "@/lib/utils";
 import {
   FileText, ScrollText, FolderOpen, Phone, Mail, MessageCircle,
@@ -133,7 +134,10 @@ const ClientPortal = () => {
     return () => { cancelled = true; };
   }, [activeOrg, orgsLoading]);
 
-  const firstName = userName.split(" ")[0] || "Cliente";
+  // Nome atual da ficha do cliente; os metadados da conta só como recurso
+  // (podem ter ficado com o nome de quem criou o acesso).
+  const entityName = usePortalEntityName(activeOrg?.entityId);
+  const firstName = (entityName || userName).split(" ")[0] || "Cliente";
   const today = format(new Date(), "EEEE, d 'de' MMMM 'de' yyyy", { locale: pt });
 
   // M2: formatCurrency now imported from @/lib/utils

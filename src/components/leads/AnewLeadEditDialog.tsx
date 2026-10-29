@@ -576,21 +576,43 @@ export function AnewLeadEditDialog({
           }
         }
 
+        // Email/telefone só seguem para a ficha se mudaram face ao que a lead
+        // tinha ao abrir o diálogo. Reenviar o valor antigo a cada gravação
+        // voltava a promover um contacto entretanto corrigido na ficha
+        // (ex.: noutra lead, no cliente ou no contrato).
+        const originalFieldValues = lead.field_values || {};
+        const normEmail = (v: string) => (v || "").trim().toLowerCase();
+        const normPhone = (v: string) => (v || "").replace(/\s+/g, "");
+
         const emailValue = readGeneralField("email", updatedFieldValues);
-        if (emailValue) {
+        const originalEmail = readGeneralField("email", originalFieldValues);
+        if (emailValue && normEmail(emailValue) !== normEmail(originalEmail)) {
           try {
             await linkEntityEmail(lead.entity_id, emailValue, userId);
           } catch (emailError) {
             console.error("Error linking lead's email:", emailError);
+            const description = await getFriendlyErrorMessage(emailError);
+            toast({
+              title: "Lead guardada, mas o email não foi atualizado na ficha do cliente",
+              description,
+              variant: "destructive",
+            });
           }
         }
 
         const phoneValue = readGeneralField("phone", updatedFieldValues);
-        if (phoneValue) {
+        const originalPhone = readGeneralField("phone", originalFieldValues);
+        if (phoneValue && normPhone(phoneValue) !== normPhone(originalPhone)) {
           try {
             await linkEntityPhone(lead.entity_id, phoneValue, userId);
           } catch (phoneError) {
             console.error("Error linking lead's phone:", phoneError);
+            const description = await getFriendlyErrorMessage(phoneError);
+            toast({
+              title: "Lead guardada, mas o telefone não foi atualizado na ficha do cliente",
+              description,
+              variant: "destructive",
+            });
           }
         }
       }

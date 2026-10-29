@@ -474,19 +474,30 @@ const ClientContracts = () => {
       if (entityIds.length > 0) {
         const [{ data: entities }, { data: phones }, { data: emails }] = await Promise.all([
           supabase.from("anew_entities").select("id, display_name").in("id", entityIds),
-          supabase.from("anew_entity_phones").select("entity_id, phone_number, country_code, is_primary").in("entity_id", entityIds),
-          supabase.from("anew_entity_emails").select("entity_id, email, is_primary").in("entity_id", entityIds),
+          supabase.from("anew_entity_phones").select("entity_id, phone_number, country_code, is_primary").in("entity_id", entityIds)
+            .eq("is_primary", true)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false }),
+          supabase.from("anew_entity_emails").select("entity_id, email, is_primary").in("entity_id", entityIds)
+            .eq("is_primary", true)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false }),
         ]);
         const nameMap = new Map((entities || []).map(e => [e.id, e.display_name]));
+        // A ficha pode ter vários contactos marcados como principais (os
+        // antigos nunca foram despromovidos ao editar). Vale o principal mais
+        // recente: só se pedem principais (para não passar o limite de 1000
+        // linhas do PostgREST), do mais recente para o mais antigo, e fica a
+        // primeira de cada entidade.
         const phoneMap = new Map<string, { phone: string; countryCode?: string }>();
         (phones || []).forEach(p => {
-          if (!phoneMap.has(p.entity_id) || p.is_primary) {
+          if (!phoneMap.has(p.entity_id)) {
             phoneMap.set(p.entity_id, { phone: p.phone_number, countryCode: p.country_code || undefined });
           }
         });
         const emailMap = new Map<string, string>();
         (emails || []).forEach(e => {
-          if (!emailMap.has(e.entity_id) || e.is_primary) {
+          if (!emailMap.has(e.entity_id)) {
             emailMap.set(e.entity_id, e.email);
           }
         });

@@ -5109,7 +5109,7 @@ export default function AnewLeads() {
     if (lead.entity_id) {
       try {
         const [emailsRes, entityRes] = await Promise.all([
-          (supabase as any).from("anew_entity_emails").select("email, is_primary").eq("entity_id", lead.entity_id).order("is_primary", { ascending: false }).limit(1),
+          (supabase as any).from("anew_entity_emails").select("email, is_primary").eq("entity_id", lead.entity_id).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
           (supabase as any).from("anew_entities").select("display_name, first_name, last_name").eq("id", lead.entity_id).maybeSingle(),
         ]);
         emailAddr = emailsRes?.data?.[0]?.email || "";

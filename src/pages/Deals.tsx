@@ -805,10 +805,10 @@ const Deals = () => {
           ? supabase.from("proposals").select("deal_id, stage_id").in("deal_id", dealIds)
           : { data: [] },
         entityIds.length > 0
-          ? supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", entityIds).eq("is_primary", true)
+          ? supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", entityIds).eq("is_primary", true).order("created_at", { ascending: false }).order("id", { ascending: false })
           : { data: [] },
         entityIds.length > 0
-          ? supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", entityIds).eq("is_primary", true)
+          ? supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", entityIds).eq("is_primary", true).order("created_at", { ascending: false }).order("id", { ascending: false })
           : { data: [] },
         assignedToIds.length > 0
           ? supabase.from("anew_users").select("id, name").in("id", assignedToIds)
@@ -822,8 +822,14 @@ const Deals = () => {
       const entityMap = new Map((entitiesRes.data || []).map(e => [e.id, e.display_name]));
       const orgMap = new Map((orgsRes.data || []).map(o => [o.id, o.name]));
       const creatorMap = new Map((creatorsRes.data || []).map(u => [u.id, u.name]));
-      const emailMap = new Map((entityEmailsRes.data || []).map(e => [e.entity_id, e.email]));
-      const phoneMap = new Map((entityPhonesRes.data || []).map(p => [p.entity_id, p.phone_number]));
+      // Email/telefone = o principal mais recente da ficha (pode haver vários
+      // principais antigos por despromover). Só principais, para não passar
+      // o limite de 1000 linhas do PostgREST; vêm do mais recente para o mais
+      // antigo e fica a primeira de cada entidade.
+      const emailMap = new Map<string, string>();
+      (entityEmailsRes.data || []).forEach(e => { if (!emailMap.has(e.entity_id)) emailMap.set(e.entity_id, e.email); });
+      const phoneMap = new Map<string, string>();
+      (entityPhonesRes.data || []).forEach(p => { if (!phoneMap.has(p.entity_id)) phoneMap.set(p.entity_id, p.phone_number); });
       const assignedMap = new Map((assignedUsersRes.data || []).map(u => [u.id, u.name]));
       const leadSourceMap = new Map((leadSourcesRes.data || []).map((l: any) => [l.id, l.source || (l.campaign_id ? 'campanha' : 'manual')]));
       const leadAssignedMap = new Map((leadSourcesRes.data || []).map((l: any) => [l.id, l.assigned_to]));
@@ -970,10 +976,10 @@ const Deals = () => {
           ? supabase.from("anew_users").select("id, name").eq("id", data.created_by).maybeSingle()
           : Promise.resolve({ data: null }),
         data.entity_id
-          ? supabase.from("anew_entity_emails").select("entity_id, email").eq("entity_id", data.entity_id).eq("is_primary", true).maybeSingle()
+          ? supabase.from("anew_entity_emails").select("entity_id, email").eq("entity_id", data.entity_id).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle()
           : Promise.resolve({ data: null }),
         data.entity_id
-          ? supabase.from("anew_entity_phones").select("entity_id, phone_number").eq("entity_id", data.entity_id).eq("is_primary", true).maybeSingle()
+          ? supabase.from("anew_entity_phones").select("entity_id, phone_number").eq("entity_id", data.entity_id).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle()
           : Promise.resolve({ data: null }),
         data.lead_id
           ? (supabase.from("anew_leads") as any).select("id, source, assigned_to").eq("id", data.lead_id).maybeSingle()
@@ -1082,8 +1088,8 @@ const Deals = () => {
           if (lead.entity_id) {
             const [entRes, emRes, phRes] = await Promise.all([
               supabase.from("anew_entities").select("display_name").eq("id", lead.entity_id).single(),
-              supabase.from("anew_entity_emails").select("email").eq("entity_id", lead.entity_id).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
-              supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", lead.entity_id).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
+              supabase.from("anew_entity_emails").select("email").eq("entity_id", lead.entity_id).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
+              supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", lead.entity_id).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1),
             ]);
             leadName = entRes.data?.display_name || leadName;
             leadEmail = emRes.data?.[0]?.email;

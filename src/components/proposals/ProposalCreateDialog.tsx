@@ -620,13 +620,23 @@ export function ProposalCreateDialog({
     }
     const entityIds = entities.map((e: any) => e.id);
     const [emailRes, phoneRes] = await Promise.all([
-      supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", entityIds).eq("is_primary", true),
-      supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", entityIds).eq("is_primary", true),
+      supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", entityIds)
+        .eq("is_primary", true)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false }),
+      supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", entityIds)
+        .eq("is_primary", true)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false }),
     ]);
+    // Email/telefone = o principal mais recente da ficha (pode haver vários
+    // principais antigos por despromover). Só principais (limite de 1000
+    // linhas do PostgREST), do mais recente para o mais antigo, e fica a
+    // primeira de cada entidade.
     const emailMap: Record<string, string> = {};
     const phoneMap: Record<string, string> = {};
-    (emailRes.data || []).forEach((e: any) => { emailMap[e.entity_id] = e.email; });
-    (phoneRes.data || []).forEach((p: any) => { phoneMap[p.entity_id] = p.phone_number; });
+    (emailRes.data || []).forEach((e: any) => { if (!(e.entity_id in emailMap)) emailMap[e.entity_id] = e.email; });
+    (phoneRes.data || []).forEach((p: any) => { if (!(p.entity_id in phoneMap)) phoneMap[p.entity_id] = p.phone_number; });
     setContactSearchResults(entities.map((e: any) => ({
       entity_id: e.id, display_name: e.display_name,
       email: emailMap[e.id] || null, phone: phoneMap[e.id] || null,

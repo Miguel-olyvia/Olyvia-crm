@@ -65,7 +65,7 @@ export function AIProposalGeneratorDialog({ open, onOpenChange, onApply }: AIPro
         if (!entities || entities.length === 0) { setSearchResults([]); setSearching(false); return; }
         const enriched: EntitySearchResult[] = await Promise.all(entities.map(async (e) => {
           const [emailRes, leadRes, dealRes] = await Promise.all([
-            supabase.from("anew_entity_emails").select("email").eq("entity_id", e.id).eq("is_primary", true).maybeSingle(),
+            supabase.from("anew_entity_emails").select("email").eq("entity_id", e.id).order("is_primary", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle(),
             (supabase.from("anew_leads") as any).select("id", { count: "exact", head: true }).eq("entity_id", e.id),
             supabase.from("deals").select("id", { count: "exact", head: true }).eq("entity_id", e.id),
           ]);
