@@ -160,7 +160,7 @@ BEGIN
   END IF;
 
   -- ── 2. anew_entity_emails: upsert primary (only when email provided) ──────
-  -- 20261213100000: o alvo é o primário MAIS RECENTE (ORDER BY created_at DESC,
+  -- 20261229500000: o alvo é o primário MAIS RECENTE (ORDER BY created_at DESC,
   -- id DESC) e todos os outros primários da mesma entidade são despromovidos
   -- (is_primary=false, sem apagar — fica o histórico). Antes era um LIMIT 1
   -- sem ORDER BY e o primário antigo ficava ao lado do novo.
@@ -202,7 +202,7 @@ BEGIN
   END IF;
 
   -- ── 3. anew_entity_phones: upsert primary (only when phone provided) ──────
-  -- 20261213100000: mesma regra que o email — primário mais recente atualizado
+  -- 20261229500000: mesma regra que o email — primário mais recente atualizado
   -- no sítio, restantes primários despromovidos.
   IF p_phone IS NOT NULL AND p_phone <> '' THEN
     SELECT id, phone_number, country_code
