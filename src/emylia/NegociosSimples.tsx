@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { FASES, aberto, eur, proximo, tot, type Negocio } from "./motor";
 import { IconeFase, type Ctx } from "./pecas";
 import { FILTROS_TRABALHO } from "./filtrosTrabalho";
+import { orgDoModoReal } from "./acessosPortal";
+import { contactoDaPessoa, usePesquisaPessoas, type PessoaPesquisada } from "./real/pessoasReal";
 import { NegociosHistorico, SeletorModo, type ModoNegocios } from "./NegociosHistorico";
 import { SEM_FILTROS_H, type FiltrosH } from "./historicoNegocios";
 
@@ -148,18 +150,74 @@ function gravarModo(m: ModoNegocios): void {
 function NovoSimples({ S, A, run }: Pick<Ctx, "S" | "A" | "run">) {
   const [nome, setNome] = useState(S.novo!.nome);
   const [tel, setTel] = useState(S.novo!.tel);
+  // 30/10 (2.0): com a base ligada, o negócio novo pode ser de uma pessoa que já existe (a mesma pesquisa da página Pessoas) em vez de criar outra
+  const org = orgDoModoReal();
+  const [existente, setExistente] = useState(false);
+  const [pesquisa, setPesquisa] = useState("");
+  const [escolhida, setEscolhida] = useState<PessoaPesquisada | null>(null);
+  const [aEscolher, setAEscolher] = useState(false);
+  const [erroEscolha, setErroEscolha] = useState<string | null>(null);
+  const procura = usePesquisaPessoas(org, existente && !escolhida ? pesquisa : "");
+  const escolher = async (p: PessoaPesquisada) => {
+    setAEscolher(true); setErroEscolha(null);
+    try {
+      const contacto = await contactoDaPessoa(p.entityId);
+      setEscolhida(p); setNome(p.nome); setTel(contacto);
+    } catch (e) {
+      setErroEscolha(e instanceof Error ? e.message : "Não foi possível ler o contacto da pessoa.");
+    } finally {
+      setAEscolher(false);
+    }
+  };
+  const mudarModo = (paraExistente: boolean) => {
+    setExistente(paraExistente); setEscolhida(null); setPesquisa(""); setErroEscolha(null);
+    if (paraExistente) { setNome(""); setTel(""); }
+  };
   // 27/10: sem a linha: ao telefone ainda não se sabe o que o cliente quer; sai da divisão escolhida na visita
-  const criar = () => run(() => A.novoCriar(nome, tel));
+  const criar = () => run(() => A.novoCriar(nome, tel, undefined, existente ? escolhida?.entityId : undefined));
   const inp = "h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
+  const modo = (ativo: boolean) => cn("min-h-11 flex-1 rounded-lg border px-3 text-[15px] font-medium", ativo ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:border-foreground/40");
   return (
     <li className="rounded-xl border-2 border-primary bg-card p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
-      <form className="grid min-w-0 gap-3" onSubmit={(e) => { e.preventDefault(); criar(); }} onKeyDown={(e) => { if (e.key === "Escape") run(() => A.novoCancel()); }}>
-        <label className="grid gap-1.5 text-sm font-medium">Nome<input autoFocus autoComplete="off" value={nome} onChange={(e) => setNome(e.target.value)} className={inp} /></label>
-        <label className="grid gap-1.5 text-sm font-medium">Telefone ou email<input autoComplete="off" inputMode="tel" value={tel} onChange={(e) => setTel(e.target.value)} className={inp} /></label>
+      <form className="grid min-w-0 gap-3" onSubmit={(e) => { e.preventDefault(); if (!existente || escolhida) criar(); }} onKeyDown={(e) => { if (e.key === "Escape") run(() => A.novoCancel()); }}>
+        {org && (
+          <div role="group" aria-label="De quem é o negócio" className="flex gap-2">
+            <button type="button" aria-pressed={!existente} className={modo(!existente)} onClick={() => mudarModo(false)}>Pessoa nova</button>
+            <button type="button" aria-pressed={existente} className={modo(existente)} onClick={() => mudarModo(true)}>Pessoa que já existe</button>
+          </div>
+        )}
+        {existente ? (
+          escolhida ? (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 p-3">
+              <p className="min-w-0 text-[15px]"><span className="block truncate font-medium">{escolhida.nome}</span><span className="block truncate text-muted-foreground">{tel || "Sem telefone nem email na ficha"}</span></p>
+              <Button type="button" variant="ghost" onClick={() => { setEscolhida(null); setPesquisa(""); setNome(""); setTel(""); }}>Trocar</Button>
+            </div>
+          ) : (
+            <div className="grid gap-1.5">
+              <label className="grid gap-1.5 text-sm font-medium">Procurar a pessoa<input autoFocus autoComplete="off" value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Nome, email ou telefone (2 letras no mínimo)" className={inp} /></label>
+              {pesquisa.trim().length >= 2 && (
+                <ul aria-label="Pessoas encontradas" className="grid max-h-56 gap-1 overflow-y-auto rounded-lg border border-border p-1">
+                  {procura.aPesquisar && <li role="status" className="px-3 py-2 text-sm text-muted-foreground">A procurar…</li>}
+                  {!procura.aPesquisar && procura.erro && <li role="alert" className="px-3 py-2 text-sm text-destructive">{procura.erro}</li>}
+                  {!procura.aPesquisar && !procura.erro && procura.pessoas.length === 0 && <li className="px-3 py-2 text-sm text-muted-foreground">Ninguém encontrado. Escolha «Pessoa nova» para a criar.</li>}
+                  {!procura.aPesquisar && procura.pessoas.map((p) => (
+                    <li key={p.entityId}><button type="button" disabled={aEscolher} onClick={() => void escolher(p)} className="min-h-11 w-full rounded-md px-3 text-left text-[15px] hover:bg-muted focus-visible:bg-muted disabled:opacity-50">{p.nome}</button></li>
+                  ))}
+                </ul>
+              )}
+              {erroEscolha && <p className="text-sm font-medium text-destructive" role="alert">{erroEscolha}</p>}
+            </div>
+          )
+        ) : (
+          <>
+            <label className="grid gap-1.5 text-sm font-medium">Nome<input autoFocus autoComplete="off" value={nome} onChange={(e) => setNome(e.target.value)} className={inp} /></label>
+            <label className="grid gap-1.5 text-sm font-medium">Telefone ou email<input autoComplete="off" inputMode="tel" value={tel} onChange={(e) => setTel(e.target.value)} className={inp} /></label>
+          </>
+        )}
         {S.novo!.err && <p className="text-sm font-medium text-destructive" role="alert">{S.novo!.err}</p>}
         <div className="flex gap-2">
           <Button type="button" variant="ghost" onClick={() => run(() => A.novoCancel())}>Cancelar</Button>
-          <Button type="submit" className="flex-1">Criar</Button>
+          <Button type="submit" className="flex-1" disabled={existente && !escolhida}>Criar</Button>
         </div>
       </form>
     </li>

@@ -5,6 +5,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tot, totaisIva, type Estado, type Negocio } from "../motor";
 import { gravarNovaLead } from "@/hooks/pessoas/novaLead/gravarNovaLead";
+import { criarNegocioNovaLead, novoIdNegocio } from "@/hooks/pessoas/novaLead/criarNegocioNovaLead";
 import { resolverOrgRaiz } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { paraLinhas } from "./negocioReal";
 import { gravarNegocio, gravarObra, type IdsServico } from "./negocioBase";
@@ -50,15 +51,25 @@ export function renumerar(S: Estado, de: number, para: number): void {
 
 /** Cria a pessoa e o negócio pela "Nova lead" do CRM e devolve as referências e o número dado pela base. */
 async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<{ ref: RefNegocio; numero: number }> {
-  const email = d.tel.includes("@") ? d.tel.trim() : "";
-  const r = await gravarNovaLead({
-    organizationId: org, rootOrganizationId: await resolverOrgRaiz(org),
-    dados: { displayName: d.nome, firstName: null, lastName: null, email, telefone: email ? "" : d.tel.trim(), nif: "" },
-    valores: {}, origemId: null, origemNome: "manual", campanhaId: null,
-  });
-  const { data, error } = await sb.from("negocios" as never).select("numero").eq("id", r.negocioId).single();
+  // 30/10: uma pessoa que já existia (escolhida em «Novo negócio») não se cria outra vez: só se cria o negócio dela (neg_criar_negocio, o mesmo
+  // caminho de «outro negócio para quem já existe» da Nova lead).
+  let negocioId: string, entityId: string;
+  if (d.pessoaId) {
+    negocioId = novoIdNegocio();
+    entityId = d.pessoaId;
+    await criarNegocioNovaLead({ organizationId: org, entityId, negocioId, titulo: d.nome });
+  } else {
+    const email = d.tel.includes("@") ? d.tel.trim() : "";
+    const r = await gravarNovaLead({
+      organizationId: org, rootOrganizationId: await resolverOrgRaiz(org),
+      dados: { displayName: d.nome, firstName: null, lastName: null, email, telefone: email ? "" : d.tel.trim(), nif: "" },
+      valores: {}, origemId: null, origemNome: "manual", campanhaId: null,
+    });
+    negocioId = r.negocioId; entityId = r.entityId;
+  }
+  const { data, error } = await sb.from("negocios" as never).select("numero").eq("id", negocioId).single();
   if (error || !data) throw new Error("O negócio foi criado mas não se conseguiu ler o número.");
-  return { ref: { id: r.negocioId, entityId: r.entityId }, numero: Number((data as { numero: number }).numero) };
+  return { ref: { id: negocioId, entityId }, numero: Number((data as { numero: number }).numero) };
 }
 
 /** F3: `reler`: houve fatura, pagamento ou anulação no servidor (a encomenda de cliente pode ter nascido ou sido cancelada): quem chama relê
