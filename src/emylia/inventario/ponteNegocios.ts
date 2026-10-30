@@ -206,6 +206,8 @@ export function ecsEliminadasDeNegocios(deals: Negocio[], db: Inventario): { id:
 /** Onde está a encomenda a fornecedor, para quem lê o negócio. */
 export type FasePo = "por aprovar" | "no portal" | "por email" | "parcial" | "recebida" | "cancelada";
 export interface PoResumoNeg { id: string; forn: string; estado: string; fase: FasePo; prometida: string | null;
+  /** 30/10: o id da encomenda na base (purchase_orders.id), nas encomendas reais: é por ele que Compras e armazém a aprova */
+  uuid?: string;
   /** quando chega: a data prometida no portal ou, sem ela, a prevista da encomenda ("aaaa-mm-dd") */
   prevista: string }
 /** pending → por aprovar; encomendada → no portal do fornecedor (ou por email, sem portal); depois parcial / recebida. */

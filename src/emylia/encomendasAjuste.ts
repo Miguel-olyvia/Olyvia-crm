@@ -22,6 +22,39 @@ import type { MatTarefa, Negocio, Plano, Tarefa } from "./motor";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
+/* ------------------------------------------------------------------ 30/10: na Olyvia */
+// Com a encomenda de cliente da base (obra.ec.contrato, sem a referência do Inventário do browser), os materiais novos vão à encomenda a
+// fornecedor da base (obra_encomendar_materiais, 20270101350000): pendente, do fornecedor preferido, ligada à encomenda de cliente, para
+// Compras e armazém aprovar. As adendas não passam por aqui: a encomenda delas nasce na base com o pagamento validado.
+export interface LinhaAjusteReal { produto: string; n: string; q: number; un: string; tarefa: string }
+type PedirAjusteReal = (d: Negocio, motivo: string, linhas: LinhaAjusteReal[]) => void;
+let pedirReal: PedirAjusteReal | null = null;
+export const definirAjusteReal = (f: PedirAjusteReal | null): void => { pedirReal = f; };
+
+/** null: não é a Olyvia (segue o Inventário do browser). Senão, marca o que fica encomendado em cada tarefa e pede-o à base. */
+export function ajusteReal(d: Negocio, motivo: string, adenda?: string): { n: number; linhas: string[] } | { erro: string } | null {
+  const base = d.obra.ec;
+  if (!pedirReal || adenda || !base || base.ref || !base.contrato || !d.obra.plano || d.perdido) return null;
+  const P = porEncomendarDe(d);
+  if (!P.length) return { n: 0, linhas: [] };
+  const sem = [...new Set(P.filter((x) => !x.m.produto).map((x) => x.m.n))];
+  if (sem.length) return { erro: `${sem.join(", ")} não ${sem.length === 1 ? "é um produto" : "são produtos"} do Catálogo: escolha os materiais da lista.` };
+  for (const { t, m } of P) {
+    const enc = (t.encomendado ??= []), e = enc.find((x) => x.n === m.n);
+    if (e) e.q = m.q; else enc.push({ ...m });
+  }
+  const linhas = P.map(({ t, m, q }) => ({ produto: m.produto!, n: m.n, q, un: m.un, tarefa: t.nome }));
+  pedirReal(d, motivo, linhas);
+  return { n: linhas.length, linhas: linhas.map((x) => `${x.n} × ${x.q} ${x.un}`) };
+}
+/** O pedido à base falhou: o que se marcou como encomendado volta a estar por encomendar (para se pedir outra vez). */
+export function desfazerAjusteReal(d: Negocio, linhas: readonly LinhaAjusteReal[]): void {
+  for (const l of linhas) {
+    const t = d.obra.plano?.tasks.find((x) => x.nome === l.tarefa), e = t?.encomendado?.find((x) => x.n === l.n);
+    if (e) e.q = r2(Math.max(0, e.q - l.q));
+  }
+}
+
 /** As tarefas cujos materiais se encomendam à parte: as novas (do validador ou de uma adenda) e as do orçamento com materiais mudados à mão. */
 export const contaParaAjuste = (t: Tarefa): boolean => !!t.mats && (!!t.nova || !!t.encomendado);
 

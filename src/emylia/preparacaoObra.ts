@@ -11,7 +11,7 @@ import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
-import { PERFIL_DO_SK, perfilDoTecnico } from "./equipa/tecnicos";
+import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
 import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
@@ -124,9 +124,10 @@ export function oficioDoServico(S: Estado, s: Pick<Servico, "perfil" | "n"> & { 
   const sk = skDaTarefa(s.perfil, s.n);
   return { perfilId: PERFIL_DO_SK[sk] ?? "", sk };
 }
-/** 22/10: os técnicos de um ofício: os do perfil (pelo id), ou os do mesmo nome nos planos de antes. */
+/** 22/10: os técnicos de um ofício: os do perfil (pelo id), ou os do mesmo nome nos planos de antes.
+ *  30/10: um técnico do RH com vários ofícios conta em todos (tecnicosDoPerfil); antes só contava no primeiro. */
 export const tecnicosDoOficio = (t: Pick<Tarefa, "sk"> & { perfilId?: string }) =>
-  t.perfilId ? TECS.filter((x) => perfilDoTecnico(x) === t.perfilId) : t.sk ? TECS.filter((x) => x.sk === t.sk) : [];
+  t.perfilId ? tecnicosDoPerfil(t.perfilId, TECS) : t.sk ? TECS.filter((x) => x.sk === t.sk) : [];
 /** O técnico do ofício livre nesses dias (o primeiro; senão o primeiro do ofício; sem técnicos do ofício, ninguém: fica por atribuir). */
 export function tecnicoDoOficio(t: Pick<Tarefa, "sk"> & { perfilId?: string }, p: Plano, dia: number, dur: number): string | null {
   const doOficio = tecnicosDoOficio(t);
@@ -134,6 +135,17 @@ export function tecnicoDoOficio(t: Pick<Tarefa, "sk"> & { perfilId?: string }, p
 }
 /** 22/10: as tarefas do plano sem técnico (o ofício não tem técnicos no RH): ficam por atribuir, com aviso. */
 export const porAtribuir = (p: Plano): Tarefa[] => p.tasks.filter((t) => !t.tec && !(t.exec?.estado === "validada"));
+/** 30/10: o plano ainda por aprovar que tem tarefas por atribuir (o ofício não tinha técnicos no RH quando se gerou): cada uma fica com um
+ *  técnico do ofício que o RH já tem, o livre nesses dias. Os planos aprovados não mudam sozinhos. Devolve quantas tarefas ficaram atribuídas. */
+export function atribuirPorAtribuir(p: Plano | null | undefined): number {
+  if (!p || p.estado !== "por aprovar") return 0;
+  let n = 0;
+  for (const t of porAtribuir(p)) {
+    const tec = tecnicoDoOficio(t, p, t.dia, t.dur);
+    if (tec) { t.tec = tec; n++; }
+  }
+  return n;
+}
 
 /** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias).
  *  22/10: o ofício é o perfil do passo da receita (pelo id); sem técnico com esse perfil, a tarefa fica por atribuir (tec null). */

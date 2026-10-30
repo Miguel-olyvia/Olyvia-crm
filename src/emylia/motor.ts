@@ -25,7 +25,7 @@ import {
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
-import { anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
+import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
@@ -333,7 +333,8 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
-export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string }
+export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string;
+  /** 30/10: o produto do Catálogo (products.id), na Olyvia: é por ele que a base encomenda ao fornecedor (obra_encomendar_materiais) */ produto?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
 export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string }
 export interface Plano {
@@ -1746,6 +1747,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   const descontoValido = (x?: number) => (x != null && Number.isFinite(x) && x > 0 ? Math.min(100, r2(x)) : 0);
   /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
   const ajustar = (d: Negocio, motivo: string, adenda?: string): boolean => {
+    // 30/10: na Olyvia (a encomenda de cliente da base), os materiais novos vão à encomenda a fornecedor da base, pendente para Compras
+    const real = ajusteReal(d, motivo, adenda);
+    if (real) {
+      if ("erro" in real) {
+        log(d, "Materiais novos não pedidos ao fornecedor: " + real.erro, "x");
+        avisar({ msg: "Os materiais novos não foram pedidos", sub: real.erro, kind: "bad" });
+        return false;
+      }
+      if (!real.n) return false;
+      log(d, `Materiais novos pedidos ao fornecedor (${motivo}): ${real.linhas.join(", ")} · a aprovar por Compras e armazém`);
+      return true;
+    }
     const r = encomendarAjustes(d, motivo, PAPEIS[S.role].n, agora(), adenda);
     if (!r) return false;
     if ("erro" in r) {

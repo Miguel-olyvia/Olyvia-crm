@@ -16,6 +16,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { cn } from "@/lib/utils";
+import { usePedidoPaginaInteira } from "@/hooks/usePaginaInteira";
 
 interface LayoutProps {
   children?: ReactNode;
@@ -139,6 +140,8 @@ const LayoutContent = memo(function LayoutContent({
   const { isSubmenuOpen } = useSidebarExpand();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const location = useLocation();
+  // 30/10: as páginas do protótipo V1 pedem a área toda (usePaginaInteira): sem o container centrado nem as margens
+  const paginaInteira = usePedidoPaginaInteira();
 
   // Total sidebar width: icon rail (64px) + submenu panel (256px) when open
   const sidebarWidth = isSubmenuOpen ? "md:ml-80" : "md:ml-16";
@@ -186,6 +189,8 @@ const LayoutContent = memo(function LayoutContent({
           <div className="flex items-center justify-center min-h-[60vh]">
             <OlyviaLoader size={40} />
           </div>
+        ) : paginaInteira && !showNoOrgState ? (
+          <div className="min-h-full w-full">{children}</div>
         ) : fullWidth ? (
           showNoOrgState ? (
             <div className="p-6 md:p-8"><NoOrganizationState /></div>

@@ -42,6 +42,8 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
   beforeEach(() => {
     rpc.mockReset(); gravarNovaLead.mockReset();
     rpc.mockImplementation(async (fn: string) => {
+      // 30/10 (20270101340000): os papéis do RH; aqui, quem vê todos (pessoas.edit pelo perfil da Olyvia)
+      if (fn === "neg_meus_papeis") return { data: { papeis: [], pessoa: null, todos: true }, error: null };
       if (fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
       if (fn === "neg_ler_negocios") return { data: [NEGOCIO], error: null };
       // 20261231999000: as obras dos negócios lêem-se ao lado (aqui, nenhuma)
@@ -62,6 +64,29 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(rpc.mock.calls.filter(([fn]) => fn === "neg_guardar_negocio")).toHaveLength(0);
     expect(rpc.mock.calls.filter(([fn]) => fn === "obra_guardar_negocio")).toHaveLength(0);
+  });
+
+  // 30/10 (20270101340000): os papéis vêm do RH. A Inês, só Financeiro, vê-se a si própria e não escolhe os outros papéis
+  it("quem só tem o papel Financeiro no RH: o A ver como só tem esse, com o nome da pessoa", async () => {
+    const antes = rpc.getMockImplementation()!;
+    rpc.mockImplementation(async (fn: string, ...r: unknown[]) => fn === "neg_meus_papeis"
+      ? { data: { papeis: ["financeiro"], pessoa: { id: "p1", nome: "Inês Lourenço" }, todos: false }, error: null }
+      : antes(fn, ...r));
+    render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+    const sel = screen.getByLabelText("A ver como") as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(["Inês · Financeiro"]);
+    expect(sel.value).toBe("financeiro");
+  });
+
+  it("sem papel no RH (e sem o perfil que vê todos): diz o que falta e não lê os negócios", async () => {
+    const antes = rpc.getMockImplementation()!;
+    rpc.mockImplementation(async (fn: string, ...r: unknown[]) => fn === "neg_meus_papeis"
+      ? { data: { papeis: [], pessoa: { id: "p2", nome: "Helena Brandão" }, todos: false }, error: null }
+      : antes(fn, ...r));
+    render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText(/Não tem nenhum papel no Negócio/)).toBeTruthy(), { timeout: 8000 });
+    expect(rpc.mock.calls.some(([fn]) => fn === "neg_ler_negocios")).toBe(false);
   });
 
   it("o Hoje e as Operações abrem na página (Fase 3), também como técnico, sem o aviso de ecrã por ligar e sem gravar", async () => {

@@ -63,6 +63,7 @@ import { PessoaAfectacoesSeccao } from "@/components/hr/PessoaAfectacoesSeccao";
 import { PessoaCargoCard } from "@/components/hr/PessoaCargoCard";
 import { PessoaColocacaoOrganogramaSeccao } from "@/components/hr/PessoaColocacaoOrganogramaSeccao";
 import { PessoaOficiosObraCard } from "@/components/hr/PessoaOficiosObraCard";
+import { PessoaPapeisNegocioCard } from "@/components/hr/PessoaPapeisNegocioCard";
 import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
 import { type LocalTrabalho, type Pessoa } from "@/types/hr";
 import type { HrCargo } from "@/hooks/useCargos";
@@ -363,6 +364,13 @@ export function PessoaLaboraisTab({
     />
 
     <PessoaOficiosObraCard
+      pessoaId={pessoa.id}
+      organizationId={pessoa.organization_id}
+      podeEditar={podeEditar}
+    />
+
+    <PessoaPapeisNegocioCard
+      key={`papeis:${pessoa.id}:${pessoa.cargo_id ?? ""}`}
       pessoaId={pessoa.id}
       organizationId={pessoa.organization_id}
       podeEditar={podeEditar}

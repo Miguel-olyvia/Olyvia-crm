@@ -7,7 +7,7 @@ import { encadearFases, fimDe, guardarBase, inicioMinimo, mudarInicio } from "./
 import { RECEITAS } from "./receitas";
 import { TECS, diaDeFerias, type AvisoTec, type MatTarefa, type Plano, type Servico, type SvcId, type Tarefa } from "./motor";
 import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
-import { perfilDoTecnico } from "./equipa/tecnicos";
+import { tecnicosDoPerfil } from "./equipa/tecnicos";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 /** As unidades que não se partem (um kit, um tubo, um saco): arredondam para cima. */
@@ -33,7 +33,12 @@ export function materiaisDaTarefa(t: Tarefa, svc: Record<SvcId, Servico>): MatTa
 }
 
 /** Todos os consumíveis conhecidos (para juntar um à mão), sem repetir o nome. */
+/** 30/10: na Olyvia, os materiais que se juntam a uma tarefa são os produtos e consumíveis do Catálogo da organização (com o id do produto,
+ *  por onde a base os encomenda); a página define-os ao ler o Catálogo. null: os das receitas de exemplo (a V1). */
+let materiaisReais: MatTarefa[] | null = null;
+export const definirMateriaisReais = (L: MatTarefa[] | null): void => { materiaisReais = L ? [...L].sort((a, b) => a.n.localeCompare(b.n, "pt")) : null; };
 export function consumiveisConhecidos(): MatTarefa[] {
+  if (materiaisReais) return materiaisReais.map((m) => ({ ...m }));
   const vistos = new Map<string, MatTarefa>();
   for (const R of Object.values(RECEITAS)) for (const c of R.cons) if (!vistos.has(c.n)) vistos.set(c.n, { n: c.n, q: 1, un: c.un, preco: c.preco, forn: c.fornecedor });
   return [...vistos.values()].sort((a, b) => a.n.localeCompare(b.n, "pt"));
@@ -51,7 +56,7 @@ export function tecnicoLivre(p: Plano, sk: string, dia: number, dur: number, per
 }
 /** 22/10: o ofício de um serviço sem o Estado: o perfil pelo id (Servico.perfilId) e o nome dos técnicos desse perfil; sem ele, pelo nome. */
 export function oficioDe(s: Servico): { sk: string; perfilId?: string } {
-  if (s.perfilId) return { perfilId: s.perfilId, sk: TECS.find((x) => perfilDoTecnico(x) === s.perfilId)?.sk ?? s.perfil };
+  if (s.perfilId) return { perfilId: s.perfilId, sk: tecnicosDoPerfil(s.perfilId, TECS)[0]?.sk ?? s.perfil };
   return { sk: skDaTarefa(s.perfil, s.n) };
 }
 

@@ -41,6 +41,13 @@ import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/re
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
+import { usePaginaInteira } from "@/hooks/usePaginaInteira";
+import { aplicarNomesPapeis, aplicarPermissoesReais, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
+import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
+import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
+import { definirMateriaisReais } from "@/emylia/tarefasValidador";
+import { lerCatalogo } from "@/emylia/v2/catalogoStore";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
@@ -58,6 +65,7 @@ const LIGACOES: [string, string][] = [["Pessoas", "/pessoas"], ["Inventário", "
 
 /** `vistaInicial`: a vista ao abrir sem ?vista= (a primeira página, /home, abre no Hoje). */
 export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje" | "operacoes" } = {}) {
+  usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
   // ?vista=operacoes (o "Operações" do menu) ou ?vista=hoje abre logo essa vista; o resto abre os Negócios
@@ -77,6 +85,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   }, [vistaPedida, S, redesenhar]);
   const [pronto, setPronto] = useState(false);
   const [erroLer, setErroLer] = useState<string | null>(null);
+  // 30/10 (20270101340000): os papéis de quem entrou, do RH; null enquanto se leem
+  const [meus, setMeus] = useState<MeusPapeis | null>(null);
   const [gravacao, setGravacao] = useState<Gravacao>({ k: "parado" });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const tid = useRef(0);
@@ -193,7 +203,22 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     let vivo = true;
     setPronto(false); setErroLer(null);
     (async () => {
+      // 30/10: os papéis do RH primeiro: sem nenhum (e sem o perfil da Olyvia que vê todos), não há nada a fazer aqui
+      const mp = await lerMeusPapeis(supabase, org);
+      if (!vivo) return;
+      aplicarNomesPapeis(mp); aplicarPermissoesReais();
+      const papel = papelInicial(mp, S.role);
+      setMeus(mp);
+      if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), ou um cargo técnico de obra."); return; }
+      S.role = papel;
       const cat = await carregarCatalogo(supabase, org, S);
+      // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)
+      const K = lerCatalogo(), custo = new Map([...K.produtos.map((p) => [p.id, { preco: p.custo, forn: p.fornecedor }] as const),
+        ...(K.consumiveisCriados ?? []).map((c) => [c.id, { preco: c.preco, forn: c.fornecedor }] as const)]);
+      definirMateriaisReais(cat.produtos.map((p) => {
+        const c = custo.get(p.id);
+        return { n: p.name, q: 1, un: p.unidade ?? "un", produto: p.id, ...(c?.preco ? { preco: c.preco } : {}), ...(c?.forn ? { forn: c.forn } : {}) };
+      }));
       // 28/10: as ausências aprovadas no RH dos técnicos (plano e agenda); um erro aqui não impede os negócios de abrir
       const ag = await carregarAgendaReal(supabase, org);
       if (ag.erro) avisar({ msg: "A agenda do RH não carregou", sub: ag.erro, kind: "bad" });
@@ -204,14 +229,64 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const lidos = await lerNegocios(supabase, org, ids.current);
       if (!vivo) return;
       aplicarLidos(lidos);
+      // 30/10: os planos por aprovar com tarefas por atribuir (o RH não tinha técnicos do ofício quando se geraram) ficam com os técnicos
+      // que o RH já tem; grava-se a obra a seguir. Só quem grava a obra (o Gestor de obra; ou quem vê todos) o faz.
+      const atribuidas = mp.todos || mp.papeis.includes("operacoes") ? S.deals.reduce((a, d) => a + atribuirPorAtribuir(d.obra.plano), 0) : 0;
       // F3: a prontidão das encomendas de cliente emitidas (o passo «À espera dos materiais»)
       await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       if (!vivo) return;
       setPronto(true);
       void carregarEncomendas(lidos);
+      if (atribuidas) { avisar({ msg: "Técnicos atribuídos", sub: `${atribuidas} ${atribuidas === 1 ? "tarefa ficou" : "tarefas ficaram"} com um técnico do RH.`, kind: "ok" }); void gravar(); }
     })().catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
-  }, [org, S, avisar, carregarEncomendas, aplicarLidos]);
+  }, [org, S, avisar, carregarEncomendas, aplicarLidos]); // eslint-disable-line react-hooks/exhaustive-deps -- gravar só depois de ler
+  useEffect(() => () => reporNomesPapeis(), []);
+  // 30/10: Compras e armazém aprova a encomenda a fornecedor no passo dos materiais; depois relê as encomendas do negócio
+  useEffect(() => {
+    if (!org) return;
+    definirAprovadorPo(async (uuid) => {
+      try {
+        const r = await aprovarPoReal(supabase, uuid);
+        avisar(r.publicada ? { msg: "Encomenda aprovada", sub: "Já está no portal do fornecedor.", kind: "ok" }
+          : { msg: "Encomenda aprovada", sub: r.aviso ?? "O fornecedor não tem portal: envie-lhe a encomenda por email.", kind: "ok" });
+        const relidos = await lerNegocios(supabase, org, ids.current);
+        await carregarEncomendas(relidos);
+      } catch (e) {
+        avisar({ msg: "A encomenda não foi aprovada", sub: (e as Error).message, kind: "bad" });
+      } finally { redesenhar(); }
+    });
+    return () => definirAprovadorPo(null);
+  }, [org, avisar, carregarEncomendas, redesenhar]);
+  // 30/10 (20270101350000): os materiais novos da obra (o Gestor de obra) vão à encomenda a fornecedor da base, pendente para Compras
+  useEffect(() => {
+    if (!org) return;
+    definirAjusteReal((d, motivo, linhas) => {
+      const ref = refs.current.get(d.id);
+      void (async () => {
+        try {
+          if (!ref) throw new Error("O negócio ainda não está gravado na base.");
+          const { data, error } = await supabase.rpc("obra_encomendar_materiais" as never, { p_org: org, p_negocio: ref.id, p_motivo: motivo,
+            p_linhas: linhas.map((l) => ({ produto: l.produto, q: l.q, n: l.n, tarefa: l.tarefa })) } as never);
+          if (error) throw new Error(error.message);
+          const r = (data ?? {}) as { encomendas?: { numero: string; fornecedor: string | null; nova: boolean }[]; fora?: { n: string; motivo: string }[] };
+          const pos = r.encomendas ?? [], fora = r.fora ?? [];
+          if (pos.length) avisar({ msg: "Materiais novos pedidos ao fornecedor", kind: "ok",
+            sub: `${pos.map((p) => `${p.numero}${p.fornecedor ? `, ${p.fornecedor}` : ""}`).join(" · ")} · a aprovar por Compras e armazém` });
+          if (fora.length) {
+            avisar({ msg: "Materiais sem fornecedor", sub: `${fora.map((x) => `${x.n} (${x.motivo})`).join(" · ")}. Ligue um fornecedor preferido no Catálogo.`, kind: "bad", atraso: 300 });
+            run(() => desfazerAjusteReal(d, linhas.filter((l) => fora.some((x) => x.n === l.n))));
+          }
+          const relidos = await lerNegocios(supabase, org, ids.current);
+          await carregarEncomendas(relidos);
+        } catch (e) {
+          avisar({ msg: "Os materiais novos não foram pedidos", sub: (e as Error).message, kind: "bad" });
+          run(() => desfazerAjusteReal(d, linhas));
+        }
+      })();
+    });
+    return () => { definirAjusteReal(null); definirMateriaisReais(null); };
+  }, [org, avisar, carregarEncomendas, run]);
 
   // 29/10 (visto no teste no browser): como na V1 (PrototipoNegocios), o "pulse" acende a secção uma vez e desliga-se. Sem isto, um
   // "Fechar levantamento" com campos em falta deixava o pulse "falta" ligado e a página voltava sempre ao primeiro passo com falta
@@ -286,7 +361,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     })().catch(() => undefined);
     return () => { vivo = false; };
   }, []);
-  const eu = minha.loading ? null : { pessoaId: minha.pessoaId, nome: minha.nome ?? nomeConta ?? "Eu" };
+  // 30/10: sem ler o RH (sem permissão nele), a pessoa vem da conta pelos papéis (neg_meus_papeis)
+  const eu = minha.loading ? null : { pessoaId: minha.pessoaId ?? meus?.pessoa?.id ?? null, nome: minha.nome ?? meus?.pessoa?.nome ?? nomeConta ?? "Eu" };
   const tecConta = pronto ? tecnicoDaConta(S.tecnicos ?? [], eu) : null;
   useEffect(() => {
     if (!pronto) return;
@@ -318,7 +394,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
           <span className="text-muted-foreground">A ver como</span>
           <select className="min-h-10 rounded-lg border border-input bg-card px-3" value={S.role}
             onChange={(e) => run(() => { S.role = e.target.value as Papel; })}>
-            {(Object.keys(PAPEIS) as Papel[]).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
+            {(meus ? papeisPermitidos(meus) : (Object.keys(PAPEIS) as Papel[])).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
           </select>
         </label>
         <nav aria-label="Vistas" className="flex gap-1">

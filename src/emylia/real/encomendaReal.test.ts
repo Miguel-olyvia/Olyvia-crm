@@ -33,7 +33,8 @@ describe("resumoDaBase", () => {
     ] }, [{ id: "po-1", order_number: "PO-2026-0031", status: "pending", expected_delivery: "2026-11-05T00:00:00Z", fornecedor: "Beta" }]);
     expect(r.id).toBe("EC-2026-0007");
     expect(r.linhas.map((l) => [l.n, l.st])).toEqual([["Base de duche", "ready"], ["Torneira", "waitpo"]]);
-    expect(r.linhas[1].pos).toEqual([{ id: "PO-2026-0031", forn: "Beta", estado: "pending", fase: "por aprovar", prometida: null, prevista: "2026-11-05" }]);
+    // 30/10: com o id da base (uuid), por onde Compras e armazém a aprova
+    expect(r.linhas[1].pos).toEqual([{ id: "PO-2026-0031", uuid: "po-1", forn: "Beta", estado: "pending", fase: "por aprovar", prometida: null, prevista: "2026-11-05" }]);
     expect(r.tot).toMatchObject({ linhas: 2, prontas: 1, aFornecedor: 1, semForn: 0 });
     expect(r.estado).toBe("waiting");
     expect(r.pronta).toBe(false);
@@ -63,5 +64,18 @@ describe("lerEncomendaReal", () => {
     expect(sb.rpc).toHaveBeenCalledWith("rpc_get_client_order_document", { p_contract_id: "ct-1" });
     expect(filtros).toEqual([["organization_id", "org-1"], ["source_type", "contract"], ["source_id", "ct-1"]]);
     expect(r.linhas[0].pos[0]).toMatchObject({ id: "PO-1", forn: "Beta", fase: "no portal" });
+  });
+
+  // 30/10 (20270101360000): Compras e armazém só com o papel do RH não lê purchase_orders pelo RLS: lê-se pela base
+  it("as encomendas a fornecedor vêm da base (neg_ler_encomendas_fornecedor), com o id para as aprovar; a tabela não se lê", async () => {
+    const sb = {
+      rpc: vi.fn(async (fn: string) => fn === "neg_ler_encomendas_fornecedor"
+        ? { data: [{ id: "po-7", order_number: "PO-7", status: "pending", expected_delivery: null, fornecedor: "Gama" }], error: null }
+        : { data: { order_number: "EC-9", lines: [linha({ qty_ordered: 2, purchase_order_id: "po-7" })] }, error: null }),
+      from: vi.fn(() => { throw new Error("não devia ler a tabela"); }),
+    };
+    const r = await lerEncomendaReal(sb as never, "org-1", "ct-1");
+    expect(sb.rpc).toHaveBeenCalledWith("neg_ler_encomendas_fornecedor", { p_org: "org-1", p_contrato: "ct-1" });
+    expect(r.pos).toEqual([{ id: "PO-7", uuid: "po-7", forn: "Gama", estado: "pending", fase: "por aprovar", prometida: null, prevista: "" }]);
   });
 });

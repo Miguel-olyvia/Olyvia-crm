@@ -15,6 +15,7 @@ import { PessoasRota } from "@/components/pessoas-lista/PessoasRota";
 import { RedirectPreservandoPesquisa } from "@/components/pessoas-lista/RedirectPreservandoPesquisa";
 import { ClientRouteGuard, CrmRouteGuard, SupplierRouteGuard } from "@/components/ClientRouteGuard";
 import { LayoutRoute } from "@/components/Layout";
+import { RotaNegocios } from "@/components/RotaNegocios";
 
 // Critical routes loaded eagerly
 import Index from "./pages/Index";
@@ -300,7 +301,7 @@ const App = () => (
                       <Route path="/leads" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasCrm /></PessoasRota></ProtectedRoute>} />
                       <Route path="/pipeline" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasPipeline /></PessoasRota></ProtectedRoute>} />
-                      <Route path="/negocios" element={<ProtectedRoute permission="pessoas.view"><NegociosEmylia /></ProtectedRoute>} />
+                      <Route path="/negocios" element={<RotaNegocios><NegociosEmylia /></RotaNegocios>} />
                       {/* Utilizadores e Roles num só ecrã: entra quem tem users.view OU roles.view; cada separador pede a sua. */}
                       <Route path="/utilizadores-perfis" element={<ProtectedRoute permissions={["users.view", "roles.view"]}><UtilizadoresPerfis /></ProtectedRoute>} />
                       {/* Uma só rota (`:id?`): abrir e fechar a ficha muda o endereço PELO ROUTER sem remontar a página. */}

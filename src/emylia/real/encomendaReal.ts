@@ -23,7 +23,7 @@ const FASE: Record<string, FasePo> = {
 };
 
 export const poResumo = (p: PoBase): PoResumoNeg => ({
-  id: p.order_number ?? p.id, forn: p.fornecedor ?? "Fornecedor", estado: p.status, fase: FASE[p.status] ?? "no portal",
+  id: p.order_number ?? p.id, uuid: p.id, forn: p.fornecedor ?? "Fornecedor", estado: p.status, fase: FASE[p.status] ?? "no portal",
   prometida: null, prevista: (p.expected_delivery ?? "").slice(0, 10),
 });
 
@@ -63,6 +63,23 @@ export function resumoDaBase(doc: DocEc, pos: readonly PoBase[]): ResumoEcNeg {
   };
 }
 
+/* ------------------------------------------------------------------ 30/10: aprovar a encomenda a fornecedor */
+// A encomenda a fornecedor nasce pendente (a base pede ao fornecedor o que falta quando emite a encomenda de cliente). Quem a aprova e a
+// envia ao fornecedor é Compras e armazém (o papel do RH, 20270101340000, ou purchase_orders.approve): rpc_po_send_to_supplier. A página
+// liga o aprovador (com a releitura das encomendas); fora dela não há botão.
+type Aprovador = (uuid: string) => Promise<void>;
+let aprovador: Aprovador | null = null;
+export const definirAprovadorPo = (f: Aprovador | null): void => { aprovador = f; };
+export const aprovadorPo = (): Aprovador | null => aprovador;
+
+/** Aprova e envia ao fornecedor. A mensagem de erro da base volta tal como vem (sem fornecedor, sem linhas, sem permissão). */
+export async function aprovarPoReal(sb: SupabaseClient, uuid: string): Promise<{ publicada: boolean; aviso: string | null }> {
+  const { data, error } = await sb.rpc("rpc_po_send_to_supplier" as never, { p_po_id: uuid } as never);
+  if (error) throw new Error(error.message || "Não foi possível aprovar a encomenda a fornecedor.");
+  const r = (data ?? {}) as { published?: boolean; warning?: string | null };
+  return { publicada: r.published === true, aviso: r.warning ?? null };
+}
+
 /* ------------------------------------------------------------------ os resumos reais (pela referência do negócio) */
 let reais = new Map<string, ResumoEcNeg>();
 const ouvintes = new Set<() => void>();
@@ -80,14 +97,26 @@ type Consulta = { eq: (c: string, v: string) => Consulta; is: (c: string, v: nul
 export async function lerEncomendaReal(sb: SupabaseClient, org: string, contractId: string): Promise<ResumoEcNeg> {
   const { data, error } = await sb.rpc("rpc_get_client_order_document" as never, { p_contract_id: contractId } as never);
   if (error) throw new Error(error.message || "Não foi possível ler a encomenda de cliente.");
-  const tabela = sb.from("purchase_orders" as never) as unknown as { select: (c: string) => Consulta };
-  const pq = await tabela.select("id, order_number, status, expected_delivery, suppliers(name)")
-    .eq("organization_id", org).eq("source_type", "contract").eq("source_id", contractId).is("deleted_at", null);
-  if (pq.error) throw new Error(pq.error.message);
-  const pos: PoBase[] = (pq.data ?? []).map((p) => ({
-    id: String(p.id), order_number: (p.order_number as string | null) ?? null, status: String(p.status ?? ""),
-    expected_delivery: (p.expected_delivery as string | null) ?? null, fornecedor: (p.suppliers as { name?: string } | null)?.name ?? null,
-  }));
+  // 30/10 (20270101360000): pela base, que aceita o papel do RH (Compras e armazém não lê purchase_orders pelo RLS do perfil da Olyvia);
+  // sem a função (a migration por aplicar), da tabela, como antes
+  const r = await sb.rpc("neg_ler_encomendas_fornecedor" as never, { p_org: org, p_contrato: contractId } as never);
+  let pos: PoBase[];
+  if (!r.error && Array.isArray(r.data)) {
+    pos = (r.data as Record<string, unknown>[]).map((p) => ({
+      id: String(p.id), order_number: (p.order_number as string | null) ?? null, status: String(p.status ?? ""),
+      expected_delivery: (p.expected_delivery as string | null) ?? null, fornecedor: (p.fornecedor as string | null) ?? null,
+    }));
+  } else {
+    if (r.error && r.error.code !== "PGRST202" && r.error.code !== "42883") throw new Error(r.error.message || "Não foi possível ler as encomendas a fornecedor.");
+    const tabela = sb.from("purchase_orders" as never) as unknown as { select: (c: string) => Consulta };
+    const pq = await tabela.select("id, order_number, status, expected_delivery, suppliers(name)")
+      .eq("organization_id", org).eq("source_type", "contract").eq("source_id", contractId).is("deleted_at", null);
+    if (pq.error) throw new Error(pq.error.message);
+    pos = (pq.data ?? []).map((p) => ({
+      id: String(p.id), order_number: (p.order_number as string | null) ?? null, status: String(p.status ?? ""),
+      expected_delivery: (p.expected_delivery as string | null) ?? null, fornecedor: (p.suppliers as { name?: string } | null)?.name ?? null,
+    }));
+  }
   return resumoDaBase((data ?? { order_number: null, lines: [] }) as DocEc, pos);
 }
 

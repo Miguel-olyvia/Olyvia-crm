@@ -1,6 +1,7 @@
 // 21/10 (Ruben): depois do pagamento validado, o plano e os materiais são dois passos da Obra, e não um só ("parece que é só o plano").
 // Este é o dos materiais: quantos estão garantidos para arrancar, o que falta e quem o faz, as linhas agrupadas pelo estado
 // (por resolver, a caminho, garantidas) e as encomendas a fornecedor. O estado lê-se ao vivo do Inventário; quem lá trabalha é o Armazém.
+import { useState } from "react";
 import { AlertTriangle, ArrowRight, Check, Circle, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, typ
 import { entregaTarde, textoMateriais } from "./preparacaoObra";
 import { ecDaAdenda, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
 import { assinadas, primeiraPaga } from "./adendas";
+import { aprovadorPo } from "./real/encomendaReal";
 
 type Grupo = "resolver" | "caminho" | "ok";
 const GRUPOS: { k: Grupo; t: string; vazio?: string }[] = [
@@ -38,7 +40,11 @@ export function contaMateriais(d: Negocio, r: ResumoEcNeg | null): { ok: number;
 export const materiaisProntos = (d: Negocio, r: ResumoEcNeg | null) => !!d.obra.ec && (usarProntidao(d.obra.ec) ? prontaReal(prontidaoDe(d.obra.ec.contrato)) : !d.obra.ec.ref || !!r?.pronta);
 
 export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
-  const { A, go, d } = ctx;
+  const { A, go, d, S } = ctx;
+  // 30/10: na Olyvia, Compras e armazém aprova aqui a encomenda a fornecedor pendente e envia-a (rpc_po_send_to_supplier)
+  const aprovar = aprovadorPo();
+  const podeAprovar = !!aprovar && S.role === "armazem";
+  const [aAprovar, setAAprovar] = useState<string | null>(null);
   const db = useInventario();
   const ec = d.obra.ec;
   const r = ec?.ref ? resumoEcNegocio(db, ec.ref) : null;
@@ -189,8 +195,13 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
                 <li key={p.id} className="flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-[15px]">
                   <span>{p.id} <span className="text-muted-foreground">· {p.forn.replace(" (exemplo)", "")}</span></span>
                   <span className={cn("text-sm", p.fase === "por aprovar" ? "text-warning" : p.fase === "recebida" ? "text-success" : "text-muted-foreground")}>
-                    {p.estado.split(" · ").at(-1)}{(p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial") && p.prevista ? ` · chega a ${ddmm(p.prevista)}${p.prometida ? "" : " (prevista)"}` : ""}
+                    {p.fase === "por aprovar" && p.uuid ? "por aprovar por Compras e armazém" : p.estado.split(" · ").at(-1)}{(p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial") && p.prevista ? ` · chega a ${ddmm(p.prevista)}${p.prometida ? "" : " (prevista)"}` : ""}
                   </span>
+                  {podeAprovar && p.fase === "por aprovar" && p.uuid && (
+                    <Button size="sm" disabled={aAprovar !== null} onClick={() => { const id = p.uuid!; setAAprovar(id); void aprovar!(id).finally(() => setAAprovar(null)); }}>
+                      {aAprovar === p.uuid ? "A aprovar…" : "Aprovar e enviar ao fornecedor"}
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

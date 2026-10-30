@@ -14,6 +14,7 @@ import { CatalogoV1 } from "@/emylia/CatalogoV1";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo, type CatalogoCarregado } from "@/emylia/real/carregarCatalogo";
 import { diferencasCatalogo, executarCatalogo, fotografar, type Rpc } from "@/emylia/real/gravarCatalogo";
+import { usePaginaInteira } from "@/hooks/usePaginaInteira";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
@@ -27,6 +28,7 @@ const rpc: Rpc = async (fn, args) => {
 type Base = CatalogoCarregado;
 
 export default function CatalogoCustos() {
+  usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
   const S = useMemo<Estado>(() => { const s = seed(); s.deals = []; return s; }, []);
