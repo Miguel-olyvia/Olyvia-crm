@@ -466,7 +466,8 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       {
         signed: !!contract?.company_signature_date,
         name: contract?.company_signed_by_name,
-        showOtpBadge: false,
+        signedAt: contract?.company_signature_date,
+        showOtpBadge: true,
       },
       {
         signed: !!contract?.signature_date,

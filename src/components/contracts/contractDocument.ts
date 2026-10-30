@@ -202,7 +202,7 @@ export interface PartySignatureInfo {
   name?: string | null;
   signedAt?: string | null;
   ip?: string | null;
-  /** true = client (shows "Assinado via SMS OTP" + name/date/IP); false = company (plain signature, no badge) */
+  /** true = o selo «Assinado via SMS OTP» com nome, data e IP (o do cliente e, desde 30/10, também o da empresa, sem IP); false = só o nome em letra manuscrita */
   showOtpBadge?: boolean;
 }
 
@@ -299,19 +299,25 @@ export function injectSignaturesIntoBlock(
   //    menciona o cliente/segunda parte, a outra não. Isto ignora tanto
   //    wrappers de 1 filho como containers maiores que incluem texto solto
   //    (datas, quebras de linha) ao lado do verdadeiro bloco de colunas.
-  const columnsTarget = candidates.find((el) => {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (!SECOND_PARTY_RE.test(text) || text.length >= 400) return false;
-    const kids = Array.from(el.children) as HTMLElement[];
-    if (kids.length < 2) return false;
-    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""));
-    const companyCol = kids.find((k) => k !== clientCol);
-    if (!clientCol || !companyCol) return false;
-    return hasLineMarker(clientCol) && hasLineMarker(companyCol);
-  });
+  // Vários contentores podem passar neste teste (o wrapper das colunas e, por cima dele, o parágrafo «Pontinha, ____» que o contém, cujo
+  // «____» da data por preencher também conta como linha). Escolhe-se o MAIS INTERIOR (o de menos texto): é o das duas colunas verdadeiras,
+  // e assim cada assinatura fica por cima da linha da sua parte e não empilhadas antes das duas.
+  const textoDe = (el: Element): string => (el.textContent || "").replace(/\s+/g, " ").trim();
+  const columnsTarget = candidates
+    .filter((el) => {
+      const text = textoDe(el);
+      if (!SECOND_PARTY_RE.test(text) || text.length >= 400) return false;
+      const kids = (Array.from(el.children) as HTMLElement[]).filter((k) => k.tagName !== "BR");
+      if (kids.length < 2) return false;
+      const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""));
+      const companyCol = kids.find((k) => k !== clientCol);
+      if (!clientCol || !companyCol) return false;
+      return hasLineMarker(clientCol) && hasLineMarker(companyCol);
+    })
+    .reduce<Element | undefined>((melhor, el) => (melhor === undefined || textoDe(el).length < textoDe(melhor).length ? el : melhor), undefined);
 
   if (columnsTarget) {
-    const kids = Array.from(columnsTarget.children) as HTMLElement[];
+    const kids = (Array.from(columnsTarget.children) as HTMLElement[]).filter((k) => k.tagName !== "BR");
     const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""))!;
     const companyCol = kids.find((k) => k !== clientCol)!;
     // Inserir mesmo antes da linha (não no início da coluna) — a assinatura
@@ -1378,7 +1384,8 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
     {
       signed: !!contract.company_signature_date,
       name: contract.company_signed_by_name,
-      showOtpBadge: false,
+      signedAt: contract.company_signature_date,
+      showOtpBadge: true,
     },
     {
       signed: !!contract.signature_date,
