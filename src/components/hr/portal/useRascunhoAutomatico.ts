@@ -4,8 +4,8 @@
  *
  *  - Nunca grava o que acabou de ler (um rascunho igual ao lido) nem o que ja gravou.
  *  - O NISS e o IBAN seguem a parte (o hook valida o formato e so reenvia o que mudou). Quando a Edge diz
- *    que ficaram no cofre, o campo limpa-se (se a pessoa nao mexeu entretanto): depois de guardados nunca
- *    se mostram por inteiro; a saudacao mostra os 4 ultimos digitos.
+ *    que ficaram no cofre, o campo NAO se limpa — a pessoa precisa de ver o que escreveu ate submeter.
+ *    A saudacao mostra os 4 ultimos digitos.
  *  - Ao fechar o separador segue so o rascunho, sem NISS nem IBAN (ninguem confirma esse pedido).
  *  - Em processo `devolvida` segue o que o servidor tem com as chaves devolvidas alteradas por cima.
  */
@@ -33,7 +33,7 @@ interface Opcoes {
   ativo: boolean;
 }
 
-export function useRascunhoAutomatico({ dados, rascunho, definir, escrita, ativo }: Opcoes): { gravarJa: () => Promise<void> } {
+export function useRascunhoAutomatico({ dados, rascunho, escrita, ativo }: Opcoes): { gravarJa: () => Promise<void> } {
   const podeEditar = ativo && estadoPermiteEditar(dados.estado);
   // Preenchido uma so vez, a partir do que a `ler` trouxe: gravar de volta o que se acabou de ler nao e gravar.
   const lidoRef = useRef(rascunhoLido(dados));
@@ -48,8 +48,6 @@ export function useRascunhoAutomatico({ dados, rascunho, definir, escrita, ativo
   dadosRef.current = dados;
   const escritaRef = useRef(escrita);
   escritaRef.current = escrita;
-  const definirRef = useRef(definir);
-  definirRef.current = definir;
 
   const gravarJa = useCallback(async (): Promise<void> => {
     const atual = atualRef.current;
@@ -67,15 +65,8 @@ export function useRascunhoAutomatico({ dados, rascunho, definir, escrita, ativo
       return;
     }
     confirmadoRef.current = aEnviar;
-    // Guardado no cofre: o campo limpa-se, a menos que a pessoa ja tenha mexido nele.
-    if (resultado.nissGuardado && niss !== "") {
-      if (atualRef.current.niss.trim() === niss) definirRef.current("niss", "");
-      if (ultimoRef.current) ultimoRef.current = { ...ultimoRef.current, niss: "" };
-    }
-    if (resultado.ibanGuardado && iban !== "") {
-      if (atualRef.current.conta_numero.trim() === iban) definirRef.current("conta_numero", "");
-      if (ultimoRef.current) ultimoRef.current = { ...ultimoRef.current, iban: "" };
-    }
+    // O NISS e o IBAN ja ficaram no cofre: o ultimoRef mantem o valor enviado para que a comparacao
+    // na linha seguinte nao o reenvie. O campo NAO se limpa — a pessoa precisa de o ver ate submeter.
   }, []);
 
   useEffect(() => {

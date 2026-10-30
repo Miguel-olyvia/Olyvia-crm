@@ -560,7 +560,7 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(document.body.textContent).not.toMatch(/em separado|separately|só de consulta|view-only/i);
     });
 
-    it("um NISS escrito segue na gravacao (a parte do rascunho), o campo limpa-se e so os 4 ultimos digitos aparecem", async () => {
+    it("um NISS escrito segue na gravacao (a parte do rascunho) e mantem-se visivel no campo", async () => {
       await abrirSessao();
       ligar({
         ...base(),
@@ -581,13 +581,12 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(rascunho).not.toHaveProperty("aceite");
       expect(rascunho.linha1).toBe("Rua das Flores 12");
 
+      // O campo mantem o valor ate a pessoa submeter — nao se limpa apos a gravacao no cofre.
       await irParaPagina1();
-      await waitFor(() => expect(porId("convite-niss")).toHaveValue(""));
-      expect(screen.getByText(txt("hr.convite.jaRegistadoNiss", { ultimos4: "8902" }))).toBeInTheDocument();
-      expect(document.body.innerHTML).not.toContain(NISS_VALIDO);
+      await waitFor(() => expect(porId("convite-niss")).toHaveValue(NISS_VALIDO));
     });
 
-    it("o IBAN vai sem espacos e em maiusculas, e tambem se limpa depois de guardado", async () => {
+    it("o IBAN vai sem espacos e em maiusculas e mantem-se visivel no campo", async () => {
       await abrirSessao();
       await irParaPagina2();
       ligar({
@@ -600,10 +599,9 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(chamadas("rascunho")[0][1].body.iban).toBe(IBAN_VALIDO);
       expect((chamadas("rascunho")[0][1].body.rascunho as Record<string, unknown>)).not.toHaveProperty("conta_numero");
 
+      // O campo mantem o valor ate a pessoa submeter.
       await irParaPagina2();
-      await waitFor(() => expect(porId("convite-conta-numero")).toHaveValue(""));
-      expect(screen.getByText(txt("hr.convite.jaRegistadoConta", { ultimos4: "0154" }))).toBeInTheDocument();
-      expect(document.body.innerHTML).not.toContain(IBAN_VALIDO);
+      await waitFor(() => expect(porId("convite-conta-numero")).toHaveValue("pt50 0002 0123 1234 5678 9015 4"));
     });
 
     it("um NISS invalido mostra o erro ligado ao campo e nunca segue para a Edge", async () => {

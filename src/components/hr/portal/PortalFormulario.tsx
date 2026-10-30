@@ -9,7 +9,7 @@
  *    devolvidos em `devolvida`); a assinatura e a declaracao editam-se sempre que o estado deixa;
  *  - GRAVAR: rascunho automatico (debounce de 3 s, ao mudar de pagina, ao fechar o separador), ver
  *    `useRascunhoAutomatico`. O NISS e o IBAN seguem com o resto e ficam cifrados no cofre; guardados,
- *    o campo limpa-se e a saudacao mostra so os 4 ultimos digitos;
+ *    o campo mantem o valor visivel ate a pessoa submeter;
  *  - SUBMETER: na pagina 2, valida como o prototipo (assinatura, declaracao, obrigatorios, formato),
  *    leva a pessoa ao campo em falta e, no sucesso, a pagina mostra o ecra de sucesso.
  *
