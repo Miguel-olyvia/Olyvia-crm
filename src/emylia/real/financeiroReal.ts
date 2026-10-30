@@ -74,6 +74,9 @@ function aplicarResposta(d: Negocio, o: OpFinanceira, r: Record<string, unknown>
   }
   const rc = typeof r.recibo === "string" ? r.recibo : null;
   if (!rc) return;
+  // 30/10 (visto no browser): o ecrã numera o recibo antes de a base responder (RC 2026/301) e escreve-o no histórico; fica o da base
+  const antes = [d.fin.recibo?.n, ...(d.fin.tranches ?? []).map((x) => x.recibo)].filter((x): x is string => !!x && x !== rc);
+  for (const h of d.hist ?? []) for (const v of antes) if (h.t.includes(v)) h.t = h.t.split(v).join(rc);
   const t = d.fin.tranches?.find((x) => x.numero.trim() === o.fatura);
   if (t) {
     // 29/10: a tranche paga pelo cartão Pagamento fica com o pagamento; a 1.ª paga é a do negócio, que fica com o recibo da base

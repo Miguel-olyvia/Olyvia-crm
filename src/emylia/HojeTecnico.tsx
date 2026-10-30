@@ -73,7 +73,8 @@ export function HojeTecnico(ctx: Ctx) {
   if (fixo && !(fixo.ref && TECS.some((x) => x.id === fixo.ref))) return <SemTecnicoLigado />;
   // 24/10: uma organização real ainda sem técnicos de obra (criam-se em Utilizadores): nada para ver como técnico
   if (!TECS.length) return <SemTecnicos />;
-  const eu = fixo?.ref ? fixo.ref : S.tec && TECS.some((x) => x.id === S.tec) ? S.tec : comTrabalho[0] ?? "hn";
+  const eu = fixo?.ref ? fixo.ref : S.tec && TECS.some((x) => x.id === S.tec) ? S.tec : comTrabalho[0] ?? (TECS.some((x) => x.id === "hn") ? "hn" : TECS[0].id);
+  // 30/10 (visto no browser): com os técnicos do RH não há o "hn" do exemplo; sem trabalho para ninguém, rebentava (tec undefined)
   const tec = TECS.find((x) => x.id === eu)!;
   const hoje = trabalhoDoTecnico(S.deals, eu);
   const seguir = aSeguirDoTecnico(S.deals, eu);

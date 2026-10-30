@@ -74,6 +74,14 @@ export function aplicarNomesPapeis(m: MeusPapeis): void {
 }
 
 const ORIGINAIS: Record<Papel, (typeof PAPEIS)[Papel]> = Object.fromEntries((Object.keys(PAPEIS) as Papel[]).map((p) => [p, { ...PAPEIS[p] }])) as Record<Papel, (typeof PAPEIS)[Papel]>;
+/** 30/10: os papéis que quem entrou pode escolher no "A ver como" (null: todos, como na V1). Os ecrãs que oferecem "mudar para o
+ *  Financeiro" só o oferecem a quem o pode ser. */
+let escolhiveis: Papel[] | null = null;
+export const definirPapeisEscolhiveis = (L: Papel[] | null): void => { escolhiveis = L; };
+export const podeVerComo = (p: Papel): boolean => !escolhiveis || escolhiveis.includes(p);
+/** "Só o Financeiro" na Olyvia; "Só o Financeiro ou a Direção" na V1. */
+export const quemFatura = (): string => (PERMS_PAPEL.direcao.includes("*") ? "Só o Financeiro ou a Direção" : "Só o Financeiro");
+
 const DIRECAO_V1 = PERMS_PAPEL.direcao;
 /** Na Olyvia, a fatura e o pagamento são só do Financeiro (a base também o exige: neg_papeis_permissoes); na V1 a Direção tinha tudo.
  *  A Direção fica com o resto (aprovar a margem, anular, a equipa). */
@@ -84,4 +92,5 @@ export function aplicarPermissoesReais(): void {
 export function reporNomesPapeis(): void {
   for (const p of Object.keys(ORIGINAIS) as Papel[]) PAPEIS[p] = { ...ORIGINAIS[p] };
   PERMS_PAPEL.direcao = DIRECAO_V1;
+  escolhiveis = null;
 }

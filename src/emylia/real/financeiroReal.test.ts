@@ -72,6 +72,14 @@ describe("gravarFinanceiro", () => {
     expect(avisos).toEqual([]);
   });
 
+  it("30/10 (visto no browser): o histórico fica com o recibo da base, não com o que o ecrã numerou", async () => {
+    const d = neg({ fin: { fatura: { n: "FAT 1", q: "x" }, pago: true, recibo: { n: "RC 2026/301", q: "hoje" } },
+      hist: [{ t: "Pagamento validado · RC 2026/301 emitido", q: "hoje", k: "a" }, { t: "Fatura FAT 1 registada", q: "hoje", k: "a" }] } as Partial<Negocio>);
+    const rpc = vi.fn(async (fn: string) => ({ data: fn === "neg_validar_pagamento" ? { recibo: "RC 2026/3" } : {}, error: null }));
+    await gravarFinanceiro({ rpc } as never, ORG, NEG, d, financeiroDe(d));
+    expect(d.hist.map((h) => h.t)).toEqual(["Pagamento validado · RC 2026/3 emitido", "Fatura FAT 1 registada"]);
+  });
+
   it("29/10: tranche registada e pagamento validado pelo cartão Pagamento: o pagamento vai à base (a EC nasce lá) e o recibo é o da base", async () => {
     const d = neg({ f: { data_pag: "2026-10-29", conta: "Banco A", comprovativo: "TRF 7" } as Negocio["f"],
       fin: { fatura: { n: "gvgvv", q: "29/10" }, pago: true, recibo: { n: "RC 2026/301", q: "hoje" }, tranches: [

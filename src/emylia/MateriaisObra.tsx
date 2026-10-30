@@ -11,7 +11,7 @@ import { useInventario } from "./inventario/loja";
 import { faltaMateriaisReal, prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { entregaTarde, textoMateriais } from "./preparacaoObra";
-import { ecDaAdenda, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
+import { ecDaAdenda, linhasDaEc, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
 import { assinadas, primeiraPaga } from "./adendas";
 import { aprovadorPo } from "./real/encomendaReal";
 
@@ -25,6 +25,8 @@ function grupoDe(l: LinhaResumoNeg | undefined, exemplo: boolean): Grupo {
   if (estadoLinhaNegocio(l).ok) return "ok";
   return l.aChegar > 0 && l.pos.some((p) => p.fase !== "por aprovar") ? "caminho" : "resolver";
 }
+/** 30/10: o estado da encomenda a fornecedor real, em português (o estado da base vem em inglês: ordered, received…) */
+const FASE_PO: Record<string, string> = { "no portal": "encomendada · à espera do fornecedor", "por email": "encomendada · à espera do fornecedor", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
 const ddmm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
 /** Quantas linhas estão garantidas para arrancar (para o resumo do passo na lista). */
@@ -82,7 +84,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           <div className="min-w-0">
             <h3 id="mat-t" className="text-xl font-semibold tracking-tight">{titulo}</h3>
             <p className="mt-0.5 text-[15px] text-muted-foreground">
-              Encomenda de cliente {ec.n} · {exemplo ? `de ${ec.criada}` : `emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}`} · {ec.linhas.length} {ec.linhas.length === 1 ? "material" : "materiais"}
+              Encomenda de cliente {ec.n} · {exemplo ? `de ${ec.criada}` : `emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}`} · {linhasDaEc(ec).length} {linhasDaEc(ec).length === 1 ? "material" : "materiais"}
             </p>
             {ajustes.map((a) => (
               <p key={a.n} className="text-[15px] text-muted-foreground">{a.adenda ? `Encomenda da adenda ${a.adenda} · ${a.n} · emitida ao validar o pagamento da adenda` : `Encomenda de ajuste ${a.n} · ${a.motivo}`} · {a.linhas.length} {a.linhas.length === 1 ? "material" : "materiais"}</p>
@@ -195,7 +197,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
                 <li key={p.id} className="flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-[15px]">
                   <span>{p.id} <span className="text-muted-foreground">· {p.forn.replace(" (exemplo)", "")}</span></span>
                   <span className={cn("text-sm", p.fase === "por aprovar" ? "text-warning" : p.fase === "recebida" ? "text-success" : "text-muted-foreground")}>
-                    {p.fase === "por aprovar" && p.uuid ? "por aprovar por Compras e armazém" : p.estado.split(" · ").at(-1)}{(p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial") && p.prevista ? ` · chega a ${ddmm(p.prevista)}${p.prometida ? "" : " (prevista)"}` : ""}
+                    {p.fase === "por aprovar" && p.uuid ? "por aprovar por Compras e armazém" : p.uuid ? FASE_PO[p.fase] ?? p.fase : p.estado.split(" · ").at(-1)}{(p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial") && p.prevista ? ` · chega a ${ddmm(p.prevista)}${p.prometida ? "" : " (prevista)"}` : ""}
                   </span>
                   {podeAprovar && p.fase === "por aprovar" && p.uuid && (
                     <Button size="sm" disabled={aAprovar !== null} onClick={() => { const id = p.uuid!; setAAprovar(id); void aprovar!(id).finally(() => setAAprovar(null)); }}>

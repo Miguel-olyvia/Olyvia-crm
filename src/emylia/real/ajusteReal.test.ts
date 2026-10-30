@@ -3,16 +3,18 @@
 // do browser, e a encomenda de cliente da base não tem a referência dele.
 import { afterEach, describe, expect, it } from "vitest";
 import { seed, type Negocio, type Tarefa } from "../motor";
-import { ajusteReal, definirAjusteReal, desfazerAjusteReal, porEncomendarDe, type LinhaAjusteReal } from "../encomendasAjuste";
+import { ajusteReal, definirAjusteReal, desfazerAjusteReal, linhasDaEc, porEncomendarDe, type LinhaAjusteReal } from "../encomendasAjuste";
+import { definirEncomendasReais, resumoDaBase } from "./encomendaReal";
 import { consumiveisConhecidos, definirMateriaisReais } from "../tarefasValidador";
 
-afterEach(() => { definirAjusteReal(null); definirMateriaisReais(null); });
+afterEach(() => { definirAjusteReal(null); definirMateriaisReais(null); definirEncomendasReais(null); });
 
 /** Um negócio com a encomenda de cliente da base (contrato, sem ref) e uma tarefa nova com materiais. */
 function negocioReal(mats: Tarefa["mats"]): Negocio {
   const d = structuredClone(seed().deals[0]);
   d.perdido = false;
-  d.obra.ec = { n: "EC-2026-0001", estado: "emitida", criada: "hoje", linhas: [], valor: 0, custo: 0, contrato: "ct-1" };
+  // como a base a dá: com o contrato e a referência do negócio (negocioBase.ts)
+  d.obra.ec = { n: "EC-2026-0001", estado: "emitida", criada: "hoje", linhas: [], valor: 0, custo: 0, contrato: "ct-1", ref: "CT 2026/1010" };
   d.obra.plano = { estado: "aprovado", dia: 0, origem: "orcamento", inicio: "2026-11-02",
     tasks: [{ nome: "Reboco", svcs: [], dia: 0, dur: 1, sk: "Pedreiro", h: 4, tec: null, nova: true, mats } as Tarefa] };
   return d;
@@ -21,6 +23,23 @@ function negocioReal(mats: Tarefa["mats"]): Negocio {
 describe("os materiais novos da obra na Olyvia", () => {
   it("sem a ligação à base (a V1), não é aqui: segue o Inventário do browser", () => {
     expect(ajusteReal(negocioReal([{ n: "Estuque", q: 2, un: "saco", produto: "p1" }]), "tarefa nova")).toBeNull();
+    // e a encomenda do Inventário do browser (sem contrato) também não, mesmo com a ligação
+    definirAjusteReal(() => { throw new Error("não devia pedir"); });
+    const d = negocioReal([{ n: "Estuque", q: 2, un: "saco", produto: "p1" }]);
+    delete d.obra.ec!.contrato;
+    expect(ajusteReal(d, "tarefa nova")).toBeNull();
+  });
+
+  it("30/10 (visto no browser): as linhas da encomenda de cliente da base vêm do documento dela (no negócio vêm vazias)", () => {
+    const d = negocioReal([]);
+    expect(linhasDaEc(d.obra.ec!)).toEqual([]);
+    definirEncomendasReais(new Map([["CT 2026/1010", resumoDaBase({ order_number: "EC-2026-0001", lines: [
+      { quote_line_id: "q1", item_type: "product", product_id: "p1", product_name: "Base de duche", product_sku: null, quantity: 1, unidade: "un", line_status: null,
+        purchase_order_id: null, qty_needed: 1, qty_reserved: 1, qty_ordered: 0, qty_received: 0, qty_missing: 0, qty_served: 0, has_preferred_supplier: true },
+      { quote_line_id: "q2", item_type: "product", product_id: "p2", product_name: "Cerâmico", product_sku: null, quantity: 11, unidade: "m²", line_status: null,
+        purchase_order_id: null, qty_needed: 11, qty_reserved: 0, qty_ordered: 11, qty_received: 0, qty_missing: 11, qty_served: 0, has_preferred_supplier: true },
+    ] }, [])]]));
+    expect(linhasDaEc(d.obra.ec!).map((x) => [x.n, x.q, x.res, x.falta])).toEqual([["Base de duche", 1, 1, 0], ["Cerâmico", 11, 0, 11]]);
   });
 
   it("pede à base o que falta, com o produto e a tarefa, e marca-o como encomendado (não se pede duas vezes)", () => {

@@ -32,7 +32,9 @@ export function estadoDaLinha(l: LinhaDocEc): EstadoLinhaEc {
   if (l.item_type !== "product") return "service";
   const q = n(l.qty_needed) || n(l.quantity), servido = n(l.qty_served), res = n(l.qty_reserved), ped = n(l.qty_ordered), rec = n(l.qty_received);
   if (q > 0 && servido >= q) return "served";
-  if (q > 0 && servido + res >= q) return rec > 0 ? "recvpo" : "ready";
+  // 30/10 (visto no browser): como a base (rpc_get_client_order_document: "is_served = qty_served + qty_received >= qty_needed"), o que
+  // chegou do fornecedor para esta linha conta; antes, com a receção feita e a reserva a 0, a linha ficava "parcial" e a obra não arrancava
+  if (q > 0 && servido + Math.max(res, rec) >= q) return rec > 0 ? "recvpo" : "ready";
   if (ped > rec) return "waitpo";
   if (n(l.qty_missing) > 0 && l.has_preferred_supplier === false) return "nosup";
   if (res > 0 || servido > 0) return "partial";

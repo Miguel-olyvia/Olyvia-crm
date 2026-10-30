@@ -22,6 +22,11 @@ describe("estadoDaLinha", () => {
     expect(estadoDaLinha(linha({ qty_missing: 2 }))).toBe("missing");
     expect(estadoDaLinha(linha({ item_type: "service" }))).toBe("service");
   });
+
+  it("30/10 (visto no browser): recebido do fornecedor para a linha, sem reserva nem saída, conta como pronto (a regra da base)", () => {
+    expect(estadoDaLinha(linha({ qty_needed: 1, quantity: 1, qty_ordered: 1, qty_received: 1, line_status: "recebido" }))).toBe("recvpo");
+    expect(resumoDaBase({ order_number: "EC-1", lines: [linha({ qty_needed: 1, quantity: 1, qty_ordered: 1, qty_received: 1 })] }, []).pronta).toBe(true);
+  });
 });
 
 describe("resumoDaBase", () => {

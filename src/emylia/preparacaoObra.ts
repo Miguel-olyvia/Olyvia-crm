@@ -20,7 +20,7 @@ import { faltaMateriaisReal, prontidaoDe, textoProntidaoReal, usarProntidao } fr
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
 import { assinadas, diasAdenda, faturasAdenda, nomeParcela, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
-import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
+import { ecDaAdenda, linhasDaEc, porEncomendarDe } from "./encomendasAjuste";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
 export interface LinhaEc {
@@ -236,7 +236,7 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
       : { id: "ec", trilho: "ec", estado: "espera", who: null, t: "Encomenda de cliente", sub: EC_NO_PAGAMENTO });
   } else {
     L.push({ id: "ec", trilho: "ec", estado: "feito", who: ec.ref ? "financeiro" : null, t: `Encomenda de cliente ${ec.n}`,
-      sub: `${ec.ref ? `Emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}` : `De ${ec.criada}`} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"} · ${eur(ec.valor)} € na proposta` });
+      sub: `${ec.ref ? `Emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}` : `De ${ec.criada}`} · ${linhasDaEc(ec).length} ${linhasDaEc(ec).length === 1 ? "linha" : "linhas"}${ec.contrato && !ec.valor ? "" : ` · ${eur(ec.valor)} € na proposta`}` });
     if (!ec.ref) L.push({ id: "ec-inv", trilho: "ec", estado: "feito", who: null, t: "Materiais na obra", sub: "Obra do exemplo, de antes do Inventário novo." });
     else if (inv !== undefined) L.push(!inv
       ? { id: "ec-inv", trilho: "ec", estado: "espera", who: null, t: "No Inventário", sub: "A encomenda ainda não está no Inventário (os dados de exemplo foram repostos): volta a ser emitida sozinha." }

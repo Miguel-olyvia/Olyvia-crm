@@ -17,7 +17,8 @@ import { executar, lerInventario } from "./inventario/loja";
 import { emitirNoInventario, idAjuste, pedidoDoNegocio, refAjuste, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { mudarInicio } from "./ajustesPlano";
 import { deIso, diasDaObra, isoDia } from "./planoObra";
-import { inicioDoPlano, type EcAjuste, type LinhaEc } from "./preparacaoObra";
+import { inicioDoPlano, type EcAjuste, type EncCliente, type LinhaEc } from "./preparacaoObra";
+import { encomendaReal } from "./real/encomendaReal";
 import type { MatTarefa, Negocio, Plano, Tarefa } from "./motor";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -34,7 +35,8 @@ export const definirAjusteReal = (f: PedirAjusteReal | null): void => { pedirRea
 /** null: não é a Olyvia (segue o Inventário do browser). Senão, marca o que fica encomendado em cada tarefa e pede-o à base. */
 export function ajusteReal(d: Negocio, motivo: string, adenda?: string): { n: number; linhas: string[] } | { erro: string } | null {
   const base = d.obra.ec;
-  if (!pedirReal || adenda || !base || base.ref || !base.contrato || !d.obra.plano || d.perdido) return null;
+  // a encomenda da base tem contrato (e também a referência, negocioBase.ts); a do Inventário do browser não tem contrato
+  if (!pedirReal || adenda || !base?.contrato || !d.obra.plano || d.perdido) return null;
   const P = porEncomendarDe(d);
   if (!P.length) return { n: 0, linhas: [] };
   const sem = [...new Set(P.filter((x) => !x.m.produto).map((x) => x.m.n))];
@@ -97,11 +99,22 @@ export function linhasDeAjuste(P: PorEncomendar[]): LinhaEc[] {
 }
 
 /** As linhas de materiais da obra: as da encomenda inicial e as de cada encomenda de ajuste (não anulada), com o número de cada uma. */
+/** 30/10 (visto no browser): as linhas da encomenda de cliente. As da base não vêm no negócio (obraDaEc: linhas []): leem-se do
+ *  documento da encomenda (encomendaReal), com o reservado e o que falta. Sem o documento lido, nenhuma. */
+export function linhasDaEc(ec: EncCliente): LinhaEc[] {
+  if (ec.linhas.length || !ec.contrato) return ec.linhas;
+  const r = encomendaReal(ec.ref);
+  return (r?.linhas ?? []).map((l) => {
+    const tem = r2(l.pronto + l.saida);
+    return { n: l.n, q: l.q, un: l.un, de: "material" as const, res: Math.min(l.q, tem), falta: r2(Math.max(0, l.q - tem)), custo: 0, preco: 0 };
+  });
+}
+
 export function linhasDaObra(d: Negocio): { x: LinhaEc; ec: string; motivo?: string }[] {
   const ec = d.obra.ec;
   if (!ec) return [];
   return [
-    ...ec.linhas.map((x) => ({ x, ec: ec.n })),
+    ...linhasDaEc(ec).map((x) => ({ x, ec: ec.n })),
     ...(d.obra.ecsAjuste ?? []).filter((a) => !a.anulada).flatMap((a) => a.linhas.map((x) => ({ x, ec: a.n, motivo: a.motivo }))),
   ];
 }
