@@ -10,7 +10,7 @@ import type { Ctx } from "./pecas";
 import { ListaObras, PaginaObra } from "./ObraOperacoes";
 import { useInventario } from "./inventario/loja";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio } from "./inventario/ponteNegocios";
-import { linhasDaObra } from "./encomendasAjuste";
+import { linhasDaObra, totaisDaEc } from "./encomendasAjuste";
 
 /** As Operações (15/10: refeitas em ObraOperacoes.tsx): a lista de obras, ou a página da obra aberta. */
 export function OperacoesSimples(ctx: Ctx) {
@@ -60,7 +60,7 @@ export function InventarioSimples(ctx: Ctx) {
       {aba === "ec" && (
         <ul className="mt-8 space-y-4 animate-in fade-in-0 duration-200">
           {ecs.map((d) => {
-            const ec = d.obra.ec!, inv = resumoEcNegocio(db, ec.ref);
+            const ec = d.obra.ec!, inv = resumoEcNegocio(db, ec.ref), tot = totaisDaEc(d, ec); // 30/10: a da base vem a 0 no negócio: somam-se as linhas
             return (
               <li key={d.id} className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -79,7 +79,7 @@ export function InventarioSimples(ctx: Ctx) {
                   ))}
                 </ul>
                 <p className="mt-2 flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-[15px]">
-                  <span className="text-muted-foreground">Custo {eur(ec.custo ?? 0)} € · na proposta {eur(ec.valor)} €</span>
+                  <span className="text-muted-foreground">Custo {eur(tot.custo)} € · na proposta {eur(tot.valor)} €</span>
                   {ec.ref && <button type="button" onClick={go(() => A.abrirInv(d.id))} className="text-sm font-medium text-primary underline-offset-4 hover:underline">Lida do Inventário</button>}
                 </p>
               </li>

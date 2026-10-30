@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, Plus, Calendar, LayoutGrid, List, Settings2, Users, Layers, HelpCircle, Settings, Trash2, RotateCcw } from 'lucide-react';
+import { Loader2, Plus, Calendar, LayoutGrid, List, Settings2, Users, Layers, HelpCircle, Settings, Trash2, RotateCcw, HardHat } from 'lucide-react';
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/toast';
@@ -36,6 +36,14 @@ import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { FleetScheduleItemDialog } from '@/components/scheduling/FleetScheduleItem';
 import { FLEET_READ_ONLY_MESSAGE, isFleetScheduleItem } from '@/lib/agenda/fleet';
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
+import { useObraTarefasAgenda } from '@/hooks/useObraTarefasAgenda';
+import { eventosObra, filtrarPessoasObra, filtroDeAlvos, type FiltroPessoasObra } from '@/lib/agenda/obraTarefas';
+
+/** O interruptor "Obras" (as tarefas de obra no calendário) fica guardado neste browser. */
+const CHAVE_MOSTRAR_OBRAS = 'agenda.mostrarObras';
+const lerMostrarObras = (): boolean => {
+  try { return localStorage.getItem(CHAVE_MOSTRAR_OBRAS) !== '0'; } catch { return true; }
+};
 
 type ViewMode = 'month' | 'week' | 'day';
 type TabType = 'calendar' | 'boards' | 'resources' | 'rules';
@@ -157,6 +165,20 @@ export default function Scheduling() {
   const [reactivatingResourceId, setReactivatingResourceId] = useState<string | null>(null);
 
   const { settings, holidays } = useScheduleSettings(activeCompany?.id);
+
+  // Tarefas de obra (plano da obra no negócio), só de leitura, no intervalo visível do calendário
+  const [mostrarObras, setMostrarObras] = useState<boolean>(lerMostrarObras);
+  const alternarObras = () => setMostrarObras(prev => {
+    const next = !prev;
+    try { localStorage.setItem(CHAVE_MOSTRAR_OBRAS, next ? '1' : '0'); } catch { /* sem localStorage: fica só nesta sessão */ }
+    return next;
+  });
+  const intervaloVisivel = useMemo(() => {
+    if (viewMode === 'month') return { de: startOfWeek(startOfMonth(currentDate), { weekStartsOn: 1 }), ate: endOfWeek(endOfMonth(currentDate), { weekStartsOn: 1 }) };
+    if (viewMode === 'week') return { de: startOfWeek(currentDate, { weekStartsOn: 1 }), ate: endOfWeek(currentDate, { weekStartsOn: 1 }) };
+    return { de: currentDate, ate: currentDate };
+  }, [currentDate, viewMode]);
+  const obras = useObraTarefasAgenda(activeCompany?.id, intervaloVisivel.de, intervaloVisivel.ate, mostrarObras && activeTab === 'calendar');
 
   // Recursos inactivos ficam de fora do fetchResources normal (schedule_resources.is_active = true).
   // Só se pede a lista completa quando o utilizador liga "Mostrar inactivos" — evita um pedido extra
@@ -451,6 +473,26 @@ export default function Scheduling() {
     return users.filter(u => u.id === anewUserId);
   }, [users, canSeeAll, isTeamScope, anewUserId, teamMemberIds]);
 
+  // As tarefas de obra seguem o "Ver" e os recursos escolhidos, como as marcações. A pessoa do RH encontra-se pela conta ligada
+  // (pessoas_contas: anew_users.id → pessoa) e, sem conta ligada, pelo nome (ver lib/agenda/obraTarefas). Os quadros não se aplicam:
+  // as obras não são de quadro nenhum, ligam-se e desligam-se no "Obras".
+  const obraEventos = useMemo(() => {
+    if (!mostrarObras) return [];
+    const nomeDe = (id: string | null | undefined) => (id ? users.find(u => u.id === id)?.name : undefined);
+    const filtros: FiltroPessoasObra[] = [];
+    if (scheduleScope === 'mine') {
+      filtros.push(filtroDeAlvos([{ userId: currentUserId, nomes: [nomeDe(currentUserId)] }], obras.pessoaDoUtilizador));
+    } else if (scheduleScope === 'team') {
+      const ids = [currentUserId, ...teamAuthUserIds];
+      filtros.push(filtroDeAlvos(ids.map(id => ({ userId: id, nomes: [nomeDe(id)] })), obras.pessoaDoUtilizador));
+    }
+    if (selectedResourceIds.length > 0) {
+      const escolhidos = resources.filter(r => selectedResourceIds.includes(r.id));
+      filtros.push(filtroDeAlvos(escolhidos.map(r => ({ userId: r.user_id, nomes: [r.name, r.user?.name] })), obras.pessoaDoUtilizador));
+    }
+    return eventosObra(filtrarPessoasObra(obras.pessoas, filtros), obras.de, obras.ate);
+  }, [mostrarObras, obras.pessoas, obras.pessoaDoUtilizador, obras.de, obras.ate, scheduleScope, currentUserId, teamAuthUserIds, selectedResourceIds, resources, users]);
+
   if (loading && boards.length === 0) return <><div className="flex justify-center items-center h-64"><OlyviaLoader size={40} /></div></>;
 
   return (
@@ -536,6 +578,13 @@ export default function Scheduling() {
                       </Popover>
                     )}
                     {selectedBoardIds.length > 0 && <Button variant="ghost" size="sm" onClick={() => setSelectedBoardIds([])}>{t('scheduling.clear')}</Button>}
+                    <Badge role="switch" aria-checked={mostrarObras} tabIndex={0} data-testid="agenda-toggle-obras"
+                      variant={mostrarObras ? 'default' : 'outline'} className="cursor-pointer transition-colors gap-1"
+                      title="Mostrar as tarefas de obra (planeadas no negócio, só de leitura)"
+                      onClick={alternarObras}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); alternarObras(); } }}>
+                      <HardHat className="h-3 w-3" aria-hidden />Obras
+                    </Badge>
                   </div>
                   {resources.length > 0 && (
                     <div className="flex items-center gap-2 flex-wrap">
@@ -575,7 +624,7 @@ export default function Scheduling() {
               <CardContent className="p-4">
                 <ScheduleCalendarView items={items} boards={boards} currentDate={currentDate} onDateChange={setCurrentDate}
                   onItemClick={handleItemClick} onItemDrop={handleItemDrop} onAddClick={handleAddClick} viewMode={viewMode}
-                  settings={settings} holidays={holidays} />
+                  settings={settings} holidays={holidays} obraEventos={obraEventos} />
               </CardContent>
             </Card>
           </TabsContent>

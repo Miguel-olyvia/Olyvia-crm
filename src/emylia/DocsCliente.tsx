@@ -7,7 +7,7 @@ import { Armchair, Check, Copy, Grid3x3, Hammer, HardHat, Mail, Maximize2, Messa
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useInventario } from "./inventario/loja";
-import { linhasDaObra } from "./encomendasAjuste";
+import { linhasDaObra, totaisDaEc } from "./encomendasAjuste";
 import { ESTADO_PO_POR_APROVAR, estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
@@ -890,7 +890,7 @@ export function NotaEncomendaDoc({ d }: { d: Negocio }) {
           );
         })}
       </ul>
-      <div className="flex items-baseline justify-between"><span className="text-slate-600">Materiais, sem IVA (IVA a 23%)</span><span className="text-lg font-semibold tabular-nums">{eur(ec.valor)} €</span></div>
+      <div className="flex items-baseline justify-between"><span className="text-slate-600">Materiais, sem IVA (IVA a 23%)</span><span className="text-lg font-semibold tabular-nums">{eur(totaisDaEc(d, ec).valor)} €</span></div>
       <section className="rounded-xl bg-slate-50 p-4">
         <p className="font-medium">{prontos === todas.length ? "Tudo pronto para a obra." : `${prontos} de ${todas.length} prontos para a obra.`}</p>
         <p className="text-slate-600">{p ? `Tudo em obra antes do início, a ${rotuloDia(p, 0)}.` : "A data de entrega segue o início da obra."} Avisamos no portal quando chegar.</p>

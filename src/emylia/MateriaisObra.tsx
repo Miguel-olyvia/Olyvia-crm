@@ -11,7 +11,7 @@ import { useInventario } from "./inventario/loja";
 import { faltaMateriaisReal, prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { entregaTarde, textoMateriais } from "./preparacaoObra";
-import { ecDaAdenda, linhasDaEc, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
+import { ecDaAdenda, linhasDaEc, linhasDaObra, porEncomendarDe, totaisDaEc } from "./encomendasAjuste";
 import { assinadas, primeiraPaga } from "./adendas";
 import { aprovadorPo } from "./real/encomendaReal";
 
@@ -60,6 +60,8 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   );
 
   const exemplo = !ec.ref && !ec.contrato, c = contaMateriais(d, r)!, pronto = materiaisProntos(d, r);
+  // 30/10: a da base vem a 0 no negócio: o custo e o valor somam-se das linhas (totaisDaEc)
+  const tot = totaisDaEc(d, ec);
   const todosNaObra = exemplo || (!!r && r.linhas.length > 0 && r.linhas.every((l) => l.st === "served"));
   // 21/10: com as linhas das encomendas de ajuste (materiais novos de tarefas novas, adendas ou mudados à mão)
   const linhas = linhasDaObra(d).map(({ x, ec: n, motivo }) => { const l = linhaDoResumo(r, x.n, n); return { x, l, n, motivo, g: grupoDe(l, exemplo) }; });
@@ -84,7 +86,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           <div className="min-w-0">
             <h3 id="mat-t" className="text-xl font-semibold tracking-tight">{titulo}</h3>
             <p className="mt-0.5 text-[15px] text-muted-foreground">
-              Encomenda de cliente {ec.n} · {exemplo ? `de ${ec.criada}` : `emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}`} · {linhasDaEc(ec).length} {linhasDaEc(ec).length === 1 ? "material" : "materiais"}
+              Encomenda de cliente {ec.n} · {exemplo ? `de ${ec.criada}` : `emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}`} · {linhasDaEc(d, ec).length} {linhasDaEc(d, ec).length === 1 ? "material" : "materiais"}
             </p>
             {ajustes.map((a) => (
               <p key={a.n} className="text-[15px] text-muted-foreground">{a.adenda ? `Encomenda da adenda ${a.adenda} · ${a.n} · emitida ao validar o pagamento da adenda` : `Encomenda de ajuste ${a.n} · ${a.motivo}`} · {a.linhas.length} {a.linhas.length === 1 ? "material" : "materiais"}</p>
@@ -215,7 +217,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
       <section aria-labelledby="mat-custo-t">
         <h3 id="mat-custo-t" className="text-[17px] font-semibold tracking-tight">Custo dos materiais</h3>
         <dl className="mt-3 grid grid-cols-3 gap-3">
-          {([["Custo", `${eur(ec.custo ?? 0)} €`], ["Na proposta", `${eur(ec.valor)} €`], ["Margem", ec.valor > 0 ? pct((ec.valor - (ec.custo ?? 0)) / ec.valor) : "—"]] as [string, string][]).map(([k, v]) => (
+          {([["Custo", `${eur(tot.custo)} €`], ["Na proposta", `${eur(tot.valor)} €`], ["Margem", tot.valor > 0 ? pct((tot.valor - tot.custo) / tot.valor) : "—"]] as [string, string][]).map(([k, v]) => (
             <div key={k} className="rounded-xl border border-border bg-card px-3 py-2.5"><dt className="text-sm text-muted-foreground">{k}</dt><dd className="text-lg font-semibold tabular-nums">{v}</dd></div>
           ))}
         </dl>

@@ -17,7 +17,9 @@ import { executar, lerInventario } from "./inventario/loja";
 import { emitirNoInventario, idAjuste, pedidoDoNegocio, refAjuste, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { mudarInicio } from "./ajustesPlano";
 import { deIso, diasDaObra, isoDia } from "./planoObra";
-import { inicioDoPlano, type EcAjuste, type EncCliente, type LinhaEc } from "./preparacaoObra";
+import { custosDosMateriais, inicioDoPlano, type EcAjuste, type EncCliente, type LinhaEc } from "./preparacaoObra";
+import { normal } from "./catalogo";
+import { precoProduto } from "./produtosVisita";
 import { encomendaReal } from "./real/encomendaReal";
 import type { MatTarefa, Negocio, Plano, Tarefa } from "./motor";
 
@@ -98,23 +100,40 @@ export function linhasDeAjuste(P: PorEncomendar[]): LinhaEc[] {
   return [...L.values()];
 }
 
-/** As linhas de materiais da obra: as da encomenda inicial e as de cada encomenda de ajuste (não anulada), com o número de cada uma. */
 /** 30/10 (visto no browser): as linhas da encomenda de cliente. As da base não vêm no negócio (obraDaEc: linhas []): leem-se do
- *  documento da encomenda (encomendaReal), com o reservado e o que falta. Sem o documento lido, nenhuma. */
-export function linhasDaEc(ec: EncCliente): LinhaEc[] {
+ *  documento da encomenda (encomendaReal), com o reservado e o que falta. Sem o documento lido, nenhuma.
+ *  30/10: o documento não traz preços (e as linhas material_modelo da proposta vão a 0): o custo e o preço por unidade fazem-se como em
+ *  gerarEncCliente: os produtos da visita (pelo nome) com os do Catálogo; os materiais do modelo, todos juntos, repartem a linha de
+ *  materiais do orçamento (custosDosMateriais), para baterem com o que o cliente aceitou. */
+export function linhasDaEc(d: Negocio, ec: EncCliente): LinhaEc[] {
   if (ec.linhas.length || !ec.contrato) return ec.linhas;
   const r = encomendaReal(ec.ref);
-  return (r?.linhas ?? []).map((l) => {
-    const tem = r2(l.pronto + l.saida);
-    return { n: l.n, q: l.q, un: l.un, de: "material" as const, res: Math.min(l.q, tem), falta: r2(Math.max(0, l.q - tem)), custo: 0, preco: 0 };
+  const prods = (d.visita.prod ?? []).filter((p) => !p.cliente);
+  const L = (r?.linhas ?? []).map((l) => {
+    const tem = r2(l.pronto + l.saida), p = prods.find((x) => normal(x.n.trim()) === normal(l.n.trim()));
+    const base = { n: l.n, q: l.q, un: l.un, res: Math.min(l.q, tem), falta: r2(Math.max(0, l.q - tem)) };
+    return p
+      ? { ...base, de: "produto" as const, custo: r2(p.custo), preco: r2(precoProduto(p) / (p.q || 1)), id: p.id }
+      : { ...base, de: "material" as const, custo: 0, preco: 0 };
   });
+  const mats = L.filter((x) => x.de === "material"), cm = custosDosMateriais(d, mats);
+  mats.forEach((x, j) => Object.assign(x, cm[j]));
+  return L;
 }
 
+/** 30/10: o custo e o valor na proposta da encomenda de cliente. Os da base vêm a 0 no negócio (obraDaEc): somam-se as linhas (linhasDaEc). */
+export function totaisDaEc(d: Negocio, ec: EncCliente): { custo: number; valor: number } {
+  if (ec.linhas.length || !ec.contrato) return { custo: ec.custo ?? 0, valor: ec.valor };
+  const L = linhasDaEc(d, ec);
+  return { custo: r2(L.reduce((a, x) => a + x.custo * x.q, 0)), valor: r2(L.reduce((a, x) => a + x.preco * x.q, 0)) };
+}
+
+/** As linhas de materiais da obra: as da encomenda inicial e as de cada encomenda de ajuste (não anulada), com o número de cada uma. */
 export function linhasDaObra(d: Negocio): { x: LinhaEc; ec: string; motivo?: string }[] {
   const ec = d.obra.ec;
   if (!ec) return [];
   return [
-    ...linhasDaEc(ec).map((x) => ({ x, ec: ec.n })),
+    ...linhasDaEc(d, ec).map((x) => ({ x, ec: ec.n })),
     ...(d.obra.ecsAjuste ?? []).filter((a) => !a.anulada).flatMap((a) => a.linhas.map((x) => ({ x, ec: a.n, motivo: a.motivo }))),
   ];
 }

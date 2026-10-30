@@ -14,6 +14,8 @@ import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
 import { FleetItemBadge } from './FleetScheduleItem';
 import { FLEET_READ_ONLY_MESSAGE, isFleetScheduleItem } from '@/lib/agenda/fleet';
 import type { ScheduleSettings, ScheduleHoliday } from '@/hooks/useScheduleSettings';
+import { eventosObraPorDia, type EventoObra } from '@/lib/agenda/obraTarefas';
+import { ObraTarefaEvento } from './ObraTarefaEvento';
 
 interface ScheduleCalendarViewProps {
   items: ScheduleItem[];
@@ -26,7 +28,12 @@ interface ScheduleCalendarViewProps {
   viewMode: 'month' | 'week' | 'day';
   settings?: ScheduleSettings | null;
   holidays?: ScheduleHoliday[];
+  /** Tarefas de obra (rh_agenda_tecnicos), um evento por dia útil: só de leitura, abrem um resumo. */
+  obraEventos?: EventoObra[];
 }
+
+type EntradaDia = { tipo: 'item'; item: ScheduleItem } | { tipo: 'obra'; evento: EventoObra };
+const SEM_OBRAS: EventoObra[] = [];
 
 export function ScheduleCalendarView({
   items,
@@ -39,6 +46,7 @@ export function ScheduleCalendarView({
   viewMode,
   settings,
   holidays = [],
+  obraEventos = SEM_OBRAS,
 }: ScheduleCalendarViewProps) {
   const { t, language } = useTranslation();
   const { hasPermission } = usePermissions();
@@ -124,6 +132,9 @@ export function ScheduleCalendarView({
     });
     return map;
   }, [items, boards]);
+
+  // Tarefas de obra por dia ("aaaa-mm-dd"): vêm depois das marcações do dia
+  const obrasByDay = useMemo(() => eventosObraPorDia(obraEventos), [obraEventos]);
 
   const getBoardColor = (boardId: string) => {
     const board = boards.find(b => b.id === boardId);
@@ -284,6 +295,10 @@ export function ScheduleCalendarView({
             {days.map(day => {
               const dayKey = format(day, 'yyyy-MM-dd');
               const dayItems = itemsByDay.get(dayKey) || [];
+              const dayEntries: EntradaDia[] = [
+                ...dayItems.map(item => ({ tipo: 'item' as const, item })),
+                ...(obrasByDay.get(dayKey) || []).map(evento => ({ tipo: 'obra' as const, evento })),
+              ];
               const isToday = isSameDay(day, new Date());
               const isCurrentMonth = isSameMonth(day, currentDate);
               const isWeekendStyle = isWeekendDay(day);
@@ -343,7 +358,10 @@ export function ScheduleCalendarView({
                     )}
                   </div>
                   <div className={cn("space-y-1", expandedDays.has(dayKey) ? "max-h-[200px] overflow-y-auto" : "overflow-hidden")}>
-                    {(expandedDays.has(dayKey) ? dayItems : dayItems.slice(0, 3)).map(item => (
+                    {(expandedDays.has(dayKey) ? dayEntries : dayEntries.slice(0, 3)).map(entry => {
+                      if (entry.tipo === 'obra') return <ObraTarefaEvento key={entry.evento.key} evento={entry.evento} variante="month" />;
+                      const item = entry.item;
+                      return (
                       <div
                         key={item.id}
                         draggable={!naoArrastavel(item)}
@@ -374,8 +392,9 @@ export function ScheduleCalendarView({
                         </span>
                         <ConfirmedByClientBadge confirmedAt={item.confirmed_at} className="block" />
                       </div>
-                    ))}
-                    {dayItems.length > 3 && !expandedDays.has(dayKey) && (
+                      );
+                    })}
+                    {dayEntries.length > 3 && !expandedDays.has(dayKey) && (
                       <button
                         type="button"
                         className="text-xs text-muted-foreground pl-1 hover:text-primary cursor-pointer transition-colors"
@@ -384,10 +403,10 @@ export function ScheduleCalendarView({
                           toggleDayExpand(dayKey);
                         }}
                       >
-                        +{dayItems.length - 3} {t('scheduling.more')}
+                        +{dayEntries.length - 3} {t('scheduling.more')}
                       </button>
                     )}
-                    {dayItems.length > 3 && expandedDays.has(dayKey) && (
+                    {dayEntries.length > 3 && expandedDays.has(dayKey) && (
                       <button
                         type="button"
                         className="text-xs text-muted-foreground pl-1 hover:text-primary cursor-pointer transition-colors"
@@ -509,6 +528,9 @@ export function ScheduleCalendarView({
                       </div>
                     ))
                     }
+                    {(obrasByDay.get(dayKey) || []).map(evento => (
+                      <ObraTarefaEvento key={evento.key} evento={evento} variante="week" />
+                    ))}
                   </div>
                 </div>
               </TooltipTrigger>
@@ -526,6 +548,17 @@ export function ScheduleCalendarView({
 
         {viewMode === 'day' && (
           <div className="p-4">
+            {/* Tarefas de obra: dias inteiros, por cima das horas */}
+            {(obrasByDay.get(format(currentDate, 'yyyy-MM-dd')) || []).length > 0 && (
+              <div className="flex border-b pb-2 mb-2">
+                <div className="w-16 text-sm text-muted-foreground pr-2 pt-1 text-right shrink-0">Obras</div>
+                <div className="flex-1 pl-2">
+                  {(obrasByDay.get(format(currentDate, 'yyyy-MM-dd')) || []).map(evento => (
+                    <ObraTarefaEvento key={evento.key} evento={evento} variante="day" />
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Time slots */}
             <div className="space-y-1">
               {Array.from({ length: 24 }, (_, hour) => {
