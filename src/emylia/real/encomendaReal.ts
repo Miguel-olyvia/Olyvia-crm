@@ -15,7 +15,9 @@ export interface LinhaDocEc {
   qty_served: number | null; has_preferred_supplier: boolean | null;
 }
 export interface DocEc { contract_id?: string; order_number: string | null; signed?: boolean; lines: LinhaDocEc[] }
-export interface PoBase { id: string; order_number: string | null; status: string; expected_delivery: string | null; fornecedor: string | null }
+export interface PoBase { id: string; order_number: string | null; status: string; expected_delivery: string | null; fornecedor: string | null;
+  /** 30/10 (20270101410000): publicada no portal do fornecedor, e a data que ele lá prometeu. Sem o campo (leitura antiga), como antes. */
+  publicada?: boolean; prometida?: string | null }
 
 const n = (x: unknown): number => { const v = Number(x); return Number.isFinite(v) ? v : 0; };
 const FASE: Record<string, FasePo> = {
@@ -23,8 +25,10 @@ const FASE: Record<string, FasePo> = {
 };
 
 export const poResumo = (p: PoBase): PoResumoNeg => ({
-  id: p.order_number ?? p.id, forn: p.fornecedor ?? "Fornecedor", estado: p.status, fase: FASE[p.status] ?? "no portal",
-  prometida: null, prevista: (p.expected_delivery ?? "").slice(0, 10),
+  id: p.order_number ?? p.id, uuid: p.id, forn: p.fornecedor ?? "Fornecedor", estado: p.status,
+  // 30/10: encomendada a um fornecedor sem portal (não publicada) não está "no portal do fornecedor"
+  fase: (p.status === "ordered" || p.status === "sent") && p.publicada === false ? "por email" : FASE[p.status] ?? "no portal",
+  prometida: p.prometida ? p.prometida.slice(0, 10) : null, prevista: (p.prometida ?? p.expected_delivery ?? "").slice(0, 10),
 });
 
 /** O estado de uma linha, como o Inventário da V1 o diz (servido, pronto a sair, à espera do fornecedor, sem fornecedor…). */
@@ -32,7 +36,9 @@ export function estadoDaLinha(l: LinhaDocEc): EstadoLinhaEc {
   if (l.item_type !== "product") return "service";
   const q = n(l.qty_needed) || n(l.quantity), servido = n(l.qty_served), res = n(l.qty_reserved), ped = n(l.qty_ordered), rec = n(l.qty_received);
   if (q > 0 && servido >= q) return "served";
-  if (q > 0 && servido + res >= q) return rec > 0 ? "recvpo" : "ready";
+  // 30/10 (visto no browser): como a base (rpc_get_client_order_document: "is_served = qty_served + qty_received >= qty_needed"), o que
+  // chegou do fornecedor para esta linha conta; antes, com a receção feita e a reserva a 0, a linha ficava "parcial" e a obra não arrancava
+  if (q > 0 && servido + Math.max(res, rec) >= q) return rec > 0 ? "recvpo" : "ready";
   if (ped > rec) return "waitpo";
   if (n(l.qty_missing) > 0 && l.has_preferred_supplier === false) return "nosup";
   if (res > 0 || servido > 0) return "partial";
@@ -56,11 +62,30 @@ export function resumoDaBase(doc: DocEc, pos: readonly PoBase[]): ResumoEcNeg {
   const servidas = linhas.filter((l) => l.st === "served").length, prontas = linhas.filter((l) => l.st === "ready" || l.st === "recvpo").length;
   const aFornecedor = linhas.filter((l) => l.aChegar > 0).length, semForn = linhas.filter((l) => l.semForn > 0).length;
   const estado: EstadoEc = linhas.length && servidas === linhas.length ? "full" : semForn ? "nosup" : aFornecedor ? "waiting" : "partial";
+  const pronta = linhas.every((l) => l.st === "served" || l.st === "ready" || l.st === "recvpo");
   return {
-    id: ec, eliminada: false, estado, rotulo: EC_ESTADOS[estado], linhas, ajustes: [],
+    // 30/10 (visto no browser): tudo garantido no armazém dizia "Parcialmente pendente"
+    id: ec, eliminada: false, estado, rotulo: pronta && estado !== "full" && linhas.length ? "Pronta a sair para a obra" : EC_ESTADOS[estado], linhas, ajustes: [],
     tot: { linhas: linhas.length, servidas, prontas, aBordo: 0, aFornecedor, semForn }, pos: [...porId.values()],
-    pronta: linhas.every((l) => l.st === "served" || l.st === "ready" || l.st === "recvpo"),
+    pronta,
   };
+}
+
+/* ------------------------------------------------------------------ 30/10: aprovar a encomenda a fornecedor */
+// A encomenda a fornecedor nasce pendente (a base pede ao fornecedor o que falta quando emite a encomenda de cliente). Quem a aprova e a
+// envia ao fornecedor é Compras e armazém (o papel do RH, 20270101340000, ou purchase_orders.approve): rpc_po_send_to_supplier. A página
+// liga o aprovador (com a releitura das encomendas); fora dela não há botão.
+type Aprovador = (uuid: string) => Promise<void>;
+let aprovador: Aprovador | null = null;
+export const definirAprovadorPo = (f: Aprovador | null): void => { aprovador = f; };
+export const aprovadorPo = (): Aprovador | null => aprovador;
+
+/** Aprova e envia ao fornecedor. A mensagem de erro da base volta tal como vem (sem fornecedor, sem linhas, sem permissão). */
+export async function aprovarPoReal(sb: SupabaseClient, uuid: string): Promise<{ publicada: boolean; aviso: string | null }> {
+  const { data, error } = await sb.rpc("rpc_po_send_to_supplier" as never, { p_po_id: uuid } as never);
+  if (error) throw new Error(error.message || "Não foi possível aprovar a encomenda a fornecedor.");
+  const r = (data ?? {}) as { published?: boolean; warning?: string | null };
+  return { publicada: r.published === true, aviso: r.warning ?? null };
 }
 
 /* ------------------------------------------------------------------ os resumos reais (pela referência do negócio) */
@@ -80,14 +105,27 @@ type Consulta = { eq: (c: string, v: string) => Consulta; is: (c: string, v: nul
 export async function lerEncomendaReal(sb: SupabaseClient, org: string, contractId: string): Promise<ResumoEcNeg> {
   const { data, error } = await sb.rpc("rpc_get_client_order_document" as never, { p_contract_id: contractId } as never);
   if (error) throw new Error(error.message || "Não foi possível ler a encomenda de cliente.");
-  const tabela = sb.from("purchase_orders" as never) as unknown as { select: (c: string) => Consulta };
-  const pq = await tabela.select("id, order_number, status, expected_delivery, suppliers(name)")
-    .eq("organization_id", org).eq("source_type", "contract").eq("source_id", contractId).is("deleted_at", null);
-  if (pq.error) throw new Error(pq.error.message);
-  const pos: PoBase[] = (pq.data ?? []).map((p) => ({
-    id: String(p.id), order_number: (p.order_number as string | null) ?? null, status: String(p.status ?? ""),
-    expected_delivery: (p.expected_delivery as string | null) ?? null, fornecedor: (p.suppliers as { name?: string } | null)?.name ?? null,
-  }));
+  // 30/10 (20270101360000): pela base, que aceita o papel do RH (Compras e armazém não lê purchase_orders pelo RLS do perfil da Olyvia);
+  // sem a função (a migration por aplicar), da tabela, como antes
+  const r = await sb.rpc("neg_ler_encomendas_fornecedor" as never, { p_org: org, p_contrato: contractId } as never);
+  let pos: PoBase[];
+  if (!r.error && Array.isArray(r.data)) {
+    pos = (r.data as Record<string, unknown>[]).map((p) => ({
+      id: String(p.id), order_number: (p.order_number as string | null) ?? null, status: String(p.status ?? ""),
+      expected_delivery: (p.expected_delivery as string | null) ?? null, fornecedor: (p.fornecedor as string | null) ?? null,
+      ...(typeof p.publicada === "boolean" ? { publicada: p.publicada } : {}), prometida: (p.prometida as string | null) ?? null,
+    }));
+  } else {
+    if (r.error && r.error.code !== "PGRST202" && r.error.code !== "42883") throw new Error(r.error.message || "Não foi possível ler as encomendas a fornecedor.");
+    const tabela = sb.from("purchase_orders" as never) as unknown as { select: (c: string) => Consulta };
+    const pq = await tabela.select("id, order_number, status, expected_delivery, suppliers(name)")
+      .eq("organization_id", org).eq("source_type", "contract").eq("source_id", contractId).is("deleted_at", null);
+    if (pq.error) throw new Error(pq.error.message);
+    pos = (pq.data ?? []).map((p) => ({
+      id: String(p.id), order_number: (p.order_number as string | null) ?? null, status: String(p.status ?? ""),
+      expected_delivery: (p.expected_delivery as string | null) ?? null, fornecedor: (p.suppliers as { name?: string } | null)?.name ?? null,
+    }));
+  }
   return resumoDaBase((data ?? { order_number: null, lines: [] }) as DocEc, pos);
 }
 

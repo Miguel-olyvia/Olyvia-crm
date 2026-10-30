@@ -206,6 +206,8 @@ export function ecsEliminadasDeNegocios(deals: Negocio[], db: Inventario): { id:
 /** Onde está a encomenda a fornecedor, para quem lê o negócio. */
 export type FasePo = "por aprovar" | "no portal" | "por email" | "parcial" | "recebida" | "cancelada";
 export interface PoResumoNeg { id: string; forn: string; estado: string; fase: FasePo; prometida: string | null;
+  /** 30/10: o id da encomenda na base (purchase_orders.id), nas encomendas reais: é por ele que Compras e armazém a aprova */
+  uuid?: string;
   /** quando chega: a data prometida no portal ou, sem ela, a prevista da encomenda ("aaaa-mm-dd") */
   prevista: string }
 /** pending → por aprovar; encomendada → no portal do fornecedor (ou por email, sem portal); depois parcial / recebida. */
@@ -217,7 +219,7 @@ export function fasePo(p: Po): FasePo {
   if (st === "partial") return "parcial";
   return p.portal.state === "email" || p.portal.state === "none" ? "por email" : "no portal";
 }
-const ROTULO_FASE: Record<FasePo, string> = { "por aprovar": "por aprovar", "no portal": "no portal do fornecedor", "por email": "enviada por email", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
+const ROTULO_FASE: Record<FasePo, string> = { "por aprovar": "por aprovar", "no portal": "no portal do fornecedor", "por email": "encomendada, fora do portal", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
 
 export interface LinhaResumoNeg {
   /** 21/10: a encomenda de cliente da linha (a inicial, EC-1027, ou uma de ajuste, EC-1027-A1) */

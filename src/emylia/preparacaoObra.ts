@@ -11,7 +11,7 @@ import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
-import { PERFIL_DO_SK, perfilDoTecnico } from "./equipa/tecnicos";
+import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
 import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
@@ -20,7 +20,7 @@ import { faltaMateriaisReal, prontidaoDe, textoProntidaoReal, usarProntidao } fr
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
 import { assinadas, diasAdenda, faturasAdenda, nomeParcela, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
-import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
+import { ecDaAdenda, linhasDaEc, porEncomendarDe } from "./encomendasAjuste";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
 export interface LinhaEc {
@@ -124,9 +124,10 @@ export function oficioDoServico(S: Estado, s: Pick<Servico, "perfil" | "n"> & { 
   const sk = skDaTarefa(s.perfil, s.n);
   return { perfilId: PERFIL_DO_SK[sk] ?? "", sk };
 }
-/** 22/10: os técnicos de um ofício: os do perfil (pelo id), ou os do mesmo nome nos planos de antes. */
+/** 22/10: os técnicos de um ofício: os do perfil (pelo id), ou os do mesmo nome nos planos de antes.
+ *  30/10: um técnico do RH com vários ofícios conta em todos (tecnicosDoPerfil); antes só contava no primeiro. */
 export const tecnicosDoOficio = (t: Pick<Tarefa, "sk"> & { perfilId?: string }) =>
-  t.perfilId ? TECS.filter((x) => perfilDoTecnico(x) === t.perfilId) : t.sk ? TECS.filter((x) => x.sk === t.sk) : [];
+  t.perfilId ? tecnicosDoPerfil(t.perfilId, TECS) : t.sk ? TECS.filter((x) => x.sk === t.sk) : [];
 /** O técnico do ofício livre nesses dias (o primeiro; senão o primeiro do ofício; sem técnicos do ofício, ninguém: fica por atribuir). */
 export function tecnicoDoOficio(t: Pick<Tarefa, "sk"> & { perfilId?: string }, p: Plano, dia: number, dur: number): string | null {
   const doOficio = tecnicosDoOficio(t);
@@ -134,6 +135,17 @@ export function tecnicoDoOficio(t: Pick<Tarefa, "sk"> & { perfilId?: string }, p
 }
 /** 22/10: as tarefas do plano sem técnico (o ofício não tem técnicos no RH): ficam por atribuir, com aviso. */
 export const porAtribuir = (p: Plano): Tarefa[] => p.tasks.filter((t) => !t.tec && !(t.exec?.estado === "validada"));
+/** 30/10: o plano ainda por aprovar que tem tarefas por atribuir (o ofício não tinha técnicos no RH quando se gerou): cada uma fica com um
+ *  técnico do ofício que o RH já tem, o livre nesses dias. Os planos aprovados não mudam sozinhos. Devolve quantas tarefas ficaram atribuídas. */
+export function atribuirPorAtribuir(p: Plano | null | undefined): number {
+  if (!p || p.estado !== "por aprovar") return 0;
+  let n = 0;
+  for (const t of porAtribuir(p)) {
+    const tec = tecnicoDoOficio(t, p, t.dia, t.dur);
+    if (tec) { t.tec = tec; n++; }
+  }
+  return n;
+}
 
 /** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias).
  *  22/10: o ofício é o perfil do passo da receita (pelo id); sem técnico com esse perfil, a tarefa fica por atribuir (tec null). */
@@ -224,7 +236,7 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
       : { id: "ec", trilho: "ec", estado: "espera", who: null, t: "Encomenda de cliente", sub: EC_NO_PAGAMENTO });
   } else {
     L.push({ id: "ec", trilho: "ec", estado: "feito", who: ec.ref ? "financeiro" : null, t: `Encomenda de cliente ${ec.n}`,
-      sub: `${ec.ref ? `Emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}` : `De ${ec.criada}`} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"} · ${eur(ec.valor)} € na proposta` });
+      sub: `${ec.ref ? `Emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}` : `De ${ec.criada}`} · ${linhasDaEc(ec).length} ${linhasDaEc(ec).length === 1 ? "linha" : "linhas"}${ec.contrato && !ec.valor ? "" : ` · ${eur(ec.valor)} € na proposta`}` });
     if (!ec.ref) L.push({ id: "ec-inv", trilho: "ec", estado: "feito", who: null, t: "Materiais na obra", sub: "Obra do exemplo, de antes do Inventário novo." });
     else if (inv !== undefined) L.push(!inv
       ? { id: "ec-inv", trilho: "ec", estado: "espera", who: null, t: "No Inventário", sub: "A encomenda ainda não está no Inventário (os dados de exemplo foram repostos): volta a ser emitida sozinha." }

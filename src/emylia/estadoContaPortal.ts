@@ -16,7 +16,7 @@ export function estadoDoResultado(r: ResultadoConta, email: string, em = new Dat
   const pendentes = !!antes?.credenciaisPorEnviar;
   if (r.fase === "erro") return { estado: "erro", email, msg: r.msg, em, ...(pendentes ? { credenciaisPorEnviar: true } : {}) };
   if (r.fase === "a criar") return { estado: "a criar", email, em, ...(pendentes ? { credenciaisPorEnviar: true } : {}) };
-  const e: EstadoContaPortal = { estado: "ok", email, em };
+  const e: EstadoContaPortal = { estado: "ok", email, em, ...(r.nova ? {} : { existia: true }) };
   if (r.email?.enviado) e.envio = "enviado";
   else if (r.email) {
     e.envio = "falhou"; e.envioMsg = r.email.mensagem;

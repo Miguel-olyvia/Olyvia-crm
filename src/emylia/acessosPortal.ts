@@ -223,6 +223,8 @@ export interface EstadoContaPortal {
   envio?: "enviado" | "falhou"; envioMsg?: string;
   /** 24/10: o email que falhou levava as credenciais: "Tentar de novo" pede credenciais novas (a pessoa ainda não entrou) */
   credenciaisPorEnviar?: boolean;
+  /** 30/10 (visto no browser): a conta já existia (o envio só pôs o documento no portal); dizia sempre "Conta do portal pronta" */
+  existia?: boolean;
 }
 /** O que aconteceu à conta real de um envio (o popup mostra-o). Igual a ContaReal (contasReais.ts), que o reexporta. */
 export type ResultadoConta =

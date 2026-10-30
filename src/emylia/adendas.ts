@@ -12,7 +12,7 @@ import { TECS, alertas, bloqueado, custoUnLinha, garantirServico, horaDoPerfil, 
 import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
 import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
-import { perfilDoTecnico } from "./equipa/tecnicos";
+import { tecnicosDoPerfil } from "./equipa/tecnicos";
 import { prestacoes } from "./planoObra";
 
 export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu: number; h: number; perfil: string;
@@ -256,7 +256,7 @@ export function juntarAoPlano(p: Plano, a: Adenda): Tarefa[] {
     const dia = Math.max(ate.length ? Math.max(...ate.map((t) => t.dia + t.dur)) : 0, p.estado === "em curso" ? p.dia : 0);
     for (const t of p.tasks) if (t.dia >= dia && (t.fase ?? 4) > fase) t.dia += dur;
     // 22/10: o técnico pelo perfil (id) da linha; sem técnicos do perfil, fica por atribuir
-    const of = x.perfilId ? { perfilId: x.perfilId, sk: TECS.find((t) => perfilDoTecnico(t) === x.perfilId)?.sk ?? x.perfil } : { sk: skDaTarefa(x.perfil, x.n) };
+    const of = x.perfilId ? { perfilId: x.perfilId, sk: tecnicosDoPerfil(x.perfilId, TECS)[0]?.sk ?? x.perfil } : { sk: skDaTarefa(x.perfil, x.n) };
     const tec = tecnicoDoOficio(of, p, dia, dur);
     const t: Tarefa = { nome: `${x.n} (adenda ${a.n})`, svcs: [x.sid], dia, dur, sk: of.sk, ...(x.perfilId ? { perfilId: x.perfilId } : {}), h: r2(x.h * x.q), tec, fase };
     p.tasks.push(t); novas.push(t);

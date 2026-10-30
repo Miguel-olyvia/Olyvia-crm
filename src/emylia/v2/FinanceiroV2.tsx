@@ -14,6 +14,8 @@ import { faturasDe, guardarFaturas, hojeISO, totalComIva, tranchesDe } from "./e
 import { BOTAO, CHIP, INPUT } from "./estilo";
 import { SEM_PERM, podeNeg } from "../permissoes";
 import { AdendasNoFinanceiro } from "../FinanceiroAdendas";
+import { PAPEIS } from "../motor";
+import { podeVerComo, quemFatura } from "../real/papeisReal";
 
 const CONTAS = FINANCEIRO[2].campos.find((c) => c.k === "conta")?.op ?? ["Banco A · conta à ordem", "Banco B · conta obras"];
 
@@ -224,8 +226,8 @@ export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
       {(!podeValidar || !podeRegistar) && !R.completo && (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] text-muted-foreground">
           <Info className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-          Só o Financeiro ou a Direção registam faturas e validam pagamentos.
-          <button type="button" onClick={ctx.go(() => ctx.A.role("financeiro"))} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">Mudar para Sandra</button>
+          {quemFatura()} regista{quemFatura().includes(" ou ") ? "m" : ""} faturas e valida{quemFatura().includes(" ou ") ? "m" : ""} pagamentos.
+          {podeVerComo("financeiro") && <button type="button" onClick={ctx.go(() => ctx.A.role("financeiro"))} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">Mudar para {PAPEIS.financeiro.nome}</button>}
         </p>
       )}
       {R.porFaturar.length > 0 && podeRegistar && <FormRegistar key={fs.length} ctx={ctx} d={d} fs={fs} tranches={tranches} total={total} avisar={setAviso} />}

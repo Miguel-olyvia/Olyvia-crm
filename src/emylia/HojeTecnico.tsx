@@ -73,7 +73,8 @@ export function HojeTecnico(ctx: Ctx) {
   if (fixo && !(fixo.ref && TECS.some((x) => x.id === fixo.ref))) return <SemTecnicoLigado />;
   // 24/10: uma organização real ainda sem técnicos de obra (criam-se em Utilizadores): nada para ver como técnico
   if (!TECS.length) return <SemTecnicos />;
-  const eu = fixo?.ref ? fixo.ref : S.tec && TECS.some((x) => x.id === S.tec) ? S.tec : comTrabalho[0] ?? "hn";
+  const eu = fixo?.ref ? fixo.ref : S.tec && TECS.some((x) => x.id === S.tec) ? S.tec : comTrabalho[0] ?? (TECS.some((x) => x.id === "hn") ? "hn" : TECS[0].id);
+  // 30/10 (visto no browser): com os técnicos do RH não há o "hn" do exemplo; sem trabalho para ninguém, rebentava (tec undefined)
   const tec = TECS.find((x) => x.id === eu)!;
   const hoje = trabalhoDoTecnico(S.deals, eu);
   const seguir = aSeguirDoTecnico(S.deals, eu);
@@ -104,7 +105,8 @@ export function HojeTecnico(ctx: Ctx) {
         <AvatarTec id={eu} tam="h-12 w-12 text-sm" />
         <div className="min-w-0">
           <h1 className="text-3xl font-semibold tracking-tight">{saudacao(agora.getHours())}, {tec.n.split(" ")[0]}</h1>
-          <p className="text-[15px] text-muted-foreground">{tec.sk}</p>
+          {/* 30/10: o ofício das tarefas de hoje (um técnico do RH com vários ofícios); sem tarefas, o da ficha */}
+          <p className="text-[15px] text-muted-foreground">{[...new Set(hoje.map((x) => x.t.sk).filter(Boolean))].join(" · ") || tec.sk}</p>
         </div>
       </div>
       <p className="mt-3 text-lg text-muted-foreground">
@@ -172,7 +174,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
         <div className="mt-3 flex flex-wrap gap-2">
           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><MapPin className="h-4 w-4" aria-hidden="true" />{morada}</a>
           <a href={`tel:${d.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />Cliente</a>
-          <a href={`tel:${RESPONSAVEL_OBRA.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />{RESPONSAVEL_OBRA.n.split(" ")[0]} (responsável)</a>
+          {RESPONSAVEL_OBRA.tel && <a href={`tel:${RESPONSAVEL_OBRA.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />{RESPONSAVEL_OBRA.n.split(" ")[0]} (responsável)</a>}
         </div>
       </header>
 
