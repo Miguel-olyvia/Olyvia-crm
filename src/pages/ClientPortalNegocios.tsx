@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { PASSOS_PORTAL, passoDoNegocio, type PassoPortal } from "@/components/portal/negocio/PassosDoNegocio";
+import { CHAVE_NAO_LIDAS_PORTAL } from "@/components/portal/negocio/ConversaDoNegocio";
 import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +74,19 @@ const ClientPortalNegocios = () => {
     staleTime: 0,
   });
   const negocios = consulta.data ?? [];
+  // As mensagens da equipa por ler, por negócio (o mesmo ritmo da lista): um selo «N novas» em cada negócio.
+  const naoLidas = useQuery({
+    queryKey: [CHAVE_NAO_LIDAS_PORTAL, activeOrg?.organizationId ?? null],
+    queryFn: async (): Promise<Record<string, number>> => {
+      const { data, error } = await (supabase as unknown as { rpc: (f: string) => PromiseLike<{ data: unknown; error: { message: string } | null }> }).rpc("portal_neg_mensagens_nao_lidas");
+      if (error) throw new Error(error.message);
+      return (data && typeof data === "object" ? data : {}) as Record<string, number>;
+    },
+    enabled: !orgsLoading && Boolean(activeOrg),
+    refetchInterval: ATUALIZAR_CADA_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  });
   const loading = orgsLoading || (Boolean(activeOrg) && consulta.isLoading);
   const falhou = consulta.isError && !consulta.data;
 
@@ -110,6 +124,9 @@ const ClientPortalNegocios = () => {
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
+                        {(naoLidas.data?.[n.negocioId] ?? 0) > 0 && (
+                          <Badge className="text-xs">{naoLidas.data?.[n.negocioId]} {naoLidas.data?.[n.negocioId] === 1 ? "mensagem nova" : "mensagens novas"}</Badge>
+                        )}
                         <Badge variant="secondary" className="text-xs">{PASSOS_PORTAL[n.passo - 1].nome}</Badge>
                         <Button variant="ghost" size="sm" onClick={() => abrir(n)} aria-label={`Abrir ${n.titulo}`}>
                           Abrir <ArrowRight className="ml-1 h-3 w-3" aria-hidden="true" />

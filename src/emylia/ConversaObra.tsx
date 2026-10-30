@@ -7,12 +7,24 @@ import type { MensagemObra } from "./motor";
 
 const iniciais = (n: string) => n.split(" ").filter(Boolean).map((x) => x[0]).slice(0, 2).join("").toUpperCase();
 
-export function Conversa({ msgs, eu, enviar, rapidas = [], vazio }: { msgs: MensagemObra[]; eu: "cliente" | "empresa"; enviar: (t: string) => void; rapidas?: string[]; vazio: string }) {
+/** `enviar` pode devolver uma promessa (a conversa da base): o texto só se apaga se correu bem (devolver `false` = falhou), e enquanto envia não se envia outra. */
+export function Conversa({ msgs, eu, enviar, rapidas = [], vazio }: { msgs: MensagemObra[]; eu: "cliente" | "empresa"; enviar: (t: string) => void | boolean | Promise<boolean | void>; rapidas?: string[]; vazio: string }) {
   const [texto, setTexto] = useState("");
+  const [aMandar, setAMandar] = useState(false);
   const fim = useRef<HTMLDivElement>(null), caixa = useRef<HTMLDivElement>(null);
   // a última mensagem à vista (só dentro da caixa: a página não salta)
   useEffect(() => { const c = caixa.current; if (c) c.scrollTop = c.scrollHeight; }, [msgs.length]);
-  const mandar = (t: string) => { if (!t.trim()) return; enviar(t.trim()); setTexto(""); };
+  const mandar = async (t: string) => {
+    const limpo = t.trim();
+    if (!limpo || aMandar) return;
+    setAMandar(true);
+    try {
+      const r = await enviar(limpo);
+      if (r !== false) setTexto("");
+    } finally {
+      setAMandar(false);
+    }
+  };
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]">
       <div ref={caixa} className="max-h-[26rem] space-y-3 overflow-y-auto p-4" aria-live="polite">
@@ -33,13 +45,13 @@ export function Conversa({ msgs, eu, enviar, rapidas = [], vazio }: { msgs: Mens
       </div>
       {rapidas.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto border-t border-border px-3 pt-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {rapidas.map((r) => <button key={r} type="button" onClick={() => mandar(r)} className="min-h-9 shrink-0 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{r}</button>)}
+          {rapidas.map((r) => <button key={r} type="button" disabled={aMandar} onClick={() => void mandar(r)} className="min-h-9 shrink-0 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{r}</button>)}
         </div>
       )}
-      <form className="flex gap-2 p-3" onSubmit={(e) => { e.preventDefault(); mandar(texto); }}>
-        <input value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Escrever uma mensagem" placeholder="Escrever uma mensagem"
+      <form className="flex gap-2 p-3" onSubmit={(e) => { e.preventDefault(); void mandar(texto); }}>
+        <input value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Escrever uma mensagem" placeholder="Escrever uma mensagem" maxLength={2000}
           className="h-11 min-w-0 flex-1 rounded-full border border-input bg-background px-4 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-        <button type="submit" disabled={!texto.trim()} aria-label="Enviar" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><Send className="h-4 w-4" /></button>
+        <button type="submit" disabled={!texto.trim() || aMandar} aria-label="Enviar" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><Send className="h-4 w-4" aria-hidden="true" /></button>
       </form>
     </div>
   );

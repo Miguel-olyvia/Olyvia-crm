@@ -25,6 +25,7 @@ import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
 import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/PassosDoNegocio";
+import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
@@ -704,6 +705,9 @@ const ClientPortalContractDetail = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* A conversa com a equipa (só nos negócios): o que o cliente escreve chega às Operações e a resposta aparece aqui. */}
+        {contract.negocio_id && <ConversaDoNegocio negocioId={contract.negocio_id} />}
 
         {/* Ask Question Dialog */}
         <Dialog open={showQuestion} onOpenChange={setShowQuestion}>

@@ -44,6 +44,7 @@ const REJECTION_REASONS = [
 ];
 
 import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/PassosDoNegocio";
+import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
 
 const ClientPortalProposalDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -527,6 +528,9 @@ const ClientPortalProposalDetail = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* A conversa com a equipa (só nos negócios): o que o cliente escreve chega às Operações e a resposta aparece aqui. */}
+        {proposal.negocio_id && <ConversaDoNegocio negocioId={proposal.negocio_id} />}
 
         {/* Reject Dialog */}
         <Dialog open={showReject} onOpenChange={setShowReject}>

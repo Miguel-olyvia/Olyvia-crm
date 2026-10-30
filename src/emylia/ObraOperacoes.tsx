@@ -32,6 +32,8 @@ import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { DiaDaObra, FitaDias, HistoricoTarefa, Miniaturas, nomeTec } from "./AcompanhamentoObra";
 import { Conversa } from "./ConversaObra";
+import { orgDoModoReal } from "./acessosPortal";
+import { useConversaReal } from "./real/conversaReal";
 import { pedirFrota } from "./frota/pontes";
 import { BarraTarefa, ExtrasTarefa, TarefasDoPlano } from "./PlanoInterativo";
 import { MOTIVOS_AJUSTE, TEMPOS_CORRECAO, duracaoMinima, enviosDe, inicioMinimoVivo, juntarAjustes, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, textoAvisoCliente } from "./trabalhoObra";
@@ -1518,17 +1520,24 @@ function EquipamentosObra({ d }: { d: Negocio }) {
 /** 21/10: a conversa com o cliente (o mesmo fio do portal do cliente). Ao abrir, as mensagens do cliente ficam lidas. */
 function ConversaNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { A, run } = ctx;
-  const msgs = d.obra.chat ?? [], porLer = msgs.filter((m) => m.de === "cliente" && !m.lida).length;
+  // 30/10 (2.0): com a base ligada a conversa é a da base, a mesma do portal do cliente (o autor é o utilizador com sessão); no protótipo de
+  // sempre continua a do estado local do negócio.
+  const org = orgDoModoReal();
+  const real = useConversaReal(org, d.id);
+  const msgs = org ? real.msgs : (d.obra.chat ?? []), porLer = msgs.filter((m) => m.de === "cliente" && !m.lida).length;
+  const marcarLidas = () => (org ? void real.marcarComoLidas() : run(() => A.lerChat(d.id)));
+  const enviar = (t: string): void | Promise<boolean> => (org ? real.enviar(t) : run(() => A.mensagemObra(d.id, "empresa", t)));
   return (
     <section id="obra-chat" aria-labelledby="obra-chat-t" className={cn(CARTAO, "mt-4 scroll-mt-16 p-5", porLer > 0 && "border-warning/50")}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 id="obra-chat-t" className={H2}>Conversa com o cliente <span className="font-normal text-muted-foreground">· {d.nome}</span>
           {porLer > 0 && <span className="ml-2 rounded-full bg-warning px-2 py-0.5 align-middle text-xs font-semibold text-white">{porLer} por ler</span>}</h2>
-        {porLer > 0 && <button type="button" onClick={() => run(() => A.lerChat(d.id))} className="min-h-10 text-sm font-medium text-primary underline-offset-4 hover:underline">Marcar {porLer === 1 ? "1 mensagem" : `${porLer} mensagens`} como lida{porLer === 1 ? "" : "s"}</button>}
+        {porLer > 0 && <button type="button" onClick={marcarLidas} className="min-h-10 text-sm font-medium text-primary underline-offset-4 hover:underline">Marcar {porLer === 1 ? "1 mensagem" : `${porLer} mensagens`} como lida{porLer === 1 ? "" : "s"}</button>}
       </div>
       <div className="mt-3">
-        <Conversa msgs={msgs} eu="empresa" enviar={(t) => run(() => A.mensagemObra(d.id, "empresa", t))} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal."
+        <Conversa msgs={msgs} eu="empresa" enviar={enviar} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal."
           rapidas={["Bom dia! A equipa já está na obra.", "Já pode ver as fotografias de hoje no portal.", "Vou confirmar e respondo ainda hoje."]} />
+        {org && real.erro && <p role="alert" className="mt-2 text-[15px] text-destructive">{real.erro}</p>}
       </div>
     </section>
   );
