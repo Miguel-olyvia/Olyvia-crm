@@ -176,21 +176,22 @@ function NovoSimples({ S, A, run }: Pick<Ctx, "S" | "A" | "run">) {
   // 27/10: sem a linha: ao telefone ainda não se sabe o que o cliente quer; sai da divisão escolhida na visita
   const criar = () => run(() => A.novoCriar(nome, tel, undefined, existente ? escolhida?.entityId : undefined));
   const inp = "h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
-  const modo = (ativo: boolean) => cn("min-h-11 flex-1 rounded-lg border px-3 text-[15px] font-medium", ativo ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:border-foreground/40");
+  const modo = (ativo: boolean) => cn("min-h-11 min-w-0 rounded-lg border px-2 text-sm font-medium", ativo ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:border-foreground/40");
   return (
-    <li className="rounded-xl border-2 border-primary bg-card p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
-      <form className="grid min-w-0 gap-3" onSubmit={(e) => { e.preventDefault(); if (!existente || escolhida) criar(); }} onKeyDown={(e) => { if (e.key === "Escape") run(() => A.novoCancel()); }}>
+    <li className="min-w-0 rounded-xl border-2 border-primary bg-card p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
+      {/* uma só coluna que encolhe (minmax(0,1fr)): numa coluna estreita do quadro nada sai da caixa */}
+      <form className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3" onSubmit={(e) => { e.preventDefault(); if (!existente || escolhida) criar(); }} onKeyDown={(e) => { if (e.key === "Escape") run(() => A.novoCancel()); }}>
         {org && (
-          <div role="group" aria-label="De quem é o negócio" className="flex gap-2">
+          <div role="group" aria-label="De quem é o negócio" className="grid grid-cols-2 gap-2">
             <button type="button" aria-pressed={!existente} className={modo(!existente)} onClick={() => mudarModo(false)}>Pessoa nova</button>
-            <button type="button" aria-pressed={existente} className={modo(existente)} onClick={() => mudarModo(true)}>Pessoa que já existe</button>
+            <button type="button" aria-pressed={existente} className={modo(existente)} onClick={() => mudarModo(true)}>Já existe</button>
           </div>
         )}
         {existente ? (
           escolhida ? (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 p-3">
+            <div className="grid min-w-0 gap-2 rounded-lg border border-border bg-muted/40 p-3">
               <p className="min-w-0 text-[15px]"><span className="block truncate font-medium">{escolhida.nome}</span><span className="block truncate text-muted-foreground">{tel || "Sem telefone nem email na ficha"}</span></p>
-              <Button type="button" variant="ghost" onClick={() => { setEscolhida(null); setPesquisa(""); setNome(""); setTel(""); }}>Trocar</Button>
+              <Button type="button" variant="outline" size="sm" className="min-h-11 justify-self-start" onClick={() => { setEscolhida(null); setPesquisa(""); setNome(""); setTel(""); }}>Trocar</Button>
             </div>
           ) : (
             <div className="grid gap-1.5">
