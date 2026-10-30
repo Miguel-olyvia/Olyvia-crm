@@ -115,16 +115,19 @@ export const iniciais = (n: string) => n.replace(/\([^)]*\)/g, " ").split(" ").f
 
 export interface Membro { id: string; n: string; sk: string; tel: string; custoH: number; dias: number; horas: number; tarefas: string[] }
 export function equipaDaObra(p: Plano): Membro[] {
-  const M = new Map<string, Membro & { ds: Set<number> }>();
+  const M = new Map<string, Membro & { ds: Set<number>; sks: Set<string> }>();
   for (const t of p.tasks) {
     const tec = TECS.find((x) => x.id === t.tec);
     if (!tec) continue;
-    const m = M.get(tec.id) ?? { id: tec.id, n: tec.n, sk: tec.sk, tel: fichaTecnico(tec.id)?.tel ?? "—", custoH: custoHoraDe(tec.id), dias: 0, horas: 0, tarefas: [], ds: new Set<number>() };
+    const m = M.get(tec.id) ?? { id: tec.id, n: tec.n, sk: tec.sk, tel: fichaTecnico(tec.id)?.tel ?? "—", custoH: custoHoraDe(tec.id), dias: 0, horas: 0, tarefas: [], ds: new Set<number>(), sks: new Set<string>() };
     for (let k = t.dia; k < t.dia + t.dur; k++) m.ds.add(k);
     m.horas += t.h; m.tarefas.push(t.nome);
+    if (t.sk) m.sks.add(t.sk);
     M.set(tec.id, m);
   }
-  return [...M.values()].map(({ ds, ...m }) => ({ ...m, dias: ds.size, horas: Math.round(m.horas * 10) / 10 }));
+  // 30/10 (visto no browser): o ofício de cada um nesta obra é o das tarefas dele (o Sérgio, ladrilhador aqui, aparecia "técnico de vidro",
+  // o primeiro ofício da ficha); sem ofício nas tarefas, o da ficha
+  return [...M.values()].map(({ ds, sks, ...m }) => ({ ...m, sk: sks.size ? [...sks].join(" · ") : m.sk, dias: ds.size, horas: Math.round(m.horas * 10) / 10 }));
 }
 /** O custo/hora de quem faz a tarefa, pela ficha do técnico (16 €/h sem técnico ou sem ficha). */
 export { custoHoraDe };
@@ -141,6 +144,12 @@ const DO_OFICIO: Record<string, { n: string; origem: Origem; de?: string }[]> = 
 };
 /** Os nomes curtos dos serviços do pacote nas receitas (o plano antigo guarda-os em svcs). */
 export interface Equip { n: string; origem: Origem; de?: string; tarefas: string[]; dia: number; fim: number }
+/** 30/10: a carrinha da Frota que leva a equipa (a do exemplo). Na Olyvia a Frota ainda não está ligada às obras: a página real tira-a
+ *  (definirViaturaObra(null)) e o Hoje do técnico deixa de mostrar a "Renault Master" do exemplo. */
+const VIATURA_V1 = "Renault Master · AA-12-BC";
+let viatura: string | null = VIATURA_V1;
+export const definirViaturaObra = (v: string | null | undefined): void => { viatura = v === undefined ? VIATURA_V1 : v; };
+
 export function equipamentosDaObra(p: Plano): Equip[] {
   const E = new Map<string, Equip>();
   const juntar = (n: string, origem: Origem, t: Tarefa, de?: string) => {
@@ -157,7 +166,7 @@ export function equipamentosDaObra(p: Plano): Equip[] {
   const fim = Math.max(1, ...p.tasks.map((t) => t.dia + t.dur));
   const L = [...E.values()].sort((a, b) => a.dia - b.dia || a.n.localeCompare(b.n));
   // a carrinha da Frota leva a equipa e o material todos os dias
-  return [{ n: "Renault Master · AA-12-BC", origem: "Frota", tarefas: ["Transporte da equipa e do material"], dia: 0, fim }, ...L];
+  return viatura ? [{ n: viatura, origem: "Frota", tarefas: ["Transporte da equipa e do material"], dia: 0, fim }, ...L] : L;
 }
 export const quandoEquip = (p: Plano, e: { dia: number; fim: number }) =>
   `${rotuloDia(p, e.dia)}${e.fim - e.dia > 1 ? ` a ${rotuloDia(p, e.fim - 1)}` : ""} · ${e.fim - e.dia} ${e.fim - e.dia === 1 ? "dia" : "dias"}`;

@@ -5,7 +5,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PAPEIS, type Papel } from "../motor";
 import { PERMS_PAPEL } from "../permissoes";
-import { RESPONSAVEL_OBRA } from "../obraOps";
+import { RESPONSAVEL_OBRA, definirViaturaObra } from "../obraOps";
+import { definirResponsaveisObra } from "../campos";
 
 export interface MeusPapeis {
   papeis: Papel[];
@@ -90,11 +91,19 @@ export function definirResponsavelObra(g: { nome: string; telefone: string | nul
   if (g === null) { Object.assign(RESPONSAVEL_OBRA, RESPONSAVEL_V1); return; }
   Object.assign(RESPONSAVEL_OBRA, { n: g?.nome?.trim() || "o Gestor de obra", papel: "Gestor de obra", tel: g?.telefone?.trim() ?? "" });
 }
-export async function lerGestorObra(sb: SupabaseClient, org: string): Promise<{ nome: string; telefone: string | null } | undefined> {
+export interface GestorObra { nome: string; telefone: string | null }
+/** Os Gestores de obra do RH (neg_gestores_obra). Sem a função ou com erro, nenhum. */
+export async function lerGestoresObra(sb: SupabaseClient, org: string): Promise<GestorObra[]> {
   const { data, error } = await sb.rpc("neg_gestores_obra" as never, { p_org: org } as never);
-  if (error || !Array.isArray(data)) return undefined;
-  const g = (data as { nome?: string; telefone?: string | null }[])[0];
-  return g?.nome ? { nome: g.nome, telefone: g.telefone ?? null } : undefined;
+  if (error || !Array.isArray(data)) return [];
+  return (data as { nome?: string; telefone?: string | null }[]).filter((g) => !!g.nome?.trim()).map((g) => ({ nome: g.nome!.trim(), telefone: g.telefone ?? null }));
+}
+/** O primeiro (o do Hoje do técnico, da obra e do auto). */
+export const lerGestorObra = async (sb: SupabaseClient, org: string): Promise<GestorObra | undefined> => (await lerGestoresObra(sb, org))[0];
+/** 30/10: o responsável de obra (o do Hoje do técnico) e a lista de "Preparar a obra" vêm dos Gestores de obra do RH. */
+export function aplicarGestoresObra(L: readonly GestorObra[]): void {
+  definirResponsavelObra(L[0]);
+  definirResponsaveisObra(L.map((g) => g.nome));
 }
 
 const DIRECAO_V1 = PERMS_PAPEL.direcao;
@@ -102,6 +111,8 @@ const DIRECAO_V1 = PERMS_PAPEL.direcao;
  *  A Direção fica com o resto (aprovar a margem, anular, a equipa). */
 export function aplicarPermissoesReais(): void {
   PERMS_PAPEL.direcao = ["contracts.cancel", "equipa.edit", "margin.approve"];
+  // a Frota ainda não está ligada às obras na Olyvia: sem a carrinha do exemplo
+  definirViaturaObra(null);
 }
 /** Volta aos nomes e às permissões do protótipo (ao sair da página). */
 export function reporNomesPapeis(): void {
@@ -109,4 +120,6 @@ export function reporNomesPapeis(): void {
   PERMS_PAPEL.direcao = DIRECAO_V1;
   escolhiveis = null;
   definirResponsavelObra(null);
+  definirResponsaveisObra(null);
+  definirViaturaObra(undefined);
 }

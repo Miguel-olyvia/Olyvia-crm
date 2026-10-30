@@ -236,11 +236,19 @@ export const FINANCEIRO: Grupo[] = [
   },
 ];
 
+/** 30/10: os responsáveis de obra que se escolhem em "Preparar a obra". Na V1, os do exemplo; na Olyvia, os Gestores de obra do RH
+ *  (definirResponsaveisObra, chamado pela página com neg_gestores_obra). Muda-se no sítio: o campo usa este array. */
+const RESPONSAVEIS_V1 = ["Filipe", "Hugo"];
+export const RESPONSAVEIS_OBRA: string[] = [...RESPONSAVEIS_V1];
+export function definirResponsaveisObra(nomes: readonly string[] | null): void {
+  RESPONSAVEIS_OBRA.splice(0, RESPONSAVEIS_OBRA.length, ...(nomes && nomes.length ? nomes : RESPONSAVEIS_V1));
+}
+
 export const OBRA: Grupo[] = [
   {
     titulo: "Preparar a obra",
     campos: [
-      { k: "responsavel", l: "Responsável de obra", t: "escolha", op: ["Filipe", "Hugo"] },
+      { k: "responsavel", l: "Responsável de obra", t: "escolha", op: RESPONSAVEIS_OBRA },
       { k: "inicio", l: "Início", t: "data" },
       { k: "horario", l: "Horário permitido", t: "escolha", op: ["Dias úteis 8h–17h", "Dias úteis 9h–18h", "Com sábados"] },
       { k: "chaves", l: "Acesso à casa", t: "escolha", op: ["O cliente abre", "Chave entregue", "Código", "Porteiro"] },

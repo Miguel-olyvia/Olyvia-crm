@@ -1,7 +1,7 @@
 // A encomenda de cliente da base nos ecrãs da Emylia (28/10): os estados das linhas como na V1, as encomendas a fornecedor e que o resumo
 // do negócio passa a ser o da base (e não o do Inventário do browser).
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { definirEncomendasReais, estadoDaLinha, lerEncomendaReal, resumoDaBase, type LinhaDocEc } from "./encomendaReal";
+import { definirEncomendasReais, estadoDaLinha, lerEncomendaReal, poResumo, resumoDaBase, type LinhaDocEc } from "./encomendaReal";
 import { estadoLinhaNegocio, resumoEcNegocio } from "../inventario/ponteNegocios";
 
 const linha = (o: Partial<LinhaDocEc>): LinhaDocEc => ({
@@ -26,6 +26,15 @@ describe("estadoDaLinha", () => {
   it("30/10 (visto no browser): recebido do fornecedor para a linha, sem reserva nem saída, conta como pronto (a regra da base)", () => {
     expect(estadoDaLinha(linha({ qty_needed: 1, quantity: 1, qty_ordered: 1, qty_received: 1, line_status: "recebido" }))).toBe("recvpo");
     expect(resumoDaBase({ order_number: "EC-1", lines: [linha({ qty_needed: 1, quantity: 1, qty_ordered: 1, qty_received: 1 })] }, []).pronta).toBe(true);
+  });
+});
+
+describe("poResumo", () => {
+  it("30/10 (visto no browser): encomendada a um fornecedor sem portal não está 'no portal'; publicada, com a data que o fornecedor prometeu", () => {
+    const base = { id: "po", order_number: "PO-7", status: "ordered", expected_delivery: null, fornecedor: "Sanitop" };
+    expect(poResumo({ ...base, publicada: false }).fase).toBe("por email");
+    expect(poResumo({ ...base, publicada: true, prometida: "2026-10-31" })).toMatchObject({ fase: "no portal", prometida: "2026-10-31", prevista: "2026-10-31" });
+    expect(poResumo(base).fase).toBe("no portal");
   });
 });
 

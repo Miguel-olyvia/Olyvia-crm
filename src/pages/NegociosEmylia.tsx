@@ -42,7 +42,7 @@ import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
-import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, definirResponsavelObra, lerGestorObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
@@ -213,7 +213,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       S.role = papel;
       const cat = await carregarCatalogo(supabase, org, S);
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
-      definirResponsavelObra(await lerGestorObra(supabase, org));
+      aplicarGestoresObra(await lerGestoresObra(supabase, org));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)
       const K = lerCatalogo(), custo = new Map([...K.produtos.map((p) => [p.id, { preco: p.custo, forn: p.fornecedor }] as const),
         ...(K.consumiveisCriados ?? []).map((c) => [c.id, { preco: c.preco, forn: c.fornecedor }] as const)]);
@@ -271,8 +271,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
           const { data, error } = await supabase.rpc("obra_encomendar_materiais" as never, { p_org: org, p_negocio: ref.id, p_motivo: motivo,
             p_linhas: linhas.map((l) => ({ produto: l.produto, q: l.q, n: l.n, tarefa: l.tarefa })) } as never);
           if (error) throw new Error(error.message);
-          const r = (data ?? {}) as { encomendas?: { numero: string; fornecedor: string | null; nova: boolean }[]; fora?: { n: string; motivo: string }[] };
-          const pos = r.encomendas ?? [], fora = r.fora ?? [];
+          // 30/10 (20270101400000): cada material é uma linha da encomenda de cliente; o stock reserva-se primeiro (reservadas)
+          const r = (data ?? {}) as { encomendas?: { numero: string; fornecedor: string | null }[]; fora?: { n: string; motivo: string }[]; reservadas?: number };
+          const pos = r.encomendas ?? [], fora = r.fora ?? [], reservadas = r.reservadas ?? 0;
+          if (reservadas) avisar({ msg: "Materiais novos reservados para a obra", sub: `${reservadas} ${reservadas === 1 ? "material havia" : "materiais havia"} em stock: ficam reservados para esta obra.`, kind: "ok" });
           if (pos.length) avisar({ msg: "Materiais novos pedidos ao fornecedor", kind: "ok",
             sub: `${pos.map((p) => `${p.numero}${p.fornecedor ? `, ${p.fornecedor}` : ""}`).join(" · ")} · a aprovar por Compras e armazém` });
           if (fora.length) {

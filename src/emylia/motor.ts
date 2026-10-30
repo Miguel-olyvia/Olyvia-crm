@@ -34,7 +34,7 @@ import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./invent
 import { origemAtual, pedirRota } from "./navegacao";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
-import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
+import { RESPONSAVEIS_OBRA, chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
 import { quemVaiPorOmissao } from "./equipa/membros";
 import { TECNICOS, ausenteNoRh, custoHoraDe, garantirTecnicos, perfilDoTecnico, temAusenciasRh, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
 import { custoObra } from "./custoObra";
@@ -1535,7 +1535,7 @@ function preencher(d: Negocio, n: number) {
   }
   if (n === 4) def({ nome_fiscal: d.nome, nif_fat: f.nif || "", morada_fiscal_igual: "Sim", email_fat: f.email || "", serie: "FT 2026",
     tranche: f.pagamento === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)", vencimento: "15 dias", metodo: "Transferência" });
-  if (n === 5) def({ data_pag: hojeISO(), responsavel: "Filipe", horario: "Dias úteis 8h–17h", chaves: f.habitada_durante_obra === "Sim" ? "O cliente abre" : "Chave entregue",
+  if (n === 5) def({ data_pag: hojeISO(), responsavel: RESPONSAVEIS_OBRA[0] ?? "", horario: "Dias úteis 8h–17h", chaves: f.habitada_durante_obra === "Sim" ? "O cliente abre" : "Chave entregue",
     contacto_local: d.nome + " · " + d.tel, contentor: "Não", protecoes: protecoesSugeridas(f) });
 }
 const fichaCliente = (d: Negocio, desde: string) => ({ nome: d.nome, tel: d.tel, local: nomeLinha(d) + (d.local ? " · " + d.local : ""), desde, deal: d.id });

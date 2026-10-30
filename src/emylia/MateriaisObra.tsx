@@ -26,7 +26,7 @@ function grupoDe(l: LinhaResumoNeg | undefined, exemplo: boolean): Grupo {
   return l.aChegar > 0 && l.pos.some((p) => p.fase !== "por aprovar") ? "caminho" : "resolver";
 }
 /** 30/10: o estado da encomenda a fornecedor real, em português (o estado da base vem em inglês: ordered, received…) */
-const FASE_PO: Record<string, string> = { "no portal": "encomendada · à espera do fornecedor", "por email": "encomendada · à espera do fornecedor", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
+const FASE_PO: Record<string, string> = { "no portal": "encomendada · à espera do fornecedor", "por email": "encomendada fora do portal · envie-a ao fornecedor", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
 const ddmm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
 /** Quantas linhas estão garantidas para arrancar (para o resumo do passo na lista). */

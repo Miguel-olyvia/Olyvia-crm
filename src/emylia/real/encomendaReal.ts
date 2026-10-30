@@ -15,7 +15,9 @@ export interface LinhaDocEc {
   qty_served: number | null; has_preferred_supplier: boolean | null;
 }
 export interface DocEc { contract_id?: string; order_number: string | null; signed?: boolean; lines: LinhaDocEc[] }
-export interface PoBase { id: string; order_number: string | null; status: string; expected_delivery: string | null; fornecedor: string | null }
+export interface PoBase { id: string; order_number: string | null; status: string; expected_delivery: string | null; fornecedor: string | null;
+  /** 30/10 (20270101410000): publicada no portal do fornecedor, e a data que ele lá prometeu. Sem o campo (leitura antiga), como antes. */
+  publicada?: boolean; prometida?: string | null }
 
 const n = (x: unknown): number => { const v = Number(x); return Number.isFinite(v) ? v : 0; };
 const FASE: Record<string, FasePo> = {
@@ -23,8 +25,10 @@ const FASE: Record<string, FasePo> = {
 };
 
 export const poResumo = (p: PoBase): PoResumoNeg => ({
-  id: p.order_number ?? p.id, uuid: p.id, forn: p.fornecedor ?? "Fornecedor", estado: p.status, fase: FASE[p.status] ?? "no portal",
-  prometida: null, prevista: (p.expected_delivery ?? "").slice(0, 10),
+  id: p.order_number ?? p.id, uuid: p.id, forn: p.fornecedor ?? "Fornecedor", estado: p.status,
+  // 30/10: encomendada a um fornecedor sem portal (não publicada) não está "no portal do fornecedor"
+  fase: (p.status === "ordered" || p.status === "sent") && p.publicada === false ? "por email" : FASE[p.status] ?? "no portal",
+  prometida: p.prometida ? p.prometida.slice(0, 10) : null, prevista: (p.prometida ?? p.expected_delivery ?? "").slice(0, 10),
 });
 
 /** O estado de uma linha, como o Inventário da V1 o diz (servido, pronto a sair, à espera do fornecedor, sem fornecedor…). */
@@ -109,6 +113,7 @@ export async function lerEncomendaReal(sb: SupabaseClient, org: string, contract
     pos = (r.data as Record<string, unknown>[]).map((p) => ({
       id: String(p.id), order_number: (p.order_number as string | null) ?? null, status: String(p.status ?? ""),
       expected_delivery: (p.expected_delivery as string | null) ?? null, fornecedor: (p.fornecedor as string | null) ?? null,
+      ...(typeof p.publicada === "boolean" ? { publicada: p.publicada } : {}), prometida: (p.prometida as string | null) ?? null,
     }));
   } else {
     if (r.error && r.error.code !== "PGRST202" && r.error.code !== "42883") throw new Error(r.error.message || "Não foi possível ler as encomendas a fornecedor.");

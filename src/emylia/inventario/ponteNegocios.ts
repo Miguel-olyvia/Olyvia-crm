@@ -219,7 +219,7 @@ export function fasePo(p: Po): FasePo {
   if (st === "partial") return "parcial";
   return p.portal.state === "email" || p.portal.state === "none" ? "por email" : "no portal";
 }
-const ROTULO_FASE: Record<FasePo, string> = { "por aprovar": "por aprovar", "no portal": "no portal do fornecedor", "por email": "enviada por email", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
+const ROTULO_FASE: Record<FasePo, string> = { "por aprovar": "por aprovar", "no portal": "no portal do fornecedor", "por email": "encomendada, fora do portal", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
 
 export interface LinhaResumoNeg {
   /** 21/10: a encomenda de cliente da linha (a inicial, EC-1027, ou uma de ajuste, EC-1027-A1) */

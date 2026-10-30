@@ -105,7 +105,8 @@ export function HojeTecnico(ctx: Ctx) {
         <AvatarTec id={eu} tam="h-12 w-12 text-sm" />
         <div className="min-w-0">
           <h1 className="text-3xl font-semibold tracking-tight">{saudacao(agora.getHours())}, {tec.n.split(" ")[0]}</h1>
-          <p className="text-[15px] text-muted-foreground">{tec.sk}</p>
+          {/* 30/10: o ofício das tarefas de hoje (um técnico do RH com vários ofícios); sem tarefas, o da ficha */}
+          <p className="text-[15px] text-muted-foreground">{[...new Set(hoje.map((x) => x.t.sk).filter(Boolean))].join(" · ") || tec.sk}</p>
         </div>
       </div>
       <p className="mt-3 text-lg text-muted-foreground">

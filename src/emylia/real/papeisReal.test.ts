@@ -5,10 +5,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { PAPEIS, type Plano } from "../motor";
 import { podeNeg } from "../permissoes";
-import { RESPONSAVEL_OBRA } from "../obraOps";
+import { RESPONSAVEL_OBRA, equipaDaObra, equipamentosDaObra } from "../obraOps";
+import { RESPONSAVEIS_OBRA } from "../campos";
 import { TECNICOS, tecnicosIniciais, usarTecnicos, type FichaTecnico } from "../equipa/tecnicos";
 import { atribuirPorAtribuir, tecnicosDoOficio } from "../preparacaoObra";
-import { aplicarNomesPapeis, aplicarPermissoesReais, definirResponsavelObra, papeisDoLido, papeisPermitidos, papelInicial, reporNomesPapeis } from "./papeisReal";
+import { aplicarGestoresObra, aplicarNomesPapeis, aplicarPermissoesReais, definirResponsavelObra, papeisDoLido, papeisPermitidos, papelInicial, reporNomesPapeis } from "./papeisReal";
 
 afterEach(() => { reporNomesPapeis(); usarTecnicos(tecnicosIniciais()); });
 
@@ -69,6 +70,33 @@ describe("o responsável de obra", () => {
     expect(RESPONSAVEL_OBRA).toMatchObject({ n: "o Gestor de obra", tel: "" });
     reporNomesPapeis();
     expect(RESPONSAVEL_OBRA.n).toBe("Filipe Rocha");
+  });
+});
+
+describe("30/10: o resto do exemplo sai da Olyvia", () => {
+  it("os responsáveis de 'Preparar a obra' são os Gestores de obra do RH; ao sair, os do exemplo", () => {
+    aplicarGestoresObra([{ nome: "Paulo Nogueira", telefone: "210000003" }, { nome: "Teresa Albuquerque", telefone: null }]);
+    expect(RESPONSAVEIS_OBRA).toEqual(["Paulo Nogueira", "Teresa Albuquerque"]);
+    expect(RESPONSAVEL_OBRA.n).toBe("Paulo Nogueira");
+    reporNomesPapeis();
+    expect(RESPONSAVEIS_OBRA).toEqual(["Filipe", "Hugo"]);
+  });
+
+  it("sem a carrinha do exemplo na Olyvia; na V1 continua", () => {
+    const p: Plano = { tasks: [{ nome: "Canalização", svcs: ["canal"], dia: 0, dur: 1, sk: "Canalizador", h: 8, tec: null }], estado: "aprovado", dia: 0 };
+    expect(equipamentosDaObra(p).some((e) => /Renault/.test(e.n))).toBe(true);
+    aplicarPermissoesReais();
+    expect(equipamentosDaObra(p).some((e) => /Renault/.test(e.n))).toBe(false);
+    reporNomesPapeis();
+    expect(equipamentosDaObra(p).some((e) => /Renault/.test(e.n))).toBe(true);
+  });
+
+  it("na equipa da obra, o ofício de cada técnico é o das tarefas dele ali (não o primeiro da ficha)", () => {
+    usarTecnicos([tec("sergio", "Sérgio Matos", ["vidro", "ladrilhador"])]);
+    TECNICOS[0].sk = "técnico de vidro";
+    const t = (nome: string) => ({ nome, svcs: [], dia: 0, dur: 1, sk: "Ladrilhador", perfilId: "ladrilhador", h: 4, tec: "sergio" });
+    const p: Plano = { tasks: [t("Revestimento"), t("Pavimento")], estado: "aprovado", dia: 0 };
+    expect(equipaDaObra(p)[0].sk).toBe("Ladrilhador");
   });
 });
 
