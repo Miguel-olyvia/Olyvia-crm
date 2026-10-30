@@ -5,9 +5,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { PAPEIS, type Plano } from "../motor";
 import { podeNeg } from "../permissoes";
+import { RESPONSAVEL_OBRA } from "../obraOps";
 import { TECNICOS, tecnicosIniciais, usarTecnicos, type FichaTecnico } from "../equipa/tecnicos";
 import { atribuirPorAtribuir, tecnicosDoOficio } from "../preparacaoObra";
-import { aplicarNomesPapeis, aplicarPermissoesReais, papeisDoLido, papeisPermitidos, papelInicial, reporNomesPapeis } from "./papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, definirResponsavelObra, papeisDoLido, papeisPermitidos, papelInicial, reporNomesPapeis } from "./papeisReal";
 
 afterEach(() => { reporNomesPapeis(); usarTecnicos(tecnicosIniciais()); });
 
@@ -57,6 +58,17 @@ describe("as permissões do Financeiro na Olyvia", () => {
     expect(podeNeg("financeiro", "finance.validate_payment")).toBe(true);
     reporNomesPapeis();
     expect(podeNeg("direcao", "finance.validate_payment")).toBe(true);
+  });
+});
+
+describe("o responsável de obra", () => {
+  it("30/10: é o Gestor de obra do RH, e não o Filipe do exemplo; sem nenhum, 'o Gestor de obra' sem telefone; ao sair, o do exemplo", () => {
+    definirResponsavelObra({ nome: "Paulo Nogueira", telefone: "210000003" });
+    expect(RESPONSAVEL_OBRA).toEqual({ n: "Paulo Nogueira", papel: "Gestor de obra", tel: "210000003" });
+    definirResponsavelObra(undefined);
+    expect(RESPONSAVEL_OBRA).toMatchObject({ n: "o Gestor de obra", tel: "" });
+    reporNomesPapeis();
+    expect(RESPONSAVEL_OBRA.n).toBe("Filipe Rocha");
   });
 });
 

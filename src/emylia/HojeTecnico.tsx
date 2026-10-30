@@ -173,7 +173,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
         <div className="mt-3 flex flex-wrap gap-2">
           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><MapPin className="h-4 w-4" aria-hidden="true" />{morada}</a>
           <a href={`tel:${d.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />Cliente</a>
-          <a href={`tel:${RESPONSAVEL_OBRA.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />{RESPONSAVEL_OBRA.n.split(" ")[0]} (responsável)</a>
+          {RESPONSAVEL_OBRA.tel && <a href={`tel:${RESPONSAVEL_OBRA.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />{RESPONSAVEL_OBRA.n.split(" ")[0]} (responsável)</a>}
         </div>
       </header>
 

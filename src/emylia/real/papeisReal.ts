@@ -5,6 +5,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PAPEIS, type Papel } from "../motor";
 import { PERMS_PAPEL } from "../permissoes";
+import { RESPONSAVEL_OBRA } from "../obraOps";
 
 export interface MeusPapeis {
   papeis: Papel[];
@@ -82,6 +83,20 @@ export const podeVerComo = (p: Papel): boolean => !escolhiveis || escolhiveis.in
 /** "Só o Financeiro" na Olyvia; "Só o Financeiro ou a Direção" na V1. */
 export const quemFatura = (): string => (PERMS_PAPEL.direcao.includes("*") ? "Só o Financeiro ou a Direção" : "Só o Financeiro");
 
+/** 30/10 (20270101380000): o responsável de obra é o Gestor de obra do RH (neg_gestores_obra), e não o "Filipe Rocha" do exemplo; sem
+ *  nenhum no RH, "o Gestor de obra" e sem telefone. null: volta ao do exemplo. */
+const RESPONSAVEL_V1 = { ...RESPONSAVEL_OBRA };
+export function definirResponsavelObra(g: { nome: string; telefone: string | null } | null | undefined): void {
+  if (g === null) { Object.assign(RESPONSAVEL_OBRA, RESPONSAVEL_V1); return; }
+  Object.assign(RESPONSAVEL_OBRA, { n: g?.nome?.trim() || "o Gestor de obra", papel: "Gestor de obra", tel: g?.telefone?.trim() ?? "" });
+}
+export async function lerGestorObra(sb: SupabaseClient, org: string): Promise<{ nome: string; telefone: string | null } | undefined> {
+  const { data, error } = await sb.rpc("neg_gestores_obra" as never, { p_org: org } as never);
+  if (error || !Array.isArray(data)) return undefined;
+  const g = (data as { nome?: string; telefone?: string | null }[])[0];
+  return g?.nome ? { nome: g.nome, telefone: g.telefone ?? null } : undefined;
+}
+
 const DIRECAO_V1 = PERMS_PAPEL.direcao;
 /** Na Olyvia, a fatura e o pagamento são só do Financeiro (a base também o exige: neg_papeis_permissoes); na V1 a Direção tinha tudo.
  *  A Direção fica com o resto (aprovar a margem, anular, a equipa). */
@@ -93,4 +108,5 @@ export function reporNomesPapeis(): void {
   for (const p of Object.keys(ORIGINAIS) as Papel[]) PAPEIS[p] = { ...ORIGINAIS[p] };
   PERMS_PAPEL.direcao = DIRECAO_V1;
   escolhiveis = null;
+  definirResponsavelObra(null);
 }

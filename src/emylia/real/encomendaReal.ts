@@ -58,10 +58,12 @@ export function resumoDaBase(doc: DocEc, pos: readonly PoBase[]): ResumoEcNeg {
   const servidas = linhas.filter((l) => l.st === "served").length, prontas = linhas.filter((l) => l.st === "ready" || l.st === "recvpo").length;
   const aFornecedor = linhas.filter((l) => l.aChegar > 0).length, semForn = linhas.filter((l) => l.semForn > 0).length;
   const estado: EstadoEc = linhas.length && servidas === linhas.length ? "full" : semForn ? "nosup" : aFornecedor ? "waiting" : "partial";
+  const pronta = linhas.every((l) => l.st === "served" || l.st === "ready" || l.st === "recvpo");
   return {
-    id: ec, eliminada: false, estado, rotulo: EC_ESTADOS[estado], linhas, ajustes: [],
+    // 30/10 (visto no browser): tudo garantido no armazém dizia "Parcialmente pendente"
+    id: ec, eliminada: false, estado, rotulo: pronta && estado !== "full" && linhas.length ? "Pronta a sair para a obra" : EC_ESTADOS[estado], linhas, ajustes: [],
     tot: { linhas: linhas.length, servidas, prontas, aBordo: 0, aFornecedor, semForn }, pos: [...porId.values()],
-    pronta: linhas.every((l) => l.st === "served" || l.st === "ready" || l.st === "recvpo"),
+    pronta,
   };
 }
 

@@ -42,7 +42,7 @@ import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
-import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, definirResponsavelObra, lerGestorObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
@@ -212,6 +212,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), ou um cargo técnico de obra."); return; }
       S.role = papel;
       const cat = await carregarCatalogo(supabase, org, S);
+      // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
+      definirResponsavelObra(await lerGestorObra(supabase, org));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)
       const K = lerCatalogo(), custo = new Map([...K.produtos.map((p) => [p.id, { preco: p.custo, forn: p.fornecedor }] as const),
         ...(K.consumiveisCriados ?? []).map((c) => [c.id, { preco: c.preco, forn: c.fornecedor }] as const)]);
