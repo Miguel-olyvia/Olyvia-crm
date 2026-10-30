@@ -22,7 +22,7 @@ import { prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoRe
 import { useFrota } from "./frota/loja";
 import { ligacoesObra } from "./frota/transporteObra";
 import { ProximoRececaoNegocio } from "./RececaoNegocio";
-import { ecDaAdenda, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
+import { ecDaAdenda, linhasDaObra, porEncomendarDe, totaisDaEc } from "./encomendasAjuste";
 import { nomeCurtoTarefa } from "./obraOps";
 import { assinadas, primeiraPaga } from "./adendas";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
@@ -259,6 +259,8 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
 function DetalheEncomenda({ ctx, inv }: { ctx: Ctx & { d: Negocio }; inv: ResumoEcNeg | null | undefined }) {
   const { A, d, go } = ctx;
   const ec = d.obra.ec!;
+  // 30/10: a da base vem a 0 no negócio: o custo e o valor somam-se das linhas
+  const tot = totaisDaEc(d, ec);
   const [nota, setNota] = useState(false);
   return (
     <div className="mt-4 grid gap-4 rounded-xl border border-border p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:grid-cols-2">
@@ -283,9 +285,9 @@ function DetalheEncomenda({ ctx, inv }: { ctx: Ctx & { d: Negocio }; inv: Resumo
         </ul>
         {/* o custo contra o que o cliente paga por estes materiais */}
         <dl className="mt-2 grid grid-cols-3 gap-2 border-t border-border pt-3 text-sm">
-          <div><dt className="text-muted-foreground">Custo</dt><dd className="text-[15px] font-semibold tabular-nums">{eur(ec.custo ?? 0)} €</dd></div>
-          <div><dt className="text-muted-foreground">Na proposta</dt><dd className="text-[15px] font-semibold tabular-nums">{eur(ec.valor)} €</dd></div>
-          <div><dt className="text-muted-foreground">Margem</dt><dd className="text-[15px] font-semibold tabular-nums">{ec.valor > 0 ? pct((ec.valor - (ec.custo ?? 0)) / ec.valor) : "—"}</dd></div>
+          <div><dt className="text-muted-foreground">Custo</dt><dd className="text-[15px] font-semibold tabular-nums">{eur(tot.custo)} €</dd></div>
+          <div><dt className="text-muted-foreground">Na proposta</dt><dd className="text-[15px] font-semibold tabular-nums">{eur(tot.valor)} €</dd></div>
+          <div><dt className="text-muted-foreground">Margem</dt><dd className="text-[15px] font-semibold tabular-nums">{tot.valor > 0 ? pct((tot.valor - tot.custo) / tot.valor) : "—"}</dd></div>
         </dl>
       </div>
       <div>
