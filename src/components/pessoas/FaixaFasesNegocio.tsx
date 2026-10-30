@@ -2,7 +2,7 @@
 // Deriva da mesma lista da ficha (`fasesDoNegocio`), por isso N varia com o negócio. Um negócio ganho não tem fase atual: só mostra a faixa.
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import type { EstadoFase, FaseDoNegocio } from "./fasesDoNegocio";
+import type { EstadoFase, FaseVista } from "./fasesDoNegocio";
 
 const COR_SEGMENTO: Record<EstadoFase, string> = {
   feita: "bg-emerald-600 dark:bg-emerald-400",
@@ -11,7 +11,7 @@ const COR_SEGMENTO: Record<EstadoFase, string> = {
   perdida: "bg-destructive",
 };
 
-export function FaixaFasesNegocio({ fases }: { fases: readonly FaseDoNegocio[] }) {
+export function FaixaFasesNegocio({ fases }: { fases: readonly FaseVista[] }) {
   const { t } = useTranslation();
   if (fases.length === 0) return null;
   const indice = fases.findIndex((f) => f.estado === "atual" || f.estado === "perdida");

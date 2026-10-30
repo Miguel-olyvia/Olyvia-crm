@@ -1,11 +1,11 @@
-// O detalhe de um negócio dentro da ficha: "← Voltar aos negócios", o título e secções (não abas): próximo passo e prazo,
-// o percurso (contactos, visitas, levantamento), orçamentos e, se existirem, proposta e contrato. Tudo na página de Pessoas, sem
-// ir à de Negócio e metas: só reutiliza os seus painéis, com os detalhes de exemplo (ou nenhuns). Na ficha real (com `DadosNegocio` e as
-// mutações por contexto) lê os documentos da base, perde, anula a perda e dá como ganho contra a base, só com permissão de editar.
+// O detalhe de um negócio dentro da ficha: "← Voltar aos negócios", o título, os selos, o valor e o comercial e as «Fases do negócio»
+// (Orçamento, Proposta, Contrato, Financeiro e Obra, com a atual marcada). Sem o guia, é só isto: o passo e o prazo, os botões (perder,
+// mudar o fecho, editar, lixo) e os detalhes (percurso, registos ligados, orçamentos, proposta, condições) saíram desta vista (30/10).
+// A Financeiro e a Obra vêm do `negocios.fase` lido da base, pela mesma regra do Quadro. Com o guia (a ficha real) nada disto muda.
 // Com o guia (a ficha real) por baixo do guia só ficam os elementos de decisão (perda, alertas, fecho); as secções recolhíveis e as ações de editar,
 // mandar para o lixo e mudar o fecho abrem a pedido nos «Detalhes do negócio» (um diálogo por cima, a partir do menu «Mais»).
 import { useEffect, useRef, type MutableRefObject } from "react";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -20,15 +20,15 @@ import { useAlteracoesNegocios } from "@/components/negocio-metas/negociosAltera
 import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { RESTO_EM_COLUNA } from "./layoutGuia";
 import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
-import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { AcoesEdicaoNegocio } from "./AcoesEdicaoNegocio";
 import { DetalhesRecolhiveis, secaoAberta } from "./ApoioNegocio";
 import { AlertasNegocio } from "./AlertasNegocio";
 import { BlocoFechoNegocio } from "./BlocoFechoNegocio";
 import { EtiquetaFecho } from "./EtiquetaFecho";
-import { passoDoNegocio } from "./etapaPessoa";
 import { FaixaFasesNegocio } from "./FaixaFasesNegocio";
-import { fasesDoNegocio } from "./fasesDoNegocio";
+import { comPosContrato, fasesDoNegocio } from "./fasesDoNegocio";
+import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { useNegocioEmylia } from "./negocioEmylia/useNegocioEmylia";
 import { FichaApoioDialogo } from "./FichaApoioDialogo";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
@@ -36,13 +36,8 @@ import { GuiaDoNegocio } from "./GuiaDoNegocio";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 import { estaAberto } from "./juntarPessoas";
 import { MudarFechoNegocio } from "./MudarFechoNegocio";
-import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
 import { useAcoesDoNegocio } from "./permissoesNegocio";
-import { passoDoItem } from "./processo/passosProcesso";
-import { useAcaoDoPasso } from "./processo/processoContexto";
 import type { ItemProcesso } from "./processo/tiposProcesso";
-import { trabalhoDoItem } from "./processo/trabalhoDoItem";
-import { Prazo } from "./SeccoesResumo";
 
 const P = "pessoasPagina.";
 
@@ -76,39 +71,6 @@ interface DetalheNegocioFichaProps {
   aoRegistarChamada?: (origem: HTMLElement | null) => void;
   /** Com o guia: a ficha está na página e tem a ligação «← Pipeline» / «← Pessoas» no topo, por isso não há segundo botão de voltar. No painel lateral não há essa ligação e o botão fica. */
   comSaidaNaPagina?: boolean;
-}
-
-/**
- * O "A fazer" de um negócio: o passo, a explicação, o prazo e a saúde, e o botão que executa o passo (o mesmo do Quadro e da Lista) quando
- * há processo. Só os negócios abertos têm passo: num ganho ou perdido não há nada a fazer.
- */
-function PassoDoNegocio({ negocio, hoje, item }: { negocio: NegocioMes; hoje: string; item?: ItemProcesso }) {
-  const { t } = useTranslation();
-  const id = passoDoNegocio(negocio);
-  const acao = useAcaoDoPasso(item, () => undefined);
-  const passo = item ? t(passoDoItem(item).chave) : "";
-  return (
-    <Seccao titulo={t(`${P}deal.next`)} nivel={4}>
-      <div className="space-y-2">
-        <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${id}`)}</p>
-        <p className="text-[15px] text-muted-foreground">{t(`${P}next.${id}.hint`)}</p>
-        <Prazo prazo={negocio.proximoPrazo} hoje={hoje} />
-        <SaudeTag negocio={negocio} hoje={hoje} />
-        {item && acao.executa && (
-          <Button
-            type="button" onClick={acao.aoClicar} {...acao.atributos}
-            // Começa pelo texto visível (WCAG 2.5.3) e diz de que trabalho é.
-            aria-label={t(`${P}process.stepLabel`, { step: passo, work: trabalhoDoItem(t, item), name: negocio.pessoa })}
-            className={cn("h-auto min-h-11 w-full justify-start gap-2 whitespace-normal py-2 text-left motion-reduce:transition-none sm:w-auto", FOCO)}
-          >
-            {passo}
-            <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
-          </Button>
-        )}
-        {acao.bloqueio && acao.idBloqueio && <ExplicacaoDoPasso id={acao.idBloqueio} texto={acao.bloqueio} />}
-      </div>
-    </Seccao>
-  );
 }
 
 /** Um negócio perdido: em que fase e porquê, e o botão que anula a perda (o negócio volta ao quadro). */
@@ -151,6 +113,14 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
   const perdidoAntigo = (negocio as { resultado?: string }).resultado === "perdido";
   const fases = fasesDoNegocio(negocio, registos, perda, perdidoAntigo);
   const faseAtual = (fases.find((f) => f.estado === "atual" || f.estado === "perdida") ?? fases[fases.length - 1])?.id;
+  // A Financeiro e a Obra vêm do `negocios.fase` lido da base (a mesma regra do Quadro); só se lê no negócio aberto da aba «Negócios», sem o guia.
+  const fonte = useFontePessoas();
+  const org = fonte.modo === "real" ? fonte.organizationId : null;
+  const utilizador = fonte.modo === "real" ? (fonte.utilizadorId ?? "") : "";
+  const perdidoNeg = negocio.estadoReal === "perdido" || perda !== undefined || perdidoAntigo;
+  const emylia = useNegocioEmylia(comGuia || perdidoNeg ? null : org, negocio.id, undefined, undefined, utilizador);
+  const fasesVistas = comPosContrato(fases, { fase: emylia.d?.fase, estado: negocio.estadoReal, contratoAssinado: negocio.contrato?.estado === "assinado", perdido: perdidoNeg });
+  const faseVista = (fasesVistas.find((f) => f.estado === "atual" || f.estado === "perdida") ?? fasesVistas[fasesVistas.length - 1])?.id;
   // O passo seguinte só existe num negócio aberto: num ganho ou perdido reabre-se primeiro.
   const comPasso = estaAberto(negocio) && !acoes.fechado;
   // Os detalhes: só o da fase em que o negócio está vem aberto (num ganho ou perdido, o percurso); os outros ficam a uma linha de resumo.
@@ -195,7 +165,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{t(`${P}deals.kind.deal`)}</Badge>
               {negocio.fecho && <EtiquetaFecho fecho={negocio.fecho} />}
-              {faseAtual && <Badge variant="secondary">{t(`${P}phases.${faseAtual}`)}</Badge>}
+              {faseVista && <Badge variant="secondary">{t(`${P}phases.${faseVista}`)}</Badge>}
             </div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[15px]">
               <dt className="text-muted-foreground">{t(`${P}detail.value`)}</dt>
@@ -217,22 +187,9 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
             />
           </>
         ) : (
-          <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fases} /><FasesDoNegocioLista fases={fases} /></div></Seccao>
+          // Sem o guia (o negócio aberto na aba «Negócios»): só em que fase está, da Orçamento à Obra. O passo, os botões e os detalhes saíram.
+          <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fasesVistas} /><FasesDoNegocioLista fases={fasesVistas} /></div></Seccao>
         )}
-        {!comGuia && perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
-        {!comGuia && <AlertasNegocio negocio={negocio} />}
-        {/* Um negócio ganho ou perdido não tem passo a fazer (criar documentos incluído): reabre-se primeiro. Sem processo (o exemplo) fica só o texto do passo. */}
-        {comPasso && !comGuia && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
-        {comPasso && !comGuia && podeEditar && (
-          <div className="flex flex-wrap items-start gap-3">
-            <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
-          </div>
-        )}
-        {!comGuia && <BlocoFechoNegocio negocio={negocio} />}
-        {/* Mudar o tipo de fecho: só na ficha real, com permissão de editar e com o negócio aberto. Com o guia vive nos «Detalhes do negócio». */}
-        {!comGuia && <MudarFechoNegocio negocio={negocio} aoSemBotao={() => titulo.current?.focus()} />}
-        {/* Editar o título, as notas e o comercial, e mandar para o lixo: só na ficha real, com a permissão certa. Com o guia vive nos «Detalhes do negócio». */}
-        {!comGuia && <AcoesEdicaoNegocio negocio={negocio} aoApagado={aoApagado ?? aoVoltar} />}
       </div>
       {comGuia ? (
         <FichaApoioDialogo
@@ -245,7 +202,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
             <DetalhesRecolhiveis negocio={negocio} hoje={hoje} aberta={aberta} />
           </div>
         </FichaApoioDialogo>
-      ) : <DetalhesRecolhiveis negocio={negocio} hoje={hoje} aberta={aberta} />}
+      ) : null}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { Check, Circle, CircleDot, X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import type { EstadoFase, FaseDoNegocio } from "./fasesDoNegocio";
+import type { EstadoFase, FaseVista } from "./fasesDoNegocio";
 
 const P = "pessoasPagina.phases.";
 
@@ -21,7 +21,7 @@ const COR_TEXTO: Record<EstadoFase, string> = {
   perdida: "font-semibold text-foreground",
 };
 
-export function FasesDoNegocioLista({ fases }: { fases: readonly FaseDoNegocio[] }) {
+export function FasesDoNegocioLista({ fases }: { fases: readonly FaseVista[] }) {
   const { t } = useTranslation();
   return (
     <ol className="space-y-1.5">

@@ -6,12 +6,20 @@ import { visitasDerivadas } from "@/components/negocio-metas/derivadosDoNegocio"
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { faseDoPercurso, type FaseNaPerda, type PerdaDoPercurso } from "@/components/negocio-metas/percursoNegocio";
 import type { EstadoRegistos } from "@/components/negocio-metas/registosTipos";
+import { colunaDoPosContrato } from "./quadro/colunasPosContrato";
 
 export type IdFase = "contacto" | "visita" | "levantamento" | "orcamento" | "proposta" | "contrato" | "ganho";
 export type EstadoFase = "feita" | "atual" | "porFazer" | "perdida";
 
 export interface FaseDoNegocio {
   id: IdFase;
+  estado: EstadoFase;
+}
+
+/** As fases como a ficha as mostra no detalhe de um negócio: as do percurso mais Financeiro e Obra (a seguir ao contrato). */
+export type IdFaseVista = IdFase | "financeiro" | "obra";
+export interface FaseVista {
+  id: IdFaseVista;
   estado: EstadoFase;
 }
 
@@ -50,5 +58,30 @@ export function fasesDoNegocio(negocio: NegocioMes, registos: EstadoRegistos, pe
     // Fecho na proposta: os contratos são ignorados, por isso o percurso não tem a fase «Contrato».
     ...(negocio.fecho === "proposta" ? [] : [fase("contrato", estadoNa("contrato"))]),
     ...(lugar === "ganho" ? [fase("ganho", "feita")] : []),
+  ];
+}
+
+interface EntradaPosContratoVista {
+  /** `negocios.fase` (0 a 5), lido da base; `null` ou `undefined` quando não se leu ou o CRM criou o negócio. */
+  fase: number | null | undefined;
+  /** `negocios.estado`; sem ele conta como aberto. */
+  estado?: "aberto" | "ganho" | "perdido";
+  contratoAssinado: boolean;
+  perdido: boolean;
+}
+
+/**
+ * Junta à lista as duas fases a seguir ao contrato, Financeiro e Obra, com a MESMA regra do Quadro (colunaDoPosContrato): contrato assinado
+ * ou `negocios.fase` 4 = Financeiro; `negocios.fase` 5 = Obra. Quando o negócio já está numa delas, as anteriores ficam feitas. Um negócio
+ * perdido não as mostra (como na barra do guia). Função pura.
+ */
+export function comPosContrato(fases: readonly FaseDoNegocio[], e: EntradaPosContratoVista): FaseVista[] {
+  if (e.perdido || fases.some((f) => f.estado === "perdida")) return [...fases];
+  const coluna = colunaDoPosContrato({ estado: e.estado ?? "aberto", fase: e.fase ?? null, contratoAssinado: e.contratoAssinado, pagamentoValidado: false });
+  const antes: FaseVista[] = coluna === null ? [...fases] : fases.filter((f) => f.id !== "ganho").map((f) => ({ id: f.id, estado: "feita" as const }));
+  return [
+    ...antes,
+    { id: "financeiro", estado: coluna === "obra" ? "feita" : coluna === "financeiro" ? "atual" : "porFazer" },
+    { id: "obra", estado: coluna === "obra" ? "atual" : "porFazer" },
   ];
 }
