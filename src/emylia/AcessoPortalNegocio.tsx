@@ -84,8 +84,8 @@ export function EstadoAcessoPortal({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <span className="min-w-0 flex-1">
             {/* 24/10: o email do envio (SMTP da organização) */}
             {a.estado === "ok" && a.envio === "falhou" ? `Email não enviado para ${a.email}: ${a.envioMsg || "erro desconhecido"}`
-              : a.estado === "ok" && a.envio === "enviado" ? `Conta do portal pronta · email enviado para ${a.email}`
-              : a.estado === "ok" ? `Conta do portal pronta: ${a.email}`
+              : a.estado === "ok" && a.envio === "enviado" ? (a.existia ? `Documento no portal do cliente · aviso enviado para ${a.email}` : `Conta do portal criada · credenciais enviadas para ${a.email}`)
+              : a.estado === "ok" ? (a.existia ? `Documento no portal do cliente (${a.email})` : `Conta do portal criada: ${a.email}`)
               : a.estado === "erro" ? `Não foi possível criar a conta do portal (${a.email}): ${a.msg || "erro desconhecido"}`
               : `A preparar a conta do portal (${a.email})…`}
           </span>
