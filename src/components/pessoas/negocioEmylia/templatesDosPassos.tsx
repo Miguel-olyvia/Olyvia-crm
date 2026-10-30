@@ -13,7 +13,7 @@ import type { Passo } from "@/emylia/CamposFase";
 import type { Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { useCompany } from "@/contexts/CompanyContext";
-import { useMinutasDeContrato, useNomeDoSignatario, usePerguntasDeContrato, useTemplatesDeAspeto, type MinutaDeContrato, type TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
+import { useDadosDaProposta, useMinutasDeContrato, useNomeDoSignatario, usePerguntasDeContrato, useTemplatesDeAspeto, type MinutaDeContrato, type TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
 import { useTemplatesDoNegocio, type UseTemplatesDoNegocio } from "@/hooks/pessoas/useTemplatesDoNegocio";
 import { extractPromptTokens, substituteVariables, type ContractVariableData } from "@/utils/contractVariables";
 import { sanitizeRichHtml } from "@/utils/sanitize";
@@ -163,22 +163,31 @@ function TemplateDaProposta({ c, children }: { c: ContextoDosTemplates; children
 }
 
 /* ------------------------------------------------------------------------------------------------ passo Contrato */
-function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valores: Record<string, string>): ContractVariableData {
+/** «2026-10-30» passa a «30/10/2026»; qualquer outro texto fica como está. */
+const dataDmy = (iso: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split("-").reverse().join("/") : iso);
+
+type DadosDaProposta = { numero: string; data: string } | null | undefined;
+
+function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valores: Record<string, string>, proposta?: DadosDaProposta): ContractVariableData {
   const T = d.orc ? totaisIva(d, c.ctx.S) : null;
+  // O início da obra é a data do contrato; o número e a data da proposta são os da base (os que o cliente vê no portal), não os do desenho da Emylia.
+  const inicio = d.f.inicio_prev || d.orc?.inicioObra || "";
   const base: ContractVariableData = {
     empresa_nome: nome, cliente_nome: d.f.nome_fiscal || d.nome, cliente_nif: d.f.nif_fat || d.f.nif || "", cliente_morada: d.f.morada || d.local || "",
     cliente_email: d.f.email || "", cliente_telefone: d.tel.includes("@") ? "" : d.tel, ...(T ? { contrato_valor: T.total, proposta_valor: T.total } : {}),
+    ...(proposta ? { proposta_numero: proposta.numero, ...(proposta.data ? { proposta_data: proposta.data } : {}) } : {}),
+    ...(inicio ? { contrato_data_inicio: dataDmy(inicio) } : {}),
   };
   return { ...base, ...valores } as ContractVariableData;
 }
 
-function MinutaDoContrato({ minuta, valores, aoEscrever, aoGuardar, desativado, d, c, nome }: {
-  minuta: MinutaDeContrato; valores: Record<string, string>; aoEscrever: (k: string, v: string) => void; aoGuardar: () => void; desativado: boolean; d: Negocio; c: ContextoDosTemplates; nome: string;
+function MinutaDoContrato({ minuta, valores, aoEscrever, aoGuardar, desativado, d, c, nome, proposta }: {
+  minuta: MinutaDeContrato; valores: Record<string, string>; aoEscrever: (k: string, v: string) => void; aoGuardar: () => void; desativado: boolean; d: Negocio; c: ContextoDosTemplates; nome: string; proposta?: DadosDaProposta;
 }) {
   const perguntas = usePerguntasDeContrato();
   const chaves = useMemo(() => extractPromptTokens(minuta.body_html), [minuta.body_html]);
   const rotulo = new Map((perguntas.data ?? []).map((p) => [p.key, p]));
-  const html = useMemo(() => sanitizeRichHtml(substituteVariables(minuta.body_html, dadosDaMinuta(d, c, nome, valores), true)), [minuta.body_html, d, c, nome, valores]);
+  const html = useMemo(() => sanitizeRichHtml(substituteVariables(minuta.body_html, dadosDaMinuta(d, c, nome, valores, proposta), true)), [minuta.body_html, d, c, nome, valores, proposta]);
   return (
     <div className="space-y-4">
       {perguntas.error instanceof Error && <p role="alert" className="text-[15px] text-destructive">Não foi possível ler as perguntas da minuta: {perguntas.error.message}</p>}
@@ -240,8 +249,9 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
   const chave = `${c.negocioId ?? ""}|${neg.estado}|${neg.dados.minuta_id ?? ""}`;
   if (chave !== chaveVista) { setChaveVista(chave); setValores(neg.dados.minuta_respostas); }
   const omissao = lista.data?.find((m) => m.is_default) ?? null;
+  const proposta = useDadosDaProposta(c.negocioId).data;
   const corpoPreenchido = (m: MinutaDeContrato, v: Record<string, string>): string =>
-    sanitizeRichHtml(substituteVariables(m.body_html, dadosDaMinuta(c.d, c, org.nome, v)));
+    sanitizeRichHtml(substituteVariables(m.body_html, dadosDaMinuta(c.d, c, org.nome, v, proposta)));
   const guardarRespostas = async (): Promise<void> => {
     if (!minuta) return;
     const guardado = neg.dados.minuta_respostas;
@@ -269,7 +279,7 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
         {minuta && <AssinaturaDaMinuta minuta={minuta} />}
         {minuta && !soEscolher && (
           <MinutaDoContrato
-            minuta={minuta} valores={valores} d={c.d} c={c} nome={org.nome} desativado={bloqueado || !podeEscolher(neg, c)}
+            minuta={minuta} valores={valores} d={c.d} c={c} nome={org.nome} proposta={proposta} desativado={bloqueado || !podeEscolher(neg, c)}
             aoEscrever={(k, v) => setValores((x) => ({ ...x, [k]: v }))}
             aoGuardar={() => { void guardarRespostas(); }}
           />

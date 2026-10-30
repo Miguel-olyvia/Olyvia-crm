@@ -91,6 +91,22 @@ export function useMinutasDeContrato() {
   });
 }
 
+/** O número e a data (dd/mm/aaaa) da proposta mais recente do negócio, que a minuta pede ({{proposta_numero}} e {{proposta_data}}); `null` sem proposta. */
+export function useDadosDaProposta(negocioId: string | null) {
+  return useQuery({
+    queryKey: ["pessoas-proposta-do-negocio", negocioId],
+    enabled: negocioId !== null,
+    staleTime: 30_000,
+    queryFn: async (): Promise<{ numero: string; data: string } | null> => {
+      const { data, error } = await tabela("proposals").select("proposal_number, created_at").eq("negocio_id", negocioId).is("deleted_at", null).order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      const p = ((data as { proposal_number?: string | null; created_at?: string | null }[] | null) ?? [])[0];
+      if (!p?.proposal_number) return null;
+      return { numero: p.proposal_number, data: p.created_at ? new Date(p.created_at).toLocaleDateString("pt-PT") : "" };
+    },
+  });
+}
+
 /** O nome do signatário de uma minuta (anew_users); sem id não lê. Uma falha devolve erro, nunca um nome inventado. */
 export function useNomeDoSignatario(id: string | null) {
   return useQuery({
