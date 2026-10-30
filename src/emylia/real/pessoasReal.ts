@@ -46,6 +46,13 @@ export function usePesquisaPessoas(org: string | null, texto: string) {
 type Consulta ={ select: (c: string) => Consulta; eq: (c: string, v: unknown) => Consulta; limit: (n: number) => Consulta } & PromiseLike<{ data: unknown; error: { message: string } | null }>;
 const tabela = (nome: string): Consulta => (supabase as unknown as { from: (n: string) => Consulta }).from(nome);
 
+/** O email principal da pessoa (vai para o campo Email da ficha do negócio); vazio se não tem. */
+export async function emailDaPessoa(entityId: string): Promise<string> {
+  const r = await tabela("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).limit(1);
+  if (r.error) throw new Error(r.error.message);
+  return ((r.data as { email?: string | null }[] | null) ?? [])[0]?.email?.trim().toLowerCase() ?? "";
+}
+
 /** O telefone principal (ou, sem ele, o email principal) da pessoa, como o negócio o guarda em `tel`; vazio se não tem nenhum. */
 export async function contactoDaPessoa(entityId: string): Promise<string> {
   const [tel, mail] = await Promise.all([

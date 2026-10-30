@@ -1866,13 +1866,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       S.fichas[nome] = { ...(S.fichas[nome] || {}), [k]: val };
     },
     /** 27/10: sem `linha`, a lead fica com a linha por definir (sai da divisão escolhida na visita). */
-    novoCriar(nome: string, tel: string, linha?: LinhaId, pessoaId?: string) {
+    novoCriar(nome: string, tel: string, linha?: LinhaId, pessoaId?: string, emailPessoa?: string) {
       const n = S.novo!;
       n.nome = nome.trim(); n.tel = tel.trim();
       // 30/10 (2.0): uma pessoa que já existe traz o seu contacto da base; se não tiver nenhum, o negócio cria-se na mesma (o envio ao portal pede-o depois)
       if (!n.nome || (!n.tel && !pessoaId)) { n.err = "Falta " + (!n.nome ? "o nome" : "o telefone ou o email") + "."; return; }
       const id = S.seq++;
-      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, ...(pessoaId ? { pessoaId } : {}), linha: linha ?? "geral", ...(linha ? {} : { linhaPorDefinir: true }), servico: linha ? LINHAS[linha].n : "Por definir", local: "", origem: "à mão", quando: agora(), f: { origem: "Telefone", ...(emailOk(n.tel.toLowerCase()) ? { email: n.tel.toLowerCase(), origem: "Email" } : {}) }, hist: [{ t: pessoaId ? "Negócio criado à mão para uma pessoa que já existia" : "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
+      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, ...(pessoaId ? { pessoaId } : {}), linha: linha ?? "geral", ...(linha ? {} : { linhaPorDefinir: true }), servico: linha ? LINHAS[linha].n : "Por definir", local: "", origem: "à mão", quando: agora(), f: { origem: "Telefone", ...(emailOk(n.tel.toLowerCase()) ? { email: n.tel.toLowerCase(), origem: "Email" } : emailPessoa && emailOk(emailPessoa) ? { email: emailPessoa } : {}) }, hist: [{ t: pessoaId ? "Negócio criado à mão para uma pessoa que já existia" : "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
       S.novo = null;
       // abre logo o negócio novo: o próximo passo (registar a chamada) fica à vista, sem ter de o procurar na lista
       S.view = "negocio"; S.deal = id; S.confirmPerda = null;

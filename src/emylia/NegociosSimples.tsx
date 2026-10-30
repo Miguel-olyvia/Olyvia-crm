@@ -8,7 +8,7 @@ import { FASES, aberto, eur, proximo, tot, type Negocio } from "./motor";
 import { IconeFase, type Ctx } from "./pecas";
 import { FILTROS_TRABALHO } from "./filtrosTrabalho";
 import { orgDoModoReal } from "./acessosPortal";
-import { contactoDaPessoa, usePesquisaPessoas, type PessoaPesquisada } from "./real/pessoasReal";
+import { contactoDaPessoa, emailDaPessoa, usePesquisaPessoas, type PessoaPesquisada } from "./real/pessoasReal";
 import { NegociosHistorico, SeletorModo, type ModoNegocios } from "./NegociosHistorico";
 import { SEM_FILTROS_H, type FiltrosH } from "./historicoNegocios";
 
@@ -155,14 +155,15 @@ function NovoSimples({ S, A, run }: Pick<Ctx, "S" | "A" | "run">) {
   const [existente, setExistente] = useState(false);
   const [pesquisa, setPesquisa] = useState("");
   const [escolhida, setEscolhida] = useState<PessoaPesquisada | null>(null);
+  const [emailEscolhida, setEmailEscolhida] = useState("");
   const [aEscolher, setAEscolher] = useState(false);
   const [erroEscolha, setErroEscolha] = useState<string | null>(null);
   const procura = usePesquisaPessoas(org, existente && !escolhida ? pesquisa : "");
   const escolher = async (p: PessoaPesquisada) => {
     setAEscolher(true); setErroEscolha(null);
     try {
-      const contacto = await contactoDaPessoa(p.entityId);
-      setEscolhida(p); setNome(p.nome); setTel(contacto);
+      const [contacto, mail] = await Promise.all([contactoDaPessoa(p.entityId), emailDaPessoa(p.entityId)]);
+      setEscolhida(p); setNome(p.nome); setTel(contacto); setEmailEscolhida(mail);
     } catch (e) {
       setErroEscolha(e instanceof Error ? e.message : "Não foi possível ler o contacto da pessoa.");
     } finally {
@@ -174,7 +175,7 @@ function NovoSimples({ S, A, run }: Pick<Ctx, "S" | "A" | "run">) {
     if (paraExistente) { setNome(""); setTel(""); }
   };
   // 27/10: sem a linha: ao telefone ainda não se sabe o que o cliente quer; sai da divisão escolhida na visita
-  const criar = () => run(() => A.novoCriar(nome, tel, undefined, existente ? escolhida?.entityId : undefined));
+  const criar = () => run(() => A.novoCriar(nome, tel, undefined, existente ? escolhida?.entityId : undefined, existente ? emailEscolhida : undefined));
   const inp = "h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
   const modo = (ativo: boolean) => cn("min-h-11 min-w-0 rounded-lg border px-2 text-sm font-medium", ativo ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground hover:border-foreground/40");
   return (
