@@ -190,7 +190,7 @@ const LayoutContent = memo(function LayoutContent({
             <OlyviaLoader size={40} />
           </div>
         ) : paginaInteira && !showNoOrgState ? (
-          <div className="min-h-full w-full">{children}</div>
+          <div className="flex min-h-full w-full flex-col [&>*]:flex-1">{children}</div>
         ) : fullWidth ? (
           showNoOrgState ? (
             <div className="p-6 md:p-8"><NoOrganizationState /></div>
