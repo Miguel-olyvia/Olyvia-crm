@@ -174,7 +174,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
         <div>
           <h2 id={`caminho-${d.id}`} className="text-xl font-semibold tracking-tight">Do contrato à obra</h2>
           {/* 27/10: antes de arrancar, as condições estão logo abaixo: a frase só repetia */}
-          {arrancou && <p className="text-[15px] text-muted-foreground">{falta.length ? `Para arrancar, falta ${falta.join(", ")}.` : go1.estado === "feito" ? go1.t + "." : "Está tudo pronto para arrancar."}</p>}
+          {arrancou && <p className="text-[15px] text-muted-foreground">{/* 30/10 (visto no browser): com a obra já a andar, uma encomenda de ajuste por aprovar dizia "Para arrancar, falta…" */}{go1.estado === "feito" ? go1.t + "." : falta.length ? `Para arrancar, falta ${falta.join(", ")}.` : "Está tudo pronto para arrancar."}</p>}
         </div>
         <p className="text-sm tabular-nums text-muted-foreground">{feitos} de {P.length} passos</p>
       </div>
