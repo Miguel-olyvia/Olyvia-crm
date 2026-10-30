@@ -275,7 +275,9 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
           />
         )}
       </section>
-      <div key={org.chave}>{children}</div>
+      {/* O contrato é o da minuta escolhida (preenchida acima): o corpo que a Emylia desenha por baixo (Modelo, Assinatura, «Assina pela empresa»,
+          Penalização, Partilhar e o contrato com as cláusulas dela) só se vê enquanto o contrato está bloqueado, que é o aviso de que ainda não abre. */}
+      {soEscolher && <div key={org.chave}>{children}</div>}
       {!soEscolher && <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar} />}
     </div>
   );
