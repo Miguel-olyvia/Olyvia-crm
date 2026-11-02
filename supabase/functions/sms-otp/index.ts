@@ -10,6 +10,7 @@ const requestSchema = z.object({
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { resolveSupplierOtpTarget } from "./supplierOtp.ts";
 
 initSentry();
 
@@ -208,6 +209,35 @@ serve(async (req) => {
           phoneNumber = user.phone || user.user_metadata?.phone || null;
         }
       }
+    } else if (caller_type === "supplier") {
+      // Fornecedor do portal (contrato de fornecedor): as regras são as da BD,
+      // avaliadas com o JWT do próprio (fn_sp_actor, sp_supplier_contracts_list).
+      // Telemóvel = supplier_portal_users.phone; referência/propósito fixos
+      // (supplier_contract / supplier_signature). Ver supplierOtp.ts.
+      const supplierClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      let target: Awaited<ReturnType<typeof resolveSupplierOtpTarget>>;
+      try {
+        target = await withTimeout(
+          resolveSupplierOtpTarget((fn, args) => supplierClient.rpc(fn, args), body),
+          8000,
+          "supplier_lookup",
+        );
+      } catch {
+        return new Response(
+          JSON.stringify({ error: "supplier_lookup_failed", message: "Não foi possível validar o acesso. Tente novamente." }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      if (!target.ok) {
+        return new Response(JSON.stringify(target.body), {
+          status: target.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      phoneNumber = target.phoneNumber;
+      callerName = target.callerName;
     } else {
       // Portal user (original flow)
       const { data: portalUser } = await supabase
