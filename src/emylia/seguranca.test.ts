@@ -16,13 +16,13 @@ describe("podeNeg: as permissões reais, e o quadro por papel só para simular",
     expect(podeNeg("direcao", "margin.approve")).toBe(true);
   });
   it("com conta: o que a base diz, seja qual for o papel do protótipo", () => {
-    definirPermissoesReais({ codigos: new Set(["financeiro.validar_pagamento"]), simular: false });
+    definirPermissoesReais({ codigos: new Set(["negocios.validar_pagamento"]), simular: false });
     expect(podeNeg("comercial", "finance.validate_payment")).toBe(true); // um papel personalizado com a permissão
     expect(podeNeg("direcao", "contracts.cancel")).toBe(false); // o papel "direcao" do Estado não chega
     expect(podeNeg("financeiro", "finance.invoice")).toBe(false);
   });
   it("a Direção a ver como outro papel: o desse papel, mas nunca mais do que ela pode", () => {
-    definirPermissoesReais({ codigos: new Set(Object.values(CODIGO_BASE).filter((c) => c !== "negocios.anular")), simular: true });
+    definirPermissoesReais({ codigos: new Set(Object.values(CODIGO_BASE).filter((c) => c !== "client_contracts.cancel")), simular: true });
     expect(podeNeg("financeiro", "finance.validate_payment")).toBe(true);
     expect(podeNeg("comercial", "finance.validate_payment")).toBe(false);
     expect(podeNeg("direcao", "contracts.cancel")).toBe(false);
@@ -44,8 +44,8 @@ describe("podeNeg: as permissões reais, e o quadro por papel só para simular",
     expect(avisos).toContain("Sem permissão para aprovar a margem");
   });
   it("os códigos são os do catálogo da base", () => {
-    expect(CODIGO_BASE).toMatchObject({ "finance.validate_payment": "financeiro.validar_pagamento", "finance.invoice": "financeiro.faturar",
-      "contracts.cancel": "negocios.anular", "margin.approve": "orcamentos.aprovar_margem" });
+    expect(CODIGO_BASE).toMatchObject({ "finance.validate_payment": "negocios.validar_pagamento", "finance.invoice": "negocios.registar_fatura",
+      "contracts.cancel": "client_contracts.cancel", "equipa.edit": "negocios.obra.planear", "margin.approve": "negocios.margem.aprovar" });
   });
 });
 

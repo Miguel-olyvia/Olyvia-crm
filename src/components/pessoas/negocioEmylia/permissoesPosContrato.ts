@@ -1,7 +1,7 @@
 // O que a ficha pode oferecer no Negócio, no Financeiro e na Obra: `pessoas.edit` da ficha E as permissões da Emylia lidas da base COM SUCESSO. Três
 // estados, nunca confundidos: a ler, falhou, lidas. Uma leitura que falha NÃO vale por «sem permissões» e não dá gravar: diz-se, com repetir. A guarda do
-// ecrã não é a guarda: a base recusa na mesma em neg_guardar_negocio. As permissões novas do Ben (negocios.validar_pagamento, faturar, aprovar_margem)
-// ligam-se aqui quando existirem na base.
+// ecrã não é a guarda: a base recusa na mesma em neg_guardar_negocio. Os códigos são os reais da base (CODIGO_BASE em permissoes.ts:
+// negocios.validar_pagamento, negocios.registar_fatura, client_contracts.cancel, negocios.obra.planear, negocios.margem.aprovar; 20270102200000).
 import { useCallback, useEffect, useState } from "react";
 import { definirPermissoesReais } from "@/emylia/permissoes";
 import { CODIGOS_NEGOCIOS } from "@/emylia/permissoesReais";

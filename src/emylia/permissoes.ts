@@ -16,13 +16,14 @@ export const PERMS_PAPEL: Record<Papel, readonly (PermNeg | "*")[]> = {
   comercial: [], armazem: [], operacoes: ["equipa.edit"], juridico: [], tecnico: [],
 };
 
-/** O código da permissão na base (o catálogo `permissoes`, migração 0001) de cada ação. */
+/** O código da permissão na base (anew_permissions) de cada ação. 2/11 (20270102200000): os códigos reais; os de antes
+ *  (financeiro.validar_pagamento, financeiro.faturar, negocios.anular, obras.gerir, orcamentos.aprovar_margem) não existiam na base. */
 export const CODIGO_BASE: Record<PermNeg, string> = {
-  "finance.validate_payment": "financeiro.validar_pagamento",
-  "finance.invoice": "financeiro.faturar",
-  "contracts.cancel": "negocios.anular",
-  "equipa.edit": "obras.gerir",
-  "margin.approve": "orcamentos.aprovar_margem",
+  "finance.validate_payment": "negocios.validar_pagamento",
+  "finance.invoice": "negocios.registar_fatura",
+  "contracts.cancel": "client_contracts.cancel",
+  "equipa.edit": "negocios.obra.planear",
+  "margin.approve": "negocios.margem.aprovar",
 };
 
 /** As permissões da conta real: `codigos` as concedidas na organização ativa (null: ainda não se sabem); `simular`: a Direção/admin
@@ -49,5 +50,5 @@ export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "finance.invoice": { msg: "Sem permissão para tratar de faturas", sub: "Só o Financeiro ou a Direção emitem ou registam faturas (finance.invoice)." },
   "contracts.cancel": { msg: "Sem permissão para anular contratos", sub: "Só a Direção anula contratos e vendas (contracts.cancel)." },
   "equipa.edit": { msg: "Sem permissão para mudar a ficha do técnico", sub: "Só a Direção ou as Operações mudam o custo/hora, o ofício e as férias (equipa.edit). Mude de papel em cima." },
-  "margin.approve": { msg: "Sem permissão para aprovar a margem", sub: "Só a Direção aprova uma proposta abaixo da margem mínima (orcamentos.aprovar_margem)." },
+  "margin.approve": { msg: "Sem permissão para aprovar a margem", sub: "Só a Direção aprova uma proposta abaixo da margem mínima (negocios.margem.aprovar)." },
 };

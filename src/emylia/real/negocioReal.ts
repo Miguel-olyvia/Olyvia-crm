@@ -403,24 +403,26 @@ export function obraDaEc(e: LinhaEcLida | null | undefined): { ec?: EncCliente; 
 }
 
 const linhaParaProd = (p: LinhaProdutoVisita): ProdVisita => ({
-  id: p.produto, n: p.nome, un: p.unidade, custo: p.custo_un, q: p.quantidade, no: p.categoria,
+  id: p.produto, n: p.nome, un: p.unidade, custo: p.custo_un ?? 0, q: p.quantidade, no: p.categoria,
   ...(p.cliente_fornece ? { cliente: true } : {}), ...(p.servico ? { svc: p.servico } : {}), ...(p.fator != null ? { fator: p.fator } : {}),
   ...(p.pvp_un != null ? { pvp: p.pvp_un } : {}), ...(p.sem_instalacao ? { semSvc: true } : {}),
 } as ProdVisita);
+// 2/11 (20270102210000): sem quotes.view_costs a base devolve os custos a null (custo_un, mão de obra, custo/hora dos ofícios, custo dos
+// produtos): ficam 0 no ecrã. Ao gravar, a base repõe os da base nas linhas que já existiam (quem não vê custos não os apaga).
 function linhaDeLinha(l: LinhaOrcamentoLinha): LinhaOrc {
   const zonas = l.zonas ? { zonas: l.zonas.map((z) => ({ z: z.zona, q: z.quantidade, ...(z.valor != null ? { preco: z.valor } : {}) })) } : {};
   const iva = l.taxa_iva != null ? { iva: l.taxa_iva as 6 | 23 } : {};
   if (l.tipo === "servico") {
     const c = l.custo;
     return {
-      t: "svc", sid: l.servico!, q: l.quantidade, cu: c.custo_un, pu: l.preco_un, ...(c.manual ? { cuMan: true as const } : {}),
-      ...(c.congelado ? { det: { h: c.horas_un, oficios: c.oficios.map((o) => ({ perfil: o.perfil_chave, n: o.nome, h: o.horas_un, eh: o.custo_hora, ...(o.tecnicos ? { tecnicos: o.tecnicos } : {}) })),
-        mo: c.mao_obra_un, eq: c.equipamentos_un, cons: c.consumiveis_un, taxaEstr: c.estrutura_hora, estr: c.estrutura_un, ajuste: c.ajuste_un, q: deIso(c.congelado_em) } } : {}),
+      t: "svc", sid: l.servico!, q: l.quantidade, cu: c.custo_un ?? 0, pu: l.preco_un, ...(c.manual ? { cuMan: true as const } : {}),
+      ...(c.congelado ? { det: { h: c.horas_un, oficios: c.oficios.map((o) => ({ perfil: o.perfil_chave, n: o.nome, h: o.horas_un, eh: o.custo_hora ?? 0, ...(o.tecnicos ? { tecnicos: o.tecnicos } : {}) })),
+        mo: c.mao_obra_un ?? 0, eq: c.equipamentos_un ?? 0, cons: c.consumiveis_un ?? 0, taxaEstr: c.estrutura_hora ?? 0, estr: c.estrutura_un ?? 0, ajuste: c.ajuste_un ?? 0, q: deIso(c.congelado_em) } } : {}),
       ...iva, ...zonas,
     };
   }
   return {
-    t: "mat", d: l.descricao, custo: l.custo.custo_un, preco: l.preco_un,
+    t: "mat", d: l.descricao, custo: l.custo.custo_un ?? 0, preco: l.preco_un,
     ...(l.tipo === "produto" ? { prod: { ...(l.fornecedor ? { forn: l.fornecedor } : {}), custoUn: l.custo_un_origem ?? 0, precoUn: l.preco_un_origem ?? 0, q: l.qtd_origem ?? 0 } } : {}),
     ...(l.tipo === "livre" ? { livre: { q: l.qtd_origem ?? 0, un: l.unidade ?? "", pu: l.preco_un_origem ?? 0 } } : {}),
     ...iva, ...zonas,
