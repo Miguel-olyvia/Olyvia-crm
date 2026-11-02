@@ -1904,9 +1904,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       return id;
     },
     contactar(id: number) { const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
-    marcarVisita(id: number, slot?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
+    marcarVisita(id: number, slot?: string, quemSugerido?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
       // 23/10: com a equipa real, a visita fica na agenda de quem a marca (e não na do Rúben de exemplo)
-      const quem = quemVaiPorOmissao();
+      // 2/11: ou de quem a Olyvia sugeriu para a vaga (livre e mais perto: sugestaoVisita.ts)
+      const quem = quemSugerido || quemVaiPorOmissao();
       if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes, duracao: d.f.duracao, quem })); log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda de " + quem.replace(/\s*\(.*\)\s*$/, ""), kind: "ok" }); },
     fecharVisita(id: number) {
       const d = deal(id);

@@ -32,6 +32,7 @@ import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
+import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -265,16 +266,21 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       g(CONTACTO[3], CalendarClock),
       { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}.</p>
+          <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>
+          {/* 2/11 (reunião): a sugestão de quem vai, pela agenda (livre a essa hora) e pela proximidade (visitas perto nesse dia) */}
           <div className="flex flex-wrap gap-2">
-            {vagasVisita().map((s) => (
-              <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s))}
-                className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
-                <CalendarClock className="mr-1.5 inline h-4 w-4" />{s}
-              </button>
-            ))}
+            {vagasVisita().map((s) => {
+              const sg = sugerirQuemVai(S.deals, d, s, opcoesDaVisita());
+              return (
+                <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s, sg?.quem))} title={sg ? `${sg.nome}: ${sg.motivo}${sg.ocupados.length ? ` · ocupados: ${sg.ocupados.join(", ")}` : ""}` : undefined}
+                  className="rounded-xl border border-border bg-card px-3 py-2 text-left text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
+                  <span className="block"><CalendarClock className="mr-1.5 inline h-4 w-4" />{s}</span>
+                  {sg && <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{sg.nome} · {sg.motivo}</span>}
+                </button>
+              );
+            })}
           </div>
-          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot))()} />
+          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot, sugerirQuemVai(S.deals, d, slot, opcoesDaVisita())?.quem))()} />
         </div>
       ) },
     ];
