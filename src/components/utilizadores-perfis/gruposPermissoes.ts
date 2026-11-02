@@ -14,6 +14,11 @@ export const ROTULOS_CATEGORIA: Record<string, string> = {
   suppliers: "Fornecedores", warehouses: "Armazéns", purchase_orders: "Encomendas", receiving: "Receção no armazém", stocks: "Stocks",
   inventory: "Acesso a Stock", client_orders: "Encomendas Clientes", scheduling: "Agendamentos", users: "Utilizadores", roles: "Funções",
   settings: "Definições", smtp: "SMTP", email_templates: "Templates de Email", hr: "Recursos Humanos",
+  // Categorias que Roles.tsx não mostrava.
+  operations: "Operação", catalog_items: "Itens de Catálogo", service_catalog: "Catálogo de Serviços",
+  pessoas: "Pessoas", negocios: "Etapas do Negócio", fleet: "Frota", security: "Auditoria de Exportações",
+  api_keys: "API Keys", technical_settings: "Configurações Técnicas", trash: "Lixo", portal: "Portal de Clientes",
+  platform: "Plataforma",
 };
 
 interface DefinicaoGrupo {
@@ -23,37 +28,15 @@ interface DefinicaoGrupo {
 }
 
 /**
- * `sidebarMenuGroups` de Roles.tsx. Diferença: lá o grupo Marketing lista `forms` nas categorias diretas E no subgrupo
- * Formulários (as permissões apareciam duas vezes e contavam a dobrar); aqui só ficam no subgrupo.
+ * Os grupos do editor, pela ordem do menu lateral (menuConfig.ts): Dashboard, Atividades, Operação, Catálogo e custos, Organizações,
+ * CRM (Negócios e as páginas antigas de leads/contactos/clientes), Aquisição, Marketing, Inventário, Frota, RH, Utilizadores,
+ * Definições e Plataforma. Partiu de `sidebarMenuGroups` de Roles.tsx; diferenças: `forms` só no subgrupo Formulários (lá contavam a
+ * dobrar), Produtos/Serviços passam para Catálogo e custos (o item de topo que os substitui), e ganham grupo as categorias que Roles.tsx
+ * escondia (hr, pessoas/negocios, fleet, operations, portal, security, platform, api_keys, catalog_items, service_catalog, lead_sources).
+ * Só aparecem as permissões em uso (permissoesEmUso.ts); grupos e subgrupos sem nenhuma omitem-se.
  */
 export const GRUPOS_MENU: DefinicaoGrupo[] = [
   { rotulo: "Dashboard", categorias: ["dashboard"] },
-  {
-    rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"],
-    subgrupos: [
-      { rotulo: "Produtos", categorias: ["products", "bundles", "brands", "product_categories", "product_subcategories", "product_attributes", "units_of_measure"] },
-      { rotulo: "Serviços", categorias: ["services", "service_categories", "service_subcategories", "service_fees"] },
-    ],
-  },
-  { rotulo: "CRM", categorias: ["leads", "contacts", "clients"] },
-  {
-    rotulo: "Aquisição", categorias: ["deals"],
-    subgrupos: [
-      { rotulo: "Propostas", categorias: ["proposals", "quotes", "quote_templates"] },
-      { rotulo: "Venda Direta", categorias: ["direct_sales"] },
-      { rotulo: "Contratos", categorias: ["contracts", "client_contracts"] },
-    ],
-  },
-  {
-    rotulo: "Marketing", categorias: [],
-    subgrupos: [
-      { rotulo: "Campanhas", categorias: ["marketing_campaigns"] },
-      { rotulo: "Origens", categorias: ["marketing_channels"] },
-      { rotulo: "Listas", categorias: ["marketing_lists"] },
-      { rotulo: "Formulários", categorias: ["forms"] },
-    ],
-  },
-  { rotulo: "Inventário", categorias: ["suppliers", "warehouses", "purchase_orders", "receiving", "stocks", "inventory", "client_orders"] },
   {
     rotulo: "Agendamentos", categorias: [],
     subgrupos: [
@@ -64,11 +47,54 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
       { rotulo: "Outros", categorias: ["scheduling_other"] },
     ],
   },
-  { rotulo: "Utilizadores", categorias: ["users", "roles"] },
-  { rotulo: "Definições", categorias: ["settings", "smtp", "email_templates"] },
+  { rotulo: "Operação", categorias: ["operations"] },
+  {
+    rotulo: "Catálogo e custos", categorias: [],
+    subgrupos: [
+      { rotulo: "Produtos", categorias: ["products", "catalog_items", "bundles", "brands", "product_categories", "product_subcategories", "product_attributes", "units_of_measure"] },
+      { rotulo: "Serviços", categorias: ["services", "service_catalog", "service_categories", "service_subcategories", "service_fees"] },
+    ],
+  },
+  { rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"] },
+  // /pessoas e /negocios: as permissões dos negócios de pessoas e as de cada parte do negócio e da obra (negocios.*).
+  { rotulo: "Negócios", categorias: ["pessoas", "negocios"] },
+  { rotulo: "CRM", categorias: ["leads", "contacts", "clients"] },
+  {
+    rotulo: "Aquisição", categorias: ["deals"],
+    subgrupos: [
+      { rotulo: "Propostas", categorias: ["proposals", "quotes", "quote_templates"] },
+      { rotulo: "Venda Direta", categorias: ["direct_sales"] },
+      { rotulo: "Contratos", categorias: ["contracts", "client_contracts", "portal"] },
+    ],
+  },
+  {
+    rotulo: "Marketing", categorias: [],
+    subgrupos: [
+      { rotulo: "Campanhas", categorias: ["marketing_campaigns"] },
+      { rotulo: "Origens", categorias: ["marketing_channels", "lead_sources"] },
+      { rotulo: "Listas", categorias: ["marketing_lists"] },
+      { rotulo: "Formulários", categorias: ["forms"] },
+    ],
+  },
+  { rotulo: "Inventário", categorias: ["suppliers", "warehouses", "purchase_orders", "receiving", "stocks", "inventory", "client_orders"] },
+  { rotulo: "Frota", categorias: ["fleet"] },
   // Roles.tsx aceita a categoria hr no filtro mas não a põe em nenhum grupo, e as permissões hr.* não se viam. Aqui ganham grupo.
   { rotulo: "Recursos Humanos", categorias: ["hr"] },
+  // security = exports.audit.view (/export-audit vive no menu de Utilizadores).
+  { rotulo: "Utilizadores", categorias: ["users", "roles", "security"] },
+  // api_keys: ecrã de configurações técnicas (/technical-settings). trash e technical_settings estão hoje escondidas (nada as verifica).
+  { rotulo: "Definições", categorias: ["settings", "smtp", "email_templates", "api_keys", "technical_settings", "trash"] },
+  { rotulo: "Plataforma", categorias: ["platform"] },
 ];
+
+/**
+ * Códigos guardados numa categoria da base mas com bloco próprio no editor, pelo prefixo: a base junta marcas/categorias/atributos em
+ * `products`, as taxas/subcategorias em `services` e os negocios.* em `pessoas`.
+ */
+const PREFIXOS_COM_BLOCO = new Set([
+  "brands", "bundles", "product_categories", "product_subcategories", "product_attributes", "units_of_measure",
+  "service_categories", "service_subcategories", "service_fees", "service_catalog", "catalog_items", "negocios", "lead_sources",
+]);
 
 const ROTULOS_VIRTUAIS: Record<string, string> = {
   marketing_campaigns: "Campanhas", marketing_channels: "Origens", marketing_lists: "Listas",
@@ -110,6 +136,8 @@ export function categoriaVirtual(p: Permissao): string {
     if (p.codigo.startsWith("channels.")) return "marketing_channels";
     if (p.codigo.startsWith("lists.")) return "marketing_lists";
   }
+  const prefixo = p.codigo.split(".")[0] ?? "";
+  if (PREFIXOS_COM_BLOCO.has(prefixo)) return prefixo;
   return p.categoria;
 }
 
@@ -175,6 +203,17 @@ const DISTINTIVOS: Record<string, DistintivoAcao> = {
   manage_delivery_notes: { rotulo: "Guias", classes: AMBAR },
   learn_codes: { rotulo: "Códigos", classes: ROXO },
   download_proof: { rotulo: "PDF", classes: TEAL },
+  // Negócios (pessoas.* e negocios.*): os códigos acabam em português.
+  editar: { rotulo: "Editar", classes: AMBAR },
+  aprovar: { rotulo: "Aprovar", classes: ROXO },
+  enviar: { rotulo: "Enviar", classes: TEAL },
+  planear: { rotulo: "Planear", classes: AMBAR },
+  executar: { rotulo: "Executar", classes: VERDE },
+  materiais: { rotulo: "Materiais", classes: TEAL },
+  registar_fatura: { rotulo: "Fatura", classes: TEAL },
+  validar_pagamento: { rotulo: "Pagamento", classes: ROXO },
+  reopen: { rotulo: "Reabrir", classes: AMBAR },
+  config: { rotulo: "Configurar", classes: ROXO },
 };
 
 export function distintivoAcao(codigo: string): DistintivoAcao {

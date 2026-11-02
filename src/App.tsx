@@ -43,7 +43,6 @@ const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const CatalogItems = lazy(() => import("./pages/CatalogItems"));
 
 
-const Roles = lazy(() => import("./pages/Roles"));
 const ApiKeys = lazy(() => import("./pages/ApiKeys"));
 const Campaigns = lazy(() => import("./pages/Campaigns"));
 const CampaignDetail = lazy(() => import("./pages/CampaignDetail"));
@@ -338,7 +337,8 @@ const App = () => (
                       <Route path="/direct-sales" element={<ProtectedRoute permission="direct_sales.view"><DirectSales /></ProtectedRoute>} />
                       <Route path="/catalog-items" element={<CatalogItems />} />
                       <Route path="/users" element={<ProtectedRoute permission="users.view"><UsersNew /></ProtectedRoute>} />
-                      <Route path="/roles" element={<ProtectedRoute permission="roles.view"><Roles /></ProtectedRoute>} />
+                      {/* O editor antigo de roles deu lugar ao separador Roles de /utilizadores-perfis (que já pede roles.view). */}
+                      <Route path="/roles" element={<Navigate to="/utilizadores-perfis?aba=roles" replace />} />
                       <Route path="/api-keys" element={<ProtectedRoute permission="settings.update"><ApiKeys /></ProtectedRoute>} />
                       <Route path="/forms" element={<ProtectedRoute permission="forms.view"><Forms /></ProtectedRoute>} />
                       <Route path="/campaigns" element={<ProtectedRoute permission="campaigns.view"><Campaigns /></ProtectedRoute>} />

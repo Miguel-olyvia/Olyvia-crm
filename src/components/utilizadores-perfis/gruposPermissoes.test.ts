@@ -42,8 +42,11 @@ describe("agruparPorMenu", () => {
     const todas = grupos.flatMap((g) => g.permissoes.map((p) => p.codigo));
     expect(todas).toHaveLength(PERMISSOES.length);
     expect(new Set(todas).size).toBe(PERMISSOES.length);
-    // O catálogo de exemplo não tem permissões hr.*, por isso o grupo de RH não aparece (grupos sem permissões omitem-se).
-    expect(grupos.map((g) => g.rotulo)).toEqual(GRUPOS_MENU.filter((g) => g.rotulo !== "Recursos Humanos").map((g) => g.rotulo));
+    // O catálogo de exemplo não tem hr.*, operations.*, pessoas.*, fleet.* nem platform.*, por isso esses grupos não aparecem (grupos
+    // sem permissões omitem-se); os outros saem pela ordem de GRUPOS_MENU.
+    const rotulos = grupos.map((g) => g.rotulo);
+    expect(rotulos).toEqual(["Dashboard", "Agendamentos", "Catálogo e custos", "Organizações", "CRM", "Aquisição", "Marketing", "Inventário", "Utilizadores", "Definições"]);
+    expect(rotulos).toEqual(GRUPOS_MENU.map((g) => g.rotulo).filter((r) => rotulos.includes(r)));
     grupos.forEach((g) => {
       const soma = g.blocos.flatMap((b) => b.permissoes).length + g.subgrupos.flatMap((s) => s.permissoes).length;
       expect(soma).toBe(g.permissoes.length);
