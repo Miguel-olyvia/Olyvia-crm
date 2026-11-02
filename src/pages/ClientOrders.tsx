@@ -204,7 +204,48 @@ interface ClientOrderAvailableWarehouse {
   // linha); `physical_quantity` = stock físico do armazém.
   quantity: number;
   physical_quantity?: number | null;
+  // EC por armazém (20270103100000): parcela da reserva da linha neste armazém
+  // (unidades base; 0 se a regra não o escolheu) e se é o armazém sugerido.
+  // Os sugeridos vêm primeiro; só armazéns elegíveis (sem viaturas).
+  suggested_quantity?: number | null;
+  is_suggested?: boolean | null;
 }
+
+// EC por armazém (20270103100000): reserva da linha por armazém, maior
+// primeiro (unidades base; soma = qty_reserved).
+interface ClientOrderWarehouseAlloc {
+  warehouse_id: string;
+  warehouse_name: string | null;
+  qty: number;
+}
+
+// Plano da EC: 'single' = um armazém cobre tudo o pendente; 'split' = tudo
+// coberto por mais de um armazém; 'partial' = há falta; 'none' = nada pendente.
+type ClientOrderEcPlan = 'single' | 'split' | 'partial' | 'none';
+
+const EC_PLAN_LABELS: Record<ClientOrderEcPlan, string> = {
+  single: 'tudo deste armazém',
+  split: 'repartida por armazéns',
+  partial: 'com falta de stock',
+  none: 'nada pendente',
+};
+
+// Valor do Select de "Confirmar saída (N)" = a sugestão da EC por produto
+// (o Select não aceita "" como item).
+const EC_SUGGESTED_WAREHOUSE = '__ec_suggested__';
+
+// Saída de um produto por armazém (quantidade inteira em unidades base).
+interface StockExitAllocation {
+  warehouse_id: string;
+  quantity: number;
+}
+
+// rpc_confirm_client_order_stock_exit_split ainda não está nos tipos gerados
+// (não se regeneram): chamada com cast local, como a prontidão em clientOrderList.
+type StockExitSplitRpc = (
+  fn: 'rpc_confirm_client_order_stock_exit_split',
+  args: { p_contract_id: string; p_product_id: string; p_allocations: StockExitAllocation[] },
+) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
 
 // Uma linha é de produto OU de serviço (item_type), nunca das duas. A RPC
 // rpc_get_client_order_document já devolve os dois pares de campos desde
@@ -260,6 +301,11 @@ interface ClientOrderDocumentLine {
   // categoria; ausentes enquanto a RPC não tiver os campos.
   category_name?: string | null;
   subcategory_name?: string | null;
+  // EC por armazém (20270103100000): armazém sugerido para a saída (a maior
+  // parcela da reserva; null sem reserva) e a reserva por armazém. null em
+  // serviços e em encomendas não assinadas.
+  suggested_warehouse_id?: string | null;
+  warehouse_alloc?: ClientOrderWarehouseAlloc[] | null;
 }
 
 // 'sem_fornecedor' = quantidade em falta sem pedido ao fornecedor. A causa
@@ -466,6 +512,20 @@ interface ClientOrderDocumentDetail {
   missing_lines_count?: number | null;
   can_request_missing?: boolean;
   missing_units_total?: number | null;
+  // EC por armazém (20270103100000): armazém da EC (o único se 'single'; senão
+  // o com mais reservado; sem reserva, o sugerido para a receção), o plano e o
+  // aviso da baixa automática (texto pronto; null sem nada a avisar).
+  ec_warehouse_id?: string | null;
+  ec_warehouse_name?: string | null;
+  ec_plan?: ClientOrderEcPlan | null;
+  stock_deduction_warning?: string | null;
+  stock_deduction?: {
+    action_type: string | null;
+    status: string | null;
+    executed_at: string | null;
+    reason: string | null;
+    data: unknown;
+  } | null;
 }
 
 // --- Normalização defensiva do bloco `diagnostic` -------------------------
@@ -710,18 +770,19 @@ const ClientOrders = () => {
   // Checklist de saída de stock (linhas stock_disponivel_confirmar e
   // 'parcial' com reserva):
   // - checklistActiveLineIds: linhas onde o checkbox foi marcado E há mais de
-  //   1 armazém disponível, pelo que o Select + botão "Confirmar" ficam
-  //   visíveis à espera de escolha.
-  // - selectedWarehouseByLine: armazém escolhido no Select acima, por
-  //   lineKey (quote_line_id + component_index).
+  //   1 armazém disponível, pelo que a repartição por armazém + botão
+  //   "Confirmar" ficam visíveis à espera de escolha.
+  // - splitDraftByLine: quantidade escrita por armazém (texto), por lineKey
+  //   (quote_line_id + component_index); pré-preenchida com a sugestão da EC.
   // - confirmingLineId: linha atualmente a chamar
-  //   rpc_confirm_client_order_stock_exit (mostra spinner em vez do checkbox).
+  //   rpc_confirm_client_order_stock_exit(_split) (mostra spinner em vez do checkbox).
   const [checklistActiveLineIds, setChecklistActiveLineIds] = useState<Set<string>>(new Set());
-  const [selectedWarehouseByLine, setSelectedWarehouseByLine] = useState<Record<string, string>>({});
+  const [splitDraftByLine, setSplitDraftByLine] = useState<Record<string, Record<string, string>>>({});
   const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
 
   // "Confirmar saída de todas": armazém escolhido quando as linhas pendentes
-  // têm mais de um armazém possível, e flag de processamento em lote.
+  // têm mais de um armazém possível ("" = a sugestão da EC por produto), e
+  // flag de processamento em lote.
   const [confirmAllWarehouseId, setConfirmAllWarehouseId] = useState<string>("");
   const [confirmingAll, setConfirmingAll] = useState(false);
 
@@ -1166,10 +1227,16 @@ const ClientOrders = () => {
   // isso `warehouses` só traz os armazéns cuja capacidade ≥ quantity (é o que se
   // mostra e permite); sem nenhum, a confirmação da linha fica desativada.
   // `quantity` de cada armazém devolvido = essa capacidade (stock a mostrar).
+  // EC por armazém (20270103100000): `options` = todos os armazéns com stock
+  // (para repartir; a soma das capacidades tem de cobrir a quantidade) e
+  // `suggested` = a repartição da reserva (warehouse_alloc das linhas,
+  // validada contra a capacidade); sem ela, o armazém sugerido que cubra
+  // tudo, ou o primeiro que cubra. null = nenhuma sugestão válida.
   const getProductExitGroup = (productId: string, docLines: ClientOrderDocumentLine[]) => {
     const groupLines = docLines.filter((l) => l.product_id === productId && isStockExitConfirmable(l));
     const quantity = roundQty(groupLines.reduce((sum, l) => sum + confirmableQty(l), 0));
     const byId = new Map<string, ClientOrderAvailableWarehouse>();
+    const allocById = new Map<string, number>();
     groupLines.forEach((l) => (l.available_warehouses || []).forEach((wh) => {
       const physical = wh.physical_quantity === null || wh.physical_quantity === undefined
         ? null
@@ -1180,19 +1247,90 @@ const ClientOrders = () => {
         : physical;
       byId.set(wh.warehouse_id, { ...wh, quantity: roundQty(capacity) });
     }));
-    const warehouses = Array.from(byId.values())
-      .filter((wh) => quantity > 0 && asQty(wh.quantity) >= quantity)
-      .sort((a, b) => asQty(b.quantity) - asQty(a.quantity));
-    return { product_id: productId, quantity, warehouses, lineKeys: groupLines.map(lineKey) };
+    groupLines.forEach((l) => (l.warehouse_alloc || []).forEach((a) => {
+      if (!a?.warehouse_id) return;
+      allocById.set(a.warehouse_id, roundQty((allocById.get(a.warehouse_id) ?? 0) + asQty(a.qty)));
+    }));
+    const allocOf = (id: string) => allocById.get(id) ?? 0;
+    const options = Array.from(byId.values())
+      .filter((wh) => asQty(wh.quantity) > 0)
+      .sort((a, b) => allocOf(b.warehouse_id) - allocOf(a.warehouse_id) || asQty(b.quantity) - asQty(a.quantity));
+    const warehouses = options.filter((wh) => quantity > 0 && asQty(wh.quantity) >= quantity);
+    const capacityOf = (id: string) => asQty(byId.get(id)?.quantity);
+    const totalCapacity = roundQty(options.reduce((sum, wh) => sum + asQty(wh.quantity), 0));
+
+    let suggested: StockExitAllocation[] | null = null;
+    const fromAlloc = Array.from(allocById, ([warehouse_id, qty]) => ({ warehouse_id, quantity: qty }))
+      .filter((a) => a.quantity > 0)
+      .sort((a, b) => b.quantity - a.quantity);
+    if (
+      quantity > 0
+      && fromAlloc.length > 0
+      && roundQty(fromAlloc.reduce((sum, a) => sum + a.quantity, 0)) === quantity
+      && fromAlloc.every((a) => Number.isInteger(a.quantity) && byId.has(a.warehouse_id) && a.quantity <= capacityOf(a.warehouse_id))
+    ) {
+      suggested = fromAlloc;
+    } else if (warehouses.length > 0) {
+      const preferred = groupLines.map((l) => l.suggested_warehouse_id).find((id) => !!id && warehouses.some((wh) => wh.warehouse_id === id));
+      suggested = [{ warehouse_id: preferred ?? warehouses[0].warehouse_id, quantity }];
+    }
+    return { product_id: productId, quantity, warehouses, options, totalCapacity, suggested, lineKeys: groupLines.map(lineKey) };
+  };
+
+  // Confirma a saída de um produto: 1 armazém → rpc_confirm_client_order_stock_exit;
+  // vários → rpc_confirm_client_order_stock_exit_split (uma só saída repartida —
+  // o servidor recusa uma 2.ª saída do mesmo produto).
+  const runStockExit = (contractId: string, productId: string, allocations: StockExitAllocation[]) => {
+    if (allocations.length === 1) {
+      return supabase.rpc('rpc_confirm_client_order_stock_exit', {
+        p_contract_id: contractId,
+        p_product_id: productId,
+        p_quantity: allocations[0].quantity,
+        p_warehouse_id: allocations[0].warehouse_id,
+      });
+    }
+    const rpc = supabase.rpc.bind(supabase) as unknown as StockExitSplitRpc;
+    return rpc('rpc_confirm_client_order_stock_exit_split', {
+      p_contract_id: contractId,
+      p_product_id: productId,
+      p_allocations: allocations.map((a) => ({ warehouse_id: a.warehouse_id, quantity: a.quantity })),
+    });
+  };
+
+  // Repartição escrita na linha (texto por armazém) → alocações > 0 e o
+  // motivo para não confirmar (null = pode confirmar).
+  const parseSplitDraft = (group: ReturnType<typeof getProductExitGroup>, draft: Record<string, string> | undefined) => {
+    const allocations: StockExitAllocation[] = [];
+    let invalid: string | null = null;
+    group.options.forEach((wh) => {
+      const raw = (draft?.[wh.warehouse_id] ?? '').trim().replace(',', '.');
+      if (raw === '') return;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+        if (!invalid) invalid = `Quantidade inválida em ${wh.warehouse_name} — use números inteiros`;
+        return;
+      }
+      if (n > asQty(wh.quantity)) {
+        if (!invalid) invalid = `${wh.warehouse_name} só tem ${formatDiagnosticNumber(asQty(wh.quantity))} em stock`;
+        return;
+      }
+      if (n > 0) allocations.push({ warehouse_id: wh.warehouse_id, quantity: n });
+    });
+    const total = roundQty(allocations.reduce((sum, a) => sum + a.quantity, 0));
+    const reason = invalid
+      ?? (total !== group.quantity
+        ? `A soma (${formatDiagnosticNumber(total)}) tem de ser igual à quantidade a sair (${formatDiagnosticNumber(group.quantity)})`
+        : null);
+    return { allocations, total, reason };
   };
 
   // Checklist de saída de stock (fase pós-20261130070000).
-  const handleConfirmStockExit = async (line: ClientOrderDocumentLine, warehouseId: string) => {
+  const handleConfirmStockExit = async (line: ClientOrderDocumentLine, allocations: StockExitAllocation[]) => {
     if (!detailData || !line.product_id) return;
     const group = getProductExitGroup(line.product_id, detailData.lines);
     const key = lineKey(line);
     // p_quantity é integer na RPC — a reserva em unidades base pode não ser.
-    if (!(group.quantity > 0) || !Number.isInteger(group.quantity)) {
+    if (!(group.quantity > 0) || !Number.isInteger(group.quantity) || allocations.length === 0) {
       toast({
         title: t('clientOrders.toast.stockExitError'),
         description: t('clientOrders.toast.confirmAllSkippedNonInteger', { count: 1 }),
@@ -1202,12 +1340,7 @@ const ClientOrders = () => {
     }
     setConfirmingLineId(key);
     try {
-      const { error } = await supabase.rpc('rpc_confirm_client_order_stock_exit', {
-        p_contract_id: detailData.contract_id,
-        p_product_id: line.product_id,
-        p_quantity: group.quantity,
-        p_warehouse_id: warehouseId,
-      });
+      const { error } = await runStockExit(detailData.contract_id, line.product_id, allocations);
       if (error) throw error;
 
       toast({ title: t('clientOrders.dialog.stockExitSuccess') });
@@ -1216,7 +1349,7 @@ const ClientOrders = () => {
         group.lineKeys.forEach((k) => next.delete(k));
         return next;
       });
-      setSelectedWarehouseByLine((prev) => {
+      setSplitDraftByLine((prev) => {
         const next = { ...prev };
         group.lineKeys.forEach((k) => { delete next[k]; });
         return next;
@@ -1237,9 +1370,8 @@ const ClientOrders = () => {
 
   const handleChecklistCheckboxChange = (line: ClientOrderDocumentLine, checked: boolean) => {
     const key = lineKey(line);
-    const warehouses = line.product_id && detailData
-      ? getProductExitGroup(line.product_id, detailData.lines).warehouses
-      : [];
+    const group = line.product_id && detailData ? getProductExitGroup(line.product_id, detailData.lines) : null;
+    const options = group?.options ?? [];
 
     if (!checked) {
       setChecklistActiveLineIds((prev) => {
@@ -1247,7 +1379,7 @@ const ClientOrders = () => {
         next.delete(key);
         return next;
       });
-      setSelectedWarehouseByLine((prev) => {
+      setSplitDraftByLine((prev) => {
         const next = { ...prev };
         delete next[key];
         return next;
@@ -1255,12 +1387,18 @@ const ClientOrders = () => {
       return;
     }
 
-    if (warehouses.length === 1) {
-      handleConfirmStockExit(line, warehouses[0].warehouse_id);
+    if (!group) return;
+    // Um só armazém com stock e cobre tudo: confirma logo (como antes).
+    if (options.length === 1 && group.warehouses.length === 1) {
+      handleConfirmStockExit(line, [{ warehouse_id: options[0].warehouse_id, quantity: group.quantity }]);
       return;
     }
 
-    if (warehouses.length > 1) {
+    if (options.length > 1) {
+      // Pré-preenche com a sugestão da EC (armazém único ou repartição).
+      const draft: Record<string, string> = {};
+      (group.suggested ?? []).forEach((a) => { draft[a.warehouse_id] = String(a.quantity); });
+      setSplitDraftByLine((prev) => ({ ...prev, [key]: draft }));
       setChecklistActiveLineIds((prev) => new Set(prev).add(key));
     }
   };
@@ -1276,6 +1414,9 @@ const ClientOrders = () => {
   // pendentes.
   // 20261204310000: entram também as linhas 'parcial' com parte reservada, e
   // a quantidade de cada produto é a soma de qty_reserved (getProductExitGroup).
+  // EC por armazém (20270103100000): sem armazém escolhido usa-se a sugestão
+  // da EC de cada produto (um armazém ou repartida); entram também os produtos
+  // que só se cobrem repartindo.
   const getConfirmAllInfo = () => {
     const docLines = detailData?.lines || [];
     const productIds = Array.from(new Set(
@@ -1287,14 +1428,16 @@ const ClientOrders = () => {
     const groups = productIds
       .map((pid) => getProductExitGroup(pid, docLines))
       .filter((g) => g.quantity > 0);
-    const pending = groups.filter((g) => g.warehouses.length > 0);
+    const pending = groups.filter((g) => g.suggested !== null);
     const uncovered = groups.length - pending.length;
     const byId = new Map<string, string>();
     pending.forEach((p) => p.warehouses.forEach((wh) => {
       if (!byId.has(wh.warehouse_id)) byId.set(wh.warehouse_id, wh.warehouse_name);
     }));
     const warehouses = Array.from(byId, ([warehouse_id, warehouse_name]) => ({ warehouse_id, warehouse_name }));
-    const singleEach = pending.every((p) => p.warehouses.length === 1);
+    // Sem escolha a fazer: cada produto tem um só armazém possível e a
+    // sugestão é esse armazém.
+    const singleEach = pending.every((p) => p.options.length === 1 && (p.suggested?.length ?? 0) === 1);
     return { pending, warehouses, singleEach, uncovered };
   };
 
@@ -1303,7 +1446,6 @@ const ClientOrders = () => {
     const contractId = detailData.contract_id;
     const { pending, singleEach, uncovered } = getConfirmAllInfo();
     if (pending.length === 0) return;
-    if (!singleEach && !confirmAllWarehouseId) return;
 
     let ok = 0;
     let failed = 0;
@@ -1322,20 +1464,23 @@ const ClientOrders = () => {
           skippedNonInteger++;
           continue;
         }
-        // O armazém tem de cobrir a quantidade somada do produto; se não
-        // cobrir, o produto fica pendente (não conta como falha).
-        const targetId = singleEach ? group.warehouses[0]?.warehouse_id : confirmAllWarehouseId;
-        const wh = group.warehouses.find((w) => w.warehouse_id === targetId);
-        if (!wh || !(Number(wh.quantity) >= group.quantity)) {
+        // Sem armazém escolhido: a sugestão da EC. Com armazém escolhido, ele
+        // tem de cobrir a quantidade somada do produto; se não cobrir, o
+        // produto fica pendente (não conta como falha).
+        let allocations: StockExitAllocation[] | null = null;
+        if (singleEach || !confirmAllWarehouseId) {
+          allocations = group.suggested;
+        } else {
+          const wh = group.warehouses.find((w) => w.warehouse_id === confirmAllWarehouseId);
+          if (wh && Number(wh.quantity) >= group.quantity) {
+            allocations = [{ warehouse_id: wh.warehouse_id, quantity: group.quantity }];
+          }
+        }
+        if (!allocations || allocations.length === 0) {
           leftPending++;
           continue;
         }
-        const { error } = await supabase.rpc('rpc_confirm_client_order_stock_exit', {
-          p_contract_id: contractId,
-          p_product_id: group.product_id,
-          p_quantity: group.quantity,
-          p_warehouse_id: wh.warehouse_id,
-        });
+        const { error } = await runStockExit(contractId, group.product_id, allocations);
         if (error) {
           failed++;
           if (!firstError) firstError = error.message;
@@ -1345,7 +1490,7 @@ const ClientOrders = () => {
       }
 
       setChecklistActiveLineIds(new Set());
-      setSelectedWarehouseByLine({});
+      setSplitDraftByLine({});
       setConfirmAllWarehouseId("");
 
       try {
@@ -2421,9 +2566,9 @@ const ClientOrders = () => {
     }, { replace: true });
   };
 
-  // Prontas a expedir: nº de encomendas com lines_ready > 0 na prontidão
-  // (rpc_client_order_list_readiness — mesma regra de
-  // rpc_inventory_today.ready_to_ship). Enquanto não chega ou se falhar, o
+  // Prontas a expedir: nº de encomendas com is_ready na prontidão
+  // (rpc_client_order_list_readiness — EC por armazém: tudo o que está em
+  // aberto coberto por stock reservado). Enquanto não chega ou se falhar, o
   // número agregado de rpc_inventory_today.
   const canViewOrders = hasPermission('client_orders.view');
   const { data: inventoryToday } = useInventoryToday({ enabled: canViewOrders });
@@ -2752,8 +2897,8 @@ const ClientOrders = () => {
     return <RowActions items={items} modal={false} menuLabel={`Mais ações para ${label}`} />;
   };
 
-  // Grelha de dados (Dados do protótipo). Sem "Armazém de expedição": não
-  // existe nos dados.
+  // Grelha de dados (Dados do protótipo). "Armazém": o armazém da EC e o plano
+  // (EC por armazém, 20270103100000) — só nas encomendas assinadas com stock.
   const renderDetailInfo = (doc: ClientOrderDocumentDetail) => {
     const label = doc.order_number || doc.contract_number;
     const origin = getDetailOrigin(doc);
@@ -2814,6 +2959,17 @@ const ClientOrders = () => {
         ),
       },
     ];
+    if (doc.ec_warehouse_name && doc.ec_plan && doc.ec_plan !== 'none') {
+      items.push({
+        label: 'Armazém',
+        value: (
+          <>
+            {doc.ec_warehouse_name}
+            <span className="text-muted-foreground"> · {EC_PLAN_LABELS[doc.ec_plan] ?? doc.ec_plan}</span>
+          </>
+        ),
+      });
+    }
     return <ClientOrderInfoGrid items={items} />;
   };
 
@@ -2852,7 +3008,8 @@ const ClientOrders = () => {
 
   // Rodapé fixo: PDF à esquerda; "Pedir em falta ao fornecedor" e
   // "Confirmar saída (N)" à direita (N = produtos prontos, a RPC é por
-  // produto). Com vários armazéns possíveis pede-se um antes de confirmar.
+  // produto). Com vários armazéns possíveis o Select começa na sugestão da EC
+  // (por produto, um armazém ou repartida); pode escolher-se um só armazém.
   const renderDetailFooter = (doc: ClientOrderDocumentDetail) => {
     const label = doc.order_number || doc.contract_number;
     const { pending, warehouses, singleEach } = getConfirmAllInfo();
@@ -2861,9 +3018,7 @@ const ClientOrders = () => {
       ? t('clientOrders.dialog.noPermissionToConfirm')
       : pending.length === 0
         ? 'Nada pronto a sair: as linhas esperam stock ou a encomenda ao fornecedor'
-        : !singleEach && !confirmAllWarehouseId
-          ? 'Escolha o armazém de saída'
-          : null;
+        : null;
     const requestReason = !canRequestMissing
       ? 'Sem permissão: requer encomendas a fornecedor (criar)'
       : !doc.can_request_missing
@@ -2897,11 +3052,16 @@ const ClientOrders = () => {
           </Button>
         </span>
         {canConfirmStockExit && pending.length > 0 && !singleEach && (
-          <Select value={confirmAllWarehouseId} onValueChange={setConfirmAllWarehouseId} disabled={busy}>
+          <Select
+            value={confirmAllWarehouseId || EC_SUGGESTED_WAREHOUSE}
+            onValueChange={(value) => setConfirmAllWarehouseId(value === EC_SUGGESTED_WAREHOUSE ? "" : value)}
+            disabled={busy}
+          >
             <SelectTrigger className="h-10 w-[200px] text-xs" aria-label={t('clientOrders.dialog.confirmAllWarehouse')}>
               <SelectValue placeholder={t('clientOrders.dialog.confirmAllWarehouse')} />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={EC_SUGGESTED_WAREHOUSE}>Sugestão da encomenda</SelectItem>
               {warehouses.map((wh) => (
                 <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
                   {wh.warehouse_name}
@@ -2923,19 +3083,20 @@ const ClientOrders = () => {
   };
 
   // "Confirmar saída" por linha (substitui a checkbox): mesma lógica de
-  // handleChecklistCheckboxChange — 1 armazém confirma logo; 2+ mostram o
-  // Select do armazém e "Confirmar". Sem permissão ou sem armazém com stock
-  // suficiente fica desativado com o motivo.
+  // handleChecklistCheckboxChange — 1 armazém confirma logo; 2+ mostram a
+  // quantidade por armazém (pré-preenchida com a sugestão da EC; pode
+  // repartir-se) e "Confirmar". Sem permissão ou sem stock suficiente nos
+  // armazéns (somados) fica desativado com o motivo.
   const renderStockExitAction = (line: ClientOrderDocumentLine) => {
     const key = lineKey(line);
     const group = line.product_id && detailData ? getProductExitGroup(line.product_id, detailData.lines) : null;
-    const warehouses = group?.warehouses ?? [];
+    const options = group?.options ?? [];
     if (confirmingLineId === key || confirmingAll) {
       return <Loader2 key="exit" className="h-4 w-4 animate-spin text-muted-foreground" aria-label="A confirmar a saída" />;
     }
     const reason = !canConfirmStockExit
       ? t('clientOrders.dialog.noPermissionToConfirm')
-      : warehouses.length === 0
+      : !group || options.length === 0 || !(group.quantity > 0) || group.totalCapacity < group.quantity
         ? (group && group.quantity > 0
           ? t('clientOrders.dialog.noWarehouseEnoughStock', { qty: formatDiagnosticNumber(group.quantity) })
           : t('clientOrders.dialog.noWarehouseAvailable'))
@@ -2955,42 +3116,61 @@ const ClientOrders = () => {
       );
     }
     const isActive = checklistActiveLineIds.has(key);
-    const selectedWarehouseId = selectedWarehouseByLine[key];
-    if (warehouses.length > 1 && isActive) {
+    if (group && options.length > 1 && isActive) {
+      const draft = splitDraftByLine[key];
+      const { allocations, total, reason: splitReason } = parseSplitDraft(group, draft);
       return (
-        <div key="exit" className="flex items-center gap-1.5">
-          <Select
-            value={selectedWarehouseId || ""}
-            onValueChange={(value) => setSelectedWarehouseByLine((prev) => ({ ...prev, [key]: value }))}
-          >
-            <SelectTrigger className="h-8 w-[190px] text-xs" aria-label={t('clientOrders.dialog.selectWarehouse')}>
-              <SelectValue placeholder={t('clientOrders.dialog.selectWarehouse')} />
-            </SelectTrigger>
-            <SelectContent>
-              {warehouses.map((wh) => (
-                <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
+        <div key="exit" className="flex flex-col items-end gap-1.5">
+          {options.map((wh) => {
+            const suggestedQty = group.suggested?.find((a) => a.warehouse_id === wh.warehouse_id)?.quantity ?? 0;
+            return (
+              <label key={wh.warehouse_id} className="flex items-center gap-1.5 text-xs">
+                <span className="truncate" title={wh.warehouse_name}>
                   {wh.warehouse_name} ({formatDiagnosticNumber(asQty(wh.quantity))})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            size="sm"
-            className="h-8"
-            disabled={!selectedWarehouseId || confirmingLineId !== null}
-            onClick={() => selectedWarehouseId && handleConfirmStockExit(line, selectedWarehouseId)}
-          >
-            {t('clientOrders.dialog.confirmStockExit')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            aria-label="Cancelar a escolha do armazém"
-            onClick={() => handleChecklistCheckboxChange(line, false)}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </Button>
+                  {suggestedQty > 0 ? <span className="text-muted-foreground"> · sugerido</span> : null}
+                </span>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  max={asQty(wh.quantity)}
+                  className="h-8 w-20 text-right text-xs tabular-nums"
+                  value={draft?.[wh.warehouse_id] ?? ''}
+                  placeholder="0"
+                  aria-label={`Quantidade a sair de ${wh.warehouse_name}`}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSplitDraftByLine((prev) => ({ ...prev, [key]: { ...(prev[key] ?? {}), [wh.warehouse_id]: value } }));
+                  }}
+                />
+              </label>
+            );
+          })}
+          <div className="flex items-center gap-1.5">
+            <span className={`text-xs tabular-nums ${splitReason ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {formatDiagnosticNumber(total)} / {formatDiagnosticNumber(group.quantity)}
+            </span>
+            <Button
+              size="sm"
+              className="h-8"
+              disabled={!!splitReason || confirmingLineId !== null}
+              title={splitReason ?? undefined}
+              onClick={() => !splitReason && handleConfirmStockExit(line, allocations)}
+            >
+              {t('clientOrders.dialog.confirmStockExit')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              aria-label="Cancelar a escolha do armazém"
+              onClick={() => handleChecklistCheckboxChange(line, false)}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+          {splitReason ? <p className="max-w-[260px] text-right text-xs text-destructive" role="status">{splitReason}</p> : null}
         </div>
       );
     }
@@ -3467,6 +3647,13 @@ const ClientOrders = () => {
           </div>
         ) : detailData ? (
           <>
+            {/* Baixa automática que não deu saída a tudo (texto do servidor). */}
+            {detailData.stock_deduction_warning ? (
+              <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" role="status">
+                {detailData.stock_deduction_warning}
+              </div>
+            ) : null}
+
             {/* Diagnóstico da obra — só leitura, colapsável. Nada quando a
                 encomenda não tem diagnóstico (vendas diretas, manuais). */}
             <ClientOrderDiagnosticSection needs={detailData.diagnostic ?? []} tf={tf} />

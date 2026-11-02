@@ -40,7 +40,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import type { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   InventoryPageHeader,
@@ -51,6 +51,7 @@ import {
 } from "@/components/inventory/ui";
 import { DeliveryNotesPanel, deliveryNotesPanelQueryKey } from "@/components/receiving/DeliveryNotesPanel";
 import { inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
+import { fetchClientOrderReadiness } from "@/components/client-orders/clientOrderList";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useToast } from "@/hooks/use-toast";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -4248,6 +4249,44 @@ export default function Receiving() {
             : null));
   const panelMissing: "loading" | "gone" | null =
     poParam && !panelPo ? (poListGate.allowed && receivableQuery.isLoading ? "loading" : "gone") : null;
+
+  // EC por armazém (20270103100000): a PO pedida por uma encomenda de cliente (purchase_orders.source_id) abre com o armazém da
+  // EC pré-escolhido (ec_warehouse_id de rpc_client_order_list_readiness, só desse contrato) — continua alterável. Sem permissão
+  // de ver encomendas de cliente (a RPC recusa) ou com erro, fica o armazém atual.
+  const panelPoId = panelPo?.id ?? null;
+  const panelContractId = panelPo?.contractId ?? null;
+  const ecWarehouseQuery = useQuery({
+    queryKey: ["receiving-ec-warehouse", orgId, panelContractId],
+    enabled: listOn && !!orgId && !!panelContractId,
+    staleTime: 60 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const map = await fetchClientOrderReadiness(orgId as string, [panelContractId as string]);
+      return map[panelContractId as string]?.ec_warehouse_id ?? null;
+    },
+  });
+  const ecWarehouseId = ecWarehouseQuery.data ?? null;
+  // Uma vez por PO aberta: se o utilizador mudar o armazém depois, não se volta a impor.
+  const ecWarehouseAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!poParam) {
+      ecWarehouseAppliedRef.current = null;
+      return;
+    }
+    if (!ecWarehouseId || panelPoId !== poParam || ecWarehouseAppliedRef.current === poParam) return;
+    // Espera pelos armazéns desta empresa (validam o id).
+    const opts = optionsRef.current && optionsRef.current.epoch === orgEpochRef.current ? optionsRef.current : null;
+    if (!opts) return;
+    ecWarehouseAppliedRef.current = poParam;
+    // Com o cesto cheio ou uma entrada a decorrer o armazém está preso (como no seletor).
+    if (basketRef.current.length > 0 || submittingRef.current || poRunActiveRef.current) return;
+    const wh = opts.warehouses.find((w) => w.id === ecWarehouseId);
+    if (!wh || warehouseRef.current === wh.id) return;
+    setWarehouseId(wh.id);
+    warehouseRef.current = wh.id;
+    setAnnouncement(`Armazém da encomenda de cliente escolhido: ${wh.name}.`);
+  }, [poParam, panelPoId, ecWarehouseId, warehouses]);
 
   /** "Nova guia" do cabeçalho: mesma regra do "Criar guia" da lista de guias (só com o cesto vazio). */
   const openNewNote = () => {

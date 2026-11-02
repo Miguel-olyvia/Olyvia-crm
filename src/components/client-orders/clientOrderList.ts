@@ -120,6 +120,17 @@ export interface ClientOrderReadiness {
   units_served: number;
   units_received: number;
   units_needed: number;
+  /**
+   * EC por armazém (20270103100000): pronta a expedir — há linhas em aberto e
+   * todas cobertas por stock reservado (nada em falta nem à espera de PO).
+   * É esta que conta para «Prontas a expedir» (lines_ready mantém o sentido).
+   */
+  is_ready: boolean;
+  /** Armazém da EC e plano ('single' | 'split' | 'partial' | 'none'); null sem dados. */
+  ec_warehouse_id: string | null;
+  ec_plan: string | null;
+  /** Armazéns de onde sai o stock reservado. */
+  reserved_warehouse_ids: string[];
 }
 
 export type ClientOrderReadinessMap = Record<string, ClientOrderReadiness>;
@@ -135,9 +146,13 @@ const toNum = (v: unknown): number => {
   return Number.isFinite(x) ? x : 0;
 };
 
-export async function fetchClientOrderReadiness(organizationId: string): Promise<ClientOrderReadinessMap> {
+/** `contractIds` (opcional) limita a resposta a esses contratos (ex.: a EC de origem de uma PO na Receção). */
+export async function fetchClientOrderReadiness(organizationId: string, contractIds?: string[]): Promise<ClientOrderReadinessMap> {
   const rpc = supabase.rpc.bind(supabase) as unknown as ReadinessRpc;
-  const { data, error } = await rpc("rpc_client_order_list_readiness", { p_organization_id: organizationId });
+  const { data, error } = await rpc(
+    "rpc_client_order_list_readiness",
+    contractIds ? { p_organization_id: organizationId, p_contract_ids: contractIds } : { p_organization_id: organizationId },
+  );
   if (error) throw error;
   const map: ClientOrderReadinessMap = {};
   for (const raw of (data as Array<Record<string, unknown>> | null) ?? []) {
@@ -153,6 +168,13 @@ export async function fetchClientOrderReadiness(organizationId: string): Promise
       units_served: toNum(raw.units_served),
       units_received: toNum(raw.units_received),
       units_needed: toNum(raw.units_needed),
+      // Sem a coluna (RPC antiga): a regra anterior, linhas prontas > 0.
+      is_ready: typeof raw.is_ready === "boolean" ? raw.is_ready : toNum(raw.lines_ready) > 0,
+      ec_warehouse_id: typeof raw.ec_warehouse_id === "string" ? raw.ec_warehouse_id : null,
+      ec_plan: typeof raw.ec_plan === "string" ? raw.ec_plan : null,
+      reserved_warehouse_ids: Array.isArray(raw.reserved_warehouse_ids)
+        ? raw.reserved_warehouse_ids.filter((x): x is string => typeof x === "string")
+        : [],
     };
   }
   return map;
@@ -181,8 +203,9 @@ export function loadClientOrderReadiness(
   });
 }
 
+/** «Prontas a expedir»: is_ready (EC por armazém), não lines_ready > 0. */
 export const readyContractIds = (map: ClientOrderReadinessMap | null | undefined): Set<string> =>
-  new Set(Object.values(map ?? {}).filter((r) => r.lines_ready > 0).map((r) => r.contract_id));
+  new Set(Object.values(map ?? {}).filter((r) => r.is_ready).map((r) => r.contract_id));
 
 // ── Contagens por estado (pílulas e KPI) ───────────────────────────────────
 
