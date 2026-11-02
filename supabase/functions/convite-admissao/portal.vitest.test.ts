@@ -67,6 +67,8 @@ function montar(opcoes: Opcoes = {}) {
     }),
     rpc_hr_convite_admissao_otp_verificar: () => ({ data: { ok: true, sessao_expira_em: "2026-10-16T12:30:00.000Z" }, error: null }),
     rpc_hr_convite_admissao_sessao_terminar: () => ({ data: { ok: true, terminada: true }, error: null }),
+    // fora da janela de documentos (o caso do preenchimento): a base responde que esta fechada
+    rpc_hr_portal_documentos_estado: () => ({ data: { documentos_abertos: false }, error: null }),
     rpc_hr_convite_admissao_portal_ler: () => ({
       data: {
         estado: "em_preenchimento",

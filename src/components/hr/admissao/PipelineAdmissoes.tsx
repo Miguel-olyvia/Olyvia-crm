@@ -131,7 +131,7 @@ export function PipelineAdmissoes({ aoAbrirFicha }: { aoAbrirFicha: (pessoaId: s
         </Button>
       )}
 
-      <RevisaoAdmissaoDialog item={emRevisao} aoFechar={() => setEmRevisao(null)} />
+      <RevisaoAdmissaoDialog item={emRevisao} aoFechar={() => setEmRevisao(null)} aoDecidido={recarregar} />
     </div>
   );
 }

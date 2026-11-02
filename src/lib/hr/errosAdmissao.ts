@@ -146,6 +146,11 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   dias_invalidos: "hr.convite.erro.diasInvalidos",
   prazo_excedido: "hr.convite.erro.prazoExcedido",
   limite_excedido: "hr.convite.erro.limiteExcedido",
+  // Troca de documentos e assinatura do contrato (HRA61 a HRA64): a pessoa e o RH ouvem o que fazer a seguir.
+  aceite_obrigatorio: "hr.convite.erro.aceiteObrigatorio",
+  sem_ficheiro: "hr.convite.erro.semFicheiro",
+  documentos_fechados: "hr.convite.erro.documentosFechados",
+  sem_telemovel: "hr.convite.erro.semTelemovel",
   // V3a (reenviar o convite): HRA56, o portal ja nao tem link que se possa reenviar.
   link_indisponivel: "hr.convite.erro.linkIndisponivel",
   // O SMTP falhou ao reenviar (a accao do RH di-lo; o convite nao chegou).

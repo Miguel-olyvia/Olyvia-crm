@@ -103,7 +103,7 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
   }
   const vista = vistaDoConvite(portal.erroInicial, convite);
   // Em analise: so o estado (sem dados nem nome), dentro da moldura do portal.
-  if (vista === "analise" && convite) {
+  if ((vista === "analise" || vista === "documentos") && convite) {
     return (
       <PortalMoldura organizacao={convite.organizacao_nome} nome={convite.primeiro_nome}>
         <PortalEmAnalise estado={convite.estado} />
@@ -112,7 +112,7 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
   }
   // Link invalido, revogado, encerrado, expirado ou bloqueado: o cartao que o convite ja tinha.
   if (vista !== "consulta" || !convite) {
-    return <ConviteCartaoLinkInvalido t={t} motivo={motivoDaVista(vista === "consulta" || vista === "analise" ? "invalido" : vista)} />;
+    return <ConviteCartaoLinkInvalido t={t} motivo={motivoDaVista(vista === "consulta" || vista === "analise" || vista === "documentos" ? "invalido" : vista)} />;
   }
 
   const confirmarIdentidade = () => {

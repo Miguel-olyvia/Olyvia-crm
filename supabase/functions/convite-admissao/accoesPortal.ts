@@ -72,6 +72,9 @@ export interface DepsPortal {
   req: Request;
   otpPepper: string | null | undefined;
   enviarCorreio?: (pedido: PedidoCorreio) => Promise<ResultadoCorreio>;
+  /** As RPCs do OTP a usar; por omissao as do preenchimento. Com a janela de documentos aberta, as de documentos.
+   *  E uma funcao para so se resolver DEPOIS das validacoes baratas (pepper, correio, formato do codigo): falhar fechado nao toca na base. */
+  rpcOtp?: () => Promise<{ pedir: string; verificar: string } | undefined>;
   /** Regista um erro de uma RPC: so tipo e SQLSTATE. */
   reportar(origem: string, erro: unknown): void;
   /** Regista um erro JA sem dados (mensagem fixa nossa). */
@@ -164,7 +167,8 @@ async function otpPedir(deps: DepsPortal): Promise<RespostaAccaoPortal> {
   // O codigo vive so nesta funcao: a base recebe o HMAC, o e-mail recebe o codigo.
   const codigo = gerarCodigoOtp();
   const hmac = await hmacOtp(deps.otpPepper, deps.tokenHash, codigo);
-  const { data, error } = await deps.svc.rpc("rpc_hr_convite_admissao_otp_pedir", {
+  const rpcs = await deps.rpcOtp?.();
+  const { data, error } = await deps.svc.rpc(rpcs?.pedir ?? "rpc_hr_convite_admissao_otp_pedir", {
     p_token_hash: deps.tokenHash,
     p_otp_hmac: hmac,
   });
@@ -215,7 +219,8 @@ async function otpVerificar(deps: DepsPortal): Promise<RespostaAccaoPortal> {
   const hmac = await hmacOtp(deps.otpPepper, deps.tokenHash, codigo);
   // A sessao nasce aqui; a base so recebe o hash dela.
   const { sessao, hash } = await gerarSessao();
-  const { data, error } = await deps.svc.rpc("rpc_hr_convite_admissao_otp_verificar", {
+  const rpcs = await deps.rpcOtp?.();
+  const { data, error } = await deps.svc.rpc(rpcs?.verificar ?? "rpc_hr_convite_admissao_otp_verificar", {
     p_token_hash: deps.tokenHash,
     p_otp_hmac: hmac,
     p_sessao_hash: hash,

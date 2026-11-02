@@ -123,6 +123,16 @@ export interface EscritaPortal {
   erroRascunho: string | null;
 }
 
+/** A resposta de uma accao `doc_*`: forma plana (sem `strictNullChecks` uma uniao por `ok` nao estreita). */
+export interface ResultadoAccaoSessao {
+  ok: boolean;
+  /** O codigo da recusa (o ecra traduz); `null` quando correu bem. */
+  codigo: string | null;
+  data: Record<string, unknown>;
+  /** Tentativas que restam, so quando o codigo SMS estava errado. */
+  restantes: number | null;
+}
+
 /** O que nunca viaja dentro do rascunho: vive no cofre (NISS, IBAN) ou nunca se grava (a declaracao). */
 const FORA_DO_RASCUNHO: readonly string[] = ["niss", "iban", "conta_numero", "aceite"];
 
@@ -204,6 +214,9 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
   const [aGravar, setAGravar] = useState(false);
   const [erroRascunho, setErroRascunho] = useState<string | null>(null);
   const [concluido, setConcluido] = useState(false);
+  // Janela de documentos (processo ja aprovado): o que a sessao le e `doc_ler`, nao `ler`. Resposta em bruto; quem a usa normaliza.
+  const [documentosBrutos, setDocumentosBrutos] = useState<Record<string, unknown> | null>(null);
+  const documentosAbertosRef = useRef(false);
 
   // Fila de uma gravacao de cada vez: a que esta em curso, e a ultima que ficou a espera.
   const emCursoRef = useRef(false);
@@ -260,6 +273,7 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
         return null;
       }
       const c = normalizarConvite(r.data.convite);
+      documentosAbertosRef.current = c.documentos_abertos === true;
       setErroInicial(null);
       setConvite(c);
       return c;
@@ -275,6 +289,7 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
       setSessaoAtiva(false);
       setSessaoAExpirar(false);
       setDados(null);
+      setDocumentosBrutos(null);
       setErroLeitura(null);
       setOtp(OTP_INICIAL);
       setErroRascunho(null);
@@ -288,8 +303,16 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
 
   /** Le o que a sessao permite. `true` se a sessao continua de pe. */
   const lerComSessao = useCallback(async (): Promise<boolean> => {
-    const r = await chamar("ler", {}, true);
+    const comDocumentos = documentosAbertosRef.current;
+    const r = await chamar(comDocumentos ? "doc_ler" : "ler", {}, true);
     if (!montadoRef.current) return false;
+    if (!deuErro(r) && comDocumentos) {
+      atividadeRef.current = Date.now();
+      setDocumentosBrutos(r.data);
+      setErroLeitura(null);
+      setSessaoAExpirar(false);
+      return true;
+    }
     if (!deuErro(r)) {
       atividadeRef.current = Date.now();
       setDados(normalizarPortalLer(r.data));
@@ -327,6 +350,8 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     setSessaoAtiva(false);
     setSessaoAExpirar(false);
     setDados(null);
+    setDocumentosBrutos(null);
+    documentosAbertosRef.current = false;
     setErroLeitura(null);
     setAviso(null);
     setOtp(OTP_INICIAL);
@@ -458,6 +483,27 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
       return true;
     },
     [encerrarLocalmente],
+  );
+
+  /**
+   * Uma accao da janela de documentos (`doc_*`) com a sessao aberta. Nunca lanca. Uma recusa que acaba a sessao limpa tudo
+   * (o ecra volta a pedir o codigo); qualquer outra volta como codigo (e as tentativas que restam, no codigo errado).
+   */
+  const chamarComSessao = useCallback(
+    async (accao: string, extra: Record<string, unknown> = {}): Promise<ResultadoAccaoSessao> => {
+      if (!lerSessao()) return { ok: false, codigo: "sessao_ausente", data: {}, restantes: null };
+      const r = await chamar(accao, extra, true);
+      if (!montadoRef.current) return { ok: false, codigo: "erro_inesperado", data: {}, restantes: null };
+      if (deuErro(r)) {
+        await tratarSessaoPerdida(r.codigo);
+        const restantes = typeof r.corpo?.restantes === "number" ? r.corpo.restantes : null;
+        return { ok: false, codigo: r.codigo, data: {}, restantes };
+      }
+      atividadeRef.current = Date.now();
+      setSessaoAExpirar(false);
+      return { ok: true, codigo: null, data: r.data, restantes: null };
+    },
+    [chamar, tratarSessaoPerdida],
   );
 
   /** Um pedido `rascunho` (o rascunho e, se for caso disso, o NISS e o IBAN). Nunca lanca. */
@@ -636,6 +682,8 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     aGravar,
     erroRascunho,
     concluido,
+    documentosBrutos,
+    chamarComSessao,
     gravarRascunho,
     gravarRascunhoAoFechar,
     submeter,

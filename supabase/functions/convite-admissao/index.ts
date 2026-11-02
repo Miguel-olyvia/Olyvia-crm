@@ -45,6 +45,7 @@ import { resolveOrganizationSmtp, sendEmailViaSMTP } from "../_shared/smtp.ts";
 import { criarEnviadorCorreio } from "./correio.ts";
 import { criarHandler, type ClienteConvite, type DepsConvite } from "./handler.ts";
 import { comCabecalhoSessao } from "./sessao.ts";
+import { criarEnviadorSms } from "./smsapi.ts";
 
 initSentry();
 
@@ -69,6 +70,11 @@ const deps: DepsConvite = {
   enviarCorreio: criarEnviadorCorreio({
     resolverSmtp: (organizationId) => resolveOrganizationSmtp(clienteSmtp, organizationId),
     enviarSmtp: (smtp, mensagem) => sendEmailViaSMTP(smtp, mensagem),
+  }),
+  // SMS do codigo de assinatura dos documentos (SMSAPI_TOKEN da RH). Sem token: doc_codigo falha FECHADO.
+  enviarSms: criarEnviadorSms({
+    token: Deno.env.get("SMSAPI_TOKEN"),
+    fetch: (url, init) => fetch(url, init),
   }),
   criarCliente: (url, key, opcoes) =>
     comoCliente(

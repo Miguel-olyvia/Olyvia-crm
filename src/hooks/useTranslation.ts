@@ -28,6 +28,7 @@ import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemplo
 import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
 import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
 import { rhExemploPortalTranslations } from "@/translations/rhExemploPortal";
+import { rhPortalRealTranslations } from "@/translations/rhPortalReal";
 import { rhExemploOrganizacaoTranslations } from "@/translations/rhExemploOrganizacao";
 import { rhExemploJustificacoesTranslations } from "@/translations/rhExemploJustificacoes";
 import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
@@ -127,6 +128,11 @@ Object.keys(rhExemploAdmissaoMenuTranslations).forEach((lang) => {
 // Portal do colaborador de exemplo: a página pública do link, a troca de documentos e o lado do RH (`rhPortal.*`).
 Object.keys(rhExemploPortalTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploPortalTranslations[lang as keyof typeof rhExemploPortalTranslations] };
+});
+
+// Portal do colaborador ligado à base: assinatura por SMS, abas reais, enviar contrato, aprovar e rejeitar (`rhPortalReal.*`).
+Object.keys(rhPortalRealTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhPortalRealTranslations[lang as keyof typeof rhPortalRealTranslations] };
 });
 
 // Página «Organização» do RH de exemplo: grupo, empresas, filiais, centros e a ligação das pessoas (`rhOrg.*`).

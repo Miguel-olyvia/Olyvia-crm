@@ -6,7 +6,7 @@ import { PessoaPapeisNegocioCard } from "@/components/rh-exemplo/hooks/PessoaPap
 import { PessoaAgendaObraCard } from "@/components/rh-exemplo/hooks/PessoaAgendaObraCardReal";
 import { CartaoAdmissaoDaFicha } from "@/components/rh-exemplo/hooks/CartaoAdmissaoDaFicha";
 import type { ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
-import { PortalColaboradorRh } from "@/components/rh-exemplo/portal/PortalColaboradorRh";
+import { PortalColaboradorRhReal } from "@/components/rh-exemplo/portal/PortalColaboradorRhReal";
 import { PessoaLaboraisTab } from "@/components/rh-exemplo/PessoaLaboraisTab";
 import { PessoaOutrosDadosCard } from "@/components/rh-exemplo/hooks/PessoaOutrosDadosReal";
 import { PessoaPessoaisTab } from "@/components/rh-exemplo/PessoaPessoaisTab";
@@ -38,7 +38,7 @@ export function AbaVisaoGeral({ ficha, pessoa, ctx, aoAbrirAba, resumoConvite }:
         pessoaId={pessoa.id} nome={pessoa.nome_completo} cargo={ctx.cargos.find((c) => c.id === pessoa.cargo_id)?.nome ?? pessoa.cargo ?? null}
         resumo={resumoConvite} aoAbrirFicha={() => aoAbrirAba("visaoGeral")}
       />
-      <PortalColaboradorRh pessoaId={pessoa.id} compacto aoGerir={() => aoAbrirAba("documentos")} />
+      <PortalColaboradorRhReal pessoaId={pessoa.id} nome={pessoa.nome_completo} compacto aoGerir={() => aoAbrirAba("documentos")} />
       <PessoaVisaoGeralTab
         pessoa={pessoa} reportaANome={ctx.reportaANome} entidadeLegalNome={ctx.entidadeLegalNome} vinculos={ficha.vinculos}
         horarioRealizado={ficha.horarioRealizado} retribuicao={ficha.retribuicao} podeVerRealizado={ctx.trabalho.podeVerRealizado}

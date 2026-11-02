@@ -38,6 +38,8 @@ export interface ConvitePublico {
   organizacao_nome: string | null;
   bloqueado: boolean;
   precisa_otp: boolean;
+  /** So existe (e verdadeiro) quando o RH reabriu o portal SO para documentos: o preenchimento continua fechado. */
+  documentos_abertos?: boolean;
 }
 
 export interface DevolucaoPortal {
@@ -91,6 +93,7 @@ export function normalizarConvite(bruto: unknown): ConvitePublico {
     bloqueado: o.bloqueado === true,
     // Nunca por omissao: sem a certeza de que ha sessao valida, pede-se o codigo.
     precisa_otp: o.precisa_otp === true,
+    ...(o.documentos_abertos === true ? { documentos_abertos: true } : {}),
   };
 }
 
@@ -152,6 +155,7 @@ export function estadoPermiteEditar(estado: string | null | undefined): boolean 
 export type VistaPortal =
   | "consulta"
   | "analise"
+  | "documentos"
   | "invalido"
   | "revogado"
   | "encerrado"
@@ -178,6 +182,8 @@ export function vistaDoConvite(erro: string | null, convite: ConvitePublico | nu
   if (convite.bloqueado) return "bloqueado";
   if (convite.estado_portal === "expirado") return "expirado";
   if (convite.estado_portal === "revogado") return "revogado";
+  // O RH reabriu o portal so para documentos (processo ja aprovado): o preenchimento continua fechado.
+  if (convite.documentos_abertos === true) return "documentos";
   if (convite.estado_portal === "encerrado") return "encerrado";
   if (estadoPermiteEditar(convite.estado)) return "consulta";
   if (convite.estado !== null && ESTADOS_EM_ANALISE.includes(convite.estado)) return "analise";
@@ -368,7 +374,7 @@ export function formularioEditavel(dados: PortalLer, campo: keyof RascunhoConvit
  * As vistas sem acesso (menos "em analise", que e do portal) mostram o cartao de link invalido que ja
  * existia, com o motivo que ja tinha.
  */
-export function motivoDaVista(vista: Exclude<VistaPortal, "consulta" | "analise">): MotivoConvite {
+export function motivoDaVista(vista: Exclude<VistaPortal, "consulta" | "analise" | "documentos">): MotivoConvite {
   const codigo = Object.entries(VISTA_POR_ERRO).find(([, v]) => v === vista)?.[0] ?? null;
   return motivoDoCodigo(codigo);
 }
@@ -389,6 +395,10 @@ export const CODIGOS_DE_ERRO_DO_PORTAL: readonly string[] = [
   "otp_indisponivel",
   "email_nao_enviado",
   "demasiadas_tentativas",
+  "aceite_obrigatorio",
+  "sem_ficheiro",
+  "documentos_fechados",
+  "sem_telemovel",
   "sessao_expirada",
   "sessao_ausente",
   "sessao_substituida",

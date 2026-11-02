@@ -32,6 +32,16 @@ import { orgScoped, type OrgScopedQueryBuilder } from "../_shared/orgScopedQuery
 import { getClientIp, type RateLimitOptions, type RateLimitResult } from "../_shared/rateLimit.ts";
 import { eAccaoAnexo, tratarAccaoAnexo, type ClienteAnexos } from "./accoesAnexos.ts";
 import {
+  avisarDocumentos,
+  eAccaoDocumentos,
+  pedidoFicheiroUrlRh,
+  tectoDocumentosPorHora,
+  tratarAccaoDocumentos,
+  type ClienteDocumentos,
+  type PedidoSms,
+  type ResultadoSms,
+} from "./accoesDocumentos.ts";
+import {
   IBAN_MAX,
   NISS_MAX,
   codigoParaOVisitante,
@@ -163,6 +173,8 @@ export interface DepsConvite {
   otpPepper?: string | null;
   /** Correio directo pelo SMTP da organizacao do processo, SEM `send-email` nem `email_logs`. */
   enviarCorreio?: (pedido: PedidoCorreio) => Promise<ResultadoCorreio>;
+  /** SMS do codigo de assinatura dos documentos (SMSAPI). Sem ele, `doc_codigo` falha FECHADO. Nos testes, um falso. */
+  enviarSms?: (pedido: PedidoSms) => Promise<ResultadoSms>;
   verificarLimite(svc: ClienteConvite, opcoes: RateLimitOptions): Promise<RateLimitResult>;
   registarTentativa(svc: ClienteConvite, bucket: string, identifier: string): Promise<void>;
   /** Recebe SO erros ja sem dados (ver `erroSemDados`). */
@@ -555,10 +567,88 @@ async function tratarReenviar(ctx: Contexto, payload: Record<string, unknown>): 
   return responder(r.body, r.status);
 }
 
+// -- documentos_avisar (RH) -----------------------------------------------------
+
+/** Por hora, por utilizador. */
+const LIMITE_AVISAR_DOCUMENTOS_POR_UTILIZADOR = 30;
+
+async function tratarDocumentosAvisar(ctx: Contexto, payload: Record<string, unknown>): Promise<Response> {
+  const { deps, req, responder } = ctx;
+  const jwt = bearer(req);
+  if (!jwt) return responder({ error: "sem_sessao" }, 401);
+
+  const svc = deps.criarCliente(deps.supabaseUrl, deps.serviceKey);
+  // O actor DERIVA-SE do JWT, nunca do corpo.
+  const actor = await utilizadorDoJwt(svc, jwt);
+  if (!actor) return responder({ error: "sem_sessao" }, 401);
+
+  const { convite_id: conviteId, organization_id: organizationId } = payload;
+  if (typeof conviteId !== "string" || !UUID.test(conviteId) || typeof organizationId !== "string" || !UUID.test(organizationId)) {
+    return responder({ error: "pedido_invalido" }, 400);
+  }
+
+  const baseUrl = resolverBaseUrl(origemPermitida(req.headers.get("origin"), deps.allowedOrigin) ?? deps.appBaseUrl);
+  if (!baseUrl || !deps.enviarCorreio) {
+    deps.registarErro(new Error("convite-admissao documentos_avisar: sem URL base ou sem correio configurado"));
+    return responder({ error: "erro_inesperado" }, 500);
+  }
+
+  const dentro = await dentroDoLimite(ctx, svc, [
+    { bucket: "convite-admissao-documentos-avisar", identifier: actor, maxAttempts: LIMITE_AVISAR_DOCUMENTOS_POR_UTILIZADOR, windowMinutes: 60 },
+  ]);
+  if (!dentro) return responder({ error: "demasiadas_tentativas" }, 429);
+
+  const r = await avisarDocumentos({
+    svc,
+    enviarCorreio: deps.enviarCorreio,
+    conviteId,
+    organizationId,
+    actor,
+    baseUrl,
+    reportar: ctx.reportar,
+    registarErro: deps.registarErro,
+  });
+  return responder(r.body, r.status);
+}
+
+// -- pedido_ficheiro_url (RH) ---------------------------------------------------
+
+async function tratarPedidoFicheiroUrl(ctx: Contexto, payload: Record<string, unknown>): Promise<Response> {
+  const { deps, req, responder } = ctx;
+  const jwt = bearer(req);
+  if (!jwt) return responder({ error: "sem_sessao" }, 401);
+
+  const svc = deps.criarCliente(deps.supabaseUrl, deps.serviceKey);
+  // O actor DERIVA-SE do JWT, nunca do corpo.
+  const actor = await utilizadorDoJwt(svc, jwt);
+  if (!actor) return responder({ error: "sem_sessao" }, 401);
+
+  const { anexo_id: anexoId, organization_id: organizationId } = payload;
+  if (typeof anexoId !== "string" || !UUID.test(anexoId) || typeof organizationId !== "string" || !UUID.test(organizationId)) {
+    return responder({ error: "pedido_invalido" }, 400);
+  }
+
+  const dentro = await dentroDoLimite(ctx, svc, [
+    { bucket: "convite-admissao-pedido-ficheiro-url", identifier: actor, maxAttempts: LIMITE_AVISAR_DOCUMENTOS_POR_UTILIZADOR, windowMinutes: 60 },
+  ]);
+  if (!dentro) return responder({ error: "demasiadas_tentativas" }, 429);
+
+  const r = await pedidoFicheiroUrlRh({
+    svc: svc as unknown as ClienteDocumentos,
+    anexoId,
+    organizationId,
+    actor,
+    reportar: ctx.reportar,
+    registarErro: deps.registarErro,
+  });
+  return responder(r.body, r.status);
+}
+
 // -- accoes publicas (so com o token) -------------------------------------------
 
 function tectoPorHora(accao: string): number {
   if (eAccaoPortal(accao)) return tectoPortalPorHora(accao);
+  if (eAccaoDocumentos(accao)) return tectoDocumentosPorHora(accao);
   if (accao === "estado") return 30;
   // O rascunho grava com "debounce" de 3s enquanto a pessoa escreve.
   if (accao === "rascunho") return 240;
@@ -751,6 +841,54 @@ async function tratarSubmeter(
   return responder({ ok: true });
 }
 
+/**
+ * O estado da janela de documentos (`rpc_hr_portal_documentos_estado`): o objecto da base se estiver
+ * ABERTA, senao `null` (fechada, ou a RPC falhou: o erro reporta-se e segue-se o caminho de sempre).
+ */
+async function estadoDeDocumentos(
+  ctx: Contexto,
+  svc: ClienteConvite,
+  tokenHash: string,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const sessao = lerSessaoDoPedido(ctx.req, payload);
+    const { data, error } = await svc.rpc("rpc_hr_portal_documentos_estado", {
+      p_token_hash: tokenHash,
+      p_sessao_hash: sessao ? await sha256Hex(sessao) : null,
+    });
+    if (error) {
+      ctx.reportar("estado documentos", error);
+      return null;
+    }
+    return eObjecto(data) && data.documentos_abertos === true ? data : null;
+  } catch (e) {
+    ctx.reportar("estado documentos", e);
+    return null;
+  }
+}
+
+async function tratarDocumentos(
+  ctx: Contexto,
+  svc: ClienteConvite,
+  accao: Parameters<typeof tratarAccaoDocumentos>[0],
+  tokenHash: string,
+  payload: Record<string, unknown>,
+): Promise<Response> {
+  const { deps, req, responder } = ctx;
+  const r = await tratarAccaoDocumentos(accao, {
+    svc: svc as unknown as ClienteDocumentos,
+    tokenHash,
+    payload,
+    req,
+    otpPepper: deps.otpPepper,
+    enviarSms: deps.enviarSms,
+    reportar: ctx.reportar,
+    registarErro: deps.registarErro,
+  });
+  return responder(r.body, r.status);
+}
+
 async function tratarPortal(
   ctx: Contexto,
   svc: ClienteConvite,
@@ -759,12 +897,19 @@ async function tratarPortal(
   payload: Record<string, unknown>,
 ): Promise<Response> {
   const { deps, req, responder } = ctx;
+  // Com a janela de documentos aberta o processo ja foi submetido: o OTP por e-mail usa as RPCs de documentos.
+  const rpcOtp = accao === "otp_pedir" || accao === "otp_verificar"
+    ? async () => (await estadoDeDocumentos(ctx, svc, tokenHash, {})) !== null
+      ? { pedir: "rpc_hr_portal_documentos_otp_pedir", verificar: "rpc_hr_portal_documentos_otp_verificar" }
+      : undefined
+    : undefined;
   const r = await tratarAccaoPortal(accao, {
     svc,
     tokenHash,
     payload,
     req,
     otpPepper: deps.otpPepper,
+    rpcOtp,
     enviarCorreio: deps.enviarCorreio,
     reportar: ctx.reportar,
     registarErro: deps.registarErro,
@@ -805,7 +950,15 @@ async function tratarPublica(ctx: Contexto, accao: string, payload: Record<strin
     return responder(resultado.body, resultado.status);
   }
   if (eAccaoPortal(accao)) return tratarPortal(ctx, svc, accao, tokenHash, payload);
-  if (accao === "estado") return tratarEstado(ctx, await clienteDoEstado(ctx, svc, payload), tokenHash);
+  if (eAccaoDocumentos(accao)) return tratarDocumentos(ctx, svc, accao, tokenHash, payload);
+  if (accao === "estado") {
+    // Janela de documentos aberta: o estado e o da vista `documentos` (so o minimo publico, mais `documentos_abertos`).
+    const documentos = await estadoDeDocumentos(ctx, svc, tokenHash, payload);
+    if (documentos) {
+      return responder({ ok: true, convite: soCampos(documentos, [...CHAVES_ESTADO_PUBLICO, "documentos_abertos"]) });
+    }
+    return tratarEstado(ctx, await clienteDoEstado(ctx, svc, payload), tokenHash);
+  }
 
   // Rascunho e submeter ESCREVEM: exigem a sessao que o OTP abriu. O link sozinho nao escreve.
   // A base verifica-a (hr_convite_sessao_exigir); aqui poupa-se a viagem a sessao ausente ou mal formada.
@@ -842,9 +995,11 @@ export function criarHandler(deps: DepsConvite): (req: Request) => Promise<Respo
       if (accao === "criar") return await tratarCriar(ctx, payload);
       if (accao === "cancelar" || accao === "prolongar") return await tratarAccaoRh(ctx, accao, payload);
       if (accao === "reenviar") return await tratarReenviar(ctx, payload);
+      if (accao === "documentos_avisar") return await tratarDocumentosAvisar(ctx, payload);
+      if (accao === "pedido_ficheiro_url") return await tratarPedidoFicheiroUrl(ctx, payload);
       // Os anexos ficam para a fase 2: nem chegam a base, ao rate limit ou ao token. Corpo fixo, sem dados.
       if (eAccaoAnexo(accao)) return responder({ error: "portal_em_atualizacao" }, 410);
-      if (accao !== "estado" && accao !== "submeter" && accao !== "rascunho" && !eAccaoAnexo(accao) && !eAccaoPortal(accao)) {
+      if (accao !== "estado" && accao !== "submeter" && accao !== "rascunho" && !eAccaoAnexo(accao) && !eAccaoPortal(accao) && !eAccaoDocumentos(accao)) {
         return responder({ error: "accao_desconhecida" }, 400);
       }
       return await tratarPublica(ctx, accao as string, payload);

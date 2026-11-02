@@ -96,6 +96,14 @@ export const CODIGOS_V2 = [
   "email_nao_enviado",
   // Os anexos ficam para a fase 2 do portal: respondem 410 (o link sozinho nao escreve).
   "portal_em_atualizacao",
+  // Documentos do portal (20270101460000, HRA61 a HRA64) e o SMS que falha (so da Edge).
+  "aceite_obrigatorio",
+  "sem_ficheiro",
+  "documentos_fechados",
+  "sem_telemovel",
+  "sms_nao_enviado",
+  // So em jsonb (sem SQLSTATE): o documento mudou depois de pedido o codigo de assinatura.
+  "conteudo_alterado",
 ] as const;
 
 export type CodigoV2 = (typeof CODIGOS_V2)[number];
@@ -156,6 +164,10 @@ const CODIGO_POR_SQLSTATE: Record<string, CodigoPublico | CodigoV2> = {
   HRA52: "sessao_expirada",
   HRA53: "sessao_substituida",
   HRA56: "link_indisponivel",
+  HRA61: "aceite_obrigatorio",
+  HRA62: "sem_ficheiro",
+  HRA63: "documentos_fechados",
+  HRA64: "sem_telemovel",
   "42501": "insufficient_privilege",
 };
 
@@ -246,6 +258,13 @@ const STATUS_POR_CODIGO: Readonly<Record<string, number>> = {
   otp_indisponivel: 503,
   email_nao_enviado: 502,
   portal_em_atualizacao: 410,
+  // Documentos do portal.
+  aceite_obrigatorio: 400,
+  sem_ficheiro: 409,
+  documentos_fechados: 409,
+  sem_telemovel: 422,
+  sms_nao_enviado: 502,
+  conteudo_alterado: 409,
   anexo_maximo_ficheiros: 409,
   anexo_tipo_cheio: 409,
   anexo_limite_convite: 409,

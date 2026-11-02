@@ -32,6 +32,8 @@ import { cn } from "@/lib/utils";
 interface RevisaoAdmissaoDialogProps {
   item: ItemPipeline | null;
   aoFechar: () => void;
+  /** Depois de aprovar, rejeitar ou enviar o contrato: quem abriu o dialogo volta a ler a sua lista. */
+  aoDecidido?: () => void;
 }
 
 /** O estado vem do resumo da base (o que ela diz agora); o item do pipeline so serve se o resumo nao o trouxe. */
@@ -54,9 +56,10 @@ interface CorpoProps {
   revisao: RevisaoAdmissao;
   podeRevelar: boolean;
   revelar: EstadoRevisao["revelar"];
+  aoDecidido: () => void;
 }
 
-function Corpo({ item, revisao, podeRevelar, revelar }: CorpoProps) {
+function Corpo({ item, revisao, podeRevelar, revelar, aoDecidido }: CorpoProps) {
   const { t } = useTranslation();
   return (
     <div className="space-y-5">
@@ -71,12 +74,12 @@ function Corpo({ item, revisao, podeRevelar, revelar }: CorpoProps) {
       {revisao.devolucao && <RevisaoDevolucao devolucao={revisao.devolucao} />}
       <RevisaoPendencias pendencias={revisao.pendencias} />
       <HistoricoAdmissao eventos={revisao.eventos} />
-      <RevisaoDecisoes />
+      <RevisaoDecisoes conviteId={item.conviteId} estado={revisao.estado ?? item.estado} nome={item.nome} aoDecidido={aoDecidido} />
     </div>
   );
 }
 
-export function RevisaoAdmissaoDialog({ item, aoFechar }: RevisaoAdmissaoDialogProps) {
+export function RevisaoAdmissaoDialog({ item, aoFechar, aoDecidido }: RevisaoAdmissaoDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
   const { carregando, erro, revisao, revelar, recarregar } = useRevisaoAdmissao(item?.conviteId ?? null);
@@ -105,7 +108,10 @@ export function RevisaoAdmissaoDialog({ item, aoFechar }: RevisaoAdmissaoDialogP
         )}
 
         {item && revisao && (
-          <Corpo item={item} revisao={revisao} podeRevelar={hasPermission("hr.onboarding.sensitive")} revelar={revelar} />
+          <Corpo
+            item={item} revisao={revisao} podeRevelar={hasPermission("hr.onboarding.sensitive")} revelar={revelar}
+            aoDecidido={() => { recarregar(); aoDecidido?.(); }}
+          />
         )}
 
         <DialogFooter>
