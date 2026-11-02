@@ -46,6 +46,8 @@ export function posicaoDoCampo(
   campoId: string,
 ): PosicaoEtiqueta | null {
   if (codigo === undefined || ctx.config === null) return null;
+  // O convite segue para o e-mail pessoal: não se pode pedir à pessoa no convite (sem ele não há para onde o enviar).
+  if (campoId === "hr-novo-email-pessoal") return null;
   const posicao = ctx.config.find((c) => c.codigo === codigo)?.posicao ?? null;
   if (posicao === null) return null;
   const seccao: SeccaoConvite | undefined = seccaoDoCampo(campoId);
