@@ -286,8 +286,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       if (!vivo) return;
       setPronto(true);
-      void carregarEncomendas(lidos);
-      void publicarVistasCliente().then(avisarClientes);
+      // 2/11: a vista do cliente grava-se depois de as encomendas carregarem (leva o estado dos materiais) e só depois os avisos
+      void carregarEncomendas(lidos).catch(() => undefined).then(() => publicarVistasCliente()).then(avisarClientes);
       if (recebidas) avisar({ msg: "Obra recebida pelo cliente", sub: `${recebidas} ${recebidas === 1 ? "auto de receção foi assinado" : "autos de receção foram assinados"} no portal.`, kind: "ok" });
       if (atribuidas) avisar({ msg: "Técnicos atribuídos", sub: `${atribuidas} ${atribuidas === 1 ? "tarefa ficou" : "tarefas ficaram"} com um técnico do RH.`, kind: "ok" });
       if (atribuidas || recebidas || respostasAplicadas.current.length) void gravar();
