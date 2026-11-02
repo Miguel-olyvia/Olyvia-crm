@@ -6,7 +6,7 @@
 // · Decisões: liga-se sempre (mesmo com a obra por preparar), mas só se carrega com a obra pronta (encomenda de cliente toda em armazém, ou já saída,
 //   e plano aprovado); não se desliga com material dessa obra na carrinha (entrega-se primeiro), para não ficar stock perdido.
 import { FASES_OBRA } from "../fasesObra";
-import { faseDoMaterial } from "../obraOps";
+import { fasesDaObra, faseNaObra } from "../obraOps";
 import { nomeProd, produto } from "../inventario/base";
 import { ecLinhaInfo, sairLinha } from "../inventario/ec";
 import { docFase, ecDoNegocio, resumoEcNegocio } from "../inventario/ponteNegocios";
@@ -29,14 +29,17 @@ export const ligacoesObra = (F: Frota, obra: number) => (F.ligObras ?? []).filte
 
 const ecDaObra = (inv: Inventario, o: Pick<ObraRef, "ec">): Ec | undefined => (o.ec ? ecDoNegocio(inv, o.ec) : undefined);
 
-/** As fases do plano com os materiais da encomenda de cliente (cada linha na fase em que entra) e o estado de cada uma, lido dos movimentos. */
-export function fasesTransporte(inv: Inventario, o: Pick<ObraRef, "ec">): FaseTransporte[] {
+/** As fases do plano com os materiais da encomenda de cliente (cada linha na fase em que entra) e o estado de cada uma, lido dos movimentos.
+ *  02/11: a fase é a da regra única (obraOps.ts faseNaObra), com os serviços da obra (`o.svcs`); sem eles, pelo nome, como antes. Quem
+ *  carrega e quem mostra usa a mesma obra (obrasDoEstado), por isso a etiqueta dos movimentos (docFase) é a mesma. */
+export function fasesTransporte(inv: Inventario, o: Pick<ObraRef, "ec" | "svcs">): FaseTransporte[] {
   const e = ecDaObra(inv, o);
   if (!e || e.deleted) return [];
   const porFase = new Map<number, EcLinha[]>();
+  const F = fasesDaObra(o.svcs);
   for (const l of e.lines) {
     if (!l.sku || l.voided) continue;
-    const f = faseDoMaterial(nomeProd(inv, l.sku));
+    const f = faseNaObra(F, { n: nomeProd(inv, l.sku) });
     porFase.set(f, [...(porFase.get(f) ?? []), l]);
   }
   return [...porFase.keys()].sort().map((f) => {
@@ -66,7 +69,7 @@ export function faltaParaCarregar(inv: Inventario, o: Pick<ObraRef, "ec" | "esta
 export const obraPronta = (inv: Inventario, o: Pick<ObraRef, "ec" | "estado">): boolean => !faltaParaCarregar(inv, o).length;
 
 /** Há material desta obra a bordo de alguma carrinha (carregado e ainda não entregue)? */
-export const materialNaCarrinha = (inv: Inventario, o: Pick<ObraRef, "ec">): boolean => fasesTransporte(inv, o).some((f) => f.estado === "na carrinha");
+export const materialNaCarrinha = (inv: Inventario, o: Pick<ObraRef, "ec" | "svcs">): boolean => fasesTransporte(inv, o).some((f) => f.estado === "na carrinha");
 
 /* ------------------------------------------------------------------ na Frota */
 /** Liga a viatura à obra (sempre: carregar é que espera pela obra pronta). */
@@ -76,13 +79,13 @@ export function ligarObra(F: Frota, vid: string, obra: number): void {
   (F.ligObras ??= []).push({ vid, obra, at: HOJE });
 }
 /** Desliga a viatura da obra; recusa com material dessa obra na carrinha (entrega-se primeiro: não fica stock perdido). */
-export function desligarObra(F: Frota, inv: Inventario, vid: string, o: Pick<ObraRef, "id" | "ec">): void {
+export function desligarObra(F: Frota, inv: Inventario, vid: string, o: Pick<ObraRef, "id" | "ec" | "svcs">): void {
   if (materialNaCarrinha(inv, o)) falhar(`Há material da obra #${o.id} na carrinha: entregue-o na obra antes de desligar.`);
   F.ligObras = (F.ligObras ?? []).filter((x) => !(x.vid === vid && x.obra === o.id));
 }
 
 /* ------------------------------------------------------------------ no Inventário (corre dentro de executar do Inventário) */
-const faseDe = (inv: Inventario, o: Pick<ObraRef, "ec">, fase: number): { e: Ec; f: FaseTransporte } => {
+const faseDe = (inv: Inventario, o: Pick<ObraRef, "ec" | "svcs">, fase: number): { e: Ec; f: FaseTransporte } => {
   const e = ecDaObra(inv, o);
   const f = fasesTransporte(inv, o).find((x) => x.fase === fase);
   if (!e || !f) return falharInv("Fase sem materiais nesta obra.");
@@ -90,7 +93,7 @@ const faseDe = (inv: Inventario, o: Pick<ObraRef, "ec">, fase: number): { e: Ec;
 };
 
 /** "Carregar": transfere os materiais da fase do armazém da encomenda para a carrinha da viatura (transferir, as regras do Inventário). */
-export function carregarFase(inv: Inventario, o: Pick<ObraRef, "id" | "ec" | "estado">, v: Viatura, fase: number): void {
+export function carregarFase(inv: Inventario, o: Pick<ObraRef, "id" | "ec" | "estado" | "svcs">, v: Viatura, fase: number): void {
   const falta = faltaParaCarregar(inv, o);
   if (falta.length) falharInv("A obra ainda não está pronta: falta " + falta.join(" e ") + ".");
   if (!v.armazem || !v.armazemId || !inv.warehouses.some((w) => w.id === v.armazemId && !w.deleted)) falharInv(`A viatura ${v.mat} não é armazém móvel: não leva material.`);
@@ -105,7 +108,7 @@ export function carregarFase(inv: Inventario, o: Pick<ObraRef, "id" | "ec" | "es
 }
 
 /** "Entregar na obra": a saída das linhas da fase a partir da carrinha (sairLinha, a saída para o cliente da encomenda). */
-export function entregarFase(inv: Inventario, o: Pick<ObraRef, "id" | "ec">, fase: number): void {
+export function entregarFase(inv: Inventario, o: Pick<ObraRef, "id" | "ec" | "svcs">, fase: number): void {
   const { e, f } = faseDe(inv, o, fase);
   if (f.estado !== "na carrinha" || !f.carrinha) falharInv(`A fase ${fase} não está na carrinha.`);
   for (const l of f.linhas) if (l.falta > 0) sairLinha(inv, e, e.lines.find((x) => x.id === l.lineId)!, l.falta, f.carrinha);

@@ -25,6 +25,7 @@ import { lerCustos, mudarCustos, useCustos } from "./custosStore";
 import { confirmarHorasEquip, custoEquipamentos, equipamentosObra, horasReais, horasSugeridas, opcoesHoras, type LinhaEquipObra } from "./equipamentosObra";
 import { MIN_OBRAS, TOLERANCIA, comparacaoObra, podeUsarMediana, receitaComHoras, type ComparacaoReceita } from "./receitaReal";
 import { ViaturasObra } from "../frota/ViaturasObra";
+import { servicosDaObra } from "../fasesObra";
 import { faltaParaEncerrar } from "../encerrarObra";
 import { ProximoRececaoNegocio } from "../RececaoNegocio";
 import { useInventario } from "../inventario/loja";
@@ -70,7 +71,7 @@ export function ObraV2({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <p className="mt-1 flex flex-wrap items-center gap-x-2 text-base text-muted-foreground">
           <EstadoObra p={p} /> <span>· {d.servico} · {p.tasks.length} fases · {nfmt(horas)} h de equipa</span>
         </p>
-        <ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} />
+        <ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} svcs={servicosDaObra(d)} />
         {!pode && (
           <p className="mt-3 text-[15px] text-muted-foreground">
             Esta página é de {PAPEIS.operacoes.n}.{" "}

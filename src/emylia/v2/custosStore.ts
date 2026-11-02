@@ -4,14 +4,17 @@
 // "global" da sincronização. Sem Estado ligado (alguns testes), a store guarda os seus, como antes.
 // O que o orçamento precisa (horas, €/h, equipamentos, consumíveis, preço) passa para S.svc com aplicarTodos, ao editar.
 import { useSyncExternalStore } from "react";
-import { custos0, garantirCustos, type Custos } from "./custosModelo";
+import { custos0, garantirCustos, receitaDe, type Custos } from "./custosModelo";
 import { reporCatalogo } from "./catalogoStore";
+import { ligarReceitas } from "../produtosVisita";
 
 let estado: Custos = custos0();
 /** O Estado a que a store está ligada (o da página). */
 let alvo: { custos?: Custos } | null = null;
 const ouvintes = new Set<() => void>();
 const avisar = () => ouvintes.forEach((o) => o());
+// 02/11: a obra lê os consumíveis das receitas (as dos custos de agora) para a regra única das fases (produtosVisita.ts consumiveisLigados)
+ligarReceitas((sid) => receitaDe(estado, sid, null)?.cons ?? null);
 
 export const lerCustos = (): Custos => estado;
 /** Liga a store aos custos de um Estado (garante-os nos estados de antes). Chama-se ao ler, repor ou sincronizar o Estado. */
