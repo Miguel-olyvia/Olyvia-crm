@@ -39,6 +39,8 @@ export function aplicarDados(d: Negocio, x: DadosCliente): (keyof DadosCliente)[
   d.tel = x.telefone.trim() || email;
   if (email) d.f.email = email; else delete d.f.email;
   for (const k of ["nif", "morada", "cp", "localidade", "fracao"] as const) { const v = x[k].trim(); if (v) d.f[k] = k === "nif" ? v.replace(/\s/g, "") : v; else delete d.f[k]; }
+  // 2/11: no Financeiro, o NIF escrito agora passa para os dados de faturação que ainda não o tinham
+  if (d.fase >= 4 && d.f.nif && !d.f.nif_fat) d.f.nif_fat = d.f.nif;
   if (d.sug) for (const k of mudou) delete d.sug[k];
   d.local = [d.f.morada, d.f.cp, d.f.localidade].filter(Boolean).join(", ") || d.local;
   if (mudou.length) d.hist.push({ t: "Dados do cliente mudados: " + mudou.join(", "), q: "hoje", k: "a" });
