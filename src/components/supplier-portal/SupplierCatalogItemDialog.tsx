@@ -17,6 +17,7 @@ import {
   type SpCategoria,
 } from "@/lib/supplierPortal/spRpc";
 import { skuPrevisto } from "@/lib/supplierPortal/skuPortal";
+import { CORES, corCanonica, UNIDADES } from "@/lib/supplierPortal/listasArtigo";
 
 interface SupplierCatalogItemDialogProps {
   open: boolean;
@@ -195,9 +196,13 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
             <Input id="sp-brand" className="h-11" maxLength={100} value={form.brand}
               onChange={(e) => set("brand", e.target.value)} />
           </Field>
-          <Field id="sp-unit" label="Unidade" hint="ex.: un, cx, m, kg">
-            <Input id="sp-unit" className="h-11" maxLength={30} value={form.unit_label}
-              onChange={(e) => set("unit_label", e.target.value)} />
+          <Field id="sp-unit" label="Unidade">
+            <select id="sp-unit" className={SELECT} value={form.unit_label}
+              onChange={(e) => set("unit_label", e.target.value)}>
+              <option value="">Escolha a unidade</option>
+              {form.unit_label && !UNIDADES.some(([v]) => v === form.unit_label) && <option value={form.unit_label}>{form.unit_label}</option>}
+              {UNIDADES.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+            </select>
           </Field>
           <Field id="sp-upp" label="Unidades por embalagem">
             <Input id="sp-upp" className="h-11" inputMode="decimal" value={form.units_per_pack}
@@ -241,9 +246,10 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
                 <Input id="sp-medida" className="h-11" maxLength={40} value={form.medida}
                   onChange={(e) => set("medida", e.target.value)} autoComplete="off" />
               </Field>
-              <Field id="sp-cor" label="Cor" hint="ex.: Branco, Antracite">
-                <Input id="sp-cor" className="h-11" maxLength={40} value={form.cor}
-                  onChange={(e) => set("cor", e.target.value)} autoComplete="off" />
+              <Field id="sp-cor" label="Cor" hint="Escolha da lista ou escreva uma cor nova">
+                <Input id="sp-cor" className="h-11" maxLength={40} value={form.cor} list="sp-cores"
+                  onChange={(e) => set("cor", e.target.value)} onBlur={() => set("cor", corCanonica(form.cor))} autoComplete="off" />
+                <datalist id="sp-cores">{CORES.map((c) => <option key={c} value={c} />)}</datalist>
               </Field>
               <div className="sm:col-span-2 rounded-md border bg-muted/40 p-3" aria-live="polite">
                 <p className="text-sm text-muted-foreground">SKU</p>
