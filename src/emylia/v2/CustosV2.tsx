@@ -62,7 +62,7 @@ export function CustosV2({ S, C, run, anunciar }: { S: Estado; C: Custos; run: (
       <section id="cat-perfis" aria-labelledby="pf-t" className="scroll-mt-6">
         <h2 id="pf-t" className="text-2xl font-semibold tracking-tight">Perfis</h2>
         <p className="mt-1 text-[15px] text-muted-foreground">
-          Custo/hora = salário × {nfmt(C.par.meses)} × (1 + TSU {nfmt(C.par.tsu)}%) + seguros, ÷ {nfmt(C.par.horasAno)} h produtivas.
+          Custo/hora = salário × {nfmt(C.par.meses)} × (1 + TSU {nfmt(C.par.tsu)}%) + seguros (o maior entre o valor do ano e 5 % do salário), ÷ {nfmt(C.par.horasAno)} h produtivas.
           {!direcao && " O salário só a Direção vê e muda."}
         </p>
         <div className="mt-3 overflow-x-auto">

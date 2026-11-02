@@ -51,7 +51,7 @@ describe("o €/h de cada ofício", () => {
   it("um ofício sem técnicos usa o salário do perfil, com o aviso 'Sem técnicos no RH'", () => {
     const C = custos0(), h = horaPerfil(C, "eletricista");
     expect(h).toMatchObject({ fonte: "salario", tecnicos: [] });
-    expect(h.eh).toBeCloseTo((1900 * 14 * 1.2375 + 713) / 1345, 6);
+    expect(h.eh).toBeCloseTo((1900 * 14 * 1.2375 + Math.max(713, 1900 * 14 * 0.05)) / 1345, 6); // seguros: pelo menos 5 % do salário do ano
     const S = seed(), rec = receitaDe(C, "eletr", S.svc.eletr)!, c = custoReceita(rec, C, true);
     expect(c.semTecnicos).toEqual(["Eletricista"]);
     const A = alertasServico({ rec, c, preco: 78, un: "pt", min: 28, alvo: 35, mesesDesatualizado: 6 });
@@ -102,7 +102,7 @@ describe("o €/h de cada ofício", () => {
     L.find((t) => t.id === "ma")!.semCustoRh = true;
     const h = horaPerfil(C, "canalizador", L);
     expect(h).toMatchObject({ fonte: "salario", semCustoRh: ["Marco Antunes"] });
-    expect(h.eh).toBeCloseTo((1900 * 14 * 1.2375 + 713) / 1345, 6);
+    expect(h.eh).toBeCloseTo((1900 * 14 * 1.2375 + Math.max(713, 1900 * 14 * 0.05)) / 1345, 6); // seguros: pelo menos 5 % do salário do ano
     L.find((t) => t.id === "sf")!.semCustoRh = true;
     expect(horaPerfil(C, "ladrilhador", L)).toMatchObject({ fonte: "rh", eh: 17.8, tecnicos: [expect.objectContaining({ n: "Hugo Neves" })] });
   });
