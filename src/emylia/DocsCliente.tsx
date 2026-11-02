@@ -12,7 +12,7 @@ import { ESTADO_PO_POR_APROVAR, estadoLinhaNegocio, linhaDoResumo, resumoEcNegoc
 import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
 import { SeloAssinatura } from "./AssinaturaContrato";
-import { nifEmpresa, nomeEmpresa, nomeFiscalEmpresa } from "./acessosPortal";
+import { modoReal, nifEmpresa, nomeEmpresa, nomeFiscalEmpresa } from "./acessosPortal";
 import { LINHA_DEMOLICAO } from "./entulho";
 import { ESCOLHAS } from "./campos";
 import type { Ctx } from "./pecas";
@@ -27,9 +27,10 @@ import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, faseDosMateriai
 // exemplo (a organização ainda não tem morada)
 const EMPRESA = {
   get nome() { return nomeEmpresa(); },
-  get sub() { const f = nomeFiscalEmpresa(); return f && f !== nomeEmpresa() ? f : "Remodelações de casas de banho e cozinhas"; },
-  get nif() { return nifEmpresa() || "500 000 000"; },
-  morada: "Lisboa",
+  // 2/11: numa organização real (o CRM e o portal) não se inventa nada: sem nome fiscal, NIF ou sede, a parte não aparece
+  get sub() { const f = nomeFiscalEmpresa(); return f && f !== nomeEmpresa() ? f : modoReal() ? "" : "Remodelações de casas de banho e cozinhas"; },
+  get nif() { return nifEmpresa() || (modoReal() ? "" : "500 000 000"); },
+  get morada() { return modoReal() ? "" : "Lisboa"; },
 };
 
 // IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
@@ -180,7 +181,7 @@ function Pagina({ n, total, numero, capa, children }: { n: number; total: number
       )}
       <div className={cn("flex-1", !capa && "space-y-9 px-6 py-8 sm:px-12 sm:py-10")}>{children}</div>
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-6 py-4 text-[11px] text-slate-500 sm:px-12">
-        <span>{EMPRESA.nome} · {EMPRESA.sub} · NIF {EMPRESA.nif} · {EMPRESA.morada}</span>
+        <span>{[EMPRESA.nome, EMPRESA.sub, EMPRESA.nif && `NIF ${EMPRESA.nif}`, EMPRESA.morada].filter(Boolean).join(" · ")}</span>
         <span className="tabular-nums">Página {n} de {total}</span>
       </footer>
     </article>
@@ -731,7 +732,7 @@ export function ContratoDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
   return (
     <Folha titulo={d.f.modelo_contrato || "Contrato de empreitada"} numero={`CT 2026/${d.id}`} data={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : "rascunho"} carimbo={o.contrato === "assinado" ? "Assinado" : undefined}>
       <p className="text-slate-700">
-        Entre <b>{EMPRESA.nome}</b>, NIF {EMPRESA.nif}, com sede em {EMPRESA.morada}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
+        Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}{EMPRESA.morada ? `, com sede em ${EMPRESA.morada}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
       </p>
       {o.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({o.contratoRevisto.por}) a {o.contratoRevisto.q}, a pedido do cliente.</p>}
       {clausulasContrato(d, S).map((c, i) => <Clausula key={i + 1} k={i + 1} titulo={c.titulo} corpo={c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto} revista={c.revista} />)}
@@ -757,7 +758,7 @@ function ContratoAdenda({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
     <Folha titulo="Adenda ao contrato" numero={a.n} data={quando} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
       <Cliente d={d} />
       <p className="text-slate-700">
-        Entre <b>{EMPRESA.nome}</b>, NIF {EMPRESA.nif}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrada esta adenda ao contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}, que segue a proposta da adenda {a.n}{v > 1 ? ` (versão ${v})` : ""}{a.aceite ? `, aceite a ${a.aceite}` : ""}. O resto do contrato mantém-se.
+        Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrada esta adenda ao contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}, que segue a proposta da adenda {a.n}{v > 1 ? ` (versão ${v})` : ""}{a.aceite ? `, aceite a ${a.aceite}` : ""}. O resto do contrato mantém-se.
       </p>
       {/* 21/10: nasceu de um imprevisto na obra: o que a equipa encontrou, onde e a fotografia */}
       {a.origem && (

@@ -57,6 +57,15 @@ export function estadoDoCliente(v: VistaCliente, rececao: RececaoCliente | null,
   return S;
 }
 
+/** O que os documentos da V1 lêem fora do negócio: o nome e o NIF da empresa e o responsável de obra (os da organização do negócio,
+ *  gravados na vista) e o estado dos materiais, como o CRM o calculou (MateriaisPortal e NotaEncomendaDoc, pela referência da EC). */
+export function prepararGlobais(v: VistaCliente, S: Estado, orgId: string | null, orgNome: string): void {
+  definirModoReal(orgId, v.empresa.nome || orgNome, { nome: v.empresa.nomeFiscal, nif: v.empresa.nif });
+  if (v.responsavel.n) Object.assign(RESPONSAVEL_OBRA, v.responsavel);
+  const refEc = S.deals[0]?.obra.ec?.ref;
+  definirEncomendasReais(v.ec && refEc ? new Map([[refEc, v.ec]]) : null);
+}
+
 /** O código por SMS (sms-otp) e, verificado, a ação na base (`confirmar`). O mesmo para o auto de receção e para a adenda. */
 function CodigoSms({ subtitulo, titulo, texto, acao, referenceType, purpose, negocioId, voltar, voltarTexto, confirmar }: {
   subtitulo: string; titulo: string; texto: string; acao: string; referenceType: string; purpose: string; negocioId: string;
@@ -162,13 +171,8 @@ const ClientPortalNegocio = () => {
   const v = vista.data ?? null;
   const ctx = useMemo<Ctx | null>(() => {
     if (!v) return null;
-    // o nome e o NIF da empresa nos documentos, e o responsável de obra, são os da organização do negócio
-    definirModoReal(activeOrg?.organizationId ?? null, v.empresa.nome || activeOrg?.name || "", { nome: v.empresa.nomeFiscal, nif: v.empresa.nif });
-    if (v.responsavel.n) Object.assign(RESPONSAVEL_OBRA, v.responsavel);
     const S = estadoDoCliente(v, v.rececao, v.respostas, docs.data);
-    // o estado dos materiais, como o CRM o calculou (MateriaisPortal e NotaEncomendaDoc lêem-no pela referência da encomenda)
-    const refEc = S.deals[0].obra.ec?.ref;
-    definirEncomendasReais(v.ec && refEc ? new Map([[refEc, v.ec]]) : null);
+    prepararGlobais(v, S, activeOrg?.organizationId ?? null, activeOrg?.name ?? "");
     // As ações do motor não correm aqui. As que o cliente faz nos cartões da V1 vão para a base (portal_neg_responder); o resto
     // (aceitar e assinar com SMS, receber a obra, pagar, escrever) tem o seu caminho próprio.
     const naBase: Record<string, (...a: unknown[]) => void> = {
