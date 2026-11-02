@@ -1,7 +1,7 @@
 // Os 4 KPI de "Saídas para clientes" (scrEC do mockup). Clicar aplica o filtro.
-//   Prontas a expedir   → nº de encomendas com lines_ready > 0
-//                         (rpc_client_order_list_readiness; mesma regra de
-//                         rpc_inventory_today.ready_to_ship) → ?ready=1.
+//   Prontas a expedir   → nº de encomendas com is_ready
+//                         (rpc_client_order_list_readiness, EC por armazém;
+//                         sem ela, rpc_inventory_today.ready_to_ship) → ?ready=1.
 //   Parcialmente pendentes / A aguardar PO / Sem fornecedor → contagem por
 //                         overall_status da RPC da lista → ?status=.
 // null = desconhecido (a carregar ou sem dados) → "—".

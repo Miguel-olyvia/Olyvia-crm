@@ -193,6 +193,20 @@ describe("destino \"Prontas a expedir\" (Encomendas Clientes ?ready=1)", () => {
     expect([...readyContractIds(map)]).toEqual(["c1"]);
   });
 
+  it("prontidão (EC por armazém): prontas = is_ready, não lines_ready; lê o armazém da EC", async () => {
+    rpcMock.mockResolvedValueOnce({
+      data: [
+        { contract_id: "c1", lines_ready: 2, units_missing: "1", units_needed: "9", is_ready: false, ec_warehouse_id: "wh-1", ec_plan: "partial", reserved_warehouse_ids: ["wh-1"] },
+        { contract_id: "c2", lines_ready: 1, units_needed: 4, is_ready: true, ec_warehouse_id: "wh-2", ec_plan: "split", reserved_warehouse_ids: ["wh-2", "wh-3"] },
+      ],
+      error: null,
+    });
+    const map = await fetchClientOrderReadiness("org-1", ["c1", "c2"]);
+    expect(rpcMock).toHaveBeenCalledWith("rpc_client_order_list_readiness", { p_organization_id: "org-1", p_contract_ids: ["c1", "c2"] });
+    expect(map.c2).toMatchObject({ is_ready: true, ec_warehouse_id: "wh-2", ec_plan: "split", reserved_warehouse_ids: ["wh-2", "wh-3"] });
+    expect([...readyContractIds(map)]).toEqual(["c2"]);
+  });
+
   it("filtro: lê a lista por páginas só até encontrar todas as prontas, com os mesmos filtros", async () => {
     const page = (start: number, n: number) =>
       Array.from({ length: n }, (_, i) => ({ contract_id: `c${start + i}` }));

@@ -103,6 +103,12 @@ describe("permissões em uso: a lista", () => {
     ].forEach((c) => expect(CODIGOS_EM_USO).toContain(c));
   });
 
+  it("tem a permissão do contrato de fornecedor, no grupo de Inventário", () => {
+    expect(CODIGOS_EM_USO).toContain("suppliers.contract_manage");
+    const grupo = agruparPorMenu(emUso).find((g) => g.permissoes.some((p) => p.codigo === "suppliers.contract_manage"));
+    expect(grupo?.rotulo).toBe("Inventário");
+  });
+
   it("os grupos seguem a ordem do menu, com Negócios e Frota", () => {
     const rotulos = agruparPorMenu(emUso).map((g) => g.rotulo);
     expect(rotulos).toEqual([
