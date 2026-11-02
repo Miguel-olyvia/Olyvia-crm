@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   spCatalogCategorias,
@@ -18,6 +19,7 @@ import {
 } from "@/lib/supplierPortal/spRpc";
 import { skuPrevisto } from "@/lib/supplierPortal/skuPortal";
 import { CORES, corCanonica, UNIDADES } from "@/lib/supplierPortal/listasArtigo";
+import { UNIDADES_SERVICO, kindOf, useDistritos, type ItemKind } from "@/lib/supplierPortal/servicoCatalogo";
 
 interface SupplierCatalogItemDialogProps {
   open: boolean;
@@ -46,6 +48,10 @@ interface FormState {
   subcategoria_id: string;
   medida: string;
   cor: string;
+  // Fase 5: produto | serviço (subempreitada)
+  item_kind: ItemKind;
+  service_districts: string[];
+  mobilization_days: string;
 }
 
 const numToText = (n: number | null | undefined): string =>
@@ -69,6 +75,9 @@ function toForm(item: SpCatalogItem | null): FormState {
     subcategoria_id: item?.subcategoria_id ?? "",
     medida: item?.medida ?? "",
     cor: item?.cor ?? "",
+    item_kind: item ? kindOf(item) : "produto",
+    service_districts: item?.service_districts ?? [],
+    mobilization_days: item?.mobilization_days === null || item?.mobilization_days === undefined ? "" : String(item.mobilization_days),
   };
 }
 
@@ -78,6 +87,9 @@ const TEXT_FIELDS = [
   "supplier_ref", "name", "barcode", "brand", "description", "unit_label",
   "units_per_pack", "base_price", "currency", "moq", "lead_time_days",
 ] as const;
+
+// Serviço: sem código de barras, marca, embalagem, mínimo nem prazo de entrega (tem prazo de mobilização).
+const SERVICE_TEXT_FIELDS = ["supplier_ref", "name", "description", "unit_label", "base_price", "currency", "mobilization_days"] as const;
 
 /** Criar/editar um artigo (sp_catalog_upsert_item). Só para o owner. */
 export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, onNoAccess }: SupplierCatalogItemDialogProps) {
@@ -107,6 +119,22 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
     !!item && item.categoria_id === form.categoria_id && (item.subcategoria_id ?? null) === (form.subcategoria_id || null));
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const isService = form.item_kind === "servico";
+  const unidades = isService ? UNIDADES_SERVICO : UNIDADES;
+  const { distritos, erro: distritosErro } = useDistritos(open && isService);
+
+  // Mudar o tipo: a unidade só fica se existir na lista do outro tipo.
+  const setKind = (kind: ItemKind) =>
+    setForm((f) => {
+      if (f.item_kind === kind) return f;
+      const lista = kind === "servico" ? UNIDADES_SERVICO : UNIDADES;
+      return { ...f, item_kind: kind, unit_label: lista.some(([v]) => v === f.unit_label) ? f.unit_label : "" };
+    });
+  const toggleDistrito = (code: string, on: boolean) =>
+    setForm((f) => ({
+      ...f,
+      service_districts: on ? [...new Set([...f.service_districts, code])] : f.service_districts.filter((c) => c !== code),
+    }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,21 +143,33 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
       setError("A referência e o nome são obrigatórios.");
       return;
     }
-    if (categorias && !categoria) {
-      setError("Escolha a categoria. O SKU faz-se com ela.");
-      return;
-    }
-    if (categorias && categoria && categoria.subcategorias.length && !subcategoria) {
-      setError("Escolha a subcategoria. O SKU faz-se com ela.");
-      return;
+    if (isService) {
+      if (!form.unit_label) {
+        setError("Escolha a unidade do serviço.");
+        return;
+      }
+      if (form.service_districts.length === 0) {
+        setError("Escolha pelo menos um distrito na zona de atuação.");
+        return;
+      }
+    } else {
+      if (categorias && !categoria) {
+        setError("Escolha a categoria. O SKU faz-se com ela.");
+        return;
+      }
+      if (categorias && categoria && categoria.subcategorias.length && !subcategoria) {
+        setError("Escolha a subcategoria. O SKU faz-se com ela.");
+        return;
+      }
     }
 
     // Editar: envia todas as chaves (vazio = limpar). Criar: só as preenchidas.
-    const payload: SpCatalogRowInput & { id?: string } = {};
-    for (const k of TEXT_FIELDS) {
+    const payload: SpCatalogRowInput & { id?: string } = { item_kind: form.item_kind };
+    for (const k of isService ? SERVICE_TEXT_FIELDS : TEXT_FIELDS) {
       const v = form[k].trim();
       if (isEdit || v !== "") payload[k] = v;
     }
+    if (isService) payload.service_districts = form.service_districts;
     if (isEdit) {
       payload.id = item!.id;
       payload.is_active = form.is_active;
@@ -140,7 +180,7 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
       const res = await spCatalogUpsertItem(payload);
       let saved = res.item;
       // 29/10: a classificação grava-se a seguir; a base gera o SKU e devolve o artigo com ele
-      if (categorias && categoria) {
+      if (!isService && categorias && categoria) {
         try {
           saved = (await spCatalogClassificarItem(saved.id, {
             categoria_id: categoria.id, subcategoria_id: subcategoria?.id ?? null, medida: form.medida.trim(), cor: form.cor.trim(),
@@ -169,21 +209,43 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
     <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
       <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar artigo" : "Novo artigo"}</DialogTitle>
+          <DialogTitle>{isEdit ? (isService ? "Editar serviço" : "Editar artigo") : isService ? "Novo serviço" : "Novo artigo"}</DialogTitle>
           <DialogDescription>
-            {isEdit ? "Altere os dados do artigo. Campos vazios ficam sem valor." : "Preencha pelo menos a referência e o nome."}
+            {isEdit
+              ? "Altere os dados do artigo. Campos vazios ficam sem valor."
+              : isService
+                ? "Preencha a referência, o nome, a unidade e a zona de atuação."
+                : "Preencha pelo menos a referência e o nome."}
           </DialogDescription>
         </DialogHeader>
 
         <form id="sp-item-form" onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label id="sp-kind-label">Tipo</Label>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-labelledby="sp-kind-label">
+              {(["produto", "servico"] as const).map((k) => (
+                <Button key={k} type="button" role="radio" aria-checked={form.item_kind === k} className="h-11"
+                  variant={form.item_kind === k ? "default" : "outline"} onClick={() => setKind(k)}>
+                  {k === "produto" ? "Produto" : "Serviço"}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {isService ? "Mão de obra ou subempreitada (ex.: eletricista, canalizador)." : "Material que vende e entrega."}
+            </p>
+          </div>
           <Field id="sp-ref" label="Referência *">
             <Input id="sp-ref" className="h-11" maxLength={100} value={form.supplier_ref}
               onChange={(e) => set("supplier_ref", e.target.value)} required autoComplete="off" />
           </Field>
-          <Field id="sp-barcode" label="Código de barras" hint="8 a 14 dígitos">
-            <Input id="sp-barcode" className="h-11" inputMode="numeric" maxLength={20} value={form.barcode}
-              onChange={(e) => set("barcode", e.target.value)} autoComplete="off" />
-          </Field>
+          {isService ? (
+            <div className="hidden sm:block" aria-hidden="true" />
+          ) : (
+            <Field id="sp-barcode" label="Código de barras" hint="8 a 14 dígitos">
+              <Input id="sp-barcode" className="h-11" inputMode="numeric" maxLength={20} value={form.barcode}
+                onChange={(e) => set("barcode", e.target.value)} autoComplete="off" />
+            </Field>
+          )}
           <Field id="sp-name" label="Nome *" className="sm:col-span-2">
             <Input id="sp-name" className="h-11" maxLength={300} value={form.name}
               onChange={(e) => set("name", e.target.value)} required />
@@ -192,22 +254,31 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
             <Textarea id="sp-desc" rows={3} maxLength={2000} value={form.description}
               onChange={(e) => set("description", e.target.value)} />
           </Field>
-          <Field id="sp-brand" label="Marca">
-            <Input id="sp-brand" className="h-11" maxLength={100} value={form.brand}
-              onChange={(e) => set("brand", e.target.value)} />
-          </Field>
-          <Field id="sp-unit" label="Unidade">
+          {!isService && (
+            <Field id="sp-brand" label="Marca">
+              <Input id="sp-brand" className="h-11" maxLength={100} value={form.brand}
+                onChange={(e) => set("brand", e.target.value)} />
+            </Field>
+          )}
+          <Field id="sp-unit" label={isService ? "Unidade *" : "Unidade"}>
             <select id="sp-unit" className={SELECT} value={form.unit_label}
               onChange={(e) => set("unit_label", e.target.value)}>
               <option value="">Escolha a unidade</option>
-              {form.unit_label && !UNIDADES.some(([v]) => v === form.unit_label) && <option value={form.unit_label}>{form.unit_label}</option>}
-              {UNIDADES.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+              {form.unit_label && !unidades.some(([v]) => v === form.unit_label) && <option value={form.unit_label}>{form.unit_label}</option>}
+              {unidades.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
           </Field>
-          <Field id="sp-upp" label="Unidades por embalagem">
-            <Input id="sp-upp" className="h-11" inputMode="decimal" value={form.units_per_pack}
-              onChange={(e) => set("units_per_pack", e.target.value)} />
-          </Field>
+          {isService ? (
+            <Field id="sp-mob" label="Prazo de mobilização (dias)" hint="Dias até poder começar a obra">
+              <Input id="sp-mob" className="h-11" inputMode="numeric" value={form.mobilization_days}
+                onChange={(e) => set("mobilization_days", e.target.value)} />
+            </Field>
+          ) : (
+            <Field id="sp-upp" label="Unidades por embalagem">
+              <Input id="sp-upp" className="h-11" inputMode="decimal" value={form.units_per_pack}
+                onChange={(e) => set("units_per_pack", e.target.value)} />
+            </Field>
+          )}
           <div className="grid grid-cols-[1fr_6rem] gap-3">
             <Field id="sp-price" label="Preço (sem IVA)">
               <Input id="sp-price" className="h-11" inputMode="decimal" value={form.base_price}
@@ -218,15 +289,53 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
                 onChange={(e) => set("currency", e.target.value.toUpperCase())} />
             </Field>
           </div>
-          <Field id="sp-moq" label="Quantidade mínima">
-            <Input id="sp-moq" className="h-11" inputMode="decimal" value={form.moq}
-              onChange={(e) => set("moq", e.target.value)} />
-          </Field>
-          <Field id="sp-lead" label="Prazo de entrega (dias)">
-            <Input id="sp-lead" className="h-11" inputMode="numeric" value={form.lead_time_days}
-              onChange={(e) => set("lead_time_days", e.target.value)} />
-          </Field>
-          {categorias && (
+          {isService && (
+            <fieldset className="sm:col-span-2 space-y-1.5">
+              <legend className="text-sm font-medium leading-none">Zona de atuação *</legend>
+              <p className="text-xs text-muted-foreground">Os distritos onde faz este serviço.</p>
+              {distritosErro ? (
+                <p className="text-sm text-destructive">{distritosErro}</p>
+              ) : !distritos ? (
+                <p className="text-sm text-muted-foreground">A carregar os distritos…</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" className="h-9"
+                      onClick={() => set("service_districts", distritos.map((d) => d.code))}>
+                      Todos
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" className="h-9" disabled={form.service_districts.length === 0}
+                      onClick={() => set("service_districts", [])}>
+                      Limpar
+                    </Button>
+                    <span className="text-xs text-muted-foreground self-center">{form.service_districts.length} escolhido(s)</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1 rounded-md border p-3 max-h-56 overflow-y-auto">
+                    {distritos.map((d) => (
+                      <label key={d.code} className="flex items-center gap-2 min-h-9 text-sm cursor-pointer">
+                        <Checkbox checked={form.service_districts.includes(d.code)}
+                          onCheckedChange={(v) => toggleDistrito(d.code, v === true)} aria-label={d.name} />
+                        {d.name}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </fieldset>
+          )}
+          {!isService && (
+            <>
+              <Field id="sp-moq" label="Quantidade mínima">
+                <Input id="sp-moq" className="h-11" inputMode="decimal" value={form.moq}
+                  onChange={(e) => set("moq", e.target.value)} />
+              </Field>
+              <Field id="sp-lead" label="Prazo de entrega (dias)">
+                <Input id="sp-lead" className="h-11" inputMode="numeric" value={form.lead_time_days}
+                  onChange={(e) => set("lead_time_days", e.target.value)} />
+              </Field>
+            </>
+          )}
+          {categorias && !isService && (
             <>
               <Field id="sp-cat" label="Categoria *">
                 <select id="sp-cat" className={SELECT} value={form.categoria_id}

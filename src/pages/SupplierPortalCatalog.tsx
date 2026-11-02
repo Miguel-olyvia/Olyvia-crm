@@ -21,9 +21,25 @@ import {
 import { downloadSupplierCatalogTemplate, exportSupplierPortalCatalogXlsx } from "@/utils/supplierPortalCatalogTemplate";
 import { SupplierCatalogItemDialog } from "@/components/supplier-portal/SupplierCatalogItemDialog";
 import { SupplierCatalogImportDialog } from "@/components/supplier-portal/SupplierCatalogImportDialog";
+import {
+  carregarDistritos,
+  kindOf,
+  nomesDistritos,
+  unidadeServicoLabel,
+  useDistritos,
+  type ItemKind,
+} from "@/lib/supplierPortal/servicoCatalogo";
 
 const PAGE_SIZE = 50;
 const QUERY_KEY = "supplier-portal-catalog";
+
+// Fase 5: filtro por tipo (Produto | Serviço).
+type KindFilter = "all" | ItemKind;
+const KIND_FILTERS: { value: KindFilter; label: string }[] = [
+  { value: "all", label: "Todos" },
+  { value: "produto", label: "Produtos" },
+  { value: "servico", label: "Serviços" },
+];
 
 function formatNumber(n: number | null, opts?: Intl.NumberFormatOptions): string {
   if (n === null || n === undefined) return "—";
@@ -53,6 +69,7 @@ export default function SupplierPortalCatalog() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<SpCatalogItem | null>(null);
@@ -72,12 +89,19 @@ export default function SupplierPortalCatalog() {
 
   useEffect(() => {
     setSelected(new Set());
-  }, [search, includeInactive, page]);
+  }, [search, includeInactive, page, kindFilter]);
 
   const accountId = account?.id ?? null;
   const query = useQuery({
-    queryKey: [QUERY_KEY, accountId, search, includeInactive, page],
-    queryFn: () => spCatalogList({ search, limit: PAGE_SIZE, offset: page * PAGE_SIZE, includeInactive }),
+    queryKey: [QUERY_KEY, accountId, search, includeInactive, page, kindFilter],
+    queryFn: () =>
+      spCatalogList({
+        search,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+        includeInactive,
+        kind: kindFilter === "all" ? null : kindFilter,
+      }),
     enabled: !!accountId,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
@@ -90,6 +114,7 @@ export default function SupplierPortalCatalog() {
 
   const data = query.data;
   const items = useMemo(() => data?.items ?? [], [data]);
+  const { distritos } = useDistritos(items.some((i) => kindOf(i) === "servico"));
   const total = data?.total ?? 0;
   const canEdit = canManageCatalog && (data?.can_edit ?? true);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -146,7 +171,14 @@ export default function SupplierPortalCatalog() {
         toast({ title: "Catálogo vazio", description: "Ainda não tem artigos para exportar." });
         return;
       }
-      exportSupplierPortalCatalogXlsx(all, account?.display_name ?? "fornecedor");
+      // Serviços: os distritos saem com o nome (sem a lista, saem os códigos, que também se reimportam).
+      let nomes: Record<string, string> | undefined;
+      if (all.some((i) => kindOf(i) === "servico")) {
+        nomes = await carregarDistritos()
+          .then((d) => Object.fromEntries(d.map((x) => [x.code, x.name])))
+          .catch(() => undefined);
+      }
+      exportSupplierPortalCatalogXlsx(all, account?.display_name ?? "fornecedor", nomes);
     } catch (err) {
       handleError(err, "Não foi possível exportar");
     } finally {
@@ -184,7 +216,7 @@ export default function SupplierPortalCatalog() {
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Catálogo</h1>
           <p className="text-sm text-muted-foreground">
-            {query.isLoading ? "A carregar…" : `${total.toLocaleString("pt-PT")} artigo(s)${includeInactive ? "" : " ativos"}`}
+            {query.isLoading ? "A carregar…" : `${total.toLocaleString("pt-PT")} ${kindFilter === "servico" ? "serviço(s)" : kindFilter === "produto" ? "produto(s)" : "artigo(s)"}${includeInactive ? "" : " ativos"}`}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
@@ -233,6 +265,29 @@ export default function SupplierPortalCatalog() {
             maxLength={100}
           />
         </div>
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filtrar por tipo">
+          {KIND_FILTERS.map((f) => {
+            const n = f.value === "all"
+              ? (data?.kind_counts ? data.kind_counts.produto + data.kind_counts.servico : null)
+              : data?.kind_counts?.[f.value] ?? null;
+            return (
+              <Button
+                key={f.value}
+                type="button"
+                role="tab"
+                aria-selected={kindFilter === f.value}
+                variant={kindFilter === f.value ? "default" : "outline"}
+                className="h-11"
+                onClick={() => {
+                  setKindFilter(f.value);
+                  setPage(0);
+                }}
+              >
+                {f.label}{n !== null ? ` (${n.toLocaleString("pt-PT")})` : ""}
+              </Button>
+            );
+          })}
+        </div>
         <div className="flex items-center gap-2 min-h-11">
           <Switch
             id="sp-include-inactive"
@@ -279,7 +334,13 @@ export default function SupplierPortalCatalog() {
       {!query.isLoading && !query.error && items.length === 0 && (
         <div className="rounded-lg border bg-background p-8 text-center space-y-3">
           <p className="text-sm text-muted-foreground">
-            {search ? "Nenhum artigo corresponde à pesquisa." : "Ainda não tem artigos no catálogo."}
+            {search
+              ? "Nenhum artigo corresponde à pesquisa."
+              : kindFilter === "servico"
+                ? "Ainda não tem serviços no catálogo."
+                : kindFilter === "produto"
+                  ? "Ainda não tem produtos no catálogo."
+                  : "Ainda não tem artigos no catálogo."}
           </p>
           {!search && canEdit && (
             <div className="flex flex-col sm:flex-row gap-2 justify-center">
@@ -313,6 +374,7 @@ export default function SupplierPortalCatalog() {
                     </TableHead>
                   )}
                   <TableHead>Ref.</TableHead>
+                  <TableHead>Tipo</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Nome</TableHead>
                   <TableHead>Cód. barras</TableHead>
@@ -337,20 +399,33 @@ export default function SupplierPortalCatalog() {
                       </TableCell>
                     )}
                     <TableCell className="font-mono text-xs whitespace-nowrap">{item.supplier_ref}</TableCell>
-                    <TableCell className="font-mono text-xs whitespace-nowrap">{item.sku ?? <span className="text-muted-foreground">Sem categoria</span>}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{kindOf(item) === "servico" ? "Serviço" : "Produto"}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs whitespace-nowrap">
+                      {kindOf(item) === "servico" ? "—" : item.sku ?? <span className="text-muted-foreground">Sem categoria</span>}
+                    </TableCell>
                     <TableCell className="max-w-[28ch]">
                       <p className="truncate" title={item.name}>{item.name}</p>
-                      {item.brand && <p className="text-xs text-muted-foreground truncate">{item.brand}</p>}
+                      {kindOf(item) === "servico" ? (
+                        <p className="text-xs text-muted-foreground truncate" title={nomesDistritos(item.service_districts, distritos, 99)}>
+                          Zona: {nomesDistritos(item.service_districts, distritos)}
+                        </p>
+                      ) : (
+                        item.brand && <p className="text-xs text-muted-foreground truncate">{item.brand}</p>
+                      )}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{item.barcode ?? "—"}</TableCell>
                     <TableCell className="whitespace-nowrap">
-                      {item.unit_label ?? "—"}
+                      {kindOf(item) === "servico" ? unidadeServicoLabel(item.unit_label) : item.unit_label ?? "—"}
                       {item.units_per_pack ? <span className="text-xs text-muted-foreground"> · {formatNumber(item.units_per_pack)}/emb.</span> : null}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">{formatPrice(item)}</TableCell>
                     <TableCell className="text-right">{formatNumber(item.moq)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      {item.lead_time_days === null ? "—" : `${item.lead_time_days} d`}
+                      {kindOf(item) === "servico"
+                        ? item.mobilization_days == null ? "—" : <span title="Prazo de mobilização">{item.mobilization_days} d mob.</span>
+                        : item.lead_time_days === null ? "—" : `${item.lead_time_days} d`}
                     </TableCell>
                     <TableCell>
                       <Badge variant={item.is_active ? "secondary" : "outline"}>{item.is_active ? "Ativo" : "Inativo"}</Badge>
@@ -396,22 +471,36 @@ export default function SupplierPortalCatalog() {
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-xs text-muted-foreground break-all">{item.supplier_ref}{item.sku ? ` · SKU ${item.sku}` : ""}</p>
                     <p className="font-medium break-words">{item.name}</p>
-                    {item.brand && <p className="text-xs text-muted-foreground">{item.brand}</p>}
+                    {item.brand && kindOf(item) !== "servico" && <p className="text-xs text-muted-foreground">{item.brand}</p>}
                   </div>
-                  <Badge variant={item.is_active ? "secondary" : "outline"}>{item.is_active ? "Ativo" : "Inativo"}</Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant={item.is_active ? "secondary" : "outline"}>{item.is_active ? "Ativo" : "Inativo"}</Badge>
+                    {kindOf(item) === "servico" && <Badge variant="outline">Serviço</Badge>}
+                  </div>
                 </div>
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                   <dt className="text-muted-foreground">Preço</dt>
                   <dd className="text-right">{formatPrice(item)}</dd>
                   <dt className="text-muted-foreground">Unidade</dt>
                   <dd className="text-right">
-                    {item.unit_label ?? "—"}
+                    {kindOf(item) === "servico" ? unidadeServicoLabel(item.unit_label) : item.unit_label ?? "—"}
                     {item.units_per_pack ? ` · ${formatNumber(item.units_per_pack)}/emb.` : ""}
                   </dd>
-                  <dt className="text-muted-foreground">Mínimo</dt>
-                  <dd className="text-right">{formatNumber(item.moq)}</dd>
-                  <dt className="text-muted-foreground">Prazo</dt>
-                  <dd className="text-right">{item.lead_time_days === null ? "—" : `${item.lead_time_days} dias`}</dd>
+                  {kindOf(item) === "servico" ? (
+                    <>
+                      <dt className="text-muted-foreground">Zona de atuação</dt>
+                      <dd className="text-right">{nomesDistritos(item.service_districts, distritos, 99)}</dd>
+                      <dt className="text-muted-foreground">Mobilização</dt>
+                      <dd className="text-right">{item.mobilization_days == null ? "—" : `${item.mobilization_days} dias`}</dd>
+                    </>
+                  ) : (
+                    <>
+                      <dt className="text-muted-foreground">Mínimo</dt>
+                      <dd className="text-right">{formatNumber(item.moq)}</dd>
+                      <dt className="text-muted-foreground">Prazo</dt>
+                      <dd className="text-right">{item.lead_time_days === null ? "—" : `${item.lead_time_days} dias`}</dd>
+                    </>
+                  )}
                   {item.barcode && (
                     <>
                       <dt className="text-muted-foreground">Cód. barras</dt>

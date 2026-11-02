@@ -77,6 +77,10 @@ export interface SpCatalogItem {
   medida?: string | null;
   cor?: string | null;
   sku?: string | null;
+  /** Fase 5 (migration 20270103600000): produto | servico; serviço com distritos (códigos PT-xx) e prazo de mobilização. */
+  item_kind?: "produto" | "servico";
+  service_districts?: string[] | null;
+  mobilization_days?: number | null;
 }
 
 export interface SpCatalogListResult {
@@ -84,6 +88,8 @@ export interface SpCatalogListResult {
   limit: number;
   offset: number;
   can_edit: boolean;
+  /** Fase 5: contagem por tipo (com a pesquisa e o filtro de inativos aplicados). */
+  kind_counts?: { produto: number; servico: number };
   items: SpCatalogItem[];
 }
 
@@ -100,10 +106,14 @@ export type SpCatalogField =
   | "currency"
   | "moq"
   | "lead_time_days"
-  | "is_active";
+  | "is_active"
+  // Fase 5: produto | serviço
+  | "item_kind"
+  | "service_districts"
+  | "mobilization_days";
 
-/** Chave ausente = mantém o valor gravado; presente com "" = limpa. */
-export type SpCatalogRowInput = Partial<Record<SpCatalogField, string | number | boolean>> & {
+/** Chave ausente = mantém o valor gravado; presente com "" = limpa. Distritos: lista de códigos ou texto "Lisboa; Setúbal". */
+export type SpCatalogRowInput = Partial<Record<SpCatalogField, string | number | boolean | string[]>> & {
   _row?: number;
 };
 
@@ -506,14 +516,18 @@ export async function spCatalogList(params: {
   limit?: number;
   offset?: number;
   includeInactive?: boolean;
+  /** Fase 5: só produtos ou só serviços (ausente = todos). */
+  kind?: "produto" | "servico" | null;
 }): Promise<SpCatalogListResult> {
   const search = params.search?.trim();
-  const args: SpFunctions["sp_catalog_list"]["Args"] = {
+  // p_kind (migration 20270103600000) ainda não está nos tipos gerados.
+  const args = {
     p_limit: params.limit ?? 50,
     p_offset: params.offset ?? 0,
     p_include_inactive: params.includeInactive ?? false,
     ...(search ? { p_search: search } : {}),
-  };
+    ...(params.kind ? { p_kind: params.kind } : {}),
+  } as SpFunctions["sp_catalog_list"]["Args"];
   return unwrap<SpCatalogListResult>(await supabase.rpc("sp_catalog_list", args));
 }
 

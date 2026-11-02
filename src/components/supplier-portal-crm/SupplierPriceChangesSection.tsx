@@ -155,7 +155,7 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
   };
 
   const labelOf = (i: PriceChangeItem | undefined) =>
-    i ? `${i.catalog_item.supplier_ref}${i.product ? ` · ${i.product.name}` : ""}` : "Pedido";
+    i ? `${i.catalog_item.supplier_ref}${i.product ? ` · ${i.product.name}` : i.service ? ` · ${i.service.name}` : ""}` : "Pedido";
 
   const runDecision = async (req: PriceDecisionRequest, opts: { note: string; acceptUnitChange: boolean }) => {
     setDeciding(true);
@@ -344,6 +344,13 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
                         <>
                           <div className="font-medium">{item.product.name}</div>
                           {item.product.sku && <div className="text-xs text-muted-foreground font-mono">{item.product.sku}</div>}
+                        </>
+                      ) : item.service ? (
+                        <>
+                          <div className="font-medium">{item.service.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Serviço{item.service.sku ? <span className="font-mono"> · {item.service.sku}</span> : null}
+                          </div>
                         </>
                       ) : (
                         <span className="text-muted-foreground">-</span>

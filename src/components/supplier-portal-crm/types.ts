@@ -31,6 +31,16 @@ export type F31CrmRpc =
   | "rpc_price_changes_list"
   | "rpc_price_changes_decide";
 
+/**
+ * Fase 5 (migration 20270103600000): RPCs/argumentos que ainda não estão nos
+ * tipos gerados (rpc_catalog_link_service, rpc_catalog_service_search e o
+ * p_kind de rpc_supplier_catalog_list). Cast local, sem mexer nos tipos gerados.
+ */
+export async function callRpcLocal<T>(fn: string, args: Record<string, unknown>): Promise<RpcResult<T>> {
+  const { data, error } = await supabase.rpc(fn as never, args as never);
+  return { data: (data ?? null) as unknown as T | null, error: (error ?? null) as RpcError | null };
+}
+
 /** Chama uma RPC do CRM da F3.1 (args tipados) e dá forma ao JSON devolvido. */
 export async function callRpc<T, K extends F31CrmRpc = F31CrmRpc>(
   fn: K,
@@ -76,7 +86,8 @@ export type CatalogFilter = "all" | "linked" | "unlinked" | "dismissed";
 
 export interface CatalogItemLink {
   item_supplier_id: string;
-  product_id: string;
+  /** Fase 5: null numa ligação a um serviço nosso (product_name traz então o nome do serviço). */
+  product_id: string | null;
   product_name: string;
   product_sku: string | null;
   uom_id: string | null;
@@ -84,6 +95,11 @@ export interface CatalogItemLink {
   purchase_price: number | null;
   currency: string | null;
   is_preferred: boolean;
+  /** Fase 5: 'service' quando a ligação é a um serviço nosso. Ausente = resposta antiga (produto). */
+  item_type?: "product" | "service";
+  service_id?: string | null;
+  service_name?: string | null;
+  service_sku?: string | null;
 }
 
 export interface CrmCatalogItem {
@@ -103,6 +119,10 @@ export interface CrmCatalogItem {
   updated_at: string;
   /** 29/10 (migration 20270101310000): o SKU que a base gerou no portal (categoria-subcategoria-medida-cor). Ausente antes. */
   sku?: string | null;
+  /** Fase 5: produto | servico; serviço com distritos (códigos PT-xx) e prazo de mobilização. Ausente = produto. */
+  item_kind?: "produto" | "servico";
+  service_districts?: string[] | null;
+  mobilization_days?: number | null;
   is_linked: boolean;
   is_dismissed: boolean;
   links: CatalogItemLink[];
@@ -122,8 +142,43 @@ export interface CrmCatalogList {
    * (hint no_price_permission). Ausente = resposta antiga → tratar como false.
    */
   can_manage_prices?: boolean;
+  /** Fase 5: contagem por tipo no filtro de estado escolhido. */
+  kind_counts?: { produto: number; servico: number };
+  /** Fase 5: services.edit (ligar um serviço do fornecedor a um serviço nosso). */
+  can_link_services?: boolean;
+  /** Fase 5: services.manage_prices (usar o preço do catálogo ao ligar um serviço). */
+  can_manage_service_prices?: boolean;
   items: CrmCatalogItem[];
 }
+
+// ─── Fase 5: rpc_catalog_service_search / rpc_catalog_link_service ─────────
+
+export interface ServiceSuggestion {
+  service_id: string;
+  service_name: string;
+  service_sku: string | null;
+  unidade: string | null;
+  is_active: boolean | null;
+  /** supplier_ref_code = ref. do fornecedor igual ao SKU do serviço; name = nome semelhante; search = pesquisa. */
+  reason: "supplier_ref_code" | "name" | "search";
+  score: number;
+  exact: boolean;
+  /** Associação (serviço, este fornecedor) já existente, que a ligação reaproveita. */
+  item_supplier_id: string | null;
+  /** Essa associação já está ligada a outra referência do catálogo (a ligação seria recusada). */
+  linked_to_other: boolean;
+}
+
+export interface ServiceSearchResult {
+  catalog_item_id: string;
+  items: ServiceSuggestion[];
+}
+
+export const SERVICE_REASON_LABEL: Record<ServiceSuggestion["reason"], string> = {
+  supplier_ref_code: "Ref. igual ao SKU",
+  name: "Nome semelhante",
+  search: "Pesquisa",
+};
 
 // ─── 3.4 rpc_catalog_link_suggestions ──────────────────────────────────────
 
