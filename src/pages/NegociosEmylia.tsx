@@ -37,6 +37,7 @@ import { podeNeg } from "@/emylia/permissoes";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
+import { aplicarRececao, lerRececoes, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
@@ -121,6 +122,17 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     foto.current = fotografarNegocios(S.deals);
   }, [S]);
 
+  // 2/11 (20270103800000): a vista do cliente de cada negócio com proposta enviada (o portal real desenha-a com o ecrã da V1). Só se
+  // grava a que mudou; um erro aqui não para o Negócio (o portal mostra a última vista gravada).
+  const vistas = useRef<VistasGravadas>(new Map());
+  const publicarVistasCliente = useCallback(async () => {
+    if (!org) return;
+    try {
+      const erros = await publicarVistas(supabase, org, S, refs.current, vistas.current);
+      if (erros.length) console.warn("[portal] vistas do cliente por gravar:", erros);
+    } catch (e) { console.warn("[portal] vistas do cliente:", (e as Error).message); }
+  }, [org, S]);
+
   // grava o que mudou; se mudar outra vez enquanto grava, volta a gravar no fim
   const gravar = useCallback(async () => {
     if (!org || !ids.current) return;
@@ -159,13 +171,14 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         await carregarEncomendas(relidos);
         await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       }
+      await publicarVistasCliente();
     } catch (e) {
       avisar({ msg: "Não foi possível atualizar os negócios", sub: (e as Error).message, kind: "bad" });
     } finally {
       aGravar.current = false;
       redesenhar();
     }
-  }, [org, S, avisar, redesenhar, aplicarLidos]);
+  }, [org, S, avisar, redesenhar, aplicarLidos, publicarVistasCliente]);
 
   // 28/10: a encomenda de cliente e as encomendas a fornecedor de cada negócio, da base (as emitidas no servidor)
   const carregarEncomendas = useCallback(async (lidos: readonly NegocioLido[]) => {
@@ -231,6 +244,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const lidos = await lerNegocios(supabase, org, ids.current);
       if (!vivo) return;
       aplicarLidos(lidos);
+      // 2/11 (20270103800000): o auto de receção que o cliente assinou no portal passa a assinado na obra (o relatório final); grava-se a seguir
+      const rececoes = await lerRececoes(supabase, org);
+      if (!vivo) return;
+      const recebidas = S.deals.filter((d) => { const ref = refs.current.get(d.id); return !!ref && aplicarRececao(d, rececoes.get(ref.id)); }).length;
       // 30/10: os planos por aprovar com tarefas por atribuir (o RH não tinha técnicos do ofício quando se geraram) ficam com os técnicos
       // que o RH já tem; grava-se a obra a seguir. Só quem grava a obra (o Gestor de obra; ou quem vê todos) o faz.
       const atribuidas = mp.todos || mp.papeis.includes("operacoes") ? S.deals.reduce((a, d) => a + atribuirPorAtribuir(d.obra.plano), 0) : 0;
@@ -239,7 +256,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!vivo) return;
       setPronto(true);
       void carregarEncomendas(lidos);
-      if (atribuidas) { avisar({ msg: "Técnicos atribuídos", sub: `${atribuidas} ${atribuidas === 1 ? "tarefa ficou" : "tarefas ficaram"} com um técnico do RH.`, kind: "ok" }); void gravar(); }
+      void publicarVistasCliente();
+      if (recebidas) avisar({ msg: "Obra recebida pelo cliente", sub: `${recebidas} ${recebidas === 1 ? "auto de receção foi assinado" : "autos de receção foram assinados"} no portal.`, kind: "ok" });
+      if (atribuidas) avisar({ msg: "Técnicos atribuídos", sub: `${atribuidas} ${atribuidas === 1 ? "tarefa ficou" : "tarefas ficaram"} com um técnico do RH.`, kind: "ok" });
+      if (atribuidas || recebidas) void gravar();
     })().catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
   }, [org, S, avisar, carregarEncomendas, aplicarLidos]); // eslint-disable-line react-hooks/exhaustive-deps -- gravar só depois de ler

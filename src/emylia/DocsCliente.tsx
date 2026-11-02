@@ -35,6 +35,7 @@ const EMPRESA = {
 // IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
 export { IVA_MAT, IVA_MO } from "./motor";
 import { IVA_MAT, IVA_MO, porZonaDe, totaisIva } from "./motor";
+import type { FaturaReg } from "./v2/financeiro";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, textoProduto } from "./produtosVisita";
 /** Os totais com IVA (19/10: a fonte única está no motor, totaisIva; o sinal do Financeiro usa a mesma conta). */
 export const totais = totaisIva;
@@ -832,11 +833,16 @@ export function AdendaDoc({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
 
 /* ------------------------------------------------------------------ fatura */
 /** A fatura (a da 1.ª tranche do contrato). 21/10: com `a` e `ft`, a fatura de uma parcela da adenda (o IVA por taxa, a parte da parcela). */
-export function FaturaDoc({ S, d, a, ft: fa }: { S: Estado; d: Negocio; a?: Adenda; ft?: FaturaAdenda }) {
+export function FaturaDoc({ S, d, a, ft: fa, reg, regParcela }: { S: Estado; d: Negocio; a?: Adenda; ft?: FaturaAdenda;
+  /** 2/11 (portal real): uma fatura de prestação registada pelo Financeiro (d.fin.tranches) e o nome da prestação. */
+  reg?: FaturaReg; regParcela?: string }) {
   const ad = !!(a && fa);
-  const T = a && fa ? totaisAdenda(a) : totais(d, S), p = fa && a ? fa.p : tranches(d, T.total)[0].p, ft = a && fa ? fa : d.fin.fatura, recibo = a && fa ? fa.recibo : d.fin.recibo;
+  const T = a && fa ? totaisAdenda(a) : totais(d, S);
+  const p = reg ? (T.total > 0 ? reg.valor / T.total : 0) : fa && a ? fa.p : tranches(d, T.total)[0].p;
+  const ft = reg ? { n: reg.numero, q: reg.data.split("-").reverse().join("/") } : a && fa ? fa : d.fin.fatura;
+  const recibo = reg ? (reg.pagamento ? { n: reg.recibo || "pagamento validado" } : null) : a && fa ? fa.recibo : d.fin.recibo;
   const objeto = a && fa ? `trabalhos a mais, conforme a adenda ${a.n} ao contrato CT 2026/${d.id}` : `${d.servico}, conforme contrato CT 2026/${d.id}`;
-  const parcela = a && fa ? `${nomeParcela(fa.i)} (${fa.l.toLowerCase()})` : d.f.tranche || "1.ª tranche";
+  const parcela = reg ? regParcela || "Prestação" : a && fa ? `${nomeParcela(fa.i)} (${fa.l.toLowerCase()})` : d.f.tranche || "1.ª tranche";
   return (
     <Folha titulo="Fatura" numero={ft ? ft.n : "por emitir"} data={ft ? `emitida ${ft.q}` : "rascunho"} carimbo={recibo ? `Paga · ${recibo.n}` : undefined}>
       <Cliente d={d} />
