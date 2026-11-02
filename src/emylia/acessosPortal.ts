@@ -82,8 +82,13 @@ export const emailDaFicha = (d: Negocio): string | null => {
   const e = normal(d.f.email || "");
   return emailOk(e) ? e : null;
 };
-/** 29/10: o telefone de contacto sem espaços, pontos, hífenes nem parêntesis; «00» à frente vira «+». */
-export const telefoneNormal = (t: string): string => t.trim().replace(/[\s.()-]/g, "").replace(/^00/, "+");
+/** 29/10: o telefone de contacto sem espaços, pontos, hífenes nem parêntesis; «00» à frente vira «+».
+ *  2/11 (reunião): um número português de 9 algarismos sem indicativo (912 345 678, 213 456 789) fica com o +351; antes dava
+ *  «inválido» ao enviar a proposta e só se percebia que faltava o +351 lendo o aviso. */
+export const telefoneNormal = (t: string): string => {
+  const n = t.trim().replace(/[\s.()-]/g, "").replace(/^00/, "+");
+  return /^[29]\d{8}$/.test(n) ? "+351" + n : n;
+};
 /** 29/10: o telefone do cliente tem de levar o indicativo do país («+351912345678»): o código por SMS segue para este número. */
 export const telefoneOk = (t: string): boolean => {
   const n = telefoneNormal(t);

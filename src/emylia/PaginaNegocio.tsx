@@ -31,6 +31,7 @@ import { lerInventario, useInventario } from "./inventario/loja";
 import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra";
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
+import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -247,7 +248,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       { id: "quem", titulo: "Quem pede", icone: User, conta: { f: 2, n: 2 }, resumo: [d.nome, d.tel, nomeLinha(d)], corpo: (
         <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
           <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>
-          <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
+          {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
+          {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
+            : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
           <div className={ROT}>Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{nomeLinha(d)}{d.linhaPorDefinir && <span className="block font-normal text-muted-foreground">Sai da divisão escolhida na visita.</span>}</span></div>
         </div>
       ) },

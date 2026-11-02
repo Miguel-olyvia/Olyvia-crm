@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { emailOk, modoReal } from "./acessosPortal";
 import { temPortal } from "./AcessoPortalNegocio";
+import { TelefoneIndicativo } from "./TelefoneIndicativo";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
@@ -82,7 +83,13 @@ export function EditarCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       className="mt-4 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]">
       <h3 className="text-[17px] font-semibold">Dados do cliente</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {CAMPOS.map(([k, l, tipo]) => (
+        {CAMPOS.map(([k, l, tipo]) => k === "telefone" ? (
+          // 2/11: o telefone com o seletor de indicativo do país (o código para assinar vai por SMS)
+          <div key={k} className="grid gap-1.5 text-sm font-medium">
+            <label htmlFor={`cli-tel-${d.id}`}>{l}</label>
+            <TelefoneIndicativo id={`cli-tel-${d.id}`} valor={x.telefone} mudar={(v) => setX((y) => ({ ...y, telefone: v }))} rotulo={l} classeInput={inp} />
+          </div>
+        ) : (
           <label key={k} className="grid gap-1.5 text-sm font-medium">
             {l}
             <input type={tipo ?? "text"} value={x[k]} autoComplete="off" onChange={(e) => setX({ ...x, [k]: e.target.value })} className={inp} />

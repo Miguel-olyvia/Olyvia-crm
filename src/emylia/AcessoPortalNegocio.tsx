@@ -8,6 +8,7 @@ import { AlertTriangle, CheckCircle2, KeyRound, Loader2, Mail } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { modoReal, pedirEmailPortal, usePedidoEmail } from "./acessosPortal";
 import { podeTentarDeNovo } from "./estadoContaPortal";
+import { TelefoneIndicativo } from "./TelefoneIndicativo";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
@@ -64,12 +65,11 @@ export function EstadoAcessoPortal({ ctx, d }: { ctx: Ctx; d: Negocio }) {
               </label>
             )}
             {mostraTelefone && (
-              <label className="grid min-w-0 flex-1 gap-1 text-sm text-muted-foreground">
-                Telefone do cliente (com indicativo)
-                <input type="tel" inputMode="tel" value={telefone} onChange={(e) => setTelefone(e.target.value)} autoComplete="off" required
-                  placeholder="+351 912 345 678" title="Telefone com o indicativo do país, por exemplo +351 912 345 678"
-                  className="h-11 rounded-lg border border-input bg-card px-3 text-[15px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30" />
-              </label>
+              <div className="grid min-w-0 flex-1 gap-1 text-sm text-muted-foreground">
+                <label htmlFor={`tel-portal-${d.id}`}>Telemóvel do cliente</label>
+                {/* 2/11: o indicativo escolhe-se numa lista (antes escrevia-se «+351» à mão e, sem ele, dava «inválido») */}
+                <TelefoneIndicativo id={`tel-portal-${d.id}`} valor={telefone} mudar={setTelefone} rotulo="Telemóvel do cliente" required />
+              </div>
             )}
             <Button type="submit" className="h-11">Guardar e enviar</Button>
             <Button type="button" variant="ghost" className="h-11" onClick={() => pedirEmailPortal(null)}>Agora não</Button>
