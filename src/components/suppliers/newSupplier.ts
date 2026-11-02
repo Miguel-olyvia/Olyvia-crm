@@ -67,6 +67,33 @@ export function supplierNifKey(nif: string | null | undefined): string | null {
   return cc + body;
 }
 
+/** Os países do NIF (reunião de 30/10: escolhe-se primeiro o país; o NIF leva o prefixo, menos o português). */
+export const PAISES_NIF: ReadonlyArray<readonly [string, string]> = [
+  ["PT", "Portugal"], ["ES", "Espanha"], ["FR", "França"], ["IT", "Itália"], ["DE", "Alemanha"], ["NL", "Países Baixos"],
+  ["BE", "Bélgica"], ["LU", "Luxemburgo"], ["IE", "Irlanda"], ["AT", "Áustria"], ["PL", "Polónia"], ["CZ", "Chéquia"],
+  ["SK", "Eslováquia"], ["SI", "Eslovénia"], ["HR", "Croácia"], ["HU", "Hungria"], ["RO", "Roménia"], ["BG", "Bulgária"],
+  ["EL", "Grécia"], ["CY", "Chipre"], ["MT", "Malta"], ["DK", "Dinamarca"], ["SE", "Suécia"], ["FI", "Finlândia"],
+  ["EE", "Estónia"], ["LV", "Letónia"], ["LT", "Lituânia"], ["XI", "Irlanda do Norte"],
+];
+
+const prefixoDoNif = (nif: string): string | null => {
+  const m = /^([A-Za-z]{2})/.exec(nif.trim());
+  if (!m) return null;
+  const cc = m[1].toUpperCase() === "GR" ? "EL" : m[1].toUpperCase();
+  return EU_PREFIXES.has(cc) ? cc : null;
+};
+
+/** O país de um NIF escrito: o do prefixo; sem prefixo, Portugal. */
+export function paisDoNif(nif: string): string {
+  return prefixoDoNif(nif) ?? "PT";
+}
+
+/** O NIF com o país escolhido: troca o prefixo (o português fica sem prefixo, como sempre). */
+export function nifComPais(nif: string, pais: string): string {
+  const corpo = prefixoDoNif(nif) ? nif.trim().slice(2) : nif.trim();
+  return pais === "PT" ? corpo : `${pais}${corpo}`;
+}
+
 // O mesmo critério do separador Portal (z.string().email()) sem puxar o zod.
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 

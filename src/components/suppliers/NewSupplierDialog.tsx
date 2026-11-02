@@ -25,6 +25,9 @@ import { cn } from "@/lib/utils";
 import {
   createSupplierRecord,
   firstError,
+  nifComPais,
+  PAISES_NIF,
+  paisDoNif,
   sendSupplierPortalInvite,
   supplierNifKey,
   validateNewSupplier,
@@ -265,6 +268,21 @@ export function NewSupplierDialog({
             {errorText("organizationId")}
           </div>
           {textField("name", "Nome do fornecedor", { disabled: locked, inputProps: { maxLength: 200 } })}
+          <div className="space-y-1.5">
+            <Label htmlFor={`${fieldId("taxId")}-pais`}>País do NIF</Label>
+            <Select value={paisDoNif(d.taxId)} onValueChange={(cc) => set({ taxId: nifComPais(d.taxId, cc) })} disabled={locked}>
+              <SelectTrigger id={`${fieldId("taxId")}-pais`} className="h-11">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAISES_NIF.map(([cc, nome]) => (
+                  <SelectItem key={cc} value={cc}>
+                    {nome} ({cc})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           {textField("taxId", "NIF", {
             disabled: locked,
             hint: nifOk ? (
@@ -275,7 +293,7 @@ export function NewSupplierDialog({
             ) : (
               "Obrigatório e válido para convidar (estrangeiros com o prefixo do país, ex.: ESB12345678)."
             ),
-            inputProps: { maxLength: 50, placeholder: "9 dígitos" },
+            inputProps: { maxLength: 50, placeholder: paisDoNif(d.taxId) === "PT" ? "9 dígitos" : `${paisDoNif(d.taxId)}…` },
           })}
           {textField("email", "Email", {
             type: "email",
