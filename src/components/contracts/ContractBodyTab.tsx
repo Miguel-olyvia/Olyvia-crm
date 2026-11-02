@@ -3,6 +3,7 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import DOMPurify from "dompurify";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,7 @@ interface ContractBodyTabProps {
 
 export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   const { activeCompany } = useCompany();
+  const { hasPermission } = usePermissions();
   const { settings: docSettings } = useDocumentSettings();
   const queryClient = useQueryClient();
   const [bodyHtml, setBodyHtml] = useState(contract?.contract_body_html || "");
@@ -91,7 +93,12 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   // generated from that same minuta can reuse that verification instead of
   // asking for a new SMS code per document.
   const currentTemplate = (templates as any[]).find((t: any) => t.id === contract?.contract_template_id);
-  const hasVerifiedTemplateSignatory = !!currentTemplate?.signatory_user_id;
+  // Assinar pelo signatário da minuta (sem novo SMS) só para quem envia
+  // contratos para assinatura; o servidor (rpc_contra_assinar_contrato)
+  // volta a exigir client_contracts.send_signature. Sem a permissão, o
+  // diálogo cai no fluxo normal de SMS do próprio utilizador.
+  const hasVerifiedTemplateSignatory =
+    !!currentTemplate?.signatory_user_id && hasPermission("client_contracts.send_signature");
 
   const { data: templateSignatoryUser } = useQuery({
     queryKey: ["contract-template-signatory-user", currentTemplate?.signatory_user_id],
@@ -329,37 +336,18 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     }
   };
 
+  // A contra-assinatura é gravada no servidor (rpc_contra_assinar_contrato):
+  // consome o OTP que o sms-otp acabou de marcar como verificado, confirma que
+  // quem assina tem can_sign_contracts e descongela o documento (a assinatura
+  // passa a fazer parte dele). As colunas company_* já não se escrevem daqui.
   const handleCompanySignAfterOtp = async () => {
     setCompanySigning(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Não autenticado");
-
-      const { data: anewUser } = await (supabase as any)
-        .from("anew_users")
-        .select("id, name")
-        .eq("auth_user_id", user.id)
-        .maybeSingle();
-
-      const signerName = anewUser?.name || user.email || "Representante";
-
-      if (anewUser?.id) {
-        await supabase.rpc('set_audit_context', { p_user_id: anewUser.id, p_source: 'ui' });
-      }
-      await (supabase as any)
-        .from("client_contracts")
-        .update({
-          company_signature_date: new Date().toISOString(),
-          company_signed_by_name: signerName,
-          company_signed_by_id: anewUser?.id || user.id,
-          // Assinar MUDA o documento (a assinatura passa a fazer parte dele).
-          // Descongela-se para a proxima leitura o reconstruir ja com ela --
-          // sem isto, uma empresa que assine depois do cliente ficaria com a
-          // sua assinatura de fora do documento congelado.
-          ...UNFREEZE_CONTRACT_COLUMNS,
-        })
-        .eq("id", contract.id)
-        .throwOnError();
+      const { error } = await (supabase as any).rpc("rpc_contra_assinar_contrato", {
+        p_contract_id: contract.id,
+        p_modo: "proprio",
+      });
+      if (error) throw new Error(error.message);
 
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
       toast.success("Contrato assinado pela empresa via SMS OTP!");
@@ -383,20 +371,13 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     }
     setCompanySigning(true);
     try {
-      const actingBusinessUserId = await resolveCurrentBusinessUserId();
-      if (actingBusinessUserId) {
-        await supabase.rpc('set_audit_context', { p_user_id: actingBusinessUserId, p_source: 'ui' });
-      }
-      await (supabase as any)
-        .from("client_contracts")
-        .update({
-          company_signature_date: new Date().toISOString(),
-          company_signed_by_name: templateSignatoryUser.name || "Representante",
-          company_signed_by_id: templateSignatoryUser.id,
-          ...UNFREEZE_CONTRACT_COLUMNS,
-        })
-        .eq("id", contract.id)
-        .throwOnError();
+      // O servidor lê o signatário da própria minuta do contrato, exige
+      // client_contracts.send_signature e regista quem executou.
+      const { error } = await (supabase as any).rpc("rpc_contra_assinar_contrato", {
+        p_contract_id: contract.id,
+        p_modo: "signatario_minuta",
+      });
+      if (error) throw new Error(error.message);
 
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
       toast.success(`Contrato assinado por ${templateSignatoryUser.name} (signatário já verificado nesta minuta).`);
