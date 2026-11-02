@@ -31,6 +31,7 @@ import { lerInventario, useInventario } from "./inventario/loja";
 import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra";
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
+import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
@@ -88,6 +89,7 @@ export function PaginaNegocio(ctx: Ctx) {
         </div>
       </header>
       <EstadoAcessoPortal ctx={ctx} d={d} />
+      <div className="empty:hidden"><DocumentosParaCliente d={d} /></div>
       {anular && podeAnular(d) && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
       {S.confirmPerda === d.id && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/[0.06] p-3 text-sm animate-in fade-in-0 slide-in-from-top-2">
