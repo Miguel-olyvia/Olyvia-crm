@@ -46,6 +46,10 @@ export interface PriceChangeItem {
   product: { id: string; name: string; sku: string | null } | null;
   /** Fase 5: ligação a um serviço nosso (product é então null). */
   service?: { id: string; name: string; sku: string | null } | null;
+  /** Fase 5b: pedido de um serviço (decide-se com services.edit + services.manage_prices). */
+  is_service?: boolean;
+  /** Fase 5b: quem está a ver pode decidir este pedido (permissões do tipo dele). Ausente = can_decide da lista. */
+  can_decide?: boolean;
   purchase_uom: { id: string | null; code: string | null } | null;
   is_preferred: boolean;
   current_price: number | null;
@@ -80,6 +84,8 @@ export interface PriceChangeList {
   limit: number;
   offset: number;
   can_decide: boolean;
+  /** Fase 5b: services.edit + services.manage_prices (pedidos de serviços). */
+  can_decide_services?: boolean;
   items: PriceChangeItem[];
 }
 

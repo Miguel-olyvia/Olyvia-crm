@@ -52,8 +52,10 @@ interface ResultLine {
 export default function SupplierPriceChangesSection({ supplierId, focus = false, onDecided, onAfterDecision, alwaysShow = false }: SupplierPriceChangesSectionProps) {
   const { toast } = useToast();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
+  // Fase 5b: services.view_cost também lista (só os pedidos de serviços; a base filtra).
   const canList =
-    hasPermission("suppliers.view") && (hasPermission("suppliers.view_pricing") || hasPermission("products.view_cost"));
+    hasPermission("suppliers.view") &&
+    (hasPermission("suppliers.view_pricing") || hasPermission("products.view_cost") || hasPermission("services.view_cost"));
 
   const [view, setView] = useState<View>("pending");
   const [offset, setOffset] = useState(0);
@@ -114,8 +116,16 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
   }, [focus]);
 
   const items = useMemo(() => list?.items ?? [], [list]);
-  const canDecide = !!list?.can_decide && view === "pending";
-  const selectable = useMemo(() => items.filter((i) => i.status === "pending").map((i) => i.id), [items]);
+  // Fase 5b: produtos com products.*, serviços com services.* — decide-se pedido a pedido.
+  const canDecide = (!!list?.can_decide || !!list?.can_decide_services) && view === "pending";
+  const canDecideItem = useCallback(
+    (i: PriceChangeItem) => i.can_decide ?? !!list?.can_decide,
+    [list],
+  );
+  const selectable = useMemo(
+    () => items.filter((i) => i.status === "pending" && canDecideItem(i)).map((i) => i.id),
+    [items, canDecideItem],
+  );
 
   // Recarga/página nova: larga o que já não está na lista.
   useEffect(() => {
@@ -332,11 +342,13 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
                   <TableRow key={item.id}>
                     {canDecide && (
                       <TableCell className="align-top">
-                        <Checkbox
-                          checked={selected.has(item.id)}
-                          onCheckedChange={(v) => toggle(item.id, v === true)}
-                          aria-label={`Selecionar ${item.catalog_item.supplier_ref}`}
-                        />
+                        {canDecideItem(item) && (
+                          <Checkbox
+                            checked={selected.has(item.id)}
+                            onCheckedChange={(v) => toggle(item.id, v === true)}
+                            aria-label={`Selecionar ${item.catalog_item.supplier_ref}`}
+                          />
+                        )}
                       </TableCell>
                     )}
                     <TableCell className="align-top">
@@ -405,6 +417,7 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
                     )}
                     {canDecide && (
                       <TableCell className="text-right align-top">
+                        {canDecideItem(item) ? (
                         <div className="flex justify-end gap-1">
                           <Button type="button" size="sm" onClick={() => acceptOne(item)} disabled={busy || deciding}>
                             {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Check className="w-4 h-4 mr-1" />}
@@ -420,6 +433,11 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
                             <X className="w-4 h-4 mr-1" /> Recusar
                           </Button>
                         </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {item.is_service ? "Sem permissão para preços de serviços" : "Sem permissão para preços de produtos"}
+                          </span>
+                        )}
                       </TableCell>
                     )}
                   </TableRow>
@@ -430,8 +448,10 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
         </div>
       )}
 
-      {list && !list.can_decide && view === "pending" && pendingCount > 0 && (
-        <p className="text-xs text-muted-foreground">Só quem pode gerir preços (products.manage_prices) aceita ou recusa.</p>
+      {list && !list.can_decide && !list.can_decide_services && view === "pending" && pendingCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Só quem pode gerir preços aceita ou recusa (products.manage_prices nos produtos, services.manage_prices nos serviços).
+        </p>
       )}
 
       {(total > PAGE_SIZE || offset > 0) && (

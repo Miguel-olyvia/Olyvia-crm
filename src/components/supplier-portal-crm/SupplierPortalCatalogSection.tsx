@@ -871,7 +871,7 @@ export default function SupplierPortalCatalogSection({
                                   <PackagePlus className="w-4 h-4 mr-1" /> Criar produto
                                 </Button>
                               )}
-                              {canLink && (
+                              {canLinkThis && (
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -886,13 +886,13 @@ export default function SupplierPortalCatalogSection({
                               )}
                             </>
                           )}
-                          {canLink && item.is_dismissed && !item.is_linked && (
+                          {canLinkThis && item.is_dismissed && !item.is_linked && (
                             <Button type="button" variant="outline" size="sm" onClick={() => handleDismiss(item, false)} disabled={busy}>
                               {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-1" />}
                               Repor
                             </Button>
                           )}
-                          {canLink && item.is_linked && (
+                          {canLinkThis && item.is_linked && (
                             <Button
                               type="button"
                               variant="outline"
