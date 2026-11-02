@@ -11,6 +11,7 @@ vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 vi.mock("@/lib/identity/resolveBusinessUserId", () => ({ resolveCurrentBusinessUserId: vi.fn() }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: null }) }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => false }) }));
 vi.mock("@/hooks/useDocumentSettings", () => ({ useDocumentSettings: () => ({ settings: {} }) }));
 vi.mock("@/components/RichTextEditor", () => ({ RichTextEditor: () => null }));
 vi.mock("@/components/contracts/GenerateFromTemplateDialog", () => ({ GenerateFromTemplateDialog: () => null }));

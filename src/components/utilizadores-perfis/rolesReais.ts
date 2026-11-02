@@ -4,6 +4,7 @@
 import { roleFormSchema } from "@/lib/validations";
 import { gerarCodigo } from "./validacoes";
 import { normalizar, type Editor } from "./logica";
+import { CODIGOS_EM_USO } from "./permissoesEmUso";
 import type { Ambito, DadosRole, Permissao, Role } from "./tipos";
 
 export interface LinhaRole {
@@ -31,18 +32,6 @@ export interface LinhaRolePermissao {
   permission_code: string;
 }
 
-/** As categorias com módulo no menu lateral (`sidebarCategories` de Roles.tsx, com `hr`). */
-export const CATEGORIAS_DO_MENU: ReadonlySet<string> = new Set([
-  "dashboard", "organizations", "org_chart", "flow_builder",
-  "products", "bundles", "brands", "product_categories", "product_subcategories", "product_attributes", "units_of_measure",
-  "services", "service_categories", "service_subcategories", "service_fees",
-  "leads", "contacts", "clients",
-  "deals", "proposals", "quotes", "quote_templates", "direct_sales", "contracts", "client_contracts",
-  "marketing", "forms",
-  "suppliers", "warehouses", "purchase_orders", "receiving", "stocks", "inventory", "client_orders",
-  "scheduling", "users", "roles", "settings", "smtp", "email_templates", "hr",
-]);
-
 /** `permissionNamePt` de Roles.tsx: nomes em inglês na base que o ecrã mostra em português. */
 const NOMES_PT: Record<string, string> = {
   "View scheduling boards": "Ver quadros de agendamento", "Create scheduling boards": "Criar quadros de agendamento",
@@ -56,6 +45,18 @@ const NOMES_PT: Record<string, string> = {
   "Export scheduling data": "Exportar dados de agendamento",
   "View Flow Builder": "Ver Flow Builder", "Create Flow Builder": "Criar Flow Builder",
   "Edit Flow Builder": "Editar Flow Builder", "Delete Flow Builder": "Eliminar Flow Builder",
+  // Nomes que a base ainda tem em inglês, das permissões em uso.
+  "View Organizations": "Ver organizações", "Create Organizations": "Criar organizações",
+  "Edit Organizations": "Editar organizações", "Delete Organizations": "Eliminar organizações",
+  "View forms": "Ver formulários", "Create forms": "Criar formulários", "Edit forms": "Editar formulários", "Delete forms": "Eliminar formulários",
+  "View product categories": "Ver categorias de produto", "Create product categories": "Criar categorias de produto",
+  "Edit product categories": "Editar categorias de produto", "Delete product categories": "Eliminar categorias de produto",
+  "View product subcategories": "Ver subcategorias de produto", "Create product subcategories": "Criar subcategorias de produto",
+  "Edit product subcategories": "Editar subcategorias de produto", "Delete product subcategories": "Eliminar subcategorias de produto",
+  "View product attributes": "Ver atributos de produto", "Create product attributes": "Criar atributos de produto",
+  "Edit product attributes": "Editar atributos de produto", "Delete product attributes": "Eliminar atributos de produto",
+  "Manage proposal templates and workflows": "Gerir templates e fluxos de propostas",
+  "Manage scheduling settings": "Gerir definições de agendamento",
 };
 
 export function permissaoDaBase(l: LinhaPermissao): Permissao {
@@ -65,9 +66,12 @@ export function permissaoDaBase(l: LinhaPermissao): Permissao {
   };
 }
 
-/** O catálogo que a página mostra: só as permissões de módulos do menu, como Roles.tsx. */
+/**
+ * O catálogo que o editor mostra: só as permissões em uso (permissoesEmUso.ts). As escondidas continuam na base e nos papéis que já
+ * as têm; ao gravar, o FormRole volta a juntá-las (`fundirPermissoes`), por isso escondê-las não as remove.
+ */
 export const permissoesDoMenu = (linhas: readonly LinhaPermissao[]): Permissao[] =>
-  linhas.filter((l) => CATEGORIAS_DO_MENU.has(l.category ?? "")).map(permissaoDaBase);
+  linhas.filter((l) => CODIGOS_EM_USO.has(l.code)).map(permissaoDaBase);
 
 /** Quem não é administrador de sistema só pode dar permissões que ele próprio tem (modelos de role). */
 export const tiraPermissoesDoEditor = (codigos: readonly string[], editor: Editor): string[] =>

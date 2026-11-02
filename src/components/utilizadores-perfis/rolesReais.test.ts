@@ -59,10 +59,13 @@ describe("mapeamento base -> maquete", () => {
     expect(permissaoDaBase(l)).toMatchObject({ codigo: "scheduling.boards.view", categoria: "scheduling", nome: "Ver quadros de agendamento", perigosa: false, comAmbito: true });
     expect(permissaoDaBase({ ...l, name: "Algo", is_dangerous: true, supports_scope: null })).toMatchObject({ nome: "Algo", perigosa: true, comAmbito: false });
   });
-  it("permissoesDoMenu só deixa as categorias do menu (incluindo hr)", () => {
+  it("permissoesDoMenu só deixa as permissões em uso (incluindo hr, pessoas, negocios e fleet), sem as escondidas", () => {
     const l = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
-    const r = permissoesDoMenu([l("leads.view", "leads"), l("hr.people.view", "hr"), l("zzz.view", "zzz"), l("a.b", "")]);
-    expect(r.map((p) => p.codigo)).toEqual(["leads.view", "hr.people.view"]);
+    const r = permissoesDoMenu([
+      l("leads.view", "leads"), l("hr.pessoas.view", "hr"), l("vacations.view", "hr"), l("negocios.obra.planear", "pessoas"),
+      l("fleet.view", "fleet"), l("trash.view", "trash"), l("zzz.view", "zzz"), l("a.b", ""),
+    ]);
+    expect(r.map((p) => p.codigo)).toEqual(["leads.view", "hr.pessoas.view", "negocios.obra.planear", "fleet.view"]);
   });
   it("tiraPermissoesDoEditor deixa a um não administrador só as permissões que ele tem", () => {
     expect(tiraPermissoesDoEditor(["a", "b"], { administradorSistema: false, codigos: ["b"] })).toEqual(["b"]);

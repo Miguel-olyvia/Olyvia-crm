@@ -10,7 +10,7 @@ import { mensagemDeErro, permissoesDoMenu, type LinhaPermissao } from "../rolesR
 import type { Permissao } from "../tipos";
 
 export interface CatalogoPermissoes {
-  /** Todas as permissões dos módulos do menu. */
+  /** Todas as permissões em uso (permissoesEmUso.ts); as escondidas não entram. */
   catalogo: Permissao[];
   /** Quem edita: administrador de sistema ou as permissões que tem. */
   editor: Editor;

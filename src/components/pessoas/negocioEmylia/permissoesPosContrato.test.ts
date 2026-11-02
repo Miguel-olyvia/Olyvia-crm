@@ -27,7 +27,7 @@ describe("podeNoPosContrato", () => {
     expect(podeNoPosContrato(true, { k: "falhou" })).toEqual({ gravar: false, aLer: false, falhou: true });
   });
   it("sem pessoas.edit na ficha não se grava, mesmo com permissões lidas", () => {
-    expect(podeNoPosContrato(false, { k: "lidas", codigos: new Set(["financeiro.faturar"]) })).toEqual({ gravar: false, aLer: false, falhou: false });
+    expect(podeNoPosContrato(false, { k: "lidas", codigos: new Set(["negocios.registar_fatura"]) })).toEqual({ gravar: false, aLer: false, falhou: false });
   });
   it("com as duas coisas grava", () => {
     expect(podeNoPosContrato(true, { k: "lidas", codigos: new Set() })).toEqual({ gravar: true, aLer: false, falhou: false });
