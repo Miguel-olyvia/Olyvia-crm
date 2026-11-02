@@ -233,7 +233,7 @@ describe("Portal do colaborador ligado à Edge convite-admissao", () => {
     await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
     const [, opcoes] = chamadas("rascunho")[0];
     expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
-    expect((opcoes.body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("913000000");
+    expect((opcoes.body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("+351913000000");
     const d = new Date("2099-10-16T10:42:00.000Z");
     const hora = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     await waitFor(() => expect(screen.getByTestId("portal-rascunho-estado")).toHaveTextContent(txt("portal.rascunho.guardado").replace("{{hora}}", hora)));

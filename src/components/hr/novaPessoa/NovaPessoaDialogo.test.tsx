@@ -100,6 +100,7 @@ function preencherMinimo() {
   escrever("hr-novo-apelido", "Nogueira");
   irParaAba(/rhNova\.tabs\.contacto/);
   escrever("hr-novo-email-pessoal", "teresa@exemplo.pt");
+  escrever("hr-novo-telefone-pessoal", "912345678");
   irParaAba(/rhNova\.tabs\.contrato/);
   escolher(/^hr\.laborais\.cargoCatalogo/, "Vendedor");
   // Com a tradução simulada a devolver a chave, `opcoes()` mostra o próprio valor como rótulo.
@@ -182,10 +183,11 @@ describe("NovaPessoaDialogo: a estrutura", () => {
 
 describe("NovaPessoaDialogo: obrigatórios pela posição da configuração da admissão", () => {
   it("sem convite, o campo na posição «convite» é obrigatório (asterisco e aria-required); «ficha» e «opcional» não", () => {
-    configuracao = { campos: [posicao("telefone_pessoal", "convite"), posicao("genero", "ficha"), posicao("nacionalidade", "opcional")], carregando: false, erro: false, semAcesso: false };
+    configuracao = { campos: [posicao("linha1", "convite"), posicao("genero", "ficha"), posicao("nacionalidade", "opcional")], carregando: false, erro: false, semAcesso: false };
     montar();
     expect(campo("hr-novo-genero")).not.toHaveAttribute("aria-required");
     irParaAba(/rhNova\.tabs\.contacto/);
+    expect(campo("hr-novo-morada-linha1")).toHaveAttribute("aria-required", "true");
     expect(campo("hr-novo-telefone-pessoal")).toHaveAttribute("aria-required", "true");
     expect(screen.getAllByText("rhNova.pos.convite").length).toBeGreaterThan(0);
     irParaAba(/rhNova\.tabs\.dados/);
@@ -194,14 +196,14 @@ describe("NovaPessoaDialogo: obrigatórios pela posição da configuração da a
   });
 
   it("criar sem preencher o obrigatório da configuração é recusado e leva o foco ao campo, na aba certa", async () => {
-    configuracao = { campos: [posicao("telefone_pessoal", "convite")], carregando: false, erro: false, semAcesso: false };
+    configuracao = { campos: [posicao("linha1", "convite")], carregando: false, erro: false, semAcesso: false };
     const { onCriar } = montar();
     preencherMinimo();
     fireEvent.click(botaoCriar());
     expect(onCriar).not.toHaveBeenCalled();
     expect(within(painel()).getByRole("tab", { name: /rhNova\.tabs\.contacto/ })).toHaveAttribute("data-state", "active");
-    await waitFor(() => expect(campo("hr-novo-telefone-pessoal")).toHaveFocus());
-    expect(campo("hr-novo-telefone-pessoal")).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(campo("hr-novo-morada-linha1")).toHaveFocus());
+    expect(campo("hr-novo-morada-linha1")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("a «ficha» e o «opcional» nunca bloqueiam", async () => {
@@ -780,10 +782,10 @@ describe("NovaPessoaDialogo: botões travados falam (aria-disabled, não disable
 
 describe("NovaPessoaDialogo: a posição do campo lê-se", () => {
   it("«no convite» está ligada ao campo por aria-describedby e não escondida dos leitores de ecrã", () => {
-    configuracao = { campos: [posicao("telefone_pessoal", "convite")], carregando: false, erro: false, semAcesso: false };
+    configuracao = { campos: [posicao("linha1", "convite")], carregando: false, erro: false, semAcesso: false };
     montar();
     irParaAba(/rhNova\.tabs\.contacto/);
-    const ligados = (campo("hr-novo-telefone-pessoal").getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+    const ligados = (campo("hr-novo-morada-linha1").getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
     const alvo = ligados.map((id) => document.getElementById(id)).find((el) => el?.textContent === "rhNova.pos.convite");
     expect(alvo).toBeDefined();
     expect(alvo?.closest('[aria-hidden="true"]')).toBeNull();

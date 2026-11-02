@@ -77,7 +77,7 @@ export function useTocarCampo(): (campoId: string) => void {
 /** O Radix nao aceita `value=""` num SelectItem: e preciso um valor sentinela. */
 export const SEM_ESCOLHA = "__sem_escolha__";
 
-interface CampoBaseProps {
+export interface CampoBaseProps {
   id: string;
   label: string;
   ajuda?: string;
@@ -115,12 +115,12 @@ interface CampoBaseProps {
 }
 
 /** `aria-describedby` de um campo: o que vem de fora, a ajuda e o erro (a ajuda mantem-se quando ha erro). */
-function descricaoDoCampo(id: string, { ajuda, erro, descritoPor }: Pick<CampoBaseProps, "ajuda" | "erro" | "descritoPor">): string | undefined {
+export function descricaoDoCampo(id: string, { ajuda, erro, descritoPor }: Pick<CampoBaseProps, "ajuda" | "erro" | "descritoPor">): string | undefined {
   const ids = [descritoPor, ajuda ? `${id}-ajuda` : undefined, erro ? `${id}-erro` : undefined].filter(Boolean);
   return ids.length > 0 ? ids.join(" ") : undefined;
 }
 
-function Envolvente({
+export function Envolvente({
   id,
   label,
   ajuda,

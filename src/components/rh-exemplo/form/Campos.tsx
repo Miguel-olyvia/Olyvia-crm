@@ -78,7 +78,7 @@ export function useTocarCampo(): (campoId: string) => void {
 export const SEM_ESCOLHA = "__sem_escolha__";
 
 /** `aria-describedby` de um campo: o que vem de fora (`descritoPor`), a ajuda quando se vê, e o erro. */
-function descricaoDoCampo(
+export function descricaoDoCampo(
   id: string,
   { ajuda, erro, descritoPor }: { ajuda?: string; erro?: string | null; descritoPor?: string },
 ): string | undefined {
@@ -86,7 +86,7 @@ function descricaoDoCampo(
   return ids.length > 0 ? ids.join(" ") : undefined;
 }
 
-interface CampoBaseProps {
+export interface CampoBaseProps {
   id: string;
   label: string;
   ajuda?: string;
@@ -120,7 +120,7 @@ interface CampoBaseProps {
   recomendado?: boolean;
 }
 
-function Envolvente({
+export function Envolvente({
   id,
   label,
   ajuda,

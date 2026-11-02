@@ -718,7 +718,7 @@ describe("ConviteAdmissao (portal temporario)", () => {
       await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
       const [, opcoes] = chamadas("rascunho")[0];
       expect(opcoes.headers).toEqual({ "x-portal-sessao": SESSAO });
-      expect((opcoes.body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("913000000");
+      expect((opcoes.body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("+351913000000");
       const estado = await screen.findByTestId("portal-rascunho-estado");
       await waitFor(() => expect(estado).toHaveTextContent(txt("portal.rascunho.guardado", { hora: horaDe("2099-10-16T10:42:00.000Z") })));
     });
@@ -737,7 +737,7 @@ describe("ConviteAdmissao (portal temporario)", () => {
         vi.advanceTimersByTime(3200);
       });
       await waitFor(() => expect(chamadas("rascunho")).toHaveLength(1));
-      expect((chamadas("rascunho")[0][1].body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("9130");
+      expect((chamadas("rascunho")[0][1].body.rascunho as Record<string, unknown>).telefone_pessoal).toBe("+3519130");
     });
 
     it("mudar de pagina grava logo o que foi alterado", async () => {
@@ -760,7 +760,7 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect((init.headers as Record<string, string>)["x-portal-sessao"]).toBe(SESSAO);
       expect(String(init.body)).not.toContain(NISS_VALIDO);
       expect(String(init.body)).not.toContain(SESSAO);
-      expect(JSON.parse(String(init.body)).rascunho.telefone_pessoal).toBe("913000000");
+      expect(JSON.parse(String(init.body)).rascunho.telefone_pessoal).toBe("+351913000000");
     });
 
     it("ao fechar com uma gravacao ainda em curso (sem resposta), o rascunho segue mesmo assim por keepalive", async () => {
@@ -774,7 +774,7 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(init.keepalive).toBe(true);
-      expect(JSON.parse(String(init.body)).rascunho.telefone_pessoal).toBe("913000000");
+      expect(JSON.parse(String(init.body)).rascunho.telefone_pessoal).toBe("+351913000000");
     });
 
     it("depois de o servidor confirmar, fechar sem mais alteracoes nao reenvia nada", async () => {

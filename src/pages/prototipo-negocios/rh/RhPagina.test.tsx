@@ -107,6 +107,7 @@ describe("RH no protótipo: criar e editar dados de teste", () => {
     escrever("hr-novo-apelido", "Nogueira");
     irParaAba(/Contacto e morada/);
     escrever("hr-novo-email-pessoal", "teresa@exemplo.pt");
+    escrever("hr-novo-telefone-pessoal", "912345678");
     irParaAba(/Contrato e local/);
     escolher(/^Cargo/, /Vendedor/);
     escolher(/^Tipo de contrato/, /Sem termo/);

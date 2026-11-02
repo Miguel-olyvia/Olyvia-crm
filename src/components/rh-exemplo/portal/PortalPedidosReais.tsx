@@ -22,7 +22,7 @@ import {
 import { mensagemErroPortal } from "@/components/rh-exemplo/hooks/portalAdmissaoReal";
 import {
   pedidoRhAtrasadoReal, pedidoRhPedeAcaoReal, type EnvioPortal, type PedidoPessoaPortal, type PedidoRhPortal,
-} from "@/components/rh-exemplo/hooks/portalDocumentosReal";
+} from "@/components/rh-exemplo/hooks/portalDocumentosPublicoReal";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import type { DocumentosPortalHook } from "./PortalDocumentosReal";

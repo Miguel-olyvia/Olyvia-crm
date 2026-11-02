@@ -10,6 +10,8 @@
  */
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampoPais, CampoSelect, CampoTexto } from "@/components/rh-exemplo/form/Campos";
+import { CampoTelefone } from "@/components/rh-exemplo/form/CampoTelefone";
+import { INDICATIVOS_SMS_CONTRATO } from "@/lib/phone/indicativosRh";
 import { useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
 import { ehPortugal } from "@/lib/addresses/procurarCodigoPostal";
 import {
@@ -61,9 +63,11 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             valor={rascunho.nacionalidade}
             onChange={(v) => definir("nacionalidade", v)}
           />
-          <CampoTexto
+          <CampoTelefone
             id="convite-telefone-pessoal"
             label={t("hr.campos.telefonePessoal")}
+            rotuloIndicativo={t("rhNova.f.indicativo")}
+            indicativos={INDICATIVOS_SMS_CONTRATO}
             obrigatorio={obrigatorio("telefone_pessoal")}
             erro={erroDe("telefone_pessoal")}
             valor={rascunho.telefone_pessoal}

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CampoPais, CampoSelect, CampoTexto, type OpcaoSelect } from "@/components/hr/form/Campos";
+import { CampoTelefone } from "@/components/hr/form/CampoTelefone";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { posicaoDoCampo, useNova } from "./contextoNova";
@@ -79,6 +80,28 @@ export function CampoT({ g, k, id, rotulo, codigo, ajuda, largo, tipo, placehold
         ajuda={aviso ? t(aviso.mensagemKey, aviso.parametros) : ajuda} placeholder={placeholder}
         erro={ctx.erro(id)} obrigatorio={ctx.obrigatorio(id)} min={min} max={max} marcado={ctx.conta.ePalpite(id)}
         descritoPor={descritoPor}
+      />
+    </LinhaCampo>
+  );
+}
+
+interface TelefoneProps extends BaseProps {
+  /** Só estes indicativos no seletor (o telefone pessoal: os dos SMS do contrato). Omitido = a lista completa. */
+  indicativos?: readonly string[];
+}
+
+/** Um telefone com o seletor de indicativo. O valor guardado é «+<indicativo><dígitos>». */
+export function CampoTel({ g, k, id, rotulo, codigo, ajuda, largo, indicativos }: TelefoneProps) {
+  const { t } = useTranslation();
+  const ctx = useNova();
+  const aviso = ctx.conta.avisoDoPalpite(id);
+  return (
+    <LinhaCampo id={id} codigo={codigo} largo={largo}>
+      <CampoTelefone
+        id={id} label={rotulo} valor={useValor(g, k)} onChange={useDefinir(g, k)} rotuloIndicativo={t("rhNova.f.indicativo")}
+        ajuda={aviso ? t(aviso.mensagemKey, aviso.parametros) : ajuda} erro={ctx.erro(id)} obrigatorio={ctx.obrigatorio(id)}
+        marcado={ctx.conta.ePalpite(id)} indicativos={indicativos}
+        descritoPor={posicaoDoCampo(ctx, codigo, id) ? idDaPosicao(id) : undefined}
       />
     </LinhaCampo>
   );

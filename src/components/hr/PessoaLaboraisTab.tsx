@@ -49,6 +49,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CampoTelefone } from "@/components/hr/form/CampoTelefone";
 import {
   Select,
   SelectContent,
@@ -237,7 +238,17 @@ export function PessoaLaboraisTab({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {campos.map(({ id, labelKey, tipo, ajudaKey }) => (
+          {campos.map(({ id, labelKey, tipo, ajudaKey }) => id === "telefone_trabalho" ? (
+            <CampoTelefone
+              key={id}
+              id={`hr-laborais-${id}`}
+              label={t(labelKey)}
+              rotuloIndicativo={t("rhNova.f.indicativo")}
+              valor={rascunho.telefone_trabalho}
+              disabled={!podeEditar}
+              onChange={(v) => definir("telefone_trabalho", v)}
+            />
+          ) : (
             <div key={id} className="space-y-1.5">
               <Label htmlFor={`hr-laborais-${id}`}>{t(labelKey)}</Label>
               <Input

@@ -4,12 +4,7 @@
  * `rpc_hr_portal_*` e `rpc_hr_admissao_*`. Só re-exporta: a fronteira de `semBase.test.ts` deixa os ecrãs de /rh-exemplo importar
  * código real de RH apenas por aqui (pasta `hooks/`).
  */
-export { usePortalDocumentosPublico, type DadosPedidoAoRh, type ResultadoCodigoSms } from "@/hooks/usePortalDocumentosPublico";
-export type { ResultadoAccaoSessao } from "@/hooks/useConviteAdmissaoPublico";
-export {
-  envioPedeAssinatura, pedidoRhAtrasadoReal, pedidoRhPedeAcaoReal,
-  type DocumentosPortal, type EnvioPortal, type PedidoPessoaPortal, type PedidoRhPortal,
-} from "@/lib/hr/portalDocumentosContrato";
+export * from "./portalDocumentosPublicoReal";
 export {
   usePortalDocumentosRh,
   type DocumentoPartilhavel, type EnvioRh, type PedidoDaPessoa, type PedidoDoRh, type ResultadoPortalRh,

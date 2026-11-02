@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { mensagemErroPortal } from "@/components/rh-exemplo/hooks/portalAdmissaoReal";
-import type { ResultadoAccaoSessao, ResultadoCodigoSms } from "@/components/rh-exemplo/hooks/portalDocumentosReal";
+import type { ResultadoAccaoSessao, ResultadoCodigoSms } from "@/components/rh-exemplo/hooks/portalDocumentosPublicoReal";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 

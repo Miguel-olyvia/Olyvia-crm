@@ -4,7 +4,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
 import { ehPortugal } from "@/lib/addresses/procurarCodigoPostal";
 import { useNova } from "./contextoNova";
-import { CampoP, CampoT, GRELHA } from "./camposNova";
+import { INDICATIVOS_SMS_CONTRATO } from "@/lib/phone/indicativosRh";
+import { CampoP, CampoT, CampoTel, GRELHA } from "./camposNova";
 import { SeccaoNova } from "./SeccaoNova";
 
 function Contactos() {
@@ -13,9 +14,9 @@ function Contactos() {
     <SeccaoNova titulo={t("rhNova.sec.contactos")} convite="contactos">
       <div className={GRELHA}>
         <CampoT g="pessoais" k="email_pessoal" id="hr-novo-email-pessoal" codigo="email_pessoal" tipo="email" rotulo={t("hr.campos.emailPessoal")} ajuda={t("rhNova.h.emailPessoal")} />
-        <CampoT g="pessoais" k="telefone_pessoal" id="hr-novo-telefone-pessoal" codigo="telefone_pessoal" tipo="tel" rotulo={t("hr.campos.telefonePessoal")} ajuda={t("rhNova.h.telefone")} />
+        <CampoTel g="pessoais" k="telefone_pessoal" id="hr-novo-telefone-pessoal" codigo="telefone_pessoal" rotulo={t("hr.campos.telefonePessoal")} ajuda={t("rhNova.h.telefonePessoal")} indicativos={INDICATIVOS_SMS_CONTRATO} />
         <CampoT g="geral" k="email_trabalho" id="hr-novo-email-trabalho" tipo="email" rotulo={t("hr.laborais.emailTrabalho")} ajuda={t("rhNova.h.emailTrabalho")} />
-        <CampoT g="geral" k="telefone_trabalho" id="hr-novo-telefone-trabalho" tipo="tel" rotulo={t("hr.laborais.telefoneTrabalho")} ajuda={t("rhNova.h.telefone")} />
+        <CampoTel g="geral" k="telefone_trabalho" id="hr-novo-telefone-trabalho"rotulo={t("hr.laborais.telefoneTrabalho")} ajuda={t("rhNova.h.telefone")} />
       </div>
     </SeccaoNova>
   );
@@ -55,8 +56,8 @@ function Emergencia() {
       <div className={GRELHA}>
         <CampoT g="pessoais" k="emergencia_nome" id="hr-novo-emergencia-nome" rotulo={t("rhNova.f.emergenciaNome")} />
         <CampoT g="pessoais" k="emergencia_relacao" id="hr-novo-emergencia-relacao" rotulo={t("hr.campos.relacao")} ajuda={t("rhNova.h.relacao")} />
-        <CampoT g="pessoais" k="emergencia_telefone" id="hr-novo-emergencia-telefone" tipo="tel" rotulo={t("rhNova.f.emergenciaTelefone")} ajuda={t("rhNova.h.telefone")} />
-        <CampoT g="extra" k="emergencia_telefone_alt" id="hr-novo-emergencia-telefone-alt" tipo="tel" rotulo={t("hr.campos.telefoneAlternativo")} />
+        <CampoTel g="pessoais" k="emergencia_telefone" id="hr-novo-emergencia-telefone"rotulo={t("rhNova.f.emergenciaTelefone")} ajuda={t("rhNova.h.telefone")} />
+        <CampoTel g="extra" k="emergencia_telefone_alt" id="hr-novo-emergencia-telefone-alt"rotulo={t("hr.campos.telefoneAlternativo")} />
         <CampoT g="extra" k="emergencia_email" id="hr-novo-emergencia-email" tipo="email" rotulo={t("rhNova.f.emergenciaEmail")} />
       </div>
     </SeccaoNova>

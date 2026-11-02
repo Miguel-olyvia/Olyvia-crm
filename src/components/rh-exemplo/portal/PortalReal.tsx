@@ -17,7 +17,7 @@ import {
   AvisoSessaoPerdida, ConviteCartaoLinkInvalido, PortalOtpDialogo, PortalSucesso,
   idiomaDoNavegador, motivoDaVista, useConviteAdmissaoPublico, vistaDoConvite, type ConvitePublico, type IdiomaConvite,
 } from "@/components/rh-exemplo/hooks/portalAdmissaoReal";
-import { usePortalDocumentosPublico } from "@/components/rh-exemplo/hooks/portalDocumentosReal";
+import { usePortalDocumentosPublico } from "@/components/rh-exemplo/hooks/portalDocumentosPublicoReal";
 import { lerAbaDocumentos, lerSeccao, type AbaDocumentos } from "@/components/rh-exemplo/lib/portalEstado";
 import { cn } from "@/lib/utils";
 import { PortalDocumentosReal } from "./PortalDocumentosReal";

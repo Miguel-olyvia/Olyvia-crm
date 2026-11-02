@@ -40,7 +40,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Os campos que são sempre obrigatórios: os do RH (fixos) e o nome. */
 export const OBRIGATORIOS_FIXOS: ReadonlySet<string> = new Set([
   "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato",
-  "hr-novo-subsidio", "hr-novo-duodecimos",
+  "hr-novo-subsidio", "hr-novo-duodecimos", "hr-novo-telefone-pessoal",
 ]);
 
 /** Uma data ISO que existe de verdade (31 de fevereiro não passa). */
@@ -81,8 +81,13 @@ function problemasDeDatasPessoais(v: ValoresNovaPessoa, hoje: string): ProblemaN
 
 function problemasDeContactos(v: ValoresNovaPessoa): ProblemaNova[] {
   const e = v.extra;
+  // O telefone pessoal é sempre obrigatório: recebe o código SMS que assina o contrato. Não passa pelo filtro das secções
+  // adiadas de `problemasDoAssistente`, por isso «Pedir à pessoa no convite» (Contactos) não o corta.
+  const telefonePessoal: ProblemaNova[] = textoOuNull(v.pessoais.telefone_pessoal) === null
+    ? [{ campoId: "hr-novo-telefone-pessoal", mensagemKey: OBRIGATORIO }]
+    : problemasDeTelefone("hr-novo-telefone-pessoal", v.pessoais.telefone_pessoal);
   const lista = [
-    ...problemasDeTelefone("hr-novo-telefone-pessoal", v.pessoais.telefone_pessoal),
+    ...telefonePessoal,
     ...problemasDeTelefone("hr-novo-telefone-trabalho", v.geral.telefone_trabalho),
     ...problemasDeTelefone("hr-novo-emergencia-telefone", v.pessoais.emergencia_telefone),
     ...problemasDeTelefone("hr-novo-emergencia-telefone-alt", e.emergencia_telefone_alt),

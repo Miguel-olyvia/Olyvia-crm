@@ -47,7 +47,8 @@ export function posicaoDoCampo(
 ): PosicaoEtiqueta | null {
   if (codigo === undefined || ctx.config === null) return null;
   // O convite segue para o e-mail pessoal: não se pode pedir à pessoa no convite (sem ele não há para onde o enviar).
-  if (campoId === "hr-novo-email-pessoal") return null;
+  // O telefone pessoal também é sempre obrigatório: recebe o código SMS que assina o contrato.
+  if (campoId === "hr-novo-email-pessoal" || campoId === "hr-novo-telefone-pessoal") return null;
   const posicao = ctx.config.find((c) => c.codigo === codigo)?.posicao ?? null;
   if (posicao === null) return null;
   const seccao: SeccaoConvite | undefined = seccaoDoCampo(campoId);

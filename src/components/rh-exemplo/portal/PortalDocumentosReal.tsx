@@ -12,7 +12,7 @@ import { ABAS_DOCUMENTOS, type AbaDocumentos } from "@/components/rh-exemplo/lib
 import { mensagemErroPortal } from "@/components/rh-exemplo/hooks/portalAdmissaoReal";
 import {
   envioPedeAssinatura, pedidoRhPedeAcaoReal, type EnvioPortal, type usePortalDocumentosPublico,
-} from "@/components/rh-exemplo/hooks/portalDocumentosReal";
+} from "@/components/rh-exemplo/hooks/portalDocumentosPublicoReal";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { SeloRecebido } from "./aspeto";

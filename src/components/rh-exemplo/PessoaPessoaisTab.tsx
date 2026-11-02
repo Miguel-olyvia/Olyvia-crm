@@ -49,6 +49,8 @@ import { nifValido, nissValido } from "@/components/rh-exemplo/lib/identificador
 import { toast } from "@/lib/toast";
 import { PessoaContaBancariaField } from "@/components/rh-exemplo/PessoaContaBancariaField";
 import { CountrySelect } from "@/components/rh-exemplo/CountrySelect";
+import { CampoTelefone } from "@/components/rh-exemplo/form/CampoTelefone";
+import { INDICATIVOS_SMS_CONTRATO } from "@/lib/phone/indicativosRh";
 import { PessoaNissField } from "@/components/rh-exemplo/PessoaNissField";
 import { PessoaSaudeCard } from "@/components/rh-exemplo/PessoaSaudeCard";
 import { PessoaFardamentoCard } from "@/components/rh-exemplo/PessoaFardamentoCard";
@@ -604,15 +606,15 @@ export function PessoaPessoaisTab({
                   onChange={(codigo) => setGeral({ ...geral, nacionalidade: codigo })}
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="hr-telefone-pessoal">{t("hr.campos.telefonePessoal")}</Label>
-                <Input
-                  id="hr-telefone-pessoal"
-                  value={geral.telefone_pessoal}
-                  disabled={!permissoes.pessoaisEdit}
-                  onChange={(e) => setGeral({ ...geral, telefone_pessoal: e.target.value })}
-                />
-              </div>
+              <CampoTelefone
+                id="hr-telefone-pessoal"
+                label={t("hr.campos.telefonePessoal")}
+                rotuloIndicativo={t("rhNova.f.indicativo")}
+                indicativos={INDICATIVOS_SMS_CONTRATO}
+                valor={geral.telefone_pessoal}
+                disabled={!permissoes.pessoaisEdit}
+                onChange={(v) => setGeral({ ...geral, telefone_pessoal: v })}
+              />
               <div className="space-y-1.5">
                 <Label htmlFor="hr-email-pessoal">{t("hr.campos.emailPessoal")}</Label>
                 <Input
@@ -965,32 +967,22 @@ export function PessoaPessoaisTab({
                   onChange={(e) => setEmergenciaDraft({ ...emergenciaDraft, relacao: e.target.value })}
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="hr-emergencia-telefone">
-                  {t("employees.form.emergencyContactPhone")}
-                </Label>
-                <Input
-                  id="hr-emergencia-telefone"
-                  value={emergenciaDraft.telefone}
-                  disabled={!permissoes.emergenciaEdit}
-                  onChange={(e) =>
-                    setEmergenciaDraft({ ...emergenciaDraft, telefone: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="hr-emergencia-alternativo">
-                  {t("hr.campos.telefoneAlternativo")}
-                </Label>
-                <Input
-                  id="hr-emergencia-alternativo"
-                  value={emergenciaDraft.telefone_alternativo}
-                  disabled={!permissoes.emergenciaEdit}
-                  onChange={(e) =>
-                    setEmergenciaDraft({ ...emergenciaDraft, telefone_alternativo: e.target.value })
-                  }
-                />
-              </div>
+              <CampoTelefone
+                id="hr-emergencia-telefone"
+                label={t("employees.form.emergencyContactPhone")}
+                rotuloIndicativo={t("rhNova.f.indicativo")}
+                valor={emergenciaDraft.telefone}
+                disabled={!permissoes.emergenciaEdit}
+                onChange={(v) => setEmergenciaDraft({ ...emergenciaDraft, telefone: v })}
+              />
+              <CampoTelefone
+                id="hr-emergencia-alternativo"
+                label={t("hr.campos.telefoneAlternativo")}
+                rotuloIndicativo={t("rhNova.f.indicativo")}
+                valor={emergenciaDraft.telefone_alternativo}
+                disabled={!permissoes.emergenciaEdit}
+                onChange={(v) => setEmergenciaDraft({ ...emergenciaDraft, telefone_alternativo: v })}
+              />
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="hr-emergencia-email">{t("employees.form.email")}</Label>
                 <Input

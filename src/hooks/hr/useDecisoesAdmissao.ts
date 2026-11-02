@@ -14,7 +14,6 @@
  * `erro_inesperado`) vao para o registo; recusas de negocio (permissao, estado) nao.
  */
 import { useCallback, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { hrRpc } from "@/lib/hr/hrDb";
@@ -106,6 +105,8 @@ export function useDecisoesAdmissao() {
     async (conviteId: string): Promise<ResultadoDecisao> => {
       if (!organizationId) return { ok: false, erro: textoDoErro(null) };
       try {
+        // Só se carrega o cliente quando se vai mesmo avisar: o protótipo de RH (sem base) chega a este ficheiro e não o pode importar.
+        const { supabase } = await import("@/integrations/supabase/client");
         const { data, error } = await supabase.functions.invoke("convite-admissao", {
           body: { action: "documentos_avisar", organization_id: organizationId, convite_id: conviteId },
         });

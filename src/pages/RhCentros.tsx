@@ -65,6 +65,7 @@ import { Loader2, MapPin, Pencil, Plus, Search } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import { CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
+import { CampoTelefone } from "@/components/hr/form/CampoTelefone";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useLocaisTrabalho, type DadosLocalTrabalho } from "@/hooks/useLocaisTrabalho";
@@ -396,10 +397,10 @@ export default function RhCentros() {
               valor={form.contacto_nome ?? ""}
               onChange={(v) => setForm((f) => ({ ...f, contacto_nome: v }))}
             />
-            <CampoTexto
+            <CampoTelefone
               id="centro-contacto-telefone"
               label={t("hr.locais.contactoTelefone")}
-              tipo="tel"
+              rotuloIndicativo={t("rhNova.f.indicativo")}
               valor={form.contacto_telefone ?? ""}
               onChange={(v) => setForm((f) => ({ ...f, contacto_telefone: v }))}
             />

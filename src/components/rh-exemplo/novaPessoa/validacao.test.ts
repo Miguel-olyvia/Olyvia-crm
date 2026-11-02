@@ -14,6 +14,7 @@ function minimo(): ValoresNovaPessoa {
   let v = valoresIniciais(HOJE);
   v = comPatch(v, "geral", { primeiro_nome: "Ana", apelido: "Sousa" });
   v = comPatch(v, "laborais", { cargo_id: "cargo-1" });
+  v = comPatch(v, "pessoais", { telefone_pessoal: "+351912345678" });
   return comPatch(v, "contrato", { tipo_contrato: "sem_termo", subsidio: "0", duodecimos_pct: "50" });
 }
 
@@ -26,7 +27,7 @@ describe("problemasDaNova: campos do RH e nome", () => {
 
   it("pede o nome, o cargo e os campos só do RH (tipo de contrato, subsídio e duodécimos)", () => {
     expect(ids(valoresIniciais(HOJE))).toEqual([
-      "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-tipo-contrato", "hr-novo-subsidio", "hr-novo-duodecimos",
+      "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-telefone-pessoal", "hr-novo-cargo", "hr-novo-tipo-contrato", "hr-novo-subsidio", "hr-novo-duodecimos",
     ]);
   });
 
