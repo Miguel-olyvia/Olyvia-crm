@@ -13,6 +13,9 @@ export interface LinhaDocEc {
   quantity: number | null; unidade: string | null; line_status: string | null; purchase_order_id: string | null;
   qty_needed: number | null; qty_reserved: number | null; qty_ordered: number | null; qty_received: number | null; qty_missing: number | null;
   qty_served: number | null; has_preferred_supplier: boolean | null;
+  /** A saída de stock (movimento «saida») que serviu a linha; null sem saída. Uma «venda» (a baixa no stock ao validar o pagamento)
+   *  também conta como servida na base, mas o material ainda está no armazém. */
+  stock_exit_movement_id?: string | null;
 }
 export interface DocEc { contract_id?: string; order_number: string | null; signed?: boolean; lines: LinhaDocEc[] }
 export interface PoBase { id: string; order_number: string | null; status: string; expected_delivery: string | null; fornecedor: string | null;
@@ -35,7 +38,12 @@ export const poResumo = (p: PoBase): PoResumoNeg => ({
 export function estadoDaLinha(l: LinhaDocEc): EstadoLinhaEc {
   if (l.item_type !== "product") return "service";
   const q = n(l.qty_needed) || n(l.quantity), servido = n(l.qty_served), res = n(l.qty_reserved), ped = n(l.qty_ordered), rec = n(l.qty_received);
-  if (q > 0 && servido >= q) return "served";
+  if (q > 0 && servido >= q) {
+    // 2/11 (reunião, negócio 1014: "saiu para a obra, mas não saiu"): ao validar o pagamento, a base regista uma «venda» do que há em
+    // stock e dá a linha como servida. Sem a saída de stock (stock_exit_movement_id), o material está pronto no armazém, não na obra.
+    if ("stock_exit_movement_id" in l && !l.stock_exit_movement_id) return rec > 0 ? "recvpo" : "ready";
+    return "served";
+  }
   // 30/10 (visto no browser): como a base (rpc_get_client_order_document: "is_served = qty_served + qty_received >= qty_needed"), o que
   // chegou do fornecedor para esta linha conta; antes, com a receção feita e a reserva a 0, a linha ficava "parcial" e a obra não arrancava
   if (q > 0 && servido + Math.max(res, rec) >= q) return rec > 0 ? "recvpo" : "ready";
