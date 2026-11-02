@@ -16,7 +16,7 @@ import {
   type SpCatalogRowInput,
   type SpCategoria,
 } from "@/lib/supplierPortal/spRpc";
-import { skuBase } from "@/lib/supplierPortal/skuPortal";
+import { skuPrevisto } from "@/lib/supplierPortal/skuPortal";
 
 interface SupplierCatalogItemDialogProps {
   open: boolean;
@@ -102,7 +102,8 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
 
   const categoria = categorias?.find((c) => c.id === form.categoria_id);
   const subcategoria = categoria?.subcategorias.find((s) => s.id === form.subcategoria_id);
-  const skuPrevisto = skuBase(categoria?.codigo, subcategoria?.codigo, form.medida, form.cor);
+  const skuVisto = skuPrevisto(categoria?.codigo, subcategoria?.codigo, form.medida, form.cor, item?.sku,
+    !!item && item.categoria_id === form.categoria_id && (item.subcategoria_id ?? null) === (form.subcategoria_id || null));
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -247,9 +248,9 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
               <div className="sm:col-span-2 rounded-md border bg-muted/40 p-3" aria-live="polite">
                 <p className="text-sm text-muted-foreground">SKU</p>
                 <p className="font-mono text-base">
-                  {item?.sku && skuPrevisto && (item.sku === skuPrevisto || (item.sku.startsWith(skuPrevisto) && /^-\d+$/.test(item.sku.slice(skuPrevisto.length)))) ? item.sku : skuPrevisto ?? "Escolha a categoria"}
+                  {skuVisto ?? "Escolha a categoria"}
                 </p>
-                <p className="text-xs text-muted-foreground">Gera-se ao gravar. Se já existir, fica com -2, -3 no fim.</p>
+                <p className="text-xs text-muted-foreground">Gera-se ao gravar. O número de 4 algarismos é o seguinte desta subcategoria.</p>
               </div>
             </>
           )}
