@@ -15,6 +15,9 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { AlertTriangle, Loader2, Mail, RefreshCw, Send, UserCheck, Unplug, UserX } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useSupplierContractsList, useInvalidateSupplierContracts } from "@/components/suppliers/contract/useSupplierContracts";
+import { STATUS_LABEL, contractRef } from "@/lib/supplierContracts/tipos";
 import {
   callRpc,
   describeAccessError,
@@ -80,6 +83,13 @@ export default function SupplierPortalTab({
   const [inviteName, setInviteName] = useState("");
   const [inviteEmailError, setInviteEmailError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // «Enviar o contrato junto»: o contrato de fornecedor em rascunho ou enviado (há no máximo um em curso).
+  const [sendContract, setSendContract] = useState(false);
+  const contractsQuery = useSupplierContractsList(supplierId, inviteOpen);
+  const invalidateContracts = useInvalidateSupplierContracts();
+  const contractToSend = contractsQuery.data?.can_manage
+    ? contractsQuery.data.contracts.find((c) => c.status === "draft" || c.status === "sent") ?? null
+    : null;
 
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokeUser, setRevokeUser] = useState<PortalUser | null>(null);
@@ -134,6 +144,7 @@ export default function SupplierPortalTab({
     setInviteEmail(status?.supplier_email || defaultEmail || "");
     setInviteName(defaultName || "");
     setInviteEmailError(null);
+    setSendContract(true);
     setInviteOpen(true);
   };
 
@@ -179,6 +190,7 @@ export default function SupplierPortalTab({
       supplier_id: supplierId,
       email,
       name: inviteName.trim() || undefined,
+      ...(sendContract && contractToSend ? { contract_id: contractToSend.id } : {}),
     });
     setSending(false);
     if (error || !data) {
@@ -195,6 +207,21 @@ export default function SupplierPortalTab({
     const fresh = await load();
     const user = fresh?.users.find((u) => u.email.toLowerCase() === email && u.access_status === "active");
     notifyResult(data.message || "Convite enviado", data.smtp_warning, data.smtp_error_safe, user?.portal_user_id ?? null);
+    if (data.contract_status) {
+      void invalidateContracts();
+      const ref = contractToSend ? contractRef(contractToSend) : "do fornecedor";
+      if (data.contract_status === "send_failed") {
+        sonnerToast.warning(`Contrato ${ref} não enviado`, {
+          description: `${data.contract_error?.message || "Não foi possível enviar o contrato."} O convite seguiu; envie o contrato no separador Contrato.`,
+          duration: 12000,
+        });
+      } else {
+        sonnerToast.success(
+          data.contract_status === "sent" ? `Contrato ${ref} enviado com o convite` : `Contrato ${ref} (já enviado) mencionado no convite`,
+          { description: "O fornecedor assina no portal com código SMS.", duration: 6000 },
+        );
+      }
+    }
   };
 
   async function handleResend(portalUserId: string) {
@@ -450,6 +477,25 @@ export default function SupplierPortalTab({
                 maxLength={200}
               />
             </div>
+            {contractToSend && (
+              <div className="flex items-start gap-2 rounded-md border p-3">
+                <Checkbox
+                  id="supplier-portal-invite-contract"
+                  checked={sendContract}
+                  onCheckedChange={(v) => setSendContract(v === true)}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="supplier-portal-invite-contract" className="cursor-pointer font-normal leading-snug">
+                  Enviar o contrato junto: <span className="font-mono">{contractRef(contractToSend)}</span> (
+                  {STATUS_LABEL[contractToSend.status].toLowerCase()})
+                  <span className="block text-xs text-muted-foreground">
+                    {contractToSend.status === "draft"
+                      ? "O rascunho é enviado (fica congelado) e o e-mail do convite pede a assinatura."
+                      : "O e-mail do convite menciona o contrato já enviado, para o fornecedor o assinar."}
+                  </span>
+                </Label>
+              </div>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setInviteOpen(false)} disabled={sending}>
                 Cancelar

@@ -271,6 +271,10 @@ export interface PortalAccessResponse {
   smtp_status: "sent" | "not_found" | "send_failed";
   smtp_warning?: boolean;
   smtp_error_safe?: string;
+  /** Só com contract_id no pedido (contrato de fornecedor enviado junto com o convite). */
+  contract_id?: string;
+  contract_status?: "sent" | "already_sent" | "send_failed";
+  contract_error?: { error: string; message: string };
 }
 
 export interface PortalAccessError {
@@ -283,6 +287,8 @@ const INVITE_ERROR_MESSAGES: Record<string, string> = {
   invalid_nif: "Preenche um NIF válido no fornecedor antes de enviar o acesso. Para fornecedores estrangeiros usa o prefixo do país (ex.: ESB12345678).",
   email_not_allowed:
     "Este email não pode ser usado no portal do fornecedor: já pertence a um utilizador interno ou a um cliente do portal. Indica outro email.",
+  contract_not_found: "O contrato escolhido já não existe para este fornecedor. Atualiza a ficha e tenta de novo.",
+  contract_invalid_state: "O contrato escolhido já não pode ser enviado (já foi assinado, recusado ou cancelado). Envia o convite sem o contrato.",
 };
 
 /** Mensagem a mostrar para um erro da edge function (pelo código estável). */

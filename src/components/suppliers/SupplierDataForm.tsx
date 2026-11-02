@@ -2,8 +2,11 @@
 // mesmos campos, validação e gravação de sempre (o submit continua em
 // Suppliers.tsx); só muda o arranjo. O botão "Guardar" está no rodapé da folha
 // e submete este formulário pelo atributo form={formId}.
+// Com um contrato de fornecedor assinado e em vigor (conditionsLock), o prazo
+// de entrega (SLA) e as condições comerciais ficam só de leitura: vêm do
+// contrato e a BD recusa mudá-las (trg_suppliers_05_guarda_condicoes).
 import type { Dispatch, FormEvent, SetStateAction } from "react";
-import { Lock } from "lucide-react";
+import { FileSignature, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,6 +46,10 @@ interface SupplierDataFormProps {
   portalLinked?: boolean;
   /** Leva ao separador Portal (onde se revoga o acesso). */
   onGoToPortal?: () => void;
+  /** Contrato assinado e em vigor (conditions_locked): SLA e condições só de leitura. */
+  conditionsLock?: { contractLabel: string } | null;
+  /** Leva ao separador Contrato (onde se faz uma nova versão). */
+  onGoToContract?: () => void;
 }
 
 type TextField = Exclude<keyof SupplierFormData, "is_active">;
@@ -58,6 +65,8 @@ export function SupplierDataForm({
   t,
   portalLinked = false,
   onGoToPortal,
+  conditionsLock = null,
+  onGoToContract,
 }: SupplierDataFormProps) {
   // Código postal completo: procura a rua e a cidade e preenche o que está vazio (reunião de 30/10).
   useMoradaPorCodigoPostal(formData.postal_code, (m) => setFormData((f) => ({
@@ -66,7 +75,14 @@ export function SupplierDataForm({
   const field = (
     key: TextField,
     label: string,
-    opts: { required?: boolean; type?: string; span2?: boolean; hint?: string; inputProps?: Record<string, unknown> } = {},
+    opts: {
+      required?: boolean;
+      type?: string;
+      span2?: boolean;
+      hint?: string;
+      disabled?: boolean;
+      inputProps?: Record<string, unknown>;
+    } = {},
   ) => {
     const err = fieldErrors[key];
     const hintId = opts.hint ? `${formId}-${key}-hint` : undefined;
@@ -83,6 +99,7 @@ export function SupplierDataForm({
           value={formData[key]}
           onChange={(e) => setFormData((prev) => ({ ...prev, [key]: e.target.value }))}
           required={opts.required}
+          disabled={opts.disabled}
           aria-invalid={!!err}
           aria-describedby={[hintId, errId].filter(Boolean).join(" ") || undefined}
           className={err ? "border-destructive" : ""}
@@ -125,6 +142,27 @@ export function SupplierDataForm({
         </div>
       )}
 
+      {conditionsLock && (
+        <div
+          role="note"
+          className="flex items-start gap-2.5 rounded-lg border border-info/30 bg-info/10 px-3.5 py-3 text-sm text-sky-900 dark:text-info"
+        >
+          <FileSignature className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <div className="space-y-2">
+            <p>
+              Prazo de entrega e condições comerciais definidas pelo contrato {conditionsLock.contractLabel}; para mudar faça
+              uma nova versão.
+            </p>
+            {onGoToContract && (
+              <Button type="button" variant="outline" size="sm" className="h-7" onClick={onGoToContract}>
+                <FileSignature className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+                Ir para o Contrato
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       <OrganizationFormSection
         value={organizationSelection}
         onChange={onOrganizationChange}
@@ -148,6 +186,8 @@ export function SupplierDataForm({
         })}
         {field("delivery_sla_days", t("suppliers.form.deliverySlaDays"), {
           type: "number",
+          disabled: !!conditionsLock,
+          hint: conditionsLock ? `Definido pelo contrato ${conditionsLock.contractLabel}.` : undefined,
           inputProps: { min: "1", step: "1" },
         })}
         {field("address", t("suppliers.form.address"), { span2: true })}
