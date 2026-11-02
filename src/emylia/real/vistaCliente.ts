@@ -16,6 +16,8 @@ import type { Envio } from "../trabalhoObra";
 import { sidsDoNegocio } from "./negocioReal";
 import { nifEmpresa, nomeEmpresa, nomeFiscalEmpresa } from "../acessosPortal";
 import { RESPONSAVEL_OBRA } from "../obraOps";
+import { lerInventario } from "../inventario/loja";
+import { resumoEcNegocio, type PoResumoNeg, type ResumoEcNeg } from "../inventario/ponteNegocios";
 
 export const VERSAO_VISTA = 1;
 
@@ -27,6 +29,8 @@ export interface VistaCliente {
   svc: Record<string, Servico>;
   empresa: { nome: string; nif: string; nomeFiscal: string };
   responsavel: { n: string; papel: string; tel: string };
+  /** O estado da encomenda de cliente (os materiais), já calculado no CRM e sem fornecedores. */
+  ec?: ResumoEcNeg;
 }
 
 const custoZero = (c: CustoCongelado): CustoCongelado => ({ h: c.h, oficios: [], mo: 0, eq: 0, cons: 0, taxaEstr: 0, estr: 0, ajuste: 0, q: c.q });
@@ -120,13 +124,23 @@ export function servicosParaCliente(d: Negocio, S: Estado): Record<string, Servi
 
 /** A vista do cliente de um negócio (o que neg_vista_cliente_guardar recebe). */
 export function vistaDoCliente(d: Negocio, S: Estado): VistaCliente {
+  const ec = encomendaParaCliente(resumoEcNegocio(lerInventario(), d.obra.ec?.ref));
   return {
     v: VERSAO_VISTA,
     d: negocioParaCliente(d),
     svc: servicosParaCliente(d, S),
     empresa: { nome: nomeEmpresa(), nif: nifEmpresa(), nomeFiscal: nomeFiscalEmpresa() },
     responsavel: { n: RESPONSAVEL_OBRA.n, papel: RESPONSAVEL_OBRA.papel, tel: RESPONSAVEL_OBRA.tel },
+    ...(ec ? { ec } : {}),
   };
+}
+
+/** O estado da encomenda de cliente como o CRM o calcula (a da base, ou a do Inventário), sem os fornecedores nem os ids internos:
+ *  o portal mostra o estado dos materiais (reservado, encomendado, na obra) com as mesmas contas (MateriaisPortal, NotaEncomendaDoc). */
+export function encomendaParaCliente(r: ResumoEcNeg | null | undefined): ResumoEcNeg | null {
+  if (!r) return null;
+  const po = ({ uuid: _u, forn: _f, id: _i, ...p }: PoResumoNeg): PoResumoNeg => ({ ...p, id: "", forn: "" });
+  return { ...structuredClone(r), pos: r.pos.map(po), linhas: r.linhas.map((l) => ({ ...structuredClone(l), pos: l.pos.map(po) })) };
 }
 
 /** Só os negócios que o cliente já vê no portal: com a proposta enviada. */
@@ -212,17 +226,73 @@ export async function lerRececoes(sb: SupabaseClient, org: string): Promise<Map<
   return new Map(Object.entries(data as Record<string, RececaoCliente>));
 }
 
+/* ------------------------------------------------------------------ as respostas do cliente (20270103900000) */
+
+export type TipoResposta = "pagamento" | "adenda_aceitar" | "adenda_recusar" | "adenda_alterar" | "adenda_contrato_alterar" | "adenda_assinar";
+/** O que portal_neg_responder gravou (fn_neg_resposta_json). `negocio` é o uuid; `ref` o número da fatura ou da adenda. */
+export interface RespostaCliente {
+  id: string; negocio: string; tipo: TipoResposta; ref: string; nome: string; telemovel: string | null; em: string; assinatura: string | null;
+  dados: { referencia?: string; motivos?: string[]; nota?: string; motivo?: string; clausulas?: { c: string; nota: string }[] };
+}
+
+type AcoesMotor = ReturnType<typeof import("../motor").acoes>;
+
+/** Aplica uma resposta ao negócio com as ações da V1 (as mesmas do portal do protótipo). Devolve false se não deu. */
+export function aplicarResposta(d: Negocio, A: AcoesMotor, r: RespostaCliente): boolean {
+  const x = r.dados ?? {};
+  try {
+    switch (r.tipo) {
+      case "pagamento": {
+        const ref = x.referencia?.trim() ?? "";
+        const daAdenda = (d.adendas ?? []).some((a) => (a.faturas ?? (a.fatura ? [a.fatura] : [])).some((f) => f.n === r.ref));
+        if (daAdenda) A.avisarPagamento(d.id, ref, r.ref);
+        else if (d.fin.fatura?.n === r.ref && !d.fin.pago) A.avisarPagamento(d.id, ref);
+        else {
+          // a fatura de uma prestação (d.fin.tranches): o Financeiro vê o aviso no comprovativo do negócio
+          d.f.comprovativo = `Fatura ${r.ref}${ref ? ": " + ref : ": pago, avisado no portal"}`;
+          if (!d.f.data_pag) d.f.data_pag = r.em.slice(0, 10);
+          d.hist.push({ t: `O cliente avisou no portal que pagou a fatura ${r.ref}${ref ? " · " + ref : ""}`, q: quandoPt(r.em), k: "a" });
+        }
+        return true;
+      }
+      case "adenda_aceitar": A.aceitarAdenda(d.id, r.ref); return true;
+      case "adenda_recusar": A.recusarAdenda(d.id, r.ref, x.motivo ?? [...(x.motivos ?? []), x.nota ?? ""].filter(Boolean).join(" · ")); return true;
+      case "adenda_alterar": A.pedirAlteracoesAdenda(d.id, r.ref, x.nota ?? "", x.motivos ?? []); return true;
+      case "adenda_contrato_alterar": A.pedirAlteracoesContratoAdenda(d.id, r.ref, x.clausulas ?? []); return true;
+      case "adenda_assinar":
+        A.assinarAdendaCom(d.id, r.ref, { tipo: "sms", nome: r.nome, q: quandoPt(r.em), ...(r.assinatura ? { id: r.assinatura } : {}), ...(r.telemovel ? { telemovel: r.telemovel } : {}) });
+        return true;
+    }
+  } catch { return false; }
+  return false;
+}
+
+/** As respostas por aplicar da organização (neg_respostas_ler). Numa base sem a função, nenhuma. */
+export async function lerRespostas(sb: SupabaseClient, org: string): Promise<RespostaCliente[]> {
+  const { data, error } = await sb.rpc("neg_respostas_ler" as never, { p_org: org } as never);
+  return error || !Array.isArray(data) ? [] : (data as RespostaCliente[]);
+}
+
+/** Marca as respostas como aplicadas (depois de o negócio ficar gravado). */
+export async function marcarRespostas(sb: SupabaseClient, org: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const { error } = await sb.rpc("neg_respostas_marcar" as never, { p_org: org, p_ids: ids } as never);
+  if (error) throw new Error(error.message);
+}
+
 /* ------------------------------------------------------------------ o lado do portal */
 
 /** A vista lida da base, se for uma vista desta versão (com a receção da obra, se o cliente já a assinou). */
-export function lerVista(j: unknown): (VistaCliente & { rececao: RececaoCliente | null }) | null {
-  const o = j as { vista?: unknown; rececao?: unknown } | null;
+export function lerVista(j: unknown): (VistaCliente & { rececao: RececaoCliente | null; respostas: RespostaCliente[] }) | null {
+  const o = j as { vista?: unknown; rececao?: unknown; respostas?: unknown } | null;
   const v = o?.vista as Partial<VistaCliente> | undefined;
   if (!v || v.v !== VERSAO_VISTA || !v.d || typeof v.d !== "object") return null;
   const r = o?.rececao as RececaoCliente | null | undefined;
   return { v: VERSAO_VISTA, d: v.d as Negocio, svc: v.svc ?? {}, empresa: v.empresa ?? { nome: "", nif: "", nomeFiscal: "" },
     responsavel: v.responsavel ?? { n: "", papel: "Responsável de obra", tel: "" },
-    rececao: r && typeof r === "object" && typeof r.auto === "string" ? r : null };
+    ...(v.ec && typeof v.ec === "object" ? { ec: v.ec } : {}),
+    rececao: r && typeof r === "object" && typeof r.auto === "string" ? r : null,
+    respostas: Array.isArray(o?.respostas) ? (o!.respostas as RespostaCliente[]) : [] };
 }
 
 /** O estado real da proposta e do contrato (o que o cliente acabou de fazer no portal), por cima da vista: a vista só se atualiza

@@ -27,7 +27,7 @@ export function negociosDoPortal(deals: Negocio[], ids: number[]): Negocio[] {
 const ESTADO: Record<ReturnType<typeof passoPortal>["estado"], string> = {
   rever: "Proposta para rever", pedido: "Pediu alterações: a nova versão está a ser preparada", recusada: "Proposta recusada",
   preparar: "O contrato está a ser preparado", revisao: "O contrato está a ser revisto", assinar: "Contrato por assinar",
-  obra: "Obra", pagar: "Fatura por pagar", auto: "Receber a obra", relatorio: "Obra concluída", sem: "À espera de documentos",
+  obra: "Obra", pagar: "Fatura por pagar", auto: "Receber o serviço", relatorio: "Obra concluída", sem: "À espera de documentos",
 };
 
 /** O código da encomenda que o link do email trouxe (?po=), se tiver o formato de um código; senão null. */

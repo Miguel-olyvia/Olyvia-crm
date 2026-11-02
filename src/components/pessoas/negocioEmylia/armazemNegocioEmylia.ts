@@ -15,6 +15,7 @@ import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { deLinhas, garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
+import { publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 
@@ -100,6 +101,8 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   let deNovo = false;
   let lidaEm = 0;
   let refs = new Map<number, RefNegocio>();
+  // as vistas do cliente já gravadas nesta sessão (vistaCliente.ts)
+  const vistasCliente: VistasGravadas = new Map();
   // os negócios com documentos do CRM (pelo número da Emylia, para gravarMudancas; pelo id da base, para a ficha) e a cópia lida de cada um
   let soLeitura = new Set<number>();
   let docsPorId = new Set<string>();
@@ -194,6 +197,13 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     if (relerFinanceiro && !porGravar()) {
       try { await lerAgora(false); mudou(); }
       catch (e) { avisar({ msg: "Não foi possível atualizar o negócio", sub: (e as Error).message, kind: "bad" }); }
+    }
+    // 2/11 (20270103800000): a vista do cliente no portal, como no /negocios (só a que mudou; um erro aqui não para a ficha)
+    if (gravados > 0) {
+      try {
+        const erros = await publicarVistas(sb, org, S, refs, vistasCliente);
+        if (erros.length) console.warn("[portal] vistas do cliente por gravar:", erros);
+      } catch (e) { console.warn("[portal] vistas do cliente:", (e as Error).message); }
     }
     if (gravados > 0) for (const f of [...aposGravar]) f();
   };

@@ -3,9 +3,11 @@
 // as notas dos técnicos, o diário, os materiais, as faturas das prestações (pagas e por pagar), os documentos (proposta, contrato,
 // adendas, nota de encomenda, faturas, auto e relatório), a receção da obra, o relatório final e a conversa com a equipa.
 // · O negócio vem da vista do cliente (portal_neg_vista, 20270103800000), que o CRM grava já sem custos (real/vistaCliente.ts).
-// · O estado da proposta e do contrato é o real (o que a RLS do portal já deixa ler), por cima da vista; a receção da obra também.
-// · Aceitar e assinar abrem as páginas reais (código por SMS, client-portal-action). A conversa é a da base (ConversaDoNegocio).
-// · O auto de receção assina-se aqui, com o código por SMS (sms-otp) e portal_neg_receber_obra. Assinado, aparece o relatório da obra.
+// · O estado da proposta e do contrato é o real (o que a RLS do portal já deixa ler), por cima da vista; a receção da obra e as
+//   respostas do cliente ainda por aplicar pelo CRM também (com as mesmas ações da V1), para o cliente ver logo o que fez.
+// · Aceitar e assinar o contrato abrem as páginas reais (código por SMS, client-portal-action). A conversa é a da base.
+// · O auto de receção (portal_neg_receber_obra) e a adenda (aceitar e assinar, portal_neg_responder) assinam-se aqui com o código
+//   por SMS (sms-otp). Pedir alterações, não aceitar e avisar o pagamento vão por portal_neg_responder (20270103900000).
 // · Sem vista (o CRM ainda não abriu o negócio depois desta versão), abre a proposta ou o contrato, como antes.
 import { useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
@@ -17,15 +19,17 @@ import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortalCliente } from "@/emylia/PortalCliente";
-import { acoes, seed, type Estado } from "@/emylia/motor";
+import { acoes, seed, type Estado, type PedidoClausula } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { definirModoReal } from "@/emylia/acessosPortal";
 import { RESPONSAVEL_OBRA } from "@/emylia/obraOps";
-import { aplicarRececao, comEstadoReal, lerVista, type RececaoCliente, type VistaCliente } from "@/emylia/real/vistaCliente";
+import { definirEncomendasReais } from "@/emylia/real/encomendaReal";
+import { aplicarRececao, aplicarResposta, comEstadoReal, lerVista, type RececaoCliente, type RespostaCliente, type TipoResposta, type VistaCliente } from "@/emylia/real/vistaCliente";
 
 const ATUALIZAR_CADA_MS = 30_000;
 
 type Rpc = { rpc: (f: string, a: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { message: string } | null }> };
+const rpc = (f: string, a: Record<string, unknown>) => (supabase as unknown as Rpc).rpc(f, a);
 
 interface DocsReais { propostaId: string | null; propostaEstado: string | null; contratoId: string | null; contratoEstado: string | null }
 
@@ -41,23 +45,29 @@ async function lerDocs(negocioId: string): Promise<DocsReais> {
   return { propostaId: pr?.id ?? null, propostaEstado: pr?.status ?? null, contratoId: ct?.id ?? null, contratoEstado: ct?.status ?? null };
 }
 
-/** O Estado mínimo do motor para o ecrã do cliente: só este negócio e os serviços que ele usa (sem o exemplo). */
-function estadoDoCliente(v: VistaCliente, rececao: RececaoCliente | null, docs: DocsReais | undefined): Estado {
+/** O Estado mínimo do motor para o ecrã do cliente: só este negócio e os serviços que ele usa (sem o exemplo), com o que o cliente
+ *  já fez por cima (o estado real dos documentos, a receção e as respostas por aplicar). */
+export function estadoDoCliente(v: VistaCliente, rececao: RececaoCliente | null, respostas: readonly RespostaCliente[], docs: DocsReais | undefined): Estado {
   const S = seed();
   const d = comEstadoReal(v.d, docs?.propostaEstado, docs?.contratoEstado);
   aplicarRececao(d, rececao);
   S.deals = [d]; S.clientes = []; S.svc = v.svc as Estado["svc"]; S.deal = d.id; S.semExemplos = true;
+  const A = acoes(S, () => {}, (fn) => fn());
+  for (const r of respostas) aplicarResposta(d, A, r);
   return S;
 }
 
-/** A assinatura do auto de receção: o código por SMS (sms-otp) e, verificado, portal_neg_receber_obra. */
-function ReceberObraSms({ negocioId, auto, reservas, voltar, feito }: { negocioId: string; auto: string; reservas?: string; voltar: () => void; feito: () => void }) {
+/** O código por SMS (sms-otp) e, verificado, a ação na base (`confirmar`). O mesmo para o auto de receção e para a adenda. */
+function CodigoSms({ subtitulo, titulo, texto, acao, referenceType, purpose, negocioId, voltar, voltarTexto, confirmar }: {
+  subtitulo: string; titulo: string; texto: string; acao: string; referenceType: string; purpose: string; negocioId: string;
+  voltar: () => void; voltarTexto: string; confirmar: () => Promise<void>;
+}) {
   const [fase, setFase] = useState<"inicio" | "a-enviar" | "codigo" | "a-verificar">("inicio");
   const [codigo, setCodigo] = useState("");
   const [tel, setTel] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const aEnviar = useRef(false);
-  const ref = { reference_id: negocioId, reference_type: "negocio_auto", purpose: "auto_rececao" };
+  const ref = { reference_id: negocioId, reference_type: referenceType, purpose };
 
   const enviar = async () => {
     if (aEnviar.current) return;
@@ -76,21 +86,16 @@ function ReceberObraSms({ negocioId, auto, reservas, voltar, feito }: { negocioI
       const v = await supabase.functions.invoke("sms-otp", { body: { action: "verify_otp", ...ref, code: codigo } });
       if (v.error) throw new Error(v.error.message);
       if (v.data?.error) throw new Error(v.data.message || "Código inválido.");
-      const r = await (supabase as unknown as Rpc).rpc("portal_neg_receber_obra", { p_negocio_id: negocioId, p_auto: auto, p_reservas: reservas ?? null });
-      if (r.error) throw new Error(r.error.message);
-      feito();
+      await confirmar();
     } catch (e) { setErro((e as Error).message); setCodigo(""); setFase("codigo"); }
   };
 
   const botao = "inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 text-[15px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2 disabled:opacity-50";
   return (
     <div className="space-y-4">
-      <p className="text-sm font-medium text-slate-500">Receber a obra · auto {auto}</p>
-      <h2 className="text-xl font-semibold">Assinar o auto de receção</h2>
-      <p className="text-[15px] text-slate-600">
-        {reservas ? `Fica escrita a sua observação: «${reservas}». ` : "Diz que está tudo bem. "}
-        Para assinar, enviamos um código por SMS para o seu telemóvel.
-      </p>
+      <p className="text-sm font-medium text-slate-500">{subtitulo}</p>
+      <h2 className="text-xl font-semibold">{titulo}</h2>
+      <p className="text-[15px] text-slate-600">{texto} Para confirmar, enviamos um código por SMS para o seu telemóvel.</p>
       {fase === "inicio" || fase === "a-enviar" ? (
         <button type="button" onClick={enviar} disabled={fase === "a-enviar"} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>
           {fase === "a-enviar" ? "A enviar o código…" : "Enviar o código por SMS"}
@@ -103,13 +108,13 @@ function ReceberObraSms({ negocioId, auto, reservas, voltar, feito }: { negocioI
               aria-invalid={!!erro} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-center text-xl tracking-[0.4em] tabular-nums outline-none focus:border-slate-900" />
           </label>
           <button type="button" onClick={assinar} disabled={codigo.length !== 6 || fase === "a-verificar"} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>
-            {fase === "a-verificar" ? "A assinar…" : "Assinar o auto"}
+            {fase === "a-verificar" ? "A confirmar…" : acao}
           </button>
           <button type="button" onClick={enviar} className="min-h-11 w-full text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline">Enviar outro código</button>
         </div>
       )}
       {erro && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[15px] text-red-900">{erro}</p>}
-      <button type="button" onClick={voltar} className={`${botao} border border-slate-300 bg-white text-slate-800 hover:border-slate-500`}>Voltar ao auto</button>
+      <button type="button" onClick={voltar} className={`${botao} border border-slate-300 bg-white text-slate-800 hover:border-slate-500`}>{voltarTexto}</button>
     </div>
   );
 }
@@ -124,7 +129,7 @@ const ClientPortalNegocio = () => {
   const vista = useQuery({
     queryKey: ["portal-negocio-vista", id],
     queryFn: async () => {
-      const { data, error } = await (supabase as unknown as Rpc).rpc("portal_neg_vista", { p_negocio_id: id });
+      const { data, error } = await rpc("portal_neg_vista", { p_negocio_id: id });
       if (error) throw new Error(error.message);
       return lerVista(data);
     },
@@ -141,6 +146,18 @@ const ClientPortalNegocio = () => {
     refetchOnWindowFocus: true,
     staleTime: 0,
   });
+  const reler = () => qc.invalidateQueries({ queryKey: ["portal-negocio-vista", id] });
+
+  /** Uma resposta do cliente para a base; depois relê a vista (a resposta aparece logo, por cima). */
+  const responder = async (tipo: TipoResposta, ref: string, dados: Record<string, unknown> = {}) => {
+    const { error } = await rpc("portal_neg_responder", { p_negocio_id: id, p_tipo: tipo, p_ref: ref, p_dados: dados });
+    if (error) throw new Error(error.message);
+    setAviso(null);
+    await reler();
+  };
+  const responderComAviso = (tipo: TipoResposta, ref: string, dados: Record<string, unknown>) => {
+    void responder(tipo, ref, dados).catch((e: Error) => setAviso(e.message));
+  };
 
   const v = vista.data ?? null;
   const ctx = useMemo<Ctx | null>(() => {
@@ -148,11 +165,22 @@ const ClientPortalNegocio = () => {
     // o nome e o NIF da empresa nos documentos, e o responsável de obra, são os da organização do negócio
     definirModoReal(activeOrg?.organizationId ?? null, v.empresa.nome || activeOrg?.name || "", { nome: v.empresa.nomeFiscal, nif: v.empresa.nif });
     if (v.responsavel.n) Object.assign(RESPONSAVEL_OBRA, v.responsavel);
-    const S = estadoDoCliente(v, v.rececao, docs.data);
-    // as ações do motor nunca correm aqui: o que tem caminho real (aceitar, assinar, receber a obra, escrever) vai pelas funções reais
-    const A = new Proxy({}, { get: () => () => setAviso("Isto ainda não se faz por aqui. Escreva-nos na conversa e tratamos consigo.") }) as ReturnType<typeof acoes>;
+    const S = estadoDoCliente(v, v.rececao, v.respostas, docs.data);
+    // o estado dos materiais, como o CRM o calculou (MateriaisPortal e NotaEncomendaDoc lêem-no pela referência da encomenda)
+    const refEc = S.deals[0].obra.ec?.ref;
+    definirEncomendasReais(v.ec && refEc ? new Map([[refEc, v.ec]]) : null);
+    // As ações do motor não correm aqui. As que o cliente faz nos cartões da V1 vão para a base (portal_neg_responder); o resto
+    // (aceitar e assinar com SMS, receber a obra, pagar, escrever) tem o seu caminho próprio.
+    const naBase: Record<string, (...a: unknown[]) => void> = {
+      pedirAlteracoesAdenda: (_id, n, texto, motivos) => responderComAviso("adenda_alterar", String(n), { nota: String(texto ?? ""), motivos: (motivos as string[]) ?? [] }),
+      recusarAdenda: (_id, n, motivo) => responderComAviso("adenda_recusar", String(n), { motivo: String(motivo ?? "") }),
+      pedirAlteracoesContratoAdenda: (_id, n, cs) => responderComAviso("adenda_contrato_alterar", String(n), { clausulas: (cs as PedidoClausula[]) ?? [] }),
+    };
+    const A = new Proxy({}, {
+      get: (_t, nome: string) => naBase[nome] ?? (() => setAviso("Isto ainda não se faz por aqui. Escreva-nos na conversa e tratamos consigo.")),
+    }) as ReturnType<typeof acoes>;
     return { S, A, run: (fn) => { try { fn(); } catch { /* nada corre no motor */ } }, go: (fn) => () => fn(), q: "" };
-  }, [v, docs.data, activeOrg?.organizationId, activeOrg?.name]);
+  }, [v, docs.data, activeOrg?.organizationId, activeOrg?.name]); // eslint-disable-line react-hooks/exhaustive-deps -- responder só usa o id e o qc
 
   if (orgsLoading || vista.isLoading || docs.isLoading) {
     return <ClientPortalLayout><div className="space-y-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div></ClientPortalLayout>;
@@ -178,9 +206,22 @@ const ClientPortalNegocio = () => {
         abrirContrato: D?.contratoId ? () => navigate(`/client-portal/contracts/${D.contratoId}`) : null,
         conversa: <ConversaDoNegocio negocioId={id} />,
         receberObra: (reservas, voltar) => d.obra.auto ? (
-          <ReceberObraSms negocioId={id} auto={d.obra.auto.n} reservas={reservas} voltar={voltar}
-            feito={() => { voltar(); void qc.invalidateQueries({ queryKey: ["portal-negocio-vista", id] }); }} />
+          <CodigoSms negocioId={id} referenceType="negocio_auto" purpose="auto_rececao" subtitulo={`Receber o serviço · auto ${d.obra.auto.n}`}
+            titulo="Assinar o auto de receção" texto={reservas ? `Fica escrita a sua observação: «${reservas}».` : "Diz que está tudo bem."}
+            acao="Assinar o auto" voltar={voltar} voltarTexto="Voltar ao auto"
+            confirmar={async () => {
+              const r = await rpc("portal_neg_receber_obra", { p_negocio_id: id, p_auto: d.obra.auto!.n, p_reservas: reservas ?? null });
+              if (r.error) throw new Error(r.error.message);
+              voltar(); await reler();
+            }} />
         ) : null,
+        assinarComSms: ({ titulo, texto, acao, fim, ref, voltar }) => (
+          <CodigoSms negocioId={id} referenceType="negocio_adenda" purpose={fim} subtitulo={`Trabalhos a mais · adenda ${ref}`} titulo={titulo} texto={texto}
+            acao={acao} voltar={voltar} voltarTexto="Voltar à adenda"
+            confirmar={async () => { await responder(fim, ref); voltar(); }} />
+        ),
+        avisarPagamento: (numero, referencia) => responder("pagamento", numero, referencia ? { referencia } : {}),
+        avisados: v.respostas.filter((r) => r.tipo === "pagamento").map((r) => r.ref),
         aviso,
       }}
     />

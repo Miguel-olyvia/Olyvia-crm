@@ -1,5 +1,5 @@
 // O portal do cliente (14/10/2026; percurso guiado a 15/10): o que o cliente vê no link pessoal, no telemóvel ou no computador.
-// Um percurso com o próximo passo sempre à vista: Rever a proposta → Aceitar → Assinar o contrato → Acompanhar a obra.
+// Um percurso com o próximo passo sempre à vista: Rever a proposta → Aceitar → Assinar o contrato → Acompanhar o serviço.
 // · Proposta por aceitar: a proposta inteira (o mesmo documento), com "Aceitar a proposta" sempre à mão em baixo.
 // · Aceite: é o comercial que gera o contrato (decisão do Ruben, 15/10); até lá, "O contrato está a ser preparado", sem botão.
 // · Contrato gerado: aparece no mesmo link, por assinar, com o contrato à vista.
@@ -29,21 +29,27 @@ import { RESPONSAVEL_OBRA } from "./obraOps";
 
 /** 2/11: o portal real (/client-portal/negocios/:id). A proposta aceita-se e o contrato assina-se nas páginas reais do portal (com o
  *  código por SMS e a client-portal-action); a conversa é a da base (negocio_mensagens); o auto de receção assina-se com o código por
- *  SMS (portal_neg_receber_obra). O que ainda não tem caminho na base (avisar o pagamento, adendas) não simula nada: mostra o que há
- *  e diz para falar com a equipa. */
+ *  SMS (portal_neg_receber_obra). As adendas e o aviso de pagamento vão por portal_neg_responder (aceitar e assinar a adenda com o
+ *  código por SMS); as outras respostas (pedir alterações, não aceitar) vão pelas mesmas ações da V1, que a página liga à base. */
 export interface PortalReal {
   abrirProposta: () => void;
   abrirContrato: (() => void) | null;
   conversa: ReactNode;
   /** A assinatura do auto de receção (o código por SMS), com as observações do cliente; `voltar` fecha-a. */
   receberObra: (reservas: string | undefined, voltar: () => void) => ReactNode;
+  /** Aceitar ou assinar a adenda com o código por SMS; `voltar` fecha-a. */
+  assinarComSms: (o: { titulo: string; texto: string; acao: string; fim: "adenda_aceitar" | "adenda_assinar"; ref: string; voltar: () => void }) => ReactNode;
+  /** Avisar que pagou a fatura (o número), com a referência do pagamento. Rejeita com a mensagem do erro. */
+  avisarPagamento: (numero: string, referencia: string) => Promise<void>;
+  /** As faturas de que o cliente já avisou o pagamento (à espera do Financeiro). */
+  avisados: readonly string[];
   /** a resposta a uma ação que ainda não tem caminho no portal real */
   aviso?: string | null;
 }
 
 /** Os passos do percurso, pela ordem. */
-export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar a obra", "Receber a obra"] as const;
-const CURTO = ["Proposta", "Aceitar", "Contrato", "Obra", "Receção"];
+export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar o serviço", "Receber o serviço"] as const;
+const CURTO = ["Proposta", "Aceitar", "Contrato", "Serviço", "Receção"];
 /** 21/10: os passos da adenda (o mesmo percurso do orçamento): a proposta, aceitar, o contrato da adenda, assinar e pagar. */
 export const PASSOS_ADENDA = ["Proposta da adenda", "Aceitar", "Contrato da adenda", "Assinar", "Pagar"] as const;
 const CURTO_ADENDA = ["Proposta", "Aceitar", "Contrato", "Assinar", "Pagar"];
@@ -274,7 +280,7 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
   for (const f of faturasReais.filter((x) => !x.pagamento)) {
     outros.push({
       id: "tr-" + f.id, t: `Pagar a fatura ${f.numero}`, sub: `${nomeTranche(f)} · emitida a ${f.data.split("-").reverse().join("/")}`,
-      corpo: <PagarReal montante={eur(f.valor)} verFatura={() => setDoc("tr:" + f.id)} />,
+      corpo: <PagarReal numero={f.numero} real={real!} montante={eur(f.valor)} verFatura={() => setDoc("tr:" + f.id)} />,
     });
   }
   if (d.fin.fatura && !d.fin.pago && T && !faturasReais.some((f) => f.numero === d.fin.fatura?.n)) {
@@ -283,7 +289,7 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
     const vence = vencimento(emitidaEm(ft.q), d.f.vencimento || "15 dias");
     outros.push({
       id: "pag", t: `Pagar a fatura ${ft.n}`, sub: `${t0.l} · vence a ${vence}`,
-      corpo: real ? <PagarReal montante={eur(t0.v)} verFatura={() => setDoc("fatura")} /> : <PagarFatura numero={ft.n} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={d.f} titular={d.nome} verFatura={() => setDoc("fatura")}
+      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(t0.v)} verFatura={() => setDoc("fatura")} /> : <PagarFatura numero={ft.n} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={d.f} titular={d.nome} verFatura={() => setDoc("fatura")}
         escolher={(m) => run(() => A.escolherMetodo(d.id, m))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t))} />,
     });
   }
@@ -293,7 +299,7 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
     const vence = vencimento(emitidaEm(ft.q), "15 dias");
     outros.push({
       id: "pag-" + ft.n, t: `Pagar a fatura ${ft.n}`, sub: `Adenda ${a.n} · ${nomeParcela(ft.i)} (${ft.l.toLowerCase()}) · vence a ${vence}${ft.i > 0 && !primeiraPaga(a) ? ` · primeiro, a ${nomeParcela(0)}` : ""}`,
-      corpo: real ? <PagarReal montante={eur(ft.v)} verFatura={() => setDoc("ft:" + ft.n)} /> : <PagarFatura numero={ft.n} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={ft.pag ?? {}} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)}
+      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(ft.v)} verFatura={() => setDoc("ft:" + ft.n)} /> : <PagarFatura numero={ft.n} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={ft.pag ?? {}} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)}
         escolher={(m) => run(() => A.escolherMetodo(d.id, m, ft.n))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r, ft.n))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t, ft.n))} />,
     });
   }
@@ -456,7 +462,9 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
   } else if (P.estado === "assinar") {
     // 15/10: assinar abre aqui, no cartão do passo: Chave Móvel Digital ou código por SMS (AssinaturaContrato.tsx)
     agora = confirmar === "assinar" ? (
-      ad
+      ad && real
+        ? real.assinarComSms({ titulo: `Assinar a adenda ${ad.n}`, texto: `Li e aceito a adenda ${ad.n} ao contrato CT 2026/${d.id}.`, acao: "Assinar a adenda", fim: "adenda_assinar", ref: ad.n, voltar: () => setConfirmar(null) })
+        : ad
         ? <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={ad.n} aceito={`Li e aceito a adenda ${ad.n} ao contrato CT 2026/${d.id}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
             onAssinar={(as) => fazer(() => A.assinarAdendaCom(d.id, ad.n, as))} onCancelar={() => setConfirmar(null)} />
         : <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={`CT 2026/${d.id}`}
@@ -538,7 +546,7 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
     ) : (
       <>
         <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Obra concluída</p>
-        <h2 className="mt-2 text-xl font-semibold">Receber a obra</h2>
+        <h2 className="mt-2 text-xl font-semibold">Receber o serviço</h2>
         <p className="mt-1 text-[15px] text-slate-600">Veja a obra com calma. Depois assine o auto de receção: a garantia começa nesse dia e recebe aqui o relatório da obra, com tudo o que fizemos.</p>
         <fieldset className="mt-4 border-t border-slate-200 pt-4">
           <legend className="text-[15px] font-medium">Como encontrou a obra?</legend>
@@ -594,10 +602,29 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
 
   /** A obra à vista: depois de assinar o contrato, e com a 1.ª parcela de uma adenda por pagar. */
   const naObra = P.estado === "obra" || P.estado === "pagar";
+  // 2/11, portal real: aceitar a adenda pede o código por SMS (no lugar da confirmação da V1)
+  if (real && ad && TA && P.estado === "rever" && confirmar === "aceitar") {
+    agora = real.assinarComSms({ titulo: `Aceitar a adenda ${ad.n}`, texto: `De ${eur(TA.total)} € com IVA, mais ${diasAdenda(ad.linhas)} ${diasAdenda(ad.linhas) === 1 ? "dia útil" : "dias úteis"} de obra.`,
+      acao: "Aceitar a adenda", fim: "adenda_aceitar", ref: ad.n, voltar: () => setConfirmar(null) });
+  }
 
   /* ---------------------------------------------- a barra fixa em baixo: o próximo passo sempre à mão */
-  // 2/11, portal real: aceitar e assinar abrem as páginas reais (código por SMS); a adenda e o auto ainda não têm caminho no portal real
-  const barraReal = !real ? null : !ad && P.estado === "rever" ? (
+  // 2/11, portal real: aceitar e assinar o contrato abrem as páginas reais; a adenda e o auto respondem-se aqui, com o código por SMS
+  const barraReal = !real ? null : ad && P.estado === "rever" ? (
+    resposta || confirmar === "aceitar" ? null : (
+      <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
+        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("aceitar"); topo(); }}>Aceitar a adenda</Botao></div>
+        <button type="button" onClick={() => responder("escolher")} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações ou recusar</button>
+      </div>
+    )
+  ) : ad && P.estado === "assinar" ? (
+    confirmar === "assinar" || pedirContrato ? null : (
+      <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
+        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar a adenda</span></Botao></div>
+        <button type="button" onClick={() => { setPedirContrato(true); topo(); }} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações à adenda</button>
+      </div>
+    )
+  ) : !ad && P.estado === "rever" ? (
     <div className="sm:ml-auto sm:w-72"><Botao onClick={real.abrirProposta}>Responder à proposta</Botao></div>
   ) : !ad && P.estado === "assinar" && real.abrirContrato ? (
     <div className="sm:ml-auto sm:w-72"><Botao onClick={real.abrirContrato}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o contrato</span></Botao></div>
@@ -608,8 +635,6 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
         {!receber && <p className="text-center text-sm text-slate-500 sm:mr-auto sm:text-left">Diga primeiro como encontrou a obra.</p>}
       </div>
     )
-  ) : ad && (P.estado === "rever" || P.estado === "assinar") ? (
-    <p className="text-[15px] text-slate-700">Para responder à adenda {ad.n}, fale com a equipa na conversa aqui em cima. Tratamos de tudo consigo.</p>
   ) : null;
   const barra = real ? barraReal : P.estado === "rever" && !resposta ? (
     confirmar === "aceitar" ? (
@@ -797,8 +822,16 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
   );
 }
 
-/** 2/11, portal real: a fatura e o valor, sem dados bancários de exemplo nem avisos que a base ainda não recebe. */
-function PagarReal({ montante, verFatura }: { montante: string; verFatura: () => void }) {
+/** 2/11, portal real: a fatura e o valor (sem dados bancários de exemplo) e o aviso de que pagou (portal_neg_responder). */
+function PagarReal({ numero, real, montante, verFatura }: { numero: string; real: PortalReal; montante: string; verFatura: () => void }) {
+  const [ref, setRef] = useState("");
+  const [aEnviar, setAEnviar] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const avisado = real.avisados.includes(numero);
+  const avisar = async () => {
+    setAEnviar(true); setErro(null);
+    try { await real.avisarPagamento(numero, ref.trim()); } catch (e) { setErro((e as Error).message); } finally { setAEnviar(false); }
+  };
   return (
     <div className="space-y-3">
       <div className="flex items-end justify-between gap-3">
@@ -807,7 +840,20 @@ function PagarReal({ montante, verFatura }: { montante: string; verFatura: () =>
           <FileText className="h-4 w-4" aria-hidden="true" />Ver a fatura
         </button>
       </div>
-      <p className="text-sm text-slate-600">Pague com os dados da fatura que lhe enviámos. Depois de pagar, diga-nos na conversa. Se precisar dos dados outra vez, peça-os aí.</p>
+      {avisado ? (
+        <p role="status" className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />Recebemos o seu aviso. O Financeiro confirma o pagamento e envia-lhe o recibo.</p>
+      ) : (
+        <>
+          <p className="text-sm text-slate-600">Pague com os dados da fatura que lhe enviámos. Se precisar deles outra vez, peça-os na conversa.</p>
+          <div className="space-y-2 border-t border-slate-200 pt-3">
+            <p className="text-[15px] font-medium">Já pagou? Avise-nos</p>
+            <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder="Referência ou n.º da transferência (opcional)" aria-label="Referência do pagamento"
+              className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
+            <Botao disabled={aEnviar} onClick={() => void avisar()}>{aEnviar ? "A enviar…" : "Já paguei"}</Botao>
+            {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

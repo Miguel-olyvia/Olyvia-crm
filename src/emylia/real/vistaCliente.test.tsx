@@ -5,7 +5,7 @@ import { acoes, seed, type Estado, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { PortalCliente } from "../PortalCliente";
 import { totais } from "../DocsCliente";
-import { aplicarRececao, caber, comEstadoReal, lerVista, negocioParaCliente, vistaDoCliente, type VistaCliente } from "./vistaCliente";
+import { aplicarRececao, aplicarResposta, caber, comEstadoReal, encomendaParaCliente, lerVista, negocioParaCliente, vistaDoCliente, type RespostaCliente, type VistaCliente } from "./vistaCliente";
 
 afterEach(cleanup);
 
@@ -112,6 +112,45 @@ describe("vista do cliente: o estado real por cima", () => {
   });
 });
 
+describe("respostas do cliente aplicadas com as ações da V1 (CRM e portal)", () => {
+  const resp = (o: Partial<RespostaCliente>): RespostaCliente => ({ id: "r1", negocio: "u", tipo: "pagamento", ref: "", nome: "Ana", telemovel: null, em: "2026-11-21T10:30:00Z", assinatura: null, dados: {}, ...o });
+  const comAdendaSimples = (estado: string, contrato?: string) => {
+    const S = seed();
+    const d = S.deals.find((x) => x.orc)!;
+    d.adendas = [{ n: "A1", estado, criada: "01/11", enviada: "02/11", contrato: contrato ?? null, linhas: [] } as unknown as NonNullable<Negocio["adendas"]>[number]];
+    return { S, d, A: acoes(S, vi.fn(), (fn) => fn()) };
+  };
+  it("aceitar, pedir alterações e não aceitar a adenda", () => {
+    let x = comAdendaSimples("enviada");
+    expect(aplicarResposta(x.d, x.A, resp({ tipo: "adenda_aceitar", ref: "A1" }))).toBe(true);
+    expect(x.d.adendas![0].estado).toBe("aceite");
+    x = comAdendaSimples("enviada");
+    aplicarResposta(x.d, x.A, resp({ tipo: "adenda_alterar", ref: "A1", dados: { nota: "mais barato", motivos: ["Baixar o preço"] } }));
+    expect(x.d.adendas![0].pedidoCliente?.motivos).toEqual(["Baixar o preço"]);
+    x = comAdendaSimples("enviada");
+    aplicarResposta(x.d, x.A, resp({ tipo: "adenda_recusar", ref: "A1", dados: { motivo: "caro" } }));
+    expect(x.d.adendas![0].estado).toBe("recusada");
+  });
+  it("assinar o contrato da adenda fica com a assinatura por SMS", () => {
+    const x = comAdendaSimples("aceite", "enviado");
+    aplicarResposta(x.d, x.A, resp({ tipo: "adenda_assinar", ref: "A1", assinatura: "SMS-123", telemovel: "+351 ••• 676" }));
+    expect(x.d.adendas![0].assinatura?.tipo).toBe("sms");
+  });
+  it("o aviso de pagamento de uma prestação fica no comprovativo do negócio (o Financeiro vê-o)", () => {
+    const S = seed(); const d = S.deals.find((x) => x.orc)!; d.fin.fatura = null;
+    aplicarResposta(d, acoes(S, vi.fn(), (fn) => fn()), resp({ tipo: "pagamento", ref: "FT 2026/10", dados: { referencia: "TRF 123" } }));
+    expect(d.f.comprovativo).toBe("Fatura FT 2026/10: TRF 123");
+  });
+  it("a encomenda vai para o cliente sem fornecedores nem ids internos", () => {
+    const po = { id: "PO-9", forn: "Fornecedor X", estado: "x", fase: "encomendada" as never, prometida: null, uuid: "u", prevista: "2026-11-30" };
+    const r = encomendaParaCliente({ id: "EC-1", eliminada: false, estado: "open" as never, rotulo: "", ajustes: [], pronta: false,
+      tot: { linhas: 1, servidas: 0, prontas: 0, aBordo: 0, aFornecedor: 1, semForn: 0 }, pos: [po],
+      linhas: [{ ec: "EC-1", id: "l", sku: "s", n: "Tubo", q: 1, un: "m", st: "open" as never, rotulo: "", aBordo: false, saida: 0, pronto: 0, aChegar: 1, semForn: 0, pos: [po] }] });
+    expect(JSON.stringify(r)).not.toMatch(/Fornecedor X|PO-9|"uuid"/);
+    expect(r!.linhas[0].pos[0].fase).toBe("encomendada");
+  });
+});
+
 describe("portal real com o ecrã da V1", () => {
   function montar(v: VistaCliente, real: Partial<Parameters<typeof PortalCliente>[0]["real"]> = {}) {
     const S = seed(); S.svc = v.svc as Estado["svc"]; S.deals = [v.d];
@@ -119,9 +158,43 @@ describe("portal real com o ecrã da V1", () => {
     const ctx = { S, A, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "" } as unknown as Ctx;
     const abrirProposta = vi.fn(), abrirContrato = vi.fn();
     const receberObra = vi.fn((reservas: string | undefined) => <p>RECEBER-SMS {reservas ?? "tudo bem"}</p>);
-    render(<PortalCliente ctx={ctx} d={v.d} fechar={() => {}} real={{ abrirProposta, abrirContrato, conversa: <p>CONVERSA-REAL</p>, receberObra, ...real }} />);
-    return { abrirProposta, abrirContrato, receberObra };
+    const assinarComSms = vi.fn((o: { fim: string; ref: string }) => <p>SMS {o.fim} {o.ref}</p>);
+    const avisarPagamento = vi.fn(async () => {});
+    render(<PortalCliente ctx={ctx} d={v.d} fechar={() => {}} real={{ abrirProposta, abrirContrato, conversa: <p>CONVERSA-REAL</p>, receberObra, assinarComSms, avisarPagamento, avisados: [], ...real }} />);
+    return { abrirProposta, abrirContrato, receberObra, assinarComSms, avisarPagamento, A };
   }
+
+  /** Uma adenda enviada ao cliente (a proposta por responder), com uma linha do Catálogo e custos (que não podem ir). */
+  function comAdenda(): { S: Estado; d: Negocio } {
+    const { S, d } = comObra();
+    const sid = Object.keys(S.svc)[0];
+    d.adendas = [{ n: "A1", estado: "enviada", criada: "01/11/2026", enviada: "02/11/2026", motivo: "Pedido do cliente",
+      linhas: [{ sid, n: S.svc[sid].n, un: S.svc[sid].un, q: 2, pu: 50, h: 1, perfil: S.svc[sid].perfil, cu: 30, mo: 20 }] } as unknown as NonNullable<Negocio["adendas"]>[number]];
+    return { S, d };
+  }
+
+  it("adenda por responder: aceitar pede o código por SMS (não a confirmação simulada)", () => {
+    const { S, d } = comAdenda();
+    const v = vistaDoCliente(d, S);
+    expect(JSON.stringify(v.d.adendas)).not.toMatch(/"cu"|"mo"/);
+    const { assinarComSms } = montar(v);
+    fireEvent.click(within(screen.getByRole("region", { name: "Próximo passo" })).getByRole("button", { name: "Aceitar a adenda" }));
+    expect(assinarComSms).toHaveBeenCalled();
+    expect(screen.getByText("SMS adenda_aceitar A1")).toBeTruthy();
+  });
+
+  it("fatura por pagar: «Já paguei» avisa com a referência; depois de avisado, diz que recebemos", () => {
+    const { S, d } = comObra();
+    d.fin.tranches = [{ id: "f2-t2", numero: "FT 2026/10", data: "2026-11-20", valor: 100, tranche: "t2" }];
+    const v = vistaDoCliente(d, S);
+    const { avisarPagamento } = montar(v);
+    fireEvent.change(screen.getByRole("textbox", { name: "Referência do pagamento" }), { target: { value: "TRF 123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Já paguei" }));
+    expect(avisarPagamento).toHaveBeenCalledWith("FT 2026/10", "TRF 123");
+    cleanup();
+    montar(v, { avisados: ["FT 2026/10"] });
+    expect(screen.getByText(/Recebemos o seu aviso/)).toBeTruthy();
+  });
 
   it("as faturas das prestações: a paga com o recibo, a por pagar com o cartão, e cada uma abre o documento", () => {
     const { S, d } = comObra();
@@ -143,7 +216,7 @@ describe("portal real com o ecrã da V1", () => {
     d.obra.plano!.estado = "concluída";
     d.obra.auto = { n: "AR 2026/7", q: "20/11/2026", estado: "por assinar" };
     const { receberObra } = montar(vistaDoCliente(d, S));
-    expect(screen.getByRole("heading", { name: "Receber a obra" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Receber o serviço" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Tenho uma observação" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "falta um rodapé" } });
     fireEvent.click(screen.getByRole("button", { name: /Assinar o auto de receção/ }));
