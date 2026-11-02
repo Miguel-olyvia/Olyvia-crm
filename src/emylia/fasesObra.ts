@@ -82,3 +82,79 @@ export function faseDoProduto(
   if (p.servico && servico) { const f = fasesDoServico(K, p.servico, servico.nome, servico.oficio); return f[f.length - 1]; }
   return faseDaIlustracao(p.img);
 }
+
+/** A rampa das fases (um só tom, do claro ao escuro; todos ≥ 3:1 sobre o branco e sobre o fundo). 02/11: mudou de planoObra.ts para
+ *  aqui (a Encomenda de Cliente também a usa, sem o motor); planoObra.ts reexporta-a. */
+export const COR_FASE: Record<number, string> = { 1: "#9074dc", 2: "#7452d1", 3: "#5a36bf", 4: "#432791" };
+
+/* ------------------------------------------------------------------ os materiais na obra (02/11) */
+// Uma regra só para a fase de um material, na Encomenda de Cliente (Olyvia) e na obra (materiais por fase, transporte):
+//  a) o produto é instalado por um serviço que ESTÁ na obra → a última fase desse serviço (faseDoProduto: é quando se monta);
+//  b) senão, é um consumível da receita de serviços da obra → a primeira fase do serviço que o gasta (a menor, se forem vários);
+//  c) senão, pelo nome (faseDoMaterial, a regra de sempre das obras).
+
+/** A fase em que o material entra, só pelo nome (a regra antiga das obras). 02/11: mudou de obraOps.ts para aqui (obraOps reexporta-a). */
+export function faseDoMaterial(n: string): FaseObra {
+  const s = n.toLowerCase();
+  // "saco" só os do entulho/lixo: "Cimento-cola · saco 25 kg" é revestimento (F3), não preparação
+  if (/sacos? (de |para )?(entulho|lixo|rafia|ráfia)|big ?bag|prote|plást|cartão|entulho/.test(s)) return 1;
+  if (/tubo|vál|valv|torneira de corte|multicamada|cabo|caixa/.test(s)) return 2;
+  if (/cerâm|ceram|azulej|pavimento|cola|junta|argamassa|revest/.test(s)) return 3;
+  return 4;
+}
+
+/** O nome e o ofício dos serviços do modelo do motor (motor.ts SVC0, pela chave): o ofício é o `perfil` com que o plano chama
+ *  fasesDoServico. Os outros serviços usam o ofício do Catálogo (a categoria). Quem não tem o motor (a Encomenda de Cliente, a obra sem
+ *  o Estado) usa isto para dar as mesmas fases. O teste de fasesObra confirma que bate com o SVC0. */
+export const SERVICOS_MODELO: Record<string, { n: string; oficio: string }> = {
+  demol: { n: "Demolição e entulho", oficio: "Servente · demolição" }, canal: { n: "Canalização", oficio: "Canalizador" },
+  revest: { n: "Revestimento de parede", oficio: "Ladrilhador" }, pav: { n: "Pavimento cerâmico", oficio: "Ladrilhador" },
+  loucas: { n: "Montagem de louças", oficio: "Canalizador" }, moveis: { n: "Montagem de móveis", oficio: "Montador" },
+  eletr: { n: "Pontos elétricos", oficio: "Eletricista" }, teto: { n: "Teto falso em pladur", oficio: "Montador" },
+  pint: { n: "Pintura de tetos e paredes", oficio: "Pintor" },
+};
+/** O ofício de um serviço como o plano o vê: o do modelo (pela chave) ou o da categoria do Catálogo. */
+export const oficioDoServico = (chave: string | null | undefined, categoria: string | null | undefined): string =>
+  (chave && SERVICOS_MODELO[chave]?.oficio) || categoria || "";
+
+/** Um serviço da obra (ou da encomenda): o id com que se procura em `K.fasesServico`, o nome e o ofício (como no plano) e os
+ *  consumíveis da receita (pelo id do produto e/ou pelo nome). */
+export interface ServicoNaObra { sid: string; nome: string; oficio?: string; cons?: { id?: string | null; n?: string | null }[] }
+/** O material: o id e o nome (para a receita), o serviço que o instala (o `servico` do produto no Catálogo) e a ilustração. */
+export interface MaterialNaObra { id?: string | null; n: string; servico?: string | null; img?: string }
+export interface FaseMaterialNaObra {
+  fase: FaseObra;
+  /** Qual das regras decidiu: o serviço que o instala, a receita de um serviço, ou o nome. */
+  por: "instala" | "receita" | "nome";
+  /** Os serviços que o justificam (o que o instala, ou os que o gastam, pela primeira fase de cada um), para mostrar "para: …". Vazio
+   *  pelo nome. */
+  servicos: ServicoNaObra[];
+}
+/** O mesmo nome, sem acentos nem maiúsculas (a receita e o Catálogo guardam o consumível pelo nome). */
+export const mesmoNome = (a?: string | null, b?: string | null): boolean => !!a && !!b && sem(a).trim() === sem(b).trim();
+
+/** A fase de um material numa obra (ou encomenda), com os serviços dela: ver a regra acima. */
+export function faseDoMaterialNaObra(K: ComFases | null | undefined, m: MaterialNaObra, servicos: readonly ServicoNaObra[]): FaseMaterialNaObra {
+  // a) o serviço que o instala está na obra
+  const inst = m.servico ? servicos.find((s) => s.sid === m.servico) : undefined;
+  if (inst) return { fase: faseDoProduto(K, { servico: inst.sid, img: m.img }, { nome: inst.nome, oficio: inst.oficio }), por: "instala", servicos: [inst] };
+  // b) é consumível da receita de serviços da obra: a primeira fase do que o gasta mais cedo
+  const gastam = servicos.filter((s) => s.cons?.some((c) => (!!m.id && c.id === m.id) || mesmoNome(c.n, m.n)));
+  if (gastam.length) {
+    // pela primeira fase de cada um (o primeiro é o que decide); na mesma fase, pela ordem da obra
+    const porFase = gastam.map((s, i) => ({ s, i, f: fasesDoServico(K, s.sid, s.nome, s.oficio)[0] })).sort((a, b) => a.f - b.f || a.i - b.i);
+    return { fase: porFase[0].f, por: "receita", servicos: porFase.map((x) => x.s) };
+  }
+  // c) pelo nome
+  return { fase: faseDoMaterial(m.n), por: "nome", servicos: [] };
+}
+
+/** Os serviços de uma obra: as linhas de serviço do orçamento e os serviços das tarefas do plano, sem repetidos (pela ordem). Só a forma
+ *  do Negócio que interessa, para a Frota a usar sem o motor. */
+export function servicosDaObra(d: {
+  orc?: { linhas: readonly ({ t: string; sid?: string; q?: number })[] } | null;
+  obra: { plano?: { tasks: readonly { svcs: readonly string[] }[] } | null };
+}): string[] {
+  const L = [...(d.orc?.linhas ?? []).flatMap((l) => (l.t === "svc" && l.sid && (l.q ?? 0) > 0 ? [l.sid] : [])), ...(d.obra.plano?.tasks ?? []).flatMap((t) => t.svcs)];
+  return [...new Set(L.filter(Boolean))];
+}

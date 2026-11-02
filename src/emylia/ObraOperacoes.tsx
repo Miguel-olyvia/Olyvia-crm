@@ -20,7 +20,7 @@ import { diasDasHoras, diferencas, fimDe, inicioMinimo, mexida } from "./ajustes
 import { HORAS_DIA } from "./ganttOrcamento";
 import {
   RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
-  iniciais, materiaisPorFase, nomeCurtoTarefa, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EntradaDiario, type EstadoExec, type EstadoMat,
+  iniciais, materiaisPorFase, nomeCurtoTarefa, servicosDaObra, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EntradaDiario, type EstadoExec, type EstadoMat,
 } from "./obraOps";
 import { custoObra } from "./custoObra";
 import type { Ctx } from "./pecas";
@@ -396,7 +396,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </>}
         {aba === "meios" && <>
           <EquipaObra ctx={ctx} d={d} direcao={direcao} verDia={verDia} />
-          <div className="mt-8"><ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} /></div>
+          <div className="mt-8"><ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} svcs={servicosDaObra(d)} /></div>
           <MateriaisObra ctx={ctx} d={d} />
           <EquipamentosObra d={d} />
         </>}

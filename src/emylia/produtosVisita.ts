@@ -42,6 +42,12 @@ export interface ProdVisita {
 let lerK: (() => Catalogo) | null = null;
 export function ligarCatalogo(f: (() => Catalogo) | null) { lerK = f; }
 export const catalogoLigado = (): Catalogo | null => (lerK ? lerK() : null);
+// 02/11: os consumíveis da receita de um serviço, com os custos ligados (a store dos custos liga-a: receitaDe). Pela mesma razão: a obra
+// (obraOps.ts, que o motor importa) lê-os para a regra única das fases sem importar a store. Sem ligação: null.
+type LerConsumiveis = (sid: string) => { id?: string; n: string }[] | null;
+let lerCons: LerConsumiveis | null = null;
+export function ligarReceitas(f: LerConsumiveis | null) { lerCons = f; }
+export const consumiveisLigados = (sid: string): { id?: string; n: string }[] | null => (lerCons ? lerCons(sid) : null);
 
 /* ------------------------------------------------------------------ árvore */
 /** O nó e tudo o que está abaixo dele. */

@@ -10,6 +10,9 @@ import { rotuloDia } from "./preparacaoObra";
 import { linhaDoResumo, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import type { Envio } from "./trabalhoObra";
 import { custoHoraDe, fichaTecnico } from "./equipa/tecnicos";
+import { itemCatalogo } from "./catalogo";
+import { catalogoLigado, consumiveisLigados } from "./produtosVisita";
+import { SERVICOS_MODELO, faseDoMaterial, faseDoMaterialNaObra, mesmoNome, servicosDaObra, type ComFases, type FaseObra, type ServicoNaObra } from "./fasesObra";
 
 /* ------------------------------------------------------------------ o ciclo da tarefa */
 export type EstadoExec = "por fazer" | "em curso" | "feita" | "validada" | "corrigir";
@@ -174,17 +177,43 @@ export const quandoEquip = (p: Plano, e: { dia: number; fim: number }) =>
 /* ------------------------------------------------------------------ os materiais, por fase */
 export type EstadoMat = "na obra" | "na carrinha" | "reservado" | "recebido" | "a chegar" | "encomendado" | "por encomendar" | "em falta";
 export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quando?: string; forn?: string }
-/** A fase em que o material entra (pelo nome). */
-export function faseDoMaterial(n: string): number {
-  const s = n.toLowerCase();
-  if (/saco|prote|plást|cartão|entulho/.test(s)) return 1;
-  if (/tubo|vál|valv|torneira de corte|multicamada|cabo|caixa/.test(s)) return 2;
-  if (/cerâm|ceram|azulej|pavimento|cola|junta|argamassa|revest/.test(s)) return 3;
-  return 4;
+/** A fase em que o material entra, só pelo nome. 02/11: mora em fasesObra.ts (a regra única); fica aqui para os imports de sempre. */
+export { faseDoMaterial };
+
+/** 02/11: os serviços de uma obra (mora em fasesObra.ts, sem o motor: a Frota também a usa). */
+export { servicosDaObra };
+/** 02/11: o que a regra única das fases (fasesObra.ts faseDoMaterialNaObra) precisa para os materiais de uma obra: o Catálogo ligado
+ *  (os produtos, com o serviço que os instala, e as fases das fichas) e os serviços da obra com os consumíveis da receita
+ *  (receitaDe, com os custos ligados: produtosVisita.ts consumiveisLigados). Sem Catálogo ligado ou sem serviços: null, e os materiais
+ *  ficam pelo nome, como antes.
+ *  O nome e o ofício do serviço: os do Catálogo (itemCatalogo) ou, nos do modelo, os de SERVICOS_MODELO. Não usa o Estado, para todos os
+ *  ecrãs da obra (o Hoje do técnico, a obra, o relatório, a Frota) porem o mesmo material na mesma fase. */
+export interface FasesDaObra { K: ComFases & { produtos?: { id: string; n: string; servico?: string; img?: string }[] }; servicos: ServicoNaObra[] }
+export function fasesDaObra(sids: readonly string[] | null | undefined): FasesDaObra | null {
+  const K = catalogoLigado();
+  if (!K || !sids?.length) return null;
+  const servicos = sids.map((sid): ServicoNaObra => {
+    const c = itemCatalogo(sid), m = SERVICOS_MODELO[sid];
+    // os do modelo (canal, revest…) não estão no itemCatalogo e a receitaDe sem o Estado não os vê: a receita deles é a de receitas.ts
+    const cons: { id?: string; n: string }[] = consumiveisLigados(sid) ?? RECEITAS[sid]?.cons ?? [];
+    return { sid, nome: c?.n ?? m?.n ?? sid, oficio: m?.oficio ?? c?.cat ?? "", cons: cons.map((x) => ({ id: x.id ?? null, n: x.n })) };
+  });
+  return { K, servicos };
 }
-/** Os materiais da obra por fase. `inv`: o estado da encomenda no Inventário novo (16/10); sem ele, o das obras antigas do exemplo. */
+/** 02/11: a fase de um material da obra pela regra única (fasesObra.ts); sem `F` (sem Catálogo ou sem serviços), pelo nome. O produto do
+ *  Catálogo procura-se pelo id (o da visita) e, sem ele, pelo nome. */
+export function faseNaObra(F: FasesDaObra | null, m: { id?: string | null; n: string }): FaseObra {
+  if (!F) return faseDoMaterial(m.n);
+  const P = F.K.produtos ?? [];
+  const p = (m.id ? P.find((x) => x.id === m.id) : undefined) ?? P.find((x) => mesmoNome(x.n, m.n));
+  return faseDoMaterialNaObra(F.K, { id: p?.id ?? m.id ?? null, n: m.n, servico: p?.servico ?? null, img: p?.img }, F.servicos).fase;
+}
+
+/** Os materiais da obra por fase. `inv`: o estado da encomenda no Inventário novo (16/10); sem ele, o das obras antigas do exemplo.
+ *  02/11: a fase é a da regra única (faseNaObra: o serviço da obra que instala o produto, a receita que o gasta, ou o nome). */
 export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null): { fase: number; itens: Mat[] }[] {
-  const linhas = d.obra.ec?.linhas.map((x) => ({ n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? d.obra.mats?.map((x) => ({ n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
+  const linhas = d.obra.ec?.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? d.obra.mats?.map((x) => ({ id: undefined, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
+  const F = fasesDaObra(servicosDaObra(d));
   const itens: (Mat & { fase: number })[] = linhas.map((x) => {
     let estado: EstadoMat = "reservado", quando: string | undefined, forn: string | undefined;
     const li = linhaDoResumo(inv, x.n);
@@ -195,7 +224,7 @@ export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null): { fase: 
       estado = li.st === "served" ? "na obra" : li.aBordo ? "na carrinha" : li.st === "ready" || li.st === "recvpo" ? "reservado" : li.aChegar > 0 ? (porAprovar ? "por encomendar" : pr ? "a chegar" : "encomendado") : "em falta";
       quando = estado === "a chegar" && pr ? `${pr.slice(8, 10)}/${pr.slice(5, 7)}` : undefined;
     } else if (x.falta > 0) estado = d.obra.ec?.ref ? "por encomendar" : "em falta";
-    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, fase: faseDoMaterial(x.n) };
+    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, fase: faseNaObra(F, x) };
   });
   return [1, 2, 3, 4].map((f) => ({ fase: f, itens: itens.filter((x) => x.fase === f).map(({ fase: _f, ...m }) => m) })).filter((g) => g.itens.length);
 }

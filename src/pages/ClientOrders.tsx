@@ -48,6 +48,9 @@ import { ClientOrderLineSource } from "@/components/client-orders/ClientOrderLin
 import { ClientOrderLineStateBadge, ClientOrderLineStateLegend, clientOrderLineState } from "@/components/client-orders/clientOrderLineState";
 import { ClientOrderProductPicker, type ClientOrderCatalogProduct } from "@/components/client-orders/ClientOrderProductPicker";
 import { useClientOrderPoStates } from "@/components/client-orders/useClientOrderPoStates";
+import { useClientOrderLinePhases } from "@/components/client-orders/useClientOrderLinePhases";
+import { CLIENT_ORDER_SECTION_LABELS, groupClientOrderLines } from "@/components/client-orders/clientOrderLinePhases";
+import { ClientOrderPhaseBadge } from "@/components/client-orders/ClientOrderPhaseBadge";
 import { useInventoryToday } from "@/hooks/useInventoryToday";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { useQueryClient } from "@tanstack/react-query";
@@ -2784,6 +2787,9 @@ const ClientOrders = () => {
     activeCompany?.id,
     (detailData?.lines || []).map((l) => l.purchase_order_id).filter((id): id is string => !!id),
   );
+  // Secções (Produtos / Serviços / Consumíveis para os serviços) e a fase da obra de cada linha, pela mesma regra da obra
+  // (src/emylia/fasesObra.ts). Só leitura e best-effort: sem o Catálogo, a tabela fica como antes.
+  const detailPhaseCatalog = useClientOrderLinePhases(activeCompany?.id, detailData?.lines);
 
   // Nova encomenda manual: abre com uma linha por escolher, como no protótipo.
   useEffect(() => {
@@ -3666,6 +3672,7 @@ const ClientOrders = () => {
                   <TableRow>
                     <TableHead>SKU</TableHead>
                     <TableHead>Produto</TableHead>
+                    <TableHead>Fase</TableHead>
                     <TableHead className="text-right">Qtd</TableHead>
                     <TableHead className="w-[260px]">De onde vem</TableHead>
                     <TableHead>Estado</TableHead>
@@ -3677,12 +3684,18 @@ const ClientOrders = () => {
                 <TableBody>
                   {detailData.lines.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground">
                         {t('clientOrders.dialog.noLines')}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    detailData.lines.map((line) => {
+                    groupClientOrderLines(detailData.lines, detailPhaseCatalog).flatMap(({ section, rows }) => [
+                      <TableRow key={`section-${section}`} className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={7} className="py-1.5 text-[12.5px] font-semibold text-muted-foreground">
+                          {CLIENT_ORDER_SECTION_LABELS[section]} · {rows.length}
+                        </TableCell>
+                      </TableRow>,
+                      ...rows.map(({ line, phase }) => {
                       const isProductLine = line.item_type !== 'service' && !!line.product_id;
                       const served = asQty(line.qty_served);
                       const reserved = asQty(line.qty_reserved);
@@ -3710,7 +3723,15 @@ const ClientOrders = () => {
                           <TableCell className="whitespace-nowrap align-top font-mono text-[0.92em]">
                             {line.product_sku || line.service_sku || '—'}
                           </TableCell>
-                          <TableCell className="align-top">{line.product_name || line.service_name || '—'}</TableCell>
+                          <TableCell className="align-top">
+                            {line.product_name || line.service_name || '—'}
+                            {phase.forServices.length > 0 ? (
+                              <div className="text-xs text-muted-foreground">para: {phase.forServices.join(', ')}</div>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <ClientOrderPhaseBadge fases={phase.fases} />
+                          </TableCell>
                           <TableCell className="text-right align-top">
                             <div className="inline-flex items-center justify-end gap-1">
                               <b className="tabular-nums">{line.quantity}</b>
@@ -3747,7 +3768,8 @@ const ClientOrders = () => {
                           <TableCell className="text-right align-top">{renderLineActions(line)}</TableCell>
                         </TableRow>
                       );
-                    })
+                      }),
+                    ])
                   )}
                 </TableBody>
               </Table>
