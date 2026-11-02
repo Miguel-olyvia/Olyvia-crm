@@ -190,9 +190,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   smtp: [
     "smtp.edit", "smtp.view",
   ],
+  // Só verificadas no servidor (policies/RPCs): suppliers.contract_manage (contrato de fornecedor, 20270103300000)
   suppliers: [
-    "suppliers.create", "suppliers.delete", "suppliers.edit", "suppliers.export", "suppliers.import",
-    "suppliers.portal_manage", "suppliers.view", "suppliers.view_pricing", "suppliers.view_sla_report",
+    "suppliers.contract_manage", "suppliers.create", "suppliers.delete", "suppliers.edit", "suppliers.export",
+    "suppliers.import", "suppliers.portal_manage", "suppliers.view", "suppliers.view_pricing", "suppliers.view_sla_report",
   ],
   users: [
     "users.create", "users.delete", "users.edit", "users.manage_roles", "users.view",
