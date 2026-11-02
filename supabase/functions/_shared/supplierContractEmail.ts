@@ -9,6 +9,50 @@
  * (APP_URL/produção), nunca do pedido.
  */
 
+/** "jo***@exemplo.pt" — destinatários na resposta ao CRM e no histórico (nunca o email completo). */
+export function maskEmail(email: string): string {
+  const [user, domain] = String(email).split("@");
+  if (!domain) return "***";
+  const head = user.slice(0, Math.min(2, user.length));
+  return `${head}***@${domain}`;
+}
+
+/**
+ * Regista no histórico do contrato (evento signature_request_resent) que o pedido de assinatura foi enviado por
+ * email. service_role: a RPC volta a validar quem pede e o estado. Falhar aqui não desfaz o envio: devolve false.
+ */
+export async function logSignatureRequest(
+  // deno-lint-ignore no-explicit-any
+  svc: any,
+  args: {
+    callerAuthUid: string;
+    contractId: string;
+    source: "reenvio" | "convite";
+    maskedRecipients: string[];
+    smtpStatus: "sent" | "not_found" | "send_failed";
+    sentCount: number;
+  },
+): Promise<boolean> {
+  try {
+    const { error } = await svc.rpc("rpc_supplier_contract_log_signature_request", {
+      p_caller_auth_uid: args.callerAuthUid,
+      p_contract_id: args.contractId,
+      p_source: args.source,
+      p_recipients: args.maskedRecipients,
+      p_smtp_status: args.smtpStatus,
+      p_sent_count: args.sentCount,
+    });
+    if (error) {
+      console.error("[supplier-contract] registo do pedido de assinatura falhou", { hint: error.hint || null });
+      return false;
+    }
+    return true;
+  } catch {
+    console.error("[supplier-contract] registo do pedido de assinatura falhou");
+    return false;
+  }
+}
+
 export function escapeHtml(str: string): string {
   return String(str)
     .replace(/&/g, "&amp;")

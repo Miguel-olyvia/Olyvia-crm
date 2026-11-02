@@ -139,10 +139,4 @@ export function rpcErrorBody(error: DbError | null | undefined): { status: numbe
   return { status, body: { error: hint, message: error?.message || "Erro." } };
 }
 
-/** "jo***@exemplo.pt" — para a resposta ao CRM, sem expor o email completo em listas. */
-export function maskEmail(email: string): string {
-  const [user, domain] = String(email).split("@");
-  if (!domain) return "***";
-  const head = user.slice(0, Math.min(2, user.length));
-  return `${head}***@${domain}`;
-}
+export { maskEmail } from "../_shared/supplierContractEmail.ts";

@@ -25,7 +25,8 @@
  *   resend_signature_request (JSON { action, contract_id })  — só CRM
  *     Contrato enviado, can_manage; email aos titulares do portal com acesso à
  *     ligação do contrato, pelo SMTP de quem envia/da organização (como o
- *     convite do portal).
+ *     convite do portal). Fica no histórico do contrato (evento signature_request_resent, com quem enviou,
+ *     destinatários mascarados e smtp_status) por rpc_supplier_contract_log_signature_request; history_logged na resposta.
  *
  * Erros: { error: <código>, message: <texto PT> }. Nunca devolve dados de
  * outro fornecedor/organização, caminhos de outros ficheiros nem texto interno.
@@ -36,7 +37,7 @@ import { resolveCallerIdentity, AuthError, getServiceRoleKey } from "../_shared/
 import { getCorsHeadersExtended, PRODUCTION_ORIGIN } from "../_shared/cors.ts";
 import { checkRateLimit, recordRateLimitAttempt, rateLimitResponse } from "../_shared/rateLimit.ts";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
-import { buildSignatureRequestEmail } from "../_shared/supplierContractEmail.ts";
+import { buildSignatureRequestEmail, logSignatureRequest } from "../_shared/supplierContractEmail.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import {
   BUCKET,
@@ -365,14 +366,23 @@ serve(async (req: Request) => {
       return json(409, { error: "no_portal_owner", message: "A conta do fornecedor no portal não tem um titular ativo para assinar." });
     }
 
+    const masked = recipients.map((r) => maskEmail(r.email));
+    const logResend = (smtpStatus: "sent" | "not_found" | "send_failed", sentCount: number) =>
+      logSignatureRequest(svc, {
+        callerAuthUid: authUid, contractId: String(c.id), source: "reenvio",
+        maskedRecipients: masked, smtpStatus, sentCount,
+      });
+
     const smtp = await resolveSmtpForAuthenticatedUser(svc, { authUserId: authUid, organizationId: c.organization_id });
     if (!smtp) {
+      const historyLogged = await logResend("not_found", 0);
       return json(200, {
         success: true,
         message: `O email não foi enviado. ${smtpNotFoundMessage()}`,
         smtp_status: "not_found",
         smtp_warning: true,
-        recipients: recipients.map((r) => maskEmail(r.email)),
+        recipients: masked,
+        history_logged: historyLogged,
       });
     }
 
@@ -394,6 +404,7 @@ serve(async (req: Request) => {
         console.error(`[${FN}] envio SMTP falhou`, { ...smtp.metadata, error: lastError });
       }
     }
+    const historyLogged = await logResend(sent === 0 ? "send_failed" : "sent", sent);
     if (sent === 0) {
       return json(200, {
         success: true,
@@ -401,7 +412,8 @@ serve(async (req: Request) => {
         smtp_status: "send_failed",
         smtp_warning: true,
         smtp_error_safe: lastError,
-        recipients: recipients.map((r) => maskEmail(r.email)),
+        recipients: masked,
+        history_logged: historyLogged,
       });
     }
     return json(200, {
@@ -409,7 +421,8 @@ serve(async (req: Request) => {
       message: "Pedido de assinatura reenviado",
       smtp_status: "sent",
       sent_count: sent,
-      recipients: recipients.map((r) => maskEmail(r.email)),
+      recipients: masked,
+      history_logged: historyLogged,
     });
   } catch (err) {
     if (uploadedPath && svc) {

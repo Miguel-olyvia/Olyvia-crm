@@ -136,3 +136,14 @@ verify_jwt = false
 # NAO PUBLICAR antes das RPCs rpc_denuncia_publica_* existirem na base.
 [functions.denuncia-publica]
 verify_jwt = false
+
+# Contrato de fornecedor (Fase 2): iguais ao que está publicado.
+[functions.sms-otp]
+verify_jwt = true
+
+[functions.supplier-contract-action]
+verify_jwt = true
+
+# Valida o JWT dentro da função (auth.getUser); publicada sem verificação no gateway.
+[functions.create-supplier-portal-access]
+verify_jwt = false

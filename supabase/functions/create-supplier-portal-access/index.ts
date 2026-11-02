@@ -47,7 +47,8 @@
  * Resposta 200:
  *   { success: true, message, smtp_status: "sent" | "not_found" | "send_failed", smtp_warning?: true }
  *   Com contract_id acrescenta: contract_status: "sent" | "already_sent" | "send_failed",
- *   contract_id, contract_error?: { error, message }
+ *   contract_id, contract_error?: { error, message }, history_logged?: boolean (quando o email leva o
+ *   contrato, fica no histórico do contrato um evento signature_request_resent com source "convite")
  * Erros: { error: <código>, message: <texto PT> } com 400/401/403/404/409/422/429/500.
  */
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
@@ -58,7 +59,7 @@ import { validateOrgScope, checkUserPermission, getServiceRoleKey } from "../_sh
 import { checkRateLimit, recordRateLimitAttempt, rateLimitResponse } from "../_shared/rateLimit.ts";
 import { getCorsHeadersExtended, PRODUCTION_ORIGIN } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
-import { inviteContractParagraph, type ContractEmailInfo } from "../_shared/supplierContractEmail.ts";
+import { inviteContractParagraph, logSignatureRequest, maskEmail, type ContractEmailInfo } from "../_shared/supplierContractEmail.ts";
 
 initSentry();
 
@@ -450,6 +451,14 @@ serve(async (req: Request) => {
     }
 
     const email: string = String(prep.email);
+    // Histórico do contrato: o email do convite também é o pedido de assinatura.
+    const logContractRequest = async (smtpStatus: "sent" | "not_found" | "send_failed") => {
+      if (!mentionContract || !contractInfo) return;
+      contractResult.history_logged = await logSignatureRequest(supabase, {
+        callerAuthUid: caller.id, contractId: contractInfo.id, source: "convite",
+        maskedRecipients: [maskEmail(email)], smtpStatus, sentCount: smtpStatus === "sent" ? 1 : 0,
+      });
+    };
     // Sempre do servidor (APP_URL/produção).
     const baseUrl = resolveAppBaseUrl();
     const loginUrl = `${baseUrl}/auth`;
@@ -473,6 +482,7 @@ serve(async (req: Request) => {
     if (!resolvedSmtp) {
       createdAuthUserPassword = null;
       console.warn("[create-supplier-portal-access] sem SMTP", { organization_id: input.organization_id });
+      await logContractRequest("not_found");
       return json(200, {
         success: true,
         message: `Acesso registado, mas o email não foi enviado. ${smtpNotFoundMessage()}`,
@@ -545,6 +555,7 @@ serve(async (req: Request) => {
       // Defesa extra: a password temporária nunca sai em logs nem na resposta.
       if (tempPassword) safe = safe.split(tempPassword).join("[redacted]");
       console.error("[create-supplier-portal-access] envio SMTP falhou", { ...resolvedSmtp.metadata, error: safe });
+      await logContractRequest("send_failed");
       return json(200, {
         success: true,
         message: "Acesso registado, mas o email não foi enviado (erro SMTP). Tente reenviar.",
@@ -555,6 +566,7 @@ serve(async (req: Request) => {
       }, corsHeaders);
     }
 
+    await logContractRequest("sent");
     return json(200, { success: true, message: okMessage, smtp_status: "sent", ...contractResult }, corsHeaders);
   } catch (err) {
     if (createdAuthUserId && supabase) {
