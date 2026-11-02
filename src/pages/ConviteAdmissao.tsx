@@ -27,7 +27,7 @@
  * de `PortalFormulario`), a saudacao (`ConviteSaudacao`, dentro de `TopoPortal`) e o cartao de link
  * invalido (`ConviteCartaoLinkInvalido`) para todas as vistas sem acesso, menos a de processo em analise.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { IdiomaForcadoProvider } from "@/contexts/IdiomaForcadoContext";
@@ -42,6 +42,10 @@ import { PortalOtpDialogo } from "@/components/hr/portal/PortalOtpDialogo";
 import { PortalEmAnalise } from "@/components/hr/portal/PortalSemAcesso";
 import { PortalSessaoAtiva } from "@/components/hr/portal/PortalSessaoAtiva";
 import { PortalSucesso } from "@/components/hr/portal/PortalSucesso";
+
+// Com a janela de documentos aberta (depois de o RH aprovar e enviar o contrato) o link mostra o portal do colaborador com a aba
+// «Documentos»: o contrato para assinar por SMS, o que o RH pede e o que a pessoa pede. Carrega-se só nesse caso.
+const PortalColaboradorDocumentos = lazy(() => import("@/components/rh-exemplo/portal/PortalReal").then((m) => ({ default: m.PortalReal })));
 
 export default function ConviteAdmissao() {
   // O provider faz com que os componentes da arvore (que chamam useTranslation() sem
@@ -102,8 +106,22 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
     );
   }
   const vista = vistaDoConvite(portal.erroInicial, convite);
+  if (vista === "documentos" && convite && token) {
+    return (
+      <Suspense
+        fallback={
+          <div role="status" className="flex min-h-screen items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
+            <span className="sr-only">{t("portal.carregando")}</span>
+          </div>
+        }
+      >
+        <PortalColaboradorDocumentos token={token} />
+      </Suspense>
+    );
+  }
   // Em analise: so o estado (sem dados nem nome), dentro da moldura do portal.
-  if ((vista === "analise" || vista === "documentos") && convite) {
+  if (vista === "analise" && convite) {
     return (
       <PortalMoldura organizacao={convite.organizacao_nome} nome={convite.primeiro_nome}>
         <PortalEmAnalise estado={convite.estado} />
