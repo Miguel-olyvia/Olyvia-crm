@@ -10,6 +10,8 @@
  */
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampoPais, CampoSelect, CampoTexto } from "@/components/rh-exemplo/form/Campos";
+import { useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
+import { ehPortugal } from "@/lib/addresses/procurarCodigoPostal";
 import {
   CONJUGE_SITUACOES_PROFISSIONAIS,
   ESTADOS_CIVIS,
@@ -20,6 +22,11 @@ import {
 import type { PaginaConviteProps } from "@/components/rh-exemplo/convite/tiposConvite";
 
 export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: PaginaConviteProps) {
+  // Código postal completo: procura a morada e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(rascunho.codigo_postal, (m) => {
+    const encher = (c: "linha1" | "localidade" | "distrito", v: string) => { if (v && !(rascunho[c] ?? "").trim()) definir(c, v); };
+    encher("linha1", m.rua); encher("localidade", m.localidade); encher("distrito", m.distrito);
+  }, ehPortugal(rascunho.pais));
   return (
     <div className="space-y-4">
       <Card>

@@ -1,6 +1,9 @@
 // A aba "Contacto e morada" do painel "Nova pessoa": e-mail e telefone (pessoais e profissionais), morada completa e contacto de
 // emergência.
 import { useTranslation } from "@/hooks/useTranslation";
+import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
+import { ehPortugal } from "@/lib/addresses/procurarCodigoPostal";
+import { useNova } from "./contextoNova";
 import { CampoP, CampoT, GRELHA } from "./camposNova";
 import { SeccaoNova } from "./SeccaoNova";
 
@@ -20,6 +23,17 @@ function Contactos() {
 
 function Morada() {
   const { t } = useTranslation();
+  const { valores, alterar } = useNova();
+  const p = valores.pessoais as unknown as Record<string, unknown>;
+  const txt = (k: string) => String(p[k] ?? "");
+  // Código postal completo: procura a rua, a localidade e o distrito e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(txt("morada_codigo_postal"), (m) => {
+    (alterar as (grupo: "pessoais", patch: Record<string, unknown>) => void)("pessoais", {
+      morada_linha1: seVazio(txt("morada_linha1"), m.rua),
+      morada_localidade: seVazio(txt("morada_localidade"), m.localidade),
+      morada_distrito: seVazio(txt("morada_distrito"), m.distrito),
+    });
+  }, ehPortugal(txt("morada_pais")));
   return (
     <SeccaoNova titulo={t("rhNova.sec.morada")} convite="morada">
       <div className={GRELHA}>

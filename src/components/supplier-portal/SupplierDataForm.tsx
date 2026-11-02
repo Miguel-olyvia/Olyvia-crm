@@ -6,6 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PhoneInput } from "@/components/PhoneInput";
 import { useToast } from "@/hooks/use-toast";
+import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
+import { ehPortugal } from "@/lib/addresses/procurarCodigoPostal";
 import { cn } from "@/lib/utils";
 import {
   getSpHint,
@@ -56,6 +58,10 @@ export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNo
     setValues((v) => ({ ...v, [field]: value }));
     setErrors((e) => (e[field] ? { ...e, [field]: undefined } : e));
   };
+  // Código postal completo: procura a rua e a cidade e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(values.postal_code, (m) => setValues((v) => ({
+    ...v, address: seVazio(v.address, m.rua), city: seVazio(v.city, m.localidade),
+  })), ehPortugal(values.country));
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

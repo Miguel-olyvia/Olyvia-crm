@@ -3,6 +3,7 @@
 // segunda. Partilhado pelo "Registar chamada", pelo diálogo "Marcar visita" das submissões e por "Alterar visita".
 import { useId } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,6 +70,8 @@ function CamposOutra({ id, valor, erro, aoMudar }: Pick<MoradaVisitaCamposProps,
   const { t } = useTranslation();
   const o = valor.outra;
   const mudar = (parcial: Partial<MoradaVisita>) => aoMudar({ ...valor, outra: { ...o, ...parcial } });
+  // Código postal completo: procura a rua e a localidade e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(o.codigoPostal, (m) => mudar({ rua: seVazio(o.rua, m.rua), localidade: seVazio(o.localidade, m.localidade) }));
   const texto = (e: ErroMoradaVisita) => (erro === e ? t(`${A}error.${e}`, { max: MAX_NOTA_ACESSO }) : null);
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

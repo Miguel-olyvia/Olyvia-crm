@@ -1,6 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
+import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
 import {
   normalizarCodigoPostal,
   type CampoMorada,
@@ -28,6 +29,10 @@ export const CamposMorada = ({ valor, onChange, erros, idPrefix, disabled }: Cam
   const { t } = useTranslation();
 
   const setCampo = (campo: CampoMorada, texto: string) => onChange({ ...valor, [campo]: texto });
+  // Código postal completo: procura a rua e a localidade e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(valor.postal_code, (m) => {
+    onChange({ ...valor, street: seVazio(valor.street, m.rua), city: seVazio(valor.city, m.localidade) });
+  }, !disabled);
 
   const handleBlurCodigoPostal = () => {
     const normalizado = normalizarCodigoPostal(valor.postal_code);

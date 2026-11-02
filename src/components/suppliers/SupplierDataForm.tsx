@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
+import { ehPortugal } from "@/lib/addresses/procurarCodigoPostal";
 import { OrganizationFormSection, type OrganizationSelection } from "@/components/OrganizationFormSection";
 
 export interface SupplierFormData {
@@ -57,6 +59,10 @@ export function SupplierDataForm({
   portalLinked = false,
   onGoToPortal,
 }: SupplierDataFormProps) {
+  // Código postal completo: procura a rua e a cidade e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(formData.postal_code, (m) => setFormData((f) => ({
+    ...f, address: seVazio(f.address, m.rua), city: seVazio(f.city, m.localidade),
+  })), ehPortugal(formData.country));
   const field = (
     key: TextField,
     label: string,

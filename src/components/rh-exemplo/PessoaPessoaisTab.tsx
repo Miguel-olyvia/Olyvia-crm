@@ -42,6 +42,8 @@ import {
 } from "@/components/ui/select";
 import { CreditCard, IdCard, Loader2, MapPin, Phone, Receipt, User } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
+import { ehPortugal } from "@/lib/addresses/procurarCodigoPostal";
 import { usePessoaDuplicados } from "@/components/rh-exemplo/hooks/usePessoaDuplicados";
 import { nifValido, nissValido } from "@/components/rh-exemplo/lib/identificadoresPt";
 import { toast } from "@/lib/toast";
@@ -483,6 +485,10 @@ export function PessoaPessoaisTab({
   );
   const [moradaDraft, setMoradaDraft] = useState(moradaOriginal);
   useEffect(() => setMoradaDraft(moradaOriginal), [moradaOriginal]);
+  // Código postal completo: procura a rua, a localidade e o distrito e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(moradaDraft.codigo_postal, (m) => setMoradaDraft((d) => ({
+    ...d, linha1: seVazio(d.linha1, m.rua), localidade: seVazio(d.localidade, m.localidade), distrito: seVazio(d.distrito, m.distrito),
+  })), ehPortugal(moradaDraft.pais) && moradaDraft.codigo_postal !== moradaOriginal.codigo_postal);
   const moradaAlterada = useMemo(
     () => JSON.stringify(moradaDraft) !== JSON.stringify(moradaOriginal),
     [moradaDraft, moradaOriginal],
