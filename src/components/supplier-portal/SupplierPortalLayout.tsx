@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeftRight, Building2, ClipboardList, Home, IdCard, LogOut, Package, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Building2, ClipboardList, FileSignature, Home, IdCard, LogOut, Package, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useClientSupplierSwitch } from "@/hooks/useClientRole";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,15 @@ import { SupplierPortalProvider, useSupplierPortal } from "@/contexts/SupplierPo
 import { SupplierFirstLoginModal } from "@/components/supplier-portal/SupplierFirstLoginModal";
 import { SupplierConfirmDataModal } from "@/components/supplier-portal/SupplierConfirmDataModal";
 import { useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
+import { SpContractPendingBanner, SpContractPendingPrompt } from "@/components/supplier-portal/contract/SpContractPending";
+import { useSpContractsList } from "@/components/supplier-portal/contract/useSpContracts";
+import { pendingContract } from "@/lib/supplierContracts/portal";
 
 const NAV_ITEMS = [
   { label: "Início", icon: Home, path: "/supplier-portal", end: true, badge: false },
   { label: "Encomendas", icon: ClipboardList, path: "/supplier-portal/orders", end: false, badge: true },
   { label: "Catálogo", icon: Package, path: "/supplier-portal/catalog", end: false, badge: false },
+  { label: "Contrato", icon: FileSignature, path: "/supplier-portal/contract", end: false, badge: false },
   { label: "Os meus dados", icon: IdCard, path: "/supplier-portal/profile", end: false, badge: false },
 ];
 
@@ -113,6 +117,10 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
     useSupplierPortal();
   const logout = useLogout();
   const { count: toConfirm } = useSpOrdersToConfirm();
+  // Contrato por assinar: só depois da password e da confirmação de dados (um passo de cada vez).
+  const contractNoticesOn = !firstLogin && profileConfirmed;
+  const { data: contractsList } = useSpContractsList(contractNoticesOn);
+  const contractToSign = pendingContract(contractsList)?.can_sign === true;
 
   if (loading) return <FullScreenLoader />;
   if (loadError) return <LoadErrorScreen onRetry={() => void refresh()} />;
@@ -176,6 +184,9 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
             >
               <item.icon className="h-4 w-4" aria-hidden="true" />
               {item.label}
+              {item.path === "/supplier-portal/contract" && contractNoticesOn && contractToSign && (
+                <span className="ml-0.5 h-2.5 w-2.5 rounded-full bg-primary" aria-label="contrato por assinar" role="img" />
+              )}
               {item.badge && !!toConfirm && toConfirm > 0 && (
                 <span
                   className="ml-0.5 inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground"
@@ -189,6 +200,8 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
         </div>
       </nav>
 
+      <SpContractPendingBanner enabled={contractNoticesOn} />
+
       <main className="flex-1 w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6">{children}</main>
 
       <footer className="border-t bg-background px-4 md:px-6 py-3 text-center">
@@ -200,6 +213,7 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
       <SupplierFirstLoginModal open={firstLogin} onDone={markPasswordChanged} />
       {/* Só depois da password: um passo de cada vez. */}
       <SupplierConfirmDataModal open={!firstLogin && !profileConfirmed} />
+      <SpContractPendingPrompt enabled={contractNoticesOn} />
     </div>
   );
 }
