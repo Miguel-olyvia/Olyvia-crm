@@ -35,17 +35,17 @@ describe("SKU do artigo do fornecedor", () => {
   it("mostra o SKU pela categoria, a subcategoria, a medida e a cor, e grava a classificação a seguir ao artigo", async () => {
     categorias.mockResolvedValue(LISTA);
     upsert.mockResolvedValue({ created: true, item: ITEM });
-    classificar.mockResolvedValue({ item: { ...ITEM, sku: "REV-PAR-30X60-BRA-2" } });
+    classificar.mockResolvedValue({ item: { ...ITEM, sku: "REV-PAR-0002-30X60-BRA" } });
     const onSaved = abrir();
     fireEvent.change(await screen.findByLabelText("Categoria *"), { target: { value: "c-rev" } });
     fireEvent.change(screen.getByLabelText("Subcategoria *"), { target: { value: "s-par" } });
     fireEvent.change(screen.getByLabelText("Medida"), { target: { value: "30 x 60 cm" } });
     fireEvent.change(screen.getByLabelText("Cor"), { target: { value: "Branco mate" } });
-    expect(screen.getByText("REV-PAR-30X60-BRA")).toBeInTheDocument();
+    expect(screen.getByText("REV-PAR-····-30X60-BRA")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Criar artigo" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(classificar).toHaveBeenCalledWith("i1", { categoria_id: "c-rev", subcategoria_id: "s-par", medida: "30 x 60 cm", cor: "Branco mate" });
-    expect(onSaved.mock.calls[0][0].sku).toBe("REV-PAR-30X60-BRA-2");
+    expect(onSaved.mock.calls[0][0].sku).toBe("REV-PAR-0002-30X60-BRA");
   });
 
   it("sem categoria (ou sem a subcategoria que a categoria tem) não grava", async () => {
@@ -65,7 +65,7 @@ describe("SKU do artigo do fornecedor", () => {
     abrir();
     fireEvent.change(await screen.findByLabelText("Categoria *"), { target: { value: "c-iso" } });
     fireEvent.change(screen.getByLabelText("Cor"), { target: { value: "Cinza" } });
-    expect(screen.getByText("ISO-CIN")).toBeInTheDocument();
+    expect(screen.getByText("ISO-····-CIN")).toBeInTheDocument();
   });
 
   it("sem a lista na base (migration por aplicar), grava como antes, sem classificação", async () => {

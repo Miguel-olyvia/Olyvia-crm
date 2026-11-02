@@ -157,15 +157,21 @@ export function custos0(): Custos {
 }
 
 /* ------------------------------------------------------------------ contas */
+/** Os seguros entram com pelo menos 5 % do salário do ano (reunião de 30/10; igual a fn_cat_custo_hora_salario, 20270101450000). */
+export const SEGUROS_MINIMO_PCT = 5;
+/** Os seguros do ano de um salário: o maior entre o valor fixo dos parâmetros e 5 % do salário do ano. */
+export function segurosDoAno(salarioMensal: number, par: Parametros): number {
+  return Math.max(par.segurosAno, salarioMensal * par.meses * SEGUROS_MINIMO_PCT / 100);
+}
 /** Custo/hora de um perfil: salário × meses × (1 + TSU) + seguros, a dividir pelas horas produtivas. Null sem salário. */
 export function custoHoraPerfil(p: Perfil, par: Parametros): number | null {
   if (p.salario == null || !(par.horasAno > 0)) return null;
-  return (p.salario * par.meses * (1 + par.tsu / 100) + par.segurosAno) / par.horasAno;
+  return (p.salario * par.meses * (1 + par.tsu / 100) + segurosDoAno(p.salario, par)) / par.horasAno;
 }
 /** O ano de um perfil, para mostrar a conta (só a Direção vê o salário). */
 export function anoPerfil(p: Perfil, par: Parametros) {
-  const base = (p.salario ?? 0) * par.meses, tsu = base * par.tsu / 100;
-  return { base, tsu, seguros: par.segurosAno, total: base + tsu + par.segurosAno, horas: par.horasAno };
+  const base = (p.salario ?? 0) * par.meses, tsu = base * par.tsu / 100, seguros = segurosDoAno(p.salario ?? 0, par);
+  return { base, tsu, seguros, total: base + tsu + seguros, horas: par.horasAno };
 }
 /** O custo/hora médio dos perfis com salário. 22/10: já não entra no custo de nenhum serviço (um perfil sem €/h não usa a média dos outros). */
 export function mediaHora(C: Custos): number {

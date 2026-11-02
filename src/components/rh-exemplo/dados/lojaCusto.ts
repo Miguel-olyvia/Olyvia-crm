@@ -66,7 +66,7 @@ export interface NovoEquipamento {
   conta?: ContaItem;
 }
 
-const DEFINICOES_INICIAIS: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 1.5, valorPorKm: 0.4, ajudaPorDia: 25 };
+const DEFINICOES_INICIAIS: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 };
 
 const estadoInicial = (): EstadoCusto => ({
   avulsos: avulsosIniciais(),

@@ -592,7 +592,7 @@ function FormTecnico({ S, C, onCriado }: { S: Estado; C: Custos; onCriado: (id: 
         <Grande v={eh == null ? "—" : eur(eh)} un="€/h" legenda={eh == null ? "sem €/h até ter salário ou técnicos no RH" : "pelo salário, até haver técnicos no RH"} />
         {eh != null && (
           <p className={cn(NOTA, "mt-4 rounded-xl bg-muted/60 p-3 tabular-nums")}>
-            {eur(o.salario ?? 0)} € × {nfmt(C.par.meses)} meses + TSU {nfmt(C.par.tsu)}% + seguros {eur(C.par.segurosAno)} € = {eur(ano.total)} € por ano, a dividir por {nfmt(C.par.horasAno)} h.
+            {eur(o.salario ?? 0)} € × {nfmt(C.par.meses)} meses + TSU {nfmt(C.par.tsu)}% + seguros {eur(ano.seguros)} € = {eur(ano.total)} € por ano, a dividir por {nfmt(C.par.horasAno)} h.
           </p>
         )}
         <Pronto itens={["Escreva o nome"]} faltas={faltas} botao="Criar o técnico" onCriar={criar} />

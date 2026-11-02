@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Home, Loader2, LocateFixed, MapPin } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -103,6 +104,10 @@ const CAMPO = cn("min-h-11", FOCO);
 /** A morada da obra (fica no negócio, não na pessoa): rua, código postal 0000-000, localidade e andar, com o atalho de usar a morada do contacto. */
 export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, origem = null, aoMudar, aoPreencher, origemObra = null, real, semTitulo = false, vazio }: Props) {
   const { t } = useTranslation();
+  // Código postal completo: procura a rua e a localidade e preenche o que está vazio (reunião de 30/10).
+  useMoradaPorCodigoPostal(valores.codigoPostal, (m) => {
+    aoPreencher({ ...valores, rua: seVazio(valores.rua, m.rua), localidade: seVazio(valores.localidade, m.localidade) });
+  });
   const usarContacto = () => {
     if (moradaContacto.trim() === "") {
       toast.info(t(`${N}address.useContact.empty`));
