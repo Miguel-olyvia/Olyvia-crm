@@ -3,9 +3,12 @@
 // supabase/migrations/20270103300000_contrato_fornecedor_base.sql
 // (fn_sc_contrato_json, rpc_supplier_contracts_list, ...). As tabelas e RPCs
 // ainda não estão em types.ts (não regenerado): os tipos ficam aqui.
+// Propostas do fornecedor (estado 'proposed', created_via 'portal'):
+// supabase/migrations/20270104100000_contrato_fornecedor_propostas_portal.sql.
 import type { InventoryTone } from "@/components/inventory/ui/tones";
 
 export type SupplierContractStatus =
+  | "proposed"
   | "draft"
   | "sent"
   | "signed_supplier"
@@ -17,6 +20,35 @@ export type SupplierContractStatus =
 
 export type SupplierContractKind = "material" | "servico";
 export type SupplierContractOrigin = "modelo" | "pdf_fornecedor";
+/** Quem criou o contrato: o CRM (rascunho) ou o fornecedor no portal (proposta). */
+export type SupplierContractCreatedVia = "crm" | "portal";
+/**
+ * Só nos contratos criados pelo portal (senão null): pending = 'proposed' à espera do CRM; accepted = o CRM aceitou
+ * (draft em preparação e tudo o que se segue); refused = recusada pela empresa; withdrawn = retirada pelo fornecedor.
+ */
+export type SupplierContractProposalState = "pending" | "accepted" | "refused" | "withdrawn";
+/** Em 'refused': quem recusou (a empresa recusa propostas; o fornecedor recusa contratos enviados). */
+export type SupplierContractRefusedBy = "empresa" | "fornecedor";
+
+/** Tipos de evento do histórico (o portal vê só uma parte; o CRM vê todos). */
+export type SupplierContractEventType =
+  | "created"
+  | "updated"
+  | "conditions_updated"
+  | "sent"
+  | "file_added"
+  | "supplier_signed"
+  | "company_signed"
+  | "refused"
+  | "cancelled"
+  | "superseded"
+  | "expired"
+  | "new_version"
+  | "signature_request_resent"
+  | "proposed"
+  | "proposal_accepted"
+  | "proposal_refused"
+  | "proposal_withdrawn";
 
 export const PAYMENT_METHODS = [
   "transferencia",
@@ -104,13 +136,20 @@ export interface SupplierContractSummary {
   company_signed_by_name: string | null;
   refused_at: string | null;
   refusal_reason: string | null;
+  refused_by: SupplierContractRefusedBy | null;
   cancelled_at: string | null;
   superseded_at: string | null;
   expired_at: string | null;
+  created_via: SupplierContractCreatedVia;
+  proposal_state: SupplierContractProposalState | null;
+  /** Nome (ou email) do utilizador do portal que propôs; null se criado no CRM. */
+  proposed_by_name: string | null;
   created_at: string;
   updated_at: string;
   // Só no CRM
   template_id: string | null;
+  created_by_portal_user_id: string | null;
+  proposed_by_email: string | null;
   supplier_signed_by_email: string | null;
   supplier_signed_ip: string | null;
   supplier_signed_user_agent: string | null;
@@ -120,14 +159,28 @@ export interface SupplierContractSummary {
   cancel_reason: string | null;
 }
 
+/** O que o fornecedor propôs (evento 'proposed'), tal como submetido: não muda quando o CRM edita o rascunho. */
+export interface SupplierContractProposalSnapshot extends SupplierContractConditions {
+  kind: SupplierContractKind;
+  origin: SupplierContractOrigin;
+  title: string;
+  valid_from: string | null;
+  valid_until: string | null;
+}
+
 /** rpc_supplier_contract_get — o contrato completo (+ permissões). */
 export interface SupplierContractDetail extends SupplierContractSummary {
   document_html: string | null;
   body_html: string | null;
   files: SupplierContractFile[];
   events: SupplierContractEvent[];
+  /** Só em contratos criados pelo portal; senão null. */
+  proposal_snapshot: SupplierContractProposalSnapshot | null;
   can_manage: boolean;
   can_countersign: boolean;
+  /** status 'proposed' e suppliers.contract_manage. */
+  can_accept_proposal: boolean;
+  can_refuse_proposal: boolean;
 }
 
 /** rpc_supplier_contracts_list(p_supplier_id). */
@@ -179,6 +232,7 @@ export interface SupplierContractExpiring {
 // ── Rótulos ─────────────────────────────────────────────────────────────────
 
 export const STATUS_LABEL: Record<SupplierContractStatus, string> = {
+  proposed: "Proposta do fornecedor",
   draft: "Rascunho",
   sent: "Enviado",
   signed_supplier: "Assinado pelo fornecedor",
@@ -190,6 +244,7 @@ export const STATUS_LABEL: Record<SupplierContractStatus, string> = {
 };
 
 export const STATUS_TONE: Record<SupplierContractStatus, InventoryTone> = {
+  proposed: "warn",
   draft: "neutral",
   sent: "info",
   signed_supplier: "warn",
@@ -227,8 +282,11 @@ export const SHIPPING_TERMS_LABEL: Record<ShippingTerms, string> = {
   a_combinar: "A combinar em cada encomenda",
 };
 
-/** Os estados em curso (um de cada vez por fornecedor: supplier_contracts_um_em_curso). */
-export const OPEN_STATUSES: readonly SupplierContractStatus[] = ["draft", "sent", "signed_supplier"];
+/**
+ * Os estados em curso (um de cada vez por fornecedor: supplier_contracts_um_em_curso). Atenção: uma proposta
+ * ('proposed') não se cancela com rpc_supplier_contract_cancel — aceita-se ou recusa-se (can_accept/can_refuse).
+ */
+export const OPEN_STATUSES: readonly SupplierContractStatus[] = ["proposed", "draft", "sent", "signed_supplier"];
 
 export const isOpenStatus = (s: SupplierContractStatus): boolean => OPEN_STATUSES.includes(s);
 

@@ -128,6 +128,19 @@ export const supplierContractsRpc = {
       p_reason: reason,
     }),
 
+  /** Proposta do fornecedor → rascunho (origem modelo: aplica o primeiro modelo ativo do mesmo tipo). */
+  acceptProposal: (contractId: string) =>
+    call<SupplierContractDetail & { template_applied: boolean }>("rpc_supplier_contract_accept_proposal", {
+      p_contract_id: contractId,
+    }),
+
+  /** Proposta do fornecedor → recusada; o motivo (3 a 2000 caracteres) fica visível ao fornecedor. */
+  refuseProposal: (contractId: string, reason: string) =>
+    call<{ contract_id: string; status: SupplierContractStatus; refused_at: string; refusal_reason: string }>(
+      "rpc_supplier_contract_refuse_proposal",
+      { p_contract_id: contractId, p_reason: reason },
+    ),
+
   countersign: (contractId: string) =>
     call<{ contract_id: string; status: SupplierContractStatus; company_signed_at: string; company_signed_by_name: string }>(
       "rpc_supplier_contract_countersign",

@@ -14,7 +14,10 @@
  *   upload (multipart/form-data: action=upload, contract_id, kind, file[, file_name])
  *     CRM: suppliers.contract_manage na org, contrato em rascunho, kind
  *          contrato_fornecedor (PDF) ou anexo (PDF/JPEG/PNG).
- *     Portal: titular da conta, contrato enviado, só kind=anexo.
+ *     Portal: titular da conta; contrato enviado → só kind=anexo; proposta dele
+ *             ('proposed', criada no portal) → anexo, e contrato_fornecedor (PDF)
+ *             uma vez se a origem é pdf_fornecedor (sp_supplier_contract_get:
+ *             can_attach / can_attach_main; regra em portalUploadDecision).
  *     Bytes ≤ 15 MB, tipo pelos magic bytes, SHA-256 dos bytes; grava no bucket
  *     privado supplier-contracts (service_role) e regista com
  *     rpc_supplier_contract_register_file (que volta a validar tudo). Se o
@@ -48,6 +51,7 @@ import {
   checkFile,
   jsonActionSchema,
   maskEmail,
+  portalUploadDecision,
   rpcErrorBody,
   sanitizeFileName,
   sha256Hex,
@@ -196,19 +200,13 @@ serve(async (req: Request) => {
       let orgId: string;
       if (actor.isPortal) {
         // O mesmo critério de rpc_supplier_contract_register_file: portal ganha.
-        if (input.kind !== "anexo") {
-          return json(400, { error: "validation", message: "No portal só se anexam ficheiros (anexo)." });
-        }
         const { data: c, error } = await asUser.rpc("sp_supplier_contract_get", { p_contract_id: input.contract_id });
         if (error) {
           const r = rpcErrorBody(error);
           return json(r.status, r.body);
         }
-        if (c?.can_attach !== true) {
-          return c?.status !== "sent"
-            ? json(409, { error: "invalid_state", message: "Já não é possível anexar ficheiros a este contrato." })
-            : json(403, { error: "not_owner", message: "Só o responsável da conta pode anexar ficheiros ao contrato." });
-        }
+        const decision = portalUploadDecision(c, input.kind);
+        if (!decision.ok) return json(decision.status, decision.body);
         orgId = String(c.organization_id);
       } else {
         const { data: c, error } = await asUser.rpc("rpc_supplier_contract_get", { p_contract_id: input.contract_id });

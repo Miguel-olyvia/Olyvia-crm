@@ -58,12 +58,18 @@ const base: Detail = {
   company_signed_by_name: null,
   refused_at: null,
   refusal_reason: null,
+  refused_by: null,
   cancelled_at: null,
   superseded_at: null,
   expired_at: null,
+  created_via: "crm",
+  proposal_state: null,
+  proposed_by_name: null,
   created_at: "2026-11-01T10:00:00Z",
   updated_at: "2026-11-01T10:00:00Z",
   template_id: "t1",
+  created_by_portal_user_id: null,
+  proposed_by_email: null,
   supplier_signed_by_email: null,
   supplier_signed_ip: null,
   supplier_signed_user_agent: null,
@@ -77,6 +83,9 @@ const base: Detail = {
   events: [],
   can_manage: true,
   can_countersign: false,
+  proposal_snapshot: null,
+  can_accept_proposal: false,
+  can_refuse_proposal: false,
 };
 
 function renderDetail(c: Detail, hasOpen = false) {

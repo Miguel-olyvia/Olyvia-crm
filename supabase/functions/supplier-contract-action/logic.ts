@@ -114,6 +114,46 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", bytes.slice()));
 }
 
+/** O que a Edge precisa de sp_supplier_contract_get para decidir um upload do portal. */
+export interface PortalContractFlags {
+  status?: unknown;
+  origin?: unknown;
+  can_attach?: unknown;
+  can_attach_main?: unknown;
+}
+
+export type UploadDecision =
+  | { ok: true }
+  | { ok: false; status: number; body: { error: string; message: string } };
+
+/**
+ * Upload do portal (pré-verificação antes de escrever no bucket; a BD volta a
+ * validar tudo em rpc_supplier_contract_register_file):
+ *   • anexo — titular, contrato enviado ('sent') ou proposta dele ('proposed'): can_attach.
+ *   • contrato_fornecedor — só numa proposta dele com origem pdf_fornecedor e ainda
+ *     sem PDF principal: can_attach_main. Num contrato enviado continua recusado.
+ */
+export function portalUploadDecision(c: PortalContractFlags | null | undefined, kind: FileKind): UploadDecision {
+  const fail = (status: number, error: string, message: string): UploadDecision => ({ ok: false, status, body: { error, message } });
+  const status = c?.status;
+  if (kind === "contrato_fornecedor") {
+    if (c?.can_attach_main === true) return { ok: true };
+    if (status === "proposed" && c?.can_attach === true) {
+      return c?.origin !== "pdf_fornecedor"
+        ? fail(400, "validation", "Esta proposta usa o modelo da empresa: só pode juntar anexos.")
+        : fail(409, "invalid_state", "O PDF do contrato já foi carregado: para o trocar, retire a proposta e proponha de novo.");
+    }
+    if (status === "proposed" && c?.can_attach !== true) {
+      return fail(403, "not_owner", "Só o responsável da conta pode anexar ficheiros ao contrato.");
+    }
+    return fail(400, "validation", "No portal só se anexam ficheiros (anexo).");
+  }
+  if (c?.can_attach === true) return { ok: true };
+  return status !== "sent" && status !== "proposed"
+    ? fail(409, "invalid_state", "Já não é possível anexar ficheiros a este contrato.")
+    : fail(403, "not_owner", "Só o responsável da conta pode anexar ficheiros ao contrato.");
+}
+
 /** HINT das RPCs → estado HTTP. Sem HINT conhecido → 500 com mensagem genérica. */
 export const HINT_STATUS: Record<string, number> = {
   no_permission: 403,

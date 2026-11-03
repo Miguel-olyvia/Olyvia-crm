@@ -6,11 +6,16 @@
 // acrescenta (can_sign/can_refuse/can_attach, telemóvel) e o que lhe falta
 // (fn_sc_contrato_json(c,'portal',...) não traz os campos internos do CRM).
 // As RPCs ainda não estão em types.ts (não regenerado): cast local.
+// Propostas do fornecedor (sp_supplier_contract_propose / _withdraw):
+// migration 20270104100000_contrato_fornecedor_propostas_portal.sql.
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import { SupplierPortalRpcError, getSpHint, spErrorMessage } from "@/lib/supplierPortal/spRpc";
 import type {
+  SupplierContractConditions,
   SupplierContractDetail,
+  SupplierContractKind,
+  SupplierContractOrigin,
   SupplierContractStatus,
   SupplierContractSummary,
 } from "./tipos";
@@ -26,10 +31,40 @@ type CrmOnly =
   | "supplier_signed_document_sha256"
   | "company_signature_mode"
   | "company_signed_ip"
-  | "cancel_reason";
+  | "cancel_reason"
+  | "created_by_portal_user_id"
+  | "proposed_by_email";
 
-/** Uma linha de sp_supplier_contracts_list().contracts. */
-export type SpContractSummary = Omit<SupplierContractSummary, CrmOnly> & { can_sign: boolean };
+/** Ações do utilizador do portal (fn_sc_portal_flags): só o titular da conta fixada no contrato. */
+export interface SpContractFlags {
+  /** 'sent'. */
+  can_sign: boolean;
+  can_refuse: boolean;
+  /** 'sent' ou proposta dele ('proposed'): anexos. */
+  can_attach: boolean;
+  /** Proposta dele com origem pdf_fornecedor e ainda sem PDF: upload kind contrato_fornecedor (uma vez). */
+  can_attach_main: boolean;
+  /** Proposta dele ('proposed'). */
+  can_withdraw: boolean;
+}
+
+/**
+ * Uma linha de sp_supplier_contracts_list().contracts. Um 'draft' só aparece se for uma proposta dele aceite
+ * ("Aceite — em preparação"): os campos são os da PROPOSTA, não o rascunho que a empresa está a editar.
+ */
+export type SpContractSummary = Omit<SupplierContractSummary, CrmOnly> & SpContractFlags;
+
+/** Onde o fornecedor pode propor um contrato (uma ligação ativa da conta dele). */
+export interface SpProposalTarget {
+  organization_id: string;
+  organization_name: string | null;
+  supplier_id: string;
+  supplier_name: string | null;
+  /** Já há um contrato em curso (proposed/draft/sent/signed_supplier) com esta empresa. */
+  has_open_contract: boolean;
+  /** Titular e sem contrato em curso. */
+  can_propose: boolean;
+}
 
 /** sp_supplier_contracts_list(). */
 export interface SpContractsList {
@@ -37,17 +72,35 @@ export interface SpContractsList {
   phone_set: boolean;
   phone_masked: string | null;
   contracts: SpContractSummary[];
+  proposal_targets: SpProposalTarget[];
 }
 
-/** sp_supplier_contract_get(p_contract_id). */
-export type SpContractDetail = Omit<SupplierContractDetail, CrmOnly | "body_html" | "can_manage" | "can_countersign"> & {
-  is_owner: boolean;
-  can_sign: boolean;
-  can_refuse: boolean;
-  can_attach: boolean;
-  phone_set: boolean;
-  phone_masked: string | null;
-};
+/** sp_supplier_contract_get(p_contract_id). Num 'draft' (proposta aceite): files só os dele, document_html null. */
+export type SpContractDetail = Omit<
+  SupplierContractDetail,
+  CrmOnly | "body_html" | "can_manage" | "can_countersign" | "can_accept_proposal" | "can_refuse_proposal"
+> &
+  SpContractFlags & {
+    is_owner: boolean;
+    phone_set: boolean;
+    phone_masked: string | null;
+  };
+
+/**
+ * p_data de sp_supplier_contract_propose. origin obrigatório; kind 'material' por omissão; title por omissão
+ * "Condições comerciais — <fornecedor>". conditions: as chaves de fn_sc_aplicar_condicoes (outras dão erro), com
+ * payment_terms_days e payment_method obrigatórios e shipping_free_from se shipping_terms = gratis_acima_minimo.
+ * Datas AAAA-MM-DD; valid_until não pode já ter passado. O PDF (origem pdf_fornecedor) e os anexos carregam-se a
+ * seguir pela Edge supplier-contract-action (upload, kind contrato_fornecedor | anexo).
+ */
+export interface SpProposeData {
+  origin: SupplierContractOrigin;
+  kind?: SupplierContractKind;
+  title?: string;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  conditions: Partial<SupplierContractConditions>;
+}
 
 export interface SpMyPhone {
   phone: string | null;
@@ -72,6 +125,21 @@ async function call<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
 export const spContractsRpc = {
   list: () => call<SpContractsList>("sp_supplier_contracts_list"),
   get: (contractId: string) => call<SpContractDetail>("sp_supplier_contract_get", { p_contract_id: contractId }),
+  /**
+   * Propor um contrato (só o titular). supplierId só é preciso se a conta estiver ligada a mais de um fornecedor na
+   * empresa (hint supplier_required). Erros: not_owner, not_found, open_contract_exists, validation.
+   */
+  propose: (organizationId: string, supplierId: string | null, data: SpProposeData) =>
+    call<SpContractDetail>("sp_supplier_contract_propose", {
+      p_organization_id: organizationId,
+      p_supplier_id: supplierId,
+      p_data: data,
+    }),
+  /** Retirar a proposta (só 'proposed', só o titular) → 'cancelled' (proposal_state 'withdrawn'). */
+  withdraw: (contractId: string) =>
+    call<{ contract_id: string; status: SupplierContractStatus; cancelled_at: string }>("sp_supplier_contract_withdraw", {
+      p_contract_id: contractId,
+    }),
   refuse: (contractId: string, reason: string) =>
     call<{ contract_id: string; status: SupplierContractStatus; refused_at: string }>("sp_supplier_contract_refuse", {
       p_contract_id: contractId,
@@ -110,6 +178,8 @@ export function describeSpContractError(err: unknown): string {
       return "O documento mudou desde que o abriu. Recarregue o contrato e reveja-o antes de assinar.";
     case "otp_required":
       return raw || "Código SMS não verificado, expirado ou já utilizado. Peça um novo código.";
+    case "open_contract_exists":
+    case "supplier_required":
     case "invalid_state":
     case "expired":
     case "no_phone":
@@ -124,7 +194,9 @@ export function describeSpContractError(err: unknown): string {
 
 /** Rótulos do ponto de vista do fornecedor (os de ./tipos são do CRM). */
 export const SP_STATUS_LABEL: Record<SupplierContractStatus, string> = {
-  draft: "Rascunho",
+  proposed: "Proposta enviada · a aguardar resposta",
+  // O portal só vê um rascunho se for uma proposta dele que a empresa aceitou.
+  draft: "Aceite — em preparação",
   sent: "Por assinar",
   signed_supplier: "Assinado por si · falta a empresa",
   signed: "Assinado",
@@ -133,6 +205,18 @@ export const SP_STATUS_LABEL: Record<SupplierContractStatus, string> = {
   expired: "Expirado",
   superseded: "Substituído por nova versão",
 };
+
+/** Rótulo no portal, afinado pelas propostas (retirada / recusada pela empresa). */
+export function spStatusLabel(c: Pick<SpContractSummary, "status" | "proposal_state" | "refused_by">): string {
+  if (c.proposal_state === "withdrawn") return "Proposta retirada";
+  if (c.status === "refused" && c.refused_by === "empresa") return "Proposta recusada pela empresa";
+  return SP_STATUS_LABEL[c.status];
+}
+
+/** A proposta dele à espera de resposta da empresa. */
+export function pendingProposal(list: Pick<SpContractsList, "contracts"> | null | undefined): SpContractSummary | null {
+  return list?.contracts.find((c) => c.status === "proposed") ?? null;
+}
 
 /** O contrato enviado por assinar (no máximo um em curso por fornecedor; o mais recente primeiro). */
 export function pendingContract(list: Pick<SpContractsList, "contracts"> | null | undefined): SpContractSummary | null {
@@ -144,12 +228,16 @@ export function expiringContract(list: Pick<SpContractsList, "contracts"> | null
   return list?.contracts.find((c) => c.status === "signed" && c.expires_soon) ?? null;
 }
 
-/** Versão a mostrar por omissão: a por assinar, senão a assinada em vigor, senão a mais recente. */
+/**
+ * Versão a mostrar por omissão: a por assinar, senão a assinada por si, senão a proposta em curso (ou aceite em
+ * preparação), senão a assinada em vigor, senão a mais recente.
+ */
 export function defaultContractId(list: Pick<SpContractsList, "contracts"> | null | undefined): string | null {
   if (!list || list.contracts.length === 0) return null;
   return (
     pendingContract(list)?.id ??
     list.contracts.find((c) => c.status === "signed_supplier")?.id ??
+    list.contracts.find((c) => c.status === "proposed" || c.status === "draft")?.id ??
     list.contracts.find((c) => c.status === "signed")?.id ??
     list.contracts[0]?.id ??
     null
