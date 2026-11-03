@@ -57,7 +57,7 @@ interface ContractRow {
   valid_until: string | null;
 }
 
-const OPEN: readonly SupplierContractStatus[] = ["draft", "sent", "signed_supplier"];
+const OPEN: readonly SupplierContractStatus[] = ["proposed", "draft", "sent", "signed_supplier"];
 const PAGE = 1000;
 
 // Tabela ainda fora de types.ts: cliente sem tipos só para esta leitura.

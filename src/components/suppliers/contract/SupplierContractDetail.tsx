@@ -2,10 +2,14 @@
 // ações conforme o estado e as permissões do servidor (can_manage /
 // can_countersign), condições, assinaturas (fornecedor e empresa), recusa,
 // cancelamento, ficheiros e histórico. Em rascunho mostra o editor.
+// Proposta do fornecedor (status 'proposed', created_via 'portal'): Aceitar
+// (→ rascunho no editor) ou Recusar com motivo; nunca «Cancelar» (a RPC de
+// cancelamento recusa propostas).
 import { useCallback, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
+  Check,
   Download,
   Eye,
   FileText,
@@ -35,7 +39,12 @@ import {
 import { InventoryStatusBadge } from "@/components/inventory/ui";
 import { sanitizeRichHtml } from "@/utils/sanitize";
 import { toast } from "@/lib/toast";
-import { describeContractError, supplierContractKeys, supplierContractsRpc } from "@/lib/supplierContracts/rpc";
+import {
+  SupplierContractError,
+  describeContractError,
+  supplierContractKeys,
+  supplierContractsRpc,
+} from "@/lib/supplierContracts/rpc";
 import { downloadContractFile, resendContractEmail } from "@/lib/supplierContracts/acoes";
 import {
   KIND_LABEL,
@@ -44,6 +53,7 @@ import {
   STATUS_TONE,
   conditionsRows,
   contractRef,
+  eventText,
   fmtData,
   fmtDataHora,
   hojeLisboa,
@@ -63,6 +73,9 @@ interface Props {
 }
 
 const shortHash = (h: string | null | undefined) => (h ? `${h.slice(0, 12)}…${h.slice(-6)}` : "—");
+
+export const PROPOSAL_REFUSE_MIN = 3;
+export const PROPOSAL_REFUSE_MAX = 2000;
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -90,10 +103,18 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [signOpen, setSignOpen] = useState(false);
-  const [busy, setBusy] = useState<null | "send" | "cancel" | "new" | "resend">(null);
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [refuseOpen, setRefuseOpen] = useState(false);
+  const [refuseReason, setRefuseReason] = useState("");
+  const [busy, setBusy] = useState<null | "send" | "cancel" | "new" | "resend" | "accept" | "refuse">(null);
+  const queryClient = useQueryClient();
 
   const c = contract;
   const isDraft = c.status === "draft";
+  const isProposed = c.status === "proposed";
+  const fromPortal = c.created_via === "portal";
+  const refuseTrimmed = refuseReason.trim();
+  const refuseValid = refuseTrimmed.length >= PROPOSAL_REFUSE_MIN && refuseTrimmed.length <= PROPOSAL_REFUSE_MAX;
   const canManage = c.can_manage;
   const label = contractRef(c);
   const missing = isDraft ? missingForSend(c, hojeLisboa()) : [];
@@ -152,6 +173,56 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
     }
   };
 
+  const doAccept = async () => {
+    setBusy("accept");
+    try {
+      const r = await supplierContractsRpc.acceptProposal(c.id);
+      // Mostra já o rascunho no editor; a seguir recarrega lista e detalhe.
+      const { template_applied, ...detail } = r;
+      queryClient.setQueryData(supplierContractKeys.detail(c.id), detail);
+      setAcceptOpen(false);
+      if (c.origin === "modelo" && !template_applied) {
+        toast.warning(`Proposta ${label} aceite — está em rascunho`, {
+          description: "Não há nenhum modelo ativo deste tipo: escolha o texto do contrato no editor antes de enviar.",
+          duration: 10000,
+        });
+      } else {
+        toast.success(`Proposta ${label} aceite — está em rascunho`, {
+          description: "Reveja as condições no editor e envie ao fornecedor para assinar.",
+        });
+      }
+      await invalidate();
+    } catch (err) {
+      toast.error(describeContractError(err));
+      await invalidate();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doRefuseProposal = async () => {
+    if (!refuseValid) {
+      toast.error(`Indique o motivo da recusa (${PROPOSAL_REFUSE_MIN} a ${PROPOSAL_REFUSE_MAX} caracteres).`);
+      return;
+    }
+    setBusy("refuse");
+    try {
+      await supplierContractsRpc.refuseProposal(c.id, refuseTrimmed);
+      toast.success(`Proposta ${label} recusada`, { description: "O fornecedor vê o motivo no portal." });
+      setRefuseOpen(false);
+      setRefuseReason("");
+      await invalidate();
+    } catch (err) {
+      toast.error(describeContractError(err));
+      if (err instanceof SupplierContractError && err.hint === "invalid_state") {
+        setRefuseOpen(false);
+        await invalidate();
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const doNewVersion = async () => {
     setBusy("new");
     try {
@@ -190,7 +261,8 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
     window.open(r.data.url, "_blank", "noopener,noreferrer");
   };
 
-  const canCancel = canManage && isOpenStatus(c.status);
+  // Uma proposta não se cancela (rpc_supplier_contract_cancel recusa): aceita-se ou recusa-se.
+  const canCancel = canManage && isOpenStatus(c.status) && !isProposed;
   const canNewVersion = canManage && !isOpenStatus(c.status) && !supplierHasOpenContract;
 
   return (
@@ -204,13 +276,39 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
             {c.expires_soon && c.days_to_expiry !== null && (
               <InventoryStatusBadge tone="warn">Expira em {c.days_to_expiry} dias</InventoryStatusBadge>
             )}
+            {/* Em 'proposed' o próprio estado já diz «Proposta do fornecedor». */}
+            {fromPortal && !isProposed && <InventoryStatusBadge tone="violet">Proposta do fornecedor</InventoryStatusBadge>}
           </p>
           <h3 className="mt-1 truncate text-base font-semibold">{c.title}</h3>
           <p className="text-xs text-muted-foreground">
             {KIND_LABEL[c.kind]} · {ORIGIN_LABEL[c.origin]} · validade {fmtData(c.valid_from)} a {c.valid_until ? fmtData(c.valid_until) : "sem termo"}
           </p>
+          {fromPortal && (
+            <p className="text-xs text-muted-foreground">
+              Proposto no portal por {c.proposed_by_name || "fornecedor"}
+              {c.proposed_by_email && c.proposed_by_email !== c.proposed_by_name ? ` (${c.proposed_by_email})` : ""} em{" "}
+              {fmtDataHora(c.created_at)}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {isProposed && c.can_accept_proposal && (
+            <Button type="button" size="sm" onClick={() => setAcceptOpen(true)} disabled={busy !== null}>
+              <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Aceitar
+            </Button>
+          )}
+          {isProposed && c.can_refuse_proposal && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setRefuseOpen(true)}
+              disabled={busy !== null}
+            >
+              <XCircle className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Recusar
+            </Button>
+          )}
           <Button type="button" size="sm" variant="outline" onClick={() => setPreviewOpen(true)} disabled={isDraft && dirty}>
             <Eye className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Pré-visualizar
           </Button>
@@ -244,6 +342,15 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
         </div>
       </div>
 
+      {isProposed && (
+        <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-amber-900 dark:text-warning" role="note">
+          {c.supplier_name || "O fornecedor"} propôs estas condições no portal.{" "}
+          {c.can_accept_proposal
+            ? "Aceite para as rever no editor e enviar o contrato para assinatura, ou recuse com um motivo (o fornecedor vê-o). Enquanto não responder, não se pode criar outro contrato com este fornecedor."
+            : "Só quem gere contratos de fornecedor a pode aceitar ou recusar."}
+          {c.origin === "pdf_fornecedor" && !c.main_file_id ? " O fornecedor ainda não carregou o PDF do contrato." : ""}
+        </p>
+      )}
       {isDraft && canManage && missing.length > 0 && (
         <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-amber-900 dark:text-warning" role="note">
           Para enviar falta: {missing.join(", ")}.
@@ -278,6 +385,28 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
             ))}
           </dl>
         </section>
+      )}
+
+      {/* O que o fornecedor propôs (fica igual mesmo depois de a empresa editar o rascunho) */}
+      {fromPortal && !isProposed && c.proposal_snapshot && (
+        <details className="rounded-lg border p-3">
+          <summary className="cursor-pointer text-sm font-semibold">O que o fornecedor propôs</summary>
+          <dl className="mt-2 divide-y">
+            <Row label="Título">{c.proposal_snapshot.title}</Row>
+            <Row label="Tipo">
+              {KIND_LABEL[c.proposal_snapshot.kind]} · {ORIGIN_LABEL[c.proposal_snapshot.origin]}
+            </Row>
+            {conditionsRows(c.proposal_snapshot).map((r) => (
+              <Row key={r.label} label={r.label}>
+                {r.value}
+              </Row>
+            ))}
+            <Row label="Validade">
+              {fmtData(c.proposal_snapshot.valid_from)} a{" "}
+              {c.proposal_snapshot.valid_until ? fmtData(c.proposal_snapshot.valid_until) : "sem termo"}
+            </Row>
+          </dl>
+        </details>
       )}
 
       {/* Documento enviado */}
@@ -335,9 +464,13 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
 
       {/* Recusa */}
       {c.status === "refused" && (
-        <section aria-label="Recusa do fornecedor" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+        <section
+          aria-label={c.refused_by === "empresa" ? "Recusa da proposta" : "Recusa do fornecedor"}
+          className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"
+        >
           <h4 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-            <XCircle className="h-4 w-4 text-destructive" aria-hidden="true" /> Recusado pelo fornecedor
+            <XCircle className="h-4 w-4 text-destructive" aria-hidden="true" />{" "}
+            {c.refused_by === "empresa" ? "Proposta recusada pela empresa" : "Recusado pelo fornecedor"}
           </h4>
           <dl>
             <Row label="Quando">{fmtDataHora(c.refused_at)}</Row>
@@ -354,12 +487,16 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
       {/* Cancelamento */}
       {c.status === "cancelled" && (
         <section aria-label="Cancelamento" className="rounded-lg border p-3">
-          <h4 className="mb-1 text-sm font-semibold">Cancelado pela empresa</h4>
+          <h4 className="mb-1 text-sm font-semibold">
+            {c.proposal_state === "withdrawn" ? "Proposta retirada pelo fornecedor" : "Cancelado pela empresa"}
+          </h4>
           <dl>
             <Row label="Quando">{fmtDataHora(c.cancelled_at)}</Row>
-            <Row label="Motivo">
-              <span className="whitespace-pre-wrap">{c.cancel_reason || "—"}</span>
-            </Row>
+            {c.proposal_state !== "withdrawn" && (
+              <Row label="Motivo">
+                <span className="whitespace-pre-wrap">{c.cancel_reason || "—"}</span>
+              </Row>
+            )}
           </dl>
         </section>
       )}
@@ -400,7 +537,7 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
           <ol className="mt-2 space-y-1 border-l pl-3">
             {[...c.events].reverse().map((e) => (
               <li key={e.id} className="text-sm">
-                <span className="text-xs text-muted-foreground">{fmtDataHora(e.created_at)}</span> · {e.description || e.event_type}
+                <span className="text-xs text-muted-foreground">{fmtDataHora(e.created_at)}</span> · {eventText(e)}
               </li>
             ))}
           </ol>
@@ -497,6 +634,80 @@ export function SupplierContractDetail({ contract, supplierHasOpenContract, onSe
             >
               {busy === "cancel" && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}
               Cancelar contrato
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Aceitar a proposta */}
+      <AlertDialog open={acceptOpen} onOpenChange={(v) => busy !== "accept" && setAcceptOpen(v)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Aceitar a proposta {label}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A proposta passa a rascunho com as condições do fornecedor
+              {c.origin === "modelo" ? " e o texto do modelo da empresa" : " e o PDF dele"}. Pode ajustá-las no editor antes de
+              enviar; o fornecedor assina por SMS e a empresa contra-assina, como num contrato criado aqui.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy === "accept"}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void doAccept();
+              }}
+              disabled={busy === "accept"}
+            >
+              {busy === "accept" && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}
+              Aceitar proposta
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Recusar a proposta */}
+      <Dialog
+        open={refuseOpen}
+        onOpenChange={(v) => {
+          if (busy === "refuse") return;
+          setRefuseOpen(v);
+          if (!v) setRefuseReason("");
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Recusar a proposta {label}</DialogTitle>
+            <DialogDescription>
+              O fornecedor vê o motivo no portal e pode propor de novo. A proposta fica no histórico como recusada.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor={`sc-refuse-proposal-${c.id}`}>Motivo da recusa *</Label>
+            <Textarea
+              id={`sc-refuse-proposal-${c.id}`}
+              rows={4}
+              maxLength={PROPOSAL_REFUSE_MAX}
+              value={refuseReason}
+              onChange={(e) => setRefuseReason(e.target.value)}
+              aria-describedby={`sc-refuse-proposal-${c.id}-help`}
+            />
+            <p id={`sc-refuse-proposal-${c.id}-help`} className="text-xs text-muted-foreground">
+              Entre {PROPOSAL_REFUSE_MIN} e {PROPOSAL_REFUSE_MAX} caracteres ({refuseTrimmed.length}/{PROPOSAL_REFUSE_MAX}).
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setRefuseOpen(false)} disabled={busy === "refuse"}>
+              Voltar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void doRefuseProposal()}
+              disabled={busy === "refuse" || !refuseValid}
+            >
+              {busy === "refuse" && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}
+              Recusar proposta
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -255,6 +255,32 @@ export const STATUS_TONE: Record<SupplierContractStatus, InventoryTone> = {
   superseded: "neutral",
 };
 
+/** Rótulo de cada evento do histórico (quando o servidor não manda descrição). */
+export const EVENT_LABEL: Record<SupplierContractEventType, string> = {
+  created: "Rascunho criado",
+  updated: "Rascunho alterado",
+  conditions_updated: "Condições alteradas",
+  sent: "Enviado ao fornecedor",
+  file_added: "Ficheiro adicionado",
+  supplier_signed: "Assinado pelo fornecedor",
+  company_signed: "Contra-assinado pela empresa",
+  refused: "Recusado pelo fornecedor",
+  cancelled: "Cancelado pela empresa",
+  superseded: "Substituído por nova versão",
+  expired: "Expirado",
+  new_version: "Nova versão criada",
+  signature_request_resent: "Pedido de assinatura reenviado",
+  proposed: "Proposta do fornecedor",
+  proposal_accepted: "Proposta aceite pela empresa",
+  proposal_refused: "Proposta recusada pela empresa",
+  proposal_withdrawn: "Proposta retirada pelo fornecedor",
+};
+
+/** Texto de uma linha do histórico: a descrição do servidor, senão o rótulo do tipo. */
+export function eventText(e: Pick<SupplierContractEvent, "event_type" | "description">): string {
+  return e.description || EVENT_LABEL[e.event_type as SupplierContractEventType] || e.event_type;
+}
+
 export const KIND_LABEL: Record<SupplierContractKind, string> = {
   material: "Fornecimento de material",
   servico: "Subempreitada / serviços",

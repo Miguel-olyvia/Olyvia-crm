@@ -62,6 +62,8 @@ export function SupplierContractTab({ supplierId, supplierName, organizationId, 
   const data = listQuery.data;
   const contracts = data?.contracts ?? [];
   const hasOpen = contracts.some((c) => isOpenStatus(c.status));
+  // Proposta do fornecedor por responder: conta como contrato em curso (índice "um em curso").
+  const pendingProposal = contracts.find((c) => c.status === "proposed") ?? null;
   const active = contracts.find((c) => c.status === "signed") ?? null;
 
   // Seleção: mantém a escolhida enquanto existir; senão a por omissão.
@@ -149,8 +151,33 @@ export function SupplierContractTab({ supplierId, supplierName, organizationId, 
                 {contracts.length === 0 ? "Novo contrato" : "Novo rascunho em branco"}
               </Button>
             )}
+            {data.can_manage && pendingProposal && (
+              <Button type="button" size="sm" disabled aria-describedby="sc-proposta-pendente">
+                <FilePlus2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Novo contrato
+              </Button>
+            )}
           </div>
         </div>
+        {pendingProposal && (
+          <p
+            id="sc-proposta-pendente"
+            className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-amber-900 dark:text-warning"
+            role="note"
+          >
+            {supplierName} propôs um contrato no portal ({contractRef(pendingProposal)}
+            {pendingProposal.proposed_by_name ? `, por ${pendingProposal.proposed_by_name}` : ""}). Só pode haver um contrato em
+            curso de cada vez: aceite ou recuse a proposta antes de criar outro.{" "}
+            {pendingProposal.id !== selectedId && (
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={() => setSelectedId(pendingProposal.id)}
+              >
+                Abrir a proposta
+              </button>
+            )}
+          </p>
+        )}
         {contracts.length === 0 ? (
           <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
             Ainda não há contratos com este fornecedor.
@@ -177,6 +204,9 @@ export function SupplierContractTab({ supplierId, supplierName, organizationId, 
                       <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                       <span className="font-mono font-semibold">{contractRef(c)}</span>
                       <span className="truncate text-muted-foreground">{c.title}</span>
+                      {c.created_via === "portal" && c.status !== "proposed" && (
+                        <InventoryStatusBadge tone="violet">Proposta do fornecedor</InventoryStatusBadge>
+                      )}
                     </span>
                     <span className="flex flex-wrap items-center gap-2">
                       <small className="text-xs text-muted-foreground">

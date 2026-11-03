@@ -14,6 +14,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 vi.mock("../SupplierContractDraftEditor", () => ({ SupplierContractDraftEditor: () => <div>editor do rascunho</div> }));
 
 import { SupplierContractDetail } from "../SupplierContractDetail";
+import { useSupplierContractDetail } from "../useSupplierContracts";
 
 const base: Detail = {
   id: "sc1",
@@ -190,5 +191,139 @@ describe("SupplierContractDetail — ações por estado e permissão", () => {
     await waitFor(() =>
       expect(rpc).toHaveBeenCalledWith("rpc_supplier_contract_cancel", { p_contract_id: "sc1", p_reason: "Condições erradas" }),
     );
+  });
+});
+
+describe("SupplierContractDetail — proposta do fornecedor", () => {
+  const proposta: Detail = {
+    ...base,
+    status: "proposed",
+    created_via: "portal",
+    proposal_state: "pending",
+    proposed_by_name: "Rui Fornecedor",
+    proposed_by_email: "rui@fornecedor.pt",
+    created_by_portal_user_id: "pu1",
+    template_id: null,
+    body_html: null,
+    can_accept_proposal: true,
+    can_refuse_proposal: true,
+  };
+  const DETAIL_KEY = ["supplier-contracts", "detail", "sc1"];
+
+  beforeAll(() => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  });
+  beforeEach(() => {
+    rpc.mockReset();
+    invoke.mockReset();
+  });
+
+  it("mostra quem propôs, Aceitar/Recusar e nunca Cancelar nem o editor", () => {
+    renderDetail(proposta, true);
+    expect(screen.getByText(/Proposto no portal por Rui Fornecedor \(rui@fornecedor\.pt\)/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Aceitar$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Recusar$/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Cancelar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Nova versão/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Enviar ao fornecedor/ })).toBeNull();
+    expect(screen.queryByText("editor do rascunho")).toBeNull();
+  });
+
+  it("sem permissão (can_accept/can_refuse falsos): sem Aceitar, Recusar ou Cancelar", () => {
+    renderDetail({ ...proposta, can_manage: false, can_accept_proposal: false, can_refuse_proposal: false }, true);
+    expect(screen.queryByRole("button", { name: /^Aceitar$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Recusar$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Cancelar/ })).toBeNull();
+    expect(screen.getByText(/Só quem gere contratos de fornecedor a pode aceitar ou recusar/)).toBeTruthy();
+  });
+
+  it("Aceitar chama rpc_supplier_contract_accept_proposal e abre o rascunho no editor", async () => {
+    const aceite = { ...proposta, status: "draft" as const, proposal_state: "accepted" as const, can_accept_proposal: false, can_refuse_proposal: false };
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "rpc_supplier_contract_accept_proposal" ? { data: { ...aceite, template_applied: true }, error: null } : { data: aceite, error: null },
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Como em SupplierContractTab: o detalhe vem de useSupplierContractDetail (react-query).
+    client.setQueryData(DETAIL_KEY, proposta);
+    function FromQuery() {
+      const q = useSupplierContractDetail("sc1");
+      return q.data ? <SupplierContractDetail contract={q.data} supplierHasOpenContract onSelect={() => {}} /> : null;
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <FromQuery />
+      </QueryClientProvider>,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Aceitar$/ }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /Aceitar proposta/ }));
+    });
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith("rpc_supplier_contract_accept_proposal", { p_contract_id: "sc1" }));
+    await waitFor(() => expect(client.getQueryData<Detail>(DETAIL_KEY)?.status).toBe("draft"));
+    expect(await screen.findByText("editor do rascunho")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Aceitar$/ })).toBeNull();
+    // Já em rascunho cancela-se como qualquer rascunho.
+    expect(screen.getByRole("button", { name: /Cancelar rascunho/ })).toBeTruthy();
+  });
+
+  it("Recusar exige motivo de 3 a 2000 caracteres e chama rpc_supplier_contract_refuse_proposal", async () => {
+    rpc.mockImplementation(async () => ({
+      data: { contract_id: "sc1", status: "refused", refused_at: "2026-11-03T10:00:00Z", refusal_reason: "Prazo curto" },
+      error: null,
+    }));
+    renderDetail(proposta, true);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Recusar$/ }));
+    });
+    const confirmar = (await screen.findByRole("button", { name: /Recusar proposta/ })) as HTMLButtonElement;
+    expect(confirmar.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Motivo da recusa/), { target: { value: "  ok " } });
+    expect(confirmar.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Motivo da recusa/), { target: { value: "x".repeat(2001) } });
+    expect(confirmar.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Motivo da recusa/), { target: { value: "  Prazo curto  " } });
+    expect(confirmar.disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(confirmar);
+    });
+    await waitFor(() =>
+      expect(rpc).toHaveBeenCalledWith("rpc_supplier_contract_refuse_proposal", { p_contract_id: "sc1", p_reason: "Prazo curto" }),
+    );
+    expect(rpc).not.toHaveBeenCalledWith("rpc_supplier_contract_cancel", expect.anything());
+  });
+
+  it("recusada pela empresa e retirada: títulos certos e rótulos dos eventos novos no histórico", () => {
+    const { unmount } = renderDetail({
+      ...proposta,
+      status: "refused",
+      proposal_state: "refused",
+      refused_by: "empresa",
+      refused_at: "2026-11-03T10:00:00Z",
+      refusal_reason: "Prazo curto",
+      can_accept_proposal: false,
+      can_refuse_proposal: false,
+      events: [
+        { id: "e1", event_type: "proposed", description: null, created_at: "2026-11-02T10:00:00Z" },
+        { id: "e2", event_type: "proposal_refused", description: null, created_at: "2026-11-03T10:00:00Z" },
+      ],
+    });
+    expect(screen.getByText(/Proposta recusada pela empresa/, { selector: "h4" })).toBeTruthy();
+    expect(screen.getByText("Prazo curto")).toBeTruthy();
+    expect(screen.getByText(/Proposta recusada pela empresa$/, { selector: "li" })).toBeTruthy();
+    expect(screen.getByText(/Proposta do fornecedor$/, { selector: "li" })).toBeTruthy();
+    unmount();
+    renderDetail({
+      ...proposta,
+      status: "cancelled",
+      proposal_state: "withdrawn",
+      cancelled_at: "2026-11-03T10:00:00Z",
+      can_accept_proposal: false,
+      can_refuse_proposal: false,
+      events: [{ id: "e3", event_type: "proposal_withdrawn", description: null, created_at: "2026-11-03T10:00:00Z" }],
+    });
+    expect(screen.getByText("Proposta retirada pelo fornecedor", { selector: "h4" })).toBeTruthy();
+    expect(screen.getByText(/Proposta retirada pelo fornecedor$/, { selector: "li" })).toBeTruthy();
   });
 });

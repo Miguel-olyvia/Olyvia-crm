@@ -190,6 +190,34 @@ export function describeSpContractError(err: unknown): string {
   }
 }
 
+/** Erros de sp_supplier_contract_propose, por hint (o not_found aqui é a empresa, não o contrato). */
+export function describeSpProposeError(err: unknown): string {
+  const hint = getSpHint(err);
+  const raw = err instanceof Error ? err.message : "";
+  switch (hint) {
+    case "not_owner":
+      return "Só o responsável principal da conta pode propor um contrato.";
+    case "not_found":
+      return "Esta empresa já não está ligada à sua conta. Atualize a página.";
+    case "open_contract_exists":
+      return "Já há um contrato em curso com esta empresa: aguarde que termine (ou retire a sua proposta) antes de propor outro.";
+    case "supplier_required":
+      return "A sua conta está ligada a mais de um fornecedor nesta empresa: escolha qual.";
+    case "validation":
+      return raw || "Verifique os dados da proposta.";
+    default:
+      return describeSpContractError(err);
+  }
+}
+
+/** Erros de sp_supplier_contract_withdraw. */
+export function describeSpWithdrawError(err: unknown): string {
+  const hint = getSpHint(err);
+  if (hint === "invalid_state") return "Esta proposta já não pode ser retirada: a empresa já lhe respondeu. Atualize a página.";
+  if (hint === "not_owner") return "Só o responsável principal da conta pode retirar a proposta.";
+  return describeSpContractError(err);
+}
+
 // ── Estado do contrato no portal ────────────────────────────────────────────
 
 /** Rótulos do ponto de vista do fornecedor (os de ./tipos são do CRM). */
