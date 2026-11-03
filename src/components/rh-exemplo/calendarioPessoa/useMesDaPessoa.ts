@@ -3,7 +3,7 @@
  * (o hook que a aba Assiduidade ja carregou para esta janela, entregue por quem chama para nao ir duas vezes a base),
  * tal como o horario planeado (`pessoas_horario_planeado`, que vem na mesma leitura). O minimo de minutos do subsidio
  * e a regra real da organizacao (`hr_regras_subsidio_alimentacao`). Continuam a vir dos stores de exemplo, por ainda
- * nao terem tabela, so as horas extra e o banco de horas.
+ * nao ter tabela, so o banco de horas. As horas extra vem da base (`rpc_hr_horas_extra_listar`, so as do mes desta pessoa).
  */
 import { useMemo } from "react";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
@@ -11,6 +11,8 @@ import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useR
 import { horarioPessoaDeLinhas } from "@/components/rh-exemplo/lib/horarioReal";
 import { saldoDoBanco } from "@/components/rh-exemplo/fluxosC/bancoHorasRegras";
 import { useFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { limitesDoMes, useHorasExtraAutorizacoes, useHorasExtraListar } from "@/components/rh-exemplo/hooks/horasExtraReal";
+import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
 import type { LocalTrabalho } from "@/components/rh-exemplo/tipos";
 import type { AusenciaTipo } from "@/components/rh-exemplo/tiposAusencias";
 import { entradaMesReal, type AssiduidadeDoMes } from "./fonteMes";
@@ -24,6 +26,8 @@ export interface MesDaPessoa {
   erroRegraSubsidio: boolean;
   /** O horario planeado foi recusado a quem consulta: o previsto fica vazio e o ecra tem de o dizer. */
   planeadoRecusado: boolean;
+  /** As horas extra do mes nao se leram (texto traduzido): o calendario nao as mostra e tem de o dizer. `null` se correu bem. */
+  erroHorasExtra: string | null;
 }
 
 export interface FonteRealDoMes {
@@ -41,9 +45,14 @@ const SEM_LOCAIS: readonly LocalTrabalho[] = [];
 export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte: FonteRealDoMes): MesDaPessoa {
   const { regra, error: erroRegra } = useRegrasSubsidioAlimentacao();
   const minimo = regra.minutosMinimosDia;
-  const horasExtra = useFluxosC((e) => e.horasExtra);
   const banco = useFluxosC((e) => e.banco);
-  const podeHE = useFluxosC((e) => e.podeHE);
+  const { permissoes } = usePermissoesAssiduidade();
+  const periodo = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);
+  // Sem permissao de ver (ou se a leitura falha) o mes fica sem horas extra, em vez de acusar a pessoa.
+  const { horas: horasExtra, erro: erroHorasExtra } = useHorasExtraListar({ pessoaId, de: periodo.de, ate: periodo.ate, enabled: permissoes.view || permissoes.viewOwn });
+  // «Pode fazer horas extra» so se le com `hr.assiduidade.view`; sem ela nao se afirma que falta a marca.
+  const autorizacoes = useHorasExtraAutorizacoes(permissoes.view);
+  const podeHE = permissoes.view && !autorizacoes.aCarregar && !autorizacoes.erro ? autorizacoes.pode(pessoaId) : true;
   const { assiduidade, dataAdmissao, tiposAusencia = SEM_TIPOS, locais = SEM_LOCAIS } = fonte;
   const planeado = assiduidade.planeado;
   const horario = useMemo(() => horarioPessoaDeLinhas(planeado), [planeado]);
@@ -59,15 +68,15 @@ export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte
         tiposAusencia,
         locais,
         horario,
-        horasExtra: horasExtra.filter((h) => h.pessoaId === pessoaId),
+        horasExtra,
         banco: banco.filter((m) => m.pessoaId === pessoaId),
-        podeHE: podeHE[pessoaId] === true,
+        podeHE,
       }),
     );
     const totais = totaisDoMes(dias, {
       minimoSubsidioMin: minimo,
       bancoSaldoMin: saldoDoBanco(banco, pessoaId),
     });
-    return { dias, totais, erroRegraSubsidio: Boolean(erroRegra), planeadoRecusado: Boolean(assiduidade.planeadoRecusado) };
-  }, [ano, mes, dataAdmissao, assiduidade, tiposAusencia, locais, horario, horasExtra, banco, podeHE, minimo, erroRegra, pessoaId]);
+    return { dias, totais, erroRegraSubsidio: Boolean(erroRegra), planeadoRecusado: Boolean(assiduidade.planeadoRecusado), erroHorasExtra };
+  }, [ano, mes, dataAdmissao, assiduidade, tiposAusencia, locais, horario, horasExtra, banco, podeHE, minimo, erroRegra, erroHorasExtra, pessoaId]);
 }

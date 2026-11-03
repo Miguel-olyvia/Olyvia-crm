@@ -5,6 +5,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 // As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
+// As horas extra e as permissoes de assiduidade vem da base: simuladas, semeadas com as horas extra de exemplo.
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
+vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 
 // O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
 vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
@@ -44,7 +47,8 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
-import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
 import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
 import { PainelDoDiaDePessoa } from "@/components/rh-exemplo/assiduidade/PainelDoDiaDePessoa";
 import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeTab";
@@ -88,6 +92,8 @@ beforeEach(() => {
   reporGestao();
   reporFluxosB();
   reporFluxosC();
+  reporBaseFalsa();
+  semearHoras(lerFluxosC().horasExtra);
   reporAssiduidadeFalsa();
 });
 

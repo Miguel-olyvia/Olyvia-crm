@@ -32,12 +32,16 @@ vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => {
 });
 vi.mock("@/components/rh-exemplo/hooks/PessoaRelatorioAssiduidadeMensalReal", () => ({ PessoaRelatorioAssiduidadeMensal: () => null }));
 
+// As horas extra e as permissoes de assiduidade tambem vem da base: simuladas, semeadas com as horas extra de exemplo.
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
+vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 // O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
 vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
   useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
 }));
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { baseFalsa, reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { repor } from "@/components/rh-exemplo/dados/loja";
@@ -86,6 +90,8 @@ beforeEach(() => {
   reporGestao();
   reporFluxosB();
   reporFluxosC();
+  reporBaseFalsa();
+  semearHoras(lerFluxosC().horasExtra);
   reporAssiduidadeFalsa();
 });
 
@@ -146,13 +152,13 @@ describe("o calendario do mes na aba Assiduidade", () => {
     expect(within(detalhe).getByRole("button", { name: /Corrigir ou pedir justificação/ })).toBeInTheDocument();
   });
 
-  it("confirmar uma hora extra no detalhe atualiza o dia", () => {
+  it("confirmar uma hora extra no detalhe atualiza o dia", async () => {
     abrir("p-sofia", "Sofia Rebelo");
     fireEvent.click(celula("2026-10-06"));
     fireEvent.click(within(screen.getByTestId("rhcal-detalhe")).getByRole("button", { name: /Confirmar hora extra de 1 h 30 min/ }));
     const dialogo = screen.getAllByRole("dialog").at(-1) as HTMLElement;
     fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
-    expect(lerFluxosC().horasExtra.find((h) => h.id === "he-sofia-2026-10-06")?.estado).toBe("confirmada");
+    await waitFor(() => expect(baseFalsa.horas.find((h) => h.id === "he-sofia-2026-10-06")?.estado).toBe("confirmada"));
     expect(celula("2026-10-06")).toHaveTextContent("hora extra confirmada");
     expect(within(screen.getByTestId("rhcal-detalhe")).queryByRole("button", { name: /Confirmar hora extra/ })).not.toBeInTheDocument();
   });

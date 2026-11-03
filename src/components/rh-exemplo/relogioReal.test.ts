@@ -43,7 +43,19 @@ describe("ficheiros ligados a dados reais não usam o relógio de exemplo", () =
     "novaPessoa/FormularioNovaPessoa.tsx",
     "novaPessoa/AbaRetribuicao.tsx",
     "../../pages/rh-exemplo/RhAusenciasOrganizacao.tsx",
+    "fluxosC/DetetarHorasExtraDialog.tsx",
+    "fluxosC/RegistarTempoAMaisDialog.tsx",
+    "fluxosC/HorasExtraDaPessoa.tsx",
   ])("%s", (f) => {
     expect(readFileSync(join(RAIZ, f), "utf8")).not.toMatch(/hojeExemplo|agoraExemplo|HOJE_EXEMPLO_RH/);
+  });
+
+  // `hojeIso` de dados/datas devolve o dia fixo do exemplo (HOJE_EXEMPLO_RH): as horas extra reais usam o dia de Lisboa.
+  it.each([
+    "fluxosC/DetetarHorasExtraDialog.tsx",
+    "fluxosC/RegistarTempoAMaisDialog.tsx",
+    "fluxosC/HorasExtraDaPessoa.tsx",
+  ])("%s não importa o dia fixo do exemplo (dados/datas)", (f) => {
+    expect(readFileSync(join(RAIZ, f), "utf8")).not.toMatch(/dados\/datas/);
   });
 });

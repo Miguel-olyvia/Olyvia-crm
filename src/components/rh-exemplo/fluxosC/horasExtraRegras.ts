@@ -46,7 +46,17 @@ export interface HoraExtra {
   acimaDoLimite: boolean;
   motivoDecisao: string | null;
   decididoPor: string | null;
+  /** Vindo da base: a pessoa não tinha a marca «pode fazer horas extra» quando a hora extra nasceu. */
+  semAutorizacao?: boolean;
+  /** Vindo da base: o nome da pessoa (a lista já o traz) e o tramo, quando o tempo a mais é um só bloco. */
+  pessoaNome?: string;
+  horaInicio?: string | null;
+  horaFim?: string | null;
 }
+
+/** Uma hora extra precisa de motivo para ser confirmada quando passa um limite ou a pessoa não tinha autorização. */
+export const confirmaExigeMotivo = (h: Pick<HoraExtra, "acimaDoLimite" | "semAutorizacao">): boolean =>
+  h.acimaDoLimite || h.semAutorizacao === true;
 
 // -- 1. Tempo a mais por tipo de horário --------------------------------------------------------
 
@@ -187,7 +197,7 @@ export function decidirHoraExtra(
   quem: string,
 ): ResultadoDecisao {
   if (h.estado !== "pendente") return { ok: false, erro: "ja_decidida" };
-  const exigeMotivo = decisao === "rejeitar" || h.acimaDoLimite;
+  const exigeMotivo = decisao === "rejeitar" || confirmaExigeMotivo(h);
   if (exigeMotivo && !motivoValido(motivo)) return { ok: false, erro: "motivo_obrigatorio" };
   return {
     ok: true,

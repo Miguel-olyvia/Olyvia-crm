@@ -5,6 +5,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
+// As horas extra e as permissoes de assiduidade vem da base: simuladas, semeadas com as horas extra de exemplo.
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
+vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -12,7 +15,8 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
-import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
 import { baseFalsa, reporBaseFalsa, semearJustificacao } from "@/test/justificacoesDoDiaFalso";
 import RhAssiduidadeOrganizacao from "./RhAssiduidadeOrganizacao";
 
@@ -31,6 +35,8 @@ beforeEach(() => {
   reporGestao();
   reporFluxosB();
   reporFluxosC();
+  reporBaseFalsa();
+  semearHoras(lerFluxosC().horasExtra);
   reporBaseFalsa();
 });
 

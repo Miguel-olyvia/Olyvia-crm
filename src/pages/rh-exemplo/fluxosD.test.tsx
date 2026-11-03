@@ -1,10 +1,10 @@
 // Arranque das duas alterações da frente D: o banco de horas na aba Horário da ficha (só com horário «banco de horas»)
-// e as horas extra pendentes na fila de trabalho do mapa de assiduidade (mesmas ações do store da frente C).
+// e as horas extra pendentes na fila de trabalho do mapa de assiduidade (simuladas ao nível do wrapper `horasExtraReal`, como a base).
 import { beforeEach, describe, expect, it, vi } from "vitest";
 // As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { lerEstado, repor } from "@/components/rh-exemplo/dados/loja";
@@ -24,6 +24,13 @@ import { menuSections } from "@/components/sidebar/menuConfig";
 import { PessoaHorarioTab } from "@/components/rh-exemplo/PessoaHorarioTab";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
 import RhAssiduidadeOrganizacao from "./RhAssiduidadeOrganizacao";
+
+// As horas extra, os limites e a marca por pessoa vivem na base: aqui simulados (semeados com as horas extra de exemplo).
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
+vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
+import { baseFalsa, reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
+// Os dialogos de detetar e registar listam as pessoas da base: sem CompanyProvider aqui, a lista vem vazia.
+vi.mock("@/components/rh-exemplo/hooks/usePessoas", () => ({ usePessoas: () => ({ pessoas: [] }) }));
 
 // Os limites e coeficientes vêm da base: aqui os wrappers são simulados (sem Supabase). O que se vê da base fica
 // testado em fluxosC/horasExtraReal.test.tsx.
@@ -50,6 +57,8 @@ beforeEach(() => {
   reporGestao();
   reporFluxosB();
   reporFluxosC();
+  reporBaseFalsa();
+  semearHoras(lerFluxosC().horasExtra.map((h) => ({ ...h, pessoaNome: lerEstado().fichas[h.pessoaId]?.pessoa.nome_completo ?? h.pessoaId })));
 });
 
 describe("traduções da frente D", () => {
@@ -93,7 +102,7 @@ describe("banco de horas na ficha", () => {
 });
 
 describe("horas extra na fila de trabalho", () => {
-  const pendentes = () => lerFluxosC().horasExtra.filter((h) => h.estado === "pendente");
+  const pendentes = () => baseFalsa.horas.filter((h) => h.estado === "pendente");
 
   it("lista só as pendentes, com chip de texto, tempo a mais e os dois botões", () => {
     noRouter(<HorasExtraNaFila />);
@@ -105,29 +114,31 @@ describe("horas extra na fila de trabalho", () => {
     expect(within(linhas[0]).getByRole("button", { name: /^Rejeitar hora extra:/ })).toBeInTheDocument();
   });
 
-  it("confirmar usa a ação do store e a linha sai da fila", () => {
+  it("confirmar usa a ação do store e a linha sai da fila", async () => {
     noRouter(<HorasExtraNaFila />);
     const antes = pendentes().length;
     const linha = screen.getAllByTestId(/^rhd-fila-he-/)[0];
     const id = (linha.getAttribute("data-testid") ?? "").replace("rhd-fila-he-", "");
     fireEvent.click(within(linha).getByRole("button", { name: /^Confirmar hora extra:/ }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirmar" }));
-    expect(lerFluxosC().horasExtra.find((h) => h.id === id)?.estado).toBe("confirmada");
+    await waitFor(() => expect(baseFalsa.horas.find((h) => h.id === id)?.estado).toBe("confirmada"));
     expect(pendentes()).toHaveLength(antes - 1);
-    expect(screen.queryByTestId(`rhd-fila-he-${id}`)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId(`rhd-fila-he-${id}`)).not.toBeInTheDocument());
   });
 
-  it("rejeitar exige motivo de 3 caracteres", () => {
+  it("rejeitar exige motivo de 3 caracteres", async () => {
     noRouter(<HorasExtraNaFila />);
     const antes = pendentes().length;
     fireEvent.click(screen.getAllByRole("button", { name: /^Rejeitar hora extra:/ })[0]);
     const dialogo = screen.getByRole("dialog");
     fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "ab" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Rejeitar" }));
+    expect(await within(dialogo).findByRole("alert")).toBeInTheDocument();
     expect(pendentes()).toHaveLength(antes);
+    expect(baseFalsa.decisoes).toHaveLength(0);
     fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "abc" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Rejeitar" }));
-    expect(pendentes()).toHaveLength(antes - 1);
+    await waitFor(() => expect(pendentes()).toHaveLength(antes - 1));
   });
 
   it("o separador da fila mostra o contador e abre com as horas extra", async () => {
@@ -155,21 +166,23 @@ describe("horas extra: limites, configuração e histórico", () => {
     expect(limiteAnualMin(comLimite, 9000)).toBe(6000);
   });
 
-  it("o interruptor está no grupo «Tempo de trabalho» do Contrato e os máximos só ficam ativos com ele ligado", () => {
+  it("o interruptor está no grupo «Tempo de trabalho» do Contrato, grava na base, e os máximos dependem só de quem pode editar", async () => {
     const rascunho = { horas_anuais_maximas: "", horas_semanais_maximas: "", regime: "tempo_inteiro", tipo_trabalho: "", horas_periodo: "40", horas_frequencia: "semanal", politica_feriados: "nao_laboral", isencao_horario: false, dias_uteis: [1] } as unknown as Parameters<typeof ContratoGrupoTempoTrabalho>[0]["rascunho"];
     noRouter(<ContratoGrupoTempoTrabalho rascunho={rascunho} definir={() => {}} podeEditar criandoContrato={false} pessoaId="p-marta" erroDe={() => null} />);
     const interruptor = screen.getByRole("switch", { name: "Pode fazer horas extra" });
     expect(interruptor).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByLabelText(/Horas anuais máximas/i)).toBeDisabled();
+    // Os máximos gravam-se no contrato: só dependem de `podeEditar`, não do interruptor (que se guarda à parte, na base).
+    expect(screen.getByLabelText(/Horas anuais máximas/i)).toBeEnabled();
     fireEvent.click(interruptor);
+    await waitFor(() => expect(baseFalsa.autorizacoes["p-marta"]).toBe(true));
     expect(screen.getByLabelText(/Horas anuais máximas/i)).toBeEnabled();
   });
 
-  it("o alerta configura-se em Processamento salarial > Configuração (os coeficientes são da base, ver horasExtraReal.test)", () => {
+  it("o alerta configura-se em Processamento salarial > Configuração (os coeficientes são da base, ver horasExtraReal.test)", async () => {
     noRouter(<ConfiguracaoHorasExtra />);
     fireEvent.change(screen.getByLabelText(/Alerta a/), { target: { value: "70" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Guardar" })[0]);
-    expect(lerFluxosC().limites.alertaPct).toBe(70);
+    await waitFor(() => expect(baseFalsa.limites.alertaPct).toBe(70));
   });
 
   it("o cálculo do mês usa só as confirmadas e os coeficientes configurados", () => {

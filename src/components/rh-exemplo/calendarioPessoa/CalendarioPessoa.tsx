@@ -93,6 +93,9 @@ export function CalendarioPessoa({
       {dados.erroRegraSubsidio && (
         <p role="alert" className="text-sm font-medium text-destructive">{t("rhExemplo.hor.real.erroRegraSubsidio")}</p>
       )}
+      {dados.erroHorasExtra && (
+        <p role="alert" className="text-sm font-medium text-destructive">{t("rhHeReal.calendario.erroHorasExtra", { erro: dados.erroHorasExtra })}</p>
+      )}
       {dados.planeadoRecusado && (
         <p role="alert" className="text-sm font-medium text-destructive">{t("rhExemplo.hor.real.planeadoRecusado")}</p>
       )}

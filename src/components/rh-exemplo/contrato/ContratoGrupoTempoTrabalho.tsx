@@ -57,7 +57,7 @@ export function ContratoGrupoTempoTrabalho({
 }: ContratoGrupoTempoTrabalhoProps) {
   const { t } = useTranslation();
   // Os máximos gravam-se em pessoas_vinculos (saveVinculo), como no RH real: só dependem de quem pode editar o contrato,
-  // e não do interruptor de horas extra, que vive só em memória.
+  // e não do interruptor de horas extra, que se guarda à parte na base (`rpc_hr_pessoa_horas_extra_autorizar`).
   const maximosAtivos = podeEditar;
 
   const horasNumero = Number(rascunho.horas_periodo.replace(",", "."));

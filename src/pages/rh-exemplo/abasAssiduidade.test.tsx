@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
+// As horas extra e as permissoes de assiduidade vem da base: simuladas, semeadas com as horas extra de exemplo.
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
+vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 
 // O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
 vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
@@ -19,7 +22,35 @@ import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
-import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
+// A base e simulada como nos outros testes do rh-exemplo (mesmo conjunto do justificacaoDia.test): sem CompanyProvider e sem chamadas.
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
+vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", async (importOriginal) =>
+  (await import("@/test/assiduidadeDaPessoaFalso")).wrapperAssiduidadeDaPessoaFalso(
+    await importOriginal<typeof import("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa")>(),
+  ));
+vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao", async (importOriginal) =>
+  (await import("@/test/assiduidadeDaPessoaFalso")).wrapperAssiduidadeDaOrganizacaoFalso(
+    await importOriginal<typeof import("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao")>(),
+  ));
+vi.mock("@/components/rh-exemplo/hooks/useLocaisTrabalho", () => {
+  const resultado = { locais: [] as never[], loading: false, recusado: false };
+  return { useLocaisTrabalho: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/useAusenciasTipos", async () => {
+  const tipos = (await import("@/components/rh-exemplo/dados/catalogos")).catalogos().tiposAusencia;
+  const resultado = { tipos, loading: false, recusado: false, vazio: false };
+  return { useAusenciasTipos: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => {
+  const resultado = { regra: { minutosMinimosDia: 240 }, error: null };
+  return { useRegrasSubsidioAlimentacao: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/PessoaRelatorioAssiduidadeMensalReal", () => ({ PessoaRelatorioAssiduidadeMensal: () => null }));
+import { reporAssiduidadeFalsa } from "@/test/assiduidadeDaPessoaFalso";
 import { abaAberta, abasVisiveis } from "@/components/rh-exemplo/assiduidadeAbas/abas";
 import { ListaAbasFicha } from "@/components/rh-exemplo/ficha/ListaAbasFicha";
 import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeTab";
@@ -59,6 +90,9 @@ beforeEach(() => {
   reporGestao();
   reporFluxosB();
   reporFluxosC();
+  reporBaseFalsa();
+  reporAssiduidadeFalsa();
+  semearHoras(lerFluxosC().horasExtra);
   reporCusto();
 });
 

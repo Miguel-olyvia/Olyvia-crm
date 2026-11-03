@@ -234,6 +234,16 @@ export type BusinessFlow =
   // este ecra nunca escreve retribuicao nem horas.
   | "hr-retribuicoes-vigentes-organizacao-load"
   | "hr-horas-vigentes-organizacao-load"
+  // Horas extra (`rpc_hr_horas_extra_*`): so defeitos (rede, sem codigo legivel); as recusas de negocio nao se reportam.
+  | "hr-horas-extra-listar"
+  | "hr-horas-extra-saldo"
+  | "hr-horas-extra-config-ler"
+  | "hr-horas-extra-config-guardar"
+  | "hr-horas-extra-autorizacoes"
+  | "hr-horas-extra-autorizar"
+  | "hr-horas-extra-detetar"
+  | "hr-hora-extra-decidir"
+  | "hr-hora-extra-registar"
   // Funções neg_* da página Pessoas: só os erros inesperados (os códigos NG são esperados).
   | "pessoas-neg";
 

@@ -10,6 +10,8 @@ vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => ({
   useRegrasSubsidioAlimentacao: () => ({ regra: { minutosMinimosDia: regraSubsidio.minutosMinimosDia }, error: regraSubsidio.error }),
 }));
 
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
+vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 import { entradaMesReal, type AssiduidadeDoMes } from "./fonteMes";
 import { useMesDaPessoa } from "./useMesDaPessoa";
 
