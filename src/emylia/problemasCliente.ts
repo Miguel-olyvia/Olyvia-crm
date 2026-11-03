@@ -1,6 +1,6 @@
 // Os problemas que o cliente reporta na conversa (3/11/2026, Rúben): «se ele demonstrar um problema e submeter fotos com o problema, o gestor
 // de obra cria novas tasks, mete técnicos associados e gera ou não orçamento para ela».
-// · O cliente escreve na conversa do portal com fotografias (20270105200000). Uma mensagem do cliente com fotografias é um problema por
+// · O cliente escreve na conversa do portal com fotografias (20270105400000). Uma mensagem do cliente com fotografias é um problema por
 //   tratar na página da obra; o gestor também pode tratar como problema uma mensagem só com texto, ou dizer que não é um problema.
 // · O gestor (o papel operacoes) cria uma ou mais tarefas (o trabalho, as horas e o técnico) e escolhe:
 //   - sem orçamento (garantia, erro nosso, oferta): as tarefas entram já no plano e os técnicos são avisados; o cliente não paga nada;

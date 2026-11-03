@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { MensagemObra } from "../motor";
 
 export interface LinhaMensagem { id: string; de: "cliente" | "empresa"; quem: string; t: string; em: string; lida: boolean;
-  /** 3/11 (20270105200000): os ids das fotografias da mensagem (até 4); as antigas não têm */ fotos?: string[] }
+  /** 3/11 (20270105400000): os ids das fotografias da mensagem (até 4); as antigas não têm */ fotos?: string[] }
 type RespostaRpc = { data: unknown; error: { message: string } | null };
 const rpc = (fn: string, args: Record<string, unknown>): PromiseLike<RespostaRpc> =>
   (supabase as unknown as { rpc: (f: string, a: Record<string, unknown>) => PromiseLike<RespostaRpc> }).rpc(fn, args);
@@ -28,7 +28,7 @@ export function horaDaMensagem(iso: string, agora: Date = new Date()): string {
 export const mensagemDaLinha = (l: LinhaMensagem): MensagemObra => ({ id: l.id, de: l.de, quem: l.quem, t: l.t, q: horaDaMensagem(l.em), lida: l.lida,
   ...(Array.isArray(l.fotos) && l.fotos.length ? { fotos: l.fotos.map(String) } : {}) });
 
-/* ------------------------------------------------------------------ 3/11 (Rúben): as fotografias da conversa (20270105200000) */
+/* ------------------------------------------------------------------ 3/11 (Rúben): as fotografias da conversa (20270105400000) */
 /** Uma fotografia pronta a enviar: o tipo e os bytes em base64 (sem o «data:…;base64,»). */
 export interface FotoEnvio { mime: string; b64: string }
 /** Até 4 por mensagem e 1,5 MB cada (a base recusa o resto). */

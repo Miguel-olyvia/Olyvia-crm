@@ -340,7 +340,7 @@ export interface MatTarefa { n: string; q: number; un: string; preco?: number; f
   /** 30/10: o produto do Catálogo (products.id), na Olyvia: é por ele que a base encomenda ao fornecedor (obra_encomendar_materiais) */ produto?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
 export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string;
-  /** 3/11: o id da mensagem na base (negocio_mensagens) e os ids das fotografias dela (20270105200000) */ id?: string; fotos?: string[] }
+  /** 3/11: o id da mensagem na base (negocio_mensagens) e os ids das fotografias dela (20270105400000) */ id?: string; fotos?: string[] }
 export interface Plano {
   tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number;
   /** Gerado do plano do orçamento (preparacaoObra.ts), com o início previsto ("aaaa-mm-dd"). */

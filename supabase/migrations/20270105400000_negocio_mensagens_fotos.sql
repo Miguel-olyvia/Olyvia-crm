@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS public.negocio_mensagem_fotos (
 CREATE INDEX IF NOT EXISTS negocio_mensagem_fotos_negocio_idx ON public.negocio_mensagem_fotos (negocio_id);
 ALTER TABLE public.negocio_mensagem_fotos ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.negocio_mensagem_fotos FROM PUBLIC, anon, authenticated;
-COMMENT ON TABLE public.negocio_mensagem_fotos IS 'Negócio: as fotografias das mensagens da conversa (até 4 por mensagem). Sem políticas: só as funções portal_neg_mensagem_enviar_fotos, portal_neg_mensagem_foto e neg_mensagem_foto. 20270105200000.';
+COMMENT ON TABLE public.negocio_mensagem_fotos IS 'Negócio: as fotografias das mensagens da conversa (até 4 por mensagem). Sem políticas: só as funções portal_neg_mensagem_enviar_fotos, portal_neg_mensagem_foto e neg_mensagem_foto. 20270105400000.';
 
 -- 2. A mensagem em JSON leva os ids das fotografias -------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fn_neg_msg_json(m public.negocio_mensagens)
@@ -197,9 +197,9 @@ GRANT EXECUTE ON FUNCTION public.portal_neg_mensagem_enviar_fotos(uuid, text, js
 GRANT EXECUTE ON FUNCTION public.portal_neg_mensagem_foto(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.neg_mensagem_foto(uuid, uuid) TO authenticated;
 
-COMMENT ON FUNCTION public.portal_neg_mensagem_enviar_fotos(uuid, text, jsonb) IS 'Portal: o cliente escreve à equipa com 1 a 4 fotografias ({mime, b64}); a mensagem segue por portal_neg_mensagem_enviar. 20270105200000.';
-COMMENT ON FUNCTION public.portal_neg_mensagem_foto(uuid) IS 'Portal: uma fotografia ({id, mime, b64}) de uma mensagem de um negócio da conta que chama. 20270105200000.';
-COMMENT ON FUNCTION public.neg_mensagem_foto(uuid, uuid) IS 'Negócio: uma fotografia ({id, mime, b64}) de uma mensagem de um negócio da organização. pessoas.view. 20270105200000.';
+COMMENT ON FUNCTION public.portal_neg_mensagem_enviar_fotos(uuid, text, jsonb) IS 'Portal: o cliente escreve à equipa com 1 a 4 fotografias ({mime, b64}); a mensagem segue por portal_neg_mensagem_enviar. 20270105400000.';
+COMMENT ON FUNCTION public.portal_neg_mensagem_foto(uuid) IS 'Portal: uma fotografia ({id, mime, b64}) de uma mensagem de um negócio da conta que chama. 20270105400000.';
+COMMENT ON FUNCTION public.neg_mensagem_foto(uuid, uuid) IS 'Negócio: uma fotografia ({id, mime, b64}) de uma mensagem de um negócio da organização. pessoas.view. 20270105400000.';
 
 -- 6. Verificação final: RLS activa, sem privilégios directos, as três funções só para authenticated e a mensagem com 'fotos'.
 DO $verifica$

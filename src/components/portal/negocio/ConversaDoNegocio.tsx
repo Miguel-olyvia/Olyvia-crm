@@ -1,7 +1,7 @@
 // A conversa do cliente com a equipa, dentro do negócio (portal, 30/10/2026): o mesmo painel das Operações («Conversa com o cliente»), com
 // as mensagens da base. Lê ao abrir, de 10 em 10 segundos e ao voltar ao separador; o cliente escreve e a equipa responde nas Operações.
 // As mensagens da equipa ficam lidas quando o cliente as vê. Só dados e funções da base (portal_neg_mensagens_*): nunca a tabela.
-// 3/11 (Rúben, 20270105200000): o cliente junta fotografias (até 4) para mostrar um problema; o gestor de obra vê-as e decide o que fazer.
+// 3/11 (Rúben, 20270105400000): o cliente junta fotografias (até 4) para mostrar um problema; o gestor de obra vê-as e decide o que fazer.
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle } from "lucide-react";
