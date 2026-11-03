@@ -29,7 +29,7 @@ interface DefinicaoGrupo {
 
 /**
  * Os grupos do editor, pela ordem do menu lateral (menuConfig.ts): Dashboard, Atividades, Operação, Catálogo e custos, Organizações,
- * CRM (Negócios e as páginas antigas de leads/contactos/clientes), Aquisição, Marketing, Inventário, Frota, RH, Utilizadores,
+ * Negócios (com os dados da pessoa: leads.* e clients.*), CRM (o que sobra das páginas antigas: contacts.*), Aquisição, Marketing, Inventário, Frota, RH, Utilizadores,
  * Definições e Plataforma. Partiu de `sidebarMenuGroups` de Roles.tsx; diferenças: `forms` só no subgrupo Formulários (lá contavam a
  * dobrar), Produtos/Serviços passam para Catálogo e custos (o item de topo que os substitui), e ganham grupo as categorias que Roles.tsx
  * escondia (hr, pessoas/negocios, fleet, operations, portal, security, platform, api_keys, catalog_items, service_catalog, lead_sources).
@@ -57,11 +57,13 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   },
   { rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"] },
   // /pessoas e /negocios: um subgrupo por fase do negócio, pelas categorias virtuais de categoriaNegocio() (pessoas.*, negocios.*,
-  // e quotes.view_costs / client_contracts.cancel, que saem de Aquisição).
+  // e quotes.view_costs / client_contracts.cancel, que saem de Aquisição). «Pessoas: leads e clientes» junta os leads.* e clients.*
+  // (dados da pessoa, verificados pelo /pessoas, /negocios e pelas funções da entidade única), que antes estavam no grupo CRM.
   {
     rotulo: "Negócios", categorias: [],
     subgrupos: [
       { rotulo: "Geral", categorias: ["negocios_geral"] },
+      { rotulo: "Pessoas: leads e clientes", categorias: ["negocios_pessoas"] },
       { rotulo: "Visita", categorias: ["negocios_visita"] },
       { rotulo: "Orçamento e proposta", categorias: ["negocios_orcamento"] },
       { rotulo: "Contrato", categorias: ["negocios_contrato"] },
@@ -69,6 +71,8 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
       { rotulo: "Obra", categorias: ["negocios_obra"] },
     ],
   },
+  // Os leads.* e clients.* foram para Negócios › Pessoas (categoriaNegocio); as categorias ficam aqui só como rede (uma permissão com
+  // outro prefixo guardada nelas). Sobram os contacts.* ainda verificados no servidor (ver permissoesEmUso.ts). Vazio = não aparece.
   { rotulo: "CRM", categorias: ["leads", "contacts", "clients"] },
   {
     rotulo: "Aquisição", categorias: ["deals"],
@@ -110,7 +114,7 @@ const PREFIXOS_COM_BLOCO = new Set([
 const ROTULOS_VIRTUAIS: Record<string, string> = {
   marketing_campaigns: "Campanhas", marketing_channels: "Origens", marketing_lists: "Listas",
   scheduling_boards: "Quadros", scheduling_items: "Itens", scheduling_resources: "Recursos", scheduling_rules: "Regras", scheduling_other: "Outros",
-  negocios_geral: "Geral", negocios_visita: "Visita", negocios_orcamento: "Orçamento e proposta", negocios_contrato: "Contrato",
+  negocios_geral: "Geral", negocios_pessoas: "Pessoas: leads e clientes", negocios_visita: "Visita", negocios_orcamento: "Orçamento e proposta", negocios_contrato: "Contrato",
   negocios_financeiro: "Financeiro", negocios_obra: "Obra",
 };
 
@@ -129,6 +133,9 @@ const MOVIDAS_PARA_NEGOCIOS = new Map<string, string>([
   ["client_contracts.cancel", "negocios_contrato"],
 ]);
 
+/** Os dados da pessoa (lead/cliente da entidade única): ficam em Negócios › Pessoas, pelo prefixo do código. */
+const PREFIXOS_PESSOA = new Set(["leads", "clients"]);
+
 /** A categoria virtual de Negócios da permissão, ou null se não for de Negócios. */
 function categoriaNegocio(p: Permissao): string | null {
   const movida = MOVIDAS_PARA_NEGOCIOS.get(p.codigo);
@@ -136,6 +143,7 @@ function categoriaNegocio(p: Permissao): string | null {
   const [prefixo, fase] = p.codigo.split(".");
   if (prefixo === "negocios") return FASES_NEGOCIO.get(fase ?? "") ?? "negocios_geral";
   if (prefixo === "pessoas") return "negocios_geral";
+  if (PREFIXOS_PESSOA.has(prefixo ?? "")) return "negocios_pessoas";
   // Outra permissão guardada nas categorias de Negócios fica em Geral (não desaparece do editor).
   if (p.categoria === "pessoas" || p.categoria === "negocios") return "negocios_geral";
   return null;
@@ -163,10 +171,20 @@ export interface GrupoMenu {
 }
 
 /**
+ * Permissões que a base guarda numa categoria mas que, no editor, vivem no bloco doutra pelo código. platform.pending_submissions.view
+ * (submissões pendentes dos formulários, /leads/pending-submissions) está em `leads` na base mas é de Marketing › Formulários.
+ */
+const MOVIDAS_POR_CODIGO = new Map<string, string>([
+  ["platform.pending_submissions.view", "forms"],
+]);
+
+/**
  * Agendamentos e Marketing partem-se em categorias virtuais pelo prefixo do código, como em Roles.tsx; Negócios parte-se por fase
  * (categoriaNegocio).
  */
 export function categoriaVirtual(p: Permissao): string {
+  const movida = MOVIDAS_POR_CODIGO.get(p.codigo);
+  if (movida) return movida;
   if (p.categoria === "scheduling") {
     if (p.codigo.startsWith("scheduling.boards")) return "scheduling_boards";
     if (p.codigo.startsWith("scheduling.items")) return "scheduling_items";

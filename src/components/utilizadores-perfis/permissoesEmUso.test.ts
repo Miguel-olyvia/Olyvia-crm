@@ -3,7 +3,7 @@
 //  - uma permissão em uso não couber em nenhum grupo do editor (ficaria invisível sem ninguém dar por isso).
 // Quem acrescentar uma permissão nova ao código acrescenta-a a PERMISSOES_EM_USO (com a categoria de anew_permissions) e, se for
 // uma categoria nova, dá-lhe grupo em GRUPOS_MENU. Quem voltar a usar uma escondida passa-a de PERMISSOES_ESCONDIDAS para EM_USO.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { agruparPorMenu, permissoesForaDoMenu } from "./gruposPermissoes";
@@ -21,6 +21,17 @@ const SRC = join(process.cwd(), "src");
  * e os pares de sinónimos de lib/permissionAliases.ts (mapeiam nomes, não verificam nada; employees.edit só aparece lá).
  */
 const IGNORAR = /\.test\.tsx?$|__tests__\/|\/test\/|supabaseFalso\.ts$|Exemplo\.ts$|permissoesExemplo\.ts$|catalogoExemplo\.ts$|utilizadoresPerfisFalso\.ts$|^pages\/docs\/|^translations\/|^integrations\/supabase\/types\.ts$|^lib\/permissionAliases\.ts$|^components\/utilizadores-perfis\/permissoesEmUso\.ts$/;
+
+/**
+ * Páginas LEGADAS: existem em disco mas nada vivo as importa, porque as rotas /leads, /clients e /contacts só redirecionam para /pessoas
+ * (RedirectPreservandoPesquisa em App.tsx). As permissões que só elas verificam foram escondidas (03/11/2026) — por isso o scan não
+ * as conta. Lista fechada e explícita: o teste «as páginas legadas não são importadas por nada vivo» falha se alguma voltar a ser
+ * importada (aí sai daqui e as permissões dela voltam a estar em uso) ou se o ficheiro desaparecer (aí sai da lista).
+ * ClientDetailsDialog/ClientDetailHeader (só importados por AnewClients) não precisam de estar aqui: só verificam clients.edit, em uso.
+ */
+const LEGADO = ["pages/AnewLeads.tsx", "pages/AnewClients.tsx", "components/leads/LeadTableRow.tsx"] as const;
+/** Um import (estático ou lazy) de uma página legada: `from "@/pages/AnewLeads"`, `import("./pages/AnewLeads")`. */
+const IMPORT_LEGADO = /\b(?:from|import)\s*\(?\s*["'`][^"'`\n]*\/(?:AnewLeads|AnewClients|LeadTableRow)(?:\.tsx)?["'`]/;
 
 /** Um literal com forma de código de permissão: "modulo.acao", "modulo.sub.acao". */
 const LITERAL = /["'`]([a-z_]+(?:\.[a-z_]+)+)["'`]/g;
@@ -42,10 +53,12 @@ function ficheiros(pasta: string): string[] {
 
 interface Uso { codigo: string; ficheiro: string; contexto: boolean }
 
+const caminhoRelativo = (caminho: string): string => relative(SRC, caminho).split(sep).join("/");
+
 function usosNoCodigo(): Uso[] {
   return ficheiros(SRC).flatMap((caminho) => {
-    const ficheiro = relative(SRC, caminho).split(sep).join("/");
-    if (IGNORAR.test(ficheiro)) return [];
+    const ficheiro = caminhoRelativo(caminho);
+    if (IGNORAR.test(ficheiro) || (LEGADO as readonly string[]).includes(ficheiro)) return [];
     const texto = readFileSync(caminho, "utf8");
     return [...texto.matchAll(LITERAL)].flatMap((m): Uso[] => {
       const antes = texto.slice(Math.max(0, (m.index ?? 0) - 400), m.index ?? 0);
@@ -71,6 +84,15 @@ describe("permissões em uso: o código fonte", () => {
   it("não usa nenhuma das permissões escondidas, em contexto nenhum", () => {
     const escondidas = usos.filter((u) => CODIGOS_ESCONDIDOS.has(u.codigo)).map((u) => `${u.codigo} (${u.ficheiro})`);
     expect([...new Set(escondidas)]).toEqual([]);
+  });
+
+  it("as páginas legadas ignoradas existem e não são importadas por nada vivo (só umas pelas outras)", () => {
+    LEGADO.forEach((f) => expect(existsSync(join(SRC, f)), f).toBe(true));
+    const importadoras = ficheiros(SRC)
+      .map(caminhoRelativo)
+      .filter((f) => !IGNORAR.test(f) && !(LEGADO as readonly string[]).includes(f))
+      .filter((f) => IMPORT_LEGADO.test(readFileSync(join(SRC, f), "utf8")));
+    expect(importadoras).toEqual([]);
   });
 
   it("o scan encontra mesmo as verificações (guarda contra um teste que passa por não ler nada)", () => {
@@ -117,9 +139,45 @@ describe("permissões em uso: a lista", () => {
     ]);
     const negocios = agruparPorMenu(emUso).find((g) => g.rotulo === "Negócios");
     expect(negocios?.blocos).toEqual([]);
-    expect(negocios?.subgrupos.map((s) => s.rotulo)).toEqual(["Geral", "Orçamento e proposta", "Contrato", "Financeiro", "Obra"]);
+    expect(negocios?.subgrupos.map((s) => s.rotulo)).toEqual([
+      "Geral", "Pessoas: leads e clientes", "Orçamento e proposta", "Contrato", "Financeiro", "Obra",
+    ]);
     expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(9);
     expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("pessoas."))).toHaveLength(6);
+  });
+
+  it("Negócios › Pessoas tem os dados da pessoa em uso, e o CRM só os contacts.* que o servidor ainda verifica", () => {
+    const grupos = agruparPorMenu(emUso);
+    const pessoas = grupos.find((g) => g.rotulo === "Negócios")!.subgrupos.find((s) => s.rotulo === "Pessoas: leads e clientes")!;
+    expect(pessoas.permissoes.map((p) => p.codigo).sort()).toEqual([
+      "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
+      "leads.assign", "leads.config", "leads.convert", "leads.create", "leads.delete", "leads.edit", "leads.import", "leads.view",
+    ]);
+    const crm = grupos.find((g) => g.rotulo === "CRM")!;
+    expect(crm.permissoes.map((p) => p.codigo).sort()).toEqual([
+      "contacts.create", "contacts.delete", "contacts.edit", "contacts.import", "contacts.view",
+    ]);
+    const foraDePessoas = grupos
+      .flatMap((g) => g.permissoes)
+      .filter((p) => (p.codigo.startsWith("leads.") || p.codigo.startsWith("clients.")) && !pessoas.permissoes.includes(p));
+    expect(foraDePessoas).toEqual([]);
+  });
+
+  it("«Ver submissões pendentes» está em Marketing › Formulários e em mais lado nenhum", () => {
+    const grupos = agruparPorMenu(emUso);
+    const forms = grupos.find((g) => g.rotulo === "Marketing")!.subgrupos.find((s) => s.rotulo === "Formulários")!;
+    expect(forms.permissoes.map((p) => p.codigo)).toContain("platform.pending_submissions.view");
+    const noutros = grupos.filter((g) => g.rotulo !== "Marketing").flatMap((g) => g.permissoes.map((p) => p.codigo));
+    expect(noutros).not.toContain("platform.pending_submissions.view");
+  });
+
+  it("as permissões só da página antiga de leads/clientes estão escondidas (fora do editor)", () => {
+    ["leads.export", "leads.export_sensitive", "leads.contact", "clients.export", "clients.export_sensitive"].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS).toContain(c);
+      expect(CODIGOS_EM_USO).not.toContain(c);
+    });
+    const noEditor = agruparPorMenu(emUso).flatMap((g) => g.permissoes.map((p) => p.codigo));
+    expect(noEditor.filter((c) => CODIGOS_ESCONDIDOS.has(c))).toEqual([]);
   });
 
   it("quotes.view_costs e client_contracts.cancel estão em Negócios e já não em Aquisição", () => {
@@ -150,5 +208,15 @@ describe("esconder não remove", () => {
     const original = ["leads.view", "vacations.view", "trash.view"];
     const gravado = fundirPermissoes(original, ["leads.edit"], visiveis);
     expect(gravado.sort()).toEqual(["leads.edit", "trash.view", "vacations.view"]);
+  });
+
+  it("as escondidas da página antiga de leads/clientes não chegam ao editor, mas uma role que as tem não as perde ao gravar", () => {
+    const visiveis = permissoesDoMenu([
+      linha("leads.view", "leads"), linha("leads.export", "leads"), linha("leads.export_sensitive", "leads"), linha("leads.contact", "leads"),
+      linha("clients.view", "clients"), linha("clients.export", "clients"), linha("clients.export_sensitive", "clients"),
+    ]);
+    expect(visiveis.map((p) => p.codigo)).toEqual(["leads.view", "clients.view"]);
+    const gravado = fundirPermissoes(["leads.view", "leads.export", "clients.export_sensitive"], ["clients.view"], visiveis);
+    expect(gravado.sort()).toEqual(["clients.export_sensitive", "clients.view", "leads.export"]);
   });
 });

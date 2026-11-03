@@ -10,6 +10,12 @@
 // à mão. A chave é a categoria em anew_permissions.category. permissoesEmUso.test.ts falha se o código passar a verificar uma
 // permissão que não esteja aqui, ou se uma daqui não couber em nenhum grupo do editor.
 // Contagem na geração: 353 em uso, 109 escondidas, 462 no total de anew_permissions.
+//
+// 03/11/2026 (aprovado): as rotas /leads, /clients e /contacts só redirecionam para /pessoas (RedirectPreservandoPesquisa em App.tsx)
+// e AnewLeads.tsx / AnewClients.tsx / LeadTableRow.tsx já não são importados por nada vivo. Esconderam-se as permissões que só essas
+// páginas verificavam e nenhuma função/policy viva usa: leads.export, leads.export_sensitive, leads.contact, clients.export,
+// clients.export_sensitive (a exportação de leads/clients da edge function export-data só era pedida por essas páginas; as páginas
+// vivas exportam client_contracts/proposals/quotes). Ficaram as que o servidor ainda verifica — ver os comentários de cada categoria.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
@@ -28,12 +34,15 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "client_orders.confirm_stock_exit", "client_orders.create", "client_orders.delete", "client_orders.edit",
     "client_orders.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): clients.import
+  // Só verificadas no servidor (policies/RPCs/edge functions): clients.create (rpc_confirm_direct_sale, policies anew_clients/anew_entities),
+  // clients.delete (policies anew_clients e anew_entity_*), clients.import (policies de INSERT/UPDATE de anew_entity_roles,
+  // 20270102130000). clients.edit também em ClientDetailsDialog, que só AnewClients importa.
   clients: [
-    "clients.create", "clients.delete", "clients.edit", "clients.export", "clients.export_sensitive", "clients.import",
-    "clients.view",
+    "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): contacts.create, contacts.delete, contacts.import, contacts.view
+  // Só verificadas no servidor (policies/RPCs/edge function ai-assistant): todas. Não se escondem porque o assistente (AIAssistant, no
+  // Layout) as exige (contacts.view/create/edit) e as policies de anew_contacts e anew_entity_roles/relationships as aceitam
+  // (contacts.delete/import). São as únicas que sobram no grupo CRM do editor.
   contacts: [
     "contacts.create", "contacts.delete", "contacts.edit", "contacts.import", "contacts.view",
   ],
@@ -92,10 +101,13 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   inventory: [
     "inventory.adjust", "inventory.count", "inventory.create", "inventory.delete", "inventory.edit", "inventory.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): leads.assign
+  // Só verificadas no servidor (policies/RPCs/edge functions): leads.assign (neg_atribuir_pessoa), leads.config (policies das tabelas de
+  // configuração de leads, incluindo lead_contact_results que a rota viva /lead-contact-results grava), leads.delete (policies anew_leads
+  // e anew_entity_*), leads.edit (policies, ai-assistant, execute-workflow), leads.import (policies de anew_entity_roles, 20270102130000).
+  // platform.pending_submissions.view está na categoria leads da base mas aparece em Marketing › Formulários (gruposPermissoes.ts).
   leads: [
-    "leads.assign", "leads.config", "leads.contact", "leads.convert", "leads.create", "leads.delete", "leads.edit",
-    "leads.export", "leads.export_sensitive", "leads.import", "leads.view", "platform.pending_submissions.view",
+    "leads.assign", "leads.config", "leads.convert", "leads.create", "leads.delete", "leads.edit", "leads.import", "leads.view",
+    "platform.pending_submissions.view",
   ],
   // Só verificadas no servidor (policies/RPCs): lists.create, lists.delete, lists.edit, lists.view
   marketing: [
@@ -221,6 +233,10 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   calendar: [
     "calendar.create", "calendar.edit", "calendar.view_company",
   ],
+  // Só AnewClients.tsx (rota /clients redireciona) as verificava; export-data só as pede para o módulo clients, que nada vivo exporta.
+  clients: [
+    "clients.export", "clients.export_sensitive",
+  ],
   call_center: [
     "call_center.handle_calls", "call_center.manage", "call_center.view",
   ],
@@ -252,8 +268,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   inventory: [
     "inventory.export", "inventory.import", "inventory.transfer",
   ],
+  // leads.contact: só LeadTableRow.tsx; leads.export(_sensitive): só AnewLeads.tsx (rota /leads redireciona) e o módulo leads de export-data.
   leads: [
-    "leads.manage",
+    "leads.contact", "leads.export", "leads.export_sensitive", "leads.manage",
   ],
   marketing: [
     "channels.delete", "channels.edit", "lead_sources.view", "lists.add_contacts",
