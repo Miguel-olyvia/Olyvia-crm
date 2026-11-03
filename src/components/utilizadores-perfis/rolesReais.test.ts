@@ -63,7 +63,7 @@ describe("mapeamento base -> maquete", () => {
     const l = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
     const r = permissoesDoMenu([
       l("leads.view", "leads"), l("hr.pessoas.view", "hr"), l("vacations.view", "hr"), l("negocios.obra.planear", "pessoas"),
-      l("fleet.view", "fleet"), l("trash.view", "trash"), l("zzz.view", "zzz"), l("a.b", ""),
+      l("fleet.view", "fleet"), l("trash.restore", "trash"), l("zzz.view", "zzz"), l("a.b", ""),
     ]);
     expect(r.map((p) => p.codigo)).toEqual(["leads.view", "hr.pessoas.view", "negocios.obra.planear", "fleet.view"]);
   });

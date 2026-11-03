@@ -57,7 +57,8 @@ describe("agruparPorMenu", () => {
   it("as permissões hr.* da base têm grupo próprio (Roles.tsx aceitava a categoria mas não a mostrava)", () => {
     const grupos = agruparPorMenu([perm("hr.people.view", "hr")]);
     expect(grupos.map((g) => g.rotulo)).toEqual(["Recursos Humanos"]);
-    expect(grupos[0].blocos[0].rotulo).toBe("Recursos Humanos");
+    // 03/11: um hr.* sem subgrupo próprio cai em «Pessoas: ficha».
+    expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Pessoas: ficha"]);
     expect(permissoesForaDoMenu([perm("hr.people.view", "hr")])).toEqual([]);
   });
 
@@ -182,7 +183,7 @@ describe("agruparPorMenu", () => {
       const virtuais = GRUPOS_MENU.find((g) => g.rotulo === "Negócios")!.subgrupos!.flatMap((s) => s.categorias);
       virtuais.forEach((c) => expect(Object.keys(ROTULOS_CATEGORIA)).not.toContain(c));
       // hr.pessoas.* é do RH, não de Negócios.
-      expect(categoriaVirtual(perm("hr.pessoas.view", "hr"))).toBe("hr");
+      expect(categoriaVirtual(perm("hr.pessoas.view", "hr"))).toBe("hr_pessoas");
     });
   });
 

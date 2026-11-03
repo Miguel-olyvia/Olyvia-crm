@@ -17,6 +17,7 @@ import { InviteeSelector } from './InviteeSelector';
 import { useScheduleInvitations } from '@/hooks/useScheduleInvitations';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { usePermissionScope } from '@/hooks/usePermissionScope';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/toast';
@@ -66,6 +67,7 @@ export function ScheduleItemDialog({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { hasPermission, isSystemAdmin } = usePermissions();
+  const { getPermissionScope, teamMemberIds } = usePermissionScope();
   const { userType } = useCompany();
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -239,15 +241,22 @@ export function ScheduleItemDialog({
   const showPriority  = !isTimeOffBoard && (!boardModules || boardModules.includes('priority'));
   const showResources = !isTimeOffBoard && (!boardModules || boardModules.includes('resources'));
 
-  // Company Admins (and below) can only schedule for themselves
-  const isSelfOnly = !hasPermission('scheduling.items.manage');
-  
+  // 03/11/2026 (decisão do utilizador): para quem se agenda segue o âmbito de scheduling.items.edit (scheduling.items.manage não
+  // existe no catálogo). Organização (ou administrador de sistema): qualquer pessoa da lista; equipa: a própria pessoa e a sua equipa;
+  // próprio (ou sem a permissão): só a própria pessoa.
+  const ambitoEditar = isSystemAdmin ? 'ORG' : getPermissionScope('scheduling.items.edit');
+  const isSelfOnly = ambitoEditar !== 'ORG' && ambitoEditar !== 'TEAM';
+
   const filteredCompanyUsers = useMemo(() => {
     if (isSelfOnly && currentUserId) {
       return companyUsers.filter(u => u.id === currentUserId);
     }
+    if (ambitoEditar === 'TEAM') {
+      const daEquipa = new Set<string>([currentUserId, ...teamMemberIds].filter((id): id is string => !!id));
+      return companyUsers.filter(u => daEquipa.has(u.id));
+    }
     return companyUsers;
-  }, [companyUsers, isSelfOnly, currentUserId]);
+  }, [companyUsers, isSelfOnly, ambitoEditar, currentUserId, teamMemberIds]);
 
   // Auto-set user_id for self-only users on time-off boards (new items, or existing items
   // without a user_id). Never overwrites a user_id the item already has.
@@ -438,7 +447,7 @@ export function ScheduleItemDialog({
               <Button
                 onClick={() => {
                   onOpenChange(false);
-                  navigate('/rh/ausencias');
+                  navigate('/rh-exemplo/ausencias');
                 }}
               >
                 {t('hr.ausencias.board.irParaAusencias')}

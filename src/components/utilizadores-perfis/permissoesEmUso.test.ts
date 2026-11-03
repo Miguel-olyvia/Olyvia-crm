@@ -30,9 +30,18 @@ const IGNORAR = /\.test\.tsx?$|__tests__\/|\/test\/|supabaseFalso\.ts$|Exemplo\.
  * importada (aí sai daqui e as permissões dela voltam a estar em uso) ou se o ficheiro desaparecer (aí sai da lista).
  * ClientDetailsDialog/ClientDetailHeader (só importados por AnewClients) não precisam de estar aqui: só verificam clients.edit, em uso.
  */
-const LEGADO = ["pages/AnewLeads.tsx", "pages/AnewClients.tsx", "components/leads/LeadTableRow.tsx"] as const;
+const LEGADO = [
+  "pages/AnewLeads.tsx", "pages/AnewClients.tsx", "components/leads/LeadTableRow.tsx",
+  // 03/11/2026 (aprovado): as rotas antigas do catálogo redirecionam para /catalogo-custos (App.tsx); estas páginas já não montam e as
+  // permissões que só elas verificavam esconderam-se (criar/eliminar serviços, marcas, categorias, subcategorias, atributos, taxas,
+  // itens de catálogo, exportar/importar produtos...). Ficam as que o Catálogo novo, a receção, os fornecedores e o assistente usam.
+  "pages/Products.tsx", "pages/Services.tsx", "pages/Brands.tsx", "pages/Bundles.tsx", "pages/CatalogItems.tsx",
+  "pages/ProductAttributes.tsx", "pages/ProductCategories.tsx", "pages/ProductSubcategories.tsx", "pages/ServiceCatalogItems.tsx",
+  "pages/ServiceCategories.tsx", "pages/ServiceFees.tsx", "pages/ServiceSubcategories.tsx",
+] as const;
+const NOMES_LEGADO = LEGADO.map((f) => f.split("/").pop()!.replace(/\.tsx$/, "")).join("|");
 /** Um import (estático ou lazy) de uma página legada: `from "@/pages/AnewLeads"`, `import("./pages/AnewLeads")`. */
-const IMPORT_LEGADO = /\b(?:from|import)\s*\(?\s*["'`][^"'`\n]*\/(?:AnewLeads|AnewClients|LeadTableRow)(?:\.tsx)?["'`]/;
+const IMPORT_LEGADO = new RegExp(`\\b(?:from|import)\\s*\\(?\\s*["'\`][^"'\`\\n]*/(?:${NOMES_LEGADO})(?:\\.tsx)?["'\`]`);
 
 /**
  * Páginas FORA DO MENU (03/11/2026): o grupo Aquisição saiu do menu (o Negócios em /pessoas e /negocios substitui-o), mas /quotes,
@@ -57,6 +66,15 @@ const FORA_DO_MENU = {
   ],
 } as const;
 const FICHEIROS_FORA_DO_MENU: readonly string[] = [...FORA_DO_MENU.paginas.map((p) => p.ficheiro), ...FORA_DO_MENU.soDelas];
+
+/**
+ * PROTÓTIPO (03/11/2026): o Inventário nativo de exemplo (src/emylia/inventario, e a cópia em pages/prototipo-negocios) trabalha numa
+ * base em memória com perfis de demonstração (perfil.ts) e verifica os códigos com `exigir`/`can` contra esse perfil, nunca contra a
+ * base. Pode usar códigos escondidos (purchase_orders.manage, purchase_orders.view_prices...) sem que isso os torne «em uso»: continuam
+ * no scan (um código desconhecido continua a falhar), só se tolera que usem as escondidas.
+ */
+const PROTOTIPO = /^(?:emylia\/inventario\/|pages\/prototipo-negocios\/)/;
+const toleraEscondidas = (ficheiro: string): boolean => FICHEIROS_FORA_DO_MENU.includes(ficheiro) || PROTOTIPO.test(ficheiro);
 
 /** Um literal com forma de código de permissão: "modulo.acao", "modulo.sub.acao". */
 const LITERAL = /["'`]([a-z_]+(?:\.[a-z_]+)+)["'`]/g;
@@ -103,14 +121,14 @@ describe("permissões em uso: o código fonte", () => {
     const fora = usos
       .filter((u) => u.contexto && !CODIGOS_EM_USO.has(u.codigo) && !CODIGOS_SEM_CATALOGO.includes(u.codigo))
       // As páginas FORA_DO_MENU podem verificar escondidas (só essas; uma permissão desconhecida continua a falhar).
-      .filter((u) => !(FICHEIROS_FORA_DO_MENU.includes(u.ficheiro) && CODIGOS_ESCONDIDOS.has(u.codigo)))
+      .filter((u) => !(toleraEscondidas(u.ficheiro) && CODIGOS_ESCONDIDOS.has(u.codigo)))
       .map((u) => `${u.codigo} (${u.ficheiro})`);
     expect([...new Set(fora)]).toEqual([]);
   });
 
-  it("não usa nenhuma das permissões escondidas, em contexto nenhum (fora das páginas FORA_DO_MENU)", () => {
+  it("não usa nenhuma das permissões escondidas, em contexto nenhum (fora das páginas FORA_DO_MENU e do PROTÓTIPO)", () => {
     const escondidas = usos
-      .filter((u) => CODIGOS_ESCONDIDOS.has(u.codigo) && !FICHEIROS_FORA_DO_MENU.includes(u.ficheiro))
+      .filter((u) => CODIGOS_ESCONDIDOS.has(u.codigo) && !toleraEscondidas(u.ficheiro))
       .map((u) => `${u.codigo} (${u.ficheiro})`);
     expect([...new Set(escondidas)]).toEqual([]);
   });
@@ -304,15 +322,15 @@ describe("esconder não remove", () => {
   const linha = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
 
   it("o catálogo do editor deixa de fora as escondidas", () => {
-    const catalogo = permissoesDoMenu([linha("leads.view", "leads"), linha("vacations.view", "hr"), linha("trash.view", "trash")]);
+    const catalogo = permissoesDoMenu([linha("leads.view", "leads"), linha("vacations.view", "hr"), linha("trash.restore", "trash")]);
     expect(catalogo.map((p) => p.codigo)).toEqual(["leads.view"]);
   });
 
   it("ao gravar uma role, as escondidas que ela já tinha ficam (e as visíveis seguem o que se marcou)", () => {
     const visiveis = permissoesDoMenu([linha("leads.view", "leads"), linha("leads.edit", "leads"), linha("vacations.view", "hr")]);
-    const original = ["leads.view", "vacations.view", "trash.view"];
+    const original = ["leads.view", "vacations.view", "trash.restore"];
     const gravado = fundirPermissoes(original, ["leads.edit"], visiveis);
-    expect(gravado.sort()).toEqual(["leads.edit", "trash.view", "vacations.view"]);
+    expect(gravado.sort()).toEqual(["leads.edit", "trash.restore", "vacations.view"]);
   });
 
   it("as escondidas da página antiga de leads/clientes não chegam ao editor, mas uma role que as tem não as perde ao gravar", () => {
@@ -323,5 +341,131 @@ describe("esconder não remove", () => {
     expect(visiveis.map((p) => p.codigo)).toEqual(["leads.view", "clients.view"]);
     const gravado = fundirPermissoes(["leads.view", "leads.export", "clients.export_sensitive"], ["clients.view"], visiveis);
     expect(gravado.sort()).toEqual(["clients.export_sensitive", "clients.view", "leads.export"]);
+  });
+});
+
+describe("03/11: Recursos Humanos", () => {
+  const rh = () => agruparPorMenu(emUso).find((g) => g.rotulo === "Recursos Humanos")!;
+  const codigosDe = (rotulo: string) => rh().subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo).sort() ?? [];
+
+  it("hr.denuncias.gerir está em uso, no subgrupo Denúncias", () => {
+    expect(CODIGOS_EM_USO).toContain("hr.denuncias.gerir");
+    expect(CODIGOS_SEM_CATALOGO).not.toContain("hr.denuncias.gerir");
+    expect(codigosDe("Denúncias")).toEqual(["hr.denuncias.gerir"]);
+  });
+
+  it("as cinco sem efeito vivo estão escondidas", () => {
+    ["hr.ausencias.tipos.edit", "hr.ausencias.direitos.edit", "hr.pessoas.horario_realizado.edit", "hr.pessoas.duplicados.view",
+      "hr.pessoas.acessos_sensiveis.view"].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+    });
+  });
+
+  it("o grupo parte-se nos subgrupos pela ordem pedida, sem blocos soltos", () => {
+    expect(rh().blocos).toEqual([]);
+    expect(rh().subgrupos.map((s) => s.rotulo)).toEqual([
+      "Pessoas: ficha", "Dados sensíveis", "Admissão", "Documentos", "Contratos, cargos e ofícios", "Retribuição e custos",
+      "Horário e assiduidade", "Ausências", "Processamento salarial", "Centros de trabalho", "Denúncias",
+    ]);
+    expect(rh().permissoes).toHaveLength(emUso.filter((p) => p.categoria === "hr").length);
+  });
+
+  it("cada prefixo cai no seu subgrupo", () => {
+    expect(codigosDe("Dados sensíveis")).toEqual([
+      "hr.pessoas.saude.edit", "hr.pessoas.saude.view", "hr.pessoas.sindicalizacao.edit", "hr.pessoas.sindicalizacao.view",
+    ]);
+    expect(codigosDe("Retribuição e custos").every((c) => c.startsWith("hr.pessoas.retribuicao."))).toBe(true);
+    expect(codigosDe("Admissão")).toEqual(expect.arrayContaining(["hr.pessoas.convite.enviar", "hr.onboarding.approve", "hr.admissao.obrigatorios.gerir"]));
+    expect(codigosDe("Documentos").every((c) => c.startsWith("hr.pessoas.documentos."))).toBe(true);
+    expect(codigosDe("Contratos, cargos e ofícios")).toEqual(expect.arrayContaining([
+      "hr.pessoas.vinculos.view", "hr.contratos.regras.gerir", "hr.cargos.salario.alterar", "hr.pessoas.laborais.view",
+    ]));
+    expect(codigosDe("Horário e assiduidade")).toEqual(expect.arrayContaining([
+      "hr.assiduidade.view", "hr.pessoas.horario.view", "hr.pessoas.horario_realizado.view",
+    ]));
+    expect(codigosDe("Ausências").every((c) => c.startsWith("hr.ausencias."))).toBe(true);
+    expect(codigosDe("Processamento salarial")).toEqual(expect.arrayContaining(["hr.processamento.periodo.view", "hr.vencimento.codigos.view"]));
+    expect(codigosDe("Centros de trabalho")).toEqual(["hr.locais.edit", "hr.locais.view"]);
+    expect(codigosDe("Pessoas: ficha")).toEqual(expect.arrayContaining([
+      "hr.pessoas.view", "hr.pessoas.view.own", "hr.pessoas.create", "hr.pessoas.morada.view", "hr.pessoas.colocacao.view",
+      "hr.pessoas.conta.criar", "hr.pessoas.afectacoes.view",
+    ]));
+    expect(codigosDe("Pessoas: ficha").some((c) => c.startsWith("hr.pessoas.saude."))).toBe(false);
+  });
+});
+
+describe("03/11: Inventário", () => {
+  it("os stocks.* (sem catálogo) deram lugar a inventory.*: o código já não os verifica", () => {
+    ["Stocks.tsx", "StockMovements.tsx", "InventoryToday.tsx"].forEach((f) => {
+      expect(readFileSync(join(SRC, "pages", f), "utf8"), f).not.toMatch(/(?:permission\s*[:=]\s*|gate\(\s*)["'`]stocks\./);
+    });
+    expect(CODIGOS_SEM_CATALOGO.filter((c) => c.startsWith("stocks."))).toEqual([]);
+  });
+
+  it("Stocks usa inventory.create/edit/delete/export/import e Movimentos inventory.export/edit", () => {
+    const stocks = readFileSync(join(SRC, "pages/Stocks.tsx"), "utf8");
+    ["inventory.create", "inventory.edit", "inventory.delete", "inventory.export", "inventory.import"].forEach((c) => expect(stocks, c).toContain(`"${c}"`));
+    const mov = readFileSync(join(SRC, "pages/StockMovements.tsx"), "utf8");
+    ["inventory.export", "inventory.edit"].forEach((c) => expect(mov, c).toContain(`"${c}"`));
+    expect(readFileSync(join(SRC, "pages/InventoryToday.tsx"), "utf8")).toContain('PermissionGate permission="inventory.edit"');
+  });
+
+  it("inventory.export e inventory.import passam a em uso; inventory.adjust, purchase_orders.manage e purchase_orders.view_prices escondem-se", () => {
+    ["inventory.export", "inventory.import"].forEach((c) => {
+      expect(CODIGOS_EM_USO, c).toContain(c);
+      expect(CODIGOS_ESCONDIDOS, c).not.toContain(c);
+    });
+    ["inventory.adjust", "purchase_orders.manage", "purchase_orders.view_prices"].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+    });
+  });
+});
+
+describe("03/11: Catálogo e módulos gerais", () => {
+  it("as permissões só das páginas antigas do catálogo estão escondidas; as que o Catálogo novo e os outros módulos usam ficam", () => {
+    [
+      "services.create", "services.delete", "products.delete", "products.export", "products.import", "products.manage",
+      "products.manage_attributes", "brands.create", "brands.edit", "brands.delete", "product_attributes.create", "product_attributes.edit",
+      "product_attributes.delete", "product_categories.create", "product_categories.edit", "product_categories.delete",
+      "product_subcategories.create", "product_subcategories.edit", "product_subcategories.delete", "product_subcategories.view",
+      "service_categories.create", "service_categories.edit", "service_categories.delete", "service_categories.view",
+      "service_subcategories.create", "service_subcategories.edit", "service_subcategories.delete", "service_subcategories.view",
+      "service_fees.create", "service_fees.edit", "service_fees.delete", "catalog_items.view", "catalog_items.delete",
+      "catalog_items.export", "catalog_items.import", "service_catalog.view", "service_catalog.delete", "service_catalog.export",
+      "service_catalog.import",
+    ].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+    });
+    [
+      "services.view", "services.edit", "services.manage_prices", "services.view_cost", "products.view", "products.create", "products.edit",
+      "products.manage_prices", "products.view_cost", "brands.view", "product_attributes.view", "product_categories.view", "service_fees.view",
+    ].forEach((c) => expect(CODIGOS_EM_USO, c).toContain(c));
+  });
+
+  it("Operação, listas, canais e definições de plataforma sem ecrã vivo estão escondidas; trash.view e lead_sources.view voltam", () => {
+    [
+      "operations.orders.create", "operations.orders.edit", "operations.orders.execute", "operations.orders.confirm", "operations.orders.cancel",
+      "operations.checklists.manage", "operations.locations.view", "operations.locations.manage", "operations.plans.manage",
+      "operations.settings.manage", "channels.create", "lists.create", "lists.edit", "lists.delete", "platform.settings.manage",
+    ].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+    });
+    ["trash.view", "lead_sources.view"].forEach((c) => {
+      expect(CODIGOS_EM_USO, c).toContain(c);
+      expect(CODIGOS_ESCONDIDOS, c).not.toContain(c);
+    });
+    const grupos = agruparPorMenu(emUso);
+    expect(grupos.find((g) => g.rotulo === "Definições")!.permissoes.map((p) => p.codigo)).toContain("trash.view");
+    const origens = grupos.find((g) => g.rotulo === "Marketing")!.subgrupos.find((s) => s.rotulo === "Origens")!;
+    expect(origens.permissoes.map((p) => p.codigo)).toContain("lead_sources.view");
+  });
+
+  it("os códigos sem catálogo trocados deixaram a lista (scheduling.view, settings.view/manage, countries.view, contract_templates.view, scheduling.items.manage)", () => {
+    ["scheduling.view", "settings.view", "settings.manage", "countries.view", "contract_templates.view", "scheduling.items.manage"]
+      .forEach((c) => expect(CODIGOS_SEM_CATALOGO, c).not.toContain(c));
   });
 });

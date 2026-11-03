@@ -83,9 +83,9 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
     (item: TopLevelItem): boolean => {
       if (permissionsLoading) return true;
       if (item.permissions.length === 0) return true;
-      return hasAnyPermission(item.permissions);
+      return item.requireAll ? item.permissions.every((p) => hasPermission(p)) : hasAnyPermission(item.permissions);
     },
-    [permissionsLoading, hasAnyPermission]
+    [permissionsLoading, hasAnyPermission, hasPermission]
   );
 
   const canViewSection = useCallback(

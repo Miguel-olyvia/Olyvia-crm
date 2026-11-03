@@ -4,9 +4,7 @@ import {
   Building2,
   CalendarClock,
   ChevronDown,
-  DollarSign,
   FileText,
-  FolderTree,
   Inbox,
   Key,
   LayoutDashboard,
@@ -17,11 +15,9 @@ import {
   Radio,
   Receipt,
   Settings,
-  Settings2,
   Shield,
   ShoppingCart,
   Sparkles,
-  Tags,
   Target,
   UserCog,
   Users,
@@ -69,7 +65,7 @@ export const QUICK_GROUPS: QuickGroup[] = [
     items: [
       { id: "dashboard", to: "/dashboard", icon: LayoutDashboard, labelKey: "sidebar.dashboard", permission: "dashboard.view" },
       { id: "atividades", to: "/atividades", icon: ListChecks, labelKey: "sidebar.activities", permission: "scheduling.items.view" },
-      { id: "scheduling", to: "/scheduling", icon: CalendarClock, labelKey: "sidebar.scheduling", permission: "scheduling.view" },
+      { id: "scheduling", to: "/scheduling", icon: CalendarClock, labelKey: "sidebar.scheduling", permission: "scheduling.items.view" },
     ],
   },
   {
@@ -83,11 +79,9 @@ export const QUICK_GROUPS: QuickGroup[] = [
       { id: "deals", to: "/deals", icon: Target, labelKey: "sidebar.proposalRequests", permission: "deals.view" },
       { id: "proposals", to: "/proposals", icon: FileText, labelKey: "sidebar.proposals", permission: "proposals.view" },
       { id: "contracts", to: "/client-contracts", icon: FileText, labelKey: "sidebar.contracts", permission: "client_contracts.view" },
-      { id: "contract-templates", to: "/contract-templates", icon: Sparkles, labelKey: "sidebar.contractTemplates", permission: "contract_templates.view" },
+      { id: "contract-templates", to: "/contract-templates", icon: Sparkles, labelKey: "sidebar.contractTemplates", permission: "client_contracts.view" },
       { id: "quote-models", to: "/quote-models", icon: Sparkles, labelKey: "today.quick.quoteModels", permission: "quote_templates.view" },
       { id: "quote-pdf-templates", to: "/quote-templates", icon: Sparkles, labelKey: "today.quick.quotePdfTemplates", permission: "quotes.manage" },
-      { id: "catalog-items", to: "/catalog-items", icon: Package, labelKey: "sidebar.catalogItems", permission: "catalog_items.view" },
-      { id: "service-catalog", to: "/service-catalog-items", icon: Package, labelKey: "sidebar.serviceCatalogItems", permission: "service_catalog.view" },
     ],
   },
   {
@@ -109,34 +103,19 @@ export const QUICK_GROUPS: QuickGroup[] = [
     color: "bg-pink-500/10 text-pink-700 dark:text-pink-400",
     items: [
       { id: "campaigns", to: "/campaigns", icon: Megaphone, labelKey: "sidebar.campaigns", permission: "campaigns.view" },
-      { id: "channels", to: "/channels", icon: Radio, labelKey: "sidebar.channels", permission: "channels.view" },
+      { id: "channels", to: "/channels", icon: Radio, labelKey: "sidebar.channels", permission: "campaigns.view" },
     ],
   },
   {
     id: "services",
-    titleKey: "sidebar.services",
+    // 03/11/2026: as páginas antigas de produtos, serviços, categorias, marcas, atributos e taxas redirecionam para o Catálogo e
+    // custos (App.tsx); fica um atalho só, com a permissão da rota.
+    titleKey: "sidebar.catalogoCustos",
     descriptionKey: "today.quick.desc.services",
     icon: Wrench,
     color: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
     items: [
-      { id: "services", to: "/services", icon: Wrench, labelKey: "sidebar.services", permission: "services.view" },
-      { id: "service-categories", to: "/service-categories", icon: FolderTree, labelKey: "sidebar.serviceCategories", permission: "service_categories.view" },
-      { id: "service-subcategories", to: "/service-subcategories", icon: FolderTree, labelKey: "sidebar.serviceSubcategories", permission: "service_subcategories.view" },
-      { id: "service-fees", to: "/service-fees", icon: DollarSign, labelKey: "sidebar.serviceFees", permission: "service_fees.view" },
-    ],
-  },
-  {
-    id: "products",
-    titleKey: "sidebar.products",
-    descriptionKey: "today.quick.desc.products",
-    icon: Package,
-    color: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",
-    items: [
-      { id: "products", to: "/products", icon: ShoppingCart, labelKey: "sidebar.productsList", permission: "products.view" },
-      { id: "product-categories", to: "/product-categories", icon: FolderTree, labelKey: "sidebar.productCategories", permission: "product_categories.view" },
-      { id: "product-subcategories", to: "/product-subcategories", icon: FolderTree, labelKey: "sidebar.productSubcategories", permission: "product_subcategories.view" },
-      { id: "product-attributes", to: "/product-attributes", icon: Settings2, labelKey: "sidebar.productAttributes", permission: "product_attributes.view" },
-      { id: "brands", to: "/brands", icon: Tags, labelKey: "sidebar.brands", permission: "brands.view" },
+      { id: "catalogo", to: "/catalogo-custos", icon: Package, labelKey: "sidebar.catalogoCustos", permission: "services.view" },
     ],
   },
   {
@@ -160,8 +139,8 @@ export const QUICK_GROUPS: QuickGroup[] = [
     color: "bg-red-500/10 text-red-700 dark:text-red-400",
     items: [
       { id: "users", to: "/users", icon: UserCog, labelKey: "sidebar.users", permission: "users.view" },
-      { id: "roles", to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
-      { id: "api-keys", to: "/api-keys", icon: Key, labelKey: "sidebar.apiKeys", permission: "api_keys.view" },
+      { id: "roles", to: "/utilizadores-perfis", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
+      { id: "api-keys", to: "/api-keys", icon: Key, labelKey: "sidebar.apiKeys", permission: "settings.update" },
     ],
   },
   {
@@ -171,10 +150,11 @@ export const QUICK_GROUPS: QuickGroup[] = [
     icon: Settings,
     color: "bg-muted text-muted-foreground",
     items: [
-      { id: "settings", to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.view" },
-      { id: "alert-settings", to: "/alert-settings", icon: Settings, labelKey: "today.quick.alertSettings", permission: "settings.view" },
-      { id: "countries", to: "/countries", icon: Globe, labelKey: "sidebar.countries", permission: "countries.view" },
-      { id: "trash", to: "/trash", icon: Package2, labelKey: "sidebar.trash" },
+      // 03/11/2026: as permissões das rotas (settings.view e countries.view não existem no catálogo).
+      { id: "settings", to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.update" },
+      { id: "alert-settings", to: "/alert-settings", icon: Settings, labelKey: "today.quick.alertSettings", permission: "settings.update" },
+      { id: "countries", to: "/countries", icon: Globe, labelKey: "sidebar.countries", permission: "settings.update" },
+      { id: "trash", to: "/trash", icon: Package2, labelKey: "sidebar.trash", permission: "trash.view" },
     ],
   },
 ];

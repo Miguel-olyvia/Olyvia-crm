@@ -47,7 +47,8 @@ export default function RhAssiduidadeEAusencias() {
     "hr.ausencias.aprovar.chefia",
     "hr.ausencias.aprovar.rh",
   ]);
-  const podeAssiduidade = hasPermission("hr.assiduidade.view");
+  // equipa.view: a chefia vê o mapa da sua cadeia (a RLS de pessoas_picagens limita a quem aparece).
+  const podeAssiduidade = hasAnyPermission(["hr.assiduidade.view", "hr.assiduidade.equipa.view"]);
 
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;

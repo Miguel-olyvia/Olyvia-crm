@@ -12,7 +12,7 @@ import { INVALIDA, chavesExternas, frotaKeys, type AcaoFrota } from "./dados";
 import { PedidosCarrinhasPainel } from "./PedidosCarrinha";
 
 const estado = vi.hoisted(() => ({ perms: new Set<string>() }));
-const TODAS = ["fleet.view", "fleet.manage", "fleet.costs", "inventory.edit", "inventory.view", "warehouses.view", "warehouses.create", "operations.view", "scheduling.view"];
+const TODAS = ["fleet.view", "fleet.manage", "fleet.costs", "inventory.edit", "inventory.view", "warehouses.view", "warehouses.create", "operations.view", "scheduling.items.view"];
 vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({
     hasPermission: (p: string) => estado.perms.has(p),

@@ -1452,7 +1452,7 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => window.open(`/products?edit=${item.id}`, '_blank')}
+                                onClick={() => window.open("/catalogo-custos", "_blank")}
                                 title="Editar produto"
                               >
                                 <Pencil className="h-4 w-4" />
@@ -1559,7 +1559,7 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => window.open(`/services?edit=${item.id}`, '_blank')}
+                                onClick={() => window.open("/catalogo-custos", "_blank")}
                                 title="Editar serviço"
                               >
                                 <Pencil className="h-4 w-4" />

@@ -248,12 +248,12 @@ describe("ligar, alterar e desligar a pessoa", () => {
 });
 
 describe("o menu", () => {
-  it("tem «Organização» no grupo de RH de exemplo, logo a seguir a Pessoas, para users.view", () => {
+  it("tem «Organização» no grupo de RH de exemplo, logo a seguir a Pessoas, para hr.pessoas.colocacao.view", () => {
     const grupo = menuSections.find((s) => s.id === "rh-exemplo")!;
     const destinos = grupo.items.map((i) => i.to);
     expect(destinos.slice(0, 2)).toEqual(["/rh-exemplo/pessoas", "/rh-exemplo/organizacao"]);
     const item = grupo.items[1]!;
     expect(item.labelKey).toBe("sidebar.rhExemploOrganizacao");
-    expect(item.permission).toBe("users.view");
+    expect(item.permissions).toEqual(["hr.pessoas.colocacao.view"]);
   });
 });

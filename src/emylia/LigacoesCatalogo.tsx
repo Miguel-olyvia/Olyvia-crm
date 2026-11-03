@@ -16,6 +16,7 @@ import { candidatos, juntar, podeJuntar, podeRetirar, retirar, textoJuntar, type
 import { aplicarTodos } from "./v2/custosModelo";
 import { lerCustos, mudarCustos } from "./v2/custosStore";
 import { lerCatalogo, mudarCatalogo } from "./v2/catalogoStore";
+import { usePermissoesCatalogo } from "./permissoesCatalogo";
 import { IconeServico, Ilustracao } from "./ilustracoes";
 import { useDesktop } from "./useDesktop";
 import {
@@ -439,7 +440,9 @@ export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; 
       },
     }));
   };
-  const edicao: EdicaoMapa | undefined = S && run && centro ? {
+  // 03/11: juntar/desligar no mapa muda receitas de serviços (services.edit) e produtos (products.edit); sem as duas, o mapa só se consulta.
+  const perms = usePermissoesCatalogo();
+  const edicao: EdicaoMapa | undefined = S && run && centro && perms.servicos && perms.produtos ? {
     podeJuntar: (g) => podeJuntar(centro, g),
     texto: (g) => textoJuntar(centro, g),
     opcoes: (g) => candidatos(centro, g, K).map((x) => ({

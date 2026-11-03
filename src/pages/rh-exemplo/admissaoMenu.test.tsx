@@ -73,7 +73,9 @@ describe("o menu de RH de exemplo", () => {
     expect(grupo().items.some((i) => (i.textCounter as string | undefined) === "rhAdmissoesPorAprovar")).toBe(false);
     expect(entrada("/rh-exemplo/denuncias").textCounter).toBe("rhDenunciasPorConfirmar");
     expect(entrada("/rh-exemplo/admissao").labelKey).toBe("sidebar.rhExemploVerComoPessoa");
-    expect(grupo().items.every((i) => i.permission === "users.view")).toBe(true);
+    // 03/11: «Ver como a pessoa» com a regra de podeVerAdmissoes (PessoasRh), e já nada com users.view.
+    expect(entrada("/rh-exemplo/admissao").permissions).toEqual(["hr.pessoas.convite.enviar", "hr.onboarding.approve"]);
+    expect(grupo().items.some((i) => i.permission === "users.view" || i.permissions?.includes("users.view"))).toBe(false);
   });
 
   it("a ligação direta ?tab=admissoes continua a abrir o pipeline de admissões (lido da base), e a de «Pessoas» o separador Pessoas", async () => {

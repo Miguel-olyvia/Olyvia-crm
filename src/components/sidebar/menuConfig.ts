@@ -97,6 +97,8 @@ export interface TopLevelItem {
   icon: LucideIcon;
   labelKey: string;
   permissions: string[];
+  /** Exige TODAS as `permissions` em vez de qualquer uma (OR, por omissão). */
+  requireAll?: boolean;
   /**
    * Destino servido por outra aplicação no mesmo domínio (ex.: /operacao).
    * O react-router não o conhece, por isso a navegação tem de ser um
@@ -110,6 +112,33 @@ export interface TopLevelItem {
    */
   adminOnly?: boolean;
 }
+
+/**
+ * As permissões de cada entrada do RH, as mesmas das rotas /rh-exemplo/* em App.tsx (qualquer uma chega). Exportadas para a rota
+ * e o menu não divergirem.
+ */
+export const PERMISSOES_RH = {
+  // A rota aceita também hr.pessoas.view.own (a própria ficha, useContextoFicha); o menu, que abre a lista, só hr.pessoas.view.
+  pessoas: ["hr.pessoas.view"],
+  organizacao: ["hr.pessoas.colocacao.view"],
+  assiduidadeEAusencias: [
+    "hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.assiduidade.view", "hr.assiduidade.equipa.view",
+  ],
+  centros: ["hr.locais.view"],
+  modelos: ["hr.pessoas.documentos.modelos.view"],
+  processamento: ["hr.processamento.periodo.view", "hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"],
+  custos: ["hr.pessoas.retribuicao.view"],
+  denuncias: ["hr.denuncias.gerir"],
+  // A regra de podeVerAdmissoes (PessoasRh).
+  admissao: ["hr.pessoas.convite.enviar", "hr.onboarding.approve"],
+};
+
+/** As permissões das entradas de «Eu» (a própria pessoa; a permissão geral também chega). */
+export const PERMISSOES_RH_EU = {
+  documentos: ["hr.pessoas.documentos.view.own", "hr.pessoas.documentos.view"],
+  ausencias: ["hr.ausencias.view.own", "hr.ausencias.pedir"],
+  assiduidade: ["hr.assiduidade.view.own", "hr.assiduidade.picar"],
+};
 
 export const topLevelItems: TopLevelItem[] = [
   {
@@ -145,11 +174,14 @@ export const topLevelItems: TopLevelItem[] = [
     to: "/negocios?vista=operacoes",
     icon: Wrench,
     labelKey: "sidebar.operations",
-    permissions: ["operations.view"],
+    // 03/11: a rota /negocios (RotaNegocios) exige pessoas.view (ou um papel no Negócio pelo RH, que já abre o /negocios pelo Hoje);
+    // o item pede as duas, para não aparecer a quem tem operations.view e depois leva «Sem acesso».
+    permissions: ["operations.view", "pessoas.view"],
+    requireAll: true,
   },
   {
     // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços. 28/10: sai de Organizações para o topo, como no
-    // protótipo. As páginas antigas (/products, /services, categorias, marcas, pacotes…) continuam pelo endereço até à limpeza.
+    // protótipo. 03/11: as páginas antigas (/products, /services, categorias, marcas, pacotes…) redirecionam para aqui.
     id: "catalogo",
     to: "/catalogo-custos",
     icon: Package,
@@ -163,8 +195,9 @@ export const menuSections: MenuSection[] = [
     id: "organizations",
     icon: Building,
     labelKey: "sidebar.organizations",
-    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees"],
-    permissions: ["organizations.view", "products.view", "services.view"],
+    // 03/11: as páginas antigas do catálogo (/products, /services, marcas, categorias...) redirecionam para /catalogo-custos (item de topo).
+    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder"],
+    permissions: ["organizations.view", "flow_builder.view"],
     items: [
       { to: "/organizations", icon: Building, labelKey: "sidebar.organizations", permission: "organizations.view" },
       { to: "/org-chart", icon: Network, labelKey: "sidebar.orgChart", permission: "organizations.view" },
@@ -190,10 +223,11 @@ export const menuSections: MenuSection[] = [
     icon: Megaphone,
     labelKey: "sidebar.marketing",
     paths: ["/campaigns", "/forms", "/lead-sources"],
-    permissions: ["campaigns.view", "forms.view", "channels.view"],
+    permissions: ["campaigns.view", "forms.view", "lead_sources.view"],
     items: [
       { to: "/campaigns", icon: Megaphone, labelKey: "sidebar.campaigns", permission: "campaigns.view" },
-      { to: "/lead-sources", icon: Crosshair, labelKey: "sidebar.leadSources", permission: "channels.view" },
+      // 03/11: a permissão da própria página (era channels.view); a rota pede a mesma.
+      { to: "/lead-sources", icon: Crosshair, labelKey: "sidebar.leadSources", permission: "lead_sources.view" },
       { to: "/forms", icon: FileText, labelKey: "sidebar.forms", permission: "forms.view" },
     ],
   },
@@ -268,10 +302,10 @@ export const menuSections: MenuSection[] = [
     ],
   },
   {
-    // Recursos Humanos de exemplo (dados em memória, sem base): a gestão de toda a organização. Vem ANTES de
-    // "A minha área" porque a barra lateral escolhe o primeiro grupo cujo caminho é prefixo do URL, e
-    // `/rh-exemplo/documentos/modelos` e `/rh-exemplo/assiduidade-e-ausencias` começam pelos caminhos do outro grupo.
-    // Mesmo desenho do ramo de RH real (`rh`), com `users.view` no lugar das permissões `hr.*`.
+    // Recursos Humanos: a gestão de toda a organização. Vem ANTES de "Eu" porque a barra lateral escolhe o primeiro grupo cujo
+    // caminho é prefixo do URL, e `/rh-exemplo/documentos/modelos` e `/rh-exemplo/assiduidade-e-ausencias` começam pelos caminhos
+    // do outro grupo. 03/11: cada item pede as permissões hr.* da sua rota (App.tsx) e o grupo aparece com qualquer delas
+    // (era `users.view` em tudo, e um colaborador normal não via nada).
     id: "rh-exemplo",
     icon: IdCard,
     labelKey: "sidebar.rhExemploModulo",
@@ -287,36 +321,37 @@ export const menuSections: MenuSection[] = [
       "/rh-exemplo/contratos",
       "/rh-exemplo/denuncias",
     ],
-    permissions: ["users.view"],
+    permissions: [...new Set(Object.values(PERMISSOES_RH).flat())],
     items: [
-      { to: "/rh-exemplo/pessoas", icon: Users, labelKey: "sidebar.rhExemploPessoas", permission: "users.view" },
-      { to: "/rh-exemplo/organizacao", icon: Network, labelKey: "sidebar.rhExemploOrganizacao", permission: "users.view" },
-      { to: "/rh-exemplo/assiduidade-e-ausencias", icon: CalendarRange, labelKey: "sidebar.rhExemploAssiduidadeEAusencias", permission: "users.view" },
-      { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permission: "users.view" },
-      { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permission: "users.view" },
-      { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permission: "users.view" },
-      { to: "/rh-exemplo/custos", icon: Coins, labelKey: "rhCustos.menu", permission: "users.view" },
+      { to: "/rh-exemplo/pessoas", icon: Users, labelKey: "sidebar.rhExemploPessoas", permissions: PERMISSOES_RH.pessoas },
+      { to: "/rh-exemplo/organizacao", icon: Network, labelKey: "sidebar.rhExemploOrganizacao", permissions: PERMISSOES_RH.organizacao },
+      { to: "/rh-exemplo/assiduidade-e-ausencias", icon: CalendarRange, labelKey: "sidebar.rhExemploAssiduidadeEAusencias", permissions: PERMISSOES_RH.assiduidadeEAusencias },
+      { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permissions: PERMISSOES_RH.centros },
+      { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permissions: PERMISSOES_RH.modelos },
+      { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permissions: PERMISSOES_RH.processamento },
+      { to: "/rh-exemplo/custos", icon: Coins, labelKey: "rhCustos.menu", permissions: PERMISSOES_RH.custos },
       // A gestão do canal de denúncias da organização ativa (anónimas e identificadas), com o contador «N por confirmar».
-      { to: "/rh-exemplo/denuncias", icon: ShieldAlert, labelKey: "sidebar.rhExemploDenuncias", permission: "users.view", textCounter: "rhDenunciasPorConfirmar" },
+      { to: "/rh-exemplo/denuncias", icon: ShieldAlert, labelKey: "sidebar.rhExemploDenuncias", permissions: PERMISSOES_RH.denuncias, textCounter: "rhDenunciasPorConfirmar" },
       // Índice dos oito estados da página pública do convite; `exact` para não realçar em `/admissao/configuracao`.
-      { to: "/rh-exemplo/admissao", icon: Eye, labelKey: "sidebar.rhExemploVerComoPessoa", permission: "users.view", exact: true },
+      { to: "/rh-exemplo/admissao", icon: Eye, labelKey: "sidebar.rhExemploVerComoPessoa", permissions: PERMISSOES_RH.admissao, exact: true },
       // «Campos de admissão» e «Regras de fim de contrato» não têm entrada no menu: abrem por dois botões no cabeçalho da
       // lista de Pessoas, como no ramo de RH real. Os caminhos continuam em `paths` para o grupo se manter aberto nesses ecrãs.
     ],
   },
   {
-    // A minha área de exemplo: ausências, assiduidade e documentos da PRÓPRIA pessoa (a Sofia, nos dados de exemplo).
+    // «Eu»: ausências, assiduidade, documentos e denúncias da PRÓPRIA pessoa. Sem permissão de grupo (como Definições): aparece a
+    // quem puder ver pelo menos um item, e «As minhas denúncias» basta a sessão (RhSemFichaDenuncias trata quem não tem ficha).
     id: "rh-exemplo-eu",
     icon: CalendarDays,
     labelKey: "sidebar.rhExemploEu",
     paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos", "/rh-exemplo/minhas-denuncias"],
-    permissions: ["users.view"],
+    permissions: [],
     items: [
-      { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permission: "users.view" },
-      { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permission: "users.view" },
-      { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permission: "users.view" },
-      // Canal de denúncias, do lado de quem denuncia: UMA entrada (denunciar num painel e acompanhar nas abas).
-      { to: "/rh-exemplo/minhas-denuncias", icon: Megaphone, labelKey: "sidebar.rhExemploMinhasDenuncias", permission: "users.view" },
+      { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permissions: PERMISSOES_RH_EU.documentos },
+      { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permissions: PERMISSOES_RH_EU.ausencias },
+      { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permissions: PERMISSOES_RH_EU.assiduidade },
+      // Canal de denúncias, do lado de quem denuncia: UMA entrada (denunciar num painel e acompanhar nas abas). Sem permissão.
+      { to: "/rh-exemplo/minhas-denuncias", icon: Megaphone, labelKey: "sidebar.rhExemploMinhasDenuncias" },
     ],
   },
   {
@@ -337,8 +372,8 @@ export const menuSections: MenuSection[] = [
     icon: Settings,
     labelKey: "sidebar.settings",
     // 03/11: os templates e modelos dos documentos do negócio vêm do grupo Aquisição (que saiu do menu: o Negócios em /pessoas e
-    // /negocios substitui-o). Cada item tem a permissão da sua rota em App.tsx; /proposal-templates não tem ProtectedRoute (a página
-    // só trava as ações com proposals.manage), por isso o item também não tem permissão.
+    // /negocios substitui-o). Cada item tem a permissão da sua rota em App.tsx (03/11: /proposal-templates passou a pedir proposals.manage,
+    // /send-failures smtp.view e /trash trash.view).
     paths: [
       "/settings", "/smtp-management", "/email-templates", "/trash", "/send-failures",
       "/contract-templates", "/quote-templates", "/proposal-templates", "/quote-models", "/modelos-orcamento",
@@ -350,10 +385,10 @@ export const menuSections: MenuSection[] = [
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
       { to: "/contract-templates", icon: BookOpen, labelKey: "sidebar.contractTemplates", permission: "client_contracts.view" },
       { to: "/quote-templates", icon: FileCheck, labelKey: "today.quick.quotePdfTemplates", permission: "quotes.manage" },
-      { to: "/proposal-templates", icon: FileText, labelKey: "sidebar.proposalTemplates" },
+      { to: "/proposal-templates", icon: FileText, labelKey: "sidebar.proposalTemplates", permission: "proposals.manage" },
       { to: "/quote-models", icon: FileCheck, labelKey: "today.quick.quoteModels", permission: "quote_templates.view" },
-      { to: "/send-failures", icon: AlertTriangle, labelKey: "sidebar.sendFailures", permission: "scheduling.items.view" },
-      { to: "/trash", icon: Trash2, labelKey: "sidebar.trash", permission: "settings.update" },
+      { to: "/send-failures", icon: AlertTriangle, labelKey: "sidebar.sendFailures", permission: "smtp.view" },
+      { to: "/trash", icon: Trash2, labelKey: "sidebar.trash", permission: "trash.view" },
     ],
   },
   {

@@ -51,8 +51,8 @@ describe("Definições: templates e modelos dos documentos do negócio", () => {
     expect(permissaoDaRota("/contract-templates")).toBe("client_contracts.view");
     expect(permissaoDaRota("/quote-templates")).toBe("quotes.manage");
     expect(permissaoDaRota("/quote-models")).toBe("quote_templates.view");
-    // /proposal-templates não tem ProtectedRoute: a página trava as ações com proposals.manage.
-    expect(permissaoDaRota("/proposal-templates")).toBeNull();
+    // 03/11: /proposal-templates passou a ter ProtectedRoute com proposals.manage (aparecia a toda a gente).
+    expect(permissaoDaRota("/proposal-templates")).toBe("proposals.manage");
   });
 
   it("o grupo Definições fica aberto nesses ecrãs (paths)", () => {

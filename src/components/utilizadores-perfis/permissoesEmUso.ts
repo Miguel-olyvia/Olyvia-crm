@@ -29,9 +29,6 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
     "api_keys.copy", "api_keys.create", "api_keys.delete", "api_keys.toggle", "api_keys.view",
   ],
-  catalog_items: [
-    "catalog_items.delete", "catalog_items.export", "catalog_items.import", "catalog_items.view",
-  ],
   // Só verificadas no servidor (policies/RPCs): client_contracts.manage
   client_contracts: [
     "client_contracts.cancel", "client_contracts.create", "client_contracts.delete", "client_contracts.edit",
@@ -79,37 +76,38 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   forms: [
     "forms.create", "forms.delete", "forms.edit", "forms.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): hr.ausencias.direitos.edit, hr.ausencias.tipos.edit, hr.ausencias.tipos.view, hr.pessoas.acessos_sensiveis.view, hr.pessoas.duplicados.view, hr.pessoas.horario_realizado.edit
+  // Só verificadas no servidor (policies/RPCs): hr.ausencias.tipos.view. 03/11: hr.denuncias.gerir (nova) guarda a gestão do canal de
+  // denúncias (/rh-exemplo/denuncias). Esconderam-se hr.ausencias.tipos.edit, hr.ausencias.direitos.edit, hr.pessoas.horario_realizado.edit,
+  // hr.pessoas.duplicados.view e hr.pessoas.acessos_sensiveis.view: só policies/RPCs que nenhum ecrã vivo chama.
   hr: [
     "hr.admissao.obrigatorios.gerir", "hr.assiduidade.corrigir", "hr.assiduidade.equipa.view", "hr.assiduidade.faltas.edit",
-    "hr.assiduidade.faltas.view", "hr.assiduidade.gerir", "hr.assiduidade.justificacao.edit",
-    "hr.assiduidade.justificacao.view", "hr.assiduidade.obras.registar", "hr.assiduidade.picar", "hr.assiduidade.picar.outros",
-    "hr.assiduidade.view", "hr.assiduidade.view.own", "hr.ausencias.ajustar", "hr.ausencias.aprovar.chefia",
-    "hr.ausencias.aprovar.rh", "hr.ausencias.direitos.edit", "hr.ausencias.direitos.view", "hr.ausencias.historico.editar",
-    "hr.ausencias.justificacao.view", "hr.ausencias.pedir", "hr.ausencias.pedir.outros", "hr.ausencias.tipos.edit",
-    "hr.ausencias.tipos.view", "hr.ausencias.view", "hr.ausencias.view.own", "hr.cargos.salario.alterar",
-    "hr.contratos.regras.gerir", "hr.locais.edit", "hr.locais.view", "hr.onboarding.approve", "hr.onboarding.restrito",
-    "hr.onboarding.sensitive", "hr.pessoas.acessos_sensiveis.view", "hr.pessoas.afectacoes.corrigir",
+    "hr.assiduidade.faltas.view", "hr.assiduidade.gerir", "hr.assiduidade.justificacao.edit", "hr.assiduidade.justificacao.view",
+    "hr.assiduidade.obras.registar", "hr.assiduidade.picar", "hr.assiduidade.picar.outros", "hr.assiduidade.view",
+    "hr.assiduidade.view.own", "hr.ausencias.ajustar", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh",
+    "hr.ausencias.direitos.view", "hr.ausencias.historico.editar", "hr.ausencias.justificacao.view", "hr.ausencias.pedir",
+    "hr.ausencias.pedir.outros", "hr.ausencias.tipos.view", "hr.ausencias.view", "hr.ausencias.view.own",
+    "hr.cargos.salario.alterar", "hr.contratos.regras.gerir", "hr.denuncias.gerir", "hr.locais.edit", "hr.locais.view",
+    "hr.onboarding.approve", "hr.onboarding.restrito", "hr.onboarding.sensitive", "hr.pessoas.afectacoes.corrigir",
     "hr.pessoas.afectacoes.edit", "hr.pessoas.afectacoes.view", "hr.pessoas.bancarios.edit", "hr.pessoas.bancarios.view",
     "hr.pessoas.colocacao.corrigir", "hr.pessoas.colocacao.edit", "hr.pessoas.colocacao.view", "hr.pessoas.conta.criar",
     "hr.pessoas.conta.link", "hr.pessoas.convite.enviar", "hr.pessoas.create", "hr.pessoas.documentos.anular",
     "hr.pessoas.documentos.conteudo.view", "hr.pessoas.documentos.edit", "hr.pessoas.documentos.emitir",
     "hr.pessoas.documentos.modelos.edit", "hr.pessoas.documentos.modelos.view", "hr.pessoas.documentos.view",
-    "hr.pessoas.documentos.view.own", "hr.pessoas.duplicados.view", "hr.pessoas.edit", "hr.pessoas.emergencia.edit",
-    "hr.pessoas.emergencia.view", "hr.pessoas.horario_realizado.edit", "hr.pessoas.horario_realizado.validar",
-    "hr.pessoas.horario_realizado.view", "hr.pessoas.horario.corrigir", "hr.pessoas.horario.edit", "hr.pessoas.horario.view",
-    "hr.pessoas.identificacao.edit", "hr.pessoas.identificacao.reveal", "hr.pessoas.identificacao.view",
-    "hr.pessoas.laborais.edit", "hr.pessoas.laborais.view", "hr.pessoas.morada.edit", "hr.pessoas.morada.view",
-    "hr.pessoas.pessoais.edit", "hr.pessoas.pessoais.view", "hr.pessoas.retribuicao.corrigir", "hr.pessoas.retribuicao.edit",
-    "hr.pessoas.retribuicao.view", "hr.pessoas.saude.edit", "hr.pessoas.saude.view", "hr.pessoas.sindicalizacao.edit",
-    "hr.pessoas.sindicalizacao.view", "hr.pessoas.view", "hr.pessoas.view.own", "hr.pessoas.vinculos.edit",
-    "hr.pessoas.vinculos.horas.corrigir", "hr.pessoas.vinculos.view", "hr.processamento.lancamentos.gerir",
-    "hr.processamento.periodo.gerir", "hr.processamento.periodo.view", "hr.vencimento.codigos.gerir",
-    "hr.vencimento.codigos.view", "hr.vencimento.subsidio.gerir", "hr.vencimento.subsidio.view",
+    "hr.pessoas.documentos.view.own", "hr.pessoas.edit", "hr.pessoas.emergencia.edit", "hr.pessoas.emergencia.view",
+    "hr.pessoas.horario.corrigir", "hr.pessoas.horario.edit", "hr.pessoas.horario.view", "hr.pessoas.horario_realizado.validar",
+    "hr.pessoas.horario_realizado.view", "hr.pessoas.identificacao.edit", "hr.pessoas.identificacao.reveal",
+    "hr.pessoas.identificacao.view", "hr.pessoas.laborais.edit", "hr.pessoas.laborais.view", "hr.pessoas.morada.edit",
+    "hr.pessoas.morada.view", "hr.pessoas.pessoais.edit", "hr.pessoas.pessoais.view", "hr.pessoas.retribuicao.corrigir",
+    "hr.pessoas.retribuicao.edit", "hr.pessoas.retribuicao.view", "hr.pessoas.saude.edit", "hr.pessoas.saude.view",
+    "hr.pessoas.sindicalizacao.edit", "hr.pessoas.sindicalizacao.view", "hr.pessoas.view", "hr.pessoas.view.own",
+    "hr.pessoas.vinculos.edit", "hr.pessoas.vinculos.horas.corrigir", "hr.pessoas.vinculos.view",
+    "hr.processamento.lancamentos.gerir", "hr.processamento.periodo.gerir", "hr.processamento.periodo.view",
+    "hr.vencimento.codigos.gerir", "hr.vencimento.codigos.view", "hr.vencimento.subsidio.gerir", "hr.vencimento.subsidio.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): inventory.adjust, inventory.create, inventory.delete
+  // 03/11: os stocks.* (sem catálogo) passaram a inventory.* em Stocks/Movimentos/Hoje — inventory.create/delete/export/import passam a
+  // ter uso no ecrã; inventory.adjust escondeu-se (nada vivo a verifica).
   inventory: [
-    "inventory.adjust", "inventory.count", "inventory.create", "inventory.delete", "inventory.edit", "inventory.view",
+    "inventory.count", "inventory.create", "inventory.delete", "inventory.edit", "inventory.export", "inventory.import", "inventory.view",
   ],
   // Só verificadas no servidor (policies/RPCs/edge functions): leads.assign (neg_atribuir_pessoa), leads.config (policies das tabelas de
   // configuração de leads, incluindo lead_contact_results que a rota viva /lead-contact-results grava), leads.delete (policies anew_leads
@@ -120,17 +118,14 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "platform.pending_submissions.view",
   ],
   // Só verificadas no servidor (policies/RPCs): lists.create, lists.delete, lists.edit, lists.view
+  // 03/11: trash.view guarda /trash (rota, menu e atalho); lead_sources.view guarda /lead-sources.
   marketing: [
-    "campaigns.create", "campaigns.delete", "campaigns.edit", "campaigns.view", "channels.create", "channels.view",
-    "lead_sources.create", "lead_sources.delete", "lead_sources.edit", "lists.create", "lists.delete", "lists.edit",
-    "lists.view",
+    "campaigns.create", "campaigns.delete", "campaigns.edit", "campaigns.view", "channels.view", "lead_sources.create",
+    "lead_sources.delete", "lead_sources.edit", "lead_sources.view", "lists.view",
   ],
   // Só verificadas no servidor (policies/RPCs): operations.checklists.manage, operations.costs.view, operations.locations.manage, operations.locations.view, operations.orders.cancel, operations.orders.confirm, operations.orders.create, operations.orders.edit, operations.orders.execute, operations.orders.view, operations.orders.view_all, operations.plans.manage, operations.settings.manage
   operations: [
-    "operations.checklists.manage", "operations.costs.view", "operations.locations.manage", "operations.locations.view",
-    "operations.orders.cancel", "operations.orders.confirm", "operations.orders.create", "operations.orders.edit",
-    "operations.orders.execute", "operations.orders.view", "operations.orders.view_all", "operations.plans.manage",
-    "operations.settings.manage", "operations.view",
+    "operations.costs.view", "operations.orders.view", "operations.orders.view_all", "operations.view",
   ],
   organizations: [
     "organizations.create", "organizations.delete", "organizations.edit", "organizations.view",
@@ -147,7 +142,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   ],
   // Só verificadas no servidor (policies/RPCs): platform.settings.manage
   platform: [
-    "platform.auth_audit_log.view", "platform.settings.manage", "platform.support_access.view", "rgpd.erasure.manage",
+    "platform.auth_audit_log.view", "platform.support_access.view", "rgpd.erasure.manage",
   ],
   // Só verificadas no servidor (policies/RPCs): portal.manage
   portal: [
@@ -155,20 +150,16 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   ],
   // Só verificadas no servidor (policies/RPCs): products.manage_attributes
   products: [
-    "brands.create", "brands.delete", "brands.edit", "brands.view", "product_attributes.create", "product_attributes.delete",
-    "product_attributes.edit", "product_attributes.view", "product_categories.create", "product_categories.delete",
-    "product_categories.edit", "product_categories.view", "product_subcategories.create", "product_subcategories.delete",
-    "product_subcategories.edit", "product_subcategories.view", "products.create", "products.delete", "products.edit",
-    "products.export", "products.import", "products.manage", "products.manage_attributes", "products.manage_prices",
-    "products.view", "products.view_cost",
+    "brands.view", "product_attributes.view", "product_categories.view", "products.create", "products.edit",
+    "products.manage_prices", "products.view", "products.view_cost",
   ],
   proposals: [
     "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.manage", "proposals.view",
   ],
   purchase_orders: [
     "purchase_orders.approve", "purchase_orders.create", "purchase_orders.delete", "purchase_orders.edit",
-    "purchase_orders.export", "purchase_orders.import", "purchase_orders.manage", "purchase_orders.receive",
-    "purchase_orders.revert_receipt", "purchase_orders.view", "purchase_orders.view_prices",
+    "purchase_orders.export", "purchase_orders.import", "purchase_orders.receive", "purchase_orders.revert_receipt",
+    "purchase_orders.view",
   ],
   quote_templates: [
     "quote_templates.create", "quote_templates.delete", "quote_templates.duplicate", "quote_templates.edit",
@@ -195,18 +186,9 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   security: [
     "exports.audit.view",
   ],
-  service_catalog: [
-    "service_catalog.delete", "service_catalog.view",
-  ],
-  service_categories: [
-    "service_categories.create", "service_categories.delete", "service_categories.edit", "service_categories.view",
-  ],
   // Só verificadas no servidor (policies/RPCs): service_fees.delete, service_fees.edit
   services: [
-    "service_catalog.export", "service_catalog.import", "service_fees.create", "service_fees.delete", "service_fees.edit",
-    "service_fees.view", "service_subcategories.create", "service_subcategories.delete", "service_subcategories.edit",
-    "service_subcategories.view", "services.create", "services.delete", "services.edit", "services.manage_prices",
-    "services.view", "services.view_cost",
+    "service_fees.view", "services.edit", "services.manage_prices", "services.view", "services.view_cost",
   ],
   settings: [
     "settings.update",
@@ -218,6 +200,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   suppliers: [
     "suppliers.contract_manage", "suppliers.create", "suppliers.delete", "suppliers.edit", "suppliers.export",
     "suppliers.import", "suppliers.portal_manage", "suppliers.view", "suppliers.view_pricing", "suppliers.view_sla_report",
+  ],
+  // 03/11: trash.view guarda /trash (rota, menu e atalho); lead_sources.view guarda /lead-sources.
+  trash: [
+    "trash.view",
   ],
   users: [
     "users.create", "users.delete", "users.edit", "users.manage_roles", "users.view",
@@ -244,6 +230,10 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   ],
   calendar: [
     "calendar.create", "calendar.edit", "calendar.view_company",
+  ],
+  // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam.
+  catalog_items: [
+    "catalog_items.delete", "catalog_items.export", "catalog_items.import", "catalog_items.view",
   ],
   // Só AnewClients.tsx (rota /clients redireciona) as verificava; export-data só as pede para o módulo clients, que nada vivo exporta.
   clients: [
@@ -280,29 +270,47 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   employees: [
     "employees.create", "employees.delete", "employees.edit", "employees.export", "employees.import", "employees.view",
   ],
+  // 03/11: as cinco de cima (sem ecrã vivo que as use).
   hr: [
+    "hr.ausencias.direitos.edit", "hr.ausencias.tipos.edit", "hr.pessoas.acessos_sensiveis.view", "hr.pessoas.duplicados.view",
+    "hr.pessoas.horario_realizado.edit",
     "hr.assiduidade.importar", "hr.module.access", "hr.onboarding.sign_employer", "hr.pessoas.archive", "vacations.create",
     "vacations.manage", "vacations.view",
   ],
+  // 03/11: inventory.adjust (nada vivo a verifica).
   inventory: [
-    "inventory.export", "inventory.import", "inventory.transfer",
+    "inventory.adjust", "inventory.transfer",
   ],
   // leads.contact: só LeadTableRow.tsx; leads.export(_sensitive): só AnewLeads.tsx (rota /leads redireciona) e o módulo leads de export-data.
   leads: [
     "leads.contact", "leads.export", "leads.export_sensitive", "leads.manage",
   ],
+  // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   marketing: [
-    "channels.delete", "channels.edit", "lead_sources.view", "lists.add_contacts",
+    "channels.create", "channels.delete", "channels.edit", "lists.add_contacts", "lists.create", "lists.delete", "lists.edit",
   ],
+  // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   operations: [
-    "operations.orders.approve",
+    "operations.checklists.manage", "operations.locations.manage", "operations.locations.view", "operations.orders.approve",
+    "operations.orders.cancel", "operations.orders.confirm", "operations.orders.create", "operations.orders.edit",
+    "operations.orders.execute", "operations.plans.manage", "operations.settings.manage",
   ],
+  // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   platform: [
     "platform.dashboard.view", "platform.organizations.manage", "platform.organizations.view", "platform.security.audit",
-    "platform.users.manage", "platform.users.view",
+    "platform.settings.manage", "platform.users.manage", "platform.users.view",
   ],
+  // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam.
   products: [
+    "brands.create", "brands.delete", "brands.edit", "product_attributes.create", "product_attributes.delete",
+    "product_attributes.edit", "product_categories.create", "product_categories.delete", "product_categories.edit",
+    "product_subcategories.create", "product_subcategories.delete", "product_subcategories.edit", "product_subcategories.view",
+    "products.delete", "products.export", "products.import", "products.manage", "products.manage_attributes",
     "products.manage_catalog", "products.view_price_history",
+  ],
+  // 03/11: nada vivo as verifica (as ações das encomendas de compra pedem as próprias: create/edit/delete/receive/approve...).
+  purchase_orders: [
+    "purchase_orders.manage", "purchase_orders.view_prices",
   ],
   // Só Proposals.tsx (FORA_DO_MENU) e o pedido dela a export-data.
   proposals: [
@@ -318,11 +326,22 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   scheduling: [
     "scheduling.export",
   ],
+  // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam.
+  service_catalog: [
+    "service_catalog.delete", "service_catalog.view",
+  ],
+  // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam.
+  service_categories: [
+    "service_categories.create", "service_categories.delete", "service_categories.edit", "service_categories.view",
+  ],
   service_requests: [
     "service_requests.create", "service_requests.delete", "service_requests.edit", "service_requests.view",
   ],
+  // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam.
   services: [
-    "services.view_price_history",
+    "service_catalog.export", "service_catalog.import", "service_fees.create", "service_fees.delete", "service_fees.edit",
+    "service_subcategories.create", "service_subcategories.delete", "service_subcategories.edit", "service_subcategories.view",
+    "services.create", "services.delete", "services.view_price_history",
   ],
   spare_parts: [
     "spare_parts.create", "spare_parts.delete", "spare_parts.edit", "spare_parts.view",
@@ -334,7 +353,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "tenants.create", "tenants.delete", "tenants.edit", "tenants.manage_companies", "tenants.view",
   ],
   trash: [
-    "trash.delete", "trash.restore", "trash.view",
+    "trash.delete", "trash.restore",
   ],
   users: [
     "users.change_password",
@@ -353,11 +372,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
  * é outra tarefa. Os de src/emylia e src/pages/prototipo-negocios são do protótipo.
  */
 export const CODIGOS_SEM_CATALOGO: readonly string[] = [
-  "contacto.registar", "contract_templates.view", "contracts.cancel", "contracts.view", "countries.view", "equipa.edit",
-  "finance.invoice", "finance.validate_payment", "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder",
-  "obra.fechar", "obra.imprevistos", "proposta.decidir", "scheduling.items.manage", "scheduling.view", "settings.manage",
-  "settings.view", "stocks.create", "stocks.delete", "stocks.edit", "stocks.export", "stocks.import", "suppliers.manage",
-  "visita.gerir",
+  "contacto.registar", "contracts.cancel", "contracts.view", "equipa.edit", "finance.invoice", "finance.validate_payment",
+  "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder", "obra.fechar", "obra.imprevistos",
+  "proposta.decidir", "suppliers.manage", "visita.gerir",
 ];
 
 const todas = (r: Readonly<Record<string, readonly string[]>>): string[] => Object.values(r).flat();

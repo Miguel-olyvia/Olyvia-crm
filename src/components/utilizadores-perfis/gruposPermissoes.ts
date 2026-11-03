@@ -103,7 +103,23 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   { rotulo: "Inventário", categorias: ["suppliers", "warehouses", "purchase_orders", "receiving", "stocks", "inventory", "client_orders"] },
   { rotulo: "Frota", categorias: ["fleet"] },
   // Roles.tsx aceita a categoria hr no filtro mas não a põe em nenhum grupo, e as permissões hr.* não se viam. Aqui ganham grupo.
-  { rotulo: "Recursos Humanos", categorias: ["hr"] },
+  // 03/11: partido em subgrupos pelo prefixo do código (categoriaRh); um hr.* não mapeado cai em «Pessoas: ficha».
+  {
+    rotulo: "Recursos Humanos", categorias: [],
+    subgrupos: [
+      { rotulo: "Pessoas: ficha", categorias: ["hr_pessoas"] },
+      { rotulo: "Dados sensíveis", categorias: ["hr_sensiveis"] },
+      { rotulo: "Admissão", categorias: ["hr_admissao"] },
+      { rotulo: "Documentos", categorias: ["hr_documentos"] },
+      { rotulo: "Contratos, cargos e ofícios", categorias: ["hr_contratos"] },
+      { rotulo: "Retribuição e custos", categorias: ["hr_retribuicao"] },
+      { rotulo: "Horário e assiduidade", categorias: ["hr_horario"] },
+      { rotulo: "Ausências", categorias: ["hr_ausencias"] },
+      { rotulo: "Processamento salarial", categorias: ["hr_processamento"] },
+      { rotulo: "Centros de trabalho", categorias: ["hr_locais"] },
+      { rotulo: "Denúncias", categorias: ["hr_denuncias"] },
+    ],
+  },
   // security = exports.audit.view (/export-audit vive no menu de Utilizadores).
   { rotulo: "Utilizadores", categorias: ["users", "roles", "security"] },
   // api_keys: ecrã de configurações técnicas (/technical-settings). trash e technical_settings estão hoje escondidas (nada as verifica).
@@ -126,7 +142,30 @@ const ROTULOS_VIRTUAIS: Record<string, string> = {
   negocios_geral: "Geral", negocios_pessoas: "Pessoas: leads e clientes", negocios_por_contactar: "Por contactar", negocios_contacto: "Contacto",
   negocios_visita: "Visita", negocios_negocio: "Negócio", negocios_financeiro: "Financeiro", negocios_obra: "Obra",
   documentos_config: "Templates de propostas e contratos",
+  hr_pessoas: "Pessoas: ficha", hr_sensiveis: "Dados sensíveis", hr_admissao: "Admissão", hr_documentos: "Documentos",
+  hr_contratos: "Contratos, cargos e ofícios", hr_retribuicao: "Retribuição e custos", hr_horario: "Horário e assiduidade",
+  hr_ausencias: "Ausências", hr_processamento: "Processamento salarial", hr_locais: "Centros de trabalho", hr_denuncias: "Denúncias",
 };
+
+/** Os subgrupos do RH pelo início do código, pela ordem em que se testam (o mais específico primeiro). */
+const PREFIXOS_RH: readonly (readonly [string, string])[] = [
+  ["hr.pessoas.saude.", "hr_sensiveis"], ["hr.pessoas.sindicalizacao.", "hr_sensiveis"],
+  ["hr.pessoas.convite.", "hr_admissao"], ["hr.onboarding.", "hr_admissao"], ["hr.admissao.", "hr_admissao"],
+  ["hr.pessoas.documentos.", "hr_documentos"],
+  ["hr.pessoas.vinculos.", "hr_contratos"], ["hr.contratos.", "hr_contratos"], ["hr.cargos.", "hr_contratos"], ["hr.pessoas.laborais.", "hr_contratos"],
+  ["hr.pessoas.retribuicao.", "hr_retribuicao"],
+  ["hr.assiduidade.", "hr_horario"], ["hr.pessoas.horario.", "hr_horario"], ["hr.pessoas.horario_realizado.", "hr_horario"],
+  ["hr.ausencias.", "hr_ausencias"],
+  ["hr.processamento.", "hr_processamento"], ["hr.vencimento.", "hr_processamento"],
+  ["hr.locais.", "hr_locais"],
+  ["hr.denuncias.", "hr_denuncias"],
+];
+
+/** O subgrupo do RH da permissão (hr.* ou categoria hr), ou null se não for do RH. O que não estiver mapeado fica na ficha. */
+function categoriaRh(p: Permissao): string | null {
+  if (!p.codigo.startsWith("hr.") && p.categoria !== "hr") return null;
+  return PREFIXOS_RH.find(([prefixo]) => p.codigo.startsWith(prefixo))?.[1] ?? "hr_pessoas";
+}
 
 /** Os negocios.* pela segunda parte do código (a fase); o que não for conhecido (e negocios.perder) cai em Geral. 03/11: o orçamento, a
  *  margem, a proposta (incluindo a decisão do cliente) e o contrato são a fase Negócio. */
@@ -197,7 +236,7 @@ const MOVIDAS_POR_CODIGO = new Map<string, string>([
 
 /**
  * Agendamentos e Marketing partem-se em categorias virtuais pelo prefixo do código, como em Roles.tsx; Negócios parte-se por fase
- * (categoriaNegocio).
+ * (categoriaNegocio) e o RH por área (categoriaRh).
  */
 export function categoriaVirtual(p: Permissao): string {
   const movida = MOVIDAS_POR_CODIGO.get(p.codigo);
@@ -216,6 +255,8 @@ export function categoriaVirtual(p: Permissao): string {
   }
   const negocio = categoriaNegocio(p);
   if (negocio) return negocio;
+  const rh = categoriaRh(p);
+  if (rh) return rh;
   const prefixo = p.codigo.split(".")[0] ?? "";
   if (PREFIXOS_COM_BLOCO.has(prefixo)) return prefixo;
   return p.categoria;
