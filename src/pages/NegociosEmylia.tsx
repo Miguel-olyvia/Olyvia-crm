@@ -11,7 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acoes, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
+import { acoes, definirPerdaReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
+import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
@@ -105,6 +106,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // 28/10: os envios ao portal do cliente à espera de a gravação acabar (a proposta e o contrato têm de estar na base)
   const filaPortal = useRef<EnvioAcesso[]>([]);
   const deNovo = useRef(false);
+  // 3/11: a perda (neg_perder_negocio / neg_anular_perda) foi à base: na próxima gravação relê-se o negócio, como depois do Financeiro
+  const relerPedido = useRef(false);
   const [q, setQ] = useState("");
 
   const avisar = useCallback((a: Aviso) => {
@@ -167,6 +170,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         deNovo.current = false;
         const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current);
         if (r.reler) relerFinanceiro = true;
+        if (relerPedido.current) { relerPedido.current = false; relerFinanceiro = true; }
         if (r.erros.length) { semErros = false; setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
@@ -331,6 +335,29 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     return () => { vivo = false; };
   }, [org, S, avisar, carregarEncomendas, aplicarLidos]); // eslint-disable-line react-hooks/exhaustive-deps -- gravar só depois de ler
   useEffect(() => () => reporNomesPapeis(), []);
+  // 3/11 (20270105200000): perder e anular a perda gravam-se pelas funções da base (neg_guardar_negocio ignora o estado e o motivo); depois,
+  // com sucesso ou não, grava-se o resto e relê-se o negócio (a base é que diz se ficou perdido). A base pede negocios.perder.
+  useEffect(() => {
+    if (!org) return;
+    const depois = () => { relerPedido.current = true; redesenhar(); void gravar(); };
+    definirPerdaReal({
+      perder: (d, fase, motivo) => {
+        const ref = refs.current.get(d.id);
+        if (!ref) { avisar({ msg: "A perda não ficou gravada", sub: "O negócio ainda não está gravado na base.", kind: "bad" }); return; }
+        void perderNegocioReal(ref.id, fase, motivo)
+          .catch((e) => { d.perdido = false; avisar({ msg: "A perda não ficou gravada", sub: mensagemDaPerda(e), kind: "bad" }); })
+          .finally(depois);
+      },
+      anular: (d, razao) => {
+        const ref = refs.current.get(d.id);
+        if (!ref) return;
+        void anularPerdaReal(ref.id, razao)
+          .catch((e) => { d.perdido = true; avisar({ msg: "A perda não foi anulada", sub: mensagemDaPerda(e), kind: "bad" }); })
+          .finally(depois);
+      },
+    });
+    return () => definirPerdaReal(null);
+  }, [org, avisar, redesenhar, gravar]);
   // 30/10: Compras e armazém aprova a encomenda a fornecedor no passo dos materiais; depois relê as encomendas do negócio
   useEffect(() => {
     if (!org) return;

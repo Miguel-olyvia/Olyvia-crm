@@ -7,6 +7,7 @@ import { completarParaEncerrar, faltaParaEncerrar, pontosEncerrar } from "./ence
 function obraEmCurso() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   d.fase = 5; d.obra.plano!.estado = "em curso";
+  S.role = "operacoes"; // 3/11: encerrar a obra pede negocios.obra.fechar (o Gestor de obra)
   for (const c of emFalta(OBRA, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Sim" : c.t === "data" ? "2026-10-20" : "x";
   return { S, A, d };
 }

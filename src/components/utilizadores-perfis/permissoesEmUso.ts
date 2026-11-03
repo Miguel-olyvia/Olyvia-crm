@@ -42,7 +42,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   ],
   // Só verificadas no servidor (policies/RPCs/edge function ai-assistant): todas. Não se escondem porque o assistente (AIAssistant, no
   // Layout) as exige (contacts.view/create/edit) e as policies de anew_contacts e anew_entity_roles/relationships as aceitam
-  // (contacts.delete/import). São as únicas que sobram no grupo CRM do editor.
+  // (contacts.delete/import). 03/11/2026: no editor ficam em Negócios › Pessoas: leads e clientes (o grupo CRM deixou de existir).
   contacts: [
     "contacts.create", "contacts.delete", "contacts.edit", "contacts.import", "contacts.view",
   ],
@@ -125,11 +125,15 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   organizations: [
     "organizations.create", "organizations.delete", "organizations.edit", "organizations.view",
   ],
+  // 03/11/2026 (20270105200000): as seis por fase, exigidas no servidor (neg_guardar_negocio, obra_guardar_negocio, neg_perder_negocio,
+  // neg_anular_perda, neg_guardar_visita, …): negocios.contacto.registar, negocios.visita.gerir, negocios.proposta.decidir,
+  // negocios.obra.imprevistos, negocios.obra.fechar, negocios.perder.
   pessoas: [
-    "negocios.contrato.editar", "negocios.margem.aprovar", "negocios.obra.executar", "negocios.obra.materiais",
-    "negocios.obra.planear", "negocios.orcamento.editar", "negocios.proposta.enviar", "negocios.registar_fatura",
-    "negocios.validar_pagamento", "pessoas.config", "pessoas.create", "pessoas.delete", "pessoas.edit", "pessoas.reopen",
-    "pessoas.view",
+    "negocios.contacto.registar", "negocios.contrato.editar", "negocios.margem.aprovar", "negocios.obra.executar",
+    "negocios.obra.fechar", "negocios.obra.imprevistos", "negocios.obra.materiais", "negocios.obra.planear",
+    "negocios.orcamento.editar", "negocios.perder", "negocios.proposta.decidir", "negocios.proposta.enviar",
+    "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.visita.gerir", "pessoas.config", "pessoas.create",
+    "pessoas.delete", "pessoas.edit", "pessoas.reopen", "pessoas.view",
   ],
   // Só verificadas no servidor (policies/RPCs): platform.settings.manage
   platform: [
@@ -329,10 +333,11 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
  * é outra tarefa. Os de src/emylia e src/pages/prototipo-negocios são do protótipo.
  */
 export const CODIGOS_SEM_CATALOGO: readonly string[] = [
-  "contract_templates.view", "contracts.cancel", "contracts.view", "countries.view", "equipa.edit", "finance.invoice",
-  "finance.validate_payment", "inventory.manage", "inventory.receive", "margin.approve", "scheduling.items.manage",
-  "scheduling.view", "settings.manage", "settings.view", "stocks.create", "stocks.delete", "stocks.edit", "stocks.export",
-  "stocks.import", "suppliers.manage",
+  "contacto.registar", "contract_templates.view", "contracts.cancel", "contracts.view", "countries.view", "equipa.edit",
+  "finance.invoice", "finance.validate_payment", "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder",
+  "obra.fechar", "obra.imprevistos", "proposta.decidir", "scheduling.items.manage", "scheduling.view", "settings.manage",
+  "settings.view", "stocks.create", "stocks.delete", "stocks.edit", "stocks.export", "stocks.import", "suppliers.manage",
+  "visita.gerir",
 ];
 
 const todas = (r: Readonly<Record<string, readonly string[]>>): string[] => Object.values(r).flat();

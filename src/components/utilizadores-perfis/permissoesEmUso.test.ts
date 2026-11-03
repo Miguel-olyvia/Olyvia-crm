@@ -121,6 +121,8 @@ describe("permissões em uso: a lista", () => {
       "pessoas.view", "pessoas.create", "pessoas.edit", "pessoas.delete", "pessoas.reopen", "pessoas.config",
       "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.orcamento.editar", "negocios.margem.aprovar",
       "negocios.proposta.enviar", "negocios.contrato.editar", "negocios.obra.planear", "negocios.obra.executar", "negocios.obra.materiais",
+      "negocios.contacto.registar", "negocios.visita.gerir", "negocios.proposta.decidir", "negocios.obra.imprevistos", "negocios.obra.fechar",
+      "negocios.perder",
       "platform.support_access.view", "platform.auth_audit_log.view",
     ].forEach((c) => expect(CODIGOS_EM_USO).toContain(c));
   });
@@ -134,33 +136,46 @@ describe("permissões em uso: a lista", () => {
   it("os grupos seguem a ordem do menu, com Negócios e Frota", () => {
     const rotulos = agruparPorMenu(emUso).map((g) => g.rotulo);
     expect(rotulos).toEqual([
-      "Dashboard", "Agendamentos", "Operação", "Catálogo e custos", "Organizações", "Negócios", "CRM", "Aquisição", "Marketing",
+      "Dashboard", "Agendamentos", "Operação", "Catálogo e custos", "Organizações", "Negócios", "Aquisição", "Marketing",
       "Inventário", "Frota", "Recursos Humanos", "Utilizadores", "Definições", "Plataforma",
     ]);
     const negocios = agruparPorMenu(emUso).find((g) => g.rotulo === "Negócios");
     expect(negocios?.blocos).toEqual([]);
     expect(negocios?.subgrupos.map((s) => s.rotulo)).toEqual([
-      "Geral", "Pessoas: leads e clientes", "Orçamento e proposta", "Contrato", "Financeiro", "Obra",
+      "Geral", "Pessoas: leads e clientes", "Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra",
     ]);
-    expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(9);
+    expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(15);
+    const codigosDe = (rotulo: string) => negocios?.subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo).sort();
+    expect(codigosDe("Geral")).toContain("negocios.perder");
+    expect(codigosDe("Por contactar")).toEqual(["leads.assign", "leads.create", "leads.view"]);
+    expect(codigosDe("Contacto")).toEqual(["negocios.contacto.registar"]);
+    expect(codigosDe("Visita")).toEqual(["negocios.visita.gerir"]);
+    expect(codigosDe("Negócio")).toEqual([
+      "client_contracts.cancel", "negocios.contrato.editar", "negocios.margem.aprovar", "negocios.orcamento.editar", "negocios.proposta.decidir",
+      "negocios.proposta.enviar", "quotes.view_costs",
+    ]);
+    expect(codigosDe("Obra")).toEqual([
+      "negocios.obra.executar", "negocios.obra.fechar", "negocios.obra.imprevistos", "negocios.obra.materiais", "negocios.obra.planear",
+    ]);
     expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("pessoas."))).toHaveLength(6);
   });
 
-  it("Negócios › Pessoas tem os dados da pessoa em uso, e o CRM só os contacts.* que o servidor ainda verifica", () => {
+  it("Negócios › Pessoas tem os dados da pessoa em uso (com os contacts.*), «Por contactar» ver/criar/atribuir leads, e não há grupo CRM", () => {
     const grupos = agruparPorMenu(emUso);
-    const pessoas = grupos.find((g) => g.rotulo === "Negócios")!.subgrupos.find((s) => s.rotulo === "Pessoas: leads e clientes")!;
+    const negocios = grupos.find((g) => g.rotulo === "Negócios")!;
+    const pessoas = negocios.subgrupos.find((s) => s.rotulo === "Pessoas: leads e clientes")!;
+    const porContactar = negocios.subgrupos.find((s) => s.rotulo === "Por contactar")!;
     expect(pessoas.permissoes.map((p) => p.codigo).sort()).toEqual([
       "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
-      "leads.assign", "leads.config", "leads.convert", "leads.create", "leads.delete", "leads.edit", "leads.import", "leads.view",
-    ]);
-    const crm = grupos.find((g) => g.rotulo === "CRM")!;
-    expect(crm.permissoes.map((p) => p.codigo).sort()).toEqual([
       "contacts.create", "contacts.delete", "contacts.edit", "contacts.import", "contacts.view",
+      "leads.config", "leads.convert", "leads.delete", "leads.edit", "leads.import",
     ]);
-    const foraDePessoas = grupos
+    expect(grupos.find((g) => g.rotulo === "CRM")).toBeUndefined();
+    const foraDeNegocios = grupos
       .flatMap((g) => g.permissoes)
-      .filter((p) => (p.codigo.startsWith("leads.") || p.codigo.startsWith("clients.")) && !pessoas.permissoes.includes(p));
-    expect(foraDePessoas).toEqual([]);
+      .filter((p) => ["leads.", "clients.", "contacts."].some((x) => p.codigo.startsWith(x)))
+      .filter((p) => !pessoas.permissoes.includes(p) && !porContactar.permissoes.includes(p));
+    expect(foraDeNegocios).toEqual([]);
   });
 
   it("«Ver submissões pendentes» está em Marketing › Formulários e em mais lado nenhum", () => {
@@ -185,8 +200,8 @@ describe("permissões em uso: a lista", () => {
     const negocios = grupos.find((g) => g.rotulo === "Negócios")!;
     const aquisicao = grupos.find((g) => g.rotulo === "Aquisição")!;
     const codigosDe = (rotulo: string) => negocios.subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo) ?? [];
-    expect(codigosDe("Orçamento e proposta")).toContain("quotes.view_costs");
-    expect(codigosDe("Contrato")).toContain("client_contracts.cancel");
+    expect(codigosDe("Negócio")).toContain("quotes.view_costs");
+    expect(codigosDe("Negócio")).toContain("client_contracts.cancel");
     const naAquisicao = aquisicao.permissoes.map((p) => p.codigo);
     expect(naAquisicao).not.toContain("quotes.view_costs");
     expect(naAquisicao).not.toContain("client_contracts.cancel");

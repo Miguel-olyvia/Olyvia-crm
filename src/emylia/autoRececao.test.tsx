@@ -26,6 +26,7 @@ const ASS: Assinatura = { tipo: "digital", nome: "Tiago Almeida", q: "30/10/2026
 function obraAcabada() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   d.fase = 5; d.obra.plano!.estado = "em curso"; // como depois do recibo
+  S.role = "operacoes"; // 3/11: encerrar a obra pede negocios.obra.fechar (o Gestor de obra)
   preencher(d, OBRA);
   completarParaEncerrar(d);
   A.fimObra(d.id);

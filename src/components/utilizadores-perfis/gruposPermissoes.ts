@@ -29,7 +29,7 @@ interface DefinicaoGrupo {
 
 /**
  * Os grupos do editor, pela ordem do menu lateral (menuConfig.ts): Dashboard, Atividades, Operação, Catálogo e custos, Organizações,
- * Negócios (com os dados da pessoa: leads.* e clients.*), CRM (o que sobra das páginas antigas: contacts.*), Aquisição, Marketing, Inventário, Frota, RH, Utilizadores,
+ * Negócios (com os dados da pessoa: leads.*, clients.* e contacts.*), Aquisição, Marketing, Inventário, Frota, RH, Utilizadores,
  * Definições e Plataforma. Partiu de `sidebarMenuGroups` de Roles.tsx; diferenças: `forms` só no subgrupo Formulários (lá contavam a
  * dobrar), Produtos/Serviços passam para Catálogo e custos (o item de topo que os substitui), e ganham grupo as categorias que Roles.tsx
  * escondia (hr, pessoas/negocios, fleet, operations, portal, security, platform, api_keys, catalog_items, service_catalog, lead_sources).
@@ -56,24 +56,24 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
     ],
   },
   { rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"] },
-  // /pessoas e /negocios: um subgrupo por fase do negócio, pelas categorias virtuais de categoriaNegocio() (pessoas.*, negocios.*,
-  // e quotes.view_costs / client_contracts.cancel, que saem de Aquisição). «Pessoas: leads e clientes» junta os leads.* e clients.*
-  // (dados da pessoa, verificados pelo /pessoas, /negocios e pelas funções da entidade única), que antes estavam no grupo CRM.
+  // /pessoas e /negocios: um subgrupo por fase do negócio, pela ordem das 6 fases do ecrã (Por contactar, Contacto, Visita, Negócio,
+  // Financeiro, Obra), pelas categorias virtuais de categoriaNegocio() (pessoas.*, negocios.*, e quotes.view_costs / client_contracts.cancel,
+  // que saem de Aquisição). «Pessoas: leads e clientes» junta os dados da pessoa (leads.*, clients.* e, 03/11, contacts.*: o grupo CRM
+  // deixou de existir); «Por contactar» tira de lá ver, criar e atribuir leads. Uma permissão com outro prefixo guardada nas categorias
+  // leads/contacts/clients também vai para «Pessoas» (categoriaNegocio), para não desaparecer do editor.
   {
     rotulo: "Negócios", categorias: [],
     subgrupos: [
       { rotulo: "Geral", categorias: ["negocios_geral"] },
       { rotulo: "Pessoas: leads e clientes", categorias: ["negocios_pessoas"] },
+      { rotulo: "Por contactar", categorias: ["negocios_por_contactar"] },
+      { rotulo: "Contacto", categorias: ["negocios_contacto"] },
       { rotulo: "Visita", categorias: ["negocios_visita"] },
-      { rotulo: "Orçamento e proposta", categorias: ["negocios_orcamento"] },
-      { rotulo: "Contrato", categorias: ["negocios_contrato"] },
+      { rotulo: "Negócio", categorias: ["negocios_negocio"] },
       { rotulo: "Financeiro", categorias: ["negocios_financeiro"] },
       { rotulo: "Obra", categorias: ["negocios_obra"] },
     ],
   },
-  // Os leads.* e clients.* foram para Negócios › Pessoas (categoriaNegocio); as categorias ficam aqui só como rede (uma permissão com
-  // outro prefixo guardada nelas). Sobram os contacts.* ainda verificados no servidor (ver permissoesEmUso.ts). Vazio = não aparece.
-  { rotulo: "CRM", categorias: ["leads", "contacts", "clients"] },
   {
     rotulo: "Aquisição", categorias: ["deals"],
     subgrupos: [
@@ -114,27 +114,30 @@ const PREFIXOS_COM_BLOCO = new Set([
 const ROTULOS_VIRTUAIS: Record<string, string> = {
   marketing_campaigns: "Campanhas", marketing_channels: "Origens", marketing_lists: "Listas",
   scheduling_boards: "Quadros", scheduling_items: "Itens", scheduling_resources: "Recursos", scheduling_rules: "Regras", scheduling_other: "Outros",
-  negocios_geral: "Geral", negocios_pessoas: "Pessoas: leads e clientes", negocios_visita: "Visita", negocios_orcamento: "Orçamento e proposta", negocios_contrato: "Contrato",
-  negocios_financeiro: "Financeiro", negocios_obra: "Obra",
+  negocios_geral: "Geral", negocios_pessoas: "Pessoas: leads e clientes", negocios_por_contactar: "Por contactar", negocios_contacto: "Contacto",
+  negocios_visita: "Visita", negocios_negocio: "Negócio", negocios_financeiro: "Financeiro", negocios_obra: "Obra",
 };
 
-/** Os negocios.* pela segunda parte do código (a fase); o que não for conhecido cai em Geral. */
+/** Os negocios.* pela segunda parte do código (a fase); o que não for conhecido (e negocios.perder) cai em Geral. 03/11: o orçamento, a
+ *  margem, a proposta (incluindo a decisão do cliente) e o contrato são a fase Negócio. */
 const FASES_NEGOCIO = new Map<string, string>([
+  ["contacto", "negocios_contacto"],
   ["visita", "negocios_visita"],
-  ["orcamento", "negocios_orcamento"], ["margem", "negocios_orcamento"], ["proposta", "negocios_orcamento"],
-  ["contrato", "negocios_contrato"],
+  ["orcamento", "negocios_negocio"], ["margem", "negocios_negocio"], ["proposta", "negocios_negocio"], ["contrato", "negocios_negocio"],
   ["registar_fatura", "negocios_financeiro"], ["validar_pagamento", "negocios_financeiro"],
   ["obra", "negocios_obra"],
+  ["perder", "negocios_geral"],
 ]);
 
-/** Permissões doutros módulos que, no editor, pertencem a uma fase do negócio (saem de Aquisição). */
+/** Permissões doutros módulos que, no editor, pertencem a uma fase do negócio (saem de Aquisição; ver, criar e atribuir leads, das Pessoas). */
 const MOVIDAS_PARA_NEGOCIOS = new Map<string, string>([
-  ["quotes.view_costs", "negocios_orcamento"],
-  ["client_contracts.cancel", "negocios_contrato"],
+  ["quotes.view_costs", "negocios_negocio"],
+  ["client_contracts.cancel", "negocios_negocio"],
+  ["leads.view", "negocios_por_contactar"], ["leads.create", "negocios_por_contactar"], ["leads.assign", "negocios_por_contactar"],
 ]);
 
-/** Os dados da pessoa (lead/cliente da entidade única): ficam em Negócios › Pessoas, pelo prefixo do código. */
-const PREFIXOS_PESSOA = new Set(["leads", "clients"]);
+/** Os dados da pessoa (lead/cliente/contacto da entidade única): ficam em Negócios › Pessoas, pelo prefixo do código. */
+const PREFIXOS_PESSOA = new Set(["leads", "clients", "contacts"]);
 
 /** A categoria virtual de Negócios da permissão, ou null se não for de Negócios. */
 function categoriaNegocio(p: Permissao): string | null {
@@ -143,7 +146,7 @@ function categoriaNegocio(p: Permissao): string | null {
   const [prefixo, fase] = p.codigo.split(".");
   if (prefixo === "negocios") return FASES_NEGOCIO.get(fase ?? "") ?? "negocios_geral";
   if (prefixo === "pessoas") return "negocios_geral";
-  if (PREFIXOS_PESSOA.has(prefixo ?? "")) return "negocios_pessoas";
+  if (PREFIXOS_PESSOA.has(prefixo ?? "") || PREFIXOS_PESSOA.has(p.categoria)) return "negocios_pessoas";
   // Outra permissão guardada nas categorias de Negócios fica em Geral (não desaparece do editor).
   if (p.categoria === "pessoas" || p.categoria === "negocios") return "negocios_geral";
   return null;
@@ -275,6 +278,13 @@ const DISTINTIVOS: Record<string, DistintivoAcao> = {
   materiais: { rotulo: "Materiais", classes: TEAL },
   registar_fatura: { rotulo: "Fatura", classes: TEAL },
   validar_pagamento: { rotulo: "Pagamento", classes: ROXO },
+  // 03/11 (20270105200000): as seis por fase.
+  registar: { rotulo: "Registar", classes: VERDE },
+  gerir: { rotulo: "Gerir", classes: AMBAR },
+  decidir: { rotulo: "Decidir", classes: ROXO },
+  imprevistos: { rotulo: "Imprevistos", classes: AMBAR },
+  fechar: { rotulo: "Encerrar", classes: ROXO },
+  perder: { rotulo: "Perder", classes: VERMELHO },
   reopen: { rotulo: "Reabrir", classes: AMBAR },
   config: { rotulo: "Configurar", classes: ROXO },
 };

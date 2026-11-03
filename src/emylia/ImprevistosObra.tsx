@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { CATALOGO_TODO } from "./catalogo";
 import { eur, nfmt, servicoDoCatalogo, type MatTarefa, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
+import { podeNeg } from "./permissoes";
 import { SeletorPesquisa } from "./pecasFicha";
 import { EditorMateriais } from "./PlanoInterativo";
 import { Miniaturas } from "./AcompanhamentoObra";
@@ -122,7 +123,8 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
   const { S, A, run, go } = ctx;
   const [propor, setPropor] = useState(false);
   const [nota, setNota] = useState("");
-  const pode = S.role === "operacoes";
+  // 3/11 (20270105200000): propor e decidir o imprevisto é da permissão negocios.obra.imprevistos (era só o papel das Operações)
+  const pode = podeNeg(S.role, "obra.imprevistos");
   const par = paradasPor(d.obra.plano, im.id), a = im.adenda ? d.adendas?.find((x) => x.n === im.adenda) : undefined;
   return (
     <article aria-label={`Imprevisto ${im.id}`} className={cn("rounded-xl border p-4", im.estado === "aberto" || im.estado === "recusado" ? "border-destructive/40 bg-destructive/[0.04]" : "border-border")}>

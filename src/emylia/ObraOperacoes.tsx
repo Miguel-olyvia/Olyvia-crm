@@ -24,6 +24,7 @@ import {
 } from "./obraOps";
 import { custoObra } from "./custoObra";
 import type { Ctx } from "./pecas";
+import { podeNeg } from "./permissoes";
 import { AutoNoNegocio } from "./AutoRececao";
 import { pontosEncerrar, type PontoEncerrar } from "./encerrarObra";
 import { ViaturasObra } from "./frota/ViaturasObra";
@@ -248,7 +249,8 @@ const ABA_DE: Record<Seccao, Aba | null> = {
 
 export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go } = ctx;
-  const p = d.obra.plano!, C = conflitos(p), pode = S.role === "operacoes", direcao = S.role === "direcao";
+  // 3/11: quem planeia a obra é quem tem negocios.obra.planear (equipa.edit), e não só o papel das Operações; encerrá-la pede negocios.obra.fechar
+  const p = d.obra.plano!, C = conflitos(p), pode = podeNeg(S.role, "equipa.edit"), direcao = S.role === "direcao", podeFechar = podeNeg(S.role, "obra.fechar");
   // 19/10: os materiais lidos ao vivo do Inventário (o arranque espera por eles)
   const db = useInventario();
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
@@ -298,7 +300,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   } else if (p.estado === "em curso") {
     frase = `Dia ${p.dia + 1} de ${fim} · ${rotuloDia(p, p.dia)}`;
     // a validação faz-se no próprio cartão (Agora); o encerrar só aparece na reta final e só fica ativo com tudo completo
-    botao = !PV.length && retaFinal ? <Button size="lg" disabled={!podeEncerrar} onClick={go(() => A.fimObra(d.id))}><CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />Encerrar a obra</Button> : null;
+    botao = !PV.length && retaFinal && podeFechar ? <Button size="lg" disabled={!podeEncerrar} onClick={go(() => A.fimObra(d.id))}><CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />Encerrar a obra</Button> : null;
   // 27/10: concluída com auto, o cartão do auto (a seguir) já diz tudo: o "Agora" não repete
   } else frase = d.obra.auto ? "" : "Obra concluída.";
 
@@ -1160,7 +1162,8 @@ function PedirCorrecao({ ctx, d, ti, motivo, setMotivo }: { ctx: Ctx; d: Negocio
 /** O que o técnico registou (horas, fotografias, nota) e, se está feita, validar ou pedir correção. */
 function Registo({ ctx, d, ti, compacto }: { ctx: Ctx; d: Negocio; ti: number; compacto?: boolean }) {
   const { S, A, run } = ctx;
-  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), pode = S.role === "operacoes";
+  // 3/11: validar é de quem planeia a obra (negocios.obra.planear), como no servidor
+  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), pode = podeNeg(S.role, "equipa.edit");
   const [motivo, setMotivo] = useState<string | null>(null);
   const dif = t.exec ? t.exec.horas - t.h : 0;
   return (

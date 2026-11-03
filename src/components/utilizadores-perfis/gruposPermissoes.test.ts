@@ -43,10 +43,10 @@ describe("agruparPorMenu", () => {
     expect(todas).toHaveLength(PERMISSOES.length);
     expect(new Set(todas).size).toBe(PERMISSOES.length);
     // O catálogo de exemplo não tem hr.*, operations.*, pessoas.*, fleet.* nem platform.* (além de pending_submissions, que vai para
-    // Formulários), por isso esses grupos não aparecem (grupos sem permissões omitem-se); Negócios aparece pelos leads.*/clients.*, e
-    // os outros saem pela ordem de GRUPOS_MENU.
+    // Formulários), por isso esses grupos não aparecem (grupos sem permissões omitem-se); Negócios aparece pelos leads.*/clients.*/contacts.*
+    // (03/11: o grupo CRM deixou de existir), e os outros saem pela ordem de GRUPOS_MENU.
     const rotulos = grupos.map((g) => g.rotulo);
-    expect(rotulos).toEqual(["Dashboard", "Agendamentos", "Catálogo e custos", "Organizações", "Negócios", "CRM", "Aquisição", "Marketing", "Inventário", "Utilizadores", "Definições"]);
+    expect(rotulos).toEqual(["Dashboard", "Agendamentos", "Catálogo e custos", "Organizações", "Negócios", "Aquisição", "Marketing", "Inventário", "Utilizadores", "Definições"]);
     expect(rotulos).toEqual(GRUPOS_MENU.map((g) => g.rotulo).filter((r) => rotulos.includes(r)));
     grupos.forEach((g) => {
       const soma = g.blocos.flatMap((b) => b.permissoes).length + g.subgrupos.flatMap((s) => s.permissoes).length;
@@ -73,7 +73,7 @@ describe("agruparPorMenu", () => {
     expect(categoriaVirtual(perm("scheduling.boards.view", "scheduling"))).toBe("scheduling_boards");
     expect(categoriaVirtual(perm("scheduling.view", "scheduling"))).toBe("scheduling_other");
     expect(categoriaVirtual(perm("campaigns.view", "marketing"))).toBe("marketing_campaigns");
-    expect(categoriaVirtual(perm("contacts.view", "contacts"))).toBe("contacts");
+    expect(categoriaVirtual(perm("contacts.view", "contacts"))).toBe("negocios_pessoas");
     const agendamentos = agruparPorMenu(PERMISSOES).find((g) => g.rotulo === "Agendamentos")!;
     expect(agendamentos.subgrupos.map((s) => s.rotulo)).toEqual(["Quadros", "Itens", "Recursos", "Regras de Auto-agendamento", "Outros"]);
   });
@@ -81,12 +81,15 @@ describe("agruparPorMenu", () => {
   describe("Negócios por fase", () => {
     const NEGOCIOS = [
       perm("pessoas.view", "pessoas"), perm("pessoas.reopen", "pessoas"),
-      perm("negocios.visita.agendar", "pessoas"),
+      perm("negocios.contacto.registar", "pessoas"),
+      perm("negocios.visita.gerir", "pessoas"),
       perm("negocios.orcamento.editar", "pessoas"), perm("negocios.margem.aprovar", "pessoas"), perm("negocios.proposta.enviar", "pessoas"),
+      perm("negocios.proposta.decidir", "pessoas"),
       perm("quotes.view_costs", "quotes"),
       perm("negocios.contrato.editar", "pessoas"), perm("client_contracts.cancel", "client_contracts"),
       perm("negocios.registar_fatura", "pessoas"), perm("negocios.validar_pagamento", "pessoas"),
       perm("negocios.obra.planear", "pessoas"), perm("negocios.obra.materiais", "pessoas"),
+      perm("negocios.obra.imprevistos", "pessoas"), perm("negocios.obra.fechar", "pessoas"),
       perm("negocios.perder", "pessoas"),
     ];
     const subgrupo = (rotulo: string) =>
@@ -96,20 +99,24 @@ describe("agruparPorMenu", () => {
       const grupos = agruparPorMenu(NEGOCIOS);
       expect(grupos.map((g) => g.rotulo)).toEqual(["Negócios"]);
       expect(grupos[0].blocos).toEqual([]);
-      expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Geral", "Visita", "Orçamento e proposta", "Contrato", "Financeiro", "Obra"]);
+      expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Geral", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"]);
       expect(grupos[0].permissoes).toHaveLength(NEGOCIOS.length);
       expect(permissoesForaDoMenu(NEGOCIOS)).toEqual([]);
     });
 
     it("põe cada permissão na sua fase", () => {
       expect(subgrupo("Geral")).toEqual(["pessoas.view", "pessoas.reopen", "negocios.perder"]);
-      expect(subgrupo("Visita")).toEqual(["negocios.visita.agendar"]);
-      expect(subgrupo("Orçamento e proposta")).toEqual([
-        "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "quotes.view_costs",
+      expect(subgrupo("Contacto")).toEqual(["negocios.contacto.registar"]);
+      expect(subgrupo("Visita")).toEqual(["negocios.visita.gerir"]);
+      // 03/11: «Orçamento e proposta» e «Contrato» são agora a fase Negócio (com a decisão do cliente)
+      expect(subgrupo("Negócio")).toEqual([
+        "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "negocios.proposta.decidir", "quotes.view_costs",
+        "negocios.contrato.editar", "client_contracts.cancel",
       ]);
-      expect(subgrupo("Contrato")).toEqual(["negocios.contrato.editar", "client_contracts.cancel"]);
+      expect(subgrupo("Orçamento e proposta")).toBeUndefined();
+      expect(subgrupo("Contrato")).toBeUndefined();
       expect(subgrupo("Financeiro")).toEqual(["negocios.registar_fatura", "negocios.validar_pagamento"]);
-      expect(subgrupo("Obra")).toEqual(["negocios.obra.planear", "negocios.obra.materiais"]);
+      expect(subgrupo("Obra")).toEqual(["negocios.obra.planear", "negocios.obra.materiais", "negocios.obra.imprevistos", "negocios.obra.fechar"]);
     });
 
     it("um negocios.* desconhecido cai em Geral, e o subgrupo Visita só aparece se houver permissões", () => {
@@ -130,18 +137,26 @@ describe("agruparPorMenu", () => {
       expect(grupos[0].permissoes.map((p) => p.codigo)).toEqual(["quotes.view_costs", "client_contracts.cancel"]);
     });
 
-    it("leads.* e clients.* vão para o subgrupo «Pessoas: leads e clientes», logo a seguir a Geral", () => {
-      const pessoas = [perm("leads.view", "leads"), perm("leads.assign", "leads"), perm("clients.edit", "clients")];
+    it("leads.*, clients.* e contacts.* vão para o subgrupo «Pessoas: leads e clientes», logo a seguir a Geral; ver, criar e atribuir leads para «Por contactar»", () => {
+      const pessoas = [perm("leads.edit", "leads"), perm("clients.edit", "clients"), perm("contacts.view", "contacts")];
       pessoas.forEach((p) => expect(categoriaVirtual(p)).toBe("negocios_pessoas"));
-      const grupos = agruparPorMenu([...NEGOCIOS, ...pessoas]);
+      const porContactar = [perm("leads.view", "leads"), perm("leads.create", "leads"), perm("leads.assign", "leads")];
+      porContactar.forEach((p) => expect(categoriaVirtual(p)).toBe("negocios_por_contactar"));
+      const grupos = agruparPorMenu([...NEGOCIOS, ...pessoas, ...porContactar]);
       expect(grupos.map((g) => g.rotulo)).toEqual(["Negócios"]);
       expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual([
-        "Geral", "Pessoas: leads e clientes", "Visita", "Orçamento e proposta", "Contrato", "Financeiro", "Obra",
+        "Geral", "Pessoas: leads e clientes", "Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra",
       ]);
-      expect(grupos[0].subgrupos[1].permissoes.map((p) => p.codigo)).toEqual(["leads.view", "leads.assign", "clients.edit"]);
+      expect(grupos[0].subgrupos[1].permissoes.map((p) => p.codigo)).toEqual(["leads.edit", "clients.edit", "contacts.view"]);
       expect(grupos[0].subgrupos[1].blocos.map((b) => b.rotulo)).toEqual(["Pessoas: leads e clientes"]);
+      expect(grupos[0].subgrupos[2].permissoes.map((p) => p.codigo)).toEqual(["leads.view", "leads.create", "leads.assign"]);
       const definicao = GRUPOS_MENU.find((g) => g.rotulo === "Negócios")!.subgrupos!.map((s) => s.rotulo);
-      expect(definicao.indexOf("Pessoas: leads e clientes")).toBe(definicao.indexOf("Geral") + 1);
+      expect(definicao).toEqual(["Geral", "Pessoas: leads e clientes", "Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"]);
+    });
+
+    it("uma permissão com outro prefixo guardada em leads/contacts/clients fica em «Pessoas» (não desaparece do editor)", () => {
+      expect(categoriaVirtual(perm("outra.coisa", "contacts"))).toBe("negocios_pessoas");
+      expect(permissoesForaDoMenu([perm("outra.coisa", "leads")])).toEqual([]);
     });
 
     it("as categorias virtuais de Negócios não colidem com categorias reais", () => {
@@ -169,11 +184,12 @@ describe("agruparPorMenu", () => {
     expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Formulários"]);
   });
 
-  it("o grupo CRM só aparece com o que sobra (contacts.*) e desaparece sem isso", () => {
-    expect(agruparPorMenu([perm("leads.view", "leads"), perm("clients.view", "clients")]).map((g) => g.rotulo)).toEqual(["Negócios"]);
-    const comContactos = agruparPorMenu([perm("leads.view", "leads"), perm("contacts.view", "contacts")]);
-    expect(comContactos.map((g) => g.rotulo)).toEqual(["Negócios", "CRM"]);
-    expect(comContactos[1].permissoes.map((p) => p.codigo)).toEqual(["contacts.view"]);
+  it("03/11: o grupo CRM deixou de existir: os contacts.* ficam em Negócios › Pessoas: leads e clientes", () => {
+    expect(GRUPOS_MENU.map((g) => g.rotulo)).not.toContain("CRM");
+    const comContactos = agruparPorMenu([perm("leads.edit", "leads"), perm("contacts.view", "contacts")]);
+    expect(comContactos.map((g) => g.rotulo)).toEqual(["Negócios"]);
+    expect(comContactos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Pessoas: leads e clientes"]);
+    expect(comContactos[0].permissoes.map((p) => p.codigo)).toEqual(["leads.edit", "contacts.view"]);
   });
 });
 
