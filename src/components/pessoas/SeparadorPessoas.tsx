@@ -104,7 +104,7 @@ export function SeparadorPessoas(p: SeparadorPessoasProps) {
         aoMudarOrdem={p.aoMudarOrdem} aoMudarVista={p.aoMudarVista} aoLimpar={limparPopover}
       />
       <div role="status" className="sr-only">
-        {vista === "quadro" ? t("pessoasPagina.view.announce.board", { count: COLUNAS_QUADRO.length }) : t("pessoasPagina.view.announce.list")}
+        {vista === "quadro" ? t("pessoasPagina.view.announce.board", { count: COLUNAS_QUADRO.filter((d) => d.parte === "abordagem").length + 1 }) : t("pessoasPagina.view.announce.list")}
       </div>
       {vista === "quadro"
         ? <QuadroPessoas cartoes={cartoes} hoje={hoje} chip={chip} itens={itensDosCartoes} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />

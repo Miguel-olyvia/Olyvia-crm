@@ -134,7 +134,7 @@ describe("PessoasReal: o Quadro", () => {
     expect(ultima(quadroMock)[1]).toBe(false);
     irParaQuadro();
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getAllByRole("region")).toHaveLength(7);
+    expect(screen.getAllByRole("region")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Quadro" })).toHaveAttribute("aria-pressed", "true");
     expect(ultima(listaMock)[1]).toBe(false);
     expect(ultima(quadroMock)[1]).toBe(true);
@@ -182,7 +182,7 @@ describe("PessoasReal: o Quadro", () => {
     expect(JSON.parse(window.localStorage.getItem(CHAVE_PREFS_PESSOAS) ?? "{}").vista).toBe("quadro");
     unmount();
     desenhar();
-    expect(screen.getAllByRole("region")).toHaveLength(7);
+    expect(screen.getAllByRole("region")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Quadro" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -198,8 +198,9 @@ describe("PessoasReal: a ficha aberta a partir do Quadro", () => {
   it("abre a pessoa pelo endereço, com o negócio, e passa à ficha os ids únicos pela ordem das colunas", () => {
     desenhar();
     irParaQuadro();
-    const coluna = screen.getByRole("region", { name: /^Orçamento/ });
-    fireEvent.click(within(coluna).getByRole("button", { name: "Abrir a ficha de Carla Dias" }));
+    const neg = screen.getByRole("region", { name: /^Negócios/ });
+    // Carla Dias tem dois cartões (orcamento e proposta), ambos na coluna Negócios: o primeiro é o do orçamento (neg-1).
+    fireEvent.click(within(neg).getAllByRole("button", { name: "Abrir a ficha de Carla Dias" })[0]);
     expect(url()).toBe("/pessoas?open=dono-1&negocio=neg-1");
     expect(screen.getByRole("button", { name: "Quadro" })).toHaveAttribute("aria-pressed", "true");
     expect(ultima(fichaMock)[0].idsVisiveis).toEqual(["a", "b", "dono-1"]);

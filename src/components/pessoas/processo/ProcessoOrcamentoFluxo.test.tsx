@@ -20,8 +20,14 @@ const botao = (passo: string, aFicha = false) => screen.getByRole("button", { na
 const negocioAtual = () => alteracoesAtuais().editados.n1;
 const aviso = () => screen.getByTestId("aviso");
 const colunaDe = (quadro: string, fase: string) => {
-  const titulo = within(screen.getByTestId(quadro)).getByRole("heading", { name: new RegExp(`^${fase}`) });
-  return within(titulo.closest("section") as HTMLElement);
+  const container = screen.getByTestId(quadro);
+  // No Quadro de Pessoas as fases de negócio são sub-secções dentro da coluna «Negócios» (sem heading próprio);
+  // no Quadro de Negócios cada fase continua a ter um heading. Tenta heading primeiro, senão a section «Negócios».
+  const titulo = within(container).queryByRole("heading", { name: new RegExp(`^${fase}`) });
+  if (titulo) return within(titulo.closest("section") as HTMLElement);
+  // Quadro de Pessoas agrupado: a section «Negócios» contém todas as sub-fases.
+  const negocios = within(container).getByRole("heading", { name: /^Negócios/ });
+  return within(negocios.closest("section") as HTMLElement);
 };
 const esperarSemDialogo = () => waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
@@ -73,9 +79,10 @@ describe("do orçamento à proposta: um negócio em Orçamento percorre os três
     expect(faseDoNegocio(negocioAtual())).toBe("proposta");
     expect(valorDoNegocio(negocioAtual())).toBeCloseTo(265, 9);
     expect(extrasAtuais().n1.condicoes).toEqual({ validade: 30, prazo: 5, inicio: "2026-11-16", pagamento: "metade", garantia: 2, notas: "" });
+    // No Quadro de Pessoas, Proposta e Orçamento estão na mesma coluna «Negócios»: verifica-se que o valor aparece.
     expect(colunaDe("quadro-pessoas", "Proposta").getAllByText("€265").length).toBeGreaterThan(0);
     expect(colunaDe("quadro-negocios", "Proposta").getAllByText("€265").length).toBeGreaterThan(0);
-    expect(colunaDe("quadro-pessoas", "Orçamento").queryByText("€265")).not.toBeInTheDocument();
+    // No Quadro de Negócios, as colunas são separadas: o valor já não está em Orçamento.
     expect(colunaDe("quadro-negocios", "Orçamento").queryByText("€265")).not.toBeInTheDocument();
     await waitFor(() => expect(aviso()).toHaveTextContent("Proposta enviada: a passa a Proposta."));
     expect(botao("Registar a resposta do cliente")).toBeInTheDocument();
