@@ -17,7 +17,7 @@ import { useCatalogo } from "./v2/catalogoStore";
 import type { Catalogo, Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
 import { ContadorQtd } from "./ContadorQtd";
-import { Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
+import { FotoOuIlustracao, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { categoriaDe, categorias, filtrarProdutos, ilustracaoDoCatalogo } from "./necessidades";
 import { nosAbaixo, partesDoModelo, precoProduto, precoUnitario, qtdSugerida, type ParteEstimativa, type ProdVisita } from "./produtosVisita";
 import { MOLA, useReduzir } from "./movimento";
@@ -29,6 +29,8 @@ const imgDe = (K: Catalogo, p: ProdVisita | Produto): IlustracaoKey => {
   const doCat = K.produtos.find((x) => x.id === p.id);
   return doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(p.n);
 };
+/** 03/11: as fotos do produto do catálogo (sem elas, a ilustração). */
+const fotosDe = (K: Catalogo, p: ProdVisita | Produto) => K.produtos.find((x) => x.id === p.id)?.fotos;
 
 /** Onde procurar o substituto: o ramo da parte do modelo que o produto cobre (uma bancada → móveis e bancada); senão o nó
  *  do produto, subindo um nível só quando ele tem poucos irmãos (uma troca precisa de por onde escolher). */
@@ -161,7 +163,7 @@ function CartaoEscolhido({ K, p, novo, era, qtd, trocar, tirar }: {
       className={cn("relative flex flex-col rounded-2xl border bg-card p-3 shadow-[0_1px_2px_hsl(var(--foreground)/0.05)]", novo || era ? "border-primary/40" : "border-border")}>
       <div className="flex gap-3">
         <span className="relative grid h-20 w-20 shrink-0 place-items-center rounded-xl bg-muted/70">
-          <Ilustracao k={imgDe(K, p)} className="h-14 w-14" />
+          <FotoOuIlustracao fotos={fotosDe(K, p)} nome={p.n} k={imgDe(K, p)} className="h-14 w-14" />
         </span>
         <span className="min-w-0 flex-1">
           {(novo || era) && (
@@ -288,7 +290,7 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
           <DialogDescription className="mt-1">{sub}</DialogDescription>
           {atual && (
             <div className="mt-3 flex items-center gap-3 rounded-xl bg-muted/60 p-2.5">
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-card"><Ilustracao k={imgDe(K, atual)} className="h-9 w-9" /></span>
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-card"><FotoOuIlustracao fotos={fotosDe(K, atual)} nome={atual.n} k={imgDe(K, atual)} className="h-9 w-9" /></span>
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">Agora</span>
                 <span className="block truncate text-[15px] font-medium">{atual.n}</span>
@@ -327,7 +329,7 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
                       className={cn("group relative flex h-full w-full flex-col rounded-2xl border bg-card p-2.5 text-left transition-all duration-150",
                         eAtual || ja ? "cursor-default border-primary/50 ring-1 ring-primary/40" : "border-border hover:-translate-y-0.5 hover:border-primary hover:shadow-[0_10px_24px_-14px_hsl(var(--primary)/0.6)]")}>
                       <span className="grid h-24 place-items-center rounded-xl bg-muted/70 transition-colors group-hover:bg-primary/[0.08]">
-                        <Ilustracao k={ilustracaoDoCatalogo(K.arvore, p)} className="h-16 w-16 transition-transform duration-200 group-hover:scale-105" />
+                        <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={ilustracaoDoCatalogo(K.arvore, p)} className="h-16 w-16 transition-transform duration-200 group-hover:scale-105" />
                       </span>
                       {(eAtual || ja) && <span className="absolute left-4 top-4 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">{eAtual ? "Atual" : "Já está"}</span>}
                       <span className="mt-2 line-clamp-2 text-[15px] font-medium leading-snug">{p.n}</span>

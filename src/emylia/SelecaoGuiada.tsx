@@ -520,7 +520,7 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
     const j = idx++;
     return (
       <CartaoProduto key={p.id} nome={nome} nomeCompleto={p.n} detalhe={[detalhe, p.marca].filter(Boolean).join(" · ")} preco={precoUnitario(p, ctx.S.cfg.alvo)} un={p.un}
-        img={ilustracaoDoCatalogo(K.arvore, p)} on={!!ja} trazInstalacao={!!p.servico} animar={animar} entrada={cascata(j, reduzir)}
+        img={ilustracaoDoCatalogo(K.arvore, p)} fotos={p.fotos} on={!!ja} trazInstalacao={!!p.servico} animar={animar} entrada={cascata(j, reduzir)}
         onTocar={() => { if (onTocar(p) === "juntou") vibrar(10, reduzir); }}>
         {ja && (
           <QtdMudar id={`pq-${p.id}-${d.id}`} valor={ja.q} un={p.un} nome={nome} texto={textoQtd({ q: ja.q, un: p.un, daMedida })}

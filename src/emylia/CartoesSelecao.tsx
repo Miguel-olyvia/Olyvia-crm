@@ -7,7 +7,7 @@ import { Link2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, nfmt } from "./motor";
 import { numero } from "./pecas";
-import { IconeServico, Ilustracao, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
+import { FotoOuIlustracao, IconeServico, Ilustracao, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
 import { MOLA, MOLA_CARTAO, VistoDesenho, cascata, useReduzir } from "./movimento";
 
 /** O visto do cartão escolhido (desenha-se ao ligar; o círculo vazio quando não está); "so" = vem com um produto. */
@@ -97,8 +97,8 @@ export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, s
 }
 
 /* ------------------------------------------------------------------ produto */
-export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, on, trazInstalacao, onTocar, children, animar, entrada }: {
-  nome: string; nomeCompleto: string; detalhe?: string | null; preco: number; un: string; img: IlustracaoKey; on: boolean; trazInstalacao?: boolean;
+export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, fotos, on, trazInstalacao, onTocar, children, animar, entrada }: {
+  nome: string; nomeCompleto: string; detalhe?: string | null; preco: number; un: string; img: IlustracaoKey; fotos?: readonly string[] | null; on: boolean; trazInstalacao?: boolean;
   onTocar: () => void; children?: ReactNode; animar?: boolean; entrada?: ReturnType<typeof cascata>;
 }) {
   const rotulo = [nomeCompleto, detalhe, `${eur(preco)} € por ${un}`, trazInstalacao ? "traz a instalação" : null].filter(Boolean).join(". ");
@@ -106,7 +106,9 @@ export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, on,
     <Caixa on={on} title={nomeCompleto} animar={animar} entrada={entrada}>
       <motion.button type="button" aria-pressed={on} onClick={onTocar} aria-label={rotulo} {...PRESS} className={cn(TOQUE, "h-full flex-col gap-2 p-3")}>
         <span className="flex w-full items-start justify-between gap-2">
-          <Figura on={on} className="h-14 w-14"><Ilustracao k={img} className="h-11 w-11" /></Figura>
+          {fotos?.length
+            ? <FotoOuIlustracao fotos={fotos} nome={nomeCompleto} k={img} className="h-14 w-14 rounded-lg border-0" />
+            : <Figura on={on} className="h-14 w-14"><Ilustracao k={img} className="h-11 w-11" /></Figura>}
           <Visto on={on} />
         </span>
         <span className="line-clamp-2 w-full text-[15px] font-medium leading-snug text-foreground">{nome}</span>
