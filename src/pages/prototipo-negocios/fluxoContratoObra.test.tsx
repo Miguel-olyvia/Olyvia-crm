@@ -67,7 +67,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); localStorage.clear(); window.matchMedia = original; });
 
 describe("Tiago (1027): do pagamento ao arranque, com os materiais garantidos", () => {
-  it("o comercial não valida nem emite (no ecrã e no motor); o Financeiro sim; o arranque espera pela PO aprovada e recebida", async () => {
+  it("o comercial não valida nem emite (no ecrã e no motor); o Financeiro sim; o arranque espera pela PO aprovada e recebida", () => {
     const S = seed(), d = deal(S, 1027), avisos: Aviso[] = [];
     preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]);
 
@@ -91,16 +91,11 @@ describe("Tiago (1027): do pagamento ao arranque, com os materiais garantidos", 
     const oQueFazer = () => screen.getByRole("region", { name: "O que fazer" });
 
     // no ecrã, o comercial vê de quem é o passo, sem o botão
-    expect(within(caminho()).queryByRole("button", { name: "Registar fatura" })).toBeNull();
+    expect(within(caminho()).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
     fireEvent.click(within(caminho()).getByRole("button", { name: "Ver como Sandra" }));
     expect(S.role).toBe("financeiro");
-    // 22/10: a fatura emite-se no Eticadata e regista-se aqui; sem ligação ao ERP (no teste), regista-se sem confirmar e valida-se à mão
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("sem rede"); }));
-    fireEvent.change(within(caminho()).getByRole("textbox", { name: "Número da fatura no Eticadata" }), { target: { value: "FAT 15200126/12" } });
-    fireEvent.click(within(caminho()).getByRole("button", { name: "Registar fatura" }));
-    fireEvent.click(await within(caminho()).findByRole("button", { name: "Registar sem confirmar" }));
-    vi.unstubAllGlobals();
-    expect(d.fin.fatura?.n).toBe("FAT 15200126/12");
+    fireEvent.click(within(caminho()).getByRole("button", { name: "Emitir a fatura" }));
+    expect(d.fin.fatura?.n).toMatch(/^FT 2026\//);
     fireEvent.click(within(caminho()).getByRole("button", { name: "Validar o pagamento" }));
     expect(d.fin.pago).toBe(true);
     expect(d.fase).toBe(5);

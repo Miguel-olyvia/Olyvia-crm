@@ -27,7 +27,6 @@ import { anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe }
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
-import { lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadata";
 import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./inventario/loja";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
@@ -339,9 +338,7 @@ export interface Negocio {
     /** As fotografias por etapa da visita (fotos é o total). Em falta: reparte-se o total (fotosPor). */
     fotosPor?: Partial<Record<"exterior" | "interior" | "area", number>> } & NecVisita;
   orc: Orcamento | null;
-  fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null;
-    /** 22/10: a fatura emitida no Eticadata e registada aqui (V1): a última leitura do ERP (erpEticadata.ts). Sem ela, a fatura é a simulada. */
-    erp?: InfoErp | null };
+  fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
   obra: { plano: Plano | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean;
     /** 15/10: o diário de obra (registos por dia) e a segurança tratada (chave → quando), obraOps.ts */
     diario?: EntradaDiario[]; seg?: Record<string, string>;
@@ -1202,9 +1199,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
     case 4:
       // 19/10: na V2 a Olyvia não emite faturas: o Financeiro regista a do programa certificado (sem botão no passo)
       if (!d.fin.fatura && lerVersao() !== "atual") return { t: "Registar a fatura", sub: "Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio.", who: "financeiro" };
-      // 22/10: no V1 também não: emite-se no Eticadata, regista-se aqui o número e a Olyvia lê no ERP se já foi paga (erpEticadata.ts)
-      if (!d.fin.fatura) return { t: "Registar a fatura do ERP", sub: "Emita-a no Eticadata e escreva aqui o número. A Olyvia confirma no ERP se já foi paga.", btn: "Registar fatura", act: "registarFaturaErp", who: "financeiro" };
-      if (d.fin.erp) return { t: "À espera do pagamento", sub: `${d.fin.fatura.n}: ${resumoErp(d.fin.erp)}. A Olyvia vê no Eticadata quando for paga.`, btn: "Verificar no ERP", act: "verificarErp", who: "financeiro" };
+      if (!d.fin.fatura) return { t: "Emitir a fatura", sub: "Vai para o portal do cliente.", btn: "Emitir fatura", act: "emitir", who: "financeiro" };
       return { t: "Validar o pagamento", sub: `Confirmar que o valor da ${d.fin.fatura.n} entrou na conta. O recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
     case 5: {
       const p = d.obra.plano!;
@@ -1437,27 +1432,6 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
   };
   /** A encomenda de cliente, emitida no Inventário novo (16/10): reserva FIFO do stock e encomenda ao fornecedor do que faltar.
    *  Idempotente: se já existe, não faz nada. Devolve se a encomenda ficou emitida. */
-  /** O pagamento confirmado (à mão ou no Eticadata): o recibo, a encomenda de cliente no Inventário e a passagem à Obra. */
-  const pago = (d: Negocio, rc: { n: string; q: string }, como: string) => {
-    const id = d.id;
-    d.fin.pago = true; d.fin.recibo = rc;
-    // 16/10: o pagamento validado emite logo a encomenda de cliente no Inventário novo (sem aprovação) e passa o negócio à Obra;
-    // o plano veio do contrato (o negócio que ainda não o tenha ganha-o aqui): depois disto só pode faltar aprová-lo
-    if (!d.obra.plano) d.obra.plano = planoDoOrcamento(d, S);
-    const ok = emitirEc(d);
-    fase(d, 5);
-    const F = faltaParaArrancar(d);
-    avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
-    if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta vai numa encomenda a fornecedor, por aprovar no Inventário", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
-  };
-  /** 22/10: a fatura está paga no Eticadata: o recibo é o do ERP (o último) e os dados do pagamento vêm de lá. */
-  const pagoNoErp = (d: Negocio, i: InfoErp) => {
-    const r = i.recibos[i.recibos.length - 1];
-    d.f.valor_recebido = String(i.pago);
-    if (r) { d.f.data_pag = r.data; d.f.comprovativo = r.n + (r.meio ? " · " + r.meio : ""); }
-    log(d, `Pagamento confirmado no Eticadata · ${d.fin.fatura!.n} paga${r ? " com o " + r.n : ""}`);
-    pago(d, { n: r?.n || "recibo no ERP", q: r ? r.data.slice(8, 10) + "/" + r.data.slice(5, 7) : "hoje" }, "no Eticadata");
-  };
   const emitirEc = (d: Negocio): boolean => {
     if (d.obra.ec) return true;
     const ec = gerarEncCliente(d, S, idEcNegocio(d), agora());
@@ -2150,39 +2124,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!d.f.valor_recebido) d.f.valor_recebido = String(valorSinal(d, S));
       if (!d.f.data_pag) d.f.data_pag = new Date().toISOString().slice(0, 10);
       if (!portao(d, [FINANCEIRO[2]])) return;
-      const rc = { n: "RC 2026/" + S.rc++, q: "hoje" };
-      log(d, "Pagamento validado · " + rc.n + " emitido");
-      pago(d, rc, "emitido");
-    },
-    /** 22/10: regista a fatura emitida no Eticadata (o número, como lá aparece) com a leitura do ERP; se já estiver paga, segue logo para a Obra. */
-    registarFaturaErp(id: number, numero?: string, info?: InfoErp | null) {
-      const d = deal(id);
-      // chamada só com o id (das listas do Hoje): abre o negócio, onde se escreve o número
-      if (numero == null) { S.view = "negocio"; S.deal = id; S.confirmPerda = null; S.pulse = "sec-4"; return; }
-      if (!exigePerm("finance.invoice")) return;
-      if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return;
-      const n = numero.trim(), hoje = new Date();
-      d.fin.fatura = { n, q: info?.data ? info.data.slice(8, 10) + "/" + info.data.slice(5, 7) : String(hoje.getDate()).padStart(2, "0") + "/" + String(hoje.getMonth() + 1).padStart(2, "0") };
-      d.fin.erp = info ?? null;
-      log(d, `Fatura ${n} registada · emitida no Eticadata` + (info ? ` · ${resumoErp(info)}` : " · sem ligação ao ERP"));
-      avisar({ msg: `Fatura ${n} registada`, sub: info ? `No Eticadata: ${resumoErp(info)}` : "Sem ligação ao Eticadata: valide o pagamento à mão", kind: "ok" });
-      if (info && d.f.nif_fat && info.nif && info.nif.replace(/\D/g, "") !== d.f.nif_fat.replace(/\D/g, ""))
-        avisar({ msg: "O NIF da fatura no ERP não é o do negócio", sub: `ERP: ${info.nif} · negócio: ${d.f.nif_fat}. Confirme o número da fatura.`, kind: "bad", atraso: 400 });
-      if (info?.estado === "paga") pagoNoErp(d, info);
-    },
-    /** 22/10: lê no Eticadata se a fatura do negócio já foi paga; se sim, o recibo é o do ERP e o negócio passa à Obra. */
-    verificarErp(id: number, calado = false) {
-      const d0 = deal(id), n = d0.fin.fatura?.n;
-      if (!n || d0.fin.pago) return;
-      void lerFaturaErp(n).then((r) => run(() => {
-        const d = deal(id);
-        if (!d || d.fin.pago || d.fin.fatura?.n !== n) return;
-        if (!("info" in r)) { if (!calado) avisar({ msg: "Não deu para ler o Eticadata", sub: r.msg, kind: "bad" }); return; }
-        const antes = d.fin.erp?.estado;
-        d.fin.erp = r.info;
-        if (r.info.estado === "paga") pagoNoErp(d, r.info);
-        else if (!calado || antes !== r.info.estado) avisar({ msg: `${n}: ${resumoErp(r.info)}`, sub: "Lido agora no Eticadata", kind: "" });
-      }));
+      d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
+      log(d, "Pagamento validado · " + d.fin.recibo.n + " emitido");
+      // 16/10: o pagamento validado emite logo a encomenda de cliente no Inventário novo (sem aprovação) e passa o negócio à Obra;
+      // o plano veio do contrato (o negócio que ainda não o tenha ganha-o aqui): depois disto só pode faltar aprová-lo
+      if (!d.obra.plano) d.obra.plano = planoDoOrcamento(d, S);
+      const ok = emitirEc(d);
+      fase(d, 5);
+      const F = faltaParaArrancar(d);
+      avisar({ msg: "Recibo " + d.fin.recibo.n + " emitido", sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
+      if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta vai numa encomenda a fornecedor, por aprovar no Inventário", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
     },
     abrirPlano(id: number) { S.view = "operacoes"; S.op = id; S.deal = null; },
     /** Abre o Inventário; com um negócio, abre a encomenda de cliente dele (Saídas para clientes). */

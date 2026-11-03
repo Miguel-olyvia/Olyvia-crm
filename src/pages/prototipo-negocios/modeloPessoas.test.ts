@@ -127,7 +127,7 @@ describe("estado do negócio", () => {
     expect(faltaParaOrcamento(S, base(1031)).titulo).toBe("O que falta para o contrato");
     const f = faltaParaOrcamento(S, base(1027));
     expect(f.titulo).toBe("O que falta para o pagamento");
-    expect(f.passos).toEqual(["Registar a fatura do ERP"]);
+    expect(f.passos).toEqual(["Emitir a fatura"]);
     expect(faltaParaOrcamento(S, base(1050)).passos).toEqual([]);
   });
 });

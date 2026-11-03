@@ -66,9 +66,9 @@ describe("Proposta do V1 · Pessoas e Negócios", () => {
     fireEvent.click(botao(/^Tiago Almeida/));
     const agora = screen.getByRole("region", { name: "O que fazer agora" });
     expect(agora).toHaveTextContent("Este passo é de Sandra.");
-    expect(within(agora).queryByRole("button", { name: "Registar fatura" })).toBeNull();
+    expect(within(agora).queryByRole("button", { name: "Emitir fatura" })).toBeNull();
     fireEvent.change(screen.getAllByRole("combobox", { name: "A ver como" })[0], { target: { value: "financeiro" } });
-    expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Registar fatura" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Emitir fatura" })).toBeInTheDocument();
   });
 
   it("marcar como perdida pede o motivo, diz a consequência e passa a pessoa para Perdidas", () => {
@@ -93,7 +93,7 @@ describe("Proposta do V1 · Pessoas e Negócios", () => {
     fireEvent.click(botao(/^Clientes/));
     fireEvent.click(botao(/^Tiago Almeida/));
     fireEvent.click(botao(/^Mudar para Sandra/));
-    expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Registar fatura" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Emitir fatura" })).toBeInTheDocument();
   });
 
   it("neste ramo fica desligada por defeito: sem preferência guardada, o V1 de antes (Leads e Clientes)", () => {

@@ -7,7 +7,6 @@
 //     emitida e não eliminada, nenhuma linha sem fornecedor, nenhuma encomenda a fornecedor por aprovar ou por receber, e cada linha saída, pronta a
 //     sair no armazém ou a bordo da carrinha (o critério da Frota para carregar). As obras antigas do exemplo (encomenda sem ref) não bloqueiam.
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
-import { resumoErp } from "./erpEticadata";
 import { normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe } from "./v2/custosModelo";
@@ -168,7 +167,7 @@ export const EC_NO_PAGAMENTO = "Emite-se quando o pagamento for validado.";
  *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */
 export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] {
   const p = d.obra.plano, F: string[] = [];
-  if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "registar a fatura do ERP e receber o pagamento");
+  if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "emitir a fatura e receber o pagamento");
   else if (!d.obra.ec) F.push("emitir a encomenda de cliente");
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   // 21/10 (decisão B): as adendas assinadas antes do arranque também: o pagamento de cada uma e a encomenda dos materiais dela (como as
@@ -248,17 +247,13 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
 
   // o pagamento
   L.push(d.fin.fatura
-    ? { id: "ft", trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${d.fin.fatura.n}`, sub: `${d.fin.erp !== undefined ? "Emitida no Eticadata" : "Emitida"} ${d.fin.fatura.q.startsWith("hoje") ? d.fin.fatura.q : "a " + d.fin.fatura.q}.` }
+    ? { id: "ft", trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${d.fin.fatura.n}`, sub: `Emitida ${d.fin.fatura.q.startsWith("hoje") ? d.fin.fatura.q : "a " + d.fin.fatura.q}.` }
     // 19/10: na V2 a Olyvia não emite faturas: regista-se a do programa certificado no Financeiro do negócio (sem botão aqui)
     : lerVersao() !== "atual"
     ? { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Registar a fatura", sub: "Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio." }
-    // 22/10: no V1 também não: emite-se no Eticadata e regista-se aqui o número (o botão abre o negócio, onde se escreve)
-    : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Registar a fatura do ERP", sub: "Emita-a no Eticadata e escreva aqui o número.", act: "registarFaturaErp", btn: "Registar fatura" });
+    : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Emitir a fatura", sub: "Vai para o portal do cliente.", act: "emitir", btn: "Emitir a fatura" });
   L.push(d.fin.pago
     ? { id: "pg", trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado`, sub: d.fin.recibo ? `Recibo ${d.fin.recibo.n}.` : "" }
-    // 22/10: a fatura lida no Eticadata: o pagamento confirma-se lá (FaturaErp.tsx)
-    : d.fin.fatura && d.fin.erp
-    ? { id: "pg", trilho: "pag", estado: "agora", who: "financeiro", t: "À espera do pagamento", sub: `No Eticadata: ${resumoErp(d.fin.erp)}. Quando for paga, o recibo é o do ERP e a encomenda de cliente vai para o Inventário.`, act: "verificarErp", btn: "Verificar no ERP" }
     : { id: "pg", trilho: "pag", estado: d.fin.fatura ? "agora" : "espera", who: "financeiro", t: "Validar o pagamento", sub: d.fin.fatura ? "Confirmar que o valor entrou. O recibo sai sozinho e a encomenda de cliente vai para o Inventário." : "Depois da fatura.", act: d.fin.fatura ? "validar" : undefined, btn: "Validar o pagamento" });
   // 21/10: a 1.ª parcela de cada adenda assinada, com os mesmos dois passos do contrato (a fatura e o pagamento validado): é ela que
   // emite a encomenda dos materiais da adenda no Inventário. As parcelas seguintes ficam no Financeiro do negócio, como as do contrato.

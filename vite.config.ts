@@ -2,7 +2,6 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
-import { eticadataLeitura } from "./server/eticadataLeitura";
 
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
@@ -12,8 +11,6 @@ export default defineConfig(() => ({
   },
   plugins: [
     react(),
-    // 22/10: /api/erp/fatura lê o estado das faturas no Eticadata (só no servidor de desenvolvimento, só leitura)
-    eticadataLeitura(),
     // Sourcemap upload only runs when SENTRY_AUTH_TOKEN is set (CI/Vercel build),
     // so local builds without the token still work unchanged.
     process.env.SENTRY_AUTH_TOKEN &&

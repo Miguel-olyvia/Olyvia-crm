@@ -140,7 +140,7 @@ describe("Hoje V2 · os outros papéis", () => {
   it("Financeiro: Faturas por registar e Pagamentos por validar (mesmo a zero); registar, não emitir", () => {
     const S = seed(), itens = hojeV2(S, "financeiro", [], VAZIO);
     expect(contadores(itens, "financeiro").map((c) => [c.nome, c.n])).toEqual([["Faturas por registar", 1], ["Pagamentos por validar", 0]]);
-    expect(itens[0]).toMatchObject({ nome: "Tiago Almeida", acao: { rotulo: "Registar fatura", act: "registarFaturaErp" } });
+    expect(itens[0]).toMatchObject({ nome: "Tiago Almeida", acao: { rotulo: "Registar fatura", act: "emitir" } });
   });
   it("Financeiro: depois de registar a fatura, o negócio passa a Pagamentos por validar (uma só linha)", () => {
     const S = seed(), d = S.deals.find((x) => x.id === 1027)!;

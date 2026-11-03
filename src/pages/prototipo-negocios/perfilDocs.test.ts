@@ -279,7 +279,7 @@ describe("o que falta para o orçamento", () => {
     const f = faltaParaOrcamento(S, neg(1031));
     expect(f.titulo).toBe("O que falta para o contrato");
     expect(f.passos).toEqual(["À espera do cliente"]);
-    expect(faltaParaOrcamento(S, neg(1027)).passos).toEqual(["Registar a fatura do ERP"]);
+    expect(faltaParaOrcamento(S, neg(1027)).passos).toEqual(["Emitir a fatura"]);
     expect(faltaParaOrcamento(S, neg(1050)).passos).toEqual([]);
   });
 });

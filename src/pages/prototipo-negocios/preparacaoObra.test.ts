@@ -37,7 +37,7 @@ describe("do contrato √† obra (16/10: a encomenda nasce do pagamento, no Invent√
     // o pagamento vem primeiro: a encomenda emite-se com ele e o plano espera por ele
     expect(estados(S, d)).toMatchObject({ ec: "espera", pl: "feito", "pl-ok": "espera", ft: "agora", pg: "espera", go: "espera" });
     expect(passosPreparacao(d, S).find((x) => x.id === "ec")!.sub).toBe(EC_NO_PAGAMENTO);
-    expect(faltaParaArrancar(d)).toEqual(["registar a fatura do ERP e receber o pagamento", "aprovar o plano"]);
+    expect(faltaParaArrancar(d)).toEqual(["emitir a fatura e receber o pagamento", "aprovar o plano"]);
     expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027")).toBe(false);
   });
 
@@ -118,7 +118,7 @@ describe("do contrato √† obra (16/10: a encomenda nasce do pagamento, no Invent√
     const de = (r: Parameters<typeof minhas>[1]) => minhas(S, r).filter((x) => x.d.id === 1027).map((x) => x.p.act);
     expect(de("comercial")).toEqual([]);
     expect(de("operacoes")).toEqual([]);
-    expect(de("financeiro")).toEqual(["registarFaturaErp"]);
+    expect(de("financeiro")).toEqual(["emitir"]);
     pagar(A, S.deals.find((x) => x.id === 1027)!);
     expect(de("comercial")).toEqual([]);
     expect(de("financeiro")).toEqual([]);

@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
-import { RegistarFaturaErp } from "./FaturaErp";
 import { ContratoDoc, NotaEncomendaDoc, Partilhar } from "./DocsCliente";
 import { SeloAssinatura } from "./AssinaturaContrato";
 import { AutoNoNegocio } from "./AutoRececao";
@@ -105,10 +104,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
         {x.sub && <p className="text-sm text-muted-foreground">{x.sub.split(" · atenção: ")[0]}{x.sub.includes(" · atenção: ") && <span className="mt-0.5 flex items-start gap-1.5 text-foreground"><TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />{x.sub.split(" · atenção: ")[1].replace(/^./, (c) => c.toUpperCase())}.</span>}</p>}
         {x.estado !== "feito" && <div className="mt-1"><Quem who={x.who} /></div>}
         {x.estado === "agora" && x.act && x.who && (
-          // 22/10: a fatura do Eticadata: o número escreve-se aqui mesmo (FaturaErp.tsx)
-          x.who === S.role && x.act === "registarFaturaErp"
-            ? <div className="mt-2"><RegistarFaturaErp ctx={ctx} d={d} tamanho="default" aEsquerda /></div>
-            : x.who === S.role
+          x.who === S.role
             ? <Button size="sm" variant={meu?.id === x.id ? "default" : "outline"} className="mt-2 min-h-10" onClick={go(() => fazer(A, x.act!, d.id, x.arg))}>{x.btn}</Button>
             : <button type="button" onClick={() => verComo(x.who!)} className="mt-1 inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Ver como {PAPEIS[x.who].nome}</button>
         )}
