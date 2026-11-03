@@ -123,7 +123,7 @@ export function ProdutosDaVersao({ ctx, d, ant }: { ctx: Ctx; d: Negocio; ant: V
               const doCat = K.produtos.find((x) => x.id === p.id);
               return (
                 <li key={p.id} className="flex items-center gap-2 rounded-full border border-dashed border-input bg-card py-1 pl-1 pr-1.5">
-                  <span className="grid h-8 w-8 place-items-center rounded-full bg-muted/70 opacity-60"><Ilustracao k={imgDe(K, p)} className="h-6 w-6" /></span>
+                  <span className="grid h-8 w-8 place-items-center rounded-full bg-muted/70 opacity-60"><FotoOuIlustracao fotos={fotosDe(K, p)} nome={p.n} k={imgDe(K, p)} className="h-6 w-6" classeFoto="h-8 w-8 rounded-full border-0" decorativa /></span>
                   <span className="text-sm text-muted-foreground line-through decoration-muted-foreground/50">{p.n}</span>
                   {doCat && (
                     <button type="button" onClick={() => mudar(() => A.produto(d.id, doCat, p.q))}

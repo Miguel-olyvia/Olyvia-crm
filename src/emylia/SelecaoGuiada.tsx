@@ -19,7 +19,7 @@ import { useCustos } from "./v2/custosStore";
 import { type Catalogo, type Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
 import { orcLinhas } from "./ServicosCatalogo";
-import { IconeServico, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
+import { FotoOuIlustracao, IconeServico, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, type Obrigacao } from "./produtosVisita";
 import {
   filtrarProdutos, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, obrigacoesAMostrar, ordenarParaObjeto, resumoNecessidades,
@@ -731,9 +731,11 @@ function BlocoServico({ ctx, K, b }: { ctx: P; K: Catalogo; b: BlocoFornece }) {
     if (it.on) return `Fornecido pelo cliente${it.valor ? ` · − ${eur(it.valor)} €` : ""}`;
     return [TIPO_TXT[it.tipo], qtd, it.valor ? `${eur(it.valor)} €` : ""].filter(Boolean).join(" · ");
   };
+  // 03/11: o produto do catálogo mostra a foto (sem ela, ou se falhar, a ilustração); o resto fica com a ilustração
   const figura = (it: ItemFornece) => {
     const doCat = it.tipo === "produto" ? K.produtos.find((p) => p.id === it.id) : undefined;
-    return doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(it.n);
+    const k = doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(it.n);
+    return <FotoOuIlustracao fotos={doCat?.fotos} nome={it.n} k={k} className="h-7 w-7" classeFoto="h-8 w-8 rounded-none border-0" decorativa />;
   };
   const vis = b.itens.slice(0, n);
   return (
@@ -746,7 +748,7 @@ function BlocoServico({ ctx, K, b }: { ctx: P; K: Catalogo; b: BlocoFornece }) {
         {vis.map((it, j) => {
           const { nome } = encurtar(it.n);
           return (
-            <CartaoServico key={it.k} compacto nome={nome} nomeCompleto={it.n} icone="outro" figura={<Ilustracao k={figura(it)} className="h-7 w-7" />}
+            <CartaoServico key={it.k} compacto nome={nome} nomeCompleto={it.n} icone="outro" figura={figura(it)}
               on={it.on} linha2={linha2(it)} entrada={cascata(j, reduzir)} animar={vis.length <= ANIMAR_ATE}
               onTocar={() => { run(() => marcarFornece(A, d, it, !it.on)); if (!it.on) vibrar(10, reduzir); }} />
           );
@@ -830,7 +832,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
       const f = faseDoProduto(K as ComFases, { servico: doCat?.servico, img }, sNome ? { nome: sNome } : undefined);
       return { k: "p:" + p.id, f, nome: encurtar(p.n).nome, det: [doCat?.marca, `${nfmt(p.q)} ${p.un}`, p.cliente ? "fornecido pelo cliente" : `${eur(precoProduto(p))} €`,
         doCat?.servico && instalados.has(doCat.servico) && orcLinhas(d, S).includes(doCat.servico) ? "com instalação" : null].filter(Boolean).join(" · "),
-        fig: <Ilustracao k={img} className="h-6 w-6" />, passo: passoDoProduto(p.no ?? null) };
+        fig: <FotoOuIlustracao fotos={doCat?.fotos} nome={p.n} k={img} className="h-6 w-6" classeFoto="h-9 w-9 rounded-lg border-0" decorativa />, passo: passoDoProduto(p.no ?? null) };
     }),
   ];
   const fases = porFase(linhasCrono, (x) => x.f);
