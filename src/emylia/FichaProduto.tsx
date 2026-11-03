@@ -66,6 +66,7 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
         {p.servico && (
           <button type="button" onClick={() => onAbrirServico(p.servico!)} className={LINK}>Traz: {nomeServico(p.servico)}</button>
         )}
+        <FotosProduto fotos={p.fotos} nome={p.n} />
       </header>
 
       {/* 29/10: a chave inclui o PVP: depois de gravar e reler, o campo volta ao que ficou na base */}
@@ -83,6 +84,26 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
         : <Seccao id="fp-forn" titulo="Fornecedores"><p className={cn(NOTA, "mt-3")}>{p.fornecedor || "Sem fornecedor indicado."}</p></Seccao>}
       {real && eUuid(p.id) && <StockArmazens key={`stock-${p.id}`} productId={p.id} nome={p.n} real={real} anunciar={anunciar} />}
     </article>
+  );
+}
+
+/* ------------------------------------------------------------------ fotos */
+// 03/11: as fotos do produto (products.image_urls; vêm do catálogo do fornecedor ao ligar ou quando ele as carrega). A 1.ª é a principal.
+// Só URLs http(s); a que falhar a carregar some. Sem fotos: nada.
+function FotosProduto({ fotos, nome }: { fotos?: string[]; nome: string }) {
+  const urls = (fotos ?? []).filter((u) => /^https?:\/\//i.test(u));
+  const [falhadas, setFalhadas] = useState<string[]>([]);
+  const vis = urls.filter((u) => !falhadas.includes(u));
+  if (!vis.length) return null;
+  return (
+    <ul className="mt-4 flex flex-wrap gap-3" aria-label={`Fotos de ${nome}`}>
+      {vis.map((u, i) => (
+        <li key={u} className={cn("overflow-hidden rounded-xl border border-border bg-muted", i === 0 ? "h-32 w-32" : "h-20 w-20")}>
+          <img src={u} alt={i === 0 ? `${nome} (foto principal)` : `${nome} (foto ${i + 1})`} loading="lazy" decoding="async"
+            onError={() => setFalhadas((f) => [...f, u])} className="h-full w-full object-cover" />
+        </li>
+      ))}
+    </ul>
   );
 }
 

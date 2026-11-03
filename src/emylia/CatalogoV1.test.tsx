@@ -42,6 +42,25 @@ describe("CatalogoV1 · os seis separadores", () => {
     expect(lista()).toHaveLength(1);
     expect(lista()[0]).toHaveTextContent("Artigo 1999");
   });
+  it("03/11: o produto com fotos mostra a 1.ª (lazy, alt = nome) no lugar da ilustração; sem fotos fica a ilustração", () => {
+    mudarCatalogo((k) => {
+      const base = k.produtos[0];
+      k.produtos.unshift({ ...base, id: "f1", n: "Bolas com foto", sku: "FOTO-1", fotos: ["https://x.supabase.co/a.webp", "https://x.supabase.co/b.webp"] } as Produto);
+      k.produtos.unshift({ ...base, id: "f2", n: "Bolas sem foto", sku: "FOTO-2", fotos: undefined, img: undefined } as Produto);
+    });
+    pagina();
+    fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar produto" }), { target: { value: "foto-1" } });
+    const img = within(screen.getByRole("tabpanel")).getByRole("img", { name: "Bolas com foto" });
+    expect(img).toHaveAttribute("src", "https://x.supabase.co/a.webp");
+    expect(img).toHaveAttribute("loading", "lazy");
+    fireEvent.error(img);
+    expect(within(screen.getByRole("tabpanel")).queryByRole("img", { name: "Bolas com foto" })).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar produto" }), { target: { value: "foto-2" } });
+    const linha = within(screen.getByRole("tabpanel")).getAllByRole("listitem")[0];
+    expect(linha.querySelector("img")).toBeNull();
+    expect(linha.querySelector("svg[data-ilustracao]")).not.toBeNull();
+  });
 });
 
 describe("CatalogoV1 · a ficha do serviço numa página", () => {

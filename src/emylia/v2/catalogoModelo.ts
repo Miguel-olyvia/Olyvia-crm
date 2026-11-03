@@ -39,6 +39,8 @@ export interface Produto {
   pvp?: number;
   /** A ilustração (ilustracoes.tsx). Sem ela, escolhe-se pelo nome. */
   img?: IlustracaoKey;
+  /** 03/11: as fotos do produto (products.image_urls, URLs públicos; a 1.ª é a principal). Sem elas, a ilustração. */
+  fotos?: string[];
   /** Uma linha de descrição. */
   desc?: string;
   /** A subcategoria real (ex.: "Toalheiros"). */

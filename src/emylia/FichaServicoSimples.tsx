@@ -21,7 +21,7 @@ import { lerCustos, mudarCustos } from "./v2/custosStore";
 import { caminho, consumivelDe, noDoServico, opcoesArvore, textoRegra, type Produto, type Regra } from "./v2/catalogoModelo";
 import { mudarCatalogo, useCatalogo } from "./v2/catalogoStore";
 import { ListaAlertas, Retirar } from "./v2/pecasCustos";
-import { ICONES_SERVICO, IconeServico, Ilustracao } from "./ilustracoes";
+import { FotoOuIlustracao, ICONES_SERVICO, IconeServico } from "./ilustracoes";
 import {
   ORIGENS_MEDIDA, REGRAS_QTD, UNIDADES_SERVICO, avisoMedida, chaveRegra, custoComOpcionais, entulhoFicha, exemploMedida, iconeDoServico, margemEmPalavras, medidaDe,
   partesCusto, perguntasPossiveis, precoProduto, produtosQueTrazem, quebraEquip,
@@ -399,7 +399,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
         <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
           <span className="flex flex-wrap items-center gap-x-4">
             <SeletorPesquisa rotulo="Juntar consumível" gatilho={<Juntar t="Juntar consumível" />} placeholder="Nome, marca ou referência"
-              opcoes={K.produtos.filter((p) => !rec.cons.some((x) => x.n === p.n)).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(p.custo)} €/${p.un}`, icone: <Ilustracao k={p.img ?? "generico"} className="h-9 w-9" /> }))}
+              opcoes={K.produtos.filter((p) => !rec.cons.some((x) => x.n === p.n)).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(p.custo)} €/${p.un}`, icone: <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-9 w-9" /> }))}
               onEscolher={(id) => { const p = K.produtos.find((y) => y.id === id); if (!p) return; const nId = nid("c", rec.cons); setNova(nId); editar((r) => { r.cons.push(consumivelDe(p, nId, 1)); }, `${p.n} juntado`); }} />
             <button type="button" className="inline-flex min-h-11 items-center px-1 text-[15px] text-muted-foreground hover:text-foreground"
               onClick={() => { const nId = nid("c", rec.cons); setNova(nId); editar((r) => { r.cons.push({ id: nId, n: "Novo consumível", q: 1, un: "un", preco: 1, fornecedor: "Por escolher", data: HOJE }); }, "Consumível juntado"); }}>
@@ -417,7 +417,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
           <ul className="mt-3 divide-y divide-border">
             {ligados.slice(0, 12).map((p) => (
               <li key={p.id} className="flex min-h-14 items-center gap-3 py-1.5">
-                <Ilustracao k={p.img ?? "generico"} className="h-10 w-10" />
+                <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-10 w-10" />
                 <span className="min-w-0 flex-1">
                   {verLigacoes
                     ? <button type="button" onClick={() => verLigacoes({ t: "prod", id: p.id })} aria-label={`${p.n}: ver ligações`} className="block min-h-11 text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">{p.n}</button>
@@ -432,7 +432,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
           </ul>
         ) : <p className={cn(NOTA, "mt-3")}>Nenhum produto traz este serviço.</p>}
         <SeletorPesquisa rotulo="Ligar um produto" gatilho={<Juntar t="Ligar um produto" />} placeholder="Nome, marca ou referência"
-          opcoes={K.produtos.filter((p) => p.servico !== sid).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(precoProduto(p, S.cfg.alvo))} €`, icone: <Ilustracao k={p.img ?? "generico"} className="h-9 w-9" /> }))}
+          opcoes={K.produtos.filter((p) => p.servico !== sid).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(precoProduto(p, S.cfg.alvo))} €`, icone: <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-9 w-9" /> }))}
           onEscolher={(id) => { const p = K.produtos.find((y) => y.id === id); if (!p) return; mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === id); if (y) { y.servico = sid; y.fatorServico = 1; } }); anunciar(`${p.n} passa a trazer este serviço`); }} />
 
         <h3 className="mt-6 text-base font-semibold">Na visita</h3>
@@ -480,7 +480,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
                   const por = (m3: number, kg: number | undefined) => { mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === p.id); if (y) y.entulho = { m3, ...(kg ? { kg } : {}) }; }); anunciar(`${p.n}: ${m3t(m3)} m³${kg ? ` e ${nfmt(kg)} kg` : ""}`); };
                   return (
                     <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
-                      <Ilustracao k={p.img ?? "generico"} className="h-9 w-9" />
+                      <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-9 w-9" />
                       <span className="min-w-0 flex-[1_1_10rem] text-[15px]">{p.n}{en.doTipo && <span className="block text-[14px] text-muted-foreground">valor do tipo: {en.tipo}</span>}</span>
                       <span className="flex items-center gap-1.5 text-[15px] tabular-nums text-muted-foreground">
                         <NumeroInline rotulo={`m³ de ${p.n}`} v={en.m3} onSet={(v) => por(v, en.kg)} /><span>m³</span>

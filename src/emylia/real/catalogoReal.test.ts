@@ -79,6 +79,14 @@ describe("montarCatalogo: as tabelas nos objetos dos ecrãs da Emylia", () => {
     L.precosProduto.push({ product_id: ID.prod, price_type: "retail", price: null as unknown as number, valid_from: "2026-10-29T11:00:00" });
     expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].pvp).toBeUndefined();
   });
+  it("03/11: image_urls do produto passam a fotos; sem o campo (base antiga) ou vazio, sem fotos", () => {
+    expect(montar().K.produtos[0].fotos).toBeUndefined();
+    const L = linhas();
+    L.produtos[1].image_urls = ["https://x.supabase.co/a.webp"];
+    expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].fotos).toEqual(["https://x.supabase.co/a.webp"]);
+    L.produtos[1].image_urls = [];
+    expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].fotos).toBeUndefined();
+  });
   it("uma organização sem Catálogo dá listas vazias e os parâmetros por omissão", () => {
     const M = montarCatalogo(linhasDe(null), catalogo0(), {});
     expect(Object.keys(M.C.receitas)).toHaveLength(0);

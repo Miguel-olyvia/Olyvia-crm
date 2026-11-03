@@ -225,3 +225,16 @@ describe("FichaProduto · ligar a artigo do fornecedor", () => {
     expect(base.chamadas.find((c) => c.f === "rpc_catalog_link")?.a).toMatchObject({ p_uom_id: null, p_apply_catalog_price: false });
   });
 });
+
+describe("FichaProduto · fotos (03/11)", () => {
+  it("mostra as fotos do produto, a 1.ª como principal; sem fotos não há galeria", () => {
+    ficha({ ...PROD, fotos: ["https://x.supabase.co/a.webp", "https://x.supabase.co/b.webp", "javascript:alert(1)"] });
+    const g = screen.getByRole("list", { name: "Fotos de Torneira Teste" });
+    const imgs = within(g).getAllByRole("img");
+    expect(imgs.map((i) => i.getAttribute("alt"))).toEqual(["Torneira Teste (foto principal)", "Torneira Teste (foto 2)"]);
+    expect(imgs[0]).toHaveAttribute("loading", "lazy");
+    cleanup();
+    ficha(PROD);
+    expect(screen.queryByRole("list", { name: /^Fotos de/ })).toBeNull();
+  });
+});
