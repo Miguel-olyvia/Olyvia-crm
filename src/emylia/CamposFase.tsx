@@ -386,18 +386,20 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }
   }
   const Rot = comLabel ? "label" : "span";
   return (
-    <div data-campo={c.k} className={cn("grid gap-3 py-4 transition-colors duration-300", !largo && "sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-6",
+    // 3/11: lado a lado, a pergunta tem sempre um mínimo («Estacionamento» ficava cortado pelos botões); se não couber, a resposta desce
+    <div data-campo={c.k} className={cn("grid gap-3 py-4 transition-colors duration-300", !largo && "sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3",
       erro ? "-mx-3 rounded-lg bg-destructive/[0.05] px-3" : seguinte ? "-mx-3 rounded-lg bg-primary/[0.04] px-3" : "")}>
-      <div className="min-w-0">
+      <div className={cn("min-w-0", !largo && "sm:min-w-40 sm:flex-1")}>
         <Rot id={rot} {...(Rot === "label" ? { htmlFor: id } : {})} className="text-[15px] font-medium text-foreground">
           {c.l}{!obrigatorio(c) && <span className="font-normal text-muted-foreground"> (opcional)</span>}
         </Rot>
         {sugerido && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-xs text-muted-foreground" title="Preenchido pela Olyvia a partir de outras respostas. Confirme ou mude."><Sparkles className="h-3 w-3" aria-hidden="true" />Sugerido</span>}
         {c.ajuda && <p id={id + "-ajuda"} className="mt-0.5 text-sm text-muted-foreground">{c.ajuda}</p>}
         {erro && <p id={id + "-erro"} className="mt-1 flex items-center gap-1.5 text-sm font-medium text-destructive motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150"><AlertCircle className="h-4 w-4" aria-hidden="true" />Falta preencher</p>}
-        {impacto}
       </div>
-      {ctl}
+      {largo ? ctl : <div className="sm:ml-auto">{ctl}</div>}
+      {/* a nota do orçamento («+ 80,00 € no orçamento · …») numa linha só dela, por baixo da pergunta e da resposta */}
+      <div className="empty:hidden sm:basis-full [&>p]:mt-0 [&>p]:w-fit">{impacto}</div>
     </div>
   );
 }
