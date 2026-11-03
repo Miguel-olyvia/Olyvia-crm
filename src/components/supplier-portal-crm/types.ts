@@ -123,6 +123,12 @@ export interface CrmCatalogItem {
   item_kind?: "produto" | "servico";
   service_districts?: string[] | null;
   mobilization_days?: number | null;
+  /**
+   * Fotos do fornecedor (migration 20270104300000): até 4 caminhos no bucket público
+   * supplier-catalog-images; a 1.ª é a principal. URL: catalogImageUrls (src/lib/supplierPortal/catalogImages).
+   * Ausente antes da migration → tratar como [].
+   */
+  image_paths?: string[];
   is_linked: boolean;
   is_dismissed: boolean;
   links: CatalogItemLink[];
@@ -241,6 +247,11 @@ export interface CatalogLinkResult {
   product_cost_message?: string | null;
   new_unit_cost?: number | null;
   units_per_purchase_uom?: number | null;
+  /**
+   * 20270104300000: quantas fotos do artigo foram copiadas para products.image_urls (só quando o
+   * produto não tinha fotos; 0 = nada mudou). Ausente antes da migration.
+   */
+  images_copied?: number;
 }
 
 /** Hint do rpc_catalog_link quando falta products.manage_prices para usar o preço do catálogo. */

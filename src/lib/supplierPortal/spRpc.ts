@@ -11,6 +11,28 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 
+// Fotos do catálogo (Edge supplier-catalog-image): upload / remover / reordenar e URL público.
+export {
+  CATALOG_IMAGE_MAX_BYTES,
+  CATALOG_IMAGE_MAX_COUNT,
+  CATALOG_IMAGE_MIME,
+  CatalogImageError,
+  catalogImageUrl,
+  catalogImageUrls,
+  catalogMainImageUrl,
+  describeCatalogImageError,
+  removeCatalogImage as spCatalogRemoveImage,
+  reorderCatalogImages as spCatalogReorderImages,
+  setMainCatalogImage as spCatalogSetMainImage,
+  uploadCatalogImage as spCatalogUploadImage,
+  validateCatalogImageFile,
+} from "./catalogImages";
+export type {
+  CatalogImageRemoveResult,
+  CatalogImageReorderResult,
+  CatalogImageUploadResult,
+} from "./catalogImages";
+
 type SpFunctions = Database["public"]["Functions"];
 
 // ─── Conteúdo dos retornos Json (tipos locais) ──────────────────────────────
@@ -81,6 +103,11 @@ export interface SpCatalogItem {
   item_kind?: "produto" | "servico";
   service_districts?: string[] | null;
   mobilization_days?: number | null;
+  /**
+   * Fotos (migration 20270104300000): até 4 caminhos no bucket público supplier-catalog-images; a 1.ª é a
+   * principal. URL público: catalogImageUrl / catalogImageUrls. Ausente antes da migration → tratar como [].
+   */
+  image_paths?: string[];
 }
 
 export interface SpCatalogListResult {

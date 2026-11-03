@@ -144,6 +144,10 @@ verify_jwt = true
 [functions.supplier-contract-action]
 verify_jwt = true
 
+# Fotos dos artigos do catálogo do fornecedor (portal): titular da conta, JWT de pessoa.
+[functions.supplier-catalog-image]
+verify_jwt = true
+
 # Valida o JWT dentro da função (auth.getUser); publicada sem verificação no gateway.
 [functions.create-supplier-portal-access]
 verify_jwt = false
