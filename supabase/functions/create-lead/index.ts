@@ -35,6 +35,7 @@ import { runMarketingAttribution } from '../_shared/marketingAttribution.ts';
 import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from '../_shared/formEmails.ts';
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
 import { pickExistingAddress } from '../_shared/addressLookup.ts';
+import { persistEntityAddress } from '../_shared/addressPersist.ts';
 import {
   findLocalEntityForOrg,
   collectDedupCandidatesForOrg,
@@ -861,7 +862,6 @@ Deno.serve(async (req) => {
             // lower(concat_ws('|', street, postal, city)) — see migration
             // 20260821020000_security_definer_identity_from_authuid_fix_record.sql:106.
             const addressKey = [backfillStreet, backfillPostal, backfillCity].join('|').toLowerCase();
-            let backfillAddressId: string | null = null;
             // address_key nao tem UNIQUE (edicao so de maiusculas cria duplicados):
             // .maybeSingle() daria PGRST116 com 2+ linhas e criaria mais um duplicado.
             const { data: existingAddressRows, error: existingAddressError } = await supabase
@@ -874,41 +874,18 @@ Deno.serve(async (req) => {
               console.error('[create-lead] reused-entity address_key lookup failed (continuing):', existingAddressError);
             }
             const existingAddress = pickExistingAddress(existingAddressRows);
-            if (existingAddress?.id) {
-              // Reuse the existing address row instead of creating a duplicate.
-              backfillAddressId = existingAddress.id;
-            } else {
-              const { data: newAddress, error: addressInsertError } = await supabase
-                .from('anew_addresses')
-                .insert({
-                  address_key: addressKey,
-                  street: backfillStreet,
-                  number: '',
-                  postal_code: backfillPostal,
-                  city: backfillCity || '',
-                  country: 'PT',
-                  created_by: backfillCreatedBy,
-                })
-                .select('id')
-                .single();
-              if (addressInsertError) {
-                console.error('[create-lead] reused-entity address backfill insert failed (continuing):', addressInsertError);
-              } else {
-                backfillAddressId = newAddress?.id || null;
-              }
-            }
-            if (backfillAddressId) {
-              const { error: entityAddressInsertError } = await supabase.from('anew_entity_addresses').insert({
-                entity_id: entityId,
-                address_id: backfillAddressId,
-                address_type: 'primary',
-                is_primary: true,
-                created_by: backfillCreatedBy,
-              });
-              if (entityAddressInsertError) {
-                console.error('[create-lead] reused-entity entity_address backfill insert failed (continuing):', entityAddressInsertError);
-              }
-            }
+            // Reuse the existing address row if any; insert + vinculo com 1
+            // repeticao, registo Sentry sem PII e limpeza de orfa (nunca lanca).
+            await persistEntityAddress(supabase, {
+              entityId,
+              existingAddressId: existingAddress?.id ?? null,
+              addressKey,
+              street: backfillStreet,
+              postalCode: backfillPostal,
+              city: backfillCity,
+              createdBy: backfillCreatedBy,
+              fn: 'create-lead',
+            });
           }
         } catch (addressBackfillErr) {
           console.error('[create-lead] reused-entity address backfill failed (continuing):', addressBackfillErr);

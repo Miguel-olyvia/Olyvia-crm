@@ -27,6 +27,7 @@ import { sanitizeFieldValues, sanitizeEmail } from "../_shared/inputSanitizers.t
 import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from "../_shared/formEmails.ts";
 import { resolveCanonicalFormId, validateLocationDistrict } from "../_shared/leadsValidation.ts";
 import { pickExistingAddress } from "../_shared/addressLookup.ts";
+import { persistEntityAddress } from "../_shared/addressPersist.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -562,7 +563,6 @@ Deno.serve(async (req) => {
             const addressKey = [street, postalCode, city].join("|").toLowerCase();
             const createdBy = existingLead.created_by || null;
 
-            let addressId: string | null = null;
             // address_key nao tem UNIQUE (edicao so de maiusculas cria duplicados):
             // .maybeSingle() daria PGRST116 com 2+ linhas e criaria mais um duplicado.
             const { data: existingAddressRows, error: existingAddressError } = await supabase
@@ -576,44 +576,20 @@ Deno.serve(async (req) => {
             }
             const existingAddress = pickExistingAddress(existingAddressRows);
 
-            if (existingAddress?.id) {
-              addressId = existingAddress.id;
-            } else {
-              const { data: newAddress, error: addressInsertError } = await supabase
-                .from("anew_addresses")
-                .insert({
-                  address_key: addressKey,
-                  street,
-                  number: "",
-                  postal_code: postalCode,
-                  city: city || "",
-                  country: "PT",
-                  created_by: createdBy,
-                })
-                .select("id")
-                .single();
-              if (addressInsertError) {
-                console.error("[update-lead] address insert failed (continuing):", addressInsertError);
-              } else {
-                addressId = newAddress?.id || null;
-              }
-            }
-
-            if (addressId) {
-              const { error: entityAddressInsertError } = await supabase
-                .from("anew_entity_addresses")
-                .insert({
-                  entity_id: existingLead.entity_id,
-                  address_id: addressId,
-                  address_type: "primary",
-                  is_primary: true,
-                  created_by: createdBy,
-                });
-              if (entityAddressInsertError) {
-                console.error("[update-lead] entity_address insert failed (continuing):", entityAddressInsertError);
-              } else {
-                console.log("Persisted lead address to entity:", existingLead.entity_id);
-              }
+            // Insert + vinculo com 1 repeticao, registo no Sentry sem PII e
+            // limpeza da morada orfa: tudo em persistEntityAddress (nunca lanca).
+            const persisted = await persistEntityAddress(supabase, {
+              entityId: existingLead.entity_id,
+              existingAddressId: existingAddress?.id ?? null,
+              addressKey,
+              street,
+              postalCode,
+              city,
+              createdBy,
+              fn: "update-lead",
+            });
+            if (persisted.ok) {
+              console.log("Persisted lead address to entity:", existingLead.entity_id);
             }
           }
         }
