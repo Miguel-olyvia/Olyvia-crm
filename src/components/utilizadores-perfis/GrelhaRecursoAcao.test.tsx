@@ -16,6 +16,10 @@ const CATALOGO: Permissao[] = [
   p("suppliers.export", "Exportar fornecedores"),
   p("warehouses.view", "Ver armazéns"),
   p("hr.pessoas.view", "Ver fichas", { categoria: "hr" }), p("hr.pessoas.view.own", "Ver a própria ficha", { categoria: "hr" }),
+  p("leads.view", "Ver leads"), p("leads.create", "Criar leads"), p("leads.assign", "Atribuir leads"), p("leads.edit", "Editar leads"),
+  p("clients.view", "Ver clientes"),
+  p("negocios.contacto.registar", "Registar contacto", { categoria: "pessoas" }),
+  p("negocios.orcamento.editar", "Editar o orçamento do negócio", { categoria: "pessoas" }),
 ];
 
 function Editor({ visiveis = CATALOGO, inicial = [] as string[], somenteLeitura = false }) {
@@ -29,26 +33,48 @@ function Editor({ visiveis = CATALOGO, inicial = [] as string[], somenteLeitura 
 }
 
 const abrir = (grupo: string) => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${grupo}`) }));
-const tabela = (nome: RegExp) => screen.getByRole("table", { name: nome });
 const caixa = (nome: string) => screen.getByRole("checkbox", { name: nome });
+const botao = (nome: string) => screen.getByRole("button", { name: nome });
 const concedidas = () => screen.getByTestId("concedidas").textContent;
+const secao = (titulo: string) => document.querySelector(`tbody[data-secao="${titulo}"]`) as HTMLElement;
 
 beforeEach(() => localStorage.setItem("language", "pt"));
 afterEach(cleanup);
 
-describe("GrelhaRecursoAcao (editor de papéis)", () => {
-  it("tabela recurso × ação: colunas fixas, Outras e '–' onde não há permissão", () => {
+describe("GrelhaRecursoAcao (editor de papéis, v2)", () => {
+  it("uma tabela por grupo, colunas fixas e Outras, '–' só onde falta uma CRUD; sem caixas de marcar linha/coluna", () => {
     render(<Editor />);
     abrir("Inventário");
-    const t = tabela(/Inventário/);
-    const cabecalhos = within(t).getAllByRole("columnheader").map((h) => h.textContent?.trim());
+    const tabelas = screen.getAllByRole("table");
+    expect(tabelas).toHaveLength(1);
+    const cabecalhos = within(tabelas[0]).getAllByRole("columnheader").map((h) => h.textContent?.trim());
     expect(cabecalhos).toEqual(["Recurso", "Ver", "Criar", "Editar", "Eliminar", "Outras"]);
-    const linhas = within(t).getAllByRole("row").slice(1);
-    expect(linhas.map((l) => within(l).getByRole("rowheader").textContent)).toEqual(["Fornecedores", "Armazéns"]);
-    const armazens = linhas[1];
+    const linhas = within(tabelas[0]).getAllByRole("rowheader").map((h) => h.textContent);
+    expect(linhas).toEqual(["Fornecedores", "Armazéns"]);
+    const armazens = within(tabelas[0]).getAllByRole("row").find((r) => r.textContent?.startsWith("Armazéns")) as HTMLElement;
     expect(within(armazens).getAllByText("Não se aplica")).toHaveLength(3);
-    expect(within(armazens).getByRole("checkbox", { name: "Armazéns: Ver" })).toBeInTheDocument();
-    expect(within(linhas[0]).getByRole("button", { name: "Fornecedores: Exportar" })).toHaveAttribute("aria-pressed", "false");
+    expect(caixa("Fornecedores: Ver")).toBeInTheDocument();
+    // Só caixas de permissões: nenhuma de linha ou coluna.
+    expect(within(tabelas[0]).getAllByRole("checkbox")).toHaveLength(5);
+    expect(botao("Fornecedores: Exportar")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("Negócios: o recurso inteiro numa linha (leads.view/create/assign com o resto de Leads) e as fases como chips", () => {
+    render(<Editor />);
+    abrir("Negócios");
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    const pessoas = secao("Pessoas");
+    expect(within(pessoas).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["Leads", "Clientes"]);
+    expect(within(pessoas).getByRole("checkbox", { name: "Leads: Ver" })).toBeInTheDocument();
+    expect(within(pessoas).getByRole("checkbox", { name: "Leads: Criar" })).toBeInTheDocument();
+    expect(within(pessoas).getByRole("button", { name: "Leads: Atribuir" })).toBeInTheDocument();
+
+    const fases = secao("Fases do negócio");
+    expect(within(fases).queryAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Fases do negócio"]);
+    expect(within(fases).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(fases).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["Contacto", "Negócio"]);
+    expect(within(fases).getByRole("button", { name: "Contacto: Registar contacto" })).toBeInTheDocument();
+    expect(within(fases).getByRole("button", { name: "Negócio: Editar orçamento" })).toBeInTheDocument();
   });
 
   it("dependência de Ver: bloqueada até Ver estar marcado; tirar Ver tira as dependentes, com aviso", () => {
@@ -69,52 +95,44 @@ describe("GrelhaRecursoAcao (editor de papéis)", () => {
     expect(screen.getByTestId("aviso-matriz")).toHaveTextContent("Também retiradas, porque precisam de Ver: Criar fornecedores");
   });
 
-  it("chips de Outras: botão liga/desliga com aria-pressed", () => {
+  it("chips de Outras: botão liga/desliga com aria-pressed e rótulo encurtado", () => {
     render(<Editor inicial={["suppliers.view"]} />);
     abrir("Inventário");
-    const chip = screen.getByRole("button", { name: "Fornecedores: Exportar" });
+    const chip = botao("Fornecedores: Exportar");
+    expect(chip).toHaveTextContent("Exportar");
     fireEvent.click(chip);
     expect(chip).toHaveAttribute("aria-pressed", "true");
     expect(concedidas()).toBe("suppliers.export,suppliers.view");
   });
 
-  it("marcar linha (com perigosa: pede confirmação) e estado indeterminado da coluna", () => {
+  it("'Tudo' da linha (com perigosa: pede confirmação) passa a 'Nenhum' e desmarca", () => {
     render(<Editor />);
     abrir("Inventário");
-    fireEvent.click(caixa("Todas as permissões de Fornecedores"));
-    // suppliers.delete é perigosa: confirmação antes de conceder.
-    fireEvent.click(screen.getByRole("button", { name: "Conceder" }));
+    fireEvent.click(botao("Marcar todas as permissões de Fornecedores"));
+    fireEvent.click(botao("Conceder"));
     expect(concedidas()).toBe("suppliers.create,suppliers.delete,suppliers.edit,suppliers.export,suppliers.view");
-    expect(caixa("Todas as permissões de Fornecedores")).toHaveAttribute("aria-checked", "true");
-    expect(caixa("Coluna Ver em Inventário")).toHaveAttribute("aria-checked", "mixed");
-    expect(caixa("Coluna Criar em Inventário")).toHaveAttribute("aria-checked", "true");
-
-    fireEvent.click(caixa("Fornecedores: Editar"));
-    expect(caixa("Todas as permissões de Fornecedores")).toHaveAttribute("aria-checked", "mixed");
-    fireEvent.click(caixa("Todas as permissões de Fornecedores"));
-    expect(concedidas()).toBe("suppliers.create,suppliers.delete,suppliers.edit,suppliers.export,suppliers.view");
-  });
-
-  it("marcar coluna: Ver marca as duas linhas; Criar sem Ver fica por marcar, com aviso; desmarcar Ver limpa as dependentes", () => {
-    render(<Editor />);
-    abrir("Inventário");
-    fireEvent.click(caixa("Coluna Criar em Inventário"));
-    expect(concedidas()).toBe("");
-    expect(screen.getByTestId("aviso-matriz")).toHaveTextContent("Ficaram por marcar, porque precisam primeiro de Ver: Criar fornecedores");
-
-    fireEvent.click(caixa("Coluna Ver em Inventário"));
-    expect(concedidas()).toBe("suppliers.view,warehouses.view");
-    fireEvent.click(caixa("Coluna Criar em Inventário"));
-    expect(concedidas()).toBe("suppliers.create,suppliers.view,warehouses.view");
-    fireEvent.click(caixa("Coluna Ver em Inventário"));
+    const nenhum = botao("Desmarcar todas as permissões de Fornecedores");
+    expect(nenhum).toHaveTextContent("Nenhum");
+    fireEvent.click(nenhum);
     expect(concedidas()).toBe("");
   });
 
-  it(".own vai para Outras como 'Ver (só as suas)'; Ver é o 'ver tudo'", () => {
+  it("'Tudo' da secção e 'Tudo'/'Limpar' do grupo", () => {
+    render(<Editor />);
+    abrir("Negócios");
+    fireEvent.click(botao("Marcar todas as permissões de Fases do negócio"));
+    expect(concedidas()).toBe("negocios.contacto.registar,negocios.orcamento.editar");
+    fireEvent.click(botao("Marcar todas as permissões de Negócios"));
+    expect(concedidas()).toBe("clients.view,leads.assign,leads.create,leads.edit,leads.view,negocios.contacto.registar,negocios.orcamento.editar");
+    fireEvent.click(botao("Limpar todas as permissões de Negócios"));
+    expect(concedidas()).toBe("");
+  });
+
+  it(".own vai para Outras como chip; Ver é o 'ver tudo'", () => {
     render(<Editor />);
     abrir("Recursos Humanos");
-    expect(caixa("Pessoas: ficha: Ver")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pessoas: ficha: Ver (só as suas)" })).toBeInTheDocument();
+    expect(caixa("Ficha: Ver")).toBeInTheDocument();
+    expect(botao("Ficha: Ver a própria ficha")).toBeInTheDocument();
   });
 
   it("perigosas assinaladas e descrição acessível com nome, descrição e aviso", () => {
@@ -132,18 +150,16 @@ describe("GrelhaRecursoAcao (editor de papéis)", () => {
     render(<Editor visiveis={visiveis} />);
     expect(screen.queryByRole("button", { name: /^Recursos Humanos/ })).not.toBeInTheDocument();
     abrir("Inventário");
-    const linhas = within(tabela(/Inventário/)).getAllByRole("row").slice(1);
-    expect(linhas).toHaveLength(1);
-    expect(within(linhas[0]).getAllByText("Não se aplica")).toHaveLength(3);
+    expect(screen.getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["Fornecedores"]);
+    expect(screen.getAllByText("Não se aplica")).toHaveLength(3);
     expect(screen.queryByRole("checkbox", { name: "Fornecedores: Criar" })).not.toBeInTheDocument();
   });
 
-  it("role de sistema: tudo desligado, sem marcar linha/coluna", () => {
+  it("role de sistema: tudo desligado, sem 'Tudo'", () => {
     render(<Editor somenteLeitura inicial={["suppliers.view"]} />);
     abrir("Inventário");
     expect(caixa("Fornecedores: Ver")).toBeDisabled();
-    expect(screen.queryByRole("checkbox", { name: /Todas as permissões/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: /^Coluna/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Marcar todas/ })).not.toBeInTheDocument();
   });
 
   it("ficha da role (só leitura): a mesma grelha com Tem/Não tem", () => {
@@ -156,7 +172,7 @@ describe("GrelhaRecursoAcao (editor de papéis)", () => {
       </LanguageProvider>,
     );
     abrir("Inventário");
-    const t = tabela(/Inventário/);
+    const t = screen.getByRole("table");
     expect(within(t).getByText("Fornecedores: Ver: Tem")).toBeInTheDocument();
     expect(within(t).getByText("Fornecedores: Criar: Não tem")).toBeInTheDocument();
     expect(within(t).queryByRole("checkbox")).not.toBeInTheDocument();

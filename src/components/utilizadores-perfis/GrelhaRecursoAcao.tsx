@@ -1,61 +1,40 @@
-// A grelha recurso × ação de um subgrupo do editor de papéis: uma tabela semântica, uma linha por recurso (grelhaPermissoes.ts) e as
-// colunas Ver, Criar, Editar, Eliminar e Outras. Com `edicao` cada célula é uma caixa de seleção, cada ação de Outras um botão
-// liga/desliga (aria-pressed), e há "marcar linha" (no início da linha) e "marcar coluna" (no cabeçalho), com estado indeterminado.
-// Sem `edicao` é só leitura (ficha da role): ícone e texto "Tem"/"Não tem" em cada célula.
+// A grelha recurso × ação de um grupo do editor de papéis (v2): UMA tabela por grupo, partida em secções (grelhaPermissoes.ts >
+// secoesDoGrupo). Cada linha é um recurso inteiro. A linha de secção traz o título, os cabeçalhos Ver/Criar/Editar/Eliminar/Outras
+// (só nas secções com colunas) e o "Tudo" da secção. Secções "só ações" desenham-se como chips por linha, sem colunas vazias.
+// Com `edicao`: caixas de seleção nas colunas fixas, chips liga/desliga (aria-pressed) em Outras, e o botão "Tudo"/"Nenhum" no fim
+// de cada linha. Sem `edicao` é só leitura (ficha da role): ícone e "Tem"/"Não tem".
 //
-// Ecrã estreito: a tabela rola na horizontal DENTRO do seu contentor e a 1.ª coluna (recurso) fica fixa. Escolhido em vez de virar
-// lista porque mantém um só DOM (os mesmos controlos para o leitor de ecrã, sem duplicados escondidos), mantém os cabeçalhos de
-// coluna e o "marcar coluna", e a página nunca ganha scroll horizontal.
+// Ecrã estreito: a tabela rola na horizontal DENTRO do seu contentor e a 1.ª coluna (recurso) fica fixa — um só DOM para o leitor
+// de ecrã, os cabeçalhos mantêm-se, e a página nunca ganha scroll horizontal.
 import { useId, type ReactNode } from "react";
-import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
 import { Check, Minus, ShieldAlert } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import type { BlocoCategoria } from "./gruposPermissoes";
-import {
-  COLUNAS_FIXAS, estadoConjunto, linhasDosBlocos, permissoesDaColuna, permissoesOutras,
-  type ColunaFixa, type EstadoConjunto, type LinhaGrelha,
-} from "./grelhaPermissoes";
+import type { GrupoMenu } from "./gruposPermissoes";
+import { COLUNAS_FIXAS, estadoConjunto, secoesDoGrupo, type ColunaFixa, type LinhaGrelha, type SecaoGrelha } from "./grelhaPermissoes";
 import type { Permissao } from "./tipos";
 
 /** O que a grelha precisa para deixar de ser só leitura. */
 export interface EdicaoMatriz {
-  /** Role de sistema: os controlos ficam desligados e não há "marcar tudo". */
+  /** Role de sistema: os controlos ficam desligados e não há "Tudo". */
   desativada: boolean;
-  /** Sem a permissão Ver do módulo: a célula fica assinalada e não se marca (matriz.ts > podeAlterar). */
+  /** Sem a permissão Ver do módulo: a célula fica esbatida e não se marca (matriz.ts > podeAlterar). */
   bloqueada: (codigo: string) => boolean;
   aoAlternar: (p: Permissao) => void;
-  /** "Marcar tudo" / "Limpar" do módulo. */
+  /** "Tudo" / "Limpar" do grupo. */
   aoModulo: (lista: Permissao[], marcar: boolean) => void;
-  /** Marcar/desmarcar uma linha ou uma coluna (matriz.ts > definirConjunto). */
+  /** "Tudo"/"Nenhum" de uma linha ou de uma secção (matriz.ts > definirConjunto). */
   aoConjunto: (lista: Permissao[], marcar: boolean) => void;
 }
 
 const CHAVE_COLUNA: Record<ColunaFixa, string> = { ver: "view", criar: "create", editar: "edit", eliminar: "delete" };
 const G = "usersProfiles.form.matrix.grid.";
-
-/** Caixa com os três estados (o Checkbox de ui/ só desenha o visto). */
-function CaixaTriEstado({ estado, rotulo, desligada, aoMudar }: {
-  estado: EstadoConjunto; rotulo: string; desligada: boolean; aoMudar: () => void;
-}) {
-  return (
-    <CheckboxPrimitive.Root
-      checked={estado} disabled={desligada} aria-label={rotulo} onCheckedChange={aoMudar}
-      className={cn(
-        "peer h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
-        "data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
-        "data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground",
-        FOCO,
-      )}
-    >
-      <CheckboxPrimitive.Indicator className="flex items-center justify-center text-current">
-        {estado === "indeterminate" ? <Minus className="h-3.5 w-3.5" aria-hidden="true" /> : <Check className="h-4 w-4" aria-hidden="true" />}
-      </CheckboxPrimitive.Indicator>
-    </CheckboxPrimitive.Root>
-  );
-}
+/** Fundo sólido da coluna fixa (tem de tapar o que rola por baixo). */
+const FIXA = "sticky left-0 z-10";
 
 /** O texto da dica e da descrição acessível: nome, código, descrição, perigosa e porque está bloqueada. */
 function Dica({ permissao: p, bloqueada }: { permissao: Permissao; bloqueada: boolean }) {
@@ -75,20 +54,16 @@ interface ControloProps {
   permissao: Permissao;
   /** Nome acessível ("Leads: Criar"). */
   rotulo: string;
-  /** O texto visível do chip ("Converter"). */
+  /** Texto visível do chip ("Converter"). */
   acao: string;
   concedida: boolean;
-  edicao: EdicaoMatriz;
-  /** Célula de coluna fixa (caixa) ou ação de Outras (botão liga/desliga). */
   tipo: "celula" | "chip";
 }
 
-function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo }: ControloProps) {
+function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo }: ControloProps & { edicao: EdicaoMatriz }) {
   const id = useId();
   const bloqueada = !edicao.desativada && edicao.bloqueada(p.codigo) && !concedida;
   const idDica = `${id}-dica`;
-  const descricao = <span id={idDica} className="sr-only"><Dica permissao={p} bloqueada={bloqueada} /></span>;
-  const perigo = p.perigosa && <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />;
   // Bloqueada: continua focável (aria-disabled) para se ler a razão; o clique só avisa (MatrizEditavel), não muda nada.
   const comum = {
     "aria-describedby": idDica,
@@ -102,23 +77,13 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
       className={cn("inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-md px-1",
         edicao.desativada || bloqueada ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted")}
     >
-      <CheckboxPrimitive.Root
+      <Checkbox
         id={id} checked={concedida} aria-label={rotulo} {...comum}
         // Controlada: o estado só muda quando `concedida` mudar (o clique vai por onClick, para a bloqueada também avisar).
         onCheckedChange={() => undefined}
-        className={cn(
-          "peer h-4 w-4 shrink-0 rounded-sm border ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
-          "data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
-          p.perigosa ? "border-destructive" : "border-primary",
-          bloqueada && "opacity-50",
-          FOCO,
-        )}
-      >
-        <CheckboxPrimitive.Indicator className="flex items-center justify-center text-current">
-          <Check className="h-4 w-4" aria-hidden="true" />
-        </CheckboxPrimitive.Indicator>
-      </CheckboxPrimitive.Root>
-      {perigo}
+        className={cn("h-[18px] w-[18px] rounded-[4px]", p.perigosa && "border-destructive", bloqueada && "opacity-40", FOCO)}
+      />
+      {p.perigosa && <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}
     </label>
   ) : (
     <button
@@ -126,7 +91,6 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
       className={cn(
         "inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-xs font-medium transition-colors motion-reduce:transition-none",
         concedida ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40",
-        p.perigosa && !concedida && "border-destructive/60",
         (bloqueada || edicao.desativada) && "cursor-not-allowed opacity-50",
         FOCO,
       )}
@@ -142,15 +106,16 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
         <TooltipTrigger asChild>{gatilho}</TooltipTrigger>
         <TooltipContent><Dica permissao={p} bloqueada={bloqueada} /></TooltipContent>
       </Tooltip>
-      {descricao}
+      <span id={idDica} className="sr-only"><Dica permissao={p} bloqueada={bloqueada} /></span>
     </>
   );
 }
 
 /** Só leitura: ícone mais texto escondido ("Tem"/"Não tem"), e a dica nativa com o nome. */
-function Leitura({ permissao: p, rotulo, acao, concedida, tipo }: Omit<ControloProps, "edicao">) {
+function Leitura({ permissao: p, rotulo, acao, concedida, tipo }: ControloProps) {
   const { t } = useTranslation();
   const estado = t(concedida ? "usersProfiles.matrix.has" : "usersProfiles.matrix.hasNot");
+  const perigosa = p.perigosa ? ` (${t("usersProfiles.dangerous")})` : "";
   const titulo = [p.nome, p.descricao, p.perigosa ? t("usersProfiles.dangerous") : ""].filter(Boolean).join(" · ");
   const Icone = concedida ? Check : Minus;
   if (tipo === "celula") {
@@ -158,7 +123,7 @@ function Leitura({ permissao: p, rotulo, acao, concedida, tipo }: Omit<ControloP
       <span title={titulo} className="inline-flex h-11 min-w-11 items-center justify-center gap-1">
         <Icone className={cn("h-4 w-4", concedida ? "text-primary dark:text-violet-300" : "text-muted-foreground")} aria-hidden="true" />
         {p.perigosa && <ShieldAlert className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />}
-        <span className="sr-only">{`${rotulo}: ${estado}`}{p.perigosa ? ` (${t("usersProfiles.dangerous")})` : ""}</span>
+        <span className="sr-only">{`${rotulo}: ${estado}${perigosa}`}</span>
       </span>
     );
   }
@@ -169,112 +134,124 @@ function Leitura({ permissao: p, rotulo, acao, concedida, tipo }: Omit<ControloP
         concedida ? "border-primary bg-primary/10 text-foreground" : "border-dashed border-input text-muted-foreground")}
     >
       <Icone className="h-3 w-3 shrink-0" aria-hidden="true" />
-      {acao}
+      <span aria-hidden="true">{acao}</span>
       {p.perigosa && <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}
-      <span className="sr-only">{`: ${estado}`}{p.perigosa ? ` (${t("usersProfiles.dangerous")})` : ""}</span>
+      <span className="sr-only">{`${rotulo}: ${estado}${perigosa}`}</span>
     </span>
   );
 }
 
+/** "Tudo" (marca o que falta) ou "Nenhum" (quando já está tudo marcado) de uma linha ou secção. */
+function BotaoTudo({ nome, lista, concedida, edicao }: { nome: string; lista: Permissao[]; concedida: (c: string) => boolean; edicao: EdicaoMatriz }) {
+  const { t } = useTranslation();
+  const tudo = estadoConjunto(lista, concedida) === true;
+  return (
+    <Button
+      type="button" variant="ghost" size="sm"
+      className={cn("h-8 px-2 text-xs font-medium text-primary hover:text-primary dark:text-violet-300", FOCO)}
+      aria-label={t(tudo ? `${G}unmarkRow` : `${G}markRow`, { row: nome })}
+      onClick={() => edicao.aoConjunto(lista, !tudo)}
+    >
+      {t(tudo ? `${G}nothing` : `${G}all`)}
+    </Button>
+  );
+}
+
 interface GrelhaRecursoAcaoProps {
-  /** O nome da tabela (grupo ou "grupo › subgrupo"), para a legenda e os rótulos das colunas. */
-  titulo: string;
-  blocos: BlocoCategoria[];
+  grupo: GrupoMenu;
   concedida: (codigo: string) => boolean;
   edicao?: EdicaoMatriz;
 }
 
-const TH_FIXO = "sticky left-0 z-10 bg-background";
-
-export function GrelhaRecursoAcao({ titulo, blocos, concedida, edicao }: GrelhaRecursoAcaoProps) {
+export function GrelhaRecursoAcao({ grupo, concedida, edicao }: GrelhaRecursoAcaoProps) {
   const { t } = useTranslation();
-  const linhas = linhasDosBlocos(blocos);
-  const legenda = t(`${G}caption`, { table: titulo });
-  const comMarcar = !!edicao && !edicao.desativada;
+  const secoes = secoesDoGrupo(grupo);
+  const comTudo = !!edicao && !edicao.desativada;
   const rotuloColuna = (c: ColunaFixa) => t(`${G}${CHAVE_COLUNA[c]}`);
 
   const controlo = (l: LinhaGrelha, p: Permissao, acao: string, tipo: "celula" | "chip"): ReactNode => {
-    const rotulo = t(`${G}cell`, { row: l.rotulo, action: acao });
-    return edicao
-      ? <ControloPermissao key={p.codigo} permissao={p} rotulo={rotulo} acao={acao} concedida={concedida(p.codigo)} edicao={edicao} tipo={tipo} />
-      : <Leitura key={p.codigo} permissao={p} rotulo={rotulo} acao={acao} concedida={concedida(p.codigo)} tipo={tipo} />;
+    const props = { permissao: p, rotulo: t(`${G}cell`, { row: l.rotulo, action: acao }), acao, concedida: concedida(p.codigo), tipo };
+    return edicao ? <ControloPermissao key={p.codigo} {...props} edicao={edicao} /> : <Leitura key={p.codigo} {...props} />;
+  };
+  const chips = (l: LinhaGrelha) => (
+    <span className="flex flex-wrap gap-1.5">{l.outras.map((o) => controlo(l, o.permissao, o.rotulo, "chip"))}</span>
+  );
+  const tudoLinha = (nome: string, lista: Permissao[]) => (comTudo && edicao
+    ? <td className="px-1 text-right"><BotaoTudo nome={nome} lista={lista} concedida={concedida} edicao={edicao} /></td>
+    : null);
+
+  const cabecalhoSecao = (s: SecaoGrelha) => {
+    // Secção só de ações sem título: não há nada a dizer na linha de secção.
+    if (s.soAcoes && !s.titulo) return null;
+    const titulo = s.titulo ?? t(`${G}resource`);
+    return (
+      <tr className="bg-muted text-xs font-medium text-muted-foreground">
+        <th scope={s.soAcoes ? "colgroup" : "col"} colSpan={s.soAcoes ? 6 : 1} className={cn(FIXA, "bg-muted px-3 py-2 text-left text-sm font-semibold text-foreground")}>
+          {titulo}
+        </th>
+        {!s.soAcoes && COLUNAS_FIXAS.map((c) => <th key={c} scope="col" className="px-1 py-2 text-center font-medium">{rotuloColuna(c)}</th>)}
+        {!s.soAcoes && <th scope="col" className="px-3 py-2 text-left font-medium">{t(`${G}other`)}</th>}
+        {comTudo && edicao && (
+          <td className="px-1 text-right">
+            {s.titulo && <BotaoTudo nome={s.titulo} lista={s.permissoes} concedida={concedida} edicao={edicao} />}
+          </td>
+        )}
+      </tr>
+    );
   };
 
-  const cabecalho = (texto: string, lista: Permissao[]) => (
-    <span className="inline-flex flex-col items-center gap-1">
-      <span>{texto}</span>
-      {comMarcar && lista.length > 0 && (
-        <CaixaTriEstado
-          estado={estadoConjunto(lista, concedida)} desligada={false}
-          rotulo={t(`${G}column`, { action: texto, table: titulo })}
-          aoMudar={() => edicao.aoConjunto(lista, estadoConjunto(lista, concedida) !== true)}
-        />
-      )}
-    </span>
+  const linhaTabela = (l: LinhaGrelha) => {
+    const semCrud = Object.keys(l.fixas).length === 0;
+    return (
+      <tr key={l.chave} className="border-t border-border/60">
+        <th scope="row" className={cn(FIXA, "bg-background px-3 py-1 text-left font-medium text-foreground")}>{l.rotulo}</th>
+        {COLUNAS_FIXAS.map((c) => {
+          const p = l.fixas[c];
+          return (
+            <td key={c} className="px-1 py-0 text-center">
+              {p ? controlo(l, p, rotuloColuna(c), "celula") : !semCrud && (
+                <span className="text-muted-foreground">
+                  <span aria-hidden="true">–</span>
+                  <span className="sr-only">{t(`${G}none`)}</span>
+                </span>
+              )}
+            </td>
+          );
+        })}
+        <td className="px-3 py-1.5">{chips(l)}</td>
+        {tudoLinha(l.rotulo, l.permissoes)}
+      </tr>
+    );
+  };
+
+  const linhaAcoes = (l: LinhaGrelha) => (
+    <tr key={l.chave} className="border-t border-border/60">
+      <th scope="row" className={cn(FIXA, "bg-background px-3 py-1.5 text-left align-top font-medium text-foreground")}>
+        <span className="flex min-h-8 items-center">{l.rotulo}</span>
+      </th>
+      <td colSpan={5} className="px-3 py-1.5">{chips(l)}</td>
+      {tudoLinha(l.rotulo, l.permissoes)}
+    </tr>
   );
 
   return (
     <TooltipProvider delayDuration={300}>
       {/* A região rola na horizontal só por dentro; é focável para se poder rolar com o teclado. */}
-      <div role="region" aria-label={legenda} tabIndex={0} className={cn("relative overflow-x-auto rounded-md border border-border", FOCO)}>
-        <table className="w-full min-w-[36rem] table-fixed border-collapse text-sm">
-          <caption className="sr-only">{legenda}</caption>
-          <thead>
-            <tr className="border-b border-border text-xs font-medium text-muted-foreground">
-              <th scope="col" className={cn(TH_FIXO, "w-44 px-3 py-2 text-left font-medium")}>{t(`${G}resource`)}</th>
-              {COLUNAS_FIXAS.map((c) => (
-                <th key={c} scope="col" className="w-16 px-1 py-2 text-center font-medium">
-                  {cabecalho(rotuloColuna(c), permissoesDaColuna(linhas, c))}
-                </th>
-              ))}
-              <th scope="col" className="px-3 py-2 text-left font-medium">
-                <span className="inline-flex items-center gap-2">
-                  {t(`${G}other`)}
-                  {comMarcar && permissoesOutras(linhas).length > 0 && (
-                    <CaixaTriEstado
-                      estado={estadoConjunto(permissoesOutras(linhas), concedida)} desligada={false}
-                      rotulo={t(`${G}column`, { action: t(`${G}other`), table: titulo })}
-                      aoMudar={() => edicao.aoConjunto(permissoesOutras(linhas), estadoConjunto(permissoesOutras(linhas), concedida) !== true)}
-                    />
-                  )}
-                </span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/60">
-            {linhas.map((l) => (
-              <tr key={l.chave}>
-                <th scope="row" className={cn(TH_FIXO, "px-3 py-1 text-left font-medium text-foreground")}>
-                  <span className="flex items-center gap-2">
-                    {comMarcar && (
-                      <CaixaTriEstado
-                        estado={estadoConjunto(l.permissoes, concedida)} desligada={false}
-                        rotulo={t(`${G}row`, { row: l.rotulo })}
-                        aoMudar={() => edicao.aoConjunto(l.permissoes, estadoConjunto(l.permissoes, concedida) !== true)}
-                      />
-                    )}
-                    <span>{l.rotulo}</span>
-                  </span>
-                </th>
-                {COLUNAS_FIXAS.map((c) => {
-                  const p = l.fixas[c];
-                  return (
-                    <td key={c} className="px-1 py-0 text-center">
-                      {p ? controlo(l, p, rotuloColuna(c), "celula") : (
-                        <span className="text-muted-foreground">
-                          <span aria-hidden="true">–</span>
-                          <span className="sr-only">{t(`${G}none`)}</span>
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-                <td className="px-3 py-1.5">
-                  <span className="flex flex-wrap gap-1.5">{l.outras.map((o) => controlo(l, o.permissao, o.rotulo, "chip"))}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+      <div role="region" aria-label={grupo.rotulo} tabIndex={0} className={cn("relative overflow-x-auto rounded-md border border-border", FOCO)}>
+        <table className="w-full min-w-[40rem] table-fixed border-collapse text-sm">
+          <caption className="sr-only">{grupo.rotulo}</caption>
+          <colgroup>
+            <col className="w-40" />
+            {COLUNAS_FIXAS.map((c) => <col key={c} className="w-16" />)}
+            <col />
+            {comTudo && <col className="w-20" />}
+          </colgroup>
+          {secoes.map((s) => (
+            <tbody key={s.chave} data-secao={s.titulo ?? ""}>
+              {cabecalhoSecao(s)}
+              {s.linhas.map((l) => (s.soAcoes ? linhaAcoes(l) : linhaTabela(l)))}
+            </tbody>
+          ))}
         </table>
       </div>
     </TooltipProvider>

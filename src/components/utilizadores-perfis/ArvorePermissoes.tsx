@@ -1,6 +1,5 @@
-// A matriz de permissões: um Accordion por entrada do menu (cabeçalho com "x de y"), e lá dentro uma GRELHA recurso × ação por
-// subgrupo (GrelhaRecursoAcao; os blocos diretos do grupo fazem uma tabela sem título). Por omissão é só leitura ("Tem"/"Não tem");
-// com `edicao` as células são caixas de seleção e cada módulo tem "Marcar tudo" e "Limpar" (formulário de role).
+// A matriz de permissões: um Accordion por entrada do menu (cabeçalho com "x de y" e, na edição, "Tudo"/"Limpar" ao lado), e lá
+// dentro UMA grelha recurso × ação por grupo, partida em secções (GrelhaRecursoAcao). Por omissão é só leitura ("Tem"/"Não tem").
 // Com `extra` (separador Permissões do utilizador, que diz de que role vem cada permissão) mantém-se a LISTA: a origem é por
 // permissão e não cabe numa célula da grelha.
 import { useId, useMemo, useState, type ReactNode } from "react";
@@ -68,42 +67,44 @@ interface ItemGrupoProps {
   /** Quantas das permissões da lista estão concedidas. */
   concedidas: (lista: Permissao[]) => number;
   linha: (p: Permissao) => ReactNode;
-  /** "Marcar tudo" e "Limpar" do módulo (só com edição). */
+  /** "Tudo" e "Limpar" do grupo (só com edição), ao lado do cabeçalho (nunca dentro do botão do acordeão). */
   acoes?: ReactNode;
-  /** Desenha os blocos de uma tabela em grelha; sem isto, lista. */
-  grelha?: (titulo: string, blocos: BlocoCategoria[]) => ReactNode;
+  /** Desenha o grupo como uma grelha; sem isto, lista (separador do utilizador). */
+  grelha?: (g: GrupoMenu) => ReactNode;
 }
 
-/** Um módulo do menu: cabeçalho com o total concedido, categorias diretas e subgrupos. */
+/** Um módulo do menu: cabeçalho com o total concedido e, lá dentro, a grelha do grupo ou a lista por subgrupo. */
 function ItemGrupo({ grupo: g, concedidas, linha, acoes, grelha }: ItemGrupoProps) {
   const { t } = useTranslation();
   const contagem = (lista: Permissao[]) => t("usersProfiles.matrix.count", { n: concedidas(lista), total: lista.length });
   return (
     <AccordionItem value={g.rotulo}>
-      <AccordionTrigger className="min-h-11 py-2 text-left hover:no-underline motion-reduce:transition-none">
-        <span className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="font-medium">{g.rotulo}</span>
-          <Badge variant="outline">{contagem(g.permissoes)}</Badge>
-        </span>
-      </AccordionTrigger>
-      <AccordionContent>
-        <div className="space-y-3 pl-1 sm:pl-3">
-          {acoes}
-          {grelha
-            ? g.blocos.length > 0 && grelha(g.rotulo, g.blocos)
-            : g.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={g.blocos.length > 1} linha={linha} />)}
-          {g.subgrupos.map((s) => (
-            <div key={s.rotulo} className="space-y-2 border-l-2 border-border pl-3">
-              <p className="flex flex-wrap items-center gap-x-3 text-sm font-medium text-foreground">
-                {s.rotulo}
-                <Badge variant="outline" className="text-xs">{contagem(s.permissoes)}</Badge>
-              </p>
-              {grelha
-                ? grelha(`${g.rotulo} › ${s.rotulo}`, s.blocos)
-                : s.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={s.blocos.length > 1} linha={linha} />)}
-            </div>
-          ))}
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <AccordionTrigger className="min-h-11 py-2 text-left hover:no-underline motion-reduce:transition-none">
+            <span className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="font-medium">{g.rotulo}</span>
+              <Badge variant="outline">{contagem(g.permissoes)}</Badge>
+            </span>
+          </AccordionTrigger>
         </div>
+        {acoes}
+      </div>
+      <AccordionContent>
+        {grelha ? <div className="pt-1">{grelha(g)}</div> : (
+          <div className="space-y-3 pl-1 sm:pl-3">
+            {g.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={g.blocos.length > 1} linha={linha} />)}
+            {g.subgrupos.map((s) => (
+              <div key={s.rotulo} className="space-y-2 border-l-2 border-border pl-3">
+                <p className="flex flex-wrap items-center gap-x-3 text-sm font-medium text-foreground">
+                  {s.rotulo}
+                  <Badge variant="outline" className="text-xs">{contagem(s.permissoes)}</Badge>
+                </p>
+                {s.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={s.blocos.length > 1} linha={linha} />)}
+              </div>
+            ))}
+          </div>
+        )}
       </AccordionContent>
     </AccordionItem>
   );
@@ -125,7 +126,7 @@ export function ArvorePermissoes({ permissoes, concedida, extra, edicao }: Arvor
   const linha = (p: Permissao) => <LinhaPermissao key={p.codigo} permissao={p} concedida={concedida(p.codigo)} extra={extra?.(p)} />;
   const grelha = extra && !edicao
     ? undefined
-    : (titulo: string, blocos: BlocoCategoria[]) => <GrelhaRecursoAcao titulo={titulo} blocos={blocos} concedida={concedida} edicao={edicao} />;
+    : (g: GrupoMenu) => <GrelhaRecursoAcao grupo={g} concedida={concedida} edicao={edicao} />;
   const acoes = (g: GrupoMenu) => (edicao && !edicao.desativada
     ? <AcoesModulo modulo={g.rotulo} aoMarcar={() => edicao.aoModulo(g.permissoes, true)} aoLimpar={() => edicao.aoModulo(g.permissoes, false)} />
     : undefined);

@@ -1,95 +1,156 @@
 import { describe, expect, it } from "vitest";
-import { agruparPorMenu, type BlocoCategoria } from "./gruposPermissoes";
-import { estadoConjunto, linhasDosBlocos, permissoesDaColuna, permissoesOutras, separarCodigo } from "./grelhaPermissoes";
-import { definirConjunto, alternarPermissao } from "./matriz";
+import { agruparPorMenu } from "./gruposPermissoes";
+import { encurtarNome, estadoConjunto, secoesDoGrupo, separarCodigo } from "./grelhaPermissoes";
+import { alternarPermissao, definirConjunto } from "./matriz";
 import { permissoesDoMenu } from "./rolesReais";
 import { PERMISSOES_EM_USO } from "./permissoesEmUso";
 import type { Permissao } from "./tipos";
 
 const p = (codigo: string, nome = codigo, categoria = codigo.split(".")[0] ?? ""): Permissao =>
   ({ codigo, categoria, nome, perigosa: false, comAmbito: false });
-const bloco = (categoria: string, rotulo: string, codigos: string[]): BlocoCategoria =>
-  ({ categoria, rotulo, permissoes: codigos.map((c) => p(c)) });
+const grupo = (rotulo: string, lista: Permissao[]) => {
+  const g = agruparPorMenu(lista).find((x) => x.rotulo === rotulo);
+  if (!g) throw new Error(`sem grupo ${rotulo}`);
+  return secoesDoGrupo(g);
+};
+const catalogoReal = () => permissoesDoMenu(Object.entries(PERMISSOES_EM_USO).flatMap(([category, codigos]) =>
+  codigos.map((code) => ({ code, name: code, category, is_dangerous: false }))));
 
 describe("separarCodigo", () => {
   it("tira a ação do fim e reconhece as variantes", () => {
     expect(separarCodigo("leads.edit")).toEqual({ recurso: "leads", acao: "edit", variante: null });
     expect(separarCodigo("hr.pessoas.saude.view")).toEqual({ recurso: "hr.pessoas.saude", acao: "view", variante: null });
     expect(separarCodigo("hr.pessoas.view.own")).toEqual({ recurso: "hr.pessoas", acao: "view", variante: "own" });
-    expect(separarCodigo("hr.ausencias.aprovar.chefia")).toEqual({ recurso: "hr.ausencias", acao: "aprovar", variante: "chefia" });
   });
 });
 
-describe("linhasDosBlocos", () => {
-  it("um bloco de um só recurso dá uma linha com o rótulo do bloco, colunas fixas e o resto em Outras", () => {
-    const [l] = linhasDosBlocos([bloco("negocios_visita", "Visita", ["negocios.visita.gerir"])]);
-    expect(l.rotulo).toBe("Visita");
-    expect(l.fixas).toEqual({});
-    expect(l.outras.map((c) => c.rotulo)).toEqual(["Gerir"]);
-  });
-
-  it("um bloco que mistura recursos dá uma linha por recurso", () => {
-    const linhas = linhasDosBlocos([bloco("negocios_pessoas", "Pessoas", [
-      "leads.edit", "leads.convert", "clients.view", "clients.create", "clients.edit", "contacts.view",
-    ])]);
-    expect(linhas.map((l) => l.rotulo)).toEqual(["Leads", "Clientes", "Contactos"]);
-    expect(linhas[0].fixas.editar?.codigo).toBe("leads.edit");
-    expect(linhas[0].outras.map((c) => c.rotulo)).toEqual(["Converter"]);
-    expect(Object.keys(linhas[1].fixas)).toEqual(["ver", "criar", "editar"]);
-  });
-
-  it(".own e outras variantes vão para Outras com a variante no rótulo; Ver fica o 'ver tudo'", () => {
-    const [l] = linhasDosBlocos([bloco("hr_ausencias", "Ausências", [
-      "hr.ausencias.view", "hr.ausencias.view.own", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.ausencias.pedir.outros",
-    ])]);
-    expect(l.fixas.ver?.codigo).toBe("hr.ausencias.view");
-    expect(l.outras.map((c) => c.rotulo)).toEqual(["Ver (só as suas)", "Aprovar (chefia)", "Aprovar (RH)", "Pedir (por outros)"]);
-  });
-
-  it("ação sem rótulo próprio ou rótulos repetidos usam o nome da base; edit e update na mesma linha: o segundo vai para Outras", () => {
-    const b: BlocoCategoria = { categoria: "x", rotulo: "X", permissoes: [
-      p("x.edit"), p("x.update", "Atualizar X"), p("x.view_costs", "Ver custos de X"),
-    ] };
-    const [l] = linhasDosBlocos([b]);
-    expect(l.fixas.editar?.codigo).toBe("x.edit");
-    expect(l.outras.map((c) => c.rotulo)).toEqual(["Editar", "Ver custos de X"]);
-    const [d] = linhasDosBlocos([{ categoria: "y", rotulo: "Y", permissoes: [p("y.manage", "Gerir A"), p("y.gerir", "Gerir B")] }]);
-    expect(d.outras.map((c) => c.rotulo)).toEqual(["Gerir A", "Gerir B"]);
-  });
-
-  it("com o catálogo em uso, nenhuma permissão se perde nem se repete na grelha", () => {
-    const catalogo = permissoesDoMenu(Object.entries(PERMISSOES_EM_USO).flatMap(([category, codigos]) =>
-      codigos.map((code) => ({ code, name: code, category, is_dangerous: false }))));
-    const naGrelha = agruparPorMenu(catalogo).flatMap((g) => [
-      ...linhasDosBlocos(g.blocos), ...g.subgrupos.flatMap((s) => linhasDosBlocos(s.blocos)),
-    ]).flatMap((l) => [...Object.values(l.fixas), ...l.outras.map((c) => c.permissao)].map((x) => x?.codigo));
-    const doMenu = agruparPorMenu(catalogo).flatMap((g) => g.permissoes.map((x) => x.codigo));
-    expect([...naGrelha].sort()).toEqual([...doMenu].sort());
-    expect(new Set(naGrelha).size).toBe(naGrelha.length);
-  });
-
-  it("colunas e estado de conjunto (indeterminado)", () => {
-    const linhas = linhasDosBlocos([bloco("a", "A", ["a.view", "a.edit", "a.convert"]), bloco("b", "B", ["b.view"])]);
-    expect(permissoesDaColuna(linhas, "ver").map((x) => x.codigo)).toEqual(["a.view", "b.view"]);
-    expect(permissoesDaColuna(linhas, "eliminar")).toEqual([]);
-    expect(permissoesOutras(linhas).map((x) => x.codigo)).toEqual(["a.convert"]);
-    const ver = permissoesDaColuna(linhas, "ver");
-    expect(estadoConjunto(ver, (c) => c === "a.view")).toBe("indeterminate");
-    expect(estadoConjunto(ver, () => true)).toBe(true);
-    expect(estadoConjunto(ver, () => false)).toBe(false);
+describe("encurtarNome", () => {
+  it("tira o artigo e o contexto do fim; o nome da linha só nas linhas de recurso", () => {
+    expect(encurtarNome("Editar o orçamento do negócio", "Negócio", false)).toBe("Editar orçamento");
+    expect(encurtarNome("Gerir as visitas do negócio", "Visita", false)).toBe("Gerir visitas");
+    expect(encurtarNome("Registar contacto", "Contacto", false)).toBe("Registar contacto");
+    expect(encurtarNome("Converter leads", "Leads")).toBe("Converter");
+    expect(encurtarNome("Configurar o workflow de Pessoas", "Pessoas (ecrã)")).toBe("Configurar workflow");
   });
 });
 
-describe("definirConjunto (linha/coluna) com as regras de 'ver'", () => {
+describe("secoesDoGrupo", () => {
+  it("Negócios: secção Pessoas com o recurso inteiro por linha e secção Fases só de ações, uma linha por fase", () => {
+    const lista = [
+      p("pessoas.view", "Ver negócios de pessoas"), p("pessoas.reopen", "Reabrir negócios ganhos"), p("negocios.perder", "Dar o negócio como perdido"),
+      p("leads.view"), p("leads.create"), p("leads.assign", "Atribuir leads"), p("leads.edit"), p("leads.convert", "Converter leads"),
+      p("clients.view"), p("contacts.view"),
+      p("negocios.contacto.registar", "Registar contacto"), p("negocios.visita.gerir", "Gerir as visitas do negócio"),
+      p("negocios.orcamento.editar", "Editar o orçamento do negócio"), p("quotes.view_costs", "Ver custos"),
+      p("client_contracts.cancel", "Anular contrato"), p("negocios.registar_fatura", "Registar faturas do negócio"),
+    ];
+    const [pessoas, fases, ...resto] = grupo("Negócios", lista);
+    expect(resto).toEqual([]);
+    expect(pessoas.titulo).toBe("Pessoas");
+    expect(pessoas.soAcoes).toBe(false);
+    expect(pessoas.linhas.map((l) => l.rotulo)).toEqual(["Pessoas (ecrã)", "Leads", "Clientes", "Contactos"]);
+    const leads = pessoas.linhas[1];
+    expect(Object.keys(leads.fixas).sort()).toEqual(["criar", "editar", "ver"]);
+    expect(leads.outras.map((c) => c.rotulo)).toEqual(["Converter", "Atribuir"]);
+
+    expect(fases.titulo).toBe("Fases do negócio");
+    expect(fases.soAcoes).toBe(true);
+    expect(fases.linhas.map((l) => l.rotulo)).toEqual(["Contacto", "Visita", "Negócio", "Financeiro", "Geral"]);
+    const negocio = fases.linhas[2];
+    expect(negocio.fixas).toEqual({});
+    expect(negocio.outras.map((c) => c.rotulo)).toEqual(["Editar orçamento", "Anular contrato", "Ver custos do orçamento"]);
+    expect(fases.linhas[0].outras[0].rotulo).toBe("Registar contacto");
+    expect(fases.linhas[4].outras[0].rotulo).toBe("Dar negócio como perdido");
+  });
+
+  it("secção de uma só linha com o nome dela perde o título e junta-se às sem título vizinhas", () => {
+    const secoes = grupo("Agendamentos", [p("scheduling.boards.view", "x", "scheduling"), p("scheduling.items.view", "y", "scheduling")]);
+    expect(secoes).toHaveLength(1);
+    expect(secoes[0].titulo).toBeNull();
+    expect(secoes[0].linhas.map((l) => l.rotulo)).toEqual(["Quadros", "Itens"]);
+  });
+
+  it(".own vai para Outras ('Ver (só as suas)' sem nome legível); Ver fica o 'ver tudo'", () => {
+    const [s] = grupo("Recursos Humanos", [p("hr.pessoas.view", "hr.pessoas.view", "hr"), p("hr.pessoas.view.own", "hr.pessoas.view.own", "hr")]);
+    expect(s.linhas[0].fixas.ver?.codigo).toBe("hr.pessoas.view");
+    expect(s.linhas[0].outras.map((c) => c.rotulo)).toEqual(["Ver (só as suas)"]);
+  });
+
+  it("rótulos repetidos na mesma linha voltam ao nome completo", () => {
+    const [s] = grupo("Inventário", [p("suppliers.manage", "Gerir fornecedores"), p("suppliers.portal_manage", "Gerir fornecedores")]);
+    expect(s.linhas[0].outras.map((c) => c.rotulo)).toEqual(["Gerir fornecedores", "Gerir fornecedores"]);
+  });
+
+  it("com o catálogo em uso, nenhuma permissão se perde nem se repete, e nenhuma linha repete o título da secção", () => {
+    const grupos = agruparPorMenu(catalogoReal());
+    grupos.forEach((g) => {
+      const secoes = secoesDoGrupo(g);
+      const naGrelha = secoes.flatMap((s) => s.linhas.flatMap((l) => [...Object.values(l.fixas), ...l.outras.map((c) => c.permissao)]))
+        .map((x) => x?.codigo);
+      expect([...naGrelha].sort()).toEqual(g.permissoes.map((x) => x.codigo).sort());
+      expect(new Set(naGrelha).size).toBe(naGrelha.length);
+      secoes.forEach((s) => s.linhas.forEach((l) => expect(l.rotulo.toLowerCase()).not.toBe(s.titulo?.toLowerCase())));
+    });
+  });
+
+  it("ordem dos chips das fases pelo fluxo do negócio, seja qual for a ordem do catálogo", () => {
+    const lista = [
+      p("quotes.view_costs", "Ver custos"), p("negocios.obra.fechar", "Encerrar a obra"), p("negocios.validar_pagamento", "Validar pagamentos do negócio"),
+      p("client_contracts.cancel", "Cancelar"), p("negocios.contrato.editar", "Editar o contrato do negócio"),
+      p("negocios.proposta.decidir", "Registar a decisão do cliente sobre a proposta"), p("negocios.obra.imprevistos", "Decidir os imprevistos da obra"),
+      p("negocios.proposta.enviar", "Enviar a proposta ao cliente"), p("negocios.margem.aprovar", "Aprovar a margem do orçamento"),
+      p("negocios.obra.materiais", "Encomendar materiais da obra"), p("negocios.registar_fatura", "Registar faturas do negócio"),
+      p("negocios.orcamento.editar", "Editar o orçamento do negócio"), p("negocios.obra.executar", "Executar as tarefas da obra"),
+      p("negocios.obra.planear", "Planear a obra"),
+    ].map((x) => ({ ...x, categoria: x.categoria === "negocios" ? "pessoas" : x.categoria }));
+    const fases = grupo("Negócios", lista).find((s) => s.titulo === "Fases do negócio");
+    const chips = (rotulo: string) => fases?.linhas.find((l) => l.rotulo === rotulo)?.outras.map((c) => c.rotulo);
+    expect(chips("Negócio")).toEqual([
+      "Editar orçamento", "Aprovar margem do orçamento", "Enviar proposta ao cliente", "Registar decisão do cliente sobre a proposta",
+      "Editar contrato", "Anular contrato", "Ver custos do orçamento",
+    ]);
+    expect(chips("Obra")).toEqual(["Planear obra", "Executar tarefas", "Encomendar materiais", "Decidir imprevistos", "Encerrar obra"]);
+    expect(chips("Financeiro")).toEqual(["Registar faturas", "Validar pagamentos"]);
+  });
+
+  it("restantes linhas: ver → criar → editar/gerir → aprovar → exportar/importar → configurar → perigosas", () => {
+    const lista = [
+      p("purchase_orders.delete_sent", "Eliminar enviadas"), p("purchase_orders.config", "Configurar encomendas"),
+      p("purchase_orders.import", "Importar encomendas"), p("purchase_orders.approve", "Aprovar encomendas"),
+      p("purchase_orders.revert_receipt", "Reverter receção"),
+      p("purchase_orders.receive", "Receber encomendas"), p("purchase_orders.duplicate", "Duplicar encomendas"),
+      p("purchase_orders.view_prices", "Ver preços"),
+    ].map((x, i) => (i === 4 ? { ...x, perigosa: true } : x));
+    const [s] = grupo("Inventário", lista);
+    expect(s.linhas[0].outras.map((c) => c.permissao.codigo)).toEqual([
+      "purchase_orders.view_prices", "purchase_orders.duplicate", "purchase_orders.receive", "purchase_orders.approve",
+      "purchase_orders.import", "purchase_orders.config", "purchase_orders.delete_sent", "purchase_orders.revert_receipt",
+    ]);
+  });
+
+  it("leads.config diz o quê: 'Configurar workflows e IA'", () => {
+    const [s] = grupo("Negócios", [p("leads.config", "leads.config")]);
+    expect(s.linhas[0].outras[0].rotulo).toBe("Configurar workflows e IA");
+  });
+
+  it("estado de conjunto (indeterminado)", () => {
+    const lista = [p("a.view"), p("b.view")];
+    expect(estadoConjunto(lista, (c) => c === "a.view")).toBe("indeterminate");
+    expect(estadoConjunto(lista, () => true)).toBe(true);
+    expect(estadoConjunto(lista, () => false)).toBe(false);
+  });
+});
+
+describe("definirConjunto (linha/secção) com as regras de 'ver'", () => {
   const CAT = ["leads.view", "leads.create", "leads.edit", "clients.view", "clients.edit", "hr.pessoas.view", "hr.pessoas.edit"].map((c) => p(c));
   const de = (...c: string[]) => CAT.filter((x) => c.includes(x.codigo));
 
-  it("marcar uma linha com o 'ver' do módulo concede tudo; uma coluna sem o 'ver' deixa as bloqueadas por marcar", () => {
+  it("marcar uma linha com o 'ver' do módulo concede tudo; sem o 'ver' as bloqueadas ficam por marcar", () => {
     expect(definirConjunto([], de("leads.view", "leads.create", "leads.edit"), true, CAT)).toEqual(["leads.view", "leads.create", "leads.edit"]);
     expect(definirConjunto(["clients.view"], de("leads.edit", "clients.edit"), true, CAT)).toEqual(["clients.view", "clients.edit"]);
   });
 
-  it("desmarcar a coluna Ver tira as dependentes do módulo; não toca nas outras", () => {
+  it("desmarcar o 'ver' do módulo tira as dependentes; não toca nas outras", () => {
     expect(definirConjunto(["leads.view", "leads.edit", "clients.view"], de("leads.view"), false, CAT)).toEqual(["clients.view"]);
   });
 
