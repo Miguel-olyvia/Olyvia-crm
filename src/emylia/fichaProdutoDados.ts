@@ -112,9 +112,10 @@ export async function lerFornecedoresOrg(org: string): Promise<Res<{ id: string;
 
 /** O catálogo do fornecedor no portal, com pesquisa (a mesma chamada de Compras, filtro "todos"). */
 export async function procurarArtigos(supplierId: string, q: string): Promise<Res<CrmCatalogList>> {
-  const { callRpc } = await compras();
-  const { data, error } = await callRpc<CrmCatalogList>("rpc_supplier_catalog_list", {
-    p_supplier_id: supplierId, p_filter: "all", p_search: q.trim() || null, p_limit: 20, p_offset: 0, p_include_inactive: false,
+  const { callRpcLocal } = await compras();
+  // Fase 5: só artigos do tipo produto (um serviço do fornecedor liga-se a um serviço nosso, em Compras).
+  const { data, error } = await callRpcLocal<CrmCatalogList>("rpc_supplier_catalog_list", {
+    p_supplier_id: supplierId, p_filter: "all", p_search: q.trim() || null, p_limit: 20, p_offset: 0, p_include_inactive: false, p_kind: "produto",
   });
   if (error || !data) return { ok: false, erro: error?.message || "Não foi possível carregar o catálogo do fornecedor." };
   return { ok: true, v: data };

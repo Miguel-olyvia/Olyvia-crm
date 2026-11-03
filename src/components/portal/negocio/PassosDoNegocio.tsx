@@ -6,8 +6,8 @@ export const PASSOS_PORTAL = [
   { id: 1, nome: "Rever a proposta", titulo: "Reveja a sua proposta", texto: "Está toda aqui em baixo: o que vamos fazer, fase a fase, os materiais, o preço e as condições." },
   { id: 2, nome: "Aceitar", titulo: "Aceite a proposta", texto: "Se está de acordo, aceite com o código que lhe enviamos por SMS. Se quiser mudar alguma coisa, peça alterações." },
   { id: 3, nome: "Assinar o contrato", titulo: "Assine o contrato", texto: "A proposta foi aceite. Leia o contrato e assine com o código que lhe enviamos por SMS." },
-  { id: 4, nome: "Acompanhar a obra", titulo: "A sua obra está em curso", texto: "O contrato está assinado. A equipa avisa-o por aqui e por contacto direto a cada avanço." },
-  { id: 5, nome: "Receber a obra", titulo: "Receber a obra", texto: "No fim da obra confirmamos consigo que está tudo como combinado." },
+  { id: 4, nome: "Acompanhar o serviço", titulo: "A sua obra está em curso", texto: "O contrato está assinado. A equipa avisa-o por aqui e por contacto direto a cada avanço." },
+  { id: 5, nome: "Receber o serviço", titulo: "Receber o serviço", texto: "No fim da obra confirmamos consigo que está tudo como combinado." },
 ] as const;
 
 export type PassoPortal = 1 | 2 | 3 | 4 | 5;

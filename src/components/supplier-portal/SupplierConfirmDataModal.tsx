@@ -9,6 +9,8 @@ import { useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import { isNoSupplierAccess, isSpFunctionMissing, spErrorMessage } from "@/lib/supplierPortal/spRpc";
 import { SupplierDataForm } from "@/components/supplier-portal/SupplierDataForm";
 import { useSpMySupplierData } from "@/components/supplier-portal/useSpMySupplierData";
+import { SpMobileField } from "@/components/supplier-portal/contract/SpMobileField";
+import { useSpMobileInput } from "@/components/supplier-portal/contract/useSpMobileInput";
 
 interface SupplierConfirmDataModalProps {
   open: boolean;
@@ -27,6 +29,8 @@ export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps
   const { data, error, isLoading, isError, refetch, isFetching, invalidate } = useSpMySupplierData(open);
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
+  // Telemóvel pessoal (para o SMS da assinatura de contratos); gravado com os dados.
+  const mobile = useSpMobileInput({ enabled: open });
 
   // Saída para não ficar preso se o servidor recusar ou falhar sempre (igual ao "Sair" do layout).
   const logout = async () => {
@@ -98,6 +102,20 @@ export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps
               markProfileConfirmed();
             }}
             onNoAccess={() => void refresh()}
+            beforeSave={mobile.save}
+            extraFields={
+              mobile.available ? (
+                <SpMobileField
+                  id="sp-confirm-data-mobile"
+                  value={mobile.value}
+                  onChange={mobile.setValue}
+                  error={mobile.error}
+                  disabled={mobile.loading}
+                  required
+                  hint="Identifica-o na sua conta. É para este número que enviamos o código SMS quando assinar um contrato."
+                />
+              ) : null
+            }
           />
         )}
 

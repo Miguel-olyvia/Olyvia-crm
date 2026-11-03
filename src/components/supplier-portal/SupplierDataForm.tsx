@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Info, Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,10 @@ interface SupplierDataFormProps {
   /** no_supplier_access: o acesso caiu entretanto. */
   onNoAccess?: () => void;
   className?: string;
+  /** Campos extra no fim do formulário (p.ex. o telemóvel pessoal no passo "Confirme os seus dados"). */
+  extraFields?: ReactNode;
+  /** Corre depois da validação e antes de gravar; false = não gravar (o próprio mostra o erro). */
+  beforeSave?: () => Promise<boolean>;
 }
 
 /**
@@ -42,7 +46,7 @@ interface SupplierDataFormProps {
  * passo obrigatório "Confirme os seus dados" e pela página "Os meus dados".
  * Com can_edit=false (utilizador de consulta) fica só de leitura.
  */
-export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNoAccess, className }: SupplierDataFormProps) {
+export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNoAccess, className, extraFields, beforeSave }: SupplierDataFormProps) {
   const { toast } = useToast();
   const [values, setValues] = useState<SupplierDataFormValues>(() => toFormValues(initial.data));
   // Base de comparação do payload (só vai o que mudou). Passa a ser o que se
@@ -78,6 +82,7 @@ export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNo
     setValues(result.values);
     setSaving(true);
     try {
+      if (beforeSave && !(await beforeSave())) return;
       const saved = await spUpdateMySupplierData(result.payload);
       setBaseline(result.values);
       onSaved(saved, result.values);
@@ -177,6 +182,8 @@ export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNo
         {textField("country", "País", { autoComplete: "country-name", placeholder: "Portugal", maxLength: 100 })}
         {textField("website", "Website", { type: "url", autoComplete: "url", placeholder: "www.empresa.pt", maxLength: 255 })}
       </fieldset>
+
+      {extraFields}
 
       {!readOnly && (
         <div className="flex justify-end">

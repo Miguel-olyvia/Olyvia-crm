@@ -6,6 +6,7 @@ import { pessoaDeOrigem } from "./PessoasV1";
 import { clienteDeOrigem } from "./ClientesV1";
 import { ArrowLeft, Check, Euro, Lock, Mail, MapPin, MessageCircle, MoreHorizontal, Pencil, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { BotaoAcessoPortal, EstadoAcessoPortal, temPortal } from "./AcessoPortalNegocio";
+import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { EditarCliente } from "./EditarCliente";
 import { modoReal } from "./acessosPortal";
 import { PortalCliente } from "./PortalCliente";
@@ -193,6 +194,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       {/* 23/10 (2.0): o email que falta para enviar ao portal e o estado da conta do cliente */}
       {editar && <EditarCliente ctx={ctx} d={d} fechar={() => setEditar(false)} />}
       <div className="mt-4 empty:hidden"><EstadoAcessoPortal ctx={ctx} d={d} /></div>
+      {/* 2/11 (reunião): escolher um ficheiro e pô-lo no portal do cliente, em Documentos */}
+      <div className="mt-2 empty:hidden"><DocumentosParaCliente d={d} /></div>
       {S.confirmPerda === d.id && (
         <div role="alertdialog" aria-label="Confirmar" className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 animate-in fade-in-0">
           <p className="flex-1 text-[15px]">Marcar como perdido? Sai do quadro, mas fica no histórico.</p>

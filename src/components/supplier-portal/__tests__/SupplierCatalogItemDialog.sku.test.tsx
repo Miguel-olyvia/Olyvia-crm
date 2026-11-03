@@ -4,6 +4,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const upsert = vi.fn(), classificar = vi.fn(), categorias = vi.fn();
+// O diálogo importa as fotos de catalogImages, que carrega o cliente Supabase (sem env nos testes).
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/supplierPortal/spRpc", () => ({
   spCatalogUpsertItem: (...a: unknown[]) => upsert(...a),
   spCatalogClassificarItem: (...a: unknown[]) => classificar(...a),

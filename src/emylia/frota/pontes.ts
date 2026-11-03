@@ -10,6 +10,7 @@ import { HOJE, addDias } from "./base";
 import { lerFrota, type AbaFrota } from "./loja";
 import { ativa, bloqueios, custoKmDeslocacao } from "./regras";
 import type { Frota, ObraRef } from "./tipos";
+import { servicosDaObra } from "../fasesObra";
 
 /* ------------------------------------------------------------------ Obras */
 
@@ -19,6 +20,7 @@ export function obrasDoEstado(S: Estado): ObraRef[] {
     id: d.id, nome: d.nome, servico: d.servico, local: d.f.localidade || d.local.split(",").pop()!.trim(), estado: d.obra.plano!.estado,
     tarefas: d.obra.plano!.tasks.map((t) => ({ nome: t.nome, dia: t.dia, dur: t.dur, tec: t.tec })),
     ec: d.obra.ec?.ref ?? null,
+    svcs: servicosDaObra(d),
   }));
 }
 /** "Obra #1022 · WC · Marta Lima, Odivelas". */

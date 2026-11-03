@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { emailOk, modoReal } from "./acessosPortal";
 import { temPortal } from "./AcessoPortalNegocio";
+import { TelefoneIndicativo } from "./TelefoneIndicativo";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
@@ -38,6 +39,8 @@ export function aplicarDados(d: Negocio, x: DadosCliente): (keyof DadosCliente)[
   d.tel = x.telefone.trim() || email;
   if (email) d.f.email = email; else delete d.f.email;
   for (const k of ["nif", "morada", "cp", "localidade", "fracao"] as const) { const v = x[k].trim(); if (v) d.f[k] = k === "nif" ? v.replace(/\s/g, "") : v; else delete d.f[k]; }
+  // 2/11: no Financeiro, o NIF escrito agora passa para os dados de faturação que ainda não o tinham
+  if (d.fase >= 4 && d.f.nif && !d.f.nif_fat) d.f.nif_fat = d.f.nif;
   if (d.sug) for (const k of mudou) delete d.sug[k];
   d.local = [d.f.morada, d.f.cp, d.f.localidade].filter(Boolean).join(", ") || d.local;
   if (mudou.length) d.hist.push({ t: "Dados do cliente mudados: " + mudou.join(", "), q: "hoje", k: "a" });
@@ -82,7 +85,13 @@ export function EditarCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       className="mt-4 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]">
       <h3 className="text-[17px] font-semibold">Dados do cliente</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {CAMPOS.map(([k, l, tipo]) => (
+        {CAMPOS.map(([k, l, tipo]) => k === "telefone" ? (
+          // 2/11: o telefone com o seletor de indicativo do país (o código para assinar vai por SMS)
+          <div key={k} className="grid gap-1.5 text-sm font-medium">
+            <label htmlFor={`cli-tel-${d.id}`}>{l}</label>
+            <TelefoneIndicativo id={`cli-tel-${d.id}`} valor={x.telefone} mudar={(v) => setX((y) => ({ ...y, telefone: v }))} rotulo={l} classeInput={inp} />
+          </div>
+        ) : (
           <label key={k} className="grid gap-1.5 text-sm font-medium">
             {l}
             <input type={tipo ?? "text"} value={x[k]} autoComplete="off" onChange={(e) => setX({ ...x, [k]: e.target.value })} className={inp} />

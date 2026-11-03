@@ -108,7 +108,7 @@ describe("no portal: receber a obra", () => {
   it("diz como encontrou a obra, assina o auto e recebe o relatório", () => {
     const { S, A, d } = obraAcabada();
     render(<Portal S={S} d={d} A={A} />);
-    expect(screen.getByRole("heading", { name: "Receber a obra" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Receber o serviço" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "O auto de receção" })).toBeTruthy();
     const assinar = () => within(screen.getByRole("region", { name: "Próximo passo" })).getByRole("button", { name: /Assinar o auto de receção/ }) as HTMLButtonElement;
     expect(assinar().disabled).toBe(true); // primeiro, como encontrou a obra

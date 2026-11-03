@@ -93,3 +93,18 @@ describe("lerEncomendaReal", () => {
     expect(r.pos).toEqual([{ id: "PO-7", uuid: "po-7", forn: "Gama", estado: "pending", fase: "por aprovar", prometida: null, prevista: "" }]);
   });
 });
+
+describe("2/11: a venda ao validar o pagamento não é uma saída para a obra", () => {
+  const linha = (x: Partial<LinhaDocEc>): LinhaDocEc => ({ quote_line_id: "q", item_type: "product", product_id: "p", product_name: "bolas2", product_sku: null,
+    quantity: 1, unidade: "un", line_status: "servido_por_stock", purchase_order_id: null, qty_needed: 1, qty_reserved: 0, qty_ordered: 0,
+    qty_received: 0, qty_missing: 0, qty_served: 1, has_preferred_supplier: true, ...x });
+  it("servida sem saída de stock fica pronta no armazém", () => {
+    expect(estadoDaLinha(linha({ stock_exit_movement_id: null }))).toBe("ready");
+  });
+  it("com a saída de stock, saiu para a obra", () => {
+    expect(estadoDaLinha(linha({ stock_exit_movement_id: "m1" }))).toBe("served");
+  });
+  it("uma leitura antiga, sem o campo, fica como antes", () => {
+    expect(estadoDaLinha(linha({}))).toBe("served");
+  });
+});

@@ -9,12 +9,12 @@ import { useInventario } from "../inventario/loja";
 import { fasesTransporte, faltaParaCarregar, ligacoesObra } from "./transporteObra";
 
 /** 16/10: a viatura ligada à obra (Frota › Ligações › Operações) e o estado do transporte de cada fase: por carregar / na carrinha / entregue. */
-function ViaturaLigada({ obra, ec, estado }: { obra: number; ec?: string | null; estado?: string }) {
+function ViaturaLigada({ obra, ec, estado, svcs }: { obra: number; ec?: string | null; estado?: string; svcs?: string[] }) {
   const F = useFrota(), inv = useInventario();
   const comFrota = useMolduraFrota();
   const lig = ligacoesObra(F, obra);
   if (!lig.length) return null;
-  const o = { ec: ec ?? null, estado: estado ?? "" };
+  const o = { ec: ec ?? null, estado: estado ?? "", svcs };
   const fases = fasesTransporte(inv, o), falta = faltaParaCarregar(inv, o);
   return (
     <div className="mt-3 text-[15px]" role="group" aria-label="Viatura ligada à obra">
@@ -39,11 +39,12 @@ function ViaturaLigada({ obra, ec, estado }: { obra: number; ec?: string | null;
   );
 }
 
-export function ViaturasObra({ obra, ec, estado }: { obra: number; ec?: string | null; estado?: string }) {
+/** 02/11: `svcs`, os serviços da obra (obraOps.ts servicosDaObra): o transporte põe os materiais na fase da regra única, como na Frota. */
+export function ViaturasObra({ obra, ec, estado, svcs }: { obra: number; ec?: string | null; estado?: string; svcs?: string[] }) {
   const F = useFrota();
   const comFrota = useMolduraFrota(); // só quando a moldura do protótipo consegue mesmo abrir a Frota
   const l = viaturasDaObra(F, obra);
-  if (!l.length) return <ViaturaLigada obra={obra} ec={ec} estado={estado} />;
+  if (!l.length) return <ViaturaLigada obra={obra} ec={ec} estado={estado} svcs={svcs} />;
   // 21/10: uma linha por viatura (matrícula e quem a leva; o que se fez e quando por baixo; o custo por km à direita), sem texto corrido
   return (<>
     <div className="mt-3" aria-label="Viaturas da obra" role="group">
@@ -68,6 +69,6 @@ export function ViaturasObra({ obra, ec, estado }: { obra: number; ec?: string |
         ))}
       </ul>
     </div>
-    <ViaturaLigada obra={obra} ec={ec} estado={estado} />
+    <ViaturaLigada obra={obra} ec={ec} estado={estado} svcs={svcs} />
   </>);
 }

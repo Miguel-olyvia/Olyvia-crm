@@ -6,6 +6,7 @@ import {
   checkFile,
   jsonActionSchema,
   maskEmail,
+  portalUploadDecision,
   rpcErrorBody,
   sanitizeFileName,
   sha256Hex,
@@ -139,5 +140,23 @@ describe("emails", () => {
   it("maskEmail", () => {
     expect(maskEmail("joana@exemplo.pt")).toBe("jo***@exemplo.pt");
     expect(maskEmail("x")).toBe("***");
+  });
+});
+
+describe("portalUploadDecision — upload do portal", () => {
+  it("anexo: contrato enviado ou proposta dele (can_attach)", () => {
+    expect(portalUploadDecision({ status: "sent", can_attach: true }, "anexo")).toEqual({ ok: true });
+    expect(portalUploadDecision({ status: "proposed", can_attach: true }, "anexo")).toEqual({ ok: true });
+    expect(portalUploadDecision({ status: "proposed", can_attach: false }, "anexo")).toMatchObject({ ok: false, status: 403, body: { error: "not_owner" } });
+    expect(portalUploadDecision({ status: "signed", can_attach: false }, "anexo")).toMatchObject({ ok: false, status: 409, body: { error: "invalid_state" } });
+  });
+  it("contrato_fornecedor: só numa proposta pdf_fornecedor ainda sem PDF (can_attach_main)", () => {
+    expect(portalUploadDecision({ status: "proposed", origin: "pdf_fornecedor", can_attach: true, can_attach_main: true }, "contrato_fornecedor")).toEqual({ ok: true });
+    expect(portalUploadDecision({ status: "proposed", origin: "pdf_fornecedor", can_attach: true, can_attach_main: false }, "contrato_fornecedor")).toMatchObject({ ok: false, status: 409, body: { error: "invalid_state" } });
+    expect(portalUploadDecision({ status: "proposed", origin: "modelo", can_attach: true, can_attach_main: false }, "contrato_fornecedor")).toMatchObject({ ok: false, status: 400, body: { error: "validation" } });
+    expect(portalUploadDecision({ status: "proposed", origin: "pdf_fornecedor", can_attach: false, can_attach_main: false }, "contrato_fornecedor")).toMatchObject({ ok: false, status: 403, body: { error: "not_owner" } });
+    // Num contrato enviado o portal continua a só poder juntar anexos.
+    expect(portalUploadDecision({ status: "sent", can_attach: true, can_attach_main: false }, "contrato_fornecedor")).toMatchObject({ ok: false, status: 400, body: { error: "validation" } });
+    expect(portalUploadDecision(null, "contrato_fornecedor")).toMatchObject({ ok: false, status: 400 });
   });
 });

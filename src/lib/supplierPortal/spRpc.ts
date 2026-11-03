@@ -11,6 +11,28 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 
+// Fotos do catálogo (Edge supplier-catalog-image): upload / remover / reordenar e URL público.
+export {
+  CATALOG_IMAGE_MAX_BYTES,
+  CATALOG_IMAGE_MAX_COUNT,
+  CATALOG_IMAGE_MIME,
+  CatalogImageError,
+  catalogImageUrl,
+  catalogImageUrls,
+  catalogMainImageUrl,
+  describeCatalogImageError,
+  removeCatalogImage as spCatalogRemoveImage,
+  reorderCatalogImages as spCatalogReorderImages,
+  setMainCatalogImage as spCatalogSetMainImage,
+  uploadCatalogImage as spCatalogUploadImage,
+  validateCatalogImageFile,
+} from "./catalogImages";
+export type {
+  CatalogImageRemoveResult,
+  CatalogImageReorderResult,
+  CatalogImageUploadResult,
+} from "./catalogImages";
+
 type SpFunctions = Database["public"]["Functions"];
 
 // ─── Conteúdo dos retornos Json (tipos locais) ──────────────────────────────
@@ -77,6 +99,15 @@ export interface SpCatalogItem {
   medida?: string | null;
   cor?: string | null;
   sku?: string | null;
+  /** Fase 5 (migration 20270103600000): produto | servico; serviço com distritos (códigos PT-xx) e prazo de mobilização. */
+  item_kind?: "produto" | "servico";
+  service_districts?: string[] | null;
+  mobilization_days?: number | null;
+  /**
+   * Fotos (migration 20270104300000): até 4 caminhos no bucket público supplier-catalog-images; a 1.ª é a
+   * principal. URL público: catalogImageUrl / catalogImageUrls. Ausente antes da migration → tratar como [].
+   */
+  image_paths?: string[];
 }
 
 export interface SpCatalogListResult {
@@ -84,6 +115,8 @@ export interface SpCatalogListResult {
   limit: number;
   offset: number;
   can_edit: boolean;
+  /** Fase 5: contagem por tipo (com a pesquisa e o filtro de inativos aplicados). */
+  kind_counts?: { produto: number; servico: number };
   items: SpCatalogItem[];
 }
 
@@ -100,10 +133,14 @@ export type SpCatalogField =
   | "currency"
   | "moq"
   | "lead_time_days"
-  | "is_active";
+  | "is_active"
+  // Fase 5: produto | serviço
+  | "item_kind"
+  | "service_districts"
+  | "mobilization_days";
 
-/** Chave ausente = mantém o valor gravado; presente com "" = limpa. */
-export type SpCatalogRowInput = Partial<Record<SpCatalogField, string | number | boolean>> & {
+/** Chave ausente = mantém o valor gravado; presente com "" = limpa. Distritos: lista de códigos ou texto "Lisboa; Setúbal". */
+export type SpCatalogRowInput = Partial<Record<SpCatalogField, string | number | boolean | string[]>> & {
   _row?: number;
 };
 
@@ -506,14 +543,18 @@ export async function spCatalogList(params: {
   limit?: number;
   offset?: number;
   includeInactive?: boolean;
+  /** Fase 5: só produtos ou só serviços (ausente = todos). */
+  kind?: "produto" | "servico" | null;
 }): Promise<SpCatalogListResult> {
   const search = params.search?.trim();
-  const args: SpFunctions["sp_catalog_list"]["Args"] = {
+  // p_kind (migration 20270103600000) ainda não está nos tipos gerados.
+  const args = {
     p_limit: params.limit ?? 50,
     p_offset: params.offset ?? 0,
     p_include_inactive: params.includeInactive ?? false,
     ...(search ? { p_search: search } : {}),
-  };
+    ...(params.kind ? { p_kind: params.kind } : {}),
+  } as SpFunctions["sp_catalog_list"]["Args"];
   return unwrap<SpCatalogListResult>(await supabase.rpc("sp_catalog_list", args));
 }
 

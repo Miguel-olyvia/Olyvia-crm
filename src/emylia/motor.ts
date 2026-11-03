@@ -1091,6 +1091,14 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
   else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: `Margem total de ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });
   return A;
 }
+/** 2/11 (reunião: "não deu, porquê? Ah, é por causa da margem"): o que bloqueia a proposta, dito pelo nome do produto ou do serviço.
+ *  Ex.: "Revestimento de parede (Margem 12% · mínimo 20%)". Até 3; o resto conta-se. */
+export function textoBloqueios(d: Negocio, S: Estado): string {
+  const A = alertas(d, S).filter((a) => a.k === "x" && !(d.orc!.aprov === "ok" && a.aprov));
+  if (!A.length) return "";
+  const t = A.slice(0, 3).map((a) => (a.d ? `${a.t} (${a.d})` : a.t)).join("; ");
+  return A.length > 3 ? `${t} e mais ${A.length - 3}` : t;
+}
 export function bloqueado(d: Negocio, S: Estado): boolean {
   const A = alertas(d, S).filter((a) => a.k === "x");
   if (!A.length) return false;
@@ -1309,7 +1317,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         if (bloqueado(d, S))
           return o!.aprov === "pedida"
             ? { t: "À espera da aprovação da Direção", sub: "Pedido de exceção à margem mínima.", who: "direcao", wait: true }
-            : { t: "Resolver os bloqueios", sub: "Corrigir o preço ou pedir aprovação à Direção.", btn: "Ver bloqueios", act: "irVerif", who: "comercial" };
+            : { t: "Resolver os bloqueios", sub: `${textoBloqueios(d, S) || "Ver a verificação"}. Corrigir o preço ou pedir aprovação à Direção.`, btn: "Ver bloqueios", act: "irVerif", who: "comercial" };
         return { t: o!.versoes?.length ? `Enviar a versão ${versaoAtual(o!)}` : "Enviar a proposta", sub: o!.vendaDireta ? "Venda direta: a proposta aceite dispensa o contrato." : "Vai para o portal do cliente.", btn: "Enviar proposta", act: "enviar", who: "comercial" };
       }
       if (!o!.aceite && o!.pedidoCliente) {
@@ -1473,6 +1481,7 @@ export function derivar(d: Negocio, k: string) {
   if (k === "tem_elevador" && v === "Sim") sugerir(d, { n_elevadores: "1" });
   if (k === "gas" && v === "Sem gás") sugerir(d, { diag_gas: "Não há" });
   if (k === "localidade" && v) sugerir(d, { concelho: v });
+  if (k === "nif" && v && d.fase >= 4 && !d.f.nif_fat) d.f.nif_fat = v;
   if (k === "fracao" && v) {
     const m = /^\s*(\d+)/.exec(v);
     const andar = /r\/?c|rés/i.test(v) ? "0" : m ? m[1] : "";
@@ -1535,8 +1544,13 @@ function preencher(d: Negocio, n: number) {
     def({ validade: "30 dias", prazo_exec: String(Math.max(3, Math.ceil(h / 7))), garantia: "2 anos", pagamento: "50% + 50% no fim",
       modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben" });
   }
-  if (n === 4) def({ nome_fiscal: d.nome, nif_fat: f.nif || "", morada_fiscal_igual: "Sim", email_fat: f.email || "", serie: "FT 2026",
-    tranche: f.pagamento === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)", vencimento: "15 dias", metodo: "Transferência" });
+  if (n === 4) {
+    // 2/11 (reunião: "isto devia ser automático"): os dados de faturação que vêm da ficha do cliente (o nome, o NIF, o email) ficam
+    // preenchidos de vez, sem pedir para confirmar; só a série, a tranche, o vencimento e o método continuam como sugestão
+    for (const [k, v] of Object.entries({ nome_fiscal: d.nome, nif_fat: f.nif || "", morada_fiscal_igual: "Sim", email_fat: f.email || "" }))
+      if (!f[k] && v) f[k] = v;
+    def({ serie: "FT 2026", tranche: f.pagamento === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)", vencimento: "15 dias", metodo: "Transferência" });
+  }
   if (n === 5) def({ data_pag: hojeISO(), responsavel: RESPONSAVEIS_OBRA[0] ?? "", horario: "Dias úteis 8h–17h", chaves: f.habitada_durante_obra === "Sim" ? "O cliente abre" : "Chave entregue",
     contacto_local: d.nome + " · " + d.tel, contentor: "Não", protecoes: protecoesSugeridas(f) });
 }
@@ -1890,9 +1904,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       return id;
     },
     contactar(id: number) { const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
-    marcarVisita(id: number, slot?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
+    marcarVisita(id: number, slot?: string, quemSugerido?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
       // 23/10: com a equipa real, a visita fica na agenda de quem a marca (e não na do Rúben de exemplo)
-      const quem = quemVaiPorOmissao();
+      // 2/11: ou de quem a Olyvia sugeriu para a vaga (livre e mais perto: sugestaoVisita.ts)
+      const quem = quemSugerido || quemVaiPorOmissao();
       if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes, duracao: d.f.duracao, quem })); log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda de " + quem.replace(/\s*\(.*\)\s*$/, ""), kind: "ok" }); },
     fecharVisita(id: number) {
       const d = deal(id);
@@ -1965,7 +1980,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // o início previsto da proposta é o do plano (o editor muda-o lá); sem ele, o primeiro dia útil possível
       if (!d.f.inicio_prev) d.f.inicio_prev = o.inicioObra ?? isoDia(iniciosRapidos(new Date())[0].data);
       o.verif = true;
-      if (bloqueado(d, S)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: baixe o desconto ou peça aprovação à Direção", kind: "bad" }); return false; }
+      if (bloqueado(d, S)) { avisar({ msg: "Ainda não dá para enviar", sub: `${textoBloqueios(d, S)}. Corrija o preço ou peça aprovação à Direção.`, kind: "bad" }); return false; }
       A.enviar(id);
       return !!o.enviada;
     },

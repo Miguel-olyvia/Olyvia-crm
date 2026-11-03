@@ -90,9 +90,9 @@ const ClientPortalNegocios = () => {
   const loading = orgsLoading || (Boolean(activeOrg) && consulta.isLoading);
   const falhou = consulta.isError && !consulta.data;
 
-  // Proposta por decidir: abre a proposta; depois de aceite e com contrato, abre o contrato.
-  const abrir = (n: NegocioDoCliente) =>
-    navigate(n.passo >= 3 && n.contratoId ? `/client-portal/contracts/${n.contratoId}` : `/client-portal/proposals/${n.propostaId}`);
+  // 2/11: abre o negócio inteiro (o ecrã da V1: plano da obra, acompanhamento, documentos); sem a vista do cliente, essa página abre
+  // a proposta ou o contrato, como antes.
+  const abrir = (n: NegocioDoCliente) => navigate(`/client-portal/negocios/${n.negocioId}`);
 
   return (
     <ClientPortalLayout>

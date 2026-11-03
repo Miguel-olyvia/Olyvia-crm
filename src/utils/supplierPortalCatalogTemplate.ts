@@ -32,6 +32,11 @@ export const SUPPLIER_CATALOG_COLUMNS: SupplierCatalogColumnDef[] = [
     aliases: ["ref", "referencia", "reffornecedor", "referenciafornecedor", "referenciadofornecedor", "codigo", "codigoartigo", "codigodoartigo", "codigofornecedor", "suppliersku", "supplierref", "sku"],
   },
   {
+    field: "item_kind", header: "Tipo", type: "text", width: 10,
+    description: "produto ou serviço (subempreitada, ex.: eletricista). Vazio = mantém o tipo gravado (artigos novos ficam produto).",
+    aliases: ["tipo", "tipodeartigo", "produtoouservico", "kind", "itemkind"],
+  },
+  {
     field: "barcode", header: "Código de barras", type: "text", width: 18,
     description: "EAN/GTIN com 8 a 14 dígitos.",
     aliases: ["codigodebarras", "codigobarras", "codbarras", "barcode", "ean", "ean13", "gtin"],
@@ -53,7 +58,7 @@ export const SUPPLIER_CATALOG_COLUMNS: SupplierCatalogColumnDef[] = [
   },
   {
     field: "unit_label", header: "Unidade", type: "text", width: 10,
-    description: "Unidade de venda (ex.: un, cx, m, kg). Máx. 30 caracteres.",
+    description: "Unidade de venda (ex.: un, cx, m, kg). Máx. 30 caracteres. Serviço: hora, dia, m², m³, ml, m, un, ponto, km ou empreitada (obrigatória).",
     aliases: ["unidade", "un", "unid", "unit", "uom", "unidadedevenda", "unidademedida"],
   },
   {
@@ -82,6 +87,16 @@ export const SUPPLIER_CATALOG_COLUMNS: SupplierCatalogColumnDef[] = [
     aliases: ["prazodias", "prazo", "prazoentrega", "prazodeentrega", "prazodeentregadias", "diasdeentrega", "leadtime", "leadtimedays"],
   },
   {
+    field: "service_districts", header: "Zona de atuação", type: "text", width: 28,
+    description: "Só serviços (obrigatória): distritos separados por ; (ex.: Lisboa; Setúbal; Porto).",
+    aliases: ["zonadeatuacao", "zonaatuacao", "zona", "distritos", "distrito", "areadeatuacao", "servicedistricts"],
+  },
+  {
+    field: "mobilization_days", header: "Prazo de mobilização (dias)", type: "number", width: 14,
+    description: "Só serviços: dias até começar a obra (0 a 365).",
+    aliases: ["prazodemobilizacao", "prazodemobilizacaodias", "prazomobilizacao", "mobilizacao", "mobilizacaodias", "mobilizationdays"],
+  },
+  {
     field: "is_active", header: "Ativo", type: "text", width: 8,
     description: "sim/não. Vazio = mantém o estado gravado.",
     aliases: ["ativo", "activo", "active", "estado"],
@@ -98,7 +113,8 @@ export const SUPPLIER_CATALOG_FIELD_LABELS: Record<SpCatalogField, string> = Obj
  *  • name: vazio daria "Nome obrigatório" num artigo existente;
  *  • is_active: o servidor lê "" como ativo — reativaria artigos sem querer.
  */
-const OMIT_WHEN_EMPTY: ReadonlySet<SpCatalogField> = new Set<SpCatalogField>(["name", "is_active"]);
+//  • item_kind: o servidor lê "" como produto — passaria serviços a produtos sem querer.
+const OMIT_WHEN_EMPTY: ReadonlySet<SpCatalogField> = new Set<SpCatalogField>(["name", "is_active", "item_kind"]);
 
 const normalizeHeader = (value: unknown): string =>
   String(value ?? "")
@@ -139,12 +155,20 @@ export function downloadSupplierCatalogTemplate(): void {
 }
 
 /** Exporta o catálogo atual no formato do modelo (reimportável). */
-export function exportSupplierPortalCatalogXlsx(items: SpCatalogItem[], accountName: string): void {
+export function exportSupplierPortalCatalogXlsx(
+  items: SpCatalogItem[],
+  accountName: string,
+  /** Fase 5: nomes dos distritos por código (sem ele exporta os códigos, que também se reimportam). */
+  districtNames?: Record<string, string>,
+): void {
   const wb = buildStandardWorkbook({
     sheetName: "Catálogo",
     columns: exportColumns(),
     rows: items.map((i) => ({
       supplier_ref: i.supplier_ref,
+      item_kind: i.item_kind === "servico" ? "serviço" : "produto",
+      service_districts: (i.service_districts ?? []).map((c) => districtNames?.[c] ?? c).join("; ") || null,
+      mobilization_days: i.mobilization_days ?? null,
       barcode: i.barcode,
       name: i.name,
       description: i.description,

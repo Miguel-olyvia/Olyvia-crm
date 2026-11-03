@@ -41,9 +41,15 @@ export interface PriceChangeItem {
   requested_at: string;
   batch_id: string;
   supplier: { id: string; name: string };
-  catalog_item: { id: string; supplier_ref: string; name: string; is_active: boolean };
+  catalog_item: { id: string; supplier_ref: string; name: string; is_active: boolean; item_kind?: "produto" | "servico" };
   item_supplier_id: string;
   product: { id: string; name: string; sku: string | null } | null;
+  /** Fase 5: ligação a um serviço nosso (product é então null). */
+  service?: { id: string; name: string; sku: string | null } | null;
+  /** Fase 5b: pedido de um serviço (decide-se com services.edit + services.manage_prices). */
+  is_service?: boolean;
+  /** Fase 5b: quem está a ver pode decidir este pedido (permissões do tipo dele). Ausente = can_decide da lista. */
+  can_decide?: boolean;
   purchase_uom: { id: string | null; code: string | null } | null;
   is_preferred: boolean;
   current_price: number | null;
@@ -78,6 +84,8 @@ export interface PriceChangeList {
   limit: number;
   offset: number;
   can_decide: boolean;
+  /** Fase 5b: services.edit + services.manage_prices (pedidos de serviços). */
+  can_decide_services?: boolean;
   items: PriceChangeItem[];
 }
 

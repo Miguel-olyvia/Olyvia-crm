@@ -66,7 +66,9 @@ export interface LinhaCarrinha { sku: string; nome: string; qty: number; un: str
 /** Uma obra do protótipo, como a Frota a vê (vem do Estado: os negócios em obra com plano). */
 export interface ObraRef { id: number; nome: string; servico: string; local: string; estado: string; tarefas: { nome: string; dia: number; dur: number; tec: string | null }[];
   /** A origem da encomenda de cliente no Inventário novo ("CT 2026/<id>"), quando já foi emitida. */
-  ec?: string | null }
+  ec?: string | null;
+  /** 02/11: os serviços da obra (obraOps.ts servicosDaObra), para os materiais irem na fase da regra única (fasesTransporte). */
+  svcs?: string[] }
 
 /** Uma entrada do histórico: quando (ISO, hora real), o texto, quem fez, a viatura, o tipo de ação e o detalhe. */
 export interface EntradaLog { at: string; t: string; quem?: string; vid?: string; acao?: string; det?: string }

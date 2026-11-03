@@ -180,6 +180,7 @@ const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/Prototip
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
 const ClientPortalNegocios = lazy(() => import("./pages/ClientPortalNegocios"));
+const ClientPortalNegocio = lazy(() => import("./pages/ClientPortalNegocio"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
 // Portal do Fornecedor (F3.1): contexto sp_whoami + layout montados uma vez.
@@ -189,6 +190,7 @@ const SupplierPortalCatalog = lazy(() => import("./pages/SupplierPortalCatalog")
 const SupplierPortalOrders = lazy(() => import("./pages/SupplierPortalOrders"));
 const SupplierPortalOrderDetail = lazy(() => import("./pages/SupplierPortalOrderDetail"));
 const SupplierPortalProfile = lazy(() => import("./pages/SupplierPortalProfile"));
+const SupplierPortalContract = lazy(() => import("./pages/SupplierPortalContract"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -264,6 +266,7 @@ const App = () => (
                     <Route element={<PortalCompanyRoute />}>
                       <Route path="/client-portal" element={<ClientPortal />} />
                       <Route path="/client-portal/negocios" element={<ClientPortalNegocios />} />
+                      <Route path="/client-portal/negocios/:id" element={<ClientPortalNegocio />} />
                       <Route path="/client-portal/proposals" element={<Navigate to="/client-portal/negocios" replace />} />
                       <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
                       <Route path="/client-portal/contracts" element={<Navigate to="/client-portal/negocios" replace />} />
@@ -280,6 +283,7 @@ const App = () => (
                       <Route path="/supplier-portal/orders" element={<SupplierPortalOrders />} />
                       <Route path="/supplier-portal/orders/:id" element={<SupplierPortalOrderDetail />} />
                       <Route path="/supplier-portal/profile" element={<SupplierPortalProfile />} />
+                      <Route path="/supplier-portal/contract" element={<SupplierPortalContract />} />
                     </Route>
                   </Route>
 

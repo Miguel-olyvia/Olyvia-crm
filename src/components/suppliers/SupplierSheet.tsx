@@ -2,11 +2,12 @@
 // /prototipo/negocios): migalha "Compras › Fornecedor", nome, distintivos
 // (código, Ativo/Inativo, estado do portal), faixa "à espera da ficha" com
 // "Reenviar convite", separadores Resumo · Dados · Artigos e preços · Preços
-// por aprovar · Portal, e rodapé (Guardar só em Dados).
+// por aprovar · Portal · Contrato, e rodapé (Guardar só em Dados).
 //
 // Dados reais e a lógica de sempre: o formulário de Dados e a gravação vêm de
 // Suppliers.tsx (prop dataForm); Portal = SupplierPortalTab; Artigos =
-// item_suppliers + SupplierPortalCatalogSection; Preços = SupplierPriceChangesSection.
+// item_suppliers + SupplierPortalCatalogSection; Preços = SupplierPriceChangesSection;
+// Contrato = SupplierContractTab (contrato de fornecedor, rpc_supplier_contract*).
 // Um fornecedor novo abre a mesma folha só com Dados.
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -26,16 +27,19 @@ import { SupplierPortalBadge } from "./SupplierRowStats";
 import { useSupplierOrgStats } from "./useSupplierListStats";
 import { SupplierSummaryTab } from "./SupplierSummaryTab";
 import { SupplierItemsTab } from "./SupplierItemsTab";
+import { SupplierContractTab } from "./contract/SupplierContractTab";
+import { SupplierContractBadge } from "./contract/SupplierContractBadge";
+import { useSupplierContractOrgStatuses } from "./contract/useSupplierContracts";
 import { supplierItemsKey, supplierPortalInviteKey, useSupplierItems, useSupplierPortalInvite } from "./useSupplierSheetData";
 
 type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
 
-export type SupplierSheetTab = "resumo" | "dados" | "artigos" | "precos" | "portal";
+export type SupplierSheetTab = "resumo" | "dados" | "artigos" | "precos" | "portal" | "contrato";
 
 /**
  * ?tab= / ?prices= → separador. Aceita os valores novos e os antigos:
  * prices=pending → Preços por aprovar; catalogo → Artigos e preços;
- * portal → Portal; dados → Dados; sem tab → Resumo.
+ * portal → Portal; dados → Dados; contrato → Contrato; sem tab → Resumo.
  */
 export function supplierSheetTabFromParams(tab: string | null, prices: string | null): SupplierSheetTab {
   if (prices === "pending") return "precos";
@@ -45,6 +49,7 @@ export function supplierSheetTabFromParams(tab: string | null, prices: string | 
     case "artigos":
     case "precos":
     case "portal":
+    case "contrato":
       return tab;
     case "catalogo":
       return "artigos";
@@ -111,6 +116,9 @@ export function SupplierSheet({
   const orgStats = orgStatsQuery.data ?? null;
   const portalState = supplierId && orgStats ? orgStats.portal.get(supplierId) ?? "none" : null;
   const awaiting = !!supplierId && !!orgStats?.awaiting.some((s) => s.id === supplierId);
+  // Estado do contrato de fornecedor (cache partilhada com a coluna Contrato da lista).
+  const contractStatuses = useSupplierContractOrgStatuses(isNew ? null : orgId).data ?? null;
+  const contractState = supplierId && contractStatuses ? contractStatuses.get(supplierId) ?? null : undefined;
   const pricesPending = supplierId && canPricing && orgStats?.pricesPending ? orgStats.pricesPending.get(supplierId) ?? 0 : 0;
 
   const items = useSupplierItems(supplierId, canViewPricing, open && !permLoading);
@@ -180,6 +188,7 @@ export function SupplierSheet({
         { id: "artigos", label: "Artigos e preços", count: itemsCount },
         { id: "precos", label: "Preços por aprovar", count: pricesPending },
         { id: "portal", label: "Portal" },
+        { id: "contrato", label: "Contrato" },
       ];
   const current: SupplierSheetTab = isNew ? "dados" : tab;
 
@@ -241,6 +250,14 @@ export function SupplierSheet({
     ) : (
       <p className="text-sm text-muted-foreground">Sem permissão para gerir o acesso deste fornecedor ao portal.</p>
     );
+  else if (supplier && current === "contrato")
+    body = (
+      <SupplierContractTab
+        supplierId={supplier.id}
+        supplierName={supplier.name}
+        organizationId={orgId ?? fallbackOrganizationId}
+      />
+    );
 
   return (
     <Sheet
@@ -271,6 +288,7 @@ export function SupplierSheet({
                       {supplier.is_active ? "Ativo" : "Inativo"}
                     </InventoryStatusBadge>
                     {portalState ? <SupplierPortalBadge state={portalState} /> : null}
+                    {contractState !== undefined ? <SupplierContractBadge state={contractState} compact /> : null}
                     {supplier.deleted_at ? <InventoryStatusBadge tone="bad">Eliminado</InventoryStatusBadge> : null}
                   </>
                 ) : (

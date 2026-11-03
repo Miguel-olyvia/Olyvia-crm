@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
+import { CatalogPhotoStrip } from "@/components/catalog-images/CatalogItemPhotos";
 import { formatMoney, type CrmCatalogItem } from "./types";
 import {
   BARCODE_MAX,
@@ -289,6 +290,13 @@ export default function CreateProductFromCatalogDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+
+        {current && (current.image_paths?.length ?? 0) > 0 && (
+          <div className="space-y-1">
+            <CatalogPhotoStrip item={current} name={current.name} />
+            <p className="text-xs text-muted-foreground">Se o produto ainda não tiver fotos, estas são copiadas para ele ao ligar.</p>
+          </div>
+        )}
 
         {!organizationId ? (
           <p className="text-sm text-destructive">O fornecedor não tem empresa definida — não é possível criar produtos.</p>

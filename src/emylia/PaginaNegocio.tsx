@@ -31,6 +31,9 @@ import { lerInventario, useInventario } from "./inventario/loja";
 import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra";
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
+import { DocumentosParaCliente } from "./DocumentosParaCliente";
+import { TelefoneComRascunho } from "./TelefoneIndicativo";
+import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -86,6 +89,7 @@ export function PaginaNegocio(ctx: Ctx) {
         </div>
       </header>
       <EstadoAcessoPortal ctx={ctx} d={d} />
+      <div className="empty:hidden"><DocumentosParaCliente d={d} /></div>
       {anular && podeAnular(d) && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
       {S.confirmPerda === d.id && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/[0.06] p-3 text-sm animate-in fade-in-0 slide-in-from-top-2">
@@ -247,7 +251,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       { id: "quem", titulo: "Quem pede", icone: User, conta: { f: 2, n: 2 }, resumo: [d.nome, d.tel, nomeLinha(d)], corpo: (
         <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
           <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>
-          <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
+          {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
+          {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
+            : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
           <div className={ROT}>Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{nomeLinha(d)}{d.linhaPorDefinir && <span className="block font-normal text-muted-foreground">Sai da divisão escolhida na visita.</span>}</span></div>
         </div>
       ) },
@@ -262,16 +268,21 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       g(CONTACTO[3], CalendarClock),
       { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}.</p>
+          <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>
+          {/* 2/11 (reunião): a sugestão de quem vai, pela agenda (livre a essa hora) e pela proximidade (visitas perto nesse dia) */}
           <div className="flex flex-wrap gap-2">
-            {vagasVisita().map((s) => (
-              <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s))}
-                className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
-                <CalendarClock className="mr-1.5 inline h-4 w-4" />{s}
-              </button>
-            ))}
+            {vagasVisita().map((s) => {
+              const sg = sugerirQuemVai(S.deals, d, s, opcoesDaVisita());
+              return (
+                <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s, sg?.quem))} title={sg ? `${sg.nome}: ${sg.motivo}${sg.ocupados.length ? ` · ocupados: ${sg.ocupados.join(", ")}` : ""}` : undefined}
+                  className="rounded-xl border border-border bg-card px-3 py-2 text-left text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
+                  <span className="block"><CalendarClock className="mr-1.5 inline h-4 w-4" />{s}</span>
+                  {sg && <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{sg.nome} · {sg.motivo}</span>}
+                </button>
+              );
+            })}
           </div>
-          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot))()} />
+          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot, sugerirQuemVai(S.deals, d, slot, opcoesDaVisita())?.quem))()} />
         </div>
       ) },
     ];

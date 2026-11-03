@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { CatalogPhotosViewer, CatalogThumb } from "@/components/catalog-images/CatalogItemPhotos";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
@@ -17,10 +19,13 @@ import CatalogLinkDialog, { type LinkChoice } from "./CatalogLinkDialog";
 import CreateProductFromCatalogDialog, { type CreatedProductInfo } from "./CreateProductFromCatalogDialog";
 import BulkCreateProductsDialog, { type BulkCreateRow } from "./BulkCreateProductsDialog";
 import SupplierPriceChangesSection from "./SupplierPriceChangesSection";
+import ServiceLinkDialog, { type ServiceLinkChoice } from "./ServiceLinkDialog";
+import { kindOf, nomesDistritos, unidadeServicoLabel, useDistritos, type ItemKind } from "@/lib/supplierPortal/servicoCatalogo";
 import { BULK_CREATE_LIMIT, type CreateOutcome } from "./catalogProductCreate";
 import {
   REASON_LABEL,
   callRpc,
+  callRpcLocal,
   confidenceOf,
   describeLinkPriceOutcome,
   fetchFreeSupplierRows,
@@ -58,7 +63,16 @@ const FILTERS: { value: CatalogFilter; label: string }[] = [
   { value: "all", label: "Todos" },
 ];
 
+// Fase 5: filtro por tipo (Produto | Serviço).
+type KindFilter = "all" | ItemKind;
+const KIND_FILTERS: { value: KindFilter; label: string }[] = [
+  { value: "all", label: "Todos os tipos" },
+  { value: "produto", label: "Produtos" },
+  { value: "servico", label: "Serviços" },
+];
+
 const formatUnit = (item: CrmCatalogItem) => {
+  if (kindOf(item) === "servico") return unidadeServicoLabel(item.unit_label);
   if (!item.unit_label && !item.units_per_pack) return "-";
   return [item.unit_label, item.units_per_pack ? `× ${item.units_per_pack}` : null].filter(Boolean).join(" ");
 };
@@ -86,6 +100,7 @@ export default function SupplierPortalCatalogSection({
   hidePriceChanges = false,
 }: SupplierPortalCatalogSectionProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { hasPermission } = usePermissions();
   const canSuggest = hasPermission("products.view");
   // Criar produto a partir do artigo: products.create (como o botão de
@@ -93,6 +108,8 @@ export default function SupplierPortalCatalogSection({
   const canCreateProduct = hasPermission("products.create");
 
   const [filter, setFilter] = useState<CatalogFilter>("unlinked");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [serviceLinkItem, setServiceLinkItem] = useState<CrmCatalogItem | null>(null);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
@@ -108,6 +125,17 @@ export default function SupplierPortalCatalogSection({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [linkItem, setLinkItem] = useState<CrmCatalogItem | null>(null);
+  const [photosItem, setPhotosItem] = useState<CrmCatalogItem | null>(null);
+
+  // rpc_catalog_link copiou fotos do artigo para products.image_urls (produto sem fotos):
+  // diz quantas e faz as listas de produtos em cache voltarem a ler.
+  const afterImagesCopied = (n: number | undefined): string | null => {
+    if (!n || n <= 0) return null;
+    void queryClient.invalidateQueries({
+      predicate: (q) => typeof q.queryKey[0] === "string" && (q.queryKey[0] as string).startsWith("product"),
+    });
+    return n === 1 ? "1 foto copiada para o produto." : `${n} fotos copiadas para o produto.`;
+  };
   const [linking, setLinking] = useState(false);
 
   const [unlinkItem, setUnlinkItem] = useState<CrmCatalogItem | null>(null);
@@ -135,13 +163,15 @@ export default function SupplierPortalCatalogSection({
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await callRpc<CrmCatalogList>("rpc_supplier_catalog_list", {
+    // p_kind (Fase 5) ainda não está nos tipos gerados.
+    const { data, error } = await callRpcLocal<CrmCatalogList>("rpc_supplier_catalog_list", {
       p_supplier_id: supplierId,
       p_filter: filter,
       p_search: search || null,
       p_limit: PAGE_SIZE,
       p_offset: offset,
       p_include_inactive: false,
+      p_kind: kindFilter === "all" ? null : kindFilter,
     });
     setLoading(false);
     if (error) {
@@ -150,7 +180,7 @@ export default function SupplierPortalCatalogSection({
     }
     setLoadError(null);
     setList(data);
-  }, [supplierId, filter, search, offset]);
+  }, [supplierId, filter, search, offset, kindFilter]);
 
   useEffect(() => {
     load();
@@ -165,11 +195,16 @@ export default function SupplierPortalCatalogSection({
     }
   }, [list, offset]);
 
-  // Sugestões em lote para os artigos visíveis que estão por ligar.
+  // Sugestões de produto em lote para os artigos visíveis que estão por ligar
+  // (os serviços têm as suas sugestões no diálogo de ligar a um serviço).
   const pendingIds = useMemo(
-    () => (list?.items ?? []).filter((i) => !i.is_linked && !i.is_dismissed && i.is_active).map((i) => i.id),
+    () =>
+      (list?.items ?? [])
+        .filter((i) => !i.is_linked && !i.is_dismissed && i.is_active && kindOf(i) === "produto")
+        .map((i) => i.id),
     [list],
   );
+  const { distritos } = useDistritos((list?.items ?? []).some((i) => kindOf(i) === "servico"));
 
   useEffect(() => {
     if (!list?.linked_account || !canSuggest || pendingIds.length === 0) {
@@ -217,7 +252,7 @@ export default function SupplierPortalCatalogSection({
   const selectableIds = useMemo(
     () =>
       (list?.items ?? [])
-        .filter((i) => !i.is_linked && !i.is_dismissed && i.is_active && !createdPending[i.id])
+        .filter((i) => !i.is_linked && !i.is_dismissed && i.is_active && kindOf(i) === "produto" && !createdPending[i.id])
         .map((i) => i.id),
     [list, createdPending],
   );
@@ -249,6 +284,12 @@ export default function SupplierPortalCatalogSection({
 
   const changeFilter = (f: CatalogFilter) => {
     setFilter(f);
+    setOffset(0);
+    setRowErrors({});
+  };
+
+  const changeKindFilter = (k: KindFilter) => {
+    setKindFilter(k);
     setOffset(0);
     setRowErrors({});
   };
@@ -327,7 +368,43 @@ export default function SupplierPortalCatalogSection({
       description: [
         `${item.supplier_ref} → ${choice.productName}${result.created ? " (nova associação ao fornecedor)" : ""}.`,
         describeLinkPriceOutcome(result, item.currency),
+        afterImagesCopied(result.images_copied),
         ...(result.warnings ?? []),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    });
+    await load();
+    onLinksChanged?.();
+  };
+
+  // Fase 5: serviço do fornecedor → serviço nosso (rpc_catalog_link_service).
+  const handleServiceLink = async (choice: ServiceLinkChoice) => {
+    if (!serviceLinkItem) return;
+    const item = serviceLinkItem;
+    setLinking(true);
+    const { data, error } = await callRpcLocal<CatalogLinkResult>("rpc_catalog_link_service", {
+      p_supplier_id: supplierId,
+      p_catalog_item_id: item.id,
+      p_service_id: choice.serviceId,
+      p_apply_catalog_price: choice.applyCatalogPrice,
+    });
+    setLinking(false);
+    if (error || !data) {
+      const message = error?.message || "Não foi possível ligar o serviço.";
+      setRowErrors((prev) => ({ ...prev, [item.id]: message }));
+      toast({ title: "Não foi possível ligar", description: message, variant: "destructive" });
+      if (isNoPricePermission(error)) void load();
+      return;
+    }
+    clearRowError(item.id);
+    setServiceLinkItem(null);
+    toast({
+      title: data.already_linked ? "O serviço já estava ligado" : "Serviço ligado",
+      description: [
+        `${item.supplier_ref} → ${choice.serviceName}${data.created ? " (nova associação ao fornecedor)" : ""}.`,
+        !data.already_linked && data.item_supplier_price_updated ? "Preço do fornecedor atualizado." : null,
+        ...(data.warnings ?? []),
       ]
         .filter(Boolean)
         .join(" "),
@@ -434,6 +511,7 @@ export default function SupplierPortalCatalogSection({
       description: [
         `${item.supplier_ref} → ${product.name} (${product.sku}).`,
         outcome.priceNotApplied ?? describeLinkPriceOutcome(outcome.result, item.currency),
+        afterImagesCopied(outcome.result.images_copied),
         ...(outcome.result.warnings ?? []),
       ]
         .filter(Boolean)
@@ -530,7 +608,7 @@ export default function SupplierPortalCatalogSection({
     <div className="flex items-center justify-between gap-2">
       <div>
         <h3 className="text-base font-semibold">Catálogo do fornecedor</h3>
-        <p className="text-xs text-muted-foreground">Artigos que o fornecedor gere no Portal do Fornecedor.</p>
+        <p className="text-xs text-muted-foreground">Produtos e serviços que o fornecedor gere no Portal do Fornecedor.</p>
       </div>
       <Button type="button" variant="ghost" size="sm" onClick={() => load()} disabled={loading} aria-label="Atualizar catálogo do fornecedor">
         <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
@@ -582,6 +660,9 @@ export default function SupplierPortalCatalogSection({
   }
 
   const canLink = list.can_link;
+  const canLinkServices = !!list.can_link_services;
+  const canManageServicePrices = !!list.can_manage_service_prices;
+  const showActions = canLink || canLinkServices;
   const showPrice = list.can_view_pricing;
   const canManagePrices = !!list.can_manage_prices;
   const items = list.items;
@@ -613,6 +694,27 @@ export default function SupplierPortalCatalogSection({
           </Button>
         ))}
       </div>
+
+      {list.kind_counts && (
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filtrar por tipo">
+          {KIND_FILTERS.map((k) => {
+            const n = k.value === "all" ? list.kind_counts!.produto + list.kind_counts!.servico : list.kind_counts![k.value];
+            return (
+              <Button
+                key={k.value}
+                type="button"
+                role="tab"
+                aria-selected={kindFilter === k.value}
+                variant={kindFilter === k.value ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => changeKindFilter(k.value)}
+              >
+                {k.label} ({n})
+              </Button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
         <div className="relative flex-1 max-w-sm">
@@ -675,7 +777,7 @@ export default function SupplierPortalCatalogSection({
                 <TableHead>Unidade</TableHead>
                 {showPrice && <TableHead className="text-right">Preço catálogo</TableHead>}
                 <TableHead>Produto / sugestão</TableHead>
-                {canLink && <TableHead className="text-right"><span className="sr-only">Ações</span></TableHead>}
+                {showActions && <TableHead className="text-right"><span className="sr-only">Ações</span></TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -684,6 +786,8 @@ export default function SupplierPortalCatalogSection({
                 const top = sugg[0];
                 const pending = !item.is_linked && !item.is_dismissed;
                 const busy = busyId === item.id;
+                const isService = kindOf(item) === "servico";
+                const canLinkThis = isService ? canLinkServices : canLink;
                 return (
                   <TableRow key={item.id} className={item.is_active ? "" : "opacity-60"}>
                     {showSelection && (
@@ -699,12 +803,25 @@ export default function SupplierPortalCatalogSection({
                     )}
                     <TableCell className="font-mono text-xs align-top">{item.supplier_ref}</TableCell>
                     <TableCell className="align-top">
-                      <div className="font-medium">{item.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {[item.brand, item.barcode ? `EAN ${item.barcode}` : null].filter(Boolean).join(" · ") || null}
+                      <div className="flex items-start gap-2">
+                        <CatalogThumb item={item} name={item.name} size={40} onOpen={() => setPhotosItem(item)} />
+                        <div className="min-w-0">
+                          <div className="font-medium">{item.name}</div>
+                          {isService ? (
+                            <div className="text-xs text-muted-foreground">
+                              <Badge variant="outline" className="mr-1">Serviço</Badge>
+                              Zona: {nomesDistritos(item.service_districts, distritos)}
+                              {item.mobilization_days != null ? ` · mobilização ${item.mobilization_days} d` : ""}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-muted-foreground">
+                              {[item.brand, item.barcode ? `EAN ${item.barcode}` : null].filter(Boolean).join(" · ") || null}
+                            </div>
+                          )}
+                          {!item.is_active && <Badge variant="secondary" className="mt-1">Inativo</Badge>}
+                          {rowErrors[item.id] && <p className="text-xs text-destructive mt-1">{rowErrors[item.id]}</p>}
+                        </div>
                       </div>
-                      {!item.is_active && <Badge variant="secondary" className="mt-1">Inativo</Badge>}
-                      {rowErrors[item.id] && <p className="text-xs text-destructive mt-1">{rowErrors[item.id]}</p>}
                     </TableCell>
                     <TableCell className="align-top whitespace-nowrap">{formatUnit(item)}</TableCell>
                     {showPrice && (
@@ -726,6 +843,10 @@ export default function SupplierPortalCatalogSection({
                         </div>
                       ) : item.is_dismissed ? (
                         <Badge variant="outline">Dispensado</Badge>
+                      ) : isService ? (
+                        <span className="text-xs text-muted-foreground">
+                          {canLinkServices ? "Ligar a um serviço nosso" : "Sem permissão para ligar serviços"}
+                        </span>
                       ) : top ? (
                         <div className="space-y-1">
                           <div className="text-sm">{top.product_name}{top.product_sku && <span className="text-xs text-muted-foreground"> · {top.product_sku}</span>}</div>
@@ -743,15 +864,23 @@ export default function SupplierPortalCatalogSection({
                         <span className="text-xs text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    {canLink && (
+                    {showActions && (
                       <TableCell className="text-right align-top">
                         <div className="flex justify-end gap-1">
                           {pending && (
                             <>
-                              <Button type="button" size="sm" onClick={() => setLinkItem(item)} disabled={busy || bulkRunning}>
-                                <Link2 className="w-4 h-4 mr-1" /> Ligar
-                              </Button>
-                              {canCreate && !createdPending[item.id] && (
+                              {canLinkThis && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => (isService ? setServiceLinkItem(item) : setLinkItem(item))}
+                                  disabled={busy || bulkRunning}
+                                  title={isService ? "Ligar a um serviço nosso" : undefined}
+                                >
+                                  <Link2 className="w-4 h-4 mr-1" /> Ligar
+                                </Button>
+                              )}
+                              {canCreate && !isService && !createdPending[item.id] && (
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -763,26 +892,28 @@ export default function SupplierPortalCatalogSection({
                                   <PackagePlus className="w-4 h-4 mr-1" /> Criar produto
                                 </Button>
                               )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDismiss(item, true)}
-                                disabled={busy || bulkRunning}
-                                title="Não vendemos isto: sai da lista Por ligar"
-                              >
-                                {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <EyeOff className="w-4 h-4 mr-1" />}
-                                Dispensar
-                              </Button>
+                              {canLinkThis && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDismiss(item, true)}
+                                  disabled={busy || bulkRunning}
+                                  title={isService ? "Não usamos este serviço: sai da lista Por ligar" : "Não vendemos isto: sai da lista Por ligar"}
+                                >
+                                  {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <EyeOff className="w-4 h-4 mr-1" />}
+                                  Dispensar
+                                </Button>
+                              )}
                             </>
                           )}
-                          {item.is_dismissed && !item.is_linked && (
+                          {canLinkThis && item.is_dismissed && !item.is_linked && (
                             <Button type="button" variant="outline" size="sm" onClick={() => handleDismiss(item, false)} disabled={busy}>
                               {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-1" />}
                               Repor
                             </Button>
                           )}
-                          {item.is_linked && (
+                          {canLinkThis && item.is_linked && (
                             <Button
                               type="button"
                               variant="outline"
@@ -829,6 +960,8 @@ export default function SupplierPortalCatalogSection({
         </div>
       )}
 
+      <CatalogPhotosViewer item={photosItem} onClose={() => setPhotosItem(null)} />
+
       <CatalogLinkDialog
         item={linkItem}
         suggestions={linkItem ? effectiveSuggestions[linkItem.id] ?? NO_SUGGESTIONS : NO_SUGGESTIONS}
@@ -848,6 +981,17 @@ export default function SupplierPortalCatalogSection({
               }
             : undefined
         }
+      />
+
+      <ServiceLinkDialog
+        item={serviceLinkItem}
+        supplierId={supplierId}
+        canViewPricing={showPrice}
+        canManagePrices={canManageServicePrices}
+        distritos={distritos}
+        linking={linking}
+        onClose={() => setServiceLinkItem(null)}
+        onConfirm={(c) => { void handleServiceLink(c); }}
       />
 
       <CreateProductFromCatalogDialog
@@ -875,7 +1019,7 @@ export default function SupplierPortalCatalogSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Desligar «{unlinkItem?.supplier_ref}»?</AlertDialogTitle>
             <AlertDialogDescription>
-              O artigo do catálogo deixa de estar ligado a {unlinkItem?.links.map((l) => l.product_name).join(", ") || "o produto"}.
+              O artigo do catálogo deixa de estar ligado a {unlinkItem?.links.map((l) => l.product_name).join(", ") || (unlinkItem && kindOf(unlinkItem) === "servico" ? "o serviço" : "o produto")}.
               Os códigos criados pela ligação são anulados e o artigo volta à lista "Por ligar".
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -886,7 +1030,7 @@ export default function SupplierPortalCatalogSection({
               onCheckedChange={(v) => setRemoveItemSupplier(!!v)}
             />
             <Label htmlFor="catalog-unlink-remove" className="text-sm font-normal leading-snug cursor-pointer">
-              Remover também a associação do produto a este fornecedor
+              Remover também a associação do {unlinkItem && kindOf(unlinkItem) === "servico" ? "serviço" : "produto"} a este fornecedor
               <span className="block text-xs text-muted-foreground">
                 Por omissão mantém-se (com o preço e a ref.), apenas sem ligação ao catálogo.
               </span>

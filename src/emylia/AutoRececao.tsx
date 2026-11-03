@@ -10,6 +10,7 @@ import { Cliente, Folha } from "./DocsCliente";
 import { SeloAssinatura } from "./AssinaturaContrato";
 import { FASES_OBRA } from "./fasesObra";
 import { RESPONSAVEL_OBRA } from "./obraOps";
+import { nomeEmpresa } from "./acessosPortal";
 import { totaisAdenda } from "./adendas";
 import { garantiaAte, resumoObra } from "./historiaObra";
 import { RelatorioObra } from "./RelatorioObra";
@@ -22,12 +23,12 @@ export function AutoRececaoDoc({ d }: { d: Negocio }) {
   const adendas = (d.adendas ?? []).filter((a) => a.estado === "assinada");
   const porFase = FASES_OBRA.map((f) => ({ f, ts: [...new Set(p.tasks.filter((t) => t.fase === f.n).map((t) => t.nome))] })).filter((x) => x.ts.length);
   const semFase = [...new Set(p.tasks.filter((t) => !t.fase).map((t) => t.nome))];
-  const empresa: Assinatura = { tipo: "digital", nome: `${RESPONSAVEL_OBRA.n} (Mudelar)`, q: au.q, id: `MDL-AR-${d.id}` };
+  const empresa: Assinatura = { tipo: "digital", nome: `${RESPONSAVEL_OBRA.n} (${nomeEmpresa()})`, q: au.q, id: `MDL-AR-${d.id}` };
   return (
     <Folha titulo="Auto de receção da obra" numero={au.n} data={assinado ? `assinado ${au.assinado ?? ""}` : "à espera da assinatura"} carimbo={assinado ? "Obra recebida" : undefined}>
       <Cliente d={d} />
       <p className="text-slate-700">
-        A Mudelar entrega e o cliente recebe a obra do contrato CT 2026/{d.id}{adendas.length ? ` e das adendas ${adendas.map((a) => a.n).join(", ")}` : ""}: {d.servico.toLowerCase()} em {d.f.morada || d.local}.
+        A {nomeEmpresa()} entrega e o cliente recebe a obra do contrato CT 2026/{d.id}{adendas.length ? ` e das adendas ${adendas.map((a) => a.n).join(", ")}` : ""}: {d.servico.toLowerCase()} em {d.f.morada || d.local}.
       </p>
       {R && (
         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">

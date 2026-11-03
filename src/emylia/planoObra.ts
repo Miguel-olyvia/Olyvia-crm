@@ -10,8 +10,8 @@ import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
 import { TAREFA_DEMOLICAO, diasPrevistos, tarefasPrevistas, type TarefaPrevista } from "./ganttOrcamento";
 import { LINHA_DEMOLICAO } from "./entulho";
 
-/** A rampa das fases (um só tom, do claro ao escuro; todos ≥ 3:1 sobre o branco e sobre o fundo). */
-export const COR_FASE: Record<number, string> = { 1: "#9074dc", 2: "#7452d1", 3: "#5a36bf", 4: "#432791" };
+/** A rampa das fases (um só tom, do claro ao escuro; todos ≥ 3:1 sobre o branco e sobre o fundo). 02/11: mora em fasesObra.ts. */
+export { COR_FASE } from "./fasesObra";
 
 /* ------------------------------------------------------------------ o calendário */
 const doisD = (n: number) => String(n).padStart(2, "0");

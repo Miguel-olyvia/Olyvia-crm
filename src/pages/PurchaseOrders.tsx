@@ -102,6 +102,10 @@ type PoSheetTab = "lines" | "rec" | "guias" | "portal" | "ann" | "notes" | "hist
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
+  // Contrato de fornecedor (20270103300000): preenchidos por gatilho a partir das
+  // condições do fornecedor; só de leitura no CRM. Ainda fora de types.ts.
+  payment_terms_days?: number | null;
+  payment_due_date?: string | null;
 };
 
 // Pré-seleção de linhas no diálogo "Reverter receção" — vem do link por linha
@@ -3008,7 +3012,14 @@ const PurchaseOrders = () => {
             )}
           </div>
         </TableCell>
-        <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">{formatEur(order.total_value)}</TableCell>
+        <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
+          {formatEur(order.total_value)}
+          {order.payment_due_date && (
+            <small className="block text-xs font-normal text-muted-foreground" title={order.payment_terms_days != null ? `Prazo de pagamento: ${order.payment_terms_days} dias` : undefined}>
+              vence {formatPoDate(order.payment_due_date)}
+            </small>
+          )}
+        </TableCell>
         <TableCell className={`text-right ${stickyActionsClass(!showSupplier)}`}>
           <div className="flex justify-end">
             <PoRowActions
@@ -3461,6 +3472,21 @@ const PurchaseOrders = () => {
                             </>
                           ),
                         },
+                        editingId && sheetOrderRow
+                          ? {
+                              // Só de leitura: vem das condições do fornecedor (contrato) por gatilho na BD.
+                              label: "Pagamento",
+                              value:
+                                sheetOrderRow.payment_terms_days != null ? (
+                                  <span>
+                                    {sheetOrderRow.payment_terms_days} dias
+                                    {sheetOrderRow.payment_due_date ? ` · vence ${formatPoDate(sheetOrderRow.payment_due_date)}` : ""}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">Sem prazo definido no fornecedor</span>
+                                ),
+                            }
+                          : null,
                         { label: t('purchaseOrders.summary.total'), value: <span className="font-semibold tabular-nums">€{totals.total.toFixed(2)}</span> },
                       ]}
                     />

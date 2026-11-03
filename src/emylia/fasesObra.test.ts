@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { faseDoProduto, fasesDoServico, fasesPadrao } from "./fasesObra";
+import { SERVICOS_MODELO, faseDoMaterial, faseDoMaterialNaObra, faseDoProduto, fasesDoServico, fasesPadrao, oficioDoServico, servicosDaObra, type ServicoNaObra } from "./fasesObra";
+import { seed } from "./motor";
 import { CATALOGO_TODO } from "./catalogo";
 
 describe("fases da obra", () => {
@@ -46,5 +47,66 @@ describe("fases da obra", () => {
     const porFase = new Map<number, number>();
     for (const c of CATALOGO_TODO) for (const f of fasesDoServico(null, c.id, c.n, c.cat)) porFase.set(f, (porFase.get(f) ?? 0) + 1);
     expect([...porFase.keys()].sort()).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("a fase de um material na obra (02/11: a regra única da Encomenda de Cliente e da obra)", () => {
+  const K = { fasesServico: { pint: [3, 4] as (1 | 2 | 3 | 4)[] } };
+  const loucas: ServicoNaObra = { sid: "loucas", nome: "Montagem de louças sanitárias", oficio: "Canalizador", cons: [{ n: "Silicone sanitário" }] };
+  const revest: ServicoNaObra = { sid: "revest", nome: "Revestimento de parede", oficio: "Ladrilhador", cons: [{ id: "p-cola", n: "Cimento-cola C2" }, { n: "Silicone sanitário" }] };
+  const pint: ServicoNaObra = { sid: "pint", nome: "Pintura de paredes", oficio: "Pintor", cons: [{ n: "Fita de pintor" }] };
+  it("a) instalado por um serviço da obra: a última fase desse serviço", () => {
+    const r = faseDoMaterialNaObra(K, { n: "Sanita suspensa", servico: "loucas" }, [revest, loucas]);
+    expect(r).toMatchObject({ fase: 4, por: "instala" });
+    expect(r.servicos.map((s) => s.sid)).toEqual(["loucas"]);
+    // um serviço em várias fases (pintura: 3 e 4) → a última
+    expect(faseDoMaterialNaObra(K, { n: "Tinta especial", servico: "pint" }, [pint]).fase).toBe(4);
+  });
+  it("a) o serviço que o instala não está na obra: passa às regras seguintes", () => {
+    // não está na obra nem em receitas: pelo nome ("cerâmico" → 3), e não pela última fase das louças
+    expect(faseDoMaterialNaObra(K, { n: "Cerâmico 30×60", servico: "loucas" }, [pint])).toMatchObject({ fase: 3, por: "nome", servicos: [] });
+  });
+  it("b) consumível da receita: a primeira fase do serviço que o gasta; com vários, a menor", () => {
+    // pelo id (o nome pode ser outro) e pelo nome sem acentos
+    expect(faseDoMaterialNaObra(K, { id: "p-cola", n: "Cola cimentícia (saco)" }, [revest, loucas])).toMatchObject({ fase: 3, por: "receita" });
+    expect(faseDoMaterialNaObra(K, { n: "fita de PINTOR" }, [pint]).fase).toBe(3);
+    // o silicone vai nas louças (4) e no revestimento (3): fica na 3 e justifica-se pelos dois
+    const r = faseDoMaterialNaObra(K, { n: "Silicone sanitário" }, [loucas, revest]);
+    expect(r).toMatchObject({ fase: 3, por: "receita" });
+    expect(r.servicos.map((s) => s.sid)).toEqual(["revest", "loucas"]); // o que decide primeiro
+  });
+  it("b) a primeira fase de um serviço com várias (a ficha ganha às regras)", () => {
+    const parede: ServicoNaObra = { sid: "x", nome: "Levantamento de parede em alvenaria", cons: [{ n: "Tijolo 11" }] };
+    expect(fasesDoServico(null, "x", parede.nome)).toEqual([2, 3]);
+    expect(faseDoMaterialNaObra(null, { n: "Tijolo 11" }, [parede]).fase).toBe(2);
+    expect(faseDoMaterialNaObra({ fasesServico: { x: [4, 3] } }, { n: "Tijolo 11" }, [parede]).fase).toBe(3);
+  });
+  it("c) sem serviço nem receita: pelo nome, como nas obras de antes", () => {
+    for (const n of ["Saco de entulho", "Tubo multicamada 16", "Cimento-cola · saco 25 kg", "Pavimento cerâmico 60×60", "Espelho 80"]) {
+      expect(faseDoMaterialNaObra(K, { n }, [loucas, revest, pint])).toEqual({ fase: faseDoMaterial(n), por: "nome", servicos: [] });
+    }
+    expect(faseDoMaterialNaObra(K, { n: "Silicone sanitário" }, [])).toMatchObject({ fase: 4, por: "nome" });
+  });
+  it("o ofício dos serviços do modelo é o do motor (o plano chama fasesDoServico com ele)", () => {
+    const svc = seed().svc;
+    for (const [k, m] of Object.entries(SERVICOS_MODELO)) expect([k, m.n, m.oficio]).toEqual([k, svc[k]?.n, svc[k]?.perfil]);
+    expect(oficioDoServico("canal", "Canalização")).toBe("Canalizador");
+    expect(oficioDoServico("c12", "Carpintaria")).toBe("Carpintaria");
+    expect(oficioDoServico(null, null)).toBe("");
+  });
+  it("os serviços de uma obra: os do orçamento e os do plano, sem repetidos", () => {
+    expect(servicosDaObra({
+      orc: { linhas: [{ t: "svc", sid: "revest", q: 4 }, { t: "mat" }, { t: "svc", sid: "pint", q: 0 }] },
+      obra: { plano: { tasks: [{ svcs: ["revest", "loucas"] }, { svcs: [] }] } },
+    })).toEqual(["revest", "loucas"]);
+    expect(servicosDaObra({ orc: null, obra: {} })).toEqual([]);
+  });
+});
+
+describe("faseDoMaterial — saco", () => {
+  it("o saco do entulho é preparação; o cimento-cola em saco é revestimento", () => {
+    expect(faseDoMaterial("Sacos de entulho")).toBe(1);
+    expect(faseDoMaterial("Big bag 1 m³")).toBe(1);
+    expect(faseDoMaterial("Cimento-cola · saco 25 kg")).toBe(3);
   });
 });

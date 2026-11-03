@@ -51,6 +51,12 @@ import { Clock, Eye, ShoppingCart, Undo2, Users } from "lucide-react";
 import { SupplierSheet, supplierSheetTabFromParams, type SupplierSheetTab } from "@/components/suppliers/SupplierSheet";
 import { SupplierDataForm, type SupplierFormData } from "@/components/suppliers/SupplierDataForm";
 import { NewSupplierDialog, type NewSupplierDraft } from "@/components/suppliers/NewSupplierDialog";
+import { SupplierContractBadge } from "@/components/suppliers/contract/SupplierContractBadge";
+import {
+  useSupplierContractOrgStatuses,
+  useSupplierContractsList,
+} from "@/components/suppliers/contract/useSupplierContracts";
+import { contractRef } from "@/lib/supplierContracts/tipos";
 
 const SUPPLIER_FORM_ID = "supplier-sheet-form";
 
@@ -107,7 +113,7 @@ const Suppliers = () => {
   // Ficha em edição: o separador Portal usa a empresa/nome gravados.
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   // Separador da folha do fornecedor (Resumo · Dados · Artigos e preços ·
-  // Preços por aprovar · Portal).
+  // Preços por aprovar · Portal · Contrato).
   const [formTab, setFormTab] = useState<SupplierSheetTab>("dados");
   // Link do sino "Preços do fornecedor por aprovar" (F3.4b): a ficha abre no
   // separador "Preços por aprovar".
@@ -159,6 +165,18 @@ const Suppliers = () => {
   // Portal, à espera da ficha e catálogo por ligar: uma chamada por organização.
   const orgStatsQuery = useSupplierOrgStats(statsOrgId);
   const orgStats = orgStatsQuery.data ?? null;
+  // Estado do contrato de fornecedor por fornecedor (coluna Contrato).
+  const contractStatusesQuery = useSupplierContractOrgStatuses(statsOrgId);
+  const contractStatuses = contractStatusesQuery.data ?? null;
+  // Fornecedor em edição com contrato assinado e em vigor: SLA e condições só de
+  // leitura (a BD recusa: trg_suppliers_05_guarda_condicoes, hint conditions_locked).
+  const editingContractsQuery = useSupplierContractsList(editingId, open && !!editingId);
+  const editingConditionsLock = (() => {
+    const d = editingContractsQuery.data;
+    if (!d?.conditions_locked) return null;
+    const active = d.contracts.find((c) => c.status === "signed") ?? null;
+    return { contractLabel: active ? contractRef(active) : "assinado" };
+  })();
 
   // Caixas ativas → restrição por ids (intersecção). null = sem restrição;
   // "pending" = à espera das estatísticas.
@@ -626,6 +644,9 @@ const Suppliers = () => {
         is_active: formData.is_active,
         organization_id: organizationSelection.companyId || null,
       };
+      // Com contrato em vigor o SLA vem do contrato: não se reenvia (o valor do
+      // formulário pode estar desatualizado se a contra-assinatura foi agora).
+      if (editingId && editingConditionsLock) delete supplierData.delivery_sla_days;
 
       if (editingId) {
         const { error } = await withAuditContext(supabase, businessUserId, () =>
@@ -664,6 +685,9 @@ const Suppliers = () => {
     } catch (error: any) {
       // Gatilho do portal do fornecedor: com o portal ativo não se muda o NIF
       // nem a empresa. A mensagem da BD já vem em português.
+      if (error?.hint === "conditions_locked") {
+        setFieldErrors((prev) => ({ ...prev, delivery_sla_days: error.message }));
+      }
       const portalLinkActive = error?.hint === "portal_link_active";
       const portalMessage = error?.message || "Este fornecedor tem acesso ao portal ativo: desligue o portal antes de mudar o NIF";
       if (portalLinkActive) {
@@ -1021,7 +1045,7 @@ const Suppliers = () => {
   const canEditSupplier = hasPermission("suppliers.edit");
 
   /** Abre a ficha pelo mesmo caminho do link do sino (?open=&tab=&prices=). */
-  const openSupplierVia = (supplierId: string, extra: { tab?: "portal"; prices?: "pending" } = {}) => {
+  const openSupplierVia = (supplierId: string, extra: { tab?: "portal" | "contrato"; prices?: "pending" } = {}) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set("open", supplierId);
@@ -1375,7 +1399,7 @@ const Suppliers = () => {
               </InventoryEmptyState>
             ) : (
               <div className="overflow-x-auto">
-                <Table className="min-w-[1000px]">
+                <Table className="min-w-[1100px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10">
@@ -1392,6 +1416,7 @@ const Suppliers = () => {
                       <TableHead className="text-right">POs abertas</TableHead>
                       <TableHead className="text-right">SLA %</TableHead>
                       <TableHead>Portal</TableHead>
+                      <TableHead>Contrato</TableHead>
                       <TableHead>Preços por aprovar</TableHead>
                       <TableHead>Estado</TableHead>
                       <TableHead className="text-right">
@@ -1406,6 +1431,8 @@ const Suppliers = () => {
                       const openPos = inStatsOrg && rowStats?.openPos ? rowStats.openPos.get(supplier.id) ?? 0 : null;
                       const slaPct = inStatsOrg && rowStats?.slaPct ? rowStats.slaPct.get(supplier.id) : null;
                       const prices = inStatsOrg && orgStats?.pricesPending ? orgStats.pricesPending.get(supplier.id) ?? 0 : null;
+                      // undefined = sem dados (outra org / a carregar); null = sem contrato.
+                      const contractState = inStatsOrg && contractStatuses ? contractStatuses.get(supplier.id) ?? null : undefined;
                       const isDeleted = !!supplier.deleted_at;
                       const rowOpens = !isDeleted && canEditSupplier;
                       const hasContact = !!(supplier.contact_person || supplier.email || supplier.phone);
@@ -1457,6 +1484,23 @@ const Suppliers = () => {
                           </TableCell>
                           <TableCell>
                             <SupplierPortalBadge state={portalState} />
+                          </TableCell>
+                          <TableCell>
+                            {contractState && canEditSupplier && !isDeleted ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openSupplierVia(supplier.id, { tab: "contrato" });
+                                }}
+                                className="rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                aria-label={`Abrir o contrato de ${supplier.name}`}
+                              >
+                                <SupplierContractBadge state={contractState} />
+                              </button>
+                            ) : (
+                              <SupplierContractBadge state={contractState} />
+                            )}
                           </TableCell>
                           <TableCell>
                             {canEditSupplier ? (
@@ -1555,6 +1599,8 @@ const Suppliers = () => {
               t={t}
               portalLinked={editingPortalLinked}
               onGoToPortal={editingId ? () => setFormTab("portal") : undefined}
+              conditionsLock={editingId ? editingConditionsLock : null}
+              onGoToContract={editingId ? () => setFormTab("contrato") : undefined}
             />
           }
         />

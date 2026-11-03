@@ -94,7 +94,8 @@ describe("sem email válido não se envia ao portal (2.0)", () => {
     A.enviarContrato(d.id);
     expect(d.orc!.contrato).toBeNull();
     expect(pedidos).toHaveLength(0);
-    expect(lerPedidoEmail()).toEqual({ deal: d.id, acao: "contrato", n: undefined });
+    // 29/10: o pedido diz também se falta o telefone; 2/11: o telefone de exemplo (912 345 678) já vale com o +351
+    expect(lerPedidoEmail()).toEqual({ deal: d.id, acao: "contrato", n: undefined, semEmail: true, semTelefone: false });
     expect(avisar).toHaveBeenCalledWith(expect.objectContaining({ msg: "Falta o email do cliente" }));
 
     render(<Montar S={S} A={A} filho={(ctx) => <EstadoAcessoPortal ctx={ctx} d={d} />} />);

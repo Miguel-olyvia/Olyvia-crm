@@ -7,6 +7,7 @@ import { useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import { isNoSupplierAccess, isSpFunctionMissing, spErrorMessage } from "@/lib/supplierPortal/spRpc";
 import { SupplierDataForm } from "@/components/supplier-portal/SupplierDataForm";
 import { useSpMySupplierData } from "@/components/supplier-portal/useSpMySupplierData";
+import { SpMyPhoneCard } from "@/components/supplier-portal/contract/SpMyPhoneCard";
 
 function formatDateTime(iso: string | null): string | null {
   if (!iso) return null;
@@ -89,6 +90,8 @@ export default function SupplierPortalProfile() {
           )}
         </CardContent>
       </Card>
+
+      <SpMyPhoneCard />
     </div>
   );
 }

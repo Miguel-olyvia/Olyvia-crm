@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Check, Loader2, PackagePlus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CatalogPhotoStrip } from "@/components/catalog-images/CatalogItemPhotos";
 import {
   REASON_LABEL,
   confidenceOf,
@@ -243,6 +244,7 @@ export default function CatalogLinkDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {item && <CatalogPhotoStrip item={item} name={item.name} />}
           <section className="space-y-2" aria-labelledby="catalog-link-suggestions">
             <h4 id="catalog-link-suggestions" className="text-sm font-medium">Sugestões</h4>
             {suggestions.length === 0 ? (
