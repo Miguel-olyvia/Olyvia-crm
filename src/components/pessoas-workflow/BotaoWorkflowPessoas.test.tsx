@@ -14,6 +14,9 @@ vi.mock("@/hooks/pessoas/workflow/useRegrasQualificacao", () => ({ useRegrasQual
 vi.mock("@/hooks/pessoas/workflow/useConfigNegocios", () => ({
   useConfigNegocios: () => ({ estado: "a-carregar", dados: null, aGuardar: false, guardar: vi.fn(), recarregar: vi.fn() }),
 }));
+vi.mock("@/hooks/pessoas/workflow/useCamposConfig", () => ({
+  useCamposConfig: () => ({ estado: "a-carregar", dados: null, erro: null, aGuardar: false, guardar: vi.fn(), recarregar: vi.fn() }),
+}));
 vi.mock("@/hooks/pessoas/workflow/useQuestionarioLevantamento", () => ({
   useQuestionarioLevantamento: () => ({
     dados: null, erro: null, isLoading: false, isError: false, aGuardar: false, guardar: vi.fn(), recarregar: vi.fn(),

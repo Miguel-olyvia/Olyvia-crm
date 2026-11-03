@@ -8,6 +8,7 @@ import type { RegrasQualificacaoHook } from "@/hooks/pessoas/workflow/useRegrasQ
 import { lerQuestionario } from "@/hooks/pessoas/workflow/questionario";
 import { QUESTIONARIO_BRUTO } from "@/hooks/pessoas/workflow/questionarioTestUtil";
 import type { QuestionarioHook } from "@/hooks/pessoas/workflow/useQuestionarioLevantamento";
+import type { CamposConfigHook } from "@/hooks/pessoas/workflow/useCamposConfig";
 import { WorkflowPessoasDialogo } from "./WorkflowPessoasDialogo";
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -34,6 +35,9 @@ vi.mock("@/hooks/pessoas/workflow/useConsequencias", () => ({
 }));
 const usarQuest = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useQuestionarioLevantamento", () => ({ useQuestionarioLevantamento: (h: boolean) => usarQuest(h) }));
+// 3/11: os campos das fases e o impacto no orçamento (uma só leitura para os dois separadores)
+const usarCampos = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/pessoas/workflow/useCamposConfig", () => ({ useCamposConfig: (h: boolean) => usarCampos(h) }));
 beforeAll(prepararRadixNoJsdom);
 
 const hook = (sobre: Partial<RegrasQualificacaoHook> = {}): RegrasQualificacaoHook => ({
@@ -46,6 +50,11 @@ const configNegocios = (sobre: Partial<ConfigNegociosHook> = {}): ConfigNegocios
   dados: { conversaoAoGanhar: "automatica", recusaProposta: "perder", recusaContrato: "perder", cancelamentoNoPrazo: "perder", reflexaoDias: null },
 });
 
+const camposConfig = (sobre: Partial<CamposConfigHook> = {}): CamposConfigHook => ({
+  estado: "pronto", dados: { campos: {}, efeitos: {} }, erro: null, aGuardar: false,
+  guardar: vi.fn().mockResolvedValue({ campos: {}, efeitos: {} }), recarregar: vi.fn(), ...sobre,
+});
+
 const questionario = (sobre: Partial<QuestionarioHook> = {}): QuestionarioHook => ({
   dados: lerQuestionario(QUESTIONARIO_BRUTO), erro: null, isLoading: false, isError: false, aGuardar: false,
   guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
@@ -55,6 +64,7 @@ beforeEach(() => {
   usarRegras.mockReset(); usarRegras.mockReturnValue(hook());
   usarConfig.mockReset(); usarConfig.mockReturnValue(configNegocios());
   usarQuest.mockReset(); usarQuest.mockReturnValue(questionario());
+  usarCampos.mockReset(); usarCampos.mockReturnValue(camposConfig());
 });
 
 const irParaNegocios = () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Negócios" }), { button: 0, ctrlKey: false });
@@ -80,14 +90,15 @@ describe("WorkflowPessoasDialogo", () => {
     expect(usarRegras).toHaveBeenCalledWith(true);
   });
 
-  it("tem os separadores «Qualificação» (selecionado, com as regras MQL e SQL), «Levantamento» e «Negócios»", () => {
+  it("tem os separadores «Qualificação» (selecionado, com as regras MQL e SQL), «Levantamento», «Campos das fases» e «Negócios»", () => {
     desenhar();
     const lista = screen.getByRole("tablist", { name: "Secções do Workflow" });
     const separadores = within(lista).getAllByRole("tab");
-    expect(separadores.map((s) => s.textContent)).toEqual(["Qualificação", "Levantamento", "Negócios"]);
+    expect(separadores.map((s) => s.textContent)).toEqual(["Qualificação", "Levantamento", "Campos das fases", "Negócios"]);
     expect(separadores[0]).toHaveAttribute("aria-selected", "true");
     expect(separadores[1]).toHaveAttribute("aria-selected", "false");
     expect(separadores[2]).toHaveAttribute("aria-selected", "false");
+    expect(separadores[3]).toHaveAttribute("aria-selected", "false");
     const painel = screen.getByRole("tabpanel", { name: "Qualificação" });
     expect(within(painel).getByRole("group", { name: "Quando uma lead é MQL" })).toBeInTheDocument();
     expect(within(painel).getByRole("group", { name: "Quando uma lead é SQL" })).toBeInTheDocument();
@@ -290,5 +301,42 @@ describe("WorkflowPessoasDialogo: alterações do levantamento por gravar", () =
     rerender(<WorkflowPessoasDialogo {...props} aberto />);
     irParaLevantamento();
     expect(within(screen.getByRole("region", { name: "Exterior do edifício" })).getByLabelText("Título da secção")).toHaveValue("Exterior do edifício");
+  });
+});
+
+describe("WorkflowPessoasDialogo: campos das fases e impacto no orçamento (3/11)", () => {
+  const escape = () => fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
+  const irParaCampos = () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Campos das fases" }), { button: 0, ctrlKey: false });
+
+  it("os ajustes só se leem com «Campos das fases» ou «Levantamento» à vista", () => {
+    desenhar();
+    expect(usarCampos).toHaveBeenLastCalledWith(false);
+    irParaCampos();
+    expect(usarCampos).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("button", { name: "Guardar campos" })).toBeInTheDocument();
+    irParaLevantamento();
+    expect(usarCampos).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("heading", { name: "Impacto dos campos no orçamento" })).toBeInTheDocument();
+  });
+
+  it("com um campo escondido por gravar, fechar pergunta primeiro; o rascunho sobrevive à troca de separador", async () => {
+    const { props } = desenhar();
+    irParaCampos();
+    fireEvent.click(screen.getByRole("button", { name: "Esconder Amianto" }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    irParaCampos();
+    expect(screen.getByRole("button", { name: "Mostrar Amianto" })).toBeInTheDocument();
+    escape();
+    expect(await screen.findByRole("alertdialog", { name: "Alterações por gravar" })).toBeInTheDocument();
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
+  });
+
+  it("com um valor do impacto por gravar, fechar pergunta primeiro", async () => {
+    const { props } = desenhar();
+    irParaLevantamento();
+    fireEvent.click(screen.getByRole("switch", { name: "Mexe no orçamento: Proteção do elevador" }));
+    escape();
+    expect(await screen.findByRole("alertdialog", { name: "Alterações por gravar" })).toBeInTheDocument();
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
   });
 });

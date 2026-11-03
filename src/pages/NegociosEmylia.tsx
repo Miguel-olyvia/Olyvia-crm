@@ -21,6 +21,7 @@ import { HojeTecnico } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
+import { carregarCamposConfig } from "@/emylia/real/camposConfig";
 import { aplicarAgenda, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
 import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
@@ -272,6 +273,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), ou um cargo técnico de obra."); return; }
       S.role = papel;
       const cat = await carregarCatalogo(supabase, org, S);
+      // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
+      await carregarCamposConfig(supabase, org, S);
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
       aplicarGestoresObra(await lerGestoresObra(supabase, org));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)

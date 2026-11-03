@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { acoes, type Aviso, type Estado, type Negocio } from "@/emylia/motor";
 import { estadoVazio } from "@/emylia/estadoOrganizacao";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
+import { carregarCamposConfig } from "@/emylia/real/camposConfig";
 import { deLinhas, garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
@@ -223,6 +224,8 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     if (catalogo || !ids) {
       const cat = await carregarCatalogo(sb, org, S);
       ids = idsServico(cat.M.ids.servico);
+      // 3/11 (Rúben): os campos das fases e o impacto no orçamento da organização (os mesmos de /negocios)
+      await carregarCamposConfig(sb, org, S);
     }
     aplicarLeitura(await lerNegocios(sb, org, ids));
     await lerProntidoes(sb, org, contratosDasEcs(S.deals));
