@@ -1,10 +1,10 @@
 // Os campos de uma fase, com o aspeto da Olyvia: um passo de cada vez.
 // O passo aberto mostra os campos e acende o próximo por preencher; quando
 // os campos do passo ficam todos preenchidos, abre sozinho o passo seguinte.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, LayoutList, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Sun, Wind, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PAPEL_ROT, alternarVarios, chaveBase, contagem, listaVarios, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
+import { PAPEL_ROT, alternarVarios, chaveBase, contagem, juntarOutra, listaVarios, obrigatorio, opcoesVarios, visivel, type Def, type Grupo, type Papel } from "./campos";
 import { eur, type Negocio } from "./motor";
 import { CAMPOS_COM_EFEITO, efeitosDoCampo } from "./efeitosLevantamento";
 import { Chip, type Ctx } from "./pecas";
@@ -165,17 +165,20 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   let botoes = false;
   if (c.t === "varios") {
     // escolha múltipla: botões que ligam e desligam; o valor fica "A, B"
-    const sel = listaVarios(val);
+    const sel = listaVarios(val), op = opcoesVarios(c, val);
     botoes = true;
     ctl = (
-      <div className="inline-flex w-fit flex-wrap gap-0.5 rounded-lg border border-input bg-background p-0.5" role="group" aria-label={c.l}>
-        {c.op!.map((x) => (
-          <button key={x} type="button" aria-pressed={sel.includes(x)} onClick={() => set(alternarVarios(c.op!, val, x))}
-            className={cn("rounded-md px-2.5 py-1 text-sm transition-all duration-200",
-              sel.includes(x) ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
-            {x}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex w-fit flex-wrap gap-0.5 rounded-lg border border-input bg-background p-0.5" role="group" aria-label={c.l}>
+          {op.map((x) => (
+            <button key={x} type="button" aria-pressed={sel.includes(x)} onClick={() => set(alternarVarios(op, val, x))}
+              className={cn("rounded-md px-2.5 py-1 text-sm transition-all duration-200",
+                sel.includes(x) ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+              {x}
+            </button>
+          ))}
+        </div>
+        {c.outras && <JuntarOutra c={c} val={val} set={set} />}
       </div>
     );
   } else if (c.t === "sim_nao" || c.t === "escolha") {
@@ -357,8 +360,10 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }
   // largo: a resposta vai para baixo da pergunta (muitas opções ou texto longo)
   let largo = false, comLabel = false;
   if (c.t === "varios") {
-    largo = c.op!.length > 3 || c.op!.join("").length > 34;
-    ctl = <Botoes op={c.op!} val={val} set={set} rot={rot} desc={desc} erro={erro} largo={largo} multi />;
+    const op = opcoesVarios(c, val);
+    largo = !!c.outras || op.length > 3 || op.join("").length > 34;
+    ctl = <Botoes op={op} val={val} set={set} rot={rot} desc={desc} erro={erro} largo={largo} multi />;
+    if (c.outras) ctl = <div className="grid gap-2">{ctl}<JuntarOutra c={c} val={val} set={set} simples /></div>;
   } else if (c.t === "sim_nao" || c.t === "escolha") {
     // escolher é mais rápido do que escrever: botões sempre, nunca uma lista que abre
     const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
@@ -405,6 +410,37 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }
 }
 
 type Ctl = { val: string; set: (x: string) => void; rot: string; desc?: string; erro?: boolean };
+
+/** 3/11: juntar uma opção escrita à mão (ex.: uma divisão que não está na lista), quantas se quiser. Fica escolhida; tirá-la é carregar nela. */
+function JuntarOutra({ c, val, set, simples }: { c: Def; val: string; set: (x: string) => void; simples?: boolean }) {
+  const [aberto, setAberto] = useState(false);
+  const [nome, setNome] = useState("");
+  const id = useId();
+  const juntar = () => {
+    const novo = juntarOutra(c, val, nome);
+    if (novo !== val) set(novo);
+    setNome(""); setAberto(false);
+  };
+  const grande = simples ? "min-h-11 rounded-lg px-4 text-[15px]" : "h-8 rounded-md px-2.5 text-sm";
+  if (!aberto) return (
+    <button type="button" onClick={() => setAberto(true)}
+      className={cn("inline-flex w-fit items-center gap-1.5 border border-dashed border-primary/60 font-medium text-primary transition-colors hover:bg-primary/[0.06]", grande)}>
+      <Plus className="h-4 w-4" aria-hidden="true" />{c.outras}
+    </button>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor={id} className="sr-only">Nome: {c.outras}</label>
+      <input id={id} autoFocus value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Escritório, garagem, varanda…"
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); juntar(); } else if (e.key === "Escape") { setNome(""); setAberto(false); } }}
+        className={cn(simples ? INPUT_G : INPUT, "w-64 max-w-full")} />
+      <button type="button" onClick={juntar} disabled={!nome.trim()}
+        className={cn("border border-primary bg-primary font-medium text-primary-foreground transition-opacity disabled:opacity-40", grande)}>Juntar</button>
+      <button type="button" onClick={() => { setNome(""); setAberto(false); }}
+        className={cn("text-muted-foreground hover:text-foreground", grande)}>Cancelar</button>
+    </div>
+  );
+}
 
 function Botoes({ op, val, set, rot, desc, erro, largo, multi, avanca }: Ctl & { op: string[]; largo?: boolean; multi?: boolean; avanca?: string }) {
   // multi: escolha múltipla ("varios"), cada botão liga e desliga a sua opção
