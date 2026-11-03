@@ -349,7 +349,17 @@ export interface Plano {
 export interface AvisoTec { tec: string; ti: number; t: string; q: string; lido?: string }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
-export interface Evento { t: string; q: string; k: "a" | "w" | "x" }
+export interface Evento {
+  t: string; q: string; k: "a" | "w" | "x";
+  /** 3/11: quem fez (o nome); "" lido da base sem autor; por definir numa entrada nova, ainda por gravar (marcarAutor) */
+  quem?: string;
+}
+/** 3/11: as entradas novas do histórico (sem quem) ficam com este nome; "" para as que não são de ninguém da equipa. */
+export function marcarAutor(deals: Negocio[], quem: string) {
+  for (const d of deals) for (const h of d.hist) if (h.quem === undefined) h.quem = quem;
+}
+/** «hoje 15:21 · Rúben Carvalho» (sem o nome, se não houver). */
+export const quandoEQuem = (h: Evento) => (h.quem ? `${h.q} · ${h.quem}` : h.q);
 
 /** 21/10: como o cliente assinou, para o histórico e os documentos ("Chave Móvel Digital", "código por SMS"). */
 export const comoAssinou = (a: Assinatura): string => a.tipo === "digital" ? "Chave Móvel Digital" : a.tipo === "sms" ? "código por SMS" : "desenhada no ecrã";

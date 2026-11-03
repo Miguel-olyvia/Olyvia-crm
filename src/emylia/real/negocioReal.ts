@@ -106,7 +106,7 @@ export interface LinhasNegocio {
   orcamentos: LinhaOrcamento[];
   contratos: LinhaContrato[];
   faturas: LinhaFatura[] | null;
-  historico: { ordem: number; texto: string; tipo: string; ocorrido_em: string | null }[];
+  historico: { ordem: number; texto: string; tipo: string; ocorrido_em: string | null; /** 3/11: quem fez (neg_historico_autores) */ quem?: string }[];
   /** F3 (20261231999700): a encomenda de cliente emitida no servidor (fatura registada e pagamento validado), só de leitura: o contrato do
    *  CRM (o em vigor ou, na venda direta, o de suporte) e as das adendas. Nunca vai para a base (é ela que a emite). */
   ec?: LinhaEcLida | null;
@@ -508,7 +508,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
       })) } : {}),
     },
     obra: { plano: null, mats: null, real: null, aprendido: false, ...obraDaEc(L.ec) },
-    hist: [...L.historico].sort((a, b) => a.ordem - b.ordem).map((e): Evento => ({ t: e.texto, q: deIso(e.ocorrido_em), k: e.tipo as Evento["k"] })),
+    hist: [...L.historico].sort((a, b) => a.ordem - b.ordem).map((e): Evento => ({ t: e.texto, q: deIso(e.ocorrido_em), k: e.tipo as Evento["k"], quem: e.quem ?? "" })),
     ...(L.adendas?.length ? { adendas: [...L.adendas].sort((x, y) => x.numero - y.numero).map(adendaDeLinhas) } : {}),
   };
 }

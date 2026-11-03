@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
-  alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot, valorSinal,
+  alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
@@ -179,7 +179,7 @@ export function PaginaNegocio(ctx: Ctx) {
               {d.hist.map((h, i) => (
                 <li key={d.hist.length - i} className="flex gap-3 rounded-lg px-1.5 py-1.5 text-sm animate-in fade-in-0 slide-in-from-top-1">
                   <i className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", h.k === "x" ? "bg-destructive" : h.k === "w" ? "bg-warning" : h.t.startsWith("Passou") ? "bg-primary" : "bg-success")} />
-                  <span className="min-w-0">{h.t}<small className="block text-xs text-muted-foreground">{h.q}</small></span>
+                  <span className="min-w-0">{h.t}<small className="block text-xs text-muted-foreground">{quandoEQuem(h)}</small></span>
                 </li>
               ))}
             </ol>

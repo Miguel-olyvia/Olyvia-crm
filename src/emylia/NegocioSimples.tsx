@@ -25,7 +25,7 @@ import { DocumentosSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { NecessidadesCliente } from "./NecessidadesVisita";
 import { VisitasLista } from "./Visitas";
-import { camposMedida, medida, nfmt, nomeLinha } from "./motor";
+import { camposMedida, medida, nfmt, nomeLinha, quandoEQuem } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 import { GuiaPassoCtx } from "./guiaPasso";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
@@ -299,7 +299,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
           <ol className="mt-3 space-y-3">
             {d.hist.slice(0, 5).map((h, i) => (
               <li key={d.hist.length - i} className="text-[15px] leading-snug">
-                {h.t}<span className="block text-sm text-muted-foreground">{h.q}</span>
+                {h.t}<span className="block text-sm text-muted-foreground">{quandoEQuem(h)}</span>
               </li>
             ))}
           </ol>

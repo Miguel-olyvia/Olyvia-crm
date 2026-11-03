@@ -6,7 +6,7 @@
 import { useState, type ReactNode } from "react";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
-import { FASES, type Negocio } from "@/emylia/motor";
+import { FASES, quandoEQuem, type Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { DocumentosSimples } from "@/emylia/FasesSimples";
 import { CaminhoObra } from "@/emylia/CaminhoObra";
@@ -49,7 +49,7 @@ export function HistoricoDoNegocio({ d }: { d: Negocio }) {
       {d.hist.length === 0 ? <p className="text-[15px] text-muted-foreground">{t(`${R}semHistorico`)}</p> : (
         <ol className="space-y-2">
           {d.hist.slice(0, 8).map((h, i) => (
-            <li key={d.hist.length - i} className="text-[15px] leading-snug">{h.t}<span className="block text-sm text-muted-foreground">{h.q}</span></li>
+            <li key={d.hist.length - i} className="text-[15px] leading-snug">{h.t}<span className="block text-sm text-muted-foreground">{quandoEQuem(h)}</span></li>
           ))}
         </ol>
       )}

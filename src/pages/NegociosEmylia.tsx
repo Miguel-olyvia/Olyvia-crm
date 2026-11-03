@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acoes, herdarFaturacao, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
+import { acoes, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
@@ -236,8 +236,11 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     }
   }, [org, S, redesenhar, gravar]);
 
+  // 3/11: o nome de quem entrou, nas entradas novas do histórico (depois de gravar, a base guarda-o: 20270105100000)
+  const nomeEu = useRef("");
   const run = useCallback((fn: () => void) => {
     fn();
+    marcarAutor(S.deals, nomeEu.current);
     preencherDaFicha();
     // 28/10: as vistas da Emylia que já têm página real na Olyvia abrem-na (o que mudou grava-se na mesma, antes de sair)
     const fora = VISTAS.has(S.view) ? null : PAGINA_REAL[S.view] ?? null;
@@ -301,6 +304,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         const d = S.deals.find((x) => x.id === numeroDe.get(r.negocio));
         if (d && aplicarResposta(d, Aresp, r)) respostasAplicadas.current.push(r.id);
       }
+      // 3/11: o que veio do portal (o cliente avisou, assinou, recebeu a obra) não é de ninguém da equipa
+      marcarAutor(S.deals, "");
       // 30/10: os planos por aprovar com tarefas por atribuir (o RH não tinha técnicos do ofício quando se geraram) ficam com os técnicos
       // que o RH já tem; grava-se a obra a seguir. Só quem grava a obra (o Gestor de obra; ou quem vê todos) o faz.
       const atribuidas = mp.todos || mp.papeis.includes("operacoes") ? S.deals.reduce((a, d) => a + atribuirPorAtribuir(d.obra.plano), 0) : 0;
@@ -441,6 +446,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   }, []);
   // 30/10: sem ler o RH (sem permissão nele), a pessoa vem da conta pelos papéis (neg_meus_papeis)
   const eu = minha.loading ? null : { pessoaId: minha.pessoaId ?? meus?.pessoa?.id ?? null, nome: minha.nome ?? meus?.pessoa?.nome ?? nomeConta ?? "Eu" };
+  nomeEu.current = eu && eu.nome !== "Eu" ? eu.nome : "";
   const tecConta = pronto ? tecnicoDaConta(S.tecnicos ?? [], eu) : null;
   useEffect(() => {
     if (!pronto) return;
