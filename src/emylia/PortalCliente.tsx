@@ -321,7 +321,8 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
     ["contrato", `Contrato CT 2026/${d.id}${adendasAssinadas ? ` + ${adendasAssinadas} ${adendasAssinadas === 1 ? "adenda" : "adendas"}` : ""}`, !!o?.contrato],
     ...docsAdenda,
     ["encomenda", d.obra.ec ? `Nota de encomenda ${d.obra.ec.n}` : "", !!d.obra.ec],
-    ["fatura", d.fin.fatura ? `Fatura ${d.fin.fatura.n}` : "", !!d.fin.fatura && !faturasReais.some((f) => f.numero === d.fin.fatura?.n)],
+    // 3/11: paga no Eticadata ou validada à mão no CRM, o cliente vê-a como paga
+    ["fatura", d.fin.fatura ? `Fatura ${d.fin.fatura.n}${d.fin.pago ? ` · paga${d.fin.recibo ? ` (recibo ${d.fin.recibo.n})` : ""}` : " · por pagar"}` : "", !!d.fin.fatura && !faturasReais.some((f) => f.numero === d.fin.fatura?.n)],
     ...faturasReais.map((f): [string, string, boolean] => ["tr:" + f.id,
       `Fatura ${f.numero} · ${nomeTranche(f)}${f.pagamento ? ` · paga${f.recibo ? ` (recibo ${f.recibo})` : ""}` : " · por pagar"}`, true]),
     ["auto", au ? `Auto de receção ${au.n}` : "", !!au],
