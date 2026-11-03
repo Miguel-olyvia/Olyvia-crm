@@ -52,6 +52,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { orgScoped, type OrgScopedQueryBuilder } from "../_shared/orgScopedQuery.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { resolveOrganizationSmtp, sendEmailViaSMTP } from "../_shared/smtp.ts";
+import { criarEnviadorCorreio } from "../convite-admissao/correio.ts";
 import { corpoDoEmail, destinatarioDoReenvio } from "./emailCredenciais.ts";
 import { avaliarFichaCompleta } from "./fichaCompleta.ts";
 
@@ -282,11 +284,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return responder({ error: "password_nao_alterada" }, 400);
       }
 
-      const enviado = await enviarCredenciais(svc, { email: emailConta, nome, password, baseUrl, org });
+      const envio = await enviarCredenciais(svc, { email: emailConta, nome, password, baseUrl, org });
       return responder({
         ok: true,
-        email_enviado: enviado,
-        aviso: enviado ? null : "conta_criada_sem_email",
+        email_enviado: envio.enviado,
+        aviso: envio.enviado ? null : "conta_criada_sem_email",
+        motivo_email: envio.motivo,
       });
     }
 
@@ -499,7 +502,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await gravarEmailTrabalho(svc, { pessoaId, org, email, authUid: authUidChamador });
     }
 
-    const enviado = await enviarCredenciais(svc, {
+    const envio = await enviarCredenciais(svc, {
       email,
       nome,
       password: passwordParaEnviar,
@@ -508,8 +511,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
     return responder({
       ok: true,
-      email_enviado: enviado,
-      aviso: enviado ? null : "conta_criada_sem_email",
+      email_enviado: envio.enviado,
+      aviso: envio.enviado ? null : "conta_criada_sem_email",
+      motivo_email: envio.motivo,
     });
   } catch (e) {
     captureError(e);
@@ -550,6 +554,24 @@ async function gravarEmailTrabalho(
   }
 }
 
+interface ResultadoEnvio {
+  enviado: boolean;
+  /** Codigo da falha (nunca o texto do erro); nulo quando o e-mail saiu. */
+  motivo: "smtp_nao_configurado" | "smtp_falhou" | "pedido_invalido" | null;
+}
+
+/**
+ * Envio DIRECTO pelo SMTP da organizacao da ficha, exactamente como o convite de
+ * admissao (`convite-admissao/correio.ts`): NUNCA pela `send-email`, que grava o
+ * `body_html` em `email_logs` -- a password gerada ficaria la em claro.
+ */
+// deno-lint-ignore no-explicit-any
+const enviarCorreio = (svc: any) =>
+  criarEnviadorCorreio({
+    resolverSmtp: (organizationId) => resolveOrganizationSmtp(svc, organizationId),
+    enviarSmtp: (smtp, mensagem) => sendEmailViaSMTP(smtp, mensagem),
+  });
+
 /**
  * O envio e MELHOR-ESFORCO, como no convite de admissao: a conta ja existe e
  * ja tem papel, e falhar o e-mail nao desfaz nada. Quem enviou fica com o aviso
@@ -560,23 +582,25 @@ async function enviarCredenciais(
   // deno-lint-ignore no-explicit-any
   svc: any,
   args: { email: string; nome: string; password: string | null; baseUrl: string; org: string },
-): Promise<boolean> {
+): Promise<ResultadoEnvio> {
   try {
     const { html, text } = corpoDoEmail(args.nome, args.email, args.password, args.baseUrl);
-    const { error } = await svc.functions.invoke("send-email", {
-      body: {
-        to: args.email,
-        organization_id: args.org,
-        subject: "Os seus dados de acesso a Olyvia",
-        html,
-        text,
-      },
+    const r = await enviarCorreio(svc)({
+      organizationId: args.org,
+      para: args.email,
+      assunto: "Os seus dados de acesso a Olyvia",
+      html,
+      texto: text,
     });
-    if (error) captureError(error);
-    return !error;
+    if (r.enviado) return { enviado: true, motivo: null };
+    // So o CODIGO: nunca o texto do erro, nem o destinatario, nem a password.
+    console.warn(JSON.stringify({ evento: "credenciais_email_nao_enviado", org: args.org, motivo_email: r.erroCodigo }));
+    return { enviado: false, motivo: r.erroCodigo };
   } catch (e) {
+    // Falha ao montar o corpo (e nao ao enviar): so o codigo sai.
     captureError(e);
-    return false;
+    console.warn(JSON.stringify({ evento: "credenciais_email_nao_enviado", org: args.org, motivo_email: "pedido_invalido" }));
+    return { enviado: false, motivo: "pedido_invalido" };
   }
 }
 
