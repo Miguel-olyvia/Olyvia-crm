@@ -42,6 +42,8 @@ export interface LinhaProduto {
   id: string; name: string; sku: string | null; tipo_catalogo: string; unidade: string | null; catalogo_categoria_id: string | null;
   servico_id: string | null; fator_servico: number; entulho_m3: number | null; entulho_kg: number | null; short_description: string | null;
   marca_livre: string | null; fornecedor_livre: string | null;
+  /** 03/11 (20270104930000): as fotos do produto; base antiga não manda o campo. */
+  image_urls?: string[] | null;
 }
 export interface LinhaPrecoProduto { product_id: string; price_type: string; price: number; valid_from: string | null }
 export interface LinhaFornecedorProduto { product_id: string; purchase_price: number | null; preco_data: string | null; ligacao: string; fornecedor: string | null }
@@ -193,6 +195,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
         ...(p.servico_id && svcChave.has(p.servico_id) ? { servico: svcChave.get(p.servico_id)!, fatorServico: n(p.fator_servico) || 1 } : {}),
         ...(p.sku ? { sku: p.sku } : {}), ...(pvp && n(pvp.price) > 0 ? { pvp: n(pvp.price) } : {}), ...(p.short_description ? { desc: p.short_description } : {}),
         ...(p.entulho_m3 != null ? { entulho: { m3: n(p.entulho_m3), ...(p.entulho_kg != null ? { kg: n(p.entulho_kg) } : {}) } } : {}),
+        ...(Array.isArray(p.image_urls) && p.image_urls.length ? { fotos: p.image_urls.filter((u) => typeof u === "string" && u) } : {}),
       };
       K.produtos.push(prod);
     } else if (!usados.has(p.id)) {

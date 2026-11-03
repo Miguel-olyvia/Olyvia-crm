@@ -5,7 +5,7 @@
 // · <IconeServico k="canalizacao" />: um ícone lucide por tipo de serviço.
 // · ilustracaoDe / ilustracaoDoProduto / iconeDoOficio / iconeDoServico: a escolha por palavras-chave quando o
 //   Catálogo não diz (Produto.img, Catalogo.icone).
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   AirVent, Armchair, AppWindow, BrickWall, CookingPot, DoorOpen, Droplets, Flame, Grid3x3, Hammer, Handshake, Lightbulb,
   PaintRoller, PanelTop, PencilRuler, Pickaxe, ShowerHead, Sparkles, Toilet, Trash2, Truck, Umbrella, Waves, Wrench, Zap,
@@ -179,6 +179,28 @@ export function Ilustracao({ k, className }: { k: IlustracaoKey | undefined | nu
       className={cn("h-16 w-16 shrink-0 [&_*]:[vector-effect:non-scaling-stroke]", className)}>
       {desenho}
     </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ foto do produto */
+/** Só URLs http(s) servem de foto (products.image_urls vem do catálogo do fornecedor ou do CRM). */
+export function fotoPrincipal(fotos: readonly string[] | null | undefined): string | null {
+  const f = (fotos ?? []).find((u) => typeof u === "string" && /^https?:\/\//i.test(u));
+  return f ?? null;
+}
+
+/**
+ * 03/11: a foto principal do produto (products.image_urls[0]) no lugar da ilustração; sem foto, ou se a imagem falhar,
+ * fica a ilustração. Carrega só quando chega ao ecrã (loading="lazy"); alt = nome do produto.
+ */
+export function FotoOuIlustracao({ fotos, nome, k, className }: { fotos?: readonly string[] | null; nome: string; k: IlustracaoKey | undefined | null; className?: string }) {
+  const src = fotoPrincipal(fotos);
+  const [falhou, setFalhou] = useState(false);
+  useEffect(() => setFalhou(false), [src]);
+  if (!src || falhou) return <Ilustracao k={k} className={className} />;
+  return (
+    <img src={src} alt={nome} loading="lazy" decoding="async" onError={() => setFalhou(true)}
+      className={cn("h-16 w-16 shrink-0 rounded-lg border border-border bg-muted object-cover", className)} />
   );
 }
 

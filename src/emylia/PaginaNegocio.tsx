@@ -39,6 +39,8 @@ import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
+/** A origem como se mostra: em «Outros», o que se escreveu em «Outra origem». */
+const origemDoNegocio = (d: Negocio) => (d.f.origem === "Outros" && d.f.origem_outra?.trim()) || d.f.origem || d.origem;
 const QUANDO_ABRE = ["", "abre quando a chamada for registada", "abre quando a visita for marcada", "abre quando o levantamento fechar", "abre quando o contrato for assinado", "abre quando o pagamento for validado"];
 
 export function PaginaNegocio(ctx: Ctx) {
@@ -164,7 +166,7 @@ export function PaginaNegocio(ctx: Ctx) {
               {d.f.email && <><dt className="text-muted-foreground">Email</dt><dd className="truncate text-right">{d.f.email}</dd></>}
               <dt className="text-muted-foreground">Obra</dt><dd className="text-right">{d.f.morada ? `${d.f.morada}, ${d.f.localidade || ""}` : d.local || "—"}</dd>
               {d.f.imovel && <><dt className="text-muted-foreground">Imóvel</dt><dd className="text-right">{d.f.imovel}{d.f.tipologia ? " " + d.f.tipologia : ""}</dd></>}
-              <dt className="text-muted-foreground">Origem</dt><dd className="text-right">{d.f.origem || d.origem}</dd>
+              <dt className="text-muted-foreground">Origem</dt><dd className="text-right">{origemDoNegocio(d)}</dd>
               {d.f.pref && <><dt className="text-muted-foreground">Contactar</dt><dd className="text-right">{d.f.pref}{d.f.hora ? " · " + d.f.hora.toLowerCase() : ""}</dd></>}
             </dl>
           </section>
@@ -195,7 +197,7 @@ function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: n
   const gs = (i === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[i]).flatMap((g) => (g === AREA ? gruposArea(S.campos, d.f) : [g]));
   const c = contagem(gs, d.f);
   let resumo = resumoGrupos(gs, d.f, 4);
-  if (i === 0) resumo = [d.f.origem || d.origem, d.f.email || "", d.f.tipo_cliente || ""].filter(Boolean);
+  if (i === 0) resumo = [origemDoNegocio(d), d.f.email || "", d.f.tipo_cliente || ""].filter(Boolean);
   if (i === 1) resumo = [d.f.resultado || "", d.f.orc_cliente || "", d.visita.slot ? "visita " + d.visita.slot : ""].filter(Boolean);
   if (i === 2) resumo = [d.f.tipologia || "", d.f.andar ? d.f.andar + ".º andar" : "", d.f.tem_elevador === "Sim" ? "com elevador" : "", orcLinhas(d, S).length + " serviços", d.visita.fotos + " fotos"].filter(Boolean);
   if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " € s/ IVA", "margem " + pct(T.m), d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")]; }

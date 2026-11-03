@@ -14,7 +14,7 @@ import { lerCustos, mudarCustos, useCustos } from "./v2/custosStore";
 import { caminho, dentroDe, noDoServico, oficios, type Catalogo } from "./v2/catalogoModelo";
 import { useCatalogo } from "./v2/catalogoStore";
 import { ICONE_ALERTA, NumeroCelula, TextoCelula, Escolha } from "./v2/pecasCustos";
-import { IconeServico, Ilustracao } from "./ilustracoes";
+import { FotoOuIlustracao, IconeServico } from "./ilustracoes";
 import { desempenhoServicos, desempenhoTecnicos } from "./desempenhoCatalogo";
 import { ENTRADA, NavOficios, ORDENS, PainelDesempenho, usePrefsCatalogo, type Ordem } from "./PainelCatalogo";
 import { FichaServicoSimples } from "./FichaServicoSimples";
@@ -222,7 +222,7 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
         {L.slice(0, n).map((p) => (
           <li key={p.id} onClick={() => tocar(p.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", p.id === novo && REALCE)}>
             <CaixaLinha id={p.id} nome={p.n} s={sl} />
-            <Ilustracao k={p.img ?? "generico"} />
+            <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} />
             <span className="min-w-0 flex-1">
               <button id={`prod-${p.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(p.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{p.n}{p.id === novo && <Novo />}</button>
               {(p.marca || p.sku) && <span className={cn(NOTA, "block")}>{[p.marca, p.sku ? `ref. ${p.sku}` : ""].filter(Boolean).join(" · ")}</span>}

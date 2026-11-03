@@ -8,7 +8,7 @@ import { perdaLembrada } from "./perdaDocs";
 
 /** Campos da ficha que são da pessoa do negócio base e não podem passar para a cópia (o email, o NIF, a morada e o pedido dela). */
 const DA_PESSOA: readonly string[] = [
-  "email", "nif", "nif_fat", "nome_fiscal", "email_fat", "contacto_local", "campanha", "concelho", "pedido", "morada", "cp", "localidade", "fracao", "recomendou",
+  "email", "nif", "nif_fat", "nome_fiscal", "email_fat", "contacto_local", "campanha", "concelho", "pedido", "morada", "cp", "localidade", "fracao", "recomendou", "origem_outra",
 ];
 
 const semDaPessoa = (f: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(f).filter(([k]) => !DA_PESSOA.includes(k)));

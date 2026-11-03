@@ -50,9 +50,11 @@ export const LEAD: Grupo[] = [
   {
     titulo: "Origem",
     campos: [
-      { k: "origem", l: "Origem", t: "escolha", op: ["Site", "Campanha", "Telefone", "Recomendação", "Redes sociais", "Loja"] },
+      { k: "origem", l: "Origem", t: "escolha", op: ["Site", "Campanha", "Telefone", "Recomendação", "Redes sociais", "Loja", "Outros"] },
       { k: "campanha", l: "Campanha", t: "escolha", op: ["Campanha de outono · Meta Ads", "Google Ads", "Folheto na caixa do correio"], se: { k: "origem", v: ["Campanha", "Redes sociais"] } },
       { k: "recomendou", l: "Recomendado por", t: "texto", se: { k: "origem", v: ["Recomendação"] } },
+      // 3/11 (Rúben): a origem pode ser outra; diz-se qual
+      { k: "origem_outra", l: "Outra origem", t: "texto", ph: "Feira, parceiro, vizinho…", se: { k: "origem", v: ["Outros"] } },
       { k: "rgpd", l: "Autoriza o contacto (RGPD)", t: "sim_nao" },
     ],
   },
