@@ -50,6 +50,7 @@ import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
+import { aplicarFaturacao, lerFaturacaoDaFicha, precisaDaFicha } from "@/emylia/real/faturacaoDaFicha";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
@@ -215,8 +216,27 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     redesenhar();
   }, [org, S, avisar, redesenhar]);
 
+  // 3/11: no Financeiro, o nome e o NIF dos dados de faturação vêm da ficha do cliente (Edge Function nif-faturacao). Pede-se uma vez
+  // por negócio e por sessão; sem permissão ou sem a função publicada fica como antes (escreve-se à mão).
+  const fichaPedida = useRef(new Set<number>());
+  const preencherDaFicha = useCallback(() => {
+    if (!org) return;
+    for (const d of S.deals) {
+      const ref = refs.current.get(d.id);
+      if (!ref || fichaPedida.current.has(d.id) || !precisaDaFicha(d)) continue;
+      fichaPedida.current.add(d.id);
+      void lerFaturacaoDaFicha(supabase, org, ref.id).then((x) => {
+        const atual = S.deals.find((y) => y.id === d.id);
+        if (!x || !atual || !precisaDaFicha(atual) || !aplicarFaturacao(atual, x)) return;
+        redesenhar();
+        void gravar();
+      }).catch(() => { /* fica como antes: escreve-se à mão */ });
+    }
+  }, [org, S, redesenhar, gravar]);
+
   const run = useCallback((fn: () => void) => {
     fn();
+    preencherDaFicha();
     // 28/10: as vistas da Emylia que já têm página real na Olyvia abrem-na (o que mudou grava-se na mesma, antes de sair)
     const fora = VISTAS.has(S.view) ? null : PAGINA_REAL[S.view] ?? null;
     if (!VISTAS.has(S.view)) {
@@ -226,7 +246,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     redesenhar();
     void gravar();
     if (fora) navigate(fora);
-  }, [S, avisar, redesenhar, gravar, navigate]);
+  }, [S, avisar, redesenhar, gravar, navigate, preencherDaFicha]);
   const go = useCallback((fn: () => void) => () => run(fn), [run]);
   // F3: abrir a encomenda de cliente, a Receção e as compras vai às páginas reais, filtradas pela encomenda do negócio
   const A = useMemo(() => acoes(S, avisar, run, ligacaoInventario((url) => navigate(url))), [S, avisar, run, navigate]);
@@ -286,6 +306,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       if (!vivo) return;
       setPronto(true);
+      preencherDaFicha();
       // 2/11: a vista do cliente grava-se depois de as encomendas carregarem (leva o estado dos materiais) e só depois os avisos
       void carregarEncomendas(lidos).catch(() => undefined).then(() => publicarVistasCliente()).then(avisarClientes);
       if (recebidas) avisar({ msg: "Obra recebida pelo cliente", sub: `${recebidas} ${recebidas === 1 ? "auto de receção foi assinado" : "autos de receção foram assinados"} no portal.`, kind: "ok" });
