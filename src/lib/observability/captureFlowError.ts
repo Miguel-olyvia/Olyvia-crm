@@ -126,6 +126,11 @@ export type BusinessFlow =
   | "hr-admissao-revisao-sensivel"
   | "hr-admissao-posicoes-campos"
   | "hr-criar-acesso-pessoa"
+  // Portal do colaborador, lado do RH: documentos, pedidos e o envio de um
+  // ficheiro novo. Uma recusa por permissao nao vem para aqui.
+  | "hr-portal-documentos-ler"
+  | "hr-portal-pedido-ficheiros"
+  | "hr-portal-anexar-enviar"
   // Locais de trabalho e papeis de acesso, lidos pelo assistente de criacao de
   // pessoa e pelo editor de horario. Uma recusa por permissao nao vem para
   // aqui; uma falha de rede vem, porque sem locais o horario perde o "onde".

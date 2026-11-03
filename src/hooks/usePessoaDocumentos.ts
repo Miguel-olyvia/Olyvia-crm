@@ -76,7 +76,7 @@ const HR_DOCUMENTO_EXTENSOES_PERMITIDAS = ["pdf", "jpg", "jpeg", "png"];
 /** Mesmo tecto do bucket hr-documentos-quarantine (20261130055000). */
 const HR_DOCUMENTO_TAMANHO_MAXIMO_BYTES = 10 * 1024 * 1024;
 
-function extensaoHrDocumento(ficheiro: File): string | null {
+export function extensaoHrDocumento(ficheiro: File): string | null {
   const porMime = HR_DOCUMENTO_EXTENSAO_POR_MIME[ficheiro.type];
   if (porMime) return porMime;
   const bruta = ficheiro.name.split(".").pop()?.toLowerCase() ?? "";
@@ -98,6 +98,16 @@ export function validarFicheiroHr(ficheiro: File): string | null {
 }
 
 /**
+ * So o upload para `hr-documentos-quarantine`, no caminho ja montado pelo chamador
+ * (<organization_id>/<pessoa_id>/<documento_id>/<uuid>.<ext>). Nao cria nem liga registo nenhum.
+ * Devolve a mensagem de erro traduzida, ou `null` em sucesso.
+ */
+export async function subirParaQuarentenaHr(caminho: string, ficheiro: File): Promise<string | null> {
+  const { error } = await supabase.storage.from("hr-documentos-quarantine").upload(caminho, ficheiro);
+  return error ? await getUploadErrorMessage(error) : null;
+}
+
+/**
  * Sobe o ficheiro para a quarentena e liga-o ao documento via `validate-upload` (o UNICO caminho de escrita).
  * Nao recarrega listas nem mexe em estado: quem chama decide. Devolve a mensagem de erro, ou `null` em sucesso.
  * Partilhado por `anexarFicheiro` (separador Documentos) e pelo envio com ficheiro novo do portal.
@@ -116,10 +126,8 @@ export async function subirFicheiroParaDocumento(
       `${documento.organization_id}/${documento.pessoa_id}/${documento.id}/` +
       `${crypto.randomUUID()}.${extensao}`;
 
-    const { error: erroUpload } = await supabase.storage
-      .from("hr-documentos-quarantine")
-      .upload(caminho, ficheiro);
-    if (erroUpload) return getUploadErrorMessage(erroUpload);
+    const erroUpload = await subirParaQuarentenaHr(caminho, ficheiro);
+    if (erroUpload) return erroUpload;
 
     const { data: dadosValidacao, error: erroValidacao } = await supabase.functions.invoke(
       "validate-upload",

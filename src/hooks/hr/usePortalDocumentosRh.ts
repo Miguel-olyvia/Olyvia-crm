@@ -16,7 +16,9 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { codigoDeErroRpc, chaveDoErro } from "@/lib/hr/admissaoPipeline";
 import { getLocalizedFallback } from "@/utils/friendlyError";
-import { subirFicheiroParaDocumento, validarFicheiroHr } from "@/hooks/usePessoaDocumentos";
+import { supabase } from "@/integrations/supabase/client";
+import { useCompany } from "@/contexts/CompanyContext";
+import { extensaoHrDocumento, subirParaQuarentenaHr, validarFicheiroHr } from "@/hooks/usePessoaDocumentos";
 
 export interface EnvioRh {
   id: string;
@@ -109,6 +111,34 @@ function falha(erro: unknown, origem: string): ResultadoPortalRh {
   return { ok: false, erro: getLocalizedFallback(chaveDoErro(codigo, GENERICA)) };
 }
 
+/** O texto de cada codigo `{ok:false, codigo}` da Edge `hr-documento-enviar-ficheiro`; o que nao esta aqui cai no generico. */
+const CHAVE_POR_CODIGO_EDGE: Readonly<Record<string, string>> = {
+  ficheiro_em_falta: "rhPortalReal.enviar.erro.ficheiroEmFalta",
+  ficheiro_invalido: "rhPortalReal.enviar.erro.ficheiroInvalido",
+  ficheiro_demasiado_grande: "rhPortalReal.enviar.erro.ficheiroGrande",
+  pedido_repetido: "rhPortalReal.enviar.erro.pedidoRepetido",
+  limite_excedido: "rhPortalReal.enviar.erro.limite",
+  pedido_invalido: "rhPortalReal.enviar.erro.tituloInvalido",
+  estado_invalido: "rhPortalReal.enviar.erro.estadoInvalido",
+  nao_encontrado: "rhPortalReal.enviar.erro.naoEncontrado",
+  insufficient_privilege: "rhPortalReal.enviar.erro.semPermissao",
+  nao_autenticado: "rhPortalReal.enviar.erro.semSessao",
+};
+
+const chaveDoErroEdge = (codigo: string | null): string => (codigo !== null && CHAVE_POR_CODIGO_EDGE[codigo]) || GENERICA;
+
+/** `functions.invoke` devolve erro em qualquer resposta nao-2xx; o `codigo` esta no corpo (`error.context`, uma Response). */
+async function codigoDaEdge(erro: unknown): Promise<string | null> {
+  const contexto = (erro as { context?: unknown } | null)?.context;
+  if (!contexto || typeof (contexto as { json?: unknown }).json !== "function") return null;
+  try {
+    const corpo = (await (contexto as Response).json()) as unknown;
+    return corpo && typeof corpo === "object" ? texto((corpo as Linha).codigo) : null;
+  } catch {
+    return null;
+  }
+}
+
 function ficheirosDe(bruto: unknown): FicheiroDoPedido[] {
   return linhas(bruto).flatMap((f) => {
     const id = texto(f.id);
@@ -121,6 +151,7 @@ export function usePortalDocumentosRh(pessoaId: string | null) {
   const [semAcesso, setSemAcesso] = useState(false);
   const [erro, setErro] = useState(false);
   const [aExecutar, setAExecutar] = useState(false);
+  const organizationId = useCompany().activeCompany?.id ?? null;
   const [envios, setEnvios] = useState<EnvioRh[]>([]);
   const [pedidosRh, setPedidosRh] = useState<PedidoDoRh[]>([]);
   const [pedidosPessoa, setPedidosPessoa] = useState<PedidoDaPessoa[]>([]);
@@ -260,48 +291,43 @@ export function usePortalDocumentosRh(pessoaId: string | null) {
   );
 
   /**
-   * Cria um documento novo com um ficheiro, anexa-o e so entao partilha-o no portal (3 passos, por esta ordem; o seguinte so corre
-   * se o anterior correu bem). Sem assinatura, a base so deixa entregar `declaracao` ou `recibo`. Se o anexo falhar, o documento
-   * (sem ficheiro) fica na ficha, NAO se envia, e o erro diz isso mesmo: nao ha RPC de anular com a permissao certa neste caminho.
+   * Cria um documento novo com um ficheiro e partilha-o no portal numa so accao (Edge `hr-documento-enviar-ficheiro`): o ficheiro
+   * sobe para a quarentena num caminho com o id do documento novo, e a Edge valida-o, copia-o e cria o documento ja com o ficheiro
+   * e o envio, numa transaccao. Ou fica tudo, ou nao fica nada. Sem assinatura, so `declaracao` ou `recibo`.
    */
   const anexarEEnviar = useCallback(
     async (d: { titulo: string; tipo: string; ficheiro: File; exigeAssinatura: boolean; conviteId: string | null }): Promise<ResultadoPortalRh> => {
-      if (!pessoaId) return { ok: false, erro: getLocalizedFallback(GENERICA) };
+      if (!pessoaId || !organizationId) return { ok: false, erro: getLocalizedFallback(GENERICA) };
       if (d.titulo.trim() === "") return { ok: false, erro: getLocalizedFallback("rhPortalReal.enviar.erroTitulo") };
       if (!d.exigeAssinatura && !TIPOS_SEM_ASSINATURA.includes(d.tipo)) {
         return { ok: false, erro: getLocalizedFallback("rhPortalReal.enviar.erroTipoSemAssinatura") };
       }
       const invalido = validarFicheiroHr(d.ficheiro);
       if (invalido) return { ok: false, erro: invalido };
+      const extensao = extensaoHrDocumento(d.ficheiro);
+      if (!extensao) return { ok: false, erro: getLocalizedFallback("hr.documentos.tipoFicheiroInvalido") };
       setAExecutar(true);
       try {
-        const criado = await hrRpc("rpc_hr_documento_upload_assinado_criar", {
-          p_pessoa_id: pessoaId, p_vinculo_id: null, p_tipo: d.tipo, p_titulo: d.titulo.trim(),
-        });
-        if (criado.error) return falha(criado.error, "hr-portal-anexar-enviar-criar");
-        const documentoId = texto(criado.data);
-        if (!documentoId) return { ok: false, erro: getLocalizedFallback(GENERICA) };
+        // Caminho imposto pela politica da quarentena; a 3.a pasta e o id do documento que a base vai criar.
+        const documentoId = crypto.randomUUID();
+        const caminho = `${organizationId}/${pessoaId}/${documentoId}/${crypto.randomUUID()}.${extensao}`;
+        const erroUpload = await subirParaQuarentenaHr(caminho, d.ficheiro);
+        if (erroUpload) return { ok: false, erro: erroUpload };
 
-        const linha = await hrFrom("pessoas_documentos").select("id, pessoa_id, organization_id").eq("id", documentoId).maybeSingle();
-        const org = texto((linha.data as Linha | null)?.organization_id);
-        const semFicheiro = async (motivo: string): Promise<ResultadoPortalRh> => {
-          await carregar(false);
-          return { ok: false, erro: `${motivo} ${getLocalizedFallback("rhPortalReal.enviar.ficouSemFicheiro")}` };
-        };
-        if (linha.error || !org) {
-          if (linha.error) falha(linha.error, "hr-portal-anexar-enviar-ler");
-          return await semFicheiro(getLocalizedFallback("hr.documentos.erroAnexar"));
-        }
-        const erroAnexo = await subirFicheiroParaDocumento({ id: documentoId, pessoa_id: pessoaId, organization_id: org }, d.ficheiro);
-        if (erroAnexo) return await semFicheiro(erroAnexo);
-
-        const { error } = await hrRpc("rpc_hr_portal_documento_enviar", {
-          p_documento_id: documentoId, p_convite_id: d.conviteId, p_exige_assinatura: d.exigeAssinatura,
+        const { data, error } = await supabase.functions.invoke("hr-documento-enviar-ficheiro", {
+          body: {
+            caminho, organizationId, tipo: d.tipo, titulo: d.titulo.trim(), exigeAssinatura: d.exigeAssinatura, conviteId: d.conviteId,
+          },
         });
+        // `invoke` devolve erro em qualquer resposta que nao seja 2xx: o codigo vem no corpo da resposta.
+        const recusado = (data as Linha | null)?.ok === false;
+        const codigo = error ? await codigoDaEdge(error) : recusado ? texto((data as Linha).codigo) : null;
+        // Volta a ler sempre: mesmo numa falha ambigua (500) o documento pode ter ficado criado.
         await carregar(false);
-        if (error) {
-          const r = falha(error, "hr-portal-anexar-enviar-enviar");
-          return { ok: false, erro: `${r.erro ?? ""} ${getLocalizedFallback("rhPortalReal.enviar.ficouNaFicha")}`.trim() };
+        // Uma repeticao ja feita (`repetido: true`, ok) e sucesso: o documento existe e foi enviado.
+        if (error || recusado) {
+          if (codigo === null || codigo === "erro_inesperado") captureFlowError(error ?? new Error("hr-documento-enviar-ficheiro: erro_inesperado"), "hr-portal-anexar-enviar");
+          return { ok: false, erro: getLocalizedFallback(chaveDoErroEdge(codigo)) };
         }
         return { ok: true, erro: null };
       } catch (e) {
@@ -310,7 +336,7 @@ export function usePortalDocumentosRh(pessoaId: string | null) {
         setAExecutar(false);
       }
     },
-    [carregar, pessoaId],
+    [carregar, organizationId, pessoaId],
   );
 
   const retirarEnvio = useCallback(

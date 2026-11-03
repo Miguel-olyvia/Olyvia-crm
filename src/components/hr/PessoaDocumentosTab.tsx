@@ -370,7 +370,8 @@ export function PessoaDocumentosTab({
                         <TableCell>{formatarData(documento.assinado_em)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-wrap justify-end gap-2">
-                            {podeVerConteudoDeste && (
+                            {/* Um documento so de ficheiro (sem modelo) nao tem texto: so o ficheiro. */}
+                            {podeVerConteudoDeste && !(documento.modelo_id === null && documento.ficheiro_caminho) && (
                               <Button
                                 variant="ghost"
                                 size="sm"
