@@ -11,6 +11,33 @@ vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) =
   ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
   useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
 }));
+// A base e simulada como nos outros testes do rh-exemplo (mesmo conjunto do justificacaoDia.test): sem CompanyProvider e sem chamadas.
+vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
+vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
+vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());
+vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", async (importOriginal) =>
+  (await import("@/test/assiduidadeDaPessoaFalso")).wrapperAssiduidadeDaPessoaFalso(
+    await importOriginal<typeof import("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa")>(),
+  ));
+vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao", async (importOriginal) =>
+  (await import("@/test/assiduidadeDaPessoaFalso")).wrapperAssiduidadeDaOrganizacaoFalso(
+    await importOriginal<typeof import("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao")>(),
+  ));
+vi.mock("@/components/rh-exemplo/hooks/useLocaisTrabalho", () => {
+  const resultado = { locais: [] as never[], loading: false, recusado: false };
+  return { useLocaisTrabalho: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/useAusenciasTipos", async () => {
+  const tipos = (await import("@/components/rh-exemplo/dados/catalogos")).catalogos().tiposAusencia;
+  const resultado = { tipos, loading: false, recusado: false, vazio: false };
+  return { useAusenciasTipos: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => {
+  const resultado = { regra: { minutosMinimosDia: 240 }, error: null };
+  return { useRegrasSubsidioAlimentacao: () => resultado };
+});
+vi.mock("@/components/rh-exemplo/hooks/PessoaRelatorioAssiduidadeMensalReal", () => ({ PessoaRelatorioAssiduidadeMensal: () => null }));
+import { reporAssiduidadeFalsa } from "@/test/assiduidadeDaPessoaFalso";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -61,6 +88,7 @@ beforeEach(() => {
   reporGestao();
   reporFluxosB();
   reporFluxosC();
+  reporAssiduidadeFalsa();
 });
 
 afterEach(() => {
@@ -95,7 +123,9 @@ describe("vista da própria pessoa: nunca «Corrigir»", () => {
     expect(botoesDeCorrecao()).toEqual([]);
     unmount();
     aba(true, "justificacoes");
-    expect(screen.getByRole("button", { name: "Justificar" })).toBeInTheDocument();
+    // A justificação de uma falha de marcação faz-se no detalhe do dia do calendário (formulário real, na base): a aba só as lista.
+    expect(screen.getByRole("tab", { name: /Justificações/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Justificar" })).not.toBeInTheDocument();
     expect(botoesDeCorrecao()).toEqual([]);
   });
 

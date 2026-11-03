@@ -6,8 +6,9 @@
  */
 export * from "./portalDocumentosPublicoReal";
 export {
-  usePortalDocumentosRh,
+  usePortalDocumentosRh, TIPOS_SEM_ASSINATURA, TIPOS_COM_ASSINATURA,
   type DocumentoPartilhavel, type EnvioRh, type PedidoDaPessoa, type PedidoDoRh, type ResultadoPortalRh,
 } from "@/hooks/hr/usePortalDocumentosRh";
+export { HR_DOCUMENTO_ACCEPT } from "@/hooks/usePessoaDocumentos";
 export { useDecisoesAdmissao, type ResultadoDecisao, type ResultadoEnvioContrato } from "@/hooks/hr/useDecisoesAdmissao";
 export { EnviarContratoDialog } from "@/components/hr/admissao/EnviarContratoDialog";

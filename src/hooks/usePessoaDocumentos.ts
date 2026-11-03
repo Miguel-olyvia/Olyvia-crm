@@ -83,6 +83,65 @@ function extensaoHrDocumento(ficheiro: File): string | null {
   return HR_DOCUMENTO_EXTENSOES_PERMITIDAS.includes(bruta) ? bruta : null;
 }
 
+/** O valor de `accept` do input de ficheiro: as mesmas extensoes que o servidor aceita. */
+export const HR_DOCUMENTO_ACCEPT = HR_DOCUMENTO_EXTENSOES_PERMITIDAS.map((e) => `.${e}`).join(",");
+
+/** Valida tamanho e tipo ANTES de gastar um upload. Devolve a mensagem traduzida, ou `null` se o ficheiro serve. */
+export function validarFicheiroHr(ficheiro: File): string | null {
+  if (ficheiro.size > HR_DOCUMENTO_TAMANHO_MAXIMO_BYTES) {
+    return getLocalizedFallback("hr.documentos.ficheiroDemasiadoGrande");
+  }
+  if (!extensaoHrDocumento(ficheiro)) {
+    return getLocalizedFallback("hr.documentos.tipoFicheiroInvalido");
+  }
+  return null;
+}
+
+/**
+ * Sobe o ficheiro para a quarentena e liga-o ao documento via `validate-upload` (o UNICO caminho de escrita).
+ * Nao recarrega listas nem mexe em estado: quem chama decide. Devolve a mensagem de erro, ou `null` em sucesso.
+ * Partilhado por `anexarFicheiro` (separador Documentos) e pelo envio com ficheiro novo do portal.
+ */
+export async function subirFicheiroParaDocumento(
+  documento: { id: string; pessoa_id: string; organization_id: string },
+  ficheiro: File,
+): Promise<string | null> {
+  const invalido = validarFicheiroHr(ficheiro);
+  if (invalido) return invalido;
+  const extensao = extensaoHrDocumento(ficheiro);
+  try {
+    // Caminho IMPOSTO por politica (20261130055000):
+    // <organization_id>/<pessoa_id>/<documento_id>/<uuid_minusculo>.<ext>
+    const caminho =
+      `${documento.organization_id}/${documento.pessoa_id}/${documento.id}/` +
+      `${crypto.randomUUID()}.${extensao}`;
+
+    const { error: erroUpload } = await supabase.storage
+      .from("hr-documentos-quarantine")
+      .upload(caminho, ficheiro);
+    if (erroUpload) return getUploadErrorMessage(erroUpload);
+
+    const { data: dadosValidacao, error: erroValidacao } = await supabase.functions.invoke(
+      "validate-upload",
+      {
+        body: {
+          quarantineBucket: "hr-documentos-quarantine",
+          finalBucket: "hr-documentos",
+          path: caminho,
+        },
+      },
+    );
+    const resultadoValidacao = parseValidateUploadResponse(dadosValidacao);
+    if (erroValidacao || !resultadoValidacao.ok) {
+      return await resolveValidateUploadErrorMessage(resultadoValidacao, erroValidacao);
+    }
+    return null;
+  } catch (e) {
+    if (!isPermissionError(e)) captureFlowError(e, "hr-documentos-anexar-ficheiro");
+    return await getFriendlyErrorMessage(e);
+  }
+}
+
 export interface UsePessoaDocumentosResult {
   documentos: PessoaDocumento[];
   /** So preenchido quando `podeVerModelos` -- quem so pode ver os proprios
@@ -305,54 +364,15 @@ export function usePessoaDocumentos(
         return getLocalizedFallback("hr.documentos.erroAnexar");
       }
 
-      if (ficheiro.size > HR_DOCUMENTO_TAMANHO_MAXIMO_BYTES) {
-        return getLocalizedFallback("hr.documentos.ficheiroDemasiadoGrande");
-      }
-
-      const extensao = extensaoHrDocumento(ficheiro);
-      if (!extensao) {
-        return getLocalizedFallback("hr.documentos.tipoFicheiroInvalido");
-      }
+      const invalido = validarFicheiroHr(ficheiro);
+      if (invalido) return invalido;
 
       setSaving(true);
       try {
-        // Caminho IMPOSTO por politica (20261130055000):
-        // <organization_id>/<pessoa_id>/<documento_id>/<uuid_minusculo>.<ext>
-        // crypto.randomUUID() ja produz minusculas -- a mesma exigencia que a
-        // politica de storage e a RPC de anexar (20261130065000) confirmam.
-        const caminho =
-          `${documento.organization_id}/${documento.pessoa_id}/${documento.id}/` +
-          `${crypto.randomUUID()}.${extensao}`;
-
-        const { error: erroUpload } = await supabase.storage
-          .from("hr-documentos-quarantine")
-          .upload(caminho, ficheiro);
-        if (erroUpload) return getUploadErrorMessage(erroUpload);
-
-        // Promove da quarentena, confirma a permissao/organizacao/estado, e
-        // liga o ficheiro ao documento via rpc_hr_documento_anexar_ficheiro
-        // -- tudo dentro de validate-upload, que e o UNICO caminho de escrita
-        // (a RPC nao tem EXECUTE para authenticated, so para service_role).
-        const { data: dadosValidacao, error: erroValidacao } = await supabase.functions.invoke(
-          "validate-upload",
-          {
-            body: {
-              quarantineBucket: "hr-documentos-quarantine",
-              finalBucket: "hr-documentos",
-              path: caminho,
-            },
-          },
-        );
-        const resultadoValidacao = parseValidateUploadResponse(dadosValidacao);
-        if (erroValidacao || !resultadoValidacao.ok) {
-          return await resolveValidateUploadErrorMessage(resultadoValidacao, erroValidacao);
-        }
-
+        const erro = await subirFicheiroParaDocumento(documento, ficheiro);
+        if (erro) return erro;
         await load();
         return null;
-      } catch (e) {
-        if (!isPermissionError(e)) captureFlowError(e, "hr-documentos-anexar-ficheiro");
-        return await getFriendlyErrorMessage(e);
       } finally {
         setSaving(false);
       }

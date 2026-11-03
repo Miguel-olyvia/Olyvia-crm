@@ -110,7 +110,8 @@ export function PortalColaboradorRhReal({ pessoaId, nome = "", compacto = false,
       <EnviarContratoDialog aberto={dialogo === "contrato"} conviteId={conviteId} nome={nome} aoFechar={() => setDialogo(null)} aoEnviado={recarregarTudo} />
       <RhEnviarDocumentoDialogReal
         aberto={dialogo === "enviar"} documentos={rh.documentos.filter((d) => !d.partilhado)} conviteId={conviteId}
-        enviar={rh.enviarDocumento} aoFechar={() => setDialogo(null)}
+        enviar={rh.enviarDocumento} anexarEEnviar={rh.anexarEEnviar} podeAnexar={permissoes.podeEditar && permissoes.podeEmitir}
+        aoFechar={() => setDialogo(null)}
       />
       <RhPedirDocumentoDialogReal aberto={dialogo === "pedir"} pedir={rh.pedirDocumento} conviteId={conviteId} aoFechar={() => setDialogo(null)} />
     </Card>

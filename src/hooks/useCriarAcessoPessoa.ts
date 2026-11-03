@@ -74,6 +74,9 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   pessoa_ja_tem_conta_activa: "hr.conta.erroPessoaJaTemConta",
   // Reenvio com uma conta sem e-mail de autenticacao: nao ha para onde mandar.
   conta_sem_email: "hr.acesso.erroContaSemEmail",
+  // Criar sem e-mail de acesso (nem no pedido, nem na ficha) ou com um e-mail invalido.
+  sem_email_acesso: "hr.acesso.erroSemEmailAcesso",
+  email_invalido: "hr.acesso.erroEmailInvalido",
   // Inclui a guarda de ficha completa que nao conseguiu correr: o acesso NAO foi criado.
   erro_inesperado: "hr.acesso.erroInesperado",
 };
@@ -96,6 +99,8 @@ function erroSemDados(codigo: string | null): Error {
 
 interface OpcoesCriarAcesso {
   forcarNovaPassword?: boolean;
+  /** E-mail de acesso (o da empresa): login e destino das credenciais. So na criacao. */
+  email?: string;
 }
 
 export function useCriarAcessoPessoa() {
@@ -114,6 +119,7 @@ export function useCriarAcessoPessoa() {
             pessoa_id: pessoaId,
             role_id: roleId || null,
             forcar_nova_password: opcoes?.forcarNovaPassword ?? false,
+            ...(opcoes?.email ? { email: opcoes.email } : {}),
           },
         });
         if (error) {

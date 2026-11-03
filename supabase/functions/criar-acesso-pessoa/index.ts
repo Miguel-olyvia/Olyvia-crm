@@ -17,13 +17,16 @@
  *   5. ENVIA AS CREDENCIAIS por e-mail, sem segundo botao e sem ninguem
  *      redigir o e-mail.
  *
- * Na CRIACAO o destinatario e o `email_pessoal` da ficha -- que e campo
- * obrigatorio da admissao, por isso nunca falta a quem esta em condicoes de
- * receber acesso. Nunca o `email_trabalho`: mandar as credenciais para a caixa
- * da empresa a quem ainda nao entrou na empresa nao chega a lado nenhum. No
- * REENVIO e o e-mail da CONTA de autenticacao (nunca o `email_pessoal`, que se
- * edita com outra permissao). Se a conta de autenticacao ja existia, a sua
- * password nao se repoe nem se envia.
+ * Na CRIACAO o e-mail de acesso e o da EMPRESA: e o endereco de entrada na
+ * plataforma (login) e para la vao as credenciais. Vem do campo opcional
+ * `email` do pedido (o que o RH confirmou no dialogo); se faltar, usa-se o
+ * `pessoas.email_trabalho` e, por ultimo, o `pessoas.email_pessoal` (fallback
+ * so para nao partir fichas antigas). Sem nenhum dos tres: `sem_email_acesso`.
+ * Depois de a conta criada, se o e-mail escolhido difere do `email_trabalho`
+ * grava-se la -- so se quem clicou tem `hr.pessoas.laborais.edit` (senao segue
+ * sem gravar). No REENVIO e o e-mail da CONTA de autenticacao (nunca editavel
+ * nem o `email_pessoal`, que se edita com outra permissao). Se a conta de
+ * autenticacao ja existia, a sua password nao se repoe nem se envia.
  *
  * A PASSWORD NUNCA SAI NA RESPOSTA
  * --------------------------------
@@ -55,6 +58,9 @@ const COMPRIMENTO_PASSWORD = 16;
 
 /** Papeis que esta funcao NUNCA atribui, mesmo que o pedido os peca. */
 const PAPEIS_PROIBIDOS = ["super_admin", "system_admin"];
+
+/** Validacao simples (uma arroba, dominio com ponto, sem espacos); o resto e do auth. */
+const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -120,9 +126,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const pessoaId = payload?.pessoa_id;
     const roleId = payload?.role_id ?? null;
     const forcarNovaPassword = Boolean(payload?.forcar_nova_password);
+    // E-mail de acesso escolhido no dialogo (opcional): validado e em minusculas.
+    const emailDoPedido: string | null =
+      payload?.email === undefined || payload?.email === null || payload?.email === ""
+        ? null
+        : typeof payload.email === "string"
+          ? payload.email.trim().toLowerCase()
+          : "";
 
     if (typeof pessoaId !== "string" || !UUID.test(pessoaId)) {
       return responder({ error: "pedido_invalido" }, 400);
+    }
+    if (emailDoPedido !== null && !EMAIL_VALIDO.test(emailDoPedido)) {
+      return responder({ error: "email_invalido" }, 400);
     }
     if (roleId !== null && (typeof roleId !== "string" || !UUID.test(roleId))) {
       return responder({ error: "pedido_invalido" }, 400);
@@ -134,7 +150,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // seguinte tudo passa a ser filtrado pelo `organization_id` que ela devolve.
     const { data: pessoa, error: erroPessoa } = await svc
       .from("pessoas")
-      .select("id, organization_id, primeiro_nome, apelido, email_pessoal, deleted_at")
+      .select("id, organization_id, primeiro_nome, apelido, email_pessoal, email_trabalho, deleted_at")
       .eq("id", pessoaId)
       .maybeSingle();
 
@@ -160,9 +176,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     if (!pode) return responder({ error: "insufficient_privilege" }, 403);
 
-    const email = (pessoa.email_pessoal ?? "").trim().toLowerCase();
-    if (!email || !email.includes("@")) {
-      return responder({ error: "sem_email_pessoal" }, 400);
+    // Pedido > email_trabalho > email_pessoal (fallback de fichas antigas).
+    const emailTrabalhoAtual = (pessoa.email_trabalho ?? "").trim().toLowerCase();
+    const email: string =
+      emailDoPedido ?? (emailTrabalhoAtual || (pessoa.email_pessoal ?? "").trim().toLowerCase());
+    if (!email || !EMAIL_VALIDO.test(email)) {
+      return responder({ error: "sem_email_acesso" }, 400);
     }
     const nome = [pessoa.primeiro_nome, pessoa.apelido].filter(Boolean).join(" ").trim() || email;
 
@@ -378,6 +397,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return responder({ error: erroLigar.message ?? "conta_nao_ligada_a_ficha" }, 400);
     }
 
+    // Grava o e-mail de acesso como e-mail de trabalho da ficha, se difere e se
+    // quem clicou pode editar dados laborais. Melhor-esforco: a conta ja existe.
+    if (email !== emailTrabalhoAtual) {
+      await gravarEmailTrabalho(svc, { pessoaId, org, email, authUid: authUidChamador });
+    }
+
     const enviado = await enviarCredenciais(svc, {
       email,
       nome,
@@ -395,6 +420,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return responder({ error: "erro_inesperado" }, 500);
   }
 });
+
+/**
+ * Grava `pessoas.email_trabalho` com service role e filtro de organizacao, so
+ * se o chamador tem `hr.pessoas.laborais.edit` NESSA organizacao. Nunca falha
+ * o pedido: sem permissao ou com erro, regista (so erros) e segue.
+ */
+async function gravarEmailTrabalho(
+  // deno-lint-ignore no-explicit-any
+  svc: any,
+  args: { pessoaId: string; org: string; email: string; authUid: string },
+): Promise<void> {
+  try {
+    if (!args.org) return;
+    const { data: pode, error: erroPermissao } = await svc.rpc("has_anew_permission_in_org", {
+      _auth_uid: args.authUid,
+      _permission_code: "hr.pessoas.laborais.edit",
+      _organization_id: args.org,
+    });
+    if (erroPermissao) {
+      captureError(erroPermissao);
+      return;
+    }
+    if (!pode) return;
+    const { error } = await svc
+      .from("pessoas")
+      .update({ email_trabalho: args.email })
+      .eq("id", args.pessoaId)
+      .eq("organization_id", args.org);
+    if (error) captureError(error);
+  } catch (e) {
+    captureError(e);
+  }
+}
 
 /**
  * O envio e MELHOR-ESFORCO, como no convite de admissao: a conta ja existe e

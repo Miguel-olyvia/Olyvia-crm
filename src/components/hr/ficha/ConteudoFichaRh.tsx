@@ -232,6 +232,7 @@ function Dialogos(p: DialogosProps) {
       <CriarAcessoDialog
         open={p.acessoAberto} onOpenChange={p.setAcessoAberto} pessoaId={pessoa.id} modo={p.temConta ? "reenviar" : "criar"}
         pendencias={p.ctx.pendencias.pendencias} onCriado={p.aoCriadoAcesso}
+        emailTrabalho={pessoa.email_trabalho} emailPessoal={pessoa.email_pessoal}
       />
     </>
   );

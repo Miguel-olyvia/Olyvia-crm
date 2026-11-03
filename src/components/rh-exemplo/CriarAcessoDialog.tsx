@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -53,7 +54,15 @@ interface CriarAcessoDialogProps {
    * e travado. Ausente = nao se sabe, e quem decide e a Edge Function.
    */
   pendencias?: Pendencia[];
+  /** E-mail da empresa da ficha: sugestao do e-mail de acesso (login e destino das credenciais). */
+  emailTrabalho?: string | null;
+  /** Fallback da sugestao quando a ficha ainda nao tem e-mail da empresa. */
+  emailPessoal?: string | null;
+  /** E-mail da conta existente, so para mostrar ao reenviar (nao se edita). */
+  emailConta?: string | null;
 }
+
+const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function CriarAcessoDialog({
   open,
@@ -62,12 +71,26 @@ export function CriarAcessoDialog({
   modo,
   onCriado,
   pendencias,
+  emailTrabalho,
+  emailPessoal,
+  emailConta,
 }: CriarAcessoDialogProps) {
   const { t } = useTranslation();
   const { criarAcesso, processando } = useCriarAcessoPessoa();
   const { papeis, loading: papeisLoading } = usePapeisDaOrganizacao();
   const [roleId, setRoleId] = useState("");
   const [tocado, setTocado] = useState(false);
+  const [email, setEmail] = useState("");
+  const sugestaoEmail = (emailTrabalho || emailPessoal || "").trim();
+  // Cada abertura recomeca com a sugestao da ficha.
+  useEffect(() => {
+    if (open) setEmail(sugestaoEmail);
+  }, [open, sugestaoEmail]);
+  const emailLimpo = email.trim().toLowerCase();
+  const erroEmail =
+    tocado && modo === "criar" && !EMAIL_VALIDO.test(emailLimpo)
+      ? t(emailLimpo === "" ? "hr.acesso.erroSemEmailAcesso" : "hr.acesso.erroEmailInvalido")
+      : null;
   /** O que a Edge Function disse que falta, quando a ficha mudou entre a
    * leitura das pendencias e o clique (ou quando elas nao foram lidas). */
   const [faltamDoServidor, setFaltamDoServidor] = useState<string[]>([]);
@@ -93,7 +116,10 @@ export function CriarAcessoDialog({
   // voltar a tentar depois de completar a ficha nao fica preso ate fechar e
   // reabrir o dialogo.
   const botaoTravado = pendenciasConhecidas;
-  const podeConfirmar = (!precisaDePapel || roleId !== "") && !botaoTravado;
+  const podeConfirmar =
+    (!precisaDePapel || roleId !== "") &&
+    (modo !== "criar" || EMAIL_VALIDO.test(emailLimpo)) &&
+    !botaoTravado;
   const erroPapel =
     tocado && precisaDePapel && roleId === "" ? t("hr.acesso.erroPapelObrigatorio") : null;
 
@@ -102,6 +128,7 @@ export function CriarAcessoDialog({
     if (!podeConfirmar) return;
     const resultado = await criarAcesso(pessoaId, roleId, {
       forcarNovaPassword: modo === "reenviar",
+      email: modo === "criar" ? emailLimpo : undefined,
     });
     if (!resultado.ok) {
       if (resultado.faltam) setFaltamDoServidor(resultado.faltam);
@@ -150,6 +177,46 @@ export function CriarAcessoDialog({
               </ul>
             </AlertDescription>
           </Alert>
+        )}
+
+        {modo === "criar" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="hr-acesso-email">
+              {t("hr.acesso.email")}
+              <span aria-hidden="true" className="ml-0.5 text-destructive">
+                *
+              </span>
+              <span className="sr-only"> ({t("hr.campos.obrigatorio")})</span>
+            </Label>
+            <Input
+              id="hr-acesso-email"
+              type="email"
+              autoComplete="off"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onBlur={() => setTocado(true)}
+              aria-required="true"
+              aria-invalid={erroEmail ? true : undefined}
+              aria-describedby={
+                erroEmail ? "hr-acesso-email-ajuda hr-acesso-email-erro" : "hr-acesso-email-ajuda"
+              }
+              className={cn(erroEmail && "border-destructive")}
+            />
+            <p id="hr-acesso-email-ajuda" className="text-xs text-muted-foreground">
+              {t("hr.acesso.emailAjuda")}
+            </p>
+            {erroEmail && (
+              <p id="hr-acesso-email-erro" className="text-xs text-destructive">
+                {erroEmail}
+              </p>
+            )}
+          </div>
+        ) : (
+          emailConta && (
+            <p className="text-sm">
+              {t("hr.acesso.emailDaConta", { email: emailConta })}
+            </p>
+          )
         )}
 
         {precisaDePapel && (

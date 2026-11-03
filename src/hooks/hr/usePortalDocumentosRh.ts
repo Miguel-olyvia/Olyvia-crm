@@ -16,6 +16,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { codigoDeErroRpc, chaveDoErro } from "@/lib/hr/admissaoPipeline";
 import { getLocalizedFallback } from "@/utils/friendlyError";
+import { subirFicheiroParaDocumento, validarFicheiroHr } from "@/hooks/usePessoaDocumentos";
 
 export interface EnvioRh {
   id: string;
@@ -91,6 +92,10 @@ const COLUNAS_DOCUMENTO =
   "id, titulo, tipo, estado, assinado_em, assinatura_origem, assinatura_referencia, assinatura_telemovel_mascarado";
 const ESTADOS_COM_FICHEIROS = ["enviado", "aceite", "recusado"];
 const GENERICA = "hr.convite.erro.accaoFalhou";
+/** Sem assinatura, a base so deixa entregar estes tipos (rpc_hr_portal_documento_enviar). */
+export const TIPOS_SEM_ASSINATURA: readonly string[] = ["declaracao", "recibo"];
+/** Com assinatura, todos os que a criacao por upload aceita. */
+export const TIPOS_COM_ASSINATURA: readonly string[] = ["contrato", "adenda", "declaracao", "recibo", "outro"];
 
 const texto = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 const textoOuVazio = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -254,6 +259,60 @@ export function usePortalDocumentosRh(pessoaId: string | null) {
     [escrever],
   );
 
+  /**
+   * Cria um documento novo com um ficheiro, anexa-o e so entao partilha-o no portal (3 passos, por esta ordem; o seguinte so corre
+   * se o anterior correu bem). Sem assinatura, a base so deixa entregar `declaracao` ou `recibo`. Se o anexo falhar, o documento
+   * (sem ficheiro) fica na ficha, NAO se envia, e o erro diz isso mesmo: nao ha RPC de anular com a permissao certa neste caminho.
+   */
+  const anexarEEnviar = useCallback(
+    async (d: { titulo: string; tipo: string; ficheiro: File; exigeAssinatura: boolean; conviteId: string | null }): Promise<ResultadoPortalRh> => {
+      if (!pessoaId) return { ok: false, erro: getLocalizedFallback(GENERICA) };
+      if (d.titulo.trim() === "") return { ok: false, erro: getLocalizedFallback("rhPortalReal.enviar.erroTitulo") };
+      if (!d.exigeAssinatura && !TIPOS_SEM_ASSINATURA.includes(d.tipo)) {
+        return { ok: false, erro: getLocalizedFallback("rhPortalReal.enviar.erroTipoSemAssinatura") };
+      }
+      const invalido = validarFicheiroHr(d.ficheiro);
+      if (invalido) return { ok: false, erro: invalido };
+      setAExecutar(true);
+      try {
+        const criado = await hrRpc("rpc_hr_documento_upload_assinado_criar", {
+          p_pessoa_id: pessoaId, p_vinculo_id: null, p_tipo: d.tipo, p_titulo: d.titulo.trim(),
+        });
+        if (criado.error) return falha(criado.error, "hr-portal-anexar-enviar-criar");
+        const documentoId = texto(criado.data);
+        if (!documentoId) return { ok: false, erro: getLocalizedFallback(GENERICA) };
+
+        const linha = await hrFrom("pessoas_documentos").select("id, pessoa_id, organization_id").eq("id", documentoId).maybeSingle();
+        const org = texto((linha.data as Linha | null)?.organization_id);
+        const semFicheiro = async (motivo: string): Promise<ResultadoPortalRh> => {
+          await carregar(false);
+          return { ok: false, erro: `${motivo} ${getLocalizedFallback("rhPortalReal.enviar.ficouSemFicheiro")}` };
+        };
+        if (linha.error || !org) {
+          if (linha.error) falha(linha.error, "hr-portal-anexar-enviar-ler");
+          return await semFicheiro(getLocalizedFallback("hr.documentos.erroAnexar"));
+        }
+        const erroAnexo = await subirFicheiroParaDocumento({ id: documentoId, pessoa_id: pessoaId, organization_id: org }, d.ficheiro);
+        if (erroAnexo) return await semFicheiro(erroAnexo);
+
+        const { error } = await hrRpc("rpc_hr_portal_documento_enviar", {
+          p_documento_id: documentoId, p_convite_id: d.conviteId, p_exige_assinatura: d.exigeAssinatura,
+        });
+        await carregar(false);
+        if (error) {
+          const r = falha(error, "hr-portal-anexar-enviar-enviar");
+          return { ok: false, erro: `${r.erro ?? ""} ${getLocalizedFallback("rhPortalReal.enviar.ficouNaFicha")}`.trim() };
+        }
+        return { ok: true, erro: null };
+      } catch (e) {
+        return falha(e, "hr-portal-anexar-enviar");
+      } finally {
+        setAExecutar(false);
+      }
+    },
+    [carregar, pessoaId],
+  );
+
   const retirarEnvio = useCallback(
     (envioId: string, motivo: string) => escrever("rpc_hr_portal_envio_retirar", { p_envio_id: envioId, p_motivo: motivo.trim() }),
     [escrever],
@@ -305,7 +364,7 @@ export function usePortalDocumentosRh(pessoaId: string | null) {
 
   return {
     carregando, semAcesso, erro, aExecutar, envios, pedidosRh, pedidosPessoa, documentos, recarregar,
-    enviarDocumento, retirarEnvio, pedirDocumento, aceitarPedido, recusarPedido, cancelarPedido,
+    enviarDocumento, anexarEEnviar, retirarEnvio, pedirDocumento, aceitarPedido, recusarPedido, cancelarPedido,
     prepararPedidoDaPessoa, recusarPedidoDaPessoa, responderPedidoDaPessoa,
   };
 }
