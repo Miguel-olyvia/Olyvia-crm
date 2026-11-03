@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { CatalogPhotosViewer, CatalogThumb } from "@/components/catalog-images/CatalogItemPhotos";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
@@ -98,6 +100,7 @@ export default function SupplierPortalCatalogSection({
   hidePriceChanges = false,
 }: SupplierPortalCatalogSectionProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { hasPermission } = usePermissions();
   const canSuggest = hasPermission("products.view");
   // Criar produto a partir do artigo: products.create (como o botão de
@@ -122,6 +125,17 @@ export default function SupplierPortalCatalogSection({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [linkItem, setLinkItem] = useState<CrmCatalogItem | null>(null);
+  const [photosItem, setPhotosItem] = useState<CrmCatalogItem | null>(null);
+
+  // rpc_catalog_link copiou fotos do artigo para products.image_urls (produto sem fotos):
+  // diz quantas e faz as listas de produtos em cache voltarem a ler.
+  const afterImagesCopied = (n: number | undefined): string | null => {
+    if (!n || n <= 0) return null;
+    void queryClient.invalidateQueries({
+      predicate: (q) => typeof q.queryKey[0] === "string" && (q.queryKey[0] as string).startsWith("product"),
+    });
+    return n === 1 ? "1 foto copiada para o produto." : `${n} fotos copiadas para o produto.`;
+  };
   const [linking, setLinking] = useState(false);
 
   const [unlinkItem, setUnlinkItem] = useState<CrmCatalogItem | null>(null);
@@ -354,6 +368,7 @@ export default function SupplierPortalCatalogSection({
       description: [
         `${item.supplier_ref} → ${choice.productName}${result.created ? " (nova associação ao fornecedor)" : ""}.`,
         describeLinkPriceOutcome(result, item.currency),
+        afterImagesCopied(result.images_copied),
         ...(result.warnings ?? []),
       ]
         .filter(Boolean)
@@ -496,6 +511,7 @@ export default function SupplierPortalCatalogSection({
       description: [
         `${item.supplier_ref} → ${product.name} (${product.sku}).`,
         outcome.priceNotApplied ?? describeLinkPriceOutcome(outcome.result, item.currency),
+        afterImagesCopied(outcome.result.images_copied),
         ...(outcome.result.warnings ?? []),
       ]
         .filter(Boolean)
@@ -787,20 +803,25 @@ export default function SupplierPortalCatalogSection({
                     )}
                     <TableCell className="font-mono text-xs align-top">{item.supplier_ref}</TableCell>
                     <TableCell className="align-top">
-                      <div className="font-medium">{item.name}</div>
-                      {isService ? (
-                        <div className="text-xs text-muted-foreground">
-                          <Badge variant="outline" className="mr-1">Serviço</Badge>
-                          Zona: {nomesDistritos(item.service_districts, distritos)}
-                          {item.mobilization_days != null ? ` · mobilização ${item.mobilization_days} d` : ""}
+                      <div className="flex items-start gap-2">
+                        <CatalogThumb item={item} name={item.name} size={40} onOpen={() => setPhotosItem(item)} />
+                        <div className="min-w-0">
+                          <div className="font-medium">{item.name}</div>
+                          {isService ? (
+                            <div className="text-xs text-muted-foreground">
+                              <Badge variant="outline" className="mr-1">Serviço</Badge>
+                              Zona: {nomesDistritos(item.service_districts, distritos)}
+                              {item.mobilization_days != null ? ` · mobilização ${item.mobilization_days} d` : ""}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-muted-foreground">
+                              {[item.brand, item.barcode ? `EAN ${item.barcode}` : null].filter(Boolean).join(" · ") || null}
+                            </div>
+                          )}
+                          {!item.is_active && <Badge variant="secondary" className="mt-1">Inativo</Badge>}
+                          {rowErrors[item.id] && <p className="text-xs text-destructive mt-1">{rowErrors[item.id]}</p>}
                         </div>
-                      ) : (
-                        <div className="text-xs text-muted-foreground">
-                          {[item.brand, item.barcode ? `EAN ${item.barcode}` : null].filter(Boolean).join(" · ") || null}
-                        </div>
-                      )}
-                      {!item.is_active && <Badge variant="secondary" className="mt-1">Inativo</Badge>}
-                      {rowErrors[item.id] && <p className="text-xs text-destructive mt-1">{rowErrors[item.id]}</p>}
+                      </div>
                     </TableCell>
                     <TableCell className="align-top whitespace-nowrap">{formatUnit(item)}</TableCell>
                     {showPrice && (
@@ -938,6 +959,8 @@ export default function SupplierPortalCatalogSection({
           </div>
         </div>
       )}
+
+      <CatalogPhotosViewer item={photosItem} onClose={() => setPhotosItem(null)} />
 
       <CatalogLinkDialog
         item={linkItem}

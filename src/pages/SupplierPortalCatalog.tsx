@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Download, FileDown, Info, Pencil, Plus, Power, Search, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import {
 import { downloadSupplierCatalogTemplate, exportSupplierPortalCatalogXlsx } from "@/utils/supplierPortalCatalogTemplate";
 import { SupplierCatalogItemDialog } from "@/components/supplier-portal/SupplierCatalogItemDialog";
 import { SupplierCatalogImportDialog } from "@/components/supplier-portal/SupplierCatalogImportDialog";
+import { CatalogPhotosViewer, CatalogThumb } from "@/components/catalog-images/CatalogItemPhotos";
 import {
   carregarDistritos,
   kindOf,
@@ -77,6 +78,7 @@ export default function SupplierPortalCatalog() {
   const [importOpen, setImportOpen] = useState(false);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [viewing, setViewing] = useState<SpCatalogItem | null>(null);
 
   // Pesquisa com atraso para não chamar a RPC a cada tecla.
   useEffect(() => {
@@ -127,6 +129,16 @@ export default function SupplierPortalCatalog() {
   }, [data, page, pageCount]);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: [QUERY_KEY, accountId] });
+
+  // Fotos alteradas no diálogo: troca já o artigo nas páginas em cache (sem esperar pela rede) e
+  // revalida em fundo (o artigo pode ser novo, ainda fora da lista).
+  const applyItemUpdate = (updated: SpCatalogItem) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof spCatalogList>>>(
+      { queryKey: [QUERY_KEY, accountId] as QueryKey },
+      (old) => (old ? { ...old, items: old.items.map((i) => (i.id === updated.id ? { ...i, ...updated } : i)) } : old),
+    );
+    void invalidate();
+  };
 
   const handleError = (err: unknown, title: string) => {
     if (isNoSupplierAccess(err)) {
@@ -376,6 +388,7 @@ export default function SupplierPortalCatalog() {
                   <TableHead>Ref.</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>SKU</TableHead>
+                  <TableHead className="w-14"><span className="sr-only">Foto</span></TableHead>
                   <TableHead>Nome</TableHead>
                   <TableHead>Cód. barras</TableHead>
                   <TableHead>Unidade</TableHead>
@@ -404,6 +417,9 @@ export default function SupplierPortalCatalog() {
                     </TableCell>
                     <TableCell className="font-mono text-xs whitespace-nowrap">
                       {kindOf(item) === "servico" ? "—" : item.sku ?? <span className="text-muted-foreground">Sem categoria</span>}
+                    </TableCell>
+                    <TableCell className="w-14">
+                      <CatalogThumb item={item} name={item.name} size={40} onOpen={() => setViewing(item)} />
                     </TableCell>
                     <TableCell className="max-w-[28ch]">
                       <p className="truncate" title={item.name}>{item.name}</p>
@@ -468,6 +484,7 @@ export default function SupplierPortalCatalog() {
                       />
                     </div>
                   )}
+                  <CatalogThumb item={item} name={item.name} size={48} onOpen={() => setViewing(item)} />
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-xs text-muted-foreground break-all">{item.supplier_ref}{item.sku ? ` · SKU ${item.sku}` : ""}</p>
                     <p className="font-medium break-words">{item.name}</p>
@@ -560,11 +577,15 @@ export default function SupplierPortalCatalog() {
         </>
       )}
 
+      <CatalogPhotosViewer item={viewing} onClose={() => setViewing(null)} />
+
       {canEdit && (
         <>
           <SupplierCatalogItemDialog
             open={itemDialogOpen}
             item={editing}
+            canEditPhotos={canEdit}
+            onImagesChanged={applyItemUpdate}
             onOpenChange={setItemDialogOpen}
             onNoAccess={() => {
               setItemDialogOpen(false);
