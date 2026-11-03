@@ -19,6 +19,7 @@ import type { Ctx } from "./pecas";
 import { rotuloDia } from "./preparacaoObra";
 import { adendaComoEnviada, assinadas, diasAdenda, impactoNoPlano, materiaisAdenda, nomeParcela, parcelasAdenda, totaisAdenda, valorContrato, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda } from "./adendas";
 import { materiaisDoServico } from "./tarefasValidador";
+import { ehRefProblema } from "./problemasCliente";
 import { porFase, linhaDeMaterial, quantidade, escolhasVisiveis, fornecidosPeloCliente, type Grupo } from "./propostaConteudo";
 import { Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, faseDosMateriais, iniciosRapidos, planoObra, prestacoes, valoresPrestacoes } from "./planoObra";
@@ -38,6 +39,10 @@ export { IVA_MAT, IVA_MO } from "./motor";
 import { IVA_MAT, IVA_MO, porZonaDe, totaisIva } from "./motor";
 import type { FaturaReg } from "./v2/financeiro";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, textoProduto } from "./produtosVisita";
+
+/** 3/11: de onde vem a adenda: um imprevisto que a equipa encontrou (e onde), ou o problema que o próprio cliente nos mostrou na conversa. */
+const origemAdenda = (o: NonNullable<Adenda["origem"]>): string =>
+  ehRefProblema(o.imprevisto) ? "O problema que nos mostrou" : `O que encontrámos${o.onde ? ` (${o.onde.toLowerCase()})` : ""}`;
 /** Os totais com IVA (19/10: a fonte única está no motor, totaisIva; o sinal do Financeiro usa a mesma conta). */
 export const totais = totaisIva;
 /** As linhas de IVA de um valor (o total ou uma tranche), na proporção do orçamento. */
@@ -563,7 +568,7 @@ function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
         aceite={a.aceite}>
         <p>Olá, {d.nome.split(" ")[0]},</p>
         <p>Esta é a proposta dos trabalhos a mais na sua obra ({a.motivo.toLowerCase()}): {a.linhas.map((x) => x.n.toLowerCase()).join(", ")}. O resto do contrato mantém-se.</p>
-        {a.origem && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-slate-800"><b className="font-medium">O que encontrámos{a.origem.onde ? ` (${a.origem.onde.toLowerCase()})` : ""}:</b> {a.origem.texto}</p>}
+        {a.origem && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-slate-800"><b className="font-medium">{origemAdenda(a.origem)}:</b> {a.origem.texto}</p>}
         <p>Nas páginas seguintes está o que vamos fazer, os materiais, o que muda no plano da obra, o preço e as condições. Se quiser mudar alguma coisa, diga-nos: fazemos uma nova versão.</p>
         <p className="pt-2">Com os melhores cumprimentos,<br /><span className="font-semibold text-slate-900">{comercial}</span>, {EMPRESA.nome}</p>
       </Capa>
@@ -763,7 +768,7 @@ function ContratoAdenda({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
       {/* 21/10: nasceu de um imprevisto na obra: o que a equipa encontrou, onde e a fotografia */}
       {a.origem && (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="font-medium">O que encontrámos{a.origem.onde ? ` (${a.origem.onde.toLowerCase()})` : ""}</p>
+          <p className="font-medium">{origemAdenda(a.origem)}</p>
           <p className="text-slate-700">{a.origem.texto}</p>
           {a.origem.foto && <img src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} width={320} height={192} className="mt-2 max-h-48 rounded-lg object-cover" />}
         </section>

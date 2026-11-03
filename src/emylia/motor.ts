@@ -22,6 +22,8 @@ import {
   MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
   juntarAoPlano, linhaAdenda, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
+import { MOTIVO_PROBLEMA, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
+  textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
@@ -331,12 +333,14 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
-  /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string }
+  /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
+  /** 3/11: resolve um problema que o cliente reportou na conversa (o id, problemasCliente.ts) */ problema?: string }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
 export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string;
   /** 30/10: o produto do Catálogo (products.id), na Olyvia: é por ele que a base encomenda ao fornecedor (obra_encomendar_materiais) */ produto?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
-export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string }
+export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string;
+  /** 3/11: o id da mensagem na base (negocio_mensagens) e os ids das fotografias dela (20270105200000) */ id?: string; fotos?: string[] }
 export interface Plano {
   tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number;
   /** Gerado do plano do orçamento (preparacaoObra.ts), com o início previsto ("aaaa-mm-dd"). */
@@ -423,7 +427,9 @@ export interface Negocio {
     /** 21/10: os ajustes ao plano com a obra em curso (trabalhoObra.ts), com o aviso ao cliente quando foi avisado. */
     alteracoes?: Alteracao[];
     /** 21/10: a conversa com o cliente sobre a obra (a página da obra e o portal do cliente) */
-    chat?: MensagemObra[] };
+    chat?: MensagemObra[];
+    /** 3/11: os problemas que o cliente reportou na conversa e o que o gestor decidiu (problemasCliente.ts) */
+    problemas?: ProblemaCliente[] };
   /** Os trabalhos a mais depois do contrato assinado (adendas.ts). */
   adendas?: Adenda[];
   /** 23/10 (2.0): a conta real do cliente no portal, criada no envio (estadoContaPortal.ts): a criar, pronta ou com erro. */
@@ -1407,6 +1413,8 @@ export function minhas(S: Estado, role: Papel) {
         : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
       if (role === "comercial" && im.estado === "recusado") L.push({ d, p: { t: "O cliente não aceitou a proposta do imprevisto", sub: `${im.texto} · fale com ${d.nome.split(" ")[0]}`, who: "comercial" } });
     }
+    // 3/11: os problemas reportados pelo cliente que esperam pelo gestor (outra proposta, a proposta recusada, a resposta por enviar)
+    if (role === "operacoes") for (const pr of problemasPorTratar(d)) L.push({ d, p: { t: `Problema do cliente · ${pr.texto}`, sub: pr.estado === "recusado" ? "O cliente não aceitou a proposta · decida o que fazer" : pr.estado === "aberto" ? "Faça outra proposta" : "A resposta ao cliente não seguiu · envie-a de novo", btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
     // 21/10: as adendas, com o mesmo percurso do orçamento: cada passo de quem é (comercial, Direção, Jurídico)
     if (!d.anulado) for (const a of d.adendas ?? []) for (const t of tarefasAdenda(d, S, a)) if (t.who === role) L.push({ d, p: t });
     // 21/10: a fatura e o pagamento da 1.ª parcela de cada adenda assinada vêm dos passos do bloco Pagamento (passosAgora), como os do
@@ -1782,6 +1790,35 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), livre: true, mats: x.mats.map((m) => ({ ...m })) });
     });
     return linhas;
+  };
+  /** 3/11: o problema do cliente sem orçamento: as tarefas entram já no plano (hoje, com a obra em curso), com os técnicos avisados. */
+  const resolverSemCusto = (d: Negocio, pr: ProblemaCliente): string => {
+    const p = d.obra.plano!, fimAntes = rotuloDia(p, fimDe(p.tasks) - 1), quem = PAPEIS[S.role].nome;
+    const novas = pr.tarefas.map((x) => {
+      const t = tarefaDoProblema(p, pr, x, TECS), ti = juntarTarefa(p, t);
+      avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)} (sem custo para o cliente)`, agora());
+      return t;
+    });
+    pr.estado = "resolvido";
+    pr.resposta = textoRespostaSemCusto(pr, rotuloDia(p, Math.min(...novas.map((t) => t.dia))), TECS);
+    const fimDepois = rotuloDia(p, fimDe(p.tasks) - 1);
+    (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Problema reportado pelo cliente: ${novas.map((t) => t.nome).join(", ")}`, motivo: MOTIVO_PROBLEMA, fimAntes, fimDepois, cliente: true, avisoCliente: pr.resposta });
+    (d.obra.diario ??= []).push({ q: agora(), quem, t: `Problema do cliente (${pr.texto}): ${novas.length} ${novas.length === 1 ? "tarefa nova" : "tarefas novas"} sem custo${pr.motivo ? ` · ${pr.motivo.toLowerCase()}` : ""}`, k: "ocorrencia" });
+    log(d, `Problema do cliente ${pr.id} («${pr.texto}»): sem orçamento${pr.motivo ? ` (${pr.motivo.toLowerCase()})` : ""} · ${novas.map((t) => `${t.nome}, ${TECS.find((x) => x.id === t.tec)?.n ?? "por atribuir"}, ${rotuloDia(p, t.dia)}`).join(" · ")}`);
+    if (!A.planoMudou(d)) avisar({ msg: novas.length === 1 ? "Tarefa juntada ao plano" : `${novas.length} tarefas juntadas ao plano`, sub: "Sem custo para o cliente · os técnicos foram avisados", kind: "ok" });
+    return pr.resposta;
+  };
+  /** 3/11: o problema do cliente com orçamento: uma adenda com uma linha livre por tarefa, verificada e enviada ao portal como as outras. */
+  const orcamentarProblema = (d: Negocio, pr: ProblemaCliente): string | null => {
+    const n = A.criarAdenda(d.id, [], MOTIVO_PROBLEMA, { livres: livresDoProblema(pr.tarefas, TECS), origem: { imprevisto: pr.id, texto: pr.texto, onde: "" } });
+    // sem adenda (ex.: ainda não há contrato), o problema fica por tratar como estava
+    if (!n) { if (!pr.adenda && !pr.decisao) d.obra.problemas = d.obra.problemas?.filter((x) => x !== pr); return null; }
+    Object.assign(pr, { estado: "proposta", adenda: n });
+    // como qualquer adenda, verifica-se antes de ir ao cliente; com a margem abaixo do mínimo fica à espera da Direção
+    const foi = A.verificarEnviarAdenda(d.id, n), a = d.adendas!.find((x) => x.n === n)!;
+    pr.resposta = textoRespostaComOrcamento(pr, n, foi, eur(totaisAdenda(a).total));
+    log(d, `Problema do cliente ${pr.id} («${pr.texto}»): com orçamento · adenda ${n} ${foi ? "enviada ao cliente" : "por enviar (margem abaixo do mínimo)"}`, foi ? "a" : "w");
+    return pr.resposta;
   };
   const descontoValido = (x?: number) => (x != null && Number.isFinite(x) && x > 0 ? Math.min(100, r2(x)) : 0);
   /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
@@ -2453,6 +2490,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         // 21/10: os materiais das tarefas da adenda (os consumíveis da receita de cada serviço, ou os escolhidos na linha livre) vão numa encomenda de ajuste,
         // mas só quando o Financeiro validar o pagamento desta adenda (decisão B: sem encomenda antes do pagamento, como no contrato)
         novas.forEach((t, i) => { const x = a.linhas[i]; t.adenda = n; if (x) { t.mats = x.mats ? x.mats.map((m) => ({ ...m })) : materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
+        // 3/11: a de um problema do cliente: as tarefas ficam com os técnicos que o gestor escolheu e começam já (com a obra em curso)
+        const pr = problemaDaAdenda(d, a);
+        if (pr) {
+          // (sem fase: são uma reparação, não andam com as fases da obra)
+          novas.forEach((t, i) => { const x = pr.tarefas[i]; t.problema = pr.id; delete t.fase; if (x?.tec) t.tec = x.tec; });
+          // o resto do plano não anda por juntar ao fim da fase: o trabalho do problema faz-se a partir de hoje
+          if (p.estado === "em curso") { for (const [t, dia] of antes) t.dia = dia; for (const t of novas) mudarInicio(p, p.tasks.indexOf(t), p.dia); }
+          for (const t of novas) avisarTecnico(p, p.tasks.indexOf(t), `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+          pr.estado = "aprovado";
+          log(d, `Problema do cliente ${pr.id} aprovado (${n}): ${novas.map((t) => t.nome).join(", ")} no plano`);
+        }
         // 21/10: a de um imprevisto resolve-se já (a partir de hoje), antes das tarefas que ele parou
         const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
         if (im && p.estado === "em curso") {
@@ -3129,6 +3177,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 21/10: a de um imprevisto volta ao gestor, que decide o que fazer (imprevistos.ts: DECISOES)
       const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
       if (im) { im.estado = "recusado"; log(d, `Imprevisto ${im.id}: o cliente não aceitou a proposta · o gestor da obra decide`, "w"); }
+      // 3/11: a de um problema do cliente também volta ao gestor
+      const pr = problemaDaAdenda(d, a);
+      if (pr && pr.estado === "proposta") { pr.estado = "recusado"; log(d, `Problema do cliente ${pr.id}: o cliente não aceitou a proposta · o gestor da obra decide`, "w"); }
       avisar({ msg: "Resposta enviada", sub: "O contrato e o plano da obra ficam como estavam", kind: "ok" });
     },
     /** 21/10: o comercial retira a adenda ainda não assinada (por enviar, enviada ou aceite): sai do portal do cliente (fica nos documentos, retirada). */
@@ -3140,6 +3191,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // a de um imprevisto: o gestor da obra volta a decidir
       const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto && x.adenda === n) : undefined;
       if (im && im.estado === "proposta") im.estado = "aberto";
+      const pr = problemaDaAdenda(d, a);
+      if (pr && pr.adenda === n && pr.estado === "proposta") pr.estado = "aberto";
       log(d, "Adenda " + n + (enviada ? " retirada do portal do cliente" : " apagada antes de enviar"));
       avisar({ msg: "Adenda " + n + " retirada", sub: enviada ? "Já não aparece no portal do cliente para responder" : "Não chegou ao cliente", kind: "ok" });
     },
@@ -3197,6 +3250,69 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         fimAntes: rotuloDia(p, fimDe(p.tasks) - 1), fimDepois: rotuloDia(p, fimDe(p.tasks) - 1), cliente: true,
         avisoCliente: k === "seguir" ? `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): seguimos a obra sem esse trabalho.` : `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): a obra fica suspensa até combinarmos consigo.` });
       avisar({ msg: D.t, sub: k === "seguir" ? "As tarefas paradas continuam" : k === "refazer" ? "Faça a nova proposta no imprevisto" : "As tarefas ficam paradas", kind: "ok" });
+    },
+    /* -------------------------------------------- 3/11: os problemas que o cliente reporta na conversa (problemasCliente.ts) */
+    /**
+     * O gestor da obra trata o problema de uma mensagem do cliente: as tarefas (o trabalho, as horas, o técnico) e se gera orçamento.
+     * Sem orçamento, as tarefas entram já no plano; com orçamento, vai ao cliente uma adenda. Devolve a resposta a escrever ao cliente
+     * na conversa (null se não seguiu); a página envia-a e marca-a (problemaRespondido).
+     */
+    tratarProblema(id: number, m: { msg: string; texto: string; fotos: string[] }, x: { tarefas: TarefaProblema[]; cobrar: boolean; motivo?: string }): string | null {
+      const d = deal(id), p = d.obra.plano;
+      if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
+      if (!p || p.estado === "concluída") { avisar({ msg: p ? "A obra já acabou" : "A obra ainda não tem plano", sub: "As tarefas novas entram no plano da obra", kind: "bad" }); return null; }
+      const erro = erroTarefas(x.tarefas, x.cobrar);
+      if (erro) { avisar({ msg: "Falta informação", sub: erro, kind: "bad" }); return null; }
+      const ja = problemaDaMensagem(d, m.msg);
+      if (ja && ja.estado !== "aberto") return null;
+      const tarefas = x.tarefas.map((t) => ({ n: t.n.trim(), h: r2(t.h), tec: t.tec, ...(x.cobrar ? { preco: r2(t.preco ?? 0) } : {}) }));
+      const pr: ProblemaCliente = ja ?? { id: novoIdProblema(d), msg: m.msg, texto: m.texto.trim(), fotos: [...m.fotos], q: agora(), estado: "aberto", cobrar: x.cobrar, tarefas };
+      Object.assign(pr, { q: agora(), cobrar: x.cobrar, tarefas });
+      if (x.cobrar || !x.motivo?.trim()) delete pr.motivo; else pr.motivo = x.motivo.trim();
+      delete pr.resposta; delete pr.respondida;
+      if (!ja) (d.obra.problemas ??= []).push(pr);
+      return x.cobrar ? orcamentarProblema(d, pr) : resolverSemCusto(d, pr);
+    },
+    /** Não era um problema (ex.: uma fotografia do que já está bem): sai da lista por tratar, com a nota no histórico. */
+    descartarProblema(id: number, m: { msg: string; texto: string; fotos: string[] }, nota = "") {
+      const d = deal(id);
+      if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", kind: "bad" }); return; }
+      if (problemaDaMensagem(d, m.msg)) return;
+      const pr: ProblemaCliente = { id: novoIdProblema(d), msg: m.msg, texto: m.texto.trim(), fotos: [...m.fotos], q: agora(), estado: "descartado", cobrar: false, tarefas: [],
+        decisao: nota.trim() || "Não é um problema" };
+      (d.obra.problemas ??= []).push(pr);
+      log(d, `Mensagem do cliente vista pelo gestor: não é um problema (${pr.decisao}) · «${pr.texto}»`);
+      avisar({ msg: "Fica como não sendo um problema", sub: "Sai da lista por tratar", kind: "ok" });
+    },
+    /** Com a proposta recusada, o gestor decide: fazer sem custo, outra proposta, ou não fazer. Devolve a resposta ao cliente (ou null). */
+    decidirProblema(id: number, pid: string, k: DecisaoProblema, motivo = ""): string | null {
+      const d = deal(id), pr = d.obra.problemas?.find((x) => x.id === pid);
+      if (!pr || pr.estado !== "recusado") return null;
+      if (S.role !== "operacoes") { avisar({ msg: "Quem decide é o gestor da obra", kind: "bad" }); return null; }
+      if (k === "refazer") {
+        pr.estado = "aberto"; pr.decisao = "Fazer outra proposta";
+        log(d, `Problema do cliente ${pr.id}: o gestor vai fazer outra proposta`);
+        return null;
+      }
+      if (k === "sem_custo") {
+        const p = d.obra.plano;
+        if (!p || p.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
+        pr.cobrar = false; pr.decisao = "Fazer sem custo, depois da proposta recusada";
+        if (motivo.trim()) pr.motivo = motivo.trim(); else delete pr.motivo;
+        pr.tarefas = pr.tarefas.map((t) => ({ n: t.n, h: t.h, tec: t.tec }));
+        return resolverSemCusto(d, pr);
+      }
+      pr.estado = "fechado"; pr.decisao = "Não fazer (proposta recusada)";
+      pr.resposta = textoRespostaNaoFazer(pr);
+      delete pr.respondida;
+      log(d, `Problema do cliente ${pr.id}: não se faz (o cliente não aceitou a proposta)`, "w");
+      avisar({ msg: "Fica fechado", sub: "O cliente é avisado na conversa", kind: "ok" });
+      return pr.resposta;
+    },
+    /** A resposta ao cliente seguiu na conversa. */
+    problemaRespondido(id: number, pid: string) {
+      const pr = deal(id).obra.problemas?.find((x) => x.id === pid);
+      if (pr?.resposta && !pr.respondida) pr.respondida = agora();
     },
     /** O Financeiro emite a fatura da 1.ª parcela de cada adenda assinada sem faturas (vai para o portal do cliente, que paga com o método
      *  que escolher). 21/10 (decisão C): as parcelas são as do contrato; as seguintes emitem-se no Financeiro do negócio (faturarParcelaAdenda). */

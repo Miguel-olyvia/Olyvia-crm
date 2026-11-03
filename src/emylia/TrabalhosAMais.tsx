@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO_TODO } from "./catalogo";
 import { PAPEIS, eur, r2, servicoDoCatalogo, type Negocio } from "./motor";
+import { ehRefProblema } from "./problemasCliente";
 import type { Ctx } from "./pecas";
 import { SeletorPesquisa } from "./pecasFicha";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
@@ -162,7 +163,7 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
                   </div>
                   <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", E.cor)}>{E.t}</span>
                 </div>
-                {a.origem && <p className="mt-1 text-sm text-muted-foreground">Imprevisto na obra: {a.origem.texto}</p>}
+                {a.origem && <p className="mt-1 text-sm text-muted-foreground">{ehRefProblema(a.origem.imprevisto) ? "Problema reportado pelo cliente" : "Imprevisto na obra"}: {a.origem.texto}</p>}
                 {/* 21/10 (decisão C): as faturas das parcelas (as do contrato), emitidas pelo Financeiro depois da assinatura, e o pagamento no portal */}
                 {a.estado === "assinada" && <ParcelasAdenda ctx={ctx} d={d} a={a} />}
                 {/* 21/10 (decisão B): os materiais da adenda só se encomendam com a 1.ª parcela dela paga */}
