@@ -79,6 +79,8 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   email_invalido: "hr.acesso.erroEmailInvalido",
   // Inclui a guarda de ficha completa que nao conseguiu correr: o acesso NAO foi criado.
   erro_inesperado: "hr.acesso.erroInesperado",
+  // A conta de autenticacao com este e-mail ja existia e nao e uma conta orfa de admissao.
+  conta_existente_nao_reutilizavel: "hr.acesso.erroContaExistenteNaoReutilizavel",
 };
 
 /** Nunca o codigo em bruto: sempre texto traduzido. */

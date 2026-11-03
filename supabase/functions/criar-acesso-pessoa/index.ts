@@ -26,7 +26,12 @@
  * grava-se la -- so se quem clicou tem `hr.pessoas.laborais.edit` (senao segue
  * sem gravar). No REENVIO e o e-mail da CONTA de autenticacao (nunca editavel
  * nem o `email_pessoal`, que se edita com outra permissao). Se a conta de
- * autenticacao ja existia, a sua password nao se repoe nem se envia.
+ * autenticacao ja existia: se NAO tem ficha em `anew_users` E e uma conta orfa
+ * de admissao (admin_created, nunca usada, com menos de 14 dias, so por e-mail)
+ * repoe-se-lhe a password gerada e as credenciais seguem como numa conta nova;
+ * se NAO tem ficha mas nao passa essas guardas, 409
+ * `conta_existente_nao_reutilizavel` e nada se toca; se TEM ficha
+ * (e de alguem, talvez de outra organizacao) a password nao se repoe nem se envia.
  *
  * A PASSWORD NUNCA SAI NA RESPOSTA
  * --------------------------------
@@ -63,6 +68,28 @@ const PAPEIS_PROIBIDOS = ["super_admin", "system_admin"];
 const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Idade maxima de uma conta de admissao sem ficha para ser reaproveitada. */
+const DIAS_MAXIMOS_CONTA_ORFA = 14;
+const MS_POR_DIA = 24 * 60 * 60 * 1000;
+
+/**
+ * A conta de autenticacao pode ser reaproveitada (password reposta) so se for
+ * uma conta orfa do login temporario de admissao: criada pelo admin, nunca
+ * usada, recente, por e-mail e sem identidades sociais.
+ */
+// deno-lint-ignore no-explicit-any
+function contaOrfaReutilizavel(u: any, agora: number = Date.now()): boolean {
+  if (u?.user_metadata?.admin_created !== true) return false;
+  if (u?.last_sign_in_at) return false;
+  const criada = Date.parse(u?.created_at ?? "");
+  if (!Number.isFinite(criada)) return false;
+  if (agora - criada >= DIAS_MAXIMOS_CONTA_ORFA * MS_POR_DIA) return false;
+  if (u?.app_metadata?.provider !== "email") return false;
+  const identidades = Array.isArray(u?.identities) ? u.identities : [];
+  // deno-lint-ignore no-explicit-any
+  return identidades.every((i: any) => i?.provider === "email");
+}
 
 function gerarPassword(): string {
   const bytes = new Uint8Array(COMPRIMENTO_PASSWORD);
@@ -307,7 +334,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // A conta de autenticacao. `admin_created` diz ao trigger handle_new_user()
     // para nao pre-criar o perfil -- ver o comentario longo em create-user.
     let authUserId: string;
-    // `null` quando a conta ja existia: nesse caso nao se envia password nenhuma.
+    // `null` so quando a conta ja existia E e de alguem (tem ficha em
+    // `anew_users`): nesse caso nao se envia password nenhuma.
     let passwordParaEnviar: string | null = password;
     const { data: criada, error: erroCriar } = await svc.auth.admin.createUser({
       email,
@@ -323,16 +351,84 @@ Deno.serve(async (req: Request): Promise<Response> => {
         captureError(erroCriar);
         return responder({ error: erroCriar.message ?? "conta_nao_criada" }, 400);
       }
-      // Ja ha conta com este e-mail (a pessoa ja trabalhou aqui, ou tem conta
-      // noutra organizacao). Reaproveita-se: a alternativa e deixar a ficha sem
-      // acesso possivel para sempre. A password dessa conta NAO se toca: pode
-      // ser de uma pessoa de outra organizacao, e repo-la por indicacao de um
-      // terceiro invalidava-lhe a sessao. A pessoa entra com a que ja tem, ou
-      // recupera-a (o e-mail diz-lho, sem password).
+      // Ja ha conta de autenticacao com este e-mail. Reaproveita-se: a
+      // alternativa e deixar a ficha sem acesso possivel para sempre. Ha dois
+      // casos, e o que os distingue e ter ou nao FICHA em `anew_users`:
+      //
+      //  a) SEM ficha em `anew_users` (e, por consequencia, sem linha em
+      //     `pessoas_contas`, que se liga por `anew_user_id`): e a conta que
+      //     nasceu do login temporario do portal de admissao (OTP por link +
+      //     codigo por e-mail). So existe para a admissao, nao e de ninguem,
+      //     e e seguro toca-la: define-se-lhe a password gerada e o e-mail
+      //     diz as credenciais como numa conta nova.
+      //  b) COM ficha em `anew_users`: e de alguem, possivelmente de outra
+      //     organizacao. A password NAO se toca: repo-la por indicacao de um
+      //     terceiro invalidava-lhe a sessao. A pessoa entra com a que ja tem,
+      //     ou recupera-a (o e-mail diz-lho, sem password).
       const existente = await procurarAuthUserPorEmail(svc, email);
       if (!existente) return responder({ error: "conta_existente_nao_encontrada" }, 400);
       authUserId = existente.id;
-      passwordParaEnviar = null;
+
+      // EXCEPCAO 2 ao orgScoped (de novo): `anew_users` nao tem
+      // `organization_id`; filtra-se pelo auth uid, que e unico. A consulta e
+      // deliberadamente global: a pergunta e "esta conta e de alguem, em
+      // qualquer organizacao?". Se falhar, fecha-se: nada se toca.
+      const { data: fichaExistente, error: erroFicha } = await svc
+        .from("anew_users")
+        .select("id")
+        .eq("auth_user_id", authUserId)
+        .maybeSingle();
+      if (erroFicha) {
+        captureError(erroFicha);
+        return responder({ error: "erro_inesperado" }, 500);
+      }
+
+      if (fichaExistente) {
+        passwordParaEnviar = null;
+      } else {
+        // Ter "sem ficha" nao basta: sem ficha ha contas de outras apps, do
+        // portal ou de registos pendentes, e quem tem `hr.pessoas.conta.criar`
+        // nao pode repor a password de nenhuma delas. So se reaproveita a conta
+        // ORFA de admissao, e ela passa TODAS estas:
+        //  - `user_metadata.admin_created === true`;
+        //  - nunca fez login (`last_sign_in_at` nulo);
+        //  - criada ha menos de DIAS_MAXIMOS_CONTA_ORFA dias;
+        //  - `app_metadata.provider === "email"`, sem identidades sociais;
+        //  - sem ficha em `anew_users` (acima). Sem ficha nao ha `anew_users.id`,
+        //    logo nao pode haver linha em `pessoas_contas` nem em
+        //    `anew_memberships` (ambas se ligam por esse id): ficam cobertas
+        //    por esta condicao e nao ha consulta possivel por fazer.
+        // NAO se filtra `deleted_at` nem `status`: a conta de alguem apagado ou
+        // inactivo nao deve ser reposta por terceiros -- ja nem entra aqui, tem
+        // ficha. Se falhar qualquer uma: 409, nada se toca, nada se cria, nada se envia.
+        if (!contaOrfaReutilizavel(existente)) {
+          return responder({ error: "conta_existente_nao_reutilizavel" }, 409);
+        }
+        // Rasto de auditoria, sem a password.
+        console.warn(JSON.stringify({
+          evento: "reaproveitada_conta_orfa",
+          motivo: "reaproveitada_conta_orfa",
+          actorId,
+          org,
+          pessoaId,
+          authUserId,
+          created_at: existente.created_at ?? null,
+          last_sign_in_at: existente.last_sign_in_at ?? null,
+        }));
+        // Dois pedidos simultaneos podem gerar duas passwords: ganha a ultima
+        // a ser escrita e o e-mail da outra deixa de servir. O RH repete o
+        // pedido ou usa "Reenviar". Aceite, sem bloqueio.
+        // Antes de criar perfil/ligar: se a password nao ficar definida, nao
+        // se cria nada e a pessoa nao recebe um e-mail com uma password falsa.
+        const { error: erroPasswordExistente } = await svc.auth.admin.updateUserById(authUserId, {
+          password,
+        });
+        if (erroPasswordExistente) {
+          captureError(erroPasswordExistente);
+          return responder({ error: "password_nao_alterada" }, 400);
+        }
+        passwordParaEnviar = password;
+      }
     } else {
       authUserId = criada.user!.id;
     }
