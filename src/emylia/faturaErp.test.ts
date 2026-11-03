@@ -94,9 +94,23 @@ describe("a fatura do Eticadata no V1", () => {
   });
 
   it("sem ligação ao ERP: regista-se na mesma e o pagamento valida-se à mão, como antes", () => {
-    acoes(S, () => {}, (fn) => fn()).registarFaturaErp(1027, "FAT 15200126/12", null);
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.registarFaturaErp(1027, "FAT 15200126/12", null);
     expect(d().fin.fatura?.n).toBe("FAT 15200126/12");
+    // 3/11: sem o Eticadata, valida-se à mão quando se quiser (opcional), com ou sem o aviso do cliente no portal
+    delete d().f.comprovativo;
+    expect(proximo(d(), S)).toMatchObject({ t: "À espera do pagamento", act: "validar", btn: "Validar à mão" });
+    A.avisarPagamento(1027, "TRF 123");
     expect(proximo(d(), S)).toMatchObject({ act: "validar", btn: "Validar pagamento" });
+  });
+
+  it("3/11: validar à mão sem o aviso do cliente dá a fatura como paga", () => {
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.registarFaturaErp(1027, "FAT 15200126/12", null);
+    delete d().f.comprovativo;
+    A.validar(1027);
+    expect(d().fin.pago).toBe(true);
+    expect(d().f.comprovativo).toBe("Validado à mão no CRM");
   });
 
   it("só o Financeiro regista", () => {

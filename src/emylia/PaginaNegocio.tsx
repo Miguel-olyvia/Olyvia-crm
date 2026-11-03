@@ -32,6 +32,7 @@ import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
 import { DocumentosParaCliente } from "./DocumentosParaCliente";
+import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
@@ -368,7 +369,13 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   } else if (d.fase === 4) {
     passos = [
       { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: simples ? <DocumentosSimples {...ctx} d={d} /> : <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
-      ...FINANCEIRO.map((gr) => g(gr, Euro)),
+      // 3/11 (Rúben): o Pagamento não se preenche à mão: espera que o cliente diga no portal que pagou e o Financeiro só valida
+      // (PagamentoDoCliente.tsx). Os outros grupos (dados de faturação, fatura) continuam como a empresa os definiu.
+      ...FINANCEIRO.map((gr) => gr === FINANCEIRO[2]
+        ? { id: gr.titulo, titulo: E(gr).nome || gr.titulo, icone: Euro, feito: d.fin.pago,
+            resumo: [d.fin.pago ? "validado" : d.f.comprovativo ? "o cliente diz que pagou" : "à espera do cliente"],
+            corpo: <PagamentoDoCliente {...ctx} d={d} /> }
+        : g(gr, Euro)),
     ];
   } else if (d.fase === 5) {
     passos = [

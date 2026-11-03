@@ -226,11 +226,13 @@ export const FINANCEIRO: Grupo[] = [
   },
   {
     titulo: "Pagamento",
-    nota: "Por agora valida-se à mão. Quando o portal aceitar pagamentos, isto preenche-se sozinho.",
+    // 3/11 (Rúben): no Negócio, este passo já não se preenche à mão (PagamentoDoCliente.tsx): o cliente diz no portal que pagou (a data
+    // e a referência vêm de lá; o valor é o da fatura) e o Financeiro só valida, enquanto não houver Eticadata. A conta é opcional.
+    nota: "Preenche-se com o que o cliente diz no portal. O Financeiro só valida, enquanto não houver Eticadata.",
     campos: [
       { k: "data_pag", l: "Data do pagamento", t: "data" },
       { k: "valor_recebido", l: "Valor recebido", t: "numero", un: "€" },
-      { k: "conta", l: "Conta de destino", t: "escolha", op: ["Banco A · conta à ordem", "Banco B · conta obras"] },
+      { k: "conta", l: "Conta de destino", t: "escolha", op: ["Banco A · conta à ordem", "Banco B · conta obras"], opcional: true },
       { k: "comprovativo", l: "Referência ou comprovativo", t: "texto" },
     ],
   },
