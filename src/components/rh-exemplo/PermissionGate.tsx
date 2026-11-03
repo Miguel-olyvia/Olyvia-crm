@@ -23,7 +23,7 @@ interface PermissionGateProps {
  *   <Button>New Quote</Button>
  * </PermissionGate>
  * 
- * <PermissionGate permissions={["quotes.edit", "quotes.delete"]} requireAll>
+ * <PermissionGate permissions={["quotes.edit", "quotes.create"]} requireAll>
  *   <AdminPanel />
  * </PermissionGate>
  * ```

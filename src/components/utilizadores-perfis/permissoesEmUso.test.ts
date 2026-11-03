@@ -12,6 +12,7 @@ import {
   CODIGOS_EM_USO, CODIGOS_ESCONDIDOS, CODIGOS_SEM_CATALOGO, PERMISSOES_EM_USO, PERMISSOES_ESCONDIDAS,
 } from "./permissoesEmUso";
 import { permissoesDoMenu, type LinhaPermissao } from "./rolesReais";
+import { menuSections, topLevelItems } from "@/components/sidebar/menuConfig";
 import type { Permissao } from "./tipos";
 
 const SRC = join(process.cwd(), "src");
@@ -32,6 +33,30 @@ const IGNORAR = /\.test\.tsx?$|__tests__\/|\/test\/|supabaseFalso\.ts$|Exemplo\.
 const LEGADO = ["pages/AnewLeads.tsx", "pages/AnewClients.tsx", "components/leads/LeadTableRow.tsx"] as const;
 /** Um import (estático ou lazy) de uma página legada: `from "@/pages/AnewLeads"`, `import("./pages/AnewLeads")`. */
 const IMPORT_LEGADO = /\b(?:from|import)\s*\(?\s*["'`][^"'`\n]*\/(?:AnewLeads|AnewClients|LeadTableRow)(?:\.tsx)?["'`]/;
+
+/**
+ * Páginas FORA DO MENU (03/11/2026): o grupo Aquisição saiu do menu (o Negócios em /pessoas e /negocios substitui-o), mas /quotes,
+ * /proposals e /client-contracts continuam com rota, porque a ficha do /pessoas ainda as abre (ProcessoProviderReal, notificações,
+ * Hoje...). /direct-sales redireciona para /negocios e DirectSales.tsx fica em disco sem rota. As permissões que só estas páginas
+ * verificam foram escondidas (exportar, eliminar orçamentos, criar/editar/confirmar/faturar vendas diretas, ver custos da venda direta).
+ * Ao contrário de LEGADO, estes ficheiros CONTINUAM no scan: uma permissão fora da lista em uso continua a falhar; só se tolera que
+ * usem as escondidas. `paginas`: não podem voltar ao menu (teste abaixo). `soDelas`: componentes/utilitários importados só por
+ * ficheiros desta lista (teste abaixo) — se outro ficheiro vivo os passar a importar, saem daqui e a permissão volta a estar em uso.
+ */
+const FORA_DO_MENU = {
+  paginas: [
+    { ficheiro: "pages/Quotes.tsx", rota: "/quotes" },
+    { ficheiro: "pages/Proposals.tsx", rota: "/proposals" },
+    { ficheiro: "pages/ClientContracts.tsx", rota: "/client-contracts" },
+    { ficheiro: "pages/DirectSales.tsx", rota: "/direct-sales" },
+  ],
+  soDelas: [
+    "components/directSales/DirectSaleEditor.tsx",
+    "utils/generateInternalSalePdfBlob.ts",
+    "components/directSales/InternalSaleDocumentPDF.tsx",
+  ],
+} as const;
+const FICHEIROS_FORA_DO_MENU: readonly string[] = [...FORA_DO_MENU.paginas.map((p) => p.ficheiro), ...FORA_DO_MENU.soDelas];
 
 /** Um literal com forma de código de permissão: "modulo.acao", "modulo.sub.acao". */
 const LITERAL = /["'`]([a-z_]+(?:\.[a-z_]+)+)["'`]/g;
@@ -77,13 +102,41 @@ describe("permissões em uso: o código fonte", () => {
   it("não verifica nenhuma permissão fora da lista em uso", () => {
     const fora = usos
       .filter((u) => u.contexto && !CODIGOS_EM_USO.has(u.codigo) && !CODIGOS_SEM_CATALOGO.includes(u.codigo))
+      // As páginas FORA_DO_MENU podem verificar escondidas (só essas; uma permissão desconhecida continua a falhar).
+      .filter((u) => !(FICHEIROS_FORA_DO_MENU.includes(u.ficheiro) && CODIGOS_ESCONDIDOS.has(u.codigo)))
       .map((u) => `${u.codigo} (${u.ficheiro})`);
     expect([...new Set(fora)]).toEqual([]);
   });
 
-  it("não usa nenhuma das permissões escondidas, em contexto nenhum", () => {
-    const escondidas = usos.filter((u) => CODIGOS_ESCONDIDOS.has(u.codigo)).map((u) => `${u.codigo} (${u.ficheiro})`);
+  it("não usa nenhuma das permissões escondidas, em contexto nenhum (fora das páginas FORA_DO_MENU)", () => {
+    const escondidas = usos
+      .filter((u) => CODIGOS_ESCONDIDOS.has(u.codigo) && !FICHEIROS_FORA_DO_MENU.includes(u.ficheiro))
+      .map((u) => `${u.codigo} (${u.ficheiro})`);
     expect([...new Set(escondidas)]).toEqual([]);
+  });
+
+  it("as páginas FORA_DO_MENU existem e nenhuma rota delas está no menu", () => {
+    FICHEIROS_FORA_DO_MENU.forEach((f) => expect(existsSync(join(SRC, f)), f).toBe(true));
+    const destinos = [
+      ...topLevelItems.map((i) => i.to),
+      ...menuSections.flatMap((s) => [...s.items, ...(s.subSections ?? []).flatMap((x) => x.items)].map((i) => i.to)),
+    ].map((to) => to.split("?")[0]);
+    const caminhos = menuSections.flatMap((s) => s.paths);
+    FORA_DO_MENU.paginas.forEach(({ rota }) => {
+      expect(destinos, rota).not.toContain(rota);
+      expect(caminhos, rota).not.toContain(rota);
+    });
+    const menu = readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8");
+    FORA_DO_MENU.paginas.forEach(({ rota }) => expect(menu, rota).not.toContain(`"${rota}"`));
+  });
+
+  it("os componentes FORA_DO_MENU só são importados por ficheiros FORA_DO_MENU", () => {
+    const vivos = ficheiros(SRC).map(caminhoRelativo).filter((f) => !IGNORAR.test(f) && !FICHEIROS_FORA_DO_MENU.includes(f));
+    FORA_DO_MENU.soDelas.forEach((f) => {
+      const nome = f.split("/").pop()!.replace(/\.tsx?$/, "");
+      const importa = new RegExp(`\\b(?:from|import)\\s*\\(?\\s*["'\`][^"'\`\\n]*/${nome}(?:\\.tsx?)?["'\`]`);
+      expect(vivos.filter((v) => importa.test(readFileSync(join(SRC, v), "utf8"))), f).toEqual([]);
+    });
   });
 
   it("as páginas legadas ignoradas existem e não são importadas por nada vivo (só umas pelas outras)", () => {
@@ -136,7 +189,7 @@ describe("permissões em uso: a lista", () => {
   it("os grupos seguem a ordem do menu, com Negócios e Frota", () => {
     const rotulos = agruparPorMenu(emUso).map((g) => g.rotulo);
     expect(rotulos).toEqual([
-      "Dashboard", "Agendamentos", "Operação", "Catálogo e custos", "Organizações", "Negócios", "Aquisição", "Marketing",
+      "Dashboard", "Agendamentos", "Operação", "Catálogo e custos", "Organizações", "Negócios", "Documentos do negócio", "Marketing",
       "Inventário", "Frota", "Recursos Humanos", "Utilizadores", "Definições", "Plataforma",
     ]);
     const negocios = agruparPorMenu(emUso).find((g) => g.rotulo === "Negócios");
@@ -167,7 +220,7 @@ describe("permissões em uso: a lista", () => {
     const porContactar = negocios.subgrupos.find((s) => s.rotulo === "Por contactar")!;
     expect(pessoas.permissoes.map((p) => p.codigo).sort()).toEqual([
       "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
-      "contacts.create", "contacts.delete", "contacts.edit", "contacts.import", "contacts.view",
+      "contacts.create", "contacts.edit", "contacts.import", "contacts.view",
       "leads.config", "leads.convert", "leads.delete", "leads.edit", "leads.import",
     ]);
     expect(grupos.find((g) => g.rotulo === "CRM")).toBeUndefined();
@@ -195,10 +248,10 @@ describe("permissões em uso: a lista", () => {
     expect(noEditor.filter((c) => CODIGOS_ESCONDIDOS.has(c))).toEqual([]);
   });
 
-  it("quotes.view_costs e client_contracts.cancel estão em Negócios e já não em Aquisição", () => {
+  it("quotes.view_costs e client_contracts.cancel estão em Negócios e já não nos Documentos do negócio", () => {
     const grupos = agruparPorMenu(emUso);
     const negocios = grupos.find((g) => g.rotulo === "Negócios")!;
-    const aquisicao = grupos.find((g) => g.rotulo === "Aquisição")!;
+    const aquisicao = grupos.find((g) => g.rotulo === "Documentos do negócio")!;
     const codigosDe = (rotulo: string) => negocios.subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo) ?? [];
     expect(codigosDe("Negócio")).toContain("quotes.view_costs");
     expect(codigosDe("Negócio")).toContain("client_contracts.cancel");
@@ -207,6 +260,43 @@ describe("permissões em uso: a lista", () => {
     expect(naAquisicao).not.toContain("client_contracts.cancel");
     expect(naAquisicao).toContain("quotes.view");
     expect(naAquisicao).toContain("client_contracts.edit");
+  });
+});
+
+describe("03/11: a Aquisição saiu do menu", () => {
+  const ESCONDIDAS_AQUISICAO = [
+    "proposals.export", "quotes.delete", "quotes.export", "quotes.export_sensitive", "client_contracts.export",
+    "direct_sales.create", "direct_sales.edit", "direct_sales.confirm", "direct_sales.register_invoice", "direct_sales.view_costs",
+    "contacts.delete",
+  ];
+
+  it("as permissões só das páginas fora do menu estão escondidas e fora do editor", () => {
+    ESCONDIDAS_AQUISICAO.forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+    });
+    const noEditor = agruparPorMenu(emUso).flatMap((g) => g.permissoes.map((p) => p.codigo));
+    ESCONDIDAS_AQUISICAO.forEach((c) => expect(noEditor, c).not.toContain(c));
+  });
+
+  it("ficam em uso as que algo vivo ainda verifica: direct_sales.view (Encomendas de Cliente) e contacts.view/create/edit (assistente IA)", () => {
+    ["direct_sales.view", "contacts.view", "contacts.create", "contacts.edit", "contacts.import"].forEach((c) => expect(CODIGOS_EM_USO, c).toContain(c));
+  });
+
+  it("o grupo chama-se «Documentos do negócio», com Pedidos de Proposta, Propostas e orçamentos, Venda Direta (só ver), Contratos e Configuração", () => {
+    const grupos = agruparPorMenu(emUso);
+    const grupo = grupos.find((g) => g.rotulo === "Documentos do negócio")!;
+    expect(grupos.find((g) => g.rotulo === "Aquisição")).toBeUndefined();
+    expect(grupo.blocos).toEqual([]);
+    expect(grupo.subgrupos.map((s) => s.rotulo)).toEqual(["Pedidos de Proposta", "Propostas e orçamentos", "Venda Direta", "Contratos", "Configuração"]);
+    const codigosDe = (r: string) => grupo.subgrupos.find((s) => s.rotulo === r)!.permissoes.map((p) => p.codigo).sort();
+    expect(codigosDe("Venda Direta")).toEqual(["direct_sales.view"]);
+    expect(codigosDe("Configuração")).toEqual([
+      "client_contracts.manage", "client_contracts.manage_templates", "proposals.manage",
+      "quote_templates.create", "quote_templates.delete", "quote_templates.duplicate", "quote_templates.edit", "quote_templates.view",
+    ]);
+    expect(codigosDe("Propostas e orçamentos")).toContain("quotes.manage");
+    expect(codigosDe("Pedidos de Proposta")).toEqual(["deals.create", "deals.delete", "deals.edit", "deals.view"]);
   });
 });
 

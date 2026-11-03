@@ -2,7 +2,6 @@ import { LucideIcon } from "lucide-react";
 import {
   Building,
   Zap,
-  Handshake,
   LayoutDashboard,
   Users,
   Settings,
@@ -33,7 +32,6 @@ import {
   Sun,
   ScanBarcode,
   ArrowLeftRight,
-  TrendingUp,
   IdCard,
   CalendarDays,
   CalendarRange,
@@ -188,53 +186,6 @@ export const menuSections: MenuSection[] = [
     ],
   },
   {
-    id: "acquisition",
-    icon: Target,
-    labelKey: "sidebar.acquisition",
-    paths: ["/deals", "/negocio-metas", "/proposals", "/quotes", "/quote-models", "/quote-templates", "/modelos-orcamento", "/proposal-templates", "/direct-sales", "/client-contracts", "/contract-templates", "/acquisition-help", "/needs-assessment-config"],
-    permissions: ["deals.view", "proposals.view", "quotes.view", "direct_sales.view"],
-    items: [
-      { to: "/deals", icon: Handshake, labelKey: "sidebar.proposalRequests", permission: "deals.view" },
-      // Exemplo estático por agora; mesma permissão dos Pedidos de Proposta.
-      { to: "/negocio-metas", icon: TrendingUp, labelKey: "sidebar.businessGoals", permission: "deals.view" },
-    ],
-    subSections: [
-      {
-        key: "proposals",
-        labelKey: "sidebar.proposals",
-        items: [
-          { to: "/proposals", icon: FileText, labelKey: "sidebar.proposals", permission: "proposals.view" },
-          { to: "/quotes", icon: FileCheck, labelKey: "sidebar.quotes", permission: "quotes.view" },
-        ],
-      },
-      // Venda Direta (Fase 2): fluxo alternativo, mais leve, ao caminho
-      // Orçamento -> Proposta -> Contrato. Fica entre "proposals" e
-      // "contracts" porque é exatamente aí que entra no percurso comercial —
-      // substitui a proposta e dispensa o contrato.
-      {
-        key: "direct-sale",
-        labelKey: "sidebar.directSale",
-        items: [
-          { to: "/direct-sales", icon: Receipt, labelKey: "sidebar.directSales", permission: "direct_sales.view" },
-        ],
-      },
-      {
-        key: "contracts",
-        labelKey: "sidebar.contracts",
-        items: [
-          { to: "/client-contracts", icon: BookOpen, labelKey: "sidebar.contracts", permission: "deals.view" },
-        ],
-      },
-      {
-        key: "acquisition-config",
-        labelKey: "sidebar.settings",
-        items: [
-          { to: "/acquisition-help", icon: HelpCircle, labelKey: "sidebar.acquisitionHelp" },
-        ],
-      },
-    ],
-  },
-  {
     id: "marketing",
     icon: Megaphone,
     labelKey: "sidebar.marketing",
@@ -385,12 +336,22 @@ export const menuSections: MenuSection[] = [
     id: "settings",
     icon: Settings,
     labelKey: "sidebar.settings",
-    paths: ["/settings", "/smtp-management", "/email-templates", "/trash", "/send-failures"],
+    // 03/11: os templates e modelos dos documentos do negócio vêm do grupo Aquisição (que saiu do menu: o Negócios em /pessoas e
+    // /negocios substitui-o). Cada item tem a permissão da sua rota em App.tsx; /proposal-templates não tem ProtectedRoute (a página
+    // só trava as ações com proposals.manage), por isso o item também não tem permissão.
+    paths: [
+      "/settings", "/smtp-management", "/email-templates", "/trash", "/send-failures",
+      "/contract-templates", "/quote-templates", "/proposal-templates", "/quote-models", "/modelos-orcamento",
+    ],
     permissions: [],
     items: [
       { to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.update" },
       { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
+      { to: "/contract-templates", icon: BookOpen, labelKey: "sidebar.contractTemplates", permission: "client_contracts.view" },
+      { to: "/quote-templates", icon: FileCheck, labelKey: "today.quick.quotePdfTemplates", permission: "quotes.manage" },
+      { to: "/proposal-templates", icon: FileText, labelKey: "sidebar.proposalTemplates" },
+      { to: "/quote-models", icon: FileCheck, labelKey: "today.quick.quoteModels", permission: "quote_templates.view" },
       { to: "/send-failures", icon: AlertTriangle, labelKey: "sidebar.sendFailures", permission: "scheduling.items.view" },
       { to: "/trash", icon: Trash2, labelKey: "sidebar.trash", permission: "settings.update" },
     ],

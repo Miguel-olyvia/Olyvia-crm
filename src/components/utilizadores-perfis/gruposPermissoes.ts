@@ -29,7 +29,7 @@ interface DefinicaoGrupo {
 
 /**
  * Os grupos do editor, pela ordem do menu lateral (menuConfig.ts): Dashboard, Atividades, Operação, Catálogo e custos, Organizações,
- * Negócios (com os dados da pessoa: leads.*, clients.* e contacts.*), Aquisição, Marketing, Inventário, Frota, RH, Utilizadores,
+ * Negócios (com os dados da pessoa: leads.*, clients.* e contacts.*), Documentos do negócio, Marketing, Inventário, Frota, RH, Utilizadores,
  * Definições e Plataforma. Partiu de `sidebarMenuGroups` de Roles.tsx; diferenças: `forms` só no subgrupo Formulários (lá contavam a
  * dobrar), Produtos/Serviços passam para Catálogo e custos (o item de topo que os substitui), e ganham grupo as categorias que Roles.tsx
  * escondia (hr, pessoas/negocios, fleet, operations, portal, security, platform, api_keys, catalog_items, service_catalog, lead_sources).
@@ -58,7 +58,7 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   { rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"] },
   // /pessoas e /negocios: um subgrupo por fase do negócio, pela ordem das 6 fases do ecrã (Por contactar, Contacto, Visita, Negócio,
   // Financeiro, Obra), pelas categorias virtuais de categoriaNegocio() (pessoas.*, negocios.*, e quotes.view_costs / client_contracts.cancel,
-  // que saem de Aquisição). «Pessoas: leads e clientes» junta os dados da pessoa (leads.*, clients.* e, 03/11, contacts.*: o grupo CRM
+  // que saem dos Documentos do negócio). «Pessoas: leads e clientes» junta os dados da pessoa (leads.*, clients.* e, 03/11, contacts.*: o grupo CRM
   // deixou de existir); «Por contactar» tira de lá ver, criar e atribuir leads. Uma permissão com outro prefixo guardada nas categorias
   // leads/contacts/clients também vai para «Pessoas» (categoriaNegocio), para não desaparecer do editor.
   {
@@ -74,12 +74,21 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
       { rotulo: "Obra", categorias: ["negocios_obra"] },
     ],
   },
+  // 03/11: era «Aquisição». O grupo saiu do menu (o Negócios substitui-o), mas os documentos (pedidos de proposta, orçamentos,
+  // propostas, contratos) continuam: a ficha do /pessoas abre-os e /quotes, /proposals e /client-contracts têm rota. «Configuração»
+  // junta o que controla os templates e modelos (agora no grupo Definições do menu): quote_templates.* (/quote-models),
+  // proposals.manage (templates e workflow das propostas, /proposal-templates), client_contracts.manage_templates e
+  // client_contracts.manage (as duas abrem a policy client_templates_manage de client_contract_templates, /contract-templates).
+  // quotes.manage NÃO vai para lá: além de /quote-templates é a permissão de ver custos e margens no orçamento (canViewQuoteCosts,
+  // QuoteBuilder) e das ações em massa (rpc_bulk_status_quote), por isso fica com os orçamentos.
   {
-    rotulo: "Aquisição", categorias: ["deals"],
+    rotulo: "Documentos do negócio", categorias: [],
     subgrupos: [
-      { rotulo: "Propostas", categorias: ["proposals", "quotes", "quote_templates"] },
+      { rotulo: "Pedidos de Proposta", categorias: ["deals"] },
+      { rotulo: "Propostas e orçamentos", categorias: ["proposals", "quotes"] },
       { rotulo: "Venda Direta", categorias: ["direct_sales"] },
       { rotulo: "Contratos", categorias: ["contracts", "client_contracts", "portal"] },
+      { rotulo: "Configuração", categorias: ["quote_templates", "documentos_config"] },
     ],
   },
   {
@@ -116,6 +125,7 @@ const ROTULOS_VIRTUAIS: Record<string, string> = {
   scheduling_boards: "Quadros", scheduling_items: "Itens", scheduling_resources: "Recursos", scheduling_rules: "Regras", scheduling_other: "Outros",
   negocios_geral: "Geral", negocios_pessoas: "Pessoas: leads e clientes", negocios_por_contactar: "Por contactar", negocios_contacto: "Contacto",
   negocios_visita: "Visita", negocios_negocio: "Negócio", negocios_financeiro: "Financeiro", negocios_obra: "Obra",
+  documentos_config: "Templates de propostas e contratos",
 };
 
 /** Os negocios.* pela segunda parte do código (a fase); o que não for conhecido (e negocios.perder) cai em Geral. 03/11: o orçamento, a
@@ -129,7 +139,7 @@ const FASES_NEGOCIO = new Map<string, string>([
   ["perder", "negocios_geral"],
 ]);
 
-/** Permissões doutros módulos que, no editor, pertencem a uma fase do negócio (saem de Aquisição; ver, criar e atribuir leads, das Pessoas). */
+/** Permissões doutros módulos que, no editor, pertencem a uma fase do negócio (saem dos Documentos do negócio; ver, criar e atribuir leads, das Pessoas). */
 const MOVIDAS_PARA_NEGOCIOS = new Map<string, string>([
   ["quotes.view_costs", "negocios_negocio"],
   ["client_contracts.cancel", "negocios_negocio"],
@@ -179,6 +189,10 @@ export interface GrupoMenu {
  */
 const MOVIDAS_POR_CODIGO = new Map<string, string>([
   ["platform.pending_submissions.view", "forms"],
+  // Documentos do negócio › Configuração (ver GRUPOS_MENU).
+  ["proposals.manage", "documentos_config"],
+  ["client_contracts.manage_templates", "documentos_config"],
+  ["client_contracts.manage", "documentos_config"],
 ]);
 
 /**

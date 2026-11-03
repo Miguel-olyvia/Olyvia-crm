@@ -16,6 +16,14 @@
 // páginas verificavam e nenhuma função/policy viva usa: leads.export, leads.export_sensitive, leads.contact, clients.export,
 // clients.export_sensitive (a exportação de leads/clients da edge function export-data só era pedida por essas páginas; as páginas
 // vivas exportam client_contracts/proposals/quotes). Ficaram as que o servidor ainda verifica — ver os comentários de cada categoria.
+//
+// 03/11/2026 (aprovado): o grupo Aquisição saiu do menu (o Negócios em /pessoas e /negocios substitui-o); /quotes, /proposals e
+// /client-contracts continuam com rota (a ficha do /pessoas ainda as abre) e /direct-sales redireciona para /negocios. Esconderam-se
+// as permissões que só essas páginas (FORA_DO_MENU em permissoesEmUso.test.ts) verificam: proposals.export, quotes.delete,
+// quotes.export, quotes.export_sensitive, client_contracts.export (export-data só as pede para os pedidos dessas páginas) e
+// direct_sales.create/edit/confirm/register_invoice/view_costs (as RPCs da venda direta só correm a partir de DirectSales.tsx).
+// direct_sales.view fica (as RPCs das Encomendas de Cliente verificam-na). contacts.delete também se escondeu: só a verificam as
+// policies de anew_contacts (tabela antiga) e as de anew_entity_*, que aceitam também pessoas.delete.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
@@ -27,7 +35,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // Só verificadas no servidor (policies/RPCs): client_contracts.manage
   client_contracts: [
     "client_contracts.cancel", "client_contracts.create", "client_contracts.delete", "client_contracts.edit",
-    "client_contracts.export", "client_contracts.manage", "client_contracts.manage_templates",
+    "client_contracts.manage", "client_contracts.manage_templates",
     "client_contracts.send_signature", "client_contracts.view",
   ],
   client_orders: [
@@ -40,11 +48,13 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   clients: [
     "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
   ],
-  // Só verificadas no servidor (policies/RPCs/edge function ai-assistant): todas. Não se escondem porque o assistente (AIAssistant, no
-  // Layout) as exige (contacts.view/create/edit) e as policies de anew_contacts e anew_entity_roles/relationships as aceitam
-  // (contacts.delete/import). 03/11/2026: no editor ficam em Negócios › Pessoas: leads e clientes (o grupo CRM deixou de existir).
+  // Só verificadas no servidor (policies/RPCs/edge functions): todas. Não se escondem porque o assistente (AIAssistant, aberto pelo
+  // InternalChatWidget) as exige no ai-assistant: contacts.create (createContact, convertLead), contacts.edit (updateContact,
+  // deleteContact e as ferramentas de emails/telefones/morada/etiquetas da entidade em tools/entities.ts) e contacts.view
+  // (getContactDetails); contacts.import nas policies de anew_entity_roles (20270102130000). 03/11/2026: no editor ficam em
+  // Negócios › Pessoas: leads e clientes (o grupo CRM deixou de existir); contacts.delete passou para as escondidas.
   contacts: [
-    "contacts.create", "contacts.delete", "contacts.edit", "contacts.import", "contacts.view",
+    "contacts.create", "contacts.edit", "contacts.import", "contacts.view",
   ],
   dashboard: [
     "dashboard.view",
@@ -52,9 +62,9 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   deals: [
     "deals.create", "deals.delete", "deals.edit", "deals.view",
   ],
+  // Só a verificam as RPCs das Encomendas de Cliente (origem Venda Direta) e DirectSales.tsx (FORA_DO_MENU); as outras escondeu-se.
   direct_sales: [
-    "direct_sales.confirm", "direct_sales.create", "direct_sales.edit", "direct_sales.register_invoice", "direct_sales.view",
-    "direct_sales.view_costs",
+    "direct_sales.view",
   ],
   email_templates: [
     "email_templates.create", "email_templates.delete", "email_templates.duplicate", "email_templates.edit",
@@ -153,8 +163,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "products.view", "products.view_cost",
   ],
   proposals: [
-    "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.export", "proposals.manage",
-    "proposals.view",
+    "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.manage", "proposals.view",
   ],
   purchase_orders: [
     "purchase_orders.approve", "purchase_orders.create", "purchase_orders.delete", "purchase_orders.edit",
@@ -166,8 +175,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "quote_templates.view",
   ],
   quotes: [
-    "quotes.create", "quotes.delete", "quotes.edit", "quotes.export", "quotes.export_sensitive", "quotes.manage",
-    "quotes.view", "quotes.view_costs",
+    "quotes.create", "quotes.edit", "quotes.manage", "quotes.view", "quotes.view_costs",
   ],
   receiving: [
     "receiving.download_proof", "receiving.learn_codes", "receiving.manage_delivery_notes", "receiving.receive",
@@ -244,20 +252,27 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   call_center: [
     "call_center.handle_calls", "call_center.manage", "call_center.view",
   ],
+  // Só ClientContracts.tsx (FORA_DO_MENU) e o pedido dela a export-data.
+  client_contracts: [
+    "client_contracts.export",
+  ],
   companies: [
     "companies.create", "companies.delete", "companies.edit", "companies.upload_logo", "companies.view",
   ],
   company_groups: [
     "company_groups.create", "company_groups.delete", "company_groups.edit", "company_groups.view",
   ],
+  // contacts.delete: só policies de anew_contacts (antiga) e de anew_entity_* (que aceitam também pessoas.delete).
   contacts: [
-    "contacts.export", "contacts.export_sensitive", "contacts.view_details",
+    "contacts.delete", "contacts.export", "contacts.export_sensitive", "contacts.view_details",
   ],
   departments: [
     "departments.create", "departments.delete", "departments.edit", "departments.view",
   ],
+  // Só DirectSales.tsx / DirectSaleEditor.tsx (FORA_DO_MENU; /direct-sales redireciona para /negocios) e as RPCs que só elas chamam.
   direct_sales: [
-    "direct_sales.delete",
+    "direct_sales.confirm", "direct_sales.create", "direct_sales.delete", "direct_sales.edit", "direct_sales.register_invoice",
+    "direct_sales.view_costs",
   ],
   drivers: [
     "drivers.create", "drivers.delete", "drivers.edit", "drivers.export", "drivers.import", "drivers.view",
@@ -289,8 +304,13 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   products: [
     "products.manage_catalog", "products.view_price_history",
   ],
+  // Só Proposals.tsx (FORA_DO_MENU) e o pedido dela a export-data.
+  proposals: [
+    "proposals.export",
+  ],
+  // quotes.delete/export/export_sensitive: só Quotes.tsx (FORA_DO_MENU) e o pedido dela a export-data.
   quotes: [
-    "quotes.generate_pdf",
+    "quotes.delete", "quotes.export", "quotes.export_sensitive", "quotes.generate_pdf",
   ],
   roles: [
     "roles.clone",
