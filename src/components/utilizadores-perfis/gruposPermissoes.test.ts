@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PERMISSOES } from "./permissoesExemplo";
-import { agruparPorMenu, categoriaVirtual, distintivoAcao, GRUPOS_MENU, permissoesForaDoMenu } from "./gruposPermissoes";
+import { agruparPorMenu, categoriaVirtual, distintivoAcao, GRUPOS_MENU, permissoesForaDoMenu, ROTULOS_CATEGORIA } from "./gruposPermissoes";
 import type { Permissao } from "./tipos";
 
 const perm = (codigo: string, categoria: string): Permissao => ({ codigo, categoria, nome: codigo, fonte: "codigo", perigosa: false, comAmbito: false });
@@ -75,6 +75,66 @@ describe("agruparPorMenu", () => {
     expect(categoriaVirtual(perm("clients.view", "clients"))).toBe("clients");
     const agendamentos = agruparPorMenu(PERMISSOES).find((g) => g.rotulo === "Agendamentos")!;
     expect(agendamentos.subgrupos.map((s) => s.rotulo)).toEqual(["Quadros", "Itens", "Recursos", "Regras de Auto-agendamento", "Outros"]);
+  });
+
+  describe("Negócios por fase", () => {
+    const NEGOCIOS = [
+      perm("pessoas.view", "pessoas"), perm("pessoas.reopen", "pessoas"),
+      perm("negocios.visita.agendar", "pessoas"),
+      perm("negocios.orcamento.editar", "pessoas"), perm("negocios.margem.aprovar", "pessoas"), perm("negocios.proposta.enviar", "pessoas"),
+      perm("quotes.view_costs", "quotes"),
+      perm("negocios.contrato.editar", "pessoas"), perm("client_contracts.cancel", "client_contracts"),
+      perm("negocios.registar_fatura", "pessoas"), perm("negocios.validar_pagamento", "pessoas"),
+      perm("negocios.obra.planear", "pessoas"), perm("negocios.obra.materiais", "pessoas"),
+      perm("negocios.perder", "pessoas"),
+    ];
+    const subgrupo = (rotulo: string) =>
+      agruparPorMenu(NEGOCIOS).find((g) => g.rotulo === "Negócios")!.subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo);
+
+    it("tem só subgrupos, pela ordem das fases, e nenhuma permissão fica de fora", () => {
+      const grupos = agruparPorMenu(NEGOCIOS);
+      expect(grupos.map((g) => g.rotulo)).toEqual(["Negócios"]);
+      expect(grupos[0].blocos).toEqual([]);
+      expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Geral", "Visita", "Orçamento e proposta", "Contrato", "Financeiro", "Obra"]);
+      expect(grupos[0].permissoes).toHaveLength(NEGOCIOS.length);
+      expect(permissoesForaDoMenu(NEGOCIOS)).toEqual([]);
+    });
+
+    it("põe cada permissão na sua fase", () => {
+      expect(subgrupo("Geral")).toEqual(["pessoas.view", "pessoas.reopen", "negocios.perder"]);
+      expect(subgrupo("Visita")).toEqual(["negocios.visita.agendar"]);
+      expect(subgrupo("Orçamento e proposta")).toEqual([
+        "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "quotes.view_costs",
+      ]);
+      expect(subgrupo("Contrato")).toEqual(["negocios.contrato.editar", "client_contracts.cancel"]);
+      expect(subgrupo("Financeiro")).toEqual(["negocios.registar_fatura", "negocios.validar_pagamento"]);
+      expect(subgrupo("Obra")).toEqual(["negocios.obra.planear", "negocios.obra.materiais"]);
+    });
+
+    it("um negocios.* desconhecido cai em Geral, e o subgrupo Visita só aparece se houver permissões", () => {
+      expect(categoriaVirtual(perm("negocios.xyz", "pessoas"))).toBe("negocios_geral");
+      expect(categoriaVirtual(perm("negocios.xyz.abc", "pessoas"))).toBe("negocios_geral");
+      const grupos = agruparPorMenu([perm("negocios.xyz", "pessoas"), perm("negocios.obra.executar", "pessoas")]);
+      expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Geral", "Obra"]);
+      expect(grupos[0].subgrupos[0].blocos[0].rotulo).toBe("Geral");
+    });
+
+    it("quotes.view_costs e client_contracts.cancel saem de Aquisição; as outras quotes.* e client_contracts.* ficam", () => {
+      const grupos = agruparPorMenu([
+        perm("quotes.view", "quotes"), perm("quotes.view_costs", "quotes"),
+        perm("client_contracts.edit", "client_contracts"), perm("client_contracts.cancel", "client_contracts"),
+      ]);
+      expect(grupos.map((g) => g.rotulo)).toEqual(["Negócios", "Aquisição"]);
+      expect(grupos[1].permissoes.map((p) => p.codigo)).toEqual(["quotes.view", "client_contracts.edit"]);
+      expect(grupos[0].permissoes.map((p) => p.codigo)).toEqual(["quotes.view_costs", "client_contracts.cancel"]);
+    });
+
+    it("as categorias virtuais de Negócios não colidem com categorias reais", () => {
+      const virtuais = GRUPOS_MENU.find((g) => g.rotulo === "Negócios")!.subgrupos!.flatMap((s) => s.categorias);
+      virtuais.forEach((c) => expect(Object.keys(ROTULOS_CATEGORIA)).not.toContain(c));
+      // hr.pessoas.* é do RH, não de Negócios.
+      expect(categoriaVirtual(perm("hr.pessoas.view", "hr"))).toBe("hr");
+    });
   });
 
   it("as permissões de formulários aparecem uma só vez, no subgrupo Formulários", () => {

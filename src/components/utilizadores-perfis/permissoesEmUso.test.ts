@@ -116,8 +116,24 @@ describe("permissões em uso: a lista", () => {
       "Inventário", "Frota", "Recursos Humanos", "Utilizadores", "Definições", "Plataforma",
     ]);
     const negocios = agruparPorMenu(emUso).find((g) => g.rotulo === "Negócios");
-    expect(negocios?.blocos.map((b) => b.categoria)).toEqual(["pessoas", "negocios"]);
+    expect(negocios?.blocos).toEqual([]);
+    expect(negocios?.subgrupos.map((s) => s.rotulo)).toEqual(["Geral", "Orçamento e proposta", "Contrato", "Financeiro", "Obra"]);
     expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(9);
+    expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("pessoas."))).toHaveLength(6);
+  });
+
+  it("quotes.view_costs e client_contracts.cancel estão em Negócios e já não em Aquisição", () => {
+    const grupos = agruparPorMenu(emUso);
+    const negocios = grupos.find((g) => g.rotulo === "Negócios")!;
+    const aquisicao = grupos.find((g) => g.rotulo === "Aquisição")!;
+    const codigosDe = (rotulo: string) => negocios.subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo) ?? [];
+    expect(codigosDe("Orçamento e proposta")).toContain("quotes.view_costs");
+    expect(codigosDe("Contrato")).toContain("client_contracts.cancel");
+    const naAquisicao = aquisicao.permissoes.map((p) => p.codigo);
+    expect(naAquisicao).not.toContain("quotes.view_costs");
+    expect(naAquisicao).not.toContain("client_contracts.cancel");
+    expect(naAquisicao).toContain("quotes.view");
+    expect(naAquisicao).toContain("client_contracts.edit");
   });
 });
 

@@ -56,8 +56,19 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
     ],
   },
   { rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"] },
-  // /pessoas e /negocios: as permissões dos negócios de pessoas e as de cada parte do negócio e da obra (negocios.*).
-  { rotulo: "Negócios", categorias: ["pessoas", "negocios"] },
+  // /pessoas e /negocios: um subgrupo por fase do negócio, pelas categorias virtuais de categoriaNegocio() (pessoas.*, negocios.*,
+  // e quotes.view_costs / client_contracts.cancel, que saem de Aquisição).
+  {
+    rotulo: "Negócios", categorias: [],
+    subgrupos: [
+      { rotulo: "Geral", categorias: ["negocios_geral"] },
+      { rotulo: "Visita", categorias: ["negocios_visita"] },
+      { rotulo: "Orçamento e proposta", categorias: ["negocios_orcamento"] },
+      { rotulo: "Contrato", categorias: ["negocios_contrato"] },
+      { rotulo: "Financeiro", categorias: ["negocios_financeiro"] },
+      { rotulo: "Obra", categorias: ["negocios_obra"] },
+    ],
+  },
   { rotulo: "CRM", categorias: ["leads", "contacts", "clients"] },
   {
     rotulo: "Aquisição", categorias: ["deals"],
@@ -89,17 +100,46 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
 
 /**
  * Códigos guardados numa categoria da base mas com bloco próprio no editor, pelo prefixo: a base junta marcas/categorias/atributos em
- * `products`, as taxas/subcategorias em `services` e os negocios.* em `pessoas`.
+ * `products` e as taxas/subcategorias em `services`. (Os negocios.*, guardados em `pessoas`, vão por categoriaNegocio().)
  */
 const PREFIXOS_COM_BLOCO = new Set([
   "brands", "bundles", "product_categories", "product_subcategories", "product_attributes", "units_of_measure",
-  "service_categories", "service_subcategories", "service_fees", "service_catalog", "catalog_items", "negocios", "lead_sources",
+  "service_categories", "service_subcategories", "service_fees", "service_catalog", "catalog_items", "lead_sources",
 ]);
 
 const ROTULOS_VIRTUAIS: Record<string, string> = {
   marketing_campaigns: "Campanhas", marketing_channels: "Origens", marketing_lists: "Listas",
   scheduling_boards: "Quadros", scheduling_items: "Itens", scheduling_resources: "Recursos", scheduling_rules: "Regras", scheduling_other: "Outros",
+  negocios_geral: "Geral", negocios_visita: "Visita", negocios_orcamento: "Orçamento e proposta", negocios_contrato: "Contrato",
+  negocios_financeiro: "Financeiro", negocios_obra: "Obra",
 };
+
+/** Os negocios.* pela segunda parte do código (a fase); o que não for conhecido cai em Geral. */
+const FASES_NEGOCIO = new Map<string, string>([
+  ["visita", "negocios_visita"],
+  ["orcamento", "negocios_orcamento"], ["margem", "negocios_orcamento"], ["proposta", "negocios_orcamento"],
+  ["contrato", "negocios_contrato"],
+  ["registar_fatura", "negocios_financeiro"], ["validar_pagamento", "negocios_financeiro"],
+  ["obra", "negocios_obra"],
+]);
+
+/** Permissões doutros módulos que, no editor, pertencem a uma fase do negócio (saem de Aquisição). */
+const MOVIDAS_PARA_NEGOCIOS = new Map<string, string>([
+  ["quotes.view_costs", "negocios_orcamento"],
+  ["client_contracts.cancel", "negocios_contrato"],
+]);
+
+/** A categoria virtual de Negócios da permissão, ou null se não for de Negócios. */
+function categoriaNegocio(p: Permissao): string | null {
+  const movida = MOVIDAS_PARA_NEGOCIOS.get(p.codigo);
+  if (movida) return movida;
+  const [prefixo, fase] = p.codigo.split(".");
+  if (prefixo === "negocios") return FASES_NEGOCIO.get(fase ?? "") ?? "negocios_geral";
+  if (prefixo === "pessoas") return "negocios_geral";
+  // Outra permissão guardada nas categorias de Negócios fica em Geral (não desaparece do editor).
+  if (p.categoria === "pessoas" || p.categoria === "negocios") return "negocios_geral";
+  return null;
+}
 
 export interface BlocoCategoria {
   categoria: string;
@@ -122,7 +162,10 @@ export interface GrupoMenu {
   permissoes: Permissao[];
 }
 
-/** Agendamentos e Marketing partem-se em categorias virtuais pelo prefixo do código, como em Roles.tsx. */
+/**
+ * Agendamentos e Marketing partem-se em categorias virtuais pelo prefixo do código, como em Roles.tsx; Negócios parte-se por fase
+ * (categoriaNegocio).
+ */
 export function categoriaVirtual(p: Permissao): string {
   if (p.categoria === "scheduling") {
     if (p.codigo.startsWith("scheduling.boards")) return "scheduling_boards";
@@ -136,6 +179,8 @@ export function categoriaVirtual(p: Permissao): string {
     if (p.codigo.startsWith("channels.")) return "marketing_channels";
     if (p.codigo.startsWith("lists.")) return "marketing_lists";
   }
+  const negocio = categoriaNegocio(p);
+  if (negocio) return negocio;
   const prefixo = p.codigo.split(".")[0] ?? "";
   if (PREFIXOS_COM_BLOCO.has(prefixo)) return prefixo;
   return p.categoria;
