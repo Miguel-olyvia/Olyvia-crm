@@ -94,8 +94,16 @@ describe("a fatura do Eticadata no V1", () => {
   });
 
   it("sem ligação ao ERP: regista-se na mesma e o pagamento valida-se à mão, como antes", () => {
-    acoes(S, () => {}, (fn) => fn()).registarFaturaErp(1027, "FAT 15200126/12", null);
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.registarFaturaErp(1027, "FAT 15200126/12", null);
     expect(d().fin.fatura?.n).toBe("FAT 15200126/12");
+    // 3/11: primeiro espera que o cliente diga no portal que pagou; só depois se valida à mão
+    delete d().f.comprovativo;
+    expect(proximo(d(), S)).toMatchObject({ t: "À espera do pagamento do cliente", wait: true });
+    expect(proximo(d(), S).btn).toBeUndefined();
+    A.validar(1027);
+    expect(d().fin.pago).toBe(false);
+    A.avisarPagamento(1027, "TRF 123");
     expect(proximo(d(), S)).toMatchObject({ act: "validar", btn: "Validar pagamento" });
   });
 

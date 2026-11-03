@@ -1341,7 +1341,10 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       // 22/10: no V1 também não: emite-se no Eticadata, regista-se aqui o número e a Olyvia lê no ERP se já foi paga (erpEticadata.ts)
       if (!d.fin.fatura) return { t: "Registar a fatura do ERP", sub: "Emita-a no Eticadata e escreva aqui o número. A Olyvia confirma no ERP se já foi paga.", btn: "Registar fatura", act: "registarFaturaErp", who: "financeiro" };
       if (d.fin.erp) return { t: "À espera do pagamento", sub: `${d.fin.fatura.n}: ${resumoErp(d.fin.erp)}. A Olyvia vê no Eticadata quando for paga.`, btn: "Verificar no ERP", act: "verificarErp", who: "financeiro" };
-      return { t: "Validar o pagamento", sub: `Confirmar que o valor da ${d.fin.fatura.n} entrou na conta. O recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
+      // 3/11 (Rúben): a fatura vai ao portal com a referência para pagar; só depois de o cliente dizer no portal que pagou é que o
+      // Financeiro valida (à mão, enquanto não houver Eticadata)
+      if (!d.f.comprovativo) return { t: "À espera do pagamento do cliente", sub: `A ${d.fin.fatura.n} está no portal do cliente, com a referência para pagar. Avança quando o cliente disser no portal que pagou.`, who: "cliente", wait: true };
+      return { t: "Validar o pagamento", sub: `O cliente diz que pagou a ${d.fin.fatura.n}${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""} · ${d.f.comprovativo}. Confirmar que o valor entrou na conta; o recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
     case 5: {
       const p = d.obra.plano;
       // F3: a encomenda emitida no servidor e o plano ainda por gerar (gera-se do orçamento, como no pagamento do protótipo)
@@ -2531,6 +2534,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     validar(id: number) {
       const d = deal(id);
       if (!exigePerm("finance.validate_payment")) return;
+      // 3/11: só depois de o cliente dizer no portal que pagou (o comprovativo vem de lá)
+      if (!d.f.comprovativo) { avisar({ msg: "O cliente ainda não disse que pagou", sub: "A fatura está no portal com a referência; o pagamento valida-se depois de o cliente avisar", kind: "bad" }); return; }
       // o sinal (a primeira prestação), com IVA, como na fatura
       if (!d.f.valor_recebido) d.f.valor_recebido = String(valorSinal(d, S));
       if (!d.f.data_pag) d.f.data_pag = new Date().toISOString().slice(0, 10);
