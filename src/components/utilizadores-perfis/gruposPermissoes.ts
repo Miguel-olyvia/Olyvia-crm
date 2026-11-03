@@ -342,7 +342,32 @@ const DISTINTIVOS: Record<string, DistintivoAcao> = {
   perder: { rotulo: "Perder", classes: VERMELHO },
   reopen: { rotulo: "Reabrir", classes: AMBAR },
   config: { rotulo: "Configurar", classes: ROXO },
+  // 03/11 (grelha recurso × ação): ações frequentes que caíam no texto em inglês tirado do código.
+  convert: { rotulo: "Converter", classes: VERDE },
+  assign: { rotulo: "Atribuir", classes: ROXO },
+  approve: { rotulo: "Aprovar", classes: ROXO },
+  manage: { rotulo: "Gerir", classes: ROXO },
+  criar: { rotulo: "Criar", classes: VERDE },
+  corrigir: { rotulo: "Corrigir", classes: AMBAR },
+  reveal: { rotulo: "Revelar", classes: VERMELHO },
+  emitir: { rotulo: "Emitir", classes: TEAL },
+  anular: { rotulo: "Anular", classes: VERMELHO },
+  pedir: { rotulo: "Pedir", classes: VERDE },
+  ajustar: { rotulo: "Ajustar", classes: AMBAR },
+  picar: { rotulo: "Picar", classes: VERDE },
+  validar: { rotulo: "Validar", classes: ROXO },
+  importar: { rotulo: "Importar", classes: TEAL },
+  alterar: { rotulo: "Alterar", classes: AMBAR },
+  archive: { rotulo: "Arquivar", classes: VERMELHO },
+  count: { rotulo: "Contar", classes: AMBAR },
+  adjust: { rotulo: "Ajustar", classes: AMBAR },
+  transfer: { rotulo: "Transferir", classes: TEAL },
+  duplicate: { rotulo: "Duplicar", classes: TEAL },
+  cancel: { rotulo: "Cancelar", classes: VERMELHO },
 };
+
+/** A ação tem rótulo próprio (não é o texto tirado do código, que pode vir em inglês). */
+export const ehAcaoConhecida = (acao: string): boolean => Object.prototype.hasOwnProperty.call(DISTINTIVOS, acao);
 
 export function distintivoAcao(codigo: string): DistintivoAcao {
   const fim = codigo.split(".").pop() ?? "";

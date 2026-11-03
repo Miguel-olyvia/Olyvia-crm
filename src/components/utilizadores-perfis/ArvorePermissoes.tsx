@@ -1,7 +1,8 @@
-// A matriz de permissões, no mesmo desenho do ecrã de Roles atual: um Accordion por entrada do menu, categorias e subgrupos lá
-// dentro, e cada permissão com o seu distintivo de ação (Ver, Criar, Editar, Eliminar...) e a marca de perigosa.
-// Por omissão é só leitura: cada linha diz "Tem" ou "Não tem" em texto e ícone, e o cabeçalho do grupo soma o que está concedido.
-// Com `edicao` cada linha passa a ter uma caixa de seleção e cada módulo "Marcar tudo" e "Limpar" (formulário de role).
+// A matriz de permissões: um Accordion por entrada do menu (cabeçalho com "x de y"), e lá dentro uma GRELHA recurso × ação por
+// subgrupo (GrelhaRecursoAcao; os blocos diretos do grupo fazem uma tabela sem título). Por omissão é só leitura ("Tem"/"Não tem");
+// com `edicao` as células são caixas de seleção e cada módulo tem "Marcar tudo" e "Limpar" (formulário de role).
+// Com `extra` (separador Permissões do utilizador, que diz de que role vem cada permissão) mantém-se a LISTA: a origem é por
+// permissão e não cabe numa célula da grelha.
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { Check, Minus } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -12,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AcoesModulo } from "./AcoesModulo";
 import { agruparPorMenu, distintivoAcao, type BlocoCategoria, type GrupoMenu } from "./gruposPermissoes";
-import { LinhaPermissaoEditavel, type EdicaoMatriz } from "./LinhaPermissaoEditavel";
+import { GrelhaRecursoAcao, type EdicaoMatriz } from "./GrelhaRecursoAcao";
 import { normalizar } from "./logica";
 import { MarcaPerigosa } from "./pecas";
 import type { Permissao } from "./tipos";
@@ -69,10 +70,12 @@ interface ItemGrupoProps {
   linha: (p: Permissao) => ReactNode;
   /** "Marcar tudo" e "Limpar" do módulo (só com edição). */
   acoes?: ReactNode;
+  /** Desenha os blocos de uma tabela em grelha; sem isto, lista. */
+  grelha?: (titulo: string, blocos: BlocoCategoria[]) => ReactNode;
 }
 
 /** Um módulo do menu: cabeçalho com o total concedido, categorias diretas e subgrupos. */
-function ItemGrupo({ grupo: g, concedidas, linha, acoes }: ItemGrupoProps) {
+function ItemGrupo({ grupo: g, concedidas, linha, acoes, grelha }: ItemGrupoProps) {
   const { t } = useTranslation();
   const contagem = (lista: Permissao[]) => t("usersProfiles.matrix.count", { n: concedidas(lista), total: lista.length });
   return (
@@ -86,14 +89,18 @@ function ItemGrupo({ grupo: g, concedidas, linha, acoes }: ItemGrupoProps) {
       <AccordionContent>
         <div className="space-y-3 pl-1 sm:pl-3">
           {acoes}
-          {g.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={g.blocos.length > 1} linha={linha} />)}
+          {grelha
+            ? g.blocos.length > 0 && grelha(g.rotulo, g.blocos)
+            : g.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={g.blocos.length > 1} linha={linha} />)}
           {g.subgrupos.map((s) => (
             <div key={s.rotulo} className="space-y-2 border-l-2 border-border pl-3">
               <p className="flex flex-wrap items-center gap-x-3 text-sm font-medium text-foreground">
                 {s.rotulo}
                 <Badge variant="outline" className="text-xs">{contagem(s.permissoes)}</Badge>
               </p>
-              {s.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={s.blocos.length > 1} linha={linha} />)}
+              {grelha
+                ? grelha(`${g.rotulo} › ${s.rotulo}`, s.blocos)
+                : s.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={s.blocos.length > 1} linha={linha} />)}
             </div>
           ))}
         </div>
@@ -115,9 +122,10 @@ export function ArvorePermissoes({ permissoes, concedida, extra, edicao }: Arvor
   );
   const grupos = useMemo(() => agruparPorMenu(filtradas), [filtradas]);
   const n = (lista: Permissao[]) => lista.filter((p) => concedida(p.codigo)).length;
-  const linha = (p: Permissao) => (edicao
-    ? <LinhaPermissaoEditavel key={p.codigo} permissao={p} concedida={concedida(p.codigo)} edicao={edicao} />
-    : <LinhaPermissao key={p.codigo} permissao={p} concedida={concedida(p.codigo)} extra={extra?.(p)} />);
+  const linha = (p: Permissao) => <LinhaPermissao key={p.codigo} permissao={p} concedida={concedida(p.codigo)} extra={extra?.(p)} />;
+  const grelha = extra && !edicao
+    ? undefined
+    : (titulo: string, blocos: BlocoCategoria[]) => <GrelhaRecursoAcao titulo={titulo} blocos={blocos} concedida={concedida} edicao={edicao} />;
   const acoes = (g: GrupoMenu) => (edicao && !edicao.desativada
     ? <AcoesModulo modulo={g.rotulo} aoMarcar={() => edicao.aoModulo(g.permissoes, true)} aoLimpar={() => edicao.aoModulo(g.permissoes, false)} />
     : undefined);
@@ -140,7 +148,7 @@ export function ArvorePermissoes({ permissoes, concedida, extra, edicao }: Arvor
           type="multiple" className="w-full" value={consulta ? grupos.map((g) => g.rotulo) : abertos}
           onValueChange={(v) => { if (!consulta) setAbertos(v); }}
         >
-          {grupos.map((g) => <ItemGrupo key={g.rotulo} grupo={g} concedidas={n} linha={linha} acoes={acoes(g)} />)}
+          {grupos.map((g) => <ItemGrupo key={g.rotulo} grupo={g} concedidas={n} linha={linha} acoes={acoes(g)} grelha={grelha} />)}
         </Accordion>
       )}
     </div>

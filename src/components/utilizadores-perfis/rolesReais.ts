@@ -25,6 +25,7 @@ export interface LinhaPermissao {
   category: string | null;
   is_dangerous: boolean | null;
   supports_scope?: boolean | null;
+  description?: string | null;
 }
 
 export interface LinhaRolePermissao {
@@ -63,6 +64,7 @@ export function permissaoDaBase(l: LinhaPermissao): Permissao {
   return {
     codigo: l.code, categoria: l.category ?? "", nome: NOMES_PT[l.name] ?? l.name,
     perigosa: l.is_dangerous === true, comAmbito: l.supports_scope === true,
+    ...(l.description?.trim() ? { descricao: l.description.trim() } : {}),
   };
 }
 
