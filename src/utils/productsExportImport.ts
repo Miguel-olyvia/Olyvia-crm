@@ -675,12 +675,17 @@ export const parseProductsCSV = async ({
     const supplierName = values[8];
     const productType = values[9]?.toLowerCase() || 'venda';
     const companyName = values[10];
-    const vatRate = parseFloat(values[11]) || 23;
-    const purchasePrice = parseFloat(values[12]) || 0;
-    const retailPrice = parseFloat(values[13]) || 0;
-    const wholesalePrice = parseFloat(values[14]) || 0;
-    const distributorPrice = parseFloat(values[15]) || 0;
-    const promoPrice = parseFloat(values[16]) || 0;
+    // Aceita vírgula decimal ("14,26"): parseFloat sozinho lia 14 em silêncio.
+    const parseNum = (v?: string) => {
+      const s = (v ?? '').toString().trim().replace(/\s|€/g, '');
+      return parseFloat(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s);
+    };
+    const vatRate = parseNum(values[11]) || 23;
+    const purchasePrice = parseNum(values[12]) || 0;
+    const retailPrice = parseNum(values[13]) || 0;
+    const wholesalePrice = parseNum(values[14]) || 0;
+    const distributorPrice = parseNum(values[15]) || 0;
+    const promoPrice = parseNum(values[16]) || 0;
     const promoFrom = values[17] || null;
     const promoTo = values[18] || null;
     const currency = values[19] || 'EUR';
