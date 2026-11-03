@@ -1557,6 +1557,16 @@ function preencher(d: Negocio, n: number) {
   if (n === 5) def({ data_pag: hojeISO(), responsavel: RESPONSAVEIS_OBRA[0] ?? "", horario: "Dias úteis 8h–17h", chaves: f.habitada_durante_obra === "Sim" ? "O cliente abre" : "Chave entregue",
     contacto_local: d.nome + " · " + d.tel, contentor: "Não", protecoes: protecoesSugeridas(f) });
 }
+// 3/11 (Rúben): o NIF e o email da faturação vêm da Lead (a primeira fase), também nos negócios que já estavam no Financeiro e quando se
+// escrevem depois na Lead. Só se preenche o que está vazio: o que alguém escreveu na faturação não se troca.
+const DA_LEAD: [string, string][] = [["nif_fat", "nif"], ["email_fat", "email"]];
+/** No Financeiro, antes de pago: o NIF e o email da faturação que faltam vêm da Lead. Devolve true se mudou alguma coisa. */
+export function herdarFaturacao(d: Negocio): boolean {
+  if (d.fase !== 4 || d.fin.pago) return false;
+  let mudou = false;
+  for (const [fat, lead] of DA_LEAD) if (!d.f[fat]?.trim() && d.f[lead]?.trim()) { d.f[fat] = d.f[lead].trim(); mudou = true; }
+  return mudou;
+}
 const fichaCliente = (d: Negocio, desde: string) => ({ nome: d.nome, tel: d.tel, local: nomeLinha(d) + (d.local ? " · " + d.local : ""), desde, deal: d.id });
 function criarCliente(S: Estado, d: Negocio) {
   if (!S.clientes.some((c) => c.deal === d.id)) S.clientes.unshift(fichaCliente(d, "hoje"));
@@ -3313,7 +3323,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Visita ${n} apagada`, "w");
     },
     campo(id: number, k: string, v: string) {
-      const d = deal(id); d.f[k] = v;
+      const d = deal(id);
+      // 3/11: o NIF e o email da Lead mudaram: a faturação acompanha, se estava vazia ou igual ao que a Lead tinha (não foi escrita à parte)
+      const fat = DA_LEAD.find(([, lead]) => lead === k)?.[0];
+      if (fat && !d.fin.pago && (!d.f[fat]?.trim() || d.f[fat] === d.f[k])) d.f[fat] = v.trim();
+      d.f[k] = v;
       // 19/10: as prestações "Por fases" guardam-se com a escolha (a mesma fonte para a proposta, o portal e o Financeiro V2); outra condição esquece-as
       if (k === "pagamento" && d.orc && !d.orc.enviada) {
         if (v !== PAGAMENTO_FASES && v !== PAGAMENTO_MEDIDA) delete d.orc.pagFases;

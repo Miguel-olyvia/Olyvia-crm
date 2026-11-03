@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acoes, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
+import { acoes, herdarFaturacao, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
@@ -122,6 +122,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
     foto.current = fotografarNegocios(S.deals);
+    // 3/11: no Financeiro, o NIF e o email da faturação que faltam vêm da Lead (depois da fotografia: grava-se na próxima gravação)
+    for (const d of S.deals) if (!soLeitura.current.has(d.id)) herdarFaturacao(d);
   }, [S]);
 
   // 2/11 (20270103800000): a vista do cliente de cada negócio com proposta enviada (o portal real desenha-a com o ecrã da V1). Só se
