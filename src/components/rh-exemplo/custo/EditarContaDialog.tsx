@@ -1,12 +1,13 @@
 /**
  * «Alterar como conta»: muda o «Como conta» de um equipamento ou de um valor avulso já registado. O valor, a data de entrega
- * (ou da data) e a devolução não mudam; só a forma de contar, e a alteração vale logo para todos os meses. Só memória.
+ * (ou da data) e a devolução não mudam; só a forma de contar, e a alteração vale logo para todos os meses. Equipamentos gravam na base; valores avulsos ficam em memória.
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
-import { alterarContaAvulso, alterarContaEquipamento } from "@/components/rh-exemplo/dados/lojaCusto";
+import { alterarContaAvulso } from "@/components/rh-exemplo/dados/lojaCusto";
+import { useEquipamentosCustoAcoes } from "@/components/rh-exemplo/hooks/useEquipamentosCusto";
 import type { ErroConta } from "@/components/rh-exemplo/lib/comoConta";
 import type { AvulsoCusto } from "@/components/rh-exemplo/lib/custoMes";
 import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
@@ -28,21 +29,39 @@ function Formulario({ alvo, aoFechar }: { alvo: AlvoConta; aoFechar: () => void 
   const { t } = useTranslation();
   const [escolha, setEscolha] = useState<EscolhaConta>(() => escolhaDe(alvo.item.conta.modo, alvo.item.conta));
   const [erro, setErro] = useState<ErroConta | null>(null);
-  const guardar = () => {
+  const [mensagem, setMensagem] = useState<string | null>(null);
+  const [aGuardar, setAGuardar] = useState(false);
+  const { alterarConta } = useEquipamentosCustoAcoes();
+  const guardar = async () => {
+    if (aGuardar) return;
     const conta = contaDaEscolha(escolha, dataDe(alvo));
-    const { erro: recusa } = alvo.tipo === "equipamento" ? alterarContaEquipamento(alvo.item.id, conta) : alterarContaAvulso(alvo.item.id, conta);
-    setErro(recusa);
-    if (!recusa) aoFechar();
+    setAGuardar(true);
+    try {
+      if (alvo.tipo === "avulso") {
+        // Os valores avulsos continuam em memoria (os lancamentos reais tem o seu proprio caminho).
+        const { erro: recusa } = alterarContaAvulso(alvo.item.id, conta);
+        setErro(recusa);
+        if (!recusa) aoFechar();
+        return;
+      }
+      const resultado = await alterarConta(alvo.item.id, conta);
+      setErro(resultado.erro as ErroConta | null);
+      setMensagem(resultado.mensagem);
+      if (resultado.ok) aoFechar();
+    } finally {
+      setAGuardar(false);
+    }
   };
   return (
-    <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); guardar(); }}>
+    <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
       <ComoContaCampos
         idBase="rhCustos-editar-conta" escolha={escolha} aoMudar={(p) => setEscolha((e) => ({ ...e, ...p }))}
         valor={alvo.item.valor} data={dataDe(alvo)} comDevolucao={alvo.tipo === "equipamento"} erro={erro}
       />
+      {mensagem && <p role="alert" className="text-sm font-medium text-destructive">{mensagem}</p>}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("common.cancel")}</Button>
-        <Button type="submit" className={cn("min-h-11", FOCO)}>{t("rhCustos.conta.guardar")}</Button>
+        <Button type="submit" disabled={aGuardar} className={cn("min-h-11", FOCO)}>{t("rhCustos.conta.guardar")}</Button>
       </DialogFooter>
     </form>
   );

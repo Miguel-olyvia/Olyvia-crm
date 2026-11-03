@@ -2,7 +2,8 @@
  * O separador «Custo» da ficha (fluxo 11): quanto custa a pessoa à empresa, no mês escolhido. Mostra o quadro do mês (a
  * retribuição é o total bruto estimado do processamento salarial real), a composição, os equipamentos que a pessoa tem
  * (cada um conta como foi escolhido), os valores avulsos (os lançamentos pontuais do processamento salarial, da base) e os
- * encargos. Só para quem vê salários; a própria pessoa não vê o custo. Equipamentos e taxas dos encargos ainda só existem em memória.
+ * encargos. Só para quem vê salários (`hr.pessoas.retribuicao.view`); a própria pessoa não vê o custo. Atribuir, devolver, alterar a conta
+ * e guardar taxas pedem também `hr.pessoas.retribuicao.edit`. Equipamentos, taxas e exceções vêm da base; enquanto não chegam mostra-se «a calcular».
  */
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -20,7 +21,7 @@ import { useCustoDaPessoa } from "./useCustoDaPessoa";
 export function AbaCusto({ pessoa, ctx }: AbaProps) {
   const { t } = useTranslation();
   const mes = useCusto((e) => e.mes);
-  const { custo, aCarregar, retribuicaoRecusada, incompleta, lancamentos } = useCustoDaPessoa(pessoa, mes);
+  const { custo, aCarregar, retribuicaoRecusada, erroBase, podeEditar, incompleta, lancamentos } = useCustoDaPessoa(pessoa, mes);
   const autor = ctx.nomePorPessoaId.get(ctx.minhaPessoaId ?? "") ?? t("rhA.custo.autorOmissao");
 
   return (
@@ -32,6 +33,7 @@ export function AbaCusto({ pessoa, ctx }: AbaProps) {
           <OlyviaLoader size={16} />{t("rhProcReal.custo.fichaACalcular")}
         </div>
       )}
+      {erroBase && !retribuicaoRecusada && <p role="alert" className="text-sm text-destructive">{t("rhCustos.base.erro", { erro: erroBase })}</p>}
       {incompleta && !aCarregar && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.fichaIncompleta")}</p>}
       {custo && (
         <>
@@ -39,9 +41,9 @@ export function AbaCusto({ pessoa, ctx }: AbaProps) {
           <Seccao titulo={t("rhCustos.comp.fichaTitulo")}>
             <BarraComposicao partes={custo.composicao} titulo={t("rhCustos.comp.titulo", { nome: pessoa.nome_completo })} />
           </Seccao>
-          <CustoEquipamentos pessoaId={pessoa.id} pessoaNome={pessoa.nome_completo} mes={mes} autor={autor} equipamentos={custo.equipamentos} />
-          <CustoAvulsos pessoaId={pessoa.id} avulsos={custo.avulsos} mes={mes} acoes={lancamentos} podeGerir />
-          <CustoEncargos pessoaId={pessoa.id} />
+          <CustoEquipamentos pessoaId={pessoa.id} pessoaNome={pessoa.nome_completo} mes={mes} autor={autor} equipamentos={custo.equipamentos} podeGerir={podeEditar} />
+          <CustoAvulsos pessoaId={pessoa.id} avulsos={custo.avulsos} mes={mes} acoes={lancamentos} podeGerir={podeEditar} />
+          <CustoEncargos pessoaId={pessoa.id} podeGerir={podeEditar} />
         </>
       )}
     </div>

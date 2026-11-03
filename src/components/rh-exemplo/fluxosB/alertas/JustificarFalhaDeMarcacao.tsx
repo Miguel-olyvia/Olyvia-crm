@@ -4,83 +4,23 @@
  * justificacao» (falta sugerida). A pessoa nao corrige a propria picagem: so o RH aceita (lanca a picagem a mao)
  * ou recusa com motivo.
  */
-import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { MessageSquareWarning } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { toast } from "@/lib/toast";
 import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
-import { enviarJustificacaoDePicagem } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
 import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import {
   diasUteisRestantes,
   prazoDaJustificacao,
   situacaoDoPrazo,
-  type AlertaDia,
   type JustificacaoPicagem,
 } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
-import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
 import { useJustificacoesDeDiaDaPessoa } from "@/components/rh-exemplo/calendarioPessoa/situacaoDoMes";
 import { ESTADO_DA_JUSTIFICACAO, textoEhSensivel, type EstadoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import type { JustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
-
-/** O formulário de justificação (hora real, motivo, anexo); usado aqui e no detalhe do dia do calendário. */
-export function FormularioDeJustificacao({ alerta, onFechar }: { alerta: AlertaDia; onFechar: () => void }) {
-  const { t } = useTranslation();
-  const [horaReal, setHoraReal] = useState("18:00");
-  const [motivo, setMotivo] = useState("");
-  const [anexoNome, setAnexoNome] = useState<string | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
-  const id = `rhb-just-${alerta.id}`;
-
-  const { dias: prazoDias } = usePrazoJustificacao();
-
-  const enviar = () => {
-    const resultado = enviarJustificacaoDePicagem(alerta.id, { horaReal, motivo, anexoNome, prazoDias });
-    setErro(resultado.erro);
-    if (!resultado.erro) {
-      toast.success(t("rhExemplo.pic.justificacaoEnviada"));
-      onFechar();
-    }
-  };
-
-  return (
-    <div className="mt-2 grid gap-3 rounded-md border p-3 sm:grid-cols-2">
-      <div className="space-y-1.5">
-        <Label htmlFor={`${id}-hora`}>{t("rhExemplo.pic.horaReal")}</Label>
-        <Input id={`${id}-hora`} type="time" className="min-h-11" value={horaReal} onChange={(e) => setHoraReal(e.target.value)} />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor={`${id}-anexo`}>{t("rhExemplo.hor.anexoOpcional")}</Label>
-        <Input id={`${id}-anexo`} type="file" className="min-h-11" onChange={(e) => setAnexoNome(e.target.files?.[0]?.name ?? null)} />
-      </div>
-      <div className="space-y-1.5 sm:col-span-2">
-        <Label htmlFor={`${id}-motivo`}>{t("rhExemplo.fluxosB.motivoObrigatorio", { minimo: String(MOTIVO_MINIMO_CARACTERES) })}</Label>
-        <Textarea id={`${id}-motivo`} rows={2} value={motivo} onChange={(e) => setMotivo(e.target.value)} />
-      </div>
-      {erro && (
-        <p role="alert" className="text-sm font-medium text-destructive sm:col-span-2">
-          {t(erro)}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-2 sm:col-span-2">
-        <Button type="button" className="min-h-11" onClick={enviar}>
-          {t("rhExemplo.pic.enviarJustificacao")}
-        </Button>
-        <Button type="button" variant="outline" className="min-h-11" onClick={onFechar}>
-          {t("common.cancel")}
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 function LinhaEnviada({ j }: { j: JustificacaoPicagem }) {
   const { t } = useTranslation();

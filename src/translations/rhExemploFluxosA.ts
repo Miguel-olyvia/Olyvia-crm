@@ -89,7 +89,9 @@ export const rhExemploFluxosATranslations: Record<"en" | "pt", Record<string, st
     "rhA.custo.excecaoPessoa": "Rate for this person (%)",
     "rhA.custo.excecaoAjuda": "Leave empty to use the company rate (reduced-rate regimes).",
     "rhA.custo.guardarEncargos": "Save",
-    "rhA.custo.encargosNota": "Example values, to be confirmed by accounting. The value per km and per day are only suggestions when registering.",
+    "rhA.custo.encargosSemMudanca": "Nothing changed: there is nothing to save.",
+    "rhA.custo.encargosParcial": "The organisation's rates were saved, but this person's rate was not: {erro}",
+    "rhA.custo.encargosNota": "The company rate and the insurance are per organisation: changing them here changes the cost of everyone in this organisation. The rate for this person is the only one that applies to them alone. The value per km and per day are only suggestions when registering.",
     "rhA.custo.autorOmissao": "HR",
   },
   pt: {
@@ -179,7 +181,9 @@ export const rhExemploFluxosATranslations: Record<"en" | "pt", Record<string, st
     "rhA.custo.excecaoPessoa": "Taxa desta pessoa (%)",
     "rhA.custo.excecaoAjuda": "Deixa vazio para usar a taxa da empresa (regimes com taxa reduzida).",
     "rhA.custo.guardarEncargos": "Guardar",
-    "rhA.custo.encargosNota": "Valores de exemplo, por confirmar pela contabilidade. O valor por km e por dia são só sugestões ao registar.",
+    "rhA.custo.encargosSemMudanca": "Nada mudou: não há nada para guardar.",
+    "rhA.custo.encargosParcial": "As taxas da organização ficaram guardadas, mas a taxa desta pessoa não: {erro}",
+    "rhA.custo.encargosNota": "A taxa da empresa e o seguro são por organização: editá-los aqui muda o custo de todas as pessoas desta organização. A taxa desta pessoa é a única que vale só para ela. O valor por km e por dia são só sugestões ao registar.",
     "rhA.custo.autorOmissao": "RH",
   },
 };

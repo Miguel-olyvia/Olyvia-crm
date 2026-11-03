@@ -49,6 +49,9 @@ export interface DefinicoesCusto {
   ajudaPorDia: number;
 }
 
+/** Os valores com que a base cria as definições de uma organização (`hr_custo_definicoes`): o que se usa só enquanto não há definições lidas. */
+export const DEFINICOES_OMISSAO: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 };
+
 export interface EntradaCustoMes {
   mes: MesIso;
   salarioMes: number | null;

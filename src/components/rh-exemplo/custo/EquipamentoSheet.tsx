@@ -1,14 +1,14 @@
 /**
  * «Atribuir equipamento» (painel lateral): tipo, descrição, valor, data de entrega e «Como conta» (pago de uma vez, repartido
  * por N meses — 36 por omissão, o do fluxo 11 — ou todos os meses). Na ficha a pessoa já vem escolhida; no módulo «Custos»
- * escolhe-se aqui. Passa logo a contar no custo da pessoa e nos totais da organização. Tudo em memória.
+ * escolhe-se aqui. Grava na base e passa a contar no custo da pessoa e nos totais da organização quando a lista se refaz.
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
-import { hojeIso } from "@/components/rh-exemplo/dados/datas";
-import { atribuirEquipamento } from "@/components/rh-exemplo/dados/lojaCusto";
+import { hojeLocal } from "@/components/rh-exemplo/hooks/dataLocal";
+import { useEquipamentosCustoAcoes } from "@/components/rh-exemplo/hooks/useEquipamentosCusto";
 import { CampoSelect, CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { ehErroConta } from "@/components/rh-exemplo/lib/comoConta";
 import { TIPOS_EQUIPAMENTO, type ErroEquipamento, type TipoEquipamento } from "@/components/rh-exemplo/lib/equipamentos";
@@ -27,7 +27,8 @@ interface Props {
   /** A pessoa fixa (ficha) ou `null` para escolher no painel (módulo «Custos»). */
   pessoaId: string | null;
   pessoas: readonly PessoaEscolhivel[];
-  autor: string;
+  /** Ja nao se grava: a base regista quem atribuiu e a lista nao o devolve (revisao de seguranca). Mantem-se para nao mexer nos chamadores. */
+  autor?: string;
   aoFechar: () => void;
   /** Depois de atribuir: o id da pessoa a quem foi atribuído. */
   aoAtribuir?: (pessoaId: string) => void;
@@ -35,29 +36,41 @@ interface Props {
 
 const numero = (texto: string): number => Number(texto.trim().replace(",", "."));
 
-function Formulario({ pessoaId, pessoas, autor, aoFechar, aoAtribuir }: Omit<Props, "aberto">) {
+function Formulario({ pessoaId, pessoas, aoFechar, aoAtribuir }: Omit<Props, "aberto">) {
   const { t } = useTranslation();
+  const { atribuir } = useEquipamentosCustoAcoes();
+  // Um id por formulario aberto: um duplo clique ou um reenvio nao duplica o equipamento (a base reconhece o mesmo id).
+  const [idPedido] = useState(() => crypto.randomUUID());
+  const [aGuardar, setAGuardar] = useState(false);
+  const [mensagem, setMensagem] = useState<string | null>(null);
   const [quem, setQuem] = useState(pessoaId ?? "");
   const [tipo, setTipo] = useState<TipoEquipamento>("portatil");
   const [descricao, setDescricao] = useState("");
   const [valor, setValor] = useState("");
-  const [entrega, setEntrega] = useState(hojeIso());
+  const [entrega, setEntrega] = useState(hojeLocal());
   const [escolha, setEscolha] = useState<EscolhaConta>(() => escolhaDe("repartido"));
   const [erro, setErro] = useState<ErroEquipamento | null>(null);
 
   const euro = numero(valor);
-  const guardar = () => {
+  const guardar = async () => {
+    if (aGuardar) return;
     const conta = contaDaEscolha(escolha, entrega);
-    const resultado = atribuirEquipamento({ pessoaId: quem, tipo, descricao, valor: Number.isFinite(euro) ? euro : 0, entrega, autor, conta });
-    setErro(resultado.erro);
-    if (resultado.erro === null) {
-      aoAtribuir?.(quem);
-      aoFechar();
+    setAGuardar(true);
+    try {
+      const resultado = await atribuir({ pessoaId: quem, tipo, descricao, valor: Number.isFinite(euro) ? euro : 0, entrega, conta, idPedido });
+      setErro(resultado.erro as ErroEquipamento | null);
+      setMensagem(resultado.mensagem);
+      if (resultado.ok) {
+        aoAtribuir?.(quem);
+        aoFechar();
+      }
+    } finally {
+      setAGuardar(false);
     }
   };
 
   return (
-    <form className="mt-6 space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); guardar(); }}>
+    <form className="mt-6 space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
       {pessoaId === null && (
         <CampoSelect
           id="rhCustos-eq-pessoa" label={t("rhCustos.pessoa")} valor={quem} onChange={setQuem} obrigatorio
@@ -79,9 +92,10 @@ function Formulario({ pessoaId, pessoas, autor, aoFechar, aoAtribuir }: Omit<Pro
         valor={euro} data={entrega} comDevolucao erro={ehErroConta(erro) ? erro : null}
       />
       {erro && !ehErroConta(erro) && <p role="alert" className="text-sm font-medium text-destructive">{t(`rhCustos.eq.erro.${erro}`)}</p>}
+      {mensagem && <p role="alert" className="text-sm font-medium text-destructive">{mensagem}</p>}
       <SheetFooter className="gap-2 sm:gap-2">
         <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("common.cancel")}</Button>
-        <Button type="submit" className={cn("min-h-11", FOCO)}>{t("rhCustos.eq.confirmarAtribuir")}</Button>
+        <Button type="submit" disabled={aGuardar} className={cn("min-h-11", FOCO)}>{t("rhCustos.eq.confirmarAtribuir")}</Button>
       </SheetFooter>
     </form>
   );

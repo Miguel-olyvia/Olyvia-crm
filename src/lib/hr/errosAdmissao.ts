@@ -151,6 +151,8 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   sem_ficheiro: "hr.convite.erro.semFicheiro",
   documentos_fechados: "hr.convite.erro.documentosFechados",
   sem_telemovel: "hr.convite.erro.semTelemovel",
+  sms_nao_enviado: "hr.convite.erro.smsNaoEnviado",
+  conteudo_alterado: "hr.convite.erro.conteudoAlterado",
   // V3a (reenviar o convite): HRA56, o portal ja nao tem link que se possa reenviar.
   link_indisponivel: "hr.convite.erro.linkIndisponivel",
   // O SMTP falhou ao reenviar (a accao do RH di-lo; o convite nao chegou).

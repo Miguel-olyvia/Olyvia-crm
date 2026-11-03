@@ -44,7 +44,8 @@ interface CriarAcessoDialogProps {
   onOpenChange: (aberto: boolean) => void;
   pessoaId: string;
   modo: "criar" | "reenviar";
-  onCriado?: () => void;
+  /** `emailEnviado`: falso quando a conta ficou criada mas o e-mail das credenciais não saiu. */
+  onCriado?: (resultado: { emailEnviado: boolean }) => void;
   /**
    * O que ainda falta na ficha (ver `useAdmissaoPendencias`). Ao CRIAR o
    * acesso, qualquer pendencia trava a confirmacao: as credenciais so se
@@ -115,7 +116,7 @@ export function CriarAcessoDialog({
       );
     }
     onOpenChange(false);
-    onCriado?.();
+    onCriado?.({ emailEnviado: resultado.aviso !== "conta_criada_sem_email" && Boolean(resultado.emailEnviado) });
   };
 
   return (

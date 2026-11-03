@@ -1,15 +1,19 @@
 /**
- * O store, em memória, do custo (fluxo 11): valores avulsos (quilómetros, ajudas de custo), equipamentos atribuídos a cada
- * pessoa, as definições da empresa (taxa, seguro, valor por km e por dia), a exceção de taxa por pessoa e o mês que o
+ * O store, em memória, do custo (fluxo 11): os valores avulsos de exemplo (quilómetros, ajudas de custo) e o mês que o
  * separador Custo da ficha e o módulo «Custos» mostram. Nada aqui fala com lado nenhum; recarregar a página repõe tudo.
  * É um store próprio (não toca no `loja.ts`): `reporCusto()` volta ao início.
  *
- * Cada equipamento e cada valor avulso tem o seu «como conta» (de uma vez, repartido por N meses, todos os meses), escolhido
- * ao registar e editável depois. Um valor conta no mês da sua data e nunca noutro. O mês mostrado começa em Setembro de 2026,
- * o mês do «Cálculo do mês».
+ * Os EQUIPAMENTOS, as DEFINIÇÕES (taxa da empresa, seguro, valor por km e por dia — por organização) e as EXCEÇÕES de taxa
+ * por pessoa já não vivem aqui: vêm da base pelos hooks `useEquipamentosCusto`, `useCustoDefinicoes` e `useCustoExcecoes`
+ * (rh-exemplo/hooks). Os valores avulsos reais (os lançamentos do processamento) também não passam por aqui; ficam só os de
+ * exemplo, que servem aos testes e ao protótipo.
+ *
+ * Cada valor avulso tem o seu «como conta» (de uma vez, repartido por N meses, todos os meses), escolhido ao registar e
+ * editável depois. Um valor conta no mês da sua data e nunca noutro. O mês mostrado começa em Setembro de 2026, o mês do
+ * «Cálculo do mês».
  */
 import { useSyncExternalStore } from "react";
-import { avulsosIniciais, equipamentosIniciais } from "@/components/rh-exemplo/dados/custoExemplo";
+import { avulsosIniciais } from "@/components/rh-exemplo/dados/custoExemplo";
 import { MES_PROCESSAVEL } from "@/components/rh-exemplo/dados/assiduidadeSetembro";
 import {
   anularAvulsoErro,
@@ -19,23 +23,11 @@ import {
   type ErroAnulacao,
   type ErroAvulso,
 } from "@/components/rh-exemplo/lib/custo";
-import { contaRepartida, contaUmaVez, normalizarConta, validarConta, type ContaItem, type ErroConta } from "@/components/rh-exemplo/lib/comoConta";
-import type { AvulsoCusto, DefinicoesCusto, TipoAvulso } from "@/components/rh-exemplo/lib/custoMes";
-import {
-  validarDevolucao,
-  validarEquipamento,
-  type ErroDevolucao,
-  type ErroEquipamento,
-  type EquipamentoPessoa,
-  type EstadoDevolucao,
-  type TipoEquipamento,
-} from "@/components/rh-exemplo/lib/equipamentos";
+import { contaUmaVez, normalizarConta, validarConta, type ContaItem, type ErroConta } from "@/components/rh-exemplo/lib/comoConta";
+import type { AvulsoCusto, TipoAvulso } from "@/components/rh-exemplo/lib/custoMes";
 
 interface EstadoCusto {
   avulsos: AvulsoCusto[];
-  equipamentos: EquipamentoPessoa[];
-  definicoes: DefinicoesCusto;
-  excecoes: Record<string, number | null>;
   /** O mês («AAAA-MM») que a aba Custo e o módulo «Custos» mostram. */
   mes: string;
 }
@@ -55,24 +47,8 @@ export interface NovoAvulso {
   conta?: ContaItem;
 }
 
-export interface NovoEquipamento {
-  pessoaId: string;
-  tipo: TipoEquipamento;
-  descricao: string;
-  valor: number;
-  entrega: string;
-  autor: string;
-  /** Como conta; sem isto, repartido por 36 meses (o do fluxo 11). */
-  conta?: ContaItem;
-}
-
-const DEFINICOES_INICIAIS: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 };
-
 const estadoInicial = (): EstadoCusto => ({
   avulsos: avulsosIniciais(),
-  equipamentos: equipamentosIniciais(),
-  definicoes: DEFINICOES_INICIAIS,
-  excecoes: {},
   mes: MES_PROCESSAVEL,
 });
 
@@ -141,46 +117,6 @@ export function anularAvulso(id: string, motivo: string, por: string, podeProces
   return { erro: null };
 }
 
-/** Atribui um equipamento à pessoa: passa a contar no custo, conforme «como conta», a partir do mês da entrega. */
-export function atribuirEquipamento(novo: NovoEquipamento): { erro: ErroEquipamento | null; id: string | null } {
-  const pedida = novo.conta ?? contaRepartida();
-  const erro = validarEquipamento({ ...novo, conta: pedida });
-  if (erro) return { erro, id: null };
-  const conta = normalizarConta(pedida);
-  contador += 1;
-  const id = `eq-novo-${contador}`;
-  const registo: EquipamentoPessoa = {
-    id, pessoaId: novo.pessoaId, tipo: novo.tipo, descricao: novo.descricao.trim(), valor: novo.valor, entrega: novo.entrega,
-    conta, estado: "atribuido", devolucao: null, estadoDevolucao: null, autor: novo.autor,
-  };
-  definir({ ...estado, equipamentos: [...estado.equipamentos, registo] });
-  return { erro: null, id };
-}
-
-/** Devolve um equipamento atribuído: deixa de contar a partir do mês seguinte ao da devolução. */
-export function devolverEquipamento(id: string, data: string, estadoDevolucao: EstadoDevolucao | string): { erro: ErroDevolucao | null } {
-  const atual = estado.equipamentos.find((e) => e.id === id && e.estado === "atribuido");
-  if (!atual) return { erro: "semData" };
-  const erro = validarDevolucao(atual, data, estadoDevolucao);
-  if (erro) return { erro };
-  definir({
-    ...estado,
-    equipamentos: estado.equipamentos.map((e) =>
-      e.id === id ? { ...e, estado: "devolvido", devolucao: data, estadoDevolucao: estadoDevolucao as EstadoDevolucao } : e,
-    ),
-  });
-  return { erro: null };
-}
-
-/** Muda o «como conta» de um equipamento (a conta passa a valer em todos os meses, já). */
-export function alterarContaEquipamento(id: string, nova: ContaItem): { erro: ErroConta | null } {
-  const erro = validarConta(nova);
-  if (erro) return { erro };
-  const conta = normalizarConta(nova);
-  definir({ ...estado, equipamentos: estado.equipamentos.map((e) => (e.id === id ? { ...e, conta } : e)) });
-  return { erro: null };
-}
-
 /** Muda o «como conta» de um valor avulso (continua a partir do mês da sua data). */
 export function alterarContaAvulso(id: string, nova: ContaItem): { erro: ErroConta | null } {
   const erro = validarConta(nova);
@@ -188,15 +124,6 @@ export function alterarContaAvulso(id: string, nova: ContaItem): { erro: ErroCon
   const conta = normalizarConta(nova);
   definir({ ...estado, avulsos: estado.avulsos.map((a) => (a.id === id ? { ...a, conta } : a)) });
   return { erro: null };
-}
-
-export function definirDefinicoesCusto(definicoes: DefinicoesCusto): void {
-  definir({ ...estado, definicoes });
-}
-
-/** `null` tira a exceção e volta à taxa da empresa. */
-export function definirExcecaoTaxa(pessoaId: string, taxa: number | null): void {
-  definir({ ...estado, excecoes: { ...estado.excecoes, [pessoaId]: taxa } });
 }
 
 /** O mês («AAAA-MM») que a aba Custo e o módulo «Custos» mostram; um valor que não seja um mês é ignorado. */

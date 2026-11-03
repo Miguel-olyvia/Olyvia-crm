@@ -9,9 +9,11 @@ import { cn } from "@/lib/utils";
 interface Props {
   aoRegistarAvulso: () => void;
   aoAtribuirEquipamento: () => void;
+  /** `hr.pessoas.retribuicao.edit`: sem isto o botão «Atribuir equipamento» não aparece. */
+  podeAtribuir: boolean;
 }
 
-export function CabecalhoPagina({ aoRegistarAvulso, aoAtribuirEquipamento }: Props) {
+export function CabecalhoPagina({ aoRegistarAvulso, aoAtribuirEquipamento, podeAtribuir }: Props) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -23,9 +25,11 @@ export function CabecalhoPagina({ aoRegistarAvulso, aoAtribuirEquipamento }: Pro
         <Button type="button" variant="outline" onClick={aoRegistarAvulso} className={cn("min-h-11 gap-2", FOCO)}>
           <Plus className="h-4 w-4" aria-hidden="true" />{t("rhCustos.registarAvulso")}
         </Button>
-        <Button type="button" onClick={aoAtribuirEquipamento} className={cn("min-h-11 gap-2", FOCO)}>
-          <Plus className="h-4 w-4" aria-hidden="true" />{t("rhCustos.atribuirEquipamento")}
-        </Button>
+        {podeAtribuir && (
+          <Button type="button" onClick={aoAtribuirEquipamento} className={cn("min-h-11 gap-2", FOCO)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />{t("rhCustos.atribuirEquipamento")}
+          </Button>
+        )}
       </div>
     </div>
   );

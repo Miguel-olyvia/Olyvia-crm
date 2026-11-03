@@ -1,13 +1,22 @@
 // Os hooks do custo ligados ao calculo REAL: a retribuicao do mes e o total bruto estimado do processamento, as horas
 // feitas as da assiduidade, e os acumulados nao se inventam. O calculo partilhado entra por argumento (sem Supabase);
-// os equipamentos continuam no store em memoria, que faz o hook recalcular. Os valores avulsos sao os lancamentos pontuais
-// do periodo (da base): vem dentro da retribuicao do processamento e o custo mostra-os a parte. O tipo de contrato e as
-// horas por semana vem dos vinculos (aqui simulados).
+// os equipamentos, as definicoes e as excecoes de taxa vem da base (hooks simulados aqui, junto com as permissoes) e fazem o
+// hook recalcular. Os valores avulsos sao os lancamentos pontuais do periodo (da base): vem dentro da retribuicao do
+// processamento e o custo mostra-os a parte. O tipo de contrato e as horas por semana vem dos vinculos (aqui simulados).
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
+import { cleanup, render, renderHook, screen } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 
 const estado = vi.hoisted(() => ({
+  permissoes: [] as string[],
+  permissoesACarregar: false,
+  equipamentosHook: { equipamentos: null as unknown, aCarregar: false, erro: null as string | null, atribuir: vi.fn(), devolver: vi.fn(), alterarConta: vi.fn() },
+  definicoesHook: { definicoes: null as unknown, omissao: false, aCarregar: false, erro: null as string | null, guardar: vi.fn() },
+  excecoesHook: { excecoes: null as unknown, aCarregar: false, erro: null as string | null, definir: vi.fn() },
+  pedidoEquipamentos: vi.fn(),
+  pedidoDefinicoes: vi.fn(),
+  pedidoExcecoes: vi.fn(),
   pessoa: { resultado: null as unknown, aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: true, temPeriodo: true, dados: {} as Record<string, unknown> },
   organizacao: {} as Record<string, unknown>,
   vinculos: new Map<string, unknown[]>(),
@@ -32,13 +41,47 @@ vi.mock("@/components/rh-exemplo/hooks/usePessoasVinculosVigentes", async () => 
 vi.mock("@/components/rh-exemplo/hooks/useLocaisTrabalho", () => ({ useLocaisTrabalho: () => ({ locais: estado.locais }) }));
 vi.mock("@/components/rh-exemplo/hooks/useFiliaisDaArvore", () => ({ useFiliaisDaArvore: () => ({ filiais: estado.filiais, loading: false }) }));
 vi.mock("@/components/rh-exemplo/hooks/useCargos", () => ({ useCargos: () => ({ cargos: estado.cargos }) }));
+// Os dados do custo (equipamentos, definicoes, excecoes) e as permissoes vem destes wrappers: aqui sao simulados.
+vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    hasPermission: (p: string) => estado.permissoes.includes(p),
+    hasAnyPermission: (ps: string[]) => ps.some((p) => estado.permissoes.includes(p)),
+    permissions: estado.permissoes,
+    loading: estado.permissoesACarregar,
+  }),
+}));
+vi.mock("@/components/rh-exemplo/hooks/useEquipamentosCusto", () => ({
+  useEquipamentosCusto: (opcoes: unknown) => {
+    estado.pedidoEquipamentos(opcoes);
+    return estado.equipamentosHook;
+  },
+  useEquipamentosCustoAcoes: () => estado.equipamentosHook,
+}));
+vi.mock("@/components/rh-exemplo/hooks/useCustoDefinicoes", () => ({
+  useCustoDefinicoes: (opcoes: unknown) => {
+    estado.pedidoDefinicoes(opcoes);
+    return estado.definicoesHook;
+  },
+}));
+vi.mock("@/components/rh-exemplo/hooks/useCustoExcecoes", () => ({
+  useCustoExcecoes: (opcoes: unknown) => {
+    estado.pedidoExcecoes(opcoes);
+    return estado.excecoesHook;
+  },
+}));
 
-import { repor } from "@/components/rh-exemplo/dados/loja";
-import { atribuirEquipamento, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
+import { reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { useCustoDaOrganizacao, useCustoDaPessoa, dividirMes } from "./useCustoDaPessoa";
 
 const MES = "2026-09";
 const PESSOA = { id: "p-tiago", nome_completo: "Tiago Pinheiro", cargo: null, cargo_id: null, local_id: null } as never;
+const VER = "hr.pessoas.retribuicao.view";
+const EDITAR = "hr.pessoas.retribuicao.edit";
+
+const portatil = (extra: Partial<EquipamentoPessoa> = {}): EquipamentoPessoa => ({
+  id: "eq-1", pessoaId: "p-tiago", tipo: "portatil", descricao: "Portátil", valor: 1800, entrega: "2026-09-01",
+  conta: { modo: "repartido", meses: 36, inicio: null, fim: null }, estado: "atribuido", devolucao: null, estadoDevolucao: null, autor: "Sofia", ...extra,
+});
 
 const lancamento = (id: string, pessoa: string, valor: number, extra: Record<string, unknown> = {}) => ({
   id, periodo_id: "per", pessoa_id: pessoa, organization_id: "org-1", descricao: `Premio ${id}`, valor, codigo_processamento_id: null,
@@ -65,8 +108,15 @@ const calculoReal = (
 
 beforeEach(() => {
   cleanup();
-  repor();
   reporCusto();
+  estado.permissoes = [VER, EDITAR];
+  estado.permissoesACarregar = false;
+  estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: [], aCarregar: false, erro: null };
+  estado.definicoesHook = { ...estado.definicoesHook, definicoes: { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 }, aCarregar: false, erro: null };
+  estado.excecoesHook = { ...estado.excecoesHook, excecoes: {}, aCarregar: false, erro: null };
+  estado.pedidoEquipamentos.mockClear();
+  estado.pedidoDefinicoes.mockClear();
+  estado.pedidoExcecoes.mockClear();
   estado.pessoa = { resultado: calculoReal(1200), aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: true, temPeriodo: true, dados: dadosDoMes() };
   estado.vinculos = new Map();
   estado.horas = { versoes: [], loading: false };
@@ -161,13 +211,70 @@ describe("useCustoDaPessoa", () => {
     expect(result.current.incompleta).toBe(true);
   });
 
-  it("atribuir um equipamento (store em memoria) recalcula o custo", () => {
-    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+  it("um equipamento vindo da base recalcula o custo (1800 / 36 = 50 por mes), e so conta o da propria pessoa", () => {
+    const { result, rerender } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
     const antes = result.current.custo?.atual.outrosCustos ?? 0;
-    act(() => {
-      expect(atribuirEquipamento({ pessoaId: "p-tiago", tipo: "portatil", descricao: "Portátil", valor: 1800, entrega: "2026-09-01", autor: "Sofia" }).erro).toBeNull();
-    });
+    estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: [portatil(), portatil({ id: "eq-2", pessoaId: "p-outro" })] };
+    rerender();
     expect((result.current.custo?.atual.outrosCustos ?? 0) - antes).toBeCloseTo(50, 2);
+    expect(result.current.custo?.equipamentos.map((e) => e.id)).toEqual(["eq-1"]);
+  });
+
+  it("as taxas e a excecao da base entram na conta: a excecao da pessoa baixa os encargos", () => {
+    const { result, rerender } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    const antes = result.current.custo?.atual.encargosTaxa ?? 0;
+    expect(result.current.custo?.taxaExcecao).toBeNull();
+    estado.excecoesHook = { ...estado.excecoesHook, excecoes: { "p-tiago": 10 } };
+    rerender();
+    expect(result.current.custo?.taxaExcecao).toBe(10);
+    expect(result.current.custo?.atual.encargosTaxa).toBeLessThan(antes);
+    expect(result.current.custo?.atual.encargosTaxa).toBeCloseTo(120, 2);
+  });
+
+  it("pede os dados do custo so da pessoa, e so a quem pode ver; podeEditar exige ver e editar", () => {
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(estado.pedidoEquipamentos).toHaveBeenCalledWith({ pessoaId: "p-tiago", enabled: true });
+    expect(estado.pedidoDefinicoes).toHaveBeenCalledWith({ enabled: true });
+    expect(estado.pedidoExcecoes).toHaveBeenCalledWith({ enabled: true });
+    expect(result.current.podeEditar).toBe(true);
+    estado.permissoes = [VER];
+    expect(renderHook(() => useCustoDaPessoa(PESSOA, MES)).result.current.podeEditar).toBe(false);
+  });
+
+  it("sem a permissao de ver o custo nada se pede a base, nao ha custo e diz-se (mesmo com resultado)", () => {
+    estado.permissoes = [];
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(estado.pedidoEquipamentos).toHaveBeenCalledWith({ pessoaId: "p-tiago", enabled: false });
+    expect(estado.pedidoDefinicoes).toHaveBeenCalledWith({ enabled: false });
+    expect(estado.pedidoExcecoes).toHaveBeenCalledWith({ enabled: false });
+    expect(result.current.custo).toBeNull();
+    expect(result.current.retribuicaoRecusada).toBe(true);
+    expect(result.current.podeEditar).toBe(false);
+  });
+
+  it("enquanto os dados da base nao chegam nao ha custo (nunca valores de exemplo) e diz que esta a carregar", () => {
+    estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: null, aCarregar: true };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.custo).toBeNull();
+    expect(result.current.aCarregar).toBe(true);
+    expect(result.current.erroBase).toBeNull();
+  });
+
+  it("enquanto as permissoes carregam nao ha custo e diz que esta a carregar, sem dizer que falta permissao", () => {
+    estado.permissoes = [];
+    estado.permissoesACarregar = true;
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.custo).toBeNull();
+    expect(result.current.aCarregar).toBe(true);
+    expect(result.current.retribuicaoRecusada).toBe(false);
+  });
+
+  it("uma falha a ler os dados da base nao calcula o custo e devolve o texto do erro", () => {
+    estado.definicoesHook = { ...estado.definicoesHook, definicoes: null, erro: "Falha de teste" };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.custo).toBeNull();
+    expect(result.current.erroBase).toBe("Falha de teste");
+    expect(result.current.aCarregar).toBe(false);
   });
 });
 
@@ -266,6 +373,43 @@ describe("useCustoDaOrganizacao", () => {
     expect(lancamentos.anular).toBe(estado.anular);
   });
 
+  it("os equipamentos da base entram nas linhas (os da organizacao toda) e o custo da linha acompanha-os", () => {
+    estado.organizacao = organizacao();
+    const { result, rerender } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(estado.pedidoEquipamentos).toHaveBeenCalledWith({ pessoaId: null, enabled: true });
+    expect(result.current.linhas[0]!.equipamentosMes).toBe(0);
+    estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: [portatil({ pessoaId: "p-hugo" })] };
+    rerender();
+    expect(result.current.linhas[0]!.equipamentosMes).toBeCloseTo(50, 2);
+    expect(result.current.podeEditar).toBe(true);
+  });
+
+  it("sem a permissao de ver o custo nao ha linhas e diz-se; sem permissao de editar so se le", () => {
+    estado.organizacao = organizacao();
+    estado.permissoes = [];
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(result.current.linhas).toEqual([]);
+    expect(result.current.semPermissaoCusto).toBe(true);
+    expect(result.current.baseACarregar).toBe(false);
+    estado.permissoes = [VER];
+    const soLeitura = renderHook(() => useCustoDaOrganizacao(MES)).result.current;
+    expect(soLeitura.linhas).toHaveLength(1);
+    expect(soLeitura.podeEditar).toBe(false);
+  });
+
+  it("enquanto os dados da base nao chegam nao ha linhas e diz-se que esta a carregar; uma falha da o erro", () => {
+    estado.organizacao = organizacao();
+    estado.excecoesHook = { ...estado.excecoesHook, excecoes: null, aCarregar: true };
+    const carregar = renderHook(() => useCustoDaOrganizacao(MES)).result.current;
+    expect(carregar.linhas).toEqual([]);
+    expect(carregar.baseACarregar).toBe(true);
+    estado.excecoesHook = { ...estado.excecoesHook, excecoes: null, aCarregar: false, erro: "Falha de teste" };
+    const falha = renderHook(() => useCustoDaOrganizacao(MES)).result.current;
+    expect(falha.linhas).toEqual([]);
+    expect(falha.baseACarregar).toBe(false);
+    expect(falha.erroBase).toBe("Falha de teste");
+  });
+
   it("sem pessoas nao ha linhas", () => {
     estado.organizacao = organizacao({ pessoasActivas: [], resultados: new Map() });
     const { result } = renderHook(() => useCustoDaOrganizacao(MES));
@@ -304,6 +448,27 @@ describe("AbaCusto", () => {
     estado.pessoa = { ...estado.pessoa, resultado: null, retribuicaoRecusada: true };
     await renderAba();
     expect(screen.getByText("Não tem permissão para ver a retribuição: o custo do mês não se calcula.")).toBeInTheDocument();
+    expect(screen.queryByText("Total bruto estimado do processamento salarial")).not.toBeInTheDocument();
+  });
+
+  it("sem a permissao de ver o custo (permissoes) diz-o e nao mostra custo", async () => {
+    estado.permissoes = [];
+    await renderAba();
+    expect(screen.getByText("Não tem permissão para ver a retribuição: o custo do mês não se calcula.")).toBeInTheDocument();
+    expect(screen.queryByText("Total bruto estimado do processamento salarial")).not.toBeInTheDocument();
+  });
+
+  it("enquanto os dados da base nao chegam diz que esta a calcular em vez de mostrar um quadro a zeros", async () => {
+    estado.definicoesHook = { ...estado.definicoesHook, definicoes: null, aCarregar: true };
+    await renderAba();
+    expect(screen.getByText("A calcular a retribuição do mês…")).toBeInTheDocument();
+    expect(screen.queryByText("Total bruto estimado do processamento salarial")).not.toBeInTheDocument();
+  });
+
+  it("uma falha a ler os dados da base mostra o erro e nao mostra custo", async () => {
+    estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: null, erro: "Falha de teste" };
+    await renderAba();
+    expect(screen.getByRole("alert")).toHaveTextContent("Falha de teste");
     expect(screen.queryByText("Total bruto estimado do processamento salarial")).not.toBeInTheDocument();
   });
 

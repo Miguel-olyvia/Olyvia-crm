@@ -2,13 +2,14 @@
  * «Custos» (módulo do RH de exemplo): o custo de cada pessoa num mês — retribuição do processamento salarial, encargos, valores
  * avulsos e equipamentos, cada um contado como foi escolhido —, com os totais da organização, filtros, ordenação e a composição de cada custo.
  * Clicar numa pessoa abre a ficha dela já no separador Custo. Registar um valor avulso grava um lançamento pontual no
- * processamento do mês (na base); atribuir equipamento funciona aqui, em memória, e muda logo os totais.
+ * processamento do mês (na base); atribuir equipamento grava na base e muda os totais quando a lista se refaz.
  *
  * LIGADO À BASE: as pessoas, a retribuição do mês (o total bruto estimado do processamento salarial, a mesma conta da
  * «Visão geral», sem os lançamentos pontuais, que contam à parte como valores avulsos), os valores avulsos (só os que
- * contam de uma vez: lançamentos pontuais), o tipo de contrato e as horas por semana (vínculos) vêm da base. AINDA EM
- * MEMÓRIA: equipamentos e as taxas dos encargos (valores de exemplo) — não existe tabela para eles. Os acumulados não se
- * calculam (precisam de cada mês anterior).
+ * contam de uma vez: lançamentos pontuais), o tipo de contrato e as horas por semana (vínculos), os equipamentos, as taxas
+ * da organização e as exceções de taxa vêm da base. Ver o custo pede `hr.pessoas.retribuicao.view`; atribuir equipamento
+ * pede também `hr.pessoas.retribuicao.edit`. Enquanto os dados da base não chegam mostra-se «a carregar», nunca valores de
+ * exemplo. AINDA EM MEMÓRIA: o mês escolhido. Os acumulados não se calculam (precisam de cada mês anterior).
  */
 import { useState, useMemo } from "react";
 import { TriangleAlert } from "lucide-react";
@@ -47,7 +48,10 @@ export default function RhCustos() {
   const { activeCompany, isLoading } = useCompany();
   const minha = useMinhaPessoa();
   const mes = useCusto((e) => e.mes);
-  const { linhas, calculo, ano, mesNum, vinculosHook, avulsosPorPessoa, lancamentos } = useCustoDaOrganizacao(mes);
+  const { linhas, calculo, ano, mesNum, vinculosHook, avulsosPorPessoa, lancamentos, baseACarregar, baseTemDados, erroBase, semPermissaoCusto, podeEditar } = useCustoDaOrganizacao(mes);
+  // Sem os equipamentos, as taxas e as excecoes da base (a carregar, falha sem dados ou sem permissao) nao se mostram totais nem tabela:
+  // nunca valores de exemplo. Se uma releitura falha mas ha dados guardados, mostram-se com o aviso de erro.
+  const semDados = semPermissaoCusto || baseACarregar || (erroBase !== null && !baseTemDados);
   const pessoas = useMemo<PessoaEscolhivel[]>(
     () => calculo.pessoasActivas.map((p) => ({ id: p.id, nome: p.nome_completo })),
     [calculo.pessoasActivas],
@@ -79,7 +83,7 @@ export default function RhCustos() {
   return (
     <AvulsosReaisProvider valor={avulsosPorPessoa}>
     <div className="space-y-5 p-6">
-      <CabecalhoPagina aoRegistarAvulso={() => setAvulsoAberto(true)} aoAtribuirEquipamento={() => setEquipamentoAberto(true)} />
+      <CabecalhoPagina aoRegistarAvulso={() => setAvulsoAberto(true)} aoAtribuirEquipamento={() => setEquipamentoAberto(true)} podeAtribuir={podeEditar} />
 
       <SeletorMesCusto id="rhCustos-mes" />
       <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">{aviso || t("rhCustos.mesVisto", { mes: nomeDoMes(mes, language) })}</p>
@@ -90,7 +94,18 @@ export default function RhCustos() {
           {t("rhProcReal.custo.erroPessoas", { erro: calculo.pessoasErro })}
         </p>
       )}
-      {calculo.retribuicoesHook.recusado && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.semPermissaoRetribuicao")}</p>}
+      {(calculo.retribuicoesHook.recusado || semPermissaoCusto) && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.semPermissaoRetribuicao")}</p>}
+      {baseACarregar && !semPermissaoCusto && (
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <OlyviaLoader size={16} />{t("rhCustos.base.aCarregar")}
+        </div>
+      )}
+      {erroBase !== null && !semPermissaoCusto && (
+        <p role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {t("rhCustos.base.erro", { erro: erroBase })}
+        </p>
+      )}
       {vinculosHook.error && (
         <p role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm text-destructive">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -108,17 +123,21 @@ export default function RhCustos() {
           <OlyviaLoader size={16} />{t("rhProcReal.custo.aCalcular", { n: calculo.pendentes })}
         </div>
       )}
-      <CabecalhoTotais totais={totaisOrganizacao} />
-      <FiltrosCustos
-        linhas={linhas} filtros={filtros} visiveis={visiveis.length}
-        aoMudar={(parcial) => setFiltros((f) => ({ ...f, ...parcial }))} aoLimpar={limpar}
-      />
-      <TabelaCustos
-        linhas={visiveis} totais={totaisVisiveis} mesTexto={nomeDoMes(mes, language)} ordem={ordem}
-        aoOrdenar={(coluna) => setOrdem((o) => ordemSeguinte(o, coluna))}
-        aoAbrir={(id) => setFicha({ id, aberta: true })} filtrado={filtrado} aoLimpar={limpar}
-      />
-      <p className="text-xs text-muted-foreground">{t("rhCustos.nota")}</p>
+      {!semDados && (
+        <>
+          <CabecalhoTotais totais={totaisOrganizacao} />
+          <FiltrosCustos
+            linhas={linhas} filtros={filtros} visiveis={visiveis.length}
+            aoMudar={(parcial) => setFiltros((f) => ({ ...f, ...parcial }))} aoLimpar={limpar}
+          />
+          <TabelaCustos
+            linhas={visiveis} totais={totaisVisiveis} mesTexto={nomeDoMes(mes, language)} ordem={ordem}
+            aoOrdenar={(coluna) => setOrdem((o) => ordemSeguinte(o, coluna))}
+            aoAbrir={(id) => setFicha({ id, aberta: true })} filtrado={filtrado} aoLimpar={limpar}
+          />
+          <p className="text-xs text-muted-foreground">{t("rhCustos.nota")}</p>
+        </>
+      )}
 
       <PaineisCustos
         ficha={ficha} idsVisiveis={visiveis.map((l) => l.pessoaId)} pessoas={pessoas} autor={autor} mes={mes} lancamentos={lancamentos}

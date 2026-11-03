@@ -13,7 +13,6 @@ import { estadoVisivel, type HoraExtra } from "@/components/rh-exemplo/fluxosC/h
 import { useTranslation } from "@/hooks/useTranslation";
 import { ChipDoDia } from "./ChipDoDia";
 import { JustificacaoDeDiaPessoa } from "./JustificacaoDeDiaPessoa";
-import { JustificacaoDoDia } from "./JustificacaoDoDia";
 import { duracao, duracaoComSinal, textoFeito, textoPrevisto } from "./formatos";
 import type { DiaCalendario } from "./montarMes";
 
@@ -129,10 +128,7 @@ export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorr
               </Seccao>
             )}
             {souAPessoa ? (
-              <>
-                <JustificacaoDeDiaPessoa dia={dia} pessoaId={pessoaId} />
-                <JustificacaoDoDia pessoaId={pessoaId} data={dia.data} />
-              </>
+              <JustificacaoDeDiaPessoa dia={dia} pessoaId={pessoaId} />
             ) : (
               <>
                 <JustificacaoDiaRh pessoaId={pessoaId} pessoaNome={pessoaNome} data={dia.data} aoCriarFalta={aoCriarFalta} />

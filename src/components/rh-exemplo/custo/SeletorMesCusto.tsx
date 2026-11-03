@@ -5,7 +5,7 @@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
-import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { hojeLocal } from "@/components/rh-exemplo/hooks/dataLocal";
 import { definirMesCusto, useCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 export function SeletorMesCusto({ id, rotulo }: { id: string; rotulo?: string }) {
   const { t } = useTranslation();
   const mes = useCusto((e) => e.mes);
-  const hoje = hojeIso().slice(0, 7);
+  const hoje = hojeLocal().slice(0, 7);
   return (
     <div className="flex flex-wrap items-end gap-2">
       <div className="w-48">

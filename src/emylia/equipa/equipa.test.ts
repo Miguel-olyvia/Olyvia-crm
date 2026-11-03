@@ -16,8 +16,16 @@ import { criarEstadoInicial } from "@/components/rh-exemplo/dados/exemplo";
 import {
   agendaEquipa, contarConflitos, diasDoPeriodo, horasDaDuracao, moverPeriodo, obrasDoTecnico, segundaDe, tituloPeriodo, type LinhaAgenda,
 } from "./regrasAgenda";
-import { atualizarCustosDoRh, ausenciasDosTecnicos, custosDoRh, garantirTecnicosNoRh, juntarTecnicosAoRh, pessoaRhDe, sugestaoCustoHora, tecnicoDaPessoaRh } from "./pontes";
+import { DEFINICOES_OMISSAO } from "@/components/rh-exemplo/lib/custoMes";
+import {
+  TAXAS_DE_OMISSAO, atualizarCustosDoRh, ausenciasDosTecnicos, custosDoRh, garantirTecnicosNoRh, juntarTecnicosAoRh, pessoaRhDe, sugestaoCustoHora, tecnicoDaPessoaRh,
+  type DadosDeTaxas,
+} from "./pontes";
 import { CUSTO_HORA_OMISSAO, garantirTecnicos, tecnicosIniciais, type FichaTecnico } from "./tecnicos";
+
+/** As taxas com que se calcularam os custos/hora de exemplo dos técnicos (14,20 / 18,50 / 17,80 / 16,90 €/h): 20,25 % + 5 % = 25,25 % de encargos, sem exceções.
+ *  A base cria as definições com 23,75 % + 5 % (TAXAS_DE_OMISSAO), que é o que se usa quando ninguém passa as taxas lidas. */
+const TAXAS_DO_EXEMPLO: DadosDeTaxas = { definicoes: { ...DEFINICOES_OMISSAO, taxaEmpresa: 20.25, seguro: 5 }, excecoes: {} };
 
 const avisos: { msg: string; kind?: string }[] = [];
 function estado(papel: Estado["role"] = "direcao") {
@@ -55,13 +63,22 @@ describe("a ficha dos técnicos", () => {
     const antes = custoObra(d, S);
     const deHugo = p.tasks.filter((t) => t.tec === "hn"), hHugo = deHugo.reduce((a, t) => a + t.h, 0);
     expect(hHugo).toBeGreaterThan(0);
+    const chAntes = Object.fromEntries(S.tecnicos!.map((t) => [t.id, t.custoHora]));
     expect(salarioRh(S, "hn", 3560)).toBe(true);
     const ch = S.tecnicos!.find((t) => t.id === "hn")!.custoHora;
     expect(ch).toBe(sugestaoCustoHora(lerRh().fichas["p-tec-hn"])!.valor);
-    expect(ch).toBeCloseTo(30.01, 2);
+    // atualizarCustosDoRh não recebe taxas: usa as de omissão da base (23,75 % + 5 %), por isso dá 30,85 €/h; com as taxas do exemplo (25,25 %) dava 30,01
+    expect(ch).toBeCloseTo(30.85, 2);
+    expect(sugestaoCustoHora(lerRh().fichas["p-tec-hn"], TAXAS_DO_EXEMPLO)!.valor).toBeCloseTo(30.01, 2);
     const depois = custoObra(d, S);
     expect(depois.prev).toBe(antes.prev); // fase 3: o previsto é o da proposta aceite
-    expect(depois.linhas.map((l) => l.real)).toEqual(antes.linhas.map((l) => l.real)); // as horas já registadas não mudam
+    // as horas já registadas ficam as mesmas; o que se paga por cada uma é o custo/hora atual do técnico (o salarioRh recalcula o de todos)
+    antes.linhas.forEach((l, i) => {
+      const real = depois.linhas[i].real;
+      if (l.real === null || real === null) return expect(real).toBe(l.real);
+      const tec = S.tecnicos!.find((t) => t.id === p.tasks[i].tec)!;
+      expect(real).toBeCloseTo((l.real * tec.custoHora) / chAntes[tec.id], 2);
+    });
     expect(equipaDaObra(p).find((m) => m.id === "hn")?.custoH).toBe(ch);
     deHugo[0].exec = { estado: "feita", horas: 10, fotos: ["x"] };
     expect(custoObra(d, S).linhas[p.tasks.indexOf(deHugo[0])].real).toBeCloseTo(10 * ch, 2);
@@ -132,14 +149,16 @@ describe("os estados de antes da ficha", () => {
   it("a ficha vai na parte global da sincronização; uma global remota de antes não a apaga", () => {
     const { S } = estado();
     salarioRh(S, "sf", 2491);
-    expect(S.tecnicos!.find((t) => t.id === "sf")!.custoHora).toBe(21);
+    // com as taxas de omissão (sem taxas passadas): 2491 € dão 21,59 €/h (com as taxas do exemplo davam 21)
+    expect(sugestaoCustoHora(lerRh().fichas["p-tec-sf"], TAXAS_DO_EXEMPLO)!.valor).toBe(21);
+    expect(S.tecnicos!.find((t) => t.id === "sf")!.custoHora).toBe(21.59);
     const g = partesDoEstado(S)[0];
     expect(g.chave).toBe("global");
-    expect((g.dados as { tecnicos: FichaTecnico[] }).tecnicos.find((t) => t.id === "sf")!.custoHora).toBe(21);
+    expect((g.dados as { tecnicos: FichaTecnico[] }).tecnicos.find((t) => t.id === "sf")!.custoHora).toBe(21.59);
     const remotaAntiga = { ...(g.dados as Record<string, unknown>) };
     delete remotaAntiga.tecnicos;
     const J = juntarEstado(S, remotaAntiga, new Map());
-    expect(J.tecnicos!.find((t) => t.id === "sf")!.custoHora).toBe(21);
+    expect(J.tecnicos!.find((t) => t.id === "sf")!.custoHora).toBe(21.59);
   });
 });
 
@@ -239,15 +258,28 @@ describe("a ponte com o RH de exemplo", () => {
 
   it("calcula o custo/hora pelo salário e encargos no RH (22/10: é o custo/hora do técnico), e lê as ausências aprovadas", () => {
     garantirTecnicosNoRh();
-    const s = sugestaoCustoHora(lerRh().fichas["p-tec-ma"])!;
-    // 2195 € × 14 / 12 × (1 + 25,25 %) ÷ (40 × 52 / 12) h = 18,50 €/h (o da ficha do técnico de exemplo)
+    const s = sugestaoCustoHora(lerRh().fichas["p-tec-ma"], TAXAS_DO_EXEMPLO)!;
+    // 2195 € × 14 / 12 × (1 + 25,25 %) ÷ (40 × 52 / 12) h = 18,50 €/h (o da ficha do técnico de exemplo, com as taxas do exemplo)
     expect(s.salario).toBe(2195);
+    expect(s.encargosPct).toBe(25.25);
     expect(s.valor).toBeCloseTo((2195 * 14 / 12) * 1.2525 / (40 * 52 / 12), 1);
     expect(s.valor).toBe(18.5);
-    // as seis fichas de exemplo têm o custo/hora que o RH calcula (nada muda ao sincronizar com o RH de exemplo)
+    // sem taxas passadas valem as de omissão da base (23,75 % + 5 % = 28,75 %): 19,02 €/h
+    const semTaxas = sugestaoCustoHora(lerRh().fichas["p-tec-ma"])!;
+    expect(sugestaoCustoHora(lerRh().fichas["p-tec-ma"], TAXAS_DE_OMISSAO)).toEqual(semTaxas);
+    expect(semTaxas.encargosPct).toBe(28.75);
+    expect(semTaxas.valor).toBeCloseTo((2195 * 14 / 12) * 1.2875 / (40 * 52 / 12), 1);
+    // uma exceção da pessoa troca a taxa da empresa (o seguro mantém-se): 10 % + 5 % = 15 %
+    const comExcecao = sugestaoCustoHora(lerRh().fichas["p-tec-ma"], { ...TAXAS_DO_EXEMPLO, excecoes: { "p-tec-ma": 10 } })!;
+    expect(comExcecao.encargosPct).toBe(15);
+    expect(comExcecao.valor).toBeLessThan(s.valor);
+    // as seis fichas de exemplo têm o custo/hora que o RH calcula com as taxas do exemplo
     const L = tecnicosIniciais();
-    expect(custosDoRh(L)).toBe(false);
+    for (const t of L) expect(t.custoHora, t.id).toBe(sugestaoCustoHora(lerRh().fichas[pessoaRhDe(t)], TAXAS_DO_EXEMPLO)!.valor);
+    // custosDoRh não recebe taxas: com as de omissão o custo/hora das fichas de exemplo muda (era `false` com as taxas do exemplo)
+    expect(custosDoRh(L)).toBe(true);
     for (const t of L) expect(t.custoHora, t.id).toBe(sugestaoCustoHora(lerRh().fichas[pessoaRhDe(t)])!.valor);
+    expect(custosDoRh(L)).toBe(false);
     expect(sugestaoCustoHora(null)).toBeNull();
     expect(ausenciasDosTecnicos(lerRh())).toHaveProperty("ma");
   });

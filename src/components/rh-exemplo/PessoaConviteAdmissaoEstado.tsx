@@ -119,7 +119,7 @@ export function PessoaConviteAdmissaoEstado({
   const aberto = processoAberto(resumo.estado) && !desconhecido;
   // O e-mail falhado so interessa enquanto o processo esta aberto.
   const semEmail = aberto && resumo.emailEnviado === false;
-  const frase = desconhecido ? t("hr.convite.estado.desconhecido") : fraseDoPortal(t, resumo.estadoPortal, resumo.validUntil);
+  const frase = desconhecido ? t("hr.convite.estado.desconhecido") : fraseDoPortal(t, resumo.estadoPortal, resumo.validUntil, resumo.estado);
 
   const recusa = resumo.estado === "concluida" ? null : resumo.ultimaRecusa;
   const campoDaRecusa = recusa?.codigo === "niss_ja_existe" ? "niss" : "nif";

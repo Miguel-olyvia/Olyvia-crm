@@ -15,7 +15,7 @@ import * as K from "@/components/rh-exemplo/dados/constantes";
 import { catalogos } from "@/components/rh-exemplo/dados/catalogos";
 import { fichaDeEspec, type EspecPessoa } from "@/components/rh-exemplo/dados/fichaExemplo";
 import { definirEstado, lerEstado } from "@/components/rh-exemplo/dados/loja";
-import { lerCusto } from "@/components/rh-exemplo/dados/lojaCusto";
+import { DEFINICOES_OMISSAO, type DefinicoesCusto } from "@/components/rh-exemplo/lib/custoMes";
 import type { EstadoRh, FichaRh } from "@/components/rh-exemplo/dados/tiposLoja";
 import { custoPorHora, custoRepartido14em12, encargosDaEmpresa, salarioMensal, taxaEfetiva } from "@/components/rh-exemplo/lib/custo";
 import { TECNICOS, type FichaTecnico } from "./tecnicos";
@@ -82,12 +82,20 @@ export function garantirTecnicosNoRh(L: readonly FichaTecnico[] = TECNICOS): voi
 
 /* ------------------------------------------------------------------ o custo/hora sugerido */
 export interface SugestaoCustoHora { valor: number; salario: number; encargosPct: number; horasMes: number }
+/** As taxas da organização (da base) e as exceções por pessoa: o que a conta do custo/hora usa. */
+export interface DadosDeTaxas { definicoes: DefinicoesCusto; excecoes: Readonly<Record<string, number | null>> }
+/**
+ * FALLBACK EXPLÍCITO: sem as taxas lidas da base (quem chama não é um ecrã com os hooks, ou ainda não chegaram), usam-se os valores
+ * com que a base cria as definições de uma organização (23,75 % e 5 %) e nenhuma exceção. Quem tem os hooks reais passa os dados lidos.
+ */
+export const TAXAS_DE_OMISSAO: DadosDeTaxas = { definicoes: DEFINICOES_OMISSAO, excecoes: {} };
 /**
  * O custo/hora pelo RH: (salário base × 14 / 12 + encargos da empresa) ÷ horas do contrato num mês (horas semanais × 52 / 12).
- * Os encargos (TSU e seguro de acidentes de trabalho) são os das definições do separador Custos do RH, com a exceção da pessoa, se tiver.
+ * Os encargos (TSU e seguro de acidentes de trabalho) são os das definições do separador Custos do RH (por organização, lidas da base e
+ * passadas em `custo`), com a exceção da pessoa, se tiver; sem `custo` valem os de omissão da base (`TAXAS_DE_OMISSAO`).
  * Não conta o tempo não produtivo (deslocações, armazém) nem a estrutura: é um ponto de partida, não o valor a pôr.
  */
-export function sugestaoCustoHora(f: FichaRh | null | undefined): SugestaoCustoHora | null {
+export function sugestaoCustoHora(f: FichaRh | null | undefined, custo: DadosDeTaxas = TAXAS_DE_OMISSAO): SugestaoCustoHora | null {
   const r = f?.retribuicoes.find((x) => !x.valido_ate) ?? f?.retribuicoes[0];
   const v = f?.vinculos.find((x) => x.estado === "activo") ?? f?.vinculos[0];
   if (!f || !r || !v) return null;
@@ -95,11 +103,11 @@ export function sugestaoCustoHora(f: FichaRh | null | undefined): SugestaoCustoH
   const horasMes = (horasSemana * 52) / 12;
   const salario = salarioMensal({ valor_base: r.valor_base, periodicidade: r.periodicidade }, horasMes);
   if (salario === null) return null;
-  const { definicoes, excecoes } = lerCusto();
+  const { definicoes, excecoes } = custo;
   const taxa = taxaEfetiva(definicoes.taxaEmpresa, excecoes[f.pessoa.id] ?? null);
   const media = (salario * 14) / 12;
-  const custo = custoRepartido14em12(salario, encargosDaEmpresa(media, taxa, definicoes.seguro));
-  const valor = custoPorHora(custo, horasMes);
+  const custoMensal = custoRepartido14em12(salario, encargosDaEmpresa(media, taxa, definicoes.seguro));
+  const valor = custoPorHora(custoMensal, horasMes);
   return valor === null ? null : { valor, salario, encargosPct: taxa + definicoes.seguro, horasMes: Math.round(horasMes * 10) / 10 };
 }
 

@@ -5,11 +5,10 @@
 import { lerEstado } from "@/components/rh-exemplo/dados/loja";
 import { definirGestao, lerGestao, novoIdGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { nomeDeQuemUsa } from "@/components/rh-exemplo/dados/accoesHorarioB";
-import { definirFluxosB, lerFluxosB, novoIdB } from "@/components/rh-exemplo/dados/lojaFluxosB";
+import { definirFluxosB, lerFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import {
   aplicarAccao,
   decidirJustificacaoPicagem,
-  submeterJustificacao,
   type AccaoAlerta,
   type AlertaDia,
 } from "@/components/rh-exemplo/lib/alertasFimDia";
@@ -122,26 +121,6 @@ export function tratarAlerta(alertaId: string, accao: AccaoAlerta, motivo: strin
     if (falta.erro) return falta;
   }
   guardarAlerta(resultado.valor);
-  return OK;
-}
-
-/**
- * A pessoa justifica a falha de marcacao (hora real + motivo + anexo opcional), dentro do prazo da organizacao
- * (`prazoDias`, obrigatorio: vem de `usePrazoJustificacao`, nao ha 5 fixo).
- */
-export function enviarJustificacaoDePicagem(
-  alertaId: string,
-  dados: { horaReal: string; motivo: string; anexoNome: string | null; prazoDias: number },
-): ResultadoAccao {
-  const alerta = lerFluxosB().alertas.find((a) => a.id === alertaId);
-  if (!alerta) return { erro: "rhExemplo.pic.erro.jaTratado" };
-  const resultado = submeterJustificacao(alerta, { ...dados, id: novoIdB("jp"), hoje: hojeIso(), agora: new Date().toISOString() });
-  if (resultado.ok === false) return { erro: resultado.erro };
-  definirFluxosB((e) => ({
-    ...e,
-    justificacoesPicagem: [...e.justificacoesPicagem, resultado.valor],
-    alertas: e.alertas.map((a) => (a.id === alertaId ? { ...a, estado: "justificacao_recebida" as const } : a)),
-  }));
   return OK;
 }
 

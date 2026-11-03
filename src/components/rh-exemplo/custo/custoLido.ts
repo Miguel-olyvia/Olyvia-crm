@@ -3,12 +3,12 @@
  *
  * A RETRIBUICAO do mes vem de fora (`PessoaParaCusto.retribuicaoMes` = o total bruto estimado do processamento salarial
  * real), nunca de uma conta repetida aqui. Os valores avulsos vem da base (os lancamentos pontuais do periodo, passados
- * por `avulsosReais`); os equipamentos, as taxas e as excecoes continuam a ser do store em memoria do custo (nao ha tabela
- * na base para eles) e as taxas dos encargos sao de exemplo.
+ * por `avulsosReais`); os equipamentos, as definicoes (taxa, seguro, km, dia) e as excecoes de taxa tambem vem da base e
+ * entram por parametro (`DadosCusto`): esta conta nao le store nenhum para eles.
  */
 import { lerCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { arredondar } from "@/components/rh-exemplo/lib/custo";
-import { custoDoMes, type CustoDoMes, type AvulsoCusto } from "@/components/rh-exemplo/lib/custoMes";
+import { custoDoMes, type CustoDoMes, type AvulsoCusto, type DefinicoesCusto } from "@/components/rh-exemplo/lib/custoMes";
 import {
   composicaoDoCusto,
   montarLinhaCusto,
@@ -34,15 +34,28 @@ export interface CustoDaPessoa {
   composicao: ParteCusto[];
 }
 
-/** `avulsosReais` (os lancamentos da base) substituem os do store de exemplo; sem eles, usa-se o store (so os testes antigos). */
-const contextoDe = (mes: string, avulsosReais?: readonly AvulsoCusto[]): ContextoCusto => {
-  const { avulsos, equipamentos, definicoes, excecoes } = lerCusto();
-  return { mes, avulsos: avulsosReais ?? avulsos, equipamentos, definicoes, excecoes };
-};
+/**
+ * O que vem da base e entra na conta: os equipamentos, as definicoes (por organizacao) e as excecoes de taxa. Passa-se por
+ * parametro (os hooks `useEquipamentosCusto`, `useCustoDefinicoes` e `useCustoExcecoes` dao-nos): nunca se le de um store.
+ */
+export interface DadosCusto {
+  equipamentos: readonly EquipamentoPessoa[];
+  definicoes: DefinicoesCusto;
+  excecoes: Readonly<Record<string, number | null>>;
+}
+
+/** `avulsosReais` (os lancamentos da base) substituem os do store em memoria; sem eles, usa-se o store (so os testes antigos). */
+const contextoDe = (mes: string, dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[]): ContextoCusto => ({
+  mes,
+  avulsos: avulsosReais ?? lerCusto().avulsos,
+  equipamentos: dados.equipamentos,
+  definicoes: dados.definicoes,
+  excecoes: dados.excecoes,
+});
 
 /** O custo de todas as pessoas dadas, num mes. */
-export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCusto[], avulsosReais?: readonly AvulsoCusto[]): LinhaCusto[] {
-  const contexto = contextoDe(mes, avulsosReais);
+export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCusto[], dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[]): LinhaCusto[] {
+  const contexto = contextoDe(mes, dados, avulsosReais);
   return pessoas.map((pessoa) => montarLinhaCusto(pessoa, contexto));
 }
 
@@ -50,9 +63,9 @@ export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCus
  * O custo de uma pessoa num mes. `horasFeitas` sao as horas realmente trabalhadas no mes (relatorio de assiduidade);
  * o saldo do banco de horas continua a ser o valor de exemplo (o banco de horas nao esta ligado a base).
  */
-export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas: number, avulsosReais?: readonly AvulsoCusto[]): CustoDaPessoa {
-  const { avulsos: avulsosDaLoja, equipamentos, definicoes, excecoes } = lerCusto();
-  const avulsos = avulsosReais ?? avulsosDaLoja;
+export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas: number, dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[]): CustoDaPessoa {
+  const { equipamentos, definicoes, excecoes } = dados;
+  const avulsos = avulsosReais ?? lerCusto().avulsos;
   const atual = custoDoMes({
     mes,
     salarioMes: pessoa.retribuicaoMes,

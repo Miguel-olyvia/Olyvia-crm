@@ -8,7 +8,9 @@ import { useId, useState } from "react";
 import { CalendarX2, HardHat, Lightbulb, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
-import { useCusto } from "@/components/rh-exemplo/dados/lojaCusto";
+import { useCustoDefinicoes } from "@/components/rh-exemplo/hooks/useCustoDefinicoes";
+import { useCustoExcecoes } from "@/components/rh-exemplo/hooks/useCustoExcecoes";
+import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { PAPEIS, eur, nfmt } from "../motor";
 import { podeNeg } from "../permissoes";
 import { obrasDoTecnico, rotuloCurto } from "./regrasAgenda";
@@ -34,9 +36,13 @@ function FichaObra({ t, pessoaId, ctx }: { t: FichaTecnico; pessoaId: string; ct
   const pode = podeNeg(S.role, "equipa.edit");
   const hoje = new Date().toISOString().slice(0, 10);
   const fichaRh = useEstadoRh((e) => e.fichas[pessoaId] ?? null);
-  useCusto((e) => e.definicoes); // o cálculo muda com a taxa e o seguro do separador Custos
-  // o detalhe do cálculo: o do RH deste aparelho, ou o guardado na ficha (vindo de outro aparelho)
-  const sug = sugestaoCustoHora(fichaRh);
+  // A taxa, o seguro e as exceções do separador Custos vêm da base (por organização) e só se pedem a quem vê retribuições.
+  const { hasPermission } = usePermissions();
+  const podeVerCusto = hasPermission("hr.pessoas.retribuicao.view");
+  const { definicoes } = useCustoDefinicoes({ enabled: podeVerCusto });
+  const { excecoes } = useCustoExcecoes({ enabled: podeVerCusto });
+  // o detalhe do cálculo: o do RH deste aparelho, ou o guardado na ficha (vindo de outro aparelho). Sem as taxas lidas, valem as de omissão.
+  const sug = sugestaoCustoHora(fichaRh, definicoes && excecoes ? { definicoes, excecoes } : undefined);
   const rh = sug && sug.valor === t.custoHora ? { salario: sug.salario, encargosPct: sug.encargosPct, horasMes: sug.horasMes } : t.custoRh;
   const [novaData, setNovaData] = useState("");
   const obras = obrasDoTecnico(S.deals, t.id, t.custoHora);

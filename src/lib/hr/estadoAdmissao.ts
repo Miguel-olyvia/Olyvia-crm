@@ -32,6 +32,7 @@ export const ESTADOS_ADMISSAO: readonly EstadoAdmissaoBase[] = [
 const ESTADOS_FECHADOS: readonly EstadoAdmissao[] = ["concluida", "rejeitada", "cancelada", "terminado"];
 const ESTADOS_PORTAL: readonly EstadoPortalConvite[] = ["ativo", "expirado", "revogado", "encerrado"];
 const ESTADOS_QUE_PROLONGAM: readonly EstadoAdmissao[] = ["convidada", "em_preenchimento", "devolvida"];
+const ESTADOS_SEM_CANCELAR: readonly EstadoAdmissao[] = ["assinaturas_concluidas", "a_aguardar_ativacao"];
 const ESTADOS_DEPOIS_DE_APROVAR: readonly EstadoAdmissao[] = [
   "aprovada",
   "a_aguardar_assinaturas",
@@ -72,5 +73,23 @@ export function cancelarExigeAprovar(estado: EstadoAdmissao): boolean {
 /** Ha algo a cancelar (estado aberto conhecido) e a permissao basta para esse estado. */
 export function podeCancelar(estado: EstadoAdmissao, permissoes: { podeAprovar: boolean }): boolean {
   if (estado === "desconhecido" || !processoAberto(estado)) return false;
+  // Com as assinaturas feitas ja nao se cancela (HRA38 na base): so falta dar o acesso e concluir.
+  if (ESTADOS_SEM_CANCELAR.includes(estado)) return false;
   return !cancelarExigeAprovar(estado) || permissoes.podeAprovar;
+}
+
+/**
+ * Falta so o acesso: contrato assinado, nada a cancelar. Com conta criada, ou ainda sem ela, o RH conclui a admissao
+ * (`rpc_hr_admissao_concluir`, `hr.onboarding.approve`); a base so a aceita nestes dois estados.
+ */
+export function podeConcluirAdmissao(estado: EstadoAdmissao): boolean {
+  return ESTADOS_SEM_CANCELAR.includes(estado);
+}
+
+/**
+ * Os estados em que o portal ja nao serve para preencher a ficha mas continua aberto para documentos: o texto «o portal foi
+ * encerrado» enganaria.
+ */
+export function portalSoParaDocumentos(estado: EstadoAdmissao): boolean {
+  return ESTADOS_DEPOIS_DE_APROVAR.includes(estado);
 }

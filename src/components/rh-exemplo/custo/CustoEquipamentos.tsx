@@ -1,7 +1,8 @@
 /**
  * Os equipamentos da pessoa (aba Custo): tipo, descrição, valor, entrega, estado, «Como conta» (pago de uma vez, repartido por
  * N meses ou todos os meses), o que conta no mês escolhido, o que já contou e o que falta contar. «Atribuir equipamento» abre o
- * painel lateral; «Devolver» pede a data e o estado; «Alterar como conta» muda a forma de contar. Tudo em memória; o custo muda logo.
+ * painel lateral; «Devolver» pede a data e o estado; «Alterar como conta» muda a forma de contar. Vem da base e escreve na base
+ * (só com a permissão de editar retribuições); depois de cada escrita a lista e o custo refazem-se. O devolvido conta até ao mês da devolução, inclusive.
  */
 import { useState } from "react";
 import { Plus } from "lucide-react";
@@ -26,16 +27,19 @@ interface Props {
   mes: string;
   autor: string;
   equipamentos: EquipamentoPessoa[];
+  /** Pode atribuir, devolver e alterar a conta (`hr.pessoas.retribuicao.edit`); sem isto a lista so se le. */
+  podeGerir: boolean;
 }
 
 interface LinhaProps {
   e: EquipamentoPessoa;
   mes: string;
+  podeGerir: boolean;
   aoDevolver: (e: EquipamentoPessoa) => void;
   aoAlterar: (alvo: AlvoConta) => void;
 }
 
-function LinhaEquipamento({ e, mes, aoDevolver, aoAlterar }: LinhaProps) {
+function LinhaEquipamento({ e, mes, podeGerir, aoDevolver, aoAlterar }: LinhaProps) {
   const { t, language } = useTranslation();
   const s = situacaoDoEquipamento(e, mes);
   const devolvido = e.estado === "devolvido";
@@ -68,16 +72,18 @@ function LinhaEquipamento({ e, mes, aoDevolver, aoAlterar }: LinhaProps) {
         {s.mesesFalta !== null && s.mesesFalta > 0 && <span className="block text-xs text-muted-foreground">{t(s.mesesFalta === 1 ? "rhCustos.eq.mes1" : "rhCustos.eq.meses", { n: s.mesesFalta })}</span>}
       </TableCell>
       <TableCell>
-        <div className="flex flex-wrap gap-1">
-          <Button type="button" size="sm" variant="outline" onClick={() => aoAlterar({ tipo: "equipamento", item: e })} aria-label={t("rhCustos.conta.editarAria", { descricao: e.descricao })} className={cn("min-h-11", FOCO)}>
-            {t("rhCustos.conta.editar")}
-          </Button>
-          {!devolvido && (
-            <Button type="button" size="sm" variant="outline" onClick={() => aoDevolver(e)} aria-label={t("rhCustos.eq.devolverAria", { descricao: e.descricao })} className={cn("min-h-11", FOCO)}>
-              {t("rhCustos.eq.devolver")}
+        {podeGerir && (
+          <div className="flex flex-wrap gap-1">
+            <Button type="button" size="sm" variant="outline" onClick={() => aoAlterar({ tipo: "equipamento", item: e })} aria-label={t("rhCustos.conta.editarAria", { descricao: e.descricao })} className={cn("min-h-11", FOCO)}>
+              {t("rhCustos.conta.editar")}
             </Button>
-          )}
-        </div>
+            {!devolvido && (
+              <Button type="button" size="sm" variant="outline" onClick={() => aoDevolver(e)} aria-label={t("rhCustos.eq.devolverAria", { descricao: e.descricao })} className={cn("min-h-11", FOCO)}>
+                {t("rhCustos.eq.devolver")}
+              </Button>
+            )}
+          </div>
+        )}
       </TableCell>
     </TableRow>
   );
@@ -86,7 +92,7 @@ function LinhaEquipamento({ e, mes, aoDevolver, aoAlterar }: LinhaProps) {
 const COLUNAS = ["tipo", "descricao", "valor", "entrega", "estado", "comoConta", "contaMes", "jaContou", "falta"] as const;
 const COLUNAS_NUMERO: readonly string[] = ["valor", "contaMes", "jaContou", "falta"];
 
-export function CustoEquipamentos({ pessoaId, pessoaNome, mes, autor, equipamentos }: Props) {
+export function CustoEquipamentos({ pessoaId, pessoaNome, mes, autor, equipamentos, podeGerir }: Props) {
   const { t, language } = useTranslation();
   const [aAtribuir, setAAtribuir] = useState(false);
   const [aDevolver, setADevolver] = useState<EquipamentoPessoa | null>(null);
@@ -96,12 +102,12 @@ export function CustoEquipamentos({ pessoaId, pessoaNome, mes, autor, equipament
   return (
     <Seccao
       titulo={t("rhCustos.eq.titulo")}
-      marca={(
+      marca={podeGerir ? (
         <Button type="button" size="sm" onClick={() => setAAtribuir(true)} className={cn("ml-auto min-h-11 gap-2", FOCO)}>
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t("rhCustos.eq.atribuir")}
         </Button>
-      )}
+      ) : undefined}
     >
       {ordenados.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("rhCustos.eq.vazio")}</p>
@@ -119,7 +125,7 @@ export function CustoEquipamentos({ pessoaId, pessoaNome, mes, autor, equipament
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ordenados.map((e) => <LinhaEquipamento key={e.id} e={e} mes={mes} aoDevolver={setADevolver} aoAlterar={setAAlterar} />)}
+              {ordenados.map((e) => <LinhaEquipamento key={e.id} e={e} mes={mes} podeGerir={podeGerir} aoDevolver={setADevolver} aoAlterar={setAAlterar} />)}
             </TableBody>
           </Table>
         </div>

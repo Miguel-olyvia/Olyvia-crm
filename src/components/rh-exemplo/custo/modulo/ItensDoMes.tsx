@@ -2,15 +2,21 @@
 import { useMemo } from "react";
 import { useCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { useAvulsosReais } from "@/components/rh-exemplo/custo/lancamentosCusto";
+import { useEquipamentosCusto } from "@/components/rh-exemplo/hooks/useEquipamentosCusto";
+import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 import { itensDoMes } from "@/components/rh-exemplo/lib/custoItens";
 import { useTranslation } from "@/hooks/useTranslation";
 import { euros, nomeDoMes } from "@/components/rh-exemplo/custo/formato";
 import { rotuloDaConta } from "@/components/rh-exemplo/custo/rotuloConta";
 
+const SEM_EQUIPAMENTOS: readonly EquipamentoPessoa[] = [];
+
 export function ItensDoMes({ pessoaId }: { pessoaId: string }) {
   const { t, language } = useTranslation();
   const mes = useCusto((e) => e.mes);
-  const equipamentos = useCusto((e) => e.equipamentos);
+  // Os equipamentos da organizacao vem da base (a mesma consulta que o modulo ja fez: nao ha segundo pedido).
+  const { equipamentos: daBase } = useEquipamentosCusto({ enabled: true });
+  const equipamentos = daBase ?? SEM_EQUIPAMENTOS;
   // Os avulsos sao os lancamentos reais do periodo (da base), nao os do store de exemplo.
   const avulsosPorPessoa = useAvulsosReais();
   const avulsos = avulsosPorPessoa.get(pessoaId);

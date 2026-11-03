@@ -15,7 +15,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { repor } from "@/components/rh-exemplo/dados/loja";
-import { definirFluxosB, lerFluxosB, reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
+import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
 import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
@@ -108,41 +108,6 @@ describe("vista da própria pessoa: nunca «Corrigir»", () => {
     expect(screen.queryByRole("button", { name: /Consolidar/ })).not.toBeInTheDocument();
   });
 
-  it("num dia com picagem em falta dentro dos 5 dias úteis só há «Justificar», e a justificação fica pendente", () => {
-    aba(true);
-    fireEvent.click(celula("2026-10-13"));
-    const detalhe = screen.getByTestId("rhcal-detalhe");
-    expect(within(detalhe).getByText(/dias úteis para justificar/)).toBeInTheDocument();
-    expect(botoesDeCorrecao()).toEqual([]);
-    fireEvent.click(within(detalhe).getByRole("button", { name: "Justificar" }));
-    fireEvent.change(within(detalhe).getByLabelText("Hora real"), { target: { value: "18:30" } });
-    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
-    expect(within(detalhe).getByRole("alert")).toBeInTheDocument();
-    fireEvent.change(within(detalhe).getByLabelText(/Motivo/), { target: { value: "Saí de uma reunião fora do escritório" } });
-    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
-    expect(lerFluxosB().justificacoesPicagem.find((j) => j.pessoaId === "p-sofia")).toMatchObject({ horaReal: "18:30", estado: "pendente" });
-    const secao = within(screen.getByTestId("rhcal-detalhe")).getByTestId("rhcal-justificacao");
-    expect(within(secao).getByText("Pendente")).toBeInTheDocument();
-    expect(within(secao).getByText("Justificação (hora real 18:30):")).toBeInTheDocument();
-    expect(within(secao).queryByRole("button", { name: "Justificar" })).not.toBeInTheDocument();
-  });
-
-  it("mostra a justificação recusada com o motivo da recusa", () => {
-    const alerta = lerFluxosB().alertas.find((a) => a.pessoaId === "p-sofia");
-    expect(alerta?.data).toBe("2026-10-13");
-    definirFluxosB((atual) => ({
-      ...atual,
-      justificacoesPicagem: [...atual.justificacoesPicagem, {
-        id: "j-teste", alertaId: alerta?.id ?? "", pessoaId: "p-sofia", horaReal: "18:00", motivo: "Esqueci-me", anexoNome: null,
-        enviadaEm: "2026-10-14T09:00:00Z", estado: "recusada", decididaPor: "Marta", decididaEm: "2026-10-14T10:00:00Z", motivoRecusa: "Sem prova",
-      }],
-    }));
-    aba(true);
-    fireEvent.click(celula("2026-10-13"));
-    const secao = within(screen.getByTestId("rhcal-detalhe")).getByTestId("rhcal-justificacao");
-    expect(within(secao).getByText("Recusada")).toBeInTheDocument();
-    expect(within(secao).getByText("Motivo da recusa: Sem prova")).toBeInTheDocument();
-  });
 });
 
 describe("vista do RH: corrige, pede justificação, marca falta e aceita a diferença", () => {

@@ -1,25 +1,48 @@
 // O módulo «Custos» do RH: as pessoas e a retribuição do mês vêm do processamento salarial REAL (aqui entram por
-// argumento, ao nível do hook `useCustoDaOrganizacao`, por isso não há Supabase); equipamentos e taxas continuam em
-// memória. Os valores avulsos são lançamentos pontuais da base: aqui o `criar` e o `anular` do processamento são
-// simulados e gravam no store de exemplo, só para os totais e as listas se poderem ver mexer. A ficha da pessoa é substituída por um painel que mostra só o separador Custo (a ficha real
+// argumento, ao nível do hook `useCustoDaOrganizacao`, por isso não há Supabase). Os equipamentos, as taxas e as exceções
+// de taxa vêm da base: aqui os hooks que os dão (e as permissões) são simulados com dados de teste. As ações (atribuir,
+// devolver, alterar como conta, guardar taxas) são `vi.fn` e os testes verificam com que argumentos são chamadas; para os
+// totais se poderem ver mexer, as ações de equipamentos aplicam a mudança a uma lista de teste (como o refetch da base).
+// Os valores avulsos são lançamentos pontuais da base: aqui o `criar` e o `anular` do processamento são simulados e gravam
+// no store de exemplo. A ficha da pessoa é substituída por um painel que mostra só o separador Custo (a ficha real
 // tem testes próprios). Data fixa (14/10/2026).
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import type { DadosCusto } from "@/components/rh-exemplo/custo/custoLido";
 import type { PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
+import type { DefinicoesCusto } from "@/components/rh-exemplo/lib/custoMes";
+import type { ContaItem } from "@/components/rh-exemplo/lib/comoConta";
+import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 
 const estado = vi.hoisted(() => ({
   pessoas: [] as PessoaParaCusto[],
   calculo: {} as Record<string, unknown>,
   periodoAberto: true,
   vinculos: { error: null as string | null, recusado: false },
+  // Os dados da base (simulados): a lista de equipamentos muda quando as ações a mudam, e quem a lê é avisado.
+  permissoes: [] as string[],
+  baseACarregar: false,
+  erroBase: null as string | null,
+  equipamentos: [] as EquipamentoPessoa[],
+  definicoes: { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 } as DefinicoesCusto,
+  excecoes: {} as Record<string, number | null>,
+  ouvintes: new Set<() => void>(),
+  acoes: {
+    atribuir: vi.fn(),
+    devolver: vi.fn(),
+    alterarConta: vi.fn(),
+    guardarDefinicoes: vi.fn(),
+    definirExcecao: vi.fn(),
+  },
 }));
 
 vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({ useCompany: () => ({ activeCompany: { id: "org-1" }, isLoading: false }) }));
 vi.mock("@/components/rh-exemplo/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => ({ nome: "Sofia" }) }));
 vi.mock("@/components/rh-exemplo/processamento/useCalculoReal", () => ({ RecolhaDeAssiduidade: () => null }));
 vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
+  const { useSyncExternalStore } = await import("react");
   const { useCusto } = await import("@/components/rh-exemplo/dados/lojaCusto");
   const { custoDaPessoa, linhasDaOrganizacao } = await import("@/components/rh-exemplo/custo/custoLido");
   const { lerCusto, registarAvulso, anularAvulso } = await import("@/components/rh-exemplo/dados/lojaCusto");
@@ -40,28 +63,68 @@ vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
     for (const a of lerCusto().avulsos) mapa.set(a.pessoaId, [...(mapa.get(a.pessoaId) ?? []), a]);
     return mapa;
   };
-  // Recalcula quando o store em memoria dos avulsos, equipamentos e taxas muda (como o hook verdadeiro).
+  // Recalcula quando o store em memoria dos avulsos ou a lista de equipamentos de teste muda (como o hook verdadeiro).
   const useAssinar = () => {
     useCusto((e) => e.avulsos);
-    useCusto((e) => e.equipamentos);
-    useCusto((e) => e.definicoes);
-    useCusto((e) => e.excecoes);
+    useSyncExternalStore(
+      (ouvinte) => {
+        estado.ouvintes.add(ouvinte);
+        return () => {
+          estado.ouvintes.delete(ouvinte);
+        };
+      },
+      () => estado.equipamentos,
+    );
   };
+  const dadosDeTeste = (): DadosCusto => ({ equipamentos: estado.equipamentos, definicoes: estado.definicoes, excecoes: estado.excecoes });
+  const semPermissao = () => !estado.permissoes.includes("hr.pessoas.retribuicao.view");
+  const podeEditar = () => !semPermissao() && estado.permissoes.includes("hr.pessoas.retribuicao.edit");
   return {
     useCustoDaOrganizacao: (mes: string) => {
       useAssinar();
+      // Como o hook verdadeiro: sem os dados da base (sem permissao, a carregar ou falha) nao ha linhas.
+      const semDados = semPermissao() || estado.baseACarregar || estado.erroBase !== null;
       return {
-        linhas: linhasDaOrganizacao(mes, estado.pessoas, lerCusto().avulsos), calculo: estado.calculo, ano: Number(mes.slice(0, 4)), mesNum: Number(mes.slice(5, 7)),
+        linhas: semDados ? [] : linhasDaOrganizacao(mes, estado.pessoas, dadosDeTeste(), lerCusto().avulsos),
+        baseACarregar: !semPermissao() && estado.baseACarregar, erroBase: estado.erroBase, semPermissaoCusto: semPermissao(), podeEditar: podeEditar(),
+        calculo: estado.calculo, ano: Number(mes.slice(0, 4)), mesNum: Number(mes.slice(5, 7)),
         vinculosHook: estado.vinculos, avulsosPorPessoa: porPessoa(), lancamentos: lancamentos(mes),
       };
     },
     useCustoDaPessoa: (pessoa: { id: string }, mes: string) => {
       useAssinar();
       const p = estado.pessoas.find((x) => x.pessoaId === pessoa.id);
-      return { custo: p ? custoDaPessoa(p, mes, 0, lerCusto().avulsos) : null, aCarregar: false, retribuicaoRecusada: false, incompleta: false, lancamentos: lancamentos(mes) };
+      return {
+        custo: p && !semPermissao() ? custoDaPessoa(p, mes, 0, dadosDeTeste(), lerCusto().avulsos) : null, aCarregar: false,
+        retribuicaoRecusada: semPermissao(), erroBase: estado.erroBase, podeEditar: podeEditar(), incompleta: false, lancamentos: lancamentos(mes),
+      };
     },
   };
 });
+// Os hooks da base (equipamentos, taxas, excecoes) sao simulados com os dados e as acoes de teste.
+vi.mock("@/components/rh-exemplo/hooks/useEquipamentosCusto", async () => {
+  const { useSyncExternalStore } = await import("react");
+  const lista = () =>
+    useSyncExternalStore(
+      (ouvinte) => {
+        estado.ouvintes.add(ouvinte);
+        return () => {
+          estado.ouvintes.delete(ouvinte);
+        };
+      },
+      () => estado.equipamentos,
+    );
+  return {
+    useEquipamentosCusto: () => ({ equipamentos: lista(), aCarregar: false, erro: null, ...estado.acoes }),
+    useEquipamentosCustoAcoes: () => ({ atribuir: estado.acoes.atribuir, devolver: estado.acoes.devolver, alterarConta: estado.acoes.alterarConta }),
+  };
+});
+vi.mock("@/components/rh-exemplo/hooks/useCustoDefinicoes", () => ({
+  useCustoDefinicoes: () => ({ definicoes: estado.definicoes, omissao: false, aCarregar: false, erro: null, guardar: estado.acoes.guardarDefinicoes }),
+}));
+vi.mock("@/components/rh-exemplo/hooks/useCustoExcecoes", () => ({
+  useCustoExcecoes: () => ({ excecoes: estado.excecoes, aCarregar: false, erro: null, definir: estado.acoes.definirExcecao }),
+}));
 vi.mock("@/components/rh-exemplo/ficha/FichaPessoaRh", async () => {
   const { AbaCusto } = await import("@/components/rh-exemplo/custo/AbaCusto");
   return {
@@ -79,8 +142,8 @@ vi.mock("@/components/rh-exemplo/ficha/FichaPessoaRh", async () => {
 });
 
 import { lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
-import { repor } from "@/components/rh-exemplo/dados/loja";
-import { valorDoEquipamentoNoMes, type EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
+import { contaRepartida, contaTodosMeses, contaUmaVez, normalizarConta, validarConta } from "@/components/rh-exemplo/lib/comoConta";
+import { validarDevolucao, validarEquipamento, valorDoEquipamentoNoMes } from "@/components/rh-exemplo/lib/equipamentos";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemploProcessamentoReal";
 import RhCustos from "./RhCustos";
@@ -95,6 +158,62 @@ const PESSOAS: PessoaParaCusto[] = [
   pessoa("p-tiago", "Tiago Pinheiro", 950.55, { centroId: "l-colombo", centro: "Loja Colombo", filialId: "fil-lisboa", filial: "Filial Lisboa", tipoContrato: "termo_certo" }),
   pessoa("p-marta", "Marta Figueiredo", 2000, { centroId: "l-porto", centro: "Loja Porto", filialId: "fil-porto", filial: "Filial Porto", tipoContrato: "sem_termo" }),
 ];
+
+const VER = "hr.pessoas.retribuicao.view";
+const EDITAR = "hr.pessoas.retribuicao.edit";
+
+const equipamento = (extra: Partial<EquipamentoPessoa> & Pick<EquipamentoPessoa, "id" | "pessoaId">): EquipamentoPessoa => ({
+  tipo: "portatil", descricao: "Portátil", valor: 900, entrega: "2025-05-01", conta: contaRepartida(), estado: "atribuido",
+  devolucao: null, estadoDevolucao: null, autor: "Sofia", ...extra,
+});
+
+/** Os equipamentos de teste (o que a base devolveria): o Hugo tem viatura (todos os meses) e portátil (36 meses); o Tiago, um telemóvel. */
+const EQUIPAMENTOS: EquipamentoPessoa[] = [
+  equipamento({ id: "eq-hugo-viatura", pessoaId: "p-hugo", tipo: "viatura", descricao: "Viatura de serviço", valor: 389, entrega: "2026-01-10", conta: contaTodosMeses("2026-01") }),
+  equipamento({ id: "eq-hugo-portatil", pessoaId: "p-hugo", tipo: "portatil", descricao: "Portátil de Hugo", valor: 900 }),
+  equipamento({ id: "eq-tiago-telemovel", pessoaId: "p-tiago", tipo: "telemovel", descricao: "Telemóvel", valor: 360, entrega: "2026-03-01" }),
+  equipamento({ id: "eq-ines-fardamento", pessoaId: "p-ines", tipo: "fardamento", descricao: "Fardamento", valor: 80, entrega: "2026-09-02", conta: contaUmaVez() }),
+];
+
+/** Uma lista nova de equipamentos de teste: quem a lê (os hooks simulados) e avisado, como no refetch da base. */
+const mudarEquipamentos = (lista: EquipamentoPessoa[]): void => {
+  estado.equipamentos = lista;
+  estado.ouvintes.forEach((o) => o());
+};
+
+const ok = { ok: true, erro: null, mensagem: null };
+let contadorEquipamentos = 0;
+
+/** As acoes dos hooks da base, simuladas: validam como o hook verdadeiro (mesmos nomes de erro) e mudam a lista de teste. */
+function simularAcoes(): void {
+  const { atribuir, devolver, alterarConta, guardarDefinicoes, definirExcecao } = estado.acoes;
+  for (const acao of [atribuir, devolver, alterarConta, guardarDefinicoes, definirExcecao]) acao.mockReset();
+  atribuir.mockImplementation(async (novo: { pessoaId: string; tipo: EquipamentoPessoa["tipo"]; descricao: string; valor: number; entrega: string; conta?: ContaItem }) => {
+    const conta = novo.conta ?? contaRepartida();
+    const erro = validarEquipamento({ ...novo, conta });
+    if (erro) return { ok: false, erro, mensagem: null, id: null };
+    contadorEquipamentos += 1;
+    const id = `eq-novo-${contadorEquipamentos}`;
+    mudarEquipamentos([...estado.equipamentos, equipamento({
+      id, pessoaId: novo.pessoaId, tipo: novo.tipo, descricao: novo.descricao.trim(), valor: novo.valor, entrega: novo.entrega, conta: normalizarConta(conta),
+    })]);
+    return { ...ok, id };
+  });
+  devolver.mockImplementation(async (e: EquipamentoPessoa, data: string, estadoDev: string) => {
+    const erro = validarDevolucao(e, data, estadoDev);
+    if (erro) return { ok: false, erro, mensagem: null };
+    mudarEquipamentos(estado.equipamentos.map((x) => (x.id === e.id ? { ...x, estado: "devolvido", devolucao: data, estadoDevolucao: estadoDev as EquipamentoPessoa["estadoDevolucao"] } : x)));
+    return ok;
+  });
+  alterarConta.mockImplementation(async (id: string, nova: ContaItem) => {
+    const erro = validarConta(nova);
+    if (erro) return { ok: false, erro, mensagem: null };
+    mudarEquipamentos(estado.equipamentos.map((x) => (x.id === id ? { ...x, conta: normalizarConta(nova) } : x)));
+    return ok;
+  });
+  guardarDefinicoes.mockResolvedValue(ok);
+  definirExcecao.mockResolvedValue(ok);
+}
 
 function calculo(extra: Record<string, unknown> = {}) {
   return {
@@ -129,8 +248,15 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-14T12:00:00"));
   window.localStorage.setItem("language", "pt");
-  repor();
   reporCusto();
+  contadorEquipamentos = 0;
+  simularAcoes();
+  estado.permissoes = [VER, EDITAR];
+  estado.baseACarregar = false;
+  estado.erroBase = null;
+  estado.equipamentos = EQUIPAMENTOS;
+  estado.definicoes = { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 };
+  estado.excecoes = {};
   estado.pessoas = PESSOAS;
   estado.calculo = calculo();
   estado.periodoAberto = true;
@@ -297,15 +423,46 @@ describe("o que a base diz e o que falta dizer", () => {
     expect(screen.queryByText(/ainda não tem período de processamento aberto/)).not.toBeInTheDocument();
   });
 
-  it("a nota do fundo diz o que está ligado e o que ainda é de exemplo", () => {
+  it("sem permissão para ver o custo (permissões) avisa, não mostra totais nem tabela e esconde os botões de atribuir", () => {
+    estado.permissoes = [];
     noRouter();
-    expect(screen.getByText(/total bruto estimado do processamento salarial/)).toBeInTheDocument();
-    expect(screen.getByText(/só existem em memória/)).toBeInTheDocument();
+    expect(screen.getByText("Não tem permissão para ver as retribuições: o custo não se calcula.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rhcustos-total-total")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Atribuir equipamento" })).not.toBeInTheDocument();
+  });
+
+  it("só com a permissão de ver, vê-se a tabela mas não se pode atribuir", () => {
+    estado.permissoes = [VER];
+    noRouter();
+    expect(linhas()).toHaveLength(PESSOAS.length);
+    expect(screen.queryByRole("button", { name: "Atribuir equipamento" })).not.toBeInTheDocument();
+  });
+
+  it("enquanto os equipamentos e as taxas da base não chegam diz que está a carregar e não mostra totais a zero", () => {
+    estado.baseACarregar = true;
+    noRouter();
+    expect(screen.getByText("A carregar os equipamentos e as taxas da organização…")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rhcustos-total-total")).not.toBeInTheDocument();
+  });
+
+  it("uma falha a ler os equipamentos ou as taxas aparece como alerta e não mostra a tabela", () => {
+    estado.erroBase = "sem rede";
+    noRouter();
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível ler os equipamentos e as taxas: sem rede");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("a nota do fundo diz de onde vêm a retribuição, os encargos e o «Como conta»", () => {
+    noRouter();
+    expect(screen.getByText(/A retribuição é o total bruto do «Cálculo do mês» de cada pessoa/)).toBeInTheDocument();
+    expect(screen.getByText(/Encargos e seguro vêm das taxas da organização/)).toBeInTheDocument();
   });
 });
 
-describe("atribuir equipamento (em memória) e registar valor avulso (lançamento pontual)", () => {
-  it("atribuir na ficha aparece na lista da pessoa e muda o total de equipamentos do módulo", () => {
+describe("atribuir equipamento (ação da base) e registar valor avulso (lançamento pontual)", () => {
+  it("atribuir na ficha chama a ação com a pessoa e os dados do formulário, aparece na lista da pessoa e muda o total de equipamentos do módulo", async () => {
     noRouter();
     const antes = totalDoCabecalho("equipamentos");
     const custoAntes = totalDoCabecalho("total");
@@ -314,48 +471,53 @@ describe("atribuir equipamento (em memória) e registar valor avulso (lançament
     const painel = screen.getAllByRole("dialog").at(-1) as HTMLElement;
     fireEvent.change(within(painel).getByLabelText(/Descrição/), { target: { value: "Tablet de loja" } });
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
-    expect(within(painel).getByRole("alert")).toHaveTextContent("O valor tem de ser maior que 0.");
+    expect(await within(painel).findByRole("alert")).toHaveTextContent("O valor tem de ser maior que 0.");
     fireEvent.change(within(painel).getByLabelText(/Valor de aquisição/), { target: { value: "720" } });
     fireEvent.change(within(painel).getByLabelText(/Data de entrega/), { target: { value: "2026-09-02" } });
     expect(within(painel).getByRole("status")).toHaveTextContent(/720,00.* repartidos por 36 meses = 20,00.* por mês, de setembro de 2026 até à devolução/);
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
-    const ficha = screen.getByRole("dialog");
-    expect(within(ficha).getByText("Tablet de loja")).toBeInTheDocument();
-    expect(lerCusto().equipamentos.at(-1)).toMatchObject({ pessoaId: "p-tiago", descricao: "Tablet de loja", valor: 720, estado: "atribuido" });
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
+    expect(await within(screen.getByRole("dialog")).findByText("Tablet de loja")).toBeInTheDocument();
+    expect(estado.acoes.atribuir).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pessoaId: "p-tiago", tipo: "portatil", descricao: "Tablet de loja", valor: 720, entrega: "2026-09-02", conta: expect.objectContaining({ modo: "repartido", meses: 36 }) }),
+    );
+    expect(estado.equipamentos.at(-1)).toMatchObject({ pessoaId: "p-tiago", descricao: "Tablet de loja", valor: 720, estado: "atribuido" });
     expect(totalDoCabecalho("equipamentos")).not.toBe(antes);
     expect(totalDoCabecalho("total")).not.toBe(custoAntes);
     expect(screen.getByTestId("rhcustos-linha-total").textContent).toBe(totalDoCabecalho("total"));
   });
 
-  it("devolver na ficha pede data e estado e deixa o equipamento como devolvido", () => {
+  it("devolver na ficha pede data e estado, chama a ação com o equipamento, a data e o estado, e deixa-o como devolvido", async () => {
     noRouter();
     fireEvent.click(within(linhaDe("Tiago Pinheiro")).getByRole("button", { name: /Abrir a ficha de Tiago Pinheiro/ }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Devolver Telemóvel" }));
     const dialogo = screen.getAllByRole("dialog").at(-1) as HTMLElement;
     fireEvent.click(within(dialogo).getByRole("button", { name: "Devolver equipamento" }));
-    expect(within(dialogo).getByRole("alert")).toHaveTextContent("Escolhe o estado em que volta.");
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Escolhe o estado em que volta.");
     fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /Estado em que volta/ }), { key: "Enter" });
     fireEvent.click(screen.getByRole("option", { name: "Com desgaste" }));
     fireEvent.click(within(dialogo).getByRole("button", { name: "Devolver equipamento" }));
-    const devolvido = lerCusto().equipamentos.find((e) => e.pessoaId === "p-tiago" && e.tipo === "telemovel");
-    expect(devolvido).toMatchObject({ estado: "devolvido", estadoDevolucao: "desgaste" });
-    expect(within(screen.getByRole("dialog")).getByText(/Devolvido em .*: Com desgaste/)).toBeInTheDocument();
+    await waitFor(() => expect(estado.acoes.devolver).toHaveBeenLastCalledWith(expect.objectContaining({ id: "eq-tiago-telemovel", pessoaId: "p-tiago" }), "2026-10-14", "desgaste"));
+    expect(estado.equipamentos.find((e) => e.id === "eq-tiago-telemovel")).toMatchObject({ estado: "devolvido", estadoDevolucao: "desgaste" });
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
+    expect(await within(screen.getByRole("dialog")).findByText(/Devolvido em .*: Com desgaste/)).toBeInTheDocument();
   });
 
-  it("o botão do topo abre o painel com a pessoa a escolher e recusa sem pessoa", () => {
+  it("o botão do topo abre o painel com a pessoa a escolher e recusa sem pessoa", async () => {
     noRouter();
     fireEvent.click(screen.getByRole("button", { name: "Atribuir equipamento" }));
     const painel = screen.getByRole("dialog");
     expect(within(painel).getByRole("combobox", { name: /Pessoa/ })).toBeInTheDocument();
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
-    expect(within(painel).getByRole("alert")).toHaveTextContent("Escolhe a pessoa.");
+    expect(await within(painel).findByRole("alert")).toHaveTextContent("Escolhe a pessoa.");
     fireEvent.keyDown(within(painel).getByRole("combobox", { name: /Pessoa/ }), { key: "Enter" });
     fireEvent.click(screen.getByRole("option", { name: "Hugo Teixeira" }));
     fireEvent.change(within(painel).getByLabelText(/Descrição/), { target: { value: "Colete refletor" } });
     fireEvent.change(within(painel).getByLabelText(/Valor de aquisição/), { target: { value: "36" } });
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
-    expect(lerCusto().equipamentos.at(-1)).toMatchObject({ pessoaId: "p-hugo", descricao: "Colete refletor", valor: 36 });
-    expect(screen.getByText("Equipamento atribuído a Hugo Teixeira.")).toBeInTheDocument();
+    expect(await screen.findByText("Equipamento atribuído a Hugo Teixeira.")).toBeInTheDocument();
+    expect(estado.acoes.atribuir).toHaveBeenLastCalledWith(expect.objectContaining({ pessoaId: "p-hugo", descricao: "Colete refletor", valor: 36 }));
+    expect(estado.equipamentos.at(-1)).toMatchObject({ pessoaId: "p-hugo", descricao: "Colete refletor", valor: 36 });
   });
 
   it("registar valor avulso no topo escolhe a pessoa, pede descrição e valor, regista e conta no mês visto, sem saltar para outro", async () => {
@@ -475,7 +637,7 @@ describe("«Como conta» no painel de atribuir e na ficha", () => {
     expect(within(painel).queryByLabelText(/Número de meses/)).not.toBeInTheDocument();
   });
 
-  it("a frase de efeito atualiza com o número de meses e com a data de entrega", () => {
+  it("a frase de efeito atualiza com o número de meses e com a data de entrega", async () => {
     noRouter();
     const painel = atribuirNoTopo("900", "2026-11-05");
     expect(within(painel).getByRole("status")).toHaveTextContent(/900,00.* repartidos por 36 meses = 25,00.* por mês, de novembro de 2026/);
@@ -486,11 +648,11 @@ describe("«Como conta» no painel de atribuir e na ficha", () => {
     fireEvent.change(within(painel).getByLabelText(/Número de meses/), { target: { value: "0" } });
     expect(within(painel).getByRole("status")).toHaveTextContent("Preenche o valor e a data para ver como conta.");
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
-    expect(within(painel).getByRole("alert")).toHaveTextContent("Indica um número inteiro de meses entre 1 e 120.");
-    expect(lerCusto().equipamentos.some((e) => e.descricao === "Colete de teste")).toBe(false);
+    expect(await within(painel).findByRole("alert")).toHaveTextContent("Indica um número inteiro de meses entre 1 e 120.");
+    expect(estado.equipamentos.some((e) => e.descricao === "Colete de teste")).toBe(false);
   });
 
-  it("pago de uma vez aparece só no mês da entrega; mudar para repartido por 12 aparece nos 12 meses", () => {
+  it("pago de uma vez aparece só no mês da entrega; mudar para repartido por 12 aparece nos 12 meses", async () => {
     noRouter();
     const set = totalDoCabecalho("equipamentos");
     irParaMes("2026-10");
@@ -499,8 +661,9 @@ describe("«Como conta» no painel de atribuir e na ficha", () => {
     const painel = atribuirNoTopo("360", "2026-09-10");
     fireEvent.click(within(painel).getByRole("radio", { name: /Pago de uma vez/ }));
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
-    expect(lerCusto().equipamentos.at(-1)).toMatchObject({ descricao: "Colete de teste", conta: { modo: "umaVez" } });
-    expect(euroDe(totalDoCabecalho("equipamentos")) - euroDe(set)).toBeCloseTo(360, 2);
+    await waitFor(() => expect(euroDe(totalDoCabecalho("equipamentos")) - euroDe(set)).toBeCloseTo(360, 2));
+    expect(estado.acoes.atribuir).toHaveBeenLastCalledWith(expect.objectContaining({ pessoaId: "p-hugo", descricao: "Colete de teste", valor: 360, conta: expect.objectContaining({ modo: "umaVez" }) }));
+    expect(estado.equipamentos.at(-1)).toMatchObject({ descricao: "Colete de teste", conta: { modo: "umaVez" } });
     irParaMes("2026-10");
     expect(totalDoCabecalho("equipamentos")).toBe(out);
 
@@ -512,10 +675,22 @@ describe("«Como conta» no painel de atribuir e na ficha", () => {
     fireEvent.change(within(editar).getByLabelText(/Número de meses/), { target: { value: "12" } });
     expect(within(editar).getByRole("status")).toHaveTextContent(/360,00.* repartidos por 12 meses = 30,00.* por mês/);
     fireEvent.click(within(editar).getByRole("button", { name: "Guardar" }));
-    expect(lerCusto().equipamentos.at(-1)?.conta).toMatchObject({ modo: "repartido", meses: 12 });
-    expect(euroDe(totalDoCabecalho("equipamentos")) - euroDe(out)).toBeCloseTo(30, 2);
-    const colete = lerCusto().equipamentos.at(-1) as EquipamentoPessoa;
+    await waitFor(() => expect(estado.acoes.alterarConta).toHaveBeenLastCalledWith("eq-novo-1", expect.objectContaining({ modo: "repartido", meses: 12 })));
+    await waitFor(() => expect(euroDe(totalDoCabecalho("equipamentos")) - euroDe(out)).toBeCloseTo(30, 2));
+    expect(estado.equipamentos.at(-1)?.conta).toMatchObject({ modo: "repartido", meses: 12 });
+    const colete = estado.equipamentos.at(-1) as EquipamentoPessoa;
     expect(["2026-09", "2026-10", "2027-08", "2027-09"].map((m) => valorDoEquipamentoNoMes(colete, m))).toEqual([30, 30, 30, 0]);
+  });
+
+  it("guardar as taxas e a exceção da pessoa na ficha chama as ações da base com os valores escritos", async () => {
+    noRouter();
+    fireEvent.click(within(linhaDe("Hugo Teixeira")).getByRole("button", { name: /Abrir a ficha de Hugo Teixeira/ }));
+    const ficha = screen.getByRole("dialog");
+    fireEvent.change(within(ficha).getByLabelText(/Taxa da empresa/), { target: { value: "20" } });
+    fireEvent.change(within(ficha).getByLabelText(/Taxa desta pessoa/), { target: { value: "10" } });
+    fireEvent.click(within(ficha).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(estado.acoes.guardarDefinicoes).toHaveBeenCalledWith({ taxaEmpresa: 20, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 }));
+    await waitFor(() => expect(estado.acoes.definirExcecao).toHaveBeenCalledWith("p-hugo", 10));
   });
 
   it("a ficha mostra Como conta, o que conta no mês, o que já contou e o que falta; o módulo mostra-o na linha aberta", () => {

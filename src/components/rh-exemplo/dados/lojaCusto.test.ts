@@ -2,10 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { diaIso } from "@/components/rh-exemplo/dados/datas";
 import {
   alterarContaAvulso,
-  alterarContaEquipamento,
   anularAvulso,
-  atribuirEquipamento,
-  definirExcecaoTaxa,
   lerCusto,
   registarAvulso,
   reporCusto,
@@ -13,7 +10,6 @@ import {
 } from "@/components/rh-exemplo/dados/lojaCusto";
 import { contaRepartida, contaTodosMeses, contaUmaVez } from "@/components/rh-exemplo/lib/comoConta";
 import { valorDoAvulsoNoMes, type AvulsoCusto } from "@/components/rh-exemplo/lib/custoMes";
-import { valorDoEquipamentoNoMes, type EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 
 const base: NovoAvulso = {
   pessoaId: "p-tiago",
@@ -105,41 +101,7 @@ describe("store do custo", () => {
     const anulado = lerCusto().avulsos.find((a) => a.id === id);
     expect(anulado?.anulado).toMatchObject({ motivo: "Registado por engano", por: "Sofia" });
   });
-
-  it("a exceção de taxa é por pessoa e pode ser retirada", () => {
-    definirExcecaoTaxa("p-rui", 11);
-    expect(lerCusto().excecoes["p-rui"]).toBe(11);
-    definirExcecaoTaxa("p-rui", null);
-    expect(lerCusto().excecoes["p-rui"]).toBeNull();
-  });
 });
 
-describe("store do custo: equipamentos com «como conta»", () => {
-  const novo = { pessoaId: "p-tiago", tipo: "portatil" as const, descricao: "Portátil", valor: 900, entrega: "2026-11-15", autor: "Sofia" };
-  const ler = (id: string | null) => lerCusto().equipamentos.find((e) => e.id === id) as EquipamentoPessoa;
-
-  it("sem escolha, o equipamento fica repartido por 36 meses (o do fluxo 11)", () => {
-    const { id } = atribuirEquipamento(novo);
-    expect(ler(id).conta).toEqual(contaRepartida(36));
-    expect(valorDoEquipamentoNoMes(ler(id), "2026-11")).toBe(25);
-  });
-
-  it("pago de uma vez só conta no mês da entrega; mudar para repartido por 12 conta nos 12 meses", () => {
-    const { id } = atribuirEquipamento({ ...novo, conta: contaUmaVez() });
-    expect([valorDoEquipamentoNoMes(ler(id), "2026-11"), valorDoEquipamentoNoMes(ler(id), "2026-12")]).toEqual([900, 0]);
-    expect(alterarContaEquipamento(id ?? "", contaRepartida(12)).erro).toBeNull();
-    const meses = ["2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04", "2027-05", "2027-06", "2027-07", "2027-08", "2027-09", "2027-10"];
-    expect(meses.every((m) => valorDoEquipamentoNoMes(ler(id), m) === 75)).toBe(true);
-    expect(valorDoEquipamentoNoMes(ler(id), "2027-11")).toBe(0);
-  });
-
-  it("recusa uma conta inválida ao atribuir e ao alterar, sem mexer em nada", () => {
-    const antes = lerCusto().equipamentos;
-    expect(atribuirEquipamento({ ...novo, conta: contaRepartida(121) }).erro).toBe("mesesInvalidos");
-    expect(atribuirEquipamento({ ...novo, conta: contaTodosMeses("2026-09", "2026-08") }).erro).toBe("fimAntesInicio");
-    expect(lerCusto().equipamentos).toBe(antes);
-    const { id } = atribuirEquipamento(novo);
-    expect(alterarContaEquipamento(id ?? "", contaTodosMeses("")).erro).toBe("semInicio");
-    expect(ler(id).conta).toEqual(contaRepartida(36));
-  });
-});
+// Equipamentos, definições e exceções de taxa já não vivem neste store: vêm da base (hooks `useEquipamentosCusto`,
+// `useCustoDefinicoes`, `useCustoExcecoes`). As contas de «como conta» dos equipamentos têm os seus testes em lib/.

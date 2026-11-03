@@ -3,4 +3,6 @@
  * sem componentes nem base: pode importar-se sem arrastar o resto. Fica aqui, em hooks/, porque é o único sítio de rh-exemplo
  * onde o teste guarda (semBase.test.ts) deixa importar código real de RH.
  */
-export { cancelarExigeAprovar, podeCancelar, podeProlongar, processoAberto } from "@/lib/hr/estadoAdmissao";
+export {
+  cancelarExigeAprovar, podeCancelar, podeConcluirAdmissao, podeProlongar, portalSoParaDocumentos, processoAberto,
+} from "@/lib/hr/estadoAdmissao";

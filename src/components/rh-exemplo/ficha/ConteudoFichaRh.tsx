@@ -12,11 +12,14 @@ import { PessoaAdmissaoPendencias } from "@/components/rh-exemplo/PessoaAdmissao
 import { PessoaConviteAdmissaoEstado } from "@/components/rh-exemplo/PessoaConviteAdmissaoEstado";
 import { useConviteAdmissaoResumo, type ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
 import { useFiliaisDaArvore } from "@/components/rh-exemplo/hooks/useFiliaisDaArvore";
+import { podeConcluirAdmissao } from "@/components/rh-exemplo/hooks/estadoAdmissaoReal";
+import { useConcluirAdmissao } from "@/components/rh-exemplo/hooks/useConcluirAdmissao";
 import { usePessoa } from "@/components/rh-exemplo/hooks/usePessoa";
 import { usePessoaFotografia } from "@/components/rh-exemplo/hooks/usePessoaFotografia";
 import { podeEnviarNovoConvite } from "@/components/rh-exemplo/modoEnvioConvite";
 import type { Pessoa } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
+import { toast } from "@/lib/toast";
 import { AbaCusto } from "@/components/rh-exemplo/custo/AbaCusto";
 import { AbaAusencias, AbaContratos, AbaDocumentos, AbaPlaneamento } from "./AbasTempo";
 import { AbaLaborais, AbaPessoais, AbaVisaoGeral, type AbaProps } from "./AbasPessoa";
@@ -25,6 +28,7 @@ import { CabecalhoFichaRh } from "./CabecalhoFichaRh";
 import { contadoresDaFicha } from "./contadores";
 import { ehAbaFicha, type AbaFicha } from "./abas";
 import { ListaAbasFicha } from "./ListaAbasFicha";
+import { PassoAcessoAdmissao } from "./PassoAcessoAdmissao";
 import type { TeclaNavegacao, Vizinhas } from "./navegacao";
 import { useContextoFicha, type ContextoFicha } from "./useContextoFicha";
 
@@ -137,6 +141,70 @@ function useReler(aCarregar: boolean, ...recarregar: Array<() => void>) {
   }, [aCarregar]);
 }
 
+/**
+ * Concluir a admissão quando só falta o acesso (assinaturas_concluidas, a_aguardar_ativacao). Chama-se DEPOIS de o acesso ser
+ * criado com sucesso, ou à mão («Concluir admissão») quando a pessoa já tem conta. Se a RPC falhar, o acesso fica criado e o
+ * texto diz que a admissão se conclui mais tarde. Só com `hr.onboarding.approve`, que é o que a RPC exige.
+ */
+function useConcluirNaFicha(convite: ReturnType<typeof useConviteAdmissaoResumo>, temConta: boolean, podeAprovar: boolean) {
+  const { t } = useTranslation();
+  const { concluir, aExecutar } = useConcluirAdmissao();
+  const [erro, setErro] = useState<string | null>(null);
+  /** A conta ficou criada mas o e-mail das credenciais não saiu: não se conclui até se reenviarem. */
+  const [emailNaoSaiu, setEmailNaoSaiu] = useState(false);
+  // O estado `aExecutar` só muda no render seguinte: a ref impede o segundo clique no mesmo instante.
+  const emCurso = useRef(false);
+  const resumo = convite.resumo;
+  const conviteId = resumo?.conviteId ?? null;
+  const estadoDoConvite = resumo?.estado;
+  const concluivel = conviteId !== null && resumo !== null && podeConcluirAdmissao(resumo.estado) && podeAprovar;
+
+  // Um erro ou aviso de um convite (ou de um estado) que já passou não se mantém.
+  useEffect(() => {
+    setErro(null);
+    setEmailNaoSaiu(false);
+  }, [conviteId, estadoDoConvite]);
+
+  const concluirAgora = async (depoisDoAcesso: boolean) => {
+    if (conviteId === null || !concluivel || emCurso.current) return;
+    emCurso.current = true;
+    setErro(null);
+    try {
+      const resultado = await concluir(conviteId);
+      if (!resultado.ok) {
+        const motivo = resultado.erro ?? "";
+        setErro(depoisDoAcesso ? t("hr.acesso.passo.concluirFalhouDepoisDoAcesso", { motivo }) : motivo);
+        return;
+      }
+      toast.success(t("hr.acesso.passo.concluida"));
+      setEmailNaoSaiu(false);
+      focarTituloDaFicha();
+      convite.recarregar();
+    } finally {
+      emCurso.current = false;
+    }
+  };
+  // Só a criação do acesso conclui, e só se o e-mail das credenciais saiu; reenviar a quem já tem conta não conclui nada.
+  const aoCriarAcesso = (emailEnviado: boolean) => {
+    focarTituloDaFicha();
+    if (temConta) return;
+    if (!emailEnviado) {
+      setEmailNaoSaiu(true);
+      return;
+    }
+    void concluirAgora(true);
+  };
+  return { aConcluir: aExecutar, erro, emailNaoSaiu, concluirAgora, aoCriarAcesso };
+}
+
+/**
+ * O botão que abriu o diálogo (ou que se clicou) desaparece quando a conta aparece ou a admissão conclui, e o foco cairia
+ * para o body: leva-se para o título da ficha. O atraso deixa o Radix devolver o foco primeiro, para este ganhar.
+ */
+function focarTituloDaFicha() {
+  window.setTimeout(() => document.querySelector<HTMLElement>("[data-titulo-ficha]")?.focus(), 150);
+}
+
 function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa, aoPronta }: FichaCompletaProps) {
   useAvisarPronta(aoPronta);
   const ctx = useContextoFicha(ficha, pessoa);
@@ -153,6 +221,12 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa, aoPront
   const aoMudarCargo = () => {
     void ficha.refresh();
     p.recarregar();
+  };
+  const podeAprovar = ctx.hasPermission("hr.onboarding.approve");
+  const conclusao = useConcluirNaFicha(convite, temConta, podeAprovar);
+  const aoCriadoAcesso = (resultado: { emailEnviado: boolean }) => {
+    void ficha.refresh();
+    conclusao.aoCriarAcesso(resultado.emailEnviado);
   };
 
   return (
@@ -172,7 +246,12 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa, aoPront
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <PessoaConviteAdmissaoEstado
             pessoaId={pessoa.id} estado={convite} podeEnviar={ctx.hasPermission("hr.pessoas.convite.enviar") && !temConta}
-            podeAprovar={ctx.hasPermission("hr.onboarding.approve")}
+            podeAprovar={podeAprovar}
+          />
+          <PassoAcessoAdmissao
+            resumo={convite.resumo} temConta={temConta} podeCriarAcesso={ctx.hasPermission("hr.pessoas.conta.criar")}
+            podeAprovar={podeAprovar} aoEnviarAcesso={() => dialogos.setAcessoAberto(true)}
+            aoConcluir={() => void conclusao.concluirAgora(false)} aConcluir={conclusao.aConcluir} erro={conclusao.erro} emailNaoSaiu={conclusao.emailNaoSaiu}
           />
           <PessoaAdmissaoPendencias pessoaId={pessoa.id} estado={p} />
           <ConteudoAba
@@ -182,7 +261,7 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa, aoPront
       </Tabs>
       <Dialogos
         pessoa={pessoa} ctx={ctx} convite={convite} temConta={temConta} {...dialogos}
-        aoCriadoAcesso={() => void ficha.refresh()}
+        aoCriadoAcesso={aoCriadoAcesso}
       />
     </>
   );
@@ -212,7 +291,7 @@ interface DialogosProps {
   setConviteAberto: (aberto: boolean) => void;
   acessoAberto: boolean;
   setAcessoAberto: (aberto: boolean) => void;
-  aoCriadoAcesso: () => void;
+  aoCriadoAcesso: (resultado: { emailEnviado: boolean }) => void;
 }
 
 function Dialogos(p: DialogosProps) {

@@ -3,6 +3,7 @@
  * JSX): vive aqui para `SelosAdmissao.tsx` exportar so o componente.
  */
 import { formatarDataHora } from "@/lib/hr/conviteAdmissaoEcra";
+import { portalSoParaDocumentos } from "@/lib/hr/estadoAdmissao";
 import type { useTranslation } from "@/hooks/useTranslation";
 import type { EstadoAdmissao, EstadoPortalConvite } from "@/types/hr";
 
@@ -22,7 +23,16 @@ export function varianteDoPortal(portal: EstadoPortalConvite): VarianteSelo {
 }
 
 /** A frase da validade do link, ou `null` quando nao ha nada a dizer. */
-export function fraseDoPortal(t: Traduzir, portal: EstadoPortalConvite, validUntil: string | null): string | null {
+export function fraseDoPortal(
+  t: Traduzir,
+  portal: EstadoPortalConvite,
+  validUntil: string | null,
+  estado?: EstadoAdmissao,
+): string | null {
+  // Depois de aprovada a ficha fecha, mas o portal continua aberto para documentos: «encerrado» enganaria.
+  if (portal === "encerrado" && estado !== undefined && portalSoParaDocumentos(estado)) {
+    return t("hr.convite.validade.soDocumentos");
+  }
   switch (portal) {
     case "ativo":
       return validUntil ? t("hr.convite.validade.ativo", { data: formatarDataHora(validUntil) }) : null;

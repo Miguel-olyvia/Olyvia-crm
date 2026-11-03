@@ -29,7 +29,7 @@ interface CartaoAdmissaoProps {
 export function CartaoAdmissao({ item, podeRever, aoRever, aoAbrirFicha }: CartaoAdmissaoProps) {
   const { t } = useTranslation();
   const terminado = item.estado === "terminado";
-  const frase = fraseDoPortal(t, item.estadoPortal, item.validUntil);
+  const frase = fraseDoPortal(t, item.estadoPortal, item.validUntil, item.estado);
   const submetidoEm = formatarDataHora(item.submetidoEm);
   const devolvidaEm = formatarDataHora(item.devolvidaEm);
   const revisavel = podeRever && !terminado && item.estado !== "desconhecido";

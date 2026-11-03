@@ -41,7 +41,7 @@ function Estado({ item, revisao }: { item: ItemPipeline; revisao: RevisaoAdmissa
   const { t } = useTranslation();
   const estado = revisao.estado ?? item.estado;
   const estadoPortal = revisao.estadoPortal ?? item.estadoPortal;
-  const frase = fraseDoPortal(t, estadoPortal, revisao.validUntil ?? item.validUntil);
+  const frase = fraseDoPortal(t, estadoPortal, revisao.validUntil ?? item.validUntil, estado);
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-semibold">{t("rhAdm.revisao.estado")}</h3>

@@ -101,12 +101,19 @@ describe("podeProlongar", () => {
 });
 
 describe("cancelarExigeAprovar / podeCancelar", () => {
-  it.each(["aprovada", "a_aguardar_assinaturas", "assinaturas_concluidas", "a_aguardar_ativacao"] as const)(
+  it.each(["aprovada", "a_aguardar_assinaturas"] as const)(
     "%s: cancelar desfaz a aprovacao e exige hr.onboarding.approve",
     (estado) => {
       expect(cancelarExigeAprovar(estado)).toBe(true);
       expect(podeCancelar(estado, { podeAprovar: false })).toBe(false);
       expect(podeCancelar(estado, { podeAprovar: true })).toBe(true);
+    },
+  );
+
+  it.each(["assinaturas_concluidas", "a_aguardar_ativacao"] as const)(
+    "%s: contrato assinado, ja nao se cancela (HRA38 na base)",
+    (estado) => {
+      expect(podeCancelar(estado, { podeAprovar: true })).toBe(false);
     },
   );
 
