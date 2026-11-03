@@ -684,7 +684,7 @@ export function exemplosClientes(S: Estado): boolean {
 export const demo = (): Estado => { const S = seed(); exemplosClientes(S); return S; };
 
 /** Os campos que são da pessoa (e não de um negócio): passam para cada negócio novo do mesmo cliente. */
-export const CAMPOS_PESSOA: readonly string[] = ["email", "pref", "hora", "idioma", "rgpd", "tipo_cliente", "nif", "nif_fat", "nome_fiscal", "email_fat", "origem", "recomendou", "concelho"];
+export const CAMPOS_PESSOA: readonly string[] = ["email", "pref", "hora", "idioma", "rgpd", "tipo_cliente", "nif", "nif_fat", "nome_fiscal", "email_fat", "origem", "recomendou", "origem_outra", "concelho"];
 
 const by0 = (S: Estado, id: number) => S.deals.find((d) => d.id === id)!;
 
