@@ -71,7 +71,8 @@ function PorTratar({ ctx, d, conversa, m, chave, fechar }: { ctx: Ctx; d: Negoci
   const { S, A, run } = ctx;
   const [tratar, setTratar] = useState(false);
   const [nota, setNota] = useState<string | null>(null);
-  const pode = S.role === "operacoes" && d.obra.plano?.estado !== "concluída";
+  // 3/11: também com a obra concluída (a assistência depois da obra, ex.: garantia: a obra reabre quando as tarefas entram)
+  const pode = S.role === "operacoes";
   const origem: Origem = { msg: chave, texto: m.t, fotos: fotosDe(m) };
   return (
     <article aria-label={`Problema por tratar: ${m.t}`} className="rounded-xl border border-destructive/40 bg-destructive/[0.04] p-4">
@@ -221,6 +222,9 @@ function CartaoProblema({ ctx, d, conversa, pr }: { ctx: Ctx; d: Negocio; conver
           <Button variant="outline" className="min-h-11" onClick={() => void responder(pr.id, pr.resposta ?? null)}><MessageCircle className="mr-1.5 h-4 w-4" aria-hidden="true" />Enviar a resposta</Button>
         </div>
       )}
+      {d.obra.plano?.estado === "concluída" && (pr.estado === "aberto" || pr.estado === "recusado") && pode && (
+        <p className="mt-3 text-sm text-muted-foreground">A obra está concluída: quando as tarefas entrarem no plano, reabre para a assistência.</p>
+      )}
       {pr.estado === "proposta" && a && (
         <div className="mt-3 flex flex-wrap items-center gap-3 text-[15px]">
           <span>Adenda {a.n} · {eur(totaisAdenda(a).total)} € · +{diasAdenda(a.linhas)} {diasAdenda(a.linhas) === 1 ? "dia" : "dias"}{a.estado === "rascunho" ? ` · ${estadoAdenda(a).t}` : ""}</span>
@@ -261,6 +265,6 @@ export function AcaoMensagemCliente({ ctx, d, m, chave, abrir }: { ctx: Ctx; d: 
   const pr = problemaDaMensagem(d, chave);
   if (pr) return <span className="text-xs text-muted-foreground">Problema {pr.id} · {ESTADO[pr.estado][0]}</span>;
   if (fotosDe(m).length) return <button type="button" onClick={() => abrir(chave)} className="text-xs font-medium text-destructive underline-offset-4 hover:underline">Problema por tratar</button>;
-  if (ctx.S.role !== "operacoes" || !d.obra.plano || d.obra.plano.estado === "concluída") return null;
+  if (ctx.S.role !== "operacoes" || !d.obra.plano) return null;
   return <button type="button" onClick={() => abrir(chave)} className="text-xs font-medium text-primary underline-offset-4 hover:underline">Tratar como problema</button>;
 }

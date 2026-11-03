@@ -22,7 +22,7 @@ import {
   MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
   juntarAoPlano, linhaAdenda, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
-import { MOTIVO_PROBLEMA, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
+import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
@@ -1791,8 +1791,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     });
     return linhas;
   };
+  /** 3/11: a obra concluída volta a «em curso» para as tarefas de um problema do cliente (a assistência, ex.: garantia): começam hoje.
+   *  O auto de receção assinado fica; ao encerrar de novo, o real da obra conta também a assistência. */
+  const reabrirParaAssistencia = (d: Negocio, pr: Pick<ProblemaCliente, "id">): void => {
+    const p = d.obra.plano;
+    if (!p || p.estado !== "concluída") return;
+    p.estado = "em curso"; p.dia = diaDeHoje(p);
+    log(d, `Obra reaberta para assistência: problema do cliente ${pr.id}`, "w");
+  };
   /** 3/11: o problema do cliente sem orçamento: as tarefas entram já no plano (hoje, com a obra em curso), com os técnicos avisados. */
   const resolverSemCusto = (d: Negocio, pr: ProblemaCliente): string => {
+    reabrirParaAssistencia(d, pr);
     const p = d.obra.plano!, fimAntes = rotuloDia(p, fimDe(p.tasks) - 1), quem = PAPEIS[S.role].nome;
     const novas = pr.tarefas.map((x) => {
       const t = tarefaDoProblema(p, pr, x, TECS), ti = juntarTarefa(p, t);
@@ -2331,7 +2340,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"]; desconto?: number }): string | null {
       const d = deal(id);
       if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return null; }
-      if (d.obra.plano?.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
+      // 3/11: a de um problema do cliente faz-se mesmo com a obra concluída (a assistência depois da obra; reabre quando for assinada)
+      if (d.obra.plano?.estado === "concluída" && !ehRefProblema(extra?.origem?.imprevisto)) { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
       const k = (d.adendas?.length ?? 0) + 1;
       const linhas = linhasDaAdenda(d, k, itens, extra?.livres ?? []);
       if (!linhas.length) return null;
@@ -2484,6 +2494,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!a || a.estado !== "aceite" || a.contrato !== "enviado") return;
       a.estado = "assinada"; a.assinada = agora(); a.contrato = null;
       log(d, "Adenda " + n + " assinada pelo cliente");
+      // 3/11: a de um problema do cliente com a obra já concluída reabre-a para a assistência
+      { const pr = problemaDaAdenda(d, a); if (pr) reabrirParaAssistencia(d, pr); }
       if (p && p.estado !== "concluída") {
         const antes = new Map(p.tasks.map((t) => [t, t.dia] as const));
         const novas = juntarAoPlano(p, a);
@@ -3260,7 +3272,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     tratarProblema(id: number, m: { msg: string; texto: string; fotos: string[] }, x: { tarefas: TarefaProblema[]; cobrar: boolean; motivo?: string }): string | null {
       const d = deal(id), p = d.obra.plano;
       if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
-      if (!p || p.estado === "concluída") { avisar({ msg: p ? "A obra já acabou" : "A obra ainda não tem plano", sub: "As tarefas novas entram no plano da obra", kind: "bad" }); return null; }
+      // 3/11: com a obra concluída também se trata (garantia depois da obra): a obra reabre para assistência quando as tarefas entram
+      if (!p) { avisar({ msg: "A obra ainda não tem plano", sub: "As tarefas novas entram no plano da obra", kind: "bad" }); return null; }
       const erro = erroTarefas(x.tarefas, x.cobrar);
       if (erro) { avisar({ msg: "Falta informação", sub: erro, kind: "bad" }); return null; }
       const ja = problemaDaMensagem(d, m.msg);
@@ -3295,8 +3308,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         return null;
       }
       if (k === "sem_custo") {
-        const p = d.obra.plano;
-        if (!p || p.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
+        if (!d.obra.plano) return null;
         pr.cobrar = false; pr.decisao = "Fazer sem custo, depois da proposta recusada";
         if (motivo.trim()) pr.motivo = motivo.trim(); else delete pr.motivo;
         pr.tarefas = pr.tarefas.map((t) => ({ n: t.n, h: t.h, tec: t.tec }));

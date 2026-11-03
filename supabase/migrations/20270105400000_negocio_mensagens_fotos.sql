@@ -16,13 +16,20 @@
 --      · neg_mensagem_foto(organização, foto): a equipa (pessoas.view) lê uma fotografia de um negócio da organização.
 --      Cada fotografia vem como {mime, b64}; a leitura devolve {mime, b64}.
 --   Limites: 1 a 4 fotografias por mensagem; até 1,5 MB cada (o portal reduz a 1600 px antes de enviar); até 200 por negócio.
+--   4. Quem é avisado quando o cliente escreve (decisão do Rúben, 3/11): os GESTORES DE OBRA da organização (as pessoas do RH com o papel
+--      «operacoes» no Negócio e uma conta activa), em vez do comercial do negócio. Só se a organização não tiver nenhum gestor de obra com
+--      conta é que o aviso vai ao comercial (como antes), para a mensagem nunca ficar sem ninguém. Com fotografias, o título diz que o
+--      cliente mostrou um problema. A notificação abre a obra (/negocios?vista=operacoes&obra=<número>).
+--      portal_neg_mensagem_enviar passa a usar a função interna fn_portal_neg_msg_gravar (a mesma validação, o mesmo limite por hora e a
+--      mesma notificação única por resolver, de 20270103700000); a assinatura, os GRANT e o que devolve não mudam.
 --
 -- O que muda para a Mudelar: nada (tabela e funções novas). Esta migration só se aplica à RH.
 -- Precisa do código novo para se ver (o portal só envia fotografias com ele), mas aplicada sozinha não parte nada: as mensagens antigas
--- ficam com 'fotos': [] e o código de antes ignora o campo.
+-- ficam com 'fotos': [] e o código de antes ignora o campo. O aviso passa logo a ir aos gestores de obra.
 SET lock_timeout = '5s';
 
 DO $guarda$
+DECLARE v_falta text;
 BEGIN
   IF to_regclass('public.negocio_mensagens') IS NULL THEN
     RAISE EXCEPTION 'Guarda: falta a tabela negocio_mensagens (migration 20270101430000).';
@@ -30,6 +37,18 @@ BEGIN
   IF to_regprocedure('public.portal_neg_mensagem_enviar(uuid,text)') IS NULL OR to_regprocedure('public.fn_portal_msg_negocio(uuid)') IS NULL
      OR to_regprocedure('public.fn_neg_msg_json(public.negocio_mensagens)') IS NULL OR to_regprocedure('public.fn_cat_exigir(uuid,text)') IS NULL THEN
     RAISE EXCEPTION 'Guarda: faltam as funções da conversa do negócio (20270101430000) ou fn_cat_exigir.';
+  END IF;
+  -- a notificação única por resolver (20270103700000) já tem de estar aplicada: esta migration parte dessa versão
+  IF position('ON CONFLICT (type, entity_id, user_id)' IN pg_get_functiondef('public.portal_neg_mensagem_enviar(uuid,text)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'Guarda: aplicar primeiro 20270103700000_portal_mensagem_notificacao_unica.sql.';
+  END IF;
+  SELECT string_agg(x.t || '.' || x.c, ', ') INTO v_falta
+    FROM (VALUES ('pessoas_papeis_negocio','pessoa_id'), ('pessoas_papeis_negocio','organization_id'), ('pessoas_papeis_negocio','papel'),
+                 ('pessoas_contas','pessoa_id'), ('pessoas_contas','anew_user_id'), ('pessoas_contas','organization_id'), ('pessoas_contas','estado'),
+                 ('pessoas_contas','revogada_em'), ('pessoas','deleted_at'), ('pessoas','data_saida')) AS x(t, c)
+   WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns k WHERE k.table_schema = 'public' AND k.table_name = x.t AND k.column_name = x.c);
+  IF v_falta IS NOT NULL THEN
+    RAISE EXCEPTION 'Guarda: faltam colunas de que o aviso aos gestores de obra depende: %', v_falta;
   END IF;
 END
 $guarda$;
@@ -110,7 +129,76 @@ AS $function$
 $function$;
 REVOKE ALL ON FUNCTION public.fn_neg_msg_foto_json(public.negocio_mensagem_fotos) FROM PUBLIC, anon, authenticated, service_role;
 
--- 3. Portal: enviar com fotografias, ler uma fotografia -----------------------------------------------------------------------------------------
+-- 3. Portal: gravar a mensagem e avisar os gestores de obra ---------------------------------------------------------------------------------------
+-- Interna: valida, grava a mensagem do cliente e avisa. Uma só notificação por resolver por negócio e pessoa (notifications_dedup): a mais
+-- recente ganha. p_fotos: quantas fotografias a mensagem vai levar (só muda o título do aviso).
+CREATE OR REPLACE FUNCTION public.fn_portal_neg_msg_gravar(p_negocio_id uuid, p_texto text, p_fotos integer)
+ RETURNS public.negocio_mensagens
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v        public.negocios;
+  v_texto  text := btrim(p_texto);
+  v_nome   text;
+  v_titulo text;
+  v_quem   uuid[];
+  v_u      uuid;
+  v_m      public.negocio_mensagens;
+BEGIN
+  v := public.fn_portal_msg_negocio(p_negocio_id);
+  IF v_texto IS NULL OR char_length(v_texto) NOT BETWEEN 1 AND 2000 THEN
+    RAISE EXCEPTION 'Dados inválidos: a mensagem tem de 1 a 2000 caracteres.' USING ERRCODE = 'NE006';
+  END IF;
+  IF (SELECT count(*) FROM public.negocio_mensagens
+       WHERE negocio_id = v.id AND autor_tipo = 'cliente' AND created_at > now() - interval '1 hour') >= 30 THEN
+    RAISE EXCEPTION 'Demasiadas mensagens: tente daqui a pouco.' USING ERRCODE = 'NE010';
+  END IF;
+  SELECT COALESCE(NULLIF(btrim(e.display_name), ''), 'Cliente') INTO v_nome FROM public.anew_entities e WHERE e.id = v.entity_id;
+  v_nome := COALESCE(v_nome, 'Cliente');
+  INSERT INTO public.negocio_mensagens (organization_id, negocio_id, autor_tipo, autor_nome, autor_auth_id, texto)
+  VALUES (v.organization_id, v.id, 'cliente', v_nome, auth.uid(), v_texto)
+  RETURNING * INTO v_m;
+
+  -- 3/11: avisa os gestores de obra da organização (papel «operacoes» no Negócio, pessoa activa, conta activa); sem nenhum, o comercial
+  SELECT array_agg(DISTINCT u.auth_user_id) INTO v_quem
+    FROM public.pessoas_papeis_negocio pp
+    JOIN public.pessoas p ON p.id = pp.pessoa_id AND p.deleted_at IS NULL AND (p.data_saida IS NULL OR p.data_saida >= current_date)
+    JOIN public.pessoas_contas pc ON pc.pessoa_id = pp.pessoa_id AND pc.organization_id = v.organization_id AND pc.estado = 'activa' AND pc.revogada_em IS NULL
+    JOIN public.anew_users u ON u.id = pc.anew_user_id AND u.deleted_at IS NULL AND u.auth_user_id IS NOT NULL
+   WHERE pp.organization_id = v.organization_id AND pp.papel = 'operacoes';
+  IF v_quem IS NULL OR cardinality(v_quem) = 0 THEN
+    SELECT array_agg(u.auth_user_id) INTO v_quem FROM public.anew_users u WHERE u.id = v.assigned_to AND u.deleted_at IS NULL AND u.auth_user_id IS NOT NULL;
+  END IF;
+  v_titulo := CASE WHEN COALESCE(p_fotos, 0) > 0 THEN v_nome || ' mostrou um problema (' || p_fotos || CASE WHEN p_fotos = 1 THEN ' fotografia)' ELSE ' fotografias)' END
+                   ELSE 'Mensagem de ' || v_nome END;
+  FOREACH v_u IN ARRAY COALESCE(v_quem, '{}'::uuid[]) LOOP
+    INSERT INTO public.notifications (user_id, organization_id, type, kind, title, message, priority, link, entity_type, entity_id)
+    VALUES (v_u, v.organization_id, 'client_message', 'notification', v_titulo, left(v_texto, 200), 'high',
+            '/negocios?vista=operacoes&obra=' || v.numero, 'negocio', v.id)
+    ON CONFLICT (type, entity_id, user_id) WHERE (is_resolved = false)
+    DO UPDATE SET title = EXCLUDED.title, message = EXCLUDED.message, priority = EXCLUDED.priority, link = EXCLUDED.link,
+                  is_read = false, read_at = NULL, is_dismissed = false, created_at = now();
+  END LOOP;
+  RETURN v_m;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.fn_portal_neg_msg_gravar(uuid, text, integer) FROM PUBLIC, anon, authenticated, service_role;
+
+-- A de sempre (a mesma assinatura e o mesmo resultado), agora pela gravação interna: o aviso vai aos gestores de obra.
+CREATE OR REPLACE FUNCTION public.portal_neg_mensagem_enviar(p_negocio_id uuid, p_texto text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  RETURN public.fn_neg_msg_json(public.fn_portal_neg_msg_gravar(p_negocio_id, p_texto, 0));
+END;
+$function$;
+
+-- 4. Portal: enviar com fotografias, ler uma fotografia -----------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.portal_neg_mensagem_enviar_fotos(p_negocio_id uuid, p_texto text, p_fotos jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -122,7 +210,6 @@ DECLARE
   v_n      integer;
   v_texto  text := NULLIF(btrim(COALESCE(p_texto, '')), '');
   v_bytes  bytea[] := '{}';
-  v_msg    jsonb;
   v_m      public.negocio_mensagens;
   i        integer;
 BEGIN
@@ -138,13 +225,12 @@ BEGIN
   FOR i IN 0 .. v_n - 1 LOOP
     v_bytes := array_append(v_bytes, public.fn_neg_msg_foto_bytes(p_fotos->i));
   END LOOP;
-  -- a mensagem pelo caminho de sempre (validação, limite por hora, notificação ao comercial)
-  v_msg := public.portal_neg_mensagem_enviar(p_negocio_id, COALESCE(v_texto, CASE WHEN v_n = 1 THEN 'Enviei uma fotografia.' ELSE 'Enviei ' || v_n || ' fotografias.' END));
+  -- a mensagem pelo caminho de sempre (validação, limite por hora, aviso aos gestores de obra)
+  v_m := public.fn_portal_neg_msg_gravar(p_negocio_id, COALESCE(v_texto, CASE WHEN v_n = 1 THEN 'Enviei uma fotografia.' ELSE 'Enviei ' || v_n || ' fotografias.' END), v_n);
   FOR i IN 0 .. v_n - 1 LOOP
     INSERT INTO public.negocio_mensagem_fotos (organization_id, negocio_id, mensagem_id, ordem, mime, dados)
-    VALUES (v.organization_id, v.id, (v_msg->>'id')::uuid, i + 1, p_fotos->i->>'mime', v_bytes[i + 1]);
+    VALUES (v.organization_id, v.id, v_m.id, i + 1, p_fotos->i->>'mime', v_bytes[i + 1]);
   END LOOP;
-  SELECT * INTO v_m FROM public.negocio_mensagens WHERE id = (v_msg->>'id')::uuid;
   RETURN public.fn_neg_msg_json(v_m);
 END;
 $function$;
@@ -166,7 +252,7 @@ BEGIN
 END;
 $function$;
 
--- 4. CRM: ler uma fotografia ------------------------------------------------------------------------------------------------------------------
+-- 5. CRM: ler uma fotografia ------------------------------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.neg_mensagem_foto(p_organization_id uuid, p_foto_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -189,7 +275,7 @@ BEGIN
 END;
 $function$;
 
--- 5. Privilégios: só utilizadores com sessão; nunca anon ------------------------------------------------------------------------------------
+-- 6. Privilégios: só utilizadores com sessão; nunca anon ------------------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION public.portal_neg_mensagem_enviar_fotos(uuid, text, jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.portal_neg_mensagem_foto(uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.neg_mensagem_foto(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -201,7 +287,7 @@ COMMENT ON FUNCTION public.portal_neg_mensagem_enviar_fotos(uuid, text, jsonb) I
 COMMENT ON FUNCTION public.portal_neg_mensagem_foto(uuid) IS 'Portal: uma fotografia ({id, mime, b64}) de uma mensagem de um negócio da conta que chama. 20270105400000.';
 COMMENT ON FUNCTION public.neg_mensagem_foto(uuid, uuid) IS 'Negócio: uma fotografia ({id, mime, b64}) de uma mensagem de um negócio da organização. pessoas.view. 20270105400000.';
 
--- 6. Verificação final: RLS activa, sem privilégios directos, as três funções só para authenticated e a mensagem com 'fotos'.
+-- 7. Verificação final: RLS activa, sem privilégios directos, as funções só para authenticated, a mensagem com 'fotos' e o aviso aos gestores.
 DO $verifica$
 DECLARE v_n integer;
 BEGIN
@@ -221,6 +307,14 @@ BEGIN
   END IF;
   IF position('''fotos''' IN pg_get_functiondef('public.fn_neg_msg_json(public.negocio_mensagens)'::regprocedure)) = 0 THEN
     RAISE EXCEPTION 'fn_neg_msg_json não ficou com as fotografias.';
+  END IF;
+  IF position('fn_portal_neg_msg_gravar' IN pg_get_functiondef('public.portal_neg_mensagem_enviar(uuid,text)'::regprocedure)) = 0
+     OR has_function_privilege('anon', 'public.portal_neg_mensagem_enviar(uuid,text)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.portal_neg_mensagem_enviar(uuid,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'portal_neg_mensagem_enviar não ficou com o aviso aos gestores de obra (ou mudaram os privilégios).';
+  END IF;
+  IF has_function_privilege('authenticated', 'public.fn_portal_neg_msg_gravar(uuid,text,integer)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'A gravação interna da mensagem ficou aberta a authenticated.';
   END IF;
   IF has_function_privilege('authenticated', 'public.fn_neg_msg_foto_bytes(jsonb)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.fn_neg_msg_foto_json(public.negocio_mensagem_fotos)', 'EXECUTE') THEN

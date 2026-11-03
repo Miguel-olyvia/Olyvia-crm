@@ -12,6 +12,7 @@
 // chama estas funções (A.tratarProblema, A.descartarProblema, A.decidirProblema, A.problemaRespondido).
 import { HORAS_DIA } from "./ganttOrcamento";
 import { fimDe } from "./ajustesPlano";
+import { deIso, diasDaObra } from "./planoObra";
 import { perfilDoTecnico, type FichaTecnico } from "./equipa/tecnicos";
 
 /** O que se usa de cada técnico (o registo vivo, TECS). */
@@ -98,6 +99,17 @@ export function erroTarefas(T: readonly TarefaProblema[], cobrar: boolean): stri
   if (T.some((x) => !x.tec)) return "Falta o técnico de uma tarefa.";
   if (cobrar && T.some((x) => !((x.preco ?? 0) > 0))) return "Falta o preço de uma tarefa.";
   return null;
+}
+
+/** O índice do dia de hoje no plano (os dias úteis desde o início; pode passar do fim da obra). Sem datas reais (o protótipo), o dia
+ *  a seguir ao fim. Serve para reabrir uma obra concluída: as tarefas da assistência começam hoje. */
+export function diaDeHoje(p: Plano, hoje = new Date()): number {
+  const fim = fimDe(p.tasks);
+  if (p.origem !== "orcamento" || !p.inicio) return fim;
+  const hj = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()), dias = diasDaObra(deIso(p.inicio), fim + 400);
+  let k = -1;
+  for (let i = 0; i < dias.length && dias[i] <= hj; i++) k = i;
+  return Math.max(fim, k);
 }
 
 /** O primeiro dia das tarefas de um problema: hoje, com a obra em curso; antes de arrancar, no fim do plano. */

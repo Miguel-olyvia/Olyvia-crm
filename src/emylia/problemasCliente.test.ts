@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { esquecerInventario } from "./inventario/loja";
 import { TECS, acoes, minhas, seed, type Estado, type MensagemObra, type Negocio } from "./motor";
 import { adendaAssinada } from "./testeAdenda";
+import { fimDe } from "./ajustesPlano";
 import {
-  erroTarefas, inicioProblema, livresDoProblema, mensagensPorTratar, problemaDaAdenda, problemasAbertos, tarefaDoProblema, textoRespostaComOrcamento,
+  diaDeHoje, erroTarefas, inicioProblema, livresDoProblema, mensagensPorTratar, problemaDaAdenda, problemasAbertos, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto,
 } from "./problemasCliente";
 
@@ -136,6 +137,42 @@ describe("problemas reportados pelo cliente (o gestor de obra)", () => {
     expect(d.obra.problemas![1]).toMatchObject({ estado: "descartado", decisao: "é um elogio" });
     expect(p.tasks).toHaveLength(antes);
     expect(d.hist[0].t).toMatch(/não é um problema \(é um elogio\)/);
+  });
+
+  it("depois de a obra acabar (garantia): sem orçamento, a obra reabre para assistência e as tarefas começam a seguir ao fim", () => {
+    const { A, d, p } = obra1022();
+    p.estado = "concluída";
+    const fim = fimDe(p.tasks);
+    A.role("operacoes");
+    expect(A.tratarProblema(d.id, origem(), { tarefas: [{ n: "Refazer a junta", h: 2, tec: "ma" }], cobrar: false, motivo: "Garantia" })).toMatch(/sem custo para si \(garantia\)/);
+    expect(p.estado).toBe("em curso");
+    expect(p.dia).toBe(fim);
+    expect(p.tasks.find((t) => t.problema === "PC-1022-1")).toMatchObject({ dia: fim, tec: "ma" });
+    expect(d.hist.some((h) => h.t === "Obra reaberta para assistência: problema do cliente PC-1022-1")).toBe(true);
+  });
+
+  it("depois de a obra acabar, com orçamento: a adenda faz-se na mesma e, assinada, reabre a obra", () => {
+    const { A, d, p } = obra1022();
+    p.estado = "concluída";
+    A.role("operacoes");
+    // as outras adendas continuam a não se poder fazer com a obra concluída
+    expect(A.criarAdenda(d.id, [], "O cliente pediu", { livres: [{ n: "x", h: 1, preco: 10, perfil: "Canalizador", mats: [] }] })).toBeNull();
+    A.tratarProblema(d.id, origem(), { tarefas: [{ n: "Trocar a base", h: 6, tec: "hn", preco: 320 }], cobrar: true });
+    const pr = d.obra.problemas![0];
+    expect(pr.estado).toBe("proposta");
+    expect(p.estado).toBe("concluída");
+    adendaAssinada(A, d.id, pr.adenda!);
+    expect(p.estado).toBe("em curso");
+    expect(pr.estado).toBe("aprovado");
+    expect(p.tasks.find((t) => t.problema === pr.id)).toMatchObject({ tec: "hn", dia: p.dia });
+  });
+
+  it("o dia de hoje no plano: os dias úteis desde o início (pode passar do fim); sem datas, o dia a seguir ao fim", () => {
+    const { p } = obra1022();
+    expect(diaDeHoje({ ...p, origem: undefined })).toBe(fimDe(p.tasks));
+    const q = { ...p, origem: "orcamento" as const, inicio: "2026-10-01" };
+    expect(diaDeHoje(q, new Date(2026, 9, 1))).toBe(fimDe(p.tasks));
+    expect(diaDeHoje(q, new Date(2027, 2, 1))).toBeGreaterThan(fimDe(p.tasks));
   });
 
   it("só o gestor da obra trata; sem contrato não há orçamento e o problema fica por tratar", () => {
