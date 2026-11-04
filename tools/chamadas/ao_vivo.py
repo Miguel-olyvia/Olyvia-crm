@@ -30,22 +30,44 @@ sys.stdout.reconfigure(encoding="utf-8")
 AQUI = Path(__file__).parent
 SAIDA = AQUI / "saida"
 TAXA = 16000
-BLOCO = 480  # 30 ms
-PRE_ROLL_S = 0.4
-PAUSA_FIM_S = 0.8     # silêncio que fecha uma fala
+BLOCO = 512  # 32 ms, o que o VAD Silero espera
+PRE_ROLL_S = 0.3
+PAUSA_FIM_S = 0.4     # silêncio que fecha uma fala (ao telefone responde-se depressa)
 FALA_MAX_S = 20.0     # corta falas longas para o texto ir aparecendo
 FALA_MIN_S = 0.35
 PISO_MIN = 0.004
+VAD_LIMIAR = 0.5
 
 COR = {"comercial": "\033[94m", "cliente": "\033[33m", "fim": "\033[0m", "cinza": "\033[90m"}
 
 
-class Detetor:
-    """Separa o som do microfone em falas, por energia, com piso de ruído adaptativo."""
+class VadSilero:
+    """VAD Silero (vem com o faster-whisper), em modo contínuo: guarda o estado entre blocos."""
 
     def __init__(self):
+        import whisper_local  # garante o stub do PyAV antes de importar o faster_whisper
+        from faster_whisper.vad import get_vad_model
+        self.modelo = get_vad_model()
+        self.h = np.zeros((1, 1, 128), dtype="float32")
+        self.c = np.zeros((1, 1, 128), dtype="float32")
+        self.contexto = np.zeros(64, dtype="float32")
+
+    def prob_fala(self, bloco: np.ndarray) -> float:
+        x = np.concatenate([self.contexto, bloco.astype("float32")])[None, :]
+        out, self.h, self.c = self.modelo.session.run(None, {"input": x, "h": self.h, "c": self.c})
+        self.contexto = bloco[-64:].astype("float32")
+        return float(out.reshape(-1)[0])
+
+
+class Detetor:
+    """Separa o som do microfone em falas: o VAD diz se há voz em cada bloco de 32 ms;
+    uma pausa fecha a fala. A energia fica só para o medidor e para ignorar o quase silêncio."""
+
+    def __init__(self):
+        self.vad = VadSilero()
         self.piso = PISO_MIN
         self.ultimo_rms = 0.0
+        self.ultima_prob = 0.0
         self.buffer: list[np.ndarray] = []
         self.pre: list[np.ndarray] = []
         self.a_falar = False
@@ -55,23 +77,24 @@ class Detetor:
 
     def alimentar(self, bloco: np.ndarray) -> tuple[np.ndarray, float] | None:
         """Devolve (fala, inicio_s) quando uma fala termina; senão None."""
+        if len(bloco) != BLOCO:
+            bloco = np.pad(bloco, (0, BLOCO - len(bloco)))[:BLOCO]
         dur = len(bloco) / TAXA
         rms = float(np.sqrt((bloco ** 2).mean()))
         self.ultimo_rms = rms
-        # piso de ruído: desce logo que há um bloco mais baixo, sobe devagar (cerca de 15 s)
         self.piso = max(PISO_MIN, rms if rms < self.piso else self.piso + (rms - self.piso) * 0.002)
-        limiar = max(self.piso * 3.0, PISO_MIN * 2)
-        com_som = rms > limiar
+        self.ultima_prob = self.vad.prob_fala(bloco)
+        com_som = self.ultima_prob >= VAD_LIMIAR and rms > PISO_MIN
         resultado = None
         if self.a_falar:
             self.buffer.append(bloco)
             self.silencio = 0.0 if com_som else self.silencio + dur
             duracao = sum(len(b) for b in self.buffer) / TAXA
-            pausa = PAUSA_FIM_S if duracao < 8 else PAUSA_FIM_S / 2
+            pausa = PAUSA_FIM_S if duracao < 8 else PAUSA_FIM_S * 0.75
             if self.silencio >= pausa or duracao >= FALA_MAX_S:
                 fala = np.concatenate(self.buffer)
                 if self.silencio >= pausa:
-                    fala = fala[: len(fala) - int(max(0, self.silencio - 0.2) * TAXA)]  # tira o silêncio final
+                    fala = fala[: len(fala) - int(max(0, self.silencio - 0.15) * TAXA)]  # tira o silêncio final
                 self.buffer, self.a_falar, self.silencio = [], False, 0.0
                 if len(fala) >= FALA_MIN_S * TAXA:
                     resultado = (fala, self.inicio_s)
@@ -120,8 +143,17 @@ def _fonte_ficheiro(fila: queue.Queue, parar: threading.Event, wav: Path, rapido
     fila.put(None)  # fim do ficheiro
 
 
+def _limpar_teclado():
+    """Deita fora Enters que ficaram no teclado (por exemplo durante o registo da voz)."""
+    if os.name == "nt":
+        import msvcrt
+        while msvcrt.kbhit():
+            msvcrt.getwch()
+
+
 def _esperar_enter(parar: threading.Event):
     try:
+        _limpar_teclado()
         input()
     except EOFError:
         return
@@ -129,15 +161,15 @@ def _esperar_enter(parar: threading.Event):
 
 
 def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool, sem_ficha: bool,
-           dispositivo: int | None, segundos: float | None = None) -> Path:
+           dispositivo: int | None, segundos: float | None = None, primeiro: str = "cliente") -> Path:
     import whisper_local
     from falantes import Falantes
 
     SAIDA.mkdir(exist_ok=True)
     print("A carregar modelos...", end=" ", flush=True)
     whisper_local.modelo()
-    falantes = Falantes.com_voz_registada(comercial) if comercial else Falantes()
-    print("pronto." + ("" if comercial else " Sem voz registada: a primeira fala conta como do comercial."))
+    falantes = Falantes.com_voz_registada(comercial) if comercial else Falantes(primeiro=primeiro)
+    print("pronto." + ("" if comercial else f" Sem voz registada: a primeira voz conta como do {primeiro}."))
     print(f"{'A ouvir o microfone' if not ficheiro else 'A ler ' + ficheiro.name}. Enter ou Ctrl+C para terminar.\n")
 
     fila: queue.Queue = queue.Queue()
@@ -159,14 +191,31 @@ def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool
         segs = whisper_local.transcrever_trecho(fala, inicio_s)
         if not segs:
             return
-        quem, conf = falantes.atribuir(fala)
-        texto = " ".join(s["texto"] for s in segs)
-        seg = {"inicio": segs[0]["inicio"], "fim": segs[-1]["fim"], "texto": texto, "falante": quem,
-               "confianca_falante": conf, "latencia_s": round(time.time() - t_ini, 2)}
-        segmentos.append(seg)
-        m, s = divmod(int(inicio_s), 60)
-        aviso = "" if conf >= 0.3 else " (?)"
-        print(f"{COR['cinza']}{m}:{s:02d}{COR['fim']} {COR[quem]}{quem.capitalize()}{aviso}:{COR['fim']} {texto}", flush=True)
+        # quem fala, frase a frase: ao telefone a resposta vem colada à pergunta e a mesma
+        # "fala" traz as duas pessoas. Frases curtas herdam o falante da fala inteira.
+        quem_fala, conf_fala = falantes.atribuir(fala)
+        linhas: list[dict] = []
+        for sg in segs:
+            a, b = int((sg["inicio"] - inicio_s) * TAXA), int((sg["fim"] - inicio_s) * TAXA)
+            trecho = fala[max(0, a):min(len(fala), b)]
+            if len(trecho) >= 0.7 * TAXA and len(segs) > 1:
+                quem, conf = falantes.atribuir(trecho)
+            else:
+                quem, conf = quem_fala, conf_fala
+            if linhas and linhas[-1]["falante"] == quem:
+                linhas[-1]["texto"] += " " + sg["texto"]
+                linhas[-1]["fim"] = sg["fim"]
+                linhas[-1]["confianca_falante"] = min(linhas[-1]["confianca_falante"], conf)
+            else:
+                linhas.append({"inicio": sg["inicio"], "fim": sg["fim"], "texto": sg["texto"], "falante": quem,
+                               "confianca_falante": conf})
+        latencia = round(time.time() - t_ini, 2)
+        for seg in linhas:
+            seg["latencia_s"] = latencia
+            segmentos.append(seg)
+            m, s = divmod(int(seg["inicio"]), 60)
+            aviso = "" if seg["confianca_falante"] >= 0.3 else " (?)"
+            print(f"{COR['cinza']}{m}:{s:02d}{COR['fim']} {COR[seg['falante']]}{seg['falante'].capitalize()}{aviso}:{COR['fim']} {seg['texto']}", flush=True)
         caminho_json.write_text(json.dumps({"ficheiro": f"{nome}.wav", "modo": "direto (microfone)", "segmentos": segmentos},
                                            ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -199,7 +248,7 @@ def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool
                 ultimo_nivel = agora
                 barra = "▮" * min(20, int(detetor.ultimo_rms * 100))
                 estado = "a ouvir fala" if detetor.a_falar else "silêncio"
-                print(f"{COR['cinza']}   som {detetor.ultimo_rms:.3f} piso {detetor.piso:.3f} {estado} {barra}{COR['fim']}", flush=True)
+                print(f"{COR['cinza']}   som {detetor.ultimo_rms:.3f} voz {detetor.ultima_prob:.2f} {estado} {barra}{COR['fim']}", flush=True)
             if agora - ultima_gravacao >= 30:
                 ultima_gravacao = agora
                 guardar_wav()
@@ -240,6 +289,8 @@ if __name__ == "__main__":
     ap.add_argument("--sem-ficha", action="store_true")
     ap.add_argument("--dispositivo", type=int, default=None, help="índice do microfone (python -m sounddevice)")
     ap.add_argument("--segundos", type=float, default=None, help="parar sozinho ao fim deste tempo (testes)")
+    ap.add_argument("--primeiro", choices=["cliente", "comercial"], default="cliente",
+                    help="sem voz registada, de quem é a primeira voz (numa chamada de saída é o cliente a atender)")
     a = ap.parse_args()
     nome = a.nome or ("direto-" + datetime.now().strftime("%Y-%m-%d-%H%M"))
-    correr(nome, a.comercial, a.ficheiro, a.rapido, a.sem_ficha, a.dispositivo, a.segundos)
+    correr(nome, a.comercial, a.ficheiro, a.rapido, a.sem_ficha, a.dispositivo, a.segundos, a.primeiro)

@@ -11,6 +11,12 @@ import site
 import sys
 import types
 
+# Os modelos já estão em cache. Sem isto, o cliente do Hugging Face (que o faster-whisper
+# importa) ia à internet confirmar versões e ficava pendurado quando a rede não respondia.
+# Tem de ser antes de qualquer import que o carregue. Para atualizar modelos: CHAMADAS_ONLINE=1.
+if not os.environ.get("CHAMADAS_ONLINE"):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 import numpy as np
 
 _modelo = None
@@ -67,6 +73,9 @@ PROMPT = ("Chamada telefónica em português de Portugal entre um comercial da M
 # Sem prompt inicial: com fala fora do tema o whisper devolvia o próprio prompt
 # (visto numa gravação real a 04/11). O PROMPT fica só para o filtro de ecos.
 
+# Vocabulário da área, como "hotwords" (mais leve do que o prompt). Vazio desliga.
+HOTWORDS = os.environ.get("CHAMADAS_HOTWORDS", "Mudelar, walk-in shower, SPC, poliban, base de duche, Olyvia")
+
 # Frases que o whisper inventa em silêncio ou ruído.
 ALUCINACOES = {"obrigado", "obrigada", "legendas pela comunidade amara.org", "amara.org", "tchau", "até à próxima", "subtitles by"}
 
@@ -90,7 +99,7 @@ def transcrever_trecho(pcm: np.ndarray, deslocamento_s: float = 0.0) -> list[dic
     """Transcreve um trecho (float32, 16 kHz). Devolve segmentos com tempos absolutos."""
     m = modelo()
     segs, _ = m.transcribe(np.ascontiguousarray(pcm, dtype=np.float32), language="pt", beam_size=5,
-                           vad_filter=False, condition_on_previous_text=False)
+                           vad_filter=False, condition_on_previous_text=False, hotwords=HOTWORDS or None)
     saida = []
     for s in segs:
         texto = s.text.strip()

@@ -18,6 +18,9 @@ from pathlib import Path
 
 import numpy as np
 
+if not os.environ.get("CHAMADAS_ONLINE"):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")  # ver whisper_local.py
+
 AQUI = Path(__file__).parent
 VOZES = AQUI / "vozes"
 TAXA = 16000
@@ -31,9 +34,10 @@ def _carregar():
     global _codificador
     if _codificador is not None:
         return _codificador
+    savedir = AQUI / ".modelos" / "ecapa"
     import torch  # noqa: F401
     from speechbrain.inference.speaker import EncoderClassifier
-    kw = {"source": "speechbrain/spkrec-ecapa-voxceleb", "savedir": str(AQUI / ".modelos" / "ecapa"),
+    kw = {"source": "speechbrain/spkrec-ecapa-voxceleb", "savedir": str(savedir),
           "run_opts": {"device": "cpu"}}
     try:
         from speechbrain.utils.fetching import LocalStrategy
@@ -71,12 +75,13 @@ def impressao_de_ficheiro(wav: Path) -> np.ndarray:
 class Falantes:
     """Decide, fala a fala, se é o comercial ou o cliente."""
 
-    def __init__(self, voz_comercial: np.ndarray | None = None):
+    def __init__(self, voz_comercial: np.ndarray | None = None, primeiro: str = "cliente"):
         self.comercial = voz_comercial
         self.registado = voz_comercial is not None
         self.cliente: np.ndarray | None = None
         self.n_comercial = 0
         self.n_cliente = 0
+        self.primeiro = primeiro  # sem registo: de quem é a primeira voz
 
     @classmethod
     def com_voz_registada(cls, nome: str) -> "Falantes":
@@ -95,12 +100,20 @@ class Falantes:
         """Devolve (quem, confiança). quem é 'comercial' ou 'cliente'."""
         curta = len(pcm) < MIN_S * TAXA
         e = impressao(pcm)
-        if self.comercial is None:  # sem registo: a primeira fala é do comercial
-            self.comercial, self.n_comercial = e, 1
-            return "comercial", 0.5
-        s_com = float(e @ self.comercial)
+        if self.comercial is None and self.cliente is None:  # sem registo: a primeira voz
+            if self.primeiro == "comercial":
+                self.comercial, self.n_comercial = e, 1
+            else:
+                self.cliente, self.n_cliente = e, 1
+            return self.primeiro, 0.5
+        s_com = float(e @ self.comercial) if self.comercial is not None else None
         s_cli = float(e @ self.cliente) if self.cliente is not None else None
-        if s_cli is None:
+        if s_com is None:  # só se conhece o cliente (sem registo, primeira voz dele)
+            quem = "cliente" if s_cli >= LIMIAR_MESMA_VOZ else "comercial"
+            conf = abs(s_cli - LIMIAR_MESMA_VOZ) * 2
+            if quem == "comercial" and not curta:
+                self.comercial, self.n_comercial = e, 1
+        elif s_cli is None:
             quem = "comercial" if s_com >= LIMIAR_MESMA_VOZ else "cliente"
             conf = abs(s_com - LIMIAR_MESMA_VOZ) * 2
         else:

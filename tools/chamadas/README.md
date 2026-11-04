@@ -80,6 +80,34 @@ Precisa de: ffmpeg no PATH, Python 3.12 com `numpy`, `requests`, `sounddevice`, 
 `torch` (CPU chega) e `speechbrain`, `edge-tts` (só para gerar testes), whisper.cpp com CUDA (modo ficheiro),
 Ollama com o modelo puxado (`ollama pull qwen3:8b`).
 
+## O que as entrevistas reais ensinaram (4 de novembro, duas gravações da Catarina)
+
+Duas chamadas reais, gravadas pelo PC com o telemóvel em alta voz (3 min e 25 s):
+
+- **O VAD por energia não serve para telefone.** Passou a usar-se o VAD Silero que vem no
+  faster-whisper, em modo contínuo (estado guardado entre blocos de 32 ms). Pausa de 0,4 s
+  fecha a fala; ao telefone responde-se depressa.
+- **A primeira voz é o cliente a atender ("Estou?").** Sem voz registada, a primeira voz conta
+  como cliente (`--primeiro comercial` para o contrário). Com a voz da comercial registada
+  (feita a partir das falas limpas dela na gravação) as falas dela ficam todas certas.
+- **A resposta vem colada à pergunta.** A mesma fala traz as duas pessoas, por isso o falante
+  é decidido frase a frase (segmento do whisper), não pela fala inteira.
+- **O lado do cliente é o ponto fraco.** Vem abafado pelo altifalante do telemóvel: o whisper
+  transcreve mal e inventa frases ("Eu também te amo"), e a voz fica difícil de reconhecer.
+  O que ajuda: volume do telemóvel no máximo e o telemóvel junto ao microfone.
+- **Prompt inicial fora; hotwords dentro.** Com o prompt, fala fora do tema devolvia o próprio
+  prompt. As hotwords ("Mudelar, walk-in shower, SPC, poliban, base de duche") corrigem o
+  vocabulário sem esse efeito.
+- **O Qwen 8B adivinha.** Toma a pergunta "é moradia ou andar?" como resposta, inventa
+  "sem elevador" e marca campos não falados com confiança 0,5. Há uma guarda (pergunta do
+  comercial não é prova) e as regras do prompt foram reforçadas, mas um modelo maior ou o
+  Claude (só texto) fará melhor. Por isso a revisão humana é obrigatória. O modo de
+  raciocínio do Qwen (`CHAMADAS_PENSAR=1`) é pior: inventa mais e com confiança total.
+  Na entrevista completa, sem pensar: 6 campos certos (nome, morada, o que quer, divisões,
+  visita, pavimento), 1 errado (prazo = data do pré-agendamento) e 6 a rever.
+- **Sem internet nos modelos.** O cliente do Hugging Face ia confirmar versões e ficava
+  pendurado; os modelos carregam em modo offline (`CHAMADAS_ONLINE=1` para atualizar).
+
 ## Resultados na chamada de teste (3,4 min, duas vozes neurais)
 
 | Modo | Transcrição | Falante certo | Ficha |

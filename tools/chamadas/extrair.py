@@ -28,14 +28,26 @@ OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 MOTOR = os.environ.get("CHAMADAS_LLM", "ollama")
 MODELO_OLLAMA = os.environ.get("CHAMADAS_MODELO_OLLAMA", "qwen3:8b")
 MODELO_ANTHROPIC = os.environ.get("CHAMADAS_MODELO_ANTHROPIC", "claude-opus-5-5")
+PENSAR = os.environ.get("CHAMADAS_PENSAR", "") == "1"  # modo de raciocínio do qwen3 (mais lento)
 
 SISTEMA = """És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição
 de uma chamada entre um comercial e um cliente e preenches uma ficha para preparar a visita.
 
+Quem é quem: as linhas "Comercial:" são da pessoa da empresa, que faz as perguntas; as linhas
+"Cliente:" são do cliente. O nome do cliente é o nome por que o comercial o trata (por exemplo
+"Dona Inês"), nunca o nome com que o comercial se apresenta.
+
 Regras:
 - Só preenches o que foi dito na chamada. Se não foi dito, valor é null e confianca é 0.
+- Uma pergunta do comercial não é uma resposta. "É uma moradia ou é um andar?" não diz nada;
+  só a resposta do cliente conta. Se a resposta não se percebe, fica null.
 - Nunca deduzes para além do razoável. "Terceiro andar sem elevador" permite acesso "dificil";
-  não permite inventar o número de andares do prédio.
+  não permite inventar o número de andares nem se há elevador. "Sexto direito" diz que é um
+  andar (apartamento), não diz nada sobre elevador.
+- A transcrição do lado do cliente vem do altifalante do telemóvel e tem frases sem sentido.
+  Ignora o que não faz sentido; não o copies para as observações.
+- Prazo é quando o cliente quer a obra pronta. A data da visita vai só para a disponibilidade,
+  e se a data for alterada durante a chamada fica a última.
 - Para campos de escolha, usa exatamente um dos valores permitidos (a chave, não o rótulo).
 - Para sim/não, usa "sim" ou "nao". Se não foi falado, null (não uses "nao_sei" para o que não foi dito).
 - A transcrição é automática e tem erros típicos: "um T3" pode vir "1T3", "uma T2" pode vir "1 T2".
@@ -99,7 +111,7 @@ def _pedir_ollama(sistema: str, pedido: str, esquema: dict) -> dict:
         "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": pedido}],
         "format": esquema,
         "stream": False,
-        "think": False,
+        "think": PENSAR,
         "options": {"temperature": 0, "num_ctx": 8192},
     }, timeout=600)
     r.raise_for_status()
@@ -166,6 +178,10 @@ def _normalizar(campo: dict, bruto: dict) -> dict:
                 valor, rotulo_valor, conf = None, None, 0
         else:
             valor, rotulo_valor = v, v
+    # guarda: uma pergunta do comercial não é prova de nada; se o modelo só cita a pergunta,
+    # o valor fica a rever
+    if excerto.lower().startswith("comercial:") and "?" in excerto and campo["tipo"] in ("escolha", "sim_nao", "numero"):
+        conf = min(conf, 0.3)
     if valor is None or conf < 0.25:
         estado, valor, rotulo_valor = "em_falta", None, None
     else:

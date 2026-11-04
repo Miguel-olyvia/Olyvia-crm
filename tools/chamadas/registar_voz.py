@@ -3,9 +3,12 @@
 Grava 20 segundos do microfone e guarda em vozes/<nome>.wav. Durante a gravação a
 pessoa fala normalmente: diz o nome, a empresa e o que costuma dizer ao telefone.
 
-Uso:  python registar_voz.py <nome> [--segundos 20] [--de-ficheiro gravacao.wav]
+Uso:  python registar_voz.py <nome> [--segundos 20]
+      python registar_voz.py <nome> --de-ficheiro gravacao.wav [--trechos 1-35,69-98]
+      (de uma gravação já feita: só os trechos, em segundos, em que fala essa pessoa)
 """
 import argparse
+import os
 import sys
 import wave
 from pathlib import Path
@@ -28,6 +31,10 @@ def gravar(segundos: float) -> np.ndarray:
         sd.sleep(1000)
         print(f"  {i + 1:2d}/{int(segundos)}", end="\r")
     sd.wait()
+    if os.name == "nt":  # Enters carregados durante a gravação não podem passar ao programa seguinte
+        import msvcrt
+        while msvcrt.kbhit():
+            msvcrt.getwch()
     print()
     return pcm[:, 0]
 
@@ -48,10 +55,17 @@ if __name__ == "__main__":
     ap.add_argument("nome")
     ap.add_argument("--segundos", type=float, default=20)
     ap.add_argument("--de-ficheiro", type=Path, default=None, help="usar um WAV 16 kHz já gravado em vez do microfone")
+    ap.add_argument("--trechos", default=None, help="com --de-ficheiro: trechos em segundos, ex. 1-35,69-98")
     a = ap.parse_args()
     if a.de_ficheiro:
         from falantes import ler_wav
         pcm = ler_wav(a.de_ficheiro)
+        if a.trechos:
+            partes = []
+            for t in a.trechos.split(","):
+                ini, fim = (float(x) for x in t.split("-"))
+                partes.append(pcm[int(ini * TAXA):int(fim * TAXA)])
+            pcm = np.concatenate(partes)
     else:
         pcm = gravar(a.segundos)
     nivel = float(np.sqrt((pcm ** 2).mean()))
