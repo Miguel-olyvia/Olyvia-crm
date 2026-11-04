@@ -62,6 +62,10 @@ export interface Deslocacao {
   veredicto: (recursoId: string, hora: string) => Veredicto | undefined;
   /** As horas em que o recurso consegue ir. Sem dados do recurso: todas (não se bloqueia por desconhecimento, mas fica `semDadosDe`). */
   horasQuePode: (recursoId: string, horas: readonly string[] | undefined) => string[] | undefined;
+  /** O que a base deu deste recurso no dia (base e visitas vizinhas); undefined se não deu. */
+  recursoDe: (recursoId: string) => RecursoVizinhas | undefined;
+  /** O veredicto da hora em que o recurso parte de mais perto (para mostrar a viagem estimada); sem horas ou sem origem, undefined. */
+  melhorVeredicto: (recursoId: string, horas: readonly string[] | undefined) => Veredicto | undefined;
   /** O km mais curto do recurso (da vizinha ou da base) entre as suas horas; para ordenar. null se não se sabe. */
   kmDoRecurso: (recursoId: string, horas: readonly string[] | undefined) => number | null;
 }
@@ -139,5 +143,13 @@ export function useDeslocacaoVisita(e: Entrada): Deslocacao {
     const kms = (horas ?? []).map((h) => veredicto(recursoId, h)?.km).filter((k): k is number => typeof k === "number");
     return kms.length > 0 ? Math.min(...kms) : null;
   };
-  return { aLer, semDadosDe, semDadosTotal: ids.filter(semDadosDe).length, veredicto, horasQuePode, kmDoRecurso };
+  const melhorVeredicto = (recursoId: string, horas: readonly string[] | undefined): Veredicto | undefined => {
+    const todos = (horas ?? []).map((h) => veredicto(recursoId, h)).filter((v): v is Veredicto => v !== undefined);
+    const comKm = todos.filter((v) => v.km !== null).sort((x, y) => (x.km as number) - (y.km as number));
+    return comKm[0] ?? todos[0];
+  };
+  return {
+    aLer, semDadosDe, semDadosTotal: ids.filter(semDadosDe).length, veredicto, horasQuePode, kmDoRecurso, melhorVeredicto,
+    recursoDe: (recursoId) => porRecurso.get(recursoId),
+  };
 }

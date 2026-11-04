@@ -17,6 +17,8 @@ export interface RecursoVisita {
   name: string;
   resource_type: string;
   user_id: string | null;
+  /** O código postal da base do recurso (Agenda > Recursos); só se usa para saber se está definido. */
+  postal_code?: string | null;
 }
 
 export interface AgendaVisita {
@@ -33,7 +35,7 @@ const STALE_TIME_MS = 60_000;
 // Quadros que não servem para visitas: as ausências (a base recusa, NG009) e a frota (a base só o recusa ao alterar).
 const TIPOS_QUADRO_FORA = ["time_off", "fleet"];
 const COLUNAS_QUADRO = "id, name, board_type, settings";
-const COLUNAS_RECURSO = "id, name, resource_type, user_id";
+const COLUNAS_RECURSO = "id, name, resource_type, user_id, postal_code";
 
 /** Chave da leitura, com a organização (mudar de organização não reaproveita a agenda da outra). */
 export const agendaVisitaQueryKey = (organizationId: string | null | undefined) => ["neg-agenda-visita", organizationId ?? null] as const;

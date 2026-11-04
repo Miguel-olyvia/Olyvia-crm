@@ -13,7 +13,7 @@ import { Calendar } from "@/components/ui/calendar";
 import type { FeriadosOrg, HorarioOrg } from "@/hooks/pessoas/horasLivresVisita";
 import type { RecursoVisita } from "@/hooks/pessoas/useAgendaVisita";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
-import { frasesDoVeredicto } from "@/hooks/pessoas/deslocacaoVisita";
+import { estimativaDoVeredicto, frasesDoVeredicto, origemDoRecurso } from "@/hooks/pessoas/deslocacaoVisita";
 import { useDeslocacaoVisita } from "@/hooks/pessoas/useDeslocacaoVisita";
 import { useDestinoVisita } from "@/hooks/pessoas/useDestinoVisita";
 import { useHorasPorRecurso } from "@/hooks/pessoas/useHorasLivresVisita";
@@ -76,7 +76,16 @@ interface Props {
   hora: ReactNode | ((filtrarHoras: (horas: readonly string[]) => string[]) => ReactNode);
 }
 
-const SEM_DADOS_RECURSO = "não verificado: sem dados de deslocação";
+/** O estado da verificação da viagem de um recurso: a ler, sem morada da obra localizada, ou o que se sabe da base dele. */
+type EstadoDoRecurso = "indisponivel" | "a-ler" | "sem-destino" | "erro" | "sem-base" | "base-sem-coordenadas" | "verificado";
+type ComTexto = "erro" | "sem-base" | "base-sem-coordenadas";
+/** O texto de cada estado sem verificação: `curto` vai no chip; `frase` na lista por baixo e na linha da hora. */
+const TEXTO_ESTADO: Record<ComTexto, { curto: string; frase: string }> = {
+  erro: { curto: "não verificado: erro", frase: "não verificado: erro ao ler a deslocação" },
+  "sem-base": { curto: "sem base", frase: "sem base nem visitas localizadas: defina o código postal do recurso em Agenda > Recursos" },
+  "base-sem-coordenadas": { curto: "base sem coordenadas", frase: "a base não tem coordenadas: volte a guardar o recurso em Agenda > Recursos para a localizar" },
+};
+const nomeDe = (r: RecursoVisita): string => r.name?.trim() || "(sem nome)";
 const SEM_CP7 ="Falta a morada completa (código postal de 7 dígitos) para ver quem consegue chegar.";
 
 export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, horarioPronto, excluirId, hora }: Props) {
@@ -91,6 +100,8 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
   const local = useDestinoVisita(cp7);
   const desloc = useDeslocacaoVisita({ recursos: recursos.map((r) => r.id), dia, duracaoMin, destino: local.destino, excluirId, ativo: dia !== "" });
   const aVerificar = local.aLer || desloc.aLer;
+  const fonte = useFontePessoas();
+  const verificavel = fonte.modo === "real" && !!fonte.organizationId;
   const podeNoDia = (r: RecursoVisita) => desloc.horasQuePode(r.id, livresNoDia(r));
   const comerciais = g.conhecido ? g.comerciais ?? [] : [];
   const comerciaisLivres = comerciais.filter((r) => (podeNoDia(r)?.length ?? 0) > 0);
@@ -121,20 +132,37 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
     a.aoMudarRecursos([comerciaisLivres[0].id]);
   }, [dia, a, comerciaisLivres, aVerificar]);
 
-  /** O texto de cada recurso a uma hora: ocupado, ou o veredicto da viagem (pode / não pode / de onde parte). */
+  /** Em que ponto está a verificação da viagem deste recurso: nunca fica por dizer (o ecrã escreve sempre o estado). */
+  const estadoDe = (r: RecursoVisita): EstadoDoRecurso => {
+    // fora do modo real ou sem organização não se lê nada: não houve erro, e não se diz nenhum estado
+    if (!verificavel) return "indisponivel";
+    if (aVerificar) return "a-ler";
+    if (cp7 === null || local.destino === null) return "sem-destino";
+    const dados = desloc.recursoDe(r.id);
+    if (!dados) return "erro";
+    const origem = origemDoRecurso(dados, (r.postal_code ?? "").trim() !== "");
+    return origem === "com-origem" ? "verificado" : origem;
+  };
+  const semOrigem = (e: EstadoDoRecurso) => e === "sem-base" || e === "base-sem-coordenadas";
+  /** O texto de cada recurso a uma hora: ocupado, ou o veredicto da viagem (pode / não pode / de onde parte / porque não se verifica). */
   const textoDaHora = (r: RecursoVisita): string => {
     if (!(livresNoDia(r) ?? []).includes(a.hora)) return "ocupado a essa hora";
-    // sem dados deste recurso: livre, mas nunca dado por verificado
-    if (desloc.semDadosDe(r.id)) return SEM_DADOS_RECURSO;
+    const estado = estadoDe(r);
     const v = desloc.veredicto(r.id, a.hora);
+    // o almoço ainda pode impedir sem origem: só se não impede é que se diz que a viagem não se verifica
+    if ((estado === "erro" || semOrigem(estado)) && v?.pode !== false) return `livre; ${TEXTO_ESTADO[estado as ComTexto].frase}`;
     return v ? frasesDoVeredicto(v).join("; ") || "pode ir" : "livre";
   };
+  // as contagens são só das pessoas que se veem nos chips (os técnicos só aparecem nas sugestões)
+  const nSemBase = ordenados.filter((r) => estadoDe(r) === "sem-base").length;
+  const nSemCoordenadas = ordenados.filter((r) => estadoDe(r) === "base-sem-coordenadas").length;
+  const nSemDados = ordenados.filter((r) => estadoDe(r) === "erro").length;
   const avisosDeslocacao: string[] = [];
   if (cp7 === null) avisosDeslocacao.push(SEM_CP7);
   else if (!local.aLer && local.erro) avisosDeslocacao.push("Não foi possível ligar ao serviço de moradas: tente de novo dentro de instantes. Entretanto só se verifica o almoço.");
   else if (!local.aLer && local.destino === null) avisosDeslocacao.push(`O código postal ${cp7} não tem localização: só se verifica o almoço.`);
-  if (cp7 !== null && !aVerificar && desloc.semDadosTotal > 0) {
-    const n = desloc.semDadosTotal;
+  if (cp7 !== null && !aVerificar && nSemDados > 0) {
+    const n = nSemDados;
     avisosDeslocacao.push(`Não foi possível verificar a viagem de ${n} ${n === 1 ? "pessoa" : "pessoas"}: mostram-se as horas livres dessas pessoas sem essa verificação.`);
   }
 
@@ -144,15 +172,24 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
   };
   const textoDoRecurso = (r: RecursoVisita): string => {
     const livres = livresNoDia(r), pode = podeNoDia(r);
-    if (desloc.semDadosDe(r.id)) return `${textoHoras(pode)}, não verificado`;
-    return livres && pode && livres.length > 0 && pode.length === 0 ? "livre, mas não chega a tempo" : textoHoras(pode);
+    const horasTexto = livres && pode && livres.length > 0 && pode.length === 0 ? "livre, mas não chega a tempo" : textoHoras(pode);
+    const estado = estadoDe(r);
+    if (estado === "erro" || semOrigem(estado)) return `${horasTexto} · ${TEXTO_ESTADO[estado as ComTexto].curto}`;
+    if (estado === "sem-destino") {
+      return `${horasTexto} · ${cp7 === null ? "viagem por verificar: falta a morada da obra"
+        : local.erro ? "viagem por verificar: serviço de moradas indisponível" : "viagem por verificar: código postal sem localização"}`;
+    }
+    // «verificado» só com as horas lidas e um veredicto que o sustente; antes disso, ou sem horas a que chegue, só as horas
+    if (estado !== "verificado" || livres === undefined) return horasTexto;
+    const melhor = desloc.melhorVeredicto(r.id, pode);
+    return melhor ? `${horasTexto} · ${estimativaDoVeredicto(melhor) ?? "verificado"}` : horasTexto;
   };
   const chipDe = (r: RecursoVisita) => {
     const ligado = a.escolhidos.includes(r.id);
     return (
       <button key={r.id} type="button" aria-pressed={ligado} aria-disabled={a.somenteLeitura || undefined} onClick={() => alternar(r.id)} className={chip(ligado)}>
         {ligado && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
-        <span>{r.name}</span>{" "}
+        <span>{nomeDe(r)}</span>{" "}
         <span className="text-sm font-normal text-muted-foreground">· {a.ocupados.includes(r.id) ? "ocupado nesse horário" : textoDoRecurso(r)}</span>
       </button>
     );
@@ -184,6 +221,16 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
         <>
           <fieldset ref={a.grupoRef} tabIndex={-1} aria-describedby={a.erroRecursos ? idErroRec : undefined} data-foco-erro={a.erroRecursos ? "" : undefined} className="m-0 min-w-0 space-y-2 border-0 p-0">
             <legend className="mb-2 text-sm font-semibold text-foreground">{g.conhecido ? `Comerciais a ${diaPt(dia)}` : "Quem vai à visita"}</legend>
+            {nSemBase > 0 && (
+              <p role="status" className="text-sm text-foreground">
+                {nSemBase} {nSemBase === 1 ? "pessoa sem base definida" : "pessoas sem base definida"}: defina o código postal em Agenda &gt; Recursos.
+              </p>
+            )}
+            {nSemCoordenadas > 0 && (
+              <p role="status" className="text-sm text-foreground">
+                {nSemCoordenadas} {nSemCoordenadas === 1 ? "pessoa com base sem coordenadas" : "pessoas com base sem coordenadas"}: volte a guardar o recurso em Agenda &gt; Recursos.
+              </p>
+            )}
             {g.principais.length > 0
               ? <div className="flex flex-wrap gap-2">{ordenados.map(chipDe)}</div>
               : <p className="text-sm text-muted-foreground">Não há comerciais com agenda nesta organização.</p>}
@@ -206,7 +253,7 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
                       <button key={d} type="button" onClick={() => a.aoMudar({ data: d })} className={chip(false)}>
                         {diaPt(d)}{" "}
                         <span className="text-sm font-normal text-muted-foreground">
-                          · {comerciais.filter((r) => (outros.horas(d, r.id)?.length ?? 0) > 0).map((r) => r.name).join(", ")}
+                          · {comerciais.filter((r) => (outros.horas(d, r.id)?.length ?? 0) > 0).map(nomeDe).join(", ")}
                         </span>
                       </button>
                     ))}
@@ -220,13 +267,13 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
           )}
           {(noDia.comErro || outros.comErro) && <p role="alert" className="text-sm text-foreground">Não foi possível ler as horas livres de toda a gente. Tente outra vez.</p>}
           {aVerificar && <p role="status" className="text-sm text-muted-foreground">A verificar quem consegue chegar…</p>}
-          {avisosDeslocacao.map((texto) => <p key={texto} role="status" className="text-sm text-foreground">{texto}</p>)}
+          {(verificavel ? avisosDeslocacao : []).map((texto) => <p key={texto} role="status" className="text-sm text-foreground">{texto}</p>)}
           {typeof hora === "function" ? hora(filtrarHoras) : hora}
           {/* sempre presente (uma região só se anuncia se já existia): ao mudar a hora diz-se quem pode ir e porquê */}
           <div aria-live="polite" data-testid="deslocacao-da-hora" className="text-sm text-foreground">
             {a.hora && !aVerificar && (
               <ul className="m-0 list-none space-y-1 p-0">
-                {ordenados.map((r) => <li key={r.id}><b className="font-semibold">{r.name}</b>: {textoDaHora(r)}</li>)}
+                {ordenados.map((r) => <li key={r.id}><b className="font-semibold">{nomeDe(r)}</b>: {textoDaHora(r)}</li>)}
               </ul>
             )}
           </div>

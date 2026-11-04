@@ -179,6 +179,28 @@ export function avaliarViagem(e: Entrada): Veredicto {
 
 const arredondar = (n: number): string => (n < 10 ? n.toFixed(1) : String(Math.round(n))).replace(".", ",");
 
+/**
+ * De onde pode partir o recurso, no dia: «com-origem» (a base tem coordenadas ou há visitas com coordenadas), «sem-base» (nem base nem visitas
+ * localizadas) ou «base-sem-coordenadas» (o recurso tem código postal, mas ainda não foi geocodificado). Só informa: nunca bloqueia.
+ */
+export type OrigemDoRecurso = "com-origem" | "sem-base" | "base-sem-coordenadas";
+
+export function origemDoRecurso(recurso: RecursoVizinhas, temCodigoPostal: boolean): OrigemDoRecurso {
+  const temBase = recurso.latitude !== null && recurso.longitude !== null;
+  const temVisitaLocalizada = recurso.visitas.some((v) => v.lat !== null && v.lng !== null);
+  if (temBase || temVisitaLocalizada) return "com-origem";
+  return temCodigoPostal ? "base-sem-coordenadas" : "sem-base";
+}
+
+/** A viagem estimada, numa frase curta para junto do recurso («~N min desde a base, aprox. X km»); null se não há de onde partir. */
+export function estimativaDoVeredicto(v: Veredicto): string | null {
+  if (v.base) return `~${v.base.viagemMin} min desde a base, aprox. ${arredondar(v.base.km)} km`;
+  const lado = [v.anterior && { l: v.anterior, de: "desde a visita anterior" }, v.seguinte && { l: v.seguinte, de: "até à visita seguinte" }]
+    .filter((x): x is { l: LadoViagem; de: string } => !!x)
+    .sort((x, y) => x.l.km - y.l.km)[0];
+  return lado ? `~${lado.l.viagemMin} min ${lado.de}, aprox. ${arredondar(lado.l.km)} km` : null;
+}
+
 /** As frases (uma por ponta ou por motivo) que o ecrã mostra para um recurso a uma hora. */
 export function frasesDoVeredicto(v: Veredicto): string[] {
   const frases: string[] = [];
