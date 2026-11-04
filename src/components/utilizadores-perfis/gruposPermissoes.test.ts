@@ -75,7 +75,7 @@ describe("agruparPorMenu", () => {
     const grupos = agruparPorMenu([
       perm("deals.view", "deals"), perm("quotes.view", "quotes"), perm("quotes.manage", "quotes"), perm("proposals.view", "proposals"),
       perm("proposals.manage", "proposals"), perm("direct_sales.view", "direct_sales"), perm("client_contracts.view", "client_contracts"),
-      perm("client_contracts.manage", "client_contracts"), perm("client_contracts.manage_templates", "client_contracts"),
+      perm("client_contracts.manage_templates", "client_contracts"),
       perm("quote_templates.view", "quote_templates"), perm("portal.manage", "portal"),
     ]);
     expect(grupos.map((g) => g.rotulo)).toEqual(["Documentos do negócio"]);
@@ -85,7 +85,7 @@ describe("agruparPorMenu", () => {
     expect(sub("Propostas e orçamentos")).toEqual(["proposals.view", "quotes.view", "quotes.manage"]);
     expect(sub("Venda Direta")).toEqual(["direct_sales.view"]);
     expect(sub("Contratos")).toEqual(["client_contracts.view", "portal.manage"]);
-    expect(sub("Configuração")).toEqual(["quote_templates.view", "proposals.manage", "client_contracts.manage", "client_contracts.manage_templates"]);
+    expect(sub("Configuração")).toEqual(["quote_templates.view", "proposals.manage", "client_contracts.manage_templates"]);
     expect(permissoesForaDoMenu([perm("proposals.manage", "proposals")])).toEqual([]);
   });
 
