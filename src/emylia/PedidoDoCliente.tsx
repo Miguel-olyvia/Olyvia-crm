@@ -15,7 +15,6 @@ import { PROPOSTA, efetivo, emFalta } from "./campos";
 import { totais } from "./DocsCliente";
 import { PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
 import { ProdutosDaVersao } from "./TrocarProdutos";
-import { SemPermissaoPortal, usePermPortalDoPasso } from "./permPortalPasso";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { LINHA_DEMOLICAO } from "./entulho";
 import { dataCurta, iniciosRapidos, isoDia, proximoUtil } from "./planoObra";
@@ -59,8 +58,6 @@ export function PedidoDoCliente({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 /** O editor da versão nova, num só sítio. */
 function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, run } = ctx;
-  // 04/11/2026: a versão nova vai ao portal (A.enviarVersao → A.enviar): pede também a permissão real de quem está ligado
-  const portal = usePermPortalDoPasso("enviar");
   const o = d.orc!, ant = o.versoes![o.versoes!.length - 1], nome = d.nome.split(" ")[0], v = versaoAtual(o);
   const T = tot(d, S), TI = totais(d, S), razao = T.pf > 0 ? TI.total / T.pf : 1.23;
   const antIva = ant.totalIva ?? ant.total * razao, dif = TI.total - antIva;
@@ -168,8 +165,7 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
         <div className="flex flex-wrap gap-2">
           {bloq && <Button variant="outline" size="lg" onClick={() => run(() => A.pedirAprov(d.id))} disabled={o.aprov === "pedida"}>{o.aprov === "pedida" ? "Aprovação pedida" : "Pedir aprovação"}</Button>}
-          <Button size="lg" disabled={bloq || faltam.length > 0 || !portal.pode} title={portal.semPermissao ? portal.motivo : undefined}
-            onClick={() => { if (portal.pode) run(() => { A.enviarVersao(d.id); }); }}><Send className="mr-2 h-4 w-4" aria-hidden="true" />Enviar a versão {v} a {nome}<SemPermissaoPortal p={portal} /></Button>
+          <Button size="lg" disabled={bloq || faltam.length > 0} onClick={() => run(() => { A.enviarVersao(d.id); })}><Send className="mr-2 h-4 w-4" aria-hidden="true" />Enviar a versão {v} a {nome}</Button>
         </div>
       </footer>
     </section>
