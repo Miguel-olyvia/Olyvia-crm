@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -17,7 +18,8 @@ Element.prototype.releasePointerCapture = Element.prototype.releasePointerCaptur
 Element.prototype.scrollIntoView = Element.prototype.scrollIntoView ?? (() => {});
 
 const toastError = vi.fn();
-const permissions = { manage: true };
+// 03/11: para quem se agenda segue o âmbito de scheduling.items.edit (era scheduling.items.manage, que não existe no catálogo).
+const permissions = { ambito: "ORG" as "NONE" | "OWNED" | "TEAM" | "ORG", equipa: [] as string[] };
 
 vi.mock("@/lib/toast", () => ({
   toast: { error: (...a: unknown[]) => toastError(...a), info: vi.fn(), success: vi.fn() },
@@ -25,8 +27,14 @@ vi.mock("@/lib/toast", () => ({
 vi.mock("@/hooks/useTranslation", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({
-    hasPermission: (p: string) => (p === "scheduling.items.manage" ? permissions.manage : true),
+    hasPermission: () => true,
     isSystemAdmin: false,
+  }),
+}));
+vi.mock("@/hooks/usePermissionScope", () => ({
+  usePermissionScope: () => ({
+    getPermissionScope: (p: string) => (p === "scheduling.items.edit" ? permissions.ambito : "ORG"),
+    teamMemberIds: permissions.equipa,
   }),
 }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ userType: "company_admin" }) }));
@@ -59,7 +67,9 @@ const baseItem = {
 
 function setup(props: Record<string, unknown>) {
   const onSave = vi.fn().mockResolvedValue(undefined);
+  // O diálogo usa useNavigate (ligação para as ausências do RH): precisa de um router.
   render(
+    <MemoryRouter>
     <ScheduleItemDialog
       open
       onOpenChange={vi.fn()}
@@ -69,7 +79,8 @@ function setup(props: Record<string, unknown>) {
       companyUsers={users}
       onSave={onSave}
       {...props}
-    />,
+    />
+    </MemoryRouter>,
   );
   return onSave;
 }
@@ -77,7 +88,8 @@ function setup(props: Record<string, unknown>) {
 describe("ScheduleItemDialog - Colaborador obrigatorio em quadros de ferias", () => {
   beforeEach(() => {
     toastError.mockClear();
-    permissions.manage = true;
+    permissions.ambito = "ORG";
+    permissions.equipa = [];
   });
 
   it("sem colaborador nao grava, mostra o erro e marca o campo", async () => {
@@ -101,18 +113,17 @@ describe("ScheduleItemDialog - Colaborador obrigatorio em quadros de ferias", ()
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it("utilizador so-proprio (novo item) continua a gravar com o seu user_id", async () => {
-    permissions.manage = false;
+  // Um item NOVO num quadro de férias já não se cria aqui: o diálogo manda para o pedido de ausência do RH (ausenciaPassaPorPedido).
+  it("novo item num quadro de ferias leva ao pedido de ausencia do RH, sem botao de criar", () => {
+    permissions.ambito = "OWNED";
     const onSave = setup({ currentUserId: "u1", defaultTitle: "Ferias" });
-    fireEvent.click(screen.getByRole("button", { name: "common.create" }));
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave.mock.calls[0][0]).toMatchObject({ user_id: "u1" });
-    expect(toastError).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "common.create" })).toBeNull();
+    expect(screen.getByRole("button", { name: "hr.ausencias.board.irParaAusencias" })).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("self-only a editar item de ferias sem user_id grava com o seu id", async () => {
-    permissions.manage = false;
+    permissions.ambito = "OWNED";
     const onSave = setup({ item: baseItem, currentUserId: "u1" });
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
@@ -122,7 +133,7 @@ describe("ScheduleItemDialog - Colaborador obrigatorio em quadros de ferias", ()
   });
 
   it("self-only nao sobrescreve um user_id ja existente", async () => {
-    permissions.manage = false;
+    permissions.ambito = "OWNED";
     const onSave = setup({ item: { ...baseItem, user_id: "u2" }, currentUserId: "u1" });
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
@@ -184,5 +195,37 @@ describe("ScheduleItemDialog - Colaborador obrigatorio em quadros de ferias", ()
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave.mock.calls[0][0]).toMatchObject({ id: "i1", approval_status: status });
     expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe("ScheduleItemDialog - para quem se agenda segue o ambito de scheduling.items.edit (03/11)", () => {
+  const users3 = [{ id: "u1", name: "Ana" }, { id: "u2", name: "Rui" }, { id: "u3", name: "Eva" }];
+  const opcoes = async () => {
+    const trigger = screen.getByRole("combobox", { name: /scheduling\.timeOff\.employee/ });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    await screen.findAllByRole("option");
+    return screen.getAllByRole("option").map((o) => o.textContent);
+  };
+  beforeEach(() => { permissions.equipa = []; });
+
+  it("organizacao: qualquer pessoa da lista", async () => {
+    permissions.ambito = "ORG";
+    setup({ item: baseItem, currentUserId: "u1", companyUsers: users3 });
+    expect(await opcoes()).toEqual(["Ana", "Rui", "Eva"]);
+  });
+
+  it("equipa: a propria pessoa e a sua equipa", async () => {
+    permissions.ambito = "TEAM";
+    permissions.equipa = ["u3"];
+    setup({ item: baseItem, currentUserId: "u1", companyUsers: users3 });
+    expect(await opcoes()).toEqual(["Ana", "Eva"]);
+  });
+
+  it.each(["OWNED", "NONE"] as const)("%s: so a propria pessoa (o seletor fica fixo nela)", (ambito) => {
+    permissions.ambito = ambito;
+    setup({ item: baseItem, currentUserId: "u1", companyUsers: users3 });
+    const trigger = screen.getByRole("combobox", { name: /scheduling\.timeOff\.employee/ });
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveTextContent("Ana");
   });
 });

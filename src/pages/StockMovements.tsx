@@ -537,12 +537,12 @@ const StockMovements = () => {
           description={t("inventory.movements.description")}
           actions={
             <>
-              <PermissionGate permission="stocks.export">
+              <PermissionGate permission="inventory.export">
                 <Button variant="outline" onClick={handleExport} disabled={exporting}>
                   <Download className="mr-2 h-4 w-4" /> {exporting ? "A exportar…" : "Exportar"}
                 </Button>
               </PermissionGate>
-              <PermissionGate permission="stocks.edit">
+              <PermissionGate permission="inventory.edit">
                 <Button onClick={() => setMovementDialogOpen(true)}>
                   <ArrowLeftRight className="mr-2 h-4 w-4" /> Registar movimento
                 </Button>

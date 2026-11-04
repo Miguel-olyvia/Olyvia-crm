@@ -474,7 +474,7 @@ const InventoryToday = () => {
           description={t("inventory.today.description")}
           actions={
             <>
-              <PermissionGate permission="stocks.edit">
+              <PermissionGate permission="inventory.edit">
                 <Button variant="outline" onClick={() => setMovementDialogOpen(true)}>
                   <ArrowLeftRight className="mr-2 h-4 w-4" /> Registar movimento
                 </Button>

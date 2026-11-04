@@ -19,6 +19,7 @@ import {
   faltasEquip, faltasProduto, faltasServico, faltasTecnico, horaTecnicoNovo, oficioESub, precoVendaProduto, previsaoServico,
   type NovoServico, type TipoCriar,
 } from "./criarCatalogo";
+import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 
 const NOTA = "text-[15px] text-muted-foreground";
 const CAMPO = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none transition-shadow focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
@@ -608,6 +609,10 @@ export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado 
 }) {
   const titulo = useRef<HTMLHeadingElement>(null);
   useEffect(() => { titulo.current?.focus(); }, []);
+  // 03/11: só os tipos que a permissão deixa gravar (podeCriarTipo); um tipo sem permissão no endereço não abre o formulário.
+  const perms = usePermissoesCatalogo();
+  const tipos = TIPOS_CRIAR.filter((x) => podeCriarTipo(perms, x.k));
+  const pode = podeCriarTipo(perms, tipo);
   const feito = (t: TipoCriar) => (id: string, nome: string) => {
     // equipamentos e técnicos mexem no custo dos serviços em uso
     if (t === "equipamento" || t === "tecnico") run(() => aplicarTodos(S, lerCustos()));
@@ -621,7 +626,7 @@ export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado 
       <h1 ref={titulo} tabIndex={-1} className="mt-2 text-3xl font-semibold tracking-tight outline-none">Criar no Catálogo</h1>
       <p className="mt-2 text-lg text-muted-foreground">Escolha o que quer criar. À direita vê já como fica, com o custo e o preço.</p>
       <div role="radiogroup" aria-label="O que criar" className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {TIPOS_CRIAR.map((x, i) => {
+        {tipos.map((x, i) => {
           const I = ICONE_TIPO[x.k], on = tipo === x.k;
           return (
             <button key={x.k} type="button" role="radio" aria-checked={on} onClick={() => setTipo(x.k)}
@@ -635,13 +640,14 @@ export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado 
           );
         })}
       </div>
-      <div key={tipo} className="mt-8 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
+      {!pode && <p role="note" className="mt-8 text-[15px] text-muted-foreground">Sem permissão para criar este tipo no Catálogo.</p>}
+      {pode && <div key={tipo} className="mt-8 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
         {tipo === "servico" && <FormServico S={S} C={C} K={K} onCriado={feito("servico")} />}
         {tipo === "produto" && <FormProduto S={S} K={K} onCriado={feito("produto")} />}
         {tipo === "equipamento" && <FormEquip C={C} onCriado={feito("equipamento")} />}
         {tipo === "consumivel" && <FormConsumivel S={S} C={C} K={K} onCriado={feito("consumivel")} />}
         {tipo === "tecnico" && <FormTecnico S={S} C={C} onCriado={feito("tecnico")} />}
-      </div>
+      </div>}
     </div>
   );
 }

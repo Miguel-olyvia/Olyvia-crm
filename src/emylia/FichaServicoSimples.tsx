@@ -21,6 +21,7 @@ import { lerCustos, mudarCustos } from "./v2/custosStore";
 import { caminho, consumivelDe, noDoServico, opcoesArvore, textoRegra, type Produto, type Regra } from "./v2/catalogoModelo";
 import { mudarCatalogo, useCatalogo } from "./v2/catalogoStore";
 import { ListaAlertas, Retirar } from "./v2/pecasCustos";
+import { SoLeitura, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { FotoOuIlustracao, ICONES_SERVICO, IconeServico } from "./ilustracoes";
 import {
   ORIGENS_MEDIDA, REGRAS_QTD, UNIDADES_SERVICO, avisoMedida, chaveRegra, custoComOpcionais, entulhoFicha, exemploMedida, iconeDoServico, margemEmPalavras, medidaDe,
@@ -128,6 +129,9 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
   const [nova, setNova] = useState<string | null>(null);
   // 27/10: o histórico de preços mostra os 3 últimos; o resto atrás de «Ver todos»
   const [histTodo, setHistTodo] = useState(false);
+  const pode = usePermissoesCatalogo().servicos;
+  // Só de leitura, o histórico mostra-se todo (o botão «Ver todos» ficaria desligado).
+  const verHistTodo = histTodo || !pode;
 
   /** Muda a receita (como editada, quando mexe no custo) e passa os custos para os serviços em uso. */
   const editar = (fn: (r: ReceitaV2) => void, msg: string, receita = true) => {
@@ -226,6 +230,8 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
         </div>
       </dl>
       {A.length > 0 && <div className="mt-5"><ListaAlertas A={A} /></div>}
+      {/* 03/11: sem services.edit, a ficha fica só de leitura (cat_guardar_servico recusa com CT001). */}
+      <SoLeitura pode={pode} aviso="Só de leitura: mudar o serviço precisa da permissão «Editar serviços».">
       <details className="mt-4">
         <summary className="inline-flex min-h-11 cursor-pointer items-center text-[15px] font-medium text-muted-foreground hover:text-foreground">Mudar o ícone</summary>
         <div role="group" aria-label="Ícone do serviço" className="mt-2 flex flex-wrap gap-1.5">
@@ -573,7 +579,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
         <h3 className="mt-8 text-[17px] font-semibold tracking-tight">Histórico de preços</h3>
         {rec.hist.length ? (
           <ul className="mt-2 divide-y divide-border border-y border-border">
-            {(histTodo ? rec.hist : rec.hist.slice(0, 3)).map((h, i) => (
+            {(verHistTodo ? rec.hist : rec.hist.slice(0, 3)).map((h, i) => (
               <li key={i} className="flex min-h-11 items-center justify-between gap-3 py-2 text-[15px]">
                 <span><span className="tabular-nums">{dataPT(h.data)}</span><span className="text-muted-foreground"> · {h.nota}</span></span>
                 <span className="tabular-nums">{eur(h.preco)} €/{un}</span>
@@ -581,12 +587,13 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
             ))}
           </ul>
         ) : <p className={cn(NOTA, "mt-2")}>Ainda sem preço guardado: o preço sai do custo + {rec.margem}% de margem.</p>}
-        {rec.hist.length > 3 && (
+        {rec.hist.length > 3 && pode && (
           <button type="button" aria-expanded={histTodo} onClick={() => setHistTodo(!histTodo)} className="mt-1 inline-flex min-h-11 items-center text-[15px] font-medium text-primary underline-offset-4 hover:underline">
             {histTodo ? "Ver menos" : `Ver todos (${rec.hist.length})`}
           </button>
         )}
       </Seccao>
+      </SoLeitura>
     </article>
   );
 }

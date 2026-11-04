@@ -241,7 +241,7 @@ const Stocks = () => {
   // Produtos abertos na vista "Por produto".
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const gate = usePermissionGate();
-  const canEditStock = gate("stocks.edit").allowed;
+  const canEditStock = gate("inventory.edit").allowed;
 
   // KPIs do topo (rpc_inventory_today.stock). Sem a RPC ou sem o bloco: escondidos.
   const { data: inventoryToday } = useInventoryToday();
@@ -995,7 +995,7 @@ const Stocks = () => {
   };
 
   // Ações da linha (td.act do mockup): Movimento · Histórico · ⋯ — mesmas
-  // permissões de antes (stocks.edit / inventory.view / stocks.delete).
+  // permissões de antes (inventory.edit / inventory.view / inventory.delete; eram stocks.*, sem catálogo).
   const renderStockActions = (stock: Stock) => {
     const label = stock.products?.name ?? "stock";
     if (showDeleted) {
@@ -1005,7 +1005,7 @@ const Stocks = () => {
             label: t('stocks.restore') || 'Restaurar',
             icon: RotateCcw,
             onClick: () => handleRestore(stock.id),
-            permission: "stocks.delete",
+            permission: "inventory.delete",
           }}
         />
       );
@@ -1017,7 +1017,7 @@ const Stocks = () => {
             label: "Movimento",
             icon: ArrowLeftRight,
             onClick: () => openMovement({ productId: stock.product_id, warehouseId: stock.warehouse_id }),
-            permission: "stocks.edit",
+            permission: "inventory.edit",
           }}
         />
         {/* Histórico → livro de Movimentos filtrado por produto+armazém
@@ -1039,13 +1039,13 @@ const Stocks = () => {
               label: "Editar",
               icon: Pencil,
               onSelect: () => openEditDialog(stock),
-              permission: "stocks.edit",
+              permission: "inventory.edit",
             },
             {
               label: "Registar ajuste",
               icon: ClipboardList,
               onSelect: () => openMovement({ productId: stock.product_id, warehouseId: stock.warehouse_id, movementType: "ajuste" }),
-              permission: "stocks.edit",
+              permission: "inventory.edit",
             },
             {
               // Diálogo rápido dos últimos movimentos — o mesmo de antes.
@@ -1067,7 +1067,7 @@ const Stocks = () => {
               icon: Trash2,
               destructive: true,
               onSelect: () => handleDelete(stock.id),
-              permission: "stocks.delete",
+              permission: "inventory.delete",
             },
           ]}
         />
@@ -1624,12 +1624,12 @@ const Stocks = () => {
           description={t('inventory.stocks.description')}
           actions={
           <>
-            <PermissionGate permission="stocks.export">
+            <PermissionGate permission="inventory.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('stocks.export')}
               </Button>
             </PermissionGate>
-            <PermissionGate permission="stocks.import">
+            <PermissionGate permission="inventory.import">
               <Dialog
                 open={importDialogOpen}
                 onOpenChange={(open) => {
@@ -1688,7 +1688,7 @@ const Stocks = () => {
                 </DialogContent>
               </Dialog>
             </PermissionGate>
-            <PermissionGate permission="stocks.edit">
+            <PermissionGate permission="inventory.edit">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -1699,7 +1699,7 @@ const Stocks = () => {
                 <ArrowLeftRight className="mr-2 h-4 w-4" /> Registar movimento
               </Button>
             </PermissionGate>
-            <PermissionGate permission="stocks.create">
+            <PermissionGate permission="inventory.create">
               <Button
                 onClick={() => {
                   resetForm();
@@ -1793,7 +1793,7 @@ const Stocks = () => {
                       <p className="text-xs text-muted-foreground">
                         Para alterar a quantidade usa Registar movimento → Ajuste.
                       </p>
-                      <PermissionGate permission="stocks.edit">
+                      <PermissionGate permission="inventory.edit">
                         <Button
                           type="button"
                           variant="outline"

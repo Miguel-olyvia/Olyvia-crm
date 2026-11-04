@@ -9,14 +9,17 @@ import type { Estado } from "@/emylia/motor";
 import { supabase } from "@/integrations/supabase/client";
 
 /**
- * As permissões de quem entrou, lidas por `fn_neg_tem_permissao_org(org, código)`, a função que a base RH tem e que as RPCs do Pipeline já usam. O
- * `tem_permissao(org, perm)` que o código da Emylia pergunta não existe nesta base (a leitura falhava sempre). `null`: a leitura falhou.
+ * As permissões de quem entrou, lidas por `fn_cat_pode(org, código)`: a MESMA função com que o servidor decide nas funções do Negócio
+ * (neg_guardar_negocio, obra_guardar_negocio, neg_perder_negocio, …; 20270101340000 e 20270105200000) e que dá EXECUTE a authenticated.
+ * Junta o perfil da Olyvia (has_anew_permission_in_org), o Papel no Negócio do RH (fn_neg_papel_permite) e o admin do sistema. Antes lia-se
+ * `fn_neg_tem_permissao_org`, que ignora o Papel no Negócio e o admin do sistema e escondia ações que o servidor deixa fazer (3/11). O
+ * `tem_permissao(org, perm)` que o código da Emylia pergunta não existe nesta base. `null`: a leitura falhou.
  */
 export async function lerPermissoesDaFicha(org: string): Promise<ReadonlySet<string> | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
   try {
-    const r = await Promise.all(CODIGOS_NEGOCIOS.map((codigo) => db.rpc("fn_neg_tem_permissao_org", { p_organization_id: org, p_codigo: codigo }) as Promise<{ data: unknown; error: unknown }>));
+    const r = await Promise.all(CODIGOS_NEGOCIOS.map((codigo) => db.rpc("fn_cat_pode", { p_org: org, p_perm: codigo }) as Promise<{ data: unknown; error: unknown }>));
     if (r.some((x) => x.error)) return null;
     return new Set(CODIGOS_NEGOCIOS.filter((_, i) => r[i].data === true));
   } catch {

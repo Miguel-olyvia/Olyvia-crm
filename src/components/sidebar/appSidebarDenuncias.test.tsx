@@ -68,7 +68,10 @@ describe("o menu do canal de denúncias", () => {
     expect(grupo("rh-exemplo-eu").paths).toContain("/rh-exemplo/minhas-denuncias");
     expect(grupo("rh-exemplo-eu").paths).not.toContain("/rh-exemplo/denunciar");
     const entrada = grupo("rh-exemplo-eu").items.find((i) => i.to === "/rh-exemplo/minhas-denuncias")!;
-    expect(entrada).toMatchObject({ labelKey: "sidebar.rhExemploMinhasDenuncias", permission: "users.view" });
+    expect(entrada).toMatchObject({ labelKey: "sidebar.rhExemploMinhasDenuncias" });
+    // 03/11: sem permissão — basta a sessão (RhSemFichaDenuncias trata quem não tem ficha).
+    expect(entrada.permission).toBeUndefined();
+    expect(entrada.permissions).toBeUndefined();
     expect(entrada.icon).toBe(Megaphone);
     mostrar("rh-exemplo-eu");
     expect(screen.getByText("A minha área (exemplo)")).toBeInTheDocument();
@@ -88,11 +91,12 @@ describe("o menu do canal de denúncias", () => {
     expect(screen.queryByText(/Canal de denúncias \(exemplo\)/)).not.toBeInTheDocument();
   });
 
-  it("«Denúncias» está em «Recursos Humanos», para quem tem users.view, com o contador de texto", () => {
+  it("«Denúncias» está em «Recursos Humanos», para quem tem hr.denuncias.gerir, com o contador de texto", () => {
     const entrada = grupo("rh-exemplo").items.find((i) => i.to === "/rh-exemplo/denuncias")!;
-    expect(entrada).toMatchObject({ labelKey: "sidebar.rhExemploDenuncias", permission: "users.view", textCounter: "rhDenunciasPorConfirmar" });
+    expect(entrada).toMatchObject({ labelKey: "sidebar.rhExemploDenuncias", permissions: ["hr.denuncias.gerir"], textCounter: "rhDenunciasPorConfirmar" });
     expect(grupo("rh-exemplo").paths).toContain("/rh-exemplo/denuncias");
-    expect(grupo("rh-exemplo").items.every((i) => i.permission === "users.view")).toBe(true);
+    // 03/11: nenhuma entrada do RH usa users.view (cada uma pede as hr.* da sua rota).
+    expect(grupo("rh-exemplo").items.some((i) => i.permission === "users.view" || i.permissions?.includes("users.view"))).toBe(false);
   });
 
   it("o contador diz «2 por confirmar» e acompanha a gestão; as denúncias de outra organização não contam", () => {

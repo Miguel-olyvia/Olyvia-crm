@@ -192,15 +192,19 @@ export function fotoPrincipal(fotos: readonly string[] | null | undefined): stri
 /**
  * 03/11: a foto principal do produto (products.image_urls[0]) no lugar da ilustração; sem foto, ou se a imagem falhar,
  * fica a ilustração. Carrega só quando chega ao ecrã (loading="lazy"); alt = nome do produto.
+ * "decorativa" (alt="") é para as miniaturas ao lado do nome já escrito, para o leitor de ecrã não o dizer duas vezes;
+ * "classeFoto" só se aplica à foto (ex.: a foto preenche a caixa, a ilustração fica mais pequena dentro dela).
  */
-export function FotoOuIlustracao({ fotos, nome, k, className }: { fotos?: readonly string[] | null; nome: string; k: IlustracaoKey | undefined | null; className?: string }) {
+export function FotoOuIlustracao({ fotos, nome, k, className, classeFoto, decorativa }: {
+  fotos?: readonly string[] | null; nome: string; k: IlustracaoKey | undefined | null; className?: string; classeFoto?: string; decorativa?: boolean;
+}) {
   const src = fotoPrincipal(fotos);
   const [falhou, setFalhou] = useState(false);
   useEffect(() => setFalhou(false), [src]);
   if (!src || falhou) return <Ilustracao k={k} className={className} />;
   return (
-    <img src={src} alt={nome} loading="lazy" decoding="async" onError={() => setFalhou(true)}
-      className={cn("h-16 w-16 shrink-0 rounded-lg border border-border bg-muted object-cover", className)} />
+    <img src={src} alt={decorativa ? "" : nome} loading="lazy" decoding="async" onError={() => setFalhou(true)}
+      className={cn("h-16 w-16 shrink-0 rounded-lg border border-border bg-muted object-cover", className, classeFoto)} />
   );
 }
 

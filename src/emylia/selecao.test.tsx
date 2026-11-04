@@ -665,3 +665,52 @@ describe("a experiência guiada: aria-live, foco, modelos rápidos, passo guarda
     expect(within(crono).getByRole("button", { name: /^Demolição/ })).toBeInTheDocument();
   });
 });
+
+/* ------------------------------------------------------------------ 03/11: a foto do produto */
+describe("a foto do produto na seleção guiada (03/11)", () => {
+  const FOTO = "https://x.supabase.co/toalheiro.webp";
+  const comFoto = () => mudarCatalogo((k) => {
+    const p = k.produtos.find((x) => x.n === "Toalheiro elétrico")!;
+    p.fotos = [FOTO];
+  });
+
+  it("Mais produtos: o cartão do produto com foto mostra a foto; os outros ficam com a ilustração", () => {
+    comFoto();
+    const { S, d } = preparar();
+    d.visita.manter = { pav: "sim", loucas: "sim" };
+    render(<Montar S={S} d={d} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Mais produtos/ }));
+    const lista = screen.getByRole("list", { name: "Mais produtos" });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "toalheiro" } });
+    const img = within(lista).getByRole("img", { name: "Toalheiro elétrico" });
+    expect(img).toHaveAttribute("src", FOTO);
+    expect(img).toHaveAttribute("loading", "lazy");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "espelho" } });
+    const cartoes = within(screen.getByRole("list", { name: "Mais produtos" })).getAllByRole("listitem");
+    expect(cartoes.length).toBeGreaterThan(0);
+    for (const c of cartoes) {
+      expect(c.querySelector("img")).toBeNull();
+      expect(c.querySelector("svg[data-ilustracao]")).not.toBeNull();
+    }
+  });
+
+  it("o resumo mostra a miniatura da foto ao lado do nome (decorativa: alt vazio)", () => {
+    comFoto();
+    const { S, A, d } = preparar();
+    d.visita.manter = { pav: "sim", loucas: "sim" };
+    A.produto(d.id, prodN("Toalheiro elétrico"), 1);
+    // o toalheiro traz a instalação, que faz uma pergunta nova: o cliente mantém o que tem em todas
+    for (const o of obrigacoes(lerCatalogo(), servicosVisita(d), d.visita)) d.visita.manter![o.sid] = "sim";
+    render(<Montar S={S} d={d} />);
+    expect(titulo()).toBe("Resumo");
+    fireEvent.click(screen.getByRole("button", { name: /^Ver tudo por fase \(\d+\)$/ }));
+    const crono = screen.getByRole("list", { name: "Por fase da obra" });
+    const linha = within(crono).getByRole("button", { name: /^Toalheiro/ });
+    const img = linha.querySelector("img")!;
+    expect(img).toHaveAttribute("src", FOTO);
+    expect(img).toHaveAttribute("alt", "");
+    fireEvent.error(img);
+    expect(linha.querySelector("img")).toBeNull();
+    expect(linha.querySelector("svg[data-ilustracao]")).not.toBeNull();
+  });
+});

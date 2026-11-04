@@ -384,8 +384,8 @@ const Channels = () => {
           </div>
           {/* RLS on `channels` actually checks campaigns.create/edit/delete
               (see 20260615130000_baseline_new_database.sql ~L25855-25884) —
-              there is no channels.* permission seeded anywhere, so gating on
-              "channels.create" hid this button from everyone but system admins. */}
+              there is no channels.* permission seeded anywhere, so
+              gating on channels.create (sem aspas: escondida no editor desde 03/11) hid this button from everyone but system admins. */}
           <PermissionGate permission="campaigns.create">
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>

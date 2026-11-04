@@ -401,7 +401,7 @@ export default function TechnicalSettings() {
   };
 
   const canAccessScopeLevel = (level: ScopeLevel): boolean => {
-    if (isSystemAdmin || hasPermission('settings.manage') || hasPermission('settings.update')) {
+    if (isSystemAdmin || hasPermission('settings.update')) {
       return true;
     }
     return false;

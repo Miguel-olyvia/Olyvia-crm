@@ -20,7 +20,7 @@ export interface ResultadoFrota<T> { ok: boolean; valor: T | undefined; erro: st
 export const PERM = {
   ver: "fleet.view", gerir: "fleet.manage", custos: "fleet.costs", self: "fleet.self",
   inventario: "inventory.edit", criarArmazem: "warehouses.create", verArmazens: "warehouses.view",
-  operacoes: "operations.view", agenda: "scheduling.view",
+  operacoes: "operations.view", agenda: "scheduling.items.view",
 } as const;
 
 /** O que uma ação exige (o mesmo que o fn_fleet_assert da RPC). */

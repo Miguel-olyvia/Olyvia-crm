@@ -5,7 +5,7 @@
 //   tudo pelo Hoje dele, HojeTecnico.tsx), por validar (o supervisor valida ou pede correção), os ajustes ao plano com a obra
 //   em curso (com aviso ao cliente), a equipa, os equipamentos, os materiais por fase, o diário, a segurança e os custos.
 // O ciclo da tarefa é o da app das obras (operacao-app), muito mais simples: um toque de cada vez.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowRight, CalendarClock, ChevronDown, ChevronRight, MessageCircle, Camera, Check, CheckCircle2, Circle, ClipboardCheck, Clock, FileWarning, HardHat,
   MapPin, Minus, NotebookPen, Phone, Plus, RotateCcw, ShieldCheck, Smartphone, Store, Truck, Wrench, X,
@@ -24,6 +24,7 @@ import {
 } from "./obraOps";
 import { custoObra } from "./custoObra";
 import type { Ctx } from "./pecas";
+import { podeNeg } from "./permissoes";
 import { AutoNoNegocio } from "./AutoRececao";
 import { pontosEncerrar, type PontoEncerrar } from "./encerrarObra";
 import { ViaturasObra } from "./frota/ViaturasObra";
@@ -33,7 +34,8 @@ import { resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { DiaDaObra, FitaDias, HistoricoTarefa, Miniaturas, nomeTec } from "./AcompanhamentoObra";
 import { Conversa } from "./ConversaObra";
 import { orgDoModoReal } from "./acessosPortal";
-import { useConversaReal } from "./real/conversaReal";
+import { fotoDaEquipa, useConversaReal } from "./real/conversaReal";
+import { AcaoMensagemCliente, ProblemasDoCliente, type ConversaDaObra } from "./ProblemasObra";
 import { pedirFrota } from "./frota/pontes";
 import { BarraTarefa, ExtrasTarefa, TarefasDoPlano } from "./PlanoInterativo";
 import { MOTIVOS_AJUSTE, TEMPOS_CORRECAO, duracaoMinima, enviosDe, inicioMinimoVivo, juntarAjustes, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, textoAvisoCliente } from "./trabalhoObra";
@@ -247,7 +249,8 @@ const ABA_DE: Record<Seccao, Aba | null> = {
 
 export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go } = ctx;
-  const p = d.obra.plano!, C = conflitos(p), pode = S.role === "operacoes", direcao = S.role === "direcao";
+  // 3/11: quem planeia a obra é quem tem negocios.obra.planear (equipa.edit), e não só o papel das Operações; encerrá-la pede negocios.obra.fechar
+  const p = d.obra.plano!, C = conflitos(p), pode = podeNeg(S.role, "equipa.edit"), direcao = S.role === "direcao", podeFechar = podeNeg(S.role, "obra.fechar");
   // 19/10: os materiais lidos ao vivo do Inventário (o arranque espera por eles)
   const db = useInventario();
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
@@ -280,6 +283,10 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     window.setTimeout(() => document.getElementById(a || s === "chat" ? `obra-${s}` : "obra-agora")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
   };
   const verDia = (k: number) => { setSel(k); irPara("hoje"); };
+  // 3/11: a conversa lê-se uma vez para a página: a «Conversa com o cliente» e os problemas que o cliente reporta nela (com fotografias)
+  const conversa = useConversaObra(ctx, d);
+  const [problemaAberto, setProblemaAberto] = useState<string | null>(null);
+  const abrirProblema = (k: string) => { setProblemaAberto(k); window.setTimeout(() => document.getElementById("obra-problemas")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
 
   let frase = "", botao: ReactNode = null;
   if (p.estado === "por aprovar") {
@@ -293,7 +300,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   } else if (p.estado === "em curso") {
     frase = `Dia ${p.dia + 1} de ${fim} · ${rotuloDia(p, p.dia)}`;
     // a validação faz-se no próprio cartão (Agora); o encerrar só aparece na reta final e só fica ativo com tudo completo
-    botao = !PV.length && retaFinal ? <Button size="lg" disabled={!podeEncerrar} onClick={go(() => A.fimObra(d.id))}><CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />Encerrar a obra</Button> : null;
+    botao = !PV.length && retaFinal && podeFechar ? <Button size="lg" disabled={!podeEncerrar} onClick={go(() => A.fimObra(d.id))}><CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />Encerrar a obra</Button> : null;
   // 27/10: concluída com auto, o cartão do auto (a seguir) já diz tudo: o "Agora" não repete
   } else frase = d.obra.auto ? "" : "Obra concluída.";
 
@@ -375,8 +382,11 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       {/* 15/10: com a obra concluída, o auto de receção (por assinar / assinado) e o relatório da obra */}
       {p.estado === "concluída" && d.obra.auto && <div className="mt-4"><AutoNoNegocio S={ctx.S} d={d} /></div>}
 
+      {/* 3/11: os problemas que o cliente reportou na conversa (com fotografias): o gestor cria as tarefas e decide se gera orçamento */}
+      <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={problemaAberto} setAbrir={setProblemaAberto} />
+
       {/* ------------------------------------------------ 3. a conversa com o cliente, sempre à vista (27/10) */}
-      <ConversaNaObra ctx={ctx} d={d} />
+      <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrirProblema} />
 
       {/* ------------------------------------------------ 4. o resto, uma parte de cada vez */}
       <div role="tablist" aria-label="Partes da obra" className="sticky top-0 z-10 -mx-4 mt-8 flex gap-1 overflow-x-auto border-b border-border bg-background/95 px-4 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden">
@@ -1152,7 +1162,8 @@ function PedirCorrecao({ ctx, d, ti, motivo, setMotivo }: { ctx: Ctx; d: Negocio
 /** O que o técnico registou (horas, fotografias, nota) e, se está feita, validar ou pedir correção. */
 function Registo({ ctx, d, ti, compacto }: { ctx: Ctx; d: Negocio; ti: number; compacto?: boolean }) {
   const { S, A, run } = ctx;
-  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), pode = S.role === "operacoes";
+  // 3/11: validar é de quem planeia a obra (negocios.obra.planear), como no servidor
+  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), pode = podeNeg(S.role, "equipa.edit");
   const [motivo, setMotivo] = useState<string | null>(null);
   const dif = t.exec ? t.exec.horas - t.h : 0;
   return (
@@ -1517,16 +1528,26 @@ function EquipamentosObra({ d }: { d: Negocio }) {
   );
 }
 
-/** 21/10: a conversa com o cliente (o mesmo fio do portal do cliente). Ao abrir, as mensagens do cliente ficam lidas. */
-function ConversaNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+/** A conversa da obra para a página: a da base (com a base ligada) ou a do estado local (o protótipo), com as fotografias e a escrita. */
+function useConversaObra(ctx: Ctx, d: Negocio) {
   const { A, run } = ctx;
   // 30/10 (2.0): com a base ligada a conversa é a da base, a mesma do portal do cliente (o autor é o utilizador com sessão); no protótipo de
   // sempre continua a do estado local do negócio.
   const org = orgDoModoReal();
   const real = useConversaReal(org, d.id);
-  const msgs = org ? real.msgs : (d.obra.chat ?? []), porLer = msgs.filter((m) => m.de === "cliente" && !m.lida).length;
+  const fotoDe = useMemo(() => (org ? fotoDaEquipa(org) : undefined), [org]);
+  const msgs = org ? real.msgs : (d.obra.chat ?? []);
   const marcarLidas = () => (org ? void real.marcarComoLidas() : run(() => A.lerChat(d.id)));
   const enviar = (t: string): void | Promise<boolean> => (org ? real.enviar(t) : run(() => A.mensagemObra(d.id, "empresa", t)));
+  // 3/11: a resposta a um problema do cliente: devolve se seguiu (no protótipo, segue sempre)
+  const responder = async (t: string): Promise<boolean> => (org ? real.enviar(t) : (run(() => A.mensagemObra(d.id, "empresa", t)), true));
+  const c: ConversaDaObra & { org: string | null; erro: string | null; marcarLidas: () => void; enviar: typeof enviar } = { msgs, fotoDe, responder, org, erro: real.erro, marcarLidas, enviar };
+  return c;
+}
+
+/** 21/10: a conversa com o cliente (o mesmo fio do portal do cliente). Ao abrir, as mensagens do cliente ficam lidas. */
+function ConversaNaObra({ ctx, d, conversa, abrirProblema }: { ctx: Ctx; d: Negocio; conversa: ReturnType<typeof useConversaObra>; abrirProblema: (k: string) => void }) {
+  const { org, msgs, marcarLidas, enviar } = conversa, porLer = msgs.filter((m) => m.de === "cliente" && !m.lida).length;
   return (
     <section id="obra-chat" aria-labelledby="obra-chat-t" className={cn(CARTAO, "mt-4 scroll-mt-16 p-5", porLer > 0 && "border-warning/50")}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -1535,9 +1556,10 @@ function ConversaNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         {porLer > 0 && <button type="button" onClick={marcarLidas} className="min-h-10 text-sm font-medium text-primary underline-offset-4 hover:underline">Marcar {porLer === 1 ? "1 mensagem" : `${porLer} mensagens`} como lida{porLer === 1 ? "" : "s"}</button>}
       </div>
       <div className="mt-3">
-        <Conversa msgs={msgs} eu="empresa" enviar={enviar} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal."
+        <Conversa msgs={msgs} eu="empresa" enviar={enviar} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal." fotoDe={conversa.fotoDe}
+          acao={(m, i) => <AcaoMensagemCliente ctx={ctx} d={d} m={m} chave={m.id ?? `local-${i}`} abrir={abrirProblema} />}
           rapidas={["Bom dia! A equipa já está na obra.", "Já pode ver as fotografias de hoje no portal.", "Vou confirmar e respondo ainda hoje."]} />
-        {org && real.erro && <p role="alert" className="mt-2 text-[15px] text-destructive">{real.erro}</p>}
+        {org && conversa.erro && <p role="alert" className="mt-2 text-[15px] text-destructive">{conversa.erro}</p>}
       </div>
     </section>
   );

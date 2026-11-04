@@ -29,7 +29,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 export default function RhMinhasAusencias() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
-  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
   const minha = useMinhaPessoa();
   const { pessoas: colegas } = usePessoas();
 
@@ -67,7 +67,7 @@ export default function RhMinhasAusencias() {
         aprovadorChefiaNome={aprovadorChefiaNome}
         nomePorPessoaId={nomePorPessoaId}
         permissoes={{
-          view: hasPermission("hr.ausencias.view"),
+          view: hasAnyPermission(["hr.ausencias.view.own", "hr.ausencias.view"]),
           pedir: hasPermission("hr.ausencias.pedir"),
           pedirOutros: false,
           aprovarChefia: false,

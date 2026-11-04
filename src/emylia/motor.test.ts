@@ -100,6 +100,8 @@ describe("protótipo de Negócios", () => {
     expect(d().obra.plano!.estado).toBe("em curso");
 
     preencher(d(), [OBRA[1]]);
+    // 3/11 (20270105200000): encerrar a obra pede negocios.obra.fechar (o Gestor de obra; o Financeiro não a tem)
+    S.role = "operacoes";
     // 21/10: não encerra com tarefas por fazer; com tudo feito e validado, sim
     A.fimObra(id);
     expect(d().obra.plano!.estado).toBe("em curso");

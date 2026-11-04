@@ -11,7 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acoes, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
+import { acoes, definirPerdaReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
+import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
@@ -21,6 +22,7 @@ import { HojeTecnico } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
+import { carregarCamposConfig } from "@/emylia/real/camposConfig";
 import { aplicarAgenda, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
 import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
@@ -75,6 +77,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const vistaPedida = params.get("vista") ?? vistaInicial ?? null;
+  // 3/11: a notificação de uma mensagem do cliente (aos gestores de obra) abre a obra dele: ?vista=operacoes&obra=<número>
+  const obraPedida = useRef(Number(params.get("obra")) || null);
   const S = useMemo<Estado>(() => {
     const s = seed(); s.deals = []; s.clientes = []; s.deal = null;
     s.view = vistaPedida === "operacoes" || vistaPedida === "hoje" ? vistaPedida : "negocios";
@@ -102,6 +106,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // 28/10: os envios ao portal do cliente à espera de a gravação acabar (a proposta e o contrato têm de estar na base)
   const filaPortal = useRef<EnvioAcesso[]>([]);
   const deNovo = useRef(false);
+  // 3/11: a perda (neg_perder_negocio / neg_anular_perda) foi à base: na próxima gravação relê-se o negócio, como depois do Financeiro
+  const relerPedido = useRef(false);
   const [q, setQ] = useState("");
 
   const avisar = useCallback((a: Aviso) => {
@@ -122,6 +128,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
     foto.current = fotografarNegocios(S.deals);
+    // 3/11: no Financeiro, o NIF e o email da faturação que faltam vêm da Lead (depois da fotografia: grava-se na próxima gravação)
+    for (const d of S.deals) if (!soLeitura.current.has(d.id)) herdarFaturacao(d);
   }, [S]);
 
   // 2/11 (20270103800000): a vista do cliente de cada negócio com proposta enviada (o portal real desenha-a com o ecrã da V1). Só se
@@ -162,6 +170,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         deNovo.current = false;
         const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current);
         if (r.reler) relerFinanceiro = true;
+        if (relerPedido.current) { relerPedido.current = false; relerFinanceiro = true; }
         if (r.erros.length) { semErros = false; setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
@@ -234,8 +243,11 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     }
   }, [org, S, redesenhar, gravar]);
 
+  // 3/11: o nome de quem entrou, nas entradas novas do histórico (depois de gravar, a base guarda-o: 20270105100000)
+  const nomeEu = useRef("");
   const run = useCallback((fn: () => void) => {
     fn();
+    marcarAutor(S.deals, nomeEu.current);
     preencherDaFicha();
     // 28/10: as vistas da Emylia que já têm página real na Olyvia abrem-na (o que mudou grava-se na mesma, antes de sair)
     const fora = VISTAS.has(S.view) ? null : PAGINA_REAL[S.view] ?? null;
@@ -267,6 +279,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), ou um cargo técnico de obra."); return; }
       S.role = papel;
       const cat = await carregarCatalogo(supabase, org, S);
+      // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
+      await carregarCamposConfig(supabase, org, S);
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
       aplicarGestoresObra(await lerGestoresObra(supabase, org));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)
@@ -299,12 +313,17 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         const d = S.deals.find((x) => x.id === numeroDe.get(r.negocio));
         if (d && aplicarResposta(d, Aresp, r)) respostasAplicadas.current.push(r.id);
       }
+      // 3/11: o que veio do portal (o cliente avisou, assinou, recebeu a obra) não é de ninguém da equipa
+      marcarAutor(S.deals, "");
       // 30/10: os planos por aprovar com tarefas por atribuir (o RH não tinha técnicos do ofício quando se geraram) ficam com os técnicos
       // que o RH já tem; grava-se a obra a seguir. Só quem grava a obra (o Gestor de obra; ou quem vê todos) o faz.
       const atribuidas = mp.todos || mp.papeis.includes("operacoes") ? S.deals.reduce((a, d) => a + atribuirPorAtribuir(d.obra.plano), 0) : 0;
       // F3: a prontidão das encomendas de cliente emitidas (o passo «À espera dos materiais»)
       await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       if (!vivo) return;
+      // 3/11: a obra pedida no endereço (a notificação de uma mensagem do cliente), se o negócio já tem plano
+      const op = obraPedida.current;
+      if (op && S.deals.some((x) => x.id === op && x.obra.plano)) { S.view = "operacoes"; S.op = op; S.deal = null; }
       setPronto(true);
       preencherDaFicha();
       // 2/11: a vista do cliente grava-se depois de as encomendas carregarem (leva o estado dos materiais) e só depois os avisos
@@ -316,6 +335,29 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     return () => { vivo = false; };
   }, [org, S, avisar, carregarEncomendas, aplicarLidos]); // eslint-disable-line react-hooks/exhaustive-deps -- gravar só depois de ler
   useEffect(() => () => reporNomesPapeis(), []);
+  // 3/11 (20270105200000): perder e anular a perda gravam-se pelas funções da base (neg_guardar_negocio ignora o estado e o motivo); depois,
+  // com sucesso ou não, grava-se o resto e relê-se o negócio (a base é que diz se ficou perdido). A base pede negocios.perder.
+  useEffect(() => {
+    if (!org) return;
+    const depois = () => { relerPedido.current = true; redesenhar(); void gravar(); };
+    definirPerdaReal({
+      perder: (d, fase, motivo) => {
+        const ref = refs.current.get(d.id);
+        if (!ref) { avisar({ msg: "A perda não ficou gravada", sub: "O negócio ainda não está gravado na base.", kind: "bad" }); return; }
+        void perderNegocioReal(ref.id, fase, motivo)
+          .catch((e) => { d.perdido = false; avisar({ msg: "A perda não ficou gravada", sub: mensagemDaPerda(e), kind: "bad" }); })
+          .finally(depois);
+      },
+      anular: (d, razao) => {
+        const ref = refs.current.get(d.id);
+        if (!ref) return;
+        void anularPerdaReal(ref.id, razao)
+          .catch((e) => { d.perdido = true; avisar({ msg: "A perda não foi anulada", sub: mensagemDaPerda(e), kind: "bad" }); })
+          .finally(depois);
+      },
+    });
+    return () => definirPerdaReal(null);
+  }, [org, avisar, redesenhar, gravar]);
   // 30/10: Compras e armazém aprova a encomenda a fornecedor no passo dos materiais; depois relê as encomendas do negócio
   useEffect(() => {
     if (!org) return;
@@ -439,6 +481,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   }, []);
   // 30/10: sem ler o RH (sem permissão nele), a pessoa vem da conta pelos papéis (neg_meus_papeis)
   const eu = minha.loading ? null : { pessoaId: minha.pessoaId ?? meus?.pessoa?.id ?? null, nome: minha.nome ?? meus?.pessoa?.nome ?? nomeConta ?? "Eu" };
+  nomeEu.current = eu && eu.nome !== "Eu" ? eu.nome : "";
   const tecConta = pronto ? tecnicoDaConta(S.tecnicos ?? [], eu) : null;
   useEffect(() => {
     if (!pronto) return;

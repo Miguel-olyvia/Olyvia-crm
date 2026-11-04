@@ -18,7 +18,7 @@ import { CONSUMIVEIS } from "./equipamentosCliente";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
 import { ContadorQtd } from "./ContadorQtd";
 import { SelecaoGuiada } from "./SelecaoGuiada";
-import { Ilustracao, ilustracaoDe } from "./ilustracoes";
+import { FotoOuIlustracao, ilustracaoDe } from "./ilustracoes";
 import {
   nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
 } from "./produtosVisita";
@@ -41,8 +41,9 @@ function CartaoProduto({ p, K, alvo, ja, onTocar, compacto }: { p: Produto; K: C
     <button type="button" aria-pressed={ja} onClick={onTocar} title={p.n}
       className={cn("relative flex h-full w-full flex-col rounded-xl border bg-card p-2.5 text-left transition-colors duration-150",
         ja ? "border-primary bg-primary/[0.04] ring-1 ring-primary" : "border-border hover:border-foreground/30")}>
-      <span className={cn("grid place-items-center rounded-lg bg-muted/70", compacto ? "h-20" : "h-24")}>
-        <Ilustracao k={ilustracaoNo(K, p)} className={compacto ? "h-14 w-14" : "h-16 w-16"} />
+      <span className={cn("grid place-items-center overflow-hidden rounded-lg bg-muted/70", compacto ? "h-20" : "h-24")}>
+        {/* 03/11: a foto do produto preenche a caixa; sem ela (ou se falhar), a ilustração */}
+        <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={ilustracaoNo(K, p)} className={compacto ? "h-14 w-14" : "h-16 w-16"} classeFoto="h-full w-full rounded-none border-0" decorativa />
       </span>
       <span className="mt-2 line-clamp-2 text-[15px] font-medium leading-snug text-foreground">{p.n}</span>
       {p.marca && <span className="text-sm text-muted-foreground">{p.marca}</span>}
@@ -63,7 +64,7 @@ function Escolhido({ p, ctx, K, ro, clienteFornece }: { p: ProdVisita; ctx: P; K
   const img = doCat ? ilustracaoNo(K, doCat) : ilustracaoDe(p.n);
   return (
     <li id={`pe-${p.id}-${d.id}`} tabIndex={-1} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:flex-nowrap">
-      <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-muted/70"><Ilustracao k={img} className="h-10 w-10" /></span>
+      <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-muted/70"><FotoOuIlustracao fotos={doCat?.fotos} nome={p.n} k={img} className="h-10 w-10" classeFoto="h-14 w-14 border-0" decorativa /></span>
       <span className="min-w-0 flex-1">
         <span className="block text-[15px] font-medium leading-snug text-foreground">{p.n}</span>
         <span className="block text-sm text-muted-foreground">
@@ -201,7 +202,10 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
     <section id={`obr-${o.sid}-${d.id}`} aria-labelledby={hid}
       className={cn("border-t border-border pt-5 first:border-t-0 first:pt-0", erro && "border-l-4 border-l-destructive pl-3")}>
       <div className="flex items-center gap-4">
-        <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-muted/70"><Ilustracao k={img} className="h-12 w-12" /></span>
+        <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-muted/70">
+          {/* 03/11: com produto escolhido, a foto dele; sem produto, a ilustração da pergunta */}
+          <FotoOuIlustracao fotos={primeiro?.fotos} nome={primeiro?.n ?? ""} k={img} className="h-12 w-12" classeFoto="h-16 w-16 rounded-xl border-0" decorativa />
+        </span>
         <div className="min-w-0 flex-1">
           <h4 id={hid} tabIndex={-1} className="text-lg font-semibold leading-snug text-foreground outline-none">{titulo}</h4>
           <p className="text-sm text-muted-foreground">Para {nomeCurto(nome).toLowerCase()}</p>

@@ -33,6 +33,7 @@ import { BarraSelecao, CaixaLinha, useSelecao } from "./MarcarArmazens";
 import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatalogo";
 import { ehCriado } from "./catalogo";
 import { MateriaisModelo } from "./MateriaisModelo";
+import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
@@ -247,6 +248,8 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
 /* ------------------------------------------------------------------ equipamentos */
 function Equipamentos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (c: Custos) => void, msg: string) => void; novo?: string }) {
   const [aberto, setAberto] = useState<string | null>(null);
+  // 03/11: mudar um equipamento grava com cat_guardar_equipamento_horas (services.edit); sem a permissão não há «Editar».
+  const pode = usePermissoesCatalogo().servicos;
   const campos: [keyof Custos["equip"][number], string, string][] = [["compra", "Compra", "€"], ["residual", "Valor residual", "€"], ["vida", "Vida útil", "h"], ["manutAno", "Manutenção", "€/ano"], ["usoAno", "Uso", "h/ano"]];
   return (
     <>
@@ -264,10 +267,10 @@ function Equipamentos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (f
                   <span className="block text-[15px] font-medium tabular-nums">{eur(q.total)} €/h</span>
                 </span>
               </div>
-              <button type="button" aria-expanded={ab} aria-label={`${ab ? "Fechar" : "Editar"} ${e.n}`} onClick={() => setAberto(ab ? null : e.id)} className="mt-1 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+              {pode && <button type="button" aria-expanded={ab} aria-label={`${ab ? "Fechar" : "Editar"} ${e.n}`} onClick={() => setAberto(ab ? null : e.id)} className="mt-1 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline">
                 {ab ? "Fechar" : "Editar"}
-              </button>
-              {ab && (
+              </button>}
+              {ab && pode && (
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
                   <label className="col-span-2 grid gap-1 sm:col-span-5"><span className="text-[15px] font-medium">Nome</span>
                     <TextoCelula rotulo="Nome do equipamento" v={e.n} onSet={(v) => mudar((c) => { c.equip.find((x) => x.id === e.id)!.n = v; }, "Nome mudado")} /></label>
@@ -330,7 +333,9 @@ function Consumiveis({ todos, C, nomeServico, novo, onAbrirConsumivel, real, anu
 
 /* ------------------------------------------------------------------ técnicos */
 function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (c: Custos) => void, msg: string) => void; novo?: string }) {
-  const L = primeiro(tecnicosCatalogo(S, C), (t) => t.p.id === novo), direcao = S.role === "direcao";
+  // 03/11: o salário do perfil grava com cat_guardar_perfil (services.edit).
+  const pode = usePermissoesCatalogo().servicos;
+  const L = primeiro(tecnicosCatalogo(S, C), (t) => t.p.id === novo), direcao = S.role === "direcao" && pode;
   return (
     <>
       <ul className={LISTA}>
@@ -368,6 +373,7 @@ const NOME_TIPO: Record<TipoCriar, string> = { servico: "Serviço", produto: "Pr
 export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) {
   const C = useCustos();
   const K = useCatalogo();
+  const perms = usePermissoesCatalogo();
   // 26/10: a secção e a ficha aberta vão para o endereço (?sec=…, ?servico=…): o "voltar" do browser fecha a ficha e volta à secção
   const [seccao, setSeccaoE] = useParamUrl<Seccao>("sec", ultimaSeccao, SECCOES.map(([k]) => k));
   const setSeccao = (s: Seccao) => { ultimaSeccao = s; setSeccaoE(s); };
@@ -434,8 +440,9 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
     </div>
   );
 
-  /** O tipo que o botão Criar escolhe, pelo separador aberto. */
-  const tipoDaSeccao: TipoCriar = seccao === "produtos" ? "produto" : seccao === "equipamentos" ? "equipamento" : seccao === "consumiveis" ? "consumivel" : seccao === "tecnicos" ? "tecnico" : "servico";
+  /** O tipo que o botão Criar escolhe, pelo separador aberto (03/11: se a permissão não deixar, o primeiro que deixe; nenhum = sem botão). */
+  const tipoPedido: TipoCriar = seccao === "produtos" ? "produto" : seccao === "equipamentos" ? "equipamento" : seccao === "consumiveis" ? "consumivel" : seccao === "tecnicos" ? "tecnico" : "servico";
+  const tipoDaSeccao: TipoCriar | undefined = podeCriarTipo(perms, tipoPedido) ? tipoPedido : TIPOS_CRIAR.find((x) => podeCriarTipo(perms, x.k))?.k;
   const criado = (t: TipoCriar, id: string, nome: string) => {
     anunciar(`${NOME_TIPO[t]} «${nome}» criado.`);
     setCriar("", { substituir: true });
@@ -521,9 +528,11 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
         <div className="min-w-0 flex-1">
           <h1 className="text-3xl font-semibold tracking-tight">Catálogo e custos</h1>
         </div>
-        <Button className="h-11 shrink-0 text-[15px] shadow-sm transition-transform hover:-translate-y-0.5" onClick={() => setCriar(tipoDaSeccao)}>
-          <Plus className="mr-1 h-5 w-5" aria-hidden="true" />Criar
-        </Button>
+        {tipoDaSeccao && (
+          <Button className="h-11 shrink-0 text-[15px] shadow-sm transition-transform hover:-translate-y-0.5" onClick={() => setCriar(tipoDaSeccao)}>
+            <Plus className="mr-1 h-5 w-5" aria-hidden="true" />Criar
+          </Button>
+        )}
       </div>
       <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
         {SECCOES.map(([s, t]) => tab(s, t))}

@@ -17,6 +17,7 @@ import { diferencasCatalogo, executarCatalogo, fotografar, type Rpc } from "@/em
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
+import { ProvedorPermissoesCatalogo, permissoesCatalogo } from "@/emylia/permissoesCatalogo";
 
 type Gravacao = { k: "parado" } | { k: "a-gravar"; n: number } | { k: "gravado"; n: number } | { k: "erro"; t: string };
 
@@ -82,6 +83,8 @@ export default function CatalogoCustos() {
   const podeEditar = hasPermission("products.edit"), podeMudarPrecos = hasPermission("products.manage_prices");
   // 29/10: marcar armazéns em lote (Produtos/Consumíveis) só com inventory.edit, como cat_definir_armazem_produtos
   const podeStock = hasPermission("inventory.edit");
+  // 03/11: o que cada parte do Catálogo deixa mudar (services.edit, services.manage_prices, products.edit, products.manage_prices).
+  const perms = useMemo(() => permissoesCatalogo(hasPermission), [hasPermission]);
   const real = useMemo<FichaProdutoReal | undefined>(() => (org ? { org, podeEditar, podeMudarPrecos, podeStock, recarregar: () => carregar(org) } : undefined), [org, podeEditar, podeMudarPrecos, podeStock, carregar]);
 
   if (isLoading || (!org && !erroLer)) return <div className="p-6 text-muted-foreground">A carregar…</div>;
@@ -95,7 +98,7 @@ export default function CatalogoCustos() {
       </div>
       {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>
         : !pronto ? <p className="p-6 text-muted-foreground">A ler o Catálogo…</p>
-        : <CatalogoV1 {...ctx} real={real} />}
+        : <ProvedorPermissoesCatalogo valor={perms}><CatalogoV1 {...ctx} real={real} /></ProvedorPermissoesCatalogo>}
     </div>
   );
 }

@@ -76,8 +76,10 @@ export default function Scheduling() {
   const isTeamScope = schedulingScope === 'TEAM';
   const showScopeSelector = canSeeAll || isTeamScope;
 
-  const canViewScheduling = hasPermission('scheduling.view') || hasPermission('scheduling') || hasPermission('scheduling.items.view') || hasPermission('scheduling.boards.view') || hasPermission('scheduling.resources.view');
+  const canViewScheduling = hasPermission('scheduling.items.view') || hasPermission('scheduling.boards.view') || hasPermission('scheduling.resources.view');
   const hasAnyViewPermission = canViewScheduling;
+  // 03/11: o separador Regras só a quem pode ver as regras de auto-agendamento (a RLS de auto_schedule_rules pede o mesmo).
+  const podeVerRegras = hasPermission('scheduling.rules.view');
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasAnyViewPermission) navigate('/dashboard');
@@ -520,7 +522,7 @@ export default function Scheduling() {
             <TabsTrigger value="calendar" className="flex items-center gap-2"><Calendar className="h-4 w-4" />{t('scheduling.calendar')}</TabsTrigger>
             <TabsTrigger value="boards" className="flex items-center gap-2"><Layers className="h-4 w-4" />{t('scheduling.boards')}</TabsTrigger>
             <TabsTrigger value="resources" className="flex items-center gap-2"><Users className="h-4 w-4" />{t('scheduling.resources')}</TabsTrigger>
-            <TabsTrigger value="rules" className="flex items-center gap-2"><Settings2 className="h-4 w-4" />{t('scheduling.rules')}</TabsTrigger>
+            {podeVerRegras && <TabsTrigger value="rules" className="flex items-center gap-2"><Settings2 className="h-4 w-4" />{t('scheduling.rules')}</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="calendar" className="space-y-4">
@@ -735,9 +737,11 @@ export default function Scheduling() {
             </div>
           </TabsContent>
 
-          <TabsContent value="rules" className="space-y-4">
-            <AutoScheduleRulesTab companyId={activeCompany?.id} boards={boards} resources={resources} />
-          </TabsContent>
+          {podeVerRegras && (
+            <TabsContent value="rules" className="space-y-4">
+              <AutoScheduleRulesTab companyId={activeCompany?.id} boards={boards} resources={resources} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
 

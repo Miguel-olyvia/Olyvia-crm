@@ -190,7 +190,11 @@ const ClientPortalContractDetail = () => {
     }
   }
 
-  const handleSendOtp = () => sendOtp(false);
+  // 3/11 (Rúben): antes do código, o cliente confirma que leu o contrato e aceita os termos
+  const [showLeitura, setShowLeitura] = useState(false);
+  const [leuAceita, setLeuAceita] = useState(false);
+  const handleSendOtp = () => { setLeuAceita(false); setShowLeitura(true); };
+  const confirmarLeitura = () => { setShowLeitura(false); void sendOtp(false); };
   const handleResendOtp = () => sendOtp(true);
 
   async function handleVerifyOtp() {
@@ -672,6 +676,26 @@ const ClientPortalContractDetail = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* Leu e aceita: a pergunta antes de assinar (3/11) */}
+        <Dialog open={showLeitura} onOpenChange={setShowLeitura}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Leu o contrato e aceita os termos?</DialogTitle>
+              <DialogDescription>
+                Ao assinar, aceita o contrato {contract.contract_number || ""} tal como está escrito acima. A seguir enviamos um código por SMS para confirmar a assinatura.
+              </DialogDescription>
+            </DialogHeader>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-primary" checked={leuAceita} onChange={(e) => setLeuAceita(e.target.checked)} />
+              <span>Li o contrato e aceito os seus termos e condições.</span>
+            </label>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setShowLeitura(false)}>Voltar ao contrato</Button>
+              <Button onClick={confirmarLeitura} disabled={!leuAceita || actionLoading}>Assinar e receber o código</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Reject Dialog */}
         <Dialog open={showReject} onOpenChange={setShowReject}>

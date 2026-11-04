@@ -8,6 +8,8 @@ export interface Permissao {
   /** A categoria em anew_permissions (a que o ecrã de Roles agrupa por menu). */
   categoria: string;
   nome: string;
+  /** A descrição em anew_permissions.description (só vem da base; a grelha mostra-a na dica e lê-a ao leitor de ecrã). */
+  descricao?: string;
   /** Só existe nos dados de exemplo; a base não guarda de onde veio a permissão. */
   fonte?: FontePermissao;
   /** Assinalada como perigosa (eliminar, exportar dados sensíveis, aprovar, receber...). */

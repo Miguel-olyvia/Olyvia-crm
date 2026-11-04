@@ -50,9 +50,15 @@ const otpInput = () =>
   document.querySelector("input[autocomplete='one-time-code']") as HTMLInputElement | null;
 const resendButton = () => screen.getByRole("button", { name: /^Reenviar código/ }) as HTMLButtonElement;
 
+// 3/11: antes do código, o cliente confirma que leu o contrato e aceita os termos
+async function confirmarLeitura() {
+  await act(async () => { fireEvent.click(screen.getByRole("checkbox", { name: /Li o contrato e aceito/ })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Assinar e receber o código/ })); });
+}
 async function clickSend() {
   const btn = await screen.findByRole("button", { name: /Enviar código SMS/ });
   await act(async () => { fireEvent.click(btn); });
+  await confirmarLeitura();
 }
 async function clickResend() {
   await act(async () => { fireEvent.click(resendButton()); });
@@ -111,6 +117,19 @@ describe("ClientPortalContractDetail - Reenviar recusado não desmonta o passo d
     expect(smsCalls()).toBe(2);
     expect(otpInput()).not.toBeNull();
     expect(resendButton().textContent).toBe("Reenviar código (60s)");
+  });
+
+  it("3/11: assinar pergunta primeiro se leu e aceita; sem marcar, não se envia o código", async () => {
+    renderPage();
+    const enviar = await screen.findByRole("button", { name: /Enviar código SMS/ });
+    await act(async () => { fireEvent.click(enviar); });
+    expect(screen.getByRole("heading", { name: /Leu o contrato e aceita os termos/ })).toBeTruthy();
+    const assinar = screen.getByRole("button", { name: /Assinar e receber o código/ }) as HTMLButtonElement;
+    expect(assinar.disabled).toBe(true);
+    expect(smsCalls()).toBe(0);
+    await confirmarLeitura();
+    expect(smsCalls()).toBe(1);
+    expect(otpInput()).not.toBeNull();
   });
 
   it("primeiro envio recusado volta ao Enviar clicável, sem contagem", async () => {

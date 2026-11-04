@@ -80,16 +80,21 @@ export function deBase(j: unknown, ids: IdsServico): NegocioLido {
 }
 
 export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico): Promise<NegocioLido[]> {
-  const [neg, obras] = await Promise.all([
+  const [neg, obras, autores] = await Promise.all([
     sb.rpc("neg_ler_negocios" as never, { p_org: org } as never),
     sb.rpc("obra_ler_negocios" as never, { p_org: org } as never),
+    // 3/11 (20270105100000): quem fez cada entrada do histórico; sem a função (ou com erro), o histórico fica sem nomes
+    sb.rpc("neg_historico_autores" as never, { p_org: org } as never),
   ]);
   if (neg.error) throw new Error(neg.error.message || "Não foi possível ler os negócios.");
   if (obras.error && !semFuncao(obras.error)) throw new Error(obras.error.message || "Não foi possível ler as obras.");
   const porNegocio = new Map(((obras.error ? [] : obras.data) as { negocio_id: string; emylia: unknown }[] | null ?? [])
     .map((o) => [o.negocio_id, obraDaBase(o.emylia)]));
+  const quem = new Map(((autores.error ? [] : autores.data) as { negocio_id: string; ordem: number; quem: string | null }[] | null ?? [])
+    .map((a) => [`${a.negocio_id}:${a.ordem}`, a.quem ?? ""]));
   return ((neg.data as unknown[]) ?? []).map((j) => {
     const n = deBase(j, ids);
+    for (const h of n.linhas.historico) h.quem = quem.get(`${n.id}:${h.ordem}`) ?? "";
     const obra = porNegocio.get(n.id);
     return obra ? { ...n, obra } : n;
   });

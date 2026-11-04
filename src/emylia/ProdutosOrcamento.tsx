@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, precoProduto, servicosTrazidos } from "./produtosVisita";
-import { Ilustracao, ilustracaoDe } from "./ilustracoes";
+import { FotoOuIlustracao, ilustracaoDe } from "./ilustracoes";
+import { useCatalogo } from "./v2/catalogoStore";
 
 export { PREFIXO_CLIENTE, PREFIXO_PROD };
 
@@ -17,6 +18,7 @@ export function ProdutosOrcamento({ S, A, run, d, simples }: Pick<Ctx, "S" | "A"
   const o = d.orc!, prod = d.visita.prod ?? [], compra = Object.values(d.visita.clienteCompra ?? {});
   const traz = Object.entries(servicosTrazidos(prod));
   const t = simples ? "text-[15px]" : "text-sm";
+  const K = useCatalogo();
   // 15/10, a página simples: uma lista limpa (a ilustração, o nome e a quantidade, o preço à direita); a instalação que o
   // produto traz vai por baixo do próprio produto, e não numa frase à parte
   if (simples) {
@@ -32,7 +34,7 @@ export function ProdutosOrcamento({ S, A, run, d, simples }: Pick<Ctx, "S" | "A"
               const inst = p.svc && p.q > 0 ? S.svc[p.svc] : null;
               return (
                 <li key={p.id} className="flex items-center gap-3 py-3">
-                  <Ilustracao k={ilustracaoDe(p.n)} className="h-10 w-10 shrink-0" />
+                  <FotoOuIlustracao fotos={K.produtos.find((x) => x.id === p.id)?.fotos} nome={p.n} k={ilustracaoDe(p.n)} className="h-10 w-10 shrink-0" decorativa />
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] font-medium leading-snug">{p.n}</span>
                     <span className="block text-sm text-muted-foreground">

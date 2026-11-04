@@ -22,6 +22,8 @@ import {
   MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
   juntarAoPlano, linhaAdenda, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
+import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
+  textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
@@ -331,12 +333,14 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
-  /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string }
+  /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
+  /** 3/11: resolve um problema que o cliente reportou na conversa (o id, problemasCliente.ts) */ problema?: string }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
 export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string;
   /** 30/10: o produto do Catálogo (products.id), na Olyvia: é por ele que a base encomenda ao fornecedor (obra_encomendar_materiais) */ produto?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
-export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string }
+export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string;
+  /** 3/11: o id da mensagem na base (negocio_mensagens) e os ids das fotografias dela (20270105400000) */ id?: string; fotos?: string[] }
 export interface Plano {
   tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number;
   /** Gerado do plano do orçamento (preparacaoObra.ts), com o início previsto ("aaaa-mm-dd"). */
@@ -349,7 +353,17 @@ export interface Plano {
 export interface AvisoTec { tec: string; ti: number; t: string; q: string; lido?: string }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
-export interface Evento { t: string; q: string; k: "a" | "w" | "x" }
+export interface Evento {
+  t: string; q: string; k: "a" | "w" | "x";
+  /** 3/11: quem fez (o nome); "" lido da base sem autor; por definir numa entrada nova, ainda por gravar (marcarAutor) */
+  quem?: string;
+}
+/** 3/11: as entradas novas do histórico (sem quem) ficam com este nome; "" para as que não são de ninguém da equipa. */
+export function marcarAutor(deals: Negocio[], quem: string) {
+  for (const d of deals) for (const h of d.hist) if (h.quem === undefined) h.quem = quem;
+}
+/** «hoje 15:21 · Rúben Carvalho» (sem o nome, se não houver). */
+export const quandoEQuem = (h: Evento) => (h.quem ? `${h.q} · ${h.quem}` : h.q);
 
 /** 21/10: como o cliente assinou, para o histórico e os documentos ("Chave Móvel Digital", "código por SMS"). */
 export const comoAssinou = (a: Assinatura): string => a.tipo === "digital" ? "Chave Móvel Digital" : a.tipo === "sms" ? "código por SMS" : "desenhada no ecrã";
@@ -413,7 +427,9 @@ export interface Negocio {
     /** 21/10: os ajustes ao plano com a obra em curso (trabalhoObra.ts), com o aviso ao cliente quando foi avisado. */
     alteracoes?: Alteracao[];
     /** 21/10: a conversa com o cliente sobre a obra (a página da obra e o portal do cliente) */
-    chat?: MensagemObra[] };
+    chat?: MensagemObra[];
+    /** 3/11: os problemas que o cliente reportou na conversa e o que o gestor decidiu (problemasCliente.ts) */
+    problemas?: ProblemaCliente[] };
   /** Os trabalhos a mais depois do contrato assinado (adendas.ts). */
   adendas?: Adenda[];
   /** 23/10 (2.0): a conta real do cliente no portal, criada no envio (estadoContaPortal.ts): a criar, pronta ou com erro. */
@@ -1397,6 +1413,8 @@ export function minhas(S: Estado, role: Papel) {
         : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
       if (role === "comercial" && im.estado === "recusado") L.push({ d, p: { t: "O cliente não aceitou a proposta do imprevisto", sub: `${im.texto} · fale com ${d.nome.split(" ")[0]}`, who: "comercial" } });
     }
+    // 3/11: os problemas reportados pelo cliente que esperam pelo gestor (outra proposta, a proposta recusada, a resposta por enviar)
+    if (role === "operacoes") for (const pr of problemasPorTratar(d)) L.push({ d, p: { t: `Problema do cliente · ${pr.texto}`, sub: pr.estado === "recusado" ? "O cliente não aceitou a proposta · decida o que fazer" : pr.estado === "aberto" ? "Faça outra proposta" : "A resposta ao cliente não seguiu · envie-a de novo", btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
     // 21/10: as adendas, com o mesmo percurso do orçamento: cada passo de quem é (comercial, Direção, Jurídico)
     if (!d.anulado) for (const a of d.adendas ?? []) for (const t of tarefasAdenda(d, S, a)) if (t.who === role) L.push({ d, p: t });
     // 21/10: a fatura e o pagamento da 1.ª parcela de cada adenda assinada vêm dos passos do bloco Pagamento (passosAgora), como os do
@@ -1557,6 +1575,16 @@ function preencher(d: Negocio, n: number) {
   if (n === 5) def({ data_pag: hojeISO(), responsavel: RESPONSAVEIS_OBRA[0] ?? "", horario: "Dias úteis 8h–17h", chaves: f.habitada_durante_obra === "Sim" ? "O cliente abre" : "Chave entregue",
     contacto_local: d.nome + " · " + d.tel, contentor: "Não", protecoes: protecoesSugeridas(f) });
 }
+// 3/11 (Rúben): o NIF e o email da faturação vêm da Lead (a primeira fase), também nos negócios que já estavam no Financeiro e quando se
+// escrevem depois na Lead. Só se preenche o que está vazio: o que alguém escreveu na faturação não se troca.
+const DA_LEAD: [string, string][] = [["nif_fat", "nif"], ["email_fat", "email"]];
+/** No Financeiro, antes de pago: o NIF e o email da faturação que faltam vêm da Lead. Devolve true se mudou alguma coisa. */
+export function herdarFaturacao(d: Negocio): boolean {
+  if (d.fase !== 4 || d.fin.pago) return false;
+  let mudou = false;
+  for (const [fat, lead] of DA_LEAD) if (!d.f[fat]?.trim() && d.f[lead]?.trim()) { d.f[fat] = d.f[lead].trim(); mudou = true; }
+  return mudou;
+}
 const fichaCliente = (d: Negocio, desde: string) => ({ nome: d.nome, tel: d.tel, local: nomeLinha(d) + (d.local ? " · " + d.local : ""), desde, deal: d.id });
 function criarCliente(S: Estado, d: Negocio) {
   if (!S.clientes.some((c) => c.deal === d.id)) S.clientes.unshift(fichaCliente(d, "hoje"));
@@ -1586,6 +1614,34 @@ export function diaReal(p: Plano, hoje = new Date()): { dia: number; atraso: num
   for (let i = 0; i < dias.length && dias[i] <= hj; i++) k = i;
   if (k < 0) return { dia: 0, atraso: 0 };
   return { dia: Math.min(k, fim - 1), atraso: Math.max(0, k - (fim - 1)) };
+}
+
+/** 3/11 (20270105200000): a perda do negócio numa organização real. neg_guardar_negocio ignora o estado e o motivo da perda: perder e
+ *  anular a perda gravam-se pelas funções neg_perder_negocio e neg_anular_perda (NegociosEmylia.tsx liga-as e relê o negócio). Sem
+ *  ligação (o protótipo, os testes) a perda fica só no Estado, como sempre. */
+export type FasePerdaBase = "lead" | "contacto" | "visita" | "levantamento" | "orcamento" | "proposta" | "contrato";
+export interface PerdaReal {
+  perder(d: Negocio, fase: FasePerdaBase, motivo: string): void;
+  anular(d: Negocio, razao: string): void;
+}
+let perdaReal: PerdaReal | null = null;
+export function definirPerdaReal(p: PerdaReal | null): void { perdaReal = p; }
+/** A fase da perda na linguagem da base (neg_perder_negocio): Por contactar, Contacto, Visita (marcada, ou já no levantamento: com
+ *  fotografias ou diagnóstico), Negócio (orçamento, ou proposta enviada). Com contrato não se perde (anula-se o contrato). */
+export function faseDaPerda(d: Negocio): FasePerdaBase {
+  if (d.fase <= 0) return "lead";
+  if (d.fase === 1) return "contacto";
+  if (d.fase === 2) return d.visita.fotos > 0 || Object.keys(d.f).some((k) => /^(diag_|div_[a-z0-9]+_diag_)/.test(k) && !!d.f[k]) ? "levantamento" : "visita";
+  if (d.fase === 3) return d.orc?.enviada ? "proposta" : "orcamento";
+  return "contrato";
+}
+/** 3/11 (20270105200000): a permissão que uma resposta do negócio pede no servidor (fn_neg_marcas_permissoes): o resultado da chamada, as
+ *  tentativas e o voltar a ligar são do contacto; as da agenda das visitas (v<n>_…) e as do diagnóstico (diag_…, div_<divisão>_diag_…) da
+ *  visita. As outras não pedem nenhuma destas. */
+export function permDoCampo(k: string): PermNeg | null {
+  if (k === "resultado" || k === "tentativas" || k === "religar") return "contacto.registar";
+  if (/^(v[0-9]+_|diag_|div_[a-z0-9]+_diag_)/.test(k)) return "visita.gerir";
+  return null;
 }
 
 /** 23/10 (2.0): o motor corre no portal real (a conta de um cliente ou fornecedor, ligada à base). */
@@ -1618,6 +1674,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     if (podeNeg(S.role, p)) return true;
     avisar({ ...SEM_PERM[p], kind: "bad" });
     return false;
+  };
+  /** 3/11: o «Anular» do aviso de perda: pede negocios.perder e, numa organização real, grava-se pela neg_anular_perda. Devolve se anulou. */
+  const anularPerda = (d: Negocio, razao: string): boolean => {
+    if (!exigePerm("negocio.perder")) return false;
+    d.perdido = false; delete d.motivoPerda; log(d, razao);
+    perdaReal?.anular(d, razao);
+    return true;
   };
   /** 22/10: um documento foi ao portal do cliente: a conta dele (criada no primeiro envio) e o popup com o email de acesso (acessosPortal.ts).
    *  23/10 (2.0): a conta real pede-se no próprio envio (enviarAcesso), uma vez; o estado fica no negócio (d.acesso). */
@@ -1763,6 +1826,44 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     });
     return linhas;
   };
+  /** 3/11: a obra concluída volta a «em curso» para as tarefas de um problema do cliente (a assistência, ex.: garantia): começam hoje.
+   *  O auto de receção assinado fica; ao encerrar de novo, o real da obra conta também a assistência. */
+  const reabrirParaAssistencia = (d: Negocio, pr: Pick<ProblemaCliente, "id">): void => {
+    const p = d.obra.plano;
+    if (!p || p.estado !== "concluída") return;
+    p.estado = "em curso"; p.dia = diaDeHoje(p);
+    log(d, `Obra reaberta para assistência: problema do cliente ${pr.id}`, "w");
+  };
+  /** 3/11: o problema do cliente sem orçamento: as tarefas entram já no plano (hoje, com a obra em curso), com os técnicos avisados. */
+  const resolverSemCusto = (d: Negocio, pr: ProblemaCliente): string => {
+    reabrirParaAssistencia(d, pr);
+    const p = d.obra.plano!, fimAntes = rotuloDia(p, fimDe(p.tasks) - 1), quem = PAPEIS[S.role].nome;
+    const novas = pr.tarefas.map((x) => {
+      const t = tarefaDoProblema(p, pr, x, TECS), ti = juntarTarefa(p, t);
+      avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)} (sem custo para o cliente)`, agora());
+      return t;
+    });
+    pr.estado = "resolvido";
+    pr.resposta = textoRespostaSemCusto(pr, rotuloDia(p, Math.min(...novas.map((t) => t.dia))), TECS);
+    const fimDepois = rotuloDia(p, fimDe(p.tasks) - 1);
+    (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Problema reportado pelo cliente: ${novas.map((t) => t.nome).join(", ")}`, motivo: MOTIVO_PROBLEMA, fimAntes, fimDepois, cliente: true, avisoCliente: pr.resposta });
+    (d.obra.diario ??= []).push({ q: agora(), quem, t: `Problema do cliente (${pr.texto}): ${novas.length} ${novas.length === 1 ? "tarefa nova" : "tarefas novas"} sem custo${pr.motivo ? ` · ${pr.motivo.toLowerCase()}` : ""}`, k: "ocorrencia" });
+    log(d, `Problema do cliente ${pr.id} («${pr.texto}»): sem orçamento${pr.motivo ? ` (${pr.motivo.toLowerCase()})` : ""} · ${novas.map((t) => `${t.nome}, ${TECS.find((x) => x.id === t.tec)?.n ?? "por atribuir"}, ${rotuloDia(p, t.dia)}`).join(" · ")}`);
+    if (!A.planoMudou(d)) avisar({ msg: novas.length === 1 ? "Tarefa juntada ao plano" : `${novas.length} tarefas juntadas ao plano`, sub: "Sem custo para o cliente · os técnicos foram avisados", kind: "ok" });
+    return pr.resposta;
+  };
+  /** 3/11: o problema do cliente com orçamento: uma adenda com uma linha livre por tarefa, verificada e enviada ao portal como as outras. */
+  const orcamentarProblema = (d: Negocio, pr: ProblemaCliente): string | null => {
+    const n = A.criarAdenda(d.id, [], MOTIVO_PROBLEMA, { livres: livresDoProblema(pr.tarefas, TECS), origem: { imprevisto: pr.id, texto: pr.texto, onde: "" } });
+    // sem adenda (ex.: ainda não há contrato), o problema fica por tratar como estava
+    if (!n) { if (!pr.adenda && !pr.decisao) d.obra.problemas = d.obra.problemas?.filter((x) => x !== pr); return null; }
+    Object.assign(pr, { estado: "proposta", adenda: n });
+    // como qualquer adenda, verifica-se antes de ir ao cliente; com a margem abaixo do mínimo fica à espera da Direção
+    const foi = A.verificarEnviarAdenda(d.id, n), a = d.adendas!.find((x) => x.n === n)!;
+    pr.resposta = textoRespostaComOrcamento(pr, n, foi, eur(totaisAdenda(a).total));
+    log(d, `Problema do cliente ${pr.id} («${pr.texto}»): com orçamento · adenda ${n} ${foi ? "enviada ao cliente" : "por enviar (margem abaixo do mínimo)"}`, foi ? "a" : "w");
+    return pr.resposta;
+  };
   const descontoValido = (x?: number) => (x != null && Number.isFinite(x) && x > 0 ? Math.min(100, r2(x)) : 0);
   /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
   const ajustar = (d: Negocio, motivo: string, adenda?: string): boolean => {
@@ -1906,13 +2007,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       avisar({ msg: "Pedido trazido para a Olyvia", sub: `${p.nome} · fase ${FASES[0]}`, kind: "ok" });
       return id;
     },
-    contactar(id: number) { const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
-    marcarVisita(id: number, slot?: string, quemSugerido?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
+    contactar(id: number) { if (!exigePerm("contacto.registar")) return; const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
+    marcarVisita(id: number, slot?: string, quemSugerido?: string) { if (!exigePerm("visita.gerir")) return; const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
       // 23/10: com a equipa real, a visita fica na agenda de quem a marca (e não na do Rúben de exemplo)
       // 2/11: ou de quem a Olyvia sugeriu para a vaga (livre e mais perto: sugestaoVisita.ts)
       const quem = quemSugerido || quemVaiPorOmissao();
       if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes, duracao: d.f.duracao, quem })); log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda de " + quem.replace(/\s*\(.*\)\s*$/, ""), kind: "ok" }); },
     fecharVisita(id: number) {
+      // 3/11: fechar o levantamento é da visita; o orçamento que nasce aqui o servidor só o deixa mudar com negocios.orcamento.editar (sem
+      // ela, neg_guardar_negocio repõe os totais da base e recusa se o orçamento mudar)
+      if (!exigePerm("visita.gerir")) return;
       const d = deal(id);
       sincronizarVisita(d);
       if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, ...gruposArea(S.campos, d.f), ESCOLHAS], extrasVisita(d))) return;
@@ -1932,6 +2036,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Volta a abrir o levantamento (só antes de a proposta ser enviada): a visita fica editável e o negócio volta à Visita. */
     reabrirVisita(id: number) {
+      if (!exigePerm("visita.gerir")) return;
       const d = deal(id);
       if (d.fase !== 3 || !d.orc || d.orc.enviada) { avisar({ msg: "Já não se pode reabrir", sub: "A proposta já foi enviada ao cliente", kind: "bad" }); return; }
       d.visita.fechada = false; d.fase = 2; d.valida = null; d.orc.verif = false; d.orc.aprov = null;
@@ -1940,6 +2045,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Voltou à visita mas afinal não muda nada: o orçamento fica exatamente como estava (sem o refazer nem pedir os campos). */
     desistirVisita(id: number) {
+      if (!exigePerm("visita.gerir")) return;
       const d = deal(id);
       if (d.fase !== 2 || !d.orc) return;
       d.visita.fechada = true; d.fase = 3; d.valida = null; S.pulse = null;
@@ -2224,7 +2330,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (d.orc!.vendaDireta) { criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); }
       else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta o comercial gerar o contrato", kind: "ok" });
     },
-    recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
+    recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { anularPerda(d, "Recusa anulada pelo comercial"); }) } }); },
     enviarContrato(id: number) { const d = deal(id); if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; if (!comEmail(d, "contrato")) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); acessoCliente(d, "contrato", "Contrato · " + obraDe(d)); },
     /** 23/10 (2.0): "Acesso ao portal" (o cabeçalho do negócio) e "Tentar de novo": o acesso do cliente outra vez, sem documento novo.
      *  A conta real volta a pedir-se (já existindo, só se liga ao negócio; a password não muda). */
@@ -2274,7 +2380,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"]; desconto?: number }): string | null {
       const d = deal(id);
       if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return null; }
-      if (d.obra.plano?.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
+      // 3/11: a de um problema do cliente faz-se mesmo com a obra concluída (a assistência depois da obra; reabre quando for assinada)
+      if (d.obra.plano?.estado === "concluída" && !ehRefProblema(extra?.origem?.imprevisto)) { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
       const k = (d.adendas?.length ?? 0) + 1;
       const linhas = linhasDaAdenda(d, k, itens, extra?.livres ?? []);
       if (!linhas.length) return null;
@@ -2427,12 +2534,25 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!a || a.estado !== "aceite" || a.contrato !== "enviado") return;
       a.estado = "assinada"; a.assinada = agora(); a.contrato = null;
       log(d, "Adenda " + n + " assinada pelo cliente");
+      // 3/11: a de um problema do cliente com a obra já concluída reabre-a para a assistência
+      { const pr = problemaDaAdenda(d, a); if (pr) reabrirParaAssistencia(d, pr); }
       if (p && p.estado !== "concluída") {
         const antes = new Map(p.tasks.map((t) => [t, t.dia] as const));
         const novas = juntarAoPlano(p, a);
         // 21/10: os materiais das tarefas da adenda (os consumíveis da receita de cada serviço, ou os escolhidos na linha livre) vão numa encomenda de ajuste,
         // mas só quando o Financeiro validar o pagamento desta adenda (decisão B: sem encomenda antes do pagamento, como no contrato)
         novas.forEach((t, i) => { const x = a.linhas[i]; t.adenda = n; if (x) { t.mats = x.mats ? x.mats.map((m) => ({ ...m })) : materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
+        // 3/11: a de um problema do cliente: as tarefas ficam com os técnicos que o gestor escolheu e começam já (com a obra em curso)
+        const pr = problemaDaAdenda(d, a);
+        if (pr) {
+          // (sem fase: são uma reparação, não andam com as fases da obra)
+          novas.forEach((t, i) => { const x = pr.tarefas[i]; t.problema = pr.id; delete t.fase; if (x?.tec) t.tec = x.tec; });
+          // o resto do plano não anda por juntar ao fim da fase: o trabalho do problema faz-se a partir de hoje
+          if (p.estado === "em curso") { for (const [t, dia] of antes) t.dia = dia; for (const t of novas) mudarInicio(p, p.tasks.indexOf(t), p.dia); }
+          for (const t of novas) avisarTecnico(p, p.tasks.indexOf(t), `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+          pr.estado = "aprovado";
+          log(d, `Problema do cliente ${pr.id} aprovado (${n}): ${novas.map((t) => t.nome).join(", ")} no plano`);
+        }
         // 21/10: a de um imprevisto resolve-se já (a partir de hoje), antes das tarefas que ele parou
         const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
         if (im && p.estado === "em curso") {
@@ -2480,7 +2600,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       d.perdido = true;
       d.motivoPerda = [...motivos, nota].filter(Boolean).join(", ") || "Recusou a proposta";
       log(d, "O cliente recusou a proposta no portal: " + d.motivoPerda, "x");
-      avisar({ msg: "O cliente recusou a proposta", sub: d.motivoPerda, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; o.recusada = null; log(d, "Recusa anulada pelo comercial"); }) } });
+      avisar({ msg: "O cliente recusou a proposta", sub: d.motivoPerda, kind: "bad", act: { label: "Anular", fn: () => run(() => { if (anularPerda(d, "Recusa anulada pelo comercial")) o.recusada = null; }) } });
     },
     /** No portal do cliente: avisa que pagou, com a referência (o Financeiro confirma na conta e valida). */
     avisarPagamento(id: number, ref: string, adenda?: string) {
@@ -3014,6 +3134,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
     },
     fimObra(id: number) {
+      if (!exigePerm("obra.fechar")) return;
       const d = deal(id);
       if (d.obra.plano?.estado !== "em curso") return;
       // 21/10: só com tudo completo (encerrarObra.ts): tarefas feitas e validadas, mensagens, materiais, adendas, segurança
@@ -3027,6 +3148,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /* ---------------------------------------------- auto de receção e adendas assinadas no portal (15/10) */
     /** O auto de receção da obra concluída vai ao portal do cliente (uma vez). */
     enviarAuto(id: number) {
+      if (!exigePerm("obra.fechar")) return;
       const d = deal(id);
       if (d.obra.plano?.estado !== "concluída" || d.obra.auto) return;
       d.obra.auto = { n: "AR 2026/" + d.id, q: agora(), estado: "por assinar" };
@@ -3044,6 +3166,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** No protótipo, o comercial simula o cliente a assinar o auto (Chave Móvel Digital). */
     simularAuto(id: number) {
+      // 3/11: o auto assinado sem a receção do portal é, para o servidor, mexer no auto (negocios.obra.fechar)
+      if (!exigePerm("obra.fechar")) return;
       const d = deal(id), t = new Date(), p = (n: number) => String(n).padStart(2, "0");
       A.assinarAuto(id, { tipo: "digital", nome: d.f.nome_fiscal || d.nome, q: `${p(t.getDate())}/${p(t.getMonth() + 1)}/${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}`, id: "CMD-SIM" + String(d.id).slice(-3) });
     },
@@ -3088,14 +3212,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** No protótipo, o comercial simula o cliente a assinar o contrato da adenda (Chave Móvel Digital), como no auto. */
     simularAdenda(id: number, n?: string) {
+      if (!exigePerm("proposta.decidir")) return;
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "aceite" && x.contrato === "enviado"), t = new Date(), p = (k: number) => String(k).padStart(2, "0");
       if (!a) return;
       A.assinarAdendaCom(id, a.n, { tipo: "digital", nome: d.f.nome_fiscal || d.nome, q: `${p(t.getDate())}/${p(t.getMonth() + 1)}/${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}`, id: "CMD-SIM" + String(d.id).slice(-3) });
     },
     /** No protótipo: o cliente aceita a proposta da adenda (como o "Aceitou" do orçamento). */
-    simularAceitarAdenda(id: number, n?: string) { A.aceitarAdenda(id, n); },
+    simularAceitarAdenda(id: number, n?: string) { if (!exigePerm("proposta.decidir")) return; A.aceitarAdenda(id, n); },
     /** No protótipo: o cliente pede alterações à proposta da adenda (o preço). */
     simularAlteracoesAdenda(id: number, n?: string) {
+      if (!exigePerm("proposta.decidir")) return;
       const a = adendaDe(deal(id), n, (x) => x.estado === "enviada" && !x.pedidoCliente);
       if (a) A.pedirAlteracoesAdenda(id, a.n, "Pode baixar um pouco o preço?", ["Baixar o preço"]);
     },
@@ -3109,6 +3235,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 21/10: a de um imprevisto volta ao gestor, que decide o que fazer (imprevistos.ts: DECISOES)
       const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
       if (im) { im.estado = "recusado"; log(d, `Imprevisto ${im.id}: o cliente não aceitou a proposta · o gestor da obra decide`, "w"); }
+      // 3/11: a de um problema do cliente também volta ao gestor
+      const pr = problemaDaAdenda(d, a);
+      if (pr && pr.estado === "proposta") { pr.estado = "recusado"; log(d, `Problema do cliente ${pr.id}: o cliente não aceitou a proposta · o gestor da obra decide`, "w"); }
       avisar({ msg: "Resposta enviada", sub: "O contrato e o plano da obra ficam como estavam", kind: "ok" });
     },
     /** 21/10: o comercial retira a adenda ainda não assinada (por enviar, enviada ou aceite): sai do portal do cliente (fica nos documentos, retirada). */
@@ -3120,6 +3249,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // a de um imprevisto: o gestor da obra volta a decidir
       const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto && x.adenda === n) : undefined;
       if (im && im.estado === "proposta") im.estado = "aberto";
+      const pr = problemaDaAdenda(d, a);
+      if (pr && pr.adenda === n && pr.estado === "proposta") pr.estado = "aberto";
       log(d, "Adenda " + n + (enviada ? " retirada do portal do cliente" : " apagada antes de enviar"));
       avisar({ msg: "Adenda " + n + " retirada", sub: enviada ? "Já não aparece no portal do cliente para responder" : "Não chegou ao cliente", kind: "ok" });
     },
@@ -3153,7 +3284,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     proporImprevisto(id: number, imId: string, itens: { sid: string; q: number }[], livres: LinhaLivre[]): string | null {
       const d = deal(id), im = d.obra.imprevistos?.find((x) => x.id === imId);
       if (!im || (im.estado !== "aberto" && im.estado !== "recusado")) return null;
-      if (S.role !== "operacoes" && S.role !== "comercial" && S.role !== "direcao") { avisar({ msg: "Quem propõe é o gestor da obra", kind: "bad" }); return null; }
+      // 3/11 (20270105200000): era por papel (operações, comercial, direção); passa a ser a permissão que o servidor pede
+      if (!exigePerm("obra.imprevistos")) return null;
       const n = A.criarAdenda(id, itens, MOTIVO_IMPREVISTO, { livres, origem: { imprevisto: im.id, texto: im.texto, onde: im.onde, ...(im.foto ? { foto: im.foto } : {}) } });
       if (!n) return null;
       Object.assign(im, { estado: "proposta", adenda: n });
@@ -3165,6 +3297,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Com a proposta recusada (ou sem proposta), o gestor decide: seguir sem o trabalho, fazer outra proposta ou suspender a obra. */
     decidirImprevisto(id: number, imId: string, k: Decisao, nota = "") {
+      if (!exigePerm("obra.imprevistos")) return;
       const d = deal(id), p = d.obra.plano, im = d.obra.imprevistos?.find((x) => x.id === imId);
       if (!im || !p || im.estado === "aprovado" || im.estado === "fechado") return;
       const D = DECISOES.find((x) => x.k === k)!;
@@ -3177,6 +3310,69 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         fimAntes: rotuloDia(p, fimDe(p.tasks) - 1), fimDepois: rotuloDia(p, fimDe(p.tasks) - 1), cliente: true,
         avisoCliente: k === "seguir" ? `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): seguimos a obra sem esse trabalho.` : `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): a obra fica suspensa até combinarmos consigo.` });
       avisar({ msg: D.t, sub: k === "seguir" ? "As tarefas paradas continuam" : k === "refazer" ? "Faça a nova proposta no imprevisto" : "As tarefas ficam paradas", kind: "ok" });
+    },
+    /* -------------------------------------------- 3/11: os problemas que o cliente reporta na conversa (problemasCliente.ts) */
+    /**
+     * O gestor da obra trata o problema de uma mensagem do cliente: as tarefas (o trabalho, as horas, o técnico) e se gera orçamento.
+     * Sem orçamento, as tarefas entram já no plano; com orçamento, vai ao cliente uma adenda. Devolve a resposta a escrever ao cliente
+     * na conversa (null se não seguiu); a página envia-a e marca-a (problemaRespondido).
+     */
+    tratarProblema(id: number, m: { msg: string; texto: string; fotos: string[] }, x: { tarefas: TarefaProblema[]; cobrar: boolean; motivo?: string }): string | null {
+      const d = deal(id), p = d.obra.plano;
+      if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
+      // 3/11: com a obra concluída também se trata (garantia depois da obra): a obra reabre para assistência quando as tarefas entram
+      if (!p) { avisar({ msg: "A obra ainda não tem plano", sub: "As tarefas novas entram no plano da obra", kind: "bad" }); return null; }
+      const erro = erroTarefas(x.tarefas, x.cobrar);
+      if (erro) { avisar({ msg: "Falta informação", sub: erro, kind: "bad" }); return null; }
+      const ja = problemaDaMensagem(d, m.msg);
+      if (ja && ja.estado !== "aberto") return null;
+      const tarefas = x.tarefas.map((t) => ({ n: t.n.trim(), h: r2(t.h), tec: t.tec, ...(x.cobrar ? { preco: r2(t.preco ?? 0) } : {}) }));
+      const pr: ProblemaCliente = ja ?? { id: novoIdProblema(d), msg: m.msg, texto: m.texto.trim(), fotos: [...m.fotos], q: agora(), estado: "aberto", cobrar: x.cobrar, tarefas };
+      Object.assign(pr, { q: agora(), cobrar: x.cobrar, tarefas });
+      if (x.cobrar || !x.motivo?.trim()) delete pr.motivo; else pr.motivo = x.motivo.trim();
+      delete pr.resposta; delete pr.respondida;
+      if (!ja) (d.obra.problemas ??= []).push(pr);
+      return x.cobrar ? orcamentarProblema(d, pr) : resolverSemCusto(d, pr);
+    },
+    /** Não era um problema (ex.: uma fotografia do que já está bem): sai da lista por tratar, com a nota no histórico. */
+    descartarProblema(id: number, m: { msg: string; texto: string; fotos: string[] }, nota = "") {
+      const d = deal(id);
+      if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", kind: "bad" }); return; }
+      if (problemaDaMensagem(d, m.msg)) return;
+      const pr: ProblemaCliente = { id: novoIdProblema(d), msg: m.msg, texto: m.texto.trim(), fotos: [...m.fotos], q: agora(), estado: "descartado", cobrar: false, tarefas: [],
+        decisao: nota.trim() || "Não é um problema" };
+      (d.obra.problemas ??= []).push(pr);
+      log(d, `Mensagem do cliente vista pelo gestor: não é um problema (${pr.decisao}) · «${pr.texto}»`);
+      avisar({ msg: "Fica como não sendo um problema", sub: "Sai da lista por tratar", kind: "ok" });
+    },
+    /** Com a proposta recusada, o gestor decide: fazer sem custo, outra proposta, ou não fazer. Devolve a resposta ao cliente (ou null). */
+    decidirProblema(id: number, pid: string, k: DecisaoProblema, motivo = ""): string | null {
+      const d = deal(id), pr = d.obra.problemas?.find((x) => x.id === pid);
+      if (!pr || pr.estado !== "recusado") return null;
+      if (S.role !== "operacoes") { avisar({ msg: "Quem decide é o gestor da obra", kind: "bad" }); return null; }
+      if (k === "refazer") {
+        pr.estado = "aberto"; pr.decisao = "Fazer outra proposta";
+        log(d, `Problema do cliente ${pr.id}: o gestor vai fazer outra proposta`);
+        return null;
+      }
+      if (k === "sem_custo") {
+        if (!d.obra.plano) return null;
+        pr.cobrar = false; pr.decisao = "Fazer sem custo, depois da proposta recusada";
+        if (motivo.trim()) pr.motivo = motivo.trim(); else delete pr.motivo;
+        pr.tarefas = pr.tarefas.map((t) => ({ n: t.n, h: t.h, tec: t.tec }));
+        return resolverSemCusto(d, pr);
+      }
+      pr.estado = "fechado"; pr.decisao = "Não fazer (proposta recusada)";
+      pr.resposta = textoRespostaNaoFazer(pr);
+      delete pr.respondida;
+      log(d, `Problema do cliente ${pr.id}: não se faz (o cliente não aceitou a proposta)`, "w");
+      avisar({ msg: "Fica fechado", sub: "O cliente é avisado na conversa", kind: "ok" });
+      return pr.resposta;
+    },
+    /** A resposta ao cliente seguiu na conversa. */
+    problemaRespondido(id: number, pid: string) {
+      const pr = deal(id).obra.problemas?.find((x) => x.id === pid);
+      if (pr?.resposta && !pr.respondida) pr.respondida = agora();
     },
     /** O Financeiro emite a fatura da 1.ª parcela de cada adenda assinada sem faturas (vai para o portal do cliente, que paga com o método
      *  que escolher). 21/10 (decisão C): as parcelas são as do contrato; as seguintes emitem-se no Financeiro do negócio (faturarParcelaAdenda). */
@@ -3248,12 +3444,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     vendaDireta(id: number, v: boolean) { const d = deal(id); d.orc!.vendaDireta = v; log(d, v ? "Marcado como venda direta (sem contrato)" : "Deixou de ser venda direta"); },
     perder(id: number) { S.confirmPerda = id; },
-    perderSim(id: number) {
+    /** 3/11: `motivo` (o da lista das Pessoas); sem ele, o que o negócio já tinha ou «Marcado como perdido». Numa organização real grava-se
+     *  pela neg_perder_negocio (perdaReal): neg_guardar_negocio ignora a perda e ela desaparecia ao reler. */
+    perderSim(id: number, motivo?: string) {
+      if (!exigePerm("negocio.perder")) { S.confirmPerda = null; return; }
       const d = deal(id);
       // 19/10: com contrato (ou venda direta aceite), não se perde: anula-se o contrato (a encomenda no Inventário vai com ele)
       if (d.fase >= 4) { S.confirmPerda = null; avisar({ msg: "Com contrato, anula-se o contrato", sub: "Use «Anular contrato» (Direção)", kind: "bad" }); return; }
-      d.perdido = true; S.confirmPerda = null; log(d, "Marcado como perdido", "x");
-      avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; log(d, "Perda anulada"); }) } });
+      const m = motivo?.trim() || d.motivoPerda?.trim() || "Marcado como perdido";
+      d.perdido = true; d.motivoPerda = m; S.confirmPerda = null; log(d, "Marcado como perdido", "x");
+      perdaReal?.perder(d, faseDaPerda(d), m);
+      avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { anularPerda(d, "Perda anulada"); }) } });
       S.view = "negocios"; S.deal = null;
     },
     perderNao() { S.confirmPerda = null; },
@@ -3295,25 +3496,35 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       avisar({ msg: "Negócio anulado no Inventário", sub: `${d.nome} · ${d.obra.ec?.n ?? "encomenda"} eliminada: ${motivo}`, kind: "bad" });
     },
     nec(id: number, v: string) { const a = deal(id).visita.nec; const i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); },
-    novaVisita(id: number) {
+    novaVisita(id: number): number | null {
+      if (!exigePerm("visita.gerir")) return null;
       const d = deal(id);
       const n = criarVisita(d, { tipo: "Revisita", estado: "Marcada", quem: quemVaiPorOmissao(), presentes: d.f.presentes || "O cliente", duracao: "1 h" });
       log(d, `Visita ${n} criada`);
       return n;
     },
     cancelarVisita(id: number, n: number, cancelar = true) {
+      if (!exigePerm("visita.gerir")) return;
       const d = deal(id), i = visitas(d).indexOf(n) + 1;
       if (cancelar) { d.f[`v${n}_estado`] = "Cancelada"; delete d.f[`v${n}_auto`]; log(d, `Visita ${i} cancelada`, "w"); }
       else { d.f[`v${n}_estado`] = "Marcada"; delete d.f[`v${n}_motivo`]; log(d, `Visita ${i} volta a marcada`); }
     },
     apagarVisita(id: number, n: number) {
+      if (!exigePerm("visita.gerir")) return;
       const d = deal(id);
       d.vis = visitas(d).filter((x) => x !== n);
       for (const k of Object.keys(d.f)) if (k.startsWith(`v${n}_`)) delete d.f[k];
       log(d, `Visita ${n} apagada`, "w");
     },
     campo(id: number, k: string, v: string) {
-      const d = deal(id); d.f[k] = v;
+      // 3/11 (20270105200000): o contacto e a visita pedem a sua permissão (as outras respostas, só a de gravar o negócio)
+      const perm = permDoCampo(k);
+      if (perm && !exigePerm(perm)) return;
+      const d = deal(id);
+      // 3/11: o NIF e o email da Lead mudaram: a faturação acompanha, se estava vazia ou igual ao que a Lead tinha (não foi escrita à parte)
+      const fat = DA_LEAD.find(([, lead]) => lead === k)?.[0];
+      if (fat && !d.fin.pago && (!d.f[fat]?.trim() || d.f[fat] === d.f[k])) d.f[fat] = v.trim();
+      d.f[k] = v;
       // 19/10: as prestações "Por fases" guardam-se com a escolha (a mesma fonte para a proposta, o portal e o Financeiro V2); outra condição esquece-as
       if (k === "pagamento" && d.orc && !d.orc.enviada) {
         if (v !== PAGAMENTO_FASES && v !== PAGAMENTO_MEDIDA) delete d.orc.pagFases;
@@ -3333,7 +3544,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // o acesso e o contentor mexem na conta do entulho (o meio, o fator de acesso)
       if (d.orc && !d.orc.enviada && ["contentor", "dist_entulho", "andar", "tem_elevador", "estacionamento"].includes(k)) sincronizarDemolicao(d, S);
     },
-    confirmar(id: number, ks: string[]) { const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k]; },
+    confirmar(id: number, ks: string[]) {
+      // 3/11: confirmar a sugestão muda a resposta na base (sugerido): pede a permissão de cada campo, como o campo
+      for (const p of new Set(ks.map(permDoCampo))) if (p && !exigePerm(p)) return;
+      const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k];
+    },
     localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {
       const d = deal(id), f = d.f;
       if (d.sug) for (const k of ["morada", "cp", "localidade"]) delete d.sug[k];
@@ -3350,7 +3565,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (q > 0) { garantirServico(S, sid); d.visita.extra[sid] = q; } else delete d.visita.extra[sid];
     },
     /** Uma fotografia numa etapa da visita (por omissão, a área); o total sobe também. */
-    foto(id: number, etapa: EtapaFotos = "area") { const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++; },
+    foto(id: number, etapa: EtapaFotos = "area") { if (!exigePerm("visita.gerir")) return; const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++; },
     recalc(id: number, i: number) {
       const d = deal(id), l = d.orc!.linhas[i];
       // 22/10 (fase 2): depois de enviada, o custo da proposta está congelado (como o preço)

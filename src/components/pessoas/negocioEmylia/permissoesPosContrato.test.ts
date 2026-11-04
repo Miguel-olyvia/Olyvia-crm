@@ -2,14 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook, waitFor, act } from "@testing-library/react";
 import { seed } from "@/emylia/motor";
 
-const m = vi.hoisted(() => ({ ler: vi.fn(), definir: vi.fn() }));
+const m = vi.hoisted(() => ({ ler: vi.fn(), definir: vi.fn(), chamadas: [] as { nome: string; args: unknown }[] }));
 vi.mock("@/emylia/permissoesReais", () => ({ CODIGOS_NEGOCIOS: ["negocios.validar_pagamento"] }));
-// a leitura é fn_neg_tem_permissao_org(org, código), uma chamada por código: `m.ler` devolve o conjunto concedido, ou null para uma leitura que falha
+// a leitura é fn_cat_pode(org, código) (3/11: a função com que o servidor decide), uma chamada por código: `m.ler` devolve o conjunto
+// concedido, ou null para uma leitura que falha
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
-    rpc: async (_nome: string, args: { p_codigo: string }) => {
+    rpc: async (nome: string, args: { p_org: string; p_perm: string }) => {
+      m.chamadas.push({ nome, args });
       const concedidas = (await m.ler()) as Set<string> | null;
-      return concedidas === null ? { data: null, error: { message: "falhou" } } : { data: concedidas.has(args.p_codigo), error: null };
+      return concedidas === null ? { data: null, error: { message: "falhou" } } : { data: concedidas.has(args.p_perm), error: null };
     },
   },
 }));
@@ -17,7 +19,7 @@ vi.mock("@/emylia/permissoes", () => ({ definirPermissoesReais: m.definir }));
 
 import { podeNoPosContrato, usePermissoesPosContrato } from "./permissoesPosContrato";
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); m.chamadas.length = 0; });
 
 describe("podeNoPosContrato", () => {
   it("enquanto as permissões da base se leem, não se grava", () => {
@@ -42,6 +44,12 @@ describe("usePermissoesPosContrato", () => {
     expect(result.current.gravar).toBe(false);
     await waitFor(() => expect(result.current.gravar).toBe(true));
     expect(m.definir).toHaveBeenCalledWith({ codigos: new Set(["negocios.validar_pagamento"]), simular: false });
+  });
+  it("3/11: lê com fn_cat_pode (o perfil, o Papel no Negócio e o admin do sistema, como o servidor), e não com fn_neg_tem_permissao_org", async () => {
+    m.ler.mockResolvedValue(new Set());
+    const { result } = renderHook(() => usePermissoesPosContrato("org-1", null, true));
+    await waitFor(() => expect(result.current.gravar).toBe(true));
+    expect(m.chamadas).toEqual([{ nome: "fn_cat_pode", args: { p_org: "org-1", p_perm: "negocios.validar_pagamento" } }]);
   });
   it("uma leitura que falha diz-se, não deixa gravar, e repetir lê outra vez", async () => {
     m.ler.mockResolvedValueOnce(null).mockResolvedValueOnce(new Set());

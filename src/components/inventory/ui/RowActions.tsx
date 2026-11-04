@@ -2,12 +2,12 @@
 //
 // API:
 //   <RowActions
-//     primary={{ label: "Receber", onClick, permission: "inventory.receive" }}
+//     primary={{ label: "Receber", onClick, permission: "purchase_orders.receive" }}
 //     items={[
 //       { label: "Abrir detalhe", icon: Eye, onSelect },
 //       { label: "Editar", icon: Pencil, onSelect, disabled: !editavel, disabledReason: "Só pendentes/encomendadas" },
 //       "separator",
-//       { label: "Eliminar", icon: Trash2, onSelect, destructive: true, permission: "purchase_orders.manage" },
+//       { label: "Eliminar", icon: Trash2, onSelect, destructive: true, permission: "purchase_orders.delete" },
 //     ]}
 //     menuLabel="Mais ações para PO-0042"
 //   />

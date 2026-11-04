@@ -1,11 +1,12 @@
 // A conversa do cliente com a equipa, dentro do negócio (portal, 30/10/2026): o mesmo painel das Operações («Conversa com o cliente»), com
 // as mensagens da base. Lê ao abrir, de 10 em 10 segundos e ao voltar ao separador; o cliente escreve e a equipa responde nas Operações.
 // As mensagens da equipa ficam lidas quando o cliente as vê. Só dados e funções da base (portal_neg_mensagens_*): nunca a tabela.
+// 3/11 (Rúben, 20270105400000): o cliente junta fotografias (até 4) para mostrar um problema; o gestor de obra vê-as e decide o que fazer.
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle } from "lucide-react";
 import { Conversa } from "@/emylia/ConversaObra";
-import { mensagemDaLinha, type LinhaMensagem } from "@/emylia/real/conversaReal";
+import { fotoDoPortal, fotoParaEnvio, mensagemDaLinha, type LinhaMensagem } from "@/emylia/real/conversaReal";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -33,8 +34,11 @@ export function ConversaDoNegocio({ negocioId }: { negocioId: string }) {
   const linhas = consulta.data ?? [];
 
   const enviar = useMutation({
-    mutationFn: async (texto: string): Promise<LinhaMensagem> => {
-      const { data, error } = await rpc("portal_neg_mensagem_enviar", { p_negocio_id: negocioId, p_texto: texto });
+    mutationFn: async ({ texto, fotos }: { texto: string; fotos?: File[] }): Promise<LinhaMensagem> => {
+      // com fotografias: reduzem-se aqui (1600 px) e seguem com a mensagem numa só chamada (se uma falha, nada fica)
+      const { data, error } = fotos?.length
+        ? await rpc("portal_neg_mensagem_enviar_fotos", { p_negocio_id: negocioId, p_texto: texto, p_fotos: await Promise.all(fotos.map((f) => fotoParaEnvio(f))) })
+        : await rpc("portal_neg_mensagem_enviar", { p_negocio_id: negocioId, p_texto: texto });
       if (error) throw new Error(error.message);
       if (!data || typeof data !== "object") throw new Error("Resposta inesperada do servidor: a mensagem pode ter seguido, confirme na conversa.");
       return data as LinhaMensagem;
@@ -75,8 +79,8 @@ export function ConversaDoNegocio({ negocioId }: { negocioId: string }) {
           <p role="alert" className="text-[15px] text-destructive">Não foi possível ler a conversa. Tente de novo daqui a pouco.</p>
         ) : (
           <Conversa
-            msgs={linhas.map(mensagemDaLinha)} eu="cliente" enviar={(t) => enviar.mutateAsync(t).then(() => true, () => false)}
-            vazio="Ainda sem mensagens. Escreva à equipa: respondemos por aqui."
+            msgs={linhas.map(mensagemDaLinha)} eu="cliente" enviar={(t, fotos) => enviar.mutateAsync({ texto: t, fotos }).then(() => true, () => false)}
+            vazio="Ainda sem mensagens. Escreva à equipa: respondemos por aqui. Se houver um problema na obra, junte fotografias." anexar fotoDe={fotoDoPortal}
           />
         )}
         {consulta.isError && consulta.data && <p role="status" className="text-sm text-muted-foreground">Não foi possível atualizar a conversa; a tentar de novo…</p>}

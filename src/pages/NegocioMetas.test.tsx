@@ -257,14 +257,12 @@ describe("Dashboard", () => {
   });
 });
 
-describe("menu de Aquisição", () => {
-  it("tem a entrada Negócio e metas com a permissão dos Pedidos de Proposta", () => {
-    const aquisicao = menuSections.find((s) => s.id === "acquisition")!;
-    const deals = aquisicao.items.find((i) => i.to === "/deals")!;
-    const entrada = aquisicao.items.find((i) => i.to === "/negocio-metas");
-    expect(entrada).toBeDefined();
-    expect(entrada!.labelKey).toBe("sidebar.businessGoals");
-    expect(entrada!.permission).toBe(deals.permission);
-    expect(aquisicao.paths).toContain("/negocio-metas");
+// 03/11: o grupo Aquisição saiu do menu (o Negócios substitui-o); /negocio-metas e /deals ficam pelo endereço.
+describe("menu: Negócio e metas fora do menu", () => {
+  it("nenhum grupo tem a entrada /negocio-metas nem /deals, e o grupo Aquisição já não existe", () => {
+    expect(menuSections.find((s) => s.id === "acquisition")).toBeUndefined();
+    const destinos = menuSections.flatMap((s) => [...s.items, ...(s.subSections ?? []).flatMap((x) => x.items)].map((i) => i.to));
+    expect(destinos).not.toContain("/negocio-metas");
+    expect(destinos).not.toContain("/deals");
   });
 });

@@ -9,12 +9,24 @@
 // Uma conta real sem as permissões lidas (a carregar, ou a leitura falhou) não pode nenhuma destas ações.
 import type { Papel } from "./motor";
 
-export type PermNeg = "finance.validate_payment" | "finance.invoice" | "contracts.cancel" | "equipa.edit" | "margin.approve";
+// 3/11 (20270105200000): seis permissões por fase, exigidas no servidor: registar o contacto, gerir as visitas, registar a decisão do cliente
+// (pedido de alterações, adendas), os imprevistos da obra, encerrar a obra e perder o negócio. O quadro por papel bate com neg_papeis_permissoes
+// da migração: comercial, armazém, financeiro e jurídico as quatro do negócio; operações e direção as seis; o técnico nenhuma.
+export type PermNeg = "finance.validate_payment" | "finance.invoice" | "contracts.cancel" | "equipa.edit" | "margin.approve"
+  | "contacto.registar" | "visita.gerir" | "proposta.decidir" | "obra.imprevistos" | "obra.fechar" | "negocio.perder";
+
+/** As quatro que a migração deu a quem grava o negócio (pessoas.edit): contacto, visita, decisão do cliente e perder. */
+const DO_NEGOCIO: readonly PermNeg[] = ["contacto.registar", "visita.gerir", "proposta.decidir", "negocio.perder"];
+/** As duas da obra (negocios.obra.planear). */
+const DA_OBRA: readonly PermNeg[] = ["obra.imprevistos", "obra.fechar"];
 
 export const PERMS_PAPEL: Record<Papel, readonly (PermNeg | "*")[]> = {
-  direcao: ["*"], financeiro: ["finance.validate_payment", "finance.invoice"],
-  comercial: [], armazem: [], operacoes: ["equipa.edit"], juridico: [], tecnico: [],
+  direcao: ["*"], financeiro: ["finance.validate_payment", "finance.invoice", ...DO_NEGOCIO],
+  comercial: [...DO_NEGOCIO], armazem: [...DO_NEGOCIO], operacoes: ["equipa.edit", ...DO_NEGOCIO, ...DA_OBRA], juridico: [...DO_NEGOCIO], tecnico: [],
 };
+
+/** 3/11: as seis da migração 20270105200000 (a Direção da Olyvia tem-nas todas: papeisReal.aplicarPermissoesReais). */
+export const PERMS_FASES: readonly PermNeg[] = [...DO_NEGOCIO, ...DA_OBRA];
 
 /** O código da permissão na base (anew_permissions) de cada ação. 2/11 (20270102200000): os códigos reais; os de antes
  *  (financeiro.validar_pagamento, financeiro.faturar, negocios.anular, obras.gerir, orcamentos.aprovar_margem) não existiam na base. */
@@ -24,6 +36,12 @@ export const CODIGO_BASE: Record<PermNeg, string> = {
   "contracts.cancel": "client_contracts.cancel",
   "equipa.edit": "negocios.obra.planear",
   "margin.approve": "negocios.margem.aprovar",
+  "contacto.registar": "negocios.contacto.registar",
+  "visita.gerir": "negocios.visita.gerir",
+  "proposta.decidir": "negocios.proposta.decidir",
+  "obra.imprevistos": "negocios.obra.imprevistos",
+  "obra.fechar": "negocios.obra.fechar",
+  "negocio.perder": "negocios.perder",
 };
 
 /** As permissões da conta real: `codigos` as concedidas na organização ativa (null: ainda não se sabem); `simular`: a Direção/admin
@@ -51,4 +69,10 @@ export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "contracts.cancel": { msg: "Sem permissão para anular contratos", sub: "Só a Direção anula contratos e vendas (contracts.cancel)." },
   "equipa.edit": { msg: "Sem permissão para mudar a ficha do técnico", sub: "Só a Direção ou as Operações mudam o custo/hora, o ofício e as férias (equipa.edit). Mude de papel em cima." },
   "margin.approve": { msg: "Sem permissão para aprovar a margem", sub: "Só a Direção aprova uma proposta abaixo da margem mínima (negocios.margem.aprovar)." },
+  "contacto.registar": { msg: "Sem permissão para registar o contacto", sub: "Registar a chamada, as tentativas e o voltar a ligar pede a permissão negocios.contacto.registar." },
+  "visita.gerir": { msg: "Sem permissão para gerir as visitas", sub: "Marcar, alterar, cancelar e fechar as visitas e o diagnóstico no local pede a permissão negocios.visita.gerir." },
+  "proposta.decidir": { msg: "Sem permissão para registar a decisão do cliente", sub: "Registar o pedido de alterações ou a resposta a uma adenda pede a permissão negocios.proposta.decidir." },
+  "obra.imprevistos": { msg: "Sem permissão para decidir os imprevistos", sub: "Propor ao cliente o trabalho extra e decidir o imprevisto pede a permissão negocios.obra.imprevistos." },
+  "obra.fechar": { msg: "Sem permissão para encerrar a obra", sub: "Dar a obra por concluída e enviar o auto de receção pede a permissão negocios.obra.fechar." },
+  "negocio.perder": { msg: "Sem permissão para dar o negócio como perdido", sub: "Marcar o negócio como perdido, ou anular a perda, pede a permissão negocios.perder." },
 };

@@ -86,7 +86,7 @@ export function VisitasLista({ ctx, d, simples }: { ctx: Ctx; d: Negocio; simple
       })}
 
       {!ro && (
-        <button type="button" onClick={() => run(() => { const n = A.novaVisita(d.id); setAbertas([n]); })}
+        <button type="button" onClick={() => run(() => { const n = A.novaVisita(d.id); if (n != null) setAbertas([n]); })}
           className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-[15px] font-medium text-primary transition-colors hover:border-primary hover:bg-primary/[0.04]">
           <Plus className="h-5 w-5" aria-hidden="true" />Marcar outra visita
         </button>

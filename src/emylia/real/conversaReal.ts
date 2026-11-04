@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { MensagemObra } from "../motor";
 
-export interface LinhaMensagem { id: string; de: "cliente" | "empresa"; quem: string; t: string; em: string; lida: boolean }
+export interface LinhaMensagem { id: string; de: "cliente" | "empresa"; quem: string; t: string; em: string; lida: boolean;
+  /** 3/11 (20270105400000): os ids das fotografias da mensagem (até 4); as antigas não têm */ fotos?: string[] }
 type RespostaRpc = { data: unknown; error: { message: string } | null };
 const rpc = (fn: string, args: Record<string, unknown>): PromiseLike<RespostaRpc> =>
   (supabase as unknown as { rpc: (f: string, a: Record<string, unknown>) => PromiseLike<RespostaRpc> }).rpc(fn, args);
@@ -24,7 +25,68 @@ export function horaDaMensagem(iso: string, agora: Date = new Date()): string {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${hhmm(d)}`;
 }
 
-export const mensagemDaLinha = (l: LinhaMensagem): MensagemObra => ({ de: l.de, quem: l.quem, t: l.t, q: horaDaMensagem(l.em), lida: l.lida });
+export const mensagemDaLinha = (l: LinhaMensagem): MensagemObra => ({ id: l.id, de: l.de, quem: l.quem, t: l.t, q: horaDaMensagem(l.em), lida: l.lida,
+  ...(Array.isArray(l.fotos) && l.fotos.length ? { fotos: l.fotos.map(String) } : {}) });
+
+/* ------------------------------------------------------------------ 3/11 (Rúben): as fotografias da conversa (20270105400000) */
+/** Uma fotografia pronta a enviar: o tipo e os bytes em base64 (sem o «data:…;base64,»). */
+export interface FotoEnvio { mime: string; b64: string }
+/** Até 4 por mensagem e 1,5 MB cada (a base recusa o resto). */
+export const MAX_FOTOS = 4;
+export const MAX_BYTES_FOTO = 1_572_864;
+/** O tamanho em bytes de uma fotografia em base64. */
+export const bytesDeB64 = (b64: string): number => Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
+/** Um data URL («data:image/jpeg;base64,…») em {mime, b64}; null se não for uma imagem. */
+export function fotoDeDataUrl(u: string): FotoEnvio | null {
+  const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(u);
+  return m ? { mime: m[1], b64: m[2] } : null;
+}
+
+/** Reduz a fotografia (o lado maior a 1600 px, JPEG): o que o cliente envia é a prova do problema, por isso não tão pequena como a do protótipo. */
+export function fotoParaEnvio(f: File, max = 1600): Promise<FotoEnvio> {
+  return new Promise((ok, falha) => {
+    const r = new FileReader();
+    r.onerror = () => falha(r.error ?? new Error("Não foi possível ler a fotografia."));
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height);
+        let foto: FotoEnvio | null = null;
+        try { foto = fotoDeDataUrl(c.toDataURL("image/jpeg", 0.8)); } catch { /* sem canvas: fica a original */ }
+        foto ??= fotoDeDataUrl(String(r.result));
+        if (!foto) { falha(new Error("O ficheiro não é uma fotografia.")); return; }
+        if (bytesDeB64(foto.b64) > MAX_BYTES_FOTO) { falha(new Error("A fotografia é grande demais (até 1,5 MB).")); return; }
+        ok(foto);
+      };
+      img.onerror = () => falha(new Error("O ficheiro não é uma fotografia."));
+      img.src = String(r.result);
+    };
+    r.readAsDataURL(f);
+  });
+}
+
+/** As fotografias já lidas nesta sessão (pelo id): cada uma lê-se uma vez, nas Operações e no portal. */
+const fotosLidas = new Map<string, Promise<string>>();
+function lerFoto(fn: string, args: Record<string, unknown>, id: string): Promise<string> {
+  const ja = fotosLidas.get(id);
+  if (ja) return ja;
+  const p = Promise.resolve(rpc(fn, args)).then(({ data, error }) => {
+    if (error) throw new Error(error.message);
+    const f = data as { mime?: string; b64?: string } | null;
+    if (!f?.mime || !f.b64) throw new Error("Fotografia indisponível.");
+    return `data:${f.mime};base64,${f.b64}`;
+  });
+  fotosLidas.set(id, p);
+  // uma leitura que falhou volta a tentar-se da próxima vez
+  p.catch(() => fotosLidas.delete(id));
+  return p;
+}
+/** A fotografia de uma mensagem, nas Operações (pessoas.view). */
+export const fotoDaEquipa = (org: string) => (id: string): Promise<string> => lerFoto("neg_mensagem_foto", { p_organization_id: org, p_foto_id: id }, id);
+/** A fotografia de uma mensagem, no portal do cliente (só dos negócios dele). */
+export const fotoDoPortal = (id: string): Promise<string> => lerFoto("portal_neg_mensagem_foto", { p_foto_id: id }, id);
 
 function linhas(data: unknown): LinhaMensagem[] {
   return Array.isArray(data) ? (data as LinhaMensagem[]) : [];

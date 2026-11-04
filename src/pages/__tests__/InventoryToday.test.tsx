@@ -46,7 +46,7 @@ vi.mock("@/components/receiving/useReceivablePos", () => ({
 
 import InventoryToday from "../InventoryToday";
 
-const ALL = ["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "stocks.edit"];
+const ALL = ["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "inventory.edit"];
 const payload: InventoryTodayPayload = {
   purchases: { pending_approval: 3, late: 1, portal_unseen: 2, portal_confirmed: 1, open_delivery_notes: 4, delivery_notes_with_divergences: 0 },
   suppliers: { price_changes_pending: 1, awaiting_profile: 2, catalog_unlinked: 5 },

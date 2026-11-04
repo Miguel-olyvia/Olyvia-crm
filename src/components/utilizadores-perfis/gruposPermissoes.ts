@@ -29,7 +29,7 @@ interface DefinicaoGrupo {
 
 /**
  * Os grupos do editor, pela ordem do menu lateral (menuConfig.ts): Dashboard, Atividades, Operação, Catálogo e custos, Organizações,
- * CRM (Negócios e as páginas antigas de leads/contactos/clientes), Aquisição, Marketing, Inventário, Frota, RH, Utilizadores,
+ * Negócios (com os dados da pessoa: leads.*, clients.* e contacts.*), Documentos do negócio, Marketing, Inventário, Frota, RH, Utilizadores,
  * Definições e Plataforma. Partiu de `sidebarMenuGroups` de Roles.tsx; diferenças: `forms` só no subgrupo Formulários (lá contavam a
  * dobrar), Produtos/Serviços passam para Catálogo e custos (o item de topo que os substitui), e ganham grupo as categorias que Roles.tsx
  * escondia (hr, pessoas/negocios, fleet, operations, portal, security, platform, api_keys, catalog_items, service_catalog, lead_sources).
@@ -56,15 +56,39 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
     ],
   },
   { rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"] },
-  // /pessoas e /negocios: as permissões dos negócios de pessoas e as de cada parte do negócio e da obra (negocios.*).
-  { rotulo: "Negócios", categorias: ["pessoas", "negocios"] },
-  { rotulo: "CRM", categorias: ["leads", "contacts", "clients"] },
+  // /pessoas e /negocios: um subgrupo por fase do negócio, pela ordem das 6 fases do ecrã (Por contactar, Contacto, Visita, Negócio,
+  // Financeiro, Obra), pelas categorias virtuais de categoriaNegocio() (pessoas.*, negocios.*, e quotes.view_costs / client_contracts.cancel,
+  // que saem dos Documentos do negócio). «Pessoas: leads e clientes» junta os dados da pessoa (leads.*, clients.* e, 03/11, contacts.*: o grupo CRM
+  // deixou de existir); «Por contactar» tira de lá ver, criar e atribuir leads. Uma permissão com outro prefixo guardada nas categorias
+  // leads/contacts/clients também vai para «Pessoas» (categoriaNegocio), para não desaparecer do editor.
   {
-    rotulo: "Aquisição", categorias: ["deals"],
+    rotulo: "Negócios", categorias: [],
     subgrupos: [
-      { rotulo: "Propostas", categorias: ["proposals", "quotes", "quote_templates"] },
+      { rotulo: "Geral", categorias: ["negocios_geral"] },
+      { rotulo: "Pessoas: leads e clientes", categorias: ["negocios_pessoas"] },
+      { rotulo: "Por contactar", categorias: ["negocios_por_contactar"] },
+      { rotulo: "Contacto", categorias: ["negocios_contacto"] },
+      { rotulo: "Visita", categorias: ["negocios_visita"] },
+      { rotulo: "Negócio", categorias: ["negocios_negocio"] },
+      { rotulo: "Financeiro", categorias: ["negocios_financeiro"] },
+      { rotulo: "Obra", categorias: ["negocios_obra"] },
+    ],
+  },
+  // 03/11: era «Aquisição». O grupo saiu do menu (o Negócios substitui-o), mas os documentos (pedidos de proposta, orçamentos,
+  // propostas, contratos) continuam: a ficha do /pessoas abre-os e /quotes, /proposals e /client-contracts têm rota. «Configuração»
+  // junta o que controla os templates e modelos (agora no grupo Definições do menu): quote_templates.* (/quote-models),
+  // proposals.manage (templates e workflow das propostas, /proposal-templates), client_contracts.manage_templates e
+  // client_contracts.manage (as duas abrem a policy client_templates_manage de client_contract_templates, /contract-templates).
+  // quotes.manage NÃO vai para lá: além de /quote-templates é a permissão de ver custos e margens no orçamento (canViewQuoteCosts,
+  // QuoteBuilder) e das ações em massa (rpc_bulk_status_quote), por isso fica com os orçamentos.
+  {
+    rotulo: "Documentos do negócio", categorias: [],
+    subgrupos: [
+      { rotulo: "Pedidos de Proposta", categorias: ["deals"] },
+      { rotulo: "Propostas e orçamentos", categorias: ["proposals", "quotes"] },
       { rotulo: "Venda Direta", categorias: ["direct_sales"] },
       { rotulo: "Contratos", categorias: ["contracts", "client_contracts", "portal"] },
+      { rotulo: "Configuração", categorias: ["quote_templates", "documentos_config"] },
     ],
   },
   {
@@ -79,7 +103,23 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   { rotulo: "Inventário", categorias: ["suppliers", "warehouses", "purchase_orders", "receiving", "stocks", "inventory", "client_orders"] },
   { rotulo: "Frota", categorias: ["fleet"] },
   // Roles.tsx aceita a categoria hr no filtro mas não a põe em nenhum grupo, e as permissões hr.* não se viam. Aqui ganham grupo.
-  { rotulo: "Recursos Humanos", categorias: ["hr"] },
+  // 03/11: partido em subgrupos pelo prefixo do código (categoriaRh); um hr.* não mapeado cai em «Pessoas: ficha».
+  {
+    rotulo: "Recursos Humanos", categorias: [],
+    subgrupos: [
+      { rotulo: "Pessoas: ficha", categorias: ["hr_pessoas"] },
+      { rotulo: "Dados sensíveis", categorias: ["hr_sensiveis"] },
+      { rotulo: "Admissão", categorias: ["hr_admissao"] },
+      { rotulo: "Documentos", categorias: ["hr_documentos"] },
+      { rotulo: "Contratos, cargos e ofícios", categorias: ["hr_contratos"] },
+      { rotulo: "Retribuição e custos", categorias: ["hr_retribuicao"] },
+      { rotulo: "Horário e assiduidade", categorias: ["hr_horario"] },
+      { rotulo: "Ausências", categorias: ["hr_ausencias"] },
+      { rotulo: "Processamento salarial", categorias: ["hr_processamento"] },
+      { rotulo: "Centros de trabalho", categorias: ["hr_locais"] },
+      { rotulo: "Denúncias", categorias: ["hr_denuncias"] },
+    ],
+  },
   // security = exports.audit.view (/export-audit vive no menu de Utilizadores).
   { rotulo: "Utilizadores", categorias: ["users", "roles", "security"] },
   // api_keys: ecrã de configurações técnicas (/technical-settings). trash e technical_settings estão hoje escondidas (nada as verifica).
@@ -89,17 +129,77 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
 
 /**
  * Códigos guardados numa categoria da base mas com bloco próprio no editor, pelo prefixo: a base junta marcas/categorias/atributos em
- * `products`, as taxas/subcategorias em `services` e os negocios.* em `pessoas`.
+ * `products` e as taxas/subcategorias em `services`. (Os negocios.*, guardados em `pessoas`, vão por categoriaNegocio().)
  */
 const PREFIXOS_COM_BLOCO = new Set([
   "brands", "bundles", "product_categories", "product_subcategories", "product_attributes", "units_of_measure",
-  "service_categories", "service_subcategories", "service_fees", "service_catalog", "catalog_items", "negocios", "lead_sources",
+  "service_categories", "service_subcategories", "service_fees", "service_catalog", "catalog_items", "lead_sources",
 ]);
 
 const ROTULOS_VIRTUAIS: Record<string, string> = {
   marketing_campaigns: "Campanhas", marketing_channels: "Origens", marketing_lists: "Listas",
   scheduling_boards: "Quadros", scheduling_items: "Itens", scheduling_resources: "Recursos", scheduling_rules: "Regras", scheduling_other: "Outros",
+  negocios_geral: "Geral", negocios_pessoas: "Pessoas: leads e clientes", negocios_por_contactar: "Por contactar", negocios_contacto: "Contacto",
+  negocios_visita: "Visita", negocios_negocio: "Negócio", negocios_financeiro: "Financeiro", negocios_obra: "Obra",
+  documentos_config: "Templates de propostas e contratos",
+  hr_pessoas: "Pessoas: ficha", hr_sensiveis: "Dados sensíveis", hr_admissao: "Admissão", hr_documentos: "Documentos",
+  hr_contratos: "Contratos, cargos e ofícios", hr_retribuicao: "Retribuição e custos", hr_horario: "Horário e assiduidade",
+  hr_ausencias: "Ausências", hr_processamento: "Processamento salarial", hr_locais: "Centros de trabalho", hr_denuncias: "Denúncias",
 };
+
+/** Os subgrupos do RH pelo início do código, pela ordem em que se testam (o mais específico primeiro). */
+const PREFIXOS_RH: readonly (readonly [string, string])[] = [
+  ["hr.pessoas.saude.", "hr_sensiveis"], ["hr.pessoas.sindicalizacao.", "hr_sensiveis"],
+  ["hr.pessoas.convite.", "hr_admissao"], ["hr.onboarding.", "hr_admissao"], ["hr.admissao.", "hr_admissao"],
+  ["hr.pessoas.documentos.", "hr_documentos"],
+  ["hr.pessoas.vinculos.", "hr_contratos"], ["hr.contratos.", "hr_contratos"], ["hr.cargos.", "hr_contratos"], ["hr.pessoas.laborais.", "hr_contratos"],
+  ["hr.pessoas.retribuicao.", "hr_retribuicao"],
+  ["hr.assiduidade.", "hr_horario"], ["hr.pessoas.horario.", "hr_horario"], ["hr.pessoas.horario_realizado.", "hr_horario"],
+  ["hr.ausencias.", "hr_ausencias"],
+  ["hr.processamento.", "hr_processamento"], ["hr.vencimento.", "hr_processamento"],
+  ["hr.locais.", "hr_locais"],
+  ["hr.denuncias.", "hr_denuncias"],
+];
+
+/** O subgrupo do RH da permissão (hr.* ou categoria hr), ou null se não for do RH. O que não estiver mapeado fica na ficha. */
+function categoriaRh(p: Permissao): string | null {
+  if (!p.codigo.startsWith("hr.") && p.categoria !== "hr") return null;
+  return PREFIXOS_RH.find(([prefixo]) => p.codigo.startsWith(prefixo))?.[1] ?? "hr_pessoas";
+}
+
+/** Os negocios.* pela segunda parte do código (a fase); o que não for conhecido (e negocios.perder) cai em Geral. 03/11: o orçamento, a
+ *  margem, a proposta (incluindo a decisão do cliente) e o contrato são a fase Negócio. */
+const FASES_NEGOCIO = new Map<string, string>([
+  ["contacto", "negocios_contacto"],
+  ["visita", "negocios_visita"],
+  ["orcamento", "negocios_negocio"], ["margem", "negocios_negocio"], ["proposta", "negocios_negocio"], ["contrato", "negocios_negocio"],
+  ["registar_fatura", "negocios_financeiro"], ["validar_pagamento", "negocios_financeiro"],
+  ["obra", "negocios_obra"],
+  ["perder", "negocios_geral"],
+]);
+
+/** Permissões doutros módulos que, no editor, pertencem a uma fase do negócio (saem dos Documentos do negócio; ver, criar e atribuir leads, das Pessoas). */
+const MOVIDAS_PARA_NEGOCIOS = new Map<string, string>([
+  ["quotes.view_costs", "negocios_negocio"],
+  ["client_contracts.cancel", "negocios_negocio"],
+  ["leads.view", "negocios_por_contactar"], ["leads.create", "negocios_por_contactar"], ["leads.assign", "negocios_por_contactar"],
+]);
+
+/** Os dados da pessoa (lead/cliente/contacto da entidade única): ficam em Negócios › Pessoas, pelo prefixo do código. */
+const PREFIXOS_PESSOA = new Set(["leads", "clients", "contacts"]);
+
+/** A categoria virtual de Negócios da permissão, ou null se não for de Negócios. */
+function categoriaNegocio(p: Permissao): string | null {
+  const movida = MOVIDAS_PARA_NEGOCIOS.get(p.codigo);
+  if (movida) return movida;
+  const [prefixo, fase] = p.codigo.split(".");
+  if (prefixo === "negocios") return FASES_NEGOCIO.get(fase ?? "") ?? "negocios_geral";
+  if (prefixo === "pessoas") return "negocios_geral";
+  if (PREFIXOS_PESSOA.has(prefixo ?? "") || PREFIXOS_PESSOA.has(p.categoria)) return "negocios_pessoas";
+  // Outra permissão guardada nas categorias de Negócios fica em Geral (não desaparece do editor).
+  if (p.categoria === "pessoas" || p.categoria === "negocios") return "negocios_geral";
+  return null;
+}
 
 export interface BlocoCategoria {
   categoria: string;
@@ -122,8 +222,25 @@ export interface GrupoMenu {
   permissoes: Permissao[];
 }
 
-/** Agendamentos e Marketing partem-se em categorias virtuais pelo prefixo do código, como em Roles.tsx. */
+/**
+ * Permissões que a base guarda numa categoria mas que, no editor, vivem no bloco doutra pelo código. platform.pending_submissions.view
+ * (submissões pendentes dos formulários, /leads/pending-submissions) está em `leads` na base mas é de Marketing › Formulários.
+ */
+const MOVIDAS_POR_CODIGO = new Map<string, string>([
+  ["platform.pending_submissions.view", "forms"],
+  // Documentos do negócio › Configuração (ver GRUPOS_MENU).
+  ["proposals.manage", "documentos_config"],
+  ["client_contracts.manage_templates", "documentos_config"],
+  ["client_contracts.manage", "documentos_config"],
+]);
+
+/**
+ * Agendamentos e Marketing partem-se em categorias virtuais pelo prefixo do código, como em Roles.tsx; Negócios parte-se por fase
+ * (categoriaNegocio) e o RH por área (categoriaRh).
+ */
 export function categoriaVirtual(p: Permissao): string {
+  const movida = MOVIDAS_POR_CODIGO.get(p.codigo);
+  if (movida) return movida;
   if (p.categoria === "scheduling") {
     if (p.codigo.startsWith("scheduling.boards")) return "scheduling_boards";
     if (p.codigo.startsWith("scheduling.items")) return "scheduling_items";
@@ -136,6 +253,10 @@ export function categoriaVirtual(p: Permissao): string {
     if (p.codigo.startsWith("channels.")) return "marketing_channels";
     if (p.codigo.startsWith("lists.")) return "marketing_lists";
   }
+  const negocio = categoriaNegocio(p);
+  if (negocio) return negocio;
+  const rh = categoriaRh(p);
+  if (rh) return rh;
   const prefixo = p.codigo.split(".")[0] ?? "";
   if (PREFIXOS_COM_BLOCO.has(prefixo)) return prefixo;
   return p.categoria;
@@ -212,9 +333,41 @@ const DISTINTIVOS: Record<string, DistintivoAcao> = {
   materiais: { rotulo: "Materiais", classes: TEAL },
   registar_fatura: { rotulo: "Fatura", classes: TEAL },
   validar_pagamento: { rotulo: "Pagamento", classes: ROXO },
+  // 03/11 (20270105200000): as seis por fase.
+  registar: { rotulo: "Registar", classes: VERDE },
+  gerir: { rotulo: "Gerir", classes: AMBAR },
+  decidir: { rotulo: "Decidir", classes: ROXO },
+  imprevistos: { rotulo: "Imprevistos", classes: AMBAR },
+  fechar: { rotulo: "Encerrar", classes: ROXO },
+  perder: { rotulo: "Perder", classes: VERMELHO },
   reopen: { rotulo: "Reabrir", classes: AMBAR },
   config: { rotulo: "Configurar", classes: ROXO },
+  // 03/11 (grelha recurso × ação): ações frequentes que caíam no texto em inglês tirado do código.
+  convert: { rotulo: "Converter", classes: VERDE },
+  assign: { rotulo: "Atribuir", classes: ROXO },
+  approve: { rotulo: "Aprovar", classes: ROXO },
+  manage: { rotulo: "Gerir", classes: ROXO },
+  criar: { rotulo: "Criar", classes: VERDE },
+  corrigir: { rotulo: "Corrigir", classes: AMBAR },
+  reveal: { rotulo: "Revelar", classes: VERMELHO },
+  emitir: { rotulo: "Emitir", classes: TEAL },
+  anular: { rotulo: "Anular", classes: VERMELHO },
+  pedir: { rotulo: "Pedir", classes: VERDE },
+  ajustar: { rotulo: "Ajustar", classes: AMBAR },
+  picar: { rotulo: "Picar", classes: VERDE },
+  validar: { rotulo: "Validar", classes: ROXO },
+  importar: { rotulo: "Importar", classes: TEAL },
+  alterar: { rotulo: "Alterar", classes: AMBAR },
+  archive: { rotulo: "Arquivar", classes: VERMELHO },
+  count: { rotulo: "Contar", classes: AMBAR },
+  adjust: { rotulo: "Ajustar", classes: AMBAR },
+  transfer: { rotulo: "Transferir", classes: TEAL },
+  duplicate: { rotulo: "Duplicar", classes: TEAL },
+  cancel: { rotulo: "Cancelar", classes: VERMELHO },
 };
+
+/** A ação tem rótulo próprio (não é o texto tirado do código, que pode vir em inglês). */
+export const ehAcaoConhecida = (acao: string): boolean => Object.prototype.hasOwnProperty.call(DISTINTIVOS, acao);
 
 export function distintivoAcao(codigo: string): DistintivoAcao {
   const fim = codigo.split(".").pop() ?? "";

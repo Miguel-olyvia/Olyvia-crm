@@ -9,16 +9,16 @@ interface AcoesModuloProps {
   aoLimpar: () => void;
 }
 
-/** "Marcar tudo" e "Limpar" de um módulo, dois botões à parte (nunca dentro do cabeçalho do módulo, que já é um botão). */
+/** "Tudo" e "Limpar" de um módulo, dois botões à parte, ao lado do cabeçalho do módulo (nunca dentro dele, que já é um botão). */
 export function AcoesModulo({ modulo, aoMarcar, aoLimpar }: AcoesModuloProps) {
   const { t } = useTranslation();
   return (
-    <div role="group" aria-label={modulo} className="mb-2 flex flex-wrap gap-2">
-      <Button type="button" variant="outline" size="sm" className={cn("min-h-11", FOCO)} aria-label={t("usersProfiles.form.matrix.markAllLabel", { module: modulo })} onClick={aoMarcar}>
-        {t("usersProfiles.form.matrix.markAll")}
+    <div role="group" aria-label={modulo} className="flex shrink-0 gap-1.5">
+      <Button type="button" variant="outline" size="sm" className={cn("h-9 px-3 text-xs", FOCO)} aria-label={t("usersProfiles.form.matrix.markAllLabel", { module: modulo })} onClick={aoMarcar}>
+        {t("usersProfiles.form.matrix.grid.all")}
       </Button>
-      <Button type="button" variant="outline" size="sm" className={cn("min-h-11", FOCO)} aria-label={t("usersProfiles.form.matrix.clearLabel", { module: modulo })} onClick={aoLimpar}>
-        {t("usersProfiles.form.matrix.clear")}
+      <Button type="button" variant="outline" size="sm" className={cn("h-9 px-3 text-xs", FOCO)} aria-label={t("usersProfiles.form.matrix.clearLabel", { module: modulo })} onClick={aoLimpar}>
+        {t("usersProfiles.form.matrix.grid.clear")}
       </Button>
     </div>
   );

@@ -32,6 +32,8 @@ export interface Def {
   novo?: boolean;
   /** Sub-bloco dentro do grupo, com título próprio (para partir os formulários longos). */
   bloco?: string;
+  /** Escolha múltipla: deixa juntar opções escritas à mão, quantas se quiser; é o texto do botão (ex.: "Outra divisão"). */
+  outras?: string;
 }
 export interface Grupo { titulo: string; nota?: string; campos: Def[]; /** o nome que a empresa lhe deu */ nome?: string; oculto?: boolean }
 
@@ -153,12 +155,14 @@ export const INTERIOR: Grupo = {
 
 // Diagnóstico da área (deal_needs.diag_*). As medidas ficam à parte, porque dão as quantidades.
 /** As divisões da área de intervenção (escolha múltipla, 13/10): cada uma tem os seus campos. */
-export const DIVISOES = ["Casa de banho", "Cozinha", "Sala", "Quarto", "Outra"];
+// 3/11 (Rúben): «Outra» deixou de ser uma opção fixa: o comercial escreve o nome (Escritório, Garagem…) e junta quantas quiser
+// (outras: "Outra divisão"). Os negócios que já tinham «Outra» continuam com ela, como uma divisão escrita à mão.
+export const DIVISOES = ["Casa de banho", "Cozinha", "Sala", "Quarto"];
 
 export const AREA: Grupo = {
   titulo: "Área de intervenção",
   campos: [
-    { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "varios", op: DIVISOES, papel: "plano", ajuda: "Uma ou mais." },
+    { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "varios", op: DIVISOES, outras: "Outra divisão", papel: "plano", ajuda: "Uma ou mais." },
     { k: "diag_intervencao_tipo", bloco: "A divisão", l: "Intervenção", t: "escolha", op: ["Remodelação total", "Remodelação parcial", "Só substituir"], papel: "plano" },
     { k: "diag_pe_direito_m", bloco: "A divisão", l: "Pé-direito", t: "escolha", op: ["2,4 m", "2,5 m", "2,6 m", "2,7 m", "2,8 m", "3 m ou mais"], papel: "plano" },
     { k: "diag_pontos_eletricos", bloco: "Instalações da divisão", l: "Pontos elétricos", t: "contador", min: 0, max: 30, papel: "plano" },
@@ -178,7 +182,7 @@ export const ESCOLHAS: Grupo = {
   campos: [
     { k: "materiais_cliente", l: "O cliente fornece produtos", t: "sim_nao", papel: "orcamento" }, // 27/10 (Rúben): "produtos", não "materiais"
     { k: "mobilidade_reduzida", l: "Mobilidade reduzida", t: "sim_nao", ajuda: "Alguém da casa.", se: { k: "@divisoes", v: ["Casa de banho"] } },
-    { k: "cor_estilo", l: "Cores e estilo", t: "texto", ph: "Branco, madeira clara", opcional: true },
+    // 3/11 (Rúben): «Cores e estilo» saiu das Necessidades (o valor dos negócios que o tinham fica guardado, mas já não se pede nem se mostra)
   ],
 };
 
@@ -287,6 +291,20 @@ export const alternarVarios = (op: string[], v: string, x: string): string => {
   if (s.has(x)) s.delete(x); else s.add(x);
   return op.filter((o) => s.has(o)).join(", ");
 };
+
+/** As opções de uma escolha múltipla: as do campo e, se aceita outras, as escritas à mão que estão escolhidas (a seguir às do campo). */
+export const opcoesVarios = (c: Def, v: string): string[] =>
+  c.outras ? [...(c.op ?? []), ...listaVarios(v).filter((x) => !(c.op ?? []).includes(x))] : c.op ?? [];
+
+/** Junta uma opção escrita à mão (sem vírgulas, que separam as opções). Se já existe com outras maiúsculas, escolhe essa. Vazia: fica igual. */
+export function juntarOutra(c: Def, v: string, nome: string): string {
+  const n = nome.replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  if (!n || !normalSlug(n)) return v;
+  const op = opcoesVarios(c, v), igual = op.find((x) => x.toLowerCase() === n.toLowerCase());
+  const sel = listaVarios(v);
+  if (igual) return sel.includes(igual) ? v : alternarVarios(op, v, igual);
+  return [...sel, n].join(", ");
+}
 
 export const visivel = (c: Def, v: Record<string, string>) => {
   if (!c.se) return true;

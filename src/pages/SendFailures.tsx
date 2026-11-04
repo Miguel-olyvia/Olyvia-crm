@@ -75,7 +75,7 @@ export default function SendFailures() {
 
   useEffect(() => { load(); }, [load]);
 
-  const scope = getPermissionScope("scheduling.items.view");
+  const scope = getPermissionScope("smtp.view");
   const scopedRows = applyScopeFilter(
     rows.map(r => ({ ...r, created_by: r.createdBy })),
     scope, anewUserId, null, teamMemberIds,

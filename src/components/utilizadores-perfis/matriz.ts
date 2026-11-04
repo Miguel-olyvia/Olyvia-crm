@@ -6,6 +6,8 @@ import type { Permissao } from "./tipos";
 export const moduloDe = (codigo: string): string => codigo.split(".")[0];
 const ehVer = (codigo: string): boolean => codigo.endsWith(".view");
 const codigoVer = (codigo: string): string => `${moduloDe(codigo)}.view`;
+/** A permissão de ver do MÓDULO (leads.view), a única de que as outras dependem; hr.pessoas.saude.view não o é. */
+export const ehVerDoModulo = (codigo: string): boolean => codigo === codigoVer(codigo);
 
 /** Uma permissão que não é "ver" fica bloqueada enquanto a de ver do módulo (se existir no catálogo) não estiver concedida. */
 export function podeAlterar(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): boolean {
@@ -15,14 +17,39 @@ export function podeAlterar(codigo: string, concedidas: readonly string[], catal
   return concedidas.includes(ver) || concedidas.includes(codigo);
 }
 
-/** Concede ou tira uma permissão. Tirar "ver" tira também as outras do módulo. Uma bloqueada não muda. */
+/**
+ * Concede ou tira uma permissão. Tirar o "ver" do módulo (leads.view) tira também as outras do módulo. Uma bloqueada não muda.
+ * 03/11: só o ver DO MÓDULO arrasta as outras (é o único de que podeAlterar as faz depender); antes, tirar hr.pessoas.saude.view
+ * tirava todas as hr.*, sem que nenhuma delas dependesse dele.
+ */
 export function alternarPermissao(
   concedidas: readonly string[], codigo: string, catalogo: readonly Permissao[],
 ): string[] {
   if (!podeAlterar(codigo, concedidas, catalogo)) return [...concedidas];
   if (!concedidas.includes(codigo)) return [...concedidas, codigo];
   const modulo = moduloDe(codigo);
-  return concedidas.filter((c) => c !== codigo && !(ehVer(codigo) && moduloDe(c) === modulo));
+  return concedidas.filter((c) => c !== codigo && !(ehVerDoModulo(codigo) && moduloDe(c) === modulo));
+}
+
+/**
+ * Marca ou desmarca um conjunto qualquer (uma linha ou uma coluna da grelha), com as MESMAS regras de alternarPermissao:
+ * - marcar concede as do conjunto que se podem conceder; o "ver" do módulo que vier no próprio conjunto conta (marcar a linha
+ *   Leads concede leads.view e, com ele, as restantes); as que continuam bloqueadas (sem o ver do módulo) ficam por marcar;
+ * - desmarcar tira as do conjunto e, se tirar o ver do módulo, também as outras desse módulo.
+ */
+export function definirConjunto(
+  concedidas: readonly string[], conjunto: readonly Permissao[], marcar: boolean, catalogo: readonly Permissao[],
+): string[] {
+  const codigos = conjunto.map((p) => p.codigo);
+  if (marcar) {
+    const tem = new Set(concedidas);
+    const comVer = [...concedidas, ...codigos.filter(ehVerDoModulo)];
+    const novas = codigos.filter((c) => !tem.has(c) && podeAlterar(c, comVer, catalogo));
+    return [...concedidas, ...new Set(novas)];
+  }
+  const tirar = new Set(codigos);
+  const modulosSemVer = new Set(codigos.filter((c) => ehVerDoModulo(c) && concedidas.includes(c)).map(moduloDe));
+  return concedidas.filter((c) => !tirar.has(c) && !modulosSemVer.has(moduloDe(c)));
 }
 
 /** Marca tudo ou limpa tudo num conjunto de permissões (um módulo do menu), sem tocar nas restantes. */

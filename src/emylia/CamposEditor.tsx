@@ -14,9 +14,12 @@ import {
   AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, PAPEL_ROT,
   camposAjustados, chaveLivre, type AjusteGrupo, type Def, type Grupo, type Tipo,
 } from "./campos";
-import { FASES } from "./motor";
+import { FASES, type Estado } from "./motor";
 import { SETORES, type Setor } from "./setores";
 import { IconeFase, type Ctx } from "./pecas";
+
+/** 3/11 (Rúben): o editor só precisa dos ajustes; assim usa-se também fora do protótipo (Pessoas › Workflow › Campos das fases). */
+type AjustesS = Pick<Estado, "campos" | "setor">;
 
 const GRUPOS: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 const TIPOS: [Tipo, string][] = [["escolha", "Escolha"], ["varios", "Escolha múltipla"], ["sim_nao", "Sim ou não"], ["contador", "Contador"], ["numero", "Número"], ["texto", "Texto curto"], ["data", "Data"], ["texto_longo", "Nota"]];
@@ -92,7 +95,7 @@ export function ModelosSetor({ S, run, setores = SETORES, onAplicado }: Pick<Ctx
 }
 
 /** A fase escolhe-se num grupo de opções (rádio) e os grupos dessa fase aparecem por baixo. */
-export function EditorFases({ S, run, nomes = FASES }: Pick<Ctx, "S" | "run"> & { nomes?: readonly string[] }) {
+export function EditorFases({ S, run, nomes = FASES }: { S: AjustesS; run: Ctx["run"]; nomes?: readonly string[] }) {
   const [fase, setFase] = useState(2);
   const nome = useId();
   const mexer = (g: Grupo, fn: (a: AjusteGrupo) => void) => run(() => { S.campos ??= {}; fn((S.campos[g.titulo] ??= {})); S.setor = "personalizado"; });
@@ -120,7 +123,7 @@ export function EditorFases({ S, run, nomes = FASES }: Pick<Ctx, "S" | "run"> & 
 
 const obrigOn = (c: Def) => !!(c.obrigatorio ?? (!c.opcional && c.t !== "texto_longo"));
 
-function EditorGrupo({ S, g, mexer }: { S: Ctx["S"]; g: Grupo; mexer: (g: Grupo, fn: (a: AjusteGrupo) => void) => void }) {
+function EditorGrupo({ S, g, mexer }: { S: AjustesS; g: Grupo; mexer: (g: Grupo, fn: (a: AjusteGrupo) => void) => void }) {
   const a = S.campos?.[g.titulo] || {};
   const cs = camposAjustados(S.campos, g);
   const [novo, setNovo] = useState(false);
