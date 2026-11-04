@@ -45,7 +45,7 @@ const STALE_TIME_MS = 30_000;
 const semFuncao = (e: { code?: string } | null) => e?.code === "PGRST202" || e?.code === "42883";
 interface SlotsLidos { slots: SlotDb[]; diaTodo: boolean }
 
-async function lerSlots(org: string, recurso: string, dia: string, minutos: number, excluir: string | null): Promise<SlotsLidos> {
+export async function lerSlots(org: string, recurso: string, dia: string, minutos: number, excluir: string | null): Promise<SlotsLidos> {
   // 4/11 (20270106400000): as horas da visita do negócio são do dia todo, sem o horário da organização (só o que ocupa quem vai)
   const novo = await supabase.rpc("neg_horas_livres_visita" as never, {
     p_resource_id: recurso, p_date: dia, p_duration_minutes: minutos, p_organization_id: org, p_exclude_item_id: excluir,
@@ -115,4 +115,39 @@ export function useHorasLivresVisita(e: Entrada): HorasLivres {
   else if (comErro) estado = { k: "erro" };
   else estado = horas.length === 0 ? { k: "sem-horas" } : { k: "pronto" };
   return { horas: estado.k === "pronto" ? horas : [], estado, refetch, diaTodo };
+}
+
+/**
+ * 4/11 (Rúben): quem pode ir à visita em cada dia: as horas livres de cada recurso em cada dia pedido (as mesmas leituras e a mesma cache de
+ * useHorasLivresVisita). Serve para mostrar, depois da data, os comerciais livres e, sem nenhum, sugerir técnicos ou outros dias.
+ */
+export function useHorasPorRecurso(e: {
+  recursos: readonly string[]; dias: readonly string[]; duracaoMin: number; horario: HorarioOrg; feriados: FeriadosOrg; horarioPronto: boolean;
+  excluirId?: string | null; ativo?: boolean;
+}): { horas: (dia: string, recurso: string) => string[] | undefined; aLer: boolean; comErro: boolean } {
+  const fonte = useFontePessoas();
+  const org = fonte.modo === "real" ? fonte.organizationId : null;
+  const excluir = e.excluirId ?? null;
+  const pares = e.dias.filter((dia) => !ehFeriado(dia, e.feriados)).flatMap((dia) => e.recursos.map((r) => ({ dia, r })));
+  const consultas = useQueries({
+    queries: pares.map(({ dia, r }) => ({
+      queryKey: ["neg-horas-livres-visita", org, r, dia, e.duracaoMin, excluir] as const,
+      queryFn: () => lerSlots(org as string, r, dia, e.duracaoMin, excluir),
+      enabled: (e.ativo ?? true) && org !== null && e.horarioPronto && e.duracaoMin > 0, staleTime: STALE_TIME_MS,
+    })),
+  });
+  const agora = Date.now();
+  const mapa = new Map<string, string[]>();
+  pares.forEach(({ dia, r }, i) => {
+    const lido = consultas[i]?.data;
+    if (!lido) return;
+    const h = lido.diaTodo ? DIA_TODO : e.horario;
+    const fechado = !lido.diaTodo && motivoDiaFechado(dia, e.horario, e.feriados) !== null;
+    mapa.set(`${dia}|${r}`, fechado ? [] : horasDoRecurso(lido.slots, dia, e.duracaoMin, h, agora));
+  });
+  return {
+    horas: (dia, recurso) => (ehFeriado(dia, e.feriados) ? [] : mapa.get(`${dia}|${recurso}`)),
+    aLer: consultas.some((q) => q.isLoading || q.isFetching),
+    comErro: consultas.some((q) => q.isError),
+  };
 }

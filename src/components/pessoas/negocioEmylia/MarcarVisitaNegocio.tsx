@@ -4,7 +4,7 @@
 //  2. «Quem vai» são só as pessoas com RECURSO de agenda (recurso do tipo utilizador, ativo, da organização);
 //  3. o tipo de visita (Levantamento, Medição técnica, Escolha de materiais, Revisita) escolhe-se aqui.
 // Não ha ligação board-recurso na base (só `allowed_modules` do quadro): por isso «quem vai» não se filtra por quadro (decisão por confirmar no desenho).
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check } from "lucide-react";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { TipoVisitaNegocio } from "@/components/negocio-metas/negocioMetas";
@@ -29,7 +29,8 @@ import type { MoradaVisita } from "../pessoasTipos";
 import { useEnvioVisita } from "../useEnvioVisita";
 import { useFormAgendaVisita } from "../useFormAgendaVisita";
 import { MAX_NOTA_VISITA } from "../visitaPessoa";
-import { DiaDaVisita, HorasLivresVisita } from "./HorasLivresVisita";
+import { HorasLivresVisita } from "./HorasLivresVisita";
+import { QuemPodeIrVisita } from "./QuemPodeIrVisita";
 
 const BOTAO = cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO);
 const CHIP = "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 py-2 text-[15px] transition-colors motion-reduce:transition-none";
@@ -104,14 +105,6 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
     [form.agenda.recursos, visita],
   );
   const agenda = useMemo(() => ({ ...form.agenda, recursos }), [form.agenda, recursos]);
-  // 4/11 (Rúben: «falta a hora da visita»): numa visita nova, com uma só pessoa que pode ir, ela já vem escolhida, e as horas livres
-  // aparecem logo. Só uma vez: se a tirarem, não volta.
-  const sozinhoEscolhido = useRef(false);
-  useEffect(() => {
-    if (sozinhoEscolhido.current || visita || soLeitura || recursos.length !== 1 || form.valor.recursos.length > 0) return;
-    sozinhoEscolhido.current = true;
-    form.mudar({ recursos: [recursos[0].id], hora: "" });
-  }, [recursos, visita, soLeitura, form]);
   const horas = useHorasLivresVisita({
     recursos: valor.recursos, dia: valor.data, duracaoMin: minutos, horario: horario.horario, feriados: horario.feriados,
     horarioPronto: !horario.isLoading && !horario.isError, atual: visita ? { dia: visita.dia, hora: visita.hora } : null, excluirId: visita?.id ?? null,
@@ -181,17 +174,21 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
         id={id} hoje={hoje} agenda={agenda} valor={valor} aoMudar={mudar} erro={ehErroAgenda(visto) ? visto : null} conflito={form.conflito} recursoOcupado={form.recusado}
         moradaLead={moradaLead} destino={destino} aoMudarDestino={setDestino} erroMorada={ehErroMorada(visto) ? visto : null} comQuemVaiEstar
         campoData={campoData} grupoRecursos={grupoRecursos} desativado={envio.aGuardar || soLeitura}
-        renderDataHora={(p) => (
-          <div className="space-y-4">
-            <DiaDaVisita
-              id={p.id} hoje={p.hoje} dia={p.data} aoMudar={(data) => p.aoMudar({ data })} erro={p.erroData} somenteLeitura={p.somenteLeitura} campoData={p.campoData}
-            />
-            <HorasLivresVisita
-              id={p.id} hora={p.hora} horas={horas.horas} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}
-              aoEscolher={(hora) => p.aoMudar({ hora })} aoTentarOutraVez={horas.refetch} somenteLeitura={p.somenteLeitura} diaTodo={horas.diaTodo}
-              erro={p.erroHora ?? (tentou && horaForaDasLivres ? (horasNaoConfirmadas ? "Não foi possível confirmar as horas livres deste dia. Aguarde ou tente outra vez." : "Escolha uma das horas livres.") : null)}
-            />
-          </div>
+        // 4/11 (Rúben): a data da visita primeiro (obrigatória, sem atalhos de dia), depois quem pode ir nesse dia (os comerciais; sem
+        // nenhum livre, técnicos e outros dias sugeridos) e a hora. A duração sai: vem de «Preparar a visita» (1 h sem nada).
+        semDuracao
+        renderQuemEQuando={(p) => (
+          <QuemPodeIrVisita
+            a={p} recursos={recursos} duracaoMin={minutos} horario={horario.horario} feriados={horario.feriados}
+            horarioPronto={!horario.isLoading && !horario.isError} excluirId={visita?.id ?? null}
+            hora={(
+              <HorasLivresVisita
+                id={p.id} hora={p.hora} horas={horas.horas} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}
+                aoEscolher={(hora) => p.aoMudar({ hora })} aoTentarOutraVez={horas.refetch} somenteLeitura={p.somenteLeitura} diaTodo={horas.diaTodo}
+                erro={p.erroHora ?? (tentou && horaForaDasLivres ? (horasNaoConfirmadas ? "Não foi possível confirmar as horas livres deste dia. Aguarde ou tente outra vez." : "Escolha uma das horas livres.") : null)}
+              />
+            )}
+          />
         )}
       />
       {tentou && presentesEmFalta && <MensagemErro id={`${id}-presentes-erro`} texto="Diga quem vai estar na visita." />}
