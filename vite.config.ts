@@ -21,9 +21,12 @@ export default defineConfig(() => ({
       }),
   ],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      // 4/11: o VAD da chamada em direto (vad-web) usa o onnxruntime só em WebAssembly, sem WebGPU/JSEP:
+      // ficheiros do runtime em public/chamadas/vad (15 MB em vez de 44 MB) e sem workers, por causa da CSP.
+      { find: /^onnxruntime-web(\/wasm)?$/, replacement: path.resolve(__dirname, "node_modules/onnxruntime-web/dist/ort.wasm.min.mjs") },
+    ],
   },
   define: {
     global: "globalThis",

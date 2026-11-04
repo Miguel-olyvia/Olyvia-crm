@@ -56,12 +56,19 @@ export async function gravarMicrofone(segundos: number, aoProgredir?: (s: number
 }
 
 // ---- VAD no browser -----------------------------------------------------------------------------
-/** O onnxruntime só com uma thread: sem workers criados de blobs, que a Content-Security-Policy da app não deixa. */
+/** O onnxruntime (a versão só WebAssembly, a mesma que o vad-web usa) com uma thread: sem workers criados de
+ *  blobs, que a Content-Security-Policy da app não deixa. Os ficheiros do runtime vêm de public/chamadas/vad. */
+// Em desenvolvimento o Vite não deixa importar módulos da pasta public (dá 500 em «.mjs?import»), por isso
+// aí o runtime vem de node_modules; na build são os ficheiros estáticos de public/chamadas/vad.
+const ORT_PASTA = import.meta.env.DEV ? "/node_modules/onnxruntime-web/dist/" : VAD_ASSETS;
+const ORT_FICHEIROS = { mjs: ORT_PASTA + "ort-wasm-simd-threaded.mjs", wasm: ORT_PASTA + "ort-wasm-simd-threaded.wasm" };
 async function semWorkers(): Promise<void> {
-  const ort = await import("onnxruntime-web");
+  const ort = await import("onnxruntime-web/wasm");
   ort.env.wasm.numThreads = 1;
-  ort.env.wasm.wasmPaths = VAD_ASSETS;
+  ort.env.wasm.wasmPaths = ORT_FICHEIROS;
 }
+// o vad-web copia esta opção para ort.env.wasm.wasmPaths tal como está; o objeto diz os dois ficheiros exatos
+const ONNX_BASE = ORT_FICHEIROS as unknown as string;
 export interface Ouvinte { parar: () => Promise<void> }
 
 /** Liga o microfone com o VAD Silero; chama `aoTerminarFala` com cada fala (float32 a 16 kHz) e o seu início em segundos. */
@@ -72,7 +79,7 @@ export async function ouvirMicrofone(aoTerminarFala: (pcm: Float32Array, inicioS
   let inicioFala = 0;
   const vad = await MicVAD.new({
     baseAssetPath: VAD_ASSETS,
-    onnxWASMBasePath: VAD_ASSETS,
+    onnxWASMBasePath: ONNX_BASE,
     model: "v5",
     positiveSpeechThreshold: 0.5,
     negativeSpeechThreshold: 0.35,
@@ -96,8 +103,12 @@ export async function falasDeFicheiro(url: string): Promise<{ pcm: Float32Array;
   const dec = await ctx.decodeAudioData(await resposta.arrayBuffer());
   const pcm = dec.getChannelData(0);
   await ctx.close();
-  const vad = await NonRealTimeVAD.new({ baseAssetPath: VAD_ASSETS, onnxWASMBasePath: VAD_ASSETS, model: "v5",
-    positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35, redemptionMs: 400, preSpeechPadMs: 300, minSpeechMs: 350 });
+  // o VAD de ficheiro tem opções próprias: só o modelo «legacy» e o runtime configurado por ortConfig
+  const vad = await NonRealTimeVAD.new({
+    modelURL: VAD_ASSETS + "silero_vad_legacy.onnx",
+    ortConfig: (ort: { env: { wasm: { numThreads: number; wasmPaths: unknown } } }) => { ort.env.wasm.numThreads = 1; ort.env.wasm.wasmPaths = ORT_FICHEIROS; },
+    positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35, redemptionMs: 400, preSpeechPadMs: 300, minSpeechMs: 350,
+  });
   const falas: { pcm: Float32Array; inicioS: number }[] = [];
   for await (const { audio, start } of vad.run(pcm, TAXA)) falas.push({ pcm: audio, inicioS: start / 1000 });
   return falas;
