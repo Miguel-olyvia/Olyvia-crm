@@ -77,8 +77,9 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   // 03/11: era «Aquisição». O grupo saiu do menu (o Negócios substitui-o), mas os documentos (pedidos de proposta, orçamentos,
   // propostas, contratos) continuam: a ficha do /pessoas abre-os e /quotes, /proposals e /client-contracts têm rota. «Configuração»
   // junta o que controla os templates e modelos (agora no grupo Definições do menu): quote_templates.* (/quote-models),
-  // proposals.manage (templates e workflow das propostas, /proposal-templates), client_contracts.manage_templates e
-  // client_contracts.manage (as duas abrem a policy client_templates_manage de client_contract_templates, /contract-templates).
+  // proposals.manage (templates e workflow das propostas, /proposal-templates) e client_contracts.manage_templates (abre a policy
+  // client_templates_manage de client_contract_templates, /contract-templates). client_contracts.manage abre a mesma policy mas está
+  // escondida desde 04/11 (sem ação na app viva além dessa) e saiu daqui.
   // quotes.manage NÃO vai para lá: além de /quote-templates é a permissão de ver custos e margens no orçamento (canViewQuoteCosts,
   // QuoteBuilder) e das ações em massa (rpc_bulk_status_quote), por isso fica com os orçamentos.
   {
@@ -231,7 +232,6 @@ const MOVIDAS_POR_CODIGO = new Map<string, string>([
   // Documentos do negócio › Configuração (ver GRUPOS_MENU).
   ["proposals.manage", "documentos_config"],
   ["client_contracts.manage_templates", "documentos_config"],
-  ["client_contracts.manage", "documentos_config"],
 ]);
 
 /**

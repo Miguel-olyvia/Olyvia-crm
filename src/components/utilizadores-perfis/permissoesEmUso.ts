@@ -24,15 +24,23 @@
 // direct_sales.create/edit/confirm/register_invoice/view_costs (as RPCs da venda direta só correm a partir de DirectSales.tsx).
 // direct_sales.view fica (as RPCs das Encomendas de Cliente verificam-na). contacts.delete também se escondeu: só a verificam as
 // policies de anew_contacts (tabela antiga) e as de anew_entity_*, que aceitam também pessoas.delete.
+//
+// 04/11/2026 (aprovado), sem ação na app viva: channels.view (o menu de Origens pede lead_sources.view), products.manage e brands.edit
+// (as páginas de packs/marcas/atributos/unidades redirecionam para /catalogo-custos e nenhum ecrã vivo chama as RPCs/escritas que
+// as exigem; desfaz só a visibilidade do Lote C), client_contracts.manage (só a policy client_templates_manage, que aceita também
+// client_contracts.manage_templates; nenhum papel tinha uma sem a outra) e hr.denuncias.gerir (as RPCs da página não existem na
+// base). Só saem do editor: os códigos ficam na base, os papéis que as têm mantêm-nas e as guardas não mudam — ver
+// ESCONDIDAS_COM_GUARDA. operations.orders.view/view_all e operations.costs.view FICAM: o Frota (Ligações / ligar viatura a uma
+// ordem) lê ops_ordem pela policy ops_ordem_select (orders.view + ops_pode_ver_ordem, onde entra view_all) e rpc_fleet_link_order
+// só lança o custo da deslocação na ordem com operations.costs.view.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
     "api_keys.copy", "api_keys.create", "api_keys.delete", "api_keys.toggle", "api_keys.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): client_contracts.manage
   client_contracts: [
     "client_contracts.cancel", "client_contracts.create", "client_contracts.delete", "client_contracts.edit",
-    "client_contracts.manage", "client_contracts.manage_templates",
+    "client_contracts.manage_templates",
     "client_contracts.send_signature", "client_contracts.view",
   ],
   client_orders: [
@@ -76,8 +84,8 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   forms: [
     "forms.create", "forms.delete", "forms.edit", "forms.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): hr.ausencias.tipos.view. 03/11: hr.denuncias.gerir (nova) guarda a gestão do canal de
-  // denúncias (/rh-exemplo/denuncias). Esconderam-se hr.ausencias.tipos.edit, hr.ausencias.direitos.edit, hr.pessoas.horario_realizado.edit,
+  // Só verificadas no servidor (policies/RPCs): hr.ausencias.tipos.view. 04/11: hr.denuncias.gerir passou para as escondidas (sem ação
+  // na app viva). Esconderam-se hr.ausencias.tipos.edit, hr.ausencias.direitos.edit, hr.pessoas.horario_realizado.edit,
   // hr.pessoas.duplicados.view e hr.pessoas.acessos_sensiveis.view: só policies/RPCs que nenhum ecrã vivo chama.
   hr: [
     "hr.admissao.obrigatorios.gerir", "hr.assiduidade.corrigir", "hr.assiduidade.equipa.view", "hr.assiduidade.faltas.edit",
@@ -86,7 +94,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "hr.assiduidade.view.own", "hr.ausencias.ajustar", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh",
     "hr.ausencias.direitos.view", "hr.ausencias.historico.editar", "hr.ausencias.justificacao.view", "hr.ausencias.pedir",
     "hr.ausencias.pedir.outros", "hr.ausencias.tipos.view", "hr.ausencias.view", "hr.ausencias.view.own",
-    "hr.cargos.salario.alterar", "hr.contratos.regras.gerir", "hr.denuncias.gerir", "hr.locais.edit", "hr.locais.view",
+    "hr.cargos.salario.alterar", "hr.contratos.regras.gerir", "hr.locais.edit", "hr.locais.view",
     "hr.onboarding.approve", "hr.onboarding.restrito", "hr.onboarding.sensitive", "hr.pessoas.afectacoes.corrigir",
     "hr.pessoas.afectacoes.edit", "hr.pessoas.afectacoes.view", "hr.pessoas.bancarios.edit", "hr.pessoas.bancarios.view",
     "hr.pessoas.colocacao.corrigir", "hr.pessoas.colocacao.edit", "hr.pessoas.colocacao.view", "hr.pessoas.conta.criar",
@@ -120,7 +128,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // Só verificadas no servidor (policies/RPCs): lists.create, lists.delete, lists.edit, lists.view
   // 03/11: trash.view guarda /trash (rota, menu e atalho); lead_sources.view guarda /lead-sources.
   marketing: [
-    "campaigns.create", "campaigns.delete", "campaigns.edit", "campaigns.view", "channels.view", "lead_sources.create",
+    "campaigns.create", "campaigns.delete", "campaigns.edit", "campaigns.view", "lead_sources.create",
     "lead_sources.delete", "lead_sources.edit", "lead_sources.view", "lists.view",
   ],
   // Só verificadas no servidor (policies/RPCs): operations.checklists.manage, operations.costs.view, operations.locations.manage, operations.locations.view, operations.orders.cancel, operations.orders.confirm, operations.orders.create, operations.orders.edit, operations.orders.execute, operations.orders.view, operations.orders.view_all, operations.plans.manage, operations.settings.manage
@@ -148,13 +156,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   portal: [
     "portal.manage",
   ],
-  // Só verificadas no servidor (policies/RPCs): products.manage_attributes. 04/11/2026: products.manage e brands.edit voltam ao editor:
-  // o servidor exige-as (products.manage: rpc_create/update/delete_bundle e _bundle_children_authorize, os atributos de produto, as paletas
-  // de atributos das categorias, as unidades (uom) e as policies dessas tabelas; brands.edit: rpc_create/update/delete_brand, as rpc_bulk_*_brand
-  // e as policies de brands/brand_organizations). Escondidas, ninguém as podia dar e os packs, atributos e marcas ficavam só para admins.
+  // 04/11/2026: products.manage e brands.edit voltaram a sair do editor (sem ação na app viva) — ver PERMISSOES_ESCONDIDAS.products.
   products: [
-    "brands.edit", "brands.view", "product_attributes.view", "product_categories.view", "products.create", "products.edit",
-    "products.manage", "products.manage_prices", "products.view", "products.view_cost",
+    "brands.view", "product_attributes.view", "product_categories.view", "products.create", "products.edit",
+    "products.manage_prices", "products.view", "products.view_cost",
   ],
   proposals: [
     "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.manage", "proposals.view",
@@ -248,9 +253,10 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   call_center: [
     "call_center.handle_calls", "call_center.manage", "call_center.view",
   ],
-  // Só ClientContracts.tsx (FORA_DO_MENU) e o pedido dela a export-data.
+  // Só ClientContracts.tsx (FORA_DO_MENU) e o pedido dela a export-data. client_contracts.manage: sem ação na app viva, 04/11 (só a
+  // policy client_templates_manage, que aceita também client_contracts.manage_templates — essa fica no editor).
   client_contracts: [
-    "client_contracts.export",
+    "client_contracts.export", "client_contracts.manage",
   ],
   companies: [
     "companies.create", "companies.delete", "companies.edit", "companies.upload_logo", "companies.view",
@@ -276,9 +282,10 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   employees: [
     "employees.create", "employees.delete", "employees.edit", "employees.export", "employees.import", "employees.view",
   ],
-  // 03/11: as cinco de cima (sem ecrã vivo que as use).
+  // 03/11: as cinco de cima (sem ecrã vivo que as use). hr.denuncias.gerir: sem ação na app viva, 04/11 (a rota e o menu de
+  // /rh-exemplo/denuncias continuam a pedi-la, mas as RPCs da página não existem na base; ver ESCONDIDAS_COM_GUARDA).
   hr: [
-    "hr.ausencias.direitos.edit", "hr.ausencias.tipos.edit", "hr.pessoas.acessos_sensiveis.view", "hr.pessoas.duplicados.view",
+    "hr.ausencias.direitos.edit", "hr.denuncias.gerir", "hr.ausencias.tipos.edit", "hr.pessoas.acessos_sensiveis.view", "hr.pessoas.duplicados.view",
     "hr.pessoas.horario_realizado.edit",
     "hr.assiduidade.importar", "hr.module.access", "hr.onboarding.sign_employer", "hr.pessoas.archive", "vacations.create",
     "vacations.manage", "vacations.view",
@@ -292,8 +299,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "leads.contact", "leads.export", "leads.export_sensitive", "leads.manage",
   ],
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
+  // channels.view: sem ação na app viva, 04/11 (o menu e a rota de Origens pedem lead_sources.view; nenhuma função/policy a verifica).
   marketing: [
-    "channels.create", "channels.delete", "channels.edit", "lists.add_contacts", "lists.create", "lists.delete", "lists.edit",
+    "channels.create", "channels.view", "channels.delete", "channels.edit", "lists.add_contacts", "lists.create", "lists.delete", "lists.edit",
   ],
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   operations: [
@@ -306,13 +314,15 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "platform.dashboard.view", "platform.organizations.manage", "platform.organizations.view", "platform.security.audit",
     "platform.settings.manage", "platform.users.manage", "platform.users.view",
   ],
-  // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam.
+  // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam. products.manage e brands.edit:
+  // sem ação na app viva, 04/11 — o servidor exige-as nas RPCs/policies de packs, atributos, unidades e marcas, mas só as páginas
+  // antigas (Bundles, ProductAttributes, Brands, UnitsOfMeasure...) as chamavam; o Catálogo novo grava por cat_guardar_*.
   products: [
-    "brands.create", "brands.delete", "product_attributes.create", "product_attributes.delete",
+    "brands.create", "brands.delete", "brands.edit", "product_attributes.create", "product_attributes.delete",
     "product_attributes.edit", "product_categories.create", "product_categories.delete", "product_categories.edit",
     "product_subcategories.create", "product_subcategories.delete", "product_subcategories.edit", "product_subcategories.view",
-    "products.delete", "products.export", "products.import", "products.manage_attributes",
-    "products.manage_catalog", "products.view_price_history",
+    "products.delete", "products.export", "products.import", "products.manage",
+    "products.manage_attributes", "products.manage_catalog", "products.view_price_history",
   ],
   // 03/11: nada vivo as verifica (as ações das encomendas de compra pedem as próprias: create/edit/delete/receive/approve...).
   purchase_orders: [
@@ -382,6 +392,16 @@ export const CODIGOS_SEM_CATALOGO: readonly string[] = [
   "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder", "obra.executar", "obra.fechar", "obra.imprevistos",
   "obra.materiais", "obra.planear", "orcamento.editar", "proposta.decidir", "proposta.enviar", "suppliers.manage", "visita.gerir",
 ];
+
+/**
+ * Escondidas do editor que uma guarda viva ainda pede (rota/menu). Esconder não muda a guarda: quem já tem o código (papéis antigos,
+ * administradores de sistema e Super Admin) continua a passar; os outros deixam de o poder receber pelo editor. Lista fechada:
+ * permissoesEmUso.test.ts só tolera estes códigos nestes ficheiros.
+ */
+export const ESCONDIDAS_COM_GUARDA: Readonly<Record<string, readonly string[]>> = {
+  // 04/11: /rh-exemplo/denuncias (ProtectedRoute em App.tsx e PERMISSOES_RH.denuncias em menuConfig.ts); as RPCs da página não existem.
+  "hr.denuncias.gerir": ["App.tsx", "components/sidebar/menuConfig.ts"],
+};
 
 const todas = (r: Readonly<Record<string, readonly string[]>>): string[] => Object.values(r).flat();
 
