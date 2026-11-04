@@ -9,3 +9,4 @@ exemplos/*.wav
 vozes/
 .modelos/
 __pycache__/
+.env

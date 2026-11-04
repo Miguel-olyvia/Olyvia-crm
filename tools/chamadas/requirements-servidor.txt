@@ -1,0 +1,14 @@
+# Motor das chamadas num servidor sem GPU (transcrição e campos pelo Gemini).
+fastapi
+uvicorn[standard]
+websockets
+numpy
+requests
+google-genai
+# VAD Silero (vem dentro do faster-whisper; em CPU) e voz do comercial (SpeechBrain em CPU)
+faster-whisper
+torch --index-url https://download.pytorch.org/whl/cpu
+torchaudio --index-url https://download.pytorch.org/whl/cpu
+speechbrain
+# Só para o modo ficheiro e para gerar chamadas de teste
+edge-tts

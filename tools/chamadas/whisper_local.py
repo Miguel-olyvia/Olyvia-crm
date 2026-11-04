@@ -108,3 +108,21 @@ def transcrever_trecho(pcm: np.ndarray, deslocamento_s: float = 0.0) -> list[dic
         saida.append({"inicio": round(deslocamento_s + s.start, 2), "fim": round(deslocamento_s + s.end, 2), "texto": texto,
                       "logprob": round(float(s.avg_logprob), 2)})
     return saida
+
+
+def carregar_env() -> None:
+    """Lê tools/chamadas/.env (GEMINI_API_KEY, ANTHROPIC_API_KEY, CHAMADAS_TOKEN…) para o ambiente,
+    sem substituir o que já lá estiver. O ficheiro fica fora do git."""
+    import pathlib
+    f = pathlib.Path(__file__).parent / ".env"
+    if not f.exists():
+        return
+    for linha in f.read_text(encoding="utf-8").splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#") or "=" not in linha:
+            continue
+        k, v = linha.split("=", 1)
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+carregar_env()

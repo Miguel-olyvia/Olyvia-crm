@@ -201,3 +201,35 @@ motor por um túnel https com WebSocket e um segredo partilhado:
 
 O ambiente «testarh» do Vercel (https://olyvia-crm-env-testarh-bmgest.vercel.app) publica o ramo
 feature/rh-pessoas a cada push.
+
+## Sem GPU: transcrição e campos pelo Gemini (4 de novembro, fim do dia)
+
+Decisão do Rúben: o motor não pode depender do PC dele, e sem GPU. A transcrição e a extração
+passam para a API do Gemini; o motor fica leve (VAD, voz do comercial, WebSocket) e corre em
+qualquer servidor pequeno. O código do whisper e do Qwen continua cá, só se escolhe por variáveis:
+
+| Variável | Valor | Faz |
+|---|---|---|
+| CHAMADAS_STT | gemini ou whisper | quem transcreve cada fala |
+| CHAMADAS_LLM | gemini, ollama ou anthropic | quem preenche os campos |
+| CHAMADAS_GEMINI_MODELO | gemini-3.1-flash-lite | transcrição (2 s por fala, bom em PT) |
+| CHAMADAS_MODELO_GEMINI | gemini-3.8-flash | campos e resumo |
+| GEMINI_API_KEY | a chave | em tools/chamadas/.env, fora do git |
+
+Medido a 4 de novembro: gemini-3.1-flash-lite transcreve uma fala de 6 s em 1,9 s e acerta
+«um T3»; gemini-3.5-flash-lite em 1,2 s mas perde frases; gemini-3.8-flash em 3 a 10 s.
+Na extração, o gemini-3.8-flash na entrevista real deu nome, morada completa com andar e
+localidade, apartamento deduzido do «sexto direito», visita, e não inventou elevador nem
+proprietária (6 preenchidos, 2 a rever, 23 em falta, 23 s). Custo de referência: cerca de
+0,12 dólares por hora de áudio transcrita, e cêntimos por chamada na extração.
+
+### Instalar num servidor sem GPU (Linux)
+
+    python3 -m venv .venv && . .venv/bin/activate
+    pip install -r tools/chamadas/requirements-servidor.txt
+    cp tools/chamadas/.env.exemplo tools/chamadas/.env   # e preencher as chaves
+    CHAMADAS_TOKEN=um-segredo python tools/chamadas/servidor.py --host 0.0.0.0 --porta 8765
+
+À frente, um https com WebSocket (Caddy ou nginx) num nome fixo, p. ex. chamadas.olyvia-ai.com,
+e esse nome no connect-src do vercel.json e no painel «Motor» da app. O ffmpeg só é preciso
+para o modo ficheiro; o direto não o usa.

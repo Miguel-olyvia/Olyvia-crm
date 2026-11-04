@@ -32,9 +32,12 @@ VOZES = AQUI / "vozes"
 SAIDA.mkdir(exist_ok=True)
 VOZES.mkdir(exist_ok=True)
 
+import whisper_local  # noqa: E402 — carrega tools/chamadas/.env (chaves, CHAMADAS_STT, CHAMADAS_LLM, CHAMADAS_TOKEN)
+
 # Segredo partilhado quando o motor fica exposto na internet (túnel): a app manda-o em ?token=.
-# Sem CHAMADAS_TOKEN definido não há verificação (uso só no PC).
-TOKEN = os.environ.get("CHAMADAS_TOKEN", "").strip()
+# Vem de CHAMADAS_TOKEN (ambiente ou .env) ou do ficheiro segredo.txt; sem nada, não há verificação (uso só no PC).
+_SEGREDO_FICHEIRO = AQUI / "segredo.txt"
+TOKEN = os.environ.get("CHAMADAS_TOKEN", "").strip() or (_SEGREDO_FICHEIRO.read_text(encoding="utf-8").strip() if _SEGREDO_FICHEIRO.exists() else "")
 
 
 def _token_ok(token: str | None) -> bool:

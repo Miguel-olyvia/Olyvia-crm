@@ -44,6 +44,7 @@ MOTOR = os.environ.get("CHAMADAS_LLM", "ollama")
 MODELO_OLLAMA = os.environ.get("CHAMADAS_MODELO_OLLAMA", "qwen3:8b")
 MODELO_ANTHROPIC = os.environ.get("CHAMADAS_MODELO_ANTHROPIC", "claude-opus-5-5")
 PENSAR = os.environ.get("CHAMADAS_PENSAR", "") == "1"  # modo de raciocínio do qwen3 (mais lento)
+MODELO_GEMINI = os.environ.get("CHAMADAS_MODELO_GEMINI", "gemini-3.8-flash")
 
 SISTEMA = """És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição
 de uma chamada entre um comercial e um cliente e preenches uma ficha para preparar a visita.
@@ -157,6 +158,29 @@ def _pedir_anthropic(sistema: str, pedido: str, esquema: dict) -> dict:
     return json.loads(m.group(0))
 
 
+def _esquema_gemini(chaves: list[str]) -> dict:
+    """O mesmo esquema em maiúsculas (a forma que o Gemini aceita), sem uniões de tipos: valor é STRING."""
+    campo = {"type": "OBJECT", "properties": {"valor": {"type": "STRING", "nullable": True}, "confianca": {"type": "NUMBER"},
+                                              "excerto": {"type": "STRING"}}, "required": ["valor", "confianca", "excerto"]}
+    return {"type": "OBJECT", "properties": {"campos": {"type": "OBJECT", "properties": {k: campo for k in chaves}, "required": chaves},
+                                             "resumo": {"type": "STRING"}}, "required": ["campos", "resumo"]}
+
+
+def _pedir_gemini(sistema: str, pedido: str, esquema: dict) -> dict:
+    import whisper_local  # noqa: F401 — carrega o .env
+    from google import genai
+    from google.genai import types
+    chave = os.environ.get("GEMINI_API_KEY", "")
+    if not chave:
+        raise SystemExit("Falta GEMINI_API_KEY (tools/chamadas/.env).")
+    client = genai.Client(api_key=chave)
+    chaves = list(esquema["properties"]["campos"]["properties"].keys())
+    cfg = types.GenerateContentConfig(system_instruction=sistema, response_mime_type="application/json",
+                                      response_schema=_esquema_gemini(chaves), temperature=0)
+    r = client.models.generate_content(model=MODELO_GEMINI, contents=pedido, config=cfg)
+    return json.loads(r.text or "{}")
+
+
 def _normalizar(campo: dict, bruto: dict) -> dict:
     valor = bruto.get("valor")
     conf = float(bruto.get("confianca") or 0)
@@ -226,6 +250,8 @@ def extrair(transcricao_json: Path, campos_json: Path, saida: Path, definicao: d
     esquema = _esquema(chaves)
     if MOTOR == "anthropic":
         bruto, modelo = _pedir_anthropic(SISTEMA, pedido, esquema), MODELO_ANTHROPIC
+    elif MOTOR == "gemini":
+        bruto, modelo = _pedir_gemini(SISTEMA, pedido, esquema), MODELO_GEMINI
     else:
         bruto, modelo = _pedir_ollama(SISTEMA, pedido, esquema), MODELO_OLLAMA
     resultado = {

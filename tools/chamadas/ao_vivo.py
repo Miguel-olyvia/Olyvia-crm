@@ -165,11 +165,16 @@ class Sessao:
     falante, e no fim guarda tudo e preenche a ficha. Serve o Terminal e o servidor web."""
 
     def __init__(self, nome: str, comercial: str | None = None, primeiro: str = "cliente"):
-        import whisper_local
+        import whisper_local  # carrega o .env
         from falantes import Falantes
         SAIDA.mkdir(exist_ok=True)
-        whisper_local.modelo()
-        self.whisper = whisper_local
+        # quem transcreve: CHAMADAS_STT=gemini (API, sem GPU) ou whisper (local, GPU)
+        if os.environ.get("CHAMADAS_STT", "whisper").lower() == "gemini":
+            import gemini_stt
+            self.whisper = gemini_stt
+        else:
+            self.whisper = whisper_local
+        self.whisper.modelo()
         self.nome = nome
         self.falantes = Falantes.com_voz_registada(comercial) if comercial else Falantes(primeiro=primeiro)
         self.detetor = Detetor()
