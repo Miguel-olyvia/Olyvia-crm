@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
 import { entidadesDaNovaLead, supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
-import { NovaLeadReal } from "./NovaLeadReal";
+import { NovaLeadReal } from "./NovaLeadReal";
+import { continuar, criar, irParaConfirmar, irParaContacto } from "./passosNovaLeadTeste";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -52,12 +53,13 @@ function desenhar() {
 const abrir = () => fireEvent.click(screen.getByRole("button", { name: "Nova lead" }));
 const escrever = (rotulo: RegExp, valor: string) => fireEvent.change(screen.getByLabelText(rotulo), { target: { value: valor } });
 const preencherValido = () => {
+  irParaContacto();
   escrever(/Nome próprio/, "Ana");
   escrever(/Apelido/, "Lopes");
   escrever(/^Email/, "ana@x.pt");
   fireEvent.change(document.getElementById("nl-campo-phone") as HTMLInputElement, { target: { value: "912 345 678" } });
 };
-const criar = () => fireEvent.click(screen.getByRole("button", { name: "Criar lead" }));
+// 4/11: a Nova lead é guiada; «Criar lead» só está no último passo (passosNovaLeadTeste.ts)
 
 beforeEach(() => {
   supabaseFalso.reiniciar();
@@ -90,13 +92,17 @@ describe("NovaLeadReal: o diálogo", () => {
     abrir();
     const dialogo = await screen.findByRole("dialog", { name: "Criar nova lead" });
     expect(dialogo).toHaveAccessibleDescription(/Cria uma pessoa nova/);
-    await waitFor(() => expect(within(dialogo).getByLabelText("Campanha", { selector: "select" })).toHaveFocus());
+    // 4/11: guiado; o primeiro passo é «Como chegou», com o formulário (opcional) e a fonte
+    await waitFor(() => expect(within(dialogo).getByLabelText("Formulário", { selector: "select" })).toHaveFocus());
+    expect(within(dialogo).getByText("Passo 1 de 4")).toBeInTheDocument();
+    expect(within(dialogo).getByRole("button", { current: "step" })).toHaveTextContent("Como chegou");
   });
 
   it("tem os campos base de Leads e nenhum de morada", async () => {
     desenhar();
     abrir();
     await screen.findByRole("dialog");
+    irParaContacto();
     for (const nome of [/Nome próprio/, /Apelido/, /^Email/, /Empresa/, /Notas/]) expect(screen.getByLabelText(nome)).toBeInTheDocument();
     expect(document.getElementById("nl-campo-phone")).not.toBeNull();
     expect(screen.queryByLabelText(/Morada|Código postal/)).toBeNull();
@@ -106,31 +112,44 @@ describe("NovaLeadReal: o diálogo", () => {
     desenhar();
     abrir();
     const dialogo = await screen.findByRole("dialog");
+    expect(screen.getByRole("button", { name: "Continuar" })).toHaveAttribute("type", "submit");
+    for (const b of within(dialogo).getAllByRole("button").filter((x) => /Cancelar|Continuar|Criar formulário/.test(x.textContent ?? ""))) {
+      expect(b.className, b.textContent ?? "").toContain("min-h-11");
+    }
+    preencherValido();
+    irParaConfirmar();
     expect(screen.getByRole("button", { name: "Criar lead" })).toHaveAttribute("type", "submit");
-    for (const b of within(dialogo).getAllByRole("button").filter((x) => /Cancelar|Criar lead|Criar formulário/.test(x.textContent ?? ""))) {
+    for (const b of within(dialogo).getAllByRole("button").filter((x) => /Anterior|Criar lead|Alterar/.test(x.textContent ?? ""))) {
       expect(b.className, b.textContent ?? "").toContain("min-h-11");
     }
   });
 
-  it("escolher uma campanha acrescenta os campos dela e esconde o campo base que ela já cobre", async () => {
+  it("escolher um formulário mostra a campanha dele, acrescenta o passo dos campos dele e esconde o campo base que ele já cobre", async () => {
     desenhar();
     abrir();
     await screen.findByRole("dialog");
-    await waitFor(() => expect(screen.getByRole("option", { name: /Verão/ })).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText("Campanha", { selector: "select" }), { target: { value: "c1" } });
+    await waitFor(() => expect(screen.getByRole("option", { name: /Orçamento online/ })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Formulário", { selector: "select" }), { target: { value: "f1" } });
+    expect(await screen.findByText("2 campos extra")).toBeInTheDocument();
+    expect(screen.getByText("Verão")).toBeInTheDocument();
+    // com campos no formulário, há mais um passo: «O formulário»
+    await waitFor(() => expect(screen.getByText("Passo 1 de 5")).toBeInTheDocument());
+    continuar();
+    // o nome próprio (base) é coberto pelo campo do formulário, que o mapeia: deixa de se desenhar
+    expect(screen.queryByLabelText(/Nome próprio/)).toBeNull();
+    escrever(/Apelido/, "Lopes");
+    continuar();
     expect(await screen.findByLabelText(/Nome do cliente/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Campos adicionais da campanha" })).toBeInTheDocument();
-    expect(screen.getByText("Orçamento online")).toBeInTheDocument();
-    expect(screen.getByText("2 campos extra")).toBeInTheDocument();
-    // o nome próprio (base) é coberto pelo campo da campanha, que o mapeia: deixa de se desenhar
-    expect(screen.queryByLabelText(/Nome próprio/)).toBeNull();
   });
 
   it("campos em falta: marca-os, liga a mensagem ao campo, foca o primeiro e não toca na base", async () => {
     desenhar();
     abrir();
     await screen.findByRole("dialog");
-    criar();
+    // 4/11: o «Continuar» do passo «Quem é» valida como o «Criar lead»
+    irParaContacto();
+    continuar();
     const nome = await screen.findByLabelText(/Nome próprio/);
     expect(nome).toHaveAttribute("aria-invalid", "true");
     expect(nome).toHaveAccessibleDescription(/obrigatório/);
@@ -247,6 +266,9 @@ describe("NovaLeadReal: duplicados", () => {
     const dup = await ateOBloqueio();
     fireEvent.click(within(dup).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    // fica no passo «Confirmar»; o resumo tem o que se escreveu, e «Alterar» volta ao campo
+    expect(screen.getByRole("dialog")).toHaveTextContent("Ana");
+    fireEvent.click(screen.getByRole("button", { name: "Alterar: Quem é" }));
     expect(screen.getByLabelText(/Nome próprio/)).toHaveValue("Ana");
     expect(nomesRpc()).toEqual(["neg_procurar_duplicados"]);
   });

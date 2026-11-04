@@ -11,14 +11,16 @@ interface CamposProps {
   erros: Readonly<Record<string, string>>;
   campanhaId: string | null;
   aoMudar: (chave: string, valor: unknown) => void;
+  /** 4/11: num passo da Nova lead guiada, o título é o do passo: aqui fica só para os leitores de ecrã. */
+  tituloEscondido?: boolean;
 }
 
 /** Uma secção do formulário: os campos em grelha, os de texto longo a toda a largura. Só dados e callbacks. */
-export function CamposNovaLead({ titulo, descricao, idSecao, campos, valores, erros, campanhaId, aoMudar }: CamposProps) {
+export function CamposNovaLead({ titulo, descricao, idSecao, campos, valores, erros, campanhaId, aoMudar, tituloEscondido }: CamposProps) {
   if (campos.length === 0) return null;
   return (
-    <section aria-labelledby={idSecao} className="space-y-3 border-t pt-4">
-      <div className="space-y-1">
+    <section aria-labelledby={idSecao} className={tituloEscondido ? "space-y-3" : "space-y-3 border-t pt-4"}>
+      <div className={tituloEscondido ? "sr-only" : "space-y-1"}>
         <h3 id={idSecao} className="text-sm font-semibold text-foreground">{titulo}</h3>
         {descricao && <p className="text-xs text-muted-foreground">{descricao}</p>}
       </div>
