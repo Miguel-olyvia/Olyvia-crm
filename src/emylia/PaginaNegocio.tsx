@@ -268,9 +268,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
               <TextoDaLead ctx={ctx} d={d} k="apelido" rotulo="Apelido" />
             </div>
           ) : <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>}
-          {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
-          {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
-            : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
+          {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
+          {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
+            : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
           <Campos grupo={gPedido} {...fx} />
         </div>
       ), d.f), id: "quem", titulo: "Quem pede", personalizado: false, resumo: [d.nome, d.tel, d.f.pedido || ""].filter(Boolean) },
