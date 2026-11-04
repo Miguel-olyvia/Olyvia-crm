@@ -1,10 +1,9 @@
-// O diálogo do Workflow de Pessoas: título, separadores «Qualificação» e «Levantamento», foco ao abrir e ao fechar, não se fecha enquanto
+// O diálogo do Workflow de Pessoas: título, separadores «Levantamento», «Campos das fases» e «Negócios» (sem «Qualificação»), foco ao abrir e ao fechar, não se fecha enquanto
 // grava e pergunta antes de fechar com alterações do levantamento por gravar. Os hooks de leitura e gravação são simulados.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import type { ConfigNegociosHook } from "@/hooks/pessoas/workflow/useConfigNegocios";
-import type { RegrasQualificacaoHook } from "@/hooks/pessoas/workflow/useRegrasQualificacao";
 import { lerQuestionario } from "@/hooks/pessoas/workflow/questionario";
 import { QUESTIONARIO_BRUTO } from "@/hooks/pessoas/workflow/questionarioTestUtil";
 import type { QuestionarioHook } from "@/hooks/pessoas/workflow/useQuestionarioLevantamento";
@@ -15,8 +14,6 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
-const usarRegras = vi.hoisted(() => vi.fn());
-vi.mock("@/hooks/pessoas/workflow/useRegrasQualificacao", () => ({ useRegrasQualificacao: (h: boolean) => usarRegras(h) }));
 const usarConfig = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useConfigNegocios", () => ({ useConfigNegocios: (h: boolean) => usarConfig(h) }));
 // Com a bandeira CONSEQUENCIAS_ATIVO ligada, o separador «Negócios» lê as consequências e a permissão pessoas.config: ambos simulados (com permissão).
@@ -40,11 +37,6 @@ const usarCampos = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useCamposConfig", () => ({ useCamposConfig: (h: boolean) => usarCampos(h) }));
 beforeAll(prepararRadixNoJsdom);
 
-const hook = (sobre: Partial<RegrasQualificacaoHook> = {}): RegrasQualificacaoHook => ({
-  dados: { mql: null, sql: null, descartadas: 0 }, isLoading: false, isError: false, aGuardar: false,
-  guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
-});
-
 const configNegocios = (sobre: Partial<ConfigNegociosHook> = {}): ConfigNegociosHook => ({
   estado: "pronto", aGuardar: false, guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
   dados: { conversaoAoGanhar: "automatica", recusaProposta: "perder", recusaContrato: "perder", cancelamentoNoPrazo: "perder", reflexaoDias: null },
@@ -61,7 +53,6 @@ const questionario = (sobre: Partial<QuestionarioHook> = {}): QuestionarioHook =
 });
 
 beforeEach(() => {
-  usarRegras.mockReset(); usarRegras.mockReturnValue(hook());
   usarConfig.mockReset(); usarConfig.mockReturnValue(configNegocios());
   usarQuest.mockReset(); usarQuest.mockReturnValue(questionario());
   usarCampos.mockReset(); usarCampos.mockReturnValue(camposConfig());
@@ -77,31 +68,27 @@ const desenhar = (aberto = true, sobre: Partial<Parameters<typeof WorkflowPessoa
 };
 
 describe("WorkflowPessoasDialogo", () => {
-  it("fechado não mostra nada e não lê as regras", () => {
+  it("fechado não mostra nada", () => {
     desenhar(false);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(usarRegras).toHaveBeenCalledWith(false);
   });
 
-  it("aberto: diálogo com título e descrição, e as regras passam a ser lidas", () => {
+  it("aberto: diálogo com título e descrição", () => {
     desenhar();
     const d = screen.getByRole("dialog", { name: "Configuração de Workflow" });
     expect(d).toHaveAccessibleDescription(/Pessoas desta organização/);
-    expect(usarRegras).toHaveBeenCalledWith(true);
   });
 
-  it("tem os separadores «Qualificação» (selecionado, com as regras MQL e SQL), «Levantamento», «Campos das fases» e «Negócios»", () => {
+  it("tem os separadores «Levantamento» (selecionado), «Campos das fases» e «Negócios»; «Qualificação» já não existe", () => {
     desenhar();
     const lista = screen.getByRole("tablist", { name: "Secções do Workflow" });
     const separadores = within(lista).getAllByRole("tab");
-    expect(separadores.map((s) => s.textContent)).toEqual(["Qualificação", "Levantamento", "Campos das fases", "Negócios"]);
+    expect(separadores.map((s) => s.textContent)).toEqual(["Levantamento", "Campos das fases", "Negócios"]);
     expect(separadores[0]).toHaveAttribute("aria-selected", "true");
     expect(separadores[1]).toHaveAttribute("aria-selected", "false");
     expect(separadores[2]).toHaveAttribute("aria-selected", "false");
-    expect(separadores[3]).toHaveAttribute("aria-selected", "false");
-    const painel = screen.getByRole("tabpanel", { name: "Qualificação" });
-    expect(within(painel).getByRole("group", { name: "Quando uma lead é MQL" })).toBeInTheDocument();
-    expect(within(painel).getByRole("group", { name: "Quando uma lead é SQL" })).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel", { name: "Levantamento" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Qualificação" })).toBeNull();
   });
 
   it("a configuração dos negócios só se lê quando o separador «Negócios» está à vista, e mostra os cinco campos e a tabela das consequências", () => {
@@ -129,8 +116,10 @@ describe("WorkflowPessoasDialogo", () => {
     expect(props.aoMudarAberto).not.toHaveBeenCalled();
   });
 
-  it("o questionário só se lê quando o separador «Levantamento» está à vista", () => {
+  it("o questionário só se lê quando o separador «Levantamento» está à vista (o que abre primeiro)", () => {
     desenhar();
+    expect(usarQuest).toHaveBeenLastCalledWith(true);
+    irParaNegocios();
     expect(usarQuest).toHaveBeenLastCalledWith(false);
     irParaLevantamento();
     expect(usarQuest).toHaveBeenLastCalledWith(true);
@@ -161,7 +150,7 @@ describe("WorkflowPessoasDialogo", () => {
   });
 
   it("a gravar: Escape não fecha e o botão de fechar sai (o resultado não chegava a ninguém)", () => {
-    usarRegras.mockReturnValue(hook({ aGuardar: true }));
+    usarCampos.mockReturnValue(camposConfig({ aGuardar: true }));
     const { props } = desenhar();
     expect(screen.queryByRole("button", { name: /close|fechar/i })).toBeNull();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
@@ -216,7 +205,7 @@ describe("WorkflowPessoasDialogo: alterações dos negócios por gravar", () => 
   it("o que se escolheu sobrevive à troca de separador", () => {
     desenhar();
     editarNegocios();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    irParaLevantamento();
     irParaNegocios();
     expect(within(screen.getByRole("radiogroup", { name: "Quando a proposta é recusada" })).getByRole("radio", { name: "Manter o negócio aberto" })).toBeChecked();
   });
@@ -279,16 +268,16 @@ describe("WorkflowPessoasDialogo: alterações do levantamento por gravar", () =
   it("o que se escreveu sobrevive à troca de separador", () => {
     desenhar();
     editar();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    irParaNegocios();
     expect(screen.queryByRole("region", { name: "Fachada" })).toBeNull();
     irParaLevantamento();
     expect(tituloExterior()).toHaveValue("Fachada");
   });
 
-  it("com alterações no levantamento e o separador «Qualificação» à vista, fechar também pergunta", async () => {
+  it("com alterações no levantamento e o separador «Negócios» à vista, fechar também pergunta", async () => {
     const { props } = desenhar();
     editar();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    irParaNegocios();
     fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(props.aoMudarAberto).not.toHaveBeenCalled();
@@ -310,6 +299,8 @@ describe("WorkflowPessoasDialogo: campos das fases e impacto no orçamento (3/11
 
   it("os ajustes só se leem com «Campos das fases» ou «Levantamento» à vista", () => {
     desenhar();
+    expect(usarCampos).toHaveBeenLastCalledWith(true);
+    irParaNegocios();
     expect(usarCampos).toHaveBeenLastCalledWith(false);
     irParaCampos();
     expect(usarCampos).toHaveBeenLastCalledWith(true);
@@ -323,7 +314,7 @@ describe("WorkflowPessoasDialogo: campos das fases e impacto no orçamento (3/11
     const { props } = desenhar();
     irParaCampos();
     fireEvent.click(screen.getByRole("button", { name: "Esconder Amianto" }));
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    irParaNegocios();
     irParaCampos();
     expect(screen.getByRole("button", { name: "Mostrar Amianto" })).toBeInTheDocument();
     escape();
