@@ -26649,6 +26649,26 @@ export type Database = {
         }
         Returns: undefined
       }
+      neg_guardar_ligacao_fase: {
+        Args: { p_field_id: string; p_mapping: Json; p_org: string }
+        Returns: Json
+      }
+      neg_ler_ligacao_fase: {
+        Args: { p_form_id: string; p_org: string }
+        Returns: Json
+      }
+      neg_ligacoes_fase: {
+        Args: { p_org: string }
+        Returns: Json
+      }
+      neg_sugestoes_formulario: {
+        Args: { p_negocios?: string[]; p_org: string }
+        Returns: Json
+      }
+      neg_sugestoes_submissoes: {
+        Args: { p_org: string; p_submissoes: string[] }
+        Returns: Json
+      }
       ops_agendar_relatorio: {
         Args: { _autor_id: string; _ordem_id: string }
         Returns: boolean

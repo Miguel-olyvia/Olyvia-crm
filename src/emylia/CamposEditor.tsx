@@ -17,6 +17,30 @@ import {
 import { FASES, type Estado } from "./motor";
 import { SETORES, type Setor } from "./setores";
 import { IconeFase, type Ctx } from "./pecas";
+import type { LigacaoFase } from "@/hooks/pessoas/workflow/useLigacoesFase";
+
+/** Os formulários (distintos, pelo id) que enviam respostas para uma pergunta (ou, sem `chave`, para qualquer pergunta do grupo). */
+export function formulariosDe(ligacoes: readonly LigacaoFase[] | undefined, grupo: string, chave?: string): string[] {
+  const vistos = new Map<string, string>();
+  for (const l of ligacoes ?? []) {
+    if (l.grupo !== grupo || (chave !== undefined && l.chave !== chave)) continue;
+    vistos.set(l.form_id || l.form_nome, l.form_nome || l.field_label);
+  }
+  return [...vistos.values()];
+}
+const nForms = (n: number) => (n === 1 ? "1 formulário" : `${n} formulários`);
+const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+/** A confirmação inline (como «Confirmar o modelo»): diz o que se perde e deixa cancelar. */
+function ConfirmarAlteracao({ texto, ok, onOk, onCancel }: { texto: string; ok: string; onOk: () => void; onCancel: () => void }) {
+  return (
+    <div role="group" aria-label="Confirmar a alteração" className="flex flex-wrap items-center gap-3 border-l-2 border-primary py-2 pl-4 animate-in fade-in-0">
+      <p className="flex-1 text-[15px]">{texto}</p>
+      <Button variant="ghost" className={BTN} autoFocus onClick={onCancel}>Cancelar</Button>
+      <Button variant="outline" className={BTN} onClick={onOk}>{ok}</Button>
+    </div>
+  );
+}
 
 /** 3/11 (Rúben): o editor só precisa dos ajustes; assim usa-se também fora do protótipo (Pessoas › Workflow › Campos das fases). */
 type AjustesS = Pick<Estado, "campos" | "setor">;
@@ -56,11 +80,12 @@ export function CamposEditor(ctx: Ctx) {
 }
 
 /** Os modelos de setor, um por linha. Escolher um pede confirmação na própria página (os ajustes perdem-se). */
-export function ModelosSetor({ S, run, setores = SETORES, onAplicado }: Pick<Ctx, "S" | "run"> & { setores?: Setor[]; onAplicado?: (id: string) => void }) {
+export function ModelosSetor({ S, run, setores = SETORES, onAplicado, ligacoes }: Pick<Ctx, "S" | "run"> & { setores?: Setor[]; onAplicado?: (id: string) => void; ligacoes?: LigacaoFase[] }) {
   const [confirmar, setConfirmar] = useState<string | null>(null);
   const atual = S.setor || "remodelacao";
   const setorAtual = setores.find((x) => x.id === atual);
   const alvo = setores.find((x) => x.id === confirmar);
+  const totalLigados = new Set((ligacoes ?? []).map((l) => l.form_id || l.form_nome)).size;
   return (
     <>
       <p className="mt-1 text-[15px] text-muted-foreground">
@@ -85,7 +110,7 @@ export function ModelosSetor({ S, run, setores = SETORES, onAplicado }: Pick<Ctx
       </ul>
       {alvo && (
         <div role="group" aria-label="Confirmar o modelo" className="mt-3 flex flex-wrap items-center gap-3 border-l-2 border-primary py-2 pl-4 animate-in fade-in-0">
-          <p className="flex-1 text-[15px]">Usar o modelo {alvo.nome}? Os ajustes que fez perdem-se. Os valores já preenchidos nos negócios ficam.</p>
+          <p className="flex-1 text-[15px]">Usar o modelo {alvo.nome}? Os ajustes que fez perdem-se. Os valores já preenchidos nos negócios ficam.{totalLigados > 0 && ` Há ${nForms(totalLigados)} a enviar respostas para perguntas das fases: as que o modelo não tiver deixam de ser sugeridas.`}</p>
           <Button variant="ghost" className={BTN} onClick={() => setConfirmar(null)}>Cancelar</Button>
           <Button variant="outline" className={BTN} onClick={() => { run(() => { S.campos = structuredClone(alvo.cfg); S.setor = alvo.id; }); onAplicado?.(alvo.id); setConfirmar(null); }}>Usar este modelo</Button>
         </div>
@@ -95,7 +120,7 @@ export function ModelosSetor({ S, run, setores = SETORES, onAplicado }: Pick<Ctx
 }
 
 /** A fase escolhe-se num grupo de opções (rádio) e os grupos dessa fase aparecem por baixo. */
-export function EditorFases({ S, run, nomes = FASES }: { S: AjustesS; run: Ctx["run"]; nomes?: readonly string[] }) {
+export function EditorFases({ S, run, nomes = FASES, ligacoes }: { S: AjustesS; run: Ctx["run"]; nomes?: readonly string[]; ligacoes?: LigacaoFase[] }) {
   const [fase, setFase] = useState(2);
   const nome = useId();
   const mexer = (g: Grupo, fn: (a: AjusteGrupo) => void) => run(() => { S.campos ??= {}; fn((S.campos[g.titulo] ??= {})); S.setor = "personalizado"; });
@@ -115,7 +140,7 @@ export function EditorFases({ S, run, nomes = FASES }: { S: AjustesS; run: Ctx["
       </fieldset>
 
       <div className="mt-6 space-y-6">
-        {GRUPOS[fase].map((g) => <EditorGrupo key={g.titulo} S={S} g={g} mexer={mexer} />)}
+        {GRUPOS[fase].map((g) => <EditorGrupo key={g.titulo} S={S} g={g} mexer={mexer} ligacoes={ligacoes} />)}
       </div>
     </>
   );
@@ -123,11 +148,26 @@ export function EditorFases({ S, run, nomes = FASES }: { S: AjustesS; run: Ctx["
 
 const obrigOn = (c: Def) => !!(c.obrigatorio ?? (!c.opcional && c.t !== "texto_longo"));
 
-function EditorGrupo({ S, g, mexer }: { S: AjustesS; g: Grupo; mexer: (g: Grupo, fn: (a: AjusteGrupo) => void) => void }) {
+function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: (g: Grupo, fn: (a: AjusteGrupo) => void) => void; ligacoes?: LigacaoFase[] }) {
   const a = S.campos?.[g.titulo] || {};
   const cs = camposAjustados(S.campos, g);
   const [novo, setNovo] = useState(false);
   const [abertoK, setAbertoK] = useState<string | null>(null);
+  // a ligação campo do formulário -> pergunta é por grupo (título estável) e chave: renomear não a parte, apagar ou esconder sim
+  const [confirma, setConfirma] = useState<{ texto: string; ok: string; fazer: () => void } | null>(null);
+  const pedir = (n: number, texto: string, ok: string, fazer: () => void) => { if (n === 0) fazer(); else setConfirma({ texto, ok, fazer }); };
+  const aoApagar = (c: Def, fazer: () => void) => {
+    const n = formulariosDe(ligacoes, g.titulo, c.k).length;
+    pedir(n, `Esta pergunta recebe respostas de ${nForms(n)}. Se a apagar, deixam de ser sugeridas.`, "Apagar a pergunta", fazer);
+  };
+  const aoEsconder = (c: Def, fazer: () => void) => {
+    const n = formulariosDe(ligacoes, g.titulo, c.k).length;
+    pedir(n, `Esta pergunta recebe respostas de ${nForms(n)}. Escondida, deixam de ser sugeridas.`, "Esconder a pergunta", fazer);
+  };
+  const aoEsconderGrupo = () => {
+    const n = formulariosDe(ligacoes, g.titulo).length;
+    pedir(n, `Este grupo recebe respostas de ${nForms(n)}. Escondido, deixam de ser sugeridas.`, "Esconder o grupo", () => mexer(g, (x) => { x.oculto = true; }));
+  };
   const mover = (k: string, dir: -1 | 1) => mexer(g, (x) => {
     const ks = cs.map((c) => c.k), i = ks.indexOf(k), j = i + dir;
     if (j < 0 || j >= ks.length) return;
@@ -143,10 +183,15 @@ function EditorGrupo({ S, g, mexer }: { S: AjustesS; g: Grupo; mexer: (g: Grupo,
             onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== (a.nome || g.titulo)) mexer(g, (x) => { x.nome = v === g.titulo ? undefined : v; }); }} />
         </label>
         <span className="text-[15px] text-muted-foreground">{cs.filter((c) => !c.escondido).length} campos</span>
-        <Button variant="ghost" className={BTN} onClick={() => mexer(g, (x) => { x.oculto = !x.oculto; })}>
-          {a.oculto ? <><Eye className="h-4 w-4" />Mostrar o grupo</> : <><EyeOff className="h-4 w-4" />Esconder o grupo</>}
+        <Button variant="ghost" className={BTN} onClick={() => { if (a.oculto) mexer(g, (x) => { x.oculto = false; }); else aoEsconderGrupo(); }}>
+          {a.oculto ?<><Eye className="h-4 w-4" />Mostrar o grupo</> : <><EyeOff className="h-4 w-4" />Esconder o grupo</>}
         </Button>
       </header>
+      {confirma && (
+        <div className="px-4 py-2 sm:px-5">
+          <ConfirmarAlteracao texto={confirma.texto} ok={confirma.ok} onCancel={() => setConfirma(null)} onOk={() => { const f = confirma.fazer; setConfirma(null); f(); }} />
+        </div>
+      )}
       {!a.oculto && (
         <ul className="divide-y divide-border">
           {cs.map((c, i) => (
@@ -173,10 +218,13 @@ function EditorGrupo({ S, g, mexer }: { S: AjustesS; g: Grupo; mexer: (g: Grupo,
                   Obrigatório
                 </button>
                 {c.novo ? (
-                  <Button variant="ghost" size="icon" className="h-11 w-11" aria-label={`Apagar ${c.l}`} onClick={() => mexer(g, (x) => { x.novos = (x.novos || []).filter((n) => n.k !== c.k); })}><Trash2 className="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="icon" className="h-11 w-11" aria-label={`Apagar ${c.l}`} onClick={() => aoApagar(c, () => mexer(g, (x) => { x.novos = (x.novos || []).filter((n) => n.k !== c.k); }))}><Trash2 className="h-4 w-4" /></Button>
                 ) : (
                   <Button variant="ghost" size="icon" className="h-11 w-11" aria-label={c.escondido ? `Mostrar ${c.l}` : `Esconder ${c.l}`}
-                    onClick={() => mexer(g, (x) => { const o = new Set(x.ocultos || []); if (o.has(c.k)) o.delete(c.k); else o.add(c.k); x.ocultos = [...o]; })}>
+                    onClick={() => {
+                      const alternar = () => mexer(g, (x) => { const o = new Set(x.ocultos || []); if (o.has(c.k)) o.delete(c.k); else o.add(c.k); x.ocultos = [...o]; });
+                      if (c.escondido) alternar(); else aoEsconder(c, alternar);
+                    }}>
                     {c.escondido ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                   </Button>
                 )}
@@ -192,7 +240,7 @@ function EditorGrupo({ S, g, mexer }: { S: AjustesS; g: Grupo; mexer: (g: Grupo,
                   {c.op && (
                     <div className="grid gap-2">
                       <span className="text-[15px] font-medium">Opções</span>
-                      <Opcoes op={c.op} onSet={(op) => mexer(g, (x) => {
+                      <Opcoes op={c.op} varios={c.t === "varios"} alvosDe={(o) => alvosDaOpcao(ligacoes, g.titulo, c.k, o)} onSet={(op) => mexer(g, (x) => {
                         if (c.novo) x.novos = (x.novos || []).map((n) => (n.k === c.k ? { ...n, op } : n)); else x.opcoes = { ...x.opcoes, [c.k]: op };
                       })} />
                     </div>
@@ -215,22 +263,54 @@ function EditorGrupo({ S, g, mexer }: { S: AjustesS; g: Grupo; mexer: (g: Grupo,
   );
 }
 
-function Opcoes({ op, onSet }: { op: string[]; onSet: (op: string[]) => void }) {
+/** Os rótulos dos campos de formulário cuja tabela de correspondência aponta para esta opção. */
+function alvosDaOpcao(ligacoes: readonly LigacaoFase[] | undefined, grupo: string, chave: string, opcao: string): string[] {
+  const alvo = semAcento(opcao);
+  return (ligacoes ?? [])
+    .filter((l) => l.grupo === grupo && l.chave === chave && Object.values(l.valores ?? {}).some((v) => typeof v === "string" && semAcento(v) === alvo))
+    .map((l) => l.field_label || l.form_nome);
+}
+
+const AVISO_VIRGULA = "Numa pergunta de escolha múltipla a opção não pode ter vírgula: as respostas guardam-se separadas por vírgulas.";
+
+function Opcoes({ op, onSet, varios = false, alvosDe }: { op: string[]; onSet: (op: string[]) => void; varios?: boolean; alvosDe?: (opcao: string) => string[] }) {
   const [v, setV] = useState("");
-  const juntar = () => { const x = v.trim(); if (x && !op.includes(x)) onSet([...op, x]); setV(""); };
+  const [recusa, setRecusa] = useState(false);
+  const [tirar, setTirar] = useState<{ opcao: string; alvos: string[] } | null>(null);
+  const juntar = () => {
+    const x = v.trim();
+    if (varios && x.includes(",")) { setRecusa(true); return; }
+    setRecusa(false);
+    if (x && !op.includes(x)) onSet([...op, x]);
+    setV("");
+  };
+  const pedirTirar = (o: string) => {
+    const alvos = alvosDe?.(o) ?? [];
+    if (alvos.length === 0) onSet(op.filter((x) => x !== o)); else setTirar({ opcao: o, alvos });
+  };
   return (
     <div className="flex flex-wrap items-center gap-2">
       {op.map((o) => (
         <span key={o} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-input bg-card pl-3 pr-0.5 text-[15px]">
           {o}
-          <button type="button" aria-label={`Tirar ${o}`} disabled={op.length <= 2} onClick={() => onSet(op.filter((x) => x !== o))} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted disabled:opacity-30"><X className="h-4 w-4" /></button>
+          <button type="button" aria-label={`Tirar ${o}`} disabled={op.length <= 2} onClick={() => pedirTirar(o)} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted disabled:opacity-30"><X className="h-4 w-4" /></button>
         </span>
       ))}
       <span className="inline-flex items-center gap-1">
-        <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); juntar(); } }} placeholder="Nova opção" aria-label="Nova opção"
+        <input value={v} onChange={(e) => { setV(e.target.value); setRecusa(false); }} aria-invalid={recusa || undefined} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); juntar(); } }} placeholder="Nova opção" aria-label="Nova opção"
           className="h-11 w-40 rounded-full border border-dashed border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary" />
         <Button variant="ghost" className={BTN} onClick={juntar} disabled={!v.trim()}>Juntar</Button>
       </span>
+      <p role="status" aria-live="polite" className={cn("basis-full text-[15px] text-destructive", !recusa && "sr-only")}>{recusa ? AVISO_VIRGULA : ""}</p>
+      {tirar && (
+        <div className="basis-full">
+          <ConfirmarAlteracao
+            texto={`A opção “${tirar.opcao}” é o destino de uma correspondência em ${tirar.alvos.join(", ")}. Se a tirar, essas respostas deixam de ser sugeridas.`}
+            ok="Tirar a opção" onCancel={() => setTirar(null)}
+            onOk={() => { const o = tirar.opcao; setTirar(null); onSet(op.filter((x) => x !== o)); }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -244,7 +324,8 @@ function NovoCampo({ g, cs, onAdd, onCancel }: { g: Grupo; cs: Def[]; onAdd: (c:
   const blocos = [...new Set(cs.map((c) => c.bloco).filter(Boolean))] as string[];
   const [bloco, setBloco] = useState(blocos[0] || "");
   const id = useId();
-  const pronto = l.trim() && ((t !== "escolha" && t !== "varios") || op.length >= 2);
+  const [recusa, setRecusa] = useState(false);
+  const pronto = l.trim() && ((t !== "escolha" && t !== "varios") || op.length >= 2) && !(t === "varios" && op.some((o) => o.includes(",")));
   const criar = () => {
     if (!pronto) return;
     onAdd({ k: chaveLivre(l, cs.map((c) => c.k)), l: l.trim(), t, op: t === "escolha" || t === "varios" ? op : undefined, novo: true, obrigatorio: obrig, bloco: bloco || undefined, min: t === "contador" ? 0 : undefined, max: t === "contador" ? 50 : undefined });
@@ -265,10 +346,20 @@ function NovoCampo({ g, cs, onAdd, onCancel }: { g: Grupo; cs: Def[]; onAdd: (c:
           <span className="text-[15px] font-medium">Opções (pelo menos 2)</span>
           <div className="flex flex-wrap items-center gap-2">
             {op.map((o) => <span key={o} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-input bg-card pl-3 pr-0.5 text-[15px]">{o}<button type="button" aria-label={`Tirar ${o}`} onClick={() => setOp(op.filter((x) => x !== o))} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted"><X className="h-4 w-4" /></button></span>)}
-            <input value={opT} onChange={(e) => setOpT(e.target.value)} placeholder="Escreva e carregue Enter" aria-label="Nova opção"
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const x = opT.trim(); if (x && !op.includes(x)) setOp([...op, x]); setOpT(""); } }}
+            <input value={opT} onChange={(e) => { setOpT(e.target.value); setRecusa(false); }} placeholder="Escreva e carregue Enter" aria-label="Nova opção" aria-invalid={recusa || undefined}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                const x = opT.trim();
+                if (t === "varios" && x.includes(",")) { setRecusa(true); return; }
+                if (x && !op.includes(x)) setOp([...op, x]);
+                setOpT("");
+              }}
               className="h-11 w-60 rounded-full border border-dashed border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary" />
           </div>
+          <p role="status" aria-live="polite" className={cn("text-[15px] text-destructive", !(recusa || (t === "varios" && op.some((o) => o.includes(",")))) && "sr-only")}>
+            {recusa || (t === "varios" && op.some((o) => o.includes(","))) ? AVISO_VIRGULA : ""}
+          </p>
         </div>
       )}
       {blocos.length > 0 && (

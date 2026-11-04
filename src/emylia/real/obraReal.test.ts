@@ -72,7 +72,7 @@ describe("obraDaBase", () => {
 function falso(resp: Record<string, { data?: unknown; error?: { code?: string; message?: string } | null }>) {
   const chamadas: { fn: string; args: Record<string, unknown> }[] = [];
   const sb = {
-    rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => { chamadas.push({ fn, args }); return { data: null, error: null, ...resp[fn] }; }),
+    rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => { chamadas.push({ fn, args }); return { data: null, error: fn === "neg_sugestoes_formulario" ? { code: "PGRST202" } : null, ...resp[fn] }; }),
   } as unknown as SupabaseClient;
   return { sb, chamadas };
 }

@@ -56,6 +56,9 @@ const pt: Record<string, string> = {
   [`${S}erro.ng029`]: "Este envio já não está disponível: foi tratado entretanto ou está fora do seu âmbito. A lista foi atualizada.",
   [`${S}erro.permissao`]: "Não tem permissão para esta ação.",
   [`${S}erro.generico`]: "Não foi possível resolver o envio. Tente de novo.",
+  [`${S}fase.title`]: "Vai pré-preencher o negócio",
+  [`${S}fase.note`]: "Só ao criar o negócio. Fica como “sugerido”: confirma ou muda.",
+  [`${S}fase.none`]: "sem correspondência: fica por responder",
 };
 
 const en: Record<string, string> = {
@@ -111,6 +114,9 @@ const en: Record<string, string> = {
   [`${S}erro.ng029`]: "This submission is no longer available: it was handled in the meantime or is outside your scope. The list was refreshed.",
   [`${S}erro.permissao`]: "You do not have permission for this action.",
   [`${S}erro.generico`]: "The submission could not be resolved. Please try again.",
+  [`${S}fase.title`]: "Will pre-fill the deal",
+  [`${S}fase.note`]: "Only when the deal is created. It stays as “suggested”: confirm or change it.",
+  [`${S}fase.none`]: "no match: stays unanswered",
 };
 
 export const pessoasSubmissoesTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };

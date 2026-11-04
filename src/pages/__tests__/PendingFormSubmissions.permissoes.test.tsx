@@ -84,7 +84,8 @@ describe("Submissoes pendentes: quem chega a pagina consegue despachar", () => {
     });
     expect(screen.getByText(/Criar negócio/)).toBeTruthy();
     expect(screen.getByText(/Ignorar como duplicado/)).toBeTruthy();
-  });
+    // o primeiro teste paga o import da página (agora com o motor dos campos das fases): 5 s deixam de chegar numa máquina fria
+  }, 20000);
 
   it("nao pergunta por permissoes de leads para decidir o que mostrar", async () => {
     const { default: PendingFormSubmissions } = await import("../PendingFormSubmissions");

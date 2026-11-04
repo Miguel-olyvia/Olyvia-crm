@@ -48,6 +48,8 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
       if (fn === "neg_ler_negocios") return { data: [NEGOCIO], error: null };
       // 20261231999000: as obras dos negócios lêem-se ao lado (aqui, nenhuma)
       if (fn === "obra_ler_negocios") return { data: [], error: null };
+      // 4/11: as sugestões do formulário (migration por aplicar): sem a função, os negócios abrem na mesma
+      if (fn === "neg_sugestoes_formulario") return { data: null, error: { code: "PGRST202" } };
       // 28/10: a agenda do RH (as ausências aprovadas dos técnicos)
       if (fn === "rh_agenda_tecnicos") return { data: [], error: null };
       if (fn === "neg_guardar_negocio") return { data: { negocio_id: "x" }, error: null };

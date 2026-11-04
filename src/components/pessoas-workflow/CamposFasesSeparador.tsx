@@ -5,6 +5,7 @@ import { FOCO, PISTA_DESATIVADO } from "@/components/negocio-metas/estilos";
 import type { CfgCampos } from "@/emylia/campos";
 import { EditorFases } from "@/emylia/CamposEditor";
 import type { CamposConfigHook } from "@/hooks/pessoas/workflow/useCamposConfig";
+import type { LigacaoFase } from "@/hooks/pessoas/workflow/useLigacoesFase";
 import { useTranslation } from "@/hooks/useTranslation";
 import { W } from "./LevantamentoPecas";
 
@@ -20,7 +21,7 @@ export const camposSujos = (rascunho: CfgCampos | null, gravado: CfgCampos | nul
  * diálogo (sobrevive à troca de separador e entra no aviso de alterações por gravar). Grava de uma vez por «Guardar campos».
  * Fica aqui, ao lado do «Levantamento», porque é o mesmo trabalho: decidir o que se pergunta ao cliente e quando.
  */
-export function CamposFasesSeparador({ config, rascunho, aoMudar }: { config: CamposConfigHook; rascunho: CfgCampos | null; aoMudar: (c: CfgCampos | null) => void }) {
+export function CamposFasesSeparador({ config, rascunho, aoMudar, ligacoes }: { config: CamposConfigHook; rascunho: CfgCampos | null; aoMudar: (c: CfgCampos | null) => void; ligacoes?: LigacaoFase[] }) {
   const { t } = useTranslation();
   const [aviso, setAviso] = useState<"guardado" | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -67,7 +68,7 @@ export function CamposFasesSeparador({ config, rascunho, aoMudar }: { config: Ca
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{t(`${C}intro`)}</p>
       <div className={cn(ocupado && "pointer-events-none opacity-60")} aria-busy={ocupado || undefined}>
-        <EditorFases S={S} run={run} />
+        <EditorFases S={S} run={run} ligacoes={ligacoes} />
       </div>
       {erro && <p role="alert" className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm">{t(`${C}error`, { erro })}</p>}
       <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">

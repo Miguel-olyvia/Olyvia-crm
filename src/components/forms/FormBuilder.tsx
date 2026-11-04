@@ -82,6 +82,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { PerguntaFaseMapping } from "./PerguntaFaseMapping";
 import { CONTACT_FIELDS, CLIENT_FIELDS, CONTACT_FIELD_DEFAULTS, LEAD_FORM_BASE_FIELDS } from "@/constants/fieldMappings";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { IconGallery, LucideIcon, normalizeLucideIconName } from "@/components/campaigns/IconGallery";
@@ -2217,6 +2218,18 @@ export function FormBuilder({
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Ligação a uma pergunta de fase: lê e grava por funções (a tabela é fechada); sem as funções não aparece nada */}
+                  {(activeCompany?.id ?? companyId) && (
+                    <PerguntaFaseMapping
+                      key={selectedField.id}
+                      campo={selectedField}
+                      formId={formId}
+                      opcoesCampo={getFieldOptionValues(selectedField.options)}
+                      organizationId={(activeCompany?.id ?? companyId) as string}
+                      aoAvisar={(mensagem) => toast({ title: mensagem, variant: "destructive" })}
+                    />
+                  )}
 
                   {/* Client Property Mapping - only for non-lead forms */}
                   {formType !== "lead" && (

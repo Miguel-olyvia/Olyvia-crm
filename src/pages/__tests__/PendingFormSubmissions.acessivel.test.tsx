@@ -45,7 +45,9 @@ vi.mock("@/integrations/supabase/client", () => ({
         tabela,
         tabela === "form_submissions" ? estado.submissoes : tabela === "anew_entities" ? ENTIDADES : tabela === "anew_entity_emails" ? EMAILS : [],
       ),
-    rpc: (...a: unknown[]) => estado.rpc(...a),
+    // as funções do pré-preenchimento (neg_*) ainda não estão na base: PGRST202 e a página fica como estava
+    rpc: (nome: string, ...a: unknown[]) =>
+      nome.startsWith("neg_") ? Promise.resolve({ data: null, error: { code: "PGRST202", message: "sem função" } }) : estado.rpc(nome, ...a),
   },
 }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "org-nike" }, isLoading: false }) }));

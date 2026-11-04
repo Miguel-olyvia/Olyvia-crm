@@ -9,6 +9,8 @@ import { deLinhas, type LinhasNegocio } from "./negocioReal";
 import { obraDaBase, type ObraBase } from "./obraReal";
 import { erpLembrado } from "../erpEticadata";
 import { refNegocio } from "../inventario/ponteNegocios";
+import type { CfgCampos } from "../campos";
+import { linhasSugeridas, type SugestaoBase } from "../sugestoesForm";
 
 export interface IdsServico { paraId: ReadonlyMap<string, string>; paraChave: ReadonlyMap<string, string> }
 /** Os mapas chave ↔ id a partir do que o Catálogo montou (CatalogoMontado.ids.servico: chave → id). */
@@ -38,7 +40,27 @@ export function negocioDoLido(n: NegocioLido): Negocio {
 }
 
 /** A função ainda não está na base (a migration por aplicar): PostgREST PGRST202, Postgres 42883. */
-const semFuncao = (e: { code?: string } | null) => e?.code === "PGRST202" || e?.code === "42883";
+export const semFuncao = (e: { code?: string } | null) => e?.code === "PGRST202" || e?.code === "42883";
+
+/** 4/11: as respostas do formulário online ligadas a perguntas da fase (neg_sugestoes_formulario). Best-effort: qualquer erro
+ *  (função por aplicar incluída) deixa os negócios abrirem sem sugestões; nunca lança. */
+async function lerSugestoes(sb: SupabaseClient, org: string): Promise<SugestaoBase[]> {
+  try {
+    const { data, error } = await sb.rpc("neg_sugestoes_formulario" as never, { p_org: org } as never);
+    if (error) {
+      if (!semFuncao(error)) console.warn("[negócios] as sugestões do formulário não carregaram:", error.message);
+      return [];
+    }
+    // a função devolve {sugestoes, truncado}; tolera-se também um array simples
+    if (Array.isArray(data)) return data as SugestaoBase[];
+    const o = data as { sugestoes?: unknown; truncado?: unknown } | null;
+    if (o?.truncado === true) console.warn("[negócios] sugestões truncadas: há mais negócios do que o limite");
+    return Array.isArray(o?.sugestoes) ? (o.sugestoes as SugestaoBase[]) : [];
+  } catch (e) {
+    console.warn("[negócios] as sugestões do formulário não carregaram:", (e as Error).message);
+    return [];
+  }
+}
 
 /** Troca os serviços de cada sítio onde aparecem (lista dos serviços da visita, produtos, linhas e produtos de cada versão). */
 function trocarServicos(L: LinhasNegocio, f: (s: string | null) => string | null): LinhasNegocio {
@@ -79,12 +101,15 @@ export function deBase(j: unknown, ids: IdsServico): NegocioLido {
   return { id, entityId, estadoCrm, fluxoEmylia, docsCrm, ec, linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
 }
 
-export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico): Promise<NegocioLido[]> {
-  const [neg, obras, autores] = await Promise.all([
+/** `campos`: os ajustes da organização (S.campos), para traduzir as respostas do formulário para as perguntas da fase. A foto e o conflito()
+ *  passam por aqui, por isso veem as mesmas sugestões que o ecrã. */
+export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico, campos?: CfgCampos): Promise<NegocioLido[]> {
+  const [neg, obras, autores, sugestoes] = await Promise.all([
     sb.rpc("neg_ler_negocios" as never, { p_org: org } as never),
     sb.rpc("obra_ler_negocios" as never, { p_org: org } as never),
     // 3/11 (20270105100000): quem fez cada entrada do histórico; sem a função (ou com erro), o histórico fica sem nomes
     sb.rpc("neg_historico_autores" as never, { p_org: org } as never),
+    lerSugestoes(sb, org),
   ]);
   if (neg.error) throw new Error(neg.error.message || "Não foi possível ler os negócios.");
   if (obras.error && !semFuncao(obras.error)) throw new Error(obras.error.message || "Não foi possível ler as obras.");
@@ -92,9 +117,17 @@ export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServi
     .map((o) => [o.negocio_id, obraDaBase(o.emylia)]));
   const quem = new Map(((autores.error ? [] : autores.data) as { negocio_id: string; ordem: number; quem: string | null }[] | null ?? [])
     .map((a) => [`${a.negocio_id}:${a.ordem}`, a.quem ?? ""]));
+  const sugPorNegocio = new Map<string, SugestaoBase[]>();
+  for (const s of sugestoes) if (s.negocio_id) sugPorNegocio.set(s.negocio_id, [...(sugPorNegocio.get(s.negocio_id) ?? []), s]);
   return ((neg.data as unknown[]) ?? []).map((j) => {
     const n = deBase(j, ids);
     for (const h of n.linhas.historico) h.quem = quem.get(`${n.id}:${h.ordem}`) ?? "";
+    // uma linha sugerida por chave AUSENTE; uma chave com linha (respondida, ou apagada de propósito com valor vazio) nunca se toca
+    const dele = sugPorNegocio.get(n.id);
+    if (dele) {
+      const novas = linhasSugeridas(dele, campos, new Set(n.linhas.respostas.map((r) => r.campo_chave)));
+      if (novas.length) n.linhas = { ...n.linhas, respostas: [...n.linhas.respostas, ...novas] };
+    }
     const obra = porNegocio.get(n.id);
     return obra ? { ...n, obra } : n;
   });

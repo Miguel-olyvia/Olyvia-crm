@@ -197,7 +197,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       }
       // F3: com fatura, pagamento ou anulação no servidor, relê-se: a encomenda de cliente da base (contrato e número), a fase e a prontidão
       if (relerFinanceiro) {
-        const relidos = await lerNegocios(supabase, org, ids.current);
+        const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
         aplicarLidos(relidos);
         await carregarEncomendas(relidos);
         await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
@@ -297,7 +297,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const vc = await carregarVisitasCrm(supabase, org);
       if (vc.erro) avisar({ msg: "As visitas da agenda do CRM não carregaram", sub: vc.erro, kind: "bad" });
       ids.current = idsServico(cat.M.ids.servico);
-      const lidos = await lerNegocios(supabase, org, ids.current);
+      const lidos = await lerNegocios(supabase, org, ids.current, S.campos);
       if (!vivo) return;
       aplicarLidos(lidos);
       // 2/11 (20270103800000): o auto de receção que o cliente assinou no portal passa a assinado na obra (o relatório final); grava-se a seguir
@@ -366,7 +366,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         const r = await aprovarPoReal(supabase, uuid);
         avisar(r.publicada ? { msg: "Encomenda aprovada", sub: "Já está no portal do fornecedor.", kind: "ok" }
           : { msg: "Encomenda aprovada", sub: r.aviso ?? "O fornecedor não tem portal: envie-lhe a encomenda por email.", kind: "ok" });
-        const relidos = await lerNegocios(supabase, org, ids.current);
+        const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
         await carregarEncomendas(relidos);
       } catch (e) {
         avisar({ msg: "A encomenda não foi aprovada", sub: (e as Error).message, kind: "bad" });
@@ -395,7 +395,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
             avisar({ msg: "Materiais sem fornecedor", sub: `${fora.map((x) => `${x.n} (${x.motivo})`).join(" · ")}. Ligue um fornecedor preferido no Catálogo.`, kind: "bad", atraso: 300 });
             run(() => desfazerAjusteReal(d, linhas.filter((l) => fora.some((x) => x.n === l.n))));
           }
-          const relidos = await lerNegocios(supabase, org, ids.current);
+          const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
           await carregarEncomendas(relidos);
         } catch (e) {
           avisar({ msg: "Os materiais novos não foram pedidos", sub: (e as Error).message, kind: "bad" });

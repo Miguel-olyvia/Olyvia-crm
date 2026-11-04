@@ -398,7 +398,7 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }
         <Rot id={rot} {...(Rot === "label" ? { htmlFor: id } : {})} className="text-[15px] font-medium text-foreground">
           {c.l}{!obrigatorio(c) && <span className="font-normal text-muted-foreground"> (opcional)</span>}
         </Rot>
-        {sugerido && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-xs text-muted-foreground" title="Preenchido pela Olyvia a partir de outras respostas. Confirme ou mude."><Sparkles className="h-3 w-3" aria-hidden="true" />Sugerido</span>}
+        {sugerido && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-xs text-muted-foreground" title="Preenchido pela Olyvia a partir de outras respostas ou do formulário online. Confirme ou mude."><Sparkles className="h-3 w-3" aria-hidden="true" />Sugerido</span>}
         {c.ajuda && <p id={id + "-ajuda"} className="mt-0.5 text-sm text-muted-foreground">{c.ajuda}</p>}
         {erro && <p id={id + "-erro"} className="mt-1 flex items-center gap-1.5 text-sm font-medium text-destructive motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150"><AlertCircle className="h-4 w-4" aria-hidden="true" />Falta preencher</p>}
       </div>

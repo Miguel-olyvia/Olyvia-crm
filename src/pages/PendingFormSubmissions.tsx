@@ -29,6 +29,9 @@ import {
 } from "@/lib/leads/fieldDefinitions";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { chaveDoErroSubmissao, codigoDoErroSubmissao, interpretarRespostaSubmissao } from "./pendingFormSubmissionsErros";
+import { PendingSubmissionFasePreview, carregarSugestoesFase } from "./PendingSubmissionFasePreview";
+import type { SugestaoBase } from "@/emylia/sugestoesForm";
+import type { CfgCampos } from "@/emylia/campos";
 
 const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
@@ -85,6 +88,8 @@ interface PendingSubmissionRow {
    * se ele não estiver livre guarda o pedido aqui em vez de passar a visita a outro.
    */
   requestedVisitStart: string | null;
+  /** O que o formulário sugere para as perguntas das fases (só se mostra; best-effort, vazio se não carregou). */
+  sugestoesFase: SugestaoBase[];
 }
 
 type AcaoEnvio = "ligar" | "criar_negocio" | "ignorar";
@@ -325,6 +330,7 @@ export default function PendingFormSubmissions() {
 
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<PendingSubmissionRow[]>([]);
+  const [faseCfg, setFaseCfg] = useState<CfgCampos>({});
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [resolving, setResolving] = useState(false);
   // Depois de resolver um envio a linha desaparece (e com ela o botão que tinha o foco): o foco vai para o título da lista.
@@ -339,6 +345,9 @@ export default function PendingFormSubmissions() {
     setLoading(true);
     try {
       const submissions = await fetchPendingSubmissions(orgId);
+      // Best-effort: o que pré-preenche o negócio. Qualquer erro deixa a página como está (sem este bloco).
+      const fase = await carregarSugestoesFase(supabase, orgId, submissions.map((s: any) => s.id).filter(Boolean));
+      setFaseCfg(fase.cfg);
 
       const entityIds = Array.from(new Set(submissions.map((s: any) => s.entity_id).filter(Boolean))) as string[];
       const campaignIds = Array.from(new Set(submissions.map((s: any) => s.campaign_id).filter(Boolean))) as string[];
@@ -439,6 +448,7 @@ export default function PendingFormSubmissions() {
               candidateById[conflictingEntityId].incomplete),
           nameUnread: namesRead.failed || (!!s.entity_id && !(s.entity_id in nameById)),
           requestedVisitStart: agendamentoPedido?.inicio ?? null,
+          sugestoesFase: fase.porSubmissao[s.id] ?? [],
         };
       });
 
@@ -708,6 +718,8 @@ export default function PendingFormSubmissions() {
                         onCreateDeal={(c) => void resolver(row, "criar_negocio", c.name || t(`${S}noName`), c.id === row.entity_id ? undefined : c.id)}
                       />
                     )}
+
+                    <PendingSubmissionFasePreview sugestoes={row.sugestoesFase} cfg={faseCfg} />
 
                     <div className="flex flex-wrap gap-2 pt-1">
                       {!isConflict && (

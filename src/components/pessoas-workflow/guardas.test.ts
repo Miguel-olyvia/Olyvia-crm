@@ -74,7 +74,7 @@ describe("a escrita só passa pela função da base", () => {
     const chamadas = doHooks.flatMap((f) => [...codigoDe(f).matchAll(/["'`](neg_[a-z_]+)["'`]/g)].map((m) => m[1]));
     expect([...new Set(chamadas)].sort()).toEqual([
       "neg_guardar_cadeia", "neg_guardar_campos_config", "neg_guardar_config_negocios", "neg_guardar_questionario", "neg_guardar_recusa_orcamento",
-      "neg_guardar_regras_qualificacao", "neg_ler_campos_config", "neg_questionario_levantamento",
+      "neg_guardar_regras_qualificacao", "neg_ler_campos_config", "neg_ligacoes_fase", "neg_questionario_levantamento",
     ]);
   });
 

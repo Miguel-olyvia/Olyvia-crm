@@ -38,6 +38,7 @@ vi.mock("@/hooks/pessoas/workflow/useQuestionarioLevantamento", () => ({ useQues
 // 3/11: os campos das fases e o impacto no orçamento (uma só leitura para os dois separadores)
 const usarCampos = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useCamposConfig", () => ({ useCamposConfig: (h: boolean) => usarCampos(h) }));
+vi.mock("@/hooks/pessoas/workflow/useLigacoesFase", () => ({ useLigacoesFase: () => [] }));
 beforeAll(prepararRadixNoJsdom);
 
 const hook = (sobre: Partial<RegrasQualificacaoHook> = {}): RegrasQualificacaoHook => ({

@@ -154,7 +154,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   const conflito = async (): Promise<string | null> => {
     const porGravar = negociosMudados(S.deals, foto).filter((d) => !soLeitura.has(d.id));
     if (porGravar.length === 0 || !ids) return null;
-    const frescos = await lerNegocios(sb, org, ids);
+    const frescos = await lerNegocios(sb, org, ids, S.campos);
     const porNumero = new Map(frescos.map((n) => [n.linhas.negocio.numero, n]));
     const emConflito = porGravar.filter((d) => {
       const fresco = porNumero.get(d.id);
@@ -227,7 +227,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento da organização (os mesmos de /negocios)
       await carregarCamposConfig(sb, org, S);
     }
-    aplicarLeitura(await lerNegocios(sb, org, ids));
+    aplicarLeitura(await lerNegocios(sb, org, ids, S.campos));
     await lerProntidoes(sb, org, contratosDasEcs(S.deals));
   };
   const A = acoes(S, avisar, run, ligacaoInventario((url) => navegarEmylia(url)));
