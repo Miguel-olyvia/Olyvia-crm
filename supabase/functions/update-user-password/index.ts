@@ -12,7 +12,7 @@ const requestSchema = z.object({
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
-import { souAdminSistema, temPermissao } from "../_shared/adminConta.ts";
+import { possoGerirUtilizador, souAdminSistema, temPermissao } from "../_shared/adminConta.ts";
 
 initSentry();
 
@@ -143,14 +143,12 @@ serve(async (req: Request) => {
       });
     }
 
-    // Scope check: target user must be in caller's visible org tree
-    const { data: visibleOrgs } = await supabaseAdmin.rpc("get_user_visible_org_ids", {
-      _auth_uid: callingUser.id,
-    });
-
-    const visibleOrgIds = (visibleOrgs || []).map((r: any) => r.organization_id || r);
-
-    // Get target user's org memberships
+    // Âmbito (20270106340000): só quem pode gerir a conta — a permissão da ação
+    // na organização de CADA associação ativa da pessoa (ou acima; os direitos
+    // de administração descem, não sobem), nunca um administrador de sistema,
+    // nunca alguém com um papel com mais poder. Antes bastava a pessoa estar
+    // numa organização visível (que inclui as de cima): o administrador de uma
+    // filha mudava a palavra-passe do dono da mãe.
     const { data: targetAnew } = await supabaseAdmin
       .from("anew_users")
       .select("id")
@@ -163,16 +161,11 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: targetMemberships } = await supabaseAdmin
-      .from("anew_memberships")
-      .select("organization_id")
-      .eq("user_id", targetAnew.id)
-      .eq("status", "active");
+    const podeGerir =
+      (!newPassword || await possoGerirUtilizador(supabaseAdmin, callingUser.id, targetAnew.id, "users.change_password")) &&
+      (!newEmail || await possoGerirUtilizador(supabaseAdmin, callingUser.id, targetAnew.id, "users.edit"));
 
-    const targetOrgIds = (targetMemberships || []).map((m: any) => m.organization_id);
-    const hasScope = targetOrgIds.some((orgId: string) => visibleOrgIds.includes(orgId));
-
-    if (!hasScope) {
+    if (!podeGerir) {
       return new Response(JSON.stringify({ error: "Target user not in your organizational scope" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

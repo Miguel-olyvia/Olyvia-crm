@@ -8,7 +8,7 @@ const requestSchema = z.object({
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
-import { souAdminSistema, temPermissao } from "../_shared/adminConta.ts";
+import { possoGerirUtilizador, souAdminSistema, temPermissao } from "../_shared/adminConta.ts";
 
 initSentry();
 
@@ -84,39 +84,25 @@ serve(async (req: Request) => {
     }
     const { userId } = parsed.data;
 
-    // Scope check: if not system_admin, verify target user is in visible orgs
-
+    // Âmbito (20270106340000): fora o administrador de sistema, só quem pode
+    // gerir a conta — users.delete na organização de CADA associação da pessoa
+    // (ou acima; os direitos de administração descem, não sobem), nunca a
+    // própria conta, nunca um administrador de sistema, nunca alguém com um
+    // papel com mais poder. Antes bastava a pessoa estar numa organização
+    // visível (que inclui as de cima) — o administrador de uma filha bania os
+    // utilizadores da mãe — e uma conta sem ficha passava sem verificação.
     if (!isSystemAdmin) {
-      // Get caller's visible org IDs via the DB function
-      const { data: visibleOrgs } = await supabaseClient.rpc("get_user_visible_org_ids", {
-        _auth_uid: user.id,
-      });
-
-      const visibleOrgIds = (visibleOrgs || []).map((r: any) => r.organization_id || r);
-
-      // Get target user's memberships
       const { data: targetAnew } = await supabaseClient
         .from("anew_users")
         .select("id")
         .eq("auth_user_id", userId)
         .maybeSingle();
 
-      if (targetAnew) {
-        const { data: targetMemberships } = await supabaseClient
-          .from("anew_memberships")
-          .select("organization_id")
-          .eq("user_id", targetAnew.id)
-          .eq("status", "active");
-
-        const targetOrgIds = (targetMemberships || []).map((m: any) => m.organization_id);
-        const hasScope = targetOrgIds.some((orgId: string) => visibleOrgIds.includes(orgId));
-
-        if (!hasScope) {
-          return new Response(
-            JSON.stringify({ error: "Target user not in your organizational scope" }),
-            { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
+      if (!targetAnew || !(await possoGerirUtilizador(supabaseClient, user.id, targetAnew.id, "users.delete", false))) {
+        return new Response(
+          JSON.stringify({ error: "Target user not in your organizational scope" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
     }
 
