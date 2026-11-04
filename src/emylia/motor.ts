@@ -3532,7 +3532,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 19/10: com contrato (ou venda direta aceite), não se perde: anula-se o contrato (a encomenda no Inventário vai com ele)
       if (d.fase >= 4) { S.confirmPerda = null; avisar({ msg: "Com contrato, anula-se o contrato", sub: "Use «Anular contrato» (Direção)", kind: "bad" }); return; }
       const m = motivo?.trim() || d.motivoPerda?.trim() || "Marcado como perdido";
-      d.perdido = true; d.motivoPerda = m; S.confirmPerda = null; log(d, "Marcado como perdido", "x");
+      // 4/11: as observações escritas ao perder (o motivo) ficam também no histórico
+      d.perdido = true; d.motivoPerda = m; S.confirmPerda = null; log(d, motivo?.trim() ? `Marcado como perdido · ${m}` : "Marcado como perdido", "x");
       perdaReal?.perder(d, faseDaPerda(d), m);
       avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { anularPerda(d, "Perda anulada"); }) } });
       S.view = "negocios"; S.deal = null;

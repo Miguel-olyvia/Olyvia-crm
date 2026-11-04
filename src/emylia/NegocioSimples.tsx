@@ -196,13 +196,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       <div className="mt-4 empty:hidden"><EstadoAcessoPortal ctx={ctx} d={d} /></div>
       {/* 2/11 (reunião): escolher um ficheiro e pô-lo no portal do cliente, em Documentos */}
       <div className="mt-2 empty:hidden"><DocumentosParaCliente d={d} /></div>
-      {S.confirmPerda === d.id && (
-        <div role="alertdialog" aria-label="Confirmar" className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 animate-in fade-in-0">
-          <p className="flex-1 text-[15px]">Marcar como perdido? Sai do quadro, mas fica no histórico.</p>
-          <Button variant="outline" onClick={go(() => A.perderNao())}>Cancelar</Button>
-          <Button variant="destructive" onClick={go(() => A.perderSim(d.id))}>Marcar como perdido</Button>
-        </div>
-      )}
+      {S.confirmPerda === d.id && <ConfirmarPerda ctx={ctx} d={d} />}
       {anular && podeAnular(d) && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
       {d.anulado && (
         <div role="status" className="mt-4 rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 text-[15px]">
@@ -534,5 +528,25 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
         )}
       </section>
     </>
+  );
+}
+
+/** 4/11 (Rúben): ao marcar como perdido, as observações (porquê, o que ficou combinado): ficam como motivo da perda e no histórico. */
+function ConfirmarPerda({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const [obs, setObs] = useState("");
+  const id = `perda-obs-${d.id}`;
+  return (
+    <div role="alertdialog" aria-label="Confirmar" className="mt-4 space-y-3 rounded-xl border border-border bg-card p-4 animate-in fade-in-0">
+      <p className="text-[15px]">Marcar como perdido? Sai do quadro, mas fica no histórico.</p>
+      <div className="grid gap-1.5">
+        <label htmlFor={id} className="text-[15px] font-medium">Observações</label>
+        <textarea id={id} rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Porque se perdeu, o que o cliente disse, se vale a pena voltar a ligar…"
+          className="min-h-11 w-full rounded-lg border border-input bg-card px-3 py-2.5 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
+      </div>
+      <div className="flex flex-wrap justify-end gap-3">
+        <Button variant="outline" onClick={() => ctx.run(() => ctx.A.perderNao())}>Cancelar</Button>
+        <Button variant="destructive" onClick={() => ctx.run(() => ctx.A.perderSim(d.id, obs))}>Marcar como perdido</Button>
+      </div>
+    </div>
   );
 }

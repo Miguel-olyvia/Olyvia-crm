@@ -25,6 +25,8 @@ type ConfirmarProps = Pick<PerderProps, "nome" | "abertos" | "exemplo" | "cancel
 function ConfirmarPerda({ nome, abertos, exemplo, cancelar, confirmarSim }: ConfirmarProps) {
   const cancelarRef = useRef<HTMLButtonElement>(null), aoCancelar = useRef(cancelar);
   const [motivo, setMotivo] = useState(""), idMotivo = useId();
+  // 4/11 (Rúben): as observações da perda, opcionais; vão com o motivo («Motivo · observações»)
+  const [obs, setObs] = useState(""), idObs = useId();
   aoCancelar.current = cancelar;
   useEffect(() => {
     cancelarRef.current?.focus();
@@ -47,9 +49,14 @@ function ConfirmarPerda({ nome, abertos, exemplo, cancelar, confirmarSim }: Conf
           {MOTIVOS_PERDA.map((m) => <option key={m.nome} value={m.nome}>{m.nome}</option>)}
         </select>
       </div>
+      <div>
+        <label htmlFor={idObs} className="block text-[15px] text-muted-foreground">Observações</label>
+        <textarea id={idObs} rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="O que o cliente disse, se vale a pena voltar a ligar…"
+          className={cn("w-full max-w-xl rounded-md border bg-card px-3 py-2.5 text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", BORDA_CTRL)} />
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <Button ref={cancelarRef} type="button" variant="outline" className="min-h-11 cursor-pointer text-[15px]" aria-label={`Cancelar e manter ${nome} nas leads`} onClick={cancelar}>Cancelar</Button>
-        <Button type="button" variant="destructive" disabled={!motivo} className="min-h-11 cursor-pointer text-[15px]" aria-label={`Sim, marcar como perdida: ${nome} e perder ${negocios}`} onClick={() => confirmarSim(motivo)}>
+        <Button type="button" variant="destructive" disabled={!motivo} className="min-h-11 cursor-pointer text-[15px]" aria-label={`Sim, marcar como perdida: ${nome} e perder ${negocios}`} onClick={() => confirmarSim(obs.trim() ? `${motivo} · ${obs.trim()}` : motivo)}>
           Sim, marcar como perdida
         </Button>
       </div>
