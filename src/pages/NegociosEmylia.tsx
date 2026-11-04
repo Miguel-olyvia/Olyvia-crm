@@ -38,6 +38,7 @@ import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { podeNeg } from "@/emylia/permissoes";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
+import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { avisarCliente } from "@/emylia/real/avisosCliente";
@@ -300,6 +301,12 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const lidos = await lerNegocios(supabase, org, ids.current);
       if (!vivo) return;
       aplicarLidos(lidos);
+      // 4/11: a morada que a lead já trazia (a da ficha da pessoa), para o passo «Morada da obra»; um erro a ler não para nada
+      void lerMoradasDasPessoas(supabase, [...refs.current.values()].map((r) => r.entityId)).then((m) => {
+        if (!vivo) return;
+        sugerirMoradas(S.deals, (d) => refs.current.get(d.id)?.entityId, m);
+        redesenhar();
+      });
       // 2/11 (20270103800000): o auto de receção que o cliente assinou no portal passa a assinado na obra (o relatório final); grava-se a seguir
       const rececoes = await lerRececoes(supabase, org);
       if (!vivo) return;

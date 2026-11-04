@@ -380,6 +380,8 @@ export interface Negocio {
   pessoaId?: string;
   servico: string;
   local: string;
+  /** 4/11: a morada que a lead já trazia (a da ficha da pessoa), sugerida no passo «Morada da obra». Não se grava: lê-se ao abrir. */
+  moradaLead?: MoradaLead;
   origem: string;
   quando: string;
   dono: Papel;
@@ -1496,6 +1498,22 @@ export function sugerirPrazo(d: Negocio, S: Estado) {
 const AREA_TIPO: Record<string, [string, string, string]> = {
   T0: ["35", "1", "1"], T1: ["55", "2", "1"], T2: ["80", "3", "1"], T3: ["110", "4", "2"], T4: ["140", "5", "2"], "T5+": ["180", "6", "3"],
 };
+/** 4/11 (Rúben): a morada que já veio da lead, para o passo «Morada da obra» (validar, editar ou escrever outra). */
+export interface MoradaLead { morada: string; cp: string; localidade: string; fracao: string; de: "ficha" | "pedido" }
+/** A morada escrita no pedido (negocios.morada_obra, ex.: «Estrada de Santo Eloy, 1675-010 Odivelas · 1»), em partes. Sem código postal
+ *  («Almada», «Rua das Flores 12, Sintra») não se sabe o que é rua e o que é localidade: null, e escreve-se à mão. */
+export function moradaDoTexto(texto: string): MoradaLead | null {
+  const t = (texto || "").trim();
+  const cp = /\b(\d{4}-\d{3})\b/.exec(t);
+  if (!cp) return null;
+  const antes = t.slice(0, cp.index).replace(/[,\s]+$/, "").trim();
+  const [localidade, ...resto] = t.slice(cp.index + cp[1].length).split(/[·,]/).map((x) => x.trim());
+  if (!antes) return null;
+  return { morada: antes, cp: cp[1], localidade: localidade ?? "", fracao: resto.filter(Boolean).join(" ").trim(), de: "pedido" };
+}
+/** Os campos da «Morada da obra» que a sugestão preenche. */
+export const CAMPOS_MORADA = ["morada", "cp", "localidade", "fracao"] as const;
+
 export function derivar(d: Negocio, k: string) {
   const f = d.f, v = f[k] || "";
   if (k === "tipologia" && AREA_TIPO[v]) { const [a, dv, wc] = AREA_TIPO[v]; sugerir(d, { area_util_m2: a, n_divisoes: dv, n_casas_banho: wc }); }
@@ -3558,6 +3576,19 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (m.concelho && !f.concelho) f.concelho = m.concelho;
       f.gps = `${lat.toFixed(6)},${lon.toFixed(6)}`; f.gps_precisao = String(Math.round(precisao));
       log(d, `Morada preenchida pela localização do dispositivo (± ${Math.round(precisao)} m)`);
+    },
+    /** 4/11: a morada da obra é a que a lead já trazia (validar ou editar): preenche o que ela tem; o resto fica por preencher. */
+    moradaDaLead(id: number, m: MoradaLead) {
+      for (const p of new Set(CAMPOS_MORADA.map(permDoCampo))) if (p && !exigePerm(p)) return;
+      const d = deal(id), f = d.f;
+      for (const k of CAMPOS_MORADA) {
+        const v = m[k].trim();
+        if (!v) continue;
+        f[k] = v;
+        if (d.sug) delete d.sug[k];
+      }
+      if (m.localidade.trim()) derivar(d, "localidade");
+      log(d, m.de === "ficha" ? "Morada da obra validada a partir da ficha do cliente" : "Morada da obra validada a partir do pedido");
     },
     servico(id: number, sid: SvcId) { const a = deal(id).visita.off; const i = a.indexOf(sid); if (i >= 0) a.splice(i, 1); else a.push(sid); },
     extra(id: number, sid: SvcId, q: number) {
