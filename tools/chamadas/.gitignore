@@ -1,0 +1,7 @@
+entrada/
+saida/*
+!saida/chamada-teste-maria.transcricao.txt
+!saida/chamada-teste-maria.extracao.json
+!saida/chamada-teste-maria.revisao.html
+exemplos/*.wav
+__pycache__/

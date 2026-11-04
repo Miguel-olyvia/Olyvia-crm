@@ -1,0 +1,360 @@
+{
+  "ficheiro": "chamada-teste-maria.wav",
+  "motor": "ollama:qwen3:8b",
+  "resumo": "Dona Maria Fernandes pretende remodelar a casa de banho principal e a cozinha de um apartamento T3 no terceiro andar, sem elevador, em Rua das Flores, número 23, no Porto. A área útil é de aproximadamente 95 m², e o prédio data de 1978. A casa tem duas casas de banho, mas só a principal será reformada. A obra deve ser concluída antes da Páscoa, pois a família vai visitar. A morada está situada numa zona amarela, com estacionamento pago. A casa tem um cão, que fica no quarto. A instalação elétrica é antiga, a canalização é de ferro, e o pavimento da cozinha é cerâmico, madeira ou flutuante. A obra será realizada enquanto a família continua a viver na casa.",
+  "fichas": [
+    {
+      "ficha": "chamada",
+      "rotulo": "Preparação da visita",
+      "campos": [
+        {
+          "chave": "nome_cliente",
+          "rotulo": "Nome do cliente",
+          "tipo": "texto",
+          "seccao": null,
+          "valor": "Maria Fernandes",
+          "valor_rotulo": "Maria Fernandes",
+          "confianca": 1.0,
+          "excerto": "Cliente: É a Maria Fernandes.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "consentimento_gravacao",
+          "rotulo": "Aceitou a gravação da chamada",
+          "tipo": "sim_nao",
+          "seccao": null,
+          "valor": true,
+          "valor_rotulo": "Sim",
+          "confianca": 1.0,
+          "excerto": "Cliente: Sim, sem problema.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "morada",
+          "rotulo": "Morada do local",
+          "tipo": "texto",
+          "seccao": null,
+          "valor": "Rua das Flores, número 23, terceiro esquerdo, no Porto",
+          "valor_rotulo": "Rua das Flores, número 23, terceiro esquerdo, no Porto",
+          "confianca": 1.0,
+          "excerto": "Comercial: Confirma morada, Rua das Flores, número 23, terceiro esquerdo, no Porto.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "tipo_imovel",
+          "rotulo": "Tipo de imóvel",
+          "tipo": "escolha",
+          "seccao": null,
+          "valor": "apartamento",
+          "valor_rotulo": "Apartamento",
+          "confianca": 1.0,
+          "excerto": "Cliente: É um apartamento 1T3 no terceiro andar.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "o_que_quer",
+          "rotulo": "O que o cliente quer fazer",
+          "tipo": "texto_longo",
+          "seccao": null,
+          "valor": "Queria remodelar a casa de banho principal e a cozinha. A casa de banho está muito velha, tem azulejos dos anos 70. A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.",
+          "valor_rotulo": "Queria remodelar a casa de banho principal e a cozinha. A casa de banho está muito velha, tem azulejos dos anos 70. A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.",
+          "confianca": 1.0,
+          "excerto": "Cliente: Queria remodelar a casa de banho principal e a cozinha. A casa de banho está muito velha, tem azulejos dos anos 70. A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "divisoes",
+          "rotulo": "Divisões a intervir",
+          "tipo": "texto",
+          "seccao": null,
+          "valor": "casa de banho, cozinha",
+          "valor_rotulo": "casa de banho, cozinha",
+          "confianca": 1.0,
+          "excerto": "Cliente: Queria remodelar a casa de banho principal e a cozinha.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "orcamento_indicativo",
+          "rotulo": "Orçamento indicativo",
+          "tipo": "numero",
+          "seccao": null,
+          "valor": 15000,
+          "valor_rotulo": "15000 €",
+          "confianca": 1.0,
+          "excerto": "Cliente: Pensávamos em qualquer coisa à volta dos 15 mil euros, para as duas divisões.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "prazo",
+          "rotulo": "Prazo ou data desejada",
+          "tipo": "texto",
+          "seccao": null,
+          "valor": "antes da Páscoa",
+          "valor_rotulo": "antes da Páscoa",
+          "confianca": 1.0,
+          "excerto": "Cliente: Gostava que ficasse pronto antes da Páscoa, porque vem cá a família.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "disponibilidade_visita",
+          "rotulo": "Disponibilidade para a visita",
+          "tipo": "texto",
+          "seccao": null,
+          "valor": "Sábado de manhã",
+          "valor_rotulo": "Sábado de manhã",
+          "confianca": 1.0,
+          "excerto": "Cliente: Sábado de manhã é o melhor.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "observacoes",
+          "rotulo": "Observações para o comercial",
+          "tipo": "texto_longo",
+          "seccao": null,
+          "valor": "Tem um cão, um labrador, mas ele fica no quarto.",
+          "valor_rotulo": "Tem um cão, um labrador, mas ele fica no quarto.",
+          "confianca": 1.0,
+          "excerto": "Cliente: Temos um cão, um labrador, mas ele fica no quarto.",
+          "estado": "preenchido"
+        }
+      ]
+    },
+    {
+      "ficha": "local",
+      "rotulo": "Ficha do local",
+      "campos": [
+        {
+          "chave": "acesso",
+          "rotulo": "Acesso",
+          "tipo": "escolha",
+          "seccao": "exterior",
+          "valor": "dificil",
+          "valor_rotulo": "Difícil",
+          "confianca": 1.0,
+          "excerto": "Cliente: São escadas, o que às vezes complica.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "estacionamento",
+          "rotulo": "Estacionamento",
+          "tipo": "escolha",
+          "seccao": "exterior",
+          "valor": "pago",
+          "valor_rotulo": "Pago",
+          "confianca": 1.0,
+          "excerto": "Cliente: Aqui é tudo pago, zona amarela.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "zona_estacionamento",
+          "rotulo": "Zona de estacionamento",
+          "tipo": "escolha",
+          "seccao": "exterior",
+          "valor": "amarela",
+          "valor_rotulo": "Amarela",
+          "confianca": 1.0,
+          "excerto": "Cliente: Aqui é tudo pago, zona amarela.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "tem_elevador",
+          "rotulo": "Tem elevador",
+          "tipo": "sim_nao",
+          "seccao": "exterior",
+          "valor": false,
+          "valor_rotulo": "Não",
+          "confianca": 1.0,
+          "excerto": "Cliente: Não, não tem elevador.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "n_elevadores",
+          "rotulo": "Nº de elevadores",
+          "tipo": "numero",
+          "seccao": "exterior",
+          "valor": 0,
+          "valor_rotulo": "0",
+          "confianca": 0.3,
+          "excerto": "Cliente: Não, não tem elevador.",
+          "estado": "rever"
+        },
+        {
+          "chave": "n_andares",
+          "rotulo": "Nº de andares",
+          "tipo": "numero",
+          "seccao": "exterior",
+          "valor": null,
+          "valor_rotulo": null,
+          "confianca": 0.0,
+          "excerto": "Cliente: É um apartamento 1T3 no terceiro andar.",
+          "estado": "em_falta"
+        },
+        {
+          "chave": "n_fracoes_por_andar",
+          "rotulo": "Frações por andar",
+          "tipo": "numero",
+          "seccao": "exterior",
+          "valor": null,
+          "valor_rotulo": null,
+          "confianca": 0.0,
+          "excerto": "Cliente: É um apartamento 1T3 no terceiro andar.",
+          "estado": "em_falta"
+        },
+        {
+          "chave": "tipologia",
+          "rotulo": "Tipologia",
+          "tipo": "escolha",
+          "seccao": "interior",
+          "valor": "T3",
+          "valor_rotulo": "T3",
+          "confianca": 1.0,
+          "excerto": "Cliente: É um apartamento 1T3 no terceiro andar.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "area_util_m2",
+          "rotulo": "Área útil",
+          "tipo": "numero",
+          "seccao": "interior",
+          "valor": 95.0,
+          "valor_rotulo": "95.0 m²",
+          "confianca": 1.0,
+          "excerto": "Cliente: Tem à volta de 95 metros quadrados.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "n_divisoes",
+          "rotulo": "Divisões",
+          "tipo": "numero",
+          "seccao": "interior",
+          "valor": null,
+          "valor_rotulo": null,
+          "confianca": 0.0,
+          "excerto": "Cliente: Tem duas, mas só quer mexer na principal.",
+          "estado": "em_falta"
+        },
+        {
+          "chave": "n_casas_banho",
+          "rotulo": "Casas de banho",
+          "tipo": "numero",
+          "seccao": "interior",
+          "valor": 2,
+          "valor_rotulo": "2",
+          "confianca": 1.0,
+          "excerto": "Cliente: Tem duas, mas só quer mexer na principal.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "ano_construcao",
+          "rotulo": "Ano de construção",
+          "tipo": "numero",
+          "seccao": "interior",
+          "valor": 1978,
+          "valor_rotulo": "1978",
+          "confianca": 1.0,
+          "excerto": "Cliente: O prédio é de 1978.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "pavimento",
+          "rotulo": "Pavimento",
+          "tipo": "escolha",
+          "seccao": "interior",
+          "valor": "outro",
+          "valor_rotulo": "Outro",
+          "confianca": 1.0,
+          "excerto": "Comercial: O pavimento da cozinha atualmente é cerâmico, madeira, flutuante.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "eletrica",
+          "rotulo": "Instalação elétrica",
+          "tipo": "escolha",
+          "seccao": "interior",
+          "valor": "antiga",
+          "valor_rotulo": "Antiga",
+          "confianca": 1.0,
+          "excerto": "Cliente: Não é original. O quadro é antigo, não tem disjuntor diferencial, acho eu.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "quadro_diferencial",
+          "rotulo": "Quadro com diferencial",
+          "tipo": "sim_nao",
+          "seccao": "interior",
+          "valor": false,
+          "valor_rotulo": "Não",
+          "confianca": 1.0,
+          "excerto": "Cliente: O quadro é antigo, não tem disjuntor diferencial, acho eu.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "canalizacao",
+          "rotulo": "Canalização",
+          "tipo": "escolha",
+          "seccao": "interior",
+          "valor": "ferro",
+          "valor_rotulo": "Ferro",
+          "confianca": 1.0,
+          "excerto": "Cliente: É de ferro, já tivemos problemas com ferrugem na água.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "gas",
+          "rotulo": "Gás",
+          "tipo": "escolha",
+          "seccao": "interior",
+          "valor": "canalizado",
+          "valor_rotulo": "Canalizado",
+          "confianca": 1.0,
+          "excerto": "Cliente: É canalizado.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "amianto",
+          "rotulo": "Amianto",
+          "tipo": "escolha",
+          "seccao": "interior",
+          "valor": null,
+          "valor_rotulo": null,
+          "confianca": 0.0,
+          "excerto": "Cliente: É de ferro, já tivemos problemas com ferrugem na água.",
+          "estado": "em_falta"
+        },
+        {
+          "chave": "habitada_durante_obra",
+          "rotulo": "Habitada durante a obra",
+          "tipo": "sim_nao",
+          "seccao": "interior",
+          "valor": true,
+          "valor_rotulo": "Sim",
+          "confianca": 1.0,
+          "excerto": "Cliente: Vamos ficar cá.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "animais",
+          "rotulo": "Animais",
+          "tipo": "sim_nao",
+          "seccao": "interior",
+          "valor": true,
+          "valor_rotulo": "Sim",
+          "confianca": 1.0,
+          "excerto": "Cliente: Temos um cão, um labrador, mas ele fica no quarto.",
+          "estado": "preenchido"
+        },
+        {
+          "chave": "notas_interior",
+          "rotulo": "Notas do interior",
+          "tipo": "texto_longo",
+          "seccao": "interior",
+          "valor": "A casa de banho está muito velha, tem azulejos dos anos 70. A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.",
+          "valor_rotulo": "A casa de banho está muito velha, tem azulejos dos anos 70. A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.",
+          "confianca": 1.0,
+          "excerto": "Cliente: Queria remodelar a casa de banho principal e a cozinha. A casa de banho está muito velha, tem azulejos dos anos 70. A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.",
+          "estado": "preenchido"
+        }
+      ]
+    }
+  ]
+}

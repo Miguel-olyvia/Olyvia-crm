@@ -1,0 +1,36 @@
+Comercial: Bom dia, fala o Tiago da Mudelar. Estou a ligar por causa do pedido que deixou no nosso site para a remodelação. Posso falar consigo dois minutos?
+Cliente: Bom dia, sim, pode falar. É a Maria Fernandes.
+Comercial: Obrigado, dona Maria. Esta chamada é gravada para prepararmos a visita do nosso comercial, está bem?
+Cliente: Sim, sem problema.
+Comercial: Então, conte-me o que gostava de fazer na casa.
+Cliente: Queria remodelar a casa de banho principal e a cozinha. A casa de banho está muito velha, tem azulejos dos anos setenta. A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.
+Comercial: Certo. A casa é um apartamento ou uma moradia?
+Cliente: É um apartamento, um T3, no terceiro andar. Tem à volta de noventa e cinco metros quadrados.
+Comercial: E o prédio tem elevador?
+Cliente: Não, não tem elevador. São escadas, o que às vezes complica.
+Comercial: Compreendo. E o estacionamento na rua, como é?
+Cliente: Aqui é tudo pago, zona amarela. Não é fácil estacionar durante o dia.
+Comercial: Fica registado. Sabe de que ano é o prédio?
+Cliente: O prédio é de mil novecentos e setenta e oito.
+Comercial: E a instalação elétrica, já foi renovada alguma vez?
+Cliente: Não, é a original. O quadro é antigo, não tem disjuntor diferencial, acho eu.
+Comercial: E a canalização, sabe se é de ferro ou de PVC?
+Cliente: É de ferro, já tivemos problemas com ferrugem na água.
+Comercial: E o gás, é canalizado ou de garrafa?
+Cliente: É canalizado.
+Comercial: Muito bem. O pavimento da cozinha atualmente é cerâmico, madeira, flutuante?
+Cliente: É cerâmico, mosaico antigo.
+Comercial: Quantas casas de banho tem a casa no total?
+Cliente: Tem duas, mas só quero mexer na principal.
+Comercial: Durante a obra, pensam continuar a viver na casa?
+Cliente: Sim, vamos ficar cá. Temos um cão, um labrador, mas ele fica no quarto.
+Comercial: E alguma ideia de valor que gostavam de investir?
+Cliente: Pensávamos em qualquer coisa à volta dos quinze mil euros, para as duas divisões.
+Comercial: E prazo, há alguma data que precisem?
+Cliente: Gostava que ficasse pronto antes da Páscoa, porque vem cá a família.
+Comercial: Perfeito. Para a visita do nosso comercial, que dia dá mais jeito?
+Cliente: Sábado de manhã é o melhor. Durante a semana só depois das dezanove.
+Comercial: Fica então sábado de manhã. Confirmo a morada: Rua das Flores, número vinte e três, terceiro esquerdo, no Porto?
+Cliente: Isso mesmo, terceiro esquerdo.
+Comercial: Obrigado, dona Maria. O comercial entra em contacto para confirmar a hora. Bom dia.
+Cliente: Obrigada, bom dia.

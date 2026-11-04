@@ -1,0 +1,48 @@
+{
+  "_nota": "Definição dos campos a preencher a partir da chamada. A ficha 'local' é cópia dos campos de sistema de operacao-app/src/domain/campos/catalogo.ts (ramo feat/campos-configuraveis). Na app, isto vem de cfg_campos: quando o admin acrescenta um campo, a extração passa a preenchê-lo sem mexer em código.",
+  "fichas": [
+    {
+      "ficha": "chamada",
+      "rotulo": "Preparação da visita",
+      "campos": [
+        { "chave": "nome_cliente", "rotulo": "Nome do cliente", "tipo": "texto" },
+        { "chave": "consentimento_gravacao", "rotulo": "Aceitou a gravação da chamada", "tipo": "sim_nao", "ajuda": "Só 'sim' se o cliente o disser depois de ser avisado." },
+        { "chave": "morada", "rotulo": "Morada do local", "tipo": "texto" },
+        { "chave": "tipo_imovel", "rotulo": "Tipo de imóvel", "tipo": "escolha", "opcoes": [ { "valor": "apartamento", "rotulo": "Apartamento" }, { "valor": "moradia", "rotulo": "Moradia" }, { "valor": "comercial", "rotulo": "Espaço comercial" }, { "valor": "outro", "rotulo": "Outro" } ] },
+        { "chave": "o_que_quer", "rotulo": "O que o cliente quer fazer", "tipo": "texto_longo", "ajuda": "Divisões e trabalhos, por palavras do cliente." },
+        { "chave": "divisoes", "rotulo": "Divisões a intervir", "tipo": "texto", "ajuda": "Lista separada por vírgulas: casa de banho, cozinha, sala..." },
+        { "chave": "orcamento_indicativo", "rotulo": "Orçamento indicativo", "tipo": "numero", "unidade": "€", "casas_decimais": 0 },
+        { "chave": "prazo", "rotulo": "Prazo ou data desejada", "tipo": "texto" },
+        { "chave": "disponibilidade_visita", "rotulo": "Disponibilidade para a visita", "tipo": "texto" },
+        { "chave": "observacoes", "rotulo": "Observações para o comercial", "tipo": "texto_longo", "ajuda": "O que não cabe nos outros campos e ajuda na visita." }
+      ]
+    },
+    {
+      "ficha": "local",
+      "rotulo": "Ficha do local",
+      "campos": [
+        { "chave": "acesso", "seccao": "exterior", "tipo": "escolha", "rotulo": "Acesso", "opcoes": [ { "valor": "facil", "rotulo": "Fácil" }, { "valor": "dificil", "rotulo": "Difícil" } ], "ajuda": "Difícil quando há escadas sem elevador, ruas estreitas ou sem estacionamento perto." },
+        { "chave": "estacionamento", "seccao": "exterior", "tipo": "escolha", "rotulo": "Estacionamento", "opcoes": [ { "valor": "pago", "rotulo": "Pago" }, { "valor": "nao_pago", "rotulo": "Não pago" }, { "valor": "sem_estacionamento", "rotulo": "Sem estacionamento" } ] },
+        { "chave": "zona_estacionamento", "seccao": "exterior", "tipo": "escolha", "rotulo": "Zona de estacionamento", "opcoes": [ { "valor": "verde", "rotulo": "Verde" }, { "valor": "amarela", "rotulo": "Amarela" }, { "valor": "vermelha", "rotulo": "Vermelha" } ] },
+        { "chave": "tem_elevador", "seccao": "exterior", "tipo": "sim_nao", "rotulo": "Tem elevador" },
+        { "chave": "n_elevadores", "seccao": "exterior", "tipo": "numero", "rotulo": "Nº de elevadores", "minimo": 1, "maximo": 50 },
+        { "chave": "n_andares", "seccao": "exterior", "tipo": "numero", "rotulo": "Nº de andares", "minimo": 0, "maximo": 200, "ajuda": "Andares do prédio, não o andar do cliente." },
+        { "chave": "n_fracoes_por_andar", "seccao": "exterior", "tipo": "numero", "rotulo": "Frações por andar", "minimo": 0, "maximo": 200 },
+        { "chave": "tipologia", "seccao": "interior", "tipo": "escolha", "rotulo": "Tipologia", "ajuda": "T seguido do número de quartos. 'Um T3' é T3, mesmo que a transcrição escreva 1T3.", "opcoes": [ { "valor": "T0", "rotulo": "T0" }, { "valor": "T1", "rotulo": "T1" }, { "valor": "T2", "rotulo": "T2" }, { "valor": "T3", "rotulo": "T3" }, { "valor": "T4", "rotulo": "T4" }, { "valor": "T5+", "rotulo": "T5+" } ] },
+        { "chave": "area_util_m2", "seccao": "interior", "tipo": "numero", "rotulo": "Área útil", "minimo": 0, "maximo": 10000, "casas_decimais": 2, "unidade": "m²" },
+        { "chave": "n_divisoes", "seccao": "interior", "tipo": "numero", "rotulo": "Divisões", "minimo": 0, "maximo": 100 },
+        { "chave": "n_casas_banho", "seccao": "interior", "tipo": "numero", "rotulo": "Casas de banho", "minimo": 0, "maximo": 50 },
+        { "chave": "ano_construcao", "seccao": "interior", "tipo": "numero", "rotulo": "Ano de construção", "minimo": 1800 },
+        { "chave": "pavimento", "seccao": "interior", "tipo": "escolha", "rotulo": "Pavimento", "opcoes": [ { "valor": "ceramico", "rotulo": "Cerâmico" }, { "valor": "madeira", "rotulo": "Madeira" }, { "valor": "flutuante", "rotulo": "Flutuante" }, { "valor": "vinilico", "rotulo": "Vinílico" }, { "valor": "outro", "rotulo": "Outro" } ] },
+        { "chave": "eletrica", "seccao": "interior", "tipo": "escolha", "rotulo": "Instalação elétrica", "opcoes": [ { "valor": "antiga", "rotulo": "Antiga" }, { "valor": "renovada", "rotulo": "Renovada" } ] },
+        { "chave": "quadro_diferencial", "seccao": "interior", "tipo": "sim_nao", "rotulo": "Quadro com diferencial" },
+        { "chave": "canalizacao", "seccao": "interior", "tipo": "escolha", "rotulo": "Canalização", "opcoes": [ { "valor": "ferro", "rotulo": "Ferro" }, { "valor": "pvc", "rotulo": "PVC" }, { "valor": "multicamada", "rotulo": "Multicamada" }, { "valor": "cobre", "rotulo": "Cobre" }, { "valor": "misto", "rotulo": "Misto" }, { "valor": "nao_sei", "rotulo": "Não sei" } ] },
+        { "chave": "gas", "seccao": "interior", "tipo": "escolha", "rotulo": "Gás", "opcoes": [ { "valor": "canalizado", "rotulo": "Canalizado" }, { "valor": "garrafa", "rotulo": "Garrafa" }, { "valor": "sem", "rotulo": "Sem gás" } ] },
+        { "chave": "amianto", "seccao": "interior", "tipo": "escolha", "rotulo": "Amianto", "opcoes": [ { "valor": "sim", "rotulo": "Sim" }, { "valor": "nao", "rotulo": "Não" }, { "valor": "nao_sei", "rotulo": "Não sei" } ] },
+        { "chave": "habitada_durante_obra", "seccao": "interior", "tipo": "sim_nao", "rotulo": "Habitada durante a obra" },
+        { "chave": "animais", "seccao": "interior", "tipo": "sim_nao", "rotulo": "Animais" },
+        { "chave": "notas_interior", "seccao": "interior", "tipo": "texto_longo", "rotulo": "Notas do interior" }
+      ]
+    }
+  ]
+}

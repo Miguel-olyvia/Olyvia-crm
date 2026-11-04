@@ -1,0 +1,56 @@
+[   0.0s] Comercial: Bom dia, fala o Tiago da Modular.
+[   3.0s] Comercial: Estou a ligar por causa do pedido que deixou no nosso site para a remodelação.
+[   7.3s] Comercial: Posso falar consigo dois minutos?
+[  10.2s] Cliente: Bom dia, sim, pode falar.
+[  13.5s] Cliente: É a Maria Fernandes.
+[  16.7s] Comercial: Obrigado, Dona Maria.
+[  18.9s] Comercial: Esta chamada é gravada para prepararmos a visita do nosso comercial, está bem.
+[  24.2s] Cliente: Sim, sem problema.
+[  27.3s] Comercial: Então, conte-me o que gostava de fazer na casa.
+[  31.2s] Cliente: Queria remodelar a casa de banho principal e a cozinha.
+[  35.4s] Cliente: A casa de banho está muito velha, tem azulejos dos anos 70.
+[  40.0s] Cliente: A cozinha também, mas a cozinha é mais trocar o pavimento e a bancada.
+[  45.7s] Comercial: Certo.
+[  47.0s] Comercial: A casa é um apartamento ou uma moradia.
+[  50.6s] Cliente: É um apartamento 1T3 no terceiro andar.
+[  53.9s] Cliente: Tem à volta de 95 metros quadrados.
+[  59.1s] Comercial: E o prédio tem elevador.
+[  61.9s] Cliente: Não, não tem elevador.
+[  64.5s] Cliente: São escadas, o que às vezes complica.
+[  68.9s] Comercial: Compreendo.
+[  69.4s] Comercial: E o estacionamento na rua, como é?
+[  72.8s] Comercial: Fica registado.
+[  73.9s] Cliente: Aqui é tudo pago, zona amarela.
+[  77.2s] Cliente: Não é fácil estacionar durante o dia.
+[  82.9s] Comercial: Sabe de que ano é o prédio.
+[  85.7s] Cliente: O prédio é de 1978.
+[  90.1s] Comercial: E a instalação elétrica já foi renovada alguma vez.
+[  94.5s] Cliente: Não é original.
+[  97.1s] Cliente: O quadro é antigo, não tem disjuntor diferencial, acho eu.
+[ 102.4s] Comercial: E a canalização, sabe se é de ferro ou de PVC.
+[ 106.7s] Cliente: É de ferro, já tivemos problemas com ferrugem na água.
+[ 109.8s] Cliente: É canalizado.
+[ 111.3s] Comercial: E o gás, é canalizado ou de garrafa.
+[ 117.0s] Cliente: É cerâmico, mosaico antigo.
+[ 118.3s] Comercial: Muito bem.
+[ 119.8s] Comercial: O pavimento da cozinha atualmente é cerâmico, madeira, flutuante.
+[ 128.4s] Comercial: Quantas casas de banho tem a casa no total?
+[ 132.0s] Cliente: Tem duas, mas só quer mexer na principal.
+[ 136.2s] Comercial: Durante a obra, pensam continuar a viver na casa.
+[ 138.4s] Comercial: E alguma ideia de valor que gostavam de investir?
+[ 140.3s] Cliente: Sim, vamos ficar cá.
+[ 142.8s] Cliente: Temos um cão, um labrador, mas ele fica no quarto.
+[ 151.4s] Cliente: Pensávamos em qualquer coisa à volta dos 15 mil euros, para as duas divisões.
+[ 157.6s] Comercial: E prazo, há alguma data que precisem.
+[ 161.2s] Cliente: Gostava que ficasse pronto antes da Páscoa, porque vem cá a família.
+[ 166.4s] Comercial: Perfeito.
+[ 167.9s] Comercial: Para a visita do nosso comercial, que dia dá mais jeito?
+[ 172.3s] Cliente: Sábado de manhã é o melhor.
+[ 174.9s] Cliente: Durante a semana, só depois das 19.
+[ 178.2s] Cliente: Isso mesmo, terceiro esquerdo.
+[ 179.3s] Comercial: Fique então sábado de manhã.
+[ 181.5s] Comercial: Confirma morada, Rua das Flores, número 23, terceiro esquerdo, no Porto.
+[ 191.5s] Comercial: Obrigado, Dona Maria.
+[ 193.8s] Comercial: O comercial entra em contato para confirmar a hora.
+[ 197.0s] Comercial: Bom dia.
+[ 199.3s] Cliente: Obrigada, bom dia.
