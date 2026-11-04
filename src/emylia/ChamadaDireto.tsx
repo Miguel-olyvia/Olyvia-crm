@@ -1,20 +1,21 @@
-// 4/11 (Rúben): o painel «Chamada em direto» no «Tudo na chamada»: o telemóvel em alta voz, o browser capta o
-// microfone, o motor local transcreve e diz quem fala; no fim propõe os campos da Lead e do Contacto e a comercial
-// confirma o que entra. A lógica (campos, propostas) está em chamadaDireto.ts; aqui é o microfone, o WebSocket e o ecrã.
+// 4/11 (Rúben): o painel «Chamada em direto» no «Tudo na chamada». O telemóvel em alta voz, o browser capta o
+// microfone e corta as falas (VAD Silero em WebAssembly); cada fala vai à função Supabase chamada-transcrever
+// (Gemini) e aparece aqui com quem falou; no fim, chamada-campos propõe os campos da Lead e do Contacto e a
+// comercial confirma o que entra. Nada corre no PC de ninguém. A lógica das propostas está em chamadaMotor.ts
+// e a ligação ao Supabase em chamadaNuvem.ts.
 import { useEffect, useRef, useState } from "react";
-import { Mic, PhoneOff, Settings2, Sparkles, Square } from "lucide-react";
+import { Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Grupo } from "./campos";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { MOTOR_URL_PADRAO, aAplicar, camposParaMotor, comSegredo, guardarMotor, httpDoMotor, juntarVarios, propostas, segredoDoMotor, urlDoMotor, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { aAplicar, juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { falasDeFicheiro, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, wavBase64, type Ouvinte } from "./chamadaNuvem";
 
 type EstadoLig = "parado" | "a_ligar" | "a_ouvir" | "a_terminar" | "terminado" | "erro";
-
-// O AudioWorklet que corta o microfone em blocos de 100 ms de int16 está em public/chamadas/captura.worklet.js
-// (um ficheiro estático: a Content-Security-Policy da app não deixa carregar módulos de blobs).
-const WORKLET_URL = "/chamadas/captura.worklet.js";
+const EXEMPLO_URL = "/chamadas/exemplo.ogg";
+const SEGUNDOS_VOZ = 15;
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
@@ -22,81 +23,106 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
   const [estado, setEstado] = useState<EstadoLig>("parado");
   const [msg, setMsg] = useState("");
   const [falas, setFalas] = useState<Fala[]>([]);
-  const [nivel, setNivel] = useState<{ som: number; a_falar: boolean; segundos: number } | null>(null);
+  const [aFalar, setAFalar] = useState(false);
+  const [segundos, setSegundos] = useState(0);
+  const [pendentes, setPendentes] = useState(0);
   const [extracao, setExtracao] = useState<Extracao | null>(null);
   const [resumoFim, setResumoFim] = useState("");
-  const [vozes, setVozes] = useState<string[]>([]);
-  const [comercial, setComercial] = useState(() => { try { return localStorage.getItem("olyvia.chamadas.comercial") || ""; } catch { return ""; } });
+  const [voz, setVoz] = useState<string | null>(() => vozGuardada());
+  const [aGravarVoz, setAGravarVoz] = useState<number | null>(null);
   const [substituir, setSubstituir] = useState(false);
   const [aplicadas, setAplicadas] = useState<string[] | null>(null);
-  const [definicoes, setDefinicoes] = useState(false);
-  const [motorUrl, setMotorUrl] = useState(() => urlDoMotor());
-  const [segredo, setSegredo] = useState(() => segredoDoMotor());
-  const [motorEstado, setMotorEstado] = useState<"" | "ligado" | "sem_motor" | "segredo_errado">("");
-  const ws = useRef<WebSocket | null>(null);
-  const pararAudio = useRef<() => void>(() => {});
+  const ouvinte = useRef<Ouvinte | null>(null);
+  const falasRef = useRef<Fala[]>([]);
+  const fila = useRef<Promise<void>>(Promise.resolve());
+  const relogio = useRef<number | null>(null);
   const fimLista = useRef<HTMLDivElement>(null);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
 
-  useEffect(() => {
-    const base = httpDoMotor(motorUrl);
-    fetch(comSegredo(base + "/api/estado", segredo)).then((r) => r.json())
-      .then((e: { segredo_ok: boolean }) => setMotorEstado(e.segredo_ok ? "ligado" : "segredo_errado"))
-      .catch(() => setMotorEstado("sem_motor"));
-    fetch(comSegredo(base + "/api/vozes", segredo)).then((r) => (r.ok ? r.json() : [])).then((v: string[]) => setVozes(v)).catch(() => setVozes([]));
-  }, [motorUrl, segredo]);
   useEffect(() => { fimLista.current?.scrollIntoView({ block: "nearest" }); }, [falas.length]);
-  useEffect(() => () => { pararAudio.current(); ws.current?.close(); }, []);
+  useEffect(() => () => { void ouvinte.current?.parar(); if (relogio.current) window.clearInterval(relogio.current); }, []);
 
-  const fechar = () => { pararAudio.current(); pararAudio.current = () => {}; ws.current = null; };
+  const juntar = (novas: Fala[]) => {
+    if (!novas.length) return;
+    falasRef.current = [...falasRef.current, ...novas].sort((a, b) => a.inicio - b.inicio);
+    setFalas(falasRef.current);
+  };
 
-  async function iniciar(modoTeste = false) {
-    setEstado("a_ligar"); setMsg(modoTeste ? "A ligar ao motor..." : "A pedir o microfone..."); setFalas([]); setExtracao(null); setAplicadas(null); setNivel(null);
-    try { localStorage.setItem("olyvia.chamadas.comercial", comercial); } catch { /* sem localStorage */ }
-    let stream: MediaStream | null = null;
-    if (!modoTeste) {
+  /** Cada fala vai ao Gemini por ordem (uma de cada vez), para as linhas não trocarem de sítio. */
+  const tratarFala = (pcm: Float32Array, inicioS: number) => {
+    setPendentes((n) => n + 1);
+    fila.current = fila.current.then(async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
-      } catch (e) { setEstado("erro"); setMsg("Sem acesso ao microfone: " + (e as Error).message); return; }
+        const frases = await transcreverFala(pcm, inicioS, voz);
+        juntar(linhasDaFala(frases, "cliente"));
+      } catch (e) {
+        setMsg("Uma fala ficou por transcrever: " + (e as Error).message);
+      } finally {
+        setPendentes((n) => n - 1);
+      }
+    });
+  };
+
+  const limpar = () => { setFalas([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setSegundos(0); setResumoFim(""); };
+  const pararRelogio = () => { if (relogio.current) { window.clearInterval(relogio.current); relogio.current = null; } };
+
+  async function iniciar() {
+    setEstado("a_ligar"); setMsg("A pedir o microfone..."); limpar();
+    try {
+      const t0 = Date.now();
+      ouvinte.current = await ouvirMicrofone(tratarFala, setAFalar);
+      relogio.current = window.setInterval(() => setSegundos(Math.floor((Date.now() - t0) / 1000)), 1000);
+      setEstado("a_ouvir");
+      setMsg(voz ? "A ouvir. A sua voz está registada." : "A ouvir. Sem voz registada: as falas ficam como do cliente até registar a sua.");
+    } catch (e) {
+      setEstado("erro"); setMsg("Sem acesso ao microfone: " + (e as Error).message);
     }
-    let socket: WebSocket;
-    try { socket = new WebSocket(comSegredo(motorUrl, segredo)); } catch (e) { setEstado("erro"); setMsg("Não dá para ligar ao motor: " + (e as Error).message); stream?.getTracks().forEach((t) => t.stop()); return; }
-    socket.binaryType = "arraybuffer";
-    ws.current = socket;
-    socket.onopen = () => {
-      setMsg("A carregar os modelos no motor...");
-      socket.send(JSON.stringify({ nome: `negocio-${d.id}-${Date.now().toString(36)}`, comercial: comercial || null, campos: camposParaMotor(grupos), teste: modoTeste }));
-    };
-    socket.onmessage = async (ev) => {
-      const m = JSON.parse(ev.data);
-      if (m.tipo === "pronto") {
-        setEstado("a_ouvir");
-        setMsg(modoTeste ? "A ouvir a chamada de exemplo." : m.comercial ? `A ouvir. Voz de ${m.comercial} registada.` : "A ouvir. Sem voz registada: a primeira voz conta como do cliente.");
-        if (stream) {
-          const ctxA = new AudioContext({ sampleRate: 16000 });
-          await ctxA.audioWorklet.addModule(WORKLET_URL);
-          const fonte = ctxA.createMediaStreamSource(stream);
-          const nodo = new AudioWorkletNode(ctxA, "captura");
-          nodo.port.onmessage = (e) => { if (socket.readyState === 1) socket.send(e.data); };
-          fonte.connect(nodo); nodo.connect(ctxA.destination);
-          const s = stream;
-          pararAudio.current = () => { try { nodo.disconnect(); fonte.disconnect(); s.getTracks().forEach((t) => t.stop()); void ctxA.close(); } catch { /* já fechado */ } };
-        }
-      } else if (m.tipo === "fala") setFalas((f) => [...f, m as Fala]);
-      else if (m.tipo === "nivel") setNivel({ som: m.som, a_falar: m.a_falar, segundos: m.segundos });
-      else if (m.tipo === "a_terminar") { setEstado("a_terminar"); setMsg("A preencher os campos com o que se disse (menos de um minuto)..."); pararAudio.current(); }
-      else if (m.tipo === "fim") {
-        setEstado("terminado"); setExtracao(m.extracao ?? null);
-        setResumoFim(`${m.minutos} min, ${m.falas} falas, ${m.latencia_media} s por fala.`);
-        setMsg(m.extracao ? "Chamada terminada. Confirme o que entra nos campos." : "Chamada terminada sem falas transcritas.");
-        fechar();
-      } else if (m.tipo === "erro") { setEstado("erro"); setMsg("Erro no motor: " + m.mensagem); fechar(); }
-    };
-    socket.onerror = () => { setEstado((e) => (e === "a_ligar" ? "erro" : e)); setMsg(`Não dá para ligar ao motor em ${motorUrl}. Está a correr? (python tools/chamadas/servidor.py)`); };
-    socket.onclose = () => { setEstado((e) => { if (e === "a_ouvir" || e === "a_terminar") { setMsg("Ligação ao motor perdida. O que havia ficou guardado no motor."); return "erro"; } return e; }); fechar(); };
   }
 
-  const terminar = () => { setEstado("a_terminar"); setMsg("A terminar..."); if (ws.current?.readyState === 1) ws.current.send("terminar"); };
+  async function iniciarTeste() {
+    setEstado("a_ligar"); setMsg("A carregar a chamada de exemplo..."); limpar();
+    try {
+      const falasFicheiro = await falasDeFicheiro(EXEMPLO_URL);
+      setEstado("a_ouvir"); setMsg(`A ouvir a chamada de exemplo (${falasFicheiro.length} falas).`);
+      for (const f of falasFicheiro) tratarFala(f.pcm, f.inicioS);
+      await fila.current;
+      await terminar();
+    } catch (e) {
+      setEstado("erro"); setMsg("A chamada de exemplo falhou: " + (e as Error).message);
+    }
+  }
+
+  async function terminar() {
+    setEstado("a_terminar"); setMsg("A terminar a chamada...");
+    pararRelogio();
+    await ouvinte.current?.parar(); ouvinte.current = null;
+    await fila.current;  // as últimas falas ainda a transcrever
+    const segs = falasRef.current;
+    if (!segs.length) { setEstado("terminado"); setMsg("Chamada terminada sem falas transcritas."); return; }
+    setMsg("A preencher os campos com o que se disse...");
+    try {
+      const ext = await preencherCampos(segs, grupos);
+      setExtracao(ext);
+      setResumoFim(`${segs.length} falas.`);
+      setEstado("terminado"); setMsg("Chamada terminada. Confirme o que entra nos campos.");
+    } catch (e) {
+      setEstado("erro"); setMsg("A transcrição ficou, mas os campos não: " + (e as Error).message);
+    }
+  }
+
+  async function registarVoz() {
+    setAGravarVoz(0);
+    try {
+      const pcm = await gravarMicrofone(SEGUNDOS_VOZ, (s) => setAGravarVoz(Math.min(SEGUNDOS_VOZ, Math.floor(s))));
+      const b64 = wavBase64(pcm);
+      guardarVoz(b64); setVoz(b64);
+      setMsg("A sua voz ficou registada neste browser.");
+    } catch (e) {
+      setMsg("Não deu para gravar a voz: " + (e as Error).message);
+    } finally {
+      setAGravarVoz(null);
+    }
+  }
 
   const props = propostas(extracao, grupos, d.f);
   const entram = aAplicar(props, substituir);
@@ -116,47 +142,30 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
           <p className="text-sm text-muted-foreground">O telemóvel em alta voz junto ao microfone. A transcrição aparece aqui e no fim preenche os campos em baixo.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">Voz do comercial
-            <select value={comercial} onChange={(e) => setComercial(e.target.value)} disabled={aOuvir || ocupado}
-              className="h-9 rounded-lg border border-input bg-background px-2 text-sm text-foreground">
-              <option value="">sem voz registada</option>
-              {vozes.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-          </label>
-          {!aOuvir && !ocupado ? <Button type="button" onClick={() => void iniciar(false)}><Mic className="h-4 w-4" aria-hidden="true" />Iniciar chamada</Button> : null}
-          {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciar(true)}>Testar com a chamada de exemplo</Button> : null}
-          {aOuvir ? <Button type="button" variant="destructive" onClick={terminar}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
+          {!aOuvir && !ocupado ? (
+            <Button type="button" variant="outline" onClick={() => void registarVoz()} disabled={aGravarVoz !== null}>
+              <UserRoundCheck className="h-4 w-4" aria-hidden="true" />
+              {aGravarVoz !== null ? `A gravar... ${aGravarVoz}/${SEGUNDOS_VOZ} s` : voz ? "Registar a minha voz outra vez" : "Registar a minha voz"}
+            </Button>
+          ) : null}
+          {!aOuvir && !ocupado ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null}><Mic className="h-4 w-4" aria-hidden="true" />Iniciar chamada</Button> : null}
+          {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciarTeste()} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
+          {aOuvir ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
           {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{estado === "a_ligar" ? "A ligar..." : "A terminar..."}</Button> : null}
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground" aria-live="polite">
-        <span className={cn(estado === "erro" && "text-destructive")}>{msg || (motorEstado === "ligado" ? "Motor ligado." : motorEstado === "segredo_errado" ? "O segredo do motor está errado." : motorEstado === "sem_motor" ? `Sem motor em ${motorUrl}.` : "A ver o motor...")}</span>
-        <button type="button" onClick={() => setDefinicoes((x) => !x)} className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:underline" aria-expanded={definicoes}>
-          <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />Motor
-        </button>
-        {nivel ? (
+        <span className={cn(estado === "erro" && "text-destructive")}>{msg || (voz ? "Pronto. A sua voz está registada." : "Pronto. Registe a sua voz uma vez para a transcrição saber quem fala.")}</span>
+        {aOuvir ? (
           <>
-            <span className="inline-block h-2 w-32 overflow-hidden rounded bg-muted" aria-hidden="true">
-              <i className={cn("block h-full transition-[width]", nivel.a_falar ? "bg-success" : "bg-muted-foreground/40")} style={{ width: `${Math.min(100, nivel.som * 400)}%` }} />
-            </span>
-            <span>{tempo(nivel.segundos)}</span>
+            <span className={cn("inline-block h-2.5 w-2.5 rounded-full", aFalar ? "bg-success" : "bg-muted-foreground/40")} aria-label={aFalar ? "a ouvir fala" : "silêncio"} />
+            <span>{tempo(segundos)}</span>
+            {pendentes > 0 ? <span>a transcrever {pendentes}…</span> : null}
           </>
         ) : null}
         {estado === "terminado" ? <span>{resumoFim}</span> : null}
       </div>
-
-      {definicoes ? (
-        <form className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-border bg-background p-3 text-sm" onSubmit={(e) => { e.preventDefault(); guardarMotor(motorUrl, segredo); setDefinicoes(false); }}>
-          <label className="flex min-w-[280px] flex-1 flex-col gap-1 text-xs text-muted-foreground">Endereço do motor (ws:// ou wss://…/ws)
-            <input value={motorUrl} onChange={(e) => setMotorUrl(e.target.value)} className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground" placeholder={MOTOR_URL_PADRAO} />
-          </label>
-          <label className="flex min-w-[200px] flex-col gap-1 text-xs text-muted-foreground">Segredo (só se o motor estiver na internet)
-            <input value={segredo} onChange={(e) => setSegredo(e.target.value)} type="password" autoComplete="off" className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground" />
-          </label>
-          <Button type="submit" variant="outline" size="sm">Guardar</Button>
-        </form>
-      ) : null}
 
       {falas.length ? (
         <div className="mt-4 max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-border bg-background p-3 text-[15px]" aria-label="Transcrição">

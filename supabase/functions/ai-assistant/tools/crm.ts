@@ -452,7 +452,7 @@ const createContact: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, businessUserId, organizationId } = ctx;
   const createdBy = businessUserId || null;
   if (!organizationId) return { success: false, message: "Organização não definida." };
-  const permC = requireWrite(ctx, "contacts.create", "criar contactos");
+  const permC = requireWrite(ctx, "pessoas.create", "criar contactos");
   if (permC) return permC;
 
   const proposedPayload = {
@@ -780,7 +780,7 @@ const updateLead: Handler = async (ctx, args): Promise<ToolResult> => {
 const updateContact: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   if (!args?.id || !UUID_RE.test(String(args.id))) return { success: false, message: "id inválido." };
   const patch: Record<string, any> = {};
@@ -823,7 +823,7 @@ const convertLead: Handler = async (ctx, args): Promise<ToolResult> => {
   const permL = requireWrite(ctx, "leads.edit", "editar leads (necessário para converter)");
   if (permL) return permL;
   if (toContact) {
-    const p = requireWrite(ctx, "contacts.create", "criar contactos");
+    const p = requireWrite(ctx, "pessoas.create", "criar contactos");
     if (p) return p;
   }
   if (toClient) {
@@ -1304,7 +1304,7 @@ const deleteLead: Handler = async (ctx, args): Promise<ToolResult> => {
 const getContactDetails: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
-  const perm = requireWrite(ctx, "contacts.view", "ver contactos");
+  const perm = requireWrite(ctx, "pessoas.view", "ver contactos");
   if (perm) return perm;
   if (!args?.contact_id || !UUID_RE.test(String(args.contact_id))) return { success: false, message: "contact_id inválido." };
 
@@ -1343,7 +1343,7 @@ const getContactDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 const updateContactNotes: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   if (!args?.contact_id || !UUID_RE.test(String(args.contact_id))) return { success: false, message: "contact_id inválido." };
 
@@ -1370,7 +1370,7 @@ const deleteContact: Handler = async (ctx, args): Promise<ToolResult> => {
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.contact_id || !UUID_RE.test(String(args.contact_id))) return { success: false, message: "contact_id inválido." };
   if (args?.confirm !== true) return { success: false, message: "Confirmação obrigatória — pede ao utilizador para confirmar e volta a chamar com confirm=true." };
-  const perm = requireWrite(ctx, "contacts.edit", "cancelar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "cancelar contactos");
   if (perm) return perm;
 
   const { data: contact, error } = await supabase

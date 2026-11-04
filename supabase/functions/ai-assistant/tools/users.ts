@@ -136,7 +136,7 @@ const ENTITY_TABLE: Record<EntityType, string> = {
 const ENTITY_PERM: Record<EntityType, string> = {
   lead: "leads.edit",
   deal: "deals.edit",
-  contact: "contacts.edit",
+  contact: "pessoas.edit",
 };
 const ENTITY_LABEL: Record<EntityType, string> = {
   lead: "lead",

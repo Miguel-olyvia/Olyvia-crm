@@ -235,14 +235,13 @@ describe("permissões em uso: a lista", () => {
     expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("pessoas."))).toHaveLength(6);
   });
 
-  it("Negócios › Pessoas tem os dados da pessoa em uso (com os contacts.*), «Por contactar» ver/criar/atribuir leads, e não há grupo CRM", () => {
+  it("Negócios › Pessoas tem os dados da pessoa em uso (sem os contacts.*, 04/11), «Por contactar» ver/criar/atribuir leads, e não há grupo CRM", () => {
     const grupos = agruparPorMenu(emUso);
     const negocios = grupos.find((g) => g.rotulo === "Negócios")!;
     const pessoas = negocios.subgrupos.find((s) => s.rotulo === "Pessoas: leads e clientes")!;
     const porContactar = negocios.subgrupos.find((s) => s.rotulo === "Por contactar")!;
     expect(pessoas.permissoes.map((p) => p.codigo).sort()).toEqual([
       "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
-      "contacts.create", "contacts.edit", "contacts.import", "contacts.view",
       "leads.config", "leads.convert", "leads.delete", "leads.edit", "leads.import",
     ]);
     expect(grupos.find((g) => g.rotulo === "CRM")).toBeUndefined();
@@ -301,8 +300,8 @@ describe("03/11: a Aquisição saiu do menu", () => {
     ESCONDIDAS_AQUISICAO.forEach((c) => expect(noEditor, c).not.toContain(c));
   });
 
-  it("ficam em uso as que algo vivo ainda verifica: direct_sales.view (Encomendas de Cliente) e contacts.view/create/edit (assistente IA)", () => {
-    ["direct_sales.view", "contacts.view", "contacts.create", "contacts.edit", "contacts.import"].forEach((c) => expect(CODIGOS_EM_USO, c).toContain(c));
+  it("fica em uso o que algo vivo ainda verifica: direct_sales.view (Encomendas de Cliente)", () => {
+    expect(CODIGOS_EM_USO).toContain("direct_sales.view");
   });
 
   it("o grupo chama-se «Documentos do negócio», com Pedidos de Proposta, Propostas e orçamentos, Venda Direta (só ver), Contratos e Configuração", () => {
@@ -534,5 +533,37 @@ describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contra
     expect(visiveis.map((p) => p.codigo)).toEqual(["lead_sources.view"]);
     const gravado = fundirPermissoes(ESCONDIDAS_04_11, ["lead_sources.view"], visiveis);
     expect(gravado.sort()).toEqual([...ESCONDIDAS_04_11, "lead_sources.view"].sort());
+  });
+});
+
+describe("04/11: a linha Contactos sai do editor (os contactos vivem em Pessoas); a linha Clientes fica", () => {
+  const CONTACTOS = ["contacts.view", "contacts.create", "contacts.edit", "contacts.delete", "contacts.import"];
+
+  it("contacts.* estão todas escondidas e fora do editor; o editor continua a mostrar pessoas.view/create/edit/delete", () => {
+    const noEditor = agruparPorMenu(emUso).flatMap((g) => g.permissoes.map((p) => p.codigo));
+    CONTACTOS.forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+      expect(noEditor, c).not.toContain(c);
+    });
+    ["pessoas.view", "pessoas.create", "pessoas.edit", "pessoas.delete"].forEach((c) => expect(noEditor, c).toContain(c));
+    expect(PERMISSOES_EM_USO.contacts).toBeUndefined();
+  });
+
+  it("um papel que já tinha contacts.* mantém-nas ao gravar (o editor não as mostra, mas não as tira)", () => {
+    const linha = (codigo: string, categoria: string): LinhaPermissao => ({ code: codigo, name: codigo, category: categoria, is_dangerous: false });
+    const visiveis = permissoesDoMenu([linha("contacts.view", "contacts"), linha("contacts.edit", "contacts"), linha("pessoas.view", "pessoas"),
+      linha("pessoas.edit", "pessoas")]);
+    expect(visiveis.map((p) => p.codigo).sort()).toEqual(["pessoas.edit", "pessoas.view"]);
+    const gravado = fundirPermissoes(["contacts.view", "contacts.edit", "pessoas.view"], ["pessoas.view", "pessoas.edit"], visiveis);
+    expect([...gravado].sort()).toEqual(["contacts.edit", "contacts.view", "pessoas.edit", "pessoas.view"]);
+  });
+
+  it("a linha Clientes fica: clients.view tem ação viva (âmbito do campo Cliente da «Nova encomenda manual» em /client-orders)", () => {
+    ["clients.view", "clients.create", "clients.edit", "clients.delete", "clients.import"].forEach((c) => expect(CODIGOS_EM_USO, c).toContain(c));
+    const pesquisa = readFileSync(join(SRC, "components/EntitySearchInput.tsx"), "utf8");
+    expect(pesquisa).toContain('getPermissionScope("clients.view")');
+    const encomendas = readFileSync(join(SRC, "pages/ClientOrders.tsx"), "utf8");
+    expect(encomendas).toMatch(/<EntitySearchInput[\s\S]{0,200}searchTypes=\{\["client"\]\}/);
   });
 });

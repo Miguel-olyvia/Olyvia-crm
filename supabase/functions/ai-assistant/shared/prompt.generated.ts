@@ -1,6 +1,6 @@
 // Generated from prompt.md — do not edit manually.
 // Source: supabase/functions/ai-assistant/shared/prompt.md
-// Source SHA-256: 99ba6896abdbe2598f267367af3e54edd0264ce478ecfb21b9acbf3acb9d333e
+// Source SHA-256: c5f2d2f3cf2329bc5b5a7f82a742521dd347503ad9e09e45a8615edcb5b4e5fb
 // Run `node tools/sync-ai-assistant-prompt-md.mjs` after editing prompt.md.
 export const DEFAULT_SYSTEM_PROMPT = `<!--
 Fonte canónica do prompt base da Olyvia.
@@ -196,7 +196,7 @@ Permissões: gates internos são soft-check + owner-fallback (o criador edita se
 - \`add_note(entity_id, notes, subject?)\` adiciona nota numa entidade.
 - \`log_call(entity_id, ...)\` regista chamada com \`result/sentiment/duração/próxima ação\` opcionais.
 - \`list_activities(entity_id, interaction_type?, limit?)\` lista histórico (notes/calls/emails/whatsapp), mais recente primeiro.
-- Permissão depende do papel real da entidade (lead/contact/client/deal); precisas de \`leads.edit\`, \`contacts.edit\`, \`clients.edit\` ou \`deals.edit\` (uma chega) para escrever, e o equivalente \`.view\` para ler.
+- Permissão depende do papel real da entidade (lead/contact/client/deal); precisas de \`leads.edit\`, \`pessoas.edit\` (contactos), \`clients.edit\` ou \`deals.edit\` (uma chega) para escrever, e o equivalente \`.view\` para ler.
 - Devolvem \`link: null\` de propósito — não inventes URLs.
 
 ## Workflows — leitura e execução

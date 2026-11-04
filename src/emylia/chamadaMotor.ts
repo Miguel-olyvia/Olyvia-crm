@@ -1,32 +1,7 @@
-// 4/11 (Rúben): «Tudo na chamada» com a transcrição em direto. O telemóvel em alta voz, o browser capta o
-// microfone e manda o áudio ao motor local (tools/chamadas/servidor.py, na máquina com a GPU), que transcreve,
-// diz quem fala e, no fim, preenche os campos da Lead e do Contacto a partir do que se disse. Nada de áudio
-// sai para fora: o motor corre em casa. Esta parte é só lógica (sem React), para se testar à parte.
+// 4/11 (Rúben): «Tudo na chamada» com a transcrição em direto: a lógica das propostas, do que o motor
+// (as funções Supabase chamada-transcrever e chamada-campos, em chamadaNuvem.ts) devolve para o formulário.
+// Só lógica, sem React, para se testar à parte.
 import { listaVarios, type Def, type Grupo } from "./campos";
-
-/** Onde está o motor. Por ordem: o que a pessoa escreveu no painel (localStorage), o da build
- *  (VITE_CHAMADAS_MOTOR_URL, p. ex. o túnel wss://….trycloudflare.com/ws no Vercel), o próprio PC. */
-export const MOTOR_URL_PADRAO = "ws://127.0.0.1:8765/ws";
-const env = (k: string): string => { try { return (import.meta.env?.[k] as string | undefined) ?? ""; } catch { return ""; } };
-const ler = (k: string): string => { try { return localStorage.getItem(k) ?? ""; } catch { return ""; } };
-export function urlDoMotor(): string {
-  return ler("olyvia.chamadas.motor") || env("VITE_CHAMADAS_MOTOR_URL") || MOTOR_URL_PADRAO;
-}
-/** O segredo partilhado com o motor quando ele está na internet (CHAMADAS_TOKEN no servidor). Vazio no PC. */
-export function segredoDoMotor(): string {
-  return ler("olyvia.chamadas.segredo") || env("VITE_CHAMADAS_MOTOR_SEGREDO");
-}
-export function guardarMotor(url: string, segredo: string): void {
-  try {
-    if (url.trim()) localStorage.setItem("olyvia.chamadas.motor", url.trim()); else localStorage.removeItem("olyvia.chamadas.motor");
-    if (segredo.trim()) localStorage.setItem("olyvia.chamadas.segredo", segredo.trim()); else localStorage.removeItem("olyvia.chamadas.segredo");
-  } catch { /* sem localStorage */ }
-}
-/** O endereço http do motor (para as vozes e as fichas), a partir do ws. */
-export const httpDoMotor = (ws = urlDoMotor()) => ws.replace(/^ws/, "http").replace(/\/ws$/, "");
-/** Junta o segredo ao endereço (?token=), se houver. */
-export const comSegredo = (url: string, segredo = segredoDoMotor()) =>
-  segredo ? url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(segredo) : url;
 
 /** Uma fala transcrita, como o motor a manda. */
 export interface Fala { inicio: number; fim: number; texto: string; falante: "comercial" | "cliente"; confianca_falante: number }
