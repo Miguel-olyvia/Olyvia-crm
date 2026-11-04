@@ -160,46 +160,64 @@ def _esperar_enter(parar: threading.Event):
     parar.set()
 
 
-def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool, sem_ficha: bool,
-           dispositivo: int | None, segundos: float | None = None, primeiro: str = "cliente") -> Path:
-    import whisper_local
-    from falantes import Falantes
+class Sessao:
+    """Uma chamada em direto: recebe áudio em blocos, devolve as falas transcritas com o
+    falante, e no fim guarda tudo e preenche a ficha. Serve o Terminal e o servidor web."""
 
-    SAIDA.mkdir(exist_ok=True)
-    print("A carregar modelos...", end=" ", flush=True)
-    whisper_local.modelo()
-    falantes = Falantes.com_voz_registada(comercial) if comercial else Falantes(primeiro=primeiro)
-    print("pronto." + ("" if comercial else f" Sem voz registada: a primeira voz conta como do {primeiro}."))
-    print(f"{'A ouvir o microfone' if not ficheiro else 'A ler ' + ficheiro.name}. Enter ou Ctrl+C para terminar.\n")
+    def __init__(self, nome: str, comercial: str | None = None, primeiro: str = "cliente"):
+        import whisper_local
+        from falantes import Falantes
+        SAIDA.mkdir(exist_ok=True)
+        whisper_local.modelo()
+        self.whisper = whisper_local
+        self.nome = nome
+        self.falantes = Falantes.com_voz_registada(comercial) if comercial else Falantes(primeiro=primeiro)
+        self.detetor = Detetor()
+        self.gravacao: list[np.ndarray] = []
+        self.segmentos: list[dict] = []
+        self.wav = SAIDA / f"{nome}.wav"
+        self.json = SAIDA / f"{nome}.transcricao.json"
+        self._ultima_gravacao = time.time()
+        self._resto = np.zeros(0, dtype=np.float32)
 
-    fila: queue.Queue = queue.Queue()
-    parar = threading.Event()
-    if ficheiro:
-        threading.Thread(target=_fonte_ficheiro, args=(fila, parar, ficheiro, rapido), daemon=True).start()
-    else:
-        threading.Thread(target=_fonte_microfone, args=(fila, parar, dispositivo), daemon=True).start()
-    threading.Thread(target=_esperar_enter, args=(parar,), daemon=True).start()
+    # ---- entrada de áudio -------------------------------------------------
+    def alimentar(self, pcm: np.ndarray) -> list[dict]:
+        """Recebe áudio float32 a 16 kHz (qualquer tamanho) e devolve as falas novas."""
+        novas: list[dict] = []
+        dados = np.concatenate([self._resto, pcm.astype(np.float32)])
+        n = (len(dados) // BLOCO) * BLOCO
+        self._resto = dados[n:]
+        for i in range(0, n, BLOCO):
+            bloco = dados[i:i + BLOCO]
+            self.gravacao.append(bloco)
+            r = self.detetor.alimentar(bloco)
+            if r:
+                novas += self._tratar(*r)
+        if time.time() - self._ultima_gravacao >= 30:
+            self._ultima_gravacao = time.time()
+            self.guardar_wav()
+        return novas
 
-    detetor = Detetor()
-    gravacao: list[np.ndarray] = []
-    segmentos: list[dict] = []
-    t0 = time.time()
-    caminho_json = SAIDA / f"{nome}.transcricao.json"
+    def nivel(self) -> dict:
+        d = self.detetor
+        return {"som": round(d.ultimo_rms, 3), "voz": round(d.ultima_prob, 2), "a_falar": d.a_falar,
+                "segundos": round(len(self.gravacao) * BLOCO / TAXA)}
 
-    def tratar(fala: np.ndarray, inicio_s: float):
+    # ---- transcrição e falante --------------------------------------------
+    def _tratar(self, fala: np.ndarray, inicio_s: float) -> list[dict]:
         t_ini = time.time()
-        segs = whisper_local.transcrever_trecho(fala, inicio_s)
+        segs = self.whisper.transcrever_trecho(fala, inicio_s)
         if not segs:
-            return
+            return []
         # quem fala, frase a frase: ao telefone a resposta vem colada à pergunta e a mesma
         # "fala" traz as duas pessoas. Frases curtas herdam o falante da fala inteira.
-        quem_fala, conf_fala = falantes.atribuir(fala)
+        quem_fala, conf_fala = self.falantes.atribuir(fala)
         linhas: list[dict] = []
         for sg in segs:
             a, b = int((sg["inicio"] - inicio_s) * TAXA), int((sg["fim"] - inicio_s) * TAXA)
             trecho = fala[max(0, a):min(len(fala), b)]
             if len(trecho) >= 0.7 * TAXA and len(segs) > 1:
-                quem, conf = falantes.atribuir(trecho)
+                quem, conf = self.falantes.atribuir(trecho)
             else:
                 quem, conf = quem_fala, conf_fala
             if linhas and linhas[-1]["falante"] == quem:
@@ -212,23 +230,88 @@ def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool
         latencia = round(time.time() - t_ini, 2)
         for seg in linhas:
             seg["latencia_s"] = latencia
-            segmentos.append(seg)
-            m, s = divmod(int(seg["inicio"]), 60)
-            aviso = "" if seg["confianca_falante"] >= 0.3 else " (?)"
-            print(f"{COR['cinza']}{m}:{s:02d}{COR['fim']} {COR[seg['falante']]}{seg['falante'].capitalize()}{aviso}:{COR['fim']} {seg['texto']}", flush=True)
-        caminho_json.write_text(json.dumps({"ficheiro": f"{nome}.wav", "modo": "direto (microfone)", "segmentos": segmentos},
-                                           ensure_ascii=False, indent=2), encoding="utf-8")
+            self.segmentos.append(seg)
+        self._guardar_json(parcial=True)
+        return linhas
 
-    wav = SAIDA / f"{nome}.wav"
-
-    def guardar_wav():
-        pcm = np.concatenate(gravacao) if gravacao else np.zeros(0, dtype=np.float32)
-        with wave.open(str(wav), "wb") as w:
+    # ---- fim ---------------------------------------------------------------
+    def guardar_wav(self) -> np.ndarray:
+        pcm = np.concatenate(self.gravacao) if self.gravacao else np.zeros(0, dtype=np.float32)
+        with wave.open(str(self.wav), "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(TAXA)
             w.writeframes((np.clip(pcm, -1, 1) * 32767).astype(np.int16).tobytes())
         return pcm
 
-    ultimo_nivel = ultima_gravacao = time.time()
+    def _guardar_json(self, parcial: bool) -> None:
+        dados = {"ficheiro": self.wav.name, "modo": "direto (microfone)", "modelo": "faster-whisper large-v3",
+                 "parcial": parcial, "segmentos": self.segmentos}
+        self.json.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def definicao_da_app(campos: list[dict]) -> dict:
+        """Os campos da app (Def de src/emylia/campos.ts: k, l, t, op, ajuda) na forma de campos.json."""
+        tipos = {"sim_nao": "sim_nao", "escolha": "escolha", "varios": "texto", "numero": "numero", "contador": "numero",
+                 "texto": "texto", "texto_longo": "texto_longo", "data": "texto"}
+        lista = []
+        for c in campos:
+            tipo = tipos.get(c.get("t", "texto"), "texto")
+            ajuda = c.get("ajuda") or ""
+            if c.get("t") == "varios" and c.get("op"):
+                ajuda = (ajuda + " " if ajuda else "") + "Lista separada por vírgulas, de entre: " + ", ".join(c["op"])
+            elif c.get("t") == "data":
+                ajuda = (ajuda + " " if ajuda else "") + "Data no formato AAAA-MM-DD, se for dita."
+            lista.append({"chave": c["k"], "rotulo": c.get("l", c["k"]), "tipo": tipo, "ajuda": ajuda or None,
+                          "opcoes": [{"valor": o, "rotulo": o} for o in (c.get("op") or [])] if tipo == "escolha" else [],
+                          "unidade": c.get("un"), "casas_decimais": 2 if c.get("t") == "numero" else 0})
+        return {"fichas": [{"ficha": "negocio", "rotulo": "Lead e Contacto", "campos": lista}]}
+
+    def terminar(self, com_ficha: bool = True, campos: list[dict] | None = None) -> dict:
+        """Fecha a chamada: última fala, WAV, transcrição e, se pedido, a ficha de revisão.
+        Com `campos` (os da app), a extração usa-os em vez de campos.json e devolve-a em `extracao`."""
+        r = self.detetor.despejar()
+        novas = self._tratar(*r) if r else []
+        pcm = self.guardar_wav()
+        (SAIDA / f"{self.nome}.transcricao.txt").write_text(
+            "\n".join(f"[{s['inicio']:6.1f}s] {s['falante'].capitalize()}: {s['texto']}" for s in self.segmentos), encoding="utf-8")
+        self._guardar_json(parcial=False)
+        lat = [s["latencia_s"] for s in self.segmentos]
+        resultado = {"nome": self.nome, "minutos": round(len(pcm) / TAXA / 60, 1), "falas": len(self.segmentos),
+                     "latencia_media": round(float(np.mean(lat)), 2) if lat else 0.0, "wav": str(self.wav),
+                     "transcricao": str(self.json), "novas": novas, "ficha": None}
+        resultado["extracao"] = None
+        if com_ficha and self.segmentos:
+            self.whisper.libertar()  # senão o whisper e o qwen não cabem juntos na GPU
+            from extrair import extrair
+            from rever import rever
+            definicao = self.definicao_da_app(campos) if campos else None
+            ext = extrair(self.json, AQUI / "campos.json", SAIDA, definicao)
+            resultado["extracao"] = json.loads(ext.read_text(encoding="utf-8"))
+            resultado["ficha"] = str(rever(ext, SAIDA, self.json))
+        return resultado
+
+
+def _imprimir(seg: dict) -> None:
+    m, s = divmod(int(seg["inicio"]), 60)
+    aviso = "" if seg["confianca_falante"] >= 0.3 else " (?)"
+    print(f"{COR['cinza']}{m}:{s:02d}{COR['fim']} {COR[seg['falante']]}{seg['falante'].capitalize()}{aviso}:{COR['fim']} {seg['texto']}", flush=True)
+
+
+def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool, sem_ficha: bool,
+           dispositivo: int | None, segundos: float | None = None, primeiro: str = "cliente") -> Path:
+    print("A carregar modelos...", end=" ", flush=True)
+    sessao = Sessao(nome, comercial, primeiro)
+    print("pronto." + ("" if comercial else f" Sem voz registada: a primeira voz conta como do {primeiro}."))
+    print(f"{'A ouvir o microfone' if not ficheiro else 'A ler ' + ficheiro.name}. Enter ou Ctrl+C para terminar.\n")
+
+    fila: queue.Queue = queue.Queue()
+    parar = threading.Event()
+    if ficheiro:
+        threading.Thread(target=_fonte_ficheiro, args=(fila, parar, ficheiro, rapido), daemon=True).start()
+    else:
+        threading.Thread(target=_fonte_microfone, args=(fila, parar, dispositivo), daemon=True).start()
+    threading.Thread(target=_esperar_enter, args=(parar,), daemon=True).start()
+
+    ultimo_nivel = time.time()
     try:
         while not parar.is_set():
             try:
@@ -237,47 +320,30 @@ def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool
                 continue
             if bloco is None:
                 break
-            gravacao.append(bloco)
-            if segundos and len(gravacao) * BLOCO / TAXA >= segundos:
+            for seg in sessao.alimentar(bloco):
+                _imprimir(seg)
+            if segundos and len(sessao.gravacao) * BLOCO / TAXA >= segundos:
                 break
-            r = detetor.alimentar(bloco)
-            if r:
-                tratar(*r)
-            agora = time.time()
-            if not ficheiro and agora - ultimo_nivel >= 5:
-                ultimo_nivel = agora
-                barra = "▮" * min(20, int(detetor.ultimo_rms * 100))
-                estado = "a ouvir fala" if detetor.a_falar else "silêncio"
-                print(f"{COR['cinza']}   som {detetor.ultimo_rms:.3f} voz {detetor.ultima_prob:.2f} {estado} {barra}{COR['fim']}", flush=True)
-            if agora - ultima_gravacao >= 30:
-                ultima_gravacao = agora
-                guardar_wav()
+            if not ficheiro and time.time() - ultimo_nivel >= 5:
+                ultimo_nivel = time.time()
+                n = sessao.nivel()
+                barra = "▮" * min(20, int(n["som"] * 100))
+                estado = "a ouvir fala" if n["a_falar"] else "silêncio"
+                print(f"{COR['cinza']}   som {n['som']:.3f} voz {n['voz']:.2f} {estado} {barra}{COR['fim']}", flush=True)
     except KeyboardInterrupt:
         pass
-    r = detetor.despejar()
-    if r:
-        tratar(*r)
     parar.set()
-
-    pcm = guardar_wav()
-    txt = SAIDA / f"{nome}.transcricao.txt"
-    txt.write_text("\n".join(f"[{s['inicio']:6.1f}s] {s['falante'].capitalize()}: {s['texto']}" for s in segmentos), encoding="utf-8")
-    caminho_json.write_text(json.dumps({"ficheiro": wav.name, "modo": "direto (microfone)", "modelo": "faster-whisper large-v3",
-                                        "segmentos": segmentos}, ensure_ascii=False, indent=2), encoding="utf-8")
-    lat = [s["latencia_s"] for s in segmentos]
-    print(f"\nChamada terminada: {len(pcm) / TAXA / 60:.1f} min, {len(segmentos)} falas, "
-          f"latência média {np.mean(lat) if lat else 0:.1f} s. Gravação em {wav}")
-    if sem_ficha or not segmentos:
-        return caminho_json
-    print("A preencher a ficha com o LLM...", flush=True)
-    whisper_local.libertar()  # senão o whisper e o qwen não cabem juntos na GPU
-    from extrair import extrair
-    from rever import rever
-    ext = extrair(caminho_json, AQUI / "campos.json", SAIDA)
-    ficha = rever(ext, SAIDA, caminho_json)
-    if not ficheiro:
-        os.startfile(ficha)  # abre no browser
-    return ficha
+    if not sem_ficha:
+        print("\nA terminar e a preencher a ficha com o LLM...", flush=True)
+    r = sessao.terminar(com_ficha=not sem_ficha)
+    for seg in r["novas"]:
+        _imprimir(seg)
+    print(f"\nChamada terminada: {r['minutos']} min, {r['falas']} falas, latência média {r['latencia_media']} s. Gravação em {r['wav']}")
+    if r["ficha"]:
+        if not ficheiro:
+            os.startfile(r["ficha"])  # abre no browser
+        return Path(r["ficha"])
+    return Path(r["transcricao"])
 
 
 if __name__ == "__main__":

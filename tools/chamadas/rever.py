@@ -95,7 +95,7 @@ def rever(extracao_json: Path, saida: Path, transcricao_json: Path | None = None
     for f in ext["fichas"]:
         partes.append(f"<h2>{html.escape(f['rotulo'])}</h2><table><tr><th>Campo</th><th>Valor</th><th>Estado</th><th>Na chamada</th></tr>")
         for c in f["campos"]:
-            c = {**c, "opcoes": opcoes.get(c["chave"], [])}
+            c = {**c, "opcoes": c.get("opcoes") or opcoes.get(c["chave"], [])}
             conf = f" · {int(c['confianca'] * 100)}%" if c["valor"] is not None else ""
             partes.append(f"<tr class='{c['estado']}'><td class='campo'>{html.escape(c['rotulo'])}</td><td class='valor'>{_controlo(c)}</td>"
                           f"<td><span class='estado {c['estado']}'>{ESTADO[c['estado']]}{conf}</span></td>"

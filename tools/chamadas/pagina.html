@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chamada em direto</title>
+<style>
+:root{--fundo:#f6f5f2;--cartao:#fff;--texto:#1d1d1b;--suave:#6b6b66;--linha:#e6e3dc;--primario:#1d4ed8;--perigo:#b42318;--com:#1d4ed8;--cli:#7c2d12;--ok:#1f7a4d}
+*{box-sizing:border-box}body{margin:0;background:var(--fundo);color:var(--texto);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+main{max-width:900px;margin:0 auto;padding:24px 16px 40px}h1{font-size:22px;margin:0 0 4px}.meta{color:var(--suave);font-size:13px}
+.cartao{background:var(--cartao);border:1px solid var(--linha);border-radius:10px;padding:16px;margin:16px 0}
+.linha{display:flex;gap:12px;flex-wrap:wrap;align-items:end}.campo{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--suave)}
+input,select{padding:8px 10px;border:1px solid var(--linha);border-radius:7px;font:inherit;background:#fff;min-width:220px}
+button{border:0;border-radius:8px;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;color:#fff;background:var(--primario)}
+button.perigo{background:var(--perigo)}button:disabled{opacity:.5;cursor:default}
+#estado{display:flex;gap:16px;align-items:center;font-size:13px;color:var(--suave);margin-top:10px}
+.vu{width:160px;height:8px;background:#eee;border-radius:4px;overflow:hidden}.vu i{display:block;height:100%;width:0;background:var(--ok);transition:width .2s}
+#falas{min-height:160px}#falas p{margin:6px 0;padding-left:52px;position:relative}#falas .t{position:absolute;left:0;color:var(--suave);font-size:12px;top:3px}
+#falas b.comercial{color:var(--com)}#falas b.cliente{color:var(--cli)}#falas .duvida{color:var(--suave)}
+#fim a{font-weight:600}iframe{width:100%;height:80vh;border:1px solid var(--linha);border-radius:10px;background:#fff}
+#historico li{margin:4px 0}
+</style>
+</head>
+<body><main>
+<h1>Chamada em direto</h1>
+<div class="meta">O telemóvel em alta voz junto ao microfone. A transcrição aparece aqui enquanto a chamada decorre. No fim, Terminar preenche a ficha.</div>
+
+<div class="cartao">
+  <div class="linha">
+    <label class="campo">Comercial (voz registada)<select id="comercial"><option value="">— sem voz registada —</option></select></label>
+    <label class="campo">Nome da chamada<input id="nome" placeholder="ex.: dona-ines-porto-alegre"></label>
+    <button id="iniciar">Iniciar chamada</button>
+    <button id="terminar" class="perigo" disabled>Terminar e preencher a ficha</button>
+  </div>
+  <div id="estado"><span id="msg">Pronto.</span><div class="vu"><i id="vu"></i></div><span id="tempo"></span></div>
+</div>
+
+<div class="cartao"><div id="falas"><p class="meta" id="vazio">As falas aparecem aqui.</p></div></div>
+<div id="fim"></div>
+<div class="cartao" id="hist"><b>Chamadas anteriores</b><ul id="historico"></ul></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let ws = null, ctx = null, nodo = null, fonte = null, t0 = null, relogio = null;
+
+async function carregar() {
+  const vozes = await (await fetch('/api/vozes')).json();
+  for (const v of vozes) { const o = document.createElement('option'); o.value = v; o.textContent = v; $('#comercial').appendChild(o); }
+  try { const g = localStorage.getItem('comercial'); if (g && vozes.includes(g)) $('#comercial').value = g; } catch (e) {}
+  const lista = await (await fetch('/api/chamadas')).json();
+  $('#historico').innerHTML = lista.map(c => `<li>${c.quando} — ${c.nome}` + (c.ficha ? ` · <a href="${c.ficha}" target="_blank">ficha</a>` : '') + ` · <a href="/saida/${c.nome}.transcricao.txt" target="_blank">transcrição</a></li>`).join('') || '<li class="meta">nenhuma</li>';
+}
+
+function fala(seg) {
+  $('#vazio')?.remove();
+  const m = Math.floor(seg.inicio / 60), s = String(Math.floor(seg.inicio % 60)).padStart(2, '0');
+  const p = document.createElement('p');
+  const duvida = seg.confianca_falante < 0.3 ? ' <span class="duvida">(?)</span>' : '';
+  p.innerHTML = `<span class="t">${m}:${s}</span><b class="${seg.falante}">${seg.falante[0].toUpperCase() + seg.falante.slice(1)}${duvida}:</b> ${seg.texto}`;
+  $('#falas').appendChild(p); p.scrollIntoView({block: 'nearest'});
+}
+
+async function iniciar() {
+  const comercial = $('#comercial').value; try { localStorage.setItem('comercial', comercial); } catch (e) {}
+  $('#iniciar').disabled = true; $('#msg').textContent = 'A pedir o microfone...';
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true}}); }
+  catch (e) { $('#msg').textContent = 'Sem acesso ao microfone: ' + e.message; $('#iniciar').disabled = false; return; }
+  ctx = new AudioContext({sampleRate: 16000});
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([`
+    class Captura extends AudioWorkletProcessor {
+      constructor(){ super(); this.buf = []; this.n = 0; }
+      process(inputs){ const x = inputs[0][0]; if (!x) return true;
+        this.buf.push(new Float32Array(x)); this.n += x.length;
+        if (this.n >= 1600) { const out = new Int16Array(this.n); let k = 0;
+          for (const b of this.buf) for (let i = 0; i < b.length; i++) out[k++] = Math.max(-1, Math.min(1, b[i])) * 32767;
+          this.port.postMessage(out.buffer, [out.buffer]); this.buf = []; this.n = 0; }
+        return true; }
+    }
+    registerProcessor('captura', Captura);`], {type: 'application/javascript'})));
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { $('#msg').textContent = 'A carregar os modelos...'; ws.send(JSON.stringify({nome: $('#nome').value, comercial})); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.tipo === 'pronto') {
+      $('#msg').textContent = 'A ouvir. ' + (m.comercial ? 'Voz de ' + m.comercial + ' registada.' : 'Sem voz registada: a primeira voz conta como do cliente.');
+      $('#terminar').disabled = false; $('#falas').innerHTML = '<p class="meta" id="vazio">As falas aparecem aqui.</p>'; $('#fim').innerHTML = '';
+      fonte = ctx.createMediaStreamSource(stream); nodo = new AudioWorkletNode(ctx, 'captura');
+      nodo.port.onmessage = e => { if (ws && ws.readyState === 1) ws.send(e.data); };
+      fonte.connect(nodo); nodo.connect(ctx.destination);
+      t0 = Date.now(); relogio = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); $('#tempo').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }, 1000);
+    } else if (m.tipo === 'fala') fala(m);
+    else if (m.tipo === 'nivel') { $('#vu').style.width = Math.min(100, m.som * 400) + '%'; $('#vu').style.background = m.a_falar ? 'var(--ok)' : '#bbb'; }
+    else if (m.tipo === 'a_terminar') { $('#msg').textContent = 'A preencher a ficha com o LLM (menos de um minuto)...'; pararAudio(); }
+    else if (m.tipo === 'fim') {
+      $('#msg').textContent = `Chamada terminada: ${m.minutos} min, ${m.falas} falas, ${m.latencia_media} s por fala.`;
+      if (m.ficha) $('#fim').innerHTML = `<div class="cartao"><p><b>Ficha para rever:</b> <a href="${m.ficha}" target="_blank">abrir em página própria</a></p><iframe src="${m.ficha}"></iframe></div>`;
+      else $('#fim').innerHTML = '<div class="cartao">Sem falas transcritas, por isso não há ficha.</div>';
+      fechar(); carregar();
+    } else if (m.tipo === 'erro') { $('#msg').textContent = 'Erro: ' + m.mensagem; fechar(); }
+  };
+  ws.onclose = () => { if ($('#terminar').disabled === false) { $('#msg').textContent = 'Ligação ao servidor perdida. O que havia ficou guardado.'; } fechar(); };
+  function pararAudio() { try { nodo && nodo.disconnect(); fonte && fonte.disconnect(); stream.getTracks().forEach(t => t.stop()); ctx && ctx.close(); } catch (e) {} clearInterval(relogio); }
+  window._pararAudio = pararAudio;
+}
+
+function fechar() { $('#iniciar').disabled = false; $('#terminar').disabled = true; try { window._pararAudio && window._pararAudio(); } catch (e) {} ws = null; }
+$('#iniciar').onclick = iniciar;
+$('#terminar').onclick = () => { $('#terminar').disabled = true; $('#msg').textContent = 'A terminar...'; if (ws && ws.readyState === 1) ws.send('terminar'); };
+carregar();
+</script>
+</body>
+</html>

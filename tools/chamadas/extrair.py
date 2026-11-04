@@ -210,12 +210,14 @@ def _normalizar(campo: dict, bruto: dict) -> dict:
     else:
         estado = "preenchido" if conf >= 0.75 else "rever"
     return {"chave": campo["chave"], "rotulo": campo["rotulo"], "tipo": campo["tipo"], "seccao": campo.get("seccao"),
-            "valor": valor, "valor_rotulo": rotulo_valor, "confianca": round(conf, 2), "excerto": excerto, "estado": estado}
+            "opcoes": campo.get("opcoes", []), "valor": valor, "valor_rotulo": rotulo_valor, "confianca": round(conf, 2),
+            "excerto": excerto, "estado": estado}
 
 
-def extrair(transcricao_json: Path, campos_json: Path, saida: Path) -> Path:
+def extrair(transcricao_json: Path, campos_json: Path, saida: Path, definicao: dict | None = None) -> Path:
+    """`definicao` (a mesma forma de campos.json) ganha ao ficheiro: é assim que a app manda os seus campos."""
     transcricao = json.loads(transcricao_json.read_text(encoding="utf-8"))
-    definicao = json.loads(campos_json.read_text(encoding="utf-8"))
+    definicao = definicao or json.loads(campos_json.read_text(encoding="utf-8"))
     fichas = definicao["fichas"]
     chaves = [c["chave"] for f in fichas for c in f["campos"]]
     pedido = ("# Campos a preencher\n" + _descricao_campos(fichas) +

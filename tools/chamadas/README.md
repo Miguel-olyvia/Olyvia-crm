@@ -3,11 +3,34 @@
 Transcreve as chamadas aos leads e preenche automaticamente a ficha que prepara a
 visita do comercial. Tudo corre em casa: o áudio nunca sai do PC.
 
-## Modo direto (o que se usa)
+## No browser (o que se usa)
 
-O telemóvel fica em alta voz, o microfone do PC ouve os dois lados e a transcrição
-aparece no ecrã enquanto a chamada decorre. Cada fala é transcrita mal a pessoa
-faz uma pausa e sai com quem falou. No fim, Enter: a ficha preenche-se e abre no browser.
+```
+python tools/chamadas/servidor.py        →  http://127.0.0.1:8765/
+```
+
+A página pede o microfone do PC, manda o áudio por WebSocket para o servidor (onde está
+a GPU), e mostra as falas com quem falou enquanto a chamada decorre, com um medidor de som.
+"Terminar e preencher a ficha" fecha a chamada, corre o LLM e mostra a ficha para rever na
+própria página. Em baixo ficam as chamadas anteriores, com ficha e transcrição.
+
+Escolhe-se o comercial pela voz registada (`vozes/<nome>.wav`, feita com `registar_voz.py`).
+Hoje corre no PC da comercial; para servir vários PCs põe-se o servidor numa máquina com
+GPU, `--host 0.0.0.0`, e https à frente (o browser só dá o microfone em https ou localhost).
+
+### Na app Olyvia (ramo feature/rh-pessoas)
+
+No Negócio, «Tudo na chamada» tem o painel «Chamada em direto» (src/emylia/ChamadaDireto.tsx):
+a app manda ao motor os campos da Lead e do Contacto (k, l, t, op) no arranque, o motor
+extrai com essa definição e devolve `extracao` no fim; a comercial confirma e «Preencher»
+escreve nos campos vazios. O motor tem de estar a correr no PC (`python tools/chamadas/servidor.py`);
+`localStorage.olyvia.chamadas.motor` aponta para outro PC. `?teste=1` no endereço mostra
+«Testar com a chamada de exemplo», que usa o WAV do motor em vez do microfone.
+
+## Modo direto no Terminal
+
+O mesmo motor sem browser: o telemóvel em alta voz, o microfone do PC ouve os dois lados
+e a transcrição aparece no Terminal. No fim, Enter: a ficha preenche-se e abre no browser.
 
 ```
 microfone  →  ao_vivo.py                                   →  extrair.py  →  rever.py
@@ -46,7 +69,8 @@ gravação  →  transcrever.py  →  extrair.py  →  rever.py
 
 | Ficheiro | Faz | Sai |
 |---|---|---|
-| `ao_vivo.py` | Modo direto. Lê o microfone em blocos de 30 ms, corta em falas por energia (piso de ruído adaptativo, pausa de 0,8 s fecha a fala), transcreve cada fala com o faster-whisper, pede ao `falantes.py` quem falou, mostra no ecrã e vai gravando o JSON. No fim grava o WAV e corre a ficha. | `saida/<nome>.wav`, `.transcricao.json`, `.txt`, `.extracao.json`, `.revisao.html` |
+| `servidor.py` + `pagina.html` | Modo browser. FastAPI com um WebSocket por chamada: recebe int16 a 16 kHz, dá à `Sessao` e devolve as falas; serve as fichas de `saida/`. Uma chamada de cada vez na GPU. | |
+| `ao_vivo.py` | Classe `Sessao` (o motor: VAD, whisper, falantes, gravação, ficha) e o modo Terminal. Lê o microfone em blocos de 30 ms, corta em falas por energia (piso de ruído adaptativo, pausa de 0,8 s fecha a fala), transcreve cada fala com o faster-whisper, pede ao `falantes.py` quem falou, mostra no ecrã e vai gravando o JSON. No fim grava o WAV e corre a ficha. | `saida/<nome>.wav`, `.transcricao.json`, `.txt`, `.extracao.json`, `.revisao.html` |
 | `falantes.py` | Impressão da voz de cada fala (ECAPA do SpeechBrain, CPU). Com a voz do comercial registada compara com ela; sem registo, agrupa em duas vozes a partir da primeira fala. | |
 | `registar_voz.py` | Grava 20 s do microfone para `vozes/<nome>.wav`. | |
 | `whisper_local.py` | faster-whisper em GPU com os dois remendos desta máquina (PyAV bloqueado, cuBLAS). | |
