@@ -115,13 +115,23 @@ export async function falasDeFicheiro(url: string): Promise<{ pcm: Float32Array;
 }
 
 // ---- as duas funções Supabase -------------------------------------------------------------------
+/** A mensagem útil de um erro do functions.invoke: o corpo {error} que a função devolveu, se houver. */
+async function mensagemDoErro(error: { message?: string; context?: unknown }, funcao: string): Promise<string> {
+  const ctx = error.context as { json?: () => Promise<{ error?: string }>; status?: number } | undefined;
+  try {
+    const corpo = ctx?.json ? await ctx.json() : null;
+    if (corpo?.error) return `${funcao}: ${corpo.error}`;
+  } catch { /* sem corpo JSON */ }
+  return `${funcao}: ${error.message ?? "falhou"}${ctx?.status ? ` (HTTP ${ctx.status})` : ""}`;
+}
+
 export interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente" }
 
 export async function transcreverFala(pcm: Float32Array, inicioS: number, referenciaB64: string | null): Promise<Frase[]> {
   const { data, error } = await supabase.functions.invoke("chamada-transcrever", {
     body: { audio_b64: wavBase64(pcm), deslocamento_s: inicioS, ...(referenciaB64 ? { referencia_b64: referenciaB64 } : {}) },
   });
-  if (error) throw new Error(error.message ?? "chamada-transcrever falhou");
+  if (error) throw new Error(await mensagemDoErro(error, "chamada-transcrever"));
   return (data?.frases ?? []) as Frase[];
 }
 
@@ -130,7 +140,7 @@ export async function preencherCampos(segmentos: Fala[], grupos: Grupo[]): Promi
   const { data, error } = await supabase.functions.invoke("chamada-campos", {
     body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos },
   });
-  if (error) throw new Error(error.message ?? "chamada-campos falhou");
+  if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
   return data as Extracao & { fichas: { campos: CampoExtraido[] }[] };
 }
 

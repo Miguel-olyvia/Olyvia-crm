@@ -5,7 +5,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { getCorsHeaders } from "../_shared/cors.ts";
-import { resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
+import { AuthError, resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { ErroGemini, gerarJson, type ParteGemini } from "../_shared/gemini.ts";
 
@@ -108,6 +108,11 @@ serve(async (req) => {
       }));
     return json({ frases, modelo: MODELO });
   } catch (error) {
-    return authErrorResponse(error, corsHeaders);
+    if (error instanceof AuthError) return authErrorResponse(error, corsHeaders);
+    // qualquer outro erro vai com cabeçalhos CORS e a mensagem: sem isto o browser só diz
+    // «Failed to send a request to the Edge Function» e não se percebe o que falhou
+    console.error("[chamada-transcrever]", error);
+    const mensagem = error instanceof Error ? error.message : String(error);
+    return json({ error: mensagem }, error instanceof ErroGemini ? 502 : 500);
   }
 });
