@@ -3,5 +3,9 @@ saida/*
 !saida/chamada-teste-maria.transcricao.txt
 !saida/chamada-teste-maria.extracao.json
 !saida/chamada-teste-maria.revisao.html
+!saida/direto-teste.transcricao.txt
+!saida/direto-teste.revisao.html
 exemplos/*.wav
+vozes/
+.modelos/
 __pycache__/
