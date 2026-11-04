@@ -16,6 +16,7 @@ import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/re
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
+import { PermPortalNegocios } from "@/emylia/PermPortalNegocios";
 import { comVisitasDoCrm } from "@/components/pessoas/negocioEmylia/visitasDosPassos";
 import { HojeSimples } from "@/emylia/HojeSimples";
 import { HojeTecnico } from "@/emylia/HojeTecnico";
@@ -541,6 +542,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver os negócios.</div>;
   return (
+    // 04/11/2026: a permissão real de mandar a proposta / o contrato ao portal, para os botões dos passos (permPortalPasso.tsx)
+    <PermPortalNegocios>
     <div className="pn calma pg-root min-h-full bg-background">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-3 text-[15px]">
         <label className="flex items-center gap-2">
@@ -596,5 +599,6 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         ))}
       </div>
     </div>
+    </PermPortalNegocios>
   );
 }

@@ -14,6 +14,7 @@ import { ETAPAS_PESSOA, etapaPessoa, etapaTexto } from "./listaDocs";
 import { Atrasada, AvatarPessoa, BORDA_CTRL } from "./PessoaLinha";
 import { Etiqueta, EtiquetaQualificacao, MarcaExemplo, Perdida } from "./SelosPessoa";
 import { FASE_COR, FASE_ICONE } from "./pecas";
+import { SemPermissaoPortal, usePermPortalDoPasso } from "./permPortalPasso";
 
 const soDigitos = (t: string): string => t.replace(/\D/g, "");
 const BOTAO = "min-h-11 min-w-11 text-[15px]";
@@ -86,6 +87,8 @@ export function FichaCabecalho({ p, f, nx, aoProximo, topo, acoes }: CabecalhoPr
   // Numa lead perdida a etapa é a etiqueta "Perdida" junto ao nome (o motivo está no Resumo).
   const etapa = p.perdida !== null ? "" : p.papel === "lead" ? etapaTexto(p) : p.novoNegocio ? "Novo negócio em curso" : "";
   const resto = [etapa, f.morada.localidade].filter(Boolean).join(" · ");
+  // 04/11/2026: se o próximo passo manda a proposta / o contrato ao portal, pede também a permissão real (permPortalPasso.tsx)
+  const portal = usePermPortalDoPasso(nx.act, !p.exemplo && p.perdida === null);
   return (
     <header className="grid min-w-0 gap-3">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -111,8 +114,9 @@ export function FichaCabecalho({ p, f, nx, aoProximo, topo, acoes }: CabecalhoPr
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {acoes ?? <Contactos f={f} nome={p.nome} />}
         {p.perdida === null && (
-          <Button className={cn(BOTAO, "h-auto cursor-pointer whitespace-normal py-2 text-left")} onClick={aoProximo}>
-            {p.exemplo ? "Ver negócios" : nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
+          <Button className={cn(BOTAO, "h-auto cursor-pointer whitespace-normal py-2 text-left")} disabled={!portal.pode} title={portal.semPermissao ? portal.motivo : undefined}
+            onClick={portal.pode ? aoProximo : undefined}>
+            {p.exemplo ? "Ver negócios" : nx.btn || "Abrir negócio"}<SemPermissaoPortal p={portal} /><ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
           </Button>
         )}
       </div>

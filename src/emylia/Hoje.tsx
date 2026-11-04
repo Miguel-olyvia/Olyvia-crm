@@ -11,6 +11,7 @@ import { DayTrack, TrackEmpty, TrackGroup } from "@/components/atividades/DayTra
 import { cn } from "@/lib/utils";
 import { FASES, PAPEIS, aberto, conflitos, eur, minhas, pct, tot, type Estado, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
+import { SemPermissaoPortal, usePermPortalDoPasso } from "./permPortalPasso";
 import { FILTROS_TRABALHO } from "./filtrosTrabalho";
 
 // 22/10: "A minha agenda" (a semana da pessoa do RH deste papel, a mesma da RH › Agenda; equipa/MinhaAgenda.tsx), carregada à parte
@@ -199,6 +200,7 @@ function LinhaAgenda({ c, abrir }: { c: Compromisso; abrir: () => void }) {
 
 function LinhaTarefa({ x, ctx, atraso }: { x: ReturnType<typeof minhas>[number]; ctx: Pick<Ctx, "A" | "go">; atraso?: boolean }) {
   const { A, go } = ctx, { d, p, dir } = x;
+  const portal = usePermPortalDoPasso(p.act, !dir && !!p.btn);
   return (
     <li className="group flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-muted/50 animate-in fade-in-0">
       <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[11px] font-semibold", atraso ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary")}>{FASES[d.fase].slice(0, 3)}</span>
@@ -211,7 +213,8 @@ function LinhaTarefa({ x, ctx, atraso }: { x: ReturnType<typeof minhas>[number];
           <Button size="sm" variant="outline" onClick={go(() => A.recusarAprov(d.id))}>Recusar</Button>
           <Button size="sm" onClick={go(() => A.aprovar(d.id))}>Aprovar</Button>
         </span>
-      ) : p.btn ? <Button size="sm" className="shrink-0" onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}</Button> : null}
+      ) : p.btn ? <Button size="sm" className="shrink-0" disabled={!portal.pode} title={portal.semPermissao ? portal.motivo : undefined}
+        onClick={go(() => { if (portal.pode) fazer(A, p.act!, d.id, p.arg); })}>{p.btn}<SemPermissaoPortal p={portal} /></Button> : null}
     </li>
   );
 }

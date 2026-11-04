@@ -9,6 +9,7 @@ import { GRUPOS_V1, contagensV1, fichaV1, listaV1, pessoaV1, type GrupoV1, type 
 import { PAPEIS } from "./motor";
 import { MOTIVOS_PERDA, lembrarPerda } from "./perdaDocs";
 import { fazer, type Ctx } from "./pecas";
+import { SemPermissaoPortal, usePermPortalDoPasso } from "./permPortalPasso";
 
 /** O que a página lembra quando se abre um negócio e se volta (a página desmonta). */
 interface Memoria { sel: string | null; grupo: GrupoV1; q: string; nova: boolean; /** o negócio aberto a partir da ficha (para o "voltar") */ negocio: number | null }
@@ -105,6 +106,7 @@ function Linha({ l, procura, abrir }: { l: LinhaV1; procura: boolean; abrir: () 
 function FichaV1Pagina({ ctx: { S, A, go, run }, nome, voltar }: { ctx: Pick<Ctx, "S" | "A" | "go" | "run">; nome: string; voltar: () => void }) {
   const p = pessoaV1(S, nome)!;
   const f = fichaV1(S, p);
+  const portal = usePermPortalDoPasso(f.agora.act, f.agora.id !== null && !!f.agora.btn);
   const [tudo, setTudo] = useState(false);
   const titulo = useRef<HTMLHeadingElement>(null);
   useEffect(() => { titulo.current?.focus(); }, [nome]);
@@ -142,7 +144,8 @@ function FichaV1Pagina({ ctx: { S, A, go, run }, nome, voltar }: { ctx: Pick<Ctx
         )}
         {f.agora.id !== null && (
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            {f.agora.btn && f.agora.act && <Button size="lg" onClick={go(() => { abrirDaFicha(f.agora.id!); fazer(A, f.agora.act!, f.agora.id!); })}>{f.agora.btn}</Button>}
+            {f.agora.btn && f.agora.act && <Button size="lg" disabled={!portal.pode} title={portal.semPermissao ? portal.motivo : undefined}
+              onClick={go(() => { if (!portal.pode) return; abrirDaFicha(f.agora.id!); fazer(A, f.agora.act!, f.agora.id!); })}>{f.agora.btn}<SemPermissaoPortal p={portal} /></Button>}
             <Button size="lg" variant={f.agora.btn ? "ghost" : "outline"} onClick={go(() => { abrirDaFicha(f.agora.id!); A.abrir(f.agora.id!); })}>Abrir o negócio</Button>
           </div>
         )}
