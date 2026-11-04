@@ -4,7 +4,7 @@
 //  2. «Quem vai» são só as pessoas com RECURSO de agenda (recurso do tipo utilizador, ativo, da organização);
 //  3. o tipo de visita (Levantamento, Medição técnica, Escolha de materiais, Revisita) escolhe-se aqui.
 // Não ha ligação board-recurso na base (só `allowed_modules` do quadro): por isso «quem vai» não se filtra por quadro (decisão por confirmar no desenho).
-import { useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check } from "lucide-react";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { TipoVisitaNegocio } from "@/components/negocio-metas/negocioMetas";
@@ -54,6 +54,9 @@ interface Props {
   visita?: VisitaDoNegocio;
   /** «Quem vai estar» que a visita já tinha (o espelho do negócio o guarda; o CRM aqui não o lê). */
   presentesInicial?: string;
+  /** 4/11: numa visita nova, o que se preparou no passo «Preparar a visita» (a duração em minutos e a nota). */
+  duracaoInicialMin?: number;
+  notaInicial?: string;
   rotuloGravar: string;
   /** Nome de cada recurso da agenda, para a visita gravada. */
   aoGuardada: (r: VisitaGravada) => void;
@@ -67,14 +70,14 @@ const chaveDaDuracao = (minutos: number): Pick<ValorAgenda, "duracao" | "duracao
   return chave ? { duracao: chave } : { duracao: "", duracaoMinutos: minutos };
 };
 
-export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tipoInicial, visita, presentesInicial, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
+export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tipoInicial, visita, presentesInicial, duracaoInicialMin, notaInicial, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
   const { t } = useTranslation();
   const id = useId();
   const hoje = hojeLisboa();
   const acoes = useAcoesVisita(entityId, null);
   const horario = useHorarioOrganizacao();
   const [tipo, setTipo] = useState<TipoVisitaNegocio>(visita?.tipo ?? tipoInicial);
-  const [nota, setNota] = useState("");
+  const [nota, setNota] = useState(visita ? "" : notaInicial ?? "");
   const [destino, setDestino] = useState<DestinoVisita>(() => {
     if (!visita) return destinoInicial(moradaLead);
     const naLead = moradaLead !== null && visita.local !== null && textoMoradaVisita(moradaLead) === visita.local;
@@ -87,7 +90,8 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   const form = useFormAgendaVisita({
     responsavelUserId: null, excluirId: visita?.id ?? null,
     inicial: {
-      ...(visita ? { boardId: visita.boardId, recursos: visita.recursos, data: visita.dia, hora: visita.hora, ...chaveDaDuracao(visita.minutos) } : {}),
+      ...(visita ? { boardId: visita.boardId, recursos: visita.recursos, data: visita.dia, hora: visita.hora, ...chaveDaDuracao(visita.minutos) }
+        : duracaoInicialMin ? chaveDaDuracao(duracaoInicialMin) : {}),
       ...(presentesInicial ? { quemVaiEstar: presentesInicial } : {}),
     },
   });
@@ -100,6 +104,14 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
     [form.agenda.recursos, visita],
   );
   const agenda = useMemo(() => ({ ...form.agenda, recursos }), [form.agenda, recursos]);
+  // 4/11 (Rúben: «falta a hora da visita»): numa visita nova, com uma só pessoa que pode ir, ela já vem escolhida, e as horas livres
+  // aparecem logo. Só uma vez: se a tirarem, não volta.
+  const sozinhoEscolhido = useRef(false);
+  useEffect(() => {
+    if (sozinhoEscolhido.current || visita || soLeitura || recursos.length !== 1 || form.valor.recursos.length > 0) return;
+    sozinhoEscolhido.current = true;
+    form.mudar({ recursos: [recursos[0].id], hora: "" });
+  }, [recursos, visita, soLeitura, form]);
   const horas = useHorasLivresVisita({
     recursos: valor.recursos, dia: valor.data, duracaoMin: minutos, horario: horario.horario, feriados: horario.feriados,
     horarioPronto: !horario.isLoading && !horario.isError, atual: visita ? { dia: visita.dia, hora: visita.hora } : null,
