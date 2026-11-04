@@ -10,14 +10,14 @@ import {
   alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
-import { DadosDaLead, resumoDadosLead } from "./DadosDaLead";
+import { ComercialDaLead, FonteDaLead, RespostasDaLead, TextoDaLead, comDadosLead } from "./DadosDaLead";
 import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -254,21 +254,58 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   // 15/10: um passo cujo documento já saiu (a proposta enviada, o contrato gerado) está feito; os campos ficam só de leitura e
   // já não contam como "falta 1 resposta" (senão o negócio abria nesse passo em vez de no que há a fazer, ex.: gerar o contrato)
   const fechadoSe = (p: Passo, sim: boolean): Passo => (sim ? { ...p, conta: undefined, feito: true } : p);
-  let passos: Passo[] = [];
-  if (fase === 0) {
-    passos = [
-      { id: "quem", titulo: "Quem pede", icone: User, conta: { f: 2, n: 2 }, resumo: [d.nome, d.tel, nomeLinha(d)], corpo: (
+  const passosDaLead = (): Passo[] => {
+    const [gContacto, gOrigem, gPedido] = LEAD.map(E);
+    const todos = [gContacto, gOrigem, gPedido].flatMap((x) => x.campos);
+    const QUEM = ["email", "tipo_cliente", "nif"];
+    const sem = (gr: Grupo, ks: readonly string[]): Grupo => ({ ...gr, campos: gr.campos.filter((c) => !ks.includes(c.k)) });
+    const gQuem: Grupo = { ...gContacto, campos: QUEM.map((k) => todos.find((c) => c.k === k)).filter((c): c is Def => !!c) };
+    const gFalar: Grupo = { ...gContacto, campos: [...sem(gContacto, QUEM).campos, ...gOrigem.campos.filter((c) => c.k === "rgpd")] };
+    const gComo = sem(gOrigem, ["rgpd", ...QUEM]);
+    const gPed = sem(gPedido, QUEM);
+    const real = comDadosLead(d);
+    const campos = (gr: Grupo) => <Campos grupo={gr} {...fx} />;
+    const passo = (gr: Grupo, id: string, titulo: string, icone: LucideIcon, corpo: ReactNode, resumo?: string[]): Passo =>
+      ({ ...passoDeGrupo(gr, icone, corpo, d.f), id, titulo, personalizado: false, ...(resumo ? { resumo } : {}) });
+    return [
+      passo(gQuem, "quem", "Quem é", User, (
         <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
-          <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>
+          {real ? (
+            <div className="grid gap-5 sm:grid-cols-2">
+              <TextoDaLead ctx={ctx} d={d} k="primeiro" rotulo="Nome próprio" />
+              <TextoDaLead ctx={ctx} d={d} k="apelido" rotulo="Apelido" />
+            </div>
+          ) : <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>}
           {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
           {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
             : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
-          <div className={ROT}>Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{nomeLinha(d)}{d.linhaPorDefinir && <span className="block font-normal text-muted-foreground">Sai da divisão escolhida na visita.</span>}</span></div>
+          {real && <TextoDaLead ctx={ctx} d={d} k="empresa" rotulo="Empresa" />}
+          {campos(gQuem)}
         </div>
-      ) },
-      // 4/11 (Rúben): o que a lead trouxe da Nova lead (os campos da Olyvia original), já preenchido e editável: DadosDaLead.tsx
-      ...(d.dadosLead ? [{ id: "lead-dados", titulo: "O que veio na lead", icone: ClipboardList, feito: true, resumo: resumoDadosLead(d.dadosLead), corpo: <DadosDaLead ctx={ctx} d={d} /> } as Passo] : []),
-      g(LEAD[0], Phone), g(LEAD[1], Target), g(LEAD[2], ClipboardList),
+      ), [d.nome, d.tel, d.dadosLead?.empresa ?? "", d.f.tipo_cliente || ""].filter(Boolean)),
+      passo(gFalar, "falar", "Como falar com o cliente", Phone, campos(gFalar)),
+      passo(gComo, "origem", "Como chegou", Target, <div className="space-y-5">{real && <FonteDaLead ctx={ctx} d={d} />}{campos(gComo)}</div>,
+        [d.dadosLead?.fonte ?? "", d.f.origem === "Outros" ? d.f.origem_outra || "" : d.f.origem || "", d.f.campanha || ""].filter(Boolean)),
+      passo(gPed, "pedido", "O pedido", ClipboardList, (
+        <div className="space-y-5">
+          <ServicoDaChamada ctx={ctx} d={d} />
+          {campos(gPed)}
+          {real && <RespostasDaLead ctx={ctx} d={d} />}
+          {real && <TextoDaLead ctx={ctx} d={d} k="notas" rotulo="Notas da lead" longo />}
+        </div>
+      ), [nomeLinha(d), d.f.pedido || ""].filter(Boolean)),
+      ...(real ? [{ id: "comercial", titulo: "Quem acompanha", icone: User, feito: !!d.dadosLead?.comercialId, resumo: [d.dadosLead?.comercial || "sem comercial"],
+        corpo: <ComercialDaLead ctx={ctx} d={d} /> } as Passo] : []),
+    ];
+  };
+  let passos: Passo[] = [];
+  if (fase === 0) {
+    passos = [
+      // 4/11 (Rúben: «refazer a primeira fase da lead para ter todos os campos, separados por steps que façam sentido com os campos da Olyvia
+      // original»): quem é, como falar com o cliente, como chegou, o pedido e quem acompanha. As perguntas vêm dos grupos da Lead (com os
+      // ajustes da empresa; um campo novo fica no passo do grupo dele); o que é da pessoa (nome próprio, apelido, empresa, fonte, notas,
+      // respostas do formulário, comercial) grava-se nela (DadosDaLead.tsx), só na página real.
+      ...passosDaLead(),
     ];
   } else if (fase === 1) {
     passos = [
