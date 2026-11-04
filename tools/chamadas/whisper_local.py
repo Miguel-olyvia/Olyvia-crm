@@ -68,13 +68,19 @@ PROMPT = ("Chamada telefónica em português de Portugal entre um comercial da M
 ALUCINACOES = {"obrigado", "obrigada", "legendas pela comunidade amara.org", "amara.org", "tchau", "até à próxima", "subtitles by"}
 
 
+_PALAVRAS_PROMPT: set[str] = set()
+
+
 def _eco_do_prompt(texto: str) -> bool:
-    """Em ruído ou silêncio o whisper repete pedaços do prompt inicial."""
-    import difflib
-    t = texto.lower().strip(".!?… ")
-    if len(t) < 12:
+    """Em ruído ou silêncio o whisper repete pedaços do prompt inicial: quase todas
+    as palavras da fala (5 ou mais, com mais de 3 letras) estão no prompt."""
+    import re
+    if not _PALAVRAS_PROMPT:
+        _PALAVRAS_PROMPT.update(w for w in re.findall(r"\w+", PROMPT.lower()) if len(w) > 3)
+    palavras = [w for w in re.findall(r"\w+", texto.lower()) if len(w) > 3]
+    if len(palavras) < 5:
         return False
-    return t in PROMPT.lower() or difflib.SequenceMatcher(None, t, PROMPT.lower()).find_longest_match().size >= 0.6 * len(t)
+    return sum(w in _PALAVRAS_PROMPT for w in palavras) / len(palavras) >= 0.8
 
 
 def transcrever_trecho(pcm: np.ndarray, deslocamento_s: float = 0.0) -> list[dict]:
