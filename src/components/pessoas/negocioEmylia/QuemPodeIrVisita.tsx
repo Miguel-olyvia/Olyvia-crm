@@ -7,8 +7,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { format } from "date-fns";
+import { pt } from "date-fns/locale";
+import { Calendar } from "@/components/ui/calendar";
 import type { FeriadosOrg, HorarioOrg } from "@/hooks/pessoas/horasLivresVisita";
 import type { RecursoVisita } from "@/hooks/pessoas/useAgendaVisita";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
@@ -52,6 +53,8 @@ export function agruparQuemVai(recursos: readonly RecursoVisita[], papeis: Reado
   return { conhecido: true, principais, tecnicos, comerciais };
 }
 
+/** «aaaa-mm-dd» como data local ao meio-dia (sem saltos de fuso). */
+const diaComoData = (dia: string) => new Date(`${dia}T12:00:00`);
 const diaPt = (dia: string) => { const [, m, d] = dia.split("-"); return `${d}/${m}`; };
 const textoHoras = (h: string[] | undefined) => (h === undefined ? "a ver…" : h.length === 0 ? "sem horas livres" : h.length === 1 ? "1 hora livre" : `${h.length} horas livres`);
 
@@ -108,13 +111,22 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
   const idData = `${a.id}-data`, idErroRec = `${a.id}-recursos-erro`;
   return (
     <div className="space-y-5">
-      <div className="space-y-1.5">
-        <Label htmlFor={idData}>Data da visita</Label>
-        <Input
-          ref={a.campoData} id={idData} type="date" min={a.hoje} value={dia} required readOnly={a.somenteLeitura}
-          aria-invalid={a.erroData ? true : undefined} aria-describedby={a.erroData ? `${idData}-erro` : undefined}
-          className={cn("min-h-11 max-w-xs", FOCO, a.erroData && "border-destructive")} onChange={(e) => a.aoMudar({ data: e.target.value })}
-        />
+      {/* 4/11 (Rúben: «parece desativo e o picking deve ser mais bonito»): um calendário à vista, em vez do campo de data do browser */}
+      <div className="space-y-2">
+        <p id={idData} className="text-sm font-semibold text-foreground">Data da visita</p>
+        <div
+          ref={a.campoData as never} tabIndex={-1} role="group" aria-labelledby={idData} aria-describedby={a.erroData ? `${idData}-erro` : undefined}
+          className={cn("inline-block rounded-2xl border bg-card p-1 shadow-[var(--shadow-sm)]", FOCO, a.erroData ? "border-destructive" : "border-border")}
+        >
+          <Calendar
+            mode="single" locale={pt} weekStartsOn={1} selected={dia ? diaComoData(dia) : undefined} defaultMonth={diaComoData(dia || a.hoje)}
+            disabled={a.somenteLeitura ? true : { before: diaComoData(a.hoje) }}
+            onSelect={(x) => { if (x && !a.somenteLeitura) a.aoMudar({ data: format(x, "yyyy-MM-dd") }); }}
+          />
+        </div>
+        <p aria-live="polite" className="text-[15px]">
+          {dia ? <>Dia da visita: <b className="font-semibold">{format(diaComoData(dia), "EEEE, d 'de' MMMM", { locale: pt })}</b></> : <span className="text-muted-foreground">Escolha o dia no calendário.</span>}
+        </p>
         {a.erroData && <MensagemErro id={`${idData}-erro`} texto={a.erroData} />}
       </div>
       {!dia ? (

@@ -52,10 +52,26 @@ describe("QuemPodeIrVisita", () => {
   it("sem data: só a «Data da visita», sem atalhos de dia, e diz que a seguir vêm os comerciais", () => {
     base({});
     desenhar("");
-    expect(screen.getByLabelText("Data da visita")).toBeRequired();
+    // 4/11: um calendário à vista (o campo de data do browser parecia desativado)
+    expect(screen.getByRole("group", { name: "Data da visita" })).toBeInTheDocument();
+    expect(screen.getByText("Escolha o dia no calendário.")).toBeInTheDocument();
     for (const t of ["Hoje", "Amanhã", "Daqui a 1 semana"]) expect(screen.queryByRole("button", { name: t })).toBeNull();
     expect(screen.getByText(/a seguir aparecem os comerciais/)).toBeInTheDocument();
     expect(screen.queryByText("As horas")).toBeNull();
+  });
+
+  it("escolher um dia no calendário muda a data; os dias que já passaram não se escolhem", () => {
+    base({});
+    const { aoMudar } = desenhar("");
+    fireEvent.click(screen.getByRole("gridcell", { name: "15" }));
+    expect(aoMudar).toHaveBeenCalledWith({ data: "2030-03-15" });
+    expect(screen.getAllByRole("gridcell", { name: "1" })[0]).not.toBeDisabled();
+  });
+
+  it("com data: o dia por extenso", () => {
+    base({});
+    desenhar(DIA);
+    expect(screen.getByText("terça-feira, 12 de março")).toBeInTheDocument();
   });
 
   it("com data: os comerciais com as horas livres nesse dia, e a hora a seguir", async () => {
