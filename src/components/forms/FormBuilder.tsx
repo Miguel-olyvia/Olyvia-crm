@@ -82,7 +82,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { PerguntaFaseMapping } from "./PerguntaFaseMapping";
+import { PerguntaFaseMapping, useLigacaoFormulario } from "./PerguntaFaseMapping";
 import { CONTACT_FIELDS, CLIENT_FIELDS, CONTACT_FIELD_DEFAULTS, LEAD_FORM_BASE_FIELDS } from "@/constants/fieldMappings";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { IconGallery, LucideIcon, normalizeLucideIconName } from "@/components/campaigns/IconGallery";
@@ -656,7 +656,10 @@ export function FormBuilder({
   const { toast } = useToast();
   const { t } = useTranslation();
   const { activeCompany } = useCompany();
-  
+  // as perguntas das fases e as ligações dos campos: lidas uma vez por formulário e passadas ao campo seleccionado
+  const orgDoForm = activeCompany?.id ?? companyId;
+  const ligacaoFase = useLigacaoFormulario(orgDoForm, formId, open);
+
   const [steps, setSteps] = useState<FormStep[]>([]);
   const [fields, setFields] = useState<FormField[]>([]);
   const [branding, setBranding] = useState<any>(null);
@@ -2220,14 +2223,17 @@ export function FormBuilder({
                   </div>
 
                   {/* Ligação a uma pergunta de fase: lê e grava por funções (a tabela é fechada); sem as funções não aparece nada */}
-                  {(activeCompany?.id ?? companyId) && (
+                  {orgDoForm && (
                     <PerguntaFaseMapping
                       key={selectedField.id}
                       campo={selectedField}
-                      formId={formId}
                       opcoesCampo={getFieldOptionValues(selectedField.options)}
-                      organizationId={(activeCompany?.id ?? companyId) as string}
-                      aoAvisar={(mensagem) => toast({ title: mensagem, variant: "destructive" })}
+                      organizationId={orgDoForm}
+                      leitura={ligacaoFase.leitura}
+                      ligacoes={ligacaoFase.ligacoes}
+                      aoMudarLeitura={ligacaoFase.setLeitura}
+                      aoMudarLigacoes={ligacaoFase.setLigacoes}
+                      rotuloDe={(fieldId) => fields.find((f) => f.id === fieldId)?.field_label ?? null}
                     />
                   )}
 

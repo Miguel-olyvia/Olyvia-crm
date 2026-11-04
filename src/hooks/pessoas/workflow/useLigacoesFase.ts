@@ -51,8 +51,14 @@ export async function lerLigacoesFase(sb: SupabaseClient, org: string): Promise<
   }
 }
 
+export interface LigacoesFaseLidas {
+  ligacoes: LigacaoFase[];
+  /** A leitura terminou. Antes disso (ou se avariou) não se sabe o que está ligado: o editor pede confirmação genérica em vez de passar sem aviso. */
+  pronto: boolean;
+}
+
 /** As ligações campo do formulário → pergunta de fase, para os avisos do editor de campos das fases. Sem ligações (ou sem a função): []. */
-export function useLigacoesFase(habilitado = true): LigacaoFase[] {
+export function useLigacoesFase(habilitado = true): LigacoesFaseLidas {
   const fonte = useFontePessoas();
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const consulta = useQuery({
@@ -61,5 +67,5 @@ export function useLigacoesFase(habilitado = true): LigacaoFase[] {
     enabled: habilitado && !!organizationId,
     retry: false,
   });
-  return consulta.data ?? [];
+  return { ligacoes: consulta.data ?? [], pronto: consulta.isSuccess };
 }

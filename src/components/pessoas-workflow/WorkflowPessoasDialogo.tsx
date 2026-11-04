@@ -45,7 +45,7 @@ export function WorkflowPessoasDialogo({ aberto, aoMudarAberto, aoFocarOrigem }:
   const configNegocios = useConfigNegocios(aberto && separador === "negocios");
   // 3/11 (Rúben): os campos das fases e o impacto no orçamento (uma só leitura para os dois separadores) e os rascunhos de cada um
   const camposConfig = useCamposConfig(aberto && (separador === "campos" || separador === "levantamento"));
-  const ligacoes = useLigacoesFase(aberto && separador === "campos");
+  const { ligacoes, pronto: ligacoesProntas } = useLigacoesFase(aberto && separador === "campos");
   const [edicaoCampos, setEdicaoCampos] = useState<CfgCampos | null>(null);
   const [edicaoEfeitos, setEdicaoEfeitos] = useState<CfgEfeitos | null>(null);
   // O que se escolheu em «Negócios» e ainda não se gravou vive aqui, como o rascunho do levantamento, para sobreviver à troca de separador.
@@ -116,7 +116,7 @@ export function WorkflowPessoasDialogo({ aberto, aoMudarAberto, aoFocarOrigem }:
               <EfeitosCamposSeccao config={camposConfig} rascunho={edicaoEfeitos} aoMudar={setEdicaoEfeitos} />
             </TabsContent>
             <TabsContent value="campos" className="mt-4">
-              <CamposFasesSeparador config={camposConfig} ligacoes={ligacoes} rascunho={edicaoCampos} aoMudar={setEdicaoCampos} />
+              <CamposFasesSeparador config={camposConfig} ligacoes={ligacoes} ligacoesProntas={ligacoesProntas} rascunho={edicaoCampos} aoMudar={setEdicaoCampos} />
             </TabsContent>
             <TabsContent value="negocios" className="mt-4">
               <NegociosSeparador config={configNegocios} edicao={edicaoNegocios} aoEditar={setEdicaoNegocios} />

@@ -6,7 +6,7 @@
 // de separadores, os modelos são linhas, alvos de 44 px, texto a 15 px, nada de cartões
 // dentro de cartões). As duas partes (`ModelosSetor` e `EditorFases`) também se usam
 // dentro das Definições da V2.
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ import { FASES, type Estado } from "./motor";
 import { SETORES, type Setor } from "./setores";
 import { IconeFase, type Ctx } from "./pecas";
 import type { LigacaoFase } from "@/hooks/pessoas/workflow/useLigacoesFase";
+import { normalizarTexto } from "./sugestoesForm";
 
 /** Os formulários (distintos, pelo id) que enviam respostas para uma pergunta (ou, sem `chave`, para qualquer pergunta do grupo). */
 export function formulariosDe(ligacoes: readonly LigacaoFase[] | undefined, grupo: string, chave?: string): string[] {
@@ -29,18 +30,25 @@ export function formulariosDe(ligacoes: readonly LigacaoFase[] | undefined, grup
   return [...vistos.values()];
 }
 const nForms = (n: number) => (n === 1 ? "1 formulário" : `${n} formulários`);
-const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 
-/** A confirmação inline (como «Confirmar o modelo»): diz o que se perde e deixa cancelar. */
-function ConfirmarAlteracao({ texto, ok, onOk, onCancel }: { texto: string; ok: string; onOk: () => void; onCancel: () => void }) {
+/**
+ * A confirmação inline (como «Confirmar o modelo»): diz o que se perde e deixa cancelar. role=alertdialog para o leitor de ecrã a anunciar;
+ * o foco vai para «Cancelar» (a opção segura) e, ao fechar, volta ao botão que a pediu (`origem`).
+ */
+function ConfirmarAlteracao({ texto, ok, onOk, onCancel, origem }: { texto: string; ok: string; onOk: () => void; onCancel: () => void; origem?: HTMLElement | null }) {
+  const id = useId();
+  const devolver = () => { if (origem?.isConnected) origem.focus(); };
   return (
-    <div role="group" aria-label="Confirmar a alteração" className="flex flex-wrap items-center gap-3 border-l-2 border-primary py-2 pl-4 animate-in fade-in-0">
-      <p className="flex-1 text-[15px]">{texto}</p>
-      <Button variant="ghost" className={BTN} autoFocus onClick={onCancel}>Cancelar</Button>
-      <Button variant="outline" className={BTN} onClick={onOk}>{ok}</Button>
+    <div role="alertdialog" aria-label="Confirmar a alteração" aria-describedby={id} className="flex flex-wrap items-center gap-3 border-l-2 border-primary py-2 pl-4 animate-in fade-in-0">
+      <p id={id} className="flex-1 text-[15px]">{texto}</p>
+      <Button variant="ghost" className={BTN} autoFocus onClick={() => { onCancel(); devolver(); }}>Cancelar</Button>
+      <Button variant="outline" className={BTN} onClick={() => { onOk(); devolver(); }}>{ok}</Button>
     </div>
   );
 }
+
+/** Quando ainda não se sabe o que está ligado (a leitura não acabou ou falhou), a confirmação é genérica em vez de passar sem aviso. */
+const SEM_LEITURA = "Ainda não foi possível ver se algum formulário envia respostas para esta pergunta. Se enviar, deixam de ser sugeridas.";
 
 /** 3/11 (Rúben): o editor só precisa dos ajustes; assim usa-se também fora do protótipo (Pessoas › Workflow › Campos das fases). */
 type AjustesS = Pick<Estado, "campos" | "setor">;
@@ -121,7 +129,7 @@ export function ModelosSetor({ S, run, setores = SETORES, onAplicado, ligacoes }
 }
 
 /** A fase escolhe-se num grupo de opções (rádio) e os grupos dessa fase aparecem por baixo. */
-export function EditorFases({ S, run, nomes = FASES, ligacoes }: { S: AjustesS; run: Ctx["run"]; nomes?: readonly string[]; ligacoes?: LigacaoFase[] }) {
+export function EditorFases({ S, run, nomes = FASES, ligacoes, ligacoesProntas = true }: { S: AjustesS; run: Ctx["run"]; nomes?: readonly string[]; ligacoes?: LigacaoFase[]; ligacoesProntas?: boolean }) {
   const [fase, setFase] = useState(2);
   const nome = useId();
   const mexer = (g: Grupo, fn: (a: AjusteGrupo) => void) => run(() => { S.campos ??= {}; fn((S.campos[g.titulo] ??= {})); S.setor = "personalizado"; });
@@ -141,7 +149,7 @@ export function EditorFases({ S, run, nomes = FASES, ligacoes }: { S: AjustesS; 
       </fieldset>
 
       <div className="mt-6 space-y-6">
-        {GRUPOS[fase].map((g) => <EditorGrupo key={g.titulo} S={S} g={g} mexer={mexer} ligacoes={ligacoes} />)}
+        {GRUPOS[fase].map((g) => <EditorGrupo key={g.titulo} S={S} g={g} mexer={mexer} ligacoes={ligacoes} ligacoesProntas={ligacoesProntas} />)}
       </div>
     </>
   );
@@ -149,14 +157,21 @@ export function EditorFases({ S, run, nomes = FASES, ligacoes }: { S: AjustesS; 
 
 const obrigOn = (c: Def) => !!(c.obrigatorio ?? (!c.opcional && c.t !== "texto_longo"));
 
-function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: (g: Grupo, fn: (a: AjusteGrupo) => void) => void; ligacoes?: LigacaoFase[] }) {
+function EditorGrupo({ S, g, mexer, ligacoes, ligacoesProntas = true }: { S: AjustesS; g: Grupo; mexer: (g: Grupo, fn: (a: AjusteGrupo) => void) => void; ligacoes?: LigacaoFase[]; ligacoesProntas?: boolean }) {
   const a = S.campos?.[g.titulo] || {};
   const cs = camposAjustados(S.campos, g);
   const [novo, setNovo] = useState(false);
   const [abertoK, setAbertoK] = useState<string | null>(null);
   // a ligação campo do formulário -> pergunta é por grupo (título estável) e chave: renomear não a parte, apagar ou esconder sim
-  const [confirma, setConfirma] = useState<{ texto: string; ok: string; fazer: () => void } | null>(null);
-  const pedir = (n: number, texto: string, ok: string, fazer: () => void) => { if (n === 0) fazer(); else setConfirma({ texto, ok, fazer }); };
+  const [confirma, setConfirma] = useState<{ id: number; texto: string; ok: string; fazer: () => void; origem: HTMLElement | null } | null>(null);
+  const pedidos = useRef(0);
+  // `n` = formulários ligados; sem leitura (ligacoesProntas false) pede-se confirmação genérica, nunca passa sem aviso
+  const pedir = (n: number, texto: string, ok: string, fazer: () => void) => {
+    if (ligacoesProntas && n === 0) { fazer(); return; }
+    pedidos.current += 1;
+    const origem = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConfirma({ id: pedidos.current, texto: ligacoesProntas ? texto : SEM_LEITURA, ok, fazer, origem });
+  };
   const aoApagar = (c: Def, fazer: () => void) => {
     const n = formulariosDe(ligacoes, g.titulo, c.k).length;
     pedir(n, `Esta pergunta recebe respostas de ${nForms(n)}. Se a apagar, deixam de ser sugeridas.`, "Apagar a pergunta", fazer);
@@ -169,6 +184,8 @@ function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: 
     const n = formulariosDe(ligacoes, g.titulo).length;
     pedir(n, `Este grupo recebe respostas de ${nForms(n)}. Escondido, deixam de ser sugeridas.`, "Esconder o grupo", () => mexer(g, (x) => { x.oculto = true; }));
   };
+  // uma chave nova nunca coincide com a de uma pergunta que tem ligações (apagada ou não): herdaria a ligação e o mapa de opções antigos
+  const reservadas = (ligacoes ?? []).filter((l) => l.grupo === g.titulo).map((l) => l.chave);
   const mover = (k: string, dir: -1 | 1) => mexer(g, (x) => {
     const ks = cs.map((c) => c.k), i = ks.indexOf(k), j = i + dir;
     if (j < 0 || j >= ks.length) return;
@@ -190,7 +207,7 @@ function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: 
       </header>
       {confirma && (
         <div className="px-4 py-2 sm:px-5">
-          <ConfirmarAlteracao texto={confirma.texto} ok={confirma.ok} onCancel={() => setConfirma(null)} onOk={() => { const f = confirma.fazer; setConfirma(null); f(); }} />
+          <ConfirmarAlteracao key={confirma.id} texto={confirma.texto} ok={confirma.ok} origem={confirma.origem} onCancel={() => setConfirma(null)} onOk={() => { const f = confirma.fazer; setConfirma(null); f(); }} />
         </div>
       )}
       {!a.oculto && (
@@ -241,7 +258,7 @@ function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: 
                   {c.op && (
                     <div className="grid gap-2">
                       <span className="text-[15px] font-medium">Opções</span>
-                      <Opcoes op={c.op} varios={c.t === "varios"} alvosDe={(o) => alvosDaOpcao(ligacoes, g.titulo, c.k, o)} onSet={(op) => mexer(g, (x) => {
+                      <Opcoes op={c.op} varios={c.t === "varios"} semLeitura={!ligacoesProntas} alvosDe={(o) => alvosDaOpcao(ligacoes, g.titulo, c.k, o)} onSet={(op) => mexer(g, (x) => {
                         if (c.novo) x.novos = (x.novos || []).map((n) => (n.k === c.k ? { ...n, op } : n)); else x.opcoes = { ...x.opcoes, [c.k]: op };
                       })} />
                     </div>
@@ -261,7 +278,7 @@ function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: 
       {!a.oculto && (
         <div className="border-t border-border px-4 py-2 sm:px-5">
           {novo
-            ? <NovoCampo g={g} cs={cs} onCancel={() => setNovo(false)} onAdd={(c) => { mexer(g, (x) => { x.novos = [...(x.novos || []), c]; }); setNovo(false); }} />
+            ? <NovoCampo g={g} cs={cs} reservadas={reservadas} onCancel={() => setNovo(false)} onAdd={(c) => { mexer(g, (x) => { x.novos = [...(x.novos || []), c]; }); setNovo(false); }} />
             : <button type="button" onClick={() => setNovo(true)} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-[15px] font-medium hover:bg-muted"><Plus className="h-4 w-4 text-primary" aria-hidden="true" />Novo campo</button>}
         </div>
       )}
@@ -291,20 +308,31 @@ function Detalhe({ op, on, onSet }: { op: string[]; on: string[]; onSet: (detalh
   );
 }
 
-/** Os rótulos dos campos de formulário cuja tabela de correspondência aponta para esta opção. */
+/**
+ * Os rótulos dos campos de formulário que ficam afectados se esta opção sair: os que a têm como destino explícito, os que a apanham
+ * por texto igual (uma chave da tabela que se escreve como ela) e os que não têm tabela (a correspondência é por texto igual).
+ * Tirar «Outro» afecta todos os campos ligados à pergunta, porque é onde cai o que não corresponde.
+ */
 function alvosDaOpcao(ligacoes: readonly LigacaoFase[] | undefined, grupo: string, chave: string, opcao: string): string[] {
-  const alvo = semAcento(opcao);
+  const alvo = normalizarTexto(opcao);
+  const eOutro = alvo === "outro";
   return (ligacoes ?? [])
-    .filter((l) => l.grupo === grupo && l.chave === chave && Object.values(l.valores ?? {}).some((v) => typeof v === "string" && semAcento(v) === alvo))
+    .filter((l) => {
+      if (l.grupo !== grupo || l.chave !== chave) return false;
+      const tabela = Object.entries(l.valores ?? {});
+      if (eOutro || tabela.length === 0) return true;
+      return tabela.some(([k, v]) => normalizarTexto(k) === alvo || (typeof v === "string" && normalizarTexto(v) === alvo));
+    })
     .map((l) => l.field_label || l.form_nome);
 }
 
 const AVISO_VIRGULA = "Numa pergunta de escolha múltipla a opção não pode ter vírgula: as respostas guardam-se separadas por vírgulas.";
 
-function Opcoes({ op, onSet, varios = false, alvosDe }: { op: string[]; onSet: (op: string[]) => void; varios?: boolean; alvosDe?: (opcao: string) => string[] }) {
+function Opcoes({ op, onSet, varios = false, alvosDe, semLeitura = false }: { op: string[]; onSet: (op: string[]) => void; varios?: boolean; alvosDe?: (opcao: string) => string[]; semLeitura?: boolean }) {
   const [v, setV] = useState("");
   const [recusa, setRecusa] = useState(false);
-  const [tirar, setTirar] = useState<{ opcao: string; alvos: string[] } | null>(null);
+  const [tirar, setTirar] = useState<{ id: number; opcao: string; alvos: string[]; origem: HTMLElement | null } | null>(null);
+  const pedidos = useRef(0);
   const juntar = () => {
     const x = v.trim();
     if (varios && x.includes(",")) { setRecusa(true); return; }
@@ -314,7 +342,9 @@ function Opcoes({ op, onSet, varios = false, alvosDe }: { op: string[]; onSet: (
   };
   const pedirTirar = (o: string) => {
     const alvos = alvosDe?.(o) ?? [];
-    if (alvos.length === 0) onSet(op.filter((x) => x !== o)); else setTirar({ opcao: o, alvos });
+    if (!semLeitura && alvos.length === 0) { onSet(op.filter((x) => x !== o)); return; }
+    pedidos.current += 1;
+    setTirar({ id: pedidos.current, opcao: o, alvos, origem: document.activeElement instanceof HTMLElement ? document.activeElement : null });
   };
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -333,7 +363,8 @@ function Opcoes({ op, onSet, varios = false, alvosDe }: { op: string[]; onSet: (
       {tirar && (
         <div className="basis-full">
           <ConfirmarAlteracao
-            texto={`A opção “${tirar.opcao}” é o destino de uma correspondência em ${tirar.alvos.join(", ")}. Se a tirar, essas respostas deixam de ser sugeridas.`}
+            key={tirar.id} origem={tirar.origem}
+            texto={semLeitura ? SEM_LEITURA : `A opção “${tirar.opcao}” recebe respostas dos campos ${tirar.alvos.join(", ")}. Se a tirar, essas respostas deixam de ser sugeridas.`}
             ok="Tirar a opção" onCancel={() => setTirar(null)}
             onOk={() => { const o = tirar.opcao; setTirar(null); onSet(op.filter((x) => x !== o)); }}
           />
@@ -343,7 +374,7 @@ function Opcoes({ op, onSet, varios = false, alvosDe }: { op: string[]; onSet: (
   );
 }
 
-function NovoCampo({ g, cs, onAdd, onCancel }: { g: Grupo; cs: Def[]; onAdd: (c: Def) => void; onCancel: () => void }) {
+function NovoCampo({ g, cs, reservadas = [], onAdd, onCancel }: { g: Grupo; cs: Def[]; reservadas?: string[]; onAdd: (c: Def) => void; onCancel: () => void }) {
   const [l, setL] = useState("");
   const [t, setT] = useState<Tipo>("escolha");
   const [op, setOp] = useState<string[]>([]);
@@ -356,7 +387,7 @@ function NovoCampo({ g, cs, onAdd, onCancel }: { g: Grupo; cs: Def[]; onAdd: (c:
   const pronto = l.trim() && ((t !== "escolha" && t !== "varios") || op.length >= 2) && !(t === "varios" && op.some((o) => o.includes(",")));
   const criar = () => {
     if (!pronto) return;
-    onAdd({ k: chaveLivre(l, cs.map((c) => c.k)), l: l.trim(), t, op: t === "escolha" || t === "varios" ? op : undefined, novo: true, obrigatorio: obrig, bloco: bloco || undefined, min: t === "contador" ? 0 : undefined, max: t === "contador" ? 50 : undefined });
+    onAdd({ k: chaveLivre(l, [...cs.map((c) => c.k), ...reservadas]), l: l.trim(), t, op: t === "escolha" || t === "varios" ? op : undefined, novo: true, obrigatorio: obrig, bloco: bloco || undefined, min: t === "contador" ? 0 : undefined, max: t === "contador" ? 50 : undefined });
   };
   return (
     <div className="grid gap-4 py-3 animate-in fade-in-0" role="group" aria-label={`Novo campo em ${g.titulo}`}>

@@ -1,5 +1,5 @@
 // CRM (4/11): a resposta de um campo do formulário online, traduzida para a pergunta da fase a que o campo está ligado
-// (form_fields.phase_field_mapping). A base (neg_sugestoes_formulario) entrega o valor bruto e a tabela de correspondência;
+// (a ligação vive na tabela form_field_phase_links). A base (neg_sugestoes_formulario) entrega o valor bruto e a tabela de correspondência;
 // a tradução faz-se aqui porque as opções dos campos de sistema só existem em campos.ts. Função pura: sem rede, sem estado.
 // Ordem para cada valor do formulário: tabela explícita, texto igual (sem maiúsculas nem acentos), «Outro» (se a pergunta o tem), nada.
 import { camposAjustados, type CfgCampos, type Def } from "./campos";
@@ -18,14 +18,14 @@ export interface SugestaoBase {
   valores?: Record<string, string | null> | null;
 }
 
-/** Sem maiúsculas nem acentos, espaços normalizados. */
+/** Sem maiúsculas nem acentos, espaços normalizados (a gama dos acentos combinantes vai em escapes: não depende da codificação do ficheiro). */
 export const normalizarTexto = (s: string): string =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
-/** A pergunta (já com os ajustes da organização) ou null se não existe ou está escondida. */
+/** A pergunta (já com os ajustes da organização) ou null se não existe, ou se ela ou o grupo estão escondidos. */
 function perguntaDe(grupo: string, chave: string, cfg: CfgCampos | undefined): Def | null {
   const g = GRUPOS_AJUSTAVEIS.find((x) => x.titulo === grupo);
-  if (!g) return null;
+  if (!g || cfg?.[grupo]?.oculto) return null;
   const c = camposAjustados(cfg, g).find((x) => x.k === chave);
   return !c || c.escondido ? null : c;
 }
@@ -41,6 +41,17 @@ function itens(valor: unknown): string[] {
 
 const SIM = new Set(["sim", "true", "yes", "s", "1"]);
 const NAO = new Set(["nao", "false", "no", "n", "0"]);
+const NUMERO = /^-?\d+([.,]\d+)?$/;
+const DATA = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Uma data AAAA-MM-DD que existe no calendário (2026-02-31 não). */
+function dataReal(t: string): boolean {
+  const m = DATA.exec(t);
+  if (!m) return false;
+  const [a, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const d = new Date(Date.UTC(a, mes - 1, dia));
+  return d.getUTCFullYear() === a && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
 
 /** Um valor do formulário → uma opção da pergunta (a escrita da pergunta), ou null. */
 function paraOpcao(item: string, op: readonly string[], valores: Record<string, string | null> | null | undefined): string | null {
@@ -64,11 +75,14 @@ export function traduzirSugestao(s: SugestaoBase, cfg: CfgCampos | undefined): s
   const op = c.op ?? [];
   switch (c.t) {
     case "escolha": {
-      // só preenche com exactamente UM valor mapeado distinto
-      const mapeados = new Set(vs.map((v) => paraOpcao(v, op, s.valores)).filter((x): x is string => !!x));
-      return mapeados.size === 1 ? [...mapeados][0] : null;
+      // só preenche se o formulário trouxe uma única opção que corresponda: um valor sem correspondência ao lado de outro deixa por responder
+      const mapeados = vs.map((v) => paraOpcao(v, op, s.valores));
+      if (mapeados.some((x) => x === null)) return null;
+      const distintos = new Set(mapeados as string[]);
+      return distintos.size === 1 ? [...distintos][0] : null;
     }
     case "varios": {
+      // aqui os valores sem correspondência descartam-se: fica o que corresponde
       const mapeados = new Set(vs.map((v) => paraOpcao(v, op, s.valores)).filter((x): x is string => !!x));
       // o valor guarda-se como «A, B»: uma opção com vírgula partiria a lista
       if (!mapeados.size || [...mapeados].some((x) => x.includes(","))) return null;
@@ -80,19 +94,22 @@ export function traduzirSugestao(s: SugestaoBase, cfg: CfgCampos | undefined): s
       return SIM.has(n) ? "Sim" : NAO.has(n) ? "Não" : null;
     }
     case "numero": {
-      const t = vs[0].replace(",", ".");
-      return Number.isFinite(Number(t)) ? t : null;
+      const t = vs[0];
+      return NUMERO.test(t) ? t.replace(",", ".") : null;
     }
+    case "data":
+      return dataReal(vs[0]) ? vs[0] : null;
     case "texto":
     case "texto_longo":
-    case "data":
       return vs.join(", ");
     default:
       return null; // o contador fica de fora
   }
 }
 
-/** As sugestões de um negócio como linhas de resposta (sugerido: true), uma por chave, sem repetir as chaves de `jaTem`. */
+/** As sugestões de um negócio como linhas de resposta (sugerido: true), uma por chave, sem repetir as chaves de `jaTem`.
+ *  `jaTem` é qualquer chave que já tenha linha: equivale à regra do servidor (negocio_respostas com divisao = ''), porque
+ *  LinhaResposta não tem divisão. Uma chave respondida, ou apagada de propósito (valor vazio), nunca volta como sugestão. */
 export function linhasSugeridas(
   sugestoes: readonly SugestaoBase[], cfg: CfgCampos | undefined, jaTem: ReadonlySet<string>,
 ): { campo_chave: string; valor: string; sugerido: true }[] {

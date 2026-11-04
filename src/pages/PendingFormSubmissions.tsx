@@ -345,9 +345,8 @@ export default function PendingFormSubmissions() {
     setLoading(true);
     try {
       const submissions = await fetchPendingSubmissions(orgId);
-      // Best-effort: o que pré-preenche o negócio. Qualquer erro deixa a página como está (sem este bloco).
-      const fase = await carregarSugestoesFase(supabase, orgId, submissions.map((s: any) => s.id).filter(Boolean));
-      setFaseCfg(fase.cfg);
+      // Best-effort: o que pré-preenche o negócio. Arranca já, em paralelo com as outras leituras; qualquer erro deixa a página como está.
+      const fasePromessa = carregarSugestoesFase(supabase, orgId, submissions.map((s: any) => s.id).filter(Boolean));
 
       const entityIds = Array.from(new Set(submissions.map((s: any) => s.entity_id).filter(Boolean))) as string[];
       const campaignIds = Array.from(new Set(submissions.map((s: any) => s.campaign_id).filter(Boolean))) as string[];
@@ -363,7 +362,7 @@ export default function PendingFormSubmissions() {
         ),
       ) as string[];
 
-      const [namesRead, campaignNames, formNames, candidateById] = await Promise.all([
+      const [namesRead, campaignNames, formNames, candidateById, fase] = await Promise.all([
         fetchEntityNames(orgId, entityIds),
         campaignIds.length
           ? supabase.from("campaigns").select("id, name").in("id", campaignIds)
@@ -372,7 +371,9 @@ export default function PendingFormSubmissions() {
           ? supabase.from("forms").select("id, name").in("id", formIds)
           : Promise.resolve({ data: [] as any[] }),
         fetchConflictCandidates(orgId, candidateIds),
+        fasePromessa,
       ]);
+      setFaseCfg(fase.cfg);
 
       const nameById = namesRead.names;
       const campaignNameById = Object.fromEntries((campaignNames.data || []).map((c: any) => [c.id, c.name]));

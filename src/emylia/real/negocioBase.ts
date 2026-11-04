@@ -42,8 +42,15 @@ export function negocioDoLido(n: NegocioLido): Negocio {
 /** A função ainda não está na base (a migration por aplicar): PostgREST PGRST202, Postgres 42883. */
 export const semFuncao = (e: { code?: string } | null) => e?.code === "PGRST202" || e?.code === "42883";
 
+/** Só os elementos que servem (negocio_id, grupo e chave em texto): um null ou um objeto torto não pode rebentar a leitura. */
+const eSugestao = (x: unknown): x is SugestaoBase => {
+  const o = x as Record<string, unknown> | null;
+  return !!o && typeof o === "object" && typeof o.negocio_id === "string" && typeof o.grupo === "string" && typeof o.chave === "string";
+};
+
 /** 4/11: as respostas do formulário online ligadas a perguntas da fase (neg_sugestoes_formulario). Best-effort: qualquer erro
- *  (função por aplicar incluída) deixa os negócios abrirem sem sugestões; nunca lança. */
+ *  (função por aplicar incluída) deixa os negócios abrirem sem sugestões; nunca lança. Acima de 5000 negócios a função devolve
+ *  `truncado: true` e as sugestões dos restantes faltam em silêncio (só há um aviso na consola). */
 async function lerSugestoes(sb: SupabaseClient, org: string): Promise<SugestaoBase[]> {
   try {
     const { data, error } = await sb.rpc("neg_sugestoes_formulario" as never, { p_org: org } as never);
@@ -52,10 +59,10 @@ async function lerSugestoes(sb: SupabaseClient, org: string): Promise<SugestaoBa
       return [];
     }
     // a função devolve {sugestoes, truncado}; tolera-se também um array simples
-    if (Array.isArray(data)) return data as SugestaoBase[];
+    if (Array.isArray(data)) return data.filter(eSugestao);
     const o = data as { sugestoes?: unknown; truncado?: unknown } | null;
     if (o?.truncado === true) console.warn("[negócios] sugestões truncadas: há mais negócios do que o limite");
-    return Array.isArray(o?.sugestoes) ? (o.sugestoes as SugestaoBase[]) : [];
+    return Array.isArray(o?.sugestoes) ? o.sugestoes.filter(eSugestao) : [];
   } catch (e) {
     console.warn("[negócios] as sugestões do formulário não carregaram:", (e as Error).message);
     return [];

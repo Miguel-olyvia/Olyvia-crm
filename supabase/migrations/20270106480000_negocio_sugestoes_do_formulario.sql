@@ -283,7 +283,7 @@ ALTER TABLE public.form_field_phase_links FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.form_field_phase_links FROM PUBLIC, anon, authenticated, service_role;
 
 COMMENT ON TABLE public.form_field_phase_links IS
-'Liga um campo do formulario a uma pergunta de fase do Negocio (mapping {grupo, chave, valores?}). Fechada: RLS forcada sem politicas e sem privilegios para a API; so neg_guardar_ligacao_fase escreve e as RPCs neg_* leem. organization_id e form_id conferidos por trigger. Desde 20270105800000.';
+'Liga um campo do formulario a uma pergunta de fase do Negocio (mapping {grupo, chave, valores?}). Fechada: RLS forcada sem politicas e sem privilegios para a API; so neg_guardar_ligacao_fase escreve e as RPCs neg_* leem. organization_id e form_id conferidos por trigger. Desde 20270106480000.';
 COMMENT ON COLUMN public.form_field_phase_links.mapping IS
 '{grupo, chave, valores?}: grupo = titulo estavel do grupo; chave = k da pergunta; valores = rotulo do formulario -> rotulo da pergunta ou null. So a forma e validada (fn_neg_mapeamento_fase_valido).';
 
@@ -689,23 +689,23 @@ REVOKE ALL ON FUNCTION public.fn_neg_sugestoes_de(uuid, uuid[]) FROM PUBLIC, ano
 REVOKE ALL ON FUNCTION public.fn_form_field_phase_links_coerente() FROM PUBLIC, anon, authenticated, service_role;
 
 COMMENT ON FUNCTION public.fn_neg_mapeamento_fase_valido(jsonb) IS
-'INTERNA. CHECK de form_field_phase_links.mapping e validacao de neg_guardar_ligacao_fase: objecto so com grupo (texto 1..80), chave (^[a-z][a-z0-9_]{0,59}$) e valores opcional (objecto ate 60 entradas, chaves 1..200, valores null ou texto 1..120), ate 8 KB. NULL = false. So a forma. Desde 20270105800000.';
+'INTERNA. CHECK de form_field_phase_links.mapping e validacao de neg_guardar_ligacao_fase: objecto so com grupo (texto 1..80), chave (^[a-z][a-z0-9_]{0,59}$) e valores opcional (objecto ate 60 entradas, chaves 1..200, valores null ou texto 1..120), ate 8 KB. NULL = false. So a forma. Desde 20270106480000.';
 COMMENT ON FUNCTION public.fn_neg_valor_sugerido(jsonb) IS
-'INTERNA. Normaliza um valor de form_submissions.field_values: texto nao vazio ate 2000, numero/booleano como texto, lista de textos nao vazios (ate 100, cada ate 2000); senao NULL. Desde 20270105800000.';
+'INTERNA. Normaliza um valor de form_submissions.field_values: texto nao vazio ate 2000, numero/booleano como texto, lista de textos nao vazios (ate 100, cada ate 2000); senao NULL. Desde 20270106480000.';
 COMMENT ON FUNCTION public.fn_neg_sugestoes_de(uuid, uuid[]) IS
-'INTERNA. Nucleo de neg_sugestoes_formulario e neg_sugestoes_submissoes: para as submissoes da organizacao (nao apagadas, formulario da organizacao), os campos activos ligados (form_field_phase_links) com valor. Nao verifica permissao nem ambito. Desde 20270105800000.';
+'INTERNA. Nucleo de neg_sugestoes_formulario e neg_sugestoes_submissoes: para as submissoes da organizacao (nao apagadas, formulario da organizacao), os campos activos ligados (form_field_phase_links) com valor. Nao verifica permissao nem ambito. Desde 20270106480000.';
 COMMENT ON FUNCTION public.fn_form_field_phase_links_coerente() IS
-'INTERNA. Trigger: form_id e organization_id de form_field_phase_links tem de ser os do campo e do formulario (23514 ligacao_incoerente). Desde 20270105800000.';
+'INTERNA. Trigger: form_id e organization_id de form_field_phase_links tem de ser os do campo e do formulario (23514 ligacao_incoerente). Desde 20270106480000.';
 COMMENT ON FUNCTION public.neg_ler_ligacao_fase(uuid, uuid) IS
-'Negocio (authenticated). As ligacoes de um formulario da organizacao, incluindo as de campos inactivos: [{field_id, mapping}]. pessoas.config (42501); formulario de outra organizacao ou inexistente: NG009 formulario_indisponivel. Desde 20270105800000.';
+'Negocio (authenticated). As ligacoes de um formulario da organizacao, incluindo as de campos inactivos: [{field_id, mapping}]. pessoas.config (42501); formulario de outra organizacao ou inexistente: NG009 formulario_indisponivel. Desde 20270106480000.';
 COMMENT ON FUNCTION public.neg_guardar_ligacao_fase(uuid, uuid, jsonb) IS
-'Negocio (authenticated). Grava (upsert) ou tira (p_mapping NULL ou jsonb null) a ligacao de um campo a uma pergunta de fase; devolve {field_id, mapping, alterada}. pessoas.config (42501). NG009: pedido_invalido, mapeamento_invalido, campo_indisponivel. 23505 ligacao_repetida. Desde 20270105800000.';
+'Negocio (authenticated). Grava (upsert) ou tira (p_mapping NULL ou jsonb null) a ligacao de um campo a uma pergunta de fase; devolve {field_id, mapping, alterada}. pessoas.config (42501). NG009: pedido_invalido, mapeamento_invalido, campo_indisponivel. 23505 ligacao_repetida. Desde 20270106480000.';
 COMMENT ON FUNCTION public.neg_ligacoes_fase(uuid) IS
-'Negocio (authenticated). Campos activos ligados a perguntas de fase: [{form_id, form_nome, field_id, field_label, grupo, chave, valores}]. pessoas.config (42501). Desde 20270105800000.';
+'Negocio (authenticated). Campos activos ligados a perguntas de fase: [{form_id, form_nome, field_id, field_label, grupo, chave, valores}]. pessoas.config (42501). Desde 20270106480000.';
 COMMENT ON FUNCTION public.neg_sugestoes_formulario(uuid, uuid[]) IS
-'Negocio (authenticated). {sugestoes: [{negocio_id, submissao_id, grupo, chave, tipo_campo, valor, valores}], truncado}. So negocios no ambito do utilizador (system admin; papel do RH; ou a regra de negocios_select por crm_scope_keys), os outros omitidos sem erro. Por negocio, a submissao ligada mais antiga cujo formulario tem campos activos ligados; exclui a chave que ja tenha linha em negocio_respostas (divisao vazia). p_negocios NULL = no maximo 5000 (numero mais alto; truncado=true se havia mais); senao ate 500 (NG009). pessoas.view (42501). Desde 20270105800000.';
+'Negocio (authenticated). {sugestoes: [{negocio_id, submissao_id, grupo, chave, tipo_campo, valor, valores}], truncado}. So negocios no ambito do utilizador (system admin; papel do RH; ou a regra de negocios_select por crm_scope_keys), os outros omitidos sem erro. Por negocio, a submissao ligada mais antiga cujo formulario tem campos activos ligados; exclui a chave que ja tenha linha em negocio_respostas (divisao vazia). p_negocios NULL = no maximo 5000 (numero mais alto; truncado=true se havia mais); senao ate 500 (NG009). pessoas.view (42501). Desde 20270106480000.';
 COMMENT ON FUNCTION public.neg_sugestoes_submissoes(uuid, uuid[]) IS
-'Negocio (authenticated). Sugestoes das submissoes pendentes: array com negocio_id null; ate 200 ids (NG009). pessoas.view (42501). Exige a organizacao CRM do utilizador (tambem ao system admin) e a entidade no ambito (o portao de rpc_resolve_form_submission); o resto e omitido sem erro. Desde 20270105800000.';
+'Negocio (authenticated). Sugestoes das submissoes pendentes: array com negocio_id null; ate 200 ids (NG009). pessoas.view (42501). Exige a organizacao CRM do utilizador (tambem ao system admin) e a entidade no ambito (o portao de rpc_resolve_form_submission); o resto e omitido sem erro. Desde 20270106480000.';
 
 -- ==============================================================================
 -- 7. Conferir

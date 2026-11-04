@@ -72,7 +72,8 @@ describe("Envios de formulário: o que se vê", () => {
     expect(screen.getByText("Ana Ribeiro")).toBeInTheDocument();
     expect(estado.tabelasLidas).toContain("anew_entities");
     for (const antiga of ["anew_leads", "anew_clients", "anew_contacts"]) expect(estado.tabelasLidas).not.toContain(antiga);
-  });
+    // o primeiro teste paga o import da página (agora com o motor dos campos das fases): 5 s não chegam numa máquina ocupada
+  }, 20000);
 
   it("avisa que os dados enviados não estão verificados", async () => {
     await desenhar();
