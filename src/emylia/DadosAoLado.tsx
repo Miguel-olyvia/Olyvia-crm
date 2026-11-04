@@ -12,8 +12,10 @@ export function DadosAoLado({ d }: { d: Negocio }) {
   const servico = nomeLinha(d) + (d.f.servico_validado === "Sim" ? " · confirmado" : "");
   const linhas: [string, string][] = [
     ["Nome", d.nome], ["Telefone", telEmail ? "" : d.tel], ["Email", d.f.email || (telEmail ? d.tel : "")], ["Morada", morada || ""],
-    ["Tipo de serviço", servico], ["NIF", d.f.nif || ""], ["Empresa", x?.empresa ?? ""], ["Fonte", x?.fonte ?? ""], ["Campanha", x?.campanha ?? ""],
-    ["Comercial", x?.comercial ?? ""], ["Notas da lead", x?.notas ?? ""], ...(x?.respostas ?? []).map((r): [string, string] => [r.l, r.v]),
+    // 4/11 (Rúben): por baixo do tipo de serviço, o que o cliente pediu (e as notas da lead)
+    ["Tipo de serviço", servico], ["O que o cliente pediu", d.f.pedido || ""], ["Notas da lead", x?.notas && x.notas !== d.f.pedido ? x.notas : ""],
+    ["NIF", d.f.nif || ""], ["Empresa", x?.empresa ?? ""], ["Fonte", x?.fonte ?? ""], ["Campanha", x?.campanha ?? ""],
+    ["Comercial", x?.comercial ?? ""], ...(x?.respostas ?? []).map((r): [string, string] => [r.l, r.v]),
   ];
   return (
     <aside aria-labelledby={`ao-lado-${d.id}`} className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] lg:sticky lg:top-4">
