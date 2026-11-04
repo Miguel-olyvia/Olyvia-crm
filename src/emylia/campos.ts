@@ -85,7 +85,7 @@ export const CONTACTO: Grupo[] = [
     campos: [
       { k: "imovel", l: "Tipo de imóvel", t: "escolha", op: ["Apartamento", "Moradia", "Loja", "Escritório"] },
       { k: "posse", l: "O cliente é", t: "escolha", op: ["Proprietário", "Inquilino", "Administração"] },
-      { k: "decisor", l: "Quem decide", t: "escolha", op: ["O próprio", "Com a família", "Administração"] },
+      { k: "decisor", l: "Quem decide", t: "escolha", op: ["O próprio", "O proprietário", "Com a família", "Administração"] }, // 4/11 (Rúben): «O proprietário» (o cliente é inquilino)
       { k: "orc_cliente", l: "Orçamento do cliente", t: "escolha", op: ["Até 3.000 €", "3.000 a 6.000 €", "6.000 a 10.000 €", "Mais de 10.000 €", "Não sabe"] },
       { k: "prazo", l: "Para quando", t: "escolha", op: ["Urgente (1 mês)", "1 a 3 meses", "3 a 6 meses", "Sem pressa"] },
       { k: "outros_orc", l: "Pediu outros orçamentos", t: "sim_nao" },
