@@ -33,6 +33,10 @@
 // ESCONDIDAS_COM_GUARDA. operations.orders.view/view_all e operations.costs.view FICAM: o Frota (Ligações / ligar viatura a uma
 // ordem) lê ops_ordem pela policy ops_ordem_select (orders.view + ops_pode_ver_ordem, onde entra view_all) e rpc_fleet_link_order
 // só lança o custo da deslocação na ordem com operations.costs.view.
+//
+// 04/11/2026 (aprovado): a linha Contactos (contacts.view/create/edit/import) saiu do editor — ver PERMISSOES_ESCONDIDAS.contacts.
+// A linha Clientes FICA: o campo Cliente da «Nova encomenda manual» em /client-orders (EntitySearchInput) filtra os clientes pelo
+// âmbito de clients.view (getPermissionScope), e as policies/RPCs dos clientes continuam a verificá-las.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
@@ -49,17 +53,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   ],
   // Só verificadas no servidor (policies/RPCs/edge functions): clients.create (rpc_confirm_direct_sale, policies anew_clients/anew_entities),
   // clients.delete (policies anew_clients e anew_entity_*), clients.import (policies de INSERT/UPDATE de anew_entity_roles,
-  // 20270102130000). clients.edit também em ClientDetailsDialog, que só AnewClients importa.
+  // 20270102130000). clients.edit também em ClientDetailsDialog, que só AnewClients importa. clients.view tem ação na app viva: o âmbito
+  // dela filtra os clientes do campo Cliente (EntitySearchInput) na «Nova encomenda manual» de /client-orders (e em /deals).
   clients: [
     "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
-  ],
-  // Só verificadas no servidor (policies/RPCs/edge functions): todas. Não se escondem porque o assistente (AIAssistant, aberto pelo
-  // InternalChatWidget) as exige no ai-assistant: contacts.create (createContact, convertLead), contacts.edit (updateContact,
-  // deleteContact e as ferramentas de emails/telefones/morada/etiquetas da entidade em tools/entities.ts) e contacts.view
-  // (getContactDetails); contacts.import nas policies de anew_entity_roles (20270102130000). 03/11/2026: no editor ficam em
-  // Negócios › Pessoas: leads e clientes (o grupo CRM deixou de existir); contacts.delete passou para as escondidas.
-  contacts: [
-    "contacts.create", "contacts.edit", "contacts.import", "contacts.view",
   ],
   dashboard: [
     "dashboard.view",
@@ -266,8 +263,13 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "company_groups.create", "company_groups.delete", "company_groups.edit", "company_groups.view",
   ],
   // contacts.delete: só policies de anew_contacts (antiga) e de anew_entity_* (que aceitam também pessoas.delete).
+  // 04/11/2026 (aprovado): a linha Contactos sai toda do editor — não há ecrã de Contactos na app viva (as pessoas vivem em Pessoas).
+  // O assistente (ai-assistant) passou a pedir pessoas.view/create/edit em vez de contacts.view/create/edit, e as funções/policies dos
+  // contactos aceitam o pessoas.* equivalente além do antigo (20270106710000). contacts.import só nas policies de anew_entity_roles,
+  // que já aceitam pessoas.create/edit. Os códigos ficam na base e os papéis que os têm mantêm-nos.
   contacts: [
-    "contacts.delete", "contacts.export", "contacts.export_sensitive", "contacts.view_details",
+    "contacts.create", "contacts.delete", "contacts.edit", "contacts.export", "contacts.export_sensitive", "contacts.import",
+    "contacts.view", "contacts.view_details",
   ],
   departments: [
     "departments.create", "departments.delete", "departments.edit", "departments.view",
