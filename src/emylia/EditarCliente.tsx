@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { emailOk, modoReal } from "./acessosPortal";
-import { temPortal } from "./AcessoPortalNegocio";
+import { temPortal, usePodeAcessoPortal } from "./AcessoPortalNegocio";
 import { TelefoneIndicativo } from "./TelefoneIndicativo";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
@@ -66,13 +66,15 @@ export function EditarCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   const emailMudou = x.email.trim().toLowerCase() !== dadosDoNegocio(d).email.trim().toLowerCase() && !!x.email.trim();
   const comPortal = modoReal() && temPortal(d);
   const [reenviar, setReenviar] = useState(true);
+  // 04/11/2026: reenviar o acesso pede a permissão real (usePodeAcessoPortal); sem ela a opção fica desligada e não se reenvia
+  const perm = usePodeAcessoPortal(d, comPortal);
   const gravar = () => {
     const e = errosDados(x);
     setErros(e);
     if (e.length) return;
     ctx.run(() => {
       const mudou = aplicarDados(d, x);
-      const portal = mudou.includes("email") && comPortal && reenviar;
+      const portal = mudou.includes("email") && comPortal && reenviar && perm.pode;
       if (mudou.length) guardar?.(d, x, mudou, { portal });
       if (portal) ctx.A.acessoPortal(d.id);
     });
@@ -100,8 +102,9 @@ export function EditarCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       </div>
       {emailMudou && comPortal && (
         <label className="mt-3 flex items-center gap-2 text-[15px]">
-          <input type="checkbox" checked={reenviar} onChange={(e) => setReenviar(e.target.checked)} className="h-5 w-5" />
+          <input type="checkbox" checked={reenviar && perm.pode} disabled={!perm.pode} onChange={(e) => setReenviar(e.target.checked)} className="h-5 w-5" />
           Enviar o acesso ao portal para o email novo
+          {!perm.pode && !perm.aLer && <span className="text-sm text-muted-foreground" title={perm.motivo}>(sem permissão)</span>}
         </label>
       )}
       {erros.length > 0 && <ul role="alert" className="mt-3 space-y-1 text-[15px] text-destructive">{erros.map((e) => <li key={e}>{e}</li>)}</ul>}

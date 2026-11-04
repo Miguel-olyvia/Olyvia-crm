@@ -1,6 +1,10 @@
 // "Editar os dados do cliente" (29/10): o que se valida, o que muda no negócio e quem é avisado (o contacto do CRM e o portal).
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+// 04/11/2026: o «Acesso ao portal» pede a permissão real (usePodeEnviarAoPortal); aqui quem está ligado gere o portal
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
+vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "org-1" } }) }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: (c: string) => c === "portal.manage", loading: false }) }));
 import { seed, type Negocio } from "./motor";
 import { definirModoReal } from "./acessosPortal";
 import { aplicarDados, dadosDoNegocio, definirGuardarCliente, EditarCliente, errosDados } from "./EditarCliente";

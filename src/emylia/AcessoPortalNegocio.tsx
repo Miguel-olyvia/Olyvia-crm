@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { modoReal, pedirEmailPortal, usePedidoEmail } from "./acessosPortal";
 import { podeTentarDeNovo } from "./estadoContaPortal";
 import { TelefoneIndicativo } from "./TelefoneIndicativo";
+import { usePodeEnviarAoPortal } from "@/hooks/usePodeEnviarPropostaPortal";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
@@ -17,13 +18,24 @@ export const temPortal = (d: Negocio): boolean => !!d.orc?.enviada || !!d.orc?.v
 
 /** O botão do cabeçalho (só na 2.0, com a base ligada: no protótipo de sempre as contas são de teste). */
 export function BotaoAcessoPortal({ ctx, d, className }: { ctx: Ctx; d: Negocio; className?: string }) {
-  if (!modoReal() || !temPortal(d)) return null;
+  const mostra = modoReal() && temPortal(d);
+  const perm = usePodeAcessoPortal(d, mostra);
+  if (!mostra) return null;
   return (
-    <button type="button" onClick={() => ctx.run(() => ctx.A.acessoPortal(d.id))}
-      className={className ?? "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline"}>
+    <button type="button" onClick={() => { if (perm.pode) ctx.run(() => ctx.A.acessoPortal(d.id)); }} disabled={!perm.pode}
+      title={!perm.pode && !perm.aLer ? perm.motivo : undefined}
+      className={(className ?? "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline") + " disabled:cursor-not-allowed disabled:opacity-50"}>
       <KeyRound className="h-4 w-4" aria-hidden="true" />Acesso ao portal
+      {!perm.pode && !perm.aLer && <span className="ml-1 text-xs text-muted-foreground">(sem permissão)</span>}
     </button>
   );
+}
+
+/** 04/11/2026: reenviar o acesso ao portal (o contrato, se houver, senão a proposta — o mesmo documento de A.acessoPortal) pede a
+ *  permissão REAL de quem está ligado, a do servidor (create-client-portal-access): portal.manage OU negocios.proposta.enviar
+ *  (proposta) / client_contracts.send_signature (contrato). Não usa podeNeg (a tabela fixa do «A ver como»). */
+export function usePodeAcessoPortal(d: Negocio, ativo = true) {
+  return usePodeEnviarAoPortal(d.orc?.contrato ? "contract" : "proposal", ativo);
 }
 
 const ENVIO: Record<string, string> = {
@@ -33,6 +45,7 @@ const ENVIO: Record<string, string> = {
 /** O pedido do email (quando o envio ao portal esperou por ele) e o estado da conta real do cliente. */
 export function EstadoAcessoPortal({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const pedido = usePedidoEmail();
+  const perm = usePodeAcessoPortal(d, !!d.acesso && modoReal());
   const [email, setEmail] = useState(d.f.email || "");
   // 29/10: o telefone (com indicativo do país) também se pede quando falta: o código de assinatura vai por SMS.
   const [telefone, setTelefone] = useState(d.tel && !d.tel.includes("@") ? d.tel : "");
@@ -90,7 +103,10 @@ export function EstadoAcessoPortal({ ctx, d }: { ctx: Ctx; d: Negocio }) {
               : `A preparar a conta do portal (${a.email})…`}
           </span>
           {podeTentarDeNovo(a) && modoReal() && (
-            <Button type="button" variant="outline" className="h-10" onClick={() => ctx.run(() => ctx.A.acessoPortal(d.id))}>Tentar de novo</Button>
+            <Button type="button" variant="outline" className="h-10" disabled={!perm.pode} title={!perm.pode && !perm.aLer ? perm.motivo : undefined}
+              onClick={() => { if (perm.pode) ctx.run(() => ctx.A.acessoPortal(d.id)); }}>
+              Tentar de novo{!perm.pode && !perm.aLer && <span className="ml-1 text-xs text-muted-foreground">(sem permissão)</span>}
+            </Button>
           )}
         </p>
       )}
