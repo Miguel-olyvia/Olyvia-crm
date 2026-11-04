@@ -45,6 +45,7 @@ class Detetor:
 
     def __init__(self):
         self.piso = PISO_MIN
+        self.ultimo_rms = 0.0
         self.buffer: list[np.ndarray] = []
         self.pre: list[np.ndarray] = []
         self.a_falar = False
@@ -56,19 +57,21 @@ class Detetor:
         """Devolve (fala, inicio_s) quando uma fala termina; senão None."""
         dur = len(bloco) / TAXA
         rms = float(np.sqrt((bloco ** 2).mean()))
-        if not self.a_falar:  # desce depressa, sobe devagar
-            self.piso = max(PISO_MIN, rms if rms < self.piso else self.piso * 0.999 + rms * 0.001)
-        limiar = max(self.piso * 3.5, PISO_MIN * 2)
+        self.ultimo_rms = rms
+        # piso de ruído: desce logo que há um bloco mais baixo, sobe devagar (cerca de 15 s)
+        self.piso = max(PISO_MIN, rms if rms < self.piso else self.piso + (rms - self.piso) * 0.002)
+        limiar = max(self.piso * 3.0, PISO_MIN * 2)
         com_som = rms > limiar
         resultado = None
         if self.a_falar:
             self.buffer.append(bloco)
             self.silencio = 0.0 if com_som else self.silencio + dur
             duracao = sum(len(b) for b in self.buffer) / TAXA
-            if self.silencio >= PAUSA_FIM_S or duracao >= FALA_MAX_S:
+            pausa = PAUSA_FIM_S if duracao < 8 else PAUSA_FIM_S / 2
+            if self.silencio >= pausa or duracao >= FALA_MAX_S:
                 fala = np.concatenate(self.buffer)
-                if self.silencio >= PAUSA_FIM_S:
-                    fala = fala[: len(fala) - int((self.silencio - 0.2) * TAXA)]  # tira o silêncio final
+                if self.silencio >= pausa:
+                    fala = fala[: len(fala) - int(max(0, self.silencio - 0.2) * TAXA)]  # tira o silêncio final
                 self.buffer, self.a_falar, self.silencio = [], False, 0.0
                 if len(fala) >= FALA_MIN_S * TAXA:
                     resultado = (fala, self.inicio_s)
@@ -167,6 +170,16 @@ def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool
         caminho_json.write_text(json.dumps({"ficheiro": f"{nome}.wav", "modo": "direto (microfone)", "segmentos": segmentos},
                                            ensure_ascii=False, indent=2), encoding="utf-8")
 
+    wav = SAIDA / f"{nome}.wav"
+
+    def guardar_wav():
+        pcm = np.concatenate(gravacao) if gravacao else np.zeros(0, dtype=np.float32)
+        with wave.open(str(wav), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(TAXA)
+            w.writeframes((np.clip(pcm, -1, 1) * 32767).astype(np.int16).tobytes())
+        return pcm
+
+    ultimo_nivel = ultima_gravacao = time.time()
     try:
         while not parar.is_set():
             try:
@@ -181,6 +194,15 @@ def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool
             r = detetor.alimentar(bloco)
             if r:
                 tratar(*r)
+            agora = time.time()
+            if not ficheiro and agora - ultimo_nivel >= 5:
+                ultimo_nivel = agora
+                barra = "▮" * min(20, int(detetor.ultimo_rms * 100))
+                estado = "a ouvir fala" if detetor.a_falar else "silêncio"
+                print(f"{COR['cinza']}   som {detetor.ultimo_rms:.3f} piso {detetor.piso:.3f} {estado} {barra}{COR['fim']}", flush=True)
+            if agora - ultima_gravacao >= 30:
+                ultima_gravacao = agora
+                guardar_wav()
     except KeyboardInterrupt:
         pass
     r = detetor.despejar()
@@ -188,11 +210,7 @@ def correr(nome: str, comercial: str | None, ficheiro: Path | None, rapido: bool
         tratar(*r)
     parar.set()
 
-    pcm = np.concatenate(gravacao) if gravacao else np.zeros(0, dtype=np.float32)
-    wav = SAIDA / f"{nome}.wav"
-    with wave.open(str(wav), "wb") as w:
-        w.setnchannels(1); w.setsampwidth(2); w.setframerate(TAXA)
-        w.writeframes((np.clip(pcm, -1, 1) * 32767).astype(np.int16).tobytes())
+    pcm = guardar_wav()
     txt = SAIDA / f"{nome}.transcricao.txt"
     txt.write_text("\n".join(f"[{s['inicio']:6.1f}s] {s['falante'].capitalize()}: {s['texto']}" for s in segmentos), encoding="utf-8")
     caminho_json.write_text(json.dumps({"ficheiro": wav.name, "modo": "direto (microfone)", "modelo": "faster-whisper large-v3",

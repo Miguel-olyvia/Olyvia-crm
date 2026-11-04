@@ -64,6 +64,9 @@ PROMPT = ("Chamada telefónica em português de Portugal entre um comercial da M
           "remodelações, e um cliente. Fala-se de casa de banho, cozinha, tipologia, elevador, "
           "estacionamento, orçamento e visita.")
 
+# Sem prompt inicial: com fala fora do tema o whisper devolvia o próprio prompt
+# (visto numa gravação real a 04/11). O PROMPT fica só para o filtro de ecos.
+
 # Frases que o whisper inventa em silêncio ou ruído.
 ALUCINACOES = {"obrigado", "obrigada", "legendas pela comunidade amara.org", "amara.org", "tchau", "até à próxima", "subtitles by"}
 
@@ -73,12 +76,12 @@ _PALAVRAS_PROMPT: set[str] = set()
 
 def _eco_do_prompt(texto: str) -> bool:
     """Em ruído ou silêncio o whisper repete pedaços do prompt inicial: quase todas
-    as palavras da fala (5 ou mais, com mais de 3 letras) estão no prompt."""
+    as palavras da fala (4 ou mais, com mais de 3 letras) estão no prompt."""
     import re
     if not _PALAVRAS_PROMPT:
         _PALAVRAS_PROMPT.update(w for w in re.findall(r"\w+", PROMPT.lower()) if len(w) > 3)
     palavras = [w for w in re.findall(r"\w+", texto.lower()) if len(w) > 3]
-    if len(palavras) < 5:
+    if len(palavras) < 4:
         return False
     return sum(w in _PALAVRAS_PROMPT for w in palavras) / len(palavras) >= 0.8
 
@@ -87,7 +90,7 @@ def transcrever_trecho(pcm: np.ndarray, deslocamento_s: float = 0.0) -> list[dic
     """Transcreve um trecho (float32, 16 kHz). Devolve segmentos com tempos absolutos."""
     m = modelo()
     segs, _ = m.transcribe(np.ascontiguousarray(pcm, dtype=np.float32), language="pt", beam_size=5,
-                           vad_filter=False, condition_on_previous_text=False, initial_prompt=PROMPT)
+                           vad_filter=False, condition_on_previous_text=False)
     saida = []
     for s in segs:
         texto = s.text.strip()

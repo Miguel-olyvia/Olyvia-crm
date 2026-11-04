@@ -70,7 +70,7 @@ def _regioes_de_fala(pcm: np.ndarray, janela_s: float = 0.03, limiar: float = 30
 
 def _whisper_bruto(wav: Path, prefixo: Path) -> list[dict]:
     cmd = [str(WHISPER), "-m", str(MODELO), "-f", str(wav), "-l", "pt", "-bs", "5", "-mc", "0",
-           "--prompt", PROMPT, "-oj", "-of", str(prefixo), "-np"]
+           "-oj", "-of", str(prefixo), "-np"]  # sem --prompt: fora do tema o whisper repetia-o
     subprocess.run(cmd, check=True, capture_output=True)
     dados = json.loads(Path(str(prefixo) + ".json").read_text(encoding="utf-8"))
     segs = []

@@ -87,9 +87,13 @@ Ollama com o modelo puxado (`ollama pull qwen3:8b`).
 | Direto (ficheiro a fingir de microfone, voz do comercial registada) | 0,6 s por fala, máx. 1,2 s | 56 de 56 falas | 29 de 31 campos, 45 s no fim |
 | Ficheiro estéreo (whisper.cpp) | 20 s no total | pelo canal | 26 de 31 campos |
 
-Com o microfone real (sem telefone, só a sala): transcreve bem a fala de pessoas por perto e
-em ruído sem voz o whisper repetia o prompt inicial, que agora é filtrado. O teste completo com
-o telemóvel em alta voz ainda não foi feito: é o próximo passo, com uma chamada a sério.
+Com o microfone real (sem telefone, só a sala) apareceram três problemas, já corrigidos:
+o piso de ruído não subia durante a fala e o detetor nunca via pausas (agora desce depressa
+e sobe devagar, sempre); em monólogos longos uma pausa de 0,4 s chega para fechar a fala;
+e com fala fora do tema o whisper devolvia o prompt inicial em vez do que ouvia (o prompt
+foi retirado). De 5 em 5 segundos sai uma linha com o nível do som, o piso e se está a ouvir
+fala, para se ver logo se o microfone apanha. O teste completo com o telemóvel em alta voz
+ainda não foi feito: é o próximo passo, com uma chamada a sério.
 
 O whisper tem de sair da GPU antes do LLM arrancar: com os dois carregados a ficha
 demorava 6 minutos em vez de 45 segundos (8 GB de VRAM não chegam para os dois).

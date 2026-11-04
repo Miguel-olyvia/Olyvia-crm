@@ -20,7 +20,9 @@ VOZES = Path(__file__).parent / "vozes"
 
 def gravar(segundos: float) -> np.ndarray:
     import sounddevice as sd
-    print(f"A gravar {segundos:.0f} s... fale normalmente (nome, empresa, o que diz ao telefone).")
+    print(f"Vai gravar {segundos:.0f} s da sua voz. Fale normalmente, como ao telefone: o seu nome, a empresa, o que costuma dizer.")
+    input("Carregue em Enter para começar a gravar... ")
+    print("A gravar. Fale.")
     pcm = sd.rec(int(segundos * TAXA), samplerate=TAXA, channels=1, dtype="float32")
     for i in range(int(segundos)):
         sd.sleep(1000)
