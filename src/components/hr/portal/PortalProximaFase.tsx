@@ -1,8 +1,8 @@
 /**
  * O que a pessoa fara no portal mais tarde e que ainda nao existe: ver o contrato e assinar, e os
  * pedidos de documentos. Desenhado e desactivado, com a razao (ver `BotaoProximaFase`). Preencher, gravar o
- * rascunho, corrigir e submeter ja se fazem no proprio formulario; o envio de documentos esta no cartao de
- * documentos (fase 2).
+ * rascunho, corrigir, submeter e enviar o comprovativo de IBAN ja se fazem no proprio formulario (o cartao de
+ * documentos); por isso aqui ja nao ha botao de enviar documentos.
  */
 import { useTranslation } from "@/hooks/useTranslation";
 import { BotaoProximaFase } from "./BotaoProximaFase";

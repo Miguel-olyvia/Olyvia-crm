@@ -177,7 +177,10 @@ describe("formatarTamanho", () => {
 describe("chaveDeErroAnexo", () => {
   it.each([
     ["anexo_formato_invalido", "hr.convite.erro.anexoFormato"],
-    ["anexo_demasiado_grande", "hr.convite.erro.anexoFormato"],
+    ["anexo_demasiado_grande", "hr.convite.erro.anexoDemasiadoGrande"],
+    ["anexos_em_falta", "hr.convite.erro.anexosEmFalta"],
+    ["anexo_tipo_bloqueado", "hr.convite.erro.anexoTipoBloqueado"],
+    ["anexo_conteudo_recusado", "hr.convite.erro.anexoConteudoRecusado"],
     ["anexo_fotografia_formato", "hr.convite.erro.fotografiaFormato"],
     ["anexo_fotografia_demasiado_grande", "hr.convite.erro.fotografiaGrande"],
     ["anexo_maximo_ficheiros", "hr.convite.erro.anexosDemasiados"],

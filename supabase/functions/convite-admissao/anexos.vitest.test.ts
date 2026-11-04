@@ -9,8 +9,11 @@ import {
   LIMITES,
   MIME_POR_ASSINATURA,
   TIPOS_ANEXO,
+  TIPOS_ANEXO_ABERTOS,
   eTipoAnexo,
+  eTipoAnexoAberto,
   extensaoDoMime,
+  recusaPorTamanho,
   sanitizarNomeOriginal,
   tamanhoMaximo,
   validarFicheiroReal,
@@ -38,12 +41,19 @@ describe("constantes (iguais as das RPCs)", () => {
 });
 
 describe("validarPedidoAnexo", () => {
-  const ok = { tipo: "cartao_cidadao", tamanho: 1000, mime: "application/pdf" };
+  const ok = { tipo: "comprovativo_iban", tamanho: 1000, mime: "application/pdf" };
 
-  it("aceita um pedido valido de cada tipo", () => {
+  it("aceita um pedido valido do comprovativo de IBAN", () => {
     expect(validarPedidoAnexo(ok)).toBeNull();
     expect(validarPedidoAnexo({ tipo: "comprovativo_iban", tamanho: 1, mime: "image/png" })).toBeNull();
-    expect(validarPedidoAnexo({ tipo: "fotografia", tamanho: 1000, mime: "image/jpeg" })).toBeNull();
+  });
+
+  it("cartao de cidadao e fotografia estao FECHADOS: anexo_tipo_invalido, mesmo que o resto esteja certo", () => {
+    expect([...TIPOS_ANEXO_ABERTOS]).toEqual(["comprovativo_iban"]);
+    expect(eTipoAnexoAberto("cartao_cidadao")).toBe(false);
+    expect(eTipoAnexoAberto("fotografia")).toBe(false);
+    expect(validarPedidoAnexo({ tipo: "cartao_cidadao", tamanho: 1000, mime: "application/pdf" })).toBe("anexo_tipo_invalido");
+    expect(validarPedidoAnexo({ tipo: "fotografia", tamanho: 1000, mime: "image/jpeg" })).toBe("anexo_tipo_invalido");
   });
 
   it("tipo invalido ou ausente", () => {
@@ -62,16 +72,6 @@ describe("validarPedidoAnexo", () => {
     expect(validarPedidoAnexo({ ...ok, mime: " Application/PDF " })).toBeNull();
   });
 
-  it("fotografia que nao seja png ou jpeg", () => {
-    expect(validarPedidoAnexo({ tipo: "fotografia", tamanho: 10, mime: "application/pdf" })).toBe(
-      "anexo_fotografia_formato",
-    );
-    // fora dos tres formatos continua a ser formato invalido
-    expect(validarPedidoAnexo({ tipo: "fotografia", tamanho: 10, mime: "image/gif" })).toBe(
-      "anexo_formato_invalido",
-    );
-  });
-
   it("tamanho zero, negativo, nao numerico ou nao finito e vazio", () => {
     for (const tamanho of [0, -1, -10485760, NaN, Infinity, "10", null, undefined]) {
       expect(validarPedidoAnexo({ ...ok, tamanho })).toBe("anexo_vazio");
@@ -83,19 +83,18 @@ describe("validarPedidoAnexo", () => {
     expect(validarPedidoAnexo({ ...ok, tamanho: 10485761 })).toBe("anexo_demasiado_grande");
   });
 
-  it("fronteira de 5 MB da fotografia: 5242880 passa, 5242881 nao", () => {
-    const foto = { tipo: "fotografia", mime: "image/png" };
-    expect(validarPedidoAnexo({ ...foto, tamanho: 5242880 })).toBeNull();
-    expect(validarPedidoAnexo({ ...foto, tamanho: 5242881 })).toBe("anexo_fotografia_demasiado_grande");
-  });
-
   it("a ordem das recusas e a da base: formato antes de vazio antes de tamanho", () => {
-    expect(validarPedidoAnexo({ tipo: "cartao_cidadao", tamanho: 0, mime: "image/gif" })).toBe(
+    expect(validarPedidoAnexo({ tipo: "comprovativo_iban", tamanho: 0, mime: "image/gif" })).toBe(
       "anexo_formato_invalido",
     );
-    expect(validarPedidoAnexo({ tipo: "fotografia", tamanho: 99999999, mime: "application/pdf" })).toBe(
-      "anexo_fotografia_formato",
-    );
+    expect(validarPedidoAnexo({ tipo: "comprovativo_iban", tamanho: 0, mime: "application/pdf" })).toBe("anexo_vazio");
+  });
+
+  it("o tecto de 5 MB da fotografia fica nas constantes (fechada, mas o contrato mantem-se para quando abrir)", () => {
+    expect(recusaPorTamanho("fotografia", 5242880)).toBeNull();
+    expect(recusaPorTamanho("fotografia", 5242881)).toBe("anexo_fotografia_demasiado_grande");
+    expect(recusaPorTamanho("comprovativo_iban", 10485761)).toBe("anexo_demasiado_grande");
+    expect(recusaPorTamanho("comprovativo_iban", 0)).toBe("anexo_vazio");
   });
 });
 

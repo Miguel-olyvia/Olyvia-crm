@@ -29,6 +29,10 @@ const CODIGOS_ANEXO = [
   "anexo_nao_carregado",
   "anexo_estado_invalido",
   "anexo_falha_envio",
+  // Comprovativo de IBAN obrigatorio (20270107000000)
+  "anexos_em_falta",
+  "anexo_tipo_bloqueado",
+  "anexo_conteudo_recusado",
 ] as const;
 
 const CHAVES_ERRO: readonly string[] = [
@@ -45,6 +49,10 @@ const CHAVES_ERRO: readonly string[] = [
   "hr.convite.erro.anexoNaoCarregado",
   "hr.convite.erro.anexoEstadoInvalido",
   "hr.convite.erro.anexoFalhaEnvio",
+  "hr.convite.erro.anexoDemasiadoGrande",
+  "hr.convite.erro.anexosEmFalta",
+  "hr.convite.erro.anexoTipoBloqueado",
+  "hr.convite.erro.anexoConteudoRecusado",
 ];
 
 const CHAVES_ECRA_PUBLICO: readonly string[] = [
@@ -67,6 +75,10 @@ const CHAVES_ECRA_PUBLICO: readonly string[] = [
   "hr.convite.anexos.aRemover",
   "hr.convite.anexos.removido",
   "hr.convite.anexos.limiteAtingido",
+  "hr.convite.anexos.obrigatorio",
+  "hr.convite.anexos.anunciaEnviar",
+  "hr.convite.anexos.anunciaEnviado",
+  "hr.convite.anexos.anunciaErro",
 ];
 
 const CHAVES_FICHA_RH: readonly string[] = [
@@ -110,6 +122,21 @@ describe("traducoes dos anexos da admissao", () => {
     expect(marcadores(tabela.pt["hr.convite.anexos.progresso"])).toEqual(["{{nome}}"]);
     expect(marcadores(tabela.pt["hr.convite.anexos.contador"])).toEqual(["{{n}}"]);
     expect(marcadores(tabela.pt["hr.convite.anexos.removido"])).toEqual(["{{nome}}"]);
+    expect(marcadores(tabela.pt["hr.convite.erro.anexosEmFalta"])).toEqual(["{{lista}}"]);
+    for (const k of ["anunciaEnviar", "anunciaEnviado", "anunciaErro"]) {
+      expect(marcadores(tabela.pt[`hr.convite.anexos.${k}`])).toEqual(["{{nome}}"]);
+    }
+  });
+
+  it("o formato e o tamanho dizem coisas diferentes: 'so PDF, PNG ou JPEG' e 'mais de 10 MB'", () => {
+    for (const lingua of LINGUAS) {
+      expect(tabela[lingua]["hr.convite.erro.anexoFormato"], lingua).not.toMatch(/10/);
+      expect(tabela[lingua]["hr.convite.erro.anexoDemasiadoGrande"], lingua).toMatch(/10/);
+    }
+    expect(tabela.pt["hr.convite.erro.anexoFormato"]).toBe("Só PDF, PNG ou JPEG.");
+    expect(tabela.pt["hr.convite.erro.anexoDemasiadoGrande"]).toBe(
+      "O ficheiro tem mais de 10 MB. Escolha um mais pequeno ou tire outra foto.",
+    );
     expect(marcadores(tabela.pt["hr.anexos.promovidoEm"])).toEqual(["{{data}}"]);
     expect(marcadores(tabela.pt["hr.anexos.fotografiaAlt"])).toEqual(["{{nome}}"]);
   });

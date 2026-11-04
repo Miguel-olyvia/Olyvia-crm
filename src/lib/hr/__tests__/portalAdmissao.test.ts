@@ -82,14 +82,29 @@ describe("normalizarPortalLer", () => {
       niss_ultimos4: "1234",
       iban_ultimos4: null,
       devolucao: { campos: { genero: "Falta indicar" }, documentos: ["cartao_cidadao"], observacao: "Veja o género" },
-      anexos: [{ id: "a1", tipo: "cartao_cidadao", nome: "cc.pdf", estado: "ligado", caminho: "x/y" }],
+      anexos: [{ id: "a1", tipo: "cartao_cidadao", nome: "cc.pdf", estado: "ligado", caminho: "x/y", tamanho_bytes: 2048, mime_type: "application/pdf" }],
+      anexos_obrigatorios: ["comprovativo_iban", 7],
+      anexos_em_falta: ["comprovativo_iban"],
       rejeicao_mensagem: null,
       email_destino: "intruso@exemplo.pt",
     });
     expect(l.campos_obrigatorios).toEqual(["nif", "genero"]);
     expect(l.devolucao?.campos).toEqual({ genero: "Falta indicar" });
-    expect(l.anexos).toEqual([{ id: "a1", tipo: "cartao_cidadao", nome: "cc.pdf", estado: "ligado" }]);
+    // so o tamanho e o tipo MIME acrescem (20270107000000): o caminho nunca chega ao ecra
+    expect(l.anexos).toEqual([
+      { id: "a1", tipo: "cartao_cidadao", nome: "cc.pdf", estado: "ligado", tamanho_bytes: 2048, mime_type: "application/pdf" },
+    ]);
+    expect(l.anexos_obrigatorios).toEqual(["comprovativo_iban"]);
+    expect(l.anexos_em_falta).toEqual(["comprovativo_iban"]);
     expect(JSON.stringify(l)).not.toContain("intruso");
+    expect(JSON.stringify(l)).not.toContain("x/y");
+  });
+
+  it("sem tamanho nem tipo MIME (servidor antigo) ficam a null; sem as listas de anexos, vazias", () => {
+    const l = normalizarPortalLer({ anexos: [{ id: "a1", tipo: "comprovativo_iban", nome: "i.pdf", estado: "ligado" }] });
+    expect(l.anexos[0]).toMatchObject({ tamanho_bytes: null, mime_type: null });
+    expect(l.anexos_obrigatorios).toEqual([]);
+    expect(l.anexos_em_falta).toEqual([]);
   });
 
   it("sem nada da listas vazias e nulos, nunca excepcoes", () => {

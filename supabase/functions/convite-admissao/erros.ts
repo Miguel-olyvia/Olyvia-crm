@@ -55,6 +55,11 @@ export const CODIGOS_PUBLICOS = [
   "anexo_nao_carregado",
   "anexo_estado_invalido",
   "anexo_falha_envio",
+  // Comprovativo de IBAN obrigatorio (20270107000000): HRA86 no submeter, e os
+  // dois recusados em jsonb ou pela Edge ao ler o ficheiro.
+  "anexos_em_falta",
+  "anexo_tipo_bloqueado",
+  "anexo_conteudo_recusado",
 ] as const;
 
 export type CodigoPublico = (typeof CODIGOS_PUBLICOS)[number];
@@ -94,7 +99,7 @@ export const CODIGOS_V2 = [
   // So da Edge (sem SQLSTATE): sem pepper de OTP ou sem correio, e o SMTP a falhar.
   "otp_indisponivel",
   "email_nao_enviado",
-  // Os anexos ficam para a fase 2 do portal: respondem 410 (o link sozinho nao escreve).
+  // Ja nao e devolvido pelos anexos (o 410 saiu com 20270107000000); fica no catalogo por compatibilidade.
   "portal_em_atualizacao",
   // Documentos do portal (20270101460000, HRA61 a HRA64) e o SMS que falha (so da Edge).
   "aceite_obrigatorio",
@@ -168,6 +173,7 @@ const CODIGO_POR_SQLSTATE: Record<string, CodigoPublico | CodigoV2> = {
   HRA62: "sem_ficheiro",
   HRA63: "documentos_fechados",
   HRA64: "sem_telemovel",
+  HRA86: "anexos_em_falta",
   "42501": "insufficient_privilege",
 };
 
@@ -182,7 +188,7 @@ export interface ErroRpc {
 
 export interface ErroMapeado {
   codigo: CodigoPublico | CodigoV2;
-  /** Codigos de campo em falta; so em `admissao_incompleta`. */
+  /** Codigos de campo (ou de anexo) em falta; so em `admissao_incompleta` e `anexos_em_falta`. */
   campos?: string[];
   /** `pessoa_id` das fichas em conflito; so em `*_ja_existe`. NUNCA para o publico. */
   conflitos?: string[];
@@ -217,7 +223,8 @@ export function mapearErroRpc(error: ErroRpc | null | undefined): ErroMapeado {
   }
   if (!codigo) return { codigo: "erro_inesperado" };
 
-  if (codigo === "admissao_incompleta") {
+  // DETAIL do HRA86: o que falta enviar (hoje so `comprovativo_iban`).
+  if (codigo === "admissao_incompleta" || codigo === "anexos_em_falta") {
     const campos = separar(detalhes !== "" ? detalhes : legado).filter((c) => CODIGO_DE_CAMPO.test(c));
     return { codigo, campos };
   }
@@ -272,6 +279,9 @@ const STATUS_POR_CODIGO: Readonly<Record<string, number>> = {
   anexo_fotografia_formato: 422,
   anexo_vazio: 422,
   anexo_tipo_invalido: 422,
+  anexos_em_falta: 409,
+  anexo_tipo_bloqueado: 409,
+  anexo_conteudo_recusado: 422,
 };
 
 export function statusDoCodigo(codigo: string): number {

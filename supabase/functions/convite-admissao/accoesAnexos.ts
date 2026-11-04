@@ -33,6 +33,17 @@
  *    limpeza devolve-o, tambem depois de ligada ou promovida; para uma linha
  *    apagada que nunca foi ligada devolve ainda os tres caminhos finais
  *    possiveis. A Edge convite-admissao-limpeza remove tudo isso.
+ *
+ * LIMITES CONHECIDOS (documentados, nao resolvidos aqui)
+ * ------------------------------------------------------
+ *  - OBJECTOS ORFAOS: quando o ligar (ou o descarte) falha com HRA31, HRA51, HRA52 ou HRA53 a
+ *    copia em hr-documentos e a da quarentena ficam onde estao, de proposito (a pessoa repete a
+ *    confirmacao com a sessao nova). Se nunca repetir, ficam no Storage ate haver um job de
+ *    limpeza (D10, decisao do utilizador, fora desta entrega; sem segredos do Vault nao corre).
+ *  - O TOKEN ASSINADO DE UPLOAD continua valido depois de `anexo_remover` ou de um descarte, ate
+ *    expirar no Storage: quem o guardou pode ainda escrever nesse caminho da quarentena (upsert
+ *    false: so se o objecto nao existir). Nada o liga a uma linha, por isso nunca passa a anexo;
+ *    e so lixo na quarentena, que a limpeza apanha. O Storage nao deixa revogar o token.
  */
 import { detectSignature, toHex } from "../_shared/fileSignature.ts";
 import { UUID_RE, eUuid } from "../_shared/uuid.ts";
@@ -40,13 +51,24 @@ import {
   MIME_POR_ASSINATURA,
   extensaoDoMime,
   eTipoAnexo,
+  recusaPorTamanho,
   sanitizarNomeOriginal,
   validarFicheiroReal,
   validarPedidoAnexo,
   type TipoAnexo,
 } from "./anexos.ts";
-import { eCodigoPublico, statusDoCodigo } from "./erros.ts";
+import { limparAnexo } from "./conteudoAnexo.ts";
+import { codigoParaOVisitante } from "./accoesPortal.ts";
+import { eCodigoPublico, mapearErroRpc, statusDoCodigo } from "./erros.ts";
 
+/**
+ * BUCKET DA QUARENTENA -- A CONFIRMAR NA BASE RH (nao verificavel daqui):
+ * `hr-documentos-quarantine` deve ter `file_size_limit` = 10485760 (10 MB) e
+ * `allowed_mime_types` = application/pdf, image/jpeg, image/png. E a primeira
+ * defesa: o Storage recusa o upload grande antes de a Edge o ler. A segunda e o
+ * `tamanhoNaQuarentena` (le o tamanho nos metadados e recusa SEM descarregar).
+ * Se o bucket nao tiver o limite, so a segunda protege a memoria da Edge.
+ */
 export const BUCKET_QUARENTENA = "hr-documentos-quarantine";
 export const BUCKET_FINAL = "hr-documentos";
 
@@ -62,7 +84,7 @@ export interface RespostaAccao {
 
 interface ResultadoRpc {
   data: unknown;
-  error: { message?: string; code?: string } | null;
+  error: { message?: string; code?: string; details?: string } | null;
 }
 interface ResultadoStorage {
   data: unknown;
@@ -75,6 +97,11 @@ export interface BucketAnexos {
     opcoes?: { upsert?: boolean },
   ): PromiseLike<{ data: { token: string } | null; error: unknown }>;
   download(caminho: string): PromiseLike<{ data: { arrayBuffer(): Promise<ArrayBuffer> } | null; error: unknown }>;
+  /** Lista uma pasta (os metadados trazem o tamanho): serve para recusar antes de descarregar. */
+  list(
+    pasta: string,
+    opcoes?: { limit?: number; search?: string },
+  ): PromiseLike<{ data: { name: string; metadata?: { size?: number } | null }[] | null; error: unknown }>;
   upload(
     caminho: string,
     corpo: Uint8Array,
@@ -93,6 +120,8 @@ export interface PedidoAccaoAnexo {
   accao: string;
   svc: ClienteAnexos;
   tokenHash: string;
+  /** SHA-256 da sessao do portal (o handler ja a exigiu): vai como `p_sessao_hash` a todas as RPCs. */
+  sessaoHash: string;
   payload: Record<string, unknown> | null;
   /** IP valido ou `null` (nunca um marcador como "unknown": a coluna e inet). */
   ip: string | null;
@@ -122,6 +151,28 @@ function motivoDaResposta(data: unknown): string | null {
   const motivo = comoObjecto(data)?.erro;
   return typeof motivo === "string" ? motivo : null;
 }
+
+/**
+ * O codigo de um erro de RPC. Desde 20270107000000 as RPCs fazem RAISE (convite
+ * morto HRA02-05/HRA31, sessao HRA51-53, estado HRA38) em vez de devolver
+ * {erro}; as recusas de negocio dos ficheiros continuam em jsonb. Fora do
+ * catalogo = erro_inesperado, registado (sem texto).
+ */
+function codigoDeErroRpc(erroRpc: NonNullable<ResultadoRpc["error"]>, registarErro?: RegistarErro): string {
+  const { codigo } = mapearErroRpc(erroRpc);
+  if (codigo === "erro_inesperado") {
+    registarErro?.(erroRpc);
+    return codigo;
+  }
+  return codigoParaOVisitante(codigo);
+}
+
+/** Erros que nao desfazem o envio: a copia fica e a pessoa repete a confirmacao (nova sessao, ou o convite voltou). */
+const ERROS_QUE_NAO_DESFAZEM: ReadonlySet<string> = new Set([
+  "sessao_ausente",
+  "sessao_expirada",
+  "convite_invalido", // HRA31 (nao_encontrado) para o visitante
+]);
 
 /** Um motivo da base, como resposta: so codigos do catalogo; o resto e inesperado. */
 function respostaDeMotivo(motivo: string, registarErro?: RegistarErro): RespostaAccao {
@@ -160,7 +211,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 // -- anexo_url ---------------------------------------------------------------
 
 async function accaoUrl(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
-  const { svc, tokenHash, payload, ip, registarErro } = p;
+  const { svc, tokenHash, sessaoHash, payload, ip, registarErro } = p;
   const tipo = payload?.tipo;
   const nome = payload?.nome;
   const tamanho = payload?.tamanho;
@@ -177,16 +228,14 @@ async function accaoUrl(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
 
   const { data, error } = await svc.rpc("rpc_hr_convite_anexo_reservar", {
     p_token_hash: tokenHash,
+    p_sessao_hash: sessaoHash,
     p_tipo: tipo,
     p_nome_original: sanitizarNomeOriginal(nome),
     p_tamanho_declarado: tamanho,
     p_mime_declarado: mime.trim().toLowerCase(),
     p_ip: ip,
   });
-  if (error) {
-    registarErro?.(error);
-    return inesperado();
-  }
+  if (error) return erro(codigoDeErroRpc(error, registarErro));
   const motivo = motivoDaResposta(data);
   if (motivo) return respostaDeMotivo(motivo, registarErro);
 
@@ -210,7 +259,7 @@ async function accaoUrl(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
   }
   if (!uploadToken) {
     // A reserva conta para os tectos: liberta-a em vez de a deixar a ocupar uma vaga.
-    await descartar(svc, tokenHash, anexoId, "upload_abandonado", registarErro);
+    await descartar(svc, tokenHash, sessaoHash, anexoId, "upload_abandonado", registarErro);
     return erro("anexo_falha_envio");
   }
 
@@ -235,6 +284,51 @@ function lerContexto(data: unknown): ContextoAnexo | null {
   return { tipo: c.tipo, caminho, organizationId: org, pessoaId: pessoa };
 }
 
+/**
+ * O tamanho do objecto na quarentena, lido dos metadados (sem o descarregar):
+ * `em_falta` se nada chegou, `falhou` se o Storage falhou ou nao deu tamanho
+ * utilizavel (fecha-se: sem tamanho nao se descarrega).
+ */
+async function tamanhoNaQuarentena(
+  quarentena: BucketAnexos,
+  caminho: string,
+  registarErro?: RegistarErro,
+): Promise<number | "em_falta" | "falhou"> {
+  const i = caminho.lastIndexOf("/");
+  const pasta = i >= 0 ? caminho.slice(0, i) : "";
+  const nome = i >= 0 ? caminho.slice(i + 1) : caminho;
+  try {
+    const { data, error } = await quarentena.list(pasta, { limit: 100, search: nome });
+    if (error) {
+      registarErro?.(error);
+      return "falhou";
+    }
+    const item = (data ?? []).find((o) => o.name === nome);
+    if (!item) return "em_falta";
+    const tamanho = item.metadata?.size;
+    if (typeof tamanho === "number" && Number.isFinite(tamanho) && tamanho >= 0) return tamanho;
+    registarErro?.(new Error("convite-admissao: o Storage nao deu o tamanho do objecto"));
+    return "falhou";
+  } catch (e) {
+    registarErro?.(e);
+    return "falhou";
+  }
+}
+
+/** Recusa um ficheiro ja carregado: descarta a linha, tira-o da quarentena e responde com o codigo. */
+async function recusarFicheiro(
+  p: PedidoAccaoAnexo,
+  anexoId: string,
+  caminho: string,
+  codigo: string,
+): Promise<RespostaAccao> {
+  const { svc, tokenHash, sessaoHash, registarErro } = p;
+  // Se a remocao falhar, a linha apagada guarda o caminho e a limpeza apanha-o.
+  await descartar(svc, tokenHash, sessaoHash, anexoId, motivoDeDescarte(codigo), registarErro);
+  await tentar(() => svc.storage.from(BUCKET_QUARENTENA).remove([caminho]), registarErro);
+  return erro(codigo);
+}
+
 function motivoDeDescarte(codigo: string): "demasiado_grande" | "formato_invalido" {
   return codigo === "anexo_demasiado_grande" || codigo === "anexo_fotografia_demasiado_grande"
     ? "demasiado_grande"
@@ -245,6 +339,7 @@ function motivoDeDescarte(codigo: string): "demasiado_grande" | "formato_invalid
 function descartar(
   svc: ClienteAnexos,
   tokenHash: string,
+  sessaoHash: string,
   anexoId: string,
   motivo: string,
   registarErro?: RegistarErro,
@@ -252,6 +347,7 @@ function descartar(
   return tentar(
     () => svc.rpc("rpc_hr_convite_anexo_descartar", {
       p_token_hash: tokenHash,
+      p_sessao_hash: sessaoHash,
       p_anexo_id: anexoId,
       p_motivo: motivo,
     }),
@@ -317,7 +413,9 @@ export async function copiarParaFinal(
 interface DadosDaLigacao {
   svc: ClienteAnexos;
   tokenHash: string;
+  sessaoHash: string;
   anexoId: string;
+  tipo: TipoAnexo;
   caminhoFinal: string;
   caminhoQuarentena: string;
   mime: string;
@@ -335,7 +433,7 @@ interface DadosDaLigacao {
  * falha fica registada, sem texto.
  */
 async function desfazerCopia(d: DadosDaLigacao): Promise<void> {
-  const descartado = await descartar(d.svc, d.tokenHash, d.anexoId, "upload_abandonado", d.registarErro);
+  const descartado = await descartar(d.svc, d.tokenHash, d.sessaoHash, d.anexoId, "upload_abandonado", d.registarErro);
   if (!descartado) return;
   await tentar(() => d.svc.storage.from(BUCKET_FINAL).remove([d.caminhoFinal]), d.registarErro);
   await tentar(() => d.svc.storage.from(BUCKET_QUARENTENA).remove([d.caminhoQuarentena]), d.registarErro);
@@ -349,6 +447,7 @@ async function ligarOuDesfazer(
   try {
     ligado = await d.svc.rpc("rpc_hr_convite_anexo_ligar", {
       p_token_hash: d.tokenHash,
+      p_sessao_hash: d.sessaoHash,
       p_anexo_id: d.anexoId,
       p_caminho_final: d.caminhoFinal,
       p_mime: d.mime,
@@ -361,11 +460,24 @@ async function ligarOuDesfazer(
     return { resposta: inesperado() };
   }
   if (ligado.error) {
-    d.registarErro?.(ligado.error);
-    await desfazerCopia(d);
-    return { resposta: inesperado() };
+    // RAISE da base (sessao, convite, estado). Sessao caida ou convite nao encontrado
+    // NAO desfazem o envio: a copia e a linha pendente ficam e a pessoa repete a
+    // confirmacao (a copia identica conta como feita). Os restantes (processo ja
+    // submetido ou encerrado, bloqueado...) desfazem, porque ja nao ha onde ligar.
+    const codigo = codigoDeErroRpc(ligado.error, d.registarErro);
+    if (!ERROS_QUE_NAO_DESFAZEM.has(codigo)) await desfazerCopia(d);
+    return { resposta: erro(codigo) };
   }
   const motivo = motivoDaResposta(ligado.data);
+  // anexo_estado_invalido ao ligar = a linha ja nao esta pendente: OUTRA confirmacao em paralelo (duplo
+  // clique, repeticao) acabou de a ligar, e o objecto final e o MESMO caminho. Desfazer aqui apagava um
+  // anexo ligado. Trata-se como ja ligado: nada se descarta nem se remove, e responde-se com o que se sabe
+  // (o nome so a outra chamada o conhece; o ecra junta as duas respostas pelo id).
+  if (motivo === "anexo_estado_invalido") {
+    return {
+      anexo: { id: d.anexoId, tipo: d.tipo, nome_original: null, tamanho_bytes: d.tamanho, mime_type: d.mime },
+    };
+  }
   const anexo = comoObjecto(comoObjecto(ligado.data)?.anexo);
   if (motivo || !anexo) {
     await desfazerCopia(d);
@@ -375,18 +487,16 @@ async function ligarOuDesfazer(
 }
 
 async function accaoConfirmar(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
-  const { svc, tokenHash, payload, registarErro } = p;
+  const { svc, tokenHash, sessaoHash, payload, registarErro } = p;
   const anexoId = payload?.anexo_id;
   if (typeof anexoId !== "string" || !UUID_RE.test(anexoId)) return erro("pedido_invalido");
 
   const { data: dadosContexto, error: erroContexto } = await svc.rpc("rpc_hr_convite_anexo_contexto", {
     p_token_hash: tokenHash,
+    p_sessao_hash: sessaoHash,
     p_anexo_id: anexoId,
   });
-  if (erroContexto) {
-    registarErro?.(erroContexto);
-    return inesperado();
-  }
+  if (erroContexto) return erro(codigoDeErroRpc(erroContexto, registarErro));
   const motivoContexto = motivoDaResposta(dadosContexto);
   if (motivoContexto) return respostaDeMotivo(motivoContexto, registarErro);
   const contexto = lerContexto(dadosContexto);
@@ -396,18 +506,28 @@ async function accaoConfirmar(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
   }
 
   const quarentena = svc.storage.from(BUCKET_QUARENTENA);
-  const bytes = await lerObjecto(quarentena, contexto.caminho, registarErro);
-  if (!bytes) return erro("anexo_nao_carregado");
 
+  // ANTES de descarregar: o tamanho vem dos metadados do Storage e um objecto
+  // acima do tecto nunca chega a memoria da Edge.
+  const medido = await tamanhoNaQuarentena(quarentena, contexto.caminho, registarErro);
+  if (medido === "em_falta") return erro("anexo_nao_carregado");
+  if (medido === "falhou") return erro("anexo_falha_envio");
+  const recusaTamanho = recusaPorTamanho(contexto.tipo, medido);
+  if (recusaTamanho) return await recusarFicheiro(p, anexoId, contexto.caminho, recusaTamanho);
+
+  const lido = await lerObjecto(quarentena, contexto.caminho, registarErro);
+  if (!lido) return erro("anexo_nao_carregado");
+
+  const assinatura = detectSignature(lido.subarray(0, BYTES_DA_CABECA));
+  const recusa = validarFicheiroReal({ tipo: contexto.tipo, assinatura, tamanho: lido.length });
+  if (recusa) return await recusarFicheiro(p, anexoId, contexto.caminho, recusa);
+
+  // Conteudo: PDF com accoes activas recusado; imagem sem EXIF nem bytes depois do fim.
+  // O hash e o tamanho gravados sao os dos bytes LIMPOS, que sao os que ficam guardados.
+  const limpo = await limparAnexo(assinatura as string, lido);
+  if (!limpo.ok) return await recusarFicheiro(p, anexoId, contexto.caminho, "anexo_conteudo_recusado");
+  const bytes = limpo.bytes;
   const tamanho = bytes.length;
-  const assinatura = detectSignature(bytes.subarray(0, BYTES_DA_CABECA));
-  const recusa = validarFicheiroReal({ tipo: contexto.tipo, assinatura, tamanho });
-  if (recusa) {
-    // Se a remocao falhar, a linha apagada guarda o caminho e a limpeza apanha-o.
-    await descartar(svc, tokenHash, anexoId, motivoDeDescarte(recusa), registarErro);
-    await tentar(() => quarentena.remove([contexto.caminho]), registarErro);
-    return erro(recusa);
-  }
 
   const mime = MIME_POR_ASSINATURA[assinatura as string];
   const extensao = extensaoDoMime(mime);
@@ -421,7 +541,7 @@ async function accaoConfirmar(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
   }
 
   const resultado = await ligarOuDesfazer({
-    svc, tokenHash, anexoId, caminhoFinal, caminhoQuarentena: contexto.caminho, mime, tamanho, hash, registarErro,
+    svc, tokenHash, sessaoHash, anexoId, tipo: contexto.tipo, caminhoFinal, caminhoQuarentena: contexto.caminho, mime, tamanho, hash, registarErro,
   });
   if ("resposta" in resultado) return resultado.resposta;
   const { anexo } = resultado;
@@ -468,19 +588,20 @@ export function alvosDoDescarte(data: unknown): AlvoDeRemocao[] {
 }
 
 async function accaoRemover(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
-  const { svc, tokenHash, payload, registarErro } = p;
+  const { svc, tokenHash, sessaoHash, payload, registarErro } = p;
   const anexoId = payload?.anexo_id;
   if (typeof anexoId !== "string" || !UUID_RE.test(anexoId)) return erro("pedido_invalido");
 
+  // O motivo e FIXO, escolhido aqui: nada do pedido o altera. E o unico motivo que
+  // a base abre com sessao e estado; os internos (formato, tamanho, abandono) so
+  // existem do lado do servidor.
   const { data, error } = await svc.rpc("rpc_hr_convite_anexo_descartar", {
     p_token_hash: tokenHash,
+    p_sessao_hash: sessaoHash,
     p_anexo_id: anexoId,
     p_motivo: "removido_pela_pessoa",
   });
-  if (error) {
-    registarErro?.(error);
-    return inesperado();
-  }
+  if (error) return erro(codigoDeErroRpc(error, registarErro));
   const motivo = motivoDaResposta(data);
   if (motivo) return respostaDeMotivo(motivo, registarErro);
 

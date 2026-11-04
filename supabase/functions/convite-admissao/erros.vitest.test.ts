@@ -84,6 +84,10 @@ describe("codigos de anexo", () => {
     "anexo_nao_carregado",
     "anexo_estado_invalido",
     "anexo_falha_envio",
+    // Comprovativo de IBAN obrigatorio (20270107000000)
+    "anexos_em_falta",
+    "anexo_tipo_bloqueado",
+    "anexo_conteudo_recusado",
   ];
 
   it("todos sao codigos publicos", () => {
@@ -107,10 +111,24 @@ describe("codigos de anexo", () => {
       expect(statusDoCodigo(c)).toBe(409);
     }
     expect(statusDoCodigo("anexo_falha_envio")).toBe(400);
+    expect(statusDoCodigo("anexos_em_falta")).toBe(409);
+    expect(statusDoCodigo("anexo_tipo_bloqueado")).toBe(409);
+    expect(statusDoCodigo("anexo_conteudo_recusado")).toBe(422);
   });
 
   it("mapearErroRpc reconhece o codigo de anexo pela mensagem", () => {
     expect(mapearErroRpc({ message: "anexo_tipo_cheio" })).toEqual({ codigo: "anexo_tipo_cheio" });
+    expect(mapearErroRpc({ message: "anexo_tipo_bloqueado" })).toEqual({ codigo: "anexo_tipo_bloqueado" });
+  });
+
+  it("HRA86 e anexos_em_falta, com o que falta no DETAIL (so codigos de campo)", () => {
+    expect(mapearErroRpc({ code: "HRA86", message: "anexos_em_falta", details: "comprovativo_iban" })).toEqual({
+      codigo: "anexos_em_falta",
+      campos: ["comprovativo_iban"],
+    });
+    // so o SQLSTATE: o codigo vem na mesma
+    expect(mapearErroRpc({ code: "HRA86", message: "texto alterado", details: "x; drop table" }).codigo).toBe("anexos_em_falta");
+    expect(mapearErroRpc({ code: "HRA86", message: "anexos_em_falta", details: "x; drop table" }).campos).toEqual([]);
   });
 });
 

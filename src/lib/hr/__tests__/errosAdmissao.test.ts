@@ -164,7 +164,7 @@ describe("chaveDeErroAdmissao", () => {
     ["pais_invalido", "hr.convite.erro.paisInvalido"],
     ["bic_invalido", "hr.convite.erro.bicInvalido"],
     ["anexo_formato_invalido", "hr.convite.erro.anexoFormato"],
-    ["anexo_demasiado_grande", "hr.convite.erro.anexoFormato"],
+    ["anexo_demasiado_grande", "hr.convite.erro.anexoDemasiadoGrande"],
     ["anexo_fotografia_formato", "hr.convite.erro.fotografiaFormato"],
     ["anexo_fotografia_demasiado_grande", "hr.convite.erro.fotografiaGrande"],
     ["anexo_maximo_ficheiros", "hr.convite.erro.anexosDemasiados"],

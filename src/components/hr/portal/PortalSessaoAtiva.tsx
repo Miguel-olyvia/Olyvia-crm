@@ -26,6 +26,8 @@ interface PortalSessaoAtivaProps {
   aoManterSessao: () => void;
   escrita: EscritaPortal;
   tituloRef: RefObject<HTMLDivElement>;
+  /** O token do link (para os ficheiros). */
+  token?: string;
 }
 
 export function PortalSessaoAtiva({
@@ -36,6 +38,7 @@ export function PortalSessaoAtiva({
   aoManterSessao,
   escrita,
   tituloRef,
+  token,
 }: PortalSessaoAtivaProps) {
   const { t } = useTranslation();
   const [pagina, setPagina] = useState<1 | 2>(1);
@@ -94,7 +97,7 @@ export function PortalSessaoAtiva({
       {dados && (
         <>
           {dados.devolucao && dados.estado === "devolvida" && <PortalDevolvida devolucao={dados.devolucao} />}
-          <PortalFormulario dados={dados} pagina={pagina} aoMudarPagina={setPagina} escrita={escrita} />
+          <PortalFormulario dados={dados} pagina={pagina} aoMudarPagina={setPagina} escrita={escrita} token={token} />
           <PortalProximaFase />
         </>
       )}

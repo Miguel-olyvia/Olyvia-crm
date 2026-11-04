@@ -13,7 +13,10 @@
  *  - SUBMETER: na pagina 2, valida como o prototipo (assinatura, declaracao, obrigatorios, formato),
  *    leva a pessoa ao campo em falta e, no sucesso, a pagina mostra o ecra de sucesso.
  *
- * Os ANEXOS ficam para a fase 2: o cartao de documentos mostra a lista e diz que o envio chega depois.
+ * Os ANEXOS: o estado dos ficheiros (`useConviteAnexos`) vive aqui, porque a submissao precisa de saber o que
+ * falta. So o comprovativo de IBAN esta aberto, e e obrigatorio quando a pessoa indicou um IBAN: sem ele a
+ * submissao nem sai (resumo com `role="alert"` e o foco em «Adicionar ficheiro»), e o servidor repete a regra
+ * (`anexos_em_falta`). Os ficheiros guardam-se ao serem enviados; os campos so ao gravar (aviso fixo no cartao).
  * Nada do que se escreve sai do browser a nao ser pela Edge; acaba com a sessao: este componente
  * desmonta-se com ela.
  */
@@ -24,6 +27,7 @@ import { CamposTocadosProvider } from "@/components/hr/form/Campos";
 import { ConvitePagina1 } from "@/components/hr/convite/ConvitePagina1";
 import { ConvitePagina2 } from "@/components/hr/convite/ConvitePagina2";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useConviteAnexos } from "@/hooks/useConviteAnexos";
 import type { EscritaPortal, ResultadoSubmissao } from "@/hooks/useConviteAdmissaoPublico";
 import {
   CODIGOS_PAGINA_2,
@@ -34,6 +38,7 @@ import {
 } from "@/lib/hr/admissaoObrigatorios";
 import type { RascunhoConvite } from "@/lib/hr/conviteAdmissaoPayload";
 import { campoDoErroDeServidor, errosDeFormato, type CampoComFormato } from "@/lib/hr/conviteAdmissaoEcra";
+import { anexosLigadosDaLer, tiposEmFalta } from "@/lib/hr/conviteAnexos";
 import { mensagemErroAdmissao } from "@/lib/hr/errosAdmissao";
 import {
   comSensiveisGuardados,
@@ -57,21 +62,43 @@ const ID_DOM_DO_CAMPO: Record<CampoComFormato, string> = {
 
 const CAMPOS_COM_FORMATO: readonly string[] = ["nif", "niss", "conta_numero", "conta_bic"];
 
+/** O resumo de erros da submissao: o botao de adicionar ficheiro liga-se a ele (aria-describedby). */
+const ID_ALERTA_SUBMISSAO = "portal-erro-submissao";
+/** O que um tipo de anexo vindo do servidor pode ser antes de entrar num seletor. */
+const FORMATO_TIPO_ANEXO = /^[a-z_]+$/;
+
 interface PortalFormularioProps {
   dados: PortalLer;
   pagina: 1 | 2;
   aoMudarPagina: (pagina: 1 | 2) => void;
   escrita: EscritaPortal;
+  /** O token do link: os ficheiros passam pela Edge com ele (e a sessao, que o hook le da memoria). */
+  token?: string;
 }
 
-export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: PortalFormularioProps) {
+export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita, token }: PortalFormularioProps) {
   const { t } = useTranslation();
+  // Os ficheiros que o servidor ja tinha ligados ao abrir; o hook adopta-os uma so vez.
+  const anexosIniciais = useMemo(() => anexosLigadosDaLer(dados.anexos), [dados.anexos]);
+  const anexos = useConviteAnexos(token, anexosIniciais, { aoPerderSessao: escrita.aoPerderSessao });
+  const idsIniciais = useMemo(() => new Set(anexosIniciais.map((a) => a.id)), [anexosIniciais]);
+  // O cartao so aparece onde a base aceita ficheiros (hr_convite_anexos_abrir: em_preenchimento e devolvida,
+  // nao em `convidada`): em preenchimento, ou numa devolucao que pede o comprovativo.
+  const mostrarAnexos =
+    dados.estado === "em_preenchimento" ||
+    (dados.estado === "devolvida" && (dados.documentos_editaveis ?? []).includes("comprovativo_iban"));
+  // O que o servidor disse que faltava depois de o ecra achar que nao (anexos_em_falta na submissao).
+  const [avisoServidor, setAvisoServidor] = useState<{ tipos: string[]; ids: ReadonlySet<string> } | null>(null);
   // Preenche-se uma so vez, com o que a `ler` trouxe: depois disso quem manda e quem escreve.
   const [rascunho, setRascunho] = useState<RascunhoConvite>(() => rascunhoParaFormulario(dados.rascunho));
   const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
   const [mostrarTodos, setMostrarTodos] = useState(false);
   const [submetendo, setSubmetendo] = useState(false);
   const [erroSubmissao, setErroSubmissao] = useState<string | null>(null);
+  // O erro de submissao que se mostra e o resumo dos anexos em falta (e nao outro): sai quando deixam de faltar.
+  const [resumoAnexos, setResumoAnexos] = useState(false);
+  // Pedido de foco para «Adicionar ficheiro» (ou, sem cartao, para o resumo): ver o efeito mais abaixo.
+  const [pedidoFocoAnexo, setPedidoFocoAnexo] = useState<{ tipo: string; n: number } | null>(null);
   const [erroAssinatura, setErroAssinatura] = useState<string | null>(null);
   const [erroAceite, setErroAceite] = useState<string | null>(null);
   const [errosServidor, setErrosServidor] = useState<Partial<Record<CampoComFormato, string>>>({});
@@ -117,6 +144,33 @@ export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: Port
   const pendenciasTodas = useMemo(() => new Set<string>(pendencias), [pendencias]);
   const pendenciasPagina1 = pendencias.filter((codigo) => !CODIGOS_PAGINA_2.has(codigo));
 
+  // ANEXOS OBRIGATORIOS. `dados.anexos_obrigatorios` so se le na `ler` (ao abrir): quem abre sem IBAN e depois o
+  // escreve (ou o guarda) nao o ve la. Por isso o ecra deriva tambem do que ja sabe: o convite so grava IBAN, por
+  // isso um numero de conta escrito, ou `iban_ultimos4` (o IBAN ja no cofre), obriga o comprovativo. O servidor
+  // repete a regra (HRA86) e o que ele diz em `anexos_em_falta` entra aqui (`avisoServidor`).
+  const ibanIndicado = Boolean(dados.iban_ultimos4) || rascunho.conta_numero.trim() !== "";
+  const anexosObrigatorios = useMemo(() => {
+    if (!mostrarAnexos) return [];
+    const tipos = new Set<string>(dados.anexos_obrigatorios ?? []);
+    if (ibanIndicado) tipos.add("comprovativo_iban");
+    for (const tipo of avisoServidor?.tipos ?? []) tipos.add(tipo);
+    return [...tipos];
+  }, [mostrarAnexos, dados.anexos_obrigatorios, ibanIndicado, avisoServidor]);
+  const anexosEmFalta = useMemo(() => {
+    if (!mostrarAnexos) return [];
+    const locais = tiposEmFalta({
+      obrigatorios: [...(dados.anexos_obrigatorios ?? []), ...(ibanIndicado ? ["comprovativo_iban"] : [])],
+      emFaltaInicial: dados.anexos_em_falta ?? [],
+      idsIniciais,
+      anexos: anexos.anexos,
+    });
+    // O que o servidor recusou: so um ficheiro enviado DEPOIS do aviso o resolve.
+    const doServidor = (avisoServidor?.tipos ?? []).filter(
+      (tipo) => !anexos.anexos.some((a) => a.tipo === tipo && !avisoServidor?.ids.has(a.id)),
+    );
+    return [...new Set([...locais, ...doServidor])];
+  }, [mostrarAnexos, dados.anexos_obrigatorios, dados.anexos_em_falta, ibanIndicado, idsIniciais, anexos.anexos, avisoServidor]);
+
   // Formato: digito de controlo do NIF/NISS, IBAN, BIC. So se mostra depois de sair do campo (ou ao submeter).
   const errosFormato = useMemo(
     () => errosDeFormato({ nif: rascunho.nif, niss: rascunho.niss, conta_numero: rascunho.conta_numero, conta_bic: rascunho.conta_bic }),
@@ -144,6 +198,48 @@ export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: Port
   }, [pedidoFoco]);
   const pedirFocoNoErro = () => setPedidoFoco((n) => n + 1);
 
+  // FOCO em «Adicionar ficheiro». Depois de montado e de a mudanca de pagina ter feito o seu (o portal leva o foco
+  // ao topo num efeito): dois `requestAnimationFrame` seguidos, nao um `setTimeout(0)`, para este foco ser o ultimo.
+  // O pedido gasta-se ao focar. Se o cartao nao esta montado, o foco vai para o resumo (nunca falha em silencio).
+  useEffect(() => {
+    if (!pedidoFocoAnexo) return;
+    let segundo = 0;
+    const primeiro = requestAnimationFrame(() => {
+      segundo = requestAnimationFrame(() => {
+        const tipo = pedidoFocoAnexo.tipo;
+        const botao = FORMATO_TIPO_ANEXO.test(tipo)
+          ? formularioRef.current?.querySelector<HTMLElement>(`[data-anexo-adicionar="${tipo}"]`)
+          : null;
+        (botao ?? document.getElementById(ID_ALERTA_SUBMISSAO))?.focus();
+        setPedidoFocoAnexo(null);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(primeiro);
+      cancelAnimationFrame(segundo);
+    };
+  }, [pedidoFocoAnexo, pagina]);
+  /**
+   * O resumo do que falta enviar, no mesmo sitio dos outros erros de submissao (`role="alert"`). `tipos` pode vir do
+   * servidor: so entram os que tem o formato de um tipo (^[a-z_]+$), e sem nenhum fica o comprovativo de IBAN.
+   * Com `doServidor`, o resumo nao some enquanto nao houver um ficheiro novo, mesmo que o ecra achasse que nada faltava.
+   */
+  const avisarAnexosEmFalta = (tipos: readonly string[], doServidor = false) => {
+    const validos = tipos.filter((tipo) => FORMATO_TIPO_ANEXO.test(tipo));
+    const lista = validos.length > 0 ? validos : ["comprovativo_iban"];
+    if (doServidor) setAvisoServidor({ tipos: lista, ids: new Set(anexos.anexos.map((a) => a.id)) });
+    setResumoAnexos(true);
+    setErroSubmissao(mensagemErroAdmissao(t, { error: "anexos_em_falta", campos: lista }));
+    setPedidoFocoAnexo((anterior) => ({ tipo: lista[0], n: (anterior?.n ?? 0) + 1 }));
+  };
+  // Quando o ficheiro que faltava e enviado, o resumo deixa de ser verdade: sai (sem tocar noutros erros).
+  useEffect(() => {
+    // Sem cartao (nao se pode enviar aqui) o resumo fica: ninguem o pode resolver, e a pessoa tem de o ler.
+    if (!resumoAnexos || !mostrarAnexos || anexosEmFalta.length > 0) return;
+    setResumoAnexos(false);
+    setErroSubmissao(null);
+  }, [resumoAnexos, mostrarAnexos, anexosEmFalta]);
+
   const mudarPagina = (destino: 1 | 2) => {
     // Sair de uma pagina grava o que la ficou, sem esperar pelo debounce.
     void gravarJa();
@@ -153,6 +249,12 @@ export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: Port
   /** Uma recusa do servidor: marca o campo, ou diz o que falta, e leva a pessoa onde ha trabalho. */
   const tratarRecusa = (resultado: ResultadoSubmissao) => {
     const codigo = resultado.codigo ?? "erro_inesperado";
+    // O servidor diz que falta um anexo (a regra e dele; o ecra ja o tinha dito, a menos que o RH tenha mudado algo).
+    if (codigo === "anexos_em_falta") {
+      mudarPagina(2);
+      avisarAnexosEmFalta(resultado.campos ?? [], true);
+      return;
+    }
     const incompleta = codigo === "admissao_incompleta";
     const mensagem = incompleta ? mensagemErroAdmissao(t, { error: codigo, campos: resultado.campos }) : mensagemErroPortal(t, codigo);
     const campo = campoDoErroDeServidor(codigo);
@@ -198,7 +300,19 @@ export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: Port
       return;
     }
 
+    // Ficheiros ainda a enviar (ou a remover): a submissao espera, senao o ficheiro nao entrava.
+    if (anexos.emCurso) {
+      setErroSubmissao(t("hr.convite.anexos.aguardarEnvio"));
+      return;
+    }
+    // Comprovativo obrigatorio por enviar: nem se pede ao servidor.
+    if (anexosEmFalta.length > 0) {
+      avisarAnexosEmFalta(anexosEmFalta);
+      return;
+    }
+
     setErroSubmissao(null);
+    setResumoAnexos(false);
     setSubmetendo(true);
     const resultado = await escrita.submeter(payloadDaSubmissao(dados, rascunho), rascunho.assinatura_nome);
     setSubmetendo(false);
@@ -219,7 +333,16 @@ export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: Port
             {...propsPagina}
             erroAssinatura={erroAssinatura}
             erroAceite={erroAceite}
-            anexos={<PortalDocumentos anexos={dados.anexos} />}
+            anexos={
+              mostrarAnexos ? (
+                <PortalDocumentos
+                  estado={anexos}
+                  obrigatorios={anexosObrigatorios}
+                  idAlerta={resumoAnexos ? ID_ALERTA_SUBMISSAO : undefined}
+                  bloqueado={submetendo}
+                />
+              ) : null
+            }
           />
         )}
       </CamposTocadosProvider>
@@ -227,7 +350,7 @@ export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: Port
       <PortalEstadoRascunho guardadoEm={escrita.rascunhoGuardadoEm} aGravar={escrita.aGravar} erro={escrita.erroRascunho} />
 
       {erroSubmissao && (
-        <p role="alert" className="text-sm font-medium text-destructive">
+        <p id={ID_ALERTA_SUBMISSAO} tabIndex={-1} role="alert" className="text-sm font-medium text-destructive">
           {erroSubmissao}
         </p>
       )}
@@ -247,7 +370,7 @@ export function PortalFormulario({ dados, pagina, aoMudarPagina, escrita }: Port
         )}
         {pagina === 2 && (
           <Button type="button" className="min-h-11" onClick={() => void submeter()} disabled={submetendo}>
-            {submetendo && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />}
+            {submetendo && <Loader2 className="mr-1.5 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
             {submetendo ? t("portal.submeter.aSubmeter") : t("hr.convite.submeter")}
           </Button>
         )}

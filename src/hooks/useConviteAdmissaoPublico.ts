@@ -6,7 +6,8 @@
  * exactos estao em `supabase/functions/convite-admissao/accoesPortal.ts` e `handler.ts`.
  *
  * ESCREVER EXIGE SESSAO. O link sozinho nao escreve: `gravarRascunho` e `submeter` sem sessao nem
- * chegam a Edge. Os anexos continuam desactivados (a Edge responde 410 `portal_em_atualizacao`).
+ * chegam a Edge. Os anexos tambem exigem a sessao (ver `useConviteAnexos`, que a le de `portalSessao`);
+ * `tratarSessaoPerdida` deixa-o acabar a sessao daqui quando a Edge a recusa a um anexo.
  *
  * A SESSAO
  *  - nasce em `otp_verificar` (o segredo vem no corpo da resposta, uma so vez) e volta nos
@@ -109,7 +110,7 @@ export interface ResultadoRascunho {
 export interface ResultadoSubmissao {
   ok: boolean;
   codigo?: string;
-  /** Em `admissao_incompleta`: os codigos dos campos em falta. */
+  /** Em `admissao_incompleta`: os codigos dos campos em falta; em `anexos_em_falta`: os tipos de anexo. */
   campos?: string[];
 }
 
@@ -121,6 +122,8 @@ export interface EscritaPortal {
   rascunhoGuardadoEm: string | null;
   aGravar: boolean;
   erroRascunho: string | null;
+  /** Os anexos recebem uma sessao recusada: acaba a sessao (so no cliente) se o codigo for de sessao perdida. */
+  aoPerderSessao?: (codigo: string) => Promise<boolean>;
 }
 
 /** A resposta de uma accao `doc_*`: forma plana (sem `strictNullChecks` uma uniao por `ok` nao estreita). */
@@ -639,7 +642,10 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
         if (!montadoRef.current) return { ok: false, codigo: "erro_inesperado" };
         if (deuErro(r)) {
           if (await tratarSessaoPerdida(r.codigo)) return { ok: false, codigo: r.codigo };
-          const campos = r.codigo === "admissao_incompleta" ? camposDeAdmissaoIncompleta(r.corpo ?? {}) : undefined;
+          // `anexos_em_falta` (HRA86, comprovativo de IBAN por enviar) trata-se como `admissao_incompleta`:
+          // tambem traz a lista do que falta, e o ecra leva a pessoa ao que ha para fazer.
+          const trazLista = r.codigo === "admissao_incompleta" || r.codigo === "anexos_em_falta";
+          const campos = trazLista ? camposDeAdmissaoIncompleta(r.corpo ?? {}) : undefined;
           return campos ? { ok: false, codigo: r.codigo, campos } : { ok: false, codigo: r.codigo };
         }
         concluidoRef.current = true;
@@ -678,6 +684,7 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     verificarCodigo,
     terminarSessao,
     manterSessao,
+    tratarSessaoPerdida,
     rascunhoGuardadoEm,
     aGravar,
     erroRascunho,

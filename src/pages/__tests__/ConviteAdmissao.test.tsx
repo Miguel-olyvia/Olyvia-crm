@@ -2,7 +2,7 @@
  * `ConviteAdmissao`: o PORTAL temporario da pessoa (pagina PUBLICA /admissao/:token, sem sessao
  * da app). Consulta limitada ao abrir o link, passo de OTP por e-mail, sessao activa com o que o
  * estado permite (formulario que grava o rascunho sozinho, com NISS e IBAN a seguir cifrados, e
- * submete) e vistas sem acesso. O link sozinho nao escreve. Os anexos ficam para a fase 2. Supabase
+ * submete) e vistas sem acesso. O link sozinho nao escreve. Os anexos (so o comprovativo de IBAN) tem o seu proprio ficheiro de testes. Supabase
  * simulado: so se mexe na Edge `convite-admissao`, com os contratos exactos (ver
  * `useConviteAdmissaoPublico.test.tsx`).
  *
@@ -901,7 +901,12 @@ describe("ConviteAdmissao (portal temporario)", () => {
     });
 
     it("um IBAN escrito e valido segue na submissao, nunca no rascunho, e nao fica no ecra de sucesso", async () => {
-      await abrirNaPagina2({ submeter: { data: { ok: true }, error: null } });
+      // Com IBAN o comprovativo e obrigatorio: o processo ja o tem ligado (senao o ecra nem submetia).
+      const comprovativo = { id: "i1", tipo: "comprovativo_iban", nome: "iban.pdf", estado: "ligado", tamanho_bytes: 10, mime_type: "application/pdf" };
+      await abrirNaPagina2({
+        ler: lerOk({ campos_obrigatorios: ["linha1"], anexos: [comprovativo] }),
+        submeter: { data: { ok: true }, error: null },
+      });
       fireEvent.change(porId("convite-conta-numero"), { target: { value: IBAN_VALIDO } });
       assinarEAceitar();
       fireEvent.click(botaoSubmeter());
@@ -961,15 +966,10 @@ describe("ConviteAdmissao (portal temporario)", () => {
   });
 
   describe("o que fica para uma fase seguinte: desenhado e desactivado, com a razao", () => {
-    it.each(["portal.proxima.documentos", "portal.proxima.contrato", "portal.proxima.pedidos"])(
+    it.each(["portal.proxima.contrato", "portal.proxima.pedidos"])(
       "%s esta com aria-disabled e explica que chega numa proxima fase",
       async (chave) => {
         await abrirSessao();
-        // Os documentos ficam na pagina 2 do formulario, onde o convite sempre os teve.
-        if (chave === "portal.proxima.documentos") {
-          fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
-          await screen.findByText(txt("hr.pessoais.bancarios"));
-        }
         const botao = screen.getByRole("button", { name: txt(chave) });
         expect(botao).toHaveAttribute("aria-disabled", "true");
         expect(botao).not.toBeDisabled();
@@ -984,26 +984,28 @@ describe("ConviteAdmissao (portal temporario)", () => {
       expect(screen.queryByRole("button", { name: /submeter para análise|submit for review/i })).toBeNull();
     });
 
-    it("a pagina 2 diz com franqueza que o envio de documentos chega numa proxima fase", async () => {
+    it("o botao «Enviar documentos» desactivado e o aviso de proxima fase ja nao existem: o envio e real", async () => {
       await abrirSessao();
       fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
       await screen.findByText(txt("hr.pessoais.bancarios"));
-      expect(screen.getByText(txt("portal.documentos.proximaFase"))).toBeInTheDocument();
+      expect(screen.queryByText("Enviar documentos")).toBeNull();
+      expect(screen.queryByText(/chega numa próxima fase/)).toBeNull();
+      // Em vez disso, o cartao de anexos e o aviso fixo de que os ficheiros guardam ao enviar.
+      expect(screen.getByRole("button", { name: /Adicionar ficheiro/ })).toBeEnabled();
+      expect(screen.getByText(txt("portal.documentos.aviso"))).toBeInTheDocument();
     });
 
-    it("clicar nos documentos, no contrato e nos pedidos nao chama a Edge (nem anexos)", async () => {
+    it("clicar no contrato e nos pedidos nao chama a Edge", async () => {
       await abrirSessao();
       fireEvent.click(screen.getByRole("button", { name: txt("hr.convite.seguinte") }));
       await screen.findByText(txt("hr.pessoais.bancarios"));
       const antes = invoke.mock.calls.length;
-      for (const chave of ["portal.proxima.documentos", "portal.proxima.contrato", "portal.proxima.pedidos"]) {
+      for (const chave of ["portal.proxima.contrato", "portal.proxima.pedidos"]) {
         fireEvent.click(screen.getByRole("button", { name: txt(chave) }));
       }
       expect(invoke.mock.calls.length).toBe(antes);
-      for (const accao of ["anexo_pedir", "anexo_confirmar", "anexo_remover"]) expect(chamadas(accao)).toHaveLength(0);
     });
   });
-
   describe("vistas sem acesso", () => {
     // Link invalido, revogado, encerrado, expirado e bloqueado usam o cartao de link invalido que ja
     // existia (ConviteCartaoLinkInvalido), com o titulo de nivel 1 dele e o motivo que ja tinha.

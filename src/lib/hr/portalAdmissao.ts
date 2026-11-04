@@ -53,6 +53,9 @@ export interface AnexoPortal {
   tipo: string;
   nome: string;
   estado: string;
+  /** Do servidor, so para os ligados; `null` se nao vier (servidor anterior a 20270107000000). */
+  tamanho_bytes: number | null;
+  mime_type: string | null;
 }
 
 export interface PortalLer {
@@ -65,6 +68,10 @@ export interface PortalLer {
   iban_ultimos4: string | null;
   devolucao: DevolucaoPortal | null;
   anexos: AnexoPortal[];
+  /** Os tipos de anexo sem os quais nao se submete (hoje `comprovativo_iban`, quando ha IBAN). */
+  anexos_obrigatorios: string[];
+  /** Dos obrigatorios, os que o servidor ainda nao tem (a regra da submissao). */
+  anexos_em_falta: string[];
   rejeicao_mensagem: string | null;
 }
 
@@ -113,7 +120,14 @@ function normalizarAnexos(bruto: unknown): AnexoPortal[] {
   const anexos: AnexoPortal[] = [];
   for (const a of bruto) {
     if (!eObjecto(a) || typeof a.id !== "string") continue;
-    anexos.push({ id: a.id, tipo: texto(a.tipo) ?? "", nome: texto(a.nome) ?? "", estado: texto(a.estado) ?? "" });
+    anexos.push({
+      id: a.id,
+      tipo: texto(a.tipo) ?? "",
+      nome: texto(a.nome) ?? "",
+      estado: texto(a.estado) ?? "",
+      tamanho_bytes: typeof a.tamanho_bytes === "number" && Number.isFinite(a.tamanho_bytes) ? a.tamanho_bytes : null,
+      mime_type: texto(a.mime_type),
+    });
   }
   return anexos;
 }
@@ -131,6 +145,8 @@ export function normalizarPortalLer(bruto: unknown): PortalLer {
     iban_ultimos4: texto(o.iban_ultimos4),
     devolucao: normalizarDevolucao(o.devolucao),
     anexos: normalizarAnexos(o.anexos),
+    anexos_obrigatorios: listaDeTextos(o.anexos_obrigatorios),
+    anexos_em_falta: listaDeTextos(o.anexos_em_falta),
     rejeicao_mensagem: texto(o.rejeicao_mensagem),
   };
 }
@@ -408,6 +424,7 @@ export const CODIGOS_DE_ERRO_DO_PORTAL: readonly string[] = [
   "iban_invalido",
   "pedido_invalido",
   "portal_em_atualizacao",
+  "anexos_em_falta",
   "rascunho_chave_invalida",
   "rascunho_demasiado_grande",
   "rascunho_valor_invalido",

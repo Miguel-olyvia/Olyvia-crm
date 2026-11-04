@@ -13,8 +13,9 @@
  *    validar tudo por dentro: esta funcao nao e a unica fronteira.
  *  - "cancelar" e "prolongar": RH autenticado, sem segredos. Correm com o JWT
  *    REENCAMINHADO (cliente com o Authorization do pedido): a RPC usa auth.uid().
- *  - "estado": sem sessao, so com o token. "rascunho" e "submeter" (fase 1 do portal) exigem a
- *    SESSAO do OTP (o link sozinho nao escreve); os anexos respondem 410 ate a fase 2.
+ *  - "estado": sem sessao, so com o token. "rascunho", "submeter" e os anexos (anexo_url,
+ *    anexo_confirmar, anexo_remover) exigem a SESSAO do OTP (o link sozinho nao escreve);
+ *    sem sessao: sessao_ausente, sem chegar as RPCs de anexos.
  *    Limites por IP E por token_hash (o IP nao e fiavel: x-forwarded-for forja-se).
  *  - V3a: "otp_pedir", "otp_verificar", "sair", "ler" e "sensiveis" (ver `accoesPortal.ts`;
  *    so estes nomes: os das RPCs, como sessao_terminar, dao accao_desconhecida) com o
@@ -811,7 +812,7 @@ async function tratarSubmeter(
       {
         error: codigo,
         // Os campos em falta so saem em `admissao_incompleta`; os conflitos NUNCA.
-        ...(codigo === "admissao_incompleta" ? { campos: mapeado.campos ?? [] } : {}),
+        ...(codigo === "admissao_incompleta" || codigo === "anexos_em_falta" ? { campos: mapeado.campos ?? [] } : {}),
       },
       statusDoCodigo(codigo),
     );
@@ -936,11 +937,17 @@ async function tratarPublica(ctx: Contexto, accao: string, payload: Record<strin
   ]);
   if (!dentro) return responder({ error: "demasiadas_tentativas" }, 429);
 
+  // Rascunho, submeter e anexos ESCREVEM: exigem a sessao que o OTP abriu. O link sozinho nao escreve.
+  // A base verifica-a (hr_convite_sessao_exigir); aqui poupa-se a viagem a sessao ausente ou mal formada,
+  // e uma accao de anexos sem sessao nem chega as RPCs de anexos.
   if (eAccaoAnexo(accao)) {
+    const sessaoAnexo = lerSessaoDoPedido(req, payload);
+    if (!sessaoAnexo) return responder({ error: "sessao_ausente" }, statusDoCodigo("sessao_ausente"));
     const resultado = await tratarAccaoAnexo({
       accao,
       svc: svc as unknown as ClienteAnexos,
       tokenHash,
+      sessaoHash: await sha256Hex(sessaoAnexo),
       payload,
       // So um IP valido ou null (a coluna e inet): nunca o "unknown" do rate limit.
       ip: detectClientIp(req),
@@ -997,8 +1004,6 @@ export function criarHandler(deps: DepsConvite): (req: Request) => Promise<Respo
       if (accao === "reenviar") return await tratarReenviar(ctx, payload);
       if (accao === "documentos_avisar") return await tratarDocumentosAvisar(ctx, payload);
       if (accao === "pedido_ficheiro_url") return await tratarPedidoFicheiroUrl(ctx, payload);
-      // Os anexos ficam para a fase 2: nem chegam a base, ao rate limit ou ao token. Corpo fixo, sem dados.
-      if (eAccaoAnexo(accao)) return responder({ error: "portal_em_atualizacao" }, 410);
       if (accao !== "estado" && accao !== "submeter" && accao !== "rascunho" && !eAccaoAnexo(accao) && !eAccaoPortal(accao) && !eAccaoDocumentos(accao)) {
         return responder({ error: "accao_desconhecida" }, 400);
       }

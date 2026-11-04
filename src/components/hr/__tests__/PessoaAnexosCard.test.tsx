@@ -564,7 +564,7 @@ describe("PessoaAnexosCard", () => {
     it("uma recusa local por limite aparece em role alert na linha do tipo", () => {
       estadoHook = { ...estadoHook, anexos: [], erroLimite: { tipo: "cartao_cidadao", codigo: "anexo_formato_invalido" } };
       montar(TODAS, false, { permissoesEscrita: TODA_ESCRITA });
-      expect(screen.getByRole("alert")).toHaveTextContent("O ficheiro tem de ser PDF, PNG ou JPEG, até 10 MB.");
+      expect(screen.getByRole("alert")).toHaveTextContent("Só PDF, PNG ou JPEG.");
     });
   });
 

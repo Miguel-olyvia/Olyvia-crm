@@ -110,7 +110,7 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   pais_invalido: "hr.convite.erro.paisInvalido",
   // Anexos do convite. Os codigos de tamanho reutilizam as chaves do lote B.
   anexo_formato_invalido: "hr.convite.erro.anexoFormato",
-  anexo_demasiado_grande: "hr.convite.erro.anexoFormato",
+  anexo_demasiado_grande: "hr.convite.erro.anexoDemasiadoGrande",
   anexo_fotografia_formato: "hr.convite.erro.fotografiaFormato",
   anexo_fotografia_demasiado_grande: "hr.convite.erro.fotografiaGrande",
   anexo_maximo_ficheiros: "hr.convite.erro.anexosDemasiados",
@@ -122,6 +122,10 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   anexo_estado_invalido: "hr.convite.erro.anexoEstadoInvalido",
   anexo_tipo_invalido: "hr.convite.erro.anexoFalhaEnvio",
   anexo_falha_envio: "hr.convite.erro.anexoFalhaEnvio",
+  // Comprovativo de IBAN obrigatorio (20270107000000): o que falta, o tipo fechado e o ficheiro recusado.
+  anexos_em_falta: "hr.convite.erro.anexosEmFalta",
+  anexo_tipo_bloqueado: "hr.convite.erro.anexoTipoBloqueado",
+  anexo_conteudo_recusado: "hr.convite.erro.anexoConteudoRecusado",
   admissao_incompleta: "hr.convite.erro.faltaPreencher",
   convite_invalido: "hr.convite.motivo.inexistente",
   convite_ja_usado: "hr.convite.motivo.usado",
@@ -171,7 +175,7 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   sessao_ausente: "portal.erro.sessaoExpirada",
   sessao_expirada: "portal.erro.sessaoExpirada",
   sessao_substituida: "portal.erro.sessaoSubstituida",
-  // Os anexos so chegam na fase 2: ate la a Edge responde 410 a essas accoes.
+  // Ja nao e devolvido pelos anexos (o 410 saiu com 20270107000000); o texto fica por compatibilidade.
   portal_em_atualizacao: "portal.erro.emAtualizacao",
   // O rascunho automatico passou a ser mostrado ao utilizador (fase 1 do portal): ja nao e excepcao.
   rascunho_demasiado_grande: "portal.erro.rascunhoGrande",
@@ -224,6 +228,13 @@ export function mensagemErroAdmissao(
       .map((c) => rotuloDeCampoAdmissao(t, c))
       .join(", ");
     return campos ? t(entrada.chave, { campos }) : t("hr.convite.erroSubmeter");
+  }
+  if (codigo === "anexos_em_falta") {
+    // «Falta enviar: Comprovativo de IBAN, porque indicou um IBAN.» Sem lista legivel, o unico anexo obrigatorio de hoje.
+    const lista = camposDeAdmissaoIncompleta(corpo)
+      .filter((c) => c === "comprovativo_iban")
+      .map(() => t("hr.convite.anexos.comprovativoIban"));
+    return t(entrada.chave, { lista: lista.length > 0 ? lista.join(", ") : t("hr.convite.anexos.comprovativoIban") });
   }
   return t(entrada.chave, entrada.params);
 }

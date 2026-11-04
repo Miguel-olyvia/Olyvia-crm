@@ -1,31 +1,42 @@
 /**
- * Os documentos no portal: so a lista do que a `ler` devolveu (nome do ficheiro, sem abrir nem
- * descarregar) e o botao de enviar, desactivado, com o aviso de que o envio chega numa proxima fase (fase 2).
- * As accoes de anexos da Edge respondem 410 `portal_em_atualizacao`, por isso o portal nao as liga: nao ha
- * seletor de ficheiros nem chamada `anexo_*`.
+ * Os documentos no portal: o cartao de anexos do convite (`ConviteAnexosCard`) com o que o portal sabe de
+ * obrigatoriedade, mais o aviso fixo de que os ficheiros e os campos se guardam de maneira diferente.
+ *
+ * O estado dos ficheiros (`useConviteAnexos`) vive em `PortalFormulario`, que precisa dele para dizer o que falta
+ * antes de submeter; aqui so se mostra. Hoje so o comprovativo de IBAN esta aberto, e e obrigatorio quando a pessoa
+ * indicou um IBAN (`anexos_obrigatorios` da `ler`). Cartao de cidadao e fotografia nao aparecem.
  */
+import { ConviteAnexosCard } from "@/components/hr/convite/ConviteAnexosCard";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { AnexoPortal } from "@/lib/hr/portalAdmissao";
-import { BotaoProximaFase } from "./BotaoProximaFase";
+import type { ResultadoConviteAnexos } from "@/hooks/useConviteAnexos";
+import type { IdiomaConvite } from "@/lib/hr/conviteAdmissaoEcra";
 
-export function PortalDocumentos({ anexos }: { anexos: AnexoPortal[] }) {
-  const { t } = useTranslation();
+interface PortalDocumentosProps {
+  estado: Pick<ResultadoConviteAnexos, "anexos" | "envios" | "contagem" | "adicionar" | "remover">;
+  /** Os tipos de anexo sem os quais nao se submete (da `ler`). */
+  obrigatorios: readonly string[];
+  /** O id do resumo «Falta enviar...» (role="alert"), para o botao de adicionar o ler. */
+  idAlerta?: string;
+  /** A submeter: nao se adiciona nem se remove. */
+  bloqueado?: boolean;
+}
+
+export function PortalDocumentos({ estado, obrigatorios, idAlerta, bloqueado }: PortalDocumentosProps) {
+  const { t, language } = useTranslation();
   return (
-    <section aria-labelledby="portal-documentos-titulo" className="space-y-3 rounded-lg border bg-background p-5">
-      <h2 id="portal-documentos-titulo" className="text-base font-semibold">
+    <section aria-labelledby="portal-documentos-titulo" className="space-y-3">
+      <h2 id="portal-documentos-titulo" className="sr-only">
         {t("portal.documentos.titulo")}
       </h2>
-      {anexos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("portal.documentos.vazio")}</p>
-      ) : (
-        <ul aria-label={t("portal.documentos.titulo")} className="list-disc space-y-1 pl-5 text-sm">
-          {anexos.map((a) => (
-            <li key={a.id}>{a.nome}</li>
-          ))}
-        </ul>
-      )}
-      <p className="text-sm text-muted-foreground">{t("portal.documentos.proximaFase")}</p>
-      <BotaoProximaFase id="portal-documentos" rotulo={t("portal.proxima.documentos")} />
+      <ConviteAnexosCard
+        t={t}
+        idioma={language as IdiomaConvite}
+        estado={estado}
+        obrigatorios={obrigatorios}
+        idAlerta={idAlerta}
+        bloqueado={bloqueado}
+      />
+      <p className="text-sm text-muted-foreground">{t("portal.documentos.aviso")}</p>
     </section>
   );
 }

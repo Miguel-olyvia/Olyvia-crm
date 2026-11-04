@@ -79,7 +79,6 @@ function montar(opcoes: Opcoes = {}) {
       error: null,
     }),
     rpc_hr_convite_admissao_estado: () => ({ data: { estado: "convidada", primeiro_nome: "Ana" }, error: null }),
-    rpc_hr_convite_anexos_listar: () => ({ data: { anexos: [] }, error: null }),
     rpc_hr_convite_admissao_rascunho: () => ({ data: { ok: true }, error: null }),
     rpc_hr_convite_admissao_submeter: () => ({ data: { ok: true }, error: null }),
     rpc_hr_convite_admissao_registar_recusa: () => ({ data: true, error: null }),
@@ -369,6 +368,13 @@ describe("despacho por accao", () => {
     });
     const a = await incompleta.chamar(SUBMETER, COM_SESSAO);
     expect(a.corpo).toEqual({ error: "admissao_incompleta", campos: ["nif", "niss"] });
+
+    // HRA86 (20270107000000): IBAN indicado e comprovativo por enviar. 409, com o que falta.
+    const emFalta = montar({
+      rpc: { rpc_hr_convite_admissao_submeter: () => ({ data: null, error: { message: "anexos_em_falta", details: "comprovativo_iban", code: "HRA86" } }) },
+    });
+    const f = await emFalta.chamar(SUBMETER, COM_SESSAO);
+    expect([f.status, f.corpo]).toEqual([409, { error: "anexos_em_falta", campos: ["comprovativo_iban"] }]);
 
     const U = "44444444-4444-4444-8444-444444444444";
     const conflito = montar({
@@ -966,6 +972,24 @@ describe("limites das accoes publicas", () => {
     expect(max("convite-admissao-token-submeter")).toBe(10);
   });
 
+  it("cada accao de anexos tem o SEU contador (anexo_remover e anexo_confirmar nao gastam o de anexo_url)", async () => {
+    const m = montar({
+      rpc: {
+        rpc_hr_convite_anexo_reservar: () => ({ data: null, error: { code: "HRA38", message: "estado_invalido" } }),
+        rpc_hr_convite_anexo_contexto: () => ({ data: { erro: "anexo_nao_encontrado" }, error: null }),
+        rpc_hr_convite_anexo_descartar: () => ({ data: { erro: "anexo_nao_encontrado" }, error: null }),
+      },
+    });
+    const ANEXO = "9f8e7d6c-aaaa-4bbb-8ccc-ddddeeeeffff";
+    await m.chamar({ action: "anexo_url", token: TOKEN_PUBLICO, tipo: "comprovativo_iban", nome: "a.pdf", tamanho: 10, mime: "application/pdf" }, COM_SESSAO);
+    await m.chamar({ action: "anexo_confirmar", token: TOKEN_PUBLICO, anexo_id: ANEXO }, COM_SESSAO);
+    await m.chamar({ action: "anexo_remover", token: TOKEN_PUBLICO, anexo_id: ANEXO }, COM_SESSAO);
+    for (const accao of ["anexo_url", "anexo_confirmar", "anexo_remover"]) {
+      expect(m.limites).toContainEqual(expect.objectContaining({ bucket: `convite-admissao-${accao}`, maxAttempts: 30 }));
+      expect(m.limites).toContainEqual(expect.objectContaining({ bucket: `convite-admissao-token-${accao}`, maxAttempts: 30 }));
+    }
+  });
+
   it("um IP forjado (x-forwarded-for diferente em cada pedido) nao escapa ao limite por token", async () => {
     const m = montar();
     const pedido = SUBMETER;
@@ -992,6 +1016,58 @@ describe("limites das accoes publicas", () => {
     expect((await m.chamar(pedido(TOKEN_PUBLICO), COM_SESSAO)).status).toBe(429);
     const outro = await m.chamar(pedido("u".repeat(43)), { ...COM_SESSAO, "x-forwarded-for": "198.51.100.77" });
     expect(outro.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("anexos: sessao antes de tudo (20270107000000), sem o 410 da fase 2", () => {
+  const ANEXO = "9f8e7d6c-aaaa-4bbb-8ccc-ddddeeeeffff";
+  const PEDIDOS: Array<[string, Record<string, unknown>]> = [
+    ["anexo_url", { tipo: "comprovativo_iban", nome: "a.pdf", tamanho: 10, mime: "application/pdf" }],
+    ["anexo_confirmar", { anexo_id: ANEXO }],
+    ["anexo_remover", { anexo_id: ANEXO }],
+  ];
+  const rpcsDeAnexos = (m: ReturnType<typeof montar>) => m.rpcs.filter((x) => x.fn.startsWith("rpc_hr_convite_anexo_"));
+
+  it.each(PEDIDOS)("%s sem sessao: sessao_ausente (401), sem chegar a nenhuma RPC de anexos", async (accao, resto) => {
+    const m = montar();
+    const r = await m.chamar({ action: accao, token: TOKEN_PUBLICO, ...resto });
+    expect([r.status, r.corpo.error]).toEqual([401, "sessao_ausente"]);
+    expect(rpcsDeAnexos(m)).toHaveLength(0);
+  });
+
+  it.each(PEDIDOS)("%s com sessao mal formada: sessao_ausente, sem RPC", async (accao, resto) => {
+    const m = montar();
+    const r = await m.chamar({ action: accao, token: TOKEN_PUBLICO, ...resto }, { "x-portal-sessao": "curta" });
+    expect([r.status, r.corpo.error]).toEqual([401, "sessao_ausente"]);
+    expect(rpcsDeAnexos(m)).toHaveLength(0);
+  });
+
+  it("com sessao, a accao chega a base (nunca 410) e leva o hash da sessao, nunca a sessao em claro", async () => {
+    const m = montar({
+      rpc: { rpc_hr_convite_anexo_reservar: () => ({ data: null, error: { code: "HRA38", message: "estado_invalido" } }) },
+    });
+    const r = await m.chamar({ action: "anexo_url", token: TOKEN_PUBLICO, ...PEDIDOS[0][1] }, COM_SESSAO);
+    expect([r.status, r.corpo.error]).toEqual([409, "estado_invalido"]);
+    const chamada = m.rpcs.find((x) => x.fn === "rpc_hr_convite_anexo_reservar");
+    expect(chamada?.cliente).toBe("svc");
+    expect(chamada?.args).toMatchObject({
+      p_token_hash: await sha256Hex(TOKEN_PUBLICO),
+      p_sessao_hash: await sha256Hex(SESSAO),
+    });
+    expect(JSON.stringify(m.rpcs)).not.toContain(SESSAO);
+  });
+
+  it("a sessao tambem vale no corpo (campo sessao), como no rascunho", async () => {
+    const m = montar({
+      rpc: { rpc_hr_convite_anexo_descartar: () => ({ data: { erro: "anexo_nao_encontrado" }, error: null }) },
+    });
+    const r = await m.chamar({ action: "anexo_remover", token: TOKEN_PUBLICO, anexo_id: ANEXO, sessao: SESSAO });
+    expect([r.status, r.corpo.error]).toEqual([404, "anexo_nao_encontrado"]);
+    expect(m.rpcs.find((x) => x.fn === "rpc_hr_convite_anexo_descartar")?.args).toMatchObject({
+      p_sessao_hash: await sha256Hex(SESSAO),
+      p_motivo: "removido_pela_pessoa",
+    });
   });
 });
 

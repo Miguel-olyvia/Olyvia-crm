@@ -17,6 +17,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({
 
 import { useConviteAnexos } from "../useConviteAnexos";
 import type { AnexoConvite } from "@/lib/hr/conviteAnexos";
+import { guardarSessao, limparSessao } from "@/lib/hr/portalSessao";
 
 /** Um XHR que so regista o que lhe fazem; o teste decide quando e como termina. */
 class FakeXHR {
@@ -64,7 +65,7 @@ function anexoDe(id: string, tipo: AnexoConvite["tipo"], nome = "ficheiro.pdf"):
   return { id, tipo, nome_original: nome, tamanho_bytes: 100, mime_type: "application/pdf" };
 }
 
-function confirmarOk(id = "A1", tipo = "cartao_cidadao", nome = "a.pdf") {
+function confirmarOk(id = "A1", tipo = "comprovativo_iban", nome = "a.pdf") {
   return { data: { ok: true, anexo: anexoDe(id, tipo as AnexoConvite["tipo"], nome) }, error: null };
 }
 
@@ -123,7 +124,7 @@ describe("useConviteAnexos: envio com sucesso", () => {
     expect(result.current.emCurso).toBe(false);
     let envio!: Promise<void>;
     act(() => {
-      envio = result.current.adicionar("cartao_cidadao", pdf("a.pdf", 2048));
+      envio = result.current.adicionar("comprovativo_iban", pdf("a.pdf", 2048));
     });
 
     const xhr = await esperarXhr();
@@ -133,7 +134,7 @@ describe("useConviteAnexos: envio com sucesso", () => {
     expect(pedido[1].body).toEqual({
       action: "anexo_url",
       token: TOKEN,
-      tipo: "cartao_cidadao",
+      tipo: "comprovativo_iban",
       nome: "a.pdf",
       tamanho: 2048,
       mime: "application/pdf",
@@ -153,7 +154,7 @@ describe("useConviteAnexos: envio com sucesso", () => {
     expect(result.current.emCurso).toBe(true);
     const [idLocal] = Object.keys(result.current.envios);
     expect(result.current.envios[idLocal]).toMatchObject({
-      tipo: "cartao_cidadao",
+      tipo: "comprovativo_iban",
       nome: "a.pdf",
       fase: "a_enviar",
       progresso: 0,
@@ -174,10 +175,10 @@ describe("useConviteAnexos: envio com sucesso", () => {
       token: TOKEN,
       anexo_id: "A1",
     });
-    expect(result.current.anexos).toEqual([anexoDe("A1", "cartao_cidadao", "a.pdf")]);
+    expect(result.current.anexos).toEqual([anexoDe("A1", "comprovativo_iban", "a.pdf")]);
     expect(result.current.envios).toEqual({});
     expect(result.current.emCurso).toBe(false);
-    expect(result.current.contagem).toEqual({ total: 1, porTipo: { cartao_cidadao: 1 } });
+    expect(result.current.contagem).toEqual({ total: 1, porTipo: { comprovativo_iban: 1 } });
     expect(captureFlowError).not.toHaveBeenCalled();
   });
 
@@ -190,7 +191,7 @@ describe("useConviteAnexos: envio com sucesso", () => {
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     let envio!: Promise<void>;
     act(() => {
-      envio = result.current.adicionar("cartao_cidadao", pdf());
+      envio = result.current.adicionar("comprovativo_iban", pdf());
     });
     const xhr = await esperarXhr();
     await act(async () => {
@@ -216,7 +217,7 @@ describe("useConviteAnexos: envio com sucesso", () => {
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     let envio!: Promise<void>;
     act(() => {
-      envio = result.current.adicionar("cartao_cidadao", pdf());
+      envio = result.current.adicionar("comprovativo_iban", pdf());
     });
     const xhr = await esperarXhr();
     await act(async () => {
@@ -233,7 +234,7 @@ describe("useConviteAnexos: recusas", () => {
     responder({ anexo_url: erroHttp(422, { error: "anexo_formato_invalido" }) });
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf());
+      await result.current.adicionar("comprovativo_iban", pdf());
     });
     expect(FakeXHR.instances).toHaveLength(0);
     const [envio] = Object.values(result.current.envios);
@@ -249,7 +250,7 @@ describe("useConviteAnexos: recusas", () => {
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     let envio!: Promise<void>;
     act(() => {
-      envio = result.current.adicionar("cartao_cidadao", pdf());
+      envio = result.current.adicionar("comprovativo_iban", pdf());
     });
     const xhr = await esperarXhr();
     await act(async () => {
@@ -266,7 +267,7 @@ describe("useConviteAnexos: recusas", () => {
   it("pre-verifica localmente: um GIF e recusado sem qualquer pedido", async () => {
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf("a.gif", 100, "image/gif"));
+      await result.current.adicionar("comprovativo_iban", pdf("a.gif", 100, "image/gif"));
     });
     expect(invoke).not.toHaveBeenCalled();
     expect(FakeXHR.instances).toHaveLength(0);
@@ -282,18 +283,18 @@ describe("useConviteAnexos: recusas", () => {
     ];
     const { result } = renderHook(() => useConviteAnexos(TOKEN, iniciais));
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf());
+      await result.current.adicionar("comprovativo_iban", pdf());
     });
     expect(invoke).not.toHaveBeenCalled();
     expect(Object.values(result.current.envios)[0]?.codigoErro).toBe("anexo_maximo_ficheiros");
     expect(result.current.anexos).toHaveLength(4);
   });
 
-  it("recusa um terceiro cartao de cidadao com anexo_tipo_cheio, sem pedido", async () => {
-    const iniciais = [anexoDe("1", "cartao_cidadao"), anexoDe("2", "cartao_cidadao")];
+  it("recusa um segundo comprovativo com anexo_tipo_cheio, sem pedido", async () => {
+    const iniciais = [anexoDe("1", "comprovativo_iban")];
     const { result } = renderHook(() => useConviteAnexos(TOKEN, iniciais));
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf());
+      await result.current.adicionar("comprovativo_iban", pdf());
     });
     expect(invoke).not.toHaveBeenCalled();
     expect(Object.values(result.current.envios)[0]?.codigoErro).toBe("anexo_tipo_cheio");
@@ -303,10 +304,10 @@ describe("useConviteAnexos: recusas", () => {
     responder({ anexo_url: erroHttp(422, { error: "anexo_formato_invalido" }) });
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf("a.gif", 100, "image/gif"));
+      await result.current.adicionar("comprovativo_iban", pdf("a.gif", 100, "image/gif"));
     });
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf("b.gif", 100, "image/gif"));
+      await result.current.adicionar("comprovativo_iban", pdf("b.gif", 100, "image/gif"));
     });
     const envios = Object.values(result.current.envios);
     expect(envios).toHaveLength(1);
@@ -318,7 +319,7 @@ describe("useConviteAnexos: recusas", () => {
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     expect(result.current.erroConvite).toBeNull();
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf());
+      await result.current.adicionar("comprovativo_iban", pdf());
     });
     expect(result.current.erroConvite).toBe("convite_expirado");
   });
@@ -330,7 +331,7 @@ describe("useConviteAnexos: falhas inesperadas", () => {
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     let envio!: Promise<void>;
     act(() => {
-      envio = result.current.adicionar("cartao_cidadao", pdf("segredo-da-pessoa.pdf"));
+      envio = result.current.adicionar("comprovativo_iban", pdf("segredo-da-pessoa.pdf"));
     });
     const xhr = await esperarXhr();
     await act(async () => {
@@ -353,7 +354,7 @@ describe("useConviteAnexos: falhas inesperadas", () => {
     invoke.mockRejectedValue(new Error("Failed to fetch"));
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf());
+      await result.current.adicionar("comprovativo_iban", pdf());
     });
     expect(Object.values(result.current.envios)[0]?.codigoErro).toBe("anexo_falha_envio");
     expect(captureFlowError).toHaveBeenCalledTimes(1);
@@ -412,25 +413,32 @@ describe("useConviteAnexos: o confirmar perde a resposta (o servidor pode ja ter
       anexo_url: URL_OK,
       anexo_confirmar: erroHttp(502, {}),
       anexo_remover: erroHttp(502, {}),
-      estado: {
-        data: { ok: true, convite: { anexos: [anexoDe("A1", "comprovativo_iban", "iban.pdf")] } },
+      // A accao `ler` (com sessao): a lista do servidor, no formato do portal (so os ligados contam).
+      ler: {
+        data: {
+          ok: true,
+          anexos: [
+            { id: "A1", tipo: "comprovativo_iban", nome: "iban.pdf", estado: "ligado", tamanho_bytes: 100, mime_type: "application/pdf" },
+            { id: "P1", tipo: "comprovativo_iban", nome: "pendente.pdf", estado: "pendente", tamanho_bytes: null, mime_type: null },
+          ],
+        },
         error: null,
       },
     });
     const { result } = renderHook(() => useConviteAnexos(TOKEN));
     await enviarAteConfirmar(result);
-    expect(accoesChamadas()).toEqual(["anexo_url", "anexo_confirmar", "anexo_remover", "estado"]);
+    expect(accoesChamadas()).toEqual(["anexo_url", "anexo_confirmar", "anexo_remover", "ler"]);
     // O servidor ja o tinha ligado: o ecra passa a mostra-lo em vez de o esconder e contar.
     expect(result.current.anexos.map((a) => a.id)).toEqual(["A1"]);
     expect(result.current.contagem.porTipo).toEqual({ comprovativo_iban: 1 });
   });
 
-  it("estado sem lista valida nao apaga o que o ecra ja tinha", async () => {
+  it("ler sem lista valida nao apaga o que o ecra ja tinha", async () => {
     responder({
       anexo_url: URL_OK,
       anexo_confirmar: erroHttp(502, {}),
       anexo_remover: erroHttp(502, {}),
-      estado: { data: { ok: true, convite: {} }, error: null },
+      ler: { data: { ok: true }, error: null },
     });
     const { result } = renderHook(() =>
       useConviteAnexos(TOKEN, [anexoDe("F1", "fotografia", "f.png")]),
@@ -547,11 +555,79 @@ describe("useConviteAnexos: remover", () => {
   });
 });
 
+describe("useConviteAnexos: sessao do portal e tipos fechados", () => {
+  const SESSAO = "S".repeat(43);
+  afterEach(() => limparSessao());
+
+  it("cada accao leva a sessao no cabecalho x-portal-sessao, nunca no corpo", async () => {
+    guardarSessao(SESSAO);
+    responder({ anexo_url: URL_OK, anexo_confirmar: confirmarOk(), anexo_remover: { data: { ok: true }, error: null } });
+    const { result } = renderHook(() => useConviteAnexos(TOKEN));
+    let envio!: Promise<void>;
+    act(() => {
+      envio = result.current.adicionar("comprovativo_iban", pdf());
+    });
+    const xhr = await esperarXhr();
+    await act(async () => {
+      xhr.terminar(200);
+      await envio;
+    });
+    await act(async () => {
+      await result.current.remover("A1");
+    });
+    expect(accoesChamadas()).toEqual(["anexo_url", "anexo_confirmar", "anexo_remover"]);
+    for (const chamada of invoke.mock.calls) {
+      expect(chamada[1].headers).toEqual({ "x-portal-sessao": SESSAO });
+      expect(JSON.stringify(chamada[1].body)).not.toContain(SESSAO);
+    }
+  });
+
+  it("sem sessao em memoria nao inventa cabecalho (a Edge responde sessao_ausente)", async () => {
+    responder({ anexo_url: erroHttp(401, { error: "sessao_ausente" }) });
+    const { result } = renderHook(() => useConviteAnexos(TOKEN));
+    await act(async () => {
+      await result.current.adicionar("comprovativo_iban", pdf());
+    });
+    expect(invoke.mock.calls[0][1].headers).toBeUndefined();
+  });
+
+  it.each(["cartao_cidadao", "fotografia"] as const)("%s esta fechado: recusado sem qualquer pedido", async (tipo) => {
+    const { result } = renderHook(() => useConviteAnexos(TOKEN));
+    await act(async () => {
+      await result.current.adicionar(tipo, pdf("a.png", 100, "image/png"));
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(Object.values(result.current.envios)[0]).toMatchObject({ fase: "erro", codigoErro: "anexo_tipo_invalido" });
+  });
+
+  it.each(["sessao_ausente", "sessao_expirada"])("uma sessao perdida (%s) avisa o portal", async (codigo) => {
+    const aoPerderSessao = vi.fn();
+    responder({ anexo_url: erroHttp(401, { error: codigo }) });
+    const { result } = renderHook(() => useConviteAnexos(TOKEN, undefined, { aoPerderSessao }));
+    await act(async () => {
+      await result.current.adicionar("comprovativo_iban", pdf());
+    });
+    expect(aoPerderSessao).toHaveBeenCalledWith(codigo);
+    expect(captureFlowError).not.toHaveBeenCalled();
+  });
+
+  it("uma recusa de negocio nao avisa o portal da sessao", async () => {
+    const aoPerderSessao = vi.fn();
+    responder({ anexo_url: erroHttp(409, { error: "anexo_tipo_bloqueado" }) });
+    const { result } = renderHook(() => useConviteAnexos(TOKEN, undefined, { aoPerderSessao }));
+    await act(async () => {
+      await result.current.adicionar("comprovativo_iban", pdf());
+    });
+    expect(aoPerderSessao).not.toHaveBeenCalled();
+    expect(Object.values(result.current.envios)[0]).toMatchObject({ codigoErro: "anexo_tipo_bloqueado" });
+  });
+});
+
 describe("useConviteAnexos: sem token", () => {
   it("nao faz pedido nenhum", async () => {
     const { result } = renderHook(() => useConviteAnexos(undefined));
     await act(async () => {
-      await result.current.adicionar("cartao_cidadao", pdf());
+      await result.current.adicionar("comprovativo_iban", pdf());
     });
     expect(invoke).not.toHaveBeenCalled();
   });

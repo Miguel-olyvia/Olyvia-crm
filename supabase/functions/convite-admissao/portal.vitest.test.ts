@@ -940,7 +940,7 @@ describe("reenviar (RH)", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("fase 1 do portal: o link sozinho nao escreve; rascunho e submeter exigem sessao; os anexos ficam para a fase 2 (410)", () => {
+describe("fase 1 do portal: o link sozinho nao escreve; rascunho, submeter e anexos exigem sessao", () => {
   const ANEXOS = ["anexo_url", "anexo_confirmar", "anexo_remover"];
 
   it("rascunho e submeter SEM sessao respondem 401 sessao_ausente e NENHUMA chega a uma RPC, ao storage nem ao correio", async () => {
@@ -958,21 +958,17 @@ describe("fase 1 do portal: o link sozinho nao escreve; rascunho e submeter exig
     expect(m.invocacoes).toEqual([]);
   });
 
-  it("os anexos continuam 410 com corpo fixo e NENHUM chega a uma RPC, ao storage, ao limite nem ao correio, nem com sessao valida", async () => {
+  it("os anexos SEM sessao respondem 401 sessao_ausente e nenhum chega a uma RPC, ao storage nem ao correio (o 410 saiu)", async () => {
     const m = montar();
     for (const action of ANEXOS) {
-      for (const cab of [{ "x-forwarded-for": "203.0.113.9" }, { "x-portal-sessao": SESSAO }]) {
-        const r = await m.chamar(
-          { action, token: TOKEN, sessao: SESSAO, tipo: "fotografia", anexo_id: CONVITE, dados: { nif: "123456789" } },
-          cab,
-        );
-        expect([r.status, r.corpo]).toEqual([410, { error: "portal_em_atualizacao" }]);
-        expect(r.texto).not.toContain("123456789");
-      }
+      const r = await m.chamar(
+        { action, token: TOKEN, tipo: "comprovativo_iban", anexo_id: CONVITE, dados: { nif: "123456789" } },
+        { "x-forwarded-for": "203.0.113.9" },
+      );
+      expect([r.status, r.corpo]).toEqual([401, { error: "sessao_ausente" }]);
+      expect(r.texto).not.toContain("123456789");
     }
     expect(m.rpcs).toHaveLength(0);
-    expect(m.limites).toHaveLength(0);
-    expect(m.clientesCriados).toHaveLength(0);
     expect(m.correio).toHaveLength(0);
     expect(m.invocacoes).toEqual([]);
   });

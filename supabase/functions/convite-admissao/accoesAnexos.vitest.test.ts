@@ -27,7 +27,16 @@ const CAMINHO_FINAL_PDF = `${ORG}/${PESSOA}/admissao/${ANEXO}.pdf`;
 
 const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0, 0, 0, 0, 0, 0, 0, 0]);
 const GIF = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0, 0, 0, 0, 0, 0]);
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 0]);
+/** JPEG minimo valido: SOI, JFIF, SOF0, SOS, dois bytes de dados, EOI. */
+const JPEG = new Uint8Array([
+  0xff, 0xd8,
+  0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0,
+  0xff, 0xc0, 0, 0x0b, 8, 0, 1, 0, 1, 1, 1, 0x11, 0,
+  0xff, 0xda, 0, 0x08, 1, 1, 0, 0, 0x3f, 0,
+  0x12, 0x34,
+  0xff, 0xd9,
+]);
+const SESSAO_HASH = "b".repeat(64);
 
 type Manipulador = (args: Record<string, unknown>) => { data: unknown; error: { message?: string } | null };
 
@@ -37,18 +46,24 @@ interface Opcoes {
   falharRemoverEm?: string[];
   falharAssinar?: boolean;
   falharUploadFinal?: boolean;
+  /** O Storage falha ao listar (o tamanho nao se consegue ler). */
+  falharListar?: boolean;
+  /** O Storage lista o objecto mas sem tamanho nos metadados. */
+  semTamanhoNosMetadados?: boolean;
+  /** O tamanho que os metadados dizem, em vez do real (para provar que se recusa SEM descarregar). */
+  tamanhoNosMetadados?: number;
   /** Objectos que ja estao em hr-documentos antes do pedido (o upload com upsert false recusa-os). */
   finalInicial?: Record<string, Uint8Array>;
 }
 
-function contexto(tipo = "cartao_cidadao", caminho = CAMINHO_QUARENTENA): Manipulador {
+function contexto(tipo = "comprovativo_iban", caminho = CAMINHO_QUARENTENA): Manipulador {
   return () => ({
     data: { anexo_id: ANEXO, tipo, estado: "pendente", caminho, organization_id: ORG, pessoa_id: PESSOA },
     error: null,
   });
 }
 
-function ligarOk(tipo = "cartao_cidadao"): Manipulador {
+function ligarOk(tipo = "comprovativo_iban"): Manipulador {
   return (a) => ({
     data: {
       ok: true,
@@ -73,6 +88,7 @@ function criarFalso(opcoes: Opcoes = {}) {
   const remocoes: Array<{ bucket: string; caminho: string }> = [];
   const uploads: Array<{ bucket: string; caminho: string; contentType: string; upsert: boolean; cacheControl?: string }> = [];
   const assinados: Array<{ bucket: string; caminho: string; upsert?: boolean }> = [];
+  const descarregados: Array<{ bucket: string; caminho: string }> = [];
 
   const svc: ClienteAnexos = {
     rpc: async (fn, args) => {
@@ -88,7 +104,19 @@ function criarFalso(opcoes: Opcoes = {}) {
           if (opcoes.falharAssinar) return { data: null, error: { message: "boom" } };
           return { data: { token: "tok-de-upload" }, error: null };
         },
+        list: async (pasta, o) => {
+          if (opcoes.falharListar) return { data: null, error: { message: "boom" } };
+          const itens = [...buckets[bucket].entries()]
+            .filter(([c]) => c.startsWith(`${pasta}/`) && !c.slice(pasta.length + 1).includes("/"))
+            .map(([c, b]) => ({
+              name: c.slice(pasta.length + 1),
+              metadata: opcoes.semTamanhoNosMetadados ? null : { size: opcoes.tamanhoNosMetadados ?? b.length },
+            }))
+            .filter((i) => !o?.search || i.name.includes(o.search));
+          return { data: itens, error: null };
+        },
         download: async (caminho) => {
+          descarregados.push({ bucket, caminho });
           const bytes = buckets[bucket].get(caminho);
           if (!bytes) return { data: null, error: { message: "Object not found" } };
           return { data: { arrayBuffer: async () => bytes.slice().buffer as ArrayBuffer }, error: null };
@@ -113,12 +141,17 @@ function criarFalso(opcoes: Opcoes = {}) {
     },
   };
   const chamou = (fn: string) => chamadas.filter((c) => c.fn === fn);
-  return { svc, buckets, chamadas, chamou, remocoes, uploads, assinados };
+  return { svc, buckets, chamadas, chamou, remocoes, uploads, assinados, descarregados };
 }
 
 function pedir(svc: ClienteAnexos, accao: string, payload: Record<string, unknown> | null): Promise<RespostaAccao> {
-  return tratarAccaoAnexo({ accao, svc, tokenHash: HASH, payload, ip: "203.0.113.7", supabaseUrl: "https://x.supabase.co" });
+  return tratarAccaoAnexo({
+    accao, svc, tokenHash: HASH, sessaoHash: SESSAO_HASH, payload, ip: "203.0.113.7", supabaseUrl: "https://x.supabase.co",
+  });
 }
+
+/** O erro que o PostgREST devolve quando a RPC faz RAISE com este SQLSTATE e esta mensagem. */
+const raise = (code: string, message: string): Manipulador => () => ({ data: null, error: { code, message } });
 
 /** Como `pedir`, mas com as falhas registadas (o que iria para o Sentry) a acumular em `erros`. */
 function pedirComErros(
@@ -128,7 +161,7 @@ function pedirComErros(
   erros: unknown[],
 ): Promise<RespostaAccao> {
   return tratarAccaoAnexo({
-    accao, svc, tokenHash: HASH, payload, ip: "203.0.113.7", registarErro: (e) => erros.push(e),
+    accao, svc, tokenHash: HASH, sessaoHash: SESSAO_HASH, payload, ip: "203.0.113.7", registarErro: (e) => erros.push(e),
   });
 }
 
@@ -142,7 +175,7 @@ function semOrgNemPessoa(r: RespostaAccao) {
 }
 
 const RESERVA_OK: Manipulador = () => ({ data: { anexo_id: ANEXO, caminho: CAMINHO_QUARENTENA }, error: null });
-const PEDIDO_URL = { tipo: "cartao_cidadao", nome: "../../cc frente.pdf", tamanho: 2048, mime: "application/pdf" };
+const PEDIDO_URL = { tipo: "comprovativo_iban", nome: "../../cc frente.pdf", tamanho: 2048, mime: "application/pdf" };
 
 describe("anexo_url", () => {
   it("reserva, assina o upload na quarentena e devolve so o necessario", async () => {
@@ -155,7 +188,8 @@ describe("anexo_url", () => {
     // o nome vai sanitizado e o IP vai para a reserva
     expect(f.chamou("rpc_hr_convite_anexo_reservar")[0].args).toEqual({
       p_token_hash: HASH,
-      p_tipo: "cartao_cidadao",
+      p_sessao_hash: SESSAO_HASH,
+      p_tipo: "comprovativo_iban",
       p_nome_original: "cc frente.pdf",
       p_tamanho_declarado: 2048,
       p_mime_declarado: "application/pdf",
@@ -166,10 +200,10 @@ describe("anexo_url", () => {
 
   it.each([
     ["gif declarado", { ...PEDIDO_URL, mime: "image/gif" }, 422, "anexo_formato_invalido"],
-    ["fotografia em pdf", { ...PEDIDO_URL, tipo: "fotografia" }, 422, "anexo_fotografia_formato"],
+    ["fotografia (fechada)", { tipo: "fotografia", nome: "a.png", tamanho: 2048, mime: "image/png" }, 422, "anexo_tipo_invalido"],
+    ["cartao de cidadao (fechado)", { ...PEDIDO_URL, tipo: "cartao_cidadao" }, 422, "anexo_tipo_invalido"],
     ["tipo desconhecido", { ...PEDIDO_URL, tipo: "passaporte" }, 422, "anexo_tipo_invalido"],
     ["10 MB mais um byte", { ...PEDIDO_URL, tamanho: 10485761 }, 413, "anexo_demasiado_grande"],
-    ["fotografia de 5 MB mais um byte", { tipo: "fotografia", nome: "a.png", tamanho: 5242881, mime: "image/png" }, 413, "anexo_fotografia_demasiado_grande"],
   ])("recusa cedo, sem tocar na base: %s", async (_nome, payload, status, codigo) => {
     const f = criarFalso();
     const r = await pedir(f.svc, "anexo_url", payload);
@@ -204,8 +238,23 @@ describe("anexo_url", () => {
     ["anexo_limite_convite", 409],
     ["convite_expirado", 401],
     ["convite_ja_usado", 401],
-  ])("a recusa %s da base sai com o seu estado %i", async (codigo, status) => {
+    ["anexo_tipo_bloqueado", 409],
+  ])("a recusa %s da base (jsonb) sai com o seu estado %i", async (codigo, status) => {
     const f = criarFalso({ rpcs: { rpc_hr_convite_anexo_reservar: () => ({ data: { erro: codigo }, error: null }) } });
+    const r = await pedir(f.svc, "anexo_url", PEDIDO_URL);
+    expect(r).toEqual({ status, body: { error: codigo } });
+    expect(f.assinados).toHaveLength(0);
+  });
+
+  it.each([
+    ["HRA51", "sessao_ausente", "sessao_ausente", 401],
+    ["HRA52", "sessao_expirada", "sessao_expirada", 401],
+    ["HRA53", "sessao_substituida", "sessao_expirada", 401],
+    ["HRA38", "estado_invalido", "estado_invalido", 409],
+    ["HRA02", "convite_ja_usado", "convite_ja_usado", 401],
+    ["HRA31", "nao_encontrado", "convite_invalido", 401],
+  ])("o RAISE %s das RPCs (sessao, estado, convite) sai como %s", async (sqlstate, mensagem, codigo, status) => {
+    const f = criarFalso({ rpcs: { rpc_hr_convite_anexo_reservar: raise(sqlstate, mensagem) } });
     const r = await pedir(f.svc, "anexo_url", PEDIDO_URL);
     expect(r).toEqual({ status, body: { error: codigo } });
     expect(f.assinados).toHaveLength(0);
@@ -215,7 +264,7 @@ describe("anexo_url", () => {
     const erros: unknown[] = [];
     const f = criarFalso({ rpcs: { rpc_hr_convite_anexo_reservar: () => ({ data: { erro: "segredo_da_base" }, error: null }) } });
     const r = await tratarAccaoAnexo({
-      accao: "anexo_url", svc: f.svc, tokenHash: HASH, payload: PEDIDO_URL, ip: null, registarErro: (e) => erros.push(e),
+      accao: "anexo_url", svc: f.svc, tokenHash: HASH, sessaoHash: SESSAO_HASH, payload: PEDIDO_URL, ip: null, registarErro: (e) => erros.push(e),
     });
     expect(r).toEqual({ status: 500, body: { error: "erro_inesperado" } });
     expect(JSON.stringify(r.body)).not.toContain("segredo_da_base");
@@ -235,12 +284,14 @@ describe("anexo_url", () => {
     });
     const r = await pedir(f.svc, "anexo_url", PEDIDO_URL);
     expect(r).toEqual({ status: 400, body: { error: "anexo_falha_envio" } });
-    expect(f.chamou("rpc_hr_convite_anexo_descartar")[0].args).toMatchObject({ p_anexo_id: ANEXO, p_motivo: "upload_abandonado" });
+    expect(f.chamou("rpc_hr_convite_anexo_descartar")[0].args).toMatchObject({
+      p_sessao_hash: SESSAO_HASH, p_anexo_id: ANEXO, p_motivo: "upload_abandonado",
+    });
   });
 });
 
 describe("anexo_confirmar", () => {
-  const rpcsOk = (tipo = "cartao_cidadao"): Record<string, Manipulador> => ({
+  const rpcsOk = (tipo = "comprovativo_iban"): Record<string, Manipulador> => ({
     rpc_hr_convite_anexo_contexto: contexto(tipo),
     rpc_hr_convite_anexo_ligar: ligarOk(tipo),
     rpc_hr_convite_anexo_descartar: () => ({ data: { ok: true }, error: null }),
@@ -253,7 +304,7 @@ describe("anexo_confirmar", () => {
     expect(r.status).toBe(200);
     expect(r.body).toEqual({
       ok: true,
-      anexo: { id: ANEXO, tipo: "cartao_cidadao", nome_original: "cc.pdf", tamanho_bytes: PDF.length, mime_type: "application/pdf" },
+      anexo: { id: ANEXO, tipo: "comprovativo_iban", nome_original: "cc.pdf", tamanho_bytes: PDF.length, mime_type: "application/pdf" },
     });
     expect(f.uploads).toEqual([
       { bucket: BUCKET_FINAL, caminho: CAMINHO_FINAL_PDF, contentType: "application/pdf", upsert: false, cacheControl: "0" },
@@ -279,12 +330,47 @@ describe("anexo_confirmar", () => {
   });
 
   it("o tipo REAL manda: um JPEG enviado como .pdf vai para .jpg com image/jpeg", async () => {
-    const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: JPEG }, rpcs: rpcsOk("fotografia") });
-    // o contexto diz fotografia
+    const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: JPEG }, rpcs: rpcsOk() });
     const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
     expect(r.status).toBe(200);
     expect(f.uploads[0]).toMatchObject({ caminho: `${ORG}/${PESSOA}/admissao/${ANEXO}.jpg`, contentType: "image/jpeg" });
     expect(f.chamou("rpc_hr_convite_anexo_ligar")[0].args).toMatchObject({ p_mime: "image/jpeg" });
+  });
+
+  it("a sessao vai em todas as RPCs do confirmar (contexto e ligar)", async () => {
+    const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: PDF }, rpcs: rpcsOk() });
+    await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+    expect(f.chamou("rpc_hr_convite_anexo_contexto")[0].args).toMatchObject({ p_sessao_hash: SESSAO_HASH });
+    expect(f.chamou("rpc_hr_convite_anexo_ligar")[0].args).toMatchObject({ p_sessao_hash: SESSAO_HASH });
+  });
+
+  it("PDF com conteudo activo: recusado com anexo_conteudo_recusado (422), nada e copiado nem ligado", async () => {
+    const activo = new TextEncoder().encode("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /J#61vaScript /JS (app.alert(1)) >> >>\nendobj\n");
+    const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: activo }, rpcs: rpcsOk() });
+    const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+    expect(r).toEqual({ status: 422, body: { error: "anexo_conteudo_recusado" } });
+    expect(f.uploads).toHaveLength(0);
+    expect(f.chamou("rpc_hr_convite_anexo_ligar")).toHaveLength(0);
+    expect(f.chamou("rpc_hr_convite_anexo_descartar")[0].args).toMatchObject({ p_motivo: "formato_invalido" });
+    expect(f.remocoes).toEqual([{ bucket: BUCKET_QUARENTENA, caminho: CAMINHO_QUARENTENA }]);
+  });
+
+  it("imagem com EXIF: o que se guarda e liga e a imagem limpa, com o hash e o tamanho dos bytes limpos", async () => {
+    const comExif = Uint8Array.from([
+      ...JPEG.subarray(0, 2),
+      0xff, 0xe1, 0, 0x0a, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x47, 0x50, // APP1 Exif com "GP"
+      ...JPEG.subarray(2),
+      0x00, 0x00, 0x99, // lixo depois do fim
+    ]);
+    const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: comExif }, rpcs: rpcsOk() });
+    const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+    expect(r.status).toBe(200);
+    const guardado = f.buckets[BUCKET_FINAL].get(`${ORG}/${PESSOA}/admissao/${ANEXO}.jpg`)!;
+    expect(Array.from(guardado)).toEqual(Array.from(JPEG));
+    const esperado = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", JPEG)))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    expect(f.chamou("rpc_hr_convite_anexo_ligar")[0].args).toMatchObject({ p_tamanho: JPEG.length, p_hash: esperado });
   });
 
   it("ficheiro ausente da quarentena: anexo_nao_carregado (409), sem ligar nada", async () => {
@@ -316,21 +402,86 @@ describe("anexo_confirmar", () => {
     expect(erros).toHaveLength(1);
   });
 
-  it("fotografia em pdf recusada com o seu codigo", async () => {
-    const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: PDF }, rpcs: rpcsOk("fotografia") });
-    const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
-    expect(r).toEqual({ status: 422, body: { error: "anexo_fotografia_formato" } });
-    expect(f.chamou("rpc_hr_convite_anexo_descartar")[0].args).toMatchObject({ p_motivo: "formato_invalido" });
-    expect(f.uploads).toHaveLength(0);
-  });
-
-  it("tamanho REAL acima do tecto: recusado com demasiado_grande, seja qual for o declarado", async () => {
+  it("tamanho REAL acima do tecto: recusado com demasiado_grande SEM descarregar o objecto", async () => {
     const grande = new Uint8Array(10485761);
     grande.set(PDF);
     const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: grande }, rpcs: rpcsOk() });
     const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
     expect(r).toEqual({ status: 413, body: { error: "anexo_demasiado_grande" } });
     expect(f.chamou("rpc_hr_convite_anexo_descartar")[0].args).toMatchObject({ p_motivo: "demasiado_grande" });
+    expect(f.descarregados).toHaveLength(0);
+    expect(f.remocoes).toEqual([{ bucket: BUCKET_QUARENTENA, caminho: CAMINHO_QUARENTENA }]);
+  });
+
+  it("sem tamanho nos metadados ou com o Storage a falhar a listar: fecha-se, nao se descarrega", async () => {
+    for (const opcoes of [{ semTamanhoNosMetadados: true }, { falharListar: true }]) {
+      const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: PDF }, rpcs: rpcsOk(), ...opcoes });
+      const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+      expect(r).toEqual({ status: 400, body: { error: "anexo_falha_envio" } });
+      expect(f.descarregados).toHaveLength(0);
+      expect(f.uploads).toHaveLength(0);
+    }
+  });
+
+  it("os metadados mandam: um objecto que diz 11 MB nao e descarregado, mesmo que os bytes fossem pequenos", async () => {
+    const f = criarFalso({ quarentena: { [CAMINHO_QUARENTENA]: PDF }, rpcs: rpcsOk(), tamanhoNosMetadados: 11 * 1024 * 1024 });
+    const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+    expect(r.status).toBe(413);
+    expect(f.descarregados).toHaveLength(0);
+  });
+
+  it("sessao caida na ligacao NAO desfaz o envio: a copia e a quarentena ficam para repetir a confirmacao", async () => {
+    for (const [sqlstate, mensagem, codigo] of [
+      ["HRA51", "sessao_ausente", "sessao_ausente"],
+      ["HRA52", "sessao_expirada", "sessao_expirada"],
+      ["HRA53", "sessao_substituida", "sessao_expirada"],
+      ["HRA31", "nao_encontrado", "convite_invalido"],
+    ]) {
+      const f = criarFalso({
+        quarentena: { [CAMINHO_QUARENTENA]: PDF },
+        rpcs: { ...rpcsOk(), rpc_hr_convite_anexo_ligar: raise(sqlstate, mensagem) },
+      });
+      const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+      expect(r).toEqual({ status: 401, body: { error: codigo } });
+      expect(f.chamou("rpc_hr_convite_anexo_descartar")).toHaveLength(0);
+      expect(f.buckets[BUCKET_FINAL].has(CAMINHO_FINAL_PDF)).toBe(true);
+    }
+  });
+
+  it("duas confirmacoes em paralelo: o ligar da segunda devolve anexo_estado_invalido e NAO desfaz nada (ja ligado pela outra)", async () => {
+    const f = criarFalso({
+      quarentena: { [CAMINHO_QUARENTENA]: PDF },
+      rpcs: { ...rpcsOk(), rpc_hr_convite_anexo_ligar: () => ({ data: { erro: "anexo_estado_invalido" }, error: null }) },
+    });
+    const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ ok: true, anexo: { id: ANEXO, tipo: "comprovativo_iban", mime_type: "application/pdf" } });
+    // nada descartado, e o objecto final (o mesmo caminho do anexo ligado pela outra) fica
+    expect(f.chamou("rpc_hr_convite_anexo_descartar")).toHaveLength(0);
+    expect(f.remocoes.filter((x) => x.bucket === BUCKET_FINAL)).toEqual([]);
+    expect(f.buckets[BUCKET_FINAL].has(CAMINHO_FINAL_PDF)).toBe(true);
+    semOrgNemPessoa(r);
+  });
+
+  it("estado invalido (HRA38) na ligacao desfaz a copia: ja nao ha onde ligar", async () => {
+    const f = criarFalso({
+      quarentena: { [CAMINHO_QUARENTENA]: PDF },
+      rpcs: { ...rpcsOk(), rpc_hr_convite_anexo_ligar: raise("HRA38", "estado_invalido") },
+    });
+    const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+    expect(r).toEqual({ status: 409, body: { error: "estado_invalido" } });
+    expect(f.chamou("rpc_hr_convite_anexo_descartar")).toHaveLength(1);
+    expect(f.buckets[BUCKET_FINAL].size).toBe(0);
+  });
+
+  it("anexo_tipo_bloqueado vindo do contexto (jsonb) sai com 409 e nada e lido do Storage", async () => {
+    const f = criarFalso({
+      quarentena: { [CAMINHO_QUARENTENA]: PDF },
+      rpcs: { rpc_hr_convite_anexo_contexto: () => ({ data: { erro: "anexo_tipo_bloqueado" }, error: null }) },
+    });
+    const r = await pedir(f.svc, "anexo_confirmar", { anexo_id: ANEXO });
+    expect(r).toEqual({ status: 409, body: { error: "anexo_tipo_bloqueado" } });
+    expect(f.descarregados).toHaveLength(0);
   });
 
   it("exactamente no tecto de 10 MB passa", async () => {
@@ -592,6 +743,31 @@ describe("anexo_remover", () => {
     expect(await pedir(f.svc, "anexo_remover", { anexo_id: "x" })).toEqual({ status: 400, body: { error: "pedido_invalido" } });
     expect(f.chamadas).toHaveLength(0);
   });
+
+  it("o motivo do descarte e FIXADO no servidor: removido_pela_pessoa, qualquer motivo do pedido e ignorado, e a sessao vai", async () => {
+    const f = criarFalso({
+      rpcs: { rpc_hr_convite_anexo_descartar: descartarOk(BUCKET_QUARENTENA, CAMINHO_QUARENTENA) },
+    });
+    await pedir(f.svc, "anexo_remover", { anexo_id: ANEXO, motivo: "upload_abandonado", p_motivo: "formato_invalido" });
+    const args = f.chamou("rpc_hr_convite_anexo_descartar")[0].args;
+    expect(args).toEqual({
+      p_token_hash: HASH,
+      p_sessao_hash: SESSAO_HASH,
+      p_anexo_id: ANEXO,
+      p_motivo: "removido_pela_pessoa",
+    });
+  });
+
+  it.each([
+    ["HRA51", "sessao_ausente", "sessao_ausente"],
+    ["HRA52", "sessao_expirada", "sessao_expirada"],
+    ["HRA38", "estado_invalido", "estado_invalido"],
+  ])("o RAISE %s do descarte sai como %s e nada se remove", async (sqlstate, mensagem, codigo) => {
+    const f = criarFalso({ rpcs: { rpc_hr_convite_anexo_descartar: raise(sqlstate, mensagem) } });
+    const r = await pedir(f.svc, "anexo_remover", { anexo_id: ANEXO });
+    expect(r.body).toEqual({ error: codigo });
+    expect(f.remocoes).toHaveLength(0);
+  });
 });
 
 describe("despacho", () => {
@@ -609,7 +785,7 @@ describe("despacho", () => {
       storage: { from: () => ({}) },
     } as unknown as ClienteAnexos;
     const r = await tratarAccaoAnexo({
-      accao: "anexo_remover", svc, tokenHash: HASH, payload: { anexo_id: ANEXO }, ip: null, registarErro: (e) => erros.push(e),
+      accao: "anexo_remover", svc, tokenHash: HASH, sessaoHash: SESSAO_HASH, payload: { anexo_id: ANEXO }, ip: null, registarErro: (e) => erros.push(e),
     });
     expect(r).toEqual({ status: 500, body: { error: "erro_inesperado" } });
     expect(erros).toHaveLength(1);
@@ -620,6 +796,7 @@ describe("lerObjecto e copiarParaFinal registam as falhas do Storage", () => {
   const bucket = (download: () => Promise<{ data: unknown; error: unknown }>, upload?: () => Promise<{ data: unknown; error: unknown }>) =>
     ({
       createSignedUploadUrl: async () => ({ data: null, error: null }),
+      list: async () => ({ data: [], error: null }),
       download,
       upload: upload ?? (async () => ({ data: {}, error: null })),
       remove: async () => ({ data: [], error: null }),

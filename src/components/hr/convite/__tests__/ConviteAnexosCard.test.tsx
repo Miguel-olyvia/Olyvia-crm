@@ -10,7 +10,7 @@ import { translations } from "@/translations/index";
 import { ConviteAnexosCard } from "../ConviteAnexosCard";
 import type { EnvioAnexo, ResultadoConviteAnexos } from "@/hooks/useConviteAnexos";
 import type { AnexoConvite } from "@/lib/hr/conviteAnexos";
-import { contarPorTipo } from "@/lib/hr/conviteAnexos";
+import { TIPOS_ANEXO_CONVITE, contarPorTipo, type TipoAnexoConvite } from "@/lib/hr/conviteAnexos";
 
 const pt = (translations as unknown as Record<string, Record<string, string>>).pt;
 const t = (chave: string, params?: Record<string, string | number>) => {
@@ -29,6 +29,8 @@ function montar(
   anexos: AnexoConvite[] = [],
   envios: Record<string, EnvioAnexo> = {},
   accoes: { adicionar?: ReturnType<typeof vi.fn>; remover?: ReturnType<typeof vi.fn> } = {},
+  /** Por omissao os tres tipos, para exercitar o cartao por inteiro; o que o portal mostra esta em "tipos abertos". */
+  extra: { tipos?: readonly TipoAnexoConvite[]; obrigatorios?: readonly string[] } = { tipos: TIPOS_ANEXO_CONVITE },
 ) {
   const emVoo = Object.values(envios).filter((e) => e.fase !== "erro");
   const estado: Pick<ResultadoConviteAnexos, "anexos" | "envios" | "contagem" | "adicionar" | "remover"> = {
@@ -38,14 +40,130 @@ function montar(
     adicionar: (accoes.adicionar ?? vi.fn()) as ResultadoConviteAnexos["adicionar"],
     remover: (accoes.remover ?? vi.fn()) as ResultadoConviteAnexos["remover"],
   };
-  return render(<ConviteAnexosCard t={t} idioma="pt" estado={estado} />);
+  return render(<ConviteAnexosCard t={t} idioma="pt" estado={estado} tipos={extra.tipos} obrigatorios={extra.obrigatorios} />);
 }
+
+describe("ConviteAnexosCard: o que o portal mostra (so o comprovativo de IBAN)", () => {
+  it("por omissao so ha a linha do comprovativo: sem cartao de cidadao nem fotografia, e sem contador 'n de 4'", () => {
+    montar([], {}, {}, {});
+    expect(screen.getByRole("group", { name: "Comprovativo de IBAN" })).toBeInTheDocument();
+    expect(screen.queryByText("Cartão de cidadão")).toBeNull();
+    expect(screen.queryByText("Fotografia")).toBeNull();
+    expect(screen.queryByTestId("anexo-input-cartao_cidadao")).toBeNull();
+    expect(screen.queryByTestId("anexo-input-fotografia")).toBeNull();
+    expect(screen.queryByText(/de 4 ficheiros/)).toBeNull();
+    expect(screen.getByText(/obrigatório quando indica um IBAN/)).toBeInTheDocument();
+  });
+
+  it("diz «Obrigatório» em texto na legenda quando o servidor o exige, e so entao", () => {
+    const { unmount } = montar([], {}, {}, { obrigatorios: ["comprovativo_iban"] });
+    const grupo = screen.getByRole("group", { name: /Comprovativo de IBAN/ });
+    expect(within(grupo).getByText("(Obrigatório)")).toBeInTheDocument();
+    // esta na legenda do grupo (que da o nome ao grupo): o leitor de ecra di-lo-a, nao so a cor
+    expect(grupo.querySelector("legend")).toHaveTextContent("Comprovativo de IBAN (Obrigatório)");
+    unmount();
+    montar([], {}, {}, { obrigatorios: [] });
+    expect(screen.queryByText("(Obrigatório)")).toBeNull();
+  });
+
+  it("alvos de 44 px no telemovel: botao de adicionar e de remover; sem capture no seletor", () => {
+    montar([anexo("1", "comprovativo_iban", "iban.pdf")], {}, {}, {});
+    expect(screen.getByRole("button", { name: "Remover iban.pdf" }).className).toMatch(/h-11/);
+    expect(screen.getByRole("button", { name: "Remover iban.pdf" }).className).toMatch(/w-11/);
+    const adicionar = screen.getByRole("button", { name: /Adicionar ficheiro/ });
+    expect(adicionar.className).toMatch(/min-h-11/);
+    expect(adicionar).toHaveAttribute("data-anexo-adicionar", "comprovativo_iban");
+    expect(screen.getByTestId("anexo-input-comprovativo_iban")).not.toHaveAttribute("capture");
+  });
+
+  it("o nome do ficheiro corta com reticencias e entra sempre como texto, nunca como HTML", () => {
+    const nome = '<img src=x onerror="alert(1)">muito-comprido-muito-comprido-muito-comprido.pdf';
+    montar([anexo("1", "comprovativo_iban", nome)], {}, {}, {});
+    const item = screen.getByText(nome);
+    expect(item.className).toMatch(/truncate/);
+    expect(document.querySelector("img")).toBeNull();
+  });
+});
+
+describe("ConviteAnexosCard: acessibilidade (regiao de estado, descricoes, bloqueio)", () => {
+  const estadoCom = (anexos: AnexoConvite[], envios: Record<string, EnvioAnexo> = {}) => ({
+    anexos,
+    envios,
+    contagem: { total: anexos.length, porTipo: contarPorTipo(anexos) },
+    adicionar: vi.fn() as ResultadoConviteAnexos["adicionar"],
+    remover: vi.fn() as ResultadoConviteAnexos["remover"],
+  });
+  const card = (estado: ReturnType<typeof estadoCom>, extra: Record<string, unknown> = {}) => (
+    <ConviteAnexosCard t={t} idioma="pt" estado={estado} {...extra} />
+  );
+
+  it("a lista nao e regiao viva; ha UMA regiao role=status por linha, sempre no DOM, com aria-atomic", () => {
+    const { container } = render(card(estadoCom([anexo("1", "comprovativo_iban", "iban.pdf")])));
+    expect(container.querySelector("ul")).not.toHaveAttribute("aria-live");
+    const estados = screen.getAllByRole("status");
+    expect(estados).toHaveLength(1);
+    expect(estados[0]).toHaveAttribute("aria-atomic", "true");
+    expect(estados[0]).toHaveTextContent("");
+  });
+
+  it("uma frase curta por transicao: A enviar, Enviado, Erro", async () => {
+    const { rerender } = render(card(estadoCom([])));
+    const envio = (fase: EnvioAnexo["fase"], codigoErro: string | null = null): Record<string, EnvioAnexo> => ({
+      "envio-1": { tipo: "comprovativo_iban", nome: "iban.pdf", fase, progresso: 0, codigoErro },
+    });
+    rerender(card(estadoCom([], envio("a_enviar"))));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("A enviar iban.pdf"));
+    rerender(card(estadoCom([anexo("A1", "comprovativo_iban", "iban.pdf")])));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Enviado: iban.pdf"));
+    rerender(card(estadoCom([anexo("A1", "comprovativo_iban", "iban.pdf")], envio("erro", "anexo_formato_invalido"))));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Erro: iban.pdf"));
+  });
+
+  it("o nome comprido leva title (o texto cortado le-se por inteiro)", () => {
+    const nome = "comprovativo-muito-comprido-do-banco-2027.pdf";
+    render(card(estadoCom([anexo("1", "comprovativo_iban", nome)])));
+    expect(screen.getByText(nome)).toHaveAttribute("title", nome);
+  });
+
+  it("o botao liga-se ao erro da sua linha e ao resumo do formulario por aria-describedby", () => {
+    const envios: Record<string, EnvioAnexo> = {
+      "envio-1": { tipo: "comprovativo_iban", nome: "x.gif", fase: "erro", progresso: 0, codigoErro: "anexo_formato_invalido" },
+    };
+    render(card(estadoCom([], envios), { obrigatorios: ["comprovativo_iban"], idAlerta: "resumo-falta" }));
+    const botao = screen.getByRole("button", { name: /Adicionar ficheiro/ });
+    const ids = (botao.getAttribute("aria-describedby") ?? "").split(" ");
+    expect(ids).toContain("resumo-falta");
+    const erro = screen.getByRole("alert");
+    expect(ids).toContain(erro.id);
+    expect(erro.id).not.toBe("");
+  });
+
+  it("sem obrigatoriedade o resumo do formulario nao se liga a linha", () => {
+    render(card(estadoCom([]), { obrigatorios: [], idAlerta: "resumo-falta" }));
+    expect(screen.getByRole("button", { name: /Adicionar ficheiro/ }).getAttribute("aria-describedby") ?? "").not.toContain("resumo-falta");
+  });
+
+  it("bloqueado (a submeter): nao se adiciona nem se remove", () => {
+    render(card(estadoCom([anexo("1", "comprovativo_iban", "iban.pdf")]), { bloqueado: true }));
+    expect(screen.getByRole("button", { name: /Adicionar ficheiro/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remover iban.pdf" })).toBeDisabled();
+  });
+
+  it("o spinner de envio para com 'reduzir movimento' e o «Obrigatório» tem tamanho de corpo (text-sm)", () => {
+    const envios: Record<string, EnvioAnexo> = {
+      "envio-1": { tipo: "comprovativo_iban", nome: "a.pdf", fase: "a_enviar", progresso: 5, codigoErro: null },
+    };
+    const { container } = render(card(estadoCom([], envios), { obrigatorios: ["comprovativo_iban"] }));
+    expect(container.querySelector("svg.animate-spin")?.getAttribute("class")).toMatch(/motion-reduce:animate-none/);
+    expect(screen.getByText("(Obrigatório)").className).toMatch(/text-sm/);
+  });
+});
 
 describe("ConviteAnexosCard: estrutura e etiquetas", () => {
   it("mostra o titulo, a descricao e as tres linhas, cada uma com botao de texto visivel", () => {
     montar();
     expect(screen.getByText("Anexos")).toBeInTheDocument();
-    expect(screen.getByText(/Nenhum é obrigatório/)).toBeInTheDocument();
+    expect(screen.getByText(/obrigatório quando indica um IBAN/)).toBeInTheDocument();
     expect(screen.getByText("Cartão de cidadão")).toBeInTheDocument();
     expect(screen.getByText("Comprovativo de IBAN")).toBeInTheDocument();
     expect(screen.getByText("Fotografia")).toBeInTheDocument();
@@ -282,7 +400,7 @@ function Harness({ inicial, terminar }: { inicial: AnexoConvite[]; terminar: { f
     adicionar: vi.fn() as ResultadoConviteAnexos["adicionar"],
     remover,
   };
-  return <ConviteAnexosCard t={t} idioma="pt" estado={estado} />;
+  return <ConviteAnexosCard t={t} idioma="pt" estado={estado} tipos={TIPOS_ANEXO_CONVITE} />;
 }
 
 describe("ConviteAnexosCard: remover", () => {
@@ -318,7 +436,7 @@ describe("ConviteAnexosCard: remover", () => {
       expect(screen.getByRole("button", { name: "Adicionar ficheiro Cartão de cidadão" })).toHaveFocus(),
     );
     const anuncio = screen.getByText("Removido: frente.pdf");
-    expect(anuncio.closest("[aria-live='polite']")).not.toBeNull();
+    expect(anuncio.closest("[role='status']")).not.toBeNull();
     expect(screen.queryByText("frente.pdf")).toBeNull();
   });
 

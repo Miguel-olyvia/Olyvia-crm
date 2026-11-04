@@ -70,6 +70,7 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
     rascunhoGuardadoEm: portal.rascunhoGuardadoEm,
     aGravar: portal.aGravar,
     erroRascunho: portal.erroRascunho,
+    aoPerderSessao: portal.tratarSessaoPerdida,
   };
 
   const [dialogoAberto, setDialogoAberto] = useState(false);
@@ -155,6 +156,7 @@ function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
             aoManterSessao={() => void portal.manterSessao()}
             escrita={escrita}
             tituloRef={tituloRef}
+            token={token}
           />
         ) : (
           <PortalConsulta

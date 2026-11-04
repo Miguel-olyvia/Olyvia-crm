@@ -107,6 +107,34 @@ describe("traducoes do portal da admissao (pt e en)", () => {
     expect(emFalta, `${lingua}: por traduzir`).toEqual([]);
   });
 
+  it("o aviso do cartao de documentos diz so que os ficheiros guardam ao enviar (nao ha botao Gravar: o rascunho e automatico)", () => {
+    expect(tabela.pt["portal.documentos.aviso"]).toBe("Os ficheiros ficam guardados assim que são enviados.");
+    expect(tabela.en["portal.documentos.aviso"]).toBe("Files are saved as soon as they are sent.");
+    for (const lingua of ["pt", "en", "es", "fr", "de"]) {
+      expect(tabela[lingua]["portal.documentos.aviso"], lingua).not.toMatch(/gravar|save you|speichern Sie|guardan al/i);
+    }
+  });
+
+  it("es, fr e de tem o titulo e o aviso dos documentos e o aviso do formulario (nao caem para o ingles), sem mojibake", () => {
+    for (const lingua of ["es", "fr", "de"]) {
+      for (const chave of ["portal.documentos.titulo", "portal.documentos.aviso", "portal.formulario.aviso"]) {
+        const texto = tabela[lingua][chave];
+        expect(texto, `${lingua}: ${chave}`).toBeTruthy();
+        // "Documents" e igual em ingles e em frances: so o titulo pode coincidir
+        if (chave !== "portal.documentos.titulo") expect(texto, `${lingua}: ${chave}`).not.toBe(tabela.en[chave]);
+        expect(texto, `${lingua}: ${chave}`).not.toMatch(/Ã|Â|�/);
+      }
+    }
+  });
+
+  it("saiu o que era da fase 2: nem o botao de enviar documentos, nem o aviso de proxima fase, nem o vazio", () => {
+    for (const lingua of ["pt", "en"]) {
+      for (const morta of ["portal.documentos.vazio", "portal.documentos.proximaFase", "portal.proxima.documentos"]) {
+        expect(tabela[lingua][morta], `${lingua}: ${morta}`).toBeUndefined();
+      }
+    }
+  });
+
   it("pt e en tem exactamente as mesmas chaves portal.*", () => {
     const pt = Object.keys(tabela.pt).filter((k) => k.startsWith("portal.")).sort();
     const en = Object.keys(tabela.en).filter((k) => k.startsWith("portal.")).sort();

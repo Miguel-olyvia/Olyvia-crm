@@ -1,9 +1,11 @@
 /**
- * Os ficheiros do convite de admissao publico: cartao de cidadao, comprovativo
- * de IBAN e fotografia. Sem sessao -- tudo passa pela Edge Function
- * `convite-admissao` (accoes `anexo_url`, `anexo_confirmar`, `anexo_remover`),
- * e o ficheiro em si sobe por um URL assinado para a QUARENTENA: so depois de o
- * servidor lhe ler a assinatura real e que ele passa a ficar ligado ao convite.
+ * Os ficheiros do convite de admissao publico. Hoje so o comprovativo de IBAN
+ * esta aberto (cartao de cidadao e fotografia estao fechados: `adicionar` recusa-os
+ * sem pedido nenhum). Tudo passa pela Edge Function `convite-admissao` (accoes
+ * `anexo_url`, `anexo_confirmar`, `anexo_remover`) COM A SESSAO do portal no
+ * cabecalho `x-portal-sessao` (o link sozinho nao escreve), e o ficheiro em si
+ * sobe por um URL assinado para a QUARENTENA: so depois de o servidor lhe ler a
+ * assinatura real, o tamanho e o conteudo e que ele passa a ficar ligado ao convite.
  *
  * ESTE HOOK NUNCA LANCA
  * ---------------------
@@ -14,9 +16,13 @@
  *
  * Um motivo `convite_*` devolvido por qualquer accao fica em `erroConvite`: o
  * link ja nao serve e a pagina leva a pessoa ao cartao de link invalido, tal
- * como na submissao.
+ * como na submissao. Uma sessao perdida (`sessao_ausente`, `sessao_expirada`,
+ * `sessao_substituida`) avisa quem montou o hook (`aoPerderSessao`) para o portal
+ * voltar a pedir o codigo; o ficheiro ja copiado fica no servidor e a pessoa
+ * repete o envio depois.
  *
- * O token vive so na URL e neste hook -- nunca em localStorage/sessionStorage.
+ * O token vive so na URL e neste hook -- nunca em localStorage/sessionStorage; a
+ * sessao vem de `portalSessao` (so em memoria).
  * Os ficheiros NAO entram no rascunho nem nos `dados` da submissao.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,8 +30,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { codigoDeErroEdge } from "@/lib/hr/errosAdmissao";
 import { enviarParaQuarentena } from "@/lib/hr/envioQuarentena";
+import { CODIGOS_DE_SESSAO_PERDIDA, normalizarPortalLer } from "@/lib/hr/portalAdmissao";
+import { lerSessao } from "@/lib/hr/portalSessao";
 import {
+  anexosLigadosDaLer,
   contarPorTipo,
+  eTipoAbertoConvite,
   validarFicheiroLocal,
   verificarLimitesDeContagem,
   type AnexoConvite,
@@ -34,6 +44,7 @@ import {
 } from "@/lib/hr/conviteAnexos";
 
 const FUNCAO = "convite-admissao";
+const CABECALHO_SESSAO = "x-portal-sessao";
 const ORIGEM_REGISTO = "hr-convite-anexos";
 const CODIGO_FALHA_ENVIO = "anexo_falha_envio";
 
@@ -80,9 +91,14 @@ function eDefeito(codigo: string | null): boolean {
   return codigo === null || codigo === "erro_inesperado";
 }
 
+/** A sessao so vai no cabecalho (nunca no corpo nem no URL), e so se existir. */
 async function chamarEdge(body: Record<string, unknown>): Promise<RespostaEdge> {
+  const sessao = lerSessao();
   try {
-    const { data, error } = await supabase.functions.invoke(FUNCAO, { body });
+    const { data, error } = await supabase.functions.invoke(
+      FUNCAO,
+      sessao ? { body, headers: { [CABECALHO_SESSAO]: sessao } } : { body },
+    );
     if (error || data?.error) {
       return { ok: false, data: {}, codigo: await codigoDeErroEdge(error, data) };
     }
@@ -90,6 +106,11 @@ async function chamarEdge(body: Record<string, unknown>): Promise<RespostaEdge> 
   } catch {
     return { ok: false, data: {}, codigo: null };
   }
+}
+
+export interface OpcoesConviteAnexos {
+  /** Chamado quando uma accao devolve uma sessao perdida; o portal acaba a sessao e volta a consulta. */
+  aoPerderSessao?: (codigo: string) => void;
 }
 
 /**
@@ -100,7 +121,10 @@ async function chamarEdge(body: Record<string, unknown>): Promise<RespostaEdge> 
 export function useConviteAnexos(
   token: string | undefined,
   iniciais?: AnexoConvite[],
+  opcoes: OpcoesConviteAnexos = {},
 ): ResultadoConviteAnexos {
+  const aoPerderSessaoRef = useRef(opcoes.aoPerderSessao);
+  aoPerderSessaoRef.current = opcoes.aoPerderSessao;
   const [anexos, setAnexos] = useState<AnexoConvite[]>(() => (iniciais ? [...iniciais] : []));
   const [envios, setEnvios] = useState<Record<string, EnvioAnexo>>({});
   const [erroConvite, setErroConvite] = useState<string | null>(null);
@@ -165,6 +189,7 @@ export function useConviteAnexos(
       const codigoFinal = codigo ?? CODIGO_FALHA_ENVIO;
       if (eDefeito(codigo)) captureFlowError(erroSemDados(origem, codigo), ORIGEM_REGISTO);
       if (codigo?.startsWith("convite_")) setErroConvite(codigo);
+      if (codigo && CODIGOS_DE_SESSAO_PERDIDA.includes(codigo)) aoPerderSessaoRef.current?.(codigo);
       guardarEnvios({
         ...enviosRef.current,
         [id]: { tipo, nome, fase: "erro", progresso: 0, codigoErro: codigoFinal },
@@ -176,25 +201,20 @@ export function useConviteAnexos(
   /**
    * O `anexo_confirmar` perdeu a resposta: o servidor pode ter ligado o
    * ficheiro. Primeiro tenta-se tira-lo (`anexo_remover`, idempotente para o
-   * que ja nao existe); se nem isso chega, a lista do servidor e a fonte de
-   * verdade e o ecra passa a mostrar o que la esta. Nunca lanca.
+   * que ja nao existe); se nem isso chega, a lista do servidor (a accao `ler`,
+   * com sessao) e a fonte de verdade e o ecra passa a mostrar o que la esta.
+   * Nunca lanca.
    */
   const desfazerConfirmacaoIncerta = useCallback(
     async (anexoId: string): Promise<void> => {
       if (!token) return;
       const remocao = await chamarEdge({ action: "anexo_remover", token, anexo_id: anexoId });
       if (remocao.ok) return;
-      const estado = await chamarEdge({ action: "estado", token });
-      if (!estado.ok) return;
-      const convite = estado.data.convite as { anexos?: unknown } | null | undefined;
-      const lista = convite?.anexos;
-      if (!Array.isArray(lista)) return;
-      guardarAnexos(
-        lista.filter(
-          (a): a is AnexoConvite =>
-            typeof a === "object" && a !== null && typeof (a as { id?: unknown }).id === "string",
-        ),
-      );
+      const lida = await chamarEdge({ action: "ler", token });
+      if (!lida.ok) return;
+      // Sem lista valida nao se apaga o que o ecra ja tinha.
+      if (!Array.isArray(lida.data.anexos)) return;
+      guardarAnexos(anexosLigadosDaLer(normalizarPortalLer(lida.data).anexos));
     },
     [token, guardarAnexos],
   );
@@ -215,8 +235,10 @@ export function useConviteAnexos(
       const id = `envio-${contadorLocal.current}`;
       const nome = file.name;
 
-      const recusaLocal =
-        validarFicheiroLocal(tipo, file) ?? verificarLimitesDeContagem(tipo, contagemActual().porTipo);
+      // Cartao de cidadao e fotografia estao fechados: nem chegam a Edge.
+      const recusaLocal = !eTipoAbertoConvite(tipo)
+        ? "anexo_tipo_invalido"
+        : (validarFicheiroLocal(tipo, file) ?? verificarLimitesDeContagem(tipo, contagemActual().porTipo));
       if (recusaLocal) {
         falhar(id, tipo, nome, recusaLocal, "anexo_local");
         return;
@@ -273,7 +295,11 @@ export function useConviteAnexos(
         falhar(id, tipo, nome, null, "anexo_confirmar");
         return;
       }
-      guardarAnexos([...anexosRef.current, aceite]);
+      // Duas confirmacoes em paralelo podem devolver o mesmo anexo (a segunda sem nome): fica um por id,
+      // o que tem nome.
+      const mesmoId = anexosRef.current.find((a) => a.id === aceite.id);
+      const completo = mesmoId?.nome_original && !aceite.nome_original ? mesmoId : aceite;
+      guardarAnexos([...anexosRef.current.filter((a) => a.id !== aceite.id), completo]);
       retirarEnvio(id);
     },
     [

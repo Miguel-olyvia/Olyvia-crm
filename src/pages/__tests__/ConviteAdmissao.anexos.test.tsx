@@ -1,9 +1,10 @@
 /**
- * `ConviteAdmissao`: os documentos (cartao de cidadao, comprovativo de IBAN, fotografia) no
- * portal temporario. Os anexos ficam para a fase 2 (a Edge responde 410 `portal_em_atualizacao`),
- * por isso o portal NAO os liga: a zona de documentos esta desenhada e desactivada, com a razao
- * ("chega numa proxima fase"), e nunca chama `anexo_*`. Os anexos que a `ler` devolve mostram-se so como lista
- * (so o nome), sem abrir nem descarregar nada.
+ * `ConviteAdmissao`: o comprovativo de IBAN no portal temporario. So esse tipo esta aberto (cartao de
+ * cidadao e fotografia estao fechados e nem aparecem). Quando a pessoa indicou um IBAN o comprovativo e
+ * OBRIGATORIO: a linha diz «Obrigatorio» em texto e submeter sem ele mostra o resumo («Falta enviar: ...»,
+ * `role="alert"`) com o foco em «Adicionar ficheiro», sem chamar a Edge. O servidor repete a regra
+ * (`anexos_em_falta`) e o ecra trata-a da mesma maneira. O envio em si (URL assinado, quarentena,
+ * confirmacao) esta em `useConviteAnexos.test.ts`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -39,12 +40,25 @@ import { limparSessao } from "@/lib/hr/portalSessao";
 const pt = (translations as unknown as Record<string, Record<string, string>>).pt;
 const SESSAO = "S".repeat(43);
 
-const ANEXOS = [
-  { id: "a1", tipo: "cartao_cidadao", nome: "cartao.pdf", estado: "ligado" },
-  { id: "a2", tipo: "comprovativo_iban", nome: "iban.png", estado: "ligado" },
-];
+const IBAN_LIGADO = {
+  id: "i1", tipo: "comprovativo_iban", nome: "iban.pdf", estado: "ligado", tamanho_bytes: 2048, mime_type: "application/pdf",
+};
 
-function ligar(anexos: unknown[]) {
+const erroHttp = (status: number, corpo: Record<string, unknown>) => ({
+  data: null,
+  error: {
+    name: "FunctionsHttpError",
+    message: "Edge Function returned a non-2xx status code",
+    context: new Response(JSON.stringify(corpo), { status }),
+  },
+});
+
+interface Cenario {
+  ler?: Record<string, unknown>;
+  submeter?: unknown;
+}
+
+function ligar({ ler = {}, submeter = { data: { ok: true }, error: null } }: Cenario = {}) {
   invoke.mockImplementation(async (_n: string, o: { body: { action: string } }) => {
     switch (o.body.action) {
       case "estado":
@@ -75,16 +89,21 @@ function ligar(anexos: unknown[]) {
             estado: "em_preenchimento",
             rascunho: {},
             campos_obrigatorios: [],
-            campos_editaveis: [],
-            documentos_editaveis: ["cartao_cidadao", "comprovativo_iban", "fotografia"],
+            campos_editaveis: ["assinatura_nome"],
+            documentos_editaveis: ["comprovativo_iban"],
             niss_ultimos4: null,
             iban_ultimos4: null,
             devolucao: null,
-            anexos,
+            anexos: [],
+            anexos_obrigatorios: [],
+            anexos_em_falta: [],
             rejeicao_mensagem: null,
+            ...ler,
           },
           error: null,
         };
+      case "submeter":
+        return submeter;
       default:
         return { data: null, error: { message: "inesperado", context: new Response("{}", { status: 500 }) } };
     }
@@ -105,66 +124,185 @@ async function entrar() {
   fireEvent.change(campo, { target: { value: "123456" } });
   fireEvent.click(screen.getByRole("button", { name: pt["portal.otp.confirmar"] }));
   await screen.findByRole("button", { name: pt["portal.sair"] });
-  // Os documentos ficam na pagina 2 do formulario do convite (o sitio que ja tinham: entre o fardamento e a assinatura).
+  // Os documentos ficam na pagina 2 do formulario do convite (entre o fardamento e a assinatura).
   fireEvent.click(screen.getByRole("button", { name: pt["hr.convite.seguinte"] }));
   await screen.findByText(pt["hr.pessoais.bancarios"]);
 }
 
+const porId = (id: string) => document.getElementById(id) as HTMLInputElement;
+const assinarEAceitar = () => {
+  fireEvent.change(porId("convite-assinatura-nome"), { target: { value: "Joana Silva" } });
+  fireEvent.click(porId("convite-aceite"));
+};
+const submeter = () => fireEvent.click(screen.getByRole("button", { name: pt["hr.convite.submeter"] }));
 const accoesChamadas = () => invoke.mock.calls.map(([, o]) => (o as { body: { action: string } }).body.action);
+const RESUMO = "Falta enviar: Comprovativo de IBAN, porque indicou um IBAN.";
+const botaoAdicionar = () => screen.getByRole("button", { name: /Adicionar ficheiro/ });
 
-describe("ConviteAdmissao: documentos no portal da V3a", () => {
+describe("ConviteAdmissao: comprovativo de IBAN no portal", () => {
   beforeEach(() => {
     invoke.mockReset();
     limparSessao();
     sessionStorage.clear();
   });
 
-  it("a zona de documentos esta desactivada e diz que fica para a proxima fase", async () => {
-    ligar([]);
+  it("so ha a linha do comprovativo: o cartao de cidadao e a fotografia estao fechados", async () => {
+    ligar();
     await entrar();
-    const botao = screen.getByRole("button", { name: pt["portal.proxima.documentos"] });
-    expect(botao).toHaveAttribute("aria-disabled", "true");
-    expect(botao).toHaveAccessibleDescription(pt["portal.proxima.razao"]);
+    expect(screen.getByRole("group", { name: /Comprovativo de IBAN/ })).toBeInTheDocument();
+    expect(screen.queryByText("Cartão de cidadão")).toBeNull();
+    expect(screen.queryByText("Fotografia")).toBeNull();
+    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(1);
+    expect(document.querySelector('input[type="file"]')).not.toHaveAttribute("capture");
   });
 
-  it("nao ha seletor de ficheiros no portal", async () => {
-    ligar([]);
+  it("com IBAN indicado a linha diz «Obrigatório» em texto; sem IBAN nao diz", async () => {
+    ligar({ ler: { anexos_obrigatorios: ["comprovativo_iban"], anexos_em_falta: ["comprovativo_iban"] } });
     await entrar();
+    expect(screen.getByRole("group", { name: /Comprovativo de IBAN/ })).toHaveTextContent("(Obrigatório)");
+  });
+
+  it("sem IBAN o comprovativo e opcional", async () => {
+    ligar();
+    await entrar();
+    const grupo = screen.getByRole("group", { name: /Comprovativo de IBAN/ });
+    expect(within(grupo).queryByText("(Obrigatório)")).toBeNull();
+  });
+
+  it("diz que os ficheiros guardam ao enviar (e nao fala de um botao «Gravar», que nao existe: o rascunho e automatico)", async () => {
+    ligar();
+    await entrar();
+    expect(screen.getByText("Os ficheiros ficam guardados assim que são enviados.")).toBeInTheDocument();
+    expect(screen.queryByText(/quando gravar/)).toBeNull();
+  });
+
+  it("quem abre sem IBAN e o escreve passa a ver «Obrigatório» e fica bloqueado, sem esperar por outra leitura", async () => {
+    ligar({ ler: { campos_editaveis: ["assinatura_nome", "iban", "conta_numero"] } });
+    await entrar();
+    const grupo = () => screen.getByRole("group", { name: /Comprovativo de IBAN/ });
+    expect(within(grupo()).queryByText("(Obrigatório)")).toBeNull();
+    fireEvent.change(porId("convite-conta-numero"), { target: { value: "PT50000201231234567890154" } });
+    await waitFor(() => expect(within(grupo()).getByText("(Obrigatório)")).toBeInTheDocument());
+    assinarEAceitar();
+    submeter();
+    const alertas = await screen.findAllByRole("alert");
+    expect(alertas.some((a) => a.textContent === RESUMO)).toBe(true);
+    expect(accoesChamadas()).not.toContain("submeter");
+  });
+
+  it("o IBAN ja guardado no cofre (iban_ultimos4) tambem obriga o comprovativo", async () => {
+    ligar({ ler: { iban_ultimos4: "0154" } });
+    await entrar();
+    expect(within(screen.getByRole("group", { name: /Comprovativo de IBAN/ })).getByText("(Obrigatório)")).toBeInTheDocument();
+    assinarEAceitar();
+    submeter();
+    expect((await screen.findAllByRole("alert")).some((a) => a.textContent === RESUMO)).toBe(true);
+    expect(accoesChamadas()).not.toContain("submeter");
+  });
+
+  it("anexos_em_falta do servidor com a lista vazia usa o comprovativo de IBAN e o resumo NAO desaparece", async () => {
+    ligar({ submeter: erroHttp(409, { error: "anexos_em_falta", campos: [] }) });
+    await entrar();
+    assinarEAceitar();
+    submeter();
+    const resumo = async () => (await screen.findAllByRole("alert")).find((a) => a.textContent === RESUMO);
+    const alerta = await waitFor(async () => {
+      const a = await resumo();
+      expect(a).toBeDefined();
+      return a as HTMLElement;
+    });
+    // o botao le o resumo, e o cartao passa a dizer «Obrigatório»
+    expect(botaoAdicionar().getAttribute("aria-describedby") ?? "").toContain(alerta.id);
+    expect(within(screen.getByRole("group", { name: /Comprovativo de IBAN/ })).getByText("(Obrigatório)")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await resumo()).toBeDefined();
+  });
+
+  it("o botao de adicionar liga-se ao resumo (aria-describedby) e ganha o foco depois de montado", async () => {
+    ligar({ ler: { anexos_obrigatorios: ["comprovativo_iban"], anexos_em_falta: ["comprovativo_iban"] } });
+    await entrar();
+    assinarEAceitar();
+    submeter();
+    await screen.findAllByRole("alert");
+    const alerta = document.getElementById("portal-erro-submissao") as HTMLElement;
+    expect(alerta).toHaveTextContent(RESUMO);
+    await waitFor(() => expect(botaoAdicionar()).toHaveFocus());
+    expect(botaoAdicionar().getAttribute("aria-describedby") ?? "").toContain("portal-erro-submissao");
+  });
+
+  it("em `convidada` a base nao aceita ficheiros: o cartao de anexos nao aparece", async () => {
+    ligar({ ler: { estado: "convidada" } });
+    await entrar();
+    expect(screen.queryByRole("group", { name: /Comprovativo de IBAN/ })).toBeNull();
     expect(document.querySelector('input[type="file"]')).toBeNull();
   });
 
-  it("os anexos que a leitura devolveu aparecem so como lista (nome e estado), sem ligacoes", async () => {
-    ligar(ANEXOS);
+  it("submeter sem o comprovativo mostra o resumo (alert), leva o foco a «Adicionar ficheiro» e nao chama a Edge", async () => {
+    ligar({ ler: { anexos_obrigatorios: ["comprovativo_iban"], anexos_em_falta: ["comprovativo_iban"] } });
     await entrar();
-    const lista = screen.getByRole("list", { name: pt["portal.documentos.titulo"] });
-    const itens = within(lista).getAllByRole("listitem");
-    expect(itens).toHaveLength(2);
-    expect(itens[0]).toHaveTextContent("cartao.pdf");
-    expect(itens[1]).toHaveTextContent("iban.png");
-    expect(within(lista).queryByRole("link")).toBeNull();
+    assinarEAceitar();
+    submeter();
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent(RESUMO);
+    await waitFor(() => expect(botaoAdicionar()).toHaveFocus());
+    expect(accoesChamadas()).not.toContain("submeter");
   });
 
-  it("a zona de documentos esta entre o fardamento e a assinatura, onde o convite sempre a teve", async () => {
-    ligar(ANEXOS);
+  it("com o comprovativo ja ligado a submissao segue para a Edge", async () => {
+    ligar({ ler: { anexos: [IBAN_LIGADO], anexos_obrigatorios: ["comprovativo_iban"], anexos_em_falta: [] } });
     await entrar();
-    const fardamento = screen.getByText(pt["hr.fardamento.titulo"]);
-    const documentos = screen.getByText(pt["portal.documentos.titulo"]);
-    const assinatura = screen.getByText(pt["hr.convite.assinatura"]);
-    expect(fardamento.compareDocumentPosition(documentos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(documentos.compareDocumentPosition(assinatura) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("iban.pdf")).toBeInTheDocument();
+    assinarEAceitar();
+    submeter();
+    await screen.findByTestId("portal-sucesso");
+    expect(accoesChamadas()).toContain("submeter");
   });
 
-  it("sem anexos diz que ainda nao ha documentos", async () => {
-    ligar([]);
+  it("o servidor diz anexos_em_falta (409) e o ecra trata-o como falta de documento: resumo e foco", async () => {
+    // O ecra achava que nada faltava; o servidor sabe mais.
+    ligar({ ler: {}, submeter: erroHttp(409, { error: "anexos_em_falta", campos: ["comprovativo_iban"] }) });
     await entrar();
-    expect(screen.getByText(pt["portal.documentos.vazio"])).toBeInTheDocument();
+    assinarEAceitar();
+    submeter();
+    expect(await screen.findByRole("alert")).toHaveTextContent(RESUMO);
+    await waitFor(() => expect(botaoAdicionar()).toHaveFocus());
+    expect(accoesChamadas()).toContain("submeter");
+    expect(screen.queryByTestId("portal-sucesso")).toBeNull();
+    // Nunca o codigo em bruto.
+    expect(document.body.textContent).not.toContain("anexos_em_falta");
   });
 
-  it("nunca chama as accoes de anexos, mesmo clicando", async () => {
-    ligar(ANEXOS);
+  it("devolvida com o IBAN devolvido: o comprovativo antigo nao serve, so um enviado agora", async () => {
+    ligar({
+      ler: {
+        estado: "devolvida",
+        documentos_editaveis: ["comprovativo_iban"],
+        anexos: [{ ...IBAN_LIGADO, id: "velho" }],
+        anexos_obrigatorios: ["comprovativo_iban"],
+        anexos_em_falta: ["comprovativo_iban"],
+      },
+    });
     await entrar();
-    fireEvent.click(screen.getByRole("button", { name: pt["portal.proxima.documentos"] }));
-    expect(accoesChamadas().filter((a) => a.startsWith("anexo"))).toEqual([]);
-    expect(accoesChamadas()).toEqual(["estado", "otp_pedir", "otp_verificar", "ler"]);
+    assinarEAceitar();
+    submeter();
+    const alertas = await screen.findAllByRole("alert");
+    expect(alertas.some((a) => a.textContent === RESUMO)).toBe(true);
+    expect(accoesChamadas()).not.toContain("submeter");
+  });
+
+  it("devolvida sem pedido de documentos: o cartao de anexos nem aparece", async () => {
+    ligar({ ler: { estado: "devolvida", documentos_editaveis: [], campos_editaveis: ["assinatura_nome"] } });
+    await entrar();
+    expect(screen.queryByRole("group", { name: /Comprovativo de IBAN/ })).toBeNull();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  it("o nome do ficheiro que a pessoa enviou aparece como texto, nunca como HTML", async () => {
+    const nome = '<img src=x onerror="alert(1)">.pdf';
+    ligar({ ler: { anexos: [{ ...IBAN_LIGADO, nome }], anexos_obrigatorios: ["comprovativo_iban"] } });
+    await entrar();
+    const grupo = screen.getByRole("group", { name: /Comprovativo de IBAN/ });
+    expect(within(grupo).getByText(nome)).toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
   });
 });

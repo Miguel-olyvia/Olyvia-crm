@@ -17,6 +17,18 @@
 export const TIPOS_ANEXO = ["cartao_cidadao", "comprovativo_iban", "fotografia"] as const;
 export type TipoAnexo = (typeof TIPOS_ANEXO)[number];
 
+/**
+ * Os tipos ABERTOS a pedidos do portal. Cartao de cidadao e fotografia estao
+ * FECHADOS ate haver parecer (recusados no ecra, aqui e na RPC com
+ * anexo_tipo_bloqueado): o pedido de um deles e anexo_tipo_invalido. Os limites
+ * deles ficam em LIMITES para quando abrirem.
+ */
+export const TIPOS_ANEXO_ABERTOS: readonly TipoAnexo[] = ["comprovativo_iban"];
+
+export function eTipoAnexoAberto(valor: unknown): valor is TipoAnexo {
+  return typeof valor === "string" && (TIPOS_ANEXO_ABERTOS as readonly string[]).includes(valor);
+}
+
 export const LIMITES = {
   /** Anexos activos (pendente mais ligado) por convite. */
   maxActivos: 4,
@@ -53,10 +65,17 @@ export type CodigoAnexo =
   | "anexo_fotografia_formato"
   | "anexo_demasiado_grande"
   | "anexo_fotografia_demasiado_grande"
-  | "anexo_vazio";
+  | "anexo_vazio"
+  | "anexo_conteudo_recusado";
 
 export function eTipoAnexo(valor: unknown): valor is TipoAnexo {
   return typeof valor === "string" && (TIPOS_ANEXO as readonly string[]).includes(valor);
+}
+
+/** A recusa por tamanho (declarado ou real), ou `null` se cabe no tecto do tipo. */
+export function recusaPorTamanho(tipo: TipoAnexo, tamanho: number): CodigoAnexo | null {
+  if (!Number.isFinite(tamanho) || tamanho <= 0) return "anexo_vazio";
+  return tamanho > tamanhoMaximo(tipo) ? codigoDemasiadoGrande(tipo) : null;
 }
 
 /** Tamanho maximo em bytes para o tipo. */
@@ -94,7 +113,7 @@ export function validarPedidoAnexo(pedido: {
   tamanho: unknown;
   mime: unknown;
 }): CodigoAnexo | null {
-  if (!eTipoAnexo(pedido.tipo)) return "anexo_tipo_invalido";
+  if (!eTipoAnexoAberto(pedido.tipo)) return "anexo_tipo_invalido";
   const tipo = pedido.tipo;
 
   const mime = typeof pedido.mime === "string" ? pedido.mime.trim().toLowerCase() : "";
