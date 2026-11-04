@@ -9,7 +9,7 @@
 // · O auto de receção (portal_neg_receber_obra) e a adenda (aceitar e assinar, portal_neg_responder) assinam-se aqui com o código
 //   por SMS (sms-otp). Pedir alterações, não aceitar e avisar o pagamento vão por portal_neg_responder (20270103900000).
 // · Sem vista (o CRM ainda não abriu o negócio depois desta versão), abre a proposta ou o contrato, como antes.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,6 +24,7 @@ import type { Ctx } from "@/emylia/pecas";
 import { definirModoReal } from "@/emylia/acessosPortal";
 import { RESPONSAVEL_OBRA } from "@/emylia/obraOps";
 import { definirEncomendasReais } from "@/emylia/real/encomendaReal";
+import { definirDadosPagamento, lerDadosPagamento } from "@/emylia/pagamentoCliente";
 import { aplicarRececao, aplicarResposta, comEstadoReal, lerVista, type RececaoCliente, type RespostaCliente, type TipoResposta, type VistaCliente } from "@/emylia/real/vistaCliente";
 
 const ATUALIZAR_CADA_MS = 30_000;
@@ -155,6 +156,18 @@ const ClientPortalNegocio = () => {
     refetchOnWindowFocus: true,
     staleTime: 0,
   });
+  // 4/11: os dados da empresa para pagar (IBAN, Multibanco, MB Way, credor SEPA); sem eles, o portal diz que faltam
+  const pagamento = useQuery({
+    queryKey: ["portal-negocio-pagamento", id],
+    queryFn: async () => {
+      const { data, error } = await rpc("portal_neg_dados_pagamento", { p_negocio_id: id });
+      if (error) throw new Error(error.message);
+      return lerDadosPagamento(data);
+    },
+    enabled: !orgsLoading && Boolean(activeOrg) && Boolean(id),
+    staleTime: 5 * 60_000,
+  });
+  useEffect(() => definirDadosPagamento(pagamento.data ?? null), [pagamento.data]);
   const reler = () => qc.invalidateQueries({ queryKey: ["portal-negocio-vista", id] });
 
   /** Uma resposta do cliente para a base; depois relê a vista (a resposta aparece logo, por cima). */

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Briefcase, ClipboardList, ListChecks } from "lucide-react";
+import { Briefcase, ClipboardList, Landmark, ListChecks } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,10 +17,11 @@ import { edicaoSuja, type EdicaoNegocios } from "./edicaoNegocios";
 import { EfeitosCamposSeccao, efeitosSujos } from "./EfeitosCamposSeccao";
 import { LevantamentoSeparador } from "./LevantamentoSeparador";
 import { NegociosSeparador } from "./NegociosSeparador";
+import { PagamentosSeparador } from "./PagamentosSeparador";
 
 const W = "pessoasPagina.real.workflow.";
 
-type Separador = "levantamento" | "campos" | "negocios";
+type Separador = "levantamento" | "campos" | "negocios" | "pagamentos";
 
 export interface WorkflowPessoasDialogoProps {
   aberto: boolean;
@@ -110,6 +111,10 @@ export function WorkflowPessoasDialogo({ aberto, aoMudarAberto, aoFocarOrigem }:
                 <Briefcase className="h-3.5 w-3.5" aria-hidden="true" />
                 {t(`${W}tabs.deals`)}
               </TabsTrigger>
+              <TabsTrigger value="pagamentos" className={`min-h-11 gap-1.5 ${FOCO}`}>
+                <Landmark className="h-3.5 w-3.5" aria-hidden="true" />
+                {t(`${W}tabs.payments`)}
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="levantamento" className="mt-4">
               <LevantamentoSeparador questionario={questionario} rascunho={rascunho} />
@@ -120,6 +125,9 @@ export function WorkflowPessoasDialogo({ aberto, aoMudarAberto, aoFocarOrigem }:
             </TabsContent>
             <TabsContent value="negocios" className="mt-4">
               <NegociosSeparador config={configNegocios} edicao={edicaoNegocios} aoEditar={setEdicaoNegocios} />
+            </TabsContent>
+            <TabsContent value="pagamentos" className="mt-4">
+              <PagamentosSeparador ativo={aberto && separador === "pagamentos"} />
             </TabsContent>
           </Tabs>
         </DialogContent>

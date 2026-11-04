@@ -40,7 +40,9 @@ export type NomeNeg =
   | "neg_questionario_levantamento"
   // 3/11 (Rúben): os campos das fases e o impacto no orçamento da organização (20270105300000)
   | "neg_ler_campos_config"
-  | "neg_guardar_campos_config";
+  | "neg_guardar_campos_config"
+  | "neg_dados_pagamento_ler"
+  | "neg_dados_pagamento_guardar";
 
 /** Erro de uma função neg_*: o código (se for conhecido), a chave a traduzir e a causa. */
 export class ErroNeg extends Error {

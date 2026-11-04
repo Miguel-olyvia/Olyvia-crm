@@ -20,7 +20,7 @@ import { MOTIVOS_RECUSA_ADENDA, adendaComoEnviada, assinadas, diasAdenda, fatura
 import { AssinaturaContrato } from "./AssinaturaContrato";
 import { AutoRececaoDoc } from "./AutoRececao";
 import { RelatorioObra } from "./RelatorioObra";
-import { METODOS_PAGAMENTO, PAGAMENTO_EMPRESA, em3, ibanCurto, ibanValido, metodoDe, referenciaMb, vencimento } from "./pagamentoCliente";
+import { em3, ibanAVista, ibanCurto, ibanValido, metodoDe, metodosDe, referenciaMb, useDadosPagamento, vencimento } from "./pagamentoCliente";
 import { DiarioPortal, NovidadesPortal, TrabalhosDaFase } from "./PortalObra";
 import { Conversa } from "./ConversaObra";
 import type { FaturaReg } from "./v2/financeiro";
@@ -162,15 +162,18 @@ function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura,
   const [ibanCli, setIbanCli] = useState("");
   const [titularCli, setTitularCli] = useState<string | null>(null);
   const [autorizo, setAutorizo] = useState(false);
+  const empresa = useDadosPagamento();
   if (alvo.comprovativo) return (
     <p className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />
       {alvo.metodo === "Débito direto" && alvo.debito_iban ? `Débito direto autorizado na conta ${alvo.debito_iban}. O valor é debitado a ${vence}.` : `Comprovativo enviado (${alvo.comprovativo}). Estamos a confirmar.`}</p>
   );
-  const metodo = metodoDe(alvo.metodo), ibanOk = ibanValido(ibanCli), nomeConta = titularCli ?? titular;
+  // 4/11: só as formas que a empresa recebe (com os dados dela); uma escolha antiga que já não está volta à transferência
+  const formas = metodosDe(empresa);
+  const metodo = formas.includes(metodoDe(alvo.metodo)) ? metodoDe(alvo.metodo) : "Transferência", ibanOk = ibanValido(ibanCli), nomeConta = titularCli ?? titular;
   const jaPaguei = (
     <div className="space-y-2 border-t border-slate-200 pt-4">
       <p className="text-[15px] font-medium">Já pagou? Avise-nos</p>
-      <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder={metodo === "Referência MB" ? "N.º do talão ou do pagamento (opcional)" : "Referência ou n.º da transferência (opcional)"} aria-label="Referência do pagamento" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
+      <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder={metodo === "Referência MB" ? "N.º do talão ou do pagamento (opcional)" : metodo === "MB Way" ? "Referência do MB Way (opcional)" : "Referência ou n.º da transferência (opcional)"} aria-label="Referência do pagamento" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
       <Botao onClick={() => pago(ref)}>Já paguei</Botao>
     </div>
   );
@@ -184,8 +187,8 @@ function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura,
       </div>
       <div className="space-y-2">
         <p className="text-[15px] font-medium">Como quer pagar?</p>
-        <div role="radiogroup" aria-label="Como quer pagar" className="grid grid-cols-3 gap-2">
-          {METODOS_PAGAMENTO.map((m) => (
+        <div role="radiogroup" aria-label="Como quer pagar" className={cn("grid gap-2", formas.length > 3 ? "grid-cols-2 sm:grid-cols-4" : formas.length === 3 ? "grid-cols-3" : formas.length === 2 ? "grid-cols-2" : "grid-cols-1")}>
+          {formas.map((m) => (
             <button key={m} type="button" role="radio" aria-checked={metodo === m} onClick={() => escolher(m)}
               className={cn("min-h-12 rounded-xl border px-2 text-[14px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2",
                 metodo === m ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800 hover:border-slate-500")}>
@@ -198,25 +201,40 @@ function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura,
         <div className="rounded-xl border border-slate-200 px-4 py-1">
           <p className="pt-2 text-sm font-semibold">Multibanco ou homebanking</p>
           <dl className="divide-y divide-slate-100">
-            <Copiar rotulo="Entidade" valor={PAGAMENTO_EMPRESA.entidade} />
+            <Copiar rotulo="Entidade" valor={empresa?.mbEntidade ?? ""} />
             <Copiar rotulo="Referência" valor={refMb} mostrar={em3(refMb)} />
             <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
           </dl>
         </div>
         {jaPaguei}
       </>}
-      {metodo === "Transferência" && <>
+      {metodo === "MB Way" && <>
         <div className="rounded-xl border border-slate-200 px-4 py-1">
-          <p className="pt-2 text-sm font-semibold">Transferência bancária</p>
+          <p className="pt-2 text-sm font-semibold">MB Way</p>
+          <p className="text-sm text-slate-600">Na app MB Way, escolha «Enviar dinheiro» para este número.</p>
           <dl className="divide-y divide-slate-100">
-            <Copiar rotulo="IBAN" valor={PAGAMENTO_EMPRESA.iban.replace(/\s/g, "")} mostrar={PAGAMENTO_EMPRESA.iban} />
-            <Copiar rotulo="Descritivo" valor={numero} />
+            <Copiar rotulo="Número" valor={(empresa?.mbway ?? "").replace(/\s/g, "")} mostrar={empresa?.mbway ?? ""} />
+            <Copiar rotulo="Mensagem" valor={numero} />
             <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
           </dl>
-          <p className="pb-2 text-sm text-slate-500">Titular: {PAGAMENTO_EMPRESA.titular}. Dados de exemplo neste protótipo.</p>
+          {empresa?.titular && <p className="pb-2 text-sm text-slate-500">Em nome de {empresa.titular}.</p>}
         </div>
         {jaPaguei}
       </>}
+      {metodo === "Transferência" && (empresa?.iban ? <>
+        <div className="rounded-xl border border-slate-200 px-4 py-1">
+          <p className="pt-2 text-sm font-semibold">Transferência bancária</p>
+          <dl className="divide-y divide-slate-100">
+            <Copiar rotulo="IBAN" valor={empresa.iban.replace(/\s/g, "")} mostrar={ibanAVista(empresa.iban)} />
+            <Copiar rotulo="Descritivo" valor={numero} />
+            <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
+          </dl>
+          {empresa.titular && <p className="pb-2 text-sm text-slate-500">Titular: {empresa.titular}.</p>}
+        </div>
+        {jaPaguei}
+      </> : (
+        <p className="rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-900">A empresa ainda não indicou o IBAN para a transferência. Fale connosco pela conversa e enviamos os dados.</p>
+      ))}
       {metodo === "Débito direto" && (
         <div className="space-y-3 rounded-xl border border-slate-200 p-4">
           <p className="text-sm font-semibold">Débito direto na sua conta</p>
@@ -233,7 +251,7 @@ function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura,
           </label>
           <label className="flex items-start gap-3 text-sm text-slate-700">
             <input type="checkbox" checked={autorizo} onChange={(ev) => setAutorizo(ev.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-slate-900" />
-            Autorizo a {PAGAMENTO_EMPRESA.titular} a debitar na minha conta os valores das faturas deste contrato (autorização SEPA).
+            Autorizo {empresa?.titular ? `a ${empresa.titular}` : "a empresa"} a debitar na minha conta os valores das faturas deste contrato (autorização SEPA{empresa?.sepaCredor ? `, credor ${empresa.sepaCredor}` : ""}).
           </label>
           <Botao disabled={!ibanOk || !autorizo || !nomeConta.trim()} onClick={() => autorizar(ibanCurto(ibanCli), nomeConta)}>Autorizar o débito</Botao>
         </div>

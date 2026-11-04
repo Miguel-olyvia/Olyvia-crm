@@ -58,6 +58,7 @@ import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
 import { aplicarFaturacao, lerFaturacaoDaFicha, precisaDaFicha } from "@/emylia/real/faturacaoDaFicha";
+import { definirDadosPagamento, lerDadosPagamento } from "@/emylia/pagamentoCliente";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
@@ -268,6 +269,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // F3: abrir a encomenda de cliente, a Receção e as compras vai às páginas reais, filtradas pela encomenda do negócio
   const A = useMemo(() => acoes(S, avisar, run, ligacaoInventario((url) => navigate(url))), [S, avisar, run, navigate]);
   useEffect(() => { definirOrgErp(org); return () => definirOrgErp(null); }, [org]);
+  // 4/11: os dados da empresa para o cliente pagar (o passo «Pagamento» e «Ver como o cliente»); sem eles, nada de exemplo
+  useEffect(() => {
+    let desfazer = definirDadosPagamento(null);
+    let vivo = true;
+    if (org) void (supabase as unknown as { rpc: (f: string, a: unknown) => Promise<{ data: unknown; error: unknown }> })
+      .rpc("neg_dados_pagamento_ler", { p_org: org })
+      .then(({ data, error }) => { if (vivo && !error) { desfazer(); desfazer = definirDadosPagamento(lerDadosPagamento(data)); } });
+    return () => { vivo = false; desfazer(); };
+  }, [org]);
   useEffect(() => aoMudarProntidao(redesenhar), [redesenhar]);
 
   useEffect(() => {

@@ -6,13 +6,14 @@ import { Check, Clock, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { eur, valorSinal, type Negocio } from "./motor";
 import { resumoErp } from "./erpEticadata";
-import { PAGAMENTO_EMPRESA, em3, metodoDe, referenciaMb } from "./pagamentoCliente";
+import { em3, ibanAVista, metodoDe, referenciaMb, useDadosPagamento } from "./pagamentoCliente";
 import type { Ctx } from "./pecas";
 
 const dataPt = (iso?: string) => (iso ? iso.split("-").reverse().join("/") : "");
 
 /** O estado do pagamento: a fatura, o valor e como o cliente paga; o que diz o Eticadata, o aviso do cliente e o validar à mão. */
 export function PagamentoDoCliente({ S, A, run, d }: Ctx & { d: Negocio }) {
+  const empresa = useDadosPagamento();
   const ft = d.fin.fatura;
   if (!ft) return <p className="text-[15px] text-muted-foreground">A fatura ainda não foi registada. Registe o número do Eticadata no passo «Fatura e recibo»: vai para o portal do cliente com os dados para pagar.</p>;
   const metodo = metodoDe(d.f.metodo), valor = valorSinal(d, S), avisou = !!d.f.comprovativo && !d.fin.pago;
@@ -20,12 +21,18 @@ export function PagamentoDoCliente({ S, A, run, d }: Ctx & { d: Negocio }) {
     ["Fatura", ft.n],
     ["Valor a pagar", eur(valor) + " € com IVA"],
     ["Como paga", d.f.metodo ? metodo : "o cliente escolhe no portal"],
-    ...(metodo === "Referência MB" ? [["Entidade · referência", `${PAGAMENTO_EMPRESA.entidade} · ${em3(referenciaMb(d.id, ft.n))}`] as [string, string]] : []),
-    ...(metodo === "Transferência" ? [["IBAN", PAGAMENTO_EMPRESA.iban] as [string, string]] : []),
+    ...(metodo === "Referência MB" ? [["Entidade · referência", `${empresa?.mbEntidade ?? "sem entidade"} · ${em3(referenciaMb(d.id, ft.n))}`] as [string, string]] : []),
+    ...(metodo === "MB Way" ? [["MB Way para", empresa?.mbway ?? "sem número"] as [string, string]] : []),
+    ...(metodo === "Transferência" ? [["IBAN", empresa?.iban ? ibanAVista(empresa.iban) : "ainda não indicado"] as [string, string]] : []),
     ["No Eticadata", d.fin.erp ? resumoErp(d.fin.erp) : "ainda não lido (a Olyvia verifica sozinha com o CRM aberto)"],
   ];
   return (
     <div className="max-w-xl space-y-6">
+      {!empresa?.iban && (
+        <p className="rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-900">
+          A empresa ainda não tem o IBAN para o cliente pagar. Indique-o em Pessoas, Workflow, separador «Pagamentos».
+        </p>
+      )}
       <dl className="divide-y divide-border rounded-2xl border border-border bg-card px-5">
         {linhas.map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-4 py-3 text-[15px]">

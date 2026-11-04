@@ -84,7 +84,7 @@ describe("WorkflowPessoasDialogo", () => {
     desenhar();
     const lista = screen.getByRole("tablist", { name: "Secções do Workflow" });
     const separadores = within(lista).getAllByRole("tab");
-    expect(separadores.map((s) => s.textContent)).toEqual(["Levantamento", "Campos das fases", "Negócios"]);
+    expect(separadores.map((s) => s.textContent)).toEqual(["Levantamento", "Campos das fases", "Negócios", "Pagamentos"]);
     expect(separadores[0]).toHaveAttribute("aria-selected", "true");
     expect(separadores[1]).toHaveAttribute("aria-selected", "false");
     expect(separadores[2]).toHaveAttribute("aria-selected", "false");
