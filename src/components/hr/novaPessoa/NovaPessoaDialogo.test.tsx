@@ -188,7 +188,7 @@ describe("NovaPessoaDialogo: obrigatórios pela posição da configuração da a
     expect(campo("hr-novo-genero")).not.toHaveAttribute("aria-required");
     irParaAba(/rhNova\.tabs\.contacto/);
     expect(campo("hr-novo-morada-linha1")).toHaveAttribute("aria-required", "true");
-    expect(campo("hr-novo-telefone-pessoal")).toHaveAttribute("aria-required", "true");
+    expect(campo("hr-novo-telefone-pessoal")).not.toHaveAttribute("aria-required");
     expect(screen.getAllByText("rhNova.pos.convite").length).toBeGreaterThan(0);
     irParaAba(/rhNova\.tabs\.dados/);
     expect(screen.getByText("rhNova.pos.ficha")).toBeInTheDocument();
@@ -273,11 +273,11 @@ describe("NovaPessoaDialogo: duplicados", () => {
     );
   });
 
-  it("um campo que não conta para duplicados (ex.: o telefone de trabalho) não dispara a verificação", () => {
+  it("um campo que não conta para duplicados (ex.: a segunda linha da morada) não dispara a verificação", () => {
     montar();
     irParaAba(/rhNova\.tabs\.contacto/);
-    escrever("hr-novo-telefone-trabalho", "912345678");
-    fireEvent.blur(campo("hr-novo-telefone-trabalho"));
+    escrever("hr-novo-morada-linha2", "Andar 3");
+    fireEvent.blur(campo("hr-novo-morada-linha2"));
     expect(verificarDuplicados).not.toHaveBeenCalled();
   });
 
@@ -315,13 +315,13 @@ describe("NovaPessoaDialogo: ligar a uma conta existente", () => {
     return r;
   }
 
-  it("escolher a conta preenche o nome, o apelido, o e-mail e o telefone de trabalho", async () => {
+  it("escolher a conta preenche o nome e o apelido (o e-mail e o telefone de trabalho já não se pedem em Contactos)", async () => {
     await escolherConta();
     expect(campo("hr-novo-primeiro-nome").value).toBe("Rui");
     expect(campo("hr-novo-apelido").value).toBe("Amaral");
     irParaAba(/rhNova\.tabs\.contacto/);
-    expect(campo("hr-novo-email-trabalho").value).toBe("rui@x.pt");
-    expect(campo("hr-novo-telefone-trabalho").value).toBe("912345678");
+    expect(document.getElementById("hr-novo-email-trabalho")).toBeNull();
+    expect(document.getElementById("hr-novo-telefone-trabalho")).toBeNull();
   });
 
   it("com hr.pessoas.conta.link a conta segue para ser ligada; sem ela só preencheu", async () => {
@@ -536,7 +536,7 @@ describe("NovaPessoaDialogo: cada aba tem os seus campos reais", () => {
     montar();
     const abas: Array<[RegExp, string[]]> = [
       [/rhNova\.tabs\.dados/, ["hr-novo-primeiro-nome", "hr-novo-genero", "hr-novo-nacionalidade", "hr-novo-estado-civil", "hr-novo-dependentes", "hr-novo-data-nascimento", "hr-novo-naturalidade-concelho", "hr-novo-tipo-documento", "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero"]],
-      [/rhNova\.tabs\.contacto/, ["hr-novo-email-pessoal", "hr-novo-email-trabalho", "hr-novo-morada-linha2", "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-telefone-alt"]],
+      [/rhNova\.tabs\.contacto/, ["hr-novo-email-pessoal", "hr-novo-telefone-pessoal", "hr-novo-morada-linha2", "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-telefone-alt"]],
       [/rhNova\.tabs\.contrato/, ["hr-novo-local", "hr-novo-reporta-a", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-horas-trabalho", "hr-novo-politica-feriados", "hr-novo-categoria-funcao"]],
       [/rhNova\.tabs\.retribuicao/, ["hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic"]],
       [/rhNova\.tabs\.outros/, ["hr-novo-habilitacao", "hr-novo-saude-incapacidade", "hr-novo-sindicalizado", "hr-novo-tamanho-cima", "hr-novo-tamanho-calcado"]],

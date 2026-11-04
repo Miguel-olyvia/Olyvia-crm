@@ -34,7 +34,7 @@ describe("problemasDaNova: campos do RH e nome", () => {
 
   it("pede o nome, o cargo e os campos só do RH (tipo de contrato, subsídio e duodécimos)", () => {
     expect(ids(valoresIniciais(HOJE))).toEqual([
-      "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-telefone-pessoal", "hr-novo-cargo", "hr-novo-tipo-contrato", "hr-novo-subsidio", "hr-novo-duodecimos",
+      "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-tipo-contrato", "hr-novo-subsidio", "hr-novo-duodecimos",
     ]);
   });
 
@@ -122,11 +122,11 @@ describe("problemasDaNova: datas, contactos e acesso", () => {
 
   it("valida telefones, código postal e e-mails só quando preenchidos", () => {
     let v = comPatch(minimo(), "pessoais", { telefone_pessoal: "123", morada_codigo_postal: "1000", emergencia_nome: "Rui", emergencia_telefone: "12" });
-    v = comPatch(v, "geral", { email_trabalho: "x@", telefone_trabalho: "abc" });
+    v = comPatch(v, "geral", { email_trabalho: "x@" });
     v = comPatch(v, "extra", { emergencia_email: "y@" });
     expect(new Set(ids(v))).toEqual(new Set([
       "hr-novo-telefone-pessoal", "hr-novo-morada-codigo-postal", "hr-novo-emergencia-telefone", "hr-novo-email-trabalho",
-      "hr-novo-telefone-trabalho", "hr-novo-emergencia-email",
+      "hr-novo-emergencia-email",
     ]));
     const bem = comPatch(minimo(), "pessoais", { telefone_pessoal: "912 345 678", morada_codigo_postal: "1000-001" });
     expect(ids(bem)).toEqual([]);

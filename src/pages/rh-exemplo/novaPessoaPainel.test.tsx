@@ -141,7 +141,7 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
     const nova = abrirNovaPessoa();
     const abas: Array<[RegExp, string[]]> = [
       [/Dados pessoais/, ["hr-novo-nome-tratamento", "hr-novo-genero", "hr-novo-nacionalidade", "hr-novo-estado-civil", "hr-novo-dependentes", "hr-novo-data-nascimento", "hr-novo-naturalidade-concelho", "hr-novo-tipo-documento", "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero", "hr-novo-conta"]],
-      [/Contacto e morada/, ["hr-novo-email-pessoal", "hr-novo-email-trabalho", "hr-novo-morada-linha2", "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-telefone-alt"]],
+      [/Contacto e morada/, ["hr-novo-email-pessoal", "hr-novo-telefone-pessoal", "hr-novo-morada-linha2", "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-telefone-alt"]],
       [/Contrato e local/, ["hr-novo-local", "hr-novo-reporta-a", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-horas-trabalho", "hr-novo-politica-feriados"]],
       [/Retribuição e bancário/, ["hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic"]],
       [/Outros dados/, ["hr-novo-habilitacao", "hr-novo-saude-incapacidade", "hr-novo-sindicalizado", "hr-novo-tamanho-cima", "hr-novo-tamanho-calcado"]],

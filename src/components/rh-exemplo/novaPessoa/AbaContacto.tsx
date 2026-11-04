@@ -1,4 +1,4 @@
-// A aba "Contacto e morada" do painel "Nova pessoa": e-mail e telefone (pessoais e profissionais), morada completa e contacto de
+// A aba "Contacto e morada" do painel "Nova pessoa": e-mail e telefone pessoais, morada completa e contacto de
 // emergência.
 import { useTranslation } from "@/hooks/useTranslation";
 import { seVazio, useMoradaPorCodigoPostal } from "@/hooks/useMoradaPorCodigoPostal";
@@ -15,8 +15,6 @@ function Contactos() {
       <div className={GRELHA}>
         <CampoT g="pessoais" k="email_pessoal" id="hr-novo-email-pessoal" codigo="email_pessoal" tipo="email" rotulo={t("hr.campos.emailPessoal")} ajuda={t("rhNova.h.emailPessoal")} />
         <CampoTel g="pessoais" k="telefone_pessoal" id="hr-novo-telefone-pessoal" codigo="telefone_pessoal" rotulo={t("hr.campos.telefonePessoal")} ajuda={t("rhNova.h.telefonePessoal")} indicativos={INDICATIVOS_SMS_CONTRATO} />
-        <CampoT g="geral" k="email_trabalho" id="hr-novo-email-trabalho" tipo="email" rotulo={t("hr.laborais.emailTrabalho")} ajuda={t("rhNova.h.emailTrabalho")} />
-        <CampoTel g="geral" k="telefone_trabalho" id="hr-novo-telefone-trabalho"rotulo={t("hr.laborais.telefoneTrabalho")} ajuda={t("rhNova.h.telefone")} />
       </div>
     </SeccaoNova>
   );
