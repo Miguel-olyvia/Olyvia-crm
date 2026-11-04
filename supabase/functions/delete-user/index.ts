@@ -8,6 +8,7 @@ const requestSchema = z.object({
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { souAdminSistema, temPermissao } from "../_shared/adminConta.ts";
 
 initSentry();
 
@@ -58,39 +59,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // anew_memberships has no FK constraints (confirmed via pg_constraint —
-    // contype='f' returns zero rows), so PostgREST cannot auto-resolve an
-    // embedded `role:anew_roles!inner(code)` select: it fails with PGRST200
-    // ("Could not find a relationship..."). That error was previously
-    // swallowed here (only `data` was destructured, never `error`), so
-    // `callerMemberships` was always empty and this admin check rejected
-    // every caller, including real super_admins. Fixed with the same
-    // two-step query create-user's resolveCallerAdmin() already uses.
-    const { data: callerMemberships, error: callerMembershipsError } = await supabaseClient
-      .from("anew_memberships")
-      .select("organization_id, role_id")
-      .eq("user_id", callerAnew.id)
-      .eq("status", "active");
-
-    if (callerMembershipsError) {
-      console.error("Error fetching caller memberships:", callerMembershipsError);
-    }
-
-    const callerRoleIds = [...new Set((callerMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
-    let callerRoles: string[] = [];
-    if (callerRoleIds.length > 0) {
-      const { data: callerRoleRows, error: callerRolesError } = await supabaseClient
-        .from("anew_roles")
-        .select("code")
-        .in("id", callerRoleIds);
-      if (callerRolesError) {
-        console.error("Error fetching caller role codes:", callerRolesError);
-      } else {
-        callerRoles = [...new Set((callerRoleRows || []).map((r: any) => r.code).filter(Boolean))];
-      }
-    }
-    const adminRoles = ["system_admin", "super_admin", "org_admin"];
-    const callerIsAdmin = callerRoles.some(r => adminRoles.includes(r));
+    // Autorização (20270106300000): já não se decide pelo CÓDIGO do papel
+    // (system_admin/super_admin/org_admin) — um administrador de organização
+    // podia criar um papel com um desses códigos e dá-lo a quem quisesse. Conta o
+    // administrador de sistema verdadeiro ou a permissão users.delete (o papel
+    // base "Admin" e o super_admin têm-na).
+    const isSystemAdmin = await souAdminSistema(supabaseClient, user.id);
+    const callerIsAdmin = isSystemAdmin || await temPermissao(supabaseClient, user.id, "users.delete");
 
     if (!callerIsAdmin) {
       return new Response(
@@ -110,7 +85,6 @@ serve(async (req: Request) => {
     const { userId } = parsed.data;
 
     // Scope check: if not system_admin, verify target user is in visible orgs
-    const isSystemAdmin = callerRoles.includes("system_admin");
 
     if (!isSystemAdmin) {
       // Get caller's visible org IDs via the DB function
