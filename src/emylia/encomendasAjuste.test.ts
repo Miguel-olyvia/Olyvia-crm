@@ -63,7 +63,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     expect(porEncomendar(d.obra.plano)).toEqual([]);
   });
 
-  it("materiais mudados à mão numa tarefa do orçamento: só o que se junta vai à encomenda, com o botão Encomendar", () => {
+  it("materiais mudados à mão numa tarefa do orçamento: só o que se junta vai à encomenda (encomendarMateriais: purchase_orders.create; a obra já não tem o botão)", () => {
     const ctx = preparar(), { S, A, d } = ctx;
     pagar(ctx);
     A.role("operacoes");
@@ -75,7 +75,8 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     const falta = porEncomendar(p);
     expect(falta.map((x) => [x.m.n, x.q])).toEqual([["Silicone sanitário", 3]]);
     expect(d.obra.ecsAjuste ?? []).toEqual([]); // mudar não encomenda sozinho (cada clique mudava a encomenda)
-    A.encomendarMateriais(d.id);
+    // 4/11: encomendar é de quem cria encomendas de compra (purchase_orders.create): no quadro por papel, só a Direção
+    A.role("direcao"); A.encomendarMateriais(d.id);
     expect(d.obra.ecsAjuste!.map((a) => a.n)).toEqual(["EC-1027-A1"]);
     expect(d.obra.ecsAjuste![0].linhas).toMatchObject([{ n: "Silicone sanitário", q: 3, un: "tubo" }]);
     // a menos: não mexe na encomenda (o que sobrar volta ao armazém)
@@ -114,7 +115,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     expect(ecInv("EC-1027-A1")).toBeUndefined();
     expect(porEncomendarDe(d)).toEqual([]);
     expect(porEncomendarDe(d, "AD 2026/1027-1").length).toBeGreaterThan(0);
-    A.role("operacoes"); A.encomendarMateriais(d.id);
+    A.role("direcao"); A.encomendarMateriais(d.id);
     expect(d.obra.ecsAjuste ?? []).toEqual([]);
     // a fatura da adenda, o cliente paga no portal, o Financeiro valida: sai o recibo e a EC-1027-A1, ligada à adenda
     A.role("financeiro"); A.faturarAdendas(d.id);
@@ -157,7 +158,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     A.recusarAdenda(d.id, "AD 2026/1027-1", "O preço");
     A.anularAdenda(d.id, "AD 2026/1027-2");
     A.role("financeiro"); A.faturarAdendas(d.id); A.validarPagamentosAdenda(d.id);
-    A.role("operacoes"); A.encomendarMateriais(d.id);
+    A.role("direcao"); A.encomendarMateriais(d.id);
     expect(d.adendas!.every((a) => !a.faturas?.length)).toBe(true);
     expect(d.adendas!.map((a) => a.estado)).toEqual(["recusada", "anulada"]);
     expect(d.obra.plano!.tasks.some((t) => t.adenda)).toBe(false);

@@ -3186,7 +3186,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 21/10: encomenda o que os materiais mudados à mão pedem a mais (encomenda de cliente de ajuste, no Inventário). */
     encomendarMateriais(id: number) {
-      if (!exigePerm("obra.materiais")) return;
+      if (!exigePerm("obra.encomendar")) return;
       const d = deal(id);
       if (!d.obra.ec?.ref) { avisar({ msg: "Ainda sem encomenda de cliente", sub: "Os materiais novos encomendam-se logo a seguir à inicial, quando o pagamento for validado", kind: "" }); return; }
       // 21/10: as adendas pagas cuja encomenda não chegou ao Inventário vão primeiro (cada uma ligada à sua)

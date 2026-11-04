@@ -389,7 +389,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
  */
 export const CODIGOS_SEM_CATALOGO: readonly string[] = [
   "contacto.registar", "contracts.cancel", "contracts.view", "contrato.editar", "equipa.edit", "finance.invoice", "finance.validate_payment",
-  "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder", "obra.executar", "obra.fechar", "obra.imprevistos",
+  "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder", "obra.encomendar", "obra.executar", "obra.fechar", "obra.imprevistos",
   "obra.materiais", "obra.planear", "orcamento.editar", "proposta.decidir", "proposta.enviar", "suppliers.manage", "visita.gerir",
 ];
 

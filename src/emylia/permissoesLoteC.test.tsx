@@ -1,6 +1,6 @@
 // 4/11/2026 (Lote C): o ecrã pede as mesmas permissões que o servidor. neg_guardar_negocio recusa (CT001) sem negocios.orcamento.editar,
 // negocios.proposta.enviar e negocios.contrato.editar; obra_guardar_negocio separa negocios.obra.planear de negocios.obra.executar;
-// obra_encomendar_materiais pede negocios.obra.materiais OU purchase_orders.create; a ficha do técnico grava-se por rh_guardar_oficios_pessoa
+// obra_encomendar_materiais pede purchase_orders.create (4/11, tarde: negocios.obra.materiais passou a ser só ver os materiais); a ficha do técnico grava-se por rh_guardar_oficios_pessoa
 // (hr.pessoas.laborais.edit). Cada ação do motor é recusada sem a permissão e passa com ela; o botão do passo desliga-se e diz qual falta.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -15,7 +15,7 @@ import { BotaoFase, permEmFaltaDoPasso } from "./PaginaNegocio";
 import type { Ctx } from "./pecas";
 
 const TODOS = Object.values(CODIGO_BASE);
-const NOVAS: PermNeg[] = ["orcamento.editar", "proposta.enviar", "contrato.editar", "obra.planear", "obra.executar", "obra.materiais"];
+const NOVAS: PermNeg[] = ["orcamento.editar", "proposta.enviar", "contrato.editar", "obra.planear", "obra.executar", "obra.materiais", "obra.encomendar"];
 
 afterEach(() => { cleanup(); definirPermissoesReais(null); });
 
@@ -41,27 +41,31 @@ describe("os códigos são os do servidor", () => {
   it("as seis novas e a ficha do técnico", () => {
     expect(NOVAS.map((p) => CODIGO_BASE[p])).toEqual([
       "negocios.orcamento.editar", "negocios.proposta.enviar", "negocios.contrato.editar", "negocios.obra.planear", "negocios.obra.executar",
-      "negocios.obra.materiais",
+      "negocios.obra.materiais", "purchase_orders.create",
     ]);
     expect(CODIGO_BASE["equipa.edit"]).toBe("hr.pessoas.laborais.edit");
     NOVAS.forEach((p) => expect(SEM_PERM[p].sub).toContain(CODIGO_BASE[p]));
-    // a leitura pergunta-os (e a alternativa dos materiais)
-    [...NOVAS.map((p) => CODIGO_BASE[p]), "hr.pessoas.laborais.edit", "purchase_orders.create"].forEach((c) => expect(CODIGOS_NEGOCIOS).toContain(c));
+    // a leitura pergunta-os
+    [...NOVAS.map((p) => CODIGO_BASE[p]), "hr.pessoas.laborais.edit"].forEach((c) => expect(CODIGOS_NEGOCIOS).toContain(c));
   });
   it("o quadro por papel bate com neg_papeis_permissoes", () => {
-    expect(NOVAS.filter((p) => podeNeg("comercial", p))).toEqual(["orcamento.editar", "proposta.enviar", "contrato.editar"]);
-    expect(NOVAS.filter((p) => podeNeg("juridico", p))).toEqual(["contrato.editar"]);
+    // 4/11 (tarde): ver os materiais da obra é de todos os papéis que abrem a obra; encomendar (purchase_orders.create) não está em nenhum
+    expect(NOVAS.filter((p) => podeNeg("comercial", p))).toEqual(["orcamento.editar", "proposta.enviar", "contrato.editar", "obra.materiais"]);
+    expect(NOVAS.filter((p) => podeNeg("juridico", p))).toEqual(["contrato.editar", "obra.materiais"]);
     expect(NOVAS.filter((p) => podeNeg("operacoes", p))).toEqual(["obra.planear", "obra.executar", "obra.materiais"]);
-    expect(PERMS_PAPEL.tecnico).toEqual(["obra.executar"]);
-    expect(NOVAS.filter((p) => podeNeg("financeiro", p))).toEqual([]);
-    expect(NOVAS.filter((p) => podeNeg("armazem", p))).toEqual([]);
+    expect(PERMS_PAPEL.tecnico).toEqual(["obra.executar", "obra.materiais"]);
+    expect(NOVAS.filter((p) => podeNeg("financeiro", p))).toEqual(["obra.materiais"]);
+    expect(NOVAS.filter((p) => podeNeg("armazem", p))).toEqual(["obra.materiais"]);
   });
-  it("materiais: purchase_orders.create também serve (obra_encomendar_materiais)", () => {
-    expect(ALTERNATIVAS["obra.materiais"]).toEqual(["purchase_orders.create"]);
-    definirPermissoesReais({ codigos: new Set(["purchase_orders.create"]), simular: false });
+  it("materiais: negocios.obra.materiais só dá ver; encomendar pede purchase_orders.create (obra_encomendar_materiais)", () => {
+    expect(ALTERNATIVAS).toEqual({});
+    expect(CODIGO_BASE["obra.encomendar"]).toBe("purchase_orders.create");
+    definirPermissoesReais({ codigos: new Set(["negocios.obra.materiais"]), simular: false });
     expect(podeNeg("operacoes", "obra.materiais")).toBe(true);
-    definirPermissoesReais({ codigos: new Set([]), simular: false });
+    expect(podeNeg("operacoes", "obra.encomendar")).toBe(false);
+    definirPermissoesReais({ codigos: new Set(["purchase_orders.create"]), simular: false });
     expect(podeNeg("operacoes", "obra.materiais")).toBe(false);
+    expect(podeNeg("operacoes", "obra.encomendar")).toBe(true);
   });
   it("a ficha do técnico pede hr.pessoas.laborais.edit, não negocios.obra.planear", () => {
     definirPermissoesReais({ codigos: new Set(["negocios.obra.planear"]), simular: false });
@@ -86,7 +90,7 @@ const CASOS: Caso[] = [
   ["aprovarPlano", "obra.planear", (A, S) => A.aprovarPlano(algum(S, (d) => d.obra.plano?.estado === "por aprovar").id)],
   ["comecarTarefa", "obra.executar", (A, S) => A.comecarTarefa(emObra(S).id, 0)],
   ["registarTarefa", "obra.executar", (A, S) => A.registarTarefa(emObra(S).id, 0, { horas: 2 })],
-  ["encomendarMateriais", "obra.materiais", (A, S) => A.encomendarMateriais(emObra(S).id)],
+  ["encomendarMateriais", "obra.encomendar", (A, S) => A.encomendarMateriais(emObra(S).id)],
 ];
 
 describe("o motor recusa sem a permissão do servidor", () => {
