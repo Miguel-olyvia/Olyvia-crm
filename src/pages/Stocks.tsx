@@ -186,8 +186,10 @@ const formatQty = (value: number): string =>
 // .in() vai no URL — lotes pequenos para não passar o limite com muitos ids.
 const RESERVATION_CHUNK = 150;
 
+// Colunas explícitas: average_cost já não se lê da tabela (20270106070000), por isso select=* falharia.
 const STOCK_SELECT = `
-  *,
+  id, product_id, warehouse_id, quantity, minimum_quantity, maximum_quantity, reorder_point, location, last_counted,
+  created_by, created_at, updated_at, organization_id, deleted_at, deleted_by,
   products!inner(name, sku, barcode, category_id, subcategory_id, product_categories!category_id(name)),
   warehouses(name)
 `;

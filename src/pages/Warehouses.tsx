@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { valorStockPorArmazem } from "@/lib/custosStock";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -175,9 +176,8 @@ function useWarehouseStockStats(organizationId: string | undefined, withCost: bo
     queryKey: ["warehouses-stock-stats", organizationId ?? null, withCost] as const,
     enabled: !!organizationId,
     queryFn: async (): Promise<Record<string, WarehouseStats>> => {
-      const columns = withCost
-        ? "id, warehouse_id, quantity, reorder_point, average_cost"
-        : "id, warehouse_id, quantity, reorder_point";
+      // O custo médio já não se lê da tabela (20270106070000): o valor vem de inv_valor_stock_armazens (products.view_cost).
+      const columns = "id, warehouse_id, quantity, reorder_point";
       const out: Record<string, WarehouseStats> = {};
       for (let from = 0; ; from += STATS_PAGE_SIZE) {
         const { data, error } = await supabase
@@ -192,17 +192,21 @@ function useWarehouseStockStats(organizationId: string | undefined, withCost: bo
           warehouse_id: string;
           quantity: number | null;
           reorder_point: number | null;
-          average_cost?: number | null;
         }>;
         for (const r of rows) {
           const s = (out[r.warehouse_id] ??= { products: 0, value: 0, belowReorder: 0 });
           const qty = Number(r.quantity) || 0;
           const reorder = Number(r.reorder_point) || 0;
           if (qty > 0) s.products += 1;
-          if (withCost) s.value += qty * (Number(r.average_cost) || 0);
           if (reorder > 0 && qty <= reorder) s.belowReorder += 1;
         }
         if (rows.length < STATS_PAGE_SIZE) break;
+      }
+      if (withCost) {
+        const valores = await valorStockPorArmazem(organizationId as string);
+        for (const [warehouseId, valor] of Object.entries(valores)) {
+          (out[warehouseId] ??= { products: 0, value: 0, belowReorder: 0 }).value = valor;
+        }
       }
       return out;
     },
