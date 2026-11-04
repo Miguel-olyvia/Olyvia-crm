@@ -114,7 +114,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   }, [recursos, visita, soLeitura, form]);
   const horas = useHorasLivresVisita({
     recursos: valor.recursos, dia: valor.data, duracaoMin: minutos, horario: horario.horario, feriados: horario.feriados,
-    horarioPronto: !horario.isLoading && !horario.isError, atual: visita ? { dia: visita.dia, hora: visita.hora } : null,
+    horarioPronto: !horario.isLoading && !horario.isError, atual: visita ? { dia: visita.dia, hora: visita.hora } : null, excluirId: visita?.id ?? null,
   });
   // mudar o dia, a duração ou quem vai invalida a hora escolhida (as livres são outras)
   const mudar = (parcial: Partial<ValorAgenda>): void => {
@@ -188,7 +188,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
             />
             <HorasLivresVisita
               id={p.id} hora={p.hora} horas={horas.horas} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}
-              aoEscolher={(hora) => p.aoMudar({ hora })} aoTentarOutraVez={horas.refetch} somenteLeitura={p.somenteLeitura}
+              aoEscolher={(hora) => p.aoMudar({ hora })} aoTentarOutraVez={horas.refetch} somenteLeitura={p.somenteLeitura} diaTodo={horas.diaTodo}
               erro={p.erroHora ?? (tentou && horaForaDasLivres ? (horasNaoConfirmadas ? "Não foi possível confirmar as horas livres deste dia. Aguarde ou tente outra vez." : "Escolha uma das horas livres.") : null)}
             />
           </div>

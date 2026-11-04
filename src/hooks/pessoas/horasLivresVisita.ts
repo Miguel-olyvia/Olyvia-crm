@@ -24,6 +24,8 @@ export interface HorarioOrg {
 
 /** Quando a organização ainda não gravou horários, vale isto, e o ecrã diz que é a omissão (nada se esconde). */
 export const HORARIO_POR_OMISSAO: HorarioOrg = { inicio: "09:00", fim: "18:00", dias: [1, 2, 3, 4, 5], almoco: null };
+/** 4/11 (Rúben: «as horas podem ser o dia todo»): as visitas do negócio sem o horário da organização (20270106400000, neg_horas_livres_visita). */
+export const DIA_TODO: HorarioOrg = { inicio: "00:00", fim: "24:00", dias: [0, 1, 2, 3, 4, 5, 6], almoco: null };
 
 export interface FeriadosOrg {
   /** AAAA-MM-DD */

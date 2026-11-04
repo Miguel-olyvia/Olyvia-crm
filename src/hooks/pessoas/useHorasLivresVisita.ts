@@ -4,7 +4,7 @@
 import { useQueries } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  aplicarAlmoco, comHoraAtual, horasDoRecurso, intersetar, motivoDiaFechado, type FeriadosOrg, type HorarioOrg, type MotivoDiaFechado, type SlotDb,
+  DIA_TODO, aplicarAlmoco, comHoraAtual, ehFeriado, horasDoRecurso, intersetar, motivoDiaFechado, type FeriadosOrg, type HorarioOrg, type MotivoDiaFechado, type SlotDb,
 } from "./horasLivresVisita";
 import { useFontePessoas } from "./useFontePessoas";
 
@@ -21,6 +21,8 @@ export interface HorasLivres {
   horas: string[];
   estado: EstadoHorasLivres;
   refetch: () => void;
+  /** 4/11: as horas são do dia todo (neg_horas_livres_visita); false enquanto a base não tem a função (vale o horário da organização). */
+  diaTodo: boolean;
 }
 
 interface Entrada {
@@ -34,36 +36,50 @@ interface Entrada {
   horarioPronto: boolean;
   /** Ao remarcar: a hora que a visita já tem fica escolhível. */
   atual?: { dia: string; hora: string } | null;
+  /** Ao remarcar: a visita que se remarca não ocupa as horas dela. */
+  excluirId?: string | null;
 }
 
 const STALE_TIME_MS = 30_000;
 
-async function lerSlots(org: string, recurso: string, dia: string, minutos: number): Promise<SlotDb[]> {
+const semFuncao = (e: { code?: string } | null) => e?.code === "PGRST202" || e?.code === "42883";
+interface SlotsLidos { slots: SlotDb[]; diaTodo: boolean }
+
+async function lerSlots(org: string, recurso: string, dia: string, minutos: number, excluir: string | null): Promise<SlotsLidos> {
+  // 4/11 (20270106400000): as horas da visita do negócio são do dia todo, sem o horário da organização (só o que ocupa quem vai)
+  const novo = await supabase.rpc("neg_horas_livres_visita" as never, {
+    p_resource_id: recurso, p_date: dia, p_duration_minutes: minutos, p_organization_id: org, p_exclude_item_id: excluir,
+  } as never);
+  if (!novo.error) return { slots: ((novo.data as unknown) ?? []) as SlotDb[], diaTodo: true };
+  if (!semFuncao(novo.error)) throw novo.error;
+  // sem a função na base (por colar): como antes, com o horário da organização.
   // p_min_advance_hours a 0: o CRM marca visitas para daqui a pouco (o de uma página pública não); o que já passou corta-se em horasDoRecurso.
   const { data, error } = await supabase.rpc("get_resource_available_slots", {
     p_date: dia, p_duration_minutes: minutos, p_min_advance_hours: 0, p_organization_id: org, p_resource_id: recurso,
   });
   if (error) throw error;
-  return (data ?? []) as SlotDb[];
+  return { slots: (data ?? []) as SlotDb[], diaTodo: false };
 }
 
 export function useHorasLivresVisita(e: Entrada): HorasLivres {
   const fonte = useFontePessoas();
   const org = fonte.modo === "real" ? fonte.organizationId : null;
-  const fechado = e.dia !== "" ? motivoDiaFechado(e.dia, e.horario, e.feriados) : null;
-  const ativo = org !== null && e.recursos.length > 0 && e.dia !== "" && fechado === null && e.horarioPronto && e.duracaoMin > 0;
+  // os feriados fecham sempre; os dias em que a organização não trabalha só sem as horas do dia todo (vê-se depois de ler)
+  const feriado = e.dia !== "" && ehFeriado(e.dia, e.feriados);
+  const ativo = org !== null && e.recursos.length > 0 && e.dia !== "" && !feriado && e.horarioPronto && e.duracaoMin > 0;
+  const excluir = e.excluirId ?? null;
   const comPausaMin = e.horario.almoco ? e.duracaoMin + e.horario.almoco.minutos : 0;
   // Uma consulta por recurso (a duração da visita) e, com almoço somado, outra por recurso (a visita mais a pausa).
   const consultas = useQueries({
     queries: [
       ...e.recursos.map((r) => ({
-        queryKey: ["neg-horas-livres-visita", org, r, e.dia, e.duracaoMin] as const,
-        queryFn: () => lerSlots(org as string, r, e.dia, e.duracaoMin),
+        queryKey: ["neg-horas-livres-visita", org, r, e.dia, e.duracaoMin, excluir] as const,
+        queryFn: () => lerSlots(org as string, r, e.dia, e.duracaoMin, excluir),
         enabled: ativo, staleTime: STALE_TIME_MS,
       })),
       ...e.recursos.map((r) => ({
-        queryKey: ["neg-horas-livres-visita", org, r, e.dia, comPausaMin] as const,
-        queryFn: () => lerSlots(org as string, r, e.dia, comPausaMin),
+        queryKey: ["neg-horas-livres-visita", org, r, e.dia, comPausaMin, excluir] as const,
+        queryFn: () => lerSlots(org as string, r, e.dia, comPausaMin, excluir),
         enabled: ativo && comPausaMin > 0, staleTime: STALE_TIME_MS,
       })),
     ],
@@ -77,13 +93,17 @@ export function useHorasLivresVisita(e: Entrada): HorasLivres {
   const dadosDos = dos.map((q) => q.data);
   const dadosPausa = pausas.map((q) => q.data);
   // Sem useMemo: o cálculo é barato e um memo com dependências de tamanho variável (uma por recurso) ou com `atual` (objeto novo a cada render) não poupa nada.
+  // com a função nova, o dia todo (sem horário nem almoço); sem ela, o horário da organização
+  const diaTodo = !dadosDos.some((d) => d !== undefined && !d.diaTodo);
+  const h = diaTodo ? DIA_TODO : e.horario;
+  const fechado = e.dia === "" ? null : feriado ? "feriado" as const : diaTodo ? null : motivoDiaFechado(e.dia, e.horario, e.feriados);
   let horas: string[] = [];
-  if (ativo && !dadosDos.some((d) => d === undefined) && !dadosPausa.some((d) => d === undefined)) {
+  if (ativo && fechado === null && !dadosDos.some((d) => d === undefined) && (diaTodo || !dadosPausa.some((d) => d === undefined))) {
     const agora = Date.now();
-    const porRecurso = dadosDos.map((s) => horasDoRecurso(s as SlotDb[], e.dia, e.duracaoMin, e.horario, agora));
+    const porRecurso = dadosDos.map((s) => horasDoRecurso((s as SlotsLidos).slots, e.dia, e.duracaoMin, h, agora));
     const livres = intersetar(porRecurso);
-    const comPausa = dadosPausa.map((s) => horasDoRecurso(s as SlotDb[], e.dia, comPausaMin, e.horario, agora));
-    horas = comHoraAtual(aplicarAlmoco(livres, e.duracaoMin, e.horario.almoco, comPausa), e.dia, e.atual ?? null, e.horario);
+    const comPausa = diaTodo ? [] : dadosPausa.map((s) => horasDoRecurso((s as SlotsLidos).slots, e.dia, comPausaMin, h, agora));
+    horas = comHoraAtual(diaTodo ? livres : aplicarAlmoco(livres, e.duracaoMin, h.almoco, comPausa), e.dia, e.atual ?? null, h);
   }
   const refetch = (): void => { todas.forEach((q) => { void q.refetch(); }); };
 
@@ -94,5 +114,5 @@ export function useHorasLivresVisita(e: Entrada): HorasLivres {
   else if (!e.horarioPronto || aLer) estado = { k: "a-ler" };
   else if (comErro) estado = { k: "erro" };
   else estado = horas.length === 0 ? { k: "sem-horas" } : { k: "pronto" };
-  return { horas: estado.k === "pronto" ? horas : [], estado, refetch };
+  return { horas: estado.k === "pronto" ? horas : [], estado, refetch, diaTodo };
 }
