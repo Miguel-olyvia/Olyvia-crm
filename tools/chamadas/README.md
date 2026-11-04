@@ -105,6 +105,8 @@ Duas chamadas reais, gravadas pelo PC com o telemóvel em alta voz (3 min e 25 s
   raciocínio do Qwen (`CHAMADAS_PENSAR=1`) é pior: inventa mais e com confiança total.
   Na entrevista completa, sem pensar: 6 campos certos (nome, morada, o que quer, divisões,
   visita, pavimento), 1 errado (prazo = data do pré-agendamento) e 6 a rever.
+- **Decisão (4 de novembro): fica tudo local.** O motor Claude está escrito em `extrair.py`
+  (`CHAMADAS_LLM=anthropic`, chave em `.env.local`) mas não foi testado nem se usa.
 - **Sem internet nos modelos.** O cliente do Hugging Face ia confirmar versões e ficava
   pendurado; os modelos carregam em modo offline (`CHAMADAS_ONLINE=1` para atualizar).
 

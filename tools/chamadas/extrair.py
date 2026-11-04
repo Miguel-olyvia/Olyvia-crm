@@ -24,6 +24,21 @@ import requests
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+ENV_LOCAL = Path(__file__).resolve().parents[2] / ".env.local"  # Olyvia-crm/.env.local
+
+
+def _carregar_env_local() -> None:
+    """ANTHROPIC_API_KEY pode estar no .env.local do projeto (onde o levantamento por conversa a lê)."""
+    if os.environ.get("ANTHROPIC_API_KEY") or not ENV_LOCAL.exists():
+        return
+    for linha in ENV_LOCAL.read_text(encoding="utf-8").splitlines():
+        linha = linha.strip()
+        if linha.startswith("ANTHROPIC_API_KEY="):
+            os.environ["ANTHROPIC_API_KEY"] = linha.split("=", 1)[1].strip().strip('"').strip("'")
+            return
+
+
+_carregar_env_local()
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 MOTOR = os.environ.get("CHAMADAS_LLM", "ollama")
 MODELO_OLLAMA = os.environ.get("CHAMADAS_MODELO_OLLAMA", "qwen3:8b")
@@ -120,14 +135,22 @@ def _pedir_ollama(sistema: str, pedido: str, esquema: dict) -> dict:
 
 def _pedir_anthropic(sistema: str, pedido: str, esquema: dict) -> dict:
     import anthropic  # só quando se usa este motor
-    client = anthropic.Anthropic()
-    msg = client.messages.create(
-        model=MODELO_ANTHROPIC,
-        max_tokens=16000,
-        system=sistema + "\n\nO JSON tem de seguir este esquema:\n" + json.dumps(esquema, ensure_ascii=False),
-        messages=[{"role": "user", "content": pedido}],
-    )
-    texto = "".join(b.text for b in msg.content if b.type == "text")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise SystemExit(f"Falta a chave: ponha ANTHROPIC_API_KEY=... em {ENV_LOCAL} (ou na variável de ambiente).")
+    client = anthropic.Anthropic()  # chave de ANTHROPIC_API_KEY (ambiente ou .env.local)
+    sistema_json = (sistema + "\n\nResponde só com um objeto JSON, sem texto à volta, que siga este esquema:\n"
+                    + json.dumps(esquema, ensure_ascii=False))
+    comum = dict(model=MODELO_ANTHROPIC, max_tokens=16000, system=sistema_json,
+                 messages=[{"role": "user", "content": pedido}])
+    try:
+        # modelos da família 5: com fallbacks "default", se uma salvaguarda recusar, a API
+        # repete o pedido noutro modelo em vez de devolver vazio
+        msg = client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **comum)
+    except (TypeError, anthropic.BadRequestError):
+        msg = client.messages.create(**comum)
+    if getattr(msg, "stop_reason", None) == "refusal":
+        raise RuntimeError("O Claude recusou o pedido: " + str(getattr(msg, "stop_details", "")))
+    texto = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
     m = re.search(r"\{.*\}", texto, re.S)
     if not m:
         raise RuntimeError("A resposta não trouxe JSON: " + texto[:200])
