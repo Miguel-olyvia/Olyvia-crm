@@ -33,7 +33,12 @@ const requestSchema = z.object({
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
-import { souAdminSistema } from "../_shared/adminConta.ts";
+import {
+  motivoPapelNaoAtribuivel,
+  possoGerirUtilizador,
+  souAdminSistema,
+  temPermissaoNaOrg,
+} from "../_shared/adminConta.ts";
 import {
   deriveKeyFromEnv,
   encryptNif,
@@ -416,22 +421,32 @@ serve(async (req: Request) => {
       );
     }
 
-    // Scope check: a non-system_admin admin (super_admin/org_admin) may only
-    // grant memberships in organizations they themselves administer. Without
-    // this, an org_admin of org A could create a user with a membership in
-    // org B by simply passing org B's id in the request body.
+    // Scope check (20270106310000): fora o administrador de sistema, cada
+    // associação pedida exige users.create NESSA organização ou numa acima dela
+    // (os direitos de administração descem, não sobem — antes bastava ser membro
+    // direto, e as organizações-filhas ficavam de fora) e um papel que quem cria
+    // pode atribuir: nunca um papel de sistema que não tem (super_admin, client,
+    // system_admin), nunca um papel de outra organização, nunca um papel com
+    // permissões que quem cria não tem (fn_motivo_papel_nao_atribuivel — a mesma
+    // regra do trigger trg_anew_memberships_sem_escalada). Verificado antes de
+    // criar o utilizador de auth, para um pedido recusado não deixar nada.
     if (!callerIsSystemAdmin) {
-      const requestedOrgIds = new Set(
-        normalizedMembershipsForScopeCheck.map((m: any) => m.organization_id),
-      );
-      const outOfScopeOrgId = [...requestedOrgIds].find((orgId) => !caller.orgIds.includes(orgId));
-      if (outOfScopeOrgId) {
-        return jsonError(
-          corsHeaders,
-          "organization_out_of_scope",
-          "You do not have permission to create a user in one or more of the requested organizations.",
-          403,
-        );
+      if (requestingUser.email && email.trim().toLowerCase() === requestingUser.email.trim().toLowerCase()) {
+        return jsonError(corsHeaders, "cannot_assign_self", "Não pode atribuir papéis a si próprio.", 403);
+      }
+      for (const m of normalizedMembershipsForScopeCheck as any[]) {
+        if (!(await temPermissaoNaOrg(supabaseClient, requestingUser.id, "users.create", m.organization_id))) {
+          return jsonError(
+            corsHeaders,
+            "organization_out_of_scope",
+            "You do not have permission to create a user in one or more of the requested organizations.",
+            403,
+          );
+        }
+        const motivo = await motivoPapelNaoAtribuivel(supabaseClient, requestingUser.id, m.organization_id, m.role_id);
+        if (motivo) {
+          return jsonError(corsHeaders, "role_not_assignable", motivo, 403);
+        }
       }
     }
 
@@ -511,6 +526,38 @@ serve(async (req: Request) => {
         authUserResponse = existingAuth;
         isExistingAuthUser = true;
         console.log("Found existing auth user:", authUserId);
+
+        // 20270106310000: a conta já existe — o pedido ia reescrever a ficha
+        // dela e juntar-lhe associações. Fora o administrador de sistema, nunca
+        // a própria conta e, se a pessoa já tem associações ativas, só quem a
+        // pode gerir (users.edit na organização de cada uma, sem papéis com mais
+        // poder do que o seu).
+        if (!callerIsSystemAdmin) {
+          if (authUserId === requestingUser.id) {
+            return jsonError(corsHeaders, "cannot_assign_self", "Não pode atribuir papéis a si próprio.", 403);
+          }
+          const { data: existingAnew } = await supabaseClient
+            .from("anew_users")
+            .select("id")
+            .eq("auth_user_id", authUserId)
+            .maybeSingle();
+          if (existingAnew) {
+            const { count: activeMemberships } = await supabaseClient
+              .from("anew_memberships")
+              .select("id", { count: "exact", head: true })
+              .eq("user_id", existingAnew.id)
+              .eq("status", "active");
+            if ((activeMemberships ?? 0) > 0 &&
+                !(await possoGerirUtilizador(supabaseClient, requestingUser.id, existingAnew.id, "users.edit"))) {
+              return jsonError(
+                corsHeaders,
+                "existing_user_out_of_scope",
+                "Este email já pertence a um utilizador que não pode gerir.",
+                403,
+              );
+            }
+          }
+        }
       } else {
         console.error("Create user error:", createError);
         return new Response(JSON.stringify({ error: createError.message }), {
