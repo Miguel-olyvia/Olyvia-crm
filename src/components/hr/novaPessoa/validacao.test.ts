@@ -122,12 +122,15 @@ describe("problemasDaNova: datas, contactos e acesso", () => {
 
   it("valida telefones, código postal e e-mails só quando preenchidos", () => {
     let v = comPatch(minimo(), "pessoais", { telefone_pessoal: "123", morada_codigo_postal: "1000", emergencia_nome: "Rui", emergencia_telefone: "12" });
-    v = comPatch(v, "geral", { email_trabalho: "x@" });
+    v = comPatch(v, "geral", { email_trabalho: "x@", telefone_trabalho: "abc" });
     v = comPatch(v, "extra", { emergencia_email: "y@" });
+    // O e-mail e o telefone de trabalho já não se pedem aqui: mesmo malformados não dão erro num campo invisível.
     expect(new Set(ids(v))).toEqual(new Set([
-      "hr-novo-telefone-pessoal", "hr-novo-morada-codigo-postal", "hr-novo-emergencia-telefone", "hr-novo-email-trabalho",
-      "hr-novo-emergencia-email",
+      "hr-novo-telefone-pessoal", "hr-novo-morada-codigo-postal", "hr-novo-emergencia-telefone", "hr-novo-emergencia-email",
     ]));
+    const semTelefone = comPatch(minimo(), "pessoais", { telefone_pessoal: "" });
+    expect(ids(semTelefone)).toEqual([]);
+    expect(ids(comPatch(semTelefone, "pessoais", { email_pessoal: "ana@x.pt" }), { ...SEM_CONFIG, comConvite: true })).toEqual([]);
     const bem = comPatch(minimo(), "pessoais", { telefone_pessoal: "912 345 678", morada_codigo_postal: "1000-001" });
     expect(ids(bem)).toEqual([]);
   });

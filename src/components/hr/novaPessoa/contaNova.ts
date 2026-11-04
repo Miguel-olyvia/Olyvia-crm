@@ -43,11 +43,12 @@ export function camposPreenchiveis(v: ValoresNovaPessoa): CamposPreenchiveis {
 const CAMPO_DO_ID: Record<string, keyof CamposPreenchiveis> = {
   "hr-novo-primeiro-nome": "primeiro_nome",
   "hr-novo-apelido": "apelido",
-  "hr-novo-email-trabalho": "email_trabalho",
-  "hr-novo-telefone-trabalho": "telefone_trabalho",
   "hr-novo-cargo": "cargo_id",
   "hr-novo-local": "local_id",
 };
+
+/** Os campos de trabalho que a Nova pessoa já não mostra: a conta não os preenche e o aviso deles não aparece. */
+const CAMPOS_DE_TRABALHO: ReadonlySet<string> = new Set(["hr-novo-email-trabalho", "hr-novo-telefone-trabalho"]);
 
 interface Entrada {
   valores: ValoresNovaPessoa;
@@ -85,11 +86,18 @@ export function useContaNova({ valores, definir, tocados, locais, cargosActivos,
         return;
       }
       const resultado = preenchimentoDaConta(conta, camposPreenchiveis(depoisDaReversao), {}, locais, cargosActivos);
-      setAutoPreenchido(resultado.autoNovo);
-      setAvisos(resultado.avisos);
+      // O e-mail e o telefone de trabalho já não se pedem aqui (não há campo no ecrã): a conta só preenche o nome e o apelido.
+      // Filtra-se neste chamador, e não em `preenchimentoPorConta.ts`, porque esse ficheiro é partilhado com a ficha real.
+      const { primeiro_nome, apelido } = resultado.patchGeral;
+      setAutoPreenchido(Object.fromEntries(Object.entries(resultado.autoNovo).filter(([id]) => !CAMPOS_DE_TRABALHO.has(id))));
+      setAvisos(resultado.avisos.filter((a) => !CAMPOS_DE_TRABALHO.has(a.campoId)));
       definir({
         ...depoisDaReversao,
-        geral: { ...depoisDaReversao.geral, ...resultado.patchGeral },
+        geral: {
+          ...depoisDaReversao.geral,
+          ...(primeiro_nome !== undefined ? { primeiro_nome } : {}),
+          ...(apelido !== undefined ? { apelido } : {}),
+        },
         laborais: { ...depoisDaReversao.laborais, ...resultado.patchLaborais },
       });
     },

@@ -65,7 +65,8 @@ describe("rascunho de nova pessoa", () => {
     rascunho.pessoais.nif = "123";
     rascunho.geral.email_trabalho = "isto-nao-e-email";
     const campos = problemasDoRascunho(rascunho).map((p) => p.campoId).sort();
-    expect(campos).toEqual(["hr-novo-email-trabalho", "hr-novo-nif"]);
+    // O e-mail de trabalho já não se pede na Nova pessoa: um valor malformado que venha de outro caminho não dá erro invisível.
+    expect(campos).toEqual(["hr-novo-nif"]);
   });
 
   it("apanha a incoerencia entre passos: termo antes do inicio, maximo abaixo do contratado", () => {

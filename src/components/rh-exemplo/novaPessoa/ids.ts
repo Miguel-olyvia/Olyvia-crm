@@ -14,7 +14,7 @@ export const CAMPOS_POR_ABA: Readonly<Record<AbaNova, readonly string[]>> = {
     "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero", "hr-novo-carta-categorias", "hr-novo-carta-validade",
   ],
   contacto: [
-    "hr-novo-email-pessoal", "hr-novo-telefone-pessoal", "hr-novo-email-trabalho", "hr-novo-telefone-trabalho",
+    "hr-novo-email-pessoal", "hr-novo-telefone-pessoal",
     "hr-novo-morada-linha1", "hr-novo-morada-linha2", "hr-novo-morada-codigo-postal", "hr-novo-morada-localidade",
     "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-relacao",
     "hr-novo-emergencia-telefone", "hr-novo-emergencia-telefone-alt", "hr-novo-emergencia-email",

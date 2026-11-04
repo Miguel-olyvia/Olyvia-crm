@@ -360,14 +360,6 @@ export function problemasDoRascunho(
       mensagemKey: "hr.form.erroObrigatorio",
     });
   }
-  if (geral.email_trabalho.trim() !== "" && !EMAIL.test(geral.email_trabalho.trim())) {
-    problemas.push({
-      seccao: "geral",
-      campoId: "hr-novo-email-trabalho",
-      rotuloKey: "hr.laborais.emailTrabalho",
-      mensagemKey: "hr.form.erroEmail",
-    });
-  }
   problemas.push(...problemasDeFormatoDosPessoais(pessoais));
   if (comConvite) {
     // O convite vai para o e-mail pessoal: sem ele nao ha para onde o enviar.
@@ -426,7 +418,7 @@ export function problemasDoRascunho(
   }
   // -- Acesso ---------------------------------------------------------------
   if (rascunho.acesso.enviar_convite) {
-    const email = rascunho.acesso.email_convite.trim() || geral.email_trabalho.trim();
+    const email = rascunho.acesso.email_convite.trim();
     if (email === "" || !EMAIL.test(email)) {
       problemas.push({
         seccao: "acesso",
@@ -771,7 +763,7 @@ export function payloadDoRascunho(
     acesso: {
       role_id: texto(acesso.role_id),
       enviar_convite: acesso.enviar_convite,
-      email_convite: texto(acesso.email_convite) ?? texto(geral.email_trabalho),
+      email_convite: texto(acesso.email_convite),
     },
     contaALigar: podeLigarConta ? texto(geral.conta_id) : null,
   };
