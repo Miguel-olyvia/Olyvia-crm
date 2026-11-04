@@ -2,27 +2,19 @@
 // microfone, o motor local transcreve e diz quem fala; no fim propõe os campos da Lead e do Contacto e a comercial
 // confirma o que entra. A lógica (campos, propostas) está em chamadaDireto.ts; aqui é o microfone, o WebSocket e o ecrã.
 import { useEffect, useRef, useState } from "react";
-import { Mic, PhoneOff, Sparkles, Square } from "lucide-react";
+import { Mic, PhoneOff, Settings2, Sparkles, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Grupo } from "./campos";
 import type { Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { aAplicar, camposParaMotor, httpDoMotor, juntarVarios, propostas, urlDoMotor, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { MOTOR_URL_PADRAO, aAplicar, camposParaMotor, comSegredo, guardarMotor, httpDoMotor, juntarVarios, propostas, segredoDoMotor, urlDoMotor, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
 
 type EstadoLig = "parado" | "a_ligar" | "a_ouvir" | "a_terminar" | "terminado" | "erro";
 
-// O AudioWorklet que corta o microfone em blocos de 100 ms de int16 (o que o motor espera). Vai como texto para não
-// precisar de um ficheiro à parte no build.
-const WORKLET = `class Captura extends AudioWorkletProcessor {
-  constructor(){ super(); this.buf = []; this.n = 0; }
-  process(inputs){ const x = inputs[0][0]; if (!x) return true;
-    this.buf.push(new Float32Array(x)); this.n += x.length;
-    if (this.n >= 1600) { const out = new Int16Array(this.n); let k = 0;
-      for (const b of this.buf) for (let i = 0; i < b.length; i++) out[k++] = Math.max(-1, Math.min(1, b[i])) * 32767;
-      this.port.postMessage(out.buffer, [out.buffer]); this.buf = []; this.n = 0; }
-    return true; } }
-registerProcessor('captura', Captura);`;
+// O AudioWorklet que corta o microfone em blocos de 100 ms de int16 está em public/chamadas/captura.worklet.js
+// (um ficheiro estático: a Content-Security-Policy da app não deixa carregar módulos de blobs).
+const WORKLET_URL = "/chamadas/captura.worklet.js";
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
@@ -37,14 +29,22 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
   const [comercial, setComercial] = useState(() => { try { return localStorage.getItem("olyvia.chamadas.comercial") || ""; } catch { return ""; } });
   const [substituir, setSubstituir] = useState(false);
   const [aplicadas, setAplicadas] = useState<string[] | null>(null);
+  const [definicoes, setDefinicoes] = useState(false);
+  const [motorUrl, setMotorUrl] = useState(() => urlDoMotor());
+  const [segredo, setSegredo] = useState(() => segredoDoMotor());
+  const [motorEstado, setMotorEstado] = useState<"" | "ligado" | "sem_motor" | "segredo_errado">("");
   const ws = useRef<WebSocket | null>(null);
   const pararAudio = useRef<() => void>(() => {});
   const fimLista = useRef<HTMLDivElement>(null);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
 
   useEffect(() => {
-    fetch(httpDoMotor() + "/api/vozes").then((r) => r.json()).then((v: string[]) => setVozes(v)).catch(() => setVozes([]));
-  }, []);
+    const base = httpDoMotor(motorUrl);
+    fetch(comSegredo(base + "/api/estado", segredo)).then((r) => r.json())
+      .then((e: { segredo_ok: boolean }) => setMotorEstado(e.segredo_ok ? "ligado" : "segredo_errado"))
+      .catch(() => setMotorEstado("sem_motor"));
+    fetch(comSegredo(base + "/api/vozes", segredo)).then((r) => (r.ok ? r.json() : [])).then((v: string[]) => setVozes(v)).catch(() => setVozes([]));
+  }, [motorUrl, segredo]);
   useEffect(() => { fimLista.current?.scrollIntoView({ block: "nearest" }); }, [falas.length]);
   useEffect(() => () => { pararAudio.current(); ws.current?.close(); }, []);
 
@@ -60,7 +60,7 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
       } catch (e) { setEstado("erro"); setMsg("Sem acesso ao microfone: " + (e as Error).message); return; }
     }
     let socket: WebSocket;
-    try { socket = new WebSocket(urlDoMotor()); } catch (e) { setEstado("erro"); setMsg("Não dá para ligar ao motor: " + (e as Error).message); stream?.getTracks().forEach((t) => t.stop()); return; }
+    try { socket = new WebSocket(comSegredo(motorUrl, segredo)); } catch (e) { setEstado("erro"); setMsg("Não dá para ligar ao motor: " + (e as Error).message); stream?.getTracks().forEach((t) => t.stop()); return; }
     socket.binaryType = "arraybuffer";
     ws.current = socket;
     socket.onopen = () => {
@@ -74,7 +74,7 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
         setMsg(modoTeste ? "A ouvir a chamada de exemplo." : m.comercial ? `A ouvir. Voz de ${m.comercial} registada.` : "A ouvir. Sem voz registada: a primeira voz conta como do cliente.");
         if (stream) {
           const ctxA = new AudioContext({ sampleRate: 16000 });
-          await ctxA.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
+          await ctxA.audioWorklet.addModule(WORKLET_URL);
           const fonte = ctxA.createMediaStreamSource(stream);
           const nodo = new AudioWorkletNode(ctxA, "captura");
           nodo.port.onmessage = (e) => { if (socket.readyState === 1) socket.send(e.data); };
@@ -92,7 +92,7 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
         fechar();
       } else if (m.tipo === "erro") { setEstado("erro"); setMsg("Erro no motor: " + m.mensagem); fechar(); }
     };
-    socket.onerror = () => { setEstado((e) => (e === "a_ligar" ? "erro" : e)); setMsg(`Não dá para ligar ao motor em ${urlDoMotor()}. Está a correr? (python tools/chamadas/servidor.py)`); };
+    socket.onerror = () => { setEstado((e) => (e === "a_ligar" ? "erro" : e)); setMsg(`Não dá para ligar ao motor em ${motorUrl}. Está a correr? (python tools/chamadas/servidor.py)`); };
     socket.onclose = () => { setEstado((e) => { if (e === "a_ouvir" || e === "a_terminar") { setMsg("Ligação ao motor perdida. O que havia ficou guardado no motor."); return "erro"; } return e; }); fechar(); };
   }
 
@@ -131,7 +131,10 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground" aria-live="polite">
-        <span className={cn(estado === "erro" && "text-destructive")}>{msg || (vozes.length ? "Pronto." : `Motor em ${urlDoMotor()}.`)}</span>
+        <span className={cn(estado === "erro" && "text-destructive")}>{msg || (motorEstado === "ligado" ? "Motor ligado." : motorEstado === "segredo_errado" ? "O segredo do motor está errado." : motorEstado === "sem_motor" ? `Sem motor em ${motorUrl}.` : "A ver o motor...")}</span>
+        <button type="button" onClick={() => setDefinicoes((x) => !x)} className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:underline" aria-expanded={definicoes}>
+          <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />Motor
+        </button>
         {nivel ? (
           <>
             <span className="inline-block h-2 w-32 overflow-hidden rounded bg-muted" aria-hidden="true">
@@ -142,6 +145,18 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
         ) : null}
         {estado === "terminado" ? <span>{resumoFim}</span> : null}
       </div>
+
+      {definicoes ? (
+        <form className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-border bg-background p-3 text-sm" onSubmit={(e) => { e.preventDefault(); guardarMotor(motorUrl, segredo); setDefinicoes(false); }}>
+          <label className="flex min-w-[280px] flex-1 flex-col gap-1 text-xs text-muted-foreground">Endereço do motor (ws:// ou wss://…/ws)
+            <input value={motorUrl} onChange={(e) => setMotorUrl(e.target.value)} className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground" placeholder={MOTOR_URL_PADRAO} />
+          </label>
+          <label className="flex min-w-[200px] flex-col gap-1 text-xs text-muted-foreground">Segredo (só se o motor estiver na internet)
+            <input value={segredo} onChange={(e) => setSegredo(e.target.value)} type="password" autoComplete="off" className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground" />
+          </label>
+          <Button type="submit" variant="outline" size="sm">Guardar</Button>
+        </form>
+      ) : null}
 
       {falas.length ? (
         <div className="mt-4 max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-border bg-background p-3 text-[15px]" aria-label="Transcrição">

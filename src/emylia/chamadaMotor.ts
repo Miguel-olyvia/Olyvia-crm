@@ -4,13 +4,29 @@
 // sai para fora: o motor corre em casa. Esta parte é só lógica (sem React), para se testar à parte.
 import { listaVarios, type Def, type Grupo } from "./campos";
 
-/** Onde está o motor. Por omissão no próprio PC; `localStorage.olyvia.chamadas.motor` muda (ex.: ws://192.168.1.10:8765/ws). */
+/** Onde está o motor. Por ordem: o que a pessoa escreveu no painel (localStorage), o da build
+ *  (VITE_CHAMADAS_MOTOR_URL, p. ex. o túnel wss://….trycloudflare.com/ws no Vercel), o próprio PC. */
 export const MOTOR_URL_PADRAO = "ws://127.0.0.1:8765/ws";
+const env = (k: string): string => { try { return (import.meta.env?.[k] as string | undefined) ?? ""; } catch { return ""; } };
+const ler = (k: string): string => { try { return localStorage.getItem(k) ?? ""; } catch { return ""; } };
 export function urlDoMotor(): string {
-  try { return localStorage.getItem("olyvia.chamadas.motor") || MOTOR_URL_PADRAO; } catch { return MOTOR_URL_PADRAO; }
+  return ler("olyvia.chamadas.motor") || env("VITE_CHAMADAS_MOTOR_URL") || MOTOR_URL_PADRAO;
+}
+/** O segredo partilhado com o motor quando ele está na internet (CHAMADAS_TOKEN no servidor). Vazio no PC. */
+export function segredoDoMotor(): string {
+  return ler("olyvia.chamadas.segredo") || env("VITE_CHAMADAS_MOTOR_SEGREDO");
+}
+export function guardarMotor(url: string, segredo: string): void {
+  try {
+    if (url.trim()) localStorage.setItem("olyvia.chamadas.motor", url.trim()); else localStorage.removeItem("olyvia.chamadas.motor");
+    if (segredo.trim()) localStorage.setItem("olyvia.chamadas.segredo", segredo.trim()); else localStorage.removeItem("olyvia.chamadas.segredo");
+  } catch { /* sem localStorage */ }
 }
 /** O endereço http do motor (para as vozes e as fichas), a partir do ws. */
 export const httpDoMotor = (ws = urlDoMotor()) => ws.replace(/^ws/, "http").replace(/\/ws$/, "");
+/** Junta o segredo ao endereço (?token=), se houver. */
+export const comSegredo = (url: string, segredo = segredoDoMotor()) =>
+  segredo ? url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(segredo) : url;
 
 /** Uma fala transcrita, como o motor a manda. */
 export interface Fala { inicio: number; fim: number; texto: string; falante: "comercial" | "cliente"; confianca_falante: number }
