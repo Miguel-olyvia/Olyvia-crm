@@ -148,10 +148,13 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   portal: [
     "portal.manage",
   ],
-  // Só verificadas no servidor (policies/RPCs): products.manage_attributes
+  // Só verificadas no servidor (policies/RPCs): products.manage_attributes. 04/11/2026: products.manage e brands.edit voltam ao editor:
+  // o servidor exige-as (products.manage: rpc_create/update/delete_bundle e _bundle_children_authorize, os atributos de produto, as paletas
+  // de atributos das categorias, as unidades (uom) e as policies dessas tabelas; brands.edit: rpc_create/update/delete_brand, as rpc_bulk_*_brand
+  // e as policies de brands/brand_organizations). Escondidas, ninguém as podia dar e os packs, atributos e marcas ficavam só para admins.
   products: [
-    "brands.view", "product_attributes.view", "product_categories.view", "products.create", "products.edit",
-    "products.manage_prices", "products.view", "products.view_cost",
+    "brands.edit", "brands.view", "product_attributes.view", "product_categories.view", "products.create", "products.edit",
+    "products.manage", "products.manage_prices", "products.view", "products.view_cost",
   ],
   proposals: [
     "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.manage", "proposals.view",
@@ -228,6 +231,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "business_units.create", "business_units.delete", "business_units.edit", "business_units.export", "business_units.import",
     "business_units.view",
   ],
+  // 04/11/2026 (reconfirmado na base do ramo e em src/): nenhuma função, policy, edge function nem ecrã vivo verifica calendar.*,
+  // work_orders.*, scheduling.export, hr.pessoas.archive, hr.onboarding.sign_employer, hr.ausencias.tipos.edit e hr.assiduidade.importar
+  // (só a página de documentação /docs/permissions as lista).
   calendar: [
     "calendar.create", "calendar.edit", "calendar.view_company",
   ],
@@ -302,10 +308,10 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   ],
   // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam.
   products: [
-    "brands.create", "brands.delete", "brands.edit", "product_attributes.create", "product_attributes.delete",
+    "brands.create", "brands.delete", "product_attributes.create", "product_attributes.delete",
     "product_attributes.edit", "product_categories.create", "product_categories.delete", "product_categories.edit",
     "product_subcategories.create", "product_subcategories.delete", "product_subcategories.edit", "product_subcategories.view",
-    "products.delete", "products.export", "products.import", "products.manage", "products.manage_attributes",
+    "products.delete", "products.export", "products.import", "products.manage_attributes",
     "products.manage_catalog", "products.view_price_history",
   ],
   // 03/11: nada vivo as verifica (as ações das encomendas de compra pedem as próprias: create/edit/delete/receive/approve...).
@@ -372,9 +378,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
  * é outra tarefa. Os de src/emylia e src/pages/prototipo-negocios são do protótipo.
  */
 export const CODIGOS_SEM_CATALOGO: readonly string[] = [
-  "contacto.registar", "contracts.cancel", "contracts.view", "equipa.edit", "finance.invoice", "finance.validate_payment",
-  "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder", "obra.fechar", "obra.imprevistos",
-  "proposta.decidir", "suppliers.manage", "visita.gerir",
+  "contacto.registar", "contracts.cancel", "contracts.view", "contrato.editar", "equipa.edit", "finance.invoice", "finance.validate_payment",
+  "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder", "obra.executar", "obra.fechar", "obra.imprevistos",
+  "obra.materiais", "obra.planear", "orcamento.editar", "proposta.decidir", "proposta.enviar", "suppliers.manage", "visita.gerir",
 ];
 
 const todas = (r: Readonly<Record<string, readonly string[]>>): string[] => Object.values(r).flat();

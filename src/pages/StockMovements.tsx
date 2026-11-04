@@ -44,6 +44,7 @@ import { useMovementDocumentLinks } from "@/hooks/useMovementDocumentLinks";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { escapePostgrestOrTerm } from "@/lib/clientSearch";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { juntarCustosMovimentos } from "@/lib/custosStock";
 import { cn } from "@/lib/utils";
 
 // Movimentos: o livro completo de stock_movements da organização ativa.
@@ -59,7 +60,8 @@ const EXPORT_BATCH = 1000;
 // no URL) — limite para não passar o tamanho máximo do pedido.
 const PRODUCT_SEARCH_LIMIT = 200;
 // Permissão de custo já usada no resto da app (ItemSuppliersTable, avisos de
-// preço do fornecedor). Sem ela, unit_cost_at_time nem é pedido.
+// preço do fornecedor). Sem ela, unit_cost_at_time nem é pedido; com ela vem
+// da RPC inv_custos_movimentos (a coluna já não se lê da tabela).
 const COST_PERMISSION = "products.view_cost";
 
 interface MovementRow {
@@ -276,7 +278,6 @@ const StockMovements = () => {
 
   const selectColumns = [
     "id, movement_type, quantity, balance_after, document_number, document_type, reference_id, sale_source_type, sale_source_id, transfer_group_id, counterparty, notes, created_at, product_id, warehouse_id",
-    canViewCost ? "unit_cost_at_time" : null,
     "products(name, sku)",
     "warehouses(name)",
     "created_by_user:anew_users!stock_movements_created_by_fkey(name)",
@@ -313,7 +314,9 @@ const StockMovements = () => {
       // Total exato só na primeira página (filtrado por org, com índice).
       const { data, error, count } = await buildQuery(filters, pageParam === 0).range(from, from + PAGE_SIZE - 1);
       if (error) throw error;
-      return { rows: (data || []) as MovementRow[], count: count ?? null };
+      const page = (data || []) as MovementRow[];
+      // O custo vem à parte (inv_custos_movimentos, com products.view_cost na organização): a coluna já não se lê da tabela.
+      return { rows: canViewCost ? await juntarCustosMovimentos(page) : page, count: count ?? null };
     },
     getNextPageParam: (lastPage, pages) => (lastPage.rows.length === PAGE_SIZE ? pages.length : undefined),
     enabled: !!orgId && !searchPending && !searchFailed,
@@ -464,6 +467,7 @@ const StockMovements = () => {
           from += EXPORT_BATCH;
         }
       }
+      if (canViewCost && all.length > 0) all.splice(0, all.length, ...(await juntarCustosMovimentos(all)));
       if (all.length === 0) {
         toast({ title: "Nada para exportar", description: "Sem movimentos com estes filtros.", variant: "destructive" });
         return;

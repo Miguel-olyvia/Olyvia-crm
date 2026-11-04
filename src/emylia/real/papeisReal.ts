@@ -4,7 +4,7 @@
 // Gestor de obra e o Técnico gravam a obra. Quem tem o perfil da Olyvia com pessoas.edit (ou é admin do sistema) continua a ver todos.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PAPEIS, type Papel } from "../motor";
-import { PERMS_FASES, PERMS_PAPEL } from "../permissoes";
+import { PERMS_DIRECAO_EXTRA, PERMS_FASES, PERMS_PAPEL } from "../permissoes";
 import { RESPONSAVEL_OBRA, definirViaturaObra } from "../obraOps";
 import { definirResponsaveisObra } from "../campos";
 
@@ -111,7 +111,8 @@ const DIRECAO_V1 = PERMS_PAPEL.direcao;
  *  A Direção fica com o resto (aprovar a margem, anular, a equipa) e (3/11, 20270105200000) as seis das fases (contacto, visita, decisão
  *  do cliente, imprevistos, encerrar a obra, perder), como em neg_papeis_permissoes. */
 export function aplicarPermissoesReais(): void {
-  PERMS_PAPEL.direcao = ["contracts.cancel", "equipa.edit", "margin.approve", ...PERMS_FASES];
+  // 4/11: e o orçamento, o envio da proposta, o contrato, planear a obra e os materiais (neg_papeis_permissoes da Direção)
+  PERMS_PAPEL.direcao = ["contracts.cancel", "equipa.edit", "margin.approve", ...PERMS_FASES, ...PERMS_DIRECAO_EXTRA];
   // a Frota ainda não está ligada às obras na Olyvia: sem a carrinha do exemplo
   definirViaturaObra(null);
 }

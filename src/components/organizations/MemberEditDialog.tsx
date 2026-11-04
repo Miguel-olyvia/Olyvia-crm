@@ -90,7 +90,8 @@ export function MemberEditDialog({
 }: MemberEditDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("organizations.edit");
+  // O que o servidor pede para gravar o membro: users.edit (anew_users_update e anew_memberships_update).
+  const canManage = hasPermission("users.edit");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("general");

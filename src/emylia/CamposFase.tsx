@@ -128,7 +128,29 @@ function Impacto({ k, d, simples }: { k: string; d: Negocio; simples?: boolean }
   );
 }
 
-function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: Def; seguinte: boolean; erro?: boolean }) {
+/** 4/11 (Rúben): um campo de escolha com opções de «mais detalhe» (Def.detalhe, no editor dos campos): escolhida uma delas, aparece
+ *  por baixo uma caixa para escrever (guarda-se em `<campo>_detalhe`). */
+function CampoT(p: FxProps & { c: Def; seguinte: boolean; erro?: boolean }) {
+  const { c, d, A, run, ro, simples } = p;
+  const escolhidas = c.t === "varios" ? listaVarios(d.f[c.k] || "") : [d.f[c.k] || ""];
+  const aberto = !!c.detalhe?.some((o) => escolhidas.includes(o));
+  if (!aberto) return <CampoBase {...p} />;
+  const k = `${c.k}_detalhe`, id = `fx-${k}-${d.id}`, val = d.f[k] || "";
+  return (
+    <div className={cn("grid gap-2", !simples && "sm:col-span-full")}>
+      <CampoBase {...p} />
+      <div className={cn("grid gap-1.5 motion-safe:animate-in motion-safe:fade-in-0", simples ? "pb-4" : "")}>
+        <label htmlFor={id} className={simples ? "text-[15px] text-muted-foreground" : "text-xs font-medium text-muted-foreground"}>{c.l}: mais detalhe</label>
+        {ro ? <span className="text-[15px] font-medium">{val || "—"}</span> : (
+          <textarea key={id + val} id={id} rows={2} defaultValue={val} placeholder="Escreva aqui" className={cn(simples ? INPUT_G : INPUT, "h-auto resize-y py-2")}
+            onBlur={(e) => { if (e.target.value !== val) run(() => A.campo(d.id, k, e.target.value)); }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CampoBase({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: Def; seguinte: boolean; erro?: boolean }) {
   const val = d.f[c.k] || "";
   // o cursor vai sozinho para o próximo campo de escrever, se ninguém estiver a escrever noutro
   useEffect(() => {

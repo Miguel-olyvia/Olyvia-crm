@@ -25,6 +25,18 @@ interface ProtectedRouteProps {
    * ação na lista de leads — retirá-la a um papel fechava tudo isso junto.
    */
   adminOnly?: boolean;
+  /**
+   * Só o administrador de sistema (papel global `system_admin`, o mesmo que
+   * `is_system_admin` / `requireAdminRole` no servidor). Para ferramentas da
+   * plataforma (importar códigos postais) e páginas de desenvolvimento.
+   */
+  systemAdminOnly?: boolean;
+  /**
+   * Sem empresa ativa, deixa entrar: é o caminho de quem acabou de criar a conta e ainda vai registar a primeira
+   * organização (o servidor aceita-o por user_can_self_register_first_org). Sem empresa não há permissões, e sem
+   * organizações visíveis a RLS não devolve nada de ninguém.
+   */
+  allowWithoutCompany?: boolean;
   /** The page component to render if access is granted */
   children: ReactNode;
 }
@@ -34,10 +46,10 @@ interface ProtectedRouteProps {
  * Wraps a page component and blocks access if the user lacks the required permission.
  * Shows a localized "Access Denied" page inside the Layout shell.
  */
-export function ProtectedRoute({ permission, permissions, requireAll = false, adminOnly, children }: ProtectedRouteProps) {
-  const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
+export function ProtectedRoute({ permission, permissions, requireAll = false, adminOnly, systemAdminOnly, allowWithoutCompany, children }: ProtectedRouteProps) {
+  const { hasPermission, hasAnyPermission, isSystemAdmin, loading: permissionsLoading } = usePermissions();
   const { anewRoleCode, loading: scopeLoading } = usePermissionScope();
-  const { isLoading: companyLoading } = useCompany();
+  const { isLoading: companyLoading, activeCompany } = useCompany();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -54,7 +66,11 @@ export function ProtectedRoute({ permission, permissions, requireAll = false, ad
 
   // Check access
   let hasAccess = true;
-  if (adminOnly) {
+  if (systemAdminOnly) {
+    hasAccess = isSystemAdmin === true;
+  } else if (allowWithoutCompany && !activeCompany) {
+    hasAccess = true;
+  } else if (adminOnly) {
     hasAccess = anewRoleCode === 'super_admin' || anewRoleCode === 'system_admin';
   } else if (permission) {
     hasAccess = hasPermission(permission);

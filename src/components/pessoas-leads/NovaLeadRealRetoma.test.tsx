@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
 import { supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
-import { NovaLeadReal } from "./NovaLeadReal";
+import { NovaLeadReal } from "./NovaLeadReal";
+import { continuar, criar, irParaConfirmar, irParaContacto } from "./passosNovaLeadTeste";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -38,12 +39,13 @@ const desenhar = () => render(arvore(ORG, ORG));
 const abrir = () => fireEvent.click(screen.getByRole("button", { name: "Nova lead" }));
 const escrever = (rotulo: RegExp, valor: string) => fireEvent.change(screen.getByLabelText(rotulo), { target: { value: valor } });
 const preencherValido = (email = "ana@x.pt") => {
+  irParaContacto();
   escrever(/Nome próprio/, "Ana");
   escrever(/Apelido/, "Lopes");
   escrever(/^Email/, email);
   fireEvent.change(document.getElementById("nl-campo-phone") as HTMLInputElement, { target: { value: "912 345 678" } });
 };
-const criar = () => fireEvent.click(screen.getByRole("button", { name: "Criar lead" }));
+// 4/11: a Nova lead é guiada; «Criar lead» só está no último passo (passosNovaLeadTeste.ts)
 const procuras = () => supabaseFalso.rpc.mock.calls.filter((c) => c[0] === "neg_procurar_duplicados");
 
 beforeEach(() => {
@@ -80,6 +82,8 @@ describe("NovaLeadReal: tentar de novo depois de um erro ao verificar", () => {
     preencherValido("antigo@x.pt");
     criar();
     const alerta = (await within(dialogo).findByText("Não foi possível confirmar que esta pessoa ainda não existe. Nada foi criado. Tente de novo.")).closest("[role='alert']") as HTMLElement;
+    // 4/11: está no passo «Confirmar»; «Alterar» volta aos dados base para corrigir o email
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Alterar: Quem é" }));
     escrever(/^Email/, "novo@x.pt");
     fireEvent.click(within(alerta).getByRole("button", { name: "Tentar de novo" }));
     await waitFor(() => expect(procuras()).toHaveLength(2));
@@ -96,6 +100,7 @@ describe("NovaLeadReal: sem campanhas, origens ou comerciais não se cria", () =
     const dialogo = await screen.findByRole("dialog");
     const aviso = await within(dialogo).findByText(/Não foi possível carregar as campanhas, as origens ou os comerciais/);
     preencherValido();
+    irParaConfirmar();
     expect(screen.getByRole("button", { name: "Criar lead" })).toBeDisabled();
     fireEvent.submit(screen.getByRole("button", { name: "Criar lead" }).closest("form") as HTMLFormElement);
     expect(procuras()).toHaveLength(0);
@@ -125,6 +130,7 @@ describe("NovaLeadReal: o foco não se perde", () => {
     abrir();
     const dialogo = await screen.findByRole("dialog");
     preencherValido();
+    irParaConfirmar();
     screen.getByRole("button", { name: "Criar lead" }).focus();
     criar();
     await waitFor(() => expect(screen.getByRole("button", { name: "A criar..." })).toBeDisabled());

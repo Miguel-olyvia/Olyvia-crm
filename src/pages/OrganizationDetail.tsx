@@ -107,6 +107,11 @@ export default function OrganizationDetail() {
   // for this org-management capability elsewhere (OrganizationMembersDialog, MemberEditDialog).
   const canViewOrgHistory = hasPermission("organizations.edit");
   const canManageOrg = hasPermission("organizations.edit");
+  // Membros: as permissões que o servidor pede (anew_memberships insert/update/delete = users.create/edit/delete), não a da
+  // organização. A página abre com organizations.view (como a lista); sem estas, os membros só se veem.
+  const podeAdicionarMembro = hasPermission("users.create");
+  const podeEditarMembro = hasPermission("users.edit");
+  const podeRemoverMembro = hasPermission("users.delete");
 
   const { countries } = useCountries();
   const [selectedDistrictId, setSelectedDistrictId] = useState<string | null>(null);
@@ -777,7 +782,7 @@ export default function OrganizationDetail() {
                     <CardTitle>{t("organizations.members")}</CardTitle>
                     <CardDescription>{t("organizations.membersDescription")}</CardDescription>
                   </div>
-                  {canManageOrg && (
+                  {podeAdicionarMembro && (
                     <Button onClick={handleAddMemberPanel}>
                       <UserPlus className="w-4 h-4 mr-2" />{t("organizations.addMember")}
                     </Button>
@@ -791,10 +796,11 @@ export default function OrganizationDetail() {
                       {members.map((member) => (
                         <div key={member.id}
                           className={cn(
-                            "flex items-center justify-between p-4 border rounded-lg cursor-pointer transition-colors",
+                            "flex items-center justify-between p-4 border rounded-lg transition-colors",
+                            podeEditarMembro && "cursor-pointer",
                             memberToEdit?.id === member.id && "ring-2 ring-primary bg-primary/5"
                           )}
-                          onClick={() => handleEditMember(member)}
+                          onClick={podeEditarMembro ? () => handleEditMember(member) : undefined}
                         >
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -805,18 +811,22 @@ export default function OrganizationDetail() {
                               <p className="text-sm text-muted-foreground">{member.role?.name || "-"}</p>
                             </div>
                           </div>
-                          {canManageOrg && (
+                          {(podeEditarMembro || podeRemoverMembro) && (
                             <div className="flex items-center gap-2">
-                              <Button variant="ghost" size="icon"
-                                onClick={(e) => { e.stopPropagation(); handleEditMember(member); }}
-                                className="text-muted-foreground hover:text-foreground">
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon"
-                                onClick={(e) => { e.stopPropagation(); handleRemoveMember(member.id); }}
-                                className="text-destructive hover:text-destructive">
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              {podeEditarMembro && (
+                                <Button variant="ghost" size="icon"
+                                  onClick={(e) => { e.stopPropagation(); handleEditMember(member); }}
+                                  className="text-muted-foreground hover:text-foreground">
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                              )}
+                              {podeRemoverMembro && (
+                                <Button variant="ghost" size="icon"
+                                  onClick={(e) => { e.stopPropagation(); handleRemoveMember(member.id); }}
+                                  className="text-destructive hover:text-destructive">
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              )}
                             </div>
                           )}
                         </div>

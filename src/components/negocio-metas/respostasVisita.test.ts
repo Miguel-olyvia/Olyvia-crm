@@ -24,7 +24,7 @@ describe("as listas do protótipo", () => {
     expect(BLOCO_QUALIFICACAO.perguntas).toHaveLength(6);
     expect(imovel.opcoes.map((o) => o[1])).toEqual(["Apartamento", "Moradia", "Loja", "Escritório"]);
     expect(posse.opcoes.map((o) => o[1])).toEqual(["Proprietário", "Inquilino", "Administração"]);
-    expect(decisor.opcoes.map((o) => o[1])).toEqual(["O próprio", "Com a família", "Administração"]);
+    expect(decisor.opcoes.map((o) => o[1])).toEqual(["O próprio", "O proprietário", "Com a família", "Administração"]);
     expect(orcamento.opcoes.map((o) => o[1])).toEqual(["Até 3.000 €", "3.000 a 6.000 €", "6.000 a 10.000 €", "Mais de 10.000 €", "Não sabe"]);
     expect(prazo.opcoes.map((o) => o[1])).toEqual(["Urgente (1 mês)", "1 a 3 meses", "3 a 6 meses", "Sem pressa"]);
     expect(outros.opcoes.map((o) => o[1])).toEqual(["Sim", "Não"]);

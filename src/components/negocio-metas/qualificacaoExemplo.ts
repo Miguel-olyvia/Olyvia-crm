@@ -16,7 +16,7 @@ export const BLOCO_QUALIFICACAO: BlocoDef = {
     },
     {
       id: "decisor", rotulo: ["Quem decide", "Who decides"],
-      opcoes: [["proprio", "O próprio", "The client"], ["familia", "Com a família", "With the family"], ["administracao", "Administração", "Management"]],
+      opcoes: [["proprio", "O próprio", "The client"], ["proprietario", "O proprietário", "The owner"], ["familia", "Com a família", "With the family"], ["administracao", "Administração", "Management"]],
     },
     {
       id: "orcCliente", rotulo: ["Orçamento do cliente", "Client budget"],

@@ -1,7 +1,7 @@
 // Página do negócio (09/10/2026): só a fase atual está aberta, um passo de
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,11 +10,14 @@ import {
   alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
+import { MoradaDaObra } from "./MoradaDaObra";
+import { ServicoDaChamada } from "./ServicoDaChamada";
+import { ComercialDaLead, FonteDaLead, RespostasDaLead, TextoDaLead, comDadosLead } from "./DadosDaLead";
 import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -36,6 +39,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
+import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -235,7 +239,9 @@ function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: n
 
 /* ------------------------------------------------------------------ a fase atual */
 /** Os passos da fase atual. `simples` desenha os campos maiores, numa coluna (proposta de 09/10). */
-export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
+/** Os passos de uma fase do negócio. 4/11: `fase` (por omissão a do negócio) deixa pedir os de outra fase: «Tudo na chamada» junta os da
+ *  Lead e os do Contacto na mesma página. */
+export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fase): Passo[] {
   const { S, A, run, go } = ctx;
   const o = d.orc, L = LINHAS[d.linha], v = d.visita;
   const fx = { d, A, run, simples };
@@ -248,26 +254,68 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   // 15/10: um passo cujo documento já saiu (a proposta enviada, o contrato gerado) está feito; os campos ficam só de leitura e
   // já não contam como "falta 1 resposta" (senão o negócio abria nesse passo em vez de no que há a fazer, ex.: gerar o contrato)
   const fechadoSe = (p: Passo, sim: boolean): Passo => (sim ? { ...p, conta: undefined, feito: true } : p);
-  let passos: Passo[] = [];
-  if (d.fase === 0) {
-    passos = [
-      { id: "quem", titulo: "Quem pede", icone: User, conta: { f: 2, n: 2 }, resumo: [d.nome, d.tel, nomeLinha(d)], corpo: (
+  const passosDaLead = (): Passo[] => {
+    const [gContacto, gOrigem, gPedido] = LEAD.map(E);
+    const todos = [gContacto, gOrigem, gPedido].flatMap((x) => x.campos);
+    const QUEM = ["email", "tipo_cliente", "nif"];
+    const sem = (gr: Grupo, ks: readonly string[]): Grupo => ({ ...gr, campos: gr.campos.filter((c) => !ks.includes(c.k)) });
+    const gQuem: Grupo = { ...gContacto, campos: QUEM.map((k) => todos.find((c) => c.k === k)).filter((c): c is Def => !!c) };
+    const gFalar: Grupo = { ...gContacto, campos: [...sem(gContacto, QUEM).campos, ...gOrigem.campos.filter((c) => c.k === "rgpd")] };
+    const gComo = sem(gOrigem, ["rgpd", ...QUEM]);
+    const gPed = sem(gPedido, QUEM);
+    const real = comDadosLead(d);
+    const campos = (gr: Grupo) => <Campos grupo={gr} {...fx} />;
+    const passo = (gr: Grupo, id: string, titulo: string, icone: LucideIcon, corpo: ReactNode, resumo?: string[]): Passo =>
+      ({ ...passoDeGrupo(gr, icone, corpo, d.f), id, titulo, personalizado: false, ...(resumo ? { resumo } : {}) });
+    return [
+      passo(gQuem, "quem", "Quem é", User, (
         <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
-          <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>
+          {real ? (
+            <div className="grid gap-5 sm:grid-cols-2">
+              <TextoDaLead ctx={ctx} d={d} k="primeiro" rotulo="Nome próprio" />
+              <TextoDaLead ctx={ctx} d={d} k="apelido" rotulo="Apelido" />
+            </div>
+          ) : <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>}
           {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
           {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
             : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
-          <div className={ROT}>Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{nomeLinha(d)}{d.linhaPorDefinir && <span className="block font-normal text-muted-foreground">Sai da divisão escolhida na visita.</span>}</span></div>
+          {real && <TextoDaLead ctx={ctx} d={d} k="empresa" rotulo="Empresa" />}
+          {campos(gQuem)}
         </div>
-      ) },
-      g(LEAD[0], Phone), g(LEAD[1], Target), g(LEAD[2], ClipboardList),
+      ), [d.nome, d.tel, d.dadosLead?.empresa ?? "", d.f.tipo_cliente || ""].filter(Boolean)),
+      passo(gFalar, "falar", "Como falar com o cliente", Phone, campos(gFalar)),
+      passo(gComo, "origem", "Como chegou", Target, <div className="space-y-5">{real && <FonteDaLead ctx={ctx} d={d} />}{campos(gComo)}</div>,
+        [d.dadosLead?.fonte ?? "", d.f.origem === "Outros" ? d.f.origem_outra || "" : d.f.origem || "", d.f.campanha || ""].filter(Boolean)),
+      passo(gPed, "pedido", "O pedido", ClipboardList, (
+        <div className="space-y-5">
+          <ServicoDaChamada ctx={ctx} d={d} />
+          {campos(gPed)}
+          {real && <RespostasDaLead ctx={ctx} d={d} />}
+          {real && <TextoDaLead ctx={ctx} d={d} k="notas" rotulo="Notas da lead" longo />}
+        </div>
+      ), [nomeLinha(d), d.f.pedido || ""].filter(Boolean)),
+      ...(real ? [{ id: "comercial", titulo: "Quem acompanha", icone: User, feito: !!d.dadosLead?.comercialId, resumo: [d.dadosLead?.comercial || "sem comercial"],
+        corpo: <ComercialDaLead ctx={ctx} d={d} /> } as Passo] : []),
     ];
-  } else if (d.fase === 1) {
+  };
+  let passos: Passo[] = [];
+  if (fase === 0) {
+    passos = [
+      // 4/11 (Rúben: «refazer a primeira fase da lead para ter todos os campos, separados por steps que façam sentido com os campos da Olyvia
+      // original»): quem é, como falar com o cliente, como chegou, o pedido e quem acompanha. As perguntas vêm dos grupos da Lead (com os
+      // ajustes da empresa; um campo novo fica no passo do grupo dele); o que é da pessoa (nome próprio, apelido, empresa, fonte, notas,
+      // respostas do formulário, comercial) grava-se nela (DadosDaLead.tsx), só na página real.
+      ...passosDaLead(),
+    ];
+  } else if (fase === 1) {
     passos = [
       // 27/10: no contacto ainda não se está no local: a localização fica para a visita (Exterior)
       // 28/10 (Rúben): a morada da obra também se preenche pela localização do dispositivo (quem está no local)
-      g(CONTACTO[0], Phone), g(CONTACTO[1], Sparkles),
-      { ...g(CONTACTO[2], MapPin), corpo: <div className="space-y-4"><UsarLocalizacao ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[2])} {...fx} /></div> },
+      // 4/11 (Rúben): na Qualificação, o tipo de serviço que veio da lead confirma-se (ou troca-se) na chamada: ServicoDaChamada.tsx
+      g(CONTACTO[0], Phone),
+      { ...g(CONTACTO[1], Sparkles), corpo: <div className="space-y-4"><ServicoDaChamada ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[1])} {...fx} /></div> },
+      // 4/11 (Rúben): a morada que a lead já trazia propõe-se primeiro (validar, editar ou outra): MoradaDaObra.tsx
+      { ...g(CONTACTO[2], MapPin), corpo: <MoradaDaObra ctx={ctx} d={d}><Campos grupo={E(CONTACTO[2])} {...fx} /></MoradaDaObra> },
       g(CONTACTO[3], CalendarClock),
       { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
@@ -289,7 +337,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         </div>
       ) },
     ];
-  } else if (d.fase === 2) {
+  } else if (fase === 2) {
     const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
     const nMed = CM.length;
@@ -341,7 +389,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
       ...(simples ? [] : [g(ESCOLHAS, Sparkles)]),
     ];
-  } else if (d.fase === 3 && o) {
+  } else if (fase === 3 && o) {
     passos = [
       // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
       { id: "orc", titulo: "Orçamento", icone: o.enviada && !o.aceite && !o.vendaDireta ? Lock : FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)),
@@ -368,7 +416,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         </div>
       ) }, !!o.contrato) : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
     ];
-  } else if (d.fase === 4) {
+  } else if (fase === 4) {
     passos = [
       { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: simples ? <DocumentosSimples {...ctx} d={d} /> : <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
       // 3/11 (Rúben): o Pagamento não se preenche à mão: espera que o cliente diga no portal que pagou e o Financeiro só valida
@@ -379,7 +427,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
             corpo: <PagamentoDoCliente {...ctx} d={d} /> }
         : g(gr, Euro)),
     ];
-  } else if (d.fase === 5) {
+  } else if (fase === 5) {
     passos = [
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
@@ -409,10 +457,30 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   return passos;
 }
 
+/** 4/11: as permissões que o servidor pede ao passo de cada botão (neg_guardar_negocio, neg_validar_pagamento, neg_registar_fatura): sem
+ *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
+const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
+  contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.gerir", "orcamento.editar"],
+  pedidoCliente: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
+  enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
+  aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
+};
+/** A primeira permissão que falta a quem está no ecrã para o passo `act` (null: tem todas, ou o passo não pede nenhuma). */
+export const permEmFaltaDoPasso = (S: Ctx["S"], act: string | undefined): PermNeg | null =>
+  (act ? PERM_DO_PASSO[act] ?? [] : []).find((x) => !podeNeg(S.role, x)) ?? null;
+
 /** O botão do próximo passo do negócio (ou o simulador do cliente). */
 export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
   const { S, A, go } = ctx;
+  const idSemPerm = useId();
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  const falta = meu && p.btn ? permEmFaltaDoPasso(S, p.act) : null;
+  if (falta) return (
+    <div className="grid justify-items-start gap-1 sm:justify-items-end">
+      <Button size={tamanho} disabled aria-describedby={idSemPerm}>{p.btn}</Button>
+      <p id={idSemPerm} className="max-w-sm text-sm text-muted-foreground sm:text-right">{SEM_PERM[falta].sub}</p>
+    </div>
+  );
   // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
   // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP

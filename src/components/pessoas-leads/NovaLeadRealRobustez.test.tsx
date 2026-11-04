@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
 import { entidadesDaNovaLead, supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
-import { NovaLeadReal } from "./NovaLeadReal";
+import { NovaLeadReal } from "./NovaLeadReal";
+import { continuar, criar, irParaConfirmar, irParaContacto } from "./passosNovaLeadTeste";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -37,16 +38,19 @@ function desenhar() {
 const abrir = () => fireEvent.click(screen.getByRole("button", { name: "Nova lead" }));
 const escrever = (rotulo: RegExp, valor: string) => fireEvent.change(screen.getByLabelText(rotulo), { target: { value: valor } });
 const preencherValido = () => {
+  irParaContacto();
   escrever(/Nome próprio/, "Ana");
   escrever(/Apelido/, "Lopes");
   escrever(/^Email/, "ana@x.pt");
   fireEvent.change(document.getElementById("nl-campo-phone") as HTMLInputElement, { target: { value: "912 345 678" } });
 };
-const criar = () => fireEvent.click(screen.getByRole("button", { name: "Criar lead" }));
+// 4/11: a Nova lead é guiada; «Criar lead» só está no último passo (passosNovaLeadTeste.ts)
+// a Nova lead escolhe o formulário (a campanha vem dele: 565070e2)
 const escolherCampanha = async () => {
-  await waitFor(() => expect(screen.getByRole("option", { name: /Verão/ })).toBeInTheDocument());
-  fireEvent.change(screen.getByLabelText("Campanha", { selector: "select" }), { target: { value: "c1" } });
+  await waitFor(() => expect(screen.getByRole("option", { name: /Orçamento online/ })).toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText("Formulário", { selector: "select" }), { target: { value: "f1" } });
 };
+const botaoContinuar = () => screen.getByRole("button", { name: "Continuar" });
 
 beforeEach(() => {
   supabaseFalso.reiniciar();
@@ -93,7 +97,8 @@ describe("NovaLeadReal: fechar a meio de uma criação", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     const campos = dialogo.querySelector("fieldset") as HTMLFieldSetElement;
     expect(campos).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByLabelText(/Nome próprio/)).toBeDisabled();
+    expect(campos).toBeDisabled();
+    expect(within(dialogo).getByRole("button", { name: "Anterior" })).toBeDisabled();
     terminarVerificacao({ data: [], error: null });
     await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", expect.anything(), expect.any(String)));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -103,6 +108,7 @@ describe("NovaLeadReal: fechar a meio de uma criação", () => {
     desenhar();
     abrir();
     const dialogo = await screen.findByRole("dialog");
+    irParaContacto();
     expect(screen.getByLabelText(/Nome próprio/)).not.toBeDisabled();
     expect(dialogo.querySelector("fieldset")).not.toHaveAttribute("aria-busy");
     fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
@@ -126,9 +132,10 @@ describe("NovaLeadReal: campos da campanha que não chegam", () => {
     await screen.findByRole("dialog");
     await escolherCampanha();
     expect(await screen.findByText("A carregar os campos da campanha...")).toBeInTheDocument();
-    preencherValido();
-    expect(screen.getByRole("button", { name: "Criar lead" })).toBeDisabled();
-    fireEvent.submit(screen.getByRole("button", { name: "Criar lead" }).closest("form") as HTMLFormElement);
+    // 4/11: guiado; não se passa do primeiro passo enquanto os campos do formulário não chegam
+    expect(botaoContinuar()).toBeDisabled();
+    fireEvent.submit(botaoContinuar().closest("form") as HTMLFormElement);
+    expect(screen.getByRole("button", { current: "step" })).toHaveTextContent("Como chegou");
     expect(supabaseFalso.rpc).not.toHaveBeenCalledWith("neg_procurar_duplicados", expect.anything());
     vi.restoreAllMocks();
   });
@@ -141,18 +148,21 @@ describe("NovaLeadReal: campos da campanha que não chegam", () => {
     await escolherCampanha();
     const alerta = await screen.findByText("Não foi possível carregar os campos da campanha. Não se pode criar a lead sem eles.");
     expect(alerta.closest("[role='alert']")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Criar lead" })).toBeDisabled();
+    expect(botaoContinuar()).toBeDisabled();
     delete supabaseFalso.estado.erros["form_fields.select"];
     fireEvent.click(within(alerta.closest("[role='alert']") as HTMLElement).getByRole("button", { name: "Tentar de novo" }));
+    await waitFor(() => expect(botaoContinuar()).not.toBeDisabled());
+    continuar();
+    escrever(/Apelido/, "Lopes");
+    continuar();
     expect(await screen.findByLabelText(/Nome do cliente/)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Criar lead" })).not.toBeDisabled());
   });
 
   it("sem campanha escolhida, nada disto se aplica: o botão está livre", async () => {
     desenhar();
     abrir();
     await screen.findByRole("dialog");
-    expect(screen.getByRole("button", { name: "Criar lead" })).not.toBeDisabled();
+    expect(botaoContinuar()).not.toBeDisabled();
     expect(screen.queryByText("A carregar os campos da campanha...")).toBeNull();
   });
 });
@@ -166,7 +176,7 @@ describe("NovaLeadReal: leituras de apoio que falham", () => {
     const aviso = await screen.findByText("Não foi possível carregar as campanhas, as origens ou os comerciais.");
     delete supabaseFalso.estado.erros["campaigns.select"];
     fireEvent.click(within(aviso.closest("[role='alert']") as HTMLElement).getByRole("button", { name: "Tentar de novo" }));
-    await waitFor(() => expect(screen.getByRole("option", { name: /Verão/ })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("option", { name: /Orçamento online/ })).toBeInTheDocument());
     await waitFor(() => expect(screen.queryByText("Não foi possível carregar as campanhas, as origens ou os comerciais.")).toBeNull());
   });
 
@@ -174,7 +184,7 @@ describe("NovaLeadReal: leituras de apoio que falham", () => {
     desenhar();
     abrir();
     await screen.findByRole("dialog");
-    await waitFor(() => expect(screen.getByRole("option", { name: /Verão/ })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("option", { name: /Orçamento online/ })).toBeInTheDocument());
     expect(screen.queryByText(/Não foi possível carregar as campanhas/)).toBeNull();
   });
 });

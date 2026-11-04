@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
+import { SEM_PERM, podeNeg } from "./permissoes";
 import { useInventario } from "./inventario/loja";
 import { faltaMateriaisReal, prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
@@ -120,7 +121,11 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           <ul className="mt-2 space-y-1 text-[15px]">
             {pendentes.map(({ t, m, q }) => <li key={t.nome + m.n}>{m.n} · {nfmt(q)} {m.un} <span className="text-muted-foreground">· {t.nome}</span></li>)}
           </ul>
-          <Button className="mt-3 min-h-11" onClick={go(() => A.encomendarMateriais(d.id))}>Encomendar os materiais novos</Button>
+          {/* 4/11: obra_encomendar_materiais pede negocios.obra.materiais (ou purchase_orders.create): sem ela, o botão diz porquê */}
+          {podeNeg(S.role, "obra.materiais")
+            ? <Button className="mt-3 min-h-11" onClick={go(() => A.encomendarMateriais(d.id))}>Encomendar os materiais novos</Button>
+            : <><Button className="mt-3 min-h-11" disabled aria-describedby="mat-sem-perm">Encomendar os materiais novos</Button>
+              <p id="mat-sem-perm" className="mt-2 text-sm text-muted-foreground">{SEM_PERM["obra.materiais"].sub}</p></>}
           <p className="mt-2 text-sm text-muted-foreground">Vão numa encomenda de cliente de ajuste, no Inventário; as tarefas esperam por eles no plano.</p>
         </section>
       )}

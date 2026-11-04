@@ -2,6 +2,7 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
+import type { DadosLead } from "./real/dadosDaLead";
 import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
@@ -380,6 +381,10 @@ export interface Negocio {
   pessoaId?: string;
   servico: string;
   local: string;
+  /** 4/11: a morada que a lead já trazia (a da ficha da pessoa), sugerida no passo «Morada da obra». Não se grava: lê-se ao abrir. */
+  moradaLead?: MoradaLead;
+  /** 4/11: o que a lead trouxe na criação (Pessoas › Nova lead), lido da pessoa, para a fase Lead. Não se grava no negócio: grava-se na pessoa. */
+  dadosLead?: DadosLead;
   origem: string;
   quando: string;
   dono: Papel;
@@ -1483,6 +1488,28 @@ function sugerir(d: Negocio, o: Record<string, string>) {
   for (const k in o) if (!d.f[k] && o[k]) { d.f[k] = o[k]; (d.sug ??= {})[k] = true; }
 }
 
+/** 4/11 (Rúben: «tudo interligado entre formulários, para ir pré-preenchido»): o que a lead trouxe (Nova lead) passa às perguntas da Lead que
+ *  estão vazias, como sugestão: o pedido (das notas), o tipo de cliente (com empresa), a origem (pela fonte da lead) e a campanha. O que
+ *  alguém escreveu não se toca. Devolve true se sugeriu alguma coisa. */
+export function sugerirDaLead(d: Negocio): boolean {
+  const x = d.dadosLead;
+  if (!x || d.fase > 1) return false;
+  const antes = JSON.stringify(d.f);
+  const op = (k: string) => LEAD.flatMap((g) => g.campos).find((c) => c.k === k)?.op ?? [];
+  const igual = (k: string, v: string) => op(k).find((o) => o.toLowerCase() === v.trim().toLowerCase());
+  const o: Record<string, string> = {};
+  if (x.notas) o.pedido = x.notas;
+  if (x.empresa) o.tipo_cliente = "Empresa";
+  if (x.fonte && !d.f.origem) {
+    const origem = igual("origem", x.fonte);
+    if (origem) o.origem = origem; else { o.origem = "Outros"; o.origem_outra = x.fonte; }
+  }
+  const campanha = x.campanha ? igual("campanha", x.campanha) : undefined;
+  if (campanha) o.campanha = campanha;
+  sugerir(d, o);
+  return JSON.stringify(d.f) !== antes;
+}
+
 /** O prazo de execução da proposta vem do prazo previsto (Gantt) e acompanha-o enquanto for sugestão (ninguém o mexeu). */
 export function sugerirPrazo(d: Negocio, S: Estado) {
   if (!d.orc || d.orc.enviada || d.fase < 3 || (d.f.prazo_exec && !d.sug?.prazo_exec)) return;
@@ -1496,6 +1523,22 @@ export function sugerirPrazo(d: Negocio, S: Estado) {
 const AREA_TIPO: Record<string, [string, string, string]> = {
   T0: ["35", "1", "1"], T1: ["55", "2", "1"], T2: ["80", "3", "1"], T3: ["110", "4", "2"], T4: ["140", "5", "2"], "T5+": ["180", "6", "3"],
 };
+/** 4/11 (Rúben): a morada que já veio da lead, para o passo «Morada da obra» (validar, editar ou escrever outra). */
+export interface MoradaLead { morada: string; cp: string; localidade: string; fracao: string; de: "ficha" | "pedido" }
+/** A morada escrita no pedido (negocios.morada_obra, ex.: «Estrada de Santo Eloy, 1675-010 Odivelas · 1»), em partes. Sem código postal
+ *  («Almada», «Rua das Flores 12, Sintra») não se sabe o que é rua e o que é localidade: null, e escreve-se à mão. */
+export function moradaDoTexto(texto: string): MoradaLead | null {
+  const t = (texto || "").trim();
+  const cp = /\b(\d{4}-\d{3})\b/.exec(t);
+  if (!cp) return null;
+  const antes = t.slice(0, cp.index).replace(/[,\s]+$/, "").trim();
+  const [localidade, ...resto] = t.slice(cp.index + cp[1].length).split(/[·,]/).map((x) => x.trim());
+  if (!antes) return null;
+  return { morada: antes, cp: cp[1], localidade: localidade ?? "", fracao: resto.filter(Boolean).join(" ").trim(), de: "pedido" };
+}
+/** Os campos da «Morada da obra» que a sugestão preenche. */
+export const CAMPOS_MORADA = ["morada", "cp", "localidade", "fracao"] as const;
+
 export function derivar(d: Negocio, k: string) {
   const f = d.f, v = f[k] || "";
   if (k === "tipologia" && AREA_TIPO[v]) { const [a, dv, wc] = AREA_TIPO[v]; sugerir(d, { area_util_m2: a, n_divisoes: dv, n_casas_banho: wc }); }
@@ -1675,6 +1718,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     avisar({ ...SEM_PERM[p], kind: "bad" });
     return false;
   };
+  /** 4/11: registar a execução da obra (obra_guardar_negocio): quem planeia (negocios.obra.planear) passa sempre; sem ela, pede
+   *  negocios.obra.executar, e o servidor só aceita as tarefas atribuídas a quem a regista (fn_obra_execucao_permitida; no ecrã, o
+   *  Hoje do técnico real fica no técnico ligado à conta). */
+  const exigeExecucao = (): boolean => podeNeg(S.role, "obra.planear") || exigePerm("obra.executar");
   /** 3/11: o «Anular» do aviso de perda: pede negocios.perder e, numa organização real, grava-se pela neg_anular_perda. Devolve se anulou. */
   const anularPerda = (d: Negocio, razao: string): boolean => {
     if (!exigePerm("negocio.perder")) return false;
@@ -2016,7 +2063,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     fecharVisita(id: number) {
       // 3/11: fechar o levantamento é da visita; o orçamento que nasce aqui o servidor só o deixa mudar com negocios.orcamento.editar (sem
       // ela, neg_guardar_negocio repõe os totais da base e recusa se o orçamento mudar)
-      if (!exigePerm("visita.gerir")) return;
+      if (!exigePerm("visita.gerir") || !exigePerm("orcamento.editar")) return;
       const d = deal(id);
       sincronizarVisita(d);
       if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, ...gruposArea(S.campos, d.f), ESCOLHAS], extrasVisita(d))) return;
@@ -2055,6 +2102,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** O cliente pediu alterações a uma proposta enviada (e ainda não aceite): a versão atual fica guardada como substituída
      *  e abre-se a seguinte, para mexer só no orçamento ou também na visita (que então reabre). */
     novaVersao(id: number, motivos: string[], nota: string, onde: "orcamento" | "visita") {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc;
       // 14/10: também depois de aceite, enquanto o contrato não está assinado (o contrato enviado fica anulado)
       if (!o?.enviada || o.contrato === "assinado" || d.fase !== 3) { avisar({ msg: "Não há proposta para refazer", sub: o?.contrato === "assinado" ? "O contrato já foi assinado" : "A proposta ainda não foi enviada", kind: "bad" }); return; }
@@ -2075,6 +2123,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** 21/10: a versão nova faz-se num só sítio: mexer nos produtos da visita refaz o orçamento logo (sem voltar à visita);
      *  os preços, o desconto e as linhas à mão mantêm-se (preservarManuais). Só com a proposta por enviar. */
     refazerOrcamento(id: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), antes = d.orc, L = LINHAS[d.linha];
       if (!antes || antes.enviada || d.fase !== 3) return;
       d.orc = criarOrc(d, S);
@@ -2084,6 +2133,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 21/10: a versão nova pronta: verifica e envia ao portal num toque. Com bloqueios (margem abaixo do mínimo sem aprovação), não envia e diz porquê. */
     enviarVersao(id: number): boolean {
+      if (!exigePerm("proposta.enviar")) return false;
       const d = deal(id), o = d.orc;
       if (!o || o.enviada || d.fase !== 3) return false;
       // o início previsto da proposta é o do plano (o editor muda-o lá); sem ele, o primeiro dia útil possível
@@ -2125,11 +2175,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, "Orçamento verificado · " + A2.filter((a) => a.k === "x").length + " bloqueio(s), " + A2.filter((a) => a.k === "w").length + " aviso(s)", A2.some((a) => a.k === "x") ? "x" : "a");
     },
     irVerif() { S.pulse = "verif"; },
-    sugerido(id: number, i: number, v: number) { const d = deal(id); const l = d.orc!.linhas[i]; if (l.t === "svc") l.pu = v; else { l.preco = v; (d.orc!.precosMan ??= {})[l.d] = v; } d.orc!.aprov = null; log(d, "Preço corrigido para " + eur(v) + " €"); avisar({ msg: "Preço corrigido", sub: "A margem da linha volta ao alvo de " + S.cfg.alvo + "%", kind: "ok" }); },
+    sugerido(id: number, i: number, v: number) { if (!exigePerm("orcamento.editar")) return; const d = deal(id); const l = d.orc!.linhas[i]; if (l.t === "svc") l.pu = v; else { l.preco = v; (d.orc!.precosMan ??= {})[l.d] = v; } d.orc!.aprov = null; log(d, "Preço corrigido para " + eur(v) + " €"); avisar({ msg: "Preço corrigido", sub: "A margem da linha volta ao alvo de " + S.cfg.alvo + "%", kind: "ok" }); },
     /** O preço de uma linha mudado à mão na lista do orçamento: o preço por unidade (serviço) ou o preço da linha (materiais, levantamento, produto). */
     /** 26/10: o custo por unidade de uma linha de serviço escrito à mão (uma subempreitada: o que o subempreiteiro pediu para esta
      *  obra). Sem ele, a linha conta 0 € de custo e a margem aparece a 100%. O envio congela-o como os outros (custoCongelado: ajuste). */
     custoLinha(id: number, i: number, v: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc!, l = o.linhas[i];
       if (!l || l.t !== "svc" || o.enviada || !(v >= 0)) return;
       l.cu = r2(v); l.cuMan = true; delete l.det;
@@ -2137,6 +2188,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Custo de ${S.svc[l.sid]?.n ?? "uma linha"} escrito à mão: ${eur(l.cu)} € por ${S.svc[l.sid]?.un ?? "un"}`);
     },
     precoLinha(id: number, i: number, v: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc!, l = o.linhas[i];
       if (!l || o.enviada || !(v >= 0)) return;
       if (l.t === "mat" && l.d === LINHA_DEMOLICAO) { A.demolicaoAjuste(id, "preco", r2(v)); return; } // a demolição: o preço final ajustado
@@ -2146,6 +2198,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** 26/10: uma linha livre no orçamento (o que o Catálogo não tem: um material à parte, uma subempreitada, uma taxa de serviço), com a
      *  quantidade, a unidade, o preço por unidade, o custo (opcional) e a taxa de IVA. Devolve o índice da linha (-1: não juntou). */
     linhaLivre(id: number, m: { d: string; q: number; un?: string; pu: number; custo?: number; iva: TaxaIva }): number {
+      if (!exigePerm("orcamento.editar")) return -1;
       const d = deal(id), o = d.orc;
       const desc = m.d.trim();
       if (!o || o.enviada) return -1;
@@ -2159,6 +2212,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 26/10: tira uma linha livre do orçamento (as outras saem pela visita: o serviço desligado, o produto tirado). */
     tirarLinha(id: number, i: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc, l = o?.linhas[i];
       if (!o || o.enviada || l?.t !== "mat" || !l.livre) return;
       o.linhas.splice(i, 1); o.aprov = null;
@@ -2168,6 +2222,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** 26/10: as zonas da obra no orçamento (a casa, as casas de banho, a cozinha…), pela ordem da proposta. Uma zona tirada tira a
      *  repartição das linhas que a usavam; a lista vazia tira as zonas todas. */
     zonasOrc(id: number, nomes: string[]): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id), o = d.orc;
       if (!o || o.enviada) return false;
       const zs = limparZonas(nomes), k = new Set(zs.map((z) => z.toLowerCase()));
@@ -2180,6 +2235,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** 26/10: reparte uma linha pelas zonas (a quantidade e, nos materiais, o valor de cada zona); null tira a repartição. Nos
      *  materiais com o valor de cada zona escrito, o preço da linha passa a ser a soma. */
     zonasLinha(id: number, i: number, zs: ZonaLinha[] | null): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id), o = d.orc, l = o?.linhas[i];
       if (!o || !l || o.enviada) return false;
       if (!zs) { delete l.zonas; o.aprov = null; return true; }
@@ -2201,12 +2257,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 26/10: a linha toda numa só zona (o caso mais comum); null tira a zona. */
     zonaLinha(id: number, i: number, z: string | null): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id), l = d.orc?.linhas[i];
       if (!l) return false;
       return A.zonasLinha(id, i, z ? [{ z, q: qtdLinhaOrc(d, l) }] : null);
     },
     /** 26/10: a taxa de IVA de uma linha mudada à mão (ex.: uma subempreitada de materiais a 23%); null volta à taxa por omissão. */
     ivaLinha(id: number, i: number, iva: TaxaIva | null) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc, l = o?.linhas[i];
       if (!o || !l || o.enviada) return;
       if (iva) l.iva = iva; else delete l.iva;
@@ -2215,12 +2273,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** A quantidade de uma linha de serviço (no detalhe da linha). */
     qtdLinha(id: number, i: number, q: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc!, l = o.linhas[i];
       if (l?.t !== "svc" || o.enviada || !(q >= 0)) return;
       l.q = r2(q); o.aprov = null; sincronizarDemolicao(d, S); sugerirPrazo(d, S);
     },
     /** Os dias de uma tarefa do prazo previsto (null volta aos dias das horas do orçamento). */
     prazoTarefa(id: number, chave: string, dias: number | null) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc!;
       if (o.enviada) return;
       if (dias == null) { if (o.prazo) delete o.prazo[chave]; }
@@ -2233,6 +2293,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** O início previsto da obra (só muda as datas do plano: o custo e o preço não). */
     /** As condições de pagamento escolhidas no plano da obra; "Por fases" guarda as prestações sugeridas. */
     pagamentoPlano(id: number, pagamento: string, fases?: Orcamento["pagFases"]): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id), o = d.orc;
       if (!o || o.enviada) return false;
       // 26/10: as prestações à medida têm de somar 100%
@@ -2246,12 +2307,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O reforço no plano da obra: pessoas por ofício. Os dias mudados à mão mantêm-se (e contam com a equipa nova). */
     equipaObra(id: number, n: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc;
       if (!o || o.enviada) return;
       if (n > 1) o.equipa = n; else delete o.equipa;
       o.aprov = null; sugerirPrazo(d, S);
     },
     inicioObra(id: number, iso: string | null) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc;
       if (!o) return;
       if (iso) o.inicioObra = iso; else delete o.inicioObra;
@@ -2259,12 +2322,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (iso && !o.enviada) d.f.inicio_prev = iso;
     },
     usarPrazoPrevisto(id: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id);
       if (!d.orc || d.orc.enviada) return;
       delete d.f.prazo_exec; sugerirPrazo(d, S);
     },
     /** Liga (ou desliga) a demolição e entulho num orçamento (os de exemplo vêm sem ela). Desligar devolve as linhas de serviço. */
     demolicaoLigar(id: number, on: boolean) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc!;
       if (o.enviada) return;
       if (on) { delete o.semDemolicao; ligarDemolicao(o); sincronizarDemolicao(d, S); }
@@ -2281,6 +2346,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Um artigo de demolição no orçamento: a quantidade (0 tira-o). */
     demolicaoItem(id: number, codigo: string, q: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc!;
       if (!o.demolicao || o.enviada || !(q >= 0)) return;
       const it = o.demolicao.itens.find((x) => x.codigo === codigo);
@@ -2299,6 +2365,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Volta ao preço calculado de uma linha de materiais (esquece o preço à mão). */
     reporPreco(id: number, i: number) {
+      if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc!, l = o.linhas[i];
       if (l?.t === "mat" && l.d === LINHA_DEMOLICAO) { A.demolicaoAjuste(id, "preco", null); return; }
       if (l?.t !== "mat" || !o.precosMan || o.enviada) return;
@@ -2315,6 +2382,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     aprovar(id: number) { if (!exigePerm("margin.approve")) return; const d = deal(id); d.orc!.aprov = "ok"; log(d, "Exceção aprovada pela Direção"); avisar({ msg: "Exceção aprovada", sub: d.nome + " · o comercial já pode enviar", kind: "ok" }); },
     recusarAprov(id: number) { if (!exigePerm("margin.approve")) return; const d = deal(id); d.orc!.aprov = null; log(d, "Exceção recusada pela Direção", "x"); avisar({ msg: "Exceção recusada", sub: "O comercial tem de corrigir o preço", kind: "bad" }); },
     enviar(id: number) {
+      if (!exigePerm("proposta.enviar")) return;
       const d = deal(id); if (!portao(d, [PROPOSTA[0]])) return;
       if (!comEmail(d, "proposta")) return;
       const A2 = alertas(d, S).filter((a) => a.k === "w"); d.orc!.enviada = "hoje";
@@ -2331,7 +2399,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta o comercial gerar o contrato", kind: "ok" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { anularPerda(d, "Recusa anulada pelo comercial"); }) } }); },
-    enviarContrato(id: number) { const d = deal(id); if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; if (!comEmail(d, "contrato")) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); acessoCliente(d, "contrato", "Contrato · " + obraDe(d)); },
+    enviarContrato(id: number) { if (!exigePerm("contrato.editar")) return; const d = deal(id); if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; if (!comEmail(d, "contrato")) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); acessoCliente(d, "contrato", "Contrato · " + obraDe(d)); },
     /** 23/10 (2.0): "Acesso ao portal" (o cabeçalho do negócio) e "Tentar de novo": o acesso do cliente outra vez, sem documento novo.
      *  A conta real volta a pedir-se (já existindo, só se liga ao negócio; a password não muda). */
     acessoPortal(id: number) {
@@ -2378,6 +2446,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** Trabalhos a mais (contrato assinado, obra por acabar): a adenda nasce em rascunho; verifica-se (as margens) e envia-se ao cliente
      *  como o orçamento (verificarEnviarAdenda). */
     criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"]; desconto?: number }): string | null {
+      // 4/11: a adenda de um imprevisto ou de um problema do cliente é do Gestor de obra (negocios.obra.imprevistos, pedida em proporImprevisto);
+      // as outras pedem negocios.orcamento.editar, como neg_guardar_negocio. ATENÇÃO: o servidor pede orcamento.editar a todas (e a
+      // proposta.enviar ao envio), e as Operações não as têm em neg_papeis_permissoes: decisão pendente, não se esconde aqui o fluxo da obra
+      if (!extra?.origem?.imprevisto && !exigePerm("orcamento.editar")) return null;
       const d = deal(id);
       if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return null; }
       // 3/11: a de um problema do cliente faz-se mesmo com a obra concluída (a assistência depois da obra; reabre quando for assinada)
@@ -2404,6 +2476,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     enviarAdenda(id: number, n?: string) {
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && !!x.verif && !adendaBloqueada(d, S, x));
       if (!a || a.estado !== "rascunho") return;
+      // 4/11: como criarAdenda, a de um imprevisto/problema do cliente segue com a obra; as outras pedem negocios.proposta.enviar
+      if (!a.origem?.imprevisto && !exigePerm("proposta.enviar")) return;
       if (!a.verif) { avisar({ msg: "Primeiro, verifique a adenda", sub: "A Olyvia verifica as margens antes de enviar", kind: "bad" }); return; }
       if (adendaBloqueada(d, S, a)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: corrija o preço ou peça aprovação à Direção", kind: "bad" }); return; }
       if (!comEmail(d, "adenda", a.n)) return;
@@ -2418,6 +2492,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     verificarEnviarAdenda(id: number, n?: string): boolean {
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho");
       if (!a) return false;
+      if (!a.origem?.imprevisto && !exigePerm("proposta.enviar")) return false;
       if (!a.verif) A.verificarAdenda(id, a.n);
       if (adendaBloqueada(d, S, a)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: corrija o preço ou peça aprovação à Direção", kind: "bad" }); return false; }
       A.enviarAdenda(id, a.n);
@@ -2464,6 +2539,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** A nova versão da adenda (o mesmo número): a enviada fica guardada como substituída; as linhas novas ficam por verificar e enviar.
      *  As linhas livres da versão anterior mantêm-se se o seu id vier nos itens. */
     novaVersaoAdenda(id: number, n: string, itens: { sid: string; q: number }[], desconto?: number): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "enviada" || x.estado === "aceite");
       if (!a || (a.estado !== "enviada" && a.estado !== "aceite") || !a.enviada) return false;
       const k = Number(a.n.split("-").at(-1)) || 1;
@@ -2484,6 +2560,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Mudar a adenda ainda por enviar (as linhas e o desconto): volta a verificar-se. */
     mudarAdenda(id: number, n: string, itens: { sid: string; q: number }[], desconto?: number): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!a || a.estado !== "rascunho") return false;
       const k = Number(a.n.split("-").at(-1)) || 1;
@@ -2500,6 +2577,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     enviarContratoAdenda(id: number, n?: string) {
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "aceite" && !x.contrato && !x.contratoPedido);
       if (!a || a.estado !== "aceite") return;
+      // 4/11: como criarAdenda, o contrato da adenda de um imprevisto/problema segue com a obra; os outros pedem negocios.contrato.editar
+      if (!a.origem?.imprevisto && !exigePerm("contrato.editar")) return;
       if (a.contratoPedido) { avisar({ msg: "O contrato da adenda está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; }
       if (!comEmail(d, "contratoAdenda", a.n)) return;
       a.contrato = "enviado";
@@ -2744,6 +2823,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     irObra() { S.pulse = "sec-5"; },
     trocar(id: number, ti: number) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id); const t = d.obra.plano!.tasks[ti];
       const old = TECS.find((x) => x.id === t.tec)!;
       const alt = TECS.find((x) => x.sk === t.sk && x.id !== t.tec && diaDeFerias(x, d.obra.plano!, t.dia, t.dur) == null);
@@ -2751,6 +2831,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       t.tec = alt.id; log(d, `Plano: ${t.nome} passa de ${old.n} para ${alt.n}`); avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${alt.n}`, kind: "ok" });
     },
     adiar(id: number, ti: number) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano!; const t = p.tasks[ti]; const tec = TECS.find((x) => x.id === t.tec)!;
       let nd = t.dia;
       while (diaDeFerias(tec, p, nd, t.dur) != null && nd < t.dia + 60) nd++;
@@ -2763,6 +2844,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** As Operações escolhem o técnico de uma tarefa (do mesmo ofício). */
     trocarTec(id: number, ti: number, tec: string) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti], novo = TECS.find((x) => x.id === tec);
       if (!t || !novo || t.tec === tec) return;
       const velho = TECS.find((x) => x.id === t.tec);
@@ -2784,6 +2866,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** A duração (dias úteis, ou h: horas úteis), o dia de início e a nota de uma tarefa. Só antes de a obra arrancar. */
     ajustarTarefa(id: number, ti: number, m: { dur?: number; h?: number; dia?: number; nota?: string }) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "em curso" || p.estado === "concluída") return;
       const antes = JSON.stringify(p.tasks.map((x) => [x.dia, x.dur, x.h]));
@@ -2802,6 +2885,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /* -------------------------------------------- 15/10: o ciclo da tarefa na obra (obraOps.ts): técnico → fotografia → supervisor */
     /** O técnico começa a tarefa (ou volta a ela depois de uma correção). */
     comecarTarefa(id: number, ti: number) {
+      if (!exigeExecucao()) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t || d.obra.plano!.estado !== "em curso") return;
       // 21/10: parada por um imprevisto: espera pela decisão do cliente
@@ -2811,6 +2895,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O técnico regista as horas, junta ou tira fotografias e escreve uma nota. */
     registarTarefa(id: number, ti: number, m: { horas?: number; foto?: string; tirarFoto?: number; nota?: string }) {
+      if (!exigeExecucao()) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t || d.obra.plano!.estado !== "em curso") return;
       const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
@@ -2824,6 +2909,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O técnico marca como feita: precisa das horas e de uma fotografia; vai para o supervisor validar. */
     marcarFeita(id: number, ti: number) {
+      if (!exigeExecucao()) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t || !t.exec || d.obra.plano!.estado !== "em curso") return;
       const F = faltaParaFeita(t);
@@ -2841,6 +2927,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** O supervisor valida: a tarefa fica com o visto no Gantt e as horas contam no previsto e real. */
     /** 23/10: validar várias tarefas feitas de uma vez (as que o responsável marcou no cartão "Agora"), com um só aviso. */
     validarVarias(id: number, tis: number[]) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado !== "em curso") return;
       const ok = [...new Set(tis)].filter((ti) => p.tasks[ti]?.exec?.estado === "feita");
@@ -2850,6 +2937,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       avisar({ msg: ok.length === 1 ? `${p.tasks[ok[0]].nome} validada` : `${ok.length} tarefas validadas`, sub: falta ? `${falta} ${falta === 1 ? "tarefa ainda não validada" : "tarefas ainda não validadas"}` : "Todas as tarefas validadas: pode registar o fim da obra", kind: "ok" });
     },
     validarTarefa(id: number, ti: number, calado = false) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t?.exec || t.exec.estado !== "feita") return;
       t.exec.estado = "validada"; t.exec.validada = agora();
@@ -2868,6 +2956,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 21/10: o responsável de obra dá a tarefa por feita ele próprio, com uma fotografia (poupa tempo ao técnico): fica logo validada. */
     darPorFeita(id: number, ti: number, m: { fotos: string[]; nota: string }) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado !== "em curso" || t.dia > p.dia || t.exec?.estado === "validada") return;
       if (p.tasks.some((x) => x.corrige === ti && x.exec?.estado !== "validada")) return;
@@ -2886,6 +2975,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O supervisor pede correção, com o motivo: volta ao técnico. */
     pedirCorrecao(id: number, ti: number, motivo: string, extra?: { horas: number; tec?: string | null }) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t?.exec || t.exec.estado !== "feita" || !motivo.trim()) return;
       // 21/10: com o tempo estimado, a correção é uma tarefa nova para o técnico (atrasa o plano se não couber hoje) e volta à validação
@@ -2961,6 +3051,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O técnico marca (ou desmarca) um passo das instruções; a tarefa começa com o primeiro. */
     marcarPasso(id: number, ti: number, k: number) {
+      if (!exigeExecucao()) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t || d.obra.plano!.estado !== "em curso") return;
       const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
@@ -2971,6 +3062,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O registo do dia do técnico: as horas de hoje, as fotografias e a descrição. Com `feita`, pede a validação. */
     enviarRegisto(id: number, ti: number, m: { horas: number; fotos: string[]; nota: string; feita?: boolean }) {
+      if (!exigeExecucao()) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado !== "em curso" || t.bloqueio) return;
       const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
@@ -3000,6 +3092,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** As Operações ajustam o plano com a obra em curso (dias, início, técnico), com o motivo; podem avisar o cliente no portal. */
     ajustarAoVivo(id: number, ti: number, m: AjusteVivo, motivo: string, cliente: boolean) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado !== "em curso" || !motivo.trim()) return;
       const prev = preverAjuste(p, ti, m);
@@ -3044,6 +3137,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /* -------------------------------------------- 21/10: o validador junta, muda de fase e tira tarefas (tarefasValidador.ts) */
     novaTarefaPlano(id: number, n: NovaTarefa): number | null {
+      if (!exigePerm("obra.planear")) return null;
       const d = deal(id), p = d.obra.plano, s = S.svc[n.sid];
       if (!p || !s || p.estado === "concluída") return null;
       // 21/10: só o gestor das Operações cria tarefas; por isso não há aprovação
@@ -3058,6 +3152,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       return ti;
     },
     moverTarefaPlano(id: number, ti: number, m: { fase?: number; dia?: number }) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "em curso" || p.estado === "concluída") return;
       const antes = `${t.fase}-${t.dia}`;
@@ -3068,6 +3163,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!A.planoMudou(d)) avisar({ msg: m.fase != null ? `Passou para a fase ${t.fase}` : "Tarefa mudada", sub: `${t.nome} · ${rotuloDia(p, t.dia)}`, kind: "ok" });
     },
     tirarTarefaPlano(id: number, ti: number) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "concluída" || !tirarTarefa(p, ti)) return;
       if (t.tec) avisarTecnico(p, -1, `${t.nome} saiu do plano`, agora(), t.tec);
@@ -3080,6 +3176,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Os materiais de uma tarefa (a lista inteira, já mudada). */
     matsTarefa(id: number, ti: number, mats: MatTarefa[]) {
+      if (!exigePerm("obra.planear")) return;
       const p = deal(id).obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "concluída") return;
       if (JSON.stringify(t.mats) !== JSON.stringify(mats)) avisarTecnico(p, ti, `Os materiais de ${t.nome} mudaram`, agora());
@@ -3089,6 +3186,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 21/10: encomenda o que os materiais mudados à mão pedem a mais (encomenda de cliente de ajuste, no Inventário). */
     encomendarMateriais(id: number) {
+      if (!exigePerm("obra.materiais")) return;
       const d = deal(id);
       if (!d.obra.ec?.ref) { avisar({ msg: "Ainda sem encomenda de cliente", sub: "Os materiais novos encomendam-se logo a seguir à inicial, quando o pagamento for validado", kind: "" }); return; }
       // 21/10: as adendas pagas cuja encomenda não chegou ao Inventário vão primeiro (cada uma ligada à sua)
@@ -3102,6 +3200,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Volta ao plano que veio do orçamento (datas, dias e técnicos; as notas ficam). */
     reporPlano(id: number) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado === "em curso" || p.estado === "concluída" || !reporBase(p)) return;
       log(d, "Plano reposto como veio do orçamento");
@@ -3110,12 +3209,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O início do plano (as Operações confirmam ou mudam a data do orçamento; "aaaa-mm-dd"). */
     inicioPlano(id: number, iso: string) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano;
       if (!p || p.origem !== "orcamento" || p.estado === "em curso" || p.estado === "concluída") return;
       p.inicio = iso; log(d, `Plano: a obra começa a ${rotuloDia(p, 0)}`);
       avisar({ msg: "Início mudado", sub: `${rotuloDia(p, 0)} · acaba a ${rotuloDia(p, Math.max(...p.tasks.map((x) => x.dia + x.dur - 1)))}`, kind: "ok" });
     },
     aprovarPlano(id: number) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id);
       if (!d.fin.pago) { avisar({ msg: "Primeiro, o pagamento", sub: "O plano aprova-se depois de o Financeiro confirmar o pagamento", kind: "bad" }); return; }
       if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
@@ -3125,6 +3226,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (p.origem === "orcamento" && !d.f.inicio) { const i = inicioDoPlano(p); if (i) d.f.inicio = isoDia(i); } avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
     },
     arrancar(id: number) {
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id);
       // 19/10: o pagamento, o plano e os materiais garantidos no Inventário (preparacaoObra.ts: faltaParaArrancar)
       { const F = faltaParaArrancar(d); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
@@ -3173,6 +3275,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O cliente pede alterações a cláusulas do contrato no portal: o contrato enviado fica substituído e vai ao Jurídico. */
     pedirAlteracoesContrato(id: number, clausulas: PedidoClausula[]) {
+      if (!exigePerm("contrato.editar")) return;
       const d = deal(id), o = d.orc;
       const cs = clausulas.map((x) => ({ c: x.c, nota: x.nota.trim() })).filter((x) => x.c);
       if (!o || o.contrato !== "enviado" || !cs.length) return;
@@ -3186,6 +3289,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     fecharRevisao() { S.revisao = null; if (S.revisaoAdenda) S.revisaoAdenda = null; },
     /** O Jurídico reescreve uma cláusula (texto vazio: volta ao texto do modelo). 21/10: com `n`, a do contrato dessa adenda. */
     reverClausula(id: number, c: string, texto: string, n?: string) {
+      if (!exigePerm("contrato.editar")) return;
       const o = n ? deal(id).adendas?.find((x) => x.n === n) : deal(id).orc;
       if (!o?.contratoPedido) return;
       const t = texto.trim(), cl = (o.clausulas ??= {});
@@ -3193,6 +3297,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** O Jurídico valida o contrato revisto: só então o comercial o pode enviar outra vez ao cliente. 21/10: com `n`, o da adenda. */
     validarContrato(id: number, n?: string) {
+      if (!exigePerm("contrato.editar")) return;
       const d = deal(id), o = n ? d.adendas?.find((x) => x.n === n) : d.orc;
       if (!o?.contratoPedido) return;
       o.contratoRevisto = { por: PAPEIS.juridico.nome, q: agora() };
@@ -3442,7 +3547,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Receita do revestimento atualizada: ${nfmt(old)} → ${nfmt(s.h)} h/m²`);
       avisar({ msg: "Receita atualizada no Catálogo", sub: `Revestimento: ${nfmt(old)} → ${nfmt(s.h)} h/m². Os próximos orçamentos já usam este valor.`, kind: "ok" });
     },
-    vendaDireta(id: number, v: boolean) { const d = deal(id); d.orc!.vendaDireta = v; log(d, v ? "Marcado como venda direta (sem contrato)" : "Deixou de ser venda direta"); },
+    vendaDireta(id: number, v: boolean) { if (!exigePerm("orcamento.editar")) return; const d = deal(id); d.orc!.vendaDireta = v; log(d, v ? "Marcado como venda direta (sem contrato)" : "Deixou de ser venda direta"); },
     perder(id: number) { S.confirmPerda = id; },
     /** 3/11: `motivo` (o da lista das Pessoas); sem ele, o que o negócio já tinha ou «Marcado como perdido». Numa organização real grava-se
      *  pela neg_perder_negocio (perdaReal): neg_guardar_negocio ignora a perda e ela desaparecia ao reler. */
@@ -3452,7 +3557,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 19/10: com contrato (ou venda direta aceite), não se perde: anula-se o contrato (a encomenda no Inventário vai com ele)
       if (d.fase >= 4) { S.confirmPerda = null; avisar({ msg: "Com contrato, anula-se o contrato", sub: "Use «Anular contrato» (Direção)", kind: "bad" }); return; }
       const m = motivo?.trim() || d.motivoPerda?.trim() || "Marcado como perdido";
-      d.perdido = true; d.motivoPerda = m; S.confirmPerda = null; log(d, "Marcado como perdido", "x");
+      // 4/11: as observações escritas ao perder (o motivo) ficam também no histórico
+      d.perdido = true; d.motivoPerda = m; S.confirmPerda = null; log(d, motivo?.trim() ? `Marcado como perdido · ${m}` : "Marcado como perdido", "x");
       perdaReal?.perder(d, faseDaPerda(d), m);
       avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { anularPerda(d, "Perda anulada"); }) } });
       S.view = "negocios"; S.deal = null;
@@ -3558,6 +3664,32 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (m.concelho && !f.concelho) f.concelho = m.concelho;
       f.gps = `${lat.toFixed(6)},${lon.toFixed(6)}`; f.gps_precisao = String(Math.round(precisao));
       log(d, `Morada preenchida pela localização do dispositivo (± ${Math.round(precisao)} m)`);
+    },
+    /** 4/11 (Rúben): na chamada (Qualificação), quem liga confirma ou troca o serviço que veio da lead (casa de banho, cozinha…). O nome do
+     *  negócio acompanha enquanto for o nome da linha (ou «Por definir»); um nome escrito à mão fica. */
+    servicoDaChamada(id: number, linha: LinhaId) {
+      const d = deal(id);
+      if (!LINHAS[linha]) return;
+      const antes = nomeLinha(d), trocou = d.linhaPorDefinir || d.linha !== linha;
+      if (trocou) {
+        if (d.servico === antes || !d.servico) d.servico = LINHAS[linha].n;
+        d.linha = linha; delete d.linhaPorDefinir;
+      }
+      d.f.servico_validado = "Sim";
+      log(d, `Serviço confirmado na chamada: ${LINHAS[linha].n}` + (trocou && antes !== "Por definir" ? ` (era ${antes})` : ""));
+    },
+    /** 4/11: a morada da obra é a que a lead já trazia (validar ou editar): preenche o que ela tem; o resto fica por preencher. */
+    moradaDaLead(id: number, m: MoradaLead) {
+      for (const p of new Set(CAMPOS_MORADA.map(permDoCampo))) if (p && !exigePerm(p)) return;
+      const d = deal(id), f = d.f;
+      for (const k of CAMPOS_MORADA) {
+        const v = m[k].trim();
+        if (!v) continue;
+        f[k] = v;
+        if (d.sug) delete d.sug[k];
+      }
+      if (m.localidade.trim()) derivar(d, "localidade");
+      log(d, m.de === "ficha" ? "Morada da obra validada a partir da ficha do cliente" : "Morada da obra validada a partir do pedido");
     },
     servico(id: number, sid: SvcId) { const a = deal(id).visita.off; const i = a.indexOf(sid); if (i >= 0) a.splice(i, 1); else a.push(sid); },
     extra(id: number, sid: SvcId, q: number) {

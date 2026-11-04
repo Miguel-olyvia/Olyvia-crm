@@ -49,6 +49,23 @@ interface CamposAgendaVisitaProps {
    * Recebe o que `CamposDataHora` receberia.
    */
   renderDataHora?: (p: ArgsDataHora) => ReactNode;
+  /**
+   * 4/11 (Rúben): o Negócio desenha o dia, quem vai e a hora na ordem dele (a data da visita, depois quem pode ir nesse dia, depois a
+   * hora), no lugar de «Quem vai» e do dia e hora. Sem isto são os de sempre.
+   */
+  renderQuemEQuando?: (p: ArgsQuemEQuando) => ReactNode;
+  /** 4/11: sem o campo da duração (no Negócio vem de «Preparar a visita»). */
+  semDuracao?: boolean;
+}
+
+/** O que o Negócio recebe para desenhar o dia, quem vai e a hora (renderQuemEQuando). */
+export interface ArgsQuemEQuando extends ArgsDataHora {
+  escolhidos: readonly string[];
+  aoMudarRecursos: (ids: string[]) => void;
+  /** Os recursos ocupados nesse horário (pré-aviso, ou a recusa da base). */
+  ocupados: readonly string[];
+  erroRecursos: string | null;
+  grupoRef: Ref<HTMLFieldSetElement> | undefined;
 }
 
 /** O que `CamposDataHora` recebe, para quem o troca por `renderDataHora`. */
@@ -202,6 +219,12 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
     <div className="space-y-4">
       <EstadoDaAgenda agenda={p.agenda} />
       <Quadro id={p.id} agenda={p.agenda} valor={p.valor} aoMudar={p.aoMudar} erro={p.erro} desativado={p.desativado} />
+      {p.renderQuemEQuando ? p.renderQuemEQuando({
+        id: p.id, data: p.valor.data, hora: p.valor.hora, hoje: p.hoje, campoData: p.campoData, erroData, erroHora, somenteLeitura: p.desativado, aoMudar: p.aoMudar,
+        escolhidos: p.valor.recursos, aoMudarRecursos: (recursos) => p.aoMudar({ recursos }), ocupados,
+        erroRecursos: p.erro === "recursoEmFalta" ? t(`${E}noResource`) : null, grupoRef: p.grupoRecursos,
+      }) : (
+        <>
       <SeletorRecursosVisita
         id={`${p.id}-recursos`} recursos={p.agenda.recursos} escolhidos={p.valor.recursos} emConflito={ocupados} desativado={p.desativado}
         erro={p.erro === "recursoEmFalta" ? t(`${E}noResource`) : null} grupoRef={p.grupoRecursos}
@@ -215,7 +238,9 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
           erroData={erroData} erroHora={erroHora} somenteLeitura={p.desativado} aoMudar={p.aoMudar}
         />
       )}
-      <Duracao id={p.id} valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />
+        </>
+      )}
+      {!p.semDuracao && <Duracao id={p.id} valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />}
       {p.comQuemVaiEstar && <QuemVaiEstar valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />}
       <AvisoConflito conflito={p.conflito} nomes={nomes} semVerificar={semVerificar} />
       <MoradaVisitaCampos id={`${p.id}-morada`} moradaLead={p.moradaLead} valor={p.destino} erro={p.erroMorada} aoMudar={p.aoMudarDestino} />

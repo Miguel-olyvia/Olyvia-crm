@@ -46,7 +46,8 @@ function ConfirmarAlteracao({ texto, ok, onOk, onCancel }: { texto: string; ok: 
 type AjustesS = Pick<Estado, "campos" | "setor">;
 
 const GRUPOS: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
-const TIPOS: [Tipo, string][] = [["escolha", "Escolha"], ["varios", "Escolha múltipla"], ["sim_nao", "Sim ou não"], ["contador", "Contador"], ["numero", "Número"], ["texto", "Texto curto"], ["data", "Data"], ["texto_longo", "Nota"]];
+// 4/11 (Rúben): o texto longo (a caixa maior) chamava-se «Nota» e não se encontrava: fica ao lado do texto curto
+const TIPOS: [Tipo, string][] = [["escolha", "Escolha"], ["varios", "Escolha múltipla"], ["sim_nao", "Sim ou não"], ["contador", "Contador"], ["numero", "Número"], ["texto", "Texto curto"], ["texto_longo", "Texto longo (caixa maior)"], ["data", "Data"]];
 const NOME_TIPO = Object.fromEntries(TIPOS) as Record<Tipo, string>;
 const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const ESCOLHA = "inline-flex min-h-11 items-center rounded-lg border px-3 text-[15px]";
@@ -245,6 +246,11 @@ function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: 
                       })} />
                     </div>
                   )}
+                  {c.op && (c.t === "escolha" || c.t === "varios") && (
+                    <Detalhe op={c.op} on={c.detalhe ?? []} onSet={(detalhe) => mexer(g, (x) => {
+                      if (c.novo) x.novos = (x.novos || []).map((n) => (n.k === c.k ? { ...n, detalhe } : n)); else x.detalhes = { ...x.detalhes, [c.k]: detalhe };
+                    })} />
+                  )}
                   {c.papel && <p className="text-[15px] text-muted-foreground">Este campo é usado pela Olyvia ({PAPEL_ROT[c.papel]}). Pode mudar o nome e as opções ou escondê-lo, mas não apagá-lo.</p>}
                 </div>
               )}
@@ -260,6 +266,28 @@ function EditorGrupo({ S, g, mexer, ligacoes }: { S: AjustesS; g: Grupo; mexer: 
         </div>
       )}
     </section>
+  );
+}
+
+/** 4/11 (Rúben): as opções que, escolhidas, abrem uma caixa para escrever mais detalhe (ex.: «Outro»). */
+function Detalhe({ op, on, onSet }: { op: string[]; on: string[]; onSet: (detalhe: string[]) => void }) {
+  const rot = useId();
+  return (
+    <div className="grid gap-2">
+      <span id={rot} className="text-[15px] font-medium">Pedir mais detalhe</span>
+      <p className="text-sm text-muted-foreground">Quando se escolhe uma destas opções, aparece uma caixa para escrever (ex.: em «Outro», qual).</p>
+      <div role="group" aria-labelledby={rot} className="flex flex-wrap gap-2">
+        {op.map((o) => {
+          const ligado = on.includes(o);
+          return (
+            <button key={o} type="button" aria-pressed={ligado} onClick={() => onSet(ligado ? on.filter((x) => x !== o) : [...on, o])}
+              className={cn(ESCOLHA, "gap-1.5", ligado ? ESCOLHA_ON : ESCOLHA_OFF)}>
+              {ligado && <Check className="h-4 w-4" aria-hidden="true" />}{o}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

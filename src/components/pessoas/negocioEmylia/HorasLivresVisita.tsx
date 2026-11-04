@@ -6,7 +6,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import type { HorarioOrg } from "@/hooks/pessoas/horasLivresVisita";
+import { DIA_TODO, type HorarioOrg } from "@/hooks/pessoas/horasLivresVisita";
 import type { EstadoHorasLivres } from "@/hooks/pessoas/useHorasLivresVisita";
 import { cn } from "@/lib/utils";
 import { MensagemErro } from "../CamposDataHora";
@@ -77,6 +77,8 @@ interface HorasProps {
   aoTentarOutraVez: () => void;
   erro: string | null;
   somenteLeitura: boolean | undefined;
+  /** 4/11: as horas são do dia todo (sem o horário da organização): só o que ocupa quem vai. */
+  diaTodo?: boolean;
 }
 
 const intervalo = (h: HorarioOrg): string => `${h.inicio} às ${h.fim}`;
@@ -88,22 +90,28 @@ function textoDoEstado(estado: EstadoHorasLivres, h: HorarioOrg): string | null 
     case "dia-fechado": return estado.motivo === "feriado"
       ? "A organização não trabalha nesse dia: é feriado nas Configurações da Agenda. Escolha outro dia."
       : "A organização não trabalha nesse dia da semana (Dias de trabalho nas Configurações da Agenda). Escolha outro dia.";
-    case "sem-horas": return `Não há horas livres nesse dia para quem escolheu, dentro do horário da organização (${intervalo(h)}). Escolha outro dia ou outra pessoa.`;
+    case "sem-horas": return h.inicio === "00:00" && h.fim === "24:00"
+      ? "Não há horas livres nesse dia para quem escolheu. Escolha outro dia ou outra pessoa."
+      : `Não há horas livres nesse dia para quem escolheu, dentro do horário da organização (${intervalo(h)}). Escolha outro dia ou outra pessoa.`;
     default: return null;
   }
 }
 
-export function HorasLivresVisita({ id, hora, horas, estado, horario, horarioPorOmissao, aoEscolher, aoTentarOutraVez, erro, somenteLeitura }: HorasProps) {
+export function HorasLivresVisita({ id, hora, horas, estado, horario, horarioPorOmissao, aoEscolher, aoTentarOutraVez, erro, somenteLeitura, diaTodo }: HorasProps) {
   const rotulo = useId();
-  const texto = textoDoEstado(estado, horario);
+  const texto = textoDoEstado(estado, diaTodo ? DIA_TODO : horario);
   return (
     <div className="space-y-2">
       <p id={rotulo} className="text-sm font-semibold text-foreground">Hora</p>
-      <p className="text-sm text-muted-foreground">
-        Só as horas livres de quem vai, no horário da organização: {intervalo(horario)}
-        {horario.almoco ? `, com pausa de almoço (${horario.almoco.inicio} às ${horario.almoco.fim}, ${horario.almoco.minutos} min)` : ""}.
-        {horarioPorOmissao ? " A organização ainda não gravou o horário nas Configurações da Agenda: está a valer o de omissão." : ""}
-      </p>
+      {diaTodo ? (
+        <p className="text-sm text-muted-foreground">As horas em que quem vai está livre, a qualquer hora do dia.</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Só as horas livres de quem vai, no horário da organização: {intervalo(horario)}
+          {horario.almoco ? `, com pausa de almoço (${horario.almoco.inicio} às ${horario.almoco.fim}, ${horario.almoco.minutos} min)` : ""}.
+          {horarioPorOmissao ? " A organização ainda não gravou o horário nas Configurações da Agenda: está a valer o de omissão." : ""}
+        </p>
+      )}
       {estado.k === "a-ler" && <p role="status" className="text-sm text-muted-foreground">A ler as horas livres…</p>}
       {estado.k === "erro" && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-foreground">

@@ -86,17 +86,19 @@ describe("guardas das rotas e do menu", () => {
     expect(atalho("channels")?.permission).toBe("campaigns.view");
   });
 
-  it("/api-keys: settings.update na rota e no atalho", () => {
-    expect(linhaDe("/api-keys")).toContain('<ProtectedRoute permission="settings.update">');
-    expect(atalho("api-keys")?.permission).toBe("settings.update");
+  it("/api-keys: settings.update OU api_keys.view na rota e no atalho (como a RLS de api_keys)", () => {
+    expect(linhaDe("/api-keys")).toContain('<ProtectedRoute permissions={["settings.update", "api_keys.view"]}><ApiKeys />');
+    expect(atalho("api-keys")?.permissions).toEqual(["settings.update", "api_keys.view"]);
   });
 
-  it("/org-help e /org-templates pedem organizations.view, /organizations/:id organizations.edit, /organizations fica aberta", () => {
+  it("Organizações: lista, ficha, organograma, ajuda e modelos pedem organizations.view (como o menu); a lista abre sem empresa", () => {
     expect(linhaDe("/org-help")).toContain('<ProtectedRoute permission="organizations.view"><OrgHelp />');
     expect(linhaDe("/org-templates")).toContain('<ProtectedRoute permission="organizations.view"><OrgTemplates />');
-    expect(linhaDe("/organizations/:id")).toContain('<ProtectedRoute permission="organizations.edit"><OrganizationDetail />');
-    expect(linhaDe("/organizations")).toContain("<Organizations />");
-    expect(linhaDe("/organizations")).not.toContain("ProtectedRoute");
+    expect(linhaDe("/organizations/:id")).toContain('<ProtectedRoute permission="organizations.view"><OrganizationDetail />');
+    expect(linhaDe("/organizations")).toContain('<ProtectedRoute permission="organizations.view" allowWithoutCompany><Organizations />');
+    expect(linhaDe("/org-chart")).toContain('<ProtectedRoute permission="organizations.view"><OrgChart />');
+    expect(itemMenu("/organizations")?.permission).toBe("organizations.view");
+    expect(itemMenu("/org-chart")?.permission).toBe("organizations.view");
   });
 
   it("/proposal-templates: proposals.manage na rota e no menu", () => {
@@ -108,5 +110,58 @@ describe("guardas das rotas e do menu", () => {
     ["settings", "alert-settings", "countries"].forEach((id) => expect(atalho(id)?.permission, id).toBe("settings.update"));
     expect(atalho("contract-templates")?.permission).toBe("client_contracts.view");
     expect(linhaDe("/countries")).toContain('<ProtectedRoute permission="settings.update">');
+  });
+});
+
+// 04/11/2026 (D5): todas as rotas do CRM com a guarda do menu e do servidor. As que ficam só com sessão estão listadas com o porquê.
+describe("rotas antes sem guarda", () => {
+  const GUARDADAS: [string, string][] = [
+    ["/dashboard", '<ProtectedRoute permission="dashboard.view" allowWithoutCompany><Dashboard />'],
+    ["/lead-contact-results", '<ProtectedRoute permission="leads.config"><LeadContactResults />'],
+    ["/needs-assessment-config", '<ProtectedRoute permission="settings.update"><NeedsAssessmentConfig />'],
+    ["/marketing-integration", '<ProtectedRoute permission="settings.update"><MarketingIntegration />'],
+    ["/postal-codes-import", "<ProtectedRoute systemAdminOnly><PostalCodesImport />"],
+    ["/gallery", "<ProtectedRoute systemAdminOnly><Gallery />"],
+    ["/test-iframe", "<ProtectedRoute systemAdminOnly><TestIframe />"],
+    ["/test-widget", "<ProtectedRoute systemAdminOnly><TestWidget />"],
+    ["/docs/auto-scheduling", '<ProtectedRoute permissions={["scheduling.items.view", "scheduling.boards.view", "scheduling.resources.view"]}><DocsAutoScheduling />'],
+    ["/docs/invite-links", '<ProtectedRoute permission="users.view"><DocsInviteLinks />'],
+  ];
+  it.each(GUARDADAS)("%s tem a guarda certa", (rota, guarda) => {
+    expect(linhaDe(rota)).toContain(guarda);
+  });
+
+  it("a documentação técnica (/docs/*) é só do administrador de sistema", () => {
+    ["architecture", "user-model", "api", "database", "integrations", "edge-functions", "authentication", "guides", "permissions",
+      "translations", "embed-widget"].forEach((d) => expect(linhaDe(`/docs/${d}`), d).toContain("<ProtectedRoute systemAdminOnly>"));
+  });
+
+  it("o menu do Dashboard pede o mesmo que a rota", () => {
+    expect(topLevelItems.find((i) => i.id === "dashboard")!.permissions).toEqual(["dashboard.view"]);
+    expect(atalho("dashboard")?.permission).toBe("dashboard.view");
+  });
+
+  it("ficam só com sessão (dados da própria pessoa ou páginas estáticas): sem ProtectedRoute", () => {
+    ["/home", "/notifications", "/team-hub", "/welcome", "/marketing-api", "/marketing-help", "/rh-exemplo/minhas-denuncias"]
+      .forEach((r) => expect(linhaDe(r), r).not.toContain("ProtectedRoute"));
+  });
+
+  it("/negocios continua com RotaNegocios (pessoas.view ou um papel no Negócio pelo RH), como o menu", () => {
+    expect(linhaDe("/negocios")).toContain("<RotaNegocios>");
+    expect(itemMenu("/negocios")?.permission).toBe("pessoas.view");
+  });
+
+  it("nenhuma rota do CRM com página fica sem guarda, exceto as listadas como só sessão", () => {
+    const SO_SESSAO = new Set(["/home", "/notifications", "/team-hub", "/welcome", "/marketing-api", "/marketing-help",
+      "/rh-exemplo/minhas-denuncias", "/negocios"]);
+    const inicio = appSource.indexOf("<Route element={<CrmRouteGuard />}>");
+    const fim = appSource.indexOf('<Route path="*"');
+    const semGuarda = appSource.slice(inicio, fim).split(/\r?\n/)
+      .map((l) => /<Route path="([^"]+)" element=\{(.*)\} \/>/.exec(l))
+      .filter((m): m is RegExpExecArray => !!m)
+      .filter(([, , el]) => !/ProtectedRoute|<Navigate |<Redirect|RotaNegocios/.test(el))
+      .map(([, p]) => p)
+      .filter((p) => !SO_SESSAO.has(p));
+    expect(semGuarda).toEqual([]);
   });
 });

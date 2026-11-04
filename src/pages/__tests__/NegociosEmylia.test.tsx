@@ -18,7 +18,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: ORG }, isLoading: false }) }));
 vi.mock("@/hooks/pessoas/novaLead/gravarNovaLead", () => ({ gravarNovaLead: (...a: unknown[]) => gravarNovaLead(...a) }));
-vi.mock("@/hooks/pessoas/novaLead/comerciaisNovaLead", () => ({ resolverOrgRaiz: async () => ORG }));
+vi.mock("@/hooks/pessoas/novaLead/comerciaisNovaLead", () => ({ resolverOrgRaiz: async () => ORG, lerComerciais: async () => ({ users: [], tree: [] }) }));
 const minha = vi.hoisted(() => ({ pessoaId: null as string | null, nome: "Rúben Carvalho" }));
 vi.mock("@/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => ({ ...minha, cargo: null, dataAdmissao: null, loading: false, semFicha: !minha.pessoaId }) }));
 

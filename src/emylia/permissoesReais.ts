@@ -4,11 +4,12 @@
 // nada se dá por concedido.
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { CODIGO_BASE } from "./permissoes";
+import { ALTERNATIVAS, CODIGO_BASE } from "./permissoes";
 
 /** Os códigos que o protótipo pergunta: os das ações (CODIGO_BASE), o de ver custos e (24/10) o de ver salários (a ponte do RH).
  *  2/11: os códigos reais da base (quotes.view_costs; o salário é a retribuição do RH, hr.pessoas.retribuicao.view). */
-export const CODIGOS_NEGOCIOS: readonly string[] = [...new Set([...Object.values(CODIGO_BASE), "quotes.view_costs", "hr.pessoas.retribuicao.view"])];
+export const CODIGOS_NEGOCIOS: readonly string[] = [...new Set([...Object.values(CODIGO_BASE), ...Object.values(ALTERNATIVAS).flat(),
+  "quotes.view_costs", "hr.pessoas.retribuicao.view"])];
 
 export type LeituraPermissoes = { org: string; codigos: ReadonlySet<string> | null };
 

@@ -17,8 +17,9 @@ vi.mock("@/emylia/motor", async (original) => ({ ...(await original<typeof impor
 vi.mock("@/emylia/PedidoDoCliente", () => ({ PedidoDoCliente: () => null }));
 
 import { FaseDaEmylia } from "./FaseDaEmylia";
+import { CODIGO_BASE, definirPermissoesReais } from "@/emylia/permissoes";
 
-afterEach(() => { cleanup(); m.botao = true; m.primeiroFeito = false; m.bloqueadoSegundo = false; m.falta = 0; m.p = { t: "Enviar a proposta", wait: false }; });
+afterEach(() => { cleanup(); definirPermissoesReais(null); m.botao = true; m.primeiroFeito = false; m.bloqueadoSegundo = false; m.falta = 0; m.p = { t: "Enviar a proposta", wait: false }; });
 
 const deal = (): Negocio => ({ ...structuredClone(seed().deals[0]), fase: 3, perdido: false });
 const ctx = (): Ctx => { const S = seed(); S.role = "direcao"; return { S, A: {} as Ctx["A"], run: vi.fn(), go: vi.fn(), q: "" }; };
@@ -97,5 +98,21 @@ describe("FaseDaEmylia (o ecrã da ficha de /negocios)", () => {
     expect(document.querySelector("[inert]")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Proposta" }));
     expect(screen.getByText("CORPO-PROPOSTA")).toBeTruthy();
+  });
+
+  it("4/11: sem negocios.orcamento.editar o passo do orçamento só se lê (e diz porquê); os outros passos não", () => {
+    definirPermissoesReais({ codigos: new Set(Object.values(CODIGO_BASE).filter((c) => c !== "negocios.orcamento.editar")), simular: false });
+    desenhar();
+    expect((screen.getByText("CORPO-ORCAMENTO").closest("fieldset") as HTMLFieldSetElement).disabled).toBe(true);
+    expect(screen.getByRole("note").textContent).toContain("negocios.orcamento.editar");
+    fireEvent.click(screen.getByRole("button", { name: "Proposta" }));
+    expect(screen.getByText("CORPO-PROPOSTA").closest("fieldset")?.disabled ?? false).toBe(false);
+  });
+
+  it("4/11: com negocios.orcamento.editar o orçamento edita-se como antes", () => {
+    definirPermissoesReais({ codigos: new Set(Object.values(CODIGO_BASE)), simular: false });
+    desenhar();
+    expect(screen.getByText("CORPO-ORCAMENTO").closest("fieldset")?.disabled ?? false).toBe(false);
+    expect(screen.queryByRole("note")).toBeNull();
   });
 });

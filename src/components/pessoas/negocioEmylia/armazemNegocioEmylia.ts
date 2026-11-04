@@ -18,7 +18,8 @@ import { idsServico, lerNegocios, negocioDoLido, type IdsServico, type NegocioLi
 import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
 import { publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
-import { definirOrgErp } from "@/emylia/erpEticadata";
+import { definirOrgErp } from "@/emylia/erpEticadata";
+import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 
 // F3 (28/10): a encomenda de cliente é a do servidor (financeiroReal.ts grava a fatura, o pagamento e a anulação antes do negócio; depois disso
 // relê-se) e o Inventário é o real (inventarioReal.ts). A navegação para as páginas reais é a do react-router, registada pela ficha
@@ -136,6 +137,11 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
     foto = fotografarNegocios(S.deals);
     lidaEm = Date.now();
+    // 4/11: a morada que a lead já trazia (a da ficha da pessoa), para o passo «Morada da obra»; não se grava e um erro a ler não para nada
+    void lerMoradasDasPessoas(sb, novos.map((n) => n.entityId)).then((m) => {
+      sugerirMoradas(S.deals, (d) => refs.get(d.id)?.entityId, m);
+      mudou();
+    });
   };
 
   /** Os só de leitura que mudaram em memória voltam à cópia lida (a base recusava-os; ficava o ecrã a mentir). */

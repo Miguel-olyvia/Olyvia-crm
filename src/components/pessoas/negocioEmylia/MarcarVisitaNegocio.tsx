@@ -29,7 +29,8 @@ import type { MoradaVisita } from "../pessoasTipos";
 import { useEnvioVisita } from "../useEnvioVisita";
 import { useFormAgendaVisita } from "../useFormAgendaVisita";
 import { MAX_NOTA_VISITA } from "../visitaPessoa";
-import { DiaDaVisita, HorasLivresVisita } from "./HorasLivresVisita";
+import { HorasLivresVisita } from "./HorasLivresVisita";
+import { QuemPodeIrVisita } from "./QuemPodeIrVisita";
 
 const BOTAO = cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO);
 const CHIP = "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 py-2 text-[15px] transition-colors motion-reduce:transition-none";
@@ -54,6 +55,9 @@ interface Props {
   visita?: VisitaDoNegocio;
   /** «Quem vai estar» que a visita já tinha (o espelho do negócio o guarda; o CRM aqui não o lê). */
   presentesInicial?: string;
+  /** 4/11: numa visita nova, o que se preparou no passo «Preparar a visita» (a duração em minutos e a nota). */
+  duracaoInicialMin?: number;
+  notaInicial?: string;
   rotuloGravar: string;
   /** Nome de cada recurso da agenda, para a visita gravada. */
   aoGuardada: (r: VisitaGravada) => void;
@@ -67,14 +71,14 @@ const chaveDaDuracao = (minutos: number): Pick<ValorAgenda, "duracao" | "duracao
   return chave ? { duracao: chave } : { duracao: "", duracaoMinutos: minutos };
 };
 
-export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tipoInicial, visita, presentesInicial, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
+export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tipoInicial, visita, presentesInicial, duracaoInicialMin, notaInicial, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
   const { t } = useTranslation();
   const id = useId();
   const hoje = hojeLisboa();
   const acoes = useAcoesVisita(entityId, null);
   const horario = useHorarioOrganizacao();
   const [tipo, setTipo] = useState<TipoVisitaNegocio>(visita?.tipo ?? tipoInicial);
-  const [nota, setNota] = useState("");
+  const [nota, setNota] = useState(visita ? "" : notaInicial ?? "");
   const [destino, setDestino] = useState<DestinoVisita>(() => {
     if (!visita) return destinoInicial(moradaLead);
     const naLead = moradaLead !== null && visita.local !== null && textoMoradaVisita(moradaLead) === visita.local;
@@ -87,7 +91,8 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   const form = useFormAgendaVisita({
     responsavelUserId: null, excluirId: visita?.id ?? null,
     inicial: {
-      ...(visita ? { boardId: visita.boardId, recursos: visita.recursos, data: visita.dia, hora: visita.hora, ...chaveDaDuracao(visita.minutos) } : {}),
+      ...(visita ? { boardId: visita.boardId, recursos: visita.recursos, data: visita.dia, hora: visita.hora, ...chaveDaDuracao(visita.minutos) }
+        : duracaoInicialMin ? chaveDaDuracao(duracaoInicialMin) : {}),
       ...(presentesInicial ? { quemVaiEstar: presentesInicial } : {}),
     },
   });
@@ -102,7 +107,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   const agenda = useMemo(() => ({ ...form.agenda, recursos }), [form.agenda, recursos]);
   const horas = useHorasLivresVisita({
     recursos: valor.recursos, dia: valor.data, duracaoMin: minutos, horario: horario.horario, feriados: horario.feriados,
-    horarioPronto: !horario.isLoading && !horario.isError, atual: visita ? { dia: visita.dia, hora: visita.hora } : null,
+    horarioPronto: !horario.isLoading && !horario.isError, atual: visita ? { dia: visita.dia, hora: visita.hora } : null, excluirId: visita?.id ?? null,
   });
   // mudar o dia, a duração ou quem vai invalida a hora escolhida (as livres são outras)
   const mudar = (parcial: Partial<ValorAgenda>): void => {
@@ -169,17 +174,21 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
         id={id} hoje={hoje} agenda={agenda} valor={valor} aoMudar={mudar} erro={ehErroAgenda(visto) ? visto : null} conflito={form.conflito} recursoOcupado={form.recusado}
         moradaLead={moradaLead} destino={destino} aoMudarDestino={setDestino} erroMorada={ehErroMorada(visto) ? visto : null} comQuemVaiEstar
         campoData={campoData} grupoRecursos={grupoRecursos} desativado={envio.aGuardar || soLeitura}
-        renderDataHora={(p) => (
-          <div className="space-y-4">
-            <DiaDaVisita
-              id={p.id} hoje={p.hoje} dia={p.data} aoMudar={(data) => p.aoMudar({ data })} erro={p.erroData} somenteLeitura={p.somenteLeitura} campoData={p.campoData}
-            />
-            <HorasLivresVisita
-              id={p.id} hora={p.hora} horas={horas.horas} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}
-              aoEscolher={(hora) => p.aoMudar({ hora })} aoTentarOutraVez={horas.refetch} somenteLeitura={p.somenteLeitura}
-              erro={p.erroHora ?? (tentou && horaForaDasLivres ? (horasNaoConfirmadas ? "Não foi possível confirmar as horas livres deste dia. Aguarde ou tente outra vez." : "Escolha uma das horas livres.") : null)}
-            />
-          </div>
+        // 4/11 (Rúben): a data da visita primeiro (obrigatória, sem atalhos de dia), depois quem pode ir nesse dia (os comerciais; sem
+        // nenhum livre, técnicos e outros dias sugeridos) e a hora. A duração sai: vem de «Preparar a visita» (1 h sem nada).
+        semDuracao
+        renderQuemEQuando={(p) => (
+          <QuemPodeIrVisita
+            a={p} recursos={recursos} duracaoMin={minutos} horario={horario.horario} feriados={horario.feriados}
+            horarioPronto={!horario.isLoading && !horario.isError} excluirId={visita?.id ?? null}
+            hora={(
+              <HorasLivresVisita
+                id={p.id} hora={p.hora} horas={horas.horas} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}
+                aoEscolher={(hora) => p.aoMudar({ hora })} aoTentarOutraVez={horas.refetch} somenteLeitura={p.somenteLeitura} diaTodo={horas.diaTodo}
+                erro={p.erroHora ?? (tentou && horaForaDasLivres ? (horasNaoConfirmadas ? "Não foi possível confirmar as horas livres deste dia. Aguarde ou tente outra vez." : "Escolha uma das horas livres.") : null)}
+              />
+            )}
+          />
         )}
       />
       {tentou && presentesEmFalta && <MensagemErro id={`${id}-presentes-erro`} texto="Diga quem vai estar na visita." />}

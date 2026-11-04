@@ -8,6 +8,7 @@ import { ArrowLeft, Check, Euro, Lock, Mail, MapPin, MessageCircle, MoreHorizont
 import { BotaoAcessoPortal, EstadoAcessoPortal, temPortal } from "./AcessoPortalNegocio";
 import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { EditarCliente } from "./EditarCliente";
+import { DadosAoLado } from "./DadosAoLado";
 import { modoReal } from "./acessosPortal";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
@@ -16,7 +17,7 @@ import { PedidoDoCliente } from "./PedidoDoCliente";
 import { TrabalhosAMais } from "./TrabalhosAMais";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { FASES, LINHAS, PAPEIS, eur0, pct, proximo, tot, versaoAtual, type Negocio } from "./motor";
+import { FASES, LINHAS, PAPEIS, eur0, pct, proximo, sugerirDaLead, tot, versaoAtual, type Negocio } from "./motor";
 import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, efetivo, gruposArea, nomeGrupo, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
 import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
@@ -87,6 +88,11 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   const [mais, setMais] = useState(false);
   // 29/10: a ficha "Editar os dados do cliente" (EditarCliente.tsx), aberta do menu
   const [editar, setEditar] = useState(false);
+  // 4/11 (Rúben): «Tudo na chamada»: a Lead e o Contacto na mesma página, com os dados do cliente ao lado
+  const [naChamada, setNaChamada] = useState(false);
+  // 4/11: o que a lead trouxe passa às perguntas vazias da Lead, como sugestão (grava-se com a próxima mudança deste negócio)
+  const [, redesenhar] = useState(0);
+  useEffect(() => { if (sugerirDaLead(d)) redesenhar((n) => n + 1); }, [d, d.dadosLead]);
   const maisRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!mais) return;
@@ -196,13 +202,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       <div className="mt-4 empty:hidden"><EstadoAcessoPortal ctx={ctx} d={d} /></div>
       {/* 2/11 (reunião): escolher um ficheiro e pô-lo no portal do cliente, em Documentos */}
       <div className="mt-2 empty:hidden"><DocumentosParaCliente d={d} /></div>
-      {S.confirmPerda === d.id && (
-        <div role="alertdialog" aria-label="Confirmar" className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 animate-in fade-in-0">
-          <p className="flex-1 text-[15px]">Marcar como perdido? Sai do quadro, mas fica no histórico.</p>
-          <Button variant="outline" onClick={go(() => A.perderNao())}>Cancelar</Button>
-          <Button variant="destructive" onClick={go(() => A.perderSim(d.id))}>Marcar como perdido</Button>
-        </div>
-      )}
+      {S.confirmPerda === d.id && <ConfirmarPerda ctx={ctx} d={d} />}
       {anular && podeAnular(d) && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
       {d.anulado && (
         <div role="status" className="mt-4 rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 text-[15px]">
@@ -242,8 +242,21 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       )}
 
 
+      {d.fase <= 1 && !d.perdido && ver === null && (
+        <div className="mt-6 flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-[15px]">{naChamada
+            ? "A Lead e o Contacto numa só página, com o que se sabe do cliente ao lado."
+            : "A chamada deu para tudo? Preencha a Lead e o Contacto numa só página."}</span>
+          <Button variant={naChamada ? "outline" : "default"} className="min-h-11 shrink-0" onClick={() => setNaChamada((x) => !x)}>
+            {naChamada ? "Voltar aos passos" : "Tudo na chamada"}
+          </Button>
+        </div>
+      )}
+
       <div className={cn("mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)]", !largo && "2xl:grid-cols-[260px_minmax(0,1fr)_240px]")}>
-        {ver === null
+        {naChamada && d.fase <= 1 && ver === null
+          ? <TudoNaChamada ctx={ctx} d={d} />
+          : ver === null
           ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} lateral={(passos, ativo, setAtivo, comFim) => (
             <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} comFim={comFim} />
           )} />
@@ -532,6 +545,52 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
             </div>}
         </div>
         )}
+      </section>
+    </>
+  );
+}
+
+/** 4/11 (Rúben): ao marcar como perdido, as observações (porquê, o que ficou combinado): ficam como motivo da perda e no histórico. */
+function ConfirmarPerda({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const [obs, setObs] = useState("");
+  const id = `perda-obs-${d.id}`;
+  return (
+    <div role="alertdialog" aria-label="Confirmar" className="mt-4 space-y-3 rounded-xl border border-border bg-card p-4 animate-in fade-in-0">
+      <p className="text-[15px]">Marcar como perdido? Sai do quadro, mas fica no histórico.</p>
+      <div className="grid gap-1.5">
+        <label htmlFor={id} className="text-[15px] font-medium">Observações</label>
+        <textarea id={id} rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Porque se perdeu, o que o cliente disse, se vale a pena voltar a ligar…"
+          className="min-h-11 w-full rounded-lg border border-input bg-card px-3 py-2.5 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
+      </div>
+      <div className="flex flex-wrap justify-end gap-3">
+        <Button variant="outline" onClick={() => ctx.run(() => ctx.A.perderNao())}>Cancelar</Button>
+        <Button variant="destructive" onClick={() => ctx.run(() => ctx.A.perderSim(d.id, obs))}>Marcar como perdido</Button>
+      </div>
+    </div>
+  );
+}
+
+/** 4/11 (Rúben: «às vezes a call permite preencher logo tudo»): os passos da Lead e do Contacto seguidos, na mesma página, com os dados do
+ *  cliente ao lado (DadosAoLado). Os campos são os mesmos dos passos (gravam-se como sempre); para passar de fase volta-se aos passos. */
+function TudoNaChamada({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const fases = [0, 1] as const;
+  return (
+    <>
+      <DadosAoLado d={d} />
+      <section className="min-w-0 space-y-10" aria-label="Tudo na chamada">
+        {fases.map((f) => (
+          <div key={f} className="space-y-8">
+            <h2 className="text-2xl font-semibold tracking-tight">{FASES[f]}</h2>
+            {passosDaFase(ctx, d, true, f).filter((p) => !p.bloqueado).map((p) => (
+              <section key={p.id} aria-labelledby={`chamada-${f}-${p.id}`} className="space-y-3">
+                <h3 id={`chamada-${f}-${p.id}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
+                  <p.icone className="h-5 w-5 text-primary" aria-hidden="true" />{p.titulo}
+                </h3>
+                {p.corpo}
+              </section>
+            ))}
+          </div>
+        ))}
       </section>
     </>
   );

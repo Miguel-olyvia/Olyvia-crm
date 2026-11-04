@@ -24,6 +24,7 @@ import {
   aplicarEspelho, calcularEspelho, escreverDoFormulario, marcasDoEspelho, vagaDoMotor, visitasSoDaEmylia,
 } from "./espelhoVisitaEmylia";
 import { MarcarVisitaNegocio, type VisitaGravada } from "./MarcarVisitaNegocio";
+import { preparadoNoNegocio } from "./preparadoDaVisita";
 
 /** O que o passo precisa de saber do negócio. `entityId` pode faltar (a ficha só sabe o negócio): lê-se da base. */
 export interface ContextoDasVisitas {
@@ -155,7 +156,8 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     <div className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <MarcarVisitaNegocio
         entityId={entidade.entityId as string} negocioId={c.negocioId as string} nome={d.nome} moradaLead={moradaDoNegocio(d)} soLeitura={!c.podeEditar}
-        tipoInicial={ativas.length > 0 || numerosDe(d).length > 0 ? "revisita" : "levantamento"} {...(visita ? { visita, presentesInicial: presentesDe(d, visita) } : {})}
+        tipoInicial={ativas.length > 0 || numerosDe(d).length > 0 ? "revisita" : "levantamento"}
+        {...(visita ? { visita, presentesInicial: presentesDe(d, visita) } : preparadoNoNegocio(d))}
         rotuloGravar={visita ? "Guardar a nova hora" : modo === "primeira" ? "Marcar a visita" : "Marcar visita"} aoGuardada={aposGravar}
         aoFechar={visita || visitasCrm.length > 0 || modo === "visitas" ? () => { setAMarcar(false); setARemarcar(null); } : undefined}
       />

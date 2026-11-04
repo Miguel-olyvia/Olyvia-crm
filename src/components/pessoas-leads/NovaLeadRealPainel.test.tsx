@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
 import { entidadesDaNovaLead, supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
-import { NovaLeadReal } from "./NovaLeadReal";
+import { NovaLeadReal } from "./NovaLeadReal";
+import { continuar, criar, irParaConfirmar, irParaContacto } from "./passosNovaLeadTeste";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -52,12 +53,13 @@ function desenhar() {
 const abrir = () => fireEvent.click(screen.getByRole("button", { name: "Nova lead" }));
 const escrever = (rotulo: RegExp, valor: string) => fireEvent.change(screen.getByLabelText(rotulo), { target: { value: valor } });
 const preencherValido = () => {
+  irParaContacto();
   escrever(/Nome próprio/, "Ana");
   escrever(/Apelido/, "Lopes");
   escrever(/^Email/, "ana@x.pt");
   fireEvent.change(document.getElementById("nl-campo-phone") as HTMLInputElement, { target: { value: "912 345 678" } });
 };
-const criar = () => fireEvent.click(screen.getByRole("button", { name: "Criar lead" }));
+// 4/11: a Nova lead é guiada; «Criar lead» só está no último passo (passosNovaLeadTeste.ts)
 
 beforeEach(() => {
   supabaseFalso.reiniciar();
@@ -101,7 +103,8 @@ describe("NovaLeadReal: painel lateral", () => {
     const form = painel.querySelector("form") as HTMLFormElement;
     expect(form.className).toContain("flex-col");
     expect(form.querySelector(".overflow-y-auto")).not.toBeNull();
-    expect(within(form).getByRole("button", { name: "Criar lead" })).toBeInTheDocument();
+    // 4/11: guiado; no rodapé, «Continuar» (e «Criar lead» no último passo)
+    expect(within(form).getByRole("button", { name: "Continuar" })).toBeInTheDocument();
   });
 
   it("tem um só botão de fechar, traduzido (Fechar), e nenhum «Close» por omissão", async () => {
@@ -139,6 +142,7 @@ describe("NovaLeadReal: painel lateral", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     abrir();
     await screen.findByRole("dialog");
+    irParaContacto();
     escrever(/Nome próprio/, "Ana");
     await esperarOuvinteFora();
     cliqueFora();
@@ -150,6 +154,7 @@ describe("NovaLeadReal: painel lateral", () => {
     desenhar();
     abrir();
     const painel = await screen.findByRole("dialog");
+    irParaContacto();
     escrever(/Nome próprio/, "Ana");
     fireEvent.keyDown(painel, { key: "Escape", code: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -166,6 +171,7 @@ describe("NovaLeadReal: painel lateral", () => {
     fireEvent.keyDown(dup, { key: "Escape", code: "Escape" });
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(screen.getByRole("dialog", { name: "Criar nova lead" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Nome próprio/)).toHaveValue("Ana");
+    // fica no passo «Confirmar», com o que se escreveu
+    expect(screen.getByRole("dialog", { name: "Criar nova lead" })).toHaveTextContent("Ana");
   });
 });

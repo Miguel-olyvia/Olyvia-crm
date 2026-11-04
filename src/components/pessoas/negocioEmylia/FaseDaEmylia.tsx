@@ -11,6 +11,7 @@ import { PAPEIS, proximo, type Negocio } from "@/emylia/motor";
 import type { Passo } from "@/emylia/CamposFase";
 import { BotaoFase, passosDaFase, temBotaoFase } from "@/emylia/PaginaNegocio";
 import { PedidoDoCliente } from "@/emylia/PedidoDoCliente";
+import { SEM_PERM, podeNeg } from "@/emylia/permissoes";
 import { FASE_COR, type Ctx } from "@/emylia/pecas";
 import { GuiaPassoCtx } from "@/emylia/guiaPasso";
 import { irParaCampoEmFalta } from "@/emylia/irParaCampoEmFalta";
@@ -117,6 +118,9 @@ export function FaseDaEmylia({ ctx, d, soLeitura, topo, fasesFeitas, depois, ext
   }, [ativo]);
 
   const fim = ativo >= passos.length;
+  // 4/11: o orçamento só muda com negocios.orcamento.editar (neg_guardar_negocio recusa sem ela): sem a permissão o passo lê-se, como o resto
+  // da ficha em só leitura; o «Verificar» e o botão do passo (BotaoFase, que diz a permissão que falta) ficam fora
+  const orcSoLeitura = !soLeitura && atual?.id === "orc" && !podeNeg(S.role, "orcamento.editar");
   const quem = p.who && p.who !== "cliente" && !meu ? PAPEIS[p.who].n : null;
   // com a proposta pronta a enviar, o botão é sempre «Enviar proposta»: em cima e em baixo de cada passo, sem «Continuar»
   const enviar = !fim && meu && p.act === "enviar" && comFim;
@@ -177,7 +181,16 @@ export function FaseDaEmylia({ ctx, d, soLeitura, topo, fasesFeitas, depois, ext
                     <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl [&_svg]:h-5 [&_svg]:w-5", FASE_COR[d.fase])} aria-hidden="true"><atual.icone /></span>
                     <h3 id="passo-titulo" ref={titulo} tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none">{curto(atual)}</h3>
                   </div>
-                  <div id="passo-corpo" key={ativo}><GuiaPassoCtx.Provider value={guia}>{atual.corpo}</GuiaPassoCtx.Provider></div>
+                  <div id="passo-corpo" key={ativo}>
+                    {orcSoLeitura ? (
+                      <>
+                        <p role="note" className="mb-4 rounded-lg border border-border bg-muted/40 p-3 text-[15px]">
+                          <span className="font-medium">{SEM_PERM["orcamento.editar"].msg}.</span> {SEM_PERM["orcamento.editar"].sub}
+                        </p>
+                        <SoParaLer ativo><GuiaPassoCtx.Provider value={guia}>{atual.corpo}</GuiaPassoCtx.Provider></SoParaLer>
+                      </>
+                    ) : <GuiaPassoCtx.Provider value={guia}>{atual.corpo}</GuiaPassoCtx.Provider>}
+                  </div>
                 </>
               ) : (
                 <>

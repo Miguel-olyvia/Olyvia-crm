@@ -198,11 +198,16 @@ export async function requireAdminRole(
 
   const roleIds = memberships.map((m: any) => m.role_id);
 
+  // Só o papel GLOBAL de sistema conta (20270106300000): um papel de organização
+  // com o código 'system_admin' não pode dar administração da plataforma.
   const { data: adminRoles } = await supabaseAdmin
     .from("anew_roles")
     .select("id")
     .in("id", roleIds)
-    .eq("code", "system_admin");
+    .eq("code", "system_admin")
+    .eq("is_system", true)
+    .is("organization_id", null)
+    .is("deleted_at", null);
 
   return adminRoles && adminRoles.length > 0;
 }

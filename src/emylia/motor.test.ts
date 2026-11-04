@@ -87,6 +87,7 @@ describe("protótipo de Negócios", () => {
     S.role = "financeiro";
     A.emitir(id);
     A.validar(id);
+    S.role = "operacoes"; // 4/11: aprovar e arrancar o plano pede negocios.obra.planear (as Operações)
     expect(d().fase).toBe(5);
     // validado o pagamento, a encomenda de cliente é emitida logo no Inventário novo (sem aprovação)
     expect(d().obra.ec).toMatchObject({ n: "EC-" + id, estado: "emitida", ref: "CT 2026/" + id });

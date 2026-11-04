@@ -249,8 +249,8 @@ const ABA_DE: Record<Seccao, Aba | null> = {
 
 export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go } = ctx;
-  // 3/11: quem planeia a obra é quem tem negocios.obra.planear (equipa.edit), e não só o papel das Operações; encerrá-la pede negocios.obra.fechar
-  const p = d.obra.plano!, C = conflitos(p), pode = podeNeg(S.role, "equipa.edit"), direcao = S.role === "direcao", podeFechar = podeNeg(S.role, "obra.fechar");
+  // 3/11: quem planeia a obra é quem tem negocios.obra.planear ("obra.planear"; 4/11: antes "equipa.edit", que passou a ser a ficha do técnico no RH), e não só o papel das Operações; encerrá-la pede negocios.obra.fechar
+  const p = d.obra.plano!, C = conflitos(p), pode = podeNeg(S.role, "obra.planear"), direcao = S.role === "direcao", podeFechar = podeNeg(S.role, "obra.fechar");
   // 19/10: os materiais lidos ao vivo do Inventário (o arranque espera por eles)
   const db = useInventario();
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
@@ -1163,7 +1163,7 @@ function PedirCorrecao({ ctx, d, ti, motivo, setMotivo }: { ctx: Ctx; d: Negocio
 function Registo({ ctx, d, ti, compacto }: { ctx: Ctx; d: Negocio; ti: number; compacto?: boolean }) {
   const { S, A, run } = ctx;
   // 3/11: validar é de quem planeia a obra (negocios.obra.planear), como no servidor
-  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), pode = podeNeg(S.role, "equipa.edit");
+  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), pode = podeNeg(S.role, "obra.planear");
   const [motivo, setMotivo] = useState<string | null>(null);
   const dif = t.exec ? t.exec.horas - t.h : 0;
   return (

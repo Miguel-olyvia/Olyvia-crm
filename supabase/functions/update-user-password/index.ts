@@ -12,6 +12,7 @@ const requestSchema = z.object({
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { possoGerirUtilizador, souAdminSistema, temPermissao } from "../_shared/adminConta.ts";
 
 initSentry();
 
@@ -110,28 +111,17 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: callerMemberships } = await supabaseAdmin
-      .from("anew_memberships")
-      .select("organization_id, role_id")
-      .eq("user_id", callerAnew.id)
-      .eq("status", "active");
-
-    
-
-    // Resolve role codes from role_ids
-    const roleIds = [...new Set((callerMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
-    let callerRoles: string[] = [];
-    if (roleIds.length > 0) {
-      const { data: roles } = await supabaseAdmin
-        .from("anew_roles")
-        .select("id, code")
-        .in("id", roleIds);
-      callerRoles = (roles || []).map((r: any) => r.code).filter(Boolean);
-    }
-    
-
-    const isSystemAdmin = callerRoles.includes("system_admin");
-    const isAdminUser = callerRoles.some(r => ["system_admin", "super_admin", "org_admin"].includes(r));
+    // Autorização (20270106300000): já não se decide pelo CÓDIGO do papel
+    // (system_admin/super_admin/org_admin) — um administrador de organização
+    // podia criar um papel com um desses códigos e dá-lo a quem quisesse. Conta o
+    // administrador de sistema verdadeiro ou as permissões da ação: mudar a
+    // palavra-passe pede users.change_password, mudar o email pede users.edit
+    // (o papel base "Admin" e o super_admin têm as duas).
+    const isSystemAdmin = await souAdminSistema(supabaseAdmin, callingUser.id);
+    const isAdminUser = isSystemAdmin || (
+      (!newPassword || await temPermissao(supabaseAdmin, callingUser.id, "users.change_password")) &&
+      (!newEmail || await temPermissao(supabaseAdmin, callingUser.id, "users.edit"))
+    );
 
     if (!isAdminUser) {
       return new Response(JSON.stringify({ error: "Not authorized to update user" }), {
@@ -153,14 +143,12 @@ serve(async (req: Request) => {
       });
     }
 
-    // Scope check: target user must be in caller's visible org tree
-    const { data: visibleOrgs } = await supabaseAdmin.rpc("get_user_visible_org_ids", {
-      _auth_uid: callingUser.id,
-    });
-
-    const visibleOrgIds = (visibleOrgs || []).map((r: any) => r.organization_id || r);
-
-    // Get target user's org memberships
+    // Âmbito (20270106340000): só quem pode gerir a conta — a permissão da ação
+    // na organização de CADA associação ativa da pessoa (ou acima; os direitos
+    // de administração descem, não sobem), nunca um administrador de sistema,
+    // nunca alguém com um papel com mais poder. Antes bastava a pessoa estar
+    // numa organização visível (que inclui as de cima): o administrador de uma
+    // filha mudava a palavra-passe do dono da mãe.
     const { data: targetAnew } = await supabaseAdmin
       .from("anew_users")
       .select("id")
@@ -173,16 +161,11 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: targetMemberships } = await supabaseAdmin
-      .from("anew_memberships")
-      .select("organization_id")
-      .eq("user_id", targetAnew.id)
-      .eq("status", "active");
+    const podeGerir =
+      (!newPassword || await possoGerirUtilizador(supabaseAdmin, callingUser.id, targetAnew.id, "users.change_password")) &&
+      (!newEmail || await possoGerirUtilizador(supabaseAdmin, callingUser.id, targetAnew.id, "users.edit"));
 
-    const targetOrgIds = (targetMemberships || []).map((m: any) => m.organization_id);
-    const hasScope = targetOrgIds.some((orgId: string) => visibleOrgIds.includes(orgId));
-
-    if (!hasScope) {
+    if (!podeGerir) {
       return new Response(JSON.stringify({ error: "Target user not in your organizational scope" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

@@ -215,8 +215,9 @@ const App = () => (
                   <Route path="/form/:formId" element={<PublicLeadForm />} />
                   <Route path="/lead-form/:formId" element={<PublicLeadForm />} />
                   <Route path="/campaign/:campaignId" element={<PublicLeadForm />} />
-                  <Route path="/test-iframe" element={<TestIframe />} />
-                  <Route path="/test-widget" element={<TestWidget />} />
+                  {/* Páginas de teste do iframe e do widget (desenvolvimento): só o administrador de sistema. */}
+                  <Route path="/test-iframe" element={<ProtectedRoute systemAdminOnly><TestIframe /></ProtectedRoute>} />
+                  <Route path="/test-widget" element={<ProtectedRoute systemAdminOnly><TestWidget /></ProtectedRoute>} />
                   <Route path="/booking/manage" element={<BookingManage />} />
                   <Route path="/booking/cancel" element={<BookingManage />} />
                   {/* O convite de admissao abre-se SEM sessao, pelo link do e-mail:
@@ -264,7 +265,7 @@ const App = () => (
                   <Route element={<CrmRouteGuard />}>
                     <Route element={<LayoutRoute />}>
                       <Route path="/home" element={<HojeInicio />} />
-                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/dashboard" element={<ProtectedRoute permission="dashboard.view" allowWithoutCompany><Dashboard /></ProtectedRoute>} />
                       <Route path="/anew-clients" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/company-groups" element={<Navigate to="/organizations" replace />} />
                       <Route path="/anew-contacts" element={<RedirectPreservandoPesquisa />} />
@@ -298,6 +299,7 @@ const App = () => (
                       <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="hr.contratos.regras.gerir"><RhRegrasFimContrato /></ProtectedRoute>} />
                       {/* Canal de denúncias de exemplo, dentro da app: A minha área (Denúncias: denunciar num painel e acompanhar) e a gestão no RH */}
                       <Route path="/rh-exemplo/denunciar" element={<Navigate to="/rh-exemplo/minhas-denuncias?nova=1" replace />} />
+                      {/* As denúncias da própria pessoa: só sessão (o menu também não pede permissão). */}
                       <Route path="/rh-exemplo/minhas-denuncias" element={<RhMinhasDenuncias />} />
                       <Route path="/rh-exemplo/denuncias" element={<ProtectedRoute permission="hr.denuncias.gerir"><RhDenuncias /></ProtectedRoute>} />
                       <Route path="/canal-denuncias/gestao" element={<Navigate to="/rh-exemplo/denuncias" replace />} />
@@ -317,15 +319,15 @@ const App = () => (
                       <Route path="/users" element={<ProtectedRoute permission="users.view"><UsersNew /></ProtectedRoute>} />
                       {/* O editor antigo de roles deu lugar ao separador Roles de /utilizadores-perfis (que já pede roles.view). */}
                       <Route path="/roles" element={<Navigate to="/utilizadores-perfis?aba=roles" replace />} />
-                      <Route path="/api-keys" element={<ProtectedRoute permission="settings.update"><ApiKeys /></ProtectedRoute>} />
+                      <Route path="/api-keys" element={<ProtectedRoute permissions={["settings.update", "api_keys.view"]}><ApiKeys /></ProtectedRoute>} />
                       <Route path="/forms" element={<ProtectedRoute permission="forms.view"><Forms /></ProtectedRoute>} />
                       <Route path="/campaigns" element={<ProtectedRoute permission="campaigns.view"><Campaigns /></ProtectedRoute>} />
                       <Route path="/campaigns/:id" element={<ProtectedRoute permission="campaigns.view"><CampaignDetail /></ProtectedRoute>} />
                       <Route path="/channels" element={<ProtectedRoute permission="campaigns.view"><Channels /></ProtectedRoute>} />
                       <Route path="/channels/:id" element={<ProtectedRoute permission="campaigns.view"><ChannelDetail /></ProtectedRoute>} />
                       <Route path="/lead-sources" element={<ProtectedRoute permission="lead_sources.view"><LeadSources /></ProtectedRoute>} />
-                      <Route path="/lead-contact-results" element={<LeadContactResults />} />
-                      <Route path="/gallery" element={<Gallery />} />
+                      <Route path="/lead-contact-results" element={<ProtectedRoute permission="leads.config"><LeadContactResults /></ProtectedRoute>} />
+                      <Route path="/gallery" element={<ProtectedRoute systemAdminOnly><Gallery /></ProtectedRoute>} />
                       <Route path="/products" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/product-configurator-lab" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/product-categories" element={<Navigate to="/catalogo-custos" replace />} />
@@ -369,33 +371,35 @@ const App = () => (
                       <Route path="/service-fees" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/settings" element={<ProtectedRoute permission="settings.update"><Settings /></ProtectedRoute>} />
                       <Route path="/alert-settings" element={<ProtectedRoute permission="settings.update"><AlertSettings /></ProtectedRoute>} />
-                      <Route path="/docs/architecture" element={<DocsArchitecture />} />
-                      <Route path="/docs/user-model" element={<DocsUserModel />} />
-                      <Route path="/docs/api" element={<DocsApi />} />
-                      <Route path="/docs/database" element={<DocsDatabase />} />
-                      <Route path="/docs/integrations" element={<DocsIntegrations />} />
-                      <Route path="/docs/edge-functions" element={<DocsEdgeFunctions />} />
-                      <Route path="/docs/authentication" element={<DocsAuthentication />} />
-                      <Route path="/docs/guides" element={<DocsGuides />} />
-                      <Route path="/docs/permissions" element={<DocsPermissions />} />
-                      <Route path="/docs/auto-scheduling" element={<DocsAutoScheduling />} />
-                      <Route path="/docs/translations" element={<DocsTranslations />} />
-                      <Route path="/docs/invite-links" element={<DocsInviteLinks />} />
-                      <Route path="/docs/embed-widget" element={<DocsEmbedWidget />} />
+                      <Route path="/docs/architecture" element={<ProtectedRoute systemAdminOnly><DocsArchitecture /></ProtectedRoute>} />
+                      <Route path="/docs/user-model" element={<ProtectedRoute systemAdminOnly><DocsUserModel /></ProtectedRoute>} />
+                      <Route path="/docs/api" element={<ProtectedRoute systemAdminOnly><DocsApi /></ProtectedRoute>} />
+                      <Route path="/docs/database" element={<ProtectedRoute systemAdminOnly><DocsDatabase /></ProtectedRoute>} />
+                      <Route path="/docs/integrations" element={<ProtectedRoute systemAdminOnly><DocsIntegrations /></ProtectedRoute>} />
+                      <Route path="/docs/edge-functions" element={<ProtectedRoute systemAdminOnly><DocsEdgeFunctions /></ProtectedRoute>} />
+                      <Route path="/docs/authentication" element={<ProtectedRoute systemAdminOnly><DocsAuthentication /></ProtectedRoute>} />
+                      <Route path="/docs/guides" element={<ProtectedRoute systemAdminOnly><DocsGuides /></ProtectedRoute>} />
+                      <Route path="/docs/permissions" element={<ProtectedRoute systemAdminOnly><DocsPermissions /></ProtectedRoute>} />
+                      <Route path="/docs/auto-scheduling" element={<ProtectedRoute permissions={["scheduling.items.view", "scheduling.boards.view", "scheduling.resources.view"]}><DocsAutoScheduling /></ProtectedRoute>} />
+                      <Route path="/docs/translations" element={<ProtectedRoute systemAdminOnly><DocsTranslations /></ProtectedRoute>} />
+                      <Route path="/docs/invite-links" element={<ProtectedRoute permission="users.view"><DocsInviteLinks /></ProtectedRoute>} />
+                      <Route path="/docs/embed-widget" element={<ProtectedRoute systemAdminOnly><DocsEmbedWidget /></ProtectedRoute>} />
+                      {/* Team Hub (Beta, no cabeçalho de todos): só sessão — o servidor deixa qualquer autenticado ler e cada um escrever as suas entradas. */}
                       <Route path="/team-hub" element={<TeamHub />} />
                       <Route path="/technical-settings" element={<ProtectedRoute permission="settings.update"><TechnicalSettings /></ProtectedRoute>} />
                       <Route path="/scheduling" element={<ProtectedRoute permissions={["scheduling.items.view", "scheduling.boards.view", "scheduling.resources.view"]}><Scheduling /></ProtectedRoute>} />
                       <Route path="/contract-templates" element={<ProtectedRoute permission="client_contracts.view"><ContractTemplates /></ProtectedRoute>} />
                       <Route path="/client-contracts" element={<ProtectedRoute permission="client_contracts.view"><ClientContracts /></ProtectedRoute>} />
                       <Route path="/countries" element={<ProtectedRoute permission="settings.update"><Countries /></ProtectedRoute>} />
-                      <Route path="/org-chart" element={<OrgChart />} />
+                      <Route path="/org-chart" element={<ProtectedRoute permission="organizations.view"><OrgChart /></ProtectedRoute>} />
                       <Route path="/ai-learning" element={<ProtectedRoute permission="settings.update"><AILearning /></ProtectedRoute>} />
                       <Route path="/ai-assistant-admin" element={<ProtectedRoute permission="settings.update"><AIAssistantAdmin /></ProtectedRoute>} />
                       <Route path="/ai-assistant-config" element={<ProtectedRoute permission="settings.update"><AIAssistantConfig /></ProtectedRoute>} />
+                      {/* Guia de boas-vindas, ajuda do marketing e documentação da API do marketing: páginas estáticas (só lêem o nome da própria pessoa) — só sessão. */}
                       <Route path="/welcome" element={<WelcomeGuide />} />
-                      <Route path="/postal-codes-import" element={<PostalCodesImport />} />
+                      <Route path="/postal-codes-import" element={<ProtectedRoute systemAdminOnly><PostalCodesImport /></ProtectedRoute>} />
                       <Route path="/marketing-api" element={<MarketingApi />} />
-                      <Route path="/marketing-integration" element={<MarketingIntegration />} />
+                      <Route path="/marketing-integration" element={<ProtectedRoute permission="settings.update"><MarketingIntegration /></ProtectedRoute>} />
                       <Route path="/marketing-help" element={<MarketingHelp />} />
                       {/* 03/11/2026: o RH antigo (/rh/*) deixou de montar as páginas antigas; cada rota leva ao equivalente em /rh-exemplo/*
                           (RedirectRh mantém o :id, a query e o hash). Quem decide o acesso é a rota de destino. */}
@@ -414,13 +418,14 @@ const App = () => (
                       <Route path="/rh/documentos/modelos" element={<RedirectRh para="/rh-exemplo/documentos/modelos" />} />
                       <Route path="/rh/documentos/clausulas" element={<RedirectRh para="/rh-exemplo/documentos/modelos" />} />
                       <Route path="/rh/processamento-salarial" element={<RedirectRh para="/rh-exemplo/processamento-salarial" />} />
-                      <Route path="/organizations" element={<Organizations />} />
-                      <Route path="/organizations/:id" element={<ProtectedRoute permission="organizations.edit"><OrganizationDetail /></ProtectedRoute>} />
+                      <Route path="/organizations" element={<ProtectedRoute permission="organizations.view" allowWithoutCompany><Organizations /></ProtectedRoute>} />
+                      <Route path="/organizations/:id" element={<ProtectedRoute permission="organizations.view"><OrganizationDetail /></ProtectedRoute>} />
                       <Route path="/org-templates" element={<ProtectedRoute permission="organizations.view"><OrgTemplates /></ProtectedRoute>} />
                       <Route path="/org-help" element={<ProtectedRoute permission="organizations.view"><OrgHelp /></ProtectedRoute>} />
                       <Route path="/flow-builder" element={<ProtectedRoute permission="flow_builder.view"><FlowBuilder /></ProtectedRoute>} />
-                      <Route path="/needs-assessment-config" element={<NeedsAssessmentConfig />} />
+                      <Route path="/needs-assessment-config" element={<ProtectedRoute permission="settings.update"><NeedsAssessmentConfig /></ProtectedRoute>} />
                       <Route path="/smtp-management" element={<ProtectedRoute permission="smtp.view"><SmtpManagement /></ProtectedRoute>} />
+                      {/* Notificações: só as da própria pessoa (RLS user_id = auth.uid()) — só sessão, sem código de permissão. */}
                       <Route path="/notifications" element={<NotificationsPage />} />
                       <Route path="/email-templates" element={<ProtectedRoute permission="email_templates.view"><EmailTemplates /></ProtectedRoute>} />
                       <Route path="/trash" element={<ProtectedRoute permission="trash.view"><Trash /></ProtectedRoute>} />

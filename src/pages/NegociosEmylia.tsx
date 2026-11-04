@@ -38,6 +38,10 @@ import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { podeNeg } from "@/emylia/permissoes";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
+import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
+import { gravarDadosDaLead, lerDadosDasLeads, type FonteLead } from "@/emylia/real/dadosDaLead";
+import { definirGuardarDadosLead } from "@/emylia/DadosDaLead";
+import { lerComerciais } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { avisarCliente } from "@/emylia/real/avisosCliente";
@@ -300,6 +304,22 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const lidos = await lerNegocios(supabase, org, ids.current, S.campos);
       if (!vivo) return;
       aplicarLidos(lidos);
+      // 4/11: a morada que a lead já trazia (a da ficha da pessoa), para o passo «Morada da obra»; um erro a ler não para nada
+      void lerMoradasDasPessoas(supabase, [...refs.current.values()].map((r) => r.entityId)).then((m) => {
+        if (!vivo) return;
+        sugerirMoradas(S.deals, (d) => refs.current.get(d.id)?.entityId, m);
+        redesenhar();
+      });
+      // 4/11: o que a lead trouxe da Nova lead (os campos da Olyvia original), para a fase Lead; um erro a ler não para nada
+      void lerDadosDasLeads(supabase, org, [...refs.current.values()].map((r) => r.entityId)).then(({ porPessoa, fontes }) => {
+        if (!vivo) return;
+        for (const d of S.deals) {
+          const e = refs.current.get(d.id)?.entityId, x = e ? porPessoa.get(e) : undefined;
+          if (x) d.dadosLead = x; else delete d.dadosLead;
+        }
+        setFontesLead(fontes);
+        redesenhar();
+      });
       // 2/11 (20270103800000): o auto de receção que o cliente assinou no portal passa a assinado na obra (o relatório final); grava-se a seguir
       const rececoes = await lerRececoes(supabase, org);
       if (!vivo) return;
@@ -438,6 +458,20 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
 
   // 29/10: "Editar os dados do cliente" (menu do negócio) também muda o contacto do CRM: o nome, o email e o telefone principais da ficha
   // da pessoa (anew_entities). O resto (NIF, morada da obra) fica no negócio e grava-se com ele.
+  // 4/11: na fase Lead, «O que veio na lead» grava na pessoa (gravarDadosDaLead); as fontes e os comerciais para escolher
+  const [fontesLead, setFontesLead] = useState<FonteLead[]>([]);
+  const [comerciaisLead, setComerciaisLead] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!org) return;
+    let vivo = true;
+    void lerComerciais(org).then((c) => { if (vivo) setComerciaisLead(c.users.map((u) => ({ id: u.id, name: u.name }))); }).catch(() => undefined);
+    return () => { vivo = false; };
+  }, [org]);
+  useEffect(() => definirGuardarDadosLead(async (d, m) => {
+    if (!org || !d.dadosLead) throw new Error("Não foi possível gravar: o negócio não tem pessoa.");
+    return gravarDadosDaLead(supabase, org, d.dadosLead, m);
+  }, { fontes: fontesLead, comerciais: comerciaisLead }), [org, fontesLead, comerciaisLead]);
+
   useEffect(() => definirGuardarCliente((d, x, mudou, o) => {
     const ref = refs.current.get(d.id);
     if (!ref) return;

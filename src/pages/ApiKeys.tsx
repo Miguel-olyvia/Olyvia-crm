@@ -13,6 +13,7 @@ import { Key, Copy, Trash2, Plus, Eye, EyeOff, AlertCircle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface ApiKey {
   id: string;
@@ -33,6 +34,10 @@ export default function ApiKeys() {
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const { toast } = useToast();
+  // Ver: settings.update OU api_keys.view (rota e RLS "Users can view org API keys"). Criar, ativar/desativar e apagar: só
+  // settings.update na organização ("Admins can manage API keys", 20270106330000) — sem ela os botões não aparecem.
+  const { hasPermission } = usePermissions();
+  const podeGerir = hasPermission("settings.update");
 
   useEffect(() => {
     fetchApiKeys();
@@ -213,6 +218,7 @@ export default function ApiKeys() {
               {t('apiKeys.subtitle')}
             </p>
           </div>
+          {podeGerir && (
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -246,6 +252,7 @@ export default function ApiKeys() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          )}
         </div>
 
         {showNewKey && (
@@ -568,8 +575,8 @@ curl -X POST https://api.yourdomain.com/functions/v1/api-proxy/leads \\
                       <TableCell>
                         <Badge
                           variant={key.is_active ? "default" : "secondary"}
-                          className="cursor-pointer"
-                          onClick={() => toggleKeyStatus(key.id, key.is_active)}
+                          className={podeGerir ? "cursor-pointer" : undefined}
+                          onClick={podeGerir ? () => toggleKeyStatus(key.id, key.is_active) : undefined}
                         >
                           {key.is_active ? t('apiKeys.status.active') : t('apiKeys.status.inactive')}
                         </Badge>
@@ -581,13 +588,15 @@ curl -X POST https://api.yourdomain.com/functions/v1/api-proxy/leads \\
                       </TableCell>
                       <TableCell>{key.usage_count}</TableCell>
                       <TableCell>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => deleteApiKey(key.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        {podeGerir && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => deleteApiKey(key.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
