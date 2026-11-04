@@ -17,6 +17,8 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: ORG }, isLoading: false }) }));
+// 04/11/2026: a página lê a permissão real de mandar ao portal (PermPortalNegocios); aqui tem-na toda (portal.manage)
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => true, loading: false }) }));
 vi.mock("@/hooks/pessoas/novaLead/gravarNovaLead", () => ({ gravarNovaLead: (...a: unknown[]) => gravarNovaLead(...a) }));
 vi.mock("@/hooks/pessoas/novaLead/comerciaisNovaLead", () => ({ resolverOrgRaiz: async () => ORG, lerComerciais: async () => ({ users: [], tree: [] }) }));
 const minha = vi.hoisted(() => ({ pessoaId: null as string | null, nome: "Rúben Carvalho" }));

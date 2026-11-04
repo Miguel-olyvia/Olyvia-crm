@@ -118,7 +118,9 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
   const passarAVisita = (g: VisitaGravada): number | undefined => {
     if (modo !== "primeira" || d.fase !== 1 || g.remarcada) return undefined;
     const antes = numerosDe(d).length;
-    ctx.A.marcarVisita(d.id, vagaDoMotor(g.visita.dia, g.visita.hora));
+    // 4/11: a visita fica com quem foi escolhido na agenda (e não com quem está ligado)
+    const quem = g.visita.recursos.map((r) => nomes.get(r) ?? "").filter(Boolean).join(" e ");
+    ctx.A.marcarVisita(d.id, vagaDoMotor(g.visita.dia, g.visita.hora), quem || undefined);
     return antes === 0 && d.fase >= 2 ? numerosDe(d).find((n) => !d.f[`v${n}_crm`]) : undefined;
   };
   const aposGravar = (g: VisitaGravada): void => {

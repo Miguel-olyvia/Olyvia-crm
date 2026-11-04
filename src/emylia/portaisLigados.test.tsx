@@ -4,6 +4,10 @@
 import { useReducer } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// 04/11/2026: o «Acesso ao portal» pede a permissão real (usePodeEnviarAoPortal); aqui quem está ligado gere o portal
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
+vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "org-1" } }) }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: (c: string) => c === "portal.manage", loading: false }) }));
 import { acoes, seed, type Estado, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import {

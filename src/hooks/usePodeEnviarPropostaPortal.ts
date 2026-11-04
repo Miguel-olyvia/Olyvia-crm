@@ -44,3 +44,21 @@ export function usePodeEnviarPropostaPortal(ativo = true): { pode: boolean; aLer
   const daOrg = lida && lida.org === org ? lida : null;
   return { pode: daOrg?.pode === true, aLer: aLerPerfil || daOrg === null };
 }
+
+// 04/11/2026 (/negocios, «Acesso ao portal»): o mesmo para o CONTRATO, com a regra do servidor (create-client-portal-access):
+// portal.manage OU client_contracts.send_signature no perfil da organização ativa (hasPermission; o System Admin tem todas as
+// permissões explícitas na base). A proposta segue usePodeEnviarPropostaPortal.
+export const PERMISSAO_ENVIAR_CONTRATO = "client_contracts.send_signature";
+export const SEM_PERMISSAO_CONTRATO_PORTAL = "Sem permissão para enviar o contrato ao portal (requer client_contracts.send_signature ou portal.manage).";
+export type DocumentoPortal = "proposal" | "contract";
+
+/** Quem pode mandar ao portal (criar/reenviar o acesso) o documento `tipo`, com o motivo quando não pode. */
+export function usePodeEnviarAoPortal(tipo: DocumentoPortal, ativo = true): { pode: boolean; aLer: boolean; motivo: string } {
+  const { hasPermission, loading } = usePermissions();
+  const proposta = usePodeEnviarPropostaPortal(ativo && tipo === "proposal");
+  const motivo = tipo === "contract" ? SEM_PERMISSAO_CONTRATO_PORTAL : SEM_PERMISSAO_PROPOSTA_PORTAL;
+  if (!ativo) return { pode: false, aLer: false, motivo };
+  if (tipo === "proposal") return { ...proposta, motivo };
+  const pode = hasPermission(PERMISSAO_GERIR_PORTAL) || hasPermission(PERMISSAO_ENVIAR_CONTRATO);
+  return { pode, aLer: !pode && loading, motivo };
+}

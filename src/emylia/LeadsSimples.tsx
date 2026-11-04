@@ -13,6 +13,7 @@ import {
 import type { DocPessoa } from "./pessoasDocs";
 import { ESTADO_TOQUE, campanhaDe, infoOrigem, toquesDe, utmTexto, type AvisoOrigem, type Toque } from "./toquesDocs";
 import { FASE_COR, FASE_ICONE, Chip, fazer, teclasTablist, type Ctx } from "./pecas";
+import { SemPermissaoPortal, usePermPortalDoPasso } from "./permPortalPasso";
 
 export type Separador = "negocios" | "contratos" | "info" | "submissoes" | "historico";
 const SEPARADORES: { id: Separador; nome: string }[] = [
@@ -152,6 +153,7 @@ export function FichaLead({ S, A, go, p, voltar, papel = "lead", textoVoltar = "
   const sep = separadores.some((s) => s.id === escolhido) ? escolhido : "negocios";
   const setSep = (v: Separador) => { setSepEstado(v); if (aoMudarSep) aoMudarSep(v); else lembrar({ sep: v }); };
   const d = p.principal, nx = proximoDe(p, S), info = infoLead(p);
+  const portal = usePermPortalDoPasso(nx.act);
   const toques = toquesDe(S, p.nome), origem = infoOrigem(toques);
   const email = d.f.email;
   const wa = soDigitos(d.tel);
@@ -176,8 +178,9 @@ export function FichaLead({ S, A, go, p, voltar, papel = "lead", textoVoltar = "
           {email && <a className={LINK} href={`mailto:${email}`}><Mail className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Email</a>}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Button size="lg" className="min-h-11" onClick={go(() => (nx.act ? fazer(A, nx.act, d.id, nx.arg) : A.abrir(d.id)))}>
-            {nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
+          <Button size="lg" className="min-h-11" disabled={!portal.pode} title={portal.semPermissao ? portal.motivo : undefined}
+            onClick={go(() => { if (!portal.pode) return; if (nx.act) fazer(A, nx.act, d.id, nx.arg); else A.abrir(d.id); })}>
+            {nx.btn || "Abrir negócio"}<SemPermissaoPortal p={portal} /><ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
           </Button>
           <p className="text-[15px] text-muted-foreground">Próximo passo: {nx.t}</p>
         </div>

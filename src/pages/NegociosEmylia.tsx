@@ -16,6 +16,7 @@ import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/re
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
+import { PermPortalNegocios } from "@/emylia/PermPortalNegocios";
 import { comVisitasDoCrm } from "@/components/pessoas/negocioEmylia/visitasDosPassos";
 import { HojeSimples } from "@/emylia/HojeSimples";
 import { HojeTecnico } from "@/emylia/HojeTecnico";
@@ -57,6 +58,7 @@ import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
 import { aplicarFaturacao, lerFaturacaoDaFicha, precisaDaFicha } from "@/emylia/real/faturacaoDaFicha";
+import { definirDadosPagamento, lerDadosPagamento } from "@/emylia/pagamentoCliente";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
@@ -267,6 +269,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // F3: abrir a encomenda de cliente, a Receção e as compras vai às páginas reais, filtradas pela encomenda do negócio
   const A = useMemo(() => acoes(S, avisar, run, ligacaoInventario((url) => navigate(url))), [S, avisar, run, navigate]);
   useEffect(() => { definirOrgErp(org); return () => definirOrgErp(null); }, [org]);
+  // 4/11: os dados da empresa para o cliente pagar (o passo «Pagamento» e «Ver como o cliente»); sem eles, nada de exemplo
+  useEffect(() => {
+    let desfazer = definirDadosPagamento(null);
+    let vivo = true;
+    if (org) void (supabase as unknown as { rpc: (f: string, a: unknown) => Promise<{ data: unknown; error: unknown }> })
+      .rpc("neg_dados_pagamento_ler", { p_org: org })
+      .then(({ data, error }) => { if (vivo && !error) { desfazer(); desfazer = definirDadosPagamento(lerDadosPagamento(data)); } });
+    return () => { vivo = false; desfazer(); };
+  }, [org]);
   useEffect(() => aoMudarProntidao(redesenhar), [redesenhar]);
 
   useEffect(() => {
@@ -541,6 +552,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver os negócios.</div>;
   return (
+    // 04/11/2026: a permissão real de mandar a proposta / o contrato ao portal, para os botões dos passos (permPortalPasso.tsx)
+    <PermPortalNegocios>
     <div className="pn calma pg-root min-h-full bg-background">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-3 text-[15px]">
         <label className="flex items-center gap-2">
@@ -596,5 +609,6 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         ))}
       </div>
     </div>
+    </PermPortalNegocios>
   );
 }

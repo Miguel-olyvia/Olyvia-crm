@@ -34,6 +34,7 @@ import { lerInventario, useInventario } from "./inventario/loja";
 import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra";
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
+import { usePermPortalDoPasso } from "./permPortalPasso";
 import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
@@ -456,6 +457,8 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   const idSemPerm = useId();
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
   const falta = meu && p.btn ? permEmFaltaDoPasso(S, p.act) : null;
+  // 04/11/2026: enviar a proposta / o contrato ao portal pede também a permissão real de quem está ligado (permPortalPasso.tsx)
+  const portal = usePermPortalDoPasso(p.act, meu && !!p.btn && !falta);
   if (falta) return (
     <div className="grid justify-items-start gap-1 sm:justify-items-end">
       <Button size={tamanho} disabled aria-describedby={idSemPerm}>{p.btn}</Button>
@@ -466,6 +469,12 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
   // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP
   if (p.act === "registarFaturaErp" && meu) return <RegistarFaturaErp ctx={ctx} d={d} tamanho={tamanho} />;
+  if (p.btn && meu && !portal.pode) return (
+    <div className="grid justify-items-start gap-1 sm:justify-items-end">
+      <Button size={tamanho} disabled aria-describedby={portal.semPermissao ? idSemPerm : undefined}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
+      {portal.semPermissao && <p id={idSemPerm} className="max-w-sm text-sm text-muted-foreground sm:text-right">{portal.motivo}</p>}
+    </div>
+  );
   if (p.btn) return meu
     ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
     : (

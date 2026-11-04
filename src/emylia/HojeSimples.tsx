@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { PAPEIS, aberto, eur, minhas, pct, tot } from "./motor";
 import { agenda, alertasDia } from "./Hoje";
 import { IconeFase, Progresso, fazer, type Ctx } from "./pecas";
+import { ComPermPortalDoPasso, SemPermissaoPortal } from "./permPortalPasso";
 import { aDescoberto } from "./planoObra";
 import { useInventario } from "./inventario/loja";
 import { contadores as contadoresInv } from "./inventario/contadores";
@@ -129,7 +130,12 @@ export function HojeSimples({ S, A, run, go }: Ctx) {
       <div className="mt-6 flex flex-wrap items-center gap-3">
         {primeiro.dir
           ? <><Button size="lg" onClick={go(() => A.aprovar(primeiro.d.id))}>Aprovar</Button><Button size="lg" variant="outline" onClick={go(() => A.recusarAprov(primeiro.d.id))}>Recusar</Button></>
-          : primeiro.p.btn && <Button size="lg" onClick={go(() => fazer(A, primeiro.p.act!, primeiro.d.id, primeiro.p.arg))}>{primeiro.p.btn}</Button>}
+          : primeiro.p.btn && (
+            <ComPermPortalDoPasso act={primeiro.p.act}>{(portal) => (
+              <Button size="lg" disabled={!portal.pode} title={portal.semPermissao ? portal.motivo : undefined}
+                onClick={go(() => { if (portal.pode) fazer(A, primeiro.p.act!, primeiro.d.id, primeiro.p.arg); })}>{primeiro.p.btn}<SemPermissaoPortal p={portal} /></Button>
+            )}</ComPermPortalDoPasso>
+          )}
         <Button size="lg" variant="ghost" onClick={go(() => A.abrir(primeiro.d.id))}>Abrir o negócio</Button>
       </div>
     </section>
@@ -160,7 +166,12 @@ export function HojeSimples({ S, A, run, go }: Ctx) {
             {cols > 1 && (dir
               ? <Button variant="ghost" className="shrink-0" onClick={go(() => A.aprovar(d.id))}>Aprovar a margem</Button>
               : p.btn
-                ? <Button variant="ghost" className="shrink-0" onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}</Button>
+                ? (
+                  <ComPermPortalDoPasso act={p.act}>{(portal) => (
+                    <Button variant="ghost" className="shrink-0" disabled={!portal.pode} title={portal.semPermissao ? portal.motivo : undefined}
+                      onClick={go(() => { if (portal.pode) fazer(A, p.act!, d.id, p.arg); })}>{p.btn}<SemPermissaoPortal p={portal} /></Button>
+                  )}</ComPermPortalDoPasso>
+                )
                 : <ArrowRight className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />)}
           </li>
           );
