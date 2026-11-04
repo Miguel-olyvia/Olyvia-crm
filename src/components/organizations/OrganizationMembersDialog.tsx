@@ -73,7 +73,12 @@ export function OrganizationMembersDialog({
 }: OrganizationMembersDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("organizations.edit");
+  // As mesmas permissões que o servidor pede para os membros (não organizations.edit, que é a da organização em si):
+  // acrescentar = users.create (anew_memberships_insert e a Edge create-user), editar = users.edit (anew_memberships_update
+  // e anew_users_update), remover = users.delete (anew_memberships_delete).
+  const podeAdicionar = hasPermission("users.create");
+  const podeEditar = hasPermission("users.edit");
+  const podeRemover = hasPermission("users.delete");
   const [members, setMembers] = useState<Member[]>([]);
   const [allUsers, setAllUsers] = useState<AnewUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -471,7 +476,7 @@ export function OrganizationMembersDialog({
 
           <div className="space-y-4">
             {/* Add Member Button / Form */}
-            {!isAddingMember && canManage ? (
+            {!isAddingMember && !podeAdicionar ? null : !isAddingMember ? (
               <Button onClick={() => setIsAddingMember(true)} size="sm">
                 <UserPlus className="w-4 h-4 mr-2" />
                 {t("organizations.addMember")}
@@ -813,8 +818,7 @@ export function OrganizationMembersDialog({
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">
-                              {canManage && (
-                                <>
+                              {podeEditar && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -824,6 +828,8 @@ export function OrganizationMembersDialog({
                                   >
                                     <Pencil className="w-4 h-4" />
                                   </Button>
+                              )}
+                              {podeRemover && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -834,7 +840,6 @@ export function OrganizationMembersDialog({
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </Button>
-                                </>
                               )}
                             </div>
                           </TableCell>

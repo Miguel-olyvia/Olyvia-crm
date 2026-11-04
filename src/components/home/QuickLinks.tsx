@@ -36,6 +36,8 @@ interface QuickLink {
   icon: LucideIcon;
   labelKey: string;
   permission?: string;
+  /** Qualquer destas (OR), como a rota em App.tsx. Se existir, manda sobre `permission`. */
+  permissions?: string[];
 }
 
 interface QuickGroup {
@@ -140,7 +142,7 @@ export const QUICK_GROUPS: QuickGroup[] = [
     items: [
       { id: "users", to: "/users", icon: UserCog, labelKey: "sidebar.users", permission: "users.view" },
       { id: "roles", to: "/utilizadores-perfis", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
-      { id: "api-keys", to: "/api-keys", icon: Key, labelKey: "sidebar.apiKeys", permission: "settings.update" },
+      { id: "api-keys", to: "/api-keys", icon: Key, labelKey: "sidebar.apiKeys", permissions: ["settings.update", "api_keys.view"] },
     ],
   },
   {
@@ -188,7 +190,7 @@ export function QuickLinks({ canSee }: QuickLinksProps) {
 
   const groups = QUICK_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => canSee(item.permission)),
+    items: group.items.filter((item) => (item.permissions ? item.permissions.some((p) => canSee(p)) : canSee(item.permission))),
   })).filter((group) => group.items.length > 0);
 
   const handleOpenChange = (next: boolean) => {
