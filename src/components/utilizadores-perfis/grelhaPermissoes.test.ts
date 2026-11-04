@@ -99,7 +99,7 @@ describe("secoesDoGrupo", () => {
       p("client_contracts.cancel", "Cancelar"), p("negocios.contrato.editar", "Editar o contrato do negócio"),
       p("negocios.proposta.decidir", "Registar a decisão do cliente sobre a proposta"), p("negocios.obra.imprevistos", "Decidir os imprevistos da obra"),
       p("negocios.proposta.enviar", "Enviar a proposta ao cliente"), p("negocios.margem.aprovar", "Aprovar a margem do orçamento"),
-      p("negocios.obra.materiais", "Encomendar materiais da obra"), p("negocios.registar_fatura", "Registar faturas do negócio"),
+      p("negocios.obra.materiais", "Ver materiais da obra"), p("negocios.registar_fatura", "Registar faturas do negócio"),
       p("negocios.orcamento.editar", "Editar o orçamento do negócio"), p("negocios.obra.executar", "Executar as tarefas da obra"),
       p("negocios.obra.planear", "Planear a obra"),
     ].map((x) => ({ ...x, categoria: x.categoria === "negocios" ? "pessoas" : x.categoria }));
@@ -109,7 +109,7 @@ describe("secoesDoGrupo", () => {
       "Editar orçamento", "Aprovar margem do orçamento", "Enviar proposta ao cliente", "Registar decisão do cliente sobre a proposta",
       "Editar contrato", "Anular contrato", "Ver custos do orçamento",
     ]);
-    expect(chips("Obra")).toEqual(["Planear obra", "Executar tarefas", "Encomendar materiais", "Decidir imprevistos", "Encerrar obra"]);
+    expect(chips("Obra")).toEqual(["Planear obra", "Executar tarefas", "Ver materiais", "Decidir imprevistos", "Encerrar obra"]);
     expect(chips("Financeiro")).toEqual(["Registar faturas", "Validar pagamentos"]);
   });
 

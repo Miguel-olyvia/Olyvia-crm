@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, diaDeFerias, nfmt, type MatTarefa, type Negocio, type Plano, type SvcId, type Tarefa } from "./motor";
 import type { Ctx } from "./pecas";
-import { SEM_PERM, podeNeg } from "./permissoes";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { rotuloDia, tecnicosDoOficio } from "./preparacaoObra";
@@ -219,14 +218,11 @@ export function ExtrasTarefa({ ctx, d, ti, fase = true, fechar }: { ctx: Ctx; d:
             {t.ecs?.length ? <p className="mt-2 text-sm text-muted-foreground">Encomendado em {t.ecs.join(", ")}</p> : null}
             {falta.length > 0 && (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warning/10 px-3 py-2">
-                <span className="text-sm">Por encomendar: {falta.map((x) => `${x.m.n} (${nfmt(x.q)} ${x.m.un})`).join(", ")}</span>
+                <span className="text-sm">Ainda não encomendado: {falta.map((x) => `${x.m.n} (${nfmt(x.q)} ${x.m.un})`).join(", ")}</span>
+                {/* 4/11 (decisão do utilizador): na obra não se encomendam materiais; sem o botão "Encomendar", só o estado */}
                 {retida
                   ? <span className="text-sm text-muted-foreground">encomenda-se quando o pagamento da 1.ª parcela da adenda {t.adenda} for validado</span>
-                  : d.obra.ec?.ref
-                  ? (podeNeg(S.role, "obra.materiais")
-                    ? <Button size="sm" className="min-h-10" onClick={() => run(() => A.encomendarMateriais(d.id))}>Encomendar</Button>
-                    : <span className="text-sm text-muted-foreground">{SEM_PERM["obra.materiais"].msg}</span>)
-                  : <span className="text-sm text-muted-foreground">encomenda-se a seguir ao pagamento</span>}
+                  : !d.obra.ec?.ref && <span className="text-sm text-muted-foreground">encomenda-se a seguir ao pagamento</span>}
               </div>
             )}
           </>;

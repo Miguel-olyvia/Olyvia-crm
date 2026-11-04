@@ -15,9 +15,12 @@ import type { Papel } from "./motor";
 // 4/11 (Lote C): as cinco que o servidor também exige e o ecrã não perguntava (neg_guardar_negocio: o orçamento, o envio da proposta e
 // o contrato; obra_guardar_negocio: planear e executar a obra; obra_encomendar_materiais: os materiais novos). "equipa.edit" (a ficha do
 // técnico) passa a ser a do RH (hr.pessoas.laborais.edit, rh_guardar_oficios_pessoa); planear a obra tem a sua ("obra.planear").
+// 4/11 (tarde): "obra.materiais" (negocios.obra.materiais) passa a ser só VER os materiais da obra (o bloco no separador "Equipa e meios"),
+// e todos os papéis que abrem a obra a têm. Pedir materiais novos ao fornecedor (obra_encomendar_materiais) é "obra.encomendar", ou seja,
+// purchase_orders.create; na obra já não há botão de encomendar (20270106500000).
 export type PermNeg = "finance.validate_payment" | "finance.invoice" | "contracts.cancel" | "equipa.edit" | "margin.approve"
   | "contacto.registar" | "visita.gerir" | "proposta.decidir" | "obra.imprevistos" | "obra.fechar" | "negocio.perder"
-  | "orcamento.editar" | "proposta.enviar" | "contrato.editar" | "obra.planear" | "obra.executar" | "obra.materiais";
+  | "orcamento.editar" | "proposta.enviar" | "contrato.editar" | "obra.planear" | "obra.executar" | "obra.materiais" | "obra.encomendar";
 
 /** As quatro que a migração deu a quem grava o negócio (pessoas.edit): contacto, visita, decisão do cliente e perder. */
 const DO_NEGOCIO: readonly PermNeg[] = ["contacto.registar", "visita.gerir", "proposta.decidir", "negocio.perder"];
@@ -27,10 +30,10 @@ const DA_OBRA: readonly PermNeg[] = ["obra.imprevistos", "obra.fechar"];
 const DA_PROPOSTA: readonly PermNeg[] = ["orcamento.editar", "proposta.enviar", "contrato.editar"];
 
 export const PERMS_PAPEL: Record<Papel, readonly (PermNeg | "*")[]> = {
-  direcao: ["*"], financeiro: ["finance.validate_payment", "finance.invoice", ...DO_NEGOCIO],
-  comercial: [...DO_NEGOCIO, ...DA_PROPOSTA], armazem: [...DO_NEGOCIO],
+  direcao: ["*"], financeiro: ["finance.validate_payment", "finance.invoice", ...DO_NEGOCIO, "obra.materiais"],
+  comercial: [...DO_NEGOCIO, ...DA_PROPOSTA, "obra.materiais"], armazem: [...DO_NEGOCIO, "obra.materiais"],
   operacoes: ["equipa.edit", ...DO_NEGOCIO, ...DA_OBRA, "obra.planear", "obra.executar", "obra.materiais"],
-  juridico: [...DO_NEGOCIO, "contrato.editar"], tecnico: ["obra.executar"],
+  juridico: [...DO_NEGOCIO, "contrato.editar", "obra.materiais"], tecnico: ["obra.executar", "obra.materiais"],
 };
 
 /** 3/11: as seis da migração 20270105200000 (a Direção da Olyvia tem-nas todas: papeisReal.aplicarPermissoesReais). */
@@ -58,13 +61,12 @@ export const CODIGO_BASE: Record<PermNeg, string> = {
   "obra.planear": "negocios.obra.planear",
   "obra.executar": "negocios.obra.executar",
   "obra.materiais": "negocios.obra.materiais",
+  "obra.encomendar": "purchase_orders.create",
 };
 
-/** 4/11: outros códigos que o servidor aceita em vez do de CODIGO_BASE (obra_encomendar_materiais: negocios.obra.materiais OU
- *  purchase_orders.create). Também se leem (CODIGOS_NEGOCIOS). */
-export const ALTERNATIVAS: Readonly<Partial<Record<PermNeg, readonly string[]>>> = {
-  "obra.materiais": ["purchase_orders.create"],
-};
+/** 4/11: outros códigos que o servidor aceita em vez do de CODIGO_BASE. Também se leem (CODIGOS_NEGOCIOS). 4/11 (tarde): nenhum; o de
+ *  obra_encomendar_materiais (purchase_orders.create) passou a ser o próprio código de "obra.encomendar". */
+export const ALTERNATIVAS: Readonly<Partial<Record<PermNeg, readonly string[]>>> = {};
 
 /** As permissões da conta real: `codigos` as concedidas na organização ativa (null: ainda não se sabem); `simular`: a Direção/admin
  *  pode usar o "A ver como". Sem conta real, null. */
@@ -103,5 +105,6 @@ export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "contrato.editar": { msg: "Sem permissão para mudar o contrato", sub: "Gerar, enviar ou rever o contrato (cláusulas e pedidos do cliente) pede a permissão negocios.contrato.editar." },
   "obra.planear": { msg: "Sem permissão para planear a obra", sub: "Mudar o plano, os técnicos, aprovar, arrancar e validar as tarefas pede a permissão negocios.obra.planear." },
   "obra.executar": { msg: "Sem permissão para registar a execução", sub: "Começar, registar e marcar como feitas as tarefas atribuídas a si pede a permissão negocios.obra.executar." },
-  "obra.materiais": { msg: "Sem permissão para encomendar materiais", sub: "Pedir materiais novos ao fornecedor pede a permissão negocios.obra.materiais (ou purchase_orders.create)." },
+  "obra.materiais": { msg: "Sem permissão para ver os materiais da obra", sub: "Ver os materiais da obra (as linhas da encomenda de cliente, as reservas e as encomendas a fornecedor) pede a permissão negocios.obra.materiais." },
+  "obra.encomendar": { msg: "Sem permissão para encomendar materiais", sub: "Pedir materiais novos ao fornecedor pede a permissão purchase_orders.create (criar encomendas de compra)." },
 };

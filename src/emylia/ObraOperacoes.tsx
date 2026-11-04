@@ -24,7 +24,7 @@ import {
 } from "./obraOps";
 import { custoObra } from "./custoObra";
 import type { Ctx } from "./pecas";
-import { podeNeg } from "./permissoes";
+import { SEM_PERM, podeNeg } from "./permissoes";
 import { AutoNoNegocio } from "./AutoRececao";
 import { pontosEncerrar, type PontoEncerrar } from "./encerrarObra";
 import { ViaturasObra } from "./frota/ViaturasObra";
@@ -407,7 +407,9 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         {aba === "meios" && <>
           <EquipaObra ctx={ctx} d={d} direcao={direcao} verDia={verDia} />
           <div className="mt-8"><ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} svcs={servicosDaObra(d)} /></div>
-          <MateriaisObra ctx={ctx} d={d} />
+          {/* 4/11: negocios.obra.materiais é a de VER os materiais da obra (todos os papéis que abrem a obra a têm) */}
+          {podeNeg(S.role, "obra.materiais") ? <MateriaisObra ctx={ctx} d={d} />
+            : <p className="mt-8 max-w-3xl rounded-2xl border border-dashed border-input p-5 text-[15px] text-muted-foreground">{SEM_PERM["obra.materiais"].msg}</p>}
           <EquipamentosObra d={d} />
         </>}
         {aba === "registos" && <>

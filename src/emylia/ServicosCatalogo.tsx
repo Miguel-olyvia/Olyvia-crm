@@ -2,12 +2,12 @@
 // agrupados por ofício. Os do pacote vêm marcados (as quantidades saem das medidas); toca-se para juntar ou tirar.
 // Por omissão, cada ofício mostra os escolhidos e os mais pedidos desta linha; "Ver mais serviços" abre o resto,
 // e a pesquisa procura em todos (o Catálogo vai ter ~400 serviços).
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Check, Link2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { itemCatalogo } from "./catalogo";
 import { aValidar } from "./CamposFase";
-import { eur, nfmt, servicosVisita, type MedKey, type Negocio, type SvcId } from "./motor";
+import { eur, nfmt, servicosPedidos, servicosVisita, type MedKey, type Negocio, type SvcId } from "./motor";
 import { obrigacoes } from "./produtosVisita";
 import { useCatalogo } from "./v2/catalogoStore";
 import { useCustos } from "./v2/custosStore";
@@ -43,6 +43,26 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
   const obr = Object.fromEntries(obrigacoes(K, servicosVisita(d), v, d.f.materiais_cliente === "Sim").map((o) => [o.sid, o]));
   const nenhum = !tiles.some((t) => t.on);
 
+  // 4/11 (Rúben): os serviços do Catálogo que o cliente pediu na chamada (servicos_pedidos) entram já escolhidos, com a quantidade sugerida.
+  // Só uma vez por serviço (servicos_pedidos_levados): se alguém o tirar na visita, não volta.
+  const pedidos = servicosPedidos(d, S);
+  useEffect(() => {
+    if (ro) return;
+    const levados = new Set((d.f.servicos_pedidos_levados ?? "").split(",").filter(Boolean));
+    const novos = pedidos.map((x) => x.id).filter((sid) => !levados.has(sid));
+    if (novos.length === 0) return;
+    run(() => {
+      for (const sid of novos) {
+        const t = tiles.find((x) => x.sid === sid);
+        if (t?.origem === "pacote") { if (!t.on) A.servico(d.id, sid); continue; }
+        if ((v.extra[sid] || 0) > 0) continue;
+        const c = itemCatalogo(sid) ?? { id: sid, n: S.svc[sid].n, un: S.svc[sid].un, qm: 1 };
+        A.extra(d.id, sid, sugestaoQtd(c, d, medidaDe(sid)));
+      }
+      d.f.servicos_pedidos_levados = [...levados, ...novos].join(",");
+    });
+  }, [d.id, d.f.servicos_pedidos, ro]); // eslint-disable-line react-hooks/exhaustive-deps -- só quando mudam os pedidos
+
   const tocar = (t: TileServico) => run(() => {
     if (t.origem === "pacote") return A.servico(d.id, t.sid);
     if ((v.extra[t.sid] || 0) > 0) return A.extra(d.id, t.sid, 0);
@@ -65,6 +85,11 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
   return (
     <div className="space-y-6">
       {validar && nenhum && <p className="text-[15px] font-medium text-destructive">Escolha pelo menos um serviço.</p>}
+      {pedidos.length > 0 && (
+        <p className="rounded-xl bg-primary/[0.06] px-4 py-3 text-[15px]">
+          Pedidos na chamada: <b className="font-semibold">{pedidos.map((x) => x.n).join(", ")}</b>. Já vêm escolhidos: confirme as quantidades.
+        </p>
+      )}
 
       {!ro && (
         <label className="relative block max-w-xl">

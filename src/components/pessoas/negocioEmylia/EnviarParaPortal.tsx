@@ -43,7 +43,12 @@ export function EnviarParaPortal({ negocioId, tipo, podeEditar }: EnviarParaPort
             <Send className="h-4 w-4" aria-hidden="true" />
             {p.aEnviar ? "A enviar…" : p.estado === "enviado" ? "Reenviar para o portal" : "Enviar para o portal do cliente"}
           </button>
-          {!pode && <p className="text-sm text-muted-foreground">Não tens permissão para enviar {nome === "proposta" ? "a proposta" : "o contrato"} ao portal.</p>}
+          {!pode && !p.aLerPermissao && (
+            <p className="text-sm text-muted-foreground">
+              Não tens permissão para enviar {nome === "proposta" ? "a proposta" : "o contrato"} ao portal
+              {nome === "proposta" ? " (requer negocios.proposta.enviar ou portal.manage)" : ""}.
+            </p>
+          )}
         </>
       )}
     </section>

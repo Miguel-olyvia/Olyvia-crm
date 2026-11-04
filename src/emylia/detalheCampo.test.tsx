@@ -8,31 +8,31 @@ import type { Negocio } from "./motor";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
-const PREPARAR = CONTACTO.find((g) => g.titulo === "Preparar a visita")!;
-const ORIGEM = LEAD.find((g) => g.titulo === "Origem")!;
+const QUALIFICACAO = CONTACTO.find((g) => g.titulo === "Qualificação")!;
+const PEDIDO = LEAD.find((g) => g.titulo === "Pedido")!;
 
 describe("as opções que pedem mais detalhe", () => {
   it("o editor guarda-as por campo; ao ler, ficam só as opções que o campo tem", () => {
     const cfg = lerCfgCampos({
-      "Preparar a visita": { detalhes: { presentes: ["Outra pessoa", "não existe"], nota_visita: ["x"] } },
-      Origem: { novos: [{ k: "c_canal", l: "Canal", t: "escolha", op: ["Feira", "Outro"], detalhe: ["Outro", "Rádio"] }] },
+      Qualificação: { detalhes: { posse: ["Administração", "não existe"], poder_decisao: ["x"] } },
+      Pedido: { novos: [{ k: "c_canal", l: "Canal", t: "escolha", op: ["Feira", "Outro"], detalhe: ["Outro", "Rádio"] }] },
     });
-    expect(cfg["Preparar a visita"].detalhes).toEqual({ presentes: ["Outra pessoa"] });
-    expect(cfg.Origem.novos?.[0].detalhe).toEqual(["Outro"]);
-    expect(efetivo(cfg, PREPARAR).campos.find((c) => c.k === "presentes")?.detalhe).toEqual(["Outra pessoa"]);
-    expect(efetivo(cfg, ORIGEM).campos.find((c) => c.k === "c_canal")?.detalhe).toEqual(["Outro"]);
+    expect(cfg.Qualificação.detalhes).toEqual({ posse: ["Administração"] });
+    expect(cfg.Pedido.novos?.[0].detalhe).toEqual(["Outro"]);
+    expect(efetivo(cfg, QUALIFICACAO).campos.find((c) => c.k === "posse")?.detalhe).toEqual(["Administração"]);
+    expect(efetivo(cfg, PEDIDO).campos.find((c) => c.k === "c_canal")?.detalhe).toEqual(["Outro"]);
   });
 
   it("no formulário, a caixa só aparece com a opção escolhida, e o que se escreve grava-se em <campo>_detalhe", () => {
-    const grupo: Grupo = efetivo(lerCfgCampos({ "Preparar a visita": { detalhes: { presentes: ["Outra pessoa"] } } }), PREPARAR);
+    const grupo: Grupo = efetivo(lerCfgCampos({ Qualificação: { detalhes: { posse: ["Administração"] } } }), QUALIFICACAO);
     const campo = vi.fn();
-    const d = { id: 9, f: { presentes: "O casal" }, sug: {} } as unknown as Negocio;
+    const d = { id: 9, f: { posse: "Proprietário" }, sug: {} } as unknown as Negocio;
     const { rerender } = render(<Campos grupo={grupo} d={d} A={{ campo } as never} run={(fn) => fn()} simples />);
-    expect(screen.queryByLabelText("Quem vai estar: mais detalhe")).toBeNull();
-    d.f.presentes = "Outra pessoa";
+    expect(screen.queryByLabelText("O cliente é: mais detalhe")).toBeNull();
+    d.f.posse = "Administração";
     rerender(<Campos grupo={grupo} d={{ ...d }} A={{ campo } as never} run={(fn) => fn()} simples />);
-    const caixa = screen.getByLabelText("Quem vai estar: mais detalhe");
-    fireEvent.blur(caixa, { target: { value: "A vizinha, que tem a chave" } });
-    expect(campo).toHaveBeenCalledWith(9, "presentes_detalhe", "A vizinha, que tem a chave");
+    const caixa = screen.getByLabelText("O cliente é: mais detalhe");
+    fireEvent.blur(caixa, { target: { value: "Condomínio da Rua A, administrado pela Gestão X" } });
+    expect(campo).toHaveBeenCalledWith(9, "posse_detalhe", "Condomínio da Rua A, administrado pela Gestão X");
   });
 });

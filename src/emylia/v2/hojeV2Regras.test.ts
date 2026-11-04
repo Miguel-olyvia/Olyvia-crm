@@ -67,10 +67,12 @@ describe("Hoje V2 · marcar a visita na linha", () => {
     const S = seed();
     expect(destinoVisita(S, null)).toMatchObject({ motor: false, motivo: expect.stringMatching(/^Pessoa de exemplo/) });
     expect(destinoVisita(S, 1043)).toMatchObject({ motor: false, motivo: expect.stringMatching(/ainda está em Lead/) });
+    // 4/11: o exemplo do Manuel traz a Qualificação toda; tira-se uma pergunta para ficar incompleto
+    delete S.deals.find((d) => d.id === 1038)!.f.poder_decisao;
     const manuel = destinoVisita(S, 1038);
     expect(manuel.motor).toBe(false);
-    expect(faltamContacto(S, S.deals.find((d) => d.id === 1038)!)).toEqual(["Quem vai estar"]);
-    expect(manuel.motivo).toMatch(/^Falta 1 campo do Contacto \(Quem vai estar\)/);
+    expect(faltamContacto(S, S.deals.find((d) => d.id === 1038)!)).toEqual(["Tem poder de decisão"]);
+    expect(manuel.motivo).toMatch(/^Falta 1 campo do Contacto \(Tem poder de decisão\)/);
   });
   it("com o Contacto completo vai ao motor, e o negócio passa a Visita (com a visita na agenda)", () => {
     const S = seed(), d = S.deals.find((x) => x.id === 1038)!;

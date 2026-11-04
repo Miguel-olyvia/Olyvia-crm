@@ -76,6 +76,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
+import { usePodeEnviarPropostaPortal, SEM_PERMISSAO_PROPOSTA_PORTAL } from "@/hooks/usePodeEnviarPropostaPortal";
 import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
 import {
@@ -632,6 +633,9 @@ const Proposals = () => {
   const [isBulkStatusChanging, setIsBulkStatusChanging] = useState(false);
   const [duplicatingProposalId, setDuplicatingProposalId] = useState<string | null>(null);
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => loadData() });
+  // 04/11/2026: enviar/republicar a proposta no portal e reenviar as credenciais pedem negocios.proposta.enviar ou portal.manage
+  // (a mesma regra de create-client-portal-access). Sem ela, as duas opções ficam desligadas com o motivo.
+  const { pode: podeEnviarPortal } = usePodeEnviarPropostaPortal();
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendProposal, setSendProposal] = useState<any>(null);
@@ -1558,6 +1562,10 @@ const Proposals = () => {
   };
 
   const requestPortalPublish = (proposal: Proposal, forceNewPassword: boolean) => {
+    if (!podeEnviarPortal) {
+      toast({ title: SEM_PERMISSAO_PROPOSTA_PORTAL, variant: "destructive" });
+      return;
+    }
     // Accepted proposals with pending changes should warn the user that
     // republication will invalidate the previous signature.
     if (proposal.status === "accepted" && proposal.has_unpublished_changes) {
@@ -1571,6 +1579,10 @@ const Proposals = () => {
     if (!portalReopenConfirm) return;
     const { proposal, forceNewPassword } = portalReopenConfirm;
     setPortalReopenConfirm(null);
+    if (!podeEnviarPortal) {
+      toast({ title: SEM_PERMISSAO_PROPOSTA_PORTAL, variant: "destructive" });
+      return;
+    }
     generatePortalAccess("proposal", proposal.id, forceNewPassword);
   };
 
@@ -2872,13 +2884,15 @@ const Proposals = () => {
           )}
         </DropdownMenuLabel>
         <DropdownMenuItem
-          disabled={portalAccessLoading}
+          disabled={portalAccessLoading || !podeEnviarPortal}
+          title={!podeEnviarPortal ? SEM_PERMISSAO_PROPOSTA_PORTAL : undefined}
           onClick={(e) => {
             e.preventDefault();
             requestPortalPublish(proposal, false);
           }}
         >
           <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> {proposal.published_at ? "Republicar no portal" : "Enviar para Portal Cliente"}
+          {!podeEnviarPortal && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
         </DropdownMenuItem>
         <DropdownMenuItem 
           onClick={async (e) => {
@@ -2891,13 +2905,15 @@ const Proposals = () => {
           <Link2 className="w-3.5 h-3.5 mr-2" /> Copiar link do portal
         </DropdownMenuItem>
         <DropdownMenuItem
-          disabled={portalAccessLoading}
+          disabled={portalAccessLoading || !podeEnviarPortal}
+          title={!podeEnviarPortal ? SEM_PERMISSAO_PROPOSTA_PORTAL : undefined}
           onClick={(e) => {
             e.preventDefault();
             requestPortalPublish(proposal, true);
           }}
         >
           <KeyRound className="w-3.5 h-3.5 mr-2" /> Reenviar credenciais
+          {!podeEnviarPortal && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

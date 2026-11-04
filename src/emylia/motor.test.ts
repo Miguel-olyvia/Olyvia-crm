@@ -164,6 +164,7 @@ describe("protótipo de Negócios", () => {
     const A = acoes(S, (a) => avisos.push(a.msg + " · " + (a.sub || "")), (fn) => fn());
     const id = 1038; // Manuel Costa, no Contacto
     const d = S.deals.find((x) => x.id === id)!;
+    delete d.f.poder_decisao; // 4/11: uma pergunta da Qualificação por responder (o exemplo já a traz)
     S.view = "hoje";
     A.marcarVisita(id);
     expect(d.fase).toBe(1);

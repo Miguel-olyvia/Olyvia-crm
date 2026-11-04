@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { usePermissions } from "@/hooks/usePermissions";
+import { usePodeEnviarPropostaPortal } from "@/hooks/usePodeEnviarPropostaPortal";
 import { faltaAFuncao, lerTemplates, lerTemplatesDoNegocio } from "./useTemplatesDoNegocio";
 
 export type DocumentoParaPortal = "proposal" | "contract";
@@ -45,8 +46,11 @@ export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: Docum
     },
   });
   const { generatePortalAccess, loading } = useClientPortalAccess({ onSuccess: () => { void qc.invalidateQueries({ queryKey: chave }); } });
-  // as mesmas permissões das páginas: o contrato pede «enviar para assinatura»; a proposta não tem permissão própria, vale a de editar a ficha (feita por quem chama)
-  const podePermissao = tipo === "contract" ? isSystemAdmin || hasPermission("client_contracts.send_signature") : true;
+  // as mesmas permissões das páginas e do servidor (create-client-portal-access): o contrato pede «enviar para assinatura»; a proposta
+  // (04/11/2026) pede negocios.proposta.enviar ou portal.manage (usePodeEnviarPropostaPortal). A de editar a ficha junta-a quem chama.
+  const proposta = usePodeEnviarPropostaPortal(tipo === "proposal");
+  const podePermissao = tipo === "contract" ? isSystemAdmin || hasPermission("client_contracts.send_signature") : proposta.pode;
+  const aLerPermissao = tipo === "proposal" && proposta.aLer;
   const enviar = useCallback((novaPassword = false) => {
     const id = consulta.data?.doc?.id;
     if (!id) return;
@@ -55,6 +59,6 @@ export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: Docum
   const estado: EstadoPortalDocumento = !consulta.data?.doc ? "sem-documento" : consulta.data.noPortal ? "enviado" : "por-enviar";
   return {
     estado, aLer: consulta.isLoading, erro: consulta.error instanceof Error ? consulta.error.message : null, reler: () => { void consulta.refetch(); },
-    aEnviar: loading, podePermissao, enviar,
+    aEnviar: loading, podePermissao, aLerPermissao, enviar,
   };
 }

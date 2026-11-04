@@ -30,8 +30,9 @@ describe("MoradaDaObra", () => {
     expect(screen.queryByText("Os campos da morada")).toBeNull();
   });
 
-  it("Validar com algo em falta (o andar) abre os campos para o completar; Editar também os abre", () => {
-    const usar = desenhar(negocio({ moradaLead: { ...FICHA, fracao: "" } }));
+  // 4/11: o código postal e a localidade já não se perguntam (ficam guardados); os campos só se abrem sem a rua
+  it("Validar sem a rua abre os campos para a escrever; Editar também os abre", () => {
+    const usar = desenhar(negocio({ moradaLead: { ...FICHA, morada: " " } }));
     fireEvent.click(screen.getByRole("button", { name: "Validar esta morada" }));
     expect(usar).toHaveBeenCalled();
     expect(screen.getByText("Os campos da morada")).toBeInTheDocument();

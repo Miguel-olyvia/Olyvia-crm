@@ -22,23 +22,24 @@ describe("os ajustes da organização aos campos das fases", () => {
   });
 
   it("nome, opções, obrigatório, ordem, esconder e um campo novo chegam ao grupo que os ecrãs mostram", () => {
+    // 4/11: a Qualificação do Contacto (a Origem da Lead saiu com o levantamento da chamada)
     const campos = lerCfgCampos({
-      Origem: {
-        nome: "De onde veio",
-        rotulos: { origem: "Como nos conheceu" },
-        opcoes: { origem: ["Site", "Feira", "Outros"] },
-        obrig: { rgpd: false },
-        ordem: ["rgpd", "origem"],
-        ocultos: ["campanha"],
+      Qualificação: {
+        nome: "O cliente",
+        rotulos: { posse: "Quem é o cliente" },
+        opcoes: { posse: ["Proprietário", "Inquilino", "Outro"] },
+        obrig: { outros_orc: false },
+        ordem: ["outros_orc", "posse"],
+        ocultos: ["orc_cliente"],
         novos: [{ k: "c_vendedor", l: "Vendedor", t: "escolha", op: ["Ana", "Rui"], obrigatorio: true }],
       },
     });
-    const g = efetivo(campos, LEAD[1]);
-    expect(g.nome).toBe("De onde veio");
-    expect(g.campos.map((c) => c.k)).toEqual(["rgpd", "origem", "recomendou", "origem_outra", "c_vendedor"]);
-    expect(g.campos.find((c) => c.k === "origem")).toMatchObject({ l: "Como nos conheceu", op: ["Site", "Feira", "Outros"] });
+    const g = efetivo(campos, CONTACTO[3]);
+    expect(g.nome).toBe("O cliente");
+    expect(g.campos.map((c) => c.k)).toEqual(["outros_orc", "posse", "poder_decisao", "c_vendedor"]);
+    expect(g.campos.find((c) => c.k === "posse")).toMatchObject({ l: "Quem é o cliente", op: ["Proprietário", "Inquilino", "Outro"] });
     // a regra de «não passa de fase sem preencher» segue o que a organização marcou
-    const falta = emFalta([g], { origem: "Site" }).map((c) => c.k);
+    const falta = emFalta([g], { posse: "Inquilino", poder_decisao: "Sim" }).map((c) => c.k);
     expect(falta).toEqual(["c_vendedor"]);
   });
 
@@ -73,10 +74,10 @@ describe("os ajustes da organização aos campos das fases", () => {
 
   it("ler e aplicar: S.campos fica com os ajustes e o orçamento passa a usar as regras da organização", async () => {
     const S = estadoVazio("org");
-    const sb = sbCom({ data: { campos: { Origem: { rotulos: { origem: "Canal" } } }, efeitos: { estacionamento: { v: { dia_amarela: 10 } } } } });
+    const sb = sbCom({ data: { campos: { Qualificação: { rotulos: { posse: "Quem é" } } }, efeitos: { estacionamento: { v: { dia_amarela: 10 } } } } });
     await carregarCamposConfig(sb, "org", S);
     expect(sb.rpc).toHaveBeenCalledWith("neg_ler_campos_config", { p_org: "org" });
-    expect(efetivo(S.campos, LEAD[1]).campos.find((c) => c.k === "origem")?.l).toBe("Canal");
+    expect(efetivo(S.campos, CONTACTO[3]).campos.find((c) => c.k === "posse")?.l).toBe("Quem é");
     expect(efeitosDoCampo("estacionamento", { estacionamento: "Pago" })[0]).toMatchObject({ d: "Estacionamento pago (10 dias × 10 €)", preco: 100 });
   });
 

@@ -17,7 +17,7 @@ import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
-import { ComercialDaLead, FonteDaLead, RespostasDaLead, TextoDaLead, comDadosLead } from "./DadosDaLead";
+import { ComercialDaLead, TextoDaLead, comDadosLead } from "./DadosDaLead";
 import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -254,21 +254,13 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   // 15/10: um passo cujo documento já saiu (a proposta enviada, o contrato gerado) está feito; os campos ficam só de leitura e
   // já não contam como "falta 1 resposta" (senão o negócio abria nesse passo em vez de no que há a fazer, ex.: gerar o contrato)
   const fechadoSe = (p: Passo, sim: boolean): Passo => (sim ? { ...p, conta: undefined, feito: true } : p);
+  // 4/11 (Rúben, a gravação «Entrevista Completa»): na Lead («Por contactar») só o que a chamada usa: quem pede (o nome, que se confirma ao
+  // atender, e o telefone) e o que pediu (o motivo do contacto). O resto saiu (o levantamento de 4/11).
   const passosDaLead = (): Passo[] => {
-    const [gContacto, gOrigem, gPedido] = LEAD.map(E);
-    const todos = [gContacto, gOrigem, gPedido].flatMap((x) => x.campos);
-    const QUEM = ["email", "tipo_cliente", "nif"];
-    const sem = (gr: Grupo, ks: readonly string[]): Grupo => ({ ...gr, campos: gr.campos.filter((c) => !ks.includes(c.k)) });
-    const gQuem: Grupo = { ...gContacto, campos: QUEM.map((k) => todos.find((c) => c.k === k)).filter((c): c is Def => !!c) };
-    const gFalar: Grupo = { ...gContacto, campos: [...sem(gContacto, QUEM).campos, ...gOrigem.campos.filter((c) => c.k === "rgpd")] };
-    const gComo = sem(gOrigem, ["rgpd", ...QUEM]);
-    const gPed = sem(gPedido, QUEM);
+    const [gPedido] = LEAD.map(E);
     const real = comDadosLead(d);
-    const campos = (gr: Grupo) => <Campos grupo={gr} {...fx} />;
-    const passo = (gr: Grupo, id: string, titulo: string, icone: LucideIcon, corpo: ReactNode, resumo?: string[]): Passo =>
-      ({ ...passoDeGrupo(gr, icone, corpo, d.f), id, titulo, personalizado: false, ...(resumo ? { resumo } : {}) });
     return [
-      passo(gQuem, "quem", "Quem é", User, (
+      { ...passoDeGrupo(gPedido, User, (
         <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
           {real ? (
             <div className="grid gap-5 sm:grid-cols-2">
@@ -279,23 +271,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
           {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
             : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
-          {real && <TextoDaLead ctx={ctx} d={d} k="empresa" rotulo="Empresa" />}
-          {campos(gQuem)}
+          <Campos grupo={gPedido} {...fx} />
         </div>
-      ), [d.nome, d.tel, d.dadosLead?.empresa ?? "", d.f.tipo_cliente || ""].filter(Boolean)),
-      passo(gFalar, "falar", "Como falar com o cliente", Phone, campos(gFalar)),
-      passo(gComo, "origem", "Como chegou", Target, <div className="space-y-5">{real && <FonteDaLead ctx={ctx} d={d} />}{campos(gComo)}</div>,
-        [d.dadosLead?.fonte ?? "", d.f.origem === "Outros" ? d.f.origem_outra || "" : d.f.origem || "", d.f.campanha || ""].filter(Boolean)),
-      passo(gPed, "pedido", "O pedido", ClipboardList, (
-        <div className="space-y-5">
-          <ServicoDaChamada ctx={ctx} d={d} />
-          {campos(gPed)}
-          {real && <RespostasDaLead ctx={ctx} d={d} />}
-          {real && <TextoDaLead ctx={ctx} d={d} k="notas" rotulo="Notas da lead" longo />}
-        </div>
-      ), [nomeLinha(d), d.f.pedido || ""].filter(Boolean)),
-      ...(real ? [{ id: "comercial", titulo: "Quem acompanha", icone: User, feito: !!d.dadosLead?.comercialId, resumo: [d.dadosLead?.comercial || "sem comercial"],
-        corpo: <ComercialDaLead ctx={ctx} d={d} /> } as Passo] : []),
+      ), d.f), id: "quem", titulo: "Quem pede", personalizado: false, resumo: [d.nome, d.tel, d.f.pedido || ""].filter(Boolean) },
     ];
   };
   let passos: Passo[] = [];
@@ -312,11 +290,14 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 27/10: no contacto ainda não se está no local: a localização fica para a visita (Exterior)
       // 28/10 (Rúben): a morada da obra também se preenche pela localização do dispositivo (quem está no local)
       // 4/11 (Rúben): na Qualificação, o tipo de serviço que veio da lead confirma-se (ou troca-se) na chamada: ServicoDaChamada.tsx
-      g(CONTACTO[0], Phone),
-      { ...g(CONTACTO[1], Sparkles), corpo: <div className="space-y-4"><ServicoDaChamada ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[1])} {...fx} /></div> },
+      // 4/11 (Rúben, o levantamento da chamada): Chamada (e quem liga), O que o cliente quer (o tipo de serviço e o que quer fazer), a Morada
+      // da obra, a Qualificação e Marcar a visita. «Preparar a visita» saiu (nada disso se pergunta na chamada).
+      { ...g(CONTACTO[0], Phone), corpo: <div className="space-y-5"><Campos grupo={E(CONTACTO[0])} {...fx} />{comDadosLead(d) && <ComercialDaLead ctx={ctx} d={d} />}</div> },
+      { ...g(CONTACTO[1], ClipboardList), corpo: <div className="space-y-4"><ServicoDaChamada ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[1])} {...fx} /></div>,
+        resumo: [nomeLinha(d), ...resumoGrupos([E(CONTACTO[1])], d.f)].filter(Boolean) },
       // 4/11 (Rúben): a morada que a lead já trazia propõe-se primeiro (validar, editar ou outra): MoradaDaObra.tsx
       { ...g(CONTACTO[2], MapPin), corpo: <MoradaDaObra ctx={ctx} d={d}><Campos grupo={E(CONTACTO[2])} {...fx} /></MoradaDaObra> },
-      g(CONTACTO[3], CalendarClock),
+      { ...g(CONTACTO[3], Sparkles) },
       { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>

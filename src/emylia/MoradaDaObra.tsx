@@ -5,7 +5,7 @@ import { useState, type ReactNode } from "react";
 import { Check, MapPin, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UsarLocalizacao } from "./Localizacao";
-import { CAMPOS_MORADA, moradaDoTexto, type MoradaLead, type Negocio } from "./motor";
+import { moradaDoTexto, type MoradaLead, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
 /** A sugestão do negócio: a lida da ficha (d.moradaLead) ou, sem ela, a do pedido. Nenhuma se a morada da obra já está escrita. */
@@ -22,8 +22,8 @@ export function MoradaDaObra({ ctx, d, children }: { ctx: Ctx; d: Negocio; child
   }
   const usar = (editar: boolean) => {
     ctx.run(() => ctx.A.moradaDaLead(d.id, sugestao));
-    // com algo por preencher (ex.: o andar), ou para editar, ficam os campos à vista
-    const falta = CAMPOS_MORADA.some((k) => !sugestao[k].trim());
+    // sem a rua (o código postal e a localidade já não se perguntam: ficam guardados se a lead os trouxe), ou para editar, ficam os campos
+    const falta = !sugestao.morada.trim();
     if (editar || falta) setCampos(true);
   };
   return (

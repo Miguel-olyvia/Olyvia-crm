@@ -41,34 +41,14 @@ export interface Grupo { titulo: string; nota?: string; campos: Def[]; /** o nom
 
 const SNS = ["Sim", "Não", "Não sei"];
 
+// 4/11 (Rúben): a Lead («Por contactar») e o Contacto só com o que se pergunta numa chamada a sério (a gravação «Entrevista Completa» e o
+// levantamento de 4/11): o resto saiu dos passos (email, preferência, hora, idioma, RGPD, origem, campanha, tipo de cliente, NIF, concelho,
+// código postal e localidade, tentativas, para quando, preparar a visita). Os valores que já existiam ficam guardados no negócio.
 export const LEAD: Grupo[] = [
-  {
-    titulo: "Contacto",
-    campos: [
-      { k: "email", l: "Email", t: "texto", ph: "nome@exemplo.pt" },
-      { k: "pref", l: "Prefere ser contactado por", t: "escolha", op: ["Telefone", "WhatsApp", "Email"] },
-      { k: "hora", l: "Melhor hora", t: "escolha", op: ["Manhã", "Tarde", "Fim do dia"] },
-      { k: "idioma", l: "Idioma", t: "escolha", op: ["Português", "Inglês", "Francês"] },
-    ],
-  },
-  {
-    titulo: "Origem",
-    campos: [
-      { k: "origem", l: "Origem", t: "escolha", op: ["Site", "Campanha", "Telefone", "Recomendação", "Redes sociais", "Loja", "Outros"] },
-      { k: "campanha", l: "Campanha", t: "escolha", op: ["Campanha de outono · Meta Ads", "Google Ads", "Folheto na caixa do correio"], se: { k: "origem", v: ["Campanha", "Redes sociais"] } },
-      { k: "recomendou", l: "Recomendado por", t: "texto", se: { k: "origem", v: ["Recomendação"] } },
-      // 3/11 (Rúben): a origem pode ser outra; diz-se qual
-      { k: "origem_outra", l: "Outra origem", t: "texto", ph: "Feira, parceiro, vizinho…", se: { k: "origem", v: ["Outros"] } },
-      { k: "rgpd", l: "Autoriza o contacto (RGPD)", t: "sim_nao" },
-    ],
-  },
   {
     titulo: "Pedido",
     campos: [
-      { k: "tipo_cliente", l: "Tipo de cliente", t: "escolha", op: ["Particular", "Empresa", "Condomínio"] },
-      { k: "nif", l: "NIF", t: "texto", opcional: true },
-      { k: "concelho", l: "Concelho", t: "texto" },
-      { k: "pedido", l: "O que o cliente pediu", t: "texto_longo" },
+      { k: "pedido", l: "O que o cliente pediu", t: "texto_longo", ph: "O motivo do contacto: ex.: pedido de contacto para orçamento" },
     ],
   },
 ];
@@ -78,19 +58,14 @@ export const CONTACTO: Grupo[] = [
     titulo: "Chamada",
     campos: [
       { k: "resultado", l: "Resultado", t: "escolha", op: ["Atendeu · interessado", "Atendeu · ligar mais tarde", "Não atendeu", "Sem interesse", "Número errado"] },
-      { k: "tentativas", l: "Tentativas", t: "contador", min: 1, max: 9 },
       { k: "religar", l: "Voltar a ligar em", t: "data", se: { k: "resultado", v: ["Atendeu · ligar mais tarde", "Não atendeu"] } },
     ],
   },
   {
-    titulo: "Qualificação",
+    titulo: "O que o cliente quer",
     campos: [
-      { k: "imovel", l: "Tipo de imóvel", t: "escolha", op: ["Apartamento", "Moradia", "Loja", "Escritório"] },
-      { k: "posse", l: "O cliente é", t: "escolha", op: ["Proprietário", "Inquilino", "Administração"] },
-      { k: "decisor", l: "Quem decide", t: "escolha", op: ["O próprio", "O proprietário", "Com a família", "Administração"] }, // 4/11 (Rúben): «O proprietário» (o cliente é inquilino)
-      { k: "orc_cliente", l: "Orçamento do cliente", t: "escolha", op: ["Até 3.000 €", "3.000 a 6.000 €", "6.000 a 10.000 €", "Mais de 10.000 €", "Não sabe"] },
-      { k: "prazo", l: "Para quando", t: "escolha", op: ["Urgente (1 mês)", "1 a 3 meses", "3 a 6 meses", "Sem pressa"] },
-      { k: "outros_orc", l: "Pediu outros orçamentos", t: "sim_nao" },
+      { k: "alteracoes", l: "Que alterações quer fazer", t: "texto_longo", ph: "Ex.: tirar a base de duche e fazer walk-in shower; o resto da casa em pavimento SPC" },
+      { k: "estado_atual", l: "Como está hoje", t: "texto_longo", ph: "Ex.: o chão é flutuante e, em princípio, está nivelado" },
     ],
   },
   {
@@ -98,17 +73,17 @@ export const CONTACTO: Grupo[] = [
     nota: "A 1.ª morada do cliente é a fiscal. A da obra pode ser outra, e é dela que sai a distância ao armazém.",
     campos: [
       { k: "morada", l: "Rua e número", t: "texto" },
-      { k: "cp", l: "Código postal", t: "texto", ph: "0000-000" },
-      { k: "localidade", l: "Localidade", t: "texto" },
-      { k: "fracao", l: "Andar / fração", t: "texto", ph: "3.º Esq." },
+      { k: "imovel", l: "Moradia ou andar", t: "escolha", op: ["Andar", "Moradia"] },
+      { k: "fracao", l: "Andar e fração", t: "texto", ph: "6.º Dto.", se: { k: "imovel", v: ["Andar"] } },
     ],
   },
   {
-    titulo: "Preparar a visita",
+    titulo: "Qualificação",
     campos: [
-      { k: "duracao", l: "Duração prevista", t: "escolha", op: ["1 h", "1 h 30", "2 h"] },
-      { k: "presentes", l: "Quem vai estar", t: "escolha", op: ["O cliente", "O casal", "A família", "Outra pessoa"] },
-      { k: "nota_visita", l: "Nota para a visita", t: "texto_longo" },
+      { k: "posse", l: "O cliente é", t: "escolha", op: ["Proprietário", "Inquilino", "Administração"] },
+      { k: "poder_decisao", l: "Tem poder de decisão", t: "sim_nao" },
+      { k: "orc_cliente", l: "Valor previsto para a obra", t: "escolha", op: ["Até 3.000 €", "3.000 a 6.000 €", "6.000 a 10.000 €", "Mais de 10.000 €", "Não sabe"] },
+      { k: "outros_orc", l: "Está a pedir outros orçamentos", t: "sim_nao" },
     ],
   },
 ];
@@ -345,7 +320,8 @@ const VISITA_BASE: Def[] = [
   { k: "data", l: "Dia", t: "data" },
   { k: "hora", l: "Hora", t: "escolha", op: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"] },
   { k: "quem", l: "Quem vai", t: "escolha", op: ["Rúben (comercial)", "Hugo (técnico)", "Filipe (Operações)"] },
-  { k: "presentes", l: "Quem vai estar", t: "escolha", op: ["O cliente", "O casal", "A família", "Outra pessoa"] },
+  // 4/11 (o levantamento da chamada): «Quem vai estar» não se pergunta ao marcar: fica opcional
+  { k: "presentes", l: "Quem vai estar", t: "escolha", op: ["O cliente", "O casal", "A família", "Outra pessoa"], opcional: true },
   { k: "duracao", l: "Duração", t: "escolha", op: ["30 min", "1 h", "1 h 30", "2 h"] },
   { k: "motivo", l: "Porque se cancelou", t: "escolha", op: ["O cliente pediu", "Imprevisto nosso", "Não estava ninguém"], se: { k: "estado", v: ["Cancelada"] } },
   { k: "combinado", l: "O que ficou combinado", t: "texto_longo", ph: "Ex.: o cliente escolhe o pavimento até sexta" },

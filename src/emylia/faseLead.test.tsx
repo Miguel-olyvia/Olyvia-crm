@@ -1,4 +1,4 @@
-// 4/11 (Rúben): a fase Lead com os campos da Olyvia original, em passos que fazem sentido
+// 4/11 (Rúben, a gravação «Entrevista Completa»): a Lead e o Contacto só com o que se pergunta numa chamada
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed } from "./motor";
 import { passosDaFase } from "./PaginaNegocio";
@@ -13,28 +13,31 @@ const ctxDe = (S: ReturnType<typeof seed>) => {
   const run = (fn: () => void) => fn();
   return { S, A: acoes(S, () => {}, run), run, go: (fn: () => void) => () => fn() } as unknown as Ctx;
 };
-const LEAD_X = { entityId: "p1", primeiro: "Ana", apelido: "Lopes", empresa: "Lopes, Lda.", notas: "", fonteId: "s1", fonte: "Feira", campanha: "",
-  comercialId: "u1", comercial: "Rui Costa", respostas: [], extra: {} };
+const LEAD_X = { entityId: "p1", primeiro: "Inês", apelido: "Lopes", empresa: "", notas: "", fonteId: "", fonte: "", campanha: "",
+  comercialId: "u1", comercial: "Catarina", respostas: [], extra: {} };
 
-describe("a fase Lead", () => {
-  it("no protótipo: Quem é, Como falar com o cliente, Como chegou e O pedido, com as perguntas de sempre em cada um", () => {
+describe("a Lead e o Contacto, como na chamada", () => {
+  it("Por contactar: um só passo, «Quem pede» (o nome, o telefone e o que pediu), sem perguntas obrigatórias", () => {
     const S = seed();
     const d = S.deals.find((x) => x.fase === 0)!;
     const passos = passosDaFase(ctxDe(S), d, true, 0);
-    expect(passos.map((p) => p.titulo)).toEqual(["Quem é", "Como falar com o cliente", "Como chegou", "O pedido"]);
-    // o email, o tipo de cliente e o NIF contam em «Quem é»; o RGPD em «Como falar com o cliente»
-    expect(passos[0].conta?.n).toBe(2); // email e tipo de cliente (o NIF é opcional)
+    expect(passos.map((p) => p.titulo)).toEqual(["Quem pede"]);
+    expect(passos[0].conta?.n).toBe(0);
   });
 
-  it("na página real, com a lead: também «Quem acompanha» (o comercial) e o resumo com a empresa e a fonte", () => {
-    desligar = definirGuardarDadosLead(async () => "Ana Lopes", { fontes: [{ id: "s1", name: "Feira" }], comerciais: [{ id: "u1", name: "Rui Costa" }] });
+  it("Contacto: Chamada, O que o cliente quer, Morada da obra, Qualificação, Marcar a visita (sem «Preparar a visita»)", () => {
+    const S = seed();
+    const d = S.deals.find((x) => x.fase === 1)!;
+    const titulos = passosDaFase(ctxDe(S), d, true, 1).map((p) => p.titulo);
+    expect(titulos.slice(0, 5)).toEqual(["Chamada", "O que o cliente quer", "Morada da obra", "Qualificação", "Marcar a visita"]);
+    expect(titulos).not.toContain("Preparar a visita");
+  });
+
+  it("na página real, a Lead continua com um só passo (o nome próprio e o apelido gravam-se na pessoa)", () => {
+    desligar = definirGuardarDadosLead(async () => "Inês Lopes", { fontes: [], comerciais: [{ id: "u1", name: "Catarina" }] });
     const S = seed();
     const d = S.deals.find((x) => x.fase === 0)!;
     d.dadosLead = LEAD_X;
-    const passos = passosDaFase(ctxDe(S), d, true, 0);
-    expect(passos.map((p) => p.id)).toEqual(["quem", "falar", "origem", "pedido", "comercial"]);
-    expect(passos[0].resumo).toContain("Lopes, Lda.");
-    expect(passos[2].resumo).toContain("Feira");
-    expect(passos[4]).toMatchObject({ titulo: "Quem acompanha", feito: true, resumo: ["Rui Costa"] });
+    expect(passosDaFase(ctxDe(S), d, true, 0).map((p) => p.id)).toEqual(["quem"]);
   });
 });

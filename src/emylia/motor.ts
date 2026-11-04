@@ -716,7 +716,8 @@ const EXEMPLO_COMPLETO: Record<string, string> = {
   rgpd: "Sim", tipo_cliente: "Particular", nif: "123456789", concelho: "Lisboa",
   pedido: "Remodelar a casa de banho principal: tirar a banheira e pôr base de duche, com móvel suspenso.",
   // Contacto
-  resultado: "Atendeu · interessado", tentativas: "2", imovel: "Apartamento", posse: "Proprietário", decisor: "O próprio",
+  resultado: "Atendeu · interessado", tentativas: "2", imovel: "Andar", posse: "Proprietário", decisor: "O próprio", poder_decisao: "Sim", // 4/11: os campos do levantamento da chamada
+  alteracoes: "Tirar a banheira e pôr base de duche, com móvel suspenso.", estado_atual: "Azulejo antigo; a canalização é de cobre.",
   orc_cliente: "3.000 a 6.000 €", prazo: "1 a 3 meses", outros_orc: "Não",
   morada: "Rua Morais Soares 112", cp: "1900-345", localidade: "Lisboa", fracao: "3.º Esq.",
   duracao: "1 h 30", presentes: "O casal", nota_visita: "Estacionar na rua de trás. O prédio tem porteiro até às 18h.",
@@ -757,7 +758,7 @@ function exemplo(d: Negocio): Record<string, string> {
   };
   if (origem === "Campanha") f.campanha = "Campanha de outono · Meta Ads";
   if (d.fase >= 1) Object.assign(f, {
-    resultado: "Atendeu · interessado", tentativas: "1", imovel: "Apartamento", posse: "Proprietário", decisor: "Com a família",
+    resultado: "Atendeu · interessado", tentativas: "1", imovel: "Andar", posse: "Proprietário", decisor: "Com a família", poder_decisao: "Sim",
     orc_cliente: d.linha === "coz" ? "6.000 a 10.000 €" : "3.000 a 6.000 €", prazo: "1 a 3 meses", outros_orc: "Sim",
     morada: "Rua de exemplo, 10", cp: "2700-000", localidade: loc, fracao: "1.º Dto.", duracao: "1 h 30",
   });
@@ -1498,11 +1499,12 @@ export function sugerirDaLead(d: Negocio): boolean {
   const op = (k: string) => LEAD.flatMap((g) => g.campos).find((c) => c.k === k)?.op ?? [];
   const igual = (k: string, v: string) => op(k).find((o) => o.toLowerCase() === v.trim().toLowerCase());
   const o: Record<string, string> = {};
+  // 4/11 (o levantamento da chamada): a Lead só pergunta o que o cliente pediu; as outras sugestões só valem se a empresa voltar a pôr os campos
   if (x.notas) o.pedido = x.notas;
-  if (x.empresa) o.tipo_cliente = "Empresa";
-  if (x.fonte && !d.f.origem) {
+  if (x.empresa && op("tipo_cliente").length) o.tipo_cliente = "Empresa";
+  if (x.fonte && !d.f.origem && op("origem").length) {
     const origem = igual("origem", x.fonte);
-    if (origem) o.origem = origem; else { o.origem = "Outros"; o.origem_outra = x.fonte; }
+    if (origem) o.origem = origem; else if (op("origem").includes("Outros")) { o.origem = "Outros"; o.origem_outra = x.fonte; }
   }
   const campanha = x.campanha ? igual("campanha", x.campanha) : undefined;
   if (campanha) o.campanha = campanha;
@@ -1535,6 +1537,10 @@ export function moradaDoTexto(texto: string): MoradaLead | null {
   const [localidade, ...resto] = t.slice(cp.index + cp[1].length).split(/[·,]/).map((x) => x.trim());
   if (!antes) return null;
   return { morada: antes, cp: cp[1], localidade: localidade ?? "", fracao: resto.filter(Boolean).join(" ").trim(), de: "pedido" };
+}
+/** 4/11: os serviços do Catálogo que o cliente pediu (servicos_pedidos), pela ordem em que se escolheram; os que já não existem saem. */
+export function servicosPedidos(d: Negocio, S: Pick<Estado, "svc">): { id: SvcId; n: string }[] {
+  return (d.f.servicos_pedidos ?? "").split(",").map((s) => s.trim()).filter((s) => !!s && !!S.svc[s]).map((s) => ({ id: s, n: S.svc[s].n }));
 }
 /** Os campos da «Morada da obra» que a sugestão preenche. */
 export const CAMPOS_MORADA = ["morada", "cp", "localidade", "fracao"] as const;
@@ -2059,7 +2065,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 23/10: com a equipa real, a visita fica na agenda de quem a marca (e não na do Rúben de exemplo)
       // 2/11: ou de quem a Olyvia sugeriu para a vaga (livre e mais perto: sugestaoVisita.ts)
       const quem = quemSugerido || quemVaiPorOmissao();
-      if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes, duracao: d.f.duracao, quem })); log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda de " + quem.replace(/\s*\(.*\)\s*$/, ""), kind: "ok" }); },
+      if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes ?? "", duracao: d.f.duracao || "1 h", quem })); /* 4/11: sem «Preparar a visita», 1 h */ log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda de " + quem.replace(/\s*\(.*\)\s*$/, ""), kind: "ok" }); },
     fecharVisita(id: number) {
       // 3/11: fechar o levantamento é da visita; o orçamento que nasce aqui o servidor só o deixa mudar com negocios.orcamento.editar (sem
       // ela, neg_guardar_negocio repõe os totais da base e recusa se o orçamento mudar)
@@ -3186,7 +3192,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 21/10: encomenda o que os materiais mudados à mão pedem a mais (encomenda de cliente de ajuste, no Inventário). */
     encomendarMateriais(id: number) {
-      if (!exigePerm("obra.materiais")) return;
+      if (!exigePerm("obra.encomendar")) return;
       const d = deal(id);
       if (!d.obra.ec?.ref) { avisar({ msg: "Ainda sem encomenda de cliente", sub: "Os materiais novos encomendam-se logo a seguir à inicial, quando o pagamento for validado", kind: "" }); return; }
       // 21/10: as adendas pagas cuja encomenda não chegou ao Inventário vão primeiro (cada uma ligada à sua)
@@ -3677,6 +3683,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       }
       d.f.servico_validado = "Sim";
       log(d, `Serviço confirmado na chamada: ${LINHAS[linha].n}` + (trocou && antes !== "Por definir" ? ` (era ${antes})` : ""));
+    },
+    /** 4/11 (Rúben: «o tipo de serviço tem de ser mais completo»): os serviços do Catálogo que o cliente pediu (os ids, por vírgulas, em
+     *  servicos_pedidos). Fica no histórico com os nomes. */
+    servicosDoPedido(id: number, sids: readonly string[]) {
+      const d = deal(id);
+      const validos = [...new Set(sids)].filter((s) => !!S.svc[s]);
+      const antes = servicosPedidos(d, S).map((s) => s.id).join(",");
+      if (antes === validos.join(",")) return;
+      if (validos.length) d.f.servicos_pedidos = validos.join(","); else delete d.f.servicos_pedidos;
+      log(d, validos.length ? `Serviços pedidos: ${validos.map((s) => S.svc[s].n).join(", ")}` : "Serviços pedidos: nenhum");
     },
     /** 4/11: a morada da obra é a que a lead já trazia (validar ou editar): preenche o que ela tem; o resto fica por preencher. */
     moradaDaLead(id: number, m: MoradaLead) {

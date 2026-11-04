@@ -138,14 +138,34 @@ serve(async (req: Request) => {
     // Contracts use client_contracts.send_signature (NOT client_contracts.edit — a role can
     // be allowed to edit a contract's fields without being allowed to send it anywhere,
     // e.g. Sales Technician; the roles screen exposes these as two separate checkboxes).
-    const hasPermission =
-      await checkUserPermission(supabase, callerAnew.id, "portal.manage", organization_id) ||
-      (document_type === "contract"
-        ? await checkUserPermission(supabase, callerAnew.id, "client_contracts.send_signature", organization_id)
-        : await checkUserPermission(supabase, callerAnew.id, "client_contracts.edit", organization_id));
+    // Proposals (04/11/2026) use negocios.proposta.enviar — the permission of sending the
+    // proposal to the client — resolved by fn_cat_pode with the caller's own JWT: the SAME
+    // function neg_guardar_negocio / republish_proposal_snapshot use (profile permissions in
+    // the org, the Negócios role from neg_papeis_permissoes, system admin). Before, a
+    // proposal was gated by client_contracts.edit, a contract permission. fn_cat_pode errors
+    // fail CLOSED. Quotes keep client_contracts.edit (unchanged).
+    const hasPortalManage = await checkUserPermission(supabase, callerAnew.id, "portal.manage", organization_id);
+    let hasPermission = hasPortalManage;
+    if (!hasPermission) {
+      if (document_type === "contract") {
+        hasPermission = await checkUserPermission(supabase, callerAnew.id, "client_contracts.send_signature", organization_id);
+      } else if (document_type === "proposal") {
+        const { data: podeEnviar, error: podeError } = await callerClient.rpc("fn_cat_pode", {
+          p_org: organization_id, p_perm: "negocios.proposta.enviar",
+        });
+        if (podeError) console.error("[create-client-portal-access] fn_cat_pode failed:", podeError);
+        hasPermission = !podeError && podeEnviar === true;
+      } else {
+        hasPermission = await checkUserPermission(supabase, callerAnew.id, "client_contracts.edit", organization_id);
+      }
+    }
     if (!hasPermission) {
       return new Response(
-        JSON.stringify({ error: "Sem permissão para gerir acessos ao portal de clientes" }),
+        JSON.stringify({
+          error: document_type === "proposal"
+            ? "Sem permissão para enviar a proposta ao portal (requer negocios.proposta.enviar ou portal.manage)"
+            : "Sem permissão para gerir acessos ao portal de clientes",
+        }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
