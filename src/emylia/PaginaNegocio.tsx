@@ -16,6 +16,7 @@ import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
+import { ServicoDaChamada } from "./ServicoDaChamada";
 import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -267,7 +268,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     passos = [
       // 27/10: no contacto ainda não se está no local: a localização fica para a visita (Exterior)
       // 28/10 (Rúben): a morada da obra também se preenche pela localização do dispositivo (quem está no local)
-      g(CONTACTO[0], Phone), g(CONTACTO[1], Sparkles),
+      // 4/11 (Rúben): na Qualificação, o tipo de serviço que veio da lead confirma-se (ou troca-se) na chamada: ServicoDaChamada.tsx
+      g(CONTACTO[0], Phone),
+      { ...g(CONTACTO[1], Sparkles), corpo: <div className="space-y-4"><ServicoDaChamada ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[1])} {...fx} /></div> },
       // 4/11 (Rúben): a morada que a lead já trazia propõe-se primeiro (validar, editar ou outra): MoradaDaObra.tsx
       { ...g(CONTACTO[2], MapPin), corpo: <MoradaDaObra ctx={ctx} d={d}><Campos grupo={E(CONTACTO[2])} {...fx} /></MoradaDaObra> },
       g(CONTACTO[3], CalendarClock),

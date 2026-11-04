@@ -22,7 +22,8 @@ import { IconeFase, type Ctx } from "./pecas";
 type AjustesS = Pick<Estado, "campos" | "setor">;
 
 const GRUPOS: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
-const TIPOS: [Tipo, string][] = [["escolha", "Escolha"], ["varios", "Escolha múltipla"], ["sim_nao", "Sim ou não"], ["contador", "Contador"], ["numero", "Número"], ["texto", "Texto curto"], ["data", "Data"], ["texto_longo", "Nota"]];
+// 4/11 (Rúben): o texto longo (a caixa maior) chamava-se «Nota» e não se encontrava: fica ao lado do texto curto
+const TIPOS: [Tipo, string][] = [["escolha", "Escolha"], ["varios", "Escolha múltipla"], ["sim_nao", "Sim ou não"], ["contador", "Contador"], ["numero", "Número"], ["texto", "Texto curto"], ["texto_longo", "Texto longo (caixa maior)"], ["data", "Data"]];
 const NOME_TIPO = Object.fromEntries(TIPOS) as Record<Tipo, string>;
 const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const ESCOLHA = "inline-flex min-h-11 items-center rounded-lg border px-3 text-[15px]";

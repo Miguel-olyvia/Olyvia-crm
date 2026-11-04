@@ -3577,6 +3577,19 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       f.gps = `${lat.toFixed(6)},${lon.toFixed(6)}`; f.gps_precisao = String(Math.round(precisao));
       log(d, `Morada preenchida pela localização do dispositivo (± ${Math.round(precisao)} m)`);
     },
+    /** 4/11 (Rúben): na chamada (Qualificação), quem liga confirma ou troca o serviço que veio da lead (casa de banho, cozinha…). O nome do
+     *  negócio acompanha enquanto for o nome da linha (ou «Por definir»); um nome escrito à mão fica. */
+    servicoDaChamada(id: number, linha: LinhaId) {
+      const d = deal(id);
+      if (!LINHAS[linha]) return;
+      const antes = nomeLinha(d), trocou = d.linhaPorDefinir || d.linha !== linha;
+      if (trocou) {
+        if (d.servico === antes || !d.servico) d.servico = LINHAS[linha].n;
+        d.linha = linha; delete d.linhaPorDefinir;
+      }
+      d.f.servico_validado = "Sim";
+      log(d, `Serviço confirmado na chamada: ${LINHAS[linha].n}` + (trocou && antes !== "Por definir" ? ` (era ${antes})` : ""));
+    },
     /** 4/11: a morada da obra é a que a lead já trazia (validar ou editar): preenche o que ela tem; o resto fica por preencher. */
     moradaDaLead(id: number, m: MoradaLead) {
       for (const p of new Set(CAMPOS_MORADA.map(permDoCampo))) if (p && !exigePerm(p)) return;
