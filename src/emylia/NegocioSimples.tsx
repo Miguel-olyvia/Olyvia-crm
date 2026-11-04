@@ -9,6 +9,7 @@ import { BotaoAcessoPortal, EstadoAcessoPortal, temPortal } from "./AcessoPortal
 import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { EditarCliente } from "./EditarCliente";
 import { DadosAoLado } from "./DadosAoLado";
+import { ChamadaDireto } from "./ChamadaDireto";
 import { modoReal } from "./acessosPortal";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
@@ -578,6 +579,8 @@ function TudoNaChamada({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     <>
       <DadosAoLado d={d} S={ctx.S} />
       <section className="min-w-0 space-y-10" aria-label="Tudo na chamada">
+        {/* 4/11 (Rúben): a transcrição em direto da chamada; no fim propõe os campos da Lead e do Contacto */}
+        <ChamadaDireto ctx={ctx} d={d} grupos={[...LEAD, ...CONTACTO]} />
         {fases.map((f) => (
           <div key={f} className="space-y-8">
             <h2 className="text-2xl font-semibold tracking-tight">{FASES[f]}</h2>
