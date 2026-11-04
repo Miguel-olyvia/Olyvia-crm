@@ -576,7 +576,7 @@ function TudoNaChamada({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const fases = [0, 1] as const;
   return (
     <>
-      <DadosAoLado d={d} />
+      <DadosAoLado d={d} S={ctx.S} />
       <section className="min-w-0 space-y-10" aria-label="Tudo na chamada">
         {fases.map((f) => (
           <div key={f} className="space-y-8">

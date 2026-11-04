@@ -1536,6 +1536,10 @@ export function moradaDoTexto(texto: string): MoradaLead | null {
   if (!antes) return null;
   return { morada: antes, cp: cp[1], localidade: localidade ?? "", fracao: resto.filter(Boolean).join(" ").trim(), de: "pedido" };
 }
+/** 4/11: os serviços do Catálogo que o cliente pediu (servicos_pedidos), pela ordem em que se escolheram; os que já não existem saem. */
+export function servicosPedidos(d: Negocio, S: Pick<Estado, "svc">): { id: SvcId; n: string }[] {
+  return (d.f.servicos_pedidos ?? "").split(",").map((s) => s.trim()).filter((s) => !!s && !!S.svc[s]).map((s) => ({ id: s, n: S.svc[s].n }));
+}
 /** Os campos da «Morada da obra» que a sugestão preenche. */
 export const CAMPOS_MORADA = ["morada", "cp", "localidade", "fracao"] as const;
 
@@ -3677,6 +3681,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       }
       d.f.servico_validado = "Sim";
       log(d, `Serviço confirmado na chamada: ${LINHAS[linha].n}` + (trocou && antes !== "Por definir" ? ` (era ${antes})` : ""));
+    },
+    /** 4/11 (Rúben: «o tipo de serviço tem de ser mais completo»): os serviços do Catálogo que o cliente pediu (os ids, por vírgulas, em
+     *  servicos_pedidos). Fica no histórico com os nomes. */
+    servicosDoPedido(id: number, sids: readonly string[]) {
+      const d = deal(id);
+      const validos = [...new Set(sids)].filter((s) => !!S.svc[s]);
+      const antes = servicosPedidos(d, S).map((s) => s.id).join(",");
+      if (antes === validos.join(",")) return;
+      if (validos.length) d.f.servicos_pedidos = validos.join(","); else delete d.f.servicos_pedidos;
+      log(d, validos.length ? `Serviços pedidos: ${validos.map((s) => S.svc[s].n).join(", ")}` : "Serviços pedidos: nenhum");
     },
     /** 4/11: a morada da obra é a que a lead já trazia (validar ou editar): preenche o que ela tem; o resto fica por preencher. */
     moradaDaLead(id: number, m: MoradaLead) {
