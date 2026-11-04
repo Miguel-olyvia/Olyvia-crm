@@ -17,6 +17,7 @@ import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
+import { DadosDaLead, resumoDadosLead } from "./DadosDaLead";
 import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -263,6 +264,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
           <div className={ROT}>Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{nomeLinha(d)}{d.linhaPorDefinir && <span className="block font-normal text-muted-foreground">Sai da divisão escolhida na visita.</span>}</span></div>
         </div>
       ) },
+      // 4/11 (Rúben): o que a lead trouxe da Nova lead (os campos da Olyvia original), já preenchido e editável: DadosDaLead.tsx
+      ...(d.dadosLead ? [{ id: "lead-dados", titulo: "O que veio na lead", icone: ClipboardList, feito: true, resumo: resumoDadosLead(d.dadosLead), corpo: <DadosDaLead ctx={ctx} d={d} /> } as Passo] : []),
       g(LEAD[0], Phone), g(LEAD[1], Target), g(LEAD[2], ClipboardList),
     ];
   } else if (d.fase === 1) {

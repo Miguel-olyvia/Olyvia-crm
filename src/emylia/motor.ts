@@ -2,6 +2,7 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
+import type { DadosLead } from "./real/dadosDaLead";
 import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
@@ -382,6 +383,8 @@ export interface Negocio {
   local: string;
   /** 4/11: a morada que a lead já trazia (a da ficha da pessoa), sugerida no passo «Morada da obra». Não se grava: lê-se ao abrir. */
   moradaLead?: MoradaLead;
+  /** 4/11: o que a lead trouxe na criação (Pessoas › Nova lead), lido da pessoa, para a fase Lead. Não se grava no negócio: grava-se na pessoa. */
+  dadosLead?: DadosLead;
   origem: string;
   quando: string;
   dono: Papel;
