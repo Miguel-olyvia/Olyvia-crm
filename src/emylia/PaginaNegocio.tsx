@@ -1,7 +1,7 @@
 // Página do negócio (09/10/2026): só a fase atual está aberta, um passo de
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
+import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -414,10 +415,30 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   return passos;
 }
 
+/** 4/11: as permissões que o servidor pede ao passo de cada botão (neg_guardar_negocio, neg_validar_pagamento, neg_registar_fatura): sem
+ *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
+const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
+  contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.gerir", "orcamento.editar"],
+  pedidoCliente: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
+  enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
+  aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
+};
+/** A primeira permissão que falta a quem está no ecrã para o passo `act` (null: tem todas, ou o passo não pede nenhuma). */
+export const permEmFaltaDoPasso = (S: Ctx["S"], act: string | undefined): PermNeg | null =>
+  (act ? PERM_DO_PASSO[act] ?? [] : []).find((x) => !podeNeg(S.role, x)) ?? null;
+
 /** O botão do próximo passo do negócio (ou o simulador do cliente). */
 export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
   const { S, A, go } = ctx;
+  const idSemPerm = useId();
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  const falta = meu && p.btn ? permEmFaltaDoPasso(S, p.act) : null;
+  if (falta) return (
+    <div className="grid justify-items-start gap-1 sm:justify-items-end">
+      <Button size={tamanho} disabled aria-describedby={idSemPerm}>{p.btn}</Button>
+      <p id={idSemPerm} className="max-w-sm text-sm text-muted-foreground sm:text-right">{SEM_PERM[falta].sub}</p>
+    </div>
+  );
   // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
   // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP

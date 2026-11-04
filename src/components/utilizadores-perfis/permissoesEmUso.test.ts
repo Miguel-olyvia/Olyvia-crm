@@ -426,8 +426,8 @@ describe("03/11: Inventário", () => {
 describe("03/11: Catálogo e módulos gerais", () => {
   it("as permissões só das páginas antigas do catálogo estão escondidas; as que o Catálogo novo e os outros módulos usam ficam", () => {
     [
-      "services.create", "services.delete", "products.delete", "products.export", "products.import", "products.manage",
-      "products.manage_attributes", "brands.create", "brands.edit", "brands.delete", "product_attributes.create", "product_attributes.edit",
+      "services.create", "services.delete", "products.delete", "products.export", "products.import",
+      "products.manage_attributes", "brands.create", "brands.delete", "product_attributes.create", "product_attributes.edit",
       "product_attributes.delete", "product_categories.create", "product_categories.edit", "product_categories.delete",
       "product_subcategories.create", "product_subcategories.edit", "product_subcategories.delete", "product_subcategories.view",
       "service_categories.create", "service_categories.edit", "service_categories.delete", "service_categories.view",
@@ -467,5 +467,24 @@ describe("03/11: Catálogo e módulos gerais", () => {
   it("os códigos sem catálogo trocados deixaram a lista (scheduling.view, settings.view/manage, countries.view, contract_templates.view, scheduling.items.manage)", () => {
     ["scheduling.view", "settings.view", "settings.manage", "countries.view", "contract_templates.view", "scheduling.items.manage"]
       .forEach((c) => expect(CODIGOS_SEM_CATALOGO, c).not.toContain(c));
+  });
+});
+
+describe("04/11: o editor mostra o que o servidor exige e esconde o que nada verifica", () => {
+  it("products.manage (packs, atributos, unidades) e brands.edit (marcas) aparecem: as RPCs e as policies exigem-nas", () => {
+    ["products.manage", "brands.edit"].forEach((c) => {
+      expect(CODIGOS_EM_USO, c).toContain(c);
+      expect(CODIGOS_ESCONDIDOS, c).not.toContain(c);
+    });
+  });
+  it("calendar.*, work_orders.*, scheduling.export e os quatro do RH sem verificação ficam escondidos", () => {
+    [
+      "calendar.create", "calendar.edit", "calendar.view_company", "work_orders.create", "work_orders.delete", "work_orders.edit",
+      "work_orders.view", "scheduling.export", "hr.pessoas.archive", "hr.onboarding.sign_employer", "hr.ausencias.tipos.edit",
+      "hr.assiduidade.importar",
+    ].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+    });
   });
 });

@@ -185,6 +185,8 @@ const ROTULOS_CHIP: Record<string, string> = {
   "client_contracts.cancel": "Anular contrato",
   "quotes.view_costs": "Ver custos do orçamento",
   "quotes.manage": "Ver custos e ações em massa",
+  // 04/11: o nome da base ("Gerir configuração de produtos") não diz o quê; o servidor pede-a aos packs, atributos e unidades
+  "products.manage": "Gerir packs, atributos e unidades",
 };
 
 function montarLinha(chave: string, rotulo: string, permissoes: Permissao[], soAcoes: boolean): LinhaGrelha {

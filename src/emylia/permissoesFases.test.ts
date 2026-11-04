@@ -48,7 +48,7 @@ describe("o quadro por papel bate com neg_papeis_permissoes (20270105200000)", (
     NOVAS.forEach((p) => expect(SEM_PERM[p].sub).toContain(CODIGO_BASE[p]));
   });
   it("o técnico do protótipo (sem conta) não regista o contacto nem fecha a obra; o comercial não encerra a obra", () => {
-    expect(PERMS_PAPEL.tecnico).toEqual([]);
+    expect(PERMS_PAPEL.tecnico).toEqual(["obra.executar"]); // 4/11: o técnico regista a execução (neg_papeis_permissoes)
     expect(podeNeg("comercial", "obra.fechar")).toBe(false);
     expect(podeNeg("operacoes", "obra.fechar")).toBe(true);
   });

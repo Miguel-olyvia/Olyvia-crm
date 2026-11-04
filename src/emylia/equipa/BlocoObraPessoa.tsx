@@ -2,7 +2,8 @@
 // Antes era a aba RH › Técnicos; os técnicos já são pessoas em Pessoas, por isso a ficha deles ganha este bloco na Visão geral.
 // 22/10: o custo/hora é só leitura (calculado nos Custos do RH: equipa/pontes.ts custosDoRh). Entra no €/h do ofício (a média dos técnicos dele: receitas e orçamentos) e no real das obras; ao lado mostra-se o custo/hora que o salário e os
 // encargos no RH dariam, sem o impor. O ofício e as férias também se mudam aqui (as férias contam nos conflitos do plano e na Agenda).
-// As tarefas já atribuídas não mudam de técnico. Só a Direção e as Operações mudam a ficha (equipa.edit, ação editarTecnico); os outros veem-na.
+// As tarefas já atribuídas não mudam de técnico. Muda a ficha quem tem os dados laborais do RH (equipa.edit = hr.pessoas.laborais.edit, a
+// mesma de rh_guardar_oficios_pessoa; 4/11: antes pedia negocios.obra.planear), ação editarTecnico; os outros veem-na.
 // Entra na ficha do RH de exemplo pelo ponto de extensão genérico (rh-exemplo/ficha/extensoesFicha), que o RhPagina fornece.
 import { useId, useState } from "react";
 import { CalendarX2, HardHat, Lightbulb, Plus, X } from "lucide-react";
@@ -58,7 +59,7 @@ function FichaObra({ t, pessoaId, ctx }: { t: FichaTecnico; pessoaId: string; ct
         <p className="text-[15px] text-muted-foreground">Técnico de obra · {t.tel} · na empresa desde {t.desde || "—"}</p>
         {!pode && (
           <p className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px]" role="note">
-            Está a ver como {PAPEIS[S.role].n}: pode consultar, mas só a Direção ou as Operações mudam o ofício e as férias.
+            Está a ver como {PAPEIS[S.role].n}: pode consultar, mas mudar o ofício e as férias pede os dados laborais do RH (hr.pessoas.laborais.edit).
           </p>
         )}
       </div>

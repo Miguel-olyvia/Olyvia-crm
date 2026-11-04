@@ -12,6 +12,7 @@ function obra(id = 1022) {
   const avisos: string[] = [];
   const A = acoes(S, (a) => avisos.push(a.msg + " · " + (a.sub ?? "")), (fn) => fn());
   const d = S.deals.find((x) => x.id === id) as Negocio;
+  S.role = "operacoes"; // 4/11: o plano e a execução pedem negocios.obra.planear / executar (as Operações, no quadro por papel)
   return { S, A, d, p: d.obra.plano!, avisos };
 }
 const foto = "data:image/svg+xml;utf8,x";

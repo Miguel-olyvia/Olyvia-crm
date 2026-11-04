@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, diaDeFerias, nfmt, type MatTarefa, type Negocio, type Plano, type SvcId, type Tarefa } from "./motor";
 import type { Ctx } from "./pecas";
+import { SEM_PERM, podeNeg } from "./permissoes";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { rotuloDia, tecnicosDoOficio } from "./preparacaoObra";
@@ -222,7 +223,9 @@ export function ExtrasTarefa({ ctx, d, ti, fase = true, fechar }: { ctx: Ctx; d:
                 {retida
                   ? <span className="text-sm text-muted-foreground">encomenda-se quando o pagamento da 1.ª parcela da adenda {t.adenda} for validado</span>
                   : d.obra.ec?.ref
-                  ? <Button size="sm" className="min-h-10" onClick={() => run(() => A.encomendarMateriais(d.id))}>Encomendar</Button>
+                  ? (podeNeg(S.role, "obra.materiais")
+                    ? <Button size="sm" className="min-h-10" onClick={() => run(() => A.encomendarMateriais(d.id))}>Encomendar</Button>
+                    : <span className="text-sm text-muted-foreground">{SEM_PERM["obra.materiais"].msg}</span>)
                   : <span className="text-sm text-muted-foreground">encomenda-se a seguir ao pagamento</span>}
               </div>
             )}

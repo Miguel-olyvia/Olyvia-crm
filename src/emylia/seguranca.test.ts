@@ -45,7 +45,7 @@ describe("podeNeg: as permissões reais, e o quadro por papel só para simular",
   });
   it("os códigos são os do catálogo da base", () => {
     expect(CODIGO_BASE).toMatchObject({ "finance.validate_payment": "negocios.validar_pagamento", "finance.invoice": "negocios.registar_fatura",
-      "contracts.cancel": "client_contracts.cancel", "equipa.edit": "negocios.obra.planear", "margin.approve": "negocios.margem.aprovar" });
+      "contracts.cancel": "client_contracts.cancel", "equipa.edit": "hr.pessoas.laborais.edit", "margin.approve": "negocios.margem.aprovar" });
   });
 });
 

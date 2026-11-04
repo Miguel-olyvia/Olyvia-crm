@@ -12,6 +12,7 @@ function preparar(id = 1027) {
   const A = acoes(S, (a) => avisos.push(a.msg + " · " + (a.sub ?? "")), (fn) => fn());
   const d = S.deals.find((x) => x.id === id) as Negocio;
   d.fin.pago = true; // 15/10: o plano só se aprova com o pagamento confirmado (aqui interessam os ajustes)
+  S.role = "operacoes"; // 4/11: ajustar e validar o plano pede negocios.obra.planear (as Operações, no quadro por papel)
   return { S, A, d, p: d.obra.plano!, avisos };
 }
 
@@ -143,7 +144,7 @@ describe("a obra: técnico → fotografia → supervisor", () => {
 
   it("equipa, equipamentos, materiais por fase e segurança têm dados coerentes", () => {
     const { S, A, d, p } = preparar(1027);
-    d.fin.pago = true; S.role = "financeiro"; A.emitirEc(d.id); // 16/10: os materiais vêm da encomenda de cliente, emitida com o pagamento
+    d.fin.pago = true; S.role = "financeiro"; A.emitirEc(d.id); S.role = "operacoes"; // 16/10: os materiais vêm da encomenda de cliente, emitida com o pagamento
     const eq = equipaDaObra(p);
     expect(eq.length).toBeGreaterThan(1);
     expect(eq.every((m) => m.tel && m.dias > 0)).toBe(true);

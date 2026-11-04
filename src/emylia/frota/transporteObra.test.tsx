@@ -25,7 +25,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 /** 1027 (Tiago Almeida) pago: a EC está no Inventário, com móveis a encomendar ao fornecedor; o plano por aprovar. */
 function obraPaga() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id);
+  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id); S.role = "operacoes"; // 4/11: o plano é das Operações
   const o = () => obrasDoEstado(S).find((x) => x.id === 1027)!;
   return { S, A, d, o };
 }
