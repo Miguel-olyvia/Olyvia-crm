@@ -152,7 +152,8 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   platform: [
     "platform.auth_audit_log.view", "platform.support_access.view", "rgpd.erasure.manage",
   ],
-  // Só verificadas no servidor (policies/RPCs): portal.manage
+  // 04/11/2026: portal.manage («Gerir acessos ao portal de clientes») verifica-se no servidor (create-client-portal-access,
+  // republish_proposal_snapshot) e no ecrã (usePodeEnviarPropostaPortal: enviar/republicar a proposta e reenviar as credenciais).
   portal: [
     "portal.manage",
   ],
