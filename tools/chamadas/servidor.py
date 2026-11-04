@@ -6,12 +6,14 @@ No fim, "Terminar" preenche a ficha e mostra-a para rever.
 
 Uso:  python servidor.py [--porta 8765] [--host 127.0.0.1]
 Abrir: http://127.0.0.1:8765/
-Para outros PCs da rede: --host 0.0.0.0 e abrir http://<ip-deste-pc>:8765/ (o browser só
-dá acesso ao microfone em https ou em localhost; na rede precisa de https à frente).
+Online (a app no Vercel a falar com este PC): CHAMADAS_TOKEN=<segredo> python servidor.py e, noutra
+janela, cloudflared tunnel --url http://127.0.0.1:8765 (dá um endereço https://….trycloudflare.com;
+na app põe-se wss://….trycloudflare.com/ws e o segredo). O áudio continua a ser processado aqui.
 """
 import argparse
 import asyncio
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +32,15 @@ VOZES = AQUI / "vozes"
 SAIDA.mkdir(exist_ok=True)
 VOZES.mkdir(exist_ok=True)
 
+# Segredo partilhado quando o motor fica exposto na internet (túnel): a app manda-o em ?token=.
+# Sem CHAMADAS_TOKEN definido não há verificação (uso só no PC).
+TOKEN = os.environ.get("CHAMADAS_TOKEN", "").strip()
+
+
+def _token_ok(token: str | None) -> bool:
+    return not TOKEN or (token or "") == TOKEN
+
+
 app = FastAPI(title="Olyvia — chamadas em direto")
 # A app Olyvia (localhost:8080 em desenvolvimento, Vercel em produção) chama este servidor local.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -44,12 +55,22 @@ async def pagina():
 
 
 @app.get("/api/vozes")
-async def vozes():
+async def vozes(token: str | None = None):
+    if not _token_ok(token):
+        return JSONResponse({"erro": "segredo errado"}, status_code=401)
     return JSONResponse([p.stem for p in sorted(VOZES.glob("*.wav"))])
 
 
+@app.get("/api/estado")
+async def estado(token: str | None = None):
+    """Para a app saber se o motor está cá e se o segredo bate certo."""
+    return JSONResponse({"motor": "olyvia-chamadas", "segredo_ok": _token_ok(token), "exige_segredo": bool(TOKEN)})
+
+
 @app.get("/api/chamadas")
-async def chamadas():
+async def chamadas(token: str | None = None):
+    if not _token_ok(token):
+        return JSONResponse({"erro": "segredo errado"}, status_code=401)
     itens = []
     for p in sorted(SAIDA.glob("*.transcricao.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:30]:
         nome = p.name.replace(".transcricao.json", "")
@@ -64,6 +85,9 @@ async def chamada(ws: WebSocket):
     16 kHz mono; texto "terminar" fecha. `campos` são os Def da app (k, l, t, op): a extração usa-os
     e devolve-os em `extracao`. `teste: true` ignora o microfone e toca a chamada de exemplo.
     Respostas: {tipo:"pronto"|"fala"|"nivel"|"a_terminar"|"fim"|"erro", ...}."""
+    if not _token_ok(ws.query_params.get("token")):
+        await ws.close(code=4401, reason="segredo errado")
+        return
     await ws.accept()
     from ao_vivo import Sessao  # carrega os modelos só quando há a primeira chamada
     sessao = None

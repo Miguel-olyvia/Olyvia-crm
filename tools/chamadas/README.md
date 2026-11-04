@@ -181,3 +181,23 @@ demorava 6 minutos em vez de 45 segundos (8 GB de VRAM não chegam para os dois)
    o disser depois de avisado. Convém que a central toque o aviso automaticamente.
 6. Fila com vários trabalhadores se o volume subir (hoje é sequencial: 3,5 min de chamada
    demoram cerca de 20 s a transcrever na RTX 5070).
+
+## Online (a app no Vercel, o motor neste PC)
+
+O áudio continua a ser processado neste PC, onde está a GPU. A app, no Vercel, liga-se ao
+motor por um túnel https com WebSocket e um segredo partilhado:
+
+1. Segredo: o motor arranca com CHAMADAS_TOKEN definido (o valor fica em tools/chamadas/segredo.txt,
+   fora do git). Sem token, o motor recusa o WebSocket e as rotas /api (401), exceto /api/estado,
+   que só diz se o segredo bate certo.
+2. Túnel: cloudflared tunnel --url http://127.0.0.1:8765 dá um endereço https://….trycloudflare.com
+   (muda de cada vez; um túnel com nome fixo precisa de cloudflared tunnel login, um clique do Rúben).
+3. App: no painel «Chamada em direto», «Motor» abre as definições: endereço wss://….trycloudflare.com/ws
+   e o segredo, guardados no browser de cada comercial. Na build do Vercel podem ir por defeito em
+   VITE_CHAMADAS_MOTOR_URL e VITE_CHAMADAS_MOTOR_SEGREDO.
+4. CSP: o vercel.json só deixa a app ligar-se ao Supabase; para o túnel é preciso juntar
+   https://*.trycloudflare.com wss://*.trycloudflare.com ao connect-src (ou o nome fixo do túnel).
+5. O AudioWorklet vem de public/chamadas/captura.worklet.js, e não de um blob, por causa dessa CSP.
+
+O ambiente «testarh» do Vercel (https://olyvia-crm-env-testarh-bmgest.vercel.app) publica o ramo
+feature/rh-pessoas a cada push.
