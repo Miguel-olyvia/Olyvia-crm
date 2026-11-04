@@ -13,6 +13,9 @@ import { Calendar } from "@/components/ui/calendar";
 import type { FeriadosOrg, HorarioOrg } from "@/hooks/pessoas/horasLivresVisita";
 import type { RecursoVisita } from "@/hooks/pessoas/useAgendaVisita";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { frasesDoVeredicto } from "@/hooks/pessoas/deslocacaoVisita";
+import { useDeslocacaoVisita } from "@/hooks/pessoas/useDeslocacaoVisita";
+import { useDestinoVisita } from "@/hooks/pessoas/useDestinoVisita";
 import { useHorasPorRecurso } from "@/hooks/pessoas/useHorasLivresVisita";
 import { cn } from "@/lib/utils";
 import type { ArgsQuemEQuando } from "../CamposAgendaVisita";
@@ -66,9 +69,15 @@ interface Props {
   feriados: FeriadosOrg;
   horarioPronto: boolean;
   excluirId: string | null;
-  /** O campo da hora (as horas livres de quem se escolheu). */
-  hora: ReactNode;
+  /**
+   * O campo da hora (as horas livres de quem se escolheu). Em função, recebe o filtro que deixa só as horas a que pelo menos um dos escolhidos
+   * consegue chegar (a deslocação); como nó, mostra-se tal e qual.
+   */
+  hora: ReactNode | ((filtrarHoras: (horas: readonly string[]) => string[]) => ReactNode);
 }
+
+const SEM_DADOS_RECURSO = "não verificado: sem dados de deslocação";
+const SEM_CP7 ="Falta a morada completa (código postal de 7 dígitos) para ver quem consegue chegar.";
 
 export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, horarioPronto, excluirId, hora }: Props) {
   const papeis = usePapeisDosRecursos();
@@ -77,11 +86,29 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
   const base = { duracaoMin, horario, feriados, horarioPronto, excluirId };
   const noDia = useHorasPorRecurso({ ...base, recursos: recursos.map((r) => r.id), dias: dia ? [dia] : [], ativo: dia !== "" });
   const livresNoDia = (r: RecursoVisita) => (dia ? noDia.horas(dia, r.id) : undefined);
+  // a deslocação (regra 13 do main): das horas livres só ficam as a que o recurso consegue chegar, dado o código postal da morada da obra
+  const cp7 = a.cp7 ?? null;
+  const local = useDestinoVisita(cp7);
+  const desloc = useDeslocacaoVisita({ recursos: recursos.map((r) => r.id), dia, duracaoMin, destino: local.destino, excluirId, ativo: dia !== "" });
+  const aVerificar = local.aLer || desloc.aLer;
+  const podeNoDia = (r: RecursoVisita) => desloc.horasQuePode(r.id, livresNoDia(r));
   const comerciais = g.conhecido ? g.comerciais ?? [] : [];
-  const comerciaisLivres = comerciais.filter((r) => (livresNoDia(r)?.length ?? 0) > 0);
-  const tudoLido = dia !== "" && comerciais.every((r) => livresNoDia(r) !== undefined);
+  const comerciaisLivres = comerciais.filter((r) => (podeNoDia(r)?.length ?? 0) > 0);
+  const tudoLido = dia !== "" && !aVerificar && comerciais.every((r) => livresNoDia(r) !== undefined);
   const semComercial = g.conhecido && tudoLido && comerciaisLivres.length === 0;
-  const tecnicosLivres = g.tecnicos.filter((r) => (livresNoDia(r)?.length ?? 0) > 0);
+  const tecnicosLivres = g.tecnicos.filter((r) => (podeNoDia(r)?.length ?? 0) > 0);
+  // quem parte de mais perto vem primeiro (a viagem da vizinha ou, sem visitas, a da base); sem distância conhecida, a ordem de sempre
+  const ordenados = [...g.principais].sort((x, y) => {
+    const kx = desloc.kmDoRecurso(x.id, livresNoDia(x)), ky = desloc.kmDoRecurso(y.id, livresNoDia(y));
+    return kx === ky ? 0 : kx === null ? 1 : ky === null ? -1 : kx - ky;
+  });
+  const filtrarHoras = (horas: readonly string[]): string[] =>
+    horas.filter((h) => a.escolhidos.length === 0 || a.escolhidos.some((id) => desloc.veredicto(id, h)?.pode !== false));
+  // a hora escolhida a que ninguém dos escolhidos consegue chegar (porque mudou a morada ou os recursos): deixa de estar escolhida
+  useEffect(() => {
+    if (!a.hora || a.somenteLeitura || aVerificar || a.escolhidos.length === 0) return;
+    if (!a.escolhidos.some((id) => desloc.veredicto(id, a.hora)?.pode !== false)) a.aoMudar({ hora: "" });
+  });
   // sem comerciais livres nesse dia: os próximos dias em que há
   const proximos = useMemo(() => (dia ? Array.from({ length: DIAS_A_PROCURAR }, (_x, i) => somarDias(dia, i + 1)) : []), [dia]);
   const outros = useHorasPorRecurso({ ...base, recursos: comerciais.map((r) => r.id), dias: semComercial ? proximos : [], ativo: semComercial && comerciais.length > 0 });
@@ -89,14 +116,36 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
   // um só comercial livre nesse dia, e ninguém escolhido: fica escolhido (uma vez por data)
   const autoEm = useRef("");
   useEffect(() => {
-    if (!dia || autoEm.current === dia || a.escolhidos.length > 0 || a.somenteLeitura || comerciaisLivres.length !== 1) return;
+    if (!dia || autoEm.current === dia || a.escolhidos.length > 0 || a.somenteLeitura || aVerificar || comerciaisLivres.length !== 1) return;
     autoEm.current = dia;
     a.aoMudarRecursos([comerciaisLivres[0].id]);
-  }, [dia, a, comerciaisLivres]);
+  }, [dia, a, comerciaisLivres, aVerificar]);
+
+  /** O texto de cada recurso a uma hora: ocupado, ou o veredicto da viagem (pode / não pode / de onde parte). */
+  const textoDaHora = (r: RecursoVisita): string => {
+    if (!(livresNoDia(r) ?? []).includes(a.hora)) return "ocupado a essa hora";
+    // sem dados deste recurso: livre, mas nunca dado por verificado
+    if (desloc.semDadosDe(r.id)) return SEM_DADOS_RECURSO;
+    const v = desloc.veredicto(r.id, a.hora);
+    return v ? frasesDoVeredicto(v).join("; ") || "pode ir" : "livre";
+  };
+  const avisosDeslocacao: string[] = [];
+  if (cp7 === null) avisosDeslocacao.push(SEM_CP7);
+  else if (!local.aLer && local.erro) avisosDeslocacao.push("Não foi possível ligar ao serviço de moradas: tente de novo dentro de instantes. Entretanto só se verifica o almoço.");
+  else if (!local.aLer && local.destino === null) avisosDeslocacao.push(`O código postal ${cp7} não tem localização: só se verifica o almoço.`);
+  if (cp7 !== null && !aVerificar && desloc.semDadosTotal > 0) {
+    const n = desloc.semDadosTotal;
+    avisosDeslocacao.push(`Não foi possível verificar a viagem de ${n} ${n === 1 ? "pessoa" : "pessoas"}: mostram-se as horas livres dessas pessoas sem essa verificação.`);
+  }
 
   const alternar = (id: string) => {
     if (a.somenteLeitura) return;
     a.aoMudarRecursos(a.escolhidos.includes(id) ? a.escolhidos.filter((x) => x !== id) : [...a.escolhidos, id]);
+  };
+  const textoDoRecurso = (r: RecursoVisita): string => {
+    const livres = livresNoDia(r), pode = podeNoDia(r);
+    if (desloc.semDadosDe(r.id)) return `${textoHoras(pode)}, não verificado`;
+    return livres && pode && livres.length > 0 && pode.length === 0 ? "livre, mas não chega a tempo" : textoHoras(pode);
   };
   const chipDe = (r: RecursoVisita) => {
     const ligado = a.escolhidos.includes(r.id);
@@ -104,7 +153,7 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
       <button key={r.id} type="button" aria-pressed={ligado} aria-disabled={a.somenteLeitura || undefined} onClick={() => alternar(r.id)} className={chip(ligado)}>
         {ligado && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
         <span>{r.name}</span>{" "}
-        <span className="text-sm font-normal text-muted-foreground">· {a.ocupados.includes(r.id) ? "ocupado nesse horário" : textoHoras(livresNoDia(r))}</span>
+        <span className="text-sm font-normal text-muted-foreground">· {a.ocupados.includes(r.id) ? "ocupado nesse horário" : textoDoRecurso(r)}</span>
       </button>
     );
   };
@@ -130,13 +179,13 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
         {a.erroData && <MensagemErro id={`${idData}-erro`} texto={a.erroData} />}
       </div>
       {!dia ? (
-        <p className="text-sm text-muted-foreground">Escolha a data: a seguir aparecem os comerciais que podem ir nesse dia.</p>
+        <p className="text-sm text-muted-foreground">Escolha a data: a seguir aparecem os comerciais que podem ir nesse dia (livres e a tempo de chegar à morada da obra); ao escolher a hora, vê-se quem consegue ir a essa hora e porquê.</p>
       ) : (
         <>
           <fieldset ref={a.grupoRef} tabIndex={-1} aria-describedby={a.erroRecursos ? idErroRec : undefined} data-foco-erro={a.erroRecursos ? "" : undefined} className="m-0 min-w-0 space-y-2 border-0 p-0">
             <legend className="mb-2 text-sm font-semibold text-foreground">{g.conhecido ? `Comerciais a ${diaPt(dia)}` : "Quem vai à visita"}</legend>
             {g.principais.length > 0
-              ? <div className="flex flex-wrap gap-2">{g.principais.map(chipDe)}</div>
+              ? <div className="flex flex-wrap gap-2">{ordenados.map(chipDe)}</div>
               : <p className="text-sm text-muted-foreground">Não há comerciais com agenda nesta organização.</p>}
             {a.erroRecursos && <MensagemErro id={idErroRec} texto={a.erroRecursos} />}
           </fieldset>
@@ -170,7 +219,17 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
             </section>
           )}
           {(noDia.comErro || outros.comErro) && <p role="alert" className="text-sm text-foreground">Não foi possível ler as horas livres de toda a gente. Tente outra vez.</p>}
-          {hora}
+          {aVerificar && <p role="status" className="text-sm text-muted-foreground">A verificar quem consegue chegar…</p>}
+          {avisosDeslocacao.map((texto) => <p key={texto} role="status" className="text-sm text-foreground">{texto}</p>)}
+          {typeof hora === "function" ? hora(filtrarHoras) : hora}
+          {/* sempre presente (uma região só se anuncia se já existia): ao mudar a hora diz-se quem pode ir e porquê */}
+          <div aria-live="polite" data-testid="deslocacao-da-hora" className="text-sm text-foreground">
+            {a.hora && !aVerificar && (
+              <ul className="m-0 list-none space-y-1 p-0">
+                {ordenados.map((r) => <li key={r.id}><b className="font-semibold">{r.name}</b>: {textoDaHora(r)}</li>)}
+              </ul>
+            )}
+          </div>
         </>
       )}
     </div>

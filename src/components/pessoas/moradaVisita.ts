@@ -44,6 +44,17 @@ export function destinoDaVisita(visita: Pick<VisitaNegocio, "igualALead" | "mora
   return { igualALead: naLead, outra: naLead ? MORADA_VISITA_VAZIA : { ...visita.morada }, notaAcesso: visita.nota, notaAcessoDaBase: visita.nota };
 }
 
+/** O código postal completo no formato 0000-000 (de «1000001», «1000 001» ou «1000-001»); `null` se não tem 7 dígitos. */
+export function normalizarCp7(cp: string | null | undefined): string | null {
+  const d = (cp ?? "").replace(/\D/g, "");
+  return d.length === 7 ? `${d.slice(0, 4)}-${d.slice(4)}` : null;
+}
+
+/** O código postal (7 dígitos) da morada onde a visita vai ser: a da lead, ou a de «Outra morada». `null` sem código postal completo. */
+export function cp7DoDestino(d: DestinoVisita, moradaLead: MoradaVisita | null): string | null {
+  return normalizarCp7(moradaLead !== null && d.igualALead ? moradaLead.codigoPostal : d.outra.codigoPostal);
+}
+
 /** A visita só pode ser "na morada da lead" se a lead tiver uma. */
 const ehNaMoradaDaLead = (d: DestinoVisita, moradaLead: MoradaVisita | null): boolean => d.igualALead && moradaLead !== null;
 

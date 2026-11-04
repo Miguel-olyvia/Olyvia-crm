@@ -107,6 +107,8 @@ export interface EntradaVisita {
   quemVaiEstar: string;
   /** Só ao marcar: o negócio aberto a que a visita já nasce ligada. */
   negocioId?: string | null;
+  /** As coordenadas do código postal da morada da visita (a regra 13 da deslocação); sem elas `p_lat` e `p_lng` vão a NULL. */
+  destino?: { lat: number; lng: number } | null;
 }
 
 export type ErroEntradaVisita = "horaInvalida" | "duracaoInvalida" | "recursoEmFalta" | "quadroEmFalta" | "visitaEmFalta";
@@ -153,7 +155,7 @@ function camposComuns(e: EntradaVisita): Comuns {
 
 /**
  * Os parâmetros de `neg_guardar_visita`. Nunca leva `p_recursos` nulo (a base usaria ou criaria o recurso de quem marca): sem recursos
- * recusa. Pessoas não geocodifica: `p_lat` e `p_lng` vão a NULL e a deslocação conta 0.
+ * recusa. `p_lat` e `p_lng` levam as coordenadas do destino (`e.destino`); sem elas vão a NULL e a deslocação conta 0.
  */
 export function paraGuardarVisita(organizationId: string, pessoaId: string, e: EntradaVisita): ResultadoParams {
   const c = camposComuns(e);
@@ -161,7 +163,7 @@ export function paraGuardarVisita(organizationId: string, pessoaId: string, e: E
   return {
     ok: true,
     params: {
-      p_organization_id: organizationId, p_entity_id: pessoaId, ...c.campos, p_lat: null, p_lng: null,
+      p_organization_id: organizationId, p_entity_id: pessoaId, ...c.campos, p_lat: e.destino?.lat ?? null, p_lng: e.destino?.lng ?? null,
       p_recursos: c.recursos, p_negocio_id: e.negocioId ?? null,
     },
   };

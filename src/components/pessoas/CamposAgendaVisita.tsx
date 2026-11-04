@@ -14,7 +14,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { DURACAO_DA_BASE, opcoesDeDuracao, type ErroAgenda, type ValorAgenda } from "./agendaVisitaForm";
 import { CamposDataHora, MensagemErro } from "./CamposDataHora";
 import { MoradaVisitaCampos } from "./MoradaVisitaCampos";
-import type { DestinoVisita, ErroMoradaVisita } from "./moradaVisita";
+import { cp7DoDestino, type DestinoVisita, type ErroMoradaVisita } from "./moradaVisita";
 import type { MoradaVisita } from "./pessoasTipos";
 import { SeletorRecursosVisita } from "./SeletorRecursosVisita";
 
@@ -66,6 +66,8 @@ export interface ArgsQuemEQuando extends ArgsDataHora {
   ocupados: readonly string[];
   erroRecursos: string | null;
   grupoRef: Ref<HTMLFieldSetElement> | undefined;
+  /** O código postal (0000-000) da morada da visita; null sem código postal completo. */
+  cp7?: string | null;
 }
 
 /** O que `CamposDataHora` recebe, para quem o troca por `renderDataHora`. */
@@ -223,6 +225,7 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
         id: p.id, data: p.valor.data, hora: p.valor.hora, hoje: p.hoje, campoData: p.campoData, erroData, erroHora, somenteLeitura: p.desativado, aoMudar: p.aoMudar,
         escolhidos: p.valor.recursos, aoMudarRecursos: (recursos) => p.aoMudar({ recursos }), ocupados,
         erroRecursos: p.erro === "recursoEmFalta" ? t(`${E}noResource`) : null, grupoRef: p.grupoRecursos,
+        cp7: cp7DoDestino(p.destino, p.moradaLead),
       }) : (
         <>
       <SeletorRecursosVisita

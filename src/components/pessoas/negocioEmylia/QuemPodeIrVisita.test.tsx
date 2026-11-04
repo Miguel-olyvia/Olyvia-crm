@@ -20,6 +20,7 @@ const slot = (dia: string, h: string) => ({ slot_start: `${dia}T${h}:00+00:00`, 
 function base(livres: Record<string, Record<string, string[]>>, papeis: unknown = PAPEIS) {
   rpc.mockImplementation(async (nome: string, a: { p_resource_id?: string; p_date?: string }) => {
     if (nome === "neg_papeis_dos_recursos") return papeis === null ? { data: null, error: { code: "PGRST202" } } : { data: papeis, error: null };
+    if (nome === "neg_visitas_vizinhas") return { data: null, error: { code: "PGRST202" } };
     return { data: (livres[a.p_date ?? ""]?.[a.p_resource_id ?? ""] ?? []).map((h) => slot(a.p_date as string, h)), error: null };
   });
 }

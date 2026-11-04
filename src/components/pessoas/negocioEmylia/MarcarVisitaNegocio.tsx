@@ -15,6 +15,7 @@ import { minutosDaDuracao } from "@/hooks/pessoas/visitaDb";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { TEXTO_DO_TIPO, TIPOS_DE_VISITA } from "@/hooks/pessoas/tipoVisitaChave";
 import { useAcoesVisita } from "@/hooks/pessoas/useAcoesVisita";
+import { useDestinoVisita } from "@/hooks/pessoas/useDestinoVisita";
 import { useHorarioOrganizacao } from "@/hooks/pessoas/useHorarioOrganizacao";
 import { useHorasLivresVisita } from "@/hooks/pessoas/useHorasLivresVisita";
 import type { VisitaDoNegocio } from "@/hooks/pessoas/useVisitasDoNegocio";
@@ -24,7 +25,7 @@ import { DURACOES_VISITA, ehErroAgenda, ehErroMorada, entradaDaVisita, intervalo
 import { CamposAgendaVisita } from "../CamposAgendaVisita";
 import { MensagemErro } from "../CamposDataHora";
 import { ErroAcao } from "../ErroAcao";
-import { destinoInicial, textoMoradaVisita, MORADA_VISITA_VAZIA, type DestinoVisita } from "../moradaVisita";
+import { cp7DoDestino, destinoInicial, textoMoradaVisita, MORADA_VISITA_VAZIA, type DestinoVisita } from "../moradaVisita";
 import type { MoradaVisita } from "../pessoasTipos";
 import { useEnvioVisita } from "../useEnvioVisita";
 import { useFormAgendaVisita } from "../useFormAgendaVisita";
@@ -98,6 +99,8 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   });
   const envio = useEnvioVisita({ aoOcupado: () => undefined, aoConflito: (r) => { form.recusar(r); setTimeout(() => grupoRecursos.current?.focus(), 0); } });
   const { valor } = form;
+  // o ponto da morada da visita (o mesmo pedido e a mesma cache que a escolha de quem vai); sem código postal completo, sem ponto
+  const localVisita = useDestinoVisita(cp7DoDestino(destino, moradaLead));
   const minutos = valor.duracaoMinutos ?? minutosDaDuracao(valor.duracao) ?? 60;
   // «Quem vai»: só quem tem recurso de agenda do tipo utilizador (a visita que se remarca mantém os recursos que já tinha).
   const recursos = useMemo(
@@ -121,7 +124,9 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   const horaForaDasLivres = erroForm === null && (horas.estado.k !== "pronto" || !horas.horas.includes(valor.hora));
   const presentesEmFalta = (valor.quemVaiEstar ?? "") === "";
   const semAgenda = form.agenda.quadros.length === 0 || recursos.length === 0;
-  const bloqueado = soLeitura || semAgenda || horario.isError || horario.isLoading;
+  // gravar espera pela localização da morada: sem isso a visita ficava sem coordenadas só por se ter clicado cedo demais
+  const aLocalizar = localVisita.aLer;
+  const bloqueado = soLeitura || semAgenda || horario.isError || horario.isLoading || aLocalizar;
   const visto = tentou ? erroForm : null;
 
   const enviar = (e: FormEvent): void => {
@@ -132,9 +137,13 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
       setTimeout(() => (formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"], [data-foco-erro], [role="alert"]') ?? campoData.current)?.focus(), 0);
       return;
     }
-    const entrada = entradaDaVisita({
-      agenda: valor, nome, tipo, tituloTipo: TEXTO_DO_TIPO[tipo], destino, moradaLead, nota, quemVaiEstar: valor.quemVaiEstar ?? "", ...(visita ? {} : { negocioId }),
-    });
+    const entrada = {
+      ...entradaDaVisita({
+        agenda: valor, nome, tipo, tituloTipo: TEXTO_DO_TIPO[tipo], destino, moradaLead, nota, quemVaiEstar: valor.quemVaiEstar ?? "", ...(visita ? {} : { negocioId }),
+      }),
+      // as coordenadas do código postal ficam na visita (location_lat/location_lng): as próximas visitas contam com elas
+      ...(localVisita.destino ? { destino: localVisita.destino } : {}),
+    };
     const iv = intervaloDaVisita(valor);
     const montar = (visitaId: string | null): VisitaGravada => ({
       visitaId, remarcada: visita !== undefined, presentes: valor.quemVaiEstar ?? "",
@@ -181,9 +190,9 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
           <QuemPodeIrVisita
             a={p} recursos={recursos} duracaoMin={minutos} horario={horario.horario} feriados={horario.feriados}
             horarioPronto={!horario.isLoading && !horario.isError} excluirId={visita?.id ?? null}
-            hora={(
+            hora={(filtrar) => (
               <HorasLivresVisita
-                id={p.id} hora={p.hora} horas={horas.horas} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}
+                id={p.id} hora={p.hora} horas={filtrar(horas.horas)} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}
                 aoEscolher={(hora) => p.aoMudar({ hora })} aoTentarOutraVez={horas.refetch} somenteLeitura={p.somenteLeitura} diaTodo={horas.diaTodo}
                 erro={p.erroHora ?? (tentou && horaForaDasLivres ? (horasNaoConfirmadas ? "Não foi possível confirmar as horas livres deste dia. Aguarde ou tente outra vez." : "Escolha uma das horas livres.") : null)}
               />
@@ -206,7 +215,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
       <ErroAcao chave={envio.erro} chaveExtra={envio.erroExtra} />
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" className={BOTAO} aria-disabled={envio.aGuardar || bloqueado || undefined} aria-busy={envio.aGuardar || undefined}>
-          {envio.aGuardar ? "A guardar…" : rotuloGravar}
+          {envio.aGuardar ? "A guardar…" : aLocalizar ? "A localizar a morada…" : rotuloGravar}
         </Button>
         {aoFechar && (
           <Button type="button" variant="outline" className={BOTAO} aria-disabled={envio.aGuardar || undefined} onClick={() => { if (!envio.aGuardar) aoFechar(); }}>Cancelar</Button>
