@@ -119,7 +119,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   // O horário da organização e as horas livres só se garantem aqui: sem horas confirmadas (a ler, erro, dia fechado, sem horas) não se grava, nem ao remarcar com a hora antiga.
   const horasNaoConfirmadas = erroForm === null && horas.estado.k !== "pronto";
   const horaForaDasLivres = erroForm === null && (horas.estado.k !== "pronto" || !horas.horas.includes(valor.hora));
-  const presentesEmFalta = (valor.quemVaiEstar ?? "") === "";
+  // 4/11 (o levantamento da chamada): «Quem vai estar» e a nota da visita não se perguntam na chamada: saem do formulário
   const semAgenda = form.agenda.quadros.length === 0 || recursos.length === 0;
   const bloqueado = soLeitura || semAgenda || horario.isError || horario.isLoading;
   const visto = tentou ? erroForm : null;
@@ -128,7 +128,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
     e.preventDefault();
     if (envio.aGuardar || bloqueado) return;
     setTentou(true);
-    if (erroForm || horaForaDasLivres || presentesEmFalta) {
+    if (erroForm || horaForaDasLivres) {
       setTimeout(() => (formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"], [data-foco-erro], [role="alert"]') ?? campoData.current)?.focus(), 0);
       return;
     }
@@ -151,6 +151,10 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
   const aviso = (texto: string) => <p role="status" className="rounded-xl border border-dashed border-border bg-muted/40 p-3 text-[15px] text-muted-foreground">{texto}</p>;
   return (
     <form ref={formulario} onSubmit={enviar} noValidate className="space-y-5">
+      {/* 4/11 (Rúben, a gravação «Entrevista Completa»): o que se diz ao cliente sobre a visita */}
+      <p className="rounded-xl bg-primary/[0.06] px-4 py-3 text-[15px]">
+        <b className="font-semibold">Diga ao cliente:</b> o técnico vai a casa ver consigo as alterações que quer fazer, tira medidas e leva os materiais para escolher; depois faz-se o orçamento. A visita não tem custo: é só informativa.
+      </p>
       <div className="space-y-2">
         <p id={rotuloTipo} className="text-sm font-semibold text-foreground">Tipo de visita</p>
         <div role="group" aria-labelledby={rotuloTipo} className="flex flex-wrap gap-2">
@@ -172,7 +176,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
       )}
       <CamposAgendaVisita
         id={id} hoje={hoje} agenda={agenda} valor={valor} aoMudar={mudar} erro={ehErroAgenda(visto) ? visto : null} conflito={form.conflito} recursoOcupado={form.recusado}
-        moradaLead={moradaLead} destino={destino} aoMudarDestino={setDestino} erroMorada={ehErroMorada(visto) ? visto : null} comQuemVaiEstar
+        moradaLead={moradaLead} destino={destino} aoMudarDestino={setDestino} erroMorada={ehErroMorada(visto) ? visto : null}
         campoData={campoData} grupoRecursos={grupoRecursos} desativado={envio.aGuardar || soLeitura}
         // 4/11 (Rúben): a data da visita primeiro (obrigatória, sem atalhos de dia), depois quem pode ir nesse dia (os comerciais; sem
         // nenhum livre, técnicos e outros dias sugeridos) e a hora. A duração sai: vem de «Preparar a visita» (1 h sem nada).
@@ -191,15 +195,6 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
           />
         )}
       />
-      {tentou && presentesEmFalta && <MensagemErro id={`${id}-presentes-erro`} texto="Diga quem vai estar na visita." />}
-      <div className="space-y-1.5">
-        <Label htmlFor={`${id}-nota`}>Nota da visita</Label>
-        <Input
-          id={`${id}-nota`} value={nota} autoComplete="off" readOnly={envio.aGuardar || soLeitura} aria-invalid={visto === "notaComprida" ? true : undefined}
-          aria-describedby={visto === "notaComprida" ? `${id}-nota-erro` : undefined} className={cn("min-h-11", FOCO)} onChange={(e) => setNota(e.target.value)}
-        />
-        {visto === "notaComprida" && <MensagemErro id={`${id}-nota-erro`} texto={t("pessoasPagina.visitDialog.error.notaComprida", { max: MAX_NOTA_VISITA })} />}
-      </div>
       {!horario.isLoading && form.agenda.quadros.length === 0 && !form.agenda.isLoading && !form.agenda.isError && aviso("A organização não tem nenhum quadro de agenda onde marcar visitas. Crie um em Agenda › Quadros.")}
       {!form.agenda.isLoading && !form.agenda.isError && form.agenda.quadros.length > 0 && recursos.length === 0 && aviso("Nenhuma pessoa desta organização tem um recurso de agenda ligado: sem isso não há a quem marcar a visita. Crie o recurso em Agenda › Recursos.")}
       {soLeitura && aviso("Só leitura: não tem permissão para marcar visitas neste negócio.")}

@@ -264,7 +264,8 @@ describe("o que falta para o orçamento", () => {
     expect(faltaParaOrcamento(S, neg(1036)).passos).toEqual(["Fechar o levantamento"]);
   });
   it("diz que campos obrigatórios do passo atual ainda estão vazios (os mesmos que travam o motor)", () => {
-    const d = structuredClone(neg(1044));
+    // 4/11: a Lead já não tem perguntas obrigatórias (só «O que o cliente pediu», texto livre): o exemplo é um negócio no Contacto
+    const d = structuredClone(neg(1038));
     d.f = {};
     const vazio = faltaParaOrcamento(S, d);
     expect(vazio.campos.length).toBeGreaterThan(0);

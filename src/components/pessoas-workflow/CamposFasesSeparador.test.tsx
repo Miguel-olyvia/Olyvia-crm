@@ -33,14 +33,15 @@ describe("Campos das fases", () => {
     const config = hook();
     render(<Campos config={config} />);
     fireEvent.click(screen.getByLabelText("Por contactar"));
-    const origem = screen.getByRole("region", { name: "Origem" });
-    fireEvent.click(within(origem).getByRole("button", { name: /^Origem\s*Escolha/ }));
+    // 4/11: a Lead («Por contactar») só tem o grupo «Pedido» (o levantamento da chamada)
+    const origem = screen.getByRole("region", { name: "Pedido" });
+    fireEvent.click(within(origem).getByRole("button", { name: /^O que o cliente pediu/ }));
     const pergunta = within(origem).getByLabelText("Pergunta");
-    fireEvent.change(pergunta, { target: { value: "Como nos conheceu" } });
+    fireEvent.change(pergunta, { target: { value: "Porque contactou" } });
     fireEvent.blur(pergunta);
     expect(screen.getByText("Há alterações por guardar.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Guardar campos" }));
-    await waitFor(() => expect(config.guardar).toHaveBeenCalledWith({ campos: { Origem: { rotulos: { origem: "Como nos conheceu" } } } }));
+    await waitFor(() => expect(config.guardar).toHaveBeenCalledWith({ campos: { Pedido: { rotulos: { pedido: "Porque contactou" } } } }));
     expect(await screen.findByText("Campos guardados. Os negócios abertos a seguir já os usam.")).toBeInTheDocument();
   });
 
@@ -55,10 +56,10 @@ describe("Campos das fases", () => {
   });
 
   it("parte do que está gravado; «Voltar aos campos de sempre» grava sem ajustes", async () => {
-    const config = hook({ dados: { campos: { Origem: { nome: "De onde veio" } }, efeitos: {} } });
+    const config = hook({ dados: { campos: { Pedido: { nome: "O pedido do cliente" } }, efeitos: {} } });
     render(<Campos config={config} />);
     fireEvent.click(screen.getByLabelText("Por contactar"));
-    expect(screen.getByRole("region", { name: "De onde veio" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "O pedido do cliente" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Voltar aos campos de sempre" }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar campos" }));
     await waitFor(() => expect(config.guardar).toHaveBeenCalledWith({ campos: {} }));
