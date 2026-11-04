@@ -17,7 +17,8 @@ import type { Papel } from "./motor";
 // técnico) passa a ser a do RH (hr.pessoas.laborais.edit, rh_guardar_oficios_pessoa); planear a obra tem a sua ("obra.planear").
 // 4/11 (tarde): "obra.materiais" (negocios.obra.materiais) passa a ser só VER os materiais da obra (o bloco no separador "Equipa e meios"),
 // e todos os papéis que abrem a obra a têm. Pedir materiais novos ao fornecedor (obra_encomendar_materiais) é "obra.encomendar", ou seja,
-// purchase_orders.create; na obra já não há botão de encomendar (20270106500000).
+// purchase_orders.create; na obra já não há botão de encomendar (20270106500000). 4/11 (20270106650000): quem planeia a obra
+// (negocios.obra.planear) também pede: é o pedido automático dos materiais da tarefa nova (novaTarefaPlano → ajustar).
 export type PermNeg = "finance.validate_payment" | "finance.invoice" | "contracts.cancel" | "equipa.edit" | "margin.approve"
   | "contacto.registar" | "visita.gerir" | "proposta.decidir" | "obra.imprevistos" | "obra.fechar" | "negocio.perder"
   | "orcamento.editar" | "proposta.enviar" | "contrato.editar" | "obra.planear" | "obra.executar" | "obra.materiais" | "obra.encomendar";
@@ -32,7 +33,7 @@ const DA_PROPOSTA: readonly PermNeg[] = ["orcamento.editar", "proposta.enviar", 
 export const PERMS_PAPEL: Record<Papel, readonly (PermNeg | "*")[]> = {
   direcao: ["*"], financeiro: ["finance.validate_payment", "finance.invoice", ...DO_NEGOCIO, "obra.materiais"],
   comercial: [...DO_NEGOCIO, ...DA_PROPOSTA, "obra.materiais"], armazem: [...DO_NEGOCIO, "obra.materiais"],
-  operacoes: ["equipa.edit", ...DO_NEGOCIO, ...DA_OBRA, "obra.planear", "obra.executar", "obra.materiais"],
+  operacoes: ["equipa.edit", ...DO_NEGOCIO, ...DA_OBRA, "obra.planear", "obra.executar", "obra.materiais", "obra.encomendar"],
   juridico: [...DO_NEGOCIO, "contrato.editar", "obra.materiais"], tecnico: ["obra.executar", "obra.materiais"],
 };
 
@@ -64,9 +65,10 @@ export const CODIGO_BASE: Record<PermNeg, string> = {
   "obra.encomendar": "purchase_orders.create",
 };
 
-/** 4/11: outros códigos que o servidor aceita em vez do de CODIGO_BASE. Também se leem (CODIGOS_NEGOCIOS). 4/11 (tarde): nenhum; o de
- *  obra_encomendar_materiais (purchase_orders.create) passou a ser o próprio código de "obra.encomendar". */
-export const ALTERNATIVAS: Readonly<Partial<Record<PermNeg, readonly string[]>>> = {};
+/** 4/11: outros códigos que o servidor aceita em vez do de CODIGO_BASE. Também se leem (CODIGOS_NEGOCIOS). 4/11 (tarde): o de
+ *  obra_encomendar_materiais (purchase_orders.create) passou a ser o próprio código de "obra.encomendar"; 20270106650000: a RPC
+ *  também aceita negocios.obra.planear (quem planeia a obra pede os materiais da tarefa nova). */
+export const ALTERNATIVAS: Readonly<Partial<Record<PermNeg, readonly string[]>>> = { "obra.encomendar": ["negocios.obra.planear"] };
 
 /** As permissões da conta real: `codigos` as concedidas na organização ativa (null: ainda não se sabem); `simular`: a Direção/admin
  *  pode usar o "A ver como". Sem conta real, null. */
@@ -106,5 +108,5 @@ export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "obra.planear": { msg: "Sem permissão para planear a obra", sub: "Mudar o plano, os técnicos, aprovar, arrancar e validar as tarefas pede a permissão negocios.obra.planear." },
   "obra.executar": { msg: "Sem permissão para registar a execução", sub: "Começar, registar e marcar como feitas as tarefas atribuídas a si pede a permissão negocios.obra.executar." },
   "obra.materiais": { msg: "Sem permissão para ver os materiais da obra", sub: "Ver os materiais da obra (as linhas da encomenda de cliente, as reservas e as encomendas a fornecedor) pede a permissão negocios.obra.materiais." },
-  "obra.encomendar": { msg: "Sem permissão para encomendar materiais", sub: "Pedir materiais novos ao fornecedor pede a permissão purchase_orders.create (criar encomendas de compra)." },
+  "obra.encomendar": { msg: "Sem permissão para encomendar materiais", sub: "Pedir materiais novos ao fornecedor pede a permissão negocios.obra.planear (planear a obra) ou purchase_orders.create (criar encomendas de compra)." },
 };

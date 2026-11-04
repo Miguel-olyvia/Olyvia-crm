@@ -1,6 +1,7 @@
 // 4/11/2026: negocios.obra.materiais ("obra.materiais") é só VER os materiais da obra, e na obra já não se encomendam materiais
 // (decisão do utilizador): o bloco dos Materiais e o editor da tarefa mostram o que falta, sem botão de encomendar. Quem não tem a
-// permissão vê, no separador "Equipa e meios", só o aviso. Encomendar (o motor, obra_encomendar_materiais) pede purchase_orders.create.
+// permissão vê, no separador "Equipa e meios", só o aviso. Encomendar (o motor, obra_encomendar_materiais) pede purchase_orders.create
+// ou negocios.obra.planear (20270106650000: o pedido automático da tarefa nova).
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,10 +40,10 @@ function preparar() {
 }
 
 describe("materiais da obra: só ver", () => {
-  it("todos os papéis que abrem a obra veem os materiais; encomendar só a Direção (o quadro por papel)", () => {
+  it("todos os papéis que abrem a obra veem os materiais; encomendar a Direção e quem planeia (o quadro por papel; 20270106650000)", () => {
     const papeis = Object.keys(PERMS_PAPEL) as Papel[];
     expect(papeis.filter((p) => !podeNeg(p, "obra.materiais"))).toEqual([]);
-    expect(papeis.filter((p) => podeNeg(p, "obra.encomendar"))).toEqual(["direcao"]);
+    expect(papeis.filter((p) => podeNeg(p, "obra.encomendar"))).toEqual(["direcao", "operacoes"]);
   });
 
   it("o bloco dos Materiais mostra o que falta encomendar, sem botão de encomendar", () => {
