@@ -239,7 +239,9 @@ function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: n
 
 /* ------------------------------------------------------------------ a fase atual */
 /** Os passos da fase atual. `simples` desenha os campos maiores, numa coluna (proposta de 09/10). */
-export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
+/** Os passos de uma fase do negócio. 4/11: `fase` (por omissão a do negócio) deixa pedir os de outra fase: «Tudo na chamada» junta os da
+ *  Lead e os do Contacto na mesma página. */
+export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fase): Passo[] {
   const { S, A, run, go } = ctx;
   const o = d.orc, L = LINHAS[d.linha], v = d.visita;
   const fx = { d, A, run, simples };
@@ -253,7 +255,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   // já não contam como "falta 1 resposta" (senão o negócio abria nesse passo em vez de no que há a fazer, ex.: gerar o contrato)
   const fechadoSe = (p: Passo, sim: boolean): Passo => (sim ? { ...p, conta: undefined, feito: true } : p);
   let passos: Passo[] = [];
-  if (d.fase === 0) {
+  if (fase === 0) {
     passos = [
       { id: "quem", titulo: "Quem pede", icone: User, conta: { f: 2, n: 2 }, resumo: [d.nome, d.tel, nomeLinha(d)], corpo: (
         <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
@@ -268,7 +270,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       ...(d.dadosLead ? [{ id: "lead-dados", titulo: "O que veio na lead", icone: ClipboardList, feito: true, resumo: resumoDadosLead(d.dadosLead), corpo: <DadosDaLead ctx={ctx} d={d} /> } as Passo] : []),
       g(LEAD[0], Phone), g(LEAD[1], Target), g(LEAD[2], ClipboardList),
     ];
-  } else if (d.fase === 1) {
+  } else if (fase === 1) {
     passos = [
       // 27/10: no contacto ainda não se está no local: a localização fica para a visita (Exterior)
       // 28/10 (Rúben): a morada da obra também se preenche pela localização do dispositivo (quem está no local)
@@ -298,7 +300,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         </div>
       ) },
     ];
-  } else if (d.fase === 2) {
+  } else if (fase === 2) {
     const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
     const nMed = CM.length;
@@ -350,7 +352,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
       ...(simples ? [] : [g(ESCOLHAS, Sparkles)]),
     ];
-  } else if (d.fase === 3 && o) {
+  } else if (fase === 3 && o) {
     passos = [
       // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
       { id: "orc", titulo: "Orçamento", icone: o.enviada && !o.aceite && !o.vendaDireta ? Lock : FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)),
@@ -377,7 +379,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         </div>
       ) }, !!o.contrato) : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
     ];
-  } else if (d.fase === 4) {
+  } else if (fase === 4) {
     passos = [
       { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: simples ? <DocumentosSimples {...ctx} d={d} /> : <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
       // 3/11 (Rúben): o Pagamento não se preenche à mão: espera que o cliente diga no portal que pagou e o Financeiro só valida
@@ -388,7 +390,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
             corpo: <PagamentoDoCliente {...ctx} d={d} /> }
         : g(gr, Euro)),
     ];
-  } else if (d.fase === 5) {
+  } else if (fase === 5) {
     passos = [
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],

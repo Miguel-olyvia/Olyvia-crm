@@ -1488,6 +1488,28 @@ function sugerir(d: Negocio, o: Record<string, string>) {
   for (const k in o) if (!d.f[k] && o[k]) { d.f[k] = o[k]; (d.sug ??= {})[k] = true; }
 }
 
+/** 4/11 (Rúben: «tudo interligado entre formulários, para ir pré-preenchido»): o que a lead trouxe (Nova lead) passa às perguntas da Lead que
+ *  estão vazias, como sugestão: o pedido (das notas), o tipo de cliente (com empresa), a origem (pela fonte da lead) e a campanha. O que
+ *  alguém escreveu não se toca. Devolve true se sugeriu alguma coisa. */
+export function sugerirDaLead(d: Negocio): boolean {
+  const x = d.dadosLead;
+  if (!x || d.fase > 1) return false;
+  const antes = JSON.stringify(d.f);
+  const op = (k: string) => LEAD.flatMap((g) => g.campos).find((c) => c.k === k)?.op ?? [];
+  const igual = (k: string, v: string) => op(k).find((o) => o.toLowerCase() === v.trim().toLowerCase());
+  const o: Record<string, string> = {};
+  if (x.notas) o.pedido = x.notas;
+  if (x.empresa) o.tipo_cliente = "Empresa";
+  if (x.fonte && !d.f.origem) {
+    const origem = igual("origem", x.fonte);
+    if (origem) o.origem = origem; else { o.origem = "Outros"; o.origem_outra = x.fonte; }
+  }
+  const campanha = x.campanha ? igual("campanha", x.campanha) : undefined;
+  if (campanha) o.campanha = campanha;
+  sugerir(d, o);
+  return JSON.stringify(d.f) !== antes;
+}
+
 /** O prazo de execução da proposta vem do prazo previsto (Gantt) e acompanha-o enquanto for sugestão (ninguém o mexeu). */
 export function sugerirPrazo(d: Negocio, S: Estado) {
   if (!d.orc || d.orc.enviada || d.fase < 3 || (d.f.prazo_exec && !d.sug?.prazo_exec)) return;
