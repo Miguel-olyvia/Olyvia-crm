@@ -48,6 +48,9 @@ function lerNovo(x: unknown, usadas: Set<string>): Def | null {
   const d: Def = { k, l, t, novo: true };
   if (op && (t === "escolha" || t === "varios")) d.op = op;
   if (typeof c.obrigatorio === "boolean") d.obrigatorio = c.obrigatorio;
+  // 4/11: as opções que abrem a caixa de mais detalhe (só as que existem)
+  const detalhe = textos(c.detalhe)?.filter((o) => d.op?.includes(o));
+  if (detalhe?.length) d.detalhe = detalhe;
   const bloco = texto(c.bloco);
   if (bloco) d.bloco = bloco;
   if (t === "contador") { d.min = Number.isFinite(c.min) ? Number(c.min) : 0; d.max = Number.isFinite(c.max) ? Number(c.max) : 50; }
@@ -78,6 +81,17 @@ function lerAjuste(g: Grupo, x: unknown): AjusteGrupo | null {
   // uma escolha fica sempre com pelo menos duas opções
   const opcoes = mapa(a.opcoes, comOpcoes, (v) => { const o = textos(v); return o && o.length >= 2 ? o : null; });
   if (opcoes) r.opcoes = opcoes;
+  // 4/11: nos campos de escolha do sistema, as opções que abrem a caixa de mais detalhe (das opções que o campo tem, com os ajustes)
+  if (a.detalhes && typeof a.detalhes === "object" && !Array.isArray(a.detalhes)) {
+    const detalhes: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(a.detalhes as Record<string, unknown>)) {
+      if (!comOpcoes.has(k)) continue;
+      const ops = r.opcoes?.[k] ?? g.campos.find((c) => c.k === k)?.op ?? [];
+      const o = textos(v)?.filter((x) => ops.includes(x));
+      if (o?.length) detalhes[k] = o;
+    }
+    if (Object.keys(detalhes).length) r.detalhes = detalhes;
+  }
   if (novos.length) r.novos = novos;
   return Object.keys(r).length ? r : null;
 }

@@ -34,6 +34,8 @@ export interface Def {
   bloco?: string;
   /** Escolha múltipla: deixa juntar opções escritas à mão, quantas se quiser; é o texto do botão (ex.: "Outra divisão"). */
   outras?: string;
+  /** 4/11 (Rúben): escolha: as opções que, escolhidas, abrem uma caixa para escrever mais detalhe (ex.: «Outro»). Guarda-se em `<k>_detalhe`. */
+  detalhe?: string[];
 }
 export interface Grupo { titulo: string; nota?: string; campos: Def[]; /** o nome que a empresa lhe deu */ nome?: string; oculto?: boolean }
 
@@ -373,6 +375,8 @@ export interface AjusteGrupo {
   obrig?: Record<string, boolean>;
   rotulos?: Record<string, string>;
   opcoes?: Record<string, string[]>;
+  /** 4/11: as opções de cada campo de escolha que abrem a caixa de mais detalhe (Def.detalhe). */
+  detalhes?: Record<string, string[]>;
   novos?: Def[];
 }
 export type CfgCampos = Record<string, AjusteGrupo>;
@@ -388,6 +392,7 @@ export function camposAjustados(cfg: CfgCampos | undefined, g: Grupo): (Def & { 
     l: a.rotulos?.[c.k] ?? c.l,
     op: a.opcoes?.[c.k] ?? c.op,
     obrigatorio: a.obrig?.[c.k] ?? c.obrigatorio,
+    detalhe: a.detalhes?.[c.k] ?? c.detalhe,
     escondido: !!a.ocultos?.includes(c.k),
   }));
 }
