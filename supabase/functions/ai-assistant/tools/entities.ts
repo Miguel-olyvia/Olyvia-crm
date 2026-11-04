@@ -3,7 +3,7 @@
 // - contact_tags CRUD
 // - restore_lead / restore_contact / restore_client (clear deleted_at)
 //
-// Permissões: contacts.edit / clients.edit / leads.edit (catálogo confirmado).
+// Permissões: pessoas.edit (o antigo contacts.edit; 04/11/2026 os contactos vivem em Pessoas) / clients.edit / leads.edit.
 // NÃO toca em permissionAliases.ts.
 
 import { requireWrite } from "../shared/authz.ts";
@@ -100,7 +100,7 @@ export const addEntityEmailDef: ToolDef = {
 };
 
 const addEntityEmail: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   const r = await resolveTargetEntityId(ctx, args);
   if (!r.ok) return r.result;
@@ -138,7 +138,7 @@ export const deleteEntityEmailDef: ToolDef = {
 };
 
 const deleteEntityEmail: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   if (args.confirm !== true) return { success: false, message: "Pede confirmação (confirm=true) antes de remover." };
   if (!isUuid(args.email_id)) return { success: false, message: "email_id inválido." };
@@ -169,7 +169,7 @@ export const setPrimaryEmailDef: ToolDef = {
 };
 
 const setPrimaryEmail: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   if (!isUuid(args.email_id)) return { success: false, message: "email_id inválido." };
   const { data: row } = await ctx.supabase
@@ -210,7 +210,7 @@ export const addEntityPhoneDef: ToolDef = {
 };
 
 const addEntityPhone: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   const r = await resolveTargetEntityId(ctx, args);
   if (!r.ok) return r.result;
@@ -248,7 +248,7 @@ export const deleteEntityPhoneDef: ToolDef = {
 };
 
 const deleteEntityPhone: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   if (args.confirm !== true) return { success: false, message: "Pede confirmação (confirm=true) antes de remover." };
   if (!isUuid(args.phone_id)) return { success: false, message: "phone_id inválido." };
@@ -276,7 +276,7 @@ export const setPrimaryPhoneDef: ToolDef = {
 };
 
 const setPrimaryPhone: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   if (!isUuid(args.phone_id)) return { success: false, message: "phone_id inválido." };
   const { data: row } = await ctx.supabase
@@ -320,7 +320,7 @@ export const setEntityAddressDef: ToolDef = {
 };
 
 const setEntityAddress: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   const r = await resolveTargetEntityId(ctx, args);
   if (!r.ok) return r.result;
@@ -400,7 +400,7 @@ export const addContactTagDef: ToolDef = {
 };
 
 const addContactTag: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   const r = await resolveTargetEntityId(ctx, args);
   if (!r.ok) return r.result;
@@ -432,7 +432,7 @@ export const removeContactTagDef: ToolDef = {
 };
 
 const removeContactTag: Handler = async (ctx, args): Promise<ToolResult> => {
-  const perm = requireWrite(ctx, "contacts.edit", "editar contactos");
+  const perm = requireWrite(ctx, "pessoas.edit", "editar contactos");
   if (perm) return perm;
   const r = await resolveTargetEntityId(ctx, args);
   if (!r.ok) return r.result;
@@ -523,6 +523,6 @@ export const handlers: Record<string, Handler> = {
   remove_contact_tag: removeContactTag,
   list_contact_tags: listContactTags,
   restore_lead: makeRestoreHandler("anew_leads", "Lead", "leads.edit"),
-  restore_contact: makeRestoreHandler("anew_contacts", "Contacto", "contacts.edit"),
+  restore_contact: makeRestoreHandler("anew_contacts", "Contacto", "pessoas.edit"),
   restore_client: makeRestoreHandler("anew_clients", "Cliente", "clients.edit"),
 };

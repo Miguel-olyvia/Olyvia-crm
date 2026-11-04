@@ -82,7 +82,7 @@ function checkRolePerm(
   const detected: string[] = [];
   const accepted: string[] = [];
   if (roles.isLead) { detected.push("lead"); accepted.push(`leads.${action}`); }
-  if (roles.isContact) { detected.push("contact"); accepted.push(`contacts.${action}`); }
+  if (roles.isContact) { detected.push("contact"); accepted.push(`pessoas.${action}`); }
   if (roles.isClient) { detected.push("client"); accepted.push(`clients.${action}`); }
   if (roles.hasDeal) { detected.push("deal"); accepted.push(`deals.${action}`); }
 
