@@ -391,7 +391,7 @@ const App = () => (
                       <Route path="/team-hub" element={<TeamHub />} />
                       <Route path="/technical-settings" element={<ProtectedRoute permission="settings.update"><TechnicalSettings /></ProtectedRoute>} />
                       <Route path="/scheduling" element={<ProtectedRoute permissions={["scheduling.items.view", "scheduling.boards.view", "scheduling.resources.view"]}><Scheduling /></ProtectedRoute>} />
-                      <Route path="/contract-templates" element={<ProtectedRoute permission="client_contracts.view"><ContractTemplates /></ProtectedRoute>} />
+                      <Route path="/contract-templates" element={<ProtectedRoute permissions={["client_contracts.view", "client_contracts.manage_templates"]}><ContractTemplates /></ProtectedRoute>} />
                       <Route path="/client-contracts" element={<ProtectedRoute permission="client_contracts.view"><ClientContracts /></ProtectedRoute>} />
                       <Route path="/countries" element={<ProtectedRoute permission="settings.update"><Countries /></ProtectedRoute>} />
                       <Route path="/org-chart" element={<ProtectedRoute permission="organizations.view"><OrgChart /></ProtectedRoute>} />
