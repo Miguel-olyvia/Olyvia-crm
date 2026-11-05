@@ -1,8 +1,11 @@
 // 5/11 (Rúben, a visita real: «reconstruir tudo o que está em papel, a planta da área»). A planta da divisão na Visita: o desenho é o
 // EditorPlanta (retas com a medida por cima, peças arrastadas da barra); aqui ficam os m² do chão e das paredes, que vão para as medidas
 // com um toque. A planta grava-se no negócio (f.planta, JSON). A geometria está em planta.ts.
-import { useEffect, useState } from "react";
-import { Check, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Sparkles, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useCatalogo } from "./v2/catalogoStore";
+import { ligarAoCatalogo, type LinhaLevada } from "./ligarEstudio";
 import { CHAVE_VOLTA, abrirEstudio, lerVolta } from "@/pages/prototipo-estudio/daVisita";
 import { Button } from "@/components/ui/button";
 import { porMedida, type Negocio } from "./motor";
@@ -21,11 +24,19 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   const atual = gravada && d.f.planta !== gravarPlanta(p) ? gravada : p;
 
   const mudar = (np: Planta) => { setP(np); setFeito(""); ctx.A.campo(d.id, "planta", gravarPlanta(np)); };
+  // 5/11 (Rúben: «sim, liga-os»): as necessidades que vieram do Estúdio, por juntar (guardam-se neste browser até se juntarem)
+  const chavePendentes = `olyvia.estudio.pendentes.${d.id}`;
+  const [pendentes, setPendentesEstado] = useState<LinhaLevada[]>(() => { try { return JSON.parse(localStorage.getItem(chavePendentes) ?? "[]"); } catch { return []; } });
+  const setPendentes = (ls: LinhaLevada[]) => {
+    setPendentesEstado(ls);
+    try { if (ls.length) localStorage.setItem(chavePendentes, JSON.stringify(ls)); else localStorage.removeItem(chavePendentes); } catch { /* fica só no ecrã */ }
+  };
   // 5/11 (Rúben: «botão para o Estúdio e depois botão para voltar»): a planta desenhada no Estúdio volta para o negócio
   useEffect(() => {
     const trazer = () => {
       const v = lerVolta(d.id);
       if (v && v.antes.paredes.length) { mudar(v.antes); setFeito("A planta voltou do Estúdio."); }
+      if (v?.linhas?.length) setPendentes(v.linhas);
     };
     trazer();
     const aoMudar = (e: StorageEvent) => { if (e.key === CHAVE_VOLTA) trazer(); };
@@ -58,6 +69,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
           else setFeito("Não deu para abrir o Estúdio neste browser.");
         }}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir no Estúdio</Button>
       </div>
+      {pendentes.length > 0 && <DoEstudio ctx={ctx} d={d} linhas={pendentes} feito={(texto) => { setPendentes([]); setFeito(texto); }} />}
       <EditorPlanta planta={atual} onMudar={mudar} divisao={divisao} />
       {/* o que a planta dá, e passá-lo às medidas */}
       <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -75,5 +87,66 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
       </div>
       <p role="status" className="min-h-5 text-sm text-success">{feito}</p>
     </div>
+  );
+}
+
+/**
+ * 5/11: o que veio do Estúdio, ligado ao Catálogo verdadeiro, para o comercial rever: cada linha com o par (o serviço ou o produto) e a
+ * quantidade; as que não têm par, à parte; as instalações que o produto já traz, só a dizer. «Juntar às necessidades» põe-nas no negócio
+ * (os serviços com a quantidade, como os juntados à mão; os produtos como na escolha da visita), e daí ao orçamento.
+ */
+function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; linhas: LinhaLevada[]; feito: (texto: string) => void }) {
+  const K = useCatalogo();
+  const ligacoes = useMemo(() => ligarAoCatalogo(linhas, ctx.S?.svc ?? {}, K.produtos ?? []), [linhas, ctx.S?.svc, K.produtos]);
+  const juntaveis = ligacoes.filter((g) => g.alvo && !g.vemComProduto);
+  const [fora, setFora] = useState<Set<number>>(new Set());
+  const semPar = ligacoes.filter((g) => !g.alvo);
+  const comProduto = ligacoes.filter((g) => g.vemComProduto);
+  const entram = juntaveis.filter((g) => !fora.has(ligacoes.indexOf(g)));
+  const juntar = () => {
+    let s = 0, pr = 0;
+    ctx.run(() => {
+      for (const g of entram) {
+        if (!g.alvo) continue;
+        if (g.alvo.tipo === "servico") { ctx.A.extra(d.id, g.alvo.id, g.q); s++; }
+        else { const prod = (K.produtos ?? []).find((x) => x.id === g.alvo!.id); if (prod) { ctx.A.produto(d.id, prod, g.q); pr++; } }
+      }
+    });
+    feito(`Nas necessidades: ${s} ${s === 1 ? "serviço" : "serviços"} e ${pr} ${pr === 1 ? "produto" : "produtos"} do Estúdio. Veja-os no passo «Necessidades do cliente».`);
+  };
+  return (
+    <section aria-labelledby={`do-estudio-${d.id}`} className="space-y-3 rounded-2xl border-2 border-primary/40 bg-card p-4 shadow-[var(--shadow-sm)]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 id={`do-estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">Do Estúdio para as necessidades</h3>
+          <p className="text-sm text-muted-foreground">O que se decidiu no Estúdio, com o par no Catálogo. Tire o que não entra e junte.</p>
+        </div>
+        <Button type="button" variant="ghost" className="min-h-11" aria-label="Agora não" onClick={() => feito("")}><X className="h-4 w-4" aria-hidden="true" /></Button>
+      </div>
+      <ul className="space-y-2">
+        {juntaveis.map((g) => {
+          const i = ligacoes.indexOf(g), dentro = !fora.has(i);
+          return (
+            <li key={i}>
+              <button type="button" role="checkbox" aria-checked={dentro} onClick={() => setFora((x) => { const n = new Set(x); if (n.has(i)) n.delete(i); else n.add(i); return n; })}
+                className={cn("flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors", dentro ? "border-primary/40 bg-primary/[0.04]" : "border-border opacity-70")}>
+                <span aria-hidden="true" className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg border-2", dentro ? "border-primary bg-primary text-primary-foreground" : "border-input")}>
+                  {dentro && <Check className="h-4 w-4" />}
+                </span>
+                <span className="min-w-0 flex-1 text-[15px]">
+                  <b className="font-medium">{g.alvo!.n}</b> · {g.q.toLocaleString("pt-PT")} {g.linhas[0].un}
+                  <span className="block text-xs text-muted-foreground">{g.alvo!.tipo === "produto" ? "Produto" : "Serviço"} do Catálogo, de: {g.linhas.map((l) => l.n).join("; ")}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {comProduto.length > 0 && <p className="text-sm text-muted-foreground">A instalação já vem com o produto: {comProduto.flatMap((g) => g.linhas.map((l) => l.n)).join("; ")}.</p>}
+      {semPar.length > 0 && <p className="text-sm text-warning-foreground">Sem par no Catálogo (junte à mão nas Necessidades): {semPar.flatMap((g) => g.linhas.map((l) => l.n)).join("; ")}.</p>}
+      <Button type="button" className="min-h-11" disabled={entram.length === 0} onClick={juntar}>
+        <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar às necessidades ({entram.length})
+      </Button>
+    </section>
   );
 }

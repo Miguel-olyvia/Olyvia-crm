@@ -48,3 +48,19 @@ describe("o Estúdio a partir da Visita", () => {
     expect(lerVolta(7)).toBeNull();
   });
 });
+
+describe("levar as necessidades do Estúdio para o negócio (5/11)", () => {
+  it("a volta leva as linhas com o que são: o produto (com as cores e a peça), a instalação, os trabalhos e os serviços", async () => {
+    const { linhasParaLevar } = await import("./levarParaNegocio");
+    const { escolherProduto, juntarServico } = await import("./necessidadesEstudio");
+    const { PROJETO_EXEMPLO } = await import("./exemploEstudio");
+    let p = escolherProduto(PROJETO_EXEMPLO, "a-sanita", "san-nexo-c");
+    p = juntarServico(p, "sv-pintura-teto");
+    const ls = linhasParaLevar(p);
+    expect(ls.find((l) => l.id === "prod-a-sanita")).toMatchObject({ tipo: "produto", chave: "sanita", cores: ["cinza"], par: "a-sanita" });
+    expect(ls.find((l) => l.id === "inst-a-sanita")).toMatchObject({ tipo: "servico", chave: "instalar:sanita", par: "a-sanita" });
+    expect(ls.find((l) => l.id === "ret-a-sanita")?.chave).toBe("retirar");
+    expect(ls.find((l) => l.id === "serv-sv-pintura-teto")?.chave).toBe("pintura");
+    expect(ls.find((l) => l.id === "teto")?.chave).toBe("teto");
+  });
+});

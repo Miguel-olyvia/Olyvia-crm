@@ -2,6 +2,8 @@
 // Visita de um negócio: a planta desenhada (f.planta) é o antes, o pé-direito e o teto falso vêm das respostas da visita, e o estilo sai das
 // cores ditas nas «Peças da casa de banho» (o revestimento, a base, as torneiras, o perfil; o móvel à parte).
 import { PLANTA_VAZIA, lerPlanta, type Planta } from "@/emylia/planta";
+import type { LinhaLevada } from "@/emylia/ligarEstudio";
+import { linhasParaLevar } from "./levarParaNegocio";
 import type { Cor, Estilo } from "./catalogoFake";
 import { copiaPlanta } from "./exemploEstudio";
 import type { Projeto } from "./necessidadesEstudio";
@@ -9,7 +11,7 @@ import type { Projeto } from "./necessidadesEstudio";
 export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
 /** 5/11: o que o Estúdio devolve ao negócio quando se carrega em «Voltar ao negócio» (a Visita lê-o e grava a planta). */
 export const CHAVE_VOLTA = "olyvia.estudio.volta";
-export interface Volta { negocio: number; antes: Planta; em: number }
+export interface Volta { negocio: number; antes: Planta; em: number; /** As necessidades do Estúdio, para juntar às do negócio. */ linhas?: LinhaLevada[] }
 
 const PALAVRAS: [RegExp, Cor][] = [
   [/cinz|antracite|gris|cromad|inox/i, "cinza"], [/pret|black|negr/i, "preto"], [/branc|white/i, "branco"],
@@ -61,7 +63,7 @@ export function abrirEstudio(nome: string, f: Record<string, string>, negocio: n
 /** O Estúdio devolve a planta do antes ao negócio de onde veio. */
 export function devolverAoNegocio(p: Projeto): boolean {
   if (p.negocio === undefined) return false;
-  try { localStorage.setItem(CHAVE_VOLTA, JSON.stringify({ negocio: p.negocio, antes: p.antes, em: Date.now() } satisfies Volta)); return true; } catch { return false; }
+  try { localStorage.setItem(CHAVE_VOLTA, JSON.stringify({ negocio: p.negocio, antes: p.antes, em: Date.now(), linhas: linhasParaLevar(p) } satisfies Volta)); return true; } catch { return false; }
 }
 
 /** A volta pendente para este negócio (recente: menos de 30 min), ou null. Ler apaga-a. */

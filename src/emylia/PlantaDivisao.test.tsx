@@ -122,3 +122,28 @@ describe("PlantaDivisao", () => {
     expect(screen.getByText("4,14 m²")).toBeInTheDocument();
   });
 });
+
+describe("do Estúdio para as necessidades (5/11)", () => {
+  it("a volta do Estúdio traz as linhas; o comercial revê e junta: os serviços com a quantidade; sem par fica à parte", () => {
+    localStorage.clear();
+    localStorage.setItem("olyvia.estudio.volta", JSON.stringify({ negocio: 3, em: Date.now(), antes: { o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }, linhas: [
+      { id: "dem", n: "Demolição e entulho", q: 12.5, un: "m²", tipo: "servico", chave: "demolicao" },
+      { id: "teto", n: "Teto falso a 2,4 m", q: 3, un: "m²", tipo: "servico", chave: "teto" },
+      { id: "serv-sv-nicho", n: "Nicho embutido no duche", q: 1, un: "un", tipo: "servico", chave: "nicho" },
+    ] }));
+    const extra = vi.fn(), campo = vi.fn();
+    const d = { id: 3, f: {}, visita: { med: {}, extra: {} } } as unknown as Negocio;
+    const ctx = { A: { campo, extra, produto: vi.fn() }, run: (fn: () => void) => fn(), S: { svc: { demol: { n: "Demolição e entulho" }, teto: { n: "Teto falso em pladur" } } } } as unknown as Ctx;
+    render(<PlantaDivisao ctx={ctx} d={d} />);
+    expect(screen.getByRole("heading", { name: "Do Estúdio para as necessidades" })).toBeInTheDocument();
+    expect(screen.getByText(/Sem par no Catálogo.*Nicho embutido no duche/)).toBeInTheDocument();
+    // tirar o teto falso e juntar o resto
+    fireEvent.click(screen.getByRole("checkbox", { name: /Teto falso em pladur/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Juntar às necessidades (1)" }));
+    expect(extra).toHaveBeenCalledWith(3, "demol", 12.5);
+    expect(extra).not.toHaveBeenCalledWith(3, "teto", expect.anything());
+    expect(screen.getByText(/Nas necessidades: 1 serviço e 0 produtos do Estúdio/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Do Estúdio para as necessidades" })).toBeNull();
+    expect(localStorage.getItem("olyvia.estudio.pendentes.3")).toBeNull();
+  });
+});
