@@ -23,11 +23,15 @@
 import { useEffect, useRef } from "react";
 import { useRelatorioAssiduidadeMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
 import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+import type { IntervaloDaFolha } from "@/lib/hr/periodoFolha";
 
 interface ResumoPessoaProcessamentoOcultoProps {
   pessoaId: string;
   ano: number;
+  /** Mes do FECHO da folha, de 1 a 12. A conversao para o 0-11 do relatorio mensal e a unica, aqui. */
   mes: number;
+  /** O intervalo da folha (de, ate inclusivos): faltas, horas extra e assiduidade contam por ele. */
+  intervalo?: IntervaloDaFolha;
   aoTerminarCarregamento: (
     pessoaId: string,
     totais: TotaisRelatorioMensal,
@@ -39,14 +43,15 @@ export function ResumoPessoaProcessamentoOculto({
   pessoaId,
   ano,
   mes,
+  intervalo,
   aoTerminarCarregamento,
 }: ResumoPessoaProcessamentoOcultoProps) {
-  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes);
+  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes - 1, intervalo);
   const avisouRef = useRef(false);
 
   useEffect(() => {
     avisouRef.current = false;
-  }, [pessoaId, ano, mes]);
+  }, [pessoaId, ano, mes, intervalo?.de, intervalo?.ate]);
 
   useEffect(() => {
     if (relatorio.loading || avisouRef.current) return;

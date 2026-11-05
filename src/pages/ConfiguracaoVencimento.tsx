@@ -44,6 +44,7 @@ import {
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
+import { SeccaoPeriodoFolha } from "@/components/hr/processamento/SeccaoPeriodoFolha";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -660,12 +661,14 @@ export default function ConfiguracaoVencimento() {
   const podeGerirCodigos = hasPermission("hr.vencimento.codigos.gerir");
   const podeVerSubsidio = hasPermission("hr.vencimento.subsidio.view");
   const podeGerirSubsidio = hasPermission("hr.vencimento.subsidio.gerir");
+  const podeVerPeriodo = hasPermission("hr.processamento.periodo.view");
+  const podeGerirPeriodo = hasPermission("hr.processamento.periodo.gerir");
 
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
-  if (!podeVerCodigos && !podeVerSubsidio) return <SemAcessoCard className="m-6" />;
+  if (!podeVerCodigos && !podeVerSubsidio && !podeVerPeriodo) return <SemAcessoCard className="m-6" />;
 
-  const abaOmissao = podeVerCodigos ? "codigos" : "subsidio";
+  const abaOmissao = podeVerCodigos ? "codigos" : podeVerSubsidio ? "subsidio" : "periodo";
 
   return (
     <div className="space-y-6">
@@ -682,6 +685,9 @@ export default function ConfiguracaoVencimento() {
           {podeVerSubsidio && (
             <TabsTrigger value="subsidio">{t("hr.vencimento.abaSubsidio")}</TabsTrigger>
           )}
+          {podeVerPeriodo && (
+            <TabsTrigger value="periodo">{t("hr.vencimento.abaPeriodoFolha")}</TabsTrigger>
+          )}
         </TabsList>
 
         {podeVerCodigos && (
@@ -692,6 +698,11 @@ export default function ConfiguracaoVencimento() {
         {podeVerSubsidio && (
           <TabsContent value="subsidio" className="mt-4">
             <SeccaoSubsidioAlimentacao podeGerir={podeGerirSubsidio} />
+          </TabsContent>
+        )}
+        {podeVerPeriodo && (
+          <TabsContent value="periodo" className="mt-4">
+            <SeccaoPeriodoFolha podeGerir={podeGerirPeriodo} />
           </TabsContent>
         )}
       </Tabs>

@@ -6,6 +6,7 @@
 import { useMemo } from "react";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 import { useJustificacoesDoDia } from "@/components/rh-exemplo/hooks/useJustificacoesDoDia";
+import type { PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { somarDias } from "@/components/rh-exemplo/lib/ausencias";
 import { situacaoDoDia, type JustificacaoDia, type SituacaoDoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
@@ -36,20 +37,20 @@ export interface LeituraDeJustificacoes {
 export function situacaoDeUmDia(
   dia: DiaCalendario,
   justificacoes: readonly JustificacaoDia[],
-  prazoDias: number,
+  prazoDe: PrazoDe,
   hoje: string,
 ): SituacaoComDesvio {
   const desvio = desvioJustificavel(dia);
-  return { situacao: situacaoDoDia({ data: dia.data, hoje, prazoDias, temDesvio: desvio !== null, justificacoes }), desvio };
+  return { situacao: situacaoDoDia({ data: dia.data, hoje, prazoDe, temDesvio: desvio !== null, justificacoes }), desvio };
 }
 
 export function situacoesDosDias(
   dias: readonly DiaCalendario[],
   justificacoes: readonly JustificacaoDia[],
-  prazoDias: number,
+  prazoDe: PrazoDe,
   hoje: string,
 ): Map<string, SituacaoComDesvio> {
-  return new Map(dias.map((d) => [d.data, situacaoDeUmDia(d, justificacoes, prazoDias, hoje)]));
+  return new Map(dias.map((d) => [d.data, situacaoDeUmDia(d, justificacoes, prazoDe, hoje)]));
 }
 
 /**
@@ -71,9 +72,10 @@ export function useSituacoesDoMes(
   const ultimo = dias && dias.length > 0 ? dias[dias.length - 1].data : null;
   const janela = useMemo(() => (primeiro && ultimo ? { de: primeiro, ate: ultimo } : null), [primeiro, ultimo]);
   const { justificacoes, loading, recusado, erro, indisponivel } = useJustificacoesDeDiaDaPessoa(pessoaId, janela, janela !== null);
-  // O prazo da organizacao, lido UMA vez (o mes inteiro calcula com o mesmo numero); se a leitura falhar e a omissao (5)
-  // e o ecra di-lo onde o prazo e mostrado (AvisoDoPrazo).
-  const { dias: prazoDias } = usePrazoJustificacao();
-  const situacoes = useMemo(() => situacoesDosDias(dias ?? [], justificacoes, prazoDias, hojeIso()), [dias, justificacoes, prazoDias]);
+  // O prazo e o fim do periodo da folha que contem o dia; as regras leem-se UMA vez (sem regra, o mes de calendario).
+  // So os dias com desvio justificavel precisam do prazo: o da base vem uma vez por periodo.
+  const datasDoPrazo = useMemo(() => (dias ?? []).filter((d) => desvioJustificavel(d) !== null).map((d) => d.data), [dias]);
+  const { prazoDe } = usePrazoJustificacao(datasDoPrazo);
+  const situacoes = useMemo(() => situacoesDosDias(dias ?? [], justificacoes, prazoDe, hojeIso()), [dias, justificacoes, prazoDe]);
   return { situacoes, leitura: { loading, recusado, erro, indisponivel } };
 }

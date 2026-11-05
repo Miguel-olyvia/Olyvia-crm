@@ -7,6 +7,7 @@
  * codigo em bruto nem a mensagem da base.
  */
 import type { HoraExtra, LimitesHE, OrigemHoraExtra } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
+import { periodoDaFolha } from "@/lib/hr/periodoFolha";
 
 export interface LinhaHoraExtra {
   id: string;
@@ -232,11 +233,9 @@ export function planoDeDeteccao(de: string, ate: string, pessoaId: string | null
   return { janelas, excede: janelas.length > MAX_JANELAS_DETECAO };
 }
 
-/** Primeiro e ultimo dia do mes `AAAA-MM`. */
-export function limitesDoMes(ano: number, mes: number): { de: string; ate: string } {
-  const p = (n: number): string => String(n).padStart(2, "0");
-  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
-  return { de: `${ano}-${p(mes)}-01`, ate: `${ano}-${p(mes)}-${p(ultimo)}` };
+/** Primeiro e ultimo dia do mes `AAAA-MM` (ou da folha, com dia de inicio): a conta e a de `periodoDaFolha`, de um so sitio. */
+export function limitesDoMes(ano: number, mes: number, diaInicio: number = 1): { de: string; ate: string } {
+  return periodoDaFolha(ano, mes, diaInicio);
 }
 
 /* ------------------------------------------------------------------ erros */

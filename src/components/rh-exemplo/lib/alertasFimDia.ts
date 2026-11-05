@@ -2,16 +2,13 @@
  * Fluxo 5 (Picagem): os alertas de FIM DO DIA e a justificacao de falha de marcacao. Funcoes puras.
  *
  * O RH trata cada alerta de uma de quatro maneiras: corrigir (motivo), pedir justificacao, marcar falta
- * (fluxo 7, com motivo) ou aceitar a diferenca. A pessoa que se esqueceu de picar justifica em 5 dias
- * uteis; o RH aceita (a picagem fica lancada a mao) ou recusa com motivo (a diferenca volta a pendente);
+ * (fluxo 7, com motivo) ou aceitar a diferenca. A pessoa que se esqueceu de picar justifica ate ao fecho do
+ * periodo da folha; o RH aceita (a picagem fica lancada a mao) ou recusa com motivo (a diferenca volta a pendente);
  * passado o prazo sem justificacao a diferenca fica «sem justificacao», falta sugerida.
  */
-import { diasUteisEntre, somarDiasUteis } from "@/components/rh-exemplo/lib/diasUteis";
+import { diasDeCalendarioEntre, type PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { minutosDeHora, motivoValido, type Resultado } from "@/components/rh-exemplo/lib/horarioTipos";
 import type { Desvio } from "@/components/rh-exemplo/tiposAssiduidade";
-
-/** A omissao (5), de um so sitio: o prazo REAL e o da organizacao (`usePrazoJustificacao`), nao esta constante. */
-export { PRAZO_JUSTIFICACAO_OMISSAO as PRAZO_JUSTIFICACAO_PICAGEM_DIAS_UTEIS } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 
 export const TIPOS_ALERTA = [
   "planeado_sem_realizado",
@@ -96,30 +93,30 @@ export function aplicarAccao(alerta: AlertaDia, accao: AccaoAlerta, dados: Dados
 }
 
 /**
- * O ultimo dia para justificar: `dias` dias uteis depois do dia do alerta. Os dias sao o prazo DA ORGANIZACAO e sao
- * obrigatorios de proposito: um chamador que se esquecesse deles calcularia com um 5 fixo sem o compilador dizer nada.
+ * O ultimo dia para justificar: o fim do periodo da folha que contem o dia do alerta (`prazoDe`, de
+ * `usePrazoJustificacao`). E obrigatorio de proposito: um chamador que se esquecesse dele nao teria prazo nenhum.
  */
-export function prazoDaJustificacao(dataDoAlerta: string, dias: number): string {
-  return somarDiasUteis(dataDoAlerta, dias);
+export function prazoDaJustificacao(dataDoAlerta: string, prazoDe: PrazoDe): string {
+  return prazoDe(dataDoAlerta);
 }
 
-export function prazoPassou(dataDoAlerta: string, hoje: string, dias: number): boolean {
-  return hoje > prazoDaJustificacao(dataDoAlerta, dias);
+export function prazoPassou(dataDoAlerta: string, hoje: string, prazoDe: PrazoDe): boolean {
+  return hoje > prazoDaJustificacao(dataDoAlerta, prazoDe);
 }
 
-/** Dias uteis que ainda restam para justificar (0 no ultimo dia e depois dele). */
-export function diasUteisRestantes(dataDoAlerta: string, hoje: string, dias: number): number {
-  const prazo = prazoDaJustificacao(dataDoAlerta, dias);
-  return hoje >= prazo ? 0 : diasUteisEntre(hoje, prazo);
+/** Dias de calendario que ainda restam para justificar (0 no ultimo dia e depois dele). */
+export function diasRestantes(dataDoAlerta: string, hoje: string, prazoDe: PrazoDe): number {
+  const prazo = prazoDaJustificacao(dataDoAlerta, prazoDe);
+  return hoje >= prazo ? 0 : diasDeCalendarioEntre(hoje, prazo);
 }
 
 /** O que a pessoa e o RH veem do prazo de um alerta que ainda espera justificacao. */
 export type SituacaoDoPrazo = "dentro_do_prazo" | "sem_justificacao" | "nao_aplica";
 
-export function situacaoDoPrazo(alerta: AlertaDia, hoje: string, dias: number): SituacaoDoPrazo {
+export function situacaoDoPrazo(alerta: AlertaDia, hoje: string, prazoDe: PrazoDe): SituacaoDoPrazo {
   const espera = alerta.estado === "pendente" || alerta.estado === "justificacao_pedida";
   if (!espera) return "nao_aplica";
-  return prazoPassou(alerta.data, hoje, dias) ? "sem_justificacao" : "dentro_do_prazo";
+  return prazoPassou(alerta.data, hoje, prazoDe) ? "sem_justificacao" : "dentro_do_prazo";
 }
 
 export interface DadosJustificacao {
@@ -129,8 +126,8 @@ export interface DadosJustificacao {
   anexoNome: string | null;
   hoje: string;
   agora: string;
-  /** O prazo da organizacao, em dias uteis. */
-  prazoDias: number;
+  /** O fim do periodo da folha que contem o dia. */
+  prazoDe: PrazoDe;
 }
 
 /** A pessoa justifica uma falha de marcacao: hora real + motivo (+ anexo), dentro do prazo da organizacao. */
@@ -138,7 +135,7 @@ export function submeterJustificacao(alerta: AlertaDia, dados: DadosJustificacao
   if (alerta.estado !== "pendente" && alerta.estado !== "justificacao_pedida") {
     return { ok: false, erro: "rhExemplo.pic.erro.jaTratado" };
   }
-  if (prazoPassou(alerta.data, dados.hoje, dados.prazoDias)) return { ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" };
+  if (prazoPassou(alerta.data, dados.hoje, dados.prazoDe)) return { ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" };
   if (minutosDeHora(dados.horaReal) === null) return { ok: false, erro: "rhExemplo.pic.erro.horaInvalida" };
   if (!motivoValido(dados.motivo)) return { ok: false, erro: "rhExemplo.pic.erro.motivoCurto" };
   return {

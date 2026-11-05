@@ -73,6 +73,15 @@ describe("useProcessamentoPeriodo", () => {
     expect(result.current.periodo).toEqual(PERIODO_ABERTO);
   });
 
+  it("o periodo traz as datas proprias: o mes do fecho (ano/mes) e o intervalo de data_inicio a data_fim", async () => {
+    const periodoDe22 = { ...PERIODO_ABERTO, ano: 2026, mes: 11, data_inicio: "2026-10-22", data_fim: "2026-11-21" };
+    respostaPeriodo = { data: periodoDe22, error: null };
+    const { result } = renderHook(() => useProcessamentoPeriodo(2026, 11));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.periodo).toMatchObject({ data_inicio: "2026-10-22", data_fim: "2026-11-21" });
+  });
+
   it("um erro de permissao na leitura devolve periodo null, sem lancar", async () => {
     respostaPeriodo = { data: null, error: { code: "42501", message: "insufficient_privilege" } };
     const { result } = renderHook(() => useProcessamentoPeriodo(2026, 9));

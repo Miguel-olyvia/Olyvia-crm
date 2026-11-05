@@ -3,10 +3,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 // As justificacoes do dia vivem na base: aqui a base e simulada (sem CompanyProvider e sem chamadas).
 vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
-// O prazo para justificar e da organizacao e vem da base: aqui e simulado (5 dias, a omissao).
+// O prazo para justificar e da organizacao e vem da base: aqui e simulado (fim do periodo da folha; sem regra, o mes de calendario).
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
 import { fireEvent, render, screen } from "@testing-library/react";
 import { reporPrazoFalso } from "@/test/prazoJustificacaoFalso";
+import { fimDoPeriodoDoDia } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { lerEstado, repor } from "@/components/rh-exemplo/dados/loja";
 import { lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
@@ -95,7 +96,7 @@ describe("fluxo 5: justificacao de falha de marcacao", () => {
   // (hr_assiduidade_desvios, so os turnos sem horas e as picagens por emparelhar). Enviar uma justificacao de picagem
   // nao tem onde gravar na base: a lista so se le.
   const justificacoesDeTeste = (parcial: Partial<JustificacoesDaPessoa> = {}): JustificacoesDaPessoa => ({
-    ...resumoDosAlertas(alertasDeDesvios([DESVIO_DA_SOFIA], "p-sofia"), hojeIso(), 5),
+    ...resumoDosAlertas(alertasDeDesvios([DESVIO_DA_SOFIA], "p-sofia"), hojeIso(), (d: string) => fimDoPeriodoDoDia(d, [])),
     pendentes: [], aceites: [], recusadas: [], loading: false, erro: false, recusado: false, ...parcial,
   });
 
@@ -116,7 +117,7 @@ describe("fluxo 5: justificacao de falha de marcacao", () => {
 
   it("mostra as marcacoes por justificar da base com os dias que restam, sem oferecer o botao Justificar", () => {
     noLingua(<JustificarFalhaDeMarcacao pessoaId="p-sofia" justificacoes={justificacoesDeTeste()} />);
-    expect(screen.getByText(/Dias úteis que restam à justificação mais urgente/)).toBeInTheDocument();
+    expect(screen.getByText(/Dias que restam à justificação mais urgente/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Justificar" })).not.toBeInTheDocument();
     expect(screen.queryByText("Não há marcações por justificar nem justificações enviadas.")).not.toBeInTheDocument();
   });

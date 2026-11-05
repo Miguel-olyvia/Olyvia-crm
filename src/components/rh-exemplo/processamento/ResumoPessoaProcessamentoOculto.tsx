@@ -27,7 +27,9 @@ import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/components/rh-
 interface ResumoPessoaProcessamentoOcultoProps {
   pessoaId: string;
   ano: number;
+  /** 1-12 (o wrapper do relatorio converte). */
   mes: number;
+  intervalo?: { de: string; ate: string };
   aoTerminarCarregamento: (
     pessoaId: string,
     totais: TotaisRelatorioMensal,
@@ -39,14 +41,15 @@ export function ResumoPessoaProcessamentoOculto({
   pessoaId,
   ano,
   mes,
+  intervalo,
   aoTerminarCarregamento,
 }: ResumoPessoaProcessamentoOcultoProps) {
-  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes);
+  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, intervalo);
   const avisouRef = useRef(false);
 
   useEffect(() => {
     avisouRef.current = false;
-  }, [pessoaId, ano, mes]);
+  }, [pessoaId, ano, mes, intervalo?.de, intervalo?.ate]);
 
   useEffect(() => {
     if (relatorio.loading || avisouRef.current) return;

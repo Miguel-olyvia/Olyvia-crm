@@ -4,6 +4,7 @@
  * própria pessoa («A minha área») os poderes do RH desaparecem, mesmo que a conta os tenha.
  */
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
+import type { PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import type { AlertaDia, JustificacaoPicagem } from "./alertasFimDia";
 import { situacaoDoPrazo } from "./alertasFimDia";
 
@@ -41,12 +42,12 @@ export function justificacoesDoDia(
   pessoaId: string,
   data: string,
   hoje: string,
-  /** O prazo da organizacao, em dias uteis (obrigatorio: nao ha 5 fixo). */
-  prazoDias: number,
+  /** O fim do periodo da folha que contem o dia (obrigatorio: sem ele nao ha prazo). */
+  prazoDe: PrazoDe,
 ): JustificacoesDoDia {
   const doDia = alertas.filter((a) => a.pessoaId === pessoaId && a.data === data);
   return {
-    porJustificar: doDia.filter((a) => situacaoDoPrazo(a, hoje, prazoDias) === "dentro_do_prazo"),
+    porJustificar: doDia.filter((a) => situacaoDoPrazo(a, hoje, prazoDe) === "dentro_do_prazo"),
     enviadas: justificacoes
       .filter((j) => j.pessoaId === pessoaId)
       .flatMap((justificacao) => {

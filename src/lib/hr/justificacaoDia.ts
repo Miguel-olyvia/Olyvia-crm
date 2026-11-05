@@ -93,7 +93,10 @@ export const horaSemSegundos = (hora: string | null | undefined): string => (hor
  * (sobreposição, ausência aprovada...) chegam com o seu prefixo e traduzem-se pelo mapa da assiduidade.
  */
 const PREFIXOS: ReadonlyArray<[string, string]> = [
-  ["justificacao_dia_fora_do_prazo", "rhJust.erro.foraDoPrazo"],
+  // O prazo e o fecho do periodo da folha (20270107200000); `justificacao_dia_fora_do_prazo` (5 dias uteis) deixou de ser emitido.
+  ["justificacao_prazo_terminado", "rhJust.erro.foraDoPrazo"],
+  ["justificacao_periodo_fechado", "rhJust.erro.periodoFechado"],
+  ["justificacao_periodo_indeterminado", "rhJust.erro.periodoIndeterminado"],
   ["justificacao_dia_ja_ha_falta", "rhJust.erro.jaHaFalta"],
   ["justificacao_dia_ja_enviada", "rhJust.erro.jaEnviada"],
   ["justificacao_dia_ja_decidida", "rhJust.erro.jaDecidida"],

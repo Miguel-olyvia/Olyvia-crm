@@ -14,7 +14,7 @@ import {
   prazoParaJustificar,
   type DescontoDaFalta,
 } from "@/components/rh-exemplo/lib/faltasB";
-import { diasUteisEntre } from "@/components/rh-exemplo/lib/diasUteis";
+import { diasDeCalendarioEntre, type PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 
 export const TIPOS_JUSTIFICACAO_DIA = ["consulta_medica", "transporte", "assunto_pessoal", "outro"] as const;
 export type TipoJustificacaoDia = (typeof TIPOS_JUSTIFICACAO_DIA)[number];
@@ -84,7 +84,8 @@ export interface SituacaoDoDia {
 export interface EntradaSituacao {
   data: string;
   hoje: string;
-  prazoDias: number;
+  /** O fim do periodo da folha que contem o dia (o prazo para justificar). */
+  prazoDe: PrazoDe;
   /** O dia tem falta sugerida ou atraso acima da tolerância e nenhuma falta marcada. */
   temDesvio: boolean;
   /** As justificações DESTA pessoa; a função escolhe as do dia. */
@@ -102,9 +103,9 @@ export const ESTADO_DA_JUSTIFICACAO: Record<EstadoJustificacaoDia, EstadoDoDia> 
 /** O que a pessoa vê num dia: pode justificar, já enviou, foi aceite ou recusada, ou o prazo acabou. */
 export function situacaoDoDia(e: EntradaSituacao): SituacaoDoDia {
   const ultima = [...e.justificacoes].reverse().find((j) => j.data === e.data) ?? null;
-  const prazoAte = prazoParaJustificar(e.data, e.prazoDias);
-  const fora = foraDoPrazoDeJustificar(e.data, e.hoje, e.prazoDias);
-  const diasRestantes = fora || e.hoje >= prazoAte ? 0 : diasUteisEntre(e.hoje, prazoAte);
+  const prazoAte = prazoParaJustificar(e.data, e.prazoDe);
+  const fora = foraDoPrazoDeJustificar(e.data, e.hoje, e.prazoDe);
+  const diasRestantes = fora || e.hoje >= prazoAte ? 0 : diasDeCalendarioEntre(e.hoje, prazoAte);
   const com = (estado: EstadoDoDia, justificacao: JustificacaoDia | null): SituacaoDoDia => ({ estado, justificacao, prazoAte, diasRestantes });
   if (ultima) {
     const base = ESTADO_DA_JUSTIFICACAO[ultima.estado];

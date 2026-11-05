@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fimDoPeriodoDoDia } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import {
   decidirJustificacaoFalta,
   descontoDaFalta,
@@ -105,25 +106,28 @@ describe("sugestoes (o sistema so sugere)", () => {
   });
 });
 
-describe("justificacao com prazo da organizacao", () => {
-  it("o prazo conta dias uteis a partir do dia da falta (quinta 10/12 + 5 = quinta 17/12)", () => {
-    expect(prazoParaJustificar("2026-12-10", 5)).toBe("2026-12-17");
-    expect(prazoParaJustificar("2026-12-10", 2)).toBe("2026-12-14");
-    expect(foraDoPrazoDeJustificar("2026-12-10", "2026-12-17", 5)).toBe(false);
-    expect(foraDoPrazoDeJustificar("2026-12-10", "2026-12-18", 5)).toBe(true);
+const semRegra = (d: string): string => fimDoPeriodoDoDia(d, []);
+const inicio22 = (d: string): string => fimDoPeriodoDoDia(d, [{ dia_inicio: 22, valido_de: "2000-01-01" }]);
+
+describe("justificacao ate ao fecho do periodo da folha", () => {
+  it("o prazo e o fim do periodo que contem o dia da falta (10/12 -> 31/12; com inicio a 22 -> 21/12)", () => {
+    expect(prazoParaJustificar("2026-12-10", semRegra)).toBe("2026-12-31");
+    expect(prazoParaJustificar("2026-12-10", inicio22)).toBe("2026-12-21");
+    expect(prazoParaJustificar("2026-12-22", inicio22)).toBe("2027-01-21");
+    expect(foraDoPrazoDeJustificar("2026-12-10", "2026-12-21", inicio22)).toBe(false);
+    expect(foraDoPrazoDeJustificar("2026-12-10", "2026-12-22", inicio22)).toBe(true);
   });
 
-  it("dentro do prazo fica pendente de documento; fora do prazo fica sem justificacao", () => {
+  it("dentro do periodo fica pendente de documento; depois do fecho fica sem justificacao", () => {
     const falta = { data: "2026-12-10", estado: "activa" as const };
-    expect(registarJustificacao(falta, { texto: "Consulta medica", hoje: "2026-12-11", prazoDias: 5 })).toEqual({ ok: true, estado: "pendente_documento", foraDoPrazo: false });
-    expect(registarJustificacao(falta, { texto: "Consulta medica", hoje: "2026-12-30", prazoDias: 5 })).toEqual({ ok: true, estado: "sem_justificacao", foraDoPrazo: true });
+    expect(registarJustificacao(falta, { texto: "Consulta medica", hoje: "2026-12-11", prazoDe: semRegra })).toEqual({ ok: true, estado: "pendente_documento", foraDoPrazo: false });
+    expect(registarJustificacao(falta, { texto: "Consulta medica", hoje: "2027-01-02", prazoDe: semRegra })).toEqual({ ok: true, estado: "sem_justificacao", foraDoPrazo: true });
   });
 
   it("sem texto, ou sobre uma falta anulada, recusa", () => {
-    expect(registarJustificacao({ data: "2026-12-10", estado: "activa" }, { texto: " ", hoje: "2026-12-11", prazoDias: 5 })).toEqual({ ok: false, erro: "rhExemplo.fal.erro.semTexto" });
-    expect(registarJustificacao({ data: "2026-12-10", estado: "anulada" }, { texto: "abc", hoje: "2026-12-11", prazoDias: 5 })).toEqual({ ok: false, erro: "rhExemplo.fal.erro.faltaAnulada" });
+    expect(registarJustificacao({ data: "2026-12-10", estado: "activa" }, { texto: " ", hoje: "2026-12-11", prazoDe: semRegra })).toEqual({ ok: false, erro: "rhExemplo.fal.erro.semTexto" });
+    expect(registarJustificacao({ data: "2026-12-10", estado: "anulada" }, { texto: "abc", hoje: "2026-12-11", prazoDe: semRegra })).toEqual({ ok: false, erro: "rhExemplo.fal.erro.faltaAnulada" });
   });
-
   it("o estado mostra os quatro estados do documento", () => {
     expect(rotuloDaJustificacao({ justificacao_estado: "sem_justificacao", remunerada: false })).toBe("sem_justificacao");
     expect(rotuloDaJustificacao({ justificacao_estado: "pendente_documento", remunerada: false })).toBe("pendente_documento");

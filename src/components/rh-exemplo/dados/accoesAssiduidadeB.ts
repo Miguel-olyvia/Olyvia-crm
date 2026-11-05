@@ -2,6 +2,7 @@
  * As accoes dos fluxos 5 (alertas do fim do dia, justificacao de falha de marcacao) e 7 (faltas) sobre os
  * stores em memoria. Cada uma valida com a funcao pura e devolve `null` em sucesso ou a chave do erro.
  */
+import type { PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { lerEstado } from "@/components/rh-exemplo/dados/loja";
 import { definirGestao, lerGestao, novoIdGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { nomeDeQuemUsa } from "@/components/rh-exemplo/dados/accoesHorarioB";
@@ -179,11 +180,11 @@ function atualizarFalta(faltaId: string, patch: Partial<Falta>): void {
   definirGestao((g) => ({ ...g, faltas: g.faltas.map((f) => (f.id === faltaId ? { ...f, ...patch } : f)) }));
 }
 
-/** Registar a justificacao (texto sensivel): pendente de documento dentro do prazo da organizacao (`prazoDias`, obrigatorio). */
-export function registarJustificacaoDeFalta(faltaId: string, texto: string, prazoDias: number): ResultadoAccao & { foraDoPrazo?: boolean } {
+/** Registar a justificacao (texto sensivel): pendente de documento ate ao fecho do periodo da folha (`prazoDe`, obrigatorio). */
+export function registarJustificacaoDeFalta(faltaId: string, texto: string, prazoDe: PrazoDe): ResultadoAccao & { foraDoPrazo?: boolean } {
   const falta = lerGestao().faltas.find((f) => f.id === faltaId);
   if (!falta) return { erro: "rhExemplo.fal.erro.faltaAnulada" };
-  const resultado = registarJustificacao(falta, { texto, hoje: hojeIso(), prazoDias });
+  const resultado = registarJustificacao(falta, { texto, hoje: hojeIso(), prazoDe });
   if (resultado.ok === false) return { erro: resultado.erro };
   definirFluxosB((e) => ({ ...e, textosFalta: { ...e.textosFalta, [faltaId]: texto.trim() } }));
   atualizarFalta(faltaId, { justificacao_estado: resultado.estado });

@@ -12,14 +12,17 @@ import { formatarEuros, formatarHorasMinutos } from "@/components/rh-exemplo/flu
 import { LEITOR_FALTAS, emVigor } from "@/components/rh-exemplo/lib/assiduidade";
 import { descontoDaFalta, totalDeDescontos } from "@/components/rh-exemplo/lib/faltasB";
 import { TOLERANCIA_ATRASO_MINUTOS } from "@/components/rh-exemplo/lib/horarioTipos";
+import { formatarIntervaloPeriodo, localeDaLingua, usePeriodoDoDia } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { useCalculoRealDaPessoa } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import type { Falta } from "@/components/rh-exemplo/tiposAssiduidade";
 
 /** `faltasDaPessoa`: as faltas lidas da base para o total da pessoa (a janela pedida, nao a historia toda). */
 export function DescontoDaFaltaCard({ falta, faltasDaPessoa }: { falta: Falta; faltasDaPessoa: readonly Falta[] }) {
   const { t, language } = useTranslation();
-  const chaveMes = falta.data.slice(0, 7);
-  const calculo = useCalculoRealDaPessoa(falta.pessoa_id, Number(chaveMes.slice(0, 4)) || 0, Number(chaveMes.slice(5, 7)) || 1);
+  // A folha que CONTEM o dia da falta (pelas regras do periodo), nao o mes de calendario: 25/10 com inicio a 22 cai em novembro.
+  const folha = usePeriodoDoDia(falta.data);
+  const chaveMes = `${folha.ano}-${String(folha.mes).padStart(2, "0")}`;
+  const calculo = useCalculoRealDaPessoa(falta.pessoa_id, folha.ano, folha.mes);
   const base = useMemo(() => valorHoraDoCalculo(calculo.resultado), [calculo.resultado]);
   const valorHora = base?.valorHora ?? null;
   // Sem valor da hora o desconto em tempo e a razao continuam a ver-se; so o valor em euros nao se calcula.
@@ -28,10 +31,10 @@ export function DescontoDaFaltaCard({ falta, faltasDaPessoa }: { falta: Falta; f
     () => valorHora === null
       ? null
       : totalDeDescontos(
-        emVigor(faltasDaPessoa.filter((f) => f.pessoa_id === falta.pessoa_id && f.data.startsWith(chaveMes)), LEITOR_FALTAS),
+        emVigor(faltasDaPessoa.filter((f) => f.pessoa_id === falta.pessoa_id && f.data >= folha.de && f.data <= folha.ate), LEITOR_FALTAS),
         valorHora,
       ),
-    [faltasDaPessoa, falta.pessoa_id, chaveMes, valorHora],
+    [faltasDaPessoa, falta.pessoa_id, folha.de, folha.ate, valorHora],
   );
 
   const linhaDoValorHora = (): string => {
@@ -48,6 +51,12 @@ export function DescontoDaFaltaCard({ falta, faltasDaPessoa }: { falta: Falta; f
     <section aria-label={t("rhExemplo.fal.descontoTitulo")} className="space-y-2 rounded-md border p-3 text-sm" data-testid="rhb-desconto">
       <h3 className="font-semibold">{t("rhExemplo.fal.descontoTitulo")}</h3>
       <p className="text-muted-foreground">{t("rhExemplo.fal.descontoRegra", { minutos: String(TOLERANCIA_ATRASO_MINUTOS) })}</p>
+      <p data-testid="rhb-desconto-folha">
+        {t(calculo.temPeriodo && !calculo.periodoAberto ? "hr.falta.caiNaFolhaFechada" : "hr.falta.caiNaFolha", {
+          mes: nomeDoMes(chaveMes, language),
+          intervalo: formatarIntervaloPeriodo(folha.de, folha.ate, localeDaLingua(language), t("hr.periodoFolha.intervaloA")),
+        })}
+      </p>
       <p>{linhaDoValorHora()}</p>
       {calculo.incompleta && !calculo.aCarregar && <p role="status" className="text-amber-800 dark:text-amber-300">{t("rhProcReal.fal.incompleto")}</p>}
       {valorHora !== null && (

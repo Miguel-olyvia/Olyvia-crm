@@ -14,10 +14,20 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { invalidarPrazoDaJustificacao } from "@/lib/hr/prazoCache";
 import type { HrPeriodoProcessamento } from "@/types/hr";
 
-const COLUNAS =
+const COLUNAS_ANTIGAS =
   "id, organization_id, ano, mes, estado, fechado_em, fechado_por, created_at, created_by";
+/** O periodo da folha tem datas proprias (20270107200000): (ano, mes) e o mes do FECHO e o intervalo vai de data_inicio a data_fim. */
+const COLUNAS = `${COLUNAS_ANTIGAS}, data_inicio, data_fim`;
+
+/** 42703 = coluna inexistente, e so por causa de data_inicio / data_fim: a migration das datas ainda nao esta aplicada. */
+const colunaInexistente = (erro: unknown): boolean => {
+  if (!erro || typeof erro !== "object") return false;
+  const { code, message } = erro as { code?: unknown; message?: unknown };
+  return code === "42703" && typeof message === "string" && /data_(inicio|fim)/.test(message);
+};
 
 export function useProcessamentoPeriodo(ano: number, mes: number) {
   const { activeCompany } = useCompany();
@@ -44,12 +54,16 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
       return;
     }
     if (!silencioso) setLoading(true);
-    const { data, error } = await hrFrom("hr_periodos_processamento")
-      .select(COLUNAS)
-      .eq("organization_id", orgId)
-      .eq("ano", ano)
-      .eq("mes", mes)
-      .maybeSingle();
+    const ler = (colunas: string) =>
+      hrFrom("hr_periodos_processamento")
+        .select(colunas)
+        .eq("organization_id", orgId)
+        .eq("ano", ano)
+        .eq("mes", mes)
+        .maybeSingle();
+    let { data, error } = await ler(COLUNAS);
+    // Base ainda sem as datas: le como antes (o ecra cai para o mes de calendario).
+    if (colunaInexistente(error)) ({ data, error } = await ler(COLUNAS_ANTIGAS));
     if (pedido !== ultimoPedido.current) return;
     if (error) {
       if (isPermissionError(error)) {
@@ -77,6 +91,8 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
       try {
         const { error } = await accao();
         if (error) throw error;
+        // Abrir ou fechar muda o prazo de justificar dos dias deste periodo.
+        invalidarPrazoDaJustificacao(orgId);
         await load(true);
         return null;
       } catch (e) {
@@ -86,7 +102,7 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
         setSaving(false);
       }
     },
-    [load],
+    [load, orgId],
   );
 
   const abrir = useCallback(

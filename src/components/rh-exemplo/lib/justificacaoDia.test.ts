@@ -1,6 +1,7 @@
 // Justificar um dia com falta sugerida ou atraso (puro): quando se pode justificar (prazo, desvio), as transições
 // pendente → aceite paga / não paga / recusada e o que cada decisão faz ao desconto (pela regra das faltas).
 import { describe, expect, it } from "vitest";
+import { fimDoPeriodoDoDia, type PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import {
   criarJustificacaoDia,
   decidirJustificacaoDia,
@@ -27,35 +28,38 @@ function justificacao(campos: Partial<JustificacaoDia> = {}): JustificacaoDia {
   };
 }
 
-const situacao = (data: string, temDesvio: boolean, js: JustificacaoDia[] = [], prazoDias = 5) =>
-  situacaoDoDia({ data, hoje: HOJE, prazoDias, temDesvio, justificacoes: js });
+// O prazo e o fim do periodo da folha: sem regra, o fim do mes; com `inicio(N)`, o periodo vai de N ate N-1 do mes seguinte.
+const semRegra: PrazoDe = (d) => fimDoPeriodoDoDia(d, []);
+const inicio = (dia: number): PrazoDe => (d) => fimDoPeriodoDoDia(d, [{ dia_inicio: dia, valido_de: "2000-01-01" }]);
+const situacao = (data: string, temDesvio: boolean, js: JustificacaoDia[] = [], prazoDe: PrazoDe = semRegra) =>
+  situacaoDoDia({ data, hoje: HOJE, prazoDe, temDesvio, justificacoes: js });
 
 describe("quando se pode justificar", () => {
-  it("um dia com desvio dentro do prazo (5 dias úteis) deixa justificar, e diz quantos dias restam", () => {
+  it("um dia com desvio dentro do prazo deixa justificar ate ao fecho do periodo, e diz quantos dias restam", () => {
     const s = situacao("2026-10-08", true);
     expect(s.estado).toBe("pode_justificar");
-    expect(s.prazoAte).toBe("2026-10-15");
-    expect(s.diasRestantes).toBe(1);
+    expect(s.prazoAte).toBe("2026-10-31");
+    expect(s.diasRestantes).toBe(17);
   });
 
-  it("no último dia do prazo ainda deixa, com 0 dias restantes", () => {
-    const s = situacao("2026-10-07", true);
+  it("no ultimo dia do periodo ainda deixa, com 0 dias restantes (inicio a 15: a folha de 08/10 fecha a 14/10)", () => {
+    const s = situacao("2026-10-08", true, [], inicio(15));
     expect(s.estado).toBe("pode_justificar");
+    expect(s.prazoAte).toBe("2026-10-14");
     expect(s.diasRestantes).toBe(0);
   });
 
-  it("passado o prazo fica «prazo terminado», sem justificação, e já não deixa enviar", () => {
-    const s = situacao("2026-10-06", true);
+  it("depois de o periodo fechar fica «prazo terminado», sem justificacao, e ja nao deixa enviar", () => {
+    const s = situacao("2026-10-08", true, [], inicio(10));
     expect(s.estado).toBe("prazo_terminado");
     expect(s.justificacao).toBeNull();
     expect(podeEnviar(s.estado)).toBe(false);
   });
 
-  it("o prazo é o da organização: com 1 dia útil, o dia 8 já não deixa", () => {
-    expect(situacao("2026-10-08", true, [], 1).estado).toBe("prazo_terminado");
-    expect(situacao("2026-10-08", true, [], 10).estado).toBe("pode_justificar");
+  it("o prazo e o fecho do periodo, que muda com a regra: o dia 8 deixa justificar sem regra e ja nao com inicio a 10", () => {
+    expect(situacao("2026-10-08", true, [], inicio(10)).estado).toBe("prazo_terminado");
+    expect(situacao("2026-10-08", true, [], semRegra).estado).toBe("pode_justificar");
   });
-
   it("um dia sem falta sugerida nem atraso não se justifica", () => {
     const s = situacao("2026-10-08", false);
     expect(s.estado).toBe("nao_aplica");
@@ -82,7 +86,7 @@ describe("o estado do dia depois de enviar", () => {
     expect(podeEnviar(situacao("2026-10-08", true, [justificacao()]).estado)).toBe(false);
     const recusada = justificacao({ estado: "recusada" });
     expect(podeEnviar(situacao("2026-10-08", true, [recusada]).estado)).toBe(true);
-    expect(situacao("2026-10-06", true, [{ ...recusada, data: "2026-10-06" }]).estado).toBe("recusada_sem_prazo");
+    expect(situacao("2026-10-06", true, [{ ...recusada, data: "2026-10-06" }], inicio(10)).estado).toBe("recusada_sem_prazo");
   });
 
   it("usa a última justificação do dia", () => {

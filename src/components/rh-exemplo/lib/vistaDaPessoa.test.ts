@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fimDoPeriodoDoDia } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import type { AlertaDia, JustificacaoPicagem } from "./alertasFimDia";
 import { justificacoesDoDia, permissoesDaVista } from "./vistaDaPessoa";
@@ -36,32 +37,33 @@ const justificacao = (parcial: Partial<JustificacaoPicagem>): JustificacaoPicage
   estado: "pendente", decididaPor: null, decididaEm: null, motivoRecusa: null, ...parcial,
 });
 
-describe("justificar no dia (prazo da organização, 5 dias úteis por omissão)", () => {
+// O prazo e o fim do periodo da folha: sem regra, o fim do mes; com inicio a N, de N ate N-1 do mes seguinte.
+const semRegra = (d: string): string => fimDoPeriodoDoDia(d, []);
+const inicio = (dia: number) => (d: string): string => fimDoPeriodoDoDia(d, [{ dia_inicio: dia, valido_de: "2000-01-01" }]);
+
+describe("justificar no dia (ate ao fecho do periodo da folha)", () => {
   it("um dia com picagem em falta dentro do prazo pode ser justificado", () => {
-    const r = justificacoesDoDia([alerta({})], [], "p1", "2026-10-13", "2026-10-14", 5);
+    const r = justificacoesDoDia([alerta({})], [], "p1", "2026-10-13", "2026-10-14", semRegra);
     expect(r.porJustificar.map((a) => a.id)).toEqual(["a1"]);
     expect(r.enviadas).toEqual([]);
   });
 
-  it("no último dia útil do prazo ainda se justifica, e no dia seguinte já não", () => {
-    // 2026-10-05 é segunda-feira: 5 dias úteis depois é 2026-10-12.
+  it("no ultimo dia do periodo ainda se justifica, e no dia seguinte ja nao (sem regra: 31/10)", () => {
     const a = alerta({ data: "2026-10-05" });
-    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-12", 5).porJustificar).toHaveLength(1);
-    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-13", 5).porJustificar).toHaveLength(0);
+    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-31", semRegra).porJustificar).toHaveLength(1);
+    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-11-01", semRegra).porJustificar).toHaveLength(0);
   });
 
-  it("o prazo da organização manda: com 8 dias úteis o dia 13 ainda se justifica, com 1 já não", () => {
+  it("a regra do periodo manda: com inicio a 8 a folha de 05/10 fecha a 07/10", () => {
     const a = alerta({ data: "2026-10-05" });
-    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-13", 8).porJustificar).toHaveLength(1);
-    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-07", 1).porJustificar).toHaveLength(0);
-    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-06", 1).porJustificar).toHaveLength(1);
+    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-07", inicio(8)).porJustificar).toHaveLength(1);
+    expect(justificacoesDoDia([a], [], "p1", "2026-10-05", "2026-10-08", inicio(8)).porJustificar).toHaveLength(0);
   });
-
   it("outros dias, outras pessoas e alertas já tratados não dão nada para justificar", () => {
     const alertas = [alerta({}), alerta({ id: "a2", pessoaId: "p2" }), alerta({ id: "a3", estado: "corrigido" }), alerta({ id: "a4", data: "2026-10-12" })];
-    const r = justificacoesDoDia(alertas, [], "p1", "2026-10-13", "2026-10-14", 5);
+    const r = justificacoesDoDia(alertas, [], "p1", "2026-10-13", "2026-10-14", semRegra);
     expect(r.porJustificar.map((x) => x.id)).toEqual(["a1"]);
-    expect(justificacoesDoDia(alertas, [], "p1", "2026-10-01", "2026-10-14", 5).porJustificar).toEqual([]);
+    expect(justificacoesDoDia(alertas, [], "p1", "2026-10-01", "2026-10-14", semRegra).porJustificar).toEqual([]);
   });
 
   it("o estado das justificações enviadas (pendente, aceite, recusada com motivo) vem com o dia certo", () => {
@@ -71,10 +73,10 @@ describe("justificar no dia (prazo da organização, 5 dias úteis por omissão)
       justificacao({ id: "j2", alertaId: "a2", estado: "recusada", motivoRecusa: "Sem prova" }),
       justificacao({ id: "j3", alertaId: "a1", pessoaId: "p9" }),
     ];
-    const dia13 = justificacoesDoDia(alertas, lista, "p1", "2026-10-13", "2026-10-14", 5);
+    const dia13 = justificacoesDoDia(alertas, lista, "p1", "2026-10-13", "2026-10-14", semRegra);
     expect(dia13.enviadas.map((e) => [e.justificacao.id, e.justificacao.estado])).toEqual([["j1", "pendente"]]);
     expect(dia13.porJustificar).toEqual([]);
-    const dia9 = justificacoesDoDia(alertas, lista, "p1", "2026-10-09", "2026-10-14", 5);
+    const dia9 = justificacoesDoDia(alertas, lista, "p1", "2026-10-09", "2026-10-14", semRegra);
     expect(dia9.enviadas[0].justificacao).toMatchObject({ estado: "recusada", motivoRecusa: "Sem prova" });
   });
 });

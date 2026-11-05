@@ -35,7 +35,7 @@ import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useR
 import { useRelatorioAssiduidadeMensal } from "@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal";
 import {
   escolherRetribuicaoVigente,
-  limitesDoMes,
+  periodoDaFolha,
   useRetribuicoesVigentesDaOrganizacao,
 } from "@/components/rh-exemplo/hooks/useRetribuicoesVigentesDaOrganizacao";
 import { chaveDeErroFimContrato } from "@/components/rh-exemplo/lib/errosFimContrato";
@@ -309,7 +309,7 @@ describe("assiduidade da organização (hook real sobre o Supabase simulado)", (
 describe("relatório mensal (hook real sobre o Supabase simulado)", () => {
   // O mês do relatório conta de 0 (9 = Outubro), como `getMonth()`.
   it("tem um dia por dia do mês e totais coerentes com os dias", async () => {
-    const { result } = montar(() => useRelatorioAssiduidadeMensal("p-rui", 2026, 9));
+    const { result } = montar(() => useRelatorioAssiduidadeMensal("p-rui", 2026, 10));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.dias).toHaveLength(31);
     const soma = result.current.dias.reduce((s, d) => s + d.realizadoMinutos, 0);
@@ -318,7 +318,7 @@ describe("relatório mensal (hook real sobre o Supabase simulado)", () => {
   });
 
   it("registar e anular horas de obra mandam as RPCs e relêem o mês", async () => {
-    const { result } = montar(() => useRelatorioAssiduidadeMensal("p-rui", 2026, 9));
+    const { result } = montar(() => useRelatorioAssiduidadeMensal("p-rui", 2026, 10));
     await waitFor(() => expect(result.current.loading).toBe(false));
     await act(async () => {
       await result.current.registarObra({ data: "2026-10-05", horas: 2.5, descricao: "Montagem" });
@@ -331,7 +331,7 @@ describe("relatório mensal (hook real sobre o Supabase simulado)", () => {
 
   it("se a base recusa registar horas de obra, devolve o erro e não relê", async () => {
     rhTeste.rpcs["rpc_hr_obra_horas_registar"] = { data: null, error: RECUSA };
-    const { result } = montar(() => useRelatorioAssiduidadeMensal("p-rui", 2026, 9));
+    const { result } = montar(() => useRelatorioAssiduidadeMensal("p-rui", 2026, 10));
     await waitFor(() => expect(result.current.loading).toBe(false));
     let erro: string | null = null;
     await act(async () => {
@@ -614,10 +614,11 @@ describe("processamento salarial (hooks reais sobre o Supabase simulado)", () =>
     expect(leituras("pessoas_retribuicoes")).toBe(total);
   });
 
-  it("limitesDoMes trata fevereiro bissexto e escolherRetribuicaoVigente avisa de mudança a meio do mês", () => {
-    expect(limitesDoMes(2024, 2)).toEqual({ primeiroDia: "2024-02-01", ultimoDia: "2024-02-29" });
-    expect(limitesDoMes(2025, 2).ultimoDia).toBe("2025-02-28");
-    expect(limitesDoMes(2025, 12).ultimoDia).toBe("2025-12-31");
+  it("periodoDaFolha trata fevereiro bissexto e escolherRetribuicaoVigente avisa de mudança a meio do mês", () => {
+    expect(periodoDaFolha(2024, 2)).toEqual({ de: "2024-02-01", ate: "2024-02-29" });
+    expect(periodoDaFolha(2025, 2).ate).toBe("2025-02-28");
+    expect(periodoDaFolha(2025, 12).ate).toBe("2025-12-31");
+    expect(periodoDaFolha(2026, 11, 22)).toEqual({ de: "2026-10-22", ate: "2026-11-21" });
     const base = { pessoa_id: "p", valor_base: 1000, periodicidade: "mensal" as const, duodecimos_pct: null, subsidio_alimentacao: null };
     expect(escolherRetribuicaoVigente([], "2025-03-31")).toEqual({ retribuicao: null, mudouAMeioDoMes: false });
     const unica = { ...base, valido_de: "2025-01-01", valido_ate: null };

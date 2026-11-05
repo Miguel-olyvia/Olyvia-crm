@@ -3,7 +3,7 @@
  * ver o estado do que enviou (a aguardar o RH, aceite paga ou não paga, recusada com o motivo do RH, e voltar a enviar se ainda
  * houver prazo) ou ver que o prazo terminou. Nunca corrige nem decide: quem decide é o RH.
  */
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { podeEnviar, type SituacaoDoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
@@ -12,21 +12,21 @@ import { FormularioJustificacaoDia } from "./FormularioJustificacaoDia";
 import { IndicadorJustificacao } from "./IndicadorJustificacao";
 import { useJustificacoesDeDiaDaPessoa, situacaoDeUmDia } from "./situacaoDoMes";
 import type { DiaCalendario } from "./montarMes";
-import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
 import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 
-function TextoDoPrazo({ situacao }: { situacao: SituacaoDoDia }) {
+function TextoDoPrazo({ situacao, estimativa }: { situacao: SituacaoDoDia; estimativa: boolean }) {
   const { t } = useTranslation();
   if (!situacao.prazoAte) return null;
   const ate = formatarData(situacao.prazoAte);
+  const marca = estimativa ? ` ${t("rhJust.prazo.estimativa")}` : "";
   if (situacao.estado === "prazo_terminado" || situacao.estado === "recusada_sem_prazo") {
     return <p className="text-sm text-muted-foreground">{t("rhJust.prazo.terminou", { ate })}</p>;
   }
   if (!podeEnviar(situacao.estado)) return null;
   return (
     <p className="text-sm text-muted-foreground">
-      {situacao.diasRestantes > 0 ? t("rhJust.prazo.restam", { dias: String(situacao.diasRestantes), ate }) : t("rhJust.prazo.ultimo", { ate })}
+      {situacao.diasRestantes > 0 ? t("rhJust.prazo.restam", { dias: String(situacao.diasRestantes), ate }) : t("rhJust.prazo.ultimo", { ate })}{marca}
     </p>
   );
 }
@@ -48,11 +48,11 @@ export function JustificacaoDeDiaPessoa({ dia, pessoaId }: { dia: DiaCalendario;
   const { t } = useTranslation();
   // Só as justificações deste dia: a leitura é por RPC e limitada ao intervalo pedido.
   const { justificacoes, loading, erro, recusado, indisponivel } = useJustificacoesDeDiaDaPessoa(pessoaId, { de: dia.data, ate: dia.data });
-  const prazoOrganizacao = usePrazoJustificacao();
-  const prazoDias = prazoOrganizacao.dias;
+  const datasDoPrazo = useMemo(() => [dia.data], [dia.data]);
+  const { prazoDe, estimativaDe } = usePrazoJustificacao(datasDoPrazo);
   const [aberto, setAberto] = useState(false);
   const botao = useRef<HTMLButtonElement>(null);
-  const { situacao, desvio } = situacaoDeUmDia(dia, justificacoes, prazoDias, hojeIso());
+  const { situacao, desvio } = situacaoDeUmDia(dia, justificacoes, prazoDe, hojeIso());
   if (situacao.estado === "nao_aplica" || recusado) return null;
   // Sem a leitura feita não se sabe se já há justificação: não se oferece «Justificar» (poderia duplicar um envio).
   if (loading || erro || indisponivel) {
@@ -78,8 +78,7 @@ export function JustificacaoDeDiaPessoa({ dia, pessoaId }: { dia: DiaCalendario;
         {situacao.estado === "prazo_terminado" && <span className="text-sm font-medium">{t("rhJust.semJustificacao")}</span>}
       </div>
       <DetalheEnviado situacao={situacao} />
-      <AvisoDoPrazo leitura={prazoOrganizacao.leitura} dias={prazoDias} onTentarDeNovo={prazoOrganizacao.recarregar} />
-      <TextoDoPrazo situacao={situacao} />
+      <TextoDoPrazo situacao={situacao} estimativa={estimativaDe(dia.data)} />
       {podeEnviar(situacao.estado) && desvio && !aberto && (
         <Button ref={botao} type="button" variant="outline" className="min-h-11 w-full" onClick={() => setAberto(true)}>
           {t(situacao.estado === "recusada_com_prazo" ? "rhJust.botao.denovo" : "rhJust.botao.justificar")}

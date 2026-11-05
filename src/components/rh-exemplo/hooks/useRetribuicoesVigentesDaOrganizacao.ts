@@ -10,12 +10,15 @@ export type {
   RetribuicaoVigenteResultado,
 } from "@/hooks/useRetribuicoesVigentesDaOrganizacao";
 
-export { limitesDoMes, escolherRetribuicaoVigente } from "@/hooks/useRetribuicoesVigentesDaOrganizacao";
+export { escolherRetribuicaoVigente } from "@/hooks/useRetribuicoesVigentesDaOrganizacao";
+/** O intervalo da folha (de, ate), de um so sitio: substitui o antigo `limitesDoMes`. */
+export { periodoDaFolha } from "@/lib/hr/periodoFolha";
 
 export function useRetribuicoesVigentesDaOrganizacao(
   organizationId: string | undefined,
   ano: number,
   mes: number,
+  intervalo?: { de: string; ate: string },
 ) {
-  return useRetribuicoesVigentesDaOrganizacaoReal(organizationId, ano, mes);
+  return useRetribuicoesVigentesDaOrganizacaoReal(organizationId, ano, mes, intervalo);
 }

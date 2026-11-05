@@ -6,7 +6,7 @@
  * paga (sem justificacao, recusada, justificada nao paga, ou ainda pendente de documento, de forma
  * provisoria), mais os atrasos acima da tolerancia. Falta anulada ou corrigida nao conta.
  */
-import { somarDiasUteis } from "@/components/rh-exemplo/lib/diasUteis";
+import type { PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import {
   TOLERANCIA_ATRASO_MINUTOS,
   minutosDeHora,
@@ -15,8 +15,6 @@ import {
 import type { AlertaDia } from "@/components/rh-exemplo/lib/alertasFimDia";
 import type { EstadoFalta, EstadoJustificacao, MotivoFalta } from "@/components/rh-exemplo/tiposAssiduidade";
 
-/** A omissao (5), de um so sitio: o prazo REAL e o da organizacao (`usePrazoJustificacao`), nao esta constante. */
-export { PRAZO_JUSTIFICACAO_OMISSAO as PRAZO_JUSTIFICACAO_FALTA_DIAS_UTEIS } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 /** Convencao de exemplo: um meio dia de ausencia aprovado cobre a manha (ate as 13:00). */
 const FIM_DA_MANHA_MINUTOS = 13 * 60;
 
@@ -134,22 +132,24 @@ export function rotuloDaJustificacao(falta: { justificacao_estado: EstadoJustifi
   return falta.justificacao_estado;
 }
 
-export function prazoParaJustificar(dataDaFalta: string, prazoDias: number): string {
-  return somarDiasUteis(dataDaFalta, prazoDias);
+/** O ultimo dia para justificar a falta: o fim do periodo da folha que contem o dia dela. */
+export function prazoParaJustificar(dataDaFalta: string, prazoDe: PrazoDe): string {
+  return prazoDe(dataDaFalta);
 }
 
-export function foraDoPrazoDeJustificar(dataDaFalta: string, hoje: string, prazoDias: number): boolean {
-  return hoje > prazoParaJustificar(dataDaFalta, prazoDias);
+/** Passou o fim do periodo: a falta fica injustificada para sempre. */
+export function foraDoPrazoDeJustificar(dataDaFalta: string, hoje: string, prazoDe: PrazoDe): boolean {
+  return hoje > prazoParaJustificar(dataDaFalta, prazoDe);
 }
 
-/** Registar a justificacao: pendente de documento dentro do prazo da organizacao; fora dele fica sem justificacao. */
+/** Registar a justificacao: pendente de documento ate ao fecho do periodo; depois disso fica sem justificacao. */
 export function registarJustificacao(
   falta: { data: string; estado: EstadoFalta },
-  dados: { texto: string; hoje: string; prazoDias: number },
+  dados: { texto: string; hoje: string; prazoDe: PrazoDe },
 ): { ok: true; estado: "pendente_documento" | "sem_justificacao"; foraDoPrazo: boolean } | { ok: false; erro: string } {
   if (falta.estado !== "activa") return { ok: false, erro: "rhExemplo.fal.erro.faltaAnulada" };
   if (!motivoValido(dados.texto)) return { ok: false, erro: "rhExemplo.fal.erro.semTexto" };
-  const fora = foraDoPrazoDeJustificar(falta.data, dados.hoje, dados.prazoDias);
+  const fora = foraDoPrazoDeJustificar(falta.data, dados.hoje, dados.prazoDe);
   return { ok: true, estado: fora ? "sem_justificacao" : "pendente_documento", foraDoPrazo: fora };
 }
 

@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
+import { periodoDaFolha, type IntervaloDaFolha } from "@/lib/hr/periodoFolha";
 import type { PessoaRetribuicao } from "@/types/hr";
 
 const COLUNAS = "pessoa_id, valor_base, periodicidade, duodecimos_pct, subsidio_alimentacao, valido_de, valido_ate";
@@ -33,18 +34,6 @@ export type RetribuicaoVigenteLinha = Pick<
   PessoaRetribuicao,
   "pessoa_id" | "valor_base" | "periodicidade" | "duodecimos_pct" | "subsidio_alimentacao" | "valido_de" | "valido_ate"
 >;
-
-/** Primeiro e ultimo dia (ISO, `YYYY-MM-DD`) de um mes -- 1-indexado como no resto do modulo. */
-export function limitesDoMes(ano: number, mes: number): { primeiroDia: string; ultimoDia: string } {
-  const mesTexto = String(mes).padStart(2, "0");
-  const primeiroDia = `${ano}-${mesTexto}-01`;
-  // Dia 0 do mes seguinte = ultimo dia deste mes.
-  const ultimoDiaDate = new Date(ano, mes, 0);
-  const ultimoDia = `${ultimoDiaDate.getFullYear()}-${String(ultimoDiaDate.getMonth() + 1).padStart(2, "0")}-${String(
-    ultimoDiaDate.getDate(),
-  ).padStart(2, "0")}`;
-  return { primeiroDia, ultimoDia };
-}
 
 export interface RetribuicaoVigenteResultado {
   /** `null` = nao ha nenhuma versao a cobrir o mes. */
@@ -79,7 +68,11 @@ export function useRetribuicoesVigentesDaOrganizacao(
   organizationId: string | undefined,
   ano: number,
   mes: number,
+  /** O intervalo da folha (de, ate inclusivos); sem ele, o mes de calendario (dia de inicio 1). */
+  intervalo?: IntervaloDaFolha,
 ) {
+  const de = intervalo?.de ?? periodoDaFolha(ano, mes).de;
+  const ate = intervalo?.ate ?? periodoDaFolha(ano, mes).ate;
   const [porPessoa, setPorPessoa] = useState<Map<string, RetribuicaoVigenteLinha[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [recusado, setRecusado] = useState(false);
@@ -91,13 +84,12 @@ export function useRetribuicoesVigentesDaOrganizacao(
       return;
     }
     setLoading(true);
-    const { primeiroDia, ultimoDia } = limitesDoMes(ano, mes);
     const { data, error } = await hrFrom("pessoas_retribuicoes")
       .select(COLUNAS)
       .eq("organization_id", organizationId)
       .is("deleted_at", null)
-      .lte("valido_de", ultimoDia)
-      .or(`valido_ate.is.null,valido_ate.gt.${primeiroDia}`);
+      .lte("valido_de", ate)
+      .or(`valido_ate.is.null,valido_ate.gt.${de}`);
     if (error) {
       if (isPermissionError(error)) {
         setRecusado(true);
@@ -119,7 +111,7 @@ export function useRetribuicoesVigentesDaOrganizacao(
       setPorPessoa(mapa);
     }
     setLoading(false);
-  }, [organizationId, ano, mes]);
+  }, [organizationId, de, ate]);
 
   useEffect(() => {
     void load();

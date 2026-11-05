@@ -30,7 +30,7 @@
  * (`rpc_hr_obra_horas_registar` / `rpc_hr_obra_horas_anular`): a tabela nao
  * da INSERT/UPDATE/DELETE directo a authenticated.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
@@ -44,6 +44,7 @@ import {
 } from "@/lib/hr/assiduidade";
 import { leituraDoPlaneado } from "@/lib/hr/planeadoDoDia";
 import { minutosDe } from "@/lib/hr/horario";
+import { diasDoPeriodo, periodoDaFolha, type IntervaloDaFolha } from "@/lib/hr/periodoFolha";
 import { indexarFeriados, eFeriado, type FeriadoOrg, type IndiceFeriados } from "@/lib/hr/ausencias";
 import type { HorarioPlaneado } from "@/types/hr";
 import type { Falta } from "@/types/hrAssiduidade";
@@ -238,17 +239,6 @@ async function carregar<T>(
   return { linhas: (data ?? []) as T[], recusado: false };
 }
 
-/** O primeiro e o ultimo dia do mes, em ISO, sem passar por UTC. */
-function limitesDoMes(ano: number, mes: number): { de: string; ate: string; ultimoDia: number } {
-  const doisDigitos = (valor: number) => String(valor).padStart(2, "0");
-  const ultimoDia = new Date(ano, mes + 1, 0).getDate();
-  return {
-    de: `${ano}-${doisDigitos(mes + 1)}-01`,
-    ate: `${ano}-${doisDigitos(mes + 1)}-${doisDigitos(ultimoDia)}`,
-    ultimoDia,
-  };
-}
-
 /**
  * Hoje, em ISO -- para "sem_registo" nunca apanhar hoje nem o futuro.
  *
@@ -321,6 +311,8 @@ export function useRelatorioAssiduidadeMensal(
   pessoaId: string | undefined,
   ano: number,
   mes: number,
+  /** O intervalo da folha (de, ate inclusivos, ISO). Sem ele, o mes de calendario (`mes` e de 0 a 11 neste hook). */
+  intervalo?: IntervaloDaFolha,
 ) {
   const { activeCompany } = useCompany();
   const orgId = activeCompany?.id ?? null;
@@ -342,10 +334,14 @@ export function useRelatorioAssiduidadeMensal(
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const janela = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);
-  const { de, ate, ultimoDia } = janela;
+  const de = intervalo?.de ?? periodoDaFolha(ano, mes + 1).de;
+  const ate = intervalo?.ate ?? periodoDaFolha(ano, mes + 1).ate;
+
+  // Conta os pedidos: so a resposta do mais recente escreve no estado (mudar de periodo a meio de uma leitura).
+  const ultimoPedido = useRef(0);
 
   const load = useCallback(async () => {
+    const pedido = ++ultimoPedido.current;
     if (!pessoaId || !orgId) {
       setRealizado(vazio<RealizadoComCorreccao>());
       setFaltas(vazio<Falta>());
@@ -410,6 +406,7 @@ export function useRelatorioAssiduidadeMensal(
         ),
       ]);
 
+      if (pedido !== ultimoPedido.current) return;
       setRealizado(oRealizado);
       setFaltas(asFaltas);
       setPlaneado(oPlaneado);
@@ -421,7 +418,7 @@ export function useRelatorioAssiduidadeMensal(
     } catch (e) {
       captureFlowError(e, "hr-relatorio-assiduidade-mensal-load");
     } finally {
-      setLoading(false);
+      if (pedido === ultimoPedido.current) setLoading(false);
     }
   }, [pessoaId, orgId, de, ate]);
 
@@ -463,9 +460,7 @@ export function useRelatorioAssiduidadeMensal(
     const hoje = isoDeHoje(timezoneDaOrganizacao);
 
     const linhas: DiaRelatorioMensal[] = [];
-    for (let dia = 1; dia <= ultimoDia; dia += 1) {
-      const iso = `${de.slice(0, 8)}${String(dia).padStart(2, "0")}`;
-
+    for (const iso of diasDoPeriodo(de, ate)) {
       const realizadoDoDia = realizadoEmVigor.filter((linha) => linha.data === iso);
       const faltasDoDia = faltasEmVigor.filter((falta) => falta.data === iso);
       const obraDoDia = obras.linhas.filter((obra) => obra.data === iso && !obra.anulado_em);
@@ -572,7 +567,7 @@ export function useRelatorioAssiduidadeMensal(
     feriados,
     timezoneDaOrganizacao,
     de,
-    ultimoDia,
+    ate,
   ]);
 
   const totais = useMemo<TotaisRelatorioMensal>(

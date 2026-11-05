@@ -1,5 +1,5 @@
 // A lista «por justificar» e a pastilha da aba Justificacoes saem dos desvios que a base propoe (hr_assiduidade_desvios), dos
-// ultimos 30 dias, filtrados para a pessoa. Supabase simulado: o hook do mapa da organizacao e trocado por um que devolve o que
+// periodo da folha de hoje, filtrados para a pessoa. Supabase simulado: o hook do mapa da organizacao e trocado por um que devolve o que
 // o teste lhe der e regista a janela pedida.
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,11 +25,18 @@ vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao", () => ({
   },
 }));
 
-// O prazo da organizacao: o wrapper do hook real esta simulado, o teste escolhe os dias.
-const prazo = vi.hoisted(() => ({ dias: 5 }));
-vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", () => ({
-  usePrazoJustificacao: () => ({ dias: prazo.dias, leitura: { falhou: false }, podeAlterar: true }),
-}));
+// O prazo e o fim do periodo da folha: o wrapper do hook real esta simulado, o teste escolhe as regras do periodo.
+const prazo = vi.hoisted(() => ({ regras: [] as Array<{ dia_inicio: number; valido_de: string }> }));
+vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => {
+  const { fimDoPeriodoDoDia, periodoDoDia } = await import("@/lib/hr/periodoFolha");
+  return {
+    usePrazoJustificacao: () => ({
+      prazoDe: (data: string) => fimDoPeriodoDoDia(data, prazo.regras),
+      periodoDe: (data: string) => periodoDoDia(data, prazo.regras),
+      aCarregar: false,
+    }),
+  };
+});
 
 import { diaIsoAntes, useJustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
 
@@ -48,7 +55,7 @@ beforeEach(() => {
   organizacao.desviosErro = false;
   organizacao.desviosRecusado = false;
   organizacao.loading = false;
-  prazo.dias = 5;
+  prazo.regras = [];
 });
 afterEach(() => vi.useRealTimers());
 
@@ -62,26 +69,25 @@ describe("diaIsoAntes", () => {
 });
 
 describe("useJustificacoesDaPessoa", () => {
-  it("com o prazo de 5 dias uteis pede os desvios dos ultimos 30 dias ate hoje", () => {
+  it("sem regra pede os desvios do periodo da folha de hoje: o mes de calendario, de 1/10 a hoje", () => {
     renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
-    expect(organizacao.janelas[0]).toEqual({ de: "2026-09-14", ate: HOJE });
+    expect(organizacao.janelas[0]).toEqual({ de: "2026-10-01", ate: HOJE });
   });
 
-  it("a janela acompanha o prazo da organizacao: com 30 dias uteis recua 49 dias de calendario", () => {
-    prazo.dias = 30;
+  it("com inicio a 10 a folha de hoje (14/10) comeca a 10/10, e e dai que a janela parte", () => {
+    prazo.regras = [{ dia_inicio: 10, valido_de: "2000-01-01" }];
     renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
-    expect(organizacao.janelas[0]).toEqual({ de: diaIsoAntes(HOJE, 49), ate: HOJE });
-    expect(diaIsoAntes(HOJE, 49)).toBe("2026-08-26");
+    expect(organizacao.janelas[0]).toEqual({ de: "2026-10-10", ate: HOJE });
   });
 
-  it("o prazo da organizacao decide o que ainda esta dentro do prazo: 20/09 so conta com 30 dias uteis", () => {
-    organizacao.desvios = [desvio({ data: "2026-09-20" })];
-    const com5 = renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
-    expect(com5.result.current.porFazer).toBe(0);
-    prazo.dias = 30;
-    const com30 = renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
-    expect(com30.result.current.porFazer).toBe(1);
-    expect(com30.result.current.menorPrazoDias).toBeGreaterThan(0);
+  it("o fecho do periodo decide o que ainda esta dentro do prazo: 08/10 conta sem regra e ja nao conta com inicio a 10", () => {
+    organizacao.desvios = [desvio({ data: "2026-10-08" })];
+    const semRegra = renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
+    expect(semRegra.result.current.porFazer).toBe(1);
+    expect(semRegra.result.current.menorPrazoDias).toBe(17); // de 14/10 a 31/10
+    prazo.regras = [{ dia_inicio: 10, valido_de: "2000-01-01" }];
+    const com10 = renderHook(() => useJustificacoesDaPessoa("pessoa-1"));
+    expect(com10.result.current.porFazer).toBe(0); // a folha de 08/10 fechou a 09/10: injustificada
   });
 
   it("lista so os desvios da pessoa que sao falhas de marcacao, e conta os que estao dentro do prazo", () => {
@@ -90,7 +96,7 @@ describe("useJustificacoesDaPessoa", () => {
       desvio({ tipo: "pendente_par", referencia_id: "pic-1", data: "2026-10-13" }),
       desvio({ tipo: "realizado_sem_planeado", referencia_id: "r-1" }),
       desvio({ pessoa_id: "pessoa-2" }),
-      // Fora do prazo de 5 dias uteis: continua por justificar, mas nao conta na pastilha.
+      // Folha de setembro (fechou a 30/9): continua na lista, mas ja nao conta na pastilha.
       desvio({ data: "2026-09-20" }),
     ];
     const { result } = renderHook(() => useJustificacoesDaPessoa("pessoa-1"));

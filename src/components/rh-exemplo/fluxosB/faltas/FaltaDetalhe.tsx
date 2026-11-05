@@ -1,6 +1,6 @@
 /**
  * O detalhe de uma falta ja marcada (fluxo 7), lido e escrito na base REAL: o periodo, o estado da justificacao, o
- * prazo da organizacao (o configurado; se a leitura falhar mostra-se a omissao e di-lo), o documento (dado de saude: so aparece ao clique, e o acesso fica registado), as decisoes
+ * prazo (ate ao fecho do periodo da folha; depois disso a falta fica injustificada), o documento (dado de saude: so aparece ao clique, e o acesso fica registado), as decisoes
  * do RH, a anulacao e o calculo de exemplo do desconto de vencimento.
  *
  * A falta chega da lista da organizacao (vista em vigor, so algumas colunas). Aqui pede-se a assiduidade DESSA pessoa
@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
+import { formatarDataPorExtenso, localeDaLingua } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { MotivoDialog } from "@/components/rh-exemplo/ausencias/MotivoDialog";
 import { JustificacaoFalta } from "@/components/rh-exemplo/assiduidade/JustificacaoFalta";
@@ -22,7 +22,6 @@ import { DescontoDaFaltaCard } from "@/components/rh-exemplo/fluxosB/faltas/Desc
 import { formatarData, formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { useAssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
-import { diasUteisEntre } from "@/components/rh-exemplo/lib/diasUteis";
 import { foraDoPrazoDeJustificar, prazoParaJustificar, rotuloDaJustificacao } from "@/components/rh-exemplo/lib/faltasB";
 import { MOTIVO_MINIMO_CARACTERES, motivoValido } from "@/components/rh-exemplo/lib/horarioTipos";
 import type { AssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
@@ -68,19 +67,34 @@ function RegistarJustificacao({ falta, assiduidade, onAlterado }: { falta: Falta
 
 type PedidoDeMotivo = "recusar" | "anular";
 
+const MARCA_DA_DATA = "{{DATA}}";
+
+/** A frase com a data dentro de um <time dateTime>: a traducao leva a marca no sitio da data. */
+function FraseComData({ frase, iso, texto }: { frase: string; iso: string; texto: string }) {
+  const [antes, depois = ""] = frase.split(MARCA_DA_DATA);
+  return (
+    <>
+      {antes}
+      <time dateTime={iso}>{texto}</time>
+      {depois}
+    </>
+  );
+}
+
 export function FaltaDetalhe({ falta: daLista, nome, permissoes, onFechar, onAlterado }: FaltaDetalheProps) {
   const { t } = useTranslation();
   const janela = useMemo(() => ({ de: daLista.data, ate: daLista.data }), [daLista.data]);
   const assiduidade = useAssiduidadeDaPessoa(daLista.pessoa_id, janela);
-  const prazoOrganizacao = usePrazoJustificacao();
-  const prazoDias = prazoOrganizacao.dias;
+  const { language } = useTranslation();
+  const datasDoPrazo = useMemo(() => [daLista.data], [daLista.data]);
+  const { prazoDe, estimativaDe } = usePrazoJustificacao(datasDoPrazo);
   const [pedido, setPedido] = useState<PedidoDeMotivo | null>(null);
 
   // A linha completa (com a decisao e o motivo) quando ja chegou; ate la, a da lista.
   const falta = assiduidade.faltas.find((f) => f.id === daLista.id) ?? daLista;
   const hoje = hojeIso();
-  const prazo = prazoParaJustificar(falta.data, prazoDias);
-  const fora = foraDoPrazoDeJustificar(falta.data, hoje, prazoDias);
+  const prazo = prazoParaJustificar(falta.data, prazoDe);
+  const fora = foraDoPrazoDeJustificar(falta.data, hoje, prazoDe);
   const ativa = falta.estado === "activa";
 
   const depoisDeGravar = (erro: string | null, sucesso: string) => {
@@ -121,13 +135,20 @@ export function FaltaDetalhe({ falta: daLista, nome, permissoes, onFechar, onAlt
           </Badge>
         </div>
 
-        <section aria-label={t("rhExemplo.fal.prazo")} className="space-y-1 text-sm">
-          <h3 className="font-semibold">{t("rhExemplo.fal.prazo")}</h3>
-          <AvisoDoPrazo leitura={prazoOrganizacao.leitura} dias={prazoDias} onTentarDeNovo={prazoOrganizacao.recarregar} />
-          <p>{t("rhExemplo.fal.prazoDaOrganizacao", { dias: String(prazoDias), ate: formatarData(prazo) })}</p>
-          <p className="text-muted-foreground">
-            {fora ? t("rhExemplo.fal.prazoAcabou") : t("rhExemplo.fal.prazoRestam", { dias: String(diasUteisEntre(hoje, prazo)) })}
-          </p>
+        <section aria-labelledby="rhb-prazo-titulo" className="space-y-1 text-sm">
+          <h3 id="rhb-prazo-titulo" className="font-semibold">{t("rhExemplo.fal.prazo")}</h3>
+          {fora ? (
+            <p className="font-medium" data-testid="rhb-prazo-injustificada">{t("hr.falta.injustificadaPeriodoFechou")}</p>
+          ) : (
+            <p data-testid="rhb-prazo-ate">
+              <FraseComData
+                frase={t(estimativaDe(falta.data) ? "hr.falta.podeJustificarAteEstimativa" : "hr.falta.podeJustificarAte", { data: MARCA_DA_DATA })}
+                iso={prazo}
+                texto={formatarDataPorExtenso(prazo, localeDaLingua(language))}
+              />
+            </p>
+          )}
+          <p className="text-muted-foreground">{t("hr.falta.prazoAjuda")}</p>
         </section>
 
         <section aria-label={t("rhExemplo.fal.justificacao")} className="space-y-2">

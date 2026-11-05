@@ -15,6 +15,7 @@ import { valorHoraDoCalculo } from "@/components/rh-exemplo/fluxosB/faltas/valor
 import { formatarData, formatarDataHora, formatarEuros, formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { useAccoesJustificacaoDia, useJustificacoesDoDia } from "@/components/rh-exemplo/hooks/useJustificacoesDoDia";
 import { ESTADO_DA_JUSTIFICACAO, descontoDaDecisao, textoEhSensivel, type DecisaoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
+import { usePeriodoDoDia } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { useCalculoRealDaPessoa } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import { useTranslation } from "@/hooks/useTranslation";
 import { DialogosDecisaoDia, type PedidoDecisaoDia } from "./DialogosDecisaoDia";
@@ -85,7 +86,9 @@ function EfeitoNoDesconto({ j }: { j: JustificacaoDia }) {
 }
 
 function EfeitoComValorDaHora({ j }: { j: JustificacaoDia }) {
-  const calculo = useCalculoRealDaPessoa(j.pessoaId, Number(j.data.slice(0, 4)) || 0, Number(j.data.slice(5, 7)) || 1);
+  // O valor da hora e o da folha que CONTEM o dia (25/10 com inicio a 22 e a folha de novembro), nao o do mes de calendario.
+  const folha = usePeriodoDoDia(j.data);
+  const calculo = useCalculoRealDaPessoa(j.pessoaId, folha.ano, folha.mes);
   const valorHora = useMemo(() => valorHoraDoCalculo(calculo.resultado)?.valorHora ?? null, [calculo.resultado]);
   return <ListaDeEfeitos j={j} valorHora={valorHora} />;
 }

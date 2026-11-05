@@ -19,6 +19,9 @@ const estado = vi.hoisted(() => ({
   calculo: {} as Record<string, unknown>,
 }));
 
+// As regras do periodo da folha: sem regra (a base ainda sem as RPCs) o periodo e o mes de calendario.
+const SEM_REGRAS_PERIODO: never[] = [];
+vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: SEM_REGRAS_PERIODO, estado: "ok", isLoading: false }) }));
 vi.mock("@/lib/toast", () => ({ toast: { success: fn.sucesso, error: fn.erro } }));
 vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
   usePermissions: () => ({ hasPermission: (chave: string) => estado.permissoes.has(chave), loading: false }),
@@ -45,6 +48,8 @@ const ANA_LANCAMENTO = { id: "l1", periodo_id: "per", pessoa_id: "p1", descricao
 
 function calculo(extra: Record<string, unknown> = {}) {
   return {
+    intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false },
+    intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false },
     periodoHook: { periodo: { id: "per", estado: "aberto", fechado_em: null }, loading: false, saving: false, recusado: false, abrir: fn.abrir, fechar: fn.fechar },
     lancamentosHook: { saving: false, recusado: false, criar: fn.criar, anular: fn.anular, lancamentos: [] },
     retribuicoesHook: { recusado: false },
@@ -198,7 +203,8 @@ describe("o periodo: abrir, fechar e estar fechado", () => {
 
   it("periodo fechado: diz-o, nao deixa fechar nem acrescentar valores, e nao oferece reabrir (nao ha RPC)", () => {
     estado.calculo = calculo({
-      periodoHook: { periodo: { id: "per", estado: "fechado", fechado_em: "2026-10-20T10:00:00Z" }, loading: false, saving: false, recusado: false, abrir: fn.abrir, fechar: fn.fechar },
+      intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false },
+    periodoHook: { periodo: { id: "per", estado: "fechado", fechado_em: "2026-10-20T10:00:00Z" }, loading: false, saving: false, recusado: false, abrir: fn.abrir, fechar: fn.fechar },
     });
     abrir();
     expect(screen.getByText(/fechado em 20\/10\/2026/)).toBeInTheDocument();

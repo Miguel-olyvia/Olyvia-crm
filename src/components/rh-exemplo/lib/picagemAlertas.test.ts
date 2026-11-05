@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fimDoPeriodoDoDia, type PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { diasUteisEntre, ehDiaUtil, somarDiasUteis } from "@/components/rh-exemplo/lib/diasUteis";
 import {
   DISTANCIA_DE_EXEMPLO,
@@ -15,7 +16,7 @@ import {
   aplicarAccao,
   alertasPorTratar,
   decidirJustificacaoPicagem,
-  diasUteisRestantes,
+  diasRestantes,
   prazoDaJustificacao,
   situacaoDoPrazo,
   submeterJustificacao,
@@ -128,47 +129,40 @@ describe("accoes do RH sobre um alerta do fim do dia", () => {
   });
 });
 
-describe("justificar a falha de marcacao em 5 dias uteis", () => {
+// O prazo e o fim do periodo da folha: sem regra, o fim do mes; com inicio a N, de N ate N-1 do mes seguinte.
+const semRegra: PrazoDe = (d) => fimDoPeriodoDoDia(d, []);
+const inicio = (dia: number): PrazoDe => (d) => fimDoPeriodoDoDia(d, [{ dia_inicio: dia, valido_de: "2000-01-01" }]);
+
+describe("justificar a falha de marcacao ate ao fecho do periodo da folha", () => {
   const justificar = (hoje: string, campos = {}) =>
-    submeterJustificacao(alerta(), { id: "j1", horaReal: "18:00", motivo: "Esqueci-me de picar", anexoNome: null, hoje, agora: AGORA, prazoDias: 5, ...campos });
+    submeterJustificacao(alerta(), { id: "j1", horaReal: "18:00", motivo: "Esqueci-me de picar", anexoNome: null, hoje, agora: AGORA, prazoDe: semRegra, ...campos });
 
-  it("o prazo acaba 5 dias uteis depois do dia do alerta", () => {
-    expect(prazoDaJustificacao("2026-12-09", 5)).toBe("2026-12-16");
+  it("o prazo acaba no fim do periodo que contem o dia do alerta (sem regra: 31/12)", () => {
+    expect(prazoDaJustificacao("2026-12-09", semRegra)).toBe("2026-12-31");
   });
 
-  it("conta os dias uteis que restam e chega a 0 no ultimo dia", () => {
-    expect(diasUteisRestantes("2026-12-09", "2026-12-10", 5)).toBe(4);
-    expect(diasUteisRestantes("2026-12-09", "2026-12-16", 5)).toBe(0);
-    expect(diasUteisRestantes("2026-12-09", "2026-12-20", 5)).toBe(0);
+  it("conta os dias de calendario que restam e chega a 0 no ultimo dia", () => {
+    expect(diasRestantes("2026-12-09", "2026-12-10", semRegra)).toBe(21);
+    expect(diasRestantes("2026-12-09", "2026-12-31", semRegra)).toBe(0);
+    expect(diasRestantes("2026-12-09", "2027-01-05", semRegra)).toBe(0);
   });
 
-  it("o prazo da organizacao manda: 1, 5 e 30 dias uteis a partir de quarta 09/12", () => {
-    expect(prazoDaJustificacao("2026-12-09", 1)).toBe("2026-12-10");
-    expect(prazoDaJustificacao("2026-12-09", 5)).toBe("2026-12-16");
-    // 30 dias uteis = 6 semanas: quarta 20/01/2027.
-    expect(prazoDaJustificacao("2026-12-09", 30)).toBe("2027-01-20");
+  it("a regra do periodo manda: com inicio a 22 a folha de 09/12 fecha a 21/12 e a de 22/12 a 21/01", () => {
+    expect(prazoDaJustificacao("2026-12-09", inicio(22))).toBe("2026-12-21");
+    expect(prazoDaJustificacao("2026-12-22", inicio(22))).toBe("2027-01-21");
+    expect(situacaoDoPrazo(alerta(), "2026-12-21", inicio(22))).toBe("dentro_do_prazo");
+    expect(situacaoDoPrazo(alerta(), "2026-12-22", inicio(22))).toBe("sem_justificacao");
   });
 
-  it("uma sexta com prazo de 1 dia acaba na segunda (atravessa o fim de semana)", () => {
-    expect(prazoDaJustificacao("2026-12-11", 1)).toBe("2026-12-14");
-    expect(situacaoDoPrazo(alerta({ data: "2026-12-11" }), "2026-12-14", 1)).toBe("dentro_do_prazo");
-    expect(situacaoDoPrazo(alerta({ data: "2026-12-11" }), "2026-12-15", 1)).toBe("sem_justificacao");
+  it("depois do fecho a diferenca fica injustificada, mesmo que o mes de calendario ainda nao tenha acabado", () => {
+    expect(situacaoDoPrazo(alerta(), "2026-12-10", inicio(10))).toBe("sem_justificacao");
+    expect(situacaoDoPrazo(alerta(), "2026-12-10", semRegra)).toBe("dentro_do_prazo");
   });
 
-  it("a mesma data muda de situacao conforme o prazo da organizacao", () => {
-    // 17/12 (quinta): com 5 dias o prazo acabou ontem (16/12); com 8 ainda faltam dias; com 1 acabou ha muito.
-    expect(situacaoDoPrazo(alerta(), "2026-12-17", 5)).toBe("sem_justificacao");
-    expect(situacaoDoPrazo(alerta(), "2026-12-17", 8)).toBe("dentro_do_prazo");
-    expect(situacaoDoPrazo(alerta(), "2026-12-17", 1)).toBe("sem_justificacao");
-    // Com 8 dias o prazo e segunda 21/12: depois de quinta 17/12 restam sexta 18 e segunda 21.
-    expect(prazoDaJustificacao("2026-12-09", 8)).toBe("2026-12-21");
-    expect(diasUteisRestantes("2026-12-09", "2026-12-17", 8)).toBe(2);
-  });
-
-  it("submeter a justificacao respeita o prazo recebido, e nao um 5 fixo", () => {
-    expect(justificar("2026-12-17", { prazoDias: 8 }).ok).toBe(true);
-    expect(justificar("2026-12-17", { prazoDias: 5 })).toEqual({ ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" });
-    expect(justificar("2026-12-11", { prazoDias: 1 })).toEqual({ ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" });
+  it("submeter a justificacao respeita o fecho recebido, e nao um prazo fixo", () => {
+    expect(justificar("2026-12-21", { prazoDe: inicio(22) }).ok).toBe(true);
+    expect(justificar("2026-12-22", { prazoDe: inicio(22) })).toEqual({ ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" });
+    expect(justificar("2026-12-10", { prazoDe: inicio(10) })).toEqual({ ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" });
   });
 
   it("dentro do prazo fica pendente, com hora real, motivo e anexo", () => {
@@ -177,8 +171,8 @@ describe("justificar a falha de marcacao em 5 dias uteis", () => {
   });
 
   it("no ultimo dia ainda aceita; no dia seguinte recusa por fora do prazo", () => {
-    expect(justificar("2026-12-16").ok).toBe(true);
-    expect(justificar("2026-12-17")).toEqual({ ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" });
+    expect(justificar("2026-12-31").ok).toBe(true);
+    expect(justificar("2027-01-01")).toEqual({ ok: false, erro: "rhExemplo.pic.erro.foraDoPrazo" });
   });
 
   it("recusa hora invalida e motivo curto", () => {
@@ -187,11 +181,10 @@ describe("justificar a falha de marcacao em 5 dias uteis", () => {
   });
 
   it("passado o prazo sem justificacao a diferenca fica «sem justificacao»", () => {
-    expect(situacaoDoPrazo(alerta(), "2026-12-10", 5)).toBe("dentro_do_prazo");
-    expect(situacaoDoPrazo(alerta(), "2026-12-17", 5)).toBe("sem_justificacao");
-    expect(situacaoDoPrazo(alerta({ estado: "corrigido" }), "2026-12-17", 5)).toBe("nao_aplica");
+    expect(situacaoDoPrazo(alerta(), "2026-12-10", semRegra)).toBe("dentro_do_prazo");
+    expect(situacaoDoPrazo(alerta(), "2027-01-01", semRegra)).toBe("sem_justificacao");
+    expect(situacaoDoPrazo(alerta({ estado: "corrigido" }), "2027-01-01", semRegra)).toBe("nao_aplica");
   });
-
   it("o RH aceita: a picagem fica lancada a mao e o alerta resolve-se", () => {
     const j = justificar("2026-12-10");
     if (!j.ok) throw new Error("justificacao devia ser valida");

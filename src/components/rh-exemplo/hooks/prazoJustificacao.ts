@@ -1,12 +1,16 @@
 /**
- * O prazo para justificar: as constantes e a janela dos desvios, de @/lib/hr, reexportadas para o resto do /rh-exemplo.
- * Fora de hooks/ nada importa de @/lib/hr (regra do semBase.test.ts), por isso o numero 5 e os limites 1 a 30 vivem num
- * so sitio (src/lib/hr/regrasAssiduidade.ts) e chegam aqui por este wrapper, sem React nem base.
+ * O prazo para justificar: o FIM DO PERIODO DA FOLHA que contem o dia (nao ha dias uteis nem prazo configuravel).
+ * Depois de o periodo fechar, a falta fica injustificada para sempre. A conta vive em @/lib/hr/periodoFolha e chega ao
+ * resto do /rh-exemplo por este wrapper (fora de hooks/ nada importa de @/lib/hr, regra do semBase.test.ts).
  */
 export {
-  PRAZO_JUSTIFICACAO_MAX,
-  PRAZO_JUSTIFICACAO_MIN,
-  PRAZO_JUSTIFICACAO_OMISSAO,
-  janelaDeDesviosDias,
-  prazoJustificacaoValido,
-} from "@/lib/hr/regrasAssiduidade";
+  diasDeCalendarioEntre,
+  fimDoPeriodoDoDia,
+  formatarDataPorExtenso,
+  localeDaLingua,
+  periodoDoDia,
+  type RegraPeriodoFolha,
+} from "@/lib/hr/periodoFolha";
+
+/** O ultimo dia para justificar o dia dado: o fim do periodo da folha que o contem. */
+export type PrazoDe = (dataDoDia: string) => string;

@@ -4,6 +4,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 
+// As regras do periodo da folha: sem regra (a base ainda sem as RPCs) o periodo e o mes de calendario.
+const SEM_REGRAS_PERIODO: never[] = [];
+vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: SEM_REGRAS_PERIODO, estado: "ok", isLoading: false }) }));
+
 vi.mock("@/lib/hr/hrDb", () => ({ hrFrom: vi.fn(), hrRpc: vi.fn(), isPermissionError: () => false }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
@@ -136,7 +140,7 @@ describe("useCalculoRealDoMes", () => {
 
 describe("RecolhaDeAssiduidade", () => {
   const calculoFalso = (registar: (id: string, r: RecolhaAssiduidade) => void) =>
-    ({ pessoasActivas: [pessoa("p1")], registar }) as unknown as Parameters<typeof RecolhaDeAssiduidade>[0]["calculo"];
+    ({ pessoasActivas: [pessoa("p1")], registar, intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false } }) as unknown as Parameters<typeof RecolhaDeAssiduidade>[0]["calculo"];
 
   it("entrega a assiduidade de cada pessoa quando acaba de carregar", () => {
     const registar = vi.fn();

@@ -210,7 +210,7 @@ describe("useAccoesJustificacaoDia: registar", () => {
   });
 
   it("traduz o erro de regra de negócio em chave e não o reporta como defeito", async () => {
-    respostas.rpc_hr_justificacao_dia_registar = { data: null, error: { message: "justificacao_dia_fora_do_prazo" } };
+    respostas.rpc_hr_justificacao_dia_registar = { data: null, error: { message: "justificacao_prazo_terminado" } };
     const { result } = renderHook(() => useAccoesJustificacaoDia());
     let resultado: Awaited<ReturnType<typeof result.current.registar>> | undefined;
     await act(async () => {

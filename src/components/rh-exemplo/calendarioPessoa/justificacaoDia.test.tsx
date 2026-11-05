@@ -221,7 +221,7 @@ describe("vista da própria pessoa", () => {
     fireEvent.click(within(detalhe).getByRole("button", { name: "Justificar" }));
     preencher(detalhe);
     fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
-    expect(await within(detalhe).findByText("O prazo para justificar terminou.")).toBeInTheDocument();
+    expect(await within(detalhe).findByText("O prazo para justificar terminou com o fecho do período da folha: o dia fica injustificado.")).toBeInTheDocument();
     expect((within(detalhe).getByLabelText("Motivo") as HTMLTextAreaElement).value).toBe("O autocarro avariou a meio do caminho");
     expect(within(detalhe).getByTestId("rhjd-form")).toBeInTheDocument();
     expect(baseFalsa.justificacoes).toEqual([]);
@@ -236,7 +236,7 @@ describe("vista da própria pessoa", () => {
   });
 
   it("depois do prazo da organização mostra «Prazo terminado» e «Sem justificação», sem botão", () => {
-    prazoFalso.dias = 1;
+    prazoFalso.regras = [{ dia_inicio: 10, valido_de: "2000-01-01" }]; // a folha de 08/10 fechou a 09/10 (hoje, no exemplo, e 14/10)
     ficha("p-sofia", "Sofia Rebelo", true);
     expect(celula("2026-10-08").getAttribute("aria-label")).toContain("Sem justificação");
     const detalhe = abrirDia("2026-10-08");

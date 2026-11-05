@@ -17,6 +17,9 @@ const acoes = vi.hoisted(() => ({
   faltas: [] as unknown[],
 }));
 
+// As regras do periodo da folha: sem regra (a base ainda sem as RPCs) o periodo e o mes de calendario.
+const SEM_REGRAS_PERIODO: never[] = [];
+vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: SEM_REGRAS_PERIODO, estado: "ok", isLoading: false }) }));
 vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", () => ({
   useAssiduidadeDaPessoa: () => ({
     picagens: [],

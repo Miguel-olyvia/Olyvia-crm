@@ -670,6 +670,9 @@ export interface HrPeriodoProcessamento {
   fechado_por: string | null;
   created_at: string;
   created_by: string | null;
+  /** Primeiro e ultimo dia do periodo (inclusivos). `(ano, mes)` e o mes do fecho. Ausentes enquanto a base nao tem 20270107200000. */
+  data_inicio?: string | null;
+  data_fim?: string | null;
 }
 
 /**

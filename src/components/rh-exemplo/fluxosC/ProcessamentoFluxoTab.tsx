@@ -8,12 +8,11 @@ import { useMemo, useRef, useState } from "react";
 import { Eye, Lock, Plus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { totalDoMes } from "@/components/rh-exemplo/processamento/calculoReal";
-import { mesPorOmissao } from "@/components/rh-exemplo/processamento/mesPorOmissao";
+import { SeletorPeriodoFolha, usePeriodoFolhaEscolhido } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { RecolhaDeAssiduidade, useCalculoRealDoMes } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -35,9 +34,9 @@ const CHAVE_COLUNA: Record<(typeof COLUNAS_NUMERICAS)[number], string> = {
 export function ProcessamentoFluxoTab() {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const [mes, setMes] = useState(mesPorOmissao);
-  const ano = Number(mes.slice(0, 4)) || 0;
-  const mesNum = Number(mes.slice(5, 7)) || 1;
+  // A folha (periodo) e nao o mes de calendario: a mesma escolha da «Visao geral». mesNum e o mes do FECHO, 1-12.
+  const { ano, mes: mesNum, escolher } = usePeriodoFolhaEscolhido();
+  const mes = `${ano}-${String(mesNum).padStart(2, "0")}`;
   const calculo = useCalculoRealDoMes(ano, mesNum);
   const [detalhe, setDetalhe] = useState<{ id: string; nome: string } | null>(null);
   const [pontual, setPontual] = useState<{ id: string; nome: string } | null>(null);
@@ -75,11 +74,7 @@ export function ProcessamentoFluxoTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="w-48">
-          <Label htmlFor="fluxo-mes" className="mb-1.5 block">{t("rhFluxosC.proc.mes")}</Label>
-          <input id="fluxo-mes" type="month" value={mes} onChange={(e) => e.target.value && setMes(e.target.value)}
-            className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-        </div>
+        <SeletorPeriodoFolha ano={ano} mes={mesNum} de={calculo.intervalo.de} ate={calculo.intervalo.ate} onMudar={escolher} />
         {!aCarregar && (
           <FecharReabrirMes
             mes={mes} periodo={periodo} podeGerir={podeGerirPeriodo} aGravar={periodoHook.saving}

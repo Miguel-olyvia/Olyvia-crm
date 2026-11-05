@@ -4,21 +4,14 @@
  * lista do RH, que nao desconta nada); o RH MARCA (dia, hora de inicio e de fim). Cada falta abre o detalhe.
  *
  * As SUGESTOES vem dos desvios reais (`hr_assiduidade_desvios`, tipo «turno planeado sem horas»), lidos pelo ecra de
- * tras. O PRAZO para justificar e da organizacao (`hr_regras_assiduidade`, 5 por omissao): le-se e grava-se pelo wrapper
- * `usePrazoJustificacao`, so com a permissao de configurar, de 1 a 30 dias uteis. Ja nao ha prazo em memoria.
+ * tras. O PRAZO para justificar nao se configura aqui: e o fecho do periodo da folha (cada falta mostra o seu no detalhe).
  */
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
-import { toast } from "@/lib/toast";
 import { AvisoDeLeitura, leituraFalhou, type EstadoDeLeitura } from "@/components/rh-exemplo/AvisoDeLeitura";
-import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
-import { PRAZO_JUSTIFICACAO_MAX, PRAZO_JUSTIFICACAO_MIN, prazoJustificacaoValido } from "@/components/rh-exemplo/hooks/prazoJustificacao";
-import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { FaltaDetalhe } from "@/components/rh-exemplo/fluxosB/faltas/FaltaDetalhe";
 import { MarcarFaltaForm, type FaltaPreenchida, type PessoaDaLista } from "@/components/rh-exemplo/fluxosB/faltas/MarcarFaltaForm";
 import { formatarData, formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
@@ -52,22 +45,6 @@ export function FaltasPainel({
   onTentarDeNovo,
 }: FaltasPainelProps) {
   const { t } = useTranslation();
-  const prazo = usePrazoJustificacao();
-  // O que se escreveu no campo e ainda nao se gravou (`null`: o campo mostra o prazo da organizacao).
-  const [rascunho, setRascunho] = useState<string | null>(null);
-  const [erroDoPrazo, setErroDoPrazo] = useState<string | null>(null);
-  const valorDoCampo = rascunho ?? String(prazo.dias);
-  const alterado = rascunho !== null && rascunho !== String(prazo.dias);
-
-  const guardarPrazo = async () => {
-    const valor = rascunho === null || rascunho.trim() === "" ? Number.NaN : Number(rascunho);
-    if (!prazoJustificacaoValido(valor)) return setErroDoPrazo(t("rhRegrasAssid.erro.prazoInvalido"));
-    const { erro } = await prazo.gravar(valor);
-    if (erro) return setErroDoPrazo(t(erro));
-    setErroDoPrazo(null);
-    setRascunho(null);
-    toast.success(t("rhExemplo.fal.prazoGuardado", { dias: String(valor) }));
-  };
   const [marcar, setMarcar] = useState<{ inicial: FaltaPreenchida | null; chave: string } | null>(null);
   const [aberta, setAberta] = useState<string | null>(null);
 
@@ -86,46 +63,16 @@ export function FaltasPainel({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">{t("rhExemplo.fal.titulo")}</CardTitle>
           <p className="text-sm text-muted-foreground">{t("rhExemplo.fal.ajuda")}</p>
-          <div className="flex flex-wrap items-end gap-3 pt-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="rhb-prazo-falta">{t("rhExemplo.fal.prazoConfig")}</Label>
-              <Input
-                id="rhb-prazo-falta"
-                type="number"
-                min={PRAZO_JUSTIFICACAO_MIN}
-                max={PRAZO_JUSTIFICACAO_MAX}
-                step={1}
-                className="min-h-11 w-28"
-                value={valorDoCampo}
-                disabled={!prazo.podeAlterar || prazo.aGravar}
-                aria-describedby="rhb-prazo-ajuda"
-                onChange={(e) => {
-                  setRascunho(e.target.value);
-                  setErroDoPrazo(null);
-                }}
-              />
-            </div>
-            {prazo.podeAlterar && (
-              <Button type="button" variant="outline" className="min-h-11" disabled={!alterado || prazo.aGravar} onClick={() => void guardarPrazo()}>
-                {t("rhExemplo.fal.prazoGuardar")}
-              </Button>
-            )}
-            {marcar === null && permissoes.faltasEdit && (
+          {marcar === null && permissoes.faltasEdit && (
+            <div className="pt-2">
               <Button type="button" className="min-h-11" onClick={() => setMarcar({ inicial: null, chave: "livre" })}>
                 {t("rhExemplo.fal.marcarTitulo")}
               </Button>
-            )}
-          </div>
-          <p id="rhb-prazo-ajuda" className="text-xs text-muted-foreground">
-            {`${t("rhExemplo.fal.prazoLimites", { min: String(PRAZO_JUSTIFICACAO_MIN), max: String(PRAZO_JUSTIFICACAO_MAX) })} ${t("rhExemplo.fal.prazoAplicaSe")}`}
-            {!prazo.podeAlterar && !prazo.leitura.falhou && ` ${t("rhExemplo.fal.prazoSemPermissao")}`}
-          </p>
-          {erroDoPrazo && (
-            <p role="alert" className="text-sm font-medium text-destructive">
-              {erroDoPrazo}
-            </p>
+            </div>
           )}
-          <AvisoDoPrazo leitura={prazo.leitura} dias={prazo.dias} onTentarDeNovo={prazo.recarregar} />
+          <p className="text-xs text-muted-foreground" data-testid="rhb-prazo-ajuda">
+            {t("hr.falta.prazoAjuda")}
+          </p>
         </CardHeader>
         <CardContent className="space-y-4">
           {leituraFaltas && <AvisoDeLeitura estado={leituraFaltas} onTentarDeNovo={onTentarDeNovo} />}

@@ -61,8 +61,15 @@ import {
 import {
   useRetribuicoesVigentesDaOrganizacao,
   escolherRetribuicaoVigente,
-  limitesDoMes,
 } from "@/components/rh-exemplo/hooks/useRetribuicoesVigentesDaOrganizacao";
+import {
+  SeletorPeriodoFolha,
+  formatarIntervaloPeriodo,
+  intervaloEfectivo,
+  localeDaLingua,
+  nomeDaFolha,
+  usePeriodoFolhaEscolhido,
+} from "@/components/rh-exemplo/hooks/periodoFolha";
 import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/rh-exemplo/processamento/ResumoPessoaProcessamentoOculto";
 import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal";
@@ -73,7 +80,6 @@ import {
   type ResultadoProcessamentoPessoa,
 } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
-import { mesPorOmissao } from "@/components/rh-exemplo/processamento/mesPorOmissao";
 import { toast } from "@/lib/toast";
 import { Eye, Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
 
@@ -122,10 +128,13 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
 };
 
+const SEM_TOTAIS: Record<string, TotaisRelatorioMensal> = {};
+const SEM_DIAS: Record<string, readonly DiaRelatorioMensal[]> = {};
 const FORM_LANCAMENTO_VAZIO = { descricao: "", valor: "", codigoProcessamentoId: "" };
 
 export function ProcessamentoVisaoGeralTab() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const locale = localeDaLingua(language);
   const { hasPermission } = usePermissions();
   const { activeCompany } = useCompany();
   const { pessoas, loading: pessoasLoading } = usePessoas();
@@ -135,24 +144,30 @@ export function ProcessamentoVisaoGeralTab() {
   const podeGerirPeriodo = hasPermission("hr.processamento.periodo.gerir");
   const podeGerirLancamentos = hasPermission("hr.processamento.lancamentos.gerir");
 
-  const [mesSelecionado, setMesSelecionado] = useState(mesPorOmissao);
-  const ano = Number(mesSelecionado.slice(0, 4));
-  const mes = Number(mesSelecionado.slice(5, 7));
+  // O PERIODO da folha, nao o mes de calendario: (ano, mes 1-12) e o mes do FECHO; o mes e SEMPRE 1-12 aqui (o wrapper do
+  // relatorio faz a unica conversao para 0-11). Sem regra (ou base sem as RPCs) o dia de inicio e 1: o mes de calendario.
+  const { ano, mes, escolher, regras } = usePeriodoFolhaEscolhido();
 
   const periodoHook = useProcessamentoPeriodo(ano, mes);
   const { periodo } = periodoHook;
   const lancamentosHook = useProcessamentoLancamentos(periodo?.id);
   const { lancamentos } = lancamentosHook;
 
-  const retribuicoesHook = useRetribuicoesVigentesDaOrganizacao(activeCompany?.id, ano, mes);
-  const regrasSubsidioHook = useRegrasSubsidioAlimentacao();
-  const { ultimoDia } = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);
+  const intervalo = useMemo(() => intervaloEfectivo(periodo, ano, mes, regras), [periodo, ano, mes, regras]);
+  const ultimoDia = intervalo.ate;
 
-  const [totaisPorPessoa, setTotaisPorPessoa] = useState<Record<string, TotaisRelatorioMensal>>({});
-  const [diasPorPessoa, setDiasPorPessoa] = useState<Record<string, readonly DiaRelatorioMensal[]>>(
-    {},
-  );
-  const [confirmarFecho, setConfirmarFecho] = useState(false);
+  const retribuicoesHook = useRetribuicoesVigentesDaOrganizacao(activeCompany?.id, ano, mes, intervalo);
+  const regrasSubsidioHook = useRegrasSubsidioAlimentacao();
+  // Os totais de assiduidade ficam guardados COM o periodo a que pertencem: ao mudar de periodo os do anterior deixam de valer
+  // de imediato (sem efeito que os apague e sem uma janela em que o periodo novo mostra os totais do velho).
+  const chavePeriodo = `${ano}-${mes}-${intervalo.de}-${intervalo.ate}`;
+  const [recolhido, setRecolhido] = useState<{
+    chave: string;
+    totais: Record<string, TotaisRelatorioMensal>;
+    dias: Record<string, readonly DiaRelatorioMensal[]>;
+  }>({ chave: chavePeriodo, totais: {}, dias: {} });
+  const totaisPorPessoa = recolhido.chave === chavePeriodo ? recolhido.totais : SEM_TOTAIS;
+  const diasPorPessoa = recolhido.chave === chavePeriodo ? recolhido.dias : SEM_DIAS;  const [confirmarFecho, setConfirmarFecho] = useState(false);
   const [pessoaParaLancamento, setPessoaParaLancamento] = useState<string | null>(null);
   const [pessoaParaDetalhe, setPessoaParaDetalhe] = useState<string | null>(null);
   const [formLancamento, setFormLancamento] = useState(FORM_LANCAMENTO_VAZIO);
@@ -171,8 +186,10 @@ export function ProcessamentoVisaoGeralTab() {
     totais: TotaisRelatorioMensal,
     dias: readonly DiaRelatorioMensal[],
   ) => {
-    setTotaisPorPessoa((atual) => ({ ...atual, [pessoaId]: totais }));
-    setDiasPorPessoa((atual) => ({ ...atual, [pessoaId]: dias }));
+    setRecolhido((atual) => {
+      const base = atual.chave === chavePeriodo ? atual : { chave: chavePeriodo, totais: {}, dias: {} };
+      return { chave: chavePeriodo, totais: { ...base.totais, [pessoaId]: totais }, dias: { ...base.dias, [pessoaId]: dias } };
+    });
   };
 
   const lancamentosPorPessoa = useMemo(() => {
@@ -317,18 +334,12 @@ export function ProcessamentoVisaoGeralTab() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="w-48">
-          <Label htmlFor="hr-processamento-mes" className="mb-1.5 block">
-            {t("hr.vencimento.visaoGeral.mes")}
-          </Label>
-          <input
-            id="hr-processamento-mes"
-            type="month"
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            value={mesSelecionado}
-            onChange={(evento) => setMesSelecionado(evento.target.value)}
-          />
-        </div>
+        <SeletorPeriodoFolha ano={ano} mes={mes} de={intervalo.de} ate={intervalo.ate} onMudar={escolher} />
+        {intervalo.estimado && (
+          <p role="status" className="w-full text-xs text-muted-foreground">
+            {t("hr.periodoFolha.intervaloEstimado")}
+          </p>
+        )}
 
         {periodo && (
           <div className="flex items-center gap-3">
@@ -338,8 +349,8 @@ export function ProcessamentoVisaoGeralTab() {
                 : t("hr.vencimento.visaoGeral.estadoAberto")}
             </Badge>
             {podeGerirPeriodo && !periodoFechado && (
-              <Button variant="outline" onClick={() => setConfirmarFecho(true)}>
-                <Lock className="mr-2 h-4 w-4" />
+              <Button variant="outline" className="min-h-11" onClick={() => setConfirmarFecho(true)} aria-busy={periodoHook.saving}>
+                <Lock className="mr-2 h-4 w-4" aria-hidden="true" />
                 {t("hr.vencimento.visaoGeral.fecharPeriodo")}
               </Button>
             )}
@@ -354,10 +365,15 @@ export function ProcessamentoVisaoGeralTab() {
       ) : !periodo ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
-            <p className="text-muted-foreground">{t("hr.vencimento.visaoGeral.semPeriodo")}</p>
+            <p role="status" className="text-muted-foreground">
+              {t("hr.vencimento.visaoGeral.semPeriodoIntervalo", {
+                mes: nomeDaFolha(ano, mes, locale),
+                intervalo: formatarIntervaloPeriodo(intervalo.de, intervalo.ate, locale, t("hr.periodoFolha.intervaloA"), "long"),
+              })}
+            </p>
             {podeGerirPeriodo ? (
-              <Button onClick={abrirPeriodo} disabled={periodoHook.saving}>
-                {periodoHook.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <Button className="min-h-11" onClick={abrirPeriodo} disabled={periodoHook.saving} aria-busy={periodoHook.saving}>
+                {periodoHook.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
                 {t("hr.vencimento.visaoGeral.abrirPeriodo")}
               </Button>
             ) : (
@@ -371,10 +387,11 @@ export function ProcessamentoVisaoGeralTab() {
         <>
           {pessoasActivas.map((pessoa) => (
             <ResumoPessoaProcessamentoOculto
-              key={pessoa.id}
+              key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}`}
               pessoaId={pessoa.id}
               ano={ano}
               mes={mes}
+              intervalo={intervalo}
               aoTerminarCarregamento={marcarTotais}
             />
           ))}

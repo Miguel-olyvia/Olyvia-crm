@@ -6,7 +6,7 @@
  * simula-se `ResumoPessoaProcessamentoOculto` directamente, o mesmo ponto de
  * insercao que o componente real usa.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 
 vi.mock("@/hooks/useTranslation", () => ({
@@ -58,6 +58,13 @@ vi.mock("@/hooks/useRetribuicoesVigentesDaOrganizacao", async () => {
     }),
   };
 });
+
+// As regras do periodo da folha: sem regra (ou a base sem as RPCs) o periodo e o mes de calendario.
+const SEM_REGRAS: { dia_inicio: number; valido_de: string }[] = [];
+let regrasPeriodoFolha = SEM_REGRAS;
+vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({
+  usePeriodoFolhaRegras: () => ({ regras: regrasPeriodoFolha, estado: "ok", isLoading: false }),
+}));
 
 let regraSubsidioMock = { minutosMinimosDia: 1 };
 vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
@@ -112,6 +119,7 @@ const TOTAIS_PADRAO = {
 };
 let totaisPorPessoaMock: Record<string, typeof TOTAIS_PADRAO> = {};
 let diasPorPessoaMock: Record<string, unknown[]> = {};
+let intervaloRecebido: { de: string; ate: string; mes: number } | null = null;
 
 vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async () => {
   const react = await vi.importActual<typeof import("react")>("react");
@@ -123,11 +131,16 @@ vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async (
     // como a real ResumoPessoaProcessamentoOculto evita com `avisouRef`.
     ResumoPessoaProcessamentoOculto: ({
       pessoaId,
+      intervalo,
+      mes,
       aoTerminarCarregamento,
     }: {
       pessoaId: string;
+      intervalo?: { de: string; ate: string };
+      mes: number;
       aoTerminarCarregamento: (id: string, totais: unknown, dias: unknown[]) => void;
     }) => {
+      intervaloRecebido = intervalo ? { de: intervalo.de, ate: intervalo.ate, mes } : null;
       react.useEffect(() => {
         aoTerminarCarregamento(
           pessoaId,
@@ -170,6 +183,8 @@ beforeEach(() => {
   totaisPorPessoaMock = {};
   diasPorPessoaMock = {};
   regraSubsidioMock = { minutosMinimosDia: 1 };
+  regrasPeriodoFolha = SEM_REGRAS;
+  intervaloRecebido = null;
   abrirMock.mockClear();
   fecharMock.mockClear();
   criarMock.mockClear();
@@ -179,6 +194,50 @@ beforeEach(() => {
 function formatarValorEsperado(valor: number): string {
   return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(valor);
 }
+
+describe("ProcessamentoVisaoGeralTab: o periodo da folha", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 5, 12, 0, 0)); // 5 de novembro de 2026
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sem regra o seletor mostra o mes de calendario (1 a 31) e o relatorio por pessoa recebe esse intervalo", async () => {
+    periodoActual = PERIODO_ABERTO;
+    render(<ProcessamentoVisaoGeralTab />);
+    const seletor = await screen.findByTestId("seletor-periodo-folha");
+    expect(seletor).toHaveTextContent("Novembro de 2026");
+    expect(seletor.textContent).toMatch(/1\D+11.*30\D+11/);
+    await waitFor(() => expect(intervaloRecebido).toEqual({ de: "2026-11-01", ate: "2026-11-30", mes: 11 }));
+  });
+
+  it("com o dia de inicio 22 a folha de novembro vai de 22 out a 21 nov, e o nome e o do mes do fecho", async () => {
+    regrasPeriodoFolha = [{ dia_inicio: 22, valido_de: "2000-01-01" }];
+    periodoActual = null;
+    render(<ProcessamentoVisaoGeralTab />);
+    const seletor = await screen.findByTestId("seletor-periodo-folha");
+    expect(seletor).toHaveTextContent("Novembro de 2026");
+    expect(seletor.textContent).toMatch(/22\D+10.*21\D+11/);
+  });
+
+  it("um periodo ja aberto manda as suas datas: o relatorio conta por elas", async () => {
+    regrasPeriodoFolha = [{ dia_inicio: 22, valido_de: "2000-01-01" }];
+    periodoActual = { ...PERIODO_ABERTO, ano: 2026, mes: 11, data_inicio: "2026-10-27", data_fim: "2026-11-21" };
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(intervaloRecebido).toEqual({ de: "2026-10-27", ate: "2026-11-21", mes: 11 }));
+  });
+
+  it("anterior e seguinte andam de folha em folha", async () => {
+    regrasPeriodoFolha = [{ dia_inicio: 22, valido_de: "2000-01-01" }];
+    render(<ProcessamentoVisaoGeralTab />);
+    const botoes = await screen.findAllByRole("button", { name: "hr.vencimento.visaoGeral.irParaPeriodo" });
+    fireEvent.click(botoes[1]); // anterior, seguinte
+    expect(screen.getByTestId("seletor-periodo-folha")).toHaveTextContent("Dezembro de 2026");
+    expect(screen.getByTestId("seletor-periodo-folha").textContent).toMatch(/22\D+11.*21\D+12/);
+  });
+});
 
 describe("ProcessamentoVisaoGeralTab", () => {
   it("sem hr.processamento.periodo.view mostra o cartao de sem acesso", () => {

@@ -50,7 +50,9 @@ describe("horaSemSegundos", () => {
 
 describe("chaveDoErroDeJustificacaoDia", () => {
   it.each([
-    ["justificacao_dia_fora_do_prazo", "rhJust.erro.foraDoPrazo"],
+    ["justificacao_prazo_terminado", "rhJust.erro.foraDoPrazo"],
+    ["justificacao_periodo_fechado", "rhJust.erro.periodoFechado"],
+    ["justificacao_periodo_indeterminado", "rhJust.erro.periodoIndeterminado"],
     ["justificacao_dia_ja_ha_falta", "rhJust.erro.jaHaFalta"],
     ["justificacao_dia_ja_enviada", "rhJust.erro.jaEnviada"],
     ["justificacao_dia_ja_decidida", "rhJust.erro.jaDecidida"],
@@ -94,7 +96,7 @@ describe("chaveDoErroDeJustificacaoDia", () => {
 
   it("reconhece o prefixo mesmo no meio de uma mensagem maior, e numa cadeia solta", () => {
     expect(chaveDoErroDeJustificacaoDia({ message: "ERROR: justificacao_dia_ja_enviada (23505)" })).toBe("rhJust.erro.jaEnviada");
-    expect(chaveDoErroDeJustificacaoDia("justificacao_dia_fora_do_prazo")).toBe("rhJust.erro.foraDoPrazo");
+    expect(chaveDoErroDeJustificacaoDia("justificacao_prazo_terminado")).toBe("rhJust.erro.foraDoPrazo");
   });
 
   it.each([null, undefined, {}, { message: "" }, 42])("sem mensagem (%j) não há chave", (entrada) => {

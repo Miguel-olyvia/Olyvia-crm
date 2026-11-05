@@ -118,7 +118,7 @@ describe("ConfiguracaoVencimento", () => {
     await renderPagina();
 
     expect(screen.getByText("Não tem permissão para ver esta informação")).toBeTruthy();
-  });
+  }, 20000); // o primeiro teste paga a importacao a frio da pagina (~5 s)
 
   it("so com hr.vencimento.codigos.view mostra a aba de codigos, sem a de subsidio", async () => {
     hasPermission.mockImplementation((perm: string) => perm === "hr.vencimento.codigos.view");

@@ -1,18 +1,18 @@
 /**
  * A pessoa que se esqueceu de picar JUSTIFICA a falha de marcacao (fluxo 5): hora real + motivo (+ anexo, se
- * quiser), ate 5 dias uteis depois. Mostra quantos dias uteis restam; passado o prazo a diferenca fica «sem
+ * quiser), ate ao fecho do periodo da folha. Mostra quantos dias restam; passado o prazo a diferenca fica «sem
  * justificacao» (falta sugerida). A pessoa nao corrige a propria picagem: so o RH aceita (lanca a picagem a mao)
  * ou recusa com motivo.
  */
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MessageSquareWarning } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { AvisoDoPrazo } from "@/components/rh-exemplo/AvisoDoPrazo";
 import { usePrazoJustificacao } from "@/components/rh-exemplo/hooks/usePrazoJustificacao";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import {
-  diasUteisRestantes,
+  diasRestantes,
   prazoDaJustificacao,
   situacaoDoPrazo,
   type JustificacaoPicagem,
@@ -84,8 +84,15 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
   // As justificações de dia vêm da base (últimos 90 dias); a leitura pode demorar, falhar ou ainda não existir nesta base.
   const { justificacoes: doDia, loading: aLerDia, erro: erroDia, indisponivel: indisponivelDia } = useJustificacoesDeDiaDaPessoa(pessoaId);
   const hoje = hojeIso();
-  const prazoOrganizacao = usePrazoJustificacao();
-  const prazoDias = prazoOrganizacao.dias;
+  const datasDoPrazo = useMemo(() => meus.map((a) => a.data), [meus]);
+  const { prazoDe, estimativaDe } = usePrazoJustificacao(datasDoPrazo);
+  const textoDoPrazo = (data: string): string => {
+    const restantes = diasRestantes(data, hoje, prazoDe);
+    const ate = formatarData(prazoDaJustificacao(data, prazoDe));
+    const frase =
+      restantes === 0 ? t("rhExemplo.pic.ultimoDia", { ate }) : restantes === 1 ? t("rhExemplo.pic.diasRestantesUm", { ate }) : t("rhExemplo.pic.diasRestantes", { dias: String(restantes), ate });
+    return estimativaDe(data) ? `${frase} ${t("rhJust.prazo.estimativa")}` : frase;
+  };
   const semNada =
     !loading && !erro && !recusado && !aLerDia && !erroDia && !indisponivelDia && meus.length === 0 &&
     pendentes.length + aceites.length + recusadas.length + doDia.length === 0;
@@ -105,7 +112,6 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
         )}
       </CardHeader>
       <CardContent className="space-y-3">
-        <AvisoDoPrazo leitura={prazoOrganizacao.leitura} dias={prazoDias} onTentarDeNovo={prazoOrganizacao.recarregar} />
         {loading && <p role="status" className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.carregando")}</p>}
         {erro && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.erro")}</p>}
         {recusado && <p role="alert" className="text-sm font-medium text-destructive">{t("rhAbas.just.recusado")}</p>}
@@ -114,7 +120,7 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
         {semNada && <p className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.vazio")}</p>}
         <ul className="space-y-3">
           {meus.map((alerta) => {
-            const dentro = situacaoDoPrazo(alerta, hoje, prazoDias) === "dentro_do_prazo";
+            const dentro = situacaoDoPrazo(alerta, hoje, prazoDe) === "dentro_do_prazo";
             return (
               <li key={alerta.id} className="space-y-1 text-sm">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -129,7 +135,7 @@ export function JustificarFalhaDeMarcacao({ pessoaId, justificacoes }: { pessoaI
                   )}
                   {dentro ? (
                     <span className="text-xs text-muted-foreground">
-                      {t("rhExemplo.pic.diasRestantes", { dias: String(diasUteisRestantes(alerta.data, hoje, prazoDias)), ate: formatarData(prazoDaJustificacao(alerta.data, prazoDias)) })}
+                      {textoDoPrazo(alerta.data)}
                     </span>
                   ) : (
                     <Badge variant="outline" className="border-destructive font-normal text-destructive">

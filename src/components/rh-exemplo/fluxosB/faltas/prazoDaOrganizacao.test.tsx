@@ -1,15 +1,20 @@
-// O prazo para justificar faltas e DA ORGANIZACAO: o campo do painel de faltas grava de verdade (so com permissao, de 1 a 30,
-// com a falha visivel), e o detalhe da falta le o mesmo prazo. O wrapper do prazo esta simulado (a prova do hook real esta
-// em src/hooks/__tests__/useRegrasAssiduidade.test.tsx); nada toca em base nenhuma.
+// O prazo para justificar e o fim do periodo da folha: o painel de faltas ja nao o configura nem avisa de «prazo nao
+// disponivel», o detalhe da falta diz «Pode justificar ate ...» ou «Injustificada: o periodo fechou», e o calendario calcula
+// com as regras do periodo. O wrapper do prazo esta simulado; nada toca em base nenhuma.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
-import { falharLeituraDoPrazo, prazoFalso, reporPrazoFalso } from "@/test/prazoJustificacaoFalso";
+import { fimDoPeriodoDoDia } from "@/lib/hr/periodoFolha";
+import { prazoFalso, reporPrazoFalso } from "@/test/prazoJustificacaoFalso";
 import type { Falta, PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
 
 const aviso = vi.hoisted(() => ({ sucesso: vi.fn(), erro: vi.fn() }));
+// As regras do periodo (o DescontoDaFaltaCard, dentro do detalhe, procura a folha que contem o dia da falta).
+const periodoRegras = vi.hoisted(() => ({ regras: [] as Array<{ dia_inicio: number; valido_de: string }> }));
+vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: periodoRegras.regras, estado: "ok", isLoading: false }) }));
+
 vi.mock("@/lib/toast", () => ({ toast: { success: aviso.sucesso, error: aviso.erro } }));
 
 vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", () => ({
@@ -41,7 +46,8 @@ const TUDO: PermissoesAssiduidade = {
   faltasEdit: true, justificacaoView: true, justificacaoEdit: true, validarRealizado: true, obrasRegistar: false,
 };
 
-// Terca 06/10/2099: com 8 dias uteis o prazo acaba na sexta 16/10/2099 (nunca chega, o teste nao depende do dia de hoje).
+// Terca 06/10/2099: sem regra o periodo e o mes de calendario (prazo 31/10/2099); com inicio a 22 acaba a 21/10/2099.
+// Nunca chega, por isso o teste nao depende do dia de hoje.
 const falta = (extra: Partial<Falta> = {}): Falta =>
   ({
     id: "falta-1", pessoa_id: "pessoa-a", organization_id: "org", data: "2099-10-06", planeado_id: null, vinculo_id: null,
@@ -59,149 +65,111 @@ const painel = () =>
     </LanguageProvider>,
   );
 
-const campo = () => screen.getByLabelText(/Prazo para justificar/) as HTMLInputElement;
-
 beforeEach(() => {
   window.localStorage.setItem("language", "pt");
+  periodoRegras.regras = [];
   reporPrazoFalso();
   aviso.sucesso.mockClear();
   aviso.erro.mockClear();
 });
 afterEach(cleanup);
 
-describe("FaltasPainel: o campo do prazo da organizacao", () => {
-  it("mostra o prazo lido da organizacao e explica que se aplica aos dias ainda por justificar", () => {
-    prazoFalso.dias = 8;
-    prazoFalso.gravado = true;
+const REGRA_22 = [{ dia_inicio: 22, valido_de: "2000-01-01" }];
+
+describe("FaltasPainel: o prazo ja nao se configura", () => {
+  it("nao tem o campo «Prazo para justificar (dias uteis)» nem o aviso de que o prazo nao esta disponivel", () => {
     painel();
-    expect(campo().value).toBe("8");
-    expect(campo()).not.toBeDisabled();
-    expect(screen.getByText(/Aplica-se a partir de agora aos dias ainda por justificar/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Prazo para justificar/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Guardar prazo/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rhb-prazo-aviso")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ainda não está disponível nesta base/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/dias úteis/)).not.toBeInTheDocument();
   });
 
-  it("escrever nao grava: so o botao Guardar grava, uma vez, com o valor escrito", async () => {
+  it("explica que o prazo e o fecho do periodo da folha", () => {
     painel();
-    fireEvent.change(campo(), { target: { value: "8" } });
-    expect(prazoFalso.gravados).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Guardar prazo" }));
-    await waitFor(() => expect(prazoFalso.gravados).toEqual([8]));
-    await waitFor(() => expect(aviso.sucesso).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("rhb-prazo-ajuda")).toHaveTextContent("fecho do período da folha");
   });
 
-  it("o botao Guardar so fica activo quando o valor muda", () => {
-    prazoFalso.dias = 5;
-    painel();
-    expect(screen.getByRole("button", { name: "Guardar prazo" })).toBeDisabled();
-    fireEvent.change(campo(), { target: { value: "6" } });
-    expect(screen.getByRole("button", { name: "Guardar prazo" })).not.toBeDisabled();
-  });
-
-  it.each(["0", "31", "2.5", ""])("recusa %s com mensagem visivel e sem chamar a base", async (valor) => {
-    painel();
-    fireEvent.change(campo(), { target: { value: valor } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar prazo" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("entre 1 e 30");
-    expect(prazoFalso.gravados).toEqual([]);
-  });
-
-  it("uma falha ao gravar fica visivel e o valor escrito nao se perde", async () => {
-    prazoFalso.erroAoGravar = "rhRegrasAssid.erro.semPermissao";
-    painel();
-    fireEvent.change(campo(), { target: { value: "9" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar prazo" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Não tem permissão para alterar o prazo.");
-    expect(campo().value).toBe("9");
-    expect(aviso.sucesso).not.toHaveBeenCalled();
-  });
-
-  it("sem permissao de configurar o campo fica desactivado, e diz porque", () => {
-    prazoFalso.dias = 8;
-    prazoFalso.podeAlterar = false;
-    painel();
-    expect(campo()).toBeDisabled();
-    expect(campo().value).toBe("8");
-    expect(screen.queryByRole("button", { name: "Guardar prazo" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Só quem gere a assiduidade pode alterar o prazo\./)).toBeInTheDocument();
-  });
-
-  it("com a leitura falhada diz que o 5 e so uma omissao para calcular, e nao deixa gravar", () => {
-    falharLeituraDoPrazo("indisponivel");
-    painel();
-    expect(screen.getByTestId("rhb-prazo-aviso")).toHaveTextContent("Usam-se 5 dias úteis (a omissão) só para calcular");
-    expect(campo()).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Guardar prazo" })).not.toBeInTheDocument();
-  });
-
-  it("um erro de rede oferece tentar de novo, que manda reler o prazo", () => {
-    falharLeituraDoPrazo("erro");
-    painel();
-    expect(screen.getByTestId("rhb-prazo-aviso")).toHaveTextContent("Não foi possível ler o prazo da organização");
-    fireEvent.click(screen.getByRole("button", { name: /Tentar de novo/i }));
-    expect(prazoFalso.recarregados).toBe(1);
-  });
-
-  it("o campo ja nao vem de um valor em memoria: nao ha prazo no store dos fluxos B", async () => {
+  it("o prazo nao esta no store dos fluxos B", async () => {
     const { lerFluxosB } = await import("@/components/rh-exemplo/dados/lojaFluxosB");
     expect(Object.keys(lerFluxosB())).not.toContain("prazoFaltaDias");
   });
 });
 
-describe("FaltaDetalhe: o prazo da organizacao", () => {
-  const detalhe = () =>
+describe("FaltaDetalhe: pode justificar ate ao fecho do periodo", () => {
+  const detalhe = (f: Falta = falta()) =>
     render(
       <LanguageProvider>
-        <FaltaDetalhe falta={falta()} nome="Ana Real" permissoes={TUDO} onFechar={() => undefined} />
+        <FaltaDetalhe falta={f} nome="Ana Real" permissoes={TUDO} onFechar={() => undefined} />
       </LanguageProvider>,
     );
 
-  it("usa os dias da organizacao para a data limite: 8 dias uteis depois de 06/10 e 16/10", () => {
-    prazoFalso.dias = 8;
+  it("sem regra: ate ao ultimo dia do mes (06/10 -> 31/10)", () => {
     detalhe();
-    expect(screen.getByText(/A organização dá 8 dias úteis para justificar, até 16\/10\/2099\./)).toBeInTheDocument();
+    expect(screen.getByTestId("rhb-prazo-ate")).toHaveTextContent("Pode justificar até 31 de outubro de 2099");
   });
 
-  it("com outro prazo o texto muda: 1 dia util e quarta 07/10", () => {
-    prazoFalso.dias = 1;
-    detalhe();
-    expect(screen.getByText(/A organização dá 1 dias úteis para justificar, até 07\/10\/2099\./)).toBeInTheDocument();
+  it("com inicio a 22: 06/10 fecha a 21/10 e 22/10 so fecha a 21/11", () => {
+    prazoFalso.regras = REGRA_22;
+    const { unmount } = detalhe();
+    expect(screen.getByTestId("rhb-prazo-ate")).toHaveTextContent("Pode justificar até 21 de outubro de 2099");
+    unmount();
+    detalhe(falta({ data: "2099-10-22" }));
+    expect(screen.getByTestId("rhb-prazo-ate")).toHaveTextContent("Pode justificar até 21 de novembro de 2099");
   });
 
-  it("com a leitura falhada o detalhe diz que o prazo mostrado e a omissao", () => {
-    falharLeituraDoPrazo("indisponivel");
-    detalhe();
-    expect(screen.getByTestId("rhb-prazo-aviso")).toBeInTheDocument();
+  it("depois do fecho diz «Injustificada: o periodo fechou» e ja nao diz ate quando", () => {
+    detalhe(falta({ data: "2020-01-10" }));
+    expect(screen.getByTestId("rhb-prazo-injustificada")).toHaveTextContent("Injustificada: o período fechou");
+    expect(screen.queryByTestId("rhb-prazo-ate")).not.toBeInTheDocument();
   });
 });
 
-describe("calendario da pessoa: o mes inteiro calcula com o prazo da organizacao", () => {
+describe("FaltaDetalhe: a folha em que a falta cai (o desconto usa o periodo que CONTEM o dia)", () => {
+  const detalhe = (f: Falta) =>
+    render(
+      <LanguageProvider>
+        <FaltaDetalhe falta={f} nome="Ana Real" permissoes={TUDO} onFechar={() => undefined} />
+      </LanguageProvider>,
+    );
+
+  it("uma falta a 25/10 com inicio a 22 cai na folha de NOVEMBRO (22/10 a 21/11), e sem regra na de outubro", () => {
+    periodoRegras.regras = [{ dia_inicio: 22, valido_de: "2000-01-01" }];
+    const { unmount } = detalhe(falta({ data: "2099-10-25" }));
+    expect(screen.getByTestId("rhb-desconto-folha")).toHaveTextContent(/novembro/i);
+    expect(screen.getByTestId("rhb-desconto-folha").textContent).toMatch(/22\D+10.*21\D+11/);
+    unmount();
+    periodoRegras.regras = [];
+    detalhe(falta({ data: "2099-10-25" }));
+    expect(screen.getByTestId("rhb-desconto-folha")).toHaveTextContent(/outubro/i);
+  });
+});
+
+describe("calendario da pessoa: o mes inteiro calcula com o fecho do periodo", () => {
   // Quinta 08/10/2026 com uma falta sugerida: o que o calendario deixa justificar.
   const dia = (data: string): DiaCalendario =>
     ({
       data, diaSemana: 4, previsto: { intervalos: [], pausaMin: 0, minutos: 0 }, feitos: [], picagens: [], feitoMin: 0, deltaMin: null,
       atrasoMin: 0, chips: [{ tipo: "falta_sugerida", minutos: 120 }], faltas: [], horasExtra: [], banco: [], passado: true, hoje: false, semana: null,
     }) as unknown as DiaCalendario;
-  const estado = (prazoDias: number, hoje: string) => situacoesDosDias([dia("2026-10-08")], [], prazoDias, hoje).get("2026-10-08")?.situacao.estado;
+  const estado = (regras: typeof REGRA_22, hoje: string) =>
+    situacoesDosDias([dia("2026-10-08")], [], (data) => fimDoPeriodoDoDia(data, regras), hoje).get("2026-10-08")?.situacao.estado;
 
-  it("a mesma data muda de situacao com o prazo: 14/10 esta dentro com 5 dias (prazo 15/10) e fora com 1 dia (prazo 09/10)", () => {
-    expect(estado(5, "2026-10-14")).toBe("pode_justificar");
-    expect(estado(1, "2026-10-14")).toBe("prazo_terminado");
-    expect(estado(30, "2026-10-14")).toBe("pode_justificar");
-    expect(estado(5, "2026-10-16")).toBe("prazo_terminado");
-    expect(estado(8, "2026-10-16")).toBe("pode_justificar");
+  it("a mesma data muda de situacao com a regra: 08/10 fecha a 31/10 sem regra e a 21/10 com inicio a 22", () => {
+    expect(estado([], "2026-10-21")).toBe("pode_justificar");
+    expect(estado([], "2026-10-31")).toBe("pode_justificar");
+    expect(estado([], "2026-11-01")).toBe("prazo_terminado");
+    expect(estado(REGRA_22, "2026-10-21")).toBe("pode_justificar");
+    expect(estado(REGRA_22, "2026-10-22")).toBe("prazo_terminado");
   });
 
-  it("o hook do mes le o prazo UMA vez e passa-o a cada dia", () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-14T12:00:00"));
-    try {
-      prazoFalso.dias = 1;
-      const pouco = renderHook(() => useSituacoesDoMes("p-sofia", [dia("2026-10-08")]));
-      expect(pouco.result.current.situacoes.get("2026-10-08")?.situacao.estado).toBe("prazo_terminado");
-      prazoFalso.dias = 30;
-      const muito = renderHook(() => useSituacoesDoMes("p-sofia", [dia("2026-10-08")]));
-      expect(muito.result.current.situacoes.get("2026-10-08")?.situacao.estado).toBe("pode_justificar");
-    } finally {
-      vi.useRealTimers();
-    }
+  it("o hook do mes calcula com as regras e passa o prazo a cada dia", () => {
+    // O «hoje» deste ecra de exemplo e fixo (14/10/2026): com inicio a 10, a folha de 08/10 fechou a 09/10.
+    const semRegra = renderHook(() => useSituacoesDoMes("p-sofia", [dia("2026-10-08")]));
+    expect(semRegra.result.current.situacoes.get("2026-10-08")?.situacao.estado).toBe("pode_justificar");
+    prazoFalso.regras = [{ dia_inicio: 10, valido_de: "2000-01-01" }];
+    const com10 = renderHook(() => useSituacoesDoMes("p-sofia", [dia("2026-10-08")]));
+    expect(com10.result.current.situacoes.get("2026-10-08")?.situacao.estado).toBe("prazo_terminado");
   });
 });
