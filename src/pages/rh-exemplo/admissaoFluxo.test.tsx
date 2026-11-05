@@ -44,7 +44,7 @@ beforeAll(() => {
 beforeEach(() => {
   window.localStorage.setItem("language", "pt");
   reporRhTeste();
-  rhTeste.permissoes = new Set(["hr.pessoas.convite.enviar", "hr.onboarding.approve"]);
+  rhTeste.permissoes = new Set(["hr.pessoas.convite.enviar", "hr.onboarding.approve", "hr.pessoas.view"]);
   repor();
 });
 
@@ -100,6 +100,14 @@ describe("pipeline de admissões (lido da base)", () => {
 
   it("sem a permissão de aprovar não há «Rever», mas as linhas continuam visíveis", async () => {
     rhTeste.permissoes = new Set(["hr.pessoas.convite.enviar"]);
+    pipeline();
+    const lista = await screen.findByRole("list", { name: "Admissões" });
+    expect(within(lista).getByText("Marco Ventura")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Rever a admissão/ })).not.toBeInTheDocument();
+  });
+
+  it("aprovar sem hr.pessoas.view também não dá «Rever» (a base recusa ler as pendências da pessoa)", async () => {
+    rhTeste.permissoes = new Set(["hr.pessoas.convite.enviar", "hr.onboarding.approve"]);
     pipeline();
     const lista = await screen.findByRole("list", { name: "Admissões" });
     expect(within(lista).getByText("Marco Ventura")).toBeInTheDocument();

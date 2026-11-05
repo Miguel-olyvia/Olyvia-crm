@@ -104,6 +104,22 @@ async function preencherMinimo() {
   await escolher(/^Subsidios em duodecimos/, /^50 %/);
 }
 
+describe("Nova pessoa: permissões do botão", () => {
+  it("só com hr.pessoas.create (sem hr.pessoas.view) não há «Nova pessoa»: a base não devolve o id da pessoa criada", () => {
+    rhTeste.isSystemAdmin = false;
+    rhTeste.permissoes = new Set(["hr.pessoas.create", "hr.pessoas.view.own"]);
+    renderLista();
+    expect(screen.queryByRole("button", { name: "Nova pessoa" })).not.toBeInTheDocument();
+  });
+
+  it("com hr.pessoas.create e hr.pessoas.view há «Nova pessoa»", () => {
+    rhTeste.isSystemAdmin = false;
+    rhTeste.permissoes = new Set(["hr.pessoas.create", "hr.pessoas.view"]);
+    renderLista();
+    expect(screen.getByRole("button", { name: "Nova pessoa" })).toBeInTheDocument();
+  });
+});
+
 describe("RH de exemplo: Nova pessoa em painel lateral", () => {
   it("abre o painel com migalhas, selo, seis abas e o rodapé com um só botão primário", () => {
     const nova = abrirNovaPessoa();

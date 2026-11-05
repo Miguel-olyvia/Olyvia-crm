@@ -82,7 +82,7 @@ const montar = () => render(<PipelineAdmissoes aoAbrirFicha={aoAbrirFicha} />);
 const cartaoDe = (nome: string) => screen.getByText(nome).closest("li") as HTMLElement;
 
 beforeEach(() => {
-  permissoes = new Set(["hr.onboarding.approve", "hr.pessoas.convite.enviar"]);
+  permissoes = new Set(["hr.onboarding.approve", "hr.pessoas.convite.enviar", "hr.pessoas.view"]);
   chamadasDoHook.length = 0;
   carregarMais.mockReset();
   recarregar.mockReset();
@@ -247,6 +247,13 @@ describe("«Rever» e as permissoes", () => {
     montar();
     expect(screen.getByRole("button", { name: "Rever a admissão de Pessoa 1" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rever a admissão de Pessoa 2" })).toBeInTheDocument();
+  });
+
+  it("com hr.onboarding.approve mas sem hr.pessoas.view nao ha «Rever» (a base recusa ler as pendencias)", () => {
+    permissoes = new Set(["hr.onboarding.approve", "hr.pessoas.convite.enviar"]);
+    montar();
+    expect(screen.queryByRole("button", { name: /Rever a admissão/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Pessoa 1")).toBeInTheDocument();
   });
 
   it("sem hr.onboarding.approve nao ha «Rever» (a base recusaria com HRA31)", () => {
