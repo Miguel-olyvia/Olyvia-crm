@@ -4,7 +4,7 @@
 //  2. «Quem vai» são só as pessoas com RECURSO de agenda (recurso do tipo utilizador, ativo, da organização);
 //  3. o tipo de visita (Levantamento, Medição técnica, Escolha de materiais, Revisita) escolhe-se aqui.
 // Não ha ligação board-recurso na base (só `allowed_modules` do quadro): por isso «quem vai» não se filtra por quadro (decisão por confirmar no desenho).
-import { useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check } from "lucide-react";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { TipoVisitaNegocio } from "@/components/negocio-metas/negocioMetas";
@@ -34,6 +34,11 @@ import { HorasLivresVisita } from "./HorasLivresVisita";
 import { ROTULO_MORADA, type OrigemMoradaVisita } from "./moradaPorOmissaoDaVisita";
 import { QuemPodeIrVisita } from "./QuemPodeIrVisita";
 
+const diaPorExtenso = (dia: string): string => {
+  const [a, m, d] = dia.split("-").map(Number);
+  return new Date(Date.UTC(a, m - 1, d, 12)).toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+};
+
 const BOTAO = cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO);
 const CHIP = "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 py-2 text-[15px] transition-colors motion-reduce:transition-none";
 
@@ -62,6 +67,13 @@ interface Props {
   /** 4/11: numa visita nova, o que se preparou no passo «Preparar a visita» (a duração em minutos e a nota). */
   duracaoInicialMin?: number;
   notaInicial?: string;
+  /** 5/11: numa visita nova, o dia (AAAA-MM-DD) e a hora (HH:MM) combinados na chamada: o dia já vem escolhido e aparecem os comerciais livres. */
+  dataInicial?: string;
+  horaInicial?: string;
+  /** 5/11: marca sozinha, sem clique: escolhe o comercial livre mais perto à hora combinada e grava. Sem ninguém livre, diz e espera. */
+  marcarSozinha?: boolean;
+  /** Não deu para marcar sozinha (ninguém livre, falta a morada): o pedido acaba e a visita marca-se à mão. */
+  aoDesistirSozinha?: () => void;
   rotuloGravar: string;
   /** Nome de cada recurso da agenda, para a visita gravada. */
   aoGuardada: (r: VisitaGravada) => void;
@@ -70,12 +82,21 @@ interface Props {
   soLeitura?: boolean;
 }
 
+/** O dia e a hora combinados na chamada, se servem: o dia válido e não passado; a hora em HH:MM («11», «11h», «11:30», «11h30»). */
+export function combinadaNaChamada(dia: string | undefined, hora: string | undefined, hoje: string): { data?: string; hora?: string } {
+  if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(dia) || dia < hoje) return {};
+  const m = (hora ?? "").trim().toLowerCase().match(/^(\d{1,2})(?:\s*(?:h|:)\s*(\d{2})?)?\s*h?$/);
+  const h = m ? Number(m[1]) : NaN, min = m?.[2] ? Number(m[2]) : 0;
+  return Number.isInteger(h) && h >= 0 && h <= 23 && min >= 0 && min <= 59
+    ? { data: dia, hora: `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` } : { data: dia };
+}
+
 const chaveDaDuracao = (minutos: number): Pick<ValorAgenda, "duracao" | "duracaoMinutos"> => {
   const chave = DURACOES_VISITA.find((c) => minutosDaDuracao(c) === minutos);
   return chave ? { duracao: chave } : { duracao: "", duracaoMinutos: minutos };
 };
 
-export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, origemMorada = "obra", tipoInicial, visita, presentesInicial, duracaoInicialMin, notaInicial, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
+export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, origemMorada = "obra", tipoInicial, visita, presentesInicial, duracaoInicialMin, notaInicial, dataInicial, horaInicial, marcarSozinha = false, aoDesistirSozinha, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
   const { t } = useTranslation();
   const id = useId();
   const hoje = hojeLisboa();
@@ -96,7 +117,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
     responsavelUserId: null, excluirId: visita?.id ?? null,
     inicial: {
       ...(visita ? { boardId: visita.boardId, recursos: visita.recursos, data: visita.dia, hora: visita.hora, ...chaveDaDuracao(visita.minutos) }
-        : duracaoInicialMin ? chaveDaDuracao(duracaoInicialMin) : {}),
+        : { ...(duracaoInicialMin ? chaveDaDuracao(duracaoInicialMin) : {}), ...combinadaNaChamada(dataInicial, horaInicial, hoje) }),
       ...(presentesInicial ? { quemVaiEstar: presentesInicial } : {}),
     },
   });
@@ -131,6 +152,19 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
   const aLocalizar = localVisita.aLer;
   const bloqueado = soLeitura || semAgenda || horario.isError || horario.isLoading || aLocalizar;
   const visto = tentou ? erroForm : null;
+
+  // 5/11: marcar sozinha. QuemPodeIrVisita escolhe quem vai (o comercial livre mais perto à hora combinada) e diz-o em `sozinha`;
+  // com tudo confirmado (horas livres lidas, a hora entre elas, a morada localizada, sem erros) grava-se uma vez, sem clique.
+  const [sozinha, setSozinha] = useState<{ quem: string | null; texto: string } | null>(null);
+  const jaEnviouSozinha = useRef(false);
+  const desistir = (texto: string) => { setSozinha({ quem: null, texto }); aoDesistirSozinha?.(); };
+  useEffect(() => {
+    if (!marcarSozinha || visita || jaEnviouSozinha.current || sozinha?.quem == null) return;
+    if (bloqueado || envio.aGuardar || horas.estado.k !== "pronto" || valor.recursos.length === 0 || !valor.hora) return;
+    jaEnviouSozinha.current = true;
+    if (erroForm !== null || !horas.horas.includes(valor.hora)) { desistir("Não deu para marcar sozinha: confira o que falta em baixo e use «" + rotuloGravar + "»."); return; }
+    formulario.current?.requestSubmit();
+  });
 
   const enviar = (e: FormEvent): void => {
     e.preventDefault();
@@ -167,6 +201,15 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
       <p className="rounded-xl bg-primary/[0.06] px-4 py-3 text-[15px]">
         <b className="font-semibold">Diga ao cliente:</b> o técnico vai a casa ver consigo as alterações que quer fazer, tira medidas e leva os materiais para escolher; depois faz-se o orçamento. A visita não tem custo: é só informativa.
       </p>
+      {!visita && dataInicial && combinadaNaChamada(dataInicial, horaInicial, hoje).data && (
+        <p role="status" className="rounded-xl border border-primary/30 bg-primary/[0.04] px-4 py-3 text-[15px]">
+          <b className="font-semibold">Combinado na chamada:</b> {diaPorExtenso(dataInicial)}{combinadaNaChamada(dataInicial, horaInicial, hoje).hora ? ` às ${combinadaNaChamada(dataInicial, horaInicial, hoje).hora}` : ""}.{" "}
+          {marcarSozinha && sozinha === null ? "A procurar o comercial livre mais perto a essa hora…"
+            : sozinha ? sozinha.texto
+            : "Em baixo, os comerciais livres nesse dia; escolha quem vai."}
+          {envio.aGuardar && marcarSozinha ? " A marcar…" : ""}
+        </p>
+      )}
       <div className="space-y-2">
         <p id={rotuloTipo} className="text-sm font-semibold text-foreground">Tipo de visita</p>
         <div role="group" aria-labelledby={rotuloTipo} className="flex flex-wrap gap-2">
@@ -197,6 +240,8 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
           <QuemPodeIrVisita
             a={p} recursos={recursos} duracaoMin={minutos} horario={horario.horario} feriados={horario.feriados}
             horarioPronto={!horario.isLoading && !horario.isError} excluirId={visita?.id ?? null}
+            escolherSozinho={marcarSozinha && !visita && !jaEnviouSozinha.current}
+            aoEscolherSozinho={(r) => (r.quem ? setSozinha({ quem: r.quem, texto: `Vai ${r.quem}, o comercial livre mais perto a essa hora.` }) : desistir(r.motivo))}
             hora={(filtrar) => (
               <HorasLivresVisita
                 id={p.id} hora={p.hora} horas={filtrar(horas.horas)} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}

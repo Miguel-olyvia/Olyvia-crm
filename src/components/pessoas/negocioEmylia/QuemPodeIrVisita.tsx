@@ -46,6 +46,14 @@ export function usePapeisDosRecursos(): Map<string, string[]> | null {
   return q.data ?? null;
 }
 
+/** 5/11: os papéis do RH ainda não chegaram (a marcação sozinha espera por eles). */
+function usePapeisALer(): boolean {
+  const fonte = useFontePessoas();
+  const org = fonte.modo === "real" ? fonte.organizationId : null;
+  const q = useQuery({ queryKey: ["neg-papeis-recursos", org], enabled: false });
+  return org !== null && q.data === undefined && !q.isError;
+}
+
 /** Os comerciais e os técnicos entre os recursos (os escolhidos ficam sempre à vista). Sem papéis conhecidos, todos são «quem vai». */
 export function agruparQuemVai(recursos: readonly RecursoVisita[], papeis: ReadonlyMap<string, readonly string[]> | null, escolhidos: readonly string[]) {
   if (!papeis) return { conhecido: false, principais: [...recursos], tecnicos: [] as RecursoVisita[] };
@@ -74,6 +82,9 @@ interface Props {
    * consegue chegar (a deslocação); como nó, mostra-se tal e qual.
    */
   hora: ReactNode | ((filtrarHoras: (horas: readonly string[]) => string[]) => ReactNode);
+  /** 5/11: escolher sozinho, para a hora já escolhida, o comercial livre mais perto (uma vez por dia e hora). */
+  escolherSozinho?: boolean;
+  aoEscolherSozinho?: (r: { quem: string | null; motivo: string }) => void;
 }
 
 /** O estado da verificação da viagem de um recurso: a ler, sem morada da obra localizada, ou o que se sabe da base dele. */
@@ -88,8 +99,9 @@ const TEXTO_ESTADO: Record<ComTexto, { curto: string; frase: string }> = {
 const nomeDe = (r: RecursoVisita): string => r.name?.trim() || "(sem nome)";
 const SEM_CP7 ="Falta a morada completa (código postal de 7 dígitos) para ver quem consegue chegar.";
 
-export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, horarioPronto, excluirId, hora }: Props) {
+export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, horarioPronto, excluirId, hora, escolherSozinho = false, aoEscolherSozinho }: Props) {
   const papeis = usePapeisDosRecursos();
+  const papeisALer = usePapeisALer();
   const dia = a.data;
   const g = agruparQuemVai(recursos, papeis, a.escolhidos);
   const base = { duracaoMin, horario, feriados, horarioPronto, excluirId };
@@ -127,10 +139,32 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
   // um só comercial livre nesse dia, e ninguém escolhido: fica escolhido (uma vez por data)
   const autoEm = useRef("");
   useEffect(() => {
-    if (!dia || autoEm.current === dia || a.escolhidos.length > 0 || a.somenteLeitura || aVerificar || comerciaisLivres.length !== 1) return;
+    if (escolherSozinho || !dia || autoEm.current === dia || a.escolhidos.length > 0 || a.somenteLeitura || aVerificar || comerciaisLivres.length !== 1) return;
     autoEm.current = dia;
-    a.aoMudarRecursos([comerciaisLivres[0].id]);
-  }, [dia, a, comerciaisLivres, aVerificar]);
+    // mudar quem vai apaga a hora; a hora que já estava (a combinada na chamada) volta se esse comercial a tiver livre
+    const h = a.hora, unico = comerciaisLivres[0];
+    a.aoMudarRecursos([unico.id]);
+    if (h && (podeNoDia(unico) ?? []).includes(h)) a.aoMudar({ hora: h });
+  });
+  // 5/11 (marcar sozinha): com tudo lido, o comercial livre a essa hora que parte de mais perto
+  const sozinhoEm = useRef("");
+  useEffect(() => {
+    if (!escolherSozinho || !dia || !a.hora || sozinhoEm.current === dia + a.hora || a.escolhidos.length > 0 || a.somenteLeitura) return;
+    if (papeisALer || !tudoLido) return;
+    sozinhoEm.current = dia + a.hora;
+    if (!g.conhecido) { aoEscolherSozinho?.({ quem: null, motivo: "Não se sabe quem é comercial (os papéis do RH não chegaram): escolha quem vai." }); return; }
+    const h = a.hora;
+    const quem = ordenados.find((r) => comerciais.includes(r) && (podeNoDia(r) ?? []).includes(h));
+    if (!quem) {
+      aoEscolherSozinho?.({ quem: null, motivo: comerciaisLivres.length
+        ? `Nenhum comercial está livre às ${h}: escolha outra hora ou quem vai.`
+        : "Nenhum comercial está livre nesse dia: veja os outros dias sugeridos em baixo." });
+      return;
+    }
+    a.aoMudarRecursos([quem.id]);
+    a.aoMudar({ hora: h });
+    aoEscolherSozinho?.({ quem: nomeDe(quem), motivo: "" });
+  });
 
   /** Em que ponto está a verificação da viagem deste recurso: nunca fica por dizer (o ecrã escreve sempre o estado). */
   const estadoDe = (r: RecursoVisita): EstadoDoRecurso => {
