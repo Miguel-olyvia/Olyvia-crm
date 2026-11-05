@@ -5,7 +5,14 @@
 //  2. tocar no número de uma parede deixa escrever a medida certa;
 //  3. as peças (base, sanita, banheira…) arrastam-se da barra para a planta, e dentro dela para o sítio.
 // Os m² do chão e das paredes vão para as medidas com um toque. A planta grava-se no negócio (f.planta, JSON). A geometria está em planta.ts.
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
+import { Box } from "lucide-react";
+import { useCatalogo } from "./v2/catalogoStore";
+import { BarraProdutos } from "./planta3d/BarraProdutos";
+import { Planta3DPainel } from "./planta3d/Planta3DPainel";
+import { produtosParaEspaco, type ProdutoModelo3D } from "./planta3d/catalogo3d";
+import { pecaDeProduto } from "./planta3d/ligacao";
+import { useProto3d } from "./planta3d/usarProto3d";
 import { Check, RotateCw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,7 +46,13 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   const [sel, setSel] = useState<string | null>(null);
   const [paredeSel, setParedeSel] = useState<number | null>(null);
   const [traco, setTraco] = useState<{ de: Ponto; ate: Ponto } | null>(null);
-  const [nova, setNova] = useState<{ tipo: TipoPeca; x: number; y: number } | null>(null);
+  const [nova, setNova] = useState<{ tipo: TipoPeca; x: number; y: number; produto?: ProdutoModelo3D } | null>(null);
+  // protótipo do visualizador 3D: as peças vêm dos produtos do catálogo; o 3D abre por baixo da planta
+  const K = useCatalogo();
+  const proto = useProto3d(d.id, divisao);
+  const produtosCat = useMemo(() => produtosParaEspaco(K.produtos, K.arvore, proto.pref.tipo, { max: 400 }), [K, proto.pref.tipo]);
+  const [ver3d, setVer3d] = useState(false);
+  const [genericas, setGenericas] = useState(false);
   const [feito, setFeito] = useState("");
   const svg = useRef<SVGSVGElement>(null);
   const arrasto = useRef<{ id: string; dx: number; dy: number } | null>(null);
@@ -124,17 +137,19 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
 
   // ---- as peças novas: arrastar da barra para a planta (ou tocar, e fica ao meio) ----
   const juntarAoMeio = (t: TipoPeca) => { const nid = `pc${++contador.current}`; gravar(juntarPeca(p, t, nid)); setSel(nid); };
-  const pegarNova = (e: RPointerEvent<HTMLButtonElement>, tipo: TipoPeca) => {
+  const pegarNova = (e: RPointerEvent<HTMLButtonElement>, tipo: TipoPeca, produto?: ProdutoModelo3D) => {
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    setNova({ tipo, x: e.clientX, y: e.clientY });
+    setNova({ tipo, x: e.clientX, y: e.clientY, produto });
   };
+  const juntarProdutoAoMeio = (m: ProdutoModelo3D) => { const nid = `pc${++contador.current}`; gravar({ ...p, pecas: [...p.pecas, pecaDeProduto(p, m, nid)] }); setSel(nid); };
   const moverNova = (e: RPointerEvent<HTMLButtonElement>) => { if (nova) setNova({ ...nova, x: e.clientX, y: e.clientY }); };
   const largarNova = (e: RPointerEvent<HTMLButtonElement>) => {
     if (!nova) return;
     const r = svg.current?.getBoundingClientRect();
     const dentro = !!r && r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     const nid = `pc${++contador.current}`;
-    gravar(juntarPeca(p, nova.tipo, nid, dentro ? naPlanta(e.clientX, e.clientY) ?? undefined : undefined));
+    const centro = dentro ? naPlanta(e.clientX, e.clientY) ?? undefined : undefined;
+    gravar(nova.produto ? { ...p, pecas: [...p.pecas, pecaDeProduto(p, nova.produto, nid, centro)] } : juntarPeca(p, nova.tipo, nid, centro));
     setSel(nid); setNova(null);
   };
 
@@ -231,7 +246,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
       {/* a peça a ser arrastada da barra, debaixo do dedo */}
       {nova && (
         <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border-2 border-primary bg-primary/15 px-3 py-2 text-sm font-medium shadow-lg"
-          style={{ left: nova.x, top: nova.y }}>{PECAS[nova.tipo].n}</div>
+          style={{ left: nova.x, top: nova.y }}>{nova.produto?.nome ?? PECAS[nova.tipo].n}</div>
       )}
 
       <p role="status" className={cn("text-[15px]", !p.paredes.length ? "text-muted-foreground" : fechada ? "text-success" : "text-foreground")}>
@@ -253,9 +268,16 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
 
       {/* as peças: arrastar para a planta, ou tocar */}
       <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">Arraste para a planta (ou toque, e fica ao meio):</p>
+        <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo}
+          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} />
+        <p className="text-sm text-muted-foreground">Portas e janelas (arraste para a planta, ou toque, e fica ao meio):</p>
+        {produtosCat.length > 0 && (
+          <button type="button" className="min-h-11 text-sm underline underline-offset-2" aria-expanded={genericas} onClick={() => setGenericas(!genericas)}>
+            {genericas ? "Esconder" : "Mostrar"} as peças genéricas (sem produto do catálogo)
+          </button>
+        )}
         <div className="flex flex-wrap gap-2">
-          {(Object.keys(PECAS) as TipoPeca[]).map((t) => (
+          {(Object.keys(PECAS) as TipoPeca[]).filter((t) => PECAS[t].abertura || genericas || produtosCat.length === 0).map((t) => (
             <button key={t} type="button" className={CHIP} onPointerDown={(e) => pegarNova(e, t)} onPointerMove={moverNova} onPointerUp={largarNova}
               onPointerCancel={() => setNova(null)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); juntarAoMeio(t); } }}>
               {PECAS[t].n}
@@ -325,6 +347,17 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
         </Button>
       </div>
       <p role="status" className="min-h-5 text-sm text-success">{feito}</p>
+
+      {/* protótipo: ver o que está desenhado em 3D */}
+      <div className="space-y-3">
+        <Button type="button" variant="outline" className="min-h-11" aria-expanded={ver3d} onClick={() => setVer3d(!ver3d)}>
+          <Box className="mr-1.5 h-4 w-4" aria-hidden="true" />{ver3d ? "Fechar o 3D" : "Ver em 3D"}
+        </Button>
+        {ver3d && (
+          <Planta3DPainel planta={p} tipo={proto.pref.tipo} nome={divisao ?? "Espaço"} peDireito={pe} produtos={K.produtos} arvore={K.arvore}
+            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} />
+        )}
+      </div>
     </div>
   );
 }

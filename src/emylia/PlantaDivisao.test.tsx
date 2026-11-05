@@ -68,6 +68,9 @@ describe("PlantaDivisao", () => {
 
   it("uma peça junta-se pela barra, mexe-se com as setas e tira-se", () => {
     const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
+    // as peças genéricas ficam atrás de um botão quando o catálogo tem produtos para o espaço
+    const genericas = screen.queryByRole("button", { name: /peças genéricas/ });
+    if (genericas) fireEvent.click(genericas);
     fireEvent.keyDown(screen.getByRole("button", { name: "Sanita" }), { key: "Enter" });
     const peca = screen.getByRole("button", { name: /^Sanita, 36 por 55 cm/ });
     const x0 = lerPlanta(d.f.planta)!.pecas[0].x;

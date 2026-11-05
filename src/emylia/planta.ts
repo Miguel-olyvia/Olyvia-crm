@@ -8,7 +8,7 @@ export type Rumo = "E" | "S" | "W" | "N";
 export interface Parede { c: number; r: Rumo }
 export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "coluna" | "porta" | "janela";
 /** Uma peça na planta: o canto de cima à esquerda e o tamanho, em cm. */
-export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; w: number; h: number }
+export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; w: number; h: number; /** Protótipo 3D: o id do produto do catálogo que esta peça é (planta3d/). Sem ele, é uma peça genérica. */ produto?: string }
 export interface Ponto { x: number; y: number }
 /** `o`: onde começa a primeira parede (o primeiro toque no desenho). */
 export interface Planta { o: Ponto; paredes: Parede[]; pecas: PecaPlanta[] }

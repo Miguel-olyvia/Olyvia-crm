@@ -152,6 +152,7 @@ const BookingConfirm = lazy(() => import("./pages/BookingConfirm"));
 const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/PrototipoNegocios"));
 // 4/11: a chamada em direto sem conta (o painel do «Tudo na chamada» com um negócio de exemplo)
 const PrototipoChamada = lazy(() => import("./pages/prototipo-negocios/PrototipoChamada"));
+const PrototipoPlanta3D = lazy(() => import("./pages/PrototipoPlanta3D"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
 const ClientPortalNegocios = lazy(() => import("./pages/ClientPortalNegocios"));
@@ -230,6 +231,7 @@ const App = () => (
                   {/* Protótipo de Negócios (08/10/2026): dados de exemplo, sem sessão nem base de dados */}
                   <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
                   <Route path="/prototipo/chamada" element={<PrototipoChamada />} />
+                  <Route path="/prototipo/planta-3d" element={<PrototipoPlanta3D />} />
                   {/* Portal do colaborador de exemplo (página pública, sem sessão: acesso temporário pelo link) */}
                   <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
                   {/* O endereço antigo do link de admissão redireciona para o portal */}
