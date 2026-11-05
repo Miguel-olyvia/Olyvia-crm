@@ -42,6 +42,13 @@ Regras:
 - A transcrição do lado do cliente vem do altifalante do telemóvel e tem frases sem sentido. Ignora-as.
 - Para campos de escolha, usa exatamente uma das opções (o texto da opção). Para sim/não, "Sim" ou "Não".
 - Para números, só o número. Para listas (varios), as opções ditas separadas por vírgulas. Para datas, AAAA-MM-DD.
+- Numa lista de serviços do Catálogo (varios com muitas opções), inclui TODAS as opções que correspondem a algo que o
+  cliente disse que quer fazer, trocar, pôr ou instalar, mesmo que o diga com outras palavras ("trocar a sanita, o
+  pavimento e o espelho" dá a opção da sanita, a do pavimento e a do espelho; "banheira" dá a opção da banheira ou
+  da base de duche se for isso que existe). Se o cliente disse que quer trocar tudo ou uma remodelação geral de uma
+  divisão, inclui todas as opções típicas dessa divisão (demolição e entulho, canalização, pavimento, revestimentos,
+  sanita, duche ou banheira, mobiliário, espelho, toalheiro, elétrica, pintura), com confiança 0.5. Usa exatamente o
+  texto de cada opção.
 - Nos campos de texto longo escreve TUDO o que foi dito sobre esse tema, com detalhe e frases completas, nas
   palavras do cliente: o que quer, dúvidas e indecisões, o que já fez ou tem, referências e exemplos que pediu,
   restrições. Nunca resumas a uma linha; um campo de texto longo pode ter várias frases.

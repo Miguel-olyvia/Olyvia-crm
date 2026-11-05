@@ -35,7 +35,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
     { titulo: "Serviço", campos: [
       { k: "tipo_servico", l: "Tipo de serviço", t: "escolha" as const, op: Object.values(LINHAS).map((l) => l.n) },
       { k: "servicos_catalogo", l: "Serviços do Catálogo", t: "varios" as const, op: Object.values(svc).map((x) => x.n),
-        ajuda: "Os serviços que o cliente pediu, de entre os do Catálogo." },
+        ajuda: "Tudo o que o cliente disse que quer fazer, trocar ou instalar, de entre os do Catálogo (sanita, pavimento, espelho, banheira…). Se disse «tudo», os típicos da divisão." },
     ] },
     GRUPO_VISITA,
   ], [gruposDoNegocio, d.dadosLead, svc]);
