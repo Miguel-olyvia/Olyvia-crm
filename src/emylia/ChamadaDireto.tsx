@@ -369,6 +369,8 @@ type Escolha = { incluir: boolean; valor: string };
 function LinhaProposta({ p, def, escolha, bloqueada, onMudar }: { p: Proposta; def?: Def; escolha: Escolha; bloqueada: boolean; onMudar: (m: Partial<Escolha>) => void }) {
   const rever = p.estado === "rever";
   const id = `prop-${p.k}`;
+  // 5/11 (a folha): «Cor» aparece na base, na coluna, no resguardo… o bloco diz de que peça é
+  const rotulo = def?.bloco ? `${def.bloco} · ${p.l}` : p.l;
   return (
     <li className={cn("rounded-xl border border-border bg-background px-3 py-2.5 transition-colors", escolha.incluir ? "border-primary/40" : "opacity-70")}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -378,8 +380,8 @@ function LinhaProposta({ p, def, escolha, bloqueada, onMudar }: { p: Proposta; d
             escolha.incluir ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent hover:border-primary/60")}>
           <Check className="h-4 w-4" aria-hidden="true" />
         </button>
-        <label id={`${id}-rotulo`} htmlFor={id} className="w-44 shrink-0 text-sm text-muted-foreground">{p.l}</label>
-        <div className="min-w-[200px] flex-1"><Editor id={id} def={def} valor={escolha.valor} rotulo={p.l} bloqueado={bloqueada} onMudar={(v) => onMudar({ valor: v })} /></div>
+        <label id={`${id}-rotulo`} htmlFor={id} className="w-44 shrink-0 text-sm text-muted-foreground">{rotulo}</label>
+        <div className="min-w-[200px] flex-1"><Editor id={id} def={def} valor={escolha.valor} rotulo={rotulo} bloqueado={bloqueada} onMudar={(v) => onMudar({ valor: v })} /></div>
         <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", rever ? "bg-warning/15 text-warning-foreground" : "bg-success/15 text-success")}>{rever ? "a rever" : "ouvido"} · {Math.round(p.confianca * 100)}%</span>
         {p.jaTinha && p.jaTinha !== p.valor ? <span className="text-xs text-muted-foreground">já tinha «{p.jaTinha}»</span> : null}
       </div>

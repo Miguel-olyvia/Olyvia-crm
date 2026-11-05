@@ -58,10 +58,10 @@ const descrever = (c: z.infer<typeof campoDef>) => {
   return `- ${c.k}: ${c.bloco ? c.bloco + " · " : ""}${c.l} [${c.t}]${extra}${c.ajuda ? " — " + c.ajuda : ""}`;
 };
 
-interface CampoBruto { valor: string | null; confianca: number; excerto: string }
+interface CampoBruto { chave?: string; valor: string | null; confianca: number; excerto: string }
 interface PecaBruta { tipo: string; x?: number; y?: number; w?: number; h?: number }
 interface Resposta {
-  campos: Record<string, CampoBruto>;
+  campos: CampoBruto[];
   resumo: string;
   planta: { paredes: { c: number; vira: string }[]; pecas: PecaBruta[]; confianca: number };
 }
@@ -93,12 +93,14 @@ serve(async (req) => {
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT.bucket, caller.anewUserId);
 
     const chaves = campos.map((c) => c.k);
-    const campoEsq = { type: "OBJECT", properties: { valor: { type: "STRING", nullable: true }, confianca: { type: "NUMBER" }, excerto: { type: "STRING" } },
-      required: ["valor", "confianca", "excerto"] };
+    // 5/11: uma lista (chave, valor, confiança, excerto) em vez de um objeto com uma propriedade por campo: com os ~100 campos da visita, o
+    // esquema por propriedades dava «Gemini 400: Request contains an invalid argument»
+    const campoEsq = { type: "OBJECT", properties: { chave: { type: "STRING" }, valor: { type: "STRING", nullable: true }, confianca: { type: "NUMBER" }, excerto: { type: "STRING" } },
+      required: ["chave", "valor", "confianca", "excerto"] };
     const esquema = {
       type: "OBJECT",
       properties: {
-        campos: { type: "OBJECT", properties: Object.fromEntries(chaves.map((k) => [k, campoEsq])), required: chaves },
+        campos: { type: "ARRAY", items: campoEsq },
         resumo: { type: "STRING" },
         planta: { type: "OBJECT", properties: {
           paredes: { type: "ARRAY", items: { type: "OBJECT", properties: { c: { type: "NUMBER" }, vira: { type: "STRING", enum: ["dir", "esq"] } }, required: ["c", "vira"] } },
@@ -109,7 +111,7 @@ serve(async (req) => {
       required: ["campos", "resumo", "planta"],
     };
     const texto = (divisao ? `A divisão da visita é: ${divisao}.\n\n` : "") + "# Campos a preencher\n" + campos.map(descrever).join("\n") +
-      "\n\nLê a folha da fotografia e preenche o JSON com 'campos' (um objeto por chave, com valor, confianca e excerto), 'planta' e 'resumo'.";
+      "\n\nLê a folha da fotografia e preenche o JSON com 'campos' (uma lista: um objeto por campo que está escrito na folha, com chave, valor, confianca e excerto; os que não estão ficam de fora), 'planta' e 'resumo'.";
 
     let r: Resposta;
     try {
@@ -118,8 +120,10 @@ serve(async (req) => {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;
     }
+    const pedidas = new Set(chaves);
+    const porChave = new Map((Array.isArray(r.campos) ? r.campos : []).filter((x) => x && pedidas.has(String(x.chave))).map((x) => [String(x.chave), x] as const));
     const saida = campos.map((c) => {
-      const b = r.campos?.[c.k] ?? { valor: null, confianca: 0, excerto: "" };
+      const b = porChave.get(c.k) ?? { valor: null, confianca: 0, excerto: "" };
       const conf = Number(b.confianca ?? 0);
       const vazio = b.valor === null || b.valor === undefined || String(b.valor).trim() === "" || ["null", "none"].includes(String(b.valor).toLowerCase());
       const estado = vazio || conf < 0.25 ? "em_falta" : conf >= 0.75 ? "preenchido" : "rever";
