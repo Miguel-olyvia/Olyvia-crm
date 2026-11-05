@@ -45,6 +45,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import { SeccaoPeriodoFolha } from "@/components/hr/processamento/SeccaoPeriodoFolha";
+import { SeccaoRegrasSalariais } from "@/components/hr/processamento/SeccaoRegrasSalariais";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -636,6 +637,9 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
                   : "hr.vencimento.subsidio.minutosMinimosAjuda",
               )}
             </p>
+            <p className="text-sm text-muted-foreground" data-testid="subsidio-nota-regra-organizacao">
+              {t("hr.vencimento.subsidio.notaRegraOrganizacao")}
+            </p>
 
             {podeGerir && (
               <div className="flex justify-end">
@@ -661,6 +665,8 @@ export default function ConfiguracaoVencimento() {
   const podeGerirCodigos = hasPermission("hr.vencimento.codigos.gerir");
   const podeVerSubsidio = hasPermission("hr.vencimento.subsidio.view");
   const podeGerirSubsidio = hasPermission("hr.vencimento.subsidio.gerir");
+  // As regras salariais leem-se com qualquer uma das duas permissoes e gravam-se com a dos codigos (a mesma da base).
+  const podeVerRegras = podeVerCodigos || podeVerSubsidio;
   const podeVerPeriodo = hasPermission("hr.processamento.periodo.view");
   const podeGerirPeriodo = hasPermission("hr.processamento.periodo.gerir");
 
@@ -685,6 +691,9 @@ export default function ConfiguracaoVencimento() {
           {podeVerSubsidio && (
             <TabsTrigger value="subsidio">{t("hr.vencimento.abaSubsidio")}</TabsTrigger>
           )}
+          {podeVerRegras && (
+            <TabsTrigger value="regras">{t("hr.vencimento.abaRegrasSalariais")}</TabsTrigger>
+          )}
           {podeVerPeriodo && (
             <TabsTrigger value="periodo">{t("hr.vencimento.abaPeriodoFolha")}</TabsTrigger>
           )}
@@ -698,6 +707,11 @@ export default function ConfiguracaoVencimento() {
         {podeVerSubsidio && (
           <TabsContent value="subsidio" className="mt-4">
             <SeccaoSubsidioAlimentacao podeGerir={podeGerirSubsidio} />
+          </TabsContent>
+        )}
+        {podeVerRegras && (
+          <TabsContent value="regras" className="mt-4">
+            <SeccaoRegrasSalariais podeGerir={podeGerirCodigos} />
           </TabsContent>
         )}
         {podeVerPeriodo && (

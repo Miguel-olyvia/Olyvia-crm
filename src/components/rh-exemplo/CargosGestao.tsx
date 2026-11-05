@@ -732,6 +732,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="mensal">{t("hr.periodicidade.mensal")}</SelectItem>
+                      <SelectItem value="semanal">{t("hr.periodicidade.semanal")}</SelectItem>
                       <SelectItem value="anual">{t("hr.periodicidade.anual")}</SelectItem>
                       <SelectItem value="hora">{t("hr.periodicidade.hora")}</SelectItem>
                     </SelectContent>

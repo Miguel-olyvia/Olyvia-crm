@@ -111,6 +111,7 @@ import { useFimDoContratoPorMeses } from "@/components/rh-exemplo/hooks/useFimDo
 import { problemasDosNumerosDoContrato } from "@/components/rh-exemplo/lib/contrato";
 import { PessoaVinculoHorasCard } from "@/components/rh-exemplo/PessoaVinculoHorasCard";
 import { PessoaRetribuicaoCard } from "@/components/rh-exemplo/PessoaRetribuicaoCard";
+import { CartaoDireitosSalariais } from "@/components/rh-exemplo/hooks/regrasSalariaisReal";
 import type { PessoaRetribuicao, PessoaVinculo, TipoTrabalho } from "@/components/rh-exemplo/tipos";
 import type { HrCargo } from "@/components/rh-exemplo/hooks/useCargos";
 import type { HrCargoPeriodo } from "@/components/rh-exemplo/lib/cargosPeriodos";
@@ -423,6 +424,10 @@ export function PessoaContratoTab({
           periodosError={periodosError}
           onMudou={onRetribuicaoMudou}
         />
+      )}
+
+      {podeVerRetribuicao && (
+        <CartaoDireitosSalariais pessoaId={pessoaId} organizationId={organizationId} podeAlterar={podeEditarRetribuicao} />
       )}
 
       <PessoaVinculoHorasCard
