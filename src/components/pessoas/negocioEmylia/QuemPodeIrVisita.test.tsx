@@ -24,16 +24,17 @@ function base(livres: Record<string, Record<string, string[]>>, papeis: unknown 
     return { data: (livres[a.p_date ?? ""]?.[a.p_resource_id ?? ""] ?? []).map((h) => slot(a.p_date as string, h)), error: null };
   });
 }
-function desenhar(data: string, escolhidos: string[] = []) {
+function desenhar(data: string, escolhidos: string[] = [], sozinho?: { hora?: string; periodo?: "manha" | "tarde" | null; aoEscolher: (r: { quem: string | null; motivo: string }) => void }) {
   const aoMudar = vi.fn(), aoMudarRecursos = vi.fn();
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <FontePessoasContext.Provider value={{ modo: "real", organizationId: "org", momentoGanho: null } as never}>
         <QuemPodeIrVisita
-          a={{ id: "v", data, hora: "", hoje: "2030-03-01", campoData: undefined, erroData: null, erroHora: null, somenteLeitura: false, aoMudar,
+          a={{ id: "v", data, hora: sozinho?.hora ?? "", hoje: "2030-03-01", campoData: undefined, erroData: null, erroHora: null, somenteLeitura: false, aoMudar,
             escolhidos, aoMudarRecursos, ocupados: [], erroRecursos: null, grupoRef: undefined }}
           recursos={[ANA, RUI, TO]} duracaoMin={60} horario={HORARIO_POR_OMISSAO} feriados={SEM_FERIADOS} horarioPronto excluirId={null}
           hora={<p>As horas</p>}
+          {...(sozinho ? { escolherSozinho: true, aoEscolherSozinho: sozinho.aoEscolher, periodoPreferido: sozinho.periodo ?? null } : {})}
         />
       </FontePessoasContext.Provider>
     </QueryClientProvider>,
@@ -105,5 +106,34 @@ describe("QuemPodeIrVisita", () => {
     desenhar(DIA, ["ana"]);
     expect(await screen.findByText("Quem vai à visita")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /Tó/ })).toBeInTheDocument();
+  });
+
+  // 5/11 (Rúben: «deve marcar logo a visita, tudo automático»): a visita combinada na chamada escolhe quem vai sozinha
+  describe("escolher sozinho (a visita combinada na chamada)", () => {
+    it("com hora certa: o comercial livre a essa hora, e a hora fica", async () => {
+      base({ [DIA]: { ana: ["09:00"], rui: ["11:00"] } });
+      const aoEscolher = vi.fn();
+      const { aoMudar, aoMudarRecursos } = desenhar(DIA, [], { hora: "11:00", aoEscolher });
+      await waitFor(() => expect(aoMudarRecursos).toHaveBeenCalledWith(["rui"]));
+      expect(aoMudar).toHaveBeenCalledWith({ hora: "11:00" });
+      expect(aoEscolher).toHaveBeenCalledWith({ quem: "Rui", motivo: "" });
+    });
+
+    it("«de manhã» sem hora: a primeira hora livre entre as 08:00 e as 13:00, nunca a meia-noite", async () => {
+      base({ [DIA]: { ana: ["00:00", "07:00", "09:30", "14:00"], rui: [] } });
+      const aoEscolher = vi.fn();
+      const { aoMudar, aoMudarRecursos } = desenhar(DIA, [], { periodo: "manha", aoEscolher });
+      await waitFor(() => expect(aoMudarRecursos).toHaveBeenCalledWith(["ana"]));
+      expect(aoMudar).toHaveBeenCalledWith({ hora: "09:30" });
+      expect(aoEscolher.mock.calls[0][0].motivo).toMatch(/Vai Ana às 09:30: a primeira hora livre da manhã/);
+    });
+
+    it("ninguém livre à hora combinada: não escolhe e diz porquê", async () => {
+      base({ [DIA]: { ana: ["09:00"], rui: ["10:00"] } });
+      const aoEscolher = vi.fn();
+      const { aoMudarRecursos } = desenhar(DIA, [], { hora: "16:00", aoEscolher });
+      await waitFor(() => expect(aoEscolher).toHaveBeenCalledWith({ quem: null, motivo: "Nenhum comercial está livre às 16:00: escolha outra hora ou quem vai." }));
+      expect(aoMudarRecursos).not.toHaveBeenCalled();
+    });
   });
 });
