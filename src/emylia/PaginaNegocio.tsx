@@ -2,7 +2,7 @@
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -10,7 +10,8 @@ import {
   alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
+import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
+import { PlantaDivisao } from "./PlantaDivisao";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
@@ -347,6 +348,16 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 28/10: uma linha sem medidas (a "geral": as quantidades escrevem-se em cada serviço) não mostra um passo vazio
       ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
         <div className="space-y-2">
+          {/* 5/11 (Rúben, a visita real): a planta da folha, no ecrã; dá os m² do chão e das paredes */}
+          {simples && (CM.some(([k]) => k === "pav") || CM.some(([k]) => k === "par")) && (
+            <details className="group mb-6 rounded-2xl border border-border bg-card p-4" open={!!d.f.planta || undefined}>
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-[15px] font-semibold">
+                Desenhar a planta{divisaoPrincipal(d.f) ? ` da ${divisaoPrincipal(d.f)!.toLowerCase()}` : ""}
+                <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="pt-4"><PlantaDivisao ctx={ctx} d={d} divisao={divisaoPrincipal(d.f) ?? undefined} /></div>
+            </details>
+          )}
           <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>Todas obrigatórias. Água quente pode ser 0.</p>
           <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-5"}>
             {CM.map(([k, l]) => {
@@ -373,6 +384,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
         resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
       ...(simples ? [] : [g(ESCOLHAS, Sparkles)]),
+      // 5/11 (Rúben, a visita real): a folha da visita, peça a peça (só com casa de banho), e o prazo e a decisão do cliente
+      ...(d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho") ? [g(PECAS_WC, Bath)] : []),
+      g(DECISAO, CalendarCheck),
     ];
   } else if (fase === 3 && o) {
     passos = [

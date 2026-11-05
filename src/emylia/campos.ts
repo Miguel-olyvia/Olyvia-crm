@@ -397,6 +397,97 @@ export function chaveLivre(rotulo: string, usadas: string[]): string {
 // e os de exemplo ficam iguais. As outras usam o prefixo div_{divisão}_ (ex.: div_coz_diag_gas).
 // As regras que leem estes campos (efeitos no orçamento, proteções, pontos elétricos) juntam as divisões:
 // somam as contagens e ficam com o pior caso nas escolhas (juntarDivisoes).
+// 5/11 (Rúben, a visita real a uma casa de banho): «reconstruir tudo o que está em papel». A folha da Mudelar tem uma caixa por peça
+// (base, coluna, resguardo, revestimento, pavimento, torneiras, móvel, espelho, sanita, bidé), as opções e os extras. Aqui são botões,
+// um bloco por peça. Tudo opcional: a comercial toca só no que se escolheu (na folha, os «atributos» ficavam por preencher porque demoravam).
+const op = (...o: string[]) => o;
+const peca = (bloco: string, campos: Omit<Def, "bloco" | "opcional">[]): Def[] => campos.map((c) => ({ ...c, bloco, opcional: true }));
+const CORES_METAL = op("Cromado", "Preto", "Dourado", "Inox escovado");
+const ACABAMENTO = op("Mate", "Brilho");
+const FORMATO = op("120 x 60", "60 x 60", "30 x 60", "Outro");
+export const PECAS_WC: Grupo = {
+  titulo: "Peças da casa de banho",
+  nota: "A folha da visita, peça a peça. Toque só no que o cliente escolheu.",
+  campos: [
+    ...peca("Base de duche", [
+      { k: "pc_base_medida", l: "Medida", t: "texto", ph: "120 x 70" },
+      { k: "pc_base_cor", l: "Cor", t: "escolha", op: op("Branco", "Cinza", "Bege", "Preto", "Outra"), detalhe: ["Outra"] },
+      { k: "pc_base_textura", l: "Textura", t: "escolha", op: op("Lisa", "Rugosa") },
+      { k: "pc_base_grelha", l: "Grelha", t: "escolha", op: op("Da cor da base", "Inox", "Preta") },
+    ]),
+    ...peca("Coluna de duche", [
+      { k: "pc_coluna_tipo", l: "Tipo", t: "escolha", op: op("Termostática", "Misturadora") },
+      { k: "pc_coluna_forma", l: "Forma", t: "escolha", op: op("Circular", "Quadrada") },
+      { k: "pc_coluna_cor", l: "Cor", t: "escolha", op: CORES_METAL },
+    ]),
+    ...peca("Resguardo", [
+      { k: "pc_resg_abertura", l: "Abertura", t: "escolha", op: op("Fixo", "Fixo e deslizante", "Dois fixos, entrada no meio", "Porta de abrir") },
+      { k: "pc_resg_vidro", l: "Vidro", t: "escolha", op: op("Transparente", "Fosco", "Serigrafado") },
+      { k: "pc_resg_perfil", l: "Perfil", t: "escolha", op: CORES_METAL },
+      { k: "pc_resg_medida", l: "Medida", t: "texto", ph: "120 x 200" },
+    ]),
+    ...peca("Revestimento", [
+      { k: "pc_rev_modelo", l: "Modelo", t: "texto", ph: "Cinza 120 x 60 retificado" },
+      { k: "pc_rev_acabamento", l: "Acabamento", t: "escolha", op: ACABAMENTO },
+      { k: "pc_rev_formato", l: "Formato", t: "escolha", op: FORMATO, detalhe: ["Outro"] },
+      { k: "pc_rev_ate_teto", l: "Até ao teto", t: "sim_nao" },
+      { k: "pc_rev_duche_diferente", l: "No duche, outro revestimento", t: "sim_nao", ajuda: "Ex.: um tom madeira só na zona do duche." },
+      { k: "pc_rev_duche_modelo", l: "Revestimento do duche", t: "texto", ph: "Imitação madeira", se: { k: "pc_rev_duche_diferente", v: ["Sim"] } },
+    ]),
+    ...peca("Pavimento", [
+      { k: "pc_pav_igual", l: "O mesmo das paredes", t: "sim_nao" },
+      { k: "pc_pav_modelo", l: "Modelo", t: "texto", se: { k: "pc_pav_igual", v: ["Não", ""] } },
+      { k: "pc_pav_acabamento", l: "Acabamento", t: "escolha", op: ACABAMENTO, se: { k: "pc_pav_igual", v: ["Não", ""] } },
+      { k: "pc_pav_formato", l: "Formato", t: "escolha", op: FORMATO, detalhe: ["Outro"], se: { k: "pc_pav_igual", v: ["Não", ""] } },
+    ]),
+    ...peca("Torneiras", [
+      { k: "pc_torn_lavatorio", l: "Do lavatório", t: "escolha", op: op("Monocomando", "De pé alto", "De parede") },
+      { k: "pc_torn_cor", l: "Cor", t: "escolha", op: CORES_METAL },
+    ]),
+    ...peca("Móvel", [
+      { k: "pc_movel_montagem", l: "Montagem", t: "escolha", op: op("Suspenso", "Ao chão") },
+      { k: "pc_movel_abertura", l: "Abertura", t: "escolha", op: op("Gavetas", "Portas", "Porta e gavetas") },
+      { k: "pc_movel_largura", l: "Largura", t: "numero", un: "cm" },
+      { k: "pc_movel_frentes", l: "Cor das frentes", t: "texto", ph: "Axis Oak, branco, cinza…" },
+      { k: "pc_movel_tampo", l: "Tampo", t: "escolha", op: op("Cerâmico", "Resina", "Madeira", "Pedra") },
+      { k: "pc_movel_puxador", l: "Puxador", t: "escolha", op: op("Sem puxador", ...CORES_METAL) },
+      { k: "pc_movel_coluna", l: "Móvel coluna", t: "sim_nao" },
+    ]),
+    ...peca("Espelho", [
+      { k: "pc_espelho_luz", l: "Luz", t: "escolha", op: op("Sem luz", "LED direto", "LED indireto") },
+      { k: "pc_espelho_medida", l: "Medida", t: "texto", ph: "80 x 70" },
+    ]),
+    ...peca("Sanita e bidé", [
+      { k: "pc_sanita_tipo", l: "Sanita", t: "escolha", op: op("Suspensa", "Ao chão", "Compacta") },
+      { k: "pc_sanita_descarga", l: "Descarga", t: "escolha", op: op("Sem aro", "Com aro") },
+      { k: "pc_sanita_tampa", l: "Tampa", t: "escolha", op: op("Amortecida", "Normal") },
+      { k: "pc_bide", l: "Bidé", t: "escolha", op: op("Não", "Suspenso", "Ao chão") },
+    ]),
+    ...peca("Opções e extras", [
+      { k: "pc_teto", l: "Teto", t: "escolha", op: op("Manter", "Pintar", "Teto falso") },
+      { k: "pc_estores", l: "Caixa dos estores", t: "escolha", op: op("Não há", "Manter", "Pintar") },
+      { k: "pc_ventilacao", l: "Ventilação", t: "escolha", op: op("Não", "Ventilador") },
+      { k: "pc_tomadas", l: "Tomadas novas", t: "contador", min: 0, max: 10 },
+      { k: "pc_aplique", l: "Aplique LED", t: "sim_nao" },
+      { k: "pc_extras", l: "Outros extras", t: "texto_longo", ph: "Pintar a caixa dos estores de branco" },
+    ]),
+  ],
+};
+
+// 5/11 (a visita real): o prazo, a vaga que se deu, a data da decisão e com quem o cliente compara. Tudo opcional.
+export const DECISAO: Grupo = {
+  titulo: "Prazo e decisão",
+  campos: [
+    { k: "urgencia", l: "Urgência", t: "escolha", op: ["Sem pressa", "Nos próximos meses", "Urgente"], opcional: true },
+    { k: "prazo_cliente", l: "Para quando o cliente quer", t: "texto", ph: "Antes da Páscoa", opcional: true },
+    { k: "vaga_empresa", l: "Vaga que se deu ao cliente", t: "texto", ph: "Fevereiro", opcional: true },
+    { k: "duracao_obra", l: "Duração da obra dita ao cliente", t: "texto", ph: "Duas semanas", opcional: true },
+    { k: "decisao_ate", l: "O cliente decide até", t: "data", opcional: true },
+    { k: "concorrencia", l: "Compara com", t: "varios", op: ["Outra empresa", "Particular", "Ainda ninguém"], opcional: true },
+    { k: "concorrencia_notas", l: "Notas sobre a concorrência", t: "texto_longo", opcional: true },
+  ],
+};
+
 const SLUG_DIV: Record<string, string> = { "Casa de banho": "wc", Cozinha: "coz", Sala: "sala", Quarto: "quarto", Outra: "outra" };
 export const CHAVE_PRINCIPAL = "diag_div_principal";
 export const divisoesEscolhidas = (f: Record<string, string>) => listaVarios(f.diag_tipo_area || "");

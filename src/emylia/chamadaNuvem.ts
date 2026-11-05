@@ -164,11 +164,11 @@ export async function transcreverFala(pcm: Float32Array, inicioS: number, refere
   return (data?.frases ?? []) as Frase[];
 }
 
-export async function preencherCampos(segmentos: Fala[], grupos: Grupo[]): Promise<Extracao> {
+export async function preencherCampos(segmentos: Fala[], grupos: Grupo[], tipo: "chamada" | "visita" = "chamada"): Promise<Extracao> {
   const campos = grupos.filter((g) => !g.oculto).flatMap((g) => g.campos.map(({ k, l, t, op, ajuda, un }: Def) => ({ k, l, t, op, ajuda, un })));
   const hoje = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const { data, error } = await supabase.functions.invoke("chamada-campos", {
-    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje },
+    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje, tipo },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
   return data as Extracao & { fichas: { campos: CampoExtraido[] }[] };
@@ -184,4 +184,18 @@ export function linhasDaFala(frases: Frase[], semReferencia: "cliente" | "comerc
     else linhas.push({ inicio: f.inicio, fim: f.fim, texto: f.texto, falante: quem, confianca_falante: f.falante ? 1 : 0.3 });
   }
   return linhas;
+}
+
+// 5/11 (a visita real tem 35 min): o telemóvel não pode apagar o ecrã a meio, senão o browser corta o microfone. Sem Wake Lock
+// (browsers antigos) grava-se na mesma; volta a pedir-se quando a página volta a estar à vista.
+export async function ecraAceso(): Promise<() => void> {
+  type Trinco = { release: () => Promise<void> };
+  const nav = navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<Trinco> } };
+  if (!nav.wakeLock) return () => undefined;
+  let trinco: Trinco | null = null;
+  const pedir = async () => { try { trinco = await nav.wakeLock!.request("screen"); } catch { trinco = null; } };
+  const aoVoltar = () => { if (document.visibilityState === "visible") void pedir(); };
+  await pedir();
+  document.addEventListener("visibilitychange", aoVoltar);
+  return () => { document.removeEventListener("visibilitychange", aoVoltar); void trinco?.release().catch(() => undefined); };
 }

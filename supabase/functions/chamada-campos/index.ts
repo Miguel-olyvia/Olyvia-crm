@@ -22,10 +22,21 @@ const campoDef = z.object({
 });
 const pedido = z.object({
   segmentos: z.array(z.object({ inicio: z.number(), texto: z.string().max(2000), falante: z.enum(["comercial", "cliente", "desconhecido"]) })).max(2000),
-  campos: z.array(campoDef).min(1).max(120),
+  campos: z.array(campoDef).min(1).max(200),  // a visita tem muitos campos (o local, a área, as peças)
   // a data de hoje no fuso da comercial (AAAA-MM-DD), para «dia 10» e «amanhã» virarem datas
   hoje: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // 5/11: «visita» é a conversa da visita a casa do cliente (a comercial mede, mostra amostras e o cliente escolhe as peças)
+  tipo: z.enum(["chamada", "visita"]).optional(),
 });
+
+const SOBRE_A_VISITA = `ESTA TRANSCRIÇÃO É DE UMA VISITA, NÃO DE UMA CHAMADA. O comercial está em casa do cliente: vê o espaço, mede,
+mostra amostras e o cliente escolhe as peças; muitas vezes o comercial faz o orçamento ali. A ficha a preencher é a da visita (o local, a
+área de intervenção, as medidas, as peças escolhidas e o prazo). Regras próprias da visita:
+- As peças escolhidas: preenche cada caixa (cor, acabamento, forma, abertura…) só com o que o cliente escolheu no fim; se mudou de ideias,
+  vale a última escolha.
+- Medidas: comprimentos de paredes ditos em metros ou centímetros não são áreas. Só preenches um campo em m² se a área foi dita.
+- O resumo é para quem faz o orçamento e para o supervisor da obra: 5 a 10 frases com o que se vai fazer, as escolhas peça a peça, as
+  medidas ditas, o que ficou combinado (prazo, vaga, duração, valor, pagamento) e o que ficou por decidir.`;
 
 const INSTRUCAO = `És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição de uma chamada entre
 um comercial e um cliente e preenches uma ficha para preparar a visita.
@@ -90,7 +101,7 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { segmentos, campos, hoje } = parsed.data;
+    const { segmentos, campos, hoje, tipo } = parsed.data;
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
@@ -110,7 +121,7 @@ serve(async (req) => {
 
     let r: Resposta;
     try {
-      r = await gerarJson<Resposta>({ modelo: MODELO, partes: [{ text: texto }], esquema, instrucaoSistema: INSTRUCAO });
+      r = await gerarJson<Resposta>({ modelo: MODELO, partes: [{ text: texto }], esquema, instrucaoSistema: tipo === "visita" ? `${INSTRUCAO}\n\n${SOBRE_A_VISITA}` : INSTRUCAO });
     } catch (e) {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;
