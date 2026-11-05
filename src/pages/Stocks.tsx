@@ -64,6 +64,7 @@ import StockMovementsHistoryDialog from "@/components/inventory/StockMovementsHi
 import CategorySubcategoryFilter, { UNCATEGORIZED_CATEGORY_VALUE } from "@/components/inventory/CategorySubcategoryFilter";
 import { useProductCategories } from "@/hooks/useProductCategories";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { gravarDefinicoesImportadas } from "@/lib/inventario/definicoesImportacao";
 import { PedidosCarrinhasPainel } from "@/components/frota/PedidosCarrinha";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
@@ -1281,7 +1282,7 @@ const Stocks = () => {
   // (sem stock_movement não fica rasto): linhas novas nascem a 0 e a
   // quantidade do ficheiro entra como ajuste "Importação CSV"; linhas que já
   // existem recebem um ajuste pela diferença e só as definições
-  // (mín./máx./ponto de encomenda/localização) são atualizadas diretamente.
+  // (mín./máx./ponto de encomenda/localização) são gravadas por rpc_stock_import_settings.
   // Cada linha é tratada à parte — uma falha não aborta as outras.
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
@@ -1514,13 +1515,9 @@ const Stocks = () => {
             }
 
             if (row.settingsChanged) {
-              const { error } = await supabase
-                .from("stocks")
-                .update({
-                  ...row.settings,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", row.existing.id);
+              // Só as definições, por RPC: aceita inventory.edit OU inventory.import na organização da linha
+              // (o UPDATE direto pedia inventory.edit e, sem ela, não gravava nada sem dar erro).
+              const error = await gravarDefinicoesImportadas(row.existing.id, row.settings);
               if (error) {
                 result.errors.push(`Linha ${row.lineNumber} (${row.label}): não foi possível atualizar as definições (${error.message})`);
               } else if (row.delta === 0) {
