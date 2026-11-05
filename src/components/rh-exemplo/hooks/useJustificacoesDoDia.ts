@@ -9,48 +9,13 @@ import {
   type JustificacaoDiaLinha,
   type OpcoesJustificacoesDoDia,
 } from "@/hooks/useJustificacoesDoDia";
-import { horaSemSegundos } from "@/lib/hr/justificacaoDia";
+import { linhaEmVigor, linhaParaJustificacaoDia, type JustificacaoDiaLinhaEmVigor } from "@/lib/hr/justificacaoDiaLinha";
 import type { JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 
 export { useAccoesJustificacaoDia } from "@/hooks/useJustificacoesDoDia";
 export type { OpcoesJustificacoesDoDia };
-
-/** Sem decisor conhecido (utilizador entretanto apagado) a linha continua a dizer que foi decidida. */
-const DECISOR_DESCONHECIDO = "—";
-
-/** Uma linha que ainda vale: tudo menos `sem_efeito`. */
-export type JustificacaoDiaLinhaEmVigor = JustificacaoDiaLinha & { estado: Exclude<JustificacaoDiaLinha["estado"], "sem_efeito"> };
-
-/**
- * `sem_efeito`: estava aceite e a falta que a aceitação criou foi anulada ou corrigida. A base devolve-a no histórico, mas
- * não conta para a situação do dia: se fosse a mais recente do dia, o dia ficava preso nela e a pessoa não podia reenviar.
- */
-export const linhaEmVigor = (linha: JustificacaoDiaLinha): linha is JustificacaoDiaLinhaEmVigor => linha.estado !== "sem_efeito";
-
-/** Uma linha da base como justificação do ecrã. O motivo vem vazio quando a base o reservou («Ver texto»). */
-export function linhaParaJustificacaoDia(linha: JustificacaoDiaLinhaEmVigor): JustificacaoDia {
-  return {
-    id: linha.id,
-    origem: "sugestao",
-    pessoaId: linha.pessoa_id,
-    data: linha.data,
-    tipo: linha.tipo,
-    motivo: linha.motivo ?? "",
-    horaReal: linha.hora_real ? horaSemSegundos(linha.hora_real) : null,
-    anexos: [...(linha.anexos_nomes ?? [])],
-    minutos: linha.minutos,
-    periodoInicio: horaSemSegundos(linha.periodo_inicio),
-    periodoFim: horaSemSegundos(linha.periodo_fim),
-    deAtraso: linha.de_atraso,
-    enviadaEm: linha.enviada_em,
-    estado: linha.estado,
-    decididaPor: linha.decidida_por_nome ?? (linha.decidida_em ? DECISOR_DESCONHECIDO : null),
-    decididaEm: linha.decidida_em,
-    motivoRecusa: linha.motivo_recusa,
-    faltaId: linha.falta_id,
-    mesFechado: linha.mes_fechado_na_decisao,
-  };
-}
+// A conversão vive em `@/lib/hr/justificacaoDiaLinha` (a fila de trabalho usa-a sem passar por este wrapper).
+export { linhaEmVigor, linhaParaJustificacaoDia, type JustificacaoDiaLinhaEmVigor };
 
 /** Da mais antiga para a mais recente: `situacaoDoDia` fica com a última do dia, a que vale. */
 export function ordenarPorEnvio(justificacoes: readonly JustificacaoDia[]): JustificacaoDia[] {

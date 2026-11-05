@@ -17,6 +17,8 @@ import { toast } from "@/lib/toast";
 interface Props {
   aberto: boolean;
   aoFechar: () => void;
+  /** A pessoa já escolhida ao abrir (o painel da fila de trabalho abre-o sobre uma pessoa); sem ela, o RH escolhe. */
+  pessoaIdInicial?: string;
 }
 
 const MESES_PARA_TRAS = 12;
@@ -24,7 +26,7 @@ const HORA_INICIO_OMISSAO = "18:00";
 const HORA_FIM_OMISSAO = "20:00";
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 
-export function RegistarTempoAMaisDialog({ aberto, aoFechar }: Props) {
+export function RegistarTempoAMaisDialog({ aberto, aoFechar, pessoaIdInicial }: Props) {
   const { t } = useTranslation();
   const { pessoas } = usePessoas();
   const { registar, aExecutar } = useHorasExtraAcoes();
@@ -42,13 +44,13 @@ export function RegistarTempoAMaisDialog({ aberto, aoFechar }: Props) {
   // Cada abertura comeca limpa (sem a pessoa, o motivo ou o erro da vez anterior).
   useEffect(() => {
     if (!aberto) return;
-    setPessoaId("");
+    setPessoaId(pessoaIdInicial ?? "");
     setData(hojeLisboa());
     setInicio(HORA_INICIO_OMISSAO);
     setFim(HORA_FIM_OMISSAO);
     setMotivo("");
     setErro(null);
-  }, [aberto]);
+  }, [aberto, pessoaIdInicial]);
 
   const valido =
     pessoaId !== "" && /^\d{4}-\d{2}-\d{2}$/.test(data) && data >= minimo && data <= hoje && HORA.test(inicio) && HORA.test(fim) && inicio < fim && motivo.trim().length >= MOTIVO_MIN;

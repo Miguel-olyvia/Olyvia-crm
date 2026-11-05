@@ -11,7 +11,6 @@ import { lerEstado, repor } from "@/components/rh-exemplo/dados/loja";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { BancoHorasDaFicha } from "@/components/rh-exemplo/fluxosC/BancoHorasDaFicha";
-import { HorasExtraNaFila } from "@/components/rh-exemplo/fluxosC/HorasExtraNaFila";
 import { decidirHoraExtraNaLoja, definirRegrasPagamentoHE, lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
 import { calcularSalario } from "@/components/rh-exemplo/fluxosC/salarioRegras";
 import { entradaSalarioDaFicha } from "@/components/rh-exemplo/fluxosC/salarioContexto";
@@ -29,6 +28,13 @@ import RhAssiduidadeOrganizacao from "./RhAssiduidadeOrganizacao";
 vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 import { baseFalsa, reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
+// A fila de trabalho junta as horas extra (acima), as justificações e os desvios: simulada, sem react-query nem base.
+vi.mock("@/hooks/useFilaDeTrabalho", async () => (await import("@/test/filaDeTrabalhoFalso")).hookFalso());
+// O ecrã do mapa (que traz o separador da fila) lê a organização, o mapa do mês, os centros e a ficha de quem vê: simulados e vazios.
+vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({ useCompany: () => ({ activeCompany: { id: "org-1" }, isLoading: false }) }));
+vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao", async () => (await import("@/test/mapaAssiduidadeFalso")).organizacaoVaziaFalsa());
+vi.mock("@/components/rh-exemplo/hooks/useLocaisTrabalho", () => ({ useLocaisTrabalho: () => ({ locais: [] }) }));
+vi.mock("@/components/rh-exemplo/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => ({ pessoaId: null }) }));
 // Os dialogos de detetar e registar listam as pessoas da base: sem CompanyProvider aqui, a lista vem vazia.
 vi.mock("@/components/rh-exemplo/hooks/usePessoas", () => ({ usePessoas: () => ({ pessoas: [] }) }));
 
@@ -103,34 +109,70 @@ describe("banco de horas na ficha", () => {
 
 describe("horas extra na fila de trabalho", () => {
   const pendentes = () => baseFalsa.horas.filter((h) => h.estado === "pendente");
+  const pessoasComPendentes = () => new Set(pendentes().map((h) => h.pessoaId));
 
-  it("lista só as pendentes, com chip de texto, tempo a mais e os dois botões", () => {
-    noRouter(<HorasExtraNaFila />);
-    const linhas = screen.getAllByTestId(/^rhd-fila-he-/);
-    expect(linhas).toHaveLength(pendentes().length);
-    expect(screen.getAllByText("Hora extra pendente")).toHaveLength(pendentes().length);
-    expect(within(linhas[0]).getByText(/a mais/)).toBeInTheDocument();
-    expect(within(linhas[0]).getByRole("button", { name: /^Confirmar hora extra:/ })).toBeInTheDocument();
-    expect(within(linhas[0]).getByRole("button", { name: /^Rejeitar hora extra:/ })).toBeInTheDocument();
+  /** Abre o ecrã do mapa, o separador da fila e o painel da primeira pessoa da lista. */
+  const abrirPrimeiraPessoa = async () => {
+    noRouter(<RhAssiduidadeOrganizacao />);
+    const contador = await screen.findByTestId("rhd-contador-fila");
+    const separador = contador.closest("[role=tab]") as HTMLElement;
+    fireEvent.mouseDown(separador);
+    fireEvent.click(separador);
+    const lista = await screen.findByTestId("rhd-fila-pessoas");
+    const linha = within(lista).getAllByRole("button", { name: /abrir$/ })[0];
+    const pessoaId = linha.getAttribute("data-fila-pessoa") ?? "";
+    fireEvent.click(linha);
+    const painel = await screen.findByTestId("painel-fila-pessoa");
+    return { painel, pessoaId };
+  };
+  const horasDaPessoa = (pessoaId: string) => pendentes().filter((h) => h.pessoaId === pessoaId);
+  const dialogoDeDecisao = () => screen.getAllByRole("dialog").at(-1) as HTMLElement;
+
+  it("a lista mostra só as pessoas com horas extra por decidir, com o que cada uma tem e quando", async () => {
+    noRouter(<RhAssiduidadeOrganizacao />);
+    const contador = await screen.findByTestId("rhd-contador-fila");
+    fireEvent.mouseDown(contador.closest("[role=tab]") as HTMLElement);
+    fireEvent.click(contador.closest("[role=tab]") as HTMLElement);
+    const lista = await screen.findByTestId("rhd-fila-pessoas");
+    const linhas = within(lista).getAllByRole("listitem");
+    expect(linhas).toHaveLength(pessoasComPendentes().size);
+    // Tudo em texto, não só em cor: o tipo, a contagem, o total e o mais antigo.
+    expect(linhas[0]).toHaveTextContent(/hora extra|horas extra/);
+    expect(linhas[0]).toHaveTextContent(/pendência/);
+    expect(linhas[0]).toHaveTextContent(/mais antigo/);
+    // Nada de blocos separados por tipo: a lista de pessoas é a única coisa no separador.
+    expect(screen.queryByTestId("rhd-fila-horas-extra")).not.toBeInTheDocument();
   });
 
-  it("confirmar usa a ação do store e a linha sai da fila", async () => {
-    noRouter(<HorasExtraNaFila />);
+  it("ao abrir a pessoa, as horas extra dela vêm numa só lista, com a etiqueta do tipo, o tempo a mais e os dois botões", async () => {
+    const { painel, pessoaId } = await abrirPrimeiraPessoa();
+    const itens = within(painel).getAllByTestId(/^item-fila-hora-extra-/);
+    expect(itens).toHaveLength(horasDaPessoa(pessoaId).length);
+    expect(within(itens[0]).getByText("Hora extra")).toBeInTheDocument();
+    expect(within(itens[0]).getAllByText(/ a mais$/).length).toBeGreaterThan(0);
+    expect(within(itens[0]).getByRole("button", { name: /^Confirmar hora extra:/ })).toBeEnabled();
+    expect(within(itens[0]).getByRole("button", { name: /^Rejeitar hora extra:/ })).toBeEnabled();
+    expect(within(painel).getByRole("list", { name: /^Pendências de .*, da mais antiga para a mais recente$/ })).toBeInTheDocument();
+  });
+
+  it("confirmar usa a ação do store e o item sai da lista da pessoa", async () => {
+    const { painel, pessoaId } = await abrirPrimeiraPessoa();
     const antes = pendentes().length;
-    const linha = screen.getAllByTestId(/^rhd-fila-he-/)[0];
-    const id = (linha.getAttribute("data-testid") ?? "").replace("rhd-fila-he-", "");
-    fireEvent.click(within(linha).getByRole("button", { name: /^Confirmar hora extra:/ }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirmar" }));
+    const item = within(painel).getAllByTestId(/^item-fila-hora-extra-/)[0];
+    const id = (item.getAttribute("data-testid") ?? "").replace("item-fila-hora-extra-", "");
+    fireEvent.click(within(item).getByRole("button", { name: /^Confirmar hora extra:/ }));
+    fireEvent.click(within(dialogoDeDecisao()).getByRole("button", { name: "Confirmar" }));
     await waitFor(() => expect(baseFalsa.horas.find((h) => h.id === id)?.estado).toBe("confirmada"));
     expect(pendentes()).toHaveLength(antes - 1);
-    await waitFor(() => expect(screen.queryByTestId(`rhd-fila-he-${id}`)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId(`item-fila-hora-extra-${id}`)).not.toBeInTheDocument());
+    expect(horasDaPessoa(pessoaId).some((h) => h.id === id)).toBe(false);
   });
 
   it("rejeitar exige motivo de 3 caracteres", async () => {
-    noRouter(<HorasExtraNaFila />);
+    const { painel } = await abrirPrimeiraPessoa();
     const antes = pendentes().length;
-    fireEvent.click(screen.getAllByRole("button", { name: /^Rejeitar hora extra:/ })[0]);
-    const dialogo = screen.getByRole("dialog");
+    fireEvent.click(within(painel).getAllByRole("button", { name: /^Rejeitar hora extra:/ })[0]);
+    const dialogo = dialogoDeDecisao();
     fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "ab" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Rejeitar" }));
     expect(await within(dialogo).findByRole("alert")).toBeInTheDocument();
@@ -141,14 +183,15 @@ describe("horas extra na fila de trabalho", () => {
     await waitFor(() => expect(pendentes()).toHaveLength(antes - 1));
   });
 
-  it("o separador da fila mostra o contador e abre com as horas extra", async () => {
+  it("o separador da fila conta pessoas com pendências e abre a lista de pessoas", async () => {
     noRouter(<RhAssiduidadeOrganizacao />);
     const contador = await screen.findByTestId("rhd-contador-fila");
-    expect(Number(contador.textContent)).toBeGreaterThanOrEqual(pendentes().length);
+    expect(Number(contador.textContent)).toBe(pessoasComPendentes().size);
+    expect(screen.getByTestId("rhd-contador-fila-texto")).toHaveTextContent(/pessoas? com \d+ pendências?/);
     const separador = contador.closest("[role=tab]") as HTMLElement;
     fireEvent.mouseDown(separador);
     fireEvent.click(separador);
-    expect(await screen.findByTestId("rhd-fila-horas-extra")).toBeInTheDocument();
+    expect(await screen.findByTestId("rhd-fila-pessoas")).toBeInTheDocument();
   });
 });
 

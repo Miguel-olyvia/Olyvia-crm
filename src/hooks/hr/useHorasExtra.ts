@@ -67,6 +67,28 @@ export interface ListaHorasExtra {
   recarregar: () => Promise<unknown>;
 }
 
+/**
+ * A leitura de uma pagina (ate 500) de horas extra, sem hooks: serve `useHorasExtraListar` e a fila de trabalho.
+ * Lanca `Error` com o texto traduzido quando a base falha.
+ */
+export async function lerHorasExtra(
+  organizationId: string | null,
+  { estado = null, pessoaId = null, de = null, ate = null }: Omit<FiltrosHorasExtra, "enabled"> = {},
+): Promise<{ horas: HoraExtra[]; total: number }> {
+  const { data, error } = await rpc("rpc_hr_horas_extra_listar", {
+    p_organization_id: organizationId,
+    p_estado: estado,
+    p_pessoa_id: pessoaId,
+    p_data_de: de,
+    p_data_ate: ate,
+    p_limite: LIMITE_PAGINA,
+    p_offset: 0,
+  });
+  if (error || !data) throw new Error(textoDoErro(error, "hr-horas-extra-listar"));
+  const linhas = (Array.isArray(data.linhas) ? data.linhas : []) as LinhaHoraExtra[];
+  return { horas: linhas.map(horaExtraDaLinha), total: Number(data.total ?? linhas.length) };
+}
+
 export function useHorasExtraListar({ estado = null, pessoaId = null, de = null, ate = null, enabled = true }: FiltrosHorasExtra = {}): ListaHorasExtra {
   const { activeCompany } = useCompany();
   const organizationId = activeCompany?.id ?? null;
@@ -74,20 +96,7 @@ export function useHorasExtraListar({ estado = null, pessoaId = null, de = null,
     queryKey: [CHAVE_HORAS_EXTRA, organizationId, "lista", estado, pessoaId, de, ate],
     enabled: enabled && organizationId !== null,
     retry: false,
-    queryFn: async (): Promise<{ horas: HoraExtra[]; total: number }> => {
-      const { data, error } = await rpc("rpc_hr_horas_extra_listar", {
-        p_organization_id: organizationId,
-        p_estado: estado,
-        p_pessoa_id: pessoaId,
-        p_data_de: de,
-        p_data_ate: ate,
-        p_limite: LIMITE_PAGINA,
-        p_offset: 0,
-      });
-      if (error || !data) throw new Error(textoDoErro(error, "hr-horas-extra-listar"));
-      const linhas = (Array.isArray(data.linhas) ? data.linhas : []) as LinhaHoraExtra[];
-      return { horas: linhas.map(horaExtraDaLinha), total: Number(data.total ?? linhas.length) };
-    },
+    queryFn: (): Promise<{ horas: HoraExtra[]; total: number }> => lerHorasExtra(organizationId, { estado, pessoaId, de, ate }),
   });
   return {
     horas: consulta.data?.horas ?? SEM_HORAS,

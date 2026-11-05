@@ -17,6 +17,7 @@
  * o bloco de sem acesso, nunca uma grelha vazia nem um zero de horas.
  */
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,15 +25,14 @@ import { ChevronLeft, ChevronRight, Printer } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { AvisoDeLeitura } from "@/components/rh-exemplo/AvisoDeLeitura";
-import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
 import { FaltasPainel } from "@/components/rh-exemplo/fluxosB/faltas/FaltasPainel";
-import { FilaJustificacoesDoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/FilaJustificacoesDoDia";
-import { usePendentesJustificacaoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/usePendentesJustificacaoDia";
-import { HorasExtraNaFila, usePendentesHorasExtra } from "@/components/rh-exemplo/fluxosC/HorasExtraNaFila";
+import { ListaFilaPessoas } from "@/components/rh-exemplo/assiduidade/fila/ListaFilaPessoas";
+import { textoDasPendencias } from "@/components/rh-exemplo/assiduidade/fila/aspectoTipoFila";
 import { MapaAssiduidadeMes } from "@/components/rh-exemplo/assiduidade/MapaAssiduidadeMes";
 import { PainelDoDiaDePessoa } from "@/components/rh-exemplo/assiduidade/PainelDoDiaDePessoa";
 import { RelatorioAssiduidadeMensalOrganizacao } from "@/components/rh-exemplo/hooks/RelatorioAssiduidadeMensalOrganizacaoReal";
 import { useAssiduidadeDaOrganizacao } from "@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao";
+import { useFilaDeTrabalho } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
 import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabalho";
 import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
 import { usePessoas } from "@/components/rh-exemplo/hooks/usePessoas";
@@ -78,17 +78,28 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
 
   const [aberto, setAberto] = useState<{ pessoaId: string; data: string } | null>(null);
   const [exportarTudoAberto, setExportarTudoAberto] = useState(false);
-  const horasExtraPendentes = usePendentesHorasExtra();
-  // Os desvios REAIS da janela (os mesmos da fila): a bolinha do separador conta o que a base propoe, nao exemplos.
-  const desviosPendentes = organizacao.desvios.length;
-  // As justificações de dia por decidir vêm da base: lidas aqui UMA vez, para o contador e para a fila.
-  const justificacoesDoDia = usePendentesJustificacaoDia();
-  const porTratarNaFila = horasExtraPendentes + desviosPendentes + justificacoesDoDia.justificacoes.length;
-
   const nomePorPessoaId = useMemo(
     () => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa.nome_completo])),
     [pessoas],
   );
+  // A fila de trabalho (horas extra, justificações e alertas do fim do dia) lê-se UMA vez, por pessoa: o contador do
+  // separador e a lista saem do mesmo resultado. Segue o período da folha em curso, não o mês visível do mapa.
+  const fila = useFilaDeTrabalho(nomePorPessoaId);
+  // Para leitores de ecra: «41 pessoas com 86 pendências», ou «Pelo menos 41 pessoas com 86 pendências» se as horas extra foram cortadas.
+  const textoDoContadorDaFila = fila.pessoas.length > 0
+    ? t(fila.horasExtraCortadas ? "rhFila.contador.ariaMinimo" : "rhFila.contador.aria", {
+        pessoas: t(fila.pessoas.length === 1 ? "rhFila.pessoas.um" : "rhFila.pessoas.varios", { n: String(fila.pessoas.length) }),
+        pendencias: textoDasPendencias(t, fila.totalPendencias),
+      })
+    : "";
+  // Tudo o que mexe nos desvios ou nas justificações fora da fila (mapa, painel do dia, faltas) relê também a fila.
+  const recarregarMapaEFila = (): void => {
+    void organizacao.recarregar();
+    void fila.recarregar();
+  };
+  // Com um filtro da fila no endereço (ligação partilhada, recarregar) abre-se o separador da fila.
+  const [parametros] = useSearchParams();
+  const separadorInicial = parametros.has("fila_tipo") || parametros.has("fila_q") ? "fila" : "mapa";
 
   /** Todas as pessoas, por nome: e daqui que se escolhe a quem marcar uma falta. */
   const pessoasParaFaltas = useMemo(
@@ -148,19 +159,19 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
       {organizacao.recusado ? (
         <SemAcessoCard />
       ) : (
-        <Tabs defaultValue="mapa" className="space-y-4">
+        <Tabs defaultValue={separadorInicial} className="space-y-4">
           <TabsList>
             <TabsTrigger value="mapa">{t("hr.assiduidade.mapa.separador")}</TabsTrigger>
             <TabsTrigger value="fila" className="gap-2">
               {t("hr.assiduidade.desvios.separador")}
-              {porTratarNaFila > 0 && (
-                <span
-                  data-testid="rhd-contador-fila"
-                  aria-label={t("rhFluxosD.fila.contadorSeparador", { n: String(porTratarNaFila) })}
-                  className="rounded-full border px-1.5 text-xs tabular-nums"
-                >
-                  {porTratarNaFila}
-                </span>
+              {fila.pessoas.length > 0 && (
+                <>
+                  {/* O numero visivel e decorativo; o leitor de ecra ouve a frase completa (um aria-label num span sem papel seria ignorado). */}
+                  <span aria-hidden="true" data-testid="rhd-contador-fila" className="rounded-full border px-1.5 text-xs tabular-nums">
+                    {fila.contador}
+                  </span>
+                  <span className="sr-only" data-testid="rhd-contador-fila-texto">{textoDoContadorDaFila}</span>
+                </>
               )}
             </TabsTrigger>
             <TabsTrigger value="faltas">{t("rhExemplo.fal.separador")}</TabsTrigger>
@@ -212,22 +223,12 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
           </TabsContent>
 
           <TabsContent value="fila" className="space-y-4">
-            <HorasExtraNaFila />
-            <FilaJustificacoesDoDia
-              pendentes={justificacoesDoDia}
-              nomePorPessoaId={nomePorPessoaId}
-              minhaPessoaId={minhaPessoaId}
-              aoCriarFalta={() => void organizacao.recarregar()}
-            />
-            <FilaAlertasFimDoDia
-              desvios={organizacao.desvios}
-              nomePorPessoaId={nomePorPessoaId}
-              locais={locais}
+            <ListaFilaPessoas
+              fila={fila}
               permissoes={permissoes}
-              onAlterado={() => void organizacao.recarregar()}
-              leitura={{ recusado: organizacao.desviosRecusado, erro: organizacao.desviosErro }}
-              onTentarDeNovo={() => void organizacao.recarregar()}
-            />
+              locais={locais}
+              minhaPessoaId={minhaPessoaId}
+              aoAlterarMapa={() => void organizacao.recarregar()}            />
           </TabsContent>
 
           <TabsContent value="faltas">
@@ -236,7 +237,7 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
               desvios={organizacao.desvios}
               pessoas={pessoasParaFaltas}
               permissoes={permissoes}
-              onAlterado={() => void organizacao.recarregar()}
+              onAlterado={recarregarMapaEFila}
               leituraFaltas={{ recusado: organizacao.faltasRecusado, erro: organizacao.faltasErro }}
               leituraDesvios={{ recusado: organizacao.desviosRecusado, erro: organizacao.desviosErro }}
               onTentarDeNovo={() => void organizacao.recarregar()}
@@ -254,7 +255,7 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
           locais={locais}
           permissoes={permissoes}
           onFechar={() => setAberto(null)}
-          onDepoisDeGravar={() => void organizacao.recarregar()}
+          onDepoisDeGravar={recarregarMapaEFila}
         />
       )}
 

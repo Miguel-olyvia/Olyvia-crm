@@ -44,6 +44,14 @@ export function avisarMudancaDeJustificacoes(): void {
   ouvintes.forEach((ouvinte) => ouvinte());
 }
 
+/** Quem precisa de saber que as justificações mudaram sem ter uma leitura montada deste hook (a fila de trabalho). Devolve o cancelamento. */
+export function subscreverMudancaDeJustificacoes(ouvinte: () => void): () => void {
+  ouvintes.add(ouvinte);
+  return () => {
+    ouvintes.delete(ouvinte);
+  };
+}
+
 /** Como correu a leitura: `ok`, recusada por permissão, falhada (rede, timeout) ou RPC ainda por aplicar. */
 export type EstadoDaLeitura = "ok" | "recusado" | "erro" | "indisponivel";
 
@@ -57,6 +65,35 @@ export interface OpcoesJustificacoesDoDia {
   soPendentes?: boolean;
   /** `false` não lê nada (para quem só precisa das acções). */
   activo?: boolean;
+}
+
+/**
+ * A leitura das justificações, sem hooks: serve `useJustificacoesDoDia` e a fila de trabalho. Nunca lança: o resultado diz
+ * como correu (`ok`, recusada, falhada ou RPC ainda por aplicar); só as falhas que são defeitos vão para o registo.
+ */
+export async function lerJustificacoesDoDia(
+  orgId: string,
+  { pessoaId = null, de = null, ate = null, soPendentes = false }: Omit<OpcoesJustificacoesDoDia, "activo"> = {},
+): Promise<{ leitura: EstadoDaLeitura; linhas: JustificacaoDiaLinha[] }> {
+  try {
+    const { data, error } = await hrRpc("rpc_hr_justificacao_dia_listar", {
+      _organization_id: orgId,
+      _pessoa_id: pessoaId,
+      _de: de,
+      _ate: ate,
+      _so_pendentes: soPendentes,
+    });
+    if (error) {
+      if (rpcIndisponivel(error)) return { leitura: "indisponivel", linhas: [] };
+      if (isPermissionError(error)) return { leitura: "recusado", linhas: [] };
+      captureFlowError(error, "hr-assiduidade-load");
+      return { leitura: "erro", linhas: [] };
+    }
+    return { leitura: "ok", linhas: Array.isArray(data) ? (data as JustificacaoDiaLinha[]) : [] };
+  } catch (e) {
+    captureFlowError(e, "hr-assiduidade-load");
+    return { leitura: "erro", linhas: [] };
+  }
 }
 
 export function useJustificacoesDoDia(opcoes: OpcoesJustificacoesDoDia = {}) {
@@ -83,31 +120,10 @@ export function useJustificacoesDoDia(opcoes: OpcoesJustificacoesDoDia = {}) {
       }
       if (!silencioso) setLoading(true);
       try {
-        const { data, error } = await hrRpc("rpc_hr_justificacao_dia_listar", {
-          _organization_id: orgId,
-          _pessoa_id: pessoaId,
-          _de: de,
-          _ate: ate,
-          _so_pendentes: soPendentes,
-        });
+        const lido = await lerJustificacoesDoDia(orgId, { pessoaId, de, ate, soPendentes });
         if (pedido !== ultimoPedido.current) return;
-        if (error) {
-          setLinhas([]);
-          if (rpcIndisponivel(error)) setLeitura("indisponivel");
-          else if (isPermissionError(error)) setLeitura("recusado");
-          else {
-            captureFlowError(error, "hr-assiduidade-load");
-            setLeitura("erro");
-          }
-          return;
-        }
-        setLinhas(Array.isArray(data) ? (data as JustificacaoDiaLinha[]) : []);
-        setLeitura("ok");
-      } catch (e) {
-        captureFlowError(e, "hr-assiduidade-load");
-        if (pedido !== ultimoPedido.current) return;
-        setLinhas([]);
-        setLeitura("erro");
+        setLinhas(lido.linhas);
+        setLeitura(lido.leitura);
       } finally {
         if (pedido === ultimoPedido.current) setLoading(false);
       }

@@ -39,7 +39,7 @@ const COLUNAS_FALTA =
   "motivo_codigo, justificacao_estado, justificada, remunerada, justificacao_decidida_em, " +
   "justificacao_motivo, estado";
 
-interface Satelite<T> {
+export interface Satelite<T> {
   linhas: T[];
   recusado: boolean;
   /** A leitura falhou por outra razao que nao permissao (rede, 500, timeout): nao e o mesmo que "nao ha nada". */
@@ -61,6 +61,29 @@ async function carregar<T>(
     return comErro<T>();
   }
   return { linhas: (data ?? []) as T[], recusado: false, erro: false };
+}
+
+/**
+ * Os desvios que a base propoe numa janela (`hr_assiduidade_desvios`), sem hooks: serve este mapa e a fila de trabalho.
+ * Nunca lanca: uma recusa de permissao e uma falha ficam marcadas, nao passam por «nao ha nada».
+ */
+export async function lerDesvios(orgId: string, de: string, ate: string): Promise<Satelite<Desvio>> {
+  try {
+    const { data, error } = await hrRpc("hr_assiduidade_desvios", {
+      _organization_id: orgId,
+      _data_de: de,
+      _data_ate: ate,
+    });
+    if (error) {
+      if (isPermissionError(error)) return { linhas: [], recusado: true, erro: false };
+      captureFlowError(error, "hr-assiduidade-load");
+      return comErro<Desvio>();
+    }
+    return { linhas: (data ?? []) as Desvio[], recusado: false, erro: false };
+  } catch (e) {
+    captureFlowError(e, "hr-assiduidade-load");
+    return comErro<Desvio>();
+  }
 }
 
 /** O que uma celula do mapa mostra de um dia de uma pessoa. */
@@ -128,19 +151,7 @@ export function useAssiduidadeDaOrganizacao(janela: { de: string; ate: string })
         carregar<Falta>("v_hr_faltas_em_vigor", COLUNAS_FALTA, (q) =>
           q.eq("organization_id", orgId).gte("data", de).lte("data", ate),
         ),
-        (async (): Promise<Satelite<Desvio>> => {
-          const { data, error } = await hrRpc("hr_assiduidade_desvios", {
-            _organization_id: orgId,
-            _data_de: de,
-            _data_ate: ate,
-          });
-          if (error) {
-            if (isPermissionError(error)) return { linhas: [], recusado: true, erro: false };
-            captureFlowError(error, "hr-assiduidade-load");
-            return comErro<Desvio>();
-          }
-          return { linhas: (data ?? []) as Desvio[], recusado: false, erro: false };
-        })(),
+        lerDesvios(orgId, de, ate),
       ]);
 
       if (pedido !== ultimoPedido.current) return;
