@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { retangulo, type Planta } from "../planta";
 import { modeloDoProduto } from "./catalogo3d";
 import { deLegado, paredeMaisPerto, pecaDeProduto } from "./ligacao";
+import { ajustarPeca } from "./pecas3d";
 import { areaPavimento, areaParedes, paredesDoContorno } from "./modelo";
 
 const sala = (pecas: Planta["pecas"] = []): Planta => ({ o: { x: 0, y: 0 }, paredes: retangulo(300, 200), pecas });
@@ -35,12 +36,26 @@ describe("deLegado", () => {
     expect(r.ok && r.espaco.pecas[0]).toMatchObject({ produtoId: "p1", paredeEncosto: "p1", largura: 1.2, profundidade: 0.8, rotacao: 0 });
     expect(r.ok && Object.keys(r.modelos)).toEqual(["p1"]);
   });
-  it("a peça encostada à parede da direita roda e troca largura por profundidade", () => {
-    const pc = pecaDeProduto(sala(), base, "pc1", { x: 250, y: 100 });
-    const r = deLegado({ ...sala(), pecas: [{ ...pc, w: 80, h: 120, x: 220 }] }, opcoes);
-    expect(r.ok && r.espaco.pecas[0]).toMatchObject({ paredeEncosto: "p2", rotacao: -90, largura: 1.2, profundidade: 0.8 });
+  it("uma peça de parede (espelho) encostada à parede da direita leva a altura ao chão e roda para dentro", () => {
+    const espelho = modeloDoProduto({ id: "e1", n: "Espelho 60x80", no: null, sub: "Espelhos" });
+    const base0 = pecaDeProduto(sala(), espelho, "pc1", { x: 280, y: 100 });
+    const aj = ajustarPeca(sala(), base0);
+    if (!aj.ok) throw new Error("ajuste");
+    const r = deLegado({ ...sala(), pecas: [aj.peca] }, { ...opcoes, produtos: { e1: espelho } });
+    expect(r.ok && r.espaco.pecas[0]).toMatchObject({ paredeEncosto: "p2", rotacao: 270, montagem: "parede", altura: 1, largura: 0.6, profundidade: 0.03, espelhada: false });
   });
-  it("uma peça genérica (sem produto) ganha um modelo de reserva", () => {
+  it("uma peça espelhada guarda o espelhamento", () => {
+    const m = modeloDoProduto({ id: "p1", n: "Base de duche 80×120", no: null, sub: "Bases Duche" });
+    const pc = { ...pecaDeProduto(sala(), m, "pc1", { x: 150, y: 100 }), esp: true };
+    const r = deLegado({ ...sala(), pecas: [pc] }, { ...opcoes, produtos: { p1: m } });
+    expect(r.ok && r.espaco.pecas[0].espelhada).toBe(true);
+  });
+  it("uma janela do catálogo abre a parede com a altura do produto", () => {
+    const j = modeloDoProduto({ id: "j1", n: "Janela PVC 100x120", no: null, sub: "Janelas PVC" });
+    const pc = pecaDeProduto(sala(), j, "pc1", { x: 150, y: 0 });
+    const r = deLegado({ ...sala(), pecas: [pc] }, { ...opcoes, produtos: { j1: j } });
+    expect(r.ok && r.espaco.aberturas[0]).toMatchObject({ tipo: "janela", parede: "p1", largura: 1, altura: 1.2, peitoril: 0.9 });
+  });  it("uma peça genérica (sem produto) ganha um modelo de reserva", () => {
     const r = deLegado(sala([{ id: "s", tipo: "sanita", x: 10, y: 10, w: 36, h: 55 }]), opcoes);
     expect(r.ok && r.espaco.pecas[0].produtoId).toBe("generico:sanita");
     expect(r.ok && r.modelos["generico:sanita"].mockup3d.tipo).toBe("sanita");

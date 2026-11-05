@@ -11,7 +11,11 @@ export interface Parede { id: string; a: Ponto; b: Ponto; espessura: number }
 /** `posicao`: distância (m) do início da parede ao início da abertura. */
 export interface Abertura { id: string; tipo: TipoAbertura; parede: string; posicao: number; largura: number; altura: number; peitoril: number }
 /** Uma peça: UM produto do catálogo (pelo id). `x`,`y`: centro (m); `rotacao`: graus (frente da peça para o interior = 0 quando encosta a uma parede horizontal em cima). */
-export interface PecaProduto { id: string; produtoId: string; x: number; y: number; rotacao: number; paredeEncosto: string | null; largura: number; profundidade: number }
+export interface PecaProduto {
+  id: string; produtoId: string; x: number; y: number; rotacao: number; paredeEncosto: string | null; largura: number; profundidade: number;
+  /** «parede»: fixa à parede, a `altura` m do chão (base da peça). «chão»: pousada no chão. */
+  montagem: "chao" | "parede"; altura: number; espelhada: boolean; nome?: string;
+}
 export interface Revestimentos { pavimento: string; parede: string }
 export interface Espaco {
   tipo: TipoEspaco; nome: string; peDireito: number; unidade: "m";
@@ -181,6 +185,8 @@ export function descreverEspaco(e: Espaco, nomeDe: (produtoId: string) => string
     const ab = e.aberturas.filter((a) => a.parede === p.id).map((a) => `${a.tipo === "porta" ? "porta" : "janela"} de ${nf(a.largura)} m`);
     return `Parede ${i + 1}: ${nf(comprimento(p))} m${ab.length ? `, com ${ab.join(" e ")}` : ""}.`;
   });
-  for (const pc of e.pecas) linhas.push(`${nomeDe(pc.produtoId)}: ${nf(pc.largura * 100)} por ${nf(pc.profundidade * 100)} cm${pc.paredeEncosto ? `, encostada à parede ${pc.paredeEncosto.replace("p", "")}` : ""}.`);
+  for (const pc of e.pecas) {
+    linhas.push(`${pc.nome ?? nomeDe(pc.produtoId)}: ${nf(pc.largura * 100)} por ${nf(pc.profundidade * 100)} cm${pc.paredeEncosto ? `, encostada à parede ${pc.paredeEncosto.replace("p", "")}` : ""}${pc.montagem === "parede" ? `, na parede a ${nf(pc.altura)} m do chão` : ""}${pc.espelhada ? ", espelhada" : ""}.`);
+  }
   return linhas;
 }

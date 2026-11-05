@@ -1,3 +1,285 @@
+/** O mockup paramétrico de um tipo, com a pegada `w` (largura) × `d` (profundidade) e a altura `h`. Frente para +z, costas em -z, base em y=0. */
+function Parametrico({ tipo, w, d, h, cor }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string }) {
+  const bola = (hb: number, zc: number, prof: number) => (
+    <>
+      <Elipse p={[0, hb * 0.35, zc]} ex={w * 0.8} ez={prof * 0.9} h={hb * 0.7} cor={cor} topo={0.42} />
+      <Elipse p={[0, hb + 0.015, zc]} ex={w} ez={prof} h={0.03} cor="#fbfbfa" />
+    </>
+  );
+  switch (tipo) {
+    case "base_duche":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.4} />
+          <mesh position={[0, h + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[w - 0.08, d - 0.08]} /><meshStandardMaterial color="#cfd8dd" roughness={0.3} /></mesh>
+          <Elipse p={[0, h + 0.004, 0]} ex={0.08} ez={0.08} h={0.006} cor="#555a5e" />
+        </>
+      );
+    case "banheira": {
+      const t = Math.min(0.07, w / 6, d / 4), fundo = Math.min(0.2, h / 2);
+      return (
+        <>
+          <Caixa p={[0, fundo / 2, 0]} s={[w, fundo, d]} cor={cor} r={0.3} />
+          <Caixa p={[0, h / 2, d / 2 - t / 2]} s={[w, h, t]} cor={cor} r={0.3} />
+          <Caixa p={[0, h / 2, -d / 2 + t / 2]} s={[w, h, t]} cor={cor} r={0.3} />
+          <Caixa p={[w / 2 - t / 2, h / 2, 0]} s={[t, h, d - 2 * t]} cor={cor} r={0.3} />
+          <Caixa p={[-w / 2 + t / 2, h / 2, 0]} s={[t, h, d - 2 * t]} cor={cor} r={0.3} />
+          <mesh position={[0, h * 0.6, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[w - 2 * t, d - 2 * t]} /><meshStandardMaterial color="#bcd7e6" transparent opacity={0.45} /></mesh>
+          <Elipse p={[w / 2 - 0.15, fundo + 0.003, 0]} ex={0.07} ez={0.07} h={0.006} cor="#555a5e" />
+        </>
+      );
+    }
+    case "sanita": {
+      // cuvete, tampa e depósito com botão
+      const hb = Math.min(0.42, h), prof = Math.max(0.2, d - 0.2), ht = Math.max(hb + 0.2, h);
+      return (
+        <>
+          <Caixa p={[0, (0.18 + ht) / 2, -d / 2 + 0.1]} s={[w * 0.95, ht - 0.18, 0.2]} cor={cor} r={0.3} />
+          <Elipse p={[0, ht + 0.005, -d / 2 + 0.1]} ex={0.09} ez={0.05} h={0.01} cor="#cfd6da" />
+          <Elipse p={[0, hb * 0.35, 0.1]} ex={w * 0.8} ez={prof * 0.9} h={hb * 0.7} cor={cor} topo={0.42} />
+          <Elipse p={[0, hb + 0.02, 0.1]} ex={w} ez={prof} h={0.04} cor="#fbfbfa" />
+        </>
+      );
+    }
+    case "sanita_suspensa": {
+      // cuvete suspensa com o depósito embutido (a placa de comando na parede)
+      const hb = Math.min(0.42, h), prof = Math.max(0.2, d - 0.1);
+      return (
+        <>
+          <Caixa p={[0, 0.55, -d / 2 + 0.03]} s={[w * 1.05, 1.1, 0.06]} cor="#eef0f1" r={0.4} />
+          <Elipse p={[0, 0.82, -d / 2 + 0.065]} ex={0.1} ez={0.03} h={0.02} cor="#cfd6da" />
+          <Elipse p={[0, hb * 0.5, 0.04]} ex={w * 0.85} ez={prof * 0.9} h={hb} cor={cor} topo={0.42} />
+          <Elipse p={[0, hb + 0.02, 0.04]} ex={w} ez={prof} h={0.04} cor="#fbfbfa" />
+        </>
+      );
+    }
+    case "bide":
+      return (
+        <>
+          {bola(h, 0.05, d * 0.9)}
+          <Elipse p={[0, h + 0.033, 0.05]} ex={w * 0.6} ez={d * 0.5} h={0.006} cor="#cdd5d9" />
+          <Elipse p={[0, h + 0.07, -d * 0.35]} ex={0.04} ez={0.04} h={0.08} cor="#9aa0a4" />
+        </>
+      );
+    case "lavatorio": {
+      // lavatório com coluna
+      const hb = h - 0.16;
+      return (
+        <>
+          <Elipse p={[0, hb / 2, -d * 0.2]} ex={0.16} ez={0.14} h={hb} cor={cor} />
+          <Caixa p={[0, h - 0.09, -d / 2 + 0.04]} s={[w, 0.18, 0.08]} cor={cor} r={0.3} />
+          <Elipse p={[0, h - 0.09, 0.02]} ex={w} ez={d * 0.95} h={0.18} cor={cor} topo={0.5} />
+          <Elipse p={[0, h - 0.005, 0.03]} ex={w * 0.78} ez={d * 0.7} h={0.01} cor="#e3e8ea" />
+          <Elipse p={[0, h + 0.07, -d * 0.35]} ex={0.03} ez={0.03} h={0.14} cor="#9aa0a4" />
+        </>
+      );
+    }
+    case "movel_lavatorio": {
+      const hb = Math.max(0.2, h - 0.05);
+      return (
+        <>
+          <Caixa p={[0, hb / 2, 0]} s={[w, hb, d]} cor={cor} r={0.55} />
+          <Frentes w={w} h={hb} d={d} n={w > 0.55 ? 2 : 1} cor={cor} />
+          <Caixa p={[0, hb + 0.02, 0]} s={[w + 0.02, 0.04, d + 0.02]} cor="#eceae6" r={0.3} />
+          <Elipse p={[0, hb + 0.045, 0.02]} ex={w * 0.7} ez={d * 0.7} h={0.012} cor="#f6f8f8" />
+          <Elipse p={[0, hb + 0.1, -d * 0.3]} ex={0.03} ez={0.03} h={0.1} cor="#9aa0a4" />
+        </>
+      );
+    }
+    case "espelho":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, Math.max(d, 0.02)]} cor="#2b2f33" r={0.4} />
+          <Caixa p={[0, h / 2, Math.max(d, 0.02) / 2 + 0.001]} s={[w - 0.05, h - 0.05, 0.004]} cor="#cfe3ee" r={0.05} />
+        </>
+      );
+    case "armario_espelho":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.5} />
+          <Caixa p={[0, h / 2, d / 2 + 0.003]} s={[w - 0.04, h - 0.04, 0.006]} cor="#cfe3ee" r={0.05} />
+        </>
+      );
+    case "torneira":
+      return (
+        <>
+          <Elipse p={[0, 0.03, -d / 2 + 0.03]} ex={0.05} ez={0.05} h={0.06} cor={cor} />
+          <Caixa p={[0, 0.07, 0]} s={[0.025, 0.025, d * 0.8]} cor={cor} r={0.2} />
+        </>
+      );
+    case "toalheiro": {
+      const n = Math.max(3, Math.round(h / 0.1));
+      return (
+        <>
+          <Caixa p={[-w / 2 + 0.015, h / 2, 0]} s={[0.03, h, d]} cor={cor} r={0.35} />
+          <Caixa p={[w / 2 - 0.015, h / 2, 0]} s={[0.03, h, d]} cor={cor} r={0.35} />
+          {Array.from({ length: n }, (_, i) => <Caixa key={i} p={[0, 0.05 + i * ((h - 0.1) / (n - 1)), 0]} s={[w - 0.04, 0.022, 0.03]} cor={cor} r={0.35} />)}
+        </>
+      );
+    }
+    case "radiador": {
+      const n = Math.max(4, Math.round(w / 0.06));
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.4} />
+          {Array.from({ length: n }, (_, i) => <Caixa key={i} p={[-w / 2 + (i + 0.5) * (w / n), h / 2, d / 2 + 0.002]} s={[0.006, h - 0.04, 0.004]} cor="#c9c9c6" r={0.5} />)}
+        </>
+      );
+    }
+    case "prateleira":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, Math.max(h, 0.025), d]} cor={cor} r={0.6} />
+          <Caixa p={[-w * 0.35, -0.04, -d * 0.1]} s={[0.02, 0.08, d * 0.8]} cor="#7a7f84" r={0.4} />
+          <Caixa p={[w * 0.35, -0.04, -d * 0.1]} s={[0.02, 0.08, d * 0.8]} cor="#7a7f84" r={0.4} />
+        </>
+      );
+    case "quadro":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, Math.max(d, 0.02)]} cor="#3a3a3a" r={0.5} />
+          <Caixa p={[0, h / 2, Math.max(d, 0.02) / 2 + 0.001]} s={[w - 0.06, h - 0.06, 0.004]} cor={cor} r={0.8} />
+          <Caixa p={[0, h * 0.35, Math.max(d, 0.02) / 2 + 0.004]} s={[w - 0.06, (h - 0.06) * 0.3, 0.002]} cor="#f1d9a3" r={0.8} />
+        </>
+      );
+    case "candeeiro":
+      return (
+        <>
+          <Caixa p={[0, h / 2, -d / 2 + 0.01]} s={[0.08, 0.08, 0.02]} cor="#6b6f73" r={0.4} />
+          <Elipse p={[0, h / 2, -d / 2 + 0.1]} ex={w * 0.9} ez={d * 0.9} h={h * 0.7} cor={cor} topo={0.3} />
+        </>
+      );
+    case "coluna_duche":
+      return (
+        <>
+          <Elipse p={[0, h / 2, -d / 2 + 0.02]} ex={0.035} ez={0.035} h={h} cor={cor} />
+          <Caixa p={[0, h * 0.45, -d / 2 + 0.04]} s={[0.14, 0.14, 0.07]} cor="#b8bdc1" r={0.25} />
+          <Elipse p={[0, h - 0.01, 0.05]} ex={0.22} ez={0.22} h={0.02} cor={cor} />
+        </>
+      );
+    case "resguardo":
+      return (
+        <>
+          <mesh position={[0, h / 2, 0]}><boxGeometry args={[w, h, Math.max(d, 0.008)]} /><meshStandardMaterial color="#bcd9ea" transparent opacity={0.3} roughness={0.05} /></mesh>
+          <Caixa p={[0, 0.015, 0]} s={[w, 0.03, 0.03]} cor="#9aa0a4" r={0.3} />
+          <Caixa p={[0, h - 0.015, 0]} s={[w, 0.03, 0.03]} cor="#9aa0a4" r={0.3} />
+        </>
+      );
+    case "roupeiro":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.55} />
+          <Frentes w={w} h={h - 0.02} d={d} n={Math.max(2, Math.round(w / 0.5))} cor={cor} y0={0.01} vertical />
+        </>
+      );
+    case "cama":
+      return (
+        <>
+          <Caixa p={[0, h * 0.25, 0]} s={[w, h * 0.5, d]} cor="#8b7355" r={0.7} />
+          <Caixa p={[0, h * 0.5 + h * 0.25, 0.02]} s={[w - 0.04, h * 0.5, d - 0.08]} cor="#e8e6e1" r={0.9} />
+          <Caixa p={[0, h * 1.1, -d / 2 + 0.03]} s={[w, h * 2.2, 0.06]} cor="#8b7355" r={0.7} />
+          <Caixa p={[0, h + 0.07, -d / 2 + 0.25]} s={[Math.max(0.3, w * 0.35), 0.1, 0.4]} cor="#f7f5f0" r={0.9} />
+        </>
+      );
+    case "secretaria":
+      return (
+        <>
+          <Caixa p={[0, h - 0.015, 0]} s={[w, 0.03, d]} cor={cor} r={0.6} />
+          <Caixa p={[-w / 2 + 0.02, (h - 0.03) / 2, 0]} s={[0.04, h - 0.03, d - 0.04]} cor={cor} r={0.6} />
+          <Caixa p={[w / 2 - w * 0.15, (h - 0.03) / 2, 0]} s={[w * 0.3, h - 0.03, d - 0.04]} cor={cor} r={0.6} />
+          <Caixa p={[w / 2 - w * 0.15, h * 0.45, d / 2 - 0.018]} s={[w * 0.28, h * 0.25, 0.012]} cor="#a58a68" r={0.5} />
+          <Caixa p={[0, h * 0.55, -d / 2 + 0.02]} s={[w * 0.6, h * 0.4, 0.02]} cor={cor} r={0.6} />
+        </>
+      );
+    case "sofa":
+      return (
+        <>
+          <Caixa p={[0, h * 0.2, 0]} s={[w, h * 0.4, d]} cor="#5d6975" r={0.9} />
+          {[-1, 0, 1].map((k) => <Caixa key={k} p={[k * ((w - 0.3) / 3), h * 0.45, 0.06]} s={[(w - 0.3) / 3 - 0.01, h * 0.15, d - 0.25]} cor={cor} r={0.9} />)}
+          <Caixa p={[0, h * 0.65, -d / 2 + 0.1]} s={[w, h * 0.7, 0.2]} cor={cor} r={0.9} />
+          <Caixa p={[-w / 2 + 0.075, h * 0.35, 0]} s={[0.15, h * 0.7, d]} cor="#5d6975" r={0.9} />
+          <Caixa p={[w / 2 - 0.075, h * 0.35, 0]} s={[0.15, h * 0.7, d]} cor="#5d6975" r={0.9} />
+        </>
+      );
+    case "mesa":
+      return (
+        <>
+          <Caixa p={[0, h - 0.02, 0]} s={[w, 0.04, d]} cor={cor} r={0.55} />
+          {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i) => <Caixa key={i} p={[sx * (w / 2 - 0.06), (h - 0.04) / 2, sz * (d / 2 - 0.06)]} s={[0.06, h - 0.04, 0.06]} cor="#8e7352" r={0.6} />)}
+        </>
+      );
+    case "bancada": {
+      const hb = Math.max(0.2, h - 0.04);
+      return (
+        <>
+          <Caixa p={[0, hb / 2, -0.01]} s={[w, hb, d - 0.02]} cor="#d8d3c8" r={0.6} />
+          <Frentes w={w} h={hb} d={d - 0.02} n={Math.max(1, Math.round(w / 0.6))} cor="#d8d3c8" />
+          <Caixa p={[0, hb + 0.02, 0]} s={[w, 0.04, d]} cor={cor} r={0.3} />
+        </>
+      );
+    }
+    case "frigorifico":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.3} />
+          <Caixa p={[0, h * 0.36, d / 2 + 0.004]} s={[w, 0.012, 0.008]} cor="#4b4f53" r={0.3} />
+          <Caixa p={[w / 2 - 0.05, h * 0.6, d / 2 + 0.03]} s={[0.02, h * 0.3, 0.03]} cor="#8a8a8a" r={0.3} />
+          <Caixa p={[w / 2 - 0.05, h * 0.2, d / 2 + 0.03]} s={[0.02, h * 0.15, 0.03]} cor="#8a8a8a" r={0.3} />
+        </>
+      );
+    case "fogao":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.35} />
+          {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i) => <Elipse key={i} p={[sx * w * 0.22, h + 0.005, sz * d * 0.22]} ex={w * 0.28} ez={d * 0.28} h={0.01} cor="#1f2326" />)}
+          <Caixa p={[0, h * 0.38, d / 2 + 0.006]} s={[w * 0.8, h * 0.45, 0.012]} cor="#2b2f33" r={0.15} />
+          <Caixa p={[0, h * 0.66, d / 2 + 0.02]} s={[w * 0.6, 0.014, 0.02]} cor="#8a8a8a" r={0.3} />
+        </>
+      );
+    case "eletro":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.35} />
+          <Caixa p={[0, h * 0.45, d / 2 + 0.006]} s={[w * 0.8, h * 0.5, 0.012]} cor="#2b2f33" r={0.15} />
+          <Caixa p={[0, h * 0.82, d / 2 + 0.02]} s={[w * 0.6, 0.012, 0.02]} cor="#8a8a8a" r={0.3} />
+        </>
+      );
+    case "armario_alto":
+    case "coluna":
+    case "movel":
+      return (
+        <>
+          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.55} />
+          <Frentes w={w} h={h} d={d} n={w > 0.5 ? 2 : 1} cor={cor} />
+        </>
+      );
+    default:
+      return <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
+  }
+}
+function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
+  const { tipo, altura, cor, url } = m.mockup3d;
+  const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} />;
+  const nf = (n: number) => Math.round(n * 100).toString();
+  const base = p.montagem === "parede" ? p.altura : 0;
+  return (
+    <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }}>
+      <group scale={[p.espelhada ? -1 : 1, 1, 1]}>
+        {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
+      </group>
+      {selecionada && (
+        <mesh position={[0, altura / 2, 0]}><boxGeometry args={[p.largura + 0.04, altura + 0.04, p.profundidade + 0.04]} /><meshBasicMaterial color="#7c3aed" wireframe /></mesh>
+      )}
+      {(etiquetas || selecionada) && (
+        <Html position={[0, Math.max(altura, 0.3) + 0.12, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+          <div className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-tight text-white ${selecionada ? "bg-violet-700" : "bg-black/75"}`}>
+            {p.nome ?? m.nome}<br />{nf(p.largura)}×{nf(p.profundidade)}×{nf(altura)} cm{p.montagem === "parede" ? ` · a ${nf(p.altura)} cm do chão` : ""}
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+}
 // Protótipo (visualizador 3D): a cena three.js (react-three-fiber 8 + drei 9, compatíveis com o React 18). Carrega-se com React.lazy, por isso o
 // three só entra no pacote ao abrir o visualizador. Recebe o espaço (modelo.ts) e os produtos do catálogo com o mockup de cada um (catalogo3d.ts);
 // cada mockup é geometria paramétrica com a dimensão real do produto. Se o produto tiver `mockup3d.url` (GLB), carrega-se esse modelo e a
@@ -19,6 +301,9 @@ export interface Visualizador3DProps {
   teto: boolean;
   etiquetas: boolean;
   descricao: string;
+  /** a peça escolhida (a mesma da planta) e como escolher outra clicando nela */
+  selecionada: string | null;
+  onSelecionar: (id: string | null) => void;
 }
 
 type V3 = [number, number, number];
@@ -351,17 +636,17 @@ function Camaras({ vista, espaco }: { vista: Vista3D; espaco: Espaco }) {
   );
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar }: Visualizador3DProps) {
   return (
     <div role="img" aria-label={descricao} className="h-full w-full touch-none">
-      <Canvas frameloop="demand" dpr={[1, 1.5]} gl={{ antialias: true }}>
+      <Canvas frameloop="demand" dpr={[1, 1.5]} gl={{ antialias: true }} onPointerMissed={() => onSelecionar(null)}>
         <color attach="background" args={["#eef0f2"]} />
         <hemisphereLight args={["#ffffff", "#8a8f95", 1.0]} />
         <directionalLight position={[4, 8, 5]} intensity={1.1} />
         <Camaras vista={vista} espaco={espaco} />
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
-        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} /> : null; })}
+        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} /> : null; })}
       </Canvas>
     </div>
   );

@@ -1,59 +1,146 @@
 // Protótipo (visualizador 3D): as peças vêm dos PRODUTOS DO CATÁLOGO (v2/catalogoModelo.ts: Produto, árvore de ofícios e sub-ofícios). Aqui:
-//  1. classifica cada produto num tipo de mockup (sanita, base de duche, móvel…) pelo sub-ofício e pelo nome;
-//  2. tira as DIMENSÕES REAIS do nome («Base de duche 80×120») para campos próprios (largura, profundidade, altura), com uma tabela de omissões
-//     por tipo quando o nome não as traz;
-//  3. acrescenta a cada produto um `mockup3d` (geometria paramétrica com essa dimensão; `url` fica para um GLB por produto, quando existir);
-//  4. escolhe os produtos que fazem sentido para o espaço (mapa configurável tipo de espaço -> tipos de peça).
+//  1. classifica cada produto num tipo de mockup (sanita, espelho, toalheiro, base de duche…) pelo sub-ofício e pelo nome;
+//  2. tira as DIMENSÕES REAIS do nome («Base de duche 80×120») para campos próprios, com uma tabela de omissões por tipo;
+//  3. acrescenta a cada produto um `mockup3d` (geometria paramétrica com essa dimensão; `url` fica para um GLB por produto) e a montagem
+//     («chão» ou «parede», com a altura de omissão ao chão);
+//  4. agrupa os produtos por espaço (grupos configuráveis) e acrescenta produtos de DEMONSTRAÇÃO «(demo)» para os tipos que o catálogo não tem.
 // Funções puras: sem React, sem three.
 import type { TipoEspaco } from "./modelo";
 
 export type TipoMockup =
-  | "caixa" | "sanita" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel" | "roupeiro" | "cama" | "bancada" | "eletro" | "porta" | "janela";
+  | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
+  | "armario_alto" | "espelho" | "armario_espelho" | "torneira" | "toalheiro" | "radiador" | "resguardo" | "acessorio" | "prateleira" | "quadro" | "candeeiro"
+  | "roupeiro" | "cama" | "secretaria" | "sofa" | "mesa" | "bancada" | "frigorifico" | "fogao" | "eletro" | "porta" | "janela";
 
-/** O mínimo que se precisa de um produto do catálogo (o `Produto` real cumpre-o). */
-export interface ProdutoCat { id: string; n: string; sub?: string; no: string | null; marca?: string; fornecedor?: string; custo?: number }
+export type Montagem = "chao" | "parede";
+
+/** O mínimo que se precisa de um produto do catálogo (o `Produto` real cumpre-o). `tipo` e `dim` só os produtos de demonstração os trazem. */
+export interface ProdutoCat {
+  id: string; n: string; sub?: string; no: string | null; marca?: string; fornecedor?: string; custo?: number;
+  tipo?: TipoMockup; /** largura, profundidade, altura (cm) */ dim?: [number, number, number]; demo?: boolean;
+}
 export interface NoCat { id: string; n: string; pai: string | null }
 
 /** O mockup de um produto, em metros. `url`: um GLB opcional (carregado se existir); sem ele, desenha-se a geometria paramétrica. */
 export interface Mockup3D { tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
-export interface ProdutoModelo3D { produtoId: string; nome: string; tipo: TipoMockup; dimensoes: Dimensoes; mockup3d: Mockup3D; marca?: string; fornecedor?: string; custo?: number; categoria: string }
+export interface ProdutoModelo3D {
+  produtoId: string; nome: string; tipo: TipoMockup; dimensoes: Dimensoes; mockup3d: Mockup3D; marca?: string; fornecedor?: string; custo?: number; categoria: string;
+  montagem: Montagem; /** altura de omissão ao chão (m), só para peças de parede */ alturaOmissao: number; demo: boolean;
+}
 
-/** Dimensões de omissão por tipo (cm), quando o nome não as traz: largura, profundidade, altura. */
-export const OMISSOES_CM: Record<TipoMockup, [number, number, number]> = {
-  base_duche: [120, 80, 6], banheira: [170, 70, 55], sanita: [36, 55, 40], bide: [36, 55, 40], lavatorio: [60, 46, 85], movel: [60, 45, 80],
-  roupeiro: [200, 60, 240], cama: [160, 200, 45], bancada: [200, 60, 90], eletro: [60, 60, 85], caixa: [50, 50, 50], porta: [80, 4, 210], janela: [100, 6, 120],
+interface Espec { rotulo: string; mont: Montagem; alt: number; dim: [number, number, number]; cor: string }
+/** Por tipo: o nome, a montagem, a altura ao chão de omissão (m, peças de parede), as dimensões de omissão (cm: largura, profundidade, altura) e a cor. */
+export const ESPEC: Record<TipoMockup, Espec> = {
+  sanita: { rotulo: "Sanita de chão", mont: "chao", alt: 0, dim: [37, 65, 78], cor: "#f7f7f5" },
+  sanita_suspensa: { rotulo: "Sanita suspensa", mont: "parede", alt: 0, dim: [36, 53, 40], cor: "#f7f7f5" },
+  bide: { rotulo: "Bidé", mont: "chao", alt: 0, dim: [36, 55, 40], cor: "#f7f7f5" },
+  banheira: { rotulo: "Banheira", mont: "chao", alt: 0, dim: [170, 70, 55], cor: "#f4f6f7" },
+  base_duche: { rotulo: "Base de duche", mont: "chao", alt: 0, dim: [120, 80, 6], cor: "#e8edf0" },
+  lavatorio: { rotulo: "Lavatório", mont: "chao", alt: 0, dim: [55, 45, 85], cor: "#f4f6f7" },
+  movel_lavatorio: { rotulo: "Móvel de lavatório", mont: "chao", alt: 0, dim: [60, 46, 85], cor: "#c9b08a" },
+  coluna: { rotulo: "Coluna", mont: "chao", alt: 0, dim: [35, 35, 180], cor: "#c9b08a" },
+  coluna_duche: { rotulo: "Coluna de duche", mont: "parede", alt: 0.9, dim: [20, 12, 120], cor: "#9aa0a4" },
+  movel: { rotulo: "Móvel", mont: "chao", alt: 0, dim: [60, 45, 80], cor: "#c9b08a" },
+  armario_alto: { rotulo: "Armário alto", mont: "parede", alt: 1.4, dim: [60, 32, 70], cor: "#d8d3c8" },
+  espelho: { rotulo: "Espelho", mont: "parede", alt: 1.0, dim: [60, 3, 80], cor: "#2b2f33" },
+  armario_espelho: { rotulo: "Armário de espelho", mont: "parede", alt: 1.2, dim: [60, 15, 70], cor: "#d8d3c8" },
+  torneira: { rotulo: "Torneira", mont: "parede", alt: 1.0, dim: [8, 15, 20], cor: "#9aa0a4" },
+  toalheiro: { rotulo: "Toalheiro", mont: "parede", alt: 0.3, dim: [50, 10, 120], cor: "#e5e5e5" },
+  radiador: { rotulo: "Radiador", mont: "parede", alt: 0.15, dim: [60, 10, 60], cor: "#f2f2f0" },
+  resguardo: { rotulo: "Resguardo", mont: "chao", alt: 0, dim: [80, 4, 195], cor: "#bcd9ea" },
+  acessorio: { rotulo: "Acessório", mont: "parede", alt: 1.0, dim: [20, 10, 10], cor: "#9aa0a4" },
+  prateleira: { rotulo: "Prateleira", mont: "parede", alt: 1.5, dim: [60, 20, 3], cor: "#c9b08a" },
+  quadro: { rotulo: "Quadro", mont: "parede", alt: 1.4, dim: [60, 3, 40], cor: "#5f8aa8" },
+  candeeiro: { rotulo: "Candeeiro de parede", mont: "parede", alt: 1.8, dim: [15, 15, 15], cor: "#f1e9d2" },
+  roupeiro: { rotulo: "Roupeiro", mont: "chao", alt: 0, dim: [200, 60, 240], cor: "#bfa98a" },
+  cama: { rotulo: "Cama", mont: "chao", alt: 0, dim: [160, 200, 45], cor: "#cfd8e3" },
+  secretaria: { rotulo: "Secretária", mont: "chao", alt: 0, dim: [120, 60, 75], cor: "#b99b76" },
+  sofa: { rotulo: "Sofá", mont: "chao", alt: 0, dim: [200, 90, 85], cor: "#7d8b99" },
+  mesa: { rotulo: "Mesa", mont: "chao", alt: 0, dim: [140, 80, 75], cor: "#b99b76" },
+  bancada: { rotulo: "Bancada", mont: "chao", alt: 0, dim: [200, 60, 90], cor: "#b9b3a8" },
+  frigorifico: { rotulo: "Frigorífico", mont: "chao", alt: 0, dim: [60, 65, 185], cor: "#d7dbde" },
+  fogao: { rotulo: "Fogão", mont: "chao", alt: 0, dim: [60, 60, 90], cor: "#c9ced3" },
+  eletro: { rotulo: "Eletrodoméstico", mont: "chao", alt: 0, dim: [60, 60, 85], cor: "#c9ced3" },
+  caixa: { rotulo: "Outro", mont: "chao", alt: 0, dim: [50, 50, 50], cor: "#d0d0d0" },
+  porta: { rotulo: "Porta", mont: "parede", alt: 0, dim: [80, 4, 210], cor: "#a98467" },
+  janela: { rotulo: "Janela", mont: "parede", alt: 0.9, dim: [100, 6, 120], cor: "#9fb4c7" },
 };
-export const COR_MOCKUP: Record<TipoMockup, string> = {
-  base_duche: "#e8edf0", banheira: "#f4f6f7", sanita: "#f7f7f5", bide: "#f7f7f5", lavatorio: "#d9c7a8", movel: "#c9b08a", roupeiro: "#bfa98a", cama: "#cfd8e3",
-  bancada: "#b9b3a8", eletro: "#c9ced3", caixa: "#d0d0d0", porta: "#a98467", janela: "#9fb4c7",
-};
+/** Compatibilidade: dimensões e cores por tipo. */
+export const OMISSOES_CM: Record<TipoMockup, [number, number, number]> = Object.fromEntries(Object.entries(ESPEC).map(([k, v]) => [k, v.dim])) as Record<TipoMockup, [number, number, number]>;
+export const COR_MOCKUP: Record<TipoMockup, string> = Object.fromEntries(Object.entries(ESPEC).map(([k, v]) => [k, v.cor])) as Record<TipoMockup, string>;
 
-/** O que faz sentido em cada tipo de espaço (configurável: passa-se outro mapa a `produtosParaEspaco`). */
+/** Os grupos (separadores) de cada espaço: o que faz sentido, por ordem. Configurável: passa-se outro mapa de grupos a `produtosParaEspaco`. */
+export interface Grupo { id: string; rotulo: string; tipos: TipoMockup[] }
+export type GruposEspaco = Record<TipoEspaco, Grupo[]>;
+const G = (id: string, rotulo: string, ...tipos: TipoMockup[]): Grupo => ({ id, rotulo, tipos });
+export const GRUPOS_ESPACO: GruposEspaco = {
+  casa_banho: [
+    G("sanitas", "Sanitas", "sanita", "sanita_suspensa"), G("bides", "Bidés", "bide"), G("banheiras", "Banheiras", "banheira"), G("bases", "Bases de duche", "base_duche"),
+    G("lavatorios", "Lavatórios e móveis", "lavatorio", "movel_lavatorio", "bancada"), G("colunas", "Colunas e armários", "coluna", "coluna_duche", "armario_alto", "movel"),
+    G("espelhos", "Espelhos", "espelho", "armario_espelho"), G("torneiras", "Torneiras e misturadoras", "torneira"), G("radiadores", "Toalheiros e radiadores", "toalheiro", "radiador"),
+    G("resguardos", "Resguardos", "resguardo"), G("acessorios", "Acessórios", "acessorio", "prateleira", "quadro", "candeeiro"),
+  ],
+  cozinha: [
+    G("modulos", "Módulos", "movel", "armario_alto", "coluna"), G("bancadas", "Bancadas", "bancada"), G("eletro", "Eletrodomésticos", "frigorifico", "fogao", "eletro"),
+    G("torneiras", "Torneiras", "torneira"), G("deco", "Prateleiras e decoração", "prateleira", "quadro", "candeeiro"),
+  ],
+  quarto: [
+    G("roupeiros", "Roupeiros", "roupeiro"), G("camas", "Camas", "cama"), G("secretarias", "Secretárias", "secretaria"), G("moveis", "Móveis", "movel", "armario_alto", "coluna"),
+    G("deco", "Decoração", "prateleira", "quadro", "candeeiro", "espelho"),
+  ],
+  sala: [
+    G("sofas", "Sofás", "sofa"), G("mesas", "Mesas", "mesa"), G("moveis", "Móveis", "movel", "armario_alto", "coluna", "prateleira"), G("eletro", "Eletrodomésticos", "eletro"),
+    G("deco", "Decoração", "quadro", "candeeiro", "espelho", "radiador"),
+  ],
+  outro: [
+    G("sanitas", "Sanitários", "sanita", "sanita_suspensa", "bide", "banheira", "base_duche", "lavatorio", "movel_lavatorio"), G("moveis", "Móveis", "movel", "armario_alto", "coluna", "roupeiro", "secretaria"),
+    G("quarto", "Camas e sofás", "cama", "sofa", "mesa"), G("cozinha", "Cozinha", "bancada", "frigorifico", "fogao", "eletro"),
+    G("parede", "Peças de parede", "espelho", "armario_espelho", "toalheiro", "radiador", "prateleira", "quadro", "candeeiro", "torneira", "acessorio", "coluna_duche"),
+  ],
+};
+/** O que faz sentido em cada tipo de espaço (os grupos, por ordem, sem repetir). */
 export type MapaEspaco = Record<TipoEspaco, TipoMockup[]>;
+const achatar = (g: Grupo[]): TipoMockup[] => [...new Set(g.flatMap((x) => x.tipos))];
 export const MAPA_ESPACO: MapaEspaco = {
-  casa_banho: ["base_duche", "banheira", "sanita", "bide", "lavatorio", "movel"],
-  cozinha: ["movel", "bancada", "eletro"],
-  quarto: ["roupeiro", "cama", "movel"],
-  sala: ["movel", "eletro"],
-  outro: ["base_duche", "banheira", "sanita", "bide", "lavatorio", "movel", "roupeiro", "cama", "bancada", "eletro"],
+  casa_banho: achatar(GRUPOS_ESPACO.casa_banho), cozinha: achatar(GRUPOS_ESPACO.cozinha), quarto: achatar(GRUPOS_ESPACO.quarto), sala: achatar(GRUPOS_ESPACO.sala), outro: achatar(GRUPOS_ESPACO.outro),
 };
 
 /** Sem acentos e em minúsculas, para comparar texto. */
 export const sem = (s: string): string => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 const REGRAS: [RegExp, TipoMockup][] = [
-  [/resguardo|torneira|misturadora|coluna duche|chuveiro|toalheiro|acessorio/, "caixa"],
+  [/resguardo/, "resguardo"],
+  [/sifao|sifoes|valvula/, "acessorio"],
+  [/torneira|misturadora|chuveiro higien/, "torneira"],
+  [/toalheiro/, "toalheiro"],
+  [/radiador/, "radiador"],
+  [/coluna.*duche|duche.*coluna|colunas duche/, "coluna_duche"],
   [/base.*duche|bases duche|prato de duche/, "base_duche"],
+  [/pega de seguranca|cabide|porta-rolos|porta rolos|piacaba|nicho|escova|\bbancos?\b|\bkit/, "acessorio"],
   [/banheira/, "banheira"],
-  [/bide/, "bide"],
+  [/\bbides?\b/, "bide"],
+  [/\bsanitas?\b.*suspens|suspens.*\bsanitas?\b/, "sanita_suspensa"],
   [/\bsanitas?\b/, "sanita"],
+  [/armario.*espelho|espelheira/, "armario_espelho"],
+  [/espelho/, "espelho"],
+  [/movel.*lavatorio|moveis de lavatorio/, "movel_lavatorio"],
   [/lavatorio|lavabo/, "lavatorio"],
+  [/armarios? superiores?|armario alto|armarios? altos?/, "armario_alto"],
+  [/armarios? de coluna|\bcolunas?\b/, "coluna"],
+  [/prateleira/, "prateleira"],
+  [/\bquadros?\b/, "quadro"],
+  [/aplique|candeeiro|luminaria/, "candeeiro"],
   [/roupeiro/, "roupeiro"],
   [/\bcama\b|colchao|estrado/, "cama"],
+  [/secretaria|escrivaninha/, "secretaria"],
+  [/\bsofa\b/, "sofa"],
+  [/\bmesas?\b/, "mesa"],
   [/bancada|tampo/, "bancada"],
-  [/frigorific|fogao|\bforno|placa|maquina|exaustor|micro-ondas|garrafeira|termoacumulador|esquentador/, "eletro"],
-  [/armario|movel|moveis|mobiliario|coluna/, "movel"],
+  [/frigorific/, "frigorifico"],
+  [/\bfogao|\bfogoes/, "fogao"],
+  [/\bforno|placa|maquina|exaustor|micro-ondas|garrafeira|termoacumulador|esquentador/, "eletro"],
+  [/armario|movel|moveis|mobiliario/, "movel"],
   [/\bporta/, "porta"],
   [/janela/, "janela"],
 ];
@@ -66,12 +153,13 @@ export function caminhoDe(arvore: readonly NoCat[], no: string | null): string {
   return pai ? `${pai.n} / ${n.n}` : n.n;
 }
 
-/** O tipo de mockup de um produto: pelo sub-ofício real (`sub`), depois pelo nome e, por fim, pelo ramo da árvore. */
+/** O tipo de mockup de um produto: o que ele traz (demo), senão pelo sub-ofício real (`sub`), depois pelo nome e, por fim, pelo ramo da árvore. */
 export function tipoMockupDe(p: ProdutoCat, arvore: readonly NoCat[] = []): TipoMockup {
+  if (p.tipo) return p.tipo;
   for (const t of [p.sub ?? "", p.n, caminhoDe(arvore, p.no)]) {
     const s = sem(t);
     if (!s) continue;
-    for (const [re, tipo] of REGRAS) if (re.test(s)) return tipo;
+    for (const [re, tipo] of REGRAS) if (re.test(s)) return tipo === "sanita" && /suspens/.test(sem(p.n)) ? "sanita_suspensa" : tipo;
   }
   return "caixa";
 }
@@ -91,10 +179,13 @@ export function dimensoesDoNome(nome: string): number[] | null {
   return v.every((x) => x >= 5 && x <= 400) ? v : null;
 }
 
+/** Tipos cujo nome, com dois números, diz largura × altura (peças planas ou altas). */
+const LARGURA_ALTURA: TipoMockup[] = ["roupeiro", "espelho", "quadro", "radiador", "toalheiro", "resguardo"];
+
 /**
  * As dimensões reais de um produto. Do nome, quando as traz; senão a tabela de omissões do tipo.
- * Base de duche e banheira: o maior é a largura (comprimento) e o menor a profundidade; roupeiro com dois números: largura × altura;
- * os outros: largura × profundidade (× altura).
+ * Base de duche e banheira: o maior é a largura (comprimento) e o menor a profundidade; espelho, quadro, radiador, toalheiro, resguardo e roupeiro com
+ * dois números: largura × altura; os outros: largura × profundidade (× altura).
  */
 export function extrairDimensoes(nome: string, tipo: TipoMockup): Dimensoes {
   const [lw, pd, al] = OMISSOES_CM[tipo];
@@ -102,16 +193,42 @@ export function extrairDimensoes(nome: string, tipo: TipoMockup): Dimensoes {
   if (!v) return { larguraCm: lw, profundidadeCm: pd, alturaCm: al, deNome: false };
   const [a, b, c] = v;
   if (tipo === "base_duche" || tipo === "banheira") return { larguraCm: Math.max(a, b), profundidadeCm: Math.min(a, b), alturaCm: c ?? al, deNome: true };
-  if (tipo === "roupeiro" && c === undefined) return { larguraCm: a, profundidadeCm: pd, alturaCm: b, deNome: true };
+  if (LARGURA_ALTURA.includes(tipo) && c === undefined) return { larguraCm: a, profundidadeCm: pd, alturaCm: b, deNome: true };
   return { larguraCm: a, profundidadeCm: b, alturaCm: c ?? al, deNome: true };
 }
 
 /** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
 export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}): ProdutoModelo3D {
   const tipo = tipoMockupDe(p, arvore);
-  const d = extrairDimensoes(p.n, tipo);
-  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: COR_MOCKUP[tipo], ...(urls[p.id] ? { url: urls[p.id] } : {}) };
-  return { produtoId: p.id, nome: p.n, tipo, dimensoes: d, mockup3d, marca: p.marca, fornecedor: p.fornecedor, custo: p.custo, categoria: p.sub || caminhoDe(arvore, p.no) };
+  const d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: p.dim[2], deNome: true } : extrairDimensoes(p.n, tipo);
+  const e = ESPEC[tipo];
+  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(urls[p.id] ? { url: urls[p.id] } : {}) };
+  return {
+    produtoId: p.id, nome: p.n, tipo, dimensoes: d, mockup3d, marca: p.marca, fornecedor: p.fornecedor, custo: p.custo, categoria: p.sub || caminhoDe(arvore, p.no) || e.rotulo,
+    montagem: e.mont, alturaOmissao: e.alt, demo: !!p.demo,
+  };
+}
+
+/* ------------------------------------------------------------------ produtos de demonstração (só onde o catálogo não tem o tipo) */
+const D = (id: string, tipo: TipoMockup, n: string, w: number, d: number, h: number): ProdutoCat => ({ id: `demo:${id}`, n: `${n} (demo)`, no: null, sub: ESPEC[tipo].rotulo, tipo, dim: [w, d, h], demo: true, marca: "Demonstração" });
+export const PRODUTOS_DEMO: ProdutoCat[] = [
+  D("sanita-suspensa", "sanita_suspensa", "Sanita suspensa 36×53×40", 36, 53, 40), D("sanita-chao", "sanita", "Sanita de chão com depósito 37×65×78", 37, 65, 78),
+  D("bide", "bide", "Bidé de chão 36×55×40", 36, 55, 40), D("banheira", "banheira", "Banheira 170×70×55", 170, 70, 55), D("base-duche", "base_duche", "Base de duche 80×120", 120, 80, 6),
+  D("lavatorio", "lavatorio", "Lavatório com coluna 55×45×85", 55, 45, 85), D("movel-lavatorio", "movel_lavatorio", "Lavatório com móvel 60×46×85", 60, 46, 85),
+  D("coluna", "coluna", "Móvel coluna 35×35×180", 35, 35, 180), D("coluna-duche", "coluna_duche", "Coluna de duche termostática", 20, 12, 120),
+  D("espelho", "espelho", "Espelho 60×80", 60, 3, 80), D("armario-espelho", "armario_espelho", "Armário de espelho 60×70", 60, 15, 70), D("armario-alto", "armario_alto", "Armário alto 60×32×70", 60, 32, 70),
+  D("torneira", "torneira", "Misturadora de lavatório", 8, 15, 20), D("toalheiro", "toalheiro", "Toalheiro 50×120", 50, 10, 120), D("radiador", "radiador", "Radiador 60×60", 60, 10, 60),
+  D("resguardo", "resguardo", "Resguardo de duche 80×195", 80, 4, 195), D("acessorio", "acessorio", "Porta-rolos", 20, 10, 10), D("prateleira", "prateleira", "Prateleira 60×20", 60, 20, 3),
+  D("quadro", "quadro", "Quadro 60×40", 60, 3, 40), D("candeeiro", "candeeiro", "Candeeiro de parede", 15, 15, 15),
+  D("modulo", "movel", "Módulo baixo 60×45×80", 60, 45, 80), D("bancada", "bancada", "Bancada de cozinha 200×60", 200, 60, 90), D("frigorifico", "frigorifico", "Frigorífico 60×65×185", 60, 65, 185),
+  D("fogao", "fogao", "Fogão 60×60×90", 60, 60, 90), D("roupeiro", "roupeiro", "Roupeiro 200×60×240", 200, 60, 240), D("cama", "cama", "Cama de casal 160×200", 160, 200, 45),
+  D("secretaria", "secretaria", "Secretária 120×60", 120, 60, 75), D("sofa", "sofa", "Sofá de 3 lugares 200×90", 200, 90, 85), D("mesa", "mesa", "Mesa de jantar 140×80", 140, 80, 75),
+];
+
+/** O catálogo mais os produtos de demonstração dos tipos que ele não tem (nenhum produto desse tipo). */
+export function comDemonstracao(produtos: readonly ProdutoCat[], arvore: readonly NoCat[] = []): ProdutoCat[] {
+  const tem = new Set(produtos.map((p) => tipoMockupDe(p, arvore)));
+  return [...produtos, ...PRODUTOS_DEMO.filter((d) => !tem.has(d.tipo as TipoMockup))];
 }
 
 export interface OpcoesEspaco {
@@ -134,14 +251,17 @@ export function produtosParaEspaco(produtos: readonly ProdutoCat[], arvore: read
   };
   const lista: ProdutoModelo3D[] = [];
   for (const p of produtos) {
-    if (oficios && !oficios.includes(idOficio(p.no))) continue;
+    if (oficios && !p.demo && !oficios.includes(idOficio(p.no))) continue;
     const m = modeloDoProduto(p, arvore, o.urls);
     if (tipos.includes(m.tipo)) lista.push(m);
   }
   const ordem = (t: TipoMockup) => tipos.indexOf(t);
-  lista.sort((a, b) => ordem(a.tipo) - ordem(b.tipo) || a.nome.localeCompare(b.nome, "pt"));
+  lista.sort((a, b) => ordem(a.tipo) - ordem(b.tipo) || Number(a.demo) - Number(b.demo) || a.nome.localeCompare(b.nome, "pt"));
   return lista.slice(0, o.max ?? 200);
 }
+
+/** Os produtos de um grupo (separador) do espaço. */
+export const produtosDoGrupo = (lista: readonly ProdutoModelo3D[], g: Grupo): ProdutoModelo3D[] => lista.filter((m) => g.tipos.includes(m.tipo));
 
 /** O tipo de espaço a partir do nome da divisão da visita («Casa de banho», «Cozinha», «Quarto»…). */
 export function tipoEspacoDeDivisao(divisao: string | null | undefined): TipoEspaco {

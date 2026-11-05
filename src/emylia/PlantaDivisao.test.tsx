@@ -76,7 +76,7 @@ describe("PlantaDivisao", () => {
     const x0 = lerPlanta(d.f.planta)!.pecas[0].x;
     fireEvent.keyDown(peca, { key: "ArrowRight" });
     expect(lerPlanta(d.f.planta)!.pecas[0].x).toBe(x0 + 5);
-    fireEvent.click(screen.getByRole("button", { name: "Tirar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remover" }));
     expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
   });
 
@@ -89,5 +89,37 @@ describe("PlantaDivisao", () => {
     const ctx = { A: { campo: vi.fn() }, run: (fn: () => void) => fn() } as unknown as Ctx;
     render(<PlantaDivisao ctx={ctx} d={d} />);
     expect(screen.getByText("4,14 m²")).toBeInTheDocument();
+  });
+  it("um produto do catálogo (sanita) entra com o nome e a medida, roda 90 graus e duplica-se", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(300, 200), pecas: [] }) });
+    const chip = screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!;
+    fireEvent.keyDown(chip, { key: "Enter" });
+    const pc = lerPlanta(d.f.planta)!.pecas[0];
+    expect(pc.produto).toBeTruthy();
+    expect(pc.nome).toBeTruthy();
+    expect(pc.rot).toBeDefined();
+    const antes = pc.rot ?? 0;
+    fireEvent.click(screen.getByRole("button", { name: "Rodar 90° à direita" }));
+    expect(lerPlanta(d.f.planta)!.pecas[0].rot).toBe((antes + 90) % 360);
+    fireEvent.click(screen.getByRole("button", { name: "Duplicar" }));
+    expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(2);
+  });
+
+  it("um espelho do catálogo encosta-se à parede, a 1 m do chão, e fica dentro da divisão", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(300, 200), pecas: [] }) });
+    fireEvent.click(screen.getByRole("tab", { name: /^Espelhos/ }));
+    fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });
+    const pc = lerPlanta(d.f.planta)!.pecas[0];
+    expect(pc).toMatchObject({ mont: "parede", alt: 100 });
+    expect(pc.y).toBeGreaterThanOrEqual(-1.5);
+    expect(screen.getByLabelText("Altura ao chão (cm)")).toBeInTheDocument();
+  });
+
+  it("uma peça maior do que a divisão não entra: «Fora da divisão»", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(80, 80), pecas: [] }) });
+    fireEvent.click(screen.getByRole("tab", { name: /^Banheiras/ }));
+    fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });
+    expect(lerPlanta(d.f.planta)?.pecas ?? []).toEqual([]);
+    expect(screen.getByText(/^Fora da divisão/)).toBeInTheDocument();
   });
 });

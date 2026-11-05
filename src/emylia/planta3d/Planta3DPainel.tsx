@@ -22,9 +22,11 @@ export interface Planta3DPainelProps {
   produtos: readonly ProdutoCat[]; arvore: readonly NoCat[];
   rev: { pavimento: string; parede: string }; onRev: (s: Superficie, id: string) => void;
   teto: boolean; onTeto: (t: boolean) => void;
+  /** a peça escolhida, a mesma da planta */
+  selecionada: string | null; onSelecionar: (id: string | null) => void;
 }
 
-export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore, rev, onRev, teto, onTeto }: Planta3DPainelProps) {
+export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore, rev, onRev, teto, onTeto, selecionada, onSelecionar }: Planta3DPainelProps) {
   const [vista, setVista] = useState<Vista3D>("3d");
   const [etiquetas, setEtiquetas] = useState(true);
   const [cheio, setCheio] = useState(false);
@@ -55,11 +57,11 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
 
       <div className={cn("overflow-hidden rounded-2xl border border-border bg-muted", cheio ? "min-h-[60vh] flex-1" : "h-[420px]")}>
         <Suspense fallback={<p role="status" className="p-4 text-[15px] text-muted-foreground">A carregar o visualizador 3D…</p>}>
-          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} />
+          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} />
         </Suspense>
       </div>
       <p className="text-sm text-muted-foreground">
-        Portas e janelas só abrem a parede em 3D se estiverem encostadas a ela (a menos de 40 cm). {vista === "pessoa" ? "Arraste para olhar à volta (a câmara está a 1,6 m)." : vista === "cima" ? "Arraste para deslocar, roda do rato ou pinça para aproximar." : "Arraste para rodar, roda do rato ou pinça para aproximar."}
+        Portas e janelas só abrem a parede em 3D se estiverem encostadas a ela (a menos de 40 cm). Clique numa peça para a escolher. {vista === "pessoa" ? "Arraste para olhar à volta (a câmara está a 1,6 m)." : vista === "cima" ? "Arraste para deslocar, roda do rato ou pinça para aproximar." : "Arraste para rodar, roda do rato ou pinça para aproximar."}
       </p>
 
       <div className="flex flex-wrap items-end gap-3">

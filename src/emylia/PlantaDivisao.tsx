@@ -10,10 +10,11 @@ import { Box } from "lucide-react";
 import { useCatalogo } from "./v2/catalogoStore";
 import { BarraProdutos } from "./planta3d/BarraProdutos";
 import { Planta3DPainel } from "./planta3d/Planta3DPainel";
-import { produtosParaEspaco, type ProdutoModelo3D } from "./planta3d/catalogo3d";
+import { comDemonstracao, produtosParaEspaco, type ProdutoModelo3D } from "./planta3d/catalogo3d";
+import { ajustarPeca, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede, encostarParede, normalizarAngulo, poligonoDe, rodarPeca } from "./planta3d/pecas3d";
 import { pecaDeProduto } from "./planta3d/ligacao";
 import { useProto3d } from "./planta3d/usarProto3d";
-import { Check, RotateCw, Trash2, Undo2 } from "lucide-react";
+import { Check, Copy, FlipHorizontal, RotateCcw, RotateCw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { porMedida, type Negocio } from "./motor";
@@ -50,7 +51,10 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   // protótipo do visualizador 3D: as peças vêm dos produtos do catálogo; o 3D abre por baixo da planta
   const K = useCatalogo();
   const proto = useProto3d(d.id, divisao);
-  const produtosCat = useMemo(() => produtosParaEspaco(K.produtos, K.arvore, proto.pref.tipo, { max: 400 }), [K, proto.pref.tipo]);
+  const produtosTodos = useMemo(() => comDemonstracao(K.produtos, K.arvore), [K]);
+  const produtosCat = useMemo(() => produtosParaEspaco(produtosTodos, K.arvore, proto.pref.tipo, { max: 100000 }), [produtosTodos, K, proto.pref.tipo]);
+  const [aviso, setAviso] = useState("");
+  const origem = useRef<PecaPlanta | null>(null);
   const [ver3d, setVer3d] = useState(false);
   const [genericas, setGenericas] = useState(false);
   const [feito, setFeito] = useState("");
@@ -72,6 +76,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     if (guardar) gravar(np); else setP(np);
   };
 
+  const avisosPlanta = useMemo(() => avisosDaPlanta(p), [p]);
   const pts = cantos(p.paredes, p.o);
   const fim = pts[pts.length - 1];
   const falta = faltaFechar(p.paredes);
@@ -116,7 +121,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
       if (parede) gravar({ ...p, paredes: juntarParede(p.paredes, parede) });
       return;
     }
-    if (arrasto.current) { arrasto.current = null; gravar(p); }
+    if (arrasto.current) { const pid = arrasto.current.id; arrasto.current = null; confirmarPeca(p, pid); }
   };
 
   // ---- as peças dentro da planta ----
@@ -125,31 +130,66 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     const q = naPlanta(e.clientX, e.clientY); if (!q) return;
     svg.current?.setPointerCapture?.(e.pointerId);
     arrasto.current = { id: pc.id, dx: q.x - pc.x, dy: q.y - pc.y };
+    origem.current = pc;
     setSel(pc.id); setParedeSel(null);
   };
   const teclas = (e: KeyboardEvent, pc: PecaPlanta) => {
+    if ((e.key === "r" || e.key === "R") && !ehAbertura(pc)) { e.preventDefault(); rodar(pc, e.shiftKey ? -90 : 90); return; }
     const passo = e.shiftKey ? 25 : PASSO;
     const mov: Record<string, [number, number]> = { ArrowLeft: [-passo, 0], ArrowRight: [passo, 0], ArrowUp: [0, -passo], ArrowDown: [0, passo] };
     const m = mov[e.key]; if (!m) return;
     e.preventDefault();
-    mudarPeca(pc.id, { x: pc.x + m[0], y: pc.y + m[1] });
+    confirmarPeca({ ...p, pecas: p.pecas.map((x) => (x.id === pc.id ? { ...x, x: pc.x + m[0], y: pc.y + m[1] } : x)) }, pc.id, pc);
+  };
+
+  // ---- ajustar à divisão (peças de parede encostam-se; nenhuma sai das paredes) ----
+  /** Grava a planta com a peça ajustada; se não couber, volta ao sítio anterior (`antes`) e diz «Fora da divisão». */
+  function confirmarPeca(np: Planta, pid: string, antes: PecaPlanta | null = origem.current, o: { parede?: number; orientar?: boolean } = {}) {
+    const pc = np.pecas.find((x) => x.id === pid); if (!pc) { gravar(np); return; }
+    const r = ajustarPeca(np, pc, o);
+    if (r.ok) { gravar({ ...np, pecas: np.pecas.map((x) => (x.id === pid ? r.peca : x)) }); setAviso(""); return; }
+    gravar({ ...np, pecas: antes ? np.pecas.map((x) => (x.id === pid ? antes : x)) : np.pecas.filter((x) => x.id !== pid) });
+    setAviso(r.erro);
+  }
+  const novoId = () => { let n = contador.current; while (p.pecas.some((x) => x.id === `pc${n}`)) n++; contador.current = n; return `pc${n}`; };
+  /** Roda uma peça: de chão em torno do centro; de parede passa à parede oposta (passos de 180 graus). */
+  const rodar = (pc: PecaPlanta, graus: number) => {
+    const r = rodarPeca(p, pc, graus);
+    if (r.ok) { gravar({ ...p, pecas: p.pecas.map((x) => (x.id === pc.id ? r.peca : x)) }); setAviso(""); } else setAviso(r.erro);
+  };
+  const livre = (pc: PecaPlanta, graus: number) => {
+    const r = ajustarPeca(p, { ...pc, rot: normalizarAngulo(graus) });
+    if (r.ok) { gravar({ ...p, pecas: p.pecas.map((x) => (x.id === pc.id ? r.peca : x)) }); setAviso(""); } else setAviso(r.erro);
+  };
+  const duplicar = (pc: PecaPlanta) => {
+    const nid = novoId();
+    const r = ajustarPeca(p, { ...pc, id: nid, x: pc.x + 20, y: pc.y + 20 });
+    if (!r.ok) { setAviso(r.erro); return; }
+    gravar({ ...p, pecas: [...p.pecas, r.peca] }); setSel(nid); setAviso("");
+  };
+  const adicionarProduto = (m: ProdutoModelo3D, centro?: Ponto) => {
+    const nid = novoId();
+    const base = { ...p, pecas: [...p.pecas, pecaDeProduto(p, m, nid, centro)] };
+    confirmarPeca(base, nid, null, { orientar: true });
+    setSel(nid);
   };
 
   // ---- as peças novas: arrastar da barra para a planta (ou tocar, e fica ao meio) ----
-  const juntarAoMeio = (t: TipoPeca) => { const nid = `pc${++contador.current}`; gravar(juntarPeca(p, t, nid)); setSel(nid); };
+  const juntarAoMeio = (t: TipoPeca) => { const nid = novoId(); gravar(juntarPeca(p, t, nid)); setSel(nid); };
   const pegarNova = (e: RPointerEvent<HTMLButtonElement>, tipo: TipoPeca, produto?: ProdutoModelo3D) => {
     (e.target as Element).setPointerCapture?.(e.pointerId);
     setNova({ tipo, x: e.clientX, y: e.clientY, produto });
   };
-  const juntarProdutoAoMeio = (m: ProdutoModelo3D) => { const nid = `pc${++contador.current}`; gravar({ ...p, pecas: [...p.pecas, pecaDeProduto(p, m, nid)] }); setSel(nid); };
+  const juntarProdutoAoMeio = (m: ProdutoModelo3D) => adicionarProduto(m);
   const moverNova = (e: RPointerEvent<HTMLButtonElement>) => { if (nova) setNova({ ...nova, x: e.clientX, y: e.clientY }); };
   const largarNova = (e: RPointerEvent<HTMLButtonElement>) => {
     if (!nova) return;
     const r = svg.current?.getBoundingClientRect();
     const dentro = !!r && r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    const nid = `pc${++contador.current}`;
     const centro = dentro ? naPlanta(e.clientX, e.clientY) ?? undefined : undefined;
-    gravar(nova.produto ? { ...p, pecas: [...p.pecas, pecaDeProduto(p, nova.produto, nid, centro)] } : juntarPeca(p, nova.tipo, nid, centro));
+    if (nova.produto) { adicionarProduto(nova.produto, centro); setNova(null); return; }
+    const nid = novoId();
+    gravar(juntarPeca(p, nova.tipo, nid, centro));
     setSel(nid); setNova(null);
   };
 
@@ -226,15 +266,20 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
           })}
 
           {/* as peças: arrastar com o dedo; com o teclado, as setas */}
-          {p.pecas.map((pc) => (
-            <g key={pc.id} role="button" tabIndex={0} aria-label={`${PECAS[pc.tipo].n}, ${pc.w} por ${pc.h} cm. Setas para mover.`} aria-pressed={sel === pc.id}
-              onPointerDown={(e) => pegarPeca(e, pc)} onKeyDown={(e) => teclas(e, pc)} onFocus={() => setSel(pc.id)} className="cursor-grab outline-none">
-              <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8}
-                className={PECAS[pc.tipo].abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary"}
-                strokeWidth={sel === pc.id ? letra / 4 : letra / 10} />
-              <text x={pc.x + pc.w / 2} y={pc.y + pc.h / 2 + letra / 3} textAnchor="middle" fontSize={letra * 0.7} className="pointer-events-none fill-foreground">{PECAS[pc.tipo].n}</text>
-            </g>
-          ))}
+          {p.pecas.map((pc) => {
+            const c = centroPeca(pc), nome = pc.nome ?? PECAS[pc.tipo].n;
+            const cor = ehDeParede(pc) ? "fill-sky-100 stroke-sky-700" : PECAS[pc.tipo].abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary";
+            return (
+              <g key={pc.id} role="button" tabIndex={0} aria-label={`${nome}, ${pc.w} por ${pc.h} cm${ehDeParede(pc) && !ehAbertura(pc) ? `, na parede a ${pc.alt ?? 0} cm do chão` : ""}. Setas para mover${ehAbertura(pc) ? "" : ", R para rodar"}.`} aria-pressed={sel === pc.id}
+                onPointerDown={(e) => pegarPeca(e, pc)} onKeyDown={(e) => teclas(e, pc)} onFocus={() => setSel(pc.id)} className="cursor-grab outline-none">
+                <g transform={pc.rot ? `rotate(${pc.rot} ${c.x} ${c.y})` : undefined}>
+                  <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8} className={cor} strokeWidth={sel === pc.id ? letra / 4 : letra / 10} />
+                  {pc.rot !== undefined && <line x1={pc.x} y1={pc.y + pc.h} x2={pc.x + pc.w} y2={pc.y + pc.h} className="stroke-foreground" strokeWidth={letra / 5} />}
+                </g>
+                <text x={c.x} y={c.y + letra / 3} textAnchor="middle" fontSize={letra * 0.7} className="pointer-events-none fill-foreground">{nome.length > 18 ? `${nome.slice(0, 17)}…` : nome}</text>
+              </g>
+            );
+          })}
 
           {!p.paredes.length && !traco && (
             <text x={vista.x + vista.w / 2} y={vista.y + vista.h / 2} textAnchor="middle" fontSize={letra} className="pointer-events-none fill-muted-foreground">
@@ -286,23 +331,81 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
         </div>
       </div>
 
-      {selecionada && (
-        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-muted/30 p-3">
-          <p className="w-full text-[15px] font-medium">{PECAS[selecionada.tipo].n}</p>
-          {(["w", "h"] as const).map((k) => (
-            <label key={k} className="grid w-28 gap-1 text-sm font-medium">{k === "w" ? "Largura" : "Fundo"} (cm)
-              <input key={`${selecionada.id}-${k}-${selecionada[k]}`} type="number" inputMode="numeric" min={1} defaultValue={selecionada[k]} className={INP}
-                onBlur={(e) => { const n = Math.max(1, Math.round(Number(e.target.value) || 0)); if (n !== selecionada[k]) mudarPeca(selecionada.id, { [k]: n }); }} />
-            </label>
-          ))}
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => mudarPeca(selecionada.id, { w: selecionada.h, h: selecionada.w })}>
-            <RotateCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Rodar
-          </Button>
-          <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar({ ...p, pecas: p.pecas.filter((x) => x.id !== selecionada.id) }); setSel(null); }}>
-            <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar
-          </Button>
-        </div>
+      {(aviso || avisosPlanta.length > 0) && (
+        <ul role="status" className="space-y-1 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-900">
+          {aviso && <li>{aviso}</li>}
+          {avisosPlanta.map((a) => <li key={a}>{a}</li>)}
+        </ul>
       )}
+      {selecionada && (() => {
+        const novaPeca = selecionada.rot !== undefined && !ehAbertura(selecionada);
+        const parede = ehDeParede(selecionada) && novaPeca;
+        const poly = poligonoDe(p);
+        const ao = parede && poly ? Math.round(encostarParede(poly, selecionada).ao) : null;
+        const mudarCaixa = (k: "w" | "h", n: number) => confirmarPeca({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? { ...x, [k]: n } : x)) }, selecionada.id, selecionada);
+        const naParede = (novoAo: number) => {
+          const r = ajustarPeca(p, selecionada, { ao: novoAo });
+          if (r.ok) { gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? r.peca : x)) }); setAviso(""); } else setAviso(r.erro);
+        };
+        return (
+          <div role="group" className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-muted/30 p-3" aria-label={`Peça escolhida: ${selecionada.nome ?? PECAS[selecionada.tipo].n}`}>
+            <p className="w-full text-[15px] font-medium">{selecionada.nome ?? PECAS[selecionada.tipo].n}{parede ? " (de parede)" : ""}</p>
+            {(["w", "h"] as const).map((k) => (
+              <label key={k} className="grid w-28 gap-1 text-sm font-medium">{k === "w" ? "Largura" : "Fundo"} (cm)
+                <input key={`${selecionada.id}-${k}-${selecionada[k]}`} type="number" inputMode="numeric" min={1} defaultValue={selecionada[k]} className={INP}
+                  onBlur={(e) => { const n = Math.max(1, Math.round(Number(e.target.value) || 0)); if (n !== selecionada[k]) (novaPeca ? mudarCaixa(k, n) : mudarPeca(selecionada.id, { [k]: n })); }} />
+              </label>
+            ))}
+            {parede && (
+              <>
+                <label className="grid w-36 gap-1 text-sm font-medium">Altura ao chão (cm)
+                  <input key={`${selecionada.id}-alt-${selecionada.alt}`} type="number" inputMode="numeric" min={0} defaultValue={selecionada.alt ?? 0} className={INP}
+                    onBlur={(e) => { const n = Math.max(0, Math.round(Number(e.target.value) || 0)); if (n !== (selecionada.alt ?? 0)) mudarPeca(selecionada.id, { alt: n }); }} />
+                </label>
+                {ao !== null && (
+                  <label className="grid w-44 gap-1 text-sm font-medium">Posição ao longo da parede (cm)
+                    <input key={`${selecionada.id}-ao-${ao}`} type="number" inputMode="numeric" min={0} defaultValue={ao} className={INP}
+                      onBlur={(e) => { const n = Math.max(0, Math.round(Number(e.target.value) || 0)); if (n !== ao) naParede(n); }} />
+                  </label>
+                )}
+              </>
+            )}
+            {novaPeca && !parede && (
+              <label className="grid w-36 gap-1 text-sm font-medium">Ângulo (graus)
+                <input key={`${selecionada.id}-rot-${selecionada.rot}`} type="number" inputMode="numeric" step={5} defaultValue={selecionada.rot ?? 0} className={INP}
+                  onBlur={(e) => { const n = normalizarAngulo(Number(e.target.value) || 0); if (n !== (selecionada.rot ?? 0)) livre(selecionada, n); }} />
+              </label>
+            )}
+            {novaPeca && (
+              <>
+                <Button type="button" variant="outline" className="min-h-11" onClick={() => rodar(selecionada, -90)}>
+                  <RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />{parede ? "Passar à parede oposta" : "Rodar 90° à esquerda"}
+                </Button>
+                {!parede && (
+                  <Button type="button" variant="outline" className="min-h-11" onClick={() => rodar(selecionada, 90)}>
+                    <RotateCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Rodar 90° à direita
+                  </Button>
+                )}
+                <Button type="button" variant="outline" className="min-h-11" aria-pressed={!!selecionada.esp} onClick={() => mudarPeca(selecionada.id, { esp: !selecionada.esp })}>
+                  <FlipHorizontal className="mr-1.5 h-4 w-4" aria-hidden="true" />Espelhar
+                </Button>
+              </>
+            )}
+            {!novaPeca && !ehAbertura(selecionada) && (
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => mudarPeca(selecionada.id, { w: selecionada.h, h: selecionada.w })}>
+                <RotateCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Rodar
+              </Button>
+            )}
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => duplicar(selecionada)}>
+              <Copy className="mr-1.5 h-4 w-4" aria-hidden="true" />Duplicar
+            </Button>
+            <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar({ ...p, pecas: p.pecas.filter((x) => x.id !== selecionada.id) }); setSel(null); setAviso(""); }}>
+              <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Remover
+            </Button>
+            <p className="w-full text-sm text-muted-foreground">Com a peça escolhida: setas movem (Shift: 25 cm), R roda 90° para a direita e Shift+R para a esquerda{parede ? " (as de parede passam à parede oposta)" : ""}.</p>
+          </div>
+        );
+      })()}
 
       {/* desfazer, recomeçar, ou escrever as medidas à mão */}
       {p.paredes.length > 0 && (
@@ -354,8 +457,8 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
           <Box className="mr-1.5 h-4 w-4" aria-hidden="true" />{ver3d ? "Fechar o 3D" : "Ver em 3D"}
         </Button>
         {ver3d && (
-          <Planta3DPainel planta={p} tipo={proto.pref.tipo} nome={divisao ?? "Espaço"} peDireito={pe} produtos={K.produtos} arvore={K.arvore}
-            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} />
+          <Planta3DPainel planta={p} tipo={proto.pref.tipo} nome={divisao ?? "Espaço"} peDireito={pe} produtos={produtosTodos} arvore={K.arvore}
+            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} selecionada={sel} onSelecionar={setSel} />
         )}
       </div>
     </div>
