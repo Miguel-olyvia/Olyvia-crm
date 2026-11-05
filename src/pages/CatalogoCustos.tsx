@@ -85,7 +85,9 @@ export default function CatalogoCustos() {
   const podeStock = hasPermission("inventory.edit");
   // 03/11: o que cada parte do Catálogo deixa mudar (services.edit, services.manage_prices, products.edit, products.manage_prices).
   const perms = useMemo(() => permissoesCatalogo(hasPermission), [hasPermission]);
-  const real = useMemo<FichaProdutoReal | undefined>(() => (org ? { org, podeEditar, podeMudarPrecos, podeStock, recarregar: () => carregar(org) } : undefined), [org, podeEditar, podeMudarPrecos, podeStock, carregar]);
+  // 05/11: o custo de compra dos produtos e consumíveis (e a margem, e o preço dos fornecedores) só com products.view_cost
+  const podeVerCusto = hasPermission("products.view_cost");
+  const real = useMemo<FichaProdutoReal | undefined>(() => (org ? { org, podeEditar, podeMudarPrecos, podeStock, podeVerCusto, recarregar: () => carregar(org) } : undefined), [org, podeEditar, podeMudarPrecos, podeStock, podeVerCusto, carregar]);
 
   if (isLoading || (!org && !erroLer)) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver o Catálogo e custos.</div>;

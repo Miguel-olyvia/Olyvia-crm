@@ -19,6 +19,9 @@ export interface FichaProdutoReal {
   podeMudarPrecos: boolean;
   /** inventory.edit: marcar armazéns em lote no Catálogo (na ficha manda o pode_editar de cat_produto_stock). */
   podeStock?: boolean;
+  /** 05/11 (products.view_cost): ver o custo de compra (custo do produto/consumível, margem, preço dos fornecedores).
+   *  Sem ela o ecrã mostra só o preço de venda. Sem valor (protótipo, testes antigos) vê, como antes. */
+  podeVerCusto?: boolean;
   recarregar: () => Promise<void>;
 }
 
