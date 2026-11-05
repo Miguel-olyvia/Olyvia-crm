@@ -31,7 +31,7 @@ export interface MaterialMockup { metalness: number; roughness: number }
 export type ParamsMockup =
   | { k: "torneira"; estilo: "extraivel" | "monocomando" | "abativel" | "cira"; altura: number; saida: number; alcance: number; base: number; /** o modelo detalhado portado do HTML (modelosHtml/), com o acabamento */ html?: { modelo: string; acab: string } }
   | { k: "lava_loica"; cubas: { x: number; z: number; w: number; d: number; prof: number }[]; escorredor: boolean; degrau: boolean; /** o modelo detalhado portado do HTML (a medida e o acabamento) */ html?: { modelo: string; acab: string } }
-  | { k: "placa"; tipo: "induction" | "radiant" | "gas"; recorte: [number, number]; espessura: number; acima: number; queimadores: [number, number, number][]; manipulos: number[]; vidro: boolean }
+  | { k: "placa"; tipo: "induction" | "radiant" | "gas"; recorte: [number, number]; espessura: number; acima: number; queimadores: [number, number, number][]; manipulos: number[]; vidro: boolean; /** o modelo detalhado portado do HTML */ html?: { modelo: string; acab: string } }
   | { k: "tampo"; espessura: number };
 export interface Mockup3D { tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }

@@ -52,7 +52,7 @@ export function roundLoop(w: number, d: number, r: number, n = 24): Par[] {
   return points;
 }
 /** Uma superfície por anéis de pontos (x, y, z) consecutivos: as paredes e o fundo das cubas. */
-function sinkSurface(rings: Par[][], material: THREE.Material, parent: THREE.Object3D, name: string, reverse = false): THREE.Mesh {
+export function sinkSurface(rings: Par[][], material: THREE.Material, parent: THREE.Object3D, name: string, reverse = false): THREE.Mesh {
   const p: number[] = [], ix: number[] = [], count = rings[0].length;
   for (const ring of rings) for (const v of ring) p.push(...v);
   for (let row = 0; row < rings.length - 1; row++) for (let j = 0; j < count; j++) {

@@ -10,6 +10,7 @@ import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
 import { libertarMateriais } from "./modelosHtml/util";
 import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml/lavaLoicas";
+import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
@@ -132,6 +133,13 @@ function ModeloLavaLoicaHtml({ modelo, acab, opc, h }: { modelo: string; acab: s
   const t = useMemo(() => (ehModeloLavaLoica(modelo) ? construirLavaLoica(modelo, acab, { tampas: opc?.tampas }) : null), [modelo, acab, opc?.tampas]);
   useEffect(() => () => { t?.materiais.forEach((m) => m.dispose()); }, [t]);
   return t ? <group position={[0, h, 0]} scale={0.001}><primitive object={t.grupo} /></group> : null;
+}
+
+/** A placa detalhada do HTML (queimadores, grelhas e manípulos; vidro com bordo): a base é o plano de apoio na bancada. */
+function ModeloPlacaHtml({ modelo, acab }: { modelo: string; acab: string }) {
+  const t = useMemo(() => (ehModeloPlaca(modelo) ? construirPlaca(modelo, acab) : null), [modelo, acab]);
+  useEffect(() => () => { t?.materiais.forEach((m) => m.dispose()); }, [t]);
+  return t ? <group scale={0.001}><primitive object={t.grupo} /></group> : null;
 }
 
 /** Uma torneira de cozinha: base, coluna e bica em tubo (extraível com cabeça, monocomando, abatível ou com flexível de silicone), ao longo de uma curva. */
@@ -475,6 +483,7 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo:
       if (params?.k === "lava_loica" && params.html) return <ModeloLavaLoicaHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} h={h} />;
       return params?.k === "lava_loica" ? <LavaLoica w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
     case "placa":
+      if (params?.k === "placa" && params.html) return <ModeloPlacaHtml modelo={params.html.modelo} acab={params.html.acab} />;
       return params?.k === "placa" ? <Placa w={w} d={d} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
     case "tampo":
       return <ChapaComFuros w={w} d={d} esp={params?.k === "tampo" ? params.espessura : 0.012} y={0} furos={recortes ?? []} cor={cor} mat={mat} />;

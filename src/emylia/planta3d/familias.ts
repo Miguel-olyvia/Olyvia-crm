@@ -162,6 +162,7 @@ const OUTRAS: Familia[] = [
 const DETALHADAS: Record<string, OpcaoFamilia[]> = { round: ["bica", "extraida"], noah: ["bica"], smooth: ["bica", "extraida"], stick: ["bica", "extraida"] };
 for (const f of TORNEIRAS) if (DETALHADAS[f.id]) { f.htmlModelo = f.id; f.opcoes = DETALHADAS[f.id]; }
 /** Lava-loiças com modelo detalhado do HTML: Velar, Lody e Ambar (a medida é o id do modelo). A Ambar tem tampas dos ralos que se retiram. */
+for (const f of PLACAS) f.htmlModelo = f.id;
 for (const f of LAVALOICAS) if (["velar", "lody", "ambar"].includes(f.id)) { f.htmlModelo = f.id; if (f.id === "ambar") f.opcoes = ["tampas"]; }
 
 export const FAMILIAS: Familia[] = [...TORNEIRAS, ...LAVALOICAS, ...PLACAS, ...OUTRAS];
@@ -200,7 +201,7 @@ export function paramsDaVariante(v: VarianteResolvida): ParamsMockup | undefined
   if (s?.cubas) return { k: "lava_loica", cubas: s.cubas.map((c) => ({ x: c.left * M, z: c.top * M, w: c.w * M, d: c.d * M, prof: c.prof * M })), escorredor: !!s.escorredor, degrau: !!s.degrau, ...(v.familia.htmlModelo ? { html: { modelo: v.medida.id, acab: v.acabamento.id } } : {}) };
   if (s?.placa) {
     const p = s.placa;
-    return { k: "placa", tipo: p.tipo, recorte: [p.recorte[0] * M, p.recorte[1] * M], espessura: p.espessura * M, acima: p.acima * M, queimadores: (p.queimadores ?? []).map(([x, z, r]) => [x * M, z * M, r * M] as [number, number, number]), manipulos: (p.manipulos ?? []).map((x) => x * M), vidro: !!p.vidro };
+    return { k: "placa", tipo: p.tipo, recorte: [p.recorte[0] * M, p.recorte[1] * M], espessura: p.espessura * M, acima: p.acima * M, queimadores: (p.queimadores ?? []).map(([x, z, r]) => [x * M, z * M, r * M] as [number, number, number]), manipulos: (p.manipulos ?? []).map((x) => x * M), vidro: !!p.vidro, ...(v.familia.htmlModelo ? { html: { modelo: v.medida.id, acab: v.acabamento.id } } : {}) };
   }
   if (v.familia.tipo === "tampo") return { k: "tampo", espessura: 0.012 };
   return undefined;
