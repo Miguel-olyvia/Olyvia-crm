@@ -6,7 +6,7 @@
 /** Para onde vai a parede: este (direita), sul (baixo), oeste (esquerda), norte (cima). */
 export type Rumo = "E" | "S" | "W" | "N";
 export interface Parede { c: number; r: Rumo }
-export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "coluna" | "porta" | "janela";
+export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "coluna" | "espelho" | "toalheiro" | "porta" | "janela";
 /** Uma peça na planta: o canto de cima à esquerda e o tamanho, em cm. */
 export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; w: number; h: number }
 export interface Ponto { x: number; y: number }
@@ -20,6 +20,8 @@ export const PECAS: Record<TipoPeca, { n: string; w: number; h: number; abertura
   bide: { n: "Bidé", w: 36, h: 55 },
   movel: { n: "Móvel", w: 80, h: 45 },
   coluna: { n: "Móvel coluna", w: 35, h: 35 },
+  espelho: { n: "Espelho", w: 80, h: 4 },
+  toalheiro: { n: "Toalheiro", w: 50, h: 6 },
   porta: { n: "Porta", w: 80, h: 8, abertura: true },
   janela: { n: "Janela", w: 100, h: 8, abertura: true },
 };
