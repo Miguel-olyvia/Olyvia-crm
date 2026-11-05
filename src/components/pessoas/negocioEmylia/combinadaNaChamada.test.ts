@@ -1,7 +1,7 @@
 // 5/11 (Rúben: «consoante o agendamento da visita recomendar comerciais»): o dia e a hora combinados na chamada entram em
 // «Marcar a visita» só se servem; o dia escolhido faz aparecer os comerciais livres nesse dia (QuemPodeIrVisita).
 import { describe, expect, it } from "vitest";
-import { combinadaNaChamada } from "./MarcarVisitaNegocio";
+import { combinadaNaChamada, periodoDaHora } from "./MarcarVisitaNegocio";
 
 describe("combinadaNaChamada", () => {
   it("dia e hora em HH:MM, nas formas em que se dizem", () => {
@@ -25,5 +25,15 @@ describe("combinadaNaChamada", () => {
 
   it("hoje ainda serve", () => {
     expect(combinadaNaChamada("2026-11-05", "16:00", "2026-11-05")).toEqual({ data: "2026-11-05", hora: "16:00" });
+  });
+});
+
+describe("periodoDaHora", () => {
+  it("manhã ou tarde, quando só se combinou a parte do dia", () => {
+    expect(periodoDaHora("manhã")).toBe("manha");
+    expect(periodoDaHora("de manha")).toBe("manha");
+    expect(periodoDaHora("à tarde")).toBe("tarde");
+    expect(periodoDaHora("11:00")).toBeNull();
+    expect(periodoDaHora(undefined)).toBeNull();
   });
 });

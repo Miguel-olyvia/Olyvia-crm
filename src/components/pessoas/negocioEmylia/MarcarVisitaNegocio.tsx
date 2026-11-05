@@ -91,6 +91,12 @@ export function combinadaNaChamada(dia: string | undefined, hora: string | undef
     ? { data: dia, hora: `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` } : { data: dia };
 }
 
+/** A parte do dia combinada sem hora certa («sábado de manhã»): as horas livres escolhem-se dentro dela. */
+export function periodoDaHora(hora: string | undefined): "manha" | "tarde" | null {
+  const t = (hora ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return /manha/.test(t) ? "manha" : /tarde|noite/.test(t) ? "tarde" : null;
+}
+
 const chaveDaDuracao = (minutos: number): Pick<ValorAgenda, "duracao" | "duracaoMinutos"> => {
   const chave = DURACOES_VISITA.find((c) => minutosDaDuracao(c) === minutos);
   return chave ? { duracao: chave } : { duracao: "", duracaoMinutos: minutos };
@@ -203,7 +209,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
       </p>
       {!visita && dataInicial && combinadaNaChamada(dataInicial, horaInicial, hoje).data && (
         <p role="status" className="rounded-xl border border-primary/30 bg-primary/[0.04] px-4 py-3 text-[15px]">
-          <b className="font-semibold">Combinado na chamada:</b> {diaPorExtenso(dataInicial)}{combinadaNaChamada(dataInicial, horaInicial, hoje).hora ? ` às ${combinadaNaChamada(dataInicial, horaInicial, hoje).hora}` : ""}.{" "}
+          <b className="font-semibold">Combinado na chamada:</b> {diaPorExtenso(dataInicial)}{combinadaNaChamada(dataInicial, horaInicial, hoje).hora ? ` às ${combinadaNaChamada(dataInicial, horaInicial, hoje).hora}` : periodoDaHora(horaInicial) === "manha" ? " de manhã" : periodoDaHora(horaInicial) === "tarde" ? " à tarde" : ""}.{" "}
           {marcarSozinha && sozinha === null ? "A procurar o comercial livre mais perto a essa hora…"
             : sozinha ? sozinha.texto
             : "Em baixo, os comerciais livres nesse dia; escolha quem vai."}
@@ -240,8 +246,8 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
           <QuemPodeIrVisita
             a={p} recursos={recursos} duracaoMin={minutos} horario={horario.horario} feriados={horario.feriados}
             horarioPronto={!horario.isLoading && !horario.isError} excluirId={visita?.id ?? null}
-            escolherSozinho={marcarSozinha && !visita && !jaEnviouSozinha.current}
-            aoEscolherSozinho={(r) => (r.quem ? setSozinha({ quem: r.quem, texto: `Vai ${r.quem}, o comercial livre mais perto a essa hora.` }) : desistir(r.motivo))}
+            escolherSozinho={marcarSozinha && !visita && !jaEnviouSozinha.current} periodoPreferido={periodoDaHora(horaInicial)}
+            aoEscolherSozinho={(r) => (r.quem ? setSozinha({ quem: r.quem, texto: r.motivo || `Vai ${r.quem}, o comercial livre mais perto a essa hora.` }) : desistir(r.motivo))}
             hora={(filtrar) => (
               <HorasLivresVisita
                 id={p.id} hora={p.hora} horas={filtrar(horas.horas)} estado={horas.estado} horario={horario.horario} horarioPorOmissao={horario.porOmissao}

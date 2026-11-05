@@ -85,6 +85,8 @@ interface Props {
   /** 5/11: escolher sozinho, para a hora já escolhida, o comercial livre mais perto (uma vez por dia e hora). */
   escolherSozinho?: boolean;
   aoEscolherSozinho?: (r: { quem: string | null; motivo: string }) => void;
+  /** Sem hora certa, a parte do dia combinada: a primeira hora livre dentro dela (manhã antes das 13:00). */
+  periodoPreferido?: "manha" | "tarde" | null;
 }
 
 /** O estado da verificação da viagem de um recurso: a ler, sem morada da obra localizada, ou o que se sabe da base dele. */
@@ -99,7 +101,7 @@ const TEXTO_ESTADO: Record<ComTexto, { curto: string; frase: string }> = {
 const nomeDe = (r: RecursoVisita): string => r.name?.trim() || "(sem nome)";
 const SEM_CP7 ="Falta a morada completa (código postal de 7 dígitos) para ver quem consegue chegar.";
 
-export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, horarioPronto, excluirId, hora, escolherSozinho = false, aoEscolherSozinho }: Props) {
+export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, horarioPronto, excluirId, hora, escolherSozinho = false, aoEscolherSozinho, periodoPreferido = null }: Props) {
   const papeis = usePapeisDosRecursos();
   const papeisALer = usePapeisALer();
   const dia = a.data;
@@ -149,10 +151,26 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
   // 5/11 (marcar sozinha): com tudo lido, o comercial livre a essa hora que parte de mais perto
   const sozinhoEm = useRef("");
   useEffect(() => {
-    if (!escolherSozinho || !dia || !a.hora || sozinhoEm.current === dia + a.hora || a.escolhidos.length > 0 || a.somenteLeitura) return;
+    if (!escolherSozinho || !dia || sozinhoEm.current === dia + "|" + a.hora || a.escolhidos.length > 0 || a.somenteLeitura) return;
     if (papeisALer || !tudoLido) return;
-    sozinhoEm.current = dia + a.hora;
+    sozinhoEm.current = dia + "|" + a.hora;
     if (!g.conhecido) { aoEscolherSozinho?.({ quem: null, motivo: "Não se sabe quem é comercial (os papéis do RH não chegaram): escolha quem vai." }); return; }
+    // sem hora certa: o comercial mais perto com uma hora livre na parte do dia combinada, e a primeira dessas horas
+    if (!a.hora) {
+      const noPeriodo = (r: RecursoVisita) => (podeNoDia(r) ?? []).filter((x) => periodoPreferido === "manha" ? x < "13:00" : periodoPreferido === "tarde" ? x >= "13:00" : true);
+      const quem = ordenados.find((r) => comerciais.includes(r) && noPeriodo(r).length > 0);
+      if (!quem) {
+        aoEscolherSozinho?.({ quem: null, motivo: periodoPreferido
+          ? `Nenhum comercial tem horas livres ${periodoPreferido === "manha" ? "de manhã" : "à tarde"} nesse dia: escolha outra hora ou quem vai.`
+          : "Nenhum comercial está livre nesse dia: veja os outros dias sugeridos em baixo." });
+        return;
+      }
+      const primeira = noPeriodo(quem)[0];
+      a.aoMudarRecursos([quem.id]);
+      a.aoMudar({ hora: primeira });
+      aoEscolherSozinho?.({ quem: nomeDe(quem), motivo: `Vai ${nomeDe(quem)} às ${primeira}: a primeira hora livre ${periodoPreferido === "manha" ? "da manhã " : periodoPreferido === "tarde" ? "da tarde " : ""}do comercial mais perto (não ficou combinada uma hora certa).` });
+      return;
+    }
     const h = a.hora;
     const quem = ordenados.find((r) => comerciais.includes(r) && (podeNoDia(r) ?? []).includes(h));
     if (!quem) {

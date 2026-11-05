@@ -14,7 +14,7 @@ const CHAVE_VOZ_TEXTO = "olyvia.chamadas.voz_texto";  // o que a amostra diz, pa
  *  no passo «Marcar a visita»), mas o que se combinou ao telefone fica no negócio e à vista. */
 export const GRUPO_VISITA: Grupo = { titulo: "Da chamada", campos: [
   { k: "visita_dia", l: "Visita: dia combinado", t: "data", ajuda: "Só se ficou combinado um dia para a visita." },
-  { k: "visita_hora", l: "Visita: hora combinada", t: "texto", ajuda: "Ex.: 11:00. Só se ficou combinada uma hora." },
+  { k: "visita_hora", l: "Visita: hora combinada", t: "texto", ajuda: "Ex.: 11:00. Se só se combinou a parte do dia, «manhã» ou «tarde». Vazio se não se falou da hora." },
   { k: "notas_chamada", l: "Notas da chamada", t: "texto_longo",
     ajuda: "Tudo o que é útil para a visita e não cabe nos outros campos: dúvidas, o que o cliente já fez, exemplos que pediu, restrições, o que ficou por perguntar. Com detalhe." },
 ] };
