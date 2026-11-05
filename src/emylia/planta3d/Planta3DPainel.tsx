@@ -6,9 +6,9 @@ import { Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Planta } from "../planta";
-import { modeloDoProduto, type NoCat, type ProdutoCat, type ProdutoModelo3D, type TipoEspaco } from "./catalogo3d";
+import { modeloDoProduto, type NoCat, type ProdutoCat, type ProdutoModelo3D } from "./catalogo3d";
 import { deLegado } from "./ligacao";
-import { areaPavimento, areaParedes, descreverEspaco } from "./modelo";
+import { areaPavimento, areaParedes, descreverEspaco, type TipoEspaco } from "./modelo";
 import { REVESTIMENTOS, type Superficie } from "./revestimentos";
 import type { Vista3D } from "./Visualizador3D";
 

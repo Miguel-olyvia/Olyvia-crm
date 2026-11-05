@@ -1,3 +1,117 @@
+// Protótipo (visualizador 3D): a cena three.js (react-three-fiber 8 + drei 9, compatíveis com o React 18). Carrega-se com React.lazy, por isso o
+// three só entra no pacote ao abrir o visualizador. Recebe o espaço (modelo.ts) e os produtos do catálogo com o mockup de cada um (catalogo3d.ts);
+// cada mockup é geometria paramétrica com a dimensão real do produto. Se o produto tiver `mockup3d.url` (GLB), carrega-se esse modelo e a
+// geometria paramétrica fica de reserva. Sem sombras (o protótipo não precisa) e com o ciclo de desenho sob pedido (frameloop demand).
+import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
+import * as THREE from "three";
+import type { ProdutoModelo3D } from "./catalogo3d";
+import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type Parede, type PecaProduto } from "./modelo";
+import { revestimentoDe, type Revestimento } from "./revestimentos";
+
+export type Vista3D = "cima" | "3d" | "pessoa";
+export interface Visualizador3DProps {
+  espaco: Espaco;
+  /** Os produtos usados no espaço, por id. */
+  modelos: Readonly<Record<string, ProdutoModelo3D>>;
+  vista: Vista3D;
+  teto: boolean;
+  etiquetas: boolean;
+  descricao: string;
+  /** a peça escolhida (a mesma da planta) e como escolher outra clicando nela */
+  selecionada: string | null;
+  onSelecionar: (id: string | null) => void;
+}
+
+type V3 = [number, number, number];
+
+/* ------------------------------------------------------------------ texturas procedurais (canvas, sem ficheiros) */
+const cacheTexturas = new Map<string, THREE.CanvasTexture>();
+/** O lado, em metros, que uma repetição da textura cobre. */
+const ladoTextura = (r: Revestimento): number => (r.tipo === "madeira" ? r.modulo * 4 : r.modulo);
+
+function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
+  if (r.tipo === "tinta") return null;
+  const guardada = cacheTexturas.get(r.id);
+  if (guardada) return guardada;
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const g = c.getContext("2d");
+  if (!g) return null;
+  g.fillStyle = r.cor;
+  g.fillRect(0, 0, 256, 256);
+  if (r.tipo === "azulejo") {
+    g.strokeStyle = r.junta ?? "#bbb";
+    g.lineWidth = 8;
+    g.strokeRect(0, 0, 256, 256);
+  } else {
+    const sombras = [0.0, -0.08, 0.06, -0.04];
+    for (let i = 0; i < 4; i++) {
+      g.fillStyle = sombras[i] >= 0 ? `rgba(255,255,255,${sombras[i]})` : `rgba(0,0,0,${-sombras[i]})`;
+      g.fillRect(0, i * 64, 256, 64);
+      g.strokeStyle = "rgba(0,0,0,0.35)";
+      g.lineWidth = 2;
+      g.beginPath(); g.moveTo(0, i * 64); g.lineTo(256, i * 64); g.stroke();
+      g.strokeStyle = "rgba(0,0,0,0.08)";
+      for (let k = 0; k < 6; k++) { const y = i * 64 + 8 + k * 9 + ((i * 7 + k * 3) % 5); g.beginPath(); g.moveTo(0, y); g.lineTo(256, y + ((k % 2) * 2 - 1)); g.stroke(); }
+      g.strokeStyle = "rgba(0,0,0,0.3)";
+      const x = (i * 97) % 256; g.beginPath(); g.moveTo(x, i * 64); g.lineTo(x, i * 64 + 64); g.stroke();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  cacheTexturas.set(r.id, t);
+  return t;
+}
+
+/** Um material do revestimento para uma superfície de `w`×`h` metros (a textura repete-se por metro, não esticada). */
+function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshStandardMaterial {
+  const mat = useMemo(() => {
+    const base = texturaBase(r);
+    const m = new THREE.MeshStandardMaterial({ color: base ? "#ffffff" : r.cor, roughness: r.tipo === "azulejo" ? 0.35 : 0.8, side: THREE.DoubleSide });
+    if (base) {
+      const t = base.clone();
+      t.needsUpdate = true;
+      const l = ladoTextura(r);
+      t.repeat.set(Math.max(0.1, w / l), Math.max(0.1, h / l));
+      m.map = t;
+    }
+    return m;
+  }, [r, w, h]);
+  useEffect(() => () => { mat.map?.dispose(); mat.dispose(); }, [mat]);
+  return mat;
+}
+
+/* ------------------------------------------------------------------ pequenas peças */
+const Caixa = ({ p, s, cor, r = 0.6 }: { p: V3; s: V3; cor: string; r?: number }) => (
+  <mesh position={p}><boxGeometry args={s} /><meshStandardMaterial color={cor} roughness={r} /></mesh>
+);
+/** Um cilindro achatado em elipse: raio 0,5 em x e z, escalado para `ex` × `ez`. */
+const Elipse = ({ p, ex, ez, h, cor, topo = 0.5 }: { p: V3; ex: number; ez: number; h: number; cor: string; topo?: number }) => (
+  <mesh position={p} scale={[ex, 1, ez]}><cylinderGeometry args={[topo, 0.5, h, 28]} /><meshStandardMaterial color={cor} roughness={0.25} /></mesh>
+);
+/** As frentes (portas) de um móvel, com puxadores, na face de +z. */
+function Frentes({ w, h, d, n, cor, y0 = 0, vertical = false }: { w: number; h: number; d: number; n: number; cor: string; y0?: number; vertical?: boolean }) {
+  const folga = 0.006, lw = (w - folga * (n + 1)) / n;
+  return (
+    <>
+      {Array.from({ length: n }, (_, i) => {
+        const x = -w / 2 + folga + lw / 2 + i * (lw + folga);
+        const hx = x + (i % 2 === 0 ? lw / 2 - 0.03 : -lw / 2 + 0.03);
+        return (
+          <group key={i}>
+            <Caixa p={[x, y0 + h / 2, d / 2 + 0.009]} s={[lw, h - 0.01, 0.018]} cor={cor} r={0.5} />
+            <Caixa p={[hx, vertical ? y0 + h * 0.5 : y0 + h - 0.05, d / 2 + 0.03]} s={vertical ? [0.015, 0.14, 0.02] : [0.12, 0.012, 0.02]} cor="#8a8a8a" r={0.3} />
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
 /** O mockup paramétrico de um tipo, com a pegada `w` (largura) × `d` (profundidade) e a altura `h`. Frente para +z, costas em -z, base em y=0. */
 function Parametrico({ tipo, w, d, h, cor }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string }) {
   const bola = (hb: number, zc: number, prof: number) => (
@@ -257,245 +371,6 @@ function Parametrico({ tipo, w, d, h, cor }: { tipo: ProdutoModelo3D["tipo"]; w:
       return <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
   }
 }
-function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
-  const { tipo, altura, cor, url } = m.mockup3d;
-  const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} />;
-  const nf = (n: number) => Math.round(n * 100).toString();
-  const base = p.montagem === "parede" ? p.altura : 0;
-  return (
-    <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }}>
-      <group scale={[p.espelhada ? -1 : 1, 1, 1]}>
-        {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
-      </group>
-      {selecionada && (
-        <mesh position={[0, altura / 2, 0]}><boxGeometry args={[p.largura + 0.04, altura + 0.04, p.profundidade + 0.04]} /><meshBasicMaterial color="#7c3aed" wireframe /></mesh>
-      )}
-      {(etiquetas || selecionada) && (
-        <Html position={[0, Math.max(altura, 0.3) + 0.12, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-          <div className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-tight text-white ${selecionada ? "bg-violet-700" : "bg-black/75"}`}>
-            {p.nome ?? m.nome}<br />{nf(p.largura)}×{nf(p.profundidade)}×{nf(altura)} cm{p.montagem === "parede" ? ` · a ${nf(p.altura)} cm do chão` : ""}
-          </div>
-        </Html>
-      )}
-    </group>
-  );
-}
-// Protótipo (visualizador 3D): a cena three.js (react-three-fiber 8 + drei 9, compatíveis com o React 18). Carrega-se com React.lazy, por isso o
-// three só entra no pacote ao abrir o visualizador. Recebe o espaço (modelo.ts) e os produtos do catálogo com o mockup de cada um (catalogo3d.ts);
-// cada mockup é geometria paramétrica com a dimensão real do produto. Se o produto tiver `mockup3d.url` (GLB), carrega-se esse modelo e a
-// geometria paramétrica fica de reserva. Sem sombras (o protótipo não precisa) e com o ciclo de desenho sob pedido (frameloop demand).
-import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
-import * as THREE from "three";
-import type { ProdutoModelo3D } from "./catalogo3d";
-import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type Parede, type PecaProduto } from "./modelo";
-import { revestimentoDe, type Revestimento } from "./revestimentos";
-
-export type Vista3D = "cima" | "3d" | "pessoa";
-export interface Visualizador3DProps {
-  espaco: Espaco;
-  /** Os produtos usados no espaço, por id. */
-  modelos: Readonly<Record<string, ProdutoModelo3D>>;
-  vista: Vista3D;
-  teto: boolean;
-  etiquetas: boolean;
-  descricao: string;
-  /** a peça escolhida (a mesma da planta) e como escolher outra clicando nela */
-  selecionada: string | null;
-  onSelecionar: (id: string | null) => void;
-}
-
-type V3 = [number, number, number];
-
-/* ------------------------------------------------------------------ texturas procedurais (canvas, sem ficheiros) */
-const cacheTexturas = new Map<string, THREE.CanvasTexture>();
-/** O lado, em metros, que uma repetição da textura cobre. */
-const ladoTextura = (r: Revestimento): number => (r.tipo === "madeira" ? r.modulo * 4 : r.modulo);
-
-function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
-  if (r.tipo === "tinta") return null;
-  const guardada = cacheTexturas.get(r.id);
-  if (guardada) return guardada;
-  const c = document.createElement("canvas");
-  c.width = c.height = 256;
-  const g = c.getContext("2d");
-  if (!g) return null;
-  g.fillStyle = r.cor;
-  g.fillRect(0, 0, 256, 256);
-  if (r.tipo === "azulejo") {
-    g.strokeStyle = r.junta ?? "#bbb";
-    g.lineWidth = 8;
-    g.strokeRect(0, 0, 256, 256);
-  } else {
-    const sombras = [0.0, -0.08, 0.06, -0.04];
-    for (let i = 0; i < 4; i++) {
-      g.fillStyle = sombras[i] >= 0 ? `rgba(255,255,255,${sombras[i]})` : `rgba(0,0,0,${-sombras[i]})`;
-      g.fillRect(0, i * 64, 256, 64);
-      g.strokeStyle = "rgba(0,0,0,0.35)";
-      g.lineWidth = 2;
-      g.beginPath(); g.moveTo(0, i * 64); g.lineTo(256, i * 64); g.stroke();
-      g.strokeStyle = "rgba(0,0,0,0.08)";
-      for (let k = 0; k < 6; k++) { const y = i * 64 + 8 + k * 9 + ((i * 7 + k * 3) % 5); g.beginPath(); g.moveTo(0, y); g.lineTo(256, y + ((k % 2) * 2 - 1)); g.stroke(); }
-      g.strokeStyle = "rgba(0,0,0,0.3)";
-      const x = (i * 97) % 256; g.beginPath(); g.moveTo(x, i * 64); g.lineTo(x, i * 64 + 64); g.stroke();
-    }
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  cacheTexturas.set(r.id, t);
-  return t;
-}
-
-/** Um material do revestimento para uma superfície de `w`×`h` metros (a textura repete-se por metro, não esticada). */
-function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshStandardMaterial {
-  const mat = useMemo(() => {
-    const base = texturaBase(r);
-    const m = new THREE.MeshStandardMaterial({ color: base ? "#ffffff" : r.cor, roughness: r.tipo === "azulejo" ? 0.35 : 0.8, side: THREE.DoubleSide });
-    if (base) {
-      const t = base.clone();
-      t.needsUpdate = true;
-      const l = ladoTextura(r);
-      t.repeat.set(Math.max(0.1, w / l), Math.max(0.1, h / l));
-      m.map = t;
-    }
-    return m;
-  }, [r, w, h]);
-  useEffect(() => () => { mat.map?.dispose(); mat.dispose(); }, [mat]);
-  return mat;
-}
-
-/* ------------------------------------------------------------------ pequenas peças */
-const Caixa = ({ p, s, cor, r = 0.6 }: { p: V3; s: V3; cor: string; r?: number }) => (
-  <mesh position={p}><boxGeometry args={s} /><meshStandardMaterial color={cor} roughness={r} /></mesh>
-);
-/** Um cilindro achatado em elipse: raio 0,5 em x e z, escalado para `ex` × `ez`. */
-const Elipse = ({ p, ex, ez, h, cor, topo = 0.5 }: { p: V3; ex: number; ez: number; h: number; cor: string; topo?: number }) => (
-  <mesh position={p} scale={[ex, 1, ez]}><cylinderGeometry args={[topo, 0.5, h, 28]} /><meshStandardMaterial color={cor} roughness={0.25} /></mesh>
-);
-/** As frentes (portas) de um móvel, com puxadores, na face de +z. */
-function Frentes({ w, h, d, n, cor, y0 = 0, vertical = false }: { w: number; h: number; d: number; n: number; cor: string; y0?: number; vertical?: boolean }) {
-  const folga = 0.006, lw = (w - folga * (n + 1)) / n;
-  return (
-    <>
-      {Array.from({ length: n }, (_, i) => {
-        const x = -w / 2 + folga + lw / 2 + i * (lw + folga);
-        const hx = x + (i % 2 === 0 ? lw / 2 - 0.03 : -lw / 2 + 0.03);
-        return (
-          <group key={i}>
-            <Caixa p={[x, y0 + h / 2, d / 2 + 0.009]} s={[lw, h - 0.01, 0.018]} cor={cor} r={0.5} />
-            <Caixa p={[hx, vertical ? y0 + h * 0.5 : y0 + h - 0.05, d / 2 + 0.03]} s={vertical ? [0.015, 0.14, 0.02] : [0.12, 0.012, 0.02]} cor="#8a8a8a" r={0.3} />
-          </group>
-        );
-      })}
-    </>
-  );
-}
-
-/** O mockup paramétrico de um tipo, com a pegada `w` (largura) × `d` (profundidade) e a altura `h`. Frente para +z, costas em -z, base em y=0. */
-function Parametrico({ tipo, w, d, h, cor }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string }) {
-  switch (tipo) {
-    case "base_duche":
-      return (
-        <>
-          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.4} />
-          <mesh position={[0, h + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[w - 0.08, d - 0.08]} /><meshStandardMaterial color="#cfd8dd" roughness={0.3} /></mesh>
-          <Elipse p={[0, h + 0.004, 0]} ex={0.08} ez={0.08} h={0.006} cor="#555a5e" />
-        </>
-      );
-    case "banheira": {
-      const t = Math.min(0.07, w / 6, d / 4), fundo = Math.min(0.2, h / 2);
-      return (
-        <>
-          <Caixa p={[0, fundo / 2, 0]} s={[w, fundo, d]} cor={cor} r={0.3} />
-          <Caixa p={[0, h / 2, d / 2 - t / 2]} s={[w, h, t]} cor={cor} r={0.3} />
-          <Caixa p={[0, h / 2, -d / 2 + t / 2]} s={[w, h, t]} cor={cor} r={0.3} />
-          <Caixa p={[w / 2 - t / 2, h / 2, 0]} s={[t, h, d - 2 * t]} cor={cor} r={0.3} />
-          <Caixa p={[-w / 2 + t / 2, h / 2, 0]} s={[t, h, d - 2 * t]} cor={cor} r={0.3} />
-          <mesh position={[0, h * 0.6, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[w - 2 * t, d - 2 * t]} /><meshStandardMaterial color="#bcd7e6" transparent opacity={0.45} /></mesh>
-          <Elipse p={[w / 2 - 0.15, fundo + 0.003, 0]} ex={0.07} ez={0.07} h={0.006} cor="#555a5e" />
-        </>
-      );
-    }
-    case "sanita": {
-      const prof = Math.max(0.2, d - 0.2);
-      return (
-        <>
-          <Caixa p={[0, (0.2 + h + 0.4) / 2, -d / 2 + 0.1]} s={[w * 0.95, h + 0.2, 0.2]} cor={cor} r={0.3} />
-          <Elipse p={[0, h * 0.35, 0.1]} ex={w * 0.8} ez={prof * 0.9} h={h * 0.7} cor={cor} topo={0.42} />
-          <Elipse p={[0, h + 0.015, 0.1]} ex={w} ez={prof} h={0.03} cor="#fbfbfa" />
-          <Elipse p={[0, h + 0.033, 0.1]} ex={w * 0.62} ez={prof * 0.6} h={0.006} cor="#cdd5d9" />
-        </>
-      );
-    }
-    case "bide": {
-      return (
-        <>
-          <Elipse p={[0, h * 0.35, 0.05]} ex={w * 0.8} ez={d * 0.85} h={h * 0.7} cor={cor} topo={0.42} />
-          <Elipse p={[0, h + 0.015, 0.05]} ex={w} ez={d * 0.9} h={0.03} cor="#fbfbfa" />
-          <Elipse p={[0, h + 0.033, 0.05]} ex={w * 0.6} ez={d * 0.5} h={0.006} cor="#cdd5d9" />
-        </>
-      );
-    }
-    case "lavatorio": {
-      const hb = Math.max(0.2, h - 0.05);
-      return (
-        <>
-          <Caixa p={[0, hb / 2, 0]} s={[w, hb, d]} cor={cor} r={0.55} />
-          <Frentes w={w} h={hb} d={d} n={w > 0.55 ? 2 : 1} cor={cor} />
-          <Caixa p={[0, hb + 0.02, 0]} s={[w + 0.02, 0.04, d + 0.02]} cor="#eceae6" r={0.3} />
-          <Elipse p={[0, hb + 0.045, 0.02]} ex={w * 0.7} ez={d * 0.7} h={0.012} cor="#f6f8f8" />
-          <Elipse p={[0, hb + 0.1, -d * 0.3]} ex={0.03} ez={0.03} h={0.1} cor="#9aa0a4" />
-        </>
-      );
-    }
-    case "roupeiro":
-      return (
-        <>
-          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.55} />
-          <Frentes w={w} h={h - 0.02} d={d} n={Math.max(2, Math.round(w / 0.5))} cor={cor} y0={0.01} vertical />
-        </>
-      );
-    case "cama":
-      return (
-        <>
-          <Caixa p={[0, h * 0.25, 0]} s={[w, h * 0.5, d]} cor="#8b7355" r={0.7} />
-          <Caixa p={[0, h * 0.5 + h * 0.25, 0.02]} s={[w - 0.04, h * 0.5, d - 0.08]} cor="#e8e6e1" r={0.9} />
-          <Caixa p={[0, h * 1.1, -d / 2 + 0.03]} s={[w, h * 2.2, 0.06]} cor="#8b7355" r={0.7} />
-          <Caixa p={[0, h + 0.07, -d / 2 + 0.25]} s={[Math.max(0.3, w * 0.35), 0.1, 0.4]} cor="#f7f5f0" r={0.9} />
-        </>
-      );
-    case "bancada": {
-      const hb = Math.max(0.2, h - 0.04);
-      return (
-        <>
-          <Caixa p={[0, hb / 2, -0.01]} s={[w, hb, d - 0.02]} cor="#d8d3c8" r={0.6} />
-          <Frentes w={w} h={hb} d={d - 0.02} n={Math.max(1, Math.round(w / 0.6))} cor="#d8d3c8" />
-          <Caixa p={[0, hb + 0.02, 0]} s={[w, 0.04, d]} cor={cor} r={0.3} />
-        </>
-      );
-    }
-    case "eletro":
-      return (
-        <>
-          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.35} />
-          <Caixa p={[0, h * 0.45, d / 2 + 0.006]} s={[w * 0.8, h * 0.5, 0.012]} cor="#2b2f33" r={0.15} />
-          <Caixa p={[0, h * 0.82, d / 2 + 0.02]} s={[w * 0.6, 0.012, 0.02]} cor="#8a8a8a" r={0.3} />
-        </>
-      );
-    case "movel":
-      return (
-        <>
-          <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.55} />
-          <Frentes w={w} h={h} d={d} n={w > 0.5 ? 2 : 1} cor={cor} />
-        </>
-      );
-    default:
-      return <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
-  }
-}
 
 /* ------------------------------------------------------------------ um GLB opcional por produto, com o paramétrico de reserva */
 class Reserva extends Component<{ reserva: ReactNode; children: ReactNode }, { falhou: boolean }> {
@@ -518,17 +393,23 @@ function ModeloGLB({ url, w, d, h }: { url: string; w: number; d: number; h: num
   return <primitive object={copia} />;
 }
 
-function Peca({ p, m, etiquetas }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean }) {
+function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
   const { tipo, altura, cor, url } = m.mockup3d;
   const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} />;
   const nf = (n: number) => Math.round(n * 100).toString();
+  const base = p.montagem === "parede" ? p.altura : 0;
   return (
-    <group position={[p.x, 0, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]}>
-      {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
-      {etiquetas && (
+    <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }}>
+      <group scale={[p.espelhada ? -1 : 1, 1, 1]}>
+        {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
+      </group>
+      {selecionada && (
+        <mesh position={[0, altura / 2, 0]}><boxGeometry args={[p.largura + 0.04, altura + 0.04, p.profundidade + 0.04]} /><meshBasicMaterial color="#7c3aed" wireframe /></mesh>
+      )}
+      {(etiquetas || selecionada) && (
         <Html position={[0, Math.max(altura, 0.3) + 0.12, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-          <div className="whitespace-nowrap rounded bg-black/75 px-1.5 py-0.5 text-[11px] leading-tight text-white">
-            {m.nome}<br />{nf(p.largura)}×{nf(p.profundidade)}×{nf(altura)} cm
+          <div className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-tight text-white ${selecionada ? "bg-violet-700" : "bg-black/75"}`}>
+            {p.nome ?? m.nome}<br />{nf(p.largura)}×{nf(p.profundidade)}×{nf(altura)} cm{p.montagem === "parede" ? ` · a ${nf(p.altura)} cm do chão` : ""}
           </div>
         </Html>
       )}
