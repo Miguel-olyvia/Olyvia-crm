@@ -31,6 +31,7 @@ import { useEnvioVisita } from "../useEnvioVisita";
 import { useFormAgendaVisita } from "../useFormAgendaVisita";
 import { MAX_NOTA_VISITA } from "../visitaPessoa";
 import { HorasLivresVisita } from "./HorasLivresVisita";
+import { ROTULO_MORADA, type OrigemMoradaVisita } from "./moradaPorOmissaoDaVisita";
 import { QuemPodeIrVisita } from "./QuemPodeIrVisita";
 
 const BOTAO = cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO);
@@ -51,6 +52,8 @@ interface Props {
   negocioId: string;
   nome: string;
   moradaLead: MoradaVisita | null;
+  /** De onde vem `moradaLead` (a obra do negócio ou, sem obra, a morada do cliente): o rótulo da opção diz «Na morada da obra» ou «Na morada do cliente». */
+  origemMorada?: OrigemMoradaVisita;
   tipoInicial: TipoVisitaNegocio;
   /** A visita que se remarca; sem ela marca-se uma nova. */
   visita?: VisitaDoNegocio;
@@ -72,7 +75,7 @@ const chaveDaDuracao = (minutos: number): Pick<ValorAgenda, "duracao" | "duracao
   return chave ? { duracao: chave } : { duracao: "", duracaoMinutos: minutos };
 };
 
-export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tipoInicial, visita, presentesInicial, duracaoInicialMin, notaInicial, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
+export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, origemMorada = "obra", tipoInicial, visita, presentesInicial, duracaoInicialMin, notaInicial, rotuloGravar, aoGuardada, aoFechar, soLeitura = false }: Props) {
   const { t } = useTranslation();
   const id = useId();
   const hoje = hojeLisboa();
@@ -185,7 +188,7 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, tip
       )}
       <CamposAgendaVisita
         id={id} hoje={hoje} agenda={agenda} valor={valor} aoMudar={mudar} erro={ehErroAgenda(visto) ? visto : null} conflito={form.conflito} recursoOcupado={form.recusado}
-        moradaLead={moradaLead} destino={destino} aoMudarDestino={setDestino} erroMorada={ehErroMorada(visto) ? visto : null}
+        moradaLead={moradaLead} rotuloMoradaLead={ROTULO_MORADA[origemMorada]} destino={destino} aoMudarDestino={setDestino} erroMorada={ehErroMorada(visto) ? visto : null}
         campoData={campoData} grupoRecursos={grupoRecursos} desativado={envio.aGuardar || soLeitura}
         // 4/11 (Rúben): a data da visita primeiro (obrigatória, sem atalhos de dia), depois quem pode ir nesse dia (os comerciais; sem
         // nenhum livre, técnicos e outros dias sugeridos) e a hora. A duração sai: vem de «Preparar a visita» (1 h sem nada).

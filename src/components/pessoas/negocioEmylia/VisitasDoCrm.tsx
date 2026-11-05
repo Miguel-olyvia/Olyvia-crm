@@ -18,7 +18,7 @@ import { semSombras, useEntidadeDoNegocio, useVisitasDoNegocio, visitasDoNegocio
 import { cn } from "@/lib/utils";
 import { ErroAcao } from "../ErroAcao";
 import { useExecutarAcao } from "../useExecutarAcao";
-import type { MoradaVisita } from "../pessoasTipos";
+import { moradaPorOmissaoDaVisita } from "./moradaPorOmissaoDaVisita";
 import { EstadoHonesto } from "./EstadoHonesto";
 import {
   aplicarEspelho, calcularEspelho, escreverDoFormulario, marcasDoEspelho, vagaDoMotor, visitasSoDaEmylia,
@@ -52,10 +52,6 @@ function ComFonteReal({ children }: { children: ReactNode }) {
   return <FontePessoasContext.Provider value={valor}>{children}</FontePessoasContext.Provider>;
 }
 
-const moradaDoNegocio = (d: Negocio): MoradaVisita | null => {
-  const m = { rua: (d.f.morada || d.local || "").trim(), codigoPostal: (d.f.cp || "").trim(), localidade: (d.f.localidade || "").trim(), andar: "" };
-  return m.rua || m.codigoPostal || m.localidade ? m : null;
-};
 
 function CartaoDaVisita({ n, tipo, estado, dia, hora, quem, aoLado }: { n: number; tipo: string; estado: keyof typeof COR_ESTADO; dia: string; hora: string; quem: string; aoLado?: ReactNode }) {
   return (
@@ -154,10 +150,12 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
   }
   if (entidade.entityId === null) return <EstadoHonesto titulo="Este negócio não tem pessoa associada.">Sem pessoa não se marca a visita na agenda.</EstadoHonesto>;
 
+  // a visita vai por omissão para a OBRA; só sem morada de obra, para a do cliente (a da ficha da entidade)
+  const moradaDaVisita = moradaPorOmissaoDaVisita(d);
   const formulario = (visita?: VisitaDoNegocio): ReactNode => (
     <div className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <MarcarVisitaNegocio
-        entityId={entidade.entityId as string} negocioId={c.negocioId as string} nome={d.nome} moradaLead={moradaDoNegocio(d)} soLeitura={!c.podeEditar}
+        entityId={entidade.entityId as string} negocioId={c.negocioId as string} nome={d.nome} moradaLead={moradaDaVisita.morada} origemMorada={moradaDaVisita.origem} soLeitura={!c.podeEditar}
         tipoInicial={ativas.length > 0 || numerosDe(d).length > 0 ? "revisita" : "levantamento"}
         {...(visita ? { visita, presentesInicial: presentesDe(d, visita) } : preparadoNoNegocio(d))}
         rotuloGravar={visita ? "Guardar a nova hora" : modo === "primeira" ? "Marcar a visita" : "Marcar visita"} aoGuardada={aposGravar}

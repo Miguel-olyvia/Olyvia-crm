@@ -22,6 +22,8 @@ interface MoradaVisitaCamposProps {
   id: string;
   /** A morada que a lead indicou; `null` = a ficha não tem (só "Outra morada"). */
   moradaLead: MoradaVisita | null;
+  /** Troca «Na morada da lead» (e a linha «Morada indicada pela lead») por este rótulo, quando a morada por omissão é a da obra ou a do cliente. */
+  rotuloMoradaLead?: string;
   valor: DestinoVisita;
   erro: ErroMoradaVisita | null;
   aoMudar: (destino: DestinoVisita) => void;
@@ -90,7 +92,7 @@ function CamposOutra({ id, valor, erro, aoMudar }: Pick<MoradaVisitaCamposProps,
   );
 }
 
-export function MoradaVisitaCampos({ id, moradaLead, valor, erro, aoMudar }: MoradaVisitaCamposProps) {
+export function MoradaVisitaCampos({ id, moradaLead, rotuloMoradaLead, valor, erro, aoMudar }: MoradaVisitaCamposProps) {
   const { t } = useTranslation();
   const nome = useId();
   const naLead = moradaLead !== null && valor.igualALead;
@@ -100,7 +102,8 @@ export function MoradaVisitaCampos({ id, moradaLead, valor, erro, aoMudar }: Mor
       {moradaLead ? (
         <div className="grid grid-cols-1 gap-2">
           <Opcao
-            nome={nome} escolhida={naLead} titulo={t(`${A}same`)} detalhe={`${t(`${A}sameHint`)}: ${textoMoradaVisita(moradaLead)}`}
+            nome={nome} escolhida={naLead} titulo={rotuloMoradaLead ?? t(`${A}same`)}
+            detalhe={rotuloMoradaLead ? textoMoradaVisita(moradaLead) : `${t(`${A}sameHint`)}: ${textoMoradaVisita(moradaLead)}`}
             aoEscolher={() => aoMudar({ ...valor, igualALead: true })}
           />
           <Opcao nome={nome} escolhida={!naLead} titulo={t(`${A}other`)} aoEscolher={() => aoMudar({ ...valor, igualALead: false })} />

@@ -35,6 +35,8 @@ interface CamposAgendaVisitaProps {
   /** O recurso que a base recusou (NG010): fica marcado como ocupado até se mudar o horário ou os recursos. */
   recursoOcupado: string | null;
   moradaLead: MoradaVisita | null;
+  /** O rótulo da opção «igual à morada por omissão» («Na morada da obra», «Na morada do cliente»); sem ele, o de sempre («Na morada da lead»). */
+  rotuloMoradaLead?: string;
   destino: DestinoVisita;
   aoMudarDestino: (destino: DestinoVisita) => void;
   erroMorada: ErroMoradaVisita | null;
@@ -246,7 +248,7 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
       {!p.semDuracao && <Duracao id={p.id} valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />}
       {p.comQuemVaiEstar && <QuemVaiEstar valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />}
       <AvisoConflito conflito={p.conflito} nomes={nomes} semVerificar={semVerificar} />
-      <MoradaVisitaCampos id={`${p.id}-morada`} moradaLead={p.moradaLead} valor={p.destino} erro={p.erroMorada} aoMudar={p.aoMudarDestino} />
+      <MoradaVisitaCampos id={`${p.id}-morada`} moradaLead={p.moradaLead} rotuloMoradaLead={p.rotuloMoradaLead} valor={p.destino} erro={p.erroMorada} aoMudar={p.aoMudarDestino} />
     </div>
   );
 }
