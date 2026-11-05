@@ -87,6 +87,8 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // Só verificadas no servidor (policies/RPCs): hr.ausencias.tipos.view. 04/11: hr.denuncias.gerir passou para as escondidas (sem ação
   // na app viva). Esconderam-se hr.ausencias.tipos.edit, hr.ausencias.direitos.edit, hr.pessoas.horario_realizado.edit,
   // hr.pessoas.duplicados.view e hr.pessoas.acessos_sensiveis.view: só policies/RPCs que nenhum ecrã vivo chama.
+  // 05/11: hr.onboarding.restrito não precisa de guarda no ecrã: sem ela o servidor (rpc_hr_admissao_listar, convite_admissao_resumo,
+  // rever_ler) mostra os processos cancelados ou rejeitados como «terminado», e o cartão explica-o (CartaoAdmissao.tsx, rhAdm.cartao.restrito).
   hr: [
     "hr.admissao.obrigatorios.gerir", "hr.assiduidade.corrigir", "hr.assiduidade.equipa.view", "hr.assiduidade.faltas.edit",
     "hr.assiduidade.faltas.view", "hr.assiduidade.gerir", "hr.assiduidade.justificacao.edit", "hr.assiduidade.justificacao.view",
@@ -117,7 +119,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   inventory: [
     "inventory.count", "inventory.create", "inventory.delete", "inventory.edit", "inventory.export", "inventory.import", "inventory.view",
   ],
-  // Só verificadas no servidor (policies/RPCs/edge functions): leads.assign (neg_atribuir_pessoa), leads.config (policies das tabelas de
+  // 05/11: leads.assign (neg_atribuir_pessoa, quando a pessoa ainda não é cliente; gatilho trg_00_negocios_comercial_leads_assign em
+  // negocios.assigned_to) já se pergunta no ecrã, por usePodeAtribuirComercial: o seletor do comercial em «Editar negócio»
+  // (EditarNegocioDialogo), no passo Chamada de /negocios (ComercialDaLead, só se a pessoa não é cliente) e na «Nova lead» (ComercialNovaLead).
+  // Só verificadas no servidor (policies/RPCs/edge functions): leads.config (policies das tabelas de
   // configuração de leads, incluindo lead_contact_results que a rota viva /lead-contact-results grava), leads.delete (policies anew_leads
   // e anew_entity_*), leads.edit (policies, ai-assistant, execute-workflow). 05/11: leads.import passou para as escondidas.
   // platform.pending_submissions.view está na categoria leads da base mas aparece em Marketing › Formulários (gruposPermissoes.ts).
@@ -174,6 +179,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "quote_templates.create", "quote_templates.delete", "quote_templates.duplicate", "quote_templates.edit",
     "quote_templates.view",
   ],
+  // 05/11: quotes.view_costs também no Negócio: fn_neg_ler_orcamento, neg_ler_negocios e fn_neg_ler_adendas devolvem os custos a null
+  // sem fn_cat_pode(org, 'quotes.view_costs'), e o ecrã pergunta o mesmo (podeVerCustos em emylia/permissoes.ts: na ficha pela leitura de
+  // permissoesPosContrato.ts, em /negocios por usePodeVerCustos) para esconder a margem e o custo (OrcamentoSimples, LinhasOrcamento,
+  // PlanoObraOrcamento, DemolicaoOrcamento e os valores no texto dos bloqueios do motor).
   quotes: [
     "quotes.create", "quotes.edit", "quotes.manage", "quotes.view", "quotes.view_costs",
   ],
@@ -205,7 +214,9 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   smtp: [
     "smtp.edit", "smtp.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): suppliers.contract_manage (contrato de fornecedor, 20270103300000)
+  // suppliers.contract_manage (contrato de fornecedor, 20270103300000): o servidor decide e o ecrã usa o que ele calcula, as flags
+  // can_manage, can_countersign, can_accept_proposal e can_refuse_proposal de rpc_supplier_contracts_list/get (SupplierContractTab,
+  // SupplierContractDetail); não é «só servidor».
   suppliers: [
     "suppliers.contract_manage", "suppliers.create", "suppliers.delete", "suppliers.edit", "suppliers.export",
     "suppliers.import", "suppliers.portal_manage", "suppliers.view", "suppliers.view_pricing", "suppliers.view_sla_report",
