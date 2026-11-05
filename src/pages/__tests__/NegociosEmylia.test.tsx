@@ -25,6 +25,7 @@ const minha = vi.hoisted(() => ({ pessoaId: null as string | null, nome: "Rúben
 vi.mock("@/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => ({ ...minha, cargo: null, dataAdmissao: null, loading: false, semFicha: !minha.pessoaId }) }));
 
 import NegociosEmylia from "../NegociosEmylia";
+import { podeNeg } from "@/emylia/permissoes";
 
 const CATALOGO = {
   parametros: { meses: 14, tsu: 23.75, seguros_ano: 713, horas_ano: 1345, horas_mes: 672, meses_desatualizado: 6, margem_minima: 28, margem_alvo: 35 },
@@ -55,6 +56,8 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
       // 28/10: a agenda do RH (as ausências aprovadas dos técnicos)
       if (fn === "rh_agenda_tecnicos") return { data: [], error: null };
       if (fn === "neg_guardar_negocio") return { data: { negocio_id: "x" }, error: null };
+      // 5/11: as permissões das ações (podeNeg) leem-se por fn_cat_pode, como o servidor decide; aqui, todas concedidas
+      if (fn === "fn_cat_pode") return { data: true, error: null };
       return { data: null, error: { message: "inesperado: " + fn } };
     });
     gravarNovaLead.mockResolvedValue({ entityId: "44444444-4444-4444-a444-444444444444", leadId: null, negocioId: "55555555-5555-4555-a555-555555555555" });
@@ -122,5 +125,84 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     const [, args] = rpc.mock.calls.find(([fn]) => fn === "neg_guardar_negocio")!;
     expect(args).toMatchObject({ p_org: ORG, p_negocio_id: "55555555-5555-4555-a555-555555555555" });
     expect((args as { p_linhas: { negocio: { numero: number; titulo: string } } }).p_linhas.negocio).toMatchObject({ numero: 1201, titulo: "Rui Costa" });
+  });
+  // 5/11: em /negocios as ações decidem-se pelas permissões reais (fn_cat_pode, como o servidor), e não pela tabela fixa do papel escolhido
+  describe("permissões reais (fn_cat_pode)", () => {
+    // o jsdom não tem scrollIntoView (o passo seguinte da fase rola até ao título)
+    beforeEach(() => { if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => undefined; });
+    /** O negócio na fase do pagamento, com a fatura registada e por pagar: o passo é «Validar à mão» (finance.validate_payment). */
+    const NEGOCIO_A_PAGAR = { ...NEGOCIO, negocio: { ...NEGOCIO.negocio, fase: 4, fatura_numero: "FT 2026/77", fatura_em: "2026-10-30T10:00:00" } };
+    const comValidar = (validar: boolean) => {
+      const antes = rpc.getMockImplementation()!;
+      rpc.mockImplementation(async (fn: string, ...r: unknown[]) => {
+        if (fn === "neg_ler_negocios") return { data: [NEGOCIO_A_PAGAR], error: null };
+        if (fn === "fn_cat_pode") return { data: (r[0] as { p_perm: string }).p_perm === "negocios.validar_pagamento" ? validar : true, error: null };
+        return antes(fn, ...r);
+      });
+    };
+    const abrirComo = async (papel: string) => {
+      render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+      await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+      fireEvent.change(screen.getByLabelText("A ver como"), { target: { value: papel } });
+      fireEvent.click(screen.getAllByText("Marta Lima")[0]);
+      await waitFor(() => expect(screen.queryAllByText(/FT 2026\/77/).length).toBeGreaterThan(0));
+      // o passo «Pagamento» da fase Financeiro: «Validar à mão» (a fatura registada, sem ligação ao Eticadata)
+      fireEvent.click(screen.getAllByRole("button", { name: "Pagamento" })[0]);
+      await waitFor(() => expect(botaoValidar().length).toBeGreaterThan(0));
+    };
+    const botaoValidar = () => screen.queryAllByRole("button", { name: "Validar à mão" }) as HTMLButtonElement[];
+
+    it("sem negocios.validar_pagamento na base, validar o pagamento não se oferece (o botão fica desligado e diz porquê), mesmo como Financeiro", async () => {
+      comValidar(false);
+      await abrirComo("financeiro");
+      expect(botaoValidar().every((b) => b.disabled)).toBe(true);
+      expect(screen.queryAllByText(/Só o Financeiro ou a Direção validam pagamentos/).length).toBeGreaterThan(0);
+      expect(podeNeg("financeiro", "finance.validate_payment")).toBe(false);
+      expect(podeNeg("direcao", "finance.validate_payment")).toBe(false);
+    });
+
+    it("com negocios.validar_pagamento na base, validar o pagamento oferece-se; e o papel escolhido (Comercial) não o tira", async () => {
+      comValidar(true);
+      await abrirComo("financeiro");
+      expect(botaoValidar().length).toBeGreaterThan(0);
+      expect(botaoValidar().some((b) => !b.disabled)).toBe(true);
+      fireEvent.change(screen.getByLabelText("A ver como"), { target: { value: "comercial" } });
+      await waitFor(() => expect((screen.getByLabelText("A ver como") as HTMLSelectElement).value).toBe("comercial"));
+      // o «A ver como» escolhe de quem é cada passo; o que se pode fazer é o que a base diz (o Comercial da tabela fixa não validava)
+      expect(podeNeg("comercial", "finance.validate_payment")).toBe(true);
+    });
+
+    it("enquanto as permissões se leem, diz «A ler os negócios…» e não mostra os negócios", async () => {
+      const antes = rpc.getMockImplementation()!;
+      let soltar!: () => void;
+      const espera = new Promise<void>((r) => { soltar = r; });
+      rpc.mockImplementation(async (fn: string, ...r: unknown[]) => {
+        if (fn === "fn_cat_pode") { await espera; return { data: true, error: null }; }
+        return antes(fn, ...r);
+      });
+      render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+      await waitFor(() => expect(rpc.mock.calls.some(([fn]) => fn === "neg_ler_negocios")).toBe(true), { timeout: 8000 });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(screen.getByText("A ler os negócios…")).toBeTruthy();
+      expect(screen.queryAllByText("Marta Lima")).toHaveLength(0);
+      soltar();
+      await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+    });
+
+    it("se a leitura das permissões falhar, diz-se, com «Tentar de novo», que volta a ler", async () => {
+      const antes = rpc.getMockImplementation()!;
+      let falhar = true;
+      rpc.mockImplementation(async (fn: string, ...r: unknown[]) => {
+        if (fn === "fn_cat_pode") return falhar ? { data: null, error: { message: "sem rede" } } : { data: true, error: null };
+        return antes(fn, ...r);
+      });
+      render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+      const tentar = await screen.findByRole("button", { name: "Tentar de novo" }, { timeout: 8000 });
+      expect(screen.queryAllByText("Marta Lima")).toHaveLength(0);
+      falhar = false;
+      fireEvent.click(tentar);
+      await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+      expect(screen.queryByRole("button", { name: "Tentar de novo" })).toBeNull();
+    });
   });
 });
