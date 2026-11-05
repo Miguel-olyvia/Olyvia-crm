@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, RotateCcw, User, Briefcase, AlertTriangle, ArrowLeft, Handshake, FileText, FileSignature, FileCheck, PackageCheck } from "lucide-react";
+import { Trash2, RotateCcw, User, Users, Briefcase, AlertTriangle, ArrowLeft, Handshake, FileText, FileSignature, FileCheck, PackageCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -17,10 +17,17 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { getContactScopeUserIds, buildContactScopeOrFilter } from "@/lib/contacts/scope";
 import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { useTranslation } from "@/hooks/useTranslation";
+import { usePessoasApagadas } from "@/hooks/pessoas/useApagarPessoa";
+import { usePodeApagarPessoa } from "@/hooks/pessoas/usePodeApagarPessoa";
+import { LixoPessoas } from "@/components/lixo/LixoPessoas";
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
 type Kind = "clients" | "leads" | "deals" | "quotes" | "proposals" | "contracts" | "client_orders";
+// «Pessoas»: as anew_entities apagadas (o modelo novo de leads e clientes), lidas por neg_pessoas_apagadas e restauradas por
+// neg_apagar_pessoa. Os separadores Clientes e Leads leem as tabelas antigas (anew_clients/anew_leads) e ficam como estavam.
+type Separador = Kind | "pessoas";
 
 type Row = {
   id: string;
@@ -68,7 +75,8 @@ export default function Trash() {
   const navigate = useNavigate();
   const { activeCompany } = useCompany();
   const { toast } = useToast();
-  const [tab, setTab] = useState<Kind>("clients");
+  const { t } = useTranslation();
+  const [tab, setTab] = useState<Separador>("pessoas");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<DataState>(EMPTY_DATA);
   const [purgeTarget, setPurgeTarget] = useState<{ kind: Kind; id: string; name: string } | null>(null);
@@ -85,6 +93,8 @@ export default function Trash() {
   const { hasPermission } = usePermissions();
 
   const orgId = activeCompany?.id;
+  const pessoasApagadas = usePessoasApagadas(orgId ?? null);
+  const podeApagarPessoa = usePodeApagarPessoa();
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -406,11 +416,12 @@ export default function Trash() {
           <CardTitle className="text-base">Registos eliminados</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs value={tab} onValueChange={(v) => setTab(v as Kind)}>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as Separador)}>
             <div className="space-y-2">
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">CRM</p>
                 <TabsList>
+                  <TabsTrigger value="pessoas"><Users className="h-3.5 w-3.5 mr-1" aria-hidden="true" />{t("pessoasPagina.apagarPessoa.lixo.tab")} <Badge variant="secondary" className="ml-2">{pessoasApagadas.data?.length ?? 0}</Badge></TabsTrigger>
                   <TabsTrigger value="clients"><Briefcase className="h-3.5 w-3.5 mr-1" />Clientes <Badge variant="secondary" className="ml-2">{data.clients.length}</Badge></TabsTrigger>
                   <TabsTrigger value="leads"><User className="h-3.5 w-3.5 mr-1" />Leads <Badge variant="secondary" className="ml-2">{data.leads.length}</Badge></TabsTrigger>
                 </TabsList>
@@ -427,6 +438,14 @@ export default function Trash() {
               </div>
             </div>
 
+            <TabsContent value="pessoas" className="mt-4">
+              {orgId && (
+                <LixoPessoas
+                  organizationId={orgId} pessoas={pessoasApagadas.data ?? []} aCarregar={pessoasApagadas.isLoading} erro={pessoasApagadas.isError}
+                  aoTentarDeNovo={() => { void pessoasApagadas.refetch(); }} pode={podeApagarPessoa}
+                />
+              )}
+            </TabsContent>
             {(["clients", "leads"] as const).map((k) => (
               <TabsContent key={k} value={k} className="mt-4">
                 {loading ? <div className="text-center py-8 text-muted-foreground">A carregar…</div> : renderTable(k, data[k])}

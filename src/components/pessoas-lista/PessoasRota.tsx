@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePodeApagarNegocios } from "@/hooks/pessoas/usePodeApagarNegocios";
+import { usePodeApagarPessoa } from "@/hooks/pessoas/usePodeApagarPessoa";
 import { usePermissoesDoFechoNoNegocio } from "@/hooks/pessoas/usePermissoesDoFechoNoNegocio";
 import { useUtilizadorPessoas } from "@/hooks/pessoas/useUtilizadorPessoas";
 import { Button } from "@/components/ui/button";
@@ -31,12 +32,14 @@ export function PessoasRota({ children }: { children: ReactNode }) {
   const utilizadorId = useUtilizadorPessoas();
   // pessoas.delete: o lixo de negócios só se mostra a quem pode apagar e restaurar.
   const podeApagarNegocios = usePodeApagarNegocios();
+  // Apagar uma lead ou um cliente por engano (o item «Apagar» do menu «Mais» da ficha).
+  const podeApagarPessoa = usePodeApagarPessoa();
   // As permissões do fecho (documentos, reabrir, converter): só servem para esconder o que a base recusaria. Inclui
   // negocios.proposta.decidir (fn_cat_pode), que a base exige para aceitar/recusar uma proposta de um negócio.
   const permissoesFecho = usePermissoesDoFechoNoNegocio();
   const fonte = useMemo<FontePessoas | null>(
-    () => (organizationId ? { modo: "real", organizationId, momentoGanho, utilizadorId, podeApagarNegocios, permissoesFecho } : null),
-    [organizationId, momentoGanho, utilizadorId, podeApagarNegocios, permissoesFecho],
+    () => (organizationId ? { modo: "real", organizationId, momentoGanho, utilizadorId, podeApagarNegocios, podeApagarPessoa, permissoesFecho } : null),
+    [organizationId, momentoGanho, utilizadorId, podeApagarNegocios, podeApagarPessoa, permissoesFecho],
   );
 
   if (negocios.isLoading) {

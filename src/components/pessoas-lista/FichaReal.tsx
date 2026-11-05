@@ -8,7 +8,7 @@
 // Só se mostra a ficha da pessoa que está aberta (`?open=`): ao passar de A para B não se mostra a de A (nem as ações trabalham sobre ela)
 // enquanto B carrega; há um indicador visível e o anúncio. A última ficha só se guarda para o painel deslizar para fora com conteúdo
 // quando se fecha (`pessoaId` a null).
-import { useCallback, useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { adaptarFicha } from "@/hooks/pessoas/adaptarFicha";
@@ -24,6 +24,8 @@ import { useSubstituirContactoPessoa } from "@/hooks/pessoas/useSubstituirContac
 import { useQualificarLeadPessoa } from "@/hooks/pessoas/useQualificarLeadPessoa";
 import { useSubmissoesPessoa } from "@/hooks/pessoas/useSubmissoesPessoa";
 import type { MaisItensFicha } from "@/components/pessoas/CarregarMais";
+import { ApagarPessoaFichaContext, type ApagarPessoaFicha } from "@/components/pessoas/apagarPessoaContexto";
+import { ConfirmarApagarPessoaDialogo, type PessoaAApagar } from "@/components/pessoas/ConfirmarApagarPessoaDialogo";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
 import { ZONA_FICHA_ALTA } from "@/components/pessoas/layoutGuia";
 import type { SeparadorSubmissoesReal } from "@/components/pessoas/FichaInterior";
@@ -170,6 +172,19 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
     </>
   ) : undefined;
 
+  // «Apagar lead» / «Apagar cliente» no menu «Mais» (um engano): a permissão vem da fonte (por papel) e a base decide o âmbito.
+  const [aApagar, setAApagar] = useState<PessoaAApagar | null>(null);
+  const organizacao = fonte.modo === "real" ? fonte.organizationId : null;
+  const papel = adaptada?.resumo.papel ?? null;
+  const podeApagarPessoa = fonte.modo === "real" && papel !== null && fonte.podeApagarPessoa?.[papel] === true;
+  const nomeApagar = adaptada?.resumo.pessoa.nome ?? "";
+  const apagarPessoa = useMemo<ApagarPessoaFicha | null>(() => (
+    podeApagarPessoa && papel && pessoaIdMostrada
+      ? { pode: true, abrir: () => setAApagar({ id: pessoaIdMostrada, nome: nomeApagar, papel }) }
+      : null
+  ), [podeApagarPessoa, papel, pessoaIdMostrada, nomeApagar]);
+  const aoApagada = useCallback((anuncio: string) => { toast.success(anuncio); }, []);
+
   const aAbrir = pessoaId !== null && mostrada === null && lida.estado === "a-carregar";
   // A ficha só toma o lugar da página quando a primeira chegou; nas trocas com [ e ] (a seguinte ainda a ler) a página não reaparece.
   const jaViu = useRef(false);
@@ -201,6 +216,7 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
             {t(`${F}opening`)}
           </div>
         )}
+        <ApagarPessoaFichaContext.Provider value={apagarPessoa}>
         <div ref={zonaFicha} hidden={!fichaNaPagina && comGuia} className={comGuia ? `mx-auto w-full max-w-[1536px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6 ${ZONA_FICHA_ALTA}` : undefined}>
           {fichaNaPagina && tituloPagina && <h1 className="sr-only">{tituloPagina}</h1>}
           {acoes.capacidades?.negocios === false ? ficha() : (
@@ -209,6 +225,12 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
             </NegociosDaFichaReal>
           )}
         </div>
+        </ApagarPessoaFichaContext.Provider>
+        {organizacao && (
+          <ConfirmarApagarPessoaDialogo
+            organizationId={organizacao} pessoa={aApagar} aoFechar={() => setAApagar(null)} aoFecharFicha={aoLimpar} aoConcluido={aoApagada}
+          />
+        )}
       </div>
     </>
   );

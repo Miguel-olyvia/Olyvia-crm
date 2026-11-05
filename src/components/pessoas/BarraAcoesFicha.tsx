@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { ligacoes } from "./acoesPessoa";
+import { useApagarPessoaFicha } from "./apagarPessoaContexto";
 import type { AcaoFicha, CapacidadesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { useProcesso } from "./processo/processoContexto";
@@ -72,11 +73,14 @@ function Ligacoes({ resumo, semLigar = false }: { resumo: ResumoPessoa; semLigar
  * (uma lead sem negócio aberto: sem interesse, ou obra inviável, e não se cria negócio) ou, numa abordagem encerrada (ou numa lead perdida
  * do exemplo antigo), "Reativar abordagem". Um cliente não encerra a abordagem. O negócio cria-se à mão, para leads e clientes e em
  * qualquer fase, e liga registos existentes da pessoa: a lead tem "Criar negócio" e o cliente "Novo negócio". A visita e o levantamento
- * são opcionais.
+ * são opcionais. Por último, também separado e a vermelho, «Apagar lead» / «Apagar cliente» (um engano): só na ficha real e com as permissões
+ * de apagar; com negócios abertos fica desativado com a explicação (a base recusaria com NG011).
  */
 function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aGuardar, comItemChamada = false, semVisitaLevantamento = false, aoAbrirDetalhesNegocio }: BarraAcoesProps) {
   const { t } = useTranslation();
   const idExplicacao = useId();
+  const idExplicacaoApagar = useId();
+  const apagarPessoa = useApagarPessoaFicha();
   const processo = useProcesso();
   const gatilho = useRef<HTMLButtonElement>(null);
   const escolhida = useRef(false);
@@ -92,7 +96,9 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
   const comVisita = !!processo && !fechada && capacidades?.visita !== false && processo.comPainelVisita !== false && !semVisitaLevantamento;
   const temAcoes = comChamada || comNota || comAdiar || comVisita || !!aoCriarNegocio;
   // Sem nenhum item (um cliente no exemplo) não há menu: um botão «Mais» vazio não faz nada.
-  if (!temAcoes && !aoAbrirDetalhesNegocio && !podeEncerrar && !podeReativar) return null;
+  const comApagar = apagarPessoa?.pode === true;
+  const apagarSemEfeito = resumo.abertos.length > 0;
+  if (!temAcoes && !aoAbrirDetalhesNegocio && !podeEncerrar && !podeReativar && !comApagar) return null;
   const abrirDetalhes = () => {
     escolhida.current = true;
     aoAbrirDetalhesNegocio?.(gatilho.current);
@@ -104,6 +110,10 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
   const visitaELevantamento = () => {
     escolhida.current = true;
     processo?.abrirVisitaLevantamento(pessoa.id, gatilho.current);
+  };
+  const apagar = () => {
+    escolhida.current = true;
+    apagarPessoa?.abrir(gatilho.current);
   };
   const abrir = (acao: AcaoFicha) => {
     escolhida.current = true;
@@ -159,6 +169,20 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
               <DropdownMenuItem className="min-h-11 text-destructive focus:text-destructive" onSelect={() => abrir("encerrar")}>
                 {t("pessoasPagina.close.bar.close")}
               </DropdownMenuItem>
+            )}
+          </>
+        )}
+        {comApagar && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="min-h-11 text-destructive focus:text-destructive" disabled={apagarSemEfeito} data-apagar-pessoa
+              aria-describedby={apagarSemEfeito ? idExplicacaoApagar : undefined} onSelect={apagar}
+            >
+              {t(papel === "cliente" ? "pessoasPagina.apagarPessoa.menu.cliente" : "pessoasPagina.apagarPessoa.menu.lead")}
+            </DropdownMenuItem>
+            {apagarSemEfeito && (
+              <p id={idExplicacaoApagar} className="max-w-64 px-2 pb-1.5 text-xs text-muted-foreground">{t("pessoasPagina.apagarPessoa.menu.comAbertos")}</p>
             )}
           </>
         )}
