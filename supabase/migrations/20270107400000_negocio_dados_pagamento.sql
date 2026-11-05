@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS public.negocio_dados_pagamento (
   atualizado_em   timestamptz NOT NULL DEFAULT now(),
   atualizado_por  uuid REFERENCES public.anew_users(id) ON DELETE SET NULL
 );
-COMMENT ON TABLE public.negocio_dados_pagamento IS 'Os dados da empresa para o cliente pagar (20270106700000). Escreve-a só neg_dados_pagamento_guardar.';
+COMMENT ON TABLE public.negocio_dados_pagamento IS 'Os dados da empresa para o cliente pagar (20270107400000). Escreve-a só neg_dados_pagamento_guardar.';
 
 ALTER TABLE public.negocio_dados_pagamento ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.negocio_dados_pagamento FROM PUBLIC, anon, authenticated;
