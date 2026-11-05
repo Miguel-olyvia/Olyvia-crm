@@ -33,13 +33,15 @@ import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { enviarAoPortal } from "@/emylia/real/portalReal";
 import { definirGuardarCliente } from "@/emylia/EditarCliente";
 import { linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
+import { gravarMoradaPrincipal } from "@/emylia/real/gravarMoradaDaEntidade";
+import { definirMoradaDaEntidade } from "@/emylia/MoradaDeQuemPede";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { podeNeg } from "@/emylia/permissoes";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
-import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
+import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 import { gravarDadosDaLead, lerDadosDasLeads, type FonteLead } from "@/emylia/real/dadosDaLead";
 import { definirGuardarDadosLead } from "@/emylia/DadosDaLead";
 import { lerComerciais } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
@@ -482,6 +484,18 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     if (!org || !d.dadosLead) throw new Error("Não foi possível gravar: o negócio não tem pessoa.");
     return gravarDadosDaLead(supabase, org, d.dadosLead, m);
   }, { fontes: fontesLead, comerciais: comerciaisLead }), [org, fontesLead, comerciaisLead]);
+
+  // 4/11: «Morada de quem pede» (fase Lead): lê e grava a morada da ficha do cliente (a da obra é outra e grava-se com o negócio)
+  useEffect(() => definirMoradaDaEntidade({
+    ler: async (entityId) => {
+      const m = await lerMoradaDaEntidade(supabase, entityId);
+      return m ? { rua: m.morada, cp: m.cp, localidade: m.localidade, fracao: m.fracao } : null;
+    },
+    gravar: async (entityId, m) => {
+      if (!org) throw new Error("Não foi possível gravar: falta a organização.");
+      return gravarMoradaPrincipal(entityId, org, m);
+    },
+  }), [org]);
 
   useEffect(() => definirGuardarCliente((d, x, mudou, o) => {
     const ref = refs.current.get(d.id);

@@ -18,6 +18,7 @@ import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
 import { ComercialDaLead, TextoDaLead, comDadosLead } from "./DadosDaLead";
+import { MoradaDeQuemPede } from "./MoradaDeQuemPede";
 import { vagasVisita } from "./vagasVisita";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -272,6 +273,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
           {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
             : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
+          <MoradaDeQuemPede ctx={ctx} d={d} />
           <Campos grupo={gPedido} {...fx} />
         </div>
       ), d.f), id: "quem", titulo: "Quem pede", personalizado: false, resumo: [d.nome, d.tel, d.f.pedido || ""].filter(Boolean) },
