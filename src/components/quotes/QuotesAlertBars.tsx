@@ -67,14 +67,15 @@ export function QuotesAlertBars({ quotes, linesAgg, onNavigateProposals, onOpenQ
           <span className="text-sm text-green-700 dark:text-green-400">
             — as propostas foram criadas automaticamente pelo workflow.
           </span>
-          <div className="ml-auto flex gap-2">
+          {/* 05/11 (ronda 2): sem onNavigateProposals (sem permissão para abrir /proposals) não há botões */}
+          {onNavigateProposals && <div className="ml-auto flex gap-2">
             <Button variant="link" size="sm" className="text-green-700 dark:text-green-300 h-7 px-2" onClick={onNavigateProposals}>
               Ver propostas criadas
             </Button>
             <Button size="sm" className="h-7 bg-green-600 hover:bg-green-700 text-white" onClick={onNavigateProposals}>
               Ver propostas
             </Button>
-          </div>
+          </div>}
         </div>
       )}
 

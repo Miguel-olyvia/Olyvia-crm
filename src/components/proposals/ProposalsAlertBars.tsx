@@ -297,11 +297,11 @@ export function ProposalsAlertBars({
                 <span className="text-sm text-green-700 dark:text-green-400 hidden md:inline">
                   — contratos criados automaticamente.
                 </span>
-                <div className="ml-auto">
+                {onNavigateContracts && <div className="ml-auto">
                   <Button size="sm" className="h-7 bg-green-600 hover:bg-green-700 text-white" onClick={onNavigateContracts}>
                     Ver contratos
                   </Button>
-                </div>
+                </div>}
               </div>
             )}
           </div>

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
@@ -147,6 +148,8 @@ export function ProposalCreateDialog({
   const { isSystemAdmin } = usePermissions();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds } = usePermissionScope();
   const navigate = useNavigate();
+  // 05/11 (ronda 2): as ligações para as outras páginas fora do menu pedem a permissão da rota (lib/rotasForaDoMenu.ts).
+  const podeAbrir = usePodeAbrirDestino();
   const location = useLocation();
 
   const [savingProposal, setSavingProposal] = useState(false);
@@ -368,6 +371,7 @@ export function ProposalCreateDialog({
    */
   const handleCreateQuoteForProposal = async () => {
     if (savingProposal || submitLockRef.current) return;
+    if (!podeAbrir("/quotes")) return; // 05/11 (ronda 2): o orçamento abre em /quotes, que pede quotes.view
 
     // Editing existing proposal — just navigate.
     if (editingId) {
@@ -1067,7 +1071,7 @@ export function ProposalCreateDialog({
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs gap-1"
-                    disabled={savingProposal}
+                    disabled={savingProposal || !podeAbrir("/quotes")}
                     onClick={handleCreateQuoteForProposal}
                   >
                     📝 Criar orçamento aqui

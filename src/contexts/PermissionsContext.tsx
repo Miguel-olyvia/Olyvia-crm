@@ -189,3 +189,8 @@ export function usePermissions() {
   }
   return context;
 }
+
+/** Como usePermissions, mas devolve `undefined` fora do PermissionsProvider (componentes também montados sem ele, ex. em testes). */
+export function usePermissionsOpcional(): PermissionsContextType | undefined {
+  return useContext(PermissionsContext);
+}
