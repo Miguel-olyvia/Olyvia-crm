@@ -26,6 +26,7 @@ import { FieldConfig } from "@/components/users/TemplateFieldsConfig";
 import { UserFormEnhanced } from "@/components/users/UserFormEnhanced";
 import { PhoneEntry } from "@/components/users/MultiValuePhoneInput";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { usePermissions } from "@/hooks/usePermissions";
 import { NativeSelect } from "@/components/ui/native-select";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
@@ -94,6 +95,7 @@ export function MemberFormPanel({
   const { t } = useTranslation();
   const { countries } = useCountries();
   const { anewRoleCode } = usePermissionScope();
+  const { hasPermission } = usePermissions();
   const [allUsers, setAllUsers] = useState<AnewUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [addMode, setAddMode] = useState<"select" | "create">("select");
@@ -810,6 +812,8 @@ export function MemberFormPanel({
                         onValueChange={(value) => setEditUserData(prev => ({ ...prev, status: value }))}
                       />
                     </div>
+                    {/* 05/11/2026: a edge update-user-password pede users.change_password (não users.edit). */}
+                    {hasPermission("users.change_password") && (
                     <div className="space-y-2">
                       <Label>{t("users.newPassword")}</Label>
                       <div className="relative">
@@ -830,6 +834,7 @@ export function MemberFormPanel({
                         </Button>
                       </div>
                     </div>
+                    )}
                     <div className="space-y-2">
                       <Label>NIF</Label>
                       <Input

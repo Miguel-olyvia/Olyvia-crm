@@ -229,8 +229,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   trash: [
     "trash.view",
   ],
+  // 05/11/2026: users.change_password volta ao editor - é a que a edge update-user-password pede para mudar a palavra-passe de outro
+  // utilizador (o campo da ficha passa a pedi-la; a migration 20270108160000 deu-a aos papéis que tinham users.edit).
   users: [
-    "users.create", "users.delete", "users.edit", "users.manage_roles", "users.view",
+    "users.change_password", "users.create", "users.delete", "users.edit", "users.manage_roles", "users.view",
   ],
   warehouses: [
     "warehouses.create", "warehouses.delete", "warehouses.edit", "warehouses.export", "warehouses.import", "warehouses.view",
@@ -399,9 +401,6 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   ],
   trash: [
     "trash.delete", "trash.restore",
-  ],
-  users: [
-    "users.change_password",
   ],
   vehicles: [
     "vehicles.create", "vehicles.delete", "vehicles.edit", "vehicles.export", "vehicles.import", "vehicles.view",

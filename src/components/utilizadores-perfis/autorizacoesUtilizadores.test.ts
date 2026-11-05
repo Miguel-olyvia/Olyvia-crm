@@ -86,3 +86,19 @@ describe("criarAutorizacoes: histórico", () => {
     expect(criarAutorizacoes(ctx({ podeAgir: () => false })).podeVerHistorico(comum)).toBe(false);
   });
 });
+
+describe("criarAutorizacoes: palavra-passe", () => {
+  const comum = util("comum", "a1", [vinculo("comercial")]);
+  it("a própria muda-se sempre, mesmo sem permissões", () => {
+    expect(criarAutorizacoes(ctx({ tem: () => false })).podeMudarPalavraPasse(util("eu", "a-eu", [vinculo("comercial")]))).toBe(true);
+  });
+  it("a de outro pede users.change_password (o que o servidor pede), não users.edit", () => {
+    expect(criarAutorizacoes(ctx({ tem: (p) => p === "users.edit" })).podeMudarPalavraPasse(comum)).toBe(false);
+    expect(criarAutorizacoes(ctx({ tem: (p) => p === "users.change_password" })).podeMudarPalavraPasse(comum)).toBe(true);
+    expect(criarAutorizacoes(ctx({ podeAgir: (p) => p !== "users.change_password" })).podeMudarPalavraPasse(comum)).toBe(false);
+  });
+  it("nunca a do criador da conta", () => {
+    const criador = util("c", "a2", [vinculo("super_admin", { criador: true })]);
+    expect(criarAutorizacoes(ctx({ anewRoleCode: "super_admin" })).podeMudarPalavraPasse(criador)).toBe(false);
+  });
+});

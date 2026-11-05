@@ -22,6 +22,8 @@ export interface AutorizacoesUtilizadores {
   podeEditar: (u: Utilizador) => boolean;
   podeDesativar: (u: Utilizador) => boolean;
   podeVerHistorico: (u: Utilizador) => boolean;
+  /** Mudar a palavra-passe na ficha: a própria sempre; a de outro pede users.change_password (o que a edge update-user-password pede). */
+  podeMudarPalavraPasse: (u: Utilizador) => boolean;
 }
 
 const ROLES_QUE_EDITAM_OWNER = ["org_admin", "super_admin", "system_admin"];
@@ -54,5 +56,10 @@ export function criarAutorizacoes(c: ContextoAutorizacao): AutorizacoesUtilizado
       return c.tem("users.delete") && c.podeAgir("users.delete", u);
     },
     podeVerHistorico: (u) => c.tem("users.edit") && (ehProprio(u) || c.podeAgir("users.edit", u)),
+    podeMudarPalavraPasse: (u) => {
+      if (ehProprio(u)) return true;
+      if (protegido(u)) return false;
+      return c.tem("users.change_password") && c.podeAgir("users.change_password", u);
+    },
   };
 }

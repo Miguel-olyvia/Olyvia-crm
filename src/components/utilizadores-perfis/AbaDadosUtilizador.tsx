@@ -21,6 +21,8 @@ interface AbaDadosUtilizadorProps {
   criar: boolean;
   /** Super administrador: tudo só de leitura. */
   bloqueado: boolean;
+  /** Ao editar outro utilizador sem users.change_password o campo não aparece (o servidor recusaria a mudança). */
+  mostrarPalavraPasse: boolean;
   aoMudar: (parcial: Partial<ValoresFormUtilizador>) => void;
   aoGerar: () => void;
 }
@@ -54,7 +56,7 @@ function CampoTexto({ id, campo, texto, valor, erro, tipo = "text", obrigatorio,
   );
 }
 
-function CampoPalavraPasse({ id, valores, erro, criar, bloqueado, aoMudar, aoGerar }: Omit<AbaDadosUtilizadorProps, "erros"> & { erro?: string }) {
+function CampoPalavraPasse({ id, valores, erro, criar, bloqueado, aoMudar, aoGerar }: Omit<AbaDadosUtilizadorProps, "erros" | "mostrarPalavraPasse"> & { erro?: string }) {
   const { t } = useTranslation();
   const [visivel, setVisivel] = useState(false);
   const Icone = visivel ? EyeOff : Eye;
@@ -112,7 +114,7 @@ export function AbaDadosUtilizador(p: AbaDadosUtilizadorProps) {
         <RotuloCampo para={`${id}-posicao`} texto={t("usersProfiles.form.user.position")} />
         <Input id={`${id}-posicao`} value={valores.posicao} readOnly={bloqueado} className={CAMPO(false)} onChange={(e) => aoMudar({ posicao: e.target.value })} />
       </div>
-      <CampoPalavraPasse {...p} erro={erros.palavraPasse} />
+      {p.mostrarPalavraPasse && <CampoPalavraPasse {...p} erro={erros.palavraPasse} />}
     </div>
   );
 }

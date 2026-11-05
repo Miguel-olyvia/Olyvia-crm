@@ -535,7 +535,8 @@ export function MemberEditDialog({
                   </div>
                 </div>
 
-                {/* Password */}
+                {/* Password - 05/11/2026: a edge update-user-password pede users.change_password (não users.edit). */}
+                {hasPermission("users.change_password") && (
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
                     <KeyRound className="w-4 h-4 text-muted-foreground" />
@@ -563,6 +564,7 @@ export function MemberEditDialog({
                   {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
                   <p className="text-xs text-muted-foreground">{t("users.passwordChangeHint")}</p>
                 </div>
+                )}
 
                 {/* Fiscal Data */}
                 <div className="space-y-3 p-4 rounded-lg border bg-muted/30">

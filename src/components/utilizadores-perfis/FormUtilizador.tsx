@@ -30,6 +30,8 @@ interface FormUtilizadorProps {
   editor: Editor;
   /** users.edit com âmbito e sem as proteções de /users, para este utilizador. */
   podeEditar: (u: Utilizador) => boolean;
+  /** Mudar a palavra-passe de outro pede users.change_password (a própria muda-se sempre); sem ela o campo não aparece ao editar. */
+  podeMudarPalavraPasse: (u: Utilizador) => boolean;
   /** users.manage_roles: sem ele, ao editar, os vínculos e âmbitos só se veem. */
   podeGerirRoles: boolean;
   /** Cria ou guarda na base. Devolve o erro (nunca o engole). */
@@ -64,7 +66,7 @@ function acoesDeVinculos(valores: ValoresFormUtilizador, mudar: (p: Partial<Valo
 }
 
 /** Os valores do formulário, os erros (só depois de tentar enviar) e o que deles se deriva. */
-function useEstadoUtilizador({ form, utilizador, utilizadores, podeEditar, aoSujar }: InteriorProps, tentou: boolean) {
+function useEstadoUtilizador({ form, utilizador, utilizadores, podeEditar, podeMudarPalavraPasse, aoSujar }: InteriorProps, tentou: boolean) {
   const criar = form.modo === "criar";
   const [valores, setValores] = useState<ValoresFormUtilizador>(() => valoresIniciaisUtilizador(utilizador));
   const erros = validarUtilizador(valores, utilizadores, { criar, idAtual: form.id });
@@ -72,6 +74,7 @@ function useEstadoUtilizador({ form, utilizador, utilizadores, podeEditar, aoSuj
   return {
     criar, valores, mudar, erros, mostrados: tentou ? erros : {}, acoes: acoesDeVinculos(valores, mudar),
     bloqueado: !criar && !!utilizador && !podeEditar(utilizador),
+    mostrarPalavraPasse: criar || !utilizador || podeMudarPalavraPasse(utilizador),
     previsao: useMemo(() => utilizadorDeValores(valores, form.id ?? "novo"), [valores, form.id]),
   };
 }
@@ -85,7 +88,7 @@ function Interior(props: InteriorProps) {
   const [tentou, setTentou] = useState(false);
   const [aGravar, setAGravar] = useState(false);
   const [erroGravar, setErroGravar] = useState<string | null>(null);
-  const { criar, valores, mudar, erros, mostrados, acoes, bloqueado, previsao } = useEstadoUtilizador(props, tentou);
+  const { criar, valores, mudar, erros, mostrados, acoes, bloqueado, mostrarPalavraPasse, previsao } = useEstadoUtilizador(props, tentou);
   const marcas = abasComErroUtilizador(mostrados);
   // Ao criar, o criador escolhe os vínculos (o servidor valida); ao editar, gerir roles é users.manage_roles, como em /users.
   const vinculosBloqueados = bloqueado || (!criar && !podeGerirRoles);
@@ -123,7 +126,7 @@ function Interior(props: InteriorProps) {
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           <TabsContent value="dados" className="mt-0">
             <AbaDadosUtilizador
-              id={id} valores={valores} erros={mostrados} criar={criar} bloqueado={bloqueado} aoMudar={mudar}
+              id={id} valores={valores} erros={mostrados} criar={criar} bloqueado={bloqueado} mostrarPalavraPasse={mostrarPalavraPasse} aoMudar={mudar}
               aoGerar={() => mudar({ palavraPasse: gerarPalavraPasse() })}
             />
           </TabsContent>
