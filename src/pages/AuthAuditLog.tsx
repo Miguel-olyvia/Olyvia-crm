@@ -203,6 +203,13 @@ export default function AuthAuditLog() {
           <p className="text-sm text-muted-foreground">
             Registo de tentativas de autenticação (login) e alterações de conta, para fins de auditoria e conformidade RGPD (Art. 32).
           </p>
+          {/* 20270108150000: com platform.auth_audit_log.view a base devolve só as contas das organizações onde se tem a
+              permissão (ou abaixo); as tentativas sem conta associada só o administrador de sistema as vê. */}
+          {!isSystemAdmin && (
+            <p className="text-xs text-muted-foreground">
+              Mostra as contas das organizações onde tem esta permissão. Tentativas sem conta associada só são visíveis ao administrador de sistema.
+            </p>
+          )}
         </div>
       </div>
 

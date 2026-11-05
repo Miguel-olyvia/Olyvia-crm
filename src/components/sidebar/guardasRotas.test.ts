@@ -49,6 +49,11 @@ describe("catálogo antigo: redireciona para /catalogo-custos", () => {
 });
 
 describe("guardas das rotas e do menu", () => {
+  it("/platform/auth-audit-log: platform.auth_audit_log.view na rota e no menu (sem exigir admin de sistema)", () => {
+    expect(linhaDe("/platform/auth-audit-log")).toContain('<ProtectedRoute permission="platform.auth_audit_log.view">');
+    expect(itemMenu("/platform/auth-audit-log")?.permission).toBe("platform.auth_audit_log.view");
+  });
+
   it("/send-failures: smtp.view na rota e no menu", () => {
     expect(linhaDe("/send-failures")).toContain('<ProtectedRoute permission="smtp.view">');
     expect(itemMenu("/send-failures")?.permission).toBe("smtp.view");
