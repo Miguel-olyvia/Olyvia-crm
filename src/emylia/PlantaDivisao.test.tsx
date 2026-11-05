@@ -56,6 +56,16 @@ describe("PlantaDivisao", () => {
     expect(screen.getByText("3,75 m²")).toBeInTheDocument();
   });
 
+  it("tocar numa parede não põe o foco na caixa da medida (a página não desce); com o teclado, põe", async () => {
+    montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
+    const numero = screen.getByRole("button", { name: "Parede 3: 200 cm. Escrever a medida." });
+    fireEvent.pointerDown(numero);
+    expect(screen.getByLabelText("Parede 3, em cm")).not.toHaveFocus();
+    fireEvent.keyDown(numero, { key: "Enter" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByLabelText("Parede 3, em cm")).toHaveFocus();
+  });
+
   it("arrastar uma parede muda-a de sítio: as vizinhas esticam e a planta continua fechada (5/11)", () => {
     const { d, tela } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
     // a parede da direita está em x = 200: agarrá-la a meio e puxar 40 cm para fora

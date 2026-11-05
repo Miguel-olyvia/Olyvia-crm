@@ -10,7 +10,7 @@ import { Check, Plus, Wrench, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PECAS, type PecaPlanta, type TipoPeca } from "@/emylia/planta";
 import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, melhorPara, produto, type Categoria } from "./catalogoFake";
-import { decidir, decisaoDe, juntarPorColocar, juntarServico, mudarQtdServico, qtdSugerida, servicosRecomendados, tirarServico, type Decisao, type Projeto, totais } from "./necessidadesEstudio";
+import { decidir, decisaoDe, escolherProduto, juntarPorColocar, juntarServico, mudarQtdServico, qtdSugerida, servicosRecomendados, tirarServico, type Decisao, type Projeto, totais } from "./necessidadesEstudio";
 import { Cartao, Cores, ListaProdutos, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
 import { Ilustracao } from "./Ilustracao";
 
@@ -178,7 +178,7 @@ function CartaoDecisao({ p, setP, pc }: { p: Projeto; setP: SetP; pc: PecaPlanta
             transition={{ duration: 0.24 }} className="overflow-hidden">
             <div className="space-y-4 pt-4">
               <ListaProdutos cat={pc.tipo} estilo={p.estilo} escolhido={p.escolhas[pc.id]} limite={3}
-                onEscolher={(id) => setP((x) => ({ ...x, escolhas: { ...x.escolhas, [pc.id]: id } }))} />
+                onEscolher={(id) => setP((x) => escolherProduto(x, pc.id, id))} />
               {(ACOMPANHA[pc.tipo] ?? []).map((c) => (
                 <div key={c} className="space-y-2 border-t border-border pt-3">
                   <h4 className="flex items-center gap-2 text-[15px] font-semibold"><Plus className="h-4 w-4 text-primary" aria-hidden="true" />{NOME_CATEGORIA[c]}</h4>

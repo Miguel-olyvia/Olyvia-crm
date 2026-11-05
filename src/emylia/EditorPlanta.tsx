@@ -10,7 +10,7 @@ import { RotateCw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  PASSO, PECAS, PLANTA_VAZIA, cantos, emL, faltaFechar, gravarPlanta, juntarParede, juntarPeca, limites, moverParede, mudarComprimentoFechada, paredeDoTraco,
+  PASSO, PECAS, PLANTA_VAZIA, cantos, emL, etiquetasSemSobrepor, faltaFechar, gravarPlanta, juntarParede, juntarPeca, limites, moverParede, mudarComprimentoFechada, paredeDoTraco,
   retangulo, type PecaPlanta, type Planta, type Ponto, type TipoPeca,
 } from "./planta";
 
@@ -89,6 +89,9 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   // arrastar uma parede: de onde partiu e a planta como estava
   const arrastoParede = useRef<{ i: number; de: Ponto; base: Planta; mexeu: boolean; coladas: Set<string> } | null>(null);
   const svg = useRef<SVGSVGElement>(null);
+  // 5/11 (Rúben: «ao clicar para mover a parede a página faz scroll para baixo»): a caixa da medida já não toma o foco sozinha ao tocar na
+  // parede (o browser descia até ela); só com o teclado (Enter no número da parede) é que o foco vai para lá
+  const caixaMedida = useRef<HTMLInputElement>(null);
   const arrasto = useRef<{ id: string; dx: number; dy: number; mexeu: boolean } | null>(null);
   const contador = useRef(Date.now() % 100000);
 
@@ -227,6 +230,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   }, [aArrastarNova]);
   const pegarParede = (e: RPointerEvent, i: number) => {
     e.stopPropagation();
+    e.preventDefault();
     setParedeSel(i); setSel(null);
     if (paredesFixas || !fechada) return;
     const q = naPlanta(e.clientX, e.clientY); if (!q) return;
@@ -236,10 +240,8 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   const mudarMedida = (i: number, c: number) => { const r = mudarComprimentoFechada(p, i, c); if (r) gravar({ ...p, ...r }); };
 
   /** A etiqueta de uma parede: ao lado da reta, a meio (desenhando como na folha, no sentido dos ponteiros do relógio, fica por fora). */
-  const etiqueta = (a: Ponto, z: Ponto) => {
-    const horiz = a.y === z.y, sinal = horiz ? Math.sign(z.x - a.x) || 1 : Math.sign(z.y - a.y) || 1;
-    return horiz ? { x: (a.x + z.x) / 2, y: a.y - sinal * letra * 1.1 } : { x: a.x + sinal * letra * 2.4, y: (a.y + z.y) / 2 };
-  };
+  // 5/11 (Rúben: «não pode haver overlap de medidas»): cada medida procura um sítio livre (planta.ts)
+  const etiquetas = etiquetasSemSobrepor(p.paredes, p.o, letra * 4.2, letra * 1.5);
 
   const texto = paredesFixas ? (textoBarra ?? "Toque numa peça para a trocar; arraste-a para o sítio.")
     : !p.paredes.length ? `Arraste o dedo para desenhar as paredes${divisao ? ` da ${divisao.toLowerCase()}` : ""}, uma a uma, como na folha.`
@@ -294,7 +296,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
 
           {/* as medidas por cima de cada parede: tocar para escrever a certa */}
           {p.paredes.map((w, i) => {
-            const e = etiqueta(pts[i], pts[i + 1]);
+            const e = etiquetas[i];
             const ativa = paredeSel === i;
             const conteudo = (
               <>
@@ -306,7 +308,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
             return paredesFixas ? <g key={i} className="pointer-events-none">{conteudo}</g> : (
               <g key={i} role="button" tabIndex={0} aria-label={`Parede ${i + 1}: ${w.c} cm. Escrever a medida.`} className="cursor-pointer outline-none"
                 onPointerDown={(ev) => pegarParede(ev, i)}
-                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setParedeSel(i); } }}>{conteudo}</g>
+                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setParedeSel(i); setTimeout(() => caixaMedida.current?.focus(), 0); } }}>{conteudo}</g>
             );
           })}
 
@@ -362,7 +364,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
       {paredeSel !== null && p.paredes[paredeSel] && (
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
           <label className="grid w-40 gap-1 text-sm font-medium" htmlFor={`${id}-medida`}>Parede {paredeSel + 1}, em cm
-            <input id={`${id}-medida`} key={`${paredeSel}-${p.paredes[paredeSel].c}`} type="number" inputMode="numeric" min={0} autoFocus defaultValue={p.paredes[paredeSel].c} className={INP}
+            <input ref={caixaMedida} id={`${id}-medida`} key={`${paredeSel}-${p.paredes[paredeSel].c}`} type="number" inputMode="numeric" min={0} defaultValue={p.paredes[paredeSel].c} className={INP}
               onBlur={(e) => { const c = Math.round(Number(e.target.value) || 0); if (c > 0 && c !== p.paredes[paredeSel].c) mudarMedida(paredeSel, c); }}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
           </label>

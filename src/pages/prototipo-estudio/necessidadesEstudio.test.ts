@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { retangulo, type Planta } from "@/emylia/planta";
 import { combina, melhorPara, produtosDe, type Estilo } from "./catalogoFake";
-import { TABELA, aplicarEstilo, colocar, decidir, decisaoDe, estadoDaPeca, juntarPorColocar, juntarServico, mudaramDeSitio, mudarQtdServico, necessidades, qtdSugerida, sairam, servicosRecomendados, tirarServico, totais, type Projeto } from "./necessidadesEstudio";
+import { TABELA, aplicarEstilo, colocar, decidir, escolherProduto, decisaoDe, estadoDaPeca, juntarPorColocar, juntarServico, mudaramDeSitio, mudarQtdServico, necessidades, qtdSugerida, sairam, servicosRecomendados, tirarServico, totais, type Projeto } from "./necessidadesEstudio";
 import { servico } from "./catalogoFake";
 
 const ANTES: Planta = { o: { x: 0, y: 0 }, paredes: retangulo(234, 177), pecas: [
@@ -136,5 +136,15 @@ describe("os serviços (5/11: «e incluir também os serviços»)", () => {
     expect(juntarServico(p, "sv-pintura-teto").servicos).toHaveLength(1);
     p = tirarServico(p, "sv-pintura-teto");
     expect(necessidades(p).some((l) => l.id === "serv-sv-pintura-teto")).toBe(false);
+  });
+});
+
+describe("trocar o produto mantém a posição (5/11)", () => {
+  it("a sanita encostada à parede de cima continua lá, com o meio no mesmo sítio, e não conta como mudada de sítio", () => {
+    const p = escolherProduto(projeto(), "san", "san-nexo-s"); // a sanita do exemplo está em y = 10 (não encostada): fica com o mesmo centro
+    const antes = ANTES.pecas.find((x) => x.id === "san")!, depois = p.depois.pecas.find((x) => x.id === "san")!;
+    expect(Math.abs(depois.x + depois.w / 2 - (antes.x + antes.w / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs(depois.y + depois.h / 2 - (antes.y + antes.h / 2))).toBeLessThanOrEqual(1);
+    expect(mudaramDeSitio(p)).toEqual([]);
   });
 });

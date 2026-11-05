@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PECAS, areaChaoM2, areaParedesM2, type PecaPlanta } from "@/emylia/planta";
 import { ACOMPANHA, CORES, NOME_CATEGORIA, combina, coresPara, produto, produtosDe, type Categoria, type Cor, type Estilo, type Produto } from "./catalogoFake";
-import { IVA, alturaFinalCm, estadoDaPeca, totais, type Projeto } from "./necessidadesEstudio";
+import { IVA, alturaFinalCm, escolherProduto, estadoDaPeca, totais, type Projeto } from "./necessidadesEstudio";
 import { Ilustracao } from "./Ilustracao";
 
 export const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -143,13 +143,8 @@ export function ListaProdutos({ cat, estilo, escolhido, onEscolher, limite, acao
 
 export function PainelPeca({ p, pc, setP, fechar }: { p: Projeto; pc: PecaPlanta; setP: React.Dispatch<React.SetStateAction<Projeto>>; fechar: () => void }) {
   const estado = estadoDaPeca(p, pc), doAntes = estado !== "nova";
-  const escolher = (id: string) => setP((x) => {
-    const prod = produto(id);
-    // a peça fica com o tamanho do produto, na mesma orientação
-    const deitada = pc.w < pc.h;
-    const pecas = x.depois.pecas.map((y) => (y.id === pc.id && prod?.w && prod.h ? { ...y, w: deitada ? prod.h : prod.w, h: deitada ? prod.w : prod.h } : y));
-    return { ...x, escolhas: { ...x.escolhas, [pc.id]: id }, depois: { ...x.depois, pecas } };
-  });
+  // a peça fica no mesmo sítio, com o tamanho do produto (encaixar, em planta.ts)
+  const escolher = (id: string) => setP((x) => escolherProduto(x, pc.id, id));
   return (
     <section aria-labelledby="t-peca" className="space-y-4 rounded-2xl border border-primary/30 bg-card p-5 shadow-[var(--shadow-md)]">
       <div className="flex items-start justify-between gap-3">

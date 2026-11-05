@@ -5,7 +5,7 @@
 //  - o que muda de sítio: a canalização no sítio novo;
 //  - o revestimento e o pavimento por m² (as paredes até ao teto falso, quando há), o teto falso, as proteções e os pontos elétricos.
 // O comercial ajusta a quantidade ou tira uma linha; o ajuste fica marcado. Os preços do Estúdio são de teste (catalogoFake.ts).
-import { PASSO, PECAS, areaChaoM2, areaParedesM2, juntarPeca, type PecaPlanta, type Planta, type Ponto, type TipoPeca } from "@/emylia/planta";
+import { PASSO, PECAS, areaChaoM2, areaParedesM2, encaixar, juntarPeca, type PecaPlanta, type Planta, type Ponto, type TipoPeca } from "@/emylia/planta";
 import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, produto, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
 
 export interface Alturas { /** Pé-direito atual, em cm. */ peDireito: number; /** Altura do teto falso, em cm; null sem teto falso. */ tetoFalso: number | null }
@@ -13,6 +13,9 @@ export interface Alturas { /** Pé-direito atual, em cm. */ peDireito: number; /
 export interface Projeto {
   /** O nome do projeto (ex.: o negócio da Visita que o abriu). */
   nome?: string;
+  /** 5/11: o negócio da Visita que o abriu (para «Voltar ao negócio» levar a planta) e a página de onde veio. */
+  negocio?: number;
+  origem?: string;
   antes: Planta;
   depois: Planta;
   /** Peça do depois → produto do catálogo. Sem produto, a peça fica como está (se já era do antes). */
@@ -190,7 +193,7 @@ export function aplicarEstilo(p: Projeto, escolher: Escolher, todas = false): Pr
     for (const cat of ACOMPANHA[x.tipo] ?? []) { const a = escolher(cat); if (a) acomp[cat] = a; }
     acompanha[x.id] = acomp;
   }
-  return { ...p, escolhas, acompanha, revestimento: escolher("revestimento") ?? p.revestimento, pavimento: escolher("pavimento") ?? p.pavimento };
+  return encaixarEscolhas({ ...p, escolhas, acompanha, revestimento: escolher("revestimento") ?? p.revestimento, pavimento: escolher("pavimento") ?? p.pavimento });
 }
 
 // ---------------------------------------------------------------- 5/11: as decisões do passo «Estilo» e pôr na planta
@@ -212,7 +215,7 @@ export function decidir(p: Projeto, pecaId: string, d: Decisao, recomendado?: st
   else {
     if (!pecas.some((x) => x.id === pecaId)) pecas = [...pecas, { ...antes }];
     if (d === "fica") delete escolhas[pecaId];
-    else if (!escolhas[pecaId] && recomendado) escolhas[pecaId] = recomendado;
+    else if (!escolhas[pecaId] && recomendado) return escolherProduto({ ...p, escolhas, depois: { ...p.depois, pecas } }, pecaId, recomendado);
   }
   return { ...p, escolhas, depois: { ...p.depois, pecas } };
 }
@@ -275,3 +278,13 @@ export function juntarServico(p: Projeto, id: string): Projeto {
 }
 export const tirarServico = (p: Projeto, id: string): Projeto => ({ ...p, servicos: (p.servicos ?? []).filter((x) => x.id !== id) });
 export const mudarQtdServico = (p: Projeto, id: string, q: number): Projeto => ({ ...p, servicos: (p.servicos ?? []).map((x) => (x.id === id ? { ...x, q: Math.max(0, q) } : x)) });
+
+/** Escolher o produto de uma peça do depois: a peça fica no mesmo sítio, com o tamanho do produto (encaixar). Sem produto, só a escolha. */
+export function escolherProduto(p: Projeto, pecaId: string, produtoId: string): Projeto {
+  const prod = produto(produtoId);
+  const pecas = p.depois.pecas.map((x) => (x.id === pecaId && prod?.w && prod.h ? encaixar(x, prod.w, prod.h, p.depois) : x));
+  return { ...p, escolhas: { ...p.escolhas, [pecaId]: produtoId }, depois: { ...p.depois, pecas } };
+}
+/** Depois de muitas escolhas de uma vez (aplicar o estilo): cada peça com produto fica com o tamanho dele, no mesmo sítio. */
+export const encaixarEscolhas = (p: Projeto): Projeto =>
+  Object.entries(p.escolhas).reduce((acc, [id, prod]) => (acc.depois.pecas.some((x) => x.id === id) ? escolherProduto(acc, id, prod) : acc), p);

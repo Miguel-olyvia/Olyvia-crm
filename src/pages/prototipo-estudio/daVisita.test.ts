@@ -1,7 +1,7 @@
 // 5/11: o Estúdio abre a partir da Visita: a planta, as alturas e o estilo vêm do negócio.
 import { describe, expect, it } from "vitest";
 import { gravarPlanta, retangulo } from "@/emylia/planta";
-import { coresDoTexto, estiloDasRespostas, projetoDaVisita } from "./daVisita";
+import { abrirEstudio, coresDoTexto, devolverAoNegocio, estiloDasRespostas, lerVolta, projetoDaVisita, CHAVE_ESTUDIO } from "./daVisita";
 
 describe("o Estúdio a partir da Visita", () => {
   it("as cores ditas num texto, pela ordem", () => {
@@ -19,7 +19,7 @@ describe("o Estúdio a partir da Visita", () => {
 
   it("o projeto: a planta da visita é o antes (e o depois começa igual), com o pé-direito e o teto falso", () => {
     const f = { planta: gravarPlanta({ o: { x: 0, y: 0 }, paredes: retangulo(234, 177), pecas: [] }), diag_pe_direito_m: "2,6 m", pc_teto: "Teto falso" };
-    const p = projetoDaVisita("testeeeeeeee", f)!;
+    const p = projetoDaVisita("testeeeeeeee", f);
     expect(p.nome).toBe("testeeeeeeee");
     expect(p.antes.paredes).toEqual(retangulo(234, 177));
     expect(p.depois).toEqual(p.antes);
@@ -27,7 +27,24 @@ describe("o Estúdio a partir da Visita", () => {
     expect(p.alturas).toEqual({ peDireito: 260, tetoFalso: 240 });
   });
 
-  it("sem planta desenhada não há projeto", () => {
-    expect(projetoDaVisita("x", {})).toBeNull();
+  it("sem planta desenhada, o Estúdio abre com a planta vazia (desenha-se lá)", () => {
+    expect(projetoDaVisita("x", {}).antes.paredes).toEqual([]);
+  });
+
+  it("abrir outra vez o mesmo negócio continua o projeto; voltar ao negócio devolve a planta uma vez", () => {
+    localStorage.clear();
+    const f = { planta: gravarPlanta({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) };
+    abrirEstudio("Ana", f, 7, "/negocios");
+    const guardado = JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!);
+    guardado.escolhas = { x: "san-ria" };
+    localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(guardado));
+    abrirEstudio("Ana", f, 7, "/negocios");
+    expect(JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!).escolhas).toEqual({ x: "san-ria" });
+    abrirEstudio("Rui", f, 8, "/negocios");
+    expect(JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!).escolhas).toEqual({});
+    devolverAoNegocio({ ...guardado, negocio: 7, antes: { o: { x: 0, y: 0 }, paredes: retangulo(250, 150), pecas: [] } });
+    expect(lerVolta(8)).toBeNull();
+    expect(lerVolta(7)?.antes.paredes[0].c).toBe(250);
+    expect(lerVolta(7)).toBeNull();
   });
 });

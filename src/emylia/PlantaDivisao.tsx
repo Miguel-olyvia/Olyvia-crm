@@ -1,9 +1,9 @@
 // 5/11 (Rúben, a visita real: «reconstruir tudo o que está em papel, a planta da área»). A planta da divisão na Visita: o desenho é o
 // EditorPlanta (retas com a medida por cima, peças arrastadas da barra); aqui ficam os m² do chão e das paredes, que vão para as medidas
 // com um toque. A planta grava-se no negócio (f.planta, JSON). A geometria está em planta.ts.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Sparkles } from "lucide-react";
-import { guardarParaEstudio, projetoDaVisita } from "@/pages/prototipo-estudio/daVisita";
+import { CHAVE_VOLTA, abrirEstudio, lerVolta } from "@/pages/prototipo-estudio/daVisita";
 import { Button } from "@/components/ui/button";
 import { porMedida, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
@@ -21,6 +21,19 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   const atual = gravada && d.f.planta !== gravarPlanta(p) ? gravada : p;
 
   const mudar = (np: Planta) => { setP(np); setFeito(""); ctx.A.campo(d.id, "planta", gravarPlanta(np)); };
+  // 5/11 (Rúben: «botão para o Estúdio e depois botão para voltar»): a planta desenhada no Estúdio volta para o negócio
+  useEffect(() => {
+    const trazer = () => {
+      const v = lerVolta(d.id);
+      if (v && v.antes.paredes.length) { mudar(v.antes); setFeito("A planta voltou do Estúdio."); }
+    };
+    trazer();
+    const aoMudar = (e: StorageEvent) => { if (e.key === CHAVE_VOLTA) trazer(); };
+    window.addEventListener("storage", aoMudar);
+    window.addEventListener("focus", trazer);
+    return () => { window.removeEventListener("storage", aoMudar); window.removeEventListener("focus", trazer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por negócio
+  }, [d.id]);
   const chao = areaChaoM2(atual.paredes);
   const peCampo = peDireitoDoCampo(d.f.diag_pe_direito_m);
   const pe = peCampo ?? PE_DIREITO_SEM_RESPOSTA;
@@ -37,6 +50,14 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
 
   return (
     <div className="space-y-4">
+      {/* 5/11: o Estúdio (o depois, as peças no catálogo, o 3D e a proposta); a planta desta visita é o antes */}
+      <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[15px]"><b className="font-semibold">Estúdio</b> · desenhar como vai ficar, escolher as peças no catálogo e ver em 3D.</p>
+        <Button type="button" className="min-h-11 shrink-0" onClick={() => {
+          if (abrirEstudio(d.nome, { ...d.f, planta: gravarPlanta(atual) }, d.id, window.location.href)) window.open("/prototipo/estudio", "_blank");
+          else setFeito("Não deu para abrir o Estúdio neste browser.");
+        }}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir no Estúdio</Button>
+      </div>
       <EditorPlanta planta={atual} onMudar={mudar} divisao={divisao} />
       {/* o que a planta dá, e passá-lo às medidas */}
       <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -53,17 +74,6 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
         </Button>
       </div>
       <p role="status" className="min-h-5 text-sm text-success">{feito}</p>
-      {/* 5/11 (Rúben): o projeto do depois, no Estúdio (protótipo): esta planta é o antes, com o pé-direito, o teto falso e o estilo da visita */}
-      {chao !== null && (
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[15px]">Desenhar como vai ficar, escolher as peças no catálogo e ver em 3D.</p>
-          <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={() => {
-            const proj = projetoDaVisita(d.nome, { ...d.f, planta: gravarPlanta(atual) });
-            if (proj && guardarParaEstudio(proj)) window.open("/prototipo/estudio", "_blank", "noopener");
-            else setFeito("Não deu para abrir o Estúdio neste browser.");
-          }}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir no Estúdio</Button>
-        </div>
-      )}
     </div>
   );
 }

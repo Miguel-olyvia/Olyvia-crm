@@ -9,7 +9,7 @@
 // portal depois de a proposta ser aceite. Tudo fica neste browser (localStorage).
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorPlanta } from "@/emylia/EditorPlanta";
@@ -24,7 +24,7 @@ import { PlantaVista } from "./PlantaVista";
 import { alturasEmPalavras, materiais, tarefas } from "./fichaObra";
 import type { Cena } from "./geometria3d";
 
-import { CHAVE_ESTUDIO as CHAVE } from "./daVisita";
+import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Obra"] as const;
 type Passo = (typeof PASSOS)[number];
 /** Cores e alturas no 3D de cada peça, sem produto escolhido. */
@@ -106,7 +106,17 @@ export default function EstudioProjeto() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Estúdio · protótipo</p>
             <h1 className="truncate text-xl font-semibold tracking-tight">{p.nome ?? "Casa de banho do Bruno"}</h1>
           </div>
-          <Button type="button" className="min-h-11" onClick={() => setMostrar(true)}><Monitor className="mr-2 h-4 w-4" aria-hidden="true" />Mostrar ao cliente</Button>
+          <div className="flex flex-wrap gap-2">
+            {p.negocio !== undefined && (
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => {
+                devolverAoNegocio(p);
+                // aberto pela Visita: fecha este separador e volta-se ao do negócio; senão, vai para a página de onde veio
+                if (window.opener) window.close();
+                window.location.href = p.origem ?? "/negocios";
+              }}><ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />Voltar ao negócio</Button>
+            )}
+            <Button type="button" className="min-h-11" onClick={() => setMostrar(true)}><Monitor className="mr-2 h-4 w-4" aria-hidden="true" />Mostrar ao cliente</Button>
+          </div>
         </div>
         <nav aria-label="Passos do projeto" className="mx-auto max-w-7xl overflow-x-auto px-4 pb-3 sm:px-8">
           <ol className="flex min-w-max gap-2">
