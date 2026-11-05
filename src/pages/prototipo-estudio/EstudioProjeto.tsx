@@ -80,6 +80,16 @@ export default function EstudioProjeto() {
   const [mostrar, setMostrar] = useState(false);
   const [aviso, setAviso] = useState("");
   useEffect(() => { try { localStorage.setItem(CHAVE, JSON.stringify(p)); } catch { /* fica só em memória */ } }, [p]);
+  // 5/11: com o Estúdio aberto em dois separadores (ou aberto de novo pela Visita), o que um grava passa para o outro, em vez de o
+  // separador mais antigo gravar por cima (perdia-se o negócio de onde veio e o «Voltar ao negócio»)
+  useEffect(() => {
+    const aoMudar = (e: StorageEvent) => {
+      if (e.key !== CHAVE || !e.newValue) return;
+      try { const novo = JSON.parse(e.newValue) as Projeto; if (novo?.antes?.paredes && novo.depois?.paredes) setP(novo); } catch { /* ignora o que não se percebe */ }
+    };
+    window.addEventListener("storage", aoMudar);
+    return () => window.removeEventListener("storage", aoMudar);
+  }, []);
 
   const linhas = useMemo(() => necessidades(p), [p]);
   const t = totais(linhas);
