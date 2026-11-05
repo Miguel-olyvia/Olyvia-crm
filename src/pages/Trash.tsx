@@ -14,6 +14,7 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { usePermissions } from "@/hooks/usePermissions";
+import { podeRestaurar } from "@/lib/lixo/permissoesRestauro";
 import { getContactScopeUserIds, buildContactScopeOrFilter } from "@/lib/contacts/scope";
 import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -377,15 +378,17 @@ export default function Trash() {
             <TableCell>{r.deleted_at ? format(new Date(r.deleted_at), "dd/MM/yyyy HH:mm", { locale: pt }) : "—"}</TableCell>
             <TableCell className="text-muted-foreground">{r.deleted_by_name || "—"}</TableCell>
             <TableCell className="text-right space-x-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => (kind === "client_orders"
-                  ? setRestoreOrderTarget({ id: r.id, name: r.subtitle || r.display_name })
-                  : restore(kind, r.id))}
-              >
-                <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restaurar
-              </Button>
+              {podeRestaurar(kind, hasPermission) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => (kind === "client_orders"
+                    ? setRestoreOrderTarget({ id: r.id, name: r.subtitle || r.display_name })
+                    : restore(kind, r.id))}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restaurar
+                </Button>
+              )}
               {hasPermission(PURGE_PERMISSION[kind]) && (
                 <Button size="sm" variant="destructive" onClick={() => setPurgeTarget({ kind, id: r.id, name: r.display_name })}>
                   <Trash2 className="h-3.5 w-3.5 mr-1" /> Eliminar definitivamente
