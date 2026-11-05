@@ -162,6 +162,30 @@ describe("aceitarProposta", () => {
   });
 });
 
+// 05/11/2026: proposta de um negócio (negocio_id) — a base exige negocios.proposta.decidir (fn_neg_documento_exigir_permissao).
+describe("proposta de um negócio: negocios.proposta.decidir", () => {
+  beforeEach(() => { h.tabelas.proposals = { data: { stage_id: "e-rasc", negocio_id: "neg-1" }, error: null }; });
+
+  it("sem ela não aceita nem recusa, e não escreve", async () => {
+    await expect(aceitarProposta(PEDIDO)).rejects.toThrow("negocios.proposta.decidir");
+    await expect(recusarProposta({ ...PEDIDO, motivo: MOTIVO })).rejects.toThrow("negocios.proposta.decidir");
+    expect(escritas("proposals")).toEqual([]);
+    expect(escritas("quotes")).toEqual([]);
+  });
+
+  it("com proposals.edit e ela, aceita e recusa", async () => {
+    const permissoes = ["proposals.edit", "negocios.proposta.decidir"];
+    await expect(aceitarProposta({ ...PEDIDO, permissoes })).resolves.toEqual({ workflowFailed: false });
+    await expect(recusarProposta({ ...PEDIDO, motivo: MOTIVO, permissoes })).resolves.toEqual({ workflowFailed: false });
+    expect(escritas("proposals")).toHaveLength(2);
+  });
+
+  it("só com ela (sem proposals.edit) continua a recusar", async () => {
+    await expect(aceitarProposta({ ...PEDIDO, permissoes: ["negocios.proposta.decidir"] })).rejects.toThrow("proposals.edit");
+    expect(escritas("proposals")).toEqual([]);
+  });
+});
+
 describe("recusarProposta", () => {
   it("passa à etapa «perdida» com o motivo, rejeita os orçamentos em rascunho ou enviados e recalcula o valor", async () => {
     const r = await recusarProposta({ ...PEDIDO, motivo: MOTIVO });

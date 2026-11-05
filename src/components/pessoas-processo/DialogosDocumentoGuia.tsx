@@ -57,6 +57,10 @@ export function RespostaPropostaNoGuia({ plano, organizationId, mutacoes, aoFech
   const { t } = useTranslation();
   const [aGravar, setAGravar] = useState(false);
   const [aPedirMotivo, setAPedirMotivo] = useState(false);
+  // A proposta do guia é de um negócio: a base exige proposals.edit (RLS) e negocios.proposta.decidir (fn_neg_documento_exigir_permissao).
+  // Sem as duas conhecidas (nem enquanto a lista não se conhece) os botões «Aceitou»/«Recusou» não aparecem.
+  const autorizado = permissoes !== undefined && permissoes.includes("proposals.edit") && permissoes.includes("negocios.proposta.decidir");
+  useEffect(() => { if (!autorizado) aoFechar(); }, [autorizado, aoFechar]);
 
   /** Devolve se gravou: quem chama só larga o que o utilizador escreveu (o motivo) quando correu bem. */
   const gravar = async (fazer: () => Promise<{ workflowFailed: boolean }>, chaveOk: string): Promise<boolean> => {
@@ -82,6 +86,7 @@ export function RespostaPropostaNoGuia({ plano, organizationId, mutacoes, aoFech
     if (gravou) setAPedirMotivo(false);
   };
 
+  if (!autorizado) return null;
   return (
     <>
       <Dialog open={!aPedirMotivo} onOpenChange={(aberto) => { if (!aberto && !aGravar) aoFechar(); }}>

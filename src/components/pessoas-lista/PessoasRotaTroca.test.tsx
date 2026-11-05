@@ -7,6 +7,8 @@ import { PessoasRota } from "./PessoasRota";
 import { useFiltrosLista } from "./useFiltrosLista";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+// negocios.proposta.decidir (fn_cat_pode) não interessa aqui: «não tem», já lido.
+vi.mock("@/hooks/usePodeDecidirProposta", () => ({ PERMISSAO_DECIDIR_PROPOSTA: "negocios.proposta.decidir", usePodeDecidirProposta: () => ({ pode: false, aLer: false }) }));
 vi.mock("@/hooks/pessoas/useNegociosAtivos", () => ({
   useNegociosAtivos: () => ({
     ativo: true, momentoGanho: "manual", isLoading: false, isError: false, erroSemResposta: false, aRepetir: false,

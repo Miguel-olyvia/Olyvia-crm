@@ -77,6 +77,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { usePodeEnviarPropostaPortal, SEM_PERMISSAO_PROPOSTA_PORTAL } from "@/hooks/usePodeEnviarPropostaPortal";
+import { usePodeDecidirProposta, SEM_PERMISSAO_DECIDIR_PROPOSTA } from "@/hooks/usePodeDecidirProposta";
 import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
 import {
@@ -162,6 +163,8 @@ interface Proposal {
   proposal_number?: string | null;
   published_at?: string | null;
   has_unpublished_changes?: boolean | null;
+  /** O negócio a que a proposta pertence: com ele, aceitar/recusar/reabrir pede negocios.proposta.decidir (como a base). */
+  negocio_id?: string | null;
 }
 
 interface DealSearchResult {
@@ -200,7 +203,7 @@ const PROPOSALS_LIST_SELECT =
   "rejection_reason_code, rejection_notes, tracking_token, last_viewed_at, view_count, organization_id, " +
   "entity_id, root_organization_id, proposal_number, rejection_reason_id, is_deleted, deleted_at, deleted_by, " +
   "signature_image, assigned_to, published_at, published_snapshot_hash, has_unpublished_changes, " +
-  "decided_snapshot_hash, decided_published_at, " +
+  "decided_snapshot_hash, decided_published_at, negocio_id, " +
   "deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)";
 
 const Proposals = () => {
@@ -636,6 +639,11 @@ const Proposals = () => {
   // 04/11/2026: enviar/republicar a proposta no portal e reenviar as credenciais pedem negocios.proposta.enviar ou portal.manage
   // (a mesma regra de create-client-portal-access). Sem ela, as duas opções ficam desligadas com o motivo.
   const { pode: podeEnviarPortal } = usePodeEnviarPropostaPortal();
+  // 05/11/2026: numa proposta de um negócio (negocio_id), aceitar, recusar e reabrir uma aceite/recusada pedem negocios.proposta.decidir —
+  // a mesma regra da base (trg_negocios_21_doc_permissao → fn_neg_documento_exigir_permissao). As propostas sem negócio ficam como estavam.
+  const { pode: podeDecidirNegocio } = usePodeDecidirProposta();
+  const semDecisaoNoNegocio = (proposal: { negocio_id?: string | null } | null | undefined): boolean =>
+    !!proposal?.negocio_id && !podeDecidirNegocio;
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendProposal, setSendProposal] = useState<any>(null);
@@ -1628,6 +1636,15 @@ const Proposals = () => {
   const handleBulkStatusChange = async () => {
     if (!bulkNewStatus) return;
     if (!activeCompany?.id) return;
+    // Entrar ou sair de uma etapa «ganha»/«perdida» é decidir: numa proposta de um negócio pede negocios.proposta.decidir.
+    const decisiva = (stage: WorkflowStage | null | undefined): boolean => !!stage && (!!stage.is_won || !!stage.is_lost);
+    const destinoDecide = decisiva(workflowStages.find(s => s.id === bulkNewStatus));
+    const bloqueadas = filteredProposals.filter(p => selectedIds.includes(p.id) && semDecisaoNoNegocio(p)
+      && (destinoDecide || decisiva(getProposalStage(p))));
+    if (bloqueadas.length > 0) {
+      toast({ title: SEM_PERMISSAO_DECIDIR_PROPOSTA, variant: "destructive" });
+      return;
+    }
     setIsBulkStatusChanging(true);
     try {
       const businessUserIdBulkSt = await resolveCurrentBusinessUserId();
@@ -2255,6 +2272,10 @@ const Proposals = () => {
     if (acceptProposalLockRef.current) return;
     const targetProposal = proposalToAccept ?? selectedProposal;
     if (!targetProposal) return;
+    if (semDecisaoNoNegocio(targetProposal)) {
+      toast({ title: SEM_PERMISSAO_DECIDIR_PROPOSTA, variant: "destructive" });
+      return;
+    }
     acceptProposalLockRef.current = true;
     setIsAcceptingProposal(true);
     try {
@@ -2308,6 +2329,7 @@ const Proposals = () => {
     reason: ProposalRejectionDecision,
     stageIdOverride?: string,
   ): Promise<{ workflowFailed: boolean }> => {
+    if (semDecisaoNoNegocio(proposal)) throw new Error(SEM_PERMISSAO_DECIDIR_PROPOSTA);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Not authenticated");
     // Resolve by the is_lost flag, not by name — same reasoning as accept.
@@ -2393,6 +2415,10 @@ const Proposals = () => {
   };
 
   const handleReopenProposal = async (proposal: Proposal) => {
+    if (semDecisaoNoNegocio(proposal)) {
+      toast({ title: SEM_PERMISSAO_DECIDIR_PROPOSTA, variant: "destructive" });
+      return;
+    }
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -2766,7 +2792,7 @@ const Proposals = () => {
             onClick={() => openContractPdf(pipelineLinks[proposal.id]?.contract_id)}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} disabled={semDecisaoNoNegocio(proposal)} title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : "Reabrir"}>
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id} title="Duplicar">
@@ -2781,7 +2807,7 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} disabled={semDecisaoNoNegocio(proposal)} title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : "Reabrir"}>
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleQuickCall(proposal)} title="Follow-up">
@@ -2854,17 +2880,25 @@ const Proposals = () => {
           </DropdownMenuItem>
         )}
         {!stage?.is_won && !stage?.is_lost && (
-          <DropdownMenuItem className="text-green-600" onClick={() => { setSelectedProposal(proposal); handleAcceptProposal(proposal); }}>
+          <DropdownMenuItem
+            className="text-green-600"
+            disabled={semDecisaoNoNegocio(proposal)}
+            title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
+            onClick={() => { setSelectedProposal(proposal); handleAcceptProposal(proposal); }}
+          >
             <CheckSquare className="w-3.5 h-3.5 mr-2" /> Aceitar
-            <span className="text-[10px] text-muted-foreground ml-1">⚡ cria contrato</span>
+            <span className="text-[10px] text-muted-foreground ml-1">{semDecisaoNoNegocio(proposal) ? "(sem permissão)" : "⚡ cria contrato"}</span>
           </DropdownMenuItem>
         )}
         {!stage?.is_won && !stage?.is_lost && (
           <DropdownMenuItem
             className="text-red-500"
+            disabled={semDecisaoNoNegocio(proposal)}
+            title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
             onClick={() => { setSelectedProposal(proposal); setRejectReasonDialogOpen(true); }}
           >
             <X className="w-3.5 h-3.5 mr-2" /> Rejeitar (com motivo)
+            {semDecisaoNoNegocio(proposal) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
           </DropdownMenuItem>
         )}
 
@@ -2949,8 +2983,13 @@ const Proposals = () => {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => handleReopenProposal(proposal)}>
+            <DropdownMenuItem
+              onClick={() => handleReopenProposal(proposal)}
+              disabled={semDecisaoNoNegocio(proposal)}
+              title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
+            >
               <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
+              {semDecisaoNoNegocio(proposal) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handleQuickCall(proposal)}>
               <Phone className="w-3.5 h-3.5 mr-2" /> Contactar cliente
@@ -2962,8 +3001,13 @@ const Proposals = () => {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => handleReopenProposal(proposal)}>
+            <DropdownMenuItem
+              onClick={() => handleReopenProposal(proposal)}
+              disabled={semDecisaoNoNegocio(proposal)}
+              title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
+            >
               <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
+              {semDecisaoNoNegocio(proposal) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
             </DropdownMenuItem>
           </>
         )}
@@ -3758,6 +3802,14 @@ const Proposals = () => {
             workflowStages={workflowStages}
             getProposalStage={getProposalStage}
             onMoveStage={async (proposalId, newStageId) => {
+              // Entrar ou sair de uma etapa «ganha»/«perdida» numa proposta de um negócio pede negocios.proposta.decidir (como a base).
+              const movida = filteredProposals.find(p => p.id === proposalId);
+              const novaEtapa = workflowStages.find(s => s.id === newStageId);
+              const etapaAtual = movida ? getProposalStage(movida) : null;
+              if (semDecisaoNoNegocio(movida) && (novaEtapa?.is_won || novaEtapa?.is_lost || etapaAtual?.is_won || etapaAtual?.is_lost)) {
+                toast({ title: SEM_PERMISSAO_DECIDIR_PROPOSTA, variant: "destructive" });
+                return;
+              }
               const { error } = await supabase.from("proposals").update({ stage_id: newStageId }).eq("id", proposalId);
               if (error) {
                 captureFlowError(error, "proposal-lifecycle");
@@ -3770,6 +3822,10 @@ const Proposals = () => {
             onLostStageDrop={(proposalId, stageId) => {
               const proposal = filteredProposals.find(p => p.id === proposalId);
               if (!proposal) return;
+              if (semDecisaoNoNegocio(proposal)) {
+                toast({ title: SEM_PERMISSAO_DECIDIR_PROPOSTA, variant: "destructive" });
+                return;
+              }
               setKanbanRejectTarget({ proposal, stageId });
               setKanbanRejectDialogOpen(true);
             }}
@@ -4101,8 +4157,8 @@ const Proposals = () => {
       <ProposalDetailsDialog open={detailsOpen} onOpenChange={setDetailsOpen} proposal={selectedProposal}
         onSendProposal={() => { if (selectedProposal) { setSendProposal(selectedProposal); setSendDialogOpen(true); setDetailsOpen(false); } }}
         onViewHistory={() => { if (selectedProposal) { setSendHistoryProposalId(selectedProposal.id); setSendHistoryProposalTitle(selectedProposal.title); setSendHistoryOpen(true); setDetailsOpen(false); } }}
-        onAccept={() => handleAcceptProposal(selectedProposal ?? undefined)}
-        onReject={() => setRejectReasonDialogOpen(true)}
+        onAccept={semDecisaoNoNegocio(selectedProposal) ? undefined : () => handleAcceptProposal(selectedProposal ?? undefined)}
+        onReject={semDecisaoNoNegocio(selectedProposal) ? undefined : () => setRejectReasonDialogOpen(true)}
         isAccepting={isAcceptingProposal}
       />
 

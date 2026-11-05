@@ -48,7 +48,7 @@ const itemDe = (extra: Partial<ItemProcesso> = {}): ItemProcesso => ({
 });
 const REAL: FontePessoas = {
   modo: "real", organizationId: "org-1", momentoGanho: "manual",
-  permissoesFecho: ["quotes.create", "proposals.edit", "client_contracts.create", "client_contracts.edit"],
+  permissoesFecho: ["quotes.create", "proposals.edit", "negocios.proposta.decidir", "client_contracts.create", "client_contracts.edit"],
 };
 
 function processo(extra: Partial<ProcessoValor> = {}): ProcessoValor {

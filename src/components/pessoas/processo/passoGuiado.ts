@@ -157,10 +157,13 @@ function checklistDaFase(fase: string, { item, dados, passada }: EntradaChecklis
   }
 }
 
-const PERMISSAO_DO_PASSO: Partial<Record<PassoProcesso, string>> = {
-  criarOrcamento: "quotes.create", criarProposta: "proposals.create", criarContrato: "client_contracts.create",
+const PERMISSAO_DO_PASSO: Partial<Record<PassoProcesso, readonly string[]>> = {
+  criarOrcamento: ["quotes.create"], criarProposta: ["proposals.create"], criarContrato: ["client_contracts.create"],
   // O mesmo que as páginas de origem exigem: proposals.edit para enviar e responder, client_contracts.edit para a assinatura.
-  enviarProposta: "proposals.edit", registarRespostaCliente: "proposals.edit", registarAssinatura: "client_contracts.edit",
+  // Responder (aceitou/recusou) pede também negocios.proposta.decidir: a proposta do guia é de um negócio e a base exige-a
+  // (gatilho trg_negocios_21_doc_permissao → fn_neg_documento_exigir_permissao).
+  enviarProposta: ["proposals.edit"], registarRespostaCliente: ["proposals.edit", "negocios.proposta.decidir"],
+  registarAssinatura: ["client_contracts.edit"],
 };
 
 /** Os passos de documento do ecrã guiado (a proposta e o contrato), feitos num diálogo por cima do guia; sem o documento ficam desativados. */
@@ -192,8 +195,9 @@ function acaoDoPasso(passo: PassoProcesso, c: ContextoDoGuia): AcaoGuiada {
   } else if (passo !== "registarChamada" && !c.podeEditar) {
     return desativada(passo, "semPermissao");
   }
-  const codigo = PERMISSAO_DO_PASSO[passo];
-  if (codigo && c.permissoesFecho !== undefined && !c.permissoesFecho.includes(codigo)) return desativada(passo, "semPermissao");
+  const codigos = PERMISSAO_DO_PASSO[passo];
+  const fecho = c.permissoesFecho;
+  if (codigos && fecho !== undefined && !codigos.every((codigo) => fecho.includes(codigo))) return desativada(passo, "semPermissao");
   // Os passos de documento gravam sem passar por outra página: sem a lista conhecida (a carregar, ou a leitura falhou) o botão não faz nada, e diz porquê.
   if (PASSOS_DE_DOCUMENTO.has(passo) && c.permissoesFecho === undefined && c.ligados.has(passo)) return desativada(passo, "aCarregarPermissoes");
   return c.ligados.has(passo) ? base : desativada(passo, PASSOS_DE_DOCUMENTO.has(passo) ? "semDocumento" : "indisponivel");

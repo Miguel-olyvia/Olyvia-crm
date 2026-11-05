@@ -13,6 +13,9 @@ import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
 import { PessoasRota } from "./PessoasRota";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+// negocios.proposta.decidir lê-se por fn_cat_pode (usePodeDecidirProposta); aqui simula-se a resposta.
+const decidir = vi.hoisted(() => ({ valor: { pode: false, aLer: false } }));
+vi.mock("@/hooks/usePodeDecidirProposta", () => ({ PERMISSAO_DECIDIR_PROPOSTA: "negocios.proposta.decidir", usePodeDecidirProposta: () => decidir.valor }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 const ativosMock = vi.hoisted(() => vi.fn());
@@ -32,7 +35,7 @@ function Sonda() {
   return <p>PAGINA</p>;
 }
 
-beforeEach(() => { vistas.length = 0; escopo.mockReset(); });
+beforeEach(() => { vistas.length = 0; escopo.mockReset(); decidir.valor = { pode: false, aLer: false }; });
 afterEach(cleanup);
 
 describe("PessoasRota: permissões do fecho na fonte", () => {
@@ -46,6 +49,31 @@ describe("PessoasRota: permissões do fecho na fonte", () => {
     );
     const fonte = vistas[vistas.length - 1];
     expect(fonte.modo === "real" && [...(fonte.permissoesFecho ?? [])].sort()).toEqual(["pessoas.reopen", "proposals.edit"]);
+  });
+
+  // 05/11/2026: aceitar/recusar uma proposta de um negócio pede negocios.proposta.decidir na base; a fonte leva-a quando fn_cat_pode diz que sim.
+  const montarRota = () => {
+    escopo.mockReturnValue({ anewUserId: "u1", getPermissionScope: (c: string) => (c === "proposals.edit" ? "ORG" : "NONE") });
+    ativosMock.mockReturnValue({ ativo: true, momentoGanho: "manual", isLoading: false, isError: false, erroSemResposta: false, aRepetir: false } satisfies NegociosAtivos);
+    render(
+      <MemoryRouter initialEntries={["/pessoas"]}>
+        <Routes><Route path="/pessoas" element={<PessoasRota><Sonda /></PessoasRota>} /></Routes>
+      </MemoryRouter>,
+    );
+    const fonte = vistas[vistas.length - 1];
+    return fonte.modo === "real" ? fonte.permissoesFecho : null;
+  };
+
+  it("com negocios.proposta.decidir (fn_cat_pode) a fonte leva-a", () => {
+    decidir.valor = { pode: true, aLer: false };
+    expect([...(montarRota() ?? [])].sort()).toEqual(["negocios.proposta.decidir", "proposals.edit"]);
+  });
+
+  it("sem ela a lista fica só com as do perfil; enquanto se lê a lista é desconhecida (undefined)", () => {
+    expect(montarRota()).toEqual(["proposals.edit"]);
+    cleanup(); vistas.length = 0;
+    decidir.valor = { pode: false, aLer: true };
+    expect(montarRota()).toBeUndefined();
   });
 });
 

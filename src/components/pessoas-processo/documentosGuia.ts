@@ -22,7 +22,8 @@ export interface OpcoesDoPlano {
   podeEditar: boolean;
   /**
    * As permissões da sessão. Sem a lista (a página ainda não a leu, ou a leitura falhou) nenhum passo abre. Cada passo exige o mesmo que a página de origem:
-   * enviar e responder à proposta `proposals.edit`, criar o contrato `client_contracts.create`, assinar `client_contracts.edit`.
+   * enviar e responder à proposta `proposals.edit`, criar o contrato `client_contracts.create`, assinar `client_contracts.edit`. Responder à proposta
+   * pede também `negocios.proposta.decidir`: a proposta da ficha de um negócio tem sempre negocio_id e a base exige-a (fn_neg_documento_exigir_permissao).
    */
   permissoes: readonly string[] | undefined;
   /** O fecho v4: o contrato nasce dentro do negócio e um negócio que fecha na proposta não oferece contratos. */
@@ -39,6 +40,7 @@ export function planoDoDocumento(passo: PassoDocumento, negocio: NegocioFichaDb 
       const proposta = propostaViva(negocio);
       if (!proposta || propostaRecusada(proposta)) return null;
       if (!tem("proposals.edit")) return null;
+      if (passo === "registarRespostaCliente" && !tem("negocios.proposta.decidir")) return null;
       return { passo, propostaId: proposta.id, titulo: proposta.titulo ?? "", numero: proposta.numero } as PlanoDocumento;
     }
     case "criarContrato": {

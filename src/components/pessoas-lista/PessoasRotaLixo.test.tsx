@@ -7,6 +7,8 @@ import type { NegociosAtivos } from "@/hooks/pessoas/useNegociosAtivos";
 import { PessoasRota } from "./PessoasRota";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+// negocios.proposta.decidir (fn_cat_pode) não interessa aqui: «não tem», já lido.
+vi.mock("@/hooks/usePodeDecidirProposta", () => ({ PERMISSAO_DECIDIR_PROPOSTA: "negocios.proposta.decidir", usePodeDecidirProposta: () => ({ pode: false, aLer: false }) }));
 const ativosMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useNegociosAtivos", () => ({ useNegociosAtivos: () => ativosMock(), useRepetirNegociosAtivos: () => vi.fn() }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "org-nike" }, isLoading: false }) }));
