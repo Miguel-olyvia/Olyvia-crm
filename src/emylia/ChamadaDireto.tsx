@@ -4,16 +4,18 @@
 // comercial confirma o que entra. Nada corre no PC de ninguém. A lógica das propostas está em chamadaMotor.ts
 // e a ligação ao Supabase em chamadaNuvem.ts.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
+import { Camera, Check, Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Def, Grupo } from "./campos";
 import { LINHAS, camposMedida, medida, nomeLinha, porMedida, servicosPedidos, type LinhaId, type Negocio } from "./motor";
 import { mudarDadosLead } from "./DadosDaLead";
 import type { Ctx } from "./pecas";
-import { juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { juntarExtracoes, juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { divisaoPrincipal } from "./campos";
+import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
-import { GRUPO_VISITA, ecraAceso, falasDeFicheiro, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
+import { GRUPO_VISITA, ecraAceso, falasDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
 
 type EstadoLig = "parado" | "a_ligar" | "a_ouvir" | "a_terminar" | "terminado" | "erro";
 const EXEMPLO_URL = "/chamadas/exemplo.ogg";
@@ -86,6 +88,11 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const falasRef = useRef<Fala[]>([]);
   const fila = useRef<Promise<void>>(Promise.resolve());
   const soltarEcra = useRef<(() => void) | null>(null);
+  // 5/11: a foto da folha da visita (lida pela função visita-folha) e a planta que ela deu
+  const inputFolha = useRef<HTMLInputElement>(null);
+  const [aLerFolha, setALerFolha] = useState(false);
+  const [plantaLida, setPlantaLida] = useState<PlantaLida | null>(null);
+  const [plantaUsada, setPlantaUsada] = useState(false);
   const relogio = useRef<number | null>(null);
   const fimLista = useRef<HTMLDivElement>(null);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
@@ -170,6 +177,24 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
     }
   }
 
+  async function folhaEscolhida(ficheiro: File | undefined) {
+    if (!ficheiro) return;
+    setALerFolha(true); setMsg("A ler a folha...");
+    try {
+      const r = await lerFolha(ficheiro, grupos, divisaoPrincipal(d.f) ?? undefined);
+      const { planta, ...ext } = r;
+      setExtracao((antes) => juntarExtracoes(antes, ext));
+      setAplicadas(null);
+      setPlantaLida(planta); setPlantaUsada(false);
+      setMsg(`Folha lida.${planta ? " Há uma planta para confirmar." : ""} Confirme o que entra nos campos.`);
+    } catch (e) {
+      setMsg("Não deu para ler a folha: " + (e as Error).message);
+    } finally {
+      setALerFolha(false);
+      if (inputFolha.current) inputFolha.current.value = "";
+    }
+  }
+
   async function registarVoz() {
     setAGravarVoz(0);
     try {
@@ -250,6 +275,15 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
             </Button>
           ) : null}
           {!aOuvir && !ocupado ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
+          {modo === "visita" && !ocupado ? (
+            <>
+              <input ref={inputFolha} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true"
+                onChange={(e) => void folhaEscolhida(e.target.files?.[0])} />
+              <Button type="button" variant="outline" disabled={aLerFolha} onClick={() => inputFolha.current?.click()}>
+                <Camera className="h-4 w-4" aria-hidden="true" />{aLerFolha ? "A ler a folha..." : "Ler a folha"}
+              </Button>
+            </>
+          ) : null}
           {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciarTeste()} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
           {aOuvir ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
           {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{estado === "a_ligar" ? "A ligar..." : "A terminar..."}</Button> : null}
@@ -277,6 +311,23 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
             </p>
           ))}
           <div ref={fimLista} />
+        </div>
+      ) : null}
+
+      {plantaLida ? (
+        <div className="mt-4 flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[15px]">
+            <b className="font-semibold">Planta da folha:</b> paredes de {plantaLida.paredes.map((x) => x.c).join(", ")} cm
+            {plantaLida.pecas.length ? `, ${plantaLida.pecas.length} ${plantaLida.pecas.length === 1 ? "peça" : "peças"}` : ""}.{" "}
+            {(() => { const pl = plantaDaFolha(plantaLida).paredes, f = faltaFechar(pl);
+              return f > 1 ? `Não fecha (faltam ${f === Infinity ? "paredes" : `${f} cm`}): corrija-a em «Medidas da área».` : `Chão de ${String(areaChaoM2(pl)).replace(".", ",")} m².`; })()}
+            {plantaLida.confianca < 0.75 ? " Leitura incerta: confira as medidas." : ""}
+          </p>
+          {plantaUsada ? <span className="text-sm text-success">Na planta. Veja-a em «Medidas da área».</span> : (
+            <Button type="button" className="shrink-0" onClick={() => { ctx.A.campo(d.id, "planta", gravarPlanta(plantaDaFolha(plantaLida))); setPlantaUsada(true); }}>
+              <Check className="h-4 w-4" aria-hidden="true" />Usar esta planta
+            </Button>
+          )}
         </div>
       ) : null}
 
