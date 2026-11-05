@@ -69,11 +69,25 @@ async function semWorkers(): Promise<void> {
 }
 // o vad-web copia esta opção para ort.env.wasm.wasmPaths tal como está; o objeto diz os dois ficheiros exatos
 const ONNX_BASE = ORT_FICHEIROS as unknown as string;
+
+/** O vad-web vem num pedaço à parte. Numa aba aberta antes de um deploy novo, esse pedaço já não existe
+ *  no servidor («Failed to fetch dynamically imported module»): a solução é recarregar a página. */
+async function carregarVad(): Promise<typeof import("@ricky0123/vad-web")> {
+  try {
+    return await import("@ricky0123/vad-web");
+  } catch (e) {
+    const m = (e as Error).message ?? "";
+    if (/dynamically imported module|Loading chunk|Importing a module script failed/i.test(m)) {
+      throw new Error("A app foi atualizada entretanto. Recarregue a página (F5) e tente outra vez.");
+    }
+    throw e;
+  }
+}
 export interface Ouvinte { parar: () => Promise<void> }
 
 /** Liga o microfone com o VAD Silero; chama `aoTerminarFala` com cada fala (float32 a 16 kHz) e o seu início em segundos. */
 export async function ouvirMicrofone(aoTerminarFala: (pcm: Float32Array, inicioS: number) => void, aoNivel?: (aFalar: boolean) => void): Promise<Ouvinte> {
-  const { MicVAD } = await import("@ricky0123/vad-web");
+  const { MicVAD } = await carregarVad();
   await semWorkers();
   const t0 = performance.now();
   let inicioFala = 0;
@@ -96,7 +110,7 @@ export async function ouvirMicrofone(aoTerminarFala: (pcm: Float32Array, inicioS
 
 /** O mesmo VAD sobre um ficheiro (a chamada de exemplo), para testar sem microfone. */
 export async function falasDeFicheiro(url: string): Promise<{ pcm: Float32Array; inicioS: number }[]> {
-  const { NonRealTimeVAD } = await import("@ricky0123/vad-web");
+  const { NonRealTimeVAD } = await carregarVad();
   await semWorkers();
   const resposta = await fetch(url);
   const ctx = new AudioContext({ sampleRate: TAXA });
