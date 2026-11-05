@@ -95,7 +95,7 @@ export function AbaPessoais({ ficha, pessoa, ctx }: AbaProps) {
       onRevelarNiss={ficha.revelarNiss} onDefinirNiss={ficha.definirNiss} onDefinirConta={ficha.definirConta}
       onDefinirBic={ficha.definirBic}
     />
-    <PessoaOutrosDadosCard sindicalizacao={ficha.sindicalizacao} />
+    {ctx.permissoes.sindicalizacaoView && <PessoaOutrosDadosCard sindicalizacao={ficha.sindicalizacao} />}
     </div>
   );
 }

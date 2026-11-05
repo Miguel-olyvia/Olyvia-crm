@@ -93,6 +93,10 @@ export interface PessoaPessoaisPermissoes {
   bancariosEdit: boolean;
   saudeView: boolean;
   saudeEdit: boolean;
+  /** `hr.pessoas.sindicalizacao.view` -- o cartao «Outros dados» (sindicalizacao) da
+   *  ficha so aparece com ela; a policy `pessoas_sindicalizacao_select` ja devolve 0
+   *  linhas a quem nao a tem, isto e so a guarda no ecra. */
+  sindicalizacaoView: boolean;
   /** `hr.pessoas.edit` -- o e-mail pessoal grava no nucleo `pessoas`, nao aqui. */
   nucleoEdit: boolean;
   /** `hr.pessoas.laborais.*` -- o fardamento reusa esta permissao, ver o
