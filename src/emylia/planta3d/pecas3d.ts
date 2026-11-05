@@ -60,6 +60,8 @@ export function pontoDentro(poly: readonly Ponto[], p: Ponto, tol = MARGEM_CM): 
 }
 export const pecaDentro = (poly: readonly Ponto[], p: Pick<PecaPlanta, "x" | "y" | "w" | "h" | "rot">): boolean => cantosPeca(p).every((c) => pontoDentro(poly, c));
 
+/** Uma peça que conta (não foi retirada de um conjunto e tem geometria). */
+export const ativa = (p: Pick<PecaPlanta, "ret" | "semGeo">): boolean => !p.ret && !p.semGeo;
 export const ehDeParede = (p: Pick<PecaPlanta, "mont">): boolean => p.mont === "parede";
 /** Portas e janelas do desenho antigo (sem montagem nem rotação) não se encostam nem rodam. */
 export const ehAbertura = (p: Pick<PecaPlanta, "tipo" | "rot">): boolean => (p.tipo === "porta" || p.tipo === "janela") && p.rot === undefined;
@@ -144,16 +146,15 @@ export function sobrepoe(a: Pick<PecaPlanta, "x" | "y" | "w" | "h" | "rot">, b: 
 
 /** Pares de peças que se sobrepõem: as de chão entre si; as de parede se se tocam em planta e nas alturas. */
 export function sobreposicoes(pecas: readonly PecaPlanta[]): [PecaPlanta, PecaPlanta][] {
-  const lista = pecas.filter((p) => !ehAbertura(p));
+  const lista = pecas.filter((p) => !ehAbertura(p) && ativa(p));
   const res: [PecaPlanta, PecaPlanta][] = [];
+  const faixa = (p: PecaPlanta): [number, number] => { const a0 = p.alt ?? 0; return [a0, a0 + (p.dh ?? (ehDeParede(p) ? 30 : 200))]; };
   for (let i = 0; i < lista.length; i++) {
     for (let j = i + 1; j < lista.length; j++) {
       const a = lista[i], b = lista[j], pa = ehDeParede(a), pb = ehDeParede(b);
-      if (pa !== pb) continue;
-      if (pa) {
-        const a0 = a.alt ?? 0, a1 = a0 + (a.dh ?? 30), b0 = b.alt ?? 0, b1 = b0 + (b.dh ?? 30);
-        if (a1 <= b0 || b1 <= a0) continue;
-      }
+      if (pa !== pb || (a.conj && a.conj === b.conj)) continue; // as peças do mesmo conjunto estão ligadas de propósito
+      const [a0, a1] = faixa(a), [b0, b1] = faixa(b);
+      if (a1 <= b0 || b1 <= a0) continue;
       if (sobrepoe(a, b)) res.push([a, b]);
     }
   }
@@ -166,7 +167,7 @@ export function ocupacao(planta: Planta): number | null {
   const poly = poligonoDe(planta);
   if (!poly) return null;
   const area = areaCm2(poly);
-  const usado = planta.pecas.filter((p) => !ehAbertura(p) && !ehDeParede(p)).reduce((s, p) => s + p.w * p.h, 0);
+  const usado = planta.pecas.filter((p) => !ehAbertura(p) && ativa(p) && !ehDeParede(p) && (p.alt ?? 0) < 30).reduce((s, p) => s + p.w * p.h, 0);
   return area > 0 ? usado / area : null;
 }
 
@@ -175,7 +176,7 @@ const nome = (p: PecaPlanta) => p.nome ?? p.tipo;
 export function avisosDaPlanta(planta: Planta): string[] {
   const poly = poligonoDe(planta), avisos: string[] = [];
   if (!poly) return avisos;
-  for (const p of planta.pecas) if (!ehAbertura(p) && !pecaDentro(poly, p)) avisos.push(`Fora da divisão: ${nome(p)}.`);
+  for (const p of planta.pecas) if (!ehAbertura(p) && ativa(p) && !pecaDentro(poly, p)) avisos.push(`Fora da divisão: ${nome(p)}.`);
   for (const [a, b] of sobreposicoes(planta.pecas)) avisos.push(`Sobreposição: ${nome(a)} e ${nome(b)}.`);
   const o = ocupacao(planta);
   if (o !== null && o > LIMITE_OCUPACAO) avisos.push(`Peças a mais para esta divisão: ocupam ${Math.round(o * 100)} % do chão.`);

@@ -1,15 +1,15 @@
 // Protótipo (visualizador 3D): a ponte entre o desenho de hoje (planta.ts: cm, paredes E/S/W/N, peças com caixa) e o modelo genérico em metros
 // (modelo.ts), mais a peça que nasce de um PRODUTO DO CATÁLOGO. Funções puras.
 import { PASSO, cantos, faltaFechar, limites, type PecaPlanta, type Planta, type Ponto as PontoCm, type TipoPeca } from "../planta";
-import { COR_MOCKUP, ESPEC, OMISSOES_CM, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import { COR_MOCKUP, OMISSOES_CM, TIPO_LEGADO, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import { recortesDeTampo } from "./conjuntos";
+import { familiaPorId, modeloDaFamilia } from "./familias";
 import {
   ALTURA_JANELA, ALTURA_PORTA, PEITORIL_JANELA, abrirNaParede, comprimento, distancia, espacoVazio, normalInterior, normalizarContorno, paredesDoContorno,
   type Abertura, type Espaco, type Ponto, type Parede, type PecaProduto, type TipoEspaco,
 } from "./modelo";
 
-/** O tipo de peça do desenho de hoje que corresponde a um tipo de mockup (as portas e janelas do desenho são aberturas, não produtos). */
-export const TIPO_LEGADO: Record<TipoMockup, TipoPeca> = Object.fromEntries((Object.keys(ESPEC) as TipoMockup[]).map((t) => [t, "movel" as TipoPeca])) as Record<TipoMockup, TipoPeca>;
-Object.assign(TIPO_LEGADO, { sanita: "sanita", sanita_suspensa: "sanita", bide: "bide", banheira: "banheira", base_duche: "base", coluna: "coluna", porta: "porta", janela: "janela" });
+export { TIPO_LEGADO };
 const MOCKUP_DO_LEGADO: Record<TipoPeca, TipoMockup> = { base: "base_duche", banheira: "banheira", sanita: "sanita", bide: "bide", movel: "movel", coluna: "movel", porta: "porta", janela: "janela" };
 const arred = (n: number) => Math.round(n / PASSO) * PASSO;
 
@@ -25,7 +25,8 @@ export function pecaDeProduto(p: Planta, m: ProdutoModelo3D, id: string, centro?
   if (m.tipo === "porta" || m.tipo === "janela") return { id, tipo: m.tipo, w, h: 8, x: arred(c.x - w / 2), y: arred(c.y - 4), produto: m.produtoId, nome: m.nome, dh: Math.round(m.dimensoes.alturaCm) };
   return {
     id, tipo: TIPO_LEGADO[m.tipo], w, h, x: arred(c.x - w / 2), y: arred(c.y - h / 2), produto: m.produtoId,
-    rot: 0, mont: m.montagem, alt: Math.round(m.alturaOmissao * 100), esp: false, nome: m.nome, dh: Math.round(m.dimensoes.alturaCm),
+    rot: 0, mont: m.montagem, alt: Math.round(m.alturaOmissao * 1000) / 10, esp: false, nome: m.nome, dh: Math.round(m.dimensoes.alturaCm * 10) / 10,
+    ...(m.fam ? { fam: m.fam.familiaId, med: m.fam.medidaId, acab: m.fam.acabId } : {}), ...(m.tipo === "lava_loica" ? { opc: { montagem: "baixo" as const } } : {}),
   };
 }
 /** A parede mais próxima de um ponto (m): o índice, a distância ao segmento e a posição ao longo dela. */
@@ -73,6 +74,7 @@ export function deLegado(planta: Planta, o: OpcoesLegado): ResLegado {
   const pecas: PecaProduto[] = [];
   const modelos: Record<string, ProdutoModelo3D> = {};
   for (const pc of planta.pecas) {
+    if (pc.ret || pc.semGeo) continue;
     const centro = { x: (pc.x + pc.w / 2) / 100, y: (pc.y + pc.h / 2) / 100 };
     const w = paredeMaisPerto(paredes, centro);
     if (pc.tipo === "porta" || pc.tipo === "janela") {
@@ -84,13 +86,15 @@ export function deLegado(planta: Planta, o: OpcoesLegado): ResLegado {
       aberturas.push(abrirNaParede(paredes[w.indice], ab));
       continue;
     }
-    const m = (pc.produto && o.produtos[pc.produto]) || modeloGenerico(pc.tipo, pc.w, pc.h);
+    const familia = pc.fam ? familiaPorId(pc.fam) : undefined;
+    const m = (familia && modeloDaFamilia(familia, pc.med, pc.acab)) || (pc.produto && o.produtos[pc.produto]) || modeloGenerico(pc.tipo, pc.w, pc.h);
     modelos[m.produtoId] = m;
     if (pc.rot !== undefined) {
       // peça nova: caixa sem rodar + ângulo; as de parede levam a altura ao chão
       pecas.push({
         id: pc.id, produtoId: m.produtoId, x: centro.x, y: centro.y, rotacao: pc.rot, paredeEncosto: w && (pc.mont === "parede" || w.distancia <= pc.h / 200 + 0.3) ? paredes[w.indice].id : null,
         largura: pc.w / 100, profundidade: pc.h / 100, montagem: pc.mont ?? "chao", altura: (pc.alt ?? 0) / 100, espelhada: !!pc.esp, nome: pc.nome,
+        ...(m.tipo === "tampo" ? { recortes: recortesDeTampo(pc, planta.pecas) } : {}),
       });
       continue;
     }

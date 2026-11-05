@@ -5,12 +5,15 @@
 //     («chão» ou «parede», com a altura de omissão ao chão);
 //  4. agrupa os produtos por espaço (grupos configuráveis) e acrescenta produtos de DEMONSTRAÇÃO «(demo)» para os tipos que o catálogo não tem.
 // Funções puras: sem React, sem three.
+import type { TipoPeca } from "../planta";
 import type { TipoEspaco } from "./modelo";
 
 export type TipoMockup =
   | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
   | "armario_alto" | "espelho" | "armario_espelho" | "torneira" | "toalheiro" | "radiador" | "resguardo" | "acessorio" | "prateleira" | "quadro" | "candeeiro"
-  | "roupeiro" | "cama" | "secretaria" | "sofa" | "mesa" | "bancada" | "frigorifico" | "fogao" | "eletro" | "porta" | "janela";
+  | "roupeiro" | "cama" | "secretaria" | "sofa" | "mesa" | "bancada" | "frigorifico" | "fogao" | "eletro" | "porta" | "janela"
+  /* famílias do catálogo de cozinha (familias.ts): torneira, lava-loiça, placa e tampo com geometria própria; sifão não tem geometria */
+  | "torneira_cozinha" | "lava_loica" | "placa" | "tampo" | "sifao" | "lavatorio_pousar";
 
 export type Montagem = "chao" | "parede";
 
@@ -22,11 +25,21 @@ export interface ProdutoCat {
 export interface NoCat { id: string; n: string; pai: string | null }
 
 /** O mockup de um produto, em metros. `url`: um GLB opcional (carregado se existir); sem ele, desenha-se a geometria paramétrica. */
-export interface Mockup3D { tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string }
+/** O material de uma variante (acabamento): a cor vai em `cor`; aqui o resto. Sem mapa de ambiente, o metal renderiza-se com metalness limitado. */
+export interface MaterialMockup { metalness: number; roughness: number }
+/** Parâmetros próprios dos mockups de família (metros). */
+export type ParamsMockup =
+  | { k: "torneira"; estilo: "extraivel" | "monocomando" | "abativel" | "cira"; altura: number; saida: number; alcance: number; base: number }
+  | { k: "lava_loica"; cubas: { x: number; z: number; w: number; d: number; prof: number }[]; escorredor: boolean; degrau: boolean }
+  | { k: "placa"; tipo: "induction" | "radiant" | "gas"; recorte: [number, number]; espessura: number; acima: number; queimadores: [number, number, number][]; manipulos: number[]; vidro: boolean }
+  | { k: "tampo"; espessura: number };
+export interface Mockup3D { tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
 export interface ProdutoModelo3D {
   produtoId: string; nome: string; tipo: TipoMockup; dimensoes: Dimensoes; mockup3d: Mockup3D; marca?: string; fornecedor?: string; custo?: number; categoria: string;
   montagem: Montagem; /** altura de omissão ao chão (m), só para peças de parede */ alturaOmissao: number; demo: boolean;
+  /** Só as peças de uma família do catálogo (familias.ts): a família, a variante escolhida, o SKU e o preço dessa variante. */
+  fam?: { familiaId: string; medidaId: string; acabId: string; sku: string; preco: number };
 }
 
 interface Espec { rotulo: string; mont: Montagem; alt: number; dim: [number, number, number]; cor: string }
@@ -63,9 +76,18 @@ export const ESPEC: Record<TipoMockup, Espec> = {
   fogao: { rotulo: "Fogão", mont: "chao", alt: 0, dim: [60, 60, 90], cor: "#c9ced3" },
   eletro: { rotulo: "Eletrodoméstico", mont: "chao", alt: 0, dim: [60, 60, 85], cor: "#c9ced3" },
   caixa: { rotulo: "Outro", mont: "chao", alt: 0, dim: [50, 50, 50], cor: "#d0d0d0" },
+  torneira_cozinha: { rotulo: "Torneira de cozinha", mont: "chao", alt: 0.9, dim: [5, 22, 40], cor: "#d9dde0" },
+  lava_loica: { rotulo: "Lava-loiça", mont: "chao", alt: 0.69, dim: [50, 44, 20], cor: "#c3c7ca" },
+  placa: { rotulo: "Placa", mont: "chao", alt: 0.9, dim: [59, 51, 1], cor: "#1c1f21" },
+  tampo: { rotulo: "Tampo de bancada", mont: "chao", alt: 0.888, dim: [240, 65, 1.2], cor: "#d8d1bb" },
+  sifao: { rotulo: "Sifão e válvula", mont: "chao", alt: 0, dim: [10, 10, 10], cor: "#9aa0a4" },
+  lavatorio_pousar: { rotulo: "Lavatório de pousar", mont: "chao", alt: 0.6, dim: [55, 42, 12], cor: "#f4f6f7" },
   porta: { rotulo: "Porta", mont: "parede", alt: 0, dim: [80, 4, 210], cor: "#a98467" },
   janela: { rotulo: "Janela", mont: "parede", alt: 0.9, dim: [100, 6, 120], cor: "#9fb4c7" },
 };
+/** O tipo de peça do desenho de hoje (planta.ts) que corresponde a um tipo de mockup (as portas e janelas do desenho são aberturas). */
+export const TIPO_LEGADO: Record<TipoMockup, TipoPeca> = Object.fromEntries((Object.keys(ESPEC) as TipoMockup[]).map((t) => [t, "movel" as TipoPeca])) as Record<TipoMockup, TipoPeca>;
+Object.assign(TIPO_LEGADO, { sanita: "sanita", sanita_suspensa: "sanita", bide: "bide", banheira: "banheira", base_duche: "base", coluna: "coluna", porta: "porta", janela: "janela" });
 /** Compatibilidade: dimensões e cores por tipo. */
 export const OMISSOES_CM: Record<TipoMockup, [number, number, number]> = Object.fromEntries(Object.entries(ESPEC).map(([k, v]) => [k, v.dim])) as Record<TipoMockup, [number, number, number]>;
 export const COR_MOCKUP: Record<TipoMockup, string> = Object.fromEntries(Object.entries(ESPEC).map(([k, v]) => [k, v.cor])) as Record<TipoMockup, string>;

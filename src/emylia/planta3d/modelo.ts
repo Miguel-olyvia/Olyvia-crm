@@ -15,6 +15,8 @@ export interface PecaProduto {
   id: string; produtoId: string; x: number; y: number; rotacao: number; paredeEncosto: string | null; largura: number; profundidade: number;
   /** «parede»: fixa à parede, a `altura` m do chão (base da peça). «chão»: pousada no chão. */
   montagem: "chao" | "parede"; altura: number; espelhada: boolean; nome?: string;
+  /** Tampo de bancada: os recortes (m, relativos ao centro do tampo) dos componentes embutidos (lava-loiça, placa). */
+  recortes?: { x: number; z: number; w: number; d: number }[];
 }
 export interface Revestimentos { pavimento: string; parede: string }
 export interface Espaco {

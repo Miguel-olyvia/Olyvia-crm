@@ -6,7 +6,7 @@ import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import type { ProdutoModelo3D } from "./catalogo3d";
+import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
@@ -112,8 +112,101 @@ function Frentes({ w, h, d, n, cor, y0 = 0, vertical = false }: { w: number; h: 
   );
 }
 
+/** O material de um acabamento. Sem mapa de ambiente, o metal puro fica escuro: limita-se o metalness para o acabamento se ver. */
+function Material({ cor, mat }: { cor: string; mat?: MaterialMockup }) {
+  return <meshStandardMaterial color={cor} roughness={mat?.roughness ?? 0.4} metalness={Math.min(mat?.metalness ?? 0, 0.6)} side={THREE.DoubleSide} />;
+}
+
+/** Uma torneira de cozinha: base, coluna e bica em tubo (extraível com cabeça, monocomando, abatível ou com flexível de silicone), ao longo de uma curva. */
+function TorneiraCozinha({ w, d, h, cor, mat, p }: { w: number; d: number; h: number; cor: string; mat?: MaterialMockup; p: Extract<ParamsMockup, { k: "torneira" }> }) {
+  const z0 = -d / 2 + p.base / 2;
+  const curva = useMemo(() => {
+    const H = h, a = p.alcance, s = p.saida;
+    const pts: [number, number, number][] = p.estilo === "monocomando"
+      ? [[0, 0, 0], [0, H * 0.7, 0], [0, H * 0.96, 0.02], [0, H, a * 0.4], [0, H * 0.99, a * 0.8], [0, s + 0.03, a]]
+      : p.estilo === "abativel"
+        ? [[0, 0, 0], [0, H * 0.55, 0], [0, H * 0.9, 0.02], [0, H, a * 0.35], [0, H * 0.96, a * 0.75], [0, s + 0.04, a]]
+        : [[0, 0, 0], [0, H * 0.72, 0], [0, H * 0.95, 0.03], [0, H, a * 0.3], [0, H * 0.97, a * 0.72], [0, s + 0.1, a]];
+    return new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => new THREE.Vector3(x, y, z0 + z)));
+  }, [h, p, z0]);
+  const geo = useMemo(() => new THREE.TubeGeometry(curva, 28, p.estilo === "monocomando" ? 0.012 : 0.015, 12, false), [curva, p.estilo]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  const fim = curva.getPoint(1), silicone = p.estilo === "cira";
+  return (
+    <>
+      <Elipse p={[0, 0.006, z0]} ex={p.base} ez={p.base} h={0.012} cor={cor} />
+      <mesh geometry={geo}><Material cor={silicone ? "#151618" : cor} mat={silicone ? { metalness: 0, roughness: 0.5 } : mat} /></mesh>
+      {p.estilo !== "monocomando" && <Elipse p={[0, fim.y - 0.03, fim.z]} ex={0.034} ez={0.034} h={0.09} cor={cor} />}
+      {p.estilo === "abativel" ? <Caixa p={[0, h * 0.5, z0 - 0.005]} s={[0.012, 0.1, 0.012]} cor={cor} r={0.3} /> : <Caixa p={[0.045, 0.1, z0]} s={[0.07, 0.014, 0.014]} cor={cor} r={0.3} />}
+      <mesh position={[0, 0.001, 0]} visible={false}><boxGeometry args={[w, 0.002, d]} /></mesh>
+    </>
+  );
+}
+
+/** Uma chapa com furos (tampo e rebordo de lava-loiça): extrusão de um rectângulo com buracos, deitada. O buraco `z` do plano vira o `y` da forma (invertido). */
+function ChapaComFuros({ w, d, esp, y, furos, cor, mat }: { w: number; d: number; esp: number; y: number; furos: { x: number; z: number; w: number; d: number }[]; cor: string; mat?: MaterialMockup }) {
+  const geo = useMemo(() => {
+    const s = new THREE.Shape();
+    s.moveTo(-w / 2, -d / 2); s.lineTo(w / 2, -d / 2); s.lineTo(w / 2, d / 2); s.lineTo(-w / 2, d / 2); s.lineTo(-w / 2, -d / 2);
+    for (const f of furos) {
+      const b = new THREE.Path(), x0 = f.x - f.w / 2, x1 = f.x + f.w / 2, y0 = -f.z - f.d / 2, y1 = -f.z + f.d / 2;
+      b.moveTo(x0, y0); b.lineTo(x0, y1); b.lineTo(x1, y1); b.lineTo(x1, y0); b.lineTo(x0, y0);
+      s.holes.push(b);
+    }
+    return new THREE.ExtrudeGeometry(s, { depth: esp, bevelEnabled: false });
+  }, [w, d, esp, furos]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return <mesh geometry={geo} position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]}><Material cor={cor} mat={mat} /></mesh>;
+}
+
+/** Um lava-loiça: rebordo com os furos das cubas, cubas rebaixadas (paredes e fundo) com ralo, e o escorredor com ranhuras. */
+function LavaLoica({ w, d, h, cor, mat, p }: { w: number; d: number; h: number; cor: string; mat?: MaterialMockup; p: Extract<ParamsMockup, { k: "lava_loica" }> }) {
+  const furos = useMemo(() => p.cubas.map((c) => ({ x: c.x - w / 2 + c.w / 2, z: c.z - d / 2 + c.d / 2, w: c.w, d: c.d })), [p.cubas, w, d]);
+  const fim = Math.max(...p.cubas.map((c) => c.x + c.w));
+  const ranhuras = p.escorredor ? Math.max(0, Math.floor((w - fim - 0.06) / 0.022)) : 0;
+  const t = 0.003;
+  return (
+    <>
+      <ChapaComFuros w={w} d={d} esp={0.012} y={h - 0.012} furos={furos} cor={cor} mat={mat} />
+      {p.cubas.map((c, i) => {
+        const f = furos[i], base = h - c.prof;
+        return (
+          <group key={i}>
+            <mesh position={[f.x, base + c.prof / 2, f.z + c.d / 2 - t / 2]}><boxGeometry args={[c.w, c.prof, t]} /><Material cor={cor} mat={mat} /></mesh>
+            <mesh position={[f.x, base + c.prof / 2, f.z - c.d / 2 + t / 2]}><boxGeometry args={[c.w, c.prof, t]} /><Material cor={cor} mat={mat} /></mesh>
+            <mesh position={[f.x - c.w / 2 + t / 2, base + c.prof / 2, f.z]}><boxGeometry args={[t, c.prof, c.d]} /><Material cor={cor} mat={mat} /></mesh>
+            <mesh position={[f.x + c.w / 2 - t / 2, base + c.prof / 2, f.z]}><boxGeometry args={[t, c.prof, c.d]} /><Material cor={cor} mat={mat} /></mesh>
+            <mesh position={[f.x, base, f.z]}><boxGeometry args={[c.w, t * 1.5, c.d]} /><Material cor={cor} mat={mat} /></mesh>
+            <Elipse p={[f.x, base + 0.004, f.z - c.d * 0.2]} ex={0.07} ez={0.07} h={0.006} cor="#3a3f43" />
+          </group>
+        );
+      })}
+      {Array.from({ length: ranhuras }, (_, i) => <Caixa key={i} p={[-w / 2 + fim + 0.04 + i * 0.022, h + 0.001, 0]} s={[0.008, 0.003, d * 0.78]} cor="#8d9396" r={0.4} />)}
+    </>
+  );
+}
+
+/** Uma placa: vidro (indução e radiante, com as zonas) ou inox/vidro com queimadores, grelhas e manípulos (gás). A base do mockup é a face de cima do tampo. */
+function Placa({ w, d, cor, mat, p }: { w: number; d: number; cor: string; mat?: MaterialMockup; p: Extract<ParamsMockup, { k: "placa" }> }) {
+  const e = Math.max(0.004, p.espessura), gas = p.tipo === "gas";
+  return (
+    <>
+      <mesh position={[0, e / 2, 0]}><boxGeometry args={[w, e, d]} /><Material cor={cor} mat={mat} /></mesh>
+      {!gas && p.queimadores.map(([x, z, r], i) => <Elipse key={i} p={[x, e + 0.001, z]} ex={r * 2} ez={r * 2} h={0.002} cor={p.tipo === "induction" ? "#3a3f44" : "#8a2f26"} />)}
+      {gas && p.queimadores.map(([x, z, r], i) => (
+        <group key={i}>
+          <Elipse p={[x, e + 0.01, z]} ex={r * 2} ez={r * 2} h={0.02} cor="#23272a" />
+          <Elipse p={[x, e + 0.022, z]} ex={r * 1.2} ez={r * 1.2} h={0.006} cor="#6b7075" />
+          <Caixa p={[x, e + 0.045, z]} s={[r * 2.4, 0.008, 0.008]} cor="#1d2022" r={0.5} />
+          <Caixa p={[x, e + 0.045, z]} s={[0.008, 0.008, r * 2.4]} cor="#1d2022" r={0.5} />
+        </group>
+      ))}
+      {gas && p.manipulos.map((x, i) => <Elipse key={i} p={[Math.max(-w / 2 + 0.02, Math.min(w / 2 - 0.02, x)), e + 0.012, d / 2 - 0.025]} ex={0.032} ez={0.032} h={0.024} cor="#2b2f33" />)}
+    </>
+  );
+}
 /** O mockup paramétrico de um tipo, com a pegada `w` (largura) × `d` (profundidade) e a altura `h`. Frente para +z, costas em -z, base em y=0. */
-function Parametrico({ tipo, w, d, h, cor }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string }) {
+function Parametrico({ tipo, w, d, h, cor, mat, params, recortes }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[] }) {
   const bola = (hb: number, zc: number, prof: number) => (
     <>
       <Elipse p={[0, hb * 0.35, zc]} ex={w * 0.8} ez={prof * 0.9} h={hb * 0.7} cor={cor} topo={0.42} />
@@ -358,6 +451,24 @@ function Parametrico({ tipo, w, d, h, cor }: { tipo: ProdutoModelo3D["tipo"]; w:
           <Caixa p={[0, h * 0.82, d / 2 + 0.02]} s={[w * 0.6, 0.012, 0.02]} cor="#8a8a8a" r={0.3} />
         </>
       );
+    case "torneira_cozinha":
+      return params?.k === "torneira" ? <TorneiraCozinha w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
+    case "lava_loica":
+      return params?.k === "lava_loica" ? <LavaLoica w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
+    case "placa":
+      return params?.k === "placa" ? <Placa w={w} d={d} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
+    case "tampo":
+      return <ChapaComFuros w={w} d={d} esp={params?.k === "tampo" ? params.espessura : 0.012} y={0} furos={recortes ?? []} cor={cor} mat={mat} />;
+    case "lavatorio_pousar":
+      return (
+        <>
+          <Elipse p={[0, h * 0.5, 0]} ex={w} ez={d} h={h} cor={cor} topo={0.46} />
+          <Elipse p={[0, h + 0.001, 0]} ex={w * 0.8} ez={d * 0.74} h={0.004} cor="#d9e0e3" />
+          <Elipse p={[0, h + 0.004, -d * 0.2]} ex={0.04} ez={0.04} h={0.008} cor="#555a5e" />
+        </>
+      );
+    case "sifao":
+      return null;
     case "armario_alto":
     case "coluna":
     case "movel":
@@ -395,9 +506,9 @@ function ModeloGLB({ url, w, d, h }: { url: string; w: number; d: number; h: num
 
 function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
   const { tipo, altura, cor, url } = m.mockup3d;
-  const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} />;
+  const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} />;
   const nf = (n: number) => Math.round(n * 100).toString();
-  const base = p.montagem === "parede" ? p.altura : 0;
+  const base = p.altura; // altura da base ao chão (peças de parede e peças sobre a bancada)
   return (
     <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }}>
       <group scale={[p.espelhada ? -1 : 1, 1, 1]}>

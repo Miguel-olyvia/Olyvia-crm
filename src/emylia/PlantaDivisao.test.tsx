@@ -1,6 +1,6 @@
 // 5/11 (Rúben, a visita real): a planta no ecrã. Desenha-se com o dedo; tocar no número de uma parede deixa escrever a medida; as peças
 // juntam-se pela barra; «Usar nas medidas» põe os m² nas medidas. Tudo se grava em f.planta.
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlantaDivisao } from "./PlantaDivisao";
 import { lerPlanta, retangulo } from "./planta";
@@ -121,5 +121,30 @@ describe("PlantaDivisao", () => {
     fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });
     expect(lerPlanta(d.f.planta)?.pecas ?? []).toEqual([]);
     expect(screen.getByText(/^Fora da divisão/)).toBeInTheDocument();
+  });
+  it("uma família aparece uma só vez, com bolinhas de acabamento; escolher o acabamento muda a variante da peça (SKU e preço)", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
+    fireEvent.click(screen.getByRole("tab", { name: /^Banho \(famílias\)/ }));
+    expect(screen.getAllByText("Espelho com moldura (demo)")).toHaveLength(1);
+    fireEvent.click(screen.getAllByRole("button", { name: "Acabamento Moldura oro" })[0]);
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Família Espelho com moldura 60×80 \(demo\), acabamento Moldura oro, SKU ESP-60×80-OR/ }), { key: "Enter" });
+    const pc = lerPlanta(d.f.planta)!.pecas[0];
+    expect(pc).toMatchObject({ fam: "espelho_f", med: "60×80", acab: "oro", mont: "parede", alt: 110 });
+    fireEvent.click(within(screen.getByRole("group", { name: "Variante da peça" })).getByRole("button", { name: "Acabamento Moldura alumínio" }));
+    expect(lerPlanta(d.f.planta)!.pecas[0]).toMatchObject({ acab: "aluminio" });
+  });
+
+  it("um conjunto (duche) põe as peças ligadas; retirar um componente deixa-o na lista como retirado, e repor traz-o de volta", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
+    fireEvent.click(screen.getByRole("tab", { name: /^Conjuntos/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Pôr o conjunto Conjunto de duche (demo) na planta" }));
+    const l = lerPlanta(d.f.planta)!.pecas;
+    expect(l.map((x) => x.papel)).toEqual(["base", "resguardo", "misturadora", "coluna"]);
+    expect(l.every((x) => x.conj === "cj1")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retirar coluna de duche" }));
+    expect(lerPlanta(d.f.planta)!.pecas.find((x) => x.papel === "coluna")!.ret).toBe(true);
+    expect(screen.getAllByText(/retirado do conjunto/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Repor coluna de duche" }));
+    expect(lerPlanta(d.f.planta)!.pecas.find((x) => x.papel === "coluna")!.ret).toBe(false);
   });
 });
