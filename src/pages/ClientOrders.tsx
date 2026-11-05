@@ -65,7 +65,8 @@ import {
 import { ClientOrderKpis } from "@/components/client-orders/ClientOrderKpis";
 import { ClientOrderProgress, ClientOrderProgressLegend, clientOrderProgressParts } from "@/components/client-orders/ClientOrderProgress";
 import { ClientOrderOriginChip, type ClientOrderOriginKind } from "@/components/client-orders/ClientOrderOriginChip";
-import { ClientOrderRowActions, DeletedClientOrderRowActions } from "@/components/client-orders/ClientOrderRowActions";
+import { ClientOrderRowActions, DeletedClientOrderRowActions, DELETE_OUT_OF_SCOPE_REASON } from "@/components/client-orders/ClientOrderRowActions";
+import { encomendasQuePodeApagar } from "@/lib/inventario/encomendasPodeApagar";
 import {
   CLIENT_ORDER_ORIGIN_FILTER_LABELS,
   deletedRowOrigin,
@@ -886,6 +887,23 @@ const ClientOrders = () => {
     }
   };
 
+  // Eliminar segue a mesma regra do servidor (organização + âmbito ORG/TEAM/OWNED de client_orders.delete):
+  // rpc_client_orders_can_delete diz, das encomendas carregadas, quais o utilizador pode eliminar.
+  const [deletableIds, setDeletableIds] = useState<Set<string>>(() => new Set());
+  const loadDeletable = useCallback(async (contractIds: string[], reset: boolean) => {
+    if (reset) setDeletableIds(new Set());
+    if (!canDeleteOrder || contractIds.length === 0) return;
+    const allowed = await encomendasQuePodeApagar(contractIds);
+    setDeletableIds((prev) => {
+      const next = reset ? new Set<string>() : new Set(prev);
+      for (const id of contractIds) {
+        if (allowed.has(id)) next.add(id); else next.delete(id);
+      }
+      return next;
+    });
+  }, [canDeleteOrder]);
+  const canDeleteRow = (contractId: string) => canDeleteOrder && deletableIds.has(contractId);
+
   const loadOrigins = useCallback(async (contractIds: string[], reset: boolean) => {
     if (reset) setSalesByContract({});
     if (contractIds.length === 0) return;
@@ -981,6 +999,7 @@ const ClientOrders = () => {
         setOrders(rows);
         setReadyTruncated(truncated);
         void loadOrigins(rows.map((o) => o.contract_id), true);
+        void loadDeletable(rows.map((o) => o.contract_id), true);
         setHasMore(false);
         setPage(0);
         return;
@@ -1015,6 +1034,7 @@ const ClientOrders = () => {
       // encomenda continua a mostrar-se — apenas sem o distintivo. Nunca pode
       // impedir a listagem de carregar.
       void loadOrigins(newRows.map((o) => o.contract_id), reset);
+      void loadDeletable(newRows.map((o) => o.contract_id), reset);
       // Sem total_count na RPC — hasMore inferido do tamanho da página devolvida.
       setHasMore(newRows.length === PAGE_SIZE);
       setPage(pageNum);
@@ -1028,7 +1048,15 @@ const ClientOrders = () => {
         setLoadingMore(false);
       }
     }
-  }, [t, toast, loadOrigins, queryClient]);
+  }, [t, toast, loadOrigins, loadDeletable, queryClient]);
+
+  // As permissões podem chegar depois da primeira página: quando client_orders.delete fica conhecida, pergunta-se
+  // ao servidor quais das encomendas já carregadas se podem eliminar.
+  useEffect(() => {
+    if (!canDeleteOrder) return;
+    void loadDeletable(orders.map((o) => o.contract_id), true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canDeleteOrder]);
 
   useEffect(() => {
     if (!activeCompany?.id) return;
@@ -1093,6 +1121,11 @@ const ClientOrders = () => {
   // da PO liga à linha da EC por quote_line_id + component_index. Recarrega
   // sempre que o documento é relido. Tabela fora dos tipos gerados: cast local.
   const detailContractId = detailData?.contract_id ?? null;
+  // Detalhe aberto por ligação (encomenda fora da página carregada): pergunta também se se pode eliminar.
+  useEffect(() => {
+    if (!detailContractId || !canDeleteOrder) return;
+    void loadDeletable([detailContractId], false);
+  }, [detailContractId, canDeleteOrder, loadDeletable]);
   useEffect(() => {
     if (!detailContractId) return;
     const contractId = detailContractId;
@@ -2853,6 +2886,7 @@ const ClientOrders = () => {
     const label = doc.order_number || doc.contract_number;
     const editAction = getDetailEditAction(doc);
     const deletable = !!getDeletableOrigin(doc.contract_id, doc.origin_type);
+    const outOfScope = canDeleteOrder && !canDeleteRow(doc.contract_id);
     const sale = salesByContract[doc.contract_id];
     const items: RowActionEntry[] = [
       {
@@ -2894,8 +2928,9 @@ const ClientOrders = () => {
         icon: Trash2,
         destructive: true,
         onSelect: () => openDeleteOrder(doc.contract_id, label, doc.origin_type, doc.origin_number),
-        disabled: !deletable || deleting || confirmingAll,
-        disabledReason: !deletable ? 'Só manuais ou venda direta' : 'A eliminar…',
+        // Fora da organização/âmbito de client_orders.delete o servidor recusa: desativada com o motivo.
+        disabled: !deletable || outOfScope || deleting || confirmingAll,
+        disabledReason: !deletable ? 'Só manuais ou venda direta' : outOfScope ? DELETE_OUT_OF_SCOPE_REASON : 'A eliminar…',
         permission: 'client_orders.delete',
       },
     ];
@@ -3562,6 +3597,7 @@ const ClientOrders = () => {
                           remove={{
                             deletable,
                             busy: deleting,
+                            outOfScope: canDeleteOrder && !canDeleteRow(order.contract_id),
                             onSelect: () => openDeleteOrder(order.contract_id, orderLabel, order.origin_type, order.origin_number),
                           }}
                         />
