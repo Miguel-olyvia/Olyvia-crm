@@ -21,7 +21,10 @@ export interface Familia {
   id: string; nome: string; marca: string; categoria: CategoriaFam; tipo: TipoMockup; espacos: TipoEspaco[]; acabamentos: AcabFam[]; medidas: MedidaFam[]; nota: string;
   /** montagem e altura (m) de omissão, quando diferem do tipo; `geo: false`: sem geometria (só linha vendável) */
   mont?: "chao" | "parede"; alt?: number; geo?: boolean;
+  /** o modelo detalhado portado do HTML (modelosHtml/) e as opções que ele tem (mostradas no painel da peça) */
+  htmlModelo?: string; opcoes?: OpcaoFamilia[];
 }
+export type OpcaoFamilia = "bica" | "extraida" | "tampas" | "reverso" | "articulacao";
 export interface CategoriaFamilia { id: CategoriaFam; rotulo: string; espacos: TipoEspaco[] }
 /** Os separadores de família no ecrã (como no catálogo de origem: Torneiras, Lava-loiças, Placas, Bancadas). */
 export const CATEGORIAS_FAMILIA: CategoriaFamilia[] = [
@@ -155,6 +158,10 @@ const OUTRAS: Familia[] = [
     medidas: [["60×80", 60, 80, 79], ["80×80", 80, 80, 109], ["100×70", 100, 70, 119]].map(([r, w, h, pr]) => ({ id: String(r), rotulo: String(r), ref: `ESP-${r}`, preco: Number(pr), dim: [Number(w), 3, Number(h)] as [number, number, number] })) },
 ];
 
+/** As famílias com modelo detalhado do HTML e as opções de cada uma. */
+const DETALHADAS: Record<string, OpcaoFamilia[]> = { round: ["bica", "extraida"], noah: ["bica"], smooth: ["bica", "extraida"], stick: ["bica", "extraida"] };
+for (const f of TORNEIRAS) if (DETALHADAS[f.id]) { f.htmlModelo = f.id; f.opcoes = DETALHADAS[f.id]; }
+
 export const FAMILIAS: Familia[] = [...TORNEIRAS, ...LAVALOICAS, ...PLACAS, ...OUTRAS];
 export const familiaPorId = (id: string): Familia | undefined => FAMILIAS.find((f) => f.id === id);
 export const familiasDaCategoria = (c: CategoriaFam): Familia[] => FAMILIAS.filter((f) => f.categoria === c);
@@ -187,7 +194,7 @@ const M = 1 / 1000;
 /** Os parâmetros do mockup 3D (metros) da variante, a partir dos dados da medida. */
 export function paramsDaVariante(v: VarianteResolvida): ParamsMockup | undefined {
   const s = v.medida.spec;
-  if (s?.torneira) return { k: "torneira", estilo: s.torneira.estilo, altura: s.torneira.altura * M, saida: s.torneira.saida * M, alcance: s.torneira.alcance * M, base: s.torneira.base * M };
+  if (s?.torneira) return { k: "torneira", estilo: s.torneira.estilo, altura: s.torneira.altura * M, saida: s.torneira.saida * M, alcance: s.torneira.alcance * M, base: s.torneira.base * M, ...(v.familia.htmlModelo ? { html: { modelo: v.familia.htmlModelo, acab: v.acabamento.id } } : {}) };
   if (s?.cubas) return { k: "lava_loica", cubas: s.cubas.map((c) => ({ x: c.left * M, z: c.top * M, w: c.w * M, d: c.d * M, prof: c.prof * M })), escorredor: !!s.escorredor, degrau: !!s.degrau };
   if (s?.placa) {
     const p = s.placa;

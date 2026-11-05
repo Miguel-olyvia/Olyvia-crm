@@ -29,7 +29,7 @@ export interface NoCat { id: string; n: string; pai: string | null }
 export interface MaterialMockup { metalness: number; roughness: number }
 /** Parâmetros próprios dos mockups de família (metros). */
 export type ParamsMockup =
-  | { k: "torneira"; estilo: "extraivel" | "monocomando" | "abativel" | "cira"; altura: number; saida: number; alcance: number; base: number }
+  | { k: "torneira"; estilo: "extraivel" | "monocomando" | "abativel" | "cira"; altura: number; saida: number; alcance: number; base: number; /** o modelo detalhado portado do HTML (modelosHtml/), com o acabamento */ html?: { modelo: string; acab: string } }
   | { k: "lava_loica"; cubas: { x: number; z: number; w: number; d: number; prof: number }[]; escorredor: boolean; degrau: boolean }
   | { k: "placa"; tipo: "induction" | "radiant" | "gas"; recorte: [number, number]; espessura: number; acima: number; queimadores: [number, number, number][]; manipulos: number[]; vidro: boolean }
   | { k: "tampo"; espessura: number };

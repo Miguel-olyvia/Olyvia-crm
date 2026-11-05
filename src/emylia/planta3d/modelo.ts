@@ -4,6 +4,8 @@
 // auto-intersecções) vive aqui para servir também um desenho livre.
 
 export interface Ponto { x: number; y: number }
+/** Opções de uma peça que vêm do catálogo de origem: montagem do lava-loiça, rotação e extracção da bica, tampas dos ralos, escorredor reverso, articulação. */
+export interface OpcoesPeca { montagem?: "baixo" | "cima"; bica?: number; extraido?: boolean; tampas?: boolean; reverso?: boolean; articulacao?: number }
 export type TipoEspaco = "casa_banho" | "cozinha" | "quarto" | "sala" | "outro";
 export type TipoAbertura = "porta" | "janela";
 
@@ -17,6 +19,7 @@ export interface PecaProduto {
   montagem: "chao" | "parede"; altura: number; espelhada: boolean; nome?: string;
   /** Tampo de bancada: os recortes (m, relativos ao centro do tampo) dos componentes embutidos (lava-loiça, placa). */
   recortes?: { x: number; z: number; w: number; d: number }[];
+  opc?: OpcoesPeca;
 }
 export interface Revestimentos { pavimento: string; parede: string }
 export interface Espaco {

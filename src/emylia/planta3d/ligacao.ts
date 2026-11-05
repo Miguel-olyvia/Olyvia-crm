@@ -93,7 +93,7 @@ export function deLegado(planta: Planta, o: OpcoesLegado): ResLegado {
       // peça nova: caixa sem rodar + ângulo; as de parede levam a altura ao chão
       pecas.push({
         id: pc.id, produtoId: m.produtoId, x: centro.x, y: centro.y, rotacao: pc.rot, paredeEncosto: w && (pc.mont === "parede" || w.distancia <= pc.h / 200 + 0.3) ? paredes[w.indice].id : null,
-        largura: pc.w / 100, profundidade: pc.h / 100, montagem: pc.mont ?? "chao", altura: (pc.alt ?? 0) / 100, espelhada: !!pc.esp, nome: pc.nome,
+        largura: pc.w / 100, profundidade: pc.h / 100, montagem: pc.mont ?? "chao", altura: (pc.alt ?? 0) / 100, espelhada: !!pc.esp, nome: pc.nome, opc: pc.opc,
         ...(m.tipo === "tampo" ? { recortes: recortesDeTampo(pc, planta.pecas) } : {}),
       });
       continue;

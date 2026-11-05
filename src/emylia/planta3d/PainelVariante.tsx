@@ -1,6 +1,7 @@
 // Protótipo (visualizador 3D): o painel da variante de uma peça de família (acabamento, medida, outra família do mesmo tipo, montagem do lava-loiça)
 // e o painel do conjunto a que a peça pertence (componentes, retirar, repor, trocar, preço do conjunto contra a soma), mais a lista de peças vendáveis.
 import type { PecaPlanta, Planta } from "../planta";
+import type { OpcoesPeca } from "./modelo";
 import { conjuntoPorId, familiasSubstitutas, linhasVendaveis, precoConjunto, totalDasLinhas } from "./conjuntos";
 import { acabamentosDaMedida, familiaPorId, resolverVariante } from "./familias";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,11 @@ export interface PainelVarianteProps {
   peca: PecaPlanta;
   onMudar: (familiaId: string, medidaId?: string, acabId?: string) => void;
   onMontagem: (m: "baixo" | "cima") => void;
+  /** as opções do modelo detalhado (rotação e extracção da bica, tampas dos ralos, escorredor reverso, articulação) */
+  onOpcao?: (parcial: Partial<OpcoesPeca>) => void;
 }
 /** Escolher a variante: o acabamento muda a cor e o material na hora no 3D; a medida muda o tamanho, o SKU e o preço. */
-export function PainelVariante({ peca, onMudar, onMontagem }: PainelVarianteProps) {
+export function PainelVariante({ peca, onMudar, onMontagem, onOpcao }: PainelVarianteProps) {
   const f = peca.fam ? familiaPorId(peca.fam) : undefined;
   if (!f) return null;
   const v = resolverVariante(f, peca.med, peca.acab), acabs = acabamentosDaMedida(f, v.medida.id), subs = familiasSubstitutas(peca);
@@ -40,6 +43,14 @@ export function PainelVariante({ peca, onMudar, onMontagem }: PainelVarianteProp
           <label className="grid gap-1 text-sm font-medium">Trocar por
             <select className={SEL} value={f.id} onChange={(e) => onMudar(e.target.value)}>{subs.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}</select>
           </label>
+        )}
+        {onOpcao && f.opcoes?.includes("bica") && (
+          <label className="grid gap-1 text-sm font-medium">Rodar a bica: {peca.opc?.bica ?? 0}°
+            <input type="range" min={0} max={360} step={5} value={peca.opc?.bica ?? 0} aria-label="Rodar a bica, em graus" className="h-11 w-40" onChange={(e) => onOpcao({ bica: Number(e.target.value) })} />
+          </label>
+        )}
+        {onOpcao && f.opcoes?.includes("extraida") && (
+          <label className="flex min-h-11 items-center gap-2 text-[15px]"><input type="checkbox" className="h-5 w-5" checked={!!peca.opc?.extraido} onChange={(e) => onOpcao({ extraido: e.target.checked })} />Bica extraída (com o flexível)</label>
         )}
         {f.tipo === "lava_loica" && (
           <label className="grid gap-1 text-sm font-medium">Montagem

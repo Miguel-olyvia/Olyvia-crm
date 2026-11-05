@@ -16,7 +16,7 @@ export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; 
   /** Conjunto: a instância, a definição, o papel do componente, se é a âncora, o lugar local (cm) na âncora, se foi retirado, se não tem geometria. */
   conj?: string; conjId?: string; papel?: string; ancora?: boolean; lx?: number; ly?: number; ret?: boolean; semGeo?: boolean;
   /** Opções da peça (por exemplo a montagem de um lava-loiça: por baixo ou por cima). */
-  opc?: { montagem?: "baixo" | "cima" } }
+  opc?: import("./planta3d/modelo").OpcoesPeca }
 export interface Ponto { x: number; y: number }
 /** `o`: onde começa a primeira parede (o primeiro toque no desenho). */
 export interface Planta { o: Ponto; paredes: Parede[]; pecas: PecaPlanta[] }

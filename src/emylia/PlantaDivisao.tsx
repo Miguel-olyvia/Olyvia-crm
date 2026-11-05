@@ -508,7 +508,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
             <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar(retirarComponente(p, selecionada.id)); if (!selecionada.conj || selecionada.ancora) setSel(null); setAviso(""); }}>
               <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />{selecionada.ancora ? "Remover o conjunto" : selecionada.conj ? "Retirar do conjunto" : "Remover"}
             </Button>
-            <PainelVariante peca={selecionada} onMudar={(f, med, ac) => mudarVariante(selecionada, f, med, ac)} onMontagem={(mo) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? mudarMontagem(x, mo) : x)) })} />
+            <PainelVariante peca={selecionada} onOpcao={(o) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? { ...x, opc: { ...x.opc, ...o } } : x)) })} onMudar={(f, med, ac) => mudarVariante(selecionada, f, med, ac)} onMontagem={(mo) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? mudarMontagem(x, mo) : x)) })} />
             {selecionada.conj && <PainelConjunto planta={p} peca={selecionada} onEscolher={setSel} onRetirar={(id) => gravar(retirarComponente(p, id))} onRepor={(id) => gravar(reporComponente(p, id))} />}
             <p className="w-full text-sm text-muted-foreground">Com a peça escolhida: setas movem (Shift: 25 cm), R roda 90° para a direita e Shift+R para a esquerda{parede ? " (as de parede passam à parede oposta)" : ""}.</p>
           </div>

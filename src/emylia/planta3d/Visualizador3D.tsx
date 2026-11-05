@@ -7,7 +7,9 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
-import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type Parede, type PecaProduto } from "./modelo";
+import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
+import { libertarMateriais } from "./modelosHtml/util";
+import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
 export type Vista3D = "cima" | "3d" | "pessoa";
@@ -117,6 +119,13 @@ function Material({ cor, mat }: { cor: string; mat?: MaterialMockup }) {
   return <meshStandardMaterial color={cor} roughness={mat?.roughness ?? 0.4} metalness={Math.min(mat?.metalness ?? 0, 0.6)} side={THREE.DoubleSide} />;
 }
 
+/** O modelo detalhado portado do HTML (em mm; aqui a 0,001): corpo, bica e comando reais. As geometrias pesadas vêm de cache; o acabamento muda só os materiais. */
+function ModeloHtml({ modelo, acab, opc, z0 }: { modelo: string; acab: string; opc?: OpcoesPeca; z0: number }) {
+  const t = useMemo(() => (ehModeloTorneira(modelo) ? construirTorneira(modelo, acab, { bica: opc?.bica, extraido: opc?.extraido ? 1 : 0 }) : null), [modelo, acab, opc?.bica, opc?.extraido]);
+  useEffect(() => () => { if (t) libertarMateriais(t.materiais); }, [t]);
+  return t ? <group position={[0, 0, z0]} scale={0.001}><primitive object={t.grupo} /></group> : null;
+}
+
 /** Uma torneira de cozinha: base, coluna e bica em tubo (extraível com cabeça, monocomando, abatível ou com flexível de silicone), ao longo de uma curva. */
 function TorneiraCozinha({ w, d, h, cor, mat, p }: { w: number; d: number; h: number; cor: string; mat?: MaterialMockup; p: Extract<ParamsMockup, { k: "torneira" }> }) {
   const z0 = -d / 2 + p.base / 2;
@@ -206,7 +215,7 @@ function Placa({ w, d, cor, mat, p }: { w: number; d: number; cor: string; mat?:
   );
 }
 /** O mockup paramétrico de um tipo, com a pegada `w` (largura) × `d` (profundidade) e a altura `h`. Frente para +z, costas em -z, base em y=0. */
-function Parametrico({ tipo, w, d, h, cor, mat, params, recortes }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[] }) {
+function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[]; opc?: OpcoesPeca }) {
   const bola = (hb: number, zc: number, prof: number) => (
     <>
       <Elipse p={[0, hb * 0.35, zc]} ex={w * 0.8} ez={prof * 0.9} h={hb * 0.7} cor={cor} topo={0.42} />
@@ -452,6 +461,7 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes }: { tipo: Prod
         </>
       );
     case "torneira_cozinha":
+      if (params?.k === "torneira" && params.html) return <ModeloHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} z0={-d / 2 + params.base / 2} />;
       return params?.k === "torneira" ? <TorneiraCozinha w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
     case "lava_loica":
       return params?.k === "lava_loica" ? <LavaLoica w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
@@ -506,7 +516,7 @@ function ModeloGLB({ url, w, d, h }: { url: string; w: number; d: number; h: num
 
 function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
   const { tipo, altura, cor, url } = m.mockup3d;
-  const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} />;
+  const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} />;
   const nf = (n: number) => Math.round(n * 100).toString();
   const base = p.altura; // altura da base ao chão (peças de parede e peças sobre a bancada)
   return (
@@ -628,11 +638,32 @@ function Camaras({ vista, espaco }: { vista: Vista3D; espaco: Espaco }) {
   );
 }
 
+/** O ambiente de estúdio do HTML: caixas de luz cozidas num mapa de reflexos (sem descarregar nada). É isto que dá o aspecto metálico; sem ele o metal fica baço. */
+function EstudioAmbiente() {
+  const gl = useThree((s) => s.gl), scene = useThree((s) => s.scene), invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    const estudio = new THREE.Scene(); estudio.background = new THREE.Color("#aaa9a5");
+    const caixa = (w: number, h: number, x: number, y: number, z: number, cor: string, k: number) => {
+      const o = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.001, h * 0.001), new THREE.MeshBasicMaterial({ color: new THREE.Color(cor).multiplyScalar(k), side: THREE.DoubleSide }));
+      o.position.set(x * 0.001, y * 0.001, z * 0.001); o.lookAt(0, 0.18, 0.09); estudio.add(o);
+    };
+    caixa(340, 1000, 480, 310, 330, "#ffffff", 3.5); caixa(180, 1000, -510, 360, 230, "#fffdf3", 2.3); caixa(320, 550, 0, 740, -150, "#ffffff", 3); caixa(100, 900, -140, 290, -500, "#434643", 0.45);
+    caixa(300, 800, 450, 240, -460, "#353a37", 0.42); caixa(1200, 400, 0, -260, 0, "#d8d6ce", 0.9); caixa(100, 900, 150, 350, 540, "#ffffff", 1.5);
+    const pmrem = new THREE.PMREMGenerator(gl), alvo = pmrem.fromScene(estudio, 0.02, 0.0001, 3);
+    scene.environment = alvo.texture; scene.environmentIntensity = 1.05; invalidate();
+    estudio.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });
+    pmrem.dispose();
+    return () => { scene.environment = null; alvo.dispose(); };
+  }, [gl, scene, invalidate]);
+  return null;
+}
+
 export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar }: Visualizador3DProps) {
   return (
     <div role="img" aria-label={descricao} className="h-full w-full touch-none">
       <Canvas frameloop="demand" dpr={[1, 1.5]} gl={{ antialias: true }} onPointerMissed={() => onSelecionar(null)}>
         <color attach="background" args={["#eef0f2"]} />
+        <EstudioAmbiente />
         <hemisphereLight args={["#ffffff", "#8a8f95", 1.0]} />
         <directionalLight position={[4, 8, 5]} intensity={1.1} />
         <Camaras vista={vista} espaco={espaco} />

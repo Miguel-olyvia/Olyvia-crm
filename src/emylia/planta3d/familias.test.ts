@@ -88,4 +88,11 @@ describe("o produto 3D de uma variante", () => {
     expect(fam("sifao").geo).toBe(false);
     expect(fam("tampo").acabamentos).toHaveLength(11);
   });
+  it("as torneiras com modelo detalhado do HTML (Round, Noah, Smooth, Stick) ligam o modelo e o acabamento; as outras ficam no mockup simples", () => {
+    expect(modeloDaFamilia(fam("stick"), "unica", "negro").mockup3d.params).toMatchObject({ k: "torneira", html: { modelo: "stick", acab: "negro" } });
+    expect(modeloDaFamilia(fam("round"), "unica", "oro").mockup3d.params).toMatchObject({ html: { modelo: "round", acab: "oro" } });
+    expect((modeloDaFamilia(fam("cira"), "unica", "oro").mockup3d.params as { html?: unknown }).html).toBeUndefined();
+    expect(fam("round").opcoes).toEqual(["bica", "extraida"]);
+    expect(fam("noah").opcoes).toEqual(["bica"]);
+  });
 });
