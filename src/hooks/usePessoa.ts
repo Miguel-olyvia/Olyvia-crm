@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { exigirLinhasGravadas, hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { usePessoaConta } from "@/hooks/usePessoaConta";
 import { dataDeHojeBase } from "@/lib/hr/dataBase";
 import type {
@@ -410,9 +410,12 @@ export function usePessoa(pessoaId: string | undefined) {
   const savePessoa = useCallback(
     (patch: Partial<Pessoa>) =>
       guardar(async (autorId) =>
-        hrFrom("pessoas")
-          .update({ ...patch, updated_by: autorId })
-          .eq("id", pessoaId),
+        // A RLS de `pessoas` filtra o UPDATE sem erro: 0 linhas nao e sucesso.
+        exigirLinhasGravadas(
+          await hrFrom("pessoas")
+            .update({ ...patch, updated_by: autorId }, { count: "exact" })
+            .eq("id", pessoaId),
+        ),
       ),
     [guardar, pessoaId],
   );

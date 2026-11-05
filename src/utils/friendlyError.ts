@@ -115,6 +115,11 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /horario_planeado_correccao_imutavel/i, key: "friendlyError.horarioPlaneadoCorreccaoImutavel" },
   { match: /horario_planeado_janela_decorrida/i, key: "friendlyError.horarioPlaneadoJanelaDecorrida" },
   { match: /horario_planeado_fecha_no_passado/i, key: "friendlyError.horarioPlaneadoFechaNoPassado" },
+  // `pessoas_vinculos_horas` (20270108410000): so .vinculos.edit nao reescreve horas ja decorridas
+  // (fechar no passado, mudar o inicio ou as horas de uma versao ja comecada) -- isso e .horas.corrigir.
+  { match: /horas_contratadas_(fecha_no_passado|inicio_no_passado|versao_em_curso)/i, key: "friendlyError.horasContratadasPassado" },
+  // `pessoas` (20270108420000): so hr.pessoas.laborais.edit grava apenas os campos do separador Laborais.
+  { match: /pessoas_laborais_so_campos/i, key: "friendlyError.forbidden" },
   { match: /horario_planeado_encolhe_inicio/i, key: "friendlyError.horarioPlaneadoEncolheInicio" },
   { match: /horario_planeado_altera_regra_em_curso/i, key: "friendlyError.horarioPlaneadoAlteraRegraEmCurso" },
   { match: /planeado_correccao_sem_motivo/i, key: "friendlyError.planeadoCorreccaoSemMotivo" },
