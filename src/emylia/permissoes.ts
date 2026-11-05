@@ -2,10 +2,12 @@
 // o Financeiro valida pagamentos e trata das faturas, os outros papéis nenhuma destas. A verificação é do motor (acoes, motor.ts): há ecrãs
 // que chamam a ação do passo sem olhar para o papel (fazer(A, act), em LeadsSimples, PessoaFicha e PessoasV1).
 // 22/10: "equipa.edit": a ficha dos técnicos de obra (custo/hora, ofício, férias), no bloco "Obra" da ficha da pessoa (RH › Pessoas): a Direção e as Operações.
-// 23/10 (2.0, segurança): com uma conta real, quem decide são as permissões do utilizador na base (tem_permissao, papel_permissoes),
-// lidas por permissoesReais.ts e postas aqui (definirPermissoesReais). O quadro por papel só serve:
-//   · sem conta (o protótipo local e os testes);
-//   · para o "A ver como" da Direção/admin: vê o que o papel simulado faria, mas nunca mais do que ela própria pode na base.
+// 23/10 (2.0, segurança): com uma conta real, quem decide são as permissões do utilizador na base, postas aqui (definirPermissoesReais).
+// 5/11: leem-se por fn_cat_pode(org, código), a MESMA função com que o servidor decide (o perfil, os Papéis no Negócio de TODOS os papéis
+// da pessoa e o admin do sistema), em usePermissoesReaisNegocio (real/usePermissoesReais.ts), com `simular: false`, na ficha da pessoa
+// (permissoesPosContrato.ts) e em /negocios (NegociosEmylia.tsx). Aí o "A ver como" só escolhe a vista e de quem é cada passo
+// (p.who === S.role): o que se pode fazer é o que a base diz, seja qual for o papel escolhido. O quadro por papel (PERMS_PAPEL) só serve
+// sem conta (o protótipo local e os testes); o ramo `simular: true` (o papel simulado, sem passar do que a base dá) já ninguém o põe.
 // Uma conta real sem as permissões lidas (a carregar, ou a leitura falhou) não pode nenhuma destas ações.
 import type { Papel } from "./motor";
 
@@ -75,7 +77,8 @@ export const ALTERNATIVAS: Readonly<Partial<Record<PermNeg, readonly string[]>>>
 interface Reais { codigos: ReadonlySet<string> | null; simular: boolean }
 let reais: Reais | null = null;
 
-/** 23/10: as permissões reais de quem entrou (PrototipoNegocios.tsx). null: sem conta (o quadro por papel). */
+/** 23/10: as permissões reais de quem entrou (5/11: postas por usePermissoesReaisNegocio, na ficha e em /negocios, e tiradas com null
+ *  ao sair). null: sem conta (o quadro por papel). */
 export function definirPermissoesReais(r: Reais | null): void { reais = r; }
 
 const doPapel = (p: Papel, x: PermNeg): boolean => PERMS_PAPEL[p].includes("*") || PERMS_PAPEL[p].includes(x);
@@ -96,7 +99,8 @@ export const CODIGO_VER_CUSTOS = "quotes.view_costs";
 export const SEM_VER_CUSTOS = "O custo e a margem só se veem com a permissão «Ver custos do orçamento».";
 
 /** A resposta de fn_cat_pode(org, 'quotes.view_costs') posta por /negocios (usePodeVerCustos em NegociosEmylia.tsx). `undefined`: esta
- *  página não a pôs (a ficha lê-a com as outras em permissoesPosContrato.ts, nas `reais.codigos`); `null`: ainda a ler. */
+ *  página não a pôs; `null`: ainda a ler. 5/11: com as `reais` postas (a ficha e /negocios, usePermissoesReaisNegocio, que também lê
+ *  quotes.view_costs) é ignorada: podeVerCustos responde pelas `reais.codigos`. */
 let verCustosNegocios: boolean | null | undefined;
 export function definirVerCustos(v: boolean | null | undefined): void { verCustosNegocios = v; }
 

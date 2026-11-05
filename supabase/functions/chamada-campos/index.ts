@@ -30,9 +30,14 @@ const pedido = z.object({
 const INSTRUCAO = `És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição de uma chamada entre
 um comercial e um cliente e preenches uma ficha para preparar a visita.
 
-Quem é quem: as linhas "Comercial:" são da pessoa da empresa, que faz as perguntas; as linhas "Cliente:" são do
-cliente. O nome do cliente é o nome por que o comercial o trata (por exemplo "Dona Inês"), nunca o nome com que o
-comercial se apresenta.
+Quem é quem: cada linha vem etiquetada "Comercial:" ou "Cliente:" por uma comparação de vozes que ERRA muitas vezes.
+Antes de preencheres, decide tu quem disse cada linha pelo sentido da conversa: o comercial é da empresa, apresenta-se,
+faz as perguntas, explica a visita e marca o dia; o cliente fala da casa dele, do que quer fazer, das dúvidas, da
+disponibilidade e responde às perguntas. Uma linha como "eu ainda estou interessado em fazer a casa de banho" é do
+cliente, mesmo que venha como "Comercial:". Devolve essa decisão em 'falantes': uma entrada por linha, pela ordem dos
+números entre parênteses retos, "comercial" ou "cliente". Preenche os campos já com essa correção.
+O nome do cliente é o nome por que o comercial o trata (por exemplo "Dona Inês"), nunca o nome com que o comercial se
+apresenta.
 
 Regras:
 - Só preenches o que foi dito na chamada. Se não foi dito, valor é null e confianca é 0.
@@ -42,6 +47,13 @@ Regras:
 - A transcrição do lado do cliente vem do altifalante do telemóvel e tem frases sem sentido. Ignora-as.
 - Para campos de escolha, usa exatamente uma das opções (o texto da opção). Para sim/não, "Sim" ou "Não".
 - Para números, só o número. Para listas (varios), as opções ditas separadas por vírgulas. Para datas, AAAA-MM-DD.
+- Numa lista de serviços do Catálogo (varios com muitas opções), inclui TODAS as opções que correspondem a algo que o
+  cliente disse que quer fazer, trocar, pôr ou instalar, mesmo que o diga com outras palavras ("trocar a sanita, o
+  pavimento e o espelho" dá a opção da sanita, a do pavimento e a do espelho; "banheira" dá a opção da banheira ou
+  da base de duche se for isso que existe). Se o cliente disse que quer trocar tudo ou uma remodelação geral de uma
+  divisão, inclui todas as opções típicas dessa divisão (demolição e entulho, canalização, pavimento, revestimentos,
+  sanita, duche ou banheira, mobiliário, espelho, toalheiro, elétrica, pintura), com confiança 0.5. Usa exatamente o
+  texto de cada opção.
 - Nos campos de texto longo escreve TUDO o que foi dito sobre esse tema, com detalhe e frases completas, nas
   palavras do cliente: o que quer, dúvidas e indecisões, o que já fez ou tem, referências e exemplos que pediu,
   restrições. Nunca resumas a uma linha; um campo de texto longo pode ter várias frases.
@@ -57,7 +69,7 @@ const descrever = (c: z.infer<typeof campoDef>) => {
 };
 
 interface CampoBruto { valor: string | null; confianca: number; excerto: string }
-interface Resposta { campos: Record<string, CampoBruto>; resumo: string }
+interface Resposta { campos: Record<string, CampoBruto>; resumo: string; falantes?: string[] }
 
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
@@ -88,12 +100,13 @@ serve(async (req) => {
     const campoEsq = { type: "OBJECT", properties: { valor: { type: "STRING", nullable: true }, confianca: { type: "NUMBER" }, excerto: { type: "STRING" } },
       required: ["valor", "confianca", "excerto"] };
     const esquema = { type: "OBJECT", properties: { campos: { type: "OBJECT", properties: Object.fromEntries(chaves.map((k) => [k, campoEsq])), required: chaves },
-      resumo: { type: "STRING" } }, required: ["campos", "resumo"] };
+      resumo: { type: "STRING" }, falantes: { type: "ARRAY", items: { type: "STRING", enum: ["comercial", "cliente"] } } },
+      required: ["campos", "resumo", "falantes"] };
     const texto = (hoje ? `Hoje é ${hoje}. Datas ditas de forma relativa («dia 10», «amanhã», «para a semana») ` +
       "convertem-se para AAAA-MM-DD, assumindo a próxima ocorrência a partir de hoje.\n\n" : "") +
       "# Campos a preencher\n" + campos.map(descrever).join("\n") +
-      "\n\n# Transcrição da chamada\n" + segmentos.map((s) => `${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : "Alguém"}: ${s.texto}`).join("\n") +
-      "\n\nPreenche o JSON com 'campos' (um objeto por chave, com valor, confianca e excerto) e 'resumo'.";
+      "\n\n# Transcrição da chamada\n" + segmentos.map((s, i) => `[${i}] ${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : "Alguém"}: ${s.texto}`).join("\n") +
+      "\n\nPreenche o JSON com 'falantes' (uma entrada por linha), 'campos' (um objeto por chave, com valor, confianca e excerto) e 'resumo'.";
 
     let r: Resposta;
     try {
@@ -113,7 +126,10 @@ serve(async (req) => {
       return { chave: c.k, rotulo: c.l, tipo: c.t, valor: estado === "em_falta" ? null : String(b.valor).trim(), valor_rotulo: null,
         confianca: Math.round(conf * 100) / 100, excerto, estado };
     });
-    return json({ resumo: String(r.resumo ?? "").trim(), motor: `gemini:${MODELO}`, fichas: [{ campos: saida }] });
+    // quem disse cada linha, revisto pelo sentido; só se vier uma entrada por linha (senão fica o que a comparação de vozes deu)
+    const falantes = Array.isArray(r.falantes) && r.falantes.length === segmentos.length && r.falantes.every((f) => f === "comercial" || f === "cliente")
+      ? r.falantes : undefined;
+    return json({ resumo: String(r.resumo ?? "").trim(), motor: `gemini:${MODELO}`, fichas: [{ campos: saida }], ...(falantes ? { falantes } : {}) });
   } catch (error) {
     if (error instanceof AuthError) return authErrorResponse(error, corsHeaders);
     // qualquer outro erro vai com cabeçalhos CORS e a mensagem: sem isto o browser só diz

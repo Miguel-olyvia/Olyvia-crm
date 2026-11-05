@@ -19,6 +19,8 @@ export interface PedidoGravar {
   /** O nome da origem escolhida, ou «manual». */
   origemNome: string;
   campanhaId: string | null;
+  /** Quem cria (anew_users.id). Sem ele, pergunta-se à base (current_business_user_id). */
+  criadoPor?: string | null;
 }
 
 export interface LeadGravada {
@@ -48,10 +50,29 @@ export class FalhaGravar extends Error {
   readonly causa: unknown;
   readonly limpezaFalhou: boolean;
   constructor(causa: unknown, limpezaFalhou = false) {
-    super(causa instanceof Error ? causa.message : "falha ao gravar a lead");
+    super(mensagemDaCausa(causa));
     this.name = "FalhaGravar";
     this.causa = causa;
     this.limpezaFalhou = limpezaFalhou;
+  }
+}
+
+// 5/11: o erro do Supabase (PostgrestError) chega como objeto simples, não como Error: a mensagem real perdia-se e o ecrã dizia só
+// «falha ao gravar a lead». O email ou telefone repetido (índices uq_anew_entities_org_email e _phone9) diz-se em português.
+function mensagemDaCausa(causa: unknown): string {
+  if (causa instanceof Error) return causa.message;
+  const e = (causa && typeof causa === "object" ? causa : {}) as { code?: unknown; message?: unknown };
+  if (e.code === "23505") return "Já existe uma pessoa com este email ou telefone nesta organização.";
+  return typeof e.message === "string" && e.message ? e.message : "falha ao gravar a lead";
+}
+
+/** O id de quem está na sessão (anew_users.id); null se a base não o souber. */
+async function quemCria(): Promise<string | null> {
+  try {
+    const { data, error } = await (supabase as unknown as { rpc: (n: string) => Promise<{ data: unknown; error: unknown }> }).rpc("current_business_user_id");
+    return !error && typeof data === "string" && data ? data : null;
+  } catch {
+    return null;
   }
 }
 
@@ -60,6 +81,9 @@ const tabelaEntidades = () => (supabase as unknown as { from: (t: string) => any
 const comValor = (v: string | null | undefined): string | null => (v && v.trim() ? v.trim() : null);
 
 async function criarPessoa(p: PedidoGravar, extra: Record<string, unknown>): Promise<string> {
+  // 5/11 (Rúben, «Não gravou: Miguel two»): sem created_by nem responsável, um comercial com âmbito «os meus» deixava de ver a pessoa
+  // que acabou de criar (fn_neg_pessoa_no_ambito procura org:criador ou org:responsável) e neg_criar_negocio recusava-a (NG003).
+  const criadoPor = p.criadoPor ?? (await quemCria());
   const { data, error } = await tabelaEntidades().insert({
     organization_id: p.organizationId,
     type: "person",
@@ -71,6 +95,7 @@ async function criarPessoa(p: PedidoGravar, extra: Record<string, unknown>): Pro
     extra,
     origin_id: p.origemId,
     campaign_id: p.campanhaId,
+    ...(criadoPor ? { created_by: criadoPor } : {}),
   }).select("id").single();
   if (error) throw error;
   const id = (data as { id?: unknown } | null)?.id;

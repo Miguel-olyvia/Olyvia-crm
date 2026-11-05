@@ -42,7 +42,11 @@ export type NomeNeg =
   | "neg_ler_campos_config"
   | "neg_guardar_campos_config"
   | "neg_dados_pagamento_ler"
-  | "neg_dados_pagamento_guardar";
+  | "neg_dados_pagamento_guardar"
+  // 5/11: apagar uma pessoa por engano (o aviso do que está ligado) e o separador «Pessoas» do Lixo (20270107200000)
+  | "neg_apagar_pessoa"
+  | "neg_pessoa_ligacoes"
+  | "neg_pessoas_apagadas";
 
 /** Erro de uma função neg_*: o código (se for conhecido), a chave a traduzir e a causa. */
 export class ErroNeg extends Error {

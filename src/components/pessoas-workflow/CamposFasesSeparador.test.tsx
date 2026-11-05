@@ -50,9 +50,9 @@ describe("Campos das fases", () => {
     render(<Campos config={config} />);
     expect(screen.queryByRole("button", { name: "Apagar Estacionamento" })).toBeNull();
     expect(screen.getByRole("button", { name: "Esconder Estacionamento" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Esconder Amianto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Esconder Animais" }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar campos" }));
-    await waitFor(() => expect(config.guardar).toHaveBeenCalledWith({ campos: { "Local · interior": { ocultos: ["amianto"] } } }));
+    await waitFor(() => expect(config.guardar).toHaveBeenCalledWith({ campos: { "Local · interior": { ocultos: ["animais"] } } }));
   });
 
   it("parte do que está gravado; «Voltar aos campos de sempre» grava sem ajustes", async () => {
@@ -97,27 +97,27 @@ describe("Impacto dos campos no orçamento", () => {
     const config = hook();
     render(<Efeitos config={config} />);
     fireEvent.click(screen.getByRole("switch", { name: "Mexe no orçamento: Proteção do elevador" }));
-    const amianto = screen.getByText("Remoção certificada de amianto").closest("li")!;
-    fireEvent.click(within(amianto).getByRole("button", { name: "Não sei" }));
+    const estacionamento = screen.getByText("Estacionamento pago").closest("li")!;
+    fireEvent.click(within(estacionamento).getByRole("button", { name: "Não pago" }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar impacto" }));
-    await waitFor(() => expect(config.guardar).toHaveBeenCalledWith({ efeitos: { elevador: { off: true }, amianto: { ops: ["Sim", "Não sei"] } } }));
+    await waitFor(() => expect(config.guardar).toHaveBeenCalledWith({ efeitos: { elevador: { off: true }, estacionamento: { ops: ["Pago", "Não pago"] } } }));
   });
 
   it("as opções vêm do campo como a organização o ajustou", () => {
-    const config = hook({ dados: { campos: { "Local · interior": { opcoes: { amianto: ["Sim", "Não", "Talvez"] } } }, efeitos: {} } });
+    const config = hook({ dados: { campos: { "Local · exterior (edifício e acessos)": { opcoes: { estacionamento: ["Pago", "Não pago", "Sem estacionamento", "Talvez"] } } }, efeitos: {} } });
     render(<Efeitos config={config} />);
-    const amianto = screen.getByText("Remoção certificada de amianto").closest("li")!;
-    expect(within(amianto).getByRole("button", { name: "Talvez" })).toBeInTheDocument();
+    const estacionamento = screen.getByText("Estacionamento pago").closest("li")!;
+    expect(within(estacionamento).getByRole("button", { name: "Talvez" })).toBeInTheDocument();
   });
 
   it("voltar a pôr o valor de sempre tira o ajuste (fica igual ao gravado: nada por guardar)", () => {
-    const config = hook({ dados: { campos: {}, efeitos: { amianto: { v: { preco: 600 } } } } });
+    const config = hook({ dados: { campos: {}, efeitos: { elevador: { v: { preco: 60 } } } } });
     render(<Efeitos config={config} />);
-    const preco = screen.getAllByLabelText("Preço ao cliente (€)").find((x) => (x as HTMLInputElement).value === "600")!;
-    expect(screen.getByText("De sempre: 520")).toBeInTheDocument();
-    fireEvent.change(preco, { target: { value: "520" } });
+    const preco = screen.getAllByLabelText("Preço ao cliente (€)").find((x) => (x as HTMLInputElement).value === "60")!;
+    expect(screen.getByText("De sempre: 45")).toBeInTheDocument();
+    fireEvent.change(preco, { target: { value: "45" } });
     fireEvent.blur(preco);
-    expect(screen.queryByText("De sempre: 520")).toBeNull();
+    expect(screen.queryByText("De sempre: 45")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Guardar impacto" }));
     expect(config.guardar).toHaveBeenCalledWith({ efeitos: {} });
   });

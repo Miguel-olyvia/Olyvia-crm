@@ -77,6 +77,7 @@ const PEDIDO: PedidoGravar = {
   origemId: null,
   origemNome: "manual",
   campanhaId: null,
+  criadoPor: "u-eu",
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -97,7 +98,7 @@ describe("gravarNovaLead: pessoa nova (a lead é a própria entidade)", () => {
     expect(inseridas()[0].dados).toEqual({
       organization_id: "org-nike", type: "person", display_name: "Ana Lopes", first_name: "Ana", last_name: "Lopes",
       email: "ana@x.pt", phone: "+351912345678", extra: { first_name: "Ana", last_name: "Lopes", notes: "n" },
-      origin_id: "src-1", campaign_id: "camp-1",
+      origin_id: "src-1", campaign_id: "camp-1", created_by: "u-eu",
     });
     expect(inseridas()[0].colunas).toBeNull();
   });
@@ -141,6 +142,32 @@ describe("gravarNovaLead: pessoa nova (a lead é a própria entidade)", () => {
       expect(supabaseFalso.chamadasA(tabela)).toEqual([]);
     }
     expect(supabaseFalso.functions.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("gravarNovaLead: quem cria (5/11, «Não gravou: Miguel two»)", () => {
+  it("sem criadoPor pergunta à base quem está na sessão e grava-o em created_by, antes do negócio", async () => {
+    supabaseFalso.rpc.mockImplementation(async (nome: string) => (nome === "current_business_user_id"
+      ? { data: "u-sessao", error: null } : { data: { mudou: true }, error: null }));
+    const { criadoPor: _sem, ...semCriador } = PEDIDO;
+    await gravarNovaLead({ ...semCriador, valores: {} });
+    expect(inseridas()[0].dados).toMatchObject({ created_by: "u-sessao" });
+    expect(nomesRpc()).toEqual(["current_business_user_id", "neg_criar_negocio"]);
+  });
+
+  it("se a base não souber quem é, grava na mesma sem created_by", async () => {
+    supabaseFalso.rpc.mockImplementation(async (nome: string) => (nome === "current_business_user_id"
+      ? { data: null, error: null } : { data: { mudou: true }, error: null }));
+    const { criadoPor: _sem, ...semCriador } = PEDIDO;
+    await gravarNovaLead({ ...semCriador, valores: {} });
+    expect(inseridas()[0].dados).not.toHaveProperty("created_by");
+  });
+
+  it("o erro da base chega ao ecrã: a mensagem real, e o email ou telefone repetido em português", async () => {
+    supabaseFalso.estado.erros["anew_entities.insert"] = { code: "42501", message: "new row violates row-level security policy" };
+    expect((await gravarNovaLead(PEDIDO).catch((e) => e)).message).toBe("new row violates row-level security policy");
+    supabaseFalso.estado.erros["anew_entities.insert"] = { code: "23505", message: "duplicate key value violates unique constraint" };
+    expect((await gravarNovaLead(PEDIDO).catch((e) => e)).message).toBe("Já existe uma pessoa com este email ou telefone nesta organização.");
   });
 });
 

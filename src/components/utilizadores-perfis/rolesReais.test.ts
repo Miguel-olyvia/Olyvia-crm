@@ -65,6 +65,19 @@ describe("mapeamento base -> maquete", () => {
         descricao: "Ver o histórico das encomendas a fornecedor e os atributos das categorias",
       });
   });
+  it("05/11: clients.edit e clients.create mostram o que fazem de facto (o código não muda)", () => {
+    const l = (code: string, name: string): LinhaPermissao => ({ code, name, category: "clients", is_dangerous: false, description: name });
+    expect(permissaoDaBase(l("clients.edit", "Editar clientes"))).toMatchObject({
+      codigo: "clients.edit", nome: "Editar quem já é cliente",
+      descricao: "Mudar nome, contactos, NIF, comercial, visitas e moradas de entrega de uma pessoa que já é cliente (junto com Editar negócios de pessoas).",
+    });
+    expect(permissaoDaBase(l("clients.create", "Criar clientes"))).toMatchObject({
+      codigo: "clients.create", nome: "Converter em cliente (assistente IA)",
+      descricao: "O assistente IA pode converter uma lead em cliente. No ecrã, a conversão pede Converter Leads.",
+    });
+    // clients.view não tem rótulo próprio: fica o nome da base.
+    expect(permissaoDaBase(l("clients.view", "Ver clientes")).nome).toBe("Ver clientes");
+  });
   it("permissoesDoMenu só deixa as permissões em uso (incluindo hr, pessoas, negocios e fleet), sem as escondidas", () => {
     const l = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
     const r = permissoesDoMenu([

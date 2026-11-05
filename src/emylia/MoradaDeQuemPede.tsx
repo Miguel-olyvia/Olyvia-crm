@@ -137,7 +137,7 @@ function Bloco({ ctx, d, entityId }: { ctx: Ctx; d: Negocio; entityId: string })
   const liga = (c: Campo) => (erro?.campos.includes(c) ? `${id}-erro` : undefined);
 
   return (
-    <fieldset onBlur={sair} className="grid min-w-0 gap-3 border-0 p-0 sm:col-span-3">
+    <fieldset onBlur={sair} className="col-span-full grid min-w-0 gap-3 border-0 p-0">
       <legend className="p-0 text-[15px] font-semibold text-foreground">Morada de quem pede</legend>
       <p id={`${id}-aviso`} className="text-sm text-muted-foreground">Se for diferente da morada da obra, preencha-a aqui. A morada da obra pede-se mais à frente.</p>
       {!editar && <p className="text-sm text-muted-foreground">Só de leitura: mudar a morada de quem pede precisa da permissão de registar o contacto (negocios.contacto.registar).</p>}

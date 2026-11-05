@@ -263,16 +263,17 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     const real = comDadosLead(d);
     return [
       { ...passoDeGrupo(gPedido, User, (
-        <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
+        // 5/11 (Rúben): tudo a toda a largura da coluna (nada de colunas estreitas); o nome em duas metades, o telefone em meia largura
+        <div className={simples ? "grid max-w-2xl gap-6 [&>*]:col-span-full" : "grid gap-3 sm:grid-cols-3"}>
           {real ? (
-            <div className="grid gap-5 sm:grid-cols-2">
+            <div className={cn("grid gap-5 sm:grid-cols-2", !simples && "sm:col-span-2")}>
               <TextoDaLead ctx={ctx} d={d} k="primeiro" rotulo="Nome próprio" />
               <TextoDaLead ctx={ctx} d={d} k="apelido" rotulo="Apelido" />
             </div>
           ) : <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>}
           {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
           {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
-            : <div className={ROT}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
+            : <div className={cn(ROT, simples && "sm:max-w-sm")}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
           <MoradaDeQuemPede ctx={ctx} d={d} />
           <Campos grupo={gPedido} {...fx} />
         </div>

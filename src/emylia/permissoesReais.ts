@@ -1,7 +1,7 @@
-// 23/10/2026 (2.0, segurança): as permissões de quem entrou, lidas da base, para as ações dos Negócios (permissoes.ts) e para o que
-// o ecrã mostra. Pergunta `tem_permissao(org, código)` (as mesmas funções de usePermissoes.ts e das políticas) por cada código abaixo.
-// Quem decide de verdade é a base (as funções da 0015 e as políticas): isto só evita oferecer o que a base ia recusar. Em caso de erro
-// nada se dá por concedido.
+// 23/10/2026 (2.0, segurança): os códigos das permissões dos Negócios que se leem da base (CODIGOS_NEGOCIOS).
+// 5/11: quem os lê é usePermissoesReaisNegocio (real/usePermissoesReais.ts), por fn_cat_pode(org, código), a função com que o servidor
+// decide; usado na ficha da pessoa e em /negocios. lerPermissoesNegocios e usePermissoesNegocios, abaixo, são código morto: ninguém
+// os chama e perguntam `tem_permissao(org, perm)`, que não existe nesta base. Ficam só para não mexer no que não é preciso; não usar.
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ALTERNATIVAS, CODIGO_BASE } from "./permissoes";
@@ -13,7 +13,7 @@ export const CODIGOS_NEGOCIOS: readonly string[] = [...new Set([...Object.values
 
 export type LeituraPermissoes = { org: string; codigos: ReadonlySet<string> | null };
 
-/** Lê as permissões concedidas a quem entrou na organização (null: a leitura falhou). */
+/** MORTO (5/11): ninguém chama; `tem_permissao` não existe nesta base. Use lerPermissoesReais (real/usePermissoesReais.ts). */
 export async function lerPermissoesNegocios(org: string): Promise<ReadonlySet<string> | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
@@ -26,7 +26,7 @@ export async function lerPermissoesNegocios(org: string): Promise<ReadonlySet<st
   }
 }
 
-/** As permissões de quem entrou em `org` (null enquanto se leem, ou sem organização). Uma resposta de outra organização ignora-se. */
+/** MORTO (5/11): ninguém chama. Use usePermissoesReaisNegocio (real/usePermissoesReais.ts). */
 export function usePermissoesNegocios(org: string | null): ReadonlySet<string> | null {
   const [l, setL] = useState<LeituraPermissoes | null>(null);
   useEffect(() => {

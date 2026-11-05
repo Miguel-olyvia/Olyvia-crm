@@ -32,7 +32,7 @@
 // base). Só saem do editor: os códigos ficam na base, os papéis que as têm mantêm-nas e as guardas não mudam — ver
 // ESCONDIDAS_COM_GUARDA. operations.orders.view/view_all e operations.costs.view FICAM: o Frota (Ligações / ligar viatura a uma
 // ordem) lê ops_ordem pela policy ops_ordem_select (orders.view + ops_pode_ver_ordem, onde entra view_all) e rpc_fleet_link_order
-// só lança o custo da deslocação na ordem com operations.costs.view.
+// só lança o custo da deslocação na ordem com operations.costs.view. (05/11: desfeito — as três saíram do editor, ver abaixo.)
 //
 // 04/11/2026 (aprovado): a linha Contactos (contacts.view/create/edit/import) saiu do editor — ver PERMISSOES_ESCONDIDAS.contacts.
 // A linha Clientes FICA: o campo Cliente da «Nova encomenda manual» em /client-orders (EntitySearchInput) filtra os clientes pelo
@@ -56,10 +56,14 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "client_orders.confirm_stock_exit", "client_orders.create", "client_orders.delete", "client_orders.edit",
     "client_orders.view",
   ],
-  // Só verificadas no servidor (policies/RPCs/edge functions): clients.create (rpc_confirm_direct_sale, policies anew_clients/anew_entities),
-  // clients.delete (policies anew_clients e anew_entity_*), clients.import (policies de INSERT/UPDATE de anew_entity_roles,
-  // 20270102130000). clients.edit também em ClientDetailsDialog, que só AnewClients importa. clients.view tem ação na app viva: o âmbito
-  // dela filtra os clientes do campo Cliente (EntitySearchInput) na «Nova encomenda manual» de /client-orders (e em /deals).
+  // clients.view tem ação na app viva: o âmbito dela filtra os clientes do campo Cliente (EntitySearchInput) na «Nova encomenda manual»
+  // de /client-orders (e em /deals).
+  // clients.edit é a segunda chave, junto com pessoas.edit, para mexer em quem já é cliente: fn_neg_pessoa_no_ambito
+  // (neg_guardar_identidade_pessoa, neg_substituir_contacto, neg_guardar_contacto_pessoa, neg_guardar_nif_pessoa, neg_atribuir_pessoa,
+  // rpc_resolve_form_submission), as visitas (fn_neg_pode_mudar_dono_lead), as moradas de entrega (fn_entity_delivery_address_access) e
+  // as policies dos contactos. Também em ClientDetailsDialog, que só AnewClients importa.
+  // clients.create só é usada pelo convert_lead do assistente IA (ai-assistant/tools/crm.ts:830); no ecrã, a conversão pede leads.convert.
+  // clients.delete: hoje só como alternativa a clients.edit nos contactos; vai controlar o botão Apagar cliente (neg_apagar_pessoa), pedido a 05/11.
   // 05/11: clients.import passou para as escondidas (sem ação na app viva).
   clients: [
     "clients.create", "clients.delete", "clients.edit", "clients.view",

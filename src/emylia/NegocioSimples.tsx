@@ -256,7 +256,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
 
       <div className={cn("mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)]", !largo && "2xl:grid-cols-[260px_minmax(0,1fr)_240px]")}>
         {naChamada && d.fase <= 1 && ver === null
-          ? <TudoNaChamada ctx={ctx} d={d} />
+          ? <TudoNaChamada ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} />
           : ver === null
           ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} lateral={(passos, ativo, setAtivo, comFim) => (
             <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} comFim={comFim} />
@@ -573,7 +573,7 @@ function ConfirmarPerda({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 
 /** 4/11 (Rúben: «às vezes a call permite preencher logo tudo»): os passos da Lead e do Contacto seguidos, na mesma página, com os dados do
  *  cliente ao lado (DadosAoLado). Os campos são os mesmos dos passos (gravam-se como sempre); para passar de fase volta-se aos passos. */
-function TudoNaChamada({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+function TudoNaChamada({ ctx, d, ajustarPassos }: { ctx: Ctx; d: Negocio; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[] }) {
   const fases = [0, 1] as const;
   return (
     <>
@@ -584,7 +584,8 @@ function TudoNaChamada({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         {fases.map((f) => (
           <div key={f} className="space-y-8">
             <h2 className="text-2xl font-semibold tracking-tight">{FASES[f]}</h2>
-            {passosDaFase(ctx, d, true, f).filter((p) => !p.bloqueado).map((p) => (
+            {/* 5/11: com os ajustes da página real (a agenda do CRM em «Marcar a visita»), como nos passos */}
+            {(ajustarPassos ? ajustarPassos(passosDaFase(ctx, d, true, f), d) : passosDaFase(ctx, d, true, f)).filter((p) => !p.bloqueado).map((p) => (
               <section key={p.id} aria-labelledby={`chamada-${f}-${p.id}`} className="space-y-3">
                 <h3 id={`chamada-${f}-${p.id}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
                   <p.icone className="h-5 w-5 text-primary" aria-hidden="true" />{p.titulo}

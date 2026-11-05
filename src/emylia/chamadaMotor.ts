@@ -11,7 +11,9 @@ export interface CampoExtraido {
   chave: string; rotulo: string; tipo: string; valor: string | number | boolean | null; valor_rotulo: string | null;
   confianca: number; excerto: string; estado: "preenchido" | "rever" | "em_falta";
 }
-export interface Extracao { resumo: string; motor: string; fichas: { campos: CampoExtraido[] }[] }
+export interface Extracao { resumo: string; motor: string; fichas: { campos: CampoExtraido[] }[];
+  /** 5/11: quem disse cada linha, revisto pelo sentido da conversa no fim (uma entrada por linha enviada). */
+  falantes?: ("comercial" | "cliente")[] }
 
 /** Os campos que se mandam ao motor: os Def dos grupos (k, l, t, op, ajuda, un), sem os ocultos. */
 export function camposParaMotor(grupos: Grupo[]): Pick<Def, "k" | "l" | "t" | "op" | "ajuda" | "un">[] {

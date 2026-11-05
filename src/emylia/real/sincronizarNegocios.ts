@@ -4,7 +4,7 @@
 // base lhe dá passa a ser o id do negócio na Emylia.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tot, totaisIva, type Estado, type Negocio } from "../motor";
-import { gravarNovaLead } from "@/hooks/pessoas/novaLead/gravarNovaLead";
+import { gravarNovaLead, NegocioNaoCriado } from "@/hooks/pessoas/novaLead/gravarNovaLead";
 import { criarNegocioNovaLead, novoIdNegocio } from "@/hooks/pessoas/novaLead/criarNegocioNovaLead";
 import { resolverOrgRaiz } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { paraLinhas } from "./negocioReal";
@@ -61,12 +61,18 @@ async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<
     await criarNegocioNovaLead({ organizationId: org, entityId, negocioId, titulo: d.nome });
   } else {
     const email = d.tel.includes("@") ? d.tel.trim() : "";
-    const r = await gravarNovaLead({
-      organizationId: org, rootOrganizationId: await resolverOrgRaiz(org),
-      dados: { displayName: d.nome, firstName: null, lastName: null, email, telefone: email ? "" : d.tel.trim(), nif: "" },
-      valores: {}, origemId: null, origemNome: "manual", campanhaId: null,
-    });
-    negocioId = r.negocioId; entityId = r.entityId;
+    try {
+      const r = await gravarNovaLead({
+        organizationId: org, rootOrganizationId: await resolverOrgRaiz(org),
+        dados: { displayName: d.nome, firstName: null, lastName: null, email, telefone: email ? "" : d.tel.trim(), nif: "" },
+        valores: {}, origemId: null, origemNome: "manual", campanhaId: null,
+      });
+      negocioId = r.negocioId; entityId = r.entityId;
+    } catch (e) {
+      // 5/11: a pessoa ficou criada e o negócio não: a próxima gravação só cria o negócio dela. Antes repetia a pessoa e dava email repetido.
+      if (e instanceof NegocioNaoCriado) d.pessoaId = e.entityId;
+      throw e;
+    }
   }
   const { data, error } = await sb.from("negocios" as never).select("numero").eq("id", negocioId).single();
   if (error || !data) throw new Error("O negócio foi criado mas não se conseguiu ler o número.");

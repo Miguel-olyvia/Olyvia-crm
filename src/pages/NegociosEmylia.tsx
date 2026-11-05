@@ -40,6 +40,7 @@ import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
+import { usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
@@ -88,6 +89,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const verCustos = usePodeVerCustos();
   definirVerCustos(verCustos.aLer ? null : verCustos.pode);
   useEffect(() => () => definirVerCustos(undefined), []);
+  // 5/11: as permissões das ações (podeNeg) vêm de fn_cat_pode, a MESMA pergunta do servidor (o perfil, os Papéis no Negócio de todos os
+  // papéis da pessoa e o admin do sistema), postas no motor com `simular: false`, como na ficha da pessoa. O «A ver como» continua a
+  // escolher a vista e de quem é cada passo, mas já não muda o que se pode fazer. Com as reais postas, definirVerCustos é ignorado.
+  const perms = usePermissoesReaisNegocio(org);
   // 5/11: leads.assign para o comercial da lead (ComercialDaLead), da mesma maneira
   const podeAtribuir = usePodeAtribuirComercial();
   definirPodeAtribuirLead(podeAtribuir);
@@ -609,7 +614,13 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         </span>
       </div>
       {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>
-        : !pronto ? <p className="p-6 text-muted-foreground">A ler os negócios…</p>
+        : perms.leitura.k === "falhou" ? (
+          <div role="alert" className="m-4 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[15px]">
+            <span className="text-destructive">Não foi possível ler as suas permissões nos negócios: sem elas, os negócios não abrem.</span>
+            <button type="button" onClick={perms.repetir} className="min-h-10 rounded-lg border border-input bg-card px-3 font-medium hover:bg-muted">Tentar de novo</button>
+          </div>
+        )
+        : !pronto || perms.leitura.k === "a-ler" ? <p className="p-6 text-muted-foreground">A ler os negócios…</p>
         : S.view === "hoje" ? (S.role === "tecnico" ? <HojeTecnico {...ctx} /> : <HojeSimples {...ctx} />)
         : S.view === "operacoes" ? <OperacoesSimples {...ctx} />
         : S.view === "negocio" && S.deal && S.deals.some((d) => d.id === S.deal) ? <>

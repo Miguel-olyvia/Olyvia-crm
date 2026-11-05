@@ -112,6 +112,20 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect(screen.getByText(/Preenchidos: Tipo de imóvel, O cliente é, Tipo de serviço, Serviços do Catálogo, Visita: dia combinado, Visita: hora combinada\./)).toBeInTheDocument();
   });
 
+  it("no fim, quem fala passa a ser o revisto pelo sentido da conversa (5/11: o cliente vinha como «Comercial»)", async () => {
+    nuvem.preencherCampos.mockResolvedValueOnce({ ...extracao, falantes: ["cliente", "cliente"] });
+    await correrExemplo();
+    expect(screen.queryByText("Comercial:")).toBeNull();
+    expect(screen.getAllByText("Cliente:")).toHaveLength(2);
+    expect(screen.getByText(/Quem fala foi corrigido em 1 linha, pelo sentido da conversa\./)).toBeInTheDocument();
+  });
+
+  it("se a revisão não trouxer uma entrada por linha, ficam as etiquetas da comparação de vozes", async () => {
+    nuvem.preencherCampos.mockResolvedValueOnce({ ...extracao, falantes: ["cliente"] });
+    await correrExemplo();
+    expect(screen.getByText("Comercial:")).toBeInTheDocument();
+  });
+
   it("com a voz registada manda a amostra e o que ela diz em cada fala", async () => {
     localStorage.setItem("olyvia.chamadas.voz", "UklGRg==");
     localStorage.setItem("olyvia.chamadas.voz_texto", "Esta é a minha voz");

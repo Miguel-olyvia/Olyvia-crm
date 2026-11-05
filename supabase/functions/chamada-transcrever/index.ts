@@ -26,15 +26,22 @@ const pedido = z.object({
 
 const INSTRUCAO_BASE =
   "Transcreve literalmente este áudio, em português de Portugal, dividido em frases com início e fim em segundos " +
-  "dentro do áudio. Regras: só escreves o que se ouve com clareza; se um troço for ruído, silêncio ou impercetível, " +
-  "omite-o; se não se perceber nada, devolve uma lista vazia. Nunca completes, resumas, traduzas ou corrijas. " +
-  "Em cada frase dá a tua confiança de 0 a 1 de que foi mesmo isso que se disse.";
+  "dentro do áudio. É o microfone de um computador numa sala: ouve-se a pessoa da sala e, pelo altifalante de um " +
+  "telemóvel, a pessoa do outro lado da chamada. Regras: só escreves fala humana que se ouve com clareza. Toques, " +
+  "música de espera, mensagens gravadas da operadora, ruído de fundo e troços em que as palavras não se distinguem " +
+  "ficam de fora por completo: nunca inventes uma frase plausível para os preencher. Se uma frase só se percebe em " +
+  "parte, escreve só a parte clara. Se não se perceber nada, devolve uma lista vazia. Nunca completes, resumas, " +
+  "traduzas ou corrijas. Em cada frase dá a tua confiança de 0 a 1 de que foi mesmo isso que se disse; uma frase que " +
+  "não faz sentido em português, ou que não tens a certeza de ter ouvido, fica abaixo de 0,5.";
 // Quem fala decide-se num pedido À PARTE, sem transcrição: com a amostra no mesmo pedido o modelo
 // transcrevia a amostra em vez da fala (visto em chamadas reais a 4 e 5/11).
 const INSTRUCAO_VOZ =
-  "O primeiro áudio é uma amostra da voz de uma pessoa (o comercial). O segundo áudio é uma fala de uma chamada. " +
-  "Diz se a voz principal do segundo áudio é a mesma pessoa do primeiro. Responde só com JSON: " +
-  "comercial true se for a mesma voz, false se for outra pessoa, e a confiança de 0 a 1.";
+  "O primeiro áudio é uma amostra da voz de uma pessoa (o comercial), gravada ao microfone do computador. O segundo " +
+  "áudio é uma fala de uma chamada, captada pelo mesmo microfone: o comercial está na sala e ouve-se perto e nítido; " +
+  "o cliente fala pelo altifalante de um telemóvel e ouve-se mais abafado, metálico e distante. Diz se a voz que " +
+  "mais fala no segundo áudio é a mesma pessoa do primeiro (o comercial). Pesa o timbre da voz e também a " +
+  "acústica (na sala ou pelo telemóvel). Responde só com JSON: comercial true se for a mesma voz, false se for " +
+  "outra pessoa, e a confiança de 0 a 1.";
 const ESQUEMA_VOZ = { type: "OBJECT", properties: { comercial: { type: "BOOLEAN" }, confianca: { type: "NUMBER" } }, required: ["comercial", "confianca"] };
 
 const ESQUEMA_FRASES = {

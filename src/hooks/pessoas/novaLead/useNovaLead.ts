@@ -203,6 +203,7 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
         origemId: entrada.origemId,
         origemNome: entrada.origemNome,
         campanhaId: entrada.campanhaId,
+        criadoPor: createdBy,
       });
       await concluirCriada({ entityId: gravada.entityId, negocioId: gravada.negocioId, preparada, createdBy, avisoGrupo }, organizationId);
     } catch (causa) {

@@ -71,6 +71,17 @@ export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descric
     nome: "Ver histórico de alterações",
     descricao: "Ver o histórico das encomendas a fornecedor e os atributos das categorias",
   },
+  // 05/11/2026: clients.edit é a segunda chave (com pessoas.edit) para mexer em quem já é cliente; clients.create só a usa o convert_lead
+  // do assistente IA. Os nomes «Converter Leads» e «Editar negócios de pessoas» são os de leads.convert e pessoas.edit na base.
+  // Na grelha a célula mostra a coluna (Criar/Editar); o nome e a descrição daqui aparecem na dica e na descrição acessível.
+  "clients.edit": {
+    nome: "Editar quem já é cliente",
+    descricao: "Mudar nome, contactos, NIF, comercial, visitas e moradas de entrega de uma pessoa que já é cliente (junto com Editar negócios de pessoas).",
+  },
+  "clients.create": {
+    nome: "Converter em cliente (assistente IA)",
+    descricao: "O assistente IA pode converter uma lead em cliente. No ecrã, a conversão pede Converter Leads.",
+  },
 };
 
 export function permissaoDaBase(l: LinhaPermissao): Permissao {

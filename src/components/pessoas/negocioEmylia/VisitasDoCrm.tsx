@@ -25,6 +25,7 @@ import {
 } from "./espelhoVisitaEmylia";
 import { MarcarVisitaNegocio, type VisitaGravada } from "./MarcarVisitaNegocio";
 import { preparadoNoNegocio } from "./preparadoDaVisita";
+import { esquecerMarcacao, marcacaoPedida, ouvirMarcacoes } from "@/emylia/marcacaoDaChamada";
 
 /** O que o passo precisa de saber do negócio. `entityId` pode faltar (a ficha só sabe o negócio): lê-se da base. */
 export interface ContextoDasVisitas {
@@ -119,7 +120,12 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     ctx.A.marcarVisita(d.id, vagaDoMotor(g.visita.dia, g.visita.hora), quem || undefined);
     return antes === 0 && d.fase >= 2 ? numerosDe(d).find((n) => !d.f[`v${n}_crm`]) : undefined;
   };
+  // 5/11: a chamada em direto pediu que a visita se marque sozinha (marcacaoDaChamada.ts)
+  const [, setVersaoMarcacao] = useState(0);
+  useEffect(() => ouvirMarcacoes(() => setVersaoMarcacao((v) => v + 1)), []);
+  const marcarSozinha = modo === "primeira" && marcacaoPedida(d.id);
   const aposGravar = (g: VisitaGravada): void => {
+    esquecerMarcacao(d.id);
     setAMarcar(false); setARemarcar(null); setAviso(null);
     const lista = [...visitasCrm.filter((v) => v.id !== g.visita.id), ...(g.visita.id ? [g.visita] : [])];
     refletir(lista, g.visita.id ? { visitaId: g.visita.id } : null, () => passarAVisita(g), g.presentes);
@@ -155,9 +161,13 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
   const formulario = (visita?: VisitaDoNegocio): ReactNode => (
     <div className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <MarcarVisitaNegocio
+        key={visita ? visita.id : `${d.f.visita_dia ?? ""}|${d.f.visita_hora ?? ""}`}
+        marcarSozinha={!visita && marcarSozinha} aoDesistirSozinha={() => esquecerMarcacao(d.id)}
         entityId={entidade.entityId as string} negocioId={c.negocioId as string} nome={d.nome} moradaLead={moradaDaVisita.morada} origemMorada={moradaDaVisita.origem} soLeitura={!c.podeEditar}
         tipoInicial={ativas.length > 0 || numerosDe(d).length > 0 ? "revisita" : "levantamento"}
-        {...(visita ? { visita, presentesInicial: presentesDe(d, visita) } : preparadoNoNegocio(d))}
+        {...(visita ? { visita, presentesInicial: presentesDe(d, visita) }
+          // 5/11: o dia e a hora combinados na chamada em direto (ChamadaDireto grava-os em visita_dia e visita_hora)
+          : { ...preparadoNoNegocio(d), dataInicial: d.f.visita_dia || undefined, horaInicial: d.f.visita_hora || undefined })}
         rotuloGravar={visita ? "Guardar a nova hora" : modo === "primeira" ? "Marcar a visita" : "Marcar visita"} aoGuardada={aposGravar}
         aoFechar={visita || visitasCrm.length > 0 || modo === "visitas" ? () => { setAMarcar(false); setARemarcar(null); } : undefined}
       />

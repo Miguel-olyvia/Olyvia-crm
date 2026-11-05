@@ -12,6 +12,7 @@ import { LINHAS, nomeLinha, servicosPedidos, type LinhaId, type Negocio } from "
 import { mudarDadosLead } from "./DadosDaLead";
 import type { Ctx } from "./pecas";
 import { juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { pedirMarcacao } from "./marcacaoDaChamada";
 import { GRUPO_VISITA, falasDeFicheiro, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
 
 type EstadoLig = "parado" | "a_ligar" | "a_ouvir" | "a_terminar" | "terminado" | "erro";
@@ -35,7 +36,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
     { titulo: "Serviço", campos: [
       { k: "tipo_servico", l: "Tipo de serviço", t: "escolha" as const, op: Object.values(LINHAS).map((l) => l.n) },
       { k: "servicos_catalogo", l: "Serviços do Catálogo", t: "varios" as const, op: Object.values(svc).map((x) => x.n),
-        ajuda: "Os serviços que o cliente pediu, de entre os do Catálogo." },
+        ajuda: "Tudo o que o cliente disse que quer fazer, trocar ou instalar, de entre os do Catálogo (sanita, pavimento, espelho, banheira…). Se disse «tudo», os típicos da divisão." },
     ] },
     GRUPO_VISITA,
   ], [gruposDoNegocio, d.dadosLead, svc]);
@@ -130,7 +131,14 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
     try {
       const ext = await preencherCampos(segs, grupos);
       setExtracao(ext);
-      setResumoFim(`${segs.length} falas.`);
+      // 5/11 (Rúben: as falas do cliente vinham como «Comercial»): a etiqueta de cada linha passa a ser a revista pelo sentido
+      const revistas = ext.falantes && ext.falantes.length === segs.length
+        ? segs.filter((s, i) => s.falante !== ext.falantes![i]).length : 0;
+      if (ext.falantes && ext.falantes.length === segs.length) {
+        falasRef.current = segs.map((s, i) => ({ ...s, falante: ext.falantes![i], confianca_falante: 1 }));
+        setFalas(falasRef.current);
+      }
+      setResumoFim(`${segs.length} falas.${revistas ? ` Quem fala foi corrigido em ${revistas} ${revistas === 1 ? "linha" : "linhas"}, pelo sentido da conversa.` : ""}`);
       setEstado("terminado"); setMsg("Chamada terminada. Confirme o que entra nos campos.");
     } catch (e) {
       setEstado("erro"); setMsg("A transcrição ficou, mas os campos não: " + (e as Error).message);
@@ -190,6 +198,11 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
       }
     });
     setAplicadas(entram.map((p) => p.l));
+    // o dia combinado entrou: «Marcar a visita» marca-a sozinha (o comercial livre mais perto a essa hora) e o ecrã vai lá
+    if (entram.some((p) => p.k === "visita_dia")) {
+      pedirMarcacao(d.id);
+      setTimeout(() => document.getElementById(`chamada-1-vaga`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    }
   };
   const aOuvir = estado === "a_ouvir";
   const ocupado = estado === "a_ligar" || estado === "a_terminar";
