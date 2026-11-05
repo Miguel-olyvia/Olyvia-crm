@@ -241,8 +241,8 @@ describe("permissões em uso: a lista", () => {
     const pessoas = negocios.subgrupos.find((s) => s.rotulo === "Pessoas: leads e clientes")!;
     const porContactar = negocios.subgrupos.find((s) => s.rotulo === "Por contactar")!;
     expect(pessoas.permissoes.map((p) => p.codigo).sort()).toEqual([
-      "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
-      "leads.config", "leads.convert", "leads.delete", "leads.edit", "leads.import",
+      "clients.create", "clients.delete", "clients.edit", "clients.view",
+      "leads.config", "leads.convert", "leads.delete", "leads.edit",
     ]);
     expect(grupos.find((g) => g.rotulo === "CRM")).toBeUndefined();
     const foraDeNegocios = grupos
@@ -300,18 +300,18 @@ describe("03/11: a Aquisição saiu do menu", () => {
     ESCONDIDAS_AQUISICAO.forEach((c) => expect(noEditor, c).not.toContain(c));
   });
 
-  it("fica em uso o que algo vivo ainda verifica: direct_sales.view (Encomendas de Cliente)", () => {
-    expect(CODIGOS_EM_USO).toContain("direct_sales.view");
+  it("05/11: direct_sales.view também saiu do editor (sem ação na app viva)", () => {
+    expect(CODIGOS_EM_USO).not.toContain("direct_sales.view");
+    expect(CODIGOS_ESCONDIDOS).toContain("direct_sales.view");
   });
 
-  it("o grupo chama-se «Documentos do negócio», com Pedidos de Proposta, Propostas e orçamentos, Venda Direta (só ver), Contratos e Configuração", () => {
+  it("o grupo chama-se «Documentos do negócio», com Pedidos de Proposta, Propostas e orçamentos, Contratos e Configuração (Venda Direta ficou vazia, 05/11)", () => {
     const grupos = agruparPorMenu(emUso);
     const grupo = grupos.find((g) => g.rotulo === "Documentos do negócio")!;
     expect(grupos.find((g) => g.rotulo === "Aquisição")).toBeUndefined();
     expect(grupo.blocos).toEqual([]);
-    expect(grupo.subgrupos.map((s) => s.rotulo)).toEqual(["Pedidos de Proposta", "Propostas e orçamentos", "Venda Direta", "Contratos", "Configuração"]);
+    expect(grupo.subgrupos.map((s) => s.rotulo)).toEqual(["Pedidos de Proposta", "Propostas e orçamentos", "Contratos", "Configuração"]);
     const codigosDe = (r: string) => grupo.subgrupos.find((s) => s.rotulo === r)!.permissoes.map((p) => p.codigo).sort();
-    expect(codigosDe("Venda Direta")).toEqual(["direct_sales.view"]);
     expect(codigosDe("Configuração")).toEqual([
       "client_contracts.manage_templates", "proposals.manage",
       "quote_templates.create", "quote_templates.delete", "quote_templates.duplicate", "quote_templates.edit", "quote_templates.view",
@@ -510,11 +510,12 @@ describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contra
     expect(noEditor()).toContain("client_contracts.manage_templates");
   });
 
-  it("as ordens e custos de Operações ficam: o Frota (Ligações) lê ops_ordem e lança o custo da deslocação com elas", () => {
+  it("05/11: as ordens e custos de Operações saíram do editor (desfaz a decisão de 04/11); o grupo Operação fica com operations.view", () => {
     ["operations.orders.view", "operations.orders.view_all", "operations.costs.view"].forEach((c) => {
-      expect(CODIGOS_EM_USO, c).toContain(c);
-      expect(noEditor(), c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+      expect(noEditor(), c).not.toContain(c);
     });
+    expect(agruparPorMenu(emUso).find((g) => g.rotulo === "Operação")?.permissoes.map((p) => p.codigo)).toEqual(["operations.view"]);
   });
 
   it("a guarda da página de Denúncias não muda: rota e menu continuam a pedir hr.denuncias.gerir", () => {
@@ -560,10 +561,54 @@ describe("04/11: a linha Contactos sai do editor (os contactos vivem em Pessoas)
   });
 
   it("a linha Clientes fica: clients.view tem ação viva (âmbito do campo Cliente da «Nova encomenda manual» em /client-orders)", () => {
-    ["clients.view", "clients.create", "clients.edit", "clients.delete", "clients.import"].forEach((c) => expect(CODIGOS_EM_USO, c).toContain(c));
+    ["clients.view", "clients.create", "clients.edit", "clients.delete"].forEach((c) => expect(CODIGOS_EM_USO, c).toContain(c));
     const pesquisa = readFileSync(join(SRC, "components/EntitySearchInput.tsx"), "utf8");
     expect(pesquisa).toContain('getPermissionScope("clients.view")');
     const encomendas = readFileSync(join(SRC, "pages/ClientOrders.tsx"), "utf8");
     expect(encomendas).toMatch(/<EntitySearchInput[\s\S]{0,200}searchTypes=\{\["client"\]\}/);
+  });
+});
+
+describe("05/11: escondidas sem ação na app viva (venda direta, ordens/custos de Operações, listas, importar clientes/leads)", () => {
+  const ESCONDIDAS_05_11 = [
+    "direct_sales.view", "operations.orders.view", "operations.orders.view_all", "operations.costs.view", "lists.view", "clients.import",
+    "leads.import",
+  ];
+  const grupos = () => agruparPorMenu(emUso);
+  const noEditor = () => grupos().flatMap((g) => g.permissoes.map((p) => p.codigo));
+
+  it("estão escondidas e fora do editor", () => {
+    ESCONDIDAS_05_11.forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+      expect(noEditor(), c).not.toContain(c);
+    });
+  });
+
+  it("as linhas/subgrupos que ficaram vazios desaparecem: Venda Direta e Listas; Operação e Marketing ficam com o resto", () => {
+    expect(PERMISSOES_EM_USO.direct_sales).toBeUndefined();
+    const documentos = grupos().find((g) => g.rotulo === "Documentos do negócio")!;
+    expect(documentos.subgrupos.map((s) => s.rotulo)).not.toContain("Venda Direta");
+    const marketing = grupos().find((g) => g.rotulo === "Marketing")!;
+    expect(marketing.subgrupos.map((s) => s.rotulo)).not.toContain("Listas");
+    expect(marketing.permissoes.some((p) => p.codigo.startsWith("lists."))).toBe(false);
+    expect(grupos().find((g) => g.rotulo === "Operação")?.permissoes.map((p) => p.codigo)).toEqual(["operations.view"]);
+    // Nenhum subgrupo nem grupo do editor fica vazio.
+    grupos().forEach((g) => {
+      expect(g.permissoes.length, g.rotulo).toBeGreaterThan(0);
+      g.subgrupos.forEach((s) => expect(s.permissoes.length, `${g.rotulo} › ${s.rotulo}`).toBeGreaterThan(0));
+    });
+  });
+
+  it("uma role que as tem não as perde ao gravar", () => {
+    const linha = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
+    const visiveis = permissoesDoMenu([
+      linha("operations.view", "operations"), linha("direct_sales.view", "direct_sales"), linha("operations.orders.view", "operations"),
+      linha("operations.orders.view_all", "operations"), linha("operations.costs.view", "operations"), linha("lists.view", "marketing"),
+      linha("clients.import", "clients"), linha("leads.import", "leads"),
+    ]);
+    expect(visiveis.map((p) => p.codigo)).toEqual(["operations.view"]);
+    const gravado = fundirPermissoes(ESCONDIDAS_05_11, ["operations.view"], visiveis);
+    expect([...gravado].sort()).toEqual([...ESCONDIDAS_05_11, "operations.view"].sort());
   });
 });

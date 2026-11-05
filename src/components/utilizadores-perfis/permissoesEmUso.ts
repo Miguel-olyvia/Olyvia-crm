@@ -37,6 +37,11 @@
 // 04/11/2026 (aprovado): a linha Contactos (contacts.view/create/edit/import) saiu do editor — ver PERMISSOES_ESCONDIDAS.contacts.
 // A linha Clientes FICA: o campo Cliente da «Nova encomenda manual» em /client-orders (EntitySearchInput) filtra os clientes pelo
 // âmbito de clients.view (getPermissionScope), e as policies/RPCs dos clientes continuam a verificá-las.
+//
+// 05/11/2026 (aprovado), sem ação na app viva: direct_sales.view, operations.orders.view, operations.orders.view_all,
+// operations.costs.view, lists.view, clients.import e leads.import saem do editor. Só se esconde: os códigos ficam na base, os papéis
+// que as têm mantêm-nas ao gravar (fundirPermissoes) e nenhuma guarda/policy/RPC muda — ver os comentários em PERMISSOES_ESCONDIDAS.
+// Desfaz a decisão de 04/11 que mantinha as três de Operações por causa do Frota (Ligações).
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
@@ -55,8 +60,9 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // clients.delete (policies anew_clients e anew_entity_*), clients.import (policies de INSERT/UPDATE de anew_entity_roles,
   // 20270102130000). clients.edit também em ClientDetailsDialog, que só AnewClients importa. clients.view tem ação na app viva: o âmbito
   // dela filtra os clientes do campo Cliente (EntitySearchInput) na «Nova encomenda manual» de /client-orders (e em /deals).
+  // 05/11: clients.import passou para as escondidas (sem ação na app viva).
   clients: [
-    "clients.create", "clients.delete", "clients.edit", "clients.import", "clients.view",
+    "clients.create", "clients.delete", "clients.edit", "clients.view",
   ],
   dashboard: [
     "dashboard.view",
@@ -64,10 +70,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   deals: [
     "deals.create", "deals.delete", "deals.edit", "deals.view",
   ],
-  // Só a verificam as RPCs das Encomendas de Cliente (origem Venda Direta) e DirectSales.tsx (FORA_DO_MENU); as outras escondeu-se.
-  direct_sales: [
-    "direct_sales.view",
-  ],
+  // 05/11: direct_sales.view passou para as escondidas (sem ação na app viva); a categoria deixou de ter permissões no editor.
   email_templates: [
     "email_templates.create", "email_templates.delete", "email_templates.duplicate", "email_templates.edit",
     "email_templates.view",
@@ -116,21 +119,21 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   ],
   // Só verificadas no servidor (policies/RPCs/edge functions): leads.assign (neg_atribuir_pessoa), leads.config (policies das tabelas de
   // configuração de leads, incluindo lead_contact_results que a rota viva /lead-contact-results grava), leads.delete (policies anew_leads
-  // e anew_entity_*), leads.edit (policies, ai-assistant, execute-workflow), leads.import (policies de anew_entity_roles, 20270102130000).
+  // e anew_entity_*), leads.edit (policies, ai-assistant, execute-workflow). 05/11: leads.import passou para as escondidas.
   // platform.pending_submissions.view está na categoria leads da base mas aparece em Marketing › Formulários (gruposPermissoes.ts).
   leads: [
-    "leads.assign", "leads.config", "leads.convert", "leads.create", "leads.delete", "leads.edit", "leads.import", "leads.view",
+    "leads.assign", "leads.config", "leads.convert", "leads.create", "leads.delete", "leads.edit", "leads.view",
     "platform.pending_submissions.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): lists.create, lists.delete, lists.edit, lists.view
-  // 03/11: trash.view guarda /trash (rota, menu e atalho); lead_sources.view guarda /lead-sources.
+  // 03/11: trash.view guarda /trash (rota, menu e atalho); lead_sources.view guarda /lead-sources. 05/11: lists.view passou para as
+  // escondidas (a linha Listas desaparece do editor).
   marketing: [
     "campaigns.create", "campaigns.delete", "campaigns.edit", "campaigns.view", "lead_sources.create",
-    "lead_sources.delete", "lead_sources.edit", "lead_sources.view", "lists.view",
+    "lead_sources.delete", "lead_sources.edit", "lead_sources.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): operations.checklists.manage, operations.costs.view, operations.locations.manage, operations.locations.view, operations.orders.cancel, operations.orders.confirm, operations.orders.create, operations.orders.edit, operations.orders.execute, operations.orders.view, operations.orders.view_all, operations.plans.manage, operations.settings.manage
+  // 05/11: operations.orders.view/view_all e operations.costs.view passaram para as escondidas; fica operations.view.
   operations: [
-    "operations.costs.view", "operations.orders.view", "operations.orders.view_all", "operations.view",
+    "operations.view",
   ],
   organizations: [
     "organizations.create", "organizations.delete", "organizations.edit", "organizations.view",
@@ -245,8 +248,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "catalog_items.delete", "catalog_items.export", "catalog_items.import", "catalog_items.view",
   ],
   // Só AnewClients.tsx (rota /clients redireciona) as verificava; export-data só as pede para o módulo clients, que nada vivo exporta.
+  // clients.import: sem ação na app viva, 05/11 (só as policies de anew_entity_roles, 20270102130000; nenhum ecrã vivo importa clientes).
   clients: [
-    "clients.export", "clients.export_sensitive",
+    "clients.export", "clients.export_sensitive", "clients.import",
   ],
   call_center: [
     "call_center.handle_calls", "call_center.manage", "call_center.view",
@@ -275,9 +279,11 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "departments.create", "departments.delete", "departments.edit", "departments.view",
   ],
   // Só DirectSales.tsx / DirectSaleEditor.tsx (FORA_DO_MENU; /direct-sales redireciona para /negocios) e as RPCs que só elas chamam.
+  // direct_sales.view: sem ação na app viva, 05/11 (DirectSales.tsx é FORA_DO_MENU; as RPCs das Encomendas de Cliente continuam a
+  // verificá-la para mostrar o número da venda direta de origem — a verificação não muda, só sai do editor).
   direct_sales: [
     "direct_sales.confirm", "direct_sales.create", "direct_sales.delete", "direct_sales.edit", "direct_sales.register_invoice",
-    "direct_sales.view_costs",
+    "direct_sales.view", "direct_sales.view_costs",
   ],
   drivers: [
     "drivers.create", "drivers.delete", "drivers.edit", "drivers.export", "drivers.import", "drivers.view",
@@ -298,17 +304,22 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "inventory.adjust", "inventory.transfer",
   ],
   // leads.contact: só LeadTableRow.tsx; leads.export(_sensitive): só AnewLeads.tsx (rota /leads redireciona) e o módulo leads de export-data.
+  // leads.import: sem ação na app viva, 05/11 (só AnewLeads.tsx e as policies de anew_entity_roles, 20270102130000).
   leads: [
-    "leads.contact", "leads.export", "leads.export_sensitive", "leads.manage",
+    "leads.contact", "leads.export", "leads.export_sensitive", "leads.import", "leads.manage",
   ],
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   // channels.view: sem ação na app viva, 04/11 (o menu e a rota de Origens pedem lead_sources.view; nenhuma função/policy a verifica).
+  // lists.view: sem ação na app viva, 05/11 (só as policies das listas; não há ecrã de listas).
   marketing: [
     "channels.create", "channels.view", "channels.delete", "channels.edit", "lists.add_contacts", "lists.create", "lists.delete", "lists.edit",
+    "lists.view",
   ],
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
+  // operations.orders.view/view_all e operations.costs.view: sem ação na app viva, 05/11 (as policies/RPCs de ops_* e as do Frota
+  // continuam a verificá-las; só saem do editor).
   operations: [
-    "operations.checklists.manage", "operations.locations.manage", "operations.locations.view", "operations.orders.approve",
+    "operations.checklists.manage", "operations.costs.view", "operations.orders.view", "operations.orders.view_all", "operations.locations.manage", "operations.locations.view", "operations.orders.approve",
     "operations.orders.cancel", "operations.orders.confirm", "operations.orders.create", "operations.orders.edit",
     "operations.orders.execute", "operations.plans.manage", "operations.settings.manage",
   ],
