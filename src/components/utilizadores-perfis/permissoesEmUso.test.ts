@@ -211,7 +211,7 @@ describe("permissões em uso: a lista", () => {
   it("os grupos seguem a ordem do menu, com Negócios e Frota", () => {
     const rotulos = agruparPorMenu(emUso).map((g) => g.rotulo);
     expect(rotulos).toEqual([
-      "Dashboard", "Agendamentos", "Operação", "Catálogo e custos", "Organizações", "Negócios", "Documentos do negócio", "Marketing",
+      "Dashboard", "Agendamentos", "Catálogo e custos", "Organizações", "Negócios", "Documentos do negócio", "Marketing",
       "Inventário", "Frota", "Recursos Humanos", "Utilizadores", "Definições", "Plataforma",
     ]);
     const negocios = agruparPorMenu(emUso).find((g) => g.rotulo === "Negócios");
@@ -510,19 +510,25 @@ describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contra
     expect(noEditor()).toContain("client_contracts.manage_templates");
   });
 
-  it("05/11: as ordens e custos de Operações saíram do editor (desfaz a decisão de 04/11); o grupo Operação fica com operations.view", () => {
-    ["operations.orders.view", "operations.orders.view_all", "operations.costs.view"].forEach((c) => {
+  it("05/11: as ordens e custos de Operações saíram do editor (desfaz a decisão de 04/11); ronda 2: operations.view também, e o grupo Operação sai", () => {
+    ["operations.orders.view", "operations.orders.view_all", "operations.costs.view", "operations.view"].forEach((c) => {
       expect(CODIGOS_EM_USO, c).not.toContain(c);
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
       expect(noEditor(), c).not.toContain(c);
     });
-    expect(agruparPorMenu(emUso).find((g) => g.rotulo === "Operação")?.permissoes.map((p) => p.codigo)).toEqual(["operations.view"]);
+    expect(agruparPorMenu(emUso).find((g) => g.rotulo === "Operação")).toBeUndefined();
+  });
+
+  it("05/11 (ronda 2): a guarda do item «Operação» do menu não muda (operations.view E pessoas.view)", () => {
+    expect(readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8")).toContain('permissions: ["operations.view", "pessoas.view"]');
+    expect(ESCONDIDAS_COM_GUARDA["operations.view"]).toContain("components/sidebar/menuConfig.ts");
   });
 
   it("a guarda da página de Denúncias não muda: rota e menu continuam a pedir hr.denuncias.gerir", () => {
     const app = readFileSync(join(SRC, "App.tsx"), "utf8");
     expect(app).toMatch(/path="\/rh-exemplo\/denuncias"[^\n]*permission="hr\.denuncias\.gerir"/);
     expect(readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8")).toContain('denuncias: ["hr.denuncias.gerir"]');
-    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["hr.denuncias.gerir"]);
+    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["hr.denuncias.gerir", "operations.view"]);
   });
 
   it("uma role que as tem não as perde ao gravar", () => {
@@ -585,14 +591,14 @@ describe("05/11: escondidas sem ação na app viva (venda direta, ordens/custos 
     });
   });
 
-  it("as linhas/subgrupos que ficaram vazios desaparecem: Venda Direta e Listas; Operação e Marketing ficam com o resto", () => {
+  it("as linhas/subgrupos que ficaram vazios desaparecem: Venda Direta e Listas; Marketing fica com o resto; ronda 2: Operação sai", () => {
     expect(PERMISSOES_EM_USO.direct_sales).toBeUndefined();
     const documentos = grupos().find((g) => g.rotulo === "Documentos do negócio")!;
     expect(documentos.subgrupos.map((s) => s.rotulo)).not.toContain("Venda Direta");
     const marketing = grupos().find((g) => g.rotulo === "Marketing")!;
     expect(marketing.subgrupos.map((s) => s.rotulo)).not.toContain("Listas");
     expect(marketing.permissoes.some((p) => p.codigo.startsWith("lists."))).toBe(false);
-    expect(grupos().find((g) => g.rotulo === "Operação")?.permissoes.map((p) => p.codigo)).toEqual(["operations.view"]);
+    expect(grupos().find((g) => g.rotulo === "Operação")).toBeUndefined();
     // Nenhum subgrupo nem grupo do editor fica vazio.
     grupos().forEach((g) => {
       expect(g.permissoes.length, g.rotulo).toBeGreaterThan(0);
@@ -607,8 +613,9 @@ describe("05/11: escondidas sem ação na app viva (venda direta, ordens/custos 
       linha("operations.orders.view_all", "operations"), linha("operations.costs.view", "operations"), linha("lists.view", "marketing"),
       linha("clients.import", "clients"), linha("leads.import", "leads"),
     ]);
-    expect(visiveis.map((p) => p.codigo)).toEqual(["operations.view"]);
-    const gravado = fundirPermissoes(ESCONDIDAS_05_11, ["operations.view"], visiveis);
+    // ronda 2: operations.view também está escondida — o editor não mostra nenhuma, e quem as tem fica com todas ao gravar.
+    expect(visiveis.map((p) => p.codigo)).toEqual([]);
+    const gravado = fundirPermissoes([...ESCONDIDAS_05_11, "operations.view"], [], visiveis);
     expect([...gravado].sort()).toEqual([...ESCONDIDAS_05_11, "operations.view"].sort());
   });
 });
