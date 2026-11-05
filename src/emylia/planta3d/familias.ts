@@ -161,9 +161,9 @@ const OUTRAS: Familia[] = [
 /** As famílias com modelo detalhado do HTML e as opções de cada uma. */
 const DETALHADAS: Record<string, OpcaoFamilia[]> = { round: ["bica", "extraida"], noah: ["bica"], smooth: ["bica", "extraida"], stick: ["bica", "extraida"] };
 for (const f of TORNEIRAS) if (DETALHADAS[f.id]) { f.htmlModelo = f.id; f.opcoes = DETALHADAS[f.id]; }
-/** Lava-loiças com modelo detalhado do HTML: Velar, Lody e Ambar (a medida é o id do modelo). A Ambar tem tampas dos ralos que se retiram. */
+/** Lava-loiças com modelo detalhado do HTML: as 6 famílias (a medida é o id do modelo). A Ambar tem tampas dos ralos que se retiram e a Keran escorredor reversível. */
 for (const f of PLACAS) f.htmlModelo = f.id;
-for (const f of LAVALOICAS) if (["velar", "lody", "ambar"].includes(f.id)) { f.htmlModelo = f.id; if (f.id === "ambar") f.opcoes = ["tampas"]; }
+for (const f of LAVALOICAS) { f.htmlModelo = f.id; if (f.id === "ambar") f.opcoes = ["tampas"]; if (f.id === "keran") f.opcoes = ["reverso"]; }
 
 export const FAMILIAS: Familia[] = [...TORNEIRAS, ...LAVALOICAS, ...PLACAS, ...OUTRAS];
 export const familiaPorId = (id: string): Familia | undefined => FAMILIAS.find((f) => f.id === id);

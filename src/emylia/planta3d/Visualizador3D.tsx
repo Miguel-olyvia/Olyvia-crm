@@ -9,7 +9,7 @@ import * as THREE from "three";
 import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
 import { libertarMateriais } from "./modelosHtml/util";
-import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml/lavaLoicas";
+import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml";
 import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
@@ -130,7 +130,7 @@ function ModeloHtml({ modelo, acab, opc, z0 }: { modelo: string; acab: string; o
 
 /** O lava-loiça detalhado do HTML (Velar, Lody, Ambar): o topo do rebordo à altura `h` do mockup, as cubas para baixo. */
 function ModeloLavaLoicaHtml({ modelo, acab, opc, h }: { modelo: string; acab: string; opc?: OpcoesPeca; h: number }) {
-  const t = useMemo(() => (ehModeloLavaLoica(modelo) ? construirLavaLoica(modelo, acab, { tampas: opc?.tampas }) : null), [modelo, acab, opc?.tampas]);
+  const t = useMemo(() => (ehModeloLavaLoica(modelo) ? construirLavaLoica(modelo, acab, { tampas: opc?.tampas, reverso: opc?.reverso }) : null), [modelo, acab, opc?.tampas, opc?.reverso]);
   useEffect(() => () => { t?.materiais.forEach((m) => m.dispose()); }, [t]);
   return t ? <group position={[0, h, 0]} scale={0.001}><primitive object={t.grupo} /></group> : null;
 }

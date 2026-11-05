@@ -6,7 +6,7 @@ import { cyl, lathe, mesh, rounded } from "./util";
 
 type Par = number[];
 export type ModeloLavaLoica = string;
-export interface OpcoesLavaLoica { /** retirar as tampas dos ralos (Ambar) */ tampas?: boolean }
+export interface OpcoesLavaLoica { /** retirar as tampas dos ralos (Ambar) */ tampas?: boolean; /** escorredor à esquerda (Keran) */ reverso?: boolean }
 export interface LavaLoicaHtml { grupo: THREE.Group; tampas: THREE.Object3D[]; materiais: THREE.Material[] }
 
 /* ------------------------------------------------------------------ dados dos modelos (as `*Specs` do HTML) */
@@ -40,8 +40,8 @@ export const AMBAR_SPECS: SpecAmbar[] = [
 ];
 
 /* ------------------------------------------------------------------ materiais e auxiliares (sinkSteel, sinkPolish, sinkDark, roundLoop, sinkSurface...) */
-interface Mat { aco: THREE.MeshPhysicalMaterial; polido: THREE.MeshPhysicalMaterial; escuro: THREE.MeshStandardMaterial }
-const materiais = (): Mat => ({
+export interface Mat { aco: THREE.MeshPhysicalMaterial; polido: THREE.MeshPhysicalMaterial; escuro: THREE.MeshStandardMaterial }
+export const materiais = (): Mat => ({
   aco: new THREE.MeshPhysicalMaterial({ color: "#c3c7ca", metalness: 1, roughness: 0.3, clearcoat: 0.07, envMapIntensity: 1.05, side: THREE.DoubleSide }),
   polido: new THREE.MeshPhysicalMaterial({ color: "#cdd1d3", metalness: 1, roughness: 0.2, envMapIntensity: 1.1, side: THREE.DoubleSide }),
   escuro: new THREE.MeshStandardMaterial({ color: "#1c2428", roughness: 0.58, metalness: 0.45 }),
@@ -63,7 +63,7 @@ export function sinkSurface(rings: Par[][], material: THREE.Material, parent: TH
   return mesh(g, material, parent, name);
 }
 /** Subdivide o contorno do fundo por ângulo à volta do ralo, sem mexer no contorno exterior (evita cordas a cruzar a abertura). */
-function refineDrainLoop(edge: Par[], drainZ: number): Par[] {
+export function refineDrainLoop(edge: Par[], drainZ: number): Par[] {
   const result: Par[] = [], tau = Math.PI * 2, maxAngle = Math.PI / 96;
   for (let i = 0; i < edge.length; i++) {
     const a = edge[i], b = edge[(i + 1) % edge.length], az = a[2] - drainZ, bz = b[2] - drainZ, start = Math.atan2(az, a[0]), end = Math.atan2(bz, b[0]);
@@ -77,14 +77,14 @@ function refineDrainLoop(edge: Par[], drainZ: number): Par[] {
   }
   return result;
 }
-const caminhoForma = (loop: Par[]): THREE.Shape => { const p = new THREE.Shape(); loop.forEach(([x, z], i) => { if (i === 0) p.moveTo(x, -z); else p.lineTo(x, -z); }); p.closePath(); return p; };
-const caminhoFuro = (loop: Par[]): THREE.Path => { const p = new THREE.Path(); loop.forEach(([x, z], i) => { if (i === 0) p.moveTo(x, -z); else p.lineTo(x, -z); }); p.closePath(); return p; };
-function placa(outline: Par[], holes: Par[][], y: number, mat: THREE.Material, parent: THREE.Object3D, name: string): THREE.Mesh {
+export const caminhoForma = (loop: Par[]): THREE.Shape => { const p = new THREE.Shape(); loop.forEach(([x, z], i) => { if (i === 0) p.moveTo(x, -z); else p.lineTo(x, -z); }); p.closePath(); return p; };
+export const caminhoFuro = (loop: Par[]): THREE.Path => { const p = new THREE.Path(); loop.forEach(([x, z], i) => { if (i === 0) p.moveTo(x, -z); else p.lineTo(x, -z); }); p.closePath(); return p; };
+export function placa(outline: Par[], holes: Par[][], y: number, mat: THREE.Material, parent: THREE.Object3D, name: string): THREE.Mesh {
   const s = caminhoForma(outline); s.holes = holes.map(caminhoFuro);
   const o = mesh(new THREE.ShapeGeometry(s, 24), mat, parent, name); o.rotation.x = -Math.PI / 2; o.position.y = y; return o;
 }
 /** A válvula de cesta (`keranDrain` do HTML): aro, cesto perfurado, interior escuro e pega. */
-function valvulaDeCesta(parent: THREE.Object3D, depth: number, polido: THREE.Material, escuro: THREE.Material): THREE.Group {
+export function valvulaDeCesta(parent: THREE.Object3D, depth: number, polido: THREE.Material, escuro: THREE.Material): THREE.Group {
   const drain = new THREE.Group(); drain.name = "Válvula de cesta"; drain.position.y = -depth + 200; parent.add(drain);
   lathe([[45, -200], [55, -198], [57.5, -197.4], [57.5, -196.8], [54.5, -196.5], [46, -198], [40, -203], [36.8, -207], [36.8, -213]], polido, drain, "Aro da válvula");
   const disk = new THREE.Shape(); disk.absarc(0, 0, 36.5, 0, Math.PI * 2, false);
