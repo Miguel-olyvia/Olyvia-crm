@@ -1,7 +1,7 @@
 // 5/11 (Rúben, a visita real: «reconstruir tudo o que está em papel, a planta da área»). A planta da divisão na Visita: o desenho é o
 // EditorPlanta (retas com a medida por cima, peças arrastadas da barra); aqui ficam os m² do chão e das paredes, que vão para as medidas
 // com um toque. A planta grava-se no negócio (f.planta, JSON). A geometria está em planta.ts.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCatalogo } from "./v2/catalogoStore";
@@ -45,6 +45,14 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     return () => { window.removeEventListener("storage", aoMudar); window.removeEventListener("focus", trazer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por negócio
   }, [d.id]);
+  // as linhas do Estúdio têm de se ver: se a planta está numa caixa fechada («Desenhar a planta»), abre-se e mostra-se o painel
+  const raiz = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pendentes.length) return;
+    const caixa = raiz.current?.closest("details");
+    if (caixa && !caixa.open) caixa.open = true;
+    raiz.current?.querySelector("[data-do-estudio]")?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }, [pendentes.length]);
   const chao = areaChaoM2(atual.paredes);
   const peCampo = peDireitoDoCampo(d.f.diag_pe_direito_m);
   const pe = peCampo ?? PE_DIREITO_SEM_RESPOSTA;
@@ -60,7 +68,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   };
 
   return (
-    <div className="space-y-4">
+    <div ref={raiz} className="space-y-4">
       {/* 5/11: o Estúdio (o depois, as peças no catálogo, o 3D e a proposta); a planta desta visita é o antes */}
       <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[15px]"><b className="font-semibold">Estúdio</b> · desenhar como vai ficar, escolher as peças no catálogo e ver em 3D.</p>
@@ -115,7 +123,7 @@ function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; linhas: Li
     feito(`Nas necessidades: ${s} ${s === 1 ? "serviço" : "serviços"} e ${pr} ${pr === 1 ? "produto" : "produtos"} do Estúdio. Veja-os no passo «Necessidades do cliente».`);
   };
   return (
-    <section aria-labelledby={`do-estudio-${d.id}`} className="space-y-3 rounded-2xl border-2 border-primary/40 bg-card p-4 shadow-[var(--shadow-sm)]">
+    <section data-do-estudio aria-labelledby={`do-estudio-${d.id}`} className="space-y-3 rounded-2xl border-2 border-primary/40 bg-card p-4 shadow-[var(--shadow-sm)]">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 id={`do-estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">Do Estúdio para as necessidades</h3>
@@ -136,6 +144,7 @@ function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; linhas: Li
                 <span className="min-w-0 flex-1 text-[15px]">
                   <b className="font-medium">{g.alvo!.n}</b> · {g.q.toLocaleString("pt-PT")} {g.linhas[0].un}
                   <span className="block text-xs text-muted-foreground">{g.alvo!.tipo === "produto" ? "Produto" : "Serviço"} do Catálogo, de: {g.linhas.map((l) => l.n).join("; ")}</span>
+                  {g.unDiferente && <span className="block text-xs text-warning-foreground">No Catálogo é por {g.unDiferente}: confirme a quantidade nas Necessidades.</span>}
                 </span>
               </button>
             </li>

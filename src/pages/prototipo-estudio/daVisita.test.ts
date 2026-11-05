@@ -59,7 +59,7 @@ describe("levar as necessidades do Estúdio para o negócio (5/11)", () => {
     const ls = linhasParaLevar(p);
     expect(ls.find((l) => l.id === "prod-a-sanita")).toMatchObject({ tipo: "produto", chave: "sanita", cores: ["cinza"], par: "a-sanita" });
     expect(ls.find((l) => l.id === "inst-a-sanita")).toMatchObject({ tipo: "servico", chave: "instalar:sanita", par: "a-sanita" });
-    expect(ls.find((l) => l.id === "ret-a-sanita")?.chave).toBe("retirar");
+    expect(ls.find((l) => l.id === "ret-a-sanita")?.chave).toBe("retirar:sanita");
     expect(ls.find((l) => l.id === "serv-sv-pintura-teto")?.chave).toBe("pintura");
     expect(ls.find((l) => l.id === "teto")?.chave).toBe("teto");
   });

@@ -37,6 +37,9 @@ export function linhasParaLevar(p: Projeto): LinhaLevada[] {
     } else if ((m = l.id.match(/^inst-(.+)$/))) {
       const tipo = tipoDaPeca(m[1]);
       if (tipo) out.push({ ...base, tipo: "servico", chave: `instalar:${tipo}`, par: m[1] });
+    } else if ((m = l.id.match(/^ret-(.+)$/))) {
+      const tipo = tipoDaPeca(m[1]) ?? p.antes.pecas.find((x) => x.id === m![1])?.tipo;
+      out.push({ ...base, tipo: "servico", chave: tipo ? `retirar:${tipo}` : "retirar", par: m[1] });
     } else if ((m = l.id.match(/^serv-(.+)$/))) {
       out.push({ ...base, tipo: "servico", chave: SERVICO[m[1]] ?? m[1] });
     } else {

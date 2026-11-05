@@ -147,3 +147,15 @@ describe("do Estúdio para as necessidades (5/11)", () => {
     expect(localStorage.getItem("olyvia.estudio.pendentes.3")).toBeNull();
   });
 });
+
+describe("o painel do Estúdio vê-se (5/11)", () => {
+  it("com linhas por juntar, a caixa fechada da planta abre-se", () => {
+    localStorage.clear();
+    localStorage.setItem("olyvia.estudio.pendentes.4", JSON.stringify([{ id: "teto", n: "Teto falso", q: 3, un: "m²", tipo: "servico", chave: "teto" }]));
+    const d = { id: 4, f: {}, visita: { med: {}, extra: {} } } as unknown as Negocio;
+    const ctx = { A: { campo: vi.fn(), extra: vi.fn(), produto: vi.fn() }, run: (fn: () => void) => fn(), S: { svc: { teto: { n: "Teto falso em pladur" } } } } as unknown as Ctx;
+    const { container } = render(<details><summary>Desenhar a planta</summary><PlantaDivisao ctx={ctx} d={d} /></details>);
+    expect(container.querySelector("details")!.open).toBe(true);
+    localStorage.clear();
+  });
+});

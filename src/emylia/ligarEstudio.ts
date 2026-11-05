@@ -5,7 +5,7 @@
 
 /** Uma linha do Estúdio, como chega ao negócio. `par`: a peça da planta (junta o produto com a sua instalação). */
 export interface LinhaLevada { id: string; n: string; q: number; un: string; tipo: "produto" | "servico"; chave: string; cores?: string[]; par?: string }
-export interface ServicoReal { n: string }
+export interface ServicoReal { n: string; un?: string }
 export interface ProdutoReal { id: string; n: string; servico?: string }
 export type Alvo = { tipo: "servico"; id: string; n: string } | { tipo: "produto"; id: string; n: string };
 export interface Ligacao {
@@ -15,6 +15,8 @@ export interface Ligacao {
   q: number;
   /** A instalação vem com o produto real (o produto traz o serviço): não se junta à parte. */
   vemComProduto?: boolean;
+  /** A unidade do serviço do Catálogo não é a da linha do Estúdio (ex.: un e m²): o comercial confirma a quantidade. */
+  unDiferente?: string;
 }
 
 const limpo = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -24,7 +26,18 @@ const PRODUTO: Record<string, RegExp> = {
   sanita: /sanita/, bide: /bide/, base: /base de duche|base duche|base/, banheira: /banheira/, movel: /movel|mobiliario/,
   coluna: /coluna (suspensa|de arrumacao)|movel coluna/, espelho: /espelho/, toalheiro: /toalheiro/,
   coluna_duche: /coluna de duche|coluna termostatica|coluna termo|chuveiro/, resguardo: /resguardo|divisoria|vidro/,
-  torneira: /torneira|misturadora/, revestimento: /revestimento|azulejo|parede|ceramic/, pavimento: /pavimento|chao/,
+  torneira: /torneira|misturadora/, revestimento: /revestimento|azulejo|parede|ceramic/, pavimento: /pavimento|piso|ladrilho|ceramic/,
+};
+/** A palavra com que o nome de um bom par começa (ganha aos que só a têm no meio: «Móvel…» antes de «Toalheiro de móvel»). */
+const COMECA: Record<string, RegExp> = {
+  sanita: /^sanita/, bide: /^bide/, base: /^base/, banheira: /^banheira/, movel: /^(movel|mobiliario)/, coluna: /^(coluna|movel coluna)/, espelho: /^espelho/,
+  toalheiro: /^toalheiro/, coluna_duche: /^coluna/, resguardo: /^(resguardo|divisoria)/, torneira: /^(torneira|misturadora)/, revestimento: /^(revestimento|azulejo)/,
+  pavimento: /^(pavimento|piso|ladrilho)/,
+};
+/** Nomes que são de outra coisa, mesmo tendo a palavra (o toalheiro «de móvel», a sanita «de chão»). */
+const EXCLUI: Record<string, RegExp> = {
+  movel: /toalheiro|espelho|torneira|puxador/, coluna: /toalheiro|duche|chuveiro/, base: /sanita|espelho|movel|torneira|lavatorio/,
+  pavimento: /sanita|banheira|base|revestimento de parede/, revestimento: /sanita|banheira|base/, espelho: /movel coluna/, sanita: /tampo|tampa |acessorio/,
 };
 /** O que procurar no nome de um serviço do Catálogo, pela chave do Estúdio. */
 const SERVICO: Record<string, RegExp> = {
@@ -42,19 +55,40 @@ const COR: Record<string, RegExp> = { cinza: /cinz|antracite|grafite|cromad/, pr
 export function produtoPara(chave: string, cores: readonly string[] | undefined, produtos: readonly ProdutoReal[]): ProdutoReal | null {
   const rx = PRODUTO[chave];
   if (!rx) return null;
-  const candidatos = produtos.filter((p) => rx.test(limpo(p.n)));
-  if (!candidatos.length) return null;
+  const fora = EXCLUI[chave], comeca = COMECA[chave];
   const comCor = (cores ?? []).map((c) => COR[c]).filter(Boolean);
-  return candidatos.find((p) => comCor.some((r) => r.test(limpo(p.n)))) ?? candidatos[0];
+  const nota = (p: ProdutoReal) => { const n = limpo(p.n).trim(); return (comeca?.test(n) ? 4 : 0) + (comCor.some((r) => r.test(n)) ? 2 : 0); };
+  const candidatos = produtos.filter((p) => { const n = limpo(p.n); return rx.test(n) && !fora?.test(n); });
+  if (!candidatos.length) return null;
+  // o melhor: começa pela palavra e tem a cor; entre iguais, a ordem do Catálogo
+  return candidatos.reduce((m, p) => (nota(p) > nota(m) ? p : m), candidatos[0]);
 }
 
 /** O serviço real com o nome da chave (o primeiro que serve, pela ordem do Catálogo). */
-export function servicoPara(chave: string, servicos: Readonly<Record<string, ServicoReal>>): { id: string; n: string } | null {
+export function servicoPara(chave: string, servicos: Readonly<Record<string, ServicoReal>>): { id: string; n: string; un?: string } | null {
+  // retirar uma peça: primeiro um serviço dessa peça («Remoção de banheira»), depois o geral (demolição)
+  const m = chave.match(/^retirar:(.+)$/);
+  if (m) {
+    const peca = ({ banheira: "banheira", base: "base", sanita: "sanita|louca", bide: "bide|louca", movel: "movel|mobiliario", espelho: "espelho", toalheiro: "toalheiro", coluna: "coluna|movel" } as Record<string, string>)[m[1]] ?? m[1];
+    const rx = new RegExp(`(remoc|retir|desmont|levant).*(${peca})|(${peca}).*(remoc|retir|desmont)`);
+    const achado = Object.entries(servicos).find(([, s]) => rx.test(limpo(s.n)));
+    if (achado) return { id: achado[0], n: achado[1].n, un: achado[1].un };
+    return servicoPara("retirar", servicos);
+  }
   const rx = SERVICO[chave];
   if (!rx) return null;
   const achado = Object.entries(servicos).find(([, s]) => rx.test(limpo(s.n)));
-  return achado ? { id: achado[0], n: achado[1].n } : null;
+  return achado ? { id: achado[0], n: achado[1].n, un: achado[1].un } : null;
 }
+
+/** A mesma unidade, com as maneiras de a escrever (m2 e m², un e pç e pt…). */
+const unidade = (u: string | undefined) => {
+  const t = limpo(u ?? "").replace(/\s|\./g, "");
+  if (/^m2|^m²/.test(t)) return "m2";
+  if (/^(ml|m)$/.test(t)) return "m";
+  if (/^(un|unid|unidade|pc|pç|pt|ponto|peca|mod|modulo|vg)$/.test(t)) return "un";
+  return t;
+};
 
 /**
  * As linhas do Estúdio com o par no Catálogo, juntas por alvo (duas instalações de louças somam-se). A instalação de uma peça cujo produto
@@ -67,7 +101,7 @@ export function ligarAoCatalogo(linhas: readonly LinhaLevada[], servicos: Readon
   // primeiro os produtos (para saber que instalações já vêm com eles)
   const ordem = [...linhas].sort((a, b) => (a.tipo === b.tipo ? 0 : a.tipo === "produto" ? -1 : 1));
   for (const l of ordem) {
-    let alvo: Alvo | null = null, vemComProduto = false;
+    let alvo: Alvo | null = null, vemComProduto = false, unDiferente: string | undefined;
     if (l.tipo === "produto") {
       const p = produtoPara(l.chave, l.cores, produtos);
       if (p) { alvo = { tipo: "produto", id: p.id, n: p.n }; if (l.par && !["coluna_duche", "resguardo", "torneira"].includes(l.chave)) produtoDaPeca.set(l.par, p); }
@@ -75,13 +109,14 @@ export function ligarAoCatalogo(linhas: readonly LinhaLevada[], servicos: Readon
       const doProduto = l.par && l.chave.startsWith("instalar:") ? produtoDaPeca.get(l.par) : undefined;
       if (doProduto?.servico) vemComProduto = true;
       const s = servicoPara(l.chave, servicos);
-      if (s) alvo = { tipo: "servico", id: s.id, n: s.n };
+      if (s) { alvo = { tipo: "servico", id: s.id, n: s.n }; if (s.un && unidade(s.un) !== unidade(l.un)) unDiferente = s.un; }
     }
     if (!alvo) { out.push({ linhas: [l], alvo: null, q: l.q }); continue; }
-    const chave = `${alvo.tipo}:${alvo.id}:${vemComProduto ? "p" : ""}`;
+    // só se somam linhas com a mesma unidade (retirar uma banheira, em un, não se soma à demolição em m²)
+    const chave = `${alvo.tipo}:${alvo.id}:${vemComProduto ? "p" : ""}:${unidade(l.un)}`;
     const ja = porAlvo.get(chave);
     if (ja) { ja.linhas.push(l); ja.q = Math.round((ja.q + l.q) * 100) / 100; continue; }
-    const nova: Ligacao = { linhas: [l], alvo, q: l.q, ...(vemComProduto ? { vemComProduto } : {}) };
+    const nova: Ligacao = { linhas: [l], alvo, q: l.q, ...(vemComProduto ? { vemComProduto } : {}), ...(unDiferente ? { unDiferente } : {}) };
     porAlvo.set(chave, nova); out.push(nova);
   }
   return out;

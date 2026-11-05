@@ -46,3 +46,23 @@ describe("ligar o Estúdio ao Catálogo", () => {
     expect(r.find((x) => x.linhas[0].id === "serv-nicho")?.alvo).toBeNull();
   });
 });
+
+describe("os casos do Catálogo real do testarh (5/11)", () => {
+  const REAIS = [
+    { id: "t1", n: "Toalheiro DE MOVEL MOSS 26cm" }, { id: "m1", n: "Móvel suspenso Rio 80 carvalho" },
+    { id: "s1", n: "Sanita de Chão SMART TOILET WISH" }, { id: "v1", n: "Pavimento cerâmico cinza 60x60" },
+  ];
+  it("o móvel não é o toalheiro «de móvel»; o pavimento não é a sanita «de chão»", () => {
+    expect(produtoPara("movel", ["madeira"], REAIS)?.id).toBe("m1");
+    expect(produtoPara("pavimento", ["cinza"], REAIS)?.id).toBe("v1");
+  });
+  it("retirar uma banheira procura a remoção dela; sem ela, a demolição, sem somar un com m²", () => {
+    const S = { demol: { n: "Demolição e entulho", un: "m²" }, rb: { n: "Remoção de banheira", un: "un" } };
+    expect(servicoPara("retirar:banheira", S)?.id).toBe("rb");
+    expect(servicoPara("retirar:bide", S)?.id).toBe("demol");
+    const r = ligarAoCatalogo([L("ret-b", "servico", "retirar:bide", 1), L("dem", "servico", "demolicao", 24.66, { un: "m²" })], { demol: S.demol }, []);
+    expect(r).toHaveLength(2);
+    expect(r.find((x) => x.linhas[0].id === "ret-b")?.unDiferente).toBe("m²");
+    expect(r.find((x) => x.linhas[0].id === "dem")?.unDiferente).toBeUndefined();
+  });
+});
