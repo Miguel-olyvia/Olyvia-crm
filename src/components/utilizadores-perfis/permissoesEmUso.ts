@@ -188,8 +188,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // sem fn_cat_pode(org, 'quotes.view_costs'), e o ecrã pergunta o mesmo (podeVerCustos em emylia/permissoes.ts: na ficha pela leitura de
   // permissoesPosContrato.ts, em /negocios por usePodeVerCustos) para esconder a margem e o custo (OrcamentoSimples, LinhasOrcamento,
   // PlanoObraOrcamento, DemolicaoOrcamento e os valores no texto dos bloqueios do motor).
+  // 05/11: quotes.delete volta ao editor: soft_delete_business_entity('deal'), restore_business_entity e o botão Restaurar do Lixo
+  // (lib/lixo/permissoesRestauro.ts) exigem-na para mandar/tirar orçamentos do Lixo.
   quotes: [
-    "quotes.create", "quotes.edit", "quotes.manage", "quotes.view", "quotes.view_costs",
+    "quotes.create", "quotes.delete", "quotes.edit", "quotes.manage", "quotes.view", "quotes.view_costs",
   ],
   receiving: [
     "receiving.download_proof", "receiving.learn_codes", "receiving.manage_delivery_notes", "receiving.receive",
@@ -368,9 +370,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   proposals: [
     "proposals.export",
   ],
-  // quotes.delete/export/export_sensitive: só Quotes.tsx (FORA_DO_MENU) e o pedido dela a export-data.
+  // quotes.export/export_sensitive: só Quotes.tsx (FORA_DO_MENU) e o pedido dela a export-data.
   quotes: [
-    "quotes.delete", "quotes.export", "quotes.export_sensitive", "quotes.generate_pdf",
+    "quotes.export", "quotes.export_sensitive", "quotes.generate_pdf",
   ],
   roles: [
     "roles.clone",

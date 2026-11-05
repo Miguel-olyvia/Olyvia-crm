@@ -286,7 +286,7 @@ describe("permissões em uso: a lista", () => {
 
 describe("03/11: a Aquisição saiu do menu", () => {
   const ESCONDIDAS_AQUISICAO = [
-    "proposals.export", "quotes.delete", "quotes.export", "quotes.export_sensitive", "client_contracts.export",
+    "proposals.export", "quotes.export", "quotes.export_sensitive", "client_contracts.export",
     "direct_sales.create", "direct_sales.edit", "direct_sales.confirm", "direct_sales.register_invoice", "direct_sales.view_costs",
     "contacts.delete",
   ];
