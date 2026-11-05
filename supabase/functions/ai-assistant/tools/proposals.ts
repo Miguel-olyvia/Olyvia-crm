@@ -358,12 +358,14 @@ const cancelProposal: Handler = async (ctx, args): Promise<ToolResult> => {
   if (args?.confirm !== true) {
     return { success: false, message: "Confirmação obrigatória — pede ao utilizador para confirmar e volta a chamar com confirm=true." };
   }
-  const perm = requireWrite(ctx, "proposals.edit", "cancelar propostas");
+  // Cancelar = soft_delete_business_entity('proposal'), que exige proposals.delete e, se a proposta já saiu de
+  // rascunho, também proposals.delete_sent. Pré-verifica o mesmo para responder "sem permissão" em vez de uma falha.
+  const perm = requireWrite(ctx, "proposals.delete", "cancelar propostas");
   if (perm) return perm;
 
   const { data: p, error } = await supabase
     .from("proposals")
-    .select("id, proposal_number, accepted_at")
+    .select("id, proposal_number, accepted_at, status")
     .eq("id", args.proposal_id)
     .eq("organization_id", organizationId)
     .is("deleted_at", null)
@@ -372,6 +374,10 @@ const cancelProposal: Handler = async (ctx, args): Promise<ToolResult> => {
   if (!p) return { success: false, message: "Proposta não encontrada ou fora de scope." };
   if (p.accepted_at) {
     return { success: false, message: `Proposta ${p.proposal_number ?? p.id} já foi aceite — não pode ser cancelada.` };
+  }
+  if (p.status !== "draft") {
+    const permEnviada = requireWrite(ctx, "proposals.delete_sent", "cancelar propostas já enviadas");
+    if (permEnviada) return permEnviada;
   }
 
   await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });

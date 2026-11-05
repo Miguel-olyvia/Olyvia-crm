@@ -106,9 +106,9 @@ describe("guardas das rotas e do menu", () => {
     expect(itemMenu("/proposal-templates")?.permission).toBe("proposals.manage");
   });
 
-  it("os atalhos das definições pedem settings.update e o dos modelos de contrato client_contracts.view", () => {
+  it("os atalhos das definições pedem settings.update e o dos modelos de contrato client_contracts.view ou manage_templates", () => {
     ["settings", "alert-settings", "countries"].forEach((id) => expect(atalho(id)?.permission, id).toBe("settings.update"));
-    expect(atalho("contract-templates")?.permission).toBe("client_contracts.view");
+    expect(atalho("contract-templates")?.permissions).toEqual(["client_contracts.view", "client_contracts.manage_templates"]);
     expect(linhaDe("/countries")).toContain('<ProtectedRoute permission="settings.update">');
   });
 });

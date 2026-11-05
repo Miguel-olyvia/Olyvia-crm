@@ -75,3 +75,17 @@ export function juntarVarios(c: Def | undefined, antigo: string, novo: string): 
   for (const o of listaVarios(novo)) if (!lista.includes(o)) lista.push(o);
   return lista.join(", ");
 }
+
+/** 5/11 (a folha da visita): junta duas extrações (a da conversa e a da foto da folha). Por campo fica a leitura com valor e mais confiança;
+ *  os resumos juntam-se. Sem a primeira, fica a segunda. */
+export function juntarExtracoes(a: Extracao | null, b: Extracao): Extracao {
+  if (!a) return b;
+  const porChave = new Map<string, CampoExtraido>();
+  const nota = (x: CampoExtraido) => (x.estado === "em_falta" || x.valor === null ? -1 : x.confianca);
+  for (const x of [...a.fichas.flatMap((f) => f.campos), ...b.fichas.flatMap((f) => f.campos)]) {
+    const ja = porChave.get(x.chave);
+    if (!ja || nota(x) > nota(ja)) porChave.set(x.chave, x);
+  }
+  return { resumo: [a.resumo, b.resumo].filter(Boolean).join(" "), motor: b.motor, fichas: [{ campos: [...porChave.values()] }],
+    ...(a.falantes ? { falantes: a.falantes } : {}) };
+}

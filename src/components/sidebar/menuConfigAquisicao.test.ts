@@ -18,6 +18,11 @@ const todosOsDestinos = [
 const linhaDaRota = (p: string) => appSource.split(/\r?\n/).find((l) => l.includes(`path="${p}"`)) ?? "";
 /** A permissão do ProtectedRoute da rota em App.tsx, ou null se a rota não tiver guarda. */
 const permissaoDaRota = (p: string): string | null => linhaDaRota(p).match(/<ProtectedRoute permission="([^"]+)">/)?.[1] ?? null;
+/** As permissões (OU) do ProtectedRoute da rota em App.tsx (`permissions={[...]}`), ou null. */
+const permissoesDaRota = (p: string): string[] | null => {
+  const m = linhaDaRota(p).match(/<ProtectedRoute permissions=\{\[([^\]]+)\]\}>/);
+  return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : null;
+};
 
 describe("menu sem o grupo Aquisição", () => {
   it("o grupo acquisition já não existe e nenhum item aponta para as páginas dele", () => {
@@ -46,9 +51,10 @@ describe("Definições: templates e modelos dos documentos do negócio", () => {
       expect(linhaDaRota(to), to).not.toBe("");
       const item = definicoes.find((i) => i.to === to)!;
       expect(item.permission ?? null, to).toBe(permissaoDaRota(to));
-      expect(item.permissions, to).toBeUndefined();
+      expect(item.permissions ?? null, to).toEqual(permissoesDaRota(to));
     });
-    expect(permissaoDaRota("/contract-templates")).toBe("client_contracts.view");
+    // 05/11 (P2 da auditoria): /contract-templates aceita também quem só gere as minutas (client_contracts.manage_templates).
+    expect(permissoesDaRota("/contract-templates")).toEqual(["client_contracts.view", "client_contracts.manage_templates"]);
     expect(permissaoDaRota("/quote-templates")).toBe("quotes.manage");
     expect(permissaoDaRota("/quote-models")).toBe("quote_templates.view");
     // 03/11: /proposal-templates passou a ter ProtectedRoute com proposals.manage (aparecia a toda a gente).

@@ -78,6 +78,11 @@ export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descric
     nome: "Editar quem já é cliente",
     descricao: "Mudar nome, contactos, NIF, comercial, visitas e moradas de entrega de uma pessoa que já é cliente (junto com Editar negócios de pessoas).",
   },
+  // 05/11/2026: users.change_password voltou ao editor; é o que o servidor pede para mudar a palavra-passe de OUTRO utilizador.
+  "users.change_password": {
+    nome: "Alterar palavras-passe",
+    descricao: "Definir uma nova palavra-passe para outro utilizador na ficha dele. A própria palavra-passe muda-se sempre, sem esta permissão.",
+  },
   "clients.create": {
     nome: "Converter em cliente (assistente IA)",
     descricao: "O assistente IA pode converter uma lead em cliente. No ecrã, a conversão pede Converter Leads.",

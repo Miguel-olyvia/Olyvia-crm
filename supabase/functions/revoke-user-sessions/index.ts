@@ -4,6 +4,7 @@ import { z } from "npm:zod";
 
 import { resolveCallerIdentity, authErrorResponse, AuthError } from "../_shared/auth.ts";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { possoGerirUtilizador, souAdminSistema } from "../_shared/adminConta.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 /**
@@ -15,10 +16,13 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
  * an HTTP call, not a Postgres operation, so it cannot be a SQL RPC like
  * get_login_attempts_audit_log (20261110190000_auth_audit_log_rpc.sql).
  *
- * Permission gate follows the same shape as request-support-access: resolve
- * the caller's identity from their own JWT (no service-role bypass for this
- * endpoint), then verify system_admin via the canonical get_user_context RPC
- * — never trust a client-supplied admin flag.
+ * Permission gate: resolve the caller's identity from their own JWT (no
+ * service-role bypass for this endpoint). 05/11/2026 (20270109400000 ronda 2):
+ * passa o administrador de sistema verdadeiro OU quem pode gerir a conta da
+ * pessoa com users.edit — a regra do Lote D (fn_pode_gerir_utilizador_por):
+ * permissão na organização de CADA associação ativa da pessoa (ou acima),
+ * nunca a própria, nunca um administrador de sistema, nunca alguém com um
+ * papel com mais poder. Tudo decidido na base; o cliente nunca afirma nada.
  */
 
 initSentry();
@@ -86,22 +90,25 @@ serve(async (req: Request): Promise<Response> => {
   const { target_auth_user_id } = parsed.data;
 
   try {
-    // ── 3. Verify caller is system_admin via get_user_context RPC ────────
-    // Same canonical gate as request-support-access and
-    // get_login_attempts_audit_log: resolve the caller's own auth.uid()
-    // server-side and check public.is_system_admin(uid) — the client never
-    // gets to assert its own admin status.
-    const { data: ctx, error: ctxError } = await supabase.rpc("get_user_context", {
-      _auth_user_id: caller.authUid,
-    });
-
-    if (ctxError) {
-      console.error("[revoke-user-sessions] get_user_context error:", ctxError);
-      throw new AuthError("Failed to resolve user context", 500);
-    }
-
-    if (!ctx?.is_system_admin) {
-      throw new AuthError("Only system admins can revoke user sessions", 403);
+    // ── 3. Autorização: admin de sistema, ou users.edit sobre esta pessoa ──
+    // O admin de sistema mantém o alcance total (também contas sem ficha em
+    // anew_users). Os outros só sobre uma pessoa que conseguem gerir.
+    const isSystemAdmin = await souAdminSistema(supabase, caller.authUid);
+    if (!isSystemAdmin) {
+      const { data: targetAnew, error: targetError } = await supabase
+        .from("anew_users")
+        .select("id")
+        .eq("auth_user_id", target_auth_user_id)
+        .maybeSingle();
+      if (targetError) {
+        console.error("[revoke-user-sessions] anew_users lookup error:", targetError);
+        throw new AuthError("Failed to resolve target user", 500);
+      }
+      const podeGerir = !!targetAnew &&
+        await possoGerirUtilizador(supabase, caller.authUid, targetAnew.id, "users.edit");
+      if (!podeGerir) {
+        throw new AuthError("Sem permissão para terminar as sessões desta pessoa", 403);
+      }
     }
 
     // ── 4. Revoke every active session for the target user ───────────────

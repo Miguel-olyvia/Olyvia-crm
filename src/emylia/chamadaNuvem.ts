@@ -4,6 +4,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Def, Grupo } from "./campos";
 import type { CampoExtraido, Extracao, Fala } from "./chamadaMotor";
+import type { PlantaLida } from "./planta";
 
 export const TAXA = 16000;
 const VAD_ASSETS = "/chamadas/vad/";
@@ -164,11 +165,11 @@ export async function transcreverFala(pcm: Float32Array, inicioS: number, refere
   return (data?.frases ?? []) as Frase[];
 }
 
-export async function preencherCampos(segmentos: Fala[], grupos: Grupo[]): Promise<Extracao> {
+export async function preencherCampos(segmentos: Fala[], grupos: Grupo[], tipo: "chamada" | "visita" = "chamada"): Promise<Extracao> {
   const campos = grupos.filter((g) => !g.oculto).flatMap((g) => g.campos.map(({ k, l, t, op, ajuda, un }: Def) => ({ k, l, t, op, ajuda, un })));
   const hoje = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const { data, error } = await supabase.functions.invoke("chamada-campos", {
-    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje },
+    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje, tipo },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
   return data as Extracao & { fichas: { campos: CampoExtraido[] }[] };
@@ -184,4 +185,43 @@ export function linhasDaFala(frases: Frase[], semReferencia: "cliente" | "comerc
     else linhas.push({ inicio: f.inicio, fim: f.fim, texto: f.texto, falante: quem, confianca_falante: f.falante ? 1 : 0.3 });
   }
   return linhas;
+}
+
+// 5/11 (a visita real tem 35 min): o telemóvel não pode apagar o ecrã a meio, senão o browser corta o microfone. Sem Wake Lock
+// (browsers antigos) grava-se na mesma; volta a pedir-se quando a página volta a estar à vista.
+export async function ecraAceso(): Promise<() => void> {
+  type Trinco = { release: () => Promise<void> };
+  const nav = navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<Trinco> } };
+  if (!nav.wakeLock) return () => undefined;
+  let trinco: Trinco | null = null;
+  const pedir = async () => { try { trinco = await nav.wakeLock!.request("screen"); } catch { trinco = null; } };
+  const aoVoltar = () => { if (document.visibilityState === "visible") void pedir(); };
+  await pedir();
+  document.addEventListener("visibilitychange", aoVoltar);
+  return () => { document.removeEventListener("visibilitychange", aoVoltar); void trinco?.release().catch(() => undefined); };
+}
+
+/** 5/11: a foto reduzida a 2000 px no lado maior, em JPEG (uma foto de telemóvel tem 4000 px e vários MB). */
+async function fotoReduzida(ficheiro: Blob, lado = 2000): Promise<string> {
+  const url = URL.createObjectURL(ficheiro);
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, falha) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => falha(new Error("A imagem não abriu.")); i.src = url; });
+    const k = Math.min(1, lado / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.85).split(",")[1];
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** 5/11 (Rúben: «ler a foto da folha»): a folha em papel da visita, lida pelo Gemini (função visita-folha). Volta os campos propostos,
+ *  como na conversa, e a planta lida do croqui (ou null). */
+export async function lerFolha(ficheiro: Blob, grupos: Grupo[], divisao?: string): Promise<Extracao & { planta: PlantaLida | null }> {
+  const campos = grupos.filter((g) => !g.oculto).flatMap((g) => g.campos.map(({ k, l, t, op, ajuda, un, bloco }: Def) => ({ k, l, t, op, ajuda, un, bloco })));
+  const imagem_b64 = await fotoReduzida(ficheiro);
+  const { data, error } = await supabase.functions.invoke("visita-folha", { body: { imagem_b64, mime: "image/jpeg", campos, divisao } });
+  if (error) throw new Error(await mensagemDoErro(error, "visita-folha"));
+  return data as Extracao & { planta: PlantaLida | null };
 }

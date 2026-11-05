@@ -152,17 +152,20 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
     }
   }, [substituirContacto, guardarPreferencias]);
   const { classificar } = useQualificarLeadPessoa(mostrada?.pessoa.id ?? "", mostrada?.pessoa.lead_id ?? "");
+  // O lápis da identidade e do contacto pede o mesmo que as RPCs que gravam (pessoas.edit E leads.edit numa lead / clients.edit num
+  // cliente, com o âmbito): a base dá-o em permissoes.editar_pessoa. Sem ela (ficha antiga), fica como antes (pessoas.edit).
+  const podeEditarPessoa = (mostrada?.permissoes?.editar_pessoa ?? mostrada?.permissoes?.editar) === true;
   const identidade = mostrada ? (
     <>
       <IdentidadeFichaReal
         nome={mostrada.pessoa.nome?.trim() ?? ""} tipo={tipoDeIdentidade(mostrada.pessoa.tipo)} empresaNome={mostrada.pessoa.empresa_nome ?? null}
         nomeProprio={mostrada.pessoa.first_name ?? null} apelido={mostrada.pessoa.last_name ?? null}
-        tipoCliente={pessoaAdaptada?.tipoCliente} podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarIdentidade}
+        tipoCliente={pessoaAdaptada?.tipoCliente} podeEditar={podeEditarPessoa} aoGuardar={guardarIdentidade}
       />
       <ContactoFichaReal
         key={`contacto-${mostrada.pessoa.id}`} telefone={pessoaAdaptada?.contacto.telefone ?? null} email={pessoaAdaptada?.contacto.email ?? null}
         contactoPreferido={pessoaAdaptada?.contactoPreferido} horaPreferida={pessoaAdaptada?.horaPreferida} lingua={pessoaAdaptada?.lingua}
-        podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarContacto}
+        podeEditar={podeEditarPessoa} aoGuardar={guardarContacto}
       />
       {/* O selo MQL/SQL classifica-se à mão (como em Leads); as regras do Workflow não o acendem. */}
       <QualificacaoManualFichaReal

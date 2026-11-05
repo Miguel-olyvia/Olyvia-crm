@@ -56,6 +56,23 @@ export function isPermissionError(error: unknown): boolean {
 }
 
 /**
+ * Um UPDATE que a RLS filtra devolve 0 linhas SEM erro. Quem pede o resultado
+ * com `{ count: "exact" }` passa-o por aqui: 0 linhas vira uma recusa por
+ * permissao (42501), para o ecra nao mostrar "guardado" sem ter gravado nada.
+ * `count` nulo (contagem nao pedida) nao e tratado como recusa.
+ */
+export const ERRO_NENHUMA_LINHA_GRAVADA = {
+  code: "42501",
+  message: "permission denied: nenhuma linha gravada",
+} as const;
+
+export function exigirLinhasGravadas(resultado: { error: unknown; count?: number | null }): { error: unknown } {
+  if (resultado.error) return { error: resultado.error };
+  if (resultado.count === 0) return { error: ERRO_NENHUMA_LINHA_GRAVADA };
+  return { error: null };
+}
+
+/**
  * Distingue "o travao de tentativas disparou" de "a base falhou" ou "sem
  * duplicado".
  *

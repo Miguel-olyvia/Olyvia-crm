@@ -66,7 +66,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   window.localStorage.setItem("language", "pt");
-  permissoes = new Set(["hr.onboarding.approve", "hr.pessoas.convite.enviar"]);
+  permissoes = new Set(["hr.onboarding.approve", "hr.pessoas.convite.enviar", "hr.pessoas.view"]);
   chamadas.length = 0;
   estadoHook = {
     itens: [item(1)], contadores: { submetida: 3, convidada: 2 }, carregando: false, aCarregarMais: false, temMais: false,

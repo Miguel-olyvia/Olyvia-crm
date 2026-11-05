@@ -4,16 +4,18 @@
 // comercial confirma o que entra. Nada corre no PC de ninguém. A lógica das propostas está em chamadaMotor.ts
 // e a ligação ao Supabase em chamadaNuvem.ts.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
+import { Camera, Check, Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Def, Grupo } from "./campos";
-import { LINHAS, nomeLinha, servicosPedidos, type LinhaId, type Negocio } from "./motor";
+import { LINHAS, camposMedida, medida, nomeLinha, porMedida, servicosPedidos, type LinhaId, type Negocio } from "./motor";
 import { mudarDadosLead } from "./DadosDaLead";
 import type { Ctx } from "./pecas";
-import { juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { juntarExtracoes, juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { divisaoPrincipal } from "./campos";
+import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
-import { GRUPO_VISITA, falasDeFicheiro, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
+import { GRUPO_VISITA, ecraAceso, falasDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
 
 type EstadoLig = "parado" | "a_ligar" | "a_ouvir" | "a_terminar" | "terminado" | "erro";
 const EXEMPLO_URL = "/chamadas/exemplo.ogg";
@@ -24,10 +26,31 @@ const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 /** Chaves que não são campos do formulário: gravam-se por ações próprias do motor (ver `aplicarEspecial`). */
 const CHAVES_ESPECIAIS = new Set(["lead_primeiro", "lead_apelido", "tipo_servico", "servicos_catalogo"]);
 
-export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d: Negocio; grupos: Grupo[] }) {
+/** 5/11 (Rúben, a visita real): na visita, as medidas ditas em voz alta entram nas medidas da visita (chaves `med_*`). */
+const MEDIDA = /^med_(.+)$/;
+
+/** Os textos do painel: a chamada (telemóvel em alta voz) ou a visita (o telemóvel na mesa, em casa do cliente). */
+const TEXTOS = {
+  chamada: { titulo: "Chamada em direto", sub: "O telemóvel em alta voz junto ao microfone. A transcrição aparece aqui e no fim preenche os campos em baixo.",
+    iniciar: "Iniciar chamada", aOuvir: "A ouvir.", sem: "A chamada não deu nenhum campo para preencher." },
+  visita: { titulo: "Gravar a visita", sub: "O telemóvel na mesa, perto de si e do cliente. A conversa aparece aqui e, no fim, a Olyvia propõe os campos da visita: o local, a área, as medidas, as peças e o prazo.",
+    iniciar: "Começar a gravar", aOuvir: "A gravar a visita. O ecrã fica aceso.", sem: "A visita não deu nenhum campo para preencher." },
+} as const;
+
+export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada" }: { ctx: Ctx; d: Negocio; grupos: Grupo[]; modo?: "chamada" | "visita" }) {
+  const T = TEXTOS[modo];
   // os campos do negócio, mais o cliente (nome), o serviço (tipo e serviços do Catálogo) e a visita combinada
   const svc = useMemo(() => ctx.S.svc ?? {}, [ctx.S.svc]);
-  const grupos = useMemo<Grupo[]>(() => [
+  const medidas = useMemo(() => (modo === "visita" && LINHAS[d.linha] ? camposMedida(LINHAS[d.linha]) : []), [modo, d.linha]);
+  const grupos = useMemo<Grupo[]>(() => modo === "visita" ? [
+    ...gruposDoNegocio,
+    ...(medidas.length ? [{ titulo: "Medidas da área", campos: medidas.map(([k, l]) => ({ k: `med_${k}`, l, t: "numero" as const,
+      ajuda: "Só se foi dito o número (m², ou a contagem). Medidas em cm das paredes não são m²: deixe vazio." })) }] : []),
+    { titulo: "Da visita", campos: [
+      { k: "notas_visita", l: "Notas da visita", t: "texto_longo" as const,
+        ajuda: "Para quem faz o orçamento e para o supervisor: o que se vai fazer, as escolhas, as dúvidas do cliente, o que ficou combinado e por decidir. Com detalhe." },
+    ] },
+  ] : [
     ...gruposDoNegocio,
     ...(d.dadosLead ? [{ titulo: "Cliente", campos: [
       { k: "lead_primeiro", l: "Nome próprio", t: "texto" as const, ajuda: "O nome por que o comercial trata o cliente." },
@@ -39,14 +62,15 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
         ajuda: "Tudo o que o cliente disse que quer fazer, trocar ou instalar, de entre os do Catálogo (sanita, pavimento, espelho, banheira…). Se disse «tudo», os típicos da divisão." },
     ] },
     GRUPO_VISITA,
-  ], [gruposDoNegocio, d.dadosLead, svc]);
+  ], [gruposDoNegocio, d.dadosLead, svc, modo, medidas]);
   // o que o negócio já tem nessas chaves especiais, para as propostas saberem o que «já tinha»
   const fComEspeciais = useMemo(() => ({
     ...d.f,
     lead_primeiro: d.dadosLead?.primeiro ?? "", lead_apelido: d.dadosLead?.apelido ?? "",
     tipo_servico: d.linhaPorDefinir ? "" : nomeLinha(d),
     servicos_catalogo: servicosPedidos(d, ctx.S).map((x) => x.n).join(", "),
-  }), [d, ctx.S]);
+    ...Object.fromEntries(medidas.map(([k]) => [`med_${k}`, d.visita?.med && medida(d.visita.med, k) ? String(medida(d.visita.med, k)) : ""])),
+  }), [d, ctx.S, medidas]);
   const [estado, setEstado] = useState<EstadoLig>("parado");
   const [msg, setMsg] = useState("");
   const [falas, setFalas] = useState<Fala[]>([]);
@@ -63,12 +87,18 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
   const ouvinte = useRef<Ouvinte | null>(null);
   const falasRef = useRef<Fala[]>([]);
   const fila = useRef<Promise<void>>(Promise.resolve());
+  const soltarEcra = useRef<(() => void) | null>(null);
+  // 5/11: a foto da folha da visita (lida pela função visita-folha) e a planta que ela deu
+  const inputFolha = useRef<HTMLInputElement>(null);
+  const [aLerFolha, setALerFolha] = useState(false);
+  const [plantaLida, setPlantaLida] = useState<PlantaLida | null>(null);
+  const [plantaUsada, setPlantaUsada] = useState(false);
   const relogio = useRef<number | null>(null);
   const fimLista = useRef<HTMLDivElement>(null);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
 
   useEffect(() => { fimLista.current?.scrollIntoView({ block: "nearest" }); }, [falas.length]);
-  useEffect(() => () => { void ouvinte.current?.parar(); if (relogio.current) window.clearInterval(relogio.current); }, []);
+  useEffect(() => () => { void ouvinte.current?.parar(); soltarEcra.current?.(); if (relogio.current) window.clearInterval(relogio.current); }, []);
 
   const juntar = (novas: Fala[]) => {
     if (!novas.length) return;
@@ -99,9 +129,10 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
     try {
       const t0 = Date.now();
       ouvinte.current = await ouvirMicrofone(tratarFala, setAFalar);
+      soltarEcra.current = await ecraAceso();
       relogio.current = window.setInterval(() => setSegundos(Math.floor((Date.now() - t0) / 1000)), 1000);
       setEstado("a_ouvir");
-      setMsg(voz ? "A ouvir. A sua voz está registada." : "A ouvir. Sem voz registada: as falas ficam como do cliente até registar a sua.");
+      setMsg(voz ? `${T.aOuvir} A sua voz está registada.` : `${T.aOuvir} Sem voz registada: as falas ficam como do cliente até registar a sua.`);
     } catch (e) {
       setEstado("erro"); setMsg("Sem acesso ao microfone: " + (e as Error).message);
     }
@@ -124,12 +155,13 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
     setEstado("a_terminar"); setMsg("A terminar a chamada...");
     pararRelogio();
     await ouvinte.current?.parar(); ouvinte.current = null;
+    soltarEcra.current?.(); soltarEcra.current = null;
     await fila.current;  // as últimas falas ainda a transcrever
     const segs = falasRef.current;
     if (!segs.length) { setEstado("terminado"); setMsg("Chamada terminada sem falas transcritas."); return; }
     setMsg("A preencher os campos com o que se disse...");
     try {
-      const ext = await preencherCampos(segs, grupos);
+      const ext = await preencherCampos(segs, grupos, modo);
       setExtracao(ext);
       // 5/11 (Rúben: as falas do cliente vinham como «Comercial»): a etiqueta de cada linha passa a ser a revista pelo sentido
       const revistas = ext.falantes && ext.falantes.length === segs.length
@@ -142,6 +174,24 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
       setEstado("terminado"); setMsg("Chamada terminada. Confirme o que entra nos campos.");
     } catch (e) {
       setEstado("erro"); setMsg("A transcrição ficou, mas os campos não: " + (e as Error).message);
+    }
+  }
+
+  async function folhaEscolhida(ficheiro: File | undefined) {
+    if (!ficheiro) return;
+    setALerFolha(true); setMsg("A ler a folha...");
+    try {
+      const r = await lerFolha(ficheiro, grupos, divisaoPrincipal(d.f) ?? undefined);
+      const { planta, ...ext } = r;
+      setExtracao((antes) => juntarExtracoes(antes, ext));
+      setAplicadas(null);
+      setPlantaLida(planta); setPlantaUsada(false);
+      setMsg(`Folha lida.${planta ? " Há uma planta para confirmar." : ""} Confirme o que entra nos campos.`);
+    } catch (e) {
+      setMsg("Não deu para ler a folha: " + (e as Error).message);
+    } finally {
+      setALerFolha(false);
+      if (inputFolha.current) inputFolha.current.value = "";
     }
   }
 
@@ -187,19 +237,22 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
       const ids = Object.entries(svc).filter(([, x]) => nomes.includes(x.n.toLowerCase())).map(([id]) => id);
       const atuais = servicosPedidos(d, ctx.S).map((x) => x.id);
       ctx.A.servicosDoPedido(d.id, [...atuais, ...ids]);
+    } else {
+      const m = k.match(MEDIDA), n = Number(valor.replace(",", "."));
+      if (m && Number.isFinite(n) && n >= 0) porMedida(d.visita.med, m[1] as Parameters<typeof porMedida>[1], n);
     }
   };
   const aplicar = () => {
     ctx.run(() => {
       for (const p of entram) {
         const valor = escolhas[p.k].valor.trim();
-        if (CHAVES_ESPECIAIS.has(p.k)) aplicarEspecial(p.k, valor);
+        if (CHAVES_ESPECIAIS.has(p.k) || MEDIDA.test(p.k)) aplicarEspecial(p.k, valor);
         else ctx.A.campo(d.id, p.k, juntarVarios(defs.get(p.k), d.f[p.k] || "", valor));
       }
     });
     setAplicadas(entram.map((p) => p.l));
     // o dia combinado entrou: «Marcar a visita» marca-a sozinha (o comercial livre mais perto a essa hora) e o ecrã vai lá
-    if (entram.some((p) => p.k === "visita_dia")) {
+    if (modo === "chamada" && entram.some((p) => p.k === "visita_dia")) {
       pedirMarcacao(d.id);
       setTimeout(() => document.getElementById(`chamada-1-vaga`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     }
@@ -211,8 +264,8 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
     <section aria-labelledby={`direto-${d.id}`} className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id={`direto-${d.id}`} className="flex items-center gap-2 text-lg font-semibold tracking-tight"><Mic className="h-5 w-5 text-primary" aria-hidden="true" />Chamada em direto</h2>
-          <p className="text-sm text-muted-foreground">O telemóvel em alta voz junto ao microfone. A transcrição aparece aqui e no fim preenche os campos em baixo.</p>
+          <h2 id={`direto-${d.id}`} className="flex items-center gap-2 text-lg font-semibold tracking-tight"><Mic className="h-5 w-5 text-primary" aria-hidden="true" />{T.titulo}</h2>
+          <p className="text-sm text-muted-foreground">{T.sub}</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           {!aOuvir && !ocupado ? (
@@ -221,7 +274,16 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
               {aGravarVoz !== null ? `A gravar... ${aGravarVoz}/${SEGUNDOS_VOZ} s` : voz ? "Registar a minha voz outra vez" : "Registar a minha voz"}
             </Button>
           ) : null}
-          {!aOuvir && !ocupado ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null}><Mic className="h-4 w-4" aria-hidden="true" />Iniciar chamada</Button> : null}
+          {!aOuvir && !ocupado ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
+          {modo === "visita" && !ocupado ? (
+            <>
+              <input ref={inputFolha} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true"
+                onChange={(e) => void folhaEscolhida(e.target.files?.[0])} />
+              <Button type="button" variant="outline" disabled={aLerFolha} onClick={() => inputFolha.current?.click()}>
+                <Camera className="h-4 w-4" aria-hidden="true" />{aLerFolha ? "A ler a folha..." : "Ler a folha"}
+              </Button>
+            </>
+          ) : null}
           {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciarTeste()} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
           {aOuvir ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
           {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{estado === "a_ligar" ? "A ligar..." : "A terminar..."}</Button> : null}
@@ -252,10 +314,27 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
         </div>
       ) : null}
 
+      {plantaLida ? (
+        <div className="mt-4 flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[15px]">
+            <b className="font-semibold">Planta da folha:</b> paredes de {plantaLida.paredes.map((x) => x.c).join(", ")} cm
+            {plantaLida.pecas.length ? `, ${plantaLida.pecas.length} ${plantaLida.pecas.length === 1 ? "peça" : "peças"}` : ""}.{" "}
+            {(() => { const pl = plantaDaFolha(plantaLida).paredes, f = faltaFechar(pl);
+              return f > 1 ? `Não fecha (faltam ${f === Infinity ? "paredes" : `${f} cm`}): corrija-a em «Medidas da área».` : `Chão de ${String(areaChaoM2(pl)).replace(".", ",")} m².`; })()}
+            {plantaLida.confianca < 0.75 ? " Leitura incerta: confira as medidas." : ""}
+          </p>
+          {plantaUsada ? <span className="text-sm text-success">Na planta. Veja-a em «Medidas da área».</span> : (
+            <Button type="button" className="shrink-0" onClick={() => { ctx.A.campo(d.id, "planta", gravarPlanta(plantaDaFolha(plantaLida))); setPlantaUsada(true); }}>
+              <Check className="h-4 w-4" aria-hidden="true" />Usar esta planta
+            </Button>
+          )}
+        </div>
+      ) : null}
+
       {extracao ? (
         <div className="mt-4 space-y-3">
           {extracao.resumo ? <p className="rounded-xl bg-muted/60 p-3 text-[15px] leading-snug"><b>Resumo:</b> {extracao.resumo}</p> : null}
-          {props.length === 0 ? <p className="text-sm text-muted-foreground">A chamada não deu nenhum campo para preencher.</p> : (
+          {props.length === 0 ? <p className="text-sm text-muted-foreground">{T.sem}</p> : (
             <>
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                 <span>Marque o que entra e corrija o que for preciso antes de preencher.</span>
@@ -290,6 +369,8 @@ type Escolha = { incluir: boolean; valor: string };
 function LinhaProposta({ p, def, escolha, bloqueada, onMudar }: { p: Proposta; def?: Def; escolha: Escolha; bloqueada: boolean; onMudar: (m: Partial<Escolha>) => void }) {
   const rever = p.estado === "rever";
   const id = `prop-${p.k}`;
+  // 5/11 (a folha): «Cor» aparece na base, na coluna, no resguardo… o bloco diz de que peça é
+  const rotulo = def?.bloco ? `${def.bloco} · ${p.l}` : p.l;
   return (
     <li className={cn("rounded-xl border border-border bg-background px-3 py-2.5 transition-colors", escolha.incluir ? "border-primary/40" : "opacity-70")}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -299,8 +380,8 @@ function LinhaProposta({ p, def, escolha, bloqueada, onMudar }: { p: Proposta; d
             escolha.incluir ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent hover:border-primary/60")}>
           <Check className="h-4 w-4" aria-hidden="true" />
         </button>
-        <label id={`${id}-rotulo`} htmlFor={id} className="w-44 shrink-0 text-sm text-muted-foreground">{p.l}</label>
-        <div className="min-w-[200px] flex-1"><Editor id={id} def={def} valor={escolha.valor} rotulo={p.l} bloqueado={bloqueada} onMudar={(v) => onMudar({ valor: v })} /></div>
+        <label id={`${id}-rotulo`} htmlFor={id} className="w-44 shrink-0 text-sm text-muted-foreground">{rotulo}</label>
+        <div className="min-w-[200px] flex-1"><Editor id={id} def={def} valor={escolha.valor} rotulo={rotulo} bloqueado={bloqueada} onMudar={(v) => onMudar({ valor: v })} /></div>
         <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", rever ? "bg-warning/15 text-warning-foreground" : "bg-success/15 text-success")}>{rever ? "a rever" : "ouvido"} · {Math.round(p.confianca * 100)}%</span>
         {p.jaTinha && p.jaTinha !== p.valor ? <span className="text-xs text-muted-foreground">já tinha «{p.jaTinha}»</span> : null}
       </div>

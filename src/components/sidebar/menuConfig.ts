@@ -383,7 +383,7 @@ export const menuSections: MenuSection[] = [
       { to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.update" },
       { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
-      { to: "/contract-templates", icon: BookOpen, labelKey: "sidebar.contractTemplates", permission: "client_contracts.view" },
+      { to: "/contract-templates", icon: BookOpen, labelKey: "sidebar.contractTemplates", permissions: ["client_contracts.view", "client_contracts.manage_templates"] },
       { to: "/quote-templates", icon: FileCheck, labelKey: "today.quick.quotePdfTemplates", permission: "quotes.manage" },
       { to: "/proposal-templates", icon: FileText, labelKey: "sidebar.proposalTemplates", permission: "proposals.manage" },
       { to: "/quote-models", icon: FileCheck, labelKey: "today.quick.quoteModels", permission: "quote_templates.view" },

@@ -136,7 +136,9 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
 
   const { activeCompany, isLoading: companyLoading, semOrganizacao } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
-  const podeCriar = hasPermission("hr.pessoas.create");
+  // Criar também pede hr.pessoas.view: o INSERT devolve o id da pessoa nova (RETURNING), e a policy de leitura de `pessoas`
+  // exige hr.pessoas.view — só com create o servidor recusa (auditoria de permissões 05/11/2026, B1).
+  const podeCriar = hasPermission("hr.pessoas.create") && hasPermission("hr.pessoas.view");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
   const podeGerirAdmissao = hasPermission("hr.admissao.obrigatorios.gerir");
   const podeGerirRegrasFimContrato = hasPermission("hr.contratos.regras.gerir");

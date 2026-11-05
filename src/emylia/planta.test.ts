@@ -1,0 +1,91 @@
+// 5/11 (Rúben, a visita real): a planta da divisão em vez do croqui em papel. Desenha-se com o dedo (retas com a medida por cima) e as
+// paredes à volta dão os m² do chão e das paredes.
+import { describe, expect, it } from "vitest";
+import {
+  areaChaoM2, areaParedesM2, cantos, deViragens, emL, faltaFechar, gravarPlanta, juntarParede, juntarPeca, lerPlanta, mudarComprimento,
+  paredeDoTraco, peDireitoDoCampo, perimetroM, plantaDaFolha, retangulo, type Planta,
+} from "./planta";
+
+describe("planta: as contas", () => {
+  it("um retângulo de 234 x 177 fecha e dá 4,14 m² de chão e 8,22 m de paredes", () => {
+    const p = retangulo(234, 177);
+    expect(faltaFechar(p)).toBe(0);
+    expect(cantos(p).slice(0, 4)).toEqual([{ x: 0, y: 0 }, { x: 234, y: 0 }, { x: 234, y: 177 }, { x: 0, y: 177 }]);
+    expect(areaChaoM2(p)).toBe(4.14);
+    expect(perimetroM(p)).toBe(8.22);
+  });
+
+  it("em L: o canto cortado sai à área, e o perímetro é o do retângulo de fora", () => {
+    const p = emL(234, 226, 63, 74);
+    expect(faltaFechar(p)).toBe(0);
+    expect(areaChaoM2(p)).toBe(Math.round(((234 * 226 - 63 * 74) / 10000) * 100) / 100);
+    expect(perimetroM(p)).toBe(9.2);
+  });
+
+  it("uma planta que não fecha não dá m² e diz quanto falta", () => {
+    const p = mudarComprimento(retangulo(200, 100), 0, 250);
+    expect(faltaFechar(p)).toBe(50);
+    expect(areaChaoM2(p)).toBeNull();
+  });
+
+  it("paredes: perímetro × pé-direito, menos a porta (2 m de altura) e a janela (1 m)", () => {
+    const base: Planta = { o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] };
+    expect(areaParedesM2(base, 2.5)).toBe(17.5);
+    const comAberturas = juntarPeca(juntarPeca(base, "porta", "p"), "janela", "j");
+    expect(areaParedesM2(comAberturas, 2.5)).toBe(Math.round((17.5 - 0.8 * 2 - 1 * 1) * 100) / 100);
+    expect(areaParedesM2(base, 0)).toBeNull();
+  });
+
+  it("o pé-direito lê-se do campo da visita", () => {
+    expect(peDireitoDoCampo("2,6 m")).toBe(2.6);
+    expect(peDireitoDoCampo("3 m ou mais")).toBe(3);
+    expect(peDireitoDoCampo("")).toBeNull();
+  });
+});
+
+describe("planta: desenhar com o dedo", () => {
+  it("o traço sai reto, no eixo maior, de 5 em 5 cm; um toque não é parede", () => {
+    expect(paredeDoTraco({ x: 0, y: 0 }, { x: 233, y: 12 })).toEqual({ c: 235, r: "E" });
+    expect(paredeDoTraco({ x: 100, y: 100 }, { x: 96, y: 278 })).toEqual({ c: 180, r: "S" });
+    expect(paredeDoTraco({ x: 100, y: 100 }, { x: 20, y: 110 })).toEqual({ c: 80, r: "W" });
+    expect(paredeDoTraco({ x: 0, y: 0 }, { x: 4, y: 3 })).toBeNull();
+  });
+
+  it("perto do canto de partida, no mesmo eixo, acaba nele e a planta fecha", () => {
+    const inicio = { x: 0, y: 0 };
+    let p = juntarParede([], paredeDoTraco(inicio, { x: 200, y: 0 })!);
+    p = juntarParede(p, paredeDoTraco({ x: 200, y: 0 }, { x: 200, y: 150 })!);
+    p = juntarParede(p, paredeDoTraco({ x: 200, y: 150 }, { x: 0, y: 150 })!);
+    // o dedo parou 15 cm antes do canto de partida
+    p = juntarParede(p, paredeDoTraco({ x: 0, y: 150 }, { x: 0, y: 15 }, inicio)!);
+    expect(faltaFechar(p)).toBe(0);
+    expect(areaChaoM2(p)).toBe(3);
+  });
+
+  it("duas retas seguidas no mesmo sentido são a mesma parede", () => {
+    expect(juntarParede([{ c: 100, r: "E" }], { c: 50, r: "E" })).toEqual([{ c: 150, r: "E" }]);
+    expect(juntarParede([{ c: 100, r: "E" }], { c: 50, r: "S" })).toEqual([{ c: 100, r: "E" }, { c: 50, r: "S" }]);
+  });
+
+  it("a folha lida dá viragens: a 1.ª parede vai para a direita e cada viragem muda o rumo", () => {
+    expect(deViragens([{ c: 2, vira: "dir" }, { c: 1, vira: "dir" }, { c: 2, vira: "dir" }, { c: 1, vira: "dir" }])).toEqual(retangulo(2, 1));
+    const p = plantaDaFolha({ paredes: [{ c: 234, vira: "dir" }, { c: 177, vira: "dir" }, { c: 234, vira: "dir" }, { c: 177, vira: "dir" }], pecas: [{ tipo: "sanita" }, { tipo: "foguetão" }], confianca: 0.8 });
+    expect(areaChaoM2(p.paredes)).toBe(4.14);
+    expect(p.pecas.map((x) => x.tipo)).toEqual(["sanita"]);
+  });
+});
+
+describe("planta: gravar e ler", () => {
+  it("grava e lê; lê a forma antiga (viragens); o que não se percebe não rebenta", () => {
+    const p = juntarPeca({ o: { x: 50, y: 50 }, paredes: retangulo(234, 177), pecas: [] }, "base", "b1");
+    expect(lerPlanta(gravarPlanta(p))).toEqual(p);
+    expect(lerPlanta(JSON.stringify({ paredes: [{ c: 10, vira: "dir" }, { c: 5, vira: "dir" }] }))?.paredes).toEqual([{ c: 10, r: "E" }, { c: 5, r: "S" }]);
+    expect(lerPlanta("não é json")).toBeNull();
+    expect(lerPlanta(JSON.stringify({ paredes: retangulo(10, 10), pecas: [{ id: "x", tipo: "foguetão", x: 0, y: 0, w: 1, h: 1 }] }))?.pecas).toEqual([]);
+  });
+
+  it("uma peça nova fica com o centro no ponto onde se largou, de 5 em 5 cm", () => {
+    const p = juntarPeca({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }, "sanita", "s", { x: 51, y: 42 });
+    expect(p.pecas[0]).toEqual({ id: "s", tipo: "sanita", w: 36, h: 55, x: 35, y: 15 });
+  });
+});

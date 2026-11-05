@@ -274,7 +274,12 @@ export interface FichaDb {
   lead: LeadFichaDb | null;
   leads_abertas: { id: string; status: string | null; created_at: string | null; closure_result: string | null }[];
   agregados: AgregadosDb;
-  permissoes: { editar: boolean; criar: boolean };
+  /**
+   * `editar` = pessoas.edit na organização (o negócio, os documentos, as visitas). `editar_pessoa` = o que as RPCs da identidade e do
+   * contacto exigem: pessoas.edit E o âmbito de edição sobre esta pessoa (leads.edit numa lead, clients.edit num cliente). Vem da base
+   * desde 20270108530000; uma ficha antiga sem ela usa `editar`.
+   */
+  permissoes: { editar: boolean; criar: boolean; editar_pessoa?: boolean };
   negocios: { total: number; itens: NegocioFichaDb[] } | null;
   documentos_por_ligar: { orcamentos: unknown[]; propostas: unknown[]; contratos: unknown[] } | null;
   contactos: SeccaoDb<ContactoFichaDb> | null;

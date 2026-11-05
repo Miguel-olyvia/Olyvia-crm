@@ -22,10 +22,21 @@ const campoDef = z.object({
 });
 const pedido = z.object({
   segmentos: z.array(z.object({ inicio: z.number(), texto: z.string().max(2000), falante: z.enum(["comercial", "cliente", "desconhecido"]) })).max(2000),
-  campos: z.array(campoDef).min(1).max(120),
+  campos: z.array(campoDef).min(1).max(200),  // a visita tem muitos campos (o local, a área, as peças)
   // a data de hoje no fuso da comercial (AAAA-MM-DD), para «dia 10» e «amanhã» virarem datas
   hoje: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // 5/11: «visita» é a conversa da visita a casa do cliente (a comercial mede, mostra amostras e o cliente escolhe as peças)
+  tipo: z.enum(["chamada", "visita"]).optional(),
 });
+
+const SOBRE_A_VISITA = `ESTA TRANSCRIÇÃO É DE UMA VISITA, NÃO DE UMA CHAMADA. O comercial está em casa do cliente: vê o espaço, mede,
+mostra amostras e o cliente escolhe as peças; muitas vezes o comercial faz o orçamento ali. A ficha a preencher é a da visita (o local, a
+área de intervenção, as medidas, as peças escolhidas e o prazo). Regras próprias da visita:
+- As peças escolhidas: preenche cada caixa (cor, acabamento, forma, abertura…) só com o que o cliente escolheu no fim; se mudou de ideias,
+  vale a última escolha.
+- Medidas: comprimentos de paredes ditos em metros ou centímetros não são áreas. Só preenches um campo em m² se a área foi dita.
+- O resumo é para quem faz o orçamento e para o supervisor da obra: 5 a 10 frases com o que se vai fazer, as escolhas peça a peça, as
+  medidas ditas, o que ficou combinado (prazo, vaga, duração, valor, pagamento) e o que ficou por decidir.`;
 
 const INSTRUCAO = `És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição de uma chamada entre
 um comercial e um cliente e preenches uma ficha para preparar a visita.
@@ -68,8 +79,8 @@ const descrever = (c: z.infer<typeof campoDef>) => {
   return `- ${c.k}: ${c.l} [${c.t}]${extra}${c.ajuda ? " — " + c.ajuda : ""}`;
 };
 
-interface CampoBruto { valor: string | null; confianca: number; excerto: string }
-interface Resposta { campos: Record<string, CampoBruto>; resumo: string; falantes?: string[] }
+interface CampoBruto { chave?: string; valor: string | null; confianca: number; excerto: string }
+interface Resposta { campos: CampoBruto[]; resumo: string; falantes?: string[] }
 
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
@@ -90,33 +101,37 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { segmentos, campos, hoje } = parsed.data;
+    const { segmentos, campos, hoje, tipo } = parsed.data;
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT.bucket, caller.anewUserId);
 
     const chaves = campos.map((c) => c.k);
-    const campoEsq = { type: "OBJECT", properties: { valor: { type: "STRING", nullable: true }, confianca: { type: "NUMBER" }, excerto: { type: "STRING" } },
-      required: ["valor", "confianca", "excerto"] };
-    const esquema = { type: "OBJECT", properties: { campos: { type: "OBJECT", properties: Object.fromEntries(chaves.map((k) => [k, campoEsq])), required: chaves },
+    // 5/11: uma lista (chave, valor, confiança, excerto) em vez de um objeto com uma propriedade por campo: com os ~100 campos da visita, o
+    // esquema por propriedades dava «Gemini 400: Request contains an invalid argument»
+    const campoEsq = { type: "OBJECT", properties: { chave: { type: "STRING" }, valor: { type: "STRING", nullable: true }, confianca: { type: "NUMBER" }, excerto: { type: "STRING" } },
+      required: ["chave", "valor", "confianca", "excerto"] };
+    const esquema = { type: "OBJECT", properties: { campos: { type: "ARRAY", items: campoEsq },
       resumo: { type: "STRING" }, falantes: { type: "ARRAY", items: { type: "STRING", enum: ["comercial", "cliente"] } } },
       required: ["campos", "resumo", "falantes"] };
     const texto = (hoje ? `Hoje é ${hoje}. Datas ditas de forma relativa («dia 10», «amanhã», «para a semana») ` +
       "convertem-se para AAAA-MM-DD, assumindo a próxima ocorrência a partir de hoje.\n\n" : "") +
       "# Campos a preencher\n" + campos.map(descrever).join("\n") +
       "\n\n# Transcrição da chamada\n" + segmentos.map((s, i) => `[${i}] ${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : "Alguém"}: ${s.texto}`).join("\n") +
-      "\n\nPreenche o JSON com 'falantes' (uma entrada por linha), 'campos' (um objeto por chave, com valor, confianca e excerto) e 'resumo'.";
+      "\n\nPreenche o JSON com 'falantes' (uma entrada por linha), 'campos' (uma lista: um objeto por campo que consegues preencher, com chave, valor, confianca e excerto; os que não foram ditos ficam de fora) e 'resumo'.";
 
     let r: Resposta;
     try {
-      r = await gerarJson<Resposta>({ modelo: MODELO, partes: [{ text: texto }], esquema, instrucaoSistema: INSTRUCAO });
+      r = await gerarJson<Resposta>({ modelo: MODELO, partes: [{ text: texto }], esquema, instrucaoSistema: tipo === "visita" ? `${INSTRUCAO}\n\n${SOBRE_A_VISITA}` : INSTRUCAO });
     } catch (e) {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;
     }
+    const pedidas = new Set(chaves);
+    const porChave = new Map((Array.isArray(r.campos) ? r.campos : []).filter((x) => x && pedidas.has(String(x.chave))).map((x) => [String(x.chave), x] as const));
     const saida = campos.map((c) => {
-      const b = r.campos?.[c.k] ?? { valor: null, confianca: 0, excerto: "" };
+      const b = porChave.get(c.k) ?? { valor: null, confianca: 0, excerto: "" };
       const excerto = String(b.excerto ?? "").trim();
       let conf = Number(b.confianca ?? 0);
       const vazio = b.valor === null || b.valor === undefined || String(b.valor).trim() === "" || ["null", "none"].includes(String(b.valor).toLowerCase());

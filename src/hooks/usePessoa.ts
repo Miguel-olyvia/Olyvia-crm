@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { exigirLinhasGravadas, hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { usePessoaConta } from "@/hooks/usePessoaConta";
 import { dataDeHojeBase } from "@/lib/hr/dataBase";
 import type {
@@ -410,9 +410,12 @@ export function usePessoa(pessoaId: string | undefined) {
   const savePessoa = useCallback(
     (patch: Partial<Pessoa>) =>
       guardar(async (autorId) =>
-        hrFrom("pessoas")
-          .update({ ...patch, updated_by: autorId })
-          .eq("id", pessoaId),
+        // A RLS de `pessoas` filtra o UPDATE sem erro: 0 linhas nao e sucesso.
+        exigirLinhasGravadas(
+          await hrFrom("pessoas")
+            .update({ ...patch, updated_by: autorId }, { count: "exact" })
+            .eq("id", pessoaId),
+        ),
       ),
     [guardar, pessoaId],
   );
@@ -548,8 +551,13 @@ export function usePessoa(pessoaId: string | undefined) {
    * numa READMISSAO ou RENOVACAO: a pessoa ja teve um vinculo, esse terminou,
    * e este e o proximo. `idx_pessoas_vinculos_horas_aberta` e o trigger
    * `hr_vinculos_horas_sem_sobreposicao` (20261130180000) sao POR PESSOA, nao
-   * por vinculo -- terminar um vinculo NAO fecha a versao de horas que ficou
-   * aberta, e o proprio trigger `hr_pessoas_vinculos_sincronizar_ao_entrar_
+   * por vinculo. Desde 20270109300000 terminar um vinculo FECHA a versao de
+   * horas desse vinculo em data_fim + 1 (gatilho
+   * `trg_pessoas_vinculos_fecha_horas_ao_terminar`), por isso na readmissao
+   * normal ja nao ha versao aberta e o fecho abaixo nao corre -- o que
+   * importa, porque fechar uma versao numa data passada exige
+   * `hr.pessoas.vinculos.horas.corrigir` (20270108410000). Antes disso
+   * (ou com dados antigos) a versao ficava aberta, e o proprio trigger `hr_pessoas_vinculos_sincronizar_ao_entrar_
    * em_vigor` ja copiou os valores dessa versao antiga para o vinculo novo
    * assim que ele entrou em vigor. Um INSERT cego de uma segunda versao aberta
    * era sempre rejeitado (23505 ou `horas_contratadas_sobrepostas`) -- e,

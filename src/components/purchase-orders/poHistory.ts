@@ -3,7 +3,8 @@
 // escrevem uma linha consolidada (fn_manual_audit_log) — criação/edição (web_app, com o diff aninhado em
 // {purchase_orders, purchase_order_items}), envio/retirada do portal (supplier_publication), confirmação e expedição
 // pelo fornecedor (source supplier_portal: supplier_publication, supplier_shipment, supplier_shipment_file), aceitar a
-// data prometida — e o gatilho genérico escreve as mudanças de estado das receções. Só leitura, RLS existente.
+// data prometida — e o gatilho genérico escreve as mudanças de estado das receções. Só leitura: rpc_po_historico
+// (purchase_orders.view) e, se a base disser «sem permissão», a leitura direta com a RLS do registo.
 import { supabase } from "@/integrations/supabase/client";
 import { noteLabel } from "@/components/receiving/deliveryNotes";
 import { fmtDay } from "./poSheetFlow";
@@ -191,8 +192,20 @@ export function poHistoryEntries(rows: readonly PoAuditRow[], names: ReadonlyMap
 
 const LIMIT = 200;
 
-/** Lê o registo de auditoria da PO e os nomes de quem fez (anew_users). Sem permissão a RLS devolve vazio. */
-export async function fetchPoAuditLog(poId: string): Promise<{ rows: PoAuditRow[]; names: Map<string, string> }> {
+/** O código de «sem permissão» do Postgres (42501). */
+const SEM_PERMISSAO = "42501";
+
+/**
+ * As linhas do registo da PO. Primeiro rpc_po_historico (20270108550000), que as dá a quem pode ver a PO (purchase_orders.view);
+ * se a base responder «sem permissão», lê como antes, direto de entity_audit_log (a RLS desse registo decide; sem ela, vazio).
+ * Assim quem só tem purchase_orders.view passa a ver o histórico e quem já o via por outra permissão continua a vê-lo.
+ */
+async function lerLinhasPo(poId: string): Promise<PoAuditRow[]> {
+  const rpc = await (supabase as unknown as {
+    rpc: (n: string, a: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string } | null }>;
+  }).rpc("rpc_po_historico", { p_po_id: poId, p_limite: LIMIT });
+  if (!rpc.error) return (rpc.data ?? []) as PoAuditRow[];
+  if (rpc.error.code !== SEM_PERMISSAO) throw rpc.error;
   const { data, error } = await supabase
     .from("entity_audit_log")
     .select("id, operation, changed_fields, changed_by, source, created_at")
@@ -201,7 +214,12 @@ export async function fetchPoAuditLog(poId: string): Promise<{ rows: PoAuditRow[
     .order("created_at", { ascending: false })
     .limit(LIMIT);
   if (error) throw error;
-  const rows = (data ?? []) as PoAuditRow[];
+  return (data ?? []) as PoAuditRow[];
+}
+
+/** Lê o registo de auditoria da PO e os nomes de quem fez (anew_users). Sem permissão devolve vazio. */
+export async function fetchPoAuditLog(poId: string): Promise<{ rows: PoAuditRow[]; names: Map<string, string> }> {
+  const rows = await lerLinhasPo(poId);
   const ids = [...new Set(rows.map((r) => r.changed_by).filter((x): x is string => !!x))];
   const names = new Map<string, string>();
   if (ids.length) {

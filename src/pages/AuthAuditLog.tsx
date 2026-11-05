@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { toast } from "@/lib/toast";
+import { usePermissions } from "@/hooks/usePermissions";
+import { authIdsComSessoesTerminaveis, podeTerminarSessoes } from "@/lib/auth/terminarSessoes";
 
 const PAGE_SIZE = 50;
 const USER_AGENT_TRUNCATE_LENGTH = 60;
@@ -70,6 +72,31 @@ export default function AuthAuditLog() {
 
   const [revokeTarget, setRevokeTarget] = useState<{ authUserId: string; identifier: string } | null>(null);
   const [revoking, setRevoking] = useState(false);
+
+  // "Terminar sessões" só a quem a edge revoke-user-sessions aceita: o admin de sistema, ou quem tem users.edit
+  // e consegue gerir a conta da pessoa (regra do Lote D, decidida na base por fn_pode_gerir_utilizador).
+  const { isSystemAdmin, hasPermission } = usePermissions();
+  const temUsersEdit = hasPermission("users.edit");
+  const [geriveis, setGeriveis] = useState<"todos" | ReadonlySet<string>>(() => new Set<string>());
+  useEffect(() => {
+    let cancelado = false;
+    authIdsComSessoesTerminaveis(rows.map((r) => r.auth_user_id), {
+      isSystemAdmin,
+      temUsersEdit,
+      procurarUtilizadores: async (ids) => {
+        const { data, error } = await (supabase as any).from("anew_users").select("id, auth_user_id").in("auth_user_id", ids);
+        if (error) throw error;
+        return (data ?? []) as { id: string; auth_user_id: string }[];
+      },
+      possoGerir: async (id) => {
+        const { data, error } = await (supabase.rpc as any)("fn_pode_gerir_utilizador", { p_target_user: id, p_permission: "users.edit" });
+        return !error && data === true;
+      },
+    })
+      .then((r) => { if (!cancelado) setGeriveis(r); })
+      .catch(() => { if (!cancelado) setGeriveis(new Set<string>()); });
+    return () => { cancelado = true; };
+  }, [rows, isSystemAdmin, temUsersEdit]);
 
   const fetchLog = useCallback(async (targetPage: number) => {
     setLoading(true);
@@ -270,7 +297,7 @@ export default function AuthAuditLog() {
                               </TooltipProvider>
                             </TableCell>
                             <TableCell className="text-right">
-                              {row.auth_user_id ? (
+                              {podeTerminarSessoes(geriveis, row.auth_user_id) ? (
                                 <Button
                                   variant="ghost"
                                   size="sm"

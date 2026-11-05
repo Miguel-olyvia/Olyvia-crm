@@ -172,7 +172,7 @@ const ConteudoPerfis = ({ permitidos, tem }: ConteudoPerfisProps) => {
       />
       <FormUtilizador
         form={formularios.form} utilizadores={dados.todos} roles={rolesU} organizacoes={organizacoes}
-        catalogo={catalogo.catalogo} editor={catalogo.editor} podeEditar={autU.podeEditar} podeGerirRoles={autU.podeGerirRoles}
+        catalogo={catalogo.catalogo} editor={catalogo.editor} podeEditar={autU.podeEditar} podeMudarPalavraPasse={autU.podeMudarPalavraPasse} podeGerirRoles={autU.podeGerirRoles}
         aoGravar={(form, valores, original) => {
           const campos = { nome: valores.nome, email: valores.email, telefone: valores.telefone, posicao: valores.posicao, palavraPasse: valores.palavraPasse };
           if (form.modo === "criar") return acoesU.criar(campos, valores.vinculos);

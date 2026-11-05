@@ -19,7 +19,7 @@ import { TrabalhosAMais } from "./TrabalhosAMais";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, LINHAS, PAPEIS, eur0, pct, proximo, sugerirDaLead, tot, versaoAtual, type Negocio } from "./motor";
-import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, efetivo, gruposArea, nomeGrupo, type Grupo } from "./campos";
+import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, DECISAO, PECAS_WC, divisoesEscolhidas, efetivo, gruposArea, nomeGrupo, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
 import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
 import { OrcamentoSimples } from "./OrcamentoSimples";
@@ -252,6 +252,15 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
             {naChamada ? "Voltar aos passos" : "Tudo na chamada"}
           </Button>
         </div>
+      )}
+
+      {/* 5/11 (Rúben, a visita real): gravar a conversa da visita; no fim propõe os campos da Visita. Fica por cima dos passos para
+          continuar a gravar enquanto se anda entre eles. */}
+      {d.fase === 2 && !d.perdido && ver === null && (
+        <div className="mt-6"><ChamadaDireto ctx={ctx} d={d} modo="visita" grupos={[
+          EXTERIOR, INTERIOR, ...gruposArea(ctx.S.campos, d.f), ESCOLHAS,
+          ...(d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho") ? [PECAS_WC] : []), DECISAO,
+        ].map((g) => efetivo(ctx.S.campos, g))} /></div>
       )}
 
       <div className={cn("mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)]", !largo && "2xl:grid-cols-[260px_minmax(0,1fr)_240px]")}>

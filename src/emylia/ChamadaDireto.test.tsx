@@ -136,4 +136,25 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect(nuvem.transcreverFala.mock.calls[0][2]).toBe("UklGRg==");
     expect(nuvem.transcreverFala.mock.calls[0][3]).toBe("Esta é a minha voz");
   });
+
+  // 5/11 (Rúben, a visita real): o mesmo painel grava a visita; no fim propõe os campos da Visita, com as medidas ditas
+  it("modo visita: os textos da visita, as medidas e as notas vão à função como «visita», e a medida dita entra nas medidas", async () => {
+    nuvem.preencherCampos.mockResolvedValueOnce({ resumo: "Casa de banho toda nova.", motor: "gemini", fichas: [{ campos: [
+      { chave: "med_pav", rotulo: "Pavimento (m²)", tipo: "numero", valor: "4,1", valor_rotulo: null, confianca: 1, excerto: "Comercial: são 4,1 metros quadrados", estado: "preenchido" },
+      { chave: "notas_visita", rotulo: "Notas da visita", tipo: "texto_longo", valor: "Tirar a banheira e pôr duche.", valor_rotulo: null, confianca: 1, excerto: "", estado: "preenchido" },
+    ] }] });
+    const dv = { id: 9, f: {}, linha: "wc", visita: { med: {} } } as unknown as Negocio;
+    render(<ChamadaDireto ctx={ctx} d={dv} grupos={GRUPOS} modo="visita" />);
+    expect(screen.getByRole("heading", { name: "Gravar a visita" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Começar a gravar" })).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await waitFor(() => expect(screen.getByText(/Casa de banho toda nova\./)).toBeInTheDocument());
+    const [, grupos, tipo] = nuvem.preencherCampos.mock.calls[0];
+    expect(tipo).toBe("visita");
+    expect(grupos.map((g: Grupo) => g.titulo)).toEqual(["Qualificação", "Medidas da área", "Da visita"]);
+    fireEvent.click(screen.getByRole("button", { name: /Preencher 2 campos$/ }));
+    expect((dv as unknown as { visita: { med: Record<string, number> } }).visita.med.pav).toBe(4.1);
+    expect(campo).toHaveBeenCalledWith(9, "notas_visita", "Tirar a banheira e pôr duche.");
+    expect(campo).not.toHaveBeenCalledWith(9, "med_pav", expect.anything());
+  });
 });

@@ -146,6 +146,26 @@ describe("FichaReal: contacto editável", () => {
     const seccao = await abrirDados();
     expect(within(seccao).queryByRole("button", { name: "Editar contacto" })).toBeNull();
   });
+
+  // 05/11 (P2 da auditoria): o lápis pede o mesmo que as RPCs (pessoas.edit E leads.edit/clients.edit com âmbito) — a base dá-o em
+  // permissoes.editar_pessoa. Com pessoas.edit mas sem o âmbito da pessoa, não há lápis na identidade nem no contacto.
+  it("com pessoas.edit mas sem o âmbito da pessoa (editar_pessoa false) não há lápis na identidade nem no contacto", async () => {
+    ficha = fichaCom({}, { permissoes: { editar: true, criar: true, editar_pessoa: false } });
+    desenhar();
+    const seccao = await abrirDados();
+    expect(within(seccao).queryByRole("button", { name: "Editar contacto" })).toBeNull();
+    const identidade = await screen.findByRole("region", { name: "Identidade" });
+    expect(within(identidade).queryByRole("button", { name: "Editar identidade" })).toBeNull();
+  });
+
+  it("com editar_pessoa true há lápis na identidade e no contacto", async () => {
+    ficha = fichaCom({}, { permissoes: { editar: true, criar: true, editar_pessoa: true } });
+    desenhar();
+    const seccao = await abrirDados();
+    expect(within(seccao).getByRole("button", { name: "Editar contacto" })).toBeInTheDocument();
+    const identidade = await screen.findByRole("region", { name: "Identidade" });
+    expect(within(identidade).getByRole("button", { name: "Editar identidade" })).toBeInTheDocument();
+  });
 });
 
 describe("FichaReal: tipo de cliente", () => {

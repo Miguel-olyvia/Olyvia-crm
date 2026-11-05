@@ -202,6 +202,9 @@ export function UserFormEnhanced({
   const [templateCustomAttrs, setTemplateCustomAttrs] = useState<FieldConfig[]>([]);
   const { countries } = useCountries();
   const { hasPermission, permissions: currentUserPermissions, isSystemAdmin } = usePermissions();
+  // Palavra-passe ao EDITAR outra pessoa: só com users.change_password (o que a edge update-user-password pede; a própria
+  // muda-se sempre). Ao criar continua como estava.
+  const mostrarPalavraPasse = !isEdit || isSelfEdit || hasPermission('users.change_password');
   const { userType: currentUserType, activeCompany } = useCompany();
   // Stable key for permissions to avoid infinite useEffect re-runs
   const permissionsKey = useMemo(() => currentUserPermissions.slice().sort().join(","), [currentUserPermissions]);
@@ -1170,60 +1173,62 @@ export function UserFormEnhanced({
             </div>
 
             {/* Password */}
-            <div className="space-y-2 p-4 rounded-lg border bg-muted/30">
-              <Label htmlFor="password" className="flex items-center gap-2">
-                <KeyRound className="w-4 h-4 text-muted-foreground" />
-                {t("users.password")} {!isEdit && "*"}
-              </Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    value={formData.password}
-                    onChange={(e) =>
-                      setFormData({ ...formData, password: e.target.value })
-                    }
-                    placeholder={isEdit ? t("users.leaveEmptyToKeep") : t("users.passwordPlaceholder")}
-                    className="pr-10"
-                    aria-invalid={!!fieldErrors.password}
-                  />
+            {mostrarPalavraPasse && (
+              <div className="space-y-2 p-4 rounded-lg border bg-muted/30">
+                <Label htmlFor="password" className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-muted-foreground" />
+                  {t("users.password")} {!isEdit && "*"}
+                </Label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={formData.password}
+                      onChange={(e) =>
+                        setFormData({ ...formData, password: e.target.value })
+                      }
+                      placeholder={isEdit ? t("users.leaveEmptyToKeep") : t("users.passwordPlaceholder")}
+                      className="pr-10"
+                      aria-invalid={!!fieldErrors.password}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
                   <Button
                     type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full"
-                    onClick={() => setShowPassword(!showPassword)}
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 h-10"
+                    onClick={() => {
+                      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+                      let pwd = "";
+                      for (let i = 0; i < 12; i++) {
+                        pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+                      }
+                      setFormData({ ...formData, password: pwd });
+                      setShowPassword(true);
+                    }}
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    <Wand2 className="w-4 h-4 mr-1" />
+                    Gerar
                   </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 h-10"
-                  onClick={() => {
-                    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-                    let pwd = "";
-                    for (let i = 0; i < 12; i++) {
-                      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
-                    }
-                    setFormData({ ...formData, password: pwd });
-                    setShowPassword(true);
-                  }}
-                >
-                  <Wand2 className="w-4 h-4 mr-1" />
-                  Gerar
-                </Button>
+                {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
+                {isEdit && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("users.passwordChangeHint")}
+                  </p>
+                )}
               </div>
-              {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
-              {isEdit && (
-                <p className="text-xs text-muted-foreground">
-                  {t("users.passwordChangeHint")}
-                </p>
-              )}
-            </div>
+            )}
 
             {/* Custom Attributes Section - Social links based on template + custom attrs */}
             {(isFieldVisible('linkedin') || isFieldVisible('facebook') || templateCustomAttrs.length > 0) && (

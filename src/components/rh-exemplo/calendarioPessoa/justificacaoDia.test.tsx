@@ -42,7 +42,7 @@ vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (awai
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
 
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { renderRh, reporRhTeste } from "@/test/rhExemploProviders";
+import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
 import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { definirGestao, lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
@@ -253,12 +253,52 @@ describe("vista da própria pessoa", () => {
 });
 
 describe("o RH decide", () => {
+  // Quem decide: a base pede hr.assiduidade.justificacao.edit, e aceitar (cria uma falta) também hr.assiduidade.faltas.edit.
+  beforeEach(() => {
+    rhTeste.permissoes = new Set(["hr.assiduidade.justificacao.edit", "hr.assiduidade.faltas.edit", "hr.assiduidade.justificacao.view"]);
+  });
   async function pessoaJustifica() {
     const { unmount } = ficha("p-sofia", "Sofia Rebelo", true);
     await sofiaEnvia();
     unmount();
   }
   const idDaSofia = (): string => baseFalsa.justificacoes.find((j) => j.pessoaId === "p-sofia")?.id ?? "";
+
+  it("só com justificacao.view a fila e o dia mostram a justificação sem botões de decidir", async () => {
+    rhTeste.permissoes = new Set(["hr.assiduidade.justificacao.view"]);
+    await pessoaJustifica();
+    envolver(<FilaLida />);
+    const linha = screen.getByTestId(`rhjd-fila-${idDaSofia()}`);
+    expect(linha).toHaveTextContent("Sofia");
+    expect(within(linha).queryByRole("button", { name: /Aceitar a justificação/ })).not.toBeInTheDocument();
+    expect(within(linha).queryByRole("button", { name: /Recusar a justificação/ })).not.toBeInTheDocument();
+    cleanup();
+
+    semearJustificacao({ id: "jd-ines", pessoaId: "p-ines", data: "2026-10-07" });
+    ficha("p-ines", "Inês Cardoso", false);
+    const detalhe = abrirDia("2026-10-07");
+    await waitFor(() => expect(within(detalhe).getByTestId("rhjd-rh")).toBeInTheDocument());
+    for (const nome of ["Aceitar · paga", "Aceitar · não paga", "Recusar"]) {
+      expect(within(detalhe).queryByRole("button", { name: nome })).not.toBeInTheDocument();
+    }
+  });
+
+  it("com justificacao.edit sem faltas.edit só há «Recusar» (aceitar cria uma falta)", async () => {
+    rhTeste.permissoes = new Set(["hr.assiduidade.justificacao.edit", "hr.assiduidade.justificacao.view"]);
+    await pessoaJustifica();
+    envolver(<FilaLida />);
+    const linha = screen.getByTestId(`rhjd-fila-${idDaSofia()}`);
+    expect(within(linha).queryByRole("button", { name: /Aceitar a justificação/ })).not.toBeInTheDocument();
+    expect(within(linha).getByRole("button", { name: /Recusar a justificação de Sofia/ })).toBeInTheDocument();
+    cleanup();
+
+    semearJustificacao({ id: "jd-ines", pessoaId: "p-ines", data: "2026-10-07" });
+    ficha("p-ines", "Inês Cardoso", false);
+    const detalhe = abrirDia("2026-10-07");
+    await waitFor(() => expect(within(detalhe).getByRole("button", { name: "Recusar" })).toBeInTheDocument());
+    expect(within(detalhe).queryByRole("button", { name: "Aceitar · paga" })).not.toBeInTheDocument();
+    expect(within(detalhe).queryByRole("button", { name: "Aceitar · não paga" })).not.toBeInTheDocument();
+  });
 
   it("a fila lê as pendentes da base, mostra a linha e «Aceitar · paga» faz UMA decisão e tira-a da fila", async () => {
     await pessoaJustifica();
