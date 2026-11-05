@@ -36,7 +36,8 @@ import { linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
-import { podeNeg } from "@/emylia/permissoes";
+import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
+import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
@@ -80,8 +81,12 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
-  // 5/11: leads.assign para o comercial da lead (ComercialDaLead). Põe-se já no render (como S.tec mais abaixo), para que o seletor
-  // responda o mesmo nesta passagem; a ler, fica fixo.
+  // 5/11: ver os custos e as margens do orçamento (quotes.view_costs por fn_cat_pode, a pergunta das RPCs que os devolvem). Põe-se em
+  // permissoes.ts já no render (como S.tec mais abaixo), para que podeVerCustos() responda o mesmo nesta passagem; a ler, esconde.
+  const verCustos = usePodeVerCustos();
+  definirVerCustos(verCustos.aLer ? null : verCustos.pode);
+  useEffect(() => () => definirVerCustos(undefined), []);
+  // 5/11: leads.assign para o comercial da lead (ComercialDaLead), da mesma maneira
   const podeAtribuir = usePodeAtribuirComercial();
   definirPodeAtribuirLead(podeAtribuir);
   useEffect(() => () => definirPodeAtribuirLead(null), []);

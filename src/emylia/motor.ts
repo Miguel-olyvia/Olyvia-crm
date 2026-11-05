@@ -16,6 +16,7 @@ import {
 import type { Produto } from "./v2/catalogoModelo";
 import { volumesDasLinhas } from "./entulhoPadrao";
 import { faltaParaEncerrar } from "./encerrarObra";
+import { podeVerCustos } from "./permissoes";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ParDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, PAGAMENTO_MEDIDA, deIso, erroPrestacoes, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
@@ -1082,16 +1083,18 @@ function oficiosSemCusto(S: Estado, sid: SvcId, s: Servico): string[] {
 export interface Alerta { k: "x" | "w"; t: string; d: string; fix?: boolean; i?: number; sug?: number; aprov?: boolean; go?: Vista; key?: string }
 export function alertas(d: Negocio, S: Estado): Alerta[] {
   const A: Alerta[] = [], min = S.cfg.min / 100, alvo = S.cfg.alvo / 100, o = d.orc!, vistos = o.avisosVistos || {};
+  // 5/11: sem quotes.view_costs o texto não diz os valores do custo nem da margem; as regras e o que bloqueia ficam iguais
+  const vc = podeVerCustos();
   o.linhas.forEach((l, i) => {
     // 27/10: os bloqueios das linhas têm por título só o nome; o ecrã junta-os num cartão "A corrigir", uma linha cada
     // uma linha de materiais com o preço mudado à mão para baixo do custo também bloqueia
-    if (l.t === "mat" && o.precosMan?.[l.d] != null && l.custo > 0 && l.preco < l.custo) A.push({ k: "x", fix: true, t: l.d, d: `${eur(l.preco)} € · custo ${eur(l.custo)} €`, i, sug: r2(l.custo / (1 - alvo)), aprov: false });
+    if (l.t === "mat" && o.precosMan?.[l.d] != null && l.custo > 0 && l.preco < l.custo) A.push({ k: "x", fix: true, t: l.d, d: vc ? `${eur(l.preco)} € · custo ${eur(l.custo)} €` : `${eur(l.preco)} € · abaixo do custo`, i, sug: r2(l.custo / (1 - alvo)), aprov: false });
     if (l.t !== "svc") return;
     const s = S.svc[l.sid], x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
     // 22/10: uma linha a 0 € de custo e de preço (subempreitada sem custo) não tem margem: o aviso dela vem a seguir
     if (x.preco === 0 && x.custo === 0) { /* sem margem para avaliar */ }
-    else if (x.preco < x.custo) A.push({ k: "x", fix: true, t: s.n, d: `${eur(l.pu)} € por ${s.un} · custo ${eur(l.cu)} €`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
-    else if (m < min) A.push({ k: "x", fix: true, t: s.n, d: `Margem ${pct(m)} · mínimo ${S.cfg.min}%`, i, sug: r2(l.cu / (1 - alvo)), aprov: true });
+    else if (x.preco < x.custo) A.push({ k: "x", fix: true, t: s.n, d: vc ? `${eur(l.pu)} € por ${s.un} · custo ${eur(l.cu)} €` : `${eur(l.pu)} € por ${s.un} · abaixo do custo`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
+    else if (m < min) A.push({ k: "x", fix: true, t: s.n, d: vc ? `Margem ${pct(m)} · mínimo ${S.cfg.min}%` : "Margem abaixo do mínimo", i, sug: r2(l.cu / (1 - alvo)), aprov: true });
     // 22/10: um ofício sem €/h (sem técnicos no RH e sem salário) não usa a média dos outros: a mão de obra conta 0 € e não se envia assim
     // 28/10: o aviso nomeia os ofícios da receita sem €/h (num serviço do Catálogo, s.perfil é a categoria: "Revestimentos")
     if (s.semCusto) A.push({ k: "x", t: `Ofício sem custo/hora em ${s.n}`, d: textoSemCustoHora(oficiosSemCusto(S, l.sid, s)), i, aprov: false, go: "catalogo", key: "sc" + l.sid });
@@ -1107,10 +1110,10 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
   if (oc?.sugestao && !vistos["ensug"]) A.push({ k: "w", t: "Contentor quase vazio", d: oc.sugestao.charAt(0).toUpperCase() + oc.sugestao.slice(1) + ".", key: "ensug" });
   // a demolição: o preço mexido à mão abaixo da margem mínima (da demolição ou, sem ela, a geral)
   const rd = o.demolicao?.r;
-  if (rd?.abaixoMin) A.push({ k: "x", t: rd.preco < rd.custo ? "Preço da demolição abaixo do custo" : "Margem da demolição abaixo do mínimo", d: `${eur(rd.preco)} € dá ${pct(rd.margem)} de margem, com um mínimo de ${pct(rd.margemMin)}. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.`, aprov: rd.preco >= rd.custo });
+  if (rd?.abaixoMin) A.push({ k: "x", t: rd.preco < rd.custo ? "Preço da demolição abaixo do custo" : "Margem da demolição abaixo do mínimo", d: vc ? `${eur(rd.preco)} € dá ${pct(rd.margem)} de margem, com um mínimo de ${pct(rd.margemMin)}. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.` : `${eur(rd.preco)} € fica abaixo do mínimo. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.`, aprov: rd.preco >= rd.custo });
   const T = tot(d, S);
-  if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true });
-  else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: `Margem total de ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });
+  if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: vc ? `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}` : `O desconto de ${nfmt(o.desconto)}% deixa a margem abaixo do mínimo`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true });
+  else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: vc ? `Margem total de ${pct(T.m)}` : "Margem total abaixo do mínimo", d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });
   return A;
 }
 /** 2/11 (reunião: "não deu, porquê? Ah, é por causa da margem"): o que bloqueia a proposta, dito pelo nome do produto ou do serviço.

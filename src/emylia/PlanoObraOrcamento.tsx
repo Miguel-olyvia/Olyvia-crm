@@ -22,6 +22,7 @@ import { totais } from "./DocsCliente";
 import { PrestacoesMedida } from "./PrestacoesMedida";
 import { Contagem, useReduzir, vibrar } from "./movimento";
 import { useLargura } from "./largura";
+import { SEM_VER_CUSTOS, podeVerCustos } from "./permissoes";
 import { nomeCurtoTarefa } from "./obraOps";
 
 export { COR_FASE } from "./planoObra";
@@ -80,7 +81,9 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   const naProposta = Number(d.f.prazo_exec) || 0, doGantt = prazoProposta(P.tarefas);
   const delta = P.tarefas.reduce((a, t) => a + t.delta, 0);
   const temDem = (f: FasePlano) => f.tarefas.some((t) => t.chave === TAREFA_DEMOLICAO);
-  const veCustoFase = (f: FasePlano) => direcao || !temDem(f); // o custo da demolição só a Direção o vê
+  // 5/11: sem quotes.view_costs (a base manda os custos a null) não há custo nem margem nas fases, nas tarefas, nem a curva do custo
+  const ver = podeVerCustos();
+  const veCustoFase = (f: FasePlano) => ver && (direcao || !temDem(f)); // o custo da demolição só a Direção o vê
 
   /* ---------------------------------------------- arrastar a ponta da barra (meio dia de cada vez) */
   const arrastar = (t: TarefaPrevista) => (e: RPointerEvent<HTMLElement>) => {
@@ -186,7 +189,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
         </div>
       </dl>
       {delta !== 0 && (
-        <p className="-mt-3 flex items-start gap-2 text-sm text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Os dias mudados à mão {delta > 0 ? "somam" : "tiram"} {eur0(Math.abs(delta))} ao custo. O preço ao cliente não muda.</p>
+        <p className="-mt-3 flex items-start gap-2 text-sm text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Os dias mudados à mão {delta > 0 ? "somam" : "tiram"} {ver ? `${eur0(Math.abs(delta))} ` : ""}ao custo. O preço ao cliente não muda.</p>
       )}
 
       {/* ------------------------------------------------ as fases: uma lista; o nome inteiro à esquerda, os números à direita */}
@@ -306,7 +309,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                   </li>,
                   ...(abre ? f.tarefas.map((t, i) => {
                     const Ic = iconeOficio(t.perfil), apagada = faseOn != null && faseOn !== t.fase, aqui = aberta === t.chave;
-                    const dem = t.chave === TAREFA_DEMOLICAO, veCusto = !dem || direcao;
+                    const dem = t.chave === TAREFA_DEMOLICAO, veCusto = ver && (!dem || direcao);
                     const barra = (
                       <motion.div
                         role="slider" tabIndex={0} aria-label={`Dias de ${t.nome}`} aria-valuemin={0.5} aria-valuenow={t.dias}
@@ -372,10 +375,10 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
               })}
             </ul>
 
-            {/* a curva do custo acumulado, alinhada com os dias */}
-            <div style={tabela ? { paddingLeft: LW + PAD } : undefined}>
+            {/* a curva do custo acumulado, alinhada com os dias (5/11: só com quotes.view_costs) */}
+            {ver && <div style={tabela ? { paddingLeft: LW + PAD } : undefined}>
               <CurvaCusto P={P} prest={prestAtual} linhaW={linhaW} colW={colW} gradeW={gradeW} calendario={calendario} faseOn={faseOn} />
-            </div>
+            </div>}
           </div>
         </div>
       </div>
@@ -466,7 +469,7 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio }: {
   t: TarefaPrevista; d: Negocio; ctx: Pick<Ctx, "A" | "run">; fechado: boolean; direcao: boolean; inicio: string;
 }) {
   const { A, run } = ctx;
-  const dem = t.chave === TAREFA_DEMOLICAO, veCusto = !dem || direcao, poucas = t.h < t.hOrc - 1e-9;
+  const dem = t.chave === TAREFA_DEMOLICAO, ver = podeVerCustos(), veCusto = ver && (!dem || direcao), poucas = t.h < t.hOrc - 1e-9;
   return (
     <div className="grid gap-4 rounded-2xl border border-border bg-card p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 sm:p-5" aria-live="polite">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -500,7 +503,7 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio }: {
           <div><dt className="text-sm text-muted-foreground">Custo da tarefa</dt><dd className="font-semibold tabular-nums">{eur0(t.custo.total)}
             {t.delta !== 0 && <span className="block text-xs font-normal text-muted-foreground">no orçamento: {eur0(t.custoOrc)}</span>}</dd></div>
         </dl>
-      ) : <p className="text-sm text-muted-foreground">O custo da demolição e entulho só a Direção o vê.</p>}
+      ) : <p className="text-sm text-muted-foreground">{ver ? "O custo da demolição e entulho só a Direção o vê." : SEM_VER_CUSTOS}</p>}
     </div>
   );
 }

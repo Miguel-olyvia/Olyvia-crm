@@ -7,6 +7,7 @@ import { Minus, Plus, RotateCcw, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, parDemolicao, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
+import { podeVerCustos } from "./permissoes";
 import { useCatalogo } from "./v2/catalogoStore";
 import { SeletorPesquisa } from "./pecasFicha";
 import { ARTIGOS_DEM0, PAR_DEM0, resumoDemolicao, type AjustesDem, type ChaveAjuste, type Meio, type Ocupacao } from "./entulho";
@@ -38,7 +39,7 @@ export function OcupacaoMeio({ oc }: { oc: Ocupacao }) {
 
 export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"> & { d: Negocio }) {
   const K = useCatalogo();
-  const o = d.orc!, dem = o.demolicao!, r = dem.r, fechado = !!o.enviada, direcao = S.role === "direcao";
+  const o = d.orc!, dem = o.demolicao!, r = dem.r, fechado = !!o.enviada, veCusto = S.role === "direcao" && podeVerCustos(); // 5/11: só a Direção, e com quotes.view_costs (sem ela a base manda os custos a null)
   const artigos = K.artigosDem ?? ARTIGOS_DEM0, P = parDemolicao(S, K.parDem ?? PAR_DEM0); // 22/10: o €/h da equipa vem do RH
   if (!r) return null;
   const aj = (k: ChaveAjuste) => r.ajustados.includes(k);
@@ -111,7 +112,7 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
                   <span className="block text-xs text-muted-foreground">{S.svc[v.de]?.n ?? v.de}</span>
                 </span>
                 <span className="text-sm tabular-nums">{nfmt(Math.round(v.m3 * 100) / 100)} m³ · {nfmt(Math.round(v.t * 100) / 100)} t</span>
-                {direcao && <span className="w-full text-right text-xs tabular-nums text-muted-foreground">carga {eur(v.carga)} € · deposição {eur(v.deposicao)} €</span>}
+                {veCusto && <span className="w-full text-right text-xs tabular-nums text-muted-foreground">carga {eur(v.carga)} € · deposição {eur(v.deposicao)} €</span>}
               </li>
             ))}
           </ul>
@@ -166,7 +167,7 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
       </div>
 
       {/* só a Direção vê o custo; a conta (C_dep, markup ou margem alvo) fica atrás de "Ver o cálculo" */}
-      {direcao && (
+      {veCusto && (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
           {([["Demolição", r.demolicao], ["Carga", r.carga], ["Deposição", r.deposicao], ["Consumíveis", r.consumiveis], ["Proteção e limpeza", r.protecao], ["Custo", r.custo]] as [string, number][]).map(([t, v]) => (
             <div key={t}><dt className="text-muted-foreground">{t}</dt><dd className="tabular-nums">{eur(v)} €</dd></div>
