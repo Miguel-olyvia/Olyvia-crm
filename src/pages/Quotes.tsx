@@ -86,6 +86,7 @@ import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialo
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { QUOTE_LINE_COLUNAS_SEM_CUSTO, lerLinhasComCustos } from "@/lib/quotes/quoteLineCosts";
 import { getLineUnitPrice, getLineUnitCost, marginOnPrice } from "@/utils/quotes/quoteLinePricing";
 
 // Abaixo deste comprimento a pesquisa nao e aplicada (nem na lista nem nos KPIs).
@@ -328,6 +329,10 @@ export default function Quotes() {
   
   const { t, language } = useTranslation();
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
+  // See canViewQuoteCosts() for why the gate must stay identical to the one ProposalDetailsDialog
+  // uses — a proposal carries its quote's lines, so this is the same data. (20270109110000: tem de vir
+  // antes do fetchLinesAgg, que só pede os custos à base quando isto é verdade.)
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
   const alertSettings = useAlertSettings();
@@ -934,12 +939,14 @@ export default function Quotes() {
       const ids = quotes.map(q => q.id);
       // chunkSize = 30 (CRÍTICO): worst case ~31 linhas/quote × 30 = 930 < teto 1000 do PostgREST
       const lines = await fetchInBatches(ids, async (chunk) => {
+        // 20270109110000: sem as colunas de custo (já não se leem da tabela); quem pode recebe-as da RPC abaixo.
         const { data } = await supabase
           .from("quote_lines")
-          .select("id, quote_id, qt, cost_price, custo_material_unit, custo_mao_obra_unit, margem_percent, iva_percent, total_sem_iva, total_com_iva, section_name, product_id, service_id, bundle_id, descricao_snapshot, selected_attributes")
+          .select("id, quote_id, qt, iva_percent, total_sem_iva, total_com_iva, section_name, product_id, service_id, bundle_id, descricao_snapshot, selected_attributes")
           .in("quote_id", chunk)
           .limit(1000);
-        return (data as any[]) || [];
+        const linhas = (data as any[]) || [];
+        return canViewCosts ? await lerLinhasComCustos(linhas).catch(() => linhas) : linhas;
       }, 30);
 
       const detailsMap = await resolveLineDetails((lines || []) as any);
@@ -1004,7 +1011,7 @@ export default function Quotes() {
       setLinesAgg(agg);
     };
     fetchLinesAgg();
-  }, [quotes]);
+  }, [quotes, canViewCosts]);
 
   // fetchQuotes is memoised on every filter it sends to the server, so this
   // refetches (and resets to page 0) whenever one of them changes.
@@ -1091,11 +1098,7 @@ export default function Quotes() {
     return { total, rascunho, enviado, aceite, perdido, totalValue, totalCost, avgMargin, avgValue, taxaAceitacao, avgAcceptTime };
   }, [quotes, linesAgg]);
 
-  // Check if any quote has actual cost data
-  // See canViewQuoteCosts() for why "quotes.manage" (not "quotes.view_costs")
-  // is the gate, and why it must stay identical to the one ProposalDetailsDialog
-  // uses — a proposal carries its quote's lines, so this is the same data.
-  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
+  // Check if any quote has actual cost data (canViewCosts está declarado junto de usePermissions)
   const hasCostData = useMemo(() => {
     return canViewCosts && Object.values(linesAgg).some(a => a.hasCostData);
   }, [linesAgg, canViewCosts]);
@@ -1284,8 +1287,10 @@ export default function Quotes() {
 
   const handleViewDetails = async (quote: Quote) => {
     setDetailQuote(quote);
-    const { data: lines } = await supabase.from('quote_lines').select('*').eq('quote_id', quote.id).order('ordem');
-    const linesArr = (lines as QuoteLine[]) || [];
+    // 20270109110000: colunas sem custo; os custos só a quem pode (rpc_quote_lines_custos).
+    const { data: lines } = await (supabase as any).from('quote_lines').select(QUOTE_LINE_COLUNAS_SEM_CUSTO).eq('quote_id', quote.id).order('ordem');
+    const semCusto = ((lines as any[]) || []) as Array<QuoteLine & { id: string; quote_id: string }>;
+    const linesArr = (canViewCosts ? await lerLinhasComCustos(semCusto).catch(() => semCusto) : semCusto) as QuoteLine[];
     setDetailLines(linesArr);
     const details = await resolveLineDetails(linesArr as any);
     setDetailLineDetails(details);

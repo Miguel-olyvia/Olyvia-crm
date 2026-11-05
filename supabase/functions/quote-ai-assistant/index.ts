@@ -96,7 +96,7 @@ serve(async (req) => {
       .select(`
         id, title, total_value,
         quote_lines(
-          descricao_snapshot, categoria, qt, custo_material_unit
+          descricao_snapshot, categoria, qt
         )
       `)
       .eq("organization_id", effective_org_id)

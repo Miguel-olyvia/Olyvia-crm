@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { QUOTE_LINE_COLUNAS_SEM_CUSTO } from "@/lib/quotes/quoteLineCosts";
 
 // Variable definitions per module
 export const TEMPLATE_VARIABLES: Record<string, Array<{ key: string; label: string; category: string }>> = {
@@ -364,9 +365,10 @@ export async function resolveEntityVariables(
         vars.quote_number = quote.quote_number || "";
 
         // Build items table
+        // 20270109110000: sem as colunas de custo (já não se leem da tabela).
         const { data: lines } = await (supabase as any)
           .from("quote_lines")
-          .select("*")
+          .select(QUOTE_LINE_COLUNAS_SEM_CUSTO)
           .eq("quote_id", entityId)
           .order("ordem");
 

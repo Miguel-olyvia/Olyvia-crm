@@ -40,6 +40,14 @@ import { formatDeliveryAddress } from "@/lib/addresses/entityDeliveryAddresses";
 import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { QuoteBuilderSidebar } from "@/components/quote/QuoteBuilderSidebar";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import {
+  QUOTE_LINE_COLUNAS_SEM_CUSTO,
+  lerCustosDasLinhas,
+  custosSinteticos,
+  marcaCustosOcultos,
+  linhaComCustosOcultos,
+  type CustosOcultosMarca,
+} from "@/lib/quotes/quoteLineCosts";
 import { usePermissions } from "@/hooks/usePermissions";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { downloadBlob } from "@/utils/generateProposalPdfBlob";
@@ -281,6 +289,9 @@ interface QuoteLine {
   // fn_apply_deal_need faz DELETE+reinsert dos itens a cada gravação da
   // necessidade, por isso estes ids são voláteis e nunca servem de critério.
   source_deal_need_item_id?: string | null;
+  // 20270109100000: linha recebida sem custos (quem não tem quotes.view_costs/quotes.manage). Os custos da linha são
+  // de fachada (dão o preço certo); ao gravar sem mexer no artigo nem no custo, o servidor grava os verdadeiros.
+  custos_ocultos?: CustosOcultosMarca | null;
 }
 
 // Chave do antigo rascunho em localStorage (removido — sobrepunha-se para
@@ -430,7 +441,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // (canEditCosts/canEditMargins); os numeros de margem calculados eram mostrados
   // so por existirem dados de custo, sem permissao. Tem de vir DEPOIS de
   // hasPermission ser declarado, senao rebenta com "before initialization".
-  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
+  // 20270109100000: e só se a base devolveu os custos das linhas (rpc_quote_lines_custos é por organização); uma
+  // linha com custos de fachada nunca mostra custo nem margem.
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin) && !lines.some((l) => !!l.custos_ocultos);
   const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
     viewerScope: getPermissionScope("quotes.view"),
     viewerAnewUserId: scopeAnewUserId,
@@ -2006,10 +2019,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         }
       }
 
-      const { data: quoteLines, error: linesError } = await supabase
+      // 20270109110000: as colunas de custo já não se leem da tabela; vêm de rpc_quote_lines_custos (só a quem pode).
+      const { data: quoteLines, error: linesError } = await (supabase as any)
         .from("quote_lines")
         .select(`
-          *,
+          ${QUOTE_LINE_COLUNAS_SEM_CUSTO},
           products(sku),
           services(sku),
           item_suppliers:item_supplier_id(supplier_sku, purchase_price, suppliers(name))
@@ -2018,9 +2032,16 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         .order("ordem");
 
       if (linesError) throw linesError;
+      // Sem os custos (ou o preço calculado) não se pode editar sem estragar a linha: falha como a leitura das linhas.
+      const custosLinhas = await lerCustosDasLinhas([effectiveQuoteId]);
 
       setLines(
-        quoteLines.map((line) => ({
+        (quoteLines as any[]).map((line) => {
+          const custos = custosLinhas.get(line.id);
+          const visiveis = !!custos?.pode_ver_custos;
+          const deFachada = visiveis ? null : custosSinteticos(custos?.preco_base_un ?? null);
+          const custoMaterial = visiveis ? Number(custos!.custo_material_unit) : deFachada!.custo_material_unit;
+          return {
           id: line.id,
           catalog_item_id: line.catalog_item_id,
           product_id: line.product_id,
@@ -2037,11 +2058,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           supplier_sku: (line as any).item_suppliers?.supplier_sku ?? null,
           unidade: (line as any).unidade || null,
           item_description: (line as any).item_description || "",
-          cost_price: Number((line as any).cost_price) || 0,
+          cost_price: visiveis ? Number(custos!.cost_price) || 0 : 0,
           qt: Number(line.qt),
-          custo_material_unit: Number(line.custo_material_unit),
-          custo_mao_obra_unit: Number(line.custo_mao_obra_unit),
-          margem_percent: Number(line.margem_percent),
+          custo_material_unit: custoMaterial,
+          custo_mao_obra_unit: visiveis ? Number(custos!.custo_mao_obra_unit) : 0,
+          margem_percent: visiveis ? Number(custos!.margem_percent) : 0,
           iva_percent: Number(line.iva_percent),
           int_percent: Number(line.int_percent),
           discount_percent: Number((line as any).discount_percent) || 0,
@@ -2057,11 +2078,19 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           // origem e o botão de importar duplicaria as linhas.
           source_deal_need_id: line.source_deal_need_id || null,
           source_deal_need_item_id: line.source_deal_need_item_id || null,
-        }))
+          custos_ocultos: visiveis ? null : marcaCustosOcultos({
+            custo_material_unit: custoMaterial,
+            product_id: line.product_id,
+            service_id: line.service_id,
+            bundle_id: (line as any).bundle_id,
+            item_supplier_id: (line as any).item_supplier_id,
+          }),
+          };
+        })
       );
       
       // Extract unique sections from loaded lines
-      const loadedSections = [...new Set(quoteLines.map((l: any) => l.section_name || "Geral"))];
+      const loadedSections: string[] = [...new Set((quoteLines as any[]).map((l: any): string => l.section_name || "Geral"))];
       if (loadedSections.length > 0) {
         setSections(loadedSections);
         setActiveSection(loadedSections[0]);
@@ -2476,6 +2505,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             // rastreabilidade.
             source_deal_need_id: line.source_deal_need_id || null,
             source_deal_need_item_id: line.source_deal_need_item_id || null,
+            // 20270109100000: linha recebida sem custos e não mexida — o servidor grava os custos verdadeiros dela.
+            ...(linhaComCustosOcultos(line) ? { id: line.id, custos_ocultos: true } : {}),
           };
         });
 
@@ -3548,7 +3579,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               )}
               {canEditMargins && (
                 <>
-                  <TableHead className="w-[80px]">{t('quoteBuilder.table.margin')}</TableHead>
+                  {/* 20270109100000: a margem é um número de custo — só a quem vê custos */}
+                  {canViewCosts && <TableHead className="w-[80px]">{t('quoteBuilder.table.margin')}</TableHead>}
                   <TableHead className="w-[80px]">{t('quoteBuilder.table.vat')}</TableHead>
                   <TableHead className="w-[80px]">{t('quoteBuilder.table.int')}</TableHead>
                 </>
@@ -3612,6 +3644,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                   )}
                   {canEditMargins && (
                     <>
+                      {canViewCosts && (
                       <TableCell>
                         <Input
                           type="number"
@@ -3624,6 +3657,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                           className="w-full"
                         />
                       </TableCell>
+                      )}
                       <TableCell>
                         <Input
                           type="number"

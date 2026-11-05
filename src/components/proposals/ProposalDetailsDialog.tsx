@@ -49,6 +49,7 @@ import { getLineDisplayUnitPrice } from "@/utils/quotes/quoteLinePricing";
 import { round2 } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { lerCustosDasLinhas, juntarCustos } from "@/lib/quotes/quoteLineCosts";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const CALL_RESULT_LABELS: Record<string, string> = {
@@ -271,7 +272,7 @@ export function ProposalDetailsDialog({
           .order("sort_order"),
         supabase
           .from("quotes")
-          .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, retail_price_unit)")
+          .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, quote_id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, int_percent, discount_percent, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, retail_price_unit)")
           .eq("proposal_id", proposal.id),
         supabase
           .from("proposals")
@@ -312,12 +313,24 @@ export function ProposalDetailsDialog({
         if (pLink?.quote_id) {
           const { data: linkedQuote } = await supabase
             .from("quotes")
-            .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, retail_price_unit)")
+            .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, quote_id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, int_percent, discount_percent, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, retail_price_unit)")
             .eq("id", pLink.quote_id)
             .single();
           if (linkedQuote) {
             loadedQuotes = [linkedQuote as unknown as QuoteItem];
           }
+        }
+      }
+      // 20270109110000: as colunas de custo já não se leem de quote_lines; quem pode recebe-as de rpc_quote_lines_custos.
+      if (canViewCosts && loadedQuotes.length > 0) {
+        try {
+          const custos = await lerCustosDasLinhas(loadedQuotes.map((q) => q.id));
+          loadedQuotes = loadedQuotes.map((q) => ({
+            ...q,
+            quote_lines: juntarCustos(((q.quote_lines || []) as unknown) as Array<QuoteLine & { id: string }>, custos) as QuoteLine[],
+          }));
+        } catch (e) {
+          console.error("[ProposalDetailsDialog] rpc_quote_lines_custos failed", e);
         }
       }
       setQuotes(loadedQuotes);

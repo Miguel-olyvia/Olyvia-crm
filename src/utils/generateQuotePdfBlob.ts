@@ -2,6 +2,7 @@ import React from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { QuotePDFDocument } from '@/components/QuotePDFDocument';
 import { supabase } from '@/integrations/supabase/client';
+import { QUOTE_LINE_COLUNAS_SEM_CUSTO } from '@/lib/quotes/quoteLineCosts';
 import { fetchDefaultQuotePdfTemplate, fetchQuotePdfTemplateById } from '@/utils/quotePdfTemplate';
 import { buildQuoteRenderContext } from '@/utils/buildQuoteRenderContext';
 import type { AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
@@ -60,7 +61,8 @@ export async function generateQuotePdfBlob(
 
     // visible_to_client=true exclui linhas internas da Fase 1 de diagnóstico
     // (sugeridas por regra/IA) — nunca podem ser vistas pelo cliente.
-    const { data: fetchedLines } = await supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quoteId).eq('visible_to_client', true).order('ordem');
+    // 20270109110000: o PDF nunca usa custos, e as colunas de custo já não se leem da tabela.
+    const { data: fetchedLines } = await (supabase as any).from('quote_lines').select(`${QUOTE_LINE_COLUNAS_SEM_CUSTO}, products (sku), services (sku)`).eq('quote_id', quoteId).eq('visible_to_client', true).order('ordem');
     const { data: fetchedFees } = await supabase.from('quote_fees').select(`*, service_fee_types (name, calculation_type, percentage, fixed_amount)`).eq('quote_id', quoteId);
     linesData = fetchedLines;
     feesData = fetchedFees;
