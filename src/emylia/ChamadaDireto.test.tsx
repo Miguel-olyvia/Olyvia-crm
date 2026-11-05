@@ -1,6 +1,6 @@
 // 4/11: o painel «Chamada em direto» de ponta a ponta, com a nuvem simulada: a chamada de exemplo dá falas, cada fala
-// vai à transcrição (Gemini pela função Supabase), no fim os campos são propostos e «Preencher» escreve nos campos do
-// negócio por A.campo. Em modo de teste (?teste=1) não há microfone.
+// vai à transcrição (Gemini pela função Supabase), no fim os campos são propostos com caixa e valor editável, e
+// «Preencher» escreve nos campos do negócio por A.campo. Em modo de teste (?teste=1) não há microfone.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Grupo } from "./campos";
@@ -26,6 +26,16 @@ const GRUPOS: Grupo[] = [{ titulo: "Qualificação", campos: [
   { k: "orc_cliente", l: "Orçamento", t: "escolha", op: ["Até 3.000 €", "Mais"] },
 ] }];
 
+const extracao = {
+  resumo: "Apartamento, proprietária.", motor: "gemini", fichas: [{ campos: [
+    { chave: "imovel", rotulo: "Tipo de imóvel", tipo: "escolha", valor: "apartamento", valor_rotulo: null, confianca: 1, excerto: "Cliente: É um apartamento", estado: "preenchido" },
+    { chave: "posse", rotulo: "O cliente é", tipo: "escolha", valor: "Proprietário", valor_rotulo: null, confianca: 0.5, excerto: "Cliente: sim", estado: "rever" },
+    { chave: "orc_cliente", rotulo: "Orçamento", tipo: "escolha", valor: null, valor_rotulo: null, confianca: 0, excerto: "", estado: "em_falta" },
+    { chave: "visita_dia", rotulo: "Visita: dia combinado", tipo: "data", valor: "2026-11-10", valor_rotulo: null, confianca: 1, excerto: "Comercial: Dia 10, pode ser às 11?", estado: "preenchido" },
+    { chave: "visita_hora", rotulo: "Visita: hora combinada", tipo: "texto", valor: "11:00", valor_rotulo: null, confianca: 1, excerto: "Comercial: Dia 10, pode ser às 11?", estado: "preenchido" },
+  ] }],
+};
+
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   window.history.replaceState({}, "", "/negocios?teste=1");
@@ -38,13 +48,7 @@ beforeEach(() => {
     inicioS === 3
       ? [{ inicio: 3, fim: 5, texto: "É um apartamento no terceiro andar.", confianca: 0.9, falante: "cliente" }]
       : [{ inicio: 7, fim: 8, texto: "Muito bem.", confianca: 0.9, falante: "comercial" }]);
-  nuvem.preencherCampos.mockResolvedValue({
-    resumo: "Apartamento, proprietária.", motor: "gemini", fichas: [{ campos: [
-      { chave: "imovel", rotulo: "Tipo de imóvel", tipo: "escolha", valor: "apartamento", valor_rotulo: null, confianca: 1, excerto: "Cliente: É um apartamento", estado: "preenchido" },
-      { chave: "posse", rotulo: "O cliente é", tipo: "escolha", valor: "Proprietário", valor_rotulo: null, confianca: 0.5, excerto: "Cliente: sim", estado: "rever" },
-      { chave: "orc_cliente", rotulo: "Orçamento", tipo: "escolha", valor: null, valor_rotulo: null, confianca: 0, excerto: "", estado: "em_falta" },
-    ] }],
-  });
+  nuvem.preencherCampos.mockResolvedValue(extracao);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -52,37 +56,53 @@ const campo = vi.fn();
 const ctx = { A: { campo }, run: (fn: () => void) => fn(), S: {} } as unknown as Ctx;
 const d = { id: 7, f: { imovel: "Moradia" } } as unknown as Negocio;
 
+async function correrExemplo() {
+  render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+  await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
+}
+
 describe("ChamadaDireto (4/11, na nuvem)", () => {
-  it("corre a chamada de exemplo: transcreve cada fala, propõe os campos e preenche os vazios", async () => {
-    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    expect(screen.getByText(/Registe a sua voz uma vez/)).toBeInTheDocument();
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
-    await waitFor(() => expect(screen.getByText("É um apartamento no terceiro andar.")).toBeInTheDocument());
+  it("corre a chamada de exemplo: transcreve cada fala e manda os campos do negócio mais a visita combinada", async () => {
+    await correrExemplo();
+    expect(screen.getByText("É um apartamento no terceiro andar.")).toBeInTheDocument();
     expect(screen.getByText("Cliente:")).toBeInTheDocument();
-    expect(screen.getByText("Comercial:")).toBeInTheDocument();
     expect(nuvem.transcreverFala).toHaveBeenCalledTimes(2);
     expect(nuvem.transcreverFala.mock.calls[0][2]).toBeNull();  // sem voz registada
-
-    await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
-    expect(nuvem.preencherCampos).toHaveBeenCalledTimes(1);
     const [segs, grupos] = nuvem.preencherCampos.mock.calls[0];
     expect(segs.map((s: { falante: string }) => s.falante)).toEqual(["cliente", "comercial"]);
-    expect(grupos).toBe(GRUPOS);
-    // o imóvel já tinha «Moradia»: fica de fora por defeito; a posse entra (a rever)
-    expect(screen.getByText("já tinha «Moradia» · fica")).toBeInTheDocument();
-    expect(screen.getByText(/a rever · 50%/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Preencher 1 campo$/ }));
-    expect(campo).toHaveBeenCalledTimes(1);
-    expect(campo).toHaveBeenCalledWith(7, "posse", "Proprietário");
-    expect(screen.getByText(/Preenchidos: O cliente é\./)).toBeInTheDocument();
+    expect(grupos.map((g: Grupo) => g.titulo)).toEqual(["Qualificação", "Visita combinada na chamada"]);
   });
 
-  it("com a voz registada manda a amostra em cada fala", async () => {
+  it("as propostas têm caixa por linha: os campos vazios entram, os já preenchidos ficam de fora, e o valor é editável", async () => {
+    await correrExemplo();
+    // o imóvel já tinha «Moradia»: a caixa vem desmarcada; posse e visita vêm marcadas
+    const caixaImovel = screen.getByRole("checkbox", { name: "Tipo de imóvel" });
+    expect(caixaImovel).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("já tinha «Moradia»")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "O cliente é" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: /Preencher 3 campos$/ })).toBeInTheDocument();
+    // corrigir a posse no seletor e marcar o imóvel
+    fireEvent.change(screen.getByRole("combobox", { name: "O cliente é" }), { target: { value: "Inquilino" } });
+    fireEvent.click(caixaImovel);
+    expect(screen.getByRole("button", { name: /Preencher 4 campos$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Preencher 4 campos$/ }));
+    expect(campo).toHaveBeenCalledWith(7, "imovel", "Apartamento");
+    expect(campo).toHaveBeenCalledWith(7, "posse", "Inquilino");
+    expect(campo).toHaveBeenCalledWith(7, "visita_dia", "2026-11-10");
+    expect(campo).toHaveBeenCalledWith(7, "visita_hora", "11:00");
+    expect(campo).toHaveBeenCalledTimes(4);
+    expect(screen.getByText(/Preenchidos: Tipo de imóvel, O cliente é, Visita: dia combinado, Visita: hora combinada\./)).toBeInTheDocument();
+  });
+
+  it("com a voz registada manda a amostra e o que ela diz em cada fala", async () => {
     localStorage.setItem("olyvia.chamadas.voz", "UklGRg==");
+    localStorage.setItem("olyvia.chamadas.voz_texto", "Esta é a minha voz");
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
     expect(screen.getByText("Pronto. A sua voz está registada.")).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
     await waitFor(() => expect(nuvem.transcreverFala).toHaveBeenCalledTimes(2));
     expect(nuvem.transcreverFala.mock.calls[0][2]).toBe("UklGRg==");
+    expect(nuvem.transcreverFala.mock.calls[0][3]).toBe("Esta é a minha voz");
   });
 });

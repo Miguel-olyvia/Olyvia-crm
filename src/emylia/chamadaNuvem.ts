@@ -8,6 +8,14 @@ import type { CampoExtraido, Extracao, Fala } from "./chamadaMotor";
 export const TAXA = 16000;
 const VAD_ASSETS = "/chamadas/vad/";
 const CHAVE_VOZ = "olyvia.chamadas.voz";  // a amostra da voz da comercial, WAV em base64, neste browser
+const CHAVE_VOZ_TEXTO = "olyvia.chamadas.voz_texto";  // o que a amostra diz, para apanhar decalques
+
+/** Os campos da visita combinada na chamada: não estão na Lead nem no Contacto (a marcação é na agenda,
+ *  no passo «Marcar a visita»), mas o que se combinou ao telefone fica no negócio e à vista. */
+export const GRUPO_VISITA: Grupo = { titulo: "Visita combinada na chamada", campos: [
+  { k: "visita_dia", l: "Visita: dia combinado", t: "data", ajuda: "Só se ficou combinado um dia para a visita." },
+  { k: "visita_hora", l: "Visita: hora combinada", t: "texto", ajuda: "Ex.: 11:00. Só se ficou combinada uma hora." },
+] };
 
 /** Float32 a 16 kHz → WAV (int16, mono) em base64. */
 export function wavBase64(pcm: Float32Array): string {
@@ -27,9 +35,13 @@ export function wavBase64(pcm: Float32Array): string {
 
 // ---- voz da comercial (gravada uma vez neste browser) ------------------------------------------
 export function vozGuardada(): string | null { try { return localStorage.getItem(CHAVE_VOZ); } catch { return null; } }
-export function guardarVoz(b64: string | null): void {
-  try { if (b64) localStorage.setItem(CHAVE_VOZ, b64); else localStorage.removeItem(CHAVE_VOZ); } catch { /* sem localStorage */ }
+export function guardarVoz(b64: string | null, texto = ""): void {
+  try {
+    if (b64) { localStorage.setItem(CHAVE_VOZ, b64); localStorage.setItem(CHAVE_VOZ_TEXTO, texto); }
+    else { localStorage.removeItem(CHAVE_VOZ); localStorage.removeItem(CHAVE_VOZ_TEXTO); }
+  } catch { /* sem localStorage */ }
 }
+export function vozTextoGuardado(): string { try { return localStorage.getItem(CHAVE_VOZ_TEXTO) ?? ""; } catch { return ""; } }
 
 /** Grava `segundos` do microfone a 16 kHz e devolve o PCM (para registar a voz). */
 export async function gravarMicrofone(segundos: number, aoProgredir?: (s: number) => void): Promise<Float32Array> {
@@ -141,9 +153,10 @@ async function mensagemDoErro(error: { message?: string; context?: unknown }, fu
 
 export interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente" }
 
-export async function transcreverFala(pcm: Float32Array, inicioS: number, referenciaB64: string | null): Promise<Frase[]> {
+export async function transcreverFala(pcm: Float32Array, inicioS: number, referenciaB64: string | null, referenciaTexto = ""): Promise<Frase[]> {
   const { data, error } = await supabase.functions.invoke("chamada-transcrever", {
-    body: { audio_b64: wavBase64(pcm), deslocamento_s: inicioS, ...(referenciaB64 ? { referencia_b64: referenciaB64 } : {}) },
+    body: { audio_b64: wavBase64(pcm), deslocamento_s: inicioS,
+      ...(referenciaB64 ? { referencia_b64: referenciaB64, referencia_texto: referenciaTexto } : {}) },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-transcrever"));
   return (data?.frases ?? []) as Frase[];
@@ -151,8 +164,9 @@ export async function transcreverFala(pcm: Float32Array, inicioS: number, refere
 
 export async function preencherCampos(segmentos: Fala[], grupos: Grupo[]): Promise<Extracao> {
   const campos = grupos.filter((g) => !g.oculto).flatMap((g) => g.campos.map(({ k, l, t, op, ajuda, un }: Def) => ({ k, l, t, op, ajuda, un })));
+  const hoje = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const { data, error } = await supabase.functions.invoke("chamada-campos", {
-    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos },
+    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
   return data as Extracao & { fichas: { campos: CampoExtraido[] }[] };

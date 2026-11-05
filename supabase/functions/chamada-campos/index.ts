@@ -23,6 +23,8 @@ const campoDef = z.object({
 const pedido = z.object({
   segmentos: z.array(z.object({ inicio: z.number(), texto: z.string().max(2000), falante: z.enum(["comercial", "cliente", "desconhecido"]) })).max(2000),
   campos: z.array(campoDef).min(1).max(120),
+  // a data de hoje no fuso da comercial (AAAA-MM-DD), para «dia 10» e «amanhã» virarem datas
+  hoje: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 const INSTRUCAO = `És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição de uma chamada entre
@@ -72,7 +74,7 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { segmentos, campos } = parsed.data;
+    const { segmentos, campos, hoje } = parsed.data;
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
@@ -83,7 +85,9 @@ serve(async (req) => {
       required: ["valor", "confianca", "excerto"] };
     const esquema = { type: "OBJECT", properties: { campos: { type: "OBJECT", properties: Object.fromEntries(chaves.map((k) => [k, campoEsq])), required: chaves },
       resumo: { type: "STRING" } }, required: ["campos", "resumo"] };
-    const texto = "# Campos a preencher\n" + campos.map(descrever).join("\n") +
+    const texto = (hoje ? `Hoje é ${hoje}. Datas ditas de forma relativa («dia 10», «amanhã», «para a semana») ` +
+      "convertem-se para AAAA-MM-DD, assumindo a próxima ocorrência a partir de hoje.\n\n" : "") +
+      "# Campos a preencher\n" + campos.map(descrever).join("\n") +
       "\n\n# Transcrição da chamada\n" + segmentos.map((s) => `${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : "Alguém"}: ${s.texto}`).join("\n") +
       "\n\nPreenche o JSON com 'campos' (um objeto por chave, com valor, confianca e excerto) e 'resumo'.";
 

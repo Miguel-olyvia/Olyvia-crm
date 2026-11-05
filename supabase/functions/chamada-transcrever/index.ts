@@ -19,8 +19,9 @@ const MAX_B64 = 1_200_000;
 const pedido = z.object({
   audio_b64: z.string().min(100).max(MAX_B64),
   deslocamento_s: z.number().min(0).default(0),
-  // amostra da voz da comercial (WAV 16 kHz mono, base64), gravada uma vez no painel
+  // amostra da voz da comercial (WAV 16 kHz mono, base64), gravada uma vez no painel, e o que ela diz
   referencia_b64: z.string().max(MAX_B64).optional(),
+  referencia_texto: z.string().max(2000).optional(),
 });
 
 const INSTRUCAO_BASE =
@@ -29,8 +30,9 @@ const INSTRUCAO_BASE =
   "omite-o; se não se perceber nada, devolve uma lista vazia. Nunca completes, resumas, traduzas ou corrijas. " +
   "Em cada frase dá a tua confiança de 0 a 1 de que foi mesmo isso que se disse.";
 const INSTRUCAO_FALANTE =
-  " O primeiro áudio é uma amostra da voz do comercial; o segundo é a fala a transcrever. Em cada frase diz " +
-  "quem fala: 'comercial' se for a voz da amostra, 'cliente' se for outra pessoa.";
+  " O PRIMEIRO áudio é a fala a transcrever. O SEGUNDO áudio é só uma amostra da voz do comercial, para comparar " +
+  "vozes: nunca transcrevas nada do segundo áudio. Em cada frase do primeiro áudio diz quem fala: 'comercial' se for " +
+  "a voz da amostra, 'cliente' se for outra pessoa.";
 
 const esquema = (comFalante: boolean) => ({
   type: "ARRAY",
@@ -77,17 +79,24 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { audio_b64, deslocamento_s, referencia_b64 } = parsed.data;
+    const { audio_b64, deslocamento_s, referencia_b64, referencia_texto } = parsed.data;
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT.bucket, caller.anewUserId);
 
     const comFalante = !!referencia_b64;
-    const partes: ParteGemini[] = [];
+    // a fala primeiro, a amostra depois: com a amostra à frente o modelo transcrevia-a em vez da fala
+    const partes: ParteGemini[] = [{ inline_data: { mime_type: "audio/wav", data: audio_b64 } }];
     if (referencia_b64) partes.push({ inline_data: { mime_type: "audio/wav", data: referencia_b64 } });
-    partes.push({ inline_data: { mime_type: "audio/wav", data: audio_b64 } });
     partes.push({ text: INSTRUCAO_BASE + (comFalante ? INSTRUCAO_FALANTE : "") });
+    const palavrasAmostra = new Set((referencia_texto ?? "").toLowerCase().match(/\p{L}{4,}/gu) ?? []);
+    // decalque da amostra: quase todas as palavras da frase (4 ou mais) estão no que a amostra diz
+    const ecoDaAmostra = (t: string) => {
+      if (palavrasAmostra.size === 0) return false;
+      const ps = t.toLowerCase().match(/\p{L}{4,}/gu) ?? [];
+      return ps.length >= 4 && ps.filter((w) => palavrasAmostra.has(w)).length / ps.length >= 0.7;
+    };
 
     let brutas: Frase[] = [];
     try {
@@ -98,7 +107,7 @@ serve(async (req) => {
     }
     const frases = (Array.isArray(brutas) ? brutas : [])
       .map((f) => ({ ...f, texto: corrigir(String(f.texto ?? "").trim()), confianca: Number(f.confianca ?? 0) }))
-      .filter((f) => f.texto && f.confianca >= CONFIANCA_MIN && !ALUCINACOES.has(f.texto.toLowerCase().replace(/[.!?… ]+$/g, "")))
+      .filter((f) => f.texto && f.confianca >= CONFIANCA_MIN && !ALUCINACOES.has(f.texto.toLowerCase().replace(/[.!?… ]+$/g, "")) && !ecoDaAmostra(f.texto))
       .map((f) => ({
         inicio: Math.round((deslocamento_s + Math.max(0, Number(f.inicio) || 0)) * 100) / 100,
         fim: Math.round((deslocamento_s + Math.max(Number(f.inicio) || 0, Number(f.fim) || 0)) * 100) / 100,
