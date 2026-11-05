@@ -3,6 +3,8 @@
  * «Fila de trabalho» do mapa de assiduidade): chip de texto, pessoa, dia, tipo, motivo resumido, há quanto tempo e os
  * botões Aceitar e Recusar. Decidida, a linha sai daqui; o calendário da pessoa, o mapa e o cálculo do mês acompanham.
  * Um motivo de consulta médica é dado de saúde: não se mostra na fila, só no dia da pessoa com «Ver texto».
+ * Os botões seguem `rpc_hr_justificacao_dia_decidir`: Recusar pede `hr.assiduidade.justificacao.edit`; Aceitar (cria uma
+ * falta) pede também `hr.assiduidade.faltas.edit`. Quem só as vê (`justificacao.view`) não tem botões (auditoria 05/11/2026).
  *
  * As pendentes vêm da base e são lidas por quem monta o ecrã (o contador do separador usa as mesmas): esta fila não lê
  * nada por si. Uma lista vazia só diz «não há nada por decidir» quando a leitura correu bem; enquanto lê, quando falha, quando
@@ -13,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
+import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
 import { diasDesdeEnvio, resumoDoMotivo, textoEhSensivel, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { useTranslation } from "@/hooks/useTranslation";
 import { DialogosDecisaoDia, type PedidoDecisaoDia } from "./DialogosDecisaoDia";
@@ -25,10 +28,12 @@ interface LinhaProps {
   hoje: string;
   /** É a justificação de quem está a ver: ninguém decide a sua (a base recusa-o); não se oferecem os botões. */
   propria: boolean;
+  podeAceitar: boolean;
+  podeRecusar: boolean;
   aoPedir: (j: JustificacaoDia, tipo: "aceitar" | "recusar") => void;
 }
 
-function Linha({ j, nome, hoje, propria, aoPedir }: LinhaProps) {
+function Linha({ j, nome, hoje, propria, podeAceitar, podeRecusar, aoPedir }: LinhaProps) {
   const { t } = useTranslation();
   const dias = diasDesdeEnvio(j.enviadaEm, hoje);
   const dia = formatarData(j.data);
@@ -44,16 +49,20 @@ function Linha({ j, nome, hoje, propria, aoPedir }: LinhaProps) {
       <span className="text-xs text-muted-foreground">{dias === 0 ? t("rhJust.fila.hoje") : t("rhJust.fila.haDias", { n: String(dias) })}</span>
       {propria ? (
         <span className="ml-auto text-xs text-muted-foreground" data-testid={`rhjd-fila-propria-${j.id}`}>{t("rhJust.rh.propriaSemDecisao")}</span>
-      ) : (
+      ) : podeAceitar || podeRecusar ? (
         <div className="ml-auto flex flex-wrap gap-2">
-          <Button type="button" size="sm" className="min-h-11" aria-label={t("rhJust.rh.ariaAceitar", { pessoa: nome, dia })} onClick={() => aoPedir(j, "aceitar")}>
-            {t("rhJust.rh.aceitar")}
-          </Button>
-          <Button type="button" size="sm" variant="outline" className="min-h-11" aria-label={t("rhJust.rh.ariaRecusar", { pessoa: nome, dia })} onClick={() => aoPedir(j, "recusar")}>
-            {t("rhJust.rh.recusar")}
-          </Button>
+          {podeAceitar && (
+            <Button type="button" size="sm" className="min-h-11" aria-label={t("rhJust.rh.ariaAceitar", { pessoa: nome, dia })} onClick={() => aoPedir(j, "aceitar")}>
+              {t("rhJust.rh.aceitar")}
+            </Button>
+          )}
+          {podeRecusar && (
+            <Button type="button" size="sm" variant="outline" className="min-h-11" aria-label={t("rhJust.rh.ariaRecusar", { pessoa: nome, dia })} onClick={() => aoPedir(j, "recusar")}>
+              {t("rhJust.rh.recusar")}
+            </Button>
+          )}
         </div>
-      )}
+      ) : null}
     </li>
   );
 }
@@ -72,6 +81,9 @@ export function FilaJustificacoesDoDia({ pendentes: leitura, nomePorPessoaId, ao
   const { t } = useTranslation();
   const [pedido, setPedido] = useState<PedidoDecisaoDia | null>(null);
   const { decidir, mensagem: aviso, executor } = useDecisaoDoDia(aoCriarFalta);
+  const { permissoes } = usePermissoesAssiduidade();
+  const podeRecusar = permissoes.justificacaoEdit;
+  const podeAceitar = permissoes.justificacaoEdit && permissoes.faltasEdit;
   const { loading, erro, indisponivel, recusado, recarregar } = leitura;
   const pendentes = useMemo(() => [...leitura.justificacoes].sort((a, b) => b.data.localeCompare(a.data)), [leitura.justificacoes]);
   const nome = (id: string): string => nomePorPessoaId.get(id) ?? t("rhJust.fila.pessoaSemNome");
@@ -114,6 +126,7 @@ export function FilaJustificacoesDoDia({ pendentes: leitura, nomePorPessoaId, ao
             {pendentes.map((j) => (
               <Linha
                 key={j.id} j={j} nome={nome(j.pessoaId)} hoje={hojeIso()} propria={minhaPessoaId !== null && j.pessoaId === minhaPessoaId}
+                podeAceitar={podeAceitar} podeRecusar={podeRecusar}
                 aoPedir={(x, tipo) => setPedido({ justificacao: x, tipo, pessoaNome: nome(x.pessoaId) })}
               />
             ))}

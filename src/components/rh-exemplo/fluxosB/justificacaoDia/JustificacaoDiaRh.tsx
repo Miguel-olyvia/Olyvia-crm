@@ -4,6 +4,9 @@
  * desconto e as acções: Aceitar · paga, Aceitar · não paga e Recusar com motivo. O desconto vem da regra das faltas, com o
  * valor da hora REAL do mês (o do processamento salarial); sem ele diz-se só o tempo e não se inventa um valor.
  *
+ * Os botões seguem o que a base exige em `rpc_hr_justificacao_dia_decidir`: decidir pede `hr.assiduidade.justificacao.edit`,
+ * e aceitar (cria uma falta) pede também `hr.assiduidade.faltas.edit`. Sem elas os botões não aparecem (auditoria 05/11/2026).
+ *
  * As justificações vêm da base (só as deste dia). Enquanto lê, quando falha ou quando a migration ainda não foi aplicada, diz-se
  * isso mesmo em vez de esconder o bloco: um dia sem nada e um dia que não se conseguiu ler não são a mesma coisa.
  */
@@ -16,6 +19,7 @@ import { formatarData, formatarDataHora, formatarEuros, formatarHorasMinutos } f
 import { useAccoesJustificacaoDia, useJustificacoesDoDia } from "@/components/rh-exemplo/hooks/useJustificacoesDoDia";
 import { ESTADO_DA_JUSTIFICACAO, descontoDaDecisao, textoEhSensivel, type DecisaoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { usePeriodoDoDia } from "@/components/rh-exemplo/hooks/periodoFolha";
+import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
 import { useCalculoRealDaPessoa } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import { useTranslation } from "@/hooks/useTranslation";
 import { DialogosDecisaoDia, type PedidoDecisaoDia } from "./DialogosDecisaoDia";
@@ -117,13 +121,26 @@ function ListaDeEfeitos({ j, valorHora }: { j: JustificacaoDia; valorHora: numbe
   );
 }
 
-function BotoesDeDecisao({ aoAceitar, aoRecusar, desactivados }: { aoAceitar: (d: "aceitar_paga" | "aceitar_nao_paga") => void; aoRecusar: () => void; desactivados: boolean }) {
+interface BotoesDeDecisaoProps {
+  aoAceitar: (d: "aceitar_paga" | "aceitar_nao_paga") => void;
+  aoRecusar: () => void;
+  desactivados: boolean;
+  podeAceitar: boolean;
+  podeRecusar: boolean;
+}
+
+function BotoesDeDecisao({ aoAceitar, aoRecusar, desactivados, podeAceitar, podeRecusar }: BotoesDeDecisaoProps) {
   const { t } = useTranslation();
+  if (!podeAceitar && !podeRecusar) return null;
   return (
     <div className="flex flex-wrap gap-2">
-      <Button type="button" className="min-h-11" disabled={desactivados} onClick={() => aoAceitar("aceitar_paga")}>{t("rhJust.rh.aceitarPaga")}</Button>
-      <Button type="button" variant="outline" className="min-h-11" disabled={desactivados} onClick={() => aoAceitar("aceitar_nao_paga")}>{t("rhJust.rh.aceitarNaoPaga")}</Button>
-      <Button type="button" variant="outline" className="min-h-11" disabled={desactivados} onClick={aoRecusar}>{t("rhJust.rh.recusar")}</Button>
+      {podeAceitar && (
+        <>
+          <Button type="button" className="min-h-11" disabled={desactivados} onClick={() => aoAceitar("aceitar_paga")}>{t("rhJust.rh.aceitarPaga")}</Button>
+          <Button type="button" variant="outline" className="min-h-11" disabled={desactivados} onClick={() => aoAceitar("aceitar_nao_paga")}>{t("rhJust.rh.aceitarNaoPaga")}</Button>
+        </>
+      )}
+      {podeRecusar && <Button type="button" variant="outline" className="min-h-11" disabled={desactivados} onClick={aoRecusar}>{t("rhJust.rh.recusar")}</Button>}
     </div>
   );
 }
@@ -133,9 +150,11 @@ interface CartaoProps {
   aOcupar: boolean;
   aoDecidir: (j: JustificacaoDia, decisao: DecisaoJustificacaoDia) => void;
   aoRecusar: (j: JustificacaoDia) => void;
+  podeAceitar: boolean;
+  podeRecusar: boolean;
 }
 
-function Cartao({ j, aOcupar, aoDecidir, aoRecusar }: CartaoProps) {
+function Cartao({ j, aOcupar, aoDecidir, aoRecusar, podeAceitar, podeRecusar }: CartaoProps) {
   const { t } = useTranslation();
   return (
     <li className="space-y-2 rounded-md border p-3 text-sm" data-testid={`rhjd-rh-${j.id}`}>
@@ -150,7 +169,12 @@ function Cartao({ j, aOcupar, aoDecidir, aoRecusar }: CartaoProps) {
       {j.estado === "recusada" && j.motivoRecusa && <p className="text-destructive">{t("rhJust.motivoRH", { motivo: j.motivoRecusa })}</p>}
       {j.decididaPor && j.decididaEm && <p className="text-xs text-muted-foreground">{t("rhJust.decididaPor", { quem: j.decididaPor, data: formatarDataHora(j.decididaEm) })}</p>}
       <EfeitoNoDesconto j={j} />
-      {j.estado === "pendente" && <BotoesDeDecisao desactivados={aOcupar} aoAceitar={(d) => aoDecidir(j, d)} aoRecusar={() => aoRecusar(j)} />}
+      {j.estado === "pendente" && (
+        <BotoesDeDecisao
+          desactivados={aOcupar} podeAceitar={podeAceitar} podeRecusar={podeRecusar}
+          aoAceitar={(d) => aoDecidir(j, d)} aoRecusar={() => aoRecusar(j)}
+        />
+      )}
     </li>
   );
 }
@@ -168,6 +192,9 @@ export function JustificacaoDiaRh({ pessoaId, pessoaNome, data, aoCriarFalta }: 
   const { justificacoes, erro, indisponivel, recarregar } = useJustificacoesDoDia({ pessoaId, de: data, ate: data });
   const [pedido, setPedido] = useState<PedidoDecisaoDia | null>(null);
   const { decidir, mensagem, executor, aOcupar } = useDecisaoDoDia(aoCriarFalta);
+  const { permissoes } = usePermissoesAssiduidade();
+  const podeRecusar = permissoes.justificacaoEdit;
+  const podeAceitar = permissoes.justificacaoEdit && permissoes.faltasEdit;
   // Um dia sem justificações e sem nada a dizer não ocupa lugar (nem pisca enquanto lê); um dia que não se conseguiu ler diz porquê.
   if (justificacoes.length === 0 && !executor && !erro && !indisponivel && !mensagem) return null;
 
@@ -183,7 +210,7 @@ export function JustificacaoDiaRh({ pessoaId, pessoaNome, data, aoCriarFalta }: 
       )}
       <ul className="space-y-2">
         {justificacoes.map((j) => (
-          <Cartao key={j.id} j={j} aOcupar={aOcupar} aoDecidir={(x, d) => decidir(x, d)} aoRecusar={(x) => setPedido({ justificacao: x, tipo: "recusar", pessoaNome })} />
+          <Cartao key={j.id} j={j} aOcupar={aOcupar} podeAceitar={podeAceitar} podeRecusar={podeRecusar} aoDecidir={(x, d) => decidir(x, d)} aoRecusar={(x) => setPedido({ justificacao: x, tipo: "recusar", pessoaNome })} />
         ))}
       </ul>
       {mensagem && <p role={mensagem.erro ? "alert" : "status"} className={`text-sm font-medium ${mensagem.erro ? "text-destructive" : ""}`}>{mensagem.texto}</p>}
