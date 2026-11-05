@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { useComerciaisNegocio } from "@/hooks/pessoas/useComerciaisNegocio";
+import { usePodeAtribuirComercial } from "@/hooks/pessoas/usePodeAtribuirComercial";
 import { MAX_NOTAS_NEGOCIO, validarEdicao } from "@/hooks/pessoas/escritasNegocio";
 import { DialogoDeEnvio, ErroDeEnvio } from "@/components/negocio-metas/DialogoDeEnvio";
 import { FOCO, PISTA_DESATIVADO } from "@/components/negocio-metas/estilos";
@@ -34,10 +35,14 @@ interface ComercialProps {
   aoMudar: (comercialId: string) => void;
 }
 
-/** O seletor de comercial: os da organização, «Sem comercial» e o atual (mesmo que já não esteja na lista, para não o perder sem querer). */
+/** O seletor de comercial: os da organização, «Sem comercial» e o atual (mesmo que já não esteja na lista, para não o perder sem querer).
+ *  Mudar o comercial pede leads.assign (o gatilho trg_00_negocios_comercial_leads_assign): sem ela fica fixo no atual e diz porquê; o
+ *  valor não muda, por isso colunasDaEdicao não envia assigned_to e o título e as notas gravam-se na mesma. */
 function SeletorComercial({ id, negocio, valor, aoMudar }: ComercialProps) {
   const { t } = useTranslation();
   const { comerciais, isLoading, isError, repetir } = useComerciaisNegocio(true);
+  const atribuir = usePodeAtribuirComercial();
+  const semPermissao = !atribuir.aLer && !atribuir.pode;
   const atual = negocio.comercialId ?? null;
   const naLista = atual !== null && comerciais.some((c) => c.id === atual);
   const opcoes = [
@@ -46,13 +51,15 @@ function SeletorComercial({ id, negocio, valor, aoMudar }: ComercialProps) {
     ...comerciais.map((c) => ({ value: c.id, label: c.nome })),
   ];
   const ajuda = isLoading ? t(`${N}edit.rep.loading`) : isError ? t(`${N}edit.rep.error`) : null;
+  const descricao = [ajuda ? `${id}-ajuda` : null, semPermissao ? `${id}-permissao` : null].filter(Boolean).join(" ");
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{t(`${N}edit.rep`)}</Label>
       <NativeSelect
-        id={id} value={valor} options={opcoes} disabled={isLoading || isError} className={cn("h-11", FOCO)}
-        aria-describedby={ajuda ? `${id}-ajuda` : undefined} onValueChange={aoMudar}
+        id={id} value={valor} options={opcoes} disabled={isLoading || isError || !atribuir.pode} className={cn("h-11", FOCO)}
+        aria-describedby={descricao || undefined} onValueChange={aoMudar}
       />
+      {semPermissao && <p id={`${id}-permissao`} className="text-sm text-muted-foreground">{t(`${N}edit.rep.noPermission`)}</p>}
       {ajuda && (
         <p id={`${id}-ajuda`} role={isError ? "alert" : "status"} className="text-sm text-muted-foreground">{ajuda}</p>
       )}

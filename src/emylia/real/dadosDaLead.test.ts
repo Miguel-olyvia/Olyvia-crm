@@ -30,9 +30,14 @@ describe("o que veio na lead", () => {
     const { porPessoa, fontes } = await lerDadosDasLeads(sb, "org", ["p1", "p1", ""]);
     expect(porPessoa.get("p1")).toMatchObject({
       primeiro: "Ana", apelido: "Lopes", empresa: "Lopes, Lda.", notas: "Ligar de manhã", fonte: "Feira", campanha: "Verão", comercial: "Rui Costa",
-      respostas: [{ k: "po_area", l: "Área da casa de banho", v: "12 m2" }],
+      respostas: [{ k: "po_area", l: "Área da casa de banho", v: "12 m2" }], cliente: false,
     });
     expect(fontes.map((f) => f.name)).toEqual(["Feira", "Site"]);
+  });
+
+  it("lê se a pessoa já é cliente (client_since): neg_atribuir_pessoa só pede leads.assign a quem não é", async () => {
+    const { sb } = sbFalso({ ...TABELAS, anew_entities: [{ ...TABELAS.anew_entities[0], client_since: "2026-01-02" }] });
+    expect((await lerDadosDasLeads(sb, "org", ["p1"])).porPessoa.get("p1")?.cliente).toBe(true);
   });
 
   it("um erro a ler não para nada: fica sem dados", async () => {

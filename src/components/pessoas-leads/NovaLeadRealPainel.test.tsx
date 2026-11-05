@@ -12,6 +12,8 @@ import { continuar, criar, irParaConfirmar, irParaContacto } from "./passosNovaL
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+// leads.assign: com a permissão (as guardas sem ela testam-se em ComercialNovaLead.test.tsx e EditarNegocioDialogo.test.tsx)
+vi.mock("@/hooks/pessoas/usePodeAtribuirComercial", () => ({ usePodeAtribuirComercial: () => ({ pode: true, aLer: false }) }));
 vi.mock("@/utils/friendlyError", () => ({ getFriendlyErrorMessage: async () => "mensagem amigável" }));
 vi.mock("@/components/billing/PlanLimitWarning", () => ({ PlanLimitWarning: () => null }));
 const toastMock = vi.hoisted(() => vi.fn());

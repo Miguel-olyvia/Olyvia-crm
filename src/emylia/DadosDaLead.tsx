@@ -16,6 +16,9 @@ export function definirGuardarDadosLead(fn: Guardar, a: ApoioDadosLead): () => v
   guardar = fn; apoio = a;
   return () => { if (guardar === fn) { guardar = null; apoio = { fontes: [], comerciais: [] }; } };
 }
+/** 5/11: leads.assign de quem entrou (usePodeAtribuirComercial), posto pela página real. Por pôr: ainda não se sabe (fixo, sem motivo). */
+let atribuir: { pode: boolean; aLer: boolean } = { pode: false, aLer: true };
+export function definirPodeAtribuirLead(v: { pode: boolean; aLer: boolean } | null): void { atribuir = v ?? { pode: false, aLer: true }; }
 /** Há quem grave na pessoa (página real) e o negócio tem os dados da lead. */
 export const comDadosLead = (d: Negocio) => !!d.dadosLead && !!guardar;
 
@@ -100,20 +103,25 @@ export function FonteDaLead({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   );
 }
 
-/** O comercial que fica com a lead (muda pela atribuição de sempre, neg_atribuir_pessoa). */
+/** O comercial que fica com a lead (muda pela atribuição de sempre, neg_atribuir_pessoa). A função pede leads.assign só quando a pessoa
+ *  ainda não é cliente (client_since vazio): nesse caso, sem a permissão, o seletor fica fixo e diz porquê. Um cliente fica como estava. */
 export function ComercialDaLead({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { gravar, aviso } = useGravar(ctx, d);
   const x = d.dadosLead;
   if (!x) return null;
   const id = `lead-${d.id}-comercial`;
+  const fixo = !x.cliente && !atribuir.pode;
+  const semPermissao = fixo && !atribuir.aLer;
   return (
     <div className={cn(ROT, "max-w-sm")}>
       <label htmlFor={id}>Comercial</label>
-      <select id={id} className={INP} value={x.comercialId} onChange={(e) => gravar({ comercialId: e.target.value }, "comercial")}>
+      <select id={id} className={cn(INP, fixo && "cursor-not-allowed opacity-60")} value={x.comercialId} disabled={fixo}
+        aria-describedby={semPermissao ? `${id}-permissao` : undefined} onChange={(e) => gravar({ comercialId: e.target.value }, "comercial")}>
         <option value="">Sem comercial</option>
         {apoio.comerciais.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         {x.comercialId && !apoio.comerciais.some((c) => c.id === x.comercialId) && <option value={x.comercialId}>{x.comercial || "O comercial atual"}</option>}
       </select>
+      {semPermissao && <p id={`${id}-permissao`} className="text-sm font-normal text-muted-foreground">Mudar o comercial pede a permissão «Atribuir leads».</p>}
       {aviso}
     </div>
   );

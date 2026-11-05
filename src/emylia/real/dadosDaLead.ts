@@ -16,6 +16,8 @@ export interface DadosLead {
   campanha: string;
   comercialId: string;
   comercial: string;
+  /** A pessoa já é cliente (anew_entities.client_since preenchido): neg_atribuir_pessoa só pede leads.assign a quem ainda não é. */
+  cliente: boolean;
   /** As respostas aos campos do formulário da campanha (pela chave do campo), com o nome do campo. */
   respostas: RespostaLead[];
   /** O `extra` como está na base (para gravar sem perder o resto). */
@@ -41,7 +43,7 @@ export async function lerDadosDasLeads(sb: SupabaseClient, org: string, pessoas:
   const vazio = { porPessoa: new Map<string, DadosLead>(), fontes: [] as FonteLead[] };
   if (ids.length === 0) return vazio;
   try {
-    const ents = await ler(db(sb).from("anew_entities").select("id, first_name, last_name, extra, origin_id, campaign_id, assigned_to").in("id", ids));
+    const ents = await ler(db(sb).from("anew_entities").select("id, first_name, last_name, extra, origin_id, campaign_id, assigned_to, client_since").in("id", ids));
     const campIds = [...new Set(ents.map((e) => e.campaign_id).filter(Boolean))] as string[];
     const userIds = [...new Set(ents.map((e) => e.assigned_to).filter(Boolean))] as string[];
     const [fontes, campanhas, users] = await Promise.all([
@@ -62,7 +64,8 @@ export async function lerDadosDasLeads(sb: SupabaseClient, org: string, pessoas:
       porPessoa.set(e.id, {
         entityId: e.id, primeiro: txt(e.first_name), apelido: txt(e.last_name), empresa: txt(extra.company_name), notas: txt(extra.notes),
         fonteId: e.origin_id ?? "", fonte: fontes.find((f) => f.id === e.origin_id)?.name ?? "", campanha: camp?.name ?? "",
-        comercialId: e.assigned_to ?? "", comercial: users.find((u) => u.id === e.assigned_to)?.name ?? "", respostas, extra,
+        comercialId: e.assigned_to ?? "", comercial: users.find((u) => u.id === e.assigned_to)?.name ?? "", cliente: e.client_since != null,
+        respostas, extra,
       });
     }
     return { porPessoa, fontes: fontes.map((f) => ({ id: f.id, name: f.name })) };
