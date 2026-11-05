@@ -60,11 +60,26 @@ const NOMES_PT: Record<string, string> = {
   "Manage scheduling settings": "Gerir definições de agendamento",
 };
 
+/**
+ * Rótulo e descrição por código, quando o nome da base não diz o que a permissão faz de facto. Só apresentação: o código, a base e
+ * os papéis não mudam.
+ */
+export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descricao: string }>> = {
+  // 05/11/2026: product_categories.view não guarda nenhum ecrã de categorias vivo; o que dá é leitura ao audit log da organização
+  // (separador Histórico das encomendas a fornecedor: PurchaseOrders → usePoAuditLog → poHistory) e aos atributos das categorias globais.
+  "product_categories.view": {
+    nome: "Ver histórico de alterações",
+    descricao: "Ver o histórico das encomendas a fornecedor e os atributos das categorias",
+  },
+};
+
 export function permissaoDaBase(l: LinhaPermissao): Permissao {
+  const proprio = ROTULOS_POR_CODIGO[l.code];
+  const descricao = proprio?.descricao ?? l.description?.trim();
   return {
-    codigo: l.code, categoria: l.category ?? "", nome: NOMES_PT[l.name] ?? l.name,
+    codigo: l.code, categoria: l.category ?? "", nome: proprio?.nome ?? NOMES_PT[l.name] ?? l.name,
     perigosa: l.is_dangerous === true, comAmbito: l.supports_scope === true,
-    ...(l.description?.trim() ? { descricao: l.description.trim() } : {}),
+    ...(descricao ? { descricao } : {}),
   };
 }
 

@@ -58,6 +58,12 @@ describe("mapeamento base -> maquete", () => {
     const l: LinhaPermissao = { code: "scheduling.boards.view", name: "View scheduling boards", category: "scheduling", is_dangerous: false, supports_scope: true };
     expect(permissaoDaBase(l)).toMatchObject({ codigo: "scheduling.boards.view", categoria: "scheduling", nome: "Ver quadros de agendamento", perigosa: false, comAmbito: true });
     expect(permissaoDaBase({ ...l, name: "Algo", is_dangerous: true, supports_scope: null })).toMatchObject({ nome: "Algo", perigosa: true, comAmbito: false });
+    // 05/11/2026: product_categories.view mostra o que faz de facto (o histórico das encomendas a fornecedor); o código não muda.
+    expect(permissaoDaBase({ code: "product_categories.view", name: "View product categories", category: "products", is_dangerous: false, description: "View product categories" }))
+      .toMatchObject({
+        codigo: "product_categories.view", nome: "Ver histórico de alterações",
+        descricao: "Ver o histórico das encomendas a fornecedor e os atributos das categorias",
+      });
   });
   it("permissoesDoMenu só deixa as permissões em uso (incluindo hr, pessoas, negocios e fleet), sem as escondidas", () => {
     const l = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
