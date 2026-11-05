@@ -9,6 +9,7 @@ import * as THREE from "three";
 import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
 import { libertarMateriais } from "./modelosHtml/util";
+import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml/lavaLoicas";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
@@ -124,6 +125,13 @@ function ModeloHtml({ modelo, acab, opc, z0 }: { modelo: string; acab: string; o
   const t = useMemo(() => (ehModeloTorneira(modelo) ? construirTorneira(modelo, acab, { bica: opc?.bica, extraido: opc?.extraido ? 1 : 0 }) : null), [modelo, acab, opc?.bica, opc?.extraido]);
   useEffect(() => () => { if (t) libertarMateriais(t.materiais); }, [t]);
   return t ? <group position={[0, 0, z0]} scale={0.001}><primitive object={t.grupo} /></group> : null;
+}
+
+/** O lava-loiça detalhado do HTML (Velar, Lody, Ambar): o topo do rebordo à altura `h` do mockup, as cubas para baixo. */
+function ModeloLavaLoicaHtml({ modelo, acab, opc, h }: { modelo: string; acab: string; opc?: OpcoesPeca; h: number }) {
+  const t = useMemo(() => (ehModeloLavaLoica(modelo) ? construirLavaLoica(modelo, acab, { tampas: opc?.tampas }) : null), [modelo, acab, opc?.tampas]);
+  useEffect(() => () => { t?.materiais.forEach((m) => m.dispose()); }, [t]);
+  return t ? <group position={[0, h, 0]} scale={0.001}><primitive object={t.grupo} /></group> : null;
 }
 
 /** Uma torneira de cozinha: base, coluna e bica em tubo (extraível com cabeça, monocomando, abatível ou com flexível de silicone), ao longo de uma curva. */
@@ -464,6 +472,7 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo:
       if (params?.k === "torneira" && params.html) return <ModeloHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} z0={-d / 2 + params.base / 2} />;
       return params?.k === "torneira" ? <TorneiraCozinha w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
     case "lava_loica":
+      if (params?.k === "lava_loica" && params.html) return <ModeloLavaLoicaHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} h={h} />;
       return params?.k === "lava_loica" ? <LavaLoica w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
     case "placa":
       return params?.k === "placa" ? <Placa w={w} d={d} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;

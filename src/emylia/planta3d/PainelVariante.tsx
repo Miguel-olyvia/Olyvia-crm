@@ -52,6 +52,9 @@ export function PainelVariante({ peca, onMudar, onMontagem, onOpcao }: PainelVar
         {onOpcao && f.opcoes?.includes("extraida") && (
           <label className="flex min-h-11 items-center gap-2 text-[15px]"><input type="checkbox" className="h-5 w-5" checked={!!peca.opc?.extraido} onChange={(e) => onOpcao({ extraido: e.target.checked })} />Bica extraída (com o flexível)</label>
         )}
+        {onOpcao && f.opcoes?.includes("tampas") && (
+          <label className="flex min-h-11 items-center gap-2 text-[15px]"><input type="checkbox" className="h-5 w-5" checked={!!peca.opc?.tampas} onChange={(e) => onOpcao({ tampas: e.target.checked })} />Retirar as tampas dos ralos</label>
+        )}
         {f.tipo === "lava_loica" && (
           <label className="grid gap-1 text-sm font-medium">Montagem
             <select className={SEL} value={peca.opc?.montagem ?? "baixo"} onChange={(e) => onMontagem(e.target.value === "cima" ? "cima" : "baixo")}>

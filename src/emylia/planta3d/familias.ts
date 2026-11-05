@@ -80,10 +80,10 @@ const INOX = [A("inox")];
 const LAVALOICAS: Familia[] = [
   L("velar", "Velar", "FRASA", INOX, [[34, 380, 450, "FS200260", 89], [40, 440, 500, "FS200261", 99], [45, 490, 500, "FS200269", 109], [50, 540, 600, "FS200262", 119], [71, 750, 800, "FS200263", 159]].map(([s, ext, cab, ref, pr]) =>
     ML(`velar${s}`, `${s} cm`, String(ref), Number(pr), Number(ext), 440, [cuba(Number(ext) - 40, 400, 200, 20, 20)], { movel: Number(cab) })), "Inox escovado AISI 304, cuba R25, sob-balcão, à face ou superior. Móvel conforme o folheto."),
-  L("keran", "Keran", "Demonstração", INOX, [
-    ML("keran80", "80 cm", "KER-80", 149, 800, 440, [cuba(340, 400, 160, 45, 20)], { movel: 450 }), ML("keran86", "86 cm", "KER-86", 159, 860, 440, [cuba(340, 400, 160, 45, 20)], { movel: 450 }),
-    ML("keran100", "100 cm (1 cuba e meia)", "KER-100", 189, 1000, 440, [cuba(340, 400, 160, 45, 20), cuba(160, 300, 90, 425, 20)], { movel: 600 }),
-    ML("keran116", "116 cm (2 cubas)", "KER-116", 219, 1160, 440, [cuba(340, 400, 160, 45, 20), cuba(340, 400, 160, 425, 20)], { movel: 800 })], "Cubas com fundo de 160 mm e a meia cuba de 90 mm."),
+  L("keran", "Keran", "RODI HOME", INOX, [
+    ML("keran80", "80 cm", "KER-80", 149, 800, 500, [cuba(340, 400, 160, 45, 50)], { movel: 450 }), ML("keran86", "86 cm", "KER-86", 159, 860, 500, [cuba(340, 400, 160, 45, 50)], { movel: 450 }),
+    ML("keran100", "100 cm (1 cuba e meia)", "KER-100", 189, 1000, 500, [cuba(340, 400, 160, 45, 50), cuba(160, 300, 90, 425, 100)], { movel: 600 }),
+    ML("keran116", "116 cm (2 cubas)", "KER-116", 219, 1160, 500, [cuba(340, 400, 160, 45, 50), cuba(340, 400, 160, 425, 50)], { movel: 800 })], "Cubas com fundo de 160 mm e a meia cuba de 90 mm."),
   L("una", "Una", "Demonstração", INOX, [
     ML("una55", "55 cm (1 cuba e meia)", "UNA-55", 169, 580, 440, [cuba(340, 400, 200, 20, 20), cuba(180, 400, 150, 380, 20)], { movel: 600 }), ML("una75", "75 cm (2 cubas)", "UNA-75", 199, 740, 440, [cuba(340, 400, 200, 20, 20), cuba(340, 400, 200, 380, 20)], { movel: 800 })], "Válvula estampada."),
   L("cubas", "Brasília, Bahia, Laguna, Belém e Duo", "Demonstração", INOX, [
@@ -91,15 +91,15 @@ const LAVALOICAS: Familia[] = [
     ML("laguna", "Laguna", "CUB-LAG", 119, 490, 440, [cuba(450, 400, 200, 20, 20)], { movel: 600 }), ML("belem", "Belém", "CUB-BEL", 129, 540, 440, [cuba(500, 400, 200, 20, 20)], { movel: 600 }),
     ML("duo60", "Duo 60", "CUB-D60", 149, 571, 450, [cuba(340, 400, 200, 25, 25), cuba(146, 296, 150, 400, 129)], { movel: 600 }),
     ML("duo80", "Duo 80", "CUB-D80", 179, 765, 450, [cuba(340, 400, 200, 25, 25), cuba(340, 400, 200, 400, 25)], { movel: 800 })], "Cubas de embutir em inox; Duo com cuba pequena ou segunda cuba."),
-  L("lody", "Lody", "Demonstração", [A("inox"), A("oro", 45, { nome: "PVD Gold" }), A("cobre", 45), A("gunmetal", 40)], [
+  L("lody", "Lody", "FRASA", [A("oro", 0, { nome: "PVD Gold", cor: "#c9ad68", roughness: 0.3 }), A("cobre", 0, { cor: "#bc825b", roughness: 0.3 }), A("gunmetal", -5, { cor: "#62605e", roughness: 0.29 })], [
     ML("lody40", "40 cm", "LOD-40", 139, 440, 440, [cuba(400, 400, 200, 20, 20)], { movel: 500 }), ML("lody50", "50 cm", "LOD-50", 159, 540, 440, [cuba(500, 400, 200, 20, 20)], { movel: 600 }),
     ML("lody70", "70 cm", "LOD-70", 199, 740, 440, [cuba(700, 400, 200, 20, 20)], { movel: 800 })], "Inox ou PVD (Gold, Cobre e Gunmetal), cantos R15."),
-  L("ambar", "Ambar", "Demonstração", [A("inox"), A("negro", 30, { cor: "#292c2d", metalness: 0, roughness: 0.58 }), A("gunmetal", 30, { cor: "#858988", metalness: 0, roughness: 0.58 }), A("blanco", 30, { cor: "#e5e5e1", metalness: 0, roughness: 0.58 })], [
+  L("ambar", "Ambar", "RODI · MAGMA", [A("negro", 0, { nome: "Midnight", cor: "#292c2d", metalness: 0, roughness: 0.58 }), A("gunmetal", 0, { nome: "Concrete", cor: "#858988", metalness: 0, roughness: 0.58 }), A("blanco", 0, { nome: "Ice", cor: "#e5e5e1", metalness: 0, roughness: 0.58 })], [
     ML("ambar40", "40", "AMB-40", 149, 450, 452, [cuba(400, 380, 200, 25, 36)], { degrau: true, movel: 500 }), ML("ambar40n", "40 N", "AMB-40N", 149, 450, 430, [cuba(390, 370, 200, 30, 30)], { movel: 500 }),
     ML("ambar50", "50", "AMB-50", 169, 550, 452, [cuba(500, 380, 200, 25, 36)], { degrau: true, movel: 600 }), ML("ambar50n", "50 N", "AMB-50N", 169, 550, 430, [cuba(490, 370, 200, 30, 30)], { movel: 600 }),
     ML("ambar57", "57", "AMB-57", 179, 550, 520, [cuba(500, 380, 200, 25, 105)], { degrau: true, movel: 600 }), ML("ambar55", "55 (1 cuba e meia)", "AMB-55", 189, 555, 450, [cuba(370, 380, 200, 20, 35), cuba(130, 380, 125, 405, 35)], { degrau: true, movel: 600 }),
     ML("ambar70", "70", "AMB-70", 219, 750, 452, [cuba(700, 380, 220, 25, 36)], { degrau: true, movel: 800 }), ML("ambar80", "80", "AMB-80", 239, 850, 452, [cuba(800, 380, 220, 25, 36)], { degrau: true, movel: 900 }),
-    ML("ambar86", "86 com escorredor", "AMB-86", 249, 860, 500, [cuba(452, 380, 200, 37, 60)], { degrau: true, escorredor: true, movel: 600 }), ML("ambar105", "105 com escorredor", "AMB-105", 269, 1000, 500, [cuba(452, 380, 200, 37, 60)], { degrau: true, escorredor: true, movel: 600 }),
+    ML("ambar86", "86 com escorredor", "AMB-86", 249, 860, 500, [cuba(452, 380, 200, 37, 60.6)], { degrau: true, escorredor: true, movel: 600 }), ML("ambar105", "105 com escorredor", "AMB-105", 269, 1000, 500, [cuba(452, 380, 200, 37, 60.6)], { degrau: true, escorredor: true, movel: 600 }),
     ML("ambar100", "100 (1 cuba e meia, escorredor)", "AMB-100", 279, 1000, 500, [cuba(302, 380, 200, 37, 60), cuba(145, 320, 125, 364, 90)], { degrau: true, escorredor: true, movel: 600 }),
     ML("ambar116", "116 (2 cubas, escorredor)", "AMB-116", 319, 1160, 500, [cuba(340, 380, 200, 37, 60), cuba(310, 320, 200, 402, 90)], { degrau: true, escorredor: true, movel: 900 })], "Doze medidas; inox ou acabamentos mate (Negro, Gunmetal, Blanco). Escorredor reversível."),
 ];
@@ -161,6 +161,8 @@ const OUTRAS: Familia[] = [
 /** As famílias com modelo detalhado do HTML e as opções de cada uma. */
 const DETALHADAS: Record<string, OpcaoFamilia[]> = { round: ["bica", "extraida"], noah: ["bica"], smooth: ["bica", "extraida"], stick: ["bica", "extraida"] };
 for (const f of TORNEIRAS) if (DETALHADAS[f.id]) { f.htmlModelo = f.id; f.opcoes = DETALHADAS[f.id]; }
+/** Lava-loiças com modelo detalhado do HTML: Velar, Lody e Ambar (a medida é o id do modelo). A Ambar tem tampas dos ralos que se retiram. */
+for (const f of LAVALOICAS) if (["velar", "lody", "ambar"].includes(f.id)) { f.htmlModelo = f.id; if (f.id === "ambar") f.opcoes = ["tampas"]; }
 
 export const FAMILIAS: Familia[] = [...TORNEIRAS, ...LAVALOICAS, ...PLACAS, ...OUTRAS];
 export const familiaPorId = (id: string): Familia | undefined => FAMILIAS.find((f) => f.id === id);
@@ -195,7 +197,7 @@ const M = 1 / 1000;
 export function paramsDaVariante(v: VarianteResolvida): ParamsMockup | undefined {
   const s = v.medida.spec;
   if (s?.torneira) return { k: "torneira", estilo: s.torneira.estilo, altura: s.torneira.altura * M, saida: s.torneira.saida * M, alcance: s.torneira.alcance * M, base: s.torneira.base * M, ...(v.familia.htmlModelo ? { html: { modelo: v.familia.htmlModelo, acab: v.acabamento.id } } : {}) };
-  if (s?.cubas) return { k: "lava_loica", cubas: s.cubas.map((c) => ({ x: c.left * M, z: c.top * M, w: c.w * M, d: c.d * M, prof: c.prof * M })), escorredor: !!s.escorredor, degrau: !!s.degrau };
+  if (s?.cubas) return { k: "lava_loica", cubas: s.cubas.map((c) => ({ x: c.left * M, z: c.top * M, w: c.w * M, d: c.d * M, prof: c.prof * M })), escorredor: !!s.escorredor, degrau: !!s.degrau, ...(v.familia.htmlModelo ? { html: { modelo: v.medida.id, acab: v.acabamento.id } } : {}) };
   if (s?.placa) {
     const p = s.placa;
     return { k: "placa", tipo: p.tipo, recorte: [p.recorte[0] * M, p.recorte[1] * M], espessura: p.espessura * M, acima: p.acima * M, queimadores: (p.queimadores ?? []).map(([x, z, r]) => [x * M, z * M, r * M] as [number, number, number]), manipulos: (p.manipulos ?? []).map((x) => x * M), vidro: !!p.vidro };

@@ -55,8 +55,8 @@ describe("resolver uma variante: material, preço e SKU", () => {
     expect(variantesDe(g)).toHaveLength(2 + 1 + 1 + 1);
     expect(resolverVariante(g, "ing61t", "inox").acabamento.id).toBe("negro");
   });
-  it("as zonas da Ambar: inox ou mate (Negro, Gunmetal, Blanco)", () => {
-    expect(variantesDe(fam("ambar"))).toHaveLength(12 * 4);
+  it("a Ambar: Midnight, Concrete e Ice (mate)", () => {
+    expect(variantesDe(fam("ambar"))).toHaveLength(12 * 3);
     expect(resolverVariante(fam("ambar"), "ambar50", "gunmetal").material).toMatchObject({ cor: "#858988", metalness: 0 });
   });
 });
