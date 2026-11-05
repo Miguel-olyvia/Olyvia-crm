@@ -1509,7 +1509,8 @@ const deleteQuote: Handler = async (ctx, args): Promise<ToolResult> => {
   if (args?.confirm !== true) {
     return { success: false, message: "Confirmação obrigatória — pede ao utilizador para confirmar e volta a chamar com confirm=true." };
   }
-  const perm = requireWrite(ctx, "quotes.edit", "cancelar orçamentos");
+  // Cancelar = soft_delete_business_entity('quote'), que exige quotes.delete (na organização ou acima).
+  const perm = requireWrite(ctx, "quotes.delete", "cancelar orçamentos");
   if (perm) return perm;
 
   const { data: quote, error: qErr } = await supabase
