@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -72,6 +73,8 @@ const DEFAULT_LABELS: Record<string, string> = {
 
 export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbProps) {
   const navigate = useNavigate();
+  // 05/11 (ronda 2): um passo só leva à página dele com a permissão que a rota pede (lib/rotasForaDoMenu.ts).
+  const podeAbrir = usePodeAbrirDestino();
   const [pipelineData, setPipelineData] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
   const [dynamicSteps, setDynamicSteps] = useState<PipelineStep[] | null>(null);
@@ -257,6 +260,7 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
         const isPast = index < currentIndex && step.id;
         const isFuture = index > currentIndex;
         const hasId = !!step.id;
+        const semPermissao = hasId && !isCurrent && !podeAbrir(step.route);
 
         return (
           <div key={step.key} className="flex items-center">
@@ -269,11 +273,11 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
                   // Abre o DETALHE do registo (todas as listas aceitam ?open=<id>),
                   // não a lista: era isso que o utilizador esperava ao clicar.
                   onClick={() =>
-                    hasId && !isCurrent && step.id
+                    hasId && !isCurrent && step.id && !semPermissao
                       ? navigate(`${step.route}?open=${encodeURIComponent(step.id)}`)
                       : undefined
                   }
-                  disabled={!hasId || isCurrent}
+                  disabled={!hasId || isCurrent || semPermissao}
                   className={cn(
                     "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap",
                     isCurrent && "bg-primary text-primary-foreground shadow-sm",
@@ -285,7 +289,7 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                   <span>{step.label}</span>
-                  {hasId && !isCurrent && (
+                  {hasId && !isCurrent && !semPermissao && (
                     <ExternalLink className="h-3 w-3 opacity-50" />
                   )}
                 </button>
@@ -294,7 +298,9 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
                 {hasId
                   ? isCurrent
                     ? `Passo actual: ${step.label}`
-                    : `Ir para ${step.label}`
+                    : semPermissao
+                      ? `${step.label} (sem permissão para abrir)`
+                      : `Ir para ${step.label}`
                   : `${step.label} (ainda não criado)`
                 }
               </TooltipContent>

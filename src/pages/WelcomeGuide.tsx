@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -63,6 +64,8 @@ interface WelcomeModule {
 const WelcomeGuide = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // 05/11 (ronda 2): as ligações para as páginas fora do menu (Pedidos, Propostas, Orçamentos, Contratos) só a quem a rota deixa entrar.
+  const podeAbrir = usePodeAbrirDestino();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
@@ -432,7 +435,7 @@ const WelcomeGuide = () => {
                           className="mt-4 pt-4 border-t border-border/50"
                         >
                           <div className="grid grid-cols-2 gap-2">
-                            {module.items.map((item, itemIndex) => (
+                            {module.items.filter((item) => podeAbrir(item.path)).map((item, itemIndex) => (
                               <motion.button
                                 key={item.path}
                                 initial={{ opacity: 0, x: -10 }}

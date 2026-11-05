@@ -1,4 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
+import { MENSAGEM_SEM_PERMISSAO_DESTINO } from "@/lib/rotasForaDoMenu";
 
 export type NotificationLike = {
   type: string;
@@ -42,12 +44,23 @@ const OTHER_APP_PREFIXES = ["/operacao", "/duc-app"];
 export const isOtherAppRoute = (route: string) =>
   OTHER_APP_PREFIXES.some((p) => route === p || route.startsWith(`${p}/`) || route.startsWith(`${p}?`));
 
-export const openNotificationRoute = (navigate: (to: string, opts?: { replace?: boolean }) => void, route: string) => {
+// 05/11 (ronda 2): `podeAbrir` é a guarda da rota (usePodeAbrirDestino): uma notificação de um orçamento, proposta, contrato ou
+// pedido só abre a página a quem a rota deixa entrar; aos outros diz porquê, em vez de levar a um «Sem acesso». Devolve se abriu.
+export const openNotificationRoute = (
+  navigate: (to: string, opts?: { replace?: boolean }) => void,
+  route: string,
+  podeAbrir?: (destino: string) => boolean,
+): boolean => {
+  if (podeAbrir && !podeAbrir(route)) {
+    toast.error(MENSAGEM_SEM_PERMISSAO_DESTINO);
+    return false;
+  }
   if (isOtherAppRoute(route)) {
     window.location.assign(route);
-    return;
+    return true;
   }
   navigate(appendTimestamp(route), { replace: true });
+  return true;
 };
 
 export const getNotificationRoute = async (notification: NotificationLike): Promise<string | null> => {

@@ -42,6 +42,9 @@
 // operations.costs.view, lists.view, clients.import e leads.import saem do editor. Só se esconde: os códigos ficam na base, os papéis
 // que as têm mantêm-nas ao gravar (fundirPermissoes) e nenhuma guarda/policy/RPC muda — ver os comentários em PERMISSOES_ESCONDIDAS.
 // Desfaz a decisão de 04/11 que mantinha as três de Operações por causa do Frota (Ligações).
+//
+// 05/11/2026 (ronda 2, aprovado): operations.view também sai do editor (sem ação própria: o item «Operação» do menu abre o /negocios,
+// guardado por pessoas.view/Papel no Negócio). A guarda do menu fica (ESCONDIDAS_COM_GUARDA); o grupo Operação desaparece do editor.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
@@ -140,10 +143,8 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "campaigns.create", "campaigns.delete", "campaigns.edit", "campaigns.view", "lead_sources.create",
     "lead_sources.delete", "lead_sources.edit", "lead_sources.view",
   ],
-  // 05/11: operations.orders.view/view_all e operations.costs.view passaram para as escondidas; fica operations.view.
-  operations: [
-    "operations.view",
-  ],
+  // 05/11: operations.orders.view/view_all e operations.costs.view passaram para as escondidas. 05/11 (ronda 2): operations.view também
+  // (ver PERMISSOES_ESCONDIDAS.operations) — o grupo Operação sai do editor.
   organizations: [
     "organizations.create", "organizations.delete", "organizations.edit", "organizations.view",
   ],
@@ -187,8 +188,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // sem fn_cat_pode(org, 'quotes.view_costs'), e o ecrã pergunta o mesmo (podeVerCustos em emylia/permissoes.ts: na ficha pela leitura de
   // permissoesPosContrato.ts, em /negocios por usePodeVerCustos) para esconder a margem e o custo (OrcamentoSimples, LinhasOrcamento,
   // PlanoObraOrcamento, DemolicaoOrcamento e os valores no texto dos bloqueios do motor).
+  // 05/11: quotes.delete volta ao editor: soft_delete_business_entity('deal'), restore_business_entity e o botão Restaurar do Lixo
+  // (lib/lixo/permissoesRestauro.ts) exigem-na para mandar/tirar orçamentos do Lixo.
   quotes: [
-    "quotes.create", "quotes.edit", "quotes.manage", "quotes.view", "quotes.view_costs",
+    "quotes.create", "quotes.delete", "quotes.edit", "quotes.manage", "quotes.view", "quotes.view_costs",
   ],
   receiving: [
     "receiving.download_proof", "receiving.learn_codes", "receiving.manage_delivery_notes", "receiving.receive",
@@ -335,8 +338,12 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   // operations.orders.view/view_all e operations.costs.view: sem ação na app viva, 05/11 (as policies/RPCs de ops_* e as do Frota
   // continuam a verificá-las; só saem do editor).
+  // operations.view: sem ação própria na app viva, 05/11 (ronda 2). O item «Operação» do menu abre /negocios?vista=operacoes, que é
+  // guardado por pessoas.view ou pelo Papel no Negócio (RotaNegocios) e lê as obras por obra_ler_negocios (pessoas.view); as ligações
+  // do Frota levam a /operacao (operacao-app desativada). No servidor só ops_pode a pede, com um perfil de operações (0 na base).
+  // Esconde-se só: a guarda do menu e as ligações do Frota não mudam (ESCONDIDAS_COM_GUARDA) e os papéis mantêm-na ao gravar.
   operations: [
-    "operations.checklists.manage", "operations.costs.view", "operations.orders.view", "operations.orders.view_all", "operations.locations.manage", "operations.locations.view", "operations.orders.approve",
+    "operations.checklists.manage", "operations.costs.view", "operations.view", "operations.orders.view", "operations.orders.view_all", "operations.locations.manage", "operations.locations.view", "operations.orders.approve",
     "operations.orders.cancel", "operations.orders.confirm", "operations.orders.create", "operations.orders.edit",
     "operations.orders.execute", "operations.plans.manage", "operations.settings.manage",
   ],
@@ -363,9 +370,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   proposals: [
     "proposals.export",
   ],
-  // quotes.delete/export/export_sensitive: só Quotes.tsx (FORA_DO_MENU) e o pedido dela a export-data.
+  // quotes.export/export_sensitive: só Quotes.tsx (FORA_DO_MENU) e o pedido dela a export-data.
   quotes: [
-    "quotes.delete", "quotes.export", "quotes.export_sensitive", "quotes.generate_pdf",
+    "quotes.export", "quotes.export_sensitive", "quotes.generate_pdf",
   ],
   roles: [
     "roles.clone",
@@ -429,6 +436,8 @@ export const CODIGOS_SEM_CATALOGO: readonly string[] = [
 export const ESCONDIDAS_COM_GUARDA: Readonly<Record<string, readonly string[]>> = {
   // 04/11: /rh-exemplo/denuncias (ProtectedRoute em App.tsx e PERMISSOES_RH.denuncias em menuConfig.ts); as RPCs da página não existem.
   "hr.denuncias.gerir": ["App.tsx", "components/sidebar/menuConfig.ts"],
+  // 05/11 (ronda 2): o item «Operação» do menu (com pessoas.view) e as ligações do Frota a /operacao; useOficiosObra só a cita num comentário.
+  "operations.view": ["components/sidebar/menuConfig.ts", "components/frota/contexto.ts", "hooks/useOficiosObra.ts"],
 };
 
 const todas = (r: Readonly<Record<string, readonly string[]>>): string[] => Object.values(r).flat();

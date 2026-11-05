@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 const BTN =
   "inline-flex min-h-[30px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1 text-[13px] font-[550] text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
+/** Motivo do «Eliminar» desativado quando a encomenda está fora da organização/âmbito de client_orders.delete. */
+export const DELETE_OUT_OF_SCOPE_REASON = "Fora do seu âmbito para eliminar encomendas";
+
 interface ClientOrderRowActionsProps {
   orderLabel: string;
   onView: () => void;
@@ -19,8 +22,11 @@ interface ClientOrderRowActionsProps {
   onRequestMissing: () => void;
   /** Proforma da venda direta (só quando existe). */
   proforma: { number: string; onSelect: () => void; busy: boolean } | null;
-  /** Eliminar: deletable = manual ou venda direta. */
-  remove: { deletable: boolean; busy: boolean; onSelect: () => void };
+  /**
+   * Eliminar: deletable = manual ou venda direta. outOfScope = tem client_orders.delete mas o servidor recusaria
+   * esta encomenda (organização/âmbito ORG/TEAM/OWNED — rpc_client_orders_can_delete): fica desativada com o motivo.
+   */
+  remove: { deletable: boolean; busy: boolean; onSelect: () => void; outOfScope?: boolean };
 }
 
 /**
@@ -80,8 +86,12 @@ export function ClientOrderRowActions({
       icon: Trash2,
       destructive: true,
       onSelect: remove.onSelect,
-      disabled: !remove.deletable || remove.busy,
-      disabledReason: !remove.deletable ? "Só manuais ou venda direta" : "A eliminar…",
+      disabled: !remove.deletable || !!remove.outOfScope || remove.busy,
+      disabledReason: !remove.deletable
+        ? "Só manuais ou venda direta"
+        : remove.outOfScope
+          ? DELETE_OUT_OF_SCOPE_REASON
+          : "A eliminar…",
       permission: "client_orders.delete",
     },
   ];

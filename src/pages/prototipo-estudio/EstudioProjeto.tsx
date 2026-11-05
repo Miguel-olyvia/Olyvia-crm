@@ -8,13 +8,16 @@
 // «Mostrar ao cliente» abre a apresentação (tablet): o projeto mostra-se e não se envia (é propriedade da empresa); o projeto só vai para o
 // portal depois de a proposta ser aceite. Tudo fica neste browser (localStorage).
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, CircleDot, HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send, Sparkles, Trash2, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorPlanta } from "@/emylia/EditorPlanta";
-import { PECAS, areaChaoM2, areaParedesM2, cantos, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
-import { ACOMPANHA, CORES, NOME_CATEGORIA, combina, coresPara, melhorPara, produto, produtosDe, type Categoria, type Cor, type Estilo, type Produto } from "./catalogoFake";
-import { IVA, aplicarEstilo, alturaFinalCm, estadoDaPeca, necessidades, sairam, totais, type Linha, type Projeto } from "./necessidadesEstudio";
+import { PECAS, cantos, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
+import { NOME_CATEGORIA, melhorPara, produto, type Categoria, type Produto } from "./catalogoFake";
+import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sairam, totais, type Linha, type Projeto } from "./necessidadesEstudio";
+import { Amostra, Areas, Cartao, Numero, PainelMateriais, PainelPeca, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
+import { PassoEstilo } from "./PassoEstilo";
 import { PROJETO_EXEMPLO, copiaPlanta, depoisDaVisita } from "./exemploEstudio";
 import { Vista3D } from "./Vista3D";
 import { PlantaVista } from "./PlantaVista";
@@ -24,14 +27,6 @@ import type { Cena } from "./geometria3d";
 import { CHAVE_ESTUDIO as CHAVE } from "./daVisita";
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Obra"] as const;
 type Passo = (typeof PASSOS)[number];
-const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
-const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
-const CHIP = "inline-flex min-h-11 items-center gap-2 rounded-full border px-4 py-2 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40";
-const chip = (on: boolean) => cn(CHIP, on ? "border-primary bg-primary/10 font-medium ring-1 ring-primary" : "border-input bg-background hover:bg-accent");
-const INP = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
-
-/** As categorias com exceção de cor no estilo (as que o cliente costuma querer diferentes). */
-const EXCECOES: Categoria[] = ["movel", "sanita", "base", "torneira", "revestimento", "pavimento"];
 /** Cores e alturas no 3D de cada peça, sem produto escolhido. */
 const SEM_PRODUTO: Record<TipoPeca, { cor: string; z0: number; z1: number }> = {
   base: { cor: "#f4f4f2", z0: 0, z1: 3 }, banheira: { cor: "#f4f4f2", z0: 0, z1: 55 }, sanita: { cor: "#f4f4f2", z0: 0, z1: 78 },
@@ -89,12 +84,18 @@ export default function EstudioProjeto() {
   const linhas = useMemo(() => necessidades(p), [p]);
   const t = totais(linhas);
   const escolher = (cat: Categoria) => melhorPara(cat, p.estilo)?.id;
-  const mudarAntes = (antes: Planta) => setP((x) => ({ ...x, antes, depois: { ...x.depois, o: { ...antes.o }, paredes: antes.paredes.map((w) => ({ ...w })) } }));
+  const mudarAntes = (antes: Planta) => setP((x) => {
+    const eramDoAntes = new Set(x.antes.pecas.map((y) => y.id)), saoDoAntes = new Set(antes.pecas.map((y) => y.id));
+    const ficam = x.depois.pecas.filter((y) => saoDoAntes.has(y.id) || !eramDoAntes.has(y.id));
+    const novas = antes.pecas.filter((y) => !eramDoAntes.has(y.id)).map((y) => ({ ...y }));
+    return { ...x, antes, depois: { o: { ...antes.o }, paredes: antes.paredes.map((w) => ({ ...w })), pecas: [...ficam, ...novas] } };
+  });
   const mudarDepois = (depois: Planta) => setP((x) => ({ ...x, depois }));
   const pecaAberta = p.depois.pecas.find((x) => x.id === aberta) ?? null;
   const porEscolher = linhas.filter((l) => l.porEscolher && !l.fora).length;
 
   const ir = (q: Passo) => { setPasso(q); setAberta(null); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
+  const reduzir = useReducedMotion();
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-background to-muted/40">
@@ -123,7 +124,9 @@ export default function EstudioProjeto() {
         </nav>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <AnimatePresence mode="wait" initial={false}>
+      <motion.div key={passo} initial={reduzir ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={reduzir ? undefined : { opacity: 0, y: -8 }}
+        transition={{ duration: 0.22, ease: "easeOut" }} className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_380px]">
         {passo === "Antes" && <>
           <section aria-labelledby="t-antes" className="min-w-0 space-y-4">
             <h2 id="t-antes" className="text-2xl font-semibold tracking-tight">Como está hoje</h2>
@@ -146,45 +149,7 @@ export default function EstudioProjeto() {
           </aside>
         </>}
 
-        {passo === "Estilo" && <>
-          <section aria-labelledby="t-estilo" className="min-w-0 space-y-6">
-            <div>
-              <h2 id="t-estilo" className="text-2xl font-semibold tracking-tight">O estilo do cliente</h2>
-              <p className="text-[15px] text-muted-foreground">As cores de tudo e as exceções. O catálogo filtra-se por aqui.</p>
-            </div>
-            <Cartao titulo="As cores de tudo">
-              <Cores escolhidas={p.estilo.cores} onMudar={(cores) => setP((x) => ({ ...x, estilo: { ...x.estilo, cores } }))} />
-            </Cartao>
-            <Cartao titulo="Exceções">
-              <ul className="divide-y divide-border">
-                {EXCECOES.map((cat) => {
-                  const exc = p.estilo.porCategoria[cat];
-                  return (
-                    <li key={cat} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
-                      <span className="text-[15px] font-medium">{NOME_CATEGORIA[cat]}</span>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button type="button" className={chip(!exc?.length)} aria-pressed={!exc?.length}
-                          onClick={() => setP((x) => { const pc = { ...x.estilo.porCategoria }; delete pc[cat]; return { ...x, estilo: { ...x.estilo, porCategoria: pc } }; })}>Como o resto</button>
-                        <Cores pequeno escolhidas={exc ?? []} onMudar={(cores) => setP((x) => ({ ...x, estilo: { ...x.estilo, porCategoria: { ...x.estilo.porCategoria, [cat]: cores } } }))} />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Cartao>
-          </section>
-          <aside className="space-y-6">
-            <Cartao titulo="O que isto escolhe">
-              <ul className="space-y-2">
-                {(["sanita", "base", "movel", "torneira", "revestimento", "pavimento"] as Categoria[]).map((cat) => {
-                  const m = melhorPara(cat, p.estilo);
-                  return <li key={cat} className="flex items-center gap-3 text-[15px]"><Amostra hex={m?.hex} /><span className="min-w-0"><span className="block text-xs text-muted-foreground">{NOME_CATEGORIA[cat]}</span>{m?.n ?? "Nada combina: escolhe-se à mão"}</span></li>;
-                })}
-              </ul>
-            </Cartao>
-            <Seguinte onClick={() => ir("Depois")}>Desenhar o depois</Seguinte>
-          </aside>
-        </>}
+        {passo === "Estilo" && <PassoEstilo p={p} setP={setP} t={t} porEscolher={porEscolher} seguinte={() => ir("Depois")} />}
 
         {passo === "Depois" && <>
           <section aria-labelledby="t-depois" className="min-w-0 space-y-4">
@@ -205,6 +170,8 @@ export default function EstudioProjeto() {
             </div>
             {aviso && <p role="status" className="rounded-xl bg-primary/[0.06] px-4 py-3 text-[15px]">{aviso}</p>}
             <EditorPlanta planta={p.depois} onMudar={mudarDepois} paredesFixas fantasmas={sairam(p)}
+              bandeja={(p.porColocar ?? []).map((x) => { const prod = produto(x.produto); return { id: x.id, tipo: x.tipo, rotulo: prod?.n ?? PECAS[x.tipo].n, cor: prod?.hex }; })}
+              aoColocar={(id, centro) => { setP((x) => colocar(x, id, centro)); setAberta(id); }}
               tipos={["base", "banheira", "sanita", "bide", "movel", "coluna", "espelho", "toalheiro"]}
               aparencia={(pc) => { const prod = produto(p.escolhas[pc.id]); const e = estadoDaPeca(p, pc); return { cor: prod?.hex, rotulo: prod ? prod.colecao + " · " + PECAS[pc.tipo].n : undefined, destaque: e !== "fica" && !PECAS[pc.tipo].abertura }; }}
               aoTocarPeca={(pc) => setAberta(pc.id)} aoJuntarPeca={(pc) => setAberta(pc.id)}
@@ -246,7 +213,8 @@ export default function EstudioProjeto() {
         </>}
 
         {passo === "Obra" && <FichaObra p={p} linhas={linhas} />}
-      </div>
+      </motion.div>
+      </AnimatePresence>
 
       <footer className="mx-auto max-w-7xl px-4 pb-10 sm:px-8">
         <button type="button" className="inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground underline-offset-4 hover:underline"
@@ -255,166 +223,6 @@ export default function EstudioProjeto() {
 
       {mostrar && <MostrarAoCliente p={p} t={t} fechar={() => setMostrar(false)} />}
     </main>
-  );
-}
-
-// ---------------------------------------------------------------- peças pequenas
-
-function Cartao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-  return (
-    <section className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
-      <h3 className="text-[17px] font-semibold tracking-tight">{titulo}</h3>
-      {children}
-    </section>
-  );
-}
-function Seguinte({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return <Button type="button" className="min-h-12 w-full text-base" onClick={onClick}>{children}<ArrowRight className="ml-2 h-5 w-5" aria-hidden="true" /></Button>;
-}
-function Amostra({ hex, grande = false }: { hex?: string; grande?: boolean }) {
-  return <span aria-hidden="true" className={cn("inline-block shrink-0 rounded-lg border border-black/10 shadow-inner", grande ? "h-14 w-14" : "h-8 w-8")} style={{ background: hex ?? "repeating-linear-gradient(45deg,#eee,#eee 4px,#ddd 4px,#ddd 8px)" }} />;
-}
-function Numero({ rotulo, un, valor, onMudar }: { rotulo: string; un: string; valor: number; onMudar: (n: number) => void }) {
-  return (
-    <label className="grid gap-1.5 text-sm font-medium">{rotulo}
-      <span className="flex items-center gap-2">
-        <input key={valor} type="number" inputMode="numeric" min={150} max={500} defaultValue={valor} className={cn(INP, "w-32")}
-          onBlur={(e) => { const n = Math.round(Number(e.target.value) || 0); if (n >= 150 && n !== valor) onMudar(n); }}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-        <span className="text-muted-foreground">{un}</span>
-      </span>
-    </label>
-  );
-}
-function Cores({ escolhidas, onMudar, pequeno = false }: { escolhidas: Cor[]; onMudar: (c: Cor[]) => void; pequeno?: boolean }) {
-  return (
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Cores">
-      {(Object.keys(CORES) as Cor[]).map((c) => {
-        const on = escolhidas.includes(c);
-        return (
-          <button key={c} type="button" aria-pressed={on} className={cn(chip(on), pequeno && "px-3")}
-            onClick={() => onMudar(on ? escolhidas.filter((x) => x !== c) : [...escolhidas, c])}>
-            <span aria-hidden="true" className="h-5 w-5 rounded-full border border-black/15" style={{ background: CORES[c].hex }} />{CORES[c].n}
-            {on && escolhidas.length > 1 && escolhidas[0] === c && <span className="text-xs text-muted-foreground">1.ª</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-function Areas({ p }: { p: Projeto }) {
-  const chao = areaChaoM2(p.antes.paredes), altura = alturaFinalCm(p.alturas) / 100;
-  const paredes = areaParedesM2(p.depois, altura);
-  return chao === null ? <p className="text-sm text-muted-foreground">Feche a planta para ver os m².</p> : (
-    <dl className="grid grid-cols-2 gap-3 rounded-xl bg-muted/50 p-3 text-[15px]">
-      <div><dt className="text-xs text-muted-foreground">Chão</dt><dd className="font-semibold">{nf(chao)} m²</dd></div>
-      <div><dt className="text-xs text-muted-foreground">Paredes até {p.alturas.tetoFalso ? "ao teto falso" : "ao teto"}</dt><dd className="font-semibold">{paredes === null ? "—" : `${nf(paredes)} m²`}</dd></div>
-    </dl>
-  );
-}
-function Resumo({ t, porEscolher, grande = false }: { t: ReturnType<typeof totais>; porEscolher: number; grande?: boolean }) {
-  return (
-    <section aria-label="Orçamento" className={cn("rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]", grande && "bg-foreground text-background")}>
-      <p className={cn("text-sm", grande ? "text-background/70" : "text-muted-foreground")}>Orçamento, com IVA a {Math.round(IVA * 100)}%</p>
-      <p className={cn("font-semibold tracking-tight", grande ? "text-4xl" : "text-3xl")}>{eur(t.comIva)}</p>
-      <p className={cn("text-sm", grande ? "text-background/70" : "text-muted-foreground")}>{eur(t.semIva)} sem IVA{porEscolher ? ` · ${porEscolher} por escolher` : ""}</p>
-      {grande && <p className="mt-3 text-xs text-background/60">Com IVA a 6% se a casa estiver numa área de reabilitação urbana: por confirmar.</p>}
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------- o catálogo de uma peça
-
-function CartaoProduto({ prod, estilo, escolhido, onEscolher }: { prod: Produto; estilo: Estilo; escolhido: boolean; onEscolher: () => void }) {
-  const c = combina(prod, estilo);
-  return (
-    <li>
-      <button type="button" aria-pressed={escolhido} onClick={onEscolher}
-        className={cn("flex w-full gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          escolhido ? "border-primary bg-primary/[0.06] ring-1 ring-primary" : "border-border bg-background hover:border-primary/50")}>
-        <Amostra hex={prod.hex} grande />
-        <span className="min-w-0 flex-1">
-          <span className="block text-[15px] font-medium leading-snug">{prod.n}</span>
-          {prod.destaque && <span className="block text-xs text-muted-foreground">{prod.destaque}</span>}
-          <span className="mt-1 flex flex-wrap items-center gap-2 text-sm">
-            <b>{eur(prod.preco)}{prod.un === "m²" ? "/m²" : ""}</b>
-            <span className="text-muted-foreground">+ {eur(prod.inst)}{prod.un === "m²" ? "/m²" : ""} de mão de obra</span>
-            {c === 2 && <span className="rounded-full bg-success/15 px-2 text-xs font-medium text-success">combina</span>}
-            {c === 1 && <span className="rounded-full bg-muted px-2 text-xs">também combina</span>}
-          </span>
-        </span>
-        {escolhido && <Check className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />}
-      </button>
-    </li>
-  );
-}
-
-function ListaProdutos({ cat, estilo, escolhido, onEscolher }: { cat: Categoria; estilo: Estilo; escolhido?: string; onEscolher: (id: string) => void }) {
-  const [todos, setTodos] = useState(false);
-  const lista = produtosDe(cat, estilo, todos);
-  const fora = produtosDe(cat, estilo, true).length - produtosDe(cat, estilo).length;
-  return (
-    <div className="space-y-2">
-      <p className="text-sm text-muted-foreground">Filtrado por {coresPara(estilo, cat).map((c) => CORES[c].n.toLowerCase()).join(" e ") || "todas as cores"}.</p>
-      {lista.length === 0 && <p className="text-sm">Nenhum produto combina com o estilo.</p>}
-      <ul className="space-y-2">{lista.map((prod) => <CartaoProduto key={prod.id} prod={prod} estilo={estilo} escolhido={escolhido === prod.id} onEscolher={() => onEscolher(prod.id)} />)}</ul>
-      {fora > 0 && <button type="button" className="min-h-11 text-sm text-primary underline-offset-4 hover:underline" onClick={() => setTodos((x) => !x)}>{todos ? "Só os que combinam" : `Ver também os outros ${fora}`}</button>}
-    </div>
-  );
-}
-
-function PainelPeca({ p, pc, setP, fechar }: { p: Projeto; pc: PecaPlanta; setP: React.Dispatch<React.SetStateAction<Projeto>>; fechar: () => void }) {
-  const estado = estadoDaPeca(p, pc), doAntes = estado !== "nova";
-  const escolher = (id: string) => setP((x) => {
-    const prod = produto(id);
-    // a peça fica com o tamanho do produto, na mesma orientação
-    const deitada = pc.w < pc.h;
-    const pecas = x.depois.pecas.map((y) => (y.id === pc.id && prod?.w && prod.h ? { ...y, w: deitada ? prod.h : prod.w, h: deitada ? prod.w : prod.h } : y));
-    return { ...x, escolhas: { ...x.escolhas, [pc.id]: id }, depois: { ...x.depois, pecas } };
-  });
-  return (
-    <section aria-labelledby="t-peca" className="space-y-4 rounded-2xl border border-primary/30 bg-card p-5 shadow-[var(--shadow-md)]">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary">{estado === "nova" ? "Peça nova" : estado === "troca" ? "Troca" : "Fica como está"}</p>
-          <h3 id="t-peca" className="text-[17px] font-semibold tracking-tight">{PECAS[pc.tipo].n}</h3>
-        </div>
-        <Button type="button" variant="ghost" className="min-h-11" aria-label="Fechar o catálogo" onClick={fechar}><X className="h-4 w-4" aria-hidden="true" /></Button>
-      </div>
-      {doAntes && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={chip(estado === "fica")} aria-pressed={estado === "fica"}
-            onClick={() => setP((x) => { const e = { ...x.escolhas }; delete e[pc.id]; return { ...x, escolhas: e }; })}><CircleDot className="h-4 w-4" aria-hidden="true" />Fica como está</button>
-          <button type="button" className={chip(false)} onClick={() => { setP((x) => ({ ...x, depois: { ...x.depois, pecas: x.depois.pecas.filter((y) => y.id !== pc.id) } })); fechar(); }}>
-            <Trash2 className="h-4 w-4" aria-hidden="true" />Sai
-          </button>
-        </div>
-      )}
-      <ListaProdutos cat={pc.tipo} estilo={p.estilo} escolhido={p.escolhas[pc.id]} onEscolher={escolher} />
-      {(ACOMPANHA[pc.tipo] ?? []).map((cat) => (
-        <div key={cat} className="space-y-2 border-t border-border pt-4">
-          <h4 className="text-[15px] font-semibold">{NOME_CATEGORIA[cat]}</h4>
-          <ListaProdutos cat={cat} estilo={p.estilo} escolhido={p.acompanha[pc.id]?.[cat]}
-            onEscolher={(id) => setP((x) => ({ ...x, acompanha: { ...x.acompanha, [pc.id]: { ...(x.acompanha[pc.id] ?? {}), [cat]: id } } }))} />
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function PainelMateriais({ p, setP }: { p: Projeto; setP: React.Dispatch<React.SetStateAction<Projeto>> }) {
-  return (
-    <Cartao titulo="Paredes e chão">
-      <p className="text-sm text-muted-foreground">Ou toque numa peça da planta para a trocar.</p>
-      <div className="space-y-2">
-        <h4 className="text-[15px] font-semibold">Revestimento{p.alturas.tetoFalso ? " (até ao teto falso)" : ""}</h4>
-        <ListaProdutos cat="revestimento" estilo={p.estilo} escolhido={p.revestimento} onEscolher={(id) => setP((x) => ({ ...x, revestimento: id }))} />
-      </div>
-      <div className="space-y-2 border-t border-border pt-4">
-        <h4 className="text-[15px] font-semibold">Pavimento</h4>
-        <ListaProdutos cat="pavimento" estilo={p.estilo} escolhido={p.pavimento} onEscolher={(id) => setP((x) => ({ ...x, pavimento: id }))} />
-      </div>
-    </Cartao>
   );
 }
 

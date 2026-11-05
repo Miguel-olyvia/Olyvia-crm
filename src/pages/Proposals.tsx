@@ -1,6 +1,8 @@
 ﻿import { useEffect, useState, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
+import { MENSAGEM_SEM_PERMISSAO_DESTINO } from "@/lib/rotasForaDoMenu";
 import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -251,6 +253,8 @@ const Proposals = () => {
   const [kanbanRejectDialogOpen, setKanbanRejectDialogOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  // 05/11 (ronda 2): as ligações para as outras páginas fora do menu pedem a permissão da rota (lib/rotasForaDoMenu.ts).
+  const podeAbrir = usePodeAbrirDestino();
   const [searchParams] = useSearchParams();
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const { t } = useTranslation();
@@ -1829,6 +1833,7 @@ const Proposals = () => {
    */
   const handleCreateQuoteForProposal = async () => {
     if (savingProposal || submitLockRef.current) return;
+    if (!podeAbrir("/quotes")) return; // 05/11 (ronda 2): o orçamento abre em /quotes, que pede quotes.view
 
     if (editingId) {
       setOpen(false);
@@ -2508,6 +2513,10 @@ const Proposals = () => {
   // window.open involved, so it can never be blocked as a pop-up.
   const openContractPdf = (contractId?: string | null) => {
     if (!isContractSigned(contractId)) return;
+    if (!podeAbrir("/client-contracts")) {
+      toast({ title: MENSAGEM_SEM_PERMISSAO_DESTINO, variant: "destructive" });
+      return;
+    }
     navigate(`/client-contracts?open=${contractId}&viewPdf=1`);
   };
 
@@ -3508,7 +3517,7 @@ const Proposals = () => {
                               variant="outline"
                               size="sm"
                               className="h-7 text-xs gap-1"
-                              disabled={savingProposal}
+                              disabled={savingProposal || !podeAbrir("/quotes")}
                               onClick={handleCreateQuoteForProposal}
                             >
                               📝 Criar orçamento aqui
@@ -3657,7 +3666,7 @@ const Proposals = () => {
             noValidityEnabled={alertSettings.get("proposal_no_validity").is_active}
             draftStaleEnabled={alertSettings.get("proposal_draft_stale", 5).is_active}
             draftStaleDays={alertSettings.get("proposal_draft_stale", 5).days_threshold}
-            onNavigateContracts={() => navigate("/client-contracts")}
+            onNavigateContracts={podeAbrir("/client-contracts") ? () => navigate("/client-contracts") : undefined}
             onRenewValidity={openRenewDialog}
             onOpenProposal={(id) => {
               const found = proposals.find(p => p.id === id);

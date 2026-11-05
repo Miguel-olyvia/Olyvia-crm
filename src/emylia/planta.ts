@@ -174,3 +174,40 @@ export function plantaDaFolha(l: PlantaLida): Planta {
   });
   return p;
 }
+
+/** O vetor de uma parede (para mover outras com ela). */
+export const vetorDe = (r: Rumo): Ponto => ({ ...VETOR[r] });
+
+/**
+ * 5/11 (Rúben: «ao clicar numa parede consegue alterar o seu comprimento e posição»). Mover a parede `i` pelo vetor `s` (só a parte
+ * perpendicular a ela conta): as duas paredes vizinhas esticam ou encolhem para a acompanhar, e a planta continua fechada. Se uma vizinha
+ * ficasse com comprimento negativo, não se mexe (null). Mover a primeira parede mexe também o ponto de partida.
+ */
+export function moverParede(p: { o: Ponto; paredes: readonly Parede[] }, i: number, s: Ponto): { o: Ponto; paredes: Parede[] } | null {
+  const n = p.paredes.length;
+  if (n < 3 || i < 0 || i >= n) return null;
+  const v = VETOR[p.paredes[i].r];
+  // só o que é perpendicular à parede (andar ao longo dela não a muda)
+  const d = { x: v.x === 0 ? s.x : 0, y: v.y === 0 ? s.y : 0 };
+  if (!d.x && !d.y) return { o: { ...p.o }, paredes: p.paredes.map((w) => ({ ...w })) };
+  const ant = (i - 1 + n) % n, seg = (i + 1) % n;
+  const dot = (a: Ponto, b: Ponto) => a.x * b.x + a.y * b.y;
+  const paredes = p.paredes.map((w) => ({ ...w }));
+  paredes[ant] = { ...paredes[ant], c: paredes[ant].c + dot(d, VETOR[paredes[ant].r]) };
+  paredes[seg] = { ...paredes[seg], c: paredes[seg].c - dot(d, VETOR[paredes[seg].r]) };
+  if (paredes[ant].c < 0 || paredes[seg].c < 0) return null;
+  return { o: i === 0 ? { x: p.o.x + d.x, y: p.o.y + d.y } : { ...p.o }, paredes };
+}
+
+/**
+ * Mudar o comprimento da parede `i` sem abrir a planta: a parede seguinte anda com a ponta dela (e a do outro lado estica ou encolhe).
+ * Numa planta que ainda não fecha (a desenhar), muda só esta parede.
+ */
+export function mudarComprimentoFechada(p: { o: Ponto; paredes: readonly Parede[] }, i: number, c: number): { o: Ponto; paredes: Parede[] } | null {
+  const novo = Math.max(0, Math.round(c));
+  if (faltaFechar(p.paredes) > 1) return { o: { ...p.o }, paredes: mudarComprimento(p.paredes, i, novo) };
+  const delta = novo - p.paredes[i].c, v = VETOR[p.paredes[i].r];
+  const n = p.paredes.length, seg = (i + 1) % n;
+  // mover a seguinte com a ponta desta: esta estica (é a anterior da seguinte) e a do outro lado acompanha
+  return moverParede(p, seg, { x: v.x * delta, y: v.y * delta });
+}

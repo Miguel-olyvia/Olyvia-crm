@@ -34,6 +34,7 @@ import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { useCompany } from "@/contexts/CompanyContext";
 import { ContratosDaEquipaDialog } from "@/components/hr/fimContrato/ContratosDaEquipaDialog";
 import { getNotificationRoute, openNotificationRoute, notificationPriorityDotColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -65,6 +66,7 @@ const actionLabels: Record<string, { label: string; icon: typeof Send }> = {
 
 export function TopHeader({ userName, userRole }: TopHeaderProps) {
   const navigate = useNavigate();
+  const podeAbrir = usePodeAbrirDestino();
   const { toast } = useToast();
   const { t, language } = useTranslation();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -279,7 +281,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
     setNotificationsOpen(false);
     const route = await getNotificationRoute(notification);
     if (route) {
-      openNotificationRoute(navigate, route);
+      openNotificationRoute(navigate, route, podeAbrir);
     }
   };
 
@@ -291,7 +293,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
       const withAction = notification.action_type
         ? `${baseRoute}${baseRoute.includes("?") ? "&" : "?"}action=${notification.action_type}`
         : baseRoute;
-      openNotificationRoute(navigate, withAction);
+      openNotificationRoute(navigate, withAction, podeAbrir);
     }
   };
 
@@ -556,7 +558,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
                 const target = messageDialog.link || route;
                 setMessageDialog(null);
                 setNotificationsOpen(false);
-                if (target) openNotificationRoute(navigate, target);
+                if (target) openNotificationRoute(navigate, target, podeAbrir);
               }}
             >
               Ver documento

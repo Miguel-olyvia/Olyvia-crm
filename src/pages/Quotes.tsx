@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
 import { AUTO_IMPORT_PARAM, readAutoImportParam } from "@/lib/quotes/dealQuoteLink";
 import Layout from "@/components/Layout";
@@ -224,6 +225,8 @@ async function fetchAllPages<T>(
 
 export default function Quotes() {
   const navigate = useNavigate();
+  // 05/11 (ronda 2): as ligações para as outras páginas fora do menu pedem a permissão da rota (lib/rotasForaDoMenu.ts).
+  const podeAbrir = usePodeAbrirDestino();
   const [searchParams, setSearchParams] = useSearchParams();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [entityNamesMap, setEntityNamesMap] = useState<Record<string, string>>({});
@@ -1567,7 +1570,7 @@ export default function Quotes() {
           setBuilderInitialProposalId(null);
           setBuilderInitialDealId(null);
           setBuilderAutoImport(false);
-          if (returnProposalId) {
+          if (returnProposalId && podeAbrir("/proposals")) {
             navigate(`/proposals?open=${returnProposalId}`);
             return;
           }
@@ -1630,7 +1633,7 @@ export default function Quotes() {
         <QuotesAlertBars
           quotes={quotes}
           linesAgg={linesAgg}
-          onNavigateProposals={() => navigate("/proposals")}
+          onNavigateProposals={podeAbrir("/proposals") ? () => navigate("/proposals") : undefined}
           onOpenQuote={handleViewDetails}
           onViewLowMargin={canViewCosts ? () => setViewMode('margens') : undefined}
           showMarginAlerts={canViewCosts}
@@ -2079,7 +2082,7 @@ export default function Quotes() {
                                   </Button>
                                 )}
                                 {/* View proposal — when linked */}
-                                {quote.proposal_id && (
+                                {quote.proposal_id && podeAbrir("/proposals") && (
                                   <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600" onClick={() => navigate(`/proposals?open=${quote.proposal_id}`)} title="Ver proposta">
                                     <FileCheck className="h-3.5 w-3.5" />
                                   </Button>
@@ -2152,7 +2155,7 @@ export default function Quotes() {
                                       </DropdownMenuItem>
                                     )}
                                     {quote.proposal_id ? (
-                                      <DropdownMenuItem onClick={() => navigate(`/proposals?open=${quote.proposal_id}`)}>
+                                      <DropdownMenuItem disabled={!podeAbrir("/proposals")} onClick={() => navigate(`/proposals?open=${quote.proposal_id}`)}>
                                         <FileCheck className="w-3.5 h-3.5 mr-2 text-green-600" />Ver proposta criada
                                       </DropdownMenuItem>
                                     ) : (

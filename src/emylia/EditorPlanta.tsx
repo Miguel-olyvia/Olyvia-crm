@@ -10,8 +10,8 @@ import { RotateCw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  PASSO, PECAS, PLANTA_VAZIA, cantos, emL, faltaFechar, gravarPlanta, juntarParede, juntarPeca, limites, mudarComprimento, paredeDoTraco, retangulo,
-  type PecaPlanta, type Planta, type Ponto, type TipoPeca,
+  PASSO, PECAS, PLANTA_VAZIA, cantos, emL, faltaFechar, gravarPlanta, juntarParede, juntarPeca, limites, moverParede, mudarComprimentoFechada, paredeDoTraco,
+  retangulo, type PecaPlanta, type Planta, type Ponto, type TipoPeca,
 } from "./planta";
 
 const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
@@ -28,6 +28,23 @@ function vistaDe(p: Planta, fantasmas: readonly PecaPlanta[] = []) {
   const b = limites(todas), m = 60;
   const x = Math.min(TELA.x, b.x - m), y = Math.min(TELA.y, b.y - m);
   return { x, y, w: Math.max(TELA.x + TELA.w, b.x + b.w + m) - x, h: Math.max(TELA.y + TELA.h, b.y + b.h + m) - y };
+}
+
+/** As peças encostadas à parede `i` (a menos de 3 cm dela, e ao lado dela): andam com a parede quando se arrasta. */
+function coladasA(p: Planta, i: number): Set<string> {
+  const pts = cantos(p.paredes, p.o), a = pts[i], z = pts[i + 1];
+  const ENCOSTA = 3;
+  const ids = p.pecas.filter((pc) => {
+    if (a.x === z.x) { // vertical
+      const y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
+      const toca = Math.abs(pc.x - a.x) <= ENCOSTA || Math.abs(pc.x + pc.w - a.x) <= ENCOSTA;
+      return toca && pc.y < y1 && pc.y + pc.h > y0;
+    }
+    const x0 = Math.min(a.x, z.x), x1 = Math.max(a.x, z.x);
+    const toca = Math.abs(pc.y - a.y) <= ENCOSTA || Math.abs(pc.y + pc.h - a.y) <= ENCOSTA;
+    return toca && pc.x < x1 && pc.x + pc.w > x0;
+  }).map((pc) => pc.id);
+  return new Set(ids);
 }
 
 /** Como uma peça aparece (o Estúdio pinta-a com a cor do produto e escreve o nome dele). */
@@ -52,16 +69,25 @@ export interface PropsEditor {
   /** Por baixo da peça selecionada (ex.: «Trocar no catálogo»). */
   acoesDaPeca?: (pc: PecaPlanta) => ReactNode;
   textoBarra?: string;
+  /** 5/11: os produtos escolhidos que ainda não estão na planta (o Estúdio): arrastam-se para o sítio. */
+  bandeja?: readonly ItemBandeja[];
+  aoColocar?: (id: string, centro?: Ponto) => void;
 }
+export interface ItemBandeja { id: string; tipo: TipoPeca; rotulo: string; cor?: string }
 
-export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, tipos = TIPOS_DE_SEMPRE, fantasmas = [], aparencia, aoTocarPeca, aoJuntarPeca, acoesDaPeca, textoBarra }: PropsEditor) {
+export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, tipos = TIPOS_DE_SEMPRE, fantasmas = [], aparencia, aoTocarPeca, aoJuntarPeca, acoesDaPeca, textoBarra, bandeja = [], aoColocar }: PropsEditor) {
   const id = useId();
   const [p, setP] = useState<Planta>(planta);
   const [vista, setVista] = useState(() => vistaDe(planta, fantasmas));
   const [sel, setSel] = useState<string | null>(null);
   const [paredeSel, setParedeSel] = useState<number | null>(null);
   const [traco, setTraco] = useState<{ de: Ponto; ate: Ponto } | null>(null);
-  const [nova, setNova] = useState<{ tipo: TipoPeca; x: number; y: number } | null>(null);
+  const [nova, setNovaEstado] = useState<{ tipo: TipoPeca; x: number; y: number; bandeja?: string; rotulo?: string } | null>(null);
+  // a peça a arrastar também numa ref: um largar logo a seguir ao pegar (antes de o ecrã se redesenhar) não a perde
+  const novaRef = useRef<typeof nova>(null);
+  const setNova = (n: typeof nova) => { novaRef.current = n; setNovaEstado(n); };
+  // arrastar uma parede: de onde partiu e a planta como estava
+  const arrastoParede = useRef<{ i: number; de: Ponto; base: Planta; mexeu: boolean; coladas: Set<string> } | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const arrasto = useRef<{ id: string; dx: number; dy: number; mexeu: boolean } | null>(null);
   const contador = useRef(Date.now() % 100000);
@@ -111,10 +137,26 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   };
   const moverNaTela = (e: RPointerEvent<SVGSVGElement>) => {
     if (traco) { const q = naPlanta(e.clientX, e.clientY); if (q) setTraco({ ...traco, ate: q }); return; }
+    const ap = arrastoParede.current;
+    if (ap) {
+      const q = naPlanta(e.clientX, e.clientY); if (!q) return;
+      const s = { x: arred(q.x - ap.de.x), y: arred(q.y - ap.de.y) };
+      const r = moverParede(ap.base, ap.i, s);
+      if (r) {
+        // as peças encostadas a esta parede (o espelho, o móvel, a sanita) andam com ela
+        const vertical = ap.base.paredes[ap.i].r === "N" || ap.base.paredes[ap.i].r === "S";
+        const d = vertical ? { x: s.x, y: 0 } : { x: 0, y: s.y };
+        ap.mexeu = true;
+        setP({ ...ap.base, ...r, pecas: ap.base.pecas.map((x) => (ap.coladas.has(x.id) ? { ...x, x: x.x + d.x, y: x.y + d.y } : x)) });
+      }
+      return;
+    }
     const a = arrasto.current, q = a && naPlanta(e.clientX, e.clientY);
     if (a && q) { a.mexeu = true; mudarPeca(a.id, { x: arred(q.x - a.dx), y: arred(q.y - a.dy) }, false); }
   };
   const largarNaTela = () => {
+    const ap = arrastoParede.current;
+    if (ap) { arrastoParede.current = null; if (ap.mexeu) gravar(p); return; }
     if (traco) {
       const parede = paredeDoTraco(traco.de, traco.ate, p.paredes.length >= 2 ? p.o : undefined);
       setTraco(null);
@@ -153,18 +195,45 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
     const pc = np.pecas.find((x) => x.id === nid);
     if (pc) aoJuntarPeca?.(pc);
   };
-  const pegarNova = (e: RPointerEvent<HTMLButtonElement>, tipo: TipoPeca) => {
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    setNova({ tipo, x: e.clientX, y: e.clientY });
+  // 5/11: pegar numa peça da barra (ou da bandeja) e largá-la na planta. O arrasto segue-se na janela inteira (não só no botão): o rato e o
+  // dedo podem sair do botão, e o largar conta onde quer que aconteça. Largar fora da planta (ou só tocar) põe a peça ao meio.
+  const pegarNova = (e: RPointerEvent<HTMLButtonElement>, item: { tipo: TipoPeca; bandeja?: string; rotulo?: string }) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setNova({ ...item, x: e.clientX, y: e.clientY });
   };
-  const moverNova = (e: RPointerEvent<HTMLButtonElement>) => { if (nova) setNova({ ...nova, x: e.clientX, y: e.clientY }); };
-  const largarNova = (e: RPointerEvent<HTMLButtonElement>) => {
-    if (!nova) return;
-    const r = svg.current?.getBoundingClientRect();
-    const dentro = !!r && r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    juntar(nova.tipo, dentro ? naPlanta(e.clientX, e.clientY) ?? undefined : undefined);
+  const largarEm = (cx: number, cy: number) => {
+    const n = novaRef.current;
+    if (!n) return;
     setNova(null);
+    const r = svg.current?.getBoundingClientRect();
+    const dentro = !!r && r.width > 0 && cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
+    const centro = dentro ? naPlanta(cx, cy) ?? undefined : undefined;
+    if (n.bandeja) aoColocar?.(n.bandeja, centro); else juntar(n.tipo, centro);
   };
+  const largarEmRef = useRef(largarEm);
+  largarEmRef.current = largarEm;
+  const aArrastarNova = nova !== null;
+  useEffect(() => {
+    if (!aArrastarNova) return;
+    const mover = (e: PointerEvent) => { const n = novaRef.current; if (n) setNova({ ...n, x: e.clientX, y: e.clientY }); };
+    const largar = (e: PointerEvent) => largarEmRef.current(e.clientX, e.clientY);
+    const cancelar = () => setNova(null);
+    window.addEventListener("pointermove", mover);
+    window.addEventListener("pointerup", largar);
+    window.addEventListener("pointercancel", cancelar);
+    return () => { window.removeEventListener("pointermove", mover); window.removeEventListener("pointerup", largar); window.removeEventListener("pointercancel", cancelar); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só ao começar e ao acabar o arrasto
+  }, [aArrastarNova]);
+  const pegarParede = (e: RPointerEvent, i: number) => {
+    e.stopPropagation();
+    setParedeSel(i); setSel(null);
+    if (paredesFixas || !fechada) return;
+    const q = naPlanta(e.clientX, e.clientY); if (!q) return;
+    svg.current?.setPointerCapture?.(e.pointerId);
+    arrastoParede.current = { i, de: q, base: p, mexeu: false, coladas: coladasA(p, i) };
+  };
+  const mudarMedida = (i: number, c: number) => { const r = mudarComprimentoFechada(p, i, c); if (r) gravar({ ...p, ...r }); };
 
   /** A etiqueta de uma parede: ao lado da reta, a meio (desenhando como na folha, no sentido dos ponteiros do relógio, fica por fora). */
   const etiqueta = (a: Ponto, z: Ponto) => {
@@ -200,6 +269,14 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
           {p.paredes.length > 0 && (fechada
             ? <polygon points={pts.slice(0, -1).map((q) => `${q.x},${q.y}`).join(" ")} className="pointer-events-none fill-primary/[0.06] stroke-foreground" strokeWidth={letra / 3.5} strokeLinejoin="round" />
             : <polyline points={pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" className="pointer-events-none stroke-foreground" strokeWidth={letra / 3.5} strokeLinejoin="round" strokeLinecap="round" />)}
+          {/* cada parede: tocar seleciona, arrastar muda-a de sítio (as vizinhas acompanham); a selecionada fica destacada */}
+          {!paredesFixas && fechada && p.paredes.map((_w, i) => (
+            <g key={`p-${i}`}>
+              {paredeSel === i && <line x1={pts[i].x} y1={pts[i].y} x2={pts[i + 1].x} y2={pts[i + 1].y} className="pointer-events-none stroke-primary" strokeWidth={letra / 1.8} strokeLinecap="round" />}
+              <line x1={pts[i].x} y1={pts[i].y} x2={pts[i + 1].x} y2={pts[i + 1].y} stroke="transparent" strokeWidth={letra * 1.4}
+                className={pts[i].x === pts[i + 1].x ? "cursor-ew-resize" : "cursor-ns-resize"} onPointerDown={(e) => pegarParede(e, i)} aria-hidden="true" />
+            </g>
+          ))}
           {/* o traço a desenhar, com a medida junto ao dedo */}
           {traco && preve && (() => {
             const z = cantos([preve], traco.de)[1];
@@ -228,7 +305,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
             );
             return paredesFixas ? <g key={i} className="pointer-events-none">{conteudo}</g> : (
               <g key={i} role="button" tabIndex={0} aria-label={`Parede ${i + 1}: ${w.c} cm. Escrever a medida.`} className="cursor-pointer outline-none"
-                onPointerDown={(ev) => { ev.stopPropagation(); setParedeSel(i); setSel(null); }}
+                onPointerDown={(ev) => pegarParede(ev, i)}
                 onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setParedeSel(i); } }}>{conteudo}</g>
             );
           })}
@@ -271,7 +348,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
       {/* a peça a ser arrastada da barra, debaixo do dedo */}
       {nova && (
         <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border-2 border-primary bg-primary/15 px-3 py-2 text-sm font-medium shadow-lg"
-          style={{ left: nova.x, top: nova.y }}>{PECAS[nova.tipo].n}</div>
+          style={{ left: nova.x, top: nova.y }}>{nova.rotulo ?? PECAS[nova.tipo].n}</div>
       )}
 
       {!paredesFixas && (
@@ -283,24 +360,40 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
 
       {/* a medida certa da parede tocada */}
       {paredeSel !== null && p.paredes[paredeSel] && (
-        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3">
+        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
           <label className="grid w-40 gap-1 text-sm font-medium" htmlFor={`${id}-medida`}>Parede {paredeSel + 1}, em cm
             <input id={`${id}-medida`} key={`${paredeSel}-${p.paredes[paredeSel].c}`} type="number" inputMode="numeric" min={0} autoFocus defaultValue={p.paredes[paredeSel].c} className={INP}
-              onBlur={(e) => { const c = Math.round(Number(e.target.value) || 0); if (c > 0 && c !== p.paredes[paredeSel].c) gravar({ ...p, paredes: mudarComprimento(p.paredes, paredeSel, c) }); }}
+              onBlur={(e) => { const c = Math.round(Number(e.target.value) || 0); if (c > 0 && c !== p.paredes[paredeSel].c) mudarMedida(paredeSel, c); }}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
           </label>
+          {fechada && !paredesFixas && <p className="min-w-[200px] flex-1 text-sm text-muted-foreground">Arraste a parede na planta para a mudar de sítio: as do lado acompanham e a planta continua fechada.</p>}
           <Button type="button" variant="ghost" className="min-h-11" onClick={() => setParedeSel(null)}>Feito</Button>
         </div>
       )}
 
+      {/* os produtos escolhidos que faltam pôr na planta: arrastar para o sítio, ou tocar e fica ao meio */}
+      {bandeja.length > 0 && (
+        <div className="select-none space-y-2 rounded-2xl border-2 border-dashed border-primary/40 bg-primary/[0.03] p-3">
+          <p className="text-[15px] font-medium">Por colocar ({bandeja.length}): arraste cada um para o sítio</p>
+          <div className="flex flex-wrap gap-2">
+            {bandeja.map((b) => (
+              <button key={b.id} type="button" className={cn(CHIP, "border-primary/40 bg-card shadow-sm motion-safe:animate-in motion-safe:zoom-in-95")}
+                onPointerDown={(e) => pegarNova(e, { tipo: b.tipo, bandeja: b.id, rotulo: b.rotulo })}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); aoColocar?.(b.id); } }}>
+                <span aria-hidden="true" className="h-4 w-4 rounded border border-black/15" style={{ background: b.cor ?? "transparent" }} />{b.rotulo}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {/* as peças: arrastar para a planta, ou tocar */}
       {tipos.length > 0 && (
-        <div className="space-y-2">
+        <div className="select-none space-y-2">
           <p className="text-sm text-muted-foreground">Arraste para a planta (ou toque, e fica ao meio):</p>
           <div className="flex flex-wrap gap-2">
             {tipos.map((t) => (
-              <button key={t} type="button" className={CHIP} onPointerDown={(e) => pegarNova(e, t)} onPointerMove={moverNova} onPointerUp={largarNova}
-                onPointerCancel={() => setNova(null)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); juntar(t); } }}>
+              <button key={t} type="button" className={CHIP} onPointerDown={(e) => pegarNova(e, { tipo: t })}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); juntar(t); } }}>
                 {PECAS[t].n}
               </button>
             ))}
@@ -348,7 +441,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
               <div key={i} className="flex items-center gap-3 text-sm font-medium">
                 <label htmlFor={`${id}-p${i}`} className="w-20">Parede {i + 1}</label>
                 <input id={`${id}-p${i}`} key={`${i}-${w.c}`} type="number" inputMode="numeric" min={0} defaultValue={w.c} className={cn(INP, "w-32")}
-                  onBlur={(e) => { const c = Math.max(0, Math.round(Number(e.target.value) || 0)); if (c !== w.c) gravar({ ...p, paredes: mudarComprimento(p.paredes, i, c) }); }}
+                  onBlur={(e) => { const c = Math.max(0, Math.round(Number(e.target.value) || 0)); if (c !== w.c) mudarMedida(i, c); }}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
                 <span className="text-muted-foreground">cm</span>
               </div>

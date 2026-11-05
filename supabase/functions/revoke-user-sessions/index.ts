@@ -11,10 +11,10 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
  * RGPD Art. 32 auth-audit-trail feature, part 2: lets a system admin force
  * every active session of a given auth user to re-authenticate (e.g. after a
  * suspected credential compromise surfaced via the login-attempts audit
- * log). This has to be a service-role Admin API call
- * (supabase.auth.admin.signOut(user_id, 'global')) — GoTrue's Admin API is
- * an HTTP call, not a Postgres operation, so it cannot be a SQL RPC like
- * get_login_attempts_audit_log (20261110190000_auth_audit_log_rpc.sql).
+ * log). 20270109410000: já não usa supabase.auth.admin.signOut — essa
+ * chamada espera o JWT de uma sessão, não o id do utilizador, e falhava
+ * sempre (403 bad_jwt). Agora chama fn_terminar_sessoes_utilizador (só
+ * service_role), que apaga auth.sessions e os refresh tokens da conta.
  *
  * Permission gate: resolve the caller's identity from their own JWT (no
  * service-role bypass for this endpoint). 05/11/2026 (20270109400000 ronda 2):
@@ -111,23 +111,23 @@ serve(async (req: Request): Promise<Response> => {
       }
     }
 
-    // ── 4. Revoke every active session for the target user ───────────────
-    // Global sign-out invalidates all refresh tokens for target_auth_user_id,
-    // forcing re-authentication on every device/session.
-    const { error: signOutError } = await supabase.auth.admin.signOut(
-      target_auth_user_id,
-      "global",
-    );
+    // ── 4. Terminar todas as sessões da pessoa ────────────────────────────
+    // 20270109410000: auth.admin.signOut(jwt) espera o JWT da sessão, não o id do utilizador (respondia 403 bad_jwt e nada
+    // era terminado). fn_terminar_sessoes_utilizador (só service_role) apaga auth.sessions + refresh tokens: a pessoa tem
+    // de voltar a entrar em todos os dispositivos assim que o access token atual expira.
+    const { data: terminadas, error: revokeError } = await supabase.rpc("fn_terminar_sessoes_utilizador", {
+      p_auth_user_id: target_auth_user_id,
+    });
 
-    if (signOutError) {
-      console.error("[revoke-user-sessions] signOut error:", signOutError);
+    if (revokeError) {
+      console.error("[revoke-user-sessions] fn_terminar_sessoes_utilizador error:", revokeError);
       return new Response(
-        JSON.stringify({ error: signOutError.message || "Failed to revoke sessions" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ error: "Não foi possível terminar as sessões" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(JSON.stringify({ success: true, sessions_revoked: terminadas ?? 0 }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

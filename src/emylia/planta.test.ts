@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   areaChaoM2, areaParedesM2, cantos, deViragens, emL, faltaFechar, gravarPlanta, juntarParede, juntarPeca, lerPlanta, mudarComprimento,
-  paredeDoTraco, peDireitoDoCampo, perimetroM, plantaDaFolha, retangulo, type Planta,
+  moverParede, mudarComprimentoFechada, paredeDoTraco, peDireitoDoCampo, perimetroM, plantaDaFolha, retangulo, type Planta,
 } from "./planta";
 
 describe("planta: as contas", () => {
@@ -87,5 +87,35 @@ describe("planta: gravar e ler", () => {
   it("uma peça nova fica com o centro no ponto onde se largou, de 5 em 5 cm", () => {
     const p = juntarPeca({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }, "sanita", "s", { x: 51, y: 42 });
     expect(p.pecas[0]).toEqual({ id: "s", tipo: "sanita", w: 36, h: 55, x: 35, y: 15 });
+  });
+});
+
+describe("planta: mexer numa parede (5/11: «alterar o seu comprimento e posição»)", () => {
+  const ret = { o: { x: 0, y: 0 }, paredes: retangulo(200, 150) };
+  it("mover a parede da direita 30 cm para fora: as de cima e de baixo esticam, e continua fechada", () => {
+    const r = moverParede(ret, 1, { x: 30, y: 7 })!; // o y não conta: a parede é vertical
+    expect(r.paredes.map((w) => w.c)).toEqual([230, 150, 230, 150]);
+    expect(faltaFechar(r.paredes)).toBe(0);
+  });
+  it("mover a primeira parede mexe o ponto de partida", () => {
+    const r = moverParede(ret, 0, { x: 0, y: 20 })!;
+    expect(r.o).toEqual({ x: 0, y: 20 });
+    expect(r.paredes.map((w) => w.c)).toEqual([200, 130, 200, 130]);
+    expect(faltaFechar(r.paredes)).toBe(0);
+  });
+  it("não deixa uma vizinha ficar negativa", () => {
+    expect(moverParede(ret, 1, { x: -250, y: 0 })).toBeNull();
+  });
+  it("mudar o comprimento numa planta fechada: a parede seguinte anda e a planta não abre", () => {
+    const r = mudarComprimentoFechada(ret, 0, 250)!;
+    expect(r.paredes.map((w) => w.c)).toEqual([250, 150, 250, 150]);
+    expect(faltaFechar(r.paredes)).toBe(0);
+    const l = mudarComprimentoFechada({ o: { x: 0, y: 0 }, paredes: emL(234, 226, 63, 74) }, 3, 100)!;
+    expect(faltaFechar(l.paredes)).toBe(0);
+    expect(l.paredes[3].c).toBe(100);
+  });
+  it("numa planta ainda aberta, muda só a parede", () => {
+    const aberta = { o: { x: 0, y: 0 }, paredes: [{ c: 100, r: "E" as const }, { c: 50, r: "S" as const }] };
+    expect(mudarComprimentoFechada(aberta, 0, 120)!.paredes).toEqual([{ c: 120, r: "E" }, { c: 50, r: "S" }]);
   });
 });
