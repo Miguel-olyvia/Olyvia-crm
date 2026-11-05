@@ -85,7 +85,7 @@ interface Props {
   /** 5/11: escolher sozinho, para a hora já escolhida, o comercial livre mais perto (uma vez por dia e hora). */
   escolherSozinho?: boolean;
   aoEscolherSozinho?: (r: { quem: string | null; motivo: string }) => void;
-  /** Sem hora certa, a parte do dia combinada: a primeira hora livre dentro dela (manhã antes das 13:00). */
+  /** Sem hora certa, a parte do dia combinada: a primeira hora livre dentro dela (manhã 08:00 a 13:00, tarde 13:00 a 20:00; sem parte, 08:00 a 20:00). */
   periodoPreferido?: "manha" | "tarde" | null;
 }
 
@@ -157,7 +157,9 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
     if (!g.conhecido) { aoEscolherSozinho?.({ quem: null, motivo: "Não se sabe quem é comercial (os papéis do RH não chegaram): escolha quem vai." }); return; }
     // sem hora certa: o comercial mais perto com uma hora livre na parte do dia combinada, e a primeira dessas horas
     if (!a.hora) {
-      const noPeriodo = (r: RecursoVisita) => (podeNoDia(r) ?? []).filter((x) => periodoPreferido === "manha" ? x < "13:00" : periodoPreferido === "tarde" ? x >= "13:00" : true);
+      // as horas livres são do dia todo (00:00 incluído): só as de trabalho, manhã 08:00 a 13:00, tarde 13:00 a 20:00 (5/11: a 1.ª saiu às 00:00)
+      const [de, ate] = periodoPreferido === "manha" ? ["08:00", "13:00"] : periodoPreferido === "tarde" ? ["13:00", "20:00"] : ["08:00", "20:00"];
+      const noPeriodo = (r: RecursoVisita) => (podeNoDia(r) ?? []).filter((x) => x >= de && x < ate);
       const quem = ordenados.find((r) => comerciais.includes(r) && noPeriodo(r).length > 0);
       if (!quem) {
         aoEscolherSozinho?.({ quem: null, motivo: periodoPreferido
