@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams, Link, useNavigate } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -77,7 +77,7 @@ import {
   receivingLink,
   type PoStatusFilter,
 } from "@/components/inventory/ui";
-import { PoKpis } from "@/components/purchase-orders/PoKpis";
+import { PoKpis, PO_VALUE_PERMISSION } from "@/components/purchase-orders/PoKpis";
 import { PoPortalPill, PoShippedPill, PoStatusBadge, PoStatusPills } from "@/components/purchase-orders/PoStatusPills";
 import { PoRowActions, RECEIVE_LABEL, RECEIVE_NAV_PERMS } from "@/components/purchase-orders/PoRowActions";
 // Ficha da PO como no Olyvia 2.0: linha de etapas, passo da Receção, Histórico, cartão do portal e bloqueios.
@@ -564,6 +564,12 @@ const PurchaseOrders = () => {
   const lacksOrderEditPermission = !!editingId && !hasPermission('purchase_orders.edit');
   const isOrderReadOnly = isOrderReceivedLock || lacksOrderEditPermission;
   const canOpenOrderDialog = hasPermission('purchase_orders.view') || hasPermission('purchase_orders.create');
+  // Preços das encomendas (decisão (c) de 05/11: ficam só escondidos no ecrã): o valor, o preço e os totais das
+  // linhas só com products.view_cost, a mesma permissão do valor por receber (PoKpis) e do histórico (rpc_po_historico).
+  // Sem ela o valor continua no formulário (não se perde ao gravar), só não se mostra.
+  const podeVerPrecosPo = hasPermission(PO_VALUE_PERMISSION);
+  const precoPo = (texto: ReactNode): ReactNode =>
+    podeVerPrecosPo ? texto : <span className="text-muted-foreground" title={`Sem permissão: requer ${PO_VALUE_PERMISSION}.`}>—</span>;
 
   const [formData, setFormData] = useState<PurchaseOrderFormData>({
     supplier_id: "",
@@ -3013,7 +3019,7 @@ const PurchaseOrders = () => {
           </div>
         </TableCell>
         <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
-          {formatEur(order.total_value)}
+          {precoPo(formatEur(order.total_value))}
           {order.payment_due_date && (
             <small className="block text-xs font-normal text-muted-foreground" title={order.payment_terms_days != null ? `Prazo de pagamento: ${order.payment_terms_days} dias` : undefined}>
               vence {formatPoDate(order.payment_due_date)}
@@ -3487,7 +3493,7 @@ const PurchaseOrders = () => {
                                 ),
                             }
                           : null,
-                        { label: t('purchaseOrders.summary.total'), value: <span className="font-semibold tabular-nums">€{totals.total.toFixed(2)}</span> },
+                        { label: t('purchaseOrders.summary.total'), value: precoPo(<span className="font-semibold tabular-nums">€{totals.total.toFixed(2)}</span>) },
                       ]}
                     />
                     {editingId && sheetMeta && (
@@ -3702,6 +3708,7 @@ const PurchaseOrders = () => {
                                     />
                                   </TableCell>
                                   <TableCell>
+                                    {podeVerPrecosPo ? (
                                     <Input
                                       type="number"
                                       value={item.unit_price}
@@ -3712,9 +3719,10 @@ const PurchaseOrders = () => {
                                       step="0.01"
                                       aria-label={`${t('purchaseOrders.items.unitPrice')} ${item.description}`}
                                     />
+                                    ) : precoPo(null)}
                                   </TableCell>
                                   <TableCell>{item.vat_rate}%</TableCell>
-                                  <TableCell className="text-right font-semibold tabular-nums">€{item.total_price.toFixed(2)}</TableCell>
+                                  <TableCell className="text-right font-semibold tabular-nums">{precoPo(<>€{item.total_price.toFixed(2)}</>)}</TableCell>
                                   <TableCell>
                                     <div className="flex gap-1">
                                       {!isStructureLocked && item.item_type === 'product' && item.product_id && (
@@ -3756,15 +3764,15 @@ const PurchaseOrders = () => {
                         <dl className="ml-auto w-full max-w-xs space-y-1 text-sm">
                           <div className="flex justify-between">
                             <dt className="text-muted-foreground">{t('purchaseOrders.summary.subtotal')}</dt>
-                            <dd className="tabular-nums">€{totals.subtotal.toFixed(2)}</dd>
+                            <dd className="tabular-nums">{precoPo(<>€{totals.subtotal.toFixed(2)}</>)}</dd>
                           </div>
                           <div className="flex justify-between">
                             <dt className="text-muted-foreground">{t('purchaseOrders.summary.vat')}</dt>
-                            <dd className="tabular-nums">€{totals.totalVat.toFixed(2)}</dd>
+                            <dd className="tabular-nums">{precoPo(<>€{totals.totalVat.toFixed(2)}</>)}</dd>
                           </div>
                           <div className="flex justify-between border-t pt-1.5 text-base font-bold">
                             <dt>{t('purchaseOrders.summary.total')}</dt>
-                            <dd className="tabular-nums">€{totals.total.toFixed(2)}</dd>
+                            <dd className="tabular-nums">{precoPo(<>€{totals.total.toFixed(2)}</>)}</dd>
                           </div>
                           <div className="flex justify-between text-xs text-muted-foreground">
                             <dt>{t('purchaseOrders.summary.items')}</dt>
@@ -4241,7 +4249,7 @@ const PurchaseOrders = () => {
                         <TableCell className="whitespace-nowrap">
                           {group.lastOrderDate ? formatPoDate(group.lastOrderDate) : "N/A"}
                         </TableCell>
-                        <TableCell className="text-right font-semibold tabular-nums">{formatEur(group.totalValue)}</TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums">{precoPo(formatEur(group.totalValue))}</TableCell>
                       </TableRow>
                       {isExpanded && (
                         <TableRow className="hover:bg-transparent">
@@ -4327,7 +4335,7 @@ const PurchaseOrders = () => {
                     <div>
                       <div className="font-semibold">{product.name}</div>
                       <div className="text-sm text-muted-foreground">
-                        SKU: {product.sku || "N/A"} | {t('purchaseOrders.items.price')}: €{product.purchase_price?.toFixed(2) || "N/A"} | {t('purchaseOrders.items.vat')}: {product.vat_rate}%
+                        SKU: {product.sku || "N/A"} | {t('purchaseOrders.items.price')}: {podeVerPrecosPo ? `€${product.purchase_price?.toFixed(2) || "N/A"}` : "—"} | {t('purchaseOrders.items.vat')}: {product.vat_rate}%
                       </div>
                     </div>
                     
@@ -4405,7 +4413,7 @@ const PurchaseOrders = () => {
                   <div className="flex-1">
                     <div className="font-semibold">{service.name}</div>
                     <div className="text-sm text-muted-foreground">
-                      SKU: {service.sku || "N/A"} | {t('purchaseOrders.items.price')}: €{service.purchase_price?.toFixed(2) || "N/A"} | {t('purchaseOrders.items.vat')}: {service.vat_rate}%
+                      SKU: {service.sku || "N/A"} | {t('purchaseOrders.items.price')}: {podeVerPrecosPo ? `€${service.purchase_price?.toFixed(2) || "N/A"}` : "—"} | {t('purchaseOrders.items.vat')}: {service.vat_rate}%
                     </div>
                   </div>
                 </div>
