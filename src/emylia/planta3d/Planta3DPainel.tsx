@@ -1,7 +1,7 @@
 // Protótipo (visualizador 3D): o painel «Ver em 3D» por baixo da planta. Converte o desenho (planta.ts) para o modelo genérico, escolhe a vista,
 // os revestimentos e o tecto, mostra a lista em texto (paredes e peças com medidas) e, no telemóvel, abre em ecrã inteiro. O three só se carrega
 // (React.lazy) quando este painel abre.
-import { Suspense, lazy, useMemo, useState } from "react";
+import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,9 +24,11 @@ export interface Planta3DPainelProps {
   teto: boolean; onTeto: (t: boolean) => void;
   /** a peça escolhida, a mesma da planta */
   selecionada: string | null; onSelecionar: (id: string | null) => void;
+  /** Botões da peça escolhida (Remover, Rodar…), mostrados por cima do 3D. */
+  acoes?: ReactNode;
 }
 
-export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore, rev, onRev, teto, onTeto, selecionada, onSelecionar }: Planta3DPainelProps) {
+export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore, rev, onRev, teto, onTeto, selecionada, onSelecionar, acoes }: Planta3DPainelProps) {
   const [vista, setVista] = useState<Vista3D>("3d");
   const [etiquetas, setEtiquetas] = useState(true);
   const [cheio, setCheio] = useState(false);
@@ -55,6 +57,7 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
         </Button>
       </div>
 
+      {acoes}
       <div className={cn("overflow-hidden rounded-2xl border border-border bg-muted", cheio ? "min-h-[60vh] flex-1" : "h-[420px]")}>
         <Suspense fallback={<p role="status" className="p-4 text-[15px] text-muted-foreground">A carregar o visualizador 3D…</p>}>
           <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} />

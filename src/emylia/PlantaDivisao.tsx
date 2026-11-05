@@ -15,9 +15,10 @@ import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede,
 import { aplicarVariante, expandirConjunto, guardarLugarLocal, mudarMontagem, reporComponente, reposicionarConjunto, retirarComponente, type Conjunto } from "./planta3d/conjuntos";
 import { familiaPorId, modeloDaFamilia } from "./planta3d/familias";
 import { ListaVendavel, PainelConjunto, PainelVariante } from "./planta3d/PainelVariante";
+import { ListaPecas, nomeDaPeca } from "./planta3d/ListaPecas";
 import { pecaDeProduto } from "./planta3d/ligacao";
 import { useProto3d } from "./planta3d/usarProto3d";
-import { Check, Copy, FlipHorizontal, RotateCcw, RotateCw, Trash2, Undo2 } from "lucide-react";
+import { Check, Copy, FlipHorizontal, Redo2, RotateCcw, RotateCw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { porMedida, type Negocio } from "./motor";
@@ -34,6 +35,11 @@ const PE_DIREITO_SEM_RESPOSTA = 2.5;
 const TELA = { x: 0, y: 0, w: 500, h: 400 };
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 const arred = (n: number) => Math.round(n / PASSO) * PASSO;
+/** A ordem de desenho: as grandes por baixo, as pequenas e as elevadas por cima, e a escolhida sempre por cima de tudo (recebe o toque mesmo sob um conjunto). */
+function ordemDeDesenho(pecas: PecaPlanta[], sel: string | null): PecaPlanta[] {
+  const peso = (x: PecaPlanta) => (x.id === sel ? 2 : (x.alt ?? 0) >= 30 || x.mont === "parede" ? 1 : 0);
+  return [...pecas].sort((a, b) => peso(a) - peso(b) || b.w * b.h - a.w * a.h);
+}
 
 /** O que se vê: a tela de sempre, alargada ao que está desenhado (com margem). Só muda quando se grava, nunca a meio de um traço. */
 function vistaDe(p: Planta) {
@@ -73,7 +79,23 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só quando o que está gravado muda
   }, [d.f.planta]);
 
-  const gravar = (np: Planta) => { setP(np); setVista(vistaDe(np)); setFeito(""); ctx.A.campo(d.id, "planta", gravarPlanta(np)); };
+  // histórico para Desfazer/Refazer: a planta de antes de cada acção (a do início do arrasto, não a do meio)
+  const passado = useRef<Planta[]>([]), futuro = useRef<Planta[]>([]), instantanea = useRef<Planta | null>(null);
+  const [, redesenhar] = useState(0);
+  const [confirmarLimpar, setConfirmarLimpar] = useState(false);
+  const aplicar = (np: Planta) => { setP(np); setVista(vistaDe(np)); setFeito(""); ctx.A.campo(d.id, "planta", gravarPlanta(np)); };
+  const gravar = (np: Planta) => {
+    passado.current = [...passado.current.slice(-49), instantanea.current ?? p]; futuro.current = []; instantanea.current = null;
+    aplicar(np); redesenhar((n) => n + 1);
+  };
+  const desfazer = () => {
+    const antes = passado.current.pop(); if (!antes) return;
+    futuro.current.push(p); aplicar(antes); setSel((s) => (s && antes.pecas.some((x) => x.id === s) ? s : null)); setAviso(""); redesenhar((n) => n + 1);
+  };
+  const refazer = () => {
+    const depois = futuro.current.pop(); if (!depois) return;
+    passado.current.push(p); aplicar(depois); setSel((s) => (s && depois.pecas.some((x) => x.id === s) ? s : null)); setAviso(""); redesenhar((n) => n + 1);
+  };
   const mudarPeca = (pid: string, parcial: Partial<PecaPlanta>, guardar = true) => {
     const np = { ...p, pecas: p.pecas.map((x) => (x.id === pid ? { ...x, ...parcial } : x)) };
     if (guardar) gravar(np); else setP(np);
@@ -90,6 +112,15 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   const paredes = areaParedesM2(p, pe);
   const letra = Math.max(vista.w, vista.h) / 28;
   const selecionada = p.pecas.find((x) => x.id === sel) ?? null;
+  // a barra da peça escolhida fica logo por baixo da planta (e por cima do 3D): Remover sem andar à procura do painel
+  const barraSel = selecionada ? (
+    <div role="toolbar" aria-label="Peça escolhida" className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/40 bg-primary/[0.06] p-2">
+      <span className="min-w-0 flex-1 px-2 text-[15px] font-medium">{nomeDaPeca(selecionada)}</span>
+      {!ehAbertura(selecionada) && !selecionada.semGeo && <Button type="button" variant="outline" className="min-h-11" aria-label={`Rodar ${nomeDaPeca(selecionada)}`} onClick={() => rodar(selecionada, 90)}><RotateCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Rodar</Button>}
+      <Button type="button" variant="destructive" className="min-h-11" aria-label={`Remover ${nomeDaPeca(selecionada)}`} onClick={() => removerPeca(selecionada.id)}><Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Remover</Button>
+      <Button type="button" variant="ghost" className="min-h-11" onClick={() => setSel(null)}>Desescolher</Button>
+    </div>
+  ) : null;
   const preve = traco ? paredeDoTraco(traco.de, traco.ate, p.paredes.length >= 2 ? p.o : undefined) : null;
 
   /** Do ecrã para cm na planta. */
@@ -117,14 +148,22 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     const a = arrasto.current, q = a && naPlanta(e.clientX, e.clientY);
     if (a && q) mudarPeca(a.id, { x: arred(q.x - a.dx), y: arred(q.y - a.dy) }, false);
   };
-  const largarNaTela = () => {
+  const largarNaTela = (e?: RPointerEvent<SVGSVGElement>) => {
     if (traco) {
       const parede = paredeDoTraco(traco.de, traco.ate, p.paredes.length >= 2 ? p.o : undefined);
       setTraco(null);
       if (parede) gravar({ ...p, paredes: juntarParede(p.paredes, parede) });
       return;
     }
-    if (arrasto.current) { const pid = arrasto.current.id; arrasto.current = null; confirmarPeca(p, pid); }
+    if (arrasto.current) {
+      const pid = arrasto.current.id; arrasto.current = null;
+      const r = svg.current?.getBoundingClientRect(), pc = p.pecas.find((x) => x.id === pid), antes = origem.current;
+      // largada fora da planta (na barra de produtos, por exemplo): a peça sai
+      const fora = !!e && e.type === "pointerup" && !!r && r.width > 0 && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
+      if (fora && pc) { removerPeca(pid); setAviso("Peça removida: foi largada fora da planta. Desfazer repõe-na."); return; }
+      if (pc && antes && antes.id === pid && pc.x === antes.x && pc.y === antes.y) { instantanea.current = null; return; } // só um toque: selecciona, não grava
+      confirmarPeca(p, pid);
+    }
   };
 
   // ---- as peças dentro da planta ----
@@ -133,7 +172,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     const q = naPlanta(e.clientX, e.clientY); if (!q) return;
     svg.current?.setPointerCapture?.(e.pointerId);
     arrasto.current = { id: pc.id, dx: q.x - pc.x, dy: q.y - pc.y };
-    origem.current = pc;
+    origem.current = pc; instantanea.current = p;
     setSel(pc.id); setParedeSel(null);
   };
   const teclas = (e: KeyboardEvent, pc: PecaPlanta) => {
@@ -156,6 +195,29 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   }
   /** Peça de um conjunto: se for a âncora, o conjunto vai com ela; se for outro componente, guarda-se o novo lugar dele. */
   const aposPeca = (np: Planta, peca: PecaPlanta): Planta => (!peca.conj ? np : peca.ancora ? reposicionarConjunto(np, peca.conj) : guardarLugarLocal(np, peca.id));
+  /** Remove uma peça (a de um conjunto sai do conjunto; a âncora leva o conjunto). Desfazer repõe. */
+  function removerPeca(id: string) {
+    const pc = p.pecas.find((x) => x.id === id); if (!pc) return;
+    gravar(retirarComponente(p, id)); setSel((s) => (s === id ? null : s)); setAviso("");
+  }
+  const removerConjunto = (inst: string) => { gravar({ ...p, pecas: p.pecas.filter((x) => x.conj !== inst) }); setSel((s) => (s && p.pecas.find((x) => x.id === s)?.conj === inst ? null : s)); setAviso(""); };
+  const rodarPorId = (id: string) => { const pc = p.pecas.find((x) => x.id === id); if (pc) rodar(pc, 90); };
+  const duplicarPorId = (id: string) => { const pc = p.pecas.find((x) => x.id === id); if (pc) duplicar(pc); };
+  const limparTudo = () => { gravar({ ...p, pecas: [] }); setSel(null); setConfirmarLimpar(false); setAviso(""); };
+  // atalhos: Delete e Backspace removem a escolhida, Escape desescolhe, Ctrl+Z desfaz, Ctrl+Y (ou Ctrl+Shift+Z) refaz; nunca dentro de um campo de texto
+  useEffect(() => {
+    const tecla = (e: globalThis.KeyboardEvent) => {
+      const alvo = e.target as HTMLElement | null;
+      if (alvo && (/^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName) || alvo.isContentEditable)) return;
+      const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && k === "z" && !e.shiftKey) { e.preventDefault(); desfazer(); return; }
+      if (ctrl && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); refazer(); return; }
+      if (e.key === "Escape") { setSel(null); return; }
+      if (sel && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); removerPeca(sel); }
+    };
+    document.addEventListener("keydown", tecla);
+    return () => document.removeEventListener("keydown", tecla);
+  });
   const novoId = () => { let n = contador.current; while (p.pecas.some((x) => x.id === `pc${n}`)) n++; contador.current = n; return `pc${n}`; };
   /** Roda uma peça: de chão em torno do centro; de parede passa à parede oposta (passos de 180 graus). */
   const rodar = (pc: PecaPlanta, graus: number) => {
@@ -290,13 +352,15 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
           })}
 
           {/* as peças: arrastar com o dedo; com o teclado, as setas */}
-          {p.pecas.filter(ativa).map((pc) => {
+          {ordemDeDesenho(p.pecas.filter(ativa), sel).map((pc) => {
             const c = centroPeca(pc), nome = pc.nome ?? PECAS[pc.tipo].n;
             const cor = ehDeParede(pc) ? "fill-sky-100 stroke-sky-700" : PECAS[pc.tipo].abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary";
             return (
               <g key={pc.id} role="button" tabIndex={0} aria-label={`${nome}, ${pc.w} por ${pc.h} cm${ehDeParede(pc) && !ehAbertura(pc) ? `, na parede a ${pc.alt ?? 0} cm do chão` : ""}. Setas para mover${ehAbertura(pc) ? "" : ", R para rodar"}.`} aria-pressed={sel === pc.id}
                 onPointerDown={(e) => pegarPeca(e, pc)} onKeyDown={(e) => teclas(e, pc)} onFocus={() => setSel(pc.id)} className="cursor-grab outline-none">
                 <g transform={pc.rot ? `rotate(${pc.rot} ${c.x} ${c.y})` : undefined}>
+                  {/* área de toque maior do que a peça (as pequenas, como uma torneira, também se tocam com o dedo) */}
+                  <rect data-toque="" x={pc.x - letra * 1.2} y={pc.y - letra * 1.2} width={pc.w + letra * 2.4} height={pc.h + letra * 2.4} fill="transparent" />
                   <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8} className={cor} strokeWidth={sel === pc.id ? letra / 4 : letra / 10} />
                   {pc.rot !== undefined && <line x1={pc.x} y1={pc.y + pc.h} x2={pc.x + pc.w} y2={pc.y + pc.h} className="stroke-foreground" strokeWidth={letra / 5} />}
                 </g>
@@ -318,6 +382,23 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
           style={{ left: nova.x, top: nova.y }}>{nova.produto?.nome ?? PECAS[nova.tipo].n}</div>
       )}
 
+      {barraSel}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" className="min-h-11" disabled={passado.current.length === 0} onClick={desfazer}><Undo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Desfazer</Button>
+        <Button type="button" variant="outline" className="min-h-11" disabled={futuro.current.length === 0} onClick={refazer}><Redo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Refazer</Button>
+        {p.pecas.length > 0 && !confirmarLimpar && <Button type="button" variant="ghost" className="min-h-11" onClick={() => setConfirmarLimpar(true)}>Limpar todas as peças</Button>}
+        {confirmarLimpar && (
+          <span role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1 text-[15px]">
+            Tirar as {p.pecas.length} peças da divisão?
+            <Button type="button" variant="destructive" className="min-h-11" onClick={limparTudo}>Sim, limpar todas</Button>
+            <Button type="button" variant="ghost" className="min-h-11" onClick={() => setConfirmarLimpar(false)}>Cancelar</Button>
+          </span>
+        )}
+      </div>
+      <section aria-label="Peças na divisão" className="space-y-2">
+        <h3 className="text-[15px] font-semibold">Peças na divisão ({p.pecas.filter((x) => !x.ret).length})</h3>
+        <ListaPecas planta={p} sel={sel} onSel={setSel} onRemover={removerPeca} onRodar={rodarPorId} onDuplicar={duplicarPorId} onRemoverConjunto={removerConjunto} onRetirar={(id) => gravar(retirarComponente(p, id))} onRepor={(id) => gravar(reporComponente(p, id))} />
+      </section>
       <p role="status" className={cn("text-[15px]", !p.paredes.length ? "text-muted-foreground" : fechada ? "text-success" : "text-foreground")}>
         {!p.paredes.length ? "Ainda sem paredes." : fechada ? "A planta fecha."
           : falta === Infinity ? `${p.paredes.length} ${p.paredes.length === 1 ? "parede" : "paredes"}.` : `Faltam ${falta} cm até ao canto de partida.`}
@@ -487,7 +568,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
         </Button>
         {ver3d && (
           <Planta3DPainel planta={p} tipo={proto.pref.tipo} nome={divisao ?? "Espaço"} peDireito={pe} produtos={produtosTodos} arvore={K.arvore}
-            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} selecionada={sel} onSelecionar={setSel} />
+            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} selecionada={sel} onSelecionar={setSel} acoes={barraSel} />
         )}
       </div>
     </div>
