@@ -99,6 +99,8 @@ export const EXTERIOR: Grupo = {
     { k: "zona_estacionamento", bloco: "Acesso e estacionamento", l: "Zona de estacionamento", t: "escolha", op: ["Verde", "Amarela", "Vermelha"], papel: "sugestoes", se: { k: "estacionamento", v: ["Pago"] } },
     // 14/10: na visita (antes estava em "Preparar a obra", tarde demais para o orçamento): decide o meio do entulho
     { k: "contentor", bloco: "Acesso e estacionamento", l: "Contentor de entulho", t: "escolha", op: ["Não", "Na via pública (licença)", "Em espaço privado"], ajuda: "Sem resposta, a Olyvia escolhe pelo volume.", papel: "orcamento", opcional: true },
+    // 5/11 (Rúben): há onde pôr o contentor (à porta, no passeio, num logradouro ou garagem)?
+    { k: "espaco_contentor", bloco: "Acesso e estacionamento", l: "Espaço para colocar o contentor de entulho", t: "sim_nao", ajuda: "À porta, no passeio, num logradouro ou numa garagem.", opcional: true },
     { k: "dist_entulho", bloco: "Acesso e estacionamento", l: "Distância ao contentor", t: "escolha", op: ["Até 10 m", "10 a 30 m", "Mais de 30 m"], papel: "orcamento", opcional: true },
     { k: "tem_elevador", bloco: "O prédio", l: "Tem elevador", t: "sim_nao", papel: "plano" },
     { k: "n_elevadores", bloco: "O prédio", l: "Nº de elevadores", t: "contador", min: 1, max: 6, se: { k: "tem_elevador", v: ["Sim"] } },
@@ -123,7 +125,7 @@ export const INTERIOR: Grupo = {
     { k: "quadro_diferencial", bloco: "Instalações", l: "Quadro com diferencial", t: "sim_nao" },
     { k: "canalizacao", bloco: "Instalações", l: "Canalização", t: "escolha", op: ["Ferro", "PVC", "Multicamada", "Cobre", "Misto", "Não sei"] },
     { k: "gas", bloco: "Instalações", l: "Gás", t: "escolha", op: ["Canalizado", "Garrafa", "Sem gás"], papel: "plano" },
-    { k: "amianto", bloco: "Durante a obra", l: "Amianto", t: "escolha", op: SNS, papel: "sugestoes" },
+    // 5/11 (Rúben): «Amianto» sai da visita (e a regra «Remoção certificada de amianto» de efeitosLevantamento.ts)
     { k: "habitada_durante_obra", bloco: "Durante a obra", l: "Habitada durante a obra", t: "sim_nao", papel: "plano" },
     { k: "animais", bloco: "Durante a obra", l: "Animais", t: "sim_nao", papel: "sugestoes" },
     { k: "notas_interior", bloco: "Durante a obra", l: "Notas do interior", t: "texto_longo" },

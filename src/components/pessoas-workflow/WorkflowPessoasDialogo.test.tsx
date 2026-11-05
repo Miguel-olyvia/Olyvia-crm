@@ -314,10 +314,10 @@ describe("WorkflowPessoasDialogo: campos das fases e impacto no orçamento (3/11
   it("com um campo escondido por gravar, fechar pergunta primeiro; o rascunho sobrevive à troca de separador", async () => {
     const { props } = desenhar();
     irParaCampos();
-    fireEvent.click(screen.getByRole("button", { name: "Esconder Amianto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Esconder Animais" }));
     irParaNegocios();
     irParaCampos();
-    expect(screen.getByRole("button", { name: "Mostrar Amianto" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mostrar Animais" })).toBeInTheDocument();
     escape();
     expect(await screen.findByRole("alertdialog", { name: "Alterações por gravar" })).toBeInTheDocument();
     expect(props.aoMudarAberto).not.toHaveBeenCalled();

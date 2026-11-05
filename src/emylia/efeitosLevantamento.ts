@@ -62,7 +62,7 @@ export const REGRAS_EFEITO: readonly RegraEfeito[] = [
   { id: "estacionamento", nome: "Estacionamento pago", campo: "estacionamento", como: "Dias de obra (o prazo da proposta, ou os dias por omissão) × preço por dia da zona.", quando: ["Pago"],
     params: [{ p: "dia_verde", l: "Por dia, zona verde", un: "€", v: 4 }, { p: "dia_amarela", l: "Por dia, zona amarela (e sem zona)", un: "€", v: 8 },
       { p: "dia_vermelha", l: "Por dia, zona vermelha", un: "€", v: 14 }, { p: "dias", l: "Dias de obra por omissão", un: "dias", v: 10 }] },
-  { id: "amianto", nome: "Remoção certificada de amianto", campo: "amianto", como: "Um valor fixo.", quando: ["Sim"], params: custoPreco(300, 520) },
+  // 5/11 (Rúben): «Amianto» saiu da visita, e com ele a regra «Remoção certificada de amianto»
   { id: "gas", nome: "Ponto de gás", campo: "diag_gas", como: "Um valor para anular e outro para instalar.",
     params: [...custoPreco(110, 182, "_anular").map((x) => ({ ...x, l: `${x.l} (anular)` })), ...custoPreco(280, 450, "_instalar").map((x) => ({ ...x, l: `${x.l} (instalar)` }))] },
   { id: "acesso", nome: "Acesso difícil", campo: "acesso", como: "A percentagem que se escolhe no campo «Impacto no preço», sobre os serviços.", quando: ["Difícil"], params: [] },
@@ -158,7 +158,6 @@ export function efeitosDoLevantamento(f0: Record<string, string>, cfg: CfgEfeito
     e.push(linha(f.zona_estacionamento ? "zona_estacionamento" : "estacionamento", `Estacionamento pago (${num(dias)} dias × ${num(dia)} €)`, dia * dias, dia * dias));
   }
   // Trabalhos que o levantamento obriga
-  if (se("amianto", "amianto")) e.push(linha("amianto", "Remoção certificada de amianto", P("amianto", "custo"), P("amianto", "preco")));
   if (on("gas") && (f.diag_gas === "Anular" || f.diag_gas === "Instalar")) {
     const s = f.diag_gas === "Anular" ? "_anular" : "_instalar";
     e.push(linha("diag_gas", f.diag_gas === "Anular" ? "Anulação de ponto de gás" : "Instalação de ponto de gás", P("gas", `custo${s}`), P("gas", `preco${s}`)));
@@ -179,5 +178,5 @@ export const efeitosDoCampo = (k: string, f: Record<string, string>, cfg: CfgEfe
 /** Os campos que podem mexer no orçamento (para o aviso "mexe no orçamento" ao lado do campo). */
 export const CAMPOS_COM_EFEITO = new Set([
   "diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar", "diag_local_cortes", "estacionamento",
-  "zona_estacionamento", "amianto", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", "dist_entulho",
+  "zona_estacionamento", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", "dist_entulho",
 ]);

@@ -23,10 +23,10 @@ describe("impacto dos campos configurável", () => {
   });
 
   it("a configuração que a página definiu é a que o motor e a nota usam", () => {
-    definirEfeitosCampos({ amianto: { v: { custo: 400, preco: 700 } } });
-    expect(efeitosDoCampo("amianto", { amianto: "Sim" })[0]).toMatchObject({ custo: 400, preco: 700 });
+    definirEfeitosCampos({ elevador: { v: { custo: 40, preco: 70 } } });
+    expect(efeitosDoCampo("tem_elevador", { tem_elevador: "Sim" })[0]).toMatchObject({ custo: 40, preco: 70 });
     definirEfeitosCampos(null);
-    expect(efeitosDoCampo("amianto", { amianto: "Sim" })[0]).toMatchObject({ custo: 300, preco: 520 });
+    expect(efeitosDoCampo("tem_elevador", { tem_elevador: "Sim" })[0]).toMatchObject({ custo: 20, preco: 45 });
   });
 
   it("uma regra desligada não mexe no orçamento", () => {
@@ -34,11 +34,11 @@ describe("impacto dos campos configurável", () => {
     expect(efeitosDoLevantamento({ habitada_durante_obra: "Sim", diag_janela: "Não" }, { habitada: { off: true } }).map((e) => e.k)).toEqual(["diag_janela"]);
   });
 
-  it("as respostas a que a regra se aplica mudam-se (ex.: amianto também com «Não sei»)", () => {
-    const cfg: CfgEfeitos = { amianto: { ops: ["Sim", "Não sei"] } };
-    expect(efeitosDoCampo("amianto", { amianto: "Não sei" })).toEqual([]);
-    expect(efeitosDoCampo("amianto", { amianto: "Não sei" }, cfg)).toHaveLength(1);
-    expect(efeitosDoCampo("amianto", { amianto: "Sim" }, { amianto: { ops: ["Não sei"] } })).toEqual([]);
+  it("as respostas a que a regra se aplica mudam-se (ex.: estacionamento também «Não pago»)", () => {
+    const cfg: CfgEfeitos = { estacionamento: { ops: ["Pago", "Não pago"] } };
+    expect(efeitosDoCampo("estacionamento", { estacionamento: "Não pago" })).toEqual([]);
+    expect(efeitosDoCampo("estacionamento", { estacionamento: "Não pago" }, cfg)).toHaveLength(1);
+    expect(efeitosDoCampo("estacionamento", { estacionamento: "Pago" }, { estacionamento: { ops: ["Não pago"] } })).toEqual([]);
   });
 
   it("as percentagens e as horas também se configuram, e o texto acompanha", () => {
