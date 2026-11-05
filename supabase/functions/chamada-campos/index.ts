@@ -16,7 +16,7 @@ const campoDef = z.object({
   k: z.string().min(1).max(60),
   l: z.string().min(1).max(200),
   t: z.enum(["sim_nao", "escolha", "varios", "numero", "contador", "texto", "texto_longo", "data"]),
-  op: z.array(z.string().max(120)).max(60).optional(),
+  op: z.array(z.string().max(120)).max(400).optional(),  // os serviços do Catálogo são muitos
   ajuda: z.string().max(400).optional(),
   un: z.string().max(20).optional(),
 });
@@ -42,9 +42,13 @@ Regras:
 - A transcrição do lado do cliente vem do altifalante do telemóvel e tem frases sem sentido. Ignora-as.
 - Para campos de escolha, usa exatamente uma das opções (o texto da opção). Para sim/não, "Sim" ou "Não".
 - Para números, só o número. Para listas (varios), as opções ditas separadas por vírgulas. Para datas, AAAA-MM-DD.
+- Nos campos de texto longo escreve TUDO o que foi dito sobre esse tema, com detalhe e frases completas, nas
+  palavras do cliente: o que quer, dúvidas e indecisões, o que já fez ou tem, referências e exemplos que pediu,
+  restrições. Nunca resumas a uma linha; um campo de texto longo pode ter várias frases.
 - O excerto é uma citação curta e literal da transcrição que justifica o valor.
 - A confianca é 1 quando o cliente o disse claramente, 0.5 quando é uma dedução razoável, 0 quando não há informação.
-- O resumo tem 2 a 4 frases, em português de Portugal, dirigido ao comercial que vai à visita.`;
+- O resumo é para o comercial que vai à visita: 4 a 8 frases, em português de Portugal, com o que o cliente quer,
+  as dúvidas dele, o que já fez, orçamento, prazos e disponibilidade, o que ficou combinado e o que ficou por perguntar.`;
 
 const descrever = (c: z.infer<typeof campoDef>) => {
   const extra = c.t === "escolha" || c.t === "varios" ? ` opções: ${(c.op ?? []).join(", ")}` : c.t === "sim_nao" ? " valores: Sim, Não" :

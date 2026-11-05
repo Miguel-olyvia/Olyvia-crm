@@ -8,7 +8,8 @@ import { Check, Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Def, Grupo } from "./campos";
-import type { Negocio } from "./motor";
+import { LINHAS, nomeLinha, servicosPedidos, type LinhaId, type Negocio } from "./motor";
+import { mudarDadosLead } from "./DadosDaLead";
 import type { Ctx } from "./pecas";
 import { juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
 import { GRUPO_VISITA, falasDeFicheiro, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
@@ -19,9 +20,32 @@ const SEGUNDOS_VOZ = 15;
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
+/** Chaves que não são campos do formulário: gravam-se por ações próprias do motor (ver `aplicarEspecial`). */
+const CHAVES_ESPECIAIS = new Set(["lead_primeiro", "lead_apelido", "tipo_servico", "servicos_catalogo"]);
+
 export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d: Negocio; grupos: Grupo[] }) {
-  // os campos do negócio mais a visita combinada na chamada
-  const grupos = useMemo(() => [...gruposDoNegocio, GRUPO_VISITA], [gruposDoNegocio]);
+  // os campos do negócio, mais o cliente (nome), o serviço (tipo e serviços do Catálogo) e a visita combinada
+  const svc = useMemo(() => ctx.S.svc ?? {}, [ctx.S.svc]);
+  const grupos = useMemo<Grupo[]>(() => [
+    ...gruposDoNegocio,
+    ...(d.dadosLead ? [{ titulo: "Cliente", campos: [
+      { k: "lead_primeiro", l: "Nome próprio", t: "texto" as const, ajuda: "O nome por que o comercial trata o cliente." },
+      { k: "lead_apelido", l: "Apelido", t: "texto" as const },
+    ] }] : []),
+    { titulo: "Serviço", campos: [
+      { k: "tipo_servico", l: "Tipo de serviço", t: "escolha" as const, op: Object.values(LINHAS).map((l) => l.n) },
+      { k: "servicos_catalogo", l: "Serviços do Catálogo", t: "varios" as const, op: Object.values(svc).map((x) => x.n),
+        ajuda: "Os serviços que o cliente pediu, de entre os do Catálogo." },
+    ] },
+    GRUPO_VISITA,
+  ], [gruposDoNegocio, d.dadosLead, svc]);
+  // o que o negócio já tem nessas chaves especiais, para as propostas saberem o que «já tinha»
+  const fComEspeciais = useMemo(() => ({
+    ...d.f,
+    lead_primeiro: d.dadosLead?.primeiro ?? "", lead_apelido: d.dadosLead?.apelido ?? "",
+    tipo_servico: d.linhaPorDefinir ? "" : nomeLinha(d),
+    servicos_catalogo: servicosPedidos(d, ctx.S).map((x) => x.n).join(", "),
+  }), [d, ctx.S]);
   const [estado, setEstado] = useState<EstadoLig>("parado");
   const [msg, setMsg] = useState("");
   const [falas, setFalas] = useState<Fala[]>([]);
@@ -131,19 +155,40 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
     }
   }
 
-  const props = propostas(extracao, grupos, d.f);
+  const props = propostas(extracao, grupos, fComEspeciais);
   const defs = new Map(grupos.flatMap((g) => g.campos).map((c) => [c.k, c] as const));
   // quando chega uma extração nova: entram por defeito as propostas de campos ainda vazios, com o valor proposto
   useEffect(() => {
     if (!extracao) { setEscolhas({}); return; }
-    setEscolhas(Object.fromEntries(propostas(extracao, grupos, d.f).map((p) => [p.k, { incluir: p.jaTinha.trim() === "", valor: p.valor }])));
+    setEscolhas(Object.fromEntries(propostas(extracao, grupos, fComEspeciais).map((p) => [p.k, { incluir: p.jaTinha.trim() === "", valor: p.valor }])));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só quando a extração muda; os valores do negócio são lidos nesse momento
   }, [extracao]);
   const escolha = (k: string, mudanca: Partial<{ incluir: boolean; valor: string }>) =>
     setEscolhas((e) => ({ ...e, [k]: { ...(e[k] ?? { incluir: true, valor: "" }), ...mudanca } }));
   const entram = props.filter((p) => escolhas[p.k]?.incluir && (escolhas[p.k]?.valor ?? "").trim() !== "");
+  const marcarTodos = (incluir: boolean) => setEscolhas((e) => Object.fromEntries(props.map((p) => [p.k, { ...(e[p.k] ?? { valor: p.valor }), incluir }])));
+  /** As chaves especiais gravam-se pelas ações próprias: nome na ficha da lead, serviço pela linha, serviços pelos ids do Catálogo. */
+  const aplicarEspecial = (k: string, valor: string) => {
+    if (k === "lead_primeiro" || k === "lead_apelido") {
+      void mudarDadosLead(ctx, d, { [k === "lead_primeiro" ? "primeiro" : "apelido"]: valor }, k === "lead_primeiro" ? "nome próprio" : "apelido").catch(() => undefined);
+    } else if (k === "tipo_servico") {
+      const linha = (Object.keys(LINHAS) as LinhaId[]).find((id) => LINHAS[id].n.toLowerCase() === valor.toLowerCase());
+      if (linha) ctx.A.servicoDaChamada(d.id, linha);
+    } else if (k === "servicos_catalogo") {
+      const nomes = valor.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+      const ids = Object.entries(svc).filter(([, x]) => nomes.includes(x.n.toLowerCase())).map(([id]) => id);
+      const atuais = servicosPedidos(d, ctx.S).map((x) => x.id);
+      ctx.A.servicosDoPedido(d.id, [...atuais, ...ids]);
+    }
+  };
   const aplicar = () => {
-    ctx.run(() => { for (const p of entram) ctx.A.campo(d.id, p.k, juntarVarios(defs.get(p.k), d.f[p.k] || "", escolhas[p.k].valor.trim())); });
+    ctx.run(() => {
+      for (const p of entram) {
+        const valor = escolhas[p.k].valor.trim();
+        if (CHAVES_ESPECIAIS.has(p.k)) aplicarEspecial(p.k, valor);
+        else ctx.A.campo(d.id, p.k, juntarVarios(defs.get(p.k), d.f[p.k] || "", valor));
+      }
+    });
     setAplicadas(entram.map((p) => p.l));
   };
   const aOuvir = estado === "a_ouvir";
@@ -199,7 +244,15 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d
           {extracao.resumo ? <p className="rounded-xl bg-muted/60 p-3 text-[15px] leading-snug"><b>Resumo:</b> {extracao.resumo}</p> : null}
           {props.length === 0 ? <p className="text-sm text-muted-foreground">A chamada não deu nenhum campo para preencher.</p> : (
             <>
-              <p className="text-sm text-muted-foreground">Marque o que entra e corrija o que for preciso antes de preencher.</p>
+              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                <span>Marque o que entra e corrija o que for preciso antes de preencher.</span>
+                {aplicadas === null ? (
+                  <>
+                    <button type="button" onClick={() => marcarTodos(true)} className="text-primary underline-offset-4 hover:underline">Marcar todos</button>
+                    <button type="button" onClick={() => marcarTodos(false)} className="text-primary underline-offset-4 hover:underline">Desmarcar todos</button>
+                  </>
+                ) : null}
+              </div>
               <ul className="space-y-2">
                 {props.map((p) => (
                   <LinhaProposta key={p.k} p={p} def={defs.get(p.k)} escolha={escolhas[p.k] ?? { incluir: false, valor: p.valor }}

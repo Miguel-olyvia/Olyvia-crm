@@ -29,25 +29,22 @@ const INSTRUCAO_BASE =
   "dentro do áudio. Regras: só escreves o que se ouve com clareza; se um troço for ruído, silêncio ou impercetível, " +
   "omite-o; se não se perceber nada, devolve uma lista vazia. Nunca completes, resumas, traduzas ou corrijas. " +
   "Em cada frase dá a tua confiança de 0 a 1 de que foi mesmo isso que se disse.";
-const INSTRUCAO_FALANTE =
-  " O PRIMEIRO áudio é a fala a transcrever. O SEGUNDO áudio é só uma amostra da voz do comercial, para comparar " +
-  "vozes: nunca transcrevas nada do segundo áudio. Em cada frase do primeiro áudio diz quem fala: 'comercial' se for " +
-  "a voz da amostra, 'cliente' se for outra pessoa.";
+// Quem fala decide-se num pedido À PARTE, sem transcrição: com a amostra no mesmo pedido o modelo
+// transcrevia a amostra em vez da fala (visto em chamadas reais a 4 e 5/11).
+const INSTRUCAO_VOZ =
+  "O primeiro áudio é uma amostra da voz de uma pessoa (o comercial). O segundo áudio é uma fala de uma chamada. " +
+  "Diz se a voz principal do segundo áudio é a mesma pessoa do primeiro. Responde só com JSON: " +
+  "comercial true se for a mesma voz, false se for outra pessoa, e a confiança de 0 a 1.";
+const ESQUEMA_VOZ = { type: "OBJECT", properties: { comercial: { type: "BOOLEAN" }, confianca: { type: "NUMBER" } }, required: ["comercial", "confianca"] };
 
-const esquema = (comFalante: boolean) => ({
+const ESQUEMA_FRASES = {
   type: "ARRAY",
   items: {
     type: "OBJECT",
-    properties: {
-      inicio: { type: "NUMBER" },
-      fim: { type: "NUMBER" },
-      texto: { type: "STRING" },
-      confianca: { type: "NUMBER" },
-      ...(comFalante ? { falante: { type: "STRING", enum: ["comercial", "cliente"] } } : {}),
-    },
-    required: ["inicio", "fim", "texto", "confianca", ...(comFalante ? ["falante"] : [])],
+    properties: { inicio: { type: "NUMBER" }, fim: { type: "NUMBER" }, texto: { type: "STRING" }, confianca: { type: "NUMBER" } },
+    required: ["inicio", "fim", "texto", "confianca"],
   },
-});
+};
 
 // Nomes da casa: corrigem-se depois, em vez de os dar ao modelo (com áudio abafado ele decalcava-os).
 const CORRECOES: [RegExp, string][] = [
@@ -58,7 +55,7 @@ const CORRECOES: [RegExp, string][] = [
 const ALUCINACOES = new Set(["obrigado", "obrigada", "legendas pela comunidade amara.org", "amara.org", "tchau"]);
 const corrigir = (t: string) => CORRECOES.reduce((s, [rx, r]) => s.replace(rx, r), t);
 
-interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente" }
+interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente"; confianca_falante?: number }
 
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
@@ -86,12 +83,9 @@ serve(async (req) => {
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT.bucket, caller.anewUserId);
 
     const comFalante = !!referencia_b64;
-    // a fala primeiro, a amostra depois: com a amostra à frente o modelo transcrevia-a em vez da fala
-    const partes: ParteGemini[] = [{ inline_data: { mime_type: "audio/wav", data: audio_b64 } }];
-    if (referencia_b64) partes.push({ inline_data: { mime_type: "audio/wav", data: referencia_b64 } });
-    partes.push({ text: INSTRUCAO_BASE + (comFalante ? INSTRUCAO_FALANTE : "") });
+    const fala: ParteGemini = { inline_data: { mime_type: "audio/wav", data: audio_b64 } };
     const palavrasAmostra = new Set((referencia_texto ?? "").toLowerCase().match(/\p{L}{4,}/gu) ?? []);
-    // decalque da amostra: quase todas as palavras da frase (4 ou mais) estão no que a amostra diz
+    // decalque da amostra (rede de segurança): quase todas as palavras da frase estão no que a amostra diz
     const ecoDaAmostra = (t: string) => {
       if (palavrasAmostra.size === 0) return false;
       const ps = t.toLowerCase().match(/\p{L}{4,}/gu) ?? [];
@@ -99,8 +93,17 @@ serve(async (req) => {
     };
 
     let brutas: Frase[] = [];
+    let voz: { comercial: boolean; confianca: number } | null = null;
     try {
-      brutas = await gerarJson<Frase[]>({ modelo: MODELO, partes, esquema: esquema(comFalante) });
+      // os dois pedidos em paralelo: a transcrição só vê a fala; a comparação de vozes não transcreve nada
+      [brutas, voz] = await Promise.all([
+        gerarJson<Frase[]>({ modelo: MODELO, partes: [fala, { text: INSTRUCAO_BASE }], esquema: ESQUEMA_FRASES }),
+        comFalante
+          ? gerarJson<{ comercial: boolean; confianca: number }>({ modelo: MODELO, esquema: ESQUEMA_VOZ,
+              partes: [{ inline_data: { mime_type: "audio/wav", data: referencia_b64! } }, fala, { text: INSTRUCAO_VOZ }] })
+            .catch(() => null)  // sem comparação, a fala fica como do cliente
+          : Promise.resolve(null),
+      ]);
     } catch (e) {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;
@@ -113,7 +116,7 @@ serve(async (req) => {
         fim: Math.round((deslocamento_s + Math.max(Number(f.inicio) || 0, Number(f.fim) || 0)) * 100) / 100,
         texto: f.texto,
         confianca: Math.round(f.confianca * 100) / 100,
-        ...(comFalante ? { falante: f.falante === "comercial" ? "comercial" : "cliente" } : {}),
+        ...(comFalante ? { falante: voz?.comercial ? "comercial" : "cliente", confianca_falante: voz ? Math.round(Number(voz.confianca ?? 0.5) * 100) / 100 : 0.3 } : {}),
       }));
     return json({ frases, modelo: MODELO });
   } catch (error) {

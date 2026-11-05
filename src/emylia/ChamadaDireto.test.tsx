@@ -33,6 +33,8 @@ const extracao = {
     { chave: "orc_cliente", rotulo: "Orçamento", tipo: "escolha", valor: null, valor_rotulo: null, confianca: 0, excerto: "", estado: "em_falta" },
     { chave: "visita_dia", rotulo: "Visita: dia combinado", tipo: "data", valor: "2026-11-10", valor_rotulo: null, confianca: 1, excerto: "Comercial: Dia 10, pode ser às 11?", estado: "preenchido" },
     { chave: "visita_hora", rotulo: "Visita: hora combinada", tipo: "texto", valor: "11:00", valor_rotulo: null, confianca: 1, excerto: "Comercial: Dia 10, pode ser às 11?", estado: "preenchido" },
+    { chave: "tipo_servico", rotulo: "Tipo de serviço", tipo: "escolha", valor: "Casa de banho", valor_rotulo: null, confianca: 1, excerto: "Cliente: a casa de banho", estado: "preenchido" },
+    { chave: "servicos_catalogo", rotulo: "Serviços do Catálogo", tipo: "varios", valor: "canalização, pintura das paredes", valor_rotulo: null, confianca: 0.8, excerto: "Cliente: canalização e pintar", estado: "preenchido" },
   ] }],
 };
 
@@ -53,8 +55,11 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const campo = vi.fn();
-const ctx = { A: { campo }, run: (fn: () => void) => fn(), S: {} } as unknown as Ctx;
-const d = { id: 7, f: { imovel: "Moradia" } } as unknown as Negocio;
+const servicoDaChamada = vi.fn();
+const servicosDoPedido = vi.fn();
+const ctx = { A: { campo, servicoDaChamada, servicosDoPedido }, run: (fn: () => void) => fn(),
+  S: { svc: { s1: { n: "Canalização" }, s2: { n: "Pintura" } } } } as unknown as Ctx;
+const d = { id: 7, f: { imovel: "Moradia" }, linhaPorDefinir: true, linha: "wc" } as unknown as Negocio;
 
 async function correrExemplo() {
   render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
@@ -71,7 +76,10 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect(nuvem.transcreverFala.mock.calls[0][2]).toBeNull();  // sem voz registada
     const [segs, grupos] = nuvem.preencherCampos.mock.calls[0];
     expect(segs.map((s: { falante: string }) => s.falante)).toEqual(["cliente", "comercial"]);
-    expect(grupos.map((g: Grupo) => g.titulo)).toEqual(["Qualificação", "Visita combinada na chamada"]);
+    expect(grupos.map((g: Grupo) => g.titulo)).toEqual(["Qualificação", "Serviço", "Da chamada"]);
+    const servico = grupos.find((g: Grupo) => g.titulo === "Serviço")!;
+    expect(servico.campos[0].op).toEqual(["Casa de banho", "Cozinha", "Remodelação geral"]);
+    expect(servico.campos[1].op).toEqual(["Canalização", "Pintura"]);
   });
 
   it("as propostas têm caixa por linha: os campos vazios entram, os já preenchidos ficam de fora, e o valor é editável", async () => {
@@ -81,18 +89,27 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect(caixaImovel).toHaveAttribute("aria-checked", "false");
     expect(screen.getByText("já tinha «Moradia»")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "O cliente é" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("button", { name: /Preencher 3 campos$/ })).toBeInTheDocument();
+    // «Desmarcar todos» e «Marcar todos»
+    fireEvent.click(screen.getByRole("button", { name: "Desmarcar todos" }));
+    expect(screen.getByRole("button", { name: /Preencher 0 campos$/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Marcar todos" }));
+    expect(screen.getByRole("button", { name: /Preencher 6 campos$/ })).toBeInTheDocument();
+    fireEvent.click(caixaImovel);
+    expect(screen.getByRole("button", { name: /Preencher 5 campos$/ })).toBeInTheDocument();
     // corrigir a posse no seletor e marcar o imóvel
     fireEvent.change(screen.getByRole("combobox", { name: "O cliente é" }), { target: { value: "Inquilino" } });
     fireEvent.click(caixaImovel);
-    expect(screen.getByRole("button", { name: /Preencher 4 campos$/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Preencher 4 campos$/ }));
+    expect(screen.getByRole("button", { name: /Preencher 6 campos$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Preencher 6 campos$/ }));
     expect(campo).toHaveBeenCalledWith(7, "imovel", "Apartamento");
     expect(campo).toHaveBeenCalledWith(7, "posse", "Inquilino");
     expect(campo).toHaveBeenCalledWith(7, "visita_dia", "2026-11-10");
     expect(campo).toHaveBeenCalledWith(7, "visita_hora", "11:00");
     expect(campo).toHaveBeenCalledTimes(4);
-    expect(screen.getByText(/Preenchidos: Tipo de imóvel, O cliente é, Visita: dia combinado, Visita: hora combinada\./)).toBeInTheDocument();
+    // o tipo de serviço e os serviços do Catálogo vão pelas ações próprias (só os nomes que existem no Catálogo)
+    expect(servicoDaChamada).toHaveBeenCalledWith(7, "wc");
+    expect(servicosDoPedido).toHaveBeenCalledWith(7, ["s1", "s2"]);
+    expect(screen.getByText(/Preenchidos: Tipo de imóvel, O cliente é, Tipo de serviço, Serviços do Catálogo, Visita: dia combinado, Visita: hora combinada\./)).toBeInTheDocument();
   });
 
   it("com a voz registada manda a amostra e o que ela diz em cada fala", async () => {
