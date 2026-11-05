@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { retangulo, type Planta } from "@/emylia/planta";
 import { combina, melhorPara, produtosDe, type Estilo } from "./catalogoFake";
-import { TABELA, aplicarEstilo, estadoDaPeca, mudaramDeSitio, necessidades, sairam, totais, type Projeto } from "./necessidadesEstudio";
+import { TABELA, aplicarEstilo, colocar, decidir, decisaoDe, estadoDaPeca, juntarPorColocar, juntarServico, mudaramDeSitio, mudarQtdServico, necessidades, qtdSugerida, sairam, servicosRecomendados, tirarServico, totais, type Projeto } from "./necessidadesEstudio";
+import { servico } from "./catalogoFake";
 
 const ANTES: Planta = { o: { x: 0, y: 0 }, paredes: retangulo(234, 177), pecas: [
   { id: "ban", tipo: "banheira", x: 0, y: 0, w: 170, h: 70 },
@@ -84,5 +85,56 @@ describe("as necessidades da planta", () => {
     expect(r.escolhas.bid).toBeUndefined(); // o bidé fica como está
     expect(r.acompanha.mov1?.torneira).toBe("tor-mono-c");
     expect(r.revestimento).toBe("rev-tela-c");
+  });
+});
+
+describe("o passo «Estilo»: decidir cada peça e juntar produtos (5/11)", () => {
+  it("trocar a sanita fica com o recomendado; tirar o bidé tira-o do depois; ficar volta ao que era", () => {
+    let p = projeto();
+    p = decidir(p, "san", "troca", "san-nexo-s");
+    expect(decisaoDe(p, "san")).toBe("troca");
+    expect(p.escolhas.san).toBe("san-nexo-s");
+    p = decidir(p, "bid", "tira");
+    expect(decisaoDe(p, "bid")).toBe("tira");
+    expect(sairam(p).map((x) => x.id)).toEqual(["bid"]);
+    p = decidir(p, "bid", "fica");
+    expect(decisaoDe(p, "bid")).toBe("fica");
+    p = decidir(p, "san", "fica");
+    expect(p.escolhas.san).toBeUndefined();
+  });
+
+  it("um produto novo fica por colocar e já conta no orçamento; posto na planta, as linhas são as mesmas", () => {
+    let p = juntarPorColocar(projeto(), { tipo: "base", produto: "bas-ard-c", acompanha: { resguardo: "res-meio-p" } }, "b1");
+    const antes = necessidades(p);
+    expect(antes.find((l) => l.id === "prod-b1")).toMatchObject({ n: "Base Ardósia por medida, Cinza", porque: "Escolhido no estilo; falta pô-lo na planta." });
+    expect(antes.some((l) => l.id === "acomp-b1-resguardo")).toBe(true);
+    p = colocar(p, "b1", { x: 60, y: 35 });
+    expect(p.porColocar).toEqual([]);
+    expect(p.depois.pecas.find((x) => x.id === "b1")).toMatchObject({ tipo: "base", w: 120, h: 70, x: 0, y: 0 });
+    expect(p.escolhas.b1).toBe("bas-ard-c");
+    expect(totais(necessidades(p)).semIva).toBe(totais(antes).semIva);
+  });
+});
+
+describe("os serviços (5/11: «e incluir também os serviços»)", () => {
+  it("a quantidade sugerida sai da planta: o teto pelo chão, o rodapé pelo perímetro", () => {
+    const p = projeto();
+    expect(qtdSugerida(servico("sv-pintura-teto")!, p)).toBe(4.14);
+    expect(qtdSugerida(servico("sv-rodape")!, p)).toBe(8.22);
+    expect(qtdSugerida(servico("sv-estores")!, p)).toBe(1);
+  });
+  it("recomenda os que têm a ver com as peças: com uma base, a impermeabilização e o nicho", () => {
+    const p = juntarPorColocar(projeto(), { tipo: "base" }, "b1");
+    expect(servicosRecomendados(p).map((x) => x.id)).toEqual(expect.arrayContaining(["sv-imperm", "sv-nicho"]));
+    expect(servicosRecomendados(projeto()).map((x) => x.id)).not.toContain("sv-imperm");
+  });
+  it("juntar, mudar a quantidade e tirar um serviço, e o orçamento acompanha", () => {
+    let p = juntarServico(projeto(), "sv-pintura-teto");
+    expect(necessidades(p).find((l) => l.id === "serv-sv-pintura-teto")).toMatchObject({ q: 4.14, total: Math.round(4.14 * 9 * 100) / 100 });
+    p = mudarQtdServico(p, "sv-pintura-teto", 5);
+    expect(necessidades(p).find((l) => l.id === "serv-sv-pintura-teto")?.total).toBe(45);
+    expect(juntarServico(p, "sv-pintura-teto").servicos).toHaveLength(1);
+    p = tirarServico(p, "sv-pintura-teto");
+    expect(necessidades(p).some((l) => l.id === "serv-sv-pintura-teto")).toBe(false);
   });
 });

@@ -5,8 +5,8 @@
 //  - o que muda de sítio: a canalização no sítio novo;
 //  - o revestimento e o pavimento por m² (as paredes até ao teto falso, quando há), o teto falso, as proteções e os pontos elétricos.
 // O comercial ajusta a quantidade ou tira uma linha; o ajuste fica marcado. Os preços do Estúdio são de teste (catalogoFake.ts).
-import { PECAS, areaChaoM2, areaParedesM2, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
-import { ACOMPANHA, NOME_CATEGORIA, produto, type Categoria, type Estilo } from "./catalogoFake";
+import { PASSO, PECAS, areaChaoM2, areaParedesM2, juntarPeca, type PecaPlanta, type Planta, type Ponto, type TipoPeca } from "@/emylia/planta";
+import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, produto, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
 
 export interface Alturas { /** Pé-direito atual, em cm. */ peDireito: number; /** Altura do teto falso, em cm; null sem teto falso. */ tetoFalso: number | null }
 
@@ -24,7 +24,12 @@ export interface Projeto {
   alturas: Alturas;
   estilo: Estilo;
   ajustes: Record<string, { q?: number; fora?: boolean }>;
+  /** 5/11 (Rúben: «no passo 3 aparece todos os novos produtos por colocar»): escolhidos no estilo, ainda sem sítio na planta. */
+  porColocar?: PorColocar[];
+  /** 5/11 (Rúben: «e incluir também os serviços»): os serviços escolhidos, com a quantidade. */
+  servicos?: { id: string; q: number }[];
 }
+export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 
 export type Grupo = "Peças" | "Materiais" | "Trabalhos";
 export interface Linha {
@@ -112,6 +117,18 @@ export function necessidades(p: Projeto): Linha[] {
     if (ELETRICO.includes(x.tipo)) linha({ id: `ele-${x.id}`, grupo: "Trabalhos", n: `Ponto elétrico: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoEletrico, porque: "Precisa de corrente." });
     if (estado === "nova" && AGUA.includes(x.tipo)) linha({ id: `agua-${x.id}`, grupo: "Trabalhos", n: `Ponto de água e esgoto: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoAgua, porque: "Peça de água num sítio novo." });
   }
+  for (const x of p.porColocar ?? []) {
+    const prod = produto(x.produto), porque = "Escolhido no estilo; falta pô-lo na planta.";
+    if (prod) linha({ id: `prod-${x.id}`, grupo: "Peças", n: prod.n, q: 1, un: "un", unit: prod.preco, porque });
+    else linha({ id: `prod-${x.id}`, grupo: "Peças", n: `${PECAS[x.tipo].n}: por escolher`, q: 1, un: "un", unit: 0, porque, porEscolher: true });
+    linha({ id: `inst-${x.id}`, grupo: "Trabalhos", n: `Instalação: ${nome(x.tipo)}`, q: 1, un: "un", unit: prod?.inst ?? TABELA.instalar[x.tipo], porque });
+    for (const cat of ACOMPANHA[x.tipo] ?? []) {
+      const a = produto(x.acompanha?.[cat]);
+      if (a) linha({ id: `acomp-${x.id}-${cat}`, grupo: "Peças", n: a.n, q: 1, un: "un", unit: a.preco + a.inst, porque: `${SINGULAR[cat] ?? NOME_CATEGORIA[cat]} ${fem(x.tipo) ? "da" : "do"} ${nome(x.tipo)}, com instalação.` });
+    }
+    if (ELETRICO.includes(x.tipo)) linha({ id: `ele-${x.id}`, grupo: "Trabalhos", n: `Ponto elétrico: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoEletrico, porque: "Precisa de corrente." });
+    if (AGUA.includes(x.tipo)) linha({ id: `agua-${x.id}`, grupo: "Trabalhos", n: `Ponto de água e esgoto: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoAgua, porque: "Peça de água num sítio novo." });
+  }
   for (const x of mudaramDeSitio(p).filter((y) => AGUA.includes(y.tipo))) {
     linha({ id: `agua-${x.id}`, grupo: "Trabalhos", n: `Mudar de sítio: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoAgua, porque: "Mudou de sítio na planta: a canalização vai atrás." });
   }
@@ -137,6 +154,11 @@ export function necessidades(p: Projeto): Linha[] {
   }
   if (p.alturas.tetoFalso && chao !== null) {
     linha({ id: "teto", grupo: "Trabalhos", n: `Teto falso a ${(p.alturas.tetoFalso / 100).toLocaleString("pt-PT")} m`, q: chao, un: "m²", unit: TABELA.tetoFalsoM2 + TABELA.pinturaTetoM2, porque: `Baixa de ${(p.alturas.peDireito / 100).toLocaleString("pt-PT")} m para ${(p.alturas.tetoFalso / 100).toLocaleString("pt-PT")} m, pintado.` });
+  }
+  // os serviços escolhidos no estilo
+  for (const x of p.servicos ?? []) {
+    const sv = servico(x.id);
+    if (sv) linha({ id: `serv-${sv.id}`, grupo: "Trabalhos", n: sv.n, q: x.q, un: sv.un, unit: sv.preco, porque: sv.desc });
   }
   if (out.length) linha({ id: "prot", grupo: "Trabalhos", n: "Proteções do caminho e da obra", q: 1, un: "un", unit: TABELA.protecoes, porque: "Da entrada da casa até à casa de banho." });
 
@@ -170,3 +192,86 @@ export function aplicarEstilo(p: Projeto, escolher: Escolher, todas = false): Pr
   }
   return { ...p, escolhas, acompanha, revestimento: escolher("revestimento") ?? p.revestimento, pavimento: escolher("pavimento") ?? p.pavimento };
 }
+
+// ---------------------------------------------------------------- 5/11: as decisões do passo «Estilo» e pôr na planta
+
+export type Decisao = "fica" | "troca" | "tira";
+/** O que se decidiu para uma peça do antes. */
+export function decisaoDe(p: Projeto, pecaId: string): Decisao {
+  if (!p.depois.pecas.some((x) => x.id === pecaId)) return "tira";
+  return p.escolhas[pecaId] ? "troca" : "fica";
+}
+
+/** Decidir uma peça do antes: fica (como está), troca (pelo produto dado, ou o recomendado) ou tira (sai do depois). */
+export function decidir(p: Projeto, pecaId: string, d: Decisao, recomendado?: string): Projeto {
+  const antes = p.antes.pecas.find((x) => x.id === pecaId);
+  if (!antes) return p;
+  const escolhas = { ...p.escolhas };
+  let pecas = p.depois.pecas;
+  if (d === "tira") { delete escolhas[pecaId]; pecas = pecas.filter((x) => x.id !== pecaId); }
+  else {
+    if (!pecas.some((x) => x.id === pecaId)) pecas = [...pecas, { ...antes }];
+    if (d === "fica") delete escolhas[pecaId];
+    else if (!escolhas[pecaId] && recomendado) escolhas[pecaId] = recomendado;
+  }
+  return { ...p, escolhas, depois: { ...p.depois, pecas } };
+}
+
+/** Juntar um produto novo aos «por colocar» (fica na bandeja do passo «Depois»). */
+export function juntarPorColocar(p: Projeto, item: Omit<PorColocar, "id">, id = `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`): Projeto {
+  return { ...p, porColocar: [...(p.porColocar ?? []), { ...item, id }] };
+}
+
+/**
+ * Pôr na planta um produto por colocar: entra como peça nova com o tamanho do produto, com o centro no ponto dado (ou ao meio), e o
+ * produto e o que vai com ele passam para a peça. As linhas do orçamento ficam iguais (mudam só de «por colocar» para a peça).
+ */
+export function colocar(p: Projeto, id: string, centro?: Ponto): Projeto {
+  const item = (p.porColocar ?? []).find((x) => x.id === id);
+  if (!item) return p;
+  const prod = produto(item.produto);
+  let depois = juntarPeca(p.depois, item.tipo, id, centro);
+  if (prod?.w && prod.h) {
+    depois = { ...depois, pecas: depois.pecas.map((x) => {
+      if (x.id !== id) return x;
+      const cx = x.x + x.w / 2, cy = x.y + x.h / 2, arr = (n: number) => Math.round(n / PASSO) * PASSO;
+      return { ...x, w: prod.w!, h: prod.h!, x: arr(cx - prod.w! / 2), y: arr(cy - prod.h! / 2) };
+    }) };
+  }
+  return {
+    ...p, depois,
+    porColocar: (p.porColocar ?? []).filter((x) => x.id !== id),
+    escolhas: item.produto ? { ...p.escolhas, [id]: item.produto } : p.escolhas,
+    acompanha: item.acompanha ? { ...p.acompanha, [id]: item.acompanha } : p.acompanha,
+  };
+}
+
+// ---------------------------------------------------------------- 5/11: os serviços
+
+/** A quantidade sugerida de um serviço, tirada da planta do depois (o chão, as paredes, o perímetro, a zona do duche). */
+export function qtdSugerida(sv: Servico, p: Projeto): number {
+  const chao = areaChaoM2(p.depois.paredes) ?? 0;
+  if (sv.sugestao === "chao") return chao;
+  if (sv.sugestao === "paredes") return areaParedesM2(p.depois, alturaFinalCm(p.alturas) / 100) ?? 0;
+  if (sv.sugestao === "perimetro") return Math.round(p.depois.paredes.reduce((s, w) => s + w.c, 0)) / 100;
+  if (sv.sugestao === "duche") {
+    // o chão da base e as paredes do duche até 2 m (dois lados)
+    const base = [...p.depois.pecas, ...(p.porColocar ?? []).map((x) => ({ tipo: x.tipo, w: 120, h: 70 }))].find((x) => x.tipo === "base");
+    return base ? r2((base.w * base.h) / 10000 + ((base.w + base.h) / 100) * 2) : 0;
+  }
+  return 1;
+}
+
+/** Os serviços recomendados: os que têm a ver com as peças do depois (ou com as que estão por colocar). */
+export function servicosRecomendados(p: Projeto): Servico[] {
+  const tipos = new Set([...p.depois.pecas.map((x) => x.tipo), ...(p.porColocar ?? []).map((x) => x.tipo)]);
+  return SERVICOS.filter((sv) => sv.quando?.some((t) => tipos.has(t)));
+}
+
+export function juntarServico(p: Projeto, id: string): Projeto {
+  const sv = servico(id);
+  if (!sv || (p.servicos ?? []).some((x) => x.id === id)) return p;
+  return { ...p, servicos: [...(p.servicos ?? []), { id, q: Math.max(sv.un === "un" ? 1 : 0.5, qtdSugerida(sv, p)) }] };
+}
+export const tirarServico = (p: Projeto, id: string): Projeto => ({ ...p, servicos: (p.servicos ?? []).filter((x) => x.id !== id) });
+export const mudarQtdServico = (p: Projeto, id: string, q: number): Projeto => ({ ...p, servicos: (p.servicos ?? []).map((x) => (x.id === id ? { ...x, q: Math.max(0, q) } : x)) });

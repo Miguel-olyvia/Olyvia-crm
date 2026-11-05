@@ -45,15 +45,39 @@ describe("PlantaDivisao", () => {
     expect(screen.getByText("3 m²")).toBeInTheDocument();
   });
 
-  it("tocar no número de uma parede deixa escrever a medida certa; se deixa de fechar, diz quanto falta", () => {
+  it("tocar no número de uma parede deixa escrever a medida certa; a parede do outro lado acompanha e a planta continua fechada", () => {
     const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
     fireEvent.pointerDown(screen.getByRole("button", { name: "Parede 1: 200 cm. Escrever a medida." }));
     const caixa = screen.getByLabelText("Parede 1, em cm");
     fireEvent.change(caixa, { target: { value: "250" } });
     fireEvent.blur(caixa);
-    expect(lerPlanta(d.f.planta)?.paredes[0].c).toBe(250);
-    expect(screen.getByText("Faltam 50 cm até ao canto de partida.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Usar nas medidas" })).toBeDisabled();
+    expect(lerPlanta(d.f.planta)?.paredes.map((w) => w.c)).toEqual([250, 150, 250, 150]);
+    expect(screen.getByText("A planta fecha.")).toBeInTheDocument();
+    expect(screen.getByText("3,75 m²")).toBeInTheDocument();
+  });
+
+  it("arrastar uma parede muda-a de sítio: as vizinhas esticam e a planta continua fechada (5/11)", () => {
+    const { d, tela } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
+    // a parede da direita está em x = 200: agarrá-la a meio e puxar 40 cm para fora
+    const parede = tela.querySelectorAll("line[stroke='transparent']")[1];
+    fireEvent.pointerDown(parede, { clientX: 200, clientY: 75, pointerId: 2 });
+    fireEvent.pointerMove(tela, { clientX: 240, clientY: 80, pointerId: 2 });
+    fireEvent.pointerUp(tela, { clientX: 240, clientY: 80, pointerId: 2 });
+    expect(lerPlanta(d.f.planta)?.paredes.map((w) => w.c)).toEqual([240, 150, 240, 150]);
+    expect(screen.getByText("A planta fecha.")).toBeInTheDocument();
+  });
+
+  it("as peças encostadas à parede que se arrasta andam com ela", () => {
+    const { d, tela } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [
+      { id: "esp", tipo: "espelho", x: 196, y: 40, w: 4, h: 80 }, { id: "san", tipo: "sanita", x: 60, y: 40, w: 36, h: 55 },
+    ] }) });
+    const parede = tela.querySelectorAll("line[stroke='transparent']")[1];
+    fireEvent.pointerDown(parede, { clientX: 200, clientY: 20, pointerId: 3 });
+    fireEvent.pointerMove(tela, { clientX: 230, clientY: 20, pointerId: 3 });
+    fireEvent.pointerUp(tela, { clientX: 230, clientY: 20, pointerId: 3 });
+    const pecas = lerPlanta(d.f.planta)!.pecas;
+    expect(pecas.find((x) => x.id === "esp")?.x).toBe(226);
+    expect(pecas.find((x) => x.id === "san")?.x).toBe(60);
   });
 
   it("«Usar nas medidas» põe o chão e as paredes (pé-direito da visita, sem a porta) nas medidas", () => {

@@ -132,3 +132,33 @@ export function produtosDe(cat: Categoria, e: Estilo, todos = false): Produto[] 
 
 /** O que melhor combina, ou nada (sem nenhum que combine, não se escolhe sozinho). */
 export const melhorPara = (cat: Categoria, e: Estilo): Produto | undefined => produtosDe(cat, e)[0];
+
+// ---------------------------------------------------------------- 5/11 (Rúben: «e incluir também os serviços»)
+
+/** Um serviço do catálogo de teste: o preço por unidade, por m², por metro ou por hora. `sugestao` diz de onde sai a quantidade. */
+export interface Servico {
+  id: string;
+  n: string;
+  desc: string;
+  un: "un" | "m²" | "m" | "h";
+  preco: number;
+  /** De onde sai a quantidade sugerida: o chão, as paredes, o perímetro, a zona do duche, ou 1. */
+  sugestao: "chao" | "paredes" | "perimetro" | "um" | "duche";
+  /** Recomenda-se quando a planta do depois tem uma destas peças. */
+  quando?: TipoPeca[];
+}
+
+export const SERVICOS: Servico[] = [
+  { id: "sv-imperm", n: "Impermeabilização da zona do duche", desc: "Membrana no chão e nas paredes do duche, antes do revestimento.", un: "m²", preco: 28, sugestao: "duche", quando: ["base"] },
+  { id: "sv-nicho", n: "Nicho embutido no duche", desc: "Para os champôs, revestido como a parede.", un: "un", preco: 220, sugestao: "um", quando: ["base"] },
+  { id: "sv-pintura-teto", n: "Pintura do teto", desc: "Tinta anti-humidade, duas demãos.", un: "m²", preco: 9, sugestao: "chao" },
+  { id: "sv-estores", n: "Pintura da caixa dos estores", desc: "Da cor do teto ou dos azulejos.", un: "un", preco: 45, sugestao: "um" },
+  { id: "sv-tomada", n: "Tomada nova com tampa", desc: "Junto ao móvel ou ao espelho.", un: "un", preco: 65, sugestao: "um", quando: ["movel"] },
+  { id: "sv-aplique", n: "Aplique LED por cima do espelho", desc: "Com o ponto de luz.", un: "un", preco: 85, sugestao: "um", quando: ["espelho"] },
+  { id: "sv-ventilador", n: "Ventilador (ventaxia)", desc: "Para casas de banho sem janela ou com pouca ventilação.", un: "un", preco: 160, sugestao: "um" },
+  { id: "sv-eletrica", n: "Instalação elétrica nova da casa de banho", desc: "Circuito novo com diferencial, até ao quadro.", un: "un", preco: 480, sugestao: "um" },
+  { id: "sv-reboco", n: "Regularização das paredes (reboco)", desc: "Quando, ao tirar o azulejo, a parede não fica direita.", un: "m²", preco: 22, sugestao: "paredes" },
+  { id: "sv-rodape", n: "Rodapé cerâmico", desc: "À volta da divisão, do mesmo cerâmico do chão.", un: "m", preco: 12, sugestao: "perimetro" },
+  { id: "sv-limpeza", n: "Limpeza final da obra", desc: "Pronta a usar.", un: "un", preco: 80, sugestao: "um" },
+];
+export const servico = (id: string | undefined): Servico | undefined => (id ? SERVICOS.find((x) => x.id === id) : undefined);
