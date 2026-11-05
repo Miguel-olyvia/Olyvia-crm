@@ -89,6 +89,26 @@ export const podeNeg = (p: Papel, x: PermNeg): boolean => {
   return reais.simular ? naBase && doPapel(p, x) : naBase;
 };
 
+/** 5/11: o código com que o servidor decide se devolve os custos do orçamento (fn_neg_ler_orcamento, neg_ler_negocios, fn_neg_ler_adendas:
+ *  fn_cat_pode(org, 'quotes.view_costs'), que também conta com o Papel no Negócio). Sem ele a base manda os custos a null. */
+export const CODIGO_VER_CUSTOS = "quotes.view_costs";
+/** O nome que o editor de papéis mostra para quotes.view_costs (grelhaPermissoes.ts). */
+export const SEM_VER_CUSTOS = "O custo e a margem só se veem com a permissão «Ver custos do orçamento».";
+
+/** A resposta de fn_cat_pode(org, 'quotes.view_costs') posta por /negocios (usePodeVerCustos em NegociosEmylia.tsx). `undefined`: esta
+ *  página não a pôs (a ficha lê-a com as outras em permissoesPosContrato.ts, nas `reais.codigos`); `null`: ainda a ler. */
+let verCustosNegocios: boolean | null | undefined;
+export function definirVerCustos(v: boolean | null | undefined): void { verCustosNegocios = v; }
+
+/** Quem entrou vê os custos e as margens do orçamento? A MESMA pergunta das RPCs (fn_cat_pode, quotes.view_costs): na ficha pelas
+ *  permissões lidas (`reais`), em /negocios pela resposta de usePodeVerCustos. Enquanto se lê, ou se a leitura falhou, não. Sem conta
+ *  real (o protótipo local e os testes) vê, como até aqui. */
+export function podeVerCustos(): boolean {
+  if (reais) return !!reais.codigos && reais.codigos.has(CODIGO_VER_CUSTOS);
+  if (verCustosNegocios !== undefined) return verCustosNegocios === true;
+  return true;
+}
+
 /** O aviso de quem não tem a permissão (a mensagem e a explicação). */
 export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "finance.validate_payment": { msg: "Sem permissão para validar pagamentos", sub: "Só o Financeiro ou a Direção validam pagamentos (finance.validate_payment). Mude de papel em cima." },

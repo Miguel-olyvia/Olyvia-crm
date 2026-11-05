@@ -49,14 +49,15 @@ export interface Proposta { k: string; l: string; valor: string; confianca: numb
 /** O que a extração propõe para cada campo do formulário, com o que o campo já tinha (para não escrever por cima sem querer). */
 export function propostas(extracao: Extracao | null | undefined, grupos: Grupo[], f: Record<string, string>): Proposta[] {
   if (!extracao) return [];
-  const defs = new Map(grupos.filter((g) => !g.oculto).flatMap((g) => g.campos).map((c) => [c.k, c] as const));
+  // pela ordem do formulário (grupos e campos), não pela ordem em que o motor os devolveu
+  const extraidos = new Map(extracao.fichas.flatMap((fi) => fi.campos).map((x) => [x.chave, x] as const));
   const out: Proposta[] = [];
-  for (const x of extracao.fichas.flatMap((fi) => fi.campos)) {
-    const c = defs.get(x.chave);
-    if (!c) continue;
+  for (const c of grupos.filter((g) => !g.oculto).flatMap((g) => g.campos)) {
+    const x = extraidos.get(c.k);
+    if (!x) continue;
     const valor = valorParaCampo(c, x);
     if (valor === null) continue;
-    out.push({ k: x.chave, l: c.l, valor, confianca: x.confianca, excerto: x.excerto, estado: x.estado, jaTinha: f[x.chave] || "" });
+    out.push({ k: c.k, l: c.l, valor, confianca: x.confianca, excerto: x.excerto, estado: x.estado, jaTinha: f[c.k] || "" });
   }
   return out;
 }

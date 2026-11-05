@@ -16,13 +16,15 @@ const campoDef = z.object({
   k: z.string().min(1).max(60),
   l: z.string().min(1).max(200),
   t: z.enum(["sim_nao", "escolha", "varios", "numero", "contador", "texto", "texto_longo", "data"]),
-  op: z.array(z.string().max(120)).max(60).optional(),
+  op: z.array(z.string().max(120)).max(400).optional(),  // os serviços do Catálogo são muitos
   ajuda: z.string().max(400).optional(),
   un: z.string().max(20).optional(),
 });
 const pedido = z.object({
   segmentos: z.array(z.object({ inicio: z.number(), texto: z.string().max(2000), falante: z.enum(["comercial", "cliente", "desconhecido"]) })).max(2000),
   campos: z.array(campoDef).min(1).max(120),
+  // a data de hoje no fuso da comercial (AAAA-MM-DD), para «dia 10» e «amanhã» virarem datas
+  hoje: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 const INSTRUCAO = `És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição de uma chamada entre
@@ -40,9 +42,13 @@ Regras:
 - A transcrição do lado do cliente vem do altifalante do telemóvel e tem frases sem sentido. Ignora-as.
 - Para campos de escolha, usa exatamente uma das opções (o texto da opção). Para sim/não, "Sim" ou "Não".
 - Para números, só o número. Para listas (varios), as opções ditas separadas por vírgulas. Para datas, AAAA-MM-DD.
+- Nos campos de texto longo escreve TUDO o que foi dito sobre esse tema, com detalhe e frases completas, nas
+  palavras do cliente: o que quer, dúvidas e indecisões, o que já fez ou tem, referências e exemplos que pediu,
+  restrições. Nunca resumas a uma linha; um campo de texto longo pode ter várias frases.
 - O excerto é uma citação curta e literal da transcrição que justifica o valor.
 - A confianca é 1 quando o cliente o disse claramente, 0.5 quando é uma dedução razoável, 0 quando não há informação.
-- O resumo tem 2 a 4 frases, em português de Portugal, dirigido ao comercial que vai à visita.`;
+- O resumo é para o comercial que vai à visita: 4 a 8 frases, em português de Portugal, com o que o cliente quer,
+  as dúvidas dele, o que já fez, orçamento, prazos e disponibilidade, o que ficou combinado e o que ficou por perguntar.`;
 
 const descrever = (c: z.infer<typeof campoDef>) => {
   const extra = c.t === "escolha" || c.t === "varios" ? ` opções: ${(c.op ?? []).join(", ")}` : c.t === "sim_nao" ? " valores: Sim, Não" :
@@ -72,7 +78,7 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { segmentos, campos } = parsed.data;
+    const { segmentos, campos, hoje } = parsed.data;
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
@@ -83,7 +89,9 @@ serve(async (req) => {
       required: ["valor", "confianca", "excerto"] };
     const esquema = { type: "OBJECT", properties: { campos: { type: "OBJECT", properties: Object.fromEntries(chaves.map((k) => [k, campoEsq])), required: chaves },
       resumo: { type: "STRING" } }, required: ["campos", "resumo"] };
-    const texto = "# Campos a preencher\n" + campos.map(descrever).join("\n") +
+    const texto = (hoje ? `Hoje é ${hoje}. Datas ditas de forma relativa («dia 10», «amanhã», «para a semana») ` +
+      "convertem-se para AAAA-MM-DD, assumindo a próxima ocorrência a partir de hoje.\n\n" : "") +
+      "# Campos a preencher\n" + campos.map(descrever).join("\n") +
       "\n\n# Transcrição da chamada\n" + segmentos.map((s) => `${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : "Alguém"}: ${s.texto}`).join("\n") +
       "\n\nPreenche o JSON com 'campos' (um objeto por chave, com valor, confianca e excerto) e 'resumo'.";
 

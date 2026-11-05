@@ -22,6 +22,7 @@ import { LINHA_DEMOLICAO, resumoDemolicao } from "./entulho";
 import { DemolicaoOrcamento } from "./DemolicaoOrcamento";
 import { custosDe, receitaDe, subempreitadaSemCusto } from "./v2/custosModelo";
 import { useLargura } from "./largura";
+import { podeVerCustos } from "./permissoes";
 
 /** O ícone do ofício de um serviço (pelo ofício do Catálogo ou pelo perfil do técnico). */
 export function iconeOficio(txt: string): LucideIcon {
@@ -82,6 +83,8 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
   const [editar, setEditar] = useState<number | null>(null);
   const custoTotal = o.linhas.reduce((a, l) => a + linhaCalc(l, S).custo, 0) || 1;
   const direcao = S.role === "direcao";
+  // 5/11: sem quotes.view_costs (a base manda os custos a null) não há margem nem custo por linha, nem o filtro da margem
+  const ver = podeVerCustos();
   const t = simples ? "text-[15px]" : "text-sm";
   // 27/10: com muitas linhas a lista não acabava. No computador (largura de tabela) cada linha ocupa uma fila: o nome, a quantidade,
   // a zona, o preço, a margem e o custo lado a lado. Com mais de 8 linhas há procura, filtros e os grupos (serviços, materiais)
@@ -100,7 +103,7 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
     { k: "todas", t: "Todas", vale: () => true },
     { k: "svc", t: "Serviços", vale: (l) => l.t === "svc" },
     { k: "mat", t: "Materiais e produtos", vale: (l) => l.t === "mat" },
-    { k: "margem", t: "Margem abaixo do mínimo", vale: margemBaixa },
+    ...(ver ? [{ k: "margem", t: "Margem abaixo do mínimo", vale: margemBaixa }] : []),
     ...zonas.map((z) => ({ k: "zona:" + z, t: z, vale: (l: LinhaOrc) => !!l.zonas?.some((x) => x.z === z) })),
   ];
   const vale = (FILTROS.find((f) => f.k === filtro) ?? FILTROS[0]).vale;
@@ -182,8 +185,8 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
               <span className="min-w-0 flex-1">Linha e quantidade</span>
               {zonas.length > 0 && <span className="w-40 shrink-0">Zona</span>}
               <span className="w-28 shrink-0 text-right">Total da linha</span>
-              <span className="w-20 shrink-0 text-center">Margem</span>
-              <span className="w-32 shrink-0 text-right">Custo</span>
+              {ver && <span className="w-20 shrink-0 text-center">Margem</span>}
+              {ver && <span className="w-32 shrink-0 text-right">Custo</span>}
               <span className="w-8 shrink-0" />
             </li>
           )}
@@ -194,7 +197,7 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
         const origem = origemLinha(l), O = ORIGEM[origem];
         const nome = l.t === "svc" ? x.s!.n : l.d.replace(/^(Produto · |Fornecido pelo cliente · |Levantamento · )/, "");
         const Ic = l.t === "svc" ? iconeOficio(CATALOGO.find((c) => c.id === l.sid)?.cat ?? x.s!.perfil) : O.ic;
-        const dem = origem === "demolicao", veCusto = !dem || direcao; // o custo da demolição só a Direção o vê
+        const dem = origem === "demolicao", veCusto = ver && (!dem || direcao); // o custo da demolição só a Direção o vê
         const sub = l.t === "svc" ? `${nfmt(l.q)} ${x.s!.un} × ${eur(l.pu)} €` : l.livre ? `${nfmt(l.livre.q)} ${l.livre.un} × ${eur(l.livre.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
         const ajustado = l.t === "mat" && o.precosMan?.[l.d] != null;
         const zonaTxt = !tabela && fechado && l.zonas?.length ? (l.zonas.length === 1 ? l.zonas[0].z : l.zonas.map((z) => `${z.z} ${nfmt(z.q)}`).join(", ")) : "";
@@ -235,9 +238,9 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                 )}
                 {/* 27/10: uma subempreitada sem o custo do subempreiteiro não tem margem (dizia 100%) */}
                 {veCusto ? <span title={`custo ${eur(x.custo)} €`} className={cn("rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums", tabela && "w-20 text-center", subemp && !(x.custo > 0) ? "bg-warning/15 text-warning" : cor)}>{x.preco > 0 ? (subemp && !(x.custo > 0) ? "sem custo" : `${tabela ? "" : "margem "}${pct(m)}`) : "sem preço"}</span>
-                  : tabela && <span className="w-20" />}
+                  : tabela && ver && <span className="w-20" />}
               </div>
-              {tabela && (
+              {tabela && ver && (
                 <span className="flex w-32 shrink-0 items-center justify-end gap-2" title={veCusto ? `custo ${eur(x.custo)} €` : undefined}>
                   {veCusto && <>
                     <span className="h-1 w-8 overflow-hidden rounded-full bg-muted" aria-hidden="true">

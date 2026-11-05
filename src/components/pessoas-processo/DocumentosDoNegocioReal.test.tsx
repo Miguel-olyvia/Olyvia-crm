@@ -22,7 +22,7 @@ vi.mock("./DialogosDocumentoGuia", () => {
 
 afterEach(cleanup);
 
-const PERMS = ["proposals.edit", "client_contracts.create", "client_contracts.edit"];
+const PERMS = ["proposals.edit", "negocios.proposta.decidir", "client_contracts.create", "client_contracts.edit"];
 const REAL: FontePessoas = { modo: "real", organizationId: "org-1", momentoGanho: "manual", permissoesFecho: PERMS };
 const proposta = (status: string) => ({ id: "p1", numero: "P-1", titulo: "WC", status, valor: 100, valid_until: null, terms: null, enviada_em: null, aceite_em: null, criado_em: "2026-10-01T10:00:00Z" });
 const contratoDb = { id: "c1", numero: "C-1", status: "pending_signature", valor: 100, assinado_em: null, criado_em: "2026-10-02T10:00:00Z", tem_base: true };

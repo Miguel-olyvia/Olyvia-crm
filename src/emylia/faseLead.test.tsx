@@ -14,7 +14,7 @@ const ctxDe = (S: ReturnType<typeof seed>) => {
   return { S, A: acoes(S, () => {}, run), run, go: (fn: () => void) => () => fn() } as unknown as Ctx;
 };
 const LEAD_X = { entityId: "p1", primeiro: "Inês", apelido: "Lopes", empresa: "", notas: "", fonteId: "", fonte: "", campanha: "",
-  comercialId: "u1", comercial: "Catarina", respostas: [], extra: {} };
+  comercialId: "u1", comercial: "Catarina", cliente: false, respostas: [], extra: {} };
 
 describe("a Lead e o Contacto, como na chamada", () => {
   it("Por contactar: um só passo, «Quem pede» (o nome, o telefone e o que pediu), sem perguntas obrigatórias", () => {

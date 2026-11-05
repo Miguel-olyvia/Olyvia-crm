@@ -8,9 +8,12 @@ import type { MutacoesNegocio } from "@/components/negocio-metas/mutacoesNegocio
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { EditarNegocioDialogo } from "./EditarNegocioDialogo";
 import { negocioBase } from "./fabricaTestes";
+import { colunasDaEdicao } from "@/hooks/pessoas/escritasNegocio";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+const { podeAtribuirMock } = vi.hoisted(() => ({ podeAtribuirMock: vi.fn(() => ({ pode: true, aLer: false })) }));
+vi.mock("@/hooks/pessoas/usePodeAtribuirComercial", () => ({ usePodeAtribuirComercial: () => podeAtribuirMock() }));
 const { comerciaisMock } = vi.hoisted(() => ({ comerciaisMock: vi.fn() }));
 vi.mock("@/hooks/pessoas/useComerciaisNegocio", () => ({ useComerciaisNegocio: (ativo: boolean) => comerciaisMock(ativo) }));
 
@@ -22,7 +25,7 @@ const comerciais = (sobre: Partial<{ comerciais: typeof LISTA; isLoading: boolea
   comerciais: LISTA, isLoading: false, isError: false, repetir, ...sobre,
 });
 
-beforeEach(() => { comerciaisMock.mockReturnValue(comerciais()); repetir.mockReset(); });
+beforeEach(() => { comerciaisMock.mockReturnValue(comerciais()); repetir.mockReset(); podeAtribuirMock.mockReturnValue({ pode: true, aLer: false }); });
 afterEach(cleanup);
 
 const negocio = { ...negocioBase("n1", { pessoa: "Ana", servico: "Cozinha", comercial: "Ana Gomes" }), notas: "Tudo branco", comercialId: "u1" };
@@ -250,5 +253,33 @@ describe("EditarNegocioDialogo: cancelar", () => {
     fireEvent.click(within(dialogo()).getByRole("button", { name: "Cancelar" }));
     expect(aoFechar).toHaveBeenCalledTimes(1);
     expect(mutacoes?.editar).not.toHaveBeenCalled();
+  });
+});
+
+describe("EditarNegocioDialogo: leads.assign (o gatilho trg_00_negocios_comercial_leads_assign)", () => {
+  it("sem a permissão, o comercial fica fixo no atual e diz porquê; o título grava-se sem mexer no comercial", () => {
+    podeAtribuirMock.mockReturnValue({ pode: false, aLer: false });
+    const { mutacoes } = abrir();
+    expect(comercial()).toBeDisabled();
+    expect(comercial()).toHaveValue("u1");
+    expect(within(dialogo()).getByText("Mudar o comercial pede a permissão «Atribuir leads».")).toBeInTheDocument();
+    fireEvent.change(titulo(), { target: { value: "Cozinha nova" } });
+    fireEvent.click(guardar());
+    const pedido = (mutacoes?.editar as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(pedido.depois.comercialId).toBe("u1");
+    expect(colunasDaEdicao(pedido.antes, pedido.depois)).toEqual({ titulo: "Cozinha nova" });
+  });
+
+  it("enquanto as permissões carregam, fica desativado sem o motivo", () => {
+    podeAtribuirMock.mockReturnValue({ pode: false, aLer: true });
+    abrir();
+    expect(comercial()).toBeDisabled();
+    expect(within(dialogo()).queryByText(/Atribuir leads/)).toBeNull();
+  });
+
+  it("com a permissão fica tudo igual: escolhe-se e não há motivo", () => {
+    abrir();
+    expect(comercial()).toBeEnabled();
+    expect(within(dialogo()).queryByText(/Atribuir leads/)).toBeNull();
   });
 });

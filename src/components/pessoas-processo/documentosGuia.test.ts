@@ -15,7 +15,7 @@ const negocio = (extra: Partial<NegocioFichaDb> = {}): NegocioFichaDb => ({
   responsavel_id: null, responsavel_nome: null, valor: 100, pronto_a_ganhar: false, parado_desde: null, levantamento_id: null,
   orcamentos: [], propostas: [], contratos: [], eventos: [], ...extra,
 });
-const TODAS = ["proposals.edit", "client_contracts.create", "client_contracts.edit"];
+const TODAS = ["proposals.edit", "negocios.proposta.decidir", "client_contracts.create", "client_contracts.edit"];
 const opcoes = { podeEditar: true, fechoV4: false, permissoes: TODAS as readonly string[] | undefined };
 
 describe("os passos de documento", () => {
@@ -59,9 +59,13 @@ describe("planoDoDocumento", () => {
     const enviada = negocio({ propostas: [proposta({ status: "sent" })] });
     for (const passo of ["enviarProposta", "registarRespostaCliente"] as const) {
       expect(planoDoDocumento(passo, enviada, { ...opcoes, permissoes: ["pessoas.edit", "client_contracts.edit"] })).toBeNull();
-      expect(planoDoDocumento(passo, enviada, { ...opcoes, permissoes: ["proposals.edit"] })).not.toBeNull();
+      expect(planoDoDocumento(passo, enviada, { ...opcoes, permissoes: ["proposals.edit", "negocios.proposta.decidir"] })).not.toBeNull();
       expect(planoDoDocumento(passo, enviada, { ...opcoes, permissoes: undefined })).toBeNull();
     }
+    // 05/11/2026: responder (aceitou/recusou) pede também negocios.proposta.decidir, como a base para propostas de um negócio; enviar não.
+    expect(planoDoDocumento("enviarProposta", enviada, { ...opcoes, permissoes: ["proposals.edit"] })).not.toBeNull();
+    expect(planoDoDocumento("registarRespostaCliente", enviada, { ...opcoes, permissoes: ["proposals.edit"] })).toBeNull();
+    expect(planoDoDocumento("registarRespostaCliente", enviada, { ...opcoes, permissoes: ["negocios.proposta.decidir"] })).toBeNull();
     const assinar = negocio({ contratos: [contrato()] });
     expect(planoDoDocumento("registarAssinatura", assinar, { ...opcoes, permissoes: ["proposals.edit", "client_contracts.create"] })).toBeNull();
     expect(planoDoDocumento("registarAssinatura", assinar, { ...opcoes, permissoes: ["client_contracts.edit"] })).not.toBeNull();

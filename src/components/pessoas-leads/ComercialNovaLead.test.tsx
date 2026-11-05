@@ -1,10 +1,12 @@
 // O comercial da «Nova lead» (cópia de Leads): filtro por organização e por distrito da lead, com «a mostrar todos» quando ninguém serve a zona.
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComercialLido, NoArvoreOrg } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { ComercialNovaLead } from "./ComercialNovaLead";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+const { podeAtribuirMock } = vi.hoisted(() => ({ podeAtribuirMock: vi.fn(() => ({ pode: true, aLer: false })) }));
+vi.mock("@/hooks/pessoas/usePodeAtribuirComercial", () => ({ usePodeAtribuirComercial: () => podeAtribuirMock() }));
 
 const RUI: ComercialLido = { id: "u1", name: "Rui", districts: ["Porto"], org_ids: ["loja-a"] };
 const SOFIA: ComercialLido = { id: "u2", name: "Sofia", districts: ["Lisboa"], org_ids: ["loja-b"] };
@@ -56,5 +58,34 @@ describe("ComercialNovaLead", () => {
     desenhar({ arvore: [ARVORE[0]], comerciais: [] });
     expect(screen.queryByLabelText("Filtrar por organização...")).toBeNull();
     expect(screen.getByText("Nenhum comercial encontrado")).toBeInTheDocument();
+  });
+});
+
+describe("ComercialNovaLead: leads.assign (neg_atribuir_pessoa)", () => {
+  beforeEach(() => { podeAtribuirMock.mockReturnValue({ pode: true, aLer: false }); });
+
+  it("sem a permissão o seletor fica desativado, diz porquê e o comercial já escolhido fica vazio", () => {
+    podeAtribuirMock.mockReturnValue({ pode: false, aLer: false });
+    const f = desenhar({ atribuidoId: "u1" });
+    const sel = screen.getByLabelText("Atribuído a (comercial)", { selector: "select" });
+    expect(sel).toBeDisabled();
+    expect(sel).toHaveValue("");
+    expect(screen.getByText(/Escolher o comercial pede a permissão «Atribuir leads»/)).toBeInTheDocument();
+    expect(f.aoMudarAtribuido).toHaveBeenCalledWith("");
+  });
+
+  it("enquanto as permissões carregam fica desativado, sem motivo e sem apagar nada", () => {
+    podeAtribuirMock.mockReturnValue({ pode: false, aLer: true });
+    const f = desenhar({ atribuidoId: "u1" });
+    expect(screen.getByLabelText("Atribuído a (comercial)", { selector: "select" })).toBeDisabled();
+    expect(screen.queryByText(/Atribuir leads/)).toBeNull();
+    expect(f.aoMudarAtribuido).not.toHaveBeenCalled();
+  });
+
+  it("com a permissão fica tudo igual", () => {
+    const f = desenhar({ atribuidoId: "u1" });
+    expect(screen.getByLabelText("Atribuído a (comercial)", { selector: "select" })).toBeEnabled();
+    expect(screen.queryByText(/Atribuir leads/)).toBeNull();
+    expect(f.aoMudarAtribuido).not.toHaveBeenCalled();
   });
 });

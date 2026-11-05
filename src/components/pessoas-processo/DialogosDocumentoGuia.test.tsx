@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 
-const PERM = ["proposals.edit", "client_contracts.create", "client_contracts.edit"];
+const PERM = ["proposals.edit", "negocios.proposta.decidir", "client_contracts.create", "client_contracts.edit"];
 const h = vi.hoisted(() => ({
   aceitar: vi.fn(), recusar: vi.fn(), criarContrato: vi.fn(), finalizar: vi.fn(), toastOk: vi.fn(), toastErro: vi.fn(),
   contratoProps: { valor: null as null | Record<string, unknown> },
@@ -84,6 +84,18 @@ describe("enviar a proposta sem proposals.edit", () => {
     render(<EnviarPropostaNoGuia plano={{ passo: "enviarProposta", propostaId: "p1", titulo: "WC", numero: "P-1" }} organizationId="org-1" mutacoes={mutacoesFalsas()} aoFechar={aoFechar} permissoes={permissoes} />);
     expect(screen.queryByRole("dialog", { name: "envio" })).toBeNull();
     expect(aoFechar).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 05/11/2026: a proposta do guia é de um negócio (negocio_id); a base exige negocios.proposta.decidir para aceitar/recusar.
+describe("a resposta do cliente sem negocios.proposta.decidir", () => {
+  it.each([[undefined], [["proposals.edit"]], [["negocios.proposta.decidir"]]])("com as permissões %j não mostra «Aceitou»/«Recusou» e fecha", (permissoes) => {
+    const aoFechar = vi.fn();
+    render(<RespostaPropostaNoGuia plano={{ passo: "registarRespostaCliente", propostaId: "p1", titulo: "WC", numero: "P-1" }} organizationId="org-1" mutacoes={mutacoesFalsas()} aoFechar={aoFechar} permissoes={permissoes} />);
+    expect(screen.queryByRole("button", { name: "O cliente aceitou" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "O cliente recusou" })).toBeNull();
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+    expect(h.aceitar).not.toHaveBeenCalled();
   });
 });
 

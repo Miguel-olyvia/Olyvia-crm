@@ -56,6 +56,9 @@ export function usePermissoesPosContrato(org: string | null, S: Estado | null, p
     return () => { cancelado = true; };
   }, [org, tentativa]);
   const leitura: LeituraDePermissoes = lida && lida.org === org && lida.tentativa === tentativa ? lida.leitura : { k: "a-ler" };
+  // 5/11: também já no render, para que o que se desenha nesta passagem (podeVerCustos, podeNeg) use a leitura que acabou de chegar e
+  // não a anterior; o efeito abaixo continua a ser quem a deixa posta (e a tira ao sair)
+  definirPermissoesReais({ codigos: leitura.k === "lidas" ? leitura.codigos : new Set(), simular: false });
   useEffect(() => {
     // sem leitura bem-sucedida fica um conjunto vazio: a Emylia não dá nada por concedido
     definirPermissoesReais({ codigos: leitura.k === "lidas" ? leitura.codigos : new Set(), simular: false });

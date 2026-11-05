@@ -18,7 +18,7 @@ const dados = (extra: Partial<DadosDoGuia> = {}): DadosDoGuia => ({
 });
 
 const TODOS: ReadonlySet<PassoProcesso> = new Set(PASSOS_PROCESSO);
-const PERMS_DOCUMENTOS = ["proposals.edit", "client_contracts.create", "client_contracts.edit"];
+const PERMS_DOCUMENTOS = ["proposals.edit", "negocios.proposta.decidir", "client_contracts.create", "client_contracts.edit"];
 const contexto = (extra: Partial<ContextoDoGuia> = {}, i: ItemProcesso = item()): ContextoDoGuia => ({
   dados: dados(), fases: i.tipo === "pessoa" ? fasesDaPessoa(i.fase) : fasesDoNegocioParaGuia([{ id: "orcamento", estado: "atual" }]),
   podeEditar: true, podeCriar: true, pessoaFechada: false, ligados: TODOS, ...extra,
@@ -198,8 +198,12 @@ describe("calcularPassoGuiado: o botao primario", () => {
     const assinar = negocio({ fase: "contrato", prontoAGanhar: false });
     for (const i of [enviar, responder]) {
       expect(calcularPassoGuiado(i, contexto({ permissoesFecho: ["client_contracts.edit"] }, i)).acao).toMatchObject(razao);
-      expect(calcularPassoGuiado(i, contexto({ permissoesFecho: ["proposals.edit"] }, i)).acao.estado).toBe("pronta");
+      expect(calcularPassoGuiado(i, contexto({ permissoesFecho: ["proposals.edit", "negocios.proposta.decidir"] }, i)).acao.estado).toBe("pronta");
     }
+    // 05/11/2026: responder pede também negocios.proposta.decidir (a base exige-a nas propostas de um negócio); enviar não.
+    expect(calcularPassoGuiado(enviar, contexto({ permissoesFecho: ["proposals.edit"] }, enviar)).acao.estado).toBe("pronta");
+    expect(calcularPassoGuiado(responder, contexto({ permissoesFecho: ["proposals.edit"] }, responder)).acao).toMatchObject(razao);
+    expect(calcularPassoGuiado(responder, contexto({ permissoesFecho: ["negocios.proposta.decidir"] }, responder)).acao).toMatchObject(razao);
     expect(calcularPassoGuiado(assinar, contexto({ permissoesFecho: ["proposals.edit"] }, assinar)).acao).toMatchObject(razao);
     expect(calcularPassoGuiado(assinar, contexto({ permissoesFecho: ["client_contracts.edit"] }, assinar)).acao.estado).toBe("pronta");
   });

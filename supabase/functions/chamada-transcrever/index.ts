@@ -19,8 +19,9 @@ const MAX_B64 = 1_200_000;
 const pedido = z.object({
   audio_b64: z.string().min(100).max(MAX_B64),
   deslocamento_s: z.number().min(0).default(0),
-  // amostra da voz da comercial (WAV 16 kHz mono, base64), gravada uma vez no painel
+  // amostra da voz da comercial (WAV 16 kHz mono, base64), gravada uma vez no painel, e o que ela diz
   referencia_b64: z.string().max(MAX_B64).optional(),
+  referencia_texto: z.string().max(2000).optional(),
 });
 
 const INSTRUCAO_BASE =
@@ -28,24 +29,22 @@ const INSTRUCAO_BASE =
   "dentro do áudio. Regras: só escreves o que se ouve com clareza; se um troço for ruído, silêncio ou impercetível, " +
   "omite-o; se não se perceber nada, devolve uma lista vazia. Nunca completes, resumas, traduzas ou corrijas. " +
   "Em cada frase dá a tua confiança de 0 a 1 de que foi mesmo isso que se disse.";
-const INSTRUCAO_FALANTE =
-  " O primeiro áudio é uma amostra da voz do comercial; o segundo é a fala a transcrever. Em cada frase diz " +
-  "quem fala: 'comercial' se for a voz da amostra, 'cliente' se for outra pessoa.";
+// Quem fala decide-se num pedido À PARTE, sem transcrição: com a amostra no mesmo pedido o modelo
+// transcrevia a amostra em vez da fala (visto em chamadas reais a 4 e 5/11).
+const INSTRUCAO_VOZ =
+  "O primeiro áudio é uma amostra da voz de uma pessoa (o comercial). O segundo áudio é uma fala de uma chamada. " +
+  "Diz se a voz principal do segundo áudio é a mesma pessoa do primeiro. Responde só com JSON: " +
+  "comercial true se for a mesma voz, false se for outra pessoa, e a confiança de 0 a 1.";
+const ESQUEMA_VOZ = { type: "OBJECT", properties: { comercial: { type: "BOOLEAN" }, confianca: { type: "NUMBER" } }, required: ["comercial", "confianca"] };
 
-const esquema = (comFalante: boolean) => ({
+const ESQUEMA_FRASES = {
   type: "ARRAY",
   items: {
     type: "OBJECT",
-    properties: {
-      inicio: { type: "NUMBER" },
-      fim: { type: "NUMBER" },
-      texto: { type: "STRING" },
-      confianca: { type: "NUMBER" },
-      ...(comFalante ? { falante: { type: "STRING", enum: ["comercial", "cliente"] } } : {}),
-    },
-    required: ["inicio", "fim", "texto", "confianca", ...(comFalante ? ["falante"] : [])],
+    properties: { inicio: { type: "NUMBER" }, fim: { type: "NUMBER" }, texto: { type: "STRING" }, confianca: { type: "NUMBER" } },
+    required: ["inicio", "fim", "texto", "confianca"],
   },
-});
+};
 
 // Nomes da casa: corrigem-se depois, em vez de os dar ao modelo (com áudio abafado ele decalcava-os).
 const CORRECOES: [RegExp, string][] = [
@@ -56,7 +55,7 @@ const CORRECOES: [RegExp, string][] = [
 const ALUCINACOES = new Set(["obrigado", "obrigada", "legendas pela comunidade amara.org", "amara.org", "tchau"]);
 const corrigir = (t: string) => CORRECOES.reduce((s, [rx, r]) => s.replace(rx, r), t);
 
-interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente" }
+interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente"; confianca_falante?: number }
 
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
@@ -77,34 +76,47 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { audio_b64, deslocamento_s, referencia_b64 } = parsed.data;
+    const { audio_b64, deslocamento_s, referencia_b64, referencia_texto } = parsed.data;
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT.bucket, caller.anewUserId);
 
     const comFalante = !!referencia_b64;
-    const partes: ParteGemini[] = [];
-    if (referencia_b64) partes.push({ inline_data: { mime_type: "audio/wav", data: referencia_b64 } });
-    partes.push({ inline_data: { mime_type: "audio/wav", data: audio_b64 } });
-    partes.push({ text: INSTRUCAO_BASE + (comFalante ? INSTRUCAO_FALANTE : "") });
+    const fala: ParteGemini = { inline_data: { mime_type: "audio/wav", data: audio_b64 } };
+    const palavrasAmostra = new Set((referencia_texto ?? "").toLowerCase().match(/\p{L}{4,}/gu) ?? []);
+    // decalque da amostra (rede de segurança): quase todas as palavras da frase estão no que a amostra diz
+    const ecoDaAmostra = (t: string) => {
+      if (palavrasAmostra.size === 0) return false;
+      const ps = t.toLowerCase().match(/\p{L}{4,}/gu) ?? [];
+      return ps.length >= 4 && ps.filter((w) => palavrasAmostra.has(w)).length / ps.length >= 0.7;
+    };
 
     let brutas: Frase[] = [];
+    let voz: { comercial: boolean; confianca: number } | null = null;
     try {
-      brutas = await gerarJson<Frase[]>({ modelo: MODELO, partes, esquema: esquema(comFalante) });
+      // os dois pedidos em paralelo: a transcrição só vê a fala; a comparação de vozes não transcreve nada
+      [brutas, voz] = await Promise.all([
+        gerarJson<Frase[]>({ modelo: MODELO, partes: [fala, { text: INSTRUCAO_BASE }], esquema: ESQUEMA_FRASES }),
+        comFalante
+          ? gerarJson<{ comercial: boolean; confianca: number }>({ modelo: MODELO, esquema: ESQUEMA_VOZ,
+              partes: [{ inline_data: { mime_type: "audio/wav", data: referencia_b64! } }, fala, { text: INSTRUCAO_VOZ }] })
+            .catch(() => null)  // sem comparação, a fala fica como do cliente
+          : Promise.resolve(null),
+      ]);
     } catch (e) {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;
     }
     const frases = (Array.isArray(brutas) ? brutas : [])
       .map((f) => ({ ...f, texto: corrigir(String(f.texto ?? "").trim()), confianca: Number(f.confianca ?? 0) }))
-      .filter((f) => f.texto && f.confianca >= CONFIANCA_MIN && !ALUCINACOES.has(f.texto.toLowerCase().replace(/[.!?… ]+$/g, "")))
+      .filter((f) => f.texto && f.confianca >= CONFIANCA_MIN && !ALUCINACOES.has(f.texto.toLowerCase().replace(/[.!?… ]+$/g, "")) && !ecoDaAmostra(f.texto))
       .map((f) => ({
         inicio: Math.round((deslocamento_s + Math.max(0, Number(f.inicio) || 0)) * 100) / 100,
         fim: Math.round((deslocamento_s + Math.max(Number(f.inicio) || 0, Number(f.fim) || 0)) * 100) / 100,
         texto: f.texto,
         confianca: Math.round(f.confianca * 100) / 100,
-        ...(comFalante ? { falante: f.falante === "comercial" ? "comercial" : "cliente" } : {}),
+        ...(comFalante ? { falante: voz?.comercial ? "comercial" : "cliente", confianca_falante: voz ? Math.round(Number(voz.confianca ?? 0.5) * 100) / 100 : 0.3 } : {}),
       }));
     return json({ frases, modelo: MODELO });
   } catch (error) {

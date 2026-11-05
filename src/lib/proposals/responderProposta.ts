@@ -26,7 +26,10 @@ interface EtapaDaProposta {
 interface PedidoBase {
   propostaId: string;
   organizationId: string;
-  /** As permissões da sessão; sem `proposals.edit` (a que a página de propostas exige) a gravação recusa-se, e sem lista conhecida (`undefined`) também. */
+  /**
+   * As permissões da sessão; sem `proposals.edit` (a que a página de propostas exige) a gravação recusa-se, e sem lista conhecida (`undefined`) também.
+   * Se a proposta for de um negócio (negocio_id), exige também `negocios.proposta.decidir`, como a base (fn_neg_documento_exigir_permissao).
+   */
   permissoes: readonly string[] | undefined;
 }
 
@@ -53,12 +56,18 @@ async function etapasAtivas(organizationId: string): Promise<EtapaDaProposta[]> 
   return ((global.data ?? []) as EtapaDaProposta[]).filter((e) => e.is_active);
 }
 
-/** A etapa em que a proposta está agora (a de onde sai); a leitura é da organização pedida e uma proposta que não é dela não existe. */
-async function etapaAtualDaProposta(pedido: PedidoBase): Promise<string | null> {
-  const { data, error } = await supabase.from("proposals").select("stage_id").eq("id", pedido.propostaId).eq("organization_id", pedido.organizationId).maybeSingle();
+/**
+ * A etapa em que a proposta está agora (a de onde sai); a leitura é da organização pedida e uma proposta que não é dela não existe.
+ * Uma proposta de um negócio (negocio_id) exige `negocios.proposta.decidir`, a mesma regra da base (fn_neg_documento_exigir_permissao).
+ */
+async function etapaAtualDaProposta(pedido: PedidoBase, acao: string): Promise<string | null> {
+  const { data, error } = await supabase.from("proposals").select("stage_id, negocio_id").eq("id", pedido.propostaId).eq("organization_id", pedido.organizationId).maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("A proposta já não está disponível.");
-  return ((data as { stage_id: string | null }).stage_id) ?? null;
+  // negocio_id não consta dos tipos gerados da base (existe na tabela: é o que o gatilho trg_negocios_21_doc_permissao lê).
+  const linha = data as unknown as { stage_id: string | null; negocio_id?: string | null };
+  if (linha.negocio_id) exigirPermissao(pedido.permissoes, "negocios.proposta.decidir", acao);
+  return linha.stage_id ?? null;
 }
 
 /** `recalculate_proposal_value` não consta dos tipos gerados da base: chama-se sem eles. */
@@ -82,7 +91,7 @@ export async function aceitarProposta(pedido: PedidoBase): Promise<ResultadoDaRe
   exigirPermissao(pedido.permissoes, "proposals.edit", "aceitar a proposta");
   const etapa = (await etapasAtivas(pedido.organizationId)).find((e) => e.is_won);
   if (!etapa) throw new Error("Estágio 'Aceite' não encontrado");
-  const antes = await etapaAtualDaProposta(pedido);
+  const antes = await etapaAtualDaProposta(pedido, "aceitar a proposta");
   const { authId } = await quemEscreve();
   const { data, error } = await supabase.from("proposals")
     .update({ stage_id: etapa.id, status: "accepted", accepted_at: new Date().toISOString() })
@@ -100,7 +109,7 @@ export async function recusarProposta(pedido: PedidoBase & { motivo: MotivoDaRec
   exigirPermissao(pedido.permissoes, "proposals.edit", "recusar a proposta");
   const etapa = (await etapasAtivas(pedido.organizationId)).find((e) => e.is_lost);
   if (!etapa) throw new Error("Estágio 'Rejeitada' não encontrado");
-  const antes = await etapaAtualDaProposta(pedido);
+  const antes = await etapaAtualDaProposta(pedido, "recusar a proposta");
   const { authId } = await quemEscreve();
   const { motivo } = pedido;
   const { data, error } = await supabase.from("proposals").update({

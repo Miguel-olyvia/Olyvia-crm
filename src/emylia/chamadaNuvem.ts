@@ -8,6 +8,16 @@ import type { CampoExtraido, Extracao, Fala } from "./chamadaMotor";
 export const TAXA = 16000;
 const VAD_ASSETS = "/chamadas/vad/";
 const CHAVE_VOZ = "olyvia.chamadas.voz";  // a amostra da voz da comercial, WAV em base64, neste browser
+const CHAVE_VOZ_TEXTO = "olyvia.chamadas.voz_texto";  // o que a amostra diz, para apanhar decalques
+
+/** Os campos da visita combinada na chamada: não estão na Lead nem no Contacto (a marcação é na agenda,
+ *  no passo «Marcar a visita»), mas o que se combinou ao telefone fica no negócio e à vista. */
+export const GRUPO_VISITA: Grupo = { titulo: "Da chamada", campos: [
+  { k: "visita_dia", l: "Visita: dia combinado", t: "data", ajuda: "Só se ficou combinado um dia para a visita." },
+  { k: "visita_hora", l: "Visita: hora combinada", t: "texto", ajuda: "Ex.: 11:00. Só se ficou combinada uma hora." },
+  { k: "notas_chamada", l: "Notas da chamada", t: "texto_longo",
+    ajuda: "Tudo o que é útil para a visita e não cabe nos outros campos: dúvidas, o que o cliente já fez, exemplos que pediu, restrições, o que ficou por perguntar. Com detalhe." },
+] };
 
 /** Float32 a 16 kHz → WAV (int16, mono) em base64. */
 export function wavBase64(pcm: Float32Array): string {
@@ -27,9 +37,13 @@ export function wavBase64(pcm: Float32Array): string {
 
 // ---- voz da comercial (gravada uma vez neste browser) ------------------------------------------
 export function vozGuardada(): string | null { try { return localStorage.getItem(CHAVE_VOZ); } catch { return null; } }
-export function guardarVoz(b64: string | null): void {
-  try { if (b64) localStorage.setItem(CHAVE_VOZ, b64); else localStorage.removeItem(CHAVE_VOZ); } catch { /* sem localStorage */ }
+export function guardarVoz(b64: string | null, texto = ""): void {
+  try {
+    if (b64) { localStorage.setItem(CHAVE_VOZ, b64); localStorage.setItem(CHAVE_VOZ_TEXTO, texto); }
+    else { localStorage.removeItem(CHAVE_VOZ); localStorage.removeItem(CHAVE_VOZ_TEXTO); }
+  } catch { /* sem localStorage */ }
 }
+export function vozTextoGuardado(): string { try { return localStorage.getItem(CHAVE_VOZ_TEXTO) ?? ""; } catch { return ""; } }
 
 /** Grava `segundos` do microfone a 16 kHz e devolve o PCM (para registar a voz). */
 export async function gravarMicrofone(segundos: number, aoProgredir?: (s: number) => void): Promise<Float32Array> {
@@ -69,11 +83,25 @@ async function semWorkers(): Promise<void> {
 }
 // o vad-web copia esta opção para ort.env.wasm.wasmPaths tal como está; o objeto diz os dois ficheiros exatos
 const ONNX_BASE = ORT_FICHEIROS as unknown as string;
+
+/** O vad-web vem num pedaço à parte. Numa aba aberta antes de um deploy novo, esse pedaço já não existe
+ *  no servidor («Failed to fetch dynamically imported module»): a solução é recarregar a página. */
+async function carregarVad(): Promise<typeof import("@ricky0123/vad-web")> {
+  try {
+    return await import("@ricky0123/vad-web");
+  } catch (e) {
+    const m = (e as Error).message ?? "";
+    if (/dynamically imported module|Loading chunk|Importing a module script failed/i.test(m)) {
+      throw new Error("A app foi atualizada entretanto. Recarregue a página (F5) e tente outra vez.");
+    }
+    throw e;
+  }
+}
 export interface Ouvinte { parar: () => Promise<void> }
 
 /** Liga o microfone com o VAD Silero; chama `aoTerminarFala` com cada fala (float32 a 16 kHz) e o seu início em segundos. */
 export async function ouvirMicrofone(aoTerminarFala: (pcm: Float32Array, inicioS: number) => void, aoNivel?: (aFalar: boolean) => void): Promise<Ouvinte> {
-  const { MicVAD } = await import("@ricky0123/vad-web");
+  const { MicVAD } = await carregarVad();
   await semWorkers();
   const t0 = performance.now();
   let inicioFala = 0;
@@ -96,7 +124,7 @@ export async function ouvirMicrofone(aoTerminarFala: (pcm: Float32Array, inicioS
 
 /** O mesmo VAD sobre um ficheiro (a chamada de exemplo), para testar sem microfone. */
 export async function falasDeFicheiro(url: string): Promise<{ pcm: Float32Array; inicioS: number }[]> {
-  const { NonRealTimeVAD } = await import("@ricky0123/vad-web");
+  const { NonRealTimeVAD } = await carregarVad();
   await semWorkers();
   const resposta = await fetch(url);
   const ctx = new AudioContext({ sampleRate: TAXA });
@@ -127,9 +155,10 @@ async function mensagemDoErro(error: { message?: string; context?: unknown }, fu
 
 export interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente" }
 
-export async function transcreverFala(pcm: Float32Array, inicioS: number, referenciaB64: string | null): Promise<Frase[]> {
+export async function transcreverFala(pcm: Float32Array, inicioS: number, referenciaB64: string | null, referenciaTexto = ""): Promise<Frase[]> {
   const { data, error } = await supabase.functions.invoke("chamada-transcrever", {
-    body: { audio_b64: wavBase64(pcm), deslocamento_s: inicioS, ...(referenciaB64 ? { referencia_b64: referenciaB64 } : {}) },
+    body: { audio_b64: wavBase64(pcm), deslocamento_s: inicioS,
+      ...(referenciaB64 ? { referencia_b64: referenciaB64, referencia_texto: referenciaTexto } : {}) },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-transcrever"));
   return (data?.frases ?? []) as Frase[];
@@ -137,8 +166,9 @@ export async function transcreverFala(pcm: Float32Array, inicioS: number, refere
 
 export async function preencherCampos(segmentos: Fala[], grupos: Grupo[]): Promise<Extracao> {
   const campos = grupos.filter((g) => !g.oculto).flatMap((g) => g.campos.map(({ k, l, t, op, ajuda, un }: Def) => ({ k, l, t, op, ajuda, un })));
+  const hoje = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const { data, error } = await supabase.functions.invoke("chamada-campos", {
-    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos },
+    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
   return data as Extracao & { fichas: { campos: CampoExtraido[] }[] };

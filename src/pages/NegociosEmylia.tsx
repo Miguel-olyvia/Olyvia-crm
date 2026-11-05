@@ -38,12 +38,14 @@ import { definirMoradaDaEntidade } from "@/emylia/MoradaDeQuemPede";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
-import { podeNeg } from "@/emylia/permissoes";
+import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
+import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 import { gravarDadosDaLead, lerDadosDasLeads, type FonteLead } from "@/emylia/real/dadosDaLead";
-import { definirGuardarDadosLead } from "@/emylia/DadosDaLead";
+import { definirGuardarDadosLead, definirPodeAtribuirLead } from "@/emylia/DadosDaLead";
+import { usePodeAtribuirComercial } from "@/hooks/pessoas/usePodeAtribuirComercial";
 import { lerComerciais } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
@@ -81,6 +83,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
+  // 5/11: ver os custos e as margens do orçamento (quotes.view_costs por fn_cat_pode, a pergunta das RPCs que os devolvem). Põe-se em
+  // permissoes.ts já no render (como S.tec mais abaixo), para que podeVerCustos() responda o mesmo nesta passagem; a ler, esconde.
+  const verCustos = usePodeVerCustos();
+  definirVerCustos(verCustos.aLer ? null : verCustos.pode);
+  useEffect(() => () => definirVerCustos(undefined), []);
+  // 5/11: leads.assign para o comercial da lead (ComercialDaLead), da mesma maneira
+  const podeAtribuir = usePodeAtribuirComercial();
+  definirPodeAtribuirLead(podeAtribuir);
+  useEffect(() => () => definirPodeAtribuirLead(null), []);
   // ?vista=operacoes (o "Operações" do menu) ou ?vista=hoje abre logo essa vista; o resto abre os Negócios
   const navigate = useNavigate();
   const [params] = useSearchParams();

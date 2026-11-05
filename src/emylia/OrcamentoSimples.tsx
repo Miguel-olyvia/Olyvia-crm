@@ -13,6 +13,7 @@ import { LinhasOrcamento } from "./LinhasOrcamento";
 import { PlanoObra } from "./PlanoObraOrcamento";
 import { CaminhoOrcamento, VersoesProposta } from "./VoltarAtras";
 import { useLargura } from "./largura";
+import { SEM_VER_CUSTOS, podeVerCustos } from "./permissoes";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -32,6 +33,8 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
   const [caixa, largura] = useLargura<HTMLDivElement>(0);
   const lado = largura >= 1080;
   const escala = (x: number) => `${Math.max(0, Math.min(1, x / 0.5)) * 100}%`; // a barra vai de 0% a 50% de margem
+  // 5/11: sem quotes.view_costs a base manda os custos a null (a margem dava 100 % e o custo 0 €): fica só o total, e diz-se porquê
+  const ver = podeVerCustos();
 
   // 27/10: num ecrã largo, o total, a margem, o desconto e o "Antes de enviar" ficam numa coluna à direita, sempre à vista, enquanto
   // se mexe nas linhas e no plano (antes, uma coluna só: para ver a margem depois de mudar uma linha era preciso subir a página)
@@ -44,11 +47,13 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
             <p className="text-4xl font-semibold tracking-tight tabular-nums">{eur(T.pf)} €</p>
             <p className="mt-1 text-sm text-muted-foreground tabular-nums">{eur(TI.total)} € com IVA</p>
           </div>
-          <div className="text-right">
+          {ver && <div className="text-right">
             <p className="text-sm text-muted-foreground">Margem</p>
             <p className={cn("text-2xl font-semibold tabular-nums", cor)}>{pct(T.m)}</p>
-          </div>
+          </div>}
         </div>
+        {!ver && <p className="mt-3 text-[15px] text-muted-foreground">{SEM_VER_CUSTOS}</p>}
+        {ver && <>
         <div className="relative mt-5 h-2 rounded-full bg-muted" aria-hidden="true">
           <div className={cn("h-full rounded-full motion-safe:transition-[width] duration-500", barra)} style={{ width: escala(T.m) }} />
           <span className="absolute -top-1 h-4 w-0.5 bg-foreground/60" style={{ left: escala(min) }} />
@@ -74,6 +79,7 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
             ))}
           </dl>
         )}
+        </>}
       </section>
 
   </>);

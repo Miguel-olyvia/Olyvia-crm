@@ -3,15 +3,16 @@
 // (Gemini) e aparece aqui com quem falou; no fim, chamada-campos propõe os campos da Lead e do Contacto e a
 // comercial confirma o que entra. Nada corre no PC de ninguém. A lógica das propostas está em chamadaMotor.ts
 // e a ligação ao Supabase em chamadaNuvem.ts.
-import { useEffect, useRef, useState } from "react";
-import { Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Grupo } from "./campos";
-import type { Negocio } from "./motor";
+import type { Def, Grupo } from "./campos";
+import { LINHAS, nomeLinha, servicosPedidos, type LinhaId, type Negocio } from "./motor";
+import { mudarDadosLead } from "./DadosDaLead";
 import type { Ctx } from "./pecas";
-import { aAplicar, juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
-import { falasDeFicheiro, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, wavBase64, type Ouvinte } from "./chamadaNuvem";
+import { juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { GRUPO_VISITA, falasDeFicheiro, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
 
 type EstadoLig = "parado" | "a_ligar" | "a_ouvir" | "a_terminar" | "terminado" | "erro";
 const EXEMPLO_URL = "/chamadas/exemplo.ogg";
@@ -19,7 +20,32 @@ const SEGUNDOS_VOZ = 15;
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos: Grupo[] }) {
+/** Chaves que não são campos do formulário: gravam-se por ações próprias do motor (ver `aplicarEspecial`). */
+const CHAVES_ESPECIAIS = new Set(["lead_primeiro", "lead_apelido", "tipo_servico", "servicos_catalogo"]);
+
+export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio }: { ctx: Ctx; d: Negocio; grupos: Grupo[] }) {
+  // os campos do negócio, mais o cliente (nome), o serviço (tipo e serviços do Catálogo) e a visita combinada
+  const svc = useMemo(() => ctx.S.svc ?? {}, [ctx.S.svc]);
+  const grupos = useMemo<Grupo[]>(() => [
+    ...gruposDoNegocio,
+    ...(d.dadosLead ? [{ titulo: "Cliente", campos: [
+      { k: "lead_primeiro", l: "Nome próprio", t: "texto" as const, ajuda: "O nome por que o comercial trata o cliente." },
+      { k: "lead_apelido", l: "Apelido", t: "texto" as const },
+    ] }] : []),
+    { titulo: "Serviço", campos: [
+      { k: "tipo_servico", l: "Tipo de serviço", t: "escolha" as const, op: Object.values(LINHAS).map((l) => l.n) },
+      { k: "servicos_catalogo", l: "Serviços do Catálogo", t: "varios" as const, op: Object.values(svc).map((x) => x.n),
+        ajuda: "Os serviços que o cliente pediu, de entre os do Catálogo." },
+    ] },
+    GRUPO_VISITA,
+  ], [gruposDoNegocio, d.dadosLead, svc]);
+  // o que o negócio já tem nessas chaves especiais, para as propostas saberem o que «já tinha»
+  const fComEspeciais = useMemo(() => ({
+    ...d.f,
+    lead_primeiro: d.dadosLead?.primeiro ?? "", lead_apelido: d.dadosLead?.apelido ?? "",
+    tipo_servico: d.linhaPorDefinir ? "" : nomeLinha(d),
+    servicos_catalogo: servicosPedidos(d, ctx.S).map((x) => x.n).join(", "),
+  }), [d, ctx.S]);
   const [estado, setEstado] = useState<EstadoLig>("parado");
   const [msg, setMsg] = useState("");
   const [falas, setFalas] = useState<Fala[]>([]);
@@ -30,7 +56,8 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
   const [resumoFim, setResumoFim] = useState("");
   const [voz, setVoz] = useState<string | null>(() => vozGuardada());
   const [aGravarVoz, setAGravarVoz] = useState<number | null>(null);
-  const [substituir, setSubstituir] = useState(false);
+  // por proposta: entra ou não, e o valor (editável) que entra
+  const [escolhas, setEscolhas] = useState<Record<string, { incluir: boolean; valor: string }>>({});
   const [aplicadas, setAplicadas] = useState<string[] | null>(null);
   const ouvinte = useRef<Ouvinte | null>(null);
   const falasRef = useRef<Fala[]>([]);
@@ -53,7 +80,7 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
     setPendentes((n) => n + 1);
     fila.current = fila.current.then(async () => {
       try {
-        const frases = await transcreverFala(pcm, inicioS, voz);
+        const frases = await transcreverFala(pcm, inicioS, voz, voz ? vozTextoGuardado() : "");
         juntar(linhasDaFala(frases, "cliente"));
       } catch (e) {
         setMsg("Uma fala ficou por transcrever: " + (e as Error).message);
@@ -115,7 +142,11 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
     try {
       const pcm = await gravarMicrofone(SEGUNDOS_VOZ, (s) => setAGravarVoz(Math.min(SEGUNDOS_VOZ, Math.floor(s))));
       const b64 = wavBase64(pcm);
-      guardarVoz(b64); setVoz(b64);
+      setMsg("A guardar a sua voz...");
+      // o que a amostra diz fica guardado: serve para apanhar frases decalcadas da amostra
+      let texto = "";
+      try { texto = (await transcreverFala(pcm, 0, null)).map((f) => f.texto).join(" "); } catch { /* sem texto, a amostra serve na mesma */ }
+      guardarVoz(b64, texto); setVoz(b64);
       setMsg("A sua voz ficou registada neste browser.");
     } catch (e) {
       setMsg("Não deu para gravar a voz: " + (e as Error).message);
@@ -124,11 +155,40 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
     }
   }
 
-  const props = propostas(extracao, grupos, d.f);
-  const entram = aAplicar(props, substituir);
+  const props = propostas(extracao, grupos, fComEspeciais);
   const defs = new Map(grupos.flatMap((g) => g.campos).map((c) => [c.k, c] as const));
+  // quando chega uma extração nova: entram por defeito as propostas de campos ainda vazios, com o valor proposto
+  useEffect(() => {
+    if (!extracao) { setEscolhas({}); return; }
+    setEscolhas(Object.fromEntries(propostas(extracao, grupos, fComEspeciais).map((p) => [p.k, { incluir: p.jaTinha.trim() === "", valor: p.valor }])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só quando a extração muda; os valores do negócio são lidos nesse momento
+  }, [extracao]);
+  const escolha = (k: string, mudanca: Partial<{ incluir: boolean; valor: string }>) =>
+    setEscolhas((e) => ({ ...e, [k]: { ...(e[k] ?? { incluir: true, valor: "" }), ...mudanca } }));
+  const entram = props.filter((p) => escolhas[p.k]?.incluir && (escolhas[p.k]?.valor ?? "").trim() !== "");
+  const marcarTodos = (incluir: boolean) => setEscolhas((e) => Object.fromEntries(props.map((p) => [p.k, { ...(e[p.k] ?? { valor: p.valor }), incluir }])));
+  /** As chaves especiais gravam-se pelas ações próprias: nome na ficha da lead, serviço pela linha, serviços pelos ids do Catálogo. */
+  const aplicarEspecial = (k: string, valor: string) => {
+    if (k === "lead_primeiro" || k === "lead_apelido") {
+      void mudarDadosLead(ctx, d, { [k === "lead_primeiro" ? "primeiro" : "apelido"]: valor }, k === "lead_primeiro" ? "nome próprio" : "apelido").catch(() => undefined);
+    } else if (k === "tipo_servico") {
+      const linha = (Object.keys(LINHAS) as LinhaId[]).find((id) => LINHAS[id].n.toLowerCase() === valor.toLowerCase());
+      if (linha) ctx.A.servicoDaChamada(d.id, linha);
+    } else if (k === "servicos_catalogo") {
+      const nomes = valor.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+      const ids = Object.entries(svc).filter(([, x]) => nomes.includes(x.n.toLowerCase())).map(([id]) => id);
+      const atuais = servicosPedidos(d, ctx.S).map((x) => x.id);
+      ctx.A.servicosDoPedido(d.id, [...atuais, ...ids]);
+    }
+  };
   const aplicar = () => {
-    ctx.run(() => { for (const p of entram) ctx.A.campo(d.id, p.k, juntarVarios(defs.get(p.k), d.f[p.k] || "", p.valor)); });
+    ctx.run(() => {
+      for (const p of entram) {
+        const valor = escolhas[p.k].valor.trim();
+        if (CHAVES_ESPECIAIS.has(p.k)) aplicarEspecial(p.k, valor);
+        else ctx.A.campo(d.id, p.k, juntarVarios(defs.get(p.k), d.f[p.k] || "", valor));
+      }
+    });
     setAplicadas(entram.map((p) => p.l));
   };
   const aOuvir = estado === "a_ouvir";
@@ -184,12 +244,23 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
           {extracao.resumo ? <p className="rounded-xl bg-muted/60 p-3 text-[15px] leading-snug"><b>Resumo:</b> {extracao.resumo}</p> : null}
           {props.length === 0 ? <p className="text-sm text-muted-foreground">A chamada não deu nenhum campo para preencher.</p> : (
             <>
-              <ul className="divide-y divide-border rounded-xl border border-border">
-                {props.map((p) => <LinhaProposta key={p.k} p={p} entra={entram.includes(p)} />)}
+              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                <span>Marque o que entra e corrija o que for preciso antes de preencher.</span>
+                {aplicadas === null ? (
+                  <>
+                    <button type="button" onClick={() => marcarTodos(true)} className="text-primary underline-offset-4 hover:underline">Marcar todos</button>
+                    <button type="button" onClick={() => marcarTodos(false)} className="text-primary underline-offset-4 hover:underline">Desmarcar todos</button>
+                  </>
+                ) : null}
+              </div>
+              <ul className="space-y-2">
+                {props.map((p) => (
+                  <LinhaProposta key={p.k} p={p} def={defs.get(p.k)} escolha={escolhas[p.k] ?? { incluir: false, valor: p.valor }}
+                    bloqueada={aplicadas !== null} onMudar={(m) => escolha(p.k, m)} />
+                ))}
               </ul>
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="button" onClick={aplicar} disabled={entram.length === 0 || aplicadas !== null}><Sparkles className="h-4 w-4" aria-hidden="true" />Preencher {entram.length} {entram.length === 1 ? "campo" : "campos"}</Button>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={substituir} onChange={(e) => setSubstituir(e.target.checked)} disabled={aplicadas !== null} />Substituir também os já preenchidos</label>
                 {aplicadas ? <span className="text-sm text-success">Preenchidos: {aplicadas.join(", ")}. Confira em baixo e corrija o que for preciso.</span> : null}
               </div>
             </>
@@ -200,15 +271,49 @@ export function ChamadaDireto({ ctx, d, grupos }: { ctx: Ctx; d: Negocio; grupos
   );
 }
 
-function LinhaProposta({ p, entra }: { p: Proposta; entra: boolean }) {
+type Escolha = { incluir: boolean; valor: string };
+
+/** Uma proposta: caixa para entrar ou não, o valor editável conforme o tipo do campo, e o excerto que a justifica. */
+function LinhaProposta({ p, def, escolha, bloqueada, onMudar }: { p: Proposta; def?: Def; escolha: Escolha; bloqueada: boolean; onMudar: (m: Partial<Escolha>) => void }) {
   const rever = p.estado === "rever";
+  const id = `prop-${p.k}`;
   return (
-    <li className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-[15px]", !entra && "opacity-60")}>
-      <span className="w-44 shrink-0 text-sm text-muted-foreground">{p.l}</span>
-      <span className="font-medium">{p.valor}</span>
-      <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", rever ? "bg-warning/15 text-warning-foreground" : "bg-success/15 text-success")}>{rever ? "a rever" : "ouvido"} · {Math.round(p.confianca * 100)}%</span>
-      {p.jaTinha && p.jaTinha !== p.valor ? <span className="text-xs text-muted-foreground">já tinha «{p.jaTinha}»{entra ? "" : " · fica"}</span> : null}
-      {p.excerto ? <span className="basis-full text-xs italic text-muted-foreground">{p.excerto}</span> : null}
+    <li className={cn("rounded-xl border border-border bg-background px-3 py-2.5 transition-colors", escolha.incluir ? "border-primary/40" : "opacity-70")}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <button type="button" role="checkbox" aria-checked={escolha.incluir} aria-labelledby={`${id}-rotulo`} disabled={bloqueada}
+          onClick={() => onMudar({ incluir: !escolha.incluir })}
+          className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-lg border-2 transition-colors",
+            escolha.incluir ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent hover:border-primary/60")}>
+          <Check className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <label id={`${id}-rotulo`} htmlFor={id} className="w-44 shrink-0 text-sm text-muted-foreground">{p.l}</label>
+        <div className="min-w-[200px] flex-1"><Editor id={id} def={def} valor={escolha.valor} rotulo={p.l} bloqueado={bloqueada} onMudar={(v) => onMudar({ valor: v })} /></div>
+        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", rever ? "bg-warning/15 text-warning-foreground" : "bg-success/15 text-success")}>{rever ? "a rever" : "ouvido"} · {Math.round(p.confianca * 100)}%</span>
+        {p.jaTinha && p.jaTinha !== p.valor ? <span className="text-xs text-muted-foreground">já tinha «{p.jaTinha}»</span> : null}
+      </div>
+      {p.excerto ? <p className="mt-1 pl-9 text-xs italic text-muted-foreground">{p.excerto}</p> : null}
     </li>
   );
+}
+
+const CAIXA = "h-9 w-full rounded-lg border border-input bg-card px-2.5 text-[15px] text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60";
+
+/** O valor proposto, editável com o controlo certo para o tipo do campo. */
+function Editor({ id, def, valor, rotulo, bloqueado, onMudar }: { id: string; def?: Def; valor: string; rotulo: string; bloqueado: boolean; onMudar: (v: string) => void }) {
+  const t = def?.t ?? "texto";
+  if (t === "escolha" || t === "sim_nao") {
+    const op = t === "sim_nao" ? ["Sim", "Não"] : (def?.op ?? []);
+    const opcoes = valor && !op.includes(valor) ? [valor, ...op] : op;
+    return (
+      <select id={id} aria-label={rotulo} value={valor} disabled={bloqueado} onChange={(e) => onMudar(e.target.value)} className={CAIXA}>
+        <option value="">—</option>
+        {opcoes.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  }
+  if (t === "numero" || t === "contador") return <input id={id} aria-label={rotulo} type="number" step="any" value={valor} disabled={bloqueado} onChange={(e) => onMudar(e.target.value)} className={CAIXA} />;
+  if (t === "data") return <input id={id} aria-label={rotulo} type="date" value={valor} disabled={bloqueado} onChange={(e) => onMudar(e.target.value)} className={CAIXA} />;
+  if (t === "texto_longo") return <textarea id={id} aria-label={rotulo} value={valor} disabled={bloqueado} rows={2} onChange={(e) => onMudar(e.target.value)} className={cn(CAIXA, "h-auto py-1.5 leading-snug")} />;
+  return <input id={id} aria-label={rotulo} type="text" value={valor} disabled={bloqueado} onChange={(e) => onMudar(e.target.value)} className={CAIXA}
+    placeholder={t === "varios" ? (def?.op ?? []).join(", ") : undefined} />;
 }

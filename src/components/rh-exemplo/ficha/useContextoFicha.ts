@@ -29,7 +29,8 @@ function permissoesPessoais(has: HasPermission): PessoaPessoaisPermissoes {
     moradaEdit: has("hr.pessoas.morada.edit"), emergenciaView: has("hr.pessoas.emergencia.view"),
     emergenciaEdit: has("hr.pessoas.emergencia.edit"), bancariosView: has("hr.pessoas.bancarios.view"),
     bancariosEdit: has("hr.pessoas.bancarios.edit"), saudeView: has("hr.pessoas.saude.view"),
-    saudeEdit: has("hr.pessoas.saude.edit"), nucleoEdit: has("hr.pessoas.edit"),
+    saudeEdit: has("hr.pessoas.saude.edit"), sindicalizacaoView: has("hr.pessoas.sindicalizacao.view"),
+    nucleoEdit: has("hr.pessoas.edit"),
     laboraisView: has("hr.pessoas.laborais.view"), laboraisEdit: has("hr.pessoas.laborais.edit"),
   };
 }
