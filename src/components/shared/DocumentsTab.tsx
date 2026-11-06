@@ -17,6 +17,7 @@ import { Upload, Eye, EyeOff, Download, Trash2, Paperclip, FileText, Image, File
 import { useTranslation } from "@/hooks/useTranslation";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
+import { SEM_PERMISSAO_DOCUMENTO_PORTAL, usePodeEnviarPropostaPortal } from "@/hooks/usePodeEnviarPropostaPortal";
 
 // "product": fichas técnicas, certificados e manuais do artigo. Fica fora do
 // alcance do portal do cliente sem ser preciso fazer nada — ver a nota de
@@ -114,6 +115,12 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
   // Documentos de produto (fichas técnicas, certificados) nunca chegam ao
   // portal: não se pergunta nada e grava-se sempre false.
   const canShareWithClient = PORTAL_ENTITY_TYPES.includes(entityType);
+  // 06/11/2026: pôr/tirar do portal pede portal.manage OU negocios.proposta.enviar (a regra de enviar a proposta ao portal); o
+  // servidor exige o mesmo (trg_documents_portal_exige_permissao). Sem ela o distintivo só mostra o estado e a caixa fica desligada.
+  const permissaoPortal = usePodeEnviarPropostaPortal(canShareWithClient && !readOnly);
+  const podePortal = permissaoPortal.pode;
+  const motivoPortal = podePortal || permissaoPortal.aLer ? undefined : SEM_PERMISSAO_DOCUMENTO_PORTAL;
+  const alternaPortal = !readOnly && podePortal;
 
   const queryKey = ["documents", entityType, entityId];
 
@@ -167,7 +174,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
         // DEFAULT true (para não esconder os anexos antigos), logo omitir esta
         // chave publicava o ficheiro no portal. Escrever sempre, e a false
         // quando a entidade nem sequer pode ir ao portal (produtos).
-        visible_to_client: canShareWithClient ? uploadData.visible_to_client : false,
+        visible_to_client: canShareWithClient && podePortal ? uploadData.visible_to_client : false,
       });
     if (dbError) {
       // Rollback do ficheiro se a row falhar
@@ -259,7 +266,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
   };
 
   const handleToggleVisibility = async (doc: any) => {
-    if (!canShareWithClient) return;
+    if (!canShareWithClient || !podePortal) return;
     const next = !doc.visible_to_client;
     setTogglingDocId(doc.id);
     const { error } = await (supabase as any)
@@ -351,7 +358,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
                     do de "Visualizar", que significa outra coisa. */}
                 {canShareWithClient && (
                   <Badge
-                    {...(readOnly ? {} : {
+                    {...(!alternaPortal ? { title: readOnly ? undefined : motivoPortal } : {
                       role: "button",
                       tabIndex: 0,
                       onClick: () => handleToggleVisibility(doc),
@@ -363,7 +370,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
                         : "Enviar para o portal — o cliente passa a ver este documento",
                     })}
                     aria-busy={togglingDocId === doc.id}
-                    className={`text-[10px] shrink-0 gap-1 ${doc.visible_to_client ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"} ${readOnly ? "" : "min-h-[24px] cursor-pointer hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"} ${togglingDocId === doc.id ? "opacity-50" : ""}`}
+                    className={`text-[10px] shrink-0 gap-1 ${doc.visible_to_client ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"} ${!alternaPortal ? "" : "min-h-[24px] cursor-pointer hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"} ${togglingDocId === doc.id ? "opacity-50" : ""}`}
                   >
                     {togglingDocId === doc.id
                       ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -475,6 +482,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
                   id="documents-tab-visible-to-client"
                   className="mt-0.5"
                   checked={uploadData.visible_to_client}
+                  disabled={!podePortal}
                   onCheckedChange={checked => setUploadData({ ...uploadData, visible_to_client: checked === true })}
                 />
                 <div className="space-y-1">
@@ -486,6 +494,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
                     {selectedFiles.length > 1 ? " estes documentos" : " este documento"}.
                     Deixe desmarcado para anexos internos (ex.: faturas de fornecedor).
                   </p>
+                  {motivoPortal && <p className="text-xs text-muted-foreground">{motivoPortal}</p>}
                 </div>
               </div>
             )}

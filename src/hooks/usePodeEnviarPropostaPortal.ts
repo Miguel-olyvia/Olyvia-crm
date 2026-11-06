@@ -12,6 +12,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 export const PERMISSAO_ENVIAR_PROPOSTA = "negocios.proposta.enviar";
 export const PERMISSAO_GERIR_PORTAL = "portal.manage";
 export const SEM_PERMISSAO_PROPOSTA_PORTAL = "Sem permissão para enviar a proposta ao portal (requer negocios.proposta.enviar ou portal.manage).";
+// 06/11/2026: os documentos que se põem/tiram do portal do cliente (documents.visible_to_client) seguem a regra da proposta.
+export const SEM_PERMISSAO_DOCUMENTO_PORTAL = "Sem permissão para pôr ou tirar documentos do portal do cliente (requer negocios.proposta.enviar ou portal.manage).";
 
 /** `ativo` false (por exemplo, o mesmo ecrã a tratar de um contrato): não se pergunta nada à base e devolve «não». */
 export function usePodeEnviarPropostaPortal(ativo = true): { pode: boolean; aLer: boolean } {
