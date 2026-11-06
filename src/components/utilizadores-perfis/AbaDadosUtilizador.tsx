@@ -1,7 +1,7 @@
 // A aba "Dados" do formulário de utilizador: os campos que o ecrã atual (/users) pede (nome, email, telefone, posição,
 // palavra-passe). Sem filial nem local de trabalho: o utilizador da plataforma não é a pessoa do RH. A morada (estruturada
 // na base), o NIF e o modelo guardam-se e reenviam-se ao gravar, mas não se editam aqui. O estado muda-se na ficha.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Eye, EyeOff, Lock, Wand2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,8 @@ interface AbaDadosUtilizadorProps {
   mostrarPalavraPasse: boolean;
   aoMudar: (parcial: Partial<ValoresFormUtilizador>) => void;
   aoGerar: () => void;
+  /** Campos opcionais no fim da aba (ex.: «Pessoa do RH», só com hr.pessoas.conta.link). */
+  extra?: ReactNode;
 }
 
 interface CampoTextoProps {
@@ -56,7 +58,7 @@ function CampoTexto({ id, campo, texto, valor, erro, tipo = "text", obrigatorio,
   );
 }
 
-function CampoPalavraPasse({ id, valores, erro, criar, bloqueado, aoMudar, aoGerar }: Omit<AbaDadosUtilizadorProps, "erros" | "mostrarPalavraPasse"> & { erro?: string }) {
+function CampoPalavraPasse({ id, valores, erro, criar, bloqueado, aoMudar, aoGerar }: Omit<AbaDadosUtilizadorProps, "erros" | "mostrarPalavraPasse" | "extra"> & { erro?: string }) {
   const { t } = useTranslation();
   const [visivel, setVisivel] = useState(false);
   const Icone = visivel ? EyeOff : Eye;
@@ -115,6 +117,7 @@ export function AbaDadosUtilizador(p: AbaDadosUtilizadorProps) {
         <Input id={`${id}-posicao`} value={valores.posicao} readOnly={bloqueado} className={CAMPO(false)} onChange={(e) => aoMudar({ posicao: e.target.value })} />
       </div>
       {p.mostrarPalavraPasse && <CampoPalavraPasse {...p} erro={erros.palavraPasse} />}
+      {p.extra}
     </div>
   );
 }

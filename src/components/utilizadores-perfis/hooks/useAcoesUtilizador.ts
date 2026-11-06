@@ -6,11 +6,12 @@ import type { ValoresGravar } from "../payloadsUtilizador";
 import type { ResultadoMutacao, Utilizador, Vinculo } from "../tipos";
 import {
   atualizarUtilizadorNaBase, criarUtilizadorNaBase, desativarUtilizadorNaBase, ERRO_EMAIL_EXISTENTE, mudarRoleNaBase, reativarUtilizadorNaBase,
+  type ResultadoCriacao,
 } from "./escritasUtilizador";
 import { useRecarregarUtilizadores } from "./useUtilizadoresReais";
 
 export interface AcoesUtilizador {
-  criar: (valores: ValoresGravar, vinculos: Vinculo[]) => Promise<ResultadoMutacao>;
+  criar: (valores: ValoresGravar, vinculos: Vinculo[]) => Promise<ResultadoCriacao>;
   atualizar: (u: Utilizador, valores: ValoresGravar, vinculos: Vinculo[], ambitosEditaveis: boolean) => Promise<ResultadoMutacao>;
   mudarRole: (u: Utilizador, membershipId: string, roleId: string, ambitosEditaveis: boolean) => Promise<ResultadoMutacao>;
   desativar: (u: Utilizador) => Promise<ResultadoMutacao>;
@@ -21,7 +22,7 @@ export function useAcoesUtilizador(): AcoesUtilizador {
   const { t } = useTranslation();
   const recarregar = useRecarregarUtilizadores();
   return useMemo(() => {
-    const concluir = async (pedido: Promise<ResultadoMutacao>): Promise<ResultadoMutacao> => {
+    const concluir = async <R extends ResultadoMutacao>(pedido: Promise<R>): Promise<R | { ok: false; erro: string }> => {
       const r = await pedido;
       // Recarrega sempre: uma escrita em vários passos pode ter falhado a meio com a base já alterada.
       try { await recarregar(); } catch { /* a lista mostra o seu próprio erro; não esconde o resultado da escrita */ }

@@ -31,7 +31,7 @@ describe("criarUtilizadorNaBase", () => {
   it("chama a Edge create-user com palavra-passe e devolve ok", async () => {
     const f = preparar({ invocar: () => ({ data: { anew_user_id: "novo" } }) });
     const r = await criarUtilizadorNaBase({ ...valores, palavraPasse: "segredo1" }, vinc);
-    expect(r).toEqual({ ok: true });
+    expect(r).toEqual({ ok: true, id: "novo" });
     expect(f.invocacoes).toHaveLength(1);
     expect(f.invocacoes[0].nome).toBe("create-user");
     expect(f.invocacoes[0].corpo).toMatchObject({ email: "ana@x.pt", password: "segredo1", tipo: "worker_user", memberships: [{ organization_id: "org", role_id: "r1" }] });

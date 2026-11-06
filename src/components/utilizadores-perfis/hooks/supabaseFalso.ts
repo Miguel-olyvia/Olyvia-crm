@@ -1,5 +1,5 @@
 // SÓ PARA TESTES: um cliente da base simulado, em memória. Cada tabela é uma lista de linhas; `select`, `eq`, `in`, `is`, `not`,
-// `order`, `limit`, `maybeSingle` e `single` encadeiam-se como no Supabase e `eq`/`in`/`is` filtram de verdade, para os testes
+// `order`, `limit`, `range`, `maybeSingle` e `single` encadeiam-se como no Supabase e `eq`/`in`/`is` filtram de verdade, para os testes
 // verem o que a leitura pediu. Regista as chamadas para se poder afirmar o que se enviou. Não importa a base real.
 import { vi } from "vitest";
 
@@ -27,7 +27,7 @@ export function criarSupabaseFalso(opcoes: OpcoesFalso = {}) {
     const encadear = (nome: string, aplicar?: (...a: unknown[]) => void) => {
       construtor[nome] = (...a: unknown[]) => { aplicar?.(...a); return construtor; };
     };
-    ["select", "order", "limit", "neq", "gte", "lte", "or", "ilike"].forEach((n) => encadear(n));
+    ["select", "order", "limit", "range", "neq", "gte", "lte", "or", "ilike"].forEach((n) => encadear(n));
     encadear("eq", (c, v) => { filtros.push([`eq:${String(c)}`, v]); linhas = linhas.filter((l) => l[String(c)] === v); });
     encadear("in", (c, v) => { filtros.push([`in:${String(c)}`, v]); linhas = linhas.filter((l) => (v as unknown[]).includes(l[String(c)])); });
     encadear("is", (c, v) => { filtros.push([`is:${String(c)}`, v]); linhas = linhas.filter((l) => (l[String(c)] ?? null) === v); });
