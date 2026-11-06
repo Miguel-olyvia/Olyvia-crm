@@ -31,7 +31,7 @@ export const CATEGORIAS_FAMILIA: CategoriaFamilia[] = [
   { id: "torneiras", rotulo: "Torneiras", espacos: ["cozinha", "outro"] },
   { id: "lavaloicas", rotulo: "Lava-loiças", espacos: ["cozinha", "outro"] },
   { id: "placas", rotulo: "Placas", espacos: ["cozinha", "outro"] },
-  { id: "tampos", rotulo: "Tampos de bancada", espacos: ["cozinha", "outro"] },
+  { id: "tampos", rotulo: "Bancadas", espacos: ["cozinha", "outro"] },
   { id: "cozinha", rotulo: "Móveis e acessórios de cozinha", espacos: ["cozinha", "outro"] },
   { id: "banho", rotulo: "Banho (famílias)", espacos: ["casa_banho", "outro"] },
 ];

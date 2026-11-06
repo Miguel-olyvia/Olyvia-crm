@@ -15,6 +15,8 @@ import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede,
 import { aplicarVariante, expandirConjunto, guardarLugarLocal, mudarMontagem, reporComponente, reposicionarConjunto, retirarComponente, type Conjunto } from "./planta3d/conjuntos";
 import { familiaPorId, modeloDaFamilia } from "./planta3d/familias";
 import { ListaVendavel, PainelConjunto, PainelVariante } from "./planta3d/PainelVariante";
+import { PainelBancada } from "./planta3d/PainelBancada";
+import { BANCADA_OMISSAO, aplicarConfig, modeloDaBancada, pecaBancada, type ConfigBancada } from "./planta3d/bancada";
 import { ListaPecas, nomeDaPeca } from "./planta3d/ListaPecas";
 import { pecaDeProduto } from "./planta3d/ligacao";
 import { useProto3d } from "./planta3d/usarProto3d";
@@ -249,6 +251,16 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     const novas = expandirConjunto(c, inst, r.peca);
     gravar({ ...p, pecas: [...p.pecas, ...novas] }); setSel(`${inst}-${c.ancora}`); setAviso("");
   };
+  /** Põe a bancada composta na planta: ao meio, com as costas na parede mais próxima (como os conjuntos). */
+  const adicionarBancada = () => {
+    const nid = novoId(), cfg = BANCADA_OMISSAO;
+    const sem = pecaDeProduto(p, modeloDaBancada(nid, cfg), nid, undefined), poly = poligonoDe(p);
+    const base = pecaBancada(nid, { x: sem.x, y: sem.y }, cfg);
+    const r = ajustarPeca(p, poly ? encostarParede(poly, base).peca : base, { orientar: true });
+    if (!r.ok) { setAviso(r.erro); return; }
+    gravar({ ...p, pecas: [...p.pecas, r.peca] }); setSel(nid); setAviso("");
+  };
+  const mudarBancada = (pc: PecaPlanta, c: ConfigBancada) => confirmarPeca({ ...p, pecas: p.pecas.map((x) => (x.id === pc.id ? aplicarConfig(x, c) : x)) }, pc.id, pc);
   const mudarVariante = (pc: PecaPlanta, familiaId: string, medidaId?: string, acabId?: string) => {
     const nova = aplicarVariante(pc, familiaId, medidaId, acabId);
     confirmarPeca({ ...p, pecas: p.pecas.map((x) => (x.id === pc.id ? nova : x)) }, pc.id, pc);
@@ -419,7 +431,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
       {/* as peças: arrastar para a planta, ou tocar */}
       <div className="space-y-2">
         <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo}
-          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} />
+          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} />
         <p className="text-sm text-muted-foreground">Portas e janelas (arraste para a planta, ou toque, e fica ao meio):</p>
         {produtosCat.length > 0 && (
           <button type="button" className="min-h-11 text-sm underline underline-offset-2" aria-expanded={genericas} onClick={() => setGenericas(!genericas)}>
@@ -456,7 +468,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
           <div role="group" className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-muted/30 p-3" aria-label={`Peça escolhida: ${selecionada.nome ?? PECAS[selecionada.tipo].n}`}>
             <p className="w-full text-[15px] font-medium">{selecionada.nome ?? PECAS[selecionada.tipo].n}{parede ? " (de parede)" : ""}</p>
             {selecionada.ret && <p className="w-full text-sm text-amber-800">Retirado do conjunto.</p>}
-            {(["w", "h"] as const).map((k) => (
+            {!selecionada.banc && (["w", "h"] as const).map((k) => (
               <label key={k} className="grid w-28 gap-1 text-sm font-medium">{k === "w" ? "Largura" : "Fundo"} (cm)
                 <input key={`${selecionada.id}-${k}-${selecionada[k]}`} type="number" inputMode="numeric" min={1} defaultValue={selecionada[k]} className={INP}
                   onBlur={(e) => { const n = Math.max(1, Math.round(Number(e.target.value) || 0)); if (n !== selecionada[k]) (novaPeca ? mudarCaixa(k, n) : mudarPeca(selecionada.id, { [k]: n })); }} />
@@ -508,6 +520,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
             <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar(retirarComponente(p, selecionada.id)); if (!selecionada.conj || selecionada.ancora) setSel(null); setAviso(""); }}>
               <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />{selecionada.ancora ? "Remover o conjunto" : selecionada.conj ? "Retirar do conjunto" : "Remover"}
             </Button>
+            {selecionada.banc && <PainelBancada cfg={selecionada.banc} onMudar={(c) => mudarBancada(selecionada, c)} />}
             <PainelVariante peca={selecionada} onOpcao={(o) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? { ...x, opc: { ...x.opc, ...o } } : x)) })} onMudar={(f, med, ac) => mudarVariante(selecionada, f, med, ac)} onMontagem={(mo) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? mudarMontagem(x, mo) : x)) })} />
             {selecionada.conj && <PainelConjunto planta={p} peca={selecionada} onEscolher={setSel} onRetirar={(id) => gravar(retirarComponente(p, id))} onRepor={(id) => gravar(reporComponente(p, id))} />}
             <p className="w-full text-sm text-muted-foreground">Com a peça escolhida: setas movem (Shift: 25 cm), R roda 90° para a direita e Shift+R para a esquerda{parede ? " (as de parede passam à parede oposta)" : ""}.</p>

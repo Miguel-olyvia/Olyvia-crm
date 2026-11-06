@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { Planta } from "../planta";
 import { modeloDoProduto, type NoCat, type ProdutoCat, type ProdutoModelo3D } from "./catalogo3d";
 import { deLegado } from "./ligacao";
+import { TOPO_BANCADA_MM, VISTAS_BANCADA, presetDaVista, type VistaBancada } from "./bancada";
 import { areaPavimento, areaParedes, descreverEspaco, type TipoEspaco } from "./modelo";
 import { REVESTIMENTOS, type Superficie } from "./revestimentos";
 import type { Vista3D } from "./Visualizador3D";
@@ -33,6 +34,16 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
   const [etiquetas, setEtiquetas] = useState(true);
   const [cheio, setCheio] = useState(false);
 
+  // as vistas da bancada escolhida (como no catálogo 3D): perspetiva ¾, perfil, frente, traseira, de cima, detalhe da bica
+  const [vistaBanc, setVistaBanc] = useState<{ peca: string; v: VistaBancada; n: number } | null>(null);
+  const banc = planta.pecas.find((x) => x.id === selecionada && x.banc) ?? null;
+  const camara = useMemo(() => {
+    if (!banc?.banc || !vistaBanc || vistaBanc.peca !== banc.id) return null;
+    const pr = presetDaVista(banc.banc, vistaBanc.v), a = ((banc.rot ?? 0) * Math.PI) / 180, cx = (banc.x + banc.w / 2) / 100, cz = (banc.y + banc.h / 2) / 100;
+    // do referencial da bancada (mm, topo da chapa em y = 0) para o mundo (m), com a rotação da peça
+    const mundo = ([x, y, z]: [number, number, number]): [number, number, number] => [cx + (x * Math.cos(a) + z * Math.sin(a)) / 1000, TOPO_BANCADA_MM / 1000 + y / 1000, cz + (-x * Math.sin(a) + z * Math.cos(a)) / 1000];
+    return { chave: `${banc.id}-${vistaBanc.v}-${vistaBanc.n}`, pos: mundo(pr.p), alvo: mundo(pr.t) };
+  }, [banc, vistaBanc]);
   const res = useMemo(() => {
     const usados = new Set(planta.pecas.map((p) => p.produto).filter((x): x is string => !!x));
     const modelos: Record<string, ProdutoModelo3D> = {};
@@ -58,9 +69,18 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
       </div>
 
       {acoes}
+      {banc && vista === "3d" && (
+        <div role="group" aria-label="Vistas da bancada" className="flex flex-wrap gap-2">
+          {VISTAS_BANCADA.map((x) => (
+            <Button key={x.id} type="button" variant={camara && vistaBanc?.v === x.id ? "default" : "outline"} className="min-h-11" aria-pressed={!!camara && vistaBanc?.v === x.id}
+              onClick={() => setVistaBanc({ peca: banc.id, v: x.id, n: (vistaBanc?.n ?? 0) + 1 })}>{x.nome}</Button>
+          ))}
+          {camara && <Button type="button" variant="ghost" className="min-h-11" onClick={() => setVistaBanc(null)}>Ver a divisão</Button>}
+        </div>
+      )}
       <div className={cn("overflow-hidden rounded-2xl border border-border bg-muted", cheio ? "min-h-[60vh] flex-1" : "h-[420px]")}>
         <Suspense fallback={<p role="status" className="p-4 text-[15px] text-muted-foreground">A carregar o visualizador 3D…</p>}>
-          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} />
+          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} camara={camara} />
         </Suspense>
       </div>
       <p className="text-sm text-muted-foreground">

@@ -106,7 +106,7 @@ export const GRUPOS_ESPACO: GruposEspaco = {
     G("resguardos", "Resguardos", "resguardo"), G("acessorios", "Acessórios", "acessorio", "prateleira", "quadro", "candeeiro"),
   ],
   cozinha: [
-    G("modulos", "Módulos", "movel", "armario_alto", "coluna"), G("bancadas", "Bancadas", "bancada"), G("lavaloicas", "Lava-loiças", "lava_loica"), G("eletro", "Eletrodomésticos", "frigorifico", "fogao", "eletro", "placa"),
+    G("modulos", "Módulos", "movel", "armario_alto", "coluna"), G("bancadas", "Bancadas do catálogo", "bancada"), G("lavaloicas", "Lava-loiças", "lava_loica"), G("eletro", "Eletrodomésticos", "frigorifico", "fogao", "eletro", "placa"),
     G("torneiras", "Torneiras", "torneira_cozinha", "torneira"), G("deco", "Prateleiras e decoração", "prateleira", "quadro", "candeeiro"),
   ],
   quarto: [

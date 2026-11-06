@@ -147,6 +147,32 @@ describe("PlantaDivisao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Repor coluna de duche" }));
     expect(lerPlanta(d.f.planta)!.pecas.find((x) => x.papel === "coluna")!.ret).toBe(false);
   });
+  it("na cozinha: sem conjuntos de banho; a bancada composta entra encostada e configura-se como no catálogo 3D", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
+    fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "cozinha" } });
+    expect(screen.queryByRole("tab", { name: /^Conjuntos/ })).toBeNull();
+    try {
+    fireEvent.click(screen.getByRole("tab", { name: /^Bancadas \(/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Pôr a bancada composta na planta" }));
+    const pc = lerPlanta(d.f.planta)!.pecas[0];
+    expect(pc).toMatchObject({ w: 240, h: 65, banc: { series: "canela-roma", sink: "velar50", hob: "ib65b60", tap: "round" } });
+    const painel = screen.getByRole("region", { name: "Configurar bancada" });
+    fireEvent.change(within(painel).getByRole("combobox", { name: "Série da bancada" }), { target: { value: "jungla" } });
+    expect(lerPlanta(d.f.planta)!.pecas[0].banc).toMatchObject({ series: "jungla", tone: "abeto", surface: "escovado" });
+    // uma posição que não serve mostra a mensagem do HTML e não se aplica
+    const placa = within(painel).getByRole("spinbutton", { name: "Placa · cm" });
+    fireEvent.change(placa, { target: { value: "90" } }); fireEvent.blur(placa);
+    expect(within(painel).getByRole("status")).toHaveTextContent(/Afasta o lava-loiça e a placa/);
+    expect(lerPlanta(d.f.planta)!.pecas[0].banc!.hobX).toBe(1800);
+    fireEvent.click(within(painel).getByRole("button", { name: "Trocar lados ⇄" }));
+    const b = lerPlanta(d.f.planta)!.pecas[0].banc!;
+    expect(b.sinkX).toBeGreaterThan(b.hobX);
+    expect(within(painel).getAllByText(/88JG42S/).length).toBeGreaterThan(0);
+    } finally {
+      // a preferência do espaço fica gravada: volta à casa de banho para os testes seguintes
+      fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "casa_banho" } });
+    }
+  });
   describe("tirar peças da planta (sem acertar num alvo pequeno)", () => {
     const sala = { planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) };
     const poe = () => fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });

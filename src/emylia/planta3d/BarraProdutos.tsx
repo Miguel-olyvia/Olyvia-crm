@@ -24,6 +24,8 @@ export interface BarraProdutosProps {
   onCancelar: () => void;
   onJuntar: (m: ProdutoModelo3D) => void;
   onConjunto: (c: Conjunto) => void;
+  /** Põe a bancada composta (bancada.ts) na planta, encostada à parede. */
+  onBancada: () => void;
 }
 
 /** O cartão de uma família: UM produto no ecrã, com as variantes (acabamento e medida) escolhidas à parte. */
@@ -64,7 +66,7 @@ function CartaoFamilia({ f, escolha, onEscolha, onPegar, onMover, onLargar, onCa
   );
 }
 
-export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto }: BarraProdutosProps) {
+export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada }: BarraProdutosProps) {
   const [q, setQ] = useState("");
   const [grupoEscolhido, setGrupo] = useState<string>("");
   const [quantos, setQuantos] = useState(PASSO_VISIVEIS);
@@ -124,7 +126,14 @@ export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, on
           ))}
         </ul>
       )}
-      {ehFamilia && (
+      {ativo === "fam:tampos" && (
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-3">
+          <p className="text-[15px] font-semibold">Bancada Coverlam Top 12 mm (composição)</p>
+          <p className="text-sm text-muted-foreground">Como a aba «Bancadas» do catálogo 3D: série, tom e acabamento da chapa, comprimento e profundidade, lava-loiça (por baixo ou por cima), placa e torneira, posição dos equipamentos em cm e rodatampo. Cada parte vende-se à parte.</p>
+          <button type="button" className={`${CHIP} mt-2`} onClick={onBancada} aria-label="Pôr a bancada composta na planta">Pôr a bancada na planta</button>
+        </div>
+      )}
+      {ehFamilia && ativo !== "fam:tampos" && (
         <ul className="flex flex-wrap gap-3" aria-label="Famílias de produtos">
           {familias.map((f) => (
             <CartaoFamilia key={f.id} f={f} escolha={escolhas[f.id] ?? {}} onEscolha={(e) => setEscolhas({ ...escolhas, [f.id]: e })} onPegar={onPegar} onMover={onMover} onLargar={onLargar} onCancelar={onCancelar} onJuntar={onJuntar} />
