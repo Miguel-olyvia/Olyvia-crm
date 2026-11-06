@@ -7,6 +7,10 @@ import { lerPlanta, retangulo } from "./planta";
 import type { Ctx } from "./pecas";
 import type { Negocio } from "./motor";
 
+// estes testes usam os produtos de casa de banho (sanita, espelho…), que a lista do protótipo esconde por não terem modelo 3D do HTML:
+// aqui a lista mostra todos (o filtro tem testes próprios em planta3d/BarraProdutos.test.tsx)
+vi.mock("./planta3d/catalogo3d", async (original) => ({ ...(await original<typeof import("./planta3d/catalogo3d")>()), SO_COM_MODELO_HTML: false }));
+
 afterEach(cleanup);
 // jsdom não tem geometria: a planta mede 1 cm por píxel, a começar em (0,0)
 beforeEach(() => {

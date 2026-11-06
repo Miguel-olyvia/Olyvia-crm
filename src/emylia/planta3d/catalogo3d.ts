@@ -232,6 +232,18 @@ export function extrairDimensoes(nome: string, tipo: TipoMockup): Dimensoes {
   return { larguraCm: a, profundidadeCm: b, alturaCm: c ?? al, deNome: true };
 }
 
+/**
+ * PROTÓTIPO: a lista «Produtos do catálogo» mostra SÓ os produtos com o modelo 3D do HTML (o selo «3D do catálogo»): os «3D parecido» e os
+ * «Sem modelo do HTML» ficam escondidos da lista (o código e os modelos aproximados continuam; a planta e o 3D continuam a desenhá-los).
+ * Para voltar a mostrar todos, pôr a `false`. É o único sítio que decide isto (BarraProdutos.tsx lê-o).
+ */
+export const SO_COM_MODELO_HTML = true;
+/** O produto tem o modelo do HTML exacto (lava-loiça, placa ou torneira do catálogo 3D, ou a chapa de uma série Coverlam). */
+export function temModeloHtml(m: ProdutoModelo3D): boolean {
+  const pr = m.mockup3d.params;
+  return pr?.k === "chapa" || pr?.k === "bancada" || (!!pr && "html" in pr && !!pr.html && pr.html.exacto !== false);
+}
+
 /** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
 export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}): ProdutoModelo3D {
   const tipo = tipoMockupDe(p, arvore);

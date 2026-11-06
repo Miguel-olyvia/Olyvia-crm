@@ -3,7 +3,7 @@
 // As FAMÍLIAS (torneiras, lava-loiças, placas, tampos…) aparecem uma só vez, com bolinhas de cor para os acabamentos e um selector de medida; os
 // CONJUNTOS (bancada, duche, móvel de lavatório) põem as peças ligadas de uma vez. Arrasta-se para a planta (ou toca-se, ou Enter, e fica ao meio).
 import { useMemo, useState, type PointerEvent as RPointerEvent } from "react";
-import { GRUPOS_ESPACO, ROTULO_ESPACO, produtosDoGrupo, sem, type ProdutoModelo3D } from "./catalogo3d";
+import { GRUPOS_ESPACO, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import { CONJUNTOS, type Conjunto } from "./conjuntos";
 import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, variantesDe, type Familia } from "./familias";
 import type { TipoEspaco } from "./modelo";
@@ -74,14 +74,22 @@ function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | n
   return null;
 }
 
-export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada }: BarraProdutosProps) {
+/** As famílias que a lista mostra: com SO_COM_MODELO_HTML, só as que têm o modelo do HTML. */
+const familiasVisiveis = (c: Familia["categoria"]): Familia[] => familiasDaCategoria(c).filter((f) => !SO_COM_MODELO_HTML || !!f.htmlModelo);
+
+export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada }: BarraProdutosProps) {
   const [q, setQ] = useState("");
   const [grupoEscolhido, setGrupo] = useState<string>("");
   const [quantos, setQuantos] = useState(PASSO_VISIVEIS);
   const [escolhas, setEscolhas] = useState<Record<string, { med?: string; acab?: string }>>({});
+  // protótipo: só os produtos com o modelo 3D do HTML (catalogo3d.ts, SO_COM_MODELO_HTML); separadores, contagens e pesquisa contam só esses
+  // o catálogo 3D do HTML é de cozinha: os tampos Coverlam de cozinha não aparecem na casa de banho, no quarto nem na sala
+  const produtos = useMemo(() => (!SO_COM_MODELO_HTML ? todosProdutos : espaco === "cozinha" || espaco === "outro" ? todosProdutos.filter(temModeloHtml) : []), [todosProdutos, espaco]);
   const grupos = useMemo(() => GRUPOS_ESPACO[espaco].map((g) => ({ g, n: produtosDoGrupo(produtos, g).length })).filter((x) => x.n > 0), [produtos, espaco]);
-  const categorias = useMemo(() => CATEGORIAS_FAMILIA.filter((c) => c.espacos.includes(espaco)).map((c) => ({ c, n: familiasDaCategoria(c.id).length })).filter((x) => x.n > 0), [espaco]);
-  const conjuntos = useMemo(() => CONJUNTOS.filter((c) => c.espacos.includes(espaco)), [espaco]);
+  // o separador «Bancadas» tem a bancada composta (que é o modelo do HTML), mesmo sem famílias de tampo visíveis
+  const categorias = useMemo(() => CATEGORIAS_FAMILIA.filter((c) => c.espacos.includes(espaco)).map((c) => ({ c, n: c.id === "tampos" ? 1 : familiasVisiveis(c.id).length })).filter((x) => x.n > 0), [espaco]);
+  const conjuntos = useMemo(() => (SO_COM_MODELO_HTML ? [] : CONJUNTOS.filter((c) => c.espacos.includes(espaco))), [espaco]);
+  const vazio = grupos.length === 0 && categorias.length === 0 && conjuntos.length === 0;
   // o separador de omissão: a cozinha abre nas famílias (torneiras), o resto no primeiro grupo do catálogo
   const omissao = espaco === "cozinha" && categorias[0] ? `fam:${categorias[0].c.id}` : grupos[0]?.g.id ?? "todos";
   const ativo = grupoEscolhido || omissao;
@@ -90,7 +98,7 @@ export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, on
   const familias = useMemo(() => {
     if (!ehFamilia) return [];
     const s = sem(q.trim());
-    return familiasDaCategoria(ativo.slice(4) as Familia["categoria"]).filter((f) => !s || sem(`${f.nome} ${f.marca}`).includes(s));
+    return familiasVisiveis(ativo.slice(4) as Familia["categoria"]).filter((f) => !s || sem(`${f.nome} ${f.marca}`).includes(s));
   }, [ehFamilia, ativo, q]);
   const lista = useMemo(() => {
     if (ehFamilia || ehConjuntos) return [];
@@ -115,12 +123,16 @@ export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, on
           <input type="search" className={INP} value={q} onChange={(e) => { setQ(e.target.value); setQuantos(PASSO_VISIVEIS); }} placeholder="Nome, marca ou categoria" />
         </label>
       </div>
-      <div role="tablist" aria-label="Grupos de produtos" className="flex flex-wrap gap-2">
-        {conjuntos.length > 0 && tab("conjuntos", `Conjuntos (${conjuntos.length})`)}
-        {categorias.map(({ c, n }) => tab(`fam:${c.id}`, `${c.rotulo} (${n})`))}
-        {grupos.map(({ g, n }) => tab(g.id, `${g.rotulo} (${n})`))}
-        {tab("todos", `Todos (${produtos.length})`)}
-      </div>
+      {vazio ? (
+        <p role="status" className="rounded-xl border border-border bg-muted/30 p-3 text-[15px]">Ainda sem produtos com modelo 3D neste espaço.</p>
+      ) : (
+        <div role="tablist" aria-label="Grupos de produtos" className="flex flex-wrap gap-2">
+          {conjuntos.length > 0 && tab("conjuntos", `Conjuntos (${conjuntos.length})`)}
+          {categorias.map(({ c, n }) => tab(`fam:${c.id}`, `${c.rotulo} (${n})`))}
+          {grupos.map(({ g, n }) => tab(g.id, `${g.rotulo} (${n})`))}
+          {produtos.length > 0 && tab("todos", `Todos (${produtos.length})`)}
+        </div>
+      )}
 
       {ehConjuntos && (
         <ul className="flex flex-wrap gap-3" aria-label="Conjuntos">
@@ -149,7 +161,7 @@ export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, on
           {familias.length === 0 && <li className="text-[15px] text-muted-foreground">Nenhuma família serve este filtro.</li>}
         </ul>
       )}
-      {!ehFamilia && !ehConjuntos && (
+      {!vazio && !ehFamilia && !ehConjuntos && (
         <>
           <p className="text-sm text-muted-foreground">
             {atual ? atual.g.rotulo : "Todos os produtos"} para {ROTULO_ESPACO[espaco].toLowerCase()}: {lista.length}. Arraste para a planta (ou toque, e fica ao meio), com a medida real do produto; as peças de parede encostam-se sozinhas à parede. «(demo)» é um produto de demonstração.
