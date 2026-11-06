@@ -24,6 +24,7 @@ import { PlantaVista } from "./PlantaVista";
 import { alturasEmPalavras, materiais, tarefas } from "./fichaObra";
 import type { Cena } from "./geometria3d";
 
+import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Obra"] as const;
 type Passo = (typeof PASSOS)[number];
@@ -38,7 +39,7 @@ const SEM_PRODUTO: Record<TipoPeca, { cor: string; z0: number; z1: number }> = {
 function lerGuardado(): Projeto {
   try {
     const t = localStorage.getItem(CHAVE);
-    if (t) { const p = JSON.parse(t) as Projeto; if (p?.antes?.paredes && p.depois?.paredes) return p; }
+    if (t) { const p = JSON.parse(t) as Projeto; if (p?.antes?.paredes && p.depois?.paredes) return acertarPosicoes(p); }
   } catch { /* sem armazenamento: o exemplo */ }
   return PROJETO_EXEMPLO;
 }
@@ -94,13 +95,9 @@ export default function EstudioProjeto() {
   const linhas = useMemo(() => necessidades(p), [p]);
   const t = totais(linhas);
   const escolher = (cat: Categoria) => melhorPara(cat, p.estilo)?.id;
-  const mudarAntes = (antes: Planta) => setP((x) => {
-    const eramDoAntes = new Set(x.antes.pecas.map((y) => y.id)), saoDoAntes = new Set(antes.pecas.map((y) => y.id));
-    const ficam = x.depois.pecas.filter((y) => saoDoAntes.has(y.id) || !eramDoAntes.has(y.id));
-    const novas = antes.pecas.filter((y) => !eramDoAntes.has(y.id)).map((y) => ({ ...y }));
-    return { ...x, antes, depois: { o: { ...antes.o }, paredes: antes.paredes.map((w) => ({ ...w })), pecas: [...ficam, ...novas] } };
-  });
-  const mudarDepois = (depois: Planta) => setP((x) => ({ ...x, depois }));
+  // 6/11 (Rúben: «lembrar do posicionamento»): o depois segue o antes; o que se muda no depois fica marcado (posicoesDepois.ts)
+  const mudarAntes = (antes: Planta) => setP((x) => seguirOAntes(x, antes));
+  const mudarDepois = (depois: Planta) => setP((x) => mudarODepois(x, depois));
   const pecaAberta = p.depois.pecas.find((x) => x.id === aberta) ?? null;
   const porEscolher = linhas.filter((l) => l.porEscolher && !l.fora).length;
 
@@ -179,10 +176,11 @@ export default function EstudioProjeto() {
                 <p className="text-[15px] text-muted-foreground">As paredes do antes. Toque numa peça para a trocar no catálogo; o que sai fica a tracejado.</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" className="min-h-11" onClick={() => {
+                {/* 6/11: «Como na visita» é o exemplo do Bruno (as peças dele); num negócio real não serve */}
+                {p.negocio === undefined && <Button type="button" variant="outline" className="min-h-11" onClick={() => {
                   setP((x) => aplicarEstilo({ ...x, depois: depoisDaVisita(x.antes), escolhas: {}, acompanha: {} }, escolher, true));
                   setAviso("Como ficou combinado na visita: sai a banheira e o bidé; entra a base de 1,20 m e o toalheiro; tudo no estilo do cliente.");
-                }}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Como na visita</Button>
+                }}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Como na visita</Button>}
                 <Button type="button" variant="outline" className="min-h-11" onClick={() => { setP((x) => aplicarEstilo(x, escolher)); setAviso("O estilo do cliente foi aplicado às peças novas e trocadas, às paredes e ao chão."); }}>
                   <Paintbrush className="mr-1.5 h-4 w-4" aria-hidden="true" />Aplicar o estilo
                 </Button>

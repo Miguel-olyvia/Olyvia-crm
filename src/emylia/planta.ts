@@ -264,21 +264,35 @@ export function etiquetasSemSobrepor(paredes: readonly Parede[], o: Ponto, larg:
  * encostado não se mexe e o meio ao longo da parede também não. Solta no meio da divisão, fica com o mesmo centro e a mesma orientação.
  */
 export function encaixar(pc: PecaPlanta, largura: number, fundo: number, planta: { o: Ponto; paredes: readonly Parede[] }): PecaPlanta {
-  const pts = cantos(planta.paredes, planta.o), ENCOSTA = 4;
+  // 6/11: encostada é até um passo da grelha (5 cm); num canto (duas paredes), ganha a parede que deixa a peça virada como estava,
+  // e a peça continua no canto (encostada também à outra)
+  const pts = cantos(planta.paredes, planta.o), ENCOSTA = PASSO;
   const cx = pc.x + pc.w / 2, cy = pc.y + pc.h / 2;
+  type Opcao = { p: PecaPlanta; eixo: "x" | "y"; lado: "min" | "max"; em: number };
+  const opcoes: Opcao[] = [];
   for (let i = 0; i < planta.paredes.length; i++) {
     const a = pts[i], z = pts[i + 1];
     if (a.x === z.x) { // parede vertical: a frente fica na vertical, o fundo na horizontal
       const y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
       if (pc.y >= y1 || pc.y + pc.h <= y0) continue;
-      if (Math.abs(pc.x - a.x) <= ENCOSTA) return { ...pc, w: fundo, h: largura, x: a.x, y: Math.round(cy - largura / 2) };
-      if (Math.abs(pc.x + pc.w - a.x) <= ENCOSTA) return { ...pc, w: fundo, h: largura, x: a.x - fundo, y: Math.round(cy - largura / 2) };
+      if (Math.abs(pc.x - a.x) <= ENCOSTA) opcoes.push({ p: { ...pc, w: fundo, h: largura, x: a.x, y: Math.round(cy - largura / 2) }, eixo: "x", lado: "min", em: a.x });
+      else if (Math.abs(pc.x + pc.w - a.x) <= ENCOSTA) opcoes.push({ p: { ...pc, w: fundo, h: largura, x: a.x - fundo, y: Math.round(cy - largura / 2) }, eixo: "x", lado: "max", em: a.x });
     } else { // parede horizontal
       const x0 = Math.min(a.x, z.x), x1 = Math.max(a.x, z.x);
       if (pc.x >= x1 || pc.x + pc.w <= x0) continue;
-      if (Math.abs(pc.y - a.y) <= ENCOSTA) return { ...pc, w: largura, h: fundo, y: a.y, x: Math.round(cx - largura / 2) };
-      if (Math.abs(pc.y + pc.h - a.y) <= ENCOSTA) return { ...pc, w: largura, h: fundo, y: a.y - fundo, x: Math.round(cx - largura / 2) };
+      if (Math.abs(pc.y - a.y) <= ENCOSTA) opcoes.push({ p: { ...pc, w: largura, h: fundo, y: a.y, x: Math.round(cx - largura / 2) }, eixo: "y", lado: "min", em: a.y });
+      else if (Math.abs(pc.y + pc.h - a.y) <= ENCOSTA) opcoes.push({ p: { ...pc, w: largura, h: fundo, y: a.y - fundo, x: Math.round(cx - largura / 2) }, eixo: "y", lado: "max", em: a.y });
     }
+  }
+  if (opcoes.length) {
+    const deitada = pc.w >= pc.h;
+    const igual = opcoes.find((o) => (o.p.w >= o.p.h) === deitada) ?? opcoes[0];
+    const canto = opcoes.find((o) => o.eixo !== igual.eixo);
+    if (!canto) return igual.p;
+    const r = { ...igual.p };
+    if (canto.eixo === "x") r.x = canto.lado === "min" ? canto.em : canto.em - r.w;
+    else r.y = canto.lado === "min" ? canto.em : canto.em - r.h;
+    return r;
   }
   // solta: o mesmo centro, e a frente para o lado mais comprido que a peça já tinha
   const deitada = pc.w >= pc.h;

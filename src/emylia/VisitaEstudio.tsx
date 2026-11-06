@@ -14,6 +14,8 @@ import { CHAVE_ESTUDIO, CHAVE_VOLTA, abrirEstudio, lerVolta, medidasDoEstudio, p
 import { linhasParaLevar } from "@/pages/prototipo-estudio/levarParaNegocio";
 import { respostasDoEstudio } from "@/pages/prototipo-estudio/respostasDoEstudio";
 import { produtosEscolhidos } from "@/pages/prototipo-estudio/sugestoesServicos";
+import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
+import { produto } from "@/pages/prototipo-estudio/catalogoFake";
 import { calendario, duracaoEmPalavras, etapasDaObra, primeiroUtil } from "@/pages/prototipo-estudio/planoEstimado";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { useCatalogo } from "./v2/catalogoStore";
@@ -139,26 +141,63 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const prods = salvo ? produtosEscolhidos(salvo) : [];
   const chao = salvo ? areaChaoM2(salvo.depois.paredes) : null;
 
+  const nServ = (salvo?.servicos ?? []).length;
+  const guardado = salvo?.gravadoEm ? new Date(salvo.gravadoEm) : null;
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-4 rounded-2xl border border-primary/30 bg-primary/[0.04] p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-[15px]">
-          <p className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />{salvo ? "O projeto do Estúdio" : "Desenhar com o cliente"}</p>
-          {salvo ? (
-            <p className="text-muted-foreground">
-              {prods.length} {prods.length === 1 ? "produto escolhido" : "produtos escolhidos"} · {(salvo.servicos ?? []).length} {(salvo.servicos ?? []).length === 1 ? "serviço" : "serviços"}
-              {chao !== null && <> · chão {nf(chao)} m²</>}
-              {salvo.gravadoEm && <span className="block text-sm">Guardado no negócio a {new Date(salvo.gravadoEm).toLocaleString("pt-PT", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}.</span>}
-            </p>
+      {salvo ? (
+        <section aria-labelledby={`estudio-${d.id}`} className="grid gap-5 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:grid-cols-[11rem_minmax(0,1fr)]">
+          {/* a planta de como vai ficar, com as peças nas cores dos produtos */}
+          {salvo.depois.paredes.length > 0 ? (
+            <div className="mx-auto w-full max-w-[14rem] sm:max-w-none [&_figcaption]:sr-only">
+              <PlantaVista planta={salvo.depois} titulo="Como vai ficar" cor={(pc) => produto(salvo.escolhas[pc.id])?.hex} />
+            </div>
           ) : (
-            <p className="text-muted-foreground">A planta de como está e de como vai ficar, as peças do catálogo, os serviços e o 3D. As medidas, as necessidades e as peças da casa de banho preenchem-se daqui.</p>
+            <div className="grid aspect-square place-items-center rounded-xl border border-dashed border-border text-center text-sm text-muted-foreground">Ainda sem planta</div>
           )}
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {salvo && <Button type="button" variant="outline" className="min-h-11" onClick={() => trazer(projetoDoEstudioPara(d.id) ?? salvo)}>Trazer do Estúdio</Button>}
-          <Button type="button" className="min-h-11" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />{salvo ? "Continuar no Estúdio" : "Abrir o Estúdio"}</Button>
-        </div>
-      </div>
+          <div className="flex min-w-0 flex-col gap-4">
+            <div>
+              <h3 id={`estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">O projeto do Estúdio</h3>
+              {guardado && (
+                <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Check className="h-4 w-4 text-success" aria-hidden="true" />
+                  Guardado no negócio a {guardado.toLocaleDateString("pt-PT", { day: "numeric", month: "long" })}, às {guardado.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              )}
+            </div>
+            <dl className="grid grid-cols-3 gap-2">
+              {[
+                { n: String(prods.length), l: prods.length === 1 ? "produto" : "produtos" },
+                { n: String(nServ), l: nServ === 1 ? "serviço" : "serviços" },
+                { n: chao !== null ? nf(chao) : "—", l: "m² de chão" },
+              ].map((x) => (
+                <div key={x.l} className="rounded-xl bg-muted/60 px-3 py-2.5">
+                  <dt className="sr-only">{x.l}</dt>
+                  <dd className="text-xl font-semibold tabular-nums leading-tight">{x.n}</dd>
+                  <dd aria-hidden="true" className="text-xs text-muted-foreground">{x.l}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-auto flex flex-wrap gap-2">
+              <Button type="button" className="min-h-11 flex-1 sm:flex-none" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Continuar no Estúdio</Button>
+              <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => trazer(projetoDoEstudioPara(d.id) ?? salvo)}>Trazer do Estúdio</Button>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <section aria-labelledby={`estudio-${d.id}`} className="space-y-4 rounded-2xl border border-primary/30 bg-primary/[0.04] p-5">
+          <div className="flex items-start gap-3">
+            <span aria-hidden="true" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Sparkles className="h-5 w-5" /></span>
+            <div className="min-w-0">
+              <h3 id={`estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">Desenhar com o cliente</h3>
+              <p className="text-[15px] text-muted-foreground">A planta de como está e de como vai ficar, as peças do catálogo, os serviços e o 3D.</p>
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground">Ao voltar, preenche sozinho as medidas, as necessidades e as peças da casa de banho.</p>
+          <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir o Estúdio</Button>
+        </section>
+      )}
       {pendentes.length > 0 && <DoEstudio ctx={ctx} d={d} linhas={pendentes} feito={(texto) => { setPendentes([]); setFeito(texto); }} />}
       <p role="status" className="min-h-5 text-sm text-success">{feito}</p>
     </div>

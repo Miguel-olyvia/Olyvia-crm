@@ -6,6 +6,7 @@
 //  - o revestimento e o pavimento por m² (as paredes até ao teto falso, quando há), o teto falso, as proteções e os pontos elétricos.
 // O comercial ajusta a quantidade ou tira uma linha; o ajuste fica marcado. Os preços do Estúdio são de teste (catalogoFake.ts).
 import { PASSO, PECAS, areaChaoM2, areaParedesM2, encaixar, juntarPeca, type PecaPlanta, type Planta, type Ponto, type TipoPeca } from "@/emylia/planta";
+import { sitioDeQuemSai } from "./posicoesDepois";
 import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, produto, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
 
 export interface Alturas { /** Pé-direito atual, em cm. */ peDireito: number; /** Altura do teto falso, em cm; null sem teto falso. */ tetoFalso: number | null }
@@ -35,6 +36,8 @@ export interface Projeto {
   servicosRecusados?: string[];
   /** 6/11: quando o Estúdio gravou pela última vez (ms); a Visita guarda no negócio a versão mais recente. */
   gravadoEm?: number;
+  /** 6/11: as peças mudadas de sítio no próprio depois (deixam de seguir o antes). Sem o campo: projeto de antes da regra. */
+  movidasNoDepois?: string[];
 }
 export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 
@@ -237,12 +240,14 @@ export function colocar(p: Projeto, id: string, centro?: Ponto): Projeto {
   const item = (p.porColocar ?? []).find((x) => x.id === id);
   if (!item) return p;
   const prod = produto(item.produto);
-  let depois = juntarPeca(p.depois, item.tipo, id, centro);
+  // 6/11: tocada (sem sítio), vai para o sítio de uma do mesmo tipo que sai (a sanita nova onde estava a antiga)
+  let depois = juntarPeca(p.depois, item.tipo, id, centro ?? sitioDeQuemSai(p, item.tipo));
   if (prod?.w && prod.h) {
     depois = { ...depois, pecas: depois.pecas.map((x) => {
       if (x.id !== id) return x;
       const cx = x.x + x.w / 2, cy = x.y + x.h / 2, arr = (n: number) => Math.round(n / PASSO) * PASSO;
-      return { ...x, w: prod.w!, h: prod.h!, x: arr(cx - prod.w! / 2), y: arr(cy - prod.h! / 2) };
+      // 6/11: perto de uma parede, encosta-se a ela com a frente e o fundo do produto
+      return encaixar({ ...x, w: prod.w!, h: prod.h!, x: arr(cx - prod.w! / 2), y: arr(cy - prod.h! / 2) }, prod.w!, prod.h!, depois);
     }) };
   }
   return {
