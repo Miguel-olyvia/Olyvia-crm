@@ -85,6 +85,13 @@ export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descric
     nome: "Alterar palavras-passe",
     descricao: "Definir uma nova palavra-passe para outro utilizador na ficha dele. A própria palavra-passe muda-se sempre, sem esta permissão.",
   },
+  // 06/11/2026: deals.delete é a chave do «Eliminar definitivamente» dos documentos no Lixo (PURGE_PERMISSION em Trash.tsx,
+  // purge_business_entity no servidor; leads/clientes pedem organizations.delete) e de restaurar pedidos de proposta antigos
+  // (lib/lixo/permissoesRestauro.ts). No editor está em Definições › Lixo.
+  "deals.delete": {
+    nome: "Eliminar definitivamente do Lixo",
+    descricao: "Apagar para sempre, no Lixo, orçamentos, propostas, contratos, encomendas e pedidos de proposta já eliminados (não se pode desfazer). Restaura também pedidos de proposta antigos.",
+  },
   "clients.create": {
     nome: "Converter em cliente (assistente IA)",
     descricao: "O assistente IA pode converter uma lead em cliente. No ecrã, a conversão pede Converter Leads.",

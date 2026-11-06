@@ -184,6 +184,8 @@ const ROTULOS_CHIP: Record<string, string> = {
   "client_contracts.cancel": "Anular contrato",
   "quotes.view_costs": "Ver custos do orçamento",
   "quotes.manage": "Ver custos e ações em massa",
+  // 06/11: em Definições › Lixo, deals.delete não elimina pedidos de proposta — é o «Eliminar definitivamente» do Lixo.
+  "deals.delete": "Eliminar definitivamente do Lixo",
 };
 
 function montarLinha(chave: string, rotulo: string, permissoes: Permissao[], soAcoes: boolean): LinhaGrelha {
@@ -191,7 +193,8 @@ function montarLinha(chave: string, rotulo: string, permissoes: Permissao[], soA
   const restantes: Permissao[] = [];
   permissoes.forEach((p) => {
     const { acao, variante } = separarCodigo(p.codigo);
-    const coluna = soAcoes || variante ? undefined : ACAO_PARA_COLUNA[acao];
+    // 06/11: uma permissão com rótulo à mão (ROTULOS_CHIP) é um chip em Outras: a coluna (ex.: «Eliminar») não diria o quê.
+    const coluna = soAcoes || variante || ROTULOS_CHIP[p.codigo] ? undefined : ACAO_PARA_COLUNA[acao];
     if (coluna && !fixas[coluna]) fixas[coluna] = p;
     else restantes.push(p);
   });
@@ -249,8 +252,14 @@ const PLANO_NEGOCIOS: Plano = {
 
 const PLANOS: Record<string, Plano> = { "Negócios": PLANO_NEGOCIOS };
 
+/**
+ * 06/11: permissões que, na grelha, ficam na linha doutro recurso. deals.delete (o «Eliminar definitivamente» do Lixo) junta-se à
+ * linha Lixo (trash.view), em Definições; sem isto fazia uma linha «Pedidos de Proposta» sozinha.
+ */
+const LINHA_POR_CODIGO: Readonly<Record<string, string>> = { "deals.delete": "trash" };
+
 const destinoPadrao = (p: Permissao): Destino => {
-  const { recurso } = separarCodigo(p.codigo);
+  const recurso = LINHA_POR_CODIGO[p.codigo] ?? separarCodigo(p.codigo).recurso;
   return { chave: recurso, rotulo: rotuloRecurso(recurso), soAcoes: false };
 };
 

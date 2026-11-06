@@ -18,7 +18,6 @@ import {
   Shield,
   ShoppingCart,
   Sparkles,
-  Target,
   UserCog,
   Users,
   Warehouse,
@@ -78,7 +77,6 @@ export const QUICK_GROUPS: QuickGroup[] = [
     color: "bg-green-500/10 text-green-700 dark:text-green-400",
     items: [
       { id: "quotes", to: "/quotes", icon: Receipt, labelKey: "sidebar.quotes", permission: "quotes.view" },
-      { id: "deals", to: "/deals", icon: Target, labelKey: "sidebar.proposalRequests", permission: "deals.view" },
       { id: "proposals", to: "/proposals", icon: FileText, labelKey: "sidebar.proposals", permission: "proposals.view" },
       { id: "contracts", to: "/client-contracts", icon: FileText, labelKey: "sidebar.contracts", permission: "client_contracts.view" },
       { id: "contract-templates", to: "/contract-templates", icon: Sparkles, labelKey: "sidebar.contractTemplates", permissions: ["client_contracts.view", "client_contracts.manage_templates"] },
