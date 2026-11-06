@@ -123,7 +123,7 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   },
   // security = exports.audit.view (/export-audit vive no menu de Utilizadores).
   { rotulo: "Utilizadores", categorias: ["users", "roles", "security"] },
-  // api_keys: ecrã de configurações técnicas (/technical-settings). trash e technical_settings estão hoje escondidas (nada as verifica).
+  // api_keys: só api_keys.view (/api-keys; criar/ativar/apagar lá pedem settings.update). technical_settings está escondida (nada a verifica).
   { rotulo: "Definições", categorias: ["settings", "smtp", "email_templates", "api_keys", "technical_settings", "trash"] },
   { rotulo: "Plataforma", categorias: ["platform"] },
 ];

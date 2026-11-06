@@ -181,7 +181,6 @@ export function ordemChip(p: Permissao): number {
 
 /** Rótulos de chip escolhidos à mão, quando o nome da base não diz o quê (ex.: "Configurar" solto). */
 const ROTULOS_CHIP: Record<string, string> = {
-  "leads.config": "Configurar workflows e IA",
   "client_contracts.cancel": "Anular contrato",
   "quotes.view_costs": "Ver custos do orçamento",
   "quotes.manage": "Ver custos e ações em massa",
