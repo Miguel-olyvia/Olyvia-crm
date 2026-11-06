@@ -14,7 +14,6 @@
  *   - horas: tecto de 80h no EQUIVALENTE SEMANAL
  *     (`pessoas_vinculos_horas_equivalentes_validas`, 20261120190000);
  *   - maximo semanal: 0..80 (`..._horas_semanais_maximas_validas`);
- *   - maximo anual: 0..4000 (`..._horas_anuais_maximas_validas`);
  *   - FTE: 0..100 (`..._tempo_trabalho_pct_valido`);
  *   - experimental: 0..1095 (`..._periodo_experimental_dias_valido`);
  *   - e o cruzamento maximo semanal >= equivalente semanal
@@ -30,7 +29,6 @@ import { TIPOS_CONTRATO, type HorasFrequencia, type TipoContrato } from "@/compo
 export type CampoNumericoContrato =
   | "horas"
   | "maximoSemanal"
-  | "maximoAnual"
   | "fte"
   | "experimental";
 
@@ -44,7 +42,6 @@ export interface NumerosDoContrato {
   horas: string;
   horas_frequencia: HorasFrequencia;
   horas_semanais_maximas: string;
-  horas_anuais_maximas: string;
   tempo_trabalho_pct: string;
   /** Vazio quando o contrato nao tem periodo experimental. */
   periodo_experimental_dias: string;
@@ -73,14 +70,6 @@ export function problemasDosNumerosDoContrato(
     (maxSemanal === null || maxSemanal < 0 || maxSemanal > 80)
   ) {
     problemas.push({ campo: "maximoSemanal", mensagemKey: "hr.form.erroHoras" });
-  }
-
-  const maxAnual = numeroDe(valores.horas_anuais_maximas);
-  if (
-    valores.horas_anuais_maximas.trim() !== "" &&
-    (maxAnual === null || maxAnual < 0 || maxAnual > 4000)
-  ) {
-    problemas.push({ campo: "maximoAnual", mensagemKey: "hr.form.erroNumero" });
   }
 
   const pct = numeroDe(valores.tempo_trabalho_pct);

@@ -18,15 +18,18 @@ import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { euros, dataCurta, nomeDoMes } from "./formatosC";
 import { FecharReabrirMes } from "./FecharReabrirMes";
+import { KmAjudasDialog } from "./KmAjudasDialog";
 import { AnularLancamentoDialog, PontualDialog } from "./PontualDialog";
+import { direitosDaPessoa } from "@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao";
 import { ProcessamentoDetalheDialog } from "./ProcessamentoDetalheDialog";
 
-const COLUNAS_NUMERICAS = ["base", "codigos", "faltas", "subsidios", "pontuais", "total"] as const;
+const COLUNAS_NUMERICAS = ["base", "codigos", "faltas", "subsidios", "regras", "pontuais", "total"] as const;
 const CHAVE_COLUNA: Record<(typeof COLUNAS_NUMERICAS)[number], string> = {
   base: "rhFluxosC.proc.coluna.base",
   codigos: "rhProcReal.coluna.codigos",
   faltas: "rhProcReal.coluna.faltas",
   subsidios: "rhFluxosC.proc.coluna.subsidios",
+  regras: "rhFluxosC.proc.coluna.regras",
   pontuais: "rhFluxosC.proc.coluna.pontuais",
   total: "rhFluxosC.proc.coluna.total",
 };
@@ -40,6 +43,7 @@ export function ProcessamentoFluxoTab() {
   const calculo = useCalculoRealDoMes(ano, mesNum);
   const [detalhe, setDetalhe] = useState<{ id: string; nome: string } | null>(null);
   const [pontual, setPontual] = useState<{ id: string; nome: string } | null>(null);
+  const [kmAjudas, setKmAjudas] = useState<{ id: string; nome: string } | null>(null);
   const [paraAnular, setParaAnular] = useState<HrProcessamentoLancamento | null>(null);
   const estadoDoMesRef = useRef<HTMLParagraphElement>(null);
 
@@ -51,6 +55,8 @@ export function ProcessamentoFluxoTab() {
   const { periodo } = periodoHook;
   const fechado = periodo?.estado === "fechado";
   const semRetribuicoes = retribuicoesHook.recusado;
+  const direitosLidos = calculo.direitosLidos;
+  const idAvisoDireitos = "proc-aviso-direitos";
   const total = useMemo(() => totalDoMes(resultados.values()), [resultados]);
 
   if (!podeVerPeriodo) return <SemAcessoCard className="m-0" />;
@@ -92,6 +98,12 @@ export function ProcessamentoFluxoTab() {
       {periodoHook.recusado && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.periodoRecusado")}</p>}
       {semRetribuicoes && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.retribuicaoRecusada")}</p>}
       {lancamentosHook.recusado && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.lancamentosRecusados")}</p>}
+      {!direitosLidos && (
+        <p id={idAvisoDireitos} role={calculo.direitosHook.estado === "erro" ? "alert" : "status"} className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
+        </p>
+      )}
       {calculo.incompletas > 0 && (
         <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: calculo.incompletas })}</p>
       )}
@@ -157,9 +169,13 @@ export function ProcessamentoFluxoTab() {
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.totalCodigosAutomaticos, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.descontoFaltas > 0 ? -res.descontoFaltas : 0, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.subsidioAlimentacao, !semRetribuicoes)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums">{celula(res.totalRegras, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{euros(res.lancamentosPontuais)}</td>
                             <td className="px-4 py-3 text-right font-semibold tabular-nums">
                               {semValor ? t("rhFluxosC.proc.semValor") : celula(res.totalBrutoEstimado, !semRetribuicoes)}
+                              {!direitosLidos && !semValor && !semRetribuicoes && (
+                                <span className="block text-xs font-normal text-amber-800 dark:text-amber-300">{t("hr.vencimento.visaoGeral.totalProvisorio")}</span>
+                              )}
                             </td>
                           </>
                         )}
@@ -169,6 +185,18 @@ export function ProcessamentoFluxoTab() {
                               <Eye className="mr-1 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.proc.comoChegamos")}
                               <span className="sr-only"> {pessoa.nome_completo}</span>
                             </Button>
+                            {podeGerirLancamentos && !fechado && (!direitosLidos || direitosDaPessoa(calculo.direitosHook.porPessoa, pessoa.id).km || direitosDaPessoa(calculo.direitosHook.porPessoa, pessoa.id).ajudas) && (
+                              <Button
+                                type="button" size="sm" variant="outline" className="min-h-11"
+                                disabled={!direitosLidos}
+                                aria-describedby={!direitosLidos ? idAvisoDireitos : undefined}
+                                title={!direitosLidos ? t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis") : undefined}
+                                onClick={() => setKmAjudas({ id: pessoa.id, nome: pessoa.nome_completo })}
+                              >
+                                <Plus className="mr-1 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.lanc.abrir")}
+                                <span className="sr-only"> {pessoa.nome_completo}</span>
+                              </Button>
+                            )}
                             {podeGerirLancamentos && !fechado && (
                               <Button type="button" size="sm" variant="outline" className="min-h-11" onClick={() => setPontual({ id: pessoa.id, nome: pessoa.nome_completo })}>
                                 <Plus className="mr-1 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.proc.pontual.abrir")}
@@ -186,6 +214,9 @@ export function ProcessamentoFluxoTab() {
                     <th scope="row" colSpan={COLUNAS_NUMERICAS.length} className="px-4 py-3 text-left text-sm">{t("rhFluxosC.proc.totalMes")}</th>
                     <td className="px-4 py-3 text-right font-bold tabular-nums">
                       {semRetribuicoes || calculo.pendentes > 0 ? "—" : euros(total.total)}
+                      {!direitosLidos && !semRetribuicoes && calculo.pendentes === 0 && (
+                        <span className="block text-xs font-normal text-amber-800 dark:text-amber-300">{t("hr.vencimento.visaoGeral.totalProvisorio")}</span>
+                      )}
                     </td>
                     <td />
                   </tr>
@@ -214,6 +245,14 @@ export function ProcessamentoFluxoTab() {
         aGravar={lancamentosHook.saving}
         aoGuardar={lancamentosHook.criar}
         aoFechar={() => setPontual(null)}
+      />
+      <KmAjudasDialog
+        pessoa={kmAjudas}
+        direitos={kmAjudas ? direitosDaPessoa(calculo.direitosHook.porPessoa, kmAjudas.id) : { km: false, ajudas: false }}
+        regra={calculo.regra}
+        aGravar={lancamentosHook.saving}
+        aoGuardar={lancamentosHook.criarPorQuantidade}
+        aoFechar={() => setKmAjudas(null)}
       />
       <AnularLancamentoDialog
         lancamento={paraAnular}

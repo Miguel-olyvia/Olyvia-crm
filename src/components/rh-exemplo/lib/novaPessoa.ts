@@ -177,7 +177,6 @@ export interface RascunhoContrato {
   tempo_trabalho_pct: string;
   dias_uteis: DiaSemana[];
   politica_feriados: PoliticaFeriados;
-  horas_anuais_maximas: string;
   horas_semanais_maximas: string;
   /** `false` = horas iguais todas as semanas; `true` = abre o editor por dia. */
   horario_variavel: boolean;
@@ -267,7 +266,6 @@ export function rascunhoInicial(): RascunhoPessoa {
       tempo_trabalho_pct: "100",
       dias_uteis: [],
       politica_feriados: "nao_laboral",
-      horas_anuais_maximas: "",
       horas_semanais_maximas: "",
       horario_variavel: false,
       horario: horarioVazio(),
@@ -297,10 +295,6 @@ const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
   maximoSemanal: {
     campoId: "hr-novo-horas-semanais-maximas",
     rotuloKey: "hr.contrato.horasSemanaisMaximas",
-  },
-  maximoAnual: {
-    campoId: "hr-novo-horas-anuais-maximas",
-    rotuloKey: "hr.contrato.horasAnuaisMaximas",
   },
   fte: { campoId: "hr-novo-tempo-trabalho-pct", rotuloKey: "hr.contrato.tempoTrabalhoPct" },
   experimental: {
@@ -388,7 +382,6 @@ export function problemasDoRascunho(
     horas: contrato.horas_trabalho,
     horas_frequencia: contrato.horas_frequencia,
     horas_semanais_maximas: contrato.horas_semanais_maximas,
-    horas_anuais_maximas: contrato.horas_anuais_maximas,
     tempo_trabalho_pct: contrato.tempo_trabalho_pct,
     periodo_experimental_dias: contrato.tem_periodo_experimental
       ? contrato.periodo_experimental_dias
@@ -722,7 +715,6 @@ export function payloadDoRascunho(
           tempo_trabalho_pct: numeroDe(contrato.tempo_trabalho_pct),
           dias_uteis: contrato.dias_uteis.length > 0 ? contrato.dias_uteis : null,
           politica_feriados: contrato.politica_feriados,
-          horas_anuais_maximas: numeroDe(contrato.horas_anuais_maximas),
           horas_semanais_maximas: numeroDe(contrato.horas_semanais_maximas),
           estado: "activo",
         }

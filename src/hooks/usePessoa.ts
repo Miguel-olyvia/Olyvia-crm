@@ -111,7 +111,7 @@ const COLUNAS_VINCULO =
 
 const COLUNAS_RETRIBUICAO =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +
-  "subsidio_alimentacao, subsidio_alimentacao_modo, valido_de, valido_ate, motivo, " +
+  "subsidio_alimentacao_modo, valido_de, valido_ate, motivo, " +
   "duodecimos_pct";
 
 const COLUNAS_FARDAMENTO =

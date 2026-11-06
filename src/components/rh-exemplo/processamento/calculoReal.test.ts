@@ -22,9 +22,16 @@ const totais = (extra: Partial<TotaisRelatorioMensal> = {}): TotaisRelatorioMens
 const dia = (estado: string, realizadoMinutos: number): DiaRelatorioMensal => ({ estado, realizadoMinutos }) as unknown as DiaRelatorioMensal;
 
 const versao = (extra: Partial<RetribuicaoVigenteLinha> = {}): RetribuicaoVigenteLinha => ({
-  pessoa_id: "p1", valor_base: 1200, periodicidade: "mensal", duodecimos_pct: 0, subsidio_alimentacao: 5,
+  pessoa_id: "p1", valor_base: 1200, periodicidade: "mensal", duodecimos_pct: 0,
   valido_de: "2026-01-01", valido_ate: null, ...extra,
 });
+
+// A regra salarial em vigor: subsidio 0,76 EUR/h abaixo de 5 h e 6,15 EUR/dia a partir de 5 h; extra 50/75/100; IHT 25 %.
+const REGRA: NonNullable<EntradaCalculoReal["regra"]> = {
+  subsidio_limite_min: 300, subsidio_valor_hora: 0.76, subsidio_valor_dia: 6.15,
+  he_pct_dia_util: 50, he_pct_feriado: 75, he_pct_descanso: 100, iht_pct: 25,
+  noturnas: [{ percentagem: 25, preco_hora: null }, { percentagem: null, preco_hora: 3 }],
+};
 
 const lancamento = (valor: number, anulado: string | null = null): HrProcessamentoLancamento =>
   ({ id: `l${valor}`, periodo_id: "per", pessoa_id: "p1", valor, descricao: "x", anulado_em: anulado }) as unknown as HrProcessamentoLancamento;
@@ -36,7 +43,8 @@ const entrada = (extra: Partial<EntradaCalculoReal> = {}): EntradaCalculoReal =>
   ultimoDia: "2026-10-31",
   lancamentos: [],
   codigosActivos: [],
-  minutosMinimosSubsidio: 240,
+  regra: REGRA,
+  direitoIht: false,
   ...extra,
 });
 
@@ -47,10 +55,10 @@ describe("calcularResultadoReal", () => {
     expect(r.resultado.valorHoraReal).toBeCloseTo(7.5, 6);
     expect(r.resultado.baseMes).toBeCloseTo(1200, 6);
     expect(r.resultado.descontoFaltas).toBeCloseTo(15, 6);
-    // Dois dias com pelo menos 240 min (o de 100 min nao conta e a ausencia tambem nao): 2 x 5 EUR.
-    expect(r.resultado.subsidioAlimentacao).toBe(10);
+    // Subsidio dia a dia pela regra: dois dias de 8 h = 2 x 6,15; o de 100 min = 100 x 0,76 / 60 = 1,27; a ausencia nao conta.
+    expect(r.resultado.subsidioAlimentacao).toBeCloseTo(2 * 6.15 + 1.27, 6);
     expect(r.resultado.lancamentosPontuais).toBe(30);
-    expect(r.resultado.totalBrutoEstimado).toBeCloseTo(1200 - 15 + 10 + 30, 6);
+    expect(r.resultado.totalBrutoEstimado).toBeCloseTo(1200 - 15 + (2 * 6.15 + 1.27) + 30, 6);
     expect(r.valorBase).toBe(1200);
     expect(r.periodicidade).toBe("mensal");
     expect(r.mudouAMeioDoMes).toBe(false);
@@ -91,13 +99,39 @@ describe("calcularResultadoReal", () => {
       { id: "c2", codigo: "900", nome: "Manual", activo: true, modo_calculo: "manual", percentagem: null, valor_fixo: null, origem_automatica: null },
     ] as unknown as HrCodigoProcessamento[];
     const r = calcularResultadoReal(entrada({ codigosActivos: codigos, totais: totais({ minutosExtraNormal: 120 }) }));
-    // 2 h x 7,50 x 25 % = 3,75.
+    // A percentagem vem da regra (50 % em dia de trabalho), nao do codigo (25 %): 2 h x 7,50 x 50 % = 7,50.
     expect(r.resultado.linhasAutomaticas).toHaveLength(1);
-    expect(r.resultado.totalCodigosAutomaticos).toBeCloseTo(3.75, 6);
+    expect(r.resultado.totalCodigosAutomaticos).toBeCloseTo(7.5, 6);
+  });
+
+  it("sem regra o subsidio fica a 0 com aviso e as extra valem 0", () => {
+    const codigos = [
+      { id: "c1", codigo: "100", nome: "Hora extra", activo: true, modo_calculo: "percentagem_hora_normal", percentagem: 25, valor_fixo: null, origem_automatica: "horas_extra" },
+    ] as unknown as HrCodigoProcessamento[];
+    const r = calcularResultadoReal(entrada({ regra: null, codigosActivos: codigos, totais: totais({ minutosExtraNormal: 120 }) }));
+    expect(r.resultado.subsidioAlimentacao).toBe(0);
+    expect(r.resultado.totalCodigosAutomaticos).toBe(0);
+    expect(r.resultado.avisos).toContain("sem_regra_salarial");
+  });
+
+  it("as noturnas pagam-se por faixa: 3 h a 25 % do valor hora e 2 h a preco fixo de 3 EUR", () => {
+    const r = calcularResultadoReal(entrada({ totais: totais({ minutosNoturnosPorFaixa: [180, 120] }) }));
+    const noturnas = r.resultado.linhasRegra.filter((l) => l.tipo === "noturnas");
+    expect(noturnas.map((l) => l.faixa)).toEqual([0, 1]);
+    expect(noturnas[0].valor).toBeCloseTo(3 * 7.5 * 0.25, 6);
+    expect(noturnas[1].valor).toBeCloseTo(2 * 3, 6);
+  });
+
+  it("o IHT so entra para quem tem o direito: 25 % do ordenado base", () => {
+    const sem = calcularResultadoReal(entrada());
+    const com = calcularResultadoReal(entrada({ direitoIht: true }));
+    expect(sem.resultado.linhasRegra.some((l) => l.tipo === "iht")).toBe(false);
+    expect(com.resultado.linhasRegra.find((l) => l.tipo === "iht")?.valor).toBeCloseTo(300, 6);
+    expect((com.resultado.totalBrutoEstimado ?? 0) - (sem.resultado.totalBrutoEstimado ?? 0)).toBeCloseTo(300, 6);
   });
 
   it("o total nunca e negativo mesmo que o desconto passe a base", () => {
-    const r = calcularResultadoReal(entrada({ totais: totais({ realizadoMinutos: 0 }), versoes: [versao({ subsidio_alimentacao: null })], dias: [] }));
+    const r = calcularResultadoReal(entrada({ totais: totais({ realizadoMinutos: 0 }), versoes: [versao()], dias: [] }));
     expect(r.resultado.totalBrutoEstimado).toBeGreaterThanOrEqual(0);
   });
 });

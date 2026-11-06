@@ -3,7 +3,7 @@
  * desconto de uma falta. Nao ha segunda conta: tudo passa por `calcularResultadoReal` (a mesma da «Visao geral»).
  *
  * Fontes (todas por wrappers de rh-exemplo/hooks): pessoas, relatorio de assiduidade mensal, retribuicoes vigentes da
- * organizacao, codigos de processamento, regra do subsidio de alimentacao, periodo e lancamentos pontuais.
+ * organizacao, codigos de processamento, regra salarial em vigor, direitos das pessoas, periodo e lancamentos pontuais.
  *
  * POR QUE HA UMA INSTANCIA OCULTA POR PESSOA
  * -------------------------------------------
@@ -18,7 +18,8 @@ import { useCodigosProcessamento } from "@/components/rh-exemplo/hooks/useCodigo
 import { usePessoas } from "@/components/rh-exemplo/hooks/usePessoas";
 import { useProcessamentoLancamentos } from "@/components/rh-exemplo/hooks/useProcessamentoLancamentos";
 import { useProcessamentoPeriodo } from "@/components/rh-exemplo/hooks/useProcessamentoPeriodo";
-import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao";
+import { regraEmVigorNoDia, useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
+import { direitosDaPessoa, useDireitosSalariaisDaOrganizacao } from "@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao";
 import {
   useRelatorioAssiduidadeMensal,
   type DiaRelatorioMensal,
@@ -29,6 +30,8 @@ import { intervaloEfectivo, usePeriodoFolhaRegras } from "@/components/rh-exempl
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { calcularResultadoReal, type ResultadoCalculoReal } from "./calculoReal";
 
+const SEM_FAIXAS: readonly { hora_inicio: string; hora_fim: string }[] = [];
+
 /** O que a assiduidade de uma pessoa devolveu, e se alguma parte foi recusada por falta de permissao. */
 export interface RecolhaAssiduidade {
   totais: TotaisRelatorioMensal;
@@ -36,7 +39,7 @@ export interface RecolhaAssiduidade {
   incompleta: boolean;
 }
 
-/** O que e comum a todas as pessoas do mes: periodo, lancamentos, retribuicoes, codigos e a regra do subsidio. */
+/** O que e comum a todas as pessoas do mes: periodo, lancamentos, retribuicoes, codigos, a regra salarial em vigor e os direitos. */
 export function useDadosDoCalculoReal(ano: number, mes: number) {
   const { activeCompany } = useCompany();
   const { codigos, isLoading: codigosACarregar } = useCodigosProcessamento();
@@ -47,8 +50,12 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
   const { regras } = usePeriodoFolhaRegras();
   const intervalo = useMemo(() => intervaloEfectivo(periodoHook.periodo, ano, mes, regras), [periodoHook.periodo, ano, mes, regras]);
   const retribuicoesHook = useRetribuicoesVigentesDaOrganizacao(activeCompany?.id, ano, mes, intervalo);
-  const regrasHook = useRegrasSubsidioAlimentacao();
+  const regrasHook = useRegrasSalariais();
+  const direitosHook = useDireitosSalariaisDaOrganizacao(activeCompany?.id);
   const ultimoDia = intervalo.ate;
+  // A regra em vigor no ULTIMO DIA do periodo (a mesma a que a base calcula km e ajudas) e as suas faixas noturnas.
+  const regra = useMemo(() => regraEmVigorNoDia(regrasHook.versoes, ultimoDia), [regrasHook.versoes, ultimoDia]);
+  const faixasNoturnas = useMemo(() => regra?.noturnas ?? SEM_FAIXAS, [regra]);
   const codigosActivos = useMemo(() => codigos.filter((c) => c.activo), [codigos]);
 
   // So os lancamentos do periodo deste mes: ao mudar de mes o hook ainda guarda os do anterior ate a resposta chegar.
@@ -68,16 +75,21 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
     lancamentosHook,
     retribuicoesHook,
     regrasHook,
+    direitosHook,
+    /** Os direitos (IHT, km, ajudas) so valem se a leitura correu bem; senao os totais podem estar incompletos. */
+    direitosLidos: direitosHook.estado === "ok",
+    regra,
+    faixasNoturnas,
     intervalo,
     ultimoDia,
     codigosActivos,
     lancamentosPorPessoa,
-    minutosMinimosSubsidio: regrasHook.regra.minutosMinimosDia,
     aCarregar:
       periodoHook.loading ||
       lancamentosHook.loading ||
       retribuicoesHook.loading ||
       regrasHook.isLoading ||
+      direitosHook.isLoading ||
       codigosACarregar,
   };
 }
@@ -100,7 +112,8 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     [chave],
   );
 
-  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, minutosMinimosSubsidio } = dados;
+  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosHook } = dados;
+  const direitosPorPessoa = direitosHook.porPessoa;
   const resultados = useMemo(() => {
     const mapa = new Map<string, ResultadoCalculoReal>();
     for (const pessoa of pessoasActivas) {
@@ -115,12 +128,13 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
           ultimoDia,
           lancamentos: lancamentosPorPessoa.get(pessoa.id) ?? [],
           codigosActivos,
-          minutosMinimosSubsidio,
+          regra,
+          direitoIht: direitosDaPessoa(direitosPorPessoa, pessoa.id).iht,
         }),
       );
     }
     return mapa;
-  }, [pessoasActivas, recolhas, chave, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, minutosMinimosSubsidio]);
+  }, [pessoasActivas, recolhas, chave, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosPorPessoa]);
 
   const pendentes = pessoasActivas.filter((p) => !recolhas[`${chave}:${p.id}`]).length;
   const incompletas = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.incompleta).length;
@@ -147,16 +161,18 @@ interface RecolhaOcultaProps {
   /** 1-12 (o wrapper do relatorio converte). */
   mes: number;
   intervalo: { de: string; ate: string };
+  /** As faixas noturnas da regra em vigor (memoizadas): sem elas nao ha minutos noturnos por faixa. */
+  faixasNoturnas: readonly { hora_inicio: string; hora_fim: string }[];
   aoTerminar: (pessoaId: string, recolha: RecolhaAssiduidade) => void;
 }
 
-function RecolhaOculta({ pessoaId, ano, mes, intervalo, aoTerminar }: RecolhaOcultaProps) {
-  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, intervalo);
+function RecolhaOculta({ pessoaId, ano, mes, intervalo, faixasNoturnas, aoTerminar }: RecolhaOcultaProps) {
+  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, intervalo, faixasNoturnas);
   const avisouRef = useRef(false);
 
   useEffect(() => {
     avisouRef.current = false;
-  }, [pessoaId, ano, mes, intervalo.de, intervalo.ate]);
+  }, [pessoaId, ano, mes, intervalo.de, intervalo.ate, faixasNoturnas]);
 
   useEffect(() => {
     if (relatorio.loading || avisouRef.current) return;
@@ -178,7 +194,7 @@ export function RecolhaDeAssiduidade({ calculo, ano, mes }: { calculo: CalculoRe
   return (
     <>
       {calculo.pessoasActivas.map((pessoa) => (
-        <RecolhaOculta key={`${pessoa.id}:${calculo.intervalo.de}:${calculo.intervalo.ate}`} pessoaId={pessoa.id} ano={ano} mes={mes} intervalo={calculo.intervalo} aoTerminar={calculo.registar} />
+        <RecolhaOculta key={`${pessoa.id}:${calculo.intervalo.de}:${calculo.intervalo.ate}`} pessoaId={pessoa.id} ano={ano} mes={mes} intervalo={calculo.intervalo} faixasNoturnas={calculo.faixasNoturnas} aoTerminar={calculo.registar} />
       ))}
     </>
   );
@@ -187,8 +203,9 @@ export function RecolhaDeAssiduidade({ calculo, ano, mes }: { calculo: CalculoRe
 /** O calculo de UMA pessoa num mes (para a ficha e para o desconto de uma falta). `resultado` e `null` enquanto carrega. */
 export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number, mes: number) {
   const dados = useDadosDoCalculoReal(ano, mes);
-  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, dados.intervalo);
-  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, minutosMinimosSubsidio } = dados;
+  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, dados.intervalo, dados.faixasNoturnas);
+  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosHook } = dados;
+  const direitoIht = pessoaId ? direitosDaPessoa(direitosHook.porPessoa, pessoaId).iht : false;
   const aCarregar = relatorio.loading || dados.aCarregar;
 
   const resultado = useMemo<ResultadoCalculoReal | null>(() => {
@@ -200,9 +217,10 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
       ultimoDia,
       lancamentos: lancamentosPorPessoa.get(pessoaId) ?? [],
       codigosActivos,
-      minutosMinimosSubsidio,
+      regra,
+      direitoIht,
     });
-  }, [pessoaId, aCarregar, relatorio.totais, relatorio.dias, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, minutosMinimosSubsidio]);
+  }, [pessoaId, aCarregar, relatorio.totais, relatorio.dias, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitoIht]);
 
   return {
     resultado,
@@ -210,6 +228,7 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
     /** Os dados partilhados do mes (periodo, lancamentos, codigos): o custo regista e anula lancamentos por aqui. */
     dados,
     retribuicaoRecusada: retribuicoesHook.recusado,
+    direitosLidos: dados.direitosLidos,
     incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado,
     periodoAberto: dados.periodoHook.periodo?.estado === "aberto",
     temPeriodo: dados.periodoHook.periodo !== null,

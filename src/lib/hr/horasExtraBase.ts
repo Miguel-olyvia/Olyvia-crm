@@ -52,7 +52,7 @@ export interface LinhaSaldoHE {
   restante_min: number;
 }
 
-/** O saldo como o ecra o le. `limiteAnoOrigem` diz de onde veio o limite anual (contrato ou omissao da organizacao). */
+/** O saldo como o ecra o le. `limiteAnoOrigem` diz de onde veio o limite anual: `regra` (regra salarial da organizacao em vigor) ou `omissao` (sem regra). */
 export interface SaldoHE {
   pessoaId: string;
   ano: number;

@@ -27,7 +27,7 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   sem_retribuicao: "hr.vencimento.visaoGeral.avisoSemRetribuicao",
   periodicidade_nao_convertivel: "hr.vencimento.visaoGeral.avisoPeriodicidadeNaoConvertivel",
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
-  sem_subsidio_pessoa: "hr.vencimento.visaoGeral.avisoSemSubsidioPessoa",
+  sem_regra_salarial: "hr.vencimento.visaoGeral.avisoSemRegraSalarial",
   sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
 };
 
@@ -111,7 +111,19 @@ export function ProcessamentoDetalheDialog({ pessoa, calculo, lancamentos, retri
                 ))
               )}
               <Passo titulo={t("hr.vencimento.visaoGeral.detalheDescontoFaltas")} valor={resultado.descontoFaltas > 0 ? `−${euros(resultado.descontoFaltas)}` : euros(0)} />
-              <Passo titulo={t("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao")} valor={euros(resultado.subsidioAlimentacao)} />
+              {resultado.linhasRegra.map((l) => (
+                <Passo
+                  key={`${l.tipo}-${l.faixa ?? ""}`}
+                  titulo={l.tipo === "noturnas" ? t("rhFluxosC.proc.passo.noturnas", { n: (l.faixa ?? 0) + 1 }) : t(`rhFluxosC.proc.passo.${l.tipo}`)}
+                  conta={l.quantidade === null ? undefined : `${num(l.quantidade)} ${t(`rhFluxosC.proc.unidade.${l.tipo}`)}`}
+                  valor={euros(l.valor)}
+                />
+              ))}
+              <Passo
+                titulo={t("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao")}
+                conta={t("rhFluxosC.proc.passo.subsidioDaRegra")}
+                valor={euros(resultado.subsidioAlimentacao)}
+              />
               <Passo titulo={t("hr.vencimento.visaoGeral.detalheLancamentosPontuais")} valor={euros(resultado.lancamentosPontuais)} />
               <li className="flex items-baseline justify-between gap-4 pt-3">
                 <span className="text-sm font-semibold">{t("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado")}</span>
@@ -125,7 +137,12 @@ export function ProcessamentoDetalheDialog({ pessoa, calculo, lancamentos, retri
           <ul className="space-y-1 border-t pt-3 text-sm" aria-label={t("hr.vencimento.visaoGeral.detalheLancamentosPontuais")}>
             {lancamentos.map((l) => (
               <li key={l.id} className={`flex flex-wrap items-center justify-between gap-2 ${l.anulado_em ? "text-muted-foreground line-through" : ""}`}>
-                <span>{l.descricao} <span className="tabular-nums">{euros(l.valor)}</span></span>
+                <span>
+                  {l.descricao} <span className="tabular-nums">{euros(l.valor)}</span>
+                  {l.tipo && l.tipo !== "manual" && l.quantidade != null ? (
+                    <span className="text-xs text-muted-foreground"> · {num(l.quantidade)} {t(`rhFluxosC.proc.unidade.${l.tipo}`)}</span>
+                  ) : null}
+                </span>
                 {!l.anulado_em && podeAnular && (
                   <Button type="button" size="sm" variant="ghost" className="min-h-11 text-destructive" onClick={() => aoAnular(l)}>
                     {t("hr.vencimento.visaoGeral.anular")}

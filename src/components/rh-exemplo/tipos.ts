@@ -563,7 +563,8 @@ export interface PessoaRetribuicao {
   valor_base: number;
   moeda: string;
   periodicidade: Periodicidade;
-  subsidio_alimentacao: number | null;
+  /** @deprecated O valor vem da regra salarial da organizacao; ja nao se le nem se escreve por pessoa. */
+  subsidio_alimentacao?: number | null;
   subsidio_alimentacao_modo: SubsidioAlimentacaoModo | null;
   valido_de: string;
   valido_ate: string | null;
@@ -686,6 +687,10 @@ export interface HrProcessamentoLancamento {
   organization_id: string;
   descricao: string;
   valor: number;
+  /** `manual` (valor escrito pelo RH), `km` ou `ajudas` (valor = quantidade x valor da regra, gravado). 20270109700000. */
+  tipo?: "manual" | "km" | "ajudas";
+  /** Km (tipo km) ou dias (tipo ajudas); `null` em manual. */
+  quantidade?: number | null;
   codigo_processamento_id: string | null;
   anulado_em: string | null;
   anulado_por: string | null;
@@ -694,6 +699,42 @@ export interface HrProcessamentoLancamento {
   created_by: string | null;
   updated_at: string;
   updated_by: string | null;
+}
+
+/** Uma faixa noturna da regra salarial: "HH:MM", pode atravessar a meia-noite; percentagem OU preco por hora. */
+export interface FaixaNoturna {
+  hora_inicio: string;
+  hora_fim: string;
+  percentagem: number | null;
+  preco_hora: number | null;
+}
+
+/** Uma versao das regras salariais da organizacao (copia de `RegraSalarial` em @/types/hr). */
+export interface RegraSalarial {
+  id: string;
+  valido_de: string;
+  valido_ate: string | null;
+  subsidio_limite_min: number;
+  subsidio_valor_hora: number;
+  subsidio_valor_dia: number;
+  he_pct_dia_util: number;
+  he_pct_feriado: number;
+  he_pct_descanso: number;
+  he_limite_anual_min: number;
+  iht_pct: number;
+  km_valor: number;
+  ajudas_custo_dia: number;
+  criada_em: string;
+  criada_por_nome: string | null;
+  substituida_em: string | null;
+  noturnas: FaixaNoturna[];
+}
+
+/** O direito de uma pessoa a IHT, km e ajudas de custo. Sem linha = sem direito. */
+export interface DireitosSalariais {
+  iht: boolean;
+  km: boolean;
+  ajudas: boolean;
 }
 
 /**

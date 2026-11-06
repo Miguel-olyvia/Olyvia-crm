@@ -70,13 +70,15 @@ import {
   nomeDaFolha,
   usePeriodoFolhaEscolhido,
 } from "@/components/rh-exemplo/hooks/periodoFolha";
-import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao";
+import { regraEmVigorNoDia, useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
+import { direitosDaPessoa, useDireitosSalariaisDaOrganizacao } from "@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/rh-exemplo/processamento/ResumoPessoaProcessamentoOculto";
 import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal";
 import {
   calcularProcessamentoPessoa,
-  contarDiasElegiveisSubsidio,
+  minutosTrabalhadosPorDia,
   type AvisoProcessamento,
+  type LinhaRegraSalarial,
   type ResultadoProcessamentoPessoa,
 } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
@@ -119,15 +121,24 @@ function formatarLinhaCodigo(linha: { codigo: string; horas: number | null; valo
   return partes.join(" · ");
 }
 
+/** Uma linha da regra salarial (noturnas por faixa, IHT, km, ajudas): rotulo, quantidade se houver, valor. */
+function formatarLinhaRegra(linha: LinhaRegraSalarial, rotulo: string): string {
+  const partes = [rotulo];
+  if (linha.quantidade !== null) partes.push(String(Math.round(linha.quantidade * 100) / 100));
+  partes.push(formatarValor(linha.valor));
+  return partes.join(" · ");
+}
+
 /** A chave de traducao de cada aviso de `processamentoTotais.ts` -- uma frase por aviso. */
 const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   sem_retribuicao: "hr.vencimento.visaoGeral.avisoSemRetribuicao",
   periodicidade_nao_convertivel: "hr.vencimento.visaoGeral.avisoPeriodicidadeNaoConvertivel",
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
-  sem_subsidio_pessoa: "hr.vencimento.visaoGeral.avisoSemSubsidioPessoa",
+  sem_regra_salarial: "hr.vencimento.visaoGeral.avisoSemRegraSalarial",
   sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
 };
 
+const SEM_FAIXAS: readonly { hora_inicio: string; hora_fim: string }[] = [];
 const SEM_TOTAIS: Record<string, TotaisRelatorioMensal> = {};
 const SEM_DIAS: Record<string, readonly DiaRelatorioMensal[]> = {};
 const FORM_LANCAMENTO_VAZIO = { descricao: "", valor: "", codigoProcessamentoId: "" };
@@ -157,7 +168,13 @@ export function ProcessamentoVisaoGeralTab() {
   const ultimoDia = intervalo.ate;
 
   const retribuicoesHook = useRetribuicoesVigentesDaOrganizacao(activeCompany?.id, ano, mes, intervalo);
-  const regrasSubsidioHook = useRegrasSubsidioAlimentacao();
+  const regrasHook = useRegrasSalariais();
+  const direitosHook = useDireitosSalariaisDaOrganizacao(activeCompany?.id);
+  // Sem os direitos (IHT, km, ajudas) o total pode estar incompleto: nunca se apresenta como definitivo.
+  const direitosLidos = direitosHook.estado === "ok";
+  // A regra em vigor no ULTIMO DIA do periodo e as suas faixas noturnas (memoizadas: o relatorio de cada pessoa depende delas).
+  const regra = useMemo(() => regraEmVigorNoDia(regrasHook.versoes, ultimoDia), [regrasHook.versoes, ultimoDia]);
+  const faixasNoturnas = useMemo(() => regra?.noturnas ?? SEM_FAIXAS, [regra]);
   // Os totais de assiduidade ficam guardados COM o periodo a que pertencem: ao mudar de periodo os do anterior deixam de valer
   // de imediato (sem efeito que os apague e sem uma janela em que o periodo novo mostra os totais do velho).
   const chavePeriodo = `${ano}-${mes}-${intervalo.de}-${intervalo.ate}`;
@@ -167,7 +184,8 @@ export function ProcessamentoVisaoGeralTab() {
     dias: Record<string, readonly DiaRelatorioMensal[]>;
   }>({ chave: chavePeriodo, totais: {}, dias: {} });
   const totaisPorPessoa = recolhido.chave === chavePeriodo ? recolhido.totais : SEM_TOTAIS;
-  const diasPorPessoa = recolhido.chave === chavePeriodo ? recolhido.dias : SEM_DIAS;  const [confirmarFecho, setConfirmarFecho] = useState(false);
+  const diasPorPessoa = recolhido.chave === chavePeriodo ? recolhido.dias : SEM_DIAS;
+  const [confirmarFecho, setConfirmarFecho] = useState(false);
   const [pessoaParaLancamento, setPessoaParaLancamento] = useState<string | null>(null);
   const [pessoaParaDetalhe, setPessoaParaDetalhe] = useState<string | null>(null);
   const [formLancamento, setFormLancamento] = useState(FORM_LANCAMENTO_VAZIO);
@@ -222,12 +240,6 @@ export function ProcessamentoVisaoGeralTab() {
       const { retribuicao, mudouAMeioDoMes } = escolherRetribuicaoVigente(versoes, ultimoDia);
       const lancamentosDaPessoa = lancamentosPorPessoa.get(pessoa.id) ?? [];
       const diasDaPessoa = diasPorPessoa[pessoa.id] ?? [];
-      // Sem regra gravada, `regrasSubsidioHook.regra` ja vem com a omissao
-      // (minutosMinimosDia=1) -- ver useRegrasSubsidioAlimentacao.ts.
-      const diasElegiveisSubsidio = contarDiasElegiveisSubsidio(
-        diasDaPessoa,
-        regrasSubsidioHook.regra.minutosMinimosDia,
-      );
 
       const resultado = calcularProcessamentoPessoa({
         totais: {
@@ -243,13 +255,15 @@ export function ProcessamentoVisaoGeralTab() {
           // conhecida, documentada no cabecalho de processamentoTotais.ts.
           diasDescansoTrabalhado: 0,
         },
-        diasElegiveisSubsidio,
+        minutosPorDia: minutosTrabalhadosPorDia(diasDaPessoa),
+        minutosNoturnosPorFaixa: totais.minutosNoturnosPorFaixa ?? [],
+        regra,
+        direitoIht: direitosDaPessoa(direitosHook.porPessoa, pessoa.id).iht,
         retribuicao: retribuicao
           ? {
               valorBase: retribuicao.valor_base,
               periodicidade: retribuicao.periodicidade,
               duodecimosPct: retribuicao.duodecimos_pct,
-              subsidioAlimentacaoPessoa: retribuicao.subsidio_alimentacao,
             }
           : null,
         codigos: codigosActivos,
@@ -271,7 +285,8 @@ export function ProcessamentoVisaoGeralTab() {
     retribuicoesHook.porPessoa,
     lancamentosPorPessoa,
     codigosActivos,
-    regrasSubsidioHook.regra,
+    regra,
+    direitosHook.porPessoa,
     ultimoDia,
   ]);
 
@@ -358,7 +373,7 @@ export function ProcessamentoVisaoGeralTab() {
         )}
       </div>
 
-      {periodoHook.loading || pessoasLoading ? (
+      {periodoHook.loading || pessoasLoading || direitosHook.isLoading ? (
         <div className="flex justify-center py-12">
           <OlyviaLoader />
         </div>
@@ -385,6 +400,15 @@ export function ProcessamentoVisaoGeralTab() {
         </Card>
       ) : (
         <>
+          {!direitosLidos && (
+            <p
+              role={direitosHook.estado === "erro" ? "alert" : "status"}
+              className="flex items-start gap-2 rounded-md border border-amber-800/40 p-3 text-sm text-amber-800 dark:border-amber-300/40 dark:text-amber-300"
+            >
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
+            </p>
+          )}
           {pessoasActivas.map((pessoa) => (
             <ResumoPessoaProcessamentoOculto
               key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}`}
@@ -392,6 +416,7 @@ export function ProcessamentoVisaoGeralTab() {
               ano={ano}
               mes={mes}
               intervalo={intervalo}
+              faixasNoturnas={faixasNoturnas}
               aoTerminarCarregamento={marcarTotais}
             />
           ))}
@@ -405,16 +430,16 @@ export function ProcessamentoVisaoGeralTab() {
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaPessoa")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaDiasPlaneados")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaDiasTrabalhados")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaCompleta")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaIncompleta")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaHorasExtra")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaSalarioBase")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaCodigosAplicados")}</th>
-                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado")}</th>
-                    <th className="px-4 py-2 text-right">{t("hr.vencimento.visaoGeral.colunaAccoes")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaPessoa")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaDiasPlaneados")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaDiasTrabalhados")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaCompleta")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaIncompleta")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaHorasExtra")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaSalarioBase")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaCodigosAplicados")}</th>
+                    <th scope="col" className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado")}</th>
+                    <th scope="col" className="px-4 py-2 text-right">{t("hr.vencimento.visaoGeral.colunaAccoes")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -472,7 +497,7 @@ export function ProcessamentoVisaoGeralTab() {
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <TriangleAlert
-                                      className="h-3.5 w-3.5 shrink-0 text-amber-500"
+                                      className="h-3.5 w-3.5 shrink-0 text-amber-800 dark:text-amber-300"
                                       aria-label={t("hr.vencimento.visaoGeral.avisoRetribuicaoMudouAMeioDoMes")}
                                     />
                                   </TooltipTrigger>
@@ -489,11 +514,16 @@ export function ProcessamentoVisaoGeralTab() {
                             <span className="text-muted-foreground" title={t("hr.vencimento.visaoGeral.semPermissaoRetribuicao")}>
                               {t("hr.vencimento.visaoGeral.semPermissaoRetribuicao")}
                             </span>
-                          ) : resultadoPessoa && resultadoPessoa.resultado.linhasAutomaticas.length > 0 ? (
+                          ) : resultadoPessoa && resultadoPessoa.resultado.linhasAutomaticas.length + resultadoPessoa.resultado.linhasRegra.length > 0 ? (
                             <ul className="space-y-0.5 text-xs">
                               {resultadoPessoa.resultado.linhasAutomaticas.map((linha) => (
                                 <li key={linha.codigoId} className="tabular-nums">
                                   {formatarLinhaCodigo(linha)}
+                                </li>
+                              ))}
+                              {resultadoPessoa.resultado.linhasRegra.map((linha) => (
+                                <li key={`${linha.tipo}-${linha.faixa ?? ""}`} className="tabular-nums">
+                                  {formatarLinhaRegra(linha, t(linha.tipo === "noturnas" ? "rhFluxosC.proc.passo.noturnas" : `rhFluxosC.proc.passo.${linha.tipo}`, { n: (linha.faixa ?? 0) + 1 }))}
                                 </li>
                               ))}
                             </ul>
@@ -507,25 +537,34 @@ export function ProcessamentoVisaoGeralTab() {
                             : !resultadoPessoa || resultadoPessoa.resultado.totalBrutoEstimado === null
                               ? "—"
                               : formatarValor(resultadoPessoa.resultado.totalBrutoEstimado)}
+                          {!semPermissaoRetribuicao && !direitosLidos && resultadoPessoa?.resultado.totalBrutoEstimado != null && (
+                            <span className="block text-xs font-normal text-amber-800 dark:text-amber-300">
+                              {t("hr.vencimento.visaoGeral.totalProvisorio")}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex justify-end gap-2">
                             <Button
                               size="sm"
                               variant="ghost"
+                              className="min-h-11"
                               onClick={() => setPessoaParaDetalhe(pessoa.id)}
                             >
-                              <Eye className="mr-1 h-3 w-3" />
+                              <Eye className="mr-1 h-3 w-3" aria-hidden="true" />
                               {t("hr.vencimento.visaoGeral.verDetalhe")}
+                              <span className="sr-only"> {pessoa.nome_completo}</span>
                             </Button>
                             {podeGerirLancamentos && !periodoFechado && (
                               <Button
                                 size="sm"
                                 variant="outline"
+                                className="min-h-11"
                                 onClick={() => abrirFormularioLancamento(pessoa.id)}
                               >
-                                <Plus className="mr-1 h-3 w-3" />
+                                <Plus className="mr-1 h-3 w-3" aria-hidden="true" />
                                 {t("hr.vencimento.visaoGeral.acrescentarValor")}
+                                <span className="sr-only"> {pessoa.nome_completo}</span>
                               </Button>
                             )}
                           </div>
@@ -545,10 +584,11 @@ export function ProcessamentoVisaoGeralTab() {
                                   {!lancamento.anulado_em && podeGerirLancamentos && !periodoFechado && (
                                     <button
                                       type="button"
-                                      className="ml-2 text-destructive underline"
+                                      className="ml-2 inline-flex min-h-11 items-center text-destructive underline"
                                       onClick={() => setLancamentoParaAnular(lancamento)}
                                     >
                                       {t("hr.vencimento.visaoGeral.anular")}
+                                      <span className="sr-only"> {lancamento.descricao} {pessoa.nome_completo}</span>
                                     </button>
                                   )}
                                 </li>
@@ -770,11 +810,16 @@ export function ProcessamentoVisaoGeralTab() {
                         <div className="font-medium">
                           {t("hr.vencimento.visaoGeral.colunaCodigosAplicados")}
                         </div>
-                        {resultado.linhasAutomaticas.length > 0 ? (
+                        {resultado.linhasAutomaticas.length + resultado.linhasRegra.length > 0 ? (
                           <ul className="space-y-0.5">
                             {resultado.linhasAutomaticas.map((linha) => (
                               <li key={linha.codigoId} className="tabular-nums">
                                 {formatarLinhaCodigo(linha)}
+                              </li>
+                            ))}
+                            {resultado.linhasRegra.map((linha) => (
+                              <li key={`${linha.tipo}-${linha.faixa ?? ""}`} className="tabular-nums">
+                                {formatarLinhaRegra(linha, t(linha.tipo === "noturnas" ? "rhFluxosC.proc.passo.noturnas" : `rhFluxosC.proc.passo.${linha.tipo}`, { n: (linha.faixa ?? 0) + 1 }))}
                               </li>
                             ))}
                           </ul>
@@ -818,6 +863,7 @@ export function ProcessamentoVisaoGeralTab() {
                           {resultado.totalBrutoEstimado !== null
                             ? formatarValor(resultado.totalBrutoEstimado)
                             : "—"}
+                          {!direitosLidos && resultado.totalBrutoEstimado !== null && ` (${t("hr.vencimento.visaoGeral.totalProvisorio")})`}
                         </span>
                       </div>
                     )}
@@ -825,10 +871,10 @@ export function ProcessamentoVisaoGeralTab() {
                     {resultado.avisos.length > 0 && (
                       <div className="space-y-1 border-t pt-2">
                         <div className="font-medium">{t("hr.vencimento.visaoGeral.detalheAvisos")}</div>
-                        <ul className="space-y-0.5 text-amber-600">
+                        <ul className="space-y-0.5 text-amber-800 dark:text-amber-300">
                           {resultado.avisos.map((aviso) => (
                             <li key={aviso} className="flex items-center gap-1.5">
-                              <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                              <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                               {t(AVISO_CHAVE[aviso])}
                             </li>
                           ))}

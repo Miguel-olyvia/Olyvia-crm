@@ -11,6 +11,7 @@ const fn = vi.hoisted(() => ({
   fechar: vi.fn(),
   criar: vi.fn(),
   anular: vi.fn(),
+  criarPorQuantidade: vi.fn(),
   sucesso: vi.fn(),
   erro: vi.fn(),
 }));
@@ -38,6 +39,7 @@ const TUDO = ["hr.processamento.periodo.view", "hr.processamento.periodo.gerir",
 
 const resultado = (extra: Record<string, unknown> = {}) => ({
   valorHoraReal: 7.5, baseMes: 1000, divisorDuodecimos: 14, linhasAutomaticas: [], totalCodigosAutomaticos: 0,
+  linhasRegra: [], totalRegras: 0,
   descontoFaltas: 0, subsidioAlimentacao: 0, lancamentosPontuais: 0, totalBrutoEstimado: 1000, avisos: [], ...extra,
 });
 const linha = (extra: Record<string, unknown> = {}, valorBase: number | null = 1000) => ({
@@ -51,10 +53,14 @@ function calculo(extra: Record<string, unknown> = {}) {
     intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false },
     intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false },
     periodoHook: { periodo: { id: "per", estado: "aberto", fechado_em: null }, loading: false, saving: false, recusado: false, abrir: fn.abrir, fechar: fn.fechar },
-    lancamentosHook: { saving: false, recusado: false, criar: fn.criar, anular: fn.anular, lancamentos: [] },
+    lancamentosHook: { saving: false, recusado: false, criar: fn.criar, criarPorQuantidade: fn.criarPorQuantidade, anular: fn.anular, lancamentos: [] },
+    // So a Ana tem direito a km e ajudas; a regra em vigor traz os valores unitarios.
+    direitosHook: { porPessoa: new Map([["p1", { iht: false, km: true, ajudas: true }]]), estado: "ok" },
+    direitosLidos: true,
+    regra: { km_valor: 0.4, ajudas_custo_dia: 65.89 },
     retribuicoesHook: { recusado: false },
     resultados: new Map([
-      ["p1", linha({ totalCodigosAutomaticos: 50, descontoFaltas: 20, subsidioAlimentacao: 110, lancamentosPontuais: 30, totalBrutoEstimado: 1170 })],
+      ["p1", linha({ totalCodigosAutomaticos: 50, descontoFaltas: 20, subsidioAlimentacao: 110, totalRegras: 40, lancamentosPontuais: 30, totalBrutoEstimado: 1210 })],
       ["p2", linha({ baseMes: null, divisorDuodecimos: null, valorHoraReal: null, totalBrutoEstimado: null, avisos: ["sem_retribuicao"] }, null)],
     ]),
     pessoasActivas: [{ id: "p1", nome_completo: "Ana Real" }, { id: "p2", nome_completo: "Bruno Real" }],
@@ -86,6 +92,7 @@ beforeEach(() => {
   fn.fechar.mockResolvedValue(null);
   fn.criar.mockResolvedValue(null);
   fn.anular.mockResolvedValue(null);
+  fn.criarPorQuantidade.mockResolvedValue(null);
   estado.permissoes = new Set(TUDO);
   estado.calculo = calculo();
 });
@@ -95,16 +102,17 @@ describe("a tabela do calculo do mes", () => {
   it("uma linha por pessoa activa, com cada parcela real e o total do mes", () => {
     abrir();
     const cabecalhos = screen.getAllByRole("columnheader").map((c) => c.textContent);
-    for (const nome of ["Pessoa", "Base do mês", "Códigos", "Faltas", "Subsídios", "Pontuais", "Total bruto"]) expect(cabecalhos).toContain(nome);
+    for (const nome of ["Pessoa", "Base do mês", "Códigos", "Faltas", "Subsídios", "Noturnas, IHT, km e ajudas", "Pontuais", "Total bruto"]) expect(cabecalhos).toContain(nome);
     expect(cabecalhos).not.toContain("Horas extra");
     const ana = celulas(linhaDe(/Ana Real/));
     expect(ana[0]).toMatch(/1.?000,00/);
     expect(ana[1]).toMatch(/50,00/);
     expect(ana[2]).toMatch(/[-−]20,00/);
     expect(ana[3]).toMatch(/110,00/);
-    expect(ana[4]).toMatch(/30,00/);
-    expect(ana[5]).toMatch(/1.?170,00/);
-    expect(screen.getByText("Total bruto do mês").closest("tr")).toHaveTextContent(/1.?170,00/);
+    expect(ana[4]).toMatch(/40,00/);
+    expect(ana[5]).toMatch(/30,00/);
+    expect(ana[6]).toMatch(/1.?210,00/);
+    expect(screen.getByText("Total bruto do mês").closest("tr")).toHaveTextContent(/1.?210,00/);
   });
 
   it("quem nao tem retribuicao fica «Sem valor», com o aviso, e fora do total", () => {
@@ -128,9 +136,9 @@ describe("a tabela do calculo do mes", () => {
     abrir();
     expect(screen.getByText(/Não tem permissão para ver as retribuições/)).toBeInTheDocument();
     const ana = celulas(linhaDe(/Ana Real/));
-    expect(ana.slice(0, 4).every((c) => c.includes("—"))).toBe(true);
-    expect(ana[5]).toBe("—");
-    expect(screen.getByText("Total bruto do mês").closest("tr")).not.toHaveTextContent(/1.?170/);
+    expect(ana.slice(0, 5).every((c) => c.includes("—"))).toBe(true);
+    expect(ana[6]).toBe("—");
+    expect(screen.getByText("Total bruto do mês").closest("tr")).not.toHaveTextContent(/1.?210/);
   });
 
   it("um erro a carregar as pessoas aparece como alerta, nao como lista vazia", () => {
@@ -225,6 +233,101 @@ describe("o periodo: abrir, fechar e estar fechado", () => {
     estado.calculo = calculo({ periodoHook: { periodo: null, loading: false, saving: false, recusado: true, abrir: fn.abrir, fechar: fn.fechar } });
     abrir();
     expect(screen.getByText("Não tem permissão para ver o período deste mês.")).toBeInTheDocument();
+  });
+});
+
+describe("km e ajudas de custo", () => {
+  const abrirDialogo = () => {
+    abrir();
+    fireEvent.click(within(linhaDe(/Ana Real/)).getByRole("button", { name: /Km e ajudas/ }));
+    return screen.getByRole("dialog");
+  };
+
+  it("so quem tem direito a km ou ajudas tem o botao", () => {
+    abrir();
+    expect(within(linhaDe(/Ana Real/)).getByRole("button", { name: /Km e ajudas/ })).toBeInTheDocument();
+    expect(within(linhaDe(/Bruno Real/)).queryByRole("button", { name: /Km e ajudas/ })).not.toBeInTheDocument();
+  });
+
+  it("sem permissao de gerir lancamentos, ou com o periodo fechado, nao ha botao", () => {
+    estado.permissoes = new Set(["hr.processamento.periodo.view"]);
+    abrir();
+    expect(screen.queryByRole("button", { name: /Km e ajudas/ })).not.toBeInTheDocument();
+    cleanup();
+    estado.permissoes = new Set(TUDO);
+    estado.calculo = calculo({
+      periodoHook: { periodo: { id: "per", estado: "fechado", fechado_em: "2026-10-20T10:00:00Z" }, loading: false, saving: false, recusado: false, abrir: fn.abrir, fechar: fn.fechar },
+    });
+    abrir();
+    expect(screen.queryByRole("button", { name: /Km e ajudas/ })).not.toBeInTheDocument();
+  });
+
+  it("mostra o valor da regra e a previsao, e grava so tipo e quantidade (virgula decimal aceite), nunca o valor", async () => {
+    const dialogo = abrirDialogo();
+    expect(within(dialogo).getByText(/0,40/)).toBeInTheDocument();
+    fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "100" } });
+    expect(within(dialogo).getByText(/Valor a lançar: 40,00/)).toBeInTheDocument();
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(fn.criarPorQuantidade).toHaveBeenCalledWith({ pessoaId: "p1", tipo: "km", quantidade: 100 }));
+    expect(fn.criarPorQuantidade.mock.calls[0][0]).not.toHaveProperty("valor");
+    expect(fn.sucesso).toHaveBeenCalledWith("Lançamento registado.");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("uma quantidade invalida (zero, texto, mais de duas casas) nao chega a base", async () => {
+    const dialogo = abrirDialogo();
+    for (const invalida of ["", "0", "abc", "1,234"]) {
+      fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: invalida } });
+      fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+      expect(await within(dialogo).findByRole("alert")).toHaveTextContent(/quantidade maior que zero/);
+    }
+    expect(fn.criarPorQuantidade).not.toHaveBeenCalled();
+  });
+
+  it("uma recusa da base (por exemplo sem direito) fica no dialogo, que continua aberto", async () => {
+    fn.criarPorQuantidade.mockResolvedValue("rhFluxosC.lanc.erro.semDireito");
+    const dialogo = abrirDialogo();
+    fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "10" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Esta pessoa não tem direito a este tipo de lançamento.");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(fn.sucesso).not.toHaveBeenCalled();
+  });
+
+  it("com a leitura dos direitos falhada avisa, marca o total como provisorio e desactiva o botao (nao diz «sem direito»)", () => {
+    estado.calculo = calculo({ direitosHook: { porPessoa: new Map(), estado: "erro" }, direitosLidos: false });
+    abrir();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Não foi possível ler os direitos \(IHT, km, ajudas\): os totais podem estar incompletos/);
+    const botao = within(linhaDe(/Ana Real/)).getByRole("button", { name: /Km e ajudas/ });
+    expect(botao).toBeDisabled();
+    expect(botao).toHaveAccessibleDescription(/Não foi possível ler os direitos/);
+    expect(screen.getAllByText("provisório").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/não tem direito/i)).not.toBeInTheDocument();
+  });
+
+  it("Enter no campo da quantidade guarda (o dialogo e um formulario)", async () => {
+    const dialogo = abrirDialogo();
+    const campo = within(dialogo).getByLabelText("Quilómetros");
+    fireEvent.change(campo, { target: { value: "5" } });
+    fireEvent.submit(campo.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(fn.criarPorQuantidade).toHaveBeenCalledWith({ pessoaId: "p1", tipo: "km", quantidade: 5 }));
+  });
+
+  it("o erro fica ligado ao campo por aria-describedby", async () => {
+    const dialogo = abrirDialogo();
+    const campo = within(dialogo).getByLabelText("Quilómetros");
+    fireEvent.change(campo, { target: { value: "0" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+    await within(dialogo).findByRole("alert");
+    expect(campo.getAttribute("aria-describedby")).toContain("ka-erro");
+    expect(campo).toHaveAccessibleDescription(/quantidade maior que zero/);
+  });
+
+  it("sem regra em vigor diz-o e nao deixa guardar", () => {
+    estado.calculo = calculo({ regra: null });
+    const dialogo = abrirDialogo();
+    expect(within(dialogo).getByText(/Não há regra salarial em vigor/)).toBeInTheDocument();
+    expect(within(dialogo).getByRole("button", { name: "Guardar" })).toBeDisabled();
   });
 });
 

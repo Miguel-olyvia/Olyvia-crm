@@ -30,6 +30,8 @@ interface ResumoPessoaProcessamentoOcultoProps {
   /** 1-12 (o wrapper do relatorio converte). */
   mes: number;
   intervalo?: { de: string; ate: string };
+  /** As faixas noturnas da regra em vigor (memoizadas por quem chama): sem elas nao ha minutos noturnos por faixa. */
+  faixasNoturnas?: readonly { hora_inicio: string; hora_fim: string }[];
   aoTerminarCarregamento: (
     pessoaId: string,
     totais: TotaisRelatorioMensal,
@@ -42,14 +44,15 @@ export function ResumoPessoaProcessamentoOculto({
   ano,
   mes,
   intervalo,
+  faixasNoturnas,
   aoTerminarCarregamento,
 }: ResumoPessoaProcessamentoOcultoProps) {
-  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, intervalo);
+  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, intervalo, faixasNoturnas);
   const avisouRef = useRef(false);
 
   useEffect(() => {
     avisouRef.current = false;
-  }, [pessoaId, ano, mes, intervalo?.de, intervalo?.ate]);
+  }, [pessoaId, ano, mes, intervalo?.de, intervalo?.ate, faixasNoturnas]);
 
   useEffect(() => {
     if (relatorio.loading || avisouRef.current) return;

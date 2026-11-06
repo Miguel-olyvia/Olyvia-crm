@@ -214,11 +214,14 @@ describe("horas extra: limites, configuração e histórico", () => {
     noRouter(<ContratoGrupoTempoTrabalho rascunho={rascunho} definir={() => {}} podeEditar criandoContrato={false} pessoaId="p-marta" erroDe={() => null} />);
     const interruptor = screen.getByRole("switch", { name: "Pode fazer horas extra" });
     expect(interruptor).toHaveAttribute("aria-checked", "false");
-    // Os máximos gravam-se no contrato: só dependem de `podeEditar`, não do interruptor (que se guarda à parte, na base).
-    expect(screen.getByLabelText(/Horas anuais máximas/i)).toBeEnabled();
+    // O máximo semanal grava-se no contrato: só depende de `podeEditar`, não do interruptor (que se guarda à parte, na base).
+    // O limite ANUAL já não é do contrato: vem da regra salarial da organização e aparece só em leitura.
+    expect(screen.queryByLabelText(/Horas anuais máximas/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/vem da regra salarial da organização/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Máximo de horas semanais/i)).toBeEnabled();
     fireEvent.click(interruptor);
     await waitFor(() => expect(baseFalsa.autorizacoes["p-marta"]).toBe(true));
-    expect(screen.getByLabelText(/Horas anuais máximas/i)).toBeEnabled();
+    expect(screen.getByLabelText(/Máximo de horas semanais/i)).toBeEnabled();
   });
 
   it("o alerta configura-se em Processamento salarial > Configuração (os coeficientes são da base, ver horasExtraReal.test)", async () => {

@@ -27,12 +27,12 @@ import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import { periodoDaFolha, type IntervaloDaFolha } from "@/lib/hr/periodoFolha";
 import type { PessoaRetribuicao } from "@/types/hr";
 
-const COLUNAS = "pessoa_id, valor_base, periodicidade, duodecimos_pct, subsidio_alimentacao, valido_de, valido_ate";
+const COLUNAS = "pessoa_id, valor_base, periodicidade, duodecimos_pct, valido_de, valido_ate";
 
 /** Formas parciais devolvidas pela query -- so as colunas pedidas em `COLUNAS`. */
 export type RetribuicaoVigenteLinha = Pick<
   PessoaRetribuicao,
-  "pessoa_id" | "valor_base" | "periodicidade" | "duodecimos_pct" | "subsidio_alimentacao" | "valido_de" | "valido_ate"
+  "pessoa_id" | "valor_base" | "periodicidade" | "duodecimos_pct" | "valido_de" | "valido_ate"
 >;
 
 export interface RetribuicaoVigenteResultado {

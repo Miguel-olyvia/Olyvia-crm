@@ -35,13 +35,12 @@ import type { PessoaRetribuicao, SubsidioAlimentacaoModo } from "@/types/hr";
 
 const COLUNAS =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +
-  "subsidio_alimentacao, subsidio_alimentacao_modo, duodecimos_pct, valido_de, " +
+  "subsidio_alimentacao_modo, duodecimos_pct, valido_de, " +
   "valido_ate, motivo, origem, created_at, updated_at";
 
 /** O que se corrige numa versao ja decorrida (o valor base e a periodicidade ficam como estao). */
 export interface CorrigirVersaoRetribuicaoPatch {
   moeda: string;
-  subsidioAlimentacao: number | null;
   subsidioAlimentacaoModo: SubsidioAlimentacaoModo | null;
   duodecimosPct: 0 | 50 | 100 | null;
   validoDe: string;
@@ -130,14 +129,14 @@ export function usePessoaRetribuicao(
 
   /**
    * DEFINIR O QUE E DA PESSOA: a partir de `desde` a pessoa passa a ter este
-   * subsidio (valor e modo) e estes duodecimos, com o valor base do cargo nessa
-   * data. `desde` futuro e permitido. Devolve `null` ou o texto da recusa (por
+   * modo de subsidio e estes duodecimos, com o valor base do cargo nessa data. O VALOR do
+   * subsidio de alimentacao ja nao e da pessoa (vem da regra salarial da organizacao): a
+   * RPC recebe sempre `p_subsidio` nulo. `desde` futuro e permitido. Devolve `null` ou o texto da recusa (por
    * exemplo HRC11: "atribua primeiro um cargo").
    */
   const definirPessoal = useCallback(
     (
       desde: string,
-      subsidio: number | null,
       subsidioModo: SubsidioAlimentacaoModo | null,
       duodecimosPct: 0 | 50 | 100 | null,
       motivo: string | null,
@@ -147,7 +146,7 @@ export function usePessoaRetribuicao(
         return hrRpc("rpc_hr_retribuicao_definir_pessoal", {
           p_pessoa_id: pessoaId,
           p_desde: desde,
-          p_subsidio: subsidio,
+          p_subsidio: null,
           p_subsidio_modo: subsidioModo,
           p_duodecimos_pct: duodecimosPct,
           p_motivo: motivo,
@@ -169,7 +168,6 @@ export function usePessoaRetribuicao(
         return hrFrom("pessoas_retribuicoes")
           .update({
             moeda: patch.moeda,
-            subsidio_alimentacao: patch.subsidioAlimentacao,
             subsidio_alimentacao_modo: patch.subsidioAlimentacaoModo,
             duodecimos_pct: patch.duodecimosPct,
             valido_de: patch.validoDe,

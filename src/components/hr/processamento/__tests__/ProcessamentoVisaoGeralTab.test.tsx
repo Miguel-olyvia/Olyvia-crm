@@ -44,6 +44,7 @@ vi.mock("@/contexts/CompanyContext", () => ({
 
 let retribuicoesPorPessoa = new Map<string, unknown[]>();
 let retribuicoesRecusado = false;
+let direitosEstado: "ok" | "indisponivel" | "recusado" | "erro" = "ok";
 vi.mock("@/hooks/useRetribuicoesVigentesDaOrganizacao", async () => {
   const real = await vi.importActual<
     typeof import("@/hooks/useRetribuicoesVigentesDaOrganizacao")
@@ -66,17 +67,15 @@ vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({
   usePeriodoFolhaRegras: () => ({ regras: regrasPeriodoFolha, estado: "ok", isLoading: false }),
 }));
 
-let regraSubsidioMock = { minutosMinimosDia: 1 };
-vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
-  useRegrasSubsidioAlimentacao: () => ({
-    regra: regraSubsidioMock,
-    temRegraGravada: false,
-    isLoading: false,
-    isFetched: true,
-    error: null,
-    isSaving: false,
-    gravar: vi.fn(),
-  }),
+// A regra salarial em vigor (`null` = sem regra) e os direitos por pessoa: o subsidio vem da regra, nao da pessoa.
+let regraSalarialMock: Record<string, unknown> | null = null;
+vi.mock("@/hooks/useRegrasSalariais", () => ({
+  useRegrasSalariais: () => ({ versoes: [], emVigor: regraSalarialMock, estado: "ok", isLoading: false }),
+  regraEmVigorNoDia: () => regraSalarialMock,
+}));
+vi.mock("@/hooks/useDireitosSalariaisDaOrganizacao", () => ({
+  useDireitosSalariaisDaOrganizacao: () => ({ porPessoa: new Map(), estado: direitosEstado, isLoading: false }),
+  direitosDaPessoa: () => ({ iht: false, km: false, ajudas: false }),
 }));
 
 let periodoActual: unknown = null;
@@ -180,9 +179,10 @@ beforeEach(() => {
   codigosActuais = [];
   retribuicoesPorPessoa = new Map();
   retribuicoesRecusado = false;
+  direitosEstado = "ok";
   totaisPorPessoaMock = {};
   diasPorPessoaMock = {};
-  regraSubsidioMock = { minutosMinimosDia: 1 };
+  regraSalarialMock = null;
   regrasPeriodoFolha = SEM_REGRAS;
   intervaloRecebido = null;
   abrirMock.mockClear();
@@ -268,8 +268,8 @@ describe("ProcessamentoVisaoGeralTab", () => {
       "pessoa-2": { ...TOTAIS_PADRAO, realizadoMinutos: 9630 },
     };
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
-    expect(screen.getByText("Bruno Costa")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    expect(screen.getByRole("cell", { name: "Bruno Costa" })).toBeInTheDocument();
     // diasTrabalhados = 20 para as duas pessoas -- as horas aparecem entre
     // parenteses ao lado dos dias, com uma casa decimal quando o numero de
     // horas nao e redondo.
@@ -279,7 +279,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
   it("com periodo aberto, acrescentar valor pontual abre o formulario e chama criar()", async () => {
     periodoActual = PERIODO_ABERTO;
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
     const botoesAcrescentar = screen.getAllByText("hr.vencimento.visaoGeral.acrescentarValor");
     fireEvent.click(botoesAcrescentar[0]);
@@ -319,7 +319,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
       },
     ];
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
     expect(screen.queryByText("hr.vencimento.visaoGeral.acrescentarValor")).not.toBeInTheDocument();
     expect(screen.queryByText("hr.vencimento.visaoGeral.fecharPeriodo")).not.toBeInTheDocument();
@@ -331,7 +331,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
   it("fechar periodo pede confirmacao antes de chamar fechar()", async () => {
     periodoActual = PERIODO_ABERTO;
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("hr.vencimento.visaoGeral.fecharPeriodo"));
     expect(fecharMock).not.toHaveBeenCalled();
@@ -365,9 +365,9 @@ describe("ProcessamentoVisaoGeralTab", () => {
       ],
     ]);
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    const linha = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
     const normalizar = (texto: string) => texto.replace(/\s/g, " ");
     const valorEsperado = normalizar(formatarValorEsperado(1200));
     const correspondeAoValor = (_: string, elemento: Element | null) =>
@@ -380,10 +380,10 @@ describe("ProcessamentoVisaoGeralTab", () => {
     periodoActual = PERIODO_ABERTO;
     // Nenhuma entrada em retribuicoesPorPessoa para nenhuma das pessoas.
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
-    const linhaBruno = screen.getByText("Bruno Costa").closest("tr")!;
+    const linhaAna = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
+    const linhaBruno = screen.getByRole("cell", { name: "Bruno Costa" }).closest("tr")!;
     expect(within(linhaAna).getAllByText("—")).toHaveLength(2); // salario-base + total
     expect(within(linhaBruno).getAllByText("—")).toHaveLength(2);
   });
@@ -408,15 +408,36 @@ describe("ProcessamentoVisaoGeralTab", () => {
       ],
     ]);
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    const linha = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
     const celulas = within(linha).getAllByRole("cell");
     // Ordem das colunas: Pessoa, Dias planeados, Dias trabalhados, Falta
     // completa, Falta incompleta, Horas extra, Salario-base, Codigos
     // aplicados, Total bruto estimado, Accoes.
     const celulaCodigos = celulas[7];
     expect(celulaCodigos.textContent).toBe("");
+  });
+
+  it("sem os direitos (IHT, km, ajudas) avisa e marca o total como provisorio, nao como definitivo", async () => {
+    periodoActual = PERIODO_ABERTO;
+    direitosEstado = "erro";
+    retribuicoesPorPessoa = new Map([
+      ["pessoa-1", [{ pessoa_id: "pessoa-1", valor_base: 1200, periodicidade: "mensal", duodecimos_pct: 0, subsidio_alimentacao: null, valido_de: "2026-01-01", valido_ate: null }]],
+    ]);
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    expect(screen.getByRole("alert")).toHaveTextContent("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis");
+    const linha = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
+    expect(within(linha).getByText("hr.vencimento.visaoGeral.totalProvisorio")).toBeInTheDocument();
+  });
+
+  it("com os direitos lidos nao ha aviso nem total provisorio", async () => {
+    periodoActual = PERIODO_ABERTO;
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    expect(screen.queryByText("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")).not.toBeInTheDocument();
+    expect(screen.queryByText("hr.vencimento.visaoGeral.totalProvisorio")).not.toBeInTheDocument();
   });
 
   it("sem permissao de retribuicao, a coluna de codigos aplicados tambem nao mostra valores (M4)", async () => {
@@ -439,9 +460,9 @@ describe("ProcessamentoVisaoGeralTab", () => {
       },
     ];
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    const linha = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
     // Nao mostra o codigo "100" nem o valor "50,00 €" da lista.
     expect(within(linha).queryByText(/100/)).not.toBeInTheDocument();
     expect(within(linha).queryByText(/50,00/)).not.toBeInTheDocument();
@@ -460,7 +481,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
       "pessoa-2": { ...TOTAIS_PADRAO, planeadoMinutos: 11340 },
     };
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
     // diasPlaneados = 22 para as duas pessoas -- as horas (189h, redondas)
     // aparecem entre parenteses, sem casas decimais.
@@ -503,9 +524,9 @@ describe("ProcessamentoVisaoGeralTab", () => {
       },
     };
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    const linha = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
     // baseMes = 1166.67 mas o desconto de faltas (10h * 230.77 €/h) ultrapassa-a
     // largamente -- o total mostrado tem de ficar em 0,00 €, nunca negativo.
     const normalizar = (texto: string) => texto.replace(/\s/g, " ");
@@ -534,9 +555,9 @@ describe("ProcessamentoVisaoGeralTab", () => {
       ],
     ]);
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
+    const linhaAna = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
     fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
 
     await screen.findByText("hr.vencimento.visaoGeral.detalheSalarioBase");
@@ -555,10 +576,13 @@ describe("ProcessamentoVisaoGeralTab", () => {
     expect(within(dialogo).getByText(correspondeA1200)).toBeInTheDocument();
   });
 
-  it("com subsidio da pessoa e dias elegiveis, o detalhe deixa de mostrar o subsidio a 0 EUR", async () => {
+  it("com regra salarial e dias trabalhados, o detalhe mostra o subsidio dia a dia pelos valores da regra", async () => {
     periodoActual = PERIODO_ABERTO;
-    // A organizacao so define o tempo minimo por dia; o valor vem da pessoa.
-    regraSubsidioMock = { minutosMinimosDia: 300 };
+    // O subsidio vem da regra da organizacao: 5 h ou mais = 6,15 EUR por dia; abaixo disso 0,76 EUR por hora trabalhada.
+    regraSalarialMock = {
+      subsidio_limite_min: 300, subsidio_valor_hora: 0.76, subsidio_valor_dia: 6.15,
+      he_pct_dia_util: 50, he_pct_feriado: 75, he_pct_descanso: 100, iht_pct: 25, noturnas: [],
+    };
     retribuicoesPorPessoa = new Map([
       [
         "pessoa-1",
@@ -568,15 +592,14 @@ describe("ProcessamentoVisaoGeralTab", () => {
             valor_base: 1200,
             periodicidade: "mensal",
             duodecimos_pct: 0,
-            subsidio_alimentacao: 6,
             valido_de: "2026-01-01",
             valido_ate: null,
           },
         ],
       ],
     ]);
-    // Dois dias com >= 300 min trabalhados (elegiveis) e um dia de ausencia
-    // com muitos minutos (nao conta) e um dia curto (nao conta).
+    // Dois dias com >= 300 min (6,15 cada), um dia de ausencia com muitos minutos (nao conta) e um dia curto de
+    // 100 min (100 x 0,76 / 60 = 1,27).
     diasPorPessoaMock = {
       "pessoa-1": [
         { estado: "normal", realizadoMinutos: 480 },
@@ -586,28 +609,46 @@ describe("ProcessamentoVisaoGeralTab", () => {
       ],
     };
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
+    const linhaAna = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
     fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
 
     await screen.findByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao");
     const dialogo = screen.getByRole("dialog");
-    // 2 dias elegiveis * 6 EUR/dia = 12 EUR -- ja nao e 0,00 EUR.
+    // 2 x 6,15 + 1,27 = 13,57 EUR -- ja nao e 0,00 EUR.
     const normalizar = (texto: string) => texto.replace(/\s/g, " ");
-    const valorEsperado = normalizar(formatarValorEsperado(12));
+    const valorEsperado = normalizar(formatarValorEsperado(13.57));
     const correspondeAoValor = (_: string, elemento: Element | null) =>
       normalizar(elemento?.textContent ?? "") === valorEsperado;
     expect(within(dialogo).getByText(correspondeAoValor)).toBeInTheDocument();
+  });
+
+  it("sem regra salarial o subsidio fica a 0,00 EUR no detalhe, mesmo com dias trabalhados", async () => {
+    periodoActual = PERIODO_ABERTO;
+    retribuicoesPorPessoa = new Map([
+      ["pessoa-1", [{ pessoa_id: "pessoa-1", valor_base: 1200, periodicidade: "mensal", duodecimos_pct: 0, valido_de: "2026-01-01", valido_ate: null }]],
+    ]);
+    diasPorPessoaMock = { "pessoa-1": [{ estado: "normal", realizadoMinutos: 480 }] };
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+
+    const linhaAna = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
+    fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
+
+    await screen.findByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao");
+    const dialogo = screen.getByRole("dialog");
+    const linha = within(dialogo).getByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao").parentElement!;
+    expect(linha.textContent).toMatch(/0,00/);
   });
 
   it("sem permissao de retribuicao, o detalhe esconde base e total mas mostra o resto", async () => {
     periodoActual = PERIODO_ABERTO;
     retribuicoesRecusado = true;
     render(<ProcessamentoVisaoGeralTab />);
-    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
-    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
+    const linhaAna = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr")!;
     fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
 
     await screen.findByText("hr.vencimento.visaoGeral.detalheDescontoFaltas");

@@ -204,7 +204,11 @@ describe("migration 20261210020000 -- as tres posicoes", () => {
   it("a lista de 28 campos de M2 foi superada pela de M4 (20261210040000, o BIC)", () => {
     expect(migrationQueDefine("hr_admissao_campos_obrigatorios")).toBe(M4);
     expect(migrationQueDefine("hr_admissao_campo_permissao")).toBe(M4);
-    expect(migrationQueDefine("hr_admissao_pendencias")).toBe(M4);
+    // hr_admissao_pendencias foi redefinida depois (20270109800000): o subsidio de
+    // almoco e obrigatorio no cargo e deixou de ser pendencia da pessoa.
+    expect(migrationQueDefine("hr_admissao_pendencias")).toBe(
+      migrationPorVersao("20270109800000"),
+    );
   });
 
   it("o gancho do horario esta comentado e nao entrou como linha", () => {

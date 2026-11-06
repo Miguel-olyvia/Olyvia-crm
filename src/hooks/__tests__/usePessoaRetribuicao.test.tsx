@@ -103,7 +103,7 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
 
     let erro: string | null = "por chamar";
     await act(async () => {
-      erro = await result.current.definirPessoal("2026-11-01", 7.5, "cartao", 50, "Revisao");
+      erro = await result.current.definirPessoal("2026-11-01", "cartao", 50, "Revisao");
     });
 
     expect(erro).toBeNull();
@@ -113,7 +113,8 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
         args: {
           p_pessoa_id: "p1",
           p_desde: "2026-11-01",
-          p_subsidio: 7.5,
+          // O valor do subsidio ja nao e da pessoa (vem da regra da organizacao): a RPC recebe sempre nulo.
+          p_subsidio: null,
           p_subsidio_modo: "cartao",
           p_duodecimos_pct: 50,
           p_motivo: "Revisao",
@@ -157,7 +158,7 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
       "valor_base",
       "moeda",
       "periodicidade",
-      "subsidio_alimentacao",
+      // `subsidio_alimentacao` (o valor) ja nao se le: vem da regra salarial da organizacao.
       "subsidio_alimentacao_modo",
       "duodecimos_pct",
       "valido_de",
@@ -221,7 +222,7 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
 
     estado.versoes = [ABERTA, { ...ABERTA, id: "r2", valido_de: "2026-11-01" }];
     await act(async () => {
-      await result.current.definirPessoal("2026-11-01", null, null, null, null);
+      await result.current.definirPessoal("2026-11-01", null, null, null);
     });
     await waitFor(() => expect(result.current.versoes).toHaveLength(2));
   });
@@ -236,7 +237,7 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
 
     let erro: string | null = null;
     await act(async () => {
-      erro = await result.current.definirPessoal("2026-11-01", 6, "cartao", 50, null);
+      erro = await result.current.definirPessoal("2026-11-01", "cartao", 50, null);
     });
     expect(erro).toBe(getLocalizedFallback("hr.cargos.erro.retribuicaoSemCargo"));
   });
@@ -248,7 +249,6 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
     await act(async () => {
       await result.current.corrigir("r0", {
         moeda: "EUR",
-        subsidioAlimentacao: 6,
         subsidioAlimentacaoModo: "dinheiro",
         duodecimosPct: 100,
         validoDe: "2025-01-01",
@@ -260,8 +260,9 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
     expect(estado.updates).toHaveLength(1);
     expect(estado.updates[0]).not.toHaveProperty("valor_base");
     expect(estado.updates[0]).not.toHaveProperty("periodicidade");
+    // Corrigir tambem nao escreve o valor do subsidio por pessoa.
+    expect(estado.updates[0]).not.toHaveProperty("subsidio_alimentacao");
     expect(estado.updates[0]).toMatchObject({
-      subsidio_alimentacao: 6,
       subsidio_alimentacao_modo: "dinheiro",
       duodecimos_pct: 100,
       valido_de: "2025-01-01",

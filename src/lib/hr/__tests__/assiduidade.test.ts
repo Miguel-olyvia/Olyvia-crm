@@ -27,6 +27,7 @@ import {
   minutosCobertos,
   minutosEntre,
   minutosNoturnosDoPeriodo,
+  minutosNoturnosPorFaixa,
   minutosPrevistosNoMes,
   problemasDaFalta,
   sentidoSeguinte,
@@ -584,5 +585,42 @@ describe("minutosPrevistosNoMes", () => {
       dataFim: null,
     });
     expect(minutos).toBe(6 * 4 * 60);
+  });
+});
+
+describe("minutosNoturnosPorFaixa", () => {
+  const faixas = [
+    { hora_inicio: "21:00", hora_fim: "24:00" },
+    { hora_inicio: "00:00", hora_fim: "06:00" },
+  ];
+
+  it("um turno de dia nao tem minutos noturnos em nenhuma faixa", () => {
+    expect(minutosNoturnosPorFaixa({ hora_inicio: "09:00", hora_fim: "17:00" }, faixas)).toEqual([0, 0]);
+  });
+
+  it("20:00-23:00 cai 2 h na faixa das 21:00 e nada na outra", () => {
+    expect(minutosNoturnosPorFaixa({ hora_inicio: "20:00", hora_fim: "23:00" }, faixas)).toEqual([120, 0]);
+  });
+
+  it("um turno 22:00-07:00 divide-se pelas duas faixas: 2 h antes da meia-noite, 6 h depois", () => {
+    expect(minutosNoturnosPorFaixa({ hora_inicio: "22:00", hora_fim: "07:00" }, faixas)).toEqual([120, 360]);
+  });
+
+  it("uma faixa pode atravessar a meia-noite (22:00-06:00): um turno 23:00-07:00 tem 7 h nela", () => {
+    expect(minutosNoturnosPorFaixa({ hora_inicio: "23:00", hora_fim: "07:00" }, [{ hora_inicio: "22:00", hora_fim: "06:00" }])).toEqual([420]);
+  });
+
+  it("um periodo de madrugada dentro da faixa 00:00-06:00 conta inteiro", () => {
+    expect(minutosNoturnosPorFaixa({ hora_inicio: "02:00", hora_fim: "05:30" }, faixas)).toEqual([0, 210]);
+  });
+
+  it("sem faixas devolve lista vazia; faixa invalida ou vazia da 0", () => {
+    expect(minutosNoturnosPorFaixa({ hora_inicio: "22:00", hora_fim: "07:00" }, [])).toEqual([]);
+    expect(
+      minutosNoturnosPorFaixa({ hora_inicio: "22:00", hora_fim: "07:00" }, [
+        { hora_inicio: "xx", hora_fim: "06:00" },
+        { hora_inicio: "10:00", hora_fim: "10:00" },
+      ]),
+    ).toEqual([0, 0]);
   });
 });
