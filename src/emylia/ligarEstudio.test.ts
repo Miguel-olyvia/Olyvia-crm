@@ -61,8 +61,10 @@ describe("os casos do Catálogo real do testarh (5/11)", () => {
     expect(servicoPara("retirar:banheira", S)?.id).toBe("rb");
     expect(servicoPara("retirar:bide", S)?.id).toBe("demol");
     const r = ligarAoCatalogo([L("ret-b", "servico", "retirar:bide", 1), L("dem", "servico", "demolicao", 24.66, { un: "m²" })], { demol: S.demol }, []);
-    expect(r).toHaveLength(2);
-    expect(r.find((x) => x.linhas[0].id === "ret-b")?.unDiferente).toBe("m²");
-    expect(r.find((x) => x.linhas[0].id === "dem")?.unDiferente).toBeUndefined();
+    // 6/11: o mesmo serviço entra uma vez: a demolição em m², com o retirar do bidé incluído
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ q: 24.66, alvo: { id: "demol" } });
+    expect(r[0].unDiferente).toBeUndefined();
+    expect(r[0].incluidas?.map((l) => l.id)).toEqual(["ret-b"]);
   });
 });

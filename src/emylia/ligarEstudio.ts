@@ -17,6 +17,8 @@ export interface Ligacao {
   vemComProduto?: boolean;
   /** A unidade do serviço do Catálogo não é a da linha do Estúdio (ex.: un e m²): o comercial confirma a quantidade. */
   unDiferente?: string;
+  /** 6/11: linhas que caem no mesmo serviço noutra unidade (retirar a banheira, em un, dentro da demolição em m²): ficam incluídas. */
+  incluidas?: LinhaLevada[];
 }
 
 const limpo = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -119,5 +121,17 @@ export function ligarAoCatalogo(linhas: readonly LinhaLevada[], servicos: Readon
     const nova: Ligacao = { linhas: [l], alvo, q: l.q, ...(vemComProduto ? { vemComProduto } : {}), ...(unDiferente ? { unDiferente } : {}) };
     porAlvo.set(chave, nova); out.push(nova);
   }
-  return out;
+  // 6/11 (o teste no testarh: «Demolição e entulho · 3 un» e «· 27,53 m²»): o mesmo serviço só entra uma vez nas necessidades. Fica a
+  // linha na unidade do Catálogo (ou a primeira); as outras ficam incluídas nela, sem somar quantidades de unidades diferentes.
+  const final: Ligacao[] = [];
+  for (const g of out) {
+    if (g.alvo?.tipo !== "servico" || g.vemComProduto) { final.push(g); continue; }
+    const irmas = out.filter((x) => x !== g && x.alvo?.tipo === "servico" && x.alvo.id === g.alvo!.id && !x.vemComProduto);
+    if (!irmas.length) { final.push(g); continue; }
+    const grupo = [g, ...irmas];
+    const principal = grupo.find((x) => !x.unDiferente) ?? grupo[0];
+    if (g !== principal) continue;
+    final.push({ ...principal, incluidas: grupo.filter((x) => x !== principal).flatMap((x) => x.linhas) });
+  }
+  return final;
 }

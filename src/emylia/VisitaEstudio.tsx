@@ -211,6 +211,7 @@ export function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; lin
                 <span className="min-w-0 flex-1 text-[15px]">
                   <b className="font-medium">{g.alvo!.n}</b> · {g.q.toLocaleString("pt-PT")} {g.linhas[0].un}
                   <span className="block text-xs text-muted-foreground">{g.alvo!.tipo === "produto" ? "Produto" : "Serviço"} do Catálogo, de: {g.linhas.map((l) => l.n).join("; ")}</span>
+                  {g.incluidas?.length ? <span className="block text-xs text-muted-foreground">Inclui: {g.incluidas.map((l) => l.n).join("; ")}.</span> : null}
                   {g.unDiferente && <span className="block text-xs text-warning-foreground">No Catálogo é por {g.unDiferente}: confirme a quantidade nas Necessidades.</span>}
                 </span>
               </button>
