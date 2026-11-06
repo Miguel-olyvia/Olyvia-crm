@@ -29,6 +29,7 @@ const estado = vi.hoisted(() => ({
     realizadoRecusado: false,
     faltasRecusadas: false,
     planeadoRecusado: false,
+    erro: false,
   },
 }));
 
@@ -84,6 +85,7 @@ beforeEach(() => {
   estado.relatorio.realizadoRecusado = false;
   estado.relatorio.faltasRecusadas = false;
   estado.relatorio.planeadoRecusado = false;
+  estado.relatorio.erro = false;
 });
 
 describe("useCalculoRealDoMes", () => {
@@ -158,6 +160,24 @@ describe("useCalculoRealDoMes", () => {
     expect(result.current.resultados.get("p1")?.resultado.totalBrutoEstimado).toBeNull();
   });
 
+  it("um cargo com salario semanal (300 por semana) dá a base 300 x 52 / 12 = 1300, o valor hora e o IHT sobre essa base", () => {
+    estado.regra = {
+      subsidio_limite_min: 300, subsidio_valor_hora: 0.76, subsidio_valor_dia: 6.15,
+      he_pct_dia_util: 50, he_pct_feriado: 75, he_pct_descanso: 100, iht_pct: 25, noturnas: [],
+    };
+    estado.retribuicoes = new Map([["p1", [{ ...retribuicao("p1", 300), periodicidade: "semanal" }]]]);
+    estado.direitos = new Map([["p1", { iht: true, km: false, ajudas: false }]]);
+    const { result } = renderHook(() => useCalculoRealDoMes(2026, 10));
+    act(() => result.current.registar("p1", recolha()));
+    const calculo = result.current.resultados.get("p1");
+    expect(calculo?.periodicidade).toBe("semanal");
+    expect(calculo?.resultado.avisos).not.toContain("periodicidade_nao_convertivel");
+    expect(calculo?.resultado.baseMes).toBeCloseTo(1300, 6);
+    expect(calculo?.resultado.valorHoraReal).toBeCloseTo(8.125, 6); // 1300 / 160 h
+    expect(calculo?.resultado.linhasRegra.find((l) => l.tipo === "iht")?.valor).toBeCloseTo(325, 6);
+    expect(calculo?.resultado.totalBrutoEstimado).toBeCloseTo(1300 + 325, 6);
+  });
+
   it("devolve o erro de carregar as pessoas em vez de uma lista vazia calada", () => {
     estado.pessoas = [];
     estado.pessoasErro = "falha ao ler";
@@ -193,6 +213,30 @@ describe("RecolhaDeAssiduidade", () => {
   });
 });
 
+describe("leitura falhada da assiduidade (erro, nao permissao)", () => {
+  it("uma leitura que falhou chega marcada como incompleta (nunca como linhas vazias boas)", () => {
+    estado.relatorio.erro = true;
+    const registar = vi.fn();
+    render(<RecolhaDeAssiduidade calculo={{ pessoasActivas: [pessoa("p1")], registar, intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false } } as never} ano={2026} mes={10} />);
+    expect(registar).toHaveBeenCalledWith("p1", expect.objectContaining({ incompleta: true }));
+  });
+
+  it("a ficha da pessoa tambem a marca incompleta", () => {
+    estado.relatorio.erro = true;
+    const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10));
+    expect(result.current.incompleta).toBe(true);
+  });
+
+  it("assiduidadeIncompleta(id) diz que pessoas ficaram incompletas (bloqueia o fecho)", () => {
+    const { result } = renderHook(() => useCalculoRealDoMes(2026, 10));
+    act(() => {
+      result.current.registar("p1", recolha({ incompleta: true }));
+    });
+    expect(result.current.assiduidadeIncompleta("p1")).toBe(true);
+    expect(result.current.assiduidadeIncompleta("p2")).toBe(false);
+  });
+});
+
 describe("useCalculoRealDaPessoa", () => {
   it("calcula o total da pessoa quando tudo chegou", () => {
     const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10));
@@ -200,6 +244,13 @@ describe("useCalculoRealDaPessoa", () => {
     expect(result.current.resultado?.resultado.totalBrutoEstimado).toBeCloseTo(1200, 6);
     expect(result.current.temPeriodo).toBe(true);
     expect(result.current.periodoAberto).toBe(true);
+  });
+
+  it("a pessoa com cargo semanal tem o total pela conversao semanal x 52 / 12", () => {
+    estado.retribuicoes = new Map([["p1", [{ ...retribuicao("p1", 300), periodicidade: "semanal" }]]]);
+    const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10));
+    expect(result.current.resultado?.periodicidade).toBe("semanal");
+    expect(result.current.resultado?.resultado.totalBrutoEstimado).toBeCloseTo(1300, 6);
   });
 
   it("enquanto a assiduidade carrega nao ha resultado", () => {

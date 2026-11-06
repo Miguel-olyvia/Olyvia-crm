@@ -106,12 +106,30 @@ export function moduloPermissoesFalso() {
 /** Uma cadeia de consulta: qualquer método encadeia, e `await` devolve as linhas de `rhTeste.respostas[tabela]`. */
 function consulta(tabela: string): unknown {
   rhTeste.chamadas.push({ tabela });
+  // `.in(coluna, valores)` filtra de verdade as linhas que tenham essa coluna (como o servidor); as que nao a tem passam, para nao
+  // mudar os testes antigos que usam linhas minimas.
+  const filtrosIn: Array<[string, readonly unknown[]]> = [];
   const resultado = () => {
     const r = rhTeste.respostas[tabela];
-    return { data: r === undefined ? [] : r, error: null, count: Array.isArray(r) ? r.length : 0 };
+    const linhas =
+      Array.isArray(r) && filtrosIn.length > 0
+        ? r.filter((linha) =>
+            filtrosIn.every(([coluna, valores]) => {
+              const v = (linha as Record<string, unknown> | null)?.[coluna];
+              return v === undefined || valores.includes(v);
+            }),
+          )
+        : r;
+    return { data: linhas === undefined ? [] : linhas, error: null, count: Array.isArray(linhas) ? linhas.length : 0 };
   };
   const cadeia: unknown = new Proxy(() => undefined, {
     get: (_alvo, nome) => {
+      if (nome === "in") {
+        return (coluna: string, valores: readonly unknown[]) => {
+          filtrosIn.push([coluna, valores]);
+          return cadeia;
+        };
+      }
       if (nome === "then") return (ok: (v: unknown) => unknown, ko?: (e: unknown) => unknown) => Promise.resolve(resultado()).then(ok, ko);
       if (nome === "single" || nome === "maybeSingle") {
         return () => {

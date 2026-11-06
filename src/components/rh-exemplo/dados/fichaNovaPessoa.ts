@@ -13,7 +13,7 @@ import type { Pendencia } from "@/components/rh-exemplo/hooks/useAdmissaoPendenc
 import type { TipoAnexoConvite } from "@/components/rh-exemplo/lib/conviteAnexos";
 import type {
   HorasFrequencia, Pessoa, PessoaContactoEmergencia, PessoaDadosBancarios, PessoaDadosPessoais, PessoaDadosSaude,
-  PessoaFardamento, PessoaIdentificacao, PessoaMorada, PessoaSindicalizacao, PessoaVinculo, SubsidioAlimentacaoModo,
+  PessoaFardamento, PessoaIdentificacao, PessoaMorada, PessoaSindicalizacao, PessoaVinculo,
 } from "@/components/rh-exemplo/tipos";
 
 export interface AnexoDaNova {
@@ -43,7 +43,7 @@ export interface ExtrasNovaPessoa {
   /** Os campos do contrato que o formulário pede; o que ficou em branco vai a `null`. */
   vinculo: Partial<PessoaVinculo>;
   horas: { periodo: number; frequencia: HorasFrequencia } | null;
-  retribuicao: { subsidio: number | null; modo: SubsidioAlimentacaoModo | null; duodecimos: 0 | 50 | 100 };
+  retribuicao: { duodecimos: 0 | 50 | 100 };
   criarAcesso: boolean;
   anexos: AnexoDaNova[];
   /** Com convite: o e-mail de destino (o pessoal), o role previsto de acesso (escolhido pelo RH) e o login temporário vale 7 dias. */

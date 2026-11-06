@@ -238,6 +238,8 @@ const SEM_FAIXAS: readonly FaixaNoturnaDoRelatorio[] = [];
 interface Satelite<T> {
   linhas: T[];
   recusado: boolean;
+  /** A leitura falhou (nao por permissao): as linhas estao vazias por erro, nao porque nao existam. */
+  erro?: boolean;
 }
 
 const vazio = <T,>(): Satelite<T> => ({ linhas: [], recusado: false });
@@ -251,7 +253,7 @@ async function carregar<T>(
   if (error) {
     if (isPermissionError(error)) return { linhas: [], recusado: true };
     captureFlowError(error, "hr-relatorio-assiduidade-mensal-load");
-    return { linhas: [], recusado: false };
+    return { linhas: [], recusado: false, erro: true };
   }
   return { linhas: (data ?? []) as T[], recusado: false };
 }
@@ -352,8 +354,11 @@ export function useRelatorioAssiduidadeMensal(
   const [feriados, setFeriados] = useState<IndiceFeriados>(() => indexarFeriados([]));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Uma falha NAO por permissao (rede, base) em qualquer leitura, ou a excepcao geral do carregamento: o relatorio
+  // nao pode passar por completo so porque as linhas vieram vazias.
+  const [erroDeLeitura, setErroDeLeitura] = useState(false);
 
-  const de = intervalo?.de ?? periodoDaFolha(ano, mes + 1).de;
+  const de =intervalo?.de ?? periodoDaFolha(ano, mes + 1).de;
   const ate = intervalo?.ate ?? periodoDaFolha(ano, mes + 1).ate;
 
   // Conta os pedidos: so a resposta do mais recente escreve no estado (mudar de periodo a meio de uma leitura).
@@ -369,6 +374,7 @@ export function useRelatorioAssiduidadeMensal(
       setAusenciasTipos(vazio<AusenciaTipo>());
       setObras(vazio<ObraHoras>());
       setScheduleSettings(vazio<ScheduleSettingsTimezone>());
+      setErroDeLeitura(false);
       setLoading(false);
       return;
     }
@@ -434,8 +440,15 @@ export function useRelatorioAssiduidadeMensal(
       setObras(asObras);
       setFeriados(indexarFeriados(osFeriados.linhas));
       setScheduleSettings(asScheduleSettings);
+      setErroDeLeitura(
+        [oRealizado, asFaltas, oPlaneado, osDiasDeAusencia, osTiposDeAusencia, asObras, osFeriados, asScheduleSettings].some(
+          (s) => s.erro === true,
+        ),
+      );
     } catch (e) {
       captureFlowError(e, "hr-relatorio-assiduidade-mensal-load");
+      // Nao se engole: sem isto o relatorio ficava com as linhas do pedido anterior (ou vazias) como se fosse bom.
+      if (pedido === ultimoPedido.current) setErroDeLeitura(true);
     } finally {
       if (pedido === ultimoPedido.current) setLoading(false);
     }
@@ -767,6 +780,8 @@ export function useRelatorioAssiduidadeMensal(
     realizadoRecusado: realizado.recusado,
     faltasRecusadas: faltas.recusado,
     planeadoRecusado: planeado.recusado,
+    /** Alguma leitura falhou (nao por permissao): os totais podem estar incompletos. */
+    erro: erroDeLeitura,
     loading,
     saving,
     recarregar: load,

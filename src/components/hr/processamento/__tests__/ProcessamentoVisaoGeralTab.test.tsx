@@ -34,8 +34,10 @@ vi.mock("@/hooks/usePessoas", () => ({
 }));
 
 let codigosActuais: unknown[] = [];
+let codigosEstadoMock = "ok";
+let assiduidadeIncompletaMock = false;
 vi.mock("@/hooks/useCodigosProcessamento", () => ({
-  useCodigosProcessamento: () => ({ codigos: codigosActuais }),
+  useCodigosProcessamento: () => ({ codigos: codigosActuais, estado: codigosEstadoMock }),
 }));
 
 vi.mock("@/contexts/CompanyContext", () => ({
@@ -44,6 +46,7 @@ vi.mock("@/contexts/CompanyContext", () => ({
 
 let retribuicoesPorPessoa = new Map<string, unknown[]>();
 let retribuicoesRecusado = false;
+let retribuicoesEstadoMock: string | null = null;
 let direitosEstado: "ok" | "indisponivel" | "recusado" | "erro" = "ok";
 vi.mock("@/hooks/useRetribuicoesVigentesDaOrganizacao", async () => {
   const real = await vi.importActual<
@@ -55,6 +58,7 @@ vi.mock("@/hooks/useRetribuicoesVigentesDaOrganizacao", async () => {
       porPessoa: retribuicoesPorPessoa,
       loading: false,
       recusado: retribuicoesRecusado,
+      estado: retribuicoesEstadoMock ?? (retribuicoesRecusado ? "recusado" : "ok"),
       recarregar: vi.fn(),
     }),
   };
@@ -92,6 +96,30 @@ vi.mock("@/hooks/useProcessamentoPeriodo", () => ({
     fechar: fecharMock,
   }),
 }));
+
+// Os vinculos (quem o fecho obriga a enviar) e os resultados gravados de um periodo fechado (so se leem se estiver fechado).
+let obrigatoriasMock: string[] = ["pessoa-1", "pessoa-2"];
+let vinculosEstadoMock = "ok";
+vi.mock("@/hooks/usePessoasObrigatoriasDoFecho", () => ({
+  usePessoasObrigatoriasDoFecho: () => ({ obrigatorias: obrigatoriasMock, estado: vinculosEstadoMock }),
+}));
+const lerGravadoSemPedido = (estado: string, linhas: Array<Record<string, unknown>> = []) => ({
+  estado,
+  porPessoa: new Map(linhas.map((l) => [l.pessoa_id as string, l])),
+  fechadoEm: linhas.length > 0 ? "2026-10-01T10:00:00Z" : null,
+  fechadoPorNome: linhas.length > 0 ? "Rita Gomes" : null,
+  antesDoRegisto: estado === "ok" && linhas.length === 0,
+});
+let leituraGravada: ReturnType<typeof lerGravadoSemPedido> = lerGravadoSemPedido("inactivo");
+vi.mock("@/hooks/useProcessamentoResultados", () => ({
+  useProcessamentoResultados: () => leituraGravada,
+}));
+const gravada = (pessoaId: string, extra: Record<string, unknown> = {}) => ({
+  pessoa_id: pessoaId, valor_hora: 7.5, total_bruto: 777.77,
+  totais: { base_mes: 700, divisor_duodecimos: 14, total_codigos_automaticos: 10, total_regras: 20, desconto_faltas: 5, subsidio_alimentacao: 40, lancamentos_pontuais: 12.77 },
+  linhas: [], avisos: [], retribuicao_id: null, cargo_periodo_id: null, regra_salarial_id: null,
+  fechado_em: "2026-10-01T10:00:00Z", fechado_por_nome: "Rita Gomes", ...extra,
+});
 
 let lancamentosActuais: unknown[] = [];
 const criarMock = vi.fn(async () => null);
@@ -137,7 +165,7 @@ vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async (
       pessoaId: string;
       intervalo?: { de: string; ate: string };
       mes: number;
-      aoTerminarCarregamento: (id: string, totais: unknown, dias: unknown[]) => void;
+      aoTerminarCarregamento: (id: string, totais: unknown, dias: unknown[], incompleta: boolean) => void;
     }) => {
       intervaloRecebido = intervalo ? { de: intervalo.de, ate: intervalo.ate, mes } : null;
       react.useEffect(() => {
@@ -145,6 +173,7 @@ vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async (
           pessoaId,
           totaisPorPessoaMock[pessoaId] ?? TOTAIS_PADRAO,
           diasPorPessoaMock[pessoaId] ?? [],
+          assiduidadeIncompletaMock,
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [pessoaId]);
@@ -175,8 +204,14 @@ beforeEach(() => {
   };
   periodoActual = null;
   periodoLoading = false;
+  obrigatoriasMock = ["pessoa-1", "pessoa-2"];
+  vinculosEstadoMock = "ok";
+  leituraGravada = lerGravadoSemPedido("inactivo");
   lancamentosActuais = [];
   codigosActuais = [];
+  codigosEstadoMock = "ok";
+  assiduidadeIncompletaMock = false;
+  retribuicoesEstadoMock = null;
   retribuicoesPorPessoa = new Map();
   retribuicoesRecusado = false;
   direitosEstado = "ok";
@@ -318,6 +353,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
         anulado_motivo: null,
       },
     ];
+    leituraGravada = lerGravadoSemPedido("ok", [gravada("pessoa-1"), gravada("pessoa-2")]);
     render(<ProcessamentoVisaoGeralTab />);
     await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
 
@@ -344,6 +380,120 @@ describe("ProcessamentoVisaoGeralTab", () => {
     fireEvent.click(botaoConfirmar);
 
     await waitFor(() => expect(fecharMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("fechar envia o resultado de cada pessoa obrigatoria (p_resultados), com a versao da retribuicao em vigor e a regra", async () => {
+    periodoActual = PERIODO_ABERTO;
+    regraSalarialMock = { id: "regra-9", subsidio_limite_min: 0, subsidio_valor_hora: 0, subsidio_valor_dia: 0, noturnas: [] };
+    retribuicoesPorPessoa = new Map([
+      ["pessoa-1", [{ id: "ret-1", pessoa_id: "pessoa-1", valor_base: 1200, periodicidade: "mensal", duodecimos_pct: 0, valido_de: "2026-01-01", valido_ate: null }]],
+    ]);
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("hr.vencimento.visaoGeral.fecharPeriodo"));
+    const dialog = await screen.findByText("hr.vencimento.visaoGeral.confirmarFechoTitulo");
+    expect(screen.getByText("rhProcReal.fecho.confirmarDescricao")).toBeInTheDocument();
+    fireEvent.click(within(dialog.closest('[role="alertdialog"]') as HTMLElement).getByText("hr.vencimento.visaoGeral.fecharPeriodo"));
+
+    await waitFor(() => expect(fecharMock).toHaveBeenCalledTimes(1));
+    const enviados = (fecharMock.mock.calls[0] as unknown as [Array<Record<string, unknown>>])[0];
+    expect(enviados.map((r) => r.pessoa_id)).toEqual(["pessoa-1", "pessoa-2"]);
+    expect(enviados[0]).toMatchObject({ retribuicao_id: "ret-1", regra_salarial_id: "regra-9", cargo_periodo_id: null });
+    expect(enviados[1]).toMatchObject({ retribuicao_id: null, total_bruto: null });
+  });
+
+  it("so envia as pessoas obrigatorias (activas com vinculo sobreposto ao periodo)", async () => {
+    periodoActual = PERIODO_ABERTO;
+    obrigatoriasMock = ["pessoa-2"];
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    fireEvent.click(screen.getByText("hr.vencimento.visaoGeral.fecharPeriodo"));
+    const dialog = await screen.findByText("hr.vencimento.visaoGeral.confirmarFechoTitulo");
+    fireEvent.click(within(dialog.closest('[role="alertdialog"]') as HTMLElement).getByText("hr.vencimento.visaoGeral.fecharPeriodo"));
+    await waitFor(() => expect(fecharMock).toHaveBeenCalledTimes(1));
+    const enviados = (fecharMock.mock.calls[0] as unknown as [Array<Record<string, unknown>>])[0];
+    expect(enviados.map((r) => r.pessoa_id)).toEqual(["pessoa-2"]);
+  });
+
+  it("direitos salariais por ler: o botao de fechar fica bloqueado e o motivo escrito (nao se chama fechar)", async () => {
+    periodoActual = PERIODO_ABERTO;
+    direitosEstado = "erro";
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    const botao = screen.getByRole("button", { name: "hr.vencimento.visaoGeral.fecharPeriodo" });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("rhProcReal.fecho.bloqueio.direitos")).toBeInTheDocument();
+    fireEvent.click(botao);
+    expect(fecharMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["recusado", "erro", "a_carregar"])("codigos de processamento %s: bloqueia o fecho com o motivo escrito", async (estadoCodigos) => {
+    periodoActual = PERIODO_ABERTO;
+    codigosEstadoMock = estadoCodigos;
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    const botao = screen.getByRole("button", { name: "hr.vencimento.visaoGeral.fecharPeriodo" });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(botao).toHaveAccessibleDescription("rhProcReal.fecho.bloqueio.codigos");
+    fireEvent.click(botao);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(fecharMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["erro", "a_carregar"])("retribuicoes %s (nao so recusadas): bloqueia o fecho", async (estadoRetribuicoes) => {
+    periodoActual = PERIODO_ABERTO;
+    retribuicoesEstadoMock = estadoRetribuicoes;
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "hr.vencimento.visaoGeral.fecharPeriodo" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("rhProcReal.fecho.bloqueio.retribuicoes")).toBeInTheDocument();
+  });
+
+  it("assiduidade lida so em parte (recusada ou com erro): bloqueia o fecho e diz quantas pessoas", async () => {
+    periodoActual = PERIODO_ABERTO;
+    assiduidadeIncompletaMock = true;
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "hr.vencimento.visaoGeral.fecharPeriodo" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("rhProcReal.fecho.bloqueio.assiduidade")).toBeInTheDocument();
+    expect(fecharMock).not.toHaveBeenCalled();
+  });
+  it("vinculos por ler (nao se sabe quem e obrigatorio): bloqueia", async () => {
+    periodoActual = PERIODO_ABERTO;
+    vinculosEstadoMock = "recusado";
+    obrigatoriasMock = [];
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "hr.vencimento.visaoGeral.fecharPeriodo" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("rhProcReal.fecho.bloqueio.vinculos")).toBeInTheDocument();
+  });
+
+  it("periodo fechado: mostra os valores GRAVADOS (nao recalcula) e diz quando e por quem foi fechado", async () => {
+    periodoActual = PERIODO_FECHADO;
+    leituraGravada = lerGravadoSemPedido("ok", [gravada("pessoa-1"), gravada("pessoa-2", { total_bruto: 500, totais: { base_mes: 500 } })]);
+    // O calculo de agora daria 1200 de base para a Ana: nao pode aparecer.
+    retribuicoesPorPessoa = new Map([
+      ["pessoa-1", [{ pessoa_id: "pessoa-1", valor_base: 1200, periodicidade: "mensal", duodecimos_pct: 0, valido_de: "2026-01-01", valido_ate: null }]],
+    ]);
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByRole("cell", { name: "Ana Silva" })).toBeInTheDocument());
+    const linhaAna = screen.getByRole("cell", { name: "Ana Silva" }).closest("tr") as HTMLElement;
+    const semNbsp = (texto: string) => texto.replace(/\s/g, " ");
+    expect(semNbsp(linhaAna.textContent ?? "")).toContain(semNbsp(formatarValorEsperado(777.77)));
+    expect(semNbsp(linhaAna.textContent ?? "")).toContain(semNbsp(formatarValorEsperado(700)));
+    expect(semNbsp(document.body.textContent ?? "")).not.toContain(semNbsp(formatarValorEsperado(1200)));
+    // Nem sequer se pede a assiduidade de ninguem: as instancias ocultas nao se montam.
+    expect(intervaloRecebido).toBeNull();
+  });
+
+  it("periodo fechado antes do registo: diz que os valores nao estao disponiveis e nao mostra tabela", async () => {
+    periodoActual = PERIODO_FECHADO;
+    leituraGravada = lerGravadoSemPedido("ok", []);
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("rhProcReal.fecho.antesDoRegisto")).toBeInTheDocument());
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("cell", { name: "Ana Silva" })).not.toBeInTheDocument();
   });
 
   it("pessoa com retribuicao e sem codigos automaticos mostra base e total = base", async () => {

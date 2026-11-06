@@ -223,7 +223,6 @@ export function payloadDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): NovaPes
 
 export function extrasDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): ExtrasNovaPessoa {
   const horas = numeroDe(v.contrato.horas_trabalho);
-  const subsidio = numeroDe(v.contrato.subsidio);
   return {
     pessoa: {
       numero_interno: texto(v.geral.numero_interno),
@@ -244,8 +243,6 @@ export function extrasDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): ExtrasNo
     vinculo: vinculo(v),
     horas: horas === null ? null : { periodo: horas, frequencia: v.contrato.horas_frequencia },
     retribuicao: {
-      subsidio,
-      modo: v.contrato.subsidio_modo === "" ? null : v.contrato.subsidio_modo,
       duodecimos: Number(v.contrato.duodecimos_pct || 0) as 0 | 50 | 100,
     },
     criarAcesso: v.extra.criar_acesso,

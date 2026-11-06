@@ -18,7 +18,6 @@ import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { ContratoGrupoTempoTrabalho } from "@/components/rh-exemplo/contrato/ContratoGrupoTempoTrabalho";
 import { ConfiguracaoHorasExtra } from "@/components/rh-exemplo/fluxosC/ConfiguracaoHorasExtra";
 import { HorasExtraDaPessoa } from "@/components/rh-exemplo/fluxosC/HorasExtraDaPessoa";
-import { limiteAnualMin } from "@/components/rh-exemplo/fluxosC/limitePessoa";
 import { menuSections } from "@/components/sidebar/menuConfig";
 import { PessoaHorarioTab } from "@/components/rh-exemplo/PessoaHorarioTab";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
@@ -26,6 +25,10 @@ import RhAssiduidadeOrganizacao from "./RhAssiduidadeOrganizacao";
 
 // As horas extra, os limites e a marca por pessoa vivem na base: aqui simulados (semeados com as horas extra de exemplo).
 vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
+// A regra salarial em vigor: 7200 min (120 h) de limite anual de horas extra.
+vi.mock("@/components/rh-exemplo/hooks/useRegrasSalariais", () => ({
+  useRegrasSalariais: () => ({ emVigor: { he_limite_anual_min: 7200 }, estado: "ok", isLoading: false }),
+}));
 vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 import { baseFalsa, reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
 // A fila de trabalho junta as horas extra (acima), as justificações e os desvios: simulada, sem react-query nem base.
@@ -202,13 +205,6 @@ describe("horas extra: limites, configuração e histórico", () => {
     expect(grupo?.paths).not.toContain("/rh-exemplo/horas-extra");
   });
 
-  it("o limite anual da pessoa é o «Horas anuais máximas» do Contrato; sem ele vale o da organização", () => {
-    const ficha = lerEstado().fichas["p-sofia"];
-    expect(limiteAnualMin(ficha, 9000)).toBe(9000);
-    const comLimite = { ...ficha, vinculos: ficha.vinculos.map((v) => ({ ...v, horas_anuais_maximas: 100 })) };
-    expect(limiteAnualMin(comLimite, 9000)).toBe(6000);
-  });
-
   it("o interruptor está no grupo «Tempo de trabalho» do Contrato, grava na base, e os máximos dependem só de quem pode editar", async () => {
     const rascunho = { horas_anuais_maximas: "", horas_semanais_maximas: "", regime: "tempo_inteiro", tipo_trabalho: "", horas_periodo: "40", horas_frequencia: "semanal", politica_feriados: "nao_laboral", isencao_horario: false, dias_uteis: [1] } as unknown as Parameters<typeof ContratoGrupoTempoTrabalho>[0]["rascunho"];
     noRouter(<ContratoGrupoTempoTrabalho rascunho={rascunho} definir={() => {}} podeEditar criandoContrato={false} pessoaId="p-marta" erroDe={() => null} />);
@@ -226,9 +222,21 @@ describe("horas extra: limites, configuração e histórico", () => {
 
   it("o alerta configura-se em Processamento salarial > Configuração (os coeficientes são da base, ver horasExtraReal.test)", async () => {
     noRouter(<ConfiguracaoHorasExtra />);
+    const anoAntes = baseFalsa.limites.anoMin;
     fireEvent.change(screen.getByLabelText(/Alerta a/), { target: { value: "70" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Guardar" })[0]);
     await waitFor(() => expect(baseFalsa.limites.alertaPct).toBe(70));
+    // Guardar não mexe no limite anual antigo (já não é editável aqui).
+    expect(baseFalsa.limites.anoMin).toBe(anoAntes);
+  });
+
+  it("o limite anual é o da regra salarial em vigor: só leitura, sem campo, com ligação às Regras salariais", () => {
+    const irParaRegras = vi.fn();
+    noRouter(<ConfiguracaoHorasExtra aoIrParaRegrasSalariais={irParaRegras} />);
+    expect(screen.getByTestId("he-cfg-limite-anual")).toHaveTextContent("120 h por ano");
+    expect(document.getElementById("he-cfg-anoH")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Alterar em Regras salariais" }));
+    expect(irParaRegras).toHaveBeenCalledTimes(1);
   });
 
   it("o cálculo do mês usa só as confirmadas e os coeficientes configurados", () => {

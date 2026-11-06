@@ -13,7 +13,7 @@
  * OCULTA por pessoa (`ResumoPessoaProcessamentoOculto`), o mesmo padrao de
  * `RelatorioAssiduidadeMensalOrganizacao.tsx`.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -84,6 +84,15 @@ import {
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { toast } from "@/lib/toast";
 import { Eye, Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
+import {
+  construirResultadosDoFecho,
+  MAX_DESCRICAO_LANCAMENTO,
+  motivoDeBloqueioDoFecho,
+  resultadoDeLinhaGravada,
+  usePessoasObrigatoriasDoFecho,
+  useProcessamentoResultados,
+} from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
+import { BannerFechoGravado } from "@/components/rh-exemplo/hooks/BannerFechoGravado";
 
 /** Minutos -> horas com no maximo 2 casas decimais, sem zeros a mais. */
 function horasDeMinutos(minutos: number): string {
@@ -141,6 +150,7 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
 const SEM_FAIXAS: readonly { hora_inicio: string; hora_fim: string }[] = [];
 const SEM_TOTAIS: Record<string, TotaisRelatorioMensal> = {};
 const SEM_DIAS: Record<string, readonly DiaRelatorioMensal[]> = {};
+const SEM_INCOMPLETAS: Record<string, boolean> = {};
 const FORM_LANCAMENTO_VAZIO = { descricao: "", valor: "", codigoProcessamentoId: "" };
 
 export function ProcessamentoVisaoGeralTab() {
@@ -149,7 +159,7 @@ export function ProcessamentoVisaoGeralTab() {
   const { hasPermission } = usePermissions();
   const { activeCompany } = useCompany();
   const { pessoas, loading: pessoasLoading } = usePessoas();
-  const { codigos } = useCodigosProcessamento();
+  const { codigos, estado: codigosEstado } = useCodigosProcessamento();
 
   const podeVerPeriodo = hasPermission("hr.processamento.periodo.view");
   const podeGerirPeriodo = hasPermission("hr.processamento.periodo.gerir");
@@ -171,7 +181,7 @@ export function ProcessamentoVisaoGeralTab() {
   const regrasHook = useRegrasSalariais();
   const direitosHook = useDireitosSalariaisDaOrganizacao(activeCompany?.id);
   // Sem os direitos (IHT, km, ajudas) o total pode estar incompleto: nunca se apresenta como definitivo.
-  const direitosLidos = direitosHook.estado === "ok";
+  const direitosLidos = periodo?.estado === "fechado" || direitosHook.estado === "ok";
   // A regra em vigor no ULTIMO DIA do periodo e as suas faixas noturnas (memoizadas: o relatorio de cada pessoa depende delas).
   const regra = useMemo(() => regraEmVigorNoDia(regrasHook.versoes, ultimoDia), [regrasHook.versoes, ultimoDia]);
   const faixasNoturnas = useMemo(() => regra?.noturnas ?? SEM_FAIXAS, [regra]);
@@ -182,10 +192,14 @@ export function ProcessamentoVisaoGeralTab() {
     chave: string;
     totais: Record<string, TotaisRelatorioMensal>;
     dias: Record<string, readonly DiaRelatorioMensal[]>;
-  }>({ chave: chavePeriodo, totais: {}, dias: {} });
+    /** A assiduidade da pessoa so se leu em parte (recusada ou com erro): bloqueia o fecho. */
+    incompletas: Record<string, boolean>;
+  }>({ chave: chavePeriodo, totais: {}, dias: {}, incompletas: {} });
   const totaisPorPessoa = recolhido.chave === chavePeriodo ? recolhido.totais : SEM_TOTAIS;
   const diasPorPessoa = recolhido.chave === chavePeriodo ? recolhido.dias : SEM_DIAS;
+  const incompletasPorPessoa = recolhido.chave === chavePeriodo ? recolhido.incompletas : SEM_INCOMPLETAS;
   const [confirmarFecho, setConfirmarFecho] = useState(false);
+  const estadoFechoRef = useRef<HTMLParagraphElement>(null);
   const [pessoaParaLancamento, setPessoaParaLancamento] = useState<string | null>(null);
   const [pessoaParaDetalhe, setPessoaParaDetalhe] = useState<string | null>(null);
   const [formLancamento, setFormLancamento] = useState(FORM_LANCAMENTO_VAZIO);
@@ -203,10 +217,16 @@ export function ProcessamentoVisaoGeralTab() {
     pessoaId: string,
     totais: TotaisRelatorioMensal,
     dias: readonly DiaRelatorioMensal[],
+    incompleta: boolean,
   ) => {
     setRecolhido((atual) => {
-      const base = atual.chave === chavePeriodo ? atual : { chave: chavePeriodo, totais: {}, dias: {} };
-      return { chave: chavePeriodo, totais: { ...base.totais, [pessoaId]: totais }, dias: { ...base.dias, [pessoaId]: dias } };
+      const base = atual.chave === chavePeriodo ? atual : { chave: chavePeriodo, totais: {}, dias: {}, incompletas: {} };
+      return {
+        chave: chavePeriodo,
+        totais: { ...base.totais, [pessoaId]: totais },
+        dias: { ...base.dias, [pessoaId]: dias },
+        incompletas: { ...base.incompletas, [pessoaId]: incompleta },
+      };
     });
   };
 
@@ -292,6 +312,44 @@ export function ProcessamentoVisaoGeralTab() {
 
   const periodoFechado = periodo?.estado === "fechado";
 
+  // Um periodo fechado LE o que ficou gravado e nao recalcula (nem pede a assiduidade de ninguem).
+  const leitura = useProcessamentoResultados(periodo?.id, periodoFechado);
+  const idsActivas = useMemo(() => pessoasActivas.map((p) => p.id), [pessoasActivas]);
+  const { obrigatorias, estado: estadoVinculos } = usePessoasObrigatoriasDoFecho(idsActivas, intervalo.de, intervalo.ate);
+  const gravados = useMemo(() => {
+    const mapa = new Map<string, ResultadoPessoa>();
+    for (const [id, linha] of leitura.porPessoa) {
+      // O gravado nao guarda o valor base nem a periodicidade da retribuicao: na coluna do salario base fica a base do mes.
+      const resultado = resultadoDeLinhaGravada(linha);
+      mapa.set(id, { resultado, valorBase: resultado.baseMes, periodicidade: null, mudouAMeioDoMes: false });
+    }
+    return mapa;
+  }, [leitura.porPessoa]);
+  const resultadosMostrados: ReadonlyMap<string, ResultadoPessoa> = periodoFechado ? gravados : resultadosPorPessoa;
+  const semValoresGravados = periodoFechado && (leitura.estado !== "ok" || leitura.antesDoRegisto);
+  const pessoasDaTabela = useMemo<{ id: string; nome_completo: string }[]>(() => {
+    if (!periodoFechado) return pessoasActivas;
+    const nomes = new Map(pessoas.map((p) => [p.id, p.nome_completo]));
+    return [...gravados.keys()]
+      .map((id) => ({ id, nome_completo: nomes.get(id) ?? t("rhProcReal.pessoaRemovida") }))
+      .sort((a, b) => a.nome_completo.localeCompare(b.nome_completo));
+  }, [periodoFechado, pessoasActivas, pessoas, gravados, t]);
+
+  const motivoBloqueio = motivoDeBloqueioDoFecho({
+    direitosLidos: direitosHook.estado === "ok",
+    // O fecho grava para sempre: so avanca com as retribuicoes, os codigos e a assiduidade lidos por inteiro.
+    retribuicoes: retribuicoesHook.estado,
+    codigos: codigosEstado,
+    regras: regrasHook.isLoading ? "a_carregar" : regrasHook.estado,
+    vinculos: estadoVinculos,
+    pessoasObrigatorias: obrigatorias,
+    comCalculo: (id) => resultadosPorPessoa.has(id),
+    assiduidadeIncompleta: (id) => incompletasPorPessoa[id] === true,
+  });
+  const textoBloqueio = motivoBloqueio
+    ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
+    : null;
+
   const abrirPeriodo = async () => {
     const erro = await periodoHook.abrir();
     if (erro) toast.error(erro);
@@ -300,9 +358,29 @@ export function ProcessamentoVisaoGeralTab() {
 
   const fecharPeriodo = async () => {
     setConfirmarFecho(false);
-    const erro = await periodoHook.fechar();
+    // O botao so e ria-disabled: o clique nunca fecha com o motivo por resolver.
+    if (textoBloqueio) {
+      toast.error(textoBloqueio);
+      return;
+    }
+    // Fecha e GRAVA o resultado de cada pessoa obrigatoria, tal como o ecra o mostra agora.
+    const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
+      pessoasObrigatorias: obrigatorias,
+      resultadoDe: (id) => resultadosPorPessoa.get(id)?.resultado,
+      versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
+      lancamentosDe: (id) => lancamentosPorPessoa.get(id) ?? [],
+      dataFim: ultimoDia,
+      regraSalarialId: regra?.id ?? null,
+    });
+    const erro = semCalculo.length > 0
+      ? t("rhProcReal.fecho.bloqueio.calculo", { n: semCalculo.length })
+      : await periodoHook.fechar(paraGravar);
     if (erro) toast.error(erro);
-    else toast.success(t("hr.vencimento.visaoGeral.periodoFechadoSucesso"));
+    else {
+      toast.success(t("hr.vencimento.visaoGeral.periodoFechadoSucesso"));
+      // O botao que se clicou desaparece (fechado nao tem botao): o foco passa para a mensagem de estado do periodo.
+      requestAnimationFrame(() => estadoFechoRef.current?.focus());
+    }
   };
 
   const abrirFormularioLancamento = (pessoaId: string) => {
@@ -364,7 +442,12 @@ export function ProcessamentoVisaoGeralTab() {
                 : t("hr.vencimento.visaoGeral.estadoAberto")}
             </Badge>
             {podeGerirPeriodo && !periodoFechado && (
-              <Button variant="outline" className="min-h-11" onClick={() => setConfirmarFecho(true)} aria-busy={periodoHook.saving}>
+              <Button
+                variant="outline" className="min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50" aria-busy={periodoHook.saving}
+                onClick={() => { if (textoBloqueio === null && !periodoHook.saving) setConfirmarFecho(true); }}
+                aria-disabled={textoBloqueio !== null || periodoHook.saving}
+                aria-describedby={textoBloqueio ? "fecho-bloqueio" : undefined}
+              >
                 <Lock className="mr-2 h-4 w-4" aria-hidden="true" />
                 {t("hr.vencimento.visaoGeral.fecharPeriodo")}
               </Button>
@@ -372,6 +455,10 @@ export function ProcessamentoVisaoGeralTab() {
           </div>
         )}
       </div>
+
+      {periodo && podeGerirPeriodo && !periodoFechado && textoBloqueio && (
+        <p id="fecho-bloqueio" role="status" className="text-sm text-amber-800 dark:text-amber-300">{textoBloqueio}</p>
+      )}
 
       {periodoHook.loading || pessoasLoading || direitosHook.isLoading ? (
         <div className="flex justify-center py-12">
@@ -409,7 +496,7 @@ export function ProcessamentoVisaoGeralTab() {
               {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
             </p>
           )}
-          {pessoasActivas.map((pessoa) => (
+          {!periodoFechado && pessoasActivas.map((pessoa) => (
             <ResumoPessoaProcessamentoOculto
               key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}`}
               pessoaId={pessoa.id}
@@ -421,6 +508,10 @@ export function ProcessamentoVisaoGeralTab() {
             />
           ))}
 
+          {periodoFechado && (
+            <BannerFechoGravado estado={leitura.estado} fechadoEm={leitura.fechadoEm} fechadoPorNome={leitura.fechadoPorNome} antesDoRegisto={leitura.antesDoRegisto} innerRef={estadoFechoRef} aoTentarDeNovo={leitura.recarregar} />
+          )}
+          {!semValoresGravados && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">{t("hr.vencimento.visaoGeral.resumoTitulo")}</CardTitle>
@@ -443,17 +534,19 @@ export function ProcessamentoVisaoGeralTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pessoasActivas.map((pessoa) => {
+                  {pessoasDaTabela.map((pessoa) => {
                     const totais = totaisPorPessoa[pessoa.id];
                     const lancamentosDaPessoa = lancamentosPorPessoa.get(pessoa.id) ?? [];
-                    const resultadoPessoa = resultadosPorPessoa.get(pessoa.id);
-                    const semPermissaoRetribuicao = retribuicoesHook.recusado;
+                    const resultadoPessoa = resultadosMostrados.get(pessoa.id);
+                    const semPermissaoRetribuicao = periodoFechado ? leitura.estado === "recusado" : retribuicoesHook.recusado;
                     return (
                       <tr key={pessoa.id} className="border-b last:border-b-0 align-top">
                         <td className="px-4 py-3 font-medium">{pessoa.nome_completo}</td>
                         <td className="px-4 py-3 tabular-nums">
                           {totais ? (
                             `${totais.diasPlaneados ?? 0} ${horasEntreParenteses(totais.planeadoMinutos)}`
+                          ) : periodoFechado ? (
+                            "—"
                           ) : (
                             <OlyviaLoader size={16} />
                           )}
@@ -461,6 +554,8 @@ export function ProcessamentoVisaoGeralTab() {
                         <td className="px-4 py-3 tabular-nums">
                           {totais ? (
                             `${totais.diasTrabalhados} ${horasEntreParenteses(totais.realizadoMinutos)}`
+                          ) : periodoFechado ? (
+                            "—"
                           ) : (
                             <OlyviaLoader size={16} />
                           )}
@@ -604,6 +699,7 @@ export function ProcessamentoVisaoGeralTab() {
               </TooltipProvider>
             </CardContent>
           </Card>
+          )}
         </>
       )}
 
@@ -613,7 +709,7 @@ export function ProcessamentoVisaoGeralTab() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("hr.vencimento.visaoGeral.confirmarFechoTitulo")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("hr.vencimento.visaoGeral.confirmarFechoDescricao")}
+              {t("rhProcReal.fecho.confirmarDescricao")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -645,6 +741,7 @@ export function ProcessamentoVisaoGeralTab() {
               <Textarea
                 id="lancamento-descricao"
                 value={formLancamento.descricao}
+                maxLength={MAX_DESCRICAO_LANCAMENTO}
                 onChange={(e) => setFormLancamento((f) => ({ ...f, descricao: e.target.value }))}
                 rows={2}
               />
@@ -752,9 +849,9 @@ export function ProcessamentoVisaoGeralTab() {
         <DialogContent className="max-w-lg">
           {(() => {
             if (!pessoaParaDetalhe) return null;
-            const pessoaDetalhe = pessoasActivas.find((p) => p.id === pessoaParaDetalhe);
-            const resultadoPessoa = resultadosPorPessoa.get(pessoaParaDetalhe);
-            const semPermissaoRetribuicao = retribuicoesHook.recusado;
+            const pessoaDetalhe = pessoasDaTabela.find((p) => p.id === pessoaParaDetalhe);
+            const resultadoPessoa = resultadosMostrados.get(pessoaParaDetalhe);
+            const semPermissaoRetribuicao = periodoFechado ? leitura.estado === "recusado" : retribuicoesHook.recusado;
             const { resultado } = resultadoPessoa ?? {};
 
             return (

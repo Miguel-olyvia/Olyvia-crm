@@ -6,7 +6,8 @@
  * -------------------
  * A tabela bloqueia INSERT/UPDATE directo a `authenticated`; abrir e fechar
  * passam sempre por `rpc_hr_processamento_periodo_abrir` /
- * `rpc_hr_processamento_periodo_fechar`. Fechar e irreversivel nesta fase --
+ * `rpc_hr_processamento_periodo_fechar(p_periodo_id, p_resultados)`: fechar grava o resultado de cada pessoa.
+ * Fechar e irreversivel nesta fase --
  * ver o cabecalho da migracao 20261201220000 (sem reabertura auditada ainda).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,6 +16,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { invalidarPrazoDaJustificacao } from "@/lib/hr/prazoCache";
+import { mensagemDeErroDoFecho, mensagemDeOperacaoSemRelida, type ResultadoParaGravar } from "@/lib/hr/resultadosFecho";
 import type { HrPeriodoProcessamento } from "@/types/hr";
 
 const COLUNAS_ANTIGAS =
@@ -37,6 +39,8 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
   const [loading, setLoading] = useState(true);
   const [recusado, setRecusado] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A releitura (depois de abrir/fechar, ou ao mudar de mes) falhou: o que o ecra mostra pode nao ser o estado real do periodo.
+  const [desactualizado, setDesactualizado] = useState(false);
 
   // Conta os pedidos: so a resposta do mais recente escreve no estado (mudar de mes durante uma releitura).
   const ultimoPedido = useRef(0);
@@ -46,12 +50,12 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
    * loader, desmontaria tudo o que depende do periodo (e repetiria os pedidos de assiduidade) so porque o estado
    * do periodo mudou. `loading` e so o primeiro carregamento de uma organizacao/mes.
    */
-  const load = useCallback(async (silencioso = false) => {
+  const load = useCallback(async (silencioso = false): Promise<boolean> => {
     const pedido = ++ultimoPedido.current;
     if (!orgId) {
       setPeriodo(null);
       setLoading(false);
-      return;
+      return true;
     }
     if (!silencioso) setLoading(true);
     const ler = (colunas: string) =>
@@ -64,8 +68,11 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
     let { data, error } = await ler(COLUNAS);
     // Base ainda sem as datas: le como antes (o ecra cai para o mes de calendario).
     if (colunaInexistente(error)) ({ data, error } = await ler(COLUNAS_ANTIGAS));
-    if (pedido !== ultimoPedido.current) return;
+    // Outro pedido tomou o lugar deste: quem manda e o mais recente (nao e uma falha desta leitura).
+    if (pedido !== ultimoPedido.current) return true;
+    let leuBem = true;
     if (error) {
+      leuBem = false;
       if (isPermissionError(error)) {
         setRecusado(true);
         setPeriodo(null);
@@ -76,7 +83,9 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
       setRecusado(false);
       setPeriodo((data ?? null) as HrPeriodoProcessamento | null);
     }
+    setDesactualizado(!leuBem);
     setLoading(false);
+    return leuBem;
   }, [orgId, ano, mes]);
 
   useEffect(() => {
@@ -93,11 +102,13 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
         if (error) throw error;
         // Abrir ou fechar muda o prazo de justificar dos dias deste periodo.
         invalidarPrazoDaJustificacao(orgId);
-        await load(true);
-        return null;
+        // A RPC JA correu (o periodo mudou na base). Se a releitura falhar, o ecra ficaria a mostrar o estado antigo
+        // com um aviso de sucesso por cima: devolve-se um aviso proprio (nao «sucesso») a dizer que e preciso atualizar.
+        const releuBem = await load(true);
+        return releuBem ? null : mensagemDeOperacaoSemRelida();
       } catch (e) {
         if (!isPermissionError(e)) captureFlowError(e, "hr-processamento-periodo-write");
-        return await getFriendlyErrorMessage(e);
+        return mensagemDeErroDoFecho(e) ?? (await getFriendlyErrorMessage(e));
       } finally {
         setSaving(false);
       }
@@ -118,11 +129,15 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
     [executar, orgId, ano, mes],
   );
 
+  /**
+   * Fecha o periodo e GRAVA o resultado de cada pessoa (`p_resultados`, ver `resultadosFecho.ts`) na mesma transaccao.
+   * Se a RPC recusar, o periodo fica aberto e o erro volta em portugues claro.
+   */
   const fechar = useCallback(
-    () =>
+    (resultados: readonly ResultadoParaGravar[]) =>
       executar(() => {
         if (!periodo) return Promise.resolve({ error: new Error("Sem periodo para fechar") });
-        return hrRpc("rpc_hr_processamento_periodo_fechar", { p_periodo_id: periodo.id });
+        return hrRpc("rpc_hr_processamento_periodo_fechar", { p_periodo_id: periodo.id, p_resultados: resultados });
       }),
     [executar, periodo],
   );
@@ -132,6 +147,8 @@ export function useProcessamentoPeriodo(ano: number, mes: number) {
     loading,
     saving,
     recusado,
+    /** A ultima releitura falhou: o periodo mostrado pode estar desatualizado (ha que atualizar o ecra). */
+    desactualizado,
     recarregar,
     abrir,
     fechar,

@@ -388,7 +388,8 @@ describe("ausências da organização (hook real sobre o Supabase simulado)", ()
     expect(rpcsChamadas("rpc_hr_ausencia_decidir_rh")).toEqual([{ _pedido_id: "pe-2", _resultado: "aprovado", _motivo: null }]);
     expect(rpcsChamadas("rpc_hr_ausencia_cancelar")).toEqual([{ _pedido_id: "pe-3", _motivo: "Mudou de planos" }]);
     expect(rpcsChamadas("rpc_hr_ausencia_corrigir_aprovado")).toEqual([{ _pedido_id: "pe-3", _motivo: "Datas erradas" }]);
-    expect(leituras("pessoas_ausencias_pedidos")).toBe(5);
+    // Cada leitura da lista sao duas consultas (o historico e os pendentes, que tem consulta propria): 5 leituras = 10.
+    expect(leituras("pessoas_ausencias_pedidos")).toBe(10);
   });
 
   it("quando a base recusa decidir ou cancelar, devolve o erro a mostrar e não relê", async () => {
@@ -405,7 +406,7 @@ describe("ausências da organização (hook real sobre o Supabase simulado)", ()
     });
     expect(a).toEqual(expect.any(String));
     expect(b).toEqual(expect.any(String));
-    expect(leituras("pessoas_ausencias_pedidos")).toBe(1);
+    expect(leituras("pessoas_ausencias_pedidos")).toBe(2);
   });
 
   it("o motivo só se pede à base a pedido (nunca ao carregar) e, se a base recusa, o erro sobe", async () => {

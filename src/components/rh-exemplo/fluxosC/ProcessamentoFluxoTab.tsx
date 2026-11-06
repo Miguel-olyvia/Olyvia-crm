@@ -6,6 +6,15 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { Eye, Lock, Plus, TriangleAlert } from "lucide-react";
+import type { ResultadoProcessamentoPessoa } from "@/components/rh-exemplo/lib/processamentoTotais";
+import {
+  construirResultadosDoFecho,
+  motivoDeBloqueioDoFecho,
+  resultadoDeLinhaGravada,
+  usePessoasObrigatoriasDoFecho,
+  useProcessamentoResultados,
+} from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
+import { BannerFechoGravado } from "@/components/rh-exemplo/hooks/BannerFechoGravado";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -34,6 +43,16 @@ const CHAVE_COLUNA: Record<(typeof COLUNAS_NUMERICAS)[number], string> = {
   total: "rhFluxosC.proc.coluna.total",
 };
 
+/** O que a tabela e o detalhe mostram de uma pessoa: o calculo de agora (periodo aberto) ou o resultado gravado (fechado). */
+interface LinhaMostrada {
+  resultado: ResultadoProcessamentoPessoa;
+  valorBase: number | null;
+  periodicidade: string | null;
+  mudouAMeioDoMes: boolean;
+  /** So existe no calculo de agora; o resultado gravado nao guarda os totais da assiduidade. */
+  totais?: { planeadoMinutos: number };
+}
+
 export function ProcessamentoFluxoTab() {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
@@ -54,10 +73,64 @@ export function ProcessamentoFluxoTab() {
   const { periodoHook, lancamentosHook, retribuicoesHook, resultados, pessoasActivas } = calculo;
   const { periodo } = periodoHook;
   const fechado = periodo?.estado === "fechado";
-  const semRetribuicoes = retribuicoesHook.recusado;
-  const direitosLidos = calculo.direitosLidos;
+  // Um periodo fechado LE o que ficou gravado e nao recalcula (nem pede a assiduidade).
+  const leitura = useProcessamentoResultados(periodo?.id, fechado);
+  const semRetribuicoes = fechado ? leitura.estado === "recusado" : retribuicoesHook.recusado;
+  // Os valores gravados sao definitivos: os direitos de agora nao os tornam provisorios.
+  const direitosLidos = fechado || calculo.direitosLidos;
   const idAvisoDireitos = "proc-aviso-direitos";
-  const total = useMemo(() => totalDoMes(resultados.values()), [resultados]);
+  const idsActivas = useMemo(() => pessoasActivas.map((p) => p.id), [pessoasActivas]);
+  const { obrigatorias, estado: estadoVinculos } = usePessoasObrigatoriasDoFecho(idsActivas, calculo.intervalo.de, calculo.intervalo.ate);
+
+  const gravados = useMemo(() => {
+    const mapa = new Map<string, LinhaMostrada>();
+    for (const [id, linha] of leitura.porPessoa) {
+      mapa.set(id, { resultado: resultadoDeLinhaGravada(linha), valorBase: null, periodicidade: null, mudouAMeioDoMes: false });
+    }
+    return mapa;
+  }, [leitura.porPessoa]);
+  const resultadosMostrados: ReadonlyMap<string, LinhaMostrada> = fechado ? gravados : resultados;
+  const total = useMemo(() => totalDoMes(resultadosMostrados.values()), [resultadosMostrados]);
+  const pendentes = fechado ? 0 : calculo.pendentes;
+  const incompletas = fechado ? 0 : calculo.incompletas;
+  const semValoresGravados = fechado && (leitura.estado !== "ok" || leitura.antesDoRegisto);
+  const pessoasDaTabela = useMemo(() => {
+    if (!fechado) return pessoasActivas.map((p) => ({ id: p.id, nome_completo: p.nome_completo }));
+    const nomes = new Map((calculo.todasAsPessoas ?? pessoasActivas).map((p) => [p.id, p.nome_completo]));
+    return [...gravados.keys()]
+      .map((id) => ({ id, nome_completo: nomes.get(id) ?? t("rhProcReal.pessoaRemovida") }))
+      .sort((a, b) => a.nome_completo.localeCompare(b.nome_completo));
+  }, [fechado, pessoasActivas, calculo.todasAsPessoas, gravados, t]);
+
+  const motivoBloqueio = motivoDeBloqueioDoFecho({
+    direitosLidos: calculo.direitosLidos,
+    // O fecho grava para sempre: so avanca com as retribuicoes, os codigos e a assiduidade lidos por inteiro.
+    retribuicoes: retribuicoesHook.estado,
+    codigos: calculo.codigosEstado,
+    regras: calculo.regrasHook.isLoading ? "a_carregar" : calculo.regrasHook.estado,
+    vinculos: estadoVinculos,
+    pessoasObrigatorias: obrigatorias,
+    comCalculo: (id) => resultados.has(id),
+    assiduidadeIncompleta: calculo.assiduidadeIncompleta,
+  });
+  const textoBloqueio = motivoBloqueio
+    ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
+    : null;
+  // Fecha e GRAVA o resultado de cada pessoa obrigatoria, tal como o ecra o mostra agora.
+  const fecharComResultados = async (): Promise<string | null> => {
+    // Mesma porta do botao: o botao so e `aria-disabled`, por isso o clique nunca fecha com o motivo por resolver.
+    if (textoBloqueio) return textoBloqueio;
+    const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
+      pessoasObrigatorias: obrigatorias,
+      resultadoDe: (id) => resultados.get(id)?.resultado,
+      versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
+      lancamentosDe: (id) => calculo.lancamentosPorPessoa.get(id) ?? [],
+      dataFim: calculo.intervalo.ate,
+      regraSalarialId: calculo.regra?.id ?? null,
+    });
+    if (semCalculo.length > 0) return t("rhProcReal.fecho.bloqueio.calculo", { n: semCalculo.length });
+    return periodoHook.fechar(paraGravar);
+  };
 
   if (!podeVerPeriodo) return <SemAcessoCard className="m-0" />;
 
@@ -84,7 +157,8 @@ export function ProcessamentoFluxoTab() {
         {!aCarregar && (
           <FecharReabrirMes
             mes={mes} periodo={periodo} podeGerir={podeGerirPeriodo} aGravar={periodoHook.saving}
-            aoAbrir={depoisDeGravar(periodoHook.abrir)} aoFechar={depoisDeGravar(periodoHook.fechar)}
+            aoAbrir={depoisDeGravar(periodoHook.abrir)} aoFechar={depoisDeGravar(fecharComResultados)}
+            motivoBloqueio={textoBloqueio}
           />
         )}
       </div>
@@ -104,8 +178,8 @@ export function ProcessamentoFluxoTab() {
           {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
         </p>
       )}
-      {calculo.incompletas > 0 && (
-        <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: calculo.incompletas })}</p>
+      {incompletas > 0 && (
+        <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: incompletas })}</p>
       )}
 
       {aCarregar ? (
@@ -119,7 +193,7 @@ export function ProcessamentoFluxoTab() {
         </Card>
       ) : (
         <>
-          <RecolhaDeAssiduidade calculo={calculo} ano={ano} mes={mesNum} />
+          {!fechado && <RecolhaDeAssiduidade calculo={calculo} ano={ano} mes={mesNum} />}
 
           {fechado ? (
             <p ref={estadoDoMesRef} tabIndex={-1} role="status" className="flex items-start gap-2 rounded-md border bg-muted/50 p-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -130,8 +204,12 @@ export function ProcessamentoFluxoTab() {
           ) : (
             <p ref={estadoDoMesRef} tabIndex={-1} className="text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("rhProcReal.periodoAberto", { mes: nomeDoMes(mes) })}</p>
           )}
-          {calculo.pendentes > 0 && <p role="status" className="text-sm text-muted-foreground">{t("rhProcReal.aCalcular", { n: calculo.pendentes })}</p>}
+          {fechado && (
+            <BannerFechoGravado estado={leitura.estado} fechadoEm={leitura.fechadoEm} fechadoPorNome={leitura.fechadoPorNome} antesDoRegisto={leitura.antesDoRegisto} aoTentarDeNovo={leitura.recarregar} />
+          )}
+          {pendentes > 0 && <p role="status" className="text-sm text-muted-foreground">{t("rhProcReal.aCalcular", { n: pendentes })}</p>}
 
+          {!semValoresGravados && (<>
           <Card>
             <CardContent className="overflow-x-auto p-0">
               <table className="w-full text-sm">
@@ -146,8 +224,8 @@ export function ProcessamentoFluxoTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pessoasActivas.map((pessoa) => {
-                    const r = resultados.get(pessoa.id);
+                  {pessoasDaTabela.map((pessoa) => {
+                    const r = resultadosMostrados.get(pessoa.id);
                     const res = r?.resultado;
                     const semValor = !semRetribuicoes && res?.totalBrutoEstimado === null;
                     return (
@@ -213,8 +291,8 @@ export function ProcessamentoFluxoTab() {
                   <tr className="border-t bg-muted/30">
                     <th scope="row" colSpan={COLUNAS_NUMERICAS.length} className="px-4 py-3 text-left text-sm">{t("rhFluxosC.proc.totalMes")}</th>
                     <td className="px-4 py-3 text-right font-bold tabular-nums">
-                      {semRetribuicoes || calculo.pendentes > 0 ? "—" : euros(total.total)}
-                      {!direitosLidos && !semRetribuicoes && calculo.pendentes === 0 && (
+                      {semRetribuicoes || pendentes > 0 ? "—" : euros(total.total)}
+                      {!direitosLidos && !semRetribuicoes && pendentes === 0 && (
                         <span className="block text-xs font-normal text-amber-800 dark:text-amber-300">{t("hr.vencimento.visaoGeral.totalProvisorio")}</span>
                       )}
                     </td>
@@ -224,15 +302,16 @@ export function ProcessamentoFluxoTab() {
               </table>
             </CardContent>
           </Card>
-          {!semRetribuicoes && calculo.pendentes === 0 && total.semValor > 0 && (
+          {!semRetribuicoes && pendentes === 0 && total.semValor > 0 && (
             <p className="text-xs text-muted-foreground">{t("rhProcReal.totalSemValor", { n: total.semValor })}</p>
           )}
+          </>)}
         </>
       )}
 
       <ProcessamentoDetalheDialog
         pessoa={detalhe}
-        calculo={detalhe ? resultados.get(detalhe.id) ?? null : null}
+        calculo={detalhe ? resultadosMostrados.get(detalhe.id) ?? null : null}
         lancamentos={detalhe ? calculo.lancamentosPorPessoa.get(detalhe.id) ?? [] : []}
         retribuicaoRecusada={semRetribuicoes}
         podeAnular={podeGerirLancamentos && !fechado}

@@ -30,6 +30,8 @@ function buildChain(table: string) {
     gte: () => chain,
     lte: () => chain,
     limit: () => chain,
+    in: () => chain,
+    range: () => chain,
     then: (onFulfilled: any, onRejected: any) =>
       Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected),
   };

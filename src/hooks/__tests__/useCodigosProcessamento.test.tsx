@@ -150,6 +150,22 @@ describe("useCodigosProcessamento", () => {
 
     expect(result.current.codigos).toEqual([]);
     expect(result.current.error).toBeNull();
+    // ...mas a recusa e dita: o fecho do periodo nao trata «sem acesso» como «sem codigos».
+    expect(result.current.recusado).toBe(true);
+    expect(result.current.estado).toBe("recusado");
+  });
+
+  it("uma falha de leitura (nao de permissao) fica em estado erro", async () => {
+    respostaCodigos = { data: null, error: { code: "XX000", message: "falha" } };
+    const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.estado).toBe("erro");
+  });
+
+  it("leitura boa tem estado ok", async () => {
+    const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(result.current.recusado).toBe(false);
   });
 
   it("criar insere com organization_id da organizacao activa (nunca NULL)", async () => {

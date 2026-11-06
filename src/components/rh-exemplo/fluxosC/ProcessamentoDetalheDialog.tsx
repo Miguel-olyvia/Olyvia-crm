@@ -13,7 +13,8 @@ import { euros } from "./formatosC";
 
 interface Props {
   pessoa: { id: string; nome: string } | null;
-  calculo: ResultadoCalculoReal | null;
+  /** O calculo de agora, ou o resultado gravado de um periodo fechado (que nao tem os totais da assiduidade). */
+  calculo: (Omit<ResultadoCalculoReal, "totais"> & { totais?: Pick<ResultadoCalculoReal["totais"], "planeadoMinutos"> }) | null;
   lancamentos: readonly HrProcessamentoLancamento[];
   /** Sem permissao para ver retribuicoes: nao ha passos para mostrar. */
   retribuicaoRecusada: boolean;
@@ -95,7 +96,7 @@ export function ProcessamentoDetalheDialog({ pessoa, calculo, lancamentos, retri
               )}
               <Passo
                 titulo={t("hr.vencimento.visaoGeral.detalheValorHoraReal")}
-                conta={resultado.valorHoraReal === null ? undefined : `${num(calculo.totais.planeadoMinutos / 60, 1)} h`}
+                conta={resultado.valorHoraReal === null || !calculo.totais ? undefined : `${num(calculo.totais.planeadoMinutos / 60, 1)} h`}
                 valor={resultado.valorHoraReal === null ? "—" : `${num(resultado.valorHoraReal, 4)} €`}
               />
               {resultado.linhasAutomaticas.length === 0 ? (

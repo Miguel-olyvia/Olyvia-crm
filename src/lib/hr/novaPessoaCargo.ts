@@ -7,33 +7,27 @@
  * TODA A PESSOA TEM CARGO. Sem `cargo_id` a base recusa o INSERT (HRC08), por
  * isso aqui e um PROBLEMA bloqueante e ja nao um aviso de pendencia.
  *
- * O SALARIO BASE JA NAO SE ESCREVE NO ASSISTENTE: vem do cargo. O que a pessoa
- * tem de seu e o subsidio de alimentacao (valor e modo) e os duodecimos, e vai
- * por `rpc_hr_retribuicao_definir_pessoal` depois de a ficha existir. Se nada
- * disso foi tocado, nao ha parte da pessoa e nao se cria versao nenhuma -- o RH
- * completa na ficha (e a pendencia da admissao di-lo).
+ * O SALARIO BASE JA NAO SE ESCREVE NO ASSISTENTE: vem do cargo. O subsidio de
+ * almoco tambem nao: e obrigatorio no cargo e vem da regra salarial da
+ * organizacao, sem opcao nem excepcao por pessoa. O que a pessoa tem de seu sao
+ * os duodecimos, e vai por `rpc_hr_retribuicao_definir_pessoal` depois de a
+ * ficha existir. Se nada disso foi tocado, nao ha parte da pessoa e nao se cria
+ * versao nenhuma -- o RH completa na ficha (e a pendencia da admissao di-lo).
  */
 import type { ProblemaCampo } from "@/lib/hr/novaPessoa";
-import { numeroDe } from "@/lib/hr/numeros";
-import type { SubsidioAlimentacaoModo } from "@/types/hr";
 
 /** Os duodecimos propostos quando se define a parte pessoal e nada foi escolhido. */
 export const DUODECIMOS_PROPOSTO = 50;
 
 /** O campo de cargo no assistente (o mesmo `id` de sempre: a pendencia e o resumo focam-no). */
 export const CAMPO_CARGO_NOVO = "hr-novo-cargo";
-export const CAMPO_SUBSIDIO_NOVO = "hr-novo-subsidio";
 
 export interface ContratoParteDaPessoa {
-  subsidio: string;
-  subsidio_modo: SubsidioAlimentacaoModo | "";
   duodecimos_pct: "" | "0" | "50" | "100";
 }
 
 /** O que vai para `rpc_hr_retribuicao_definir_pessoal`. */
 export interface ParteDaPessoa {
-  subsidio: number | null;
-  subsidioModo: SubsidioAlimentacaoModo | null;
   duodecimosPct: 0 | 50 | 100;
 }
 
@@ -77,35 +71,10 @@ export function problemaDoCargo(laborais: { cargo_id: string }): ProblemaCampo |
   };
 }
 
-/** Subsidio escrito mas ilegivel ou negativo: erro de formato. Vazio nao e erro. */
-export function problemaDoSubsidio(contrato: ContratoParteDaPessoa): ProblemaCampo | null {
-  if (contrato.subsidio.trim() === "") return null;
-  const valor = numeroDe(contrato.subsidio);
-  if (valor !== null && valor >= 0) return null;
-  return {
-    seccao: "contrato",
-    campoId: CAMPO_SUBSIDIO_NOVO,
-    rotuloKey: "hr.retribuicaoCartao.subsidioAlimentacao",
-    mensagemKey: "hr.form.erroNumero",
-  };
-}
-
-/**
- * A parte da pessoa, ou `null` se nada foi tocado. Os duodecimos propoem 50
- * quando ha parte mas nao foram escolhidos.
- */
+/** A parte da pessoa (so os duodecimos), ou `null` se ainda nao foram escolhidos. */
 export function parteDaPessoaDoContrato(contrato: ContratoParteDaPessoa): ParteDaPessoa | null {
-  const subsidio = numeroDe(contrato.subsidio);
-  const modo = contrato.subsidio_modo === "" ? null : contrato.subsidio_modo;
-  const tocou =
-    contrato.subsidio.trim() !== "" || modo !== null || contrato.duodecimos_pct !== "";
-  if (!tocou) return null;
+  if (contrato.duodecimos_pct === "") return null;
   return {
-    subsidio,
-    subsidioModo: modo,
-    duodecimosPct:
-      contrato.duodecimos_pct === ""
-        ? DUODECIMOS_PROPOSTO
-        : (Number(contrato.duodecimos_pct) as 0 | 50 | 100),
+    duodecimosPct: Number(contrato.duodecimos_pct) as 0 | 50 | 100,
   };
 }

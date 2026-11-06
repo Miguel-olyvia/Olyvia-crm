@@ -9,11 +9,10 @@ import {
   dataDaPrimeiraRetribuicao,
   parteDaPessoaDoContrato,
   problemaDoCargo,
-  problemaDoSubsidio,
   type ContratoParteDaPessoa,
 } from "@/lib/hr/novaPessoaCargo";
 
-const SEM_NADA: ContratoParteDaPessoa = { subsidio: "", subsidio_modo: "", duodecimos_pct: "" };
+const SEM_NADA: ContratoParteDaPessoa = { duodecimos_pct: "" };
 
 describe("problemaDoCargo", () => {
   it("sem cargo e um problema bloqueante, com o rotulo e a mensagem do cargo", () => {
@@ -34,25 +33,6 @@ describe("problemaDoCargo", () => {
   });
 });
 
-describe("problemaDoSubsidio", () => {
-  it("vazio nao e erro; numero valido nao e erro (virgula ou ponto)", () => {
-    expect(problemaDoSubsidio(SEM_NADA)).toBeNull();
-    expect(problemaDoSubsidio({ ...SEM_NADA, subsidio: "6,5" })).toBeNull();
-    expect(problemaDoSubsidio({ ...SEM_NADA, subsidio: "0" })).toBeNull();
-  });
-
-  it("negativo e ilegivel sao erro, no campo do subsidio", () => {
-    const esperado = {
-      seccao: "contrato",
-      campoId: "hr-novo-subsidio",
-      rotuloKey: "hr.retribuicaoCartao.subsidioAlimentacao",
-      mensagemKey: "hr.form.erroNumero",
-    };
-    expect(problemaDoSubsidio({ ...SEM_NADA, subsidio: "-1" })).toEqual(esperado);
-    expect(problemaDoSubsidio({ ...SEM_NADA, subsidio: "abc" })).toEqual(esperado);
-  });
-});
-
 describe("parteDaPessoaDoContrato", () => {
   it("a proposta de duodecimos e 50", () => {
     expect(DUODECIMOS_PROPOSTO).toBe(50);
@@ -62,34 +42,13 @@ describe("parteDaPessoaDoContrato", () => {
     expect(parteDaPessoaDoContrato(SEM_NADA)).toBeNull();
   });
 
-  it("com subsidio e modo mas sem duodecimos, propoe 50", () => {
-    expect(
-      parteDaPessoaDoContrato({ subsidio: "7.5", subsidio_modo: "dinheiro", duodecimos_pct: "" }),
-    ).toEqual({ subsidio: 7.5, subsidioModo: "dinheiro", duodecimosPct: 50 });
-  });
-
   it("os duodecimos escolhidos prevalecem, incluindo 0", () => {
-    expect(parteDaPessoaDoContrato({ ...SEM_NADA, duodecimos_pct: "0" })).toEqual({
-      subsidio: null,
-      subsidioModo: null,
-      duodecimosPct: 0,
-    });
-    expect(parteDaPessoaDoContrato({ ...SEM_NADA, duodecimos_pct: "100" })?.duodecimosPct).toBe(100);
+    expect(parteDaPessoaDoContrato({ duodecimos_pct: "0" })).toEqual({ duodecimosPct: 0 });
+    expect(parteDaPessoaDoContrato({ duodecimos_pct: "100" })?.duodecimosPct).toBe(100);
   });
 
-  it("hexadecimal e notacao cientifica nao sao subsidios validos (0x10, 1e3)", () => {
-    for (const subsidio of ["0x10", "1e3"]) {
-      expect(problemaDoSubsidio({ ...SEM_NADA, subsidio })).not.toBeNull();
-      expect(
-        parteDaPessoaDoContrato({ subsidio, subsidio_modo: "cartao", duodecimos_pct: "50" })?.subsidio,
-      ).toBeNull();
-    }
-  });
-
-  it("um subsidio ilegivel vira null em vez de NaN", () => {
-    expect(
-      parteDaPessoaDoContrato({ subsidio: "abc", subsidio_modo: "cartao", duodecimos_pct: "50" })?.subsidio,
-    ).toBeNull();
+  it("a parte da pessoa nunca leva subsidio (vem da regra da organizacao)", () => {
+    expect(parteDaPessoaDoContrato({ duodecimos_pct: "50" })).toEqual({ duodecimosPct: 50 });
   });
 });
 

@@ -55,7 +55,6 @@ import { getLocalizedFallback } from "@/utils/friendlyError";
 import {
   parteDaPessoaDoContrato,
   problemaDoCargo,
-  problemaDoSubsidio,
   type ParteDaPessoa,
 } from "@/lib/hr/novaPessoaCargo";
 import type {
@@ -67,7 +66,6 @@ import type {
   PoliticaFeriados,
   RegimeContratual,
   RegimeTrabalho,
-  SubsidioAlimentacaoModo,
   TipoContrato,
   TipoDocumento,
   TipoTrabalho,
@@ -164,12 +162,10 @@ export interface RascunhoContrato {
   tem_periodo_experimental: boolean;
   periodo_experimental_dias: string;
   /**
-   * O que da retribuicao e DA PESSOA (o valor base vem do cargo): subsidio de
-   * alimentacao, o seu modo e os duodecimos. Vai por RPC depois de a ficha
-   * existir -- ver `novaPessoaCargo.ts`.
+   * O que da retribuicao e DA PESSOA (o valor base vem do cargo, e o subsidio de
+   * almoco da regra salarial da organizacao): so os duodecimos. Vai por RPC
+   * depois de a ficha existir -- ver `novaPessoaCargo.ts`.
    */
-  subsidio: string;
-  subsidio_modo: SubsidioAlimentacaoModo | "";
   duodecimos_pct: "" | "0" | "50" | "100";
   tipo_trabalho: TipoTrabalho | "";
   horas_trabalho: string;
@@ -253,8 +249,6 @@ export function rascunhoInicial(): RascunhoPessoa {
       duracao_meses: "",
       tem_periodo_experimental: false,
       periodo_experimental_dias: "",
-      subsidio: "",
-      subsidio_modo: "",
       duodecimos_pct: "",
       tipo_trabalho: "",
       horas_trabalho: "",
@@ -369,11 +363,9 @@ export function problemasDoRascunho(
     problemas.push(...problemasDeObrigatoriosDaConfiguracao(pessoais, config, indisponiveis));
   }
 
-  // -- Cargo (obrigatorio, fluxo 2) e subsidio ------------------------------
+  // -- Cargo (obrigatorio, fluxo 2) ------------------------------------------
   const problemaCargo = problemaDoCargo(rascunho.laborais);
   if (problemaCargo) problemas.push(problemaCargo);
-  const problemaSubsidio = problemaDoSubsidio(contrato);
-  if (problemaSubsidio) problemas.push(problemaSubsidio);
   // Os cinco numeros do contrato -- e o cruzamento entre dois deles -- estao
   // em `lib/hr/contrato.ts`, porque o separador Contratos da ficha edita
   // exactamente os mesmos e nao podem divergir. Aqui so se traduz o campo
@@ -491,7 +483,6 @@ export function seccaoPreenchida(rascunho: RascunhoPessoa, seccao: SeccaoId): bo
       return (
         rascunho.contrato.tipo_contrato !== "" ||
         rascunho.contrato.data_inicio.trim() !== "" ||
-        rascunho.contrato.subsidio.trim() !== "" ||
         rascunho.contrato.duodecimos_pct !== "" ||
         rascunho.contrato.horas_trabalho.trim() !== "" ||
         rascunho.contrato.horario_variavel
@@ -575,7 +566,7 @@ export interface NovaPessoaPayload {
    * `pessoas_vinculos` deixou de os poder levar; esta e a unica via.
    */
   horasVinculo: { horas_periodo: number; horas_frequencia: HorasFrequencia; valido_de: string } | null;
-  /** So a parte DA PESSOA (subsidio e duodecimos), por `rpc_hr_retribuicao_definir_pessoal`. */
+  /** So a parte DA PESSOA (os duodecimos), por `rpc_hr_retribuicao_definir_pessoal`. */
   retribuicao: ParteDaPessoa | null;
   /** Linhas de `pessoas_horario_planeado`, uma por intervalo. */
   horario: LinhaPlaneadoParaGravar[] | null;

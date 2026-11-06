@@ -36,6 +36,8 @@ interface ResumoPessoaProcessamentoOcultoProps {
     pessoaId: string,
     totais: TotaisRelatorioMensal,
     dias: readonly DiaRelatorioMensal[],
+    /** A assiduidade foi lida so em parte (recusada, com erro): o calculo desta pessoa nao pode fechar o periodo. */
+    incompleta: boolean,
   ) => void;
 }
 
@@ -57,7 +59,12 @@ export function ResumoPessoaProcessamentoOculto({
   useEffect(() => {
     if (relatorio.loading || avisouRef.current) return;
     avisouRef.current = true;
-    aoTerminarCarregamento(pessoaId, relatorio.totais, relatorio.dias);
+    aoTerminarCarregamento(
+      pessoaId,
+      relatorio.totais,
+      relatorio.dias,
+      relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relatorio.loading, relatorio.totais, relatorio.dias, pessoaId]);
 

@@ -35,14 +35,6 @@ function Retribuicao() {
             valor={periodo ? t(`hr.periodicidade.${periodo.periodicidade}`) : ""}
           />
         </LinhaCampo>
-        <CampoT
-          g="contrato" k="subsidio" id="hr-novo-subsidio" codigo="subsidio_alimentacao" tipo="text"
-          rotulo={t("hr.retribuicaoCartao.subsidioAlimentacao")} ajuda={t("hr.admissao.subsidioZeroConta")}
-        />
-        <CampoS
-          g="contrato" k="subsidio_modo" id="hr-novo-subsidio-modo" rotulo={t("hr.retribuicaoCartao.subsidioAlimentacaoModo")}
-          opcoes={opcoes(t, "rhNova.modo", ["dinheiro", "cartao"])} vazio={t("rhNova.semIndicacao")}
-        />
         <CampoS
           g="contrato" k="duodecimos_pct" id="hr-novo-duodecimos" codigo="duodecimos" rotulo={t("hr.contrato.duodecimos")}
           opcoes={opcoes(t, "rhNova.duodecimos", ["0", "50", "100"])} ajuda={t("hr.admissao.duodecimosOmissao")}

@@ -90,7 +90,7 @@ export interface TotalDoMes {
 }
 
 /** O total bruto do mes: so entram as pessoas com valor, e diz-se quantas ficaram de fora. */
-export function totalDoMes(resultados: Iterable<ResultadoCalculoReal>): TotalDoMes {
+export function totalDoMes(resultados: Iterable<{ resultado: Pick<ResultadoProcessamentoPessoa, "totalBrutoEstimado"> }>): TotalDoMes {
   let total = 0;
   let semValor = 0;
   for (const r of resultados) {

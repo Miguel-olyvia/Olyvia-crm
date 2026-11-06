@@ -35,11 +35,6 @@ vi.mock("@/components/rh-exemplo/hooks/PessoaRelatorioAssiduidadeMensalReal", ()
 // As horas extra e as permissoes de assiduidade tambem vem da base: simuladas, semeadas com as horas extra de exemplo.
 vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
-// O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
-vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
-  useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
-}));
 import { baseFalsa, reporBaseFalsa, semearHoras } from "@/test/horasExtraFalso";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";

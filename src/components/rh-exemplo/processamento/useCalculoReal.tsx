@@ -42,7 +42,7 @@ export interface RecolhaAssiduidade {
 /** O que e comum a todas as pessoas do mes: periodo, lancamentos, retribuicoes, codigos, a regra salarial em vigor e os direitos. */
 export function useDadosDoCalculoReal(ano: number, mes: number) {
   const { activeCompany } = useCompany();
-  const { codigos, isLoading: codigosACarregar } = useCodigosProcessamento();
+  const { codigos, isLoading: codigosACarregar, estado: codigosEstado } = useCodigosProcessamento();
   const periodoHook = useProcessamentoPeriodo(ano, mes);
   const periodoId = periodoHook.periodo?.id;
   const lancamentosHook = useProcessamentoLancamentos(periodoId);
@@ -78,6 +78,8 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
     direitosHook,
     /** Os direitos (IHT, km, ajudas) so valem se a leitura correu bem; senao os totais podem estar incompletos. */
     direitosLidos: direitosHook.estado === "ok",
+    /** O catalogo de codigos lido por inteiro (`ok`), a carregar, recusado ou com erro: so `ok` deixa fechar o periodo. */
+    codigosEstado,
     regra,
     faixasNoturnas,
     intervalo,
@@ -138,10 +140,17 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
 
   const pendentes = pessoasActivas.filter((p) => !recolhas[`${chave}:${p.id}`]).length;
   const incompletas = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.incompleta).length;
+  /** A assiduidade desta pessoa so se leu em parte (recusada ou com erro): bloqueia o fecho. */
+  const assiduidadeIncompleta = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.incompleta === true,
+    [recolhas, chave],
+  );
 
   return {
     ...dados,
     pessoasActivas,
+    /** Todas as pessoas (tambem as arquivadas): um periodo fechado pode ter resultados de quem entretanto saiu. */
+    todasAsPessoas: pessoas,
     pessoasACarregar,
     pessoasErro,
     resultados,
@@ -150,6 +159,7 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     pendentes,
     /** Pessoas cuja assiduidade so se leu em parte por falta de permissao. */
     incompletas,
+    assiduidadeIncompleta,
   };
 }
 
@@ -180,7 +190,7 @@ function RecolhaOculta({ pessoaId, ano, mes, intervalo, faixasNoturnas, aoTermin
     aoTerminar(pessoaId, {
       totais: relatorio.totais,
       dias: relatorio.dias,
-      incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado,
+      incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro === true,
     });
     // `aoTerminar` muda com o mes, mas so deve disparar quando o relatorio acaba de carregar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,7 +239,7 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
     dados,
     retribuicaoRecusada: retribuicoesHook.recusado,
     direitosLidos: dados.direitosLidos,
-    incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado,
+    incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro === true,
     periodoAberto: dados.periodoHook.periodo?.estado === "aberto",
     temPeriodo: dados.periodoHook.periodo !== null,
   };

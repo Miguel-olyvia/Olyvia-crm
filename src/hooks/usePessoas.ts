@@ -156,15 +156,26 @@ export function usePessoas() {
     setError(null);
 
     try {
-      const { data, error: erroPessoas } = await hrFrom("pessoas")
-        .select(COLUNAS_LISTA)
-        .eq("organization_id", activeCompany.id)
-        .is("deleted_at", null)
-        .order("nome_completo", { ascending: true });
+      // PAGINADA: o PostgREST corta nas 1000 linhas em silencio, e uma lista de pessoas truncada faria o fecho da folha
+      // (que grava para sempre) deixar gente de fora sem nenhum aviso. `id` desempata a ordem para as paginas nao
+      // repetirem nem saltarem linhas. Uma falha a meio da paginacao falha a lista inteira (nunca uma lista parcial).
+      const PAGINA_PESSOAS = 1000;
+      const linhas: Pessoa[] = [];
+      for (let inicio = 0; ; inicio += PAGINA_PESSOAS) {
+        const { data: paginaPessoas, error: erroPessoas } = await hrFrom("pessoas")
+          .select(COLUNAS_LISTA)
+          .eq("organization_id", activeCompany.id)
+          .is("deleted_at", null)
+          .order("nome_completo", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, inicio + PAGINA_PESSOAS - 1);
 
-      if (erroPessoas) throw erroPessoas;
+        if (erroPessoas) throw erroPessoas;
 
-      const linhas = (data ?? []) as Pessoa[];
+        const daPagina = (paginaPessoas ?? []) as Pessoa[];
+        linhas.push(...daPagina);
+        if (daPagina.length < PAGINA_PESSOAS) break;
+      }
 
       // Contas ligadas. Uma recusa aqui nao e um defeito: quem nao pode ler
       // `pessoas_contas` fica sem a coluna de estado do acesso, com a lista
@@ -469,10 +480,11 @@ export function usePessoas() {
         );
       }
 
-      // So a parte DA PESSOA (subsidio e duodecimos): o valor base vem do cargo
-      // (fluxo 2) e a base recusa o INSERT directo em `pessoas_retribuicoes`. Vai
-      // pela RPC, DEPOIS do vinculo (que ela procura sozinha). A falha nao desfaz
-      // a ficha (doutrina dos satelites): fica a pendencia e corrige-se na ficha.
+      // So a parte DA PESSOA (os duodecimos): o valor base vem do cargo (fluxo 2) e
+      // o subsidio de almoco da regra salarial da organizacao, sem opcao por
+      // pessoa. A base recusa o INSERT directo em `pessoas_retribuicoes`; vai pela
+      // RPC, DEPOIS do vinculo (que ela procura sozinha). A falha nao desfaz a
+      // ficha (doutrina dos satelites): fica a pendencia e corrige-se na ficha.
       if (payload.retribuicao) {
         await gravar("retribuicao", () =>
           hrRpc("rpc_hr_retribuicao_definir_pessoal", {
@@ -484,8 +496,10 @@ export function usePessoas() {
               payload.nucleo.data_admissao,
               dataDeHoje(),
             ),
-            p_subsidio: payload.retribuicao!.subsidio,
-            p_subsidio_modo: payload.retribuicao!.subsidioModo,
+            // Pessoa nova: nao ha subsidio antigo a preservar (a RPC exige os
+            // dois parametros e grava o que recebe).
+            p_subsidio: null,
+            p_subsidio_modo: null,
             p_duodecimos_pct: payload.retribuicao!.duodecimosPct,
             p_motivo: null,
           }),

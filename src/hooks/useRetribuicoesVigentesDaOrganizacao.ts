@@ -21,19 +21,25 @@
  * padrao de `useProcessamentoLancamentos.ts`: `recusado=true` e mapa vazio,
  * sem `captureFlowError`.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import { periodoDaFolha, type IntervaloDaFolha } from "@/lib/hr/periodoFolha";
 import type { PessoaRetribuicao } from "@/types/hr";
 
-const COLUNAS = "pessoa_id, valor_base, periodicidade, duodecimos_pct, valido_de, valido_ate";
+// `id`: o fecho do periodo grava a versao de retribuicao usada (`retribuicao_id`). O `cargo_periodo_id` NAO se pede aqui:
+// `pessoas_retribuicoes` nao tem essa coluna em nenhuma migration (o fecho envia `null`; ver `resultadosFecho.ts`).
+const PAGINA_RETRIBUICOES = 1000;
+const COLUNAS = "id, pessoa_id, valor_base, periodicidade, duodecimos_pct, valido_de, valido_ate";
 
-/** Formas parciais devolvidas pela query -- so as colunas pedidas em `COLUNAS`. */
+/**
+ * Formas parciais devolvidas pela query -- so as colunas pedidas em `COLUNAS`.
+ * `id` e opcional no tipo para as simulacoes antigas (testes) que nao o trazem; a query pede-o sempre.
+ */
 export type RetribuicaoVigenteLinha = Pick<
   PessoaRetribuicao,
   "pessoa_id" | "valor_base" | "periodicidade" | "duodecimos_pct" | "valido_de" | "valido_ate"
->;
+> & { id?: string };
 
 export interface RetribuicaoVigenteResultado {
   /** `null` = nao ha nenhuma versao a cobrir o mes. */
@@ -76,40 +82,61 @@ export function useRetribuicoesVigentesDaOrganizacao(
   const [porPessoa, setPorPessoa] = useState<Map<string, RetribuicaoVigenteLinha[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [recusado, setRecusado] = useState(false);
+  const [erro, setErro] = useState(false);
+  // So a resposta do pedido mais recente escreve no estado (mudar de mes a meio de uma leitura paginada).
+  const ultimoPedido = useRef(0);
 
   const load = useCallback(async () => {
+    const pedido = ++ultimoPedido.current;
+    // Limpa ANTES de ler: durante a leitura nunca fica o mapa do periodo anterior com o rotulo do novo.
+    setPorPessoa(new Map());
+    setRecusado(false);
+    setErro(false);
     if (!organizationId) {
-      setPorPessoa(new Map());
       setLoading(false);
       return;
     }
     setLoading(true);
-    const { data, error } = await hrFrom("pessoas_retribuicoes")
-      .select(COLUNAS)
-      .eq("organization_id", organizationId)
-      .is("deleted_at", null)
-      .lte("valido_de", ate)
-      .or(`valido_ate.is.null,valido_ate.gt.${de}`);
-    if (error) {
-      if (isPermissionError(error)) {
-        setRecusado(true);
-        setPorPessoa(new Map());
-      } else {
-        captureFlowError(error, "hr-retribuicoes-vigentes-organizacao-load");
-        // Falhar fechado: sem isto, o ecra continuaria a mostrar o mapa do
-        // mes anterior, agora rotulado com o mes novo, sem aviso nenhum.
-        setPorPessoa(new Map());
+    const mapa = new Map<string, RetribuicaoVigenteLinha[]>();
+    let falhou = false;
+    let recusa = false;
+    try {
+      // PAGINADA: o PostgREST corta nas 1000 linhas em silencio e as versoes sao historico (varias por pessoa). Um mapa
+      // truncado daria «sem retribuicao» a quem ficou de fora, e o fecho grava para sempre. `id` desempata a ordem.
+      for (let inicio = 0; ; inicio += PAGINA_RETRIBUICOES) {
+        const { data, error } = await hrFrom("pessoas_retribuicoes")
+          .select(COLUNAS)
+          .eq("organization_id", organizationId)
+          .is("deleted_at", null)
+          .lte("valido_de", ate)
+          .or(`valido_ate.is.null,valido_ate.gt.${de}`)
+          .order("id", { ascending: true })
+          .range(inicio, inicio + PAGINA_RETRIBUICOES - 1);
+        if (error) {
+          if (isPermissionError(error)) recusa = true;
+          else {
+            falhou = true;
+            captureFlowError(error, "hr-retribuicoes-vigentes-organizacao-load");
+          }
+          break;
+        }
+        const pagina = (data ?? []) as RetribuicaoVigenteLinha[];
+        for (const linha of pagina) {
+          const lista = mapa.get(linha.pessoa_id) ?? [];
+          lista.push(linha);
+          mapa.set(linha.pessoa_id, lista);
+        }
+        if (pagina.length < PAGINA_RETRIBUICOES) break;
       }
-    } else {
-      setRecusado(false);
-      const mapa = new Map<string, RetribuicaoVigenteLinha[]>();
-      for (const linha of (data ?? []) as RetribuicaoVigenteLinha[]) {
-        const lista = mapa.get(linha.pessoa_id) ?? [];
-        lista.push(linha);
-        mapa.set(linha.pessoa_id, lista);
-      }
-      setPorPessoa(mapa);
+    } catch (e) {
+      falhou = true;
+      captureFlowError(e, "hr-retribuicoes-vigentes-organizacao-load");
     }
+    if (pedido !== ultimoPedido.current) return;
+    // Falhar fechado: uma falha ou recusa a meio descarta tambem as paginas ja lidas (nunca um mapa parcial).
+    setPorPessoa(falhou || recusa ? new Map() : mapa);
+    setRecusado(recusa);
+    setErro(falhou);
     setLoading(false);
   }, [organizationId, de, ate]);
 
@@ -117,5 +144,8 @@ export function useRetribuicoesVigentesDaOrganizacao(
     void load();
   }, [load]);
 
-  return { porPessoa, loading, recusado, recarregar: load };
+  /** `ok` so com a leitura completa: sem erro, sem recusa e fora do carregamento. */
+  const estado: "ok" | "a_carregar" | "recusado" | "erro" = loading ? "a_carregar" : erro ? "erro" : recusado ? "recusado" : "ok";
+
+  return { porPessoa, loading, recusado, erro, estado, recarregar: load };
 }

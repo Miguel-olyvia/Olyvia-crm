@@ -533,6 +533,62 @@ describe("calcularProcessamentoPessoa", () => {
     });
   });
 
+  describe("cargo com salario semanal (300 EUR por semana, sem duodecimos)", () => {
+    // 300 x 52 / 12 = 1300,00 por mes; 160 h planeadas => 8,125 EUR a hora.
+    const semanal = (): RetribuicaoParaCalculo =>
+      retribuicao({ valorBase: 300, periodicidade: "semanal", duodecimosPct: 0 });
+
+    it("o ordenado do mes e semanal x 52 / 12 e o valor hora e esse ordenado pelas horas planeadas", () => {
+      const resultado = calcularProcessamentoPessoa(entradaBase({ retribuicao: semanal() }));
+      expect(resultado.baseMes).toBeCloseTo(1300, 6);
+      expect(resultado.valorHoraReal).toBeCloseTo(8.125, 6);
+      expect(resultado.avisos).not.toContain("periodicidade_nao_convertivel");
+      expect(resultado.avisos).not.toContain("sem_retribuicao");
+    });
+
+    it("com duodecimos a 100 % a base do mes e a mesma que a de um mensal de 1300", () => {
+      const doSemanal = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: retribuicao({ valorBase: 300, periodicidade: "semanal", duodecimosPct: 100 }) }),
+      );
+      const doMensal = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }) }),
+      );
+      expect(doSemanal.baseMes).toBeCloseTo(doMensal.baseMes as number, 6);
+      expect(doSemanal.valorHoraReal).toBeCloseTo(doMensal.valorHoraReal as number, 6);
+    });
+
+    it("o IHT e 25 % do ordenado base do mes (1300 => 325,00); sem direito nao ha linha", () => {
+      const com = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: semanal(), totais: totaisBase({ realizadoMinutos: 9600 }), direitoIht: true }),
+      );
+      expect(com.linhasRegra).toEqual([{ tipo: "iht", faixa: null, quantidade: null, valor: 325 }]);
+      const sem = calcularProcessamentoPessoa(entradaBase({ retribuicao: semanal(), direitoIht: false }));
+      expect(sem.linhasRegra).toEqual([]);
+    });
+
+    it("as horas extra pagam-se sobre o valor hora do semanal com a percentagem da regra", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: semanal(),
+          totais: totaisBase({ realizadoMinutos: 9600, minutosExtraNormal: 120 }), // 2 h extra
+          codigos: [codigo({ id: "he", modo_calculo: "percentagem_hora_normal", origem_automatica: "horas_extra" })],
+        }),
+      );
+      // 2 h x 8,125 EUR x 50 % = 8,125 => 8,13 ao centimo.
+      expect(resultado.linhasAutomaticas[0].horas).toBe(2);
+      expect(resultado.linhasAutomaticas[0].valor).toBe(cent(2 * 8.125 * 0.5));
+      expect(resultado.linhasAutomaticas[0].valor).toBe(8.13);
+    });
+
+    it("cumprir o planeado paga exactamente a base do mes", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: semanal(), totais: totaisBase({ realizadoMinutos: 9600 }) }),
+      );
+      expect(resultado.descontoFaltas).toBe(0);
+      expect(resultado.totalBrutoEstimado).toBeCloseTo(1300, 6);
+    });
+  });
+
   describe("IHT", () => {
     it("com direito: percentagem do ordenado base (1 000 x 25 % = 250,00)", () => {
       const resultado = calcularProcessamentoPessoa(
