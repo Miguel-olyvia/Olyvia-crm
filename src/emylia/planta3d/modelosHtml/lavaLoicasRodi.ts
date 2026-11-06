@@ -1,7 +1,7 @@
 // Lava-loiças RODI do catálogo de origem, portadas do HTML (milímetros, y = 0 no topo): Keran (cuba principal R95, escorredor com 5 canais e nervuras,
 // reversível), UNA (degrau de acessórios, ponte de 20 mm, válvula estampada) e Cubas individuais (Brasília, Bahia, Laguna, Belém, Duo 60 e Duo 80).
 import * as THREE from "three";
-import { cyl, lathe, mesh, rounded } from "./util";
+import { cyl, lathe, mesh, nomearMateriais, rounded } from "./util";
 import { caminhoForma, caminhoFuro, materiais, placa, refineDrainLoop, roundLoop, sinkSurface, valvulaDeCesta } from "./lavaLoicas";
 
 type Par = number[];
@@ -14,6 +14,11 @@ export const modelosRodi = (): string[] => [...KERAN_SPECS, ...UNA_SPECS, ...CUB
 export const ehModeloRodi = (id: string): boolean => modelosRodi().includes(id);
 
 const aco = (cor: string, rough: number, clear: number, env: number) => new THREE.MeshPhysicalMaterial({ color: cor, metalness: 1, roughness: rough, clearcoat: clear, envMapIntensity: env, side: THREE.DoubleSide });
+/** Os materiais de uma RODI por nome: a chapa da família (`chapa`) e os comuns (`aco`, `polido`, `escuro`). Também usados pelos GLB pré-gerados. */
+export function materiaisRodi(modelo: string): { chapa: THREE.MeshPhysicalMaterial; aco: THREE.MeshPhysicalMaterial; polido: THREE.MeshPhysicalMaterial; escuro: THREE.MeshStandardMaterial } {
+  const chapa = KERAN_SPECS.some((s) => s.id === modelo) ? aco("#c6c8ca", 0.22, 0.12, 1.08) : UNA_SPECS.some((s) => s.id === modelo) ? aco("#c8cbce", 0.23, 0.08, 1.06) : aco("#c8cbcd", 0.23, 0.09, 1.06);
+  return nomearMateriais({ chapa, ...materiais() });
+}
 const ring = (w: number, d: number, r: number, y: number, n = 24): Par[] => roundLoop(w, d, r, n).map(([x, z]) => [x, y, z]);
 
 /* ------------------------------------------------------------------ RODI Keran */
@@ -31,7 +36,7 @@ function cubaKeran(b: CubaKeran & { cx: number }, parent: THREE.Group, index: nu
   if (index === 0) for (let i = 0; i < 3; i++) { const slot = mesh(new THREE.ShapeGeometry(rounded(2.1, 20, 1), 8), escuro, g, "Keran · anti-inundação"); slot.rotation.y = -Math.PI / 2; slot.position.set(b.w / 2 - 7, -17 - i * 5.5, 0); }
 }
 function construirKeran(spec: (typeof KERAN_SPECS)[number], o: OpcoesRodi): RodiHtml {
-  const m = materiais(), steel = aco("#c6c8ca", 0.22, 0.12, 1.08), g = new THREE.Group(); g.name = `RODI Keran ${spec.size}`;
+  const m = materiaisRodi(spec.id), steel = m.chapa, g = new THREE.Group(); g.name = `RODI Keran ${spec.size}`;
   const W = spec.outerWidth, D = 500;
   sinkSurface([ring(W, D, 10, -1.2), ring(W, D, 10, -0.3), ring(W - 1, D - 1, 9.5, 0), ring(W - 8, D - 8, 10, -1.1), ring(W - 16, D - 16, 14, -1.2), ring(W - 32, D - 32, 24, -4), ring(W - 40, D - 40, 30, -4)], steel, g, "Keran · rebordo exterior R10");
   const bowls = spec.bowls.map((b) => ({ ...b, cx: -W / 2 + b.left + b.w / 2 })), holes: Par[][] = bowls.map((b) => roundLoop(b.w, b.d, b.r).map(([x, z]) => [x + b.cx, z]));
@@ -96,7 +101,7 @@ function cubaUna(b: { w: number; depth: number; cx: number }, parent: THREE.Grou
   mesh(new THREE.ShapeGeometry(rounded(78, 1.8, 0.8), 12), escuro, g, "UNA · abertura anti-inundação").position.set(0, -29, -187.9);
 }
 function construirUna(spec: (typeof UNA_SPECS)[number]): RodiHtml {
-  const m = materiais(), steel = aco("#c8cbce", 0.23, 0.08, 1.06), g = new THREE.Group(); g.name = `RODI UNA ${spec.size}`;
+  const m = materiaisRodi(spec.id), steel = m.chapa, g = new THREE.Group(); g.name = `RODI UNA ${spec.size}`;
   const W = spec.outerWidth;
   sinkSurface([ring(W, 440, 10, -1.2), ring(W, 440, 10, -0.3), ring(W - 0.6, 439.4, 9.7, 0)], steel, g, "UNA · aresta exterior R10");
   const bowls = spec.bowls.map((b) => ({ ...b, cx: -W / 2 + b.left + b.w / 2 })), outer = caminhoForma(roundLoop(W - 0.6, 439.4, 9.7));
@@ -133,7 +138,7 @@ function cubaCubas(b: CubaCubas & { cx: number; cz: number }, parent: THREE.Grou
   }
 }
 function construirCubas(spec: (typeof CUBAS_SPECS)[number]): RodiHtml {
-  const m = materiais(), steel = aco("#c8cbcd", 0.23, 0.09, 1.06), g = new THREE.Group(); g.name = `RODI ${spec.title}`;
+  const m = materiaisRodi(spec.id), steel = m.chapa, g = new THREE.Group(); g.name = `RODI ${spec.title}`;
   const outline = contornoCubas(spec);
   sinkSurface([outline.map(([x, z]) => [x, -1.2, z]), outline.map(([x, z]) => [x, -0.6, z])], steel, g, "RODI · aresta da aba");
   const bowls = spec.bowls.map((b) => ({ ...b, cx: -spec.outerWidth / 2 + b.left + b.w / 2, cz: -spec.outerDepth / 2 + b.top + b.d / 2 }));

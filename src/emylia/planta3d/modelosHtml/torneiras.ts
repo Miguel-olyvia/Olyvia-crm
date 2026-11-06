@@ -71,7 +71,8 @@ export function aplicarExtracao(p: Puxar, quantidade: number): void {
   p.core.geometry.dispose(); p.spiral.geometry.dispose();
   p.core.geometry = new THREE.TubeGeometry(curve, 50, 5.18, 24, false); p.spiral.geometry = spiralGeometry(curve);
 }
-function criarFlexivel(m: Materiais, pai: THREE.Object3D, prefixo: string) {
+/** O flexível (vazio e escondido até `aplicarExtracao`): também usado pelos GLB pré-gerados, que não o trazem. */
+export function criarFlexivel(m: Materiais, pai: THREE.Object3D, prefixo: string): Pick<Puxar, "hose" | "core" | "spiral"> {
   const hose = new THREE.Group(); hose.name = `${prefixo}flexível metálico em espiral`; hose.visible = false; pai.add(hose);
   return { hose, core: mesh(new THREE.BufferGeometry(), m.hoseCore, hose, `${prefixo}fundo das juntas`), spiral: mesh(new THREE.BufferGeometry(), m.hose, hose, `${prefixo}fita metálica helicoidal`) };
 }
@@ -330,5 +331,7 @@ export const modelosDeTorneira = (): ModeloTorneira[] => Object.keys(CONSTRUTORE
 export const ehModeloTorneira = (id: string): id is ModeloTorneira => id in CONSTRUTORES;
 /** Constrói uma torneira (em mm) para um acabamento e opções; as geometrias pesadas vêm do cache. */
 export function construirTorneira(modelo: ModeloTorneira, acab: string, opcoes: OpcoesTorneira = {}): TorneiraHtml {
-  return CONSTRUTORES[modelo](criarMateriais(acabamentoDaTorneira(modelo, acab)), opcoes);
+  return CONSTRUTORES[modelo](materiaisDaTorneira(modelo, acab), opcoes);
 }
+/** Os materiais de uma torneira num acabamento, por nome de parte (metal, trim, rubber…): os mesmos do construtor, para os GLB pré-gerados. */
+export const materiaisDaTorneira = (modelo: ModeloTorneira, acab: string): Materiais => criarMateriais(acabamentoDaTorneira(modelo, acab));

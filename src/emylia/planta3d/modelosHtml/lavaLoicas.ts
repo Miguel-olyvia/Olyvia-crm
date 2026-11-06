@@ -2,7 +2,7 @@
 // Frasa Velar (inox, cuba R25, rebordo de 20 mm), Frasa Lody (PVD Gold, Cobre e Gunmetal, ralo de 24 ranhuras) e RODI Ambar (composto Magma mate, degrau,
 // escorredor liso e tampas dos ralos que se retiram). As cubas são superfícies por anéis (sem CSG): paredes rebaixadas, fundo inclinado para a válvula.
 import * as THREE from "three";
-import { cyl, lathe, mesh, rounded } from "./util";
+import { cyl, lathe, mesh, nomearMateriais, rounded } from "./util";
 
 type Par = number[];
 export type ModeloLavaLoica = string;
@@ -21,11 +21,31 @@ export const AMBAR_ACABAMENTOS: Record<string, { color: string; trim: string }> 
 
 /* ------------------------------------------------------------------ materiais e auxiliares (sinkSteel, sinkPolish, sinkDark, roundLoop, sinkSurface...) */
 export interface Mat { aco: THREE.MeshPhysicalMaterial; polido: THREE.MeshPhysicalMaterial; escuro: THREE.MeshStandardMaterial }
-export const materiais = (): Mat => ({
+export const materiais = (): Mat => nomearMateriais({
   aco: new THREE.MeshPhysicalMaterial({ color: "#c3c7ca", metalness: 1, roughness: 0.3, clearcoat: 0.07, envMapIntensity: 1.05, side: THREE.DoubleSide }),
   polido: new THREE.MeshPhysicalMaterial({ color: "#cdd1d3", metalness: 1, roughness: 0.2, envMapIntensity: 1.1, side: THREE.DoubleSide }),
   escuro: new THREE.MeshStandardMaterial({ color: "#1c2428", roughness: 0.58, metalness: 0.45 }),
 });
+/** Os materiais da Lody num acabamento PVD: o corpo (`aco`) e os acessórios (`polido`) mudam de cor; o interior da válvula fica escuro. */
+function materiaisLody(acab: string): Mat {
+  const m = materiais(), f = LODY_ACABAMENTOS[acab] ?? LODY_ACABAMENTOS.oro;
+  m.aco.envMapIntensity = 1.05; m.polido.envMapIntensity = 1.08;
+  [m.aco, m.polido].forEach((mat, i) => { mat.color.set(i ? f.trim : f.color); mat.roughness = i ? f.roughness - 0.035 : f.roughness; mat.metalness = 1; mat.clearcoat = f.clearcoat; });
+  return m;
+}
+/** Os materiais da Ambar: o composto mate (`corpo`) e as ferragens (`polido`) mudam com o acabamento. */
+function materiaisAmbar(acab: string): Mat & { corpo: THREE.MeshPhysicalMaterial } {
+  const m = materiais(), f = AMBAR_ACABAMENTOS[acab] ?? AMBAR_ACABAMENTOS.negro;
+  const corpo = new THREE.MeshPhysicalMaterial({ color: f.color, metalness: 0, roughness: 0.58, clearcoat: 0, envMapIntensity: 0.65, side: THREE.DoubleSide });
+  m.polido.color.set(f.trim); m.polido.metalness = acab === "negro" ? 0.3 : 1; m.polido.roughness = acab === "negro" ? 0.44 : 0.24;
+  return nomearMateriais({ ...m, corpo });
+}
+/** Os materiais de uma lava-loiça Frasa/Ambar por nome (`aco`, `polido`, `escuro`, `corpo`), para os modelos pré-gerados (GLB) que não trazem materiais. */
+export function materiaisDaLavaLoicaBase(modelo: ModeloLavaLoica, acab: string): Record<string, THREE.Material> {
+  if (LODY_SPECS.some((s) => s.id === modelo)) return { ...materiaisLody(acab) };
+  if (AMBAR_SPECS.some((s) => s.id === modelo)) return { ...materiaisAmbar(acab) };
+  return { ...materiais() };
+}
 /** Uma superfície por anéis de pontos (x, y, z) consecutivos: as paredes e o fundo das cubas. */
 export function sinkSurface(rings: Par[][], material: THREE.Material, parent: THREE.Object3D, name: string, reverse = false): THREE.Mesh {
   const p: number[] = [], ix: number[] = [], count = rings[0].length;
@@ -100,10 +120,8 @@ function construirVelar(spec: (typeof VELAR_SPECS)[number]): LavaLoicaHtml {
 
 /* ------------------------------------------------------------------ Frasa Lody (PVD) */
 function construirLody(spec: (typeof LODY_SPECS)[number], acab: string): LavaLoicaHtml {
-  const m = materiais(), g = new THREE.Group(); g.name = `Frasa Lody ${spec.size} U/F PVD`;
-  const f = LODY_ACABAMENTOS[acab] ?? LODY_ACABAMENTOS.oro, body = m.aco, fittings = m.polido;
-  body.envMapIntensity = 1.05; fittings.envMapIntensity = 1.08;
-  [body, fittings].forEach((mat, i) => { mat.color.set(i ? f.trim : f.color); mat.roughness = i ? f.roughness - 0.035 : f.roughness; mat.metalness = 1; mat.clearcoat = f.clearcoat; });
+  const m = materiaisLody(acab), g = new THREE.Group(); g.name = `Frasa Lody ${spec.size} U/F PVD`;
+  const body = m.aco, fittings = m.polido;
   const w = spec.innerWidth, d = 400, r = spec.radius, drainZ = spec.drainZ, ring = (rw: number, rd: number, rr: number, y: number): Par[] => roundLoop(rw, rd, rr).map(([x, z]) => [x, y, z]);
   const floorHeight = (x: number, z: number) => -200 + 6 * (1 - Math.exp(-Math.max(0, Math.hypot(x, z - drainZ) - 44.45) / 80));
   const deck = rounded(spec.outerWidth, 440, 10), opening = rounded(w + 2, d + 2, r + 1); deck.holes.push(opening);
@@ -186,10 +204,8 @@ function cubaAmbar(b: BowlPos, parent: THREE.Group, index: number, mats: { body:
   }
 }
 function construirAmbar(spec: SpecAmbar, acab: string, o: OpcoesLavaLoica): LavaLoicaHtml {
-  const m = materiais(), g = new THREE.Group(); g.name = `RODI Ambar ${spec.size}`;
-  const W = spec.outerWidth, D = spec.outerDepth, f = AMBAR_ACABAMENTOS[acab] ?? AMBAR_ACABAMENTOS.negro;
-  const body = new THREE.MeshPhysicalMaterial({ color: f.color, metalness: 0, roughness: 0.58, clearcoat: 0, envMapIntensity: 0.65, side: THREE.DoubleSide }), hardware = m.polido;
-  hardware.color.set(f.trim); hardware.metalness = acab === "negro" ? 0.3 : 1; hardware.roughness = acab === "negro" ? 0.44 : 0.24;
+  const m = materiaisAmbar(acab), g = new THREE.Group(); g.name = `RODI Ambar ${spec.size}`;
+  const W = spec.outerWidth, D = spec.outerDepth, body = m.corpo, hardware = m.polido;
   const tampas: THREE.Object3D[] = [], bowls: BowlPos[] = spec.bowls.map((b) => ({ ...b, cx: -W / 2 + b.left + b.w / 2, cz: -D / 2 + b.top + b.d / 2 }));
   const recess = recessoAmbar(spec, bowls), startY = spec.step ? -12 : -1;
   placa(roundLoop(W, D, 10), [recess], 0, body, g, "Ambar · aba exterior R10");

@@ -10,7 +10,14 @@ import { construirPlaca } from "./placas";
 import { construirTorneira, ehModeloTorneira } from "./torneiras";
 import { libertarMateriais } from "./util";
 
-export interface BancadaHtml { grupo: THREE.Group; libertar: () => void }
+/** Um equipamento da bancada (lava-loiça, placa, torneira): o modelo do HTML e onde fica, em mm, relativo ao topo da chapa. */
+export interface EquipamentoBancada { familia: "torneira" | "lava_loica" | "placa"; modelo: string; acab: string; posicao: [number, number, number]; rotacaoY: number }
+export interface BancadaHtml {
+  grupo: THREE.Group; libertar: () => void;
+  /** Os equipamentos e as posições (sempre preenchido). Com `equipamentos: false` não estão no grupo: quem chama põe-nos (os GLB pré-gerados). */
+  equipamentos: EquipamentoBancada[];
+}
+export interface OpcoesBancada { /** construir os equipamentos com os construtores procedurais (omissão) ou deixá-los a quem chama */ equipamentos?: boolean }
 
 /** `counterUV`: a posição (x, z) na chapa física (largura × comprimento), com a faixa e o sentido dos veios. */
 function uvDaChapa(x: number, z: number, c: ConfigBancada, slab: [number, number]): [number, number] {
@@ -51,7 +58,7 @@ function moveis(c: ConfigBancada, livres: [number, number][], parent: THREE.Grou
 }
 
 /** Constrói a bancada (em mm). `textura`: a imagem da chapa (pode ainda não ter carregado; o material actualiza-se quando chegar). */
-export function construirBancada(c: ConfigBancada, textura: THREE.Texture | null): BancadaHtml | null {
+export function construirBancada(c: ConfigBancada, textura: THREE.Texture | null, opcoes: OpcoesBancada = {}): BancadaHtml | null {
   const p = colocacao(c), { series, tone, finish } = selecaoChapa(c), so = !!c.semEquipamentos;
   if (!p || !series || !tone || !finish) return null;
   const grupo = new THREE.Group(); grupo.name = `Bancada · ${series.label} · ${tone.label}`;
@@ -85,20 +92,24 @@ export function construirBancada(c: ConfigBancada, textura: THREE.Texture | null
     if (c.cabinet) moveis(c, [], grupo, mats, geos);
     grupo.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
     grupo.position.y = TOPO_BANCADA_MM;
-    return { grupo, libertar: () => { geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose()); } };
+    return { grupo, libertar: () => { geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose()); }, equipamentos: [] };
   }
-  // os equipamentos: os modelos detalhados do HTML
-  const sink = construirLavaLoica(c.sink, c.sinkFinish);
-  sink.grupo.position.set(p.sx, c.mount === "under" ? -t - 0.4 : p.sink.ambar ? 10.4 : 1.4, p.sz); sink.grupo.rotation.y = c.reverse ? Math.PI : 0;
-  grupo.add(sink.grupo); libertos.push(() => sink.materiais.forEach((m) => m.dispose()));
-  const hob = construirPlaca(c.hob, c.hobFinish);
-  hob.grupo.position.set(p.hx, 0, 0); grupo.add(hob.grupo); libertos.push(() => hob.materiais.forEach((m) => m.dispose()));
-  if (ehModeloTorneira(c.tap)) {
-    const tap = construirTorneira(c.tap, c.tapFinish);
-    tap.grupo.position.set(p.tx, 0, p.tz); grupo.add(tap.grupo); libertos.push(() => libertarMateriais(tap.materiais));
+  // os equipamentos: os modelos detalhados do HTML (as posições valem para os dois caminhos: procedural aqui, ou GLB por quem chama)
+  const equipamentos: EquipamentoBancada[] = [
+    { familia: "lava_loica", modelo: c.sink, acab: c.sinkFinish, posicao: [p.sx, c.mount === "under" ? -t - 0.4 : p.sink.ambar ? 10.4 : 1.4, p.sz], rotacaoY: c.reverse ? Math.PI : 0 },
+    { familia: "placa", modelo: c.hob, acab: c.hobFinish, posicao: [p.hx, 0, 0], rotacaoY: 0 },
+    ...(ehModeloTorneira(c.tap) ? [{ familia: "torneira" as const, modelo: c.tap, acab: c.tapFinish, posicao: [p.tx, 0, p.tz] as [number, number, number], rotacaoY: 0 }] : []),
+  ];
+  if (opcoes.equipamentos !== false) for (const e of equipamentos) {
+    const r = e.familia === "lava_loica" ? construirLavaLoica(e.modelo, e.acab) : e.familia === "placa" ? construirPlaca(e.modelo, e.acab) : null;
+    const tap = e.familia === "torneira" && ehModeloTorneira(e.modelo) ? construirTorneira(e.modelo, e.acab) : null;
+    const g = r?.grupo ?? tap?.grupo;
+    if (!g) continue;
+    g.position.set(...e.posicao); g.rotation.y = e.rotacaoY; grupo.add(g);
+    libertos.push(() => { if (r) r.materiais.forEach((m) => m.dispose()); if (tap) libertarMateriais(tap.materiais); });
   }
   if (c.cabinet) moveis(c, [[p.sx - p.sink.outerWidth / 2, p.sx + p.sink.outerWidth / 2], [p.hx - p.hob.outerWidth / 2, p.hx + p.hob.outerWidth / 2]], grupo, mats, geos);
   grupo.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
   grupo.position.y = TOPO_BANCADA_MM;
-  return { grupo, libertar: () => { geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose()); libertos.forEach((f) => f()); } };
+  return { grupo, libertar: () => { geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose()); libertos.forEach((f) => f()); }, equipamentos };
 }

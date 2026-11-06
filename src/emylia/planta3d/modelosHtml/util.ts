@@ -34,15 +34,23 @@ export function criarMateriais(a: AcabHtml): Materiais {
   const trim = new THREE.MeshPhysicalMaterial({ color: "#a4aaa4", metalness: 1, roughness: 0.24, envMapIntensity: 1.0 });
   metal.color.set(a.color); metal.roughness = a.roughness; metal.metalness = a.metalness; metal.clearcoat = a.clearcoat;
   trim.color.set(a.trim); trim.roughness = a.roughness; trim.metalness = a.metalness;
-  return {
+  return nomearMateriais({
     metal, trim, rubber: new THREE.MeshStandardMaterial({ color: "#202221", roughness: 0.85 }), aerator: new THREE.MeshStandardMaterial({ color: "#727972", metalness: 0.7, roughness: 0.45 }),
     hole: new THREE.MeshStandardMaterial({ color: "#202b24", roughness: 0.82 }),
     hose: new THREE.MeshPhysicalMaterial({ color: "#d1d0cb", metalness: 1, roughness: 0.22, clearcoat: 0.15, envMapIntensity: 1.05 }),
     hoseCore: new THREE.MeshStandardMaterial({ color: "#575953", metalness: 0.85, roughness: 0.4 }),
     silicone: new THREE.MeshStandardMaterial({ color: "#101115", metalness: 0, roughness: 0.78 }),
-  };
+  });
 }
 export const libertarMateriais = (m: Materiais): void => { for (const x of Object.values(m)) x.dispose(); };
+/**
+ * Dá a cada material o nome da sua chave (metal, trim, aco, vidro…): é por esse nome que as malhas dos GLB pré-gerados sabem que material levam
+ * (o GLB não traz materiais; o acabamento é atribuído em código, com estes mesmos materiais).
+ */
+export function nomearMateriais<T extends Record<string, THREE.Material>>(m: T): T {
+  for (const [k, x] of Object.entries(m)) x.name = k;
+  return m;
+}
 
 /* ------------------------------------------------------------------ construção de malhas (as funções do HTML) */
 export function mesh(g: THREE.BufferGeometry, m: THREE.Material, parent: THREE.Object3D, name = ""): THREE.Mesh {

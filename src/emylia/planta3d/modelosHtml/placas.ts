@@ -2,7 +2,7 @@
 // RI 161 C, THP 642 e ING 61T; Whirlpool WL B1160 BF, AKT 8090/NE, GMAL 6422/IXL e GMWL 958/IXL. Vidro com bordo (indução e radiante) ou inox estampado com
 // queimadores de coroa de alumínio, grelhas de varão, individuais ou de ferro fundido, e manípulos. A serigrafia (texto e zonas desenhadas num canvas) não se porta.
 import * as THREE from "three";
-import { V, cyl, lathe, mesh, rod, rounded } from "./util";
+import { V, cyl, lathe, mesh, nomearMateriais, rod, rounded } from "./util";
 import { roundLoop, sinkSurface } from "./lavaLoicas";
 
 import { HOB_SPECS, type SpecPlaca } from "./specs";
@@ -72,8 +72,7 @@ function grelhas(spec: SpecPlaca, iron: THREE.Material, parent: THREE.Object3D):
  * As zonas de cozedura marcadas no vidro (indução e radiante), em linha fina: uma versão simples da serigrafia do HTML (que desenha texto e símbolos
  * num canvas, o que aqui não se porta). Posições e raios do HTML: círculos nas radiantes e contornos arredondados na IB 65B60.
  */
-function marcasNoVidro(spec: SpecPlaca, g: THREE.Group): void {
-  const mat = new THREE.MeshBasicMaterial({ color: "#b0b5b7", transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+function marcasNoVidro(spec: SpecPlaca, g: THREE.Group, mat: THREE.Material): void {
   const y = spec.plate + 0.06, e = 0.85;
   const anel = (x: number, z: number, r: number) => { const o = mesh(new THREE.RingGeometry(r - e, r, 64), mat, g, "Serigrafia · zona"); o.rotation.x = -Math.PI / 2; o.position.set(x, y, z); };
   const contorno = (x: number, z: number, w: number, d: number, r: number) => {
@@ -85,22 +84,30 @@ function marcasNoVidro(spec: SpecPlaca, g: THREE.Group): void {
   else if (spec.id === "wlb1160") { anel(135, -115, 105); anel(135, 98, 75); anel(-135, -20, 100); }
 }
 
+/** Os materiais de uma placa por nome (inox, alumínio, ferro, escuro, cerâmica, vidro e a serigrafia das zonas). Também usados pelos GLB pré-gerados. */
+export function materiaisDaPlaca(modelo: string, acab: string): Mats & { serigrafia: THREE.MeshBasicMaterial } {
+  const spec = HOB_SPECS.find((s) => s.id === modelo);
+  const m = nomearMateriais({
+    steel: new THREE.MeshStandardMaterial({ color: "#b6babe", metalness: 0.94, roughness: 0.3, envMapIntensity: 0.8 }), alloy: new THREE.MeshStandardMaterial({ color: "#959da2", metalness: 0.86, roughness: 0.38 }),
+    iron: new THREE.MeshStandardMaterial({ color: "#202326", metalness: 0.12, roughness: 0.7 }), dark: new THREE.MeshStandardMaterial({ color: "#101417", roughness: 0.84 }),
+    ceramic: new THREE.MeshStandardMaterial({ color: "#dddcd4", roughness: 0.5 }),
+    glass: new THREE.MeshPhysicalMaterial({ color: "#080b0d", metalness: 0, roughness: 0.16, clearcoat: 0.75, clearcoatRoughness: 0.13, envMapIntensity: 0.32 }),
+    serigrafia: new THREE.MeshBasicMaterial({ color: "#b0b5b7", transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
+  });
+  if (spec?.glass) m.glass.color.set(acab === "blanco" ? "#f0f2f2" : "#080b0d");
+  return m;
+}
+
 /** Constrói uma placa (em mm). O acabamento só muda nas placas de vidro (ING 61T: preto ou branco). */
 export function construirPlaca(modelo: string, acab: string): PlacaHtml {
   const spec = HOB_SPECS.find((s) => s.id === modelo);
   if (!spec) throw new Error(`Modelo de placa desconhecido: ${modelo}`);
   const g = new THREE.Group(), gas = spec.kind === "gas"; g.name = `${spec.brand} ${spec.title}`;
-  const m: Mats = {
-    steel: new THREE.MeshStandardMaterial({ color: "#b6babe", metalness: 0.94, roughness: 0.3, envMapIntensity: 0.8 }), alloy: new THREE.MeshStandardMaterial({ color: "#959da2", metalness: 0.86, roughness: 0.38 }),
-    iron: new THREE.MeshStandardMaterial({ color: "#202326", metalness: 0.12, roughness: 0.7 }), dark: new THREE.MeshStandardMaterial({ color: "#101417", roughness: 0.84 }),
-    ceramic: new THREE.MeshStandardMaterial({ color: "#dddcd4", roughness: 0.5 }),
-    glass: new THREE.MeshPhysicalMaterial({ color: "#080b0d", metalness: 0, roughness: 0.16, clearcoat: 0.75, clearcoatRoughness: 0.13, envMapIntensity: 0.32 }),
-  };
-  if (spec.glass) m.glass.color.set(acab === "blanco" ? "#f0f2f2" : "#080b0d");
+  const m = materiaisDaPlaca(modelo, acab);
   laje(spec.cut[0] - 8, spec.cut[1] - 8, 9, -spec.under, spec.under - 1, m.alloy, g, "Caixa inferior de encastre");
   for (const x of [-spec.cut[0] / 2 + 22, spec.cut[0] / 2 - 22]) for (const z of [-spec.cut[1] / 2 + 25, spec.cut[1] / 2 - 25]) cyl(3, 3, 1, m.dark, g, "Parafuso inferior", 12).position.set(x, -spec.under - 0.5, z);
   if (!gas || spec.glass) laje(spec.outerWidth, spec.outerDepth, spec.radius, 0, spec.plate, m.glass, g, "Vidro · bordo exterior");
-  if (!gas) marcasNoVidro(spec, g);
+  if (!gas) marcasNoVidro(spec, g, m.serigrafia);
   else {
     const w = spec.outerWidth, d = spec.outerDepth;
     sinkSurface([roundLoop(w, d, spec.radius).map(([x, z]) => [x, 0, z]), roundLoop(w, d, spec.radius).map(([x, z]) => [x, spec.plate - 1, z]), roundLoop(w - 3, d - 3, spec.radius).map(([x, z]) => [x, spec.plate, z]),
@@ -116,8 +123,7 @@ export function construirPlaca(modelo: string, acab: string): PlacaHtml {
       caixa(1.3, 0.3, 8, 0, spec.glass ? 28.6 : 22.1, -7, m.dark, knob, "Índice do manípulo");
     });
   } else for (const x of [-180, 180]) for (let z = -150; z <= 150; z += 17) caixa(42, 0.2, 4, x, -spec.under - 0.2, z, m.dark, g, "Grelha inferior de ventilação");
-  const marcas: THREE.Material[] = []; g.traverse((o) => { const x = o as THREE.Mesh; if (x.isMesh && x.name === "Serigrafia · zona" && !marcas.includes(x.material as THREE.Material)) marcas.push(x.material as THREE.Material); });
-  return { grupo: g, materiais: [...Object.values(m), ...marcas] };
+  return { grupo: g, materiais: Object.values(m) };
 }
 export const modelosDePlaca = (): string[] => HOB_SPECS.map((s) => s.id);
 export const ehModeloPlaca = (id: string): boolean => HOB_SPECS.some((s) => s.id === id);

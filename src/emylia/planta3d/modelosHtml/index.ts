@@ -1,6 +1,9 @@
 // Registo único dos modelos detalhados de lava-loiça portados do HTML (Frasa e RODI): o visualizador usa só este ponto de entrada.
-import { construirLavaLoica as construirBase, ehModeloLavaLoica as ehBase, modelosDeLavaLoica as todosBase, type LavaLoicaHtml, type OpcoesLavaLoica } from "./lavaLoicas";
-import { construirRodi, ehModeloRodi, modelosRodi } from "./lavaLoicasRodi";
+import * as THREE from "three";
+import { construirLavaLoica as construirBase, ehModeloLavaLoica as ehBase, materiaisDaLavaLoicaBase, modelosDeLavaLoica as todosBase, type LavaLoicaHtml, type OpcoesLavaLoica } from "./lavaLoicas";
+import { construirRodi, ehModeloRodi, materiaisRodi, modelosRodi } from "./lavaLoicasRodi";
+/** Os materiais de qualquer lava-loiça portada, por nome de parte (os mesmos que o construtor usa): para os GLB pré-gerados. */
+export const materiaisDaLavaLoica = (modelo: string, acab: string): Record<string, THREE.Material> => (ehModeloRodi(modelo) ? { ...materiaisRodi(modelo) } : materiaisDaLavaLoicaBase(modelo, acab));
 
 export type { LavaLoicaHtml, OpcoesLavaLoica };
 export const modelosDeLavaLoica = (): string[] => [...todosBase(), ...modelosRodi()];

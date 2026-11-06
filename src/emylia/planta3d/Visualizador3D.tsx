@@ -2,9 +2,9 @@
 // three só entra no pacote ao abrir o visualizador. Recebe o espaço (modelo.ts) e os produtos do catálogo com o mockup de cada um (catalogo3d.ts);
 // cada mockup é geometria paramétrica com a dimensão real do produto. Se o produto tiver `mockup3d.url` (GLB), carrega-se esse modelo e a
 // geometria paramétrica fica de reserva. Sem sombras (o protótipo não precisa) e com o ciclo de desenho sob pedido (frameloop demand).
-import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Component, Suspense, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
+import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
@@ -13,7 +13,8 @@ import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml";
 import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
 import { construirBancada } from "./modelosHtml/bancada3d";
 import { VELAR_SPECS } from "./modelosHtml/lavaLoicas";
-import { BANCADA_OMISSAO, CHAPA_OMISSAO, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
+import { USAR_GLB, lerGlb, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
+import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
@@ -130,25 +131,79 @@ function Material({ cor, mat }: { cor: string; mat?: MaterialMockup }) {
   return <meshStandardMaterial color={cor} roughness={mat?.roughness ?? 0.4} metalness={mat?.metalness ?? 0} side={THREE.DoubleSide} />;
 }
 
-/** O modelo detalhado portado do HTML (em mm; aqui a 0,001): corpo, bica e comando reais. As geometrias pesadas vêm de cache; o acabamento muda só os materiais. */
+/* ------------------------------------------------------------------ os modelos do HTML: GLB pré-gerado, com o construtor procedural de reserva */
+/** Diz à etiqueta da peça de onde veio cada modelo («GLB», «construtor procedural», «construtor procedural: o GLB falhou»). */
+const AvisarFonte = createContext<(chave: string, fonte: string) => void>(() => {});
+function useFonte(chave: string, fonte: string): void {
+  const avisar = useContext(AvisarFonte);
+  useEffect(() => avisar(chave, fonte), [avisar, chave, fonte]);
+}
+
+/** O construtor procedural (o caminho antigo, e a reserva quando o GLB falha). Em mm. */
+function construirProcedural(familia: FamiliaGlb, modelo: string, acab: string, o: OpcoesPeca | undefined): ModeloMontado | null {
+  if (familia === "torneira") {
+    if (!ehModeloTorneira(modelo)) return null;
+    const t = construirTorneira(modelo, acab, { bica: o?.bica, extraido: o?.extraido ? 1 : 0 });
+    return { grupo: t.grupo, libertar: () => libertarMateriais(t.materiais) };
+  }
+  if (familia === "lava_loica") {
+    if (!ehModeloLavaLoica(modelo)) return null;
+    const t = construirLavaLoica(modelo, acab, { tampas: o?.tampas, reverso: o?.reverso });
+    return { grupo: t.grupo, libertar: () => t.materiais.forEach((m) => m.dispose()) };
+  }
+  if (!ehModeloPlaca(modelo)) return null;
+  const t = construirPlaca(modelo, acab);
+  return { grupo: t.grupo, libertar: () => t.materiais.forEach((m) => m.dispose()) };
+}
+interface PropsHtml { familia: FamiliaGlb; modelo: string; acab: string; opc?: OpcoesPeca }
+function ModeloProcedural({ familia, modelo, acab, opc, fonte }: PropsHtml & { fonte: string }) {
+  const { bica, extraido, tampas, reverso } = opc ?? {};
+  const t = useMemo(() => construirProcedural(familia, modelo, acab, { bica, extraido, tampas, reverso }), [familia, modelo, acab, bica, extraido, tampas, reverso]);
+  useEffect(() => () => t?.libertar(), [t]);
+  useFonte(`${familia}:${modelo}`, fonte);
+  return t ? <primitive object={t.grupo} /> : null;
+}
+/** O GLB do modelo (suspende enquanto carrega): a geometria fica partilhada entre peças iguais; os materiais são os do acabamento. */
+function ModeloGlbHtml({ familia, modelo, acab, opc }: PropsHtml) {
+  const url = urlDoModeloHtml(familia, modelo);
+  useEffect(() => { reterGlb(url); return () => soltarGlb(url); }, [url]);
+  const cena = lerGlb(url);
+  const { bica, extraido, tampas, reverso } = opc ?? {};
+  const t = useMemo(() => montarModelo(familia, cena, modelo, acab, { bica, extraido, tampas, reverso }), [familia, cena, modelo, acab, bica, extraido, tampas, reverso]);
+  useEffect(() => () => t.libertar(), [t]);
+  useFonte(`${familia}:${modelo}`, "GLB");
+  return <primitive object={t.grupo} />;
+}
+/** Se o GLB falhar (ficheiro em falta, rede, material desconhecido), regista o erro e põe o construtor procedural no lugar. */
+class ReservaGlb extends Component<{ reserva: ReactNode; children: ReactNode }, { falhou: boolean }> {
+  state = { falhou: false };
+  static getDerivedStateFromError() { return { falhou: true }; }
+  componentDidCatch(e: unknown) { console.warn("GLB do modelo 3D falhou; uso o construtor procedural", e); }
+  render() { return this.state.falhou ? this.props.reserva : this.props.children; }
+}
+/** Um modelo do HTML (em mm): o GLB com o procedural de reserva, ou só o procedural com `USAR_GLB = false`. */
+function CorpoHtml(p: PropsHtml) {
+  if (!USAR_GLB) return <ModeloProcedural {...p} fonte="construtor procedural" />;
+  return (
+    <ReservaGlb reserva={<ModeloProcedural {...p} fonte="construtor procedural (o GLB falhou)" />}>
+      <Suspense fallback={null}><ModeloGlbHtml {...p} /></Suspense>
+    </ReservaGlb>
+  );
+}
+
+/** A torneira detalhada do HTML (em mm; aqui a 0,001): corpo, bica e comando reais. */
 function ModeloHtml({ modelo, acab, opc, z0 }: { modelo: string; acab: string; opc?: OpcoesPeca; z0: number }) {
-  const t = useMemo(() => (ehModeloTorneira(modelo) ? construirTorneira(modelo, acab, { bica: opc?.bica, extraido: opc?.extraido ? 1 : 0 }) : null), [modelo, acab, opc?.bica, opc?.extraido]);
-  useEffect(() => () => { if (t) libertarMateriais(t.materiais); }, [t]);
-  return t ? <group position={[0, 0, z0]} scale={0.001}><primitive object={t.grupo} /></group> : null;
+  return ehModeloTorneira(modelo) ? <group position={[0, 0, z0]} scale={0.001}><CorpoHtml familia="torneira" modelo={modelo} acab={acab} opc={opc} /></group> : null;
 }
 
 /** O lava-loiça detalhado do HTML (Velar, Lody, Ambar): o topo do rebordo à altura `h` do mockup, as cubas para baixo. */
 function ModeloLavaLoicaHtml({ modelo, acab, opc, h }: { modelo: string; acab: string; opc?: OpcoesPeca; h: number }) {
-  const t = useMemo(() => (ehModeloLavaLoica(modelo) ? construirLavaLoica(modelo, acab, { tampas: opc?.tampas, reverso: opc?.reverso }) : null), [modelo, acab, opc?.tampas, opc?.reverso]);
-  useEffect(() => () => { t?.materiais.forEach((m) => m.dispose()); }, [t]);
-  return t ? <group position={[0, h, 0]} scale={0.001}><primitive object={t.grupo} /></group> : null;
+  return ehModeloLavaLoica(modelo) ? <group position={[0, h, 0]} scale={0.001}><CorpoHtml familia="lava_loica" modelo={modelo} acab={acab} opc={opc} /></group> : null;
 }
 
 /** A placa detalhada do HTML (queimadores, grelhas e manípulos; vidro com bordo): a base é o plano de apoio na bancada. */
 function ModeloPlacaHtml({ modelo, acab }: { modelo: string; acab: string }) {
-  const t = useMemo(() => (ehModeloPlaca(modelo) ? construirPlaca(modelo, acab) : null), [modelo, acab]);
-  useEffect(() => () => { t?.materiais.forEach((m) => m.dispose()); }, [t]);
-  return t ? <group scale={0.001}><primitive object={t.grupo} /></group> : null;
+  return ehModeloPlaca(modelo) ? <group scale={0.001}><CorpoHtml familia="placa" modelo={modelo} acab={acab} /></group> : null;
 }
 
 /* ------------------------------------------------------------------ a chapa Coverlam (imagem do fabricante) e a bancada composta */
@@ -173,10 +228,23 @@ function ModeloBancadaHtml({ cfg }: { cfg: ConfigBancada }) {
   const chave = JSON.stringify(cfg);
   const b = useMemo(() => {
     const c = JSON.parse(chave) as ConfigBancada, livro = selecaoChapa(c).book?.file; // o desenho escolhido (Book A/B ou chapa integral)
-    return construirBancada(c, livro ? texturaDaChapa(livro) : null);
+    // com os GLB, a bancada só constrói a chapa, o rodatampo e os móveis; os equipamentos vêm dos GLB (com o procedural de reserva)
+    return construirBancada(c, livro ? texturaDaChapa(livro) : null, { equipamentos: !USAR_GLB });
   }, [chave]);
   useEffect(() => () => b?.libertar(), [b]);
-  return b ? <group scale={0.001}><primitive object={b.grupo} /></group> : null;
+  if (!b) return null;
+  return (
+    <group scale={0.001}>
+      <primitive object={b.grupo} />
+      {USAR_GLB && (
+        <group position={[0, TOPO_BANCADA_MM, 0]}>
+          {b.equipamentos.map((e) => (
+            <group key={e.familia} position={e.posicao} rotation={[0, e.rotacaoY, 0]}><CorpoHtml familia={e.familia} modelo={e.modelo} acab={e.acab} /></group>
+          ))}
+        </group>
+      )}
+    </group>
+  );
 }
 
 /** Um tampo do catálogo sem composição: a chapa de omissão com a imagem do fabricante, deitada (e os recortes, se os tiver). */
@@ -529,8 +597,11 @@ class Reserva extends Component<{ reserva: ReactNode; children: ReactNode }, { f
   static getDerivedStateFromError() { return { falhou: true }; }
   render() { return this.state.falhou ? this.props.reserva : this.props.children; }
 }
+/** O GLB próprio de um produto (`mockup3d.url`), escalado à caixa da peça: mesma cache e descodificador (meshopt local) que os modelos do HTML. */
 function ModeloGLB({ url, w, d, h }: { url: string; w: number; d: number; h: number }) {
-  const { scene } = useGLTF(url);
+  useEffect(() => { reterGlb(url); return () => soltarGlb(url); }, [url]);
+  const scene = lerGlb(url);
+  useFonte("produto", "GLB do produto");
   const copia = useMemo(() => {
     const c = scene.clone(true);
     const caixa = new THREE.Box3().setFromObject(c), tam = caixa.getSize(new THREE.Vector3()), centro = caixa.getCenter(new THREE.Vector3());
@@ -591,10 +662,16 @@ function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: Prod
   const corpo = useRef<THREE.Group>(null);
   // todas as peças fazem e recebem sombra (os modelos do HTML já vêm assim; as paramétricas marcam-se aqui)
   useEffect(() => { corpo.current?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); });
+  // de onde veio cada modelo da peça (GLB, procedural, ou procedural porque o GLB falhou), para a etiqueta
+  const [fontes, setFontes] = useState<Record<string, string>>({});
+  const avisar = useCallback((chave: string, fonte: string) => setFontes((f) => (f[chave] === fonte ? f : { ...f, [chave]: fonte })), []);
+  const fonte = [...new Set(Object.values(fontes))].join(" + ");
   return (
     <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }}>
       <group ref={corpo} scale={[p.espelhada ? -1 : 1, 1, 1]}>
-        {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
+        <AvisarFonte.Provider value={avisar}>
+          {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
+        </AvisarFonte.Provider>
       </group>
       {selecionada && <Contorno w={p.largura} d={p.profundidade} y={Math.min(altura, 0.02)} />}
       {(etiquetas || selecionada) && (
@@ -602,6 +679,7 @@ function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: Prod
           <div className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-tight text-white ${selecionada ? "bg-violet-700/85" : "bg-black/60"}`}>
             {p.nome ?? m.nome}<br />{nf(p.largura)}×{nf(p.profundidade)}×{nf(altura)} cm{p.montagem === "parede" ? ` · a ${nf(p.altura)} cm do chão` : ""}
             {escolhido && <><br /><span className="opacity-80">{escolhido}</span></>}
+            {fonte && <><br /><span className="opacity-80">Fonte: {fonte}</span></>}
           </div>
         </Html>
       )}
