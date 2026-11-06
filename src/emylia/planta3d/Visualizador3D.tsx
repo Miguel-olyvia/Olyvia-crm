@@ -171,6 +171,9 @@ function ModeloGlbHtml({ familia, modelo, acab, opc }: PropsHtml) {
   const { bica, extraido, tampas, reverso } = opc ?? {};
   const t = useMemo(() => montarModelo(familia, cena, modelo, acab, { bica, extraido, tampas, reverso }), [familia, cena, modelo, acab, bica, extraido, tampas, reverso]);
   useEffect(() => () => t.libertar(), [t]);
+  // o ciclo de desenho é sob pedido: quando o GLB chega (o Suspense resolve), pede-se um desenho, senão a peça só aparece no próximo movimento
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => { invalidate(); }, [t, invalidate]);
   useFonte(`${familia}:${modelo}`, "GLB");
   return <primitive object={t.grupo} />;
 }
