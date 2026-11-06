@@ -11,6 +11,11 @@ interface PermissionsContextType {
   hasAnyPermission: (permissionCodes: string[]) => boolean;
   hasModuleAccess: (module: string) => boolean;
   refreshPermissions: () => void;
+  /**
+   * Relê as permissões em segundo plano, sem cache e sem pôr `loading` a true (a barra lateral e os ProtectedRoute não
+   * piscam). Só substitui o estado se o conteúdo mudou. Usar depois de gravar papéis/utilizadores.
+   */
+  refreshPermissionsSilently: () => void;
 }
 
 const PermissionsContext = createContext<PermissionsContextType | undefined>(undefined);
@@ -18,6 +23,10 @@ const PermissionsContext = createContext<PermissionsContextType | undefined>(und
 // Cache permissions per company to avoid redundant queries
 const permissionsCache = new Map<string, { permissions: string[]; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+/** Ao voltar à janela (visibilitychange/focus) relê as permissões no máximo uma vez neste intervalo. */
+export const PERMISSIONS_FOCUS_REFRESH_THROTTLE_MS = 30 * 1000;
+
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 interface UserContextRpcResult {
   business_user_id?: string | null;
@@ -35,6 +44,18 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   // Version counter to handle race conditions — only the latest call applies results
   const versionRef = useRef(0);
   const [refreshCounter, setRefreshCounter] = useState(0);
+  // Estado atual em refs, para a releitura silenciosa comparar e saber a organização sem depender de re-renders.
+  const permissionsRef = useRef<string[]>([]);
+  const isSystemAdminRef = useRef(false);
+  const loadingRef = useRef(true);
+  const companyIdRef = useRef<string | undefined>(activeCompany?.id);
+  const userTypeRef = useRef(userType);
+  const lastFetchAtRef = useRef(0);
+  permissionsRef.current = permissions;
+  isSystemAdminRef.current = isSystemAdmin;
+  loadingRef.current = loading;
+  companyIdRef.current = activeCompany?.id;
+  userTypeRef.current = userType;
 
   useEffect(() => {
     if (!userType) {
@@ -43,6 +64,8 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
 
     const version = ++versionRef.current;
+    lastFetchAtRef.current = Date.now();
+    loadingRef.current = true;
     setLoading(true);
 
     (async () => {
@@ -158,6 +181,73 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     setRefreshCounter(c => c + 1);
   }, []);
 
+  // Releitura em segundo plano: ignora a cache, nunca mexe em `loading`, só aplica se o conteúdo mudou.
+  // Se uma leitura normal (com loading) estiver em curso não faz nada: essa leitura já traz o estado e, como
+  // incrementa versionRef, as duas nunca se atropelam. Um erro de rede (comum ao acordar o portátil) mantém as
+  // permissões atuais em vez de as apagar — apagar expulsaria o utilizador de ecrãs a que continua a ter acesso.
+  const refreshPermissionsSilently = useCallback(async () => {
+    if (!userTypeRef.current || loadingRef.current) return;
+    const version = ++versionRef.current;
+    lastFetchAtRef.current = Date.now();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (version !== versionRef.current || !session?.user) return;
+      const cacheKey = `${session.user.id}-${companyIdRef.current || "none"}`;
+
+      const RPC_TIMEOUT_MS = 15000;
+      const timeout = new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error("get_user_context timed out") }), RPC_TIMEOUT_MS)
+      );
+      const result = await Promise.race([(supabase as any).rpc("get_user_context"), timeout]);
+      if (version !== versionRef.current) return;
+      if (result.error) {
+        console.error("get_user_context RPC error (silent refresh):", result.error);
+        return;
+      }
+      const ctx = result.data as UserContextRpcResult | null;
+
+      let nextAdmin = false;
+      let nextList: string[] = [];
+      if (ctx && ctx.business_user_id) {
+        nextAdmin = ctx.is_system_admin === true;
+        nextList =
+          Array.isArray(ctx.permissions) &&
+          ctx.permissions.every((value): value is string => typeof value === "string") &&
+          !ctx.permissions.includes("*")
+            ? ctx.permissions
+            : [];
+        permissionsCache.set(cacheKey, { permissions: nextList, timestamp: Date.now() });
+      }
+
+      if (nextAdmin !== isSystemAdminRef.current) setIsSystemAdmin(nextAdmin);
+      if (!sameList(nextList, permissionsRef.current)) {
+        setPermissions(nextList);
+        setPermissionSet(expandPermissions(nextList));
+      }
+    } catch (error) {
+      console.error("Error refreshing permissions:", error);
+    }
+  }, []);
+
+  const refreshPermissionsSilentlyVoid = useCallback(() => {
+    void refreshPermissionsSilently();
+  }, [refreshPermissionsSilently]);
+
+  // Ao voltar à janela (outro separador mudou um papel), relê as permissões — no máximo uma vez a cada 30 s.
+  useEffect(() => {
+    const onReturn = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (Date.now() - lastFetchAtRef.current < PERMISSIONS_FOCUS_REFRESH_THROTTLE_MS) return;
+      void refreshPermissionsSilently();
+    };
+    document.addEventListener("visibilitychange", onReturn);
+    window.addEventListener("focus", onReturn);
+    return () => {
+      document.removeEventListener("visibilitychange", onReturn);
+      window.removeEventListener("focus", onReturn);
+    };
+  }, [refreshPermissionsSilently]);
+
   // Memoized so consumers of usePermissions() only see a new context value
   // when one of these actually changes, instead of on every
   // PermissionsProvider render (all the function fields are already stable
@@ -171,8 +261,9 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       hasAnyPermission,
       hasModuleAccess,
       refreshPermissions,
+      refreshPermissionsSilently: refreshPermissionsSilentlyVoid,
     }),
-    [permissions, loading, isSystemAdmin, hasPermission, hasAnyPermission, hasModuleAccess, refreshPermissions],
+    [permissions, loading, isSystemAdmin, hasPermission, hasAnyPermission, hasModuleAccess, refreshPermissions, refreshPermissionsSilentlyVoid],
   );
 
   return (

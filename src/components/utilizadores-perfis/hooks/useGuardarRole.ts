@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissionsOpcional } from "@/contexts/PermissionsContext";
 import { mensagemDeErro } from "../rolesReais";
 import type { DadosRole, ResultadoMutacao } from "../tipos";
 import { criarRoleNaBase, eliminarRoleNaBase, guardarRoleNaBase, restaurarRoleNaBase } from "./rolesNaBase";
@@ -21,6 +22,8 @@ export function useGuardarRole(): AcoesRole {
   const queryClient = useQueryClient();
   const { activeCompany } = useCompany();
   const [aGravar, setAGravar] = useState(false);
+  // Gravar uma role pode mudar as permissões da própria sessão: relê-as em segundo plano (sem skeleton).
+  const reler = usePermissionsOpcional()?.refreshPermissionsSilently;
 
   const correr = useCallback(async (acao: () => Promise<unknown>): Promise<ResultadoMutacao> => {
     setAGravar(true);
@@ -31,13 +34,14 @@ export function useGuardarRole(): AcoesRole {
         queryClient.invalidateQueries({ queryKey: ["anew_role_permissions"] }),
         queryClient.invalidateQueries({ queryKey: ["perfis-contagem-por-role"] }),
       ]);
+      reler?.();
       return { ok: true };
     } catch (e) {
       return { ok: false, erro: mensagemDeErro(e) };
     } finally {
       setAGravar(false);
     }
-  }, [queryClient]);
+  }, [queryClient, reler]);
 
   return {
     aGravar,

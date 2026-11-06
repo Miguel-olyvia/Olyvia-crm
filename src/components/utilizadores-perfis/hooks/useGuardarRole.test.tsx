@@ -16,6 +16,8 @@ vi.mock("./rolesNaBase", () => ({
 
 let empresa: { activeCompany: { id: string } | null } = { activeCompany: { id: "org-a" } };
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => empresa }));
+const relerPermissoes = vi.fn();
+vi.mock("@/contexts/PermissionsContext", () => ({ usePermissionsOpcional: () => ({ refreshPermissionsSilently: relerPermissoes }) }));
 
 import { useGuardarRole } from "./useGuardarRole";
 
@@ -27,6 +29,7 @@ beforeEach(() => {
   [criarRoleNaBase, guardarRoleNaBase, eliminarRoleNaBase, restaurarRoleNaBase].forEach((f) => f.mockReset().mockResolvedValue(undefined));
   empresa = { activeCompany: { id: "org-a" } };
   client = new QueryClient();
+  relerPermissoes.mockReset();
 });
 
 describe("useGuardarRole", () => {
@@ -66,5 +69,15 @@ describe("useGuardarRole", () => {
     await act(async () => { await result.current.eliminar("r1", 0); await result.current.restaurar("r2"); });
     expect(eliminarRoleNaBase).toHaveBeenCalledWith("r1", 0);
     expect(restaurarRoleNaBase).toHaveBeenCalledWith("r2");
+  });
+
+  it("gravar uma role com sucesso relê as permissões da sessão em segundo plano; um erro não relê", async () => {
+    const { result } = renderHook(() => useGuardarRole(), { wrapper });
+    await act(async () => { await result.current.guardar("r1", dados, false); });
+    expect(relerPermissoes).toHaveBeenCalledTimes(1);
+
+    guardarRoleNaBase.mockRejectedValue(new Error("falhou"));
+    await act(async () => { await result.current.guardar("r1", dados, false); });
+    expect(relerPermissoes).toHaveBeenCalledTimes(1);
   });
 });
