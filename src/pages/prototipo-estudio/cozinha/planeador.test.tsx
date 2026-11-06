@@ -6,7 +6,7 @@ import { PLANTA_VAZIA, retangulo } from "@/emylia/planta";
 import { necessidades, type Projeto } from "../necessidadesEstudio";
 import { linhasParaLevar } from "../levarParaNegocio";
 import {
-  ALTURA_TAMPO, avisos, comprimento, cozinhaDeExemplo, cozinhaParaParede, juntar, linhasDaCozinha, metrosDeTampo, mover, mudar, novoModulo, postos, precoDoMovel, tirar,
+  ALTURA_TAMPO, avisos, comprimento, cozinhaDeExemplo, cozinhaParaParede, juntar, linhasDaCozinha, metrosDeTampo, mover, mudar, novoModulo, porNoLugar, postos, precoDoMovel, tirar,
   totalDaCozinha, trocosDeTampo, type Cozinha,
 } from "./modelo";
 import { cenaDaCozinha, cotas, desenhar } from "./cena";
@@ -39,6 +39,10 @@ describe("as regras do planeador", () => {
     expect(comprimento(c.baixo)).toBe(300);
     c = tirar(c, novo.id);
     expect(c.baixo).toHaveLength(4);
+    // arrastar no 3D: pôr no lugar 0 (encostado à esquerda) e no fim
+    const lava2 = c.baixo[1].id;
+    expect(porNoLugar(c, lava2, 0).baixo[0].id).toBe(lava2);
+    expect(porNoLugar(c, lava2, 99).baixo.at(-1)!.id).toBe(lava2);
     // o espaço livre pode ir para a fila de cima
     expect(juntar(c, novoModulo("vazio", 30), undefined, true).cima).toHaveLength(5);
   });

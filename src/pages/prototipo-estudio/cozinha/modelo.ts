@@ -200,6 +200,15 @@ export function mover(c: Cozinha, id: string, passo: -1 | 1): Cozinha {
   [lista[i], lista[j]] = [lista[j], lista[i]];
   return { ...c, [f]: lista };
 }
+/** Pôr o módulo no lugar `i` da fila dele (0 = encostado à esquerda), contando sem ele. */
+export function porNoLugar(c: Cozinha, id: string, i: number): Cozinha {
+  const f = naFila(c, id);
+  if (!f) return c;
+  const m = c[f].find((x) => x.id === id)!, resto = c[f].filter((x) => x.id !== id);
+  const j = Math.max(0, Math.min(resto.length, i));
+  if (c[f][j]?.id === id && c[f].indexOf(m) === j) return c;
+  return { ...c, [f]: [...resto.slice(0, j), m, ...resto.slice(j)] };
+}
 export function duplicar(c: Cozinha, id: string): Cozinha {
   const m = moduloDe(c, id);
   return m ? juntar(c, { ...m, id: novoId() }, id, naFila(c, id) === "cima") : c;

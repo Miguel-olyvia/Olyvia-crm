@@ -14,9 +14,9 @@ import type { Projeto } from "../necessidadesEstudio";
 import { Ilustracao } from "../Ilustracao";
 import {
   ACABAMENTOS, MODELOS, NOME_FRENTE, PUXADORES, acabamentoDoEstilo, avisos, comprimento, cozinhaDeExemplo, cozinhaParaParede, duplicar, juntar, lerCozinha, linhasDaCozinha,
-  moduloDe, mover, mudar, novoModulo, precoDoMovel, produtosPara, tirar, totalDaCozinha, type Cozinha, type Frente, type LinhaCozinha, type Modelo, type Modulo,
+  moduloDe, mover, mudar, novoModulo, porNoLugar, postos, precoDoMovel, produtosPara, tirar, totalDaCozinha, type Cozinha, type Frente, type LinhaCozinha, type Modelo, type Modulo,
 } from "./modelo";
-import { cenaDaCozinha, cenaDoModulo, cotas, desenhar, type Camara } from "./cena";
+import { cenaDaCozinha, cenaDoModulo, cotas, desenhar, projetor, type Camara } from "./cena";
 
 export const CHAVE_COZINHA = "olyvia.cozinha.v1";
 const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " €";
@@ -26,7 +26,7 @@ const REDONDO = "grid h-11 w-11 place-items-center rounded-full bg-white/95 text
 
 type Separador = "baixos" | "altos" | "parede" | "aparelhos" | "acabamentos";
 const SEPARADORES: { id: Separador; n: string }[] = [
-  { id: "baixos", n: "Armários baixos" }, { id: "altos", n: "Armários altos" }, { id: "parede", n: "De parede" }, { id: "aparelhos", n: "Eletrodomésticos" }, { id: "acabamentos", n: "Tampo e frentes" },
+  { id: "baixos", n: "Baixos" }, { id: "altos", n: "Altos" }, { id: "parede", n: "De parede" }, { id: "aparelhos", n: "Eletrodomésticos" }, { id: "acabamentos", n: "Tampo e frentes" },
 ];
 
 // ---------------------------------------------------------------- ler e guardar (no browser e, vindo do Estúdio, no projeto)
@@ -108,7 +108,8 @@ export default function PlaneadorCozinha() {
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background text-foreground lg:h-[100dvh] lg:flex-row">
       <main className="relative h-[62vh] shrink-0 overflow-hidden bg-gradient-to-b from-[#f4f3f0] to-[#e6e2da] lg:h-auto lg:flex-1" aria-label="A cozinha em 3D">
-        <Vista c={c} cam={cam} setCam={setCam} escolhido={escolhido} setEscolhido={setEscolhido} medidas={medidas} />
+        <Vista c={c} cam={cam} setCam={setCam} escolhido={escolhido} setEscolhido={setEscolhido} medidas={medidas}
+          aoPorNoLugar={(id, i) => { mexer((x) => porNoLugar(x, id, i)); setAviso("Mudado de sítio."); }} />
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-3 sm:p-4">
           <div className="pointer-events-auto flex flex-wrap gap-2">
@@ -117,9 +118,9 @@ export default function PlaneadorCozinha() {
               <Save className="h-4 w-4" aria-hidden="true" />Guardar
             </button>
           </div>
-          <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-white/95 p-1 pl-4 shadow-md ring-1 ring-black/5">
-            <List className="h-4 w-4 text-slate-500" aria-hidden="true" />
-            <span className="px-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-900" aria-label={`Total com IVA: ${eur(total.comIva)}`}>{eur(total.comIva)}</span>
+          <div className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-full bg-white/95 p-1 pl-3 shadow-md ring-1 ring-black/5 sm:pl-4">
+            <List className="hidden h-4 w-4 text-slate-500 sm:block" aria-hidden="true" />
+            <span className="whitespace-nowrap px-1 text-xl font-semibold tabular-nums tracking-tight text-slate-900 sm:px-2 sm:text-2xl" aria-label={`Total com IVA: ${eur(total.comIva)}`}>{eur(total.comIva)}</span>
             <button type="button" className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-primary px-4 text-[15px] font-medium text-primary-foreground hover:bg-primary/90" onClick={() => setResumo(true)}>
               Resumo<ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -142,8 +143,8 @@ export default function PlaneadorCozinha() {
           <button type="button" className={REDONDO} aria-label="Refazer" disabled={!hist.futuro.length} onClick={refazer}><Redo2 className="h-4 w-4" aria-hidden="true" /></button>
         </div>
         <div className="absolute bottom-3 right-3 sm:bottom-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2">
-          <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-4 text-[15px] font-medium text-white shadow-lg hover:bg-slate-800" aria-expanded={divisao} onClick={() => setDivisao((x) => !x)}>
-            <Settings2 className="h-4 w-4" aria-hidden="true" />Personalizar divisão
+          <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-full bg-slate-900 px-3 text-[15px] font-medium text-white shadow-lg hover:bg-slate-800 sm:px-4" aria-expanded={divisao} aria-label="Personalizar divisão" onClick={() => setDivisao((x) => !x)}>
+            <Settings2 className="h-4 w-4" aria-hidden="true" /><span className="hidden sm:inline">Personalizar divisão</span>
           </button>
           <AnimatePresence>
             {divisao && (
@@ -190,25 +191,57 @@ function Medida({ rotulo, valor, onMudar }: { rotulo: string; valor: number; onM
 }
 
 // ---------------------------------------------------------------- o 3D
-function Vista({ c, cam, setCam, escolhido, setEscolhido, medidas }: { c: Cozinha; cam: Camara; setCam: React.Dispatch<React.SetStateAction<Camara>>; escolhido: string | null; setEscolhido: (id: string | null) => void; medidas: boolean }) {
+function Vista({ c, cam, setCam, escolhido, setEscolhido, medidas, aoPorNoLugar }: {
+  c: Cozinha; cam: Camara; setCam: React.Dispatch<React.SetStateAction<Camara>>; escolhido: string | null; setEscolhido: (id: string | null) => void; medidas: boolean;
+  aoPorNoLugar: (id: string, i: number) => void;
+}) {
   const cena = useMemo(() => cenaDaCozinha(c), [c]);
   const { poligonos, caixa } = useMemo(() => desenhar(cena, cam), [cena, cam]);
   const cs = useMemo(() => (medidas ? cotas(c, cena, cam, escolhido) : []), [medidas, c, cena, cam, escolhido]);
-  const arrasto = useRef<{ x: number; y: number; r: number; i: number; mexeu: boolean } | null>(null);
+  const arrasto = useRef<{ x: number; y: number; r: number; i: number; mexeu: boolean; movel?: string } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [passar, setPassar] = useState<string | null>(null);
+  // 6/11: arrastar o escolhido muda-o de sítio na fila (o lugar é o do ponto mais perto, entre os outros)
+  const [lugar, setLugar] = useState<{ id: string; i: number; linha: [number, number][] } | null>(null);
   // à volta dos móveis: espaço para as cotas e para os botões por cima e por baixo
   const m = Math.max(caixa.w, caixa.h) * 0.1, vb = { x: caixa.x - m, y: caixa.y - m * 1.6, w: caixa.w + 2 * m, h: caixa.h + 3 * m };
   const sw = vb.w / 900, letra = vb.w / 62;
 
-  const comecar = (e: RPointerEvent<SVGSVGElement>) => { arrasto.current = { x: e.clientX, y: e.clientY, r: cam.rumo, i: cam.inclinacao, mexeu: false }; };
+  const noSvg = (e: { clientX: number; clientY: number }): [number, number] | null => {
+    const el = svgRef.current, ctm = el?.getScreenCTM?.();
+    if (!el || !ctm) return null;
+    const pt = el.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(ctm.inverse());
+    return [q.x, q.y];
+  };
+  /** O lugar na fila (sem o que se arrasta) para o ponto do ecrã: conta os que ficam à esquerda dele, e a linha onde entra. */
+  const lugarPara = (id: string, u: number) => {
+    const emCima = c.cima.some((x) => x.id === id), fila = (emCima ? c.cima : c.baixo).filter((x) => x.id !== id);
+    const { ver } = projetor(cena, cam), z = emCima ? 150 : 0, y = emCima ? 37 : 64;
+    const ps = postos(fila);
+    const i = ps.filter((p) => ver([(p.x0 + p.x1) / 2, y, z]).u < u).length;
+    const x = i < ps.length ? ps[i].x0 : ps.length ? ps[ps.length - 1].x1 : 0;
+    const a = ver([x, y, z]), b = ver([x, y, z + (emCima ? 70 : 92)]);
+    return { id, i, linha: [[a.u, a.v], [b.u, b.v]] as [number, number][] };
+  };
+
+  const comecar = (e: RPointerEvent<SVGSVGElement>) => {
+    const alvo = (e.target as Element).closest("[data-modulo]")?.getAttribute("data-modulo") ?? undefined;
+    arrasto.current = { x: e.clientX, y: e.clientY, r: cam.rumo, i: cam.inclinacao, mexeu: false, movel: alvo && alvo === escolhido ? alvo : undefined };
+  };
   const mexerRato = (e: RPointerEvent<SVGSVGElement>) => {
-    const a = arrasto.current; if (!a) return;
+    const a = arrasto.current;
+    if (!a) { setPassar((e.target as Element).closest("[data-modulo]")?.getAttribute("data-modulo") ?? null); return; }
     const dx = e.clientX - a.x, dy = e.clientY - a.y;
     if (!a.mexeu && Math.hypot(dx, dy) < 5) return;
     if (!a.mexeu) { a.mexeu = true; e.currentTarget.setPointerCapture?.(e.pointerId); }
+    if (a.movel) { const q = noSvg(e); if (q) setLugar(lugarPara(a.movel, q[0])); return; }
     setCam((x) => ({ ...x, rumo: Math.max(-1.2, Math.min(1.2, a.r + dx * 0.006)), inclinacao: Math.max(0.05, Math.min(0.95, a.i + dy * 0.004)) }));
   };
   const largar = (e: RPointerEvent<SVGSVGElement>) => {
     const a = arrasto.current; arrasto.current = null;
+    if (a?.movel && a.mexeu && lugar) { aoPorNoLugar(lugar.id, lugar.i); setLugar(null); return; }
+    setLugar(null);
     if (a && !a.mexeu) {
       // um toque: o móvel debaixo do dedo (ou nada)
       const alvo = (e.target as Element).closest("[data-modulo]");
@@ -218,20 +251,24 @@ function Vista({ c, cam, setCam, escolhido, setEscolhido, medidas }: { c: Cozinh
   const roda = (e: React.WheelEvent) => setCam((x) => ({ ...x, perto: Math.max(0.55, Math.min(1.8, (x.perto ?? 1) * (e.deltaY > 0 ? 1.08 : 0.93))) }));
 
   return (
-    <svg viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} preserveAspectRatio="xMidYMid meet" className="absolute inset-0 h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
-      role="img" aria-label="A cozinha em 3D: arraste para rodar, toque num móvel para o escolher." onPointerDown={comecar} onPointerMove={mexerRato} onPointerUp={largar} onPointerCancel={() => { arrasto.current = null; }} onWheel={roda}>
+    <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} preserveAspectRatio="xMidYMid meet" className="absolute inset-0 h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
+      role="img" aria-label="A cozinha em 3D: arraste para rodar, toque num móvel para o escolher, arraste o escolhido para o mudar de sítio." onPointerDown={comecar} onPointerMove={mexerRato} onPointerUp={largar}
+      onPointerLeave={() => { if (!arrasto.current) setPassar(null); }} onPointerCancel={() => { arrasto.current = null; setLugar(null); }} onWheel={roda}>
       {poligonos.map((p, i) => {
         const pts = p.pts.map((q) => q.join(",")).join(" ");
         if (p.linha) return p.fechada
           ? <polygon key={i} points={pts} fill="none" stroke={p.cor} strokeWidth={(p.largura ?? 1) * sw} />
           : <polyline key={i} points={pts} fill="none" stroke={p.cor} strokeWidth={(p.largura ?? 1) * sw} />;
         const mod = p.id && p.id !== "tampo" && p.id !== "chao" && !p.id.startsWith("parede") ? p.id : undefined;
-        const este = mod && mod === escolhido;
+        const este = mod && mod === escolhido, porCima = mod && mod === passar && !este;
         return (
-          <polygon key={i} points={pts} fill={p.cor} data-modulo={mod} className={mod ? "cursor-pointer" : undefined}
-            stroke={este ? "hsl(var(--primary))" : p.contorno ?? "rgba(0,0,0,0.22)"} strokeWidth={(este ? 2.4 : 0.7) * sw} strokeLinejoin="round" />
+          <polygon key={i} points={pts} fill={p.cor} data-modulo={mod} className={mod ? (este ? "cursor-move" : "cursor-pointer") : undefined}
+            stroke={este ? "hsl(var(--primary))" : porCima ? "hsl(var(--primary) / 0.55)" : p.contorno ?? "rgba(0,0,0,0.22)"} strokeWidth={(este ? 2.4 : porCima ? 1.6 : 0.7) * sw} strokeLinejoin="round"
+            opacity={lugar && mod === lugar.id ? 0.55 : 1} />
         );
       })}
+      {/* onde entra o que se arrasta */}
+      {lugar && <line x1={lugar.linha[0][0]} y1={lugar.linha[0][1]} x2={lugar.linha[1][0]} y2={lugar.linha[1][1]} stroke="hsl(var(--primary))" strokeWidth={4 * sw} strokeLinecap="round" />}
       {cs.map((k, i) => {
         const tw = letra * (0.62 * k.texto.length + 1.2), th = letra * 1.5;
         return (
@@ -284,7 +321,7 @@ function PainelCatalogo({ c, sep, setSep, frente, setFrente, juntar, mexer }: {
       <div className="border-b border-border px-5 pb-0 pt-5">
         <h2 className="text-xl font-semibold tracking-tight">Os móveis da cozinha</h2>
         <p className="text-sm text-muted-foreground">Toque num móvel para o juntar à fila. No 3D, toque num para o mudar.</p>
-        <div role="tablist" aria-label="Tipos de móvel" className="-mx-5 mt-3 flex gap-1 overflow-x-auto px-5">
+        <div role="tablist" aria-label="Tipos de móvel" className="mt-3 flex flex-wrap gap-x-3">
           {SEPARADORES.map((s) => (
             <button key={s.id} type="button" role="tab" aria-selected={sep === s.id} onClick={() => setSep(s.id)}
               className={cn("min-h-11 shrink-0 border-b-2 px-2 text-[15px] font-medium transition-colors", sep === s.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{s.n}</button>
@@ -469,7 +506,7 @@ function PainelModulo({ c, m, fechar, mexer, tirarEste }: { c: Cozinha; m: Modul
             <button type="button" className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border px-3 text-sm" onClick={() => mexer((x) => duplicar(x, m.id))}><Copy className="h-4 w-4" aria-hidden="true" />Duplicar</button>
             <button type="button" className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-destructive/40 px-3 text-sm text-destructive" onClick={tirarEste}><Trash2 className="h-4 w-4" aria-hidden="true" />Tirar</button>
           </div>
-          <p className="text-xs text-muted-foreground">No teclado: as setas mudam de sítio, Delete tira, Ctrl+Z desfaz.</p>
+          <p className="text-xs text-muted-foreground">No 3D, arraste o escolhido para outro sítio. No teclado: as setas mudam de sítio, Delete tira, Ctrl+Z desfaz.</p>
         </section>
       </div>
     </div>

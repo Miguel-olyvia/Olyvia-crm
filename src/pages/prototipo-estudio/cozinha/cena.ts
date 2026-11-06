@@ -111,8 +111,14 @@ export function caixasDoModulo(m: Modulo, x0: number, c: Pick<Cozinha, "acabamen
     out.push({ id, x0: cx - lw / 2, x1: cx + lw / 2, y0: 9, y1: 52, z0: T, z1: T + 0.25, cor: sombrear(lava?.hex ?? "#c9ccd0", 0.92), camada: 3, brilho: true });
     out.push({ id, x0: cx - lw / 2 + 3, x1: cx + lw / 2 - (m.w >= 80 ? 22 : 3), y0: 12, y1: 49, z0: T + 0.25, z1: T + 0.4, cor: sombrear(lava?.hex ?? "#c9ccd0", 0.6), camada: 3 });
     const tc = tor?.hex ?? "#a9adb1", tx = cx + (m.w >= 80 ? 8 : 0);
-    out.push({ id, x0: tx - 2.2, x1: tx + 2.2, y0: 3.5, y1: 8, z0: T, z1: T + 32, cor: tc, camada: 3, brilho: true });
-    out.push({ id, x0: tx - 1.6, x1: tx + 1.6, y0: 3.5, y1: 24, z0: T + 28, z1: T + 31.5, cor: tc, camada: 3, brilho: true });
+    // a base, o corpo fino e a bica em arco (peças pequenas ao longo de um meio círculo), e o manípulo de lado
+    out.push({ id, x0: tx - 2.6, x1: tx + 2.6, y0: 3, y1: 8.2, z0: T, z1: T + 1.5, cor: tc, camada: 3, brilho: true });
+    out.push({ id, x0: tx - 1.3, x1: tx + 1.3, y0: 4.3, y1: 6.9, z0: T + 1.5, z1: T + 26, cor: tc, camada: 3, brilho: true });
+    for (let k = 0; k <= 8; k++) {
+      const a = (k / 8) * Math.PI, r = 7, yc = 5.6 + r - r * Math.cos(a), zc = T + 26 + r * Math.sin(a);
+      out.push({ id, x0: tx - 1.1, x1: tx + 1.1, y0: yc - 1.1, y1: yc + 1.1, z0: zc - 1.1, z1: zc + 1.1, cor: tc, camada: 3, brilho: true, detalhe: true });
+    }
+    out.push({ id, x0: tx + 1.3, x1: tx + 4.8, y0: 5, y1: 6.2, z0: T + 15, z1: T + 16.4, cor: tc, camada: 3, brilho: true, detalhe: true });
   }
   if (m.modelo === "placa") {
     const pl = produto(m.produto), cx = (x0 + x1) / 2, pw = Math.min(m.w - 4, pl?.w ?? 60);
