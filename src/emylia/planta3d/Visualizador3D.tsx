@@ -4,7 +4,7 @@
 // geometria paramétrica fica de reserva. Sem sombras (o protótipo não precisa) e com o ciclo de desenho sob pedido (frameloop demand).
 import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
+import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
@@ -80,10 +80,11 @@ function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
 }
 
 /** Um material do revestimento para uma superfície de `w`×`h` metros (a textura repete-se por metro, não esticada). */
-function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshStandardMaterial {
+function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshLambertMaterial {
   const mat = useMemo(() => {
     const base = texturaBase(r);
-    const m = new THREE.MeshStandardMaterial({ color: base ? "#ffffff" : r.cor, roughness: r.tipo === "azulejo" ? 0.55 : 0.9, envMapIntensity: 0.35, side: THREE.DoubleSide });
+    // o revestimento é mate e não recebe o ambiente de estúdio (com ele o branco satura e a divisão fica lisa): só as luzes e as sombras; as peças é que brilham
+    const m = new THREE.MeshLambertMaterial({ color: base ? "#ffffff" : r.cor, side: THREE.DoubleSide });
     if (base) {
       const t = base.clone();
       t.needsUpdate = true;
@@ -681,6 +682,16 @@ function Camaras({ vista, espaco, camara }: { vista: Vista3D; espaco: Espaco; ca
   );
 }
 
+/** Uma sombra suave de contacto no chão, por baixo de todas as peças (o que as assenta no chão, como a sombra do chão do HTML). */
+function SombraDeContacto({ espaco }: { espaco: Espaco }) {
+  const { cx, cz, w, d } = useMemo(() => {
+    const xs = espaco.paredes.map((p) => p.a.x), ys = espaco.paredes.map((p) => p.a.y);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    return { cx: (x0 + x1) / 2, cz: (y0 + y1) / 2, w: x1 - x0, d: y1 - y0 };
+  }, [espaco.paredes]);
+  return <ContactShadows position={[cx, 0.002, cz]} scale={[w, d]} resolution={512} opacity={0.7} blur={2} far={1} color="#2a2c2b" />;
+}
+
 /** A luz de estúdio do HTML: céu quente e chão esverdeado, luz principal com sombras suaves e uma de enchimento fria, apontadas ao centro do espaço. */
 function LuzEstudio({ espaco }: { espaco: Espaco }) {
   const { cx, cz, r } = useMemo(() => {
@@ -696,9 +707,9 @@ function LuzEstudio({ espaco }: { espaco: Espaco }) {
   return (
     <>
       {/* o HTML usa 1,25 num estúdio aberto; dentro de uma divisão as paredes já devolvem luz, por isso menos */}
-      <hemisphereLight args={["#fffcf3", "#878e84", 0.8]} />
+      <hemisphereLight args={["#fffcf3", "#878e84", 0.95]} />
       <directionalLight ref={key} position={[cx + 250 * k, 750 * k, cz + 430 * k]} intensity={2.8} color="#fffcf2" castShadow
-        shadow-mapSize={[2048, 2048]} shadow-camera-left={-r} shadow-camera-right={r} shadow-camera-top={r} shadow-camera-bottom={-r} shadow-camera-near={0.1} shadow-camera-far={r * 8} shadow-bias={-0.0002} shadow-normalBias={0.02} shadow-radius={4} />
+        shadow-mapSize={[2048, 2048]} shadow-camera-left={-r} shadow-camera-right={r} shadow-camera-top={r} shadow-camera-bottom={-r} shadow-camera-near={0.1} shadow-camera-far={r * 8} shadow-bias={-0.0001} shadow-normalBias={0.003} />
       <directionalLight position={[cx - 340 * k, 240 * k, cz - 320 * k]} intensity={0.8} color="#d8e5e1" />
     </>
   );
@@ -735,6 +746,7 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} />
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
+        <SombraDeContacto espaco={espaco} />
         {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} /> : null; })}
       </Canvas>
     </div>
