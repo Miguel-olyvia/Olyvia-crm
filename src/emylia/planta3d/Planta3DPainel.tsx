@@ -36,6 +36,8 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
 
   // as vistas da bancada escolhida (como no catálogo 3D): perspetiva ¾, perfil, frente, traseira, de cima, detalhe da bica
   const [vistaBanc, setVistaBanc] = useState<{ peca: string; v: VistaBancada; n: number } | null>(null);
+  /** a peça para a qual se pediu «Ver a divisão» (sem aproximar) */
+  const [semFoco, setSemFoco] = useState<string | null>(null);
   const banc = planta.pecas.find((x) => x.id === selecionada && x.banc) ?? null;
   const camara = useMemo(() => {
     if (!banc?.banc || !vistaBanc || vistaBanc.peca !== banc.id) return null;
@@ -50,6 +52,16 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
     for (const p of produtos) if (usados.has(p.id)) modelos[p.id] = modeloDoProduto(p, arvore);
     return deLegado(planta, { tipo, nome, peDireito, produtos: modelos, revestimentos: rev });
   }, [planta, tipo, nome, peDireito, produtos, arvore, rev]);
+
+  // a peça escolhida vê-se de perto, em perspetiva ¾, como no catálogo 3D (a divisão inteira deixa as peças pequenas demais para se reconhecerem)
+  const camaraPeca = useMemo(() => {
+    if (!res.ok || !selecionada || semFoco === selecionada) return null;
+    const p = res.espaco.pecas.find((x) => x.id === selecionada), m = p && res.modelos[p.produtoId];
+    if (!p || !m) return null;
+    const h = m.mockup3d.altura, s = Math.max(p.largura, p.profundidade, h) * 1.7 + 0.25, a = (p.rotacao * Math.PI) / 180, base = p.altura;
+    const mundo = (x: number, y: number, z: number): [number, number, number] => [p.x + x * Math.cos(a) + z * Math.sin(a), y, p.y - x * Math.sin(a) + z * Math.cos(a)];
+    return { chave: `peca-${p.id}-${p.x.toFixed(2)}-${p.y.toFixed(2)}-${p.rotacao}-${m.produtoId}`, pos: mundo(s * 0.32, base + h * 0.5 + s * 0.55, s * 1.05), alvo: mundo(0, base + h * 0.42, 0) };
+  }, [res, selecionada, semFoco]);
 
   if (!res.ok) return <p role="status" className="rounded-xl border border-border bg-muted/30 p-4 text-[15px]">{res.erro}</p>;
   const { espaco, modelos } = res;
@@ -78,9 +90,16 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
           {camara && <Button type="button" variant="ghost" className="min-h-11" onClick={() => setVistaBanc(null)}>Ver a divisão</Button>}
         </div>
       )}
+      {selecionada && vista === "3d" && !camara && (
+        <div className="flex flex-wrap gap-2">
+          {camaraPeca
+            ? <Button type="button" variant="ghost" className="min-h-11" onClick={() => setSemFoco(selecionada)}>Ver a divisão inteira</Button>
+            : <Button type="button" variant="outline" className="min-h-11" onClick={() => setSemFoco(null)}>Ver a peça escolhida de perto</Button>}
+        </div>
+      )}
       <div className={cn("overflow-hidden rounded-2xl border border-border bg-muted", cheio ? "min-h-[60vh] flex-1" : "h-[420px]")}>
         <Suspense fallback={<p role="status" className="p-4 text-[15px] text-muted-foreground">A carregar o visualizador 3D…</p>}>
-          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} camara={camara} />
+          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} camara={camara ?? camaraPeca} />
         </Suspense>
       </div>
       <p className="text-sm text-muted-foreground">
