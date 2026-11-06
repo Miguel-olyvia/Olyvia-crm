@@ -44,7 +44,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
+import { SEM_PERM, permEmFaltaDoPasso } from "./permissoes";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -484,17 +484,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   return passos;
 }
 
-/** 4/11: as permissões que o servidor pede ao passo de cada botão (neg_guardar_negocio, neg_validar_pagamento, neg_registar_fatura): sem
- *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
-const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
-  contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.gerir", "orcamento.editar"],
-  pedidoCliente: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
-  enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
-  aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
-};
-/** A primeira permissão que falta a quem está no ecrã para o passo `act` (null: tem todas, ou o passo não pede nenhuma). */
-export const permEmFaltaDoPasso = (S: Ctx["S"], act: string | undefined): PermNeg | null =>
-  (act ? PERM_DO_PASSO[act] ?? [] : []).find((x) => !podeNeg(S.role, x)) ?? null;
+// 6/11: PERM_DO_PASSO e permEmFaltaDoPasso passaram para permissoes.ts (o CaminhoObra também os usa, sem carregar esta página)
+export { permEmFaltaDoPasso };
 
 /** O botão do próximo passo do negócio (ou o simulador do cliente). */
 export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
