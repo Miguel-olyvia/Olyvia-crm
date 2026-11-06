@@ -69,8 +69,8 @@ export function useCodigosProcessamento() {
 
   const { data, isLoading, error } = useQuery({
     queryKey,
-    queryFn: async (): Promise<HrCodigoProcessamento[]> => {
-      if (!orgId) return [];
+    queryFn: async (): Promise<{ linhas: HrCodigoProcessamento[]; recusado: boolean }> => {
+      if (!orgId) return { linhas: [], recusado: false };
       // A RLS de SELECT confirma a permissao, nao a organizacao da linha --
       // o filtro tem de vir de aqui. Ver nota no cabecalho.
       const { data: linhas, error: erro } = await hrFrom("hr_codigos_processamento")
@@ -78,13 +78,23 @@ export function useCodigosProcessamento() {
         .eq("organization_id", orgId)
         .order("codigo", { ascending: true });
       if (erro) {
-        if (isPermissionError(erro)) return [];
+        // Recusa por permissao: lista vazia, mas SEMPRE dita (o fecho do periodo nao pode tratar «sem acesso» como «sem codigos»).
+        if (isPermissionError(erro)) return { linhas: [], recusado: true };
         throw erro;
       }
-      return (linhas ?? []) as HrCodigoProcessamento[];
+      return { linhas: (linhas ?? []) as HrCodigoProcessamento[], recusado: false };
     },
     enabled: !!orgId,
   });
+  const recusado = data?.recusado ?? false;
+  /** Estado da leitura do catalogo, para quem decide se algo irreversivel pode avancar. */
+  const estado: "ok" | "a_carregar" | "recusado" | "erro" = error
+    ? "erro"
+    : isLoading || !orgId
+      ? "a_carregar"
+      : recusado
+        ? "recusado"
+        : "ok";
 
   const invalidar = useCallback(() => {
     queryClient.invalidateQueries({ queryKey });
@@ -163,9 +173,11 @@ export function useCodigosProcessamento() {
   });
 
   return {
-    codigos: data ?? [],
+    codigos: data?.linhas ?? [],
     isLoading,
     error,
+    recusado,
+    estado,
     isSaving:
       criarMutation.isPending || actualizarMutation.isPending || alternarActivoMutation.isPending,
     criar: criarMutation.mutateAsync,

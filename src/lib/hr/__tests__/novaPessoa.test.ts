@@ -624,21 +624,16 @@ describe("o valor base ja nao vem do contrato (fluxo 2)", () => {
     expect(contrato).not.toHaveProperty("periodicidade");
   });
 
-  it("sem subsidio nem duodecimos escolhidos nao ha parte da pessoa", () => {
+  it("sem duodecimos escolhidos nao ha parte da pessoa", () => {
     const payload = payloadDoRascunho(comNomes(), linhasParaGravar, false, NOME_CARGO);
     expect(payload.retribuicao).toBeNull();
   });
 
-  it("com subsidio, os duodecimos propoem 50 por omissao", () => {
+  it("com duodecimos escolhidos, a parte da pessoa so leva os duodecimos", () => {
     const rascunho = comNomes();
-    rascunho.contrato.subsidio = "6,5";
-    rascunho.contrato.subsidio_modo = "cartao";
+    rascunho.contrato.duodecimos_pct = "50";
     const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
-    expect(payload.retribuicao).toEqual({
-      subsidio: 6.5,
-      subsidioModo: "cartao",
-      duodecimosPct: 50,
-    });
+    expect(payload.retribuicao).toEqual({ duodecimosPct: 50 });
     expect(JSON.stringify(payload)).not.toContain("valor_base");
   });
 
@@ -646,16 +641,7 @@ describe("o valor base ja nao vem do contrato (fluxo 2)", () => {
     const rascunho = comNomes();
     rascunho.contrato.duodecimos_pct = "0";
     const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
-    expect(payload.retribuicao).toEqual({ subsidio: null, subsidioModo: null, duodecimosPct: 0 });
+    expect(payload.retribuicao).toEqual({ duodecimosPct: 0 });
   });
 
-  it("um subsidio negativo ou ilegivel e erro de formato no campo do subsidio", () => {
-    const rascunho = comNomes();
-    rascunho.contrato.subsidio = "-1";
-    expect(problemasDoRascunho(rascunho).map((p) => p.campoId)).toEqual(["hr-novo-subsidio"]);
-    rascunho.contrato.subsidio = "abc";
-    expect(problemasDoRascunho(rascunho).map((p) => p.campoId)).toEqual(["hr-novo-subsidio"]);
-    rascunho.contrato.subsidio = "";
-    expect(problemasDoRascunho(rascunho)).toHaveLength(0);
-  });
 });

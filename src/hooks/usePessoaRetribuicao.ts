@@ -35,13 +35,12 @@ import type { PessoaRetribuicao, SubsidioAlimentacaoModo } from "@/types/hr";
 
 const COLUNAS =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +
-  "subsidio_alimentacao, subsidio_alimentacao_modo, duodecimos_pct, valido_de, " +
+  "subsidio_alimentacao_modo, duodecimos_pct, valido_de, " +
   "valido_ate, motivo, origem, created_at, updated_at";
 
 /** O que se corrige numa versao ja decorrida (o valor base e a periodicidade ficam como estao). */
 export interface CorrigirVersaoRetribuicaoPatch {
   moeda: string;
-  subsidioAlimentacao: number | null;
   subsidioAlimentacaoModo: SubsidioAlimentacaoModo | null;
   duodecimosPct: 0 | 50 | 100 | null;
   validoDe: string;
@@ -130,30 +129,52 @@ export function usePessoaRetribuicao(
 
   /**
    * DEFINIR O QUE E DA PESSOA: a partir de `desde` a pessoa passa a ter este
-   * subsidio (valor e modo) e estes duodecimos, com o valor base do cargo nessa
-   * data. `desde` futuro e permitido. Devolve `null` ou o texto da recusa (por
+   * modo de subsidio e estes duodecimos, com o valor base do cargo nessa data. O VALOR do
+   * subsidio de alimentacao ja nao e da pessoa (vem da regra salarial da organizacao) e aqui nunca
+   * se escolhe; mas a RPC GRAVA o `p_subsidio` que recebe (nulo apaga), por isso reenvia-se o valor
+   * antigo da versao que cobre `desde`, tal como esta, lido no momento de gravar (nao entra na lista
+   * nem no ecra). Se essa leitura falhar, nao se grava: nunca se apaga em silencio.
+   * `desde` futuro e permitido. Devolve `null` ou o texto da recusa (por
    * exemplo HRC11: "atribua primeiro um cargo").
    */
   const definirPessoal = useCallback(
     (
       desde: string,
-      subsidio: number | null,
       subsidioModo: SubsidioAlimentacaoModo | null,
       duodecimosPct: 0 | 50 | 100 | null,
       motivo: string | null,
-    ) =>
-      executar(() => {
-        if (!pessoaId) return Promise.resolve({ error: new Error("Ficha sem pessoa resolvida") });
+    ) => {
+      // O texto proprio de uma recusa nossa (antes de chamar a RPC); `executar` so traduz erros da base.
+      let semGravar: string | null = null;
+      return executar(async () => {
+        if (!pessoaId) return { error: new Error("Ficha sem pessoa resolvida") };
+        // O valor antigo (legado) da versao que cobre a data: reenvia-se para a RPC nao o apagar.
+        const { data: antigas, error: erroLeitura } = await hrFrom("pessoas_retribuicoes")
+          .select("subsidio_alimentacao, valido_de, valido_ate")
+          .eq("pessoa_id", pessoaId)
+          .is("deleted_at", null);
+        if (erroLeitura) return { error: erroLeitura };
+        const linhasAntigas = (antigas ?? []) as Array<Pick<PessoaRetribuicao, "subsidio_alimentacao" | "valido_de" | "valido_ate">>;
+        // Zero linhas aqui, quando o ecra sabe que a pessoa TEM versoes (ou quando nao teve permissao para as ler), nao e
+        // «sem subsidio antigo»: a RLS escondeu-as sem dar erro. Enviar `null` apagaria o valor antigo em silencio.
+        if (linhasAntigas.length === 0 && (versoes.length > 0 || recusado)) {
+          semGravar = "Não foi possível ler o subsídio de alimentação atual (sem permissão para ver a retribuição desta pessoa). Nada foi gravado, para não o apagar.";
+          return { error: new Error("retribuicao_subsidio_antigo_nao_lido") };
+        }
+        const cobre = linhasAntigas.find(
+          (v) => v.valido_de <= desde && (v.valido_ate === null || v.valido_ate > desde),
+        );
         return hrRpc("rpc_hr_retribuicao_definir_pessoal", {
           p_pessoa_id: pessoaId,
           p_desde: desde,
-          p_subsidio: subsidio,
+          p_subsidio: cobre?.subsidio_alimentacao ?? null,
           p_subsidio_modo: subsidioModo,
           p_duodecimos_pct: duodecimosPct,
           p_motivo: motivo,
         });
-      }),
-    [executar, pessoaId],
+      }).then((resultado) => semGravar ?? resultado);
+    },
+    [executar, pessoaId, versoes.length, recusado],
   );
 
   /**
@@ -169,7 +190,6 @@ export function usePessoaRetribuicao(
         return hrFrom("pessoas_retribuicoes")
           .update({
             moeda: patch.moeda,
-            subsidio_alimentacao: patch.subsidioAlimentacao,
             subsidio_alimentacao_modo: patch.subsidioAlimentacaoModo,
             duodecimos_pct: patch.duodecimosPct,
             valido_de: patch.validoDe,

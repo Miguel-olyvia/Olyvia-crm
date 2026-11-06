@@ -28,7 +28,7 @@ export const CAMPOS_POR_ABA: Readonly<Record<AbaNova, readonly string[]>> = {
     "hr-novo-horas-anuais-maximas",
   ],
   retribuicao: [
-    "hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-formato", "hr-novo-conta-numero",
+    "hr-novo-duodecimos", "hr-novo-conta-formato", "hr-novo-conta-numero",
     "hr-novo-conta-titular", "hr-novo-conta-banco", "hr-novo-conta-agencia", "hr-novo-conta-bic",
   ],
   outros: [

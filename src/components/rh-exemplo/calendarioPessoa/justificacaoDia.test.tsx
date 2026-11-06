@@ -5,11 +5,6 @@
 // mesma transacção) é da base: aqui prova-se o que o ecrã manda, o que mostra e como reage quando a base recusa.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-// O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
-vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
-  useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
-}));
 vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
 vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());
 vi.mock("@/integrations/supabase/client", async () => (await import("@/test/rhExemploProviders")).moduloSupabaseFalso());

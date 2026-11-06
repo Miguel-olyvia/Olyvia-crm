@@ -563,7 +563,8 @@ export interface PessoaRetribuicao {
   valor_base: number;
   moeda: string;
   periodicidade: Periodicidade;
-  subsidio_alimentacao: number | null;
+  /** @deprecated O valor vem da regra salarial da organizacao; ja nao se le nem se escreve por pessoa. */
+  subsidio_alimentacao?: number | null;
   subsidio_alimentacao_modo: SubsidioAlimentacaoModo | null;
   valido_de: string;
   valido_ate: string | null;
@@ -689,6 +690,10 @@ export interface HrProcessamentoLancamento {
   organization_id: string;
   descricao: string;
   valor: number;
+  /** `manual` (valor escrito pelo RH), `km` ou `ajudas` (valor = quantidade x valor da regra, gravado). 20270109700000. */
+  tipo?: "manual" | "km" | "ajudas";
+  /** Km (tipo km) ou dias (tipo ajudas); `null` em manual. */
+  quantidade?: number | null;
   codigo_processamento_id: string | null;
   anulado_em: string | null;
   anulado_por: string | null;

@@ -47,7 +47,6 @@ export type RascunhoVinculo = {
   horas_frequencia: HorasFrequencia;
   tempo_trabalho_pct: string;
   politica_feriados: PoliticaFeriados;
-  horas_anuais_maximas: string;
   horas_semanais_maximas: string;
   dias_uteis: DiaSemana[];
   // -- Admissao, 20261124080000 ---------------------------------------------
@@ -93,8 +92,6 @@ export function rascunhoDe(vinculo: PessoaVinculo | null): RascunhoVinculo {
     tempo_trabalho_pct:
       vinculo?.tempo_trabalho_pct == null ? "" : String(vinculo.tempo_trabalho_pct),
     politica_feriados: vinculo?.politica_feriados ?? "nao_laboral",
-    horas_anuais_maximas:
-      vinculo?.horas_anuais_maximas == null ? "" : String(vinculo.horas_anuais_maximas),
     horas_semanais_maximas:
       vinculo?.horas_semanais_maximas == null ? "" : String(vinculo.horas_semanais_maximas),
     dias_uteis: vinculo?.dias_uteis ?? [],
@@ -115,7 +112,6 @@ export function rascunhoDe(vinculo: PessoaVinculo | null): RascunhoVinculo {
 export const CAMPOS_NUMERICOS: Record<CampoNumericoContrato, string> = {
   horas: "hr-contrato-horas-periodo",
   maximoSemanal: "hr-contrato-horas-semanais-maximas",
-  maximoAnual: "hr-contrato-horas-anuais-maximas",
   fte: "hr-contrato-tempo-trabalho-pct",
   experimental: "hr-contrato-periodo-experimental-dias",
 };

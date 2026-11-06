@@ -1,9 +1,9 @@
 /**
  * O resultado do processamento de UMA pessoa num mes, a partir do que a base ja devolveu (relatorio de assiduidade,
- * retribuicoes vigentes, codigos activos, lancamentos do periodo e a regra do subsidio). Funcao pura, sem React.
+ * retribuicoes vigentes, codigos activos, lancamentos do periodo e a regra salarial em vigor). Funcao pura, sem React.
  *
  * E a MESMA conta do separador «Visao geral» (`calcularProcessamentoPessoa` + `escolherRetribuicaoVigente` +
- * `contarDiasElegiveisSubsidio`): o «Calculo do mes», os «Custos» e o valor da hora do desconto de uma falta usam esta
+ * `minutosTrabalhadosPorDia`): o «Calculo do mes», os «Custos» e o valor da hora do desconto de uma falta usam esta
  * funcao para nunca divergirem dela. Lacuna herdada do modulo real: `diasDescansoTrabalhado` fica a 0, porque
  * `TotaisRelatorioMensal` nao tem essa contagem (ver o cabecalho de `lib/processamentoTotais.ts`).
  */
@@ -14,7 +14,8 @@ import {
 } from "@/components/rh-exemplo/hooks/useRetribuicoesVigentesDaOrganizacao";
 import {
   calcularProcessamentoPessoa,
-  contarDiasElegiveisSubsidio,
+  minutosTrabalhadosPorDia,
+  type RegraParaCalculo,
   type ResultadoProcessamentoPessoa,
 } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrCodigoProcessamento, HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
@@ -29,7 +30,10 @@ export interface EntradaCalculoReal {
   lancamentos: readonly HrProcessamentoLancamento[];
   /** So os codigos activos da organizacao. */
   codigosActivos: readonly HrCodigoProcessamento[];
-  minutosMinimosSubsidio: number;
+  /** A regra salarial em vigor no ultimo dia do periodo; `null` = sem regra (o subsidio e o resto que dela depende ficam a 0). */
+  regra: RegraParaCalculo | null;
+  /** A pessoa tem direito a IHT (os direitos a km e ajudas ja se verificaram ao lancar). */
+  direitoIht: boolean;
 }
 
 export interface ResultadoCalculoReal {
@@ -55,13 +59,15 @@ export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCal
       diasFeriadoTrabalhados: totais.diasFeriadoTrabalhados,
       diasDescansoTrabalhado: 0,
     },
-    diasElegiveisSubsidio: contarDiasElegiveisSubsidio(entrada.dias, entrada.minutosMinimosSubsidio),
+    minutosPorDia: minutosTrabalhadosPorDia(entrada.dias),
+    minutosNoturnosPorFaixa: totais.minutosNoturnosPorFaixa ?? [],
+    regra: entrada.regra,
+    direitoIht: entrada.direitoIht,
     retribuicao: retribuicao
       ? {
           valorBase: retribuicao.valor_base,
           periodicidade: retribuicao.periodicidade,
           duodecimosPct: retribuicao.duodecimos_pct,
-          subsidioAlimentacaoPessoa: retribuicao.subsidio_alimentacao,
         }
       : null,
     codigos: entrada.codigosActivos,
@@ -84,7 +90,7 @@ export interface TotalDoMes {
 }
 
 /** O total bruto do mes: so entram as pessoas com valor, e diz-se quantas ficaram de fora. */
-export function totalDoMes(resultados: Iterable<ResultadoCalculoReal>): TotalDoMes {
+export function totalDoMes(resultados: Iterable<{ resultado: Pick<ResultadoProcessamentoPessoa, "totalBrutoEstimado"> }>): TotalDoMes {
   let total = 0;
   let semValor = 0;
   for (const r of resultados) {

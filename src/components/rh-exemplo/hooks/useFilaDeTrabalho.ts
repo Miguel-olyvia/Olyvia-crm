@@ -18,7 +18,12 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 
 export {
+  FONTES_AUSENCIAS,
   FONTES_FILA,
+  TIPOS_ASSIDUIDADE,
+  TIPOS_AUSENCIAS,
+  construirItensDeAusencias,
+  construirItensDeDesviosAValidar,
   LIMITE_HORAS_EXTRA_NA_FILA,
   TIPOS_DE_ITEM,
   TIPOS_FILA,
@@ -27,18 +32,24 @@ export {
   ehTipoFila,
   filtrarPessoas,
   type AccaoDoItem,
+  type DesvioAValidar,
   type EstadoDeFonte,
+  type FonteAusencias,
   type FonteFila,
   type IdDeAccao,
   type ItemAlerta,
+  type ItemAusencia,
+  type ItemDesvioAValidar,
   type ItemFila,
   type ItemHoraExtra,
   type ItemJustificacao,
+  type PermissoesDaFila,
   type PessoaNaFila,
   type TipoFila,
 } from "@/lib/hr/filaDeTrabalho";
 
-export interface FilaDeTrabalho {
+/** A fila de uma ecra: `F` sao as fontes que ele le (as tres do mapa de assiduidade, ou `ausencias`). */
+export interface FilaDeTrabalho<F extends string = FonteFila> {
   /** So as pessoas com pendencias, ja ordenadas. */
   pessoas: PessoaNaFila[];
   totalPendencias: number;
@@ -47,9 +58,9 @@ export interface FilaDeTrabalho {
   /** Ha mais horas extra pendentes do que as que se leram. */
   horasExtraCortadas: boolean;
   horasExtra: { lidas: number; total: number };
-  fontes: Record<FonteFila, EstadoDeFonte>;
+  fontes: Record<F, EstadoDeFonte>;
   aCarregar: boolean;
-  /** As tres fontes leram bem: so entao uma lista vazia quer dizer «ninguem tem nada por tratar». */
+  /** Todas as fontes leram bem: so entao uma lista vazia quer dizer «ninguem tem nada por tratar». */
   lidaComSucesso: boolean;
   periodo: { de: string; ate: string } | null;
   /** AAAA-MM-DD, em Lisboa. */

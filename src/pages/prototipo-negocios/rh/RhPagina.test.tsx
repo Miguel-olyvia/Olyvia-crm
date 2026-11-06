@@ -112,7 +112,6 @@ describe("RH no protótipo: criar e editar dados de teste", () => {
     escolher(/^Cargo/, /Vendedor/);
     escolher(/^Tipo de contrato/, /Sem termo/);
     irParaAba(/Retribuição e bancário/);
-    escrever("hr-novo-subsidio", "7,63");
     escolher(/^Subsidios em duodecimos/, /^50 %/);
     fireEvent.click(within(painel()).getByRole("button", { name: "Criar e enviar convite" }));
     const titulo = await screen.findByRole("heading", { level: 1, name: "Teresa Nogueira" });

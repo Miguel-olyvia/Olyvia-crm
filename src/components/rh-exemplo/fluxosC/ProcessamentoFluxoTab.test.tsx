@@ -11,12 +11,16 @@ const fn = vi.hoisted(() => ({
   fechar: vi.fn(),
   criar: vi.fn(),
   anular: vi.fn(),
+  criarPorQuantidade: vi.fn(),
   sucesso: vi.fn(),
   erro: vi.fn(),
 }));
 const estado = vi.hoisted(() => ({
   permissoes: new Set<string>(),
   calculo: {} as Record<string, unknown>,
+  // As pessoas que o fecho tem de enviar e o que o periodo fechado leu da base (hooks simulados).
+  fecho: { obrigatorias: ["p1", "p2"] as string[], estado: "ok" as string },
+  leitura: {} as Record<string, unknown>,
 }));
 
 // As regras do periodo da folha: sem regra (a base ainda sem as RPCs) o periodo e o mes de calendario.
@@ -31,6 +35,18 @@ vi.mock("@/components/rh-exemplo/processamento/useCalculoReal", () => ({
   RecolhaDeAssiduidade: () => null,
 }));
 
+vi.mock("@/components/rh-exemplo/hooks/useProcessamentoResultados", async () => {
+  const real = await vi.importActual<typeof import("@/lib/hr/resultadosFecho")>("@/lib/hr/resultadosFecho");
+  return {
+    construirResultadosDoFecho: real.construirResultadosDoFecho,
+    motivoDeBloqueioDoFecho: real.motivoDeBloqueioDoFecho,
+    MAX_DESCRICAO_LANCAMENTO: real.MAX_DESCRICAO_LANCAMENTO,
+    resultadoDeLinhaGravada: real.resultadoDeLinhaGravada,
+    usePessoasObrigatoriasDoFecho: () => estado.fecho,
+    useProcessamentoResultados: () => estado.leitura,
+  };
+});
+
 import { ProcessamentoFluxoTab } from "./ProcessamentoFluxoTab";
 import { lerValorPontual } from "./PontualDialog";
 
@@ -38,11 +54,31 @@ const TUDO = ["hr.processamento.periodo.view", "hr.processamento.periodo.gerir",
 
 const resultado = (extra: Record<string, unknown> = {}) => ({
   valorHoraReal: 7.5, baseMes: 1000, divisorDuodecimos: 14, linhasAutomaticas: [], totalCodigosAutomaticos: 0,
+  linhasRegra: [], totalRegras: 0,
   descontoFaltas: 0, subsidioAlimentacao: 0, lancamentosPontuais: 0, totalBrutoEstimado: 1000, avisos: [], ...extra,
 });
 const linha = (extra: Record<string, unknown> = {}, valorBase: number | null = 1000) => ({
   resultado: resultado(extra), valorBase, periodicidade: valorBase === null ? null : "mensal", mudouAMeioDoMes: false, totais: { planeadoMinutos: 9600 },
 });
+
+/** O que `useProcessamentoResultados` devolve: por omissao nada (periodo aberto); `ok` com linhas gravadas para um fechado. */
+const leituraDe = (estadoLeitura: string, linhas: Array<Record<string, unknown>> = [], extra: Record<string, unknown> = {}) => ({
+  estado: estadoLeitura,
+  porPessoa: new Map(linhas.map((l) => [l.pessoa_id as string, l])),
+  fechadoEm: linhas.length > 0 ? "2026-10-20T10:00:00Z" : null,
+  fechadoPorNome: linhas.length > 0 ? "Rita Gomes" : null,
+  antesDoRegisto: estadoLeitura === "ok" && linhas.length === 0,
+  ...extra,
+});
+const gravada = (pessoaId: string, extra: Record<string, unknown> = {}) => ({
+  pessoa_id: pessoaId, valor_hora: 7.5, total_bruto: 777.77,
+  totais: { base_mes: 700, divisor_duodecimos: 14, total_codigos_automaticos: 10, total_regras: 20, desconto_faltas: 5, subsidio_alimentacao: 40, lancamentos_pontuais: 12.77 },
+  linhas: [], avisos: [], retribuicao_id: null, cargo_periodo_id: null, regra_salarial_id: "regra-1",
+  fechado_em: "2026-10-20T10:00:00Z", fechado_por_nome: "Rita Gomes", ...extra,
+});
+const PERIODO_FECHADO = { id: "per", estado: "fechado", fechado_em: "2026-10-20T10:00:00Z" };
+const calculoFechado = (extra: Record<string, unknown> = {}) =>
+  calculo({ periodoHook: { periodo: PERIODO_FECHADO, loading: false, saving: false, recusado: false, abrir: fn.abrir, fechar: fn.fechar }, pendentes: 2, ...extra });
 
 const ANA_LANCAMENTO = { id: "l1", periodo_id: "per", pessoa_id: "p1", descricao: "Prémio de equipa", valor: 30, anulado_em: null };
 
@@ -51,10 +87,17 @@ function calculo(extra: Record<string, unknown> = {}) {
     intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false },
     intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false },
     periodoHook: { periodo: { id: "per", estado: "aberto", fechado_em: null }, loading: false, saving: false, recusado: false, abrir: fn.abrir, fechar: fn.fechar },
-    lancamentosHook: { saving: false, recusado: false, criar: fn.criar, anular: fn.anular, lancamentos: [] },
-    retribuicoesHook: { recusado: false },
+    lancamentosHook: { saving: false, recusado: false, criar: fn.criar, criarPorQuantidade: fn.criarPorQuantidade, anular: fn.anular, lancamentos: [] },
+    // So a Ana tem direito a km e ajudas; a regra em vigor traz os valores unitarios.
+    direitosHook: { porPessoa: new Map([["p1", { iht: false, km: true, ajudas: true }]]), estado: "ok" },
+    direitosLidos: true,
+    regra: { id: "regra-1", km_valor: 0.4, ajudas_custo_dia: 65.89 },
+    retribuicoesHook: { recusado: false, estado: "ok", porPessoa: new Map([["p1", [{ id: "ret-p1", valido_de: "2026-01-01", valido_ate: null }]]]) },
+    codigosEstado: "ok",
+    assiduidadeIncompleta: () => false,
+    regrasHook: { estado: "ok", isLoading: false },
     resultados: new Map([
-      ["p1", linha({ totalCodigosAutomaticos: 50, descontoFaltas: 20, subsidioAlimentacao: 110, lancamentosPontuais: 30, totalBrutoEstimado: 1170 })],
+      ["p1", linha({ totalCodigosAutomaticos: 50, descontoFaltas: 20, subsidioAlimentacao: 110, totalRegras: 40, lancamentosPontuais: 30, totalBrutoEstimado: 1210 })],
       ["p2", linha({ baseMes: null, divisorDuodecimos: null, valorHoraReal: null, totalBrutoEstimado: null, avisos: ["sem_retribuicao"] }, null)],
     ]),
     pessoasActivas: [{ id: "p1", nome_completo: "Ana Real" }, { id: "p2", nome_completo: "Bruno Real" }],
@@ -86,8 +129,11 @@ beforeEach(() => {
   fn.fechar.mockResolvedValue(null);
   fn.criar.mockResolvedValue(null);
   fn.anular.mockResolvedValue(null);
+  fn.criarPorQuantidade.mockResolvedValue(null);
   estado.permissoes = new Set(TUDO);
   estado.calculo = calculo();
+  estado.fecho = { obrigatorias: ["p1", "p2"], estado: "ok" };
+  estado.leitura = leituraDe("inactivo");
 });
 afterEach(cleanup);
 
@@ -95,16 +141,17 @@ describe("a tabela do calculo do mes", () => {
   it("uma linha por pessoa activa, com cada parcela real e o total do mes", () => {
     abrir();
     const cabecalhos = screen.getAllByRole("columnheader").map((c) => c.textContent);
-    for (const nome of ["Pessoa", "Base do mês", "Códigos", "Faltas", "Subsídios", "Pontuais", "Total bruto"]) expect(cabecalhos).toContain(nome);
+    for (const nome of ["Pessoa", "Base do mês", "Códigos", "Faltas", "Subsídios", "Noturnas, IHT, km e ajudas", "Pontuais", "Total bruto"]) expect(cabecalhos).toContain(nome);
     expect(cabecalhos).not.toContain("Horas extra");
     const ana = celulas(linhaDe(/Ana Real/));
     expect(ana[0]).toMatch(/1.?000,00/);
     expect(ana[1]).toMatch(/50,00/);
     expect(ana[2]).toMatch(/[-−]20,00/);
     expect(ana[3]).toMatch(/110,00/);
-    expect(ana[4]).toMatch(/30,00/);
-    expect(ana[5]).toMatch(/1.?170,00/);
-    expect(screen.getByText("Total bruto do mês").closest("tr")).toHaveTextContent(/1.?170,00/);
+    expect(ana[4]).toMatch(/40,00/);
+    expect(ana[5]).toMatch(/30,00/);
+    expect(ana[6]).toMatch(/1.?210,00/);
+    expect(screen.getByText("Total bruto do mês").closest("tr")).toHaveTextContent(/1.?210,00/);
   });
 
   it("quem nao tem retribuicao fica «Sem valor», com o aviso, e fora do total", () => {
@@ -124,13 +171,13 @@ describe("a tabela do calculo do mes", () => {
   });
 
   it("sem permissao para ver retribuicoes nao mostra bases nem totais, so avisa", () => {
-    estado.calculo = calculo({ retribuicoesHook: { recusado: true } });
+    estado.calculo = calculo({ retribuicoesHook: { recusado: true, estado: "recusado" } });
     abrir();
     expect(screen.getByText(/Não tem permissão para ver as retribuições/)).toBeInTheDocument();
     const ana = celulas(linhaDe(/Ana Real/));
-    expect(ana.slice(0, 4).every((c) => c.includes("—"))).toBe(true);
-    expect(ana[5]).toBe("—");
-    expect(screen.getByText("Total bruto do mês").closest("tr")).not.toHaveTextContent(/1.?170/);
+    expect(ana.slice(0, 5).every((c) => c.includes("—"))).toBe(true);
+    expect(ana[6]).toBe("—");
+    expect(screen.getByText("Total bruto do mês").closest("tr")).not.toHaveTextContent(/1.?210/);
   });
 
   it("um erro a carregar as pessoas aparece como alerta, nao como lista vazia", () => {
@@ -225,6 +272,279 @@ describe("o periodo: abrir, fechar e estar fechado", () => {
     estado.calculo = calculo({ periodoHook: { periodo: null, loading: false, saving: false, recusado: true, abrir: fn.abrir, fechar: fn.fechar } });
     abrir();
     expect(screen.getByText("Não tem permissão para ver o período deste mês.")).toBeInTheDocument();
+  });
+});
+
+describe("fechar grava o resultado de cada pessoa", () => {
+  const fechar = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Fechar o mês" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Fechar o mês" }));
+  };
+
+  it("a confirmacao diz que o resultado fica gravado e ja nao se recalcula", () => {
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Fechar o mês" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(/resultado de cada pessoa fica gravado e já não se recalcula/);
+  });
+
+  it("envia p_resultados com UM objecto por pessoa obrigatoria, com os valores que o ecra mostra", async () => {
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+    const enviados = fn.fechar.mock.calls[0][0] as Array<Record<string, unknown> & { totais: Record<string, unknown> }>;
+    expect(enviados.map((r) => r.pessoa_id)).toEqual(["p1", "p2"]);
+    const ana = enviados[0];
+    expect(ana).toMatchObject({ valor_hora: 7.5, total_bruto: 1210, retribuicao_id: "ret-p1", cargo_periodo_id: null, regra_salarial_id: "regra-1" });
+    expect(ana.totais).toMatchObject({ base_mes: 1000, total_codigos_automaticos: 50, desconto_faltas: 20, subsidio_alimentacao: 110, total_regras: 40, lancamentos_pontuais: 30 });
+    expect(enviados[1]).toMatchObject({ total_bruto: null, retribuicao_id: null, avisos: ["sem_retribuicao"] });
+  });
+
+  it("so envia as pessoas obrigatorias (activas com vinculo sobreposto ao periodo)", async () => {
+    estado.fecho = { obrigatorias: ["p1"], estado: "ok" };
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+    expect((fn.fechar.mock.calls[0][0] as Array<{ pessoa_id: string }>).map((r) => r.pessoa_id)).toEqual(["p1"]);
+  });
+
+  it("uma recusa do servidor (periodo continua aberto) aparece como erro e nao como sucesso", async () => {
+    fn.fechar.mockResolvedValue("O período continua aberto: as regras salariais mudaram.");
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.erro).toHaveBeenCalledWith("O período continua aberto: as regras salariais mudaram."));
+    expect(fn.sucesso).not.toHaveBeenCalled();
+  });
+
+  it("direitos salariais por ler: o botao fica bloqueado e o motivo esta escrito", () => {
+    estado.calculo = calculo({ direitosLidos: false, direitosHook: { porPessoa: new Map(), estado: "erro" } });
+    abrir();
+    const botao = screen.getByRole("button", { name: "Fechar o mês" });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(botao).toHaveAccessibleDescription(/não foi possível ler os direitos salariais/);
+  });
+
+  it("uma pessoa obrigatoria ainda sem calculo bloqueia o botao e diz quantas faltam", () => {
+    estado.calculo = calculo({ resultados: new Map([["p1", linha()]]), pendentes: 1 });
+    abrir();
+    expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/falta o cálculo de 1 pessoa/)).toBeInTheDocument();
+    expect(fn.fechar).not.toHaveBeenCalled();
+  });
+
+  it("o botao de fechar e aria-disabled (continua focavel) e o clique nao abre a confirmacao", () => {
+    estado.calculo = calculo({ codigosEstado: "erro" });
+    abrir();
+    const botao = screen.getByRole("button", { name: "Fechar o mês" });
+    expect(botao).not.toBeDisabled();
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(botao);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("codigos de processamento que nao se leram por inteiro bloqueiam, com o motivo escrito", () => {
+    for (const codigosEstado of ["recusado", "erro", "a_carregar"]) {
+      cleanup();
+      estado.calculo = calculo({ codigosEstado });
+      abrir();
+      expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByText(/códigos de processamento não puderam ser lidos/)).toBeInTheDocument();
+    }
+  });
+
+  it("retribuicoes com erro de leitura ou a carregar bloqueiam (nao so a recusa)", () => {
+    for (const est of ["erro", "a_carregar"]) {
+      cleanup();
+      estado.calculo = calculo({ retribuicoesHook: { recusado: false, estado: est, porPessoa: new Map() } });
+      abrir();
+      expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByText(/retribuições não puderam ser lidas por inteiro/)).toBeInTheDocument();
+    }
+  });
+
+  it("assiduidade lida so em parte (recusada ou com erro) bloqueia o fecho e diz quantas pessoas", () => {
+    estado.calculo = calculo({ assiduidadeIncompleta: (id: string) => id === "p2" });
+    abrir();
+    expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/assiduidade de 1 pessoa\(s\) só se leu em parte/)).toBeInTheDocument();
+    expect(fn.fechar).not.toHaveBeenCalled();
+  });
+  it("sem permissao para ver retribuicoes, regras ilegiveis ou vinculos por ler: bloqueia", () => {
+    estado.calculo = calculo({ retribuicoesHook: { recusado: true, estado: "recusado", porPessoa: new Map() } });
+    abrir();
+    expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+    cleanup();
+    estado.calculo = calculo({ regrasHook: { estado: "erro", isLoading: false } });
+    abrir();
+    expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/regras salariais não puderam ser lidas/)).toBeInTheDocument();
+    cleanup();
+    estado.calculo = calculo();
+    estado.fecho = { obrigatorias: [], estado: "erro" };
+    abrir();
+    expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/ler os vínculos/)).toBeInTheDocument();
+  });
+});
+
+describe("periodo fechado: le o gravado e nao recalcula", () => {
+  it("mostra os valores GRAVADOS (nao o calculo de agora) e diz quando e por quem foi fechado", () => {
+    estado.calculo = calculoFechado();
+    estado.leitura = leituraDe("ok", [gravada("p1"), gravada("p2", { total_bruto: 500, totais: { base_mes: 500 } })]);
+    abrir();
+    expect(screen.getByText("Fechado a 20/10/2026 por Rita Gomes")).toBeInTheDocument();
+    const ana = celulas(linhaDe(/Ana Real/));
+    expect(ana[0]).toMatch(/700,00/);
+    expect(ana[6]).toMatch(/777,77/);
+    expect(screen.getByText("Total bruto do mês").closest("tr")).toHaveTextContent(/1.?277,77/);
+    // O calculo de agora (1210 para a Ana) nao aparece em lado nenhum.
+    expect(screen.queryByText(/1.?210,00/)).not.toBeInTheDocument();
+  });
+
+  it("nao pede nem mostra a assiduidade a calcular, nem avisos de total provisorio", () => {
+    estado.calculo = calculoFechado({ direitosLidos: false, direitosHook: { porPessoa: new Map(), estado: "erro" }, incompletas: 3 });
+    estado.leitura = leituraDe("ok", [gravada("p1")]);
+    abrir();
+    expect(screen.queryByText(/A calcular a assiduidade/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/só se leu em parte/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/provisório/i)).not.toBeInTheDocument();
+  });
+
+  it("fechado antes do registo: diz que os valores nao estao disponiveis e nao mostra numeros nem tabela", () => {
+    estado.calculo = calculoFechado();
+    estado.leitura = leituraDe("ok", []);
+    abrir();
+    expect(screen.getByText("Fechado antes do registo dos resultados: valores não disponíveis")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText(/1.?210,00/)).not.toBeInTheDocument();
+  });
+
+  it("a ler os resultados gravados: diz-o e nao mostra tabela", () => {
+    estado.calculo = calculoFechado();
+    estado.leitura = leituraDe("a_carregar");
+    abrir();
+    expect(screen.getByText(/A ler os resultados gravados/)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("sem permissao para as retribuicoes: diz-o e nao mostra valores", () => {
+    estado.calculo = calculoFechado();
+    estado.leitura = leituraDe("recusado");
+    abrir();
+    expect(screen.getAllByText(/Não tem permissão para ver/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("uma falha a ler os resultados fica visivel como alerta", () => {
+    estado.calculo = calculoFechado();
+    estado.leitura = leituraDe("erro");
+    abrir();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Não foi possível ler os resultados gravados/);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("o detalhe de uma pessoa mostra o gravado", () => {
+    estado.calculo = calculoFechado();
+    estado.leitura = leituraDe("ok", [gravada("p1")]);
+    abrir();
+    fireEvent.click(within(linhaDe(/Ana Real/)).getByRole("button", { name: /Como chegámos/ }));
+    const dialogo = screen.getByRole("dialog");
+    expect(dialogo).toHaveTextContent(/777,77/);
+    expect(dialogo).toHaveTextContent(/700,00/);
+  });
+});
+
+describe("km e ajudas de custo", () => {
+  const abrirDialogo = () => {
+    abrir();
+    fireEvent.click(within(linhaDe(/Ana Real/)).getByRole("button", { name: /Km e ajudas/ }));
+    return screen.getByRole("dialog");
+  };
+
+  it("so quem tem direito a km ou ajudas tem o botao", () => {
+    abrir();
+    expect(within(linhaDe(/Ana Real/)).getByRole("button", { name: /Km e ajudas/ })).toBeInTheDocument();
+    expect(within(linhaDe(/Bruno Real/)).queryByRole("button", { name: /Km e ajudas/ })).not.toBeInTheDocument();
+  });
+
+  it("sem permissao de gerir lancamentos, ou com o periodo fechado, nao ha botao", () => {
+    estado.permissoes = new Set(["hr.processamento.periodo.view"]);
+    abrir();
+    expect(screen.queryByRole("button", { name: /Km e ajudas/ })).not.toBeInTheDocument();
+    cleanup();
+    estado.permissoes = new Set(TUDO);
+    estado.calculo = calculoFechado();
+    estado.leitura = leituraDe("ok", [gravada("p1"), gravada("p2")]);
+    abrir();
+    expect(screen.getByRole("rowheader", { name: /Ana Real/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Km e ajudas/ })).not.toBeInTheDocument();
+  });
+
+  it("mostra o valor da regra e a previsao, e grava so tipo e quantidade (virgula decimal aceite), nunca o valor", async () => {
+    const dialogo = abrirDialogo();
+    expect(within(dialogo).getByText(/0,40/)).toBeInTheDocument();
+    fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "100" } });
+    expect(within(dialogo).getByText(/Valor a lançar: 40,00/)).toBeInTheDocument();
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(fn.criarPorQuantidade).toHaveBeenCalledWith({ pessoaId: "p1", tipo: "km", quantidade: 100 }));
+    expect(fn.criarPorQuantidade.mock.calls[0][0]).not.toHaveProperty("valor");
+    expect(fn.sucesso).toHaveBeenCalledWith("Lançamento registado.");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("uma quantidade invalida (zero, texto, mais de duas casas) nao chega a base", async () => {
+    const dialogo = abrirDialogo();
+    for (const invalida of ["", "0", "abc", "1,234"]) {
+      fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: invalida } });
+      fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+      expect(await within(dialogo).findByRole("alert")).toHaveTextContent(/quantidade maior que zero/);
+    }
+    expect(fn.criarPorQuantidade).not.toHaveBeenCalled();
+  });
+
+  it("uma recusa da base (por exemplo sem direito) fica no dialogo, que continua aberto", async () => {
+    fn.criarPorQuantidade.mockResolvedValue("rhFluxosC.lanc.erro.semDireito");
+    const dialogo = abrirDialogo();
+    fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "10" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Esta pessoa não tem direito a este tipo de lançamento.");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(fn.sucesso).not.toHaveBeenCalled();
+  });
+
+  it("com a leitura dos direitos falhada avisa, marca o total como provisorio e desactiva o botao (nao diz «sem direito»)", () => {
+    estado.calculo = calculo({ direitosHook: { porPessoa: new Map(), estado: "erro" }, direitosLidos: false });
+    abrir();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Não foi possível ler os direitos \(IHT, km, ajudas\): os totais podem estar incompletos/);
+    const botao = within(linhaDe(/Ana Real/)).getByRole("button", { name: /Km e ajudas/ });
+    expect(botao).toBeDisabled();
+    expect(botao).toHaveAccessibleDescription(/Não foi possível ler os direitos/);
+    expect(screen.getAllByText("provisório").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/não tem direito/i)).not.toBeInTheDocument();
+  });
+
+  it("Enter no campo da quantidade guarda (o dialogo e um formulario)", async () => {
+    const dialogo = abrirDialogo();
+    const campo = within(dialogo).getByLabelText("Quilómetros");
+    fireEvent.change(campo, { target: { value: "5" } });
+    fireEvent.submit(campo.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(fn.criarPorQuantidade).toHaveBeenCalledWith({ pessoaId: "p1", tipo: "km", quantidade: 5 }));
+  });
+
+  it("o erro fica ligado ao campo por aria-describedby", async () => {
+    const dialogo = abrirDialogo();
+    const campo = within(dialogo).getByLabelText("Quilómetros");
+    fireEvent.change(campo, { target: { value: "0" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
+    await within(dialogo).findByRole("alert");
+    expect(campo.getAttribute("aria-describedby")).toContain("ka-erro");
+    expect(campo).toHaveAccessibleDescription(/quantidade maior que zero/);
+  });
+
+  it("sem regra em vigor diz-o e nao deixa guardar", () => {
+    estado.calculo = calculo({ regra: null });
+    const dialogo = abrirDialogo();
+    expect(within(dialogo).getByText(/Não há regra salarial em vigor/)).toBeInTheDocument();
+    expect(within(dialogo).getByRole("button", { name: "Guardar" })).toBeDisabled();
   });
 });
 
@@ -339,7 +659,7 @@ describe("«Como chegamos a este valor» e a anulacao", () => {
   });
 
   it("sem permissao para ver retribuicoes o detalhe so diz isso", () => {
-    estado.calculo = calculo({ retribuicoesHook: { recusado: true } });
+    estado.calculo = calculo({ retribuicoesHook: { recusado: true, estado: "recusado" } });
     const dialogo = abrirDetalhe();
     expect(dialogo).toHaveTextContent("Sem permissão para ver retribuições");
     expect(within(dialogo).queryByText("Salário-base")).not.toBeInTheDocument();

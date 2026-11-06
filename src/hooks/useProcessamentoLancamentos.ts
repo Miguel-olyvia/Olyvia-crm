@@ -16,10 +16,11 @@ import { useCallback, useEffect, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { chaveDoErroDeLancamento } from "@/lib/hr/regrasSalariais";
 import type { HrProcessamentoLancamento } from "@/types/hr";
 
 const COLUNAS =
-  "id, periodo_id, pessoa_id, organization_id, descricao, valor, codigo_processamento_id, " +
+  "id, periodo_id, pessoa_id, organization_id, descricao, valor, tipo, quantidade, codigo_processamento_id, " +
   "anulado_em, anulado_por, anulado_motivo, created_at, created_by, updated_at, updated_by";
 
 export interface NovoLancamentoProcessamento {
@@ -27,6 +28,18 @@ export interface NovoLancamentoProcessamento {
   descricao: string;
   valor: number;
   codigoProcessamentoId: string | null;
+}
+
+/**
+ * Km ou ajudas de custo: o RH diz so a QUANTIDADE (km, ou dias); o valor e calculado pela base
+ * (quantidade x valor da regra salarial em vigor) e NUNCA se envia daqui. Recusa quem nao tem o direito.
+ */
+export interface NovoLancamentoPorQuantidade {
+  pessoaId: string;
+  tipo: "km" | "ajudas";
+  quantidade: number;
+  /** Opcional: sem texto a base escreve "Quilometros: N km" / "Ajudas de custo: N dia(s)". */
+  descricao?: string;
 }
 
 export function useProcessamentoLancamentos(periodoId: string | undefined) {
@@ -65,7 +78,11 @@ export function useProcessamentoLancamentos(periodoId: string | undefined) {
   }, [load]);
 
   const executar = useCallback(
-    async (accao: () => Promise<{ data?: unknown; error: unknown }>): Promise<string | null> => {
+    async (
+      accao: () => Promise<{ data?: unknown; error: unknown }>,
+      /** Traduz um erro conhecido da base numa CHAVE de traducao (quem mostra o erro traduz). */
+      chaveDoErro?: (erro: unknown) => string | null,
+    ): Promise<string | null> => {
       setSaving(true);
       try {
         const { error } = await accao();
@@ -73,6 +90,8 @@ export function useProcessamentoLancamentos(periodoId: string | undefined) {
         await load();
         return null;
       } catch (e) {
+        const chave = chaveDoErro?.(e);
+        if (chave) return chave;
         if (!isPermissionError(e)) captureFlowError(e, "hr-processamento-lancamentos-write");
         return await getFriendlyErrorMessage(e);
       } finally {
@@ -97,6 +116,25 @@ export function useProcessamentoLancamentos(periodoId: string | undefined) {
     [executar, periodoId],
   );
 
+  /**
+   * Lanca km ou ajudas de custo por quantidade (`p_tipo` e `p_quantidade`, sem `p_valor`). Um erro conhecido da base
+   * (sem direito, sem regra, quantidade invalida) volta como CHAVE de traducao `rhFluxosC.lanc.erro.*`.
+   */
+  const criarPorQuantidade = useCallback(
+    (novo: NovoLancamentoPorQuantidade) =>
+      executar(() => {
+        if (!periodoId) return Promise.resolve({ error: new Error("Sem periodo activo") });
+        return hrRpc("rpc_hr_processamento_lancamento_criar", {
+          p_periodo_id: periodoId,
+          p_pessoa_id: novo.pessoaId,
+          p_descricao: novo.descricao?.trim() ?? "",
+          p_tipo: novo.tipo,
+          p_quantidade: novo.quantidade,
+        });
+      }, chaveDoErroDeLancamento),
+    [executar, periodoId],
+  );
+
   const anular = useCallback(
     (lancamentoId: string, motivo: string) =>
       executar(() =>
@@ -115,6 +153,7 @@ export function useProcessamentoLancamentos(periodoId: string | undefined) {
     recusado,
     recarregar: load,
     criar,
+    criarPorQuantidade,
     anular,
   };
 }

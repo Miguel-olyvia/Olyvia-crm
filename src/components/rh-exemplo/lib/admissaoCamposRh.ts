@@ -24,7 +24,6 @@ export const CAMPOS_RH_OBRIGATORIOS: readonly CampoRhAdmissao[] = [
   { codigo: "cargo" },
   { codigo: "tipo_contrato" },
   { codigo: "tipo_horario", disponivel: false },
-  { codigo: "subsidio_alimentacao", nota: "hr.admissao.subsidioZeroConta" },
   { codigo: "duodecimos", nota: "hr.admissao.duodecimosOmissao" },
 ] as const;
 

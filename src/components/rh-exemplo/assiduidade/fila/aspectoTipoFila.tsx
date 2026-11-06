@@ -1,9 +1,9 @@
 /**
  * O aspecto de cada tipo de pendencia da fila de trabalho: icone, cores por tokens e a etiqueta. A cor nunca e o unico
  * indicador: leva sempre o icone e o texto. Contraste: texto `-800` no tema claro e `-300` no escuro.
- * Um tipo novo (por exemplo «ausencia por decidir») acrescenta-se aqui e em `TIPOS_DE_ITEM`.
+ * Um tipo novo acrescenta-se aqui e em `TIPOS_DE_ITEM` (assim entraram «ausencia» e «desvio a validar»).
  */
-import { Clock, FileText, OctagonAlert, type LucideIcon } from "lucide-react";
+import { CalendarClock, ClipboardCheck, Clock, FileText, OctagonAlert, type LucideIcon } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { definicaoDoTipo, type TipoFila } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,8 @@ export const ASPECTO_TIPO_FILA: Record<TipoFila, { Icone: LucideIcon; classes: s
   hora_extra: { Icone: Clock, classes: "border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-300" },
   justificacao: { Icone: FileText, classes: "border-sky-500/50 bg-sky-500/10 text-sky-800 dark:text-sky-300" },
   alerta: { Icone: OctagonAlert, classes: "border-destructive/50 bg-destructive/10 text-destructive" },
+  desvio_a_validar: { Icone: ClipboardCheck, classes: "border-violet-500/50 bg-violet-500/10 text-violet-800 dark:text-violet-300" },
+  ausencia: { Icone: CalendarClock, classes: "border-teal-500/50 bg-teal-500/10 text-teal-800 dark:text-teal-300" },
 };
 
 interface EtiquetaDoTipoProps {

@@ -13,6 +13,12 @@
  * Quem ve o que decide-o a RLS: `hr.ausencias.view` ve a organizacao toda, e a
  * chefia ve a sua cadeia por `hr_ausencias_pessoa_na_minha_cadeia`. Repetir a
  * regra no cliente daria duas versoes da mesma coisa.
+ *
+ * O SEPARADOR «A DECIDIR» E UMA FILA DE PESSOAS
+ * ---------------------------------------------
+ * Mostra so as PESSOAS com pedidos por decidir (o numero conta pessoas); ao abrir uma, o painel junta todos os pedidos
+ * dela, com as accoes nos proprios itens. E a mesma lista e o mesmo painel da fila do mapa de assiduidade (`FilaDeAusencias`).
+ * A lista de «Decididos» continua a ser a tabela por pedido: e historico, nao fila de trabalho.
  */
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -22,9 +28,9 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { PedidoDetalheSheet } from "@/components/rh-exemplo/ausencias/PedidoDetalheSheet";
+import { FilaDeAusencias } from "@/components/rh-exemplo/ausencias/fila/FilaDeAusencias";
 import { PedidosLista } from "@/components/rh-exemplo/ausencias/PedidosLista";
-import { useAusenciasDaOrganizacao } from "@/components/rh-exemplo/hooks/useAusenciasDaOrganizacao";
-import { useAusenciasTipos } from "@/components/rh-exemplo/hooks/useAusenciasTipos";
+import { useFilaDeAusencias } from "@/components/rh-exemplo/hooks/useFilaDeAusencias";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
@@ -52,8 +58,6 @@ export function AprovacoesConteudo({ tabParam = "tab" }: AprovacoesConteudoProps
 
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
-  const dados = useAusenciasDaOrganizacao();
-  const tipos = useAusenciasTipos();
   const { pessoas } = usePessoas();
   const minha = useMinhaPessoa();
 
@@ -67,13 +71,11 @@ export function AprovacoesConteudo({ tabParam = "tab" }: AprovacoesConteudoProps
     [pessoas],
   );
 
-  const aDecidir = useMemo(
-    () =>
-      dados.pendentes.filter((pedido) =>
-        pedido.estado === "pendente_chefia" ? podeChefia : podeRh,
-      ),
-    [dados.pendentes, podeChefia, podeRh],
-  );
+  // A fila, os pedidos e os tipos saem da MESMA leitura (uma so instancia do hook da organizacao).
+  const { fila, dados, tipos } = useFilaDeAusencias(nomePorPessoaId, {
+    aprovarChefia: podeChefia,
+    aprovarRh: podeRh,
+  });
 
   const jaDecididos = useMemo(
     () =>
@@ -87,6 +89,10 @@ export function AprovacoesConteudo({ tabParam = "tab" }: AprovacoesConteudoProps
     () => dados.pedidos.find((pedido) => pedido.id === pedidoAberto) ?? null,
     [dados.pedidos, pedidoAberto],
   );
+
+  // A fonte falhou: nao se afirmam contagens («0 pessoas») nem listas vazias («sem decididos») que a leitura nao prova.
+  const leituraComErro = fila.fontes.ausencias === "erro";
+  const textoErroLeitura = t("rhFila.aviso.erro", { fonte: t("rhFila.fonte.ausencias") });
 
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
@@ -106,13 +112,20 @@ export function AprovacoesConteudo({ tabParam = "tab" }: AprovacoesConteudoProps
     <>
       {dados.recusado ? (
         <SemAcessoCard />
-      ) : dados.loading || tipos.loading ? (
+      ) : fila.aCarregar ? (
+        // So ate a primeira resposta: as releituras depois de decidir nao podem desmontar a fila nem o painel aberto.
         <OlyviaLoader />
       ) : (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">
-              {t("hr.ausencias.aprovacoes.aDecidirContagem", { total: aDecidir.length })}
+              {leituraComErro
+                ? t("hr.ausencias.aprovacoes.aDecidir")
+                : t("rhFila.ausencias.contador", {
+                    pessoas: t(fila.pessoas.length === 1 ? "rhFila.pessoas.um" : "rhFila.pessoas.varios", {
+                      n: String(fila.pessoas.length),
+                    }),
+                  })}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -127,21 +140,27 @@ export function AprovacoesConteudo({ tabParam = "tab" }: AprovacoesConteudoProps
               </TabsList>
 
               <TabsContent value="aDecidir">
-                <PedidosLista
-                  pedidos={aDecidir}
-                  tiposPorId={tipos.porId}
-                  nomePorPessoaId={nomePorPessoaId}
-                  vazioTexto={t("hr.ausencias.aprovacoes.nadaAEspera")}
-                  onAbrir={setPedidoAberto}
+                <FilaDeAusencias
+                  fila={fila}
+                  permissoes={{ aprovarChefia: podeChefia, aprovarRh: podeRh }}
+                  decisoes={{
+                    decidirChefia: dados.decidirChefia,
+                    decidirRh: dados.decidirRh,
+                    saving: dados.saving,
+                  }}
+                  aoAbrirDetalhe={setPedidoAberto}
                 />
               </TabsContent>
 
               <TabsContent value="decididos">
+                {leituraComErro && (
+                  <p role="alert" className="mb-3 text-sm text-destructive">{textoErroLeitura}</p>
+                )}
                 <PedidosLista
                   pedidos={jaDecididos}
                   tiposPorId={tipos.porId}
                   nomePorPessoaId={nomePorPessoaId}
-                  vazioTexto={t("hr.ausencias.aprovacoes.semDecididos")}
+                  vazioTexto={leituraComErro ? textoErroLeitura : t("hr.ausencias.aprovacoes.semDecididos")}
                   onAbrir={setPedidoAberto}
                 />
               </TabsContent>

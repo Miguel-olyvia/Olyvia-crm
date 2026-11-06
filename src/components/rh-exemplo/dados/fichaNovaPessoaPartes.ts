@@ -57,8 +57,6 @@ export function vinculoDaNova(ficha: FichaRh, x: ExtrasNovaPessoa): Pick<FichaRh
 export function retribuicoesDaNova(ficha: FichaRh, x: ExtrasNovaPessoa): PessoaRetribuicao[] {
   return ficha.retribuicoes.map((r) => ({
     ...r,
-    subsidio_alimentacao: x.retribuicao.subsidio,
-    subsidio_alimentacao_modo: x.retribuicao.modo,
     duodecimos_pct: x.retribuicao.duodecimos,
     origem: "pessoa" as const,
   }));

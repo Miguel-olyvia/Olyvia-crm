@@ -40,6 +40,43 @@ const COLUNAS_DIA =
   "id, pedido_id, pessoa_id, organization_id, tipo_id, data, fraccao_dia, conta_saldo, " +
   "e_feriado, e_fim_semana, periodo_inicio, estado";
 
+const PAGINA_PENDENTES = 1000;
+/** Tecto de seguranca: passado isto a lista considera-se truncada (erro), nunca completa. */
+const MAX_PAGINAS_PENDENTES = 20;
+
+export interface LeituraPendentes {
+  pedidos: AusenciaPedido[];
+  recusado: boolean;
+  /** Falhou, ou ficou truncada pelo tecto de paginas. */
+  erro: boolean;
+}
+
+/** Os pedidos pendentes (chefia e RH) da organizacao, paginados ate esgotar; uma falha a meio descarta tudo. */
+async function lerPendentes(orgId: string): Promise<LeituraPendentes> {
+  const pedidos: AusenciaPedido[] = [];
+  for (let pagina = 0; pagina < MAX_PAGINAS_PENDENTES; pagina++) {
+    const inicio = pagina * PAGINA_PENDENTES;
+    const { data, error } = await hrFrom("pessoas_ausencias_pedidos")
+      .select(COLUNAS_PEDIDO)
+      .eq("organization_id", orgId)
+      .in("estado", ["pendente_chefia", "pendente_rh"])
+      .order("data_inicio", { ascending: false })
+      .order("id", { ascending: true })
+      .range(inicio, inicio + PAGINA_PENDENTES - 1);
+    if (error) {
+      if (isPermissionError(error)) return { pedidos: [], recusado: true, erro: false };
+      captureFlowError(error, "hr-ausencias-load");
+      return { pedidos: [], recusado: false, erro: true };
+    }
+    const linhas = (data ?? []) as AusenciaPedido[];
+    pedidos.push(...linhas);
+    if (linhas.length < PAGINA_PENDENTES) return { pedidos, recusado: false, erro: false };
+  }
+  // Chegou ao tecto com a ultima pagina ainda cheia: ha mais pedidos do que os lidos.
+  captureFlowError(new Error("hr-ausencias: pendentes truncados pelo tecto de paginas"), "hr-ausencias-load");
+  return { pedidos, recusado: false, erro: true };
+}
+
 export interface OpcoesOrganizacao {
   /** Janela para os dias do mapa. Sem ela nao se carregam dias nenhuns. */
   anoDoMapa?: number;
@@ -55,10 +92,19 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
   const [dias, setDias] = useState<AusenciaDia[]>([]);
   const [loading, setLoading] = useState(true);
   const [recusado, setRecusado] = useState(false);
+  // A ultima leitura FALHOU (por outra razao que nao a permissao): quem usa a lista pode manter a que tinha e avisar.
+  const [erro, setErro] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A leitura DOS PENDENTES (consulta propria): uma falha, uma recusa ou uma lista truncada nunca pode passar por «nada por decidir».
+  const [pendentesLidos, setPendentesLidos] = useState<AusenciaPedido[]>([]);
+  const [pendentesErro, setPendentesErro] = useState(false);
+  const [pendentesRecusado, setPendentesRecusado] = useState(false);
 
   const load = useCallback(async () => {
     if (!orgId) {
+      setPendentesLidos([]);
+      setPendentesErro(false);
+      setPendentesRecusado(false);
       setPedidos([]);
       setDecisoes([]);
       setDias([]);
@@ -67,6 +113,7 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
     }
     setLoading(true);
     setRecusado(false);
+    setErro(false);
     try {
       const { data, error } = await hrFrom("pessoas_ausencias_pedidos")
         .select(COLUNAS_PEDIDO)
@@ -75,12 +122,25 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
         .limit(500);
 
       if (error) {
-        if (isPermissionError(error)) setRecusado(true);
-        else captureFlowError(error, "hr-ausencias-load");
-        setPedidos([]);
+        if (isPermissionError(error)) {
+          setRecusado(true);
+          setPedidos([]);
+        } else {
+          captureFlowError(error, "hr-ausencias-load");
+          // Falha de leitura: ficam os pedidos da ultima leitura boa (o detalhe aberto nao desaparece) e `erro` diz
+          // que a lista pode estar desatualizada. So uma recusa por permissao esvazia a lista.
+          setErro(true);
+        }
       } else {
         setPedidos((data ?? []) as AusenciaPedido[]);
       }
+
+      // Os PENDENTES vem de uma consulta propria, filtrada por estado no servidor e paginada: o historico acima esta
+      // limitado a 500 linhas e um pedido pendente antigo podia ficar de fora dele, e a fila diria «nada por decidir».
+      const lidos = await lerPendentes(orgId);
+      setPendentesLidos(lidos.pedidos);
+      setPendentesRecusado(lidos.recusado);
+      setPendentesErro(lidos.erro);
 
       const { data: linhasDecisao, error: erroDecisao } = await hrFrom(
         "pessoas_ausencias_pedido_decisoes",
@@ -108,6 +168,8 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
       }
     } catch (e) {
       captureFlowError(e, "hr-ausencias-load");
+      setErro(true);
+      setPendentesErro(true);
     } finally {
       setLoading(false);
     }
@@ -209,13 +271,9 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
     return mapa;
   }, [decisoes]);
 
-  const pendentes = useMemo(
-    () =>
-      pedidos.filter(
-        (pedido) => pedido.estado === "pendente_chefia" || pedido.estado === "pendente_rh",
-      ),
-    [pedidos],
-  );
+  // Os pendentes da consulta propria. Se essa leitura falhou, nao se mostra o que o historico limitado por acaso trouxe:
+  // `erro`/`recusado` dizem-no (a fila avisa em vez de afirmar «nada por decidir»).
+  const pendentes = pendentesLidos;
 
   return {
     pedidos,
@@ -223,7 +281,8 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
     decisoesPorPedido,
     dias,
     loading,
-    recusado,
+    recusado: recusado || pendentesRecusado,
+    erro: erro || pendentesErro,
     saving,
     recarregar: load,
     decidirChefia,

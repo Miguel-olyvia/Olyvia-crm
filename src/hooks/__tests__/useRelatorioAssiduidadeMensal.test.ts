@@ -11,6 +11,7 @@ const ORG_ACTIVA = "org-activa";
 const PESSOA_ID = "pessoa-1";
 
 let tabelas: Record<string, unknown[]> = {};
+let errosPorTabela: Record<string, unknown> = {};
 let rpcChamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
 let rpcResposta: { data: unknown; error: unknown } = { data: "nova-obra-id", error: null };
 
@@ -23,7 +24,10 @@ function buildChain(table: string) {
     lte: () => chain,
     order: () => chain,
     then: (onFulfilled: any, onRejected: any) =>
-      Promise.resolve({ data: linhas, error: null }).then(onFulfilled, onRejected),
+      Promise.resolve({ data: errosPorTabela[table] ? null : linhas, error: errosPorTabela[table] ?? null }).then(
+        onFulfilled,
+        onRejected,
+      ),
   };
   return chain;
 }
@@ -85,8 +89,33 @@ function diaDeFolga(diaSemana: number) {
 describe("useRelatorioAssiduidadeMensal", () => {
   beforeEach(() => {
     tabelas = {};
+    errosPorTabela = {};
     rpcChamadas = [];
     rpcResposta = { data: "nova-obra-id", error: null };
+  });
+
+  describe("leituras falhadas nao passam por relatorio completo (o fecho grava para sempre)", () => {
+    it("sem falhas, erro e false", async () => {
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.erro).toBe(false);
+    });
+
+    it("uma leitura que falha (nao por permissao) expoe erro=true em vez de linhas vazias silenciosas", async () => {
+      errosPorTabela.pessoas_horario_realizado = { message: "falha de rede", code: "XX000" };
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.erro).toBe(true);
+      expect(result.current.realizadoRecusado).toBe(false);
+    });
+
+    it("uma recusa por permissao e recusada, nao erro", async () => {
+      errosPorTabela.pessoas_faltas = { message: "permission denied", code: "42501" };
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.faltasRecusadas).toBe(true);
+      expect(result.current.erro).toBe(false);
+    });
   });
 
   describe("'sem_registo' -- depende de 'hoje', por isso corre com o relogio fixado", () => {

@@ -96,6 +96,9 @@ const PESSOAS = [
   },
 ];
 
+/** Mutavel: o teste da paginacao de pessoas substitui-o por mais de uma pagina. */
+let PESSOAS_LISTA: Array<Record<string, unknown>> = [...PESSOAS];
+
 /** Só a p1 tem conta activa ligada. */
 const CONTAS = [{ pessoa_id: "p1", estado: "activa" }];
 
@@ -146,7 +149,11 @@ function buildChain(table: string) {
           if (table === "pessoas_vinculos") return { data: { id: "vinculo-novo" }, error: null };
           return { data: null, error: null };
         }
-        if (table === "pessoas") return { data: PESSOAS, error: null };
+        if (table === "pessoas") {
+          if (!intervalo) return { data: PESSOAS_LISTA, error: null };
+          const [de, ate] = intervalo;
+          return { data: PESSOAS_LISTA.slice(de, ate + 1), error: null };
+        }
         if (table === "pessoas_contas") return { data: CONTAS, error: null };
         if (table === "pessoas_vinculos") {
           if (falharVinculos) return { data: null, error: { message: "sem permissao" } };
@@ -229,6 +236,7 @@ describe("usePessoas", () => {
     isNulos = {};
     inserts = {};
     VINCULOS = [...VINCULOS_BASE];
+    PESSOAS_LISTA = [...PESSOAS];
     chamadasRpc = [];
     rpcImpl = () => Promise.resolve({ data: null, error: null });
     falharVinculos = false;
@@ -570,8 +578,20 @@ describe("usePessoas", () => {
     expect(porId.p1, "o contrato que estava na segunda pagina nao foi lido").toBe("em_curso");
   });
 
+  it("le todas as paginas de pessoas, e nao so as primeiras mil (o fecho da folha nao pode deixar ninguem de fora)", async () => {
+    PESSOAS_LISTA = Array.from({ length: 1001 }, (_, i) => ({
+      id: `x${i}`, nome_completo: `Pessoa ${i}`, estado_registo: "activo", data_admissao: diasAtras(200), data_saida: null,
+    }));
+
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.pessoas).toHaveLength(1001);
+    expect(result.current.pessoas.some((p) => p.id === "x1000"), "a pessoa da segunda pagina nao foi lida").toBe(true);
+  });
+
   // Fluxo 2: o valor base vem so do cargo. O nucleo leva cargo_id, e a parte
-  // pessoal (subsidio e duodecimos) vai pela RPC, DEPOIS do vinculo.
+  // pessoal (so os duodecimos) vai pela RPC, DEPOIS do vinculo.
   it("o nucleo vai com cargo_id", async () => {
     const { result } = renderHook(() => usePessoas());
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -593,7 +613,7 @@ describe("usePessoas", () => {
           // Admissao ate ao inicio do vinculo: o cargo ja esta aberto em 2026-02-01.
           nucleo: { ...payloadMinimo().nucleo, data_admissao: "2026-01-15" },
           vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" },
-          retribuicao: { subsidio: 6.5, subsidioModo: "cartao", duodecimosPct: 50 },
+          retribuicao: { duodecimosPct: 50 },
         }),
       );
     });
@@ -603,8 +623,8 @@ describe("usePessoas", () => {
     expect(chamada?.args).toEqual({
       p_pessoa_id: "pessoa-nova",
       p_desde: "2026-02-01",
-      p_subsidio: 6.5,
-      p_subsidio_modo: "cartao",
+      p_subsidio: null,
+      p_subsidio_modo: null,
       p_duodecimos_pct: 50,
       p_motivo: null,
     });
@@ -613,7 +633,7 @@ describe("usePessoas", () => {
   it("a data da parte da pessoa: inicio do vinculo, senao admissao, senao hoje", async () => {
     const { result } = renderHook(() => usePessoas());
     await waitFor(() => expect(result.current.loading).toBe(false));
-    const parte = { subsidio: null, subsidioModo: null, duodecimosPct: 50 as const };
+    const parte = { duodecimosPct: 50 as const };
 
     await act(async () => {
       await result.current.criarPessoa(
@@ -642,7 +662,7 @@ describe("usePessoas", () => {
       await result.current.criarPessoa(
         payloadMinimo({
           vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" },
-          retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 },
+          retribuicao: { duodecimosPct: 50 },
         }),
       );
     });
@@ -666,7 +686,7 @@ describe("usePessoas", () => {
         payloadMinimo({
           nucleo: { ...payloadMinimo().nucleo, data_admissao: "2026-03-01" },
           vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-01-01" },
-          retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 },
+          retribuicao: { duodecimosPct: 50 },
         }),
       );
     });
@@ -685,7 +705,7 @@ describe("usePessoas", () => {
       await result.current.criarPessoa(
         payloadMinimo({
           nucleo: { ...payloadMinimo().nucleo, local_id: "local-1" },
-          retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 },
+          retribuicao: { duodecimosPct: 50 },
         }),
       );
     });
@@ -770,7 +790,7 @@ describe("usePessoas", () => {
       let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
       await act(async () => {
         resultado = await result.current.criarPessoa(
-          payloadMinimo({ retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 } }),
+          payloadMinimo({ retribuicao: { duodecimosPct: 50 } }),
         );
       });
 
@@ -791,7 +811,7 @@ describe("usePessoas", () => {
       let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
       await act(async () => {
         resultado = await result.current.criarPessoa(
-          payloadMinimo({ retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 } }),
+          payloadMinimo({ retribuicao: { duodecimosPct: 50 } }),
         );
       });
       expect(resultado?.falhas.map((f) => f.seccao)).toEqual(["retribuicao"]);
@@ -849,7 +869,7 @@ describe("usePessoas", () => {
     let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
     await act(async () => {
       resultado = await result.current.criarPessoa(
-        payloadMinimo({ retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 } }),
+        payloadMinimo({ retribuicao: { duodecimosPct: 50 } }),
       );
     });
 
@@ -881,6 +901,7 @@ describe("usePessoas.criarPessoa: extras do painel «Nova pessoa»", () => {
     isNulos = {};
     inserts = {};
     VINCULOS = [...VINCULOS_BASE];
+    PESSOAS_LISTA = [...PESSOAS];
     chamadasRpc = [];
     rpcImpl = () => Promise.resolve({ data: null, error: null });
     falharVinculos = false;

@@ -55,7 +55,6 @@ import { getLocalizedFallback } from "@/utils/friendlyError";
 import {
   parteDaPessoaDoContrato,
   problemaDoCargo,
-  problemaDoSubsidio,
   type ParteDaPessoa,
 } from "@/lib/hr/novaPessoaCargo";
 import type {
@@ -67,7 +66,6 @@ import type {
   PoliticaFeriados,
   RegimeContratual,
   RegimeTrabalho,
-  SubsidioAlimentacaoModo,
   TipoContrato,
   TipoDocumento,
   TipoTrabalho,
@@ -164,12 +162,10 @@ export interface RascunhoContrato {
   tem_periodo_experimental: boolean;
   periodo_experimental_dias: string;
   /**
-   * O que da retribuicao e DA PESSOA (o valor base vem do cargo): subsidio de
-   * alimentacao, o seu modo e os duodecimos. Vai por RPC depois de a ficha
-   * existir -- ver `novaPessoaCargo.ts`.
+   * O que da retribuicao e DA PESSOA (o valor base vem do cargo, e o subsidio de
+   * almoco da regra salarial da organizacao): so os duodecimos. Vai por RPC
+   * depois de a ficha existir -- ver `novaPessoaCargo.ts`.
    */
-  subsidio: string;
-  subsidio_modo: SubsidioAlimentacaoModo | "";
   duodecimos_pct: "" | "0" | "50" | "100";
   tipo_trabalho: TipoTrabalho | "";
   horas_trabalho: string;
@@ -177,7 +173,6 @@ export interface RascunhoContrato {
   tempo_trabalho_pct: string;
   dias_uteis: DiaSemana[];
   politica_feriados: PoliticaFeriados;
-  horas_anuais_maximas: string;
   horas_semanais_maximas: string;
   /** `false` = horas iguais todas as semanas; `true` = abre o editor por dia. */
   horario_variavel: boolean;
@@ -254,8 +249,6 @@ export function rascunhoInicial(): RascunhoPessoa {
       duracao_meses: "",
       tem_periodo_experimental: false,
       periodo_experimental_dias: "",
-      subsidio: "",
-      subsidio_modo: "",
       duodecimos_pct: "",
       tipo_trabalho: "",
       horas_trabalho: "",
@@ -267,7 +260,6 @@ export function rascunhoInicial(): RascunhoPessoa {
       tempo_trabalho_pct: "100",
       dias_uteis: [],
       politica_feriados: "nao_laboral",
-      horas_anuais_maximas: "",
       horas_semanais_maximas: "",
       horario_variavel: false,
       horario: horarioVazio(),
@@ -297,10 +289,6 @@ const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
   maximoSemanal: {
     campoId: "hr-novo-horas-semanais-maximas",
     rotuloKey: "hr.contrato.horasSemanaisMaximas",
-  },
-  maximoAnual: {
-    campoId: "hr-novo-horas-anuais-maximas",
-    rotuloKey: "hr.contrato.horasAnuaisMaximas",
   },
   fte: { campoId: "hr-novo-tempo-trabalho-pct", rotuloKey: "hr.contrato.tempoTrabalhoPct" },
   experimental: {
@@ -375,11 +363,9 @@ export function problemasDoRascunho(
     problemas.push(...problemasDeObrigatoriosDaConfiguracao(pessoais, config, indisponiveis));
   }
 
-  // -- Cargo (obrigatorio, fluxo 2) e subsidio ------------------------------
+  // -- Cargo (obrigatorio, fluxo 2) ------------------------------------------
   const problemaCargo = problemaDoCargo(rascunho.laborais);
   if (problemaCargo) problemas.push(problemaCargo);
-  const problemaSubsidio = problemaDoSubsidio(contrato);
-  if (problemaSubsidio) problemas.push(problemaSubsidio);
   // Os cinco numeros do contrato -- e o cruzamento entre dois deles -- estao
   // em `lib/hr/contrato.ts`, porque o separador Contratos da ficha edita
   // exactamente os mesmos e nao podem divergir. Aqui so se traduz o campo
@@ -388,7 +374,6 @@ export function problemasDoRascunho(
     horas: contrato.horas_trabalho,
     horas_frequencia: contrato.horas_frequencia,
     horas_semanais_maximas: contrato.horas_semanais_maximas,
-    horas_anuais_maximas: contrato.horas_anuais_maximas,
     tempo_trabalho_pct: contrato.tempo_trabalho_pct,
     periodo_experimental_dias: contrato.tem_periodo_experimental
       ? contrato.periodo_experimental_dias
@@ -498,7 +483,6 @@ export function seccaoPreenchida(rascunho: RascunhoPessoa, seccao: SeccaoId): bo
       return (
         rascunho.contrato.tipo_contrato !== "" ||
         rascunho.contrato.data_inicio.trim() !== "" ||
-        rascunho.contrato.subsidio.trim() !== "" ||
         rascunho.contrato.duodecimos_pct !== "" ||
         rascunho.contrato.horas_trabalho.trim() !== "" ||
         rascunho.contrato.horario_variavel
@@ -582,7 +566,7 @@ export interface NovaPessoaPayload {
    * `pessoas_vinculos` deixou de os poder levar; esta e a unica via.
    */
   horasVinculo: { horas_periodo: number; horas_frequencia: HorasFrequencia; valido_de: string } | null;
-  /** So a parte DA PESSOA (subsidio e duodecimos), por `rpc_hr_retribuicao_definir_pessoal`. */
+  /** So a parte DA PESSOA (os duodecimos), por `rpc_hr_retribuicao_definir_pessoal`. */
   retribuicao: ParteDaPessoa | null;
   /** Linhas de `pessoas_horario_planeado`, uma por intervalo. */
   horario: LinhaPlaneadoParaGravar[] | null;
@@ -740,7 +724,6 @@ export function payloadDoRascunho(
           tempo_trabalho_pct: numeroDe(contrato.tempo_trabalho_pct),
           dias_uteis: contrato.dias_uteis.length > 0 ? contrato.dias_uteis : null,
           politica_feriados: contrato.politica_feriados,
-          horas_anuais_maximas: numeroDe(contrato.horas_anuais_maximas),
           horas_semanais_maximas: numeroDe(contrato.horas_semanais_maximas),
           estado: "activo",
         }

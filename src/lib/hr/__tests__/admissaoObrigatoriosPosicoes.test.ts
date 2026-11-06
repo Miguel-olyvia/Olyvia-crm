@@ -83,7 +83,7 @@ describe("CAMPOS_RH_OBRIGATORIOS", () => {
     expect(horario?.disponivel).toBe(false);
   });
 
-  it("os obrigatorios do RH disponiveis sao os cinco da base", () => {
+  it("os obrigatorios do RH disponiveis sao os quatro da base (o subsidio vem da regra da organizacao)", () => {
     const codigos = CAMPOS_RH_OBRIGATORIOS.filter((c) => c.disponivel !== false).map(
       (c) => c.codigo,
     );
@@ -91,7 +91,6 @@ describe("CAMPOS_RH_OBRIGATORIOS", () => {
       "data_admissao",
       "cargo",
       "tipo_contrato",
-      "subsidio_alimentacao",
       "duodecimos",
     ]);
   });

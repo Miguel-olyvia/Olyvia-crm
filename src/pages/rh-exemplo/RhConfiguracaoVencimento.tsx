@@ -660,6 +660,8 @@ export default function RhConfiguracaoVencimento() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
+  // A aba escolhida: `null` = a de omissão. Controlada para a ligação das horas extra poder levar às regras salariais.
+  const [aba, setAba] = useState<string | null>(null);
 
   const podeVerCodigos = hasPermission("hr.vencimento.codigos.view");
   const podeGerirCodigos = hasPermission("hr.vencimento.codigos.gerir");
@@ -679,7 +681,7 @@ export default function RhConfiguracaoVencimento() {
         <p className="text-muted-foreground">{t("hr.vencimento.subtituloPagina")}</p>
       </div>
 
-      <Tabs defaultValue={abaOmissao}>
+      <Tabs value={aba ?? abaOmissao} onValueChange={setAba}>
         <TabsList>
           {podeVerCodigos && (
             <TabsTrigger value="codigos">{t("hr.vencimento.abaCodigos")}</TabsTrigger>
@@ -707,7 +709,7 @@ export default function RhConfiguracaoVencimento() {
         </TabsContent>
 
         <TabsContent value="horas-extra" className="mt-4">
-          <ConfiguracaoHorasExtra />
+          <ConfiguracaoHorasExtra aoIrParaRegrasSalariais={() => setAba("regras")} />
         </TabsContent>
       </Tabs>
     </div>

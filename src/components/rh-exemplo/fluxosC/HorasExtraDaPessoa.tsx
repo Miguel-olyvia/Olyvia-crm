@@ -40,7 +40,7 @@ export function HorasExtraDaPessoa({ pessoaId }: { pessoaId: string }) {
               <span className="font-medium tabular-nums">{minutosEmHoras(saldo.totalAnoMin)} / {minutosEmHoras(saldo.limiteAnoMin)}</span>
               <span className="text-muted-foreground tabular-nums">
                 {t("rhFluxosC.pessoa.restante").replace("{t}", minutosEmHoras(saldo.restanteMin))}
-                {" · "}{t(saldo.limiteAnoOrigem === "contrato" ? "rhHeReal.saldo.origemContrato" : "rhHeReal.saldo.origemOmissao")}
+                {" · "}{t(saldo.limiteAnoOrigem === "regra" ? "rhHeReal.saldo.origemRegra" : "rhHeReal.saldo.origemOmissao")}
               </span>
             </div>
             <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}

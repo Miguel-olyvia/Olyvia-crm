@@ -15,6 +15,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import type { NovoLancamentoProcessamento } from "@/components/rh-exemplo/hooks/useProcessamentoLancamentos";
 import type { HrCodigoProcessamento, HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
+import { MAX_DESCRICAO_LANCAMENTO } from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
 import { euros } from "./formatosC";
 
 const SEM_CODIGO = "nenhum";
@@ -75,7 +76,7 @@ export function PontualDialog({ pessoa, codigosActivos, aGravar, aoGuardar, aoFe
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="pt-descricao">{t("rhFluxosC.proc.pontual.descricao")}</Label>
-            <Textarea id="pt-descricao" rows={2} value={descricao} onChange={(e) => { setDescricao(e.target.value); setErro(null); }} />
+            <Textarea id="pt-descricao" rows={2} maxLength={MAX_DESCRICAO_LANCAMENTO} value={descricao} onChange={(e) => { setDescricao(e.target.value); setErro(null); }} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="pt-valor">{t("rhFluxosC.proc.pontual.valor")}</Label>

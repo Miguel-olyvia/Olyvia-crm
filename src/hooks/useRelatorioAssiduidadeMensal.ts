@@ -40,6 +40,7 @@ import {
   LEITOR_REALIZADO,
   emVigor,
   minutosNoturnosDoPeriodo,
+  minutosNoturnosPorFaixa,
   subtrairIntervalos,
 } from "@/lib/hr/assiduidade";
 import { leituraDoPlaneado } from "@/lib/hr/planeadoDoDia";
@@ -160,6 +161,12 @@ export interface DiaRelatorioMensal {
    * nao custa nada garantir.
    */
   horasExtraNoturnasMinutos: number;
+  /**
+   * Os minutos REALIZADOS (todo o trabalho do dia, nao so o excedente) dentro de cada faixa noturna da regra
+   * salarial, pela ordem das faixas recebidas. So existe quando o hook recebeu faixas. E o que o Processamento
+   * Salarial paga; `horasExtraNoturnasMinutos` (janela fixa 22:00-07:00 sobre o excedente) fica para os relatorios.
+   */
+  minutosNoturnosPorFaixa?: number[];
 }
 
 export interface TotaisRelatorioMensal {
@@ -216,11 +223,23 @@ export interface TotaisRelatorioMensal {
    * Opcional, mesmo precedente de `diasPlaneados`.
    */
   minutosAusenciaRemunerada?: number;
+  /** A soma, por faixa noturna da regra, dos minutos realizados nos dias que contam. So existe com faixas. */
+  minutosNoturnosPorFaixa?: number[];
 }
+
+/** Uma faixa noturna da regra salarial: "HH:MM", podendo atravessar a meia-noite. */
+export interface FaixaNoturnaDoRelatorio {
+  hora_inicio: string;
+  hora_fim: string;
+}
+
+const SEM_FAIXAS: readonly FaixaNoturnaDoRelatorio[] = [];
 
 interface Satelite<T> {
   linhas: T[];
   recusado: boolean;
+  /** A leitura falhou (nao por permissao): as linhas estao vazias por erro, nao porque nao existam. */
+  erro?: boolean;
 }
 
 const vazio = <T,>(): Satelite<T> => ({ linhas: [], recusado: false });
@@ -234,7 +253,7 @@ async function carregar<T>(
   if (error) {
     if (isPermissionError(error)) return { linhas: [], recusado: true };
     captureFlowError(error, "hr-relatorio-assiduidade-mensal-load");
-    return { linhas: [], recusado: false };
+    return { linhas: [], recusado: false, erro: true };
   }
   return { linhas: (data ?? []) as T[], recusado: false };
 }
@@ -313,6 +332,8 @@ export function useRelatorioAssiduidadeMensal(
   mes: number,
   /** O intervalo da folha (de, ate inclusivos, ISO). Sem ele, o mes de calendario (`mes` e de 0 a 11 neste hook). */
   intervalo?: IntervaloDaFolha,
+  /** As faixas noturnas da regra salarial em vigor; sem elas nao ha minutos noturnos por faixa. */
+  faixasNoturnas: readonly FaixaNoturnaDoRelatorio[] = SEM_FAIXAS,
 ) {
   const { activeCompany } = useCompany();
   const orgId = activeCompany?.id ?? null;
@@ -333,8 +354,11 @@ export function useRelatorioAssiduidadeMensal(
   const [feriados, setFeriados] = useState<IndiceFeriados>(() => indexarFeriados([]));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Uma falha NAO por permissao (rede, base) em qualquer leitura, ou a excepcao geral do carregamento: o relatorio
+  // nao pode passar por completo so porque as linhas vieram vazias.
+  const [erroDeLeitura, setErroDeLeitura] = useState(false);
 
-  const de = intervalo?.de ?? periodoDaFolha(ano, mes + 1).de;
+  const de =intervalo?.de ?? periodoDaFolha(ano, mes + 1).de;
   const ate = intervalo?.ate ?? periodoDaFolha(ano, mes + 1).ate;
 
   // Conta os pedidos: so a resposta do mais recente escreve no estado (mudar de periodo a meio de uma leitura).
@@ -350,6 +374,7 @@ export function useRelatorioAssiduidadeMensal(
       setAusenciasTipos(vazio<AusenciaTipo>());
       setObras(vazio<ObraHoras>());
       setScheduleSettings(vazio<ScheduleSettingsTimezone>());
+      setErroDeLeitura(false);
       setLoading(false);
       return;
     }
@@ -415,8 +440,15 @@ export function useRelatorioAssiduidadeMensal(
       setObras(asObras);
       setFeriados(indexarFeriados(osFeriados.linhas));
       setScheduleSettings(asScheduleSettings);
+      setErroDeLeitura(
+        [oRealizado, asFaltas, oPlaneado, osDiasDeAusencia, osTiposDeAusencia, asObras, osFeriados, asScheduleSettings].some(
+          (s) => s.erro === true,
+        ),
+      );
     } catch (e) {
       captureFlowError(e, "hr-relatorio-assiduidade-mensal-load");
+      // Nao se engole: sem isto o relatorio ficava com as linhas do pedido anterior (ou vazias) como se fosse bom.
+      if (pedido === ultimoPedido.current) setErroDeLeitura(true);
     } finally {
       if (pedido === ultimoPedido.current) setLoading(false);
     }
@@ -538,6 +570,14 @@ export function useRelatorioAssiduidadeMensal(
         0,
       );
 
+      const noturnosPorFaixa = faixasNoturnas.length
+        ? realizadoIntervalosDoDia.reduce<number[]>(
+            (soma, intervaloDoDia) =>
+              minutosNoturnosPorFaixa(intervaloDoDia, faixasNoturnas).map((m, i) => (soma[i] ?? 0) + m),
+            faixasNoturnas.map(() => 0),
+          )
+        : null;
+
       linhas.push({
         iso,
         diaSemana: diaSemanaDe(iso),
@@ -553,6 +593,7 @@ export function useRelatorioAssiduidadeMensal(
         minutosEmFalta,
         horasExtraMinutos,
         horasExtraNoturnasMinutos: Math.min(horasExtraMinutos, minutosNoturnosDoExcedente),
+        ...(noturnosPorFaixa ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
       });
     }
     return linhas;
@@ -566,6 +607,7 @@ export function useRelatorioAssiduidadeMensal(
     remuneradaPorTipoId,
     feriados,
     timezoneDaOrganizacao,
+    faixasNoturnas,
     de,
     ate,
   ]);
@@ -676,9 +718,21 @@ export function useRelatorioAssiduidadeMensal(
           acumulado.minutosDescansoTrabalhado,
       );
 
-      return { ...acumulado, minutosExtraNormal };
+      // Minutos noturnos por faixa da regra: so os dias que contam (a mesma exclusao das ausencias).
+      const noturnosPorFaixa = faixasNoturnas.map((_, i) =>
+        dias.reduce(
+          (soma, dia) => (dia.estado !== "ausencia" ? soma + (dia.minutosNoturnosPorFaixa?.[i] ?? 0) : soma),
+          0,
+        ),
+      );
+
+      return {
+        ...acumulado,
+        minutosExtraNormal,
+        ...(faixasNoturnas.length ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
+      };
     },
-    [dias],
+    [dias, faixasNoturnas],
   );
 
   const executar = useCallback(
@@ -726,6 +780,8 @@ export function useRelatorioAssiduidadeMensal(
     realizadoRecusado: realizado.recusado,
     faltasRecusadas: faltas.recusado,
     planeadoRecusado: planeado.recusado,
+    /** Alguma leitura falhou (nao por permissao): os totais podem estar incompletos. */
+    erro: erroDeLeitura,
     loading,
     saving,
     recarregar: load,

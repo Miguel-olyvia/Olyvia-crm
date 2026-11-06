@@ -5,7 +5,7 @@
  */
 import { useProcessamentoLancamentos as useProcessamentoLancamentosReal } from "@/hooks/useProcessamentoLancamentos";
 
-export type { NovoLancamentoProcessamento, ProcessamentoLancamentos } from "@/hooks/useProcessamentoLancamentos";
+export type { NovoLancamentoProcessamento, NovoLancamentoPorQuantidade, ProcessamentoLancamentos } from "@/hooks/useProcessamentoLancamentos";
 
 export function useProcessamentoLancamentos(periodoId: string | undefined) {
   return useProcessamentoLancamentosReal(periodoId);

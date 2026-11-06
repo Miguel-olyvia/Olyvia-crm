@@ -6,8 +6,11 @@
  * UMA LISTA VAZIA NUNCA PROVA QUE NAO HA NADA: cada fonte (horas extra, justificacoes, alertas) diz como foi lida e uma que
  * falhou, foi recusada ou nao esta disponivel aparece escrita no topo; so se diz «ninguem tem nada por tratar» quando
  * as tres leram bem.
+ *
+ * A LISTA E GENERICA (`ListaFila`): o mapa de assiduidade (`ListaFilaPessoas`, no fim deste ficheiro) e o ecra de Ausencias
+ * usam a mesma, cada um com as suas fontes, os seus tipos, o seu painel e os seus textos.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,18 +22,19 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { DetetarHorasExtraDialog } from "@/components/rh-exemplo/fluxosC/DetetarHorasExtraDialog";
 import {
   FONTES_FILA,
-  TIPOS_FILA,
+  TIPOS_ASSIDUIDADE,
   ehTipoFila,
   filtrarPessoas,
   type FilaDeTrabalho,
-  type FonteFila,
   type PessoaNaFila,
+  type TipoFila,
 } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import type { LocalTrabalho } from "@/components/rh-exemplo/tipos";
 import { textoDasPendencias } from "./aspectoTipoFila";
 import { LinhaFilaPessoa } from "./LinhaFilaPessoa";
-import { PainelFilaPessoa, type PessoaAberta } from "./PainelFilaPessoa";
+import type { PessoaAberta } from "./PainelFilaBase";
+import { PainelFilaPessoa } from "./PainelFilaPessoa";
 
 const PARAM_TIPO = "fila_tipo";
 const PARAM_TEXTO = "fila_q";
@@ -42,16 +46,39 @@ const ESPERA_ENDERECO_MS = 300;
 /** O leitor de ecra so ouve a contagem filtrada depois de a pessoa parar de escrever. */
 const ESPERA_ANUNCIO_MS = 500;
 
-interface ListaFilaPessoasProps {
-  fila: FilaDeTrabalho;
-  permissoes: PermissoesAssiduidade;
-  locais: LocalTrabalho[];
-  minhaPessoaId: string | null;
-  /** Depois de gravar algo que mexe no mapa do mes (faltas, horas corrigidas), para o mapa reler. */
-  aoAlterarMapa: () => void;
+/** O que o painel de uma pessoa recebe da lista. */
+export interface PropsDoPainel<F extends string> {
+  aberta: PessoaAberta;
+  pessoa: PessoaNaFila | null;
+  fontesComProblema: readonly F[];
+  aoFechar: () => void;
+  aoDevolverFoco: (evento: Event) => void;
 }
 
-function AvisoDeFonte({ fonte, estado, aoTentar }: { fonte: FonteFila; estado: "recusado" | "erro" | "indisponivel"; aoTentar: () => void }) {
+/** Os textos que mudam de ecra para ecra (chaves de traducao). */
+interface TextosDaLista {
+  titulo: string;
+  ajuda: string;
+  vazia: string;
+  /** A nota por baixo dos filtros quando HA periodo da folha; `null` para nao a mostrar. */
+  notaComPeriodo: string | null;
+}
+
+const TEXTOS_DE_ASSIDUIDADE: TextosDaLista = { titulo: "rhFila.titulo", ajuda: "rhFila.ajuda", vazia: "rhFila.vazia", notaComPeriodo: "rhFila.inclueAnterior" };
+
+interface ListaFilaProps<F extends string> {
+  fila: FilaDeTrabalho<F>;
+  /** As fontes que esta fila le: cada uma que nao leu bem aparece escrita no topo. */
+  fontes: readonly F[];
+  /** Os tipos que o filtro oferece; com um so, o filtro nao aparece. */
+  tipos: readonly TipoFila[];
+  textos?: TextosDaLista;
+  /** Junto aos filtros (por exemplo o botao «Detetar»). */
+  topoExtra?: ReactNode;
+  renderPainel: (props: PropsDoPainel<F>) => ReactNode;
+}
+
+function AvisoDeFonte({ fonte, estado, aoTentar }: { fonte: string; estado: "recusado" | "erro" | "indisponivel"; aoTentar: () => void }) {
   const { t } = useTranslation();
   return (
     <div
@@ -70,7 +97,7 @@ function AvisoDeFonte({ fonte, estado, aoTentar }: { fonte: FonteFila; estado: "
   );
 }
 
-export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAlterarMapa }: ListaFilaPessoasProps) {
+export function ListaFila<F extends string>({ fila, fontes, tipos, textos = TEXTOS_DE_ASSIDUIDADE, topoExtra, renderPainel }: ListaFilaProps<F>) {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const tipoDoUrl = params.get(PARAM_TIPO);
@@ -79,7 +106,6 @@ export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAl
   // O que se escreve filtra logo; o endereco acompanha com atraso (cada tecla nao enche o historico de escritas).
   const [texto, setTexto] = useState(textoDoUrl.slice(0, MAX_PESQUISA));
   const [aberta, setAberta] = useState<PessoaAberta | null>(null);
-  const [detetarAberto, setDetetarAberto] = useState(false);
   const raizRef = useRef<HTMLElement>(null);
   const tituloRef = useRef<HTMLHeadingElement>(null);
   const indiceAoAbrir = useRef(0);
@@ -107,7 +133,7 @@ export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAl
   const filtrado = tipo !== null || texto.trim() !== "";
   const visiveis = useMemo(() => filtrarPessoas(fila.pessoas, { tipo, texto }), [fila.pessoas, tipo, texto]);
   const pessoaAberta = aberta ? (fila.pessoas.find((pessoa) => pessoa.pessoaId === aberta.id) ?? null) : null;
-  const fontesComProblema = FONTES_FILA.filter((fonte) => fila.fontes[fonte] !== "ok");
+  const fontesComProblema = fontes.filter((fonte) => fila.fontes[fonte] !== "ok");
 
   const mensagemFiltro = filtrado && !fila.aCarregar ? t("rhFila.contagemFiltrada", { n: String(visiveis.length), total: String(fila.pessoas.length) }) : "";
   const [anunciado, setAnunciado] = useState(mensagemFiltro);
@@ -154,9 +180,9 @@ export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAl
     <section ref={raizRef} aria-labelledby="fila-titulo" aria-busy={fila.aCarregar} className="space-y-4" data-testid="rhd-fila-pessoas">
       <div className="space-y-1">
         <h2 id="fila-titulo" ref={tituloRef} tabIndex={-1} className="text-base font-semibold outline-none">
-          {t("rhFila.titulo")}
+          {t(textos.titulo)}
         </h2>
-        <p className="text-sm text-muted-foreground">{t("rhFila.ajuda")}</p>
+        <p className="text-sm text-muted-foreground">{t(textos.ajuda)}</p>
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -172,24 +198,22 @@ export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAl
             onChange={(evento) => setTexto(evento.target.value)}
           />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="fila-tipo">{t("rhFila.filtro.rotulo")}</Label>
-          <NativeSelect
-            id="fila-tipo"
-            className="h-11 w-56"
-            value={tipo ?? TODOS}
-            onValueChange={(valor) => mudarParametro(PARAM_TIPO, valor)}
-            options={[
-              { value: TODOS, label: t("rhFila.filtro.todos") },
-              ...TIPOS_FILA.map((valor) => ({ value: valor, label: t(`rhFila.tipoPlural.${valor}`) })),
-            ]}
-          />
-        </div>
-        {permissoes.gerir && (
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => setDetetarAberto(true)}>
-            {t("rhHeReal.detetar.abrir")}
-          </Button>
+        {tipos.length > 1 && (
+          <div className="space-y-1.5">
+            <Label htmlFor="fila-tipo">{t("rhFila.filtro.rotulo")}</Label>
+            <NativeSelect
+              id="fila-tipo"
+              className="h-11 w-56"
+              value={tipo ?? TODOS}
+              onValueChange={(valor) => mudarParametro(PARAM_TIPO, valor)}
+              options={[
+                { value: TODOS, label: t("rhFila.filtro.todos") },
+                ...tipos.map((valor) => ({ value: valor, label: t(`rhFila.tipoPlural.${valor}`) })),
+              ]}
+            />
+          </div>
         )}
+        {topoExtra}
       </div>
 
       {/* Anuncia so quando o filtro muda: as releituras silenciosas nao dizem nada. */}
@@ -204,13 +228,13 @@ export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAl
       )}
       {!fila.aCarregar && (
         <p data-testid="rhd-fila-periodo" className="text-xs text-muted-foreground">
-          {fila.periodo === null ? t("rhFila.semPeriodo") : t("rhFila.inclueAnterior")}
+          {fila.periodo === null ? t("rhFila.semPeriodo") : textos.notaComPeriodo ? t(textos.notaComPeriodo) : ""}
         </p>
       )}
 
       {!fila.aCarregar &&
         fontesComProblema.map((fonte) => (
-          <AvisoDeFonte key={fonte} fonte={fonte} estado={fila.fontes[fonte] as "recusado" | "erro" | "indisponivel"} aoTentar={() => void fila.recarregar()} />
+          <AvisoDeFonte key={fonte} fonte={fonte} estado={fila.fontes[fonte] as unknown as "recusado" | "erro" | "indisponivel"} aoTentar={() => void fila.recarregar()} />
         ))}
 
       {fila.aCarregar ? (
@@ -239,24 +263,58 @@ export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAl
           </Button>
         </div>
       ) : fila.lidaComSucesso ? (
-        <p className="py-8 text-center text-sm text-muted-foreground" data-testid="rhd-fila-vazia">{t("rhFila.vazia")}</p>
+        <p className="py-8 text-center text-sm text-muted-foreground" data-testid="rhd-fila-vazia">{t(textos.vazia)}</p>
       ) : null}
 
-      <PainelFilaPessoa
-        aberta={aberta}
-        pessoa={pessoaAberta}
-        hoje={fila.hoje}
-        lidaComSucesso={fila.lidaComSucesso}
-        fontesComProblema={fontesComProblema}
-        permissoes={permissoes}
-        locais={locais}
-        minhaPessoaId={minhaPessoaId}
-        aoRecarregar={fila.recarregar}
-        aoAlterarMapa={aoAlterarMapa}
-        aoFechar={() => setAberta(null)}
-        aoDevolverFoco={devolverFoco}
+      {aberta && renderPainel({ aberta, pessoa: pessoaAberta, fontesComProblema, aoFechar: () => setAberta(null), aoDevolverFoco: devolverFoco })}
+    </section>
+  );
+}
+
+interface ListaFilaPessoasProps {
+  fila: FilaDeTrabalho;
+  permissoes: PermissoesAssiduidade;
+  locais: LocalTrabalho[];
+  minhaPessoaId: string | null;
+  /** Depois de gravar algo que mexe no mapa do mes (faltas, horas corrigidas), para o mapa reler. */
+  aoAlterarMapa: () => void;
+}
+
+/** A fila do mapa de assiduidade: horas extra, justificacoes e alertas do fim do dia. */
+export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAlterarMapa }: ListaFilaPessoasProps) {
+  const { t } = useTranslation();
+  const [detetarAberto, setDetetarAberto] = useState(false);
+  return (
+    <>
+      <ListaFila
+        fila={fila}
+        fontes={FONTES_FILA}
+        tipos={TIPOS_ASSIDUIDADE}
+        topoExtra={
+          permissoes.gerir && (
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => setDetetarAberto(true)}>
+              {t("rhHeReal.detetar.abrir")}
+            </Button>
+          )
+        }
+        renderPainel={(painel) => (
+          <PainelFilaPessoa
+            aberta={painel.aberta}
+            pessoa={painel.pessoa}
+            hoje={fila.hoje}
+            lidaComSucesso={fila.lidaComSucesso}
+            fontesComProblema={painel.fontesComProblema}
+            permissoes={permissoes}
+            locais={locais}
+            minhaPessoaId={minhaPessoaId}
+            aoRecarregar={fila.recarregar}
+            aoAlterarMapa={aoAlterarMapa}
+            aoFechar={painel.aoFechar}
+            aoDevolverFoco={painel.aoDevolverFoco}
+          />
+        )}
       />
       <DetetarHorasExtraDialog aberto={detetarAberto} aoFechar={() => setDetetarAberto(false)} />
-    </section>
+    </>
   );
 }

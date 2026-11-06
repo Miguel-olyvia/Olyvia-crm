@@ -348,3 +348,20 @@ export function chaveDoErroDeRegrasSalariais(erro: unknown): string | null {
   if (!mensagem) return null;
   return PREFIXOS.find(([prefixo]) => mensagem.includes(prefixo))?.[1] ?? null;
 }
+
+/** Os erros de `rpc_hr_processamento_lancamento_criar` por quantidade (20270109700000), em chave de traducao `rhFluxosC.lanc.erro.*`. */
+const PREFIXOS_LANCAMENTO: ReadonlyArray<[string, string]> = [
+  ["lancamento_sem_direito", "rhFluxosC.lanc.erro.semDireito"],
+  ["lancamento_sem_regra", "rhFluxosC.lanc.erro.semRegra"],
+  ["lancamento_valor_regra_zero", "rhFluxosC.lanc.erro.valorZero"],
+  ["lancamento_quantidade_invalida", "rhFluxosC.lanc.erro.quantidade"],
+  ["lancamento_tipo_invalido", "rhFluxosC.lanc.erro.tipo"],
+  ["lancamento_valor_nao_aceite", "rhFluxosC.lanc.erro.tipo"],
+];
+
+/** A chave de traducao do erro ao lancar km ou ajudas, ou `null` se nao o reconhece. */
+export function chaveDoErroDeLancamento(erro: unknown): string | null {
+  const mensagem = mensagemDe(erro);
+  if (!mensagem) return null;
+  return PREFIXOS_LANCAMENTO.find(([prefixo]) => mensagem.includes(prefixo))?.[1] ?? null;
+}

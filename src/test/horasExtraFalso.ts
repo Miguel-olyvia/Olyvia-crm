@@ -99,7 +99,7 @@ export function wrapperFalso() {
         pessoaId, ano: a, totalAnoMin: total,
         confirmadasMin: dela.filter((h) => h.estado === "confirmada").reduce((s, h) => s + h.minutos, 0),
         pendentesMin: dela.filter((h) => h.estado === "pendente").reduce((s, h) => s + h.minutos, 0),
-        limiteAnoMin: limite, limiteAnoOrigem: "organizacao", limiteDiaMin: baseFalsa.limites.diaMin, alertaPct: baseFalsa.limites.alertaPct,
+        limiteAnoMin: limite, limiteAnoOrigem: "regra", limiteDiaMin: baseFalsa.limites.diaMin, alertaPct: baseFalsa.limites.alertaPct,
         emAlerta: total >= (limite * baseFalsa.limites.alertaPct) / 100, acimaDoLimite: total > limite, restanteMin: Math.max(0, limite - total),
       };
       return { saldo, aCarregar: false, erro: baseFalsa.erroDeLeitura };

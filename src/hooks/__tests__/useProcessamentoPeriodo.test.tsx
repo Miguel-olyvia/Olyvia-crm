@@ -51,6 +51,17 @@ const PERIODO_ABERTO = {
   created_by: "user-1",
 };
 
+const RESULTADOS = [
+  {
+    pessoa_id: "pessoa-1", valor_hora: 5, total_bruto: 1000,
+    totais: {
+      base_mes: 1000, divisor_duodecimos: 14, total_codigos_automaticos: 0, total_regras: 0,
+      desconto_faltas: 0, subsidio_alimentacao: 0, lancamentos_pontuais: 0,
+    },
+    linhas: [], avisos: [], retribuicao_id: null, cargo_periodo_id: null, regra_salarial_id: null,
+  },
+];
+
 beforeEach(() => {
   chamadasRpc = [];
   respostaPeriodo = { data: null, error: null };
@@ -104,25 +115,60 @@ describe("useProcessamentoPeriodo", () => {
     });
   });
 
-  it("fechar chama a RPC com o id do periodo carregado", async () => {
+  it("fechar chama a RPC com o id do periodo e o resultado de cada pessoa (p_resultados)", async () => {
     respostaPeriodo = { data: PERIODO_ABERTO, error: null };
     const { result } = renderHook(() => useProcessamentoPeriodo(2026, 9));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    await result.current.fechar();
+    await result.current.fechar(RESULTADOS);
 
     expect(chamadasRpc).toHaveLength(1);
     expect(chamadasRpc[0]).toEqual({
       fn: "rpc_hr_processamento_periodo_fechar",
-      args: { p_periodo_id: "periodo-1" },
+      args: { p_periodo_id: "periodo-1", p_resultados: RESULTADOS },
     });
+  });
+
+  it("uma recusa do servidor ao fechar volta em portugues claro e o periodo fica aberto (nao se relê como fechado)", async () => {
+    window.localStorage.setItem("language", "pt");
+    respostaPeriodo = { data: PERIODO_ABERTO, error: null };
+    respostaRpc = { data: null, error: { code: "23514", message: "processamento_fechar_regra_desactualizada: a regra mudou" } };
+    const { result } = renderHook(() => useProcessamentoPeriodo(2026, 9));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const erro = await result.current.fechar(RESULTADOS);
+
+    expect(erro).toMatch(/continua aberto/);
+    expect(erro).not.toContain("processamento_fechar");
+    expect(result.current.periodo?.estado).toBe("aberto");
+    window.localStorage.removeItem("language");
+  });
+
+  it("o fecho correu mas a releitura falhou: devolve um aviso para atualizar (nao null/sucesso) e marca o ecra desatualizado", async () => {
+    window.localStorage.setItem("language", "pt");
+    respostaPeriodo = { data: PERIODO_ABERTO, error: null };
+    const { result } = renderHook(() => useProcessamentoPeriodo(2026, 9));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.desactualizado).toBe(false);
+
+    // A RPC fecha (ok), mas a leitura seguinte do periodo falha.
+    respostaPeriodo = { data: null, error: { code: "XX000", message: "falha de rede" } };
+    let erro: string | null = null;
+    await act(async () => {
+      erro = await result.current.fechar(RESULTADOS);
+    });
+
+    expect(chamadasRpc).toHaveLength(1);
+    expect(erro).toMatch(/operação foi concluída.*Atualize a página/s);
+    expect(result.current.desactualizado).toBe(true);
+    window.localStorage.removeItem("language");
   });
 
   it("fechar sem periodo carregado nao chama a RPC e devolve erro", async () => {
     const { result } = renderHook(() => useProcessamentoPeriodo(2026, 9));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    const erro = await result.current.fechar();
+    const erro = await result.current.fechar(RESULTADOS);
 
     expect(chamadasRpc).toHaveLength(0);
     expect(erro).toBeTruthy();
@@ -149,7 +195,7 @@ describe("useProcessamentoPeriodo", () => {
     vistos.length = 0;
 
     await act(async () => {
-      await result.current.fechar();
+      await result.current.fechar(RESULTADOS);
     });
 
     expect(chamadasRpc).toHaveLength(1);

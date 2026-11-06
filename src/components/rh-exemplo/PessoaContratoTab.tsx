@@ -258,7 +258,6 @@ export function PessoaContratoTab({
         horas: rascunho.horas_periodo,
         horas_frequencia: rascunho.horas_frequencia,
         horas_semanais_maximas: rascunho.horas_semanais_maximas,
-        horas_anuais_maximas: rascunho.horas_anuais_maximas,
         tempo_trabalho_pct: rascunho.tempo_trabalho_pct,
         periodo_experimental_dias: rascunho.periodo_experimental_dias,
       }),
@@ -336,7 +335,6 @@ export function PessoaContratoTab({
       // antigo, de antes desta regra), a partir do primeiro guardar.
       tempo_trabalho_pct: 100,
       politica_feriados: rascunho.politica_feriados,
-      horas_anuais_maximas: numeroOuNull(rascunho.horas_anuais_maximas),
       horas_semanais_maximas: numeroOuNull(rascunho.horas_semanais_maximas),
       dias_uteis: rascunho.dias_uteis.length > 0 ? rascunho.dias_uteis : null,
       categoria_profissional: textoOuNull(rascunho.categoria_profissional),
