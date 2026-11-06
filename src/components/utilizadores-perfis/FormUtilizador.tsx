@@ -1,18 +1,22 @@
 // O formulário de utilizador (convidar/criar e editar), num painel lateral no estilo de "Novo negócio": abas Dados, Vínculos e
 // Permissões (só leitura, com a origem). Grava na base pela função `aoGravar` (create-user e rpc_update_user), que a página
 // liga aos wrappers; a palavra-passe vive só aqui e vai na gravação. Um erro de gravação aparece no painel e o painel não fecha.
+// Campo opcional «Pessoa do RH» (só com hr.pessoas.conta.link): liga-se DEPOIS de gravar o utilizador e os vínculos (a RPC exige
+// membership ativa); se a ligação falhar, o utilizador fica gravado, o painel fecha e o erro aparece num aviso.
 import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { AbaDadosUtilizador } from "./AbaDadosUtilizador";
 import { AbaForm, ListaAbasForm, Tabs, TabsContent } from "./AbaForm";
 import { AbaVinculosForm, type AcoesVinculos } from "./AbaVinculosForm";
+import { CampoPessoaRh } from "./CampoPessoaRh";
 import type { ResultadoForm } from "./FormRole";
 import type { Editor } from "./logica";
 import { PainelFormulario } from "./PainelFormulario";
+import { pessoaALigar, temVinculoNaOrganizacao, type EstadoPessoaRh } from "./pessoaRh";
 import { RodapeForm } from "./RodapeForm";
 import { SeparadorPermissoesUtilizador } from "./SeparadorPermissoesUtilizador";
 import {
-  CHAVE_MODO, type AbaFormUtilizador, type FormAberto, type Organizacao, type Permissao, type ResultadoMutacao, type Role, type Utilizador,
+  CHAVE_MODO, type AbaFormUtilizador, type FormAberto, type Organizacao, type Permissao, type Role, type Utilizador,
 } from "./tipos";
 import { gerarPalavraPasse, utilizadorDeValores, valoresIniciaisUtilizador, vinculoVazio, type ValoresFormUtilizador } from "./utilizadorForm";
 import { useFocoCampo } from "./useFocoCampo";
@@ -20,6 +24,9 @@ import { useUltimo } from "./useUltimo";
 import { abasComErroUtilizador, primeiroErroUtilizador, validarUtilizador, type CampoUtilizador } from "./validacoes";
 
 export type FormUtilizadorAberto = Extract<NonNullable<FormAberto>, { tipo: "utilizador" }>;
+
+/** O resultado da gravação; ao criar traz o `anew_users.id` criado (para ligar à ficha do RH a seguir). */
+export type ResultadoGravarUtilizador = { ok: true; id?: string } | { ok: false; erro: string };
 
 interface FormUtilizadorProps {
   form: FormAberto;
@@ -35,7 +42,9 @@ interface FormUtilizadorProps {
   /** users.manage_roles: sem ele, ao editar, os vínculos e âmbitos só se veem. */
   podeGerirRoles: boolean;
   /** Cria ou guarda na base. Devolve o erro (nunca o engole). */
-  aoGravar: (form: FormUtilizadorAberto, valores: ValoresFormUtilizador, original: Utilizador | undefined) => Promise<ResultadoMutacao>;
+  aoGravar: (form: FormUtilizadorAberto, valores: ValoresFormUtilizador, original: Utilizador | undefined) => Promise<ResultadoGravarUtilizador>;
+  /** O campo «Pessoa do RH». Sem ele, ou sem `podeLigar`, o campo não aparece e nada se liga. */
+  pessoaRh?: EstadoPessoaRh;
   aoFechar: () => void;
   aoConcluir: (r: ResultadoForm) => void;
 }
@@ -80,7 +89,7 @@ function useEstadoUtilizador({ form, utilizador, utilizadores, podeEditar, podeM
 }
 
 function Interior(props: InteriorProps) {
-  const { form, roles, organizacoes, catalogo, editor, podeGerirRoles, utilizador, aoConcluir, aoGravar } = props;
+  const { form, roles, organizacoes, catalogo, editor, podeGerirRoles, utilizador, aoConcluir, aoGravar, pessoaRh } = props;
   const { t } = useTranslation();
   const id = useId();
   const pedirFoco = useFocoCampo();
@@ -88,6 +97,7 @@ function Interior(props: InteriorProps) {
   const [tentou, setTentou] = useState(false);
   const [aGravar, setAGravar] = useState(false);
   const [erroGravar, setErroGravar] = useState<string | null>(null);
+  const [pessoaRhId, setPessoaRhId] = useState("");
   const { criar, valores, mudar, erros, mostrados, acoes, bloqueado, mostrarPalavraPasse, previsao } = useEstadoUtilizador(props, tentou);
   const marcas = abasComErroUtilizador(mostrados);
   // Ao criar, o criador escolhe os vínculos (o servidor valida); ao editar, gerir roles é users.manage_roles, como em /users.
@@ -106,12 +116,21 @@ function Interior(props: InteriorProps) {
     }
     setAGravar(true);
     const r = await aoGravar(form, valores, utilizador);
+    if (!r.ok) { setAGravar(false); setErroGravar(r.erro); return; }
+    // Só depois de o utilizador e os vínculos estarem gravados: a RPC exige membership ativa. Uma falha não desfaz a gravação.
+    const aLigar = pessoaALigar(pessoaRh, pessoaRhId, valores.vinculos);
+    const alvo = criar ? r.id : form.id;
+    let alerta: string | undefined;
+    if (pessoaRh && aLigar && alvo) {
+      const l = await pessoaRh.ligar(aLigar, alvo);
+      if (!l.ok) alerta = t("usersProfiles.form.user.hrPerson.linkError", { message: l.erro });
+    }
     setAGravar(false);
-    if (!r.ok) { setErroGravar(r.erro); return; }
     const nome = valores.nome.trim();
     aoConcluir({
       aviso: t(criar ? "usersProfiles.form.user.created" : "usersProfiles.form.user.saved"),
       anuncio: t(criar ? "usersProfiles.form.user.announce.created" : "usersProfiles.form.user.announce.saved", { name: nome }),
+      ...(alerta ? { alerta } : {}),
     });
   };
 
@@ -128,6 +147,14 @@ function Interior(props: InteriorProps) {
             <AbaDadosUtilizador
               id={id} valores={valores} erros={mostrados} criar={criar} bloqueado={bloqueado} mostrarPalavraPasse={mostrarPalavraPasse} aoMudar={mudar}
               aoGerar={() => mudar({ palavraPasse: gerarPalavraPasse() })}
+              extra={pessoaRh?.podeLigar ? (
+                <CampoPessoaRh
+                  id={id} estado={pessoaRh} valor={pessoaRhId} bloqueado={bloqueado}
+                  organizacao={organizacoes.find((o) => o.id === pessoaRh.organizacaoId)?.nome ?? t("usersProfiles.form.user.hrPerson.thisOrg")}
+                  temVinculo={temVinculoNaOrganizacao(valores.vinculos, pessoaRh.organizacaoId)}
+                  aoMudar={(v) => { props.aoSujar(); setPessoaRhId(v); }}
+                />
+              ) : undefined}
             />
           </TabsContent>
           <TabsContent value="vinculos" className="mt-0">

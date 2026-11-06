@@ -9,6 +9,7 @@ import { AbaRoles } from "@/components/utilizadores-perfis/AbaRoles";
 import { AbaUtilizadores } from "@/components/utilizadores-perfis/AbaUtilizadores";
 import { EstadoCargaUtilizadores } from "@/components/utilizadores-perfis/EstadoCargaUtilizadores";
 import { usePermissoesPerfis } from "@/components/utilizadores-perfis/hooks/usePermissoesPerfis";
+import { usePessoaRhUtilizador } from "@/components/utilizadores-perfis/hooks/usePessoaRhUtilizador";
 import { useRolesPerfis } from "@/components/utilizadores-perfis/hooks/useRolesPerfis";
 import { useUtilizadoresPerfis } from "@/components/utilizadores-perfis/hooks/useUtilizadoresPerfis";
 import { resolverSeparador } from "@/components/utilizadores-perfis/separadores";
@@ -58,6 +59,9 @@ const ConteudoPerfis = ({ permitidos, tem }: ConteudoPerfisProps) => {
   const acoesU = dados.acoes;
   const fechar = () => setAberto(null);
   const formularios = useFormulariosPerfis(fechar);
+  const formU = formularios.form?.tipo === "utilizador" ? formularios.form : null;
+  // O campo «Pessoa do RH» do formulário de utilizador (só com hr.pessoas.conta.link na organização ativa).
+  const pessoaRh = usePessoaRhUtilizador(!!formU, formU?.modo === "editar" ? formU.id : undefined);
 
   const visiveis = useMemo(() => filtrarUtilizadores(utilizadores, filtros), [utilizadores, filtros]);
   const idsVisiveis = useMemo(() => visiveis.map((u) => u.id), [visiveis]);
@@ -173,6 +177,7 @@ const ConteudoPerfis = ({ permitidos, tem }: ConteudoPerfisProps) => {
       <FormUtilizador
         form={formularios.form} utilizadores={dados.todos} roles={rolesU} organizacoes={organizacoes}
         catalogo={catalogo.catalogo} editor={catalogo.editor} podeEditar={autU.podeEditar} podeMudarPalavraPasse={autU.podeMudarPalavraPasse} podeGerirRoles={autU.podeGerirRoles}
+        pessoaRh={pessoaRh}
         aoGravar={(form, valores, original) => {
           const campos = { nome: valores.nome, email: valores.email, telefone: valores.telefone, posicao: valores.posicao, palavraPasse: valores.palavraPasse };
           if (form.modo === "criar") return acoesU.criar(campos, valores.vinculos);

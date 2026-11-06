@@ -24,6 +24,8 @@ const ehCriacao = (form: FormRoleAberto): boolean => form.modo !== "editar";
 export interface ResultadoForm {
   aviso: string;
   anuncio: string;
+  /** Gravou, mas um passo seguinte falhou (ex.: a ligação à ficha do RH): mostra-se como erro, sem desfazer a gravação. */
+  alerta?: string;
 }
 
 /** As permissões que a matriz mostra e o estado da sua leitura. */

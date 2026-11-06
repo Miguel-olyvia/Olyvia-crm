@@ -17,7 +17,10 @@ export const MIN_PALAVRA_PASSE_BASE = 6;
 const falha = (e: unknown): ResultadoMutacao => ({ ok: false, erro: mensagemDeErro(e) });
 const EMAIL_JA_REGISTADO = /already been registered|email_exists/i;
 
-export async function criarUtilizadorNaBase(valores: ValoresGravar, vinculos: readonly Vinculo[]): Promise<ResultadoMutacao> {
+/** A criação devolve também o `anew_users.id` criado (serve, por exemplo, a ligar a conta a uma ficha de RH a seguir). */
+export type ResultadoCriacao = { ok: true; id: string } | { ok: false; erro: string };
+
+export async function criarUtilizadorNaBase(valores: ValoresGravar, vinculos: readonly Vinculo[]): Promise<ResultadoCriacao> {
   try {
     const resposta = await db.functions.invoke("create-user", { body: corpoCriarUtilizador(valores, vinculos) });
     if (resposta.error) {
@@ -27,7 +30,7 @@ export async function criarUtilizadorNaBase(valores: ValoresGravar, vinculos: re
     }
     const criado = (resposta.data as { anew_user_id?: string } | null)?.anew_user_id;
     if (!criado) return { ok: false, erro: "A base não devolveu o utilizador criado." };
-    return { ok: true };
+    return { ok: true, id: criado };
   } catch (e) {
     return falha(e);
   }

@@ -12,7 +12,8 @@ export function useFormulariosPerfis(aoAbrir: () => void) {
   const [anuncio, setAnuncio] = useState("");
   const avisar = (r: ResultadoForm) => {
     toast.success(r.aviso);
-    setAnuncio(r.anuncio);
+    if (r.alerta) toast.error(r.alerta);
+    setAnuncio(r.alerta ? `${r.anuncio} ${r.alerta}` : r.anuncio);
   };
   return {
     form,
