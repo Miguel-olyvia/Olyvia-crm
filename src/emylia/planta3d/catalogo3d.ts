@@ -32,7 +32,9 @@ export type ParamsMockup =
   | { k: "torneira"; estilo: "extraivel" | "monocomando" | "abativel" | "cira"; altura: number; saida: number; alcance: number; base: number; /** o modelo detalhado portado do HTML (modelosHtml/), com o acabamento */ html?: { modelo: string; acab: string } }
   | { k: "lava_loica"; cubas: { x: number; z: number; w: number; d: number; prof: number }[]; escorredor: boolean; degrau: boolean; /** o modelo detalhado portado do HTML (a medida e o acabamento) */ html?: { modelo: string; acab: string } }
   | { k: "placa"; tipo: "induction" | "radiant" | "gas"; recorte: [number, number]; espessura: number; acima: number; queimadores: [number, number, number][]; manipulos: number[]; vidro: boolean; /** o modelo detalhado portado do HTML */ html?: { modelo: string; acab: string } }
-  | { k: "tampo"; espessura: number };
+  | { k: "tampo"; espessura: number }
+  /** a bancada composta (bancada.ts): chapa, recortes, lava-loiça, placa, torneira, rodatampo e móveis */
+  | { k: "bancada"; cfg: import("./bancada").ConfigBancada };
 export interface Mockup3D { tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
 export interface ProdutoModelo3D {
@@ -104,8 +106,8 @@ export const GRUPOS_ESPACO: GruposEspaco = {
     G("resguardos", "Resguardos", "resguardo"), G("acessorios", "Acessórios", "acessorio", "prateleira", "quadro", "candeeiro"),
   ],
   cozinha: [
-    G("modulos", "Módulos", "movel", "armario_alto", "coluna"), G("bancadas", "Bancadas", "bancada"), G("eletro", "Eletrodomésticos", "frigorifico", "fogao", "eletro"),
-    G("torneiras", "Torneiras", "torneira"), G("deco", "Prateleiras e decoração", "prateleira", "quadro", "candeeiro"),
+    G("modulos", "Módulos", "movel", "armario_alto", "coluna"), G("bancadas", "Bancadas", "bancada"), G("lavaloicas", "Lava-loiças", "lava_loica"), G("eletro", "Eletrodomésticos", "frigorifico", "fogao", "eletro", "placa"),
+    G("torneiras", "Torneiras", "torneira_cozinha", "torneira"), G("deco", "Prateleiras e decoração", "prateleira", "quadro", "candeeiro"),
   ],
   quarto: [
     G("roupeiros", "Roupeiros", "roupeiro"), G("camas", "Camas", "cama"), G("secretarias", "Secretárias", "secretaria"), G("moveis", "Móveis", "movel", "armario_alto", "coluna"),
@@ -134,6 +136,10 @@ export const sem = (s: string): string => s.normalize("NFD").replace(/[̀-ͯ]/g,
 const REGRAS: [RegExp, TipoMockup][] = [
   [/resguardo/, "resguardo"],
   [/sifao|sifoes|valvula/, "acessorio"],
+  // as peças de cozinha do catálogo usam os modelos detalhados do HTML (lava-loiça, placa e torneira de cozinha)
+  [/lava-?loica|lava loica/, "lava_loica"],
+  [/torneira.*cozinha|cozinha.*torneira|misturadora.*cozinha/, "torneira_cozinha"],
+  [/placa (de )?(inducao|vitroceramica|vitro|gas|a gas)/, "placa"],
   [/torneira|misturadora|chuveiro higien/, "torneira"],
   [/toalheiro/, "toalheiro"],
   [/radiador/, "radiador"],

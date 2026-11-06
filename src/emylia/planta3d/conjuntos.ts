@@ -4,7 +4,8 @@
 // ou trocado (outra torneira, outro acabamento) e a lista de peças mostra cada componente como linha vendável. Funções puras (cm, como planta.ts).
 import type { PecaPlanta, Planta } from "../planta";
 import { ESPEC, TIPO_LEGADO, type ProdutoModelo3D } from "./catalogo3d";
-import { FAMILIAS, TAMPO_TOPO_CM, alturaLavaLoicaCm, familiaPorId, modeloDaFamilia, resolverVariante, type Familia } from "./familias";
+import { FAMILIAS, alturaLavaLoicaCm, familiaPorId, modeloDaFamilia, resolverVariante, type Familia } from "./familias";
+import { linhasDaBancada, nomeDaBancada } from "./bancada";
 import type { TipoEspaco } from "./modelo";
 
 export interface ComponenteConj {
@@ -15,13 +16,11 @@ export interface Conjunto {
   componentes: ComponenteConj[]; /** desconto do conjunto (0 a 1) sobre a soma, só com todos os obrigatórios */ desconto: number;
 }
 const C = (papel: string, rotulo: string, familiaId: string, obrigatorio: boolean, medidaId?: string, acabId?: string): ComponenteConj => ({ papel, rotulo, familiaId, medidaId, acabId, obrigatorio, vendivelSeparado: true });
+// A bancada de cozinha deixou de ser um conjunto: é a bancada composta do catálogo 3D (bancada.ts). Os conjuntos de banho só aparecem na casa de banho.
 export const CONJUNTOS: Conjunto[] = [
-  { id: "bancada_cozinha", nome: "Bancada de cozinha (demo)", descricao: "Tampo, lava-loiça, torneira e placa; móvel e sifão à parte.", espacos: ["cozinha", "outro"], ancora: "tampo", desconto: 0.08, componentes: [
-    C("tampo", "Tampo", "tampo", true, "unica", "canela-beige"), C("movel", "Móvel base", "movel_base", false, "unica", "blanco"), C("lavaloica", "Lava-loiça", "velar", true, "velar50", "inox"),
-    C("torneira", "Torneira", "noah", true, "unica", "brushed"), C("placa", "Placa", "placa_inducao", true, "ib65b60", "negro"), C("sifao", "Sifão e válvula", "sifao", false, "unica", "chrome")] },
-  { id: "conjunto_duche", nome: "Conjunto de duche (demo)", descricao: "Base, resguardo, misturadora e coluna.", espacos: ["casa_banho", "outro"], ancora: "base", desconto: 0.06, componentes: [
+  { id: "conjunto_duche", nome: "Conjunto de duche (demo)", descricao: "Base, resguardo, misturadora e coluna.", espacos: ["casa_banho"], ancora: "base", desconto: 0.06, componentes: [
     C("base", "Base de duche", "base_duche_f", true, "80×120", "blanco"), C("resguardo", "Resguardo", "resguardo_f", true, "w120", "vidro"), C("misturadora", "Misturadora", "misturadora_duche", true, "unica", "chrome"), C("coluna", "Coluna de duche", "coluna_duche_f", false, "unica", "chrome")] },
-  { id: "movel_lavatorio", nome: "Móvel de lavatório (demo)", descricao: "Móvel, lavatório de pousar, torneira e espelho.", espacos: ["casa_banho", "outro"], ancora: "movel", desconto: 0.05, componentes: [
+  { id: "movel_lavatorio", nome: "Móvel de lavatório (demo)", descricao: "Móvel, lavatório de pousar, torneira e espelho.", espacos: ["casa_banho"], ancora: "movel", desconto: 0.05, componentes: [
     C("movel", "Móvel", "movel_lav_f", true, "w80", "blanco"), C("lavatorio", "Lavatório", "lavatorio_f", true, "w60", "blanco"), C("torneira", "Torneira", "torneira_lav", true, "unica", "chrome"), C("espelho", "Espelho", "espelho_f", false, "80×80", "negro")] },
 ];
 export const conjuntoPorId = (id: string): Conjunto | undefined => CONJUNTOS.find((c) => c.id === id);
@@ -42,19 +41,8 @@ export function planoParaLocal(a: Ancora, px: number, py: number): { lx: number;
 interface Lugar { lx: number; ly: number; alt?: number; w?: number; h?: number }
 export interface OpcoesConjunto { sinkX?: number; hobX?: number; montagem?: "baixo" | "cima" }
 /** Onde fica cada componente, no referencial da âncora (centro do componente), e a altura ao chão (cm) quando difere da de omissão. */
-export function lugarDoComponente(c: Conjunto, papel: string, anc: { w: number; h: number }, m: ProdutoModelo3D, o: OpcoesConjunto = {}): Lugar {
-  const [w, d] = [m.dimensoes.larguraCm, m.dimensoes.profundidadeCm];
-  if (c.id === "bancada_cozinha") {
-    const sinkX = o.sinkX ?? Math.min(65, anc.w / 2), hobX = o.hobX ?? Math.max(sinkX + 60, anc.w - 60);
-    switch (papel) {
-      case "tampo": return { lx: anc.w / 2, ly: anc.h / 2 };
-      case "movel": return { lx: anc.w / 2, ly: 30, w: anc.w, h: 60, alt: 0 };
-      case "lavaloica": return { lx: sinkX, ly: anc.h - d / 2 - 4, alt: alturaLavaLoicaCm(m.dimensoes.alturaCm, o.montagem ?? "baixo") };
-      case "torneira": return { lx: sinkX, ly: d / 2 + 1, alt: TAMPO_TOPO_CM };
-      case "placa": return { lx: hobX, ly: anc.h / 2, alt: TAMPO_TOPO_CM };
-      default: return { lx: anc.w / 2, ly: anc.h / 2 };
-    }
-  }
+export function lugarDoComponente(c: Conjunto, papel: string, anc: { w: number; h: number }, m: ProdutoModelo3D): Lugar {
+  const d = m.dimensoes.profundidadeCm;
   if (c.id === "conjunto_duche") {
     switch (papel) {
       case "base": return { lx: anc.w / 2, ly: anc.h / 2 };
@@ -91,7 +79,7 @@ export function expandirConjunto(c: Conjunto, instId: string, ancora: PecaPlanta
   return c.componentes.map((comp) => {
     const esc = escolhas[comp.papel] ?? {}, fam = familiaPorId(esc.familiaId ?? comp.familiaId) as Familia;
     const m = modeloDaFamilia(fam, esc.medidaId ?? comp.medidaId, esc.acabId ?? comp.acabId);
-    const lugar = lugarDoComponente(c, comp.papel, { w: anc.w, h: anc.h }, m, o);
+    const lugar = lugarDoComponente(c, comp.papel, { w: anc.w, h: anc.h }, m);
     const base = camposDaVariante(m);
     const w = comp.papel === c.ancora || FLEXIVEIS.has(fam.id) ? anc.w : lugar.w ?? base.w, h = lugar.h ?? base.h;
     const p = localParaPlano(anc, lugar.lx, lugar.ly);
@@ -161,7 +149,8 @@ export function mudarMontagem(p: PecaPlanta, montagem: "baixo" | "cima"): PecaPl
 /** As famílias que podem substituir a de uma peça do conjunto (as do mesmo tipo de mockup). */
 export const familiasSubstitutas = (p: PecaPlanta): Familia[] => {
   const f = p.fam ? familiaPorId(p.fam) : undefined;
-  return f ? FAMILIAS_DO_TIPO(f.tipo) : [];
+  // só as do mesmo tipo E de um espaço em comum: nunca um móvel de lavatório a substituir um móvel de cozinha
+  return f ? FAMILIAS_DO_TIPO(f.tipo).filter((x) => x.espacos.some((e) => e !== "outro" && f.espacos.includes(e))) : [];
 };
 const FAMILIAS_DO_TIPO = (tipo: Familia["tipo"]): Familia[] => FAMILIAS.filter((f) => f.tipo === tipo);
 
@@ -211,17 +200,23 @@ export interface LinhaVenda {
 }
 /** Uma linha vendável por peça com produto: o preço e o SKU da variante, e o conjunto a que pertence (ou se foi retirada dele). Portas e janelas contam como peças. */
 export function linhasVendaveis(planta: Planta): LinhaVenda[] {
-  return planta.pecas.filter((p) => p.fam || p.produto).map((p) => {
+  return planta.pecas.filter((p) => p.fam || p.produto || p.banc).flatMap((p): LinhaVenda[] => {
+    // a bancada composta: a chapa e cada equipamento numa linha à parte
+    if (p.banc) {
+      const conjNome = nomeDaBancada(p.banc), cat = { chapa: "Bancada (chapa)", lavaloica: "Lava-loiça", placa: "Placa", torneira: "Torneira de cozinha", movel: "Móvel" } as const;
+      return linhasDaBancada(p.banc).map((l) => ({ id: `${p.id}-${l.papel}`, nome: l.nome, sku: l.sku, preco: l.preco, categoria: cat[l.papel], conjId: p.id, conjNome, papel: l.papel, retirado: false, vendivelSeparado: true }));
+    }
     const f = p.fam ? familiaPorId(p.fam) : undefined, v = f ? resolverVariante(f, p.med, p.acab) : undefined;
     const def = p.conjId ? conjuntoPorId(p.conjId) : undefined;
-    return {
+    return [{
       id: p.id, nome: v?.nome ?? p.nome ?? p.tipo, sku: v?.sku, preco: v?.preco, categoria: f ? ESPEC[f.tipo].rotulo : "Catálogo", conjId: p.conj, conjNome: def?.nome, papel: p.papel, retirado: !!p.ret, vendivelSeparado: true,
-    };
+    }];
   });
 }
 /** Total das linhas que contam (não retiradas) com preço: peças soltas à soma; as de um conjunto completo com o desconto do conjunto. */
 export function totalDasLinhas(planta: Planta): number {
   const conjs = [...new Set(planta.pecas.filter((p) => p.conj).map((p) => p.conj as string))];
   const soltas = planta.pecas.filter((p) => !p.conj && !p.ret && p.fam).reduce((s, p) => { const f = familiaPorId(p.fam as string); return s + (f ? resolverVariante(f, p.med, p.acab).preco : 0); }, 0);
-  return arred2(soltas + conjs.reduce((s, id) => s + (precoConjunto(planta, id)?.total ?? 0), 0));
+  const bancadas = planta.pecas.filter((p) => p.banc).reduce((s, p) => s + linhasDaBancada(p.banc!).reduce((t, l) => t + (l.preco ?? 0), 0), 0);
+  return arred2(soltas + bancadas + conjs.reduce((s, id) => s + (precoConjunto(planta, id)?.total ?? 0), 0));
 }

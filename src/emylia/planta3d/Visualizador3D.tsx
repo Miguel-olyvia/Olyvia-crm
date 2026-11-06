@@ -11,6 +11,9 @@ import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
 import { libertarMateriais } from "./modelosHtml/util";
 import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml";
 import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
+import { construirBancada } from "./modelosHtml/bancada3d";
+import { VELAR_SPECS } from "./modelosHtml/lavaLoicas";
+import { CHAPA_OMISSAO, ficheiroDaChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
@@ -26,6 +29,8 @@ export interface Visualizador3DProps {
   /** a peça escolhida (a mesma da planta) e como escolher outra clicando nela */
   selecionada: string | null;
   onSelecionar: (id: string | null) => void;
+  /** Uma câmara pedida (metros, no mundo): as vistas da bancada (perspetiva ¾, perfil, frente, traseira, de cima, detalhe da bica). Muda ao mudar a chave. */
+  camara?: { chave: string; pos: V3; alvo: V3 } | null;
 }
 
 type V3 = [number, number, number];
@@ -46,9 +51,12 @@ function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
   g.fillStyle = r.cor;
   g.fillRect(0, 0, 256, 256);
   if (r.tipo === "azulejo") {
+    // juntas finas e meio apagadas: o revestimento é fundo, as peças é que se destacam
+    g.globalAlpha = 0.45;
     g.strokeStyle = r.junta ?? "#bbb";
-    g.lineWidth = 8;
+    g.lineWidth = 3;
     g.strokeRect(0, 0, 256, 256);
+    g.globalAlpha = 1;
   } else {
     const sombras = [0.0, -0.08, 0.06, -0.04];
     for (let i = 0; i < 4; i++) {
@@ -75,7 +83,7 @@ function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
 function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshStandardMaterial {
   const mat = useMemo(() => {
     const base = texturaBase(r);
-    const m = new THREE.MeshStandardMaterial({ color: base ? "#ffffff" : r.cor, roughness: r.tipo === "azulejo" ? 0.35 : 0.8, side: THREE.DoubleSide });
+    const m = new THREE.MeshStandardMaterial({ color: base ? "#ffffff" : r.cor, roughness: r.tipo === "azulejo" ? 0.55 : 0.9, envMapIntensity: 0.35, side: THREE.DoubleSide });
     if (base) {
       const t = base.clone();
       t.needsUpdate = true;
@@ -116,9 +124,9 @@ function Frentes({ w, h, d, n, cor, y0 = 0, vertical = false }: { w: number; h: 
   );
 }
 
-/** O material de um acabamento. Sem mapa de ambiente, o metal puro fica escuro: limita-se o metalness para o acabamento se ver. */
+/** O material de um acabamento (o ambiente de estúdio dá os reflexos ao metal). */
 function Material({ cor, mat }: { cor: string; mat?: MaterialMockup }) {
-  return <meshStandardMaterial color={cor} roughness={mat?.roughness ?? 0.4} metalness={Math.min(mat?.metalness ?? 0, 0.6)} side={THREE.DoubleSide} />;
+  return <meshStandardMaterial color={cor} roughness={mat?.roughness ?? 0.4} metalness={mat?.metalness ?? 0} side={THREE.DoubleSide} />;
 }
 
 /** O modelo detalhado portado do HTML (em mm; aqui a 0,001): corpo, bica e comando reais. As geometrias pesadas vêm de cache; o acabamento muda só os materiais. */
@@ -141,6 +149,58 @@ function ModeloPlacaHtml({ modelo, acab }: { modelo: string; acab: string }) {
   useEffect(() => () => { t?.materiais.forEach((m) => m.dispose()); }, [t]);
   return t ? <group scale={0.001}><primitive object={t.grupo} /></group> : null;
 }
+
+/* ------------------------------------------------------------------ a chapa Coverlam (imagem do fabricante) e a bancada composta */
+const cacheChapas = new Map<string, THREE.Texture>();
+const aoCarregarChapa = new Set<() => void>();
+/** A imagem da chapa (cache por ficheiro, nunca libertada: são poucas). Quando chega, pede novo desenho às cenas abertas. */
+function texturaDaChapa(file: string): THREE.Texture {
+  const tida = cacheChapas.get(file);
+  if (tida) return tida;
+  const t = new THREE.TextureLoader().load(ficheiroDaChapa(file), () => aoCarregarChapa.forEach((f) => f()));
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.name = file;
+  cacheChapas.set(file, t);
+  return t;
+}
+function useRedesenharAoCarregar(): void {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => { const f = () => invalidate(); aoCarregarChapa.add(f); return () => { aoCarregarChapa.delete(f); }; }, [invalidate]);
+}
+/** A bancada composta do HTML (chapa furada com veios, rodatampo, lava-loiça, placa, torneira e móveis), com o topo da chapa a 90 cm. */
+function ModeloBancadaHtml({ cfg }: { cfg: ConfigBancada }) {
+  useRedesenharAoCarregar();
+  const chave = JSON.stringify(cfg);
+  const b = useMemo(() => {
+    const c = JSON.parse(chave) as ConfigBancada, livro = selecaoChapa(c).book?.file; // o desenho escolhido (Book A/B ou chapa integral)
+    return construirBancada(c, livro ? texturaDaChapa(livro) : null);
+  }, [chave]);
+  useEffect(() => () => b?.libertar(), [b]);
+  return b ? <group scale={0.001}><primitive object={b.grupo} /></group> : null;
+}
+
+/** Um tampo do catálogo sem composição: a chapa de omissão com a imagem do fabricante, deitada (e os recortes, se os tiver). */
+function TampoChapa({ w, d, esp, y, furos }: { w: number; d: number; esp: number; y: number; furos: { x: number; z: number; w: number; d: number }[] }) {
+  useRedesenharAoCarregar();
+  const geo = useMemo(() => {
+    const s = new THREE.Shape();
+    s.moveTo(-w / 2, -d / 2); s.lineTo(w / 2, -d / 2); s.lineTo(w / 2, d / 2); s.lineTo(-w / 2, d / 2); s.lineTo(-w / 2, -d / 2);
+    for (const f of furos) { const b = new THREE.Path(), x0 = f.x - f.w / 2, x1 = f.x + f.w / 2, y0 = -f.z - f.d / 2, y1 = -f.z + f.d / 2; b.moveTo(x0, y0); b.lineTo(x0, y1); b.lineTo(x1, y1); b.lineTo(x1, y0); b.lineTo(x0, y0); s.holes.push(b); }
+    const g = new THREE.ExtrudeGeometry(s, { depth: esp, bevelEnabled: false });
+    const p = g.attributes.position, uv = g.attributes.uv;
+    // à escala da chapa (1,62 × 3,24 m), sem repetir
+    for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getY(i) + d / 2 + 0.04) / 1.62, (p.getX(i) + 1.62) / 3.24);
+    return g;
+  }, [w, d, esp, furos]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return (
+    <mesh geometry={geo} position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
+      <meshPhysicalMaterial attach="material-0" map={texturaDaChapa(CHAPA_OMISSAO)} roughness={0.62} envMapIntensity={0.28} />
+      <meshStandardMaterial attach="material-1" color="#d8d1bb" roughness={0.7} />
+    </mesh>
+  );
+}
+/** O lava-loiça do HTML mais próximo de uma largura (m), para os lava-loiças do catálogo sem modelo próprio. */
+const velarDaLargura = (w: number): string => VELAR_SPECS.reduce((a, s) => (Math.abs(s.outerWidth / 1000 - w) < Math.abs(a.outerWidth / 1000 - w) ? s : a)).id;
 
 /** Uma torneira de cozinha: base, coluna e bica em tubo (extraível com cabeça, monocomando, abatível ou com flexível de silicone), ao longo de uma curva. */
 function TorneiraCozinha({ w, d, h, cor, mat, p }: { w: number; d: number; h: number; cor: string; mat?: MaterialMockup; p: Extract<ParamsMockup, { k: "torneira" }> }) {
@@ -168,68 +228,6 @@ function TorneiraCozinha({ w, d, h, cor, mat, p }: { w: number; d: number; h: nu
   );
 }
 
-/** Uma chapa com furos (tampo e rebordo de lava-loiça): extrusão de um rectângulo com buracos, deitada. O buraco `z` do plano vira o `y` da forma (invertido). */
-function ChapaComFuros({ w, d, esp, y, furos, cor, mat }: { w: number; d: number; esp: number; y: number; furos: { x: number; z: number; w: number; d: number }[]; cor: string; mat?: MaterialMockup }) {
-  const geo = useMemo(() => {
-    const s = new THREE.Shape();
-    s.moveTo(-w / 2, -d / 2); s.lineTo(w / 2, -d / 2); s.lineTo(w / 2, d / 2); s.lineTo(-w / 2, d / 2); s.lineTo(-w / 2, -d / 2);
-    for (const f of furos) {
-      const b = new THREE.Path(), x0 = f.x - f.w / 2, x1 = f.x + f.w / 2, y0 = -f.z - f.d / 2, y1 = -f.z + f.d / 2;
-      b.moveTo(x0, y0); b.lineTo(x0, y1); b.lineTo(x1, y1); b.lineTo(x1, y0); b.lineTo(x0, y0);
-      s.holes.push(b);
-    }
-    return new THREE.ExtrudeGeometry(s, { depth: esp, bevelEnabled: false });
-  }, [w, d, esp, furos]);
-  useEffect(() => () => geo.dispose(), [geo]);
-  return <mesh geometry={geo} position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]}><Material cor={cor} mat={mat} /></mesh>;
-}
-
-/** Um lava-loiça: rebordo com os furos das cubas, cubas rebaixadas (paredes e fundo) com ralo, e o escorredor com ranhuras. */
-function LavaLoica({ w, d, h, cor, mat, p }: { w: number; d: number; h: number; cor: string; mat?: MaterialMockup; p: Extract<ParamsMockup, { k: "lava_loica" }> }) {
-  const furos = useMemo(() => p.cubas.map((c) => ({ x: c.x - w / 2 + c.w / 2, z: c.z - d / 2 + c.d / 2, w: c.w, d: c.d })), [p.cubas, w, d]);
-  const fim = Math.max(...p.cubas.map((c) => c.x + c.w));
-  const ranhuras = p.escorredor ? Math.max(0, Math.floor((w - fim - 0.06) / 0.022)) : 0;
-  const t = 0.003;
-  return (
-    <>
-      <ChapaComFuros w={w} d={d} esp={0.012} y={h - 0.012} furos={furos} cor={cor} mat={mat} />
-      {p.cubas.map((c, i) => {
-        const f = furos[i], base = h - c.prof;
-        return (
-          <group key={i}>
-            <mesh position={[f.x, base + c.prof / 2, f.z + c.d / 2 - t / 2]}><boxGeometry args={[c.w, c.prof, t]} /><Material cor={cor} mat={mat} /></mesh>
-            <mesh position={[f.x, base + c.prof / 2, f.z - c.d / 2 + t / 2]}><boxGeometry args={[c.w, c.prof, t]} /><Material cor={cor} mat={mat} /></mesh>
-            <mesh position={[f.x - c.w / 2 + t / 2, base + c.prof / 2, f.z]}><boxGeometry args={[t, c.prof, c.d]} /><Material cor={cor} mat={mat} /></mesh>
-            <mesh position={[f.x + c.w / 2 - t / 2, base + c.prof / 2, f.z]}><boxGeometry args={[t, c.prof, c.d]} /><Material cor={cor} mat={mat} /></mesh>
-            <mesh position={[f.x, base, f.z]}><boxGeometry args={[c.w, t * 1.5, c.d]} /><Material cor={cor} mat={mat} /></mesh>
-            <Elipse p={[f.x, base + 0.004, f.z - c.d * 0.2]} ex={0.07} ez={0.07} h={0.006} cor="#3a3f43" />
-          </group>
-        );
-      })}
-      {Array.from({ length: ranhuras }, (_, i) => <Caixa key={i} p={[-w / 2 + fim + 0.04 + i * 0.022, h + 0.001, 0]} s={[0.008, 0.003, d * 0.78]} cor="#8d9396" r={0.4} />)}
-    </>
-  );
-}
-
-/** Uma placa: vidro (indução e radiante, com as zonas) ou inox/vidro com queimadores, grelhas e manípulos (gás). A base do mockup é a face de cima do tampo. */
-function Placa({ w, d, cor, mat, p }: { w: number; d: number; cor: string; mat?: MaterialMockup; p: Extract<ParamsMockup, { k: "placa" }> }) {
-  const e = Math.max(0.004, p.espessura), gas = p.tipo === "gas";
-  return (
-    <>
-      <mesh position={[0, e / 2, 0]}><boxGeometry args={[w, e, d]} /><Material cor={cor} mat={mat} /></mesh>
-      {!gas && p.queimadores.map(([x, z, r], i) => <Elipse key={i} p={[x, e + 0.001, z]} ex={r * 2} ez={r * 2} h={0.002} cor={p.tipo === "induction" ? "#3a3f44" : "#8a2f26"} />)}
-      {gas && p.queimadores.map(([x, z, r], i) => (
-        <group key={i}>
-          <Elipse p={[x, e + 0.01, z]} ex={r * 2} ez={r * 2} h={0.02} cor="#23272a" />
-          <Elipse p={[x, e + 0.022, z]} ex={r * 1.2} ez={r * 1.2} h={0.006} cor="#6b7075" />
-          <Caixa p={[x, e + 0.045, z]} s={[r * 2.4, 0.008, 0.008]} cor="#1d2022" r={0.5} />
-          <Caixa p={[x, e + 0.045, z]} s={[0.008, 0.008, r * 2.4]} cor="#1d2022" r={0.5} />
-        </group>
-      ))}
-      {gas && p.manipulos.map((x, i) => <Elipse key={i} p={[Math.max(-w / 2 + 0.02, Math.min(w / 2 - 0.02, x)), e + 0.012, d / 2 - 0.025]} ex={0.032} ez={0.032} h={0.024} cor="#2b2f33" />)}
-    </>
-  );
-}
 /** O mockup paramétrico de um tipo, com a pegada `w` (largura) × `d` (profundidade) e a altura `h`. Frente para +z, costas em -z, base em y=0. */
 function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[]; opc?: OpcoesPeca }) {
   const bola = (hb: number, zc: number, prof: number) => (
@@ -444,9 +442,9 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo:
       const hb = Math.max(0.2, h - 0.04);
       return (
         <>
-          <Caixa p={[0, hb / 2, -0.01]} s={[w, hb, d - 0.02]} cor="#d8d3c8" r={0.6} />
-          <Frentes w={w} h={hb} d={d - 0.02} n={Math.max(1, Math.round(w / 0.6))} cor="#d8d3c8" />
-          <Caixa p={[0, hb + 0.02, 0]} s={[w, 0.04, d]} cor={cor} r={0.3} />
+          <Caixa p={[0, hb / 2, -0.01]} s={[w, hb, d - 0.02]} cor="#e9e7e2" r={0.6} />
+          <Frentes w={w} h={hb} d={d - 0.02} n={Math.max(1, Math.round(w / 0.6))} cor="#ecebe7" />
+          <TampoChapa w={w} d={d} esp={0.012} y={hb} furos={[]} />
         </>
       );
     }
@@ -476,17 +474,21 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo:
           <Caixa p={[0, h * 0.82, d / 2 + 0.02]} s={[w * 0.6, 0.012, 0.02]} cor="#8a8a8a" r={0.3} />
         </>
       );
+    // Torneira, lava-loiça, placa e tampo usam SEMPRE os modelos do HTML: os da família com o modelo dela; os do catálogo (sem modelo próprio)
+    // com o modelo do HTML mais parecido (lava-loiça Velar da largura mais próxima, placa de indução de 60 ou a gás de 90, torneira Round).
     case "torneira_cozinha":
       if (params?.k === "torneira" && params.html) return <ModeloHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} z0={-d / 2 + params.base / 2} />;
-      return params?.k === "torneira" ? <TorneiraCozinha w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
+      if (params?.k === "torneira" && params.estilo === "cira") return <TorneiraCozinha w={w} d={d} h={h} cor={cor} mat={mat} p={params} />;
+      return <ModeloHtml modelo={params?.k === "torneira" && params.estilo === "monocomando" ? "noah" : "round"} acab={(mat?.metalness ?? 1) < 0.5 ? "negro" : "brushed"} opc={opc} z0={-d / 2 + 0.03} />;
     case "lava_loica":
       if (params?.k === "lava_loica" && params.html) return <ModeloLavaLoicaHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} h={h} />;
-      return params?.k === "lava_loica" ? <LavaLoica w={w} d={d} h={h} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
+      return <ModeloLavaLoicaHtml modelo={velarDaLargura(w)} acab="inox" opc={opc} h={h} />;
     case "placa":
       if (params?.k === "placa" && params.html) return <ModeloPlacaHtml modelo={params.html.modelo} acab={params.html.acab} />;
-      return params?.k === "placa" ? <Placa w={w} d={d} cor={cor} mat={mat} p={params} /> : <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
+      return <ModeloPlacaHtml modelo={w > 0.75 ? "gmwl958" : "ib65b60"} acab={w > 0.75 ? "inox" : "negro"} />;
     case "tampo":
-      return <ChapaComFuros w={w} d={d} esp={params?.k === "tampo" ? params.espessura : 0.012} y={0} furos={recortes ?? []} cor={cor} mat={mat} />;
+      if (params?.k === "bancada") return <ModeloBancadaHtml cfg={params.cfg} />;
+      return <TampoChapa w={w} d={d} esp={params?.k === "tampo" ? params.espessura : 0.012} y={0} furos={recortes ?? []} />;
     case "lavatorio_pousar":
       return (
         <>
@@ -532,22 +534,36 @@ function ModeloGLB({ url, w, d, h }: { url: string; w: number; d: number; h: num
   return <primitive object={copia} />;
 }
 
+/** O contorno da peça escolhida: uma moldura fina e rasa, 2 cm à volta da pegada, junto à base (não atravessa a peça nem a bancada). */
+function Contorno({ w, d, y }: { w: number; d: number; y: number }) {
+  const geo = useMemo(() => {
+    const f = 0.02, l = 0.012, s = new THREE.Shape(), b = new THREE.Path();
+    const W = w / 2 + f + l, D = d / 2 + f + l, wi = w / 2 + f, di = d / 2 + f;
+    s.moveTo(-W, -D); s.lineTo(W, -D); s.lineTo(W, D); s.lineTo(-W, D); s.lineTo(-W, -D);
+    b.moveTo(-wi, -di); b.lineTo(-wi, di); b.lineTo(wi, di); b.lineTo(wi, -di); b.lineTo(-wi, -di); s.holes.push(b);
+    return new THREE.ShapeGeometry(s);
+  }, [w, d]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return <mesh geometry={geo} position={[0, y + 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}><meshBasicMaterial color="#7c3aed" transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} /></mesh>;
+}
+
 function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
   const { tipo, altura, cor, url } = m.mockup3d;
   const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} />;
   const nf = (n: number) => Math.round(n * 100).toString();
   const base = p.altura; // altura da base ao chão (peças de parede e peças sobre a bancada)
+  const corpo = useRef<THREE.Group>(null);
+  // todas as peças fazem e recebem sombra (os modelos do HTML já vêm assim; as paramétricas marcam-se aqui)
+  useEffect(() => { corpo.current?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); });
   return (
     <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }}>
-      <group scale={[p.espelhada ? -1 : 1, 1, 1]}>
+      <group ref={corpo} scale={[p.espelhada ? -1 : 1, 1, 1]}>
         {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
       </group>
-      {selecionada && (
-        <mesh position={[0, altura / 2, 0]}><boxGeometry args={[p.largura + 0.04, altura + 0.04, p.profundidade + 0.04]} /><meshBasicMaterial color="#7c3aed" wireframe /></mesh>
-      )}
+      {selecionada && <Contorno w={p.largura} d={p.profundidade} y={Math.min(altura, 0.02)} />}
       {(etiquetas || selecionada) && (
         <Html position={[0, Math.max(altura, 0.3) + 0.12, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-          <div className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-tight text-white ${selecionada ? "bg-violet-700" : "bg-black/75"}`}>
+          <div className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-tight text-white ${selecionada ? "bg-violet-700/85" : "bg-black/60"}`}>
             {p.nome ?? m.nome}<br />{nf(p.largura)}×{nf(p.profundidade)}×{nf(altura)} cm{p.montagem === "parede" ? ` · a ${nf(p.altura)} cm do chão` : ""}
           </div>
         </Html>
@@ -575,7 +591,7 @@ function ParedeCena({ parede, indice, espaco }: { parede: Parede; indice: number
   return (
     <group ref={grupo} position={[parede.a.x, 0, parede.a.y]} rotation={[0, ang, 0]}>
       {trocos.map((t, i) => (
-        <mesh key={i} position={[(t.de + t.ate) / 2, (t.z0 + t.z1) / 2, zFora]} material={mat}>
+        <mesh key={i} position={[(t.de + t.ate) / 2, (t.z0 + t.z1) / 2, zFora]} material={mat} receiveShadow>
           <boxGeometry args={[t.ate - t.de, t.z1 - t.z0, esp]} />
         </mesh>
       ))}
@@ -615,14 +631,14 @@ function Superficies({ espaco, teto }: { espaco: Espaco; teto: boolean }) {
   const mat = useRevestimento(rev, 1, 1);
   return (
     <>
-      <mesh geometry={geo} material={mat} rotation={[-Math.PI / 2, 0, 0]} />
+      <mesh geometry={geo} material={mat} rotation={[-Math.PI / 2, 0, 0]} receiveShadow />
       {teto && <mesh geometry={geo} position={[0, espaco.peDireito, 0]} rotation={[-Math.PI / 2, 0, 0]}><meshStandardMaterial color="#fafafa" side={THREE.DoubleSide} /></mesh>}
     </>
   );
 }
 
 /* ------------------------------------------------------------------ câmaras */
-function Camaras({ vista, espaco }: { vista: Vista3D; espaco: Espaco }) {
+function Camaras({ vista, espaco, camara }: { vista: Vista3D; espaco: Espaco; camara?: Visualizador3DProps["camara"] }) {
   const { size } = useThree();
   const caixa = useMemo(() => {
     const xs = espaco.paredes.map((p) => p.a.x), ys = espaco.paredes.map((p) => p.a.y);
@@ -647,11 +663,43 @@ function Camaras({ vista, espaco }: { vista: Vista3D; espaco: Espaco }) {
       </>
     );
   }
-  const d = maior * 1.1 + 1.5;
+  if (camara) {
+    // uma vista pedida (as da bancada, como no catálogo 3D): a câmara e o alvo exactos, e roda-se à volta do alvo
+    return (
+      <>
+        <PerspectiveCamera key={`cam-${camara.chave}`} makeDefault position={camara.pos} fov={35} near={0.02} far={200} />
+        <OrbitControls key={`oc-${camara.chave}`} makeDefault target={camara.alvo} maxPolarAngle={Math.PI / 2.02} minDistance={0.2} maxDistance={maior * 4 + 6} />
+      </>
+    );
+  }
+  const d = maior * 0.8 + 1.1;
   return (
     <>
-      <PerspectiveCamera key="3d" makeDefault position={[cx + d, d * 0.9, cz + d]} fov={45} near={0.1} far={200} />
+      <PerspectiveCamera key="3d" makeDefault position={[cx + d, d * 0.9, cz + d]} fov={40} near={0.1} far={200} />
       <OrbitControls key="oc-3d" makeDefault target={[cx, pe / 3, cz]} maxPolarAngle={Math.PI / 2.02} minDistance={1} maxDistance={maior * 4 + 6} />
+    </>
+  );
+}
+
+/** A luz de estúdio do HTML: céu quente e chão esverdeado, luz principal com sombras suaves e uma de enchimento fria, apontadas ao centro do espaço. */
+function LuzEstudio({ espaco }: { espaco: Espaco }) {
+  const { cx, cz, r } = useMemo(() => {
+    const xs = espaco.paredes.map((p) => p.a.x), ys = espaco.paredes.map((p) => p.a.y);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    return { cx: (x0 + x1) / 2, cz: (y0 + y1) / 2, r: Math.max(x1 - x0, y1 - y0, 1) / 2 + 0.5 };
+  }, [espaco.paredes]);
+  const key = useRef<THREE.DirectionalLight>(null);
+  const alvo = useMemo(() => new THREE.Object3D(), []);
+  useEffect(() => { alvo.position.set(cx, 0.6, cz); alvo.updateMatrixWorld(); if (key.current) key.current.target = alvo; }, [alvo, cx, cz]);
+  // as direcções do HTML (250, 750, 430) e (−340, 240, −320), à escala do espaço
+  const k = (r * 2.2) / 900;
+  return (
+    <>
+      {/* o HTML usa 1,25 num estúdio aberto; dentro de uma divisão as paredes já devolvem luz, por isso menos */}
+      <hemisphereLight args={["#fffcf3", "#878e84", 0.8]} />
+      <directionalLight ref={key} position={[cx + 250 * k, 750 * k, cz + 430 * k]} intensity={2.8} color="#fffcf2" castShadow
+        shadow-mapSize={[2048, 2048]} shadow-camera-left={-r} shadow-camera-right={r} shadow-camera-top={r} shadow-camera-bottom={-r} shadow-camera-near={0.1} shadow-camera-far={r * 8} shadow-bias={-0.0002} shadow-normalBias={0.02} shadow-radius={4} />
+      <directionalLight position={[cx - 340 * k, 240 * k, cz - 320 * k]} intensity={0.8} color="#d8e5e1" />
     </>
   );
 }
@@ -676,15 +724,15 @@ function EstudioAmbiente() {
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara }: Visualizador3DProps) {
   return (
     <div role="img" aria-label={descricao} className="h-full w-full touch-none">
-      <Canvas frameloop="demand" dpr={[1, 1.5]} gl={{ antialias: true }} onPointerMissed={() => onSelecionar(null)}>
-        <color attach="background" args={["#eef0f2"]} />
+      {/* como o HTML: ACES com exposição 1,08, sombras suaves (PCF), ambiente de estúdio e fundo claro neutro */}
+      <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }} onPointerMissed={() => onSelecionar(null)}>
+        <color attach="background" args={["#ecebe7"]} />
         <EstudioAmbiente />
-        <hemisphereLight args={["#ffffff", "#8a8f95", 1.0]} />
-        <directionalLight position={[4, 8, 5]} intensity={1.1} />
-        <Camaras vista={vista} espaco={espaco} />
+        <LuzEstudio espaco={espaco} />
+        <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} />
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} /> : null; })}
