@@ -145,6 +145,8 @@ const REGRAS: [RegExp, TipoMockup][] = [
   [/lava-?lo[iu]cas?|lava lo[iu]ca|^cubas (inox|composito)/, "lava_loica"],
   [/^misturadoras? monocomando|torneira.*cozinha|cozinha.*torneira|misturadora.*cozinha|monocomando de lava/, "torneira_cozinha"],
   [/^placas$|placa (de )?(inducao|vitroceramica|vitro|gas|a gas)/, "placa"],
+  // uma placa de pladur é material de construção, não um eletrodoméstico
+  [/pladur|gesso cartonado/, "caixa"],
   [/torneira|misturadora|chuveiro higien/, "torneira"],
   [/toalheiro/, "toalheiro"],
   [/radiador/, "radiador"],
