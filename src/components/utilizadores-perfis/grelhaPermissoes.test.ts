@@ -154,8 +154,11 @@ describe("definirConjunto (linha/secção) com as regras de 'ver'", () => {
     expect(definirConjunto(["leads.view", "leads.edit", "clients.view"], de("leads.view"), false, CAT)).toEqual(["clients.view"]);
   });
 
-  it("só o 'ver' DO MÓDULO arrasta as outras: hr.pessoas.view não é hr.view", () => {
-    expect(alternarPermissao(["hr.pessoas.view", "hr.pessoas.edit"], "hr.pessoas.view", CAT)).toEqual(["hr.pessoas.edit"]);
+  it("06/11: as dependências são as declaradas (hr.pessoas.edit depende da ficha: hr.pessoas.view, ou a própria quando está no catálogo)", () => {
+    expect(alternarPermissao(["hr.pessoas.view", "hr.pessoas.edit"], "hr.pessoas.view", CAT)).toEqual([]);
+    const comPropria = [...CAT, p("hr.pessoas.view.own")];
+    expect(alternarPermissao(["hr.pessoas.view", "hr.pessoas.view.own", "hr.pessoas.edit"], "hr.pessoas.view", comPropria))
+      .toEqual(["hr.pessoas.view.own", "hr.pessoas.edit"]);
   });
 });
 

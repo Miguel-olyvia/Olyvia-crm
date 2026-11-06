@@ -22,8 +22,10 @@ import type { Permissao } from "./tipos";
 export interface EdicaoMatriz {
   /** Role de sistema: os controlos ficam desligados e não há "Tudo". */
   desativada: boolean;
-  /** Sem a permissão Ver do módulo: a célula fica esbatida e não se marca (matriz.ts > podeAlterar). */
+  /** Sem a permissão de que depende: a célula fica esbatida e não se marca (matriz.ts > podeAlterar). */
   bloqueada: (codigo: string) => boolean;
+  /** Porque está bloqueada, com o nome da permissão que falta («Precisa primeiro de «Ficha: Ver»»). */
+  motivoBloqueio: (codigo: string) => string;
   aoAlternar: (p: Permissao) => void;
   /** "Tudo" / "Limpar" do grupo. */
   aoModulo: (lista: Permissao[], marcar: boolean) => void;
@@ -37,7 +39,7 @@ const G = "usersProfiles.form.matrix.grid.";
 const FIXA = "sticky left-0 z-10";
 
 /** O texto da dica e da descrição acessível: nome, código, descrição, perigosa e porque está bloqueada. */
-function Dica({ permissao: p, bloqueada }: { permissao: Permissao; bloqueada: boolean }) {
+function Dica({ permissao: p, motivo }: { permissao: Permissao; motivo: string | null }) {
   const { t } = useTranslation();
   return (
     <span className="block max-w-xs space-y-0.5 text-left">
@@ -45,7 +47,7 @@ function Dica({ permissao: p, bloqueada }: { permissao: Permissao; bloqueada: bo
       <span className="block font-mono text-xs text-muted-foreground">{p.codigo}</span>
       {p.descricao && <span className="block text-xs">{p.descricao}</span>}
       {p.perigosa && <span className="block text-xs font-medium text-destructive">{t("usersProfiles.dangerous")}</span>}
-      {bloqueada && <span className="block text-xs">{t("usersProfiles.form.matrix.needsView")}</span>}
+      {motivo && <span className="block text-xs">{motivo}</span>}
     </span>
   );
 }
@@ -64,6 +66,7 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
   const id = useId();
   const bloqueada = !edicao.desativada && edicao.bloqueada(p.codigo) && !concedida;
   const idDica = `${id}-dica`;
+  const motivo = bloqueada ? edicao.motivoBloqueio(p.codigo) : null;
   // Bloqueada: continua focável (aria-disabled) para se ler a razão; o clique só avisa (MatrizEditavel), não muda nada.
   const comum = {
     "aria-describedby": idDica,
@@ -104,9 +107,9 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
     <>
       <Tooltip>
         <TooltipTrigger asChild>{gatilho}</TooltipTrigger>
-        <TooltipContent><Dica permissao={p} bloqueada={bloqueada} /></TooltipContent>
+        <TooltipContent><Dica permissao={p} motivo={motivo} /></TooltipContent>
       </Tooltip>
-      <span id={idDica} className="sr-only"><Dica permissao={p} bloqueada={bloqueada} /></span>
+      <span id={idDica} className="sr-only"><Dica permissao={p} motivo={motivo} /></span>
     </>
   );
 }

@@ -83,7 +83,7 @@ describe("GrelhaRecursoAcao (editor de papéis, v2)", () => {
     fireEvent.click(caixa("Fornecedores: Criar"));
     expect(concedidas()).toBe("");
     expect(caixa("Fornecedores: Criar")).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByTestId("aviso-matriz")).toHaveTextContent("Precisa primeiro da permissão Ver");
+    expect(screen.getByTestId("aviso-matriz")).toHaveTextContent("Criar fornecedores: Precisa primeiro de «Ver fornecedores»");
 
     fireEvent.click(caixa("Fornecedores: Ver"));
     fireEvent.click(caixa("Fornecedores: Criar"));
@@ -92,7 +92,7 @@ describe("GrelhaRecursoAcao (editor de papéis, v2)", () => {
 
     fireEvent.click(caixa("Fornecedores: Ver"));
     expect(concedidas()).toBe("");
-    expect(screen.getByTestId("aviso-matriz")).toHaveTextContent("Também retiradas, porque precisam de Ver: Criar fornecedores");
+    expect(screen.getByTestId("aviso-matriz")).toHaveTextContent("Também retiradas, porque dependiam do que se tirou: Criar fornecedores");
   });
 
   it("chips de Outras: botão liga/desliga com aria-pressed e rótulo encurtado", () => {
