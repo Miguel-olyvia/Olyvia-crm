@@ -24,6 +24,8 @@ import type { Ctx } from "./pecas";
 
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 const dataCurta = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "long" });
+/** «sex., 20 nov.»: para a coluna estreita das etapas */
+const dataEtapa = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "short" });
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 /** A visita que segue o Estúdio: a de uma casa de banho (o que o Estúdio sabe fazer hoje). */
@@ -289,12 +291,14 @@ export function PlanoEstimado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </label>
         <ol className="divide-y divide-border rounded-xl border border-border">
           {cal.etapas.map((e, i) => (
-            <li key={e.n} className="flex flex-col gap-1 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <li key={e.n} className="grid gap-1 p-3 sm:grid-cols-[minmax(0,1fr)_8.5rem] sm:gap-4">
               <span className="min-w-0 text-[15px]"><b className="font-medium">{i + 1}. {e.n}</b>
                 <span className="block text-xs text-muted-foreground">{e.oQue.join("; ")}</span>
               </span>
-              <span className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-                {e.dias} {e.dias === 1 ? "dia" : "dias"}<span className="block">{e.dias === 1 ? dataCurta(e.inicio!) : `${dataCurta(e.inicio!)} a ${dataCurta(e.fim!)}`}</span>
+              <span className="text-sm tabular-nums text-muted-foreground sm:text-right">
+                <b className="font-medium text-foreground">{e.dias} {e.dias === 1 ? "dia" : "dias"}</b>
+                <span className="block">{dataEtapa(e.inicio!)}</span>
+                {e.dias > 1 && <span className="block">a {dataEtapa(e.fim!)}</span>}
               </span>
             </li>
           ))}

@@ -409,7 +409,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           corpo: <FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
             ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: aValidar(d, "medidas") ? nMed - medOk : 0 }]),
             { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0 },
-            ...(ePecas.oculto ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: `${contagem([ePecas], d.f).f} de ${contagem([ePecas], d.f).n} respondidas`, corpo: <Campos grupo={ePecas} {...fx} /> }]),
+            ...(ePecas.oculto ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
           ]} /> },
       ];
     }
