@@ -12,6 +12,8 @@ import {
 } from "./motor";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
+import { EstudioNaVisita, FecharVisita } from "./VisitaEstudio";
+import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
@@ -328,28 +330,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
     const nMed = CM.length;
     const gv = visitas(d).map(grupoVisita), cv = contagem(gv, d.f);
-    passos = [
-      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) || visitas(d).some((n) => d.f[`v${n}_estado`] !== "Cancelada") ? 1 : 0), n: cv.n + 1 }, // a visita fica feita sozinha: só falta se todas estão canceladas
-        resumo: [`${visitas(d).length} ${visitas(d).length === 1 ? "visita" : "visitas"}`, visitaFeita(d) ? "feita" : "por fazer"],
-        corpo: <VisitasLista ctx={ctx} d={d} simples={simples} /> },
-      // 27/10 (Rúben): os passos com fotografias não passam sozinhos ao seguinte (saltavam antes de se poder tirar a foto)
-      { ...g(EXTERIOR, Building2), semAvancar: true, corpo: (
-        <div className="space-y-6">
-          {/* 27/10: a morada já está no cabeçalho; aqui só a confirmação no local */}
-          <UsarLocalizacao ctx={ctx} d={d} texto="Confirmar a morada pela localização" />
-          <Campos grupo={E(EXTERIOR)} {...fx} />
-          <FotosEtapa ctx={ctx} d={d} etapa="exterior" simples={simples} />
-        </div>
-      ) },
-      { ...g(INTERIOR, Home), semAvancar: true, corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
-      // várias divisões: um grupo de campos por divisão (gruposArea), contados todos no passo
-      // 27/10: as fotografias contam como uma resposta do passo: feita com fotografias ou com "o cliente não quis"
-      { ...g(AREA, Wrench), semAvancar: true, conta: (({ f, n }) => ({ f: f + (v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim" ? 1 : 0), n: n + 1 }))(contagem(GA, d.f)), corpo: <div className="space-y-6">{GA.map((ga) => <Campos key={ga.titulo} grupo={ga} {...fx} />)}<FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
-      // 28/10: uma linha sem medidas (a "geral": as quantidades escrevem-se em cada serviço) não mostra um passo vazio
-      ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
+    const corpoMedidas = (comPlanta: boolean) => (
         <div className="space-y-2">
           {/* 5/11 (Rúben, a visita real): a planta da folha, no ecrã; dá os m² do chão e das paredes */}
-          {simples && (CM.some(([k]) => k === "pav") || CM.some(([k]) => k === "par")) && (
+          {comPlanta && simples && (CM.some(([k]) => k === "pav") || CM.some(([k]) => k === "par")) && (
             <details className="group mb-6 rounded-2xl border border-border bg-card p-4" open={!!d.f.planta || undefined}>
               <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-[15px] font-semibold">
                 Desenhar a planta{divisaoPrincipal(d.f) ? ` da ${divisaoPrincipal(d.f)!.toLowerCase()}` : ""}
@@ -379,15 +363,56 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
             <Campos grupo={{ titulo: "", campos: [{ k: "obs_medidas", l: "Observações", t: "texto_longo", opcional: true }] }} {...fx} />
           </div>
         </div>
-      ) }]),
+    );
+    const resumoMedidas = CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`);
+    const comWC = d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho");
+    const passoNec: Passo = { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
+      resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> };
+    passos = [
+      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) || visitas(d).some((n) => d.f[`v${n}_estado`] !== "Cancelada") ? 1 : 0), n: cv.n + 1 }, // a visita fica feita sozinha: só falta se todas estão canceladas
+        resumo: [`${visitas(d).length} ${visitas(d).length === 1 ? "visita" : "visitas"}`, visitaFeita(d) ? "feita" : "por fazer"],
+        corpo: <VisitasLista ctx={ctx} d={d} simples={simples} /> },
+      // 27/10 (Rúben): os passos com fotografias não passam sozinhos ao seguinte (saltavam antes de se poder tirar a foto)
+      { ...g(EXTERIOR, Building2), semAvancar: true, corpo: (
+        <div className="space-y-6">
+          {/* 27/10: a morada já está no cabeçalho; aqui só a confirmação no local */}
+          <UsarLocalizacao ctx={ctx} d={d} texto="Confirmar a morada pela localização" />
+          <Campos grupo={E(EXTERIOR)} {...fx} />
+          <FotosEtapa ctx={ctx} d={d} etapa="exterior" simples={simples} />
+        </div>
+      ) },
+      { ...g(INTERIOR, Home), semAvancar: true, corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
+      // várias divisões: um grupo de campos por divisão (gruposArea), contados todos no passo
+      // 27/10: as fotografias contam como uma resposta do passo: feita com fotografias ou com "o cliente não quis"
+      { ...g(AREA, Wrench), semAvancar: true, conta: (({ f, n }) => ({ f: f + (v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim" ? 1 : 0), n: n + 1 }))(contagem(GA, d.f)), corpo: <div className="space-y-6">{GA.map((ga) => <Campos key={ga.titulo} grupo={ga} {...fx} />)}<FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
+      // 28/10: uma linha sem medidas (a "geral": as quantidades escrevem-se em cada serviço) não mostra um passo vazio
+      ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: resumoMedidas, corpo: corpoMedidas(true) }]),
       // na versão Atual simples, as "Escolhas do cliente" respondem-se dentro das Necessidades (seleção guiada, 14/10/2026)
-      { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
-        resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
+      passoNec,
       ...(simples ? [] : [g(ESCOLHAS, Sparkles)]),
       // 5/11 (Rúben, a visita real): a folha da visita, peça a peça (só com casa de banho), e o prazo e a decisão do cliente
-      ...(d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho") ? [g(PECAS_WC, Bath)] : []),
+      ...(comWC ? [g(PECAS_WC, Bath)] : []),
       g(DECISAO, CalendarCheck),
     ];
+    // 6/11 (Rúben: «o Estúdio já está a fazer praticamente tudo»): numa casa de banho, depois do interior e da área vem o Estúdio; as
+    // medidas, as necessidades e as peças saem dele e ficam dobradas no fecho, com o prazo e a decisão e o plano de obra estimado
+    if (simples && comWC) {
+      const pr = projetoDoNegocio(d.f);
+      const ePecas = E(PECAS_WC), eDecisao = E(DECISAO);
+      const ate = passos.findIndex((x) => x.id === "medidas" || x.id === "nec");
+      passos = [
+        ...passos.slice(0, ate),
+        { id: "estudio", titulo: "Estúdio", icone: Sparkles, feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0,
+          resumo: pr ? ["projeto guardado"] : ["por abrir"], corpo: <EstudioNaVisita ctx={ctx} d={d} /> },
+        { id: "fecho", titulo: "Fechar a visita", icone: CalendarCheck, feito: medOk === nMed && passoNec.feito === true,
+          resumo: [d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : "", d.f.decisao_ate ? `decide até ${d.f.decisao_ate}` : ""].filter(Boolean),
+          corpo: <FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+            ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: aValidar(d, "medidas") ? nMed - medOk : 0 }]),
+            { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0 },
+            ...(ePecas.oculto ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: `${contagem([ePecas], d.f).f} de ${contagem([ePecas], d.f).n} respondidas`, corpo: <Campos grupo={ePecas} {...fx} /> }]),
+          ]} /> },
+      ];
+    }
   } else if (fase === 3 && o) {
     passos = [
       // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
@@ -447,6 +472,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     const gr = TODOS.find((x) => x.titulo === ps.id);
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta(gr === AREA ? gruposArea(S.campos, d.f).map(E) : [E(gr)], d.f).length;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
+    if (ps.id === "fecho") ps.falta = ((aValidar(d, "medidas") ? camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length : 0) + (aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0)) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;
     if (ps.id === "nec" && simples && aValidar(d, ESCOLHAS.titulo) && !E(ESCOLHAS).oculto) ps.falta = (ps.falta || 0) + emFalta([E(ESCOLHAS)], d.f).length || undefined;

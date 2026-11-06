@@ -10,6 +10,7 @@ import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { EditarCliente } from "./EditarCliente";
 import { DadosAoLado } from "./DadosAoLado";
 import { ChamadaDireto } from "./ChamadaDireto";
+import { ACaminho } from "./VisitaEstudio";
 import { modoReal } from "./acessosPortal";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
@@ -256,6 +257,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
 
       {/* 5/11 (Rúben, a visita real): gravar a conversa da visita; no fim propõe os campos da Visita. Fica por cima dos passos para
           continuar a gravar enquanto se anda entre eles. */}
+      {/* 6/11 (Rúben): ao abrir o negócio na Visita, a morada para o Waze e o Google Maps */}
+      {d.fase === 2 && !d.perdido && ver === null && <div className="mt-6"><ACaminho d={d} /></div>}
       {d.fase === 2 && !d.perdido && ver === null && (
         <div className="mt-6"><ChamadaDireto ctx={ctx} d={d} modo="visita" grupos={[
           EXTERIOR, INTERIOR, ...gruposArea(ctx.S.campos, d.f), ESCOLHAS,

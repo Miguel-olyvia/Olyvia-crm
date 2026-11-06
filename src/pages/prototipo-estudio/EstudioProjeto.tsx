@@ -79,7 +79,7 @@ export default function EstudioProjeto() {
   const [aberta, setAberta] = useState<string | null>(null);
   const [mostrar, setMostrar] = useState(false);
   const [aviso, setAviso] = useState("");
-  useEffect(() => { try { localStorage.setItem(CHAVE, JSON.stringify(p)); } catch { /* fica só em memória */ } }, [p]);
+  useEffect(() => { try { localStorage.setItem(CHAVE, JSON.stringify({ ...p, gravadoEm: Date.now() })); } catch { /* fica só em memória */ } }, [p]);
   // 5/11: com o Estúdio aberto em dois separadores (ou aberto de novo pela Visita), o que um grava passa para o outro, em vez de o
   // separador mais antigo gravar por cima (perdia-se o negócio de onde veio e o «Voltar ao negócio»)
   useEffect(() => {

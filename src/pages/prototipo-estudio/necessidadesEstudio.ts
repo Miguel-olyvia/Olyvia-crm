@@ -33,6 +33,8 @@ export interface Projeto {
   servicos?: { id: string; q: number }[];
   /** 6/11: os serviços sugeridos pelos produtos a que se disse «agora não» (não voltam a ser sugeridos). */
   servicosRecusados?: string[];
+  /** 6/11: quando o Estúdio gravou pela última vez (ms); a Visita guarda no negócio a versão mais recente. */
+  gravadoEm?: number;
 }
 export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 

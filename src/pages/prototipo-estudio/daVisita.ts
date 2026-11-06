@@ -2,12 +2,12 @@
 // Visita de um negócio: a planta desenhada (f.planta) é o antes, o pé-direito e o teto falso vêm das respostas da visita, e o estilo sai das
 // cores ditas nas «Peças da casa de banho» (o revestimento, a base, as torneiras, o perfil; o móvel à parte).
 import { respostasDoEstudio } from "./respostasDoEstudio";
-import { PLANTA_VAZIA, lerPlanta, type Planta } from "@/emylia/planta";
+import { PLANTA_VAZIA, areaChaoM2, areaParedesM2, lerPlanta, type Planta } from "@/emylia/planta";
 import type { LinhaLevada } from "@/emylia/ligarEstudio";
 import { linhasParaLevar } from "./levarParaNegocio";
 import type { Cor, Estilo } from "./catalogoFake";
 import { copiaPlanta } from "./exemploEstudio";
-import type { Projeto } from "./necessidadesEstudio";
+import { alturaFinalCm, type Projeto } from "./necessidadesEstudio";
 
 export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
 /** 5/11: o que o Estúdio devolve ao negócio quando se carrega em «Voltar ao negócio» (a Visita lê-o e grava a planta). */
@@ -59,12 +59,50 @@ export function guardarParaEstudio(p: Projeto): boolean {
 
 /** Abrir o Estúdio de um negócio: se o projeto guardado é deste negócio, continua-se (não se perde o depois); senão começa um novo. */
 export function abrirEstudio(nome: string, f: Record<string, string>, negocio: number, origem: string): boolean {
+  // 6/11: o projeto vive no negócio (f.estudio); o deste browser só ganha se for do mesmo negócio e mais recente
+  const doNegocio = projetoDoNegocio(f);
+  let local: Projeto | null = null;
+  try { const t = localStorage.getItem(CHAVE_ESTUDIO); local = t ? (JSON.parse(t) as Projeto) : null; } catch { local = null; }
+  if (local?.negocio !== negocio) local = null;
+  const melhor = local && (!doNegocio || (local.gravadoEm ?? 0) >= (doNegocio.gravadoEm ?? 0)) ? local : doNegocio;
+  if (melhor) return guardarParaEstudio({ ...melhor, nome, origem, negocio });
+  return guardarParaEstudio(projetoDaVisita(nome, f, negocio, origem));
+}
+
+/** 6/11: o projeto do Estúdio gravado no negócio (f.estudio, JSON), ou null. */
+export function projetoDoNegocio(f: Record<string, string | undefined>): Projeto | null {
+  if (!f.estudio) return null;
+  try {
+    const p = JSON.parse(f.estudio) as Projeto;
+    return p && p.antes && p.depois && p.escolhas ? p : null;
+  } catch { return null; }
+}
+
+/** 6/11: o projeto deste negócio que o Estúdio tem neste browser (para a Visita o gravar no negócio), ou null. */
+export function projetoDoEstudioPara(negocio: number): Projeto | null {
   try {
     const t = localStorage.getItem(CHAVE_ESTUDIO);
-    const guardado = t ? (JSON.parse(t) as Projeto) : null;
-    if (guardado?.negocio === negocio) return guardarParaEstudio({ ...guardado, nome, origem });
-  } catch { /* sem projeto guardado que sirva: um novo */ }
-  return guardarParaEstudio(projetoDaVisita(nome, f, negocio, origem));
+    const p = t ? (JSON.parse(t) as Projeto) : null;
+    return p?.negocio === negocio ? p : null;
+  } catch { return null; }
+}
+
+/** 6/11: as medidas da área que saem do Estúdio: o chão e as paredes da planta do depois (até ao teto falso), os pontos de água e
+ *  os vasos sanitários pelas peças que ficam. Só o que a planta sabe (sem paredes, sem m²). */
+export function medidasDoEstudio(p: Projeto): Partial<Record<"pav" | "par" | "ptf" | "ptq" | "pcs", number>> {
+  const out: Partial<Record<"pav" | "par" | "ptf" | "ptq" | "pcs", number>> = {};
+  const chao = areaChaoM2(p.depois.paredes);
+  if (chao !== null) out.pav = chao;
+  const paredes = areaParedesM2(p.depois, alturaFinalCm(p.alturas) / 100);
+  if (paredes !== null) out.par = paredes;
+  const tipos = p.depois.pecas.map((x) => x.tipo);
+  if (tipos.length) {
+    const conta = (ts: string[]) => tipos.filter((t) => ts.includes(t)).length;
+    out.ptf = conta(["sanita", "bide", "base", "banheira", "movel"]);
+    out.ptq = conta(["bide", "base", "banheira", "movel"]);
+    out.pcs = conta(["sanita", "bide"]);
+  }
+  return out;
 }
 
 /** O Estúdio devolve a planta do antes ao negócio de onde veio. */
