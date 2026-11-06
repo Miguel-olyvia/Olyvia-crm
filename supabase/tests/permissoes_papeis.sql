@@ -1,0 +1,354 @@
+-- ============================================================
+-- Teste: quem passa e quem é bloqueado nas ações de permissões, por papel (base RH)
+-- ============================================================
+-- SÓ para a base RH (project-ref uetjghdkwbywbftedtth). NUNCA na de produção (tzbfgwpckrfbqcolqxtm).
+-- Tudo dentro de BEGIN … ROLLBACK; cada ação corre num sub-bloco que acaba SEMPRE em RAISE (desfaz-se o que
+-- a ação escreveu, mesmo quando passa). As trocas de papel da conta-sonda também são desfeitas no ROLLBACK final.
+-- Nada de DDL persistente: só tabelas temporárias ON COMMIT DROP, que o ROLLBACK leva.
+--
+-- Correr (o resultado é o último SELECT, uma linha por verificação + a linha TOTAL):
+--   supabase db query --linked --workdir <workdir RH> -f supabase/tests/permissoes_papeis.sql
+--
+-- O ESPERADO é derivado das tabelas, não das funções testadas:
+--   perfil  = anew_role_permissions do papel da associação ativa (não-cliente) nesta organização
+--   papel   = neg_papeis_permissoes dos Papéis no Negócio da ficha ligada (pessoas_contas ativa, não revogada,
+--             pessoa ativa) em pessoas_papeis_negocio, + 'tecnico' se fn_rh_pessoa_tecnica
+--   admin   = associação ativa ao papel global system_admin
+-- O OBTIDO é o que as funções vivas devolvem com a sessão da conta (request.jwt.claims + role authenticated).
+--
+-- Cobre (por conta ativa da organização + conta-sonda sem ficha RH com o papel trocado para system_admin, viewer e
+-- teste_rh_so_ponto — esta última é o caso "tem hr.assiduidade.picar mas não tem ficha ligada"):
+--   1. fn_cat_pode: negocios.proposta.enviar, portal.manage, client_contracts.cancel, quotes.view_costs,
+--      deals.delete, trash.view, hr.assiduidade.picar, hr.pessoas.view
+--   2. trg_documents_portal_exige_permissao: insert em documents visible_to_client=true (portal.manage OU
+--      negocios.proposta.enviar) e =false (só a RLS)
+--   3. Custos: rpc_quote_lines_custos (quotes.view + quotes.view_costs|quotes.manage) e neg_ler_negocios
+--      (pessoas.view + quotes.view_costs)
+--   4. rpc_hr_picar: com ficha → hr.assiduidade.picar; sem ficha → deve recusar com mensagem de "sem ficha"
+--   5. purge_business_entity('quote', …): bloqueia sem deals.delete (quando passa, o apagar é desfeito)
+-- ============================================================
+
+BEGIN;
+
+CREATE TEMP TABLE _perm_rel (
+  n           serial,
+  conta       text,
+  verificacao text,
+  esperado    text,
+  obtido      text,
+  resultado   text,
+  detalhe     text
+) ON COMMIT DROP;
+
+CREATE TEMP TABLE _perm_contas (
+  ordem        int,
+  user_id      uuid,
+  auth_id      uuid,
+  troca_papel  uuid,   -- não nulo: a associação da conta-sonda passa a este papel durante as verificações
+  rotulo       text
+) ON COMMIT DROP;
+
+CREATE TEMP TABLE _perm_exp (
+  code   text PRIMARY KEY,
+  perfil boolean,
+  papel  boolean
+) ON COMMIT DROP;
+
+DO $t$
+DECLARE
+  c_org    CONSTANT uuid := 'b6ffce4f-f630-4933-833a-008649757a33';
+  c_sonda  CONSTANT uuid := 'b0e36009-0b71-4e80-9851-cc2c01d12d46';  -- anew_users.id: super_admin sem ficha RH
+  c_codes  CONSTANT text[] := ARRAY['negocios.proposta.enviar', 'portal.manage', 'client_contracts.cancel', 'quotes.view_costs',
+                                    'deals.delete', 'trash.view', 'hr.assiduidade.picar', 'hr.pessoas.view'];
+  c_extra  CONSTANT text[] := ARRAY['quotes.view', 'quotes.manage', 'pessoas.view', 'hr.assiduidade.picar.outros'];
+  a            record;
+  v_code       text;
+  v_role_orig  uuid;
+  v_rolecode   text;
+  v_sa         boolean;
+  v_membro     boolean;   -- associação ativa não-cliente nesta organização (RLS de documents)
+  v_ficha      uuid;      -- pessoas_contas ativa (o critério de hr_pessoa_do_utilizador)
+  v_pessoa_neg uuid;      -- ficha para os Papéis no Negócio (o critério de fn_neg_pessoa_da_conta)
+  v_papeis     text[];
+  v_claims     text;
+  v_quote      uuid;
+  v_quotes     uuid[];
+  v_base_cost  int;
+  v_base_neg   int;
+  v_exp_b      boolean;
+  v_got_b      boolean;
+  v_exp        text;
+  v_got        text;
+  v_det        text;
+  v_msg        text;
+  v_state      text;
+  v_n          int;
+  v_nc         int;
+  v_j          jsonb;
+  v_ok_role    text;
+BEGIN
+  -- Guardas: objetos que o teste usa têm de existir (base RH com a migration 20270110100000).
+  IF to_regclass('public.neg_papeis_permissoes') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_documents_portal_exige_permissao') THEN
+    RAISE EXCEPTION 'ABORTADO: esta base não tem neg_papeis_permissoes / trg_documents_portal_exige_permissao (é a base RH?)';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM anew_organizations WHERE id = c_org) THEN
+    RAISE EXCEPTION 'ABORTADO: organização % não existe', c_org;
+  END IF;
+
+  -- Dados de referência (como postgres).
+  SELECT array_agg(q.id ORDER BY q.created_at) INTO v_quotes
+  FROM quotes q WHERE q.organization_id = c_org AND q.deleted_at IS NULL;
+  v_quote := v_quotes[1];
+  SELECT count(*) INTO v_base_cost FROM quote_lines l
+  WHERE l.quote_id = ANY (v_quotes)
+    AND (l.cost_price IS NOT NULL OR l.custo_material_unit IS NOT NULL OR l.custo_mao_obra_unit IS NOT NULL);
+  SELECT count(*) INTO v_base_neg FROM quotes q JOIN negocios n ON n.id = q.negocio_id
+  WHERE n.organization_id = c_org AND n.deleted_at IS NULL AND n.numero IS NOT NULL AND q.fluxo_emylia AND q.deleted_at IS NULL;
+
+  -- Contas: todas as associações ativas da organização (só a primeira de cliente) + a sonda com papel trocado.
+  INSERT INTO _perm_contas (ordem, user_id, auth_id, troca_papel, rotulo)
+  SELECT row_number() OVER (ORDER BY r.code, u.email), u.id, u.auth_user_id, NULL,
+         r.code || ' <' || u.email || '>'
+  FROM anew_memberships am
+  JOIN anew_users u ON u.id = am.user_id
+  JOIN anew_roles r ON r.id = am.role_id
+  WHERE am.organization_id = c_org AND am.status = 'active' AND u.auth_user_id IS NOT NULL
+    AND (r.code <> 'client' OR u.id = (SELECT min(m2.user_id::text)::uuid FROM anew_memberships m2 JOIN anew_roles r2 ON r2.id = m2.role_id
+                                        WHERE m2.organization_id = c_org AND m2.status = 'active' AND r2.code = 'client'));
+  INSERT INTO _perm_contas (ordem, user_id, auth_id, troca_papel, rotulo)
+  SELECT 900 + row_number() OVER (ORDER BY r.code), u.id, u.auth_user_id, r.id, r.code || ' (sonda <' || u.email || '>)'
+  FROM anew_users u
+  JOIN anew_roles r ON (r.code = 'system_admin' AND r.organization_id IS NULL AND r.is_system)
+                    OR (r.code IN ('viewer', 'teste_rh_so_ponto') AND r.organization_id = c_org AND r.deleted_at IS NULL)
+  WHERE u.id = c_sonda;
+
+  FOR a IN SELECT * FROM _perm_contas ORDER BY ordem LOOP
+    -- ── preparar a conta (postgres) ────────────────────────────────────────
+    PERFORM set_config('request.jwt.claims', '', true);
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    IF a.troca_papel IS NOT NULL THEN
+      SELECT role_id INTO v_role_orig FROM anew_memberships WHERE user_id = a.user_id AND organization_id = c_org;
+      UPDATE anew_memberships SET role_id = a.troca_papel WHERE user_id = a.user_id AND organization_id = c_org;
+    END IF;
+
+    SELECT r.code INTO v_rolecode FROM anew_memberships am JOIN anew_roles r ON r.id = am.role_id
+    WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active' LIMIT 1;
+
+    v_sa := EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_roles r ON r.id = am.role_id
+                    WHERE am.user_id = a.user_id AND am.status = 'active' AND r.code = 'system_admin'
+                      AND r.is_system AND r.organization_id IS NULL AND r.deleted_at IS NULL);
+    v_membro := EXISTS (SELECT 1 FROM anew_memberships am WHERE am.user_id = a.user_id AND am.organization_id = c_org
+                          AND am.status = 'active' AND am.role_is_client IS NOT TRUE);
+    SELECT pc.pessoa_id INTO v_ficha FROM pessoas_contas pc
+    WHERE pc.anew_user_id = a.user_id AND pc.organization_id = c_org AND pc.estado = 'activa' LIMIT 1;
+    SELECT pc.pessoa_id INTO v_pessoa_neg FROM pessoas_contas pc JOIN pessoas p ON p.id = pc.pessoa_id
+    WHERE pc.anew_user_id = a.user_id AND pc.organization_id = c_org AND pc.estado = 'activa' AND pc.revogada_em IS NULL
+      AND p.deleted_at IS NULL AND (p.data_saida IS NULL OR p.data_saida >= current_date)
+    ORDER BY pc.ligada_em DESC NULLS LAST LIMIT 1;
+    SELECT coalesce(array_agg(DISTINCT x), '{}') INTO v_papeis FROM (
+      SELECT pp.papel AS x FROM pessoas_papeis_negocio pp WHERE pp.pessoa_id = v_pessoa_neg AND pp.organization_id = c_org
+      UNION SELECT 'tecnico' WHERE v_pessoa_neg IS NOT NULL AND public.fn_rh_pessoa_tecnica(c_org, v_pessoa_neg)) s;
+
+    TRUNCATE _perm_exp;
+    INSERT INTO _perm_exp (code, perfil, papel)
+    SELECT c,
+      EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id AND p.permission_code = c
+              WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active' AND am.role_is_client IS NOT TRUE),
+      EXISTS (SELECT 1 FROM neg_papeis_permissoes m WHERE m.permission_code = c AND m.papel = ANY (v_papeis))
+    FROM unnest(c_codes || c_extra) c;
+
+    a.rotulo := a.rotulo || CASE WHEN cardinality(v_papeis) > 0 THEN ' [neg: ' || array_to_string(v_papeis, ',') || ']' ELSE '' END
+                         || CASE WHEN v_ficha IS NULL THEN ' [sem ficha]' ELSE '' END;
+    v_claims := json_build_object('sub', a.auth_id, 'role', 'authenticated')::text;
+
+    -- ── 1. fn_cat_pode ─────────────────────────────────────────────────────
+    FOREACH v_code IN ARRAY c_codes LOOP
+      SELECT v_sa OR e.perfil OR e.papel,
+             concat_ws('+', CASE WHEN v_sa THEN 'admin' END, CASE WHEN e.perfil THEN 'perfil' END, CASE WHEN e.papel THEN 'papel' END)
+        INTO v_exp_b, v_det FROM _perm_exp e WHERE e.code = v_code;
+      v_got_b := NULL; v_msg := NULL;
+      BEGIN
+        PERFORM set_config('request.jwt.claims', v_claims, true);
+        PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
+        EXECUTE 'SET LOCAL ROLE authenticated';
+        v_got_b := public.fn_cat_pode(c_org, v_code);
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '__desfazer__';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM <> '__desfazer__' THEN v_msg := SQLSTATE || ': ' || SQLERRM; END IF;
+      END;
+      v_exp := CASE WHEN v_exp_b THEN 'sim' ELSE 'não' END;
+      v_got := coalesce(CASE WHEN v_got_b THEN 'sim' WHEN NOT v_got_b THEN 'não' END, 'erro');
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '1 fn_cat_pode ' || v_code, v_exp, v_got, CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
+              coalesce(v_msg, nullif(v_det, ''), '—'));
+    END LOOP;
+
+    -- ── 2. documents: visible_to_client true / false ───────────────────────
+    FOR v_n IN 0..1 LOOP
+      IF v_quote IS NULL THEN
+        INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+        VALUES (a.rotulo, '2 documents insert visible_to_client=' || (v_n = 0)::text, 'sem dados', 'sem dados', 'OK', 'sem orçamentos na organização');
+        CONTINUE;
+      END IF;
+      IF v_n = 0 THEN
+        SELECT v_sa OR bool_or(e.perfil OR e.papel) INTO v_exp_b FROM _perm_exp e WHERE e.code IN ('portal.manage', 'negocios.proposta.enviar');
+        v_det := CASE WHEN NOT v_exp_b THEN 'sem portal.manage/proposta.enviar' WHEN NOT v_membro THEN 'fora da RLS (não membro)' ELSE 'membro com permissão' END;
+        v_exp_b := v_exp_b AND v_membro;
+      ELSE
+        v_exp_b := v_membro;
+        v_det := CASE WHEN v_membro THEN 'interno: só RLS' ELSE 'interno: fora da RLS (não membro)' END;
+      END IF;
+      v_msg := NULL; v_state := NULL;
+      BEGIN
+        PERFORM set_config('request.jwt.claims', v_claims, true);
+        PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
+        EXECUTE 'SET LOCAL ROLE authenticated';
+        INSERT INTO public.documents (organization_id, entity_type, entity_id, file_name, file_url, document_type, visible_to_client)
+        VALUES (c_org, 'quote', v_quote, 'teste-permissoes.pdf', 'teste/permissoes/nao-existe.pdf', 'other', v_n = 0);
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '__desfazer__';
+      EXCEPTION WHEN OTHERS THEN
+        v_msg := SQLERRM; v_state := SQLSTATE;
+      END;
+      v_got := CASE WHEN v_msg = '__desfazer__' THEN 'passou' ELSE 'bloqueado' END;
+      v_exp := CASE WHEN v_exp_b THEN 'passou' ELSE 'bloqueado' END;
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '2 documents insert visible_to_client=' || (v_n = 0)::text, v_exp, v_got,
+              CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
+              v_det || CASE WHEN v_msg <> '__desfazer__' THEN ' | ' || v_state || ': ' || left(v_msg, 140) ELSE '' END);
+    END LOOP;
+
+    -- ── 3a. rpc_quote_lines_custos ─────────────────────────────────────────
+    IF v_base_cost = 0 THEN
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '3a rpc_quote_lines_custos', 'sem dados', 'sem dados', 'OK', 'nenhuma linha com custos na organização');
+    ELSE
+      v_exp := CASE
+        WHEN NOT (v_membro AND EXISTS (SELECT 1 FROM anew_users u JOIN anew_memberships am ON am.user_id = u.id AND am.status = 'active'
+                                       JOIN anew_role_permissions p ON p.role_id = am.role_id AND p.permission_code = 'quotes.view'
+                                       WHERE u.id = a.user_id)) THEN 'sem linhas'
+        WHEN v_sa OR EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code IN ('quotes.view_costs', 'quotes.manage') AND (e.perfil OR e.papel)) THEN 'com custos'
+        ELSE 'custos a null' END;
+      v_n := NULL; v_nc := NULL; v_msg := NULL;
+      BEGIN
+        PERFORM set_config('request.jwt.claims', v_claims, true);
+        PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
+        EXECUTE 'SET LOCAL ROLE authenticated';
+        SELECT count(*), count(*) FILTER (WHERE x.cost_price IS NOT NULL OR x.custo_material_unit IS NOT NULL OR x.custo_mao_obra_unit IS NOT NULL)
+          INTO v_n, v_nc FROM public.rpc_quote_lines_custos(v_quotes) x;
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '__desfazer__';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM <> '__desfazer__' THEN v_msg := SQLSTATE || ': ' || SQLERRM; END IF;
+      END;
+      v_got := CASE WHEN v_msg IS NOT NULL THEN 'erro' WHEN v_n = 0 THEN 'sem linhas' WHEN v_nc > 0 THEN 'com custos' ELSE 'custos a null' END;
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '3a rpc_quote_lines_custos', v_exp, v_got, CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
+              coalesce(v_msg, format('%s linhas, %s com custo (base: %s com custo)', v_n, v_nc, v_base_cost)));
+    END IF;
+
+    -- ── 3b. neg_ler_negocios (fn_neg_ler_orcamento por dentro) ─────────────
+    IF v_base_neg = 0 THEN
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '3b neg_ler_negocios custos', 'sem dados', 'sem dados', 'OK', 'nenhum orçamento Emylia na organização');
+    ELSE
+      v_exp := CASE
+        WHEN NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND (v_sa OR e.perfil OR e.papel)) THEN 'bloqueado'
+        WHEN EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'quotes.view_costs' AND (v_sa OR e.perfil OR e.papel)) THEN 'com custos'
+        ELSE 'custos a null' END;
+      v_n := NULL; v_nc := NULL; v_msg := NULL; v_j := NULL;
+      BEGIN
+        PERFORM set_config('request.jwt.claims', v_claims, true);
+        PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
+        EXECUTE 'SET LOCAL ROLE authenticated';
+        v_j := public.neg_ler_negocios(c_org);
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '__desfazer__';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM <> '__desfazer__' THEN v_msg := SQLSTATE || ': ' || SQLERRM; END IF;
+      END;
+      IF v_j IS NOT NULL THEN
+        v_n  := jsonb_array_length(jsonb_path_query_array(v_j, '$[*].orcamentos[*].linhas[*]'));
+        v_nc := jsonb_array_length(jsonb_path_query_array(v_j, '$[*].orcamentos[*].linhas[*].custo.custo_un ? (@ != null)'));
+      END IF;
+      v_got := CASE WHEN v_msg IS NOT NULL THEN 'bloqueado' WHEN v_n = 0 THEN 'sem linhas' WHEN v_nc > 0 THEN 'com custos' ELSE 'custos a null' END;
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '3b neg_ler_negocios custos', v_exp, v_got, CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
+              coalesce(left(v_msg, 160), format('%s linhas, %s com custo_un', v_n, v_nc)));
+    END IF;
+
+    -- ── 4. rpc_hr_picar ────────────────────────────────────────────────────
+    SELECT e.perfil INTO v_exp_b FROM _perm_exp e WHERE e.code = 'hr.assiduidade.picar';
+    IF v_ficha IS NOT NULL THEN
+      v_exp := CASE WHEN v_exp_b THEN 'passou' ELSE 'bloqueado: sem permissão' END;
+      v_det := 'própria ficha';
+    ELSE
+      v_exp := CASE WHEN v_exp_b THEN 'bloqueado: sem ficha' ELSE 'bloqueado: sem permissão' END;
+      v_det := 'sem ficha (pessoa NULL)';
+    END IF;
+    v_msg := NULL; v_state := NULL;
+    BEGIN
+      PERFORM set_config('request.jwt.claims', v_claims, true);
+      PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
+      EXECUTE 'SET LOCAL ROLE authenticated';
+      PERFORM public.rpc_hr_picar(c_org, v_ficha, 'entrada');
+      RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '__desfazer__';
+    EXCEPTION WHEN OTHERS THEN
+      v_msg := SQLERRM; v_state := SQLSTATE;
+    END;
+    v_got := CASE
+      WHEN v_msg = '__desfazer__' THEN 'passou'
+      WHEN v_msg ~* 'sem[ _]ficha|nao tem ficha|não tem ficha|sem pessoa ligada|sem_ficha' THEN 'bloqueado: sem ficha'
+      WHEN v_msg ~* 'picagem_sem_permissao' THEN 'bloqueado: sem permissão'
+      ELSE 'bloqueado: outro' END;
+    INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+    VALUES (a.rotulo, '4 rpc_hr_picar', v_exp, v_got, CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
+            v_det || CASE WHEN v_msg <> '__desfazer__' THEN ' | ' || v_state || ': ' || left(v_msg, 140) ELSE '' END);
+
+    -- ── 5. purge_business_entity (Lixo) ────────────────────────────────────
+    IF v_quote IS NULL THEN
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '5 purge_business_entity quote', 'sem dados', 'sem dados', 'OK', 'sem orçamentos');
+    ELSE
+      v_exp_b := v_membro AND EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id
+                                       AND p.permission_code = 'deals.delete' WHERE am.user_id = a.user_id AND am.status = 'active');
+      v_exp := CASE WHEN v_exp_b THEN 'passou a guarda' ELSE 'bloqueado' END;
+      v_msg := NULL; v_state := NULL; v_got_b := NULL;
+      BEGIN
+        PERFORM set_config('request.jwt.claims', v_claims, true);
+        PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
+        EXECUTE 'SET LOCAL ROLE authenticated';
+        v_got_b := public.purge_business_entity('quote', v_quote);
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '__desfazer__';
+      EXCEPTION WHEN OTHERS THEN
+        v_msg := SQLERRM; v_state := SQLSTATE;
+      END;
+      v_got := CASE
+        WHEN v_msg = '__desfazer__' THEN 'passou a guarda'
+        WHEN v_state = '42501' THEN 'bloqueado'
+        ELSE 'passou a guarda' END;   -- outro erro = falhou depois da verificação de permissão
+      INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+      VALUES (a.rotulo, '5 purge_business_entity quote', v_exp, v_got, CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
+              CASE WHEN v_msg = '__desfazer__' THEN 'devolveu ' || coalesce(v_got_b::text, 'null') || ' (apagar desfeito)'
+                   ELSE v_state || ': ' || left(v_msg, 140) END);
+    END IF;
+
+    -- ── repor a sonda (o ROLLBACK final também desfaz) ─────────────────────
+    PERFORM set_config('request.jwt.claims', '', true);
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    IF a.troca_papel IS NOT NULL THEN
+      UPDATE anew_memberships SET role_id = v_role_orig WHERE user_id = a.user_id AND organization_id = c_org;
+    END IF;
+  END LOOP;
+END $t$;
+
+SELECT conta AS papel_conta, verificacao, esperado, obtido, resultado, detalhe
+FROM (
+  SELECT n, conta, verificacao, esperado, obtido, resultado, detalhe FROM _perm_rel
+  UNION ALL
+  SELECT 1000000, 'TOTAL', count(*)::text || ' verificações', NULL, NULL,
+         count(*) FILTER (WHERE resultado = 'FALHA')::text || ' FALHA(S)',
+         string_agg(DISTINCT verificacao, ', ') FILTER (WHERE resultado = 'FALHA')
+  FROM _perm_rel
+) s
+ORDER BY n;
+
+ROLLBACK;
