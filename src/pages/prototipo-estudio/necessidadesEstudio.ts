@@ -36,6 +36,8 @@ export interface Projeto {
   servicosRecusados?: string[];
   /** 6/11: quando o Estúdio gravou pela última vez (ms); a Visita guarda no negócio a versão mais recente. */
   gravadoEm?: number;
+  /** 6/11: a divisão do projeto (a cozinha tem as suas peças e o seu catálogo). Sem ela, casa de banho. */
+  divisao?: "Casa de banho" | "Cozinha";
   /** 6/11: as peças mudadas de sítio no próprio depois (deixam de seguir o antes). Sem o campo: projeto de antes da regra. */
   movidasNoDepois?: string[];
 }
@@ -59,8 +61,10 @@ export interface Linha {
 
 /** Mão de obra e trabalhos de teste (€ sem IVA). */
 export const TABELA = {
-  retirar: { base: 90, banheira: 180, sanita: 60, bide: 60, movel: 50, coluna: 40, espelho: 20, toalheiro: 30, porta: 0, janela: 0 } as Record<TipoPeca, number>,
-  instalar: { base: 180, banheira: 260, sanita: 140, bide: 120, movel: 150, coluna: 90, espelho: 60, toalheiro: 80, porta: 0, janela: 0 } as Record<TipoPeca, number>,
+  retirar: { base: 90, banheira: 180, sanita: 60, bide: 60, movel: 50, coluna: 40, espelho: 20, toalheiro: 30, porta: 0, janela: 0,
+    bancada: 80, lava: 40, placa: 30, forno: 30, frigorifico: 20, maquina: 30, exaustor: 40, armario: 50 } as Record<TipoPeca, number>,
+  instalar: { base: 180, banheira: 260, sanita: 140, bide: 120, movel: 150, coluna: 90, espelho: 60, toalheiro: 80, porta: 0, janela: 0,
+    bancada: 200, lava: 120, placa: 90, forno: 80, frigorifico: 40, maquina: 90, exaustor: 120, armario: 150 } as Record<TipoPeca, number>,
   demolicaoM2: 25,
   entulhoPecas: 120,
   pontoAgua: 150,
@@ -73,11 +77,11 @@ export const TABELA = {
 };
 export const IVA = 0.23;
 
-const AGUA: TipoPeca[] = ["base", "banheira", "sanita", "bide", "movel"];
+const AGUA: TipoPeca[] = ["base", "banheira", "sanita", "bide", "movel", "lava", "maquina"];
 /** Para os textos: a base, a banheira, a sanita, a porta e a janela são femininas; o resto é masculino. */
-const FEMININO: TipoPeca[] = ["base", "banheira", "sanita", "porta", "janela"];
+const FEMININO: TipoPeca[] = ["base", "banheira", "sanita", "porta", "janela", "bancada", "placa", "maquina"];
 const SINGULAR: Partial<Record<Categoria, string>> = { coluna_duche: "Coluna de duche", resguardo: "Resguardo", torneira: "Torneira" };
-const ELETRICO: TipoPeca[] = ["espelho", "toalheiro"];
+const ELETRICO: TipoPeca[] = ["espelho", "toalheiro", "placa", "forno", "frigorifico", "maquina", "exaustor"];
 const MUDOU_SITIO = 20; // cm: mais do que isto, a peça mudou de sítio
 const r2 = (n: number) => Math.round(n * 100) / 100;
 

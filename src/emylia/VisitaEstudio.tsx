@@ -31,7 +31,10 @@ const dataEtapa = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short",
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 /** A visita que segue o Estúdio: a de uma casa de banho (o que o Estúdio sabe fazer hoje). */
-export const visitaComEstudio = (d: Negocio, divisoes: string[]) => d.linha === "wc" || divisoes.includes("Casa de banho");
+export const visitaComEstudio = (d: Negocio, divisoes: string[]) => d.linha === "wc" || d.linha === "coz" || divisoes.includes("Casa de banho") || divisoes.includes("Cozinha");
+/** 6/11: a divisão do Estúdio pelo negócio (a cozinha, quando é só cozinha). */
+export const divisaoDoEstudio = (d: Negocio): "Casa de banho" | "Cozinha" =>
+  d.linha === "coz" || (/cozinha/i.test(d.f.diag_tipo_area ?? "") && !/casa de banho/i.test(d.f.diag_tipo_area ?? "") && d.linha !== "wc") ? "Cozinha" : "Casa de banho";
 
 /** A morada da obra numa linha (a do negócio, ou o local). */
 export const moradaDe = (d: Negocio) => (d.f.morada ? [d.f.morada, d.f.cp, d.f.localidade].filter(Boolean).join(", ") : d.local) || "";
@@ -72,7 +75,10 @@ export function aplicarDoEstudio(ctx: Ctx, d: Negocio, p: Projeto): { avisos: st
     if (p.antes.paredes.length) { ctx.A.campo(d.id, "planta", gravarPlanta(p.antes)); avisos.push("A planta ficou no negócio."); }
     // as medidas: só as que a linha pede (os vasos sanitários só numa linha que os conta)
     const pede = camposMedida(LINHAS[d.linha]);
-    const med = Object.entries(medidasDoEstudio(p)).filter(([k]) => pede.some(([c, l]) => c === k && (k !== "pcs" || /sanit/i.test(l))));
+    // os «pcs» da linha são os vasos sanitários (casa de banho) ou os módulos (cozinha)
+  const m = medidasDoEstudio(p), rotuloPcs = pede.find(([c]) => c === "pcs")?.[1] ?? "";
+  const pcs = /sanit/i.test(rotuloPcs) ? m.pcs : /m[oó]dulo/i.test(rotuloPcs) ? m.modulos : undefined;
+  const med = Object.entries({ pav: m.pav, par: m.par, ptf: m.ptf, ptq: m.ptq, pcs }).filter(([k, n]) => n !== undefined && pede.some(([c]) => c === k));
     if (med.length) {
       for (const [k, n] of med) porMedida(d.visita.med, k as Parameters<typeof porMedida>[1], n as number);
       avisos.push("As medidas da área saíram da planta.");
@@ -135,7 +141,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   }, [d.id]);
 
   const abrir = () => {
-    if (abrirEstudio(d.nome, d.f, d.id, window.location.href)) window.open("/prototipo/estudio", "_blank");
+    if (abrirEstudio(d.nome, d.f, d.id, window.location.href, divisaoDoEstudio(d))) window.open("/prototipo/estudio", "_blank");
     else setFeito("Não deu para abrir o Estúdio neste browser.");
   };
   const prods = salvo ? produtosEscolhidos(salvo) : [];
@@ -194,7 +200,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
               <p className="text-[15px] text-muted-foreground">A planta de como está e de como vai ficar, as peças do catálogo, os serviços e o 3D.</p>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">Ao voltar, preenche sozinho as medidas, as necessidades e as peças da casa de banho.</p>
+          <p className="text-sm text-muted-foreground">Ao voltar, preenche sozinho as medidas e as necessidades{divisaoDoEstudio(d) === "Casa de banho" ? " e as peças da casa de banho" : ""}.</p>
           <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir o Estúdio</Button>
         </section>
       )}

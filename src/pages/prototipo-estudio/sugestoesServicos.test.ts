@@ -49,3 +49,23 @@ describe("os serviços sugeridos pelos produtos", () => {
     expect(ids(p)).toEqual([]);
   });
 });
+
+describe("a cozinha (6/11)", () => {
+  const cozinha: Planta = {
+    ...PLANTA_VAZIA, paredes: retangulo(300, 250),
+    pecas: [{ id: "b1", tipo: "bancada", x: 0, y: 0, w: 240, h: 60 }, { id: "l", tipo: "lava", x: 20, y: 5, w: 80, h: 50 }, { id: "pl", tipo: "placa", x: 150, y: 5, w: 60, h: 52 },
+      { id: "ex", tipo: "exaustor", x: 150, y: 0, w: 60, h: 45 }, { id: "ar", tipo: "armario", x: 240, y: 0, w: 60, h: 60 }, { id: "mq", tipo: "maquina", x: 100, y: 0, w: 60, h: 60 }],
+  };
+  const p = base({ divisao: "Cozinha", depois: cozinha, escolhas: { b1: "ban-quartzo-b", l: "lav-inox", pl: "pla-inducao-60", ex: "exa-inox-60", ar: "arm-branco", mq: "maq-encastrar" } });
+  it("os módulos, os recortes, o circuito da placa, a conduta e a máquina; com exaustor, sem ventilador", () => {
+    const s = sugestoesDeServicos(p);
+    const q = (id: string) => s.find((x) => x.sv.id === id)?.q;
+    expect(q("sv-montagem-cozinha")).toBe(5); // 240 cm de bancada = 4 módulos, mais o armário alto
+    expect(q("sv-recortes")).toBe(2);
+    expect(q("sv-circuito-placa")).toBe(1);
+    expect(q("sv-conduta")).toBe(1);
+    expect(q("sv-ligacao-maquina")).toBe(1);
+    expect(s.map((x) => x.sv.id)).not.toContain("sv-ventilador");
+    expect(s.find((x) => x.sv.id === "sv-limpeza")?.porque[0]).toMatch(/cozinha/);
+  });
+});

@@ -14,6 +14,7 @@ const TRABALHO: [RegExp, string][] = [
 const SERVICO: Record<string, string> = {
   "sv-imperm": "imperm", "sv-nicho": "nicho", "sv-pintura-teto": "pintura", "sv-estores": "estores", "sv-tomada": "tomada", "sv-aplique": "aplique",
   "sv-ventilador": "ventilador", "sv-eletrica": "eletrica", "sv-reboco": "reboco", "sv-rodape": "rodape", "sv-limpeza": "limpeza",
+  "sv-montagem-cozinha": "montagem_cozinha", "sv-recortes": "recortes", "sv-circuito-placa": "eletrica", "sv-conduta": "conduta", "sv-ligacao-maquina": "canalizacao",
 };
 
 export function linhasParaLevar(p: Projeto): LinhaLevada[] {

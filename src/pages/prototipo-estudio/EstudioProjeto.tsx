@@ -13,7 +13,7 @@ import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorPlanta } from "@/emylia/EditorPlanta";
-import { PECAS, cantos, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
+import { PECAS, cantos, tiposDaDivisao, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
 import { NOME_CATEGORIA, melhorPara, produto, type Categoria, type Produto } from "./catalogoFake";
 import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sairam, totais, type Linha, type Projeto } from "./necessidadesEstudio";
 import { Amostra, Areas, Cartao, Numero, PainelMateriais, PainelPeca, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
@@ -34,6 +34,9 @@ const SEM_PRODUTO: Record<TipoPeca, { cor: string; z0: number; z1: number }> = {
   bide: { cor: "#f4f4f2", z0: 0, z1: 40 }, movel: { cor: "#e8e3da", z0: 0, z1: 85 }, coluna: { cor: "#e8e3da", z0: 30, z1: 190 },
   espelho: { cor: "#cfe6ef", z0: 110, z1: 180 }, toalheiro: { cor: "#bfc3c7", z0: 90, z1: 170 }, porta: { cor: "#8a6a4a", z0: 0, z1: 205 },
   janela: { cor: "#bfe3f5", z0: 110, z1: 200 },
+  bancada: { cor: "#e8e3da", z0: 0, z1: 90 }, lava: { cor: "#c9ccd0", z0: 85, z1: 92 }, placa: { cor: "#2f3136", z0: 88, z1: 92 },
+  forno: { cor: "#9aa0a6", z0: 0, z1: 60 }, frigorifico: { cor: "#d9dcdf", z0: 0, z1: 200 }, maquina: { cor: "#c9ccd0", z0: 0, z1: 85 },
+  exaustor: { cor: "#9aa0a6", z0: 150, z1: 210 }, armario: { cor: "#e8e3da", z0: 0, z1: 210 },
 };
 
 function lerGuardado(): Projeto {
@@ -146,8 +149,17 @@ export default function EstudioProjeto() {
         transition={{ duration: 0.22, ease: "easeOut" }} className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_380px]">
         {passo === "Antes" && <>
           <section aria-labelledby="t-antes" className="min-w-0 space-y-4">
-            <h2 id="t-antes" className="text-2xl font-semibold tracking-tight">Como está hoje</h2>
-            <EditorPlanta planta={p.antes} onMudar={mudarAntes} divisao="Casa de banho" />
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <h2 id="t-antes" className="text-2xl font-semibold tracking-tight">Como está hoje</h2>
+              {/* 6/11 (Rúben): também a cozinha; a divisão escolhe as peças da barra e o catálogo */}
+              <div role="group" aria-label="A divisão" className="flex flex-wrap gap-2">
+                {(["Casa de banho", "Cozinha"] as const).map((dv) => (
+                  <button key={dv} type="button" className={chip((p.divisao ?? "Casa de banho") === dv)} aria-pressed={(p.divisao ?? "Casa de banho") === dv}
+                    onClick={() => setP((x) => ({ ...x, divisao: dv }))}>{dv}</button>
+                ))}
+              </div>
+            </div>
+            <EditorPlanta planta={p.antes} onMudar={mudarAntes} divisao={p.divisao ?? "Casa de banho"} />
           </section>
           <aside className="space-y-6">
             <Cartao titulo="Alturas">
@@ -190,7 +202,7 @@ export default function EstudioProjeto() {
             <EditorPlanta planta={p.depois} onMudar={mudarDepois} paredesFixas fantasmas={sairam(p)}
               bandeja={(p.porColocar ?? []).map((x) => { const prod = produto(x.produto); return { id: x.id, tipo: x.tipo, rotulo: prod?.n ?? PECAS[x.tipo].n, cor: prod?.hex }; })}
               aoColocar={(id, centro) => { setP((x) => colocar(x, id, centro)); setAberta(id); }}
-              tipos={["base", "banheira", "sanita", "bide", "movel", "coluna", "espelho", "toalheiro"]}
+              tipos={tiposDaDivisao(p.divisao)}
               aparencia={(pc) => { const prod = produto(p.escolhas[pc.id]); const e = estadoDaPeca(p, pc); return { cor: prod?.hex, rotulo: prod ? prod.colecao + " · " + PECAS[pc.tipo].n : undefined, destaque: e !== "fica" && !PECAS[pc.tipo].abertura }; }}
               aoTocarPeca={(pc) => setAberta(pc.id)} aoJuntarPeca={(pc) => setAberta(pc.id)}
               acoesDaPeca={(pc) => PECAS[pc.tipo].abertura ? null : <Button type="button" className="min-h-11" onClick={() => setAberta(pc.id)}>Escolher no catálogo</Button>} />

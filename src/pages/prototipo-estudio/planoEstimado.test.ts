@@ -56,3 +56,17 @@ describe("as medidas e o projeto no negócio", () => {
     expect(projetoDoNegocio({ estudio: "{partido" })).toBeNull();
   });
 });
+
+describe("as medidas da cozinha (6/11)", () => {
+  it("os módulos (a bancada, um por cada 60 cm; o armário alto, um) e os pontos de água do lava-loiça e da máquina", () => {
+    const cozinha: Projeto = { ...projeto, divisao: "Cozinha", depois: { ...PLANTA_VAZIA, paredes: retangulo(300, 250), pecas: [
+      { id: "b", tipo: "bancada", x: 0, y: 0, w: 180, h: 60 }, { id: "a", tipo: "armario", x: 240, y: 0, w: 60, h: 60 },
+      { id: "l", tipo: "lava", x: 10, y: 5, w: 80, h: 50 }, { id: "m", tipo: "maquina", x: 100, y: 0, w: 60, h: 60 },
+    ] } };
+    const m = medidasDoEstudio(cozinha);
+    expect(m.modulos).toBe(4);
+    expect(m.ptf).toBe(2);
+    expect(m.ptq).toBe(1);
+    expect(m.pcs).toBe(0);
+  });
+});

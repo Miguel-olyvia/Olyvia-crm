@@ -366,6 +366,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     );
     const resumoMedidas = CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`);
     const comWC = d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho");
+    // 6/11: a cozinha também segue o Estúdio
+    const comEstudio = comWC || d.linha === "coz" || divisoesEscolhidas(d.f).includes("Cozinha");
     const passoNec: Passo = { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
       resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> };
     passos = [
@@ -396,7 +398,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     ];
     // 6/11 (Rúben: «o Estúdio já está a fazer praticamente tudo»): numa casa de banho, depois do interior e da área vem o Estúdio; as
     // medidas, as necessidades e as peças saem dele e ficam dobradas no fecho, com o prazo e a decisão e o plano de obra estimado
-    if (simples && comWC) {
+    if (simples && comEstudio) {
       const pr = projetoDoNegocio(d.f);
       const ePecas = E(PECAS_WC), eDecisao = E(DECISAO);
       const ate = passos.findIndex((x) => x.id === "medidas" || x.id === "nec");
@@ -409,7 +411,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           corpo: <FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
             ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: aValidar(d, "medidas") ? nMed - medOk : 0 }]),
             { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0 },
-            ...(ePecas.oculto ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
+            ...(ePecas.oculto || !comWC ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
           ]} /> },
       ];
     }

@@ -68,3 +68,17 @@ describe("os casos do Catálogo real do testarh (5/11)", () => {
     expect(r[0].incluidas?.map((l) => l.id)).toEqual(["ret-b"]);
   });
 });
+
+describe("a cozinha no Catálogo verdadeiro (6/11)", () => {
+  const COZ = [
+    { id: "lv", n: "Lava-Loiça Inox 1 Cuba" }, { id: "mq", n: "Máquina de Lavar Loiça Encastre" }, { id: "pl", n: "Placa Indução 4 zonas" },
+    { id: "ex", n: "Exaustor de parede Inox" }, { id: "bc", n: "Bancada em Quartzo Branco" },
+  ];
+  it("o lava-loiça não é a máquina de lavar loiça; a placa, o exaustor e a bancada pelo nome", () => {
+    expect(produtoPara("lava", ["cinza"], COZ)?.id).toBe("lv");
+    expect(produtoPara("maquina", [], COZ)?.id).toBe("mq");
+    expect(produtoPara("placa", [], COZ)?.id).toBe("pl");
+    expect(produtoPara("exaustor", [], COZ)?.id).toBe("ex");
+    expect(produtoPara("bancada", ["branco"], COZ)?.id).toBe("bc");
+  });
+});

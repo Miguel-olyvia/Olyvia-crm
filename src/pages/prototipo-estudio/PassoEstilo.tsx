@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Check, Plus, Sparkles, Wrench, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PECAS, type PecaPlanta, type TipoPeca } from "@/emylia/planta";
+import { PECAS, tiposDaDivisao, type PecaPlanta, type TipoPeca } from "@/emylia/planta";
 import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, melhorPara, produto, type Categoria } from "./catalogoFake";
 import { decidir, decisaoDe, escolherProduto, juntarPorColocar, juntarServico, mudarQtdServico, qtdSugerida, tirarServico, type Decisao, type Projeto, totais } from "./necessidadesEstudio";
 import { juntarSugestoes, recusarSugestao, sugestoesDeServicos, type Sugestao } from "./sugestoesServicos";
@@ -16,8 +16,7 @@ import { Cartao, Cores, ListaProdutos, Resumo, Seguinte, chip, eur, nf } from ".
 import { Ilustracao } from "./Ilustracao";
 
 type SetP = React.Dispatch<React.SetStateAction<Projeto>>;
-const FEMININO: TipoPeca[] = ["base", "banheira", "sanita"];
-const JUNTAVEIS: TipoPeca[] = ["base", "banheira", "sanita", "bide", "movel", "coluna", "espelho", "toalheiro"];
+const FEMININO: TipoPeca[] = ["base", "banheira", "sanita", "bancada", "placa", "maquina"];
 /** As categorias com exceção de cor no estilo (as que o cliente costuma querer diferentes). */
 const EXCECOES: Categoria[] = ["movel", "sanita", "base", "torneira", "revestimento", "pavimento"];
 const DECISOES: { d: Decisao; n: string }[] = [{ d: "fica", n: "Fica" }, { d: "troca", n: "Trocar" }, { d: "tira", n: "Tirar" }];
@@ -90,7 +89,7 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
 
         <Cartao titulo="Juntar produtos novos">
           <div role="group" aria-label="Categorias" className="flex flex-wrap gap-2">
-            {JUNTAVEIS.map((tp) => (
+            {tiposDaDivisao(p.divisao).map((tp) => (
               <button key={tp} type="button" aria-pressed={cat === tp} className={chip(cat === tp)} onClick={() => setCat((x) => (x === tp ? null : tp))}>
                 <Ilustracao cat={tp} tamanho={24} />{PECAS[tp].n}
               </button>

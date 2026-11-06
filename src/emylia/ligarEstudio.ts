@@ -29,17 +29,21 @@ const PRODUTO: Record<string, RegExp> = {
   coluna: /coluna (suspensa|de arrumacao)|movel coluna/, espelho: /espelho/, toalheiro: /toalheiro/,
   coluna_duche: /coluna de duche|coluna termostatica|coluna termo|chuveiro/, resguardo: /resguardo|divisoria|vidro/,
   torneira: /torneira|misturadora/, revestimento: /revestimento|azulejo|parede|ceramic/, pavimento: /pavimento|piso|ladrilho|ceramic/,
+  bancada: /bancada|tampo/, lava: /lava.?loica|cuba/, placa: /placa|fogao|vitroceram|inducao/, forno: /forno/, frigorifico: /frigorif|combinado/,
+  maquina: /maquina.*loica/, exaustor: /exaust|chamine/, armario: /armario|modulo alto|coluna de cozinha/,
 };
 /** A palavra com que o nome de um bom par começa (ganha aos que só a têm no meio: «Móvel…» antes de «Toalheiro de móvel»). */
 const COMECA: Record<string, RegExp> = {
   sanita: /^sanita/, bide: /^bide/, base: /^base/, banheira: /^banheira/, movel: /^(movel|mobiliario)/, coluna: /^(coluna|movel coluna)/, espelho: /^espelho/,
   toalheiro: /^toalheiro/, coluna_duche: /^coluna/, resguardo: /^(resguardo|divisoria)/, torneira: /^(torneira|misturadora)/, revestimento: /^(revestimento|azulejo)/,
   pavimento: /^(pavimento|piso|ladrilho)/,
+  bancada: /^(bancada|tampo)/, lava: /^(lava|cuba)/, placa: /^(placa|fogao)/, forno: /^forno/, frigorifico: /^frigorif/, maquina: /^maquina/, exaustor: /^(exaust|chamine)/, armario: /^armario/,
 };
 /** Nomes que são de outra coisa, mesmo tendo a palavra (o toalheiro «de móvel», a sanita «de chão»). */
 const EXCLUI: Record<string, RegExp> = {
   movel: /toalheiro|espelho|torneira|puxador/, coluna: /toalheiro|duche|chuveiro/, base: /sanita|espelho|movel|torneira|lavatorio/,
   pavimento: /sanita|banheira|base|revestimento de parede/, revestimento: /sanita|banheira|base/, espelho: /movel coluna/, sanita: /tampo|tampa |acessorio/,
+  lava: /maquina/, placa: /exaustor/, bancada: /lava|placa/,
 };
 /** O que procurar no nome de um serviço do Catálogo, pela chave do Estúdio. */
 const SERVICO: Record<string, RegExp> = {
@@ -49,6 +53,11 @@ const SERVICO: Record<string, RegExp> = {
   "instalar:movel": /movel|mobiliario/, "instalar:coluna": /coluna|movel|mobiliario/, "instalar:espelho": /espelho/, "instalar:toalheiro": /toalheiro/,
   pintura: /pintura/, imperm: /impermeab/, nicho: /nicho/, estores: /estore|pintura/, tomada: /tomada|eletric/, aplique: /ilumina|aplique|led/,
   ventilador: /ventila|ventaxia|exaust/, eletrica: /eletric/, reboco: /reboco|regulariza/, rodape: /rodape/, limpeza: /limpeza/,
+  // 6/11: a cozinha
+  "instalar:bancada": /montagem.*cozinha|moveis de cozinha|cozinha/, "instalar:armario": /montagem.*cozinha|moveis de cozinha|cozinha/,
+  "instalar:lava": /lava.?loica|canaliza/, "instalar:placa": /placa|eletrodomest/, "instalar:forno": /forno|eletrodomest/,
+  "instalar:frigorifico": /frigorif|eletrodomest/, "instalar:maquina": /maquina|eletrodomest/, "instalar:exaustor": /exaust/,
+  montagem_cozinha: /montagem.*cozinha|moveis de cozinha|cozinha/, recortes: /recorte|furo|corte/, conduta: /conduta|exaust/,
 };
 /** As palavras de cada cor no nome de um produto. */
 const COR: Record<string, RegExp> = { cinza: /cinz|antracite|grafite|cromad/, preto: /pret|negr|black/, branco: /branc|white/, madeira: /madeira|oak|carvalho|nogueira/, bege: /bege|creme|areia/ };
@@ -71,7 +80,7 @@ export function servicoPara(chave: string, servicos: Readonly<Record<string, Ser
   // retirar uma peça: primeiro um serviço dessa peça («Remoção de banheira»), depois o geral (demolição)
   const m = chave.match(/^retirar:(.+)$/);
   if (m) {
-    const peca = ({ banheira: "banheira", base: "base", sanita: "sanita|louca", bide: "bide|louca", movel: "movel|mobiliario", espelho: "espelho", toalheiro: "toalheiro", coluna: "coluna|movel" } as Record<string, string>)[m[1]] ?? m[1];
+    const peca = ({ banheira: "banheira", base: "base", sanita: "sanita|louca", bide: "bide|louca", movel: "movel|mobiliario", espelho: "espelho", toalheiro: "toalheiro", coluna: "coluna|movel", bancada: "bancada|cozinha|movel", armario: "armario|cozinha|movel", lava: "lava|cuba" } as Record<string, string>)[m[1]] ?? m[1];
     const rx = new RegExp(`(remoc|retir|desmont|levant).*(${peca})|(${peca}).*(remoc|retir|desmont)`);
     const achado = Object.entries(servicos).find(([, s]) => rx.test(limpo(s.n)));
     if (achado) return { id: achado[0], n: achado[1].n, un: achado[1].un };

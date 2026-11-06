@@ -6,7 +6,9 @@
 /** Para onde vai a parede: este (direita), sul (baixo), oeste (esquerda), norte (cima). */
 export type Rumo = "E" | "S" | "W" | "N";
 export interface Parede { c: number; r: Rumo }
-export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "coluna" | "espelho" | "toalheiro" | "porta" | "janela";
+export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "coluna" | "espelho" | "toalheiro" | "porta" | "janela"
+  // 6/11 (Rúben: «adicionar também coisas para cozinha»)
+  | "bancada" | "lava" | "placa" | "forno" | "frigorifico" | "maquina" | "exaustor" | "armario";
 /** Uma peça na planta: o canto de cima à esquerda e o tamanho, em cm. */
 export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; w: number; h: number }
 export interface Ponto { x: number; y: number }
@@ -24,7 +26,20 @@ export const PECAS: Record<TipoPeca, { n: string; w: number; h: number; abertura
   toalheiro: { n: "Toalheiro", w: 50, h: 6 },
   porta: { n: "Porta", w: 80, h: 8, abertura: true },
   janela: { n: "Janela", w: 100, h: 8, abertura: true },
+  bancada: { n: "Bancada", w: 120, h: 60 },
+  lava: { n: "Lava-loiça", w: 80, h: 50 },
+  placa: { n: "Placa", w: 60, h: 52 },
+  forno: { n: "Forno", w: 60, h: 56 },
+  frigorifico: { n: "Frigorífico", w: 60, h: 65 },
+  maquina: { n: "Máquina da loiça", w: 60, h: 60 },
+  exaustor: { n: "Exaustor", w: 60, h: 45 },
+  armario: { n: "Armário alto", w: 60, h: 60 },
 };
+/** 6/11: as peças de cada divisão (a barra da planta e os produtos a juntar). */
+export const TIPOS_WC: TipoPeca[] = ["base", "banheira", "sanita", "bide", "movel", "coluna", "espelho", "toalheiro"];
+export const TIPOS_COZINHA: TipoPeca[] = ["bancada", "lava", "placa", "forno", "frigorifico", "maquina", "exaustor", "armario"];
+export const ehCozinha = (divisao?: string) => /cozinha/i.test(divisao ?? "");
+export const tiposDaDivisao = (divisao?: string): TipoPeca[] => (ehCozinha(divisao) ? TIPOS_COZINHA : TIPOS_WC);
 /** O que uma porta e uma janela tiram às paredes, em m² (a altura de sempre: porta 2 m, janela 1 m). */
 const ALTURA_ABERTURA: Partial<Record<TipoPeca, number>> = { porta: 2, janela: 1 };
 const VETOR: Record<Rumo, Ponto> = { E: { x: 1, y: 0 }, S: { x: 0, y: 1 }, W: { x: -1, y: 0 }, N: { x: 0, y: -1 } };

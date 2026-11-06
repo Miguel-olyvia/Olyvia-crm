@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   PASSO, PECAS, PLANTA_VAZIA, cantos, emL, etiquetasSemSobrepor, faltaFechar, gravarPlanta, juntarParede, juntarPeca, limites, moverParede, mudarComprimentoFechada, paredeDoTraco,
-  retangulo, type PecaPlanta, type Planta, type Ponto, type TipoPeca,
+  retangulo, tiposDaDivisao, type PecaPlanta, type Planta, type Ponto, type TipoPeca,
 } from "./planta";
 
 const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
@@ -19,7 +19,8 @@ const CHIP = "inline-flex min-h-11 touch-none select-none items-center gap-1.5 r
 /** A tela sem nada desenhado: 5 m por 4 m. */
 const TELA = { x: 0, y: 0, w: 500, h: 400 };
 const arred = (n: number) => Math.round(n / PASSO) * PASSO;
-const TIPOS_DE_SEMPRE: TipoPeca[] = ["base", "banheira", "sanita", "bide", "movel", "coluna", "espelho", "toalheiro", "porta", "janela"];
+/** 6/11: sem tipos dados, a barra tem as peças da divisão (a cozinha tem as dela), a porta e a janela. */
+const tiposDeSempre = (divisao?: string): TipoPeca[] => [...tiposDaDivisao(divisao), "porta", "janela"];
 
 /** O que se vê: a tela de sempre, alargada ao que está desenhado (com margem). Só muda quando se grava, nunca a meio de um traço. */
 function vistaDe(p: Planta, fantasmas: readonly PecaPlanta[] = []) {
@@ -75,7 +76,8 @@ export interface PropsEditor {
 }
 export interface ItemBandeja { id: string; tipo: TipoPeca; rotulo: string; cor?: string }
 
-export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, tipos = TIPOS_DE_SEMPRE, fantasmas = [], aparencia, aoTocarPeca, aoJuntarPeca, acoesDaPeca, textoBarra, bandeja = [], aoColocar }: PropsEditor) {
+export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, tipos: tiposDados, fantasmas = [], aparencia, aoTocarPeca, aoJuntarPeca, acoesDaPeca, textoBarra, bandeja = [], aoColocar }: PropsEditor) {
+  const tipos = tiposDados ?? tiposDeSempre(divisao);
   const id = useId();
   const [p, setP] = useState<Planta>(planta);
   const [vista, setVista] = useState(() => vistaDe(planta, fantasmas));

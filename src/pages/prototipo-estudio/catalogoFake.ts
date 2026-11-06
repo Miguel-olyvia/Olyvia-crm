@@ -18,9 +18,11 @@ export const NOME_CATEGORIA: Record<Categoria, string> = {
   base: "Bases de duche", banheira: "Banheiras", sanita: "Sanitas", bide: "Bidés", movel: "Móveis", coluna: "Móveis coluna", espelho: "Espelhos",
   toalheiro: "Toalheiros", porta: "Portas", janela: "Janelas", coluna_duche: "Colunas de duche", resguardo: "Resguardos", torneira: "Torneiras",
   revestimento: "Revestimento das paredes", pavimento: "Pavimento",
+  bancada: "Bancadas", lava: "Lava-loiças", placa: "Placas", forno: "Fornos", frigorifico: "Frigoríficos", maquina: "Máquinas da loiça",
+  exaustor: "Exaustores", armario: "Armários altos",
 };
 /** O que acompanha cada peça (escolhe-se no mesmo painel). */
-export const ACOMPANHA: Partial<Record<TipoPeca, Categoria[]>> = { base: ["coluna_duche", "resguardo"], banheira: ["coluna_duche"], movel: ["torneira"] };
+export const ACOMPANHA: Partial<Record<TipoPeca, Categoria[]>> = { base: ["coluna_duche", "resguardo"], banheira: ["coluna_duche"], movel: ["torneira"], lava: ["torneira"] };
 
 export interface Produto {
   id: string;
@@ -96,6 +98,28 @@ export const CATALOGO: Produto[] = [
   P("tor-mono-c", "torneira", "Misturadora de lavatório, Cromada", "Círculo", ["cinza"], 129, 45),
   P("tor-alto-p", "torneira", "Misturadora de pé alto, Preta", "Círculo", ["preto"], 219, 45),
   P("tor-parede-p", "torneira", "Misturadora de parede, Preta", "Quadra", ["preto"], 249, 70),
+  // 6/11: a cozinha (módulos com tampo, eletrodomésticos e a torneira de bica alta)
+  P("ban-quartzo-b", "bancada", "Bancada Quartzo 120, Branco Neve", "Quartzo", ["branco"], 480, 160, { w: 120, h: 60, z0: 0, z1: 90, destaque: "Módulos baixos com tampo de quartzo de 2 cm" }),
+  P("ban-carvalho", "bancada", "Bancada Natura 120, Carvalho", "Natura", ["madeira"], 420, 160, { w: 120, h: 60, z0: 0, z1: 90 }),
+  P("ban-antracite", "bancada", "Bancada Línea 120, Antracite mate", "Línea", ["preto", "cinza"], 460, 160, { w: 120, h: 60, z0: 0, z1: 90 }),
+  P("lav-inox", "lava", "Lava-loiça de encastrar 80, Inox", "Cuba", ["cinza"], 189, 90, { w: 80, h: 50, z0: 85, z1: 92, destaque: "Uma cuba e escorredor" }),
+  P("lav-granito", "lava", "Lava-loiça de granito 80, Preto", "Granito", ["preto"], 259, 90, { w: 80, h: 50, z0: 85, z1: 92 }),
+  P("lav-ceramica", "lava", "Lava-loiça cerâmico 80, Branco", "Clássico", ["branco"], 229, 90, { w: 80, h: 50, z0: 85, z1: 92 }),
+  P("pla-inducao-60", "placa", "Placa de indução 60, 4 zonas", "Indução", ["preto"], 349, 60, { w: 60, h: 52, z0: 88, z1: 92 }),
+  P("pla-inducao-80", "placa", "Placa de indução 80 com exaustão, Preta", "Indução", ["preto"], 799, 90, { w: 80, h: 52, z0: 88, z1: 92, destaque: "Exaustão integrada: dispensa exaustor de parede" }),
+  P("for-inox", "forno", "Forno multifunções 60, Inox", "Forno", ["cinza"], 389, 60, { w: 60, h: 56, z0: 0, z1: 60 }),
+  P("for-preto", "forno", "Forno pirolítico 60, Preto", "Forno", ["preto"], 499, 60, { w: 60, h: 56, z0: 0, z1: 60 }),
+  P("fri-inox", "frigorifico", "Frigorífico combinado 60, Inox", "Frio", ["cinza"], 699, 40, { w: 60, h: 65, z0: 0, z1: 200 }),
+  P("fri-branco", "frigorifico", "Frigorífico combinado 60, Branco", "Frio", ["branco"], 599, 40, { w: 60, h: 65, z0: 0, z1: 200 }),
+  P("fri-encastrar", "frigorifico", "Frigorífico de encastrar 55, Carvalho", "Frio", ["madeira", "branco"], 899, 120, { w: 60, h: 60, z0: 0, z1: 210, destaque: "Fica atrás de uma porta do armário" }),
+  P("maq-encastrar", "maquina", "Máquina da loiça de encastrar 60", "Loiça", ["cinza"], 549, 90, { w: 60, h: 60, z0: 0, z1: 85 }),
+  P("exa-inox-60", "exaustor", "Exaustor de parede 60, Inox", "Ar", ["cinza"], 289, 120, { w: 60, h: 45, z0: 150, z1: 210 }),
+  P("exa-preto-90", "exaustor", "Exaustor de parede 90, Preto", "Ar", ["preto"], 389, 120, { w: 90, h: 45, z0: 150, z1: 210 }),
+  P("arm-carvalho", "armario", "Armário alto Natura, Carvalho", "Natura", ["madeira"], 520, 120, { w: 60, h: 60, z0: 0, z1: 210, destaque: "Para o forno e a despensa" }),
+  P("arm-branco", "armario", "Armário alto Quartzo, Branco mate", "Quartzo", ["branco"], 480, 120, { w: 60, h: 60, z0: 0, z1: 210 }),
+  P("arm-antracite", "armario", "Armário alto Línea, Antracite", "Línea", ["preto", "cinza"], 510, 120, { w: 60, h: 60, z0: 0, z1: 210 }),
+  P("tor-cozinha-p", "torneira", "Misturadora de cozinha de bica alta, Preta", "Bica", ["preto"], 189, 45),
+  P("tor-cozinha-c", "torneira", "Misturadora de cozinha de bica alta, Cromada", "Bica", ["cinza"], 149, 45),
   // revestimentos (€/m²)
   P("rev-tela-c", "revestimento", "Tela Cinza 120 x 60 retificado, mate", "Tela", ["cinza"], 39, 32, { destaque: "Placa 120 x 60, 1 cm, junta quase invisível" }),
   P("rev-tela-cc", "revestimento", "Tela Cinza Claro 120 x 60 retificado, mate", "Tela", ["cinza"], 39, 32),
@@ -160,5 +184,11 @@ export const SERVICOS: Servico[] = [
   { id: "sv-reboco", n: "Regularização das paredes (reboco)", desc: "Quando, ao tirar o azulejo, a parede não fica direita.", un: "m²", preco: 22, sugestao: "paredes" },
   { id: "sv-rodape", n: "Rodapé cerâmico", desc: "À volta da divisão, do mesmo cerâmico do chão.", un: "m", preco: 12, sugestao: "perimetro" },
   { id: "sv-limpeza", n: "Limpeza final da obra", desc: "Pronta a usar.", un: "un", preco: 80, sugestao: "um" },
+  // 6/11: a cozinha
+  { id: "sv-montagem-cozinha", n: "Montagem dos móveis de cozinha", desc: "Por módulo: corpo, portas, puxadores e rodapé.", un: "un", preco: 60, sugestao: "um", quando: ["bancada", "armario"] },
+  { id: "sv-recortes", n: "Recortes no tampo (lava e placa)", desc: "Corte e acabamento dos furos na bancada.", un: "un", preco: 60, sugestao: "um", quando: ["lava", "placa"] },
+  { id: "sv-circuito-placa", n: "Circuito elétrico da placa e do forno", desc: "Linha própria desde o quadro, com disjuntor.", un: "un", preco: 220, sugestao: "um", quando: ["placa", "forno"] },
+  { id: "sv-conduta", n: "Conduta do exaustor para o exterior", desc: "Tubo e grelha até à fachada ou à chaminé.", un: "un", preco: 180, sugestao: "um", quando: ["exaustor"] },
+  { id: "sv-ligacao-maquina", n: "Ligação da máquina da loiça", desc: "Água, esgoto e tomada própria.", un: "un", preco: 90, sugestao: "um", quando: ["maquina"] },
 ];
 export const servico = (id: string | undefined): Servico | undefined => (id ? SERVICOS.find((x) => x.id === id) : undefined);
