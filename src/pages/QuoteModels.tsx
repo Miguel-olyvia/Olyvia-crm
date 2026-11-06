@@ -317,7 +317,8 @@ export default function QuoteModels() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="quote_templates.duplicate">
+                        {/* 06/11: duplicate_quote_template aceita create OU duplicate; quote_templates.duplicate saiu do editor. */}
+                        <PermissionGate permission="quote_templates.create">
                           <Button
                             variant="ghost"
                             size="icon"

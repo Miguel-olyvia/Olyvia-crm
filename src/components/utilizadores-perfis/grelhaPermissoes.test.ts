@@ -128,9 +128,9 @@ describe("secoesDoGrupo", () => {
     ]);
   });
 
-  it("leads.config diz o quê: 'Configurar workflows e IA'", () => {
-    const [s] = grupo("Negócios", [p("leads.config", "leads.config")]);
-    expect(s.linhas[0].outras[0].rotulo).toBe("Configurar workflows e IA");
+  it("client_contracts.cancel diz o quê: 'Anular contrato' (06/11: leads.config saiu do editor e do rótulo à mão)", () => {
+    const [s] = grupo("Negócios", [p("client_contracts.cancel", "client_contracts.cancel")]);
+    expect(s.linhas[0].outras[0].rotulo).toBe("Anular contrato");
   });
 
   it("estado de conjunto (indeterminado)", () => {
