@@ -407,7 +407,7 @@ const ACABAMENTO = op("Mate", "Brilho");
 const FORMATO = op("120 x 60", "60 x 60", "30 x 60", "Outro");
 export const PECAS_WC: Grupo = {
   titulo: "Peças da casa de banho",
-  nota: "A folha da visita, peça a peça. Toque só no que o cliente escolheu.",
+  nota: "A folha da visita, peça a peça. Toque só no que o cliente escolheu. As escolhas feitas no Estúdio preenchem este passo ao voltar ao negócio.",
   campos: [
     ...peca("Base de duche", [
       { k: "pc_base_medida", l: "Medida", t: "texto", ph: "120 x 70" },

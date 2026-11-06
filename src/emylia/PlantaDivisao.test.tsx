@@ -159,3 +159,17 @@ describe("o painel do Estúdio vê-se (5/11)", () => {
     localStorage.clear();
   });
 });
+
+describe("o Estúdio preenche as Peças da casa de banho (6/11)", () => {
+  it("as respostas da volta gravam-se no negócio, só as que mudaram", () => {
+    localStorage.clear();
+    localStorage.setItem("olyvia.estudio.volta", JSON.stringify({ negocio: 5, em: Date.now(), antes: { o: { x: 0, y: 0 }, paredes: [], pecas: [] }, respostas: { pc_base_cor: "Preto", pc_sanita_tipo: "Suspensa" } }));
+    const campo = vi.fn();
+    const d = { id: 5, f: { pc_sanita_tipo: "Suspensa" }, visita: { med: {}, extra: {} } } as unknown as Negocio;
+    const ctx = { A: { campo, extra: vi.fn(), produto: vi.fn() }, run: (fn: () => void) => fn(), S: { svc: {} } } as unknown as Ctx;
+    render(<PlantaDivisao ctx={ctx} d={d} />);
+    expect(campo).toHaveBeenCalledWith(5, "pc_base_cor", "Preto");
+    expect(campo).not.toHaveBeenCalledWith(5, "pc_sanita_tipo", expect.anything());
+    expect(screen.getByText(/1 resposta do Estúdio/)).toBeInTheDocument();
+  });
+});

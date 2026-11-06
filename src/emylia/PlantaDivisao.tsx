@@ -35,8 +35,16 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   useEffect(() => {
     const trazer = () => {
       const v = lerVolta(d.id);
-      if (v && v.antes.paredes.length) { mudar(v.antes); setFeito("A planta voltou do Estúdio."); }
+      const avisos: string[] = [];
+      if (v && v.antes.paredes.length) { mudar(v.antes); avisos.push("A planta voltou do Estúdio."); }
       if (v?.linhas?.length) setPendentes(v.linhas);
+      // 6/11 (Rúben): o passo «Peças da casa de banho» preenche-se com as escolhas do Estúdio (só o que mudou)
+      const novas = Object.entries(v?.respostas ?? {}).filter(([k, val]) => val && (d.f as Record<string, string | undefined>)[k] !== val);
+      if (novas.length) {
+        for (const [k, val] of novas) ctx.A.campo(d.id, k, val);
+        avisos.push(`As Peças da casa de banho ficaram com ${novas.length} ${novas.length === 1 ? "resposta" : "respostas"} do Estúdio.`);
+      }
+      if (avisos.length) setFeito(avisos.join(" "));
     };
     trazer();
     const aoMudar = (e: StorageEvent) => { if (e.key === CHAVE_VOLTA) trazer(); };
