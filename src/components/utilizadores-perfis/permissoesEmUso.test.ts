@@ -28,7 +28,8 @@ const IGNORAR = /\.test\.tsx?$|__tests__\/|\/test\/|supabaseFalso\.ts$|Exemplo\.
  * (RedirectPreservandoPesquisa em App.tsx). As permissões que só elas verificam foram escondidas (03/11/2026) — por isso o scan não
  * as conta. Lista fechada e explícita: o teste «as páginas legadas não são importadas por nada vivo» falha se alguma voltar a ser
  * importada (aí sai daqui e as permissões dela voltam a estar em uso) ou se o ficheiro desaparecer (aí sai da lista).
- * ClientDetailsDialog/ClientDetailHeader (só importados por AnewClients) não precisam de estar aqui: só verificam clients.edit, em uso.
+ * ClientDetailHeader (só importado por AnewClients) não precisa de estar aqui: só verifica clients.edit, em uso. ClientDetailsDialog
+ * está (06/11): também verifica deals.create, escondida.
  */
 const LEGADO = [
   "pages/AnewLeads.tsx", "pages/AnewClients.tsx", "components/leads/LeadTableRow.tsx",
@@ -38,6 +39,9 @@ const LEGADO = [
   "pages/Products.tsx", "pages/Services.tsx", "pages/Brands.tsx", "pages/Bundles.tsx", "pages/CatalogItems.tsx",
   "pages/ProductAttributes.tsx", "pages/ProductCategories.tsx", "pages/ProductSubcategories.tsx", "pages/ServiceCatalogItems.tsx",
   "pages/ServiceCategories.tsx", "pages/ServiceFees.tsx", "pages/ServiceSubcategories.tsx",
+  // 06/11/2026 (aprovado): /deals e /negocio-metas redirecionam para /negocios (App.tsx); Deals.tsx e NegocioMetas.tsx ficam em disco
+  // sem rota. ClientDetailsDialog (só AnewClients o importa) entra porque verifica deals.create, agora escondida.
+  "pages/Deals.tsx", "pages/NegocioMetas.tsx", "components/clients/ClientDetailsDialog.tsx",
 ] as const;
 const NOMES_LEGADO = LEGADO.map((f) => f.split("/").pop()!.replace(/\.tsx$/, "")).join("|");
 /** Um import (estático ou lazy) de uma página legada: `from "@/pages/AnewLeads"`, `import("./pages/AnewLeads")`. */
@@ -320,12 +324,12 @@ describe("03/11: a Aquisição saiu do menu", () => {
     expect(CODIGOS_EM_USO).toContain("api_keys.view");
   });
 
-  it("o grupo chama-se «Documentos do negócio», com Pedidos de Proposta, Propostas e orçamentos, Venda Direta (só ver, 06/11), Contratos e Configuração", () => {
+  it("o grupo chama-se «Documentos do negócio», com Propostas e orçamentos, Venda Direta (só ver, 06/11), Contratos e Configuração (sem Pedidos de Proposta, 06/11)", () => {
     const grupos = agruparPorMenu(emUso);
     const grupo = grupos.find((g) => g.rotulo === "Documentos do negócio")!;
     expect(grupos.find((g) => g.rotulo === "Aquisição")).toBeUndefined();
     expect(grupo.blocos).toEqual([]);
-    expect(grupo.subgrupos.map((s) => s.rotulo)).toEqual(["Pedidos de Proposta", "Propostas e orçamentos", "Venda Direta", "Contratos", "Configuração"]);
+    expect(grupo.subgrupos.map((s) => s.rotulo)).toEqual(["Propostas e orçamentos", "Venda Direta", "Contratos", "Configuração"]);
     const codigosDe = (r: string) => grupo.subgrupos.find((s) => s.rotulo === r)!.permissoes.map((p) => p.codigo).sort();
     expect(codigosDe("Configuração")).toEqual([
       "client_contracts.manage_templates", "proposals.manage",
@@ -333,7 +337,7 @@ describe("03/11: a Aquisição saiu do menu", () => {
     ]);
     expect(codigosDe("Venda Direta")).toEqual(["direct_sales.view"]);
     expect(codigosDe("Propostas e orçamentos")).toContain("quotes.manage");
-    expect(codigosDe("Pedidos de Proposta")).toEqual(["deals.create", "deals.delete", "deals.edit", "deals.view"]);
+    expect(grupo.permissoes.some((p) => p.codigo.startsWith("deals."))).toBe(false);
   });
 });
 
@@ -544,7 +548,7 @@ describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contra
     const app = readFileSync(join(SRC, "App.tsx"), "utf8");
     expect(app).toMatch(/path="\/rh-exemplo\/denuncias"[^\n]*permission="hr\.denuncias\.gerir"/);
     expect(readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8")).toContain('denuncias: ["hr.denuncias.gerir"]');
-    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["hr.denuncias.gerir", "operations.view", "leads.config"]);
+    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["hr.denuncias.gerir", "operations.view", "leads.config", "deals.view"]);
   });
 
   it("uma role que as tem não as perde ao gravar", () => {
@@ -632,5 +636,58 @@ describe("05/11: escondidas sem ação na app viva (venda direta, ordens/custos 
     expect(visiveis.map((p) => p.codigo)).toEqual([]);
     const gravado = fundirPermissoes([...ESCONDIDAS_05_11, "operations.view"], [], visiveis);
     expect([...gravado].sort()).toEqual([...ESCONDIDAS_05_11, "operations.view"].sort());
+  });
+});
+
+describe("06/11: Pedidos de Proposta (deals, CRM antigo) saem do editor; deals.delete fica em Definições › Lixo", () => {
+  const grupos = () => agruparPorMenu(emUso);
+  const noEditor = () => grupos().flatMap((g) => g.permissoes.map((p) => p.codigo));
+
+  it("deals.view, deals.create e deals.edit estão escondidas e fora do editor; deals.delete continua em uso", () => {
+    ["deals.view", "deals.create", "deals.edit"].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+      expect(noEditor(), c).not.toContain(c);
+    });
+    expect(PERMISSOES_EM_USO.deals).toEqual(["deals.delete"]);
+    expect(CODIGOS_ESCONDIDOS).not.toContain("deals.delete");
+  });
+
+  it("não há subgrupo «Pedidos de Proposta» em grupo nenhum", () => {
+    expect(grupos().flatMap((g) => g.subgrupos.map((s) => s.rotulo))).not.toContain("Pedidos de Proposta");
+  });
+
+  it("deals.delete está em Definições (bloco Lixo, com trash.view) e em mais lado nenhum", () => {
+    const definicoes = grupos().find((g) => g.rotulo === "Definições")!;
+    const lixo = definicoes.blocos.find((b) => b.categoria === "trash")!;
+    expect(lixo.permissoes.map((p) => p.codigo).sort()).toEqual(["deals.delete", "trash.view"]);
+    const noutros = grupos().filter((g) => g.rotulo !== "Definições").flatMap((g) => g.permissoes.map((p) => p.codigo));
+    expect(noutros).not.toContain("deals.delete");
+  });
+
+  it("as guardas que ainda citam deals.view não mudam (âmbito da pesquisa de pedidos antigos, Lixo, Hoje)", () => {
+    expect(readFileSync(join(SRC, "components/QuoteBuilder.tsx"), "utf8")).toContain('getPermissionScope("deals.view")');
+    expect(readFileSync(join(SRC, "lib/search/scopedEntitySearch.ts"), "utf8")).toContain('resolveBranchScope(viewer, "deals.view")');
+    expect(readFileSync(join(SRC, "pages/Trash.tsx"), "utf8")).toContain('getPermissionScope("deals.view")');
+    expect(ESCONDIDAS_COM_GUARDA["deals.view"]).toEqual(expect.arrayContaining(["components/QuoteBuilder.tsx", "lib/search/scopedEntitySearch.ts", "pages/Trash.tsx"]));
+  });
+
+  it("/deals e /negocio-metas redirecionam para /negocios e as páginas deixam de ser carregadas; o atalho da Home saiu", () => {
+    const app = readFileSync(join(SRC, "App.tsx"), "utf8");
+    expect(app).toMatch(/path="\/deals" element=\{<Navigate to="\/negocios" replace \/>\}/);
+    expect(app).toMatch(/path="\/negocio-metas" element=\{<Navigate to="\/negocios" replace \/>\}/);
+    expect(app).not.toMatch(/import\("\.\/pages\/(?:Deals|NegocioMetas)"\)/);
+    expect(readFileSync(join(SRC, "components/home/QuickLinks.tsx"), "utf8")).not.toContain('"/deals"');
+  });
+
+  it("um papel que já tinha deals.view/create/edit mantém-nas ao gravar", () => {
+    const linha = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
+    const visiveis = permissoesDoMenu([
+      linha("deals.view", "deals"), linha("deals.create", "deals"), linha("deals.edit", "deals"), linha("deals.delete", "deals"),
+      linha("trash.view", "trash"),
+    ]);
+    expect(visiveis.map((p) => p.codigo)).toEqual(["deals.delete", "trash.view"]);
+    const gravado = fundirPermissoes(["deals.view", "deals.create", "deals.edit", "deals.delete"], ["trash.view"], visiveis);
+    expect([...gravado].sort()).toEqual(["deals.create", "deals.edit", "deals.view", "trash.view"]);
   });
 });

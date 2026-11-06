@@ -291,3 +291,153 @@ describe("PermissionsContext (P2.a — RPC-backed)", () => {
     expect(fromSpy).not.toHaveBeenCalled();
   });
 });
+
+// ---- Releitura silenciosa ao voltar à janela (visibilitychange / focus) ----
+describe("PermissionsContext — releitura ao voltar à janela", () => {
+  const ctxCom = (permissions: string[]) => ({
+    data: { business_user_id: "biz-1", is_system_admin: false, org_ids: ["org-1"], memberships: [], permissions },
+    error: null,
+  });
+  const realNow = Date.now.bind(Date);
+  let avanco = 0;
+
+  beforeEach(() => {
+    avanco = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => realNow() + avanco);
+    useCompanyMock.mockReturnValue({ activeCompany: { id: "org-1" }, userType: "member" });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const voltarAJanela = (evento: "visibilitychange" | "focus") =>
+    act(() => {
+      if (evento === "focus") window.dispatchEvent(new Event("focus"));
+      else document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+  it.each(["visibilitychange", "focus"] as const)(
+    "%s depois de 30 s volta a chamar get_user_context e hasPermission reflete a permissão nova",
+    async (evento) => {
+      rpcMock.mockResolvedValue(ctxCom(["a.view"]));
+      const { result } = renderHook(() => usePermissions(), { wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(rpcMock).toHaveBeenCalledTimes(1);
+      expect(result.current.hasPermission("b.edit")).toBe(false);
+
+      rpcMock.mockResolvedValue(ctxCom(["a.view", "b.edit"]));
+      avanco = 31_000;
+      voltarAJanela(evento);
+
+      await waitFor(() => expect(result.current.hasPermission("b.edit")).toBe(true));
+      expect(rpcMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("dentro de 30 s não volta a chamar (nem com os dois eventos seguidos)", async () => {
+    rpcMock.mockResolvedValue(ctxCom(["a.view"]));
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    avanco = 29_000;
+    voltarAJanela("visibilitychange");
+    voltarAJanela("focus");
+    await act(async () => { await Promise.resolve(); });
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+
+    // Passados os 30 s, os dois eventos seguidos só dão uma releitura.
+    avanco = 31_000;
+    voltarAJanela("visibilitychange");
+    voltarAJanela("focus");
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(2));
+    await act(async () => { await Promise.resolve(); });
+    expect(rpcMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a releitura não põe loading a true e não substitui o estado se nada mudou", async () => {
+    rpcMock.mockResolvedValue(ctxCom(["a.view"]));
+    const loadings: boolean[] = [];
+    const { result } = renderHook(() => {
+      const v = usePermissions();
+      loadings.push(v.loading);
+      return v;
+    }, { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const antes = result.current.permissions;
+    loadings.length = 0;
+
+    avanco = 31_000;
+    voltarAJanela("focus");
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(2));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(loadings).not.toContain(true);
+    expect(result.current.permissions).toBe(antes); // mesma referência: sem re-render escusado
+
+    rpcMock.mockResolvedValue(ctxCom(["a.view", "c.delete"]));
+    avanco = 62_000;
+    voltarAJanela("visibilitychange");
+    await waitFor(() => expect(result.current.permissions).toEqual(["a.view", "c.delete"]));
+    expect(loadings).not.toContain(true);
+  });
+
+  it("refreshPermissionsSilently relê sem cache e sem loading (sem esperar 30 s)", async () => {
+    rpcMock.mockResolvedValue(ctxCom(["a.view"]));
+    const loadings: boolean[] = [];
+    const { result } = renderHook(() => {
+      const v = usePermissions();
+      loadings.push(v.loading);
+      return v;
+    }, { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    loadings.length = 0;
+
+    rpcMock.mockResolvedValue(ctxCom(["a.view", "b.edit"]));
+    act(() => result.current.refreshPermissionsSilently());
+    await waitFor(() => expect(result.current.hasPermission("b.edit")).toBe(true));
+    expect(rpcMock).toHaveBeenCalledTimes(2);
+    expect(loadings).not.toContain(true);
+  });
+
+  it("um erro na releitura em segundo plano mantém as permissões atuais", async () => {
+    rpcMock.mockResolvedValue(ctxCom(["a.view"]));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rpcMock.mockResolvedValue({ data: null, error: { message: "rede" } });
+    avanco = 31_000;
+    voltarAJanela("focus");
+    await waitFor(() => expect(errSpy).toHaveBeenCalled());
+    expect(result.current.hasPermission("a.view")).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("sem sessão não chama a RPC ao voltar à janela", async () => {
+    rpcMock.mockResolvedValue(ctxCom(["a.view"]));
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    getSessionMock.mockResolvedValue({ data: { session: null } });
+    avanco = 31_000;
+    voltarAJanela("focus");
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledTimes(2));
+    await act(async () => { await Promise.resolve(); });
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    expect(result.current.hasPermission("a.view")).toBe(true);
+  });
+
+  it("remove os listeners ao desmontar", async () => {
+    rpcMock.mockResolvedValue(ctxCom(["a.view"]));
+    const { result, unmount } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    unmount();
+
+    avanco = 31_000;
+    voltarAJanela("visibilitychange");
+    voltarAJanela("focus");
+    await act(async () => { await Promise.resolve(); });
+    expect(getSessionMock).toHaveBeenCalledTimes(1);
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -32,7 +32,9 @@ describe("05/11 (ronda 2): as páginas fora do menu têm a mesma guarda em todas
     expect(podeAbrirDestino("/quotes?open=1", tem([]))).toBe(false);
     expect(podeAbrirDestino("/quotes?open=1", tem(["quotes.view"]))).toBe(true);
     expect(podeAbrirDestino("/client-contracts?open=1", tem(["client_contracts.create"]))).toBe(false);
-    expect(podeAbrirDestino("/deals", tem(["deals.view"]))).toBe(true);
+    // 06/11: /deals redireciona para /negocios e deixou de estar no mapa (não pede deals.view, escondida).
+    expect(permissaoDoDestino("/deals?open=d1")).toBeNull();
+    expect(podeAbrirDestino("/deals", tem([]))).toBe(true);
     expect(podeAbrirDestino("/pessoas?open=1", tem([]))).toBe(true);
   });
 

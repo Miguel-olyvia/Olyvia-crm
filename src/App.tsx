@@ -29,8 +29,6 @@ import NotFound from "./pages/NotFound";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 
 
-const Deals = lazy(() => import("./pages/Deals"));
-const NegocioMetas = lazy(() => import("./pages/NegocioMetas"));
 const Proposals = lazy(() => import("./pages/Proposals"));
 
 
@@ -312,10 +310,11 @@ const App = () => (
                       <Route path="/rh-exemplo/denuncias" element={<ProtectedRoute permission="hr.denuncias.gerir"><RhDenuncias /></ProtectedRoute>} />
                       <Route path="/canal-denuncias/gestao" element={<Navigate to="/rh-exemplo/denuncias" replace />} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
-                      <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
-                      <Route path="/negocio-metas" element={<ProtectedRoute permission="deals.view"><NegocioMetas /></ProtectedRoute>} />
+                      {/* 06/11: os Pedidos de Proposta são do CRM antigo; /deals e /negocio-metas levam para /negocios (as páginas ficam em disco). */}
+                      <Route path="/deals" element={<Navigate to="/negocios" replace />} />
+                      <Route path="/negocio-metas" element={<Navigate to="/negocios" replace />} />
                       <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
-                      {/* 03/11: a Aquisição saiu do menu (o Negócios substitui-a). A ajuda e a Venda Direta antiga levam para /negocios; /deals, /quotes, /proposals e /client-contracts ficam vivas (a ficha do /pessoas ainda as usa). */}
+                      {/* 03/11: a Aquisição saiu do menu (o Negócios substitui-a). A ajuda e a Venda Direta antiga levam para /negocios; /quotes, /proposals e /client-contracts ficam vivas (a ficha do /pessoas ainda as usa). */}
                       <Route path="/acquisition-help" element={<Navigate to="/negocios" replace />} />
                       <Route path="/quotes" element={<ProtectedRoute permission="quotes.view"><Quotes /></ProtectedRoute>} />
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />

@@ -51,6 +51,10 @@
 // Voltam ao editor quotes.export, quotes.export_sensitive, proposals.export e client_contracts.export (/quotes, /proposals e
 // /client-contracts abrem-se pela ficha do /pessoas e o botão Exportar pede-as) e direct_sales.view (o número da venda direta de
 // origem nas Encomendas de Cliente). Nenhuma guarda/policy/RPC muda.
+//
+// 06/11/2026 (aprovado): os Pedidos de Proposta (deals) são do CRM antigo — nenhum ecrã alcançável cria nem lista pedidos (/deals e
+// /negocio-metas redirecionam para /negocios). deals.view, deals.create e deals.edit saem do editor; deals.delete fica, em Definições
+// › Lixo, com o rótulo «Eliminar definitivamente do Lixo». As guardas que ainda as citam não mudam — ver ESCONDIDAS_COM_GUARDA.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // 06/11: só api_keys.view (rota /api-keys e policy de leitura, com settings.update); criar/copiar/ativar/apagar só a página morta
@@ -69,7 +73,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "client_orders.view",
   ],
   // clients.view tem ação na app viva: o âmbito dela filtra os clientes do campo Cliente (EntitySearchInput) na «Nova encomenda manual»
-  // de /client-orders (e em /deals).
+  // de /client-orders (e em /deals, que a 06/11 passou a redirecionar para /negocios).
   // clients.edit é a segunda chave, junto com pessoas.edit, para mexer em quem já é cliente: fn_neg_pessoa_no_ambito
   // (neg_guardar_identidade_pessoa, neg_substituir_contacto, neg_guardar_contacto_pessoa, neg_guardar_nif_pessoa, neg_atribuir_pessoa,
   // rpc_resolve_form_submission), as visitas (fn_neg_pode_mudar_dono_lead), as moradas de entrega (fn_entity_delivery_address_access) e
@@ -83,8 +87,11 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   dashboard: [
     "dashboard.view",
   ],
+  // 06/11: só deals.delete fica — é a chave do «Eliminar definitivamente» de qualquer documento no Lixo (lib/lixo/permissoesRestauro.ts,
+  // Trash.tsx e purge_business_entity no servidor); no editor aparece em Definições › Lixo (gruposPermissoes.ts). view/create/edit
+  // passaram para as escondidas.
   deals: [
-    "deals.create", "deals.delete", "deals.edit", "deals.view",
+    "deals.delete",
   ],
   // 05/11: direct_sales.view passou para as escondidas. 06/11 (aprovado): volta — rpc_list_client_order_documents e
   // rpc_get_client_order_document só devolvem o número da venda direta de origem com ela (Encomendas de Cliente, Compras, Movimentos).
@@ -313,6 +320,13 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "contacts.create", "contacts.delete", "contacts.edit", "contacts.export", "contacts.export_sensitive", "contacts.import",
     "contacts.view", "contacts.view_details",
   ],
+  // 06/11: os Pedidos de Proposta são do CRM antigo (Deals.tsx em LEGADO; /deals e /negocio-metas redirecionam para /negocios). Ainda
+  // as citam, sem ecrã para as dar sentido: o âmbito de deals.view na pesquisa para ligar orçamento/proposta a um pedido antigo
+  // (QuoteBuilder, scopedEntitySearch — sem ela a pesquisa de pedidos devolve vazio), no Lixo (pedidos apagados) e no Hoje, e o
+  // assistente IA (edge function). deals.delete fica em uso (Definições › Lixo).
+  deals: [
+    "deals.create", "deals.edit", "deals.view",
+  ],
   departments: [
     "departments.create", "departments.delete", "departments.edit", "departments.view",
   ],
@@ -458,6 +472,9 @@ export const ESCONDIDAS_COM_GUARDA: Readonly<Record<string, readonly string[]>> 
   "operations.view": ["components/sidebar/menuConfig.ts", "components/frota/contexto.ts", "hooks/useOficiosObra.ts"],
   // 06/11: a guarda da rota /lead-contact-results (sem ligação de nenhum ecrã vivo; a rota fica por agora).
   "leads.config": ["App.tsx"],
+  // 06/11: o âmbito de deals.view na pesquisa para ligar orçamento/proposta a um pedido de proposta antigo (QuoteBuilder,
+  // scopedEntitySearch — sem ela devolve vazio), nos pedidos apagados do Lixo (Trash) e na ação «Abrir pedido» do Hoje (today).
+  "deals.view": ["components/QuoteBuilder.tsx", "lib/search/scopedEntitySearch.ts", "pages/Trash.tsx", "lib/agenda/today.ts"],
 };
 
 const todas = (r: Readonly<Record<string, readonly string[]>>): string[] => Object.values(r).flat();

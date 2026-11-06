@@ -3,10 +3,10 @@
 // pediam), notificações, ficha da pessoa (abrir documento / passos do processo), PipelineBreadcrumb, Guia de boas-vindas e as ligações
 // entre estas páginas — pedem a MESMA permissão que a rota, para ninguém ser levado a um «Sem acesso».
 // rotasForaDoMenu.test.ts confirma que App.tsx pede exatamente estas.
+// 06/11: /deals saiu do mapa: a rota passou a redirecionar para /negocios (Pedidos de Proposta, CRM antigo) e deixou de pedir deals.view.
 
 /** Caminho da rota → a permissão que a rota pede (ProtectedRoute em App.tsx). */
 export const PERMISSAO_DA_ROTA_FORA_DO_MENU: Readonly<Record<string, string>> = {
-  "/deals": "deals.view",
   "/quotes": "quotes.view",
   "/proposals": "proposals.view",
   "/client-contracts": "client_contracts.view",
