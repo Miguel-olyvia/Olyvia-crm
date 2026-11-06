@@ -45,7 +45,12 @@ A partir das tabelas, não das funções testadas:
 2. `trg_documents_portal_exige_permissao`: insert com `visible_to_client=true` (exige `portal.manage` OU
    `negocios.proposta.enviar`) e `=false` (só a RLS de membro).
 3. Custos: `rpc_quote_lines_custos` (`quotes.view` para ver linhas; `quotes.view_costs`/`quotes.manage` para os custos) e
-   `neg_ler_negocios` → `fn_neg_ler_orcamento` (`pessoas.view` para ler; `quotes.view_costs` para os custos).
+   `neg_ler_negocios` → `fn_neg_ler_orcamento` (`pessoas.view` para ler; `quotes.view_costs`/`quotes.manage` para os custos — a mesma
+   regra, `fn_quote_custos_pode`, desde 20270110200000).
    Se não houver dados, a linha diz "sem dados".
-4. `rpc_hr_picar`: com ficha, exige `hr.assiduidade.picar`; sem ficha, deve recusar com uma mensagem de "sem ficha".
-5. `purge_business_entity('quote', …)` (Lixo): bloqueia sem `deals.delete`.
+4. `rpc_hr_picar`: com ficha, exige `hr.assiduidade.picar`; sem ficha, deve recusar com uma mensagem de "sem ficha"
+   (`conta_sem_ficha_rh`, 20270110200000).
+5. `purge_business_entity('quote', …)` (Lixo): bloqueia sem `deals.delete` nesta organização ou acima.
+   5b. Simulado: a sonda fica `viewer` aqui e ganha, só dentro do sub-bloco, `super_admin` noutra organização (criada e
+   desfeita se só houver uma) → tem de ser bloqueada (antes de 20270110200000 passava).
+6. Custos iguais nas duas vias: quando 3a e 3b leem linhas, dão ambas "com custos" ou ambas "custos a null".

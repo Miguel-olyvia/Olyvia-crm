@@ -23,9 +23,14 @@
 --   2. trg_documents_portal_exige_permissao: insert em documents visible_to_client=true (portal.manage OU
 --      negocios.proposta.enviar) e =false (só a RLS)
 --   3. Custos: rpc_quote_lines_custos (quotes.view + quotes.view_costs|quotes.manage) e neg_ler_negocios
---      (pessoas.view + quotes.view_costs)
+--      (pessoas.view + quotes.view_costs|quotes.manage — a mesma regra desde 20270110200000)
 --   4. rpc_hr_picar: com ficha → hr.assiduidade.picar; sem ficha → deve recusar com mensagem de "sem ficha"
---   5. purge_business_entity('quote', …): bloqueia sem deals.delete (quando passa, o apagar é desfeito)
+--      (conta_sem_ficha_rh, 20270110200000)
+--   5. purge_business_entity('quote', …): bloqueia sem deals.delete nesta organização ou acima (quando passa, o
+--      apagar é desfeito)
+--   5b. purge_business_entity simulado: a sonda fica viewer aqui e ganha, só dentro do sub-bloco, uma associação
+--      super_admin (com deals.delete) noutra organização fora da cadeia desta → tem de ser bloqueada
+--   6. custos iguais nas duas vias: onde 3a e 3b leem linhas, ambas dão "com custos" ou ambas "custos a null"
 -- ============================================================
 
 BEGIN;
@@ -86,6 +91,13 @@ DECLARE
   v_nc         int;
   v_j          jsonb;
   v_ok_role    text;
+  v_got3a      text;      -- 6: o obtido em 3a e em 3b, para comparar as duas vias de custos
+  v_got3b      text;
+  v_org2       uuid;      -- 5b: outra organização fora da cadeia desta
+  v_role_dd    uuid;      -- 5b: papel global super_admin (tem deals.delete)
+  v_role_vw    uuid;      -- 5b: papel viewer desta organização
+  v_sonda_auth uuid;
+  v_fase       text;
 BEGIN
   -- Guardas: objetos que o teste usa têm de existir (base RH com a migration 20270110100000).
   IF to_regclass('public.neg_papeis_permissoes') IS NULL
@@ -140,8 +152,8 @@ BEGIN
                       AND r.is_system AND r.organization_id IS NULL AND r.deleted_at IS NULL);
     v_membro := EXISTS (SELECT 1 FROM anew_memberships am WHERE am.user_id = a.user_id AND am.organization_id = c_org
                           AND am.status = 'active' AND am.role_is_client IS NOT TRUE);
-    SELECT pc.pessoa_id INTO v_ficha FROM pessoas_contas pc
-    WHERE pc.anew_user_id = a.user_id AND pc.organization_id = c_org AND pc.estado = 'activa' LIMIT 1;
+    SELECT pc.pessoa_id INTO v_ficha FROM pessoas_contas pc JOIN pessoas p ON p.id = pc.pessoa_id AND p.deleted_at IS NULL
+    WHERE pc.anew_user_id = a.user_id AND pc.organization_id = c_org AND pc.estado = 'activa' AND pc.revogada_em IS NULL LIMIT 1;
     SELECT pc.pessoa_id INTO v_pessoa_neg FROM pessoas_contas pc JOIN pessoas p ON p.id = pc.pessoa_id
     WHERE pc.anew_user_id = a.user_id AND pc.organization_id = c_org AND pc.estado = 'activa' AND pc.revogada_em IS NULL
       AND p.deleted_at IS NULL AND (p.data_saida IS NULL OR p.data_saida >= current_date)
@@ -219,6 +231,7 @@ BEGIN
     END LOOP;
 
     -- ── 3a. rpc_quote_lines_custos ─────────────────────────────────────────
+    v_got3a := NULL; v_got3b := NULL;
     IF v_base_cost = 0 THEN
       INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
       VALUES (a.rotulo, '3a rpc_quote_lines_custos', 'sem dados', 'sem dados', 'OK', 'nenhuma linha com custos na organização');
@@ -241,6 +254,7 @@ BEGIN
         IF SQLERRM <> '__desfazer__' THEN v_msg := SQLSTATE || ': ' || SQLERRM; END IF;
       END;
       v_got := CASE WHEN v_msg IS NOT NULL THEN 'erro' WHEN v_n = 0 THEN 'sem linhas' WHEN v_nc > 0 THEN 'com custos' ELSE 'custos a null' END;
+      v_got3a := v_got;
       INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
       VALUES (a.rotulo, '3a rpc_quote_lines_custos', v_exp, v_got, CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
               coalesce(v_msg, format('%s linhas, %s com custo (base: %s com custo)', v_n, v_nc, v_base_cost)));
@@ -253,7 +267,7 @@ BEGIN
     ELSE
       v_exp := CASE
         WHEN NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND (v_sa OR e.perfil OR e.papel)) THEN 'bloqueado'
-        WHEN EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'quotes.view_costs' AND (v_sa OR e.perfil OR e.papel)) THEN 'com custos'
+        WHEN EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code IN ('quotes.view_costs', 'quotes.manage') AND (v_sa OR e.perfil OR e.papel)) THEN 'com custos'
         ELSE 'custos a null' END;
       v_n := NULL; v_nc := NULL; v_msg := NULL; v_j := NULL;
       BEGIN
@@ -270,10 +284,19 @@ BEGIN
         v_nc := jsonb_array_length(jsonb_path_query_array(v_j, '$[*].orcamentos[*].linhas[*].custo.custo_un ? (@ != null)'));
       END IF;
       v_got := CASE WHEN v_msg IS NOT NULL THEN 'bloqueado' WHEN v_n = 0 THEN 'sem linhas' WHEN v_nc > 0 THEN 'com custos' ELSE 'custos a null' END;
+      v_got3b := v_got;
       INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
       VALUES (a.rotulo, '3b neg_ler_negocios custos', v_exp, v_got, CASE WHEN v_exp = v_got THEN 'OK' ELSE 'FALHA' END,
               coalesce(left(v_msg, 160), format('%s linhas, %s com custo_un', v_n, v_nc)));
     END IF;
+
+    -- ── 6. custos iguais nas duas vias ─────────────────────────────────────
+    INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+    SELECT a.rotulo, '6 custos iguais (3a = 3b)', x.e, x.g, CASE WHEN x.e = x.g THEN 'OK' ELSE 'FALHA' END,
+           format('3a: %s | 3b: %s', coalesce(v_got3a, 'sem dados'), coalesce(v_got3b, 'sem dados'))
+    FROM (SELECT CASE WHEN v_got3a IN ('com custos', 'custos a null') AND v_got3b IN ('com custos', 'custos a null') THEN 'iguais' ELSE 'n/a' END AS e,
+                 CASE WHEN v_got3a IN ('com custos', 'custos a null') AND v_got3b IN ('com custos', 'custos a null')
+                      THEN CASE WHEN v_got3a = v_got3b THEN 'iguais' ELSE 'diferentes' END ELSE 'n/a' END AS g) x;
 
     -- ── 4. rpc_hr_picar ────────────────────────────────────────────────────
     SELECT e.perfil INTO v_exp_b FROM _perm_exp e WHERE e.code = 'hr.assiduidade.picar';
@@ -308,8 +331,14 @@ BEGIN
       INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
       VALUES (a.rotulo, '5 purge_business_entity quote', 'sem dados', 'sem dados', 'OK', 'sem orçamentos');
     ELSE
+      -- 20270110200000: e deals.delete numa associação ativa não-cliente nesta organização ou numa acima (anew_hierarchy)
       v_exp_b := v_membro AND EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id
-                                       AND p.permission_code = 'deals.delete' WHERE am.user_id = a.user_id AND am.status = 'active');
+                                       AND p.permission_code = 'deals.delete' WHERE am.user_id = a.user_id AND am.status = 'active')
+                 AND (v_sa OR EXISTS (
+                   WITH RECURSIVE cad(org) AS (SELECT c_org UNION SELECT h.parent_org_id FROM anew_hierarchy h JOIN cad ON h.child_org_id = cad.org)
+                   SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id AND p.permission_code = 'deals.delete'
+                   WHERE am.user_id = a.user_id AND am.status = 'active' AND am.role_is_client IS NOT TRUE
+                     AND am.organization_id IN (SELECT org FROM cad)));
       v_exp := CASE WHEN v_exp_b THEN 'passou a guarda' ELSE 'bloqueado' END;
       v_msg := NULL; v_state := NULL; v_got_b := NULL;
       BEGIN
@@ -338,6 +367,52 @@ BEGIN
       UPDATE anew_memberships SET role_id = v_role_orig WHERE user_id = a.user_id AND organization_id = c_org;
     END IF;
   END LOOP;
+
+  -- ── 5b. purge_business_entity noutra organização (simulado) ─────────────
+  -- A sonda passa a viewer aqui (sem deals.delete) e ganha uma associação super_admin (com deals.delete) noutra organização
+  -- fora da cadeia desta. Antes de 20270110200000 bastava deals.delete em qualquer organização e esta ser visível.
+  -- A troca e a associação nova ficam dentro do sub-bloco, que acaba sempre em RAISE (desfeitas).
+  PERFORM set_config('request.jwt.claims', '', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  WITH RECURSIVE cad(org) AS (SELECT c_org UNION SELECT h.parent_org_id FROM anew_hierarchy h JOIN cad ON h.child_org_id = cad.org)
+  SELECT o.id INTO v_org2 FROM anew_organizations o WHERE o.id NOT IN (SELECT org FROM cad) ORDER BY o.created_at LIMIT 1;
+  SELECT r.id INTO v_role_dd FROM anew_roles r JOIN anew_role_permissions p ON p.role_id = r.id AND p.permission_code = 'deals.delete'
+  WHERE r.code = 'super_admin' AND r.organization_id IS NULL AND r.deleted_at IS NULL LIMIT 1;
+  SELECT r.id INTO v_role_vw FROM anew_roles r WHERE r.code = 'viewer' AND r.organization_id = c_org AND r.deleted_at IS NULL LIMIT 1;
+  SELECT u.auth_user_id INTO v_sonda_auth FROM anew_users u WHERE u.id = c_sonda;
+  IF v_quote IS NULL OR v_role_dd IS NULL OR v_role_vw IS NULL OR v_sonda_auth IS NULL THEN
+    INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+    VALUES ('viewer (sonda) + super_admin noutra org', '5b purge_business_entity noutra organização', 'sem dados', 'sem dados', 'OK',
+            'falta orçamento / papel super_admin ou viewer / sonda');
+  ELSE
+    v_msg := NULL; v_state := NULL; v_fase := 'preparar'; v_det := 'existente';
+    BEGIN
+      IF v_org2 IS NULL THEN  -- só há esta organização: cria-se outra, também desfeita no fim do sub-bloco
+        INSERT INTO anew_organizations (name) VALUES ('teste-permissoes 5b (desfeita)') RETURNING id INTO v_org2;
+        v_det := 'criada e desfeita';
+      END IF;
+      UPDATE anew_memberships SET role_id = v_role_vw WHERE user_id = c_sonda AND organization_id = c_org;
+      INSERT INTO anew_memberships (user_id, organization_id, role_id, status) VALUES (c_sonda, v_org2, v_role_dd, 'active');
+      v_fase := 'purge';
+      PERFORM set_config('request.jwt.claims', json_build_object('sub', v_sonda_auth, 'role', 'authenticated')::text, true);
+      PERFORM set_config('request.jwt.claim.sub', v_sonda_auth::text, true);
+      EXECUTE 'SET LOCAL ROLE authenticated';
+      PERFORM public.purge_business_entity('quote', v_quote);
+      RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '__desfazer__';
+    EXCEPTION WHEN OTHERS THEN
+      v_msg := SQLERRM; v_state := SQLSTATE;
+    END;
+    v_got := CASE WHEN v_fase = 'preparar' THEN 'erro a preparar'
+                  WHEN v_msg = '__desfazer__' THEN 'passou a guarda'
+                  WHEN v_state = '42501' THEN 'bloqueado'
+                  ELSE 'passou a guarda' END;
+    INSERT INTO _perm_rel (conta, verificacao, esperado, obtido, resultado, detalhe)
+    VALUES ('viewer (sonda) + super_admin noutra org', '5b purge_business_entity noutra organização', 'bloqueado', v_got,
+            CASE WHEN v_got = 'bloqueado' THEN 'OK' ELSE 'FALHA' END,
+            format('outra org %s (%s) | %s', v_org2, v_det, CASE WHEN v_msg = '__desfazer__' THEN 'apagar desfeito' ELSE v_state || ': ' || left(v_msg, 140) END));
+    PERFORM set_config('request.jwt.claims', '', true);
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+  END IF;
 END $t$;
 
 SELECT conta AS papel_conta, verificacao, esperado, obtido, resultado, detalhe

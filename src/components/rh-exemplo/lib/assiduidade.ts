@@ -527,6 +527,7 @@ const PREFIXOS: ReadonlyArray<[string, string]> = [
   ["picagem_ja_anulada", "hr.assiduidade.erroRpc.picagemJaAnulada"],
   ["picagem_corrige_a_si_mesma", "hr.assiduidade.erroRpc.picagemCorrigeASiMesma"],
   ["picagem_anulacao_sem_motivo", "hr.assiduidade.erroRpc.semMotivo"],
+  ["conta_sem_ficha_rh", "hr.assiduidade.erroRpc.contaSemFicha"],
   ["picagem_pessoa_invalida", "hr.assiduidade.erroRpc.pessoaInvalida"],
   ["falta_sem_sessao", "hr.assiduidade.erroRpc.semSessao"],
   ["falta_horas_invalidas", "hr.assiduidade.erroRpc.horasInvalidas"],
