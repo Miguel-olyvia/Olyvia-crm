@@ -4,13 +4,14 @@
 //  2. cada peça que há hoje: «Trocar a sanita?» Fica, Trocar (abre o recomendado do catálogo, já escolhido) ou Tirar;
 //  3. as paredes e o chão;
 //  4. juntar produtos novos por categoria: ficam «por colocar» e o passo «Depois» pede o sítio de cada um.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Check, Plus, Wrench, X } from "lucide-react";
+import { Check, Plus, Sparkles, Wrench, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PECAS, type PecaPlanta, type TipoPeca } from "@/emylia/planta";
 import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, melhorPara, produto, type Categoria } from "./catalogoFake";
-import { decidir, decisaoDe, escolherProduto, juntarPorColocar, juntarServico, mudarQtdServico, qtdSugerida, servicosRecomendados, tirarServico, type Decisao, type Projeto, totais } from "./necessidadesEstudio";
+import { decidir, decisaoDe, escolherProduto, juntarPorColocar, juntarServico, mudarQtdServico, qtdSugerida, tirarServico, type Decisao, type Projeto, totais } from "./necessidadesEstudio";
+import { juntarSugestoes, recusarSugestao, sugestoesDeServicos, type Sugestao } from "./sugestoesServicos";
 import { Cartao, Cores, ListaProdutos, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
 import { Ilustracao } from "./Ilustracao";
 
@@ -87,8 +88,6 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
           </div>
         </Cartao>
 
-        <Servicos p={p} setP={setP} />
-
         <Cartao titulo="Juntar produtos novos">
           <div role="group" aria-label="Categorias" className="flex flex-wrap gap-2">
             {JUNTAVEIS.map((tp) => (
@@ -133,10 +132,13 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
             </div>
           )}
         </Cartao>
+
+        <Servicos p={p} setP={setP} />
       </section>
 
       <aside className="space-y-6 lg:sticky lg:top-36 lg:self-start">
         <Resumo t={t} porEscolher={porEscolher} />
+        <AvisoSugestoes p={p} setP={setP} />
         <Seguinte onClick={seguinte}>{porColocar.length ? `Pôr na planta (${porColocar.length} por colocar)` : "Ver na planta"}</Seguinte>
       </aside>
     </>
@@ -194,16 +196,44 @@ function CartaoDecisao({ p, setP, pc }: { p: Projeto; setP: SetP; pc: PecaPlanta
   );
 }
 
-/** 5/11 (Rúben: «e incluir também os serviços»): os serviços do catálogo, os recomendados para esta planta primeiro, com a quantidade
- *  sugerida (o chão, as paredes, o perímetro, a zona do duche). Juntados, a quantidade muda-se aqui. */
+/** 6/11 (Rúben: «os serviços sugeridos automaticamente com base nos produtos escolhidos»): no topo, o que as peças escolhidas pedem,
+ *  cada um com o porquê e a quantidade; junta-se com um toque (ou todos) ou diz-se «agora não». Em baixo, os juntos e os outros. */
 function Servicos({ p, setP }: { p: Projeto; setP: SetP }) {
   const reduzir = useReducedMotion();
-  const recomendados = new Set(servicosRecomendados(p).map((x) => x.id));
-  const lista = [...SERVICOS].sort((a, b) => Number(recomendados.has(b.id)) - Number(recomendados.has(a.id)));
+  const sugestoes = sugestoesDeServicos(p);
+  const sugeridos = new Set(sugestoes.map((x) => x.sv.id));
   const escolhidos = new Map((p.servicos ?? []).map((x) => [x.id, x.q]));
+  // os juntos primeiro; os que estão sugeridos já aparecem em cima
+  const lista = SERVICOS.filter((sv) => !sugeridos.has(sv.id)).sort((a, b) => Number(escolhidos.has(b.id)) - Number(escolhidos.has(a.id)));
+  const total = sugestoes.reduce((t, x) => t + x.q * x.sv.preco, 0);
   return (
+    <div id="t-servicos" className="scroll-mt-40">
     <Cartao titulo="Serviços">
       <p className="text-sm text-muted-foreground">Os trabalhos que se juntam às peças. A quantidade vem da planta; mude-a se for preciso.</p>
+      <AnimatePresence initial={false}>
+        {sugestoes.length > 0 && (
+          <motion.div key="sugestoes" initial={reduzir ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={reduzir ? undefined : { opacity: 0, height: 0 }}
+            className="overflow-hidden">
+            <div className="space-y-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h4 className="flex items-center gap-2 text-[15px] font-semibold"><Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />Sugeridos pelas peças escolhidas</h4>
+                {sugestoes.length > 1 && (
+                  <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => setP((x) => juntarSugestoes(x, sugestoesDeServicos(x)))}>
+                    <Plus className="h-4 w-4" aria-hidden="true" />Juntar os {sugestoes.length} · {eur(total)}
+                  </button>
+                )}
+              </div>
+              <ul className="space-y-2">
+                <AnimatePresence initial={false}>
+                  {sugestoes.map((sg) => <LinhaSugestao key={sg.sv.id} sg={sg} reduzir={!!reduzir}
+                    juntar={() => setP((x) => juntarSugestoes(x, sugestoesDeServicos(x).filter((y) => y.sv.id === sg.sv.id)))}
+                    recusar={() => setP((x) => recusarSugestao(x, sg.sv.id))} />)}
+                </AnimatePresence>
+              </ul>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <ul className="space-y-2">
         {lista.map((sv) => {
           const q = escolhidos.get(sv.id), dentro = q !== undefined;
@@ -213,9 +243,7 @@ function Servicos({ p, setP }: { p: Projeto; setP: SetP }) {
                 {dentro ? <Check className="h-5 w-5" /> : <Wrench className="h-5 w-5" />}
               </span>
               <span className="min-w-[200px] flex-1">
-                <span className="block text-[15px] font-medium">{sv.n}
-                  {recomendados.has(sv.id) && <span className="ml-2 rounded-full bg-primary px-2 text-xs font-medium text-primary-foreground">recomendado</span>}
-                </span>
+                <span className="block text-[15px] font-medium">{sv.n}</span>
                 <span className="block text-xs text-muted-foreground">{sv.desc} {eur(sv.preco)}/{sv.un}{!dentro && sv.un !== "un" ? ` · aqui, ${nf(qtdSugerida(sv, p))} ${sv.un}` : ""}</span>
               </span>
               {dentro ? (
@@ -239,5 +267,64 @@ function Servicos({ p, setP }: { p: Projeto; setP: SetP }) {
         })}
       </ul>
     </Cartao>
+    </div>
+  );
+}
+
+function LinhaSugestao({ sg, reduzir, juntar, recusar }: { sg: Sugestao; reduzir: boolean; juntar: () => void; recusar: () => void }) {
+  return (
+    <motion.li layout={!reduzir} initial={reduzir ? false : { opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reduzir ? undefined : { opacity: 0, x: 24 }}
+      transition={{ duration: 0.2 }} className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background p-3">
+      <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Wrench className="h-5 w-5" /></span>
+      <span className="min-w-[200px] flex-1">
+        <span className="block text-[15px] font-medium">{sg.sv.n} <span className="font-normal text-muted-foreground">· {nf(sg.q)} {sg.sv.un} · {eur(sg.q * sg.sv.preco)}</span></span>
+        {sg.porque.map((x) => <span key={x} className="block text-xs text-muted-foreground">{x}</span>)}
+      </span>
+      <span className="flex items-center gap-1">
+        <button type="button" className="min-h-11 rounded-full px-3 text-sm text-muted-foreground hover:bg-muted" onClick={recusar}>Agora não</button>
+        <button type="button" className={cn(chip(false), "border-primary/40 text-primary")} onClick={juntar} aria-label={`Juntar ${sg.sv.n}`}>
+          <Plus className="h-4 w-4" aria-hidden="true" />Juntar
+        </button>
+      </span>
+    </motion.li>
+  );
+}
+
+/** Ao lado do orçamento: quando um produto escolhido pede serviços novos, a Olyvia avisa (e junta com um toque). */
+function AvisoSugestoes({ p, setP }: { p: Projeto; setP: SetP }) {
+  const reduzir = useReducedMotion();
+  const sugestoes = sugestoesDeServicos(p);
+  const ids = sugestoes.map((x) => x.sv.id).join(",");
+  // o serviço que acabou de aparecer (para dizer qual foi)
+  const antes = useRef<Set<string> | null>(null);
+  const [novo, setNovo] = useState<Sugestao | null>(null);
+  useEffect(() => {
+    const agora = new Set(sugestoes.map((x) => x.sv.id));
+    if (antes.current) { const n = sugestoes.find((x) => !antes.current!.has(x.sv.id)); setNovo(n ?? null); }
+    antes.current = agora;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- muda quando muda a lista
+  }, [ids]);
+  return (
+    <AnimatePresence initial={false}>
+      {sugestoes.length > 0 && (
+        <motion.section key="aviso" aria-label="Serviços sugeridos" initial={reduzir ? false : { opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={reduzir ? undefined : { opacity: 0, y: -8 }}
+          className="space-y-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-4">
+          <p className="flex items-start gap-2 text-[15px]"><Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <span><b className="font-semibold">{sugestoes.length} {sugestoes.length === 1 ? "serviço sugerido" : "serviços sugeridos"}</b> pelas peças escolhidas.</span>
+          </p>
+          <p role="status" className="text-xs text-muted-foreground">
+            <AnimatePresence mode="wait" initial={false}>
+              {novo && <motion.span key={novo.sv.id} className="block" initial={reduzir ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>Novo: {novo.sv.n}. {novo.porque[novo.porque.length - 1]}</motion.span>}
+            </AnimatePresence>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => setP((x) => juntarSugestoes(x, sugestoesDeServicos(x)))}>
+              <Plus className="h-4 w-4" aria-hidden="true" />{sugestoes.length === 1 ? "Juntar" : "Juntar todos"}
+            </button>
+            <button type="button" className={cn(chip(false), "min-h-11")} onClick={() => document.getElementById("t-servicos")?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" })}>Ver</button>
+          </div>
+        </motion.section>
+      )}
+    </AnimatePresence>
   );
 }

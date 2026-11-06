@@ -31,6 +31,8 @@ export interface Projeto {
   porColocar?: PorColocar[];
   /** 5/11 (Rúben: «e incluir também os serviços»): os serviços escolhidos, com a quantidade. */
   servicos?: { id: string; q: number }[];
+  /** 6/11: os serviços sugeridos pelos produtos a que se disse «agora não» (não voltam a ser sugeridos). */
+  servicosRecusados?: string[];
 }
 export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 
