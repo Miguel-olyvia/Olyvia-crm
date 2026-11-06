@@ -1,12 +1,13 @@
 import { writeFileSync } from "node:fs";
 import * as THREE from "three";
 import { afterAll, describe, expect, it } from "vitest";
-import { MEDIDAS_TORNEIRA, aplicarExtracao, construirTorneira, modelosDeTorneira, type ModeloTorneira } from "./torneiras";
+import { MEDIDAS_TORNEIRA, acabamentoDaTorneira, aplicarExtracao, construirTorneira, modelosDeTorneira, type ModeloTorneira } from "./torneiras";
 import { ACABAMENTOS_HTML, caixaEnvolvente, contarTriangulos, limparCacheGeometrias } from "./util";
 
 const LIMITE_TRIANGULOS = 150_000, LIMITE_MS = 300;
 const medidas: string[] = [];
-const acabamentos: Record<ModeloTorneira, string[]> = { round: ["brushed", "chrome", "oro", "titanio", "negro", "cobre"], noah: ["brushed", "negro", "oro", "cobre", "titanio"], smooth: ["chrome", "nickel", "blanco", "gunmetal", "negro", "oro", "cobre"], stick: ["negro"] };
+const acabamentos: Record<ModeloTorneira, string[]> = { round: ["brushed", "chrome", "oro", "titanio", "negro", "cobre"], noah: ["brushed", "negro", "oro", "cobre", "titanio"], smooth: ["chrome", "nickel", "blanco", "gunmetal", "negro", "oro", "cobre"], stick: ["negro"],
+  cira: ["chrome", "gunmetal", "negro", "oro"], alexia: ["chrome", "oro"], granada: ["negro", "blanco"] };
 afterAll(() => { if (process.env.BENCH_FILE) writeFileSync(process.env.BENCH_FILE, medidas.join("\n")); });
 
 describe("torneiras portadas do HTML (sem WebGL)", () => {
@@ -31,9 +32,10 @@ describe("torneiras portadas do HTML (sem WebGL)", () => {
     it(`${modelo}: cada acabamento muda o material (cor, rugosidade e metalness exactos do HTML)`, () => {
       const cores = new Set<string>();
       for (const a of acabamentos[modelo]) {
-        const t = construirTorneira(modelo, a), esperado = ACABAMENTOS_HTML[a];
+        const t = construirTorneira(modelo, a), esperado = acabamentoDaTorneira(modelo, a);
         cores.add(t.materiais.metal.color.getHexString());
-        expect(t.materiais.metal.metalness).toBeCloseTo(modelo === "stick" ? 0.03 : esperado.metalness, 5);
+        expect(ACABAMENTOS_HTML[a]).toBeDefined();
+        expect(t.materiais.metal.metalness).toBeCloseTo(esperado.metalness, 5);
         expect(t.materiais.metal.roughness).toBeGreaterThan(0.1);
         let usa = false; t.grupo.traverse((o) => { if ((o as THREE.Mesh).material === t.materiais.metal) usa = true; });
         expect(usa).toBe(true);

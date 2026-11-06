@@ -4,7 +4,8 @@
 import * as THREE from "three";
 import { DETALHE, V, acabamentoHtml, bodyGeometry, reduzirGrelha, criarMateriais, cyl, geometriaEmCache, lathe, mesh, rod, rounded, roundCylinder, spiralGeometry, type AcabHtml, type Materiais, type Vec } from "./util";
 
-export type ModeloTorneira = "round" | "noah" | "smooth" | "stick";
+import { MEDIDAS_TORNEIRA, type ModeloTorneira } from "./specs";
+export { MEDIDAS_TORNEIRA, type ModeloTorneira };
 export interface OpcoesTorneira { /** rotação da bica, em graus (0 a 360) */ bica?: number; /** 0 = recolhida, 1 = bica extraída com o flexível */ extraido?: number }
 export interface TorneiraHtml { grupo: THREE.Group; bica: THREE.Group; puxar: Puxar | null; materiais: Materiais }
 export interface Puxar { dock: Vec; direction: Vec; head: THREE.Group; hose: THREE.Group; core: THREE.Mesh; spiral: THREE.Mesh }
@@ -15,11 +16,9 @@ export const SOBREPOR_ACABAMENTO: Record<ModeloTorneira, Record<string, Partial<
   noah: { brushed: { color: "#b7b9ba", trim: "#a7aaab", roughness: 0.27 }, oro: { color: "#c6ab64", trim: "#ac904d" }, cobre: { color: "#b88755", trim: "#9e7248" }, titanio: { color: "#55524d", trim: "#45413c" } },
   smooth: { oro: { color: "#bba25c", trim: "#9c8447", roughness: 0.29 }, cobre: { color: "#bd977e", trim: "#a57f67", roughness: 0.3 }, negro: { color: "#151617", trim: "#101112", roughness: 0.46 } },
   stick: { negro: { color: "#151617", trim: "#111213", roughness: 0.53, metalness: 0.03, clearcoat: 0.02 } },
-};
-/** As medidas principais de cada modelo (mm), as do catálogo de origem: altura total, alcance, altura de saída e diâmetro da base. */
-export const MEDIDAS_TORNEIRA: Record<ModeloTorneira, { altura: number; alcance: number; saida: number; base: number }> = {
-  round: { altura: 445, alcance: 224, saida: 245, base: 55 }, noah: { altura: 366, alcance: 210, saida: 291, base: 51.5 },
-  smooth: { altura: 435, alcance: 213, saida: 242, base: 49 }, stick: { altura: 456, alcance: 230, saida: 231, base: 50 },
+  cira: { chrome: { roughness: 0.17 }, gunmetal: { color: "#777a78", trim: "#5c605d", roughness: 0.29 }, oro: { color: "#ccba7a", trim: "#ac995c", roughness: 0.27 }, negro: { color: "#151618", trim: "#111214", roughness: 0.46 } },
+  alexia: { chrome: { roughness: 0.115 }, oro: { color: "#c6ab64", trim: "#ac904d", roughness: 0.26 } },
+  granada: { negro: { color: "#171819", trim: "#101112", roughness: 0.4, metalness: 0.06, clearcoat: 0.07 }, blanco: { color: "#f5f5f2", trim: "#e5e6e4", roughness: 0.36, metalness: 0.015, clearcoat: 0.1 } },
 };
 export const acabamentoDaTorneira = (m: ModeloTorneira, acab: string): AcabHtml => acabamentoHtml(acab, SOBREPOR_ACABAMENTO[m][acab]);
 
@@ -204,7 +203,129 @@ function construirStick(m: Materiais, o: OpcoesTorneira): TorneiraHtml {
   return { grupo, bica, puxar, materiais: m };
 }
 
-const CONSTRUTORES: Record<ModeloTorneira, (m: Materiais, o: OpcoesTorneira) => TorneiraHtml> = { round: construirRound, noah: construirNoah, smooth: construirSmooth, stick: construirStick };
+/* ------------------------------------------------------------------ Marti 1921 Cira Silicone Edition (em repouso: a ponteira encaixada) */
+/** `ciraEngravedCylinder`: o cilindro com a gravação quadriculada em sulcos reais. */
+function cilindroGravado(radius: number, height: number, columns: number, rows: number): THREE.BufferGeometry {
+  const segments = columns * 6, levels = rows * 6, positions: number[] = [], indices: number[] = [], uv: number[] = [];
+  for (let iy = 0; iy <= levels; iy++) for (let ix = 0; ix <= segments; ix++) {
+    const u = ix / segments, v = iy / levels, fu = (ix % 6) / 6, fv = (iy % 6) / 6;
+    const edge = Math.min(fu, 1 - fu, fv, 1 - fv), t = Math.min(edge / 0.19, 1), relief = t * t * (3 - 2 * t);
+    const r = radius - 0.42 * (1 - relief), angle = u * Math.PI * 2;
+    positions.push(Math.sin(angle) * r, v * height, Math.cos(angle) * r); uv.push(u, v);
+    if (ix < segments && iy < levels) { const a = iy * (segments + 1) + ix, b = a + 1, c = a + segments + 1, d = c + 1; indices.push(a, b, c, b, d, c); }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(indices); g.computeVertexNormals(); return g;
+}
+/** O arejador com os furos (InstancedMesh, como no HTML). */
+function arejador(m: Materiais, pai: THREE.Object3D, r: number, y: number, raioFuro: number, alternado: boolean, nome: string): void {
+  cyl(r, r, 0.5, m.aerator, pai, nome).position.y = y;
+  const pts: number[][] = [];
+  for (let x = -9; x <= 9; x += 1.65) for (let z = -9; z <= 9; z += 1.65) { const zz = z + (alternado ? (Math.round(x / 1.65) % 2) * 0.825 : 0); if (x * x + zz * zz < 88) pts.push([x, zz]); }
+  const furos = new THREE.InstancedMesh(new THREE.CylinderGeometry(raioFuro, raioFuro, alternado ? 0.13 : 0.15, 8), m.hole, pts.length), mx = new THREE.Matrix4();
+  pts.forEach(([x, z], i) => { mx.makeTranslation(x, y + 0.32, z); furos.setMatrixAt(i, mx); }); pai.add(furos);
+}
+function construirCira(m: Materiais, o: OpcoesTorneira): TorneiraHtml {
+  const grupo = new THREE.Group(); grupo.name = "Marti 1921 Cira Silicone Edition";
+  lathe([[0, 0], [22.7, 0], [23.7, 0.35], [24, 1], [24, 7], [23.65, 8], [19.9, 8], [0, 8]], m.metal, grupo, "Cira · base Ø48");
+  mesh(geometriaEmCache("cira-corpo", () => cilindroGravado(19.95, 239, 26, 48)), m.metal, grupo, "Cira · corpo com gravação quadriculada").position.y = 8;
+  lathe([[19.5, 246.7], [20.3, 247], [20.5, 248], [20.5, 269], [20, 270], [11.45, 270], [11.45, 268]], m.metal, grupo, "Cira · colar superior a 270 mm");
+  lathe([[19.6, 246.9], [20.52, 246.9], [20.52, 247.35], [19.6, 247.35]], m.trim, grupo, "Cira · união do colar");
+  const neck = new THREE.Group(); neck.position.set(12, 166, 0); neck.quaternion.setFromUnitVectors(V(0, 1, 0), V(1, 0, 0)); grupo.add(neck);
+  lathe([[0, 0], [18.7, 0], [19.1, 1], [19.1, 4], [17.8, 12], [17.8, 25], [0, 25]], m.metal, neck, "Cira · ligação lateral");
+  const knob = new THREE.Group(); knob.position.set(36.5, 166, 0); knob.quaternion.setFromUnitVectors(V(0, 1, 0), V(1, 0, 0)); grupo.add(knob);
+  lathe([[0, 0], [18.6, 0], [19.5, 1], [19.7, 2], [19.7, 22.5], [19.2, 24], [18.4, 24.6], [0, 24.6]], m.metal, knob, "Cira · comando lateral");
+  lathe([[17.7, -0.35], [18.65, -0.35], [18.65, 0.1], [17.7, 0.1]], m.rubber, knob, "Cira · junta do comando");
+  lathe([[0, 0], [2.75, 0], [3.0, 0.5], [3.0, 62], [2.8, 63], [0, 63.3]], m.metal, grupo, "Cira · pega vertical").position.set(50, 184, 0);
+  const bica = new THREE.Group(); bica.name = "Cira · braço, encaixe e mangueira"; grupo.add(bica);
+  const arm = mesh(geometriaEmCache("cira-braco", () => cilindroGravado(7.3, 183.5, 12, 37)), m.metal, bica, "Cira · braço metálico gravado");
+  arm.position.set(0, 260, 18); arm.quaternion.setFromUnitVectors(V(0, 1, 0), V(0, 0, 1));
+  rod(V(0, 260, 199), V(0, 260, 207), 7.45, m.metal, bica, "Cira · ligação ao suporte");
+  lathe([[14.05, 210], [14.45, 210.7], [14.45, 271.5], [14.15, 272.4], [12.0, 272.4], [11.85, 271.5], [11.85, 211], [12.1, 210], [14.05, 210]], m.metal, bica, "Cira · encaixe cilíndrico fixo").position.z = 220;
+  lathe([[11.75, 212], [11.75, 271.8], [11.9, 271.8], [11.9, 212], [11.75, 212]], m.rubber, bica, "Cira · interior do encaixe").position.z = 220;
+  const dock = V(0, 291, 220);
+  const head = new THREE.Group(); head.name = "Cira · ponteira removível"; head.position.copy(dock); head.quaternion.setFromUnitVectors(V(0, 1, 0), V(0, -1, 0)); bica.add(head);
+  lathe([[11.3, 0], [14.1, 0], [14.45, 0.7], [14.45, 17.6], [14.0, 18.3], [11.4, 18.7], [11.4, 79.7], [10.8, 81], [10.25, 81], [10.25, 79]], m.metal, head, "Cira · ponteira metálica");
+  lathe([[13.7, 18], [14.13, 18], [14.13, 18.35], [13.7, 18.35]], m.trim, head, "Cira · junta da ponteira");
+  arejador(m, head, 10.4, 80.5, 0.42, false, "Cira · arejador");
+  // `ciraCurve(ciraDock, 478.5, (0,-1,0))`: o contorno de repouso da mangueira em silicone
+  const end = dock, peak = 478.5, direction = V(0, -1, 0);
+  const upper = end.clone().addScaledVector(direction, -Math.min(79, Math.max(0, peak - end.y - 45))), crown = V(end.x * 0.44, peak, end.z * 0.5), right = V(0, peak - 113.5, 0);
+  const curva = new THREE.CurvePath<THREE.Vector3>(); curva.add(new THREE.LineCurve3(V(0, 269.5, 0), right));
+  curva.add(new THREE.CubicBezierCurve3(right, right.clone().add(V(0, 62, 0)), crown.clone().add(V(-end.x * 0.16, 0, -end.z * 0.277)), crown));
+  curva.add(new THREE.CubicBezierCurve3(crown, crown.clone().add(V(end.x * 0.16, 0, end.z * 0.277)), upper.clone().addScaledVector(direction, -Math.min(60, (peak - upper.y) * 0.9)), upper));
+  curva.add(new THREE.LineCurve3(upper, end));
+  mesh(new THREE.TubeGeometry(curva, Math.round(240 * DETALHE.tuboSegmentos), 11.5, DETALHE.tuboRadial, false), m.silicone, bica, "Cira · mangueira preta em silicone");
+  rodar(bica, o.bica);
+  return { grupo, bica, puxar: null, materiais: m };
+}
+
+/* ------------------------------------------------------------------ GME IO Alexia e Marti 1921 Granada (abatíveis, na posição inicial) */
+interface Abativel {
+  nome: string; prefixo: string; base: number[][]; corpo: (x: number, y: number, z: number) => number; grelhaCorpo: Parameters<typeof bodyGeometry>[1];
+  hingeX: number; hinge: (x: number, y: number, z: number) => number; seamX: number; casquilho: number[][]; linhaCasquilho?: number[][];
+  inclinacao: number; saidaLocal: [number, number]; topo: number; curva: [number, number, number, number]; terminal: number[][]; junta: number[][]; raioFiltro: number;
+  knob: [number, number[][], number[][]]; pega: [number[][], number, number, number]; indicador?: boolean;
+}
+function construirAbativel(a: Abativel, m: Materiais, o: OpcoesTorneira): TorneiraHtml {
+  const grupo = new THREE.Group(); grupo.name = a.nome;
+  lathe(a.base, m.metal, grupo, `${a.prefixo} · base de fixação`);
+  mesh(corpo(`${a.prefixo}-corpo`, a.corpo, a.grelhaCorpo), m.metal, grupo, `${a.prefixo} · corpo horizontal e pedestal`);
+  const fold = new THREE.Group(); fold.name = `${a.prefixo} · articulação`; fold.position.set(a.hingeX, 52, 0); grupo.add(fold);
+  mesh(corpo(`${a.prefixo}-cabeca`, a.hinge, { step: 1.05, nx: 40, ny: 73, nz: 50, x0: -21, y0: -26, z0: -26 }), m.metal, fold, `${a.prefixo} · cabeça articulada`);
+  const seam = lathe([[23.6, 0], [24.57, 0], [24.57, 0.42], [23.6, 0.42]], m.trim, grupo, `${a.prefixo} · junta da articulação`); seam.quaternion.setFromUnitVectors(V(0, 1, 0), V(1, 0, 0)); seam.position.set(a.seamX, 52, 0);
+  lathe(a.casquilho, m.metal, fold, `${a.prefixo} · casquilho de rotação`);
+  if (a.linhaCasquilho) lathe(a.linhaCasquilho, m.trim, fold, `${a.prefixo} · linha do casquilho`);
+  const bica = new THREE.Group(); bica.name = `${a.prefixo} · bica giratória`; bica.position.y = 50; fold.add(bica);
+  const ang = (a.inclinacao * Math.PI) / 180, dir = V(0, -Math.cos(ang), Math.sin(ang)), dock = V(0, a.saidaLocal[0], a.saidaLocal[1]).addScaledVector(dir, -18);
+  const p = (y: number, z: number) => V(0, y - 102, z), [c1, c2, c3, c4] = a.curva;
+  const caminho = new THREE.CurvePath<THREE.Vector3>();
+  caminho.add(new THREE.LineCurve3(p(101.5, 0), p(293, 0)));
+  caminho.add(new THREE.CubicBezierCurve3(p(293, 0), p(c1, 0), p(c2, c3), p(c2, c4)));
+  // Alexia: um troço recto de 20 mm antes do terminal; Granada: o arco acaba no terminal
+  const fimArco = a.prefixo === "Alexia" ? dock.clone().addScaledVector(dir, -20) : dock;
+  const raio = (a.topo - fimArco.y) / (1 - Math.sin(ang)), topoFim = V(0, a.topo, fimArco.z - raio * Math.cos(ang)), alca = (4 / 3) * Math.tan(((90 - a.inclinacao) * Math.PI) / 720) * raio;
+  caminho.add(new THREE.LineCurve3(p(c2, c4), topoFim));
+  caminho.add(new THREE.CubicBezierCurve3(topoFim, topoFim.clone().add(V(0, 0, alca)), fimArco.clone().addScaledVector(dir, -alca), fimArco));
+  if (fimArco !== dock) caminho.add(new THREE.LineCurve3(fimArco, dock));
+  mesh(new THREE.TubeGeometry(caminho, Math.round(320 * DETALHE.tuboSegmentos), 12, DETALHE.tuboRadial, false), m.metal, bica, `${a.prefixo} · bica tubular`);
+  const tip = new THREE.Group(); tip.name = `${a.prefixo} · terminal`; tip.position.copy(dock); tip.quaternion.setFromUnitVectors(V(0, 1, 0), dir); bica.add(tip);
+  lathe(a.terminal, m.metal, tip, `${a.prefixo} · terminal e aro do arejador`);
+  lathe(a.junta, m.trim, tip, `${a.prefixo} · união do terminal`);
+  arejador(m, tip, a.raioFiltro, 17.4, 0.38, true, `${a.prefixo} · arejador`);
+  const [kx, kp, kj] = a.knob, knob = new THREE.Group(); knob.position.set(kx, 52, 0); knob.quaternion.setFromUnitVectors(V(0, 1, 0), V(1, 0, 0)); grupo.add(knob);
+  lathe(kp, m.metal, knob, `${a.prefixo} · comando lateral`); lathe(kj, m.rubber, knob, `${a.prefixo} · junta do comando`);
+  const [pp, px, py, prz] = a.pega, pega = lathe(pp, m.metal, grupo, `${a.prefixo} · pega`); pega.position.set(px, py, 0); pega.rotation.z = (prz * Math.PI) / 180;
+  if (a.indicador) { const ind = mesh(new THREE.SphereGeometry(1.75, 20, 12), m.rubber, grupo, `${a.prefixo} · indicador discreto`); ind.scale.y = 0.36; ind.position.set(70, 76.5, 0); }
+  rodar(bica, o.bica);
+  return { grupo, bica, puxar: null, materiais: m };
+}
+const ALEXIA: Abativel = {
+  nome: "GME IO Alexia Abatível", prefixo: "Alexia", base: [[0, 0], [25.3, 0], [26, 0.4], [26, 6.3], [25.6, 7.1], [22.5, 7.5], [0, 7.5]],
+  corpo: (x, y, z) => { const a = roundCylinder(Math.hypot(y - 52, z), x - 17, 24.5, 42, 0.8), b = roundCylinder(Math.hypot(x, z), y - 28, 22, 21.5, 0.8), h = Math.max(5 - Math.abs(a - b), 0) / 5; return Math.min(a, b) - h * h * 1.25; },
+  grelhaCorpo: { step: 1.15, nx: 78, ny: 68, nz: 47, x0: -28, y0: 4, z0: -27 }, hingeX: -42,
+  hinge: (x, y, z) => { const a = roundCylinder(Math.hypot(y, z), x + 1, 24.4, 18, 0.9), b = roundCylinder(Math.hypot(x, z), y - 29, 14.2, 19, 1), h = Math.max(4 - Math.abs(a - b), 0) / 4; return Math.min(a, b) - h * h; },
+  seamX: -25.2, casquilho: [[12, 36.7], [14.2, 36.7], [14.45, 37.1], [14.45, 51.5], [14.15, 52.3], [12, 52.3]], linhaCasquilho: [[13.7, 37.3], [14.5, 37.3], [14.5, 37.55], [13.7, 37.55]],
+  inclinacao: 5, saidaLocal: [157, 201], topo: 239, curva: [319.51, 341, 21.49, 48],
+  terminal: [[11.9, 0], [12.05, 0.4], [12.05, 16.9], [11.8, 17.7], [10.7, 18], [10.3, 18], [10.3, 16.5]], junta: [[11.7, -0.18], [12.1, -0.18], [12.1, 0.1], [11.7, 0.1]], raioFiltro: 10.45,
+  knob: [59, [[0, 0], [23.5, 0], [24.55, 0.9], [24.65, 2], [24.65, 22.9], [24.35, 24.1], [23.3, 25], [0, 25]], [[22.8, -0.5], [24, -0.5], [24, -0.08], [22.8, -0.08]]],
+  pega: [[[0, 0], [3.6, 0], [4, 0.4], [4, 65.7], [3.6, 66.8], [2.9, 67.2], [0, 67.2]], 76, 75, 0],
+};
+const GRANADA: Abativel = {
+  nome: "Marti 1921 Granada Abatível", prefixo: "Granada", base: [[0, 0], [25.3, 0], [26, 0.5], [26, 5.6], [25.4, 6.6], [22, 7], [0, 7]],
+  corpo: (x, y, z) => { const a = roundCylinder(Math.hypot(y - 52, z), x - 17.5, 24.5, 44.5, 1.1), b = roundCylinder(Math.hypot(x, z), y - 28, 22, 21.5, 1.1), h = Math.max(5 - Math.abs(a - b), 0) / 5; return Math.min(a, b) - h * h * 1.25; },
+  grelhaCorpo: { step: 1.15, nx: 84, ny: 69, nz: 47, x0: -30, y0: 3, z0: -27 }, hingeX: -44,
+  hinge: (x, y, z) => { const a = roundCylinder(Math.hypot(y, z), x + 1, 24.4, 18, 1.1), b = roundCylinder(Math.hypot(x, z), y - 29, 14.15, 19, 1.1), h = Math.max(4.5 - Math.abs(a - b), 0) / 4.5; return Math.min(a, b) - h * h * 1.125; },
+  seamX: -27.2, casquilho: [[12, 37], [14.1, 37], [14.3, 37.5], [14.3, 51.4], [13.8, 52], [12, 52]],
+  inclinacao: 8, saidaLocal: [183, 195], topo: 231, curva: [315.0914, 333, 17.9086, 40],
+  terminal: [[11.9, 0], [12.05, 0.4], [12.05, 16.8], [11.7, 17.7], [10.6, 18], [10.25, 18], [10.25, 16.3]], junta: [[11.7, -0.15], [12.09, -0.15], [12.09, 0.1], [11.7, 0.1]], raioFiltro: 10.4,
+  knob: [62, [[0, 0], [23.3, 0], [24.4, 0.9], [24.6, 2], [24.6, 23], [24.2, 24.1], [23.2, 25], [0, 25]], [[22.8, -0.5], [23.9, -0.5], [23.9, -0.1], [22.8, -0.1]]],
+  pega: [[[0, 0], [3.6, 0], [4, 0.4], [4, 65], [3.7, 66], [3.1, 66.5], [0, 66.5]], 77, 75, -3], indicador: true,
+};
+
+const CONSTRUTORES: Record<ModeloTorneira, (m: Materiais, o: OpcoesTorneira) => TorneiraHtml> = {
+  round: construirRound, noah: construirNoah, smooth: construirSmooth, stick: construirStick, cira: construirCira,
+  alexia: (m, o) => construirAbativel(ALEXIA, m, o), granada: (m, o) => construirAbativel(GRANADA, m, o),
+};
 export const modelosDeTorneira = (): ModeloTorneira[] => Object.keys(CONSTRUTORES) as ModeloTorneira[];
 export const ehModeloTorneira = (id: string): id is ModeloTorneira => id in CONSTRUTORES;
 /** Constrói uma torneira (em mm) para um acabamento e opções; as geometrias pesadas vêm do cache. */

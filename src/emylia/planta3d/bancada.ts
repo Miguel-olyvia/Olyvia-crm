@@ -7,10 +7,7 @@
 import type { PecaPlanta } from "../planta";
 import type { ProdutoModelo3D } from "./catalogo3d";
 import { FAMILIAS, acabamentosDaMedida, resolverVariante, type Familia } from "./familias";
-import { AMBAR_SPECS, LODY_SPECS, VELAR_SPECS, roundLoop } from "./modelosHtml/lavaLoicas";
-import { CUBAS_SPECS, KERAN_SPECS, UNA_SPECS } from "./modelosHtml/lavaLoicasRodi";
-import { HOB_SPECS, type SpecPlaca } from "./modelosHtml/placas";
-import { ehModeloTorneira } from "./modelosHtml/torneiras";
+import { AMBAR_SPECS, CUBAS_SPECS, HOB_SPECS, KERAN_SPECS, LODY_SPECS, UNA_SPECS, VELAR_SPECS, ehModeloTorneira, roundLoop, type SpecPlaca } from "./modelosHtml/specs";
 
 /* ------------------------------------------------------------------ as chapas (cópia de `counterMaterials` do HTML) */
 export interface LivroChapa { file: string; url: string; label: string }
@@ -30,6 +27,8 @@ export interface ConfigBancada {
   series: string; tone: string; surface: string; length: number; depth: number; thickness: 12; cabinet: boolean;
   sink: string; hob: string; tap: string; sinkFinish: string; hobFinish: string; tapFinish: string; mount: "under" | "top";
   sinkX: number; hobX: number; reverse: boolean; upstand: number; back: boolean; left: boolean; right: boolean; book: string; direction: 0 | 180; textureOffset: number;
+  /** Só a chapa (e os móveis): um tampo do catálogo vendido sem equipamentos. */
+  semEquipamentos?: boolean;
 }
 /** Os acabamentos do HTML têm outros ids nos lava-loiças (o «brushed» do Velar é o «inox» da família): a composição de exemplo usa os ids das famílias. */
 export const BANCADA_OMISSAO: ConfigBancada = { series: "canela-roma", tone: "beige", surface: "natural", length: 2400, depth: 650, thickness: 12, cabinet: true, sink: "velar50", hob: "ib65b60", tap: "round", sinkFinish: "inox", hobFinish: "negro", tapFinish: "brushed", mount: "under", sinkX: 650, hobX: 1800, reverse: false, upstand: 40, back: true, left: true, right: true, book: "A", direction: 0, textureOffset: 45 };

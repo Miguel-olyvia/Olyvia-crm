@@ -5,25 +5,8 @@ import * as THREE from "three";
 import { V, cyl, lathe, mesh, rod, rounded } from "./util";
 import { roundLoop, sinkSurface } from "./lavaLoicas";
 
-type Queimador = [number, number, number] | [number, number, number, boolean];
-export interface SpecPlaca {
-  id: string; nominalWidth: number; brand: string; title: string; kind: "induction" | "radiant" | "gas"; glass?: boolean; outerWidth: number; outerDepth: number; plate: number; under: number;
-  above?: number; cut: [number, number]; radius: number; zones: number; grate?: "wire" | "individual" | "cast"; knobs?: number[]; burners?: Queimador[];
-}
-export const HOB_SPECS: SpecPlaca[] = [
-  { id: "ib65b60", nominalWidth: 600, brand: "Indesit", title: "IB 65B60 NE", kind: "induction", outerWidth: 590, outerDepth: 510, plate: 4, under: 50, cut: [560, 480], radius: 10, zones: 4 },
-  { id: "ri161", nominalWidth: 600, brand: "Indesit", title: "RI 161 C (ES)", kind: "radiant", outerWidth: 580, outerDepth: 510, plate: 4, under: 42, cut: [560, 490], radius: 1, zones: 4 },
-  { id: "thp642", nominalWidth: 600, brand: "Indesit", title: "THP 642 IX/I 1", kind: "gas", outerWidth: 580, outerDepth: 510, plate: 13, under: 38, above: 56, cut: [560, 480], radius: 10, zones: 4, grate: "wire", knobs: [-84, -28, 28, 84],
-    burners: [[-160, -130, 37.5], [160, -130, 50], [-160, 75, 37.5], [160, 75, 27.5]] },
-  { id: "ing61t", nominalWidth: 600, brand: "Indesit", title: "ING 61T", kind: "gas", glass: true, outerWidth: 590, outerDepth: 510, plate: 7, under: 42, above: 57, cut: [560, 480], radius: 2, zones: 4, grate: "individual", knobs: [-90, -30, 30, 90],
-    burners: [[-145, -130, 37.5], [145, -130, 50], [-145, 75, 37.5], [145, 75, 27.5]] },
-  { id: "wlb1160", nominalWidth: 600, brand: "Whirlpool", title: "WL B1160 BF", kind: "induction", outerWidth: 590, outerDepth: 510, plate: 4, under: 50, cut: [560, 480], radius: 2, zones: 4 },
-  { id: "akt8090", nominalWidth: 600, brand: "Whirlpool", title: "AKT 8090/NE", kind: "radiant", outerWidth: 580, outerDepth: 510, plate: 4, under: 42, cut: [560, 490], radius: 6, zones: 4 },
-  { id: "gmal6422", nominalWidth: 600, brand: "Whirlpool", title: "GMAL 6422/IXL", kind: "gas", outerWidth: 590, outerDepth: 510, plate: 7, under: 39, above: 52, cut: [560, 480], radius: 4, zones: 4, grate: "cast", knobs: [25, 88, 151, 214],
-    burners: [[-145, -130, 37.5], [145, -130, 37.5], [-145, 70, 62, true], [145, 70, 27.5]] },
-  { id: "gmwl958", nominalWidth: 900, brand: "Whirlpool", title: "GMWL 958/IXL", kind: "gas", outerWidth: 860, outerDepth: 510, plate: 7, under: 40, above: 52, cut: [840, 480], radius: 8.5, zones: 5, grate: "cast", knobs: [-235, -70, 40, 205, 315],
-    burners: [[-270, -20, 64, true], [0, -135, 37.5], [0, 85, 37.5], [270, -135, 50], [270, 85, 27.5]] },
-];
+import { HOB_SPECS, type SpecPlaca } from "./specs";
+export { HOB_SPECS, type SpecPlaca };
 export interface PlacaHtml { grupo: THREE.Group; materiais: THREE.Material[] }
 interface Mats { steel: THREE.MeshStandardMaterial; alloy: THREE.MeshStandardMaterial; iron: THREE.MeshStandardMaterial; dark: THREE.MeshStandardMaterial; ceramic: THREE.MeshStandardMaterial; glass: THREE.MeshPhysicalMaterial }
 

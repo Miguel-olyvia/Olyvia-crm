@@ -27,7 +27,7 @@ export function acabamentoHtml(id: string, sobrepor: Partial<AcabHtml> = {}): Ac
 /** Os materiais de um modelo para um acabamento: `metal` e `trim` mudam com o acabamento; os outros são fixos, como no HTML. */
 export interface Materiais {
   metal: THREE.MeshPhysicalMaterial; trim: THREE.MeshPhysicalMaterial; rubber: THREE.MeshStandardMaterial; aerator: THREE.MeshStandardMaterial;
-  hole: THREE.MeshStandardMaterial; hose: THREE.MeshPhysicalMaterial; hoseCore: THREE.MeshStandardMaterial;
+  hole: THREE.MeshStandardMaterial; hose: THREE.MeshPhysicalMaterial; hoseCore: THREE.MeshStandardMaterial; /** o silicone preto da Cira (`ciraSilicone`) */ silicone: THREE.MeshStandardMaterial;
 }
 export function criarMateriais(a: AcabHtml): Materiais {
   const metal = new THREE.MeshPhysicalMaterial({ color: "#bdbab4", metalness: 1, roughness: 0.28, clearcoat: 0.12, clearcoatRoughness: 0.3, envMapIntensity: 1.05 });
@@ -39,6 +39,7 @@ export function criarMateriais(a: AcabHtml): Materiais {
     hole: new THREE.MeshStandardMaterial({ color: "#202b24", roughness: 0.82 }),
     hose: new THREE.MeshPhysicalMaterial({ color: "#d1d0cb", metalness: 1, roughness: 0.22, clearcoat: 0.15, envMapIntensity: 1.05 }),
     hoseCore: new THREE.MeshStandardMaterial({ color: "#575953", metalness: 0.85, roughness: 0.4 }),
+    silicone: new THREE.MeshStandardMaterial({ color: "#101115", metalness: 0, roughness: 0.78 }),
   };
 }
 export const libertarMateriais = (m: Materiais): void => { for (const x of Object.values(m)) x.dispose(); };

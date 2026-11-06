@@ -52,7 +52,7 @@ function moveis(c: ConfigBancada, livres: [number, number][], parent: THREE.Grou
 
 /** Constrói a bancada (em mm). `textura`: a imagem da chapa (pode ainda não ter carregado; o material actualiza-se quando chegar). */
 export function construirBancada(c: ConfigBancada, textura: THREE.Texture | null): BancadaHtml | null {
-  const p = colocacao(c), { series, tone, finish } = selecaoChapa(c);
+  const p = colocacao(c), { series, tone, finish } = selecaoChapa(c), so = !!c.semEquipamentos;
   if (!p || !series || !tone || !finish) return null;
   const grupo = new THREE.Group(); grupo.name = `Bancada · ${series.label} · ${tone.label}`;
   const mats: THREE.Material[] = [], geos: THREE.BufferGeometry[] = [], libertos: (() => void)[] = [];
@@ -63,7 +63,7 @@ export function construirBancada(c: ConfigBancada, textura: THREE.Texture | null
 
   // a chapa: o contorno com cantos de 4 mm e os recortes abertos
   const forma = caminhoForma(roundLoop(c.length, c.depth, 4));
-  forma.holes = p.holes.map((l) => caminhoFuro(l));
+  forma.holes = so ? [] : p.holes.map((l) => caminhoFuro(l));
   const geo = new THREE.ExtrudeGeometry(forma, { depth: t, bevelEnabled: false, steps: 1, curveSegments: 24 });
   geo.rotateX(-Math.PI / 2); geo.translate(0, -t, 0); geo.computeVertexNormals(); mapearUV(geo, c, series.slab); geos.push(geo);
   const chapa = new THREE.Mesh(geo, [mat, edge]); chapa.name = "Bancada · 12 mm · recortes abertos"; chapa.castShadow = true; chapa.receiveShadow = true; grupo.add(chapa);
@@ -81,6 +81,12 @@ export function construirBancada(c: ConfigBancada, textura: THREE.Texture | null
     if (c.right) peca(t, d, c.length / 2 - t / 2, z, "direito", (_x, y, zz) => [c.length / 2 - y, zz]);
   }
 
+  if (so) {
+    if (c.cabinet) moveis(c, [], grupo, mats, geos);
+    grupo.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    grupo.position.y = TOPO_BANCADA_MM;
+    return { grupo, libertar: () => { geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose()); } };
+  }
   // os equipamentos: os modelos detalhados do HTML
   const sink = construirLavaLoica(c.sink, c.sinkFinish);
   sink.grupo.position.set(p.sx, c.mount === "under" ? -t - 0.4 : p.sink.ambar ? 10.4 : 1.4, p.sz); sink.grupo.rotation.y = c.reverse ? Math.PI : 0;

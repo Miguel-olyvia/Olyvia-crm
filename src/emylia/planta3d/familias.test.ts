@@ -91,7 +91,8 @@ describe("o produto 3D de uma variante", () => {
   it("as torneiras com modelo detalhado do HTML (Round, Noah, Smooth, Stick) ligam o modelo e o acabamento; as outras ficam no mockup simples", () => {
     expect(modeloDaFamilia(fam("stick"), "unica", "negro").mockup3d.params).toMatchObject({ k: "torneira", html: { modelo: "stick", acab: "negro" } });
     expect(modeloDaFamilia(fam("round"), "unica", "oro").mockup3d.params).toMatchObject({ html: { modelo: "round", acab: "oro" } });
-    expect((modeloDaFamilia(fam("cira"), "unica", "oro").mockup3d.params as { html?: unknown }).html).toBeUndefined();
+    expect(modeloDaFamilia(fam("cira"), "unica", "oro").mockup3d.params).toMatchObject({ html: { modelo: "cira", acab: "oro" } });
+    expect(modeloDaFamilia(fam("granada"), "unica", "blanco").mockup3d.params).toMatchObject({ html: { modelo: "granada", acab: "blanco" } });
     expect(fam("round").opcoes).toEqual(["bica", "extraida"]);
     expect(fam("noah").opcoes).toEqual(["bica"]);
   });

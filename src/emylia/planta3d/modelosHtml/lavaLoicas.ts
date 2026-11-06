@@ -10,34 +10,14 @@ export interface OpcoesLavaLoica { /** retirar as tampas dos ralos (Ambar) */ ta
 export interface LavaLoicaHtml { grupo: THREE.Group; tampas: THREE.Object3D[]; materiais: THREE.Material[] }
 
 /* ------------------------------------------------------------------ dados dos modelos (as `*Specs` do HTML) */
-export const VELAR_SPECS = [
-  { id: "velar34", size: 34, innerWidth: 340, outerWidth: 380, cabinet: 450, reference: "FS200260" }, { id: "velar40", size: 40, innerWidth: 400, outerWidth: 440, cabinet: 500, reference: "FS200261" },
-  { id: "velar45", size: 45, innerWidth: 450, outerWidth: 490, cabinet: 500, reference: "FS200269" }, { id: "velar50", size: 50, innerWidth: 500, outerWidth: 540, cabinet: 600, reference: "FS200262" },
-  { id: "velar71", size: 71, innerWidth: 710, outerWidth: 750, cabinet: 800, reference: "FS200263" },
-];
-export const LODY_SPECS = [
-  { id: "lody40", size: 40, innerWidth: 400, outerWidth: 440, cabinet: 500, radius: 15, drainZ: -70 }, { id: "lody50", size: 50, innerWidth: 500, outerWidth: 540, cabinet: 600, radius: 15, drainZ: -70 },
-  { id: "lody70", size: 70, innerWidth: 700, outerWidth: 740, cabinet: 800, radius: 12, drainZ: -80 },
-];
+// os dados estão em specs.ts (sem three), para a lista de produtos e a bancada os usarem sem carregar o three
+import { AMBAR_SPECS, LODY_SPECS, VELAR_SPECS, roundLoop, type BowlAmbar, type SpecAmbar } from "./specs";
+export { AMBAR_SPECS, LODY_SPECS, VELAR_SPECS, roundLoop };
 export const LODY_ACABAMENTOS: Record<string, { color: string; trim: string; roughness: number; metalness: number; clearcoat: number }> = {
   oro: { color: "#c9ad68", trim: "#c2a25b", roughness: 0.3, metalness: 1, clearcoat: 0.055 }, cobre: { color: "#bc825b", trim: "#b77950", roughness: 0.3, metalness: 1, clearcoat: 0.055 },
   gunmetal: { color: "#62605e", trim: "#575553", roughness: 0.29, metalness: 1, clearcoat: 0.055 },
 };
 export const AMBAR_ACABAMENTOS: Record<string, { color: string; trim: string }> = { negro: { color: "#292c2d", trim: "#252829" }, gunmetal: { color: "#858988", trim: "#bfc4c7" }, blanco: { color: "#e5e5e1", trim: "#bfc4c7" } };
-interface BowlAmbar { w: number; d: number; depth: number; left: number; top: number; drainX: number; drainZ: number; r: number }
-const ab = (w: number, d: number, depth: number, left: number, top: number, dx = 0, dz = -80): BowlAmbar => ({ w, d, depth, left, top, drainX: dx, drainZ: dz, r: 15 });
-interface SpecAmbar { id: string; size: string; outerWidth: number; outerDepth: number; cabinet: number; step: boolean; tapLedge?: boolean; drainer?: boolean; bowls: BowlAmbar[] }
-export const AMBAR_SPECS: SpecAmbar[] = [
-  { id: "ambar40", size: "40", outerWidth: 450, outerDepth: 452, cabinet: 500, step: true, bowls: [ab(400, 380, 200, 25, 36)] }, { id: "ambar40n", size: "40 N", outerWidth: 450, outerDepth: 430, cabinet: 500, step: false, bowls: [ab(390, 370, 200, 30, 30)] },
-  { id: "ambar50", size: "50", outerWidth: 550, outerDepth: 452, cabinet: 600, step: true, bowls: [ab(500, 380, 200, 25, 36)] }, { id: "ambar50n", size: "50 N", outerWidth: 550, outerDepth: 430, cabinet: 600, step: false, bowls: [ab(490, 370, 200, 30, 30)] },
-  { id: "ambar57", size: "57", outerWidth: 550, outerDepth: 520, cabinet: 600, step: true, tapLedge: true, bowls: [ab(500, 380, 200, 25, 105)] },
-  { id: "ambar55", size: "55", outerWidth: 555, outerDepth: 450, cabinet: 600, step: true, bowls: [ab(370, 380, 200, 20, 35), ab(130, 380, 125, 405, 35)] },
-  { id: "ambar70", size: "70", outerWidth: 750, outerDepth: 452, cabinet: 800, step: true, bowls: [ab(700, 380, 220, 25, 36)] }, { id: "ambar80", size: "80", outerWidth: 850, outerDepth: 452, cabinet: 900, step: true, bowls: [ab(800, 380, 220, 25, 36)] },
-  { id: "ambar86", size: "86", outerWidth: 860, outerDepth: 500, cabinet: 600, step: true, drainer: true, bowls: [ab(452, 380, 200, 37, 60.6, 116, 0)] },
-  { id: "ambar105", size: "105", outerWidth: 1000, outerDepth: 500, cabinet: 600, step: true, drainer: true, bowls: [ab(452, 380, 200, 37, 60.6, 116, 0)] },
-  { id: "ambar100", size: "100", outerWidth: 1000, outerDepth: 500, cabinet: 600, step: true, drainer: true, bowls: [ab(302, 380, 200, 37, 60.6, 46, 0), ab(145, 320, 125, 364, 90.6, 0, 0)] },
-  { id: "ambar116", size: "116", outerWidth: 1160, outerDepth: 500, cabinet: 900, step: true, drainer: true, bowls: [ab(340, 380, 200, 37, 60.6, 65, 0), ab(310, 320, 200, 402, 90.6, -40, 0)] },
-];
 
 /* ------------------------------------------------------------------ materiais e auxiliares (sinkSteel, sinkPolish, sinkDark, roundLoop, sinkSurface...) */
 export interface Mat { aco: THREE.MeshPhysicalMaterial; polido: THREE.MeshPhysicalMaterial; escuro: THREE.MeshStandardMaterial }
@@ -46,11 +26,6 @@ export const materiais = (): Mat => ({
   polido: new THREE.MeshPhysicalMaterial({ color: "#cdd1d3", metalness: 1, roughness: 0.2, envMapIntensity: 1.1, side: THREE.DoubleSide }),
   escuro: new THREE.MeshStandardMaterial({ color: "#1c2428", roughness: 0.58, metalness: 0.45 }),
 });
-export function roundLoop(w: number, d: number, r: number, n = 24): Par[] {
-  const points: Par[] = [], centers = [[w / 2 - r, d / 2 - r], [-w / 2 + r, d / 2 - r], [-w / 2 + r, -d / 2 + r], [w / 2 - r, -d / 2 + r]];
-  centers.forEach(([x, z], corner) => { for (let i = 0; i <= n; i++) { const a = corner * Math.PI / 2 + (i / n) * Math.PI / 2; points.push([x + r * Math.cos(a), z + r * Math.sin(a)]); } });
-  return points;
-}
 /** Uma superfície por anéis de pontos (x, y, z) consecutivos: as paredes e o fundo das cubas. */
 export function sinkSurface(rings: Par[][], material: THREE.Material, parent: THREE.Object3D, name: string, reverse = false): THREE.Mesh {
   const p: number[] = [], ix: number[] = [], count = rings[0].length;

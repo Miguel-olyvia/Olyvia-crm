@@ -7,6 +7,7 @@
 // Funções puras: sem React, sem three.
 import type { TipoPeca } from "../planta";
 import type { TipoEspaco } from "./modelo";
+import { modeloHtmlDoProduto } from "./htmlDoCatalogo";
 
 export type TipoMockup =
   | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
@@ -27,14 +28,18 @@ export interface NoCat { id: string; n: string; pai: string | null }
 /** O mockup de um produto, em metros. `url`: um GLB opcional (carregado se existir); sem ele, desenha-se a geometria paramétrica. */
 /** O material de uma variante (acabamento): a cor vai em `cor`; aqui o resto. Sem mapa de ambiente, o metal renderiza-se com metalness limitado. */
 export interface MaterialMockup { metalness: number; roughness: number }
+/** O modelo do HTML de uma peça; `exacto: false`: o HTML não tem este produto e usa-se o mais parecido. */
+export interface HtmlModelo { modelo: string; acab: string; exacto?: boolean }
 /** Parâmetros próprios dos mockups de família (metros). */
 export type ParamsMockup =
-  | { k: "torneira"; estilo: "extraivel" | "monocomando" | "abativel" | "cira"; altura: number; saida: number; alcance: number; base: number; /** o modelo detalhado portado do HTML (modelosHtml/), com o acabamento */ html?: { modelo: string; acab: string } }
-  | { k: "lava_loica"; cubas: { x: number; z: number; w: number; d: number; prof: number }[]; escorredor: boolean; degrau: boolean; /** o modelo detalhado portado do HTML (a medida e o acabamento) */ html?: { modelo: string; acab: string } }
-  | { k: "placa"; tipo: "induction" | "radiant" | "gas"; recorte: [number, number]; espessura: number; acima: number; queimadores: [number, number, number][]; manipulos: number[]; vidro: boolean; /** o modelo detalhado portado do HTML */ html?: { modelo: string; acab: string } }
+  | { k: "torneira"; estilo: "extraivel" | "monocomando" | "abativel" | "cira"; altura: number; saida: number; alcance: number; base: number; /** o modelo detalhado portado do HTML (modelosHtml/), com o acabamento */ html?: HtmlModelo }
+  | { k: "lava_loica"; cubas: { x: number; z: number; w: number; d: number; prof: number }[]; escorredor: boolean; degrau: boolean; /** o modelo detalhado portado do HTML (a medida e o acabamento) */ html?: HtmlModelo }
+  | { k: "placa"; tipo: "induction" | "radiant" | "gas"; recorte: [number, number]; espessura: number; acima: number; queimadores: [number, number, number][]; manipulos: number[]; vidro: boolean; /** o modelo detalhado portado do HTML */ html?: HtmlModelo }
   | { k: "tampo"; espessura: number }
   /** a bancada composta (bancada.ts): chapa, recortes, lava-loiça, placa, torneira, rodatampo e móveis */
-  | { k: "bancada"; cfg: import("./bancada").ConfigBancada };
+  | { k: "bancada"; cfg: import("./bancada").ConfigBancada }
+  /** um tampo do catálogo de uma série Coverlam do HTML: a chapa com a imagem do fabricante */
+  | { k: "chapa"; series: string; tone: string };
 export interface Mockup3D { tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
 export interface ProdutoModelo3D {
@@ -119,7 +124,7 @@ export const GRUPOS_ESPACO: GruposEspaco = {
   ],
   outro: [
     G("sanitas", "Sanitários", "sanita", "sanita_suspensa", "bide", "banheira", "base_duche", "lavatorio", "movel_lavatorio"), G("moveis", "Móveis", "movel", "armario_alto", "coluna", "roupeiro", "secretaria"),
-    G("quarto", "Camas e sofás", "cama", "sofa", "mesa"), G("cozinha", "Cozinha", "bancada", "frigorifico", "fogao", "eletro"),
+    G("quarto", "Camas e sofás", "cama", "sofa", "mesa"), G("cozinha", "Cozinha", "bancada", "lava_loica", "placa", "torneira_cozinha", "frigorifico", "fogao", "eletro"),
     G("parede", "Peças de parede", "espelho", "armario_espelho", "toalheiro", "radiador", "prateleira", "quadro", "candeeiro", "torneira", "acessorio", "coluna_duche"),
   ],
 };
@@ -137,9 +142,9 @@ const REGRAS: [RegExp, TipoMockup][] = [
   [/resguardo/, "resguardo"],
   [/sifao|sifoes|valvula/, "acessorio"],
   // as peças de cozinha do catálogo usam os modelos detalhados do HTML (lava-loiça, placa e torneira de cozinha)
-  [/lava-?loica|lava loica/, "lava_loica"],
-  [/torneira.*cozinha|cozinha.*torneira|misturadora.*cozinha/, "torneira_cozinha"],
-  [/placa (de )?(inducao|vitroceramica|vitro|gas|a gas)/, "placa"],
+  [/lava-?lo[iu]cas?|lava lo[iu]ca|^cubas (inox|composito)/, "lava_loica"],
+  [/^misturadoras? monocomando|torneira.*cozinha|cozinha.*torneira|misturadora.*cozinha|monocomando de lava/, "torneira_cozinha"],
+  [/^placas$|placa (de )?(inducao|vitroceramica|vitro|gas|a gas)/, "placa"],
   [/torneira|misturadora|chuveiro higien/, "torneira"],
   [/toalheiro/, "toalheiro"],
   [/radiador/, "radiador"],
@@ -228,12 +233,30 @@ export function extrairDimensoes(nome: string, tipo: TipoMockup): Dimensoes {
 /** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
 export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}): ProdutoModelo3D {
   const tipo = tipoMockupDe(p, arvore);
-  const d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: p.dim[2], deNome: true } : extrairDimensoes(p.n, tipo);
+  let d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: p.dim[2], deNome: true } : extrairDimensoes(p.n, tipo);
   const e = ESPEC[tipo];
-  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(urls[p.id] ? { url: urls[p.id] } : {}) };
+  // o modelo do HTML do produto (pelo nome e pela medida): lava-loiça, placa e torneira com o modelo e as medidas do HTML; tampo com a chapa
+  const h = modeloHtmlDoProduto(p.n, tipo);
+  let params: ParamsMockup | undefined;
+  if (h && h.tipo !== "tampo") {
+    d = { larguraCm: h.dim[0], profundidadeCm: h.dim[1], alturaCm: h.dim[2], deNome: true };
+    const html = { modelo: h.modelo, acab: h.acab, exacto: h.exacto };
+    params = h.tipo === "torneira_cozinha" ? { k: "torneira", estilo: "extraivel", altura: h.dim[2] / 100, saida: 0, alcance: 0, base: h.dim[0] / 100, html }
+      : h.tipo === "lava_loica" ? { k: "lava_loica", cubas: [], escorredor: false, degrau: false, html }
+        : { k: "placa", tipo: "induction", recorte: [0, 0], espessura: 0, acima: 0, queimadores: [], manipulos: [], vidro: false, html };
+  } else if (h?.tipo === "tampo") params = { k: "chapa", series: h.series, tone: h.tone };
+  else if (tipo === "torneira_cozinha") {
+    // uma misturadora que o HTML não tem (Sophie, Bruma): o modelo simplificado com medidas habituais (nunca o de outra torneira)
+    const t = { estilo: "monocomando" as const, altura: 400, saida: 250, alcance: 220, base: 50 };
+    params = { k: "torneira", estilo: t.estilo, altura: t.altura / 1000, saida: t.saida / 1000, alcance: t.alcance / 1000, base: t.base / 1000 };
+    d = { larguraCm: t.base / 10, profundidadeCm: (t.alcance + t.base / 2) / 10, alturaCm: t.altura / 10, deNome: true };
+  }
+  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(urls[p.id] ? { url: urls[p.id] } : {}) };
+  // a altura ao chão: o lava-loiça fica com o rebordo por baixo do tampo (a 88,8 cm), a placa e a torneira em cima dele (90 cm)
+  const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : e.alt;
   return {
     produtoId: p.id, nome: p.n, tipo, dimensoes: d, mockup3d, marca: p.marca, fornecedor: p.fornecedor, custo: p.custo, categoria: p.sub || caminhoDe(arvore, p.no) || e.rotulo,
-    montagem: e.mont, alturaOmissao: e.alt, demo: !!p.demo,
+    montagem: e.mont, alturaOmissao: alt, demo: !!p.demo,
   };
 }
 

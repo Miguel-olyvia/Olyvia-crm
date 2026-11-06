@@ -159,7 +159,7 @@ const OUTRAS: Familia[] = [
 ];
 
 /** As famílias com modelo detalhado do HTML e as opções de cada uma. */
-const DETALHADAS: Record<string, OpcaoFamilia[]> = { round: ["bica", "extraida"], noah: ["bica"], smooth: ["bica", "extraida"], stick: ["bica", "extraida"] };
+const DETALHADAS: Record<string, OpcaoFamilia[]> = { round: ["bica", "extraida"], noah: ["bica"], smooth: ["bica", "extraida"], stick: ["bica", "extraida"], cira: ["bica"], alexia: ["bica"], granada: ["bica"] };
 for (const f of TORNEIRAS) if (DETALHADAS[f.id]) { f.htmlModelo = f.id; f.opcoes = DETALHADAS[f.id]; }
 /** Lava-loiças com modelo detalhado do HTML: as 6 famílias (a medida é o id do modelo). A Ambar tem tampas dos ralos que se retiram e a Keran escorredor reversível. */
 for (const f of PLACAS) f.htmlModelo = f.id;

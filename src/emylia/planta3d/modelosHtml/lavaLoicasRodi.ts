@@ -8,27 +8,8 @@ type Par = number[];
 export interface RodiHtml { grupo: THREE.Group; materiais: THREE.Material[] }
 export interface OpcoesRodi { /** Keran: escorredor à esquerda em vez de à direita */ reverso?: boolean }
 
-interface CubaKeran { w: number; d: number; depth: number; r: number; left: number; drainX: number }
-export const KERAN_SPECS: { id: string; size: number; outerWidth: number; cabinet: number; bowls: CubaKeran[] }[] = [
-  { id: "keran80", size: 80, outerWidth: 800, cabinet: 450, bowls: [{ w: 340, d: 400, depth: 160, r: 95, left: 45, drainX: 50 }] },
-  { id: "keran86", size: 86, outerWidth: 860, cabinet: 450, bowls: [{ w: 340, d: 400, depth: 160, r: 95, left: 45, drainX: 50 }] },
-  { id: "keran100", size: 100, outerWidth: 1000, cabinet: 600, bowls: [{ w: 340, d: 400, depth: 160, r: 95, left: 45, drainX: 50 }, { w: 160, d: 300, depth: 90, r: 75, left: 425, drainX: 0 }] },
-  { id: "keran116", size: 116, outerWidth: 1160, cabinet: 800, bowls: [{ w: 340, d: 400, depth: 160, r: 95, left: 45, drainX: 50 }, { w: 340, d: 400, depth: 160, r: 95, left: 425, drainX: -50 }] },
-];
-export const UNA_SPECS = [
-  { id: "una55", size: 55, outerWidth: 580, cabinet: 600, bowls: [{ w: 340, d: 400, depth: 200, left: 20 }, { w: 180, d: 400, depth: 150, left: 380 }] },
-  { id: "una75", size: 75, outerWidth: 740, cabinet: 800, bowls: [{ w: 340, d: 400, depth: 200, left: 20 }, { w: 340, d: 400, depth: 200, left: 380 }] },
-];
-interface CubaCubas { w: number; d: number; r: number; depth: number; left: number; top: number; drainX: number; drainZ: number }
-const cb = (w: number, d: number, r: number, depth: number, left: number, top: number, drainX: number, drainZ: number): CubaCubas => ({ w, d, r, depth, left, top, drainX, drainZ });
-export const CUBAS_SPECS: { id: string; title: string; outerWidth: number; outerDepth: number; outerRadius: number; cabinet: number; duo?: boolean; bowls: CubaCubas[] }[] = [
-  { id: "brasilia", title: "Brasília", outerWidth: 380, outerDepth: 440, outerRadius: 90, cabinet: 450, bowls: [cb(340, 400, 70, 200, 20, 20, 0, -80)] },
-  { id: "bahia", title: "Bahia", outerWidth: 440, outerDepth: 440, outerRadius: 90, cabinet: 500, bowls: [cb(400, 400, 70, 200, 20, 20, 0, -80)] },
-  { id: "laguna", title: "Laguna", outerWidth: 490, outerDepth: 440, outerRadius: 90, cabinet: 600, bowls: [cb(450, 400, 70, 200, 20, 20, 0, -80)] },
-  { id: "belem", title: "Belém", outerWidth: 540, outerDepth: 440, outerRadius: 90, cabinet: 600, bowls: [cb(500, 400, 70, 200, 20, 20, 0, -80)] },
-  { id: "duo60", title: "Duo 60", outerWidth: 571, outerDepth: 450, outerRadius: 50, cabinet: 600, duo: true, bowls: [cb(340, 400, 70, 200, 25, 25, 50, 0), cb(146, 296, 50, 150, 400, 129, 0, 0)] },
-  { id: "duo80", title: "Duo 80", outerWidth: 765, outerDepth: 450, outerRadius: 50, cabinet: 800, duo: true, bowls: [cb(340, 400, 70, 200, 25, 25, 50, 0), cb(340, 400, 70, 200, 400, 25, -50, 0)] },
-];
+import { CUBAS_SPECS, KERAN_SPECS, UNA_SPECS, type CubaCubas, type CubaKeran } from "./specs";
+export { CUBAS_SPECS, KERAN_SPECS, UNA_SPECS };
 export const modelosRodi = (): string[] => [...KERAN_SPECS, ...UNA_SPECS, ...CUBAS_SPECS].map((s) => s.id);
 export const ehModeloRodi = (id: string): boolean => modelosRodi().includes(id);
 

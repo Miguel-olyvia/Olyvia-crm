@@ -66,6 +66,14 @@ function CartaoFamilia({ f, escolha, onEscolha, onPegar, onMover, onLargar, onCa
   );
 }
 
+/** O modelo 3D do HTML que o produto usa (o mesmo do catálogo 3D), para se ver na lista antes de o pôr na planta. */
+function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | null {
+  const pr = m.mockup3d.params;
+  if (pr && "html" in pr && pr.html) return pr.html.exacto === false ? { curto: "3D parecido", titulo: `O HTML não tem este produto: usa o modelo ${pr.html.modelo}` } : { curto: "3D do catálogo", titulo: `Modelo ${pr.html.modelo} · ${pr.html.acab}` };
+  if (pr?.k === "chapa") return { curto: "3D do catálogo", titulo: `Chapa ${pr.series} · ${pr.tone}` };
+  return null;
+}
+
 export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada }: BarraProdutosProps) {
   const [q, setQ] = useState("");
   const [grupoEscolhido, setGrupo] = useState<string>("");
@@ -157,6 +165,7 @@ export function BarraProdutos({ produtos, espaco, onEspaco, onPegar, onMover, on
                     aria-label={`Produto ${m.nome}, ${Math.round(m.dimensoes.larguraCm)} por ${Math.round(m.dimensoes.profundidadeCm)} cm${m.dimensoes.deNome ? "" : " (medida habitual)"}${m.montagem === "parede" ? ", de parede" : ""}`}>
                     <span className="max-w-64 truncate">{m.nome}</span>
                     <span className="text-sm text-muted-foreground">{Math.round(m.dimensoes.larguraCm)}×{Math.round(m.dimensoes.profundidadeCm)}</span>
+                    {(() => { const r = rotuloModelo(m); return r ? <span className="rounded bg-muted px-1.5 text-xs text-muted-foreground" title={r.titulo}>{r.curto}</span> : null; })()}
                   </button>
                 </li>
               ))}

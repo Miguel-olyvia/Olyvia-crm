@@ -13,7 +13,7 @@ import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml";
 import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
 import { construirBancada } from "./modelosHtml/bancada3d";
 import { VELAR_SPECS } from "./modelosHtml/lavaLoicas";
-import { CHAPA_OMISSAO, ficheiroDaChapa, selecaoChapa, type ConfigBancada } from "./bancada";
+import { BANCADA_OMISSAO, CHAPA_OMISSAO, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
@@ -180,7 +180,7 @@ function ModeloBancadaHtml({ cfg }: { cfg: ConfigBancada }) {
 }
 
 /** Um tampo do catálogo sem composição: a chapa de omissão com a imagem do fabricante, deitada (e os recortes, se os tiver). */
-function TampoChapa({ w, d, esp, y, furos }: { w: number; d: number; esp: number; y: number; furos: { x: number; z: number; w: number; d: number }[] }) {
+function TampoChapa({ w, d, esp, y, furos, cor }: { w: number; d: number; esp: number; y: number; furos: { x: number; z: number; w: number; d: number }[]; /** sem série do HTML: só a cor (não se inventa um desenho) */ cor?: string }) {
   useRedesenharAoCarregar();
   const geo = useMemo(() => {
     const s = new THREE.Shape();
@@ -195,10 +195,15 @@ function TampoChapa({ w, d, esp, y, furos }: { w: number; d: number; esp: number
   useEffect(() => () => geo.dispose(), [geo]);
   return (
     <mesh geometry={geo} position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
-      <meshPhysicalMaterial attach="material-0" map={texturaDaChapa(CHAPA_OMISSAO)} roughness={0.62} envMapIntensity={0.28} />
+      {cor ? <meshStandardMaterial attach="material-0" color={cor} roughness={0.6} /> : <meshPhysicalMaterial attach="material-0" map={texturaDaChapa(CHAPA_OMISSAO)} roughness={0.62} envMapIntensity={0.28} />}
       <meshStandardMaterial attach="material-1" color="#d8d1bb" roughness={0.7} />
     </mesh>
   );
+}
+/** A composição de um tampo do catálogo: só a chapa da série (sem equipamentos nem rodatampo), com o comprimento e a profundidade da peça. */
+function cfgDaChapa(series: string, tone: string, w: number, d: number, cabinet: boolean): ConfigBancada {
+  const c = mudarChapa(mudarChapa(BANCADA_OMISSAO, "series", series), "tone", tone);
+  return { ...c, length: Math.round(w * 1000), depth: Math.round(d * 1000), upstand: 0, back: false, left: false, right: false, cabinet, semEquipamentos: true };
 }
 /** O lava-loiça do HTML mais próximo de uma largura (m), para os lava-loiças do catálogo sem modelo próprio. */
 const velarDaLargura = (w: number): string => VELAR_SPECS.reduce((a, s) => (Math.abs(s.outerWidth / 1000 - w) < Math.abs(a.outerWidth / 1000 - w) ? s : a)).id;
@@ -440,12 +445,14 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo:
         </>
       );
     case "bancada": {
+      // um tampo de cozinha do catálogo de uma série Coverlam do HTML: a chapa com a imagem do fabricante, sobre os móveis
+      if (params?.k === "chapa") return <ModeloBancadaHtml cfg={cfgDaChapa(params.series, params.tone, w, d, true)} />;
       const hb = Math.max(0.2, h - 0.04);
       return (
         <>
           <Caixa p={[0, hb / 2, -0.01]} s={[w, hb, d - 0.02]} cor="#e9e7e2" r={0.6} />
           <Frentes w={w} h={hb} d={d - 0.02} n={Math.max(1, Math.round(w / 0.6))} cor="#ecebe7" />
-          <TampoChapa w={w} d={d} esp={0.012} y={hb} furos={[]} />
+          <TampoChapa w={w} d={d} esp={0.012} y={hb} furos={[]} cor={cor} />
         </>
       );
     }
@@ -479,8 +486,9 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo:
     // com o modelo do HTML mais parecido (lava-loiça Velar da largura mais próxima, placa de indução de 60 ou a gás de 90, torneira Round).
     case "torneira_cozinha":
       if (params?.k === "torneira" && params.html) return <ModeloHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} z0={-d / 2 + params.base / 2} />;
-      if (params?.k === "torneira" && params.estilo === "cira") return <TorneiraCozinha w={w} d={d} h={h} cor={cor} mat={mat} p={params} />;
-      return <ModeloHtml modelo={params?.k === "torneira" && params.estilo === "monocomando" ? "noah" : "round"} acab={(mat?.metalness ?? 1) < 0.5 ? "negro" : "brushed"} opc={opc} z0={-d / 2 + 0.03} />;
+      // sem modelo portado (Cira, Alexia, Granada do HTML; e as que o HTML não tem): o modelo simplificado com as medidas da torneira, nunca o de outra
+      if (params?.k === "torneira") return <TorneiraCozinha w={w} d={d} h={h} cor={cor} mat={mat ?? { metalness: 1, roughness: 0.3 }} p={params} />;
+      return <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} />;
     case "lava_loica":
       if (params?.k === "lava_loica" && params.html) return <ModeloLavaLoicaHtml modelo={params.html.modelo} acab={params.html.acab} opc={opc} h={h} />;
       return <ModeloLavaLoicaHtml modelo={velarDaLargura(w)} acab="inox" opc={opc} h={h} />;
@@ -489,6 +497,7 @@ function Parametrico({ tipo, w, d, h, cor, mat, params, recortes, opc }: { tipo:
       return <ModeloPlacaHtml modelo={w > 0.75 ? "gmwl958" : "ib65b60"} acab={w > 0.75 ? "inox" : "negro"} />;
     case "tampo":
       if (params?.k === "bancada") return <ModeloBancadaHtml cfg={params.cfg} />;
+      if (params?.k === "chapa") return <ModeloBancadaHtml cfg={cfgDaChapa(params.series, params.tone, w, d, false)} />;
       return <TampoChapa w={w} d={d} esp={params?.k === "tampo" ? params.espessura : 0.012} y={0} furos={recortes ?? []} />;
     case "lavatorio_pousar":
       return (
@@ -548,9 +557,35 @@ function Contorno({ w, d, y }: { w: number; d: number; y: number }) {
   return <mesh geometry={geo} position={[0, y + 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}><meshBasicMaterial color="#7c3aed" transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} /></mesh>;
 }
 
+/** Que modelo do HTML a peça usa (mostrado na etiqueta): assim vê-se logo se um produto caiu num modelo genérico. */
+function modeloEscolhido(m: ProdutoModelo3D): string | null {
+  const pr = m.mockup3d.params;
+  if (pr && "html" in pr && pr.html) return `Modelo do HTML: ${pr.html.modelo} · ${pr.html.acab}${pr.html.exacto === false ? " (o mais parecido: o HTML não tem este produto)" : ""}`;
+  if (pr?.k === "chapa") return `Modelo do HTML: chapa ${pr.series} · ${pr.tone}`;
+  if (pr?.k === "bancada") return "Modelo do HTML: bancada composta";
+  return (["lava_loica", "placa", "torneira_cozinha", "tampo", "bancada"] as string[]).includes(m.mockup3d.tipo) ? "Sem modelo do HTML (o HTML não tem este produto)" : null;
+}
+/** Se o modelo de uma peça rebentar, não cai em silêncio: regista o erro e mostra uma caixa vermelha com o aviso. */
+class ErroDoModelo extends Component<{ nome: string; w: number; d: number; h: number; children: ReactNode }, { erro: string | null }> {
+  state = { erro: null as string | null };
+  static getDerivedStateFromError(e: unknown) { return { erro: e instanceof Error ? e.message : String(e) }; }
+  componentDidCatch(e: unknown) { console.error(`Modelo 3D de «${this.props.nome}» falhou`, e); }
+  render() {
+    if (!this.state.erro) return this.props.children;
+    const { w, d, h } = this.props;
+    return (
+      <>
+        <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor="#c0392b" />
+        <Html position={[0, h + 0.2, 0]} center style={{ pointerEvents: "none" }}><div className="whitespace-nowrap rounded bg-red-700 px-1.5 py-0.5 text-[11px] text-white">Erro no modelo 3D: {this.state.erro}</div></Html>
+      </>
+    );
+  }
+}
+
 function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
   const { tipo, altura, cor, url } = m.mockup3d;
-  const reserva = <Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} />;
+  const reserva = <ErroDoModelo nome={m.nome} w={p.largura} d={p.profundidade} h={altura}><Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} /></ErroDoModelo>;
+  const escolhido = modeloEscolhido(m);
   const nf = (n: number) => Math.round(n * 100).toString();
   const base = p.altura; // altura da base ao chão (peças de parede e peças sobre a bancada)
   const corpo = useRef<THREE.Group>(null);
@@ -566,6 +601,7 @@ function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: Prod
         <Html position={[0, Math.max(altura, 0.3) + 0.12, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
           <div className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-tight text-white ${selecionada ? "bg-violet-700/85" : "bg-black/60"}`}>
             {p.nome ?? m.nome}<br />{nf(p.largura)}×{nf(p.profundidade)}×{nf(altura)} cm{p.montagem === "parede" ? ` · a ${nf(p.altura)} cm do chão` : ""}
+            {escolhido && <><br /><span className="opacity-80">{escolhido}</span></>}
           </div>
         </Html>
       )}
