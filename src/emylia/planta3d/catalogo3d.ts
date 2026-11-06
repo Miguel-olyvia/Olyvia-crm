@@ -307,7 +307,9 @@ export function produtosParaEspaco(produtos: readonly ProdutoCat[], arvore: read
     if (tipos.includes(m.tipo)) lista.push(m);
   }
   const ordem = (t: TipoMockup) => tipos.indexOf(t);
-  lista.sort((a, b) => ordem(a.tipo) - ordem(b.tipo) || Number(a.demo) - Number(b.demo) || a.nome.localeCompare(b.nome, "pt"));
+  // dentro de cada tipo, primeiro os que têm o modelo do HTML (o mesmo do catálogo 3D), depois os parecidos, depois os sem modelo
+  const html = (m: ProdutoModelo3D) => { const pr = m.mockup3d.params; return pr?.k === "chapa" || (pr && "html" in pr && pr.html?.exacto !== false && !!pr.html) ? 0 : pr && "html" in pr && pr.html ? 1 : 2; };
+  lista.sort((a, b) => ordem(a.tipo) - ordem(b.tipo) || Number(a.demo) - Number(b.demo) || html(a) - html(b) || a.nome.localeCompare(b.nome, "pt"));
   return lista.slice(0, o.max ?? 200);
 }
 

@@ -60,7 +60,12 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
     if (!p || !m) return null;
     const h = m.mockup3d.altura, s = Math.max(p.largura, p.profundidade, h) * 1.7 + 0.25, a = (p.rotacao * Math.PI) / 180, base = p.altura;
     const mundo = (x: number, y: number, z: number): [number, number, number] => [p.x + x * Math.cos(a) + z * Math.sin(a), y, p.y - x * Math.sin(a) + z * Math.cos(a)];
-    return { chave: `peca-${p.id}-${p.x.toFixed(2)}-${p.y.toFixed(2)}-${p.rotacao}-${m.produtoId}`, pos: mundo(s * 0.32, base + h * 0.5 + s * 0.55, s * 1.05), alvo: mundo(0, base + h * 0.42, 0) };
+    // o lado da perspetiva ¾ é o que fica virado para o meio da divisão (senão a câmara sai pela parede ao lado da peça)
+    const xs = res.espaco.paredes.map((w) => w.a.x), zs = res.espaco.paredes.map((w) => w.a.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+    const [d, e] = [mundo(s * 0.32, 0, s * 1.05), mundo(-s * 0.32, 0, s * 1.05)];
+    const lado = Math.hypot(d[0] - cx, d[2] - cz) <= Math.hypot(e[0] - cx, e[2] - cz) ? 1 : -1;
+    return { chave: `peca-${p.id}-${p.x.toFixed(2)}-${p.y.toFixed(2)}-${p.rotacao}-${m.produtoId}`, pos: mundo(lado * s * 0.32, base + h * 0.5 + s * 0.55, s * 1.05), alvo: mundo(0, base + h * 0.42, 0) };
   }, [res, selecionada, semFoco]);
 
   if (!res.ok) return <p role="status" className="rounded-xl border border-border bg-muted/30 p-4 text-[15px]">{res.erro}</p>;
