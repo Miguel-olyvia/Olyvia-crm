@@ -154,6 +154,7 @@ const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/Prototip
 const PrototipoChamada = lazy(() => import("./pages/prototipo-negocios/PrototipoChamada"));
 // 5/11 (Rúben): o Estúdio do projeto (o antes, o estilo, o depois, o 3D e a proposta), com um catálogo de teste, sem conta
 const EstudioProjeto = lazy(() => import("./pages/prototipo-estudio/EstudioProjeto"));
+const PlaneadorCozinha = lazy(() => import("./pages/prototipo-estudio/cozinha/PlaneadorCozinha"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
 const ClientPortalNegocios = lazy(() => import("./pages/ClientPortalNegocios"));
@@ -233,6 +234,7 @@ const App = () => (
                   <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
                   <Route path="/prototipo/chamada" element={<PrototipoChamada />} />
                   <Route path="/prototipo/estudio" element={<EstudioProjeto />} />
+                  <Route path="/prototipo/cozinha" element={<PlaneadorCozinha />} />
                   {/* Portal do colaborador de exemplo (página pública, sem sessão: acesso temporário pelo link) */}
                   <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
                   {/* O endereço antigo do link de admissão redireciona para o portal */}

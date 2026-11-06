@@ -7,6 +7,8 @@
 // O comercial ajusta a quantidade ou tira uma linha; o ajuste fica marcado. Os preços do Estúdio são de teste (catalogoFake.ts).
 import { PASSO, PECAS, areaChaoM2, areaParedesM2, encaixar, juntarPeca, type PecaPlanta, type Planta, type Ponto, type TipoPeca } from "@/emylia/planta";
 import { sitioDeQuemSai } from "./posicoesDepois";
+import { linhasDaCozinha, type Cozinha } from "./cozinha/modelo";
+import { TIPOS_COZINHA } from "@/emylia/planta";
 import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, produto, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
 
 export interface Alturas { /** Pé-direito atual, em cm. */ peDireito: number; /** Altura do teto falso, em cm; null sem teto falso. */ tetoFalso: number | null }
@@ -38,6 +40,8 @@ export interface Projeto {
   gravadoEm?: number;
   /** 6/11: a divisão do projeto (a cozinha tem as suas peças e o seu catálogo). Sem ela, casa de banho. */
   divisao?: "Casa de banho" | "Cozinha";
+  /** 6/11: os móveis e os eletrodomésticos do planeador da cozinha (cozinha/PlaneadorCozinha.tsx). */
+  cozinha?: Cozinha;
   /** 6/11: as peças mudadas de sítio no próprio depois (deixam de seguir o antes). Sem o campo: projeto de antes da regra. */
   movidasNoDepois?: string[];
 }
@@ -115,8 +119,11 @@ export function necessidades(p: Projeto): Linha[] {
   const fora = sairam(p).filter((x) => !PECAS[x.tipo].abertura);
   for (const x of fora) linha({ id: `ret-${x.id}`, grupo: "Trabalhos", n: `Retirar ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.retirar[x.tipo], porque: "Sai na planta do depois." });
 
+  // 6/11: com o planeador da cozinha, os móveis e os eletrodomésticos são os dele (as peças de cozinha da planta só dão o sítio)
+  const planeada = !!p.cozinha && p.cozinha.baixo.length + p.cozinha.cima.length > 0;
+  const daPlanta = (t: TipoPeca) => !(planeada && TIPOS_COZINHA.includes(t));
   // o que se troca, o que é novo, e o que vai com cada peça
-  for (const x of p.depois.pecas.filter((y) => !PECAS[y.tipo].abertura)) {
+  for (const x of p.depois.pecas.filter((y) => !PECAS[y.tipo].abertura && daPlanta(y.tipo))) {
     const estado = estadoDaPeca(p, x), prod = produto(p.escolhas[x.id]);
     if (estado === "fica") continue;
     const porque = estado === "nova" ? "Peça nova na planta do depois." : "Trocada no catálogo.";
@@ -131,7 +138,7 @@ export function necessidades(p: Projeto): Linha[] {
     if (ELETRICO.includes(x.tipo)) linha({ id: `ele-${x.id}`, grupo: "Trabalhos", n: `Ponto elétrico: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoEletrico, porque: "Precisa de corrente." });
     if (estado === "nova" && AGUA.includes(x.tipo)) linha({ id: `agua-${x.id}`, grupo: "Trabalhos", n: `Ponto de água e esgoto: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoAgua, porque: "Peça de água num sítio novo." });
   }
-  for (const x of p.porColocar ?? []) {
+  for (const x of (p.porColocar ?? []).filter((y) => daPlanta(y.tipo))) {
     const prod = produto(x.produto), porque = "Escolhido no estilo; falta pô-lo na planta.";
     if (prod) linha({ id: `prod-${x.id}`, grupo: "Peças", n: prod.n, q: 1, un: "un", unit: prod.preco, porque });
     else linha({ id: `prod-${x.id}`, grupo: "Peças", n: `${PECAS[x.tipo].n}: por escolher`, q: 1, un: "un", unit: 0, porque, porEscolher: true });
@@ -145,6 +152,16 @@ export function necessidades(p: Projeto): Linha[] {
   }
   for (const x of mudaramDeSitio(p).filter((y) => AGUA.includes(y.tipo))) {
     linha({ id: `agua-${x.id}`, grupo: "Trabalhos", n: `Mudar de sítio: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoAgua, porque: "Mudou de sítio na planta: a canalização vai atrás." });
+  }
+
+  if (planeada && p.cozinha) {
+    const GRUPO = { Móveis: "Peças", Eletrodomésticos: "Peças", Tampo: "Materiais", Montagem: "Trabalhos" } as const;
+    for (const l of linhasDaCozinha(p.cozinha)) {
+      // os serviços do planeador somam-se aos escolhidos no estilo (a mesma linha não entra duas vezes)
+      if (l.id.startsWith("serv-") && (p.servicos ?? []).some((s) => `serv-${s.id}` === l.id)) continue;
+      linha({ id: l.id, grupo: GRUPO[l.grupo], n: l.n, q: l.q, un: l.un, unit: l.unit, porque: "Do planeador da cozinha." });
+    }
+    if (p.cozinha.baixo.some((m) => m.modelo === "lava")) linha({ id: "coz-agua", grupo: "Trabalhos", n: "Ponto de água e esgoto: lava-loiça", q: 1, un: "un", unit: TABELA.pontoAgua, porque: "O lava-loiça do planeador." });
   }
 
   // as paredes, o chão e o teto
@@ -162,7 +179,7 @@ export function necessidades(p: Projeto): Linha[] {
   }
   if ((rev || pav) && chao !== null && paredes !== null) {
     linha({ id: "dem", grupo: "Trabalhos", n: "Demolição e entulho", q: r2((rev ? paredes : 0) + (pav ? chao : 0)), un: "m²", unit: TABELA.demolicaoM2, porque: "Tirar o revestimento e o pavimento antigos." });
-    linha({ id: "canal", grupo: "Trabalhos", n: "Canalização nova da casa de banho", q: 1, un: "un", unit: TABELA.canalizacaoNova, porque: "Com as paredes abertas, refaz-se até à entrada da casa de banho." });
+    linha({ id: "canal", grupo: "Trabalhos", n: `Canalização nova da ${(p.divisao ?? "Casa de banho").toLowerCase()}`, q: 1, un: "un", unit: TABELA.canalizacaoNova, porque: `Com as paredes abertas, refaz-se até à entrada da ${(p.divisao ?? "Casa de banho").toLowerCase()}.` });
   } else if (fora.length) {
     linha({ id: "dem", grupo: "Trabalhos", n: "Entulho das peças retiradas", q: 1, un: "un", unit: TABELA.entulhoPecas, porque: "Levar o que sai." });
   }
@@ -174,7 +191,7 @@ export function necessidades(p: Projeto): Linha[] {
     const sv = servico(x.id);
     if (sv) linha({ id: `serv-${sv.id}`, grupo: "Trabalhos", n: sv.n, q: x.q, un: sv.un, unit: sv.preco, porque: sv.desc });
   }
-  if (out.length) linha({ id: "prot", grupo: "Trabalhos", n: "Proteções do caminho e da obra", q: 1, un: "un", unit: TABELA.protecoes, porque: "Da entrada da casa até à casa de banho." });
+  if (out.length) linha({ id: "prot", grupo: "Trabalhos", n: "Proteções do caminho e da obra", q: 1, un: "un", unit: TABELA.protecoes, porque: `Da entrada da casa até à ${(p.divisao ?? "Casa de banho").toLowerCase()}.` });
 
   // os ajustes do comercial
   return out.map((l) => {

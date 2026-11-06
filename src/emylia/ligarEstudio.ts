@@ -31,6 +31,7 @@ const PRODUTO: Record<string, RegExp> = {
   torneira: /torneira|misturadora/, revestimento: /revestimento|azulejo|parede|ceramic/, pavimento: /pavimento|piso|ladrilho|ceramic/,
   bancada: /bancada|tampo/, lava: /lava.?loica|cuba/, placa: /placa|fogao|vitroceram|inducao/, forno: /forno/, frigorifico: /frigorif|combinado/,
   maquina: /maquina.*loica/, exaustor: /exaust|chamine/, armario: /armario|modulo alto|coluna de cozinha/,
+  modulo_cozinha: /modulo|movel de cozinha|moveis de cozinha|armario de cozinha|movel base/,
 };
 /** A palavra com que o nome de um bom par começa (ganha aos que só a têm no meio: «Móvel…» antes de «Toalheiro de móvel»). */
 const COMECA: Record<string, RegExp> = {
@@ -58,6 +59,7 @@ const SERVICO: Record<string, RegExp> = {
   "instalar:lava": /lava.?loica|canaliza/, "instalar:placa": /placa|eletrodomest/, "instalar:forno": /forno|eletrodomest/,
   "instalar:frigorifico": /frigorif|eletrodomest/, "instalar:maquina": /maquina|eletrodomest/, "instalar:exaustor": /exaust/,
   montagem_cozinha: /montagem.*cozinha|moveis de cozinha|cozinha/, recortes: /recorte|furo|corte/, conduta: /conduta|exaust/,
+  eletrodomesticos: /eletrodomest|equipamento/,
 };
 /** As palavras de cada cor no nome de um produto. */
 const COR: Record<string, RegExp> = { cinza: /cinz|antracite|grafite|cromad/, preto: /pret|negr|black/, branco: /branc|white/, madeira: /madeira|oak|carvalho|nogueira/, bege: /bege|creme|areia/ };

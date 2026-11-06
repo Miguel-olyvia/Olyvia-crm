@@ -41,6 +41,19 @@ export function linhasParaLevar(p: Projeto): LinhaLevada[] {
     } else if ((m = l.id.match(/^ret-(.+)$/))) {
       const tipo = tipoDaPeca(m[1]) ?? p.antes.pecas.find((x) => x.id === m![1])?.tipo;
       out.push({ ...base, tipo: "servico", chave: tipo ? `retirar:${tipo}` : "retirar", par: m[1] });
+    } else if ((m = l.id.match(/^coz-apar-(.+)-(leva|extra)$/))) {
+      // 6/11: os eletrodomésticos do planeador da cozinha, pela categoria do produto
+      const mod = [...(p.cozinha?.baixo ?? []), ...(p.cozinha?.cima ?? [])].find((x) => x.id === m![1]);
+      const prod = produto(m[2] === "leva" ? mod?.produto : mod?.extra);
+      if (prod) out.push({ ...base, tipo: "produto", chave: prod.cat, cores: prod.cores });
+    } else if (l.id.startsWith("coz-mod-")) {
+      out.push({ ...base, tipo: "produto", chave: "modulo_cozinha" });
+    } else if (l.id === "coz-tampo") {
+      out.push({ ...base, tipo: "produto", chave: "bancada", cores: produto(p.cozinha?.tampo)?.cores });
+    } else if (l.id === "coz-inst") {
+      out.push({ ...base, tipo: "servico", chave: "eletrodomesticos" });
+    } else if (l.id === "coz-agua") {
+      out.push({ ...base, tipo: "servico", chave: "agua" });
     } else if ((m = l.id.match(/^serv-(.+)$/))) {
       out.push({ ...base, tipo: "servico", chave: SERVICO[m[1]] ?? m[1] });
     } else {

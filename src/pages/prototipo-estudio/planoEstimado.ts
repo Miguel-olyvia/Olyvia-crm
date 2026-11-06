@@ -23,8 +23,11 @@ export function etapasDaObra(p: Projeto): Etapa[] {
   etapa("Teto falso", 1, nomes(/^teto$/));
   etapa("Revestimento", Math.max(1, Math.ceil(q(/^rev-inst$/) / M2_REVESTIMENTO_DIA)), nomes(/^rev-inst$/));
   etapa("Pavimento", Math.max(1, Math.ceil(q(/^pav-inst$/) / M2_PAVIMENTO_DIA)), nomes(/^pav-inst$/));
+  // 6/11: a cozinha planeada monta-se (uns 6 módulos por dia) antes de instalar os eletrodomésticos
+  const modulos = tem(/^coz-mod-/).length;
+  etapa("Montar os móveis da cozinha", Math.max(1, Math.ceil(modulos / 6)), modulos ? [`${modulos} ${modulos === 1 ? "módulo" : "módulos"} e o tampo`] : []);
   const pecas = tem(/^inst-/).length;
-  etapa("Instalar as peças", pecas > 4 ? 2 : 1, nomes(/^inst-/));
+  etapa("Instalar as peças", pecas > 4 ? 2 : 1, [...nomes(/^inst-/), ...nomes(/^coz-inst$/)]);
   etapa("Pintura e acabamentos", 1, nomes(/^serv-sv-(pintura-teto|estores|rodape)$/));
   // a limpeza vai no último dia
   const limpeza = nomes(/^serv-sv-limpeza$/);

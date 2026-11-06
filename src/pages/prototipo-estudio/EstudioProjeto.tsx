@@ -24,6 +24,7 @@ import { PlantaVista } from "./PlantaVista";
 import { alturasEmPalavras, materiais, tarefas } from "./fichaObra";
 import type { Cena } from "./geometria3d";
 
+import { totalDaCozinha } from "./cozinha/modelo";
 import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Obra"] as const;
@@ -219,6 +220,8 @@ export default function EstudioProjeto() {
         {passo === "3D" && <>
           <section aria-labelledby="t-3d" className="min-w-0 space-y-4">
             <h2 id="t-3d" className="text-2xl font-semibold tracking-tight">Em 3D</h2>
+            {/* 6/11 (Rúben: «algo como o planner do IKEA»): numa cozinha, os móveis planeiam-se no planeador */}
+            {p.divisao === "Cozinha" && <CartaoPlaneador p={p} />}
             <AntesDepois3D p={p} />
           </section>
           <aside className="space-y-6">
@@ -449,5 +452,19 @@ function FichaObra({ p, linhas }: { p: Projeto; linhas: Linha[] }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** 6/11: o planeador da cozinha a partir do Estúdio (abre no mesmo separador e volta com os móveis). */
+function CartaoPlaneador({ p }: { p: Projeto }) {
+  const c = p.cozinha, n = c ? c.baixo.length + c.cima.length : 0, t = c ? totalDaCozinha(c) : null;
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-[15px]">
+        <p className="font-semibold">Os móveis da cozinha</p>
+        <p className="text-muted-foreground">{c ? `${n} ${n === 1 ? "módulo" : "módulos"} planeados · ${t!.comIva.toLocaleString("pt-PT", { maximumFractionDigits: 0 })} € com IVA, já na proposta.` : "Armários baixos, altos e de parede, o tampo e os eletrodomésticos do catálogo, em 3D."}</p>
+      </div>
+      <Button type="button" className="min-h-11 shrink-0" onClick={() => { window.location.href = "/prototipo/cozinha?estudio=1"; }}>{c ? "Continuar a planear" : "Abrir o planeador"}</Button>
+    </div>
   );
 }
