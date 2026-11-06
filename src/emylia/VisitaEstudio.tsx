@@ -63,17 +63,20 @@ export function ACaminho({ d }: { d: Negocio }) {
 /** O que o Estúdio passa ao negócio: a planta, as medidas da área, as respostas das peças e (para rever) as necessidades. */
 export function aplicarDoEstudio(ctx: Ctx, d: Negocio, p: Projeto): { avisos: string[]; linhas: LinhaLevada[] } {
   const avisos: string[] = [];
-  if (p.antes.paredes.length) { ctx.A.campo(d.id, "planta", gravarPlanta(p.antes)); avisos.push("A planta ficou no negócio."); }
-  // as medidas: só as que a linha pede (os vasos sanitários só numa linha que os conta)
-  const pede = camposMedida(LINHAS[d.linha]);
-  const med = Object.entries(medidasDoEstudio(p)).filter(([k]) => pede.some(([c, l]) => c === k && (k !== "pcs" || /sanit/i.test(l))));
-  if (med.length) {
-    ctx.run(() => { for (const [k, n] of med) porMedida(d.visita.med, k as Parameters<typeof porMedida>[1], n as number); });
-    avisos.push("As medidas da área saíram da planta.");
-  }
-  const novas = Object.entries(respostasDoEstudio(p)).filter(([k, v]) => v && d.f[k] !== v);
-  for (const [k, v] of novas) ctx.A.campo(d.id, k, v);
-  if (novas.length) avisos.push(`As peças da casa de banho ficaram com ${novas.length} ${novas.length === 1 ? "resposta" : "respostas"}.`);
+  // tudo numa só gravação (o run grava no negócio e redesenha)
+  ctx.run(() => {
+    if (p.antes.paredes.length) { ctx.A.campo(d.id, "planta", gravarPlanta(p.antes)); avisos.push("A planta ficou no negócio."); }
+    // as medidas: só as que a linha pede (os vasos sanitários só numa linha que os conta)
+    const pede = camposMedida(LINHAS[d.linha]);
+    const med = Object.entries(medidasDoEstudio(p)).filter(([k]) => pede.some(([c, l]) => c === k && (k !== "pcs" || /sanit/i.test(l))));
+    if (med.length) {
+      for (const [k, n] of med) porMedida(d.visita.med, k as Parameters<typeof porMedida>[1], n as number);
+      avisos.push("As medidas da área saíram da planta.");
+    }
+    const novas = Object.entries(respostasDoEstudio(p)).filter(([k, v]) => v && d.f[k] !== v);
+    for (const [k, v] of novas) ctx.A.campo(d.id, k, v);
+    if (novas.length) avisos.push(`As peças da casa de banho ficaram com ${novas.length} ${novas.length === 1 ? "resposta" : "respostas"}.`);
+  });
   return { avisos, linhas: linhasParaLevar(p) };
 }
 
@@ -103,7 +106,8 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       const local = projetoDoEstudioPara(ref.current.d.id);
       if (local && (local.gravadoEm ?? 0) > ultimo.current) {
         ultimo.current = local.gravadoEm ?? Date.now();
-        ref.current.ctx.A.campo(ref.current.d.id, "estudio", JSON.stringify(local));
+        const { ctx: c, d: n } = ref.current;
+        c.run(() => c.A.campo(n.id, "estudio", JSON.stringify(local)));
       }
       return local;
     };
@@ -113,7 +117,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       if (!v) return;
       const p = local ?? projetoDoNegocio(ref.current.d.f);
       if (p) trazer(p);
-      else if (v.antes.paredes.length) { ref.current.ctx.A.campo(ref.current.d.id, "planta", gravarPlanta(v.antes)); setFeito("A planta ficou no negócio."); }
+      else if (v.antes.paredes.length) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, "planta", gravarPlanta(v.antes))); setFeito("A planta ficou no negócio."); }
     };
     aoVoltar();
     const aoMudar = (e: StorageEvent) => {
@@ -264,9 +268,11 @@ export function PlanoEstimado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [a, m, dia] = inicio.split("-").map(Number);
   const cal = calendario(etapas, new Date(a, (m || 1) - 1, dia || 1));
   const guardar = () => {
-    ctx.A.campo(d.id, "plano_inicio", inicio);
-    ctx.A.campo(d.id, "duracao_obra", duracaoEmPalavras(cal.dias));
-    ctx.A.campo(d.id, "plano_estimado", JSON.stringify(cal.etapas.map((e) => ({ n: e.n, dias: e.dias, inicio: iso(e.inicio!), fim: iso(e.fim!), oQue: e.oQue }))));
+    ctx.run(() => {
+      ctx.A.campo(d.id, "plano_inicio", inicio);
+      ctx.A.campo(d.id, "duracao_obra", duracaoEmPalavras(cal.dias));
+      ctx.A.campo(d.id, "plano_estimado", JSON.stringify(cal.etapas.map((e) => ({ n: e.n, dias: e.dias, inicio: iso(e.inicio!), fim: iso(e.fim!), oQue: e.oQue }))));
+    });
     setGuardado(`Guardado: ${duracaoEmPalavras(cal.dias)}, de ${dataCurta(cal.etapas[0].inicio!)} a ${dataCurta(cal.fim!)}.`);
   };
   return (

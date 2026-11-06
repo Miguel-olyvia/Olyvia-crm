@@ -24,8 +24,10 @@ const negocio = (f: Record<string, string> = {}) =>
   ({ id: 3, nome: "Casa de banho", linha: "wc", tel: "912345678", local: "", f: { morada: "Rua A 1", localidade: "Lisboa", ...f }, visita: { med: { pav: 0, par: 0, pts: 0, pcs: 0 }, extra: {} } } as unknown as Negocio);
 const contexto = (d: Negocio) => {
   const campo = vi.fn((_id: number, k: string, v: string) => { d.f[k] = v; }), extra = vi.fn();
-  const ctx = { A: { campo, extra, produto: vi.fn() }, run: (fn: () => void) => fn(), S: { svc: { imp: { n: "Impermeabilização de base de duche", un: "m²" }, demol: { n: "Demolição e entulho" } } } } as unknown as Ctx;
-  return { ctx, campo, extra };
+  // o run grava no negócio e redesenha: sem ele, a mudança fica só em memória
+  const run = vi.fn((fn: () => void) => fn());
+  const ctx = { A: { campo, extra, produto: vi.fn() }, run, S: { svc: { imp: { n: "Impermeabilização de base de duche", un: "m²" }, demol: { n: "Demolição e entulho" } } } } as unknown as Ctx;
+  return { ctx, campo, extra, run };
 };
 
 describe("a caminho", () => {
@@ -41,10 +43,11 @@ describe("o Estúdio na Visita", () => {
   it("o projeto do Estúdio deste browser grava-se no negócio quando é mais recente", () => {
     localStorage.setItem("olyvia.estudio.v1", JSON.stringify(projeto({ gravadoEm: 5000 })));
     const d = negocio({ estudio: JSON.stringify(projeto({ gravadoEm: 1000 })) });
-    const { ctx, campo } = contexto(d);
+    const { ctx, campo, run } = contexto(d);
     render(<EstudioNaVisita ctx={ctx} d={d} />);
     fireEvent.focus(window);
     expect(campo).toHaveBeenCalledWith(3, "estudio", expect.stringContaining('"gravadoEm":5000'));
+    expect(run).toHaveBeenCalled();
   });
 
   it("a volta traz a planta, as medidas, as respostas das peças e as necessidades para rever", () => {

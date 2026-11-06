@@ -19,7 +19,8 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
   const gravada = lerPlanta(d.f.planta);
   const atual = gravada && d.f.planta !== gravarPlanta(p) ? gravada : p;
 
-  const mudar = (np: Planta) => { setP(np); setFeito(""); ctx.A.campo(d.id, "planta", gravarPlanta(np)); };
+  // 6/11: pelo run (grava no negócio e redesenha; sem ele a planta só ia para a base na gravação seguinte)
+  const mudar = (np: Planta) => { setP(np); setFeito(""); ctx.run(() => ctx.A.campo(d.id, "planta", gravarPlanta(np))); };
   const chao = areaChaoM2(atual.paredes);
   const peCampo = peDireitoDoCampo(d.f.diag_pe_direito_m);
   const pe = peCampo ?? PE_DIREITO_SEM_RESPOSTA;
