@@ -8,10 +8,18 @@ const ehVer = (codigo: string): boolean => codigo.endsWith(".view");
 const codigoVer = (codigo: string): string => `${moduloDe(codigo)}.view`;
 /** A permissão de ver do MÓDULO (leads.view), a única de que as outras dependem; hr.pessoas.saude.view não o é. */
 export const ehVerDoModulo = (codigo: string): boolean => codigo === codigoVer(codigo);
+/**
+ * 06/11: permissões que o editor mostra na linha «Negócio» (Fases do negócio), onde não há coluna Ver, e que o servidor não faz
+ * depender do ver do módulo: os custos no Negócio vêm por fn_cat_pode(org, 'quotes.view_costs') e anular o contrato no Negócio
+ * pergunta só client_contracts.cancel. Não ficam bloqueadas sem quotes.view / client_contracts.view, nem saem quando se tiram.
+ */
+export const SEM_DEPENDENCIA_DE_VER: ReadonlySet<string> = new Set(["quotes.view_costs", "client_contracts.cancel"]);
+const arrastadaPeloVer = (c: string, modulo: string): boolean => moduloDe(c) === modulo && !SEM_DEPENDENCIA_DE_VER.has(c);
 
 /** Uma permissão que não é "ver" fica bloqueada enquanto a de ver do módulo (se existir no catálogo) não estiver concedida. */
 export function podeAlterar(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): boolean {
   if (ehVer(codigo)) return true;
+  if (SEM_DEPENDENCIA_DE_VER.has(codigo)) return true;
   const ver = codigoVer(codigo);
   if (!catalogo.some((p) => p.codigo === ver)) return true;
   return concedidas.includes(ver) || concedidas.includes(codigo);
@@ -28,7 +36,7 @@ export function alternarPermissao(
   if (!podeAlterar(codigo, concedidas, catalogo)) return [...concedidas];
   if (!concedidas.includes(codigo)) return [...concedidas, codigo];
   const modulo = moduloDe(codigo);
-  return concedidas.filter((c) => c !== codigo && !(ehVerDoModulo(codigo) && moduloDe(c) === modulo));
+  return concedidas.filter((c) => c !== codigo && !(ehVerDoModulo(codigo) && arrastadaPeloVer(c, modulo)));
 }
 
 /**
@@ -49,7 +57,7 @@ export function definirConjunto(
   }
   const tirar = new Set(codigos);
   const modulosSemVer = new Set(codigos.filter((c) => ehVerDoModulo(c) && concedidas.includes(c)).map(moduloDe));
-  return concedidas.filter((c) => !tirar.has(c) && !modulosSemVer.has(moduloDe(c)));
+  return concedidas.filter((c) => !tirar.has(c) && !(modulosSemVer.has(moduloDe(c)) && arrastadaPeloVer(c, moduloDe(c))));
 }
 
 /** Marca tudo ou limpa tudo num conjunto de permissões (um módulo do menu), sem tocar nas restantes. */
