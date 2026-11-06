@@ -15,6 +15,7 @@ import { linhasParaLevar } from "@/pages/prototipo-estudio/levarParaNegocio";
 import { respostasDoEstudio } from "@/pages/prototipo-estudio/respostasDoEstudio";
 import { produtosEscolhidos } from "@/pages/prototipo-estudio/sugestoesServicos";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
+import { acertarPosicoes } from "@/pages/prototipo-estudio/posicoesDepois";
 import { produto } from "@/pages/prototipo-estudio/catalogoFake";
 import { calendario, duracaoEmPalavras, etapasDaObra, primeiroUtil } from "@/pages/prototipo-estudio/planoEstimado";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
@@ -157,7 +158,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           {/* a planta de como vai ficar, com as peças nas cores dos produtos */}
           {salvo.depois.paredes.length > 0 ? (
             <div className="mx-auto w-full max-w-[14rem] sm:max-w-none [&_figcaption]:sr-only">
-              <PlantaVista planta={salvo.depois} titulo="Como vai ficar" cor={(pc) => produto(salvo.escolhas[pc.id])?.hex} />
+              <PlantaVista planta={acertarPosicoes(salvo).depois} titulo="Como vai ficar" cor={(pc) => produto(salvo.escolhas[pc.id])?.hex} />
             </div>
           ) : (
             <div className="grid aspect-square place-items-center rounded-xl border border-dashed border-border text-center text-sm text-muted-foreground">Ainda sem planta</div>
