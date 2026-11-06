@@ -17,6 +17,7 @@ import { Upload, Eye, EyeOff, Download, Trash2, Paperclip, FileText, Image, File
 import { useTranslation } from "@/hooks/useTranslation";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
+import { SEM_PERMISSAO_DOCUMENTO_PORTAL, usePodeEnviarPropostaPortal } from "@/hooks/usePodeEnviarPropostaPortal";
 
 const DOCUMENT_TYPES = [
   { value: "contract_signed", label: "Contrato Assinado", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
@@ -96,6 +97,11 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [togglingDocId, setTogglingDocId] = useState<string | null>(null);
+  // 06/11/2026: pôr/tirar do portal pede portal.manage OU negocios.proposta.enviar (a regra de enviar a proposta ao portal); o
+  // servidor exige o mesmo (trg_documents_portal_exige_permissao). Sem ela o distintivo só mostra o estado e a caixa fica desligada.
+  const permissaoPortal = usePodeEnviarPropostaPortal();
+  const podePortal = permissaoPortal.pode;
+  const motivoPortal = podePortal || permissaoPortal.aLer ? undefined : SEM_PERMISSAO_DOCUMENTO_PORTAL;
 
   const { data: documents = [], isLoading } = useQuery({
     queryKey: ["all-contract-documents", activeCompany?.id],
@@ -208,7 +214,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
           // NUNCA deixar cair no DEFAULT da BD: documents.visible_to_client é
           // DEFAULT true (para preservar os anexos antigos), logo omitir esta
           // chave publicaria o ficheiro no portal do cliente sem ninguém pedir.
-          visible_to_client: uploadData.visible_to_client,
+          visible_to_client: podePortal ? uploadData.visible_to_client : false,
         });
       if (dbError) {
         await supabase.storage.from("documents").remove([filePath]);
@@ -235,6 +241,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
   };
 
   const handleToggleVisibility = async (doc: any) => {
+    if (!podePortal) return;
     const next = !doc.visible_to_client;
     setTogglingDocId(doc.id);
     const { error } = await (supabase as any)
@@ -390,17 +397,19 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                         nas ações, onde já significa "visualizar". */}
                     <TableCell>
                       <Badge
-                        role="button"
-                        tabIndex={0}
+                        {...(podePortal ? {
+                          role: "button",
+                          tabIndex: 0,
+                          onClick: () => handleToggleVisibility(doc),
+                          onKeyDown: (e: React.KeyboardEvent) => {
+                            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleToggleVisibility(doc); }
+                          },
+                          title: doc.visible_to_client
+                            ? "Retirar do portal — o cliente deixa de ver este documento"
+                            : "Enviar para o portal — o cliente passa a ver este documento",
+                        } : { title: motivoPortal })}
                         aria-busy={togglingDocId === doc.id}
-                        onClick={() => handleToggleVisibility(doc)}
-                        onKeyDown={(e: React.KeyboardEvent) => {
-                          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleToggleVisibility(doc); }
-                        }}
-                        title={doc.visible_to_client
-                          ? "Retirar do portal — o cliente deixa de ver este documento"
-                          : "Enviar para o portal — o cliente passa a ver este documento"}
-                        className={`text-[10px] gap-1 min-h-[24px] cursor-pointer hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${doc.visible_to_client
+                        className={`text-[10px] gap-1 ${podePortal ? "min-h-[24px] cursor-pointer hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" : ""} ${doc.visible_to_client
                           ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
                           : "bg-muted text-muted-foreground"} ${togglingDocId === doc.id ? "opacity-50" : ""}`}
                       >
@@ -525,6 +534,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                 id="contract-doc-visible-to-client"
                 className="mt-0.5"
                 checked={uploadData.visible_to_client}
+                disabled={!podePortal}
                 onCheckedChange={checked => setUploadData({ ...uploadData, visible_to_client: checked === true })}
               />
               <div className="space-y-1">
@@ -535,6 +545,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                   Se marcar, o cliente passa a ver e a descarregar este documento no portal.
                   Deixe desmarcado para anexos internos (ex.: faturas de fornecedor).
                 </p>
+                {motivoPortal && <p className="text-xs text-muted-foreground">{motivoPortal}</p>}
               </div>
             </div>
           </div>

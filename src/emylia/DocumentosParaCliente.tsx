@@ -5,12 +5,15 @@
 // contratos (ContractsDocumentsView): o ficheiro vai para a quarentena, a validate-upload passa-o para «documents», e a linha em
 // `documents` fica ligada ao contrato do negócio (ou à proposta, antes do contrato) com visible_to_client = true. A página Documentos
 // do portal já lê estes anexos (ClientPortalDocuments). Só numa organização real e depois de a proposta seguir para o portal.
+// 06/11/2026 (aprovado): enviar e tirar do portal pede portal.manage OU negocios.proposta.enviar, a regra de enviar a proposta ao portal
+// (usePodeEnviarPropostaPortal); o servidor exige o mesmo no gatilho trg_documents_portal_exige_permissao.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileUp, FileText, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
+import { SEM_PERMISSAO_DOCUMENTO_PORTAL, usePodeEnviarPropostaPortal } from "@/hooks/usePodeEnviarPropostaPortal";
 import { modoReal, orgDoModoReal } from "./acessosPortal";
 import type { Negocio } from "./motor";
 
@@ -55,10 +58,15 @@ export function DocumentosParaCliente({ d }: { d: Negocio }) {
 
   useEffect(() => { if (aberto) void ler(); }, [aberto, ler]);
 
-  if (!modoReal() || !org || !d.orc?.enviada) return null;
+  const visivel = modoReal() && !!org && !!d.orc?.enviada;
+  const permissao = usePodeEnviarPropostaPortal(visivel);
+  const pode = permissao.pode;
+  const motivo = pode || permissao.aLer ? undefined : SEM_PERMISSAO_DOCUMENTO_PORTAL;
+
+  if (!visivel) return null;
 
   const enviar = async (f: File) => {
-    if (!alvo) return;
+    if (!alvo || !pode) return;
     if (f.size > MAX_MB * 1024 * 1024) { setMsg({ t: `O ficheiro passa de ${MAX_MB} MB.`, erro: true }); return; }
     setAEnviar(true); setMsg(null);
     const caminho = `${org}/${alvo.tipo}/${alvo.id}/${generateSecureFileName(f)}`;
@@ -88,6 +96,7 @@ export function DocumentosParaCliente({ d }: { d: Negocio }) {
   };
 
   const tirar = async (x: DocLinha) => {
+    if (!pode) return;
     const r = await sbAny.from("documents").update({ visible_to_client: false }).eq("id", x.id);
     if (r.error) { setMsg({ t: `Não foi possível tirar do portal: ${r.error.message}`, erro: true }); return; }
     setMsg({ t: `«${x.nome}» saiu do portal do cliente.` });
@@ -120,18 +129,19 @@ export function DocumentosParaCliente({ d }: { d: Negocio }) {
                     <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <span className="min-w-0 flex-1 truncate">{x.nome}</span>
                     <span className="text-sm tabular-nums text-muted-foreground">{x.quando}</span>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => void tirar(x)} aria-label={`Tirar ${x.nome} do portal`}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+                    <Button type="button" variant="ghost" size="sm" disabled={!pode} title={motivo} onClick={() => void tirar(x)} aria-label={`Tirar ${x.nome} do portal`}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
                   </li>
                 ))}
               </ul>
             )}
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <input ref={ficheiro} type="file" className="sr-only" id={`docs-cli-f-${d.id}`} disabled={aEnviar}
+              <input ref={ficheiro} type="file" className="sr-only" id={`docs-cli-f-${d.id}`} disabled={aEnviar || !pode}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) void enviar(f); }} />
-              <Button type="button" disabled={aEnviar} onClick={() => ficheiro.current?.click()}>
+              <Button type="button" disabled={aEnviar || !pode} title={motivo} onClick={() => ficheiro.current?.click()}>
                 {aEnviar ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />A enviar…</> : <><FileUp className="mr-1.5 h-4 w-4" aria-hidden="true" />Escolher o ficheiro e enviar</>}
               </Button>
             </div>
+            {motivo && <p className="mt-2 text-[15px] text-muted-foreground">{motivo}</p>}
           </>
         )}
       {msg && <p role={msg.erro ? "alert" : "status"} className={"mt-3 text-[15px] " + (msg.erro ? "text-destructive" : "text-success")}>{msg.t}</p>}
