@@ -15,11 +15,18 @@ describe("composição modular de cozinha", () => {
     expect(PREDEFINIDOS.map((p) => p.nome)).toEqual(["Duas colunas com forno no meio", "Coluna de frigorífico e bases", "Bancada com módulos de parede", "Ilha com gavetas"]);
     expect(predefinido("ilha_gavetas")?.ilha).toBe(true);
   });
-  it("duas colunas com forno: colunas nas pontas e, no meio, gavetão, forno e armário de parede por cima", () => {
+  it("duas colunas com forno: o meio é uma coluna de forno CHEIA, à altura das colunas, e os três ficam encostados", () => {
     const p = pecasDosModulos(colunas);
-    expect(p.map((x) => x.categoria)).toEqual(["coluna_cozinha", "modulo_base", "forno", "armario_parede", "coluna_cozinha"]);
-    expect(p.find((x) => x.categoria === "armario_parede")).toMatchObject({ y: 145, d: 35, h: 70, x: 0 });
+    expect(p.map((x) => [x.categoria, x.o.interior, x.h])).toEqual([["coluna_cozinha", "despensa", 210], ["coluna_cozinha", "forno", 210], ["coluna_cozinha", "despensa", 210]]);
+    // sem vão: cada módulo começa onde o anterior acaba
+    for (let i = 1; i < p.length; i++) expect(p[i].x - p[i].w / 2).toBeCloseTo(p[i - 1].x + p[i - 1].w / 2, 6);
     expect(p[0].x).toBe(-60);
+  });
+  it("só bases: o forno fica no módulo base e o armário de parede a 145 cm; com colunas, o armário sobe até ao topo delas", () => {
+    const bancada = composicaoDe(predefinido("bancada_parede")!);
+    expect(pecasDosModulos(bancada).find((x) => x.categoria === "armario_parede")).toMatchObject({ y: 145, d: 35, h: 70 });
+    const misto = mudarModulo(bancada, "b3", { tipo: "coluna_despensa" });
+    expect(pecasDosModulos(misto).find((x) => x.categoria === "armario_parede")).toMatchObject({ y: 145, h: 65 });
   });
   it("editar ranhuras: tipo, largura, cor, acrescentar, retirar e reordenar (sem mutar a original)", () => {
     let c = mudarModulo(colunas, "f", { largura: 80, cor: "#222222" });

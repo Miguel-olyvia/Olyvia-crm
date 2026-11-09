@@ -76,12 +76,16 @@ export function modeloDaComposicao(pecaId: string, c: ComposicaoCozinha): Produt
 export interface PecaDoModulo { modulo: string; categoria: string; x: number; z: number; y: number; w: number; d: number; h: number; o: Record<string, string | boolean>; cor: string }
 export function pecasDosModulos(c: ComposicaoCozinha): PecaDoModulo[] {
   const { prof, alturaBase, alturaColuna, profParede, alturaParede, chaoParede } = MEDIDAS_COZINHA, total = larguraTotal(c);
+  // com colunas na fila, tudo acaba à altura das colunas: o forno vira uma coluna de forno CHEIA (porta em cima, nicho, gaveta em baixo, sem
+  // vãos) e os armários de parede sobem até lá acima; os módulos ficam encostados (cada um começa onde o anterior acaba, sem folga)
+  const comColunas = c.modulos.some((m) => ehColuna(m.tipo));
+  const hParede = comColunas ? alturaColuna - chaoParede : alturaParede;
   let x0 = -total / 2;
   return c.modulos.flatMap((m): PecaDoModulo[] => {
     const x = x0 + m.largura / 2; x0 += m.largura;
     const base = { modulo: m.id, x, z: 0, y: 0, w: m.largura, d: prof, cor: m.cor };
-    const parede = m.parede && !ehColuna(m.tipo) ? [{ ...base, categoria: "armario_parede", z: -prof / 2 + profParede / 2, y: chaoParede, d: profParede, h: alturaParede, o: { duas: m.largura > 50, vidro: false } }] : [];
-    if (ehColuna(m.tipo)) return [{ ...base, categoria: "coluna_cozinha", h: alturaColuna, o: { interior: m.tipo.slice(7) } }];
+    const parede = m.parede && !ehColuna(m.tipo) ? [{ ...base, categoria: "armario_parede", z: -prof / 2 + profParede / 2, y: chaoParede, d: profParede, h: hParede, o: { duas: m.largura > 50, vidro: false } }] : [];
+    if (ehColuna(m.tipo) || (m.tipo === "base_forno" && comColunas)) return [{ ...base, categoria: "coluna_cozinha", h: alturaColuna, o: { interior: m.tipo === "base_forno" ? "forno" : m.tipo.slice(7) } }];
     if (m.tipo === "base_forno") return [{ ...base, categoria: "modulo_base", h: 27, o: { frentes: "gavetas", duas: false } }, { ...base, categoria: "forno", y: 27, h: alturaBase - 27, d: prof - 2, o: { tipo: "forno" } }, ...parede];
     return [{ ...base, categoria: "modulo_base", h: alturaBase, o: { frentes: m.tipo === "base_gavetas" ? "gavetas" : "portas", duas: m.largura > 50 } }, ...parede];
   });

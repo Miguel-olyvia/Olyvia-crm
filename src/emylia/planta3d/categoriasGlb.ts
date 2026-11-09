@@ -40,9 +40,11 @@ const ASSENTO = 0.4;
 const caixa = (nome: string, mat: MaterialGlb, colocar: ParteGlb["colocar"], ver?: ParteGlb["ver"]): ParteGlb => ({ nome, forma: "caixa", mat, colocar, ...(ver ? { ver } : {}) });
 /** Rodapé recuado dos módulos de chão da cozinha (m). */
 const RODAPE = 0.1;
+/** O friso entre frentes (m): 2 mm, só relevo visual (os corpos ficam encostados, sem vão). */
+const FRISO = 0.002;
 /** Uma frente (porta ou gaveta) na face da frente, entre y0 e y1, de x0 a x1 (m). */
 const frente = (nome: string, mat: MaterialGlb, f: (p: ParamsGenerico) => [number, number, number, number], ver?: ParteGlb["ver"]): ParteGlb =>
-  caixa(nome, mat, (p) => { const [x0, x1, y0, y1] = f(p); return { pos: [(x0 + x1) / 2, (y0 + y1) / 2, p.d / 2 + 0.009], esc: [x1 - x0 - 0.004, y1 - y0 - 0.004, 0.018] }; }, ver);
+  caixa(nome, mat, (p) => { const [x0, x1, y0, y1] = f(p); return { pos: [(x0 + x1) / 2, (y0 + y1) / 2, p.d / 2 + 0.009], esc: [x1 - x0 - FRISO, y1 - y0 - FRISO, 0.018] }; }, ver);
 /** Um puxador horizontal na frente, à altura y (m). */
 const puxador = (nome: string, f: (p: ParamsGenerico) => [number, number], ver?: ParteGlb["ver"]): ParteGlb =>
   caixa(nome, "metal", (p) => { const [x, y] = f(p); return { pos: [x, y, p.d / 2 + 0.025], esc: [min(0.16, p.w * 0.35), 0.012, 0.014] }; }, ver);
@@ -66,7 +68,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       { id: "duas", rotulo: "Duas portas", tipo: "sim", omissao: true },
     ],
     partes: [
-      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, RODAPE + (h - RODAPE) / 2, -0.01], esc: [w, h - RODAPE, d - 0.02] })),
+      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, RODAPE + (h - RODAPE) / 2, 0], esc: [w, h - RODAPE, d] })),
       caixa("rodape", "escuro", ({ w, d }) => ({ pos: [0, RODAPE / 2, d / 2 - 0.08], esc: [w - 0.02, RODAPE, 0.02] })),
       frente("porta_esq", "corpo", ({ w, h, o }) => (o.duas === false ? [-w / 2, w / 2, RODAPE, h] : [-w / 2, 0, RODAPE, h]), (p) => p.o.frentes !== "gavetas"),
       frente("porta_dir", "corpo", ({ w, h }) => [0, w / 2, RODAPE, h], (p) => p.o.frentes !== "gavetas" && p.o.duas !== false),
@@ -79,7 +81,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     id: "armario_parede", rotulo: "Armário de parede (cozinha)", tipos: ["armario_alto"], nome: /superior|parede|suspens/i, parede: { alt: 1.45, prof: 0.35 },
     opcoes: [{ id: "duas", rotulo: "Duas portas", tipo: "sim", omissao: true }, { id: "vidro", rotulo: "Portas de vidro", tipo: "sim", omissao: false }],
     partes: [
-      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, -0.01], esc: [w, h, d - 0.02] })),
+      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w, h, d] })),
       frente("porta_esq", "corpo", ({ w, h, o }) => (o.duas === false ? [-w / 2, w / 2, 0, h] : [-w / 2, 0, 0, h]), (p) => p.o.vidro !== true),
       frente("porta_dir", "corpo", ({ w, h }) => [0, w / 2, 0, h], (p) => p.o.vidro !== true && p.o.duas !== false),
       frente("vidro_esq", "vidro", ({ w, h, o }) => (o.duas === false ? [-w / 2, w / 2, 0, h] : [-w / 2, 0, 0, h]), (p) => p.o.vidro === true),
@@ -91,7 +93,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     id: "coluna_cozinha", rotulo: "Coluna alta (cozinha)", tipos: ["coluna", "armario_alto"], nome: /despensa|forno|frigor|coluna c\/espa|armário de coluna|coluna de cozinha/i,
     opcoes: [{ id: "interior", rotulo: "Coluna de", tipo: "lista", valores: [{ id: "despensa", rotulo: "Despensa" }, { id: "forno", rotulo: "Forno" }, { id: "frigorifico", rotulo: "Frigorífico" }], omissao: (_t, n) => (/forno/i.test(n) ? "forno" : /frigor/i.test(n) ? "frigorifico" : "despensa") }],
     partes: [
-      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, RODAPE + (h - RODAPE) / 2, -0.01], esc: [w, h - RODAPE, d - 0.02] })),
+      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, RODAPE + (h - RODAPE) / 2, 0], esc: [w, h - RODAPE, d] })),
       caixa("rodape", "escuro", ({ w, d }) => ({ pos: [0, RODAPE / 2, d / 2 - 0.08], esc: [w - 0.02, RODAPE, 0.02] })),
       frente("porta_alta", "corpo", ({ w, h, o }) => [-w / 2, w / 2, o.interior === "frigorifico" ? RODAPE + (h - RODAPE) * 0.45 : o.interior === "forno" ? RODAPE + 0.75 : RODAPE, h], undefined),
       frente("porta_baixa", "corpo", ({ w, h, o }) => [-w / 2, w / 2, RODAPE, o.interior === "frigorifico" ? RODAPE + (h - RODAPE) * 0.45 : RODAPE + 0.15], (p) => p.o.interior !== "despensa"),
@@ -107,7 +109,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       { id: "encastre", rotulo: "De encastrar (frente de móvel)", tipo: "sim", omissao: (_t, n) => /encastr|integ/i.test(n) },
     ],
     partes: [
-      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, -0.01], esc: [w, h, d - 0.02] })),
+      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w, h, d] })),
       frente("porta_cima", "corpo", ({ w, h }) => [-w / 2, w / 2, h * 0.62, h], (p) => p.o.americano !== true),
       frente("porta_baixo", "corpo", ({ w, h }) => [-w / 2, w / 2, 0, h * 0.62], (p) => p.o.americano !== true),
       frente("porta_esq", "corpo", ({ w, h }) => [-w / 2, 0, 0, h], (p) => p.o.americano === true),
@@ -171,7 +173,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     id: "roupeiro", rotulo: "Roupeiro", tipos: ["roupeiro"],
     opcoes: [{ id: "correr", rotulo: "Portas de correr", tipo: "sim", omissao: (_t, n) => /correr/i.test(n) }],
     partes: [
-      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, -0.01], esc: [w, h, d - 0.02] })),
+      caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w, h, d] })),
       frente("porta_1", "corpo", ({ w, h }) => [-w / 2, -w / 6, 0.02, h - 0.02]),
       frente("porta_2", "corpo", ({ w, h }) => [-w / 6, w / 6, 0.02, h - 0.02]),
       frente("porta_3", "corpo", ({ w, h }) => [w / 6, w / 2, 0.02, h - 0.02]),
