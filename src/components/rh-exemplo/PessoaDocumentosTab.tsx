@@ -64,6 +64,15 @@
  * `rpc_hr_documento_anexar_ficheiro` de nunca sobrescrever em silencio: o
  * hash muda se, e so se, os bytes por tras do caminho mudaram.
  *
+ * ANULAR, OCULTAR E REPOR (20270111800000, 20270111810000)
+ * ------------------------------------------------------------
+ * A coluna Accoes tem um menu «Mais acoes» com «Anular documento» (so rascunho e a aguardar assinatura, com
+ * hr.pessoas.documentos.anular) e «Ocultar documento» (so assinado, entregue e anulado, com hr.pessoas.documentos.ocultar).
+ * Ambos pedem um motivo (`DocumentoMotivoDialog`). Um anulado fica esbatido com o motivo; os ocultados saem da lista e vivem
+ * em «Documentos ocultados (n)» (hr.pessoas.documentos.repor), onde se repoem sem nunca mostrar o texto. A base decide: o
+ * ecra so escolhe quais botoes mostrar. Um documento por assinar sem ficheiro nem modelo (sem texto real) leva o aviso
+ * «Sem ficheiro»: a base recusa assina-lo (HRA62).
+ *
  * A LEITURA NUNCA GUARDA O URL EM ESTADO
  * -----------------------------------------
  * "Abrir ficheiro" pede um URL assinado de curta duracao a
@@ -71,7 +80,7 @@
  * anterior, o mesmo cuidado do NISS e do conteudo HTML: um URL assinado e
  * tao sensivel como o proprio ficheiro enquanto for valido.
  */
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,6 +92,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import {
@@ -94,12 +109,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  AlertTriangle,
+  EyeOff,
   ExternalLink,
   FileCheck,
   FilePlus2,
   FileSignature,
   FileText,
   Loader2,
+  MoreHorizontal,
   Paperclip,
   PenLine,
 } from "lucide-react";
@@ -109,6 +127,8 @@ import { usePessoaDocumentos } from "@/components/rh-exemplo/hooks/usePessoaDocu
 import { InserirDocumentoDialog } from "@/components/rh-exemplo/InserirDocumentoDialog";
 import type { OpcaoVinculoDocumento } from "@/components/rh-exemplo/AnexarContratoAssinadoDialog";
 import { AnexarFicheiroDialog } from "@/components/rh-exemplo/AnexarFicheiroDialog";
+import { DocumentoMotivoDialog } from "@/components/rh-exemplo/DocumentoMotivoDialog";
+import { DocumentosOcultadosDialog } from "@/components/rh-exemplo/DocumentosOcultadosDialog";
 import type { EstadoDocumentoRH, PessoaDocumento } from "@/components/rh-exemplo/tipos";
 
 export type { OpcaoVinculoDocumento };
@@ -121,6 +141,10 @@ export interface PermissoesDocumentosFicha {
   anular: boolean;
   conteudoView: boolean;
   modelosView: boolean;
+  /** hr.pessoas.documentos.ocultar. Opcional: quem nao a passa (ex.: «Os meus documentos») nao ve o menu de ocultar. */
+  ocultar?: boolean;
+  /** hr.pessoas.documentos.repor. Opcional: sem ela nao ha «Documentos ocultados». */
+  repor?: boolean;
 }
 
 interface PessoaDocumentosTabProps {
@@ -142,8 +166,20 @@ const VARIANTE_ESTADO: Record<EstadoDocumentoRH, "secondary" | "outline" | "defa
   rascunho: "outline",
   a_aguardar_assinatura: "secondary",
   assinado: "default",
+  entregue: "default",
   anulado: "outline",
 };
+
+/** So se anula antes de assinar; depois de assinado o documento e imutavel (a base recusa com HRA38). */
+const ESTADOS_ANULAVEIS: readonly EstadoDocumentoRH[] = ["rascunho", "a_aguardar_assinatura"];
+/** So se oculta o que ja e final: assinado, entregue ou anulado. */
+const ESTADOS_OCULTAVEIS: readonly EstadoDocumentoRH[] = ["assinado", "entregue", "anulado"];
+
+const ID_TITULO_DOCUMENTOS = "documentos-ficha-titulo";
+const ID_BOTAO_OCULTADOS = "documentos-ficha-ocultados";
+const idMaisAccoes = (documentoId: string) => `documentos-mais-accoes-${documentoId}`;
+
+type AccaoComMotivo = { tipo: "anular" | "ocultar"; documento: PessoaDocumento };
 
 function formatarData(iso: string | null): string {
   if (!iso) return "—";
@@ -177,14 +213,36 @@ export function PessoaDocumentosTab({
   const [documentoAAbrirId, setDocumentoAAbrirId] = useState<string | null>(null);
   const [documentoAConfirmarExterna, setDocumentoAConfirmarExterna] =
     useState<PessoaDocumento | null>(null);
+  const [accaoComMotivo, setAccaoComMotivo] = useState<AccaoComMotivo | null>(null);
+  // A ultima accao pedida fica ate ao proximo pedido: o dialogo continua a mostrar o seu texto durante a animacao de saida.
+  const [accaoMostrada, setAccaoMostrada] = useState<AccaoComMotivo | null>(null);
+  // O loader e so da primeira leitura; nas releituras (depois de anular ou ocultar) a tabela fica visivel.
+  const [jaLeu, setJaLeu] = useState(false);
+  const [aVerOcultados, setAVerOcultados] = useState(false);
+  const [totalOcultados, setTotalOcultados] = useState<number | null>(null);
+  // O menu que abriu o dialogo do motivo: o foco volta-lhe ao fechar (a accao ja e null nessa altura).
+  const ultimoMenuId = useRef<string | null>(null);
+
+  const podeRepor = podeVer && permissoes.repor === true;
+  const { listarOcultados } = dados;
+  const actualizarTotalOcultados = useCallback(async () => {
+    if (!podeRepor) return;
+    const resposta = await listarOcultados();
+    // Se a base recusar, o botao fica sem numero; a lista explica porque ao abrir.
+    setTotalOcultados(resposta.erro ? null : resposta.documentos.length);
+  }, [podeRepor, listarOcultados]);
+  useEffect(() => {
+    void actualizarTotalOcultados();
+  }, [actualizarTotalOcultados]);
 
   if (!podeVer || dados.recusado) {
     return <SemAcessoCard />;
   }
 
-  if (dados.loading) {
-    return <OlyviaLoader />;
-  }
+  // O carregamento nao desmonta os dialogos (anular, ocultar, ocultados): depois de uma accao a lista recarrega-se e eles
+  // ainda tem de fechar com o foco no sitio certo.
+  if (!dados.loading && !jaLeu) setJaLeu(true);
+  const aCarregarLista = dados.loading && !jaLeu && dados.documentos.length === 0;
 
   const abrirConteudo = async (documento: PessoaDocumento) => {
     setDocumentoAVer(documento);
@@ -261,15 +319,46 @@ export function PessoaDocumentosTab({
     }
   };
 
+  const confirmarAccaoComMotivo = async (motivo: string): Promise<string | null> => {
+    if (!accaoComMotivo) return null;
+    const { tipo, documento } = accaoComMotivo;
+    const erro = await (tipo === "anular" ? dados.anular : dados.ocultar)(documento.id, motivo);
+    if (erro) return erro;
+    toast.success(t(tipo === "anular" ? "hr.documentos.anular.sucesso" : "hr.documentos.ocultar.sucesso"));
+    if (tipo === "ocultar") void actualizarTotalOcultados();
+    return null;
+  };
+
+  const abrirMotivo = (tipo: AccaoComMotivo["tipo"], documento: PessoaDocumento) => {
+    ultimoMenuId.current = documento.id;
+    setAccaoComMotivo({ tipo, documento });
+    setAccaoMostrada({ tipo, documento });
+  };
+
+  // O foco volta ao menu da linha; se a linha ja nao existe (ocultado), ao botao dos ocultados, e por fim ao titulo.
+  const devolverFocoAoMenu = () =>
+    (ultimoMenuId.current && document.getElementById(idMaisAccoes(ultimoMenuId.current))) ||
+    document.getElementById(ID_BOTAO_OCULTADOS) ||
+    document.getElementById(ID_TITULO_DOCUMENTOS);
+
   return (
     <div className="space-y-4">
+      {aCarregarLista ? (
+        <OlyviaLoader />
+      ) : (
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
+          <CardTitle id={ID_TITULO_DOCUMENTOS} tabIndex={-1} className="flex items-center gap-2 text-base">
             <FileText className="h-4 w-4 text-muted-foreground" />
             {t("hr.documentos.titulo")}
           </CardTitle>
           <div className="flex flex-wrap gap-2">
+            {podeRepor && (
+              <Button id={ID_BOTAO_OCULTADOS} size="sm" variant="outline" onClick={() => setAVerOcultados(true)}>
+                <EyeOff className="mr-2 h-4 w-4" />
+                {t("hr.documentos.ocultados", { n: totalOcultados === null ? "…" : String(totalOcultados) })}
+              </Button>
+            )}
             {(podeEmitir || podeCriarPorUpload) && (
               <Button size="sm" onClick={() => setAInserir(true)}>
                 <FilePlus2 className="mr-2 h-4 w-4" />
@@ -318,17 +407,43 @@ export function PessoaDocumentosTab({
                       documento.estado === "a_aguardar_assinatura" &&
                       documento.ficheiro_caminho !== null;
                     const aAbrirEste = documentoAAbrirId === documento.id;
+                    // Alargado ao dominio de rh-exemplo (que conhece «entregue»; o tipo do hook, partilhado, ainda nao).
+                    const estado: EstadoDocumentoRH = documento.estado;
+                    const anulado = estado === "anulado";
+                    const podeAnularEste = permissoes.anular && ESTADOS_ANULAVEIS.includes(estado);
+                    const podeOcultarEste = permissoes.ocultar === true && ESTADOS_OCULTAVEIS.includes(estado);
+                    // Por assinar, sem ficheiro e sem modelo: nao tem texto real (o texto fixo do upload nao conta), e a base
+                    // recusa assina-lo (HRA62). Sem corpo_html na lista, "sem modelo" e o que se sabe daqui.
+                    const semConteudo =
+                      ESTADOS_ANULAVEIS.includes(estado) && !documento.ficheiro_caminho && !documento.modelo_id;
+                    const esbatido = anulado ? "opacity-60" : undefined;
                     return (
                       <TableRow key={documento.id}>
-                        <TableCell className="font-medium">{documento.titulo}</TableCell>
-                        <TableCell>{t(`hr.tipoDocumentoRH.${documento.tipo}`)}</TableCell>
-                        <TableCell>
+                        <TableCell className={`font-medium ${esbatido ?? ""}`.trim()}>
+                          {documento.titulo}
+                          {anulado && (
+                            <p className="mt-0.5 text-xs font-normal text-muted-foreground">
+                              {t("hr.documentos.anuladoEm", {
+                                data: formatarData(documento.anulado_em),
+                                motivo: documento.anulado_motivo ?? "—",
+                              })}
+                            </p>
+                          )}
+                          {semConteudo && (
+                            <p className="mt-0.5 flex items-start gap-1.5 text-xs font-normal text-amber-700 dark:text-amber-400">
+                              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                              <span>{t("hr.documentos.semFicheiroAviso")}</span>
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className={esbatido}>{t(`hr.tipoDocumentoRH.${documento.tipo}`)}</TableCell>
+                        <TableCell className={esbatido}>
                           <div className="flex flex-wrap items-center gap-1.5">
                             <Badge
-                              variant={VARIANTE_ESTADO[documento.estado]}
+                              variant={VARIANTE_ESTADO[estado]}
                               className="font-normal"
                             >
-                              {t(`hr.estadoDocumentoRH.${documento.estado}`)}
+                              {t(`hr.estadoDocumentoRH.${estado}`)}
                             </Badge>
                             {/* So faz sentido distinguir a origem depois de
                                 assinado -- antes disso nao ha assinatura
@@ -345,7 +460,7 @@ export function PessoaDocumentosTab({
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={esbatido}>
                           {documento.ficheiro_caminho ? (
                             <span
                               className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -366,8 +481,8 @@ export function PessoaDocumentosTab({
                             </span>
                           )}
                         </TableCell>
-                        <TableCell>{formatarData(documento.emitido_em)}</TableCell>
-                        <TableCell>{formatarData(documento.assinado_em)}</TableCell>
+                        <TableCell className={esbatido}>{formatarData(documento.emitido_em)}</TableCell>
+                        <TableCell className={esbatido}>{formatarData(documento.assinado_em)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-wrap justify-end gap-2">
                             {podeVerConteudoDeste && (
@@ -424,6 +539,39 @@ export function PessoaDocumentosTab({
                                 {t("hr.documentos.assinar")}
                               </Button>
                             )}
+                            {(podeAnularEste || podeOcultarEste) && (
+                              <DropdownMenu modal={false}>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    id={idMaisAccoes(documento.id)}
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-11 w-11"
+                                    aria-label={t("hr.documentos.maisAccoesDe", { titulo: documento.titulo })}
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {podeAnularEste && (
+                                    <DropdownMenuItem
+                                      className="min-h-11"
+                                      onSelect={() => abrirMotivo("anular", documento)}
+                                    >
+                                      {t("hr.documentos.anularDocumento")}
+                                    </DropdownMenuItem>
+                                  )}
+                                  {podeOcultarEste && (
+                                    <DropdownMenuItem
+                                      className="min-h-11"
+                                      onSelect={() => abrirMotivo("ocultar", documento)}
+                                    >
+                                      {t("hr.documentos.ocultarDocumento")}
+                                    </DropdownMenuItem>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -435,6 +583,33 @@ export function PessoaDocumentosTab({
           )}
         </CardContent>
       </Card>
+      )}
+
+      <DocumentoMotivoDialog
+        aberto={accaoComMotivo !== null}
+        titulo={t(accaoMostrada?.tipo === "ocultar" ? "hr.documentos.ocultar.titulo" : "hr.documentos.anular.titulo")}
+        descricao={t(
+          accaoMostrada?.tipo === "ocultar" ? "hr.documentos.ocultar.descricao" : "hr.documentos.anular.descricao",
+          { titulo: accaoMostrada?.documento.titulo ?? "" },
+        )}
+        rotuloConfirmar={t(
+          accaoMostrada?.tipo === "ocultar" ? "hr.documentos.ocultar.confirmar" : "hr.documentos.anular.confirmar",
+        )}
+        apoioColaborador={accaoMostrada?.tipo === "anular"}
+        onConfirmar={confirmarAccaoComMotivo}
+        onFechar={() => setAccaoComMotivo(null)}
+        devolverFoco={devolverFocoAoMenu}
+      />
+
+      {podeRepor && (
+        <DocumentosOcultadosDialog
+          aberto={aVerOcultados}
+          onFechar={() => setAVerOcultados(false)}
+          listarOcultados={dados.listarOcultados}
+          repor={dados.repor}
+          onAlterado={() => void actualizarTotalOcultados()}
+        />
+      )}
 
       <InserirDocumentoDialog
         open={aInserir}

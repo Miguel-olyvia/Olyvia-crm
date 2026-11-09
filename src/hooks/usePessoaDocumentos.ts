@@ -40,6 +40,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage, getLocalizedFallback } from "@/utils/friendlyError";
 import { getUploadErrorMessage, resolveValidateUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { chaveErroDocumento, comRepeticaoPorDeadlock, motivoParaEnvio, razaoMotivoInvalido } from "@/lib/hr/documentoMotivo";
 import type { PessoaDocumento, PessoaDocumentoModelo, TipoDocumentoRH } from "@/types/hr";
 
 const COLUNAS_DOCUMENTO =
@@ -150,6 +151,35 @@ export async function subirFicheiroParaDocumento(
   }
 }
 
+/**
+ * Um documento ocultado, como o devolve `rpc_hr_documentos_ocultados` (20270111810000): so descritivos e a ultima ocultacao.
+ * NUNCA o texto nem o caminho do ficheiro -- para ver o conteudo de um oculto repoe-se primeiro.
+ */
+export interface DocumentoOcultado {
+  documento_id: string;
+  tipo: TipoDocumentoRH;
+  titulo: string;
+  estado: string;
+  emitido_em: string | null;
+  assinado_em: string | null;
+  entregue_em: string | null;
+  anulado_em: string | null;
+  tem_ficheiro: boolean;
+  ocultado_em: string | null;
+  ocultado_por: string | null;
+  ocultado_por_nome: string | null;
+  ocultado_motivo: string | null;
+}
+
+/** Anular, ocultar e repor: o documento e o motivo (3 a 2000 caracteres). Devolve a mensagem de erro traduzida, ou `null` em sucesso. */
+export type AccaoComMotivoDocumento = (documentoId: string, motivo: string) => Promise<string | null>;
+
+/** O erro de uma RPC de documentos em texto: o conhecido (HRA31/37/38/62, permissao) traduzido, o resto pelo texto amigavel geral. */
+async function mensagemErroDocumento(e: unknown): Promise<string> {
+  const chave = chaveErroDocumento(e);
+  return chave ? getLocalizedFallback(chave) : await getFriendlyErrorMessage(e);
+}
+
 export interface UsePessoaDocumentosResult {
   documentos: PessoaDocumento[];
   /** So preenchido quando `podeVerModelos` -- quem so pode ver os proprios
@@ -199,10 +229,28 @@ export interface UsePessoaDocumentosResult {
   obterUrlFicheiro: (documentoId: string) => Promise<UrlFicheiroDocumento>;
 }
 
+/**
+ * O resultado completo do hook: o antigo mais anular, ocultar, repor e listar ocultados. Separado de `UsePessoaDocumentosResult` para
+ * que quem constroi esse tipo a mao (testes de components/hr) nao tenha de conhecer os membros novos.
+ */
+export interface UsePessoaDocumentosCompleto extends UsePessoaDocumentosResult {
+  /**
+   * Anula um documento a rascunho ou a aguardar assinatura (`rpc_hr_documento_anular`, hr.pessoas.documentos.anular). Retira o
+   * envio ao portal, se houver. Repete uma vez se a base desfizer por deadlock (40P01).
+   */
+  anular: AccaoComMotivoDocumento;
+  /** Oculta um documento assinado, entregue ou anulado (`rpc_hr_documento_ocultar`, hr.pessoas.documentos.ocultar). */
+  ocultar: AccaoComMotivoDocumento;
+  /** Repoe um documento oculto (`rpc_hr_documento_repor`, hr.pessoas.documentos.repor). O envio ao portal nao volta. */
+  repor: AccaoComMotivoDocumento;
+  /** Os documentos ocultados desta pessoa (hr.pessoas.documentos.repor). Nunca o texto. Erro traduzido e lista vazia se a base recusar. */
+  listarOcultados: () => Promise<{ documentos: DocumentoOcultado[]; erro: string | null }>;
+}
+
 export function usePessoaDocumentos(
   pessoaId: string | undefined,
   podeVerModelos: boolean,
-): UsePessoaDocumentosResult {
+): UsePessoaDocumentosCompleto {
   const [documentos, setDocumentos] = useState<PessoaDocumento[]>([]);
   const [modelos, setModelos] = useState<PessoaDocumentoModelo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -325,8 +373,8 @@ export function usePessoaDocumentos(
         await load();
         return null;
       } catch (e) {
-        if (!isPermissionError(e)) captureFlowError(e, "hr-documentos-assinatura-externa");
-        return await getFriendlyErrorMessage(e);
+        if (!isPermissionError(e) && !chaveErroDocumento(e)) captureFlowError(e, "hr-documentos-assinatura-externa");
+        return await mensagemErroDocumento(e);
       } finally {
         setSaving(false);
       }
@@ -356,8 +404,8 @@ export function usePessoaDocumentos(
         await load();
         return null;
       } catch (e) {
-        if (!isPermissionError(e)) captureFlowError(e, "hr-documentos-assinar");
-        return await getFriendlyErrorMessage(e);
+        if (!isPermissionError(e) && !chaveErroDocumento(e)) captureFlowError(e, "hr-documentos-assinar");
+        return await mensagemErroDocumento(e);
       } finally {
         setSaving(false);
       }
@@ -410,6 +458,55 @@ export function usePessoaDocumentos(
     [],
   );
 
+  const executarComMotivo = useCallback(
+    async (rpc: string, fluxo: string, documentoId: string, motivo: string): Promise<string | null> => {
+      // O mesmo criterio da base (hr_documento_motivo): sem ida e volta por um motivo que ela ia recusar.
+      if (razaoMotivoInvalido(motivo)) return getLocalizedFallback("hr.documentos.erro.motivoInvalido");
+      setSaving(true);
+      try {
+        const { error } = await comRepeticaoPorDeadlock(() =>
+          hrRpc(rpc, { p_documento_id: documentoId, p_motivo: motivoParaEnvio(motivo) }),
+        );
+        if (error) throw error;
+        await load();
+        return null;
+      } catch (e) {
+        if (!isPermissionError(e) && !chaveErroDocumento(e)) captureFlowError(e, fluxo);
+        return await mensagemErroDocumento(e);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [load],
+  );
+
+  const anular = useCallback<AccaoComMotivoDocumento>(
+    (documentoId, motivo) => executarComMotivo("rpc_hr_documento_anular", "hr-documentos-anular", documentoId, motivo),
+    [executarComMotivo],
+  );
+  const ocultar = useCallback<AccaoComMotivoDocumento>(
+    (documentoId, motivo) => executarComMotivo("rpc_hr_documento_ocultar", "hr-documentos-ocultar", documentoId, motivo),
+    [executarComMotivo],
+  );
+  const repor = useCallback<AccaoComMotivoDocumento>(
+    (documentoId, motivo) => executarComMotivo("rpc_hr_documento_repor", "hr-documentos-repor", documentoId, motivo),
+    [executarComMotivo],
+  );
+
+  const listarOcultados = useCallback(async (): Promise<{ documentos: DocumentoOcultado[]; erro: string | null }> => {
+    if (!pessoaId) return { documentos: [], erro: null };
+    try {
+      const { data, error } = await comRepeticaoPorDeadlock(() =>
+        hrRpc("rpc_hr_documentos_ocultados", { p_pessoa_id: pessoaId }),
+      );
+      if (error) throw error;
+      return { documentos: (data ?? []) as DocumentoOcultado[], erro: null };
+    } catch (e) {
+      if (!isPermissionError(e) && !chaveErroDocumento(e)) captureFlowError(e, "hr-documentos-listar-ocultados");
+      return { documentos: [], erro: await mensagemErroDocumento(e) };
+    }
+  }, [pessoaId]);
+
   return {
     documentos,
     modelos,
@@ -424,5 +521,9 @@ export function usePessoaDocumentos(
     assinar,
     anexarFicheiro,
     obterUrlFicheiro,
+    anular,
+    ocultar,
+    repor,
+    listarOcultados,
   };
 }

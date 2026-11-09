@@ -64,6 +64,9 @@ export const EXPLICITAS: Readonly<Record<string, readonly string[]>> = {
   "hr.pessoas.horario_realizado.validar": [parteVer("horario_realizado")],
   "hr.pessoas.vinculos.horas.corrigir": [parteVer("vinculos")],
   "hr.pessoas.documentos.anular": [parteVer("documentos")],
+  // Ocultar e repor documentos (20270111810000): só se veem os documentos com a parte Documentos da ficha.
+  "hr.pessoas.documentos.ocultar": [parteVer("documentos")],
+  "hr.pessoas.documentos.repor": [parteVer("documentos")],
   // Ações sobre a ficha de OUTRA pessoa, a partir da lista: só fazem sentido com a lista (hr.pessoas.view). Criar já o exige no
   // ecrã (PessoasRh: create E view, porque a policy de leitura de `pessoas` pede view para devolver a pessoa criada).
   "hr.pessoas.create": [FICHA],

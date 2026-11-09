@@ -70,6 +70,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({
 }));
 
 import { usePessoaDocumentos } from "@/hooks/usePessoaDocumentos";
+import { getLocalizedFallback } from "@/utils/friendlyError";
 
 const DOCUMENTO = {
   id: "doc1",
@@ -288,5 +289,91 @@ describe("usePessoaDocumentos", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await expect(result.current.obterUrlFicheiro("doc1")).rejects.toBeTruthy();
+  });
+});
+
+describe("usePessoaDocumentos: anular, ocultar, repor e listar ocultados", () => {
+  const textoDe = (chave: string) => getLocalizedFallback(chave);
+
+  async function montar() {
+    const { result } = renderHook(() => usePessoaDocumentos("p1", false));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    return result;
+  }
+
+  it.each([
+    ["anular", "rpc_hr_documento_anular"],
+    ["ocultar", "rpc_hr_documento_ocultar"],
+    ["repor", "rpc_hr_documento_repor"],
+  ] as const)("%s chama %s com o documento e o motivo sem espacos nas pontas", async (accao, rpc) => {
+    const result = await montar();
+    const erro = await result.current[accao]("doc1", "  Emitido por engano  ");
+    expect(erro).toBeNull();
+    expect(chamadasRpc).toContainEqual({ fn: rpc, args: { p_documento_id: "doc1", p_motivo: "Emitido por engano" } });
+  });
+
+  it("recarrega a lista depois de anular", async () => {
+    const result = await montar();
+    respostaPorTabela.pessoas_documentos = { data: [], error: null };
+    await result.current.anular("doc1", "Emitido por engano");
+    await waitFor(() => expect(result.current.documentos).toEqual([]));
+  });
+
+  it("recusa localmente um motivo curto sem chamar a base", async () => {
+    const result = await montar();
+    const erro = await result.current.anular("doc1", " ab ");
+    expect(erro).toBe(textoDe("hr.documentos.erro.motivoInvalido"));
+    expect(chamadasRpc.filter((c) => c.fn === "rpc_hr_documento_anular")).toEqual([]);
+  });
+
+  it.each([
+    ["HRA31", "hr.documentos.erro.naoEncontrado"],
+    ["HRA37", "hr.documentos.erro.motivoInvalido"],
+    ["HRA38", "hr.documentos.erro.estadoInvalido"],
+  ])("traduz o erro %s da base, nunca o texto cru", async (code, chave) => {
+    rpcImpl = () => Promise.resolve({ data: null, error: { code, message: "texto_cru_da_base" } });
+    const result = await montar();
+    const erro = await result.current.anular("doc1", "Emitido por engano");
+    expect(erro).toBe(textoDe(chave));
+    expect(erro).not.toContain("texto_cru_da_base");
+  });
+
+  it("repete uma vez quando a base desfaz por deadlock (40P01) e acaba bem", async () => {
+    let n = 0;
+    rpcImpl = () => {
+      n += 1;
+      return Promise.resolve(n === 1 ? { data: null, error: { code: "40P01", message: "deadlock detected" } } : { data: { estado: "anulado" }, error: null });
+    };
+    const result = await montar();
+    expect(await result.current.ocultar("doc1", "Arquivo antigo")).toBeNull();
+    expect(chamadasRpc.filter((c) => c.fn === "rpc_hr_documento_ocultar")).toHaveLength(2);
+  });
+
+  it("um deadlock que se repete devolve erro, depois de so duas tentativas", async () => {
+    rpcImpl = () => Promise.resolve({ data: null, error: { code: "40P01", message: "deadlock detected" } });
+    const result = await montar();
+    expect(await result.current.anular("doc1", "Emitido por engano")).toBeTruthy();
+    expect(chamadasRpc.filter((c) => c.fn === "rpc_hr_documento_anular")).toHaveLength(2);
+  });
+
+  it("assinar traduz o HRA62 (sem ficheiro) em vez de o mostrar em bruto", async () => {
+    rpcImpl = () => Promise.resolve({ data: null, error: { code: "HRA62", message: "sem_ficheiro" } });
+    const result = await montar();
+    expect(await result.current.assinar("doc2")).toBe(textoDe("hr.documentos.erro.semFicheiro"));
+  });
+
+  it("listarOcultados chama a RPC com a pessoa e devolve as linhas, sem texto", async () => {
+    const linha = { documento_id: "d9", tipo: "contrato", titulo: "Contrato", estado: "assinado", ocultado_em: "2026-11-01T10:00:00Z", ocultado_por_nome: "Ana", ocultado_motivo: "Arquivo", tem_ficheiro: true };
+    rpcImpl = (fn) => Promise.resolve(fn === "rpc_hr_documentos_ocultados" ? { data: [linha], error: null } : { data: null, error: null });
+    const result = await montar();
+    const r = await result.current.listarOcultados();
+    expect(r).toEqual({ documentos: [expect.objectContaining({ documento_id: "d9" })], erro: null });
+    expect(chamadasRpc).toContainEqual({ fn: "rpc_hr_documentos_ocultados", args: { p_pessoa_id: "p1" } });
+  });
+
+  it("listarOcultados devolve erro traduzido e lista vazia quando a base recusa", async () => {
+    rpcImpl = () => Promise.resolve({ data: null, error: { code: "HRA31", message: "nao_encontrado" } });
+    const result = await montar();
+    expect(await result.current.listarOcultados()).toEqual({ documentos: [], erro: textoDe("hr.documentos.erro.naoEncontrado") });
   });
 });

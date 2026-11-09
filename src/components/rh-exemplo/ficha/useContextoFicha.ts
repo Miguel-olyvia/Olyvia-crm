@@ -50,6 +50,7 @@ function permissoesDeDocumentos(has: HasPermission) {
     edit: has("hr.pessoas.documentos.edit"), emitir: has("hr.pessoas.documentos.emitir"),
     anular: has("hr.pessoas.documentos.anular"), conteudoView: has("hr.pessoas.documentos.conteudo.view"),
     modelosView: has("hr.pessoas.documentos.modelos.view"),
+    ocultar: has("hr.pessoas.documentos.ocultar"), repor: has("hr.pessoas.documentos.repor"),
   };
 }
 
