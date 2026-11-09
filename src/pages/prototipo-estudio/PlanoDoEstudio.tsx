@@ -63,7 +63,7 @@ function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dis
         <div>
           <h2 id="t-fechar" className="text-2xl font-semibold tracking-tight">Fechar a visita</h2>
           <p className="text-[15px] text-muted-foreground">Os serviços do Catálogo da empresa, o plano da obra com a equipa e as datas, e o orçamento. Ao fechar, fica tudo no negócio.</p>
-          {erro && <p className="mt-2 text-sm text-warning-foreground">{erro}</p>}
+          {erro && <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">{erro}</p>}
         </div>
         <Servicos p={p} setP={setP} S={S} L={L} />
         <section aria-labelledby="t-plano" className={CARTAO}>
@@ -140,7 +140,7 @@ function Servicos({ p, setP, S, L }: { p: Projeto; setP: React.Dispatch<React.Se
           {L.tirados.map((x) => <button key={x.chave} type="button" className="inline-flex min-h-9 items-center gap-1 rounded-full border border-input px-3 hover:bg-accent" onClick={() => setP((y) => reporServico(y, x.chave))}><Undo2 className="h-3.5 w-3.5" aria-hidden="true" />{x.n}</button>)}
         </p>
       )}
-      {L.semPar.length > 0 && <p className="text-sm text-warning-foreground">Sem par no Catálogo (junte um serviço abaixo, se for preciso): {L.semPar.join("; ")}.</p>}
+      {L.semPar.length > 0 && <p className="text-sm text-amber-800 dark:text-amber-300">Sem par no Catálogo (junte um serviço abaixo, se for preciso): {L.semPar.join("; ")}.</p>}
       <div className="space-y-2 border-t border-border pt-4">
         <label className="grid gap-1.5 text-sm font-medium">Juntar um serviço do Catálogo
           <span className="relative">
@@ -178,7 +178,7 @@ function LinhaServico({ s, S, acoes, qtd }: { s: ServicoDoProjeto; S: Estado; ac
           <b className="font-medium">{s.n}</b> · {nfq(s.q)} {s.un}{s.trocado && <span className="ml-1 rounded-full bg-primary/10 px-2 text-xs text-primary">trocado</span>}
           <span className="block text-xs text-muted-foreground">{eur(s.preco)} €/{s.un}{oficios.length ? ` · ${oficios.join(", ")}` : ""} · {nfq((S.svc[s.sid]?.h ?? 0) * s.q)} h</span>
           <span className="block truncate text-xs text-muted-foreground">De: {s.de.join("; ")}</span>
-          {s.unDiferente && <span className="block text-xs text-warning-foreground">No Catálogo é por {s.unDiferente}: confirme a quantidade.</span>}
+          {s.unDiferente && <span className="block text-xs text-amber-800 dark:text-amber-300">No Catálogo é por {s.unDiferente}: confirme a quantidade.</span>}
         </span>
         <span className="flex shrink-0 items-center gap-1" onClick={(e) => e.preventDefault()}>{acoes}<ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" /></span>
       </summary>

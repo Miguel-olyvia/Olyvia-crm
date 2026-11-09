@@ -89,7 +89,7 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
       {/* 1. como está: tudo livre, ou o que falta resolver, e a sugestão de dia */}
       <div className={cn("rounded-xl border p-4", conflitos.length ? "border-warning/50 bg-warning/10" : "border-success/40 bg-success/10")}>
         {conflitos.length ? (
-          <p className="flex items-start gap-2 text-[15px]"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning-foreground" aria-hidden="true" />
+          <p className="flex items-start gap-2 text-[15px]"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-800 dark:text-amber-300" aria-hidden="true" />
             <span><b className="font-semibold">{conflitos.length} {conflitos.length === 1 ? "tarefa tem" : "tarefas têm"} o técnico ocupado</b> nestes dias
               ({[...new Set(conflitos.map((t) => t.tecNome.split(" ")[0]))].join(", ")}).</span></p>
         ) : (
@@ -126,7 +126,7 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
                   <b className="font-semibold">{x.n}</b> <span className="text-muted-foreground">· {x.oficio}</span>
                   <span className="block text-sm text-muted-foreground">{x.ts.map((t) => `${t.nome} (${dataCurta(t.inicio)}${t.dur > 1 ? `–${dataCurta(t.fim)}` : ""})`).join(" · ")}</span>
                 </span>
-                <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", x.conflitos.length ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success")}>
+                <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", x.conflitos.length ? "bg-warning/20 text-amber-800 dark:text-amber-300" : "bg-success/15 text-success")}>
                   {x.conflitos.length ? `ocupado em ${x.conflitos.length} ${x.conflitos.length === 1 ? "tarefa" : "tarefas"}` : "livre"}
                 </span>
               </button>
@@ -197,8 +197,8 @@ function AgendaTecnico({ id, P, S, negocio, fechar }: { id: string; P: PlanoData
               <span className="tabular-nums text-muted-foreground">{dataCurta(d)}</span>
               <span className="min-w-0">
                 {aqui.map((n) => <span key={n} className="block"><b className="font-medium">Esta obra:</b> {n}</span>)}
-                {fora.map((n) => <span key={n} className="block text-warning-foreground">Outra obra · {n}</span>)}
-                {ausente && <span className="block text-warning-foreground">Ausente (RH)</span>}
+                {fora.map((n) => <span key={n} className="block text-amber-800 dark:text-amber-300">Outra obra · {n}</span>)}
+                {ausente && <span className="block text-amber-800 dark:text-amber-300">Ausente (RH)</span>}
                 {!aqui.length && !fora.length && !ausente && <span className="text-muted-foreground">Livre</span>}
               </span>
             </li>
@@ -249,14 +249,14 @@ function CriarEquipa({ P, S, negocio, atual, guardadas, usar, guardar, apagar, f
                   className={cn("flex min-h-10 w-full items-center gap-2 rounded-lg border px-2 text-left text-sm", on ? "border-primary bg-card" : "border-border bg-card/60")}>
                   <span aria-hidden="true" className={cn("grid h-5 w-5 shrink-0 place-items-center rounded border-2", on ? "border-primary bg-primary text-primary-foreground" : "border-input")}>{on && <Check className="h-3.5 w-3.5" />}</span>
                   <span className="min-w-0 flex-1 truncate">{x.n}</span>
-                  <span className={cn("shrink-0 text-xs", n ? "text-warning-foreground" : "text-success")}>{n ? `${n} ${n === 1 ? "dia ocupado" : "dias ocupados"}` : "livre"}</span>
+                  <span className={cn("shrink-0 text-xs", n ? "text-amber-800 dark:text-amber-300" : "text-success")}>{n ? `${n} ${n === 1 ? "dia ocupado" : "dias ocupados"}` : "livre"}</span>
                 </button>
               );
             })}
           </fieldset>
         ))}
       </div>
-      {falta.length > 0 && <p className="flex items-start gap-2 text-sm text-warning-foreground"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Sem ninguém de {falta.join(", ")} na equipa: essas tarefas ficam com quem estiver livre.</p>}
+      {falta.length > 0 && <p className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Sem ninguém de {falta.join(", ")} na equipa: essas tarefas ficam com quem estiver livre.</p>}
       <div className="flex flex-wrap items-end gap-2">
         <Button type="button" className="min-h-11" disabled={!sel.length} onClick={() => usar(sel)}><Check className="mr-1 h-4 w-4" aria-hidden="true" />Usar nesta obra</Button>
         {atual.length > 0 && <Button type="button" variant="outline" className="min-h-11" onClick={() => usar([])}>Sem equipa fixa</Button>}

@@ -378,7 +378,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                         transition={reduzir ? { duration: 0 } : { duration: 0.2, ease: "easeOut" }}
                         className={cn("absolute origin-left cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
                           tabela ? "top-1.5 h-5" : "top-1 h-6",
-                          aqui && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-card", t.manual && "bg-[repeating-linear-gradient(135deg,transparent_0_6px,rgb(255_255_255/0.35)_6px_8px)]")}
+                          aqui && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-card", !aqui && daTarefa(t) && (daTarefa(t)!.ocupado || !daTarefa(t)!.tec) && "ring-2 ring-destructive ring-offset-1 ring-offset-card", t.manual && "bg-[repeating-linear-gradient(135deg,transparent_0_6px,rgb(255_255_255/0.35)_6px_8px)]")}
                         style={{ background: COR_FASE[t.fase] }}>
                         {/* a pega de arrastar só numa barra com tamanho para ela (em semanas, meio dia tem 3 ou 4 px: muda-se em Dias ou com ← →) */}
                         {!fechado && X(t.dias) >= 16 && (
@@ -419,7 +419,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                             <span className="min-w-0 flex-1 truncate text-sm">{nomeCurtoTarefa(t.nome)}</span>
                             {/* só os dias: o custo está no detalhe (toque na tarefa) e na dica */}
                             <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground">{dias(t.dias)}{t.manual && " · mudado"}</span>
-                            {daTarefa(t) && <span className={cn("max-w-[6rem] shrink-0 truncate text-xs", daTarefa(t)!.ocupado || !daTarefa(t)!.tec ? "text-warning-foreground" : "text-foreground")} title={`${daTarefa(t)!.tecNome} · ${daTarefa(t)!.oficio}`}>{daTarefa(t)!.tec ? daTarefa(t)!.tecNome.split(" ")[0] : "Por atribuir"}</span>}
+                            {daTarefa(t) && <IdTecnico td={daTarefa(t)!} />}
                           </button>
                           {!fechado && <>
                             <button type="button" title="Juntar uma tarefa a seguir a esta" aria-label={`Juntar uma tarefa a seguir a ${t.nome}`} onClick={() => setNovaTarefa({ fase: t.fase, depois: t.chave })}
@@ -440,7 +440,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                           className={cn("sticky left-4 flex min-h-8 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary", aqui && "text-primary")}
                           style={{ width: linhaW }}>
                           <Ic className="h-4 w-4 shrink-0" style={{ color: COR_FASE[t.fase] }} aria-hidden="true" />
-                          <span className="min-w-0 flex-1 text-[15px] font-medium leading-snug">{t.nome}{daTarefa(t) && <span className="block text-xs font-normal text-muted-foreground">{daTarefa(t)!.tecNome} · {daTarefa(t)!.oficio}</span>}</span>
+                          <span className="min-w-0 flex-1 text-[15px] font-medium leading-snug">{t.nome}{daTarefa(t) && <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs font-normal text-muted-foreground"><IdTecnico td={daTarefa(t)!} />{daTarefa(t)!.oficio}</span>}</span>
                           <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-muted-foreground">{custoTxt}</span>
                         </button>
                         {!fechado && (
@@ -585,7 +585,7 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio, PD, td, mover }: {
       )}
       {td && (
         <div className="grid gap-3 rounded-xl bg-muted/50 p-3 text-sm sm:grid-cols-[minmax(0,1fr)_20rem] sm:items-end">
-          <p><b className="font-medium">{td.tecNome}</b> · {td.oficio}{td.ocupado ? <span className="text-warning-foreground"> · {td.ocupado}</span> : null}
+          <p><b className="font-medium">{td.tecNome}</b> · {td.oficio}{td.ocupado ? <span className="text-amber-800 dark:text-amber-300"> · {td.ocupado}</span> : null}
             <span className="block text-muted-foreground">{td.dur > 1 ? `De ${dataCurta(td.inicio)} a ${dataCurta(td.fim)}` : dataCurta(td.inicio)} · {nfmt(td.h)} h{td.qtd ? ` · ${nfmt(td.qtd.q)} ${td.qtd.un}` : ""}</span></p>
           {!fechado && <TrocarTecnico t={td} P={PD} S={ctx.S} negocio={d.id} escolhas={escolhasDoNegocio(d.f)} mudar={(e) => ctx.run(() => {
             ctx.A.campo(d.id, "plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : "");
@@ -743,7 +743,12 @@ function EquipaNoOrcamento({ ctx, d, fechado, PD }: { ctx: Pick<Ctx, "S" | "A" |
       </div>
       <EquipaDaObra P={PD} S={S} negocio={d.id} escolhas={escolhas} mudar={mudar} calcular={(iso) => planoEmDatas(d, S, iso)}
         mudarInicio={fechado ? undefined : (iso) => run(() => A.inicioObra(d.id, iso))} />
-      <ul className="divide-y divide-border rounded-xl border border-border">
+      <details className="group rounded-xl border border-border">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3 text-sm font-medium">
+          Trocar o técnico de cada tarefa
+          <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+        </summary>
+      <ul className="divide-y divide-border border-t border-border">
         {PD.tarefas.map((t) => (
           <li key={t.chave} className="grid gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_20rem] sm:items-center">
             <span className="min-w-0 text-[15px]"><b className="font-medium">{t.nome}</b>
@@ -753,6 +758,7 @@ function EquipaNoOrcamento({ ctx, d, fechado, PD }: { ctx: Pick<Ctx, "S" | "A" |
           </li>
         ))}
       </ul>
+      </details>
     </section>
   );
 }
@@ -838,5 +844,19 @@ function ConfirmarTirar({ t, largura, sim, nao }: { t: TarefaPrevista; largura: 
       <button type="button" className="min-h-9 rounded-full bg-destructive px-3 font-medium text-destructive-foreground" onClick={sim}>Tirar</button>
       <button type="button" className="min-h-9 rounded-full border border-input px-3" onClick={nao}>Cancelar</button>
     </div>
+  );
+}
+
+/** 9/11 (Rúben: «identificadores nas tasks quando não tem técnicos disponíveis para estas datas»): quem faz a tarefa; a vermelho, com ⚠,
+ *  quando o técnico está ocupado nesses dias ou não há ninguém do ofício. */
+function IdTecnico({ td }: { td: TarefaDatas }) {
+  const mal = !td.tec || !!td.ocupado;
+  return (
+    <span title={mal ? (td.tec ? `${td.tecNome} está ${td.ocupado} nestes dias` : `Sem ninguém de ${td.oficio} no RH`) : `${td.tecNome} · ${td.oficio}`}
+      className={cn("inline-flex max-w-[7rem] shrink-0 items-center gap-1 truncate rounded-full px-1.5 text-xs font-medium",
+        mal ? "bg-destructive/10 text-destructive" : "text-foreground")}>
+      {mal && <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />}
+      <span className="truncate">{td.tec ? td.tecNome.split(" ")[0] : "Sem técnico"}</span>
+    </span>
   );
 }

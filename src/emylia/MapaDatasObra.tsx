@@ -79,11 +79,11 @@ export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false, equipa }
             </ul>
           ) : <p className="text-sm text-muted-foreground">O RH ainda não tem técnicos dos ofícios desta obra.</p>}
           {P.porAtribuir > 0 && (
-            <p className="flex items-start gap-2 text-sm text-warning-foreground"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               {P.porAtribuir} {P.porAtribuir === 1 ? "tarefa fica" : "tarefas ficam"} por atribuir: o RH não tem ninguém desse ofício.</p>
           )}
           {ocupadas.length > 0 && (
-            <p className="flex items-start gap-2 text-sm text-warning-foreground"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               Sem ninguém livre: {ocupadas.map((t) => `${t.tecNome} está ${t.ocupado} (${t.nome})`).join("; ")}. Escolha outro dia ou as Operações acertam no plano.</p>
           )}
         </section>
@@ -103,7 +103,7 @@ export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false, equipa }
                         <span className="flex items-start justify-between gap-3">
                           <span className="min-w-0 text-[15px]">
                             <b className="font-medium">{t.nome}</b>
-                            <span className={cn("block text-sm", t.tec ? "text-muted-foreground" : "text-warning-foreground")}>{t.tecNome} · {t.oficio}{t.ocupado ? ` (${t.ocupado})` : ""}</span>
+                            <span className={cn("block text-sm", t.tec ? "text-muted-foreground" : "text-amber-800 dark:text-amber-300")}>{t.tecNome} · {t.oficio}{t.ocupado ? ` (${t.ocupado})` : ""}</span>
                           </span>
                           <span className="shrink-0 text-right text-sm tabular-nums">
                             <b className="font-medium">{t.dur} {t.dur === 1 ? "dia" : "dias"}</b>
