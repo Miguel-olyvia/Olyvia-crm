@@ -67,6 +67,7 @@ export function hookFalso() {
         horas_extra: horas.erro ? "erro" : "ok",
         justificacoes: justificacoes.indisponivel ? "indisponivel" : "ok",
         desvios: desviosFalsos.estado,
+        desvios_a_validar: "ok",
       };
       const hoje = hojeEmLisboa();
       const periodo = useMemo(() => ({ de: `${hoje.slice(0, 7)}-01`, ate: `${hoje.slice(0, 7)}-28` }), [hoje]);

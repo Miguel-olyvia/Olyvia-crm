@@ -73,6 +73,8 @@ import {
 import { regraEmVigorNoDia, useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
 import { direitosDaPessoa, useDireitosSalariaisDaOrganizacao } from "@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/rh-exemplo/processamento/ResumoPessoaProcessamentoOculto";
+import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
+import { prepararFechoComDesvios } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal";
 import {
   calcularProcessamentoPessoa,
@@ -198,6 +200,11 @@ export function ProcessamentoVisaoGeralTab() {
   const totaisPorPessoa = recolhido.chave === chavePeriodo ? recolhido.totais : SEM_TOTAIS;
   const diasPorPessoa = recolhido.chave === chavePeriodo ? recolhido.dias : SEM_DIAS;
   const incompletasPorPessoa = recolhido.chave === chavePeriodo ? recolhido.incompletas : SEM_INCOMPLETAS;
+  // Muda quando a deteccao de desvios do fecho alterou dias: as instancias ocultas remontam e leem tudo outra vez.
+  const [versaoRecolha, setVersaoRecolha] = useState(0);
+  const desviosNaoLidosPorPessoa = (id: string): boolean => totaisPorPessoa[id]?.desviosNaoLidos === true;
+  const pessoasSemDesvios = Object.values(totaisPorPessoa).filter((tot) => tot?.desviosNaoLidos === true).length;
+  const diasPorValidar = Object.values(totaisPorPessoa).reduce((soma, tot) => soma + (tot?.diasPorValidar ?? 0), 0);
   const [confirmarFecho, setConfirmarFecho] = useState(false);
   const estadoFechoRef = useRef<HTMLParagraphElement>(null);
   const [pessoaParaLancamento, setPessoaParaLancamento] = useState<string | null>(null);
@@ -265,6 +272,7 @@ export function ProcessamentoVisaoGeralTab() {
         totais: {
           planeadoMinutos: totais.planeadoMinutos,
           realizadoMinutos: totais.realizadoMinutos,
+          contadoMinutos: totais.contadoMinutos,
           minutosExtraNormal: totais.minutosExtraNormal,
           minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
           minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,
@@ -345,6 +353,8 @@ export function ProcessamentoVisaoGeralTab() {
     pessoasObrigatorias: obrigatorias,
     comCalculo: (id) => resultadosPorPessoa.has(id),
     assiduidadeIncompleta: (id) => incompletasPorPessoa[id] === true,
+    // Sem a margem ou os desvios o calculo estaria errado: bloqueia com motivo escrito, nunca calcula em silencio.
+    desviosNaoLidos: desviosNaoLidosPorPessoa,
   });
   const textoBloqueio = motivoBloqueio
     ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
@@ -363,8 +373,26 @@ export function ProcessamentoVisaoGeralTab() {
       toast.error(textoBloqueio);
       return;
     }
+    // ANTES de gravar: detetar os desvios do periodo (a base recusa se ficarem dias por validar) e ler as assinaturas. Se a
+    // deteccao mudou dias, o calculo do ecra ja nao e o de agora: relê-se tudo e fecha-se de novo.
+    if (!activeCompany?.id || !periodo) {
+      toast.error(t("rhProcReal.fecho.erroAssinaturas"));
+      return;
+    }
+    const preparacao = await prepararFechoComDesvios({ organizationId: activeCompany.id, periodoId: periodo.id, de: intervalo.de, ate: intervalo.ate, calculadas: new Map(obrigatorias.map((id) => [id, totaisPorPessoa[id]?.desviosChave ?? ""])) });
+    if (!preparacao.ok) {
+      if (preparacao.motivo === "erro") {
+        toast.error(preparacao.texto);
+      } else {
+        setRecolhido({ chave: chavePeriodo, totais: {}, dias: {}, incompletas: {} });
+        setVersaoRecolha((v) => v + 1);
+        toast.error(t("rhProcReal.fecho.desviosMudaram", { n: String(preparacao.mudou) }));
+      }
+      return;
+    }
     // Fecha e GRAVA o resultado de cada pessoa obrigatoria, tal como o ecra o mostra agora.
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
+      assinaturaDeDesviosDe: (id) => preparacao.assinaturas.get(id) ?? null,
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultadosPorPessoa.get(id)?.resultado,
       versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
@@ -496,9 +524,10 @@ export function ProcessamentoVisaoGeralTab() {
               {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
             </p>
           )}
+          {!periodoFechado && <AvisosDeDesvios diasPorValidar={diasPorValidar} pessoasSemDesvios={pessoasSemDesvios} />}
           {!periodoFechado && pessoasActivas.map((pessoa) => (
             <ResumoPessoaProcessamentoOculto
-              key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}`}
+              key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}:${versaoRecolha}`}
               pessoaId={pessoa.id}
               ano={ano}
               mes={mes}

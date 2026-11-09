@@ -7,7 +7,7 @@
  *
  * EXTENSIVEL: um tipo novo acrescenta-se a `TIPOS_DE_ITEM` (etiqueta, fonte, permissao), a `ItemFila` (uniao
  * discriminada) e ao aspecto no componente; nada mais muda aqui. Assim entraram as «ausencias por decidir» (a fila do
- * ecra de Ausencias, com a sua propria fonte) e o «desvio a validar» (preparado, sem fonte ainda: ver `DesvioAValidar`).
+ * ecra de Ausencias, com a sua propria fonte) e o «desvio a validar» (fonte `desvios_a_validar`: `rpc_hr_desvios_listar`, ver `DesvioAValidar`).
  */
 import { diasDeCalendarioEntre } from "@/lib/hr/periodoFolha";
 import type { HoraExtra } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
@@ -15,18 +15,17 @@ import type { JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDi
 import { accoesDoPedido } from "@/lib/hr/ausencias";
 import type { Desvio, PermissoesAssiduidade } from "@/types/hrAssiduidade";
 import type { AusenciaPedido } from "@/types/hrAusencias";
+import { podeSerHoraExtra } from "@/lib/hr/desviosBase";
 
 /** Quantas horas extra pendentes a fila le (a pagina da base); acima disto diz-se e o contador mostra «N+». */
 export const LIMITE_HORAS_EXTRA_NA_FILA = 500;
 /** A partir de quantos dias do fim do periodo da folha a pessoa passa para o topo da lista. */
 export const DIAS_AVISO_FECHO = 5;
 
-/** As fontes da fila do mapa de assiduidade (as tres que o hook `useFilaDeTrabalho` le de uma so vez). */
-export type FonteFila = "horas_extra" | "justificacoes" | "desvios";
+/** As fontes da fila do mapa de assiduidade (as quatro que o hook `useFilaDeTrabalho` le de uma so vez). */
+export type FonteFila = "horas_extra" | "justificacoes" | "desvios" | "desvios_a_validar";
 /** A fonte da fila do ecra de Ausencias: os pedidos pendentes de decisao. */
 export type FonteAusencias = "ausencias";
-/** Fonte que AINDA NAO EXISTE: a validacao de desvios. O tipo «desvio a validar» ja esta preparado para ela. */
-export type FonteFutura = "desvios_a_validar";
 export type TipoFila = "hora_extra" | "justificacao" | "alerta" | "desvio_a_validar" | "ausencia";
 
 /** Como correu a leitura de uma fonte. So `ok` permite dizer «ninguem tem nada por tratar». */
@@ -34,7 +33,7 @@ export type EstadoDeFonte = "ok" | "recusado" | "erro" | "indisponivel";
 
 export interface DefinicaoDoTipo {
   tipo: TipoFila;
-  fonte: FonteFila | FonteAusencias | FonteFutura;
+  fonte: FonteFila | FonteAusencias;
   /** Chave de traducao da etiqueta do tipo. */
   chaveEtiqueta: string;
   /** A permissao que decide as accoes do tipo; `null` quando quem decide e a base (justificacoes) ou varia por accao (alertas). */
@@ -52,10 +51,10 @@ export const TIPOS_DE_ITEM: readonly DefinicaoDoTipo[] = [
 
 /** Todos os tipos do registo: servem para contar, etiquetar e ordenar. */
 export const TIPOS_FILA: readonly TipoFila[] = TIPOS_DE_ITEM.map((definicao) => definicao.tipo);
-export const FONTES_FILA: readonly FonteFila[] = ["horas_extra", "justificacoes", "desvios"];
+export const FONTES_FILA: readonly FonteFila[] = ["horas_extra", "justificacoes", "desvios", "desvios_a_validar"];
 export const FONTES_AUSENCIAS: readonly FonteAusencias[] = ["ausencias"];
-/** Os tipos que o filtro do mapa de assiduidade oferece. `desvio_a_validar` junta-se aqui quando a sua fonte existir. */
-export const TIPOS_ASSIDUIDADE: readonly TipoFila[] = ["hora_extra", "justificacao", "alerta"];
+/** Os tipos que o filtro do mapa de assiduidade oferece. */
+export const TIPOS_ASSIDUIDADE: readonly TipoFila[] = ["hora_extra", "justificacao", "alerta", "desvio_a_validar"];
 /** Os tipos do filtro do ecra de Ausencias. */
 export const TIPOS_AUSENCIAS: readonly TipoFila[] = ["ausencia"];
 
@@ -115,6 +114,12 @@ export interface DesvioAValidar {
   horaInicio: string | null;
   horaFim: string | null;
   detalhe: string | null;
+  /** As medidas do dia (da base), para o detalhe mostrar as duas e para saber se «hora extra» e possivel (diferenca > margem). */
+  planeadoMin?: number;
+  realizadoMin?: number;
+  diferencaMin?: number;
+  desvioHorarioMin?: number;
+  margemMin?: number | null;
 }
 
 export interface ItemDesvioAValidar extends ItemComum {
@@ -350,6 +355,8 @@ const CHAVE_SEM_APROVAR_CHEFIA = "rhFila.semPermissao.aprovarChefia";
 const CHAVE_SEM_APROVAR_RH = "rhFila.semPermissao.aprovarRh";
 const CHAVE_SEM_VALIDAR = "rhFila.semPermissao.validar";
 const CHAVE_PROPRIA = "rhJust.rh.propriaSemDecisao";
+const CHAVE_PROPRIA_VALIDAR = "rhFila.semPermissao.propriaValidar";
+const CHAVE_SEM_TEMPO_A_MAIS = "rhFila.semPermissao.horaExtraSemTempo";
 
 const accao = (id: IdDeAccao, permitida: boolean, porque: string): AccaoDoItem => ({ id, permitida, porque: permitida ? null : porque });
 
@@ -373,8 +380,18 @@ export function accoesDoItem(item: ItemFila, permissoes: PermissoesDaFila, minha
         id === "corrigir" ? accao(id, permissoes.corrigir, CHAVE_SEM_CORRIGIR) : accao(id, permissoes.faltasEdit, CHAVE_SEM_FALTAS),
       );
     case "desvio_a_validar": {
-      const permitida = permissoes.validarDesvios ?? permissoes.gerir;
-      return [accao("validar_normal", permitida, CHAVE_SEM_VALIDAR), accao("validar_hora_extra", permitida, CHAVE_SEM_VALIDAR), accao("validar_aceitar_desvio", permitida, CHAVE_SEM_VALIDAR)];
+      // Ninguem valida os proprios desvios (a base recusa); diz-se primeiro, como nas justificacoes.
+      const propria = minhaPessoaId !== null && item.pessoaId === minhaPessoaId;
+      const permitida = !propria && (permissoes.validarDesvios ?? permissoes.gerir);
+      const porque = propria ? CHAVE_PROPRIA_VALIDAR : CHAVE_SEM_VALIDAR;
+      // «Hora extra» so quando o realizado passa o planeado em mais do que a margem.
+      const { diferencaMin, margemMin } = item.validacao;
+      const horaExtraPossivel = podeSerHoraExtra(diferencaMin, margemMin);
+      return [
+        accao("validar_normal", permitida, porque),
+        horaExtraPossivel ? accao("validar_hora_extra", permitida, porque) : accao("validar_hora_extra", false, permitida ? CHAVE_SEM_TEMPO_A_MAIS : porque),
+        accao("validar_aceitar_desvio", permitida, porque),
+      ];
     }
     case "ausencia": {
       // As accoes possiveis saem de `accoesDoPedido` (a regra que o detalhe do pedido ja usa): pede-se-lhe o que o

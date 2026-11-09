@@ -4,6 +4,7 @@
 // avisos de permissao e de carregamento.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 
 const fn = vi.hoisted(() => ({
@@ -14,6 +15,8 @@ const fn = vi.hoisted(() => ({
   criarPorQuantidade: vi.fn(),
   sucesso: vi.fn(),
   erro: vi.fn(),
+  preparar: vi.fn(),
+  recalcular: vi.fn(),
 }));
 const estado = vi.hoisted(() => ({
   permissoes: new Set<string>(),
@@ -27,6 +30,8 @@ const estado = vi.hoisted(() => ({
 const SEM_REGRAS_PERIODO: never[] = [];
 vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: SEM_REGRAS_PERIODO, estado: "ok", isLoading: false }) }));
 vi.mock("@/lib/toast", () => ({ toast: { success: fn.sucesso, error: fn.erro } }));
+// A preparacao do fecho (detetar desvios e ler as assinaturas) entra simulada: aqui nao ha base.
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", () => ({ prepararFechoComDesvios: (...args: unknown[]) => fn.preparar(...args) }));
 vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
   usePermissions: () => ({ hasPermission: (chave: string) => estado.permissoes.has(chave), loading: false }),
 }));
@@ -95,6 +100,11 @@ function calculo(extra: Record<string, unknown> = {}) {
     retribuicoesHook: { recusado: false, estado: "ok", porPessoa: new Map([["p1", [{ id: "ret-p1", valido_de: "2026-01-01", valido_ate: null }]]]) },
     codigosEstado: "ok",
     assiduidadeIncompleta: () => false,
+    desviosNaoLidos: () => false,
+    semDesvios: 0,
+    diasPorValidar: 0,
+    recalcular: fn.recalcular,
+    organizationId: "org-1",
     regrasHook: { estado: "ok", isLoading: false },
     resultados: new Map([
       ["p1", linha({ totalCodigosAutomaticos: 50, descontoFaltas: 20, subsidioAlimentacao: 110, totalRegras: 40, lancamentosPontuais: 30, totalBrutoEstimado: 1210 })],
@@ -130,6 +140,7 @@ beforeEach(() => {
   fn.criar.mockResolvedValue(null);
   fn.anular.mockResolvedValue(null);
   fn.criarPorQuantidade.mockResolvedValue(null);
+  fn.preparar.mockResolvedValue({ ok: true, assinaturas: new Map() });
   estado.permissoes = new Set(TUDO);
   estado.calculo = calculo();
   estado.fecho = { obrigatorias: ["p1", "p2"], estado: "ok" };
@@ -313,6 +324,56 @@ describe("fechar grava o resultado de cada pessoa", () => {
     await fechar();
     await waitFor(() => expect(fn.erro).toHaveBeenCalledWith("O período continua aberto: as regras salariais mudaram."));
     expect(fn.sucesso).not.toHaveBeenCalled();
+  });
+
+  it("ANTES de fechar deteta os desvios do periodo e le as assinaturas; cada assinatura segue no resultado da pessoa", async () => {
+    estado.calculo = calculo({ chaveDeDesviosUsada: (id: string) => (id === "p1" ? "chave-p1" : "") });
+    fn.preparar.mockResolvedValue({ ok: true, assinaturas: new Map([["p1", "assinatura-ana"]]) });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+    expect(fn.preparar).toHaveBeenCalledWith({ organizationId: "org-1", periodoId: "per", de: "2026-10-01", ate: "2026-10-31", calculadas: new Map([["p1", "chave-p1"], ["p2", ""]]) });
+    const enviados = fn.fechar.mock.calls[0][0] as Array<{ pessoa_id: string; desvios_assinatura: string | null }>;
+    expect(enviados.map((r) => [r.pessoa_id, r.desvios_assinatura])).toEqual([["p1", "assinatura-ana"], ["p2", null]]);
+    expect(fn.preparar.mock.invocationCallOrder[0]).toBeLessThan(fn.fechar.mock.invocationCallOrder[0]);
+  });
+
+  it("se a deteccao mudou dias, nao fecha: relê o calculo e di-lo", async () => {
+    fn.preparar.mockResolvedValue({ ok: false, motivo: "mudaram", mudou: 3 });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
+    expect(fn.fechar).not.toHaveBeenCalled();
+    await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("mudou 3 dia(s)")));
+  });
+
+  it("um erro a detetar os desvios ou a ler as assinaturas impede o fecho e aparece escrito", async () => {
+    fn.preparar.mockResolvedValue({ ok: false, motivo: "erro", texto: "Já há uma deteção de desvios a correr nesta organização." });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.erro).toHaveBeenCalledWith("Já há uma deteção de desvios a correr nesta organização."));
+    expect(fn.fechar).not.toHaveBeenCalled();
+  });
+
+  it("a margem ou os desvios por ler bloqueiam o botao, com o motivo escrito (nunca calcula em silencio)", () => {
+    estado.calculo = calculo({ desviosNaoLidos: (id: string) => id === "p2", semDesvios: 1 });
+    abrir();
+    const botao = screen.getByRole("button", { name: "Fechar o mês" });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(botao).toHaveAccessibleDescription(/margem de tempo ou os desvios de 1 pessoa\(s\) não puderam ser lidos/);
+    expect(screen.getAllByRole("alert").some((e) => /margem de tempo ou os desvios de 1 pessoa\(s\) não se leram/.test(e.textContent ?? ""))).toBe(true);
+  });
+
+  it("avisa «N dias por validar» com a ligacao para a fila de desvios a validar", () => {
+    estado.calculo = calculo({ diasPorValidar: 4 });
+    render(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+    expect(screen.getByText(/4 dia\(s\) por validar/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ver os desvios na fila de trabalho" })).toHaveAttribute("href", "/rh-exemplo/assiduidade-e-ausencias?dominio=assiduidade&fila_tipo=desvio_a_validar");
+  });
+
+  it("sem dias por validar nao aparece nenhum aviso de desvios", () => {
+    abrir();
+    expect(screen.queryByTestId("avisos-desvios")).not.toBeInTheDocument();
   });
 
   it("direitos salariais por ler: o botao fica bloqueado e o motivo esta escrito", () => {

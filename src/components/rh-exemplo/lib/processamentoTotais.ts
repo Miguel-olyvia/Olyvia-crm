@@ -61,6 +61,12 @@ export interface EntradaProcessamentoPessoa {
   totais: {
     planeadoMinutos: number;
     realizadoMinutos: number;
+    /**
+     * Margem de tempo: os minutos que CONTAM (planeado dentro da margem ou por validar; realizado quando o desvio foi validado
+     * como hora extra ou aceite). So o desconto de faltas o usa; `realizadoMinutos` e o que se picou. Ausente = `realizadoMinutos`
+     * (sem margem configurada o resultado e o de sempre).
+     */
+    contadoMinutos?: number;
     minutosExtraNormal: number;
     minutosFeriadoTrabalhado: number;
     minutosDescansoTrabalhado: number;
@@ -416,7 +422,7 @@ function calcularSubsidioAlimentacao(
 }
 
 type DiaParaSubsidio = Pick<DiaRelatorioMensal, "estado" | "realizadoMinutos"> &
-  Partial<Pick<DiaRelatorioMensal, "iso" | "realizadoIntervalos">>;
+  Partial<Pick<DiaRelatorioMensal, "iso" | "realizadoIntervalos" | "contadoMinutos">>;
 
 const minutosDaHora = (hora: string): number => {
   const [h, m] = hora.split(":");
@@ -446,6 +452,8 @@ export function minutosTrabalhadosPorDia(dias: readonly DiaParaSubsidio[]): numb
   const porDia: { iso: string | undefined; minutos: number; acabaAMeiaNoite: boolean }[] = [];
   for (const dia of dias) {
     if (dia.estado === "ausencia" || !(dia.realizadoMinutos > 0)) continue;
+    // Margem de tempo: contam os minutos do dia que a margem manda contar (sem margem, o realizado).
+    const minutosDoDia = dia.contadoMinutos ?? dia.realizadoMinutos;
     const intervalos = dia.realizadoIntervalos ?? [];
     const primeiro = intervalos[0];
     const ultimo = intervalos[intervalos.length - 1];
@@ -459,15 +467,15 @@ export function minutosTrabalhadosPorDia(dias: readonly DiaParaSubsidio[]): numb
       !!primeiro &&
       minutosDaHora(primeiro.hora_inicio) === 0;
     if (!continuaTurno) {
-      porDia.push({ iso: dia.iso, minutos: dia.realizadoMinutos, acabaAMeiaNoite });
+      porDia.push({ iso: dia.iso, minutos: minutosDoDia, acabaAMeiaNoite });
       continue;
     }
     const minutosDoPrimeiro = minutosDaHora(primeiro.hora_fim) - minutosDaHora(primeiro.hora_inicio);
-    const juntos = Math.min(Math.max(minutosDoPrimeiro, 0), dia.realizadoMinutos);
+    const juntos = Math.min(Math.max(minutosDoPrimeiro, 0), minutosDoDia);
     anterior.minutos += juntos;
     // O turno acaba onde acaba o primeiro intervalo; so o que sobra fica como dia seu.
     anterior.acabaAMeiaNoite = false;
-    const resto = dia.realizadoMinutos - juntos;
+    const resto = minutosDoDia - juntos;
     if (resto > 0) porDia.push({ iso: dia.iso, minutos: resto, acabaAMeiaNoite });
   }
   return porDia.map((dia) => dia.minutos);
@@ -480,7 +488,7 @@ export function minutosTrabalhadosPorDia(dias: readonly DiaParaSubsidio[]): numb
  */
 function calcularMinutosDeFalta(totais: EntradaProcessamentoPessoa["totais"]): number {
   return Math.max(
-    totais.planeadoMinutos - totais.realizadoMinutos - totais.minutosAusenciaRemunerada,
+    totais.planeadoMinutos - (totais.contadoMinutos ?? totais.realizadoMinutos) - totais.minutosAusenciaRemunerada,
     0,
   );
 }

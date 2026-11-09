@@ -71,6 +71,8 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
   }, [lancamentosHook.lancamentos, periodoId]);
 
   return {
+    /** A organizacao activa (as RPCs de desvios do fecho levam-na). */
+    organizationId: activeCompany?.id ?? null,
     periodoHook,
     lancamentosHook,
     retribuicoesHook,
@@ -104,6 +106,8 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
   const { pessoas, loading: pessoasACarregar, error: pessoasErro } = usePessoas();
   const chave = `${ano}-${mes}-${dados.intervalo.de}-${dados.intervalo.ate}`;
   const [recolhas, setRecolhas] = useState<Record<string, RecolhaAssiduidade>>({});
+  // Muda quando a deteccao de desvios do fecho alterou dias: as instancias ocultas remontam e leem tudo outra vez.
+  const [versaoRecolha, setVersaoRecolha] = useState(0);
 
   const pessoasActivas = useMemo(() => pessoas.filter((p) => p.estado_registo === "activo"), [pessoas]);
 
@@ -145,6 +149,24 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.incompleta === true,
     [recolhas, chave],
   );
+  /** A margem de tempo ou os desvios desta pessoa nao se leram: o calculo dela estaria sem desvios (bloqueia o fecho). */
+  const desviosNaoLidos = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.desviosNaoLidos === true,
+    [recolhas, chave],
+  );
+  /** A chave de desvios que o calculo desta pessoa usou (vazia = sem desvios): o fecho compara-a com a da base. */
+  const chaveDeDesviosUsada = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.desviosChave ?? "",
+    [recolhas, chave],
+  );
+  const semDesvios = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.totais?.desviosNaoLidos === true).length;
+  /** Dias com desvio por validar em todas as pessoas: contam provisoriamente o planeado ate se validarem. */
+  const diasPorValidar = pessoasActivas.reduce((soma, p) => soma + (recolhas[`${chave}:${p.id}`]?.totais?.diasPorValidar ?? 0), 0);
+  /** Volta a ler a assiduidade de todas as pessoas (a deteccao do fecho mudou dias): limpa o que havia e remonta as instancias. */
+  const recalcular = useCallback(() => {
+    setRecolhas({});
+    setVersaoRecolha((v) => v + 1);
+  }, []);
 
   return {
     ...dados,
@@ -160,6 +182,13 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     /** Pessoas cuja assiduidade so se leu em parte por falta de permissao. */
     incompletas,
     assiduidadeIncompleta,
+    desviosNaoLidos,
+    chaveDeDesviosUsada,
+    /** Quantas pessoas ficaram com a margem ou os desvios por ler. */
+    semDesvios,
+    diasPorValidar,
+    versaoRecolha,
+    recalcular,
   };
 }
 
@@ -204,7 +233,7 @@ export function RecolhaDeAssiduidade({ calculo, ano, mes }: { calculo: CalculoRe
   return (
     <>
       {calculo.pessoasActivas.map((pessoa) => (
-        <RecolhaOculta key={`${pessoa.id}:${calculo.intervalo.de}:${calculo.intervalo.ate}`} pessoaId={pessoa.id} ano={ano} mes={mes} intervalo={calculo.intervalo} faixasNoturnas={calculo.faixasNoturnas} aoTerminar={calculo.registar} />
+        <RecolhaOculta key={`${pessoa.id}:${calculo.intervalo.de}:${calculo.intervalo.ate}:${calculo.versaoRecolha ?? 0}`} pessoaId={pessoa.id} ano={ano} mes={mes} intervalo={calculo.intervalo} faixasNoturnas={calculo.faixasNoturnas} aoTerminar={calculo.registar} />
       ))}
     </>
   );

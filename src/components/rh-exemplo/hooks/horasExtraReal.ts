@@ -30,3 +30,20 @@ export {
   type SaldoHE,
   type ResultadoHE,
 } from "@/lib/hr/horasExtraBase";
+
+// A margem de tempo e os desvios da base (configuracao, deteccao, validacao, assinaturas para o fecho). Ficam neste wrapper para
+// os testes que simulam as horas extra simularem tambem os desvios (`@/test/horasExtraFalso`).
+export {
+  useDesviosMargem,
+  useDesviosAcoes,
+  prepararFechoComDesvios,
+  type PreparacaoDoFecho,
+  textoDoErroDesvios,
+  CHAVE_DESVIOS_MARGEM,
+  type MargemHook,
+  type DesviosAcoesHook,
+  type ResultadoDesvios,
+} from "@/hooks/hr/useDesvios";
+export { lerAssinaturasDeDesvios, detetarDesvios, type ResumoDeteccaoDesvios, type MargemLida } from "@/lib/hr/desviosRpc";
+export { codigoDeErroDesvios, chaveDoErroDesvios, podeSerHoraExtra } from "@/lib/hr/desviosBase";
+export type { VersaoMargem } from "@/lib/hr/desviosRelatorio";

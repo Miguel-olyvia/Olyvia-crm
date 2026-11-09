@@ -14,6 +14,8 @@ let tabelas: Record<string, unknown[]> = {};
 let errosPorTabela: Record<string, unknown> = {};
 let rpcChamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
 let rpcResposta: { data: unknown; error: unknown } = { data: "nova-obra-id", error: null };
+/** Respostas por RPC (as de desvios); a que nao estiver aqui usa `rpcResposta`. */
+let rpcPorFuncao: Record<string, { data: unknown; error: unknown }> = {};
 
 function buildChain(table: string) {
   const linhas = tabelas[table] ?? [];
@@ -37,7 +39,7 @@ vi.mock("@/integrations/supabase/client", () => ({
     from: (table: string) => buildChain(table),
     rpc: (fn: string, args: Record<string, unknown>) => {
       rpcChamadas.push({ fn, args });
-      return Promise.resolve(rpcResposta);
+      return Promise.resolve(rpcPorFuncao[fn] ?? rpcResposta);
     },
   },
 }));
@@ -51,6 +53,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({
 }));
 
 import { useRelatorioAssiduidadeMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+import { limparMargemPartilhada } from "@/lib/hr/desviosRpc";
 
 // Setembro de 2026: dia 1 e terca-feira.
 const ANO = 2026;
@@ -92,6 +95,8 @@ describe("useRelatorioAssiduidadeMensal", () => {
     errosPorTabela = {};
     rpcChamadas = [];
     rpcResposta = { data: "nova-obra-id", error: null };
+    rpcPorFuncao = {};
+    limparMargemPartilhada();
   });
 
   describe("leituras falhadas nao passam por relatorio completo (o fecho grava para sempre)", () => {
@@ -1508,4 +1513,230 @@ describe("useRelatorioAssiduidadeMensal", () => {
       ).toBe(totais.horasExtraMinutos);
     });
   });
+
+  describe("margem de tempo (desvios): sem margem tudo igual a antes; com margem contam as decisoes", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-16T12:00:00"));
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const realizadoDe = (inicio: string, fim: string, minutos: number) => [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: inicio,
+        hora_fim: fim,
+        minutos,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+    const versao = (margem: number | null) => ({
+      id: "v1",
+      margem_min: margem,
+      valido_de: "2026-01-01",
+      valido_ate: null,
+      substituida_em: null,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    const configurar = (margem: number | null, desvios: unknown[] = []) => {
+      rpcPorFuncao.rpc_hr_desvios_config_ler = { data: { em_vigor: versao(margem), versoes: [versao(margem)] }, error: null };
+      rpcPorFuncao.rpc_hr_desvios_listar = { data: desvios, error: null };
+    };
+    const linhaDesvio = (extra: Record<string, unknown>) => ({
+      id: "dv1",
+      pessoa_id: PESSOA_ID,
+      data: "2026-09-01",
+      estado: "a_validar",
+      natureza: "hora_extra",
+      tipo_horario: "padrao",
+      margem_min: 10,
+      planeado_min: 540,
+      realizado_min: 600,
+      fora_min: 60,
+      em_falta_min: 0,
+      diferenca_min: 60,
+      desvio_horario_min: 0,
+      realizado_inicio: "09:00:00",
+      realizado_fim: "19:00:00",
+      decisao: null,
+      ...extra,
+    });
+    const dia1 = (r: { current: { dias: Array<{ iso: string }> } }) => r.current.dias.find((d) => d.iso === "2026-09-01") as any;
+
+    it("SEM margem configurada o caso 9:30-18:30 sai como sempre: conta o realizado, sem extra, sem desvio, sem ler desvios", async () => {
+      tabelas.pessoas_horario_realizado = realizadoDe("09:30", "18:30", 540);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const dia = dia1(result);
+      expect(dia.realizadoMinutos).toBe(540);
+      expect(dia.contadoMinutos).toBe(540);
+      expect(dia.horasExtraMinutos).toBe(0);
+      expect(dia.desvio).toBeNull();
+      expect(result.current.totais.horasExtraMinutos).toBe(0);
+      expect(result.current.totais.margemConfigurada).toBe(false);
+      expect(result.current.totais.diasPorValidar).toBe(0);
+      expect(rpcChamadas.some((c) => c.fn === "rpc_hr_desvios_listar")).toBe(false);
+    });
+
+    it("SEM margem o excesso continua a ser hora extra em bruto (10 h picadas contra 9 h planeadas)", async () => {
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "19:00", 600);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(dia1(result).horasExtraMinutos).toBe(60);
+      expect(dia1(result).contadoMinutos).toBe(600);
+      expect(result.current.totais.horasExtraMinutos).toBe(60);
+      expect(result.current.totais.minutosExtraNormal).toBe(60);
+    });
+
+    it("uma versao «sem margem» (null) tambem deixa tudo como antes", async () => {
+      configurar(null);
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "19:00", 600);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(dia1(result).horasExtraMinutos).toBe(60);
+      expect(result.current.totais.margemConfigurada).toBe(false);
+      expect(rpcChamadas.some((c) => c.fn === "rpc_hr_desvios_listar")).toBe(false);
+    });
+
+    it("COM margem 10 e SEM linha na base (9:30-18:30): o cliente nao inventa desvio; conta como antes e le os desvios da pessoa", async () => {
+      configurar(10);
+      tabelas.pessoas_horario_realizado = realizadoDe("09:30", "18:30", 540);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const dia = dia1(result);
+      expect(dia.realizadoMinutos).toBe(540);
+      expect(dia.contadoMinutos).toBe(540);
+      expect(dia.desvio).toBeNull();
+      expect(result.current.totais.diasPorValidar).toBe(0);
+      expect(result.current.totais.margemConfigurada).toBe(true);
+      expect(result.current.totais.desviosChave).toBe("");
+      const chamada = rpcChamadas.find((c) => c.fn === "rpc_hr_desvios_listar");
+      expect(chamada?.args).toMatchObject({ p_organization_id: ORG_ACTIVA, p_pessoa_id: PESSOA_ID, p_estado: null });
+    });
+
+    it("a chave dos desvios usados identifica a versao em vigor e a decisao (o fecho compara-a com a da base)", async () => {
+      configurar(10, [linhaDesvio({ estado: "validado", decisao: "hora_extra" }), linhaDesvio({ id: "antiga", estado: "substituido" })]);
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "19:00", 600);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.totais.desviosChave).toBe("2026-09-01|dv1|validado|hora_extra");
+    });
+
+    it("a margem e lida UMA vez por organizacao, mesmo com varias instancias do relatorio", async () => {
+      configurar(10);
+      const a = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      const b = renderHook(() => useRelatorioAssiduidadeMensal("pessoa-2", ANO, MES));
+      await waitFor(() => expect(a.result.current.loading).toBe(false));
+      await waitFor(() => expect(b.result.current.loading).toBe(false));
+      expect(rpcChamadas.filter((c) => c.fn === "rpc_hr_desvios_config_ler")).toHaveLength(1);
+    });
+    it("COM margem, excesso a validar: nao conta como hora extra nem como tempo (conta o planeado, marcado)", async () => {
+      configurar(10, [linhaDesvio({})]);
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "19:00", 600);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(dia1(result)).toMatchObject({ realizadoMinutos: 600, contadoMinutos: 540, horasExtraMinutos: 0 });
+      expect(dia1(result).desvio).toMatchObject({ id: "dv1", estado: "a_validar" });
+      expect(result.current.totais.horasExtraMinutos).toBe(0);
+      expect(result.current.totais.minutosExtraNormal).toBe(0);
+      expect(result.current.totais.diasPorValidar).toBe(1);
+    });
+
+    it("COM margem, validado como hora extra: conta o realizado e a hora extra validada", async () => {
+      configurar(10, [linhaDesvio({ estado: "validado", decisao: "hora_extra" })]);
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "19:00", 600);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(dia1(result)).toMatchObject({ contadoMinutos: 600, horasExtraMinutos: 60, extraValidadoMinutos: 60 });
+      expect(result.current.totais.horasExtraMinutos).toBe(60);
+      expect(result.current.totais.minutosExtraNormal).toBe(60);
+      expect(result.current.totais.diasPorValidar).toBe(0);
+    });
+
+    it("COM margem, aceitar o desvio de tempo a menos: conta o realizado (o defice desconta) sem extra", async () => {
+      configurar(10, [linhaDesvio({ estado: "validado", decisao: "aceitar_desvio", natureza: "tempo_a_menos", realizado_min: 480, diferenca_min: -60 })]);
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "17:00", 480);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(dia1(result)).toMatchObject({ contadoMinutos: 480, horasExtraMinutos: 0 });
+    });
+
+    it("uma versao substituida de um desvio nao conta (a lista traz-as com estado «substituido»): sem linha em vigor, como antes", async () => {
+      configurar(10, [linhaDesvio({ estado: "substituido", decisao: "hora_extra" })]);
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "19:00", 600);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(dia1(result)).toMatchObject({ contadoMinutos: 600, horasExtraMinutos: 60 });
+      expect(dia1(result).desvio).toBeNull();
+    });
+    it("falha ao ler a margem (nao e permissao): desviosNaoLidos e erro; nunca calcula em silencio", async () => {
+      rpcPorFuncao.rpc_hr_desvios_config_ler = { data: null, error: { message: "falha de rede", code: "XX000" } };
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.desviosNaoLidos).toBe(true);
+      expect(result.current.totais.desviosNaoLidos).toBe(true);
+      expect(result.current.erro).toBe(true);
+    });
+
+    it("recusa de permissao ao ler os desvios: desviosNaoLidos sem erro de leitura", async () => {
+      rpcPorFuncao.rpc_hr_desvios_config_ler = { data: { em_vigor: versao(10), versoes: [versao(10)] }, error: null };
+      rpcPorFuncao.rpc_hr_desvios_listar = { data: null, error: { message: "permission denied", code: "42501" } };
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.desviosNaoLidos).toBe(true);
+      expect(result.current.erro).toBe(false);
+    });
+
+    it("base sem as RPCs de desvios (migration por aplicar): sem margem, sem bloqueio", async () => {
+      rpcPorFuncao.rpc_hr_desvios_config_ler = { data: null, error: { message: "Could not find the function public.rpc_hr_desvios_config_ler", code: "PGRST202" } };
+      tabelas.pessoas_horario_realizado = realizadoDe("09:00", "19:00", 600);
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.desviosNaoLidos).toBe(false);
+      expect(result.current.erro).toBe(false);
+      expect(dia1(result).horasExtraMinutos).toBe(60);
+    });
+
+    it("sem permissao para ler a margem: margemRecusada, SEM bloquear (a base decide no fecho) e sem erro de leitura", async () => {
+      rpcPorFuncao.rpc_hr_desvios_config_ler = { data: null, error: { message: "permission denied", code: "42501" } };
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.desviosNaoLidos).toBe(false);
+      expect(result.current.totais.margemRecusada).toBe(true);
+      expect(result.current.erro).toBe(false);
+    });
+
+    it("uma funcao em falta que NAO e a chamada nao e «sem desvios»: bloqueia", async () => {
+      rpcPorFuncao.rpc_hr_desvios_config_ler = { data: null, error: { message: "Could not find the function public.outra_funcao", code: "PGRST202" } };
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.desviosNaoLidos).toBe(true);
+    });
+
+    it("se so a RPC de listar falta, mantem as versoes da margem ja lidas", async () => {
+      rpcPorFuncao.rpc_hr_desvios_config_ler = { data: { em_vigor: versao(10), versoes: [versao(10)] }, error: null };
+      rpcPorFuncao.rpc_hr_desvios_listar = { data: null, error: { message: "Could not find the function public.rpc_hr_desvios_listar", code: "PGRST202" } };
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.totais.margemConfigurada).toBe(true);
+      expect(result.current.desviosNaoLidos).toBe(false);
+    });  });
 });

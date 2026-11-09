@@ -51,6 +51,8 @@ export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCal
     totais: {
       planeadoMinutos: totais.planeadoMinutos,
       realizadoMinutos: totais.realizadoMinutos,
+      // Margem de tempo: o desconto de faltas usa o que CONTA; sem margem e o realizado, como sempre.
+      contadoMinutos: totais.contadoMinutos,
       minutosExtraNormal: totais.minutosExtraNormal,
       minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
       minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,

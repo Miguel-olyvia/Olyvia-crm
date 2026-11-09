@@ -51,6 +51,9 @@ import type { HorarioPlaneado } from "@/types/hr";
 import type { Falta } from "@/types/hrAssiduidade";
 import type { AusenciaDia, AusenciaTipo, CategoriaAusencia } from "@/types/hrAusencias";
 import type { RealizadoComCorreccao } from "@/hooks/useAssiduidadeDaPessoa";
+import { chaveDeDesvios, contarDia, linhaDaChaveDeDesvios, margemDoDia, type DesvioDoDia, type DesvioLido, type VersaoMargem } from "@/lib/hr/desviosRelatorio";
+import { desvioLidoDaLinha, rpcDeDesviosIndisponivel } from "@/lib/hr/desviosBase";
+import { lerMargemPartilhada, listarDesvios } from "@/lib/hr/desviosRpc";
 
 const COLUNAS_REALIZADO =
   "id, pessoa_id, organization_id, vinculo_id, local_id, planeado_id, data, hora_inicio, " +
@@ -145,6 +148,19 @@ export interface DiaRelatorioMensal {
    */
   horasExtraMinutos: number;
   /**
+   * MARGEM DE TEMPO (desvios). Quantos minutos CONTAM neste dia para o desconto de faltas e para o subsidio. Ausente (fixtures
+   * antigos) ou sem margem configurada = `realizadoMinutos`. Com margem: o planeado dentro da margem ou enquanto o desvio esta
+   * por validar; o realizado quando o desvio foi validado como hora extra ou aceite. `realizadoMinutos` nunca muda: e o que se picou.
+   */
+  contadoMinutos?: number;
+  /**
+   * Hora extra VALIDADA do dia (e o que `horasExtraMinutos` passa a ser com margem). Sem margem e o excesso em bruto, como antes.
+   * PONTO DE LIGACAO das horas extra aprovadas (`pessoas_horas_extra`): ver `desviosRelatorio.ts`.
+   */
+  extraValidadoMinutos?: number;
+  /** O desvio do dia (estado e decisao); `null`/ausente = sem desvio. `a_validar` conta provisoriamente o planeado. */
+  desvio?: DesvioDoDia | null;
+  /**
    * Quanto do EXCEDENTE caiu no periodo nocturno (22:00-07:00, Codigo do
    * Trabalho art. 223) -- e nao quanto do realizado do dia caiu de noite.
    *
@@ -200,6 +216,24 @@ export interface TotaisRelatorioMensal {
   diasComFaltaIncompletaRegistada: number;
   horasExtraMinutos: number;
   horasExtraNoturnasMinutos: number;
+  /** Soma de `contadoMinutos` dos dias (margem de tempo). Ausente = `realizadoMinutos`. */
+  contadoMinutos?: number;
+  /** Dias com desvio ainda por validar (a_validar ou por detetar): contam provisoriamente o planeado. */
+  diasPorValidar?: number;
+  /** A margem de tempo da organizacao estava ligada em algum dia do periodo. */
+  margemConfigurada?: boolean;
+  /**
+   * A margem ou os desvios NAO se leram (erro ou recusa): o calculo estaria sem desvios. O processamento e o fecho bloqueiam
+   * com motivo escrito, nunca calculam em silencio.
+   */
+  desviosNaoLidos?: boolean;
+  /** Sem permissao para ler a margem: nao se sabe se a organizacao a tem. Nao bloqueia o fecho (a base decide). */
+  margemRecusada?: boolean;
+  /**
+   * A chave dos desvios (versoes em vigor, com decisao) usados neste calculo. No fecho compara-se com a da base: se diferir, o calculo
+   * e mais antigo do que os desvios e recalcula-se antes de gravar.
+   */
+  desviosChave?: string;
   /** Minutos de excedente (realizado, ja que o planeado e zero) em dias de feriado. */
   minutosFeriadoTrabalhado: number;
   /** Idem, em dias de descanso (folga propria da pessoa). */
@@ -243,6 +277,72 @@ interface Satelite<T> {
 }
 
 const vazio = <T,>(): Satelite<T> => ({ linhas: [], recusado: false });
+
+/** A margem de tempo e os desvios em vigor (nao substituidos) do periodo de UMA pessoa. */
+interface DesviosDoPeriodo {
+  versoes: VersaoMargem[];
+  /** Por dia. */
+  porDia: Map<string, DesvioLido>;
+  /** A chave dos desvios usados neste calculo (`chaveDeDesvios`): o fecho compara-a com a da base antes de gravar. */
+  chave: string;
+  /** Nao se leu a margem (erro) ou os desvios (erro ou recusa) com margem ligada: nunca se calcula em silencio. */
+  naoLidos: boolean;
+  /** Sem permissao para ler a margem: nao se sabe se a organizacao a tem. Nao bloqueia o fecho (a base decide). */
+  margemRecusada: boolean;
+  /** A base ainda nao tem as RPCs (migration por aplicar): nao ha margem nem desvios. */
+  indisponivel: boolean;
+  /** Falha que NAO e recusa: tambem torna a leitura do relatorio incompleta. */
+  erro: boolean;
+}
+
+const SEM_DESVIOS: DesviosDoPeriodo = {
+  versoes: [],
+  porDia: new Map(),
+  chave: "",
+  naoLidos: false,
+  margemRecusada: false,
+  indisponivel: false,
+  erro: false,
+};
+
+const temMargemLigada = (versoes: readonly VersaoMargem[]): boolean =>
+  versoes.some((v) => v.substituida_em === null && v.margem_min !== null);
+
+/**
+ * Le a margem (versoes; uma leitura por organizacao, partilhada) e, SO se alguma esta ligada, os desvios da pessoa no periodo (por
+ * `rpc_hr_desvios_listar`, a unica via de leitura). Sem margem configurada nao se faz a segunda chamada e o resultado e o de sempre.
+ */
+async function carregarDesvios(orgId: string, pessoaId: string, de: string, ate: string): Promise<DesviosDoPeriodo> {
+  let versoes: VersaoMargem[] = [];
+  try {
+    versoes = (await lerMargemPartilhada(orgId)).versoes;
+  } catch (erro) {
+    if (rpcDeDesviosIndisponivel(erro, "rpc_hr_desvios_config_ler")) return { ...SEM_DESVIOS, indisponivel: true };
+    // Sem permissao para ler a margem: nao se sabe se a organizacao a tem. Nao e «sem margem» nem bloqueia: a base decide no fecho.
+    if (isPermissionError(erro)) return { ...SEM_DESVIOS, margemRecusada: true };
+    captureFlowError(erro, "hr-relatorio-assiduidade-mensal-load");
+    return { ...SEM_DESVIOS, naoLidos: true, erro: true };
+  }
+  if (!temMargemLigada(versoes)) return { ...SEM_DESVIOS, versoes };
+  try {
+    const linhas = await listarDesvios(orgId, { estado: null, de, ate, pessoaId });
+    const porDia = new Map<string, DesvioLido>();
+    const partes: string[] = [];
+    for (const linha of linhas) {
+      const lido = desvioLidoDaLinha(linha);
+      if (!lido) continue;
+      porDia.set(linha.data, lido);
+      partes.push(linhaDaChaveDeDesvios(linha.data, linha.id, linha.estado, linha.decisao));
+    }
+    return { ...SEM_DESVIOS, versoes, porDia, chave: chaveDeDesvios(partes) };
+  } catch (erro) {
+    // Mantem as versoes ja lidas: uma falha ao listar nao apaga o que se sabe da margem.
+    if (rpcDeDesviosIndisponivel(erro, "rpc_hr_desvios_listar")) return { ...SEM_DESVIOS, versoes, indisponivel: true };
+    if (isPermissionError(erro)) return { ...SEM_DESVIOS, versoes, naoLidos: true };
+    captureFlowError(erro, "hr-relatorio-assiduidade-mensal-load");
+    return { ...SEM_DESVIOS, versoes, naoLidos: true, erro: true };
+  }
+}
 
 async function carregar<T>(
   tabela: string,
@@ -352,6 +452,7 @@ export function useRelatorioAssiduidadeMensal(
     vazio<ScheduleSettingsTimezone>(),
   );
   const [feriados, setFeriados] = useState<IndiceFeriados>(() => indexarFeriados([]));
+  const [desviosDoPeriodo, setDesviosDoPeriodo] = useState<DesviosDoPeriodo>(SEM_DESVIOS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   // Uma falha NAO por permissao (rede, base) em qualquer leitura, ou a excepcao geral do carregamento: o relatorio
@@ -374,6 +475,7 @@ export function useRelatorioAssiduidadeMensal(
       setAusenciasTipos(vazio<AusenciaTipo>());
       setObras(vazio<ObraHoras>());
       setScheduleSettings(vazio<ScheduleSettingsTimezone>());
+      setDesviosDoPeriodo(SEM_DESVIOS);
       setErroDeLeitura(false);
       setLoading(false);
       return;
@@ -389,6 +491,7 @@ export function useRelatorioAssiduidadeMensal(
         asObras,
         osFeriados,
         asScheduleSettings,
+        osDesvios,
       ] = await Promise.all([
         carregar<RealizadoComCorreccao>("pessoas_horario_realizado", COLUNAS_REALIZADO, (q) =>
           q
@@ -429,6 +532,7 @@ export function useRelatorioAssiduidadeMensal(
         carregar<ScheduleSettingsTimezone>("schedule_settings", COLUNAS_SCHEDULE_SETTINGS, (q) =>
           q.eq("organization_id", orgId),
         ),
+        carregarDesvios(orgId, pessoaId, de, ate),
       ]);
 
       if (pedido !== ultimoPedido.current) return;
@@ -440,10 +544,11 @@ export function useRelatorioAssiduidadeMensal(
       setObras(asObras);
       setFeriados(indexarFeriados(osFeriados.linhas));
       setScheduleSettings(asScheduleSettings);
+      setDesviosDoPeriodo(osDesvios);
       setErroDeLeitura(
         [oRealizado, asFaltas, oPlaneado, osDiasDeAusencia, osTiposDeAusencia, asObras, osFeriados, asScheduleSettings].some(
           (s) => s.erro === true,
-        ),
+        ) || osDesvios.erro,
       );
     } catch (e) {
       captureFlowError(e, "hr-relatorio-assiduidade-mensal-load");
@@ -560,7 +665,20 @@ export function useRelatorioAssiduidadeMensal(
         }),
       );
       const realizadoIntervalosDoDia = intervalosOrdenados(realizadoDoDia);
-      const horasExtraMinutos = Math.max(realizadoMinutos - planeadoMinutos, 0);
+      // Margem de tempo: SEM margem configurada isto devolve o realizado e o excesso em bruto (o resultado de sempre).
+      const { contadoMinutos, extraValidadoMinutos, desvio } = contarDia({
+        estado,
+        planeadoMinutos,
+        realizadoMinutos,
+        temFalta: faltasDoDia.length > 0,
+        planeadoIntervalos: planeadoIntervalosRelatorio,
+        realizadoIntervalos: realizadoIntervalosDoDia,
+        margemMin: margemDoDia(desviosDoPeriodo.versoes, iso),
+        desvio: desviosDoPeriodo.porDia.get(iso) ?? null,
+        // PONTO DE LIGACAO (tarefa a parte): as horas extra aprovadas (`pessoas_horas_extra`) do dia entram aqui.
+        extraAprovadoMin: 0,
+      });
+      const horasExtraMinutos = extraValidadoMinutos;
       const excedenteIntervalos = subtrairIntervalos(
         realizadoIntervalosDoDia,
         planeadoIntervalosRelatorio,
@@ -592,6 +710,9 @@ export function useRelatorioAssiduidadeMensal(
         temFalta: faltasDoDia.length > 0,
         minutosEmFalta,
         horasExtraMinutos,
+        contadoMinutos,
+        extraValidadoMinutos,
+        desvio,
         horasExtraNoturnasMinutos: Math.min(horasExtraMinutos, minutosNoturnosDoExcedente),
         ...(noturnosPorFaixa ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
       });
@@ -608,6 +729,7 @@ export function useRelatorioAssiduidadeMensal(
     feriados,
     timezoneDaOrganizacao,
     faixasNoturnas,
+    desviosDoPeriodo,
     de,
     ate,
   ]);
@@ -647,6 +769,10 @@ export function useRelatorioAssiduidadeMensal(
               (acc.diasPlaneados ?? 0) + (contaParaTotais && dia.planeadoMinutos > 0 ? 1 : 0),
             planeadoMinutos: acc.planeadoMinutos + dia.planeadoMinutos,
             realizadoMinutos: acc.realizadoMinutos + dia.realizadoMinutos,
+            contadoMinutos: (acc.contadoMinutos ?? 0) + (dia.contadoMinutos ?? dia.realizadoMinutos),
+            diasPorValidar:
+              (acc.diasPorValidar ?? 0) +
+              (contaParaTotais && dia.desvio && dia.desvio.estado !== "validado" ? 1 : 0),
             // So o DEFICE do dia (planeado menos o que ja foi picado nesse
             // mesmo dia) cobertos por uma ausencia aprovada de dia inteiro e
             // remunerada (ferias, tipicamente) -- para o desconto de faltas
@@ -692,6 +818,8 @@ export function useRelatorioAssiduidadeMensal(
           diasPlaneados: 0,
           planeadoMinutos: 0,
           realizadoMinutos: 0,
+          contadoMinutos: 0,
+          diasPorValidar: 0,
           minutosAusenciaRemunerada: 0,
           obraHoras: 0,
           diasFeriadoTrabalhados: 0,
@@ -729,10 +857,14 @@ export function useRelatorioAssiduidadeMensal(
       return {
         ...acumulado,
         minutosExtraNormal,
+        margemConfigurada: temMargemLigada(desviosDoPeriodo.versoes),
+        desviosNaoLidos: desviosDoPeriodo.naoLidos,
+        margemRecusada: desviosDoPeriodo.margemRecusada,
+        desviosChave: desviosDoPeriodo.chave,
         ...(faixasNoturnas.length ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
       };
     },
-    [dias, faixasNoturnas],
+    [dias, faixasNoturnas, desviosDoPeriodo],
   );
 
   const executar = useCallback(
@@ -782,6 +914,8 @@ export function useRelatorioAssiduidadeMensal(
     planeadoRecusado: planeado.recusado,
     /** Alguma leitura falhou (nao por permissao): os totais podem estar incompletos. */
     erro: erroDeLeitura,
+    /** A margem ou os desvios nao se leram (erro ou recusa): o processamento e o fecho bloqueiam com motivo escrito. */
+    desviosNaoLidos: desviosDoPeriodo.naoLidos,
     loading,
     saving,
     recarregar: load,

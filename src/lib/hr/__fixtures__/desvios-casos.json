@@ -1,0 +1,109 @@
+{
+  "formato": "Cada caso: planeado e realizado = listas de intervalos 'HH:MM-HH:MM' (ja sem faltas e ausencias parciais aprovadas); margemMin; medidas = objecto ou null (null quando planeado = 0 ou realizado = 0); classificacao = resultado de classificarDia (natureza null quando nao ha desvio). Desvio quando |valor| > margem (igual nao e desvio). desvioHorarioMin = min(foraMin, emFaltaMin).",
+  "casos": [
+    {
+      "nome": "realizado deslocado 30 minutos (09:30-18:30)",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:30-18:30"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 540, "foraMin": 30, "emFaltaMin": 30, "diferencaMin": 0, "desvioHorarioMin": 30 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": true, "natureza": "desvio_horario" }
+    },
+    {
+      "nome": "realizado igual ao planeado",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:00-18:00"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 540, "foraMin": 0, "emFaltaMin": 0, "diferencaMin": 0, "desvioHorarioMin": 0 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": false, "natureza": null }
+    },
+    {
+      "nome": "dentro da margem (5 minutos de deslocacao, margem 10)",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:05-18:05"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 540, "foraMin": 5, "emFaltaMin": 5, "diferencaMin": 0, "desvioHorarioMin": 5 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": false, "natureza": null }
+    },
+    {
+      "nome": "25 minutos a menos",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:00-17:35"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 515, "foraMin": 0, "emFaltaMin": 25, "diferencaMin": -25, "desvioHorarioMin": 0 },
+      "classificacao": { "temDesvioTempo": true, "temDesvioHorario": false, "natureza": "tempo_a_menos" }
+    },
+    {
+      "nome": "almoco deslocado (uma hora)",
+      "planeado": ["09:00-13:00", "14:00-18:00"],
+      "realizado": ["09:00-12:00", "13:00-18:00"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 480, "realizadoMin": 480, "foraMin": 60, "emFaltaMin": 60, "diferencaMin": 0, "desvioHorarioMin": 60 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": true, "natureza": "desvio_horario" }
+    },
+    {
+      "nome": "almoco deslocado 30 minutos (09:00-12:30 e 13:30-18:00)",
+      "planeado": ["09:00-13:00", "14:00-18:00"],
+      "realizado": ["09:00-12:30", "13:30-18:00"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 480, "realizadoMin": 480, "foraMin": 30, "emFaltaMin": 30, "diferencaMin": 0, "desvioHorarioMin": 30 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": true, "natureza": "desvio_horario" }
+    },
+    {
+      "nome": "40 minutos a mais no fim",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:00-18:40"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 580, "foraMin": 40, "emFaltaMin": 0, "diferencaMin": 40, "desvioHorarioMin": 0 },
+      "classificacao": { "temDesvioTempo": true, "temDesvioHorario": false, "natureza": "hora_extra" }
+    },
+    {
+      "nome": "realizado 0 com planeado (e falta, nao e desvio)",
+      "planeado": ["09:00-18:00"],
+      "realizado": [],
+      "margemMin": 10,
+      "medidas": null,
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": false, "natureza": null }
+    },
+    {
+      "nome": "planeado 0 (feriado ou descanso, fora dos desvios)",
+      "planeado": [],
+      "realizado": ["09:00-13:00"],
+      "margemMin": 10,
+      "medidas": null,
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": false, "natureza": null }
+    },
+    {
+      "nome": "fronteira do horario: exactamente a margem nao e desvio",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:10-18:10"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 540, "foraMin": 10, "emFaltaMin": 10, "diferencaMin": 0, "desvioHorarioMin": 10 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": false, "natureza": null }
+    },
+    {
+      "nome": "fronteira do horario: um minuto acima da margem e desvio",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:11-18:11"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 540, "foraMin": 11, "emFaltaMin": 11, "diferencaMin": 0, "desvioHorarioMin": 11 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": true, "natureza": "desvio_horario" }
+    },
+    {
+      "nome": "fronteira do tempo: 10 minutos a menos nao e desvio",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:00-17:50"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 530, "foraMin": 0, "emFaltaMin": 10, "diferencaMin": -10, "desvioHorarioMin": 0 },
+      "classificacao": { "temDesvioTempo": false, "temDesvioHorario": false, "natureza": null }
+    },
+    {
+      "nome": "fronteira do tempo: 11 minutos a mais e desvio",
+      "planeado": ["09:00-18:00"],
+      "realizado": ["09:00-18:11"],
+      "margemMin": 10,
+      "medidas": { "planeadoMin": 540, "realizadoMin": 551, "foraMin": 11, "emFaltaMin": 0, "diferencaMin": 11, "desvioHorarioMin": 0 },
+      "classificacao": { "temDesvioTempo": true, "temDesvioHorario": false, "natureza": "hora_extra" }
+    }
+  ]
+}

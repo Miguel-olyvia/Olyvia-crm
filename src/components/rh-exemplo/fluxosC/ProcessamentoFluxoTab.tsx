@@ -23,6 +23,8 @@ import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { totalDoMes } from "@/components/rh-exemplo/processamento/calculoReal";
 import { SeletorPeriodoFolha, usePeriodoFolhaEscolhido } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { RecolhaDeAssiduidade, useCalculoRealDoMes } from "@/components/rh-exemplo/processamento/useCalculoReal";
+import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
+import { prepararFechoComDesvios } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { euros, dataCurta, nomeDoMes } from "./formatosC";
@@ -112,6 +114,8 @@ export function ProcessamentoFluxoTab() {
     pessoasObrigatorias: obrigatorias,
     comCalculo: (id) => resultados.has(id),
     assiduidadeIncompleta: calculo.assiduidadeIncompleta,
+    // Sem a margem ou os desvios o calculo estaria errado: bloqueia com motivo escrito, nunca calcula em silencio.
+    desviosNaoLidos: calculo.desviosNaoLidos,
   });
   const textoBloqueio = motivoBloqueio
     ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
@@ -120,7 +124,24 @@ export function ProcessamentoFluxoTab() {
   const fecharComResultados = async (): Promise<string | null> => {
     // Mesma porta do botao: o botao so e `aria-disabled`, por isso o clique nunca fecha com o motivo por resolver.
     if (textoBloqueio) return textoBloqueio;
+    // ANTES de gravar: detetar os desvios do periodo (a base recusa se ficarem dias por validar) e ler as assinaturas. Se a
+    // deteccao mudou dias, o calculo do ecra ja nao e o de agora: relê-se tudo e fecha-se de novo.
+    if (!calculo.organizationId || !periodo) return t("rhProcReal.fecho.erroAssinaturas");
+    const preparacao = await prepararFechoComDesvios({
+      organizationId: calculo.organizationId,
+      periodoId: periodo.id,
+      de: calculo.intervalo.de,
+      ate: calculo.intervalo.ate,
+      // Os desvios que o CALCULO usou, por pessoa: se a base tiver outros (decisao, deteccao), recalcula-se antes de fechar.
+      calculadas: new Map(obrigatorias.map((id) => [id, calculo.chaveDeDesviosUsada?.(id) ?? ""])),
+    });
+    if (!preparacao.ok) {
+      if (preparacao.motivo === "erro") return preparacao.texto;
+      calculo.recalcular();
+      return t("rhProcReal.fecho.desviosMudaram", { n: String(preparacao.mudou) });
+    }
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
+      assinaturaDeDesviosDe: (id) => preparacao.assinaturas.get(id) ?? null,
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultados.get(id)?.resultado,
       versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
@@ -181,6 +202,7 @@ export function ProcessamentoFluxoTab() {
       {incompletas > 0 && (
         <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: incompletas })}</p>
       )}
+      {!fechado && <AvisosDeDesvios diasPorValidar={calculo.diasPorValidar ?? 0} pessoasSemDesvios={calculo.semDesvios ?? 0} />}
 
       {aCarregar ? (
         <div className="flex justify-center py-12"><OlyviaLoader /></div>
