@@ -22,6 +22,7 @@ import { usePeriodoDoDia } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
 import { useCalculoRealDaPessoa } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import { useTranslation } from "@/hooks/useTranslation";
+import { AnexosDaJustificacao } from "@/components/rh-exemplo/anexosJustificacao/AnexosDaJustificacao";
 import { DialogosDecisaoDia, type PedidoDecisaoDia } from "./DialogosDecisaoDia";
 import { useDecisaoDoDia } from "./useDecisaoDoDia";
 
@@ -164,7 +165,7 @@ function Cartao({ j, aOcupar, aoDecidir, aoRecusar, podeAceitar, podeRecusar }: 
         <span className="text-xs text-muted-foreground">{t("rhJust.enviadaEm", { data: formatarData(j.enviadaEm.slice(0, 10)) })}</span>
       </div>
       {j.horaReal && <p className="tabular-nums">{t("rhJust.rh.horaReal", { hora: j.horaReal })}</p>}
-      {j.anexos.length > 0 && <p>{t("rhJust.rh.anexos", { nomes: j.anexos.join(", ") })}</p>}
+      <AnexosDaJustificacao alvo={{ justificacaoDiaId: j.id }} alvoAnexar={j.estado === "pendente" && podeRecusar ? { justificacaoDiaId: j.id } : null} />
       <TextoDoMotivo j={j} />
       {j.estado === "recusada" && j.motivoRecusa && <p className="text-destructive">{t("rhJust.motivoRH", { motivo: j.motivoRecusa })}</p>}
       {j.decididaPor && j.decididaEm && <p className="text-xs text-muted-foreground">{t("rhJust.decididaPor", { quem: j.decididaPor, data: formatarDataHora(j.decididaEm) })}</p>}

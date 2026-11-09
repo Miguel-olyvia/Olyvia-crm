@@ -34,9 +34,37 @@ vi.mock("@/components/rh-exemplo/hooks/useRegrasSalariais", async (importarOrigi
   return { ...original, useRegrasSalariais: () => resultado };
 });
 vi.mock("@/components/rh-exemplo/hooks/PessoaRelatorioAssiduidadeMensalReal", () => ({ PessoaRelatorioAssiduidadeMensal: () => null }));
-vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso());
+// `gravacao.activa` simula a base a gravar (aGravar) desde que o formulário abre.
+const gravacao = vi.hoisted(() => ({ activa: false }));
+vi.mock("@/components/rh-exemplo/hooks/useJustificacoesDoDia", async () => {
+  const falso = (await import("@/test/justificacoesDoDiaFalso")).wrapperFalso();
+  return { ...falso, useAccoesJustificacaoDia: () => ({ ...falso.useAccoesJustificacaoDia(), aGravar: gravacao.activa }) };
+});
 // O prazo para justificar e da organizacao e vem da base: aqui e simulado, e o teste escolhe os dias.
 vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await import("@/test/prazoJustificacaoFalso")).wrapperFalso());
+// O envio dos ficheiros (Edge + storage) está simulado: a prova do contrato com a Edge está em src/hooks/__tests__/useAnexarJustificacao.test.ts.
+const anexosFalsos = vi.hoisted(() => ({
+  envios: [] as { alvo: unknown; nome: string }[],
+  /** Os resultados anteriores que o formulário passou para repetir (um por chamada). */
+  previos: [] as unknown[],
+  /** Nomes que falham no próximo envio (saem do conjunto quando falham, para a repetição já corra bem). */
+  falhar: new Set<string>(),
+}));
+vi.mock("@/hooks/useAnexarJustificacao", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/useAnexarJustificacao")>()),
+  enviarAnexos: async (alvo: unknown, ficheiros: readonly File[], aoTerminarUm?: (r: unknown, i: number) => void, previos?: readonly unknown[]) => {
+    const resultados = [];
+    anexosFalsos.previos.push(previos ?? null);
+    for (const [i, ficheiro] of ficheiros.entries()) {
+      anexosFalsos.envios.push({ alvo, nome: ficheiro.name });
+      const falha = anexosFalsos.falhar.delete(ficheiro.name);
+      const r = { ficheiro, ok: !falha, codigo: falha ? "anexo_falha_envio" : null, anexoId: `reserva-${ficheiro.name}`, uploadFeito: !falha };
+      resultados.push(r);
+      aoTerminarUm?.(r, i);
+    }
+    return resultados;
+  },
+}));
 
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderRh, reporRhTeste, rhTeste } from "@/test/rhExemploProviders";
@@ -52,6 +80,7 @@ import { rhExemploJustificacoesTranslations } from "@/translations/rhExemploJust
 import { reporAssiduidadeFalsa } from "@/test/assiduidadeDaPessoaFalso";
 import { baseFalsa, FALTA_DA_BASE, reporBaseFalsa, semearJustificacao } from "@/test/justificacoesDoDiaFalso";
 import { prazoFalso, reporPrazoFalso } from "@/test/prazoJustificacaoFalso";
+import { subscreverMudancaDeJustificacoes } from "@/hooks/useJustificacoesDoDia";
 
 const TUDO: PermissoesAssiduidade = {
   view: true, viewOwn: true, equipaView: true, picar: true, picarOutros: true, gerir: true, corrigir: true, faltasView: true,
@@ -108,6 +137,10 @@ beforeEach(() => {
   reporFluxosC();
   reporBaseFalsa();
   reporPrazoFalso();
+  anexosFalsos.envios = [];
+  anexosFalsos.previos = [];
+  anexosFalsos.falhar.clear();
+  gravacao.activa = false;
   reporRhTeste();
   reporAssiduidadeFalsa();
 });
@@ -171,17 +204,162 @@ describe("vista da própria pessoa", () => {
     expect(baseFalsa.registos).toEqual([]);
   });
 
-  it("os anexos são só nomes, no máximo 4, e podem remover-se", () => {
+  const pdf = (nome: string, tipo = "application/pdf") => new File(["x"], nome, { type: tipo });
+  const escolher = (detalhe: HTMLElement, ficheiros: File[]) =>
+    fireEvent.change(within(detalhe).getByLabelText(/Anexos \(opcional, até 4\)/) as HTMLInputElement, { target: { files: ficheiros } });
+  const abrirFormulario = (): HTMLElement => {
     ficha("p-sofia", "Sofia Rebelo", true);
     const detalhe = abrirDia("2026-10-08");
     fireEvent.click(within(detalhe).getByRole("button", { name: "Justificar" }));
+    return detalhe;
+  };
+
+  it("os anexos reais aceitam só PDF, JPEG e PNG, no máximo 4, e podem remover-se antes de enviar", () => {
+    const detalhe = abrirFormulario();
     const campo = within(detalhe).getByLabelText(/Anexos \(opcional, até 4\)/) as HTMLInputElement;
-    const ficheiros = ["a.pdf", "b.pdf", "c.pdf", "d.pdf", "e.pdf"].map((n) => new File(["x"], n));
-    fireEvent.change(campo, { target: { files: ficheiros } });
+    expect(campo.accept).toBe("application/pdf,image/jpeg,image/png");
+    escolher(detalhe, ["a.pdf", "b.pdf", "c.pdf", "d.pdf", "e.pdf"].map((n) => pdf(n)));
     expect(within(detalhe).getByLabelText("Anexos escolhidos").querySelectorAll("li")).toHaveLength(4);
     expect(within(detalhe).getByText("No máximo 4 anexos.")).toBeInTheDocument();
     fireEvent.click(within(detalhe).getByRole("button", { name: "Remover a.pdf" }));
     expect(within(detalhe).getByLabelText("Anexos escolhidos").querySelectorAll("li")).toHaveLength(3);
+    expect(anexosFalsos.envios).toEqual([]);
+  });
+
+  it("um ficheiro de formato recusado fica de fora e o erro é anunciado", () => {
+    const detalhe = abrirFormulario();
+    escolher(detalhe, [pdf("foto.heic", "image/heic"), pdf("b.pdf")]);
+    expect(within(detalhe).getByText("O ficheiro tem de ser PDF, JPEG ou PNG.")).toHaveAttribute("role", "alert");
+    expect(within(detalhe).getByLabelText("Anexos escolhidos").querySelectorAll("li")).toHaveLength(1);
+  });
+
+  it("os botões de remover têm 44 px de alvo", () => {
+    const detalhe = abrirFormulario();
+    escolher(detalhe, [pdf("a.pdf")]);
+    expect(within(detalhe).getByRole("button", { name: "Remover a.pdf" })).toHaveClass("h-11", "w-11");
+  });
+
+  it("envia em duas fases: regista a justificação sem nomes e só depois sobe os ficheiros, para o id novo", async () => {
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    escolher(detalhe, [pdf("atestado.pdf"), pdf("receita.pdf")]);
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+    await waitFor(() => expect(anexosFalsos.envios).toHaveLength(2));
+    expect(baseFalsa.registos[0].anexosNomes).toEqual([]);
+    expect(anexosFalsos.envios).toEqual([
+      { alvo: { justificacaoDiaId: "jd-novo-1" }, nome: "atestado.pdf" },
+      { alvo: { justificacaoDiaId: "jd-novo-1" }, nome: "receita.pdf" },
+    ]);
+    await waitFor(() => expect(within(detalhe).queryByTestId("rhjd-form")).not.toBeInTheDocument());
+  });
+
+  it("sem anexos não sobe nada", async () => {
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+    await waitFor(() => expect(baseFalsa.registos).toHaveLength(1));
+    expect(anexosFalsos.envios).toEqual([]);
+  });
+
+  it("se um ficheiro falha, a justificação fica gravada, o formulário fica aberto e «Tentar outra vez» envia só esse", async () => {
+    anexosFalsos.falhar.add("receita.pdf");
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    escolher(detalhe, [pdf("atestado.pdf"), pdf("receita.pdf")]);
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+    const tentar = await within(detalhe).findByRole("button", { name: "Tentar outra vez receita.pdf" });
+    expect(baseFalsa.justificacoes).toHaveLength(1);
+    expect(within(detalhe).getByTestId("rhjd-anexos-aviso")).toHaveTextContent("A justificação ficou registada, mas 1 ficheiro(s) não foram enviados.");
+    expect(within(detalhe).getByText("Não foi possível enviar o ficheiro. Tente outra vez.")).toHaveAttribute("role", "alert");
+    expect(within(detalhe).queryByRole("button", { name: "Enviar justificação" })).not.toBeInTheDocument();
+    expect(within(detalhe).queryByRole("button", { name: "Tentar outra vez atestado.pdf" })).not.toBeInTheDocument();
+    fireEvent.click(tentar);
+    await waitFor(() => expect(within(detalhe).queryByTestId("rhjd-form")).not.toBeInTheDocument());
+    expect(baseFalsa.registos).toHaveLength(1);
+    expect(anexosFalsos.envios.map((e) => e.nome)).toEqual(["atestado.pdf", "receita.pdf", "receita.pdf"]);
+  });
+
+  it("«Tentar outra vez» entrega ao envio o resultado anterior desse ficheiro (anexoId e código), para repetir só o que falta", async () => {
+    anexosFalsos.falhar.add("receita.pdf");
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    escolher(detalhe, [pdf("atestado.pdf"), pdf("receita.pdf")]);
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+    fireEvent.click(await within(detalhe).findByRole("button", { name: "Tentar outra vez receita.pdf" }));
+    await waitFor(() => expect(anexosFalsos.previos).toHaveLength(2));
+    expect(anexosFalsos.previos[0]).toBeNull();
+    expect(anexosFalsos.previos[1]).toEqual([expect.objectContaining({ anexoId: "reserva-receita.pdf", uploadFeito: false, codigo: "anexo_falha_envio" })]);
+  });
+
+  it("avisa a lista de anexos DEPOIS de os ficheiros subirem (a lista relê-se e mostra o que subiu)", async () => {
+    const quandoAvisou: number[] = [];
+    const parar = subscreverMudancaDeJustificacoes(() => quandoAvisou.push(anexosFalsos.envios.length));
+    try {
+      const detalhe = abrirFormulario();
+      preencher(detalhe);
+      escolher(detalhe, [pdf("atestado.pdf"), pdf("receita.pdf")]);
+      fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+      await waitFor(() => expect(quandoAvisou.length).toBeGreaterThan(0));
+      expect(quandoAvisou).not.toContain(0);
+      expect(quandoAvisou[quandoAvisou.length - 1]).toBe(2);
+    } finally {
+      parar();
+    }
+  });
+
+  it("um duplo envio no mesmo instante regista a justificação uma só vez", async () => {
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    const form = within(detalhe).getByTestId("rhjd-form");
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await waitFor(() => expect(baseFalsa.registos).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(baseFalsa.registos).toHaveLength(1);
+  });
+
+  it("enquanto a base grava, «Cancelar» (como «Enviar») fica desactivado", () => {
+    gravacao.activa = true;
+    const detalhe = abrirFormulario();
+    expect(within(detalhe).getByRole("button", { name: "Cancelar" })).toBeDisabled();
+    expect(within(detalhe).getByRole("button", { name: "Enviar justificação" })).toBeDisabled();
+  });
+
+  it("remover um ficheiro que falhou actualiza o aviso de falhas (2 → 1 → nenhum) e leva o foco ao campo de ficheiros", async () => {
+    anexosFalsos.falhar.add("a.pdf");
+    anexosFalsos.falhar.add("b.pdf");
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    escolher(detalhe, [pdf("a.pdf"), pdf("b.pdf")]);
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+    expect(await within(detalhe).findByTestId("rhjd-anexos-aviso")).toHaveTextContent("mas 2 ficheiro(s)");
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Remover a.pdf" }));
+    await waitFor(() => expect(within(detalhe).getByTestId("rhjd-anexos-aviso")).toHaveTextContent("mas 1 ficheiro(s)"));
+    await waitFor(() => expect(within(detalhe).getByLabelText(/Anexos \(opcional, até 4\)/)).toHaveFocus());
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Remover b.pdf" }));
+    await waitFor(() => expect(within(detalhe).queryByTestId("rhjd-anexos-aviso")).not.toBeInTheDocument());
+  });
+
+  it("depois de gravada, «Concluir» fecha o formulário mesmo com um ficheiro por enviar", async () => {
+    anexosFalsos.falhar.add("a.pdf");
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    escolher(detalhe, [pdf("a.pdf")]);
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+    fireEvent.click(await within(detalhe).findByRole("button", { name: "Concluir" }));
+    expect(within(detalhe).queryByTestId("rhjd-form")).not.toBeInTheDocument();
+    expect(baseFalsa.justificacoes).toHaveLength(1);
+  });
+
+  it("se a base recusa a justificação, nenhum ficheiro sobe", async () => {
+    baseFalsa.erroDeEscrita = "rhJust.erro.foraDoPrazo";
+    const detalhe = abrirFormulario();
+    preencher(detalhe);
+    escolher(detalhe, [pdf("a.pdf")]);
+    fireEvent.click(within(detalhe).getByRole("button", { name: "Enviar justificação" }));
+    expect(await within(detalhe).findByText(/O prazo para justificar terminou/)).toBeInTheDocument();
+    expect(anexosFalsos.envios).toEqual([]);
+    expect(within(detalhe).getByLabelText("Anexos escolhidos").querySelectorAll("li")).toHaveLength(1);
   });
 
   it("enviar grava na base (pessoa, dia, tipo, motivo, período) e o dia passa a «a aguardar o RH»", async () => {

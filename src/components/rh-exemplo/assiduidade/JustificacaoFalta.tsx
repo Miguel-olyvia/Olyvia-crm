@@ -26,11 +26,13 @@
  * nenhuma e nao se tenta descarregar do bucket -- a politica de leitura do
  * storage nem sequer tem ramo de ficha-propria.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Eye, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { papelDaFalta } from "@/hooks/useAnexarJustificacao";
+import { AnexosDaJustificacao } from "@/components/rh-exemplo/anexosJustificacao/AnexosDaJustificacao";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import type { EstadoJustificacao, JustificacaoFaltaRevelada } from "@/components/rh-exemplo/tiposAssiduidade";
@@ -63,6 +65,16 @@ export function JustificacaoFalta({
   const { t } = useTranslation();
   const [reveladas, setReveladas] = useState<JustificacaoFaltaRevelada[] | null>(null);
   const [aRevelar, setARevelar] = useState(false);
+  // A Edge anexa ao PAPEL da falta (pessoas_faltas_justificacoes.id), que o ecrã não traz: lê-se aqui, só enquanto a justificação
+  // aceita documentos. A RLS da tabela limita-o a quem pode ver justificações; sem ele não se oferece «Anexar» (a lista continua).
+  const aceitaAnexos = estado === "pendente_documento" && (podeVerDocumento || podeDecidir);
+  const [papelId, setPapelId] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    setPapelId(null);
+    if (aceitaAnexos) void papelDaFalta(faltaId).then((id) => { if (vivo) setPapelId(id); });
+    return () => { vivo = false; };
+  }, [faltaId, aceitaAnexos]);
 
   const revelar = async () => {
     setARevelar(true);
@@ -92,6 +104,10 @@ export function JustificacaoFalta({
       </div>
 
       {motivoDaDecisao && <p className="text-xs">{motivoDaDecisao}</p>}
+
+      {estado !== "sem_justificacao" && (
+        <AnexosDaJustificacao alvo={{ faltaId }} alvoAnexar={aceitaAnexos && papelId ? { faltaJustificacaoId: papelId } : null} />
+      )}
 
       {podeVerDocumento && estado !== "sem_justificacao" && (
         <div className="space-y-2">
