@@ -22,6 +22,7 @@ import { rotuloDia } from "./preparacaoObra";
 import { RESPONSAVEL_OBRA, equipamentosDaObra, estadoDe, fotoExemplo, materiaisPorFase, nomeCurtoTarefa } from "./obraOps";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
+import { useMateriaisDaObra } from "./real/materiaisObraReal";
 import {
   aSeguirDoTecnico, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, trabalhoDoTecnico, type ASeguir,
 } from "./trabalhoObra";
@@ -134,7 +135,7 @@ export function HojeTecnico(ctx: Ctx) {
         // 21/10: o que vem a seguir, com antecedência: quem está a trabalhar antes e o que preparar
         <section aria-labelledby="seguir-t" className="mt-10">
           <h2 id="seguir-t" className="text-xl font-semibold tracking-tight">A seguir</h2>
-          <ul className="mt-3 space-y-3">{seguir.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaASeguir x={x} eu={eu} /></li>)}</ul>
+          <ul className="mt-3 space-y-3">{seguir.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaASeguir ctx={ctx} x={x} eu={eu} /></li>)}</ul>
         </section>
       )}
 
@@ -208,7 +209,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           </button>
           {abertoAntes && (
             <div className="mt-2 space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
-              <Preparacao d={d} ti={ti} />
+              <Preparacao ctx={ctx} d={d} ti={ti} />
               {ex === "por fazer" && !im && (
                 <Button size="lg" className="w-full sm:w-auto" onClick={() => run(() => { A.comecarTarefa(d.id, ti); setAbertoAntes(false); })}><HardHat className="mr-2 h-4 w-4" aria-hidden="true" />Começar a tarefa</Button>
               )}
@@ -283,11 +284,14 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
 }
 
 /** O que preparar para uma tarefa: o que fazer antes, a proteção, o material da fase e o que levar. */
-function Preparacao({ d, ti }: { d: Negocio; ti: number }) {
+function Preparacao({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   const p = d.obra.plano!, t = p.tasks[ti], I = instrucoesDe(t);
   const db = useInventario();
-  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
-  const mats = materiaisPorFase(d, inv).find((g) => g.fase === t.fase)?.itens ?? [];
+  // 09/11 (20270111870000): sem client_orders.view, com negocios.obra.materiais (o técnico): a mesma leitura das Operações (obra_materiais_ler)
+  const lida = useMateriaisDaObra(ctx, d);
+  const inv = lida.k === "lidos" ? lida.m.inv : d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const G = lida.k === "lidos" ? materiaisPorFase(d, inv, lida.m.linhas) : lida.k === "fora" ? materiaisPorFase(d, inv) : [];
+  const mats = G.find((g) => g.fase === t.fase)?.itens ?? [];
   const equip = equipamentosDaObra(p).filter((e) => e.tarefas.includes(t.nome) || e.origem === "Frota");
   return (
     <>
@@ -300,8 +304,8 @@ function Preparacao({ d, ti }: { d: Negocio; ti: number }) {
         <div>
           <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><Package className="h-4 w-4" aria-hidden="true" />Material desta fase</p>
           <ul className="mt-1.5 divide-y divide-border rounded-xl border border-border">
-            {mats.map((m) => (
-              <li key={m.n} className="flex items-center justify-between gap-3 px-3 py-2 text-[15px]">
+            {mats.map((m, k) => (
+              <li key={`${m.n}:${k}`} className="flex items-center justify-between gap-3 px-3 py-2 text-[15px]">
                 <span className="min-w-0">{m.n}</span>
                 <span className={cn("shrink-0 text-sm tabular-nums", m.estado === "na obra" || m.estado === "na carrinha" || m.estado === "reservado" ? "text-success" : "text-warning")}>{nfmt(m.q)} {m.un} · {m.estado}{m.quando ? ` ${m.quando}` : ""}</span>
               </li>
@@ -324,7 +328,7 @@ function Preparacao({ d, ti }: { d: Negocio; ti: number }) {
 }
 
 /** 21/10: uma tarefa que vem a seguir: quando começa, quem está a trabalhar antes (ao vivo) e, num toque, o que preparar. */
-function TarefaASeguir({ x, eu }: { x: ASeguir; eu: string }) {
+function TarefaASeguir({ ctx, x, eu }: { ctx: Ctx; x: ASeguir; eu: string }) {
   const { d, t, ti, antes, faltam } = x;
   const p = d.obra.plano!, cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
   const [aberto, setAberto] = useState(false);
@@ -370,7 +374,7 @@ function TarefaASeguir({ x, eu }: { x: ASeguir; eu: string }) {
           <button type="button" onClick={() => setAberto(!aberto)} aria-expanded={aberto} className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
             {aberto ? "Esconder" : "Preparar com antecedência"}<ChevronDown className={cn("h-4 w-4 transition-transform", aberto && "rotate-180")} aria-hidden="true" />
           </button>
-          {aberto && <div className="mt-2 space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"><Preparacao d={d} ti={ti} /></div>}
+          {aberto && <div className="mt-2 space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"><Preparacao ctx={ctx} d={d} ti={ti} /></div>}
         </div>
       </div>
     </article>

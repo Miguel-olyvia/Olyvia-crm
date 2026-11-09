@@ -19,6 +19,7 @@ import { produto } from "@/pages/prototipo-estudio/catalogoFake";
 import { duracaoEmPalavras } from "@/pages/prototipo-estudio/planoEstimado";
 import { planoDaVisita, planoParaGuardar } from "./planoDaVisita";
 import { levarEstudio } from "./estudioNoNegocio";
+import { camposDasEscolhas, escolhasDoNegocio } from "./preparacaoObra";
 import { MapaDatasObra, inicioPorOmissao } from "./MapaDatasObra";
 import { lerCatalogo } from "./v2/catalogoStore";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
@@ -338,7 +339,7 @@ export function FecharVisita({ ctx, d, blocos, decisao }: { ctx: Ctx; d: Negocio
 export function PlanoEstimado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [inicio, setInicio] = useState(() => inicioPorOmissao(d.f.plano_inicio));
   const [guardado, setGuardado] = useState("");
-  const P = useMemo(() => planoDaVisita(d, ctx.S, inicio), [d, ctx.S, inicio, d.visita.extra, d.visita.prod, d.visita.med]); // eslint-disable-line react-hooks/exhaustive-deps
+  const P = useMemo(() => planoDaVisita(d, ctx.S, inicio), [d, ctx.S, inicio, d.visita.extra, d.visita.prod, d.visita.med, d.f.plano_tecnicos, d.f.plano_equipa]); // eslint-disable-line react-hooks/exhaustive-deps
   const guardar = () => {
     let x: ReturnType<typeof planoDaVisita> | null = null;
     ctx.run(() => { x = guardarPlano(ctx, d, inicio); });
@@ -351,7 +352,9 @@ export function PlanoEstimado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <h3 id={`plano-${d.id}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><CalendarCheck className="h-5 w-5 text-primary" aria-hidden="true" />O plano da obra</h3>
         <p className="text-sm text-muted-foreground">Sai dos serviços das necessidades: as tarefas, o técnico livre de cada ofício e as datas. Ao fechar a visita, o orçamento e a obra seguem com ele.</p>
       </div>
-      <MapaDatasObra P={P} inicio={inicio} mudarInicio={setInicio} />
+      <MapaDatasObra P={P} inicio={inicio} mudarInicio={setInicio}
+        equipa={{ S: ctx.S, negocio: d.id, escolhas: escolhasDoNegocio(d.f), calcular: (iso) => planoDaVisita(d, ctx.S, iso),
+          mudar: (e) => ctx.run(() => { for (const [k, v] of camposDasEscolhas(e)) ctx.A.campo(d.id, k, v); }) }} />
       {P.tarefas.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[15px]">Duração: <b className="font-semibold">{duracaoEmPalavras(P.dias)}</b>{P.fim && <> · pronta a {dataCurta(P.fim)}</>}</p>

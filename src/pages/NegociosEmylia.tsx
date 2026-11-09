@@ -65,6 +65,7 @@ import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
 import { definirEstadoVivo } from "@/emylia/estadoVivo";
+import { carregarEquipasObra } from "@/emylia/equipa/equipasObra";
 import { aplicarFaturacao, lerFaturacaoDaFicha, precisaDaFicha } from "@/emylia/real/faturacaoDaFicha";
 import { definirDadosPagamento, lerDadosPagamento } from "@/emylia/pagamentoCliente";
 import "@/emylia/prototipo.css";
@@ -80,7 +81,7 @@ const PAGINA_REAL: Partial<Record<Vista, string>> = {
   pessoas: "/pessoas", leads: "/pessoas", clientes: "/pessoas", inventario: "/client-orders", catalogo: "/catalogo-custos",
 };
 /** As mesmas ligações, ao lado dos separadores (como o menu do protótipo). 09/11: com a permissão de cada página; sem ela, não aparece. */
-const LIGACOES: [string, string, string][] = [["Pessoas", "/pessoas", "pessoas.view"], ["Inventário", "/client-orders", "client_orders.view"],
+const LIGACOES: [string, string, string][] = [["Pessoas", "/pessoas", "pessoas.view"], ["Inventário", "/client-orders", "client_orders.view"], ["Equipas de obra", "/equipas-obra", "pessoas.view"],
   ["Catálogo e custos", "/catalogo-custos", "services.view"]];
 
 /** 09/11: os papéis do Negócio que veem a encomenda de cliente do negócio (neg_papeis_permissoes com client_orders.view). */
@@ -371,6 +372,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!vivo) return;
       const so = !mp.todos && soExecucaoRef.current;
       const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so });
+      // 9/11: as equipas de obra da empresa (o plano escolhe a equipa toda ou nenhum membro); um erro aqui não para nada
+      await carregarEquipasObra(supabase, org).catch(() => undefined);
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
       await carregarCamposConfig(supabase, org, S, { semLer: so });
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
@@ -695,6 +698,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   if (codigosLidos && !permsPerfilALer && !vistaPermitida(S.view)) { S.view = "hoje"; S.deal = null; S.op = null; }
   const ctx: Ctx = { S, A, run, go, q, setQ, ...(fixarTecnico ? { tecnicoFixo: { ref: tecConta } } : {}),
     podeCriarNegocio: pode("pessoas.create"), podeVerNegocio: pode("pessoas.view"), podeVerInventario: pode("client_orders.view"),
+    idNegocioBase: (numero) => refs.current.get(numero)?.id ?? null,
     ...(soExecucao ? { leituraReduzida: true } : {}) };
   // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
   const semContaLigada = !!meus && !meus.todos && !meus.pessoa && meus.papeis.length === 0 && tecnicoPorPerfil;

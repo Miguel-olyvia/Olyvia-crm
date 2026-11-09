@@ -25,7 +25,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 /** 1027 (Tiago Almeida) pago: a EC está no Inventário, com móveis a encomendar ao fornecedor; o plano por aprovar. */
 function obraPaga() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id); S.role = "operacoes"; // 4/11: o plano é das Operações
+  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ S.role = "operacoes"; // 4/11: o plano é das Operações
   const o = () => obrasDoEstado(S).find((x) => x.id === 1027)!;
   return { S, A, d, o };
 }
@@ -52,7 +52,7 @@ describe("viatura ligada a uma obra e transporte por fases", () => {
     expect(ligacoesObra(lerFrota(), 1027).map((x) => x.vid)).toEqual([v.id]);
     const falta = faltaParaCarregar(lerInventario(), o());
     expect(falta.join(" ")).toMatch(/receber no armazém/);
-    expect(falta.join(" ")).toMatch(/aprovar o plano/);
+    // 9/11: a encomenda só existe com o plano aprovado: o que falta é só receber os materiais
     const f = fasesTransporte(lerInventario(), o())[0];
     const r = executarInv((db) => carregarFase(db, o(), v, f.fase));
     expect(r.ok).toBe(false);

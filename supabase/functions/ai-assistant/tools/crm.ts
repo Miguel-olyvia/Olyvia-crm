@@ -7,6 +7,7 @@ import { findLocalEntityForOrg, ensureEntityOrgLinkSR } from "../../_shared/enti
 import { sanitizeEmail, sanitizePhone } from "../../_shared/inputSanitizers.ts";
 import { deriveKeyFromEnv, hashNif } from "../../_shared/nifCrypto.ts";
 import { requireWrite } from "../shared/authz.ts";
+import { filterVisible } from "../shared/scope.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 /**
@@ -541,15 +542,17 @@ const createContact: Handler = async (ctx, args): Promise<ToolResult> => {
 const searchClients: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
-  const { data, error } = await supabase
+  const { data: rawData, error } = await supabase
     .from("anew_clients")
     .select("id, entity_id, anew_entities!inner(display_name)")
     .eq("organization_id", organizationId)
     .eq("status", "active")
     .is("deleted_at", null)
     .ilike("anew_entities.display_name", `%${args.search_term}%`)
-    .limit(5);
+    .limit(50);
   if (error) throw error;
+  // Âmbito do utilizador (RLS): filtra-se uma janela maior e mostram-se os 5 primeiros visíveis.
+  const data = (await filterVisible(ctx, "anew_clients", rawData)).slice(0, 5);
   return {
     success: true,
     message: data?.length ? `${data.length} cliente(s) encontrado(s).` : `Nenhum cliente com "${args.search_term}".`,
@@ -560,15 +563,17 @@ const searchClients: Handler = async (ctx, args): Promise<ToolResult> => {
 const searchLeads: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
-  const { data, error } = await supabase
+  const { data: rawData, error } = await supabase
     .from("anew_leads")
     .select("id, status, entity_id, anew_entities!inner(display_name)")
     .eq("organization_id", organizationId)
     .is("deleted_at", null)
     .not("status", "in", "(converted,lost,rejected)")
     .ilike("anew_entities.display_name", `%${args.search_term}%`)
-    .limit(5);
+    .limit(50);
   if (error) throw error;
+  // Âmbito do utilizador (RLS): filtra-se uma janela maior e mostram-se os 5 primeiros visíveis.
+  const data = (await filterVisible(ctx, "anew_leads", rawData)).slice(0, 5);
   return {
     success: true,
     message: data?.length ? `${data.length} lead(s) encontrado(s).` : `Nenhum lead com "${args.search_term}".`,
@@ -579,15 +584,17 @@ const searchLeads: Handler = async (ctx, args): Promise<ToolResult> => {
 const searchContacts: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
-  const { data, error } = await supabase
+  const { data: rawData, error } = await supabase
     .from("anew_contacts")
     .select("id, entity_id, position, anew_entities!inner(display_name)")
     .eq("organization_id", organizationId)
     .eq("status", "active")
     .is("deleted_at", null)
     .ilike("anew_entities.display_name", `%${args.search_term}%`)
-    .limit(5);
+    .limit(50);
   if (error) throw error;
+  // Âmbito do utilizador (RLS): filtra-se uma janela maior e mostram-se os 5 primeiros visíveis.
+  const data = (await filterVisible(ctx, "anew_contacts", rawData)).slice(0, 5);
   return {
     success: true,
     message: data?.length ? `${data.length} contacto(s) encontrado(s).` : `Nenhum contacto com "${args.search_term}".`,
@@ -1217,7 +1224,8 @@ async function loadEntityHeader(supabase: any, entityId: string | null) {
   };
 }
 
-async function loadPipelineForEntity(supabase: any, organizationId: string, entityId: string | null) {
+async function loadPipelineForEntity(ctx: ExecCtx, organizationId: string, entityId: string | null) {
+  const supabase = ctx.supabase;
   if (!entityId) return { deal_ids: [], quote_ids: [], proposal_ids: [], contract_ids: [] };
   const [dealsRes, quotesRes, propsRes, contractsRes] = await Promise.all([
     supabase.from("deals").select("id, title, closed_at").eq("organization_id", organizationId).eq("entity_id", entityId).is("deleted_at", null).is("closed_at", null).limit(50),
@@ -1225,12 +1233,14 @@ async function loadPipelineForEntity(supabase: any, organizationId: string, enti
     supabase.from("proposals").select("id, proposal_number, title, status").eq("organization_id", organizationId).eq("entity_id", entityId).is("deleted_at", null).limit(50),
     supabase.from("client_contracts").select("id, status, end_date").eq("organization_id", organizationId).eq("entity_id", entityId).is("deleted_at", null).limit(50),
   ]);
-  return {
-    deals: dealsRes.data ?? [],
-    quotes: quotesRes.data ?? [],
-    proposals: propsRes.data ?? [],
-    contracts: contractsRes.data ?? [],
-  };
+  // Âmbito (auditoria Administração F6): só os documentos que o utilizador vê pela RLS.
+  const [deals, quotes, proposals, contracts] = await Promise.all([
+    filterVisible(ctx, "deals", dealsRes.data),
+    filterVisible(ctx, "quotes", quotesRes.data),
+    filterVisible(ctx, "proposals", propsRes.data),
+    filterVisible(ctx, "client_contracts", contractsRes.data),
+  ]);
+  return { deals, quotes, proposals, contracts };
 }
 
 // ─── Handlers ───
@@ -1253,7 +1263,7 @@ const getLeadDetails: Handler = async (ctx, args): Promise<ToolResult> => {
   if (!lead) return { success: false, message: "Lead não encontrado ou fora de scope." };
 
   const entity = await loadEntityHeader(supabase, lead.entity_id);
-  const pipeline = await loadPipelineForEntity(supabase, organizationId, lead.entity_id);
+  const pipeline = await loadPipelineForEntity(ctx, organizationId, lead.entity_id);
 
   return {
     success: true,
@@ -1319,7 +1329,7 @@ const getContactDetails: Handler = async (ctx, args): Promise<ToolResult> => {
   if (!contact) return { success: false, message: "Contacto não encontrado ou fora de scope." };
 
   const entity = await loadEntityHeader(supabase, contact.entity_id);
-  const pipeline = await loadPipelineForEntity(supabase, organizationId, contact.entity_id);
+  const pipeline = await loadPipelineForEntity(ctx, organizationId, contact.entity_id);
 
   return {
     success: true,
@@ -1410,7 +1420,7 @@ const getClientDetails: Handler = async (ctx, args): Promise<ToolResult> => {
   if (!client) return { success: false, message: "Cliente não encontrado ou fora de scope." };
 
   const entity = await loadEntityHeader(supabase, client.entity_id);
-  const pipeline = await loadPipelineForEntity(supabase, organizationId, client.entity_id);
+  const pipeline = await loadPipelineForEntity(ctx, organizationId, client.entity_id);
 
   return {
     success: true,

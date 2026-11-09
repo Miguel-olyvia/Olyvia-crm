@@ -426,3 +426,76 @@ export function encaixar(pc: PecaPlanta, largura: number, fundo: number, planta:
   const [w, h] = deitada === (largura >= fundo) ? [largura, fundo] : [fundo, largura];
   return { ...pc, w, h, x: Math.round(cx - w / 2), y: Math.round(cy - h / 2) };
 }
+
+/* ------------------------------------------------------------------ 9/11: as regras da planta (Rúben, no Estúdio) */
+/** O espaço mínimo entre a sanita e o bidé (cm). */
+export const ESPACO_SANITA_BIDE = 20;
+
+/**
+ * 9/11 (Rúben: «as janelas e portas grudadas à parede»): uma porta ou uma janela fica sempre na parede mais perto (só nas direitas), ao
+ * longo dela e com o meio na linha da parede; o resto das peças fica como está.
+ */
+export function colarAParede(pc: PecaPlanta, planta: { o: Ponto; paredes: readonly Parede[] }): PecaPlanta {
+  if (!PECAS[pc.tipo]?.abertura || !planta.paredes.length) return pc;
+  const pts = cantos(planta.paredes, planta.o);
+  const cx = pc.x + pc.w / 2, cy = pc.y + pc.h / 2, comp = Math.max(pc.w, pc.h), esp = Math.min(pc.w, pc.h);
+  let melhor: { d: number; r: PecaPlanta } | null = null;
+  for (let i = 0; i < planta.paredes.length; i++) {
+    const a = pts[i], z = pts[i + 1];
+    if (a.x !== z.x && a.y !== z.y) continue;
+    if (a.x === z.x) {
+      const y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
+      const ny = y1 - y0 <= comp ? (y0 + y1) / 2 : Math.min(y1 - comp / 2, Math.max(y0 + comp / 2, cy));
+      const d = Math.hypot(cx - a.x, cy - Math.min(y1, Math.max(y0, cy)));
+      if (!melhor || d < melhor.d) melhor = { d, r: { ...pc, w: esp, h: comp, x: Math.round(a.x - esp / 2), y: Math.round(ny - comp / 2) } };
+    } else {
+      const x0 = Math.min(a.x, z.x), x1 = Math.max(a.x, z.x);
+      const nx = x1 - x0 <= comp ? (x0 + x1) / 2 : Math.min(x1 - comp / 2, Math.max(x0 + comp / 2, cx));
+      const d = Math.hypot(cy - a.y, cx - Math.min(x1, Math.max(x0, cx)));
+      if (!melhor || d < melhor.d) melhor = { d, r: { ...pc, w: comp, h: esp, y: Math.round(a.y - esp / 2), x: Math.round(nx - comp / 2) } };
+    }
+  }
+  return melhor?.r ?? pc;
+}
+
+/** O ponto está dentro do polígono (raio para a direita). */
+function dentroDoPoligono(q: Ponto, poli: readonly Ponto[]): boolean {
+  let dentro = false;
+  for (let i = 0, j = poli.length - 1; i < poli.length; j = i++) {
+    const a = poli[i], b = poli[j];
+    if ((a.y > q.y) !== (b.y > q.y) && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) dentro = !dentro;
+  }
+  return dentro;
+}
+
+export interface AvisoPlanta { texto: string; pecas: string[] }
+/**
+ * 9/11 (Rúben: «dar alertas quando os produtos não cabem na planta, e um espaçamento mínimo entre sanita e bidé»). Numa planta fechada:
+ * a peça que sai da planta (ou que uma parede atravessa), as peças umas em cima das outras e a sanita e o bidé sem o espaço mínimo.
+ * As portas e as janelas não contam (estão na parede).
+ */
+export function avisosDaPlanta(planta: Planta): AvisoPlanta[] {
+  const out: AvisoPlanta[] = [];
+  const pecas = planta.pecas.filter((x) => !PECAS[x.tipo]?.abertura);
+  const nome = (x: PecaPlanta) => PECAS[x.tipo]?.n ?? x.tipo;
+  if (planta.paredes.length >= 3 && faltaFechar(planta.paredes) <= 1) {
+    const pts = cantos(planta.paredes, planta.o), poli = pts.slice(0, -1);
+    for (const x of pecas) {
+      const c = { x0: x.x + 1, y0: x.y + 1, x1: x.x + x.w - 1, y1: x.y + x.h - 1 };
+      const fora = [{ x: c.x0, y: c.y0 }, { x: c.x1, y: c.y0 }, { x: c.x0, y: c.y1 }, { x: c.x1, y: c.y1 }].some((q) => !dentroDoPoligono(q, poli));
+      const atravessa = !fora && pts.slice(0, -1).some((a, i) => segmentoNaCaixa(a, pts[i + 1], c));
+      if (fora || atravessa) out.push({ texto: `${nome(x)} (${Math.round(x.w)} × ${Math.round(x.h)} cm) não cabe: sai da planta. Mude de sítio ou escolha uma mais pequena.`, pecas: [x.id] });
+    }
+  }
+  for (let i = 0; i < pecas.length; i++) for (let j = i + 1; j < pecas.length; j++) {
+    const a = pecas[i], b = pecas[j];
+    const dx = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w)), dy = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
+    if (dx < -1 && dy < -1) { out.push({ texto: `${nome(a)} e ${nome(b)} estão uma em cima da outra.`, pecas: [a.id, b.id] }); continue; }
+    const par = [a.tipo, b.tipo].sort().join("+");
+    if (par === "bide+sanita") {
+      const gap = Math.round(Math.hypot(Math.max(0, dx), Math.max(0, dy)));
+      if (gap < ESPACO_SANITA_BIDE) out.push({ texto: `Entre a sanita e o bidé ${gap <= 0 ? "não há espaço" : `ficam ${gap} cm`}: o mínimo é ${ESPACO_SANITA_BIDE} cm.`, pecas: [a.id, b.id] });
+    }
+  }
+  return out;
+}

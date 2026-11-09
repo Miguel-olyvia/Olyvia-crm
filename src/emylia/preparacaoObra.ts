@@ -12,6 +12,7 @@ import { itemCatalogo, normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
+import { equipaDe } from "./equipa/equipasObra";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, isoDia, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
 import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
@@ -163,7 +164,7 @@ export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
     plano.tasks.push({ nome: t.nome, svcs: t.chave === "demolicao" ? [] : [sid], dia, dur: dur0, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase });
   }
   // 9/11: com o dia de início, os técnicos livres (sem outra obra nesses dias, nem outra tarefa desta)
-  if (plano.inicio) escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id));
+  if (plano.inicio) escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {}));
   return plano;
 }
 
@@ -180,9 +181,13 @@ export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): 
     const ds = diasDaObra(deIso(p.inicio), fim);
     for (const t of p.tasks) {
       if (!t.tec || t.exec?.estado === "validada") continue;
-      const s = out.get(t.tec) ?? new Set<string>();
-      for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) s.add(isoDia(ds[k]));
-      out.set(t.tec, s);
+      // 9/11: a equipa vem toda (ou nenhum membro): um membro numa obra ocupa a equipa inteira nesses dias
+      const quem = equipaDe(t.tec)?.membros ?? [t.tec];
+      for (const id of quem) {
+        const s = out.get(id) ?? new Set<string>();
+        for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) s.add(isoDia(ds[k]));
+        out.set(id, s);
+      }
     }
   }
   return out;
@@ -192,33 +197,76 @@ export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): 
  * Os técnicos das tarefas: o do ofício livre nesses dias, sem férias (as do RH) e sem outra obra (as outras obras e as tarefas deste
  * plano que já têm o técnico nesses dias). Sem nenhum livre, o primeiro do ofício (marcado como ocupado); sem ninguém do ofício, null.
  */
-export function escolherTecnicos(plano: Plano, ocupados: Map<string, Set<string>>): Map<Tarefa, string> {
+/** 9/11: o que o comercial escolheu no plano (Estúdio, visita, orçamento): o técnico de uma tarefa (pela chave) e a equipa da obra
+ *  (os técnicos que se escolhem primeiro em cada ofício). Fica no negócio (f.plano_tecnicos, f.plano_equipa). */
+export interface EscolhasEquipa { tecnicos?: Record<string, string>; equipa?: string[]; /** 9/11: as equipas (ids) que vêm a esta obra */ equipas?: string[] }
+/** A chave de uma tarefa para as escolhas: a fase e o nome (não muda quando os dias mudam). */
+export const chaveTarefa = (t: Pick<Tarefa, "nome" | "fase">) => `${t.fase ?? 0}:${t.nome}`;
+/** Os campos do negócio onde as escolhas ficam (o valor vazio apaga). */
+export const camposDasEscolhas = (e: EscolhasEquipa): [string, string][] => [
+  ["plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : ""],
+  ["plano_equipa", e.equipa?.length ? JSON.stringify(e.equipa) : ""],
+  ["plano_equipas", e.equipas?.length ? JSON.stringify(e.equipas) : ""],
+];
+export function escolhasDoNegocio(f: Record<string, string | undefined>): EscolhasEquipa {
+  const ler = <T,>(s: string | undefined): T | undefined => { try { return s ? JSON.parse(s) as T : undefined; } catch { return undefined; } };
+  return { tecnicos: ler<Record<string, string>>(f.plano_tecnicos), equipa: ler<string[]>(f.plano_equipa), equipas: ler<string[]>(f.plano_equipas) };
+}
+
+/** Porque é que um técnico não está livre para uma tarefa (null: livre). */
+export function motivoOcupado(tecId: string, t: Pick<Tarefa, "dia" | "dur">, plano: Plano, ocupados: Map<string, Set<string>>, outras: readonly Pick<Tarefa, "dia" | "dur" | "tec">[] = []): string | null {
+  const tec = TECS.find((x) => x.id === tecId);
+  if (!tec) return null;
+  if (diaDeFerias(tec, plano, t.dia, t.dur) != null) return "de férias";
+  if (plano.inicio) {
+    const ds = diasDaObra(deIso(plano.inicio), t.dia + t.dur);
+    const fora = ocupados.get(tecId);
+    for (let k = t.dia; k < t.dia + t.dur; k++) if (fora && ds[k] && fora.has(isoDia(ds[k]))) return "noutra obra";
+  }
+  if (outras.some((o) => o.tec === tecId && o.dia < t.dia + t.dur && t.dia < o.dia + o.dur)) return "noutra tarefa desta obra";
+  return null;
+}
+
+/**
+ * Os técnicos das tarefas: o escolhido à mão (se o houver); senão o do ofício livre nesses dias, primeiro os da equipa da obra, sem férias
+ * e sem outra obra (as outras obras e as tarefas deste plano que já têm o técnico nesses dias). Sem nenhum livre, o primeiro do ofício
+ * (marcado como ocupado); sem ninguém do ofício, null. Devolve os avisos (a tarefa → porque é que o técnico não está livre).
+ */
+export function escolherTecnicos(plano: Plano, ocupados: Map<string, Set<string>>, escolhas: EscolhasEquipa = {}): Map<Tarefa, string> {
   const avisos = new Map<Tarefa, string>();
   if (!plano.inicio) return avisos;
-  const fim = plano.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
-  const ds = diasDaObra(deIso(plano.inicio), Math.max(1, fim));
-  const destePlano = new Map<string, Set<number>>();
-  const diasDe = (t: Tarefa) => Array.from({ length: t.dur }, (_, i) => t.dia + i);
+  const feitas: Tarefa[] = [];
+  const equipa = escolhas.equipa ?? [];
+  const vem = new Set(escolhas.equipas ?? []);
+  // o técnico escolhido à mão que é de uma equipa traz a equipa
+  for (const id of Object.values(escolhas.tecnicos ?? {})) { const e = equipaDe(id); if (e) vem.add(e.id); }
   for (const t of [...plano.tasks].sort((a, b) => a.dia - b.dia)) {
     if (t.exec?.estado === "validada") continue;
-    const doOficio = tecnicosDoOficio(t);
-    if (!doOficio.length) { t.tec = null; continue; }
-    const motivo = (id: string): string | null => {
-      const tec = doOficio.find((x) => x.id === id)!;
-      if (diaDeFerias(tec, plano, t.dia, t.dur) != null) return "de férias";
-      const fora = ocupados.get(id);
-      if (fora && diasDe(t).some((k) => ds[k] && fora.has(isoDia(ds[k])))) return "noutra obra";
-      const aqui = destePlano.get(id);
-      if (aqui && diasDe(t).some((k) => aqui.has(k))) return "noutra tarefa desta obra";
-      return null;
-    };
-    const livre = doOficio.find((x) => motivo(x.id) == null);
-    const escolhido = livre ?? doOficio[0];
+    const mao = escolhas.tecnicos?.[chaveTarefa(t)];
+    if (mao && TECS.some((x) => x.id === mao)) {
+      t.tec = mao;
+      const m = motivoOcupado(mao, t, plano, ocupados, feitas);
+      if (m) avisos.set(t, m);
+      feitas.push(t);
+      continue;
+    }
+    // 9/11: os técnicos isolados e os das equipas que já vêm a esta obra (a equipa vem toda, ou nenhum membro); os da equipa primeiro
+    const todos = [...tecnicosDoOficio(t)];
+    if (!todos.length) { t.tec = null; continue; }
+    const podeVir = (id: string) => { const e = equipaDe(id); return !e || vem.has(e.id); };
+    const doOficio = todos.filter((x) => podeVir(x.id))
+      .sort((a, b) => Number(!(equipa.includes(a.id) || !!equipaDe(a.id))) - Number(!(equipa.includes(b.id) || !!equipaDe(b.id))));
+    let livre = doOficio.find((x) => motivoOcupado(x.id, t, plano, ocupados, feitas) == null);
+    // ninguém livre: uma equipa que tenha alguém do ofício livre vem toda
+    if (!livre) {
+      const daEquipa = todos.find((x) => !podeVir(x.id) && motivoOcupado(x.id, t, plano, ocupados, feitas) == null);
+      if (daEquipa) { vem.add(equipaDe(daEquipa.id)!.id); livre = daEquipa; }
+    }
+    const escolhido = livre ?? doOficio[0] ?? todos[0];
+    if (equipaDe(escolhido.id)) vem.add(equipaDe(escolhido.id)!.id);
     t.tec = escolhido.id;
-    if (!livre) avisos.set(t, motivo(escolhido.id) ?? "ocupado");
-    const s = destePlano.get(escolhido.id) ?? new Set<number>();
-    for (const k of diasDe(t)) s.add(k);
-    destePlano.set(escolhido.id, s);
+    if (!livre) avisos.set(t, motivoOcupado(escolhido.id, t, plano, ocupados, feitas) ?? "ocupado");
+    feitas.push(t);
   }
   return avisos;
 }
@@ -243,7 +291,7 @@ export const TRILHOS: { k: Trilho; t: string }[] = [
 /** O plano espera pelo pagamento confirmado. */
 export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";
 /** A encomenda de cliente nasce do pagamento validado (no Inventário novo). */
-export const EC_NO_PAGAMENTO = "Emite-se quando o pagamento for validado.";
+export const EC_NO_PAGAMENTO = "Emite-se quando o plano da obra for aprovado (com o pagamento validado).";
 
 /** O que falta para arrancar a obra (vazio = pode arrancar): o pagamento, a encomenda de cliente, os materiais garantidos no Inventário
  *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */

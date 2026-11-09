@@ -9,6 +9,7 @@ import { seed, type Estado } from "@/emylia/motor";
 import { definirEstadoVivo, useEstadoVivo } from "@/emylia/estadoVivo";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { aplicarAgenda, carregarAgendaReal } from "@/emylia/real/agendaReal";
+import { carregarEquipasObra } from "@/emylia/equipa/equipasObra";
 
 export interface CatalogoDoEstudio { S: Estado | null; aLer: boolean; erro: string | null }
 
@@ -32,6 +33,7 @@ export function useCatalogoDoEstudio(): CatalogoDoEstudio {
           if (!ativo) return;
           definirEstadoVivo(novo, org);
         }
+        await carregarEquipasObra(supabase, org).catch(() => undefined);
         const ag = await carregarAgendaReal(supabase, org);
         if (ativo && ag.erro) setErro(`As férias do RH não carregaram: ${ag.erro}`);
       } catch (e) {

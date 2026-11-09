@@ -2,7 +2,7 @@
 // e o pagamento do adiantamento põe a obra a andar pelo motor. Na Atual, a fase fica como era.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { seed, type Estado } from "../motor";
+import { acoes, seed, type Estado } from "../motor";
 import { CHAVE_VERSAO } from "../versaoPrototipo";
 import { DocumentosSimples, ObraSimples } from "../FasesSimples";
 import { FinanceiroV2 } from "./FinanceiroV2";
@@ -62,11 +62,13 @@ describe("Financeiro V2 · validar pagamentos", () => {
     expect(d.fase).toBe(5);
     expect(d.fin.recibo).not.toBeNull();
     expect(d.obra.plano?.estado).toBe("por aprovar");
-    // 16/10: o plano veio do contrato; a encomenda de cliente é emitida ao validar o pagamento, no Inventário novo
+    // 9/11 (Rúben): a encomenda de cliente só sai com o plano aprovado: o pagamento passa à Obra e as Operações aprovam o plano
+    expect(d.obra.ec).toBeUndefined();
+    expect(screen.getByText(/A obra está a andar/)).toBeInTheDocument();
+    { const A = acoes(S, () => {}, (fn) => fn()); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); }
     expect(d.obra.ec).toMatchObject({ n: "EC-1027", estado: "emitida", ref: "CT 2026/1027" });
     const fs = faturasDe(S, d);
     expect(fs[0]).toMatchObject({ numero: "FT 2026/600", recibo: d.fin.recibo!.n, pagamento: { conta: "Banco B · conta obras", ref: "TRF 1013-221" } });
-    expect(screen.getByText(/A obra está a andar/)).toBeInTheDocument();
 
     // a tranche final: regista-se e valida-se sem voltar a disparar a obra
     const plano = d.obra.plano;

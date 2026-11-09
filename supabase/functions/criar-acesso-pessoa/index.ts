@@ -12,7 +12,10 @@
  *      `convite-admissao` faz;
  *   2. cria a conta de autenticacao com uma password gerada aqui;
  *   3. cria o perfil e a associacao a organizacao com o papel escolhido
- *      (`rpc_finalize_user_profile_full`, a mesma RPC de `create-user`);
+ *      (`rpc_finalize_user_profile_full`, a mesma RPC de `create-user`); se a
+ *      conta ja tem perfil, so a associacao (`rpc_hr_associar_conta_existente`),
+ *      sem reescrever o perfil global; se a finalize falhar, a conta de
+ *      autenticacao criada nesta chamada e apagada;
  *   4. liga a conta a ficha (`rpc_hr_ligar_conta_por_servico`);
  *   5. ENVIA AS CREDENCIAIS por e-mail, sem segundo botao e sem ninguem
  *      redigir o e-mail.
@@ -340,6 +343,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // `null` so quando a conta ja existia E e de alguem (tem ficha em
     // `anew_users`): nesse caso nao se envia password nenhuma.
     let passwordParaEnviar: string | null = password;
+    // A conta de autenticacao foi criada NESTA chamada? So entao e nossa para
+    // apagar se o perfil nao chegar a ser criado (RH F5: nada de contas orfas).
+    let contaCriadaAgora = false;
+    // A conta ja tem perfil em `anew_users` (e de alguem)? Entao o perfil GLOBAL
+    // nao se reescreve: so a associacao a esta organizacao (RH F4).
+    let contaComPerfil = false;
     const { data: criada, error: erroCriar } = await svc.auth.admin.createUser({
       email,
       password,
@@ -388,6 +397,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       if (fichaExistente) {
         passwordParaEnviar = null;
+        contaComPerfil = true;
       } else {
         // Ter "sem ficha" nao basta: sem ficha ha contas de outras apps, do
         // portal ou de registos pendentes, e quem tem `hr.pessoas.conta.criar`
@@ -434,6 +444,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
     } else {
       authUserId = criada.user!.id;
+      contaCriadaAgora = true;
     }
 
     // Contexto de auditoria, como em create-user: uma accao de utilizador, uma
@@ -446,7 +457,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (erroCtx) captureError(erroCtx);
     }
 
-    const { data: perfil, error: erroPerfil } = await svc
+    // Conta com perfil (de alguem, talvez de outra organizacao): NUNCA a
+    // `rpc_finalize_user_profile_full`, cujo upsert reescreve name, email,
+    // phone, description, position, location e custom_attributes do perfil
+    // GLOBAL com os dados desta ficha e nulos. A `rpc_hr_associar_conta_existente`
+    // (migracao 20270112400000) so cria a associacao a esta organizacao com o
+    // papel escolhido, com as mesmas verificacoes da finalize (users.create,
+    // organizacao visivel, nunca a si proprio, papel atribuivel) mais
+    // users.manage_roles -- dar um papel a quem ja existe e gerir papeis.
+    const { data: perfil, error: erroPerfil } = contaComPerfil
+      ? await svc
+        .rpc("rpc_hr_associar_conta_existente", {
+          p_auth_user_id: authUserId,
+          p_actor_id: actorId,
+          p_organization_id: org,
+          p_role_id: roleId,
+        })
+        .single()
+      : await svc
       .rpc("rpc_finalize_user_profile_full", {
         p_auth_user_id: authUserId,
         p_actor_id: actorId,
@@ -473,7 +501,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (erroLimpar) captureError(erroLimpar);
 
     if (erroPerfil || !perfil) {
-      captureError(erroPerfil ?? new Error("rpc_finalize_user_profile_full sem resposta"));
+      captureError(erroPerfil ?? new Error("perfil/associacao sem resposta"));
+      // A conta de autenticacao nasceu nesta chamada e ficou sem perfil (a RPC
+      // e uma transaccao: falhou, nada ficou). Apaga-se, senao fica orfa e o
+      // proximo "Criar acesso" com este e-mail cai em `conta_existente_*`.
+      // Nunca se apaga uma conta que ja existia (reaproveitada ou de alguem).
+      if (contaCriadaAgora) {
+        const { error: erroApagar } = await svc.auth.admin.deleteUser(authUserId);
+        if (erroApagar) captureError(erroApagar);
+        console.warn(JSON.stringify({
+          evento: "conta_autenticacao_orfa_apagada",
+          ok: !erroApagar,
+          actorId,
+          org,
+          pessoaId,
+          authUserId,
+        }));
+      }
       return responder({ error: erroPerfil?.message ?? "perfil_nao_criado" }, 400);
     }
 

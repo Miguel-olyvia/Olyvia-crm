@@ -12,6 +12,7 @@ import { definirModoReal, nifEmpresa, nomeEmpresa, nomeFiscalEmpresa, orgDoModoR
 import type { Passo } from "@/emylia/CamposFase";
 import type { Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
+import { PROPOSTA, efetivo, emFalta } from "@/emylia/campos";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useDadosDaProposta, useMinutasDeContrato, useNomeDoSignatario, usePerguntasDeContrato, useTemplatesDeAspeto, type MinutaDeContrato, type TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
 import { useTemplatesDoNegocio, type UseTemplatesDoNegocio } from "@/hooks/pessoas/useTemplatesDoNegocio";
@@ -290,8 +291,41 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
       {/* O contrato é o da minuta escolhida (preenchida acima): o corpo que a Emylia desenha por baixo (Modelo, Assinatura, «Assina pela empresa»,
           Penalização, Partilhar e o contrato com as cláusulas dela) só se vê enquanto o contrato está bloqueado, que é o aviso de que ainda não abre. */}
       {soEscolher && <div key={org.chave}>{children}</div>}
+      {/* 9/11 (Rúben: «falta o campo penalização, por isso não consigo gerar»): as condições do contrato da Emylia (penalização por atraso,
+          modelo, assinatura, quem assina) continuam obrigatórias, mas o corpo dela não se vê aqui; respondem-se neste bloco */}
+      {!soEscolher && <CondicoesDoContrato c={c} />}
       {!soEscolher && <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar} />}
     </div>
+  );
+}
+
+/** As perguntas do grupo «Contrato» da Emylia (como a empresa as ajustou), em botões: o que falta fica marcado. */
+function CondicoesDoContrato({ c }: { c: ContextoDosTemplates }) {
+  const { ctx, d } = c;
+  const g = efetivo(ctx.S.campos, PROPOSTA[1]);
+  const falta = new Set(emFalta([g], d.f).map((x) => x.k));
+  const campos = g.campos.filter((x) => x.t === "sim_nao" || x.t === "escolha");
+  if (!campos.length) return null;
+  const opcoes = (x: (typeof campos)[number]) => (x.t === "sim_nao" ? ["Sim", "Não"] : x.op ?? []);
+  return (
+    <section aria-label="Condições do contrato" className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <h4 className="text-sm font-semibold">Condições do contrato</h4>
+      {campos.map((x) => (
+        <div key={x.k} role="group" aria-label={x.l} className="space-y-1.5">
+          <p className={cn("text-sm font-medium", falta.has(x.k) && "text-destructive")}>{x.l}{falta.has(x.k) ? " · falta responder" : ""}</p>
+          <div className="flex flex-wrap gap-2">
+            {opcoes(x).map((v) => {
+              const on = d.f[x.k] === v;
+              return (
+                <button key={v} type="button" aria-pressed={on} disabled={!c.podeEditar}
+                  onClick={() => ctx.run(() => ctx.A.campo(d.id, x.k, v))}
+                  className={cn("min-h-11 rounded-full border px-4 text-[15px] transition-colors disabled:opacity-50", on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>{v}</button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }
 

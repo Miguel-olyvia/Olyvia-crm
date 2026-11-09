@@ -86,7 +86,7 @@ describe("protótipo de Negócios", () => {
     // 19/10: a fatura e o pagamento são do Financeiro (permissoes.ts)
     S.role = "financeiro";
     A.emitir(id);
-    A.validar(id);
+    A.validar(id); A.role("operacoes"); A.aprovarPlano(id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
     S.role = "operacoes"; // 4/11: aprovar e arrancar o plano pede negocios.obra.planear (as Operações)
     expect(d().fase).toBe(5);
     // validado o pagamento, a encomenda de cliente é emitida logo no Inventário novo (sem aprovação)

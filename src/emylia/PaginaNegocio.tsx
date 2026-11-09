@@ -435,6 +435,14 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           <Partilhar ctx={ctx} d={d} tipo="proposta" estado={o.aceite ? `aceite ${o.aceite}` : o.enviada ? `enviada ${o.enviada} · à espera do cliente` : "ainda não enviada"}>
             <PropostaDoc S={S} d={d} />
           </Partilhar>
+          {/* 9/11 (Rúben: «enviámos a proposta sem querer»): aceite, mas com o contrato por assinar, a proposta ainda se refaz (novaVersao);
+              a versão aceite fica guardada como substituída. Aqui, e não no Contrato: na ficha do Pipeline o Contrato mostra só a minuta. */}
+          {o.aceite && o.contrato !== "assinado" && (
+            <div className="space-y-3 rounded-2xl border border-border bg-muted/40 p-4">
+              <p className="text-[15px]">Precisa de mudar a proposta? Enquanto o contrato não está assinado, faz-se uma nova versão: a aceite fica guardada.</p>
+              <NovaVersao ctx={ctx} d={d} texto="Refazer a proposta (nova versão)" />
+            </div>
+          )}
         </div>
       ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
       // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial)

@@ -2,6 +2,7 @@
 // Body is parsed exactly once in index.ts and organizationId is passed in.
 // Logic moved verbatim from index.ts (Fase 0A.1 + 0A scope check).
 
+import { createClient } from "npm:@supabase/supabase-js@2.45.0";
 import { resolveCallerIdentity, AuthError } from "../../_shared/auth.ts";
 import type { ExecCtx, Membership } from "./types.ts";
 
@@ -57,12 +58,36 @@ export async function buildExecCtx(args: {
 
   const uctx = userContext as any;
   const memberships: Membership[] = Array.isArray(uctx.memberships) ? uctx.memberships : [];
-  const permissions: string[] = uctx.permissions;
+  // Auditoria Administração F6: get_user_context junta as permissões de TODAS as associações (de qualquer
+  // organização, incluindo papéis de cliente). As tools agem na organização ativa, por isso as permissões são as que
+  // has_anew_permission_in_org_or_ancestor confirma NESSA organização (fn_ai_permissoes_na_org, migração
+  // 20270112410000). Falha fechado.
+  const { data: orgPermissions, error: permErr } = await supabase.rpc("fn_ai_permissoes_na_org", {
+    _auth_uid: caller.authUid,
+    _organization_id: organizationId,
+  });
+  if (permErr || !Array.isArray(orgPermissions)) {
+    console.error("AI assistant: fn_ai_permissoes_na_org failed", permErr);
+    return { ok: false, status: 500, body: { error: "failed to resolve user permissions" } };
+  }
+  const permissions: string[] = orgPermissions as string[];
   // is_system_admin from get_user_context() is already the canonical, correctly
   // scoped global-admin flag (system_admin only) — do not re-widen it to include
   // super_admin, which is a tenant-scoped role and must not bypass permission checks.
   const isSystemAdmin: boolean = uctx.is_system_admin === true;
   const businessUserId: string = uctx.business_user_id || caller.anewUserId;
+
+  // Cliente com o JWT do chamador: as verificações de âmbito (shared/scope.ts) usam a RLS e as funções de âmbito
+  // (crm_scope_keys, can_access_contact_row, ...) tal como o ecrã. Só leitura; o trabalho continua com a service_role.
+  const authHeader = req.headers.get("Authorization") || "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const userSupabase = authHeader && supabaseUrl && anonKey
+    ? createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    : undefined;
 
   const ctx: ExecCtx = {
     supabase,
@@ -74,7 +99,8 @@ export async function buildExecCtx(args: {
     permissions,
     memberships,
     isSystemAdmin,
-    authHeader: req.headers.get("Authorization") || "",
+    authHeader,
+    userSupabase,
   };
 
   return { ok: true, ctx };
