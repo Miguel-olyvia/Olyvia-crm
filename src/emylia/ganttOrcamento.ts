@@ -6,7 +6,7 @@
 // com elas (só a mão de obra; o equipamento e os consumíveis não). O preço ao cliente não muda.
 // 14/10: as etapas seguem as fases da obra (fasesObra.ts: 1 preparação, 2 infraestruturas, 3 revestimentos, 4 montagem);
 // dentro da fase, a ordem dos ofícios (o pintor depois do ladrilhador). Um serviço com várias fases entra na primeira.
-import { estruturaHora, parDemolicao, r2, type Estado, type Negocio, type SvcId } from "./motor";
+import { estruturaHora, parDemolicao, r2, sincronizarDemolicao, type Estado, type Negocio, type SvcId } from "./motor";
 import { catalogoLigado } from "./produtosVisita";
 import { PAR_DEM0 } from "./entulho";
 import { fasesDoServico, fasesPadrao, type ComFases, type FaseObra } from "./fasesObra";
@@ -120,7 +120,9 @@ export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): Tarefa
     // o que o custo da linha tem além da mão de obra (equipamento, consumíveis; e o que o Catálogo mudou desde então)
     extra[l.sid] = { eq: eqUn * l.q, cons: consUn * l.q, outros: custoOrc - hOrc * custoHora - eqUn * l.q - consUn * l.q, custoOrc };
   }
-  const r = o.demolicao?.r;
+  // 9/11 (Rúben: «falta a task da demolição na primeira fase»): o orçamento lido da base não traz a conta da demolição (só a linha do
+  // preço); refaz-se numa cópia, só para as horas da tarefa (o preço e o orçamento não mudam)
+  const r = o.demolicao?.r ?? (!o.demolicao && !o.semDemolicao ? demolicaoRefeita(d, S) : undefined);
   if (r && r.horas + r.horasCarga > 0) {
     // 22/10: o €/h da equipa da demolição vem do RH (parDemolicao: 2 × o €/h do Servente, ou do Ajudante)
     const P = parDemolicao(S, catalogoLigado()?.parDem ?? PAR_DEM0);
@@ -172,3 +174,12 @@ export const diasPrevistos = (T: TarefaPrevista[]) => T.reduce((a, t) => Math.ma
 
 /** O prazo de execução para a proposta (dias úteis inteiros): os dias previstos arredondados para cima. */
 export const prazoProposta = (T: TarefaPrevista[]) => Math.max(1, Math.ceil(diasPrevistos(T) - 1e-9));
+
+/** A conta da demolição refeita numa cópia do negócio (o orçamento lido da base não a guarda). */
+function demolicaoRefeita(d: Negocio, S: Estado): NonNullable<NonNullable<Negocio["orc"]>["demolicao"]>["r"] | undefined {
+  try {
+    const dc = structuredClone({ ...d, orc: d.orc ? { ...d.orc, enviada: null } : null }) as Negocio;
+    sincronizarDemolicao(dc, S);
+    return dc.orc?.demolicao?.r;
+  } catch { return undefined; }
+}
