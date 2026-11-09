@@ -16,6 +16,9 @@ export interface EscolhasCatalogo {
   extras?: ServicoEscolhido[];
   /** O dia de início da obra (aaaa-mm-dd) escolhido no plano. */
   inicio?: string;
+  /** 9/11: o técnico escolhido à mão por tarefa (preparacaoObra.chaveTarefa → id) e a equipa da obra. */
+  tecnicos?: Record<string, string>;
+  equipa?: string[];
 }
 
 /** Um serviço do Catálogo no projeto. `chave`: a linha do Estúdio de onde vem (para a troca), ou «extra:<id>» se foi juntado à mão. */
@@ -101,3 +104,5 @@ export const juntarExtra = (p: Projeto, sid: SvcId, q = 1): Projeto =>
 export const mudarExtra = (p: Projeto, sid: SvcId, q: number): Projeto =>
   comCatalogo(p, (e) => ({ ...e, extras: q > 0 ? (e.extras ?? []).map((x) => (x.sid === sid ? { ...x, q } : x)) : (e.extras ?? []).filter((x) => x.sid !== sid) }));
 export const mudarInicio = (p: Projeto, inicio: string): Projeto => comCatalogo(p, (e) => ({ ...e, inicio }));
+export const mudarEquipa = (p: Projeto, e: { tecnicos?: Record<string, string>; equipa?: string[] }): Projeto =>
+  comCatalogo(p, (x) => ({ ...x, ...e }));

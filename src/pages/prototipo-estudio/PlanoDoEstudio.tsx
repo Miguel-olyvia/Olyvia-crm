@@ -5,7 +5,7 @@
 //  · o plano da obra (o mesmo que a visita gera ao fechar e que a obra vai ter): o dia de início, a equipa do RH e o mapa de datas;
 //  · o orçamento que vai nascer (sem IVA);
 //  · «Fechar a visita»: volta ao negócio, leva tudo e fecha a visita (o orçamento e o plano ficam gerados).
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Check, ChevronDown, Hammer, Lock, Plus, Repeat, Search, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,7 @@ import { materiaisDaReceita, passosDaReceita, planoDaVisita, planoDoEstudio } fr
 import { simularNoNegocio } from "@/emylia/estudioNoNegocio";
 import { podeVerCustos } from "@/emylia/permissoes";
 import { useCatalogoDoEstudio } from "./catalogoDoEstudio";
-import { juntarExtra, mudarExtra, mudarInicio, projetoNoCatalogo, reporServico, servicosParaPlano, trocarServico, type ServicoDoProjeto } from "./servicosDoCatalogo";
+import { juntarExtra, mudarEquipa, mudarExtra, mudarInicio, projetoNoCatalogo, reporServico, servicosParaPlano, trocarServico, type ServicoDoProjeto } from "./servicosDoCatalogo";
 import type { Projeto } from "./necessidadesEstudio";
 
 const nfq = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
@@ -50,10 +50,11 @@ function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dis
   const L = useMemo(() => projetoNoCatalogo(p, S, produtos), [p, S, produtos]);
   const negocio = p.negocio !== undefined ? S.deals.find((x) => x.id === p.negocio) : undefined;
   // o plano e o orçamento: com o negócio, os que a visita vai gerar (o negócio com o Estúdio levado); sem ele, só dos serviços do Estúdio
-  const P = useMemo(() => {
-    const pi = { ...p, catalogo: { ...(p.catalogo ?? {}), inicio } };
-    return negocio ? planoDaVisita(simularNoNegocio(negocio, pi, S, produtos).d, S, inicio) : planoDoEstudio(servicosParaPlano(L), S, inicio, p.negocio);
-  }, [p, S, produtos, negocio, inicio, L]);
+  const calcular = useCallback((ini: string) => {
+    const pi = { ...p, catalogo: { ...(p.catalogo ?? {}), inicio: ini } };
+    return negocio ? planoDaVisita(simularNoNegocio(negocio, pi, S, produtos).d, S, ini) : planoDoEstudio(servicosParaPlano(L), S, ini, p.negocio, p.catalogo);
+  }, [p, S, produtos, negocio, L]);
+  const P = useMemo(() => calcular(inicio), [calcular, inicio]);
   const total = P.orc && negocio ? tot({ ...negocio, orc: P.orc }, S).pf : L.servicos.reduce((a, s) => a + s.q * s.preco, 0);
 
   return (
@@ -70,7 +71,8 @@ function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dis
             <h3 id="t-plano" className="text-[17px] font-semibold tracking-tight">O plano da obra</h3>
             <p className="text-sm text-muted-foreground">O mesmo que a obra vai ter: as tarefas pela ordem das fases, o técnico livre de cada ofício (sem férias nem outra obra) e as datas em dias úteis.</p>
           </div>
-          <MapaDatasObra P={P} inicio={inicio} mudarInicio={(iso) => setP((x) => mudarInicio(x, iso))} />
+          <MapaDatasObra P={P} inicio={inicio} mudarInicio={(iso) => setP((x) => mudarInicio(x, iso))}
+            equipa={{ S, negocio: p.negocio, escolhas: { tecnicos: p.catalogo?.tecnicos, equipa: p.catalogo?.equipa }, mudar: (e) => setP((x) => mudarEquipa(x, e)), calcular }} />
         </section>
       </section>
       <aside className="space-y-4">

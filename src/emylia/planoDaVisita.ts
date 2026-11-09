@@ -9,7 +9,7 @@
 import { TECS, criarOrc, custoUnLinha, garantirServico, ligarDemolicao, r2, sincronizarDemolicao, sincronizarEfeitos, temModeloDeObra, type Estado, type LinhaOrc, type Negocio, type Orcamento, type Plano, type SvcId } from "./motor";
 import { custosDe, receitaDe } from "./v2/custosModelo";
 import { deIso, diasDaObra, isoDia, proximoUtil } from "./planoObra";
-import { escolherTecnicos, ocupacaoDosTecnicos, planoDoOrcamento } from "./preparacaoObra";
+import { chaveTarefa, escolherTecnicos, escolhasDoNegocio, ocupacaoDosTecnicos, planoDoOrcamento } from "./preparacaoObra";
 export { escolherTecnicos, ocupacaoDosTecnicos } from "./preparacaoObra";
 import { FASES_OBRA } from "./fasesObra";
 import type { FaseObra } from "./fasesObra";
@@ -20,6 +20,10 @@ export interface MaterialPlano { n: string; q: number; un: string; porUn: number
 
 /** Uma tarefa do plano, em datas: quem a faz, quando e com quê. */
 export interface TarefaDatas {
+  /** A chave para as escolhas (a fase e o nome): preparacaoObra.chaveTarefa. */
+  chave: string;
+  /** O técnico foi escolhido à mão. */
+  aMao?: boolean;
   nome: string;
   fase: FaseObra;
   /** O ofício (o perfil do Catálogo: «Canalizador», «Ladrilhador»…). */
@@ -90,7 +94,8 @@ export function planoEmDatas(d: Negocio, S: Estado, inicioIso: string): PlanoDat
   const dx = { ...d, orc: d.orc ? { ...d.orc, inicioObra: inicio } : null } as Negocio;
   const plano = planoDoOrcamento(dx, S);
   plano.inicio = inicio;
-  const avisos = escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id));
+  const escolhas = escolhasDoNegocio(dx.f ?? {});
+  const avisos = escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id), escolhas);
   const fimDias = plano.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
   const ds = diasDaObra(deIso(inicio), Math.max(1, fimDias));
   const tarefas: TarefaDatas[] = plano.tasks.map((t) => {
@@ -101,6 +106,7 @@ export function planoEmDatas(d: Negocio, S: Estado, inicioIso: string): PlanoDat
     const q = l && l.t === "svc" ? (s && s.h > 0 && plano.tasks.filter((x) => x.svcs[0] === sid).length > 1 ? t.h / s.h : l.q) : 0;
     const tec = t.tec ? TECS.find((x) => x.id === t.tec) : undefined;
     return {
+      chave: chaveTarefa(t), ...(escolhas.tecnicos?.[chaveTarefa(t)] ? { aMao: true } : {}),
       nome: t.nome, fase: (t.fase ?? 1) as FaseObra, oficio: t.sk || "Por definir", tec: t.tec, tecNome: tec?.n ?? "Por atribuir",
       ...(avisos.has(t) ? { ocupado: avisos.get(t) } : {}),
       dia: t.dia, dur: t.dur, h: t.h, inicio: ds[t.dia] ?? ds[0], fim: ds[Math.min(ds.length - 1, t.dia + t.dur - 1)] ?? ds[0],
@@ -132,14 +138,17 @@ export function planoDaVisita(d: Negocio, S: Estado, inicioIso: string): PlanoDa
 export interface ServicoEscolhido { sid: SvcId; q: number }
 
 /** O plano da obra das linhas do Estúdio (os serviços do Catálogo, sem o negócio): um orçamento só com esses serviços. */
-export function planoDoEstudio(servicos: readonly ServicoEscolhido[], S: Estado, inicioIso: string, negocio?: number): PlanoDatas {
+export function planoDoEstudio(servicos: readonly ServicoEscolhido[], S: Estado, inicioIso: string, negocio?: number, escolhas?: { tecnicos?: Record<string, string>; equipa?: string[] }): PlanoDatas {
   const linhas: LinhaOrc[] = [];
   for (const x of servicos) {
     const s = garantirServico(S, x.sid);
     if (s && x.q > 0) linhas.push({ t: "svc", sid: x.sid, q: x.q, cu: custoUnLinha(s, S), pu: s.preco, ...(s.iva === 23 ? { iva: 23 as const } : {}) });
   }
   const orc: Orcamento = { modelo: "", linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} } as Orcamento;
-  const d = { id: negocio ?? -1, f: {}, orc, obra: { plano: null } } as unknown as Negocio;
+  const f: Record<string, string> = {};
+  if (escolhas?.tecnicos) f.plano_tecnicos = JSON.stringify(escolhas.tecnicos);
+  if (escolhas?.equipa) f.plano_equipa = JSON.stringify(escolhas.equipa);
+  const d = { id: negocio ?? -1, f, orc, obra: { plano: null } } as unknown as Negocio;
   return planoEmDatas(d, S, inicioIso);
 }
 

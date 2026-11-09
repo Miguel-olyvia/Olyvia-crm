@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { COR_FASE } from "./fasesObra";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, isoDia } from "./planoObra";
 import { nomeFaseCurto, type PlanoDatas } from "./planoDaVisita";
+import { EquipaDaObra, TrocarTecnico, type PropsEquipa } from "./EquipaDaObra";
 import type { FaseObra } from "./fasesObra";
 
 const dataLonga = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" });
@@ -15,7 +16,11 @@ const nfq = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 
 const chip = (on: boolean) => cn("inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] transition-colors",
   on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40");
 
-export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false }: { P: PlanoDatas; inicio: string; mudarInicio: (iso: string) => void; escuro?: boolean }) {
+/** 9/11: com `equipa`, a equipa é editável (trocar técnicos, ver a agenda, criar equipas, alertas e sugestões: EquipaDaObra.tsx). */
+export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false, equipa }: {
+  P: PlanoDatas; inicio: string; mudarInicio: (iso: string) => void; escuro?: boolean;
+  equipa?: Omit<PropsEquipa, "P" | "mudarInicio">;
+}) {
   const rapidos = useMemo(() => iniciosRapidos(new Date()), []);
   const fases = useMemo(() => {
     const m = new Map<FaseObra, PlanoDatas["tarefas"]>();
@@ -63,6 +68,7 @@ export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false }: { P: P
 
         <Calendario P={P} />
 
+        {equipa ? <EquipaDaObra P={P} mudarInicio={mudarInicio} {...equipa} /> : (
         <section aria-label="A equipa" className="space-y-2">
           <h4 className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-primary" aria-hidden="true" />A equipa</h4>
           {P.equipa.length ? (
@@ -81,6 +87,7 @@ export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false }: { P: P
               Sem ninguém livre: {ocupadas.map((t) => `${t.tecNome} está ${t.ocupado} (${t.nome})`).join("; ")}. Escolha outro dia ou as Operações acertam no plano.</p>
           )}
         </section>
+        )}
 
         <section aria-label="O mapa de datas" className="space-y-4">
           {fases.map(([f, ts]) => (
@@ -113,6 +120,7 @@ export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false }: { P: P
                         </span>
                       </summary>
                       <div className="pt-3 text-sm">
+                        {equipa?.mudar && <div className="mb-3"><TrocarTecnico t={t} P={P} S={equipa.S} negocio={equipa.negocio} escolhas={equipa.escolhas} mudar={equipa.mudar} /></div>}
                         <p className="text-muted-foreground">{t.dur > 1 ? `De ${dataLonga(t.inicio)} a ${dataLonga(t.fim)}.` : `${dataLonga(t.inicio)[0].toUpperCase()}${dataLonga(t.inicio).slice(1)}.`}</p>
                         {t.passos.length > 0 && (
                           <div className="mt-2">

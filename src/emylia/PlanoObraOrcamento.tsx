@@ -24,7 +24,9 @@ import { Contagem, useReduzir, vibrar } from "./movimento";
 import { useLargura } from "./largura";
 import { SEM_VER_CUSTOS, podeVerCustos } from "./permissoes";
 import { nomeCurtoTarefa } from "./obraOps";
-import { materiaisDaReceita, passosDaTarefa } from "./planoDaVisita";
+import { materiaisDaReceita, passosDaTarefa, planoEmDatas } from "./planoDaVisita";
+import { EquipaDaObra, TrocarTecnico } from "./EquipaDaObra";
+import { escolhasDoNegocio, type EscolhasEquipa } from "./preparacaoObra";
 
 export { COR_FASE } from "./planoObra";
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
@@ -384,6 +386,9 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
         </div>
       </div>
 
+      {/* 9/11 (Rúben: «aqui também, por baixo do orçamento»): a equipa da obra, as agendas, os alertas e as sugestões */}
+      <EquipaNoOrcamento ctx={ctx} d={d} fechado={fechado} inicio={isoDia(inicio)} />
+
       <Pagamentos P={P} d={d} ctx={ctx} calendario={calendario} fechado={fechado} prest={prestAtual} sugerido={sugerido} />
     </section>
   );
@@ -612,6 +617,38 @@ function Pagamentos({ P, d, ctx, calendario, fechado, prest, sugerido }: {
           <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />O plano mudou: recalcular as prestações por fases
         </button>
       )}
+    </section>
+  );
+}
+
+/** 9/11: a equipa da obra no orçamento (o mesmo plano que a obra vai ter): quem faz cada tarefa, as agendas, os alertas e as sugestões. */
+function EquipaNoOrcamento({ ctx, d, fechado, inicio }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Negocio; fechado: boolean; inicio: string }) {
+  const { S, A, run } = ctx;
+  const escolhas = escolhasDoNegocio(d.f);
+  const PD = useMemo(() => planoEmDatas(d, S, inicio), [d, S, inicio, d.orc, d.f.plano_tecnicos, d.f.plano_equipa]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mudar = fechado ? undefined : (e: EscolhasEquipa) => run(() => {
+    A.campo(d.id, "plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : "");
+    A.campo(d.id, "plano_equipa", e.equipa?.length ? JSON.stringify(e.equipa) : "");
+  });
+  if (!PD.tarefas.length) return null;
+  return (
+    <section aria-label="A equipa da obra" className="space-y-4 rounded-2xl border border-border bg-card p-4 sm:p-5">
+      <div>
+        <h3 className="text-[17px] font-semibold tracking-tight">A equipa da obra</h3>
+        <p className="text-sm text-muted-foreground">Quem faz cada tarefa, nos dias do plano. A obra começa com esta equipa; as Operações ainda a podem acertar.</p>
+      </div>
+      <EquipaDaObra P={PD} S={S} negocio={d.id} escolhas={escolhas} mudar={mudar} calcular={(iso) => planoEmDatas(d, S, iso)}
+        mudarInicio={fechado ? undefined : (iso) => run(() => A.inicioObra(d.id, iso))} />
+      <ul className="divide-y divide-border rounded-xl border border-border">
+        {PD.tarefas.map((t) => (
+          <li key={t.chave} className="grid gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_20rem] sm:items-center">
+            <span className="min-w-0 text-[15px]"><b className="font-medium">{t.nome}</b>
+              <span className="block text-sm text-muted-foreground">{dataCurta(t.inicio)}{t.dur > 1 ? ` a ${dataCurta(t.fim)}` : ""} · {t.oficio}{t.ocupado ? ` · ${t.tecNome} ${t.ocupado}` : ""}</span>
+            </span>
+            {mudar ? <TrocarTecnico t={t} P={PD} S={S} negocio={d.id} escolhas={escolhas} mudar={mudar} /> : <span className="text-sm">{t.tecNome}</span>}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

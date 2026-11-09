@@ -75,6 +75,11 @@ export function levarEstudio(d: Negocio, p: Projeto, S: Estado, produtos: readon
   if (serv.length || nProd) avisos.push(`Nas necessidades: ${serv.length} ${serv.length === 1 ? "serviço" : "serviços"} e ${nProd} ${nProd === 1 ? "produto" : "produtos"} do Catálogo.`);
   const inicio = p.catalogo?.inicio;
   if (inicio && d.f.plano_inicio !== inicio) A.campo("plano_inicio", inicio);
+  // 9/11: os técnicos e a equipa escolhidos no plano do Estúdio
+  const tecs = p.catalogo?.tecnicos && Object.keys(p.catalogo.tecnicos).length ? JSON.stringify(p.catalogo.tecnicos) : "";
+  const eq = p.catalogo?.equipa?.length ? JSON.stringify(p.catalogo.equipa) : "";
+  if ((d.f.plano_tecnicos ?? "") !== tecs) A.campo("plano_tecnicos", tecs);
+  if ((d.f.plano_equipa ?? "") !== eq) A.campo("plano_equipa", eq);
   return { avisos, servicos: serv.length, produtos: nProd, semPar: L.semPar };
 }
 
