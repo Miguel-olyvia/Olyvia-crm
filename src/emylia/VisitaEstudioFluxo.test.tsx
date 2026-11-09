@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Negocio } from "./motor";
 import { passosDaFase } from "./PaginaNegocio";
+import { EXTERIOR, INTERIOR } from "./campos";
 import { EstudioNaVisita, PlanoEstimado } from "./VisitaEstudio";
 import type { Ctx } from "./pecas";
 import { retangulo } from "./planta";
@@ -24,13 +25,10 @@ const montar = () => {
 };
 
 describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", () => {
-  it("os passos: visitas, exterior, interior, área, Estúdio e fechar a visita", () => {
+  it("os passos (9/11, o fluxo simplificado): só o exterior, o interior e o Estúdio (a área e o fecho dentro do Estúdio)", () => {
     const { ctx, d } = montar();
-    const ids = passosDaFase(ctx, d, true).map((p) => p.id);
-    expect(ids.slice(-2)).toEqual(["estudio", "fecho"]);
-    expect(ids).not.toContain("medidas");
-    expect(ids).not.toContain("nec");
-    expect(ids[0]).toBe("visitas");
+    const passos = passosDaFase(ctx, d, true);
+    expect(passos.map((p) => p.id)).toEqual([EXTERIOR.titulo, INTERIOR.titulo, "estudio"]);
     // a vista não simples fica como era
     expect(passosDaFase(ctx, d, false).map((p) => p.id)).toContain("medidas");
   });
