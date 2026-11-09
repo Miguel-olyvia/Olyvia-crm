@@ -82,6 +82,9 @@ serve(async (req) => {
     // por omissão e nunca em produção). Age como o utilizador do portal desse documento, pelo mesmo caminho do portal (o contrato
     // criado, as notificações, o estado do negócio); só o código por SMS não se pede. A assinatura fica «MODO_TESTE:<quem>».
     let simulado = false;
+    // sem acesso ao portal (o envio não criou a conta), age-se com um cliente «de teste» ligado só a este documento
+    let docSimulado: string | null = null;
+    let portalSimulado: Record<string, any> | null = null;
     if (action === "simular_cliente") {
       const acao = String(params.acao ?? "");
       const coluna = acao === "sign_proposal" ? "proposal_id" : acao === "sign_contract" ? "contract_id" : null;
@@ -107,12 +110,19 @@ serve(async (req) => {
         ({ data: pu } = await supabase.from("client_portal_users").select("auth_user_id")
           .eq("entity_id", (doc as any).entity_id).eq("organization_id", (doc as any).organization_id).not("auth_user_id", "is", null).limit(1).maybeSingle());
       }
-      if (!pu) {
-        return new Response(JSON.stringify({ error: "sem_portal", message: "O cliente ainda não tem acesso ao portal: envie primeiro o documento." }), { status: 409, headers: corsHeaders });
-      }
       const quem = user.email || user.id;
-      const { data: cliente } = await supabase.auth.admin.getUserById((pu as any).auth_user_id);
-      user = cliente?.user ?? { id: (pu as any).auth_user_id, user_metadata: {} };
+      if (pu) {
+        const { data: cliente } = await supabase.auth.admin.getUserById((pu as any).auth_user_id);
+        user = cliente?.user ?? { id: (pu as any).auth_user_id, user_metadata: {} };
+      } else {
+        // o cliente ainda não tem conta no portal: um cliente de teste, sem conta, ligado só a este documento
+        user = { id: user.id, email: null, user_metadata: { full_name: "Cliente" } };
+        portalSimulado = {
+          id: null, organization_id: (doc as any).organization_id, created_by: null, client_id: null,
+          proposal_id: coluna === "proposal_id" ? docId : null, quote_id: null, contract_id: coluna === "contract_id" ? docId : null,
+        };
+      }
+      docSimulado = docId;
       action = acao;
       params = { ...params, signature_image: `MODO_TESTE:${quem}` };
       // aceitar a proposta: o orçamento enviado mais recente, como o cliente o escolheria no portal
@@ -126,13 +136,14 @@ serve(async (req) => {
     }
 
     // Verify this user is a portal client
-    const { data: portalUser } = await supabase
+    const { data: portalUserBase } = await supabase
       .from("client_portal_users")
       .select("id, organization_id, created_by, client_id, proposal_id, quote_id, contract_id")
       .eq("auth_user_id", user.id)
       .limit(1)
       .maybeSingle();
 
+    const portalUser = portalUserBase ?? portalSimulado;
     if (!portalUser) {
       return new Response(JSON.stringify({ error: "Not a portal user" }), { status: 403, headers: corsHeaders });
     }
@@ -184,6 +195,8 @@ serve(async (req) => {
     // ── IDOR GUARD: direct portal-user row match, with entity_id fallback ──
     async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id", id: string): Promise<boolean> {
       if (!id) return false;
+      // modo de teste: só o documento verificado em «simular_cliente» (organização do super admin)
+      if (simulado) return id === docSimulado;
 
       // 1) Direct match: this portal user has a row for this exact document
       const { data: direct } = await supabase
