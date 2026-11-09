@@ -140,7 +140,7 @@ export function HojeTecnico(ctx: Ctx) {
 
       {/* 22/10: a semana do técnico (a linha dele na agenda do RH); 23/10: é sempre o técnico que se vê aqui (`tecnico`) */}
       <Suspense fallback={<p className="mt-10 text-[15px] text-muted-foreground" role="status">A carregar a agenda…</p>}>
-        <MinhaAgenda S={S} tecnico={eu} irObra={(id) => run(() => A.abrirPlano(id))} irNegocio={(id) => run(() => A.abrir(id))} id="ht-minha-agenda" className="mt-10" />
+        <MinhaAgenda S={S} tecnico={eu} irObra={(id) => run(() => A.abrirPlano(id))} irNegocio={(id) => { if (ctx.podeVerNegocio !== false) run(() => A.abrir(id)); }} id="ht-minha-agenda" className="mt-10" />
       </Suspense>
         </div>
       </div>

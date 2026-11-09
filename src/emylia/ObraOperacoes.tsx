@@ -384,10 +384,11 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       {p.estado === "concluída" && d.obra.auto && <div className="mt-4"><AutoNoNegocio S={ctx.S} d={d} /></div>}
 
       {/* 3/11: os problemas que o cliente reportou na conversa (com fotografias): o gestor cria as tarefas e decide se gera orçamento */}
-      <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={problemaAberto} setAbrir={setProblemaAberto} />
+      {/* 09/11 (20270111100000): com a leitura reduzida (sem pessoas.view) a conversa não é de quem entrou (neg_mensagens_ler recusa) */}
+      {!ctx.leituraReduzida && <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={problemaAberto} setAbrir={setProblemaAberto} />}
 
       {/* ------------------------------------------------ 3. a conversa com o cliente, sempre à vista (27/10) */}
-      <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrirProblema} />
+      {!ctx.leituraReduzida && <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrirProblema} />}
 
       {/* ------------------------------------------------ 4. o resto, uma parte de cada vez */}
       <div role="tablist" aria-label="Partes da obra" className="sticky top-0 z-10 -mx-4 mt-8 flex gap-1 overflow-x-auto border-b border-border bg-background/95 px-4 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden">
@@ -692,7 +693,7 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
           <ValidarVarias ctx={ctx} d={d} PV={PV} />
         </div>
       )}
-      {cli.length > 0 && (
+      {cli.length > 0 && !ctx.leituraReduzida && (
         <LinhaAgora I={MessageCircle} tom="aviso" titulo={`${d.nome.split(" ")[0]} escreveu${cli.length > 1 ? ` (${cli.length} mensagens)` : ""}`} texto={`«${cli[cli.length - 1].t}»`} acao="Responder" fazer={() => irPara("chat")} />
       )}
       {ocorr.map((x, k) => <LinhaAgora key={"o" + k} I={AlertTriangle} tom="mau" titulo={`${x.quem.split(" ")[0]} reportou um problema`} texto={x.t} acao="Ver o dia" fazer={() => verDia(p.dia)} />)}
@@ -1545,10 +1546,12 @@ function useConversaObra(ctx: Ctx, d: Negocio) {
   const { A, run } = ctx;
   // 30/10 (2.0): com a base ligada a conversa é a da base, a mesma do portal do cliente (o autor é o utilizador com sessão); no protótipo de
   // sempre continua a do estado local do negócio.
-  const org = orgDoModoReal();
+  // 09/11 (20270111100000): com a leitura reduzida (sem pessoas.view) não se lê a conversa (neg_mensagens_ler recusa) nem se mostra
+  const reduzida = !!ctx.leituraReduzida;
+  const org = reduzida ? null : orgDoModoReal();
   const real = useConversaReal(org, d.id);
   const fotoDe = useMemo(() => (org ? fotoDaEquipa(org) : undefined), [org]);
-  const msgs = org ? real.msgs : (d.obra.chat ?? []);
+  const msgs = reduzida ? [] : org ? real.msgs : (d.obra.chat ?? []);
   const marcarLidas = () => (org ? void real.marcarComoLidas() : run(() => A.lerChat(d.id)));
   const enviar = (t: string): void | Promise<boolean> => (org ? real.enviar(t) : run(() => A.mensagemObra(d.id, "empresa", t)));
   // 3/11: a resposta a um problema do cliente: devolve se seguiu (no protótipo, segue sempre)
@@ -1622,14 +1625,17 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       )}
       <ProximoRececaoNegocio d={d} A={A} go={go} />
       <div className="mt-2 flex flex-wrap gap-x-5">
-        {d.obra.ec?.ref && (
+        {/* 09/11: só as ligações às páginas que quem entrou pode abrir (client_orders.view; pessoas.view) */}
+        {d.obra.ec?.ref && ctx.podeVerInventario !== false && (
           <button type="button" onClick={go(() => A.abrirInv(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
             Abrir a encomenda no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
           </button>
         )}
-        <button type="button" onClick={go(() => A.abrir(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
-          Ver o negócio, do contrato à obra<ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </button>
+        {ctx.podeVerNegocio !== false && (
+          <button type="button" onClick={go(() => A.abrir(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+            Ver o negócio, do contrato à obra<ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
       </div>
     </section>
   );

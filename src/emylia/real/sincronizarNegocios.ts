@@ -86,10 +86,12 @@ export interface Sincronizacao { gravados: number; erros: string[]; avisos: stri
 /** Grava os negócios que mudaram. Atualiza `refs` e a fotografia com o que ficou gravado. Os de `soLeitura` (negócios do CRM, com
  *  documentos do CRM) nunca se gravam: a base recusa-os (NE005) e um que faltasse em `refs` criava uma lead nova. */
 export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado, refs: Map<number, RefNegocio>, foto: Map<number, string>, ids: IdsServico,
-  soLeitura: ReadonlySet<number> = new Set()): Promise<Sincronizacao> {
+  soLeitura: ReadonlySet<number> = new Set(), opcoes: { soObra?: boolean } = {}): Promise<Sincronizacao> {
   const out: Sincronizacao = { gravados: 0, erros: [], avisos: [] };
   const falhados = new Set<number>(), contados = new Set<number>();
-  for (const d of negociosMudados(S.deals, foto)) {
+  // 09/11 (20270111100000): quem só lê as obras (sem pessoas.view, com negocios.obra.executar) recebe o negócio reduzido e a base recusa-lhe
+  // neg_guardar_negocio (CT001): só se grava a obra (obra_guardar_negocio)
+  for (const d of opcoes.soObra ? [] : negociosMudados(S.deals, foto)) {
     if (soLeitura.has(d.id)) continue;
     try {
       if (!refs.has(d.id)) {
