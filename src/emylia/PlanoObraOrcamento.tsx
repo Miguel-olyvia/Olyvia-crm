@@ -24,9 +24,9 @@ import { Contagem, useReduzir, vibrar } from "./movimento";
 import { useLargura } from "./largura";
 import { SEM_VER_CUSTOS, podeVerCustos } from "./permissoes";
 import { nomeCurtoTarefa } from "./obraOps";
-import { materiaisDaReceita, passosDaTarefa, planoEmDatas } from "./planoDaVisita";
+import { materiaisDaReceita, passosDaTarefa, planoEmDatas, type PlanoDatas, type TarefaDatas } from "./planoDaVisita";
 import { EquipaDaObra, TrocarTecnico } from "./EquipaDaObra";
-import { escolhasDoNegocio, type EscolhasEquipa } from "./preparacaoObra";
+import { chaveTarefa, escolhasDoNegocio, type EscolhasEquipa } from "./preparacaoObra";
 
 export { COR_FASE } from "./planoObra";
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
@@ -58,6 +58,9 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   const calendario = useMemo(() => diasDaObra(inicio, nDias + 1), [isoDia(inicio), nDias]); // eslint-disable-line react-hooks/exhaustive-deps
   const saltados = feriadosSaltados(calendario.slice(0, nDias));
   const fimData = calendario[nDias - 1];
+  // 9/11 (Rúben: «o dono da obra precisa do máximo detalhe»): o plano com os técnicos e as datas (o mesmo que a obra vai ter)
+  const PD = useMemo(() => planoEmDatas(d, S, isoDia(inicio)), [d, S, isoDia(inicio), d.orc, d.f.plano_tecnicos, d.f.plano_equipa]); // eslint-disable-line react-hooks/exhaustive-deps
+  const daTarefa = (t: TarefaPrevista) => PD.tarefas.find((x) => x.chave === chaveTarefa({ nome: t.nome, fase: t.fase }));
   if (!P.tarefas.length) return null;
 
   // 15/10: no telemóvel, uma coluna só: o nome de cada tarefa numa linha por cima da sua barra (nunca cortado), e a grelha dos dias
@@ -227,6 +230,9 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
         </div>
       </div>
 
+      {/* 9/11 (Rúben: «a equipa deve ser a secção anterior a esta»): a equipa da obra, as agendas, os alertas e as sugestões */}
+      <EquipaNoOrcamento ctx={ctx} d={d} fechado={fechado} PD={PD} />
+
       {/* ------------------------------------------------ o Gantt e a curva (a mesma grelha de dias) */}
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -338,7 +344,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                       {veCusto && t.delta !== 0 && <span className={t.delta > 0 ? "text-destructive" : "text-success"}> {t.delta > 0 ? "+" : "−"}{eur(Math.abs(t.delta))}</span>}</>;
                     const detalhe = aqui && (
                       <div className="sticky left-4 mt-2 pb-2" style={{ width: tabela ? Math.min(largura - 2 * PAD, LW + gradeW) : linhaW }}>
-                        <DetalheTarefa t={t} d={d} ctx={ctx} fechado={fechado} direcao={direcao} inicio={dataCurta(calendario[Math.floor(t.inicio)])} />
+                        <DetalheTarefa t={t} d={d} ctx={ctx} fechado={fechado} direcao={direcao} inicio={dataCurta(calendario[Math.floor(t.inicio)])} PD={PD} td={daTarefa(t)} />
                       </div>
                     );
                     return tabela ? (
@@ -353,6 +359,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                             <span className="min-w-0 flex-1 truncate text-sm">{nomeCurtoTarefa(t.nome)}</span>
                             {/* só os dias: o custo está no detalhe (toque na tarefa) e na dica */}
                             <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground">{dias(t.dias)}{t.manual && " · mudado"}</span>
+                            {daTarefa(t) && <span className={cn("max-w-[6rem] shrink-0 truncate text-xs", daTarefa(t)!.ocupado || !daTarefa(t)!.tec ? "text-warning-foreground" : "text-foreground")} title={`${daTarefa(t)!.tecNome} · ${daTarefa(t)!.oficio}`}>{daTarefa(t)!.tec ? daTarefa(t)!.tecNome.split(" ")[0] : "Por atribuir"}</span>}
                           </button>
                           <div className="relative h-full shrink-0" style={{ width: gradeW }}>{barra}</div>
                         </div>
@@ -365,7 +372,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                           className={cn("sticky left-4 flex min-h-8 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary", aqui && "text-primary")}
                           style={{ width: linhaW }}>
                           <Ic className="h-4 w-4 shrink-0" style={{ color: COR_FASE[t.fase] }} aria-hidden="true" />
-                          <span className="min-w-0 flex-1 text-[15px] font-medium leading-snug">{t.nome}</span>
+                          <span className="min-w-0 flex-1 text-[15px] font-medium leading-snug">{t.nome}{daTarefa(t) && <span className="block text-xs font-normal text-muted-foreground">{daTarefa(t)!.tecNome} · {daTarefa(t)!.oficio}</span>}</span>
                           <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-muted-foreground">{custoTxt}</span>
                         </button>
                         <div className="relative h-8" style={{ width: gradeW }}>{barra}</div>
@@ -385,9 +392,6 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
           </div>
         </div>
       </div>
-
-      {/* 9/11 (Rúben: «aqui também, por baixo do orçamento»): a equipa da obra, as agendas, os alertas e as sugestões */}
-      <EquipaNoOrcamento ctx={ctx} d={d} fechado={fechado} inicio={isoDia(inicio)} />
 
       <Pagamentos P={P} d={d} ctx={ctx} calendario={calendario} fechado={fechado} prest={prestAtual} sugerido={sugerido} />
     </section>
@@ -471,8 +475,9 @@ function CurvaCusto({ P, prest, linhaW, colW, gradeW, calendario, faseOn }: {
 }
 
 /* ================================================================== o detalhe de uma tarefa */
-function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio }: {
+function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio, PD, td }: {
   t: TarefaPrevista; d: Negocio; ctx: Pick<Ctx, "S" | "A" | "run">; fechado: boolean; direcao: boolean; inicio: string;
+  PD: PlanoDatas; td?: TarefaDatas;
 }) {
   const { A, run, S } = ctx;
   // 9/11 (Rúben: «o que faz nos pontos elétricos?»): o que o técnico faz (os passos da receita) e os materiais, com a medida da linha
@@ -488,6 +493,16 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio }: {
         <p className="text-[15px] font-semibold">{t.nome}</p>
         <p className="text-sm text-muted-foreground">Fase {t.fase} · começa {inicio}</p>
       </div>
+      {td && (
+        <div className="grid gap-3 rounded-xl bg-muted/50 p-3 text-sm sm:grid-cols-[minmax(0,1fr)_20rem] sm:items-end">
+          <p><b className="font-medium">{td.tecNome}</b> · {td.oficio}{td.ocupado ? <span className="text-warning-foreground"> · {td.ocupado}</span> : null}
+            <span className="block text-muted-foreground">{td.dur > 1 ? `De ${dataCurta(td.inicio)} a ${dataCurta(td.fim)}` : dataCurta(td.inicio)} · {nfmt(td.h)} h{td.qtd ? ` · ${nfmt(td.qtd.q)} ${td.qtd.un}` : ""}</span></p>
+          {!fechado && <TrocarTecnico t={td} P={PD} S={ctx.S} negocio={d.id} escolhas={escolhasDoNegocio(d.f)} mudar={(e) => ctx.run(() => {
+            ctx.A.campo(d.id, "plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : "");
+            ctx.A.campo(d.id, "plano_equipa", e.equipa?.length ? JSON.stringify(e.equipa) : "");
+          })} />}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Duração" className="inline-flex items-center rounded-lg border border-input bg-background p-0.5">
           <button type="button" aria-label="Menos meio dia" disabled={fechado || t.dias <= 0.5} className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted disabled:opacity-40"
@@ -622,10 +637,9 @@ function Pagamentos({ P, d, ctx, calendario, fechado, prest, sugerido }: {
 }
 
 /** 9/11: a equipa da obra no orçamento (o mesmo plano que a obra vai ter): quem faz cada tarefa, as agendas, os alertas e as sugestões. */
-function EquipaNoOrcamento({ ctx, d, fechado, inicio }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Negocio; fechado: boolean; inicio: string }) {
+function EquipaNoOrcamento({ ctx, d, fechado, PD }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Negocio; fechado: boolean; PD: PlanoDatas }) {
   const { S, A, run } = ctx;
   const escolhas = escolhasDoNegocio(d.f);
-  const PD = useMemo(() => planoEmDatas(d, S, inicio), [d, S, inicio, d.orc, d.f.plano_tecnicos, d.f.plano_equipa]); // eslint-disable-line react-hooks/exhaustive-deps
   const mudar = fechado ? undefined : (e: EscolhasEquipa) => run(() => {
     A.campo(d.id, "plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : "");
     A.campo(d.id, "plano_equipa", e.equipa?.length ? JSON.stringify(e.equipa) : "");
