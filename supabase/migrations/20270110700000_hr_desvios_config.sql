@@ -4,10 +4,10 @@
 --
 -- PROVISORIO. NAO FAZER db push sem: (1) listar o remoto imediatamente antes,
 -- a partir do worktree rh-pessoas (project-ref uetjghdkwbywbftedtth), e
--- confirmar que so este ficheiro e 20270110510000 ficam pendentes, acima de
+-- confirmar que so este ficheiro e 20270110710000 ficam pendentes, acima de
 -- 20270109900000; (2) correr a prova na nike em transaccao desfeita ANTES do
 -- push; (3) revisao ecc:database-reviewer e ecc:security-reviewer. Entra no
--- MESMO push que 20270110510000 (deteccao e fecho), que depende desta.
+-- MESMO push que 20270110710000 (deteccao e fecho), que depende desta.
 --
 --
 -- -- PRECISA DE CODIGO NOVO NO MESMO ENVIO --------------------------------------
@@ -24,7 +24,7 @@
 --    (valido_ate NULL ou >= d), e nao esta substituida. margem_min 0..120 ou
 --    NULL. SEM VERSAO EM VIGOR, OU COM UMA VERSAO DE MARGEM NULL ("sem
 --    margem"), A FUNCIONALIDADE ESTA DESLIGADA nessa data: sem deteccao, sem
---    bloqueio no fecho, relatorio igual ao de hoje (20270110510000 e o
+--    bloqueio no fecho, relatorio igual ao de hoje (20270110710000 e o
 --    cliente dependem disto). Uma versao NULL e a forma de desligar a partir
 --    de uma data.
 --    Historico: so acrescenta. UPDATE so para FECHAR (valido_ate de NULL para
@@ -76,7 +76,7 @@
 -- -- COMO SE REVERTE -----------------------------------------------------------
 --
 -- Sem ficheiro de reversao, de proposito. A mao, por migration nova, e so
--- depois de reverter 20270110510000 (pessoas_desvios tem FK para esta tabela):
+-- depois de reverter 20270110710000 (pessoas_desvios tem FK para esta tabela):
 -- largar as RPCs, as funcoes internas e, depois de exportar e de largar os
 -- triggers de historico, a tabela.
 -- ==============================================================================
@@ -819,7 +819,7 @@ $conferir$;
 --
 -- 1. "supabase migration list --linked" imediatamente antes, a partir do
 --    worktree rh-pessoas (project-ref uetjghdkwbywbftedtth): pendentes so este
---    ficheiro e 20270110510000, acima de 20270109900000.
+--    ficheiro e 20270110710000, acima de 20270109900000.
 -- 2. Prova na nike ANTES do push: correr os dois ficheiros numa transaccao
 --    terminada por um RAISE EXCEPTION (desfaz tudo).
 -- ==============================================================================

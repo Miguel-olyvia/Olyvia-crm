@@ -5,7 +5,7 @@
 --
 -- PROVISORIO. NAO FAZER db push sem: (1) listar o remoto imediatamente antes,
 -- a partir do worktree rh-pessoas (project-ref uetjghdkwbywbftedtth):
--- pendentes so 20270110500000 (a configuracao, de que esta depende) e este,
+-- pendentes so 20270110700000 (a configuracao, de que esta depende) e este,
 -- acima de 20270109900000; (2) correr a prova na nike em transaccao desfeita
 -- ANTES do push (o conferir abaixo e essa prova); (3) revisao
 -- ecc:database-reviewer e ecc:security-reviewer.
@@ -14,7 +14,7 @@
 -- -- PRECISA DE CODIGO NOVO NO MESMO ENVIO --------------------------------------
 --
 -- NAO para nada partir. Enquanto nenhuma organizacao tiver margem configurada
--- (20270110500000 nasce sem nenhuma), a deteccao nao cria nada e o fecho da
+-- (20270110700000 nasce sem nenhuma), a deteccao nao cria nada e o fecho da
 -- folha faz exactamente o que fazia. O cliente (E5-E7: relatorio, fila,
 -- traducao do erro do fecho) so e preciso para USAR a funcionalidade. Se
 -- alguem gravar uma margem antes do cliente E7 estar publicado, o fecho
@@ -617,7 +617,7 @@ $blk$  -- ---- Desvios por validar (PREPARADO, DESLIGADO) ----------------------
   --   RAISE EXCEPTION 'processamento_fechar_desvios_por_validar: ha desvios por validar neste periodo; validar ou recusar cada um antes de fechar.'
   --     USING ERRCODE = '23514';
   -- END IF;$blk$,
-$blk$  -- ---- Desvios por validar (ligado em 20270110510000) ------------------------
+$blk$  -- ---- Desvios por validar (ligado em 20270110710000) ------------------------
   -- So actua se houver uma margem de tempo (nao NULL) em vigor em algum dia
   -- do periodo; sem ela, o fecho fica exactamente como antes. Detecta de novo
   -- o periodo inteiro, recusa enquanto houver dias por validar de pessoas
@@ -724,11 +724,11 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- G3. Suporte: a configuracao (20270110500000), as funcoes das horas extra
+  -- G3. Suporte: a configuracao (20270110700000), as funcoes das horas extra
   --     (20270104800000) e as vistas e colunas que a deteccao le.
   IF to_regclass('public.hr_desvios_config') IS NULL
      OR to_regprocedure('public.hr_desvios_config_guardar_core(uuid, date, integer, uuid)') IS NULL THEN
-    RAISE EXCEPTION 'G3: falta hr_desvios_config ou hr_desvios_config_guardar_core (aplicar 20270110500000 antes).';
+    RAISE EXCEPTION 'G3: falta hr_desvios_config ou hr_desvios_config_guardar_core (aplicar 20270110700000 antes).';
   END IF;
   SELECT string_agg(f, ', ') INTO v_lista
     FROM unnest(ARRAY['public.has_anew_permission_in_org(uuid, text, uuid)',
@@ -1787,7 +1787,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.hr_processamento_resultado_erro(jsonb) IS
-'Interna. NULL se o objecto e um resultado bem formado (o formato do cabecalho de 20270109900000, mais o campo OPCIONAL desvios_assinatura de 20270110510000: md5 ou null); senao, a descricao do que esta mal. So valida a forma, nao os valores do calculo.';
+'Interna. NULL se o objecto e um resultado bem formado (o formato do cabecalho de 20270109900000, mais o campo OPCIONAL desvios_assinatura de 20270110710000: md5 ou null); senao, a descricao do que esta mal. So valida a forma, nao os valores do calculo.';
 
 REVOKE ALL ON FUNCTION public.hr_desvios_assinaturas_periodo(uuid, date, date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.rpc_hr_desvios_assinaturas(uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -2045,7 +2045,7 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
-  -- ---- Desvios por validar (ligado em 20270110510000) ------------------------
+  -- ---- Desvios por validar (ligado em 20270110710000) ------------------------
   -- So actua se houver uma margem de tempo (nao NULL) em vigor em algum dia
   -- do periodo; sem ela, o fecho fica exactamente como antes. Detecta de novo
   -- o periodo inteiro, recusa enquanto houver dias por validar de pessoas
@@ -2140,7 +2140,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.rpc_hr_processamento_periodo_fechar(uuid, jsonb) IS
-'Fecha um periodo de processamento salarial ABERTO e grava, na mesma transaccao, o resultado de cada pessoa em hr_processamento_resultados. Exige hr.processamento.periodo.gerir na organizacao do periodo (verificada antes de revelar se o periodo existe). p_resultados: array com um objecto por pessoa (formato no cabecalho de 20270109900000): obrigatorias as activas com vinculo sobreposto ao periodo; permitidas as que tem vinculo sobreposto, activas ou arquivadas. Recusa estrutura mal formada, pessoas repetidas, sem vinculo no periodo, obrigatorias em falta, totais.lancamentos_pontuais diferente da soma dos lancamentos manuais nao anulados, regra salarial diferente da em vigor no data_fim, retribuicao que nao e a em vigor no data_fim, e cargo de outra organizacao. Desde 20270110510000: se houver margem de tempo (hr_desvios_config, nao NULL) em vigor em algum dia do periodo, detecta os desvios do periodo, recusa com processamento_fechar_desvios_por_validar (23514) enquanto houver dias a_validar de pessoas OBRIGATORIAS, e recusa com processamento_fechar_desvios_desactualizados (23514) se o campo opcional desvios_assinatura de algum resultado nao for a assinatura actual dos desvios dessa pessoa (rpc_hr_desvios_assinaturas). Uma recusa desfaz a deteccao: o cliente deteta e valida antes de fechar. Sem margem, igual a antes. O calculo e do cliente; a RPC valida estrutura, coerencia dos lancamentos e versoes, e grava. Irreversivel: sem reabertura auditada.';
+'Fecha um periodo de processamento salarial ABERTO e grava, na mesma transaccao, o resultado de cada pessoa em hr_processamento_resultados. Exige hr.processamento.periodo.gerir na organizacao do periodo (verificada antes de revelar se o periodo existe). p_resultados: array com um objecto por pessoa (formato no cabecalho de 20270109900000): obrigatorias as activas com vinculo sobreposto ao periodo; permitidas as que tem vinculo sobreposto, activas ou arquivadas. Recusa estrutura mal formada, pessoas repetidas, sem vinculo no periodo, obrigatorias em falta, totais.lancamentos_pontuais diferente da soma dos lancamentos manuais nao anulados, regra salarial diferente da em vigor no data_fim, retribuicao que nao e a em vigor no data_fim, e cargo de outra organizacao. Desde 20270110710000: se houver margem de tempo (hr_desvios_config, nao NULL) em vigor em algum dia do periodo, detecta os desvios do periodo, recusa com processamento_fechar_desvios_por_validar (23514) enquanto houver dias a_validar de pessoas OBRIGATORIAS, e recusa com processamento_fechar_desvios_desactualizados (23514) se o campo opcional desvios_assinatura de algum resultado nao for a assinatura actual dos desvios dessa pessoa (rpc_hr_desvios_assinaturas). Uma recusa desfaz a deteccao: o cliente deteta e valida antes de fechar. Sem margem, igual a antes. O calculo e do cliente; a RPC valida estrutura, coerencia dos lancamentos e versoes, e grava. Irreversivel: sem reabertura auditada.';
 
 
 -- ==============================================================================
@@ -2911,7 +2911,7 @@ $conferir$;
 --
 -- 1. "supabase migration list --linked" imediatamente antes, a partir do
 --    worktree rh-pessoas (project-ref uetjghdkwbywbftedtth): pendentes so
---    20270110500000 e este, acima de 20270109900000.
+--    20270110700000 e este, acima de 20270109900000.
 -- 2. Prova na nike ANTES do push: correr os dois ficheiros numa transaccao
 --    terminada por um RAISE EXCEPTION (desfaz tudo); as guardas confirmam o
 --    corpo do fecho no remoto, o conferir prova o resto e diz o custo da
