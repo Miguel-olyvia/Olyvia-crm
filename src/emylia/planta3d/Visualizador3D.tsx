@@ -14,13 +14,14 @@ import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
 import { construirBancada } from "./modelosHtml/bancada3d";
 import { VELAR_SPECS } from "./modelosHtml/lavaLoicas";
 import { pecasDosModulos } from "./composicaoCozinha";
+import { AcordarAndar, CamaraAndar, ControlesAndar, novaEntrada, type EntradaAndar } from "./Andar";
 import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, urlDoGenerico, type CategoriaGlb } from "./categoriasGlb";
 import { USAR_GLB, criarMaterialEspelho, lerGlb, montarGenerico, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
 
-export type Vista3D = "cima" | "3d" | "pessoa";
+export type Vista3D = "cima" | "3d" | "pessoa" | "andar";
 export interface Visualizador3DProps {
   espaco: Espaco;
   /** Os produtos usados no espaço, por id. */
@@ -36,6 +37,8 @@ export interface Visualizador3DProps {
   camara?: { chave: string; pos: V3; alvo: V3 } | null;
   /** Mover a peça escolhida arrastando-a no 3D (as regras e a gravação vêm da planta). Sem isto, só se escolhe. */
   mover?: Mover3D;
+  /** modo Andar: a altura dos olhos (m) */
+  alturaOlhos?: number;
 }
 
 type V3 = [number, number, number];
@@ -857,7 +860,7 @@ function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, s
 }
 
 /* ------------------------------------------------------------------ paredes, aberturas, chão e tecto */
-function ParedeCena({ parede, indice, espaco }: { parede: Parede; indice: number; espaco: Espaco }) {
+function ParedeCena({ parede, indice, espaco, semEsconder = false }: { parede: Parede; indice: number; espaco: Espaco; /** modo Andar: vê-se de dentro, nenhuma parede se esconde */ semEsconder?: boolean }) {
   const c = comprimento(parede), esp = parede.espessura;
   const rev = revestimentoDe("parede", espaco.revestimentos.parede);
   const mat = useRevestimento(rev, c, espaco.peDireito);
@@ -870,7 +873,7 @@ function ParedeCena({ parede, indice, espaco }: { parede: Parede; indice: number
   const grupo = useRef<THREE.Group>(null);
   const meio = { x: (parede.a.x + parede.b.x) / 2, z: (parede.a.y + parede.b.y) / 2 };
   useFrame(({ camera }) => {
-    if (grupo.current) grupo.current.visible = (-n.x) * (camera.position.x - meio.x) + (-n.y) * (camera.position.z - meio.z) <= 0.05;
+    if (grupo.current) grupo.current.visible = semEsconder || (-n.x) * (camera.position.x - meio.x) + (-n.y) * (camera.position.z - meio.z) <= 0.05;
   });
   return (
     <group ref={grupo} position={[parede.a.x, 0, parede.a.y]} rotation={[0, ang, 0]}>
@@ -1018,25 +1021,29 @@ function EstudioAmbiente() {
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, alturaOlhos = 1.6 }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
+  // o modo Andar: a entrada (teclas, joystick, olhar) partilhada entre os controlos HTML e a câmara; a altura dos olhos vem do painel
+  const entrada = useRef<EntradaAndar>(novaEntrada(alturaOlhos)), contentor = useRef<HTMLDivElement>(null);
+  useEffect(() => { entrada.current.olhos = alturaOlhos; }, [alturaOlhos]);
   return (
-    <div role="img" aria-label={descricao} className="h-full w-full touch-none" onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
+    <div ref={contentor} tabIndex={vista === "andar" ? 0 : undefined} role="img" aria-label={descricao} className="relative h-full w-full touch-none outline-none" onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
       onPointerUpCapture={() => { if (!arrasto && alvo.current.controls) alvo.current.controls.enabled = true; }}>
       {/* como o HTML: ACES com exposição 1,08, sombras suaves (PCF), ambiente de estúdio e fundo claro neutro */}
       <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }} onPointerMissed={() => onSelecionar(null)}>
         <color attach="background" args={["#ecebe7"]} />
         <EstudioAmbiente />
         <LuzEstudio espaco={espaco} />
-        <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} />
+        {vista === "andar" ? <><CamaraAndar espaco={espaco} modelos={modelos} entrada={entrada} /><AcordarAndar /></> : <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} />}
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
-        {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
+        {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} semEsconder={vista === "andar"} />)}
         <SombraDeContacto espaco={espaco} />
         {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} /> : null; })}
         {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
         <PonteCamara alvo={alvo} />
       </Canvas>
+      {vista === "andar" && <ControlesAndar entrada={entrada} contentor={contentor} />}
     </div>
   );
 }

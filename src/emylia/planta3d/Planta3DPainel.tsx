@@ -16,7 +16,8 @@ import type { Mover3D, Vista3D } from "./Visualizador3D";
 
 const Visualizador3D = lazy(() => import("./Visualizador3D"));
 const SEL = "h-11 min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
-const VISTAS: { v: Vista3D; n: string }[] = [{ v: "cima", n: "Vista de cima" }, { v: "3d", n: "Vista 3D" }, { v: "pessoa", n: "Primeira pessoa" }];
+// «Andar»: câmara livre (WASD/setas, joystick no telemóvel); «Vista 3D» volta à vista orbital
+const VISTAS: { v: Vista3D; n: string }[] = [{ v: "cima", n: "Vista de cima" }, { v: "3d", n: "Vista 3D" }, { v: "pessoa", n: "Primeira pessoa" }, { v: "andar", n: "Andar" }];
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 
 export interface Planta3DPainelProps {
