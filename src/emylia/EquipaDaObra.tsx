@@ -6,19 +6,17 @@
 //  · criar a equipa da obra (os técnicos que se escolhem primeiro) e guardá-la para outras obras (neste browser).
 // As escolhas ficam no negócio (f.plano_tecnicos, f.plano_equipa) ou no projeto do Estúdio, e o plano da obra usa-as (preparacaoObra.ts).
 import { useMemo, useState } from "react";
-import { AlertTriangle, CalendarDays, Check, Lightbulb, Plus, Save, Users, X } from "lucide-react";
+import { AlertTriangle, CalendarDays, Check, Lightbulb, Plus, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, type Estado } from "./motor";
 import { ausenteNoRh } from "./equipa/tecnicos";
 import { dataCurta, deIso, diasDaObra, isoDia } from "./planoObra";
 import { motivoOcupado, ocupacaoDosTecnicos, type EscolhasEquipa } from "./preparacaoObra";
+import { equipaDe, useEquipasObra, type EquipaObra } from "./equipa/equipasObra";
+import { irPara } from "./urlNegocio";
 import type { PlanoDatas, TarefaDatas } from "./planoDaVisita";
 
-const CHAVE_EQUIPAS = "olyvia.equipas.v1";
-interface EquipaGuardada { nome: string; membros: string[] }
-const lerEquipas = (): EquipaGuardada[] => { try { return JSON.parse(localStorage.getItem(CHAVE_EQUIPAS) ?? "[]"); } catch { return []; } };
-const gravarEquipas = (L: EquipaGuardada[]) => { try { localStorage.setItem(CHAVE_EQUIPAS, JSON.stringify(L)); } catch { /* fica só no ecrã */ } };
 const nomeTec = (id: string | null) => TECS.find((x) => x.id === id)?.n ?? "Por atribuir";
 const primeiro = (n: string) => n.split(" ")[0];
 
@@ -51,7 +49,7 @@ export function TrocarTecnico({ t, P, S, negocio, escolhas, mudar }: { t: Tarefa
     <label className="grid max-w-md gap-1 text-sm font-medium">Quem faz
       <select value={t.aMao ? t.tec ?? "" : ""} onChange={(e) => escolher(e.target.value)} className="h-11 rounded-lg border border-input bg-background px-3 text-[15px]">
         <option value="">Automático: {t.tecNome}{t.ocupado ? ` (${t.ocupado})` : ""}</option>
-        {L.map((x) => <option key={x.id} value={x.id}>{x.n} · {x.sk}{x.motivo ? ` · ${x.motivo}` : " · livre"}</option>)}
+        {L.map((x) => <option key={x.id} value={x.id}>{x.n} · {x.sk}{equipaDe(x.id) ? ` · ${equipaDe(x.id)!.nome} (vem a equipa)` : ""}{x.motivo ? ` · ${x.motivo}` : " · livre"}</option>)}
       </select>
     </label>
   );
@@ -61,7 +59,7 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
   const [agenda, setAgenda] = useState<string | null>(null);
   const [criar, setCriar] = useState(false);
   const [agendas, setAgendas] = useState(true);
-  const [guardadas, setGuardadas] = useState<EquipaGuardada[]>(lerEquipas);
+  const todasEquipas = useEquipasObra();
   const equipa = escolhas.equipa ?? [];
 
   const conflitos = P.tarefas.filter((t) => t.tec && t.ocupado);
@@ -111,10 +109,10 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
 
       {/* 2. as pessoas: o que cada uma faz e quando; tocar abre a agenda */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-primary" aria-hidden="true" />Quem vem{equipa.length ? " · equipa fixa desta obra" : ""}</h4>
+        <h4 className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-primary" aria-hidden="true" />Quem vem{P.equipas.length ? ` · ${P.equipas.map((e) => e.nome).join(", ")}` : ""}</h4>
         <span className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" className="min-h-10" aria-expanded={agendas} onClick={() => setAgendas((x) => !x)}><CalendarDays className="mr-1 h-4 w-4" aria-hidden="true" />{agendas ? "Esconder as agendas" : "Ver as agendas"}</Button>
-          {mudar && <Button type="button" variant="outline" size="sm" className="min-h-10" aria-expanded={criar} onClick={() => setCriar((x) => !x)}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />{equipa.length ? "Mudar a equipa" : "Escolher a equipa"}</Button>}
+          {mudar && <Button type="button" variant="outline" size="sm" className="min-h-10" aria-expanded={criar} onClick={() => setCriar((x) => !x)}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />{P.equipas.length ? "As equipas" : "Escolher equipas"}</Button>}
         </span>
       </div>
       {pessoas.length ? (
@@ -123,8 +121,8 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
             <li key={x.id} className="p-3">
               <button type="button" aria-expanded={agenda === x.id} onClick={() => setAgenda(agenda === x.id ? null : x.id)} className="flex w-full items-start justify-between gap-3 text-left">
                 <span className="min-w-0">
-                  <b className="font-semibold">{x.n}</b> <span className="text-muted-foreground">· {x.oficio}</span>
-                  <span className="block text-sm text-muted-foreground">{x.ts.map((t) => `${t.nome} (${dataCurta(t.inicio)}${t.dur > 1 ? `–${dataCurta(t.fim)}` : ""})`).join(" · ")}</span>
+                  <b className="font-semibold">{x.n}</b> <span className="text-muted-foreground">· {x.oficio}{x.equipa ? ` · ${x.equipa}` : ""}</span>
+                  <span className="block text-sm text-muted-foreground">{x.ts.length ? x.ts.map((t) => `${t.nome} (${dataCurta(t.inicio)}${t.dur > 1 ? `–${dataCurta(t.fim)}` : ""})`).join(" · ") : "Vem com a equipa (sem tarefas suas nesta obra)"}</span>
                 </span>
                 <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", x.conflitos.length ? "bg-warning/20 text-amber-800 dark:text-amber-300" : "bg-success/15 text-success")}>
                   {x.conflitos.length ? `ocupado em ${x.conflitos.length} ${x.conflitos.length === 1 ? "tarefa" : "tarefas"}` : "livre"}
@@ -150,11 +148,7 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
       {agendas && <Disponibilidade P={P} S={S} negocio={negocio} equipa={equipa} />}
 
       {criar && mudar && (
-        <CriarEquipa P={P} S={S} negocio={negocio} atual={equipa} guardadas={guardadas}
-          usar={(membros) => { mudar({ ...escolhas, equipa: membros }); setCriar(false); }}
-          guardar={(e) => { const L = [...guardadas.filter((x) => x.nome !== e.nome), e]; setGuardadas(L); gravarEquipas(L); }}
-          apagar={(nome) => { const L = guardadas.filter((x) => x.nome !== nome); setGuardadas(L); gravarEquipas(L); }}
-          fechar={() => setCriar(false)} />
+        <EscolherEquipas P={P} S={S} negocio={negocio} equipas={todasEquipas} escolhas={escolhas} mudar={mudar} fechar={() => setCriar(false)} />
       )}
     </section>
   );
@@ -209,64 +203,68 @@ function AgendaTecnico({ id, P, S, negocio, fechar }: { id: string; P: PlanoData
   );
 }
 
-/** Criar a equipa da obra: os técnicos (com a disponibilidade nos dias da obra), usar nesta obra e guardar para outras. */
-function CriarEquipa({ P, S, negocio, atual, guardadas, usar, guardar, apagar, fechar }: {
-  P: PlanoDatas; S: Estado; negocio?: number; atual: string[]; guardadas: EquipaGuardada[];
-  usar: (m: string[]) => void; guardar: (e: EquipaGuardada) => void; apagar: (nome: string) => void; fechar: () => void;
+/**
+ * 9/11 (Rúben: «técnicos isolados e técnicos associados a equipas: ou vem toda a equipa, ou não vem nenhum membro»). As equipas da empresa
+ * (geridas em Equipas de obra): cada uma com os membros e quantos dias estão ocupados nos dias desta obra; «Vem esta equipa» põe-na na obra
+ * (as tarefas dos ofícios dela passam para os membros). Os técnicos isolados escolhem-se tarefa a tarefa.
+ */
+function EscolherEquipas({ P, S, negocio, equipas, escolhas, mudar, fechar }: {
+  P: PlanoDatas; S: Estado; negocio?: number; equipas: EquipaObra[]; escolhas: EscolhasEquipa; mudar: (e: EscolhasEquipa) => void; fechar: () => void;
 }) {
-  const [sel, setSel] = useState<string[]>(atual.length ? atual : P.equipa.map((x) => x.id));
-  const [nome, setNome] = useState("");
   const ocup = useMemo(() => ocupacaoDosTecnicos(S, negocio), [S, negocio]);
   const diasObra = P.inicio ? diasDaObra(P.inicio, Math.max(1, P.dias)).map(isoDia) : [];
   const ocupados = (id: string) => diasObra.filter((iso) => ocup.get(id)?.has(iso) || ausenteNoRh(id, iso) || TECS.find((x) => x.id === id)?.feriasDatas?.includes(iso)).length;
-  const porOficio = [...new Set(TECS.map((x) => x.sk))].sort((a, b) => a.localeCompare(b, "pt"));
+  const ativas = equipas.filter((e) => e.ativa && e.membros.length);
+  const naObra = new Set(P.equipas.map((e) => e.id));
+  const escolhidas = new Set(escolhas.equipas ?? []);
+  const isolados = TECS.filter((x) => !ativas.some((e) => e.membros.includes(x.id)));
+  const alternar = (id: string) => {
+    const L = new Set(escolhidas);
+    if (L.has(id) || naObra.has(id)) {
+      L.delete(id);
+      // sem a equipa: as tarefas dadas à mão a membros dela voltam ao automático
+      const membros = new Set(ativas.find((e) => e.id === id)?.membros ?? []);
+      const tecnicos = Object.fromEntries(Object.entries(escolhas.tecnicos ?? {}).filter(([, t]) => !membros.has(t)));
+      mudar({ ...escolhas, equipas: [...L], tecnicos });
+    } else mudar({ ...escolhas, equipas: [...L, id] });
+  };
   const precisa = new Set(P.tarefas.map((t) => t.oficio));
-  const falta = [...precisa].filter((o) => o !== "Por definir" && !TECS.some((x) => x.sk === o && sel.includes(x.id)));
   return (
     <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/[0.03] p-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold">A equipa desta obra</p>
-        <Button type="button" variant="ghost" size="sm" className="min-h-9" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" aria-hidden="true" /></Button>
+        <p className="text-sm font-semibold">As equipas da empresa</p>
+        <span className="flex items-center gap-1">
+          <button type="button" className="min-h-9 rounded-full px-3 text-sm font-medium text-primary hover:bg-primary/[0.06]" onClick={() => irPara("/equipas-obra")}>Gerir as equipas</button>
+          <Button type="button" variant="ghost" size="sm" className="min-h-9" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" aria-hidden="true" /></Button>
+        </span>
       </div>
-      {guardadas.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 text-sm"><span className="text-muted-foreground">Equipas guardadas:</span>
-          {guardadas.map((e) => (
-            <span key={e.nome} className="inline-flex items-center rounded-full border border-border bg-card">
-              <button type="button" className="min-h-9 px-3" onClick={() => setSel(e.membros.filter((id) => TECS.some((x) => x.id === id)))}>{e.nome}</button>
-              <button type="button" className="min-h-9 pr-2 text-muted-foreground" aria-label={`Apagar a equipa ${e.nome}`} onClick={() => apagar(e.nome)}><X className="h-3.5 w-3.5" /></button>
-            </span>
-          ))}
-        </div>
+      {!ativas.length ? (
+        <p className="text-sm text-muted-foreground">Ainda não há equipas: todos os técnicos são isolados. Crie-as em «Gerir as equipas».</p>
+      ) : (
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {ativas.map((e) => {
+            const vem = naObra.has(e.id) || escolhidas.has(e.id);
+            const dias = Math.max(0, ...e.membros.map(ocupados));
+            const serve = e.membros.some((m) => precisa.has(TECS.find((x) => x.id === m)?.sk ?? ""));
+            return (
+              <li key={e.id} className={cn("rounded-xl border p-3", vem ? "border-primary bg-card" : "border-border bg-card/60")}>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="min-w-0"><b className="font-semibold">{e.nome}</b>
+                    <span className={cn("block text-xs", dias ? "text-amber-800 dark:text-amber-300" : "text-success")}>{dias ? `ocupada ${dias} ${dias === 1 ? "dia" : "dias"} da obra` : "livre nos dias da obra"}{serve ? "" : " · sem ofícios desta obra"}</span>
+                  </span>
+                  <button type="button" role="switch" aria-checked={vem} onClick={() => alternar(e.id)}
+                    className={cn("min-h-9 shrink-0 rounded-full px-3 text-sm font-medium", vem ? "bg-primary text-primary-foreground" : "border border-input")}>{vem ? "Vem" : "Não vem"}</button>
+                </div>
+                <ul className="mt-2 flex flex-wrap gap-1 text-xs">
+                  {e.membros.map((m) => { const tec = TECS.find((x) => x.id === m); const n = ocupados(m); return tec ? (
+                    <li key={m} className={cn("rounded-full px-2 py-0.5", n ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted")}>{tec.n} · {tec.sk}</li>) : null; })}
+                </ul>
+              </li>
+            );
+          })}
+        </ul>
       )}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {porOficio.map((o) => (
-          <fieldset key={o} className="space-y-1">
-            <legend className={cn("text-xs font-semibold", precisa.has(o) ? "text-foreground" : "text-muted-foreground")}>{o}{precisa.has(o) ? " · nesta obra" : ""}</legend>
-            {TECS.filter((x) => x.sk === o).map((x) => {
-              const n = ocupados(x.id), on = sel.includes(x.id);
-              return (
-                <button key={x.id} type="button" role="checkbox" aria-checked={on} onClick={() => setSel((s) => (on ? s.filter((y) => y !== x.id) : [...s, x.id]))}
-                  className={cn("flex min-h-10 w-full items-center gap-2 rounded-lg border px-2 text-left text-sm", on ? "border-primary bg-card" : "border-border bg-card/60")}>
-                  <span aria-hidden="true" className={cn("grid h-5 w-5 shrink-0 place-items-center rounded border-2", on ? "border-primary bg-primary text-primary-foreground" : "border-input")}>{on && <Check className="h-3.5 w-3.5" />}</span>
-                  <span className="min-w-0 flex-1 truncate">{x.n}</span>
-                  <span className={cn("shrink-0 text-xs", n ? "text-amber-800 dark:text-amber-300" : "text-success")}>{n ? `${n} ${n === 1 ? "dia ocupado" : "dias ocupados"}` : "livre"}</span>
-                </button>
-              );
-            })}
-          </fieldset>
-        ))}
-      </div>
-      {falta.length > 0 && <p className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Sem ninguém de {falta.join(", ")} na equipa: essas tarefas ficam com quem estiver livre.</p>}
-      <div className="flex flex-wrap items-end gap-2">
-        <Button type="button" className="min-h-11" disabled={!sel.length} onClick={() => usar(sel)}><Check className="mr-1 h-4 w-4" aria-hidden="true" />Usar nesta obra</Button>
-        {atual.length > 0 && <Button type="button" variant="outline" className="min-h-11" onClick={() => usar([])}>Sem equipa fixa</Button>}
-        <label className="grid gap-1 text-xs font-medium">Guardar como
-          <span className="flex gap-1">
-            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Equipa A" className="h-11 w-40 rounded-lg border border-input bg-background px-3 text-[15px]" />
-            <Button type="button" variant="outline" className="min-h-11" disabled={!nome.trim() || !sel.length} onClick={() => { guardar({ nome: nome.trim(), membros: sel }); setNome(""); }}><Save className="h-4 w-4" aria-hidden="true" /><span className="sr-only">Guardar a equipa</span></Button>
-          </span>
-        </label>
-      </div>
+      <p className="text-xs text-muted-foreground">Uma equipa vem toda ou não vem ninguém dela. {isolados.length} {isolados.length === 1 ? "técnico isolado" : "técnicos isolados"}: escolhem-se tarefa a tarefa.</p>
     </div>
   );
 }

@@ -1797,11 +1797,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     // 16/10: o pagamento validado emite logo a encomenda de cliente no Inventário novo (sem aprovação) e passa o negócio à Obra;
     // o plano veio do contrato (o negócio que ainda não o tenha ganha-o aqui): depois disto só pode faltar aprová-lo
     if (!d.obra.plano) d.obra.plano = planoDoOrcamento(d, S);
-    const ok = emitirEc(d);
+    // 9/11 (Rúben: «a encomenda a cliente só acontece depois do plano de obra estar aprovado»): com o plano já aprovado emite-se agora;
+    // senão, emite-se quando as Operações o aprovarem (aprovarPlano; numa organização real, a base ao gravar o plano aprovado)
+    const ok = planoAprovado(d) || d.orc?.vendaDireta ? emitirEc(d) : false; // a venda direta não tem obra a aprovar (como na base)
     fase(d, 5);
     const F = faltaParaArrancar(d);
     avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
-    if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Com a fatura registada e o pagamento validado, vai para as Encomendas de cliente: stock reservado; o que falta vai numa encomenda a fornecedor", kind: "auto", atraso: 500 });
+    if (!planoAprovado(d)) avisar({ msg: "A encomenda de cliente espera pelo plano", sub: "Emite-se quando as Operações aprovarem o plano da obra", kind: "auto", atraso: 500 });
+    else if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Com o pagamento validado e o plano aprovado, vai para as Encomendas de cliente: stock reservado; o que falta vai numa encomenda a fornecedor", kind: "auto", atraso: 500 });
     if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta vai numa encomenda a fornecedor, por aprovar no Inventário", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
   };
   /** 22/10: a fatura está paga no Eticadata: o recibo é o do ERP (o último) e os dados do pagamento vêm de lá. */
@@ -1815,6 +1818,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     log(d, `Pagamento confirmado no Eticadata · ${d.fin.fatura!.n} paga${r ? " com o " + r.n : ""}`);
     pago(d, { n: r?.n || "recibo no ERP", q: r ? r.data.slice(8, 10) + "/" + r.data.slice(5, 7) : "hoje" }, "no Eticadata");
   };
+  /** 9/11: o plano da obra aprovado (ou já em curso, ou concluído): a encomenda de cliente só depois dele. */
+  const planoAprovado = (d: Negocio): boolean => ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "");
   const emitirEc = (d: Negocio): boolean => {
     if (d.obra.ec) return true;
     // F3: numa organização real é a base que a emite (fn_neg_emitir_ec_se_pronta, ao gravar o pagamento); o Inventário de exemplo não entra
@@ -3249,6 +3254,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // o início do plano passa para a preparação da obra (não se escreve duas vezes)
       const p = d.obra.plano!;
       if (p.origem === "orcamento" && !d.f.inicio) { const i = inicioDoPlano(p); if (i) d.f.inicio = isoDia(i); } avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
+      // 9/11: o plano aprovado (com o pagamento validado) emite a encomenda de cliente; numa organização real, a base emite-a ao gravar
+      if (!d.obra.ec) {
+        if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "O plano aprovado manda-a para as Encomendas de cliente: stock reservado; o que falta vai ao fornecedor", kind: "auto", atraso: 500 });
+        else if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o plano aprovado", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
+      }
     },
     arrancar(id: number) {
       if (!exigePerm("obra.planear")) return;

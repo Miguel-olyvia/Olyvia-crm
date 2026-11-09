@@ -26,7 +26,7 @@ import { SEM_VER_CUSTOS, podeVerCustos } from "./permissoes";
 import { nomeCurtoTarefa } from "./obraOps";
 import { materiaisDaReceita, passosDaTarefa, planoEmDatas, type PlanoDatas, type TarefaDatas } from "./planoDaVisita";
 import { EquipaDaObra, TrocarTecnico } from "./EquipaDaObra";
-import { chaveTarefa, escolhasDoNegocio, type EscolhasEquipa } from "./preparacaoObra";
+import { camposDasEscolhas, chaveTarefa, escolhasDoNegocio, type EscolhasEquipa } from "./preparacaoObra";
 
 export { COR_FASE } from "./planoObra";
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
@@ -65,7 +65,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   const saltados = feriadosSaltados(calendario.slice(0, nDias));
   const fimData = calendario[nDias - 1];
   // 9/11 (Rúben: «o dono da obra precisa do máximo detalhe»): o plano com os técnicos e as datas (o mesmo que a obra vai ter)
-  const PD = useMemo(() => planoEmDatas(d, S, isoDia(inicio)), [d, S, isoDia(inicio), d.orc, d.f.plano_tecnicos, d.f.plano_equipa]); // eslint-disable-line react-hooks/exhaustive-deps
+  const PD = useMemo(() => planoEmDatas(d, S, isoDia(inicio)), [d, S, isoDia(inicio), d.orc, d.f.plano_tecnicos, d.f.plano_equipa, d.f.plano_equipas]); // eslint-disable-line react-hooks/exhaustive-deps
   const daTarefa = (t: TarefaPrevista) => PD.tarefas.find((x) => x.chave === chaveTarefa({ nome: t.nome, fase: t.fase }));
   // 9/11: mover uma tarefa (para antes ou depois de outra, ou para o fim de uma fase) e tirá-la do plano e do orçamento
   const { ordem: ordemMao, fase: faseMao } = ordemDoPlano(d.f);
@@ -587,10 +587,8 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio, PD, td, mover }: {
         <div className="grid gap-3 rounded-xl bg-muted/50 p-3 text-sm sm:grid-cols-[minmax(0,1fr)_20rem] sm:items-end">
           <p><b className="font-medium">{td.tecNome}</b> · {td.oficio}{td.ocupado ? <span className="text-amber-800 dark:text-amber-300"> · {td.ocupado}</span> : null}
             <span className="block text-muted-foreground">{td.dur > 1 ? `De ${dataCurta(td.inicio)} a ${dataCurta(td.fim)}` : dataCurta(td.inicio)} · {nfmt(td.h)} h{td.qtd ? ` · ${nfmt(td.qtd.q)} ${td.qtd.un}` : ""}</span></p>
-          {!fechado && <TrocarTecnico t={td} P={PD} S={ctx.S} negocio={d.id} escolhas={escolhasDoNegocio(d.f)} mudar={(e) => ctx.run(() => {
-            ctx.A.campo(d.id, "plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : "");
-            ctx.A.campo(d.id, "plano_equipa", e.equipa?.length ? JSON.stringify(e.equipa) : "");
-          })} />}
+          {!fechado && <TrocarTecnico t={td} P={PD} S={ctx.S} negocio={d.id} escolhas={escolhasDoNegocio(d.f)}
+            mudar={(e) => ctx.run(() => { for (const [k, v] of camposDasEscolhas(e)) ctx.A.campo(d.id, k, v); })} />}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -730,10 +728,7 @@ function Pagamentos({ P, d, ctx, calendario, fechado, prest, sugerido }: {
 function EquipaNoOrcamento({ ctx, d, fechado, PD }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Negocio; fechado: boolean; PD: PlanoDatas }) {
   const { S, A, run } = ctx;
   const escolhas = escolhasDoNegocio(d.f);
-  const mudar = fechado ? undefined : (e: EscolhasEquipa) => run(() => {
-    A.campo(d.id, "plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : "");
-    A.campo(d.id, "plano_equipa", e.equipa?.length ? JSON.stringify(e.equipa) : "");
-  });
+  const mudar = fechado ? undefined : (e: EscolhasEquipa) => run(() => { for (const [k, v] of camposDasEscolhas(e)) A.campo(d.id, k, v); });
   if (!PD.tarefas.length) return null;
   return (
     <section aria-label="A equipa da obra" className="space-y-4 rounded-2xl border border-border bg-card p-4 sm:p-5">

@@ -72,7 +72,7 @@ function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dis
             <p className="text-sm text-muted-foreground">O mesmo que a obra vai ter: as tarefas pela ordem das fases, o técnico livre de cada ofício (sem férias nem outra obra) e as datas em dias úteis.</p>
           </div>
           <MapaDatasObra P={P} inicio={inicio} mudarInicio={(iso) => setP((x) => mudarInicio(x, iso))}
-            equipa={{ S, negocio: p.negocio, escolhas: { tecnicos: p.catalogo?.tecnicos, equipa: p.catalogo?.equipa }, mudar: (e) => setP((x) => mudarEquipa(x, e)), calcular }} />
+            equipa={{ S, negocio: p.negocio, escolhas: { tecnicos: p.catalogo?.tecnicos, equipa: p.catalogo?.equipa, equipas: p.catalogo?.equipas }, mudar: (e) => setP((x) => mudarEquipa(x, e)), calcular }} />
         </section>
       </section>
       <aside className="space-y-4">

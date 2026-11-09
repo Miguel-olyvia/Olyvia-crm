@@ -80,6 +80,8 @@ export function levarEstudio(d: Negocio, p: Projeto, S: Estado, produtos: readon
   const eq = p.catalogo?.equipa?.length ? JSON.stringify(p.catalogo.equipa) : "";
   if ((d.f.plano_tecnicos ?? "") !== tecs) A.campo("plano_tecnicos", tecs);
   if ((d.f.plano_equipa ?? "") !== eq) A.campo("plano_equipa", eq);
+  const eqs = p.catalogo?.equipas?.length ? JSON.stringify(p.catalogo.equipas) : "";
+  if ((d.f.plano_equipas ?? "") !== eqs) A.campo("plano_equipas", eqs);
   return { avisos, servicos: serv.length, produtos: nProd, semPar: L.semPar };
 }
 

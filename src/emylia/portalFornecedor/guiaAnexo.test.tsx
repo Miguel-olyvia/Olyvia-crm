@@ -27,7 +27,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 };
 function pagarTiago(): void {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]); A.role("financeiro"); A.emitir(1027); A.validar(1027);
+  preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]); A.role("financeiro"); A.emitir(1027); A.validar(1027); A.role("operacoes"); A.aprovarPlano(1027); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
 }
 const po = (id: string): Po => lerInventario().pos.find((p) => p.id === id)!;
 const agirPo = (id: string, fn: (d: ReturnType<typeof lerInventario>, p: Po) => unknown) => executar((d) => fn(d, poPorId(d, id)!));

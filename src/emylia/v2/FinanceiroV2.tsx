@@ -69,7 +69,10 @@ function FormPagamento({ ctx, d, f, fs, tranches, fechar, avisar }: { ctx: Ctx; 
         guardarFaturas(S, d.id, validarPagamento(fs, f.id, p, d.fin.recibo.n));
         msg = d.obra.ec
           ? `Pagamento validado · recibo ${d.fin.recibo.n}. A obra está a andar: encomenda ${d.obra.ec.n} no Inventário; falta aprovar o plano.`
-          : `Pagamento validado · recibo ${d.fin.recibo.n}. A encomenda de cliente não chegou ao Inventário: emita-a no negócio.`;
+          // 9/11: a encomenda de cliente só sai com o plano da obra aprovado
+          : d.obra.plano && d.obra.plano.estado === "por aprovar"
+            ? `Pagamento validado · recibo ${d.fin.recibo.n}. A obra está a andar: falta aprovar o plano; a encomenda de cliente sai com ele.`
+            : `Pagamento validado · recibo ${d.fin.recibo.n}. A encomenda de cliente não chegou ao Inventário: emita-a no negócio.`;
       } else {
         const rc = A.reciboTranche(d.id, f.numero);
         if (!rc) return;

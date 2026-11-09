@@ -12,6 +12,7 @@ import { deIso, diasDaObra, isoDia, proximoUtil } from "./planoObra";
 import { chaveTarefa, escolherTecnicos, escolhasDoNegocio, ocupacaoDosTecnicos, planoDoOrcamento } from "./preparacaoObra";
 export { escolherTecnicos, ocupacaoDosTecnicos } from "./preparacaoObra";
 import { FASES_OBRA } from "./fasesObra";
+import { equipaDe, type EquipaObra } from "./equipa/equipasObra";
 import type { FaseObra } from "./fasesObra";
 
 /** Um material ou consumível da receita, para a quantidade do serviço. */
@@ -54,8 +55,10 @@ export interface PlanoDatas {
   fim: Date | null;
   /** As tarefas sem técnico (o RH não tem ninguém do ofício). */
   porAtribuir: number;
-  /** As pessoas da obra, sem repetir, pela ordem em que entram. */
-  equipa: { id: string; n: string; oficio: string }[];
+  /** As pessoas da obra, sem repetir, pela ordem em que entram (as das equipas que vêm, todas). */
+  equipa: { id: string; n: string; oficio: string; equipa?: string }[];
+  /** 9/11: as equipas que vêm a esta obra (vêm todas as pessoas delas). */
+  equipas: EquipaObra[];
   /** O plano como o motor o guarda (para comparar com o da obra). */
   plano: Plano;
   /** O orçamento de onde saiu (o que a visita gera ao fechar), com o dia de início. */
@@ -116,10 +119,19 @@ export function planoEmDatas(d: Negocio, S: Estado, inicioIso: string): PlanoDat
     };
   });
   const equipa: PlanoDatas["equipa"] = [];
-  for (const t of tarefas) if (t.tec && !equipa.some((x) => x.id === t.tec)) equipa.push({ id: t.tec, n: t.tecNome, oficio: t.oficio });
+  const equipas: EquipaObra[] = [];
+  for (const t of tarefas) {
+    if (!t.tec || equipa.some((x) => x.id === t.tec)) continue;
+    const e = equipaDe(t.tec);
+    if (!e) { equipa.push({ id: t.tec, n: t.tecNome, oficio: t.oficio }); continue; }
+    if (equipas.some((x) => x.id === e.id)) continue;
+    equipas.push(e);
+    // a equipa vem toda: também os membros sem tarefas nesta obra
+    for (const m of e.membros) { const tec = TECS.find((x) => x.id === m); if (tec && !equipa.some((x) => x.id === m)) equipa.push({ id: m, n: tec.n, oficio: tec.sk, equipa: e.nome }); }
+  }
   return {
     tarefas, dias: fimDias, inicio: tarefas.length ? ds[0] : null, fim: tarefas.length ? ds[Math.max(0, fimDias - 1)] : null,
-    porAtribuir: tarefas.filter((t) => !t.tec).length, equipa, plano, orc: dx.orc,
+    porAtribuir: tarefas.filter((t) => !t.tec).length, equipa, equipas, plano, orc: dx.orc,
   };
 }
 
@@ -138,7 +150,7 @@ export function planoDaVisita(d: Negocio, S: Estado, inicioIso: string): PlanoDa
 export interface ServicoEscolhido { sid: SvcId; q: number }
 
 /** O plano da obra das linhas do Estúdio (os serviços do Catálogo, sem o negócio): um orçamento só com esses serviços. */
-export function planoDoEstudio(servicos: readonly ServicoEscolhido[], S: Estado, inicioIso: string, negocio?: number, escolhas?: { tecnicos?: Record<string, string>; equipa?: string[] }): PlanoDatas {
+export function planoDoEstudio(servicos: readonly ServicoEscolhido[], S: Estado, inicioIso: string, negocio?: number, escolhas?: { tecnicos?: Record<string, string>; equipa?: string[]; equipas?: string[] }): PlanoDatas {
   const linhas: LinhaOrc[] = [];
   for (const x of servicos) {
     const s = garantirServico(S, x.sid);
@@ -148,6 +160,7 @@ export function planoDoEstudio(servicos: readonly ServicoEscolhido[], S: Estado,
   const f: Record<string, string> = {};
   if (escolhas?.tecnicos) f.plano_tecnicos = JSON.stringify(escolhas.tecnicos);
   if (escolhas?.equipa) f.plano_equipa = JSON.stringify(escolhas.equipa);
+  if (escolhas?.equipas) f.plano_equipas = JSON.stringify(escolhas.equipas);
   const d = { id: negocio ?? -1, f, orc, obra: { plano: null } } as unknown as Negocio;
   return planoEmDatas(d, S, inicioIso);
 }

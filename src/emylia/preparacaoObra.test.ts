@@ -23,7 +23,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 const preparar = () => { const S = seed(); S.role = "operacoes"; /* 4/11: o plano pede negocios.obra.planear */ return { S, A: acoes(S, () => {}, (fn) => fn()), d: S.deals.find((x) => x.id === 1027)! }; };
 // o pagamento validado emite a encomenda de cliente no Inventário novo; o plano aprova-se depois
 // 19/10: a fatura e o pagamento são do Financeiro (permissoes.ts)
-const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); }; // 4/11: depois do pagamento, o plano é das Operações (negocios.obra.planear)
+const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.role("operacoes"); }; // 4/11: depois do pagamento, o plano é das Operações (negocios.obra.planear)
 const estados = (S: ReturnType<typeof seed>, d: ReturnType<typeof preparar>["d"]) => Object.fromEntries(passosPreparacao(d, S).map((p) => [p.id, p.estado]));
 
 describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Inventário novo)", () => {
@@ -83,16 +83,16 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     expect(faltaParaArrancar(d)).toEqual([
       expect.stringMatching(/^aprovar a encomenda a fornecedor PO-\S+ no Inventário \(Compras\)$/),
       expect.stringMatching(/^receber no armazém a encomenda PO-\S+ \(prevista a \d\d\/\d\d\)$/),
-      "aprovar o plano",
     ]);
-    expect(estados(S, d)).toMatchObject({ ec: "feito", "pl-ok": "agora", pg: "feito" });
+    // 9/11: a encomenda só sai com o plano aprovado (o pagar() destes testes já o aprova)
+    expect(estados(S, d)).toMatchObject({ ec: "feito", pg: "feito" });
   });
 
   it("idempotente: validar outra vez (ou sincronizar) não duplica a encomenda no Inventário", () => {
     const { S, A, d } = preparar();
     pagar(A, d);
     const n = lerInventario().ecs.length;
-    A.validar(d.id); A.emitirEc(d.id);
+    A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.emitirEc(d.id);
     expect(sincronizarEcsNegocios(S.deals)).toBe(0);
     expect(lerInventario().ecs).toHaveLength(n);
     // os dados do Inventário repostos (como ao recarregar a página): volta a emiti-la, com o mesmo número
@@ -122,7 +122,7 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     pagar(A, S.deals.find((x) => x.id === 1027)!);
     expect(de("comercial")).toEqual([]);
     expect(de("financeiro")).toEqual([]);
-    expect(de("operacoes")).toEqual(["aprovarPlano"]);
+    expect(de("operacoes")).toEqual([]); // 9/11: o plano aprovou-se ao pagar (a encomenda só sai com ele aprovado)
     expect("aprovarEc" in A).toBe(false);
     expect("validarEf" in A).toBe(false);
   });
@@ -165,7 +165,7 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     executar((db) => { const l = db.ecs.find((e) => e.id === "EC-1027")!.lines.find((x) => x.sku === "OB-BANC")!; l.stockQty = 0; l.nosupQty = l.qty; });
     expect(faltaParaArrancar(d)[0]).toBe("escolher o fornecedor de 1 material no Inventário");
     expect(anularEcNoInventario(REF, "teste").ok).toBe(true);
-    expect(faltaParaArrancar(d)).toEqual(["uma encomenda de cliente válida: a EC-1027 foi eliminada no Inventário", "aprovar o plano"]);
+    expect(faltaParaArrancar(d)).toEqual(["uma encomenda de cliente válida: a EC-1027 foi eliminada no Inventário"]); // 9/11: o plano já está aprovado
     // as obras antigas do exemplo (sem origem no Inventário) não ficam presas
     const S2 = seed(), m = S2.deals.find((x) => x.id === 1022)!;
     expect(faltaParaArrancar(m)).toEqual([]);

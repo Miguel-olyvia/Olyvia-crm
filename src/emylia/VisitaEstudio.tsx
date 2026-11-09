@@ -19,7 +19,7 @@ import { produto } from "@/pages/prototipo-estudio/catalogoFake";
 import { duracaoEmPalavras } from "@/pages/prototipo-estudio/planoEstimado";
 import { planoDaVisita, planoParaGuardar } from "./planoDaVisita";
 import { levarEstudio } from "./estudioNoNegocio";
-import { escolhasDoNegocio } from "./preparacaoObra";
+import { camposDasEscolhas, escolhasDoNegocio } from "./preparacaoObra";
 import { MapaDatasObra, inicioPorOmissao } from "./MapaDatasObra";
 import { lerCatalogo } from "./v2/catalogoStore";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
@@ -354,10 +354,7 @@ export function PlanoEstimado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       </div>
       <MapaDatasObra P={P} inicio={inicio} mudarInicio={setInicio}
         equipa={{ S: ctx.S, negocio: d.id, escolhas: escolhasDoNegocio(d.f), calcular: (iso) => planoDaVisita(d, ctx.S, iso),
-          mudar: (e) => ctx.run(() => {
-            ctx.A.campo(d.id, "plano_tecnicos", e.tecnicos && Object.keys(e.tecnicos).length ? JSON.stringify(e.tecnicos) : "");
-            ctx.A.campo(d.id, "plano_equipa", e.equipa?.length ? JSON.stringify(e.equipa) : "");
-          }) }} />
+          mudar: (e) => ctx.run(() => { for (const [k, v] of camposDasEscolhas(e)) ctx.A.campo(d.id, k, v); }) }} />
       {P.tarefas.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[15px]">Duração: <b className="font-semibold">{duracaoEmPalavras(P.dias)}</b>{P.fim && <> · pronta a {dataCurta(P.fim)}</>}</p>
