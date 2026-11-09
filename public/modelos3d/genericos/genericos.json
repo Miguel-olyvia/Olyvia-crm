@@ -65,37 +65,37 @@
  {
   "categoria": "cama",
   "url": "/modelos3d/genericos/cama.glb",
-  "triangulos": 924,
-  "partes": 5,
-  "bytes": 12976
+  "triangulos": 1308,
+  "partes": 13,
+  "bytes": 24872
  },
  {
   "categoria": "roupeiro",
   "url": "/modelos3d/genericos/roupeiro.glb",
-  "triangulos": 96,
-  "partes": 8,
-  "bytes": 10404
+  "triangulos": 120,
+  "partes": 10,
+  "bytes": 12852
  },
  {
   "categoria": "secretaria",
   "url": "/modelos3d/genericos/secretaria.glb",
-  "triangulos": 72,
-  "partes": 6,
-  "bytes": 7964
+  "triangulos": 156,
+  "partes": 13,
+  "bytes": 16524
  },
  {
   "categoria": "sofa",
   "url": "/modelos3d/genericos/sofa.glb",
-  "triangulos": 1500,
-  "partes": 5,
-  "bytes": 17084
+  "triangulos": 2772,
+  "partes": 15,
+  "bytes": 37660
  },
  {
   "categoria": "mesa",
   "url": "/modelos3d/genericos/mesa.glb",
-  "triangulos": 156,
-  "partes": 6,
-  "bytes": 8632
+  "triangulos": 180,
+  "partes": 8,
+  "bytes": 11080
  },
  {
   "categoria": "prateleira",
