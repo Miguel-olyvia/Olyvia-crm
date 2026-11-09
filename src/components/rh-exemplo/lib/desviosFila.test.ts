@@ -28,8 +28,8 @@ function desvio(extra: Partial<Desvio> = {}): Desvio {
 }
 
 describe("accoesDoDesvio", () => {
-  it("turno planeado sem horas: so marcar falta, e so com periodo completo", () => {
-    expect(accoesDoDesvio(desvio())).toEqual(["marcar_falta"]);
+  it("turno planeado sem horas: corrigir o ponto primeiro e marcar falta, e so com periodo completo", () => {
+    expect(accoesDoDesvio(desvio())).toEqual(["lancar_picagem", "marcar_falta"]);
     expect(accoesDoDesvio(desvio({ hora_fim: null }))).toEqual([]);
     expect(accoesDoDesvio(desvio({ hora_inicio: null }))).toEqual([]);
   });
@@ -43,7 +43,7 @@ describe("accoesDoDesvio", () => {
 
   it("turno so parcialmente picado (almoco nao picado): marcar falta, so com o bloco completo, e nunca vira sugestao", () => {
     const parcial = desvio({ tipo: "planeado_parcialmente_realizado", minutos: 60 });
-    expect(accoesDoDesvio(parcial)).toEqual(["marcar_falta"]);
+    expect(accoesDoDesvio(parcial)).toEqual(["lancar_picagem", "marcar_falta"]);
     expect(accoesDoDesvio({ ...parcial, hora_fim: null })).toEqual([]);
     expect(sugestoesDeFaltaDosDesvios([parcial], [])).toEqual([]);
   });

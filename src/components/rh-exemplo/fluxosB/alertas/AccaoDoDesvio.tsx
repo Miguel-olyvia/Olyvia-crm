@@ -2,6 +2,7 @@
  * A accao do RH sobre UM desvio da fila, ligada as RPCs reais:
  *  - Marcar falta: o formulario de faltas abre preenchido com o periodo do desvio (`rpc_hr_falta_marcar`);
  *  - Corrigir: as horas realizadas (`rpc_hr_realizado_corrigir`) ou a picagem por emparelhar (`rpc_hr_picagem_corrigir`);
+ *  - Corrigir o ponto (`lancar_picagem`): lanca a picagem em falta nesse dia (`rpc_hr_picar`, origem `manual_rh`);
  *  - Anular a falta coberta por ausencia aprovada (`rpc_hr_falta_anular_por_ausencia`).
  *
  * So se le a assiduidade DESSA pessoa NESSE dia quando a accao e aberta (uma leitura, nao uma por linha da fila).
@@ -92,6 +93,33 @@ function AccaoComLeitura({ desvio, accao, nome, locais, onAlterado, onFechar }: 
     if (!erro) onAlterado();
     return erro;
   };
+
+  // O dia deste desvio ja foi lido acima (useAssiduidadeDaPessoa), mas lancar uma picagem em falta nao usa nenhum registo
+  // lido (nao ha linha a corrigir): abre logo, no dia e para a pessoa do desvio, pela mesma `picar` (origem `manual_rh`)
+  // que o painel do dia usa.
+  if (accao === "lancar_picagem") {
+    // So o turno sem horas nenhumas pede, com quase certeza, a ENTRADA do bloco; no parcialmente picado o buraco pode
+    // ser a saida, e a hora e o sentido ficam ao criterio de quem lanca.
+    const semHoras = desvio.tipo === "planeado_sem_realizado" && desvio.hora_inicio;
+    return (
+      <PicagemSheet
+        aberto
+        modo="lancar"
+        data={desvio.data}
+        horaInicial={semHoras ? horaCurta(desvio.hora_inicio) : undefined}
+        sentidoInicial={semHoras ? "entrada" : undefined}
+        locais={locais}
+        aGravar={assiduidade.saving}
+        onFechar={onFechar}
+        onLancar={(args) =>
+          depoisDeGravar(assiduidade.picar({ sentido: args.sentido, momento: args.momento, localId: args.localId, origem: "manual_rh" }))
+        }
+        // Nunca chamado no modo lancar; se alguma vez fosse, recusa em vez de gravar em silencio.
+        onCorrigir={async () => "rhExemplo.pic.real.semLinha"}
+        idPrefixo="rhb-desvio-picagem"
+      />
+    );
+  }
 
   // So se mostra o carregamento enquanto o registo ainda nao chegou: uma releitura depois de gravar nao pode desmontar o painel.
   if (assiduidade.loading && !realizado && !picagem && !(falta && ausencia)) {

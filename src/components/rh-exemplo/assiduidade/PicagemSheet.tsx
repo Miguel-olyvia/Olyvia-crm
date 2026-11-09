@@ -53,6 +53,9 @@ interface PicagemSheetProps {
   picagem?: Picagem | null;
   /** O dia sobre o qual se lanca, no modo lancar. */
   data: string;
+  /** Hora (HH:MM) e sentido com que o modo lancar abre, por exemplo o inicio do turno planeado. Ignorados no modo corrigir. */
+  horaInicial?: string;
+  sentidoInicial?: SentidoPicagem;
   locais: LocalTrabalho[];
   aGravar: boolean;
   onFechar: () => void;
@@ -77,6 +80,8 @@ export function PicagemSheet({
   modo,
   picagem,
   data,
+  horaInicial,
+  sentidoInicial,
   locais,
   aGravar,
   onFechar,
@@ -98,14 +103,14 @@ export function PicagemSheet({
   useEffect(() => {
     if (!aberto) return;
     setDia(picagem?.data_local ?? data);
-    setHora(horaCurta(picagem?.hora_local) === "—" ? "" : horaCurta(picagem?.hora_local));
-    setSentido(picagem?.sentido ?? "entrada");
+    setHora(picagem ? (horaCurta(picagem.hora_local) === "—" ? "" : horaCurta(picagem.hora_local)) : (horaInicial ?? ""));
+    setSentido(picagem?.sentido ?? sentidoInicial ?? "entrada");
     setLocalId(picagem?.local_id ?? SEM_LOCAL);
     setTipo("");
     setMotivo("");
     setTocados(new Set());
     setMostrarTodos(false);
-  }, [aberto, picagem, data]);
+  }, [aberto, picagem, data, horaInicial, sentidoInicial]);
 
   const tocar = (campoId: string) =>
     setTocados((anteriores) =>

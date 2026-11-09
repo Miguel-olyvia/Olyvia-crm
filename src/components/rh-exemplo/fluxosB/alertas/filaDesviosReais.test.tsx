@@ -10,6 +10,7 @@ const acoes = vi.hoisted(() => ({
   corrigirRealizado: vi.fn(),
   corrigirPicagem: vi.fn(),
   anularFaltaPorAusencia: vi.fn(),
+  picar: vi.fn(),
   toastErro: vi.fn(),
   toastOk: vi.fn(),
   realizado: [] as unknown[],
@@ -35,6 +36,7 @@ vi.mock("@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa", () => ({
       corrigirRealizado: acoes.corrigirRealizado,
       corrigirPicagem: acoes.corrigirPicagem,
       anularFaltaPorAusencia: acoes.anularFaltaPorAusencia,
+      picar: acoes.picar,
     };
   },
   comoRealizadoComCorreccao: (l: unknown) => l,
@@ -53,7 +55,9 @@ const TUDO: PermissoesAssiduidade = {
   faltasEdit: true, justificacaoView: true, justificacaoEdit: true, validarRealizado: true, obrasRegistar: false,
 };
 const SO_CORRIGIR: PermissoesAssiduidade = { ...TUDO, faltasEdit: false };
-const SO_VER: PermissoesAssiduidade = { ...TUDO, gerir: false, corrigir: false, faltasEdit: false };
+const COM_PICAR_OUTROS: PermissoesAssiduidade = { ...TUDO, picarOutros: true };
+const SO_PICAR_OUTROS: PermissoesAssiduidade = { ...TUDO, gerir: false, corrigir: false, faltasEdit: false, picarOutros: true };
+const SO_VER: PermissoesAssiduidade ={ ...TUDO, gerir: false, corrigir: false, faltasEdit: false };
 
 const NOMES = new Map([["pessoa-a", "Ana Real"], ["pessoa-b", "Bruno Real"]]);
 
@@ -102,9 +106,10 @@ beforeAll(() => {
 
 beforeEach(() => {
   window.localStorage.setItem("language", "pt");
-  for (const f of [acoes.marcarFalta, acoes.corrigirRealizado, acoes.corrigirPicagem, acoes.anularFaltaPorAusencia, acoes.toastErro, acoes.toastOk]) {
+  for (const f of [acoes.marcarFalta, acoes.corrigirRealizado, acoes.corrigirPicagem, acoes.anularFaltaPorAusencia, acoes.picar, acoes.toastErro, acoes.toastOk]) {
     f.mockReset();
   }
+  acoes.picar.mockResolvedValue(null);
   acoes.marcarFalta.mockResolvedValue(null);
   acoes.corrigirRealizado.mockResolvedValue(null);
   acoes.corrigirPicagem.mockResolvedValue(null);
@@ -197,6 +202,68 @@ describe("Marcar falta a partir de um desvio", () => {
     fireEvent.change(document.getElementById("rhb-mf-motivo") as HTMLSelectElement, { target: { value: "assuntos_pessoais" } });
     fireEvent.click(within(screen.getByRole("region", { name: "Marcar falta" })).getByRole("button", { name: "Marcar falta" }));
     expect(await screen.findByText("A base recusou a falta.")).toBeInTheDocument();
+    expect(onAlterado).not.toHaveBeenCalled();
+  });
+});
+
+describe("Corrigir o ponto (lancar uma picagem em falta) a partir de um desvio", () => {
+  const PARCIAL = desvio({ tipo: "planeado_parcialmente_realizado", minutos: 60 });
+
+  it("quem pode picar por outros ve «Corrigir o ponto» antes de «Marcar falta», nos dois tipos", () => {
+    fila([SEM_HORAS, PARCIAL], COM_PICAR_OUTROS);
+    for (const [d, indice] of [[SEM_HORAS, 0], [PARCIAL, 1]] as const) {
+      const nomes = within(linhaDe(d, indice)).getAllByRole("button").map((b) => b.textContent);
+      expect(nomes).toEqual(["Corrigir o ponto", "Marcar falta"]);
+    }
+  });
+
+  it("sem picarOutros nao aparece e Marcar falta continua pela sua permissao; com so picarOutros fica so o ponto", () => {
+    fila([SEM_HORAS], TUDO);
+    expect(screen.queryByRole("button", { name: "Corrigir o ponto" })).not.toBeInTheDocument();
+    expect(within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Marcar falta" })).toBeInTheDocument();
+    cleanup();
+    fila([SEM_HORAS], SO_PICAR_OUTROS);
+    expect(within(linhaDe(SEM_HORAS)).getAllByRole("button").map((b) => b.textContent)).toEqual(["Corrigir o ponto"]);
+  });
+
+  it("nao aparece em desvios que nao sao de turno sem horas", () => {
+    fila([HORAS_SEM_TURNO, PAR, COBERTA], COM_PICAR_OUTROS);
+    expect(screen.queryByRole("button", { name: "Corrigir o ponto" })).not.toBeInTheDocument();
+  });
+
+  it("abre o lancamento no dia e na pessoa do desvio, com a entrada do bloco planeado, grava por picar (manual_rh) e relê a fila", async () => {
+    const onAlterado = fila([SEM_HORAS], COM_PICAR_OUTROS);
+    fireEvent.click(within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Corrigir o ponto" }));
+    expect(await screen.findByText("Lancar uma picagem")).toBeInTheDocument();
+    expect(acoes.pessoaLida).toContain("pessoa-a");
+    expect((document.getElementById("rhb-desvio-picagem-dia") as HTMLInputElement).value).toBe("2026-10-06");
+    expect((document.getElementById("rhb-desvio-picagem-hora") as HTMLInputElement).value).toBe("09:00");
+    fireEvent.change(document.getElementById("rhb-desvio-picagem-hora") as HTMLInputElement, { target: { value: "09:05" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lancar picagem" }));
+    await waitFor(() => expect(acoes.picar).toHaveBeenCalledTimes(1));
+    expect(acoes.picar).toHaveBeenCalledWith({
+      sentido: "entrada", momento: new Date("2026-10-06T09:05:00").toISOString(), localId: null, origem: "manual_rh",
+    });
+    await waitFor(() => expect(onAlterado).toHaveBeenCalled());
+    expect(acoes.toastOk).toHaveBeenCalled();
+  });
+
+  it("sem hora nao grava", async () => {
+    fila([SEM_HORAS], COM_PICAR_OUTROS);
+    fireEvent.click(within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Corrigir o ponto" }));
+    fireEvent.change(await screen.findByLabelText("Hora"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lancar picagem" }));
+    expect(acoes.picar).not.toHaveBeenCalled();
+    expect(acoes.toastErro).toHaveBeenCalled();
+  });
+
+  it("uma recusa da base chega ao utilizador e nao relê a fila", async () => {
+    acoes.picar.mockResolvedValue("A base recusou a picagem.");
+    const onAlterado = fila([SEM_HORAS], COM_PICAR_OUTROS);
+    fireEvent.click(within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Corrigir o ponto" }));
+    await screen.findByText("Lancar uma picagem");
+    fireEvent.click(screen.getByRole("button", { name: "Lancar picagem" }));
+    await waitFor(() => expect(acoes.toastErro).toHaveBeenCalledWith("A base recusou a picagem."));
     expect(onAlterado).not.toHaveBeenCalled();
   });
 });

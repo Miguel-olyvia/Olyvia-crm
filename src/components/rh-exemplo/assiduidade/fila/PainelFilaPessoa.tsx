@@ -17,6 +17,7 @@ import { useDecisaoDoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia
 import { DecidirHoraExtraDialog, type PedidoDecisao } from "@/components/rh-exemplo/fluxosC/DecidirHoraExtraDialog";
 import { RegistarTempoAMaisDialog } from "@/components/rh-exemplo/fluxosC/RegistarTempoAMaisDialog";
 import { accoesDoItem, type FonteFila, type IdDeAccao, type ItemFila, type PessoaNaFila } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
+import type { AccaoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { useDesviosAcoes } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { AceitarDesvioDialog, type PedidoAceitarDesvio } from "./AceitarDesvioDialog";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
@@ -144,7 +145,7 @@ function PainelDeAssiduidade({
             <AccaoDoDesvio
               key={`${pedidoAlerta.item.id}-${pedidoAlerta.accao}`}
               desvio={pedidoAlerta.item.desvio}
-              accao={pedidoAlerta.accao as "corrigir" | "marcar_falta" | "anular_por_ausencia"}
+              accao={pedidoAlerta.accao as AccaoDesvio}
               nome={aberta.nome}
               locais={locais}
               onAlterado={aposGravar}

@@ -46,9 +46,13 @@ interface Pedido {
   accao: AccaoDesvio;
 }
 
-/** As accoes de um desvio que esta conta pode fazer: corrigir exige `corrigir`; faltas exigem `faltasEdit`. */
+/** As accoes de um desvio que esta conta pode fazer: corrigir exige `corrigir`; lancar a picagem exige `picarOutros`; faltas exigem `faltasEdit`. */
 function accoesPermitidas(desvio: Desvio, permissoes: PermissoesAssiduidade): AccaoDesvio[] {
-  return accoesDoDesvio(desvio).filter((accao) => (accao === "corrigir" ? permissoes.corrigir : permissoes.faltasEdit));
+  return accoesDoDesvio(desvio).filter((accao) => {
+    if (accao === "corrigir") return permissoes.corrigir;
+    if (accao === "lancar_picagem") return permissoes.picarOutros;
+    return permissoes.faltasEdit;
+  });
 }
 
 export function FilaAlertasFimDoDia({

@@ -174,6 +174,22 @@ describe("painel da pessoa", () => {
     expect(screen.getAllByRole("dialog").at(-1)).not.toBe(painel);
   });
 
+  it("«Corrigir o ponto» aparece antes de «Marcar falta» só a quem pode picar por outros; sem isso não aparece", () => {
+    const { unmount } = montar(filaCom(), permissoes({ gerir: true, corrigir: true, faltasEdit: true, picarOutros: true }));
+    abrirAna();
+    const alerta = within(screen.getByRole("dialog", { name: "Ana Silva" })).getAllByTestId(/^item-fila-alerta-/)[0];
+    const botoes = within(alerta).getAllByRole("button").map((b) => b.textContent);
+    expect(botoes.findIndex((t) => t?.startsWith("Corrigir o ponto"))).toBeGreaterThanOrEqual(0);
+    expect(botoes.findIndex((t) => t?.startsWith("Corrigir o ponto"))).toBeLessThan(botoes.findIndex((t) => t?.startsWith("Marcar falta")));
+    expect(within(alerta).getByRole("button", { name: /^Corrigir o ponto/ })).not.toHaveAttribute("aria-disabled");
+    unmount();
+    montar(filaCom(), permissoes({ gerir: true, corrigir: true, faltasEdit: true, picarOutros: false }));
+    abrirAna();
+    const semPicar = within(screen.getByRole("dialog", { name: "Ana Silva" }));
+    expect(semPicar.queryByRole("button", { name: /^Corrigir o ponto/ })).not.toBeInTheDocument();
+    expect(semPicar.getByRole("button", { name: /^Marcar falta/ })).toBeInTheDocument();
+  });
+
   it("nunca diz «Nada por tratar» se uma fonte não foi lida bem: avisa que os itens podem estar desactualizados", () => {
     const { rerender } = montar(filaCom());
     abrirAna();

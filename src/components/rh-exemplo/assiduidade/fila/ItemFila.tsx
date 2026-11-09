@@ -35,6 +35,7 @@ const ROTULO: Record<IdDeAccao, string> = {
   aceitar: "rhJust.rh.aceitar",
   recusar: "rhJust.rh.recusar",
   corrigir: "rhExemplo.pic.accao.corrigir",
+  lancar_picagem: "rhExemplo.pic.accao.lancar_picagem",
   marcar_falta: "rhExemplo.pic.accao.marcar_falta",
   anular_por_ausencia: "hr.assiduidade.accao.anularPorAusencia",
   aprovar_chefia: "hr.ausencias.accao.aprovarComoChefia",
