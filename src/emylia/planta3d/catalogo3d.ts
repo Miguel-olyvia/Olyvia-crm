@@ -8,6 +8,7 @@
 import type { TipoPeca } from "../planta";
 import type { TipoEspaco } from "./modelo";
 import { modeloHtmlDoProduto } from "./htmlDoCatalogo";
+import { categoriaDoTipo } from "./categoriasGlb";
 
 export type TipoMockup =
   | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
@@ -242,6 +243,17 @@ export const SO_COM_MODELO_HTML = true;
 export function temModeloHtml(m: ProdutoModelo3D): boolean {
   const pr = m.mockup3d.params;
   return pr?.k === "chapa" || pr?.k === "bancada" || (!!pr && "html" in pr && !!pr.html && pr.html.exacto !== false);
+}
+
+/**
+ * PROTÓTIPO: com SO_COM_MODELO_HTML, a lista mostra também (depois dos do HTML) os produtos que têm um modelo GENÉRICO por categoria
+ * (categoriasGlb.ts, selo «3D genérico»). Pôr a `false` volta a esconder os genéricos. Único sítio que decide isto (BarraProdutos.tsx lê-o).
+ */
+export const MOSTRAR_GENERICOS = true;
+/** O produto usa um modelo genérico da sua categoria (não tem o do HTML e o tipo tem categoria). */
+export function temModeloGenerico(m: ProdutoModelo3D): boolean {
+  const pr = m.mockup3d.params;
+  return !(pr && "html" in pr && pr.html) && pr?.k !== "chapa" && pr?.k !== "bancada" && !!categoriaDoTipo(m.mockup3d.tipo);
 }
 
 /** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */

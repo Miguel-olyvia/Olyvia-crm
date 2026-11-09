@@ -1,0 +1,93 @@
+[
+ {
+  "categoria": "sanita",
+  "url": "/modelos3d/genericos/sanita.glb",
+  "triangulos": 1124,
+  "partes": 6,
+  "bytes": 15820
+ },
+ {
+  "categoria": "sanita_suspensa",
+  "url": "/modelos3d/genericos/sanita_suspensa.glb",
+  "triangulos": 944,
+  "partes": 5,
+  "bytes": 13284
+ },
+ {
+  "categoria": "bide",
+  "url": "/modelos3d/genericos/bide.glb",
+  "triangulos": 728,
+  "partes": 4,
+  "bytes": 10656
+ },
+ {
+  "categoria": "lavatorio",
+  "url": "/modelos3d/genericos/lavatorio.glb",
+  "triangulos": 932,
+  "partes": 4,
+  "bytes": 12068
+ },
+ {
+  "categoria": "movel_lavatorio",
+  "url": "/modelos3d/genericos/movel_lavatorio.glb",
+  "triangulos": 824,
+  "partes": 9,
+  "bytes": 16876
+ },
+ {
+  "categoria": "banheira",
+  "url": "/modelos3d/genericos/banheira.glb",
+  "triangulos": 888,
+  "partes": 5,
+  "bytes": 12884
+ },
+ {
+  "categoria": "base_duche",
+  "url": "/modelos3d/genericos/base_duche.glb",
+  "triangulos": 408,
+  "partes": 3,
+  "bytes": 7060
+ },
+ {
+  "categoria": "resguardo",
+  "url": "/modelos3d/genericos/resguardo.glb",
+  "triangulos": 156,
+  "partes": 6,
+  "bytes": 8644
+ },
+ {
+  "categoria": "espelho",
+  "url": "/modelos3d/genericos/espelho.glb",
+  "triangulos": 24,
+  "partes": 2,
+  "bytes": 3104
+ },
+ {
+  "categoria": "armario",
+  "url": "/modelos3d/genericos/armario.glb",
+  "triangulos": 72,
+  "partes": 6,
+  "bytes": 7984
+ },
+ {
+  "categoria": "toalheiro",
+  "url": "/modelos3d/genericos/toalheiro.glb",
+  "triangulos": 1452,
+  "partes": 13,
+  "bytes": 26568
+ },
+ {
+  "categoria": "torneira",
+  "url": "/modelos3d/genericos/torneira.glb",
+  "triangulos": 396,
+  "partes": 5,
+  "bytes": 9400
+ },
+ {
+  "categoria": "coluna_duche",
+  "url": "/modelos3d/genericos/coluna_duche.glb",
+  "triangulos": 684,
+  "partes": 5,
+  "bytes": 11484
+ }
+]

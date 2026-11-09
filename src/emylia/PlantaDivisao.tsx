@@ -15,6 +15,7 @@ import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede,
 import { aplicarVariante, expandirConjunto, guardarLugarLocal, mudarMontagem, reporComponente, reposicionarConjunto, retirarComponente, type Conjunto } from "./planta3d/conjuntos";
 import { familiaPorId, modeloDaFamilia } from "./planta3d/familias";
 import { ListaVendavel, PainelConjunto, PainelVariante } from "./planta3d/PainelVariante";
+import { PainelGenerico } from "./planta3d/PainelGenerico";
 import { PainelBancada } from "./planta3d/PainelBancada";
 import { BANCADA_OMISSAO, aplicarConfig, modeloDaBancada, pecaBancada, type ConfigBancada } from "./planta3d/bancada";
 import { ListaPecas, nomeDaPeca } from "./planta3d/ListaPecas";
@@ -522,6 +523,8 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
             </Button>
             {selecionada.banc && <PainelBancada cfg={selecionada.banc} onMudar={(c) => mudarBancada(selecionada, c)} />}
             <PainelVariante peca={selecionada} onOpcao={(o) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? { ...x, opc: { ...x.opc, ...o } } : x)) })} onMudar={(f, med, ac) => mudarVariante(selecionada, f, med, ac)} onMontagem={(mo) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? mudarMontagem(x, mo) : x)) })} />
+            <PainelGenerico modelo={selecionada.produto ? produtosCat.find((m) => m.produtoId === selecionada.produto) : undefined} opc={selecionada.opc}
+              onGen={(gen) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? { ...x, opc: { ...x.opc, gen } } : x)) })} />
             {selecionada.conj && <PainelConjunto planta={p} peca={selecionada} onEscolher={setSel} onRetirar={(id) => gravar(retirarComponente(p, id))} onRepor={(id) => gravar(reporComponente(p, id))} />}
             <p className="w-full text-sm text-muted-foreground">Com a peça escolhida: setas movem (Shift: 25 cm), R roda 90° para a direita e Shift+R para a esquerda{parede ? " (as de parede passam à parede oposta)" : ""}.</p>
           </div>

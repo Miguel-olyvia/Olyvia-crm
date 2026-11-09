@@ -111,6 +111,20 @@ const P = await carregarPreparar();
 await MeshoptSimplifier.ready; await MeshoptEncoder.ready;
 const io = new NodeIO().registerExtensions([EXTMeshoptCompression, KHRMeshQuantization]).registerDependencies({ "meshopt.encoder": MeshoptEncoder });
 mkdirSync(SAIDA, { recursive: true });
+// `node scripts/gerar-modelos-glb.mjs genericos`: os GLB genéricos por categoria (já low-poly: sem simplificação), em public/modelos3d/genericos
+if (process.argv[2] === "genericos") {
+  const dir = join(SAIDA, "genericos"), rel = [];
+  mkdirSync(dir, { recursive: true });
+  for (const id of P.listaDeGenericos()) {
+    const prep = P.prepararGenerico(id), malhas = simplificar(prep.malhas, 0, 0), ficheiro = join(dir, `${id}.glb`);
+    writeFileSync(ficheiro, await io.writeBinary(documento(prep, malhas)));
+    const r = { categoria: id, url: `/modelos3d/genericos/${id}.glb`, triangulos: triangulos(malhas), partes: malhas.length, bytes: statSync(ficheiro).size };
+    rel.push(r); console.log(`${id}: ${r.triangulos} triângulos, ${r.partes} partes, ${(r.bytes / 1024).toFixed(1)} KB`);
+  }
+  writeFileSync(join(dir, "genericos.json"), JSON.stringify(rel, null, 1) + "\n");
+  console.log(`genéricos: ${rel.length} GLB, ${(rel.reduce((s, r) => s + r.bytes, 0) / 1024).toFixed(1)} KB no total`);
+  process.exit(0);
+}
 const pedidos = process.argv[2]?.split(",").map((s) => { const [familia, modelo] = s.split(":"); return { familia, modelo }; });
 const relatorio = [];
 for (const { familia, modelo } of pedidos ?? P.listaDeModelos()) {

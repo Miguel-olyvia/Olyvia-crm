@@ -14,6 +14,8 @@ import { construirTorneira, modelosDeTorneira, type ModeloTorneira } from "@/emy
 import { construirLavaLoica, modelosDeLavaLoica } from "@/emylia/planta3d/modelosHtml";
 import { construirPlaca, modelosDePlaca } from "@/emylia/planta3d/modelosHtml/placas";
 import { contarTriangulos } from "@/emylia/planta3d/modelosHtml/util";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { CATEGORIAS_GLB, type FormaGlb } from "@/emylia/planta3d/categoriasGlb";
 
 export type FamiliaGlb = "torneira" | "lava_loica" | "placa";
 export interface NoSaida { nome: string; pai: string | null; posicao: number[]; quaternion: number[]; extras?: Record<string, unknown> }
@@ -59,6 +61,29 @@ function geometriaAplicada(g: THREE.BufferGeometry, m: THREE.Matrix4): THREE.Buf
     for (let i = 0; i < a.count; i += 3) { const x = a.getX(i + 1), y = a.getY(i + 1), z = a.getZ(i + 1); a.setXYZ(i + 1, a.getX(i + 2), a.getY(i + 2), a.getZ(i + 2)); a.setXYZ(i + 2, x, y, z); }
   }
   return n;
+}
+
+/* ------------------------------------------------------------------ os genéricos por categoria (src/emylia/planta3d/categoriasGlb.ts) */
+/** As formas unitárias (centradas, de lado 1): low-poly; o runtime põe cada parte no sítio e na medida com a tabela. */
+function formaUnitaria(f: FormaGlb): THREE.BufferGeometry {
+  if (f === "caixa") return new THREE.BoxGeometry(1, 1, 1);
+  if (f === "caixaR") return new RoundedBoxGeometry(1, 1, 1, 2, 0.12);
+  if (f === "cilindro") return new THREE.CylinderGeometry(0.5, 0.5, 1, 24);
+  return new THREE.SphereGeometry(0.5, 20, 12);
+}
+export const listaDeGenericos = (): string[] => CATEGORIAS_GLB.map((c) => c.id);
+/** Um GLB por categoria: a raiz, um nó por parte (o nome estável, que o runtime move e escala) e a malha unitária da parte. */
+export function prepararGenerico(id: string): ModeloPreparado {
+  const c = CATEGORIAS_GLB.find((x) => x.id === id);
+  if (!c) throw new Error(`Categoria genérica desconhecida: ${id}`);
+  const nos: NoSaida[] = [{ nome: "raiz", pai: null, posicao: [0, 0, 0], quaternion: [0, 0, 0, 1] }];
+  const malhas: MalhaSaida[] = [];
+  for (const p of c.partes) {
+    nos.push({ nome: p.nome, pai: "raiz", posicao: [0, 0, 0], quaternion: [0, 0, 0, 1], extras: { forma: p.forma } });
+    const g = mergeVertices(formaUnitaria(p.forma).deleteAttribute("uv"), 1e-5);
+    malhas.push({ no: p.nome, material: p.mat, posicoes: new Float32Array(g.getAttribute("position").array), normais: new Float32Array(g.getAttribute("normal").array), indices: new Uint32Array((g.index as THREE.BufferAttribute).array) });
+  }
+  return { familia: "generico" as FamiliaGlb, modelo: id, nos, malhas, triangulosOriginais: malhas.reduce((s, m) => s + m.indices.length / 3, 0), ms: 0 };
 }
 
 export function preparar(familia: FamiliaGlb, modelo: string): ModeloPreparado {

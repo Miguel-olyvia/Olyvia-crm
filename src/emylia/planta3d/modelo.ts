@@ -5,7 +5,11 @@
 
 export interface Ponto { x: number; y: number }
 /** Opções de uma peça que vêm do catálogo de origem: montagem do lava-loiça, rotação e extracção da bica, tampas dos ralos, escorredor reverso, articulação. */
-export interface OpcoesPeca { montagem?: "baixo" | "cima"; bica?: number; extraido?: boolean; tampas?: boolean; reverso?: boolean; articulacao?: number }
+export interface OpcoesPeca {
+  montagem?: "baixo" | "cima"; bica?: number; extraido?: boolean; tampas?: boolean; reverso?: boolean; articulacao?: number;
+  /** as opções do modelo genérico da categoria (categoriasGlb.ts: depósito, coluna, porta de correr…) e `cor` (a cor escolhida no painel) */
+  gen?: Record<string, string | boolean>;
+}
 export type TipoEspaco = "casa_banho" | "cozinha" | "quarto" | "sala" | "outro";
 export type TipoAbertura = "porta" | "janela";
 

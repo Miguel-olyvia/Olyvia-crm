@@ -3,7 +3,7 @@
 // As FAMÍLIAS (torneiras, lava-loiças, placas, tampos…) aparecem uma só vez, com bolinhas de cor para os acabamentos e um selector de medida; os
 // CONJUNTOS (bancada, duche, móvel de lavatório) põem as peças ligadas de uma vez. Arrasta-se para a planta (ou toca-se, ou Enter, e fica ao meio).
 import { useMemo, useState, type PointerEvent as RPointerEvent } from "react";
-import { GRUPOS_ESPACO, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
+import { GRUPOS_ESPACO, MOSTRAR_GENERICOS, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import { CONJUNTOS, type Conjunto } from "./conjuntos";
 import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, variantesDe, type Familia } from "./familias";
 import type { TipoEspaco } from "./modelo";
@@ -71,6 +71,7 @@ function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | n
   const pr = m.mockup3d.params;
   if (pr && "html" in pr && pr.html) return pr.html.exacto === false ? { curto: "3D parecido", titulo: `O HTML não tem este produto: usa o modelo ${pr.html.modelo}` } : { curto: "3D do catálogo", titulo: `Modelo ${pr.html.modelo} · ${pr.html.acab}` };
   if (pr?.k === "chapa") return { curto: "3D do catálogo", titulo: `Chapa ${pr.series} · ${pr.tone}` };
+  if (temModeloGenerico(m)) return { curto: "3D genérico", titulo: "Modelo genérico da categoria, com as medidas e a cor deste produto" };
   return null;
 }
 
@@ -84,7 +85,12 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
   const [escolhas, setEscolhas] = useState<Record<string, { med?: string; acab?: string }>>({});
   // protótipo: só os produtos com o modelo 3D do HTML (catalogo3d.ts, SO_COM_MODELO_HTML); separadores, contagens e pesquisa contam só esses
   // o catálogo 3D do HTML é de cozinha: os tampos Coverlam de cozinha não aparecem na casa de banho, no quarto nem na sala
-  const produtos = useMemo(() => (!SO_COM_MODELO_HTML ? todosProdutos : espaco === "cozinha" || espaco === "outro" ? todosProdutos.filter(temModeloHtml) : []), [todosProdutos, espaco]);
+  // e, com MOSTRAR_GENERICOS, depois deles os que têm o modelo genérico da categoria (selo «3D genérico»)
+  const produtos = useMemo(() => {
+    if (!SO_COM_MODELO_HTML) return todosProdutos;
+    const html = espaco === "cozinha" || espaco === "outro" ? todosProdutos.filter(temModeloHtml) : [];
+    return MOSTRAR_GENERICOS ? [...html, ...todosProdutos.filter(temModeloGenerico)] : html;
+  }, [todosProdutos, espaco]);
   const grupos = useMemo(() => GRUPOS_ESPACO[espaco].map((g) => ({ g, n: produtosDoGrupo(produtos, g).length })).filter((x) => x.n > 0), [produtos, espaco]);
   // o separador «Bancadas» tem a bancada composta (que é o modelo do HTML), mesmo sem famílias de tampo visíveis
   const categorias = useMemo(() => CATEGORIAS_FAMILIA.filter((c) => c.espacos.includes(espaco)).map((c) => ({ c, n: c.id === "tampos" ? 1 : familiasVisiveis(c.id).length })).filter((x) => x.n > 0), [espaco]);

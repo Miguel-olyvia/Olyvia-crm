@@ -10,7 +10,8 @@ import { aplicarExtracao, criarFlexivel, materiaisDaTorneira, type ModeloTorneir
 import { materiaisDaLavaLoica } from "./index";
 import { materiaisDaPlaca } from "./placas";
 import { KERAN_SPECS } from "./specs";
-import { V } from "./util";
+import { V, nomearMateriais } from "./util";
+import type { CategoriaGlb, MaterialGlb, ParamsGenerico } from "../categoriasGlb";
 
 /** O interruptor único: `false` volta aos construtores procedurais em todo o lado (peças soltas e bancada). */
 export const USAR_GLB = true;
@@ -85,6 +86,32 @@ export function vestir(cena: THREE.Object3D, materiais: Readonly<Record<string, 
     m.material = mat; m.castShadow = true; m.receiveShadow = true;
   });
   return copia;
+}
+
+/* ------------------------------------------------------------------ genéricos por categoria (categoriasGlb.ts) */
+/** Os materiais dos genéricos: `corpo` leva a cor e o acabamento do produto; os outros são fixos. */
+export function materiaisGenericos(cor: string, acab?: { metalness: number; roughness: number }): Record<MaterialGlb, THREE.Material> {
+  return nomearMateriais({
+    corpo: new THREE.MeshStandardMaterial({ color: cor, roughness: acab?.roughness ?? 0.4, metalness: acab?.metalness ?? 0 }),
+    branco: new THREE.MeshStandardMaterial({ color: "#f7f7f5", roughness: 0.22 }),
+    metal: new THREE.MeshStandardMaterial({ color: "#c9ced1", roughness: 0.2, metalness: 1 }),
+    vidro: new THREE.MeshPhysicalMaterial({ color: "#d4e8ee", roughness: 0.05, transparent: true, opacity: 0.32, depthWrite: false }),
+    espelho: new THREE.MeshStandardMaterial({ color: "#e4ecef", roughness: 0.04, metalness: 1 }),
+    escuro: new THREE.MeshStandardMaterial({ color: "#2b2f33", roughness: 0.6 }),
+    interior: new THREE.MeshStandardMaterial({ color: "#e3e9eb", roughness: 0.3 }),
+  });
+}
+/** Monta o genérico de uma categoria: cada parte (nó do GLB) vai para a posição e a escala que a tabela dá para estas medidas e opções. */
+export function montarGenerico(cena: THREE.Object3D, c: CategoriaGlb, p: ParamsGenerico, cor: string, acab?: { metalness: number; roughness: number }): ModeloMontado {
+  const mats = materiaisGenericos(cor, acab), grupo = vestir(cena, mats);
+  for (const parte of c.partes) {
+    const no = grupo.getObjectByName(parte.nome);
+    if (!no) throw new Error(`O GLB genérico «${c.id}» não tem a parte «${parte.nome}»`);
+    const k = parte.colocar(p);
+    no.position.set(...k.pos); no.scale.set(...k.esc); no.rotation.set(...(k.rot ?? [0, 0, 0]));
+    no.visible = parte.ver ? parte.ver(p) : true;
+  }
+  return { grupo, libertar: () => Object.values(mats).forEach((m) => m.dispose()) };
 }
 
 /** Monta um modelo do HTML a partir do GLB, com os materiais do acabamento e as opções da peça. Em mm, como o construtor procedural. */
