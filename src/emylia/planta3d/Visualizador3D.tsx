@@ -39,6 +39,8 @@ export interface Visualizador3DProps {
 }
 
 type V3 = [number, number, number];
+/** O espelho é prateado neutro (sem tom azulado) e o vidro claro é neutro: os mesmos tons dos genéricos (modelosHtml/glb.ts). */
+const COR_ESPELHO = "#f1f1ef", COR_VIDRO = "#e9ecea";
 
 /* ------------------------------------------------------------------ texturas procedurais (canvas, sem ficheiros) */
 const cacheTexturas = new Map<string, THREE.CanvasTexture>();
@@ -449,14 +451,14 @@ function ParametricoAntigo({ tipo, w, d, h, cor, mat, params, recortes, opc }: {
       return (
         <>
           <Caixa p={[0, h / 2, 0]} s={[w, h, Math.max(d, 0.02)]} cor="#2b2f33" r={0.4} />
-          <Caixa p={[0, h / 2, Math.max(d, 0.02) / 2 + 0.001]} s={[w - 0.05, h - 0.05, 0.004]} cor="#cfe3ee" r={0.05} />
+          <mesh position={[0, h / 2, Math.max(d, 0.02) / 2 + 0.001]}><boxGeometry args={[w - 0.05, h - 0.05, 0.004]} /><meshStandardMaterial color={COR_ESPELHO} metalness={1} roughness={0.04} /></mesh>
         </>
       );
     case "armario_espelho":
       return (
         <>
           <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.5} />
-          <Caixa p={[0, h / 2, d / 2 + 0.003]} s={[w - 0.04, h - 0.04, 0.006]} cor="#cfe3ee" r={0.05} />
+          <mesh position={[0, h / 2, d / 2 + 0.003]}><boxGeometry args={[w - 0.04, h - 0.04, 0.006]} /><meshStandardMaterial color={COR_ESPELHO} metalness={1} roughness={0.04} /></mesh>
         </>
       );
     case "torneira":
@@ -519,7 +521,7 @@ function ParametricoAntigo({ tipo, w, d, h, cor, mat, params, recortes, opc }: {
     case "resguardo":
       return (
         <>
-          <mesh position={[0, h / 2, 0]}><boxGeometry args={[w, h, Math.max(d, 0.008)]} /><meshStandardMaterial color="#bcd9ea" transparent opacity={0.3} roughness={0.05} /></mesh>
+          <mesh position={[0, h / 2, 0]}><boxGeometry args={[w, h, Math.max(d, 0.008)]} /><meshStandardMaterial color={COR_VIDRO} transparent opacity={0.3} roughness={0.05} /></mesh>
           <Caixa p={[0, 0.015, 0]} s={[w, 0.03, 0.03]} cor="#9aa0a4" r={0.3} />
           <Caixa p={[0, h - 0.015, 0]} s={[w, 0.03, 0.03]} cor="#9aa0a4" r={0.3} />
         </>
@@ -890,7 +892,7 @@ function AberturaCena({ a, esp, z }: { a: Abertura; esp: number; z: number }) {
       {a.tipo === "janela" ? (
         <>
           <Caixa p={[0, a.peitoril + aro / 2, 0]} s={[a.largura, aro, e]} cor={cor} />
-          <mesh position={[0, a.peitoril + a.altura / 2, 0]}><boxGeometry args={[a.largura - 2 * aro, a.altura - 2 * aro, 0.01]} /><meshStandardMaterial color="#bcd9ea" transparent opacity={0.35} roughness={0.1} /></mesh>
+          <mesh position={[0, a.peitoril + a.altura / 2, 0]}><boxGeometry args={[a.largura - 2 * aro, a.altura - 2 * aro, 0.01]} /><meshStandardMaterial color={COR_VIDRO} transparent opacity={0.35} roughness={0.1} /></mesh>
           <Caixa p={[0, a.peitoril + a.altura / 2, 0]} s={[0.025, a.altura - 2 * aro, 0.03]} cor={cor} />
         </>
       ) : (

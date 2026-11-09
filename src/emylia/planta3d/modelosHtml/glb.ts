@@ -95,8 +95,9 @@ export function materiaisGenericos(cor: string, acab?: { metalness: number; roug
     corpo: new THREE.MeshStandardMaterial({ color: cor, roughness: acab?.roughness ?? 0.4, metalness: acab?.metalness ?? 0 }),
     branco: new THREE.MeshStandardMaterial({ color: "#f7f7f5", roughness: 0.22 }),
     metal: new THREE.MeshStandardMaterial({ color: "#c9ced1", roughness: 0.2, metalness: 1 }),
-    vidro: new THREE.MeshPhysicalMaterial({ color: "#d4e8ee", roughness: 0.05, transparent: true, opacity: 0.32, depthWrite: false }),
-    espelho: new THREE.MeshStandardMaterial({ color: "#e4ecef", roughness: 0.04, metalness: 1 }),
+    // vidro claro neutro (resguardo, portas de vidro) e espelho prateado neutro: sem tom azulado; o reflexo é o do ambiente de estúdio (neutro)
+    vidro: new THREE.MeshPhysicalMaterial({ color: "#e9ecea", roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false }),
+    espelho: new THREE.MeshStandardMaterial({ color: "#f1f1ef", roughness: 0.03, metalness: 1 }),
     escuro: new THREE.MeshStandardMaterial({ color: "#2b2f33", roughness: 0.6 }),
     interior: new THREE.MeshStandardMaterial({ color: "#e3e9eb", roughness: 0.3 }),
     // vidro escuro com reflexo (forno, placa), plástico dos painéis e botões, a luz dos mostradores, a água/fundo das louças
