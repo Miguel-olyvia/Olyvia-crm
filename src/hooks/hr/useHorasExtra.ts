@@ -13,7 +13,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError, type BusinessFlow } from "@/lib/observability/captureFlowError";
 import { getLocalizedFallback } from "@/utils/friendlyError";
-import type { EstadoHoraExtra, HoraExtra, LimitesHE } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
+import type { ConfigHE, EstadoHoraExtra, HoraExtra, LimitesHE } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import {
   DIAS_JANELA_SEMANAL, MAX_JANELAS_DETECAO, MOTIVO_MIN, RESUMO_VAZIO, SUCESSO_HE,
   chaveDoErroHorasExtra, codigoDeErroHorasExtra, diasDoIntervalo, horaExtraDaLinha, janelasDoIntervalo, limitesDaLinha, planoDeDeteccao,
@@ -133,14 +133,14 @@ export function useHorasExtraSaldo(pessoaId: string | null | undefined, ano: num
 /* ------------------------------------------------------------------ limites da organizacao */
 export interface ConfigHorasExtraHook {
   /** `null` enquanto carrega, ou quando a leitura falhou (por exemplo sem a permissao de ver). */
-  limites: LimitesHE | null;
+  limites: ConfigHE | null;
   /** Verdadeiro: a organizacao ainda nao guardou nada e estes sao os valores de omissao da base. */
   omissao: boolean;
   aCarregar: boolean;
   /** Verdadeiro enquanto um `guardar` esta a correr (o botao fica bloqueado). */
   aGuardar: boolean;
   erro: string | null;
-  guardar: (novos: LimitesHE) => Promise<ResultadoHE>;
+  guardar: (novos: ConfigHE) => Promise<ResultadoHE>;
 }
 
 export function useHorasExtraConfig(enabled = true): ConfigHorasExtraHook {
@@ -153,7 +153,7 @@ export function useHorasExtraConfig(enabled = true): ConfigHorasExtraHook {
     queryKey: [CHAVE_HORAS_EXTRA, organizationId, "config"],
     enabled: enabled && organizationId !== null,
     retry: false,
-    queryFn: async (): Promise<{ limites: LimitesHE; omissao: boolean }> => {
+    queryFn: async (): Promise<{ limites: ConfigHE; omissao: boolean }> => {
       const { data, error } = await rpc("rpc_hr_horas_extra_config_ler", { p_organization_id: organizationId });
       if (error || !data) throw new Error(textoDoErro(error, "hr-horas-extra-config-ler"));
       const linha = data as LinhaConfigHE;
@@ -162,7 +162,7 @@ export function useHorasExtraConfig(enabled = true): ConfigHorasExtraHook {
   });
 
   const guardar = useCallback(
-    async (n: LimitesHE): Promise<ResultadoHE> => {
+    async (n: ConfigHE): Promise<ResultadoHE> => {
       if (!organizationId) return recusa("pedido_invalido");
       // Guarda SINCRONA: dois cliques no mesmo instante nao chegam a fazer dois pedidos.
       if (ocupado.current) return recusa("pedido_em_curso");
@@ -172,7 +172,6 @@ export function useHorasExtraConfig(enabled = true): ConfigHorasExtraHook {
         const { error } = await rpc("rpc_hr_horas_extra_config_guardar", {
           p_organization_id: organizationId,
           p_dia_min: n.diaMin,
-          p_ano_min: n.anoMin,
           p_alerta_pct: n.alertaPct,
           p_minimo_min: n.minimoMin,
         });

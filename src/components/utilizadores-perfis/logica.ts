@@ -1,5 +1,6 @@
 // Lógica pura da página "Utilizadores e perfis": filtros, contagens, permissões efetivas, âmbito e proteção.
 import { PERMISSOES } from "./permissoesExemplo";
+import { ambitoSemEfeito } from "./regrasVinculos";
 import type { Ambito, FiltrosUtilizadores, Permissao, Role, Utilizador } from "./tipos";
 
 const ORDEM_AMBITO: Ambito[] = ["NONE", "OWNED", "TEAM", "ORG"];
@@ -85,10 +86,10 @@ export function ambitoDe(u: Utilizador, roles: Role[], codigo: string): Ambito {
     .reduce<Ambito>((acc, v) => maisLargo(acc, v.ambitos[codigo] ?? AMBITO_PADRAO), "NONE");
 }
 
-/** O âmbito resumido do utilizador: o mais largo entre as suas permissões com âmbito. */
+/** O âmbito resumido do utilizador: o mais largo entre as suas permissões com âmbito (09/11: sem as de âmbito sem efeito). */
 export function resumoAmbito(u: Utilizador, roles: Role[], catalogo: Permissao[] = PERMISSOES): Ambito {
   return catalogo
-    .filter((p) => p.comAmbito)
+    .filter((p) => p.comAmbito && !ambitoSemEfeito(p.codigo))
     .reduce<Ambito>((acc, p) => maisLargo(acc, ambitoDe(u, roles, p.codigo)), "NONE");
 }
 

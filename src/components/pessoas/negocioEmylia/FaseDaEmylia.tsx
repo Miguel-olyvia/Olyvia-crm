@@ -11,7 +11,7 @@ import { PAPEIS, proximo, type Negocio } from "@/emylia/motor";
 import type { Passo } from "@/emylia/CamposFase";
 import { BotaoFase, passosDaFase, temBotaoFase } from "@/emylia/PaginaNegocio";
 import { PedidoDoCliente } from "@/emylia/PedidoDoCliente";
-import { SEM_PERM, podeNeg } from "@/emylia/permissoes";
+import { SEM_PERM, passoDe, podeNeg } from "@/emylia/permissoes";
 import { FASE_COR, type Ctx } from "@/emylia/pecas";
 import { GuiaPassoCtx } from "@/emylia/guiaPasso";
 import { irParaCampoEmFalta } from "@/emylia/irParaCampoEmFalta";
@@ -53,7 +53,8 @@ interface FaseDaEmyliaProps {
 export function FaseDaEmylia({ ctx, d, soLeitura, topo, fasesFeitas, depois, extra, ajustarPassos }: FaseDaEmyliaProps) {
   const { t } = useTranslation();
   const { S } = ctx;
-  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  // 9/11 (Lote 1, B): o passo é do papel atual OU quem entrou tem as permissões que ele pede (passoDe, só com conta real)
+  const p = proximo(d, S), meu = passoDe(S.role, p.who, p.act);
   const passosDaEmylia = passosDaFase(ctx, d, true);
   const passos = ajustarPassos ? ajustarPassos(passosDaEmylia) : passosDaEmylia;
   const comFim = temBotaoFase(ctx, d);

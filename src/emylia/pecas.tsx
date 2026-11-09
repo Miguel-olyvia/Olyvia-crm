@@ -16,6 +16,15 @@ export interface Ctx {
   /** 23/10 (2.0): quem entrou é um técnico de obra que não troca de papel: o Hoje do técnico fica no técnico ligado à conta (ref_v1);
    *  `ref` null: a conta ainda não está ligada a nenhum técnico. Sem isto (a Direção, os testes), o técnico escolhe-se no Hoje. */
   tecnicoFixo?: { ref: string | null };
+  /** 09/11: false: quem entrou não pode criar negócios (pessoas.create): o «Novo negócio» não aparece. Sem isto (o protótipo, os testes), aparece. */
+  podeCriarNegocio?: boolean;
+  /** 09/11 (20270111100000): quem entrou só lê as obras (sem pessoas.view, com negocios.obra.executar): o negócio vem reduzido (sem dinheiro)
+   *  e a conversa com o cliente, a ficha do negócio e o Inventário não são dele; as Operações não os mostram. */
+  leituraReduzida?: boolean;
+  /** 09/11: false: sem pessoas.view (perfil, papel ou admin): as ligações à ficha do negócio («Ver o negócio») não aparecem. Sem isto, aparecem. */
+  podeVerNegocio?: boolean;
+  /** 09/11: false: sem client_orders.view: as ligações ao Inventário («Abrir a encomenda no Inventário») não aparecem. Sem isto, aparecem. */
+  podeVerInventario?: boolean;
 }
 
 /* ------------------------------------------------------------------ peças */

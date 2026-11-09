@@ -5,7 +5,7 @@
  *
  * O LIMITE ANUAL NÃO SE EDITA AQUI: é o da regra salarial da organização em vigor (`he_limite_anual_min`), mostrado só em
  * leitura com ligação à secção «Regras salariais». Já não vem do contrato da pessoa nem de `hr_horas_extra_config.ano_min`
- * (a base deixou de os ler); o `ano_min` que a RPC ainda exige segue tal como está, sem o ecrã o tocar.
+ * (a base deixou de os ler); a RPC de guardar já não recebe `p_ano_min`.
  *
  * TAMBEM REAL: o limite por dia, o alerta (% do limite anual) e o minimo de tempo a mais, guardados por organizacao
  * (`rpc_hr_horas_extra_config_*`). Ler pede `hr.assiduidade.view`; guardar, `hr.assiduidade.gerir`.
@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { CoeficientesHorasExtraReais } from "./CoeficientesHorasExtraReais";
+import { ContagemHorasExtraAprovadas } from "./ContagemHorasExtraAprovadas";
 import { useHorasExtraConfig } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
 import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
@@ -66,7 +67,7 @@ export function ConfiguracaoHorasExtra({ aoIrParaRegrasSalariais }: Configuracao
   const guardarRegras = async () => {
     if (!regrasValidas || !editavel || !limites || aGuardar) return;
     setErroGuardar(null);
-    const res = await guardar({ diaMin: Math.round(Number(r.diaH) * 60), anoMin: limites.anoMin, alertaPct: Number(r.alertaPct), minimoMin: Math.round(Number(r.minimoMin)) });
+    const res = await guardar({ diaMin: Math.round(Number(r.diaH) * 60), alertaPct: Number(r.alertaPct), minimoMin: Math.round(Number(r.minimoMin)) });
     if (!res.ok) {
       setErroGuardar(res.erro);
       return;
@@ -117,6 +118,8 @@ export function ConfiguracaoHorasExtra({ aoIrParaRegrasSalariais }: Configuracao
           <Button type="button" className="min-h-11" disabled={!regrasValidas || !editavel || aGuardar} onClick={() => void guardarRegras()}>{t("rhFluxosC.comum.guardar")}</Button>
         </CardContent>
       </Card>
+
+      <ContagemHorasExtraAprovadas />
 
       <CoeficientesHorasExtraReais />
     </div>

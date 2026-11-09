@@ -2,12 +2,12 @@
  * O mes de uma pessoa, dia a dia. Picagens, horas realizadas, faltas e ausencias vem da assiduidade REAL da pessoa
  * (o hook que a aba Assiduidade ja carregou para esta janela, entregue por quem chama para nao ir duas vezes a base),
  * tal como o horario planeado (`pessoas_horario_planeado`, que vem na mesma leitura). O minimo de minutos do subsidio
- * e a regra real da organizacao (`hr_regras_subsidio_alimentacao`). Continuam a vir dos stores de exemplo, por ainda
+ * e o limite da regra salarial em vigor (`subsidio_limite_min`); sem regra em vigor nao ha contagem de dias. Continuam a vir dos stores de exemplo, por ainda
  * nao ter tabela, so o banco de horas. As horas extra vem da base (`rpc_hr_horas_extra_listar`, so as do mes desta pessoa).
  */
 import { useMemo } from "react";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
-import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao";
+import { useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
 import { horarioPessoaDeLinhas } from "@/components/rh-exemplo/lib/horarioReal";
 import { saldoDoBanco } from "@/components/rh-exemplo/fluxosC/bancoHorasRegras";
 import { useFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
@@ -22,7 +22,7 @@ import { totaisDoMes, type TotaisMes } from "./totaisMes";
 export interface MesDaPessoa {
   dias: DiaCalendario[];
   totais: TotaisMes;
-  /** A regra do subsidio nao se leu: os totais usam o minimo por omissao e o ecra tem de o dizer. */
+  /** A regra salarial nao se leu: os dias com direito a subsidio nao se mostram e o ecra tem de o dizer. */
   erroRegraSubsidio: boolean;
   /** O horario planeado foi recusado a quem consulta: o previsto fica vazio e o ecra tem de o dizer. */
   planeadoRecusado: boolean;
@@ -43,8 +43,10 @@ const SEM_TIPOS: readonly Pick<AusenciaTipo, "id" | "nome">[] = [];
 const SEM_LOCAIS: readonly LocalTrabalho[] = [];
 
 export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte: FonteRealDoMes): MesDaPessoa {
-  const { regra, error: erroRegra } = useRegrasSubsidioAlimentacao();
-  const minimo = regra.minutosMinimosDia;
+  // O limite do subsidio e o da REGRA SALARIAL em vigor (`subsidio_limite_min`); sem regra em vigor (ou ainda por ler) nao ha numero.
+  const { emVigor, estado: estadoRegras } = useRegrasSalariais();
+  const minimo: number | null = emVigor ? emVigor.subsidio_limite_min : null;
+  const erroRegra = estadoRegras === "erro";
   const banco = useFluxosC((e) => e.banco);
   const { permissoes } = usePermissoesAssiduidade();
   const periodo = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);

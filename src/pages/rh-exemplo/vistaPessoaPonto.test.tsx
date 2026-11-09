@@ -30,9 +30,11 @@ vi.mock("@/components/rh-exemplo/hooks/useAusenciasTipos", async () => {
   const resultado = { tipos, loading: false, recusado: false, vazio: false };
   return { useAusenciasTipos: () => resultado };
 });
-vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => {
-  const resultado = { regra: { minutosMinimosDia: 240 }, error: null };
-  return { useRegrasSubsidioAlimentacao: () => resultado };
+vi.mock("@/components/rh-exemplo/hooks/useRegrasSalariais", async (importarOriginal) => {
+  const original = await importarOriginal<typeof import("@/components/rh-exemplo/hooks/useRegrasSalariais")>();
+  // O limite do subsidio vem da regra salarial em vigor.
+  const resultado = { versoes: [], emVigor: { subsidio_limite_min: 240 }, maisRecente: null, estado: "ok", isLoading: false };
+  return { ...original, useRegrasSalariais: () => resultado };
 });
 vi.mock("@/components/rh-exemplo/hooks/PessoaRelatorioAssiduidadeMensalReal", () => ({ PessoaRelatorioAssiduidadeMensal: () => null }));
 import { reporAssiduidadeFalsa } from "@/test/assiduidadeDaPessoaFalso";

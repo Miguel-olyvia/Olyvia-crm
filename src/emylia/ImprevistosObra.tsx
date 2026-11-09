@@ -124,7 +124,8 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
   const [propor, setPropor] = useState(false);
   const [nota, setNota] = useState("");
   // 3/11 (20270105200000): propor e decidir o imprevisto é da permissão negocios.obra.imprevistos (era só o papel das Operações)
-  const pode = podeNeg(S.role, "obra.imprevistos");
+  // 9/11 (Lote 1, F): propor e decidir mudam um imprevisto gravado: o servidor pede também negocios.obra.planear (como A.proporImprevisto)
+  const pode = podeNeg(S.role, "obra.imprevistos") && podeNeg(S.role, "obra.planear");
   const par = paradasPor(d.obra.plano, im.id), a = im.adenda ? d.adendas?.find((x) => x.n === im.adenda) : undefined;
   return (
     <article aria-label={`Imprevisto ${im.id}`} className={cn("rounded-xl border p-4", im.estado === "aberto" || im.estado === "recusado" ? "border-destructive/40 bg-destructive/[0.04]" : "border-border")}>

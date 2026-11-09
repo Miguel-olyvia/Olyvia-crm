@@ -62,9 +62,11 @@ export function FotosMensagem({ m, fotoDe, tam }: { m: MensagemObra; fotoDe?: (i
  * não se envia outra. Com `anexar`, recebe também as fotografias escolhidas (e a mensagem pode ir só com elas).
  * `acao`: o que se mostra por baixo de uma mensagem (ex.: «Tratar como problema», nas Operações).
  */
-export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar, acao }: {
+export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar, acao, semEnvio }: {
   msgs: MensagemObra[]; eu: "cliente" | "empresa"; enviar: (t: string, fotos?: File[]) => void | boolean | Promise<boolean | void>; rapidas?: string[]; vazio: string;
   fotoDe?: (id: string) => Promise<string>; anexar?: boolean; acao?: (m: MensagemObra, i: number) => ReactNode;
+  /** 9/11 (Lote 1, I): sem permissão para escrever: a caixa de envio fica desligada e diz porquê (este texto). Sem ele, como sempre. */
+  semEnvio?: string;
 }) {
   const [texto, setTexto] = useState("");
   const [fotos, setFotos] = useState<File[]>([]);
@@ -82,7 +84,7 @@ export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar
   useEffect(() => { const c = caixa.current; if (c) c.scrollTop = c.scrollHeight; }, [msgs.length]);
   const mandar = async (t: string, comFotos = fotos) => {
     const limpo = t.trim();
-    if ((!limpo && !comFotos.length) || aMandar) return;
+    if ((!limpo && !comFotos.length) || aMandar || semEnvio) return;
     setAMandar(true);
     try {
       const r = await (comFotos.length ? enviar(limpo, comFotos) : enviar(limpo));
@@ -120,7 +122,7 @@ export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar
       </div>
       {rapidas.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto border-t border-border px-3 pt-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {rapidas.map((r) => <button key={r} type="button" disabled={aMandar} onClick={() => void mandar(r, [])} className="min-h-9 shrink-0 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{r}</button>)}
+          {rapidas.map((r) => <button key={r} type="button" disabled={aMandar || !!semEnvio} onClick={() => void mandar(r, [])} className="min-h-9 shrink-0 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{r}</button>)}
         </div>
       )}
       {anexar && fotos.length > 0 && (
@@ -137,13 +139,14 @@ export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar
       <form className="flex gap-2 p-3" onSubmit={(e) => { e.preventDefault(); void mandar(texto); }}>
         {anexar && <>
           <input ref={ficheiro} type="file" accept="image/*" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => juntar(e.target.files)} />
-          <button type="button" disabled={aMandar || fotos.length >= MAX_FOTOS} onClick={() => ficheiro.current?.click()} aria-label={`Juntar fotografias (até ${MAX_FOTOS})`} title="Juntar fotografias"
+          <button type="button" disabled={aMandar || fotos.length >= MAX_FOTOS || !!semEnvio} onClick={() => ficheiro.current?.click()} aria-label={`Juntar fotografias (até ${MAX_FOTOS})`} title="Juntar fotografias"
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-input text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-40"><Camera className="h-4 w-4" aria-hidden="true" /></button>
         </>}
-        <input value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Escrever uma mensagem" placeholder={anexar && fotos.length ? "Explique o que se vê (opcional)" : "Escrever uma mensagem"} maxLength={2000}
+        <input value={texto} onChange={(e) => setTexto(e.target.value)} disabled={!!semEnvio} aria-describedby={semEnvio ? "conversa-sem-envio" : undefined} aria-label="Escrever uma mensagem" placeholder={anexar && fotos.length ? "Explique o que se vê (opcional)" : "Escrever uma mensagem"} maxLength={2000}
           className="h-11 min-w-0 flex-1 rounded-full border border-input bg-background px-4 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-        <button type="submit" disabled={(!texto.trim() && !fotos.length) || aMandar} aria-label="Enviar" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><Send className="h-4 w-4" aria-hidden="true" /></button>
+        <button type="submit" disabled={(!texto.trim() && !fotos.length) || aMandar || !!semEnvio} aria-label="Enviar" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><Send className="h-4 w-4" aria-hidden="true" /></button>
       </form>
+      {semEnvio && <p id="conversa-sem-envio" className="px-4 pb-3 text-sm text-muted-foreground">{semEnvio}</p>}
     </div>
   );
 }

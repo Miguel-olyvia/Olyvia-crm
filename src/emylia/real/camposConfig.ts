@@ -128,7 +128,9 @@ export function aplicarCamposConfig(S: Estado, cfg: CamposConfig): void {
 }
 
 /** Lê e aplica. Se a base falhar (ex.: a migration ainda não foi aplicada), fica como sempre: sem ajustes, e diz-se na consola. */
-export async function carregarCamposConfig(sb: SupabaseClient, org: string, S: Estado): Promise<CamposConfig> {
+export async function carregarCamposConfig(sb: SupabaseClient, org: string, S: Estado, opcoes: { semLer?: boolean } = {}): Promise<CamposConfig> {
+  // 09/11 (20270111100000): quem só lê as obras (sem pessoas.view, com negocios.obra.executar) não pode ler os ajustes: ficam os de sempre
+  if (opcoes.semLer) { const vazio: CamposConfig = { campos: {}, efeitos: {} }; aplicarCamposConfig(S, vazio); return vazio; }
   try {
     const cfg = await lerCamposConfigBase(sb, org);
     aplicarCamposConfig(S, cfg);

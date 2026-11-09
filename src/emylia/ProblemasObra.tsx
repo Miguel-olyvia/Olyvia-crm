@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type MensagemObra, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { podeNeg } from "./permissoes";
+import { pelaPermissao, podeNeg } from "./permissoes";
 import { FotoMensagem } from "./ConversaObra";
 import { AcoesAdenda } from "./TrabalhosAMais";
 import { diasAdenda, estadoAdenda, precoSugeridoLivre, totaisAdenda, totaisLinhas, type LinhaAdenda } from "./adendas";
@@ -74,7 +74,8 @@ function PorTratar({ ctx, d, conversa, m, chave, fechar }: { ctx: Ctx; d: Negoci
   const [nota, setNota] = useState<string | null>(null);
   // 3/11: também com a obra concluída (a assistência depois da obra, ex.: garantia: a obra reabre quando as tarefas entram)
   // 6/11 (permissões): o papel E negocios.obra.imprevistos (como no motor)
-  const pode = S.role === "operacoes" && podeNeg(S.role, "obra.imprevistos");
+  // 9/11 (Lote 1, C): o papel, ou (conta real) quem também planeia a obra (negocios.obra.planear), como o motor
+  const pode = (S.role === "operacoes" || pelaPermissao(S.role, ["obra.planear"])) && podeNeg(S.role, "obra.imprevistos");
   const origem: Origem = { msg: chave, texto: m.t, fotos: fotosDe(m) };
   return (
     <article aria-label={`Problema por tratar: ${m.t}`} className="rounded-xl border border-destructive/40 bg-destructive/[0.04] p-4">
@@ -204,7 +205,8 @@ function CartaoProblema({ ctx, d, conversa, pr }: { ctx: Ctx; d: Negocio; conver
   const responder = useResponder(ctx, d, conversa);
   const [motivo, setMotivo] = useState<string>(MOTIVOS_SEM_CUSTO[0]);
   // 6/11 (permissões): o papel E negocios.obra.imprevistos (como no motor)
-  const pode = S.role === "operacoes" && podeNeg(S.role, "obra.imprevistos");
+  // 9/11 (Lote 1, C): o papel, ou (conta real) quem também planeia a obra (negocios.obra.planear), como o motor
+  const pode = (S.role === "operacoes" || pelaPermissao(S.role, ["obra.planear"])) && podeNeg(S.role, "obra.imprevistos");
   const a = pr.adenda ? d.adendas?.find((x) => x.n === pr.adenda) : undefined;
   const nomes = pr.tarefas.map((x) => `${x.n} (${TECS.find((t) => t.id === x.tec)?.n.split(" ")[0] ?? "por atribuir"})`).join(", ");
   return (
@@ -268,6 +270,7 @@ export function AcaoMensagemCliente({ ctx, d, m, chave, abrir }: { ctx: Ctx; d: 
   const pr = problemaDaMensagem(d, chave);
   if (pr) return <span className="text-xs text-muted-foreground">Problema {pr.id} · {ESTADO[pr.estado][0]}</span>;
   if (fotosDe(m).length) return <button type="button" onClick={() => abrir(chave)} className="text-xs font-medium text-destructive underline-offset-4 hover:underline">Problema por tratar</button>;
-  if (ctx.S.role !== "operacoes" || !podeNeg(ctx.S.role, "obra.imprevistos") || !d.obra.plano) return null;
+  // 9/11 (Lote 1, C): o papel, ou (conta real) quem também planeia a obra (negocios.obra.planear), como o motor
+  if ((ctx.S.role !== "operacoes" && !pelaPermissao(ctx.S.role, ["obra.planear"])) || !podeNeg(ctx.S.role, "obra.imprevistos") || !d.obra.plano) return null;
   return <button type="button" onClick={() => abrir(chave)} className="text-xs font-medium text-primary underline-offset-4 hover:underline">Tratar como problema</button>;
 }

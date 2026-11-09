@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, diaDeFerias, nfmt, type MatTarefa, type Negocio, type Plano, type SvcId, type Tarefa } from "./motor";
 import type { Ctx } from "./pecas";
-import { podeNeg } from "./permissoes";
+import { pelaPermissao, podeNeg } from "./permissoes";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { rotuloDia, tecnicosDoOficio } from "./preparacaoObra";
@@ -250,7 +250,8 @@ export function TarefasDoPlano({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const p = d.obra.plano;
   const [aberto, setAberto] = useState(false);
   // 6/11 (permissões): o papel E negocios.obra.planear (A.novaTarefaPlano pede-a)
-  if (!p || ctx.S.role !== "operacoes" || !podeNeg(ctx.S.role, "obra.planear") || p.estado === "concluída") return null;
+  // 9/11 (Lote 1, C): o papel, ou (conta real) só a permissão (como A.novaTarefaPlano)
+  if (!p || (ctx.S.role !== "operacoes" && !pelaPermissao(ctx.S.role, ["obra.planear"])) || !podeNeg(ctx.S.role, "obra.planear") || p.estado === "concluída") return null;
   if (!aberto) return (
     <button type="button" onClick={() => setAberto(true)}
       className="group mt-4 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-dashed border-input bg-card px-4 text-left transition-colors hover:border-primary hover:bg-primary/[0.03]">

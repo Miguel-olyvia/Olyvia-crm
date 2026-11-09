@@ -509,7 +509,9 @@ describe("processamento salarial (hooks reais sobre o Supabase simulado)", () =>
   it("o resumo de um código diz como se calcula", () => {
     const t = (chave: string, params?: Record<string, string | number>) => `${chave}|${JSON.stringify(params ?? {})}`;
     const he = lerGestao().codigos.find((c) => c.codigo === "HE")!;
-    expect(resumoCodigoProcessamento(he, t)).toContain("hr.vencimento.codigos.resumo.percentagem");
+    // A percentagem guardada ja nao conta: o resumo diz que paga ao valor da regra da origem.
+    expect(resumoCodigoProcessamento(he, t)).toContain("hr.vencimento.codigos.resumo.regraOrigem");
+    expect(resumoCodigoProcessamento(he, t)).not.toContain("resumo.percentagem");
     const desc = lerGestao().codigos.find((c) => c.codigo === "DESC")!;
     expect(resumoCodigoProcessamento(desc, t)).toContain("valorFixoDescanso");
     const manual = lerGestao().codigos.find((c) => c.codigo === "AJUSTE")!;

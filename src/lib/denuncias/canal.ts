@@ -112,8 +112,17 @@ const ERRO_POR_CODIGO: Readonly<Record<string, ErroAcao>> = {
   HRD18: "slug_em_uso",
   HRD19: "canal_inativo",
   HRD20: "anonima_imutavel",
+  HRD23: "dados_invalidos",
+  HRD25: "limite_mensagens",
+  HRD27: "campo_imutavel",
+  HRD28: "sem_responsaveis",
   "42501": "sem_permissao",
 };
+
+/** Traduzem-se mas continuam a reportar-se: HRD27 so o gatilho o levanta; HRD23 e, fora de «designar», um dado que o ecra devia ter validado. */
+const CODIGOS_A_REPORTAR: readonly string[] = ["HRD23", "HRD27"];
+/** Ao designar um responsavel o HRD23 e a recusa GENERICA de proposito (nao e membro, visado...): nao e defeito. */
+const OPERACAO_GENERICA = "responsavel_designar";
 
 export interface ErroBase { code?: unknown; message?: unknown }
 
@@ -129,7 +138,12 @@ export const erroDeRpc = (e: unknown): ErroAcao => ERRO_POR_CODIGO[codigoDe(e)] 
  * Se um erro da base é um DEFEITO a reportar (rede, tempo esgotado, RPC por aplicar, sintaxe) e não uma resposta correta
  * (uma regra do canal, ou uma recusa por permissão).
  */
-export const deveReportar = (e: unknown): boolean => !(codigoDe(e) in ERRO_POR_CODIGO);
+export const deveReportar = (e: unknown, operacao?: string): boolean => {
+  const codigo = codigoDe(e);
+  if (!(codigo in ERRO_POR_CODIGO)) return true;
+  if (codigo === "HRD23" && operacao === OPERACAO_GENERICA) return false;
+  return CODIGOS_A_REPORTAR.includes(codigo);
+};
 
 /** O que se envia para o registo de erros: a operação e o código, NUNCA a mensagem, os detalhes nem os argumentos. */
 export const erroParaRegisto = (operacao: string, e: unknown): Error => new Error(`denuncias:${operacao}:${codigoDe(e) || "sem_codigo"}`);

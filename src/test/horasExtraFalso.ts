@@ -12,7 +12,7 @@
  */
 import { useMemo, useSyncExternalStore } from "react";
 import {
-  LIMITES_OMISSAO, type EstadoHoraExtra, type HoraExtra, type LimitesHE,
+  LIMITES_OMISSAO, type ConfigHE, type EstadoHoraExtra, type HoraExtra, type LimitesHE,
 } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import type { ResultadoDeteccao, ResultadoRegisto } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { chaveDoErroDesvios, codigoDeErroDesvios, podeSerHoraExtra } from "@/lib/hr/desviosBase";
@@ -36,6 +36,13 @@ export const baseFalsa = {
   decisoes: [] as Array<{ id: string; decisao: "confirmar" | "rejeitar"; motivo: string }>,
   detecoes: [] as Array<{ de: string; ate: string; pessoaId: string | null }>,
   registos: [] as unknown[],
+  /** O interruptor da contagem das horas extra aprovadas. */
+  contagem: { aprovacaoDesde: null, folhasFechadasDesde: null, ultimaFolhaFechadaAte: null, temConfig: false } as { aprovacaoDesde: string | null; folhasFechadasDesde: string | null; ultimaFolhaFechadaAte?: string | null; temConfig: boolean },
+  /** Verdadeiro: a RPC ainda nao existe na base (migration por aplicar). */
+  contagemIndisponivel: false,
+  /** O que o interruptor recebeu a cada gravacao (
+ull desliga). */
+  contagemGuardada: [] as Array<string | null>,
 };
 
 /** A margem de tempo e os desvios simulados (o wrapper real tambem os exporta: ver `desviosReal` em `horasExtraReal`). */
@@ -73,6 +80,9 @@ export function reporBaseFalsa(): void {
   baseFalsa.decisoes = [];
   baseFalsa.detecoes = [];
   baseFalsa.registos = [];
+  baseFalsa.contagem = { aprovacaoDesde: null, folhasFechadasDesde: null, ultimaFolhaFechadaAte: null, temConfig: false };
+  baseFalsa.contagemIndisponivel = false;
+  baseFalsa.contagemGuardada = [];
   desviosBaseFalsa.margem = { emVigor: null, versoes: [] };
   desviosBaseFalsa.indisponivel = false;
   desviosBaseFalsa.erroDeEscrita = null;
@@ -136,10 +146,28 @@ export function wrapperFalso() {
         aCarregar: false,
         aGuardar: false,
         erro: enabled ? baseFalsa.erroDeLeitura : null,
-        guardar: async (n: LimitesHE): Promise<ResultadoHE> => {
+        guardar: async (n: ConfigHE): Promise<ResultadoHE> => {
           if (baseFalsa.erroDeEscrita) return recusa(baseFalsa.erroDeEscrita);
-          baseFalsa.limites = n;
+          // O limite anual (regra salarial) nao faz parte do que se guarda: mantem-se o que la esta.
+          baseFalsa.limites = { ...baseFalsa.limites, ...n };
           baseFalsa.omissao = false;
+          avisar();
+          return ok;
+        },
+      };
+    },
+
+    useHorasExtraContagem: (enabled = true) => {
+      useSyncExternalStore(subscrever, lerVersao);
+      const lida = enabled && !baseFalsa.erroDeLeitura && !baseFalsa.contagemIndisponivel;
+      return {
+        estado: !enabled ? "a-carregar" : baseFalsa.contagemIndisponivel ? "indisponivel" : baseFalsa.erroDeLeitura ? "erro" : "ok",
+        contagem: lida ? { ultimaFolhaFechadaAte: null, ...baseFalsa.contagem } : null,
+        aGuardar: false,
+        guardar: async (desde: string | null): Promise<ResultadoHE> => {
+          if (baseFalsa.erroDeEscrita) return recusa(baseFalsa.erroDeEscrita);
+          baseFalsa.contagemGuardada.push(desde);
+          baseFalsa.contagem = { ...baseFalsa.contagem, aprovacaoDesde: desde, temConfig: true };
           avisar();
           return ok;
         },

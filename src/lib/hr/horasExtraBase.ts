@@ -6,7 +6,7 @@
  * As RPCs recusam com MESSAGE = codigo e SQLSTATE `HRA..`. O ecra so recebe TEXTO traduzido (`rhHeReal.erro.*`), nunca o
  * codigo em bruto nem a mensagem da base.
  */
-import type { HoraExtra, LimitesHE, OrigemHoraExtra } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
+import type { ConfigHE, HoraExtra, OrigemHoraExtra } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import { periodoDaFolha } from "@/lib/hr/periodoFolha";
 
 export interface LinhaHoraExtra {
@@ -31,7 +31,6 @@ export interface LinhaHoraExtra {
 
 export interface LinhaConfigHE {
   dia_min: number;
-  ano_min: number;
   alerta_pct: number;
   minimo_min: number;
   omissao?: boolean;
@@ -121,9 +120,8 @@ export function horaExtraDaLinha(l: LinhaHoraExtra): HoraExtra {
   };
 }
 
-export const limitesDaLinha = (l: LinhaConfigHE): LimitesHE => ({
+export const limitesDaLinha = (l: LinhaConfigHE): ConfigHE => ({
   diaMin: Number(l.dia_min),
-  anoMin: Number(l.ano_min),
   alertaPct: Number(l.alerta_pct),
   minimoMin: Number(l.minimo_min),
 });

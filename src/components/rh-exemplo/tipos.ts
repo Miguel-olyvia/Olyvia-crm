@@ -505,7 +505,8 @@ export interface PessoaVinculo {
   /** Dias uteis do CONTRATO. `pessoas.dias_trabalho` e agora legenda legada. */
   dias_uteis: DiaSemana[] | null;
   politica_feriados: PoliticaFeriados;
-  horas_anuais_maximas: number | null;
+  /** @deprecated A coluna ainda existe mas ja nao se le: o limite anual vem da regra salarial. */
+  horas_anuais_maximas?: number | null;
   horas_semanais_maximas: number | null;
   /** Duracao explicita, ao lado de `periodo_experimental_ate`. Nao a substitui. */
   periodo_experimental_dias: number | null;

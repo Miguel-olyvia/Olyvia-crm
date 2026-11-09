@@ -31,7 +31,7 @@ import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDo
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
-import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
+import { CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, passoDe, pelaPermissao, podeNeg, temCodigoReal, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
 import { lembrarErp, lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadata";
 import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./inventario/loja";
@@ -1409,25 +1409,28 @@ export function minhas(S: Estado, role: Papel) {
       L.push({ d, p: { t: "Aprovar exceção à margem", sub: pct(tot(d, S).m) + " de margem · mínimo " + S.cfg.min + "%" }, dir: true });
     // do contrato à obra: o pagamento primeiro; depois o plano (a encomenda emite-se sozinha com o pagamento), cada um de quem é
     else if (d.fase >= 4 && d.obra.plano && (d.obra.plano.estado === "por aprovar" || d.obra.plano.estado === "aprovado")) {
-      for (const a of passosAgora(d, S)) if (a.who === role) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
+      // 9/11 (Lote 1, B): o passo do papel OU, com conta real, o de quem tem as permissões que ele pede (passoDe)
+      for (const a of passosAgora(d, S)) if (passoDe(role, a.who, a.act)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
     }
     else {
-      if (p.who === role && !p.wait && !p.done) L.push({ d, p });
+      if (passoDe(role, p.who, p.act) && !p.wait && !p.done) L.push({ d, p });
       // 21/10: com a obra a andar (ou concluída), a 1.ª parcela de uma adenda assinada depois continua a ser do Financeiro: os mesmos
       // passos do bloco Pagamento (preparacaoObra.ts: passosPagamentoAdenda), sem linhas à parte no Hoje
-      if (d.fase >= 4 && d.obra.plano && !d.anulado) for (const a of passosAgora(d, S)) if (a.who === role && /^(ft|pg)-ad-/.test(a.id)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
+      if (d.fase >= 4 && d.obra.plano && !d.anulado) for (const a of passosAgora(d, S)) if (passoDe(role, a.who, a.act) && /^(ft|pg)-ad-/.test(a.id)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
     }
     // 21/10: os imprevistos da obra (o gestor propõe ou decide; o comercial fala com o cliente que recusou) e as faturas das adendas
+    // 9/11 (Lote 1, C): os do gestor também a quem, com conta real, decide os imprevistos e planeia a obra (o que o servidor exige)
+    const gestor = role === "operacoes" || pelaPermissao(role, ["obra.imprevistos", "obra.planear"]);
     for (const im of imprevistosPorTratar(d)) {
-      if (role === "operacoes") L.push({ d, p: im.estado === "aberto"
+      if (gestor) L.push({ d, p: im.estado === "aberto"
         ? { t: `Imprevisto · ${im.texto}`, sub: `${im.grav === "impede" ? "Tarefas paradas" : `O plano andou ${im.atraso ?? 0} ${im.atraso === 1 ? "dia" : "dias"}`}. Faça a proposta ao cliente.`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" }
         : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
       if (role === "comercial" && im.estado === "recusado") L.push({ d, p: { t: "O cliente não aceitou a proposta do imprevisto", sub: `${im.texto} · fale com ${d.nome.split(" ")[0]}`, who: "comercial" } });
     }
     // 3/11: os problemas reportados pelo cliente que esperam pelo gestor (outra proposta, a proposta recusada, a resposta por enviar)
-    if (role === "operacoes") for (const pr of problemasPorTratar(d)) L.push({ d, p: { t: `Problema do cliente · ${pr.texto}`, sub: pr.estado === "recusado" ? "O cliente não aceitou a proposta · decida o que fazer" : pr.estado === "aberto" ? "Faça outra proposta" : "A resposta ao cliente não seguiu · envie-a de novo", btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
+    if (gestor) for (const pr of problemasPorTratar(d)) L.push({ d, p: { t: `Problema do cliente · ${pr.texto}`, sub: pr.estado === "recusado" ? "O cliente não aceitou a proposta · decida o que fazer" : pr.estado === "aberto" ? "Faça outra proposta" : "A resposta ao cliente não seguiu · envie-a de novo", btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
     // 21/10: as adendas, com o mesmo percurso do orçamento: cada passo de quem é (comercial, Direção, Jurídico)
-    if (!d.anulado) for (const a of d.adendas ?? []) for (const t of tarefasAdenda(d, S, a)) if (t.who === role) L.push({ d, p: t });
+    if (!d.anulado) for (const a of d.adendas ?? []) for (const t of tarefasAdenda(d, S, a)) if (passoDe(role, t.who, t.act)) L.push({ d, p: t });
     // 21/10: a fatura e o pagamento da 1.ª parcela de cada adenda assinada vêm dos passos do bloco Pagamento (passosAgora), como os do
     // contrato; as parcelas seguintes ficam no Financeiro do negócio, como as do contrato
   }
@@ -2802,6 +2805,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     gerarPlano(id: number) {
       const d = deal(id);
       if (!d || d.obra.plano || !d.orc || d.fase < 5) return;
+      // 9/11 (Lote 1, K): com conta real, o que obra_guardar_negocio exige para a obra nova (só planeada, o plano gerado):
+      // negocios.obra.planear, ou pessoas.edit (quem grava o negócio). Sem conta real, como até aqui.
+      if (comPermissoesReais() && !podeNeg(S.role, "obra.planear") && temCodigoReal(CODIGO_GRAVAR_NEGOCIO) !== true) {
+        avisar({ ...SEM_PERM["obra.planear"], kind: "bad" });
+        return;
+      }
       d.obra.plano = planoDoOrcamento(d, S);
       log(d, "Plano da obra gerado do orçamento · " + d.obra.plano.tasks.length + " tarefas · por aprovar (Operações)");
     },
@@ -3145,6 +3154,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Segurança e licenças: marcar um ponto como tratado. */
     tratarSeguranca(id: number, k: string) {
+      // 9/11 (Lote 1, K): mexer na obra que não é a execução das tarefas pede negocios.obra.planear (obra_guardar_negocio)
+      if (!exigePerm("obra.planear")) return;
       const d = deal(id); (d.obra.seg ??= {})[k] = agora();
       log(d, "Obra: segurança · " + k + " tratado");
     },
@@ -3154,7 +3165,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), p = d.obra.plano, s = S.svc[n.sid];
       if (!p || !s || p.estado === "concluída") return null;
       // 21/10: só o gestor das Operações cria tarefas; por isso não há aprovação
-      if (S.role !== "operacoes") { avisar({ msg: "Só o gestor da obra cria tarefas", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
+      // 9/11 (Lote 1, C): ou o papel, ou (conta real) a permissão que o servidor pede (negocios.obra.planear, já verificada acima)
+      if (S.role !== "operacoes" && !pelaPermissao(S.role, ["obra.planear"])) { avisar({ msg: "Só o gestor da obra cria tarefas", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
       const t = criarTarefa(p, s, n), ti = juntarTarefa(p, t);
       avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
       const tec = TECS.find((x) => x.id === t.tec);
@@ -3249,7 +3261,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
     },
     fimObra(id: number) {
-      if (!exigePerm("obra.fechar")) return;
+      // 9/11 (Lote 1, F): como o servidor (obra_guardar_negocio), encerrar muda o estado da obra: pede também negocios.obra.planear
+      if (!exigePerm("obra.fechar") || !exigePerm("obra.planear")) return;
       const d = deal(id);
       if (d.obra.plano?.estado !== "em curso") return;
       // 21/10: só com tudo completo (encerrarObra.ts): tarefas feitas e validadas, mensagens, materiais, adendas, segurança
@@ -3382,7 +3395,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       }
       const d = deal(id), p = d.obra.plano, texto = m.texto.trim();
       if (!p || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return null; }
-      if (S.role !== "tecnico" && S.role !== "operacoes") { avisar({ msg: "Quem regista é a equipa da obra", sub: "O técnico no Hoje dele, ou o gestor das Operações", kind: "bad" }); return null; }
+      // 9/11 (Lote 1, C): ou o papel, ou (conta real) quem planeia a obra (negocios.obra.planear, o que o servidor pede a quem não é o técnico da tarefa)
+      if (S.role !== "tecnico" && S.role !== "operacoes" && !pelaPermissao(S.role, ["obra.planear"])) { avisar({ msg: "Quem regista é a equipa da obra", sub: "O técnico no Hoje dele, ou o gestor das Operações", kind: "bad" }); return null; }
       if (!texto || !m.tarefas.length) { avisar({ msg: "Falta o que encontrou e as tarefas afetadas", kind: "bad" }); return null; }
       const quem = S.role === "tecnico" ? TECS.find((x) => x.id === (S.tec ?? "hn"))?.n ?? "Técnico" : "Filipe Rocha";
       const im: Imprevisto = { id: novoIdImprevisto(d), q: agora(), dia: p.dia, quem, texto, onde: m.onde.trim(), foto: m.foto, grav: m.grav, tarefas: m.tarefas.map((ti) => p.tasks[ti]?.nome).filter(Boolean), estado: "aberto" };
@@ -3408,7 +3422,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), im = d.obra.imprevistos?.find((x) => x.id === imId);
       if (!im || (im.estado !== "aberto" && im.estado !== "recusado")) return null;
       // 3/11 (20270105200000): era por papel (operações, comercial, direção); passa a ser a permissão que o servidor pede
-      if (!exigePerm("obra.imprevistos")) return null;
+      // 9/11 (Lote 1, F): mudar um imprevisto gravado só passa no servidor a quem também planeia a obra (negocios.obra.planear)
+      if (!exigePerm("obra.imprevistos") || !exigePerm("obra.planear")) return null;
       const n = A.criarAdenda(id, itens, MOTIVO_IMPREVISTO, { livres, origem: { imprevisto: im.id, texto: im.texto, onde: im.onde, ...(im.foto ? { foto: im.foto } : {}) } });
       if (!n) return null;
       Object.assign(im, { estado: "proposta", adenda: n });
@@ -3420,7 +3435,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Com a proposta recusada (ou sem proposta), o gestor decide: seguir sem o trabalho, fazer outra proposta ou suspender a obra. */
     decidirImprevisto(id: number, imId: string, k: Decisao, nota = "") {
-      if (!exigePerm("obra.imprevistos")) return;
+      // 9/11 (Lote 1, F): como o servidor, decidir pede também negocios.obra.planear
+      if (!exigePerm("obra.imprevistos") || !exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, im = d.obra.imprevistos?.find((x) => x.id === imId);
       if (!im || !p || im.estado === "aprovado" || im.estado === "fechado") return;
       const D = DECISOES.find((x) => x.k === k)!;
@@ -3444,7 +3460,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 6/11 (permissões): como os imprevistos (negocios.obra.imprevistos); o papel continua a ser verificado a seguir
       if (!exigePerm("obra.imprevistos")) return null;
       const d = deal(id), p = d.obra.plano;
-      if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
+      // 9/11 (Lote 1, C): ou o papel, ou (conta real) quem também planeia a obra (as tarefas entram no plano: negocios.obra.planear)
+      if (S.role !== "operacoes" && !pelaPermissao(S.role, ["obra.planear"])) { avisar({ msg: "Quem trata os problemas é o gestor da obra", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
       // 3/11: com a obra concluída também se trata (garantia depois da obra): a obra reabre para assistência quando as tarefas entram
       if (!p) { avisar({ msg: "A obra ainda não tem plano", sub: "As tarefas novas entram no plano da obra", kind: "bad" }); return null; }
       const erro = erroTarefas(x.tarefas, x.cobrar);
@@ -3464,7 +3481,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 6/11 (permissões): negocios.obra.imprevistos
       if (!exigePerm("obra.imprevistos")) return;
       const d = deal(id);
-      if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", kind: "bad" }); return; }
+      if (S.role !== "operacoes" && !pelaPermissao(S.role, ["obra.planear"])) { avisar({ msg: "Quem trata os problemas é o gestor da obra", kind: "bad" }); return; }
       if (problemaDaMensagem(d, m.msg)) return;
       const pr: ProblemaCliente = { id: novoIdProblema(d), msg: m.msg, texto: m.texto.trim(), fotos: [...m.fotos], q: agora(), estado: "descartado", cobrar: false, tarefas: [],
         decisao: nota.trim() || "Não é um problema" };
@@ -3478,7 +3495,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("obra.imprevistos")) return null;
       const d = deal(id), pr = d.obra.problemas?.find((x) => x.id === pid);
       if (!pr || pr.estado !== "recusado") return null;
-      if (S.role !== "operacoes") { avisar({ msg: "Quem decide é o gestor da obra", kind: "bad" }); return null; }
+      if (S.role !== "operacoes" && !pelaPermissao(S.role, ["obra.planear"])) { avisar({ msg: "Quem decide é o gestor da obra", kind: "bad" }); return null; }
       if (k === "refazer") {
         pr.estado = "aberto"; pr.decisao = "Fazer outra proposta";
         log(d, `Problema do cliente ${pr.id}: o gestor vai fazer outra proposta`);

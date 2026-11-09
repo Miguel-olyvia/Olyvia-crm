@@ -2,23 +2,18 @@
  * Configuracao do dominio "Processamento Salarial" (nome de apresentacao;
  * dominio interno continua "vencimento" -- ficheiro, permissoes
  * hr.vencimento.* e hooks nao mudam de nome, 20261201180000..20261201200000):
- * os codigos de processamento salarial e a regra do subsidio de alimentacao
- * da organizacao activa. SO CATALOGO/CONFIGURACAO -- sem calculo nenhum
- * ligado a assiduidade ainda (confirmado com o utilizador, fica para depois).
+ * os codigos de processamento salarial, as regras salariais e as horas extra
+ * da organizacao activa.
+ *
+ * O SUBSIDIO DE ALIMENTACAO JA NAO TEM SEPARADOR PROPRIO: o valor por dia e o
+ * limite de minutos vêm da regra salarial em vigor (separador «Regras salariais»).
+ * O separador «Codigos» pede hr.vencimento.codigos.view/.gerir; o ecra so mostra
+ * "sem acesso" se faltarem a leitura dos codigos E a do subsidio.
  *
  * Segue o padrao de gating de `ConfiguracaoAdmissao.tsx` e o padrao de lista
- * activar/desactivar de `ConfiguracaoModelosDocumentos.tsx`. Duas seccoes
- * (Tabs) em vez de dois ecras: os dois assuntos sao pequenos e do mesmo
- * dominio ("o que entra no processamento salarial desta empresa").
- *
- * DOIS SEPARADORES, DUAS PERMISSOES DIFERENTES
- * -------------------------------------------------
- * "Codigos" pede hr.vencimento.codigos.view/.gerir; "Subsidio de
- * alimentacao" pede hr.vencimento.subsidio.view/.gerir. Uma pessoa pode ter
- * so uma das duas -- por isso cada separador esconde-se por si, e o ecra so
- * mostra "sem acesso" se NENHUMA das duas permissoes de leitura existir.
+ * activar/desactivar de `ConfiguracaoModelosDocumentos.tsx`.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +44,6 @@ import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCodigosProcessamento } from "@/components/rh-exemplo/hooks/useCodigosProcessamento";
 import type { CamposCodigoProcessamento } from "@/components/rh-exemplo/hooks/useCodigosProcessamento";
-import { useRegrasSubsidioAlimentacao } from "@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao";
 import { resumoCodigoProcessamento } from "@/components/rh-exemplo/lib/resumoCodigoProcessamento";
 import type {
   HrCodigoProcessamento,
@@ -71,13 +65,21 @@ const MODOS_CALCULO: readonly HrCodigoProcessamentoModoCalculo[] = [
   "valor_fixo_mensal",
 ];
 
-/** Todas as origens, para `percentagem_hora_normal`. */
+/**
+ * As origens escolhiveis em `percentagem_hora_normal` (que agora paga ao valor da regra salarial da origem).
+ * `horas_extra_noturnas` ja nao se oferece; so continua visivel num codigo que ja a tinha (ver `origensDisponiveisParaModo`).
+ */
 const TODAS_ORIGENS: readonly HrCodigoProcessamentoOrigemAutomatica[] = [
   "horas_extra",
-  "horas_extra_noturnas",
   "feriado_trabalhado",
   "descanso_trabalhado",
 ];
+
+/**
+ * A base (CHECK `modo_parametro_coerente`) exige uma percentagem NAO nula em `percentagem_hora_normal`, embora o calculo
+ * ja a ignore. Ao criar, envia-se este valor neutro (100 = hora normal); ao editar, mantem-se o que o codigo ja tinha.
+ */
+const PERCENTAGEM_NEUTRA = 100;
 
 /**
  * So `feriado_trabalhado`/`descanso_trabalhado` tem uma "ocorrencia" com
@@ -95,8 +97,11 @@ const ORIGENS_VALOR_FIXO_OCORRENCIA: readonly HrCodigoProcessamentoOrigemAutomat
 
 function origensDisponiveisParaModo(
   modo: HrCodigoProcessamentoModoCalculo,
+  origemActual: HrCodigoProcessamentoOrigemAutomatica | "" = "",
 ): readonly HrCodigoProcessamentoOrigemAutomatica[] {
-  if (modo === "percentagem_hora_normal") return TODAS_ORIGENS;
+  if (modo === "percentagem_hora_normal") {
+    return origemActual === "horas_extra_noturnas" ? [...TODAS_ORIGENS, "horas_extra_noturnas"] : TODAS_ORIGENS;
+  }
   if (modo === "valor_fixo_ocorrencia") return ORIGENS_VALOR_FIXO_OCORRENCIA;
   return [];
 }
@@ -125,17 +130,7 @@ const FORM_VAZIO: FormCodigoProcessamento = {
 /** `null` == valido. Confirma no formulario o que a base tambem exige, para
  *  nao depender so do erro em bruto da constraint. */
 function erroDeValidacao(form: FormCodigoProcessamento): string | null {
-  if (form.modo_calculo === "percentagem_hora_normal") {
-    // `Number("")` e 0, um valor "valido" no intervalo -- um campo vazio
-    // nao pode passar como se fosse zero escrito de proposito.
-    if (form.percentagem.trim() === "") {
-      return "hr.vencimento.codigos.erroPercentagem";
-    }
-    const percentagem = Number(form.percentagem);
-    if (!Number.isFinite(percentagem) || percentagem < 0 || percentagem > 1000) {
-      return "hr.vencimento.codigos.erroPercentagem";
-    }
-  }
+  // `percentagem_hora_normal` ja nao pede percentagem (ver `PERCENTAGEM_NEUTRA`).
   if (form.modo_calculo === "valor_fixo_ocorrencia" || form.modo_calculo === "valor_fixo_mensal") {
     if (form.valor_fixo.trim() === "") {
       return "hr.vencimento.codigos.erroValorFixo";
@@ -151,12 +146,18 @@ function erroDeValidacao(form: FormCodigoProcessamento): string | null {
 /** Constroi so os campos que a base espera -- nunca os dois parametros
  *  preenchidos ao mesmo tempo, origem so nos dois modos que a suportam. */
 function construirCampos(form: FormCodigoProcessamento): CamposCodigoProcessamento {
-  const origensValidas = origensDisponiveisParaModo(form.modo_calculo);
+  const origensValidas = origensDisponiveisParaModo(form.modo_calculo, form.origem_automatica);
+  const percentagemExistente = form.percentagem.trim() === "" ? NaN : Number(form.percentagem);
   return {
     nome: form.nome.trim(),
     descricao: form.descricao.trim() || null,
     modo_calculo: form.modo_calculo,
-    percentagem: form.modo_calculo === "percentagem_hora_normal" ? Number(form.percentagem) : null,
+    percentagem:
+      form.modo_calculo === "percentagem_hora_normal"
+        ? Number.isFinite(percentagemExistente)
+          ? percentagemExistente
+          : PERCENTAGEM_NEUTRA
+        : null,
     valor_fixo:
       form.modo_calculo === "valor_fixo_ocorrencia" || form.modo_calculo === "valor_fixo_mensal"
         ? Number(form.valor_fixo)
@@ -218,7 +219,7 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
    *  limpa a origem se deixar de ser uma opcao valida no modo novo. */
   const mudarModo = (novoModo: HrCodigoProcessamentoModoCalculo) => {
     setForm((f) => {
-      const origensValidas = origensDisponiveisParaModo(novoModo);
+      const origensValidas = origensDisponiveisParaModo(novoModo, f.origem_automatica);
       return {
         ...f,
         modo_calculo: novoModo,
@@ -266,7 +267,7 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
     }
   };
 
-  const origensParaOModoActual = origensDisponiveisParaModo(form.modo_calculo);
+  const origensParaOModoActual = origensDisponiveisParaModo(form.modo_calculo, form.origem_automatica);
 
   const linha = (codigo: HrCodigoProcessamento) => (
     <div
@@ -421,21 +422,7 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
             )}
 
             {form.modo_calculo === "percentagem_hora_normal" && (
-              <div className="space-y-2">
-                <Label htmlFor="codigo-processamento-percentagem">
-                  {t("hr.vencimento.codigos.campoPercentagem")}
-                </Label>
-                <Input
-                  id="codigo-processamento-percentagem"
-                  type="number"
-                  min={0}
-                  max={1000}
-                  step="0.001"
-                  value={form.percentagem}
-                  onChange={(e) => setForm((f) => ({ ...f, percentagem: e.target.value }))}
-                />
-                <p className="text-xs text-muted-foreground">{t("hr.vencimento.codigos.percentagemAjuda")}</p>
-              </div>
+              <p className="text-xs text-muted-foreground">{t("hr.vencimento.codigos.regraOrigemAjuda")}</p>
             )}
 
             {(form.modo_calculo === "valor_fixo_ocorrencia" || form.modo_calculo === "valor_fixo_mensal") && (
@@ -511,152 +498,6 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
 }
 
 
-type UnidadeMinutosMinimos = "minutos" | "horas";
-const UNIDADES_MINUTOS_MINIMOS: readonly UnidadeMinutosMinimos[] = ["minutos", "horas"];
-
-/**
- * Converte o texto do campo (na unidade em que a pessoa esta a escrever)
- * para minutos inteiros -- a unica unidade que a base guarda
- * (`minutos_minimos_dia integer`). Em horas aceita fraccoes (ex. "1.5") e
- * arredonda ao minuto mais proximo; nunca se grava fraccao de minuto.
- */
-function paraMinutos(valorTexto: string, unidade: UnidadeMinutosMinimos): number {
-  const valor = Number(valorTexto);
-  if (!Number.isFinite(valor)) return NaN;
-  return unidade === "horas" ? Math.round(valor * 60) : valor;
-}
-
-/**
- * Converte minutos (o valor real, sempre guardado) para o texto a mostrar
- * na unidade escolhida. Horas ficam com no maximo 2 casas decimais, sem
- * zeros a mais (90 minutos -> "1.5", nao "1.50").
- */
-function deMinutosParaTexto(minutos: number, unidade: UnidadeMinutosMinimos): string {
-  if (!Number.isFinite(minutos)) return "";
-  if (unidade === "minutos") return String(minutos);
-  const horas = Math.round((minutos / 60) * 100) / 100;
-  return String(horas);
-}
-
-function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
-  const { t } = useTranslation();
-  const { regra, isLoading, isSaving, gravar } = useRegrasSubsidioAlimentacao();
-
-  const [minutosMinimosDia, setMinutosMinimosDia] = useState<string>("");
-  const [unidadeMinutosMinimos, setUnidadeMinutosMinimos] = useState<UnidadeMinutosMinimos>("minutos");
-
-  // Sincroniza os campos com a regra carregada (gravada ou omissao) so
-  // quando o carregamento termina -- o formulario continua editavel a
-  // partir dai sem se sobrepor ao que o utilizador esta a escrever. A
-  // unidade volta sempre a "minutos" (a omissao pedida): o valor gravado na
-  // base e sempre em minutos, a unidade e so uma conveniencia de escrita.
-  useEffect(() => {
-    if (isLoading) return;
-    setUnidadeMinutosMinimos("minutos");
-    setMinutosMinimosDia(String(regra.minutosMinimosDia));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading]);
-
-  /** Ao trocar de unidade, converte o numero mostrado sem perder o valor
-   *  real (que continua a ser sempre minutos, arredondados ao inteiro). */
-  const mudarUnidadeMinutosMinimos = (novaUnidade: UnidadeMinutosMinimos) => {
-    if (novaUnidade === unidadeMinutosMinimos) return;
-    const minutosActuais = paraMinutos(minutosMinimosDia, unidadeMinutosMinimos);
-    if (Number.isFinite(minutosActuais)) {
-      setMinutosMinimosDia(deMinutosParaTexto(minutosActuais, novaUnidade));
-    }
-    setUnidadeMinutosMinimos(novaUnidade);
-  };
-
-  const submeter = async () => {
-    const minutos = paraMinutos(minutosMinimosDia, unidadeMinutosMinimos);
-    if (!Number.isInteger(minutos) || minutos <= 0) return;
-    try {
-      await gravar({ minutosMinimosDia: minutos });
-      toast.success(t("hr.vencimento.subsidio.guardarSucesso"));
-    } catch (erro) {
-      toast.error(await getFriendlyErrorMessage(erro));
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">{t("hr.vencimento.subsidio.titulo")}</CardTitle>
-        <p className="text-sm text-muted-foreground">{t("hr.vencimento.subsidio.subtitulo")}</p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {isLoading ? (
-          <div className="flex justify-center py-8">
-            <OlyviaLoader size={28} />
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 gap-4 sm:max-w-md">
-              <div className="space-y-2">
-                <Label htmlFor="subsidio-minutos-minimos">
-                  {t(
-                    unidadeMinutosMinimos === "horas"
-                      ? "hr.vencimento.subsidio.campoMinimoDiaHoras"
-                      : "hr.vencimento.subsidio.campoMinutosMinimos",
-                  )}
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="subsidio-minutos-minimos"
-                    type="number"
-                    min={unidadeMinutosMinimos === "horas" ? 0.01 : 1}
-                    step={unidadeMinutosMinimos === "horas" ? "0.01" : "1"}
-                    value={minutosMinimosDia}
-                    disabled={!podeGerir}
-                    onChange={(e) => setMinutosMinimosDia(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Select
-                    value={unidadeMinutosMinimos}
-                    onValueChange={(v) => mudarUnidadeMinutosMinimos(v as UnidadeMinutosMinimos)}
-                    disabled={!podeGerir}
-                  >
-                    <SelectTrigger id="subsidio-minutos-minimos-unidade" className="w-28 shrink-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {UNIDADES_MINUTOS_MINIMOS.map((u) => (
-                        <SelectItem key={u} value={u}>
-                          {t(`hr.vencimento.subsidio.unidade.${u}`)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t(
-                unidadeMinutosMinimos === "horas"
-                  ? "hr.vencimento.subsidio.minutosMinimosAjudaHoras"
-                  : "hr.vencimento.subsidio.minutosMinimosAjuda",
-              )}
-            </p>
-            <p className="text-sm text-muted-foreground" data-testid="subsidio-nota-regra-organizacao">
-              {t("hr.vencimento.subsidio.notaRegraOrganizacao")}
-            </p>
-
-            {podeGerir && (
-              <div className="flex justify-end">
-                <Button onClick={submeter} disabled={isSaving}>
-                  {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  {t("common.save")}
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 export default function RhConfiguracaoVencimento() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -666,14 +507,15 @@ export default function RhConfiguracaoVencimento() {
 
   const podeVerCodigos = hasPermission("hr.vencimento.codigos.view");
   const podeGerirCodigos = hasPermission("hr.vencimento.codigos.gerir");
+  // A permissao de ver o subsidio continua a dar acesso ao ecra (o separador antigo do subsidio ja nao existe:
+  // o valor e o limite vêm da regra salarial).
   const podeVerSubsidio = hasPermission("hr.vencimento.subsidio.view");
-  const podeGerirSubsidio = hasPermission("hr.vencimento.subsidio.gerir");
 
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
   if (!podeVerCodigos && !podeVerSubsidio) return <SemAcessoCard className="m-6" />;
 
-  const abaOmissao = podeVerCodigos ? "codigos" : "subsidio";
+  const abaOmissao = podeVerCodigos ? "codigos" : "regras";
 
   return (
     <div className="space-y-6">
@@ -687,9 +529,6 @@ export default function RhConfiguracaoVencimento() {
           {podeVerCodigos && (
             <TabsTrigger value="codigos">{t("hr.vencimento.abaCodigos")}</TabsTrigger>
           )}
-          {podeVerSubsidio && (
-            <TabsTrigger value="subsidio">{t("hr.vencimento.abaSubsidio")}</TabsTrigger>
-          )}
           <TabsTrigger value="regras">{t("hr.vencimento.abaRegrasSalariais")}</TabsTrigger>
           <TabsTrigger value="horas-extra">{t("rhFluxosD.cfg.aba")}</TabsTrigger>
         </TabsList>
@@ -699,12 +538,6 @@ export default function RhConfiguracaoVencimento() {
             <SeccaoCodigosProcessamento podeGerir={podeGerirCodigos} />
           </TabsContent>
         )}
-        {podeVerSubsidio && (
-          <TabsContent value="subsidio" className="mt-4">
-            <SeccaoSubsidioAlimentacao podeGerir={podeGerirSubsidio} />
-          </TabsContent>
-        )}
-
         <TabsContent value="regras" className="mt-4">
           <SeccaoRegrasSalariais podeGerir={podeGerirCodigos} />
         </TabsContent>

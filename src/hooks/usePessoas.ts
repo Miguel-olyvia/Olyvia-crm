@@ -496,9 +496,7 @@ export function usePessoas() {
               payload.nucleo.data_admissao,
               dataDeHoje(),
             ),
-            // Pessoa nova: nao ha subsidio antigo a preservar (a RPC exige os
-            // dois parametros e grava o que recebe).
-            p_subsidio: null,
+            // Sem p_subsidio: o valor vem da regra salarial; a RPC herda-o no servidor.
             p_subsidio_modo: null,
             p_duodecimos_pct: payload.retribuicao!.duodecimosPct,
             p_motivo: null,

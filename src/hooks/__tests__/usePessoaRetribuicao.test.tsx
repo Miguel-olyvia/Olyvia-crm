@@ -113,9 +113,8 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
         args: {
           p_pessoa_id: "p1",
           p_desde: "2026-11-01",
-          // O valor do subsidio ja nao e da pessoa (vem da regra da organizacao), mas a RPC grava o que recebe:
-          // reenvia-se o valor antigo da versao que cobre a data (6 no ABERTA) para nao o apagar.
-          p_subsidio: 6,
+          // Sem p_subsidio: o valor do subsidio ja nao e da pessoa (vem da regra salarial) e a RPC nova
+          // herda-o da versao anterior no servidor.
           p_subsidio_modo: "cartao",
           p_duodecimos_pct: 50,
           p_motivo: "Revisao",
@@ -126,48 +125,30 @@ describe("usePessoaRetribuicao (fluxo 2)", () => {
     expect(estado.updates).toEqual([]);
   });
 
-  it("definirPessoal sem versao a cobrir a data envia p_subsidio nulo (nao inventa um valor)", async () => {
+  it("definirPessoal nunca envia p_subsidio nem le o subsidio antigo (o servidor herda-o)", async () => {
     estado.versoes = [{ ...ABERTA, valido_de: "2027-01-01" }];
     const { result } = renderHook(() => usePessoaRetribuicao("p1", "org"));
     await waitFor(() => expect(result.current.loading).toBe(false));
+    const leiturasAntes = estado.selects.length;
     await act(async () => {
       await result.current.definirPessoal("2026-11-01", null, 50, null);
     });
-    expect(estado.rpcs[0].args).toMatchObject({ p_subsidio: null });
+    expect(estado.rpcs[0].args).not.toHaveProperty("p_subsidio");
+    // Nenhuma leitura previa: so o recarregamento da lista depois de gravar (colunas sem subsidio_alimentacao).
+    for (const s of estado.selects.slice(leiturasAntes)) {
+      expect(s.colunas).not.toMatch(/subsidio_alimentacao(?!_modo)/);
+    }
   });
 
-  it("definirPessoal nao grava se a leitura do valor antigo falhar (nunca apaga em silencio)", async () => {
-    const { result } = renderHook(() => usePessoaRetribuicao("p1", "org"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    estado.leitura = () => Promise.resolve({ data: null, error: { code: "XX000", message: "falhou" } });
-    await act(async () => {
-      await result.current.definirPessoal("2026-11-01", null, 50, null);
-    });
-    expect(estado.rpcs).toEqual([]);
-  });
-
-  it("definirPessoal nao grava se a leitura do valor antigo devolver ZERO linhas quando a pessoa tem versoes (a RLS escondeu-as)", async () => {
-    const { result } = renderHook(() => usePessoaRetribuicao("p1", "org"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.versoes).toHaveLength(1);
-    // So a leitura feita no momento de gravar vem vazia (sem erro).
-    estado.leitura = () => Promise.resolve({ data: [], error: null });
-    let erro: string | null = null;
-    await act(async () => {
-      erro = await result.current.definirPessoal("2026-11-01", null, 50, null);
-    });
-    expect(estado.rpcs).toEqual([]);
-    expect(erro).toMatch(/Nada foi gravado/);
-  });
-
-  it("definirPessoal de uma pessoa sem nenhuma versao grava com p_subsidio nulo (zero linhas e legitimo)", async () => {
+  it("definirPessoal de uma pessoa sem nenhuma versao grava na mesma (zero linhas e legitimo)", async () => {
     estado.versoes = [];
     const { result } = renderHook(() => usePessoaRetribuicao("p1", "org"));
     await waitFor(() => expect(result.current.loading).toBe(false));
     await act(async () => {
       await result.current.definirPessoal("2026-11-01", null, 50, null);
     });
-    expect(estado.rpcs[0].args).toMatchObject({ p_subsidio: null });
+    expect(estado.rpcs).toHaveLength(1);
+    expect(estado.rpcs[0].args).not.toHaveProperty("p_subsidio");
   });
 
   it("`aberta` e a versao em vigor HOJE, nao a futura que nao tem fim (subida agendada do cargo)", async () => {

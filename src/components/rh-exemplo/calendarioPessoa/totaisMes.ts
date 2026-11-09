@@ -24,14 +24,15 @@ export interface TotaisMes {
   /** Tempo em falta que ainda ninguem marcou. */
   faltasSugeridasMin: number;
   diasComFalta: number;
-  diasElegiveisSubsidio: number;
+  /** Dias com direito a subsidio de alimentacao; `null` quando nao ha limite (sem regra salarial em vigor): nao se inventa um numero. */
+  diasElegiveisSubsidio: number | null;
   emBanco: boolean;
   bancoSaldoMin: number | null;
 }
 
 export interface OpcoesTotais {
-  /** Minutos feitos num dia para ter direito ao subsidio de alimentacao. */
-  minimoSubsidioMin: number;
+  /** Minutos feitos num dia para ter direito ao subsidio de alimentacao (o limite da regra salarial em vigor); `null` = sem regra. */
+  minimoSubsidioMin: number | null;
   /** O saldo do banco de horas; ignorado quando o horario nao e de banco de horas. */
   bancoSaldoMin?: number;
 }
@@ -63,7 +64,10 @@ export function totaisDoMes(dias: readonly DiaCalendario[], opcoes: OpcoesTotais
     faltasMin: soma(dias, (d) => d.faltas.reduce((s, f) => s + f.minutos, 0)),
     faltasSugeridasMin: soma(dias, (d) => d.chips.filter((c) => c.tipo === "falta_sugerida").reduce((s, c) => s + c.minutos, 0)),
     diasComFalta: dias.filter((d) => d.faltas.length > 0 || d.chips.some((c) => c.tipo === "falta_sugerida")).length,
-    diasElegiveisSubsidio: dias.filter((d) => (d.passado || d.hoje) && feitoParaTotais(d) >= opcoes.minimoSubsidioMin).length,
+    diasElegiveisSubsidio:
+      opcoes.minimoSubsidioMin === null
+        ? null
+        : dias.filter((d) => (d.passado || d.hoje) && feitoParaTotais(d) >= (opcoes.minimoSubsidioMin as number)).length,
     emBanco,
     bancoSaldoMin: emBanco ? (opcoes.bancoSaldoMin ?? 0) : null,
   };

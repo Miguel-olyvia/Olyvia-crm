@@ -226,7 +226,7 @@ describe("horas extra: limites, configuração e histórico", () => {
     fireEvent.change(screen.getByLabelText(/Alerta a/), { target: { value: "70" } });
     fireEvent.click(screen.getAllByRole("button", { name: "Guardar" })[0]);
     await waitFor(() => expect(baseFalsa.limites.alertaPct).toBe(70));
-    // Guardar não mexe no limite anual antigo (já não é editável aqui).
+    // Guardar já não envia nem altera o limite anual (vem da regra salarial; o falso mantém o que lá está).
     expect(baseFalsa.limites.anoMin).toBe(anoAntes);
   });
 

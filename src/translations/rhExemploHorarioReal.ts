@@ -16,7 +16,7 @@ export const rhExemploHorarioRealTranslations: Record<"en" | "pt", Record<string
     "rhExemplo.hor.real.excecaoAjuda": "A different schedule only on that day. It replaces the normal week for that date. A past date can only be corrected in the history.",
     "rhExemplo.hor.real.semExcecoes": "No upcoming one-day exceptions.",
     "rhExemplo.hor.real.erroGravar": "Could not save the schedule: {erro}",
-    "rhExemplo.hor.real.erroRegraSubsidio": "Could not read the meal allowance rule. The totals of the month use the default minimum.",
+    "rhExemplo.hor.real.erroRegraSubsidio": "Could not read the salary rule. The days entitled to the meal allowance are not shown.",
     "rhExemplo.hor.real.planeadoRecusado": "You do not have access to the planned schedule, so the calendar shows no planned hours.",
   },
   pt: {
@@ -34,7 +34,7 @@ export const rhExemploHorarioRealTranslations: Record<"en" | "pt", Record<string
     "rhExemplo.hor.real.excecaoAjuda": "Um horário diferente só nesse dia. Substitui a semana normal nessa data. Uma data passada só se corrige no histórico.",
     "rhExemplo.hor.real.semExcecoes": "Não há exceções de um dia por vir.",
     "rhExemplo.hor.real.erroGravar": "Não foi possível guardar o horário: {erro}",
-    "rhExemplo.hor.real.erroRegraSubsidio": "Não foi possível ler a regra do subsídio de alimentação. Os totais do mês usam o mínimo por omissão.",
+    "rhExemplo.hor.real.erroRegraSubsidio": "Não foi possível ler a regra salarial. Os dias com direito a subsídio de alimentação não são mostrados.",
     "rhExemplo.hor.real.planeadoRecusado": "Não tem acesso ao horário planeado, por isso o calendário não mostra horas previstas.",
   },
 };

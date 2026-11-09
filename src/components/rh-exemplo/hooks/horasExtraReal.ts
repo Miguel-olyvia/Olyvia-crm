@@ -49,3 +49,6 @@ export { codigoDeErroDesvios, chaveDoErroDesvios, podeSerHoraExtra } from "@/lib
 export type { VersaoMargem } from "@/lib/hr/desviosRelatorio";
 // As horas extra APROVADAS no fecho: a assinatura de cada pessoa, lida imediatamente antes de calcular, e a conferencia com a do calculo.
 export { prepararFechoComHorasExtra, type PreparacaoHorasExtraDoFecho } from "@/lib/hr/horasExtraFecho";
+// O interruptor da contagem das horas extra aprovadas (a partir de que data so contam as confirmadas).
+export { useHorasExtraContagem, type ContagemHorasExtraHook, type EstadoContagemHorasExtra } from "@/hooks/hr/useHorasExtraContagem";
+export type { ContagemHorasExtra } from "@/lib/hr/horasExtraContagemRpc";
