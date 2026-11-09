@@ -20,6 +20,13 @@ const estado = vi.hoisted(() => ({
   pessoas: [] as PessoaParaCusto[],
   calculo: {} as Record<string, unknown>,
   periodoAberto: true,
+  // Mes fechado (simulado): o hook diz se o periodo esta fechado e se ha valores gravados; `recolhaMontada` conta o calculo vivo montado.
+  fechado: false,
+  semValoresGravados: false,
+  gravadosACarregar: false,
+  gravadosFalhou: false,
+  recarregarGravados: vi.fn(),
+  recolhaMontada: vi.fn(),
   vinculos: { error: null as string | null, recusado: false },
   // Os dados da base (simulados): a lista de equipamentos muda quando as ações a mudam, e quem a lê é avisado.
   permissoes: [] as string[],
@@ -40,7 +47,12 @@ const estado = vi.hoisted(() => ({
 
 vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({ useCompany: () => ({ activeCompany: { id: "org-1" }, isLoading: false }) }));
 vi.mock("@/components/rh-exemplo/hooks/useMinhaPessoa", () => ({ useMinhaPessoa: () => ({ nome: "Sofia" }) }));
-vi.mock("@/components/rh-exemplo/processamento/useCalculoReal", () => ({ RecolhaDeAssiduidade: () => null }));
+vi.mock("@/components/rh-exemplo/processamento/useCalculoReal", () => ({
+  RecolhaDeAssiduidade: () => {
+    estado.recolhaMontada();
+    return null;
+  },
+}));
 vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
   const { useSyncExternalStore } = await import("react");
   const { useCusto } = await import("@/components/rh-exemplo/dados/lojaCusto");
@@ -89,6 +101,8 @@ vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
         baseACarregar: !semPermissao() && estado.baseACarregar, erroBase: estado.erroBase, semPermissaoCusto: semPermissao(), podeEditar: podeEditar(),
         calculo: estado.calculo, ano: Number(mes.slice(0, 4)), mesNum: Number(mes.slice(5, 7)),
         vinculosHook: estado.vinculos, avulsosPorPessoa: porPessoa(), lancamentos: lancamentos(mes),
+        fechado: estado.fechado, semValoresGravados: estado.semValoresGravados, gravadosACarregar: estado.gravadosACarregar,
+        gravadosFalhou: estado.gravadosFalhou, recarregarGravados: estado.recarregarGravados,
       };
     },
     useCustoDaPessoa: (pessoa: { id: string }, mes: string) => {
@@ -260,6 +274,12 @@ beforeEach(() => {
   estado.pessoas = PESSOAS;
   estado.calculo = calculo();
   estado.periodoAberto = true;
+  estado.fechado = false;
+  estado.semValoresGravados = false;
+  estado.gravadosACarregar = false;
+  estado.gravadosFalhou = false;
+  estado.recarregarGravados.mockClear();
+  estado.recolhaMontada.mockClear();
   estado.vinculos = { error: null, recusado: false };
 });
 
@@ -406,6 +426,66 @@ describe("o que a base diz e o que falta dizer", () => {
     noRouter();
     expect(screen.getByText(/assiduidade de 2 pessoa\(s\) só se leu em parte/)).toBeInTheDocument();
     expect(screen.getByText(/A calcular a retribuição de 3 pessoa\(s\)/)).toBeInTheDocument();
+  });
+
+  it("num mês fechado não monta o cálculo vivo, diz numa linha que só as horas e a retribuição são as do fecho e não fala de cálculo por fazer", () => {
+    estado.fechado = true;
+    estado.calculo = calculo({ pendentes: 3, incompletas: 2, periodoHook: { periodo: { id: "per", estado: "fechado" }, recusado: false } });
+    noRouter();
+    expect(estado.recolhaMontada).not.toHaveBeenCalled();
+    expect(screen.getByText(/só as horas e a retribuição são as gravadas no fecho/)).toBeInTheDocument();
+    expect(screen.queryByText(/A calcular a retribuição de/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/só se leu em parte/)).not.toBeInTheDocument();
+  });
+
+  it("num mês aberto monta o cálculo vivo e não mostra a nota do fecho", () => {
+    noRouter();
+    expect(estado.recolhaMontada).toHaveBeenCalled();
+    expect(screen.queryByText(/só as horas e a retribuição são as gravadas no fecho/)).not.toBeInTheDocument();
+  });
+
+  it("mês fechado sem valores gravados avisa em texto, e a pessoa sem linha gravada diz «Sem valores gravados no fecho»", () => {
+    estado.fechado = true;
+    estado.semValoresGravados = true;
+    estado.pessoas = [PESSOAS[0] as PessoaParaCusto, pessoa("p-ines", "Inês Cardoso", null, { semValoresGravados: true })];
+    noRouter();
+    expect(screen.getByText(/este período foi fechado sem resultados guardados/)).toBeInTheDocument();
+    expect(within(linhaDe("Inês Cardoso")).getByText("Sem valores gravados no fecho")).toBeInTheDocument();
+    expect(within(linhaDe("Hugo Teixeira")).queryByText("Sem valores gravados no fecho")).not.toBeInTheDocument();
+  });
+
+  it("mês fechado a ler os valores gravados mostra só o loader: nem totais a zero nem tabela com 0 pessoas", () => {
+    estado.fechado = true;
+    estado.gravadosACarregar = true;
+    estado.pessoas = [];
+    noRouter();
+    expect(screen.getByText("A ler os valores gravados no fecho…")).toBeInTheDocument();
+    expect(screen.queryByTestId("rhcustos-total-pessoas")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rhcustos-total-total")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("mês fechado com o gravado em erro ou recusado oferece «Tentar de novo» (44 px) que volta a ler, e diz-o em inglês também", () => {
+    estado.fechado = true;
+    estado.semValoresGravados = true;
+    estado.gravadosFalhou = true;
+    noRouter();
+    const botao = screen.getByRole("button", { name: "Tentar de novo" });
+    expect(botao.className).toContain("min-h-11");
+    fireEvent.click(botao);
+    expect(estado.recarregarGravados).toHaveBeenCalledTimes(1);
+    cleanup();
+    window.localStorage.setItem("language", "en");
+    noRouter();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    window.localStorage.setItem("language", "pt");
+  });
+
+  it("sem falha a ler o gravado não há «Tentar de novo»", () => {
+    estado.fechado = true;
+    estado.semValoresGravados = true;
+    noRouter();
+    expect(screen.queryByRole("button", { name: "Tentar de novo" })).not.toBeInTheDocument();
   });
 
   it("sem período aberto no mês diz que a retribuição é a estimada, sem valores pontuais", () => {

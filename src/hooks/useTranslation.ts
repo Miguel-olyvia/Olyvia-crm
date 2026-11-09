@@ -27,6 +27,7 @@ import { rhExemploHorasExtraRealTranslations } from "@/translations/rhExemploHor
 import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
 import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
+import { rhExemploCustoFechoTranslations } from "@/translations/rhExemploCustoFecho";
 import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemploProcessamentoReal";
 import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
 import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
@@ -184,6 +185,11 @@ Object.keys(rhExemploAbasTranslations).forEach((lang) => {
 // Módulo «Custos» do RH de exemplo e secção «Equipamentos» da aba Custo (`rhCustos.*`).
 Object.keys(rhExemploCustosTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCustosTranslations[lang as keyof typeof rhExemploCustosTranslations] };
+});
+
+// Custo de um mês fechado: horas e retribuição gravadas no fecho (`rhCustoFecho.*`).
+Object.keys(rhExemploCustoFechoTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCustoFechoTranslations[lang as keyof typeof rhExemploCustoFechoTranslations] };
 });
 
 // Cálculo do mês, Custos e desconto da falta ligados ao processamento salarial real (`rhProcReal.*`). Vem DEPOIS de

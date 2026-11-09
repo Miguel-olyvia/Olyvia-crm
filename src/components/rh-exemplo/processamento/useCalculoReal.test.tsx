@@ -12,10 +12,12 @@ vi.mock("@/lib/hr/hrDb", () => ({ hrFrom: vi.fn(), hrRpc: vi.fn(), isPermissionE
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
 const estado = vi.hoisted(() => ({
+  pedidosRelatorio: vi.fn(),
   pessoas: [] as unknown[],
   pessoasACarregar: false,
   pessoasErro: null as string | null,
   periodo: null as unknown,
+  periodoACarregar: false,
   lancamentos: [] as unknown[],
   retribuicoes: new Map<string, unknown[]>(),
   retribuicoesRecusadas: false,
@@ -39,7 +41,7 @@ vi.mock("@/components/rh-exemplo/hooks/usePessoas", () => ({
 }));
 vi.mock("@/components/rh-exemplo/hooks/useCodigosProcessamento", () => ({ useCodigosProcessamento: () => ({ codigos: [], isLoading: false }) }));
 vi.mock("@/components/rh-exemplo/hooks/useProcessamentoPeriodo", () => ({
-  useProcessamentoPeriodo: () => ({ periodo: estado.periodo, loading: false, saving: false, recusado: false, abrir: vi.fn(), fechar: vi.fn() }),
+  useProcessamentoPeriodo: () => ({ periodo: estado.periodo, loading: estado.periodoACarregar, saving: false, recusado: false, abrir: vi.fn(), fechar: vi.fn() }),
 }));
 vi.mock("@/components/rh-exemplo/hooks/useProcessamentoLancamentos", () => ({
   useProcessamentoLancamentos: () => ({ lancamentos: estado.lancamentos, loading: false, saving: false, recusado: false, criar: vi.fn(), anular: vi.fn() }),
@@ -53,7 +55,7 @@ vi.mock("@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao", () =>
   direitosDaPessoa: (mapa: Map<string, unknown>, id: string) => mapa.get(id) ?? { iht: false, km: false, ajudas: false },
   SEM_DIREITOS_SALARIAIS: { iht: false, km: false, ajudas: false },
 }));
-vi.mock("@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal", () => ({ useRelatorioAssiduidadeMensal: () => estado.relatorio }));
+vi.mock("@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal", () => ({ useRelatorioAssiduidadeMensal: (...args: unknown[]) => { estado.pedidosRelatorio(...args); return estado.relatorio; } }));
 vi.mock("@/components/rh-exemplo/hooks/useRetribuicoesVigentesDaOrganizacao", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   useRetribuicoesVigentesDaOrganizacao: () => ({
@@ -76,6 +78,7 @@ beforeEach(() => {
   estado.pessoasACarregar = false;
   estado.pessoasErro = null;
   estado.periodo = { id: "per-out", estado: "aberto" };
+  estado.periodoACarregar = false;
   estado.lancamentos = [];
   estado.retribuicoes = new Map([["p1", [retribuicao("p1")]], ["p2", [retribuicao("p2", 9999)]]]);
   estado.retribuicoesRecusadas = false;
@@ -287,5 +290,53 @@ describe("useCalculoRealDaPessoa", () => {
     expect(result.current.temPeriodo).toBe(false);
     expect(result.current.periodoAberto).toBe(false);
     expect(result.current.resultado?.resultado.totalBrutoEstimado).toBeCloseTo(1200, 6);
+  });
+
+  describe("congelarSeFechado: um periodo fechado nao monta o calculo vivo", () => {
+    beforeEach(() => estado.pedidosRelatorio.mockClear());
+
+    it("com o periodo fechado nao pede a assiduidade da pessoa e nao ha resultado vivo", () => {
+      estado.periodo = { id: "per", estado: "fechado" };
+      const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10, { congelarSeFechado: true }));
+      expect(estado.pedidosRelatorio.mock.calls.every((c) => c[0] === undefined)).toBe(true);
+      expect(result.current.resultado).toBeNull();
+      expect(result.current.aCarregar).toBe(false);
+      expect(result.current.periodoAberto).toBe(false);
+    });
+
+    it("com o periodo aberto, ou sem periodo, continua vivo", () => {
+      estado.periodo = { id: "per", estado: "aberto" };
+      expect(renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10, { congelarSeFechado: true })).result.current.resultado).not.toBeNull();
+      estado.periodo = null;
+      expect(renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10, { congelarSeFechado: true })).result.current.resultado).not.toBeNull();
+      expect(estado.pedidosRelatorio.mock.calls.every((c) => c[0] === "p1")).toBe(true);
+    });
+
+    it("enquanto o periodo carrega nao pede a assiduidade viva (pode ser um mes fechado), e pede-a quando se sabe que esta aberto", () => {
+      estado.periodo = null;
+      estado.periodoACarregar = true;
+      const { result, rerender } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10, { congelarSeFechado: true }));
+      expect(estado.pedidosRelatorio.mock.calls.length).toBeGreaterThan(0);
+      expect(estado.pedidosRelatorio.mock.calls.every((c) => c[0] === undefined)).toBe(true);
+      expect(result.current.resultado).toBeNull();
+      expect(result.current.aCarregar).toBe(true);
+      estado.periodo = { id: "per", estado: "aberto" };
+      estado.periodoACarregar = false;
+      rerender();
+      expect(estado.pedidosRelatorio.mock.calls.at(-1)?.[0]).toBe("p1");
+      expect(result.current.resultado).not.toBeNull();
+    });
+
+    it("sem a opcao, o periodo a carregar nao muda nada: pede o vivo como sempre", () => {
+      estado.periodo = null;
+      estado.periodoACarregar = true;
+      renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10));
+      expect(estado.pedidosRelatorio.mock.calls.every((c) => c[0] === "p1")).toBe(true);
+    });
+
+    it("sem a opcao, o periodo fechado calcula em vivo como sempre (outros ecras)", () => {
+      estado.periodo = { id: "per", estado: "fechado" };
+      expect(renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10)).result.current.resultado).not.toBeNull();
+    });
   });
 });

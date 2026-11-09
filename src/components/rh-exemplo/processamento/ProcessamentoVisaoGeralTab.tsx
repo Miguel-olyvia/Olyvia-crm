@@ -72,6 +72,7 @@ import {
 } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { regraEmVigorNoDia, useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
 import { direitosDaPessoa, useDireitosSalariaisDaOrganizacao } from "@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao";
+import { minutosDoCalculo } from "@/components/rh-exemplo/processamento/calculoReal";
 import { ResumoPessoaProcessamentoOculto } from "@/components/rh-exemplo/processamento/ResumoPessoaProcessamentoOculto";
 import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
 import { AvisosDeHorasExtra } from "@/components/rh-exemplo/processamento/AvisosDeHorasExtra";
@@ -451,6 +452,7 @@ export function ProcessamentoVisaoGeralTab() {
       assinaturaDeHorasExtraDe: (id) => assinaturaDeHorasExtraDoCalculo(totaisPorPessoa[id]),
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultadosPorPessoa.get(id)?.resultado,
+      minutosDe: (id) => minutosDoCalculo(totaisPorPessoa[id] ? { totais: totaisPorPessoa[id] } : undefined),
       versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
       lancamentosDe: (id) => lancamentosPorPessoa.get(id) ?? [],
       dataFim: ultimoDia,

@@ -54,6 +54,14 @@ describe("o custo de uma pessoa num mês", () => {
     expect(r.encargosTaxa).toBe(120);
   });
 
+  it("mês fechado sem valores gravados não leva horas feitas de exemplo; com horas gravadas usa-as", () => {
+    const sem = custoDaPessoaNoMes(pessoa({ semValoresGravados: true, retribuicaoMes: null }), contexto({ horasRealizadas: new Map() }));
+    expect(sem.horasFeitas).toBe(0);
+    expect(sem.porHoraFeita).toBeNull();
+    const com = custoDaPessoaNoMes(pessoa(), contexto({ horasRealizadas: new Map([["p1", 150]]) }));
+    expect(com.horasFeitas).toBe(150);
+  });
+
   it("sem retribuição o custo fica sem valor, mas o equipamento e os avulsos continuam a ser vistos", () => {
     const linha = montarLinhaCusto(pessoa({ retribuicaoMes: null }), contexto());
     expect(linha).toMatchObject({ retribuicao: null, total: null, porHora: null, avulsosMes: 98, equipamentosMes: 25, composicao: [] });

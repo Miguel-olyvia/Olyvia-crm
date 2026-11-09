@@ -44,6 +44,13 @@ export interface ResultadoCalculoReal {
   totais: TotaisRelatorioMensal;
 }
 
+/** Os minutos planeados e realizados que o fecho grava (os que o ecra Custos usa); `undefined` se a pessoa ainda nao tem calculo. */
+export function minutosDoCalculo(
+  calculo: { totais: { planeadoMinutos: number; realizadoMinutos: number } } | undefined,
+): { planeado: number; realizado: number } | undefined {
+  return calculo ? { planeado: calculo.totais.planeadoMinutos, realizado: calculo.totais.realizadoMinutos } : undefined;
+}
+
 export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCalculoReal {
   const { totais } = entrada;
   const { retribuicao, mudouAMeioDoMes } = escolherRetribuicaoVigente(entrada.versoes, entrada.ultimoDia);

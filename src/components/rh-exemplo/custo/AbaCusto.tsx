@@ -2,7 +2,7 @@
  * O separador «Custo» da ficha (fluxo 11): quanto custa a pessoa à empresa, no mês escolhido. Mostra o quadro do mês (a
  * retribuição é o total bruto estimado do processamento salarial real), a composição, os equipamentos que a pessoa tem
  * (cada um conta como foi escolhido), os valores avulsos (os lançamentos pontuais do processamento salarial, da base) e os
- * encargos. Só para quem vê salários (`hr.pessoas.retribuicao.view`); a própria pessoa não vê o custo. Atribuir, devolver, alterar a conta
+ * encargos. Num mês fechado, as horas e a retribuição são as gravadas no fecho (sem valores gravados, avisa e não recalcula). Só para quem vê salários (`hr.pessoas.retribuicao.view`); a própria pessoa não vê o custo. Atribuir, devolver, alterar a conta
  * e guardar taxas pedem também `hr.pessoas.retribuicao.edit`. Equipamentos, taxas e exceções vêm da base; enquanto não chegam mostra-se «a calcular».
  */
 import { Seccao } from "@/components/ficha-comum/Seccao";
@@ -21,7 +21,7 @@ import { useCustoDaPessoa } from "./useCustoDaPessoa";
 export function AbaCusto({ pessoa, ctx }: AbaProps) {
   const { t } = useTranslation();
   const mes = useCusto((e) => e.mes);
-  const { custo, aCarregar, retribuicaoRecusada, erroBase, podeEditar, incompleta, lancamentos } = useCustoDaPessoa(pessoa, mes);
+  const { custo, aCarregar, retribuicaoRecusada, erroBase, podeEditar, incompleta, lancamentos, fechado, semValoresGravados } = useCustoDaPessoa(pessoa, mes);
   const autor = ctx.nomePorPessoaId.get(ctx.minhaPessoaId ?? "") ?? t("rhA.custo.autorOmissao");
 
   return (
@@ -34,10 +34,12 @@ export function AbaCusto({ pessoa, ctx }: AbaProps) {
         </div>
       )}
       {erroBase && !retribuicaoRecusada && <p role="alert" className="text-sm text-destructive">{t("rhCustos.base.erro", { erro: erroBase })}</p>}
+      {fechado && !retribuicaoRecusada && <p role="status" className="text-sm text-muted-foreground">{t("rhCustoFecho.nota")}</p>}
+      {semValoresGravados && !retribuicaoRecusada && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhCustoFecho.semValoresPessoa")}</p>}
       {incompleta && !aCarregar && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.fichaIncompleta")}</p>}
       {custo && (
         <>
-          <CustoResumo custo={custo} />
+          <CustoResumo custo={custo} semValoresGravados={semValoresGravados} />
           <Seccao titulo={t("rhCustos.comp.fichaTitulo")}>
             <BarraComposicao partes={custo.composicao} titulo={t("rhCustos.comp.titulo", { nome: pessoa.nome_completo })} />
           </Seccao>

@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { definirMesCusto, lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { contaRepartida, contaTodosMeses, contaUmaVez } from "@/components/rh-exemplo/lib/comoConta";
-import { totaisDaOrganizacao, type PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
+import { custoDaPessoaNoMes, HORAS_FEITAS_A_MAIS_EXEMPLO, totaisDaOrganizacao, type PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import { valorDoEquipamentoNoMes, validarDevolucao, validarEquipamento, type EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 import { custoDaPessoa, linhasDaOrganizacao, type DadosCusto } from "./custoLido";
 
@@ -256,5 +256,26 @@ describe("um equipamento atribuÃ­do ou devolvido mexe no custo da pessoa e no mÃ
     expect(lerCusto().mes).toBe("2026-11");
     reporCusto();
     expect(lerCusto().mes).toBe("2026-09");
+  });
+});
+
+describe("horas realizadas gravadas no fecho (mes fechado)", () => {
+  const contexto = (horasRealizadas?: ReadonlyMap<string, number>) => ({
+    mes: MES, avulsos: [], equipamentos: [], definicoes: DADOS.definicoes, excecoes: {}, horasRealizadas,
+  });
+  const hugo = PESSOAS[0] as PessoaParaCusto;
+
+  it("com horas gravadas para a pessoa a linha da organizacao usa-as e nao as horas previstas + exemplo", () => {
+    expect(custoDaPessoaNoMes(hugo, contexto(new Map([["p-hugo", 150.5]]))).horasFeitas).toBe(150.5);
+  });
+
+  it("sem horas gravadas (periodo aberto, ou outra pessoa) mantem a conta de sempre", () => {
+    const previstas = custoDaPessoaNoMes(hugo, contexto()).horasPrevistas;
+    expect(custoDaPessoaNoMes(hugo, contexto()).horasFeitas).toBe(Math.round((previstas + HORAS_FEITAS_A_MAIS_EXEMPLO) * 100) / 100);
+    expect(custoDaPessoaNoMes(hugo, contexto(new Map([["p-ines", 1]]))).horasFeitas).toBe(custoDaPessoaNoMes(hugo, contexto()).horasFeitas);
+  });
+
+  it("zero horas gravadas e um valor (nao cai para o exemplo)", () => {
+    expect(custoDaPessoaNoMes(hugo, contexto(new Map([["p-hugo", 0]]))).horasFeitas).toBe(0);
   });
 });

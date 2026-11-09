@@ -19,6 +19,10 @@ const estado = vi.hoisted(() => ({
   pedidoExcecoes: vi.fn(),
   pessoa: { resultado: null as unknown, aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: true, temPeriodo: true, dados: {} as Record<string, unknown> },
   organizacao: {} as Record<string, unknown>,
+  // Os resultados GRAVADOS de um periodo fechado (simulados) e os pedidos feitos ao calculo vivo e a eles.
+  gravados: { estado: "ok" as string, porPessoa: new Map<string, unknown>(), antesDoRegisto: false },
+  pedidoGravados: vi.fn(),
+  pedidoCalculo: vi.fn(),
   vinculos: new Map<string, unknown[]>(),
   horas: { versoes: [] as unknown[], loading: false },
   criar: vi.fn(),
@@ -33,9 +37,23 @@ const SEM_REGRAS_PERIODO: never[] = [];
 vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: SEM_REGRAS_PERIODO, estado: "ok", isLoading: false }) }));
 
 vi.mock("@/components/rh-exemplo/processamento/useCalculoReal", () => ({
-  useCalculoRealDaPessoa: () => estado.pessoa,
+  useCalculoRealDaPessoa: (...args: unknown[]) => {
+    estado.pedidoCalculo(...args);
+    return estado.pessoa;
+  },
   useCalculoRealDoMes: () => estado.organizacao,
 }));
+vi.mock("@/components/rh-exemplo/hooks/useProcessamentoResultados", async () => {
+  const real = await vi.importActual<typeof import("@/lib/hr/resultadosFecho")>("@/lib/hr/resultadosFecho");
+  return {
+    resultadoDeLinhaGravada: real.resultadoDeLinhaGravada,
+    minutosDeLinhaGravada: real.minutosDeLinhaGravada,
+    useProcessamentoResultados: (periodoId: string | undefined, activo: boolean) => {
+      estado.pedidoGravados(periodoId, activo);
+      return activo ? estado.gravados : { estado: "inactivo", porPessoa: new Map(), antesDoRegisto: false };
+    },
+  };
+});
 vi.mock("@/components/rh-exemplo/hooks/useCompany", () => ({ useCompany: () => ({ activeCompany: { id: "org-1", name: "Org" }, companies: [], isLoading: false }) }));
 vi.mock("@/components/rh-exemplo/hooks/usePessoaVinculoHoras", () => ({ usePessoaVinculoHoras: () => estado.horas }));
 vi.mock("@/components/rh-exemplo/hooks/usePessoasVinculosVigentes", async () => {
@@ -122,6 +140,9 @@ beforeEach(() => {
   estado.pedidoDefinicoes.mockClear();
   estado.pedidoExcecoes.mockClear();
   estado.pessoa = { resultado: calculoReal(1200), aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: true, temPeriodo: true, dados: dadosDoMes() };
+  estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
+  estado.pedidoGravados.mockClear();
+  estado.pedidoCalculo.mockClear();
   estado.vinculos = new Map();
   estado.horas = { versoes: [], loading: false };
   estado.criar.mockReset();
@@ -480,5 +501,225 @@ describe("AbaCusto", () => {
     estado.pessoa = { ...estado.pessoa, incompleta: true };
     await renderAba();
     expect(screen.getByText(/só se leu em parte \(sem permissão para tudo\): a retribuição pode estar incompleta/)).toBeInTheDocument();
+  });
+});
+
+// ---- Mes FECHADO: o ecra le o que ficou gravado no fecho e nao monta o calculo vivo ----
+
+const FECHADO = { id: "per", estado: "fechado" };
+const gravada = (pessoaId: string, extra: Record<string, unknown> = {}) => ({
+  pessoa_id: pessoaId, valor_hora: 8.5, total_bruto: 1500, totais: { lancamentos_pontuais: 100 }, linhas: [], avisos: [],
+  retribuicao_id: null, cargo_periodo_id: null, regra_salarial_id: null, fechado_em: "2026-10-01T10:00:00Z", fechado_por_nome: "Rita",
+  planeado_minutos: 9600, realizado_minutos: 9000, pessoa_nome: `Gravada ${pessoaId}`, ...extra,
+});
+/** O calculo vivo de teste: ler `resultado` ou `resultados` num mes fechado e um erro (nao se monta o calculo vivo). */
+const vivoProibido = <T extends Record<string, unknown>>(base: T, campo: "resultado" | "resultados"): T => {
+  const copia = { ...base };
+  Object.defineProperty(copia, campo, { get: () => { throw new Error("calculo vivo lido num mes fechado"); }, enumerable: true });
+  return copia;
+};
+
+describe("useCustoDaPessoa: mes fechado", () => {
+  beforeEach(() => {
+    estado.pessoa = vivoProibido({ ...estado.pessoa, dados: dadosDoMes([], FECHADO) }, "resultado") as typeof estado.pessoa;
+    estado.gravados = { estado: "ok", porPessoa: new Map([["p-tiago", gravada("p-tiago")]]), antesDoRegisto: false };
+  });
+
+  it("usa as horas e a retribuicao GRAVADAS (total_bruto menos os pontuais) e nunca le o calculo vivo", () => {
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.fechado).toBe(true);
+    expect(result.current.semValoresGravados).toBe(false);
+    expect(result.current.custo?.retribuicaoMes).toBe(1400);
+    expect(result.current.custo?.atual.horasFeitas).toBe(150);
+    // 9600 minutos planeados = 160 h previstas (sem horas contratuais).
+    expect(result.current.custo?.atual.horasPrevistas).toBeCloseTo(160, 1);
+    expect(estado.pedidoCalculo).toHaveBeenCalledWith("p-tiago", 2026, 9, { congelarSeFechado: true });
+    expect(estado.pedidoGravados).toHaveBeenCalledWith("per", true);
+  });
+
+  it("as horas contratuais continuam a mandar nas horas previstas, tambem num mes fechado", () => {
+    estado.horas = { versoes: [{ valido_de: "2026-01-01", valido_ate: null, horas_semanais_equivalentes: 20 }], loading: false };
+    expect(renderHook(() => useCustoDaPessoa(PESSOA, MES)).result.current.custo?.atual.horasPrevistas).toBe(88);
+  });
+
+  it("equipamentos, taxas e excecoes continuam vivos", () => {
+    estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: [portatil()] };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.custo?.atual.outrosCustos).toBeCloseTo(50, 2);
+    expect(result.current.custo?.atual.encargosTaxa).toBeCloseTo(1400 * 0.2375, 2);
+  });
+
+  it("pessoa sem linha gravada: aviso, sem retribuicao nem horas inventadas, nunca recalcula", () => {
+    estado.gravados = { estado: "ok", porPessoa: new Map([["p-outro", gravada("p-outro")]]), antesDoRegisto: false };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.semValoresGravados).toBe(true);
+    expect(result.current.custo?.retribuicaoMes).toBeNull();
+    expect(result.current.custo?.atual.total).toBeNull();
+    // Sem linha gravada o custo nao leva horas feitas (nem um 0 inventado) e nao ha custo por hora feita.
+    expect(result.current.custo?.horasFeitas).toBeNull();
+    expect(result.current.custo?.atual.porHoraFeita).toBeNull();
+  });
+
+  it("com linha gravada o custo leva as horas gravadas", () => {
+    expect(renderHook(() => useCustoDaPessoa(PESSOA, MES)).result.current.custo?.horasFeitas).toBe(150);
+  });
+
+  it("fechado antes do registo, recusado ou com erro: mesmo aviso", () => {
+    for (const lido of [{ estado: "ok", antesDoRegisto: true }, { estado: "recusado", antesDoRegisto: false }, { estado: "erro", antesDoRegisto: false }]) {
+      estado.gravados = { ...lido, porPessoa: new Map() };
+      expect(renderHook(() => useCustoDaPessoa(PESSOA, MES)).result.current.semValoresGravados).toBe(true);
+    }
+  });
+
+  it("linha gravada sem minutos validos (base sem a migration) conta como sem valores, nunca como 0 horas", () => {
+    estado.gravados = { estado: "ok", porPessoa: new Map([["p-tiago", gravada("p-tiago", { planeado_minutos: undefined, realizado_minutos: null })]]), antesDoRegisto: false };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.semValoresGravados).toBe(true);
+    expect(result.current.custo?.retribuicaoMes).toBeNull();
+  });
+
+  it("enquanto os valores gravados carregam nao ha custo, diz que esta a carregar e nao avisa", () => {
+    estado.gravados = { estado: "a_carregar", porPessoa: new Map(), antesDoRegisto: false };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.custo).toBeNull();
+    expect(result.current.aCarregar).toBe(true);
+    expect(result.current.semValoresGravados).toBe(false);
+  });
+
+  it("periodo aberto: continua vivo e nem pede os gravados", () => {
+    estado.pessoa = { resultado: calculoReal(1200), aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: true, temPeriodo: true, dados: dadosDoMes([], { id: "per", estado: "aberto" }) };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    expect(result.current.fechado).toBe(false);
+    expect(result.current.custo?.retribuicaoMes).toBe(1200);
+    expect(result.current.custo?.atual.horasFeitas).toBe(150);
+    expect(estado.pedidoGravados).toHaveBeenCalledWith("per", false);
+  });
+});
+
+describe("useCustoDaOrganizacao: mes fechado", () => {
+  const pessoaActiva = (id: string) => ({ id, nome_completo: `Pessoa ${id}`, cargo: null, cargo_id: "c1", local_id: "l1" });
+  const organizacaoFechada = (extra: Record<string, unknown> = {}) =>
+    vivoProibido({
+      pessoasActivas: [pessoaActiva("p-hugo"), pessoaActiva("p-ines")],
+      todasAsPessoas: [pessoaActiva("p-hugo"), pessoaActiva("p-ines"), { ...pessoaActiva("p-saiu"), nome_completo: "Saiu Depois" }],
+      retribuicoesHook: { recusado: false },
+      ...dadosDoMes([], FECHADO),
+      ...extra,
+    }, "resultados");
+
+  beforeEach(() => {
+    estado.organizacao = organizacaoFechada();
+    estado.gravados = {
+      estado: "ok", antesDoRegisto: false,
+      porPessoa: new Map([["p-hugo", gravada("p-hugo")], ["p-saiu", gravada("p-saiu", { total_bruto: 900, totais: { lancamentos_pontuais: 0 } })]]),
+    };
+  });
+
+  it("as linhas vem do gravado (tambem de quem saiu depois), sem ler o calculo vivo", () => {
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    const linhas = result.current.linhas;
+    expect(result.current.fechado).toBe(true);
+    expect(linhas.map((l) => l.pessoaId).sort()).toEqual(["p-hugo", "p-ines", "p-saiu"]);
+    expect(linhas.find((l) => l.pessoaId === "p-hugo")).toMatchObject({ retribuicao: 1400 });
+    expect(linhas.find((l) => l.pessoaId === "p-hugo")?.semValoresGravados).toBeFalsy();
+    expect(linhas.find((l) => l.pessoaId === "p-saiu")).toMatchObject({ nome: "Saiu Depois", retribuicao: 900 });
+    expect(estado.pedidoGravados).toHaveBeenCalledWith("per", true);
+  });
+
+  it("uma pessoa activa sem linha gravada vem marcada e sem retribuicao", () => {
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(result.current.linhas.find((l) => l.pessoaId === "p-ines")).toMatchObject({ retribuicao: null, total: null, semValoresGravados: true });
+    expect(result.current.semValoresGravados).toBe(false);
+  });
+
+  it("fechado antes do registo ou sem poder ler: todas as activas sem valores, e o ecra e avisado", () => {
+    estado.gravados = { estado: "recusado", antesDoRegisto: false, porPessoa: new Map() };
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(result.current.semValoresGravados).toBe(true);
+    expect(result.current.linhas.map((l) => l.semValoresGravados)).toEqual([true, true]);
+  });
+
+  it("a carregar os gravados: sem linhas e diz-se", () => {
+    estado.gravados = { estado: "a_carregar", antesDoRegisto: false, porPessoa: new Map() };
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(result.current.linhas).toEqual([]);
+    expect(result.current.gravadosACarregar).toBe(true);
+  });
+
+  it("gravado em erro ou recusado: expoe a falha e o recarregar do hook dos gravados; sem falha, nao", () => {
+    const recarregar = vi.fn();
+    for (const lido of ["erro", "recusado"]) {
+      estado.gravados = { estado: lido, antesDoRegisto: false, porPessoa: new Map(), recarregar } as typeof estado.gravados;
+      const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+      expect(result.current.gravadosFalhou).toBe(true);
+      result.current.recarregarGravados();
+    }
+    expect(recarregar).toHaveBeenCalledTimes(2);
+    estado.gravados = { estado: "ok", antesDoRegisto: true, porPessoa: new Map() };
+    expect(renderHook(() => useCustoDaOrganizacao(MES)).result.current.gravadosFalhou).toBe(false);
+  });
+
+  it("equipamentos vivos entram nas linhas do mes fechado", () => {
+    estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: [portatil({ pessoaId: "p-hugo" })] };
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(result.current.linhas.find((l) => l.pessoaId === "p-hugo")?.equipamentosMes).toBeCloseTo(50, 2);
+  });
+
+  it("periodo aberto: vivo como antes (e os gravados nem se pedem)", () => {
+    estado.organizacao = {
+      pessoasActivas: [pessoaActiva("p-hugo")], resultados: new Map([["p-hugo", calculoReal(1400)]]), retribuicoesHook: { recusado: false }, ...dadosDoMes(),
+    };
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(result.current.fechado).toBe(false);
+    expect(result.current.linhas.map((l) => l.retribuicao)).toEqual([1400]);
+    expect(estado.pedidoGravados).toHaveBeenCalledWith("per", false);
+  });
+});
+
+describe("AbaCusto: mes fechado", () => {
+  const renderAba = async () => {
+    const { AbaCusto } = await import("./AbaCusto");
+    return render(
+      <LanguageProvider>
+        <AbaCusto pessoa={PESSOA} ctx={{ nomePorPessoaId: new Map(), minhaPessoaId: null } as never} ficha={null as never} />
+      </LanguageProvider>,
+    );
+  };
+
+  beforeEach(() => {
+    window.localStorage.setItem("language", "pt");
+    estado.pessoa = { resultado: null, aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: false, temPeriodo: true, dados: dadosDoMes([], FECHADO) };
+  });
+
+  it("diz numa linha que so as horas e a retribuicao sao as do fecho", async () => {
+    estado.gravados = { estado: "ok", porPessoa: new Map([["p-tiago", gravada("p-tiago")]]), antesDoRegisto: false };
+    await renderAba();
+    expect(screen.getByText(/só as horas e a retribuição são as gravadas no fecho/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sem valores gravados no fecho/)).not.toBeInTheDocument();
+  });
+
+  it("sem linha gravada avisa em texto (nao so cor) e nao recalcula", async () => {
+    estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
+    await renderAba();
+    expect(screen.getByText(/Sem valores gravados no fecho para esta pessoa/)).toBeInTheDocument();
+  });
+
+  it("a pessoa sem linha gravada nao mostra «por hora feita»; com linha gravada mostra", async () => {
+    estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
+    const semLinha = await renderAba();
+    expect(screen.queryByText(/Custo por hora realmente feita/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Custo por hora prevista/)).toBeInTheDocument();
+    semLinha.unmount();
+    estado.gravados = { estado: "ok", porPessoa: new Map([["p-tiago", gravada("p-tiago")]]), antesDoRegisto: false };
+    await renderAba();
+    expect(screen.getByText(/Custo por hora realmente feita/)).toBeInTheDocument();
+  });
+
+  it("em ingles os mesmos avisos", async () => {
+    window.localStorage.setItem("language", "en");
+    estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
+    await renderAba();
+    expect(screen.getByText(/No values saved at closing for this person/)).toBeInTheDocument();
+    expect(screen.getByText(/only the hours and the pay are the ones saved/)).toBeInTheDocument();
   });
 });

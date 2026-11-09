@@ -75,7 +75,7 @@ const resultado = (extra: Record<string, unknown> = {}) => ({
   descontoFaltas: 0, subsidioAlimentacao: 0, lancamentosPontuais: 0, totalBrutoEstimado: 1000, avisos: [], ...extra,
 });
 const linha = (extra: Record<string, unknown> = {}, valorBase: number | null = 1000) => ({
-  resultado: resultado(extra), valorBase, periodicidade: valorBase === null ? null : "mensal", mudouAMeioDoMes: false, totais: { planeadoMinutos: 9600 },
+  resultado: resultado(extra), valorBase, periodicidade: valorBase === null ? null : "mensal", mudouAMeioDoMes: false, totais: { planeadoMinutos: 9600, realizadoMinutos: 9000 },
 });
 
 /** O que `useProcessamentoResultados` devolve: por omissao nada (periodo aberto); `ok` com linhas gravadas para um fechado. */
@@ -319,7 +319,7 @@ describe("fechar grava o resultado de cada pessoa", () => {
     const enviados = fn.fechar.mock.calls[0][0] as Array<Record<string, unknown> & { totais: Record<string, unknown> }>;
     expect(enviados.map((r) => r.pessoa_id)).toEqual(["p1", "p2"]);
     const ana = enviados[0];
-    expect(ana).toMatchObject({ valor_hora: 7.5, total_bruto: 1210, retribuicao_id: "ret-p1", cargo_periodo_id: null, regra_salarial_id: "regra-1" });
+    expect(ana).toMatchObject({ valor_hora: 7.5, total_bruto: 1210, retribuicao_id: "ret-p1", cargo_periodo_id: null, regra_salarial_id: "regra-1", planeado_minutos: 9600, realizado_minutos: 9000 });
     expect(ana.totais).toMatchObject({ base_mes: 1000, total_codigos_automaticos: 50, desconto_faltas: 20, subsidio_alimentacao: 110, total_regras: 40, lancamentos_pontuais: 30 });
     expect(enviados[1]).toMatchObject({ total_bruto: null, retribuicao_id: null, avisos: ["sem_retribuicao"] });
   });
