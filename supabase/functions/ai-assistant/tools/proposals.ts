@@ -1,6 +1,7 @@
 // Proposal tools — extracted verbatim from index.ts.
 
 import { requireWrite } from "../shared/authz.ts";
+import { filterVisible, scopeWindow } from "../shared/scope.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -99,7 +100,7 @@ const listProposals: Handler = async (ctx, args): Promise<ToolResult> => {
     .eq("organization_id", organizationId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .limit(scopeWindow(limit));
   if (args?.status) q = q.eq("status", args.status);
   if (args?.search && typeof args.search === "string" && args.search.trim().length > 0) {
     const raw = args.search.trim();
@@ -107,8 +108,10 @@ const listProposals: Handler = async (ctx, args): Promise<ToolResult> => {
     const like = `%${escaped}%`;
     q = q.or(`title.ilike.${like},proposal_number.ilike.${like}`);
   }
-  const { data, error } = await q;
+  const { data: rawData, error } = await q;
   if (error) throw error;
+  // Âmbito do utilizador (RLS) — auditoria Administração F6.
+  const data = (await filterVisible(ctx, "proposals", rawData)).slice(0, Number(limit) || 10);
   return { success: true, message: `${data?.length || 0} proposta(s).`, data: data || [] };
 };
 

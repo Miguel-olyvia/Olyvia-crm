@@ -18,6 +18,8 @@ export interface ExecCtx {
   memberships: Membership[];
   isSystemAdmin: boolean;
   authHeader: string;               // original Bearer token forwarded to invoked edge functions
+  // Cliente com o JWT do utilizador (RLS aplica-se): só para verificar o âmbito (shared/scope.ts).
+  userSupabase?: any;
 }
 
 export type ToolResult = {

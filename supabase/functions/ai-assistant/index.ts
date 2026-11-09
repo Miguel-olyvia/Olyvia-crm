@@ -6,6 +6,8 @@ import { summarizeToolArgs } from "./shared/summarizeArgs.ts";
 import { resolveEntityId, type EntityKind } from "./shared/resolveEntityId.ts";
 import { TOOLS, HANDLERS, selectToolsForContext } from "./tools/registry.ts";
 import type { ExecCtx, ToolResult } from "./shared/types.ts";
+import { checkToolScope } from "./shared/toolScope.ts";
+import { scopeResolveOutcome } from "./shared/scopeResolve.ts";
 
 
 import { getCorsHeaders } from "../_shared/cors.ts";
@@ -133,6 +135,10 @@ async function executeTool(
   const handler = HANDLERS[toolName];
   if (!handler) return { success: false, message: `Ferramenta "${toolName}" não reconhecida.` };
   try {
+    // Âmbito (OWNED/TEAM/ORG) do registo que a tool vai ver/alterar, com a RLS do próprio utilizador
+    // (shared/toolScope.ts). Um erro na verificação cai no catch abaixo: a tool não corre.
+    const denied = await checkToolScope(ctx, toolName, args);
+    if (denied) return denied;
     return await handler(ctx, args);
   } catch (error: any) {
     console.error(`Error executing tool ${toolName}:`, error);
@@ -632,6 +638,8 @@ Deno.serve(async (req) => {
             let resolveOutcome: Awaited<ReturnType<typeof resolveEntityId>>;
             try {
               resolveOutcome = await resolveEntityId(ctx.supabase, ctx.organizationId as string, resolver.kind, rawRef);
+              // Só candidatos dentro do âmbito do utilizador (nem nomes de registos que ele não vê).
+              resolveOutcome = await scopeResolveOutcome(ctx, resolver.kind, resolveOutcome);
             } catch (e) {
               resolveOutcome = { notFound: true };
               console.error("resolveEntityId failed:", e);

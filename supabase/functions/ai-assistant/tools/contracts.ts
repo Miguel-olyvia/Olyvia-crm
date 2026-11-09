@@ -9,6 +9,7 @@
 
 import { can, permissionExists } from "../shared/authz.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
+import { filterVisible, scopeWindow } from "../shared/scope.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v: unknown): v is string => typeof v === "string" && UUID_RE.test(v);
@@ -116,7 +117,7 @@ const listContracts: Handler = async (ctx, args): Promise<ToolResult> => {
     .eq("organization_id", organizationId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .limit(scopeWindow(limit));
 
   if (args?.status) q = q.eq("status", args.status);
   if (args?.contract_number) q = q.ilike("contract_number", `%${escapeIlike(String(args.contract_number))}%`);
@@ -127,7 +128,8 @@ const listContracts: Handler = async (ctx, args): Promise<ToolResult> => {
   const { data, error } = await q;
   if (error) throw error;
 
-  const rows = data ?? [];
+  // Âmbito do utilizador (RLS) — auditoria Administração F6.
+  const rows = (await filterVisible(ctx, "client_contracts", data)).slice(0, limit);
   const clientIds = Array.from(new Set(rows.map((r: any) => r.client_id).filter(Boolean))) as string[];
   const nameMap = await resolveClientNames(supabase, clientIds);
 

@@ -4,11 +4,34 @@
 
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 import { can } from "../shared/authz.ts";
+import { filterVisible, hasOrgWideScope, scopeWindow } from "../shared/scope.ts";
+import type { ExecCtx } from "../shared/types.ts";
 
 const ROW_CAP = 10000;
 const BATCH = 200;
 
 // ---------- helpers ----------
+
+// Âmbito (auditoria Administração F6). Os relatórios agregam a organização inteira com a service_role; só os vê
+// quem tem âmbito ORG (crm_scope_keys `<org>:*`) na permissão de ver desse módulo — a mesma regra da RLS de SELECT.
+// deals: a RLS de SELECT de deals não tem âmbito por dono, por isso não se acrescenta nada.
+type ReportModule = "leads" | "deals" | "proposals" | "quotes";
+async function orgWide(ctx: ExecCtx, module: ReportModule): Promise<boolean> {
+  if (module === "deals") return true;
+  return hasOrgWideScope(ctx, `${module}.view`);
+}
+async function requireOrgWide(ctx: ExecCtx, modules: ReportModule[]): Promise<ToolResult | null> {
+  for (const m of modules) {
+    if (!(await orgWide(ctx, m))) {
+      return {
+        success: false,
+        code: "forbidden",
+        message: `Este relatório agrega a organização inteira e o teu âmbito em ${m} não é a organização toda.`,
+      };
+    }
+  }
+  return null;
+}
 
 function defaultRange(args: any): { from: string; to: string } {
   const to = args?.date_to ? new Date(args.date_to) : new Date();
@@ -93,6 +116,11 @@ const getStats: Handler = async (ctx, args): Promise<ToolResult> => {
     return q;
   };
 
+  // Só contam os módulos em que o utilizador vê a organização inteira; os outros ficam a null (fora do âmbito).
+  const [wLeads, wDeals, wProposals, wQuotes] = await Promise.all([
+    orgWide(ctx, "leads"), orgWide(ctx, "deals"), orgWide(ctx, "proposals"), orgWide(ctx, "quotes"),
+  ]);
+
   const [leads, deals, proposals, quotes] = await Promise.all([
     filterRange(supabase.from("anew_leads").select("id", { count: "exact", head: true }).eq("organization_id", organizationId)),
     filterRange(supabase.from("deals").select("id", { count: "exact", head: true }).eq("organization_id", organizationId)),
@@ -101,26 +129,31 @@ const getStats: Handler = async (ctx, args): Promise<ToolResult> => {
   ]);
 
   let dashboard: any = null;
-  try {
-    const { data, error } = await supabase.rpc("get_lead_dashboard_stats", {
-      p_org_id: organizationId,
-      p_date_from: args?.date_from ?? null,
-      p_date_to: args?.date_to ?? null,
-    });
-    if (!error) dashboard = data;
-  } catch (_e) {
-    dashboard = null;
+  if (wLeads) {
+    try {
+      const { data, error } = await supabase.rpc("get_lead_dashboard_stats", {
+        p_org_id: organizationId,
+        p_date_from: args?.date_from ?? null,
+        p_date_to: args?.date_to ?? null,
+      });
+      if (!error) dashboard = data;
+    } catch (_e) {
+      dashboard = null;
+    }
   }
 
   return {
     success: true,
     message: hasRange ? "Stats do período." : "Stats do mês.",
     data: {
-      leads: leads.count || 0,
-      deals: deals.count || 0,
-      proposals: proposals.count || 0,
-      quotes: quotes.count || 0,
+      leads: wLeads ? leads.count || 0 : null,
+      deals: wDeals ? deals.count || 0 : null,
+      proposals: wProposals ? proposals.count || 0 : null,
+      quotes: wQuotes ? quotes.count || 0 : null,
       dashboard,
+      ...(!(wLeads && wDeals && wProposals && wQuotes)
+        ? { note: "Os módulos a null estão fora do teu âmbito (só com âmbito de organização inteira)." }
+        : {}),
     },
   };
 };
@@ -158,6 +191,8 @@ const getPipelineReport: Handler = async (ctx, args): Promise<ToolResult> => {
   }
 
   const { from, to } = defaultRange(args);
+  const deniedScope = await requireOrgWide(ctx, [pipeline as ReportModule]);
+  if (deniedScope) return deniedScope;
 
   if (pipeline === "deals") {
     const { data: rows, error } = await supabase
@@ -268,9 +303,10 @@ const getOverdueItems: Handler = async (ctx, args): Promise<ToolResult> => {
       .lt("start_datetime", nowIso)
       .not("status", "in", "(completed,cancelled,rescheduled)")
       .order("start_datetime", { ascending: true })
-      .limit(limit);
+      .limit(scopeWindow(limit));
     if (error) return { success: false, message: error.message };
-    return { success: true, message: `${data?.length || 0} schedule item(s) em atraso.`, data: data || [] };
+    const visible = (await filterVisible(ctx, "schedule_items", data)).slice(0, limit); // âmbito do utilizador (RLS)
+    return { success: true, message: `${visible.length} schedule item(s) em atraso.`, data: visible };
   }
 
   if (entity === "deals") {
@@ -282,9 +318,10 @@ const getOverdueItems: Handler = async (ctx, args): Promise<ToolResult> => {
       .is("closed_at", null)
       .is("deleted_at", null)
       .order("expected_close_date", { ascending: true })
-      .limit(limit);
+      .limit(scopeWindow(limit));
     if (error) return { success: false, message: error.message };
-    return { success: true, message: `${data?.length || 0} deal(s) em atraso.`, data: data || [] };
+    const visible = (await filterVisible(ctx, "deals", data)).slice(0, limit); // âmbito do utilizador (RLS)
+    return { success: true, message: `${visible.length} deal(s) em atraso.`, data: visible };
   }
 
   if (entity === "proposals") {
@@ -298,9 +335,10 @@ const getOverdueItems: Handler = async (ctx, args): Promise<ToolResult> => {
       .is("deleted_at", null)
       .or("is_deleted.is.null,is_deleted.eq.false")
       .order("valid_until", { ascending: true })
-      .limit(limit);
+      .limit(scopeWindow(limit));
     if (error) return { success: false, message: error.message };
-    return { success: true, message: `${data?.length || 0} proposal(s) em atraso.`, data: data || [] };
+    const visible = (await filterVisible(ctx, "proposals", data)).slice(0, limit); // âmbito do utilizador (RLS)
+    return { success: true, message: `${visible.length} proposal(s) em atraso.`, data: visible };
   }
 
   if (entity === "quotes") {
@@ -313,9 +351,10 @@ const getOverdueItems: Handler = async (ctx, args): Promise<ToolResult> => {
       .lt("created_at", cutoffIso)
       .is("deleted_at", null)
       .order("created_at", { ascending: true })
-      .limit(limit);
+      .limit(scopeWindow(limit));
     if (error) return { success: false, message: error.message };
-    return { success: true, message: `${data?.length || 0} quote(s) ≥30 dias sem fechar.`, data: data || [] };
+    const visible = (await filterVisible(ctx, "quotes", data)).slice(0, limit); // âmbito do utilizador (RLS)
+    return { success: true, message: `${visible.length} quote(s) ≥30 dias sem fechar.`, data: visible };
   }
 
   return { success: false, message: `entity desconhecida: ${entity}` };
@@ -348,6 +387,11 @@ const getTopClients: Handler = async (ctx, args): Promise<ToolResult> => {
   const metric = args?.metric ?? "deals";
   const limit = Math.min(Math.max(Number(args?.limit) || 10, 1), 20);
   const { from, to } = defaultRange(args);
+
+  if (metric === "deals" || metric === "quotes" || metric === "proposals") {
+    const deniedScope = await requireOrgWide(ctx, [metric]);
+    if (deniedScope) return deniedScope;
+  }
 
   let rows: any[] = [];
   let clientCol: "client_id" | "cliente_id" = "client_id";
@@ -439,6 +483,8 @@ const getTeamPerformance: Handler = async (ctx, args): Promise<ToolResult> => {
   if (!organizationId) return { success: false, message: "Organização não definida." };
   const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
   const { from, to } = defaultRange(args);
+  const deniedScope = await requireOrgWide(ctx, ["leads", "deals", "quotes", "proposals"]);
+  if (deniedScope) return deniedScope;
 
   const [{ data: leads }, { data: deals }, { data: quotes }, { data: proposals }, { data: members }] = await Promise.all([
     supabase.from("anew_leads").select("assigned_to")
@@ -509,6 +555,8 @@ const getLeadsReport: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!can(ctx, "leads.view")) return { success: false, message: "Sem permissão para ler leads (leads.view)." };
+  const deniedScope = await requireOrgWide(ctx, ["leads"]);
+  if (deniedScope) return deniedScope;
 
   const limit = Math.min(Math.max(Number(args?.limit) || 10, 1), 50);
   const { from, to } = defaultRange(args);

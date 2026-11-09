@@ -1,6 +1,7 @@
 // Deal tools — extracted verbatim from index.ts.
 
 import { requireWrite } from "../shared/authz.ts";
+import { filterVisible, scopeWindow } from "../shared/scope.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,13 +92,15 @@ const listDeals: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   const limit = args?.limit ?? 10;
-  const { data, error } = await supabase
+  const { data: rawData, error } = await supabase
     .from("deals")
     .select("id, title, value, stage_id, deal_stages(name)")
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .limit(scopeWindow(limit));
   if (error) throw error;
+  // Âmbito do utilizador (RLS) — auditoria Administração F6.
+  const data = (await filterVisible(ctx, "deals", rawData)).slice(0, Number(limit) || 10);
   return { success: true, message: `${data?.length || 0} PP encontrado(s).`, data: data || [] };
 };
 

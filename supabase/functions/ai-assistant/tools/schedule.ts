@@ -2,6 +2,7 @@
 
 import { can, permissionExists, requireWrite } from "../shared/authz.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
+import { filterVisible } from "../shared/scope.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
@@ -256,7 +257,7 @@ const listSchedule: Handler = async (ctx, args): Promise<ToolResult> => {
   const today = new Date().toISOString().split("T")[0];
   const from = args?.from_date || today;
   const to = args?.to_date || from;
-  const { data, error } = await supabase
+  const { data: rawData, error } = await supabase
     .from("schedule_items")
     .select("id, title, start_datetime, end_datetime, status")
     .eq("organization_id", organizationId)
@@ -264,6 +265,7 @@ const listSchedule: Handler = async (ctx, args): Promise<ToolResult> => {
     .lte("start_datetime", `${to}T23:59:59`)
     .order("start_datetime", { ascending: true });
   if (error) throw error;
+  const data = await filterVisible(ctx, "schedule_items", rawData); // âmbito do utilizador (RLS)
   return { success: true, message: `${data?.length || 0} item(ns) na agenda.`, data: data || [] };
 };
 
@@ -741,8 +743,9 @@ const listMyAgenda: Handler = async (ctx, args): Promise<ToolResult> => {
     .order("start_datetime", { ascending: true })
     .limit(200);
   if (args?.status) q = q.eq("status", args.status);
-  const { data, error } = await q;
+  const { data: rawData, error } = await q;
   if (error) throw error;
+  const data = await filterVisible(ctx, "schedule_items", rawData); // âmbito do utilizador (RLS)
   return { success: true, message: `${data?.length || 0} item(ns) na tua agenda.`, data: data || [] };
 };
 
