@@ -1,17 +1,122 @@
 [
  {
+  "categoria": "modulo_canto",
+  "url": "/modelos3d/genericos/modulo_canto.glb",
+  "triangulos": 60,
+  "partes": 5,
+  "bytes": 6748
+ },
+ {
+  "categoria": "modulo_base",
+  "url": "/modelos3d/genericos/modulo_base.glb",
+  "triangulos": 144,
+  "partes": 12,
+  "bytes": 15336
+ },
+ {
+  "categoria": "armario_parede",
+  "url": "/modelos3d/genericos/armario_parede.glb",
+  "triangulos": 84,
+  "partes": 7,
+  "bytes": 9184
+ },
+ {
+  "categoria": "coluna_cozinha",
+  "url": "/modelos3d/genericos/coluna_cozinha.glb",
+  "triangulos": 348,
+  "partes": 15,
+  "bytes": 20396
+ },
+ {
+  "categoria": "frigorifico",
+  "url": "/modelos3d/genericos/frigorifico.glb",
+  "triangulos": 132,
+  "partes": 11,
+  "bytes": 14084
+ },
+ {
+  "categoria": "forno",
+  "url": "/modelos3d/genericos/forno.glb",
+  "triangulos": 276,
+  "partes": 9,
+  "bytes": 12972
+ },
+ {
+  "categoria": "extrator",
+  "url": "/modelos3d/genericos/extrator.glb",
+  "triangulos": 300,
+  "partes": 11,
+  "bytes": 15400
+ },
+ {
+  "categoria": "maquina_loica",
+  "url": "/modelos3d/genericos/maquina_loica.glb",
+  "triangulos": 456,
+  "partes": 10,
+  "bytes": 15528
+ },
+ {
+  "categoria": "fogao",
+  "url": "/modelos3d/genericos/fogao.glb",
+  "triangulos": 1212,
+  "partes": 17,
+  "bytes": 29460
+ },
+ {
+  "categoria": "cama",
+  "url": "/modelos3d/genericos/cama.glb",
+  "triangulos": 924,
+  "partes": 5,
+  "bytes": 12976
+ },
+ {
+  "categoria": "roupeiro",
+  "url": "/modelos3d/genericos/roupeiro.glb",
+  "triangulos": 96,
+  "partes": 8,
+  "bytes": 10404
+ },
+ {
+  "categoria": "secretaria",
+  "url": "/modelos3d/genericos/secretaria.glb",
+  "triangulos": 72,
+  "partes": 6,
+  "bytes": 7964
+ },
+ {
+  "categoria": "sofa",
+  "url": "/modelos3d/genericos/sofa.glb",
+  "triangulos": 1500,
+  "partes": 5,
+  "bytes": 17084
+ },
+ {
+  "categoria": "mesa",
+  "url": "/modelos3d/genericos/mesa.glb",
+  "triangulos": 156,
+  "partes": 6,
+  "bytes": 8632
+ },
+ {
+  "categoria": "prateleira",
+  "url": "/modelos3d/genericos/prateleira.glb",
+  "triangulos": 36,
+  "partes": 3,
+  "bytes": 4316
+ },
+ {
   "categoria": "sanita",
   "url": "/modelos3d/genericos/sanita.glb",
-  "triangulos": 1124,
-  "partes": 6,
-  "bytes": 15820
+  "triangulos": 1508,
+  "partes": 10,
+  "bytes": 23384
  },
  {
   "categoria": "sanita_suspensa",
   "url": "/modelos3d/genericos/sanita_suspensa.glb",
-  "triangulos": 944,
-  "partes": 5,
-  "bytes": 13284
+  "triangulos": 1160,
+  "partes": 9,
+  "bytes": 19516
  },
  {
   "categoria": "bide",
@@ -23,9 +128,9 @@
  {
   "categoria": "lavatorio",
   "url": "/modelos3d/genericos/lavatorio.glb",
-  "triangulos": 932,
-  "partes": 4,
-  "bytes": 12068
+  "triangulos": 1468,
+  "partes": 6,
+  "bytes": 18316
  },
  {
   "categoria": "movel_lavatorio",
@@ -37,23 +142,23 @@
  {
   "categoria": "banheira",
   "url": "/modelos3d/genericos/banheira.glb",
-  "triangulos": 888,
-  "partes": 5,
-  "bytes": 12884
+  "triangulos": 1488,
+  "partes": 7,
+  "bytes": 19460
  },
  {
   "categoria": "base_duche",
   "url": "/modelos3d/genericos/base_duche.glb",
-  "triangulos": 408,
-  "partes": 3,
-  "bytes": 7060
+  "triangulos": 708,
+  "partes": 4,
+  "bytes": 10348
  },
  {
   "categoria": "resguardo",
   "url": "/modelos3d/genericos/resguardo.glb",
-  "triangulos": 156,
-  "partes": 6,
-  "bytes": 8644
+  "triangulos": 180,
+  "partes": 8,
+  "bytes": 11096
  },
  {
   "categoria": "espelho",
@@ -72,16 +177,16 @@
  {
   "categoria": "toalheiro",
   "url": "/modelos3d/genericos/toalheiro.glb",
-  "triangulos": 1452,
-  "partes": 13,
-  "bytes": 26568
+  "triangulos": 1932,
+  "partes": 18,
+  "bytes": 36024
  },
  {
   "categoria": "torneira",
   "url": "/modelos3d/genericos/torneira.glb",
-  "triangulos": 396,
-  "partes": 5,
-  "bytes": 9400
+  "triangulos": 932,
+  "partes": 7,
+  "bytes": 15644
  },
  {
   "categoria": "coluna_duche",
