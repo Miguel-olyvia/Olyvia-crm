@@ -60,80 +60,94 @@ export function TrocarTecnico({ t, P, S, negocio, escolhas, mudar }: { t: Tarefa
 export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarInicio }: PropsEquipa) {
   const [agenda, setAgenda] = useState<string | null>(null);
   const [criar, setCriar] = useState(false);
-  const [agendas, setAgendas] = useState(false);
+  const [agendas, setAgendas] = useState(true);
   const [guardadas, setGuardadas] = useState<EquipaGuardada[]>(lerEquipas);
   const equipa = escolhas.equipa ?? [];
 
-  const alertas = P.tarefas.filter((t) => t.ocupado || !t.tec);
-  // a sugestão de dia: o primeiro início, nas 6 semanas seguintes, em que ninguém fica ocupado
+  const conflitos = P.tarefas.filter((t) => t.tec && t.ocupado);
+  const semNinguem = P.tarefas.filter((t) => !t.tec);
+  const oficiosSem = [...new Set(semNinguem.map((t) => t.oficio))];
+  // a sugestão de dia: o primeiro início, nas 8 semanas seguintes, em que nenhum técnico fica ocupado (os ofícios sem ninguém no RH não
+  // dependem do dia, por isso não contam)
   const diaLivre = useMemo(() => {
-    if (!alertas.length || !calcular || !P.inicio) return null;
-    for (const d of diasDaObra(P.inicio, 31).slice(1)) {
+    if (!conflitos.length || !calcular || !P.inicio) return null;
+    for (const d of diasDaObra(P.inicio, 41).slice(1)) {
       const Q = calcular(isoDia(d));
       if (Q.tarefas.length && !Q.tarefas.some((t) => t.ocupado)) return { iso: isoDia(d), Q };
     }
     return null;
-  }, [alertas.length, calcular, P.inicio]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [conflitos.length, calcular, P.inicio]);
 
   const passar = (t: TarefaDatas, id: string) => mudar?.({ ...escolhas, tecnicos: { ...(escolhas.tecnicos ?? {}), [t.chave]: id } });
+  const pessoas = P.equipa.map((x) => {
+    const ts = P.tarefas.filter((t) => t.tec === x.id);
+    return { ...x, ts, conflitos: ts.filter((t) => t.ocupado) };
+  });
 
   return (
-    <section aria-label="A equipa da obra" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-primary" aria-hidden="true" />A equipa{equipa.length ? ` · equipa da obra: ${equipa.map((x) => primeiro(nomeTec(x))).join(", ")}` : ""}</h4>
-        <span className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" className="min-h-10" aria-expanded={agendas} onClick={() => setAgendas((x) => !x)}><CalendarDays className="mr-1 h-4 w-4" aria-hidden="true" />As agendas</Button>
-          {mudar && <Button type="button" variant="outline" size="sm" className="min-h-10" aria-expanded={criar} onClick={() => setCriar((x) => !x)}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />{equipa.length ? "Mudar a equipa" : "Criar equipa"}</Button>}
-        </span>
+    <section aria-label="A equipa da obra" className="space-y-4">
+      {/* 1. como está: tudo livre, ou o que falta resolver, e a sugestão de dia */}
+      <div className={cn("rounded-xl border p-4", conflitos.length ? "border-warning/50 bg-warning/10" : "border-success/40 bg-success/10")}>
+        {conflitos.length ? (
+          <p className="flex items-start gap-2 text-[15px]"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning-foreground" aria-hidden="true" />
+            <span><b className="font-semibold">{conflitos.length} {conflitos.length === 1 ? "tarefa tem" : "tarefas têm"} o técnico ocupado</b> nestes dias
+              ({[...new Set(conflitos.map((t) => t.tecNome.split(" ")[0]))].join(", ")}).</span></p>
+        ) : (
+          <p className="flex items-start gap-2 text-[15px]"><Check className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden="true" />
+            <span><b className="font-semibold">A equipa está livre</b>{P.inicio && P.fim ? ` de ${dataCurta(P.inicio)} a ${dataCurta(P.fim)}` : ""}.</span></p>
+        )}
+        {diaLivre && mudarInicio && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-card p-3">
+            <Lightbulb className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <p className="min-w-0 flex-1 text-[15px]">Sugestão: <b className="font-semibold">começar a {dataCurta(deIso(diaLivre.iso))}</b>. Ficam todos livres e a obra fica pronta a {diaLivre.Q.fim ? dataCurta(diaLivre.Q.fim) : ""}.</p>
+            <Button type="button" className="min-h-11" onClick={() => mudarInicio(diaLivre.iso)}>Começar nesse dia</Button>
+          </div>
+        )}
+        {conflitos.length > 0 && !diaLivre && calcular && <p className="mt-2 text-sm text-muted-foreground">Nas próximas 8 semanas não há um dia em que fiquem todos livres: troque o técnico das tarefas abaixo.</p>}
+        {oficiosSem.length > 0 && (
+          <p className="mt-2 text-sm text-muted-foreground">Sem ninguém no RH para {oficiosSem.join(", ")} ({semNinguem.length} {semNinguem.length === 1 ? "tarefa" : "tarefas"}): escolha alguém de outro ofício na tarefa, ou fica para as Operações.</p>
+        )}
       </div>
 
-      {P.equipa.length ? (
-        <ul className="flex flex-wrap gap-2">
-          {P.equipa.map((x) => {
-            const ocupado = P.tarefas.some((t) => t.tec === x.id && t.ocupado);
-            return (
-              <li key={x.id}>
-                <button type="button" aria-expanded={agenda === x.id} onClick={() => setAgenda(agenda === x.id ? null : x.id)}
-                  className={cn("inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors", agenda === x.id ? "border-primary bg-primary/[0.06]" : "border-border bg-card hover:border-foreground/40")}>
-                  {ocupado && <AlertTriangle className="h-3.5 w-3.5 text-warning-foreground" aria-label="Ocupado em alguns dias" />}
-                  <b className="font-medium">{x.n}</b><span className="text-muted-foreground">· {x.oficio}</span>
-                  <CalendarDays className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-                </button>
-              </li>
-            );
-          })}
+      {/* 2. as pessoas: o que cada uma faz e quando; tocar abre a agenda */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-primary" aria-hidden="true" />Quem vem{equipa.length ? " · equipa fixa desta obra" : ""}</h4>
+        <span className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" className="min-h-10" aria-expanded={agendas} onClick={() => setAgendas((x) => !x)}><CalendarDays className="mr-1 h-4 w-4" aria-hidden="true" />{agendas ? "Esconder as agendas" : "Ver as agendas"}</Button>
+          {mudar && <Button type="button" variant="outline" size="sm" className="min-h-10" aria-expanded={criar} onClick={() => setCriar((x) => !x)}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />{equipa.length ? "Mudar a equipa" : "Escolher a equipa"}</Button>}
+        </span>
+      </div>
+      {pessoas.length ? (
+        <ul className="divide-y divide-border rounded-xl border border-border">
+          {pessoas.map((x) => (
+            <li key={x.id} className="p-3">
+              <button type="button" aria-expanded={agenda === x.id} onClick={() => setAgenda(agenda === x.id ? null : x.id)} className="flex w-full items-start justify-between gap-3 text-left">
+                <span className="min-w-0">
+                  <b className="font-semibold">{x.n}</b> <span className="text-muted-foreground">· {x.oficio}</span>
+                  <span className="block text-sm text-muted-foreground">{x.ts.map((t) => `${t.nome} (${dataCurta(t.inicio)}${t.dur > 1 ? `–${dataCurta(t.fim)}` : ""})`).join(" · ")}</span>
+                </span>
+                <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", x.conflitos.length ? "bg-warning/20 text-warning-foreground" : "bg-success/15 text-success")}>
+                  {x.conflitos.length ? `ocupado em ${x.conflitos.length} ${x.conflitos.length === 1 ? "tarefa" : "tarefas"}` : "livre"}
+                </span>
+              </button>
+              {x.conflitos.map((t) => {
+                const livres = candidatos(t, P, S, negocio).filter((c) => c.doOficio && !c.motivo && c.id !== t.tec).slice(0, 3);
+                return (
+                  <div key={t.chave} className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm">
+                    <span className="min-w-0 flex-1">{t.nome}: {primeiro(x.n)} está {t.ocupado}.</span>
+                    {mudar && livres.map((c) => <button key={c.id} type="button" className="min-h-9 rounded-full border border-primary/40 bg-card px-3 text-primary hover:bg-primary/[0.06]" onClick={() => passar(t, c.id)}>Passar para {c.n}</button>)}
+                    {mudar && !livres.length && <span className="text-muted-foreground">Ninguém do ofício livre: mude o dia de início.</span>}
+                  </div>
+                );
+              })}
+              {agenda === x.id && <div className="mt-3"><AgendaTecnico id={x.id} P={P} S={S} negocio={negocio} fechar={() => setAgenda(null)} /></div>}
+            </li>
+          ))}
         </ul>
       ) : <p className="text-sm text-muted-foreground">O RH ainda não tem técnicos dos ofícios desta obra.</p>}
 
-      {agendas && <Disponibilidade P={P} S={S} negocio={negocio} equipa={equipa} mudarInicio={mudarInicio} />}
-      {agenda && <AgendaTecnico id={agenda} P={P} S={S} negocio={negocio} fechar={() => setAgenda(null)} />}
-
-      {/* os alertas, com as sugestões */}
-      {alertas.length > 0 && (
-        <ul className="space-y-2" aria-label="Alertas da equipa">
-          {alertas.map((t) => {
-            const livres = candidatos(t, P, S, negocio).filter((x) => x.doOficio && !x.motivo && x.id !== t.tec).slice(0, 3);
-            return (
-              <li key={t.chave} className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
-                <p className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" aria-hidden="true" />
-                  <span><b className="font-medium">{t.nome}</b> ({dataCurta(t.inicio)}{t.dur > 1 ? ` a ${dataCurta(t.fim)}` : ""}): {t.tec ? `${t.tecNome} está ${t.ocupado}.` : `o RH não tem ninguém de ${t.oficio}.`}</span></p>
-                {mudar && livres.length > 0 && (
-                  <p className="mt-2 flex flex-wrap items-center gap-2"><Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
-                    {livres.map((x) => <button key={x.id} type="button" className="min-h-9 rounded-full border border-primary/40 bg-card px-3 text-primary hover:bg-primary/[0.06]" onClick={() => passar(t, x.id)}>Passar para {x.n} (livre)</button>)}
-                  </p>
-                )}
-              </li>
-            );
-          })}
-          {diaLivre && mudarInicio && (
-            <li className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/[0.04] p-3 text-sm">
-              <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
-              <span>Sugestão: a começar a <b className="font-medium">{dataCurta(deIso(diaLivre.iso))}</b> estão todos livres (pronta a {diaLivre.Q.fim ? dataCurta(diaLivre.Q.fim) : ""}).</span>
-              <button type="button" className="min-h-9 rounded-full bg-primary px-3 font-medium text-primary-foreground" onClick={() => mudarInicio(diaLivre.iso)}>Começar nesse dia</button>
-            </li>
-          )}
-        </ul>
-      )}
+      {/* 3. as agendas lado a lado, nos dias do Gantt */}
+      {agendas && <Disponibilidade P={P} S={S} negocio={negocio} equipa={equipa} />}
 
       {criar && mudar && (
         <CriarEquipa P={P} S={S} negocio={negocio} atual={equipa} guardadas={guardadas}
@@ -258,48 +272,48 @@ function CriarEquipa({ P, S, negocio, atual, guardadas, usar, guardar, apagar, f
 }
 
 /**
- * As agendas lado a lado: os técnicos dos ofícios da obra (a equipa primeiro) nas próximas 6 semanas úteis, dia a dia: esta obra, outra
- * obra, ausente (RH) ou livre. Em cima, o primeiro dia em que cada ofício da obra tem alguém livre e, com `mudarInicio`, começar aí.
+ * As agendas lado a lado, nos mesmos dias do Gantt: do início da obra até duas semanas depois do fim (só dias úteis). Os técnicos dos
+ * ofícios da obra (a equipa fixa primeiro), dia a dia: esta obra, outra obra, as duas (conflito), ausente (RH) ou livre.
  */
-function Disponibilidade({ P, S, negocio, equipa, mudarInicio }: { P: PlanoDatas; S: Estado; negocio?: number; equipa: string[]; mudarInicio?: (iso: string) => void }) {
-  const dias = useMemo(() => diasDaObra(new Date(), 30), []);
+function Disponibilidade({ P, S, negocio, equipa }: { P: PlanoDatas; S: Estado; negocio?: number; equipa: string[] }) {
+  const dias = useMemo(() => (P.inicio ? diasDaObra(P.inicio, Math.max(1, P.dias) + 10) : []), [P.inicio, P.dias]);
   const ocup = useMemo(() => ocupacaoDosTecnicos(S, negocio), [S, negocio]);
   const oficios = [...new Set(P.tarefas.map((t) => t.oficio))];
-  const tecs = TECS.filter((x) => oficios.includes(x.sk) || equipa.includes(x.id) || P.equipa.some((y) => y.id === x.id))
-    .sort((a, b) => Number(!equipa.includes(a.id)) - Number(!equipa.includes(b.id)) || a.sk.localeCompare(b.sk, "pt") || a.n.localeCompare(b.n, "pt"));
+  const tecs = TECS.filter((x) => P.equipa.some((y) => y.id === x.id) || equipa.includes(x.id) || oficios.includes(x.sk))
+    .sort((a, b) => Number(!P.equipa.some((y) => y.id === a.id)) - Number(!P.equipa.some((y) => y.id === b.id)) || a.sk.localeCompare(b.sk, "pt") || a.n.localeCompare(b.n, "pt"));
   const nestaObra = new Map<string, string[]>();
-  if (P.inicio) {
-    const ds = diasDaObra(P.inicio, Math.max(1, P.dias));
-    for (const t of P.tarefas) if (t.tec) for (let k = t.dia; k < t.dia + t.dur; k++) if (ds[k]) {
-      const c = `${t.tec}|${isoDia(ds[k])}`;
-      nestaObra.set(c, [...(nestaObra.get(c) ?? []), t.nome]);
-    }
+  for (const t of P.tarefas) if (t.tec) for (let k = t.dia; k < t.dia + t.dur; k++) if (dias[k]) {
+    const c = `${t.tec}|${isoDia(dias[k])}`;
+    nestaObra.set(c, [...(nestaObra.get(c) ?? []), t.nome]);
   }
-  const estado = (id: string, iso: string): "esta" | "outra" | "ausente" | "livre" => {
+  type E = "esta" | "conflito" | "outra" | "ausente" | "livre";
+  const estado = (id: string, iso: string): E => {
     const tec = TECS.find((x) => x.id === id);
-    if (ausenteNoRh(id, iso) || tec?.feriasDatas?.includes(iso)) return "ausente";
-    if (ocup.get(id)?.has(iso)) return "outra";
-    if (nestaObra.has(`${id}|${iso}`)) return "esta";
+    const aqui = nestaObra.has(`${id}|${iso}`), fora = !!ocup.get(id)?.has(iso), aus = ausenteNoRh(id, iso) || !!tec?.feriasDatas?.includes(iso);
+    if (aqui && (fora || aus)) return "conflito";
+    if (aqui) return "esta";
+    if (aus) return "ausente";
+    if (fora) return "outra";
     return "livre";
   };
-  const primeiroLivre = dias.find((d) => oficios.every((o) => tecs.some((x) => x.sk === o && (estado(x.id, isoDia(d)) === "livre" || estado(x.id, isoDia(d)) === "esta"))));
-  const COR = { esta: "bg-primary", outra: "bg-warning", ausente: "bg-destructive/70", livre: "bg-success/25" } as const;
+  const COR: Record<E, string> = { esta: "bg-primary", conflito: "bg-destructive", outra: "bg-warning/70", ausente: "bg-muted-foreground/40", livre: "bg-success/20" };
+  const TXT: Record<E, string> = { esta: "Esta obra", conflito: "Conflito: esta obra e outra (ou ausente)", outra: "Noutra obra", ausente: "Ausente (RH)", livre: "Livre" };
   const LETRA = ["d", "s", "t", "q", "q", "s", "s"];
+  const naObra = (k: number) => k < P.dias;
   return (
     <div className="space-y-2 rounded-xl border border-border bg-card p-3">
-      <p className="text-sm font-semibold">As agendas da equipa · próximas 6 semanas</p>
-      {primeiroLivre && (
-        <p className="flex flex-wrap items-center gap-2 text-sm"><Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
-          A partir de <b className="font-medium">{dataCurta(primeiroLivre)}</b> há alguém livre em cada ofício da obra.
-          {mudarInicio && P.inicio && isoDia(primeiroLivre) !== isoDia(P.inicio) && <button type="button" className="min-h-9 rounded-full border border-primary/40 px-3 text-primary hover:bg-primary/[0.06]" onClick={() => mudarInicio(isoDia(primeiroLivre))}>Começar nesse dia</button>}
-        </p>
-      )}
+      <p className="text-sm font-semibold">As agendas, nos dias da obra <span className="font-normal text-muted-foreground">· a faixa de cima marca os dias da obra, como no Gantt</span></p>
       <div className="overflow-x-auto">
         <table className="min-w-max border-separate border-spacing-0.5 text-xs">
           <thead>
             <tr>
               <th scope="col" className="sticky left-0 z-10 bg-card pr-2 text-left font-medium">Técnico</th>
-              {dias.map((d) => <th key={isoDia(d)} scope="col" className={cn("w-7 text-center font-normal tabular-nums text-muted-foreground", d.getDay() === 1 && "border-l-2 border-l-foreground/20")}>{LETRA[d.getDay()]}<span className="block text-foreground">{d.getDate()}</span></th>)}
+              {dias.map((d, k) => (
+                <th key={isoDia(d)} scope="col" className={cn("w-8 text-center font-normal tabular-nums", d.getDay() === 1 && k > 0 && "border-l-2 border-l-foreground/20")}>
+                  <span className={cn("mb-0.5 block h-1.5 rounded-full", naObra(k) ? "bg-primary/60" : "bg-transparent")} aria-hidden="true" />
+                  <span className="text-muted-foreground">{LETRA[d.getDay()]}</span><span className="block text-foreground">{d.getDate()}</span>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -308,10 +322,10 @@ function Disponibilidade({ P, S, negocio, equipa, mudarInicio }: { P: PlanoDatas
                 <th scope="row" className="sticky left-0 z-10 max-w-[11rem] truncate bg-card pr-2 text-left font-normal">
                   <b className="font-medium">{x.n}</b>{equipa.includes(x.id) ? " ★" : ""}<span className="block text-muted-foreground">{x.sk}</span>
                 </th>
-                {dias.map((d) => {
+                {dias.map((d, k) => {
                   const iso = isoDia(d), e = estado(x.id, iso);
-                  const txt = e === "esta" ? `Esta obra: ${(nestaObra.get(`${x.id}|${iso}`) ?? []).join(", ")}` : e === "outra" ? "Noutra obra" : e === "ausente" ? "Ausente (RH)" : "Livre";
-                  return <td key={iso} title={`${dataCurta(d)} · ${txt}`} className={cn("h-7 w-7 rounded", COR[e], d.getDay() === 1 && "border-l-2 border-l-foreground/20")}><span className="sr-only">{dataCurta(d)}: {txt}</span></td>;
+                  const txt = e === "esta" || e === "conflito" ? `${TXT[e]}: ${(nestaObra.get(`${x.id}|${iso}`) ?? []).join(", ")}` : TXT[e];
+                  return <td key={iso} title={`${dataCurta(d)} · ${txt}`} className={cn("h-8 w-8 rounded", COR[e], d.getDay() === 1 && k > 0 && "border-l-2 border-l-foreground/20")}><span className="sr-only">{dataCurta(d)}: {txt}</span></td>;
                 })}
               </tr>
             ))}
@@ -319,11 +333,8 @@ function Disponibilidade({ P, S, negocio, equipa, mudarInicio }: { P: PlanoDatas
         </table>
       </div>
       <p className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1"><span className="h-3 w-3 rounded bg-primary" />Esta obra</span>
-        <span className="flex items-center gap-1"><span className="h-3 w-3 rounded bg-warning" />Noutra obra</span>
-        <span className="flex items-center gap-1"><span className="h-3 w-3 rounded bg-destructive/70" />Ausente (RH)</span>
-        <span className="flex items-center gap-1"><span className="h-3 w-3 rounded bg-success/25" />Livre</span>
-        {equipa.length > 0 && <span>★ equipa da obra</span>}
+        {(Object.keys(COR) as E[]).map((e) => <span key={e} className="flex items-center gap-1"><span className={cn("h-3 w-3 rounded", COR[e])} />{e === "conflito" ? "Conflito" : TXT[e]}</span>)}
+        {equipa.length > 0 && <span>★ equipa fixa</span>}
       </p>
     </div>
   );

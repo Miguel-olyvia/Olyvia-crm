@@ -8,9 +8,9 @@
 // Cores: uma rampa do acento, da fase 1 (clara) à 4 (escura); o texto nunca vai em cima das barras (contraste).
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, Minus, Plus, RotateCcw, Wallet } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, Minus, Plus, RotateCcw, Wallet, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { eur, nfmt, pct, type Negocio } from "./motor";
+import { eur, nfmt, pct, r2, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { iconeOficio } from "./LinhasOrcamento";
 import { HORAS_DIA, TAREFA_DEMOLICAO, diasDeHoras, prazoProposta, type TarefaPrevista } from "./ganttOrcamento";
@@ -43,6 +43,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   const [aberta, setAberta] = useState<string | null>(null);
   const [arrasto, setArrasto] = useState<string | null>(null);
   const [outra, setOutra] = useState(false);
+  const [novaTarefa, setNovaTarefa] = useState(false);
   // 27/10: as fases do Gantt abrem e fecham (com muitas tarefas começam fechadas: vê-se a obra toda em 4 linhas); no computador,
   // a escala em semanas (a obra cabe na largura) ou em dias (uma coluna por dia, rola-se para o lado)
   const [abertas, setAbertas] = useState<Record<number, boolean>>({});
@@ -238,6 +239,12 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[15px] font-medium">Tarefas por dia <span className="font-normal text-muted-foreground">· {P.tarefas.length} tarefas · {nomeMes(calendario[0])}{nomeMes(calendario[0]) !== nomeMes(fimData) ? ` a ${nomeMes(fimData)}` : ""}</span></p>
           <div className="flex flex-wrap items-center gap-2">
+            {!fechado && (
+              <button type="button" aria-expanded={novaTarefa} onClick={() => setNovaTarefa((x) => !x)}
+                className="inline-flex min-h-9 items-center gap-1 rounded-full border border-primary/40 px-3 text-sm font-medium text-primary hover:bg-primary/[0.06]">
+                <Plus className="h-4 w-4" aria-hidden="true" />Adicionar tarefa
+              </button>
+            )}
             <button type="button" onClick={() => setAbertas(Object.fromEntries(P.fases.map((f) => [f.n, !todasAbertas])))}
               className="inline-flex min-h-9 items-center gap-1 rounded-full px-2 text-sm font-medium text-primary hover:bg-primary/[0.06]">
               <ChevronDown className={cn("h-4 w-4 transition-transform", todasAbertas && "rotate-180")} aria-hidden="true" />{todasAbertas ? "Fechar as fases" : "Abrir as fases"}
@@ -254,6 +261,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
             )}
           </div>
         </div>
+        {novaTarefa && !fechado && <AdicionarTarefa ctx={ctx} d={d} fechar={() => setNovaTarefa(false)} />}
         <div ref={caixa} className="overflow-x-auto rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]">
           <div style={tabela ? { width: LW + PAD + gradeW + PAD } : { width: gradeW + 2 * PAD, paddingLeft: PAD, paddingRight: PAD }} className="relative">
             {/* os dias (só os úteis); em semanas, a data das segundas-feiras */}
@@ -664,5 +672,77 @@ function EquipaNoOrcamento({ ctx, d, fechado, PD }: { ctx: Pick<Ctx, "S" | "A" |
         ))}
       </ul>
     </section>
+  );
+}
+
+/**
+ * 9/11 (Rúben: «permitir adicionar tarefas»): uma tarefa nova no plano é um serviço do Catálogo com a quantidade. Entra nas necessidades
+ * (A.extra) e o orçamento refaz-se (A.refazerOrcamento): a tarefa aparece na sua fase, com o ofício, as horas e os materiais da receita,
+ * o técnico livre e o preço no orçamento. Um serviço que já está no orçamento soma a quantidade.
+ */
+function AdicionarTarefa({ ctx, d, fechar }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Negocio; fechar: () => void }) {
+  const { S, A, run } = ctx;
+  const [procura, setProcura] = useState("");
+  const [sid, setSid] = useState<string | null>(null);
+  const [q, setQ] = useState("1");
+  const limpo = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const todos = useMemo(() => Object.entries(S.svc).map(([id, s]) => ({ id, n: s.n, un: s.un, preco: s.preco, h: s.h, perfil: s.perfil }))
+    .sort((a, b) => a.n.localeCompare(b.n, "pt")), [S.svc]);
+  const termo = limpo(procura.trim());
+  const lista = termo.length < 2 ? [] : todos.filter((x) => limpo(x.n).includes(termo)).slice(0, 8);
+  const sv = sid ? S.svc[sid] : undefined;
+  const n = Number(q.replace(",", "."));
+  const passos = sid && n > 0 ? passosDaTarefa(S, sid, n, "", false) : [];
+  const ja = sid ? d.visita.extra[sid] || 0 : 0;
+  const juntar = () => {
+    if (!sid || !(n > 0)) return;
+    run(() => { A.extra(d.id, sid, r2(ja + n)); A.refazerOrcamento(d.id); });
+    fechar();
+  };
+  return (
+    <div className="space-y-3 rounded-2xl border border-primary/30 bg-primary/[0.03] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[15px] font-semibold">Adicionar uma tarefa</p>
+        <button type="button" className="grid h-9 w-9 place-items-center rounded-full hover:bg-muted" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" /></button>
+      </div>
+      {!sv ? <>
+        <label className="grid gap-1.5 text-sm font-medium">O serviço do Catálogo
+          <input type="search" autoFocus value={procura} onChange={(e) => setProcura(e.target.value)} placeholder="Ex.: pintura, ponto de luz, remoção"
+            className="h-11 rounded-lg border border-input bg-background px-3 text-[15px]" />
+        </label>
+        {lista.length > 0 && (
+          <ul className="space-y-1">
+            {lista.map((x) => (
+              <li key={x.id}>
+                <button type="button" className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-[15px] hover:bg-accent"
+                  onClick={() => { setSid(x.id); setQ("1"); }}>
+                  <span className="min-w-0"><span className="block truncate">{x.n}</span><span className="block text-xs text-muted-foreground">{x.perfil} · {nfmt(x.h)} h/{x.un}</span></span>
+                  <span className="shrink-0 text-sm text-muted-foreground">{eur(x.preco)} €/{x.un}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {termo.length >= 2 && !lista.length && <p className="text-sm text-muted-foreground">Nenhum serviço do Catálogo com esse nome.</p>}
+      </> : <>
+        <p className="text-[15px]"><b className="font-medium">{sv.n}</b> <span className="text-muted-foreground">· {sv.perfil} · {eur(sv.preco)} €/{sv.un}</span>
+          <button type="button" className="ml-2 text-sm font-medium text-primary" onClick={() => setSid(null)}>Outro serviço</button></p>
+        <label className="grid max-w-[12rem] gap-1 text-sm font-medium">Quantidade ({sv.un})
+          <input type="number" min={0} step={0.5} value={q} onChange={(e) => setQ(e.target.value)} className="h-11 rounded-lg border border-input bg-background px-3 text-[15px]" />
+        </label>
+        {n > 0 && (
+          <p className="text-sm text-muted-foreground">{nfmt(r2(sv.h * n))} h ({dias(diasDeHoras(sv.h * n))}) · {eur(r2(sv.preco * n))} € sem IVA no orçamento{ja ? ` · já tinha ${nfmt(ja)} ${sv.un}: fica com ${nfmt(r2(ja + n))}` : ""}</p>
+        )}
+        {passos.length > 0 && (
+          <ol className="space-y-1 text-sm">
+            {passos.map((x, k) => <li key={k} className="flex justify-between gap-3 rounded-lg bg-muted/50 px-3 py-1.5"><span>{k + 1}. {x.n} · {x.oficio}</span><span className="tabular-nums text-muted-foreground">{nfmt(x.h)} h</span></li>)}
+          </ol>
+        )}
+        <button type="button" disabled={!(n > 0)} onClick={juntar}
+          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary px-5 text-[15px] font-medium text-primary-foreground disabled:opacity-50">
+          <Plus className="h-4 w-4" aria-hidden="true" />Juntar ao plano e ao orçamento
+        </button>
+      </>}
+    </div>
   );
 }
