@@ -2,7 +2,7 @@
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -45,6 +45,7 @@ import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { SEM_PERM, permEmFaltaDoPasso } from "./permissoes";
+import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -493,6 +494,8 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   const idSemPerm = useId();
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
   const falta = meu && p.btn ? permEmFaltaDoPasso(S, p.act) : null;
+  // 9/11: o super admin, numa base de teste, age pelo cliente (aceitar a proposta, assinar o contrato)
+  const teste = useModoTeste();
   // 04/11/2026: enviar a proposta / o contrato ao portal pede também a permissão real de quem está ligado (permPortalPasso.tsx)
   const portal = usePermPortalDoPasso(p.act, meu && !!p.btn && !falta);
   if (falta) return (
@@ -520,7 +523,12 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
       </div>
     );
   // 27/10 (Rúben): sem o "Simular o cliente": quem aceita, recusa e assina é o cliente, no portal (o link da proposta)
-  if (p.sim) return <span className="text-sm text-muted-foreground">À espera do cliente no portal</span>;
+  if (p.sim) return (
+    <div className="grid justify-items-start gap-2 sm:justify-items-end">
+      <span className="text-sm text-muted-foreground">À espera do cliente no portal</span>
+      {teste && (p.sim === "aceitar" || p.sim === "assinar") && <BotaoTesteCliente d={d} acao={p.sim} tamanho={tamanho} />}
+    </div>
+  );
   if (p.wait && p.who === "direcao") return <Button variant="outline" size={tamanho} onClick={go(() => A.role("direcao"))}>Mudar para Direção</Button>;
   return null;
 }
@@ -766,6 +774,19 @@ function ObraResumo({ S, A, go, d }: Ctx & { d: Negocio }) {
 }
 
 /** 21/10: o passo Contrato antes de o cliente aceitar a proposta: fechado, com o porquê e o estado da proposta. */
+/** 9/11: o botão do modo de teste (só o super admin, numa base de teste): o que o cliente faz no portal, pelo mesmo caminho. */
+export function BotaoTesteCliente({ d, acao, tamanho = "default" }: { d: Negocio; acao: "aceitar" | "assinar"; tamanho?: "lg" | "default" }) {
+  const teste = useModoTeste();
+  const [aFazer, setAFazer] = useState(false);
+  if (!teste) return null;
+  const fazerTeste = () => { setAFazer(true); void (acao === "aceitar" ? teste.aceitarProposta(d) : teste.assinarContrato(d)).finally(() => setAFazer(false)); };
+  return (
+    <Button type="button" variant="outline" size={tamanho} className="border-dashed border-amber-500 text-amber-800 hover:bg-amber-50" disabled={aFazer} onClick={fazerTeste}>
+      <FlaskConical className="mr-2 h-4 w-4" aria-hidden="true" />{aFazer ? "A fazer pelo cliente…" : acao === "aceitar" ? "Aceitar a proposta pelo cliente (teste)" : "Assinar o contrato pelo cliente (teste)"}
+    </Button>
+  );
+}
+
 function ContratoBloqueado({ d }: { d: Negocio }) {
   const o = d.orc!;
   const estado = o.pedidoCliente ? `${d.nome.split(" ")[0]} pediu alterações: faça a versão nova e envie-a de novo.`
@@ -776,6 +797,7 @@ function ContratoBloqueado({ d }: { d: Negocio }) {
       <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground" aria-hidden="true"><Lock className="h-5 w-5" /></span>
       <p className="mt-3 text-lg font-semibold">O contrato abre quando o cliente aceitar a proposta</p>
       <p className="mx-auto mt-1 max-w-md text-[15px] text-muted-foreground">{estado}</p>
+      {o.enviada && !o.pedidoCliente && <div className="mt-4 flex justify-center"><BotaoTesteCliente d={d} acao="aceitar" /></div>}
     </div>
   );
 }

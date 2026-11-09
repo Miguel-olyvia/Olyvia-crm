@@ -72,8 +72,58 @@ serve(async (req) => {
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
-    const { action, params: _params } = parsedBody.data;
-    const params = (_params ?? body) as Record<string, any>;
+    let { action } = parsedBody.data;
+    const { params: _params } = parsedBody.data;
+    let params = (_params ?? body) as Record<string, any>;
+
+    // ── 9/11 MODO DE TESTE (migração 20270110300000) ──
+    // O super admin da organização (ou o admin do sistema) faz, num negócio de teste, o que o cliente faz no portal: aceitar a
+    // proposta (sign_proposal) e assinar o contrato (sign_contract). Só numa base com o modo de teste ligado (app_modo_teste, desligado
+    // por omissão e nunca em produção). Age como o utilizador do portal desse documento, pelo mesmo caminho do portal (o contrato
+    // criado, as notificações, o estado do negócio); só o código por SMS não se pede. A assinatura fica «MODO_TESTE:<quem>».
+    let simulado = false;
+    if (action === "simular_cliente") {
+      const acao = String(params.acao ?? "");
+      const coluna = acao === "sign_proposal" ? "proposal_id" : acao === "sign_contract" ? "contract_id" : null;
+      const docId = coluna ? String(params[coluna] ?? "") : "";
+      if (!coluna || !docId) {
+        return new Response(JSON.stringify({ error: "Invalid request", message: "acao (sign_proposal | sign_contract) e o documento são precisos." }), { status: 400, headers: corsHeaders });
+      }
+      const { data: ligado } = await supabase.rpc("fn_modo_teste");
+      if (ligado !== true) {
+        return new Response(JSON.stringify({ error: "modo_teste_desligado", message: "O modo de teste não está ligado nesta base." }), { status: 403, headers: corsHeaders });
+      }
+      const { data: doc } = await supabase.from(coluna === "proposal_id" ? "proposals" : "client_contracts")
+        .select("organization_id, entity_id").eq("id", docId).maybeSingle();
+      if (!doc) return new Response(JSON.stringify({ error: "not_found", message: "Documento não encontrado." }), { status: 404, headers: corsHeaders });
+      const { data: admin } = await supabase.rpc("fn_super_admin_de", { p_auth: user.id, p_org: (doc as any).organization_id });
+      if (admin !== true) {
+        return new Response(JSON.stringify({ error: "Forbidden", message: "Só o super admin da organização pode agir pelo cliente (teste)." }), { status: 403, headers: corsHeaders });
+      }
+      // o utilizador do portal do cliente deste documento (a linha do documento, ou a do mesmo cliente nesta organização)
+      let { data: pu } = await supabase.from("client_portal_users").select("auth_user_id")
+        .eq(coluna, docId).not("auth_user_id", "is", null).limit(1).maybeSingle();
+      if (!pu && (doc as any).entity_id) {
+        ({ data: pu } = await supabase.from("client_portal_users").select("auth_user_id")
+          .eq("entity_id", (doc as any).entity_id).eq("organization_id", (doc as any).organization_id).not("auth_user_id", "is", null).limit(1).maybeSingle());
+      }
+      if (!pu) {
+        return new Response(JSON.stringify({ error: "sem_portal", message: "O cliente ainda não tem acesso ao portal: envie primeiro o documento." }), { status: 409, headers: corsHeaders });
+      }
+      const quem = user.email || user.id;
+      const { data: cliente } = await supabase.auth.admin.getUserById((pu as any).auth_user_id);
+      user = cliente?.user ?? { id: (pu as any).auth_user_id, user_metadata: {} };
+      action = acao;
+      params = { ...params, signature_image: `MODO_TESTE:${quem}` };
+      // aceitar a proposta: o orçamento enviado mais recente, como o cliente o escolheria no portal
+      if (acao === "sign_proposal" && !Array.isArray(params.selected_quote_ids)) {
+        const { data: qs } = await supabase.from("quotes").select("id").eq("proposal_id", docId).eq("estado", "enviado")
+          .order("created_at", { ascending: false }).limit(1);
+        params.selected_quote_ids = (qs ?? []).map((q: any) => q.id);
+      }
+      simulado = true;
+      console.log(`[modo_teste] ${acao} ${docId} por ${quem}`);
+    }
 
     // Verify this user is a portal client
     const { data: portalUser } = await supabase
@@ -87,7 +137,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Not a portal user" }), { status: 403, headers: corsHeaders });
     }
 
-    const clientName = user.user_metadata?.full_name || user.email || "Cliente";
+    const clientName = (user.user_metadata?.full_name || user.email || "Cliente") + (simulado ? " (modo de teste)" : "");
 
     // ── Resolve (entity_id, organization_id) for a document column ──
     // Shared by assertOwnership and resolveAuthorizedPortalUserId.
@@ -199,6 +249,8 @@ serve(async (req) => {
       referenceId: string,
       purpose: string,
     ): Promise<{ ok: boolean; otpId?: string }> {
+      // modo de teste: o super admin age pelo cliente sem o código por SMS (ver «simular_cliente» acima)
+      if (simulado) return { ok: true };
       if (!referenceId || !purpose) return { ok: false };
       const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const nowIso = new Date().toISOString();

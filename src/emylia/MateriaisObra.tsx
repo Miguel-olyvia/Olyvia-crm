@@ -2,7 +2,7 @@
 // Este é o dos materiais: quantos estão garantidos para arrancar, o que falta e quem o faz, as linhas agrupadas pelo estado
 // (por resolver, a caminho, garantidas) e as encomendas a fornecedor. O estado lê-se ao vivo do Inventário; quem lá trabalha é o Armazém.
 import { useState } from "react";
-import { AlertTriangle, ArrowRight, Check, Circle, Truck } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Circle, Truck, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type Negocio } from "./motor";
@@ -14,6 +14,7 @@ import { entregaTarde, textoMateriais } from "./preparacaoObra";
 import { ecDaAdenda, linhasDaEc, linhasDaObra, porEncomendarDe, totaisDaEc } from "./encomendasAjuste";
 import { assinadas, primeiraPaga } from "./adendas";
 import { aprovadorPo } from "./real/encomendaReal";
+import { useModoTeste } from "./real/modoTeste";
 
 type Grupo = "resolver" | "caminho" | "ok";
 const GRUPOS: { k: Grupo; t: string; vazio?: string }[] = [
@@ -45,8 +46,11 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   const { A, go, d, S } = ctx;
   // 30/10: na Olyvia, Compras e armazém aprova aqui a encomenda a fornecedor pendente e envia-a (rpc_po_send_to_supplier)
   const aprovar = aprovadorPo();
-  const podeAprovar = !!aprovar && S.role === "armazem";
+  // 9/11: no modo de teste, o super admin aprova sem mudar para Compras e armazém e confirma pelo fornecedor
+  const teste = useModoTeste();
+  const podeAprovar = !!aprovar && (S.role === "armazem" || !!teste);
   const [aAprovar, setAAprovar] = useState<string | null>(null);
+  const [aConfirmar, setAConfirmar] = useState<string | null>(null);
   const db = useInventario();
   const ec = d.obra.ec;
   const r = ec?.ref ? resumoEcNegocio(db, ec.ref) : null;
@@ -204,6 +208,12 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
                   {podeAprovar && p.fase === "por aprovar" && p.uuid && (
                     <Button size="sm" disabled={aAprovar !== null} onClick={() => { const id = p.uuid!; setAAprovar(id); void aprovar!(id).finally(() => setAAprovar(null)); }}>
                       {aAprovar === p.uuid ? "A aprovar…" : "Aprovar e enviar ao fornecedor"}
+                    </Button>
+                  )}
+                  {teste && p.fase === "no portal" && p.uuid && (
+                    <Button size="sm" variant="outline" className="border-dashed border-amber-500 text-amber-800 hover:bg-amber-50" disabled={aConfirmar !== null}
+                      onClick={() => { const id = p.uuid!; setAConfirmar(id); void teste.confirmarFornecedor(id).finally(() => setAConfirmar(null)); }}>
+                      <FlaskConical className="mr-1.5 h-4 w-4" aria-hidden="true" />{aConfirmar === p.uuid ? "A confirmar…" : "Confirmar pelo fornecedor (teste)"}
                     </Button>
                   )}
                 </li>

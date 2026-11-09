@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acoes, definirPerdaReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Papel, type Vista } from "@/emylia/motor";
+import { acoes, definirPerdaReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -30,7 +30,8 @@ import { definirEquipaReal } from "@/emylia/equipa/membros";
 import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
 import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFicha, telefoneDaFicha, type EnvioAcesso, type ResultadoConta } from "@/emylia/acessosPortal";
 import { marcarContaPortal } from "@/emylia/estadoContaPortal";
-import { enviarAoPortal } from "@/emylia/real/portalReal";
+import { documentosDoNegocio, enviarAoPortal } from "@/emylia/real/portalReal";
+import { definirModoTeste, podeModoTeste, simularCliente, simularFornecedor } from "@/emylia/real/modoTeste";
 import { definirGuardarCliente } from "@/emylia/EditarCliente";
 import { linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { gravarMoradaPrincipal } from "@/emylia/real/gravarMoradaDaEntidade";
@@ -407,6 +408,50 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     });
     return () => definirPerdaReal(null);
   }, [org, avisar, redesenhar, gravar]);
+  // 9/11 (Rúben: «o super admin deve sempre ter botões para fazer ações pelo cliente e pelo fornecedor»): numa base com o modo de teste
+  // ligado, o super admin da organização aceita a proposta e assina o contrato pelo cliente (o caminho do portal) e confirma a encomenda
+  // pelo fornecedor; depois relê o negócio (a fase, o contrato e as encomendas vêm da base). Sem modo de teste, os botões não existem.
+  useEffect(() => {
+    if (!org) return;
+    let vivo = true;
+    const reler = async () => {
+      const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
+      aplicarLidos(relidos);
+      await carregarEncomendas(relidos);
+    };
+    const peloCliente = async (d: Negocio, acao: "sign_proposal" | "sign_contract") => {
+      const ref = refs.current.get(d.id);
+      try {
+        if (!ref) throw new Error("O negócio ainda não está gravado na base.");
+        const docs = await documentosDoNegocio(supabase, ref.id);
+        const doc = acao === "sign_proposal" ? docs.proposal : docs.contract;
+        if (!doc) throw new Error(acao === "sign_proposal" ? "A proposta ainda não está na base." : "O contrato ainda não está na base.");
+        await simularCliente(supabase, acao, doc);
+        await reler();
+        avisar({ msg: acao === "sign_proposal" ? "Proposta aceite pelo cliente (teste)" : "Contrato assinado pelo cliente (teste)", sub: "Pelo caminho do portal, sem o código por SMS.", kind: "ok" });
+      } catch (e) {
+        avisar({ msg: "O teste não foi feito", sub: (e as Error).message, kind: "bad" });
+      } finally { redesenhar(); }
+    };
+    void podeModoTeste(supabase, org).then((pode) => {
+      if (!vivo) return;
+      definirModoTeste(!pode ? null : {
+        aceitarProposta: (d) => peloCliente(d, "sign_proposal"),
+        assinarContrato: (d) => peloCliente(d, "sign_contract"),
+        confirmarFornecedor: async (uuid) => {
+          try {
+            await simularFornecedor(supabase, uuid);
+            await reler();
+            avisar({ msg: "Encomenda confirmada pelo fornecedor (teste)", sub: "Como no portal do fornecedor.", kind: "ok" });
+          } catch (e) {
+            avisar({ msg: "O teste não foi feito", sub: (e as Error).message, kind: "bad" });
+          } finally { redesenhar(); }
+        },
+      });
+    });
+    return () => { vivo = false; definirModoTeste(null); };
+  }, [org, S, avisar, redesenhar, aplicarLidos, carregarEncomendas]);
+
   // 30/10: Compras e armazém aprova a encomenda a fornecedor no passo dos materiais; depois relê as encomendas do negócio
   useEffect(() => {
     if (!org) return;
