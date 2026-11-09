@@ -11,7 +11,8 @@ import type { TipoMockup } from "./catalogo3d";
 
 export type FormaGlb = "caixa" | "caixaR" | "cilindro" | "elipsoide";
 /** Os materiais das partes: `corpo` é o do produto (cor e acabamento); os outros são fixos. */
-export type MaterialGlb = "corpo" | "branco" | "metal" | "vidro" | "espelho" | "escuro" | "interior";
+/** `vidroEscuro`: vidro de forno/placa com reflexo; `plastico`: painéis e botões; `luz`: mostradores e luzes; `agua`: interior das louças. */
+export type MaterialGlb = "corpo" | "branco" | "metal" | "vidro" | "espelho" | "escuro" | "interior" | "vidroEscuro" | "plastico" | "luz" | "agua";
 export type V3 = [number, number, number];
 export interface ParamsGenerico { w: number; d: number; h: number; o: Readonly<Record<string, string | boolean>> }
 export interface Colocacao { pos: V3; esc: V3; rot?: V3 }
@@ -49,6 +50,28 @@ const frente = (nome: string, mat: MaterialGlb, f: (p: ParamsGenerico) => [numbe
 const puxador = (nome: string, f: (p: ParamsGenerico) => [number, number], ver?: ParteGlb["ver"]): ParteGlb =>
   caixa(nome, "metal", (p) => { const [x, y] = f(p); return { pos: [x, y, p.d / 2 + 0.025], esc: [min(0.16, p.w * 0.35), 0.012, 0.014] }; }, ver);
 
+/** Um botão redondo virado para a frente (eixo do cilindro em z), no centro (x, y) da face da frente. */
+const botao = (nome: string, f: (p: ParamsGenerico) => [number, number], r = 0.034, ver?: ParteGlb["ver"]): ParteGlb =>
+  ({ nome, forma: "cilindro", mat: "metal", colocar: (p) => { const [x, y] = f(p); return { pos: [x, y, p.d / 2 + 0.012], esc: [r, 0.02, r], rot: [Math.PI / 2, 0, 0] }; }, ...(ver ? { ver } : {}) });
+/** Uma peça plana na face da frente: [x, y, largura, altura] e a saliência (m). */
+const naFrente = (nome: string, mat: MaterialGlb, f: (p: ParamsGenerico) => [number, number, number, number], sai = 0.004, ver?: ParteGlb["ver"]): ParteGlb =>
+  caixa(nome, mat, (p) => { const [x, y, w, h] = f(p); return { pos: [x, y, p.d / 2 + sai], esc: [w, h, sai * 2] }; }, ver);
+/** O forno visto de frente (num forno solto ou numa coluna de forno): moldura, vidro escuro com reflexo, painel com dois botões e mostrador, grelha de ventilação. */
+function frenteDeForno(pre: string, zona: (p: ParamsGenerico) => { x: number; y: number; w: number; h: number }, ver?: ParteGlb["ver"]): ParteGlb[] {
+  return [
+    naFrente(`${pre}moldura`, "metal", (p) => { const z = zona(p); return [z.x, z.y - z.h * 0.08, z.w * 0.94, z.h * 0.78]; }, 0.005, ver),
+    naFrente(`${pre}vidro_forno`, "vidroEscuro", (p) => { const z = zona(p); return [z.x, z.y - z.h * 0.1, z.w * 0.82, z.h * 0.6]; }, 0.007, ver),
+    naFrente(`${pre}painel_forno`, "plastico", (p) => { const z = zona(p); return [z.x, z.y + z.h * 0.4, z.w * 0.94, z.h * 0.16]; }, 0.006, ver),
+    botao(`${pre}botao_1`, (p) => { const z = zona(p); return [z.x - z.w * 0.32, z.y + z.h * 0.4]; }, 0.034, ver),
+    botao(`${pre}botao_2`, (p) => { const z = zona(p); return [z.x + z.w * 0.32, z.y + z.h * 0.4]; }, 0.034, ver),
+    naFrente(`${pre}mostrador`, "luz", (p) => { const z = zona(p); return [z.x, z.y + z.h * 0.4, z.w * 0.22, z.h * 0.07]; }, 0.008, ver),
+    naFrente(`${pre}grelha`, "escuro", (p) => { const z = zona(p); return [z.x, z.y - z.h * 0.47, z.w * 0.7, 0.008]; }, 0.006, ver),
+    caixa(`${pre}puxador_forno`, "metal", (p) => { const z = zona(p); return { pos: [z.x, z.y + z.h * 0.26, p.d / 2 + 0.03], esc: [z.w * 0.72, 0.016, 0.018] }; }, ver),
+  ];
+}
+/** O tampo dos módulos de base (3 cm, um pouco saliente à frente) e a altura onde as frentes acabam por baixo dele. */
+const TAMPO = 0.03;
+
 /** Os genéricos da cozinha, do quarto e da sala (os de cozinha antes dos de casa de banho: o nome decide entre os do mesmo tipo). */
 const CATEGORIAS_COZINHA: CategoriaGlb[] = [
   {
@@ -70,11 +93,13 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     partes: [
       caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, RODAPE + (h - RODAPE) / 2, 0], esc: [w, h - RODAPE, d] })),
       caixa("rodape", "escuro", ({ w, d }) => ({ pos: [0, RODAPE / 2, d / 2 - 0.08], esc: [w - 0.02, RODAPE, 0.02] })),
-      frente("porta_esq", "corpo", ({ w, h, o }) => (o.duas === false ? [-w / 2, w / 2, RODAPE, h] : [-w / 2, 0, RODAPE, h]), (p) => p.o.frentes !== "gavetas"),
-      frente("porta_dir", "corpo", ({ w, h }) => [0, w / 2, RODAPE, h], (p) => p.o.frentes !== "gavetas" && p.o.duas !== false),
-      ...[0, 1, 2].map((i) => frente(`gaveta_${i + 1}`, "corpo", ({ w, h }) => { const a = (h - RODAPE) / 3; return [-w / 2, w / 2, RODAPE + i * a, RODAPE + (i + 1) * a]; }, (p) => p.o.frentes === "gavetas")),
-      ...[0, 1, 2].map((i) => puxador(`puxador_gaveta_${i + 1}`, ({ h }) => [0, RODAPE + ((i + 0.85) * (h - RODAPE)) / 3], (p) => p.o.frentes === "gavetas")),
-      puxador("puxador_porta", ({ w, h, o }) => [o.duas === false ? w / 4 : 0, h - 0.06], (p) => p.o.frentes !== "gavetas"),
+      caixa("tampo", "interior", ({ w, d, h }) => ({ pos: [0, h - TAMPO / 2, 0.015], esc: [w, TAMPO, d + 0.03] }), (p) => p.h > 0.5),
+      frente("porta_esq", "corpo", ({ w, h, o }) => (o.duas === false ? [-w / 2, w / 2, RODAPE, h - TAMPO] : [-w / 2, 0, RODAPE, h - TAMPO]), (p) => p.o.frentes !== "gavetas"),
+      frente("porta_dir", "corpo", ({ w, h }) => [0, w / 2, RODAPE, h - TAMPO], (p) => p.o.frentes !== "gavetas" && p.o.duas !== false),
+      // gavetas: a de cima mais baixa, as outras mais fundas (como nas cozinhas), cada uma com o puxador de barra no terço de cima
+      ...[0, 1, 2].map((i) => frente(`gaveta_${i + 1}`, "corpo", ({ w, h }) => { const a = h - TAMPO - RODAPE, y = [0, 0.4, 0.8, 1].map((k) => RODAPE + k * a); return [-w / 2, w / 2, y[i], y[i + 1]]; }, (p) => p.o.frentes === "gavetas")),
+      ...[0, 1, 2].map((i) => puxador(`puxador_gaveta_${i + 1}`, ({ h }) => { const a = h - TAMPO - RODAPE, y = [0, 0.4, 0.8, 1].map((k) => RODAPE + k * a); return [0, y[i + 1] - 0.05]; }, (p) => p.o.frentes === "gavetas")),
+      puxador("puxador_porta", ({ w, h, o }) => [o.duas === false ? w / 4 : 0, h - TAMPO - 0.06], (p) => p.o.frentes !== "gavetas"),
     ],
   },
   {
@@ -87,6 +112,8 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       frente("vidro_esq", "vidro", ({ w, h, o }) => (o.duas === false ? [-w / 2, w / 2, 0, h] : [-w / 2, 0, 0, h]), (p) => p.o.vidro === true),
       frente("vidro_dir", "vidro", ({ w, h }) => [0, w / 2, 0, h], (p) => p.o.vidro === true && p.o.duas !== false),
       puxador("puxador", ({ w, o }) => [o.duas === false ? w / 4 : 0, 0.05]),
+      // a régua de luz por baixo do armário (ilumina a bancada)
+      caixa("luz", "luz", ({ w, d }) => ({ pos: [0, -0.004, d / 2 - 0.05], esc: [w * 0.85, 0.008, 0.02] })),
     ],
   },
   {
@@ -98,7 +125,9 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       frente("porta_alta", "corpo", ({ w, h, o }) => [-w / 2, w / 2, o.interior === "frigorifico" ? RODAPE + (h - RODAPE) * 0.45 : o.interior === "forno" ? RODAPE + 0.75 : RODAPE, h], undefined),
       frente("porta_baixa", "corpo", ({ w, h, o }) => [-w / 2, w / 2, RODAPE, o.interior === "frigorifico" ? RODAPE + (h - RODAPE) * 0.45 : RODAPE + 0.15], (p) => p.o.interior !== "despensa"),
       caixa("forno", "escuro", ({ w, d }) => ({ pos: [0, RODAPE + 0.45, d / 2 + 0.004], esc: [w - 0.04, 0.58, 0.008] }), (p) => p.o.interior === "forno"),
-      caixa("forno_puxador", "metal", ({ w, d }) => ({ pos: [0, RODAPE + 0.68, d / 2 + 0.03], esc: [w * 0.7, 0.015, 0.015] }), (p) => p.o.interior === "forno"),
+      ...frenteDeForno("forno_", ({ w }) => ({ x: 0, y: RODAPE + 0.45, w: w - 0.04, h: 0.58 }), (p) => p.o.interior === "forno"),
+      // o frigorífico encastrado: a junta entre congelador e frigorífico (as portas são as frentes da coluna)
+      naFrente("junta_frio", "escuro", ({ w, h }) => [0, RODAPE + (h - RODAPE) * 0.45, w - 0.01, 0.006], 0.019, (p) => p.o.interior === "frigorifico"),
       puxador("puxador", ({ w, h, o }) => [w / 2 - 0.05, o.interior === "despensa" ? (RODAPE + h) / 2 : h - 0.3]),
     ],
   },
@@ -116,6 +145,11 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       frente("porta_dir", "corpo", ({ w, h }) => [0, w / 2, 0, h], (p) => p.o.americano === true),
       caixa("puxador_1", "metal", ({ w, d, h, o }) => ({ pos: [o.americano === true ? -0.03 : w / 2 - 0.05, o.americano === true ? h * 0.55 : h * 0.75, d / 2 + 0.03], esc: [0.014, o.americano === true ? h * 0.4 : 0.25, 0.02] }), (p) => p.o.encastre !== true),
       caixa("puxador_2", "metal", ({ w, d, h, o }) => ({ pos: [o.americano === true ? 0.03 : w / 2 - 0.05, o.americano === true ? h * 0.55 : h * 0.45, d / 2 + 0.03], esc: [0.014, o.americano === true ? h * 0.4 : 0.25, 0.02] }), (p) => p.o.encastre !== true),
+      // a junta das portas (congelador/frigorífico), o mostrador da temperatura e os pés
+      naFrente("junta", "escuro", ({ w, h, o }) => (o.americano === true ? [0, h / 2, 0.006, h - 0.02] : [0, h * 0.62, w - 0.01, 0.006]), 0.019),
+      naFrente("mostrador", "luz", ({ w, h, o }) => (o.americano === true ? [-w / 4, h * 0.72, 0.1, 0.05] : [-w * 0.2, h * 0.86, 0.1, 0.035]), 0.021, (p) => p.o.encastre !== true),
+      caixa("pe_esq", "escuro", ({ w, d }) => ({ pos: [-w / 2 + 0.06, 0.008, d / 2 - 0.06], esc: [0.05, 0.016, 0.05] })),
+      caixa("pe_dir", "escuro", ({ w, d }) => ({ pos: [w / 2 - 0.06, 0.008, d / 2 - 0.06], esc: [0.05, 0.016, 0.05] })),
     ],
   },
   {
@@ -123,9 +157,14 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     opcoes: [{ id: "tipo", rotulo: "Aparelho", tipo: "lista", valores: [{ id: "forno", rotulo: "Forno" }, { id: "micro", rotulo: "Micro-ondas" }], omissao: (_t, n) => (/micro/i.test(n) ? "micro" : "forno") }],
     partes: [
       caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w, h, d] })),
-      caixa("vidro", "escuro", ({ w, d, h, o }) => (o.tipo === "micro" ? { pos: [-w * 0.12, h * 0.48, d / 2 + 0.003], esc: [w * 0.66, h * 0.7, 0.006] } : { pos: [0, h * 0.42, d / 2 + 0.003], esc: [w * 0.86, h * 0.62, 0.006] })),
-      caixa("painel", "escuro", ({ w, d, h, o }) => (o.tipo === "micro" ? { pos: [w * 0.36, h * 0.5, d / 2 + 0.003], esc: [w * 0.2, h * 0.8, 0.006] } : { pos: [0, h * 0.88, d / 2 + 0.003], esc: [w * 0.9, h * 0.14, 0.006] })),
-      caixa("puxador", "metal", ({ w, d, h }) => ({ pos: [0, h * 0.76, d / 2 + 0.025], esc: [w * 0.72, 0.014, 0.016] }), (p) => p.o.tipo !== "micro"),
+      caixa("vidro", "vidroEscuro", ({ w, d, h, o }) => (o.tipo === "micro" ? { pos: [-w * 0.12, h * 0.48, d / 2 + 0.006], esc: [w * 0.6, h * 0.62, 0.006] } : { pos: [0, h * 0.4, d / 2 + 0.006], esc: [w * 0.78, h * 0.52, 0.006] })),
+      caixa("moldura", "metal", ({ w, d, h, o }) => (o.tipo === "micro" ? { pos: [-w * 0.12, h * 0.48, d / 2 + 0.003], esc: [w * 0.68, h * 0.74, 0.006] } : { pos: [0, h * 0.4, d / 2 + 0.003], esc: [w * 0.88, h * 0.64, 0.006] })),
+      caixa("painel", "plastico", ({ w, d, h, o }) => (o.tipo === "micro" ? { pos: [w * 0.36, h * 0.5, d / 2 + 0.003], esc: [w * 0.2, h * 0.8, 0.006] } : { pos: [0, h * 0.88, d / 2 + 0.003], esc: [w * 0.94, h * 0.16, 0.006] })),
+      botao("botao_1", ({ w, h, o }) => (o.tipo === "micro" ? [w * 0.36, h * 0.3] : [-w * 0.32, h * 0.88]), 0.036),
+      botao("botao_2", ({ w, h, o }) => (o.tipo === "micro" ? [w * 0.36, h * 0.48] : [w * 0.32, h * 0.88]), 0.036),
+      naFrente("mostrador", "luz", ({ w, h, o }) => (o.tipo === "micro" ? [w * 0.36, h * 0.72, w * 0.12, 0.03] : [0, h * 0.88, w * 0.2, 0.035]), 0.007),
+      naFrente("grelha", "escuro", ({ w, h, o }) => (o.tipo === "micro" ? [w * 0.36, h * 0.14, w * 0.12, 0.006] : [0, h * 0.05, w * 0.7, 0.008]), 0.005),
+      caixa("puxador", "metal", ({ w, d, h }) => ({ pos: [0, h * 0.7, d / 2 + 0.028], esc: [w * 0.72, 0.016, 0.018] }), (p) => p.o.tipo !== "micro"),
     ],
   },
   {
@@ -138,14 +177,22 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       caixa("campanula", "corpo", ({ w, d }) => ({ pos: [0, 0.04, 0], esc: [w, 0.08, max(0.3, d)] })),
       caixa("filtro", "escuro", ({ w, d }) => ({ pos: [0, -0.001, 0], esc: [w * 0.85, 0.004, max(0.3, d) * 0.8] })),
       caixa("chamine", "corpo", ({ d, h, o }) => ({ pos: [0, 0.08 + max(0.2, h - 0.08) / 2, o.ilha === true ? 0 : -max(0.3, d) / 2 + 0.13], esc: [0.26, max(0.2, h - 0.08), 0.24] }), (p) => p.o.chamine !== false),
+      // a grelha de aspiração (lâminas de metal) e duas luzes por baixo; o painel de comandos à frente
+      ...[0, 1, 2, 3, 4].map((i) => caixa(`grelha_${i + 1}`, "metal", ({ w, d }) => ({ pos: [0, -0.003, -max(0.3, d) * 0.3 + i * max(0.3, d) * 0.15], esc: [w * 0.8, 0.003, 0.012] }))),
+      ...[-1, 1].map((s, i): ParteGlb => ({ nome: `luz_${i + 1}`, forma: "cilindro", mat: "luz", colocar: ({ w, d }) => ({ pos: [s * w * 0.3, -0.004, max(0.3, d) * 0.3], esc: [0.05, 0.006, 0.05] }) })),
+      caixa("comandos", "plastico", ({ w, d }) => ({ pos: [0, 0.04, max(0.3, d) / 2 + 0.003], esc: [w * 0.3, 0.03, 0.006] })),
     ],
   },
   {
     id: "maquina_loica", rotulo: "Máquina de lavar loiça", tipos: ["eletro"], nome: /m[áa]quina.*(loi|lou)|lava.?loi[çc]a.*m[áa]q/i, opcoes: [{ id: "encastre", rotulo: "De encastrar (frente de móvel)", tipo: "sim", omissao: (_t, n) => /encastr|integ/i.test(n) }],
     partes: [
       caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w, h, d] })),
-      caixa("painel", "escuro", ({ w, d, h }) => ({ pos: [0, h - 0.05, d / 2 + 0.003], esc: [w * 0.95, 0.08, 0.006] }), (p) => p.o.encastre !== true),
+      caixa("painel", "plastico", ({ w, d, h }) => ({ pos: [0, h - 0.05, d / 2 + 0.003], esc: [w * 0.95, 0.08, 0.006] }), (p) => p.o.encastre !== true),
       caixa("puxador", "metal", ({ w, d, h }) => ({ pos: [0, h - 0.12, d / 2 + 0.02], esc: [w * 0.5, 0.014, 0.016] })),
+      ...[0, 1, 2, 3].map((i) => botao(`botao_${i + 1}`, ({ w, h }) => [w * 0.12 + i * w * 0.08, h - 0.05], 0.02, (p) => p.o.encastre !== true)),
+      naFrente("mostrador", "luz", ({ w, h }) => [-w * 0.25, h - 0.05, w * 0.18, 0.03], 0.007, (p) => p.o.encastre !== true),
+      naFrente("junta_porta", "escuro", ({ w, h }) => [0, h - 0.095, w - 0.01, 0.004], 0.004),
+      caixa("rodape", "escuro", ({ w, d }) => ({ pos: [0, 0.05, d / 2 - 0.04], esc: [w - 0.01, 0.1, 0.01] })),
     ],
   },
   {
@@ -155,7 +202,11 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       caixa("corpo", "corpo", ({ w, d, h, o }) => (o.forno === false ? { pos: [0, -0.025, 0], esc: [w * 0.92, 0.05, d * 0.9] } : { pos: [0, h / 2, 0], esc: [w, h, d] })),
       caixa("tampo", "escuro", ({ w, d, h, o }) => ({ pos: [0, (o.forno === false ? 0 : h) + 0.003, 0], esc: [w, 0.006, d] })),
       ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i): ParteGlb => ({ nome: `zona_${i + 1}`, forma: "cilindro", mat: "metal", colocar: ({ w, d, h, o }) => ({ pos: [sx * w * 0.22, (o.forno === false ? 0 : h) + 0.008, sz * d * 0.22], esc: [min(w, d) * 0.28, 0.006, min(w, d) * 0.28] }) })),
-      caixa("porta_forno", "escuro", ({ w, d, h }) => ({ pos: [0, h * 0.4, d / 2 + 0.004], esc: [w * 0.82, h * 0.5, 0.008] }), (p) => p.o.forno !== false),
+      // a marcação de cada zona (um aro claro à volta) e os manípulos na frente
+      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i): ParteGlb => ({ nome: `aro_${i + 1}`, forma: "cilindro", mat: "interior", colocar: ({ w, d, h, o }) => ({ pos: [sx * w * 0.22, (o.forno === false ? 0 : h) + 0.0065, sz * d * 0.22], esc: [min(w, d) * 0.34, 0.003, min(w, d) * 0.34] }) })),
+      ...[0, 1, 2, 3].map((i) => botao(`manipulo_${i + 1}`, ({ w, h }) => [-w * 0.33 + i * w * 0.22, h * 0.86], 0.04, (p) => p.o.forno !== false)),
+      caixa("painel", "plastico", ({ w, d, h }) => ({ pos: [0, h * 0.86, d / 2 + 0.002], esc: [w * 0.96, h * 0.14, 0.004] }), (p) => p.o.forno !== false),
+      caixa("porta_forno", "vidroEscuro", ({ w, d, h }) => ({ pos: [0, h * 0.4, d / 2 + 0.004], esc: [w * 0.82, h * 0.5, 0.008] }), (p) => p.o.forno !== false),
       caixa("puxador", "metal", ({ w, d, h }) => ({ pos: [0, h * 0.7, d / 2 + 0.025], esc: [w * 0.6, 0.014, 0.016] }), (p) => p.o.forno !== false),
     ],
   },

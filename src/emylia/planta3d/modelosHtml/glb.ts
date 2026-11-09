@@ -99,6 +99,11 @@ export function materiaisGenericos(cor: string, acab?: { metalness: number; roug
     espelho: new THREE.MeshStandardMaterial({ color: "#e4ecef", roughness: 0.04, metalness: 1 }),
     escuro: new THREE.MeshStandardMaterial({ color: "#2b2f33", roughness: 0.6 }),
     interior: new THREE.MeshStandardMaterial({ color: "#e3e9eb", roughness: 0.3 }),
+    // vidro escuro com reflexo (forno, placa), plástico dos painéis e botões, a luz dos mostradores, a água/fundo das louças
+    vidroEscuro: new THREE.MeshPhysicalMaterial({ color: "#14181b", roughness: 0.08, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.05 }),
+    plastico: new THREE.MeshStandardMaterial({ color: "#2a2d30", roughness: 0.55 }),
+    luz: new THREE.MeshStandardMaterial({ color: "#9fe3ff", emissive: "#6fd0ff", emissiveIntensity: 0.9, roughness: 0.3 }),
+    agua: new THREE.MeshPhysicalMaterial({ color: "#b9d3db", roughness: 0.05, transmission: 0, clearcoat: 1, opacity: 0.85, transparent: true }),
   });
 }
 /** Monta o genérico de uma categoria: cada parte (nó do GLB) vai para a posição e a escala que a tabela dá para estas medidas e opções. */
