@@ -4,6 +4,7 @@
 // CONJUNTOS (bancada, duche, móvel de lavatório) põem as peças ligadas de uma vez. Arrasta-se para a planta (ou toca-se, ou Enter, e fica ao meio).
 import { useMemo, useState, type PointerEvent as RPointerEvent } from "react";
 import { PREDEFINIDOS } from "./composicaoCozinha";
+import { categoriaDoTipo, genericoServe } from "./categoriasGlb";
 import { GRUPOS_ESPACO, MOSTRAR_GENERICOS, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import { CONJUNTOS, type Conjunto } from "./conjuntos";
 import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, variantesDe, type Familia } from "./familias";
@@ -92,7 +93,8 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
   const produtos = useMemo(() => {
     if (!SO_COM_MODELO_HTML) return todosProdutos;
     const html = espaco === "cozinha" || espaco === "outro" ? todosProdutos.filter(temModeloHtml) : [];
-    return MOSTRAR_GENERICOS ? [...html, ...todosProdutos.filter(temModeloGenerico)] : html;
+    // só os genéricos desta divisão (o armário de cozinha não aparece na casa de banho)
+    return MOSTRAR_GENERICOS ? [...html, ...todosProdutos.filter((m) => temModeloGenerico(m) && genericoServe(m.mockup3d.generico?.id ?? categoriaDoTipo(m.tipo, m.nome)?.id, espaco))] : html;
   }, [todosProdutos, espaco]);
   const grupos = useMemo(() => GRUPOS_ESPACO[espaco].map((g) => ({ g, n: produtosDoGrupo(produtos, g).length })).filter((x) => x.n > 0), [produtos, espaco]);
   // o separador «Bancadas» tem a bancada composta (que é o modelo do HTML), mesmo sem famílias de tampo visíveis

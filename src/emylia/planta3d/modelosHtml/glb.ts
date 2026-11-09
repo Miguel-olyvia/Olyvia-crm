@@ -131,6 +131,8 @@ export function materiaisGenericos(cor: string, acab?: { metalness: number; roug
     vidroEscuro: new THREE.MeshPhysicalMaterial({ color: "#14181b", roughness: 0.08, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.05 }),
     plastico: new THREE.MeshStandardMaterial({ color: "#2a2d30", roughness: 0.55 }),
     luz: new THREE.MeshStandardMaterial({ color: "#9fe3ff", emissive: "#6fd0ff", emissiveIntensity: 0.9, roughness: 0.3 }),
+    // o fundo à vista das louças abertas (bidé): a cor da peça um pouco mais escura, como em sombra
+    fundo: new THREE.MeshStandardMaterial({ color: new THREE.Color(cor).multiplyScalar(0.72), roughness: 0.3 }),
     agua: new THREE.MeshPhysicalMaterial({ color: "#b9d3db", roughness: 0.05, transmission: 0, clearcoat: 1, opacity: 0.85, transparent: true }),
   });
 }

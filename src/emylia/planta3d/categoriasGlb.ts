@@ -8,11 +8,12 @@
 //    editáveis no painel da peça; ficam em `opc.gen` da peça.
 // Sem React nem three: o gerador (Node) e o visualizador usam a mesma tabela.
 import type { TipoMockup } from "./catalogo3d";
+import type { TipoEspaco } from "./modelo";
 
 export type FormaGlb = "caixa" | "caixaR" | "cilindro" | "elipsoide";
 /** Os materiais das partes: `corpo` é o do produto (cor e acabamento); os outros são fixos. */
 /** `vidroEscuro`: vidro de forno/placa com reflexo; `plastico`: painéis e botões; `luz`: mostradores e luzes; `agua`: interior das louças. */
-export type MaterialGlb = "corpo" | "branco" | "metal" | "vidro" | "espelho" | "escuro" | "interior" | "vidroEscuro" | "plastico" | "luz" | "agua";
+export type MaterialGlb = "corpo" | "branco" | "metal" | "vidro" | "espelho" | "escuro" | "interior" | "vidroEscuro" | "plastico" | "luz" | "agua" | "fundo";
 export type V3 = [number, number, number];
 export interface ParamsGenerico { w: number; d: number; h: number; o: Readonly<Record<string, string | boolean>> }
 export interface Colocacao { pos: V3; esc: V3; rot?: V3 }
@@ -318,12 +319,24 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
   },
   {
     id: "bide", rotulo: "Bidé", tipos: ["bide"],
-    opcoes: [{ id: "torneira", rotulo: "Com torneira", tipo: "sim", omissao: true }],
+    // um bidé é uma bacia OVAL e baixa, ABERTA (sem depósito, sem assento, sem tampa): vê-se o fundo mais escuro com o ralo, e a misturadora numa
+    // aba atrás; de chão (com pé) ou suspenso (sem pé, preso à parede)
+    opcoes: [
+      { id: "torneira", rotulo: "Com misturadora", tipo: "sim", omissao: true },
+      { id: "suspenso", rotulo: "Suspenso", tipo: "sim", omissao: (_t, n) => /suspens/i.test(n) },
+    ],
     partes: [
-      { nome: "pe", forma: "cilindro", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, (h - 0.06) / 2, d * 0.02], esc: [w * 0.6, h - 0.06, d * 0.5] }) },
-      { nome: "cuvete", forma: "elipsoide", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.07, d * 0.05], esc: [w, 0.16, d * 0.9] }) },
-      { nome: "interior", forma: "cilindro", mat: "interior", colocar: ({ w, d, h }) => ({ pos: [0, h + 0.008, d * 0.1], esc: [w * 0.75, 0.004, d * 0.6] }) },
-      { nome: "torneira", forma: "cilindro", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.05, -d / 2 + 0.07], esc: [0.03, 0.1, 0.03] }) },
+      { nome: "pe", forma: "cilindro", mat: "corpo", ver: (p) => p.o.suspenso !== true, colocar: ({ w, d, h }) => ({ pos: [0, (h - 0.12) / 2, d * 0.04], esc: [w * 0.5, h - 0.12, d * 0.42] }) },
+      caixa("fixacao", "corpo", ({ w, d, h }) => ({ pos: [0, h - 0.16, -d / 2 + 0.06], esc: [w * 0.7, 0.26, 0.12] }), (p) => p.o.suspenso === true),
+      { nome: "bacia", forma: "elipsoide", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.1, d * 0.04], esc: [w, 0.2, d * 0.92] }) },
+      // o fundo à vista (mais escuro que a louça) deixa o rebordo branco à volta: lê-se logo como uma bacia aberta
+      { nome: "fundo", forma: "elipsoide", mat: "fundo", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.078, d * 0.08], esc: [w * 0.76, 0.15, d * 0.66] }) },
+      { nome: "ralo", forma: "cilindro", mat: "metal", colocar: ({ d, h }) => ({ pos: [0, h - 0.004, d * 0.1], esc: [0.035, 0.004, 0.035] }) },
+      { nome: "aba", forma: "caixaR", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.012, -d / 2 + 0.07], esc: [w * 0.55, 0.024, 0.12] }) },
+      { nome: "furo", forma: "cilindro", mat: "escuro", colocar: ({ d, h }) => ({ pos: [0, h + 0.001, -d / 2 + 0.07], esc: [0.034, 0.004, 0.034] }) },
+      { nome: "torneira", forma: "cilindro", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.05, -d / 2 + 0.07], esc: [0.028, 0.1, 0.028] }) },
+      { nome: "bica", forma: "cilindro", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.09, -d / 2 + 0.11], esc: [0.02, 0.08, 0.02], rot: [Math.PI / 2, 0, 0] }) },
+      { nome: "manipulo", forma: "caixa", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.105, -d / 2 + 0.05], esc: [0.012, 0.012, 0.05] }) },
     ],
   },
   {
@@ -462,6 +475,19 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
 ];
 
 /** A categoria genérica de um tipo de mockup (ou nenhuma: o tipo fica com o mockup paramétrico de sempre). */
+/**
+ * Em que divisões cada genérico aparece na lista de produtos: os armários e eletrodomésticos de cozinha não aparecem na casa de banho (um
+ * «Armário Inferior de cozinha» posto na casa de banho aparecia com a etiqueta «Módulo base (cozinha)»), nem as louças na cozinha.
+ */
+const COZINHA: TipoEspaco[] = ["cozinha", "outro"], BANHO: TipoEspaco[] = ["casa_banho", "outro"];
+export const ESPACOS_GENERICOS: Record<string, TipoEspaco[]> = {
+  modulo_canto: COZINHA, modulo_base: COZINHA, armario_parede: COZINHA, coluna_cozinha: COZINHA, frigorifico: COZINHA, forno: COZINHA, extrator: COZINHA, maquina_loica: COZINHA, fogao: COZINHA,
+  cama: ["quarto", "outro"], roupeiro: ["quarto", "outro"], secretaria: ["quarto", "sala", "outro"], sofa: ["sala", "outro"], mesa: ["sala", "cozinha", "outro"], prateleira: ["casa_banho", "cozinha", "quarto", "sala", "outro"],
+  sanita: BANHO, sanita_suspensa: BANHO, bide: BANHO, lavatorio: BANHO, movel_lavatorio: BANHO, banheira: BANHO, base_duche: BANHO, resguardo: BANHO, espelho: ["casa_banho", "quarto", "sala", "outro"],
+  armario: BANHO, toalheiro: BANHO, torneira: ["casa_banho", "cozinha", "outro"], coluna_duche: BANHO,
+};
+export const genericoServe = (id: string | undefined, espaco: TipoEspaco): boolean => !!id && (ESPACOS_GENERICOS[id] ?? ["outro"]).includes(espaco);
+
 /** Pelo tipo e, quando a categoria o pede, pelo nome do produto (a primeira que casa: as mais específicas estão primeiro). */
 export const categoriaDoTipo = (t: TipoMockup, nome = ""): CategoriaGlb | undefined => CATEGORIAS_GLB.find((c) => c.tipos.includes(t) && (!c.nome || c.nome.test(nome)));
 export const categoriaPorId = (id: string | undefined): CategoriaGlb | undefined => (id ? CATEGORIAS_GLB.find((c) => c.id === id) : undefined);

@@ -121,9 +121,9 @@
  {
   "categoria": "bide",
   "url": "/modelos3d/genericos/bide.glb",
-  "triangulos": 728,
-  "partes": 4,
-  "bytes": 10656
+  "triangulos": 1684,
+  "partes": 10,
+  "bytes": 24504
  },
  {
   "categoria": "lavatorio",

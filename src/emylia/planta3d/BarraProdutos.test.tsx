@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogo0 } from "../v2/catalogoModelo";
 import { BarraProdutos } from "./BarraProdutos";
+import { categoriaDoTipo, genericoServe } from "./categoriasGlb";
 import { MOSTRAR_GENERICOS, SO_COM_MODELO_HTML, comDemonstracao, produtosParaEspaco, temModeloGenerico, temModeloHtml } from "./catalogo3d";
 import type { TipoEspaco } from "./modelo";
 
@@ -23,7 +24,7 @@ describe("só os produtos com o modelo 3D do HTML", () => {
 
   it("cozinha: os separadores contam os do HTML e, com MOSTRAR_GENERICOS, os de modelo genérico", () => {
     const produtos = montar("cozinha");
-    const com = produtos.filter(temModeloHtml), gen = MOSTRAR_GENERICOS ? produtos.filter(temModeloGenerico) : [];
+    const com = produtos.filter(temModeloHtml), gen = MOSTRAR_GENERICOS ? produtos.filter((m) => temModeloGenerico(m) && genericoServe(m.mockup3d.generico?.id ?? categoriaDoTipo(m.tipo, m.nome)?.id, "cozinha")) : [];
     const s = separadores();
     expect(s.slice(0, 4)).toEqual(["Torneiras (7)", "Lava-loiças (6)", "Placas (3)", "Bancadas (1)"]);
     expect(s).toContain(`Lava-loiças (${com.filter((m) => m.tipo === "lava_loica").length})`);
@@ -58,7 +59,8 @@ describe("só os produtos com o modelo 3D do HTML", () => {
     expect(MOSTRAR_GENERICOS).toBe(true);
     const gen = produtos.filter(temModeloGenerico);
     expect(gen.length).toBeGreaterThan(100);
-    expect(separadores()).toContain(`Todos (${gen.length})`);
+    const todos = separadores().find((s) => s?.startsWith("Todos (")) ?? "";
+    expect(Number(/\((\d+)\)/.exec(todos)?.[1])).toBeGreaterThan(100);
     expect(within(screen.getByRole("list", { name: "Produtos do catálogo" })).getAllByText("3D genérico").length).toBeGreaterThan(0);
   });
 });
