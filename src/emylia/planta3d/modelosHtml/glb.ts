@@ -88,6 +88,33 @@ export function vestir(cena: THREE.Object3D, materiais: Readonly<Record<string, 
   return copia;
 }
 
+/* ------------------------------------------------------------------ o espelho: um reflexo falso (neutro) para parecer espelho em qualquer divisão */
+let reflexoEspelho: THREE.Texture | null = null;
+/**
+ * O «mundo» que o espelho reflecte: um panorama neutro (claro em cima, escuro em baixo) com duas faixas de luz verticais. O ambiente de estúdio é
+ * cinzento e uniforme, e um espelho que só o reflecte parece cinzento-mate; com isto vê-se o brilho e as faixas a mudar com a câmara, sem tom azul.
+ */
+function texturaReflexoEspelho(): THREE.Texture | null {
+  if (reflexoEspelho || typeof document === "undefined") return reflexoEspelho;
+  const c = document.createElement("canvas"); c.width = 512; c.height = 256;
+  const g = c.getContext("2d");
+  if (!g) return null;
+  const v = g.createLinearGradient(0, 0, 0, 256);
+  v.addColorStop(0, "#fbfbf9"); v.addColorStop(0.45, "#d9d9d6"); v.addColorStop(0.55, "#8d8e8b"); v.addColorStop(1, "#3d3e3c");
+  g.fillStyle = v; g.fillRect(0, 0, 512, 256);
+  for (const [x, w] of [[120, 26], [330, 14]]) { const h = g.createLinearGradient(x - w, 0, x + w, 0); h.addColorStop(0, "rgba(255,255,255,0)"); h.addColorStop(0.5, "rgba(255,255,255,0.95)"); h.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = h; g.fillRect(x - w, 0, 2 * w, 200); }
+  reflexoEspelho = new THREE.CanvasTexture(c);
+  reflexoEspelho.mapping = THREE.EquirectangularReflectionMapping; reflexoEspelho.colorSpace = THREE.SRGBColorSpace;
+  return reflexoEspelho;
+}
+/** O material do espelho (genéricos e mockups de reserva): prata neutra, metálica e lisa, com o reflexo falso acima. */
+export function criarMaterialEspelho(): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ color: "#f4f4f2", roughness: 0.02, metalness: 1, envMapIntensity: 1.15 });
+  const t = texturaReflexoEspelho();
+  if (t) m.envMap = t;
+  return m;
+}
+
 /* ------------------------------------------------------------------ genéricos por categoria (categoriasGlb.ts) */
 /** Os materiais dos genéricos: `corpo` leva a cor e o acabamento do produto; os outros são fixos. */
 export function materiaisGenericos(cor: string, acab?: { metalness: number; roughness: number }): Record<MaterialGlb, THREE.Material> {
@@ -97,7 +124,7 @@ export function materiaisGenericos(cor: string, acab?: { metalness: number; roug
     metal: new THREE.MeshStandardMaterial({ color: "#c9ced1", roughness: 0.2, metalness: 1 }),
     // vidro claro neutro (resguardo, portas de vidro) e espelho prateado neutro: sem tom azulado; o reflexo é o do ambiente de estúdio (neutro)
     vidro: new THREE.MeshPhysicalMaterial({ color: "#e9ecea", roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false }),
-    espelho: new THREE.MeshStandardMaterial({ color: "#f1f1ef", roughness: 0.03, metalness: 1 }),
+    espelho: criarMaterialEspelho(),
     escuro: new THREE.MeshStandardMaterial({ color: "#2b2f33", roughness: 0.6 }),
     interior: new THREE.MeshStandardMaterial({ color: "#e3e9eb", roughness: 0.3 }),
     // vidro escuro com reflexo (forno, placa), plástico dos painéis e botões, a luz dos mostradores, a água/fundo das louças

@@ -15,7 +15,7 @@ import { construirBancada } from "./modelosHtml/bancada3d";
 import { VELAR_SPECS } from "./modelosHtml/lavaLoicas";
 import { pecasDosModulos } from "./composicaoCozinha";
 import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, urlDoGenerico, type CategoriaGlb } from "./categoriasGlb";
-import { USAR_GLB, lerGlb, montarGenerico, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
+import { USAR_GLB, criarMaterialEspelho, lerGlb, montarGenerico, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { revestimentoDe, type Revestimento } from "./revestimentos";
@@ -40,7 +40,9 @@ export interface Visualizador3DProps {
 
 type V3 = [number, number, number];
 /** O espelho é prateado neutro (sem tom azulado) e o vidro claro é neutro: os mesmos tons dos genéricos (modelosHtml/glb.ts). */
-const COR_ESPELHO = "#f1f1ef", COR_VIDRO = "#e9ecea";
+const COR_VIDRO = "#e9ecea";
+/** O espelho dos mockups de reserva: o mesmo material dos genéricos (prata neutra com reflexo falso), partilhado e nunca libertado. */
+const MATERIAL_ESPELHO = criarMaterialEspelho();
 
 /* ------------------------------------------------------------------ texturas procedurais (canvas, sem ficheiros) */
 const cacheTexturas = new Map<string, THREE.CanvasTexture>();
@@ -451,14 +453,14 @@ function ParametricoAntigo({ tipo, w, d, h, cor, mat, params, recortes, opc }: {
       return (
         <>
           <Caixa p={[0, h / 2, 0]} s={[w, h, Math.max(d, 0.02)]} cor="#2b2f33" r={0.4} />
-          <mesh position={[0, h / 2, Math.max(d, 0.02) / 2 + 0.001]}><boxGeometry args={[w - 0.05, h - 0.05, 0.004]} /><meshStandardMaterial color={COR_ESPELHO} metalness={1} roughness={0.04} /></mesh>
+          <mesh position={[0, h / 2, Math.max(d, 0.02) / 2 + 0.001]}><boxGeometry args={[w - 0.05, h - 0.05, 0.004]} /><primitive object={MATERIAL_ESPELHO} attach="material" /></mesh>
         </>
       );
     case "armario_espelho":
       return (
         <>
           <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={cor} r={0.5} />
-          <mesh position={[0, h / 2, d / 2 + 0.003]}><boxGeometry args={[w - 0.04, h - 0.04, 0.006]} /><meshStandardMaterial color={COR_ESPELHO} metalness={1} roughness={0.04} /></mesh>
+          <mesh position={[0, h / 2, d / 2 + 0.003]}><boxGeometry args={[w - 0.04, h - 0.04, 0.006]} /><primitive object={MATERIAL_ESPELHO} attach="material" /></mesh>
         </>
       );
     case "torneira":
