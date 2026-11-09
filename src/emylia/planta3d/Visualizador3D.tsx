@@ -13,6 +13,7 @@ import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml";
 import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
 import { construirBancada } from "./modelosHtml/bancada3d";
 import { VELAR_SPECS } from "./modelosHtml/lavaLoicas";
+import { pecasDosModulos } from "./composicaoCozinha";
 import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, urlDoGenerico, type CategoriaGlb } from "./categoriasGlb";
 import { USAR_GLB, lerGlb, montarGenerico, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
@@ -312,7 +313,7 @@ function TorneiraCozinha({ w, d, h, cor, mat, p }: { w: number; d: number; h: nu
 type PropsParam = { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[]; opc?: OpcoesPeca; generico?: Mockup3D["generico"] };
 /** A categoria genérica que a peça usa (a do produto, escolhida pelo nome; senão a do tipo; nenhuma se tiver o modelo do HTML). */
 const categoriaDaPeca = (tipo: ProdutoModelo3D["tipo"], params?: ParamsMockup, generico?: Mockup3D["generico"]): CategoriaGlb | undefined =>
-  (USAR_GLB_GENERICOS && !(params && "html" in params && params.html) && params?.k !== "chapa" && params?.k !== "bancada" ? categoriaPorId(generico?.id) ?? categoriaDoTipo(tipo) : undefined);
+  (USAR_GLB_GENERICOS && !(params && "html" in params && params.html) && params?.k !== "chapa" && params?.k !== "bancada" && params?.k !== "cozinha" ? categoriaPorId(generico?.id) ?? categoriaDoTipo(tipo) : undefined);
 function AvisoFonte({ chave, fonte }: { chave: string; fonte: string }) { useFonte(chave, fonte); return null; }
 /** O GLB genérico da categoria com as medidas, a cor e as opções desta peça (a geometria é partilhada por todos os produtos da categoria). */
 function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam & { c: CategoriaGlb }) {
@@ -329,7 +330,24 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   return <primitive object={t.grupo} />;
 }
 /** O mockup de um tipo: o GLB genérico da categoria (com o paramétrico de sempre de reserva) ou, sem categoria, o paramétrico. */
+/** A composição modular de cozinha: cada módulo com o genérico da sua categoria (coluna, base, forno, armário de parede), lado a lado, em metros. */
+function ModeloComposicao({ cfg }: { cfg: Extract<ParamsMockup, { k: "cozinha" }>["cfg"] }) {
+  return (
+    <>
+      {pecasDosModulos(cfg).map((m, i) => {
+        const c = categoriaPorId(m.categoria), w = m.w / 100, d = m.d / 100, h = m.h / 100;
+        const caixa = <Caixa p={[0, h / 2, 0]} s={[w, h, d]} cor={m.cor} />;
+        return (
+          <group key={`${m.modulo}-${i}`} position={[m.x / 100, m.y / 100, m.z / 100]}>
+            {c ? <ReservaGlb reserva={caixa}><Suspense fallback={null}><GenericoGlb c={c} tipo="movel" w={w} d={d} h={h} cor={m.cor} opc={{ gen: m.o }} /></Suspense></ReservaGlb> : caixa}
+          </group>
+        );
+      })}
+    </>
+  );
+}
 function Parametrico(props: PropsParam) {
+  if (props.params?.k === "cozinha") return <ModeloComposicao cfg={props.params.cfg} />;
   const c = categoriaDaPeca(props.tipo, props.params, props.generico);
   if (!c) return <ParametricoAntigo {...props} />;
   return (
@@ -671,6 +689,7 @@ function modeloEscolhido(m: ProdutoModelo3D): string | null {
   if (pr && "html" in pr && pr.html) return `Modelo do HTML: ${pr.html.modelo} · ${pr.html.acab}${pr.html.exacto === false ? " (o mais parecido: o HTML não tem este produto)" : ""}`;
   if (pr?.k === "chapa") return `Modelo do HTML: chapa ${pr.series} · ${pr.tone}`;
   if (pr?.k === "bancada") return "Modelo do HTML: bancada composta";
+  if (pr?.k === "cozinha") return `Composição de cozinha: ${pr.cfg.modulos.length} módulos (modelos genéricos)`;
   const c = categoriaDaPeca(m.mockup3d.tipo, pr, m.mockup3d.generico);
   if (c) return `Modelo genérico: ${c.rotulo}`;
   return (["lava_loica", "placa", "torneira_cozinha", "tampo", "bancada"] as string[]).includes(m.mockup3d.tipo) ? "Sem modelo do HTML (o HTML não tem este produto)" : null;

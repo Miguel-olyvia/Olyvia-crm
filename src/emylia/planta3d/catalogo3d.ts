@@ -40,7 +40,9 @@ export type ParamsMockup =
   /** a bancada composta (bancada.ts): chapa, recortes, lava-loiça, placa, torneira, rodatampo e móveis */
   | { k: "bancada"; cfg: import("./bancada").ConfigBancada }
   /** um tampo do catálogo de uma série Coverlam do HTML: a chapa com a imagem do fabricante */
-  | { k: "chapa"; series: string; tone: string };
+  | { k: "chapa"; series: string; tone: string }
+  /** a composição modular de cozinha (composicaoCozinha.ts): a fila de módulos, desenhada com os genéricos da cozinha */
+  | { k: "cozinha"; cfg: import("./composicaoCozinha").ComposicaoCozinha };
 export interface Mockup3D {
   tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup;
   /** o modelo genérico da categoria (categoriasGlb.ts), escolhido pelo tipo e pelo nome, com as omissões das opções que o nome dá */

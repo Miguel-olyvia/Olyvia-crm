@@ -3,6 +3,7 @@
 import { PASSO, cantos, faltaFechar, limites, type PecaPlanta, type Planta, type Ponto as PontoCm, type TipoPeca } from "../planta";
 import { COR_MOCKUP, OMISSOES_CM, TIPO_LEGADO, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
 import { modeloDaBancada } from "./bancada";
+import { modeloDaComposicao } from "./composicaoCozinha";
 import { recortesDeTampo } from "./conjuntos";
 import { familiaPorId, modeloDaFamilia } from "./familias";
 import {
@@ -88,7 +89,7 @@ export function deLegado(planta: Planta, o: OpcoesLegado): ResLegado {
       continue;
     }
     const familia = pc.fam ? familiaPorId(pc.fam) : undefined;
-    const m = (pc.banc && modeloDaBancada(pc.id, pc.banc)) || (familia && modeloDaFamilia(familia, pc.med, pc.acab)) || (pc.produto && o.produtos[pc.produto]) || modeloGenerico(pc.tipo, pc.w, pc.h);
+    const m = (pc.banc && modeloDaBancada(pc.id, pc.banc)) || (pc.coz && modeloDaComposicao(pc.id, pc.coz)) || (familia && modeloDaFamilia(familia, pc.med, pc.acab)) || (pc.produto && o.produtos[pc.produto]) || modeloGenerico(pc.tipo, pc.w, pc.h);
     modelos[m.produtoId] = m;
     if (pc.rot !== undefined) {
       // peça nova: caixa sem rodar + ângulo; as de parede levam a altura ao chão

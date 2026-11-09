@@ -3,6 +3,7 @@
 // As FAMÍLIAS (torneiras, lava-loiças, placas, tampos…) aparecem uma só vez, com bolinhas de cor para os acabamentos e um selector de medida; os
 // CONJUNTOS (bancada, duche, móvel de lavatório) põem as peças ligadas de uma vez. Arrasta-se para a planta (ou toca-se, ou Enter, e fica ao meio).
 import { useMemo, useState, type PointerEvent as RPointerEvent } from "react";
+import { PREDEFINIDOS } from "./composicaoCozinha";
 import { GRUPOS_ESPACO, MOSTRAR_GENERICOS, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import { CONJUNTOS, type Conjunto } from "./conjuntos";
 import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, variantesDe, type Familia } from "./familias";
@@ -26,6 +27,8 @@ export interface BarraProdutosProps {
   onConjunto: (c: Conjunto) => void;
   /** Põe a bancada composta (bancada.ts) na planta, encostada à parede. */
   onBancada: () => void;
+  /** Pôr uma composição modular de cozinha (o id do predefinido, composicaoCozinha.ts). */
+  onComposicao?: (predefinido: string) => void;
 }
 
 /** O cartão de uma família: UM produto no ecrã, com as variantes (acabamento e medida) escolhidas à parte. */
@@ -78,7 +81,7 @@ function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | n
 /** As famílias que a lista mostra: com SO_COM_MODELO_HTML, só as que têm o modelo do HTML. */
 const familiasVisiveis = (c: Familia["categoria"]): Familia[] => familiasDaCategoria(c).filter((f) => !SO_COM_MODELO_HTML || !!f.htmlModelo);
 
-export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada }: BarraProdutosProps) {
+export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao }: BarraProdutosProps) {
   const [q, setQ] = useState("");
   const [grupoEscolhido, setGrupo] = useState<string>("");
   const [quantos, setQuantos] = useState(PASSO_VISIVEIS);
@@ -157,6 +160,15 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
           <p className="text-[15px] font-semibold">Bancada Coverlam Top 12 mm (composição)</p>
           <p className="text-sm text-muted-foreground">Como a aba «Bancadas» do catálogo 3D: série, tom e acabamento da chapa, comprimento e profundidade, lava-loiça (por baixo ou por cima), placa e torneira, posição dos equipamentos em cm e rodatampo. Cada parte vende-se à parte.</p>
           <button type="button" className={`${CHIP} mt-2`} onClick={onBancada} aria-label="Pôr a bancada composta na planta">Pôr a bancada na planta</button>
+        </div>
+      )}
+      {ativo === "fam:tampos" && onComposicao && (
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-3">
+          <p className="text-[15px] font-semibold">Composições de cozinha (módulos)</p>
+          <p className="text-sm text-muted-foreground">Uma fila de módulos que se mexe como um bloco. Depois de a pôr, cada módulo muda de tipo, largura e cor; cada um vende-se à parte.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {PREDEFINIDOS.map((p) => <button key={p.id} type="button" className={CHIP} onClick={() => onComposicao(p.id)}>{p.nome}</button>)}
+          </div>
         </div>
       )}
       {ehFamilia && ativo !== "fam:tampos" && (

@@ -6,6 +6,7 @@ import type { PecaPlanta, Planta } from "../planta";
 import { ESPEC, TIPO_LEGADO, type ProdutoModelo3D } from "./catalogo3d";
 import { FAMILIAS, alturaLavaLoicaCm, familiaPorId, modeloDaFamilia, resolverVariante, type Familia } from "./familias";
 import { linhasDaBancada, nomeDaBancada } from "./bancada";
+import { linhasDaComposicao, precoComposicao } from "./composicaoCozinha";
 import type { TipoEspaco } from "./modelo";
 
 export interface ComponenteConj {
@@ -200,7 +201,9 @@ export interface LinhaVenda {
 }
 /** Uma linha vendável por peça com produto: o preço e o SKU da variante, e o conjunto a que pertence (ou se foi retirada dele). Portas e janelas contam como peças. */
 export function linhasVendaveis(planta: Planta): LinhaVenda[] {
-  return planta.pecas.filter((p) => p.fam || p.produto || p.banc).flatMap((p): LinhaVenda[] => {
+  return planta.pecas.filter((p) => p.fam || p.produto || p.banc || p.coz).flatMap((p): LinhaVenda[] => {
+    // a composição modular de cozinha: cada módulo (e cada armário de parede) numa linha à parte
+    if (p.coz) return linhasDaComposicao(p.coz).map((l) => ({ id: `${p.id}-${l.id}`, nome: l.nome, preco: l.preco, categoria: "Módulo de cozinha", conjId: p.id, conjNome: p.coz?.nome, papel: l.id, retirado: false, vendivelSeparado: true }));
     // a bancada composta: a chapa e cada equipamento numa linha à parte
     if (p.banc) {
       const conjNome = nomeDaBancada(p.banc), cat = { chapa: "Bancada (chapa)", lavaloica: "Lava-loiça", placa: "Placa", torneira: "Torneira de cozinha", movel: "Móvel" } as const;
@@ -218,5 +221,6 @@ export function totalDasLinhas(planta: Planta): number {
   const conjs = [...new Set(planta.pecas.filter((p) => p.conj).map((p) => p.conj as string))];
   const soltas = planta.pecas.filter((p) => !p.conj && !p.ret && p.fam).reduce((s, p) => { const f = familiaPorId(p.fam as string); return s + (f ? resolverVariante(f, p.med, p.acab).preco : 0); }, 0);
   const bancadas = planta.pecas.filter((p) => p.banc).reduce((s, p) => s + linhasDaBancada(p.banc!).reduce((t, l) => t + (l.preco ?? 0), 0), 0);
-  return arred2(soltas + bancadas + conjs.reduce((s, id) => s + (precoConjunto(planta, id)?.total ?? 0), 0));
+  const cozinhas = planta.pecas.filter((p) => p.coz).reduce((s, p) => s + precoComposicao(p.coz!).total, 0);
+  return arred2(soltas + bancadas + cozinhas + conjs.reduce((s, id) => s + (precoConjunto(planta, id)?.total ?? 0), 0));
 }

@@ -17,6 +17,8 @@ import { aplicarVariante, expandirConjunto, guardarLugarLocal, mudarMontagem, re
 import { familiaPorId, modeloDaFamilia } from "./planta3d/familias";
 import { ListaVendavel, PainelConjunto, PainelVariante } from "./planta3d/PainelVariante";
 import { PainelGenerico } from "./planta3d/PainelGenerico";
+import { PainelComposicao } from "./planta3d/PainelComposicao";
+import { aplicarComposicao, composicaoDe, modeloDaComposicao, pecaComposicao, predefinido, type ComposicaoCozinha } from "./planta3d/composicaoCozinha";
 import { PainelBancada } from "./planta3d/PainelBancada";
 import { BANCADA_OMISSAO, aplicarConfig, modeloDaBancada, pecaBancada, type ConfigBancada } from "./planta3d/bancada";
 import { ListaPecas, nomeDaPeca } from "./planta3d/ListaPecas";
@@ -276,6 +278,17 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     if (!r.ok) { setAviso(r.erro); return; }
     gravar({ ...p, pecas: [...p.pecas, r.peca] }); setSel(nid); setAviso("");
   };
+  /** Põe uma composição modular de cozinha: como a bancada (ao meio, de costas para a parede mais próxima); a ilha fica solta, só dentro da divisão. */
+  const adicionarComposicao = (id: string) => {
+    const pre = predefinido(id); if (!pre) return;
+    const nid = novoId(), cfg = composicaoDe(pre), poly = poligonoDe(p);
+    const sem = pecaDeProduto(p, modeloDaComposicao(nid, cfg), nid, undefined);
+    const base = pecaComposicao(nid, { x: sem.x, y: sem.y }, cfg);
+    const r = ajustarPeca(p, poly && !cfg.ilha ? encostarParede(poly, base).peca : base, { orientar: !cfg.ilha });
+    if (!r.ok) { setAviso(r.erro); return; }
+    gravar({ ...p, pecas: [...p.pecas, r.peca] }); setSel(nid); setAviso("");
+  };
+  const mudarComposicao = (pc: PecaPlanta, c: ComposicaoCozinha) => confirmarPeca({ ...p, pecas: p.pecas.map((x) => (x.id === pc.id ? aplicarComposicao(x, c) : x)) }, pc.id, pc);
   const mudarBancada = (pc: PecaPlanta, c: ConfigBancada) => confirmarPeca({ ...p, pecas: p.pecas.map((x) => (x.id === pc.id ? aplicarConfig(x, c) : x)) }, pc.id, pc);
   const mudarVariante = (pc: PecaPlanta, familiaId: string, medidaId?: string, acabId?: string) => {
     const nova = aplicarVariante(pc, familiaId, medidaId, acabId);
@@ -447,7 +460,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
       {/* as peças: arrastar para a planta, ou tocar */}
       <div className="space-y-2">
         <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo}
-          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} />
+          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} onComposicao={adicionarComposicao} />
         <p className="text-sm text-muted-foreground">Portas e janelas (arraste para a planta, ou toque, e fica ao meio):</p>
         {produtosCat.length > 0 && (
           <button type="button" className="min-h-11 text-sm underline underline-offset-2" aria-expanded={genericas} onClick={() => setGenericas(!genericas)}>
@@ -537,6 +550,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
               <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />{selecionada.ancora ? "Remover o conjunto" : selecionada.conj ? "Retirar do conjunto" : "Remover"}
             </Button>
             {selecionada.banc && <PainelBancada cfg={selecionada.banc} onMudar={(c) => mudarBancada(selecionada, c)} />}
+            {selecionada.coz && <PainelComposicao cfg={selecionada.coz} onMudar={(c) => mudarComposicao(selecionada, c)} />}
             <PainelVariante peca={selecionada} onOpcao={(o) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? { ...x, opc: { ...x.opc, ...o } } : x)) })} onMudar={(f, med, ac) => mudarVariante(selecionada, f, med, ac)} onMontagem={(mo) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? mudarMontagem(x, mo) : x)) })} />
             <PainelGenerico modelo={selecionada.produto ? produtosCat.find((m) => m.produtoId === selecionada.produto) : undefined} opc={selecionada.opc}
               onGen={(gen) => gravar({ ...p, pecas: p.pecas.map((x) => (x.id === selecionada.id ? { ...x, opc: { ...x.opc, gen } } : x)) })} />

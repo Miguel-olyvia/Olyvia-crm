@@ -18,7 +18,9 @@ export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; 
   /** Opções da peça (por exemplo a montagem de um lava-loiça: por baixo ou por cima). */
   opc?: import("./planta3d/modelo").OpcoesPeca;
   /** Bancada composta (planta3d/bancada.ts): a chapa, os equipamentos e as posições, como na aba «Bancadas» do catálogo 3D. `w`/`h` = comprimento/profundidade. */
-  banc?: import("./planta3d/bancada").ConfigBancada }
+  banc?: import("./planta3d/bancada").ConfigBancada;
+  /** Composição modular de cozinha (planta3d/composicaoCozinha.ts): a fila de módulos. `w` = a soma das larguras. */
+  coz?: import("./planta3d/composicaoCozinha").ComposicaoCozinha }
 export interface Ponto { x: number; y: number }
 /** `o`: onde começa a primeira parede (o primeiro toque no desenho). */
 export interface Planta { o: Ponto; paredes: Parede[]; pecas: PecaPlanta[] }
