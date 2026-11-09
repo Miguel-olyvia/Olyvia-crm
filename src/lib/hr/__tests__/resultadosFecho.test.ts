@@ -80,6 +80,20 @@ describe("construirResultadoPessoa", () => {
     );
   });
 
+  it("a assinatura das horas extra so segue quando existe; as linhas de horas extra levam fonte e minutos como campos livres", () => {
+    expect("horas_extra_assinatura" in construirResultadoPessoa(entrada)).toBe(false);
+    expect("horas_extra_assinatura" in construirResultadoPessoa({ ...entrada, horasExtraAssinatura: null })).toBe(false);
+    const md5 = "a".repeat(32);
+    expect(construirResultadoPessoa({ ...entrada, horasExtraAssinatura: md5 }).horas_extra_assinatura).toBe(md5);
+    // Sem fonte (calculo sem horas extra aprovadas conhecidas) a linha fica como sempre.
+    expect(construirResultadoPessoa(entrada).linhas[0]).not.toHaveProperty("fonte_horas_extra");
+    const comFonte = construirResultadoPessoa({
+      ...entrada,
+      resultado: resultado({ linhasAutomaticas: [{ codigoId: "c1", codigo: "100", nome: "Hora extra", origem: "horas_extra", horas: 1.5, valor: 10, fonteHorasExtra: "aprovadas", minutos: 90 }] }),
+    });
+    expect(comFonte.linhas[0]).toMatchObject({ origem: "codigo", fonte_horas_extra: "aprovadas", minutos: 90, horas: 1.5 });
+  });
+
   it("arredonda: valor da hora a 4 casas, dinheiro ao centimo, divisor a 4 casas", () => {
     const r = construirResultadoPessoa(entrada);
     expect(r.valor_hora).toBe(7.1235);
@@ -268,6 +282,18 @@ describe("motivoDeBloqueioDoFecho", () => {
     expect(motivoDeBloqueioDoFecho({ ...ok, desviosNaoLidos: () => false })).toBeNull();
   });
 
+  it("horas extra por ler ou pendentes bloqueiam o fecho e dizem quantas pessoas (so das obrigatorias)", () => {
+    expect(motivoDeBloqueioDoFecho({ ...ok, horasExtraNaoLidas: (id) => id === OUTRA })).toEqual({ codigo: "horas_extra", n: 1 });
+    expect(motivoDeBloqueioDoFecho({ ...ok, horasExtraPendentes: () => 3 })).toEqual({ codigo: "horas_extra", n: 2 });
+    expect(motivoDeBloqueioDoFecho({ ...ok, horasExtraNaoLidas: (id) => id === PESSOA, horasExtraPendentes: (id) => (id === OUTRA ? 1 : 0) })).toEqual({ codigo: "horas_extra", n: 2 });
+    expect(motivoDeBloqueioDoFecho({ ...ok, pessoasObrigatorias: [PESSOA], horasExtraPendentes: (id) => (id === OUTRA ? 5 : 0) })).toBeNull();
+    expect(motivoDeBloqueioDoFecho({ ...ok, horasExtraNaoLidas: () => false, horasExtraPendentes: () => 0 })).toBeNull();
+  });
+
+  it("os desvios por ler passam a frente das horas extra (cada motivo com a sua frase)", () => {
+    expect(motivoDeBloqueioDoFecho({ ...ok, desviosNaoLidos: () => true, horasExtraNaoLidas: () => true })).toEqual({ codigo: "desvios", n: 2 });
+  });
+
   it("uma pessoa obrigatoria sem calculo bloqueia e diz quantas faltam", () => {
     expect(motivoDeBloqueioDoFecho({ ...ok, comCalculo: (id) => id === PESSOA })).toEqual({ codigo: "calculo", n: 1 });
     expect(motivoDeBloqueioDoFecho({ ...ok, comCalculo: () => false })).toEqual({ codigo: "calculo", n: 2 });
@@ -289,6 +315,8 @@ describe("os erros da RPC de fechar, em portugues claro", () => {
     "processamento_resultados_periodo_aberto",
     "processamento_fechar_desvios_por_validar",
     "processamento_fechar_desvios_desactualizados",
+    "processamento_fechar_horas_extra_por_decidir",
+    "processamento_fechar_horas_extra_desactualizadas",
   ];
 
   it.each(codigos)("%s tem mensagem propria, sem o codigo tecnico", (codigo) => {
@@ -305,6 +333,13 @@ describe("os erros da RPC de fechar, em portugues claro", () => {
   it("na lingua inglesa ha texto proprio", () => {
     window.localStorage.setItem("language", "en");
     expect(mensagemDeErroDoFecho({ message: "processamento_fechar_regra_desactualizada" })).toMatch(/still open/);
+    expect(mensagemDeErroDoFecho({ message: "processamento_fechar_horas_extra_por_decidir" })).toMatch(/overtime is still pending/);
+    expect(mensagemDeErroDoFecho({ message: "processamento_fechar_horas_extra_desactualizadas" })).toMatch(/Overtime was decided/);
+  });
+
+  it("os erros das horas extra dizem que o periodo continua aberto e o que fazer", () => {
+    expect(mensagemDeErroDoFecho({ code: "23514", message: "processamento_fechar_horas_extra_por_decidir: ha 2" })).toMatch(/continua aberto: ainda há horas extra pendentes/);
+    expect(mensagemDeErroDoFecho({ code: "23514", message: "processamento_fechar_horas_extra_desactualizadas: x" })).toMatch(/volte a calcular/);
   });
 
   it("erros desconhecidos ou de outra origem nao se traduzem aqui", () => {
@@ -312,6 +347,23 @@ describe("os erros da RPC de fechar, em portugues claro", () => {
     expect(mensagemDeErroDoFecho({ message: "processamento_fechar_inventado" })).toBeNull();
     expect(mensagemDeErroDoFecho(null)).toBeNull();
     expect(codigoDoErroDoFecho("processamento_fechar_pessoa_repetida: x")).toBe("processamento_fechar_pessoa_repetida");
+  });
+});
+
+describe("construirResultadosDoFecho: assinatura das horas extra", () => {
+  it("cada pessoa leva a sua assinatura (ou nenhuma), lida por quem chama imediatamente antes de calcular", () => {
+    const md5 = "b".repeat(32);
+    const { resultados } = construirResultadosDoFecho({
+      pessoasObrigatorias: [PESSOA, OUTRA],
+      resultadoDe: () => resultado(),
+      versoesDe: () => [versao()],
+      lancamentosDe: () => [],
+      dataFim: "2026-10-31",
+      regraSalarialId: REGRA,
+      assinaturaDeHorasExtraDe: (id) => (id === PESSOA ? md5 : null),
+    });
+    expect(resultados[0].horas_extra_assinatura).toBe(md5);
+    expect("horas_extra_assinatura" in resultados[1]).toBe(false);
   });
 });
 

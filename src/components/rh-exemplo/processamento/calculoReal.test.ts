@@ -16,6 +16,8 @@ const totais = (extra: Partial<TotaisRelatorioMensal> = {}): TotaisRelatorioMens
     diasPlaneados: 20, planeadoMinutos: 9600, realizadoMinutos: 9480, diasTrabalhados: 20, diasComFaltaCompleta: 0,
     diasComFaltaIncompleta: 1, horasExtraMinutos: 0, minutosExtraNormal: 0, minutosFeriadoTrabalhado: 0,
     minutosDescansoTrabalhado: 0, horasExtraNoturnasMinutos: 0, minutosAusenciaRemunerada: 0, diasFeriadoTrabalhados: 0,
+    // O defice de 2 h e um dia sem registo: o hook do relatorio expoe-o como falta nao justificada (desconto por falta).
+    faltasParaDesconto: [{ data: "2026-10-15", minutos: 120, estado: "activa", justificacao_estado: "sem_justificacao", remunerada: false, motivo_codigo: "ausencia_nao_comunicada", semRegisto: true }],
     ...extra,
   }) as unknown as TotaisRelatorioMensal;
 
@@ -73,7 +75,7 @@ describe("calcularResultadoReal", () => {
     });
 
     it("o desconto de faltas sai do que CONTA: dentro da margem (contado = planeado) nao ha desconto, mesmo com menos picado", () => {
-      const r = calcularResultadoReal(entrada({ totais: totais({ contadoMinutos: 9600 }) }));
+      const r = calcularResultadoReal(entrada({ totais: totais({ contadoMinutos: 9600, faltasParaDesconto: [] }) }));
       expect(r.resultado.descontoFaltas).toBe(0);
     });
 
@@ -153,7 +155,7 @@ describe("calcularResultadoReal", () => {
   });
 
   it("o total nunca e negativo mesmo que o desconto passe a base", () => {
-    const r = calcularResultadoReal(entrada({ totais: totais({ realizadoMinutos: 0 }), versoes: [versao()], dias: [] }));
+    const r = calcularResultadoReal(entrada({ totais: totais({ realizadoMinutos: 0, faltasParaDesconto: [{ data: "2026-10-15", minutos: 9600, estado: "activa", justificacao_estado: "sem_justificacao", remunerada: false, motivo_codigo: "ausencia_nao_comunicada", semRegisto: true }] }), versoes: [versao()], dias: [] }));
     expect(r.resultado.totalBrutoEstimado).toBeGreaterThanOrEqual(0);
   });
 });

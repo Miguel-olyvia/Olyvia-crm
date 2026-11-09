@@ -9,6 +9,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 
+// A conferencia das faltas do periodo (le `pessoas_faltas`) entra simulada: aqui nao ha base.
+vi.mock("@/lib/hr/faltasFecho", () => ({ conferirFaltasDoFecho: () => Promise.resolve({ ok: true }) }));
 vi.mock("@/hooks/useTranslation", () => ({
   useTranslation: () => ({ t: (chave: string) => chave, language: "pt" }),
 }));
@@ -671,6 +673,8 @@ describe("ProcessamentoVisaoGeralTab", () => {
         horasExtraMinutos: 0,
         planeadoMinutos: 600,
         realizadoMinutos: 0,
+        // O dia planeado sem picagem desconta como falta nao justificada (desconto por falta).
+        faltasParaDesconto: [{ data: "2026-01-15", minutos: 600, estado: "activa", justificacao_estado: "sem_justificacao", remunerada: false, motivo_codigo: "ausencia_nao_comunicada", semRegisto: true }],
       },
     };
     render(<ProcessamentoVisaoGeralTab />);

@@ -16,7 +16,10 @@ const fn = vi.hoisted(() => ({
   sucesso: vi.fn(),
   erro: vi.fn(),
   preparar: vi.fn(),
+  faltas: vi.fn(),
   recalcular: vi.fn(),
+  horasExtra: vi.fn(),
+  detetar: vi.fn(),
 }));
 const estado = vi.hoisted(() => ({
   permissoes: new Set<string>(),
@@ -31,7 +34,16 @@ const SEM_REGRAS_PERIODO: never[] = [];
 vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: SEM_REGRAS_PERIODO, estado: "ok", isLoading: false }) }));
 vi.mock("@/lib/toast", () => ({ toast: { success: fn.sucesso, error: fn.erro } }));
 // A preparacao do fecho (detetar desvios e ler as assinaturas) entra simulada: aqui nao ha base.
-vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", () => ({ prepararFechoComDesvios: (...args: unknown[]) => fn.preparar(...args) }));
+// A conferencia das faltas do periodo (le `pessoas_faltas`) entra simulada: aqui nao ha base.
+vi.mock("@/lib/hr/faltasFecho", () => ({ conferirFaltasDoFecho: (...args: unknown[]) => fn.faltas(...args) }));
+vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", () => ({
+  prepararFechoComDesvios: (...args: unknown[]) => fn.preparar(...args),
+  // As horas extra aprovadas no fecho: a assinatura de cada pessoa (aqui nao ha base): sem assinaturas.
+  prepararFechoComHorasExtra: async (...args: unknown[]) => fn.horasExtra(...args),
+  // O botao «Detetar horas extra» dos avisos: a deteccao entra simulada.
+  useHorasExtraAcoes: () => ({ detetar: (...args: unknown[]) => fn.detetar(...args), aExecutar: false }),
+  hojeLisboa: () => "2026-10-20",
+}));
 vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
   usePermissions: () => ({ hasPermission: (chave: string) => estado.permissoes.has(chave), loading: false }),
 }));
@@ -141,6 +153,8 @@ beforeEach(() => {
   fn.anular.mockResolvedValue(null);
   fn.criarPorQuantidade.mockResolvedValue(null);
   fn.preparar.mockResolvedValue({ ok: true, assinaturas: new Map() });
+  fn.horasExtra.mockResolvedValue({ ok: true, assinaturas: new Map() });
+  fn.faltas.mockResolvedValue({ ok: true });
   estado.permissoes = new Set(TUDO);
   estado.calculo = calculo();
   estado.fecho = { obrigatorias: ["p1", "p2"], estado: "ok" };
@@ -347,12 +361,168 @@ describe("fechar grava o resultado de cada pessoa", () => {
     await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("mudou 3 dia(s)")));
   });
 
+  it("antes de gravar confere as faltas com as que o calculo usou (a chave de cada pessoa)", async () => {
+    estado.calculo = calculo({ chaveDeFaltasUsada: (id: string) => (id === "p1" ? "faltas-p1" : "") });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+    expect(fn.faltas).toHaveBeenCalledWith({ organizationId: "org-1", de: "2026-10-01", ate: "2026-10-31", calculadas: new Map([["p1", "faltas-p1"], ["p2", ""]]) });
+    expect(fn.faltas.mock.invocationCallOrder[0]).toBeLessThan(fn.fechar.mock.invocationCallOrder[0]);
+  });
+
+  it("se as faltas mudaram depois do calculo (justificacao aprovada, falta anulada), nao fecha: relê o calculo e di-lo", async () => {
+    fn.faltas.mockResolvedValue({ ok: false, motivo: "mudaram", mudou: 2 });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
+    expect(fn.fechar).not.toHaveBeenCalled();
+    await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("2 pessoa(s)")));
+  });
+
+  it("um erro a ler as faltas impede o fecho", async () => {
+    fn.faltas.mockResolvedValue({ ok: false, motivo: "erro" });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("faltas")));
+    expect(fn.fechar).not.toHaveBeenCalled();
+  });
+
   it("um erro a detetar os desvios ou a ler as assinaturas impede o fecho e aparece escrito", async () => {
     fn.preparar.mockResolvedValue({ ok: false, motivo: "erro", texto: "Já há uma deteção de desvios a correr nesta organização." });
     abrir();
     await fechar();
     await waitFor(() => expect(fn.erro).toHaveBeenCalledWith("Já há uma deteção de desvios a correr nesta organização."));
     expect(fn.fechar).not.toHaveBeenCalled();
+  });
+
+  describe("horas extra aprovadas", () => {
+    const totaisDe = (mapa: Record<string, Record<string, unknown>>) => (id: string) => mapa[id];
+
+    it("confere TODAS as pessoas (bruto incluido) e o interruptor; segue a chave do CALCULO (so em modo aprovadas), nunca a assinatura de agora", async () => {
+      estado.calculo = calculo({
+        totaisDe: totaisDe({
+          p1: { horasExtraFonte: "aprovadas", horasExtraChave: "he-p1", horasExtraAprovacaoDesde: "2026-10-01" },
+          p2: { horasExtraFonte: "bruto", horasExtraChave: "", horasExtraAprovacaoDesde: "2026-10-01" },
+        }),
+      });
+      // As assinaturas de agora existem para as duas, mas NENHUMA delas segue no resultado.
+      fn.horasExtra.mockResolvedValue({ ok: true, assinaturas: new Map([["p1", "fresca-p1"], ["p2", "fresca-p2"]]) });
+      abrir();
+      await fechar();
+      await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+      expect(fn.horasExtra).toHaveBeenCalledWith({
+        periodoId: "per",
+        calculadas: new Map([["p1", "he-p1"], ["p2", ""]]),
+        referencia: { organizationId: "org-1", pessoaId: "p1", de: "2026-10-01", ate: "2026-10-31", desdeCalculo: "2026-10-01" },
+      });
+      const enviados = fn.fechar.mock.calls[0][0] as Array<{ pessoa_id: string; horas_extra_assinatura?: string }>;
+      expect(enviados.map((r) => [r.pessoa_id, r.horas_extra_assinatura])).toEqual([["p1", "he-p1"], ["p2", undefined]]);
+      expect(fn.horasExtra.mock.invocationCallOrder[0]).toBeLessThan(fn.fechar.mock.invocationCallOrder[0]);
+    });
+
+    it("cenario 2: sem permissao para ler as horas extra nada se confere e nenhuma assinatura segue (a base decide)", async () => {
+      estado.calculo = calculo({
+        totaisDe: totaisDe({ p1: { horasExtraFonte: "bruto", horasExtraChave: "", horasExtraRecusadas: true }, p2: { horasExtraFonte: "bruto", horasExtraRecusadas: true } }),
+      });
+      fn.horasExtra.mockResolvedValue({ ok: true, assinaturas: new Map([["p1", "fresca-p1"]]) });
+      abrir();
+      await fechar();
+      await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+      expect(fn.horasExtra).toHaveBeenCalledWith({ periodoId: "per", calculadas: new Map(), referencia: undefined });
+      const enviados = fn.fechar.mock.calls[0][0] as Array<{ horas_extra_assinatura?: string }>;
+      expect(enviados.every((r) => !("horas_extra_assinatura" in r))).toBe(true);
+    });
+
+    it("cenario 1: a contagem foi ligada depois de calcular (calculo em bruto): nao fecha, recalcula e di-lo com a frase propria", async () => {
+      fn.horasExtra.mockResolvedValue({ ok: false, motivo: "sem_confirmadas" });
+      abrir();
+      await fechar();
+      await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
+      expect(fn.fechar).not.toHaveBeenCalled();
+      await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("sem as horas extra confirmadas")));
+      expect(fn.erro).not.toHaveBeenCalledWith(expect.stringContaining("mudaram"));
+    });
+
+    it("horas extra sem permissao e horas extra confirmadas em dias de ausencia: avisa (nao bloqueia o botao)", () => {
+      estado.calculo = calculo({ semPermissaoHorasExtra: 1, totalHorasExtraNaoContadas: 45 });
+      render(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+      expect(screen.getByText(/não foram lidas por falta de permissão.*o fecho pode ser recusado/)).toBeInTheDocument();
+      expect(screen.getByText(/45 minuto\(s\) de horas extra confirmadas em dias de ausência: não são pagas/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Fechar o mês" })).not.toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("se as horas extra mudaram depois do calculo, nao fecha: relê o calculo e di-lo", async () => {
+      fn.horasExtra.mockResolvedValue({ ok: false, motivo: "mudaram", mudou: 2 });
+      abrir();
+      await fechar();
+      await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
+      expect(fn.fechar).not.toHaveBeenCalled();
+      await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("horas extra de 2 pessoa(s) mudaram")));
+    });
+
+    it("um erro a ler as assinaturas das horas extra impede o fecho", async () => {
+      fn.horasExtra.mockResolvedValue({ ok: false, motivo: "erro", texto: "Não foi possível ler as horas extra para o fecho." });
+      abrir();
+      await fechar();
+      await waitFor(() => expect(fn.erro).toHaveBeenCalledWith("Não foi possível ler as horas extra para o fecho."));
+      expect(fn.fechar).not.toHaveBeenCalled();
+    });
+
+    it("pendentes bloqueiam o botao, com o motivo escrito", () => {
+      estado.calculo = calculo({ horasExtraPendentes: (id: string) => (id === "p2" ? 2 : 0), totalHorasExtraPendentes: 2 });
+      render(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+      const botao = screen.getByRole("button", { name: "Fechar o mês" });
+      expect(botao).toHaveAttribute("aria-disabled", "true");
+      expect(botao).toHaveAccessibleDescription(/1 pessoa\(s\) têm horas extra por decidir/);
+      expect(screen.getByText(/2 hora\(s\) extra por decidir/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Ver as horas extra na fila de trabalho" })).toHaveAttribute("href", "/rh-exemplo/assiduidade-e-ausencias?dominio=assiduidade&fila_tipo=hora_extra");
+    });
+
+    it("horas extra por ler bloqueiam o botao e o alerta di-lo", () => {
+      estado.calculo = calculo({ horasExtraNaoLidas: (id: string) => id === "p1", semHorasExtra: 1 });
+      render(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+      expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getAllByRole("alert").some((e) => /horas extra de 1 pessoa\(s\) não se leram/.test(e.textContent ?? ""))).toBe(true);
+    });
+
+    it("«excesso por detetar»: avisa e o botao corre a deteccao do periodo (ate hoje) e refaz o calculo", async () => {
+      fn.detetar.mockResolvedValue({ ok: true, erro: null, resumo: { criadas: 3 } });
+      estado.calculo = calculo({ totalExcessoPorDetetar: 3 });
+      render(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+      expect(screen.getByText(/3 dia\(s\) com tempo a mais sem hora extra registada/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Detetar horas extra" }));
+      await waitFor(() => expect(fn.detetar).toHaveBeenCalledWith("2026-10-01", "2026-10-20"));
+      await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText(/3 hora\(s\) extra nova\(s\) por decidir/)).toBeInTheDocument();
+    });
+
+    it("a resposta da deteccao sobrevive ao recalculo (os totais voltam a zero) e recebe o foco; 0 criadas diz-o e nao refaz o calculo", async () => {
+      fn.detetar.mockResolvedValue({ ok: true, erro: null, resumo: { criadas: 0 } });
+      estado.calculo = calculo({ totalExcessoPorDetetar: 2 });
+      const vista = render(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+      fireEvent.click(screen.getByRole("button", { name: "Detetar horas extra" }));
+      expect(await screen.findByText("Deteção feita: não foram criadas horas extra novas.")).toBeInTheDocument();
+      expect(fn.recalcular).not.toHaveBeenCalled();
+      // O excesso desaparece (recalculo): a mensagem fica.
+      estado.calculo = calculo({ totalExcessoPorDetetar: 0 });
+      vista.rerender(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+      expect(screen.getByText("Deteção feita: não foram criadas horas extra novas.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Deteção feita: não foram criadas horas extra novas.")).toHaveFocus());
+    });
+
+    it("deteccao parcial: mostra o erro e a janela que falhou, e refaz o calculo pelo que ja se criou", async () => {
+      fn.detetar.mockResolvedValue({ ok: false, erro: "A base recusou a deteção.", resumo: { criadas: 2 }, janelaFalhada: { de: "2026-10-08", ate: "2026-10-14" } });
+      estado.calculo = calculo({ totalExcessoPorDetetar: 2 });
+      render(<LanguageProvider><MemoryRouter><ProcessamentoFluxoTab /></MemoryRouter></LanguageProvider>);
+      fireEvent.click(screen.getByRole("button", { name: "Detetar horas extra" }));
+      expect(await screen.findByText(/A base recusou a deteção\..*2026-10-08 a 2026-10-14/)).toBeInTheDocument();
+      await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
+    });
+
+    it("sem nada a avisar (interruptor desligado) nao aparece nenhum aviso de horas extra", () => {
+      abrir();
+      expect(screen.queryByTestId("avisos-horas-extra")).not.toBeInTheDocument();
+    });
   });
 
   it("a margem ou os desvios por ler bloqueiam o botao, com o motivo escrito (nunca calcula em silencio)", () => {

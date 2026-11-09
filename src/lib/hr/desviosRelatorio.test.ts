@@ -151,6 +151,58 @@ describe("contarDia com margem", () => {
   });
 });
 
+describe("contarDia com modoExtra (horas extra aprovadas)", () => {
+  it("modoExtra bruto (ou omitido) e IDENTICO ao de hoje, incluindo 9:30-18:30 e o excesso em bruto", () => {
+    for (const modoExtra of [undefined, "bruto" as const]) {
+      expect(contarDia(dia({ modoExtra }))).toEqual({ contadoMinutos: 540, extraValidadoMinutos: 0, desvio: null });
+      expect(contarDia(dia({ modoExtra, realizadoMinutos: 600 }))).toEqual({ contadoMinutos: 600, extraValidadoMinutos: 60, desvio: null });
+      expect(contarDia(dia({ modoExtra, margemMin: 10, realizadoMinutos: 600, extraAprovadoMin: 45, desvio: linhaDesvio({ natureza: "hora_extra", realizado_min: 600 }) })))
+        .toMatchObject({ contadoMinutos: 585, extraValidadoMinutos: 45 });
+    }
+  });
+  it("aprovadas, sem margem: o excesso em bruto ja nao e hora extra; so conta a da tabela", () => {
+    expect(contarDia(dia({ modoExtra: "aprovadas", realizadoMinutos: 600 }))).toEqual({ contadoMinutos: 600, extraValidadoMinutos: 0, desvio: null });
+    expect(contarDia(dia({ modoExtra: "aprovadas", realizadoMinutos: 600, extraAprovadoMin: 40 }))).toEqual({ contadoMinutos: 600, extraValidadoMinutos: 40, desvio: null });
+  });
+  it("aprovadas: o dia 9:30-18:30 continua a contar o realizado e sem extra", () => {
+    expect(contarDia(dia({ modoExtra: "aprovadas" }))).toEqual({ contadoMinutos: 540, extraValidadoMinutos: 0, desvio: null });
+  });
+  it("aprovadas: feriado/descanso trabalhado so paga o confirmado", () => {
+    const folga = { estado: "feriado", planeadoMinutos: 0, planeadoIntervalos: [], realizadoMinutos: 300, modoExtra: "aprovadas" as const };
+    expect(contarDia(dia(folga))).toEqual({ contadoMinutos: 300, extraValidadoMinutos: 0, desvio: null });
+    expect(contarDia(dia({ ...folga, extraAprovadoMin: 120 }))).toEqual({ contadoMinutos: 300, extraValidadoMinutos: 120, desvio: null });
+  });
+  it("aprovadas: desvio validado «hora extra» conta como aceitar_desvio e a hora extra confirmada nao conta duas vezes", () => {
+    const entrada = dia({
+      modoExtra: "aprovadas",
+      margemMin: 10,
+      realizadoMinutos: 600,
+      extraAprovadoMin: 60,
+      desvio: linhaDesvio({ estado: "validado", decisao: "hora_extra", natureza: "hora_extra", planeado_min: 540, realizado_min: 600 }),
+    });
+    const r = contarDia(entrada);
+    // O realizado conta (600) e o extra e SO o da tabela (60), nunca 60 + 60.
+    expect(r.contadoMinutos).toBe(600);
+    expect(r.extraValidadoMinutos).toBe(60);
+    expect(r.desvio).toMatchObject({ estado: "validado", decisao: "hora_extra" });
+    // O mesmo desvio validado como «hora extra» sem nenhuma hora extra confirmada: o realizado conta mas nao paga extra (D3).
+    expect(contarDia({ ...entrada, extraAprovadoMin: 0 })).toMatchObject({ contadoMinutos: 600, extraValidadoMinutos: 0 });
+  });
+  it("aprovadas: desvio a validar conta provisoriamente o planeado; o extra confirmado continua a ser o da tabela", () => {
+    const r = contarDia(dia({ modoExtra: "aprovadas", margemMin: 10, realizadoMinutos: 600, extraAprovadoMin: 30, desvio: linhaDesvio({ natureza: "hora_extra", realizado_min: 600 }) }));
+    expect(r).toMatchObject({ contadoMinutos: 540, extraValidadoMinutos: 30 });
+  });
+  it("aprovadas: normal e aceitar_desvio mantem o que contavam, com o extra da tabela", () => {
+    const base = { modoExtra: "aprovadas" as const, margemMin: 10, realizadoMinutos: 480, extraAprovadoMin: 0 };
+    expect(contarDia(dia({ ...base, desvio: linhaDesvio({ estado: "validado", decisao: "normal" }) }))).toMatchObject({ contadoMinutos: 540, extraValidadoMinutos: 0 });
+    expect(contarDia(dia({ ...base, desvio: linhaDesvio({ estado: "validado", decisao: "aceitar_desvio" }) }))).toMatchObject({ contadoMinutos: 480, extraValidadoMinutos: 0 });
+  });
+  it("D3: o excesso nao aprovado nao entra no contado do dia como extra (nao ha extra a compensar faltas)", () => {
+    const r = contarDia(dia({ modoExtra: "aprovadas", realizadoMinutos: 660 }));
+    expect(r.extraValidadoMinutos).toBe(0);
+  });
+});
+
 describe("margemLigadaNoPeriodo e chave de desvios", () => {
   const v = (margem: number | null, de: string, ate: string | null, substituida: string | null = null): VersaoMargem => ({ id: de, margem_min: margem, valido_de: de, valido_ate: ate, substituida_em: substituida });
   it("so conta uma versao com margem que cubra algum dia do periodo", () => {

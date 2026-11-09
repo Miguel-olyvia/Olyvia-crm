@@ -34,6 +34,8 @@ import type {
   RegraSalarial,
 } from "@/types/hr";
 import type { DiaRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+import { descontoDasFaltas, type FaltaDoPeriodo } from "@/lib/hr/descontoFalta";
+import type { FonteHorasExtra } from "@/lib/hr/horasExtraRelatorio";
 
 export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
 
@@ -67,6 +69,13 @@ export interface EntradaProcessamentoPessoa {
      * (sem margem configurada o resultado e o de sempre).
      */
     contadoMinutos?: number;
+    /**
+     * De onde vem `minutosExtraNormal`, `minutosFeriadoTrabalhado` e `minutosDescansoTrabalhado`. Com horas extra APROVADAS (interruptor
+     * ligado) sao os minutos CONFIRMADOS por ORIGEM da hora extra: diaria e semanal em `minutosExtraNormal` (escalao `he_pct_dia_util`),
+     * feriado em `minutosFeriadoTrabalhado` (`he_pct_feriado`), descanso em `minutosDescansoTrabalhado` (`he_pct_descanso`). A conta
+     * e a mesma; esta fonte so fica registada nas linhas gravadas (`fonte_horas_extra`). Ausente = nao se regista.
+     */
+    horasExtraFonte?: FonteHorasExtra;
     minutosExtraNormal: number;
     minutosFeriadoTrabalhado: number;
     minutosDescansoTrabalhado: number;
@@ -76,16 +85,23 @@ export interface EntradaProcessamentoPessoa {
      */
     horasExtraNoturnasMinutos: number;
     /**
-     * Minutos PLANEADOS cobertos por uma ausencia aprovada de dia inteiro e
-     * remunerada (ferias, tipicamente). Um dia de ferias e ausencia
-     * remunerada -- continua a contar como planeado (a base a hora paga-o),
-     * nao tem picagem, e NAO e uma falta. Sem esta subtracao no desconto de
-     * faltas, 8h planeadas + 0h picadas saiam descontadas a 100% e o dia de
-     * ferias valia 0 EUR. Obrigatorio (contrato interno fechado): quem
-     * chamar `calcularProcessamentoPessoa` tem de decidir este numero, nunca
-     * esquece-lo em silencio.
+     * Minutos PLANEADOS cobertos por uma ausencia aprovada de dia inteiro e remunerada (ferias, tipicamente).
+     * INFORMATIVO: o desconto de faltas ja nao o usa (desconta-se por falta, ver `faltas`); um dia de ferias nao tem falta
+     * nem "dia sem picagem", por isso nunca chega ao desconto. Fica no contrato para nao partir quem o preenche.
      */
     minutosAusenciaRemunerada: number;
+    /**
+     * As faltas do periodo que podem descontar, UMA por falta (ver `descontoFalta.ts`): as faltas marcadas em vigor
+     * (`pessoas_faltas`) e, por cada dia planeado ja passado sem falta e sem picagem, uma falta NAO justificada
+     * (`semRegisto`) com o defice do dia. O desconto e a soma por falta: as horas extra de um dia nao pagam a falta de outro.
+     * Obrigatorio: quem chamar tem de decidir esta lista, nunca a esquecer em silencio.
+     */
+    faltas: readonly (FaltaDoPeriodo & { semRegisto?: boolean })[];
+    /**
+     * Por dia (ISO), o maximo de minutos de falta depois de tirar o que uma ausencia aprovada, remunerada e PARCIAL
+     * (meio dia) ja cobre. So tem os dias com esse caso.
+     */
+    limiteFaltaPorDia?: Readonly<Record<string, number>>;
     diasFeriadoTrabalhados: number;
     /** Ver nota de topo do ficheiro -- ainda nao existe em `TotaisRelatorioMensal`. */
     diasDescansoTrabalhado: number;
@@ -113,7 +129,9 @@ export type AvisoProcessamento =
   | "periodicidade_nao_convertivel"
   | "duodecimos_por_decidir"
   | "sem_regra_salarial"
-  | "sem_horas_planeadas_no_mes";
+  | "sem_horas_planeadas_no_mes"
+  | "faltas_provisorias"
+  | "dias_sem_picagem_descontados";
 
 export interface LinhaCodigoAplicado {
   codigoId: string;
@@ -123,6 +141,10 @@ export interface LinhaCodigoAplicado {
   origem: OrigemAutomaticaCodigo | null;
   horas: number | null;
   valor: number;
+  /** So nas linhas de horas extra, feriado e descanso trabalhados, e so quando a fonte NAO e bruto (aprovadas ou misto). */
+  fonteHorasExtra?: FonteHorasExtra;
+  /** Os minutos pagos nesta linha (so com `fonteHorasExtra`). */
+  minutos?: number;
 }
 
 /** Uma linha que vem da regra salarial (nao de um codigo): noturnas por faixa, IHT, km, ajudas. */
@@ -317,6 +339,8 @@ function calcularLinhasAutomaticas(
         origem,
         horas,
         valor,
+        // So quando a fonte NAO e bruto: com o interruptor desligado a linha gravada fica exactamente como sempre.
+        ...(totais.horasExtraFonte && totais.horasExtraFonte !== "bruto" ? { fonteHorasExtra: totais.horasExtraFonte, minutos: Number(minutos) } : {}),
       });
       continue;
     }
@@ -482,15 +506,22 @@ export function minutosTrabalhadosPorDia(dias: readonly DiaParaSubsidio[]): numb
 }
 
 /**
- * Os minutos de falta a descontar: o defice entre planeado e realizado,
- * DEPOIS de tirar as ausencias aprovadas e remuneradas. Nunca negativo:
- * `minutosAusenciaRemunerada` acima do defice nao gera credito.
+ * O desconto de faltas, POR FALTA (nunca o defice agregado do mes): a soma de `descontoDaFalta` de cada falta, com o valor
+ * hora real. Um dia planeado sem falta e sem picagem entra como falta NAO justificada ate o RH aprovar uma justificacao.
+ * Avisos: desconto provisorio (falta pendente de documento) e dias descontados por falta de picagem.
  */
-function calcularMinutosDeFalta(totais: EntradaProcessamentoPessoa["totais"]): number {
-  return Math.max(
-    totais.planeadoMinutos - (totais.contadoMinutos ?? totais.realizadoMinutos) - totais.minutosAusenciaRemunerada,
-    0,
-  );
+function calcularDescontoFaltas(
+  totais: EntradaProcessamentoPessoa["totais"],
+  valorHoraReal: number | null,
+  avisos: AvisoProcessamento[],
+): number {
+  if (valorHoraReal === null) return 0;
+  const faltas = totais.faltas ?? [];
+  const { valor, provisorio } = descontoDasFaltas(faltas, valorHoraReal, totais.limiteFaltaPorDia);
+  if (provisorio) avisos.push("faltas_provisorias");
+  const semPicagem = faltas.some((f) => f.semRegisto === true && f.minutos > 0);
+  if (semPicagem) avisos.push("dias_sem_picagem_descontados");
+  return valor;
 }
 
 /** Os lancamentos pontuais anulados nao contam; km e ajudas tem linha propria (`calcularLinhasRegra`). */
@@ -527,8 +558,7 @@ export function calcularProcessamentoPessoa(
   const linhasRegra = calcularLinhasRegra(entrada, retribuicaoMensal, valorHoraReal);
   const totalRegras = arredondarAoCentimo(linhasRegra.reduce((soma, linha) => soma + linha.valor, 0));
 
-  const descontoFaltas =
-    valorHoraReal === null ? 0 : arredondarAoCentimo((calcularMinutosDeFalta(entrada.totais) / 60) * valorHoraReal);
+  const descontoFaltas = calcularDescontoFaltas(entrada.totais, valorHoraReal, avisos);
 
   const subsidioAlimentacao = calcularSubsidioAlimentacao(entrada.regra, entrada.minutosPorDia, avisos);
 

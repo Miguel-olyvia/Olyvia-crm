@@ -63,7 +63,7 @@ export function ResumoPessoaProcessamentoOculto({
       pessoaId,
       relatorio.totais,
       relatorio.dias,
-      relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro,
+      relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relatorio.loading, relatorio.totais, relatorio.dias, pessoaId]);

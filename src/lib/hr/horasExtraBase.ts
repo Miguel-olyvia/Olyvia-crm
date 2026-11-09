@@ -256,6 +256,8 @@ const CODIGO_POR_SQLSTATE: Readonly<Record<string, string>> = {
   HRA83: "sobreposicao",
   HRA84: "intervalo_excedido",
   HRA85: "detecao_em_curso",
+  // Folha fechada (contagem das horas extra aprovadas): nada se cria nem decide num dia de uma folha fechada.
+  HRA87: "folha_fechada",
 };
 
 const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
@@ -275,6 +277,7 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   sobreposicao: "rhHeReal.erro.sobreposicao",
   intervalo_excedido: "rhHeReal.erro.intervaloExcedido",
   detecao_em_curso: "rhHeReal.erro.detecaoEmCurso",
+  folha_fechada: "rhHeReal.erro.folhaFechada",
   // So do cliente (nunca vem da base):
   pedido_em_curso: "rhHeReal.erro.pedidoEmCurso",
   intervalo_grande: "rhHeReal.erro.intervaloGrande",

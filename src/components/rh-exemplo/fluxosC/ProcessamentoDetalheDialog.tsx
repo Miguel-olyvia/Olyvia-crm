@@ -30,6 +30,8 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
   sem_regra_salarial: "hr.vencimento.visaoGeral.avisoSemRegraSalarial",
   sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
+  faltas_provisorias: "hr.vencimento.visaoGeral.avisoFaltasProvisorias",
+  dias_sem_picagem_descontados: "hr.vencimento.visaoGeral.avisoDiasSemPicagemDescontados",
 };
 
 const PERIODICIDADES = new Set(["mensal", "anual", "semanal", "diaria", "hora"]);

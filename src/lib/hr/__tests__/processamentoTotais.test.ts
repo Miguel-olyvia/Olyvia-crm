@@ -22,6 +22,13 @@ function diaBase(
   };
 }
 
+function faltasDoDefice(o: Partial<EntradaProcessamentoPessoa["totais"]>): EntradaProcessamentoPessoa["totais"]["faltas"] {
+  const minutos = Math.max((o.planeadoMinutos ?? 9600) - (o.contadoMinutos ?? o.realizadoMinutos ?? 0) - (o.minutosAusenciaRemunerada ?? 0), 0);
+  return minutos > 0
+    ? [{ data: "2026-01-15", minutos, estado: "activa", justificacao_estado: "sem_justificacao", remunerada: false, motivo_codigo: "ausencia_nao_comunicada" }]
+    : [];
+}
+
 function totaisBase(
   overrides: Partial<EntradaProcessamentoPessoa["totais"]> = {},
 ): EntradaProcessamentoPessoa["totais"] {
@@ -40,6 +47,9 @@ function totaisBase(
     diasFeriadoTrabalhados: 0,
     diasDescansoTrabalhado: 0,
     ...overrides,
+    // O desconto de faltas e POR FALTA (ver descontoFaltasProcessamento.test.ts). Estes testes descrevem o mes como um defice
+    // (planeado menos contado menos ausencia remunerada): vira UMA falta nao justificada com esse defice, sem alterar as contas.
+    faltas: overrides.faltas ?? faltasDoDefice(overrides),
   };
 }
 

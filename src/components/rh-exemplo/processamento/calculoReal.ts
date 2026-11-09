@@ -53,11 +53,15 @@ export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCal
       realizadoMinutos: totais.realizadoMinutos,
       // Margem de tempo: o desconto de faltas usa o que CONTA; sem margem e o realizado, como sempre.
       contadoMinutos: totais.contadoMinutos,
+      // Horas extra aprovadas: os minutos por origem ja vem nos totais; a fonte so fica registada nas linhas gravadas.
+      horasExtraFonte: totais.horasExtraFonte,
       minutosExtraNormal: totais.minutosExtraNormal,
       minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
       minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,
       horasExtraNoturnasMinutos: totais.horasExtraNoturnasMinutos,
       minutosAusenciaRemunerada: totais.minutosAusenciaRemunerada ?? 0,
+      faltas: totais.faltasParaDesconto ?? [],
+      limiteFaltaPorDia: totais.limiteFaltaPorDia,
       diasFeriadoTrabalhados: totais.diasFeriadoTrabalhados,
       diasDescansoTrabalhado: 0,
     },

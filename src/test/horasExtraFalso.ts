@@ -197,6 +197,8 @@ export function wrapperFalso() {
     lerAssinaturasDeDesvios: async (): Promise<Map<string, string>> => new Map(),
     prepararFechoComDesvios: async (): Promise<{ ok: true; assinaturas: Map<string, string> }> => ({ ok: true, assinaturas: new Map() }),
     detetarDesvios: async (): Promise<ResumoDeteccaoDesvios> => desviosBaseFalsa.resumoDeteccao,
+    // Horas extra aprovadas no fecho: sem assinaturas (nao ha contagem ligada na base falsa).
+    prepararFechoComHorasExtra: async (): Promise<{ ok: true; assinaturas: Map<string, string> }> => ({ ok: true, assinaturas: new Map() }),
 
     useDesviosMargem: (enabled = true) => {
       useSyncExternalStore(subscrever, lerVersao);
