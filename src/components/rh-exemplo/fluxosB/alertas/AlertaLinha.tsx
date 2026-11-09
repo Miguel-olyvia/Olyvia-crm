@@ -23,6 +23,7 @@ interface AlertaLinhaProps {
 
 const ROTULO_ACCAO: Record<AccaoDesvio, string> = {
   corrigir: "rhExemplo.pic.accao.corrigir",
+  lancar_picagem: "rhExemplo.pic.accao.lancar_picagem",
   marcar_falta: "rhExemplo.pic.accao.marcar_falta",
   anular_por_ausencia: "hr.assiduidade.accao.anularPorAusencia",
 };

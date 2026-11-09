@@ -1014,11 +1014,12 @@ export const TIPOS_DOCUMENTO_RH: readonly TipoDocumentoRH[] = [
 ];
 
 /** Dominio de `pessoas_documentos.estado`. Uma linha `assinado` e imutavel. */
-export type EstadoDocumentoRH = "rascunho" | "a_aguardar_assinatura" | "assinado" | "anulado";
+export type EstadoDocumentoRH = "rascunho" | "a_aguardar_assinatura" | "assinado" | "entregue" | "anulado";
 export const ESTADOS_DOCUMENTO_RH: readonly EstadoDocumentoRH[] = [
   "rascunho",
   "a_aguardar_assinatura",
   "assinado",
+  "entregue",
   "anulado",
 ];
 

@@ -289,7 +289,7 @@ function lerContexto(data: unknown): ContextoAnexo | null {
  * `em_falta` se nada chegou, `falhou` se o Storage falhou ou nao deu tamanho
  * utilizavel (fecha-se: sem tamanho nao se descarrega).
  */
-async function tamanhoNaQuarentena(
+export async function tamanhoNaQuarentena(
   quarentena: BucketAnexos,
   caminho: string,
   registarErro?: RegistarErro,

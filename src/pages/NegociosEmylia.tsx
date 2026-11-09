@@ -695,6 +695,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   if (codigosLidos && !permsPerfilALer && !vistaPermitida(S.view)) { S.view = "hoje"; S.deal = null; S.op = null; }
   const ctx: Ctx = { S, A, run, go, q, setQ, ...(fixarTecnico ? { tecnicoFixo: { ref: tecConta } } : {}),
     podeCriarNegocio: pode("pessoas.create"), podeVerNegocio: pode("pessoas.view"), podeVerInventario: pode("client_orders.view"),
+    idNegocioBase: (numero) => refs.current.get(numero)?.id ?? null,
     ...(soExecucao ? { leituraReduzida: true } : {}) };
   // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
   const semContaLigada = !!meus && !meus.todos && !meus.pessoa && meus.papeis.length === 0 && tecnicoPorPerfil;

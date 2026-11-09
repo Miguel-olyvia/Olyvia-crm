@@ -62,7 +62,7 @@ export const definicaoDoTipo = (tipo: TipoFila): DefinicaoDoTipo =>
   TIPOS_DE_ITEM.find((definicao) => definicao.tipo === tipo) ?? TIPOS_DE_ITEM[0];
 
 /** O que o RH pode fazer a um desvio (as mesmas tres accoes da fila de fim do dia). */
-export type AccaoDeDesvio = "corrigir" | "marcar_falta" | "anular_por_ausencia";
+export type AccaoDeDesvio = "corrigir" | "lancar_picagem" | "marcar_falta" | "anular_por_ausencia";
 
 interface ItemComum {
   /** Estavel entre leituras: distingue itens de tipos diferentes com o mesmo id. */
@@ -317,6 +317,7 @@ export type IdDeAccao =
   | "aceitar"
   | "recusar"
   | "corrigir"
+  | "lancar_picagem"
   | "marcar_falta"
   | "anular_por_ausencia"
   | "aprovar_chefia"
@@ -345,6 +346,8 @@ export type PermissoesDaFila = Pick<PermissoesAssiduidade, "gerir" | "corrigir" 
   aprovarChefia?: boolean;
   aprovarRh?: boolean;
   validarDesvios?: boolean;
+  /** Lancar uma picagem a outra pessoa (`hr.assiduidade.picar.outros`); sem ele «Corrigir o ponto» nao aparece. */
+  picarOutros?: boolean;
 };
 
 const CHAVE_SEM_JUSTIFICACAO = "rhFila.semPermissao.justificacao";
@@ -376,9 +379,12 @@ export function accoesDoItem(item: ItemFila, permissoes: PermissoesDaFila, minha
       return [accao("aceitar", permitida, porque), accao("recusar", permitida, porque)];
     }
     case "alerta":
-      return item.accoesPossiveis.map((id) =>
-        id === "corrigir" ? accao(id, permissoes.corrigir, CHAVE_SEM_CORRIGIR) : accao(id, permissoes.faltasEdit, CHAVE_SEM_FALTAS),
-      );
+      return item.accoesPossiveis
+        // Lancar a picagem de outra pessoa so existe para quem tem `picarOutros`: sem ele a accao nao aparece (nao fica desactivada).
+        .filter((id) => id !== "lancar_picagem" || permissoes.picarOutros === true)
+        .map((id) =>
+          id === "corrigir" ? accao(id, permissoes.corrigir, CHAVE_SEM_CORRIGIR) : accao(id, id === "lancar_picagem" ? true : permissoes.faltasEdit, CHAVE_SEM_FALTAS),
+        );
     case "desvio_a_validar": {
       // Ninguem valida os proprios desvios (a base recusa); diz-se primeiro, como nas justificacoes.
       const propria = minhaPessoaId !== null && item.pessoaId === minhaPessoaId;

@@ -18,6 +18,7 @@ import {
   type JustificacaoPicagem,
 } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
+import { AnexosDaJustificacao } from "@/components/rh-exemplo/anexosJustificacao/AnexosDaJustificacao";
 import { useJustificacoesDeDiaDaPessoa } from "@/components/rh-exemplo/calendarioPessoa/situacaoDoMes";
 import { ESTADO_DA_JUSTIFICACAO, textoEhSensivel, type EstadoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import type { JustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
@@ -47,6 +48,7 @@ function LinhaEnviadaDia({ j }: { j: JustificacaoDia }) {
       <span className="tabular-nums">{t("rhJust.aba.linha", { dia: formatarData(j.data), tipo: t(`rhJust.tipo.${j.tipo}`) })}</span>
       <span className="text-muted-foreground">{j.motivo === "" && textoEhSensivel(j) ? t("rhJust.rh.textoReservadoCurto") : j.motivo}</span>
       {j.estado === "recusada" && j.motivoRecusa && <span className="text-destructive">{t("rhJust.motivoRH", { motivo: j.motivoRecusa })}</span>}
+      <div className="basis-full"><AnexosDaJustificacao alvo={{ justificacaoDiaId: j.id }} /></div>
     </li>
   );
 }

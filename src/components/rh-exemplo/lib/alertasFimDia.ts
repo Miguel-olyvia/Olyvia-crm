@@ -195,7 +195,7 @@ export function alertasPorTratar(alertas: AlertaDia[]): AlertaDia[] {
 export const TOLERANCIAS_DESVIO = ["0", "5", "10", "15", "30"] as const;
 
 /** O que o RH pode fazer a um desvio, ligado a RPCs reais. Pedir justificacao e aceitar nao tem equivalente na base. */
-export type AccaoDesvio = "corrigir" | "marcar_falta" | "anular_por_ausencia";
+export type AccaoDesvio = "corrigir" | "lancar_picagem" | "marcar_falta" | "anular_por_ausencia";
 
 /** Uma chave estavel para a linha: a base nao da id ao desvio. */
 export function chaveDoDesvio(desvio: Desvio, indice: number): string {
@@ -209,11 +209,12 @@ export function chaveDoDesvio(desvio: Desvio, indice: number): string {
 export function accoesDoDesvio(desvio: Desvio): AccaoDesvio[] {
   switch (desvio.tipo) {
     case "planeado_sem_realizado":
-      return desvio.hora_inicio && desvio.hora_fim ? ["marcar_falta"] : [];
+      // «Corrigir o ponto» primeiro: a picagem esquecida e o caso mais comum; marcar falta continua disponivel.
+      return desvio.hora_inicio && desvio.hora_fim ? ["lancar_picagem", "marcar_falta"] : [];
     case "planeado_parcialmente_realizado":
       // O desvio traz o bloco planeado inteiro (nao o buraco exacto): o formulario abre com esse bloco e o RH
       // ajusta o inicio e o fim ao buraco real (o almoco nao picado, por exemplo) antes de gravar.
-      return desvio.hora_inicio && desvio.hora_fim ? ["marcar_falta"] : [];
+      return desvio.hora_inicio && desvio.hora_fim ? ["lancar_picagem", "marcar_falta"] : [];
     case "realizado_sem_planeado":
       return desvio.referencia_id ? ["corrigir"] : [];
     case "pendente_par":

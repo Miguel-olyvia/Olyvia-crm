@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { podeEnviar, type SituacaoDoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { useTranslation } from "@/hooks/useTranslation";
+import { AnexosDaJustificacao } from "@/components/rh-exemplo/anexosJustificacao/AnexosDaJustificacao";
 import { FormularioJustificacaoDia } from "./FormularioJustificacaoDia";
 import { IndicadorJustificacao } from "./IndicadorJustificacao";
 import { useJustificacoesDeDiaDaPessoa, situacaoDeUmDia } from "./situacaoDoMes";
@@ -39,6 +40,7 @@ function DetalheEnviado({ situacao }: { situacao: SituacaoDoDia }) {
     <div className="space-y-1 rounded-md border p-3 text-sm">
       <p className="text-xs text-muted-foreground">{t("rhJust.tipo." + j.tipo)} · {t("rhJust.enviadaEm", { data: formatarData(j.enviadaEm.slice(0, 10)) })}</p>
       <p>{j.motivo}</p>
+      <AnexosDaJustificacao alvo={{ justificacaoDiaId: j.id }} alvoAnexar={j.estado === "pendente" ? { justificacaoDiaId: j.id } : null} />
       {j.estado === "recusada" && j.motivoRecusa && <p className="text-destructive">{t("rhJust.motivoRH", { motivo: j.motivoRecusa })}</p>}
     </div>
   );

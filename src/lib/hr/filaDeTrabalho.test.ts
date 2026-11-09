@@ -34,7 +34,7 @@ const desvio = (parcial: Partial<Desvio> & Pick<Desvio, "pessoa_id" | "data">): 
   ({ organization_id: "o", tipo: "planeado_sem_realizado", hora_inicio: "09:00", hora_fim: "13:00", minutos: 240, planeado_id: "pl", local_id: null, referencia_id: null, detalhe: null, ...parcial }) as Desvio;
 
 const AJUDAS: AjudasDeDesvio = {
-  accoesDoDesvio: (d) => (d.tipo === "planeado_sem_realizado" ? ["marcar_falta"] : d.tipo === "realizado_sem_planeado" ? ["corrigir"] : []),
+  accoesDoDesvio: (d) => (d.tipo === "planeado_sem_realizado" ? ["lancar_picagem", "marcar_falta"] : d.tipo === "realizado_sem_planeado" ? ["corrigir"] : []),
   chaveDoDesvio: (d, i) => `${d.pessoa_id}|${d.data}|${i}`,
 };
 
@@ -164,10 +164,28 @@ describe("accoesDoItem", () => {
 
   it("alerta: corrigir exige corrigir, faltas exigem faltasEdit, cada accao com a sua razao", () => {
     const marcar = dela("al:rui|2026-10-25|0");
-    expect(accoesDoItem(marcar, { ...tudo, faltasEdit: false }, null)).toEqual([{ id: "marcar_falta", permitida: false, porque: "rhFila.semPermissao.faltas" }]);
+    expect(accoesDoItem(marcar, { ...tudo, picarOutros: true, faltasEdit: false }, null)).toEqual([
+      { id: "lancar_picagem", permitida: true, porque: null },
+      { id: "marcar_falta", permitida: false, porque: "rhFila.semPermissao.faltas" },
+    ]);
     const corrigir = dela("al:ines|2026-10-02|1");
     expect(accoesDoItem(corrigir, { ...tudo, corrigir: false }, null)).toEqual([{ id: "corrigir", permitida: false, porque: "rhFila.semPermissao.corrigir" }]);
     expect(accoesDoItem(corrigir, tudo, null)).toEqual([{ id: "corrigir", permitida: true, porque: null }]);
+  });
+
+  it("alerta: «lancar_picagem» so aparece a quem pode picar por outros; sem isso (ou sem o campo) nao aparece e marcar falta segue as suas", () => {
+    const marcar = dela("al:rui|2026-10-25|0");
+    expect(accoesDoItem(marcar, { ...tudo, picarOutros: false }, null)).toEqual([{ id: "marcar_falta", permitida: true, porque: null }]);
+    expect(accoesDoItem(marcar, tudo, null).map((a) => a.id)).toEqual(["marcar_falta"]);
+    expect(accoesDoItem(marcar, { ...tudo, picarOutros: true }, null).map((a) => [a.id, a.permitida])).toEqual([
+      ["lancar_picagem", true],
+      ["marcar_falta", true],
+    ]);
+    // Nao depende de corrigir nem de faltasEdit: so de picarOutros.
+    expect(accoesDoItem(marcar, { gerir: false, corrigir: false, faltasEdit: false, justificacaoEdit: false, picarOutros: true }, null).map((a) => [a.id, a.permitida])).toEqual([
+      ["lancar_picagem", true],
+      ["marcar_falta", false],
+    ]);
   });
 });
 

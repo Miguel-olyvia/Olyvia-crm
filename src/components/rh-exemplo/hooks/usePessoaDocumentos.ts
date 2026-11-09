@@ -5,14 +5,16 @@
 import {
   usePessoaDocumentos as usePessoaDocumentosReal,
   type UsePessoaDocumentosResult,
+  type UsePessoaDocumentosCompleto,
+  type DocumentoOcultado,
   type UrlFicheiroDocumento,
 } from "@/hooks/usePessoaDocumentos";
 
-export type { UsePessoaDocumentosResult, UrlFicheiroDocumento };
+export type { UsePessoaDocumentosResult, UsePessoaDocumentosCompleto, DocumentoOcultado, UrlFicheiroDocumento };
 
 export function usePessoaDocumentos(
   pessoaId: string | undefined,
   podeVerModelos: boolean,
-): UsePessoaDocumentosResult {
+): UsePessoaDocumentosCompleto {
   return usePessoaDocumentosReal(pessoaId, podeVerModelos);
 }
