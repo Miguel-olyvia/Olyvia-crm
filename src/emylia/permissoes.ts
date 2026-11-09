@@ -101,13 +101,19 @@ const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
   // 6/11: os passos da obra (as Operações) pedem negocios.obra.planear, como o motor (A.aprovarPlano, A.arrancar)
   gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"],
-  // 9/11 (Lote 1, L): «Verificar no ERP» é do pagamento (A.verificarErp pede negocios.validar_pagamento): sem ela, o botão fica desligado
-  // antes de qualquer leitura do Eticadata
-  verificarErp: ["finance.validate_payment"],
+};
+/** 9/11 (revisão do Lote 2): os passos que pedem UMA de várias permissões. «Verificar no ERP» (A.verificarErp) só lê o Eticadata: basta
+ *  negocios.registar_fatura OU negocios.validar_pagamento; sem nenhuma, o botão fica desligado antes de qualquer leitura. A primeira da
+ *  lista é a que se diz em falta. */
+const PERM_ALGUMA_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
+  verificarErp: ["finance.validate_payment", "finance.invoice"],
 };
 /** A primeira permissão que falta a quem está no ecrã para o passo `act` (null: tem todas, ou o passo não pede nenhuma). */
-export const permEmFaltaDoPasso = (S: { role: Papel }, act: string | undefined): PermNeg | null =>
-  (act ? PERM_DO_PASSO[act] ?? [] : []).find((x) => !podeNeg(S.role, x)) ?? null;
+export const permEmFaltaDoPasso = (S: { role: Papel }, act: string | undefined): PermNeg | null => {
+  const alguma = act ? PERM_ALGUMA_DO_PASSO[act] : undefined;
+  if (alguma) return alguma.some((x) => podeNeg(S.role, x)) ? null : alguma[0];
+  return (act ? PERM_DO_PASSO[act] ?? [] : []).find((x) => !podeNeg(S.role, x)) ?? null;
+};
 
 // 9/11 (Lote 1 de permissões): o papel no Negócio (o do RH, `S.role`, o «A ver como») continua a desbloquear o que desbloqueava; a isso
 // junta-se o caminho da permissão: com uma conta real, quem tem as permissões que o servidor exige para uma ação vê-a e faz-a, seja qual
@@ -118,6 +124,11 @@ export const comPermissoesReais = (): boolean => reais !== null;
 /** O caminho da permissão: só com conta real, e só se `ps` não é vazia e quem entrou as tem todas (podeNeg, fn_cat_pode). */
 export const pelaPermissao = (role: Papel, ps: readonly PermNeg[]): boolean =>
   !!reais && ps.length > 0 && ps.every((x) => podeNeg(role, x));
+/** O mesmo caminho, com UMA das permissões (os passos de PERM_ALGUMA_DO_PASSO). */
+export const pelaPermissaoAlguma = (role: Papel, ps: readonly PermNeg[]): boolean =>
+  !!reais && ps.length > 0 && ps.some((x) => podeNeg(role, x));
+/** «Verificar no ERP»: negocios.registar_fatura OU negocios.validar_pagamento (podeNeg: o papel ou, com conta real, a permissão). */
+export const podeVerificarErp = (role: Papel): boolean => PERM_ALGUMA_DO_PASSO.verificarErp.some((x) => podeNeg(role, x));
 /** Um código da base fora de PermNeg (ex. purchase_orders.approve, pessoas.edit), lido por fn_cat_pode como os outros
  *  (CODIGOS_NEGOCIOS). `null`: sem conta real (quem decide é o papel, como até aqui). */
 export const temCodigoReal = (codigo: string): boolean | null => (reais ? !!reais.codigos && reais.codigos.has(codigo) : null);
@@ -147,6 +158,7 @@ const PAPEIS_NEG: readonly string[] = Object.keys(PERMS_PAPEL);
 export function passoDe(role: Papel, who: string | null | undefined, act: string | undefined): boolean {
   if (!who || !PAPEIS_NEG.includes(who)) return false;
   if (who === role) return true;
+  if (act && PERM_ALGUMA_DO_PASSO[act]) return pelaPermissaoAlguma(role, PERM_ALGUMA_DO_PASSO[act]);
   return !!act && pelaPermissao(role, PERM_PELA_PERMISSAO[act] ?? []);
 }
 

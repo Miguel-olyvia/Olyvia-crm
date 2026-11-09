@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { eur, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { lerFaturaErp, resumoErp } from "./erpEticadata";
-import { SEM_PERM, pelaPermissao, podeNeg } from "./permissoes";
+import { SEM_PERM, pelaPermissao, pelaPermissaoAlguma, podeNeg, podeVerificarErp } from "./permissoes";
 
 /** De quanto em quanto tempo a Olyvia volta a ler o ERP enquanto a fatura está por pagar e o negócio está aberto. */
 const INTERVALO_MS = 60_000;
@@ -66,17 +66,20 @@ export function EstadoFaturaErp({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // continua a vê-los, mas só com ela (sem ela o servidor recusa sempre); com conta real, também quem a tem noutro papel. Verificado antes
   // de qualquer leitura do Eticadata (o intervalo também)
   const financeiro = (S.role === "financeiro" || pelaPermissao(S.role, ["finance.validate_payment"])) && podeNeg(S.role, "finance.validate_payment");
+  // 9/11 (revisão): «Verificar no ERP» só lê o Eticadata: basta negocios.registar_fatura OU negocios.validar_pagamento («Validar à mão»
+  // continua só com validar_pagamento)
+  const verificar = (S.role === "financeiro" || pelaPermissaoAlguma(S.role, ["finance.validate_payment", "finance.invoice"])) && podeVerificarErp(S.role);
   // enquanto o negócio está aberto e a fatura por pagar: lê já e depois a cada minuto (sem avisos, a não ser que o estado mude)
   useEffect(() => {
-    if (!porPagar || !i || !financeiro) return;
+    if (!porPagar || !i || !verificar) return;
     const t = setInterval(() => go(() => A.verificarErp(d.id, true))(), INTERVALO_MS);
     return () => clearInterval(t);
-  }, [porPagar, !!i, financeiro, d.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [porPagar, !!i, verificar, d.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!ft) return null;
   if (!i) return porPagar ? (
     <p className="rounded-xl border border-border bg-muted/40 p-4 text-[15px] text-muted-foreground">
       A {ft.n} foi registada sem ligação ao Eticadata. A Olyvia vai verificando sozinha se já foi paga, sempre que um PC na rede da empresa tiver a Olyvia aberta; até lá, pode validar o pagamento à mão no passo seguinte.
-      {financeiro && <> <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.verificarErp(d.id))}>Verificar no ERP</button></>}
+      {verificar && <> <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.verificarErp(d.id))}>Verificar no ERP</button></>}
     </p>
   ) : null;
   return (
@@ -105,10 +108,10 @@ export function EstadoFaturaErp({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       )}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
         <span>Lido a {new Date(i.lidaEm).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · {i.bd}{porPagar ? " · volta a ler a cada minuto" : ""}</span>
-        {porPagar && financeiro && (
+        {porPagar && (verificar || financeiro) && (
           <span className="flex gap-3">
-            <button type="button" className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.verificarErp(d.id))}><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Verificar agora</button>
-            <button type="button" className="font-medium underline-offset-4 hover:underline" onClick={go(() => A.validar(d.id))}>Validar à mão</button>
+            {verificar && <button type="button" className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.verificarErp(d.id))}><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Verificar agora</button>}
+            {financeiro && <button type="button" className="font-medium underline-offset-4 hover:underline" onClick={go(() => A.validar(d.id))}>Validar à mão</button>}
           </span>
         )}
       </div>

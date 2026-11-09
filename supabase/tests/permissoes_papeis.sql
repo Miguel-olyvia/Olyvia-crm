@@ -187,6 +187,11 @@ BEGIN
       OR NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND e.perfil)
       OR EXISTS (SELECT 1 FROM pessoas_papeis_negocio pp JOIN neg_papeis_permissoes m ON m.papel = pp.papel AND m.permission_code = 'pessoas.view'
                  WHERE pp.pessoa_id = v_pessoa_neg AND pp.organization_id = c_org)
+      -- 20270110910000: o back-office do Negócio no perfil também vê todos
+      OR EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id
+                 WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active' AND am.role_is_client IS NOT TRUE
+                   AND p.permission_code IN ('negocios.validar_pagamento', 'negocios.registar_fatura', 'negocios.obra.planear',
+                                             'negocios.obra.fechar', 'negocios.obra.imprevistos', 'purchase_orders.approve'))
       OR EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_membership_permission_scopes s ON s.membership_id = am.id
                  WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active'
                    AND s.permission_code = 'pessoas.view' AND s.scope_level = 'ORG');
@@ -301,6 +306,12 @@ BEGIN
       VALUES (a.rotulo, '3b neg_ler_negocios custos', 'sem dados', 'sem dados', 'OK', 'nenhum orçamento Emylia na organização');
     ELSE
       v_exp := CASE
+        -- 20270111100000: sem pessoas.view mas com negocios.obra.executar (perfil ou Papel no Negócio) lê a vista reduzida da obra,
+        -- sem orçamentos: "sem linhas" em vez de bloqueado
+        WHEN NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND (v_sa OR e.perfil OR e.papel))
+             AND (EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id AND p.permission_code = 'negocios.obra.executar'
+                          WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active' AND am.role_is_client IS NOT TRUE)
+                  OR EXISTS (SELECT 1 FROM neg_papeis_permissoes m WHERE m.permission_code = 'negocios.obra.executar' AND m.papel = ANY (v_papeis))) THEN 'sem linhas'
         WHEN NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND (v_sa OR e.perfil OR e.papel)) THEN 'bloqueado'
         WHEN v_neg_vis = 0 THEN 'sem linhas'   -- 20270110900000: nenhum negócio com orçamento Emylia no âmbito dela
         WHEN EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code IN ('quotes.view_costs', 'quotes.manage') AND (v_sa OR e.perfil OR e.papel)) THEN 'com custos'

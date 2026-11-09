@@ -17,8 +17,8 @@
 -- Cobre:
 --   A. Rafael comercial (OWNED): neg_ler_negocios / obra_ler_negocios só os dele (+ tarefas); neg_guardar_negocio e
 --      obra_guardar_negocio recusam o alheio e deixam o dele e o da tarefa; linha ORG vê tudo; TEAM vê os da equipa; NONE nada.
---   B. Só Papel no Negócio (Inês financeiro, Marta armazém, Paulo operações) e técnicos (Sérgio, Diogo): veem os mesmos que o
---      super_admin e passam a guarda de âmbito ao gravar.
+--   B. Só Papel no Negócio (Inês financeiro, Marta armazém, Paulo operações): veem os mesmos que o super_admin e não têm guarda de
+--      âmbito ao gravar. Técnicos (Sérgio, Diogo): não perdem nenhum negócio onde têm tarefas, nem a obra dele ao gravar.
 --   C. super_admin (Miguel tester): vê tudo e passa as guardas.
 --   D. rpc_save_quote: sem quotes.edit/quotes.create falha; com permissão grava o dele; orçamento alheio (OWNED) falha.
 --   E. SELECT de quotes / proposals / client_contracts: OWNED = o conjunto esperado (e contém o "meu" de cada ecrã); ORG = tudo.
@@ -26,6 +26,10 @@
 --   G. NONE no servidor: crm_scope_keys vazio, get_schedule_item_scope_context = NONE sem donos, get_proposal_edit_scope = NULL;
 --      get_proposal_edit_scope do super_admin = ORG.
 --   H. soft_delete_business_entity (quote) e cancel_and_replace_contract com âmbito.
+--   I. (20270110910000) back-office do Negócio no perfil (validar_pagamento, registar_fatura, obra.planear/fechar/imprevistos,
+--      purchase_orders.approve) = todos os negócios; o comercial (com margem.aprovar) continua com o âmbito.
+--   J. (20270110910000) fn_doc_no_ambito chamada à mão: outra organização, chaves de outra, orgs/tarefas inventadas = false.
+--   K. (20270110910000) DELETE direto de quotes/proposals com as chaves de *.delete (view=ORG não chega).
 -- ============================================================
 
 BEGIN;
@@ -75,8 +79,10 @@ DECLARE
   c_miguel  CONSTANT uuid := 'ba0b0ebf-1bdb-43f9-b82b-a2ade29848e2';  -- super_admin (tester)
   c_outro   CONSTANT uuid := '231e2bef-141e-6d0d-f63d-8edbb403d309';  -- Helena: dona dos negócios da equipa (TEAM)
   c_papel   CONSTANT text[] := ARRAY['ines.lourenco@teste-rh.olyvia.invalid', 'marta.sequeira@teste-rh.olyvia.invalid',
-                                     'paulo.nogueira@teste-rh.olyvia.invalid', 'sergio.matos@teste-rh.olyvia.invalid',
-                                     'diogo.pereira@teste-rh.olyvia.invalid'];
+                                     'paulo.nogueira@teste-rh.olyvia.invalid'];
+  -- técnicos sem pessoas.view: desde 20270111100000 leem a vista reduzida (só os negócios onde trabalham); aqui verifica-se que não
+  -- perdem nenhum negócio onde têm tarefas
+  c_tec     CONSTANT text[] := ARRAY['sergio.matos@teste-rh.olyvia.invalid', 'diogo.pereira@teste-rh.olyvia.invalid'];
   c_guarda_neg CONSTANT text := 'fora do seu âmbito';
   v_ra       uuid;   -- auth do Rafael
   v_ma       uuid;   -- auth do Miguel
@@ -109,8 +115,8 @@ BEGIN
     RAISE EXCEPTION 'ABORTADO: esta base não tem a migration 20270110900000 (fn_doc_no_ambito)';
   END IF;
 
-  -- ── preparação (postgres, sem sessão) ─────────────────────────────────────
-  PERFORM set_config('request.jwt.claims', '', true);
+  -- ── preparação (postgres, sem sessão; '{}' porque há gatilhos que leem as claims como JSON) ──
+  PERFORM set_config('request.jwt.claims', '{}', true);
   PERFORM set_config('request.jwt.claim.sub', '', true);
   SELECT auth_user_id INTO v_ra FROM anew_users WHERE id = c_rafael;
   SELECT auth_user_id INTO v_ma FROM anew_users WHERE id = c_miguel;
@@ -159,7 +165,7 @@ BEGIN
   UPDATE quotes SET created_by = c_rafael WHERE id = v_q_meu;
   SELECT p.id INTO v_p_meu FROM proposals p WHERE p.organization_id = c_org AND p.deleted_at IS NULL
     AND p.negocio_id IS DISTINCT FROM v_n_meu ORDER BY p.created_at LIMIT 1;
-  UPDATE proposals SET created_by = c_rafael WHERE id = v_p_meu;
+  UPDATE proposals SET assigned_to = c_rafael WHERE id = v_p_meu;  -- created_by está protegido (trg_lock_proposal_ownership)
   SELECT c.id INTO v_c_meu FROM client_contracts c WHERE c.organization_id = c_org AND c.deleted_at IS NULL
     AND c.negocio_id IS DISTINCT FROM v_n_meu ORDER BY c.created_at LIMIT 1;
   UPDATE client_contracts SET created_by = c_rafael WHERE id = v_c_meu;
@@ -280,6 +286,24 @@ BEGIN
     PERFORM pg_temp.amb_reg(a.email, 'B4 obra_guardar_negocio: guarda de âmbito', 'não aplica', CASE WHEN v_res ~* c_guarda_neg THEN 'bloqueado pelo âmbito' ELSE 'não aplica' END, left(v_res, 160));
   END LOOP;
 
+  FOR a IN SELECT u.email, u.auth_user_id, u.id FROM anew_users u WHERE u.email = ANY (c_tec) ORDER BY u.email LOOP
+    SELECT string_agg(DISTINCT o.negocio_id::text, ',' ORDER BY o.negocio_id::text) INTO v_esp
+    FROM ops_obra o JOIN negocios n ON n.id = o.negocio_id AND n.deleted_at IS NULL AND n.numero IS NOT NULL
+    JOIN pessoas_contas pc ON pc.anew_user_id = a.id AND pc.organization_id = c_org AND pc.estado = 'activa' AND pc.revogada_em IS NULL
+    WHERE o.organization_id = c_org
+      AND (EXISTS (SELECT 1 FROM ops_obra_tarefa_rh r WHERE r.obra_id = o.id AND r.pessoa_id = pc.pessoa_id)
+           OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.estado_emylia->'plano'->'tasks') = 'array'
+                                 THEN o.estado_emylia->'plano'->'tasks' ELSE '[]'::jsonb END) t WHERE t->>'tec' = pc.pessoa_id::text));
+    v_obt := pg_temp.amb_exec(a.auth_user_id, format($q$SELECT string_agg(e->'negocio'->>'id', ',') FROM jsonb_array_elements(public.neg_ler_negocios(%L)) e$q$, c_org));
+    PERFORM pg_temp.amb_reg(a.email, 'B5 técnico: neg_ler_negocios inclui todos os negócios com tarefas dele', 'sim',
+      CASE WHEN v_esp IS NULL THEN 'sim' WHEN v_obt IS NULL THEN 'não'
+           WHEN (SELECT bool_and(x = ANY (string_to_array(v_obt, ','))) FROM unnest(string_to_array(v_esp, ',')) x) THEN 'sim' ELSE 'não' END,
+      format('com tarefas: %s', coalesce(v_esp, '-')));
+    v_res := pg_temp.amb_exec(a.auth_user_id, format($q$SELECT 'passou' FROM public.obra_guardar_negocio(%L, %L, '{}'::jsonb)$q$, c_org, coalesce(split_part(v_esp, ',', 1)::uuid, v_n_alh)));
+    PERFORM pg_temp.amb_reg(a.email, 'B6 técnico: obra_guardar_negocio da obra dele sem a guarda de âmbito', 'não aplica',
+      CASE WHEN v_res ~* c_guarda_neg THEN 'bloqueado pelo âmbito' ELSE 'não aplica' END, left(v_res, 160));
+  END LOOP;
+
   -- ── C. super_admin ──────────────────────────────────────────────────────────
   v_obt := pg_temp.amb_exec(v_ma, format('SELECT jsonb_array_length(public.neg_ler_negocios(%L))::text', c_org));
   PERFORM pg_temp.amb_reg('Miguel super_admin', 'C1 neg_ler_negocios = todos', v_total::text, v_obt);
@@ -372,6 +396,52 @@ BEGIN
   END IF;
   v_res := pg_temp.amb_exec(v_ma, format($q$SELECT public.cancel_and_replace_contract(%L, 'teste', false)::text$q$, coalesce(v_c_alh, v_c_meu)));
   PERFORM pg_temp.amb_reg('Miguel super_admin', 'H5 cancel_and_replace_contract alheio', 'passou a guarda', pg_temp.amb_guarda(v_res, 'insufficient_permission'), left(v_res, 160));
+
+  -- ── I (20270110910000). back-office do Negócio no PERFIL = todos os negócios ──
+  -- o comercial tem negocios.margem.aprovar no perfil e continua com o âmbito (A1); com uma permissão de back-office vê/grava todos
+  FOR a IN SELECT unnest(ARRAY['negocios.validar_pagamento', 'negocios.registar_fatura', 'negocios.obra.planear', 'negocios.obra.fechar',
+                               'negocios.obra.imprevistos', 'purchase_orders.approve']) AS codigo LOOP
+    INSERT INTO anew_role_permissions (role_id, permission_code) VALUES (v_role_com, a.codigo);
+    v_obt := pg_temp.amb_exec(v_ra, format('SELECT jsonb_array_length(public.neg_ler_negocios(%L))::text', c_org));
+    PERFORM pg_temp.amb_reg('Rafael comercial + ' || a.codigo, 'I1 neg_ler_negocios = todos', v_total::text, v_obt);
+    v_res := pg_temp.amb_exec(v_ra, format($q$SELECT 'passou' FROM public.neg_guardar_negocio(%L, %L, '{}'::jsonb)$q$, c_org, v_n_alh));
+    PERFORM pg_temp.amb_reg('Rafael comercial + ' || a.codigo, 'I2 neg_guardar_negocio alheio', 'passou a guarda', pg_temp.amb_guarda(v_res, c_guarda_neg), left(v_res, 160));
+    DELETE FROM anew_role_permissions WHERE role_id = v_role_com AND permission_code = a.codigo;
+  END LOOP;
+  v_obt := pg_temp.amb_exec(v_ra, format('SELECT jsonb_array_length(public.neg_ler_negocios(%L))::text', c_org));
+  PERFORM pg_temp.amb_reg('Rafael comercial (com margem.aprovar)', 'I3 neg_ler_negocios continua com o âmbito',
+    (SELECT count(*)::text FROM negocios WHERE id IN (SELECT id FROM _neg_meus) AND numero IS NOT NULL), v_obt, 'os dele + a tarefa');
+
+  -- ── J (20270110910000). fn_doc_no_ambito chamada à mão não aceita outra organização nem chaves de outra ──
+  IF v_q_alh IS NOT NULL THEN
+    v_obt := pg_temp.amb_exec(v_ra, format($q$SELECT public.fn_doc_no_ambito('quote', %L, %L, ARRAY[%L || ':*'], '{}', '{}', '{}')::text$q$,
+                                           v_q_alh, gen_random_uuid(), gen_random_uuid()));
+    PERFORM pg_temp.amb_reg('Rafael comercial OWNED', 'J1 fn_doc_no_ambito com p_org que não é dele', 'false', v_obt);
+    v_obt := pg_temp.amb_exec(v_ra, format($q$SELECT public.fn_doc_no_ambito('quote', %L, %L, ARRAY[%L || ':*'], '{}', '{}', '{}')::text$q$,
+                                           v_q_alh, c_org, gen_random_uuid()));
+    PERFORM pg_temp.amb_reg('Rafael comercial OWNED', 'J2 fn_doc_no_ambito com chaves de outra organização', 'false', v_obt);
+    v_obt := pg_temp.amb_exec(v_ra, format($q$SELECT public.fn_doc_no_ambito('quote', %L, %L, '{}', '{}', ARRAY[%L]::uuid[], ARRAY[%L]::uuid[])::text$q$,
+                                           v_q_alh, c_org, gen_random_uuid(), gen_random_uuid()));
+    PERFORM pg_temp.amb_reg('Rafael comercial OWNED', 'J3 fn_doc_no_ambito com orgs/tarefas inventadas', 'false', v_obt);
+  END IF;
+
+  -- ── K (20270110910000). DELETE com as chaves da ação: *.view=ORG, *.delete sem linha (OWNED) ──
+  INSERT INTO anew_membership_permission_scopes (membership_id, permission_code, scope_level)
+  VALUES (v_memb, 'quotes.view', 'ORG'), (v_memb, 'proposals.view', 'ORG');
+  IF v_q_alh IS NOT NULL THEN
+    v_obt := pg_temp.amb_exec(v_ra, format($q$WITH x AS (DELETE FROM quotes WHERE id = %L RETURNING 1) SELECT count(*)::text FROM x$q$, v_q_alh));
+    PERFORM pg_temp.amb_reg('Rafael quotes.view=ORG, delete OWNED', 'K1 DELETE direto do orçamento alheio', '0', v_obt, 'antes de 20270110910000 a policy usava as chaves de view');
+  END IF;
+  SELECT p.id INTO v_ids FROM proposals p WHERE p.organization_id = c_org AND p.id <> v_p_meu
+    AND coalesce(p.created_by::text, '') NOT IN (c_rafael::text, v_ra::text) AND coalesce(p.assigned_to::text, '') NOT IN (c_rafael::text, v_ra::text) LIMIT 1;
+  IF v_ids IS NOT NULL THEN
+    v_obt := pg_temp.amb_exec(v_ra, format($q$WITH x AS (DELETE FROM proposals WHERE id = %L RETURNING 1) SELECT count(*)::text FROM x$q$, v_ids));
+    PERFORM pg_temp.amb_reg('Rafael proposals.view=ORG, delete OWNED', 'K2 DELETE direto da proposta alheia', '0', v_obt);
+  END IF;
+  v_res := pg_temp.amb_exec(v_ra, format($q$WITH x AS (DELETE FROM proposals WHERE id = %L RETURNING 1) SELECT count(*)::text FROM x$q$, v_p_meu));
+  PERFORM pg_temp.amb_reg('Rafael proposals.view=ORG, delete OWNED', 'K3 DELETE direto da proposta dele', 'não bloqueado pela policy',
+    CASE WHEN v_res = '0' THEN 'bloqueado pela policy' ELSE 'não bloqueado pela policy' END, left(v_res, 160));
+  DELETE FROM anew_membership_permission_scopes WHERE membership_id = v_memb;
 
   -- repor (o ROLLBACK final também desfaz)
   UPDATE anew_memberships SET role_id = v_role_ori WHERE id = v_memb;

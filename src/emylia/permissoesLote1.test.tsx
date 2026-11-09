@@ -14,7 +14,7 @@ vi.mock("./erpEticadata", async (orig) => ({ ...(await orig<typeof import("./erp
 import { acoes, minhas, proximo, seed, type Aviso, type Estado, type Negocio, type Papel } from "./motor";
 import {
   CODIGO_APROVAR_PO, CODIGO_BASE, CODIGO_ESCREVER_CONVERSA, CODIGO_GERIR_ORCAMENTOS, CODIGO_VER_CUSTOS, SEM_PERM, comPermissoesReais,
-  definirPermissoesReais, passoDe, pelaPermissao, permEmFaltaDoPasso, podeAprovarPo, podeVerCustos, semEnvioNaConversa, temCodigoReal,
+  definirPermissoesReais, passoDe, pelaPermissao, permEmFaltaDoPasso, podeAprovarPo, podeVerCustos, podeVerificarErp, semEnvioNaConversa, temCodigoReal,
   type PermNeg,
 } from "./permissoes";
 import { CODIGOS_NEGOCIOS } from "./permissoesReais";
@@ -71,11 +71,21 @@ describe("B · passoDe: o papel continua; com conta real, a permissão do passo 
     expect(passoDe("financeiro", null, "contactar")).toBe(false);
   });
 
-  it("Verificar no ERP passa a pedir negocios.validar_pagamento (antes de ler o Eticadata)", () => {
+  it("Verificar no ERP pede negocios.registar_fatura OU negocios.validar_pagamento (antes de ler o Eticadata)", () => {
     reais([]);
     expect(permEmFaltaDoPasso({ role: "financeiro" }, "verificarErp")).toBe("finance.validate_payment");
+    expect(podeVerificarErp("financeiro")).toBe(false);
     reais(["finance.validate_payment"]);
     expect(permEmFaltaDoPasso({ role: "financeiro" }, "verificarErp")).toBeNull();
+    expect(podeVerificarErp("financeiro")).toBe(true);
+    // só a fatura (negocios.registar_fatura) também basta: a leitura do Eticadata não valida nada
+    reais(["finance.invoice"]);
+    expect(permEmFaltaDoPasso({ role: "financeiro" }, "verificarErp")).toBeNull();
+    expect(podeVerificarErp("financeiro")).toBe(true);
+    // pela permissão, noutro papel: basta uma das duas
+    expect(passoDe("comercial", "financeiro", "verificarErp")).toBe(true);
+    reais(["visita.gerir"]);
+    expect(passoDe("comercial", "financeiro", "verificarErp")).toBe(false);
     definirPermissoesReais(null);
     expect(permEmFaltaDoPasso({ role: "financeiro" }, "verificarErp")).toBeNull();
   });
