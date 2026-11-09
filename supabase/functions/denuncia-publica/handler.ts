@@ -16,13 +16,15 @@
  *                Anonima: o JWT e IGNORADO e nao existe identidade. Identificada: com JWT
  *                valido passa o id do Auth (a base resolve a conta e tira nome e email dela).
  *  - "entrar":   {slug, codigo, pin} -> {sessao} (30 min; a base guarda so o SHA-256).
- *                Codigo inexistente, PIN errado, bloqueada e limite: MESMA resposta e MESMO tempo.
+ *                Codigo inexistente, PIN errado, bloqueada e limite da RPC: MESMA resposta e MESMO tempo.
+ *                O limite do balde `canal` e outra coisa: um 429 que nao depende de o codigo existir, e
+ *                CADA tentativa de entrar consome tambem esse balde (antes de ler o canal).
  *  - "ler" / "responder": sessao no cabecalho `x-denuncia-sessao` (nunca no URL nem no corpo)
  *                -> {ok, denuncia: <vista do denunciante>}.
  *  - anexos: fase 2 (410).
  *
  * LIMITES: correm na base, atomicos, e FALHAM FECHADOS (erro do limitador = 503). Criar e
- * entrar contam DENTRO das proprias RPCs (reservar_codigo e entrar, com `p_chave_ip`); ver o
+ * entrar contam DENTRO das proprias RPCs (reservar_codigo e entrar, com `p_chave_ip`); entrar gasta ainda o balde `canal`; ver o
  * canal e ler/responder contam em `rpc_denuncia_publica_limitar`. A chave e o HMAC do IP
  * (pepper proprio, com o dia); sem IP so contam os baldes da organizacao/globais. Nunca se
  * conta pela sessao (ligava a contagem a uma denuncia).
@@ -282,6 +284,11 @@ async function entrarSemEspera(ctx: Contexto, payload: Objecto): Promise<Respons
   const codigo = typeof payload.codigo === "string" ? normalizarCodigo(payload.codigo) : "";
   const pin = typeof payload.pin === "string" ? normalizarPin(payload.pin) : "";
   if (!slug || !CODIGO_DEN.test(codigo) || !PIN_6.test(pin)) return recusaUniforme(ctx);
+
+  // A leitura do canal tambem conta no balde 'canal' (como o ramo canal): a RPC de entrar so conta DEPOIS dela, e sem isto quem
+  // experimenta codigos lia o canal sem limite. A recusa e a do limitador (429/503): nao depende de o codigo existir.
+  const recusa = await travar(ctx, "canal");
+  if (recusa) return recusa;
 
   // O id da organizacao so serve de sal ao HMAC do PIN; a base volta a resolve-la pelo slug.
   const canal = await lerCanal(ctx, slug);

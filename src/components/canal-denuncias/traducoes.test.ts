@@ -33,11 +33,13 @@ const dinamicas = [
     // os da base real (HRD09..HRD20) e os do cliente: têm de ter texto, porque a base devolve-os e o ecrã di-los
     "nao_encontrada", "confirmar_primeiro", "anonima", "motivo_identidade", "limite_anexos", "nao_e_responsavel", "impedimento_invalido",
     "so_responsavel", "sem_permissao", "slug_em_uso", "canal_inativo", "anonima_imutavel", "indisponivel", "sessao_expirada",
+    // os novos da base (HRD23, HRD25, HRD27, HRD28)
+    "dados_invalidos", "limite_mensagens", "campo_imutavel", "sem_responsaveis",
     // os da Edge pública (demasiadas_tentativas e pedido_invalido)
     "limite", "pedido_invalido"].map((e) => `cd.erroAcao.${e}`),
   ...["recebida", "rececao_confirmada", "responsavel_atribuido", "conflito_declarado", "mensagem_enviada", "informacao_pedida",
     "denunciante_respondeu", "gravidade_alterada", "nota_adicionada", "concluida", "arquivada", "reaberta", "identidade_vista",
-    "responsavel_libertado", "visado_registado", "exportada", "anexo_aberto"].map((a) => `cd.hist.${a}`),
+    "responsavel_libertado", "visado_registado", "exportada", "anexo_aberto", "consultada", "avaliacao_alterada", "impedimento_retirado"].map((a) => `cd.hist.${a}`),
 ];
 
 describe("traduções do canal de denúncias", () => {
@@ -52,6 +54,13 @@ describe("traduções do canal de denúncias", () => {
     expect(literais.length).toBeGreaterThan(100);
     const faltam = Array.from(new Set([...literais, ...dinamicas])).filter((k) => !(k in tr.pt) || !(k in tr.en));
     expect(faltam).toEqual([]);
+  });
+
+  it("HRD14 e HRD23 soam iguais (sem revelar se a pessoa não é membro, é visada ou tem conflito oculto) e sem nome", () => {
+    for (const lingua of [tr.pt, tr.en]) {
+      expect(lingua["cd.erroAcao.nao_e_responsavel"]).toBe(lingua["cd.erroAcao.dados_invalidos"]);
+      expect(lingua["cd.erroAcao.nao_e_responsavel"]).not.toMatch(/\{nome\}|visad|conflit|named|conflict|member|membro/i);
+    }
   });
 
   it("os erros de ação e os estados cobrem as transições definidas", () => {

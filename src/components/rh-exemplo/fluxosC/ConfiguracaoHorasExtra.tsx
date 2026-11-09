@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { CoeficientesHorasExtraReais } from "./CoeficientesHorasExtraReais";
+import { ContagemHorasExtraAprovadas } from "./ContagemHorasExtraAprovadas";
 import { useHorasExtraConfig } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
 import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
@@ -117,6 +118,8 @@ export function ConfiguracaoHorasExtra({ aoIrParaRegrasSalariais }: Configuracao
           <Button type="button" className="min-h-11" disabled={!regrasValidas || !editavel || aGuardar} onClick={() => void guardarRegras()}>{t("rhFluxosC.comum.guardar")}</Button>
         </CardContent>
       </Card>
+
+      <ContagemHorasExtraAprovadas />
 
       <CoeficientesHorasExtraReais />
     </div>

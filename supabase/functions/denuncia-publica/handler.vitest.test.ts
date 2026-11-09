@@ -11,7 +11,7 @@
  */
 import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { criarHandler, type DepsDenuncia } from "./handler.ts";
+import { criarHandler, ENTRAR_MINIMO_MS, type DepsDenuncia } from "./handler.ts";
 
 const ORG = "b6ffce4f-f630-4933-833a-008649757a33";
 const UTILIZADOR = "33333333-3333-4333-8333-333333333333";
@@ -42,6 +42,8 @@ interface Opcoes {
   ipDoPedido?: (req: Request) => string | null;
   /** Usa o ipDoPedido real do modulo ip.ts em vez de um IP fixo. */
   ipReal?: boolean;
+  /** Relogio controlado: cada chamada a uma RPC gasta estes milissegundos, e dormir faz o relogio avancar. */
+  msPorRpc?: number;
 }
 
 const hex = (texto: string) => createHash("sha256").update(texto).digest("hex");
@@ -71,6 +73,7 @@ function montar(opcoes: Opcoes = {}) {
   const contagem: Record<string, number> = {};
   const erros: Error[] = [];
   const esperas: number[] = [];
+  let relogio = 1_000_000;
   const getUserChamado: string[] = [];
   const clientesCriados: string[] = [];
 
@@ -99,6 +102,7 @@ function montar(opcoes: Opcoes = {}) {
     },
     rpc: async (fn: string, args: Record<string, unknown>) => {
       rpcs.push({ fn, args });
+      relogio += opcoes.msPorRpc ?? 0;
       contagem[fn] = (contagem[fn] ?? 0) + 1;
       const m = manipuladores[fn];
       return m ? m(args, contagem[fn]) : { data: null, error: { message: "funcao inexistente", code: "42883" } };
@@ -117,10 +121,11 @@ function montar(opcoes: Opcoes = {}) {
     registarErro: (e) => erros.push(e),
     corsHeaders: () => ({ "Access-Control-Allow-Origin": "https://www.olyvia-ai.com", Vary: "Origin" }),
     ...(opcoes.ipReal ? {} : { ipDoPedido: opcoes.ipDoPedido ?? (() => IP) }),
-    agora: () => 1_000_000,
+    agora: () => relogio,
     hoje: () => "2026-10-28",
     dormir: async (ms) => {
       esperas.push(ms);
+      relogio += ms;
     },
   };
   const handler = criarHandler(deps);
@@ -630,7 +635,7 @@ describe("entrar (codigo + PIN)", () => {
     expect(t.chamadas("rpc_denuncia_publica_entrar")[0].args.p_codigo).toBe(CODIGO);
   });
 
-  it("codigo inexistente, PIN errado, limite e denuncia bloqueada: MESMA resposta, MESMO estado, MESMO tempo", async () => {
+  it("codigo inexistente, PIN errado, limite da RPC e denuncia bloqueada: MESMA resposta, MESMO estado, MESMO tempo (o 429 do balde canal e outro caso: nao depende do codigo)", async () => {
     const naoExiste = montar({ rpc: { rpc_denuncia_publica_canal: () => ({ data: { ativo: false }, error: null }) } });
     const pinErrado = montar({ rpc: { rpc_denuncia_publica_entrar: () => ({ data: false, error: null }) } });
     const formatoMau = montar();
@@ -652,6 +657,47 @@ describe("entrar (codigo + PIN)", () => {
     expect(naoExiste.chamadas("rpc_denuncia_publica_entrar")).toHaveLength(0);
   });
 
+  it("a leitura do canal conta no balde 'canal' (pela chave do IP) ANTES de lerCanal; acima do limite nao le o canal nem tenta entrar", async () => {
+    const t = montar();
+    await t.chamar(entrar());
+    expect(t.rpcs.map((c) => c.fn)).toEqual(["rpc_denuncia_publica_limitar", "rpc_denuncia_publica_canal", "rpc_denuncia_publica_entrar"]);
+    expect(t.chamadas("rpc_denuncia_publica_limitar")[0].args).toEqual({ p_balde: "canal", p_chave_ip: chaveDoIp(IP) });
+
+    const bloqueado = montar({ rpc: { rpc_denuncia_publica_limitar: () => ({ data: false, error: null }) } });
+    const r = await bloqueado.chamar(entrar());
+    expect(r.res.status).toBe(429);
+    expect(r.json).toEqual({ error: "demasiadas_tentativas" });
+    expect(bloqueado.chamadas("rpc_denuncia_publica_canal")).toHaveLength(0);
+    expect(bloqueado.chamadas("rpc_denuncia_publica_entrar")).toHaveLength(0);
+    // continua a esperar o minimo: o tempo nao distingue este caso do resto
+    expect(bloqueado.esperas).toEqual(t.esperas);
+  });
+
+  it("limitador avariado ao entrar: 503 (falha fechada) sem ler o canal; formato mau nao gasta quota", async () => {
+    const avariado = montar({ rpc: { rpc_denuncia_publica_limitar: () => ({ data: null, error: { code: "XX000", message: "x" } }) } });
+    const r = await avariado.chamar(entrar());
+    expect(r.res.status).toBe(503);
+    expect(avariado.chamadas("rpc_denuncia_publica_canal")).toHaveLength(0);
+    const formatoMau = montar();
+    await formatoMau.chamar(entrar({ codigo: "lixo", pin: "abc" }));
+    expect(formatoMau.chamadas("rpc_denuncia_publica_limitar")).toHaveLength(0);
+  });
+  it("o tempo minimo de entrar cobre os TRES passos (limitar, canal e entrar): o que falta e o minimo menos o que ja passou", async () => {
+    // 3 RPCs x 100 ms = 300 ms gastos; falta 100 ms para os 400 do minimo, e o relogio acaba nos 400 exactos.
+    const lenta = montar({ msPorRpc: 100 });
+    const a = await lenta.chamar(entrar());
+    expect(a.res.status).toBe(200);
+    expect(lenta.rpcs.map((c) => c.fn)).toEqual(["rpc_denuncia_publica_limitar", "rpc_denuncia_publica_canal", "rpc_denuncia_publica_entrar"]);
+    expect(lenta.esperas).toEqual([ENTRAR_MINIMO_MS - 300]);
+    // acerto e falha gastam o mesmo: a falha (PIN errado) espera igual
+    const errada = montar({ msPorRpc: 100, rpc: { rpc_denuncia_publica_entrar: () => ({ data: false, error: null }) } });
+    await errada.chamar(entrar());
+    expect(errada.esperas).toEqual(lenta.esperas);
+    // ja passou o minimo (3 x 150 = 450 ms): nao espera nada
+    const muitoLenta = montar({ msPorRpc: 150 });
+    await muitoLenta.chamar(entrar());
+    expect(muitoLenta.esperas).toEqual([]);
+  });
   it("o sucesso espera o mesmo minimo que a falha (nao se distingue pelo tempo)", async () => {
     const ok = montar();
     const ko = montar({ rpc: { rpc_denuncia_publica_entrar: () => ({ data: false, error: null }) } });

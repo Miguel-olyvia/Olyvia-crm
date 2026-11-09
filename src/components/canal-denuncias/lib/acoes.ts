@@ -32,6 +32,12 @@ export type ErroAcao =
   | "slug_em_uso"
   | "canal_inativo"
   | "anonima_imutavel"
+  // HRD23, HRD25, HRD27 e HRD28 (migration 20270111300000): dados inválidos (também ao designar quem não pode ficar com o caso, de propósito),
+  // limite de mensagens do denunciante, campo imutável e canal sem quem o trate.
+  | "dados_invalidos"
+  | "limite_mensagens"
+  | "campo_imutavel"
+  | "sem_responsaveis"
   | "indisponivel"
   | "sessao_expirada"
   // Da Edge pública: demasiados pedidos («demasiadas_tentativas») e um pedido que ela recusou («pedido_invalido»).

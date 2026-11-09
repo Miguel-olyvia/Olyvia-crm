@@ -25,6 +25,7 @@ describe("erros da base", () => {
     ["HRD10", "confirmar_primeiro"], ["HRD11", "anonima"], ["HRD12", "motivo_identidade"], ["HRD13", "limite_anexos"],
     ["HRD14", "nao_e_responsavel"], ["HRD15", "impedimento_invalido"], ["HRD16", "so_responsavel"], ["HRD17", "sem_permissao"],
     ["HRD18", "slug_em_uso"], ["HRD19", "canal_inativo"], ["HRD20", "anonima_imutavel"], ["42501", "sem_permissao"],
+    ["HRD23", "dados_invalidos"], ["HRD25", "limite_mensagens"], ["HRD27", "campo_imutavel"], ["HRD28", "sem_responsaveis"],
   ])("%s vira «%s»", (code, esperado) => {
     expect(erroDeRpc({ code })).toBe(esperado);
   });
@@ -38,6 +39,13 @@ describe("erros da base", () => {
   it("uma regra do canal ou uma recusa por permissão são respostas corretas; o resto é defeito a reportar", () => {
     expect(deveReportar({ code: "HRD01" })).toBe(false);
     expect(deveReportar({ code: "42501" })).toBe(false);
+    for (const code of ["HRD25", "HRD28"]) expect(deveReportar({ code })).toBe(false);
+    // HRD23 reporta-se, salvo ao designar um responsavel (ai a recusa generica e de proposito).
+    expect(deveReportar({ code: "HRD23" })).toBe(true);
+    expect(deveReportar({ code: "HRD23" }, "adicionar_nota")).toBe(true);
+    expect(deveReportar({ code: "HRD23" }, "responsavel_designar")).toBe(false);
+    // HRD27 traduz-se mas continua a reportar-se: so o gatilho o levanta, e o ecrã nunca devia chegar lá.
+    expect(deveReportar({ code: "HRD27" })).toBe(true);
     expect(deveReportar({ code: "PGRST202" })).toBe(true);
     expect(deveReportar({ message: "timeout" })).toBe(true);
     expect(deveReportar(null)).toBe(true);

@@ -61,7 +61,7 @@ async function chamarRpc<T>(operacao: string, fn: string, args: Record<string, u
   try {
     const { data, error } = await hrRpc(fn, args);
     if (error) {
-      if (deveReportar(error)) captureFlowError(erroParaRegisto(operacao, error), FLOW);
+      if (deveReportar(error, operacao)) captureFlowError(erroParaRegisto(operacao, error), FLOW);
       return { ok: false, erro: erroDeRpc(error) };
     }
     return { ok: true, dados: data as T };
