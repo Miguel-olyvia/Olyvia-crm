@@ -81,6 +81,15 @@ describe("PessoaOficiosObraCard", () => {
     expect(screen.queryByText("hr.oficiosObra.titulo")).toBeNull();
   });
 
+  it("sem cargo técnico mas com o perfil de técnico de obra (tecnico_por_perfil), o cartão aparece e os extras editam-se", async () => {
+    ler({ ...LIDO, tecnica: false, tecnico_por_perfil: true, cargo: null,
+      oficios: LIDO.oficios.map((o) => ({ ...o, herdado: false, ligado: o.extra })) });
+    render(<PessoaOficiosObraCard pessoaId="p1" organizationId="o1" podeEditar />);
+    expect(await screen.findByText("hr.oficiosObra.titulo")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Pintura/ })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: /Canalizador/ })).toBeEnabled();
+  });
+
   it("sem permissão de editar, fica em leitura e sem botão", async () => {
     render(<PessoaOficiosObraCard pessoaId="p1" organizationId="o1" podeEditar={false} />);
     expect(await screen.findByRole("checkbox", { name: /Pintura/ })).toBeDisabled();

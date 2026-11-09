@@ -16,7 +16,7 @@ export interface MeusPapeis {
   todos: boolean;
 }
 
-/** Os papéis que se escolhem no RH (o Técnico vem do cargo). */
+/** Os papéis que se escolhem no RH (o Técnico vem do cargo técnico de obra ou, 09/11, do perfil «Ser técnico de obra»: negocios.obra.tecnico). */
 export const PAPEIS_RH: readonly Papel[] = ["comercial", "direcao", "financeiro", "armazem", "operacoes", "juridico"];
 /** O nome de cada papel, sem a pessoa do exemplo ("Sandra · Financeiro" → "Financeiro"). */
 export const ROTULO_PAPEL: Record<Papel, string> = {
@@ -31,6 +31,7 @@ export const FAZ_O_PAPEL: Record<Papel, string> = {
   armazem: "Aprova as encomendas a fornecedor e recebe os materiais.",
   operacoes: "Aprova o plano da obra, atribui os técnicos e valida as tarefas.",
   juridico: "Revê as cláusulas do contrato que o cliente pede para mudar.",
+  // 09/11: vem do cargo técnico de obra (RH) ou do perfil «Ser técnico de obra» (negocios.obra.tecnico), não se escolhe aqui.
   tecnico: "Faz as tarefas da obra que lhe são atribuídas.",
 };
 

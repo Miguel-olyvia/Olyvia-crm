@@ -101,7 +101,7 @@ describe("secoesDoGrupo", () => {
       p("negocios.proposta.enviar", "Enviar a proposta ao cliente"), p("negocios.margem.aprovar", "Aprovar a margem do orçamento"),
       p("negocios.obra.materiais", "Ver materiais da obra"), p("negocios.registar_fatura", "Registar faturas do negócio"),
       p("negocios.orcamento.editar", "Editar o orçamento do negócio"), p("negocios.obra.executar", "Executar as tarefas da obra"),
-      p("negocios.obra.planear", "Planear a obra"),
+      p("negocios.obra.planear", "Planear a obra"), p("negocios.obra.tecnico", "Ser técnico de obra"),
     ].map((x) => ({ ...x, categoria: x.categoria === "negocios" ? "pessoas" : x.categoria }));
     const fases = grupo("Negócios", lista).find((s) => s.titulo === "Fases do negócio");
     const chips = (rotulo: string) => fases?.linhas.find((l) => l.rotulo === rotulo)?.outras.map((c) => c.rotulo);
@@ -109,7 +109,9 @@ describe("secoesDoGrupo", () => {
       "Editar orçamento", "Aprovar margem do orçamento", "Enviar proposta ao cliente", "Registar decisão do cliente sobre a proposta",
       "Editar contrato", "Anular contrato", "Ver custos do orçamento",
     ]);
-    expect(chips("Obra")).toEqual(["Planear obra", "Executar tarefas", "Ver materiais", "Decidir imprevistos", "Encerrar obra"]);
+    expect(chips("Obra")).toEqual([
+      "Planear obra", "Executar tarefas", "É técnico de obra (Hoje do técnico)", "Ver materiais", "Decidir imprevistos", "Encerrar obra",
+    ]);
     expect(chips("Financeiro")).toEqual(["Registar faturas", "Validar pagamentos"]);
   });
 

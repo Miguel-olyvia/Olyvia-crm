@@ -172,10 +172,11 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // 03/11/2026 (20270105200000): as seis por fase, exigidas no servidor (neg_guardar_negocio, obra_guardar_negocio, neg_perder_negocio,
   // neg_anular_perda, neg_guardar_visita, …): negocios.contacto.registar, negocios.visita.gerir, negocios.proposta.decidir,
   // negocios.obra.imprevistos, negocios.obra.fechar, negocios.perder.
+  // 09/11: negocios.obra.tecnico («Ser técnico de obra»): o perfil faz de quem a tem técnico de obra no Negócio (fn_neg_papeis), como o cargo.
   pessoas: [
     "negocios.contacto.registar", "negocios.contrato.editar", "negocios.margem.aprovar", "negocios.obra.executar",
     "negocios.obra.fechar", "negocios.obra.imprevistos", "negocios.obra.materiais", "negocios.obra.planear",
-    "negocios.orcamento.editar", "negocios.perder", "negocios.proposta.decidir", "negocios.proposta.enviar",
+    "negocios.obra.tecnico", "negocios.orcamento.editar", "negocios.perder", "negocios.proposta.decidir", "negocios.proposta.enviar",
     "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.visita.gerir", "pessoas.config", "pessoas.create",
     "pessoas.delete", "pessoas.edit", "pessoas.reopen", "pessoas.view",
   ],

@@ -153,7 +153,7 @@ const FLUXO_NEGOCIO: readonly string[] = [
   "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "negocios.proposta.decidir",
   "negocios.contrato.editar", "client_contracts.cancel", "quotes.view_costs",
   "negocios.registar_fatura", "negocios.validar_pagamento",
-  "negocios.obra.planear", "negocios.obra.executar", "negocios.obra.materiais", "negocios.obra.imprevistos", "negocios.obra.fechar",
+  "negocios.obra.planear", "negocios.obra.executar", "negocios.obra.tecnico", "negocios.obra.materiais", "negocios.obra.imprevistos", "negocios.obra.fechar",
   "negocios.perder",
 ];
 
@@ -186,6 +186,8 @@ const ROTULOS_CHIP: Record<string, string> = {
   "quotes.manage": "Ver custos e ações em massa",
   // 06/11: em Definições › Lixo, deals.delete não elimina pedidos de proposta — é o «Eliminar definitivamente» do Lixo.
   "deals.delete": "Eliminar definitivamente do Lixo",
+  // 09/11: o perfil que faz de quem o tem técnico de obra no Negócio (o Hoje do técnico).
+  "negocios.obra.tecnico": "É técnico de obra (Hoje do técnico)",
 };
 
 function montarLinha(chave: string, rotulo: string, permissoes: Permissao[], soAcoes: boolean): LinhaGrelha {
