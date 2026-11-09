@@ -5,12 +5,12 @@
 //  3. as peças arrastam-se da barra para a planta, e dentro dela para o sítio.
 // O Estúdio junta: paredes fixas (o depois tem as paredes do antes), as peças que saem a tracejado, a cor e o nome do produto escolhido
 // em cada peça, e tocar numa peça para a trocar no catálogo. A geometria está em planta.ts.
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode } from "react";
-import { Check, RotateCw, Scissors, Trash2, Undo2 } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode } from "react";
+import { AlertTriangle, Check, RotateCw, Scissors, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  PASSO, PECAS, PLANTA_VAZIA, cantos, cortarCanto, ehDiagonal, emL, etiquetasSemSobrepor, faltaFechar, fecharPlanta, gravarPlanta, juntarParede, juntarPeca, limites,
+  PASSO, PECAS, PLANTA_VAZIA, avisosDaPlanta, cantos, colarAParede, cortarCanto, ehDiagonal, emL, etiquetasSemSobrepor, faltaFechar, fecharPlanta, gravarPlanta, juntarParede, juntarPeca, limites,
   moverParede, mudarComprimentoFechada, paredeDoTraco, paredesParaFechar, retangulo, tiposDaDivisao, type PecaPlanta, type Planta, type Ponto, type TipoPeca,
 } from "./planta";
 
@@ -119,12 +119,18 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só quando a planta de fora muda
   }, [gravarPlanta(planta)]);
 
-  const gravar = (np: Planta) => { setP(np); setVista(vistaDe(np, fantasmas)); onMudar(np); };
+  // 9/11: as portas e as janelas ficam sempre coladas à parede mais perto
+  const gravar = (np0: Planta) => {
+    const np = np0.pecas.some((x) => PECAS[x.tipo]?.abertura) && np0.paredes.length ? { ...np0, pecas: np0.pecas.map((x) => colarAParede(x, np0)) } : np0;
+    setP(np); setVista(vistaDe(np, fantasmas)); onMudar(np);
+  };
   const mudarPeca = (pid: string, parcial: Partial<PecaPlanta>, guardar = true) => {
     const np = { ...p, pecas: p.pecas.map((x) => (x.id === pid ? { ...x, ...parcial } : x)) };
     if (guardar) gravar(np); else setP(np);
   };
 
+  const avisos = useMemo(() => avisosDaPlanta(p), [p]);
+  const comAviso = new Set(avisos.flatMap((a) => a.pecas));
   const pts = cantos(p.paredes, p.o);
   const fim = pts[pts.length - 1];
   const falta = faltaFechar(p.paredes);
@@ -347,6 +353,15 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
         </div>
       )}
 
+      {avisos.length > 0 && (
+        <ul role="status" aria-label="Alertas da planta" className="space-y-1.5">
+          {avisos.map((a, i) => (
+            <li key={i} className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />{a.texto}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
         <svg ref={svg} viewBox={`${vista.x} ${vista.y} ${vista.w} ${vista.h}`} className="block h-auto max-h-[65vh] w-full touch-none select-none"
           role="img" aria-label={`Planta: ${p.paredes.map((x) => `${Math.round(x.c)} cm`).join(", ") || "por desenhar"}`}
@@ -425,6 +440,8 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
                 <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8}
                   className={ap.cor ? "stroke-foreground/70" : PECAS[pc.tipo].abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary"}
                   style={ap.cor ? { fill: ap.cor } : undefined} strokeWidth={sel === pc.id ? letra / 4 : letra / 10} />
+                {comAviso.has(pc.id) && <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8} className="pointer-events-none fill-destructive/10 stroke-destructive"
+                  strokeWidth={letra / 5} strokeDasharray={`${letra / 2.5} ${letra / 4}`} />}
                 {ap.destaque && <circle cx={pc.x + pc.w} cy={pc.y} r={letra * 0.45} className="fill-primary stroke-card" strokeWidth={letra / 10} />}
                 <text x={pc.x + pc.w / 2} y={pc.y + pc.h / 2 + letra / 3} textAnchor="middle" fontSize={letra * 0.62}
                   className="pointer-events-none fill-foreground font-medium" style={ap.cor ? { paintOrder: "stroke", stroke: "hsl(var(--card))", strokeWidth: letra / 6 } : undefined}>
