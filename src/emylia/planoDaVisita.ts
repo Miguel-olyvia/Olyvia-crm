@@ -15,7 +15,8 @@ import { FASES_OBRA } from "./fasesObra";
 import type { FaseObra } from "./fasesObra";
 
 /** Um material ou consumível da receita, para a quantidade do serviço. */
-export interface MaterialPlano { n: string; q: number; un: string }
+/** `porUn`: a quantidade por unidade do serviço (a da receita), para mostrar a conta. */
+export interface MaterialPlano { n: string; q: number; un: string; porUn: number }
 
 /** Uma tarefa do plano, em datas: quem a faz, quando e com quê. */
 export interface TarefaDatas {
@@ -35,6 +36,8 @@ export interface TarefaDatas {
   inicio: Date;
   fim: Date;
   materiais: MaterialPlano[];
+  /** A medida do serviço que conta para as horas e os materiais (ex.: 22,5 m²). */
+  qtd?: { q: number; un: string };
 }
 
 export interface PlanoDatas {
@@ -60,7 +63,7 @@ export function materiaisDaReceita(S: Estado, sid: SvcId, q: number): MaterialPl
   const R = receitaDe(custosDe(S), sid, S.svc[sid], S.cfg.alvo);
   return (R?.cons ?? []).filter((c) => !c.opcional && c.q > 0).map((c) => {
     const x = c.q * q;
-    return { n: c.n, q: INTEIRAS.test(c.un) ? Math.max(1, Math.ceil(x - 1e-9)) : r2(x), un: c.un };
+    return { n: c.n, q: INTEIRAS.test(c.un) ? Math.max(1, Math.ceil(x - 1e-9)) : r2(x), un: c.un, porUn: c.q };
   });
 }
 
@@ -91,6 +94,7 @@ export function planoEmDatas(d: Negocio, S: Estado, inicioIso: string): PlanoDat
       ...(avisos.has(t) ? { ocupado: avisos.get(t) } : {}),
       dia: t.dia, dur: t.dur, h: t.h, inicio: ds[t.dia] ?? ds[0], fim: ds[Math.min(ds.length - 1, t.dia + t.dur - 1)] ?? ds[0],
       materiais: sid && q > 0 ? materiaisDaReceita(S, sid, q) : [],
+      ...(sid && q > 0 && s ? { qtd: { q: r2(q), un: s.un } } : {}),
     };
   });
   const equipa: PlanoDatas["equipa"] = [];
