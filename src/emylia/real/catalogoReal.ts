@@ -228,11 +228,15 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   const tecnicos: FichaTecnico[] = L.tecnicos.flatMap((t) => {
     const perfis = [...new Set(t.perfis.map((id) => perfilChave.get(id)).filter((k): k is string => !!k))];
     const p = perfis[0];
-    if (!p) return [];
-    const nome = C.perfis.find((x) => x.id === p)?.n ?? "";
+    // 09/11: o técnico pelo perfil «Ser técnico de obra» ainda sem ofícios na ficha do RH vem na mesma (cat_ler_catalogo), sem ofício:
+    // é o técnico da conta no Hoje, mas não entra no custo nem na escolha de técnicos de nenhum ofício (tecnicosDoPerfil).
+    const nome = p ? C.perfis.find((x) => x.id === p)?.n ?? "" : "";
+    // 09/11: para mostrar, todos os ofícios por ordem alfabética (o primeiro, `sk`, vem pela ordem dos ids e é o das contas)
+    const nomes = perfis.map((k) => C.perfis.find((x) => x.id === k)?.n ?? "").filter(Boolean).sort((a, b) => a.localeCompare(b, "pt"));
+    const rotulo = nomes.length > 1 ? { oficiosRotulo: nomes.join(" · ") } : {};
     const custo = t.custo_hora == null ? (veCusto ? { semCustoRh: true as const } : { custoOculto: true as const }) : {};
     // 28/10: pessoaRhId = a própria pessoa do RH (a agenda e as ausências leem-se por ela)
-    return [{ id: t.id, pessoaRhId: t.id, n: t.nome, sk: nome, perfilId: p, perfis, ferias: [], custoHora: n(t.custo_hora), tel: "", desde: "", ...custo }];
+    return [{ id: t.id, pessoaRhId: t.id, n: t.nome, sk: nome, ...rotulo, ...(p ? { perfilId: p } : {}), perfis, ferias: [], custoHora: n(t.custo_hora), tel: "", desde: "", ...custo }];
   });
 
   return { C, K, svc, itens, tecnicos, margens, ids: { servico: svcId, perfil: perfilId } };

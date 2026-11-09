@@ -19,7 +19,7 @@ import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templa
 import { PermPortalNegocios } from "@/emylia/PermPortalNegocios";
 import { comVisitasDoCrm } from "@/components/pessoas/negocioEmylia/visitasDosPassos";
 import { HojeSimples } from "@/emylia/HojeSimples";
-import { HojeTecnico } from "@/emylia/HojeTecnico";
+import { HojeTecnico, SemTecnicoLigado } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
@@ -40,6 +40,7 @@ import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encome
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
+import { usePermissions } from "@/hooks/usePermissions";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import { usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
@@ -80,7 +81,11 @@ const PAGINA_REAL: Partial<Record<Vista, string>> = {
 /** As mesmas ligações, ao lado dos separadores (como o menu do protótipo). */
 const LIGACOES: [string, string][] = [["Pessoas", "/pessoas"], ["Inventário", "/client-orders"], ["Catálogo e custos", "/catalogo-custos"]];
 
+/** 09/11: os papéis do Negócio que veem a encomenda de cliente do negócio (neg_papeis_permissoes com client_orders.view). */
+const PAPEIS_VEEM_ENCOMENDAS: readonly Papel[] = ["comercial", "direcao", "financeiro", "armazem", "operacoes"];
+
 /** `vistaInicial`: a vista ao abrir sem ?vista= (a primeira página, /home, abre no Hoje). */
+
 export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje" | "operacoes" } = {}) {
   usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
@@ -94,6 +99,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // papéis da pessoa e o admin do sistema), postas no motor com `simular: false`, como na ficha da pessoa. O «A ver como» continua a
   // escolher a vista e de quem é cada passo, mas já não muda o que se pode fazer. Com as reais postas, definirVerCustos é ignorado.
   const perms = usePermissoesReaisNegocio(org);
+  // 09/11: o perfil «Ser técnico de obra» (negocios.obra.tecnico) só dá o papel com a conta ligada a uma pessoa do RH; sem ela, o aviso
+  const { hasPermission, loading: permsPerfilALer } = usePermissions();
+  const tecnicoPorPerfil = hasPermission("negocios.obra.tecnico");
+  // 09/11: ver as encomendas de cliente pelo perfil (client_orders.view). Num ref, porque carregarEncomendas corre dentro de efeitos
+  // que guardam a primeira versão da função; a ler as permissões, conta como sim (o servidor decide na mesma).
+  const verEncomendasPerfil = useRef(true);
+  verEncomendasPerfil.current = permsPerfilALer || hasPermission("client_orders.view");
+  /** 09/11: os papéis lidos (neg_meus_papeis), também num ref pela mesma razão; null enquanto não se leem. */
+  const meusRef = useRef<MeusPapeis | null>(null);
   // 5/11: leads.assign para o comercial da lead (ComercialDaLead), da mesma maneira
   const podeAtribuir = usePodeAtribuirComercial();
   definirPodeAtribuirLead(podeAtribuir);
@@ -240,6 +254,11 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // 28/10: a encomenda de cliente e as encomendas a fornecedor de cada negócio, da base (as emitidas no servidor)
   const carregarEncomendas = useCallback(async (lidos: readonly NegocioLido[]) => {
     if (!org) return;
+    // 09/11: quem não vê encomendas de cliente (sem client_orders.view no perfil nem um papel do negócio que as veja, ex.: o técnico)
+    // não as pede: a base recusava-as e o aviso «A encomenda de cliente não carregou» aparecia sempre. Fica sem nenhuma.
+    const m = meusRef.current;
+    const veEncomendas = verEncomendasPerfil.current || !m || m.todos || m.papeis.some((p) => PAPEIS_VEEM_ENCOMENDAS.includes(p));
+    if (!veEncomendas) { definirEncomendasReais(new Map()); redesenhar(); return; }
     const pares = lidos.flatMap((n) => {
       const d = S.deals.find((x) => x.id === n.linhas.negocio.numero);
       return n.ec?.emitida_em && d ? [{ ref: refNegocio(d), contrato: n.ec.contract_id }] : [];
@@ -309,8 +328,9 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!vivo) return;
       aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
       const papel = papelInicial(mp, S.role);
+      meusRef.current = mp;
       setMeus(mp);
-      if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), ou um cargo técnico de obra."); return; }
+      if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), um cargo técnico de obra ou o perfil de técnico de obra."); return; }
       S.role = papel;
       const cat = await carregarCatalogo(supabase, org, S);
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
@@ -621,7 +641,11 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     return () => { desligar(); definirModoReal(null); };
   }, [org, activeCompany?.name, S]);
   if (tecConta && S.tec !== tecConta) S.tec = tecConta;
-  const ctx: Ctx = { S, A, run, go, q, setQ, ...(tecConta ? { tecnicoFixo: { ref: tecConta } } : {}) };
+  // 09/11: quem só pode ser o técnico (sem ver todos) fica sempre fixo no seu, mesmo sem técnico ligado (null: o aviso), e nunca vê o de outro
+  const fixarTecnico = !!tecConta || (!!meus && !meus.todos && S.role === "tecnico");
+  const ctx: Ctx = { S, A, run, go, q, setQ, ...(fixarTecnico ? { tecnicoFixo: { ref: tecConta } } : {}) };
+  // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
+  const semContaLigada = !!meus && !meus.todos && !meus.pessoa && meus.papeis.length === 0 && tecnicoPorPerfil;
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
 
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;
@@ -660,7 +684,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
           {gravacao.k === "erro" && <span className="text-destructive">Não gravou: {gravacao.t}</span>}
         </span>
       </div>
-      {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>
+      {erroLer ? (semContaLigada ? <SemTecnicoLigado /> : <p className="p-6 text-destructive">{erroLer}</p>)
         : perms.leitura.k === "falhou" ? (
           <div role="alert" className="m-4 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[15px]">
             <span className="text-destructive">Não foi possível ler as suas permissões nos negócios: sem elas, os negócios não abrem.</span>

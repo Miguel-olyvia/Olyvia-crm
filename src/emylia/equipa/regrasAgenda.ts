@@ -14,7 +14,7 @@ import { inicioDoPlano } from "../preparacaoObra";
 import { diasDaObra, isoDia } from "../planoObra";
 import { cobre } from "../frota/regras";
 import type { Atribuicao, Frota } from "../frota/tipos";
-import type { FichaTecnico } from "./tecnicos";
+import { rotuloOficios, type FichaTecnico } from "./tecnicos";
 import { lerVisitasCrm } from "./visitasCrm";
 
 /** As horas de um dia de trabalho. */
@@ -199,7 +199,9 @@ export function agendaEquipa(E: EntradaAgenda, dias: readonly string[]): LinhaAg
   const L: LinhaAgenda[] = E.tecnicos.map((t) => {
     const fe = feriasDe(t), aus = E.ausencias?.[t.id] ?? {};
     const pid = F?.pessoas.find((p) => p.tec === t.id)?.id;
-    return linha(t.id, t.n, `Técnico · ${t.sk}`, "tecnico",
+    // 09/11: todos os ofícios (rotuloOficios); o técnico pelo perfil ainda sem ofícios fica só «Técnico»
+    const oficios = rotuloOficios(t);
+    return linha(t.id, t.n, oficios ? `Técnico · ${oficios}` : "Técnico", "tecnico",
       (data) => [
         ...tarefas.filter((x) => x.tec === t.id && x.data === data).map((x) => x.item),
         ...visitas.filter((v) => v.data === data && tecDaVisita(v)?.id === t.id).map((v) => v.item),

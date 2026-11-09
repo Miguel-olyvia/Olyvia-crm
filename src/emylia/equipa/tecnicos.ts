@@ -10,6 +10,9 @@
 
 export interface Tecnico {
   id: string; n: string; sk: string;
+  /** 09/11: só para mostrar: todos os ofícios do técnico ("AVAC · Eletricidade"). `sk`/`perfilId` continuam o primeiro (as contas e
+   *  a escolha do técnico de cada tarefa). Sem ele, mostra-se o `sk` (rotuloOficios). */
+  oficiosRotulo?: string;
   /** Os dias de férias nos planos de exemplo (índice do dia, DIAS). */
   ferias: number[];
   /** As férias em datas reais ("aaaa-mm-dd"), para os planos do orçamento (14/10). */
@@ -91,6 +94,8 @@ function completar(t: FichaTecnico): boolean {
 }
 
 /** O id do perfil do Catálogo de um técnico (o da ficha; nas de antes, pelo ofício); "" sem perfil. */
+/** 09/11: os ofícios do técnico para mostrar (todos, ou o `sk` sem a lista); "" sem nenhum. */
+export const rotuloOficios = (t: Pick<Tecnico, "sk" | "oficiosRotulo">): string => t.oficiosRotulo || t.sk;
 export const perfilDoTecnico = (t: Pick<FichaTecnico, "sk"> & { perfilId?: string }): string => t.perfilId ?? PERFIL_DO_SK[t.sk] ?? "";
 /** Os técnicos (do registo vivo, ou de `L`) com o perfil `perfilId` (28/10: um técnico com vários ofícios conta em todos). */
 export const tecnicosDoPerfil = (perfilId: string, L: readonly FichaTecnico[] = TECNICOS): FichaTecnico[] =>
