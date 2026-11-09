@@ -8,12 +8,12 @@
 // Cores: uma rampa do acento, da fase 1 (clara) à 4 (escura); o texto nunca vai em cima das barras (contraste).
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, Minus, Plus, RotateCcw, Wallet, X } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, GripVertical, Minus, Plus, RotateCcw, Wallet, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { eur, nfmt, pct, r2, type Negocio } from "./motor";
+import { LINHAS, eur, nfmt, pct, r2, type Negocio, type SvcId } from "./motor";
 import type { Ctx } from "./pecas";
 import { iconeOficio } from "./LinhasOrcamento";
-import { HORAS_DIA, TAREFA_DEMOLICAO, diasDeHoras, prazoProposta, type TarefaPrevista } from "./ganttOrcamento";
+import { HORAS_DIA, TAREFA_DEMOLICAO, diasDeHoras, ordemDoPlano, prazoProposta, type TarefaPrevista } from "./ganttOrcamento";
 import {
   COR_FASE, PAGAMENTO_FASES, PAGAMENTO_MEDIDA, curvaCusto, dataCurta, deIso, diaDaPrestacao, diaSemana, diasDaObra, feriadosSaltados, iniciosRapidos, isoDia, nomeMes, planoObra,
   prestacoes, valoresPrestacoes, recebidoAte, sugerirPorFases, tesouraria, type FasePlano, type Plano, type Prestacao,
@@ -43,7 +43,12 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   const [aberta, setAberta] = useState<string | null>(null);
   const [arrasto, setArrasto] = useState<string | null>(null);
   const [outra, setOutra] = useState(false);
-  const [novaTarefa, setNovaTarefa] = useState(false);
+  // 9/11: uma tarefa nova (de onde se carregou no «+»: a fase e a tarefa a seguir à qual entra), a que se arrasta e onde vai cair, e a
+  // que se vai tirar (confirma-se na própria linha)
+  const [novaTarefa, setNovaTarefa] = useState<{ fase?: number; depois?: string } | null>(null);
+  const [arrastaT, setArrastaT] = useState<string | null>(null);
+  const [cai, setCai] = useState<{ chave: string | null; fase: number; depois: boolean } | null>(null);
+  const [tirarT, setTirarT] = useState<string | null>(null);
   // 27/10: as fases do Gantt abrem e fecham (com muitas tarefas começam fechadas: vê-se a obra toda em 4 linhas); no computador,
   // a escala em semanas (a obra cabe na largura) ou em dias (uma coluna por dia, rola-se para o lado)
   const [abertas, setAbertas] = useState<Record<number, boolean>>({});
@@ -62,6 +67,36 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   // 9/11 (Rúben: «o dono da obra precisa do máximo detalhe»): o plano com os técnicos e as datas (o mesmo que a obra vai ter)
   const PD = useMemo(() => planoEmDatas(d, S, isoDia(inicio)), [d, S, isoDia(inicio), d.orc, d.f.plano_tecnicos, d.f.plano_equipa]); // eslint-disable-line react-hooks/exhaustive-deps
   const daTarefa = (t: TarefaPrevista) => PD.tarefas.find((x) => x.chave === chaveTarefa({ nome: t.nome, fase: t.fase }));
+  // 9/11: mover uma tarefa (para antes ou depois de outra, ou para o fim de uma fase) e tirá-la do plano e do orçamento
+  const { ordem: ordemMao, fase: faseMao } = ordemDoPlano(d.f);
+  const mexida = Object.keys(ordemMao).length > 0 || Object.keys(faseMao).length > 0;
+  const mover = (chave: string, fase: number, alvo: string | null, depois: boolean) => {
+    if (fechado) return;
+    const listas: Record<number, string[]> = Object.fromEntries(P.fases.map((f) => [f.n, f.tarefas.map((x) => x.chave)]));
+    for (const k of Object.keys(listas)) listas[Number(k)] = listas[Number(k)].filter((c) => c !== chave);
+    const L = listas[fase] ?? [];
+    const i = alvo ? L.indexOf(alvo) : -1;
+    L.splice(i < 0 ? L.length : i + (depois ? 1 : 0), 0, chave);
+    listas[fase] = L;
+    const atual = P.tarefas.find((x) => x.chave === chave);
+    const fases = { ...faseMao };
+    if (!atual || atual.fase !== fase) fases[chave] = fase;
+    const novas = { ...ordemMao };
+    for (const f of new Set([fase, atual?.fase ?? fase])) novas[f] = listas[f] ?? [];
+    run(() => { A.campo(d.id, "plano_ordem", JSON.stringify(novas)); A.campo(d.id, "plano_fase", JSON.stringify(fases)); });
+  };
+  const largar = () => {
+    if (arrastaT && cai) mover(arrastaT, cai.fase, cai.chave, cai.depois);
+    setArrastaT(null); setCai(null);
+  };
+  const tirar = (t: TarefaPrevista) => run(() => {
+    const sid = (t.svc ?? t.chave) as SvcId, v = d.visita;
+    if ((v.extra[sid] || 0) > 0) A.extra(d.id, sid, 0);
+    if (LINHAS[d.linha].map.some(([x]) => x === sid) && !v.off.includes(sid)) A.servico(d.id, sid);
+    for (const p of v.prod ?? []) if (p.svc === sid && !p.semSvc) A.produtoSemServico(d.id, p.id, true);
+    A.refazerOrcamento(d.id);
+    setTirarT(null);
+  });
   if (!P.tarefas.length) return null;
 
   // 15/10: no telemóvel, uma coluna só: o nome de cada tarefa numa linha por cima da sua barra (nunca cortado), e a grelha dos dias
@@ -240,7 +275,7 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
           <p className="text-[15px] font-medium">Tarefas por dia <span className="font-normal text-muted-foreground">· {P.tarefas.length} tarefas · {nomeMes(calendario[0])}{nomeMes(calendario[0]) !== nomeMes(fimData) ? ` a ${nomeMes(fimData)}` : ""}</span></p>
           <div className="flex flex-wrap items-center gap-2">
             {!fechado && (
-              <button type="button" aria-expanded={novaTarefa} onClick={() => setNovaTarefa((x) => !x)}
+              <button type="button" aria-expanded={!!novaTarefa} onClick={() => setNovaTarefa((x) => (x ? null : {}))}
                 className="inline-flex min-h-9 items-center gap-1 rounded-full border border-primary/40 px-3 text-sm font-medium text-primary hover:bg-primary/[0.06]">
                 <Plus className="h-4 w-4" aria-hidden="true" />Adicionar tarefa
               </button>
@@ -261,7 +296,12 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
             )}
           </div>
         </div>
-        {novaTarefa && !fechado && <AdicionarTarefa ctx={ctx} d={d} fechar={() => setNovaTarefa(false)} />}
+        {mexida && !fechado && (
+          <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">A ordem das tarefas foi mudada à mão: numa fase reorganizada, fazem-se uma a seguir à outra.
+            <button type="button" className="min-h-9 rounded-full px-2 font-medium text-primary hover:bg-primary/[0.06]" onClick={() => run(() => { A.campo(d.id, "plano_ordem", ""); A.campo(d.id, "plano_fase", ""); })}>Repor a ordem</button></p>
+        )}
+        {novaTarefa && !fechado && <AdicionarTarefa ctx={ctx} d={d} fase={novaTarefa.fase} fechar={() => setNovaTarefa(null)}
+          juntada={(sid) => { if (novaTarefa.fase) mover(sid, novaTarefa.fase, novaTarefa.depois ?? null, true); }} />}
         <div ref={caixa} className="overflow-x-auto rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]">
           <div style={tabela ? { width: LW + PAD + gradeW + PAD } : { width: gradeW + 2 * PAD, paddingLeft: PAD, paddingRight: PAD }} className="relative">
             {/* os dias (só os úteis); em semanas, a data das segundas-feiras */}
@@ -315,7 +355,8 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                   </button>
                 );
                 return [
-                  <li key={"f" + f.n} className={cn("transition-opacity", tabela && "flex h-9 items-center border-t border-border/60 bg-muted", apagadaF && "opacity-40")}>
+                  <li key={"f" + f.n} className={cn("transition-opacity", tabela && "flex h-9 items-center border-t border-border/60 bg-muted", apagadaF && "opacity-40", arrastaT && cai?.chave === null && cai.fase === f.n && "ring-2 ring-inset ring-primary")}
+                    onDragOver={(e) => { if (!arrastaT) return; e.preventDefault(); setCai({ chave: null, fase: f.n, depois: true }); }} onDrop={(e) => { e.preventDefault(); largar(); }}>
                     {cab}
                     {/* a fase fechada: uma barra só, do início ao fim dela */}
                     {tabela && (
@@ -352,25 +393,44 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                       {veCusto && t.delta !== 0 && <span className={t.delta > 0 ? "text-destructive" : "text-success"}> {t.delta > 0 ? "+" : "−"}{eur(Math.abs(t.delta))}</span>}</>;
                     const detalhe = aqui && (
                       <div className="sticky left-4 mt-2 pb-2" style={{ width: tabela ? Math.min(largura - 2 * PAD, LW + gradeW) : linhaW }}>
-                        <DetalheTarefa t={t} d={d} ctx={ctx} fechado={fechado} direcao={direcao} inicio={dataCurta(calendario[Math.floor(t.inicio)])} PD={PD} td={daTarefa(t)} />
+                        <DetalheTarefa t={t} d={d} ctx={ctx} fechado={fechado} direcao={direcao} inicio={dataCurta(calendario[Math.floor(t.inicio)])} PD={PD} td={daTarefa(t)}
+                          mover={fechado ? undefined : (passo) => {
+                            const L = f.tarefas.map((x) => x.chave), k = L.indexOf(t.chave);
+                            if (passo === "subir" && k > 0) mover(t.chave, f.n, L[k - 1], false);
+                            else if (passo === "descer" && k < L.length - 1) mover(t.chave, f.n, L[k + 1], true);
+                            else if (typeof passo === "number") mover(t.chave, passo, null, true);
+                          }} />
                       </div>
                     );
                     return tabela ? (
-                      <li key={t.chave} className={cn("transition-opacity", apagada && "opacity-30")}>
+                      <li key={t.chave} className={cn("relative transition-opacity", apagada && "opacity-30", arrastaT === t.chave && "opacity-40")}
+                        onDragOver={(e) => { if (!arrastaT || arrastaT === t.chave) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setCai({ chave: t.chave, fase: t.fase, depois: e.clientY > r.top + 16 }); }}
+                        onDrop={(e) => { e.preventDefault(); largar(); }}>
+                        {cai?.chave === t.chave && arrastaT && <span aria-hidden="true" className={cn("pointer-events-none absolute inset-x-0 z-20 h-0.5 bg-primary", cai.depois ? "bottom-0" : "top-0")} />}
                         <div className="flex h-8 items-center">
                           {/* o nome curto, os dias e o custo numa coluna fixa (o nome inteiro no title); a barra na mesma linha */}
+                          <div className="group/linha sticky left-0 z-10 flex h-full shrink-0 items-center bg-card" style={{ width: LW + PAD }}
+                            draggable={!fechado} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.chave); setArrastaT(t.chave); }} onDragEnd={() => { setArrastaT(null); setCai(null); }}>
+                          {!fechado && <GripVertical className="ml-3 h-4 w-4 shrink-0 cursor-grab text-muted-foreground/60" aria-hidden="true" />}
                           <button type="button" onClick={() => setAberta(aqui ? null : t.chave)} aria-expanded={aqui}
                             title={`${t.nome} · ${dias(t.dias)}${veCusto ? ` · ${eur0(t.custo.total)}` : ""}`}
-                            className={cn("sticky left-0 z-10 flex h-full shrink-0 items-center gap-2 bg-card pl-9 pr-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", aqui && "text-primary")}
-                            style={{ width: LW + PAD }}>
+                            className={cn("flex h-full min-w-0 flex-1 items-center gap-2 pr-1 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", fechado ? "pl-9" : "pl-2", aqui && "text-primary")}>
                             <Ic className="h-3.5 w-3.5 shrink-0" style={{ color: COR_FASE[t.fase] }} aria-hidden="true" />
                             <span className="min-w-0 flex-1 truncate text-sm">{nomeCurtoTarefa(t.nome)}</span>
                             {/* só os dias: o custo está no detalhe (toque na tarefa) e na dica */}
                             <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground">{dias(t.dias)}{t.manual && " · mudado"}</span>
                             {daTarefa(t) && <span className={cn("max-w-[6rem] shrink-0 truncate text-xs", daTarefa(t)!.ocupado || !daTarefa(t)!.tec ? "text-warning-foreground" : "text-foreground")} title={`${daTarefa(t)!.tecNome} · ${daTarefa(t)!.oficio}`}>{daTarefa(t)!.tec ? daTarefa(t)!.tecNome.split(" ")[0] : "Por atribuir"}</span>}
                           </button>
+                          {!fechado && <>
+                            <button type="button" title="Juntar uma tarefa a seguir a esta" aria-label={`Juntar uma tarefa a seguir a ${t.nome}`} onClick={() => setNovaTarefa({ fase: t.fase, depois: t.chave })}
+                              className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-primary hover:bg-primary/10"><Plus className="h-4 w-4" /></button>
+                            <button type="button" title={dem ? "A demolição tira-se no orçamento" : "Tirar esta tarefa"} aria-label={`Tirar ${t.nome}`} disabled={dem} onClick={() => setTirarT(t.chave)}
+                              className="mr-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"><Minus className="h-4 w-4" /></button>
+                          </>}
+                          </div>
                           <div className="relative h-full shrink-0" style={{ width: gradeW }}>{barra}</div>
                         </div>
+                        {tirarT === t.chave && <ConfirmarTirar t={t} largura={Math.min(largura - 2 * PAD, LW + gradeW)} sim={() => tirar(t)} nao={() => setTirarT(null)} />}
                         {detalhe}
                       </li>
                     ) : (
@@ -383,6 +443,13 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
                           <span className="min-w-0 flex-1 text-[15px] font-medium leading-snug">{t.nome}{daTarefa(t) && <span className="block text-xs font-normal text-muted-foreground">{daTarefa(t)!.tecNome} · {daTarefa(t)!.oficio}</span>}</span>
                           <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-muted-foreground">{custoTxt}</span>
                         </button>
+                        {!fechado && (
+                          <span className="sticky left-4 flex gap-1" style={{ width: linhaW }}>
+                            <button type="button" aria-label={`Juntar uma tarefa a seguir a ${t.nome}`} onClick={() => setNovaTarefa({ fase: t.fase, depois: t.chave })} className="inline-flex min-h-9 items-center gap-1 rounded-full px-2 text-sm text-primary hover:bg-primary/10"><Plus className="h-4 w-4" />Tarefa</button>
+                            {!dem && <button type="button" aria-label={`Tirar ${t.nome}`} onClick={() => setTirarT(t.chave)} className="inline-flex min-h-9 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Minus className="h-4 w-4" />Tirar</button>}
+                          </span>
+                        )}
+                        {tirarT === t.chave && <ConfirmarTirar t={t} largura={linhaW} sim={() => tirar(t)} nao={() => setTirarT(null)} />}
                         <div className="relative h-8" style={{ width: gradeW }}>{barra}</div>
                         {/* o detalhe abre por baixo da própria tarefa */}
                         {detalhe}
@@ -483,9 +550,11 @@ function CurvaCusto({ P, prest, linhaW, colW, gradeW, calendario, faseOn }: {
 }
 
 /* ================================================================== o detalhe de uma tarefa */
-function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio, PD, td }: {
+function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio, PD, td, mover }: {
   t: TarefaPrevista; d: Negocio; ctx: Pick<Ctx, "S" | "A" | "run">; fechado: boolean; direcao: boolean; inicio: string;
   PD: PlanoDatas; td?: TarefaDatas;
+  /** 9/11: mover a tarefa sem arrastar (no telemóvel): subir, descer, ou para outra fase. */
+  mover?: (passo: "subir" | "descer" | number) => void;
 }) {
   const { A, run, S } = ctx;
   // 9/11 (Rúben: «o que faz nos pontos elétricos?»): o que o técnico faz (os passos da receita) e os materiais, com a medida da linha
@@ -501,6 +570,19 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio, PD, td }: {
         <p className="text-[15px] font-semibold">{t.nome}</p>
         <p className="text-sm text-muted-foreground">Fase {t.fase} · começa {inicio}</p>
       </div>
+      {mover && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Mover:</span>
+          <button type="button" className="min-h-9 rounded-full border border-input px-3 hover:bg-muted" onClick={() => mover("subir")}>↑ Antes</button>
+          <button type="button" className="min-h-9 rounded-full border border-input px-3 hover:bg-muted" onClick={() => mover("descer")}>↓ Depois</button>
+          <label className="inline-flex items-center gap-2">Fase
+            <select value={t.fase} onChange={(e) => mover(Number(e.target.value))} className="h-9 rounded-lg border border-input bg-background px-2">
+              {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <span className="text-xs text-muted-foreground">No computador, arraste a tarefa pela pega ⋮⋮.</span>
+        </div>
+      )}
       {td && (
         <div className="grid gap-3 rounded-xl bg-muted/50 p-3 text-sm sm:grid-cols-[minmax(0,1fr)_20rem] sm:items-end">
           <p><b className="font-medium">{td.tecNome}</b> · {td.oficio}{td.ocupado ? <span className="text-warning-foreground"> · {td.ocupado}</span> : null}
@@ -680,7 +762,7 @@ function EquipaNoOrcamento({ ctx, d, fechado, PD }: { ctx: Pick<Ctx, "S" | "A" |
  * (A.extra) e o orçamento refaz-se (A.refazerOrcamento): a tarefa aparece na sua fase, com o ofício, as horas e os materiais da receita,
  * o técnico livre e o preço no orçamento. Um serviço que já está no orçamento soma a quantidade.
  */
-function AdicionarTarefa({ ctx, d, fechar }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Negocio; fechar: () => void }) {
+function AdicionarTarefa({ ctx, d, fechar, fase, juntada }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Negocio; fechar: () => void; fase?: number; juntada?: (sid: string) => void }) {
   const { S, A, run } = ctx;
   const [procura, setProcura] = useState("");
   const [sid, setSid] = useState<string | null>(null);
@@ -697,12 +779,13 @@ function AdicionarTarefa({ ctx, d, fechar }: { ctx: Pick<Ctx, "S" | "A" | "run">
   const juntar = () => {
     if (!sid || !(n > 0)) return;
     run(() => { A.extra(d.id, sid, r2(ja + n)); A.refazerOrcamento(d.id); });
+    juntada?.(sid);
     fechar();
   };
   return (
     <div className="space-y-3 rounded-2xl border border-primary/30 bg-primary/[0.03] p-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[15px] font-semibold">Adicionar uma tarefa</p>
+        <p className="text-[15px] font-semibold">Adicionar uma tarefa{fase ? ` na fase ${fase}` : ""}</p>
         <button type="button" className="grid h-9 w-9 place-items-center rounded-full hover:bg-muted" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" /></button>
       </div>
       {!sv ? <>
@@ -743,6 +826,17 @@ function AdicionarTarefa({ ctx, d, fechar }: { ctx: Pick<Ctx, "S" | "A" | "run">
           <Plus className="h-4 w-4" aria-hidden="true" />Juntar ao plano e ao orçamento
         </button>
       </>}
+    </div>
+  );
+}
+
+/** 9/11: tirar uma tarefa confirma-se na própria linha (sai do plano e do orçamento). */
+function ConfirmarTirar({ t, largura, sim, nao }: { t: TarefaPrevista; largura: number; sim: () => void; nao: () => void }) {
+  return (
+    <div className="sticky left-4 my-1 flex flex-wrap items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-2 text-sm" style={{ width: largura }} role="alert">
+      <span className="min-w-0 flex-1">Tirar «{t.nome}» do plano e do orçamento?</span>
+      <button type="button" className="min-h-9 rounded-full bg-destructive px-3 font-medium text-destructive-foreground" onClick={sim}>Tirar</button>
+      <button type="button" className="min-h-9 rounded-full border border-input px-3" onClick={nao}>Cancelar</button>
     </div>
   );
 }

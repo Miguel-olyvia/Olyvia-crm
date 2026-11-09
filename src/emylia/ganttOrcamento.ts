@@ -130,8 +130,16 @@ export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): Tarefa
     base.push({ chave: TAREFA_DEMOLICAO, nome: "Demolição e entulho", perfil: "Demolição", ...(P.perfilId ? { perfilId: P.perfilId } : {}), fase: 1, fases: [1], hOrc, custoHora: P.custoHora });
     extra[TAREFA_DEMOLICAO] = { eq: 0, cons: r.consumiveis, outros: r.custo - mo - r.consumiveis, custoOrc: r.custo };
   }
+  // 9/11 (Rúben: «drag and drop para reorganizar as tasks»): a fase e a ordem mudadas à mão no Gantt (f.plano_fase, f.plano_ordem). Numa
+  // fase com a ordem à mão, as tarefas fazem-se uma a seguir à outra, por essa ordem; as que não estão na lista (novas) vão no fim
+  const { ordem, fase: faseMao } = ordemDoPlano(d.f ?? {});
+  for (const t of base) { const f = faseMao[t.chave]; if (f && f >= 1 && f <= 4) { t.fase = f as FaseObra; t.fases = [f as FaseObra]; } }
   // a etapa: a fase da obra e, dentro dela, a ordem dos ofícios; dentro da mesma etapa, a ordem das linhas
-  const etapaDe = (t: { nome: string; perfil: string; fase: FaseObra }) => t.fase * 10 + ordemOficio(`${t.nome} ${t.perfil}`);
+  const etapaDe = (t: { chave: string; nome: string; perfil: string; fase: FaseObra }) => {
+    const L = ordem[t.fase];
+    if (L?.length) { const i = L.indexOf(t.chave); return t.fase * 1000 + (i >= 0 ? 100 + i : 500 + ordemOficio(`${t.nome} ${t.perfil}`)); }
+    return t.fase * 1000 + ordemOficio(`${t.nome} ${t.perfil}`);
+  };
   const ord = base.map((t, i) => ({ t, i })).sort((a, b) => etapaDe(a.t) - etapaDe(b.t) || a.i - b.i).map((x) => x.t);
   // cada etapa começa quando a anterior acaba; dentro dela, cada ofício (perfil) vai na sua fila
   let etapa = -1, inicioEtapa = 0, fimEtapa = 0;
@@ -182,4 +190,10 @@ function demolicaoRefeita(d: Negocio, S: Estado): NonNullable<NonNullable<Negoci
     sincronizarDemolicao(dc, S);
     return dc.orc?.demolicao?.r;
   } catch { return undefined; }
+}
+
+/** 9/11: a ordem e a fase das tarefas mudadas à mão no Gantt do orçamento (as chaves das tarefas, por fase). */
+export function ordemDoPlano(f: Record<string, string | undefined>): { ordem: Record<number, string[]>; fase: Record<string, number> } {
+  const ler = <T,>(t: string | undefined, vazio: T): T => { try { return t ? JSON.parse(t) as T : vazio; } catch { return vazio; } };
+  return { ordem: ler<Record<number, string[]>>(f.plano_ordem, {}), fase: ler<Record<string, number>>(f.plano_fase, {}) };
 }
