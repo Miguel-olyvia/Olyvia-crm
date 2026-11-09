@@ -38,6 +38,8 @@ export interface TarefaDatas {
   materiais: MaterialPlano[];
   /** A medida do serviço que conta para as horas e os materiais (ex.: 22,5 m²). */
   qtd?: { q: number; un: string };
+  /** 9/11 (Rúben: «o que faz nos pontos elétricos?»): o que o técnico faz, os passos da receita do serviço, com as horas desta obra. */
+  passos: { n: string; oficio: string; h: number }[];
 }
 
 export interface PlanoDatas {
@@ -73,6 +75,15 @@ export function passosDaReceita(S: Estado, sid: SvcId): { n: string; oficio: str
   return (R?.mo ?? []).filter((m) => m.h > 0).map((m) => ({ n: m.n, oficio: C.perfis.find((p) => p.id === m.perfil)?.n ?? m.perfil, h: m.h }));
 }
 
+
+/** Os passos da receita de uma tarefa, com as horas para a quantidade do serviço; numa parte de um «MO Modelo», só os do seu ofício. */
+export function passosDaTarefa(S: Estado, sid: SvcId | undefined, q: number, oficio: string, parte: boolean): TarefaDatas["passos"] {
+  if (!sid || !(q > 0)) return [];
+  const ps = passosDaReceita(S, sid);
+  const meus = parte ? ps.filter((x) => x.oficio === oficio) : ps;
+  return (meus.length ? meus : ps).map((x) => ({ n: x.n, oficio: x.oficio, h: r2(x.h * q) }));
+}
+
 /** O plano em datas a partir de um negócio que já tem o orçamento (o da visita, ou um feito das linhas do Estúdio). */
 export function planoEmDatas(d: Negocio, S: Estado, inicioIso: string): PlanoDatas {
   const inicio = isoDia(proximoUtil(deIso(inicioIso)));
@@ -94,6 +105,7 @@ export function planoEmDatas(d: Negocio, S: Estado, inicioIso: string): PlanoDat
       ...(avisos.has(t) ? { ocupado: avisos.get(t) } : {}),
       dia: t.dia, dur: t.dur, h: t.h, inicio: ds[t.dia] ?? ds[0], fim: ds[Math.min(ds.length - 1, t.dia + t.dur - 1)] ?? ds[0],
       materiais: sid && q > 0 ? materiaisDaReceita(S, sid, q) : [],
+      passos: passosDaTarefa(S, sid, l && l.t === "svc" ? l.q : 0, t.sk, plano.tasks.filter((x) => x.svcs[0] === sid).length > 1),
       ...(sid && q > 0 && s ? { qtd: { q: r2(q), un: s.un } } : {}),
     };
   });

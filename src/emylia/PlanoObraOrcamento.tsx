@@ -24,6 +24,7 @@ import { Contagem, useReduzir, vibrar } from "./movimento";
 import { useLargura } from "./largura";
 import { SEM_VER_CUSTOS, podeVerCustos } from "./permissoes";
 import { nomeCurtoTarefa } from "./obraOps";
+import { materiaisDaReceita, passosDaTarefa } from "./planoDaVisita";
 
 export { COR_FASE } from "./planoObra";
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
@@ -466,9 +467,15 @@ function CurvaCusto({ P, prest, linhaW, colW, gradeW, calendario, faseOn }: {
 
 /* ================================================================== o detalhe de uma tarefa */
 function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio }: {
-  t: TarefaPrevista; d: Negocio; ctx: Pick<Ctx, "A" | "run">; fechado: boolean; direcao: boolean; inicio: string;
+  t: TarefaPrevista; d: Negocio; ctx: Pick<Ctx, "S" | "A" | "run">; fechado: boolean; direcao: boolean; inicio: string;
 }) {
-  const { A, run } = ctx;
+  const { A, run, S } = ctx;
+  // 9/11 (Rúben: «o que faz nos pontos elétricos?»): o que o técnico faz (os passos da receita) e os materiais, com a medida da linha
+  const sid = t.chave === TAREFA_DEMOLICAO ? undefined : (t.svc ?? t.chave);
+  const linha = sid ? d.orc?.linhas.find((x) => x.t === "svc" && x.sid === sid) : undefined;
+  const qLinha = linha && linha.t === "svc" ? linha.q : 0, sv = sid ? S.svc[sid] : undefined;
+  const passos = passosDaTarefa(S, sid, qLinha, t.perfil, !!t.svc);
+  const mats = sid && qLinha > 0 ? materiaisDaReceita(S, sid, t.svc && sv && sv.h > 0 ? t.hOrc / sv.h : qLinha) : [];
   const dem = t.chave === TAREFA_DEMOLICAO, ver = podeVerCustos(), veCusto = ver && (!dem || direcao), poucas = t.h < t.hOrc - 1e-9;
   return (
     <div className="grid gap-4 rounded-2xl border border-border bg-card p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 sm:p-5" aria-live="polite">
@@ -493,6 +500,37 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio }: {
       <p className="text-sm text-muted-foreground">
         O orçamento conta {nfmt(t.hOrc)} h ({t.perfil.toLowerCase()}), a {HORAS_DIA} h por dia.{t.manual && ` Com ${dias(t.dias)} contam ${nfmt(t.h)} h.`}
       </p>
+      {(passos.length > 0 || mats.length > 0) && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {passos.length > 0 && (
+            <div className="text-sm">
+              <p className="font-medium">O que o técnico faz{sv && qLinha > 0 ? ` (${nfmt(qLinha)} ${sv.un})` : ""}</p>
+              <ol className="mt-1 space-y-1">
+                {passos.map((x, k) => (
+                  <li key={k} className="flex justify-between gap-3 rounded-lg bg-muted/50 px-3 py-1.5">
+                    <span className="min-w-0">{k + 1}. {x.n}<span className="text-muted-foreground"> · {x.oficio}</span></span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{nfmt(x.h)} h</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {mats.length > 0 && (
+            <div className="text-sm">
+              <p className="font-medium">Materiais e consumíveis</p>
+              <ul className="mt-1 space-y-1">
+                {mats.map((m) => (
+                  <li key={m.n} className="flex justify-between gap-3 rounded-lg bg-muted/50 px-3 py-1.5">
+                    <span className="min-w-0">{m.n}</span>
+                    <span className="shrink-0 text-right tabular-nums text-muted-foreground">{nfmt(m.q)} {m.un}{sv && <span className="block text-xs">{nfmt(m.porUn)} {m.un}/{sv.un}</span>}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground sm:col-span-2">Vêm da receita do serviço no Catálogo e custos: mudá-la lá muda as horas, os materiais e o plano.</p>
+        </div>
+      )}
       {poucas && <p className="flex items-start gap-2 text-sm text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Menos horas do que o orçamento conta: ou vai mais gente, ou o prazo não chega.</p>}
       {veCusto ? (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[15px] sm:grid-cols-4">

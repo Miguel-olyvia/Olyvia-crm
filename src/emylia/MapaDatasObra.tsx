@@ -114,7 +114,21 @@ export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false }: { P: P
                       </summary>
                       <div className="pt-3 text-sm">
                         <p className="text-muted-foreground">{t.dur > 1 ? `De ${dataLonga(t.inicio)} a ${dataLonga(t.fim)}.` : `${dataLonga(t.inicio)[0].toUpperCase()}${dataLonga(t.inicio).slice(1)}.`}</p>
-                        {t.qtd && <p className="mt-1"><b className="font-medium">Medida:</b> {nfq(t.qtd.q)} {t.qtd.un}. Os materiais contam-se por {t.qtd.un} (a receita do Catálogo × a medida).</p>}
+                        {t.passos.length > 0 && (
+                          <div className="mt-2">
+                            <p className="font-medium">O que {t.tec ? t.tecNome.split(" ")[0] : "o técnico"} faz</p>
+                            <ol className="mt-1 space-y-1">
+                              {t.passos.map((x, k) => (
+                                <li key={k} className="flex justify-between gap-3 rounded-lg bg-muted/50 px-3 py-1.5">
+                                  <span className="min-w-0">{k + 1}. {x.n}{x.oficio !== t.oficio ? <span className="text-muted-foreground"> · {x.oficio}</span> : null}</span>
+                                  <span className="shrink-0 tabular-nums text-muted-foreground">{nfq(x.h)} h</span>
+                                </li>
+                              ))}
+                            </ol>
+                            <p className="mt-1 text-xs text-muted-foreground">Os passos vêm da receita do serviço no Catálogo (Catálogo e custos): mudá-los lá muda as horas e o plano.</p>
+                          </div>
+                        )}
+                        {t.qtd && <p className="mt-2"><b className="font-medium">Medida:</b> {nfq(t.qtd.q)} {t.qtd.un}. Os materiais contam-se por {t.qtd.un} (a receita do Catálogo × a medida).</p>}
                         {t.materiais.length > 0 && (
                           <ul className="mt-2 grid gap-1 sm:grid-cols-2">
                             {t.materiais.map((m) => <li key={m.n} className="flex justify-between gap-3 rounded-lg bg-muted/50 px-3 py-1.5"><span className="min-w-0 truncate">{m.n}</span><span className="shrink-0 text-right tabular-nums text-muted-foreground">{nfq(m.q)} {m.un}{t.qtd ? <span className="block text-xs">{nfq(m.porUn)} {m.un}/{t.qtd.un} × {nfq(t.qtd.q)} {t.qtd.un}</span> : null}</span></li>)}
