@@ -4,195 +4,195 @@
   "url": "/modelos3d/genericos/modulo_canto.glb",
   "triangulos": 60,
   "partes": 5,
-  "bytes": 6748
+  "bytes": 6768
  },
  {
   "categoria": "modulo_base",
   "url": "/modelos3d/genericos/modulo_base.glb",
   "triangulos": 144,
   "partes": 12,
-  "bytes": 15336
+  "bytes": 15384
  },
  {
   "categoria": "armario_parede",
   "url": "/modelos3d/genericos/armario_parede.glb",
   "triangulos": 84,
   "partes": 7,
-  "bytes": 9184
+  "bytes": 9212
  },
  {
   "categoria": "coluna_cozinha",
   "url": "/modelos3d/genericos/coluna_cozinha.glb",
   "triangulos": 348,
   "partes": 15,
-  "bytes": 20396
+  "bytes": 20456
  },
  {
   "categoria": "frigorifico",
   "url": "/modelos3d/genericos/frigorifico.glb",
   "triangulos": 132,
   "partes": 11,
-  "bytes": 14084
+  "bytes": 14128
  },
  {
   "categoria": "forno",
   "url": "/modelos3d/genericos/forno.glb",
   "triangulos": 276,
   "partes": 9,
-  "bytes": 12972
+  "bytes": 13008
  },
  {
   "categoria": "extrator",
   "url": "/modelos3d/genericos/extrator.glb",
   "triangulos": 300,
   "partes": 11,
-  "bytes": 15400
+  "bytes": 15444
  },
  {
   "categoria": "maquina_loica",
   "url": "/modelos3d/genericos/maquina_loica.glb",
   "triangulos": 456,
   "partes": 10,
-  "bytes": 15528
+  "bytes": 15568
  },
  {
   "categoria": "fogao",
   "url": "/modelos3d/genericos/fogao.glb",
   "triangulos": 1212,
   "partes": 17,
-  "bytes": 29460
+  "bytes": 29528
  },
  {
   "categoria": "cama",
   "url": "/modelos3d/genericos/cama.glb",
   "triangulos": 1308,
   "partes": 13,
-  "bytes": 24872
+  "bytes": 24924
  },
  {
   "categoria": "roupeiro",
   "url": "/modelos3d/genericos/roupeiro.glb",
   "triangulos": 120,
   "partes": 10,
-  "bytes": 12852
+  "bytes": 12892
  },
  {
   "categoria": "secretaria",
   "url": "/modelos3d/genericos/secretaria.glb",
   "triangulos": 156,
   "partes": 13,
-  "bytes": 16524
+  "bytes": 16576
  },
  {
   "categoria": "sofa",
   "url": "/modelos3d/genericos/sofa.glb",
   "triangulos": 2772,
   "partes": 15,
-  "bytes": 37660
+  "bytes": 37720
  },
  {
   "categoria": "mesa",
   "url": "/modelos3d/genericos/mesa.glb",
   "triangulos": 180,
   "partes": 8,
-  "bytes": 11080
+  "bytes": 11112
  },
  {
   "categoria": "prateleira",
   "url": "/modelos3d/genericos/prateleira.glb",
   "triangulos": 36,
   "partes": 3,
-  "bytes": 4316
+  "bytes": 4328
  },
  {
   "categoria": "sanita",
   "url": "/modelos3d/genericos/sanita.glb",
   "triangulos": 1508,
   "partes": 10,
-  "bytes": 23384
+  "bytes": 23424
  },
  {
   "categoria": "sanita_suspensa",
   "url": "/modelos3d/genericos/sanita_suspensa.glb",
   "triangulos": 1160,
   "partes": 9,
-  "bytes": 19516
+  "bytes": 19552
  },
  {
   "categoria": "bide",
   "url": "/modelos3d/genericos/bide.glb",
   "triangulos": 1684,
   "partes": 10,
-  "bytes": 24504
+  "bytes": 24544
  },
  {
   "categoria": "lavatorio",
   "url": "/modelos3d/genericos/lavatorio.glb",
   "triangulos": 1468,
   "partes": 6,
-  "bytes": 18316
+  "bytes": 18340
  },
  {
   "categoria": "movel_lavatorio",
   "url": "/modelos3d/genericos/movel_lavatorio.glb",
   "triangulos": 824,
   "partes": 9,
-  "bytes": 16876
+  "bytes": 16912
  },
  {
   "categoria": "banheira",
   "url": "/modelos3d/genericos/banheira.glb",
   "triangulos": 1488,
   "partes": 7,
-  "bytes": 19460
+  "bytes": 19488
  },
  {
   "categoria": "base_duche",
   "url": "/modelos3d/genericos/base_duche.glb",
   "triangulos": 708,
   "partes": 4,
-  "bytes": 10348
+  "bytes": 10364
  },
  {
   "categoria": "resguardo",
   "url": "/modelos3d/genericos/resguardo.glb",
   "triangulos": 180,
   "partes": 8,
-  "bytes": 11096
+  "bytes": 11128
  },
  {
   "categoria": "espelho",
   "url": "/modelos3d/genericos/espelho.glb",
   "triangulos": 24,
   "partes": 2,
-  "bytes": 3104
+  "bytes": 3112
  },
  {
   "categoria": "armario",
   "url": "/modelos3d/genericos/armario.glb",
   "triangulos": 72,
   "partes": 6,
-  "bytes": 7984
+  "bytes": 8008
  },
  {
   "categoria": "toalheiro",
   "url": "/modelos3d/genericos/toalheiro.glb",
   "triangulos": 1932,
   "partes": 18,
-  "bytes": 36024
+  "bytes": 36096
  },
  {
   "categoria": "torneira",
   "url": "/modelos3d/genericos/torneira.glb",
   "triangulos": 932,
   "partes": 7,
-  "bytes": 15644
+  "bytes": 15672
  },
  {
   "categoria": "coluna_duche",
   "url": "/modelos3d/genericos/coluna_duche.glb",
   "triangulos": 684,
   "partes": 5,
-  "bytes": 11484
+  "bytes": 11504
  }
 ]

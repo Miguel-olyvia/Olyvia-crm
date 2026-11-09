@@ -132,15 +132,18 @@ export function materiaisGenericos(cor: string, acab?: { metalness: number; roug
     plastico: new THREE.MeshStandardMaterial({ color: "#2a2d30", roughness: 0.55 }),
     luz: new THREE.MeshStandardMaterial({ color: "#9fe3ff", emissive: "#6fd0ff", emissiveIntensity: 0.9, roughness: 0.3 }),
     // o fundo à vista das louças abertas (bidé): a cor da peça um pouco mais escura, como em sombra
-    fundo: new THREE.MeshStandardMaterial({ color: new THREE.Color(cor).multiplyScalar(0.72), roughness: 0.3 }),
+    fundo: new THREE.MeshStandardMaterial({ color: new THREE.Color(cor).multiplyScalar(0.58), roughness: 0.3 }),
     agua: new THREE.MeshPhysicalMaterial({ color: "#b9d3db", roughness: 0.05, transmission: 0, clearcoat: 1, opacity: 0.85, transparent: true }),
   });
 }
 /** Monta o genérico de uma categoria: cada parte (nó do GLB) vai para a posição e a escala que a tabela dá para estas medidas e opções. */
 export function montarGenerico(cena: THREE.Object3D, c: CategoriaGlb, p: ParamsGenerico, cor: string, acab?: { metalness: number; roughness: number }): ModeloMontado {
   const mats = materiaisGenericos(cor, acab), grupo = vestir(cena, mats);
+  // as partes são nós sem malha (as malhas são as folhas «mat_<material>»): procura-se só entre esses, para um nome de parte nunca apanhar uma folha
+  const partes = new Map<string, THREE.Object3D>();
+  grupo.traverse((o) => { if (!(o as THREE.Mesh).isMesh && !partes.has(o.name)) partes.set(o.name, o); });
   for (const parte of c.partes) {
-    const no = grupo.getObjectByName(parte.nome);
+    const no = partes.get(parte.nome);
     if (!no) throw new Error(`O GLB genérico «${c.id}» não tem a parte «${parte.nome}»`);
     const k = parte.colocar(p);
     no.position.set(...k.pos); no.scale.set(...k.esc); no.rotation.set(...(k.rot ?? [0, 0, 0]));

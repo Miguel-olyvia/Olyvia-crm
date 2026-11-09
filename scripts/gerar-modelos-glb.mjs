@@ -80,7 +80,8 @@ function quantizar(m) {
   return { q, n, centro, meio };
 }
 
-function documento(prep, malhas) {
+/** `prefixoFolha`: nos genéricos as folhas chamam-se «mat_<material>», para não terem o nome de uma parte (uma parte «corpo» e o material «corpo» davam dois nós «corpo» e o runtime mexia no errado: as torneiras saíam como dois cilindros grandes). */
+function documento(prep, malhas, prefixoFolha = "") {
   const doc = new Document();
   doc.createExtension(KHRMeshQuantization).setRequired(true);
   doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE });
@@ -101,7 +102,7 @@ function documento(prep, malhas) {
       .setIndices(doc.createAccessor().setType("SCALAR").setArray(m.posicoes.length / 3 > 65535 ? m.indices : new Uint16Array(m.indices)).setBuffer(buffer));
     const malha = doc.createMesh(m.material).addPrimitive(prim);
     // a folha leva a desquantização (centro e escala uniforme); o nome é o do material, que o runtime usa
-    const folha = doc.createNode(m.material).setMesh(malha).setTranslation(centro).setScale([meio, meio, meio]).setExtras({ material: m.material });
+    const folha = doc.createNode(prefixoFolha + m.material).setMesh(malha).setTranslation(centro).setScale([meio, meio, meio]).setExtras({ material: m.material });
     nos.get(m.no).addChild(folha);
   }
   return doc;
@@ -117,7 +118,7 @@ if (process.argv[2] === "genericos") {
   mkdirSync(dir, { recursive: true });
   for (const id of P.listaDeGenericos()) {
     const prep = P.prepararGenerico(id), malhas = simplificar(prep.malhas, 0, 0), ficheiro = join(dir, `${id}.glb`);
-    writeFileSync(ficheiro, await io.writeBinary(documento(prep, malhas)));
+    writeFileSync(ficheiro, await io.writeBinary(documento(prep, malhas, "mat_")));
     const r = { categoria: id, url: `/modelos3d/genericos/${id}.glb`, triangulos: triangulos(malhas), partes: malhas.length, bytes: statSync(ficheiro).size };
     rel.push(r); console.log(`${id}: ${r.triangulos} triângulos, ${r.partes} partes, ${(r.bytes / 1024).toFixed(1)} KB`);
   }
