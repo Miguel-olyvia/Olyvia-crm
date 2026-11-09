@@ -3,10 +3,11 @@
  * (alertas do fim do dia) do periodo da folha em curso e do anterior, tudo no mesmo resultado. O contador do separador e a
  * lista de pessoas saem deste resultado, por isso nao podem divergir.
  *
- * UMA LEITURA, TRES FONTES, TRES ESTADOS
- * --------------------------------------
- * As fontes correm juntas (`Promise.allSettled`) e cada uma diz como correu (`ok`, recusada, falhada, indisponivel): uma que
- * falha nao esconde as outras, e a lista so pode dizer «ninguem tem nada por tratar» quando as TRES leram bem.
+ * UMA LEITURA, QUATRO FONTES, QUATRO ESTADOS
+ * --------------------------------------------
+ * As fontes (horas extra, justificacoes, alertas do fim do dia e desvios a validar) correm juntas (`Promise.allSettled`) e cada uma
+ * diz como correu (`ok`, recusada, falhada, indisponivel): uma que falha nao esconde as outras, e a lista so pode dizer «ninguem tem
+ * nada por tratar» quando as QUATRO leram bem.
  *
  * UMA FONTE QUE FALHA NAO FAZ DESAPARECER O QUE JA SE SABIA
  * ---------------------------------------------------------
@@ -32,8 +33,12 @@ import { lerDesvios } from "@/hooks/useAssiduidadeDaOrganizacao";
 import { avisarMudancaDeJustificacoes, lerJustificacoesDoDia, subscreverMudancaDeJustificacoes } from "@/hooks/useJustificacoesDoDia";
 import { usePeriodoFolhaRegras } from "@/hooks/usePeriodoFolhaRegras";
 import { usePermissoesAssiduidade } from "@/hooks/usePermissoesAssiduidade";
+import { isPermissionError } from "@/lib/hr/hrDb";
+import { desvioParaFila, rpcDeDesviosIndisponivel } from "@/lib/hr/desviosBase";
+import { listarDesvios } from "@/lib/hr/desviosRpc";
 import {
   construirItens,
+  construirItensDeDesviosAValidar,
   diaAnterior,
   janelaDosDesvios,
   type EstadoDeFonte,
@@ -47,7 +52,7 @@ import { accoesDoDesvio, chaveDoDesvio } from "@/components/rh-exemplo/lib/alert
 
 const STALE_TIME_MS = 15_000;
 const SEM_ITENS: ItemFila[] = [];
-const TODAS_COM_ERRO: Record<FonteFila, EstadoDeFonte> = { horas_extra: "erro", justificacoes: "erro", desvios: "erro" };
+const TODAS_COM_ERRO: Record<FonteFila, EstadoDeFonte> = { horas_extra: "erro", justificacoes: "erro", desvios: "erro", desvios_a_validar: "erro" };
 
 export interface FilaLida {
   itens: ItemFila[];
@@ -68,7 +73,24 @@ export interface FilaDeTrabalhoLida extends FilaLida {
 }
 
 type ItensPorFonte = Record<FonteFila, ItemFila[]>;
-const SEM_ITENS_POR_FONTE = (): ItensPorFonte => ({ horas_extra: [], justificacoes: [], desvios: [] });
+const SEM_ITENS_POR_FONTE = (): ItensPorFonte => ({ horas_extra: [], justificacoes: [], desvios: [], desvios_a_validar: [] });
+const FONTES: readonly FonteFila[] = ["horas_extra", "justificacoes", "desvios", "desvios_a_validar"];
+
+/**
+ * Os desvios de tempo/horario por validar do periodo (`rpc_hr_desvios_listar`, estado `a_validar`). Sem margem configurada a
+ * base devolve vazio. Uma base sem a RPC (migration por aplicar) quer dizer que nao ha desvios: lista vazia, sem aviso.
+ */
+async function lerDesviosAValidar(organizationId: string, de: string, ate: string): Promise<{ itens: ItemFila[]; estado: EstadoDeFonte }> {
+  try {
+    const linhas = await listarDesvios(organizationId, { estado: "a_validar", de, ate });
+    return { itens: construirItensDeDesviosAValidar(linhas.map(desvioParaFila)), estado: "ok" };
+  } catch (erro) {
+    if (rpcDeDesviosIndisponivel(erro, "rpc_hr_desvios_listar")) return { itens: [], estado: "ok" };
+    if (isPermissionError(erro)) return { itens: [], estado: "recusado" };
+    captureFlowError(erro, "hr-desvios-listar");
+    return { itens: [], estado: "erro" };
+  }
+}
 const AJUDAS = { accoesDoDesvio, chaveDoDesvio };
 
 export function useFilaDeTrabalho(): FilaDeTrabalhoLida {
@@ -101,24 +123,27 @@ export function useFilaDeTrabalho(): FilaDeTrabalhoLida {
       const organizationId = orgId as string;
       if (ultimaBoa.current.orgId !== organizationId) ultimaBoa.current = { orgId: organizationId, itens: SEM_ITENS_POR_FONTE() };
 
-      const [horasExtra, justificacoes, desvios] = await Promise.allSettled([
+      const [horasExtra, justificacoes, desvios, aValidar] = await Promise.allSettled([
         podeVerHorasExtra ? lerHorasExtra(organizationId, { estado: "pendente" }) : Promise.resolve(null),
         lerJustificacoesDoDia(organizationId, { soPendentes: true }),
         lerDesvios(organizationId, janela.de, janela.ate),
+        lerDesviosAValidar(organizationId, janela.de, janela.ate),
       ]);
       // Os leitores nao lancam em condicoes normais: uma rejeicao e um defeito e vai para o registo, como no mapa.
-      for (const resultado of [horasExtra, justificacoes, desvios]) {
+      for (const resultado of [horasExtra, justificacoes, desvios, aValidar]) {
         if (resultado.status === "rejected") captureFlowError(resultado.reason, "hr-assiduidade-load");
       }
 
       const horas = horasExtra.status === "fulfilled" ? horasExtra.value : null;
       const justificacoesLidas = justificacoes.status === "fulfilled" ? justificacoes.value : null;
       const desviosLidos = desvios.status === "fulfilled" ? desvios.value : null;
+      const aValidarLidos = aValidar.status === "fulfilled" ? aValidar.value : null;
 
       const fontes: Record<FonteFila, EstadoDeFonte> = {
         horas_extra: !podeVerHorasExtra ? "recusado" : horas ? "ok" : "erro",
         justificacoes: justificacoesLidas ? justificacoesLidas.leitura : "erro",
         desvios: !desviosLidos ? "erro" : desviosLidos.recusado ? "recusado" : desviosLidos.erro ? "erro" : "ok",
+        desvios_a_validar: aValidarLidos ? aValidarLidos.estado : "erro",
       };
 
       const lidos: ItensPorFonte = {
@@ -128,10 +153,11 @@ export function useFilaDeTrabalho(): FilaDeTrabalhoLida {
           AJUDAS,
         ),
         desvios: construirItens({ horasExtra: [], justificacoes: [], desvios: desviosLidos?.linhas ?? [] }, AJUDAS),
+        desvios_a_validar: aValidarLidos?.itens ?? [],
       };
 
       const itensPorFonte = SEM_ITENS_POR_FONTE();
-      for (const fonte of ["horas_extra", "justificacoes", "desvios"] as const) {
+      for (const fonte of FONTES) {
         if (fontes[fonte] === "ok") {
           ultimaBoa.current.itens[fonte] = lidos[fonte];
           itensPorFonte[fonte] = lidos[fonte];
@@ -141,7 +167,7 @@ export function useFilaDeTrabalho(): FilaDeTrabalhoLida {
         }
       }
       return {
-        itens: [...itensPorFonte.horas_extra, ...itensPorFonte.justificacoes, ...itensPorFonte.desvios],
+        itens: [...itensPorFonte.horas_extra, ...itensPorFonte.justificacoes, ...itensPorFonte.desvios, ...itensPorFonte.desvios_a_validar],
         fontes,
         horasExtra: { lidas: horas?.horas.length ?? 0, total: horas?.total ?? 0 },
       };

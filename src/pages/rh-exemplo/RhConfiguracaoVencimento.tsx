@@ -59,6 +59,7 @@ import type {
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { ConfiguracaoHorasExtra } from "@/components/rh-exemplo/fluxosC/ConfiguracaoHorasExtra";
+import { ConfiguracaoMargemTempo } from "@/components/rh-exemplo/fluxosC/ConfiguracaoMargemTempo";
 import { SeccaoRegrasSalariais } from "@/components/rh-exemplo/hooks/regrasSalariaisReal";
 import { Ban, Loader2, Pencil, Plus, RotateCcw, Tag } from "lucide-react";
 
@@ -708,8 +709,9 @@ export default function RhConfiguracaoVencimento() {
           <SeccaoRegrasSalariais podeGerir={podeGerirCodigos} />
         </TabsContent>
 
-        <TabsContent value="horas-extra" className="mt-4">
+        <TabsContent value="horas-extra" className="mt-4 space-y-4">
           <ConfiguracaoHorasExtra aoIrParaRegrasSalariais={() => setAba("regras")} />
+          <ConfiguracaoMargemTempo />
         </TabsContent>
       </Tabs>
     </div>

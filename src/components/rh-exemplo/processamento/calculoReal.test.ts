@@ -64,6 +64,28 @@ describe("calcularResultadoReal", () => {
     expect(r.mudouAMeioDoMes).toBe(false);
   });
 
+  describe("margem de tempo (contadoMinutos)", () => {
+    it("SEM contadoMinutos (sem margem) o resultado e o de sempre; contado = realizado da o mesmo resultado", () => {
+      const sem = calcularResultadoReal(entrada());
+      const igual = calcularResultadoReal(entrada({ totais: totais({ contadoMinutos: 9480 }), dias: entrada().dias.map((d) => ({ ...d, contadoMinutos: d.realizadoMinutos })) }));
+      expect(igual.resultado).toEqual(sem.resultado);
+      expect(sem.resultado.descontoFaltas).toBeCloseTo(15, 6);
+    });
+
+    it("o desconto de faltas sai do que CONTA: dentro da margem (contado = planeado) nao ha desconto, mesmo com menos picado", () => {
+      const r = calcularResultadoReal(entrada({ totais: totais({ contadoMinutos: 9600 }) }));
+      expect(r.resultado.descontoFaltas).toBe(0);
+    });
+
+    it("o realizado do dia fica intacto e o subsidio usa os minutos contados do dia", () => {
+      const dias = [{ ...dia("trabalho", 290), contadoMinutos: 300 }, dia("trabalho", 290)] as DiaRelatorioMensal[];
+      const r = calcularResultadoReal(entrada({ dias }));
+      // 290 min contados como 300 (o limite) pagam o valor do dia; o outro dia, sem contado, 290 x 0,76 / 60.
+      expect(r.resultado.subsidioAlimentacao).toBeCloseTo(6.15 + 3.67, 6);
+      expect(r.totais.realizadoMinutos).toBe(9480);
+    });
+  });
+
   it("um valor pontual anulado nao entra no total", () => {
     const r = calcularResultadoReal(entrada({ lancamentos: [lancamento(30), lancamento(100, "2026-10-05T10:00:00Z")] }));
     expect(r.resultado.lancamentosPontuais).toBe(30);

@@ -65,6 +65,11 @@ export interface ResultadoParaGravar {
   retribuicao_id: string | null;
   cargo_periodo_id: string | null;
   regra_salarial_id: string | null;
+  /**
+   * A assinatura dos desvios da pessoa neste periodo (`rpc_hr_desvios_assinaturas`), lida imediatamente antes de calcular. A base
+   * recusa o fecho se houve decisoes nos desvios depois (`processamento_fechar_desvios_desactualizados`). `null` = sem desvios.
+   */
+  desvios_assinatura: string | null;
 }
 
 /** Uma linha de `rpc_hr_processamento_resultados_ler`. */
@@ -163,6 +168,8 @@ export interface EntradaResultadoPessoa {
   /** A regra salarial em vigor em `dataFim`, ou `null` se nao ha. */
   regraSalarialId: string | null;
   cargoPeriodoId?: string | null;
+  /** A assinatura dos desvios da pessoa (ver `ResultadoParaGravar.desvios_assinatura`); sem ela, `null`. */
+  desviosAssinatura?: string | null;
 }
 
 export function construirResultadoPessoa(entrada: EntradaResultadoPessoa): ResultadoParaGravar {
@@ -188,6 +195,7 @@ export function construirResultadoPessoa(entrada: EntradaResultadoPessoa): Resul
     retribuicao_id: retribuicaoEmVigorNoDia(entrada.versoes, entrada.dataFim)?.id ?? null,
     cargo_periodo_id: entrada.cargoPeriodoId ?? null,
     regra_salarial_id: entrada.regraSalarialId,
+    desvios_assinatura: entrada.desviosAssinatura ? entrada.desviosAssinatura : null,
   };
 }
 
@@ -199,6 +207,8 @@ export interface ArgsResultadosDoFecho {
   lancamentosDe: (pessoaId: string) => readonly HrProcessamentoLancamento[];
   dataFim: string;
   regraSalarialId: string | null;
+  /** A assinatura dos desvios de cada pessoa, lida imediatamente antes de calcular; sem ela (sem desvios), `null`. */
+  assinaturaDeDesviosDe?: (pessoaId: string) => string | null | undefined;
 }
 
 /** O `p_resultados` completo, ou as pessoas que ainda nao tem calculo (e entao nao se fecha). */
@@ -222,6 +232,7 @@ export function construirResultadosDoFecho(args: ArgsResultadosDoFecho): {
         lancamentos: args.lancamentosDe(pessoaId),
         dataFim: args.dataFim,
         regraSalarialId: args.regraSalarialId,
+        desviosAssinatura: args.assinaturaDeDesviosDe?.(pessoaId) ?? null,
       }),
     );
   }
@@ -259,11 +270,16 @@ export interface ArgsBloqueioDoFecho {
   comCalculo: (pessoaId: string) => boolean;
   /** A assiduidade da pessoa foi lida so em parte (recusada, com erro ou truncada): o calculo dela estaria errado. */
   assiduidadeIncompleta: (pessoaId: string) => boolean;
+  /**
+   * A margem de tempo ou os desvios da pessoa NAO se leram (erro ou recusa): sem eles o calculo estaria errado e o fecho nunca
+   * calcula em silencio. Opcional: sem esta leitura (ecras antigos) nao se bloqueia.
+   */
+  desviosNaoLidos?: (pessoaId: string) => boolean;
 }
 
 export type MotivoBloqueioDoFecho =
   | { codigo: "direitos" | "retribuicoes" | "codigos" | "regras" | "vinculos" }
-  | { codigo: "assiduidade" | "calculo"; n: number };
+  | { codigo: "assiduidade" | "desvios" | "calculo"; n: number };
 
 /** Porque o botao «Fechar periodo» nao pode avancar; `null` = pode. A chave de traducao e `rhProcReal.fecho.bloqueio.<codigo>`. */
 export function motivoDeBloqueioDoFecho(args: ArgsBloqueioDoFecho): MotivoBloqueioDoFecho | null {
@@ -275,6 +291,8 @@ export function motivoDeBloqueioDoFecho(args: ArgsBloqueioDoFecho): MotivoBloque
   if (args.vinculos !== "ok") return { codigo: "vinculos" };
   const incompletas = args.pessoasObrigatorias.filter((id) => args.assiduidadeIncompleta(id)).length;
   if (incompletas > 0) return { codigo: "assiduidade", n: incompletas };
+  const semDesvios = args.desviosNaoLidos ? args.pessoasObrigatorias.filter((id) => args.desviosNaoLidos?.(id)).length : 0;
+  if (semDesvios > 0) return { codigo: "desvios", n: semDesvios };
   const n = args.pessoasObrigatorias.filter((id) => !args.comCalculo(id)).length;
   if (n > 0) return { codigo: "calculo", n };
   return null;
@@ -289,6 +307,9 @@ const ERROS_DO_FECHO: ReadonlySet<string> = new Set([
   "processamento_fechar_lancamentos_desactualizados",
   "processamento_fechar_resultado_mal_formado",
   "processamento_resultados_periodo_aberto",
+  // Desvios de tempo (margem): ha dias por validar no periodo, ou houve decisoes depois do calculo.
+  "processamento_fechar_desvios_por_validar",
+  "processamento_fechar_desvios_desactualizados",
 ]);
 
 /** O codigo do erro da RPC (prefixo da mensagem), se for um dos que o fecho conhece. */

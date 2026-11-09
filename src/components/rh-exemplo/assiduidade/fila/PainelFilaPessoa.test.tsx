@@ -11,7 +11,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import type { FilaDeTrabalho, PessoaNaFila } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
-import { agruparPorPessoa, construirItens, ordenarPessoas } from "@/lib/hr/filaDeTrabalho";
+import { agruparPorPessoa, construirItens, construirItensDeDesviosAValidar, ordenarPessoas, type DesvioAValidar } from "@/lib/hr/filaDeTrabalho";
+import { desviosBaseFalsa, reporBaseFalsa } from "@/test/horasExtraFalso";
 import { accoesDoDesvio, chaveDoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
 import type { HoraExtra } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import type { Desvio, PermissoesAssiduidade } from "@/types/hrAssiduidade";
@@ -56,7 +57,7 @@ const filaCom = (parcial: Partial<FilaDeTrabalho> = {}): FilaDeTrabalho => {
     contador: String(pessoas.length),
     horasExtraCortadas: false,
     horasExtra: { lidas: 1, total: 1 },
-    fontes: { horas_extra: "ok", justificacoes: "ok", desvios: "ok" },
+    fontes: { horas_extra: "ok", justificacoes: "ok", desvios: "ok", desvios_a_validar: "ok" },
     aCarregar: false,
     lidaComSucesso: true,
     periodo: { de: "2026-10-22", ate: "2026-11-21" },
@@ -109,7 +110,7 @@ describe("lista de pessoas", () => {
   });
 
   it("uma fonte que falhou aparece escrita e a lista vazia NÃO diz que não há nada", () => {
-    montar(filaCom({ pessoas: [], lidaComSucesso: false, fontes: { horas_extra: "ok", justificacoes: "erro", desvios: "ok" } }));
+    montar(filaCom({ pessoas: [], lidaComSucesso: false, fontes: { horas_extra: "ok", justificacoes: "erro", desvios: "ok", desvios_a_validar: "ok" } }));
     expect(screen.getByTestId("rhd-fila-aviso-justificacoes")).toHaveTextContent("Não foi possível ler as justificações");
     expect(screen.queryByTestId("rhd-fila-vazia")).not.toBeInTheDocument();
   });
@@ -176,7 +177,7 @@ describe("painel da pessoa", () => {
   it("nunca diz «Nada por tratar» se uma fonte não foi lida bem: avisa que os itens podem estar desactualizados", () => {
     const { rerender } = montar(filaCom());
     abrirAna();
-    const comFalha = filaCom({ pessoas: [], lidaComSucesso: false, fontes: { horas_extra: "ok", justificacoes: "ok", desvios: "erro" } });
+    const comFalha = filaCom({ pessoas: [], lidaComSucesso: false, fontes: { horas_extra: "ok", justificacoes: "ok", desvios: "erro", desvios_a_validar: "ok" } });
     rerender(arvore(comFalha));
     const painel = screen.getByRole("dialog", { name: "Ana Silva" });
     expect(within(painel).queryByText("Nada por tratar para Ana Silva.")).not.toBeInTheDocument();
@@ -203,5 +204,124 @@ describe("painel da pessoa", () => {
     fireEvent.keyDown(screen.getByRole("dialog", { name: "Ana Silva" }), { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(linha).toHaveFocus());
+  });
+});
+
+describe("desvios a validar na fila", () => {
+  const validacao = (extra: Partial<DesvioAValidar> = {}): DesvioAValidar => ({
+    id: "dv1", pessoaId: "p-ana", data: "2026-10-12", natureza: "hora_extra", minutos: 60, horaInicio: "09:00:00", horaFim: "19:00:00", detalhe: null,
+    planeadoMin: 540, realizadoMin: 600, diferencaMin: 60, desvioHorarioMin: 0, margemMin: 10, ...extra,
+  });
+  const filaDeDesvio = (extra: Partial<DesvioAValidar> = {}): FilaDeTrabalho =>
+    filaCom({
+      pessoas: ordenarPessoas(agruparPorPessoa(construirItensDeDesviosAValidar([validacao(extra)]), () => "Ana Silva"), { hoje: "2026-11-05", periodo: null }),
+    });
+  const abrir = (fila: FilaDeTrabalho, p: PermissoesAssiduidade = permissoes({ gerir: true }), minhaPessoaId: string | null = null) => {
+    render(
+      <LanguageProvider>
+        <MemoryRouter>
+          <ListaFilaPessoas fila={fila} permissoes={p} locais={[]} minhaPessoaId={minhaPessoaId} aoAlterarMapa={() => undefined} />
+        </MemoryRouter>
+      </LanguageProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Ana Silva/ }));
+    return screen.getByRole("dialog", { name: "Ana Silva" });
+  };
+
+  beforeEach(() => reporBaseFalsa());
+
+  it("mostra a natureza, as duas medidas e o horário picado, em texto", () => {
+    const painel = abrir(filaDeDesvio());
+    const item = within(painel).getByTestId("item-fila-desvio-a-validar-dv1");
+    expect(within(item).getByText("A validar: Hora extra")).toBeInTheDocument();
+    expect(item).toHaveTextContent("09:00–19:00");
+    expect(within(item).getByTestId("item-fila-desvio-a-validar-dv1-medidas")).toHaveTextContent(/Planeado .* picado .* diferença \+.* margem 10 min/);
+  });
+
+  it("«Normal» valida logo, sem motivo, e di-lo por extenso", async () => {
+    const painel = abrir(filaDeDesvio());
+    fireEvent.click(within(painel).getByRole("button", { name: /^Normal, desvio a validar/ }));
+    await waitFor(() => expect(desviosBaseFalsa.validacoes).toEqual([{ id: "dv1", decisao: "normal", motivo: "" }]));
+    expect(await within(painel).findByText(/validado como normal/)).toBeInTheDocument();
+  });
+
+  it("«Hora extra» valida como hora extra quando a diferença passa a margem", async () => {
+    const painel = abrir(filaDeDesvio());
+    fireEvent.click(within(painel).getByRole("button", { name: /^Hora extra, desvio a validar/ }));
+    await waitFor(() => expect(desviosBaseFalsa.validacoes).toEqual([{ id: "dv1", decisao: "hora_extra", motivo: "" }]));
+  });
+
+  it("«Hora extra» fica desactivada com o motivo escrito quando a diferença não passa a margem", () => {
+    const painel = abrir(filaDeDesvio({ natureza: "tempo_a_menos", diferencaMin: -25, realizadoMin: 515, minutos: 25 }));
+    const botao = within(painel).getByRole("button", { name: /^Hora extra, desvio a validar/ });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(botao).toHaveAccessibleDescription("Só há hora extra quando o picado passa o planeado em mais do que a margem");
+    fireEvent.click(botao);
+    expect(desviosBaseFalsa.validacoes).toEqual([]);
+  });
+
+  it("«Aceitar desvio» abre um diálogo e o motivo é obrigatório", async () => {
+    const painel = abrir(filaDeDesvio({ natureza: "tempo_a_menos", diferencaMin: -25, realizadoMin: 515, minutos: 25 }));
+    fireEvent.click(within(painel).getByRole("button", { name: /^Aceitar desvio, desvio a validar/ }));
+    const dialogo = screen.getAllByRole("dialog").at(-1) as HTMLElement;
+    expect(dialogo).not.toBe(painel);
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Aceitar desvio" }));
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Escreva o motivo");
+    expect(desviosBaseFalsa.validacoes).toEqual([]);
+    fireEvent.change(within(dialogo).getByLabelText(/^Motivo/), { target: { value: "Saiu mais cedo, combinado com a chefia" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Aceitar desvio" }));
+    await waitFor(() => expect(desviosBaseFalsa.validacoes).toEqual([{ id: "dv1", decisao: "aceitar_desvio", motivo: "Saiu mais cedo, combinado com a chefia" }]));
+  });
+
+  it("um erro da base aparece traduzido no painel e nada fica validado", async () => {
+    desviosBaseFalsa.erroDeEscrita = "Este desvio já não está por validar.";
+    const painel = abrir(filaDeDesvio());
+    fireEvent.click(within(painel).getByRole("button", { name: /^Normal, desvio a validar/ }));
+    expect(await within(painel).findByText("Este desvio já não está por validar.")).toBeInTheDocument();
+    expect(desviosBaseFalsa.validacoes).toEqual([]);
+  });
+
+  it("sem permissão para gerir, as três ficam desactivadas com o motivo; a própria pessoa também", () => {
+    const sem = abrir(filaDeDesvio(), permissoes({ gerir: false }));
+    const item = within(sem).getByTestId("item-fila-desvio-a-validar-dv1");
+    for (const nome of [/^Normal, desvio a validar/, /^Hora extra, desvio a validar/, /^Aceitar desvio, desvio a validar/]) {
+      expect(within(item).getByRole("button", { name: nome })).toHaveAttribute("aria-disabled", "true");
+    }
+    expect(within(item).getByTestId("item-fila-desvio-a-validar-dv1-porque")).toHaveTextContent("Sem permissão para validar desvios");
+  });
+
+  it("ninguém valida os próprios desvios: o motivo diz-se", () => {
+    const painel = abrir(filaDeDesvio(), permissoes({ gerir: true }), "p-ana");
+    const item = within(painel).getByTestId("item-fila-desvio-a-validar-dv1");
+    expect(within(item).getByRole("button", { name: /^Normal, desvio a validar/ })).toHaveAttribute("aria-disabled", "true");
+    expect(within(item).getByTestId("item-fila-desvio-a-validar-dv1-porque")).toHaveTextContent("Ninguém valida os próprios desvios");
+  });
+
+  it("o botão «Detetar desvios do período» é só de quem gere, deteta o período e mostra o resultado", async () => {
+    desviosBaseFalsa.resumoDeteccao = { diasVistos: 40, comDesvio: 3, substituidos: 1, criados: 2 };
+    montar(filaCom({ periodo: { de: "2026-10-22", ate: "2026-11-21" } }), permissoes({ gerir: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Detetar desvios do período" }));
+    await waitFor(() => expect(desviosBaseFalsa.detecoes).toHaveLength(1));
+    expect(desviosBaseFalsa.detecoes[0].de).toBe("2026-10-22");
+    expect(await screen.findByText(/2 novo\(s\) por validar, 1 atualizado\(s\)/)).toBeInTheDocument();
+  });
+
+  it("um erro ao detetar aparece numa região de alerta própria; a região de estado fica à parte", async () => {
+    desviosBaseFalsa.erroDeEscrita = "Já há uma deteção de desvios a correr nesta organização.";
+    montar(filaCom({ periodo: { de: "2026-10-22", ate: "2026-11-21" } }), permissoes({ gerir: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Detetar desvios do período" }));
+    expect(await screen.findByTestId("detetar-desvios-erro")).toHaveAttribute("role", "alert");
+    expect(screen.getByTestId("detetar-desvios-resultado")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("detetar-desvios-resultado")).toHaveTextContent("");
+  });
+
+  it("sem gerir o botão não aparece; sem período da folha fica desactivado com o motivo", () => {
+    const { unmount } = montar(filaCom(), permissoes({ gerir: false }));
+    expect(screen.queryByRole("button", { name: "Detetar desvios do período" })).not.toBeInTheDocument();
+    unmount();
+    montar(filaCom({ periodo: null }), permissoes({ gerir: true }));
+    const botao = screen.getByRole("button", { name: "Detetar desvios do período" });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(botao).toHaveAccessibleDescription("Sem o período da folha não se sabe que dias detetar.");
   });
 });

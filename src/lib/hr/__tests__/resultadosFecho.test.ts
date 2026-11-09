@@ -73,7 +73,7 @@ describe("construirResultadoPessoa", () => {
   it("leva EXACTAMENTE os campos do contrato, e os totais com EXACTAMENTE os sete campos", () => {
     const r = construirResultadoPessoa(entrada);
     expect(Object.keys(r).sort()).toEqual(
-      ["avisos", "cargo_periodo_id", "linhas", "pessoa_id", "regra_salarial_id", "retribuicao_id", "total_bruto", "totais", "valor_hora"].sort(),
+      ["avisos", "cargo_periodo_id", "desvios_assinatura", "linhas", "pessoa_id", "regra_salarial_id", "retribuicao_id", "total_bruto", "totais", "valor_hora"].sort(),
     );
     expect(Object.keys(r.totais).sort()).toEqual(
       ["base_mes", "desconto_faltas", "divisor_duodecimos", "lancamentos_pontuais", "subsidio_alimentacao", "total_codigos_automaticos", "total_regras"],
@@ -168,6 +168,12 @@ describe("construirResultadoPessoa", () => {
     expect(r.totais.lancamentos_pontuais).toBe(10);
   });
 
+  it("a assinatura dos desvios segue no campo desvios_assinatura; sem ela, null", () => {
+    expect(construirResultadoPessoa({ ...entrada, desviosAssinatura: "abc123" }).desvios_assinatura).toBe("abc123");
+    expect(construirResultadoPessoa(entrada).desvios_assinatura).toBeNull();
+    expect(construirResultadoPessoa({ ...entrada, desviosAssinatura: "" }).desvios_assinatura).toBeNull();
+  });
+
   it("sem regra salarial em vigor, regra_salarial_id e null", () => {
     expect(construirResultadoPessoa({ ...entrada, regraSalarialId: null }).regra_salarial_id).toBeNull();
   });
@@ -255,6 +261,13 @@ describe("motivoDeBloqueioDoFecho", () => {
     expect(motivoDeBloqueioDoFecho({ ...ok, vinculos })).toEqual({ codigo: "vinculos" });
   });
 
+  it("a margem ou os desvios por ler bloqueiam o fecho e dizem quantas pessoas (nunca se calcula em silencio sem desvios)", () => {
+    expect(motivoDeBloqueioDoFecho({ ...ok, desviosNaoLidos: (id) => id === OUTRA })).toEqual({ codigo: "desvios", n: 1 });
+    expect(motivoDeBloqueioDoFecho({ ...ok, desviosNaoLidos: () => true })).toEqual({ codigo: "desvios", n: 2 });
+    expect(motivoDeBloqueioDoFecho({ ...ok, pessoasObrigatorias: [PESSOA], desviosNaoLidos: (id) => id === OUTRA })).toBeNull();
+    expect(motivoDeBloqueioDoFecho({ ...ok, desviosNaoLidos: () => false })).toBeNull();
+  });
+
   it("uma pessoa obrigatoria sem calculo bloqueia e diz quantas faltam", () => {
     expect(motivoDeBloqueioDoFecho({ ...ok, comCalculo: (id) => id === PESSOA })).toEqual({ codigo: "calculo", n: 1 });
     expect(motivoDeBloqueioDoFecho({ ...ok, comCalculo: () => false })).toEqual({ codigo: "calculo", n: 2 });
@@ -274,6 +287,8 @@ describe("os erros da RPC de fechar, em portugues claro", () => {
     "processamento_fechar_lancamentos_desactualizados",
     "processamento_fechar_resultado_mal_formado",
     "processamento_resultados_periodo_aberto",
+    "processamento_fechar_desvios_por_validar",
+    "processamento_fechar_desvios_desactualizados",
   ];
 
   it.each(codigos)("%s tem mensagem propria, sem o codigo tecnico", (codigo) => {

@@ -35,6 +35,7 @@ import { textoDasPendencias } from "./aspectoTipoFila";
 import { LinhaFilaPessoa } from "./LinhaFilaPessoa";
 import type { PessoaAberta } from "./PainelFilaBase";
 import { PainelFilaPessoa } from "./PainelFilaPessoa";
+import { BotaoDetetarDesvios } from "./BotaoDetetarDesvios";
 
 const PARAM_TIPO = "fila_tipo";
 const PARAM_TEXTO = "fila_q";
@@ -280,7 +281,7 @@ interface ListaFilaPessoasProps {
   aoAlterarMapa: () => void;
 }
 
-/** A fila do mapa de assiduidade: horas extra, justificacoes e alertas do fim do dia. */
+/** A fila do mapa de assiduidade: horas extra, justificacoes, alertas do fim do dia e desvios a validar. */
 export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAlterarMapa }: ListaFilaPessoasProps) {
   const { t } = useTranslation();
   const [detetarAberto, setDetetarAberto] = useState(false);
@@ -292,9 +293,12 @@ export function ListaFilaPessoas({ fila, permissoes, locais, minhaPessoaId, aoAl
         tipos={TIPOS_ASSIDUIDADE}
         topoExtra={
           permissoes.gerir && (
-            <Button type="button" variant="outline" className="min-h-11" onClick={() => setDetetarAberto(true)}>
-              {t("rhHeReal.detetar.abrir")}
-            </Button>
+            <>
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => setDetetarAberto(true)}>
+                {t("rhHeReal.detetar.abrir")}
+              </Button>
+              <BotaoDetetarDesvios periodo={fila.periodo} aoDetetar={aoAlterarMapa} />
+            </>
           )
         }
         renderPainel={(painel) => (

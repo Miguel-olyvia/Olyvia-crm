@@ -261,6 +261,7 @@ export function ProcessamentoVisaoGeralTab() {
         totais: {
           planeadoMinutos: totais.planeadoMinutos,
           realizadoMinutos: totais.realizadoMinutos,
+          contadoMinutos: totais.contadoMinutos,
           minutosExtraNormal: totais.minutosExtraNormal,
           minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
           minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,

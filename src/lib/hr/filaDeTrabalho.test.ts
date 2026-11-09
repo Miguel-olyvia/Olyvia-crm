@@ -263,7 +263,7 @@ describe("desvio a validar (tipo preparado, ainda sem fonte)", () => {
   it("está no registo de tipos, com fonte própria, mas fora das listas dos ecrãs até haver fonte", () => {
     const definicao = TIPOS_DE_ITEM.find((d) => d.tipo === "desvio_a_validar");
     expect(definicao).toMatchObject({ fonte: "desvios_a_validar", chaveEtiqueta: "rhFila.tipo.desvio_a_validar" });
-    expect(TIPOS_ASSIDUIDADE).toEqual(["hora_extra", "justificacao", "alerta"]);
+    expect(TIPOS_ASSIDUIDADE).toEqual(["hora_extra", "justificacao", "alerta", "desvio_a_validar"]);
     expect(TIPOS_AUSENCIAS).toEqual(["ausencia"]);
   });
 

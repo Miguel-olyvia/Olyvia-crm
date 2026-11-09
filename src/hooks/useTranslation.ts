@@ -21,6 +21,7 @@ import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
 import { rhExemploHorarioRealTranslations } from "@/translations/rhExemploHorarioReal";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
 import { rhExemploFilaTranslations } from "@/translations/rhExemploFila";
+import { rhExemploDesviosTranslations } from "@/translations/rhExemploDesvios";
 import { hrRegrasSalariaisTranslations } from "@/translations/hrRegrasSalariais";
 import { rhExemploHorasExtraRealTranslations } from "@/translations/rhExemploHorasExtraReal";
 import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
@@ -155,6 +156,9 @@ Object.keys(rhExemploFluxosDTranslations).forEach((lang) => {
 // Fila de trabalho do mapa de assiduidade: pessoas com pendências e painel da pessoa (`rhFila.*`).
 Object.keys(rhExemploFilaTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFilaTranslations[lang as keyof typeof rhExemploFilaTranslations] };
+});
+Object.keys(rhExemploDesviosTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploDesviosTranslations[lang as keyof typeof rhExemploDesviosTranslations] };
 });
 
 // Regras salariais da organizacao e direitos salariais da pessoa (`hr.regrasSalariais.*`, `hr.direitosSalariais.*`).

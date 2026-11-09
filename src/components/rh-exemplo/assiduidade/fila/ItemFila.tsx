@@ -60,6 +60,9 @@ const SLUG: Record<ItemFila["tipo"], string> = {
   ausencia: "ausencia",
 };
 
+/** «+1h», «-30min», «0min»: o sinal escreve-se sempre, para nao depender so da cor ou da posicao. */
+const minutosComSinal = (minutos: number): string => (minutos > 0 ? `+${formatarHorasMinutos(minutos)}` : minutos < 0 ? `-${formatarHorasMinutos(-minutos)}` : formatarHorasMinutos(0));
+
 /** O id de teste/DOM de um item: `item-fila-<tipo>-<id>`. */
 export const idDoItemNoDom = (item: ItemFila): string => `item-fila-${SLUG[item.tipo]}-${item.id.slice(item.id.indexOf(":") + 1)}`;
 
@@ -172,6 +175,17 @@ export function ItemDaFila({ item, nome, hoje, accoes, aoAccionar, aoAbrirDetalh
       )}
       {item.tipo === "alerta" && item.desvio.detalhe && <p className="text-xs text-muted-foreground">{item.desvio.detalhe}</p>}
       {item.tipo === "desvio_a_validar" && item.validacao.detalhe && <p className="text-xs text-muted-foreground">{item.validacao.detalhe}</p>}
+      {item.tipo === "desvio_a_validar" && item.validacao.planeadoMin !== undefined && item.validacao.realizadoMin !== undefined && (
+        <p data-testid={`${idDom}-medidas`} className="text-xs tabular-nums text-muted-foreground">
+          {t(item.validacao.margemMin === null || item.validacao.margemMin === undefined ? "rhDesvios.detalheSemMargem" : "rhDesvios.detalhe", {
+            planeado: formatarHorasMinutos(item.validacao.planeadoMin),
+            realizado: formatarHorasMinutos(item.validacao.realizadoMin),
+            diferenca: minutosComSinal(item.validacao.diferencaMin ?? item.validacao.realizadoMin - item.validacao.planeadoMin),
+            horario: formatarHorasMinutos(item.validacao.desvioHorarioMin ?? 0),
+            margem: `${item.validacao.margemMin ?? 0} min`,
+          })}
+        </p>
+      )}
 
       {(accoes.length > 0 || (item.tipo === "ausencia" && aoAbrirDetalhe)) && (
         <div className="flex flex-wrap gap-2">
