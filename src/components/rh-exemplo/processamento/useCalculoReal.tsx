@@ -71,6 +71,8 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
   }, [lancamentosHook.lancamentos, periodoId]);
 
   return {
+    /** A organizacao activa (as RPCs de desvios do fecho levam-na). */
+    organizationId: activeCompany?.id ?? null,
     periodoHook,
     lancamentosHook,
     retribuicoesHook,
@@ -104,6 +106,8 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
   const { pessoas, loading: pessoasACarregar, error: pessoasErro } = usePessoas();
   const chave = `${ano}-${mes}-${dados.intervalo.de}-${dados.intervalo.ate}`;
   const [recolhas, setRecolhas] = useState<Record<string, RecolhaAssiduidade>>({});
+  // Muda quando a deteccao de desvios do fecho alterou dias: as instancias ocultas remontam e leem tudo outra vez.
+  const [versaoRecolha, setVersaoRecolha] = useState(0);
 
   const pessoasActivas = useMemo(() => pessoas.filter((p) => p.estado_registo === "activo"), [pessoas]);
 
@@ -145,6 +149,64 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.incompleta === true,
     [recolhas, chave],
   );
+  /** A margem de tempo ou os desvios desta pessoa nao se leram: o calculo dela estaria sem desvios (bloqueia o fecho). */
+  const desviosNaoLidos = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.desviosNaoLidos === true,
+    [recolhas, chave],
+  );
+  /** A chave de desvios que o calculo desta pessoa usou (vazia = sem desvios): o fecho compara-a com a da base. */
+  const chaveDeDesviosUsada = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.desviosChave ?? "",
+    [recolhas, chave],
+  );
+  /** A assinatura das faltas que o calculo desta pessoa usou: o fecho compara-a com a das faltas de agora. */
+  const chaveDeFaltasUsada = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.faltasChave ?? "",
+    [recolhas, chave],
+  );
+  /** As horas extra aprovadas desta pessoa nao se leram (erro ou recusa): o calculo estaria sem elas (bloqueia o fecho). */
+  const horasExtraNaoLidas = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.horasExtraNaoLidas === true,
+    [recolhas, chave],
+  );
+  /** Horas extra pendentes desta pessoa em dias de modo aprovadas: bloqueiam o fecho. */
+  const horasExtraPendentes = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.horasExtraPendentes ?? 0,
+    [recolhas, chave],
+  );
+  /** O calculo desta pessoa usou horas extra aprovadas (em todo o periodo ou em parte): o fecho confere a assinatura delas. */
+  const horasExtraAprovadas = useCallback(
+    (pessoaId: string) => {
+      const fonte = recolhas[`${chave}:${pessoaId}`]?.totais?.horasExtraFonte;
+      return fonte === "aprovadas" || fonte === "misto";
+    },
+    [recolhas, chave],
+  );
+  /** A assinatura das horas extra que o calculo desta pessoa usou (vazia = sem linhas): o fecho compara-a com a da base. */
+  const chaveDeHorasExtraUsada = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.horasExtraChave ?? "",
+    [recolhas, chave],
+  );
+  /** Os totais que o calculo desta pessoa leu (o fecho confere neles as horas extra); `undefined` enquanto nao chegaram. */
+  const totaisDe = useCallback((pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais, [recolhas, chave]);
+  /** Quantas pessoas ficaram sem permissao para ler as horas extra (nao bloqueia; a base pode recusar o fecho). */
+  const semPermissaoHorasExtra = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.totais?.horasExtraRecusadas === true).length;
+  /** Minutos de horas extra confirmadas em dias de ausencia de dia inteiro, somados: nao se pagam. */
+  const totalHorasExtraNaoContadas = pessoasActivas.reduce(
+    (soma, p) => soma + (recolhas[`${chave}:${p.id}`]?.totais?.horasExtraAprovadasNaoContadasMinutos ?? 0),
+    0,
+  );
+  const semHorasExtra = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.totais?.horasExtraNaoLidas === true).length;
+  const somaDosTotais = (campo: "horasExtraPendentes" | "excessoSemHoraExtra"): number =>
+    pessoasActivas.reduce((soma, p) => soma + (recolhas[`${chave}:${p.id}`]?.totais?.[campo] ?? 0), 0);
+  const semDesvios = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.totais?.desviosNaoLidos === true).length;
+  /** Dias com desvio por validar em todas as pessoas: contam provisoriamente o planeado ate se validarem. */
+  const diasPorValidar = pessoasActivas.reduce((soma, p) => soma + (recolhas[`${chave}:${p.id}`]?.totais?.diasPorValidar ?? 0), 0);
+  /** Volta a ler a assiduidade de todas as pessoas (a deteccao do fecho mudou dias): limpa o que havia e remonta as instancias. */
+  const recalcular = useCallback(() => {
+    setRecolhas({});
+    setVersaoRecolha((v) => v + 1);
+  }, []);
 
   return {
     ...dados,
@@ -160,6 +222,26 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     /** Pessoas cuja assiduidade so se leu em parte por falta de permissao. */
     incompletas,
     assiduidadeIncompleta,
+    desviosNaoLidos,
+    chaveDeDesviosUsada,
+    chaveDeFaltasUsada,
+    horasExtraNaoLidas,
+    horasExtraPendentes,
+    horasExtraAprovadas,
+    chaveDeHorasExtraUsada,
+    totaisDe,
+    semPermissaoHorasExtra,
+    totalHorasExtraNaoContadas,
+    /** Quantas pessoas ficaram com as horas extra por ler. */
+    semHorasExtra,
+    /** Horas extra pendentes (em dias de modo aprovadas) e dias com excesso sem hora extra, somados em todas as pessoas. */
+    totalHorasExtraPendentes: somaDosTotais("horasExtraPendentes"),
+    totalExcessoPorDetetar: somaDosTotais("excessoSemHoraExtra"),
+    /** Quantas pessoas ficaram com a margem ou os desvios por ler. */
+    semDesvios,
+    diasPorValidar,
+    versaoRecolha,
+    recalcular,
   };
 }
 
@@ -190,7 +272,7 @@ function RecolhaOculta({ pessoaId, ano, mes, intervalo, faixasNoturnas, aoTermin
     aoTerminar(pessoaId, {
       totais: relatorio.totais,
       dias: relatorio.dias,
-      incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro === true,
+      incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro === true,
     });
     // `aoTerminar` muda com o mes, mas so deve disparar quando o relatorio acaba de carregar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,7 +286,7 @@ export function RecolhaDeAssiduidade({ calculo, ano, mes }: { calculo: CalculoRe
   return (
     <>
       {calculo.pessoasActivas.map((pessoa) => (
-        <RecolhaOculta key={`${pessoa.id}:${calculo.intervalo.de}:${calculo.intervalo.ate}`} pessoaId={pessoa.id} ano={ano} mes={mes} intervalo={calculo.intervalo} faixasNoturnas={calculo.faixasNoturnas} aoTerminar={calculo.registar} />
+        <RecolhaOculta key={`${pessoa.id}:${calculo.intervalo.de}:${calculo.intervalo.ate}:${calculo.versaoRecolha ?? 0}`} pessoaId={pessoa.id} ano={ano} mes={mes} intervalo={calculo.intervalo} faixasNoturnas={calculo.faixasNoturnas} aoTerminar={calculo.registar} />
       ))}
     </>
   );
@@ -239,7 +321,7 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
     dados,
     retribuicaoRecusada: retribuicoesHook.recusado,
     direitosLidos: dados.direitosLidos,
-    incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro === true,
+    incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro === true,
     periodoAberto: dados.periodoHook.periodo?.estado === "aberto",
     temPeriodo: dados.periodoHook.periodo !== null,
   };

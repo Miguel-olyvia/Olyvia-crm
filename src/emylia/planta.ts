@@ -10,6 +10,7 @@ export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "colu
   // 6/11 (Rúben: «adicionar também coisas para cozinha»)
   | "bancada" | "lava" | "placa" | "forno" | "frigorifico" | "maquina" | "exaustor" | "armario";
 /** Uma peça na planta: o canto de cima à esquerda e o tamanho, em cm. */
+// 9/11: os campos do 3D do Miguel (planta3d/) entram na peça; o Estúdio e a Visita ignoram os que não usam.
 export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; w: number; h: number; /** Protótipo 3D: o id do produto do catálogo que esta peça é (planta3d/). Sem ele, é uma peça genérica. */ produto?: string;
   /** Protótipo 3D (planta3d/pecas3d.ts): `x`,`y`,`w`,`h` são a caixa SEM rodar (largura ao longo da parede × profundidade) e `rot` o ângulo (graus, em torno do centro; 0 = frente para baixo). Sem `rot`, é uma peça do desenho antigo (caixa já orientada). */
   rot?: number; /** altura ao chão (cm), peças de parede */ alt?: number; mont?: "chao" | "parede"; esp?: boolean; nome?: string; /** altura da peça (cm) */ dh?: number;

@@ -14,6 +14,7 @@ import {
   usePessoasObrigatoriasDoFecho,
   useProcessamentoResultados,
 } from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
+import { conferirFaltasDoFecho } from "@/components/rh-exemplo/hooks/faltasReal";
 import { BannerFechoGravado } from "@/components/rh-exemplo/hooks/BannerFechoGravado";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,6 +24,10 @@ import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { totalDoMes } from "@/components/rh-exemplo/processamento/calculoReal";
 import { SeletorPeriodoFolha, usePeriodoFolhaEscolhido } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { RecolhaDeAssiduidade, useCalculoRealDoMes } from "@/components/rh-exemplo/processamento/useCalculoReal";
+import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
+import { AvisosDeHorasExtra } from "@/components/rh-exemplo/processamento/AvisosDeHorasExtra";
+import { prepararFechoComDesvios, prepararFechoComHorasExtra } from "@/components/rh-exemplo/hooks/horasExtraReal";
+import { argsDoFechoDeHorasExtra, assinaturaDeHorasExtraDoCalculo } from "@/components/rh-exemplo/hooks/horasExtraFechoReal";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { euros, dataCurta, nomeDoMes } from "./formatosC";
@@ -112,6 +117,11 @@ export function ProcessamentoFluxoTab() {
     pessoasObrigatorias: obrigatorias,
     comCalculo: (id) => resultados.has(id),
     assiduidadeIncompleta: calculo.assiduidadeIncompleta,
+    // Sem a margem ou os desvios o calculo estaria errado: bloqueia com motivo escrito, nunca calcula em silencio.
+    desviosNaoLidos: calculo.desviosNaoLidos,
+    // Horas extra aprovadas: por ler, ou pendentes por decidir (so em dias com o interruptor ligado): o mesmo bloqueio com motivo escrito.
+    horasExtraNaoLidas: (id) => calculo.horasExtraNaoLidas?.(id) === true,
+    horasExtraPendentes: (id) => calculo.horasExtraPendentes?.(id) ?? 0,
   });
   const textoBloqueio = motivoBloqueio
     ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
@@ -120,7 +130,57 @@ export function ProcessamentoFluxoTab() {
   const fecharComResultados = async (): Promise<string | null> => {
     // Mesma porta do botao: o botao so e `aria-disabled`, por isso o clique nunca fecha com o motivo por resolver.
     if (textoBloqueio) return textoBloqueio;
+    // ANTES de gravar: detetar os desvios do periodo (a base recusa se ficarem dias por validar) e ler as assinaturas. Se a
+    // deteccao mudou dias, o calculo do ecra ja nao e o de agora: relê-se tudo e fecha-se de novo.
+    if (!calculo.organizationId || !periodo) return t("rhProcReal.fecho.erroAssinaturas");
+    const preparacao = await prepararFechoComDesvios({
+      organizationId: calculo.organizationId,
+      periodoId: periodo.id,
+      de: calculo.intervalo.de,
+      ate: calculo.intervalo.ate,
+      // Os desvios que o CALCULO usou, por pessoa: se a base tiver outros (decisao, deteccao), recalcula-se antes de fechar.
+      calculadas: new Map(obrigatorias.map((id) => [id, calculo.chaveDeDesviosUsada?.(id) ?? ""])),
+    });
+    if (!preparacao.ok) {
+      if (preparacao.motivo === "erro") return preparacao.texto;
+      calculo.recalcular();
+      return t("rhProcReal.fecho.desviosMudaram", { n: String(preparacao.mudou) });
+    }
+    // As faltas marcadas, anuladas ou justificadas depois do calculo mudam o desconto: nunca se fecha com um calculo mais antigo.
+    const faltas = await conferirFaltasDoFecho({
+      organizationId: calculo.organizationId,
+      de: calculo.intervalo.de,
+      ate: calculo.intervalo.ate,
+      calculadas: new Map(obrigatorias.map((id) => [id, calculo.chaveDeFaltasUsada?.(id) ?? ""])),
+    });
+    if (!faltas.ok) {
+      if (faltas.motivo === "erro") return t("rhProcReal.fecho.erroFaltas");
+      calculo.recalcular();
+      return t("rhProcReal.fecho.faltasMudaram", { n: String(faltas.mudou) });
+    }
+    // Horas extra aprovadas: a assinatura de cada pessoa, lida imediatamente antes de montar os resultados. Se mudaram desde o
+    // calculo (decisao, deteccao), o calculo do ecra e mais antigo: relê-se tudo e fecha-se de novo.
+    // Confere TODAS as pessoas (bruto incluido) e o interruptor; o que segue no resultado e a chave do CALCULO, nunca a de agora.
+    const horasExtra = await prepararFechoComHorasExtra(
+      argsDoFechoDeHorasExtra({
+        organizationId: calculo.organizationId,
+        periodoId: periodo.id,
+        de: calculo.intervalo.de,
+        ate: calculo.intervalo.ate,
+        obrigatorias,
+        totaisDe: (id) => calculo.totaisDe?.(id),
+      }),
+    );
+    if (!horasExtra.ok) {
+      if (horasExtra.motivo === "erro") return horasExtra.texto;
+      calculo.recalcular();
+      return horasExtra.motivo === "sem_confirmadas"
+        ? t("rhProcReal.fecho.horasExtraSemConfirmadas")
+        : t("rhProcReal.fecho.horasExtraMudaram", { n: String(horasExtra.mudou) });
+    }
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
+      assinaturaDeDesviosDe: (id) => preparacao.assinaturas.get(id) ?? null,
+      assinaturaDeHorasExtraDe: (id) => assinaturaDeHorasExtraDoCalculo(calculo.totaisDe?.(id)),
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultados.get(id)?.resultado,
       versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
@@ -180,6 +240,19 @@ export function ProcessamentoFluxoTab() {
       )}
       {incompletas > 0 && (
         <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: incompletas })}</p>
+      )}
+      {!fechado && <AvisosDeDesvios diasPorValidar={calculo.diasPorValidar ?? 0} pessoasSemDesvios={calculo.semDesvios ?? 0} />}
+      {!fechado && (
+        <AvisosDeHorasExtra
+          horasExtraPendentes={calculo.totalHorasExtraPendentes ?? 0}
+          excessoPorDetetar={calculo.totalExcessoPorDetetar ?? 0}
+          pessoasSemHorasExtra={calculo.semHorasExtra ?? 0}
+          pessoasSemPermissaoHorasExtra={calculo.semPermissaoHorasExtra ?? 0}
+          horasExtraNaoContadasMin={calculo.totalHorasExtraNaoContadas ?? 0}
+          de={calculo.intervalo.de}
+          ate={calculo.intervalo.ate}
+          aoDetetar={calculo.recalcular}
+        />
       )}
 
       {aCarregar ? (

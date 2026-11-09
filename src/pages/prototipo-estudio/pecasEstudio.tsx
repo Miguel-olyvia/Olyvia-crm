@@ -99,8 +99,9 @@ export function Resumo({ t, porEscolher, grande = false }: { t: ReturnType<typeo
 
 export function CartaoProduto({ prod, estilo, escolhido, onEscolher, recomendado = false, acao }: { prod: Produto; estilo: Estilo; escolhido: boolean; onEscolher: () => void; recomendado?: boolean; acao?: string }) {
   const c = combina(prod, estilo);
+  // 9/11 (Rúben: «a lista faz flicking»): sem «layout» (ao abrir uma lista em cima, todos os cartões de baixo animavam a mudança de sítio)
   return (
-    <motion.li layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
+    <motion.li initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
       <button type="button" aria-pressed={escolhido} onClick={onEscolher}
         className={cn("flex w-full gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
           escolhido ? "border-primary bg-primary/[0.06] ring-1 ring-primary" : "border-border bg-background hover:border-primary/50")}>

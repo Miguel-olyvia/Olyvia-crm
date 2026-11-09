@@ -115,7 +115,7 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
                   {porColocar.map((x) => {
                     const prod = produto(x.produto);
                     return (
-                      <motion.li key={x.id} layout initial={reduzir ? false : { opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={reduzir ? undefined : { opacity: 0, x: 24 }}
+                      <motion.li key={x.id} initial={reduzir ? false : { opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={reduzir ? undefined : { opacity: 0, x: 24 }}
                         transition={{ duration: 0.18 }} className="flex items-center gap-3 rounded-xl border border-border bg-background p-2">
                         <Ilustracao cat={x.tipo} hex={prod?.hex} tamanho={40} />
                         <span className="min-w-0 flex-1 text-[15px]">{prod?.n ?? PECAS[x.tipo].n}
@@ -237,7 +237,7 @@ function Servicos({ p, setP }: { p: Projeto; setP: SetP }) {
         {lista.map((sv) => {
           const q = escolhidos.get(sv.id), dentro = q !== undefined;
           return (
-            <motion.li key={sv.id} layout={!reduzir} className={cn("flex flex-wrap items-center gap-3 rounded-xl border p-3 transition-colors", dentro ? "border-primary/40 bg-primary/[0.04]" : "border-border bg-background")}>
+            <motion.li key={sv.id} className={cn("flex flex-wrap items-center gap-3 rounded-xl border p-3 transition-colors", dentro ? "border-primary/40 bg-primary/[0.04]" : "border-border bg-background")}>
               <span aria-hidden="true" className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", dentro ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
                 {dentro ? <Check className="h-5 w-5" /> : <Wrench className="h-5 w-5" />}
               </span>
@@ -272,7 +272,7 @@ function Servicos({ p, setP }: { p: Projeto; setP: SetP }) {
 
 function LinhaSugestao({ sg, reduzir, juntar, recusar }: { sg: Sugestao; reduzir: boolean; juntar: () => void; recusar: () => void }) {
   return (
-    <motion.li layout={!reduzir} initial={reduzir ? false : { opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reduzir ? undefined : { opacity: 0, x: 24 }}
+    <motion.li initial={reduzir ? false : { opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reduzir ? undefined : { opacity: 0, x: 24 }}
       transition={{ duration: 0.2 }} className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background p-3">
       <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Wrench className="h-5 w-5" /></span>
       <span className="min-w-[200px] flex-1">

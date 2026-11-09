@@ -1,6 +1,6 @@
 /**
  * O painel de UMA pessoa da fila de trabalho do mapa de assiduidade. Resolve-se tudo ali, numa so lista cronologica (horas
- * extra, justificacoes, alertas do fim do dia), cada item com a etiqueta do seu tipo. A casca (gaveta, foco, lista) e a
+ * extra, justificacoes, alertas do fim do dia, desvios a validar), cada item com a etiqueta do seu tipo. A casca (gaveta, foco, lista) e a
  * `PainelFilaBase`, a mesma do ecra de Ausencias; aqui ficam os dialogos e formularios de decisao DESTE ecra.
  *
  * Os dialogos e formularios de decisao sao os que ja existiam, sem os reescrever: `DecidirHoraExtraDialog`,
@@ -10,12 +10,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
+import { dataCurta } from "@/components/rh-exemplo/fluxosC/formatosC";
 import { AccaoDoDesvio } from "@/components/rh-exemplo/fluxosB/alertas/AccaoDoDesvio";
 import { DialogosDecisaoDia, type PedidoDecisaoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/DialogosDecisaoDia";
 import { useDecisaoDoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/useDecisaoDoDia";
 import { DecidirHoraExtraDialog, type PedidoDecisao } from "@/components/rh-exemplo/fluxosC/DecidirHoraExtraDialog";
 import { RegistarTempoAMaisDialog } from "@/components/rh-exemplo/fluxosC/RegistarTempoAMaisDialog";
 import { accoesDoItem, type FonteFila, type IdDeAccao, type ItemFila, type PessoaNaFila } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
+import { useDesviosAcoes } from "@/components/rh-exemplo/hooks/horasExtraReal";
+import { AceitarDesvioDialog, type PedidoAceitarDesvio } from "./AceitarDesvioDialog";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import type { LocalTrabalho } from "@/components/rh-exemplo/tipos";
 import { PainelFilaBase, type PessoaAberta } from "./PainelFilaBase";
@@ -70,6 +73,9 @@ function PainelDeAssiduidade({
   const [pedidoJustificacao, setPedidoJustificacao] = useState<PedidoDecisaoDia | null>(null);
   const [pedidoAlerta, setPedidoAlerta] = useState<{ item: Extract<ItemFila, { tipo: "alerta" }>; accao: IdDeAccao } | null>(null);
   const [registarAberto, setRegistarAberto] = useState(false);
+  const [pedidoAceitar, setPedidoAceitar] = useState<PedidoAceitarDesvio | null>(null);
+  const [mensagemDesvio, setMensagemDesvio] = useState<{ texto: string; erro: boolean } | null>(null);
+  const { validar: validarDesvio } = useDesviosAcoes();
   const blocoDaAccaoRef = useRef<HTMLDivElement>(null);
 
   const aposGravar = (): void => {
@@ -96,8 +102,28 @@ function PainelDeAssiduidade({
       setPedidoJustificacao({ justificacao: item.justificacao, tipo: accao === "aceitar" ? "aceitar" : "recusar", pessoaNome: aberta.nome });
     } else if (item.tipo === "alerta") {
       setPedidoAlerta({ item, accao });
+    } else if (item.tipo === "desvio_a_validar") {
+      if (accao === "validar_aceitar_desvio") {
+        // Aceitar exige um motivo: abre o dialogo.
+        setPedidoAceitar({ desvioId: item.validacao.id, pessoaNome: aberta.nome, data: item.data });
+      } else {
+        void validarDireto(item, accao === "validar_hora_extra" ? "hora_extra" : "normal");
+      }
     }
-    // «desvio a validar» e «ausencia» nao tem fonte neste ecra: nunca chegam aqui.
+    // «ausencia» nao tem fonte neste ecra: nunca chega aqui.
+  };
+
+  /** Normal e hora extra nao pedem motivo: validam logo. O resultado diz-se por extenso (regiao `status`). */
+  const validarDireto = async (item: Extract<ItemFila, { tipo: "desvio_a_validar" }>, decisao: "normal" | "hora_extra"): Promise<void> => {
+    setMensagemDesvio(null);
+    const r = await validarDesvio(item.validacao.id, decisao);
+    if (!r.ok) {
+      setMensagemDesvio({ texto: r.erro, erro: true });
+      void aoRecarregar();
+      return;
+    }
+    setMensagemDesvio({ texto: t(`rhDesvios.validar.ok.${decisao}`, { dia: dataCurta(item.data) }), erro: false });
+    aposGravar();
   };
 
   return (
@@ -109,7 +135,7 @@ function PainelDeAssiduidade({
       fontesComProblema={fontesComProblema}
       accoesDe={(item) => accoesDoItem(item, permissoes, minhaPessoaId)}
       aoAccionar={accionar}
-      mensagem={mensagem}
+      mensagem={mensagemDesvio ?? mensagem}
       hrefFicha={`/rh-exemplo/pessoas/${aberta.id}?aba=planeamento`}
       chaveFicha="rhFila.painel.abrirFicha"
       blocoExtra={
@@ -142,6 +168,14 @@ function PainelDeAssiduidade({
       <DecidirHoraExtraDialog pedido={pedidoHoraExtra} aoFechar={() => setPedidoHoraExtra(null)} />
       <DialogosDecisaoDia pedido={pedidoJustificacao} aoFechar={() => setPedidoJustificacao(null)} aoDecidir={decidirERecarregar} />
       {executor}
+      <AceitarDesvioDialog
+        pedido={pedidoAceitar}
+        aoFechar={() => setPedidoAceitar(null)}
+        aoValidado={(texto) => {
+          setMensagemDesvio({ texto, erro: false });
+          aposGravar();
+        }}
+      />
       <RegistarTempoAMaisDialog aberto={registarAberto} aoFechar={() => setRegistarAberto(false)} pessoaIdInicial={aberta.id} />
     </PainelFilaBase>
   );

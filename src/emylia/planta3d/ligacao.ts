@@ -12,7 +12,10 @@ import {
 } from "./modelo";
 
 export { TIPO_LEGADO };
-const MOCKUP_DO_LEGADO: Record<TipoPeca, TipoMockup> = { base: "base_duche", banheira: "banheira", sanita: "sanita", bide: "bide", movel: "movel", coluna: "movel", porta: "porta", janela: "janela" };
+const MOCKUP_DO_LEGADO: Record<TipoPeca, TipoMockup> = { base: "base_duche", banheira: "banheira", sanita: "sanita", bide: "bide", movel: "movel", coluna: "movel", porta: "porta", janela: "janela",
+  // 9/11 (o Estúdio): o espelho, o toalheiro e as peças da cozinha que o Estúdio desenha na planta
+  espelho: "espelho", toalheiro: "toalheiro", bancada: "bancada", lava: "lava_loica", placa: "placa", forno: "eletro", frigorifico: "frigorifico",
+  maquina: "eletro", exaustor: "eletro", armario: "armario_alto" };
 const arred = (n: number) => Math.round(n / PASSO) * PASSO;
 
 /**

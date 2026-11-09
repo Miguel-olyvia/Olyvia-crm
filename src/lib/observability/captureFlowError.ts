@@ -239,6 +239,13 @@ export type BusinessFlow =
   | "hr-horas-extra-saldo"
   | "hr-horas-extra-config-ler"
   | "hr-horas-extra-config-guardar"
+  // Margem de tempo e desvios (rpc_hr_desvios_*, rpc_hr_desvio_validar).
+  | "hr-desvios-config-ler"
+  | "hr-desvios-config-guardar"
+  | "hr-desvios-listar"
+  | "hr-desvios-detetar"
+  | "hr-desvios-validar"
+  | "hr-desvios-assinaturas"
   | "hr-horas-extra-autorizacoes"
   | "hr-horas-extra-autorizar"
   | "hr-horas-extra-detetar"

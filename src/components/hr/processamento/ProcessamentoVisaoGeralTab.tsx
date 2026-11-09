@@ -83,6 +83,7 @@ import {
 } from "@/lib/hr/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/types/hr";
 import { toast } from "@/lib/toast";
+import { conferirFaltasDoFecho } from "@/lib/hr/faltasFecho";
 import { Eye, Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
 import { usePessoasObrigatoriasDoFecho } from "@/hooks/usePessoasObrigatoriasDoFecho";
 import { useProcessamentoResultados } from "@/hooks/useProcessamentoResultados";
@@ -140,6 +141,8 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
   sem_regra_salarial: "hr.vencimento.visaoGeral.avisoSemRegraSalarial",
   sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
+  faltas_provisorias: "hr.vencimento.visaoGeral.avisoFaltasProvisorias",
+  dias_sem_picagem_descontados: "hr.vencimento.visaoGeral.avisoDiasSemPicagemDescontados",
 };
 
 const SEM_FAIXAS: readonly { hora_inicio: string; hora_fim: string }[] = [];
@@ -184,6 +187,8 @@ export function ProcessamentoVisaoGeralTab() {
   // Os totais de assiduidade ficam guardados COM o periodo a que pertencem: ao mudar de periodo os do anterior deixam de valer
   // de imediato (sem efeito que os apague e sem uma janela em que o periodo novo mostra os totais do velho).
   const chavePeriodo = `${ano}-${mes}-${intervalo.de}-${intervalo.ate}`;
+  /** Sobe quando o fecho ve faltas diferentes das do calculo: remonta a recolha e a assiduidade volta a ler-se. */
+  const [versaoRecolha, setVersaoRecolha] = useState(0);
   const [recolhido, setRecolhido] = useState<{
     chave: string;
     totais: Record<string, TotaisRelatorioMensal>;
@@ -261,11 +266,14 @@ export function ProcessamentoVisaoGeralTab() {
         totais: {
           planeadoMinutos: totais.planeadoMinutos,
           realizadoMinutos: totais.realizadoMinutos,
+          contadoMinutos: totais.contadoMinutos,
           minutosExtraNormal: totais.minutosExtraNormal,
           minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
           minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,
           horasExtraNoturnasMinutos: totais.horasExtraNoturnasMinutos,
           minutosAusenciaRemunerada: totais.minutosAusenciaRemunerada ?? 0,
+          faltas: totais.faltasParaDesconto ?? [],
+          limiteFaltaPorDia: totais.limiteFaltaPorDia,
           diasFeriadoTrabalhados: totais.diasFeriadoTrabalhados,
           // `TotaisRelatorioMensal` nao tem esta contagem ainda -- lacuna
           // conhecida, documentada no cabecalho de processamentoTotais.ts.
@@ -358,6 +366,25 @@ export function ProcessamentoVisaoGeralTab() {
     if (textoBloqueio) {
       toast.error(textoBloqueio);
       return;
+    }
+    // As faltas marcadas, anuladas ou justificadas depois do calculo mudam o desconto: nunca se fecha com um calculo mais antigo.
+    if (activeCompany?.id) {
+      const faltas = await conferirFaltasDoFecho({
+        organizationId: activeCompany.id,
+        de: intervalo.de,
+        ate: intervalo.ate,
+        calculadas: new Map(obrigatorias.map((id) => [id, totaisPorPessoa[id]?.faltasChave ?? ""])),
+      });
+      if (!faltas.ok) {
+        if (faltas.motivo === "erro") {
+          toast.error(t("rhProcReal.fecho.erroFaltas"));
+        } else {
+          setRecolhido({ chave: chavePeriodo, totais: {}, dias: {}, incompletas: {} });
+          setVersaoRecolha((v) => v + 1);
+          toast.error(t("rhProcReal.fecho.faltasMudaram", { n: String(faltas.mudou) }));
+        }
+        return;
+      }
     }
     // Fecha e GRAVA o resultado de cada pessoa obrigatoria, tal como o ecra o mostra agora.
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
@@ -500,7 +527,7 @@ export function ProcessamentoVisaoGeralTab() {
           )}
           {!periodoFechado && pessoasActivas.map((pessoa) => (
             <ResumoPessoaProcessamentoOculto
-              key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}`}
+              key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}:${versaoRecolha}`}
               pessoaId={pessoa.id}
               ano={ano}
               mes={mes}

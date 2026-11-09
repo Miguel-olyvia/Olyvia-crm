@@ -15,6 +15,9 @@ import {
   LIMITES_OMISSAO, type EstadoHoraExtra, type HoraExtra, type LimitesHE,
 } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import type { ResultadoDeteccao, ResultadoRegisto } from "@/components/rh-exemplo/hooks/horasExtraReal";
+import { chaveDoErroDesvios, codigoDeErroDesvios, podeSerHoraExtra } from "@/lib/hr/desviosBase";
+import type { MargemLida, ResumoDeteccaoDesvios } from "@/lib/hr/desviosRpc";
+import type { ResultadoDesvios } from "@/hooks/hr/useDesvios";
 import {
   DIAS_JANELA_SEMANAL, DIAS_MAX_DETECAO_ORGANIZACAO, DIAS_MAX_DETECAO_PESSOA, MAX_JANELAS_DETECAO, MOTIVO_MIN, dataHaMeses, diasDoIntervalo,
   hojeLisboa, limitesDoMes, planoDeDeteccao, type ResultadoHE, type SaldoHE,
@@ -33,6 +36,19 @@ export const baseFalsa = {
   decisoes: [] as Array<{ id: string; decisao: "confirmar" | "rejeitar"; motivo: string }>,
   detecoes: [] as Array<{ de: string; ate: string; pessoaId: string | null }>,
   registos: [] as unknown[],
+};
+
+/** A margem de tempo e os desvios simulados (o wrapper real tambem os exporta: ver `desviosReal` em `horasExtraReal`). */
+export const desviosBaseFalsa = {
+  margem: { emVigor: null, versoes: [] } as MargemLida,
+  indisponivel: false,
+  /** Uma mensagem que as escritas devolvem em vez de gravar. */
+  erroDeEscrita: null as string | null,
+  guardados: [] as Array<{ validoDe: string; margemMin: number | null }>,
+  validacoes: [] as Array<{ id: string; decisao: "normal" | "hora_extra" | "aceitar_desvio"; motivo: string }>,
+  detecoes: [] as Array<{ de: string; ate: string; pessoaId: string | null }>,
+  /** O que cada deteccao devolve. */
+  resumoDeteccao: { diasVistos: 0, comDesvio: 0, substituidos: 0, criados: 0 } as ResumoDeteccaoDesvios,
 };
 
 let versao = 0;
@@ -57,6 +73,13 @@ export function reporBaseFalsa(): void {
   baseFalsa.decisoes = [];
   baseFalsa.detecoes = [];
   baseFalsa.registos = [];
+  desviosBaseFalsa.margem = { emVigor: null, versoes: [] };
+  desviosBaseFalsa.indisponivel = false;
+  desviosBaseFalsa.erroDeEscrita = null;
+  desviosBaseFalsa.guardados = [];
+  desviosBaseFalsa.validacoes = [];
+  desviosBaseFalsa.detecoes = [];
+  desviosBaseFalsa.resumoDeteccao = { diasVistos: 0, comDesvio: 0, substituidos: 0, criados: 0 };
   avisar();
 }
 
@@ -164,6 +187,47 @@ export function wrapperFalso() {
         baseFalsa.detecoes.push({ de, ate, pessoaId });
         const resumo = { criadas: 0, atualizadas: 0, inalteradas: 0, jaDecididas: 0, divergentes: 0, saltadasSemHorario: 0, abaixoMinimo: 0, obsoletas: 0 };
         return { ...(baseFalsa.erroDeEscrita ? recusa(baseFalsa.erroDeEscrita) : ok), resumo, pedidos: 1, ultimoDiaOk: baseFalsa.erroDeEscrita ? null : ate, janelaFalhada: null };
+      },
+    }),
+
+    // Margem de tempo e desvios (as funcoes puras sao as reais).
+    CHAVE_DESVIOS_MARGEM: "hr-desvios-margem",
+    codigoDeErroDesvios, chaveDoErroDesvios, podeSerHoraExtra,
+    textoDoErroDesvios: (erro: unknown): string => String((erro as { message?: unknown })?.message ?? erro),
+    lerAssinaturasDeDesvios: async (): Promise<Map<string, string>> => new Map(),
+    prepararFechoComDesvios: async (): Promise<{ ok: true; assinaturas: Map<string, string> }> => ({ ok: true, assinaturas: new Map() }),
+    detetarDesvios: async (): Promise<ResumoDeteccaoDesvios> => desviosBaseFalsa.resumoDeteccao,
+    // Horas extra aprovadas no fecho: sem assinaturas (nao ha contagem ligada na base falsa).
+    prepararFechoComHorasExtra: async (): Promise<{ ok: true; assinaturas: Map<string, string> }> => ({ ok: true, assinaturas: new Map() }),
+
+    useDesviosMargem: (enabled = true) => {
+      useSyncExternalStore(subscrever, lerVersao);
+      return {
+        margem: enabled ? desviosBaseFalsa.margem : null,
+        aCarregar: false,
+        aGuardar: false,
+        indisponivel: desviosBaseFalsa.indisponivel,
+        erro: null,
+        guardar: async (validoDe: string, margemMin: number | null): Promise<ResultadoDesvios> => {
+          if (desviosBaseFalsa.erroDeEscrita) return { ok: false, erro: desviosBaseFalsa.erroDeEscrita };
+          desviosBaseFalsa.guardados.push({ validoDe, margemMin });
+          return { ok: true, valor: undefined };
+        },
+      };
+    },
+
+    useDesviosAcoes: () => ({
+      aExecutar: false,
+      detetar: async (de: string, ate: string, pessoaId: string | null = null): Promise<ResultadoDesvios<ResumoDeteccaoDesvios>> => {
+        desviosBaseFalsa.detecoes.push({ de, ate, pessoaId });
+        if (desviosBaseFalsa.erroDeEscrita) return { ok: false, erro: desviosBaseFalsa.erroDeEscrita };
+        return { ok: true, valor: desviosBaseFalsa.resumoDeteccao };
+      },
+      validar: async (id: string, decisao: "normal" | "hora_extra" | "aceitar_desvio", motivo = ""): Promise<ResultadoDesvios<{ id: string; pessoaId: string; data: string; decisao: "normal" | "hora_extra" | "aceitar_desvio"; contadoMin: number; extraMin: number }>> => {
+        if (desviosBaseFalsa.erroDeEscrita) return { ok: false, erro: desviosBaseFalsa.erroDeEscrita };
+        if (decisao === "aceitar_desvio" && motivo.trim().length < 3) return { ok: false, erro: "motivo obrigatorio" };
+        desviosBaseFalsa.validacoes.push({ id, decisao, motivo });
+        return { ok: true, valor: { id, pessoaId: "p", data: "2026-10-12", decisao, contadoMin: 0, extraMin: 0 } };
       },
     }),
   };
