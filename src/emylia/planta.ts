@@ -3,8 +3,11 @@
 // retas (só na horizontal ou na vertical), cada uma com o comprimento em cm, e as peças lá dentro (base, sanita, banheira…). Daqui saem os
 // m² do chão e das paredes para as medidas. Só geometria e regras do desenho (sem ecrã). Tudo em cm; x para a direita, y para baixo.
 
-/** Para onde vai a parede: este (direita), sul (baixo), oeste (esquerda), norte (cima). */
-export type Rumo = "E" | "S" | "W" | "N";
+/** Para onde vai a parede: este (direita), sul (baixo), oeste (esquerda), norte (cima). 9/11 (Rúben, a visita real: «paredes na planta
+ *  diagonais»): e as quatro diagonais a 45°, para os cantos cortados (NE = para a direita e para cima). */
+export type Rumo = "E" | "S" | "W" | "N" | "NE" | "SE" | "SW" | "NW";
+export const RUMOS: readonly Rumo[] = ["E", "S", "W", "N", "NE", "SE", "SW", "NW"];
+export const ehDiagonal = (r: Rumo) => r.length === 2;
 export interface Parede { c: number; r: Rumo }
 export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "coluna" | "espelho" | "toalheiro" | "porta" | "janela"
   // 6/11 (Rúben: «adicionar também coisas para cozinha»)
@@ -55,9 +58,16 @@ export const ehCozinha = (divisao?: string) => /cozinha/i.test(divisao ?? "");
 export const tiposDaDivisao = (divisao?: string): TipoPeca[] => (ehCozinha(divisao) ? TIPOS_COZINHA : TIPOS_WC);
 /** O que uma porta e uma janela tiram às paredes, em m² (a altura de sempre: porta 2 m, janela 1 m). */
 const ALTURA_ABERTURA: Partial<Record<TipoPeca, number>> = { porta: 2, janela: 1 };
-const VETOR: Record<Rumo, Ponto> = { E: { x: 1, y: 0 }, S: { x: 0, y: 1 }, W: { x: -1, y: 0 }, N: { x: 0, y: -1 } };
-const DIREITA: Record<Rumo, Rumo> = { E: "S", S: "W", W: "N", N: "E" };
-const ESQUERDA: Record<Rumo, Rumo> = { E: "N", N: "W", W: "S", S: "E" };
+const R2 = Math.SQRT1_2;
+const VETOR: Record<Rumo, Ponto> = {
+  E: { x: 1, y: 0 }, S: { x: 0, y: 1 }, W: { x: -1, y: 0 }, N: { x: 0, y: -1 },
+  NE: { x: R2, y: -R2 }, SE: { x: R2, y: R2 }, SW: { x: -R2, y: R2 }, NW: { x: -R2, y: -R2 },
+};
+const DIREITA: Record<Rumo, Rumo> = { E: "S", S: "W", W: "N", N: "E", NE: "SE", SE: "SW", SW: "NW", NW: "NE" };
+const ESQUERDA: Record<Rumo, Rumo> = { E: "N", N: "W", W: "S", S: "E", NE: "NW", NW: "SW", SW: "SE", SE: "NE" };
+const OPOSTO: Record<Rumo, Rumo> = { E: "W", W: "E", N: "S", S: "N", NE: "SW", SW: "NE", SE: "NW", NW: "SE" };
+/** As coordenadas com uma casa decimal (as diagonais dão raízes de 2; assim os cantos não acumulam erros). */
+const dec = (n: number) => Math.round(n * 10) / 10;
 /** As peças andam e as paredes desenham-se de 5 em 5 cm. */
 export const PASSO = 5;
 /** Uma parede mais curta do que isto foi um toque, não um traço. */
@@ -88,7 +98,7 @@ export function deViragens(lista: readonly { c: number; vira: string }[]): Pared
 /** Os cantos, a começar em `o`. Volta n+1 pontos (o último é onde a última parede acaba). */
 export function cantos(paredes: readonly Parede[], o: Ponto = ORIGEM): Ponto[] {
   const pts: Ponto[] = [{ ...o }];
-  for (const p of paredes) { const u = pts[pts.length - 1], v = VETOR[p.r]; pts.push({ x: u.x + v.x * p.c, y: u.y + v.y * p.c }); }
+  for (const p of paredes) { const u = pts[pts.length - 1], v = VETOR[p.r]; pts.push({ x: dec(u.x + v.x * p.c), y: dec(u.y + v.y * p.c) }); }
   return pts;
 }
 
@@ -132,25 +142,99 @@ export function limites(p: Planta): { x: number; y: number; w: number; h: number
 }
 
 /**
- * O traço do dedo, de `de` até `ate`, como parede reta: na horizontal ou na vertical (a que for maior), de 5 em 5 cm. Perto do canto de
- * partida (`inicio`), no mesmo eixo, acaba nele. Um traço muito curto (um toque) não é parede.
+ * O traço do dedo, de `de` até `ate`, como parede reta, de 5 em 5 cm: na horizontal ou na vertical; 9/11, ou a 45° quando o traço vai
+ * claramente em diagonal (entre 30° e 60°; um traço só um pouco torto continua reto). Perto do canto de partida (`inicio`), na mesma
+ * direção, acaba nele. Um traço muito curto (um toque) não é parede.
  */
+export function rumoDoTraco(dx: number, dy: number): Rumo {
+  const ang = (Math.atan2(Math.abs(dy), Math.abs(dx)) * 180) / Math.PI; // 0 = horizontal, 90 = vertical
+  if (ang < 30) return dx >= 0 ? "E" : "W";
+  if (ang > 60) return dy >= 0 ? "S" : "N";
+  return ((dy < 0 ? "N" : "S") + (dx >= 0 ? "E" : "W")) as Rumo;
+}
 export function paredeDoTraco(de: Ponto, ate: Ponto, inicio?: Ponto): Parede | null {
   const dx = ate.x - de.x, dy = ate.y - de.y;
-  const horiz = Math.abs(dx) >= Math.abs(dy);
-  let c = arred(Math.abs(horiz ? dx : dy));
-  const r: Rumo = horiz ? (dx >= 0 ? "E" : "W") : (dy >= 0 ? "S" : "N");
-  if (inicio && (horiz ? Math.abs(inicio.y - de.y) < 1 : Math.abs(inicio.x - de.x) < 1)) {
-    const ateInicio = horiz ? (inicio.x - de.x) * (r === "E" ? 1 : -1) : (inicio.y - de.y) * (r === "S" ? 1 : -1);
-    if (ateInicio > 0 && Math.abs(ateInicio - Math.abs(horiz ? dx : dy)) <= ATRACAO) c = Math.round(ateInicio);
+  const r = rumoDoTraco(dx, dy), v = VETOR[r];
+  const ao = dx * v.x + dy * v.y; // quanto o dedo andou na direção da parede
+  let c = arred(Math.max(0, ao));
+  if (inicio) {
+    // o canto de partida está nesta direção (a menos de 1,5 cm de lado) e perto de onde o dedo parou: a parede acaba nele
+    const ix = inicio.x - de.x, iy = inicio.y - de.y, ateInicio = ix * v.x + iy * v.y, deLado = Math.abs(ix * v.y - iy * v.x);
+    if (ateInicio > 0 && deLado < 1.5 && Math.abs(ateInicio - ao) <= ATRACAO) c = dec(ateInicio);
+    // 9/11: numa reta, acabar alinhado com o canto de partida (a parede seguinte fecha a direito)
+    else if (!ehDiagonal(r)) {
+      const alinha = v.x !== 0 ? ix * v.x : iy * v.y;
+      if (alinha >= MINIMO && Math.abs(alinha - c) <= ATRACAO * 0.6) c = dec(alinha);
+    }
   }
   return c >= MINIMO ? { c, r } : null;
 }
 
-/** Juntar a parede: a seguir a uma no mesmo rumo, soma-se a ela (o dedo parou a meio de uma reta). */
+/** Juntar a parede: a seguir a uma no mesmo rumo, soma-se a ela (o dedo parou a meio de uma reta). 9/11 (a visita real: o dedo passou
+ *  do canto e voltou para trás): no rumo contrário, desconta-se (e se voltar mais do que andou, a parede vira). */
 export function juntarParede(paredes: readonly Parede[], nova: Parede): Parede[] {
   const ultima = paredes[paredes.length - 1];
-  return ultima && ultima.r === nova.r ? [...paredes.slice(0, -1), { ...ultima, c: ultima.c + nova.c }] : [...paredes, nova];
+  if (ultima && ultima.r === nova.r) return [...paredes.slice(0, -1), { ...ultima, c: dec(ultima.c + nova.c) }];
+  if (ultima && OPOSTO[ultima.r] === nova.r) {
+    const resto = dec(ultima.c - nova.c);
+    if (Math.abs(resto) < MINIMO) return paredes.slice(0, -1);
+    return [...paredes.slice(0, -1), resto > 0 ? { ...ultima, c: resto } : { c: -resto, r: nova.r }];
+  }
+  return [...paredes, nova];
+}
+
+/**
+ * 9/11 (Rúben: «a criação de paredes é muito complicada no telemóvel»): fechar a planta com as paredes que faltam até ao canto de
+ * partida. Se o canto está numa direção certa (reta ou a 45°), é uma parede; senão, duas: `primeiro` diz se fecha com cantos a 90°
+ * («reto») ou com um canto cortado a 45° («diagonal»). Com menos de duas paredes, ou já fechada, nada.
+ */
+export function paredesParaFechar(p: { o: Ponto; paredes: readonly Parede[] }, primeiro: "reto" | "diagonal" = "reto"): Parede[] {
+  if (p.paredes.length < 2 || faltaFechar(p.paredes) <= 1) return [];
+  const pts = cantos(p.paredes, p.o), f = pts[pts.length - 1];
+  const dx = dec(p.o.x - f.x), dy = dec(p.o.y - f.y), ax = Math.abs(dx), ay = Math.abs(dy);
+  const sx: Rumo = dx >= 0 ? "E" : "W", sy: Rumo = dy >= 0 ? "S" : "N";
+  if (ay < 1) return [{ c: ax, r: sx }];
+  if (ax < 1) return [{ c: ay, r: sy }];
+  const diag = (sy + sx) as Rumo;
+  if (Math.abs(ax - ay) < 1) return [{ c: dec(Math.hypot(ax, ay)), r: diag }];
+  if (primeiro === "diagonal") {
+    // a diagonal primeiro, até ficar alinhado com o canto; depois a reta
+    const m = Math.min(ax, ay), resto: Parede = ax > ay ? { c: dec(ax - m), r: sx } : { c: dec(ay - m), r: sy };
+    return [{ c: dec(m * Math.SQRT2), r: diag }, resto];
+  }
+  // duas retas: começa pela que continua a última parede (completa o retângulo); nunca pela que volta para trás sobre ela
+  const ultima = p.paredes[p.paredes.length - 1].r;
+  const primeiroX = ultima === sx || (ultima !== sy && OPOSTO[ultima] !== sx);
+  return primeiroX ? [{ c: ax, r: sx }, { c: ay, r: sy }] : [{ c: ay, r: sy }, { c: ax, r: sx }];
+}
+
+/** O rumo de um vetor (só os 8 de sempre: retas e 45°). */
+const rumoDe = (x: number, y: number): Rumo =>
+  Math.abs(x) < 0.01 ? (y > 0 ? "S" : "N") : Math.abs(y) < 0.01 ? (x > 0 ? "E" : "W") : (((y < 0 ? "N" : "S") + (x > 0 ? "E" : "W")) as Rumo);
+
+/**
+ * 9/11 (Rúben: «paredes na planta diagonais»): cortar o canto `k` (onde acaba a parede k-1 e começa a k) a 45°, `t` cm para cada lado.
+ * As duas paredes encurtam `t` e entra entre elas uma diagonal. Só num canto entre duas retas a 90°, e com as paredes maiores do que o corte.
+ */
+export function cortarCanto(p: { o: Ponto; paredes: readonly Parede[] }, k: number, t: number): { o: Ponto; paredes: Parede[] } | null {
+  const n = p.paredes.length;
+  if (n < 3 || faltaFechar(p.paredes) > 1 || !(t >= MINIMO / 2)) return null;
+  const ia = (k - 1 + n) % n, ib = k % n, a = p.paredes[ia], b = p.paredes[ib];
+  if (ehDiagonal(a.r) || ehDiagonal(b.r) || a.r === b.r || OPOSTO[a.r] === b.r || a.c - t < 0 || b.c - t < 0) return null;
+  const va = VETOR[a.r], vb = VETOR[b.r];
+  const diag: Parede = { c: dec(t * Math.SQRT2), r: rumoDe(va.x + vb.x, va.y + vb.y) };
+  const paredes = p.paredes.map((w) => ({ ...w }));
+  paredes[ia] = { ...a, c: dec(a.c - t) };
+  paredes[ib] = { ...b, c: dec(b.c - t) };
+  // o canto 0 é o ponto de partida: a diagonal fica no fim e o ponto de partida anda para o fim dela
+  if (ib === 0) return { o: { x: dec(p.o.x + vb.x * t), y: dec(p.o.y + vb.y * t) }, paredes: [...paredes, diag].filter((w) => w.c > 0) };
+  paredes.splice(ib, 0, diag);
+  return { o: { ...p.o }, paredes: paredes.filter((w) => w.c > 0) };
+}
+
+/** 9/11: juntar as paredes que fecham a planta (ver `paredesParaFechar`). */
+export function fecharPlanta<T extends { o: Ponto; paredes: readonly Parede[] }>(p: T, primeiro: "reto" | "diagonal" = "reto"): T {
+  return { ...p, paredes: paredesParaFechar(p, primeiro).reduce<Parede[]>((ps, w) => juntarParede(ps, w), [...p.paredes]) };
 }
 
 /** Mudar o comprimento de uma parede (o número escrito por cima dela). As outras não mudam; a planta pode deixar de fechar. */
@@ -165,7 +249,7 @@ export function lerPlanta(json: string | undefined): Planta | null {
   try {
     const p = JSON.parse(json) as { o?: Ponto; paredes?: unknown[]; pecas?: unknown[] };
     const brutas = (Array.isArray(p.paredes) ? p.paredes : []) as { c?: unknown; r?: unknown; vira?: unknown }[];
-    const comRumo = brutas.every((x) => !!x && ["E", "S", "W", "N"].includes(String(x.r)));
+    const comRumo = brutas.every((x) => !!x && (RUMOS as readonly string[]).includes(String(x.r)));
     const paredes: Parede[] = (comRumo
       ? brutas.map((x) => ({ c: Number(x.c), r: x.r as Rumo }))
       : deViragens(brutas.filter((x) => !!x && (x.vira === "dir" || x.vira === "esq")).map((x) => ({ c: Number(x.c), vira: String(x.vira) }))))
@@ -209,22 +293,28 @@ export const vetorDe = (r: Rumo): Ponto => ({ ...VETOR[r] });
 /**
  * 5/11 (Rúben: «ao clicar numa parede consegue alterar o seu comprimento e posição»). Mover a parede `i` pelo vetor `s` (só a parte
  * perpendicular a ela conta): as duas paredes vizinhas esticam ou encolhem para a acompanhar, e a planta continua fechada. Se uma vizinha
- * ficasse com comprimento negativo, não se mexe (null). Mover a primeira parede mexe também o ponto de partida.
+ * ficasse com comprimento negativo (ou for paralela à parede), não se mexe (null). Mover a primeira parede mexe também o ponto de partida.
+ * 9/11: vale também com paredes a 45° (cada canto corre ao longo da vizinha; a própria parede pode crescer ou encolher).
  */
 export function moverParede(p: { o: Ponto; paredes: readonly Parede[] }, i: number, s: Ponto): { o: Ponto; paredes: Parede[] } | null {
   const n = p.paredes.length;
   if (n < 3 || i < 0 || i >= n) return null;
-  const v = VETOR[p.paredes[i].r];
-  // só o que é perpendicular à parede (andar ao longo dela não a muda)
-  const d = { x: v.x === 0 ? s.x : 0, y: v.y === 0 ? s.y : 0 };
-  if (!d.x && !d.y) return { o: { ...p.o }, paredes: p.paredes.map((w) => ({ ...w })) };
-  const ant = (i - 1 + n) % n, seg = (i + 1) % n;
+  const v = VETOR[p.paredes[i].r], nrm = { x: -v.y, y: v.x };
   const dot = (a: Ponto, b: Ponto) => a.x * b.x + a.y * b.y;
+  // só o que é perpendicular à parede (andar ao longo dela não a muda)
+  const desloc = dot(s, nrm);
+  if (Math.abs(desloc) < 0.05) return { o: { ...p.o }, paredes: p.paredes.map((w) => ({ ...w })) };
+  const ant = (i - 1 + n) % n, seg = (i + 1) % n;
+  const va = VETOR[p.paredes[ant].r], vs = VETOR[p.paredes[seg].r];
+  const ka = dot(va, nrm), ks = dot(vs, nrm);
+  if (Math.abs(ka) < 0.1 || Math.abs(ks) < 0.1) return null; // vizinha paralela: não há canto que corra
+  const ta = desloc / ka, ts = desloc / ks; // quanto cada canto anda ao longo da vizinha
   const paredes = p.paredes.map((w) => ({ ...w }));
-  paredes[ant] = { ...paredes[ant], c: paredes[ant].c + dot(d, VETOR[paredes[ant].r]) };
-  paredes[seg] = { ...paredes[seg], c: paredes[seg].c - dot(d, VETOR[paredes[seg].r]) };
-  if (paredes[ant].c < 0 || paredes[seg].c < 0) return null;
-  return { o: i === 0 ? { x: p.o.x + d.x, y: p.o.y + d.y } : { ...p.o }, paredes };
+  paredes[ant] = { ...paredes[ant], c: dec(paredes[ant].c + ta) };
+  paredes[seg] = { ...paredes[seg], c: dec(paredes[seg].c - ts) };
+  paredes[i] = { ...paredes[i], c: dec(paredes[i].c + dot({ x: vs.x * ts - va.x * ta, y: vs.y * ts - va.y * ta }, v)) };
+  if (paredes[ant].c < 0 || paredes[seg].c < 0 || paredes[i].c < 0) return null;
+  return { o: i === 0 ? { x: dec(p.o.x + va.x * ta), y: dec(p.o.y + va.y * ta) } : { ...p.o }, paredes };
 }
 
 /**
@@ -238,6 +328,18 @@ export function mudarComprimentoFechada(p: { o: Ponto; paredes: readonly Parede[
   const n = p.paredes.length, seg = (i + 1) % n;
   // mover a seguinte com a ponta desta: esta estica (é a anterior da seguinte) e a do outro lado acompanha
   return moverParede(p, seg, { x: v.x * delta, y: v.y * delta });
+}
+
+/** O segmento a–z passa pela caixa? (Liang–Barsky) */
+function segmentoNaCaixa(a: Ponto, z: Ponto, c: { x0: number; y0: number; x1: number; y1: number }): boolean {
+  let t0 = 0, t1 = 1;
+  const dx = z.x - a.x, dy = z.y - a.y;
+  for (const [p, q] of [[-dx, a.x - c.x0], [dx, c.x1 - a.x], [-dy, a.y - c.y0], [dy, c.y1 - a.y]] as const) {
+    if (p === 0) { if (q < 0) return false; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
+  }
+  return true;
 }
 
 /**
@@ -255,12 +357,8 @@ export function etiquetasSemSobrepor(paredes: readonly Parede[], o: Ponto, larg:
   type Caixa = { x0: number; y0: number; x1: number; y1: number };
   const caixa = (c: Ponto): Caixa => ({ x0: c.x - larg / 2, y0: c.y - alt / 2, x1: c.x + larg / 2, y1: c.y + alt / 2 });
   const cruza = (a: Caixa, b: Caixa) => a.x0 < b.x1 + folga && b.x0 < a.x1 + folga && a.y0 < b.y1 + folga && b.y0 < a.y1 + folga;
-  // uma parede (reta horizontal ou vertical) atravessa a caixa?
-  const tapaParede = (c: Caixa) => paredes.some((_w, j) => {
-    const a = pts[j], z = pts[j + 1];
-    const sx0 = Math.min(a.x, z.x), sx1 = Math.max(a.x, z.x), sy0 = Math.min(a.y, z.y), sy1 = Math.max(a.y, z.y);
-    return sx0 <= c.x1 && sx1 >= c.x0 && sy0 <= c.y1 && sy1 >= c.y0;
-  });
+  // uma parede atravessa a caixa? (9/11: também as diagonais, pelo corte do segmento com a caixa)
+  const tapaParede = (c: Caixa) => paredes.some((_w, j) => segmentoNaCaixa(pts[j], pts[j + 1], c));
   const ordem = paredes.map((w, i) => ({ i, c: w.c })).sort((a, b) => b.c - a.c).map((x) => x.i);
   const postas: Caixa[] = [];
   const centros: Ponto[] = new Array(n);
@@ -300,6 +398,7 @@ export function encaixar(pc: PecaPlanta, largura: number, fundo: number, planta:
   const opcoes: Opcao[] = [];
   for (let i = 0; i < planta.paredes.length; i++) {
     const a = pts[i], z = pts[i + 1];
+    if (a.x !== z.x && a.y !== z.y) continue; // 9/11: as diagonais não seguram peças
     if (a.x === z.x) { // parede vertical: a frente fica na vertical, o fundo na horizontal
       const y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
       if (pc.y >= y1 || pc.y + pc.h <= y0) continue;

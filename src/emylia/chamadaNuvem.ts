@@ -7,7 +7,7 @@ import type { CampoExtraido, Extracao, Fala } from "./chamadaMotor";
 import type { PlantaLida } from "./planta";
 
 export const TAXA = 16000;
-const VAD_ASSETS = "/chamadas/vad/";
+export const VAD_ASSETS = "/chamadas/vad/";
 const CHAVE_VOZ = "olyvia.chamadas.voz";  // a amostra da voz da comercial, WAV em base64, neste browser
 const CHAVE_VOZ_TEXTO = "olyvia.chamadas.voz_texto";  // o que a amostra diz, para apanhar decalques
 
@@ -77,17 +77,17 @@ export async function gravarMicrofone(segundos: number, aoProgredir?: (s: number
 // aí o runtime vem de node_modules; na build são os ficheiros estáticos de public/chamadas/vad.
 const ORT_PASTA = import.meta.env.DEV ? "/node_modules/onnxruntime-web/dist/" : VAD_ASSETS;
 const ORT_FICHEIROS = { mjs: ORT_PASTA + "ort-wasm-simd-threaded.mjs", wasm: ORT_PASTA + "ort-wasm-simd-threaded.wasm" };
-async function semWorkers(): Promise<void> {
+export async function semWorkers(): Promise<void> {
   const ort = await import("onnxruntime-web/wasm");
   ort.env.wasm.numThreads = 1;
   ort.env.wasm.wasmPaths = ORT_FICHEIROS;
 }
 // o vad-web copia esta opção para ort.env.wasm.wasmPaths tal como está; o objeto diz os dois ficheiros exatos
-const ONNX_BASE = ORT_FICHEIROS as unknown as string;
+export const ONNX_BASE = ORT_FICHEIROS as unknown as string;
 
 /** O vad-web vem num pedaço à parte. Numa aba aberta antes de um deploy novo, esse pedaço já não existe
  *  no servidor («Failed to fetch dynamically imported module»): a solução é recarregar a página. */
-async function carregarVad(): Promise<typeof import("@ricky0123/vad-web")> {
+export async function carregarVad(): Promise<typeof import("@ricky0123/vad-web")> {
   try {
     return await import("@ricky0123/vad-web");
   } catch (e) {
@@ -156,9 +156,11 @@ async function mensagemDoErro(error: { message?: string; context?: unknown }, fu
 
 export interface Frase { inicio: number; fim: number; texto: string; confianca: number; falante?: "comercial" | "cliente" }
 
-export async function transcreverFala(pcm: Float32Array, inicioS: number, referenciaB64: string | null, referenciaTexto = ""): Promise<Frase[]> {
+/** 9/11: `tipo` «visita» usa as instruções e o modelo da visita; `contexto` é o fim do que já se transcreveu (só para o assunto). */
+export async function transcreverFala(pcm: Float32Array, inicioS: number, referenciaB64: string | null, referenciaTexto = "",
+  opcoes: { tipo?: "chamada" | "visita"; contexto?: string } = {}): Promise<Frase[]> {
   const { data, error } = await supabase.functions.invoke("chamada-transcrever", {
-    body: { audio_b64: wavBase64(pcm), deslocamento_s: inicioS,
+    body: { audio_b64: wavBase64(pcm), deslocamento_s: inicioS, ...(opcoes.tipo ? { tipo: opcoes.tipo } : {}), ...(opcoes.contexto ? { contexto: opcoes.contexto.slice(-1400) } : {}),
       ...(referenciaB64 ? { referencia_b64: referenciaB64, referencia_texto: referenciaTexto } : {}) },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-transcrever"));

@@ -6,12 +6,12 @@
 // O Estúdio junta: paredes fixas (o depois tem as paredes do antes), as peças que saem a tracejado, a cor e o nome do produto escolhido
 // em cada peça, e tocar numa peça para a trocar no catálogo. A geometria está em planta.ts.
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode } from "react";
-import { RotateCw, Trash2, Undo2 } from "lucide-react";
+import { Check, RotateCw, Scissors, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  PASSO, PECAS, PLANTA_VAZIA, cantos, emL, etiquetasSemSobrepor, faltaFechar, gravarPlanta, juntarParede, juntarPeca, limites, moverParede, mudarComprimentoFechada, paredeDoTraco,
-  retangulo, tiposDaDivisao, type PecaPlanta, type Planta, type Ponto, type TipoPeca,
+  PASSO, PECAS, PLANTA_VAZIA, cantos, cortarCanto, ehDiagonal, emL, etiquetasSemSobrepor, faltaFechar, fecharPlanta, gravarPlanta, juntarParede, juntarPeca, limites,
+  moverParede, mudarComprimentoFechada, paredeDoTraco, paredesParaFechar, retangulo, tiposDaDivisao, type PecaPlanta, type Planta, type Ponto, type TipoPeca,
 } from "./planta";
 
 const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
@@ -19,14 +19,21 @@ const CHIP = "inline-flex min-h-11 touch-none select-none items-center gap-1.5 r
 /** A tela sem nada desenhado: 5 m por 4 m. */
 const TELA = { x: 0, y: 0, w: 500, h: 400 };
 const arred = (n: number) => Math.round(n / PASSO) * PASSO;
+/** O corte mais pequeno de um canto (cm). */
+const MIN_CORTE = 10;
 /** 6/11: sem tipos dados, a barra tem as peças da divisão (a cozinha tem as dela), a porta e a janela. */
 const tiposDeSempre = (divisao?: string): TipoPeca[] => [...tiposDaDivisao(divisao), "porta", "janela"];
 
-/** O que se vê: a tela de sempre, alargada ao que está desenhado (com margem). Só muda quando se grava, nunca a meio de um traço. */
+/** O que se vê: a tela de sempre, alargada ao que está desenhado (com margem). Só muda quando se grava, nunca a meio de um traço.
+ *  9/11 (Rúben: «no telemóvel é muito complicado»): com a planta fechada, a tela é a planta (com margem para as medidas), maior no ecrã. */
 function vistaDe(p: Planta, fantasmas: readonly PecaPlanta[] = []) {
   const todas = { ...p, pecas: [...p.pecas, ...fantasmas] };
   if (!todas.paredes.length && !todas.pecas.length) return TELA;
   const b = limites(todas), m = 60;
+  if (faltaFechar(p.paredes) <= 1) {
+    const mm = Math.max(45, Math.max(b.w, b.h) * 0.16), w = Math.max(b.w + 2 * mm, 260), h = Math.max(b.h + 2 * mm, 200);
+    return { x: b.x + b.w / 2 - w / 2, y: b.y + b.h / 2 - h / 2, w, h };
+  }
   const x = Math.min(TELA.x, b.x - m), y = Math.min(TELA.y, b.y - m);
   return { x, y, w: Math.max(TELA.x + TELA.w, b.x + b.w + m) - x, h: Math.max(TELA.y + TELA.h, b.y + b.h + m) - y };
 }
@@ -35,6 +42,7 @@ function vistaDe(p: Planta, fantasmas: readonly PecaPlanta[] = []) {
 function coladasA(p: Planta, i: number): Set<string> {
   const pts = cantos(p.paredes, p.o), a = pts[i], z = pts[i + 1];
   const ENCOSTA = 3;
+  if (ehDiagonal(p.paredes[i].r)) return new Set(); // 9/11: as diagonais não levam peças
   const ids = p.pecas.filter((pc) => {
     if (a.x === z.x) { // vertical
       const y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
@@ -83,6 +91,12 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   const [vista, setVista] = useState(() => vistaDe(planta, fantasmas));
   const [sel, setSel] = useState<string | null>(null);
   const [paredeSel, setParedeSel] = useState<number | null>(null);
+  // 9/11 (Rúben: «a criação de paredes é muito complicada no telemóvel e no tablet»): começar pelas duas medidas de um retângulo, fechar
+  // a planta com um botão, e cortar um canto a 45° tocando nele
+  const [cantoSel, setCantoSel] = useState<number | null>(null);
+  const [corte, setCorte] = useState("30");
+  const [largura, setLargura] = useState("");
+  const [fundo, setFundo] = useState("");
   const [traco, setTraco] = useState<{ de: Ponto; ate: Ponto } | null>(null);
   const [nova, setNovaEstado] = useState<{ tipo: TipoPeca; x: number; y: number; bandeja?: string; rotulo?: string } | null>(null);
   // a peça a arrastar também numa ref: um largar logo a seguir ao pegar (antes de o ecrã se redesenhar) não a perde
@@ -100,7 +114,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   // a planta mudada por fora (outra planta, a folha lida, o antes copiado) entra no desenho
   useEffect(() => {
     if (gravarPlanta(planta) === gravarPlanta(p)) return;
-    setP(planta); setVista(vistaDe(planta, fantasmas)); setParedeSel(null);
+    setP(planta); setVista(vistaDe(planta, fantasmas)); setParedeSel(null); setCantoSel(null);
     if (sel && !planta.pecas.some((x) => x.id === sel)) setSel(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só quando a planta de fora muda
   }, [gravarPlanta(planta)]);
@@ -132,7 +146,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   // ---- desenhar as paredes (só enquanto a planta não fecha, e se as paredes não estão fixas) ----
   const tocarTela = (e: RPointerEvent<SVGSVGElement>) => {
     if (e.target !== svg.current && !(e.target as Element).hasAttribute?.("data-tela")) return;
-    setSel(null); setParedeSel(null);
+    setSel(null); setParedeSel(null); setCantoSel(null);
     if (!desenhar) return;
     const q = naPlanta(e.clientX, e.clientY); if (!q) return;
     svg.current?.setPointerCapture?.(e.pointerId);
@@ -165,7 +179,12 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
     if (traco) {
       const parede = paredeDoTraco(traco.de, traco.ate, p.paredes.length >= 2 ? p.o : undefined);
       setTraco(null);
-      if (parede) gravar({ ...p, paredes: juntarParede(p.paredes, parede) });
+      if (parede) {
+        const paredes = juntarParede(p.paredes, parede);
+        gravar({ ...p, paredes });
+        // a medida da parede acabada de desenhar fica à vista em cima, para a corrigir logo
+        setParedeSel(paredes.length ? paredes.length - 1 : null);
+      }
       return;
     }
     const a = arrasto.current;
@@ -233,30 +252,104 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   const pegarParede = (e: RPointerEvent, i: number) => {
     e.stopPropagation();
     e.preventDefault();
-    setParedeSel(i); setSel(null);
+    setParedeSel(i); setSel(null); setCantoSel(null);
     if (paredesFixas || !fechada) return;
     const q = naPlanta(e.clientX, e.clientY); if (!q) return;
     svg.current?.setPointerCapture?.(e.pointerId);
     arrastoParede.current = { i, de: q, base: p, mexeu: false, coladas: coladasA(p, i) };
   };
   const mudarMedida = (i: number, c: number) => { const r = mudarComprimentoFechada(p, i, c); if (r) gravar({ ...p, ...r }); };
+  const fechar = (como: "reto" | "diagonal") => { const np = fecharPlanta(p, como); gravar(np); setParedeSel(null); };
+  const paraFechar = !paredesFixas && !fechada && p.paredes.length >= 2 ? paredesParaFechar(p, "reto") : [];
+  const criarRetangulo = () => {
+    const l = Math.round(Number(largura.replace(",", "."))), f = Math.round(Number(fundo.replace(",", ".")));
+    if (!(l >= 30 && f >= 30)) return;
+    gravar({ ...p, paredes: retangulo(l, f) }); setParedeSel(null);
+  };
+  const cortar = () => {
+    if (cantoSel === null) return;
+    const r = cortarCanto(p, cantoSel, Math.round(Number(corte.replace(",", ".")) || 0));
+    if (r) { gravar({ ...p, ...r }); setCantoSel(null); }
+  };
+  // a parede da medida em cima: a tocada, ou a última desenhada
+  // (com a planta fechada, só a que se tocou)
+  const paredeEmCima = paredeSel ?? (p.paredes.length && !fechada ? p.paredes.length - 1 : null);
+  const podeCortar = (k: number) => cortarCanto(p, k, MIN_CORTE) !== null;
 
   /** A etiqueta de uma parede: ao lado da reta, a meio (desenhando como na folha, no sentido dos ponteiros do relógio, fica por fora). */
   // 5/11 (Rúben: «não pode haver overlap de medidas»): cada medida procura um sítio livre (planta.ts)
   const etiquetas = etiquetasSemSobrepor(p.paredes, p.o, letra * 4.2, letra * 1.5);
 
   const texto = paredesFixas ? (textoBarra ?? "Toque numa peça para a trocar; arraste-a para o sítio.")
-    : !p.paredes.length ? `Arraste o dedo para desenhar as paredes${divisao ? ` da ${divisao.toLowerCase()}` : ""}, uma a uma, como na folha.`
-    : fechada ? "A planta fecha. Arraste as peças da barra para a planta, e toque num número para escrever a medida certa."
-    : "Continue a desenhar a partir do ponto. Toque num número para escrever a medida certa.";
+    : !p.paredes.length ? `Escreva as duas medidas${divisao ? ` da ${divisao.toLowerCase()}` : ""}, ou desenhe as paredes com o dedo, uma a uma.`
+    : fechada ? "A planta fecha. Toque num canto para o cortar a 45°, num número para mudar a medida, e arraste as peças para a planta."
+    : "Continue a desenhar a partir do ponto (também a 45°), ou feche a planta com o botão.";
 
   return (
     <div className="space-y-4">
       <p className="text-[15px] text-muted-foreground">{texto}</p>
 
-      <div className="overflow-hidden rounded-2xl border border-border bg-card">
+      {/* 9/11: começar pelo retângulo (a maioria das casas de banho): duas medidas e está feito */}
+      {!paredesFixas && !p.paredes.length && (
+        <form className="space-y-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-4" onSubmit={(e) => { e.preventDefault(); criarRetangulo(); }}>
+          <p className="text-[15px] font-medium">O mais rápido: as duas medidas do chão</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="grid w-32 gap-1 text-sm font-medium">Largura (cm)
+              <input type="number" inputMode="numeric" min={30} value={largura} onChange={(e) => setLargura(e.target.value)} className={INP} placeholder="200" />
+            </label>
+            <label className="grid w-32 gap-1 text-sm font-medium">Fundo (cm)
+              <input type="number" inputMode="numeric" min={30} value={fundo} onChange={(e) => setFundo(e.target.value)} className={INP} placeholder="160" />
+            </label>
+            <Button type="submit" className="min-h-11" disabled={!(Number(largura) >= 30 && Number(fundo) >= 30)}>Criar a planta</Button>
+          </div>
+          <p className="text-sm text-muted-foreground">Depois pode cortar um canto a 45° ou mudar uma parede. Se a forma for outra, desenhe-a com o dedo em baixo.</p>
+        </form>
+      )}
+
+      {/* 9/11: a barra de cima, sempre no mesmo sítio: a medida da parede, fechar, desfazer */}
+      {!paredesFixas && p.paredes.length > 0 && (
+        <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-3">
+          <div className="flex flex-wrap items-end gap-2">
+            {paredeEmCima !== null && p.paredes[paredeEmCima] && (
+              <label className="grid w-36 gap-1 text-sm font-medium" htmlFor={`${id}-medida`}>Parede {paredeEmCima + 1}{ehDiagonal(p.paredes[paredeEmCima].r) ? " (45°)" : ""}, cm
+                <input ref={caixaMedida} id={`${id}-medida`} key={`${paredeEmCima}-${p.paredes[paredeEmCima].c}`} type="number" inputMode="numeric" min={0}
+                  defaultValue={Math.round(p.paredes[paredeEmCima].c)} className={INP}
+                  onBlur={(e) => { const c = Math.round(Number(e.target.value) || 0); if (c > 0 && c !== Math.round(p.paredes[paredeEmCima].c)) mudarMedida(paredeEmCima, c); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              </label>
+            )}
+            {paraFechar.length > 0 && (
+              <Button type="button" className="min-h-11" onClick={() => fechar("reto")}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Fechar a planta</Button>
+            )}
+            {paraFechar.length > 1 && (
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => fechar("diagonal")}>Fechar com canto a 45°</Button>
+            )}
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => { gravar({ ...p, paredes: p.paredes.slice(0, -1) }); setParedeSel(null); setCantoSel(null); }}>
+              <Undo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Desfazer
+            </Button>
+          </div>
+          {cantoSel !== null && (
+            <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
+              <label className="grid w-40 gap-1 text-sm font-medium">Cortar o canto a 45°, cm
+                <input type="number" inputMode="numeric" min={MIN_CORTE} value={corte} onChange={(e) => setCorte(e.target.value)} className={INP}
+                  onKeyDown={(e) => { if (e.key === "Enter") cortar(); }} />
+              </label>
+              <Button type="button" className="min-h-11" onClick={cortar} disabled={!cortarCanto(p, cantoSel, Math.round(Number(corte) || 0))}>
+                <Scissors className="mr-1.5 h-4 w-4" aria-hidden="true" />Cortar o canto
+              </Button>
+              <Button type="button" variant="ghost" className="min-h-11" onClick={() => setCantoSel(null)}>Cancelar</Button>
+            </div>
+          )}
+          <p role="status" className={cn("text-sm", fechada ? "text-success" : "text-muted-foreground")}>
+            <span>{fechada ? "A planta fecha." : falta === Infinity ? `${p.paredes.length} ${p.paredes.length === 1 ? "parede" : "paredes"}.` : `Faltam ${falta} cm até ao canto de partida.`}</span>
+            {fechada && cantoSel === null ? <span> Arraste uma parede para a mudar de sítio.</span> : null}
+          </p>
+        </div>
+      )}
+
+      <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
         <svg ref={svg} viewBox={`${vista.x} ${vista.y} ${vista.w} ${vista.h}`} className="block h-auto max-h-[65vh] w-full touch-none select-none"
-          role="img" aria-label={`Planta: ${p.paredes.map((x) => `${x.c} cm`).join(", ") || "por desenhar"}`}
+          role="img" aria-label={`Planta: ${p.paredes.map((x) => `${Math.round(x.c)} cm`).join(", ") || "por desenhar"}`}
           onPointerDown={tocarTela} onPointerMove={moverNaTela} onPointerUp={largarNaTela} onPointerCancel={largarNaTela}>
           <defs>
             <pattern id={`${id}-grelha`} width="10" height="10" patternUnits="userSpaceOnUse">
@@ -281,14 +374,13 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
                 className={pts[i].x === pts[i + 1].x ? "cursor-ew-resize" : "cursor-ns-resize"} onPointerDown={(e) => pegarParede(e, i)} aria-hidden="true" />
             </g>
           ))}
-          {/* o traço a desenhar, com a medida junto ao dedo */}
+          {/* o traço a desenhar (a medida vai em grande por cima da planta) */}
           {traco && preve && (() => {
             const z = cantos([preve], traco.de)[1];
             return (
               <g className="pointer-events-none">
                 <line x1={traco.de.x} y1={traco.de.y} x2={z.x} y2={z.y} className="stroke-primary" strokeWidth={letra / 3} strokeLinecap="round" />
-                <rect x={traco.ate.x + letra * 0.6} y={traco.ate.y - letra * 2} width={letra * 4.6} height={letra * 1.5} rx={letra * 0.4} className="fill-primary" />
-                <text x={traco.ate.x + letra * 2.9} y={traco.ate.y - letra * 0.9} textAnchor="middle" fontSize={letra} className="fill-primary-foreground font-semibold">{preve.c} cm</text>
+                <circle cx={z.x} cy={z.y} r={letra * 0.45} className="fill-primary" />
               </g>
             );
           })()}
@@ -304,11 +396,11 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
               <>
                 <rect x={e.x - letra * 2.1} y={e.y - letra * 0.8} width={letra * 4.2} height={letra * 1.5} rx={letra * 0.4}
                   className={ativa ? "fill-primary" : "fill-card stroke-border"} strokeWidth={letra / 12} />
-                <text x={e.x} y={e.y + letra * 0.3} textAnchor="middle" fontSize={letra * 0.95} className={cn("font-semibold", ativa ? "fill-primary-foreground" : "fill-foreground")}>{w.c}</text>
+                <text x={e.x} y={e.y + letra * 0.3} textAnchor="middle" fontSize={letra * 0.95} className={cn("font-semibold", ativa ? "fill-primary-foreground" : "fill-foreground")}>{Math.round(w.c)}</text>
               </>
             );
             return paredesFixas ? <g key={i} className="pointer-events-none">{conteudo}</g> : (
-              <g key={i} role="button" tabIndex={0} aria-label={`Parede ${i + 1}: ${w.c} cm. Escrever a medida.`} className="cursor-pointer outline-none"
+              <g key={i} role="button" tabIndex={0} aria-label={`Parede ${i + 1}: ${Math.round(w.c)} cm. Escrever a medida.`} className="cursor-pointer outline-none"
                 onPointerDown={(ev) => pegarParede(ev, i)}
                 onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setParedeSel(i); setTimeout(() => caixaMedida.current?.focus(), 0); } }}>{conteudo}</g>
             );
@@ -342,37 +434,31 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
             );
           })}
 
+          {/* 9/11: os cantos da planta fechada (por cima das peças, que muitas vezes estão no canto): tocar num para o cortar a 45° */}
+          {!paredesFixas && fechada && pts.slice(0, -1).map((q, k) => podeCortar(k) && (
+            <g key={`c-${k}`} role="button" tabIndex={0} aria-label={`Canto ${k + 1}: cortar a 45°`} className="cursor-pointer outline-none"
+              onPointerDown={(e) => { e.stopPropagation(); setCantoSel(k); setParedeSel(null); setSel(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCantoSel(k); } }}>
+              <circle cx={q.x} cy={q.y} r={letra * 0.9} fill="transparent" />
+              <circle cx={q.x} cy={q.y} r={letra * (cantoSel === k ? 0.5 : 0.28)} className={cantoSel === k ? "fill-primary" : "fill-card stroke-primary"} strokeWidth={letra / 10} />
+            </g>
+          ))}
           {!p.paredes.length && !traco && (
             <text x={vista.x + vista.w / 2} y={vista.y + vista.h / 2} textAnchor="middle" fontSize={letra} className="pointer-events-none fill-muted-foreground">
               Arraste o dedo para desenhar a primeira parede
             </text>
           )}
         </svg>
+        {traco && preve && (
+          <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-primary px-4 py-1.5 text-lg font-semibold text-primary-foreground shadow-lg" aria-live="polite">
+            {Math.round(preve.c)} cm{ehDiagonal(preve.r) ? " · 45°" : ""}
+          </div>
+        )}
       </div>
       {/* a peça a ser arrastada da barra, debaixo do dedo */}
       {nova && (
         <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border-2 border-primary bg-primary/15 px-3 py-2 text-sm font-medium shadow-lg"
           style={{ left: nova.x, top: nova.y }}>{nova.rotulo ?? PECAS[nova.tipo].n}</div>
-      )}
-
-      {!paredesFixas && (
-        <p role="status" className={cn("text-[15px]", !p.paredes.length ? "text-muted-foreground" : fechada ? "text-success" : "text-foreground")}>
-          {!p.paredes.length ? "Ainda sem paredes." : fechada ? "A planta fecha."
-            : falta === Infinity ? `${p.paredes.length} ${p.paredes.length === 1 ? "parede" : "paredes"}.` : `Faltam ${falta} cm até ao canto de partida.`}
-        </p>
-      )}
-
-      {/* a medida certa da parede tocada */}
-      {paredeSel !== null && p.paredes[paredeSel] && (
-        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
-          <label className="grid w-40 gap-1 text-sm font-medium" htmlFor={`${id}-medida`}>Parede {paredeSel + 1}, em cm
-            <input ref={caixaMedida} id={`${id}-medida`} key={`${paredeSel}-${p.paredes[paredeSel].c}`} type="number" inputMode="numeric" min={0} defaultValue={p.paredes[paredeSel].c} className={INP}
-              onBlur={(e) => { const c = Math.round(Number(e.target.value) || 0); if (c > 0 && c !== p.paredes[paredeSel].c) mudarMedida(paredeSel, c); }}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-          </label>
-          {fechada && !paredesFixas && <p className="min-w-[200px] flex-1 text-sm text-muted-foreground">Arraste a parede na planta para a mudar de sítio: as do lado acompanham e a planta continua fechada.</p>}
-          <Button type="button" variant="ghost" className="min-h-11" onClick={() => setParedeSel(null)}>Feito</Button>
-        </div>
       )}
 
       {/* os produtos escolhidos que faltam pôr na planta: arrastar para o sítio, ou tocar e fica ao meio */}
@@ -427,10 +513,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
       {/* desfazer, recomeçar, ou escrever as medidas à mão */}
       {!paredesFixas && p.paredes.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => { gravar({ ...p, paredes: p.paredes.slice(0, -1) }); setParedeSel(null); }}>
-            <Undo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Desfazer a última parede
-          </Button>
-          <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar({ ...PLANTA_VAZIA, pecas: p.pecas }); setParedeSel(null); }}>Apagar as paredes</Button>
+          <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar({ ...PLANTA_VAZIA, pecas: p.pecas }); setParedeSel(null); setCantoSel(null); }}>Apagar as paredes</Button>
         </div>
       )}
       {!paredesFixas && (
@@ -444,8 +527,8 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
             {p.paredes.map((w, i) => (
               <div key={i} className="flex items-center gap-3 text-sm font-medium">
                 <label htmlFor={`${id}-p${i}`} className="w-20">Parede {i + 1}</label>
-                <input id={`${id}-p${i}`} key={`${i}-${w.c}`} type="number" inputMode="numeric" min={0} defaultValue={w.c} className={cn(INP, "w-32")}
-                  onBlur={(e) => { const c = Math.max(0, Math.round(Number(e.target.value) || 0)); if (c !== w.c) mudarMedida(i, c); }}
+                <input id={`${id}-p${i}`} key={`${i}-${w.c}`} type="number" inputMode="numeric" min={0} defaultValue={Math.round(w.c)} className={cn(INP, "w-32")}
+                  onBlur={(e) => { const c = Math.max(0, Math.round(Number(e.target.value) || 0)); if (c !== Math.round(w.c)) mudarMedida(i, c); }}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
                 <span className="text-muted-foreground">cm</span>
               </div>

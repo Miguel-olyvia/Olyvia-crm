@@ -12,12 +12,20 @@ import { ErroGemini, gerarJson, type ParteGemini } from "../_shared/gemini.ts";
 // Uma chamada dá uma fala a cada poucos segundos: 240 por minuto por pessoa chega para várias chamadas.
 const RATE_LIMIT = { bucket: "chamada-transcrever", maxAttempts: 240, windowMinutes: 1 };
 const MODELO = Deno.env.get("CHAMADAS_GEMINI_MODELO") ?? "gemini-3.1-flash-lite";
+// 9/11 (Rúben, a visita real: «a transcrição tem muitos erros»): na visita as falas são mais longas e em sala, com termos de obra;
+// vai ao modelo maior (o mesmo dos campos), que erra muito menos
+const MODELO_VISITA = Deno.env.get("CHAMADAS_GEMINI_MODELO_VISITA") ?? "gemini-3.8-flash";
 const CONFIANCA_MIN = 0.5;
 // 20 s de WAV a 16 kHz são 640 KB; em base64 ~860 KB. Mais do que isso não é uma fala.
 const MAX_B64 = 1_200_000;
+const MAX_B64_VISITA = 1_800_000; // 9/11: na visita juntam-se falas seguidas até ~20 s
 
 const pedido = z.object({
-  audio_b64: z.string().min(100).max(MAX_B64),
+  audio_b64: z.string().min(100).max(MAX_B64_VISITA),
+  // 9/11: «visita» (o telemóvel na mesa, em casa do cliente) ou «chamada» (o telemóvel em alta voz junto ao microfone)
+  tipo: z.enum(["chamada", "visita"]).default("chamada"),
+  // 9/11: o fim do que já se transcreveu, só para o modelo perceber o assunto (não se transcreve)
+  contexto: z.string().max(1500).optional(),
   deslocamento_s: z.number().min(0).default(0),
   // amostra da voz da comercial (WAV 16 kHz mono, base64), gravada uma vez no painel, e o que ela diz
   referencia_b64: z.string().max(MAX_B64).optional(),
@@ -33,6 +41,22 @@ const INSTRUCAO_BASE =
   "parte, escreve só a parte clara. Se não se perceber nada, devolve uma lista vazia. Nunca completes, resumas, " +
   "traduzas ou corrijas. Em cada frase dá a tua confiança de 0 a 1 de que foi mesmo isso que se disse; uma frase que " +
   "não faz sentido em português, ou que não tens a certeza de ter ouvido, fica abaixo de 0,5.";
+// 9/11: a visita. Duas ou mais pessoas na mesma divisão, o telemóvel ou o tablet em cima da mesa ou na mão; fala-se de obras.
+const INSTRUCAO_VISITA =
+  "Transcreve literalmente este áudio, em português de Portugal, dividido em frases com início e fim em segundos dentro do áudio. " +
+  "É uma visita a casa de um cliente para uma obra de remodelação (casa de banho, cozinha ou outra divisão): o comercial e o " +
+  "cliente falam na mesma divisão, perto de um telemóvel ou tablet que grava. Pode haver eco da divisão, passos, água ou obras ao " +
+  "lado. Fala-se de medidas (em centímetros e metros), de peças (base de duche, banheira, sanita suspensa, autoclismo, móvel, " +
+  "coluna, resguardo, torneira, misturadora, revestimento, pavimento, azulejo, tijoleira, teto falso, canalização, esgoto, " +
+  "impermeabilização), de cores, de prazos e de preços. Escreve os números com algarismos (\"80 por 60\", \"2,5 metros\"). " +
+  "Regras: só escreves fala humana que se ouve; ruído e troços em que as palavras não se distinguem ficam de fora, e nunca " +
+  "inventes uma frase plausível para os preencher. Se uma frase só se percebe em parte, escreve a parte clara. Nunca completes, " +
+  "resumas, traduzas ou corrijas o que a pessoa disse. Em cada frase dá a tua confiança de 0 a 1.";
+const INSTRUCAO_VOZ_VISITA =
+  "O primeiro áudio é uma amostra da voz de uma pessoa (o comercial). O segundo áudio é uma fala gravada numa visita a casa de um " +
+  "cliente, com o comercial e o cliente na mesma divisão. Diz se a voz que mais fala no segundo áudio é a mesma pessoa do primeiro " +
+  "(o comercial), só pelo timbre, o tom e a maneira de falar. Responde só com JSON: comercial true se for a mesma voz, false se " +
+  "for outra pessoa, e a confiança de 0 a 1.";
 // Quem fala decide-se num pedido À PARTE, sem transcrição: com a amostra no mesmo pedido o modelo
 // transcrevia a amostra em vez da fala (visto em chamadas reais a 4 e 5/11).
 const INSTRUCAO_VOZ =
@@ -83,7 +107,14 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { audio_b64, deslocamento_s, referencia_b64, referencia_texto } = parsed.data;
+    const { audio_b64, deslocamento_s, referencia_b64, referencia_texto, tipo, contexto } = parsed.data;
+    const visita = tipo === "visita";
+    if (!visita && audio_b64.length > MAX_B64) return json({ error: "Fala longa demais" }, 400);
+    const modelo = visita ? MODELO_VISITA : MODELO;
+    const instrucao = (visita ? INSTRUCAO_VISITA : INSTRUCAO_BASE) +
+      (visita && contexto ? `
+
+O que se disse imediatamente antes (só para perceberes o assunto; NÃO o transcrevas nem o repitas): «${contexto}»` : "");
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
@@ -104,10 +135,17 @@ serve(async (req) => {
     try {
       // os dois pedidos em paralelo: a transcrição só vê a fala; a comparação de vozes não transcreve nada
       [brutas, voz] = await Promise.all([
-        gerarJson<Frase[]>({ modelo: MODELO, partes: [fala, { text: INSTRUCAO_BASE }], esquema: ESQUEMA_FRASES }),
+        // 9/11: se o modelo da visita recusar o pedido (não existe, não aceita áudio), vai ao de sempre
+        gerarJson<Frase[]>({ modelo, partes: [fala, { text: instrucao }], esquema: ESQUEMA_FRASES })
+          .catch((e) => {
+            if (modelo !== MODELO && e instanceof ErroGemini && e.status >= 400 && e.status < 500 && e.status !== 429) {
+              return gerarJson<Frase[]>({ modelo: MODELO, partes: [fala, { text: instrucao }], esquema: ESQUEMA_FRASES });
+            }
+            throw e;
+          }),
         comFalante
           ? gerarJson<{ comercial: boolean; confianca: number }>({ modelo: MODELO, esquema: ESQUEMA_VOZ,
-              partes: [{ inline_data: { mime_type: "audio/wav", data: referencia_b64! } }, fala, { text: INSTRUCAO_VOZ }] })
+              partes: [{ inline_data: { mime_type: "audio/wav", data: referencia_b64! } }, fala, { text: visita ? INSTRUCAO_VOZ_VISITA : INSTRUCAO_VOZ }] })
             .catch(() => null)  // sem comparação, a fala fica como do cliente
           : Promise.resolve(null),
       ]);
@@ -117,7 +155,8 @@ serve(async (req) => {
     }
     const frases = (Array.isArray(brutas) ? brutas : [])
       .map((f) => ({ ...f, texto: corrigir(String(f.texto ?? "").trim()), confianca: Number(f.confianca ?? 0) }))
-      .filter((f) => f.texto && f.confianca >= CONFIANCA_MIN && !ALUCINACOES.has(f.texto.toLowerCase().replace(/[.!?… ]+$/g, "")) && !ecoDaAmostra(f.texto))
+      // 9/11: na visita guarda-se também o que tem confiança média (vai marcado com «(?)»): perder frases é pior do que rever
+      .filter((f) => f.texto && f.confianca >= (visita ? 0.3 : CONFIANCA_MIN) && !ALUCINACOES.has(f.texto.toLowerCase().replace(/[.!?… ]+$/g, "")) && !ecoDaAmostra(f.texto))
       .map((f) => ({
         inicio: Math.round((deslocamento_s + Math.max(0, Number(f.inicio) || 0)) * 100) / 100,
         fim: Math.round((deslocamento_s + Math.max(Number(f.inicio) || 0, Number(f.fim) || 0)) * 100) / 100,
@@ -125,7 +164,7 @@ serve(async (req) => {
         confianca: Math.round(f.confianca * 100) / 100,
         ...(comFalante ? { falante: voz?.comercial ? "comercial" : "cliente", confianca_falante: voz ? Math.round(Number(voz.confianca ?? 0.5) * 100) / 100 : 0.3 } : {}),
       }));
-    return json({ frases, modelo: MODELO });
+    return json({ frases, modelo });
   } catch (error) {
     if (error instanceof AuthError) return authErrorResponse(error, corsHeaders);
     // qualquer outro erro vai com cabeçalhos CORS e a mensagem: sem isto o browser só diz

@@ -35,7 +35,7 @@ const tracar = (tela: Element, de: [number, number], ate: [number, number]) => {
 describe("PlantaDivisao", () => {
   it("vazia, pede para desenhar; quatro traços com o dedo fecham a planta e dão os m²", () => {
     const { d, tela } = montar();
-    expect(screen.getByText("Ainda sem paredes.")).toBeInTheDocument();
+    expect(screen.getByText("O mais rápido: as duas medidas do chão")).toBeInTheDocument();
     tracar(tela, [50, 50], [250, 55]);
     expect(lerPlanta(d.f.planta)?.paredes).toEqual([{ c: 200, r: "E" }]);
     tracar(tela, [0, 0], [250, 200]);   // continua de onde acabou (o toque pode ser noutro sítio)
@@ -48,7 +48,7 @@ describe("PlantaDivisao", () => {
   it("tocar no número de uma parede deixa escrever a medida certa; a parede do outro lado acompanha e a planta continua fechada", () => {
     const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
     fireEvent.pointerDown(screen.getByRole("button", { name: "Parede 1: 200 cm. Escrever a medida." }));
-    const caixa = screen.getByLabelText("Parede 1, em cm");
+    const caixa = screen.getByLabelText("Parede 1, cm");
     fireEvent.change(caixa, { target: { value: "250" } });
     fireEvent.blur(caixa);
     expect(lerPlanta(d.f.planta)?.paredes.map((w) => w.c)).toEqual([250, 150, 250, 150]);
@@ -60,10 +60,10 @@ describe("PlantaDivisao", () => {
     montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
     const numero = screen.getByRole("button", { name: "Parede 3: 200 cm. Escrever a medida." });
     fireEvent.pointerDown(numero);
-    expect(screen.getByLabelText("Parede 3, em cm")).not.toHaveFocus();
+    expect(screen.getByLabelText("Parede 3, cm")).not.toHaveFocus();
     fireEvent.keyDown(numero, { key: "Enter" });
     await new Promise((r) => setTimeout(r, 0));
-    expect(screen.getByLabelText("Parede 3, em cm")).toHaveFocus();
+    expect(screen.getByLabelText("Parede 3, cm")).toHaveFocus();
   });
 
   it("arrastar uma parede muda-a de sítio: as vizinhas esticam e a planta continua fechada (5/11)", () => {
@@ -109,6 +109,34 @@ describe("PlantaDivisao", () => {
     expect(lerPlanta(d.f.planta)!.pecas[0].x).toBe(x0 + 5);
     fireEvent.click(screen.getByRole("button", { name: "Tirar" }));
     expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
+  });
+
+  it("9/11: as duas medidas criam o retângulo; desenhar a 45° e fechar com o botão; cortar um canto", () => {
+    const { d, tela } = montar();
+    fireEvent.change(screen.getByLabelText("Largura (cm)"), { target: { value: "200" } });
+    fireEvent.change(screen.getByLabelText("Fundo (cm)"), { target: { value: "160" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar a planta" }));
+    expect(lerPlanta(d.f.planta)?.paredes).toEqual(retangulo(200, 160));
+    expect(screen.getByText("A planta fecha.")).toBeInTheDocument();
+    // tocar no canto de cima à direita e cortá-lo 40 cm
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Canto 2: cortar a 45°" }));
+    fireEvent.change(screen.getByLabelText("Cortar o canto a 45°, cm"), { target: { value: "40" } });
+    fireEvent.click(screen.getByRole("button", { name: /Cortar o canto/ }));
+    const pl = lerPlanta(d.f.planta)!;
+    expect(pl.paredes.map((w) => w.r)).toEqual(["E", "SE", "S", "W", "N"]);
+    expect(pl.paredes.map((w) => Math.round(w.c))).toEqual([160, 57, 120, 200, 160]);
+    expect(screen.getByText("A planta fecha.")).toBeInTheDocument();
+    void tela;
+  });
+
+  it("9/11: um traço em diagonal dá uma parede a 45°; «Fechar a planta» junta as que faltam", () => {
+    const { d, tela } = montar();
+    tracar(tela, [50, 50], [250, 50]);
+    tracar(tela, [0, 0], [330, 130]);   // 45° para baixo e para a direita
+    expect(lerPlanta(d.f.planta)?.paredes[1]).toMatchObject({ r: "SE" });
+    tracar(tela, [0, 0], [330, 250]);
+    fireEvent.click(screen.getByRole("button", { name: /Fechar a planta/ }));
+    expect(screen.getByText("A planta fecha.")).toBeInTheDocument();
   });
 
   it("a planta gravada por fora (a folha) aparece no desenho", () => {

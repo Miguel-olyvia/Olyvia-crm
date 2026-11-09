@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
+import { IndicadorGravacao } from "@/emylia/IndicadorGravacao";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
@@ -200,6 +201,8 @@ const App = () => (
       <ErrorBoundary>
         <Toaster />
         <Sonner />
+        {/* 9/11: a gravação da visita continua por toda a app (o Estúdio); o indicador em baixo */}
+        <IndicadorGravacao />
         <BrowserRouter>
           <SidebarExpandProvider>
             <CompanyProvider>

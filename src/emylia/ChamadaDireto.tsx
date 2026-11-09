@@ -4,7 +4,7 @@
 // comercial confirma o que entra. Nada corre no PC de ninguém. A lógica das propostas está em chamadaMotor.ts
 // e a ligação ao Supabase em chamadaNuvem.ts.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Check, Mic, PhoneOff, Sparkles, Square, UserRoundCheck } from "lucide-react";
+import { Camera, Check, Mic, PhoneOff, RotateCcw, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Def, Grupo } from "./campos";
@@ -15,13 +15,19 @@ import { juntarExtracoes, juntarVarios, propostas, type Extracao, type Fala, typ
 import { divisaoPrincipal } from "./campos";
 import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
-import { GRUPO_VISITA, ecraAceso, falasDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, linhasDaFala, ouvirMicrofone, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64, type Ouvinte } from "./chamadaNuvem";
+import { GRUPO_VISITA, falasDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, linhasDaFala, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64 } from "./chamadaNuvem";
+import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, useGravacao } from "./gravador";
+import { urlDoNegocio } from "./urlNegocio";
 
-type EstadoLig = "parado" | "a_ligar" | "a_ouvir" | "a_terminar" | "terminado" | "erro";
+/** Depois de terminar: a preencher os campos, terminado, ou erro. A gravação em si vive no gravador (gravador.ts). */
+type Fase = "livre" | "a_preencher" | "terminado" | "erro";
 const EXEMPLO_URL = "/chamadas/exemplo.ogg";
 const SEGUNDOS_VOZ = 15;
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+/** 9/11: a transcrição como texto, para ficar no negócio (uma linha por fala, com o tempo e quem fala). */
+export const textoDaTranscricao = (falas: readonly Fala[]) =>
+  falas.map((f) => `${tempo(f.inicio)} ${f.falante === "comercial" ? "Comercial" : "Cliente"}: ${f.texto}`).join("\n");
 
 /** Chaves que não são campos do formulário: gravam-se por ações próprias do motor (ver `aplicarEspecial`). */
 const CHAVES_ESPECIAIS = new Set(["lead_primeiro", "lead_apelido", "tipo_servico", "servicos_catalogo"]);
@@ -71,95 +77,102 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
     servicos_catalogo: servicosPedidos(d, ctx.S).map((x) => x.n).join(", "),
     ...Object.fromEntries(medidas.map(([k]) => [`med_${k}`, d.visita?.med && medida(d.visita.med, k) ? String(medida(d.visita.med, k)) : ""])),
   }), [d, ctx.S, medidas]);
-  const [estado, setEstado] = useState<EstadoLig>("parado");
+  // 9/11: a gravação é do gravador da app (continua no Estúdio, guarda-se a cada fala); aqui só a parte deste negócio
+  const g = useGravacao();
+  const minha = g.negocio === d.id && g.modo === modo;
+  const vivo = minha ? g.estado : "parado";
+  const [fase, setFase] = useState<Fase>("livre");
   const [msg, setMsg] = useState("");
-  const [falas, setFalas] = useState<Fala[]>([]);
-  const [aFalar, setAFalar] = useState(false);
-  const [segundos, setSegundos] = useState(0);
-  const [pendentes, setPendentes] = useState(0);
+  const [falasFim, setFalasFim] = useState<Fala[]>([]);
+  const falas = minha && vivo !== "parado" ? g.falas : falasFim;
+  const [agora, setAgora] = useState(Date.now());
   const [extracao, setExtracao] = useState<Extracao | null>(null);
   const [resumoFim, setResumoFim] = useState("");
   const [voz, setVoz] = useState<string | null>(() => vozGuardada());
   const [aGravarVoz, setAGravarVoz] = useState<number | null>(null);
+  const [mics, setMics] = useState<{ id: string; nome: string }[]>([]);
+  const [mic, setMic] = useState(microfoneEscolhido);
+  // quando o microfone ouviu alguma coisa pela última vez (para avisar se não ouve nada)
+  const ouviuEm = useRef(Date.now());
   // por proposta: entra ou não, e o valor (editável) que entra
   const [escolhas, setEscolhas] = useState<Record<string, { incluir: boolean; valor: string }>>({});
   const [aplicadas, setAplicadas] = useState<string[] | null>(null);
-  const ouvinte = useRef<Ouvinte | null>(null);
   const falasRef = useRef<Fala[]>([]);
   const fila = useRef<Promise<void>>(Promise.resolve());
-  const soltarEcra = useRef<(() => void) | null>(null);
   // 5/11: a foto da folha da visita (lida pela função visita-folha) e a planta que ela deu
   const inputFolha = useRef<HTMLInputElement>(null);
   const [aLerFolha, setALerFolha] = useState(false);
   const [plantaLida, setPlantaLida] = useState<PlantaLida | null>(null);
   const [plantaUsada, setPlantaUsada] = useState(false);
-  const relogio = useRef<number | null>(null);
   const fimLista = useRef<HTMLDivElement>(null);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
 
   useEffect(() => { fimLista.current?.scrollIntoView({ block: "nearest" }); }, [falas.length]);
-  useEffect(() => () => { void ouvinte.current?.parar(); soltarEcra.current?.(); if (relogio.current) window.clearInterval(relogio.current); }, []);
+  // o painel à vista: o indicador de baixo esconde-se
+  useEffect(() => painelAberto(), []);
+  useEffect(() => { void microfones().then(setMics); }, [vivo]);
+  // o relógio e o aviso do microfone calado, enquanto grava
+  useEffect(() => {
+    if (vivo !== "a_ouvir") return;
+    ouviuEm.current = Date.now();
+    const t = window.setInterval(() => setAgora(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [vivo]);
+  if (g.nivel > 0.08) ouviuEm.current = Date.now();
+  const segundos = minha && g.inicioEm ? Math.max(0, Math.floor((agora - g.inicioEm) / 1000)) : 0;
+  const micCalado = vivo === "a_ouvir" && agora - ouviuEm.current > 12_000;
 
-  const juntar = (novas: Fala[]) => {
-    if (!novas.length) return;
-    falasRef.current = [...falasRef.current, ...novas].sort((a, b) => a.inicio - b.inicio);
-    setFalas(falasRef.current);
-  };
+  const limpar = () => { setFalasFim([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setResumoFim(""); setFase("livre"); };
 
-  /** Cada fala vai ao Gemini por ordem (uma de cada vez), para as linhas não trocarem de sítio. */
+  async function iniciar(continuar = false) {
+    if (!continuar) limpar();
+    setMsg("");
+    try {
+      await iniciarGravacao({ negocio: d.id, nome: d.nome, modo, voltar: urlDoNegocio(d.id) }, continuar);
+    } catch (e) {
+      setMsg((e as Error).message.startsWith("Já está") ? (e as Error).message : "Sem acesso ao microfone: " + (e as Error).message);
+    }
+  }
+
+  /** Para o teste com a chamada de exemplo: cada fala vai ao Gemini por ordem, sem o gravador. */
   const tratarFala = (pcm: Float32Array, inicioS: number) => {
-    setPendentes((n) => n + 1);
     fila.current = fila.current.then(async () => {
       try {
         const frases = await transcreverFala(pcm, inicioS, voz, voz ? vozTextoGuardado() : "");
-        juntar(linhasDaFala(frases, "cliente"));
+        falasRef.current = [...falasRef.current, ...linhasDaFala(frases, "cliente")].sort((a, b) => a.inicio - b.inicio);
+        setFalasFim(falasRef.current);
       } catch (e) {
         setMsg("Uma fala ficou por transcrever: " + (e as Error).message);
-      } finally {
-        setPendentes((n) => n - 1);
       }
     });
   };
 
-  const limpar = () => { setFalas([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setSegundos(0); setResumoFim(""); };
-  const pararRelogio = () => { if (relogio.current) { window.clearInterval(relogio.current); relogio.current = null; } };
-
-  async function iniciar() {
-    setEstado("a_ligar"); setMsg("A pedir o microfone..."); limpar();
-    try {
-      const t0 = Date.now();
-      ouvinte.current = await ouvirMicrofone(tratarFala, setAFalar);
-      soltarEcra.current = await ecraAceso();
-      relogio.current = window.setInterval(() => setSegundos(Math.floor((Date.now() - t0) / 1000)), 1000);
-      setEstado("a_ouvir");
-      setMsg(voz ? `${T.aOuvir} A sua voz está registada.` : `${T.aOuvir} Sem voz registada: as falas ficam como do cliente até registar a sua.`);
-    } catch (e) {
-      setEstado("erro"); setMsg("Sem acesso ao microfone: " + (e as Error).message);
-    }
-  }
-
   async function iniciarTeste() {
-    setEstado("a_ligar"); setMsg("A carregar a chamada de exemplo..."); limpar();
+    limpar(); setFase("a_preencher"); setMsg("A carregar a chamada de exemplo...");
     try {
       const falasFicheiro = await falasDeFicheiro(EXEMPLO_URL);
-      setEstado("a_ouvir"); setMsg(`A ouvir a chamada de exemplo (${falasFicheiro.length} falas).`);
+      setMsg(`A ouvir a chamada de exemplo (${falasFicheiro.length} falas).`);
       for (const f of falasFicheiro) tratarFala(f.pcm, f.inicioS);
       await fila.current;
-      await terminar();
+      await acabar(falasRef.current, false);
     } catch (e) {
-      setEstado("erro"); setMsg("A chamada de exemplo falhou: " + (e as Error).message);
+      setFase("erro"); setMsg("A chamada de exemplo falhou: " + (e as Error).message);
     }
   }
 
   async function terminar() {
-    setEstado("a_terminar"); setMsg("A terminar a chamada...");
-    pararRelogio();
-    await ouvinte.current?.parar(); ouvinte.current = null;
-    soltarEcra.current?.(); soltarEcra.current = null;
-    await fila.current;  // as últimas falas ainda a transcrever
-    const segs = falasRef.current;
-    if (!segs.length) { setEstado("terminado"); setMsg("Chamada terminada sem falas transcritas."); return; }
-    setMsg("A preencher os campos com o que se disse...");
+    setMsg("");
+    const segs = await terminarGravacao();
+    await acabar(segs, true);
+  }
+
+  /** As falas acabadas: ficam no negócio (a transcrição inteira) e vão preencher os campos. */
+  async function acabar(segs: Fala[], doGravador: boolean) {
+    falasRef.current = segs; setFalasFim(segs);
+    if (segs.length) ctx.run(() => ctx.A.campo(d.id, modo === "visita" ? "transcricao_visita" : "transcricao_chamada", textoDaTranscricao(segs)));
+    if (doGravador) descartarGravacao();
+    if (!segs.length) { setFase("terminado"); setMsg(modo === "visita" ? "Gravação terminada sem falas transcritas." : "Chamada terminada sem falas transcritas."); return; }
+    setFase("a_preencher"); setMsg("A preencher os campos com o que se disse...");
     try {
       const ext = await preencherCampos(segs, grupos, modo);
       setExtracao(ext);
@@ -168,14 +181,21 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
         ? segs.filter((s, i) => s.falante !== ext.falantes![i]).length : 0;
       if (ext.falantes && ext.falantes.length === segs.length) {
         falasRef.current = segs.map((s, i) => ({ ...s, falante: ext.falantes![i], confianca_falante: 1 }));
-        setFalas(falasRef.current);
+        setFalasFim(falasRef.current);
+        if (revistas) ctx.run(() => ctx.A.campo(d.id, modo === "visita" ? "transcricao_visita" : "transcricao_chamada", textoDaTranscricao(falasRef.current)));
       }
-      setResumoFim(`${segs.length} falas.${revistas ? ` Quem fala foi corrigido em ${revistas} ${revistas === 1 ? "linha" : "linhas"}, pelo sentido da conversa.` : ""}`);
-      setEstado("terminado"); setMsg("Chamada terminada. Confirme o que entra nos campos.");
+      setResumoFim(`${segs.length} falas, guardadas no negócio.${revistas ? ` Quem fala foi corrigido em ${revistas} ${revistas === 1 ? "linha" : "linhas"}, pelo sentido da conversa.` : ""}`);
+      setFase("terminado"); setMsg(`${modo === "visita" ? "Gravação terminada" : "Chamada terminada"}. Confirme o que entra nos campos.`);
     } catch (e) {
-      setEstado("erro"); setMsg("A transcrição ficou, mas os campos não: " + (e as Error).message);
+      setFase("erro"); setMsg("A transcrição ficou guardada no negócio, mas os campos não: " + (e as Error).message);
     }
   }
+
+  // terminada noutro sítio (o ecrã saiu a meio do «Terminar»): acaba-se aqui
+  useEffect(() => {
+    if (minha && g.estado === "terminada") void acabar(g.falas, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só ao abrir o negócio
+  }, []);
 
   async function folhaEscolhida(ficheiro: File | undefined) {
     if (!ficheiro) return;
@@ -257,8 +277,13 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
       setTimeout(() => document.getElementById(`chamada-1-vaga`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     }
   };
-  const aOuvir = estado === "a_ouvir";
-  const ocupado = estado === "a_ligar" || estado === "a_terminar";
+  const aOuvir = vivo === "a_ouvir";
+  const interrompida = vivo === "interrompida";
+  const ocupado = vivo === "a_ligar" || vivo === "a_terminar" || fase === "a_preencher";
+  const outroAGravar = !minha && g.negocio !== null && (g.estado === "a_ouvir" || g.estado === "a_ligar");
+  const texto = msg || (minha ? g.msg : "") || (aOuvir ? (voz ? `${T.aOuvir} A sua voz está registada.` : `${T.aOuvir} Sem voz registada: as falas ficam como do cliente até registar a sua.`)
+    : vivo === "a_ligar" ? "A pedir o microfone..." : outroAGravar ? `A gravar outro negócio (${g.nome}).`
+    : voz ? "Pronto. A sua voz está registada." : "Pronto. Registe a sua voz uma vez para a transcrição saber quem fala.");
 
   return (
     <section aria-labelledby={`direto-${d.id}`} className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
@@ -268,13 +293,14 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
           <p className="text-sm text-muted-foreground">{T.sub}</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          {!aOuvir && !ocupado ? (
+          {!aOuvir && !ocupado && !interrompida ? (
             <Button type="button" variant="outline" onClick={() => void registarVoz()} disabled={aGravarVoz !== null}>
               <UserRoundCheck className="h-4 w-4" aria-hidden="true" />
               {aGravarVoz !== null ? `A gravar... ${aGravarVoz}/${SEGUNDOS_VOZ} s` : voz ? "Registar a minha voz outra vez" : "Registar a minha voz"}
             </Button>
           ) : null}
-          {!aOuvir && !ocupado ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
+          {!aOuvir && !ocupado && !interrompida ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null || outroAGravar}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
+          {interrompida ? <Button type="button" onClick={() => void iniciar(true)}><Mic className="h-4 w-4" aria-hidden="true" />Continuar a gravar</Button> : null}
           {modo === "visita" && !ocupado ? (
             <>
               <input ref={inputFolha} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true"
@@ -285,22 +311,45 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
             </>
           ) : null}
           {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciarTeste()} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
-          {aOuvir ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
-          {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{estado === "a_ligar" ? "A ligar..." : "A terminar..."}</Button> : null}
+          {aOuvir || interrompida ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
+          {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{vivo === "a_ligar" ? "A ligar..." : fase === "a_preencher" ? "A preencher..." : "A terminar..."}</Button> : null}
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground" aria-live="polite">
-        <span className={cn(estado === "erro" && "text-destructive")}>{msg || (voz ? "Pronto. A sua voz está registada." : "Pronto. Registe a sua voz uma vez para a transcrição saber quem fala.")}</span>
+        <span className={cn((fase === "erro" || interrompida) && "text-destructive")}>{texto}</span>
         {aOuvir ? (
           <>
-            <span className={cn("inline-block h-2.5 w-2.5 rounded-full", aFalar ? "bg-success" : "bg-muted-foreground/40")} aria-label={aFalar ? "a ouvir fala" : "silêncio"} />
+            <span className={cn("inline-block h-2.5 w-2.5 rounded-full", g.aFalar ? "bg-success" : "bg-muted-foreground/40")} aria-label={g.aFalar ? "a ouvir fala" : "silêncio"} />
             <span>{tempo(segundos)}</span>
-            {pendentes > 0 ? <span>a transcrever {pendentes}…</span> : null}
+            {g.pendentes > 0 ? <span>a transcrever {g.pendentes}…</span> : null}
           </>
         ) : null}
-        {estado === "terminado" ? <span>{resumoFim}</span> : null}
+        {minha && g.falhadas > 0 ? (
+          <Button type="button" size="sm" variant="outline" onClick={repetirFalhadas}><RotateCcw className="h-4 w-4" aria-hidden="true" />Tentar outra vez ({g.falhadas})</Button>
+        ) : null}
+        {fase === "terminado" ? <span>{resumoFim}</span> : null}
       </div>
+      {/* 9/11 (Rúben: «talvez seja por causa do microfone»): o nível do microfone à vista, qual está a gravar, e escolher outro */}
+      {aOuvir ? (
+        <div className="mt-3 space-y-1.5">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="shrink-0 text-muted-foreground">Microfone</span>
+            <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted" role="meter" aria-label="Nível do microfone" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(g.nivel * 100)}>
+              <span className={cn("block h-full rounded-full transition-[width] duration-200", g.nivel > 0.08 ? "bg-success" : "bg-muted-foreground/40")} style={{ width: `${Math.round(g.nivel * 100)}%` }} />
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">{g.microfone}{g.pausas ? ` · cortado ${g.pausas} ${g.pausas === 1 ? "vez" : "vezes"} e retomado` : ""}</p>
+          {micCalado ? <p className="text-sm text-warning-foreground">O microfone quase não ouve nada. Ponha o aparelho mais perto de quem fala{mics.length > 1 ? " ou escolha outro microfone (termine e volte a começar)" : ""}.</p> : null}
+        </div>
+      ) : !ocupado && mics.length > 1 ? (
+        <label className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">Microfone
+          <select value={mic} onChange={(e) => { setMic(e.target.value); escolherMicrofone(e.target.value); }} className="h-9 min-w-0 max-w-full rounded-lg border border-input bg-card px-2.5 text-[15px] text-foreground">
+            <option value="">O do aparelho</option>
+            {mics.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+          </select>
+        </label>
+      ) : null}
 
       {falas.length ? (
         <div className="mt-4 max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-border bg-background p-3 text-[15px]" aria-label="Transcrição">

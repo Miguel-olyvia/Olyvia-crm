@@ -118,6 +118,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const vistaPedida = params.get("vista") ?? vistaInicial ?? null;
   // 3/11: a notificação de uma mensagem do cliente (aos gestores de obra) abre a obra dele: ?vista=operacoes&obra=<número>
   const obraPedida = useRef(Number(params.get("obra")) || null);
+  // 9/11: ?negocio=<número> abre esse negócio (a volta do Estúdio e o indicador da gravação, sem recarregar a app)
+  const negocioPedido = useRef(Number(params.get("negocio")) || null);
   const S = useMemo<Estado>(() => {
     const s = seed(); s.deals = []; s.clientes = []; s.deal = null;
     s.view = vistaPedida === "operacoes" || vistaPedida === "hoje" ? vistaPedida : "negocios";
@@ -394,6 +396,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       // 3/11: a obra pedida no endereço (a notificação de uma mensagem do cliente), se o negócio já tem plano
       const op = obraPedida.current;
       if (op && S.deals.some((x) => x.id === op && x.obra.plano)) { S.view = "operacoes"; S.op = op; S.deal = null; }
+      const np = negocioPedido.current;
+      if (np && S.deals.some((x) => x.id === np)) { S.view = "negocio"; S.deal = np; S.op = null; }
       setPronto(true);
       preencherDaFicha();
       // 2/11: a vista do cliente grava-se depois de as encomendas carregarem (leva o estado dos materiais) e só depois os avisos

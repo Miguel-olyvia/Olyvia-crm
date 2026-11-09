@@ -13,6 +13,7 @@ import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorPlanta } from "@/emylia/EditorPlanta";
+import { irPara } from "@/emylia/urlNegocio";
 import { PECAS, cantos, tiposDaDivisao, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
 import { NOME_CATEGORIA, melhorPara, produto, type Categoria, type Produto } from "./catalogoFake";
 import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sairam, totais, type Linha, type Projeto } from "./necessidadesEstudio";
@@ -143,9 +144,12 @@ export default function EstudioProjeto() {
             {p.negocio !== undefined && (
               <Button type="button" variant="outline" className="min-h-11" onClick={() => {
                 devolverAoNegocio(p);
-                // aberto pela Visita: fecha este separador e volta-se ao do negócio; senão, vai para a página de onde veio
+                // 9/11: aberto pela Visita no mesmo separador: volta sem recarregar a app (a gravação da visita continua). Um endereço
+                // completo de outra versão (projetos antigos) ou de outro sítio abre como antes.
+                const destino = p.origem ?? "/negocios";
+                if (destino.startsWith("/")) { irPara(destino); return; }
                 if (window.opener) window.close();
-                window.location.href = p.origem ?? "/negocios";
+                window.location.href = destino;
               }}><ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />Voltar ao negócio</Button>
             )}
             <Button type="button" className="min-h-11" onClick={() => setMostrar(true)}><Monitor className="mr-2 h-4 w-4" aria-hidden="true" />Mostrar ao cliente</Button>
@@ -504,7 +508,7 @@ function FichaObra({ p, linhas }: { p: Projeto; linhas: Linha[] }) {
               : <p className="text-sm text-muted-foreground">Sem revestimento nem pavimento escolhidos.</p>}
           </Cartao>
           <Cartao titulo="Paredes, para conferir">
-            <p className="text-[15px]">{p.depois.paredes.map((w) => `${w.c} cm`).join(" · ")}</p>
+            <p className="text-[15px]">{p.depois.paredes.map((w) => `${Math.round(w.c)} cm`).join(" · ")}</p>
           </Cartao>
         </div>
       </div>

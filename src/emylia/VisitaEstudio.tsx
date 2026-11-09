@@ -6,6 +6,7 @@
 // O projeto do Estúdio vive no negócio (f.estudio): o Estúdio abre noutro separador e grava neste browser; esta página ouve e guarda
 // no negócio a versão mais recente. «Voltar ao negócio» (ou «Trazer do Estúdio») passa a planta, as medidas, as respostas das peças e
 // as necessidades (estas com revisão, ligadas ao Catálogo verdadeiro).
+import { irPara, urlDoNegocio } from "./urlNegocio";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CalendarCheck, Check, ChevronDown, MapPin, Navigation, Phone, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -145,8 +146,10 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por negócio (o ctx e o negócio vão por ref)
   }, [d.id]);
 
+  // 9/11 (Rúben: «a transcrição não corre enquanto estamos no Estúdio»): o Estúdio abre no mesmo separador, sem recarregar a app, e a
+  // gravação da visita continua (num separador à parte o telemóvel suspendia-a); «Voltar ao negócio» volta a este negócio
   const abrir = () => {
-    if (abrirEstudio(d.nome, d.f, d.id, window.location.href, divisaoDoEstudio(d))) window.open("/prototipo/estudio", "_blank");
+    if (abrirEstudio(d.nome, d.f, d.id, urlDoNegocio(d.id), divisaoDoEstudio(d))) irPara("/prototipo/estudio");
     else setFeito("Não deu para abrir o Estúdio neste browser.");
   };
   const prods = salvo ? produtosEscolhidos(salvo) : [];

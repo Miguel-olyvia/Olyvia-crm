@@ -105,7 +105,9 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect(campo).toHaveBeenCalledWith(7, "posse", "Inquilino");
     expect(campo).toHaveBeenCalledWith(7, "visita_dia", "2026-11-10");
     expect(campo).toHaveBeenCalledWith(7, "visita_hora", "11:00");
-    expect(campo).toHaveBeenCalledTimes(4);
+    // 9/11: e a transcrição inteira fica no negócio (antes de preencher)
+    expect(campo).toHaveBeenCalledWith(7, "transcricao_chamada", expect.stringContaining("Cliente: É um apartamento no terceiro andar."));
+    expect(campo).toHaveBeenCalledTimes(5);
     // o tipo de serviço e os serviços do Catálogo vão pelas ações próprias (só os nomes que existem no Catálogo)
     expect(servicoDaChamada).toHaveBeenCalledWith(7, "wc");
     expect(servicosDoPedido).toHaveBeenCalledWith(7, ["s1", "s2"]);

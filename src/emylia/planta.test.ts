@@ -162,3 +162,38 @@ describe("planta: trocar o produto não tira a peça do sítio (5/11)", () => {
     expect(r.x + r.w / 2).toBe(140); expect(r.w).toBe(60);
   });
 });
+
+// 9/11 (Rúben, a visita real: paredes diagonais e desenhar no telemóvel)
+import { cortarCanto as cortarCanto9, fecharPlanta as fecharPlanta9, juntarParede as juntarParede9, paredeDoTraco as traco9, faltaFechar as falta9, areaChaoM2 as area9, moverParede as mover9 } from "./planta";
+describe("paredes a 45° e fechar (9/11)", () => {
+  it("um traço claramente em diagonal é uma parede a 45°; um pouco torto continua reto", () => {
+    expect(traco9({ x: 0, y: 0 }, { x: 100, y: 100 })).toEqual({ c: 140, r: "SE" });
+    expect(traco9({ x: 0, y: 0 }, { x: 100, y: 30 })?.r).toBe("E");
+    expect(traco9({ x: 0, y: 0 }, { x: -80, y: -90 })?.r).toBe("NW");
+  });
+  it("o dedo passou do canto e voltou: desconta-se em vez de juntar uma parede para trás", () => {
+    expect(juntarParede9([{ c: 100, r: "N" }, { c: 40, r: "E" }], { c: 25, r: "W" })).toEqual([{ c: 100, r: "N" }, { c: 15, r: "E" }]);
+    expect(juntarParede9([{ c: 100, r: "N" }, { c: 40, r: "E" }], { c: 40, r: "W" })).toEqual([{ c: 100, r: "N" }]);
+  });
+  it("fechar a planta: uma parede, duas a direito, ou com um canto a 45°", () => {
+    const o = { x: 0, y: 0 };
+    const reto = fecharPlanta9({ o, paredes: [{ c: 200, r: "E" }, { c: 150, r: "S" }, { c: 120, r: "W" }] });
+    expect(falta9(reto.paredes)).toBe(0);
+    expect(reto.paredes.slice(2)).toEqual([{ c: 200, r: "W" }, { c: 150, r: "N" }]); // a última continua até fechar o retângulo
+    const diag = fecharPlanta9({ o, paredes: [{ c: 200, r: "E" }, { c: 150, r: "S" }, { c: 120, r: "W" }] }, "diagonal");
+    expect(falta9(diag.paredes)).toBeLessThanOrEqual(1);
+    expect(diag.paredes.map((w) => w.r)).toContain("NW");
+  });
+  it("cortar um canto: as duas paredes encurtam, entra a diagonal, a área perde o triângulo", () => {
+    const r = cortarCanto9({ o: { x: 0, y: 0 }, paredes: [{ c: 200, r: "E" }, { c: 100, r: "S" }, { c: 200, r: "W" }, { c: 100, r: "N" }] }, 0, 30)!;
+    expect(falta9(r.paredes)).toBeLessThanOrEqual(1);
+    expect(r.o).toEqual({ x: 30, y: 0 });
+    expect(area9(r.paredes)).toBe(1.96); // 2 m² menos 0,045
+  });
+  it("arrastar uma parede a 45°: as vizinhas acompanham e a planta continua fechada", () => {
+    const p = cortarCanto9({ o: { x: 0, y: 0 }, paredes: [{ c: 200, r: "E" }, { c: 100, r: "S" }, { c: 200, r: "W" }, { c: 100, r: "N" }] }, 1, 40)!;
+    const i = p.paredes.findIndex((w) => w.r === "SE");
+    const m = mover9(p, i, { x: -10, y: 10 })!;
+    expect(falta9(m.paredes)).toBeLessThanOrEqual(1);
+  });
+});
