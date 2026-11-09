@@ -11,7 +11,8 @@ import { useCatalogo } from "./v2/catalogoStore";
 import { BarraProdutos } from "./planta3d/BarraProdutos";
 import { Planta3DPainel } from "./planta3d/Planta3DPainel";
 import { comDemonstracao, produtosParaEspaco, type ProdutoModelo3D } from "./planta3d/catalogo3d";
-import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede, encostarParede, normalizarAngulo, poligonoDe, rodarPeca } from "./planta3d/pecas3d";
+import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede, encostarParede, moverPara, normalizarAngulo, poligonoDe, rodarPeca } from "./planta3d/pecas3d";
+import type { Mover3D } from "./planta3d/Visualizador3D";
 import { aplicarVariante, expandirConjunto, guardarLugarLocal, mudarMontagem, reporComponente, reposicionarConjunto, retirarComponente, type Conjunto } from "./planta3d/conjuntos";
 import { familiaPorId, modeloDaFamilia } from "./planta3d/familias";
 import { ListaVendavel, PainelConjunto, PainelVariante } from "./planta3d/PainelVariante";
@@ -196,6 +197,20 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
     gravar({ ...np, pecas: antes ? np.pecas.map((x) => (x.id === pid ? antes : x)) : np.pecas.filter((x) => x.id !== pid) });
     setAviso(r.erro);
   }
+  /** Mover no 3D: as mesmas regras da planta (moverPara/ajustarPeca); a gravação é a de sempre (Desfazer/Refazer, conjuntos com a âncora). */
+  const mover3D: Mover3D = {
+    ajustar: (id, x, y, alt) => {
+      const pc = p.pecas.find((k) => k.id === id); if (!pc) return null;
+      const r = moverPara(p, pc, x, y, alt);
+      return r.ok ? { x: (r.peca.x + r.peca.w / 2) / 100, y: (r.peca.y + r.peca.h / 2) / 100, rot: r.peca.rot ?? 0, altura: (r.peca.alt ?? 0) / 100 } : null;
+    },
+    confirmar: (id, x, y, alt) => {
+      const pc = p.pecas.find((k) => k.id === id); if (!pc) return;
+      const r = moverPara(p, pc, x, y, alt);
+      if (!r.ok) { setAviso(r.erro); return; }
+      gravar(aposPeca({ ...p, pecas: p.pecas.map((k) => (k.id === id ? r.peca : k)) }, r.peca)); setAviso("");
+    },
+  };
   /** Peça de um conjunto: se for a âncora, o conjunto vai com ela; se for outro componente, guarda-se o novo lugar dele. */
   const aposPeca = (np: Planta, peca: PecaPlanta): Planta => (!peca.conj ? np : peca.ancora ? reposicionarConjunto(np, peca.conj) : guardarLugarLocal(np, peca.id));
   /** Remove uma peça (a de um conjunto sai do conjunto; a âncora leva o conjunto). Desfazer repõe. */
@@ -584,7 +599,7 @@ export function PlantaDivisao({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; divis
         </Button>
         {ver3d && (
           <Planta3DPainel planta={p} tipo={proto.pref.tipo} nome={divisao ?? "Espaço"} peDireito={pe} produtos={produtosTodos} arvore={K.arvore}
-            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} selecionada={sel} onSelecionar={setSel} acoes={barraSel} />
+            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} selecionada={sel} onSelecionar={setSel} acoes={barraSel} mover={mover3D} />
         )}
       </div>
     </div>

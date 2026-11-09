@@ -11,7 +11,7 @@ import { deLegado } from "./ligacao";
 import { TOPO_BANCADA_MM, VISTAS_BANCADA, presetDaVista, type VistaBancada } from "./bancada";
 import { areaPavimento, areaParedes, descreverEspaco, type TipoEspaco } from "./modelo";
 import { REVESTIMENTOS, type Superficie } from "./revestimentos";
-import type { Vista3D } from "./Visualizador3D";
+import type { Mover3D, Vista3D } from "./Visualizador3D";
 
 const Visualizador3D = lazy(() => import("./Visualizador3D"));
 const SEL = "h-11 min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
@@ -27,9 +27,11 @@ export interface Planta3DPainelProps {
   selecionada: string | null; onSelecionar: (id: string | null) => void;
   /** Botões da peça escolhida (Remover, Rodar…), mostrados por cima do 3D. */
   acoes?: ReactNode;
+  /** mover a peça escolhida arrastando-a no 3D (as regras e a gravação são as da planta) */
+  mover?: Mover3D;
 }
 
-export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore, rev, onRev, teto, onTeto, selecionada, onSelecionar, acoes }: Planta3DPainelProps) {
+export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore, rev, onRev, teto, onTeto, selecionada, onSelecionar, acoes, mover }: Planta3DPainelProps) {
   const [vista, setVista] = useState<Vista3D>("3d");
   const [etiquetas, setEtiquetas] = useState(true);
   const [cheio, setCheio] = useState(false);
@@ -104,7 +106,7 @@ export function Planta3DPainel({ planta, tipo, nome, peDireito, produtos, arvore
       )}
       <div className={cn("overflow-hidden rounded-2xl border border-border bg-muted", cheio ? "min-h-[60vh] flex-1" : "h-[420px]")}>
         <Suspense fallback={<p role="status" className="p-4 text-[15px] text-muted-foreground">A carregar o visualizador 3D…</p>}>
-          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} camara={camara ?? camaraPeca} />
+          <Visualizador3D espaco={espaco} modelos={modelos} vista={vista} teto={teto} etiquetas={etiquetas} descricao={descricao} selecionada={selecionada} onSelecionar={onSelecionar} camara={camara ?? camaraPeca} mover={mover} />
         </Suspense>
       </div>
       <p className="text-sm text-muted-foreground">

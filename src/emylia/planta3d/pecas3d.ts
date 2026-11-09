@@ -129,6 +129,17 @@ export function ajustarPeca(planta: Planta, p: PecaPlanta, o: { parede?: number;
   return corrigirDentro(poly, q);
 }
 
+/**
+ * A peça levada para um ponto do chão (centro em METROS, como no 3D) com as regras da planta: a de chão fica dentro da divisão e, perto de
+ * uma parede, vira-lhe as costas; a de parede encosta à parede mais próxima desse ponto (corre ao longo dela e passa o canto para a outra),
+ * à altura dada (m, nunca abaixo de 0). Portas e janelas do desenho antigo não se mexem aqui.
+ */
+export function moverPara(planta: Planta, p: PecaPlanta, xm: number, ym: number, alturaM?: number): ResAjuste {
+  if (ehAbertura(p)) return { ok: false, erro: "Portas e janelas mexem-se na planta." };
+  const base: PecaPlanta = { ...p, x: arred1(xm * 100 - p.w / 2), y: arred1(ym * 100 - p.h / 2), ...(alturaM !== undefined && ehDeParede(p) ? { alt: Math.max(0, Math.round(alturaM * 100)) } : {}) };
+  return ajustarPeca(planta, base, { orientar: !ehDeParede(p) });
+}
+
 /** Separa dois rectângulos rodados (SAT) com uma folga de `folga` cm: verdadeiro se se sobrepõem. */
 export function sobrepoe(a: Pick<PecaPlanta, "x" | "y" | "w" | "h" | "rot">, b: Pick<PecaPlanta, "x" | "y" | "w" | "h" | "rot">, folga = 1): boolean {
   const encolher = (p: typeof a) => ({ ...p, x: p.x + folga, y: p.y + folga, w: Math.max(1, p.w - 2 * folga), h: Math.max(1, p.h - 2 * folga) });

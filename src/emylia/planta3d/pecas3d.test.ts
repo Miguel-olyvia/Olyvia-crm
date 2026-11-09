@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { retangulo, type PecaPlanta, type Planta } from "../planta";
 import {
   FORA_DA_DIVISAO, ajustarPeca, avisosDaPlanta, cantosPeca, centroPeca, corrigirDentro, encostarParede, normalInteriorCm, normalizarAngulo, ocupacao, paredeMaisPertoCm,
-  paredeOposta, pecaDentro, poligonoDe, rodarPeca, sobrepoe, sobreposicoes,
+  moverPara, paredeOposta, pecaDentro, poligonoDe, rodarPeca, sobrepoe, sobreposicoes,
 } from "./pecas3d";
 
 // divisão de 3 m por 2 m: paredes 0 (cima), 1 (direita), 2 (baixo), 3 (esquerda)
@@ -138,5 +138,28 @@ describe("sobreposição e capacidade (avisos, não bloqueiam)", () => {
     const cheia = sala([pc({ id: "a", x: 10, y: 10, w: 140, h: 180 }), pc({ id: "b", x: 150, y: 10, w: 140, h: 180 })]);
     expect(ocupacao(cheia)).toBeCloseTo(0.84, 2);
     expect(avisosDaPlanta(cheia).some((m) => m.startsWith("Peças a mais"))).toBe(true);
+  });
+});
+
+describe("mover no 3D (moverPara: o ponto do chão em metros, com as regras da planta)", () => {
+  it("a peça de chão vai para o ponto e fica dentro da divisão", () => {
+    const r = moverPara(sala(), pc(), 1.5, 1.0);
+    expect(r.ok && centroPeca(r.peca)).toEqual({ x: 150, y: 100 });
+    const fora = moverPara(sala(), pc(), 5, 5);
+    expect(fora.ok && pecaDentro(poly, fora.peca)).toBe(true);
+  });
+  it("perto de uma parede, a peça de chão vira as costas à parede", () => {
+    const r = moverPara(sala(), pc({ rot: 90 }), 2.8, 1.0);
+    expect(r.ok && r.peca.rot).toBe(270);
+  });
+  it("a peça de parede só corre ao longo da parede, passa o canto e mantém (ou muda) a altura ao chão", () => {
+    const parede = pc({ mont: "parede", alt: 120, h: 10 });
+    const r = moverPara(sala(), parede, 1.0, 0.6);
+    expect(r.ok && [centroPeca(r.peca).y, r.peca.alt]).toEqual([5, 120]);
+    const canto = moverPara(sala(), parede, 2.95, 1.2);
+    expect(canto.ok && [centroPeca(canto.peca).x, canto.peca.rot]).toEqual([295, 270]);
+    const alto = moverPara(sala(), parede, 1.0, 0.1, 1.6);
+    expect(alto.ok && alto.peca.alt).toBe(160);
+    expect((moverPara(sala(), parede, 1.0, 0.1, -1) as { peca: PecaPlanta }).peca.alt).toBe(0);
   });
 });

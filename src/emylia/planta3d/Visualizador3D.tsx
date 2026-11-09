@@ -3,7 +3,7 @@
 // cada mockup é geometria paramétrica com a dimensão real do produto. Se o produto tiver `mockup3d.url` (GLB), carrega-se esse modelo e a
 // geometria paramétrica fica de reserva. Sem sombras (o protótipo não precisa) e com o ciclo de desenho sob pedido (frameloop demand).
 import { Component, Suspense, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import type { MaterialMockup, Mockup3D, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
@@ -33,6 +33,8 @@ export interface Visualizador3DProps {
   onSelecionar: (id: string | null) => void;
   /** Uma câmara pedida (metros, no mundo): as vistas da bancada (perspetiva ¾, perfil, frente, traseira, de cima, detalhe da bica). Muda ao mudar a chave. */
   camara?: { chave: string; pos: V3; alvo: V3 } | null;
+  /** Mover a peça escolhida arrastando-a no 3D (as regras e a gravação vêm da planta). Sem isto, só se escolhe. */
+  mover?: Mover3D;
 }
 
 type V3 = [number, number, number];
@@ -690,7 +692,85 @@ class ErroDoModelo extends Component<{ nome: string; w: number; d: number; h: nu
   }
 }
 
-function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
+/* ------------------------------------------------------------------ mover a peça escolhida directamente no 3D */
+/** O sítio de uma peça durante o arrasto (centro em metros, rotação em graus, altura da base ao chão em metros). */
+export interface LugarPeca3D { x: number; y: number; rot: number; altura: number }
+/**
+ * Mover no 3D com as MESMAS regras da planta (pecas3d.ts, `ajustarPeca`): `ajustar` diz onde a peça fica para um ponto do chão (peça de chão:
+ * dentro da divisão e encostada de costas à parede quando perto; peça de parede: só ao longo da parede, podendo passar o canto, à altura dada),
+ * ou null se não couber; `confirmar` grava (entra no Desfazer/Refazer como qualquer gravação da planta).
+ */
+export interface Mover3D {
+  ajustar: (id: string, x: number, y: number, altura?: number) => LugarPeca3D | null;
+  confirmar: (id: string, x: number, y: number, altura?: number) => void;
+}
+interface Arrasto { id: string; parede: boolean; x0: number; y0: number; alt0: number; py0: number; ultimo: { x: number; y: number; altura?: number }; lugar: LugarPeca3D | null }
+const CHAO = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+/** Metros de altura por píxel ao arrastar com Shift (peças de parede). */
+const ALTURA_POR_PIXEL = 0.004;
+
+/** A guia da parede durante o arrasto: uma faixa roxa rente à parede mais próxima (no chão e, nas peças de parede, à altura da peça). */
+function GuiaParede({ espaco, x, y, altura }: { espaco: Espaco; x: number; y: number; altura: number | null }) {
+  const w = useMemo(() => {
+    let melhor: { p: Parede; d: number } | null = null;
+    for (const p of espaco.paredes) {
+      const ax = p.a.x, ay = p.a.y, bx = p.b.x, by = p.b.y, l2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1, t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / l2));
+      const d = Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay)));
+      if (!melhor || d < melhor.d) melhor = { p, d };
+    }
+    return melhor?.p ?? null;
+  }, [espaco.paredes, x, y]);
+  if (!w) return null;
+  const c = comprimento(w), ang = -Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x), mx = (w.a.x + w.b.x) / 2, my = (w.a.y + w.b.y) / 2;
+  return (
+    <group position={[mx, 0, my]} rotation={[0, ang, 0]}>
+      <mesh position={[0, 0.006, 0]} renderOrder={3}><boxGeometry args={[c, 0.012, 0.06]} /><meshBasicMaterial color="#7c3aed" transparent opacity={0.6} depthWrite={false} /></mesh>
+      {altura !== null && <mesh position={[0, altura, 0]} renderOrder={3}><boxGeometry args={[c, 0.012, 0.06]} /><meshBasicMaterial color="#7c3aed" transparent opacity={0.6} depthWrite={false} /></mesh>}
+    </group>
+  );
+}
+
+interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void }
+function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, setArrasto }: PropsPeca) {
+  // durante o arrasto desta peça, o sítio é o que as regras dão para o ponto do rato
+  const lugar = arrasto?.id === original.id ? arrasto.lugar : null;
+  const p = lugar ? { ...original, x: lugar.x, y: lugar.y, rotacao: lugar.rot, altura: lugar.altura } : original;
+  const controls = useThree((s) => s.controls) as { enabled: boolean } | null;
+  const invalidate = useThree((s) => s.invalidate);
+  const largar = (confirmar: boolean) => {
+    if (!arrasto) return;
+    if (controls) controls.enabled = true;
+    if (confirmar && mover && arrasto.lugar) mover.confirmar(arrasto.id, arrasto.ultimo.x, arrasto.ultimo.y, arrasto.ultimo.altura);
+    setArrasto(null); invalidate();
+  };
+  const eventos = selecionada && mover ? {
+    onPointerDown: (e: ThreeEvent<PointerEvent>) => {
+      e.stopPropagation();
+      (e.target as unknown as Element).setPointerCapture?.(e.pointerId);
+      if (controls) controls.enabled = false; // a câmara não roda enquanto se arrasta
+      setArrasto({ id: original.id, parede: original.montagem === "parede", x0: original.x, y0: original.y, alt0: original.altura, py0: e.clientY, ultimo: { x: original.x, y: original.y }, lugar: { x: original.x, y: original.y, rot: original.rotacao, altura: original.altura } });
+    },
+    onPointerMove: (e: ThreeEvent<PointerEvent>) => {
+      if (arrasto?.id !== original.id || !mover) return;
+      e.stopPropagation();
+      // Shift numa peça de parede: muda só a altura ao chão; senão, o ponto do chão debaixo do rato
+      let ultimo: Arrasto["ultimo"];
+      if (arrasto.parede && e.shiftKey) ultimo = { x: arrasto.x0, y: arrasto.y0, altura: Math.max(0, arrasto.alt0 + (arrasto.py0 - e.clientY) * ALTURA_POR_PIXEL) };
+      else { const v = e.ray.intersectPlane(CHAO, new THREE.Vector3()); if (!v) return; ultimo = { x: v.x, y: v.z, altura: arrasto.ultimo.altura }; }
+      const l = mover.ajustar(original.id, ultimo.x, ultimo.y, ultimo.altura);
+      setArrasto({ ...arrasto, ultimo, lugar: l ?? arrasto.lugar });
+      invalidate();
+    },
+    onPointerUp: (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); (e.target as unknown as Element).releasePointerCapture?.(e.pointerId); largar(true); },
+    onPointerCancel: () => largar(false),
+  } : {};
+  // Esc cancela o arrasto (a peça volta ao sítio)
+  useEffect(() => {
+    if (arrasto?.id !== original.id) return;
+    const tecla = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); if (controls) controls.enabled = true; setArrasto(null); invalidate(); } };
+    window.addEventListener("keydown", tecla, true);
+    return () => window.removeEventListener("keydown", tecla, true);
+  }, [arrasto?.id, original.id, controls, setArrasto, invalidate]);
   const { tipo, altura, cor, url } = m.mockup3d;
   const reserva = <ErroDoModelo nome={m.nome} w={p.largura} d={p.profundidade} h={altura}><Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} generico={m.mockup3d.generico} /></ErroDoModelo>;
   const escolhido = modeloEscolhido(m);
@@ -704,7 +784,7 @@ function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: Prod
   const avisar = useCallback((chave: string, fonte: string) => setFontes((f) => (f[chave] === fonte ? f : { ...f, [chave]: fonte })), []);
   const fonte = [...new Set(Object.values(fontes))].join(" + ");
   return (
-    <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }}>
+    <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }} {...eventos}>
       <group ref={corpo} scale={[p.espelhada ? -1 : 1, 1, 1]}>
         <AvisarFonte.Provider value={avisar}>
           {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
@@ -886,7 +966,8 @@ function EstudioAmbiente() {
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover }: Visualizador3DProps) {
+  const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   return (
     <div role="img" aria-label={descricao} className="h-full w-full touch-none">
       {/* como o HTML: ACES com exposição 1,08, sombras suaves (PCF), ambiente de estúdio e fundo claro neutro */}
@@ -898,7 +979,8 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />
-        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} /> : null; })}
+        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} /> : null; })}
+        {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
       </Canvas>
     </div>
   );
