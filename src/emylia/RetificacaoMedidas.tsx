@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LINHAS, camposMedida, medida, nfmt, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
+import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 
@@ -32,6 +33,9 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             : d.fin.pago ? "Compare com as da visita e corrija o que for preciso. Ao aceitar, as Operações aprovam o plano e segue o contrato." : "Depois de o Financeiro validar o pagamento."}</p>
         </div>
       </div>
+
+      {/* 9/11: o Estúdio das medidas, pensado para o telemóvel no local (a planta, os botões grandes, aceitar) */}
+      <AbrirEstudioMedidas ctx={ctx} d={d} />
 
       {CM.length ? (
         <div className="overflow-hidden rounded-2xl border border-border">

@@ -17,6 +17,7 @@ import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RetificacaoMedidas } from "./RetificacaoMedidas";
+import { AbrirEstudioPlano } from "./estudioPlano/EstudioPlano";
 import { planoAprovadoDe, retificacaoAceite } from "./preparacaoObra";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
@@ -490,7 +491,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ...(semObraAMedir ? [] : [passoRetif]),
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
-        corpo: simples ? <ObraSimples {...ctx} d={d} /> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
+        // 9/11 (Rúben): o Estúdio do plano, por cima do negócio (o calendário por técnico, os alertas e aprovar)
+        corpo: simples ? <div className="space-y-6"><AbrirEstudioPlano ctx={ctx} d={d} /><ObraSimples {...ctx} d={d} /></div> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
       ...(passoContrato ? [passoContrato] : []),
       ...(simples ? [(() => {
         const r = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null, c = contaMateriais(d, r);
