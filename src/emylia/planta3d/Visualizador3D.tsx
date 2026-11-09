@@ -6,14 +6,14 @@ import { Component, Suspense, createContext, useCallback, useContext, useEffect,
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import type { MaterialMockup, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
+import type { MaterialMockup, Mockup3D, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
 import { libertarMateriais } from "./modelosHtml/util";
 import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml";
 import { construirPlaca, ehModeloPlaca } from "./modelosHtml/placas";
 import { construirBancada } from "./modelosHtml/bancada3d";
 import { VELAR_SPECS } from "./modelosHtml/lavaLoicas";
-import { USAR_GLB_GENERICOS, categoriaDoTipo, opcoesComOmissao, urlDoGenerico, type CategoriaGlb } from "./categoriasGlb";
+import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, urlDoGenerico, type CategoriaGlb } from "./categoriasGlb";
 import { USAR_GLB, lerGlb, montarGenerico, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
@@ -307,17 +307,17 @@ function TorneiraCozinha({ w, d, h, cor, mat, p }: { w: number; d: number; h: nu
 }
 
 /* ------------------------------------------------------------------ os genéricos por categoria (um GLB por categoria; categoriasGlb.ts) */
-type PropsParam = { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[]; opc?: OpcoesPeca };
-/** A categoria genérica que a peça usa (nenhuma se tiver o modelo do HTML, ou se o tipo não tiver categoria). */
-const categoriaDaPeca = (tipo: ProdutoModelo3D["tipo"], params?: ParamsMockup): CategoriaGlb | undefined =>
-  (USAR_GLB_GENERICOS && !(params && "html" in params && params.html) ? categoriaDoTipo(tipo) : undefined);
+type PropsParam = { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[]; opc?: OpcoesPeca; generico?: Mockup3D["generico"] };
+/** A categoria genérica que a peça usa (a do produto, escolhida pelo nome; senão a do tipo; nenhuma se tiver o modelo do HTML). */
+const categoriaDaPeca = (tipo: ProdutoModelo3D["tipo"], params?: ParamsMockup, generico?: Mockup3D["generico"]): CategoriaGlb | undefined =>
+  (USAR_GLB_GENERICOS && !(params && "html" in params && params.html) && params?.k !== "chapa" && params?.k !== "bancada" ? categoriaPorId(generico?.id) ?? categoriaDoTipo(tipo) : undefined);
 function AvisoFonte({ chave, fonte }: { chave: string; fonte: string }) { useFonte(chave, fonte); return null; }
 /** O GLB genérico da categoria com as medidas, a cor e as opções desta peça (a geometria é partilhada por todos os produtos da categoria). */
-function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc }: PropsParam & { c: CategoriaGlb }) {
+function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam & { c: CategoriaGlb }) {
   const url = urlDoGenerico(c.id);
   useEffect(() => { reterGlb(url); return () => soltarGlb(url); }, [url]);
   const cena = lerGlb(url);
-  const gen = opc?.gen, corFinal = typeof gen?.cor === "string" ? gen.cor : cor, chave = JSON.stringify(opcoesComOmissao(c, tipo, gen));
+  const gen = opc?.gen, corFinal = typeof gen?.cor === "string" ? gen.cor : cor, chave = JSON.stringify(opcoesComOmissao(c, tipo, { ...generico?.o, ...gen }));
   const metal = mat?.metalness, rugos = mat?.roughness;
   const t = useMemo(() => montarGenerico(cena, c, { w, d, h, o: JSON.parse(chave) as Record<string, string | boolean> }, corFinal, metal === undefined ? undefined : { metalness: metal, roughness: rugos ?? 0.4 }), [cena, c, w, d, h, chave, corFinal, metal, rugos]);
   useEffect(() => () => t.libertar(), [t]);
@@ -328,7 +328,7 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc }: PropsParam & { c: Cate
 }
 /** O mockup de um tipo: o GLB genérico da categoria (com o paramétrico de sempre de reserva) ou, sem categoria, o paramétrico. */
 function Parametrico(props: PropsParam) {
-  const c = categoriaDaPeca(props.tipo, props.params);
+  const c = categoriaDaPeca(props.tipo, props.params, props.generico);
   if (!c) return <ParametricoAntigo {...props} />;
   return (
     <ReservaGlb reserva={<><ParametricoAntigo {...props} /><AvisoFonte chave="generico" fonte="mockup paramétrico (o GLB genérico falhou)" /></>}>
@@ -669,7 +669,7 @@ function modeloEscolhido(m: ProdutoModelo3D): string | null {
   if (pr && "html" in pr && pr.html) return `Modelo do HTML: ${pr.html.modelo} · ${pr.html.acab}${pr.html.exacto === false ? " (o mais parecido: o HTML não tem este produto)" : ""}`;
   if (pr?.k === "chapa") return `Modelo do HTML: chapa ${pr.series} · ${pr.tone}`;
   if (pr?.k === "bancada") return "Modelo do HTML: bancada composta";
-  const c = categoriaDaPeca(m.mockup3d.tipo, pr);
+  const c = categoriaDaPeca(m.mockup3d.tipo, pr, m.mockup3d.generico);
   if (c) return `Modelo genérico: ${c.rotulo}`;
   return (["lava_loica", "placa", "torneira_cozinha", "tampo", "bancada"] as string[]).includes(m.mockup3d.tipo) ? "Sem modelo do HTML (o HTML não tem este produto)" : null;
 }
@@ -692,7 +692,7 @@ class ErroDoModelo extends Component<{ nome: string; w: number; d: number; h: nu
 
 function Peca({ p, m, etiquetas, selecionada, onSel }: { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void }) {
   const { tipo, altura, cor, url } = m.mockup3d;
-  const reserva = <ErroDoModelo nome={m.nome} w={p.largura} d={p.profundidade} h={altura}><Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} /></ErroDoModelo>;
+  const reserva = <ErroDoModelo nome={m.nome} w={p.largura} d={p.profundidade} h={altura}><Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} generico={m.mockup3d.generico} /></ErroDoModelo>;
   const escolhido = modeloEscolhido(m);
   const nf = (n: number) => Math.round(n * 100).toString();
   const base = p.altura; // altura da base ao chão (peças de parede e peças sobre a bancada)

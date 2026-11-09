@@ -40,8 +40,11 @@ describe("só os produtos com o modelo 3D do HTML", () => {
     fireEvent.click(screen.getByRole("button", { name: /Mostrar mais/ }));
     const nomes = nomesNaLista().join("\n");
     expect(nomes).toMatch(/VELAR 1 CUBA 50/);
-    for (const fora of [/LEMIS/, /TEKA/, /AEG/, /SOPHIE/, /Bruma/, /Frigorífico/, /Forno/, /Exaustor/, /BIANCO ORO/, /pladur/]) expect(nomes).not.toMatch(fora);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar no catálogo" }), { target: { value: "teka" } });
+    // os «3D parecido» (lava-loiça LEMIS, placas TEKA e AEG) e os tampos fora das séries do HTML continuam fora
+    for (const fora of [/LEMIS/, /CRISTAL PRETO/, /PLACA COM EXAUSTOR/, /BIANCO ORO/, /pladur/]) expect(nomes).not.toMatch(fora);
+    // com MOSTRAR_GENERICOS, os que têm modelo genérico (frigoríficos, exaustores, misturadoras sem modelo do HTML) aparecem depois dos do HTML
+    if (MOSTRAR_GENERICOS) expect(nomes.indexOf("VELAR 1 CUBA 50")).toBeLessThan(Math.max(nomes.search(/Frigorifico|Exaustor|SOPHIE|Armário Inferior/), 0) || Infinity);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar no catálogo" }), { target: { value: "lemis" } });
     expect(screen.getByText("Nenhum produto serve este espaço com este filtro.")).toBeInTheDocument();
   });
 

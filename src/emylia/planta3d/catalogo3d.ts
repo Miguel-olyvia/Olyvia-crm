@@ -8,7 +8,7 @@
 import type { TipoPeca } from "../planta";
 import type { TipoEspaco } from "./modelo";
 import { modeloHtmlDoProduto } from "./htmlDoCatalogo";
-import { categoriaDoTipo } from "./categoriasGlb";
+import { categoriaDoTipo, categoriaPorId, opcoesComOmissao } from "./categoriasGlb";
 
 export type TipoMockup =
   | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
@@ -41,7 +41,11 @@ export type ParamsMockup =
   | { k: "bancada"; cfg: import("./bancada").ConfigBancada }
   /** um tampo do catálogo de uma série Coverlam do HTML: a chapa com a imagem do fabricante */
   | { k: "chapa"; series: string; tone: string };
-export interface Mockup3D { tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup }
+export interface Mockup3D {
+  tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup;
+  /** o modelo genérico da categoria (categoriasGlb.ts), escolhido pelo tipo e pelo nome, com as omissões das opções que o nome dá */
+  generico?: { id: string; o: Record<string, string | boolean> };
+}
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
 export interface ProdutoModelo3D {
   produtoId: string; nome: string; tipo: TipoMockup; dimensoes: Dimensoes; mockup3d: Mockup3D; marca?: string; fornecedor?: string; custo?: number; categoria: string;
@@ -253,7 +257,7 @@ export const MOSTRAR_GENERICOS = true;
 /** O produto usa um modelo genérico da sua categoria (não tem o do HTML e o tipo tem categoria). */
 export function temModeloGenerico(m: ProdutoModelo3D): boolean {
   const pr = m.mockup3d.params;
-  return !(pr && "html" in pr && pr.html) && pr?.k !== "chapa" && pr?.k !== "bancada" && !!categoriaDoTipo(m.mockup3d.tipo);
+  return !(pr && "html" in pr && pr.html) && pr?.k !== "chapa" && pr?.k !== "bancada" && !!(categoriaPorId(m.mockup3d.generico?.id) ?? categoriaDoTipo(m.mockup3d.tipo, m.nome));
 }
 
 /** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
@@ -277,7 +281,9 @@ export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], ur
     params = { k: "torneira", estilo: t.estilo, altura: t.altura / 1000, saida: t.saida / 1000, alcance: t.alcance / 1000, base: t.base / 1000 };
     d = { larguraCm: t.base / 10, profundidadeCm: (t.alcance + t.base / 2) / 10, alturaCm: t.altura / 10, deNome: true };
   }
-  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(urls[p.id] ? { url: urls[p.id] } : {}) };
+  const cg = !params || (params.k === "torneira" && !params.html) ? categoriaDoTipo(tipo, p.n) : undefined;
+  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(urls[p.id] ? { url: urls[p.id] } : {}),
+    ...(cg ? { generico: { id: cg.id, o: opcoesComOmissao(cg, tipo, {}, p.n) } } : {}) };
   // a altura ao chão: o lava-loiça fica com o rebordo por baixo do tampo (a 88,8 cm), a placa e a torneira em cima dele (90 cm)
   const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : e.alt;
   return {

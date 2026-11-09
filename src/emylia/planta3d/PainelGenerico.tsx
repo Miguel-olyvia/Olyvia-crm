@@ -1,6 +1,6 @@
 // Protótipo (visualizador 3D): o painel da peça com modelo GENÉRICO (categoriasGlb.ts): a cor e as opções da categoria (depósito, coluna,
 // porta de abrir ou de correr, bica extraível…). Grava em `opc.gen` da peça; as medidas são as da peça na planta.
-import { USAR_GLB_GENERICOS, categoriaDoTipo, opcoesComOmissao } from "./categoriasGlb";
+import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao } from "./categoriasGlb";
 import type { ProdutoModelo3D } from "./catalogo3d";
 import type { OpcoesPeca } from "./modelo";
 
@@ -12,9 +12,9 @@ export interface PainelGenericoProps {
 
 export function PainelGenerico({ modelo, opc, onGen }: PainelGenericoProps) {
   const pr = modelo?.mockup3d.params;
-  const c = modelo && USAR_GLB_GENERICOS && !(pr && "html" in pr && pr.html) ? categoriaDoTipo(modelo.mockup3d.tipo) : undefined;
+  const c = modelo && USAR_GLB_GENERICOS && !(pr && "html" in pr && pr.html) ? categoriaPorId(modelo.mockup3d.generico?.id) ?? categoriaDoTipo(modelo.mockup3d.tipo, modelo.nome) : undefined;
   if (!modelo || !c) return null;
-  const gen = opc?.gen ?? {}, valores = opcoesComOmissao(c, modelo.mockup3d.tipo, gen);
+  const gen = opc?.gen ?? {}, valores = opcoesComOmissao(c, modelo.mockup3d.tipo, { ...modelo.mockup3d.generico?.o, ...gen }, modelo.nome);
   const mudar = (id: string, v: string | boolean) => onGen({ ...gen, [id]: v });
   const cor = typeof gen.cor === "string" ? gen.cor : modelo.mockup3d.cor;
   return (
