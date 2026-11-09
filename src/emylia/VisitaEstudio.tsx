@@ -115,6 +115,10 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     let t: ReturnType<typeof setTimeout> | undefined;
     const gravar = () => {
       const local = projetoDoEstudioPara(ref.current.d.id);
+      // 9/11 (o «statement timeout»): só se grava no negócio quando o projeto mudou mesmo (a hora sozinha não conta)
+      const noNegocio = projetoDoNegocio(ref.current.d.f);
+      const igual = !!local && !!noNegocio && JSON.stringify({ ...local, gravadoEm: 0 }) === JSON.stringify({ ...noNegocio, gravadoEm: 0 });
+      if (local && igual) { ultimo.current = Math.max(ultimo.current, local.gravadoEm ?? 0); return local; }
       if (local && (local.gravadoEm ?? 0) > ultimo.current) {
         ultimo.current = local.gravadoEm ?? Date.now();
         const { ctx: c, d: n } = ref.current;

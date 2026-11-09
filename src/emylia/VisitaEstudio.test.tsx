@@ -41,7 +41,8 @@ describe("a caminho", () => {
 
 describe("o Estúdio na Visita", () => {
   it("o projeto do Estúdio deste browser grava-se no negócio quando é mais recente", () => {
-    localStorage.setItem("olyvia.estudio.v1", JSON.stringify(projeto({ gravadoEm: 5000 })));
+    // mudou de verdade no Estúdio (a base passou a ser outra), e mais recente
+    localStorage.setItem("olyvia.estudio.v1", JSON.stringify(projeto({ gravadoEm: 5000, escolhas: { b: "bas-ard-c", s: "san-nexo-s" } })));
     const d = negocio({ estudio: JSON.stringify(projeto({ gravadoEm: 1000 })) });
     const { ctx, campo, run } = contexto(d);
     render(<EstudioNaVisita ctx={ctx} d={d} />);
@@ -90,5 +91,16 @@ describe("o plano de obra estimado", () => {
     const d = negocio();
     render(<PlanoEstimado ctx={contexto(d).ctx} d={d} />);
     expect(screen.getByText(/Decida as peças no Estúdio/)).toBeInTheDocument();
+  });
+});
+
+describe("o mesmo projeto não se grava duas vezes (9/11)", () => {
+  it("o projeto deste browser igual ao do negócio, só com outra hora, não se grava de novo", () => {
+    localStorage.setItem("olyvia.estudio.v1", JSON.stringify(projeto({ gravadoEm: 9000 })));
+    const d = negocio({ estudio: JSON.stringify(projeto({ gravadoEm: 1000 })) });
+    const { ctx, campo } = contexto(d);
+    render(<EstudioNaVisita ctx={ctx} d={d} />);
+    fireEvent.focus(window);
+    expect(campo).not.toHaveBeenCalledWith(3, "estudio", expect.anything());
   });
 });

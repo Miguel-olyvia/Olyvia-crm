@@ -7,7 +7,7 @@
 //  5. Proposta: as necessidades e o orçamento saem das duas plantas; o comercial ajusta.
 // «Mostrar ao cliente» abre a apresentação (tablet): o projeto mostra-se e não se envia (é propriedade da empresa); o projeto só vai para o
 // portal depois de a proposta ser aceite. Tudo fica neste browser (localStorage).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,9 @@ const SEM_PRODUTO: Record<TipoPeca, { cor: string; z0: number; z1: number }> = {
   forno: { cor: "#9aa0a6", z0: 0, z1: 60 }, frigorifico: { cor: "#d9dcdf", z0: 0, z1: 200 }, maquina: { cor: "#c9ccd0", z0: 0, z1: 85 },
   exaustor: { cor: "#9aa0a6", z0: 150, z1: 210 }, armario: { cor: "#e8e3da", z0: 0, z1: 210 },
 };
+
+/** O projeto sem a hora da gravação (para saber se mudou mesmo). */
+const semHora = (x: Projeto) => JSON.stringify({ ...x, gravadoEm: undefined });
 
 function lerGuardado(): Projeto {
   try {
@@ -84,13 +87,30 @@ export default function EstudioProjeto() {
   const [aberta, setAberta] = useState<string | null>(null);
   const [mostrar, setMostrar] = useState(false);
   const [aviso, setAviso] = useState("");
-  useEffect(() => { try { localStorage.setItem(CHAVE, JSON.stringify({ ...p, gravadoEm: Date.now() })); } catch { /* fica só em memória */ } }, [p]);
+  // 9/11 (Rúben: «ao trocar o produto a lista faz refresh várias vezes»): com dois separadores abertos, gravar sempre com a hora nova
+  // fazia-os mandar o projeto um ao outro sem parar. Grava-se só o que mudou (sem contar a hora) e ignora-se o que chega igual.
+  const gravado = useRef("");
+  const pRef = useRef(p);
+  pRef.current = p;
+  useEffect(() => {
+    const conteudo = semHora(p);
+    if (conteudo === gravado.current) return;
+    gravado.current = conteudo;
+    try { localStorage.setItem(CHAVE, JSON.stringify({ ...p, gravadoEm: Date.now() })); } catch { /* fica só em memória */ }
+  }, [p]);
   // 5/11: com o Estúdio aberto em dois separadores (ou aberto de novo pela Visita), o que um grava passa para o outro, em vez de o
   // separador mais antigo gravar por cima (perdia-se o negócio de onde veio e o «Voltar ao negócio»)
   useEffect(() => {
     const aoMudar = (e: StorageEvent) => {
       if (e.key !== CHAVE || !e.newValue) return;
-      try { const novo = JSON.parse(e.newValue) as Projeto; if (novo?.antes?.paredes && novo.depois?.paredes) setP(novo); } catch { /* ignora o que não se percebe */ }
+      try {
+        const novo = JSON.parse(e.newValue) as Projeto;
+        if (!novo?.antes?.paredes || !novo.depois?.paredes) return;
+        const conteudo = semHora(novo);
+        if (conteudo === semHora(pRef.current)) return; // o mesmo projeto: nada a fazer (e nada a gravar de volta)
+        gravado.current = conteudo;
+        setP(novo);
+      } catch { /* ignora o que não se percebe */ }
     };
     window.addEventListener("storage", aoMudar);
     return () => window.removeEventListener("storage", aoMudar);
