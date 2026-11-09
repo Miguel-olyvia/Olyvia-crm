@@ -186,10 +186,10 @@ export function decidirJustificacaoFalta(
 
 /* ---- Desconto ---- */
 
-// A regra vive em `@/lib/hr/descontoFalta` e e a MESMA do processamento salarial: o cartao e o processamento
+// A regra vive em `hooks/faltasReal` (que delega em `@/lib/hr/descontoFalta`) e e a MESMA do processamento salarial: o cartao e o processamento
 // dao sempre o mesmo numero para a mesma falta.
-export { descontoDaFalta, totalDeDescontos } from "@/lib/hr/descontoFalta";
-export type { RazaoDesconto, DescontoDaFalta, FaltaParaDesconto } from "@/lib/hr/descontoFalta";
+export { descontoDaFalta, totalDeDescontos } from "@/components/rh-exemplo/hooks/faltasReal";
+export type { RazaoDesconto, DescontoDaFalta, FaltaParaDesconto } from "@/components/rh-exemplo/hooks/faltasReal";
 
 const arredondar = (valor: number): number => Math.round(valor * 100) / 100;
 

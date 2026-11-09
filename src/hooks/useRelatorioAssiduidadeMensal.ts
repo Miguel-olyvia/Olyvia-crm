@@ -56,6 +56,20 @@ import type { RealizadoComCorreccao } from "@/hooks/useAssiduidadeDaPessoa";
 import { chaveDeDesvios, contarDia, linhaDaChaveDeDesvios, margemDoDia, type DesvioDoDia, type DesvioLido, type VersaoMargem } from "@/lib/hr/desviosRelatorio";
 import { desvioLidoDaLinha, rpcDeDesviosIndisponivel } from "@/lib/hr/desviosBase";
 import { lerMargemPartilhada, listarDesvios } from "@/lib/hr/desviosRpc";
+import {
+  SEM_HORAS_EXTRA_DO_PERIODO,
+  EXTRA_POR_ORIGEM_VAZIO,
+  extraDoDia,
+  fonteDoPeriodo,
+  linhasPorDia,
+  modoDoDia,
+  pendentesDoPeriodo,
+  type ExtraPorOrigem,
+  type FonteHorasExtra,
+  type HorasExtraDoPeriodo,
+  type LinhaHoraExtraPeriodo,
+} from "@/lib/hr/horasExtraRelatorio";
+import { lerHorasExtraDoPeriodo } from "@/lib/hr/horasExtraContagemRpc";
 
 const COLUNAS_REALIZADO =
   "id, pessoa_id, organization_id, vinculo_id, local_id, planeado_id, data, hora_inicio, " +
@@ -163,6 +177,23 @@ export interface DiaRelatorioMensal {
   /** O desvio do dia (estado e decisao); `null`/ausente = sem desvio. `a_validar` conta provisoriamente o planeado. */
   desvio?: DesvioDoDia | null;
   /**
+   * HORAS EXTRA APROVADAS. So existe (`"aprovadas"`) quando o interruptor da organizacao esta ligado NESTE dia: `horasExtraMinutos`
+   * e entao o que esta CONFIRMADO em `pessoas_horas_extra` (cortado pelo limite do dia). Ausente = modo bruto, como sempre.
+   */
+  modoExtra?: "aprovadas";
+  /** Modo aprovadas: os minutos que contam, por origem (o escalao de pagamento vem da origem). */
+  extraPorOrigem?: ExtraPorOrigem;
+  /** Modo aprovadas: horas extra pendentes do dia (bloqueiam o fecho). */
+  extraPendenteMinutos?: number;
+  /** Modo aprovadas: confirmado mas cortado pelo limite do dia. */
+  extraCortadoMinutos?: number;
+  /** Modo aprovadas: banco de horas (nao conta; so se mostra). */
+  extraBancoMinutos?: number;
+  /** Modo aprovadas: confirmado num dia de ausencia de dia inteiro; nao se paga (o dia nao entra nos totais). */
+  extraNaoContadoMinutos?: number;
+  /** Modo aprovadas: excesso do dia sem hora extra nenhuma («por detetar»): nao paga. */
+  excessoSemHoraExtraMinutos?: number;
+  /**
    * Quanto do EXCEDENTE caiu no periodo nocturno (22:00-07:00, Codigo do
    * Trabalho art. 223) -- e nao quanto do realizado do dia caiu de noite.
    *
@@ -243,6 +274,37 @@ export interface TotaisRelatorioMensal {
    * e mais antigo do que os desvios e recalcula-se antes de gravar.
    */
   desviosChave?: string;
+  /**
+   * HORAS EXTRA APROVADAS. De onde vem `horasExtraMinutos`: `bruto` (interruptor desligado: o excesso sobre o planeado, como
+   * sempre), `aprovadas` (so o confirmado) ou `misto` (a data do interruptor cai a meio do periodo). `horasExtraMinutos` continua
+   * a querer dizer «o que conta».
+   */
+  horasExtraFonte?: FonteHorasExtra;
+  /**
+   * A assinatura das horas extra que o calculo leu (vazia = sem linhas, ou nao se leu: recusa, base sem a RPC). O fecho compara-a
+   * com a da base ANTES de fechar e so a envia (`horas_extra_assinatura`) quando o calculo foi em modo aprovadas/misto.
+   */
+  horasExtraChave?: string;
+  /**
+   * O interruptor que o calculo leu: a data (`null` = desligado). `undefined` = nao se sabe (recusa ou erro de leitura). O fecho
+   * volta a le-lo: se mudou depois do calculo (ligado com o ecra aberto), o calculo em bruto nao se grava.
+   */
+  horasExtraAprovacaoDesde?: string | null;
+  /** Sem permissao para ler as horas extra (42501): nao bloqueia, mas a base pode recusar o fecho se a contagem estiver ligada. */
+  horasExtraRecusadas?: boolean;
+  /** Minutos confirmados em dias de ausencia de dia inteiro: nao se pagam (o dia nao entra nos totais). */
+  horasExtraAprovadasNaoContadasMinutos?: number;
+  /** Horas extra pendentes (origens que contam) em dias de modo aprovadas: bloqueiam o fecho. */
+  horasExtraPendentes?: number;
+  horasExtraPendentesMinutos?: number;
+  /** Dias de modo aprovadas com excesso e sem hora extra («excesso por detetar») e os minutos desse excesso. */
+  excessoSemHoraExtra?: number;
+  excessoSemHoraExtraMinutos?: number;
+  /** Confirmado mas cortado pelo limite do dia, e banco de horas (nao conta), so para mostrar. */
+  horasExtraCortadasMinutos?: number;
+  horasExtraBancoMinutos?: number;
+  /** As horas extra nao se leram (erro tecnico; uma recusa de permissao nao conta): o calculo estaria sem elas. O processamento e o fecho bloqueiam com motivo escrito. */
+  horasExtraNaoLidas?: boolean;
   /** Minutos de excedente (realizado, ja que o planeado e zero) em dias de feriado. */
   minutosFeriadoTrabalhado: number;
   /** Idem, em dias de descanso (folga propria da pessoa). */
@@ -362,6 +424,34 @@ async function carregarDesvios(orgId: string, pessoaId: string, de: string, ate:
   }
 }
 
+/** As horas extra aprovadas do periodo de UMA pessoa (`rpc_hr_horas_extra_do_periodo`). */
+interface HorasExtraLidas {
+  dados: HorasExtraDoPeriodo;
+  /** Nao se leram por erro tecnico ou resposta invalida: nunca se calcula em silencio (bloqueia o fecho). */
+  naoLidas: boolean;
+  /** Recusa de permissao (42501): nao se sabe se o interruptor esta ligado; NAO bloqueia, a base decide no fecho. */
+  recusada: boolean;
+  /** A base ainda nao tem a RPC (migration por aplicar): modo bruto, como hoje. */
+  indisponivel: boolean;
+  /** Falha que NAO e recusa: tambem torna a leitura do relatorio incompleta. */
+  erro: boolean;
+}
+
+const SEM_HORAS_EXTRA: HorasExtraLidas = { dados: SEM_HORAS_EXTRA_DO_PERIODO, naoLidas: false, recusada: false, indisponivel: false, erro: false };
+const SEM_LINHAS_DO_DIA: readonly LinhaHoraExtraPeriodo[] = [];
+
+async function carregarHorasExtra(orgId: string, pessoaId: string, de: string, ate: string): Promise<HorasExtraLidas> {
+  try {
+    return { ...SEM_HORAS_EXTRA, dados: await lerHorasExtraDoPeriodo(orgId, pessoaId, de, ate) };
+  } catch (erro) {
+    if (rpcDeDesviosIndisponivel(erro, "rpc_hr_horas_extra_do_periodo")) return { ...SEM_HORAS_EXTRA, indisponivel: true };
+    // Recusa de permissao: NAO bloqueia (como a margem recusada); com o interruptor ligado a base recusa o fecho sem a assinatura.
+    if (isPermissionError(erro)) return { ...SEM_HORAS_EXTRA, recusada: true };
+    captureFlowError(erro, "hr-relatorio-assiduidade-mensal-load");
+    return { ...SEM_HORAS_EXTRA, naoLidas: true, erro: true };
+  }
+}
+
 async function carregar<T>(
   tabela: string,
   colunas: string,
@@ -471,6 +561,7 @@ export function useRelatorioAssiduidadeMensal(
   );
   const [feriados, setFeriados] = useState<IndiceFeriados>(() => indexarFeriados([]));
   const [desviosDoPeriodo, setDesviosDoPeriodo] = useState<DesviosDoPeriodo>(SEM_DESVIOS);
+  const [horasExtraLidas, setHorasExtraLidas] = useState<HorasExtraLidas>(SEM_HORAS_EXTRA);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   // Uma falha NAO por permissao (rede, base) em qualquer leitura, ou a excepcao geral do carregamento: o relatorio
@@ -496,6 +587,7 @@ export function useRelatorioAssiduidadeMensal(
       setObras(vazio<ObraHoras>());
       setScheduleSettings(vazio<ScheduleSettingsTimezone>());
       setDesviosDoPeriodo(SEM_DESVIOS);
+      setHorasExtraLidas(SEM_HORAS_EXTRA);
       setErroDeLeitura(false);
       setFeriadosRecusados(false);
       setLoading(false);
@@ -513,6 +605,7 @@ export function useRelatorioAssiduidadeMensal(
         osFeriados,
         asScheduleSettings,
         osDesvios,
+        asHorasExtra,
       ] = await Promise.all([
         carregar<RealizadoComCorreccao>("pessoas_horario_realizado", COLUNAS_REALIZADO, (q) =>
           q
@@ -554,6 +647,7 @@ export function useRelatorioAssiduidadeMensal(
           q.eq("organization_id", orgId),
         ),
         carregarDesvios(orgId, pessoaId, de, ate),
+        carregarHorasExtra(orgId, pessoaId, de, ate),
       ]);
 
       if (pedido !== ultimoPedido.current) return;
@@ -567,10 +661,11 @@ export function useRelatorioAssiduidadeMensal(
       setFeriadosRecusados(osFeriados.recusado);
       setScheduleSettings(asScheduleSettings);
       setDesviosDoPeriodo(osDesvios);
+      setHorasExtraLidas(asHorasExtra);
       setErroDeLeitura(
         [oRealizado, asFaltas, oPlaneado, osDiasDeAusencia, osTiposDeAusencia, asObras, osFeriados, asScheduleSettings].some(
           (s) => s.erro === true,
-        ) || osDesvios.erro,
+        ) || osDesvios.erro || asHorasExtra.erro,
       );
     } catch (e) {
       captureFlowError(e, "hr-relatorio-assiduidade-mensal-load");
@@ -621,6 +716,7 @@ export function useRelatorioAssiduidadeMensal(
     const diasComFaltaAnulada = new Set(faltas.linhas.filter((f) => f.estado === "anulada").map((f) => f.data));
 
     const hoje = isoDeHoje(timezoneDaOrganizacao);
+    const horasExtraPorDia = linhasPorDia(horasExtraLidas.dados.linhas);
 
     const linhas: DiaRelatorioMensal[] = [];
     for (const iso of diasDoPeriodo(de, ate)) {
@@ -695,6 +791,18 @@ export function useRelatorioAssiduidadeMensal(
         }),
       );
       const realizadoIntervalosDoDia = intervalosOrdenados(realizadoDoDia);
+      const margemMin = margemDoDia(desviosDoPeriodo.versoes, iso);
+      // Horas extra aprovadas: com o interruptor ligado NESTE dia, o extra e so o que esta confirmado na tabela (cortado pelo
+      // limite do dia). Desligado (ou dia anterior a data), `extra.contaMin` e 0 e o modo `bruto` deixa tudo como sempre.
+      const modoExtra = modoDoDia(horasExtraLidas.dados.aprovacaoDesde, iso);
+      const extra = extraDoDia({
+        modo: modoExtra,
+        estado,
+        planeadoMinutos,
+        realizadoMinutos,
+        linhas: horasExtraPorDia.get(iso) ?? SEM_LINHAS_DO_DIA,
+        margemMin,
+      });
       // Margem de tempo: SEM margem configurada isto devolve o realizado e o excesso em bruto (o resultado de sempre).
       const { contadoMinutos, extraValidadoMinutos, desvio } = contarDia({
         estado,
@@ -703,10 +811,10 @@ export function useRelatorioAssiduidadeMensal(
         temFalta: faltasDoDia.length > 0,
         planeadoIntervalos: planeadoIntervalosRelatorio,
         realizadoIntervalos: realizadoIntervalosDoDia,
-        margemMin: margemDoDia(desviosDoPeriodo.versoes, iso),
+        margemMin,
         desvio: desviosDoPeriodo.porDia.get(iso) ?? null,
-        // PONTO DE LIGACAO (tarefa a parte): as horas extra aprovadas (`pessoas_horas_extra`) do dia entram aqui.
-        extraAprovadoMin: 0,
+        extraAprovadoMin: extra.contaMin,
+        modoExtra,
       });
       const horasExtraMinutos = extraValidadoMinutos;
       // Desconto por falta: as faltas marcadas e, num dia sem registo (sem falta e sem picagem), uma falta nao justificada
@@ -793,7 +901,21 @@ export function useRelatorioAssiduidadeMensal(
         contadoMinutos,
         extraValidadoMinutos,
         desvio,
-        horasExtraNoturnasMinutos: Math.min(horasExtraMinutos, minutosNoturnosDoExcedente),
+        horasExtraNoturnasMinutos:
+          modoExtra === "aprovadas"
+            ? Math.min(horasExtraMinutos, extra.contaNocturnoMin)
+            : Math.min(horasExtraMinutos, minutosNoturnosDoExcedente),
+        ...(modoExtra === "aprovadas"
+          ? {
+              modoExtra,
+              extraPorOrigem: extra.porOrigem,
+              extraPendenteMinutos: extra.pendenteMin,
+              extraCortadoMinutos: extra.cortadoMin,
+              extraBancoMinutos: extra.bancoMin,
+              extraNaoContadoMinutos: extra.confirmadoSemContarMin,
+              excessoSemHoraExtraMinutos: extra.excessoSemHoraExtraMin,
+            }
+          : {}),
         faltasParaDesconto,
         ...(limiteFaltaMinutos !== undefined ? { limiteFaltaMinutos } : {}),
         ...(noturnosPorFaixa ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
@@ -812,6 +934,7 @@ export function useRelatorioAssiduidadeMensal(
     timezoneDaOrganizacao,
     faixasNoturnas,
     desviosDoPeriodo,
+    horasExtraLidas,
     de,
     ate,
   ]);
@@ -887,12 +1010,26 @@ export function useRelatorioAssiduidadeMensal(
             // descontar. `contaParaTotais` exclui so "ausencia", e nenhum dia
             // pode ser "feriado"/"descanso" e "ausencia" ao mesmo tempo, mas
             // mantem-se a guarda por consistencia com os outros totais.
+            // Modo aprovadas: o escalao vem da ORIGEM da hora extra confirmada (feriado, descanso; diaria e semanal sao dia util),
+            // nao do estado do dia. Modo bruto: o realizado do dia, como sempre.
             minutosFeriadoTrabalhado:
               acc.minutosFeriadoTrabalhado +
-              (contaParaTotais && dia.estado === "feriado" ? dia.realizadoMinutos : 0),
+              (!contaParaTotais
+                ? 0
+                : dia.modoExtra === "aprovadas"
+                  ? (dia.extraPorOrigem ?? EXTRA_POR_ORIGEM_VAZIO).feriado
+                  : dia.estado === "feriado"
+                    ? dia.realizadoMinutos
+                    : 0),
             minutosDescansoTrabalhado:
               acc.minutosDescansoTrabalhado +
-              (contaParaTotais && dia.estado === "descanso" ? dia.realizadoMinutos : 0),
+              (!contaParaTotais
+                ? 0
+                : dia.modoExtra === "aprovadas"
+                  ? (dia.extraPorOrigem ?? EXTRA_POR_ORIGEM_VAZIO).descanso
+                  : dia.estado === "descanso"
+                    ? dia.realizadoMinutos
+                    : 0),
           };
         },
         {
@@ -942,8 +1079,27 @@ export function useRelatorioAssiduidadeMensal(
         if (dia.limiteFaltaMinutos !== undefined) limiteFaltaPorDia[dia.iso] = dia.limiteFaltaMinutos;
       }
 
+      // Horas extra aprovadas. Sem o interruptor (ou antes da data) a fonte e `bruto` e nada disto altera os totais de sempre.
+      const horasExtraFonte = fonteDoPeriodo(dias.map((dia) => dia.modoExtra ?? "bruto"));
+      const pendentes = pendentesDoPeriodo(horasExtraLidas.dados);
+      const diasComExcesso = dias.filter((dia) => dia.estado !== "ausencia" && (dia.excessoSemHoraExtraMinutos ?? 0) > 0);
+      const somaDosDias = (campo: "extraCortadoMinutos" | "extraBancoMinutos" | "excessoSemHoraExtraMinutos"): number =>
+        dias.reduce((soma, dia) => soma + (dia.estado !== "ausencia" ? (dia[campo] ?? 0) : 0), 0);
+
       return {
         ...acumulado,
+        horasExtraFonte,
+        horasExtraChave: horasExtraLidas.dados.assinatura ?? "",
+        horasExtraAprovacaoDesde: horasExtraLidas.recusada || horasExtraLidas.naoLidas ? undefined : horasExtraLidas.dados.aprovacaoDesde,
+        horasExtraRecusadas: horasExtraLidas.recusada,
+        horasExtraAprovadasNaoContadasMinutos: dias.reduce((soma, dia) => soma + (dia.extraNaoContadoMinutos ?? 0), 0),
+        horasExtraPendentes: pendentes.n,
+        horasExtraPendentesMinutos: pendentes.minutos,
+        excessoSemHoraExtra: diasComExcesso.length,
+        excessoSemHoraExtraMinutos: somaDosDias("excessoSemHoraExtraMinutos"),
+        horasExtraCortadasMinutos: somaDosDias("extraCortadoMinutos"),
+        horasExtraBancoMinutos: somaDosDias("extraBancoMinutos"),
+        horasExtraNaoLidas: horasExtraLidas.naoLidas,
         faltasParaDesconto,
         limiteFaltaPorDia,
         faltasChave: chaveDeAssiduidade({ faltas: faltas.linhas, realizado: realizado.linhas, ausencias: ausenciasDias.linhas }),
@@ -955,7 +1111,7 @@ export function useRelatorioAssiduidadeMensal(
         ...(faixasNoturnas.length ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
       };
     },
-    [dias, faixasNoturnas, desviosDoPeriodo, faltas.linhas, realizado.linhas, ausenciasDias.linhas],
+    [dias, faixasNoturnas, desviosDoPeriodo, horasExtraLidas, faltas.linhas, realizado.linhas, ausenciasDias.linhas],
   );
 
   const executar = useCallback(
@@ -1011,6 +1167,10 @@ export function useRelatorioAssiduidadeMensal(
     erro: erroDeLeitura,
     /** A margem ou os desvios nao se leram (erro ou recusa): o processamento e o fecho bloqueiam com motivo escrito. */
     desviosNaoLidos: desviosDoPeriodo.naoLidos,
+    /** As horas extra aprovadas nao se leram (erro ou recusa): o processamento e o fecho bloqueiam com motivo escrito. */
+    horasExtraNaoLidas: horasExtraLidas.naoLidas,
+    /** Sem permissao para ler as horas extra: nao bloqueia o fecho (a base decide). */
+    horasExtraRecusadas: horasExtraLidas.recusada,
     loading,
     saving,
     recarregar: load,

@@ -47,3 +47,5 @@ export {
 export { lerAssinaturasDeDesvios, detetarDesvios, type ResumoDeteccaoDesvios, type MargemLida } from "@/lib/hr/desviosRpc";
 export { codigoDeErroDesvios, chaveDoErroDesvios, podeSerHoraExtra } from "@/lib/hr/desviosBase";
 export type { VersaoMargem } from "@/lib/hr/desviosRelatorio";
+// As horas extra APROVADAS no fecho: a assinatura de cada pessoa, lida imediatamente antes de calcular, e a conferencia com a do calculo.
+export { prepararFechoComHorasExtra, type PreparacaoHorasExtraDoFecho } from "@/lib/hr/horasExtraFecho";

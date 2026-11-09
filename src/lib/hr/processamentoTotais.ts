@@ -35,6 +35,7 @@ import type {
 } from "@/types/hr";
 import type { DiaRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
 import { descontoDasFaltas, type FaltaDoPeriodo } from "@/lib/hr/descontoFalta";
+import type { FonteHorasExtra } from "@/lib/hr/horasExtraRelatorio";
 
 export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
 
@@ -68,6 +69,13 @@ export interface EntradaProcessamentoPessoa {
      * (sem margem configurada o resultado e o de sempre).
      */
     contadoMinutos?: number;
+    /**
+     * De onde vem `minutosExtraNormal`, `minutosFeriadoTrabalhado` e `minutosDescansoTrabalhado`. Com horas extra APROVADAS (interruptor
+     * ligado) sao os minutos CONFIRMADOS por ORIGEM da hora extra: diaria e semanal em `minutosExtraNormal` (escalao `he_pct_dia_util`),
+     * feriado em `minutosFeriadoTrabalhado` (`he_pct_feriado`), descanso em `minutosDescansoTrabalhado` (`he_pct_descanso`). A conta
+     * e a mesma; esta fonte so fica registada nas linhas gravadas (`fonte_horas_extra`). Ausente = nao se regista.
+     */
+    horasExtraFonte?: FonteHorasExtra;
     minutosExtraNormal: number;
     minutosFeriadoTrabalhado: number;
     minutosDescansoTrabalhado: number;
@@ -133,6 +141,10 @@ export interface LinhaCodigoAplicado {
   origem: OrigemAutomaticaCodigo | null;
   horas: number | null;
   valor: number;
+  /** So nas linhas de horas extra, feriado e descanso trabalhados, e so quando a fonte NAO e bruto (aprovadas ou misto). */
+  fonteHorasExtra?: FonteHorasExtra;
+  /** Os minutos pagos nesta linha (so com `fonteHorasExtra`). */
+  minutos?: number;
 }
 
 /** Uma linha que vem da regra salarial (nao de um codigo): noturnas por faixa, IHT, km, ajudas. */
@@ -327,6 +339,8 @@ function calcularLinhasAutomaticas(
         origem,
         horas,
         valor,
+        // So quando a fonte NAO e bruto: com o interruptor desligado a linha gravada fica exactamente como sempre.
+        ...(totais.horasExtraFonte && totais.horasExtraFonte !== "bruto" ? { fonteHorasExtra: totais.horasExtraFonte, minutos: Number(minutos) } : {}),
       });
       continue;
     }

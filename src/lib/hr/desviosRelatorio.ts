@@ -12,12 +12,15 @@
  *    ausencia parcial aprovada, isencao de horario, feriado, descanso). O fecho deteta na base e a releitura traz as linhas verdadeiras.
  * O `realizadoMinutos` do dia nunca se altera: e o que se picou.
  *
- * PONTO DE LIGACAO DAS HORAS EXTRA APROVADAS (tarefa a parte): quando as horas extra aprovadas (`pessoas_horas_extra`)
- * chegarem ao relatorio, entram por `EntradaContarDia.extraAprovadoMin` (minutos aprovados nesse dia); com margem, o extra que
- * conta e o maior entre o da decisao do desvio e o aprovado. Hoje quem chama passa 0.
+ * HORAS EXTRA APROVADAS (`pessoas_horas_extra`): `EntradaContarDia.modoExtra` escolhe de onde vem o extra do dia. `bruto`
+ * (omissao, interruptor desligado): como acima; com margem, o extra que conta e o maior entre o da decisao do desvio e o
+ * aprovado (quem chama passa 0). `aprovadas` (D6): o extra vem SO da tabela (`extraAprovadoMin`, ja cortado pelo limite do dia
+ * em `horasExtraRelatorio.ts`) e o desvio validado «hora extra» conta como «aceitar desvio»: o realizado conta e o extra nao se
+ * conta duas vezes.
  */
 import { minutosQueContam, type DecisaoDesvio, type NaturezaDesvio } from "@/lib/hr/desvios";
 import type { Periodo } from "@/lib/hr/assiduidade";
+import type { ModoExtra } from "@/lib/hr/horasExtraRelatorio";
 
 /** Uma versao de `hr_desvios_config` (a forma que `rpc_hr_desvios_config_ler` devolve). */
 export interface VersaoMargem {
@@ -77,8 +80,14 @@ export interface EntradaContarDia {
   margemMin: number | null;
   /** A versao nao substituida de `pessoas_desvios` deste dia, se houver. */
   desvio: DesvioLido | null;
-  /** Ponto de ligacao das horas extra aprovadas (ver o cabecalho). */
+  /** As horas extra aprovadas do dia que CONTAM (ja cortadas pelo limite do dia: `extraDoDia`). So se usa com `modoExtra` `aprovadas`. */
   extraAprovadoMin?: number;
+  /**
+   * De onde vem a hora extra do dia. `bruto` (omissao): o excesso sobre o planeado, como sempre. `aprovadas` (interruptor ligado
+   * neste dia): o extra vem SO da tabela de horas extra (`extraAprovadoMin`) e o desvio validado «hora extra» conta como
+   * «aceitar desvio» (conta o realizado, sem extra proprio): nunca se conta duas vezes.
+   */
+  modoExtra?: ModoExtra;
 }
 
 export interface ContagemDoDia {
@@ -89,9 +98,12 @@ export interface ContagemDoDia {
 
 export function contarDia(entrada: EntradaContarDia): ContagemDoDia {
   const { planeadoMinutos, realizadoMinutos, margemMin } = entrada;
+  const aprovadas = entrada.modoExtra === "aprovadas";
+  const aprovado = Math.max(entrada.extraAprovadoMin ?? 0, 0);
   const comoAntes: ContagemDoDia = {
     contadoMinutos: realizadoMinutos,
-    extraValidadoMinutos: Math.max(realizadoMinutos - planeadoMinutos, 0),
+    // Modo aprovadas: o extra e so o da tabela. Modo bruto: o excesso sobre o planeado, como sempre.
+    extraValidadoMinutos: aprovadas ? aprovado : Math.max(realizadoMinutos - planeadoMinutos, 0),
     desvio: null,
   };
   if (margemMin === null) return comoAntes;
@@ -101,12 +113,20 @@ export function contarDia(entrada: EntradaContarDia): ContagemDoDia {
   // Sem linha (ou com uma falta registada sem linha): como antes. O desvio so existe se a base o gravou.
   if (!linha) return comoAntes;
 
-  const aprovado = Math.max(entrada.extraAprovadoMin ?? 0, 0);
   const decisao: DecisaoDesvio = linha.estado === "a_validar" ? "a_validar" : (linha.decisao ?? "a_validar");
+  // D6: no modo aprovadas a decisao «hora extra» conta o realizado como «aceitar desvio» (sem extra proprio); o extra vem da tabela.
+  const decisaoQueConta: DecisaoDesvio = aprovadas && decisao === "hora_extra" ? "aceitar_desvio" : decisao;
   const { contadoMin, extraMin } = minutosQueContam(
     { planeadoMin: linha.planeado_min, realizadoMin: linha.realizado_min, temDesvio: true },
-    decisao,
+    decisaoQueConta,
   );
+  if (aprovadas) {
+    return {
+      contadoMinutos: contadoMin,
+      extraValidadoMinutos: aprovado,
+      desvio: { id: linha.id, estado: linha.estado, decisao, natureza: linha.natureza },
+    };
+  }
   const extra = Math.max(extraMin, aprovado);
   return {
     contadoMinutos: contadoMin + (extra - extraMin),

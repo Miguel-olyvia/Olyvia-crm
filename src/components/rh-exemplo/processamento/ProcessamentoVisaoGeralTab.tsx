@@ -74,7 +74,9 @@ import { regraEmVigorNoDia, useRegrasSalariais } from "@/components/rh-exemplo/h
 import { direitosDaPessoa, useDireitosSalariaisDaOrganizacao } from "@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/rh-exemplo/processamento/ResumoPessoaProcessamentoOculto";
 import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
-import { prepararFechoComDesvios } from "@/components/rh-exemplo/hooks/horasExtraReal";
+import { AvisosDeHorasExtra } from "@/components/rh-exemplo/processamento/AvisosDeHorasExtra";
+import { prepararFechoComDesvios, prepararFechoComHorasExtra } from "@/components/rh-exemplo/hooks/horasExtraReal";
+import { argsDoFechoDeHorasExtra, assinaturaDeHorasExtraDoCalculo } from "@/components/rh-exemplo/hooks/horasExtraFechoReal";
 import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal";
 import {
   calcularProcessamentoPessoa,
@@ -85,7 +87,7 @@ import {
 } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { toast } from "@/lib/toast";
-import { conferirFaltasDoFecho } from "@/lib/hr/faltasFecho";
+import { conferirFaltasDoFecho } from "@/components/rh-exemplo/hooks/faltasReal";
 import { Eye, Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
 import {
   construirResultadosDoFecho,
@@ -208,6 +210,14 @@ export function ProcessamentoVisaoGeralTab() {
   const desviosNaoLidosPorPessoa = (id: string): boolean => totaisPorPessoa[id]?.desviosNaoLidos === true;
   const pessoasSemDesvios = Object.values(totaisPorPessoa).filter((tot) => tot?.desviosNaoLidos === true).length;
   const diasPorValidar = Object.values(totaisPorPessoa).reduce((soma, tot) => soma + (tot?.diasPorValidar ?? 0), 0);
+  // Horas extra aprovadas (interruptor ligado): pendentes que bloqueiam o fecho, excesso sem hora extra e leituras falhadas.
+  const horasExtraNaoLidasPorPessoa = (id: string): boolean => totaisPorPessoa[id]?.horasExtraNaoLidas === true;
+  const horasExtraPendentesPorPessoa = (id: string): number => totaisPorPessoa[id]?.horasExtraPendentes ?? 0;
+  const pessoasSemHorasExtra = Object.values(totaisPorPessoa).filter((tot) => tot?.horasExtraNaoLidas === true).length;
+  const totalHorasExtraPendentes = Object.values(totaisPorPessoa).reduce((soma, tot) => soma + (tot?.horasExtraPendentes ?? 0), 0);
+  const pessoasSemPermissaoHorasExtra = Object.values(totaisPorPessoa).filter((tot) => tot?.horasExtraRecusadas === true).length;
+  const totalHorasExtraNaoContadas = Object.values(totaisPorPessoa).reduce((soma, tot) => soma + (tot?.horasExtraAprovadasNaoContadasMinutos ?? 0), 0);
+  const totalExcessoPorDetetar =Object.values(totaisPorPessoa).reduce((soma, tot) => soma + (tot?.excessoSemHoraExtra ?? 0), 0);
   const [confirmarFecho, setConfirmarFecho] = useState(false);
   const estadoFechoRef = useRef<HTMLParagraphElement>(null);
   const [pessoaParaLancamento, setPessoaParaLancamento] = useState<string | null>(null);
@@ -276,6 +286,7 @@ export function ProcessamentoVisaoGeralTab() {
           planeadoMinutos: totais.planeadoMinutos,
           realizadoMinutos: totais.realizadoMinutos,
           contadoMinutos: totais.contadoMinutos,
+          horasExtraFonte: totais.horasExtraFonte,
           minutosExtraNormal: totais.minutosExtraNormal,
           minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
           minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,
@@ -360,6 +371,8 @@ export function ProcessamentoVisaoGeralTab() {
     assiduidadeIncompleta: (id) => incompletasPorPessoa[id] === true,
     // Sem a margem ou os desvios o calculo estaria errado: bloqueia com motivo escrito, nunca calcula em silencio.
     desviosNaoLidos: desviosNaoLidosPorPessoa,
+    horasExtraNaoLidas: horasExtraNaoLidasPorPessoa,
+    horasExtraPendentes: horasExtraPendentesPorPessoa,
   });
   const textoBloqueio = motivoBloqueio
     ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
@@ -412,9 +425,30 @@ export function ProcessamentoVisaoGeralTab() {
       }
       return;
     }
+    // Horas extra aprovadas: a assinatura de cada pessoa, lida imediatamente antes de montar os resultados; se mudaram desde o calculo,
+    // este e mais antigo e nao se fecha.
+    // Confere TODAS as pessoas (bruto incluido) e o interruptor; o que segue no resultado e a chave do CALCULO, nunca a de agora.
+    const horasExtra = await prepararFechoComHorasExtra(
+      argsDoFechoDeHorasExtra({ organizationId: activeCompany.id, periodoId: periodo.id, de: intervalo.de, ate: intervalo.ate, obrigatorias, totaisDe: (id) => totaisPorPessoa[id] }),
+    );
+    if (!horasExtra.ok) {
+      if (horasExtra.motivo === "erro") {
+        toast.error(horasExtra.texto);
+      } else {
+        setRecolhido({ chave: chavePeriodo, totais: {}, dias: {}, incompletas: {} });
+        setVersaoRecolha((v) => v + 1);
+        toast.error(
+          horasExtra.motivo === "sem_confirmadas"
+            ? t("rhProcReal.fecho.horasExtraSemConfirmadas")
+            : t("rhProcReal.fecho.horasExtraMudaram", { n: String(horasExtra.mudou) }),
+        );
+      }
+      return;
+    }
     // Fecha e GRAVA o resultado de cada pessoa obrigatoria, tal como o ecra o mostra agora.
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
       assinaturaDeDesviosDe: (id) => preparacao.assinaturas.get(id) ?? null,
+      assinaturaDeHorasExtraDe: (id) => assinaturaDeHorasExtraDoCalculo(totaisPorPessoa[id]),
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultadosPorPessoa.get(id)?.resultado,
       versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
@@ -547,6 +581,21 @@ export function ProcessamentoVisaoGeralTab() {
             </p>
           )}
           {!periodoFechado && <AvisosDeDesvios diasPorValidar={diasPorValidar} pessoasSemDesvios={pessoasSemDesvios} />}
+          {!periodoFechado && (
+            <AvisosDeHorasExtra
+              horasExtraPendentes={totalHorasExtraPendentes}
+              excessoPorDetetar={totalExcessoPorDetetar}
+              pessoasSemHorasExtra={pessoasSemHorasExtra}
+              pessoasSemPermissaoHorasExtra={pessoasSemPermissaoHorasExtra}
+              horasExtraNaoContadasMin={totalHorasExtraNaoContadas}
+              de={intervalo.de}
+              ate={intervalo.ate}
+              aoDetetar={() => {
+                setRecolhido({ chave: chavePeriodo, totais: {}, dias: {}, incompletas: {} });
+                setVersaoRecolha((v) => v + 1);
+              }}
+            />
+          )}
           {!periodoFechado && pessoasActivas.map((pessoa) => (
             <ResumoPessoaProcessamentoOculto
               key={`${pessoa.id}:${intervalo.de}:${intervalo.ate}:${versaoRecolha}`}
