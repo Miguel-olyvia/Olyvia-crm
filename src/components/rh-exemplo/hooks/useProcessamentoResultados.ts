@@ -6,6 +6,7 @@ export { usePessoasObrigatoriasDoFecho } from "@/hooks/usePessoasObrigatoriasDoF
 export {
   MAX_DESCRICAO_LANCAMENTO,
   construirResultadosDoFecho,
+  minutosDeLinhaGravada,
   motivoDeBloqueioDoFecho,
   resultadoDeLinhaGravada,
 } from "@/lib/hr/resultadosFecho";

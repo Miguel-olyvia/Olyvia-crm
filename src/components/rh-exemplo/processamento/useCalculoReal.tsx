@@ -292,27 +292,40 @@ export function RecolhaDeAssiduidade({ calculo, ano, mes }: { calculo: CalculoRe
   );
 }
 
+export interface OpcoesCalculoRealDaPessoa {
+  /**
+   * Com o periodo do mes FECHADO nao se monta o calculo vivo (nao se pede a assiduidade da pessoa e `resultado` e `null`): quem usa
+   * esta opcao le o que ficou gravado no fecho. Sem a opcao, tudo se calcula em vivo como sempre.
+   */
+  congelarSeFechado?: boolean;
+}
+
 /** O calculo de UMA pessoa num mes (para a ficha e para o desconto de uma falta). `resultado` e `null` enquanto carrega. */
-export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number, mes: number) {
+export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number, mes: number, opcoes: OpcoesCalculoRealDaPessoa = {}) {
   const dados = useDadosDoCalculoReal(ano, mes);
-  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, dados.intervalo, dados.faixasNoturnas);
+  const congelado = opcoes.congelarSeFechado === true && dados.periodoHook.periodo?.estado === "fechado";
+  // Enquanto o estado do periodo nao esta resolvido pode ser um mes fechado: nao se pede o vivo (a ordem dos hooks mantem-se).
+  const periodoPorSaber = opcoes.congelarSeFechado === true && dados.periodoHook.loading;
+  const pessoaVivaId = congelado || periodoPorSaber ? undefined : pessoaId;
+  const relatorio = useRelatorioAssiduidadeMensal(pessoaVivaId, ano, mes, dados.intervalo, dados.faixasNoturnas);
   const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosHook } = dados;
-  const direitoIht = pessoaId ? direitosDaPessoa(direitosHook.porPessoa, pessoaId).iht : false;
-  const aCarregar = relatorio.loading || dados.aCarregar;
+  const direitoIht = pessoaVivaId ? direitosDaPessoa(direitosHook.porPessoa, pessoaVivaId).iht : false;
+  // Congelado: nada vivo por esperar (o que ainda carrega e o periodo, os lancamentos, etc., pelos `dados`).
+  const aCarregar = (!congelado && relatorio.loading) || dados.aCarregar;
 
   const resultado = useMemo<ResultadoCalculoReal | null>(() => {
-    if (!pessoaId || aCarregar) return null;
+    if (!pessoaVivaId || aCarregar) return null;
     return calcularResultadoReal({
       totais: relatorio.totais,
       dias: relatorio.dias,
-      versoes: retribuicoesHook.porPessoa.get(pessoaId) ?? [],
+      versoes: retribuicoesHook.porPessoa.get(pessoaVivaId) ?? [],
       ultimoDia,
-      lancamentos: lancamentosPorPessoa.get(pessoaId) ?? [],
+      lancamentos: lancamentosPorPessoa.get(pessoaVivaId) ?? [],
       codigosActivos,
       regra,
       direitoIht,
     });
-  }, [pessoaId, aCarregar, relatorio.totais, relatorio.dias, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitoIht]);
+  }, [pessoaVivaId, aCarregar, relatorio.totais, relatorio.dias, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitoIht]);
 
   return {
     resultado,
@@ -321,7 +334,7 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
     dados,
     retribuicaoRecusada: retribuicoesHook.recusado,
     direitosLidos: dados.direitosLidos,
-    incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro === true,
+    incompleta: !congelado && (relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro === true),
     periodoAberto: dados.periodoHook.periodo?.estado === "aberto",
     temPeriodo: dados.periodoHook.periodo !== null,
   };

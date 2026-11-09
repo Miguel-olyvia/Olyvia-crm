@@ -68,6 +68,13 @@ export interface ResultadoParaGravar {
   cargo_periodo_id: string | null;
   regra_salarial_id: string | null;
   /**
+   * Horas planeadas e realizadas do periodo, em minutos INTEIROS >= 0 (de `totais.planeadoMinutos` / `realizadoMinutos` do calculo).
+   * A base recusa o fecho se faltarem ou forem invalidos (`processamento_fechar_resultado_mal_formado`) e o ecra Custos le-os do
+   * gravado num mes fechado. Nunca um 0 inventado: sem minutos validos a pessoa nem chega a ser construida.
+   */
+  planeado_minutos: number;
+  realizado_minutos: number;
+  /**
    * A assinatura dos desvios da pessoa neste periodo (`rpc_hr_desvios_assinaturas`), lida imediatamente antes de calcular. A base
    * recusa o fecho se houve decisoes nos desvios depois (`processamento_fechar_desvios_desactualizados`). `null` = sem desvios.
    */
@@ -93,6 +100,13 @@ export interface ResultadoLido {
   regra_salarial_id: string | null;
   fechado_em: string;
   fechado_por_nome: string | null;
+  /**
+   * Colunas acrescentadas ao fecho (migration 20270112000000). Opcionais: uma resposta de uma base sem a migration nao as traz, e
+   * entao os Custos dizem «Sem valores gravados» em vez de inventar horas.
+   */
+  planeado_minutos?: number | null;
+  realizado_minutos?: number | null;
+  pessoa_nome?: string | null;
 }
 
 export function arredondar(valor: number, casas: number): number {
@@ -102,6 +116,11 @@ export function arredondar(valor: number, casas: number): number {
 
 function arredondarOuNull(valor: unknown, casas: number): number | null {
   return typeof valor === "number" && Number.isFinite(valor) ? arredondar(valor, casas) : null;
+}
+
+/** Minutos que a base aceita: inteiro finito >= 0 (o limite fino por periodo e da base). */
+export function minutosValidos(valor: unknown): valor is number {
+  return typeof valor === "number" && Number.isFinite(valor) && valor >= 0;
 }
 
 /** Os avisos que a base aceita: so codigos `^[a-z_]{1,60}$`, sem repetidos, no maximo 20. */
@@ -177,6 +196,9 @@ export interface EntradaResultadoPessoa {
   dataFim: string;
   /** A regra salarial em vigor em `dataFim`, ou `null` se nao ha. */
   regraSalarialId: string | null;
+  /** Minutos planeados e realizados do periodo (do calculo); `construirResultadoPessoa` recusa valores nao finitos ou negativos. */
+  planeadoMinutos: number;
+  realizadoMinutos: number;
   cargoPeriodoId?: string | null;
   /** A assinatura dos desvios da pessoa (ver `ResultadoParaGravar.desvios_assinatura`); sem ela, `null`. */
   desviosAssinatura?: string | null;
@@ -186,6 +208,10 @@ export interface EntradaResultadoPessoa {
 
 export function construirResultadoPessoa(entrada: EntradaResultadoPessoa): ResultadoParaGravar {
   const { resultado } = entrada;
+  if (!minutosValidos(entrada.planeadoMinutos) || !minutosValidos(entrada.realizadoMinutos)) {
+    // Quem chama (construirResultadosDoFecho) ja bloqueia a pessoa antes; chegar aqui e um erro de programacao, nunca um 0 a enviar.
+    throw new Error("Minutos planeados e realizados invalidos: o fecho nao envia horas inventadas");
+  }
   return {
     pessoa_id: entrada.pessoaId,
     valor_hora: arredondarOuNull(resultado.valorHoraReal, 4),
@@ -207,6 +233,8 @@ export function construirResultadoPessoa(entrada: EntradaResultadoPessoa): Resul
     retribuicao_id: retribuicaoEmVigorNoDia(entrada.versoes, entrada.dataFim)?.id ?? null,
     cargo_periodo_id: entrada.cargoPeriodoId ?? null,
     regra_salarial_id: entrada.regraSalarialId,
+    planeado_minutos: Math.round(entrada.planeadoMinutos),
+    realizado_minutos: Math.round(entrada.realizadoMinutos),
     desvios_assinatura: entrada.desviosAssinatura ? entrada.desviosAssinatura : null,
     ...(entrada.horasExtraAssinatura ? { horas_extra_assinatura: entrada.horasExtraAssinatura } : {}),
   };
@@ -220,6 +248,11 @@ export interface ArgsResultadosDoFecho {
   lancamentosDe: (pessoaId: string) => readonly HrProcessamentoLancamento[];
   dataFim: string;
   regraSalarialId: string | null;
+  /**
+   * Os minutos planeados e realizados de cada pessoa (do calculo). Sem esta funcao, ou sem minutos validos para a pessoa, ela fica em
+   * `semCalculo` e o fecho nao se tenta: a base recusaria o fecho e nunca se envia um 0 inventado.
+   */
+  minutosDe?: (pessoaId: string) => { planeado: number; realizado: number } | undefined;
   /** A assinatura dos desvios de cada pessoa, lida imediatamente antes de calcular; sem ela (sem desvios), `null`. */
   assinaturaDeDesviosDe?: (pessoaId: string) => string | null | undefined;
   /** A assinatura das horas extra de cada pessoa, lida imediatamente antes de calcular; sem ela (sem horas extra), o campo nao segue. */
@@ -235,7 +268,8 @@ export function construirResultadosDoFecho(args: ArgsResultadosDoFecho): {
   const semCalculo: string[] = [];
   for (const pessoaId of args.pessoasObrigatorias) {
     const resultado = args.resultadoDe(pessoaId);
-    if (!resultado) {
+    const minutos = args.minutosDe?.(pessoaId);
+    if (!resultado || !minutos || !minutosValidos(minutos.planeado) || !minutosValidos(minutos.realizado)) {
       semCalculo.push(pessoaId);
       continue;
     }
@@ -247,6 +281,8 @@ export function construirResultadosDoFecho(args: ArgsResultadosDoFecho): {
         lancamentos: args.lancamentosDe(pessoaId),
         dataFim: args.dataFim,
         regraSalarialId: args.regraSalarialId,
+        planeadoMinutos: minutos.planeado,
+        realizadoMinutos: minutos.realizado,
         desviosAssinatura: args.assinaturaDeDesviosDe?.(pessoaId) ?? null,
         horasExtraAssinatura: args.assinaturaDeHorasExtraDe?.(pessoaId) ?? null,
       }),
@@ -382,6 +418,15 @@ const numeroOuNull =(v: unknown): number | null => {
 };
 const texto = (v: unknown): string => (typeof v === "string" ? v : "");
 const TIPOS_REGRA: ReadonlySet<string> = new Set(["noturnas", "iht", "km", "ajudas"]);
+
+/** As horas gravadas no fecho (minutos inteiros >= 0), ou `null` se a linha as nao tem ou sao invalidas (nunca 0 por omissao). */
+export function minutosDeLinhaGravada(linha: ResultadoLido): { planeadoMinutos: number; realizadoMinutos: number } | null {
+  const planeado = numeroOuNull(linha.planeado_minutos);
+  const realizado = numeroOuNull(linha.realizado_minutos);
+  if (planeado === null || realizado === null) return null;
+  if (!Number.isInteger(planeado) || !Number.isInteger(realizado) || planeado < 0 || realizado < 0) return null;
+  return { planeadoMinutos: planeado, realizadoMinutos: realizado };
+}
 
 /** Volta a montar o resultado de uma pessoa a partir da linha gravada (nada se recalcula). */
 export function resultadoDeLinhaGravada(linha: ResultadoLido): ResultadoProcessamentoPessoa {

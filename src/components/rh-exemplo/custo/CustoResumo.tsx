@@ -30,7 +30,13 @@ function Linha({ rotulo, valor, ajuda, forte }: LinhaProps) {
   );
 }
 
-export function CustoResumo({ custo }: { custo: CustoDaPessoa }) {
+interface CustoResumoProps {
+  custo: CustoDaPessoa;
+  /** Mes fechado sem valores gravados: sem horas feitas, por isso nao ha «por hora feita» (nem um 0 nem um exemplo). */
+  semValoresGravados?: boolean;
+}
+
+export function CustoResumo({ custo, semValoresGravados = false }: CustoResumoProps) {
   const { t } = useTranslation();
   const { language } = useLanguage();
   const { atual: c } = custo;
@@ -55,7 +61,7 @@ export function CustoResumo({ custo }: { custo: CustoDaPessoa }) {
           <Linha rotulo={t("rhA.custo.repartido")} ajuda={t("rhA.custo.repartidoAjuda")} valor={eur(c.repartido)} />
           <Linha rotulo={t("rhA.custo.bancoHoras", { n: SALDO_BANCO_HORAS_EXEMPLO })} ajuda={t("rhA.custo.bancoHorasAjuda")} valor={eur(c.saldoEuros)} />
           <Linha rotulo={t("rhA.custo.porHoraPrevista", { n: horas(c.horasPrevistas) })} valor={eur(c.porHoraPrevista)} />
-          <Linha rotulo={t("rhA.custo.porHoraFeita", { n: horas(c.horasFeitas) })} valor={eur(c.porHoraFeita)} />
+          {!semValoresGravados && <Linha rotulo={t("rhA.custo.porHoraFeita", { n: horas(c.horasFeitas) })} valor={eur(c.porHoraFeita)} />}
         </dl>
       </Seccao>
 

@@ -13,6 +13,7 @@ import {
   construirResultadoPessoa,
   construirResultadosDoFecho,
   mensagemDeErroDoFecho,
+  minutosDeLinhaGravada,
   motivoDeBloqueioDoFecho,
   pessoasObrigatoriasDoFecho,
   resultadoDeLinhaGravada,
@@ -68,12 +69,28 @@ describe("construirResultadoPessoa", () => {
     lancamentos: [lanc({ valor: 10.1 }), lanc({ id: "l2", valor: 20 })],
     dataFim: "2026-10-31",
     regraSalarialId: REGRA,
+    planeadoMinutos: 9600,
+    realizadoMinutos: 9000,
   };
+
+  it("envia as horas planeadas e realizadas em minutos inteiros, ao lado de valor_hora (nao dentro de totais)", () => {
+    const r = construirResultadoPessoa({ ...entrada, planeadoMinutos: 9600.4, realizadoMinutos: 8999.6 });
+    expect(r.planeado_minutos).toBe(9600);
+    expect(r.realizado_minutos).toBe(9000);
+    expect(r.totais).not.toHaveProperty("planeado_minutos");
+  });
+
+  it("minutos invalidos (NaN, infinito, negativos, ausentes) nunca viram 0: recusa construir", () => {
+    for (const mau of [Number.NaN, Number.POSITIVE_INFINITY, -1, undefined as never, "9600" as never]) {
+      expect(() => construirResultadoPessoa({ ...entrada, planeadoMinutos: mau })).toThrow();
+      expect(() => construirResultadoPessoa({ ...entrada, realizadoMinutos: mau })).toThrow();
+    }
+  });
 
   it("leva EXACTAMENTE os campos do contrato, e os totais com EXACTAMENTE os sete campos", () => {
     const r = construirResultadoPessoa(entrada);
     expect(Object.keys(r).sort()).toEqual(
-      ["avisos", "cargo_periodo_id", "desvios_assinatura", "linhas", "pessoa_id", "regra_salarial_id", "retribuicao_id", "total_bruto", "totais", "valor_hora"].sort(),
+      ["avisos", "cargo_periodo_id", "desvios_assinatura", "linhas", "pessoa_id", "planeado_minutos", "realizado_minutos", "regra_salarial_id", "retribuicao_id", "total_bruto", "totais", "valor_hora"].sort(),
     );
     expect(Object.keys(r.totais).sort()).toEqual(
       ["base_mes", "desconto_faltas", "divisor_duodecimos", "lancamentos_pontuais", "subsidio_alimentacao", "total_codigos_automaticos", "total_regras"],
@@ -201,6 +218,23 @@ describe("construirResultadosDoFecho", () => {
     lancamentosDe: () => [],
     dataFim: "2026-10-31",
     regraSalarialId: REGRA,
+    minutosDe: () => ({ planeado: 9600, realizado: 9000 }),
+  });
+
+  it("cada resultado leva os minutos que `minutosDe` da para essa pessoa", () => {
+    const { resultados } = construirResultadosDoFecho({
+      ...args({ [PESSOA]: resultado(), [OUTRA]: resultado() }),
+      minutosDe: (id) => (id === PESSOA ? { planeado: 100, realizado: 90 } : { planeado: 200, realizado: 210 }),
+    });
+    expect(resultados.map((r) => [r.planeado_minutos, r.realizado_minutos])).toEqual([[100, 90], [200, 210]]);
+  });
+
+  it("minutos por ler ou invalidos bloqueiam essa pessoa (semCalculo): nunca se envia um 0 inventado", () => {
+    const sem = construirResultadosDoFecho({ ...args({ [PESSOA]: resultado(), [OUTRA]: resultado() }), minutosDe: (id) => (id === PESSOA ? undefined : { planeado: Number.NaN, realizado: 1 }) });
+    expect(sem.resultados).toEqual([]);
+    expect(sem.semCalculo).toEqual([PESSOA, OUTRA]);
+    const { minutosDe: _omitido, ...semMinutosDe } = args({ [PESSOA]: resultado() });
+    expect(construirResultadosDoFecho(semMinutosDe).semCalculo).toEqual([PESSOA, OUTRA]);
   });
 
   it("um resultado por pessoa obrigatoria, pela ordem recebida", () => {
@@ -360,6 +394,7 @@ describe("construirResultadosDoFecho: assinatura das horas extra", () => {
       lancamentosDe: () => [],
       dataFim: "2026-10-31",
       regraSalarialId: REGRA,
+      minutosDe: () => ({ planeado: 9600, realizado: 9000 }),
       assinaturaDeHorasExtraDe: (id) => (id === PESSOA ? md5 : null),
     });
     expect(resultados[0].horas_extra_assinatura).toBe(md5);
@@ -405,6 +440,15 @@ describe("resultadoDeLinhaGravada", () => {
     expect(r.totalRegras).toBe(0);
     expect(r.linhasAutomaticas).toEqual([]);
     expect(r.avisos).toEqual([]);
+  });
+
+  it("os minutos gravados voltam como inteiros; sem eles (linha antiga) ou invalidos, `null` e nunca 0", () => {
+    expect(minutosDeLinhaGravada(linha({ planeado_minutos: 9600, realizado_minutos: 9000 }))).toEqual({ planeadoMinutos: 9600, realizadoMinutos: 9000 });
+    expect(minutosDeLinhaGravada(linha({ planeado_minutos: "9600" as never, realizado_minutos: "0" as never }))).toEqual({ planeadoMinutos: 9600, realizadoMinutos: 0 });
+    expect(minutosDeLinhaGravada(linha())).toBeNull();
+    expect(minutosDeLinhaGravada(linha({ planeado_minutos: 10, realizado_minutos: null }))).toBeNull();
+    expect(minutosDeLinhaGravada(linha({ planeado_minutos: -5, realizado_minutos: 1 }))).toBeNull();
+    expect(minutosDeLinhaGravada(linha({ planeado_minutos: 1.5, realizado_minutos: 1 }))).toBeNull();
   });
 
   it("numeric que chega como texto da base volta a numero", () => {

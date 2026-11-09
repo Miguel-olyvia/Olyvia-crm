@@ -25,6 +25,8 @@ export interface CustoDaPessoa {
   atual: CustoDoMes;
   /** A retribuicao do mes: o total bruto estimado do processamento (`null` = sem retribuicao registada). */
   retribuicaoMes: number | null;
+  /** As horas feitas que entram na conta; `null` = sem horas (mes fechado sem valores gravados): nunca um 0 inventado. */
+  horasFeitas: number | null;
   /** Os acumulados precisam do calculo de cada mes anterior, que ainda nao esta ligado: `null` = sem valor. */
   acumuladoAno: number | null;
   acumuladoAdmissao: number | null;
@@ -45,17 +47,24 @@ export interface DadosCusto {
 }
 
 /** `avulsosReais` (os lancamentos da base) substituem os do store em memoria; sem eles, usa-se o store (so os testes antigos). */
-const contextoDe = (mes: string, dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[]): ContextoCusto => ({
+const contextoDe = (mes: string, dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[], horasRealizadas?: ReadonlyMap<string, number>): ContextoCusto => ({
   mes,
   avulsos: avulsosReais ?? lerCusto().avulsos,
   equipamentos: dados.equipamentos,
   definicoes: dados.definicoes,
   excecoes: dados.excecoes,
+  horasRealizadas,
 });
 
 /** O custo de todas as pessoas dadas, num mes. */
-export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCusto[], dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[]): LinhaCusto[] {
-  const contexto = contextoDe(mes, dados, avulsosReais);
+export function linhasDaOrganizacao(
+  mes: string,
+  pessoas: readonly PessoaParaCusto[],
+  dados: DadosCusto,
+  avulsosReais?: readonly AvulsoCusto[],
+  horasRealizadas?: ReadonlyMap<string, number>,
+): LinhaCusto[] {
+  const contexto = contextoDe(mes, dados, avulsosReais, horasRealizadas);
   return pessoas.map((pessoa) => montarLinhaCusto(pessoa, contexto));
 }
 
@@ -63,7 +72,7 @@ export function linhasDaOrganizacao(mes: string, pessoas: readonly PessoaParaCus
  * O custo de uma pessoa num mes. `horasFeitas` sao as horas realmente trabalhadas no mes (relatorio de assiduidade);
  * o saldo do banco de horas continua a ser o valor de exemplo (o banco de horas nao esta ligado a base).
  */
-export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas: number, dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[]): CustoDaPessoa {
+export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas: number | null, dados: DadosCusto, avulsosReais?: readonly AvulsoCusto[]): CustoDaPessoa {
   const { equipamentos, definicoes, excecoes } = dados;
   const avulsos = avulsosReais ?? lerCusto().avulsos;
   const atual = custoDoMes({
@@ -75,13 +84,14 @@ export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas:
     excecaoTaxa: excecoes[pessoa.pessoaId] ?? null,
     horasSemanais: pessoa.horasSemanais,
     saldoHoras: SALDO_BANCO_HORAS_EXEMPLO,
-    horasFeitas: arredondar(horasFeitas),
+    horasFeitas: arredondar(horasFeitas ?? 0),
   });
   const retribuicaoMes = atual.parteSujeita;
   return {
     mes,
     atual,
     retribuicaoMes,
+    horasFeitas,
     acumuladoAno: null,
     acumuladoAdmissao: null,
     avulsos: avulsos.filter((a) => a.pessoaId === pessoa.pessoaId),

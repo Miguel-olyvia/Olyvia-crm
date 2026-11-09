@@ -95,7 +95,10 @@ export function LinhaTabelaCusto({ linha, expandida, aoAbrir, aoAlternar }: Prop
           {linha.centro ?? sem}
           <span className="block text-xs leading-4 text-muted-foreground">{linha.filial ?? sem}</span>
         </TableCell>
-        <TableCell className={NUMERO}>{eur(linha.retribuicao)}</TableCell>
+        <TableCell className={NUMERO}>
+          {eur(linha.retribuicao)}
+          {linha.semValoresGravados && <span className="block text-xs leading-4 text-amber-800 dark:text-amber-300">{t("rhCustoFecho.semValores")}</span>}
+        </TableCell>
         <TableCell className={NUMERO}>{eur(linha.retribuicao === null ? null : linha.encargos)}</TableCell>
         <TableCell className={NUMERO}>{eur(linha.avulsosMes)}</TableCell>
         <TableCell className={NUMERO}><Equipamentos linha={linha} /></TableCell>

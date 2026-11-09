@@ -152,3 +152,14 @@ describe("useProcessamentoResultados", () => {
     expect([...result.current.porPessoa.keys()]).toEqual([id(9)]);
   });
 });
+
+describe("useProcessamentoResultados: as colunas do fecho chegam ao ecra", () => {
+  it("as horas planeadas e realizadas e o nome gravados passam tal como a base os devolve (nada se inventa)", async () => {
+    respostas = [{ data: [{ ...linha(1), planeado_minutos: 9600, realizado_minutos: 9000, pessoa_nome: "Ana Costa" }, linha(2)], error: null }];
+    const { result } = renderHook(() => useProcessamentoResultados("per", true));
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(result.current.porPessoa.get(id(1))).toMatchObject({ planeado_minutos: 9600, realizado_minutos: 9000, pessoa_nome: "Ana Costa" });
+    // Uma linha de uma base sem as colunas continua legivel, sem minutos (os Custos tratam-na como «sem valores gravados»).
+    expect(result.current.porPessoa.get(id(2))?.planeado_minutos).toBeUndefined();
+  });
+});

@@ -14,6 +14,7 @@
 import { useState, useMemo } from "react";
 import { TriangleAlert } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
+import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import type { PessoaEscolhivel } from "@/components/rh-exemplo/custo/EquipamentoSheet";
 import { SeletorMesCusto } from "@/components/rh-exemplo/custo/SeletorMesCusto";
@@ -48,10 +49,14 @@ export default function RhCustos() {
   const { activeCompany, isLoading } = useCompany();
   const minha = useMinhaPessoa();
   const mes = useCusto((e) => e.mes);
-  const { linhas, calculo, ano, mesNum, vinculosHook, avulsosPorPessoa, lancamentos, baseACarregar, baseTemDados, erroBase, semPermissaoCusto, podeEditar } = useCustoDaOrganizacao(mes);
+  const {
+    linhas, calculo, ano, mesNum, vinculosHook, avulsosPorPessoa, lancamentos, baseACarregar, baseTemDados, erroBase, semPermissaoCusto, podeEditar,
+    fechado, semValoresGravados, gravadosACarregar, gravadosFalhou, recarregarGravados,
+  } = useCustoDaOrganizacao(mes);
   // Sem os equipamentos, as taxas e as excecoes da base (a carregar, falha sem dados ou sem permissao) nao se mostram totais nem tabela:
   // nunca valores de exemplo. Se uma releitura falha mas ha dados guardados, mostram-se com o aviso de erro.
-  const semDados = semPermissaoCusto || baseACarregar || (erroBase !== null && !baseTemDados);
+  // Mes fechado a ler o gravado: ainda nao ha linhas, por isso so o loader (nunca totais a zero nem uma tabela com 0 pessoas).
+  const semDados = semPermissaoCusto || baseACarregar || (erroBase !== null && !baseTemDados) || (fechado && gravadosACarregar);
   const pessoas = useMemo<PessoaEscolhivel[]>(
     () => calculo.pessoasActivas.map((p) => ({ id: p.id, nome: p.nome_completo })),
     [calculo.pessoasActivas],
@@ -87,7 +92,18 @@ export default function RhCustos() {
 
       <SeletorMesCusto id="rhCustos-mes" />
       <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">{aviso || t("rhCustos.mesVisto", { mes: nomeDoMes(mes, language) })}</p>
-      <RecolhaDeAssiduidade calculo={calculo} ano={ano} mes={mesNum} />
+      {/* Mês fechado: as horas e a retribuição são as gravadas no fecho, por isso o cálculo vivo (uma recolha por pessoa) nem se monta. */}
+      {!fechado && <RecolhaDeAssiduidade calculo={calculo} ano={ano} mes={mesNum} />}
+      {fechado && <p role="status" className="text-sm text-muted-foreground">{t("rhCustoFecho.nota")}</p>}
+      {semValoresGravados && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhCustoFecho.semValoresDetalhe")}</p>}
+      {fechado && gravadosFalhou && (
+        <Button type="button" variant="outline" className="min-h-11" onClick={recarregarGravados}>{t("rhCustoFecho.tentarDeNovo")}</Button>
+      )}
+      {gravadosACarregar && (
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <OlyviaLoader size={16} />{t("rhCustoFecho.aLer")}
+        </div>
+      )}
       {calculo.pessoasErro && (
         <p role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm text-destructive">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -113,12 +129,12 @@ export default function RhCustos() {
         </p>
       )}
       {vinculosHook.recusado && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhCustos.semPermissaoVinculos")}</p>}
-      {calculo.incompletas > 0 && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.incompleto", { n: calculo.incompletas })}</p>}
+      {!fechado && calculo.incompletas > 0 && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.custo.incompleto", { n: calculo.incompletas })}</p>}
       {!calculo.aCarregar && !calculo.periodoHook.periodo && !calculo.periodoHook.recusado && (
         <p role="status" className="text-sm text-muted-foreground">{t("rhProcReal.custo.semPeriodo")}</p>
       )}
       {(calculo.pessoasACarregar || calculo.aCarregar) && !calculo.pessoasErro && <OlyviaLoader size={16} />}
-      {!calculo.pessoasACarregar && !calculo.aCarregar && calculo.pendentes > 0 && (
+      {!fechado && !calculo.pessoasACarregar && !calculo.aCarregar && calculo.pendentes > 0 && (
         <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <OlyviaLoader size={16} />{t("rhProcReal.custo.aCalcular", { n: calculo.pendentes })}
         </div>

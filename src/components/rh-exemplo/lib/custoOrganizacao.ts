@@ -20,6 +20,8 @@ export interface PessoaParaCusto {
   filialId: string | null;
   filial: string | null;
   tipoContrato: string | null;
+  /** Mes fechado sem valores gravados para esta pessoa: a retribuicao e as horas nao se recalculam (ficam sem valor). */
+  semValoresGravados?: boolean;
   /** O total bruto da pessoa no «Cálculo do mês» (`null` = sem retribuição registada). */
   retribuicaoMes: number | null;
   horasSemanais: number;
@@ -31,6 +33,8 @@ export interface ContextoCusto {
   equipamentos: readonly EquipamentoPessoa[];
   definicoes: DefinicoesCusto;
   excecoes: Readonly<Record<string, number | null>>;
+  /** Horas realizadas GRAVADAS no fecho, por pessoa (mes fechado); sem a pessoa aqui, a conta de exemplo de sempre. */
+  horasRealizadas?: ReadonlyMap<string, number>;
 }
 
 export type ChaveParte = "retribuicao" | "avulsos" | "encargos" | "seguro" | "equipamentos";
@@ -66,7 +70,8 @@ export function custoDaPessoaNoMes(p: PessoaParaCusto, c: ContextoCusto): CustoD
     excecaoTaxa: c.excecoes[p.pessoaId] ?? null,
     horasSemanais: p.horasSemanais,
     saldoHoras: SALDO_BANCO_HORAS_EXEMPLO,
-    horasFeitas: arredondar(previstas + HORAS_FEITAS_A_MAIS_EXEMPLO),
+    // Mes fechado sem valores gravados: sem horas (nunca as de exemplo); a linha avisa.
+    horasFeitas: p.semValoresGravados ? 0 : arredondar(c.horasRealizadas?.get(p.pessoaId) ?? previstas + HORAS_FEITAS_A_MAIS_EXEMPLO),
   });
 }
 

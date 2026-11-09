@@ -21,7 +21,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
-import { totalDoMes } from "@/components/rh-exemplo/processamento/calculoReal";
+import { minutosDoCalculo, totalDoMes } from "@/components/rh-exemplo/processamento/calculoReal";
 import { SeletorPeriodoFolha, usePeriodoFolhaEscolhido } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { RecolhaDeAssiduidade, useCalculoRealDoMes } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
@@ -183,6 +183,7 @@ export function ProcessamentoFluxoTab() {
       assinaturaDeHorasExtraDe: (id) => assinaturaDeHorasExtraDoCalculo(calculo.totaisDe?.(id)),
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultados.get(id)?.resultado,
+      minutosDe: (id) => minutosDoCalculo(resultados.get(id)),
       versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
       lancamentosDe: (id) => calculo.lancamentosPorPessoa.get(id) ?? [],
       dataFim: calculo.intervalo.ate,
