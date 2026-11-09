@@ -206,7 +206,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     ],
   },
   {
-    id: "prateleira", rotulo: "Prateleira ou estante", tipos: ["prateleira"], parede: { alt: 1.4 }, opcoes: [{ id: "suportes", rotulo: "Com suportes à vista", tipo: "sim", omissao: true }],
+    id: "prateleira", rotulo: "Prateleira ou estante", tipos: ["prateleira"], parede: { alt: 1.5 }, opcoes: [{ id: "suportes", rotulo: "Com suportes à vista", tipo: "sim", omissao: true }],
     partes: [
       caixa("tabua", "corpo", ({ w, d, h }) => ({ pos: [0, h - 0.0125, 0], esc: [w, min(0.025, h), d] })),
       caixa("suporte_esq", "metal", ({ w, d, h }) => ({ pos: [-w / 2 + 0.1, h - 0.06, -d / 2 + 0.01], esc: [0.02, 0.1, 0.02] }), (p) => sim(p, "suportes")),
