@@ -211,6 +211,14 @@ describe("RecolhaDeAssiduidade", () => {
     render(<RecolhaDeAssiduidade calculo={calculoFalso(registar)} ano={2026} mes={10} />);
     expect(registar).toHaveBeenCalledWith("p1", expect.objectContaining({ incompleta: true }));
   });
+
+  it.each(["ausenciasRecusadas", "feriadosRecusados", "tiposRecusados"])("%s (ausencias, feriados, tipos de ausencia) chega como incompleta: o fecho bloqueia", (campo) => {
+    (estado.relatorio as Record<string, unknown>)[campo] = true;
+    const registar = vi.fn();
+    render(<RecolhaDeAssiduidade calculo={calculoFalso(registar)} ano={2026} mes={10} />);
+    expect(registar).toHaveBeenCalledWith("p1", expect.objectContaining({ incompleta: true }));
+    (estado.relatorio as Record<string, unknown>)[campo] = false;
+  });
 });
 
 describe("leitura falhada da assiduidade (erro, nao permissao)", () => {

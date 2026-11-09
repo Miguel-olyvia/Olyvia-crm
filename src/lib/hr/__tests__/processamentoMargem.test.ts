@@ -18,6 +18,11 @@ const REGRA: RegraParaCalculo = {
   noturnas: [],
 };
 
+const faltaDoDefice = (minutos: number): EntradaProcessamentoPessoa["totais"]["faltas"] =>
+  minutos > 0
+    ? [{ data: "2026-01-15", minutos, estado: "activa", justificacao_estado: "sem_justificacao", remunerada: false, motivo_codigo: "ausencia_nao_comunicada", semRegisto: true }]
+    : [];
+
 const entrada = (totais: Partial<EntradaProcessamentoPessoa["totais"]>, minutosPorDia: number[]): EntradaProcessamentoPessoa => ({
   totais: {
     planeadoMinutos: 9600,
@@ -30,6 +35,8 @@ const entrada = (totais: Partial<EntradaProcessamentoPessoa["totais"]>, minutosP
     diasFeriadoTrabalhados: 0,
     diasDescansoTrabalhado: 0,
     ...totais,
+    // O desconto e por falta: o defice do mes vira uma falta nao justificada (o dia sem registo), como faz o hook do relatorio.
+    faltas: totais.faltas ?? faltaDoDefice((totais.planeadoMinutos ?? 9600) - (totais.contadoMinutos ?? totais.realizadoMinutos ?? 9600)),
   },
   minutosPorDia,
   minutosNoturnosPorFaixa: [],

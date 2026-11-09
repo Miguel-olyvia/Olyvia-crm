@@ -58,6 +58,8 @@ export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCal
       minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,
       horasExtraNoturnasMinutos: totais.horasExtraNoturnasMinutos,
       minutosAusenciaRemunerada: totais.minutosAusenciaRemunerada ?? 0,
+      faltas: totais.faltasParaDesconto ?? [],
+      limiteFaltaPorDia: totais.limiteFaltaPorDia,
       diasFeriadoTrabalhados: totais.diasFeriadoTrabalhados,
       diasDescansoTrabalhado: 0,
     },

@@ -14,6 +14,7 @@ import {
   usePessoasObrigatoriasDoFecho,
   useProcessamentoResultados,
 } from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
+import { conferirFaltasDoFecho } from "@/lib/hr/faltasFecho";
 import { BannerFechoGravado } from "@/components/rh-exemplo/hooks/BannerFechoGravado";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -139,6 +140,18 @@ export function ProcessamentoFluxoTab() {
       if (preparacao.motivo === "erro") return preparacao.texto;
       calculo.recalcular();
       return t("rhProcReal.fecho.desviosMudaram", { n: String(preparacao.mudou) });
+    }
+    // As faltas marcadas, anuladas ou justificadas depois do calculo mudam o desconto: nunca se fecha com um calculo mais antigo.
+    const faltas = await conferirFaltasDoFecho({
+      organizationId: calculo.organizationId,
+      de: calculo.intervalo.de,
+      ate: calculo.intervalo.ate,
+      calculadas: new Map(obrigatorias.map((id) => [id, calculo.chaveDeFaltasUsada?.(id) ?? ""])),
+    });
+    if (!faltas.ok) {
+      if (faltas.motivo === "erro") return t("rhProcReal.fecho.erroFaltas");
+      calculo.recalcular();
+      return t("rhProcReal.fecho.faltasMudaram", { n: String(faltas.mudou) });
     }
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
       assinaturaDeDesviosDe: (id) => preparacao.assinaturas.get(id) ?? null,

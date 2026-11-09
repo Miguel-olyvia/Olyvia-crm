@@ -159,6 +159,85 @@ describe("useRelatorioAssiduidadeMensal", () => {
       expect(result.current.totais.diasComFaltaCompletaRegistada).toBe(0);
     });
 
+    it("desconto por falta: cada dia 'sem_registo' vira uma falta NAO justificada com o defice do dia, e a chave so conta faltas marcadas", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const faltas = result.current.totais.faltasParaDesconto ?? [];
+      expect(faltas.map((f) => f.data)).toEqual(["2026-09-01", "2026-09-08", "2026-09-15"]);
+      for (const f of faltas) {
+        expect(f).toMatchObject({ minutos: 540, estado: "activa", justificacao_estado: "sem_justificacao", remunerada: false, semRegisto: true });
+      }
+      // Nao ha faltas marcadas (pessoas_faltas): a chave de conferencia do fecho fica vazia.
+      expect(result.current.totais.faltasChave).toBe("");
+    });
+
+    it("com a falta justificada e paga (justificacao do dia aprovada) o dia deixa de ser 'sem_registo' e a falta entra com o seu estado", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+      tabelas.pessoas_faltas = ["2026-09-01", "2026-09-08", "2026-09-15"].map((data, n) => ({
+        id: `f${n}`, pessoa_id: PESSOA_ID, organization_id: ORG_ACTIVA, data, planeado_id: null, vinculo_id: null, local_id: null,
+        hora_inicio: "09:00", hora_fim: "18:00", minutos: 540, motivo_codigo: "ausencia_nao_comunicada",
+        justificacao_estado: "justificada", justificada: true, remunerada: true, desconta_saldo: false,
+        justificacao_decidida_por: null, justificacao_decidida_em: null, justificacao_motivo: null, ausencia_dia_id: null,
+        corrige_falta_id: null, correccao_motivo: null, estado: "activa", anulado_em: null, anulacao_motivo: null,
+        created_at: "2026-09-16T09:00:00Z",
+      }));
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const faltas = result.current.totais.faltasParaDesconto ?? [];
+      expect(faltas).toHaveLength(3);
+      expect(faltas.every((f) => f.justificacao_estado === "justificada" && f.remunerada && !f.semRegisto)).toBe(true);
+      expect(result.current.totais.faltasChave).not.toBe("");
+    });
+
+    it("dia com falta ANULADA e sem picagem esta tratado: nao e sem_registo, nao desconta e nao ha aviso; sem falta nenhuma continua a descontar", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+      tabelas.pessoas_faltas = [
+        {
+          id: "f-anulada", pessoa_id: PESSOA_ID, organization_id: ORG_ACTIVA, data: "2026-09-01", planeado_id: null, vinculo_id: null,
+          local_id: null, hora_inicio: "09:00", hora_fim: "18:00", minutos: 540, motivo_codigo: "ausencia_nao_comunicada",
+          justificacao_estado: "sem_justificacao", justificada: false, remunerada: false, desconta_saldo: false,
+          justificacao_decidida_por: null, justificacao_decidida_em: null, justificacao_motivo: null, ausencia_dia_id: null,
+          corrige_falta_id: null, correccao_motivo: null, estado: "anulada", anulado_em: "2026-09-02T10:00:00Z",
+          anulacao_motivo: "marcada por engano", created_at: "2026-09-01T18:00:00Z",
+        },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.dias.find((d) => d.iso === "2026-09-01")?.estado).not.toBe("sem_registo");
+      const faltas = result.current.totais.faltasParaDesconto ?? [];
+      // O dia anulado nao desconta; os outros dois (08 e 15, sem falta nenhuma) descontam como sem picagem.
+      expect(faltas.map((f) => f.data)).toEqual(["2026-09-08", "2026-09-15"]);
+      expect(faltas.every((f) => f.semRegisto === true && f.minutos === 540)).toBe(true);
+      // Uma anulacao nova invalida o calculo: a chave ja nao e a de "sem faltas".
+      expect(result.current.totais.faltasChave).not.toBe("");
+    });
+
+    it("meio dia de ausencia remunerada limita as faltas desse dia ao que a ausencia nao cobre; dia inteiro limita a 0", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+      const ausencia = (data: string, fraccao_dia: number) => ({
+        id: `ad-${data}`, pedido_id: "ped1", pessoa_id: PESSOA_ID, organization_id: ORG_ACTIVA, tipo_id: "tipo-ferias", data,
+        fraccao_dia, conta_saldo: true, e_feriado: false, e_fim_semana: false, periodo_inicio: data, estado: "aprovado",
+      });
+      tabelas.pessoas_ausencias_dias = [ausencia("2026-09-01", 0.5), ausencia("2026-09-08", 1)];
+      tabelas.hr_ausencias_tipos = [
+        { id: "tipo-ferias", organization_id: ORG_ACTIVA, codigo: "ferias", nome: "Ferias", categoria: "ferias", remunerada: true },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.totais.limiteFaltaPorDia).toEqual({ "2026-09-01": 270, "2026-09-08": 0 });
+      // 09-08 (ausencia total paga) esta explicado; 09-01 (meio dia pago, outra metade sem picagem) so desconta a metade por explicar.
+      const semRegisto = (result.current.totais.faltasParaDesconto ?? []).filter((f) => f.semRegisto).map((f) => [f.data, f.minutos]);
+      expect(semRegisto).toEqual([["2026-09-01", 270], ["2026-09-15", 540]]);
+    });
     it("um dia FUTURO com planeado e zero realizado nao entra em 'sem_registo' -- ainda pode vir a ter picagem", async () => {
       tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // tercas, incl. 22 e 29 (futuro)
 
@@ -215,7 +294,7 @@ describe("useRelatorioAssiduidadeMensal", () => {
       expect(result.current.totais.diasComFaltaIncompletaRegistada).toBe(0);
     });
 
-    it("uma ausencia aprovada PARCIAL (fraccao_dia 0.5) num dia passado sem realizado nao vira 'sem_registo'", async () => {
+    it("uma ausencia aprovada PARCIAL (fraccao_dia 0.5) sem picagem na outra metade: o dia e 'sem_registo' so pela metade por explicar", async () => {
       tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 2026-09-01, terca, passado
       tabelas.pessoas_ausencias_dias = [
         {
@@ -249,7 +328,70 @@ describe("useRelatorioAssiduidadeMensal", () => {
 
       const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
       expect(dia1?.realizadoMinutos).toBe(0);
-      expect(dia1?.estado).not.toBe("sem_registo");
+      expect(dia1?.estado).toBe("sem_registo");
+      // So a outra metade (270 de 540) desconta: a metade paga nao.
+      const doDia = (result.current.totais.faltasParaDesconto ?? []).filter((f) => f.data === "2026-09-01");
+      expect(doDia).toHaveLength(1);
+      expect(doDia[0]).toMatchObject({ minutos: 270, semRegisto: true });
+      expect(result.current.totais.limiteFaltaPorDia?.["2026-09-01"]).toBe(270);
+    });
+
+    describe("ausencia NAO remunerada desconta o planeado coberto", () => {
+      const ausenciaDia = (data: string, fraccao_dia: number, tipo_id: string) => ({
+        id: `ad-${data}`, pedido_id: "ped1", pessoa_id: PESSOA_ID, organization_id: ORG_ACTIVA, tipo_id, data, fraccao_dia,
+        conta_saldo: true, e_feriado: false, e_fim_semana: false, periodo_inicio: data, estado: "aprovado",
+      });
+      const tipos = [
+        { id: "tipo-paga", organization_id: ORG_ACTIVA, codigo: "ferias", nome: "Ferias", categoria: "ferias", remunerada: true },
+        { id: "tipo-sem-vencimento", organization_id: ORG_ACTIVA, codigo: "licenca", nome: "Licenca sem vencimento", categoria: "outro", remunerada: false },
+      ];
+
+      it("dia inteiro de licenca sem vencimento: falta sintetica nao paga com o planeado do dia; paga: nenhuma", async () => {
+        tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+        tabelas.pessoas_ausencias_dias = [ausenciaDia("2026-09-01", 1, "tipo-sem-vencimento"), ausenciaDia("2026-09-08", 1, "tipo-paga")];
+        tabelas.hr_ausencias_tipos = tipos;
+        const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        const faltas = result.current.totais.faltasParaDesconto ?? [];
+        expect(faltas.filter((f) => f.data === "2026-09-01")).toEqual([
+          expect.objectContaining({ minutos: 540, ausenciaNaoPaga: true, justificacao_estado: "sem_justificacao", remunerada: false }),
+        ]);
+        expect(faltas.filter((f) => f.data === "2026-09-08")).toEqual([]);
+        expect(result.current.totais.limiteFaltaPorDia).toEqual({ "2026-09-01": 540, "2026-09-08": 0 });
+      });
+
+      it("meio dia nao pago (outra metade picada): 270 min; meio dia pago (outra metade picada): nenhum", async () => {
+        tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+        tabelas.pessoas_ausencias_dias = [ausenciaDia("2026-09-01", 0.5, "tipo-sem-vencimento"), ausenciaDia("2026-09-08", 0.5, "tipo-paga")];
+        tabelas.hr_ausencias_tipos = tipos;
+        tabelas.pessoas_horario_realizado = ["2026-09-01", "2026-09-08"].map((data) => ({
+          id: `r-${data}`, pessoa_id: PESSOA_ID, organization_id: ORG_ACTIVA, vinculo_id: null, local_id: null, planeado_id: null, data,
+          hora_inicio: "09:00", hora_fim: "13:30", minutos: 270, origem: "picagem", estado: "fechado", validado_por: null,
+          validado_em: null, motivo_rejeicao: null, notas: null, corrige_realizado_id: null, correccao_motivo: null,
+          corrigido_por_pessoa_id: null, deleted_at: null,
+        }));
+        const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        const faltas = result.current.totais.faltasParaDesconto ?? [];
+        expect(faltas.filter((f) => f.data === "2026-09-01").map((f) => [f.minutos, f.ausenciaNaoPaga])).toEqual([[270, true]]);
+        expect(faltas.filter((f) => f.data === "2026-09-08")).toEqual([]);
+      });
+    });
+
+    it("picagem PARCIAL num dia sem falta: a falta sintetica e um atraso (tolerancia) e nao conta como dia sem picagem", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+      tabelas.pessoas_horario_realizado = [
+        {
+          id: "r-parcial", pessoa_id: PESSOA_ID, organization_id: ORG_ACTIVA, vinculo_id: null, local_id: null, planeado_id: null,
+          data: "2026-09-01", hora_inicio: "09:00", hora_fim: "17:57", minutos: 537, origem: "picagem", estado: "fechado",
+          validado_por: null, validado_em: null, motivo_rejeicao: null, notas: null, corrige_realizado_id: null,
+          correccao_motivo: null, corrigido_por_pessoa_id: null, deleted_at: null,
+        },
+      ];
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const doDia = (result.current.totais.faltasParaDesconto ?? []).filter((f) => f.data === "2026-09-01");
+      expect(doDia).toEqual([expect.objectContaining({ minutos: 3, motivo_codigo: "atraso", semRegisto: false })]);
     });
   });
 

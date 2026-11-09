@@ -8,7 +8,6 @@
  */
 import type { PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import {
-  TOLERANCIA_ATRASO_MINUTOS,
   minutosDeHora,
   motivoValido,
 } from "@/components/rh-exemplo/lib/horarioTipos";
@@ -187,59 +186,14 @@ export function decidirJustificacaoFalta(
 
 /* ---- Desconto ---- */
 
-export type RazaoDesconto =
-  | "anulada"
-  | "justificada_paga"
-  | "atraso_dentro_tolerancia"
-  | "sem_justificacao"
-  | "pendente_documento"
-  | "justificada_nao_paga"
-  | "recusada";
-
-export interface DescontoDaFalta {
-  desconta: boolean;
-  minutos: number;
-  valor: number;
-  razao: RazaoDesconto;
-  /** Pendente de documento: conta ja, mas pode deixar de contar se for justificada e paga. */
-  provisorio: boolean;
-}
-
-export interface FaltaParaDesconto {
-  minutos: number;
-  estado: EstadoFalta;
-  justificacao_estado: EstadoJustificacao;
-  remunerada: boolean;
-  motivo_codigo: MotivoFalta;
-}
+// A regra vive em `@/lib/hr/descontoFalta` e e a MESMA do processamento salarial: o cartao e o processamento
+// dao sempre o mesmo numero para a mesma falta.
+export { descontoDaFalta, totalDeDescontos } from "@/lib/hr/descontoFalta";
+export type { RazaoDesconto, DescontoDaFalta, FaltaParaDesconto } from "@/lib/hr/descontoFalta";
 
 const arredondar = (valor: number): number => Math.round(valor * 100) / 100;
 
 /** Valor da hora de exemplo: retribuicao mensal / (horas semanais x 4), como nos exemplos do documento (1000 / 160). */
 export function valorHoraDeExemplo(valorMensal: number, horasSemanais: number): number {
   return horasSemanais > 0 ? arredondar(valorMensal / (horasSemanais * 4)) : 0;
-}
-
-export function descontoDaFalta(
-  falta: FaltaParaDesconto,
-  valorHora: number,
-  tolerancia: number = TOLERANCIA_ATRASO_MINUTOS,
-): DescontoDaFalta {
-  const sem = (razao: RazaoDesconto): DescontoDaFalta => ({ desconta: false, minutos: 0, valor: 0, razao, provisorio: false });
-  if (falta.estado !== "activa") return sem("anulada");
-  if (falta.justificacao_estado === "justificada" && falta.remunerada) return sem("justificada_paga");
-  if (falta.motivo_codigo === "atraso" && falta.minutos <= tolerancia) return sem("atraso_dentro_tolerancia");
-  const razao: RazaoDesconto =
-    falta.justificacao_estado === "justificada" ? "justificada_nao_paga" : (falta.justificacao_estado as RazaoDesconto);
-  return {
-    desconta: true,
-    minutos: falta.minutos,
-    valor: arredondar((falta.minutos / 60) * valorHora),
-    razao,
-    provisorio: falta.justificacao_estado === "pendente_documento",
-  };
-}
-
-export function totalDeDescontos(faltas: FaltaParaDesconto[], valorHora: number, tolerancia?: number): number {
-  return arredondar(faltas.reduce((soma, f) => soma + descontoDaFalta(f, valorHora, tolerancia).valor, 0));
 }

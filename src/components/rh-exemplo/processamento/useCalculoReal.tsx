@@ -159,6 +159,11 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.desviosChave ?? "",
     [recolhas, chave],
   );
+  /** A assinatura das faltas que o calculo desta pessoa usou: o fecho compara-a com a das faltas de agora. */
+  const chaveDeFaltasUsada = useCallback(
+    (pessoaId: string) => recolhas[`${chave}:${pessoaId}`]?.totais?.faltasChave ?? "",
+    [recolhas, chave],
+  );
   const semDesvios = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.totais?.desviosNaoLidos === true).length;
   /** Dias com desvio por validar em todas as pessoas: contam provisoriamente o planeado ate se validarem. */
   const diasPorValidar = pessoasActivas.reduce((soma, p) => soma + (recolhas[`${chave}:${p.id}`]?.totais?.diasPorValidar ?? 0), 0);
@@ -184,6 +189,7 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     assiduidadeIncompleta,
     desviosNaoLidos,
     chaveDeDesviosUsada,
+    chaveDeFaltasUsada,
     /** Quantas pessoas ficaram com a margem ou os desvios por ler. */
     semDesvios,
     diasPorValidar,
@@ -219,7 +225,7 @@ function RecolhaOculta({ pessoaId, ano, mes, intervalo, faixasNoturnas, aoTermin
     aoTerminar(pessoaId, {
       totais: relatorio.totais,
       dias: relatorio.dias,
-      incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro === true,
+      incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro === true,
     });
     // `aoTerminar` muda com o mes, mas so deve disparar quando o relatorio acaba de carregar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,7 +274,7 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
     dados,
     retribuicaoRecusada: retribuicoesHook.recusado,
     direitosLidos: dados.direitosLidos,
-    incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro === true,
+    incompleta: relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro === true,
     periodoAberto: dados.periodoHook.periodo?.estado === "aberto",
     temPeriodo: dados.periodoHook.periodo !== null,
   };

@@ -49,6 +49,8 @@ import { diasDoPeriodo, periodoDaFolha, type IntervaloDaFolha } from "@/lib/hr/p
 import { indexarFeriados, eFeriado, type FeriadoOrg, type IndiceFeriados } from "@/lib/hr/ausencias";
 import type { HorarioPlaneado } from "@/types/hr";
 import type { Falta } from "@/types/hrAssiduidade";
+import type { FaltaDoPeriodo } from "@/lib/hr/descontoFalta";
+import { chaveDeAssiduidade } from "@/lib/hr/faltasFecho";
 import type { AusenciaDia, AusenciaTipo, CategoriaAusencia } from "@/types/hrAusencias";
 import type { RealizadoComCorreccao } from "@/hooks/useAssiduidadeDaPessoa";
 import { chaveDeDesvios, contarDia, linhaDaChaveDeDesvios, margemDoDia, type DesvioDoDia, type DesvioLido, type VersaoMargem } from "@/lib/hr/desviosRelatorio";
@@ -183,6 +185,13 @@ export interface DiaRelatorioMensal {
    * Salarial paga; `horasExtraNoturnasMinutos` (janela fixa 22:00-07:00 sobre o excedente) fica para os relatorios.
    */
   minutosNoturnosPorFaixa?: number[];
+  /**
+   * As faltas deste dia que podem descontar (desconto de faltas por falta, ver `descontoFalta.ts`): as faltas marcadas em
+   * vigor e, num dia `sem_registo`, uma falta NAO justificada (`semRegisto`) com o defice do dia. Opcional (fixtures antigos).
+   */
+  faltasParaDesconto?: (FaltaDoPeriodo & { semRegisto?: boolean })[];
+  /** Maximo de minutos de falta do dia depois de uma ausencia remunerada (total = 0; parcial = o resto). Ausente = sem limite. */
+  limiteFaltaMinutos?: number;
 }
 
 export interface TotaisRelatorioMensal {
@@ -257,6 +266,15 @@ export interface TotaisRelatorioMensal {
    * Opcional, mesmo precedente de `diasPlaneados`.
    */
   minutosAusenciaRemunerada?: number;
+  /** As faltas do periodo que podem descontar, uma por falta (ver `DiaRelatorioMensal.faltasParaDesconto`). */
+  faltasParaDesconto?: (FaltaDoPeriodo & { semRegisto?: boolean })[];
+  /** Por dia (ISO), o maximo de minutos de falta depois de uma ausencia remunerada. So os dias com esse caso. */
+  limiteFaltaPorDia?: Record<string, number>;
+  /**
+   * Assinatura do que o calculo do desconto usou: faltas (em vigor e anuladas), picagens em vigor e ausencias aprovadas. O fecho
+   * recusa gravar um calculo mais antigo que estes dados.
+   */
+  faltasChave?: string;
   /** A soma, por faixa noturna da regra, dos minutos realizados nos dias que contam. So existe com faixas. */
   minutosNoturnosPorFaixa?: number[];
 }
@@ -458,6 +476,8 @@ export function useRelatorioAssiduidadeMensal(
   // Uma falha NAO por permissao (rede, base) em qualquer leitura, ou a excepcao geral do carregamento: o relatorio
   // nao pode passar por completo so porque as linhas vieram vazias.
   const [erroDeLeitura, setErroDeLeitura] = useState(false);
+  /** Os feriados nao se leram por falta de permissao: o calculo nao os conhece (um feriado trabalhado ou descansado muda o dia). */
+  const [feriadosRecusados, setFeriadosRecusados] = useState(false);
 
   const de =intervalo?.de ?? periodoDaFolha(ano, mes + 1).de;
   const ate = intervalo?.ate ?? periodoDaFolha(ano, mes + 1).ate;
@@ -477,6 +497,7 @@ export function useRelatorioAssiduidadeMensal(
       setScheduleSettings(vazio<ScheduleSettingsTimezone>());
       setDesviosDoPeriodo(SEM_DESVIOS);
       setErroDeLeitura(false);
+      setFeriadosRecusados(false);
       setLoading(false);
       return;
     }
@@ -543,6 +564,7 @@ export function useRelatorioAssiduidadeMensal(
       setAusenciasTipos(osTiposDeAusencia);
       setObras(asObras);
       setFeriados(indexarFeriados(osFeriados.linhas));
+      setFeriadosRecusados(osFeriados.recusado);
       setScheduleSettings(asScheduleSettings);
       setDesviosDoPeriodo(osDesvios);
       setErroDeLeitura(
@@ -593,6 +615,10 @@ export function useRelatorioAssiduidadeMensal(
       (linha) => !linha.deleted_at,
     );
     const faltasEmVigor = emVigor(faltas.linhas, LEITOR_FALTAS);
+    // Um dia com uma falta ANULADA (o RH anulou, ou uma ausencia aprovada a substituiu) esta TRATADO: nao volta a ser
+    // "sem_registo" nem desconta. `emVigor` deixa as anuladas de fora (`LEITOR_FALTAS.viva`), mas a leitura de
+    // `pessoas_faltas` nao filtra por estado, por isso estao em `faltas.linhas`.
+    const diasComFaltaAnulada = new Set(faltas.linhas.filter((f) => f.estado === "anulada").map((f) => f.data));
 
     const hoje = isoDeHoje(timezoneDaOrganizacao);
 
@@ -607,6 +633,12 @@ export function useRelatorioAssiduidadeMensal(
       const planeadoMinutos = minutosPlaneadosDoDia(planeado.linhas, iso);
       const realizadoMinutos = realizadoDoDia.reduce((soma, linha) => soma + (linha.minutos ?? 0), 0);
       const minutosEmFalta = faltasDoDia.reduce((soma, falta) => soma + (falta.minutos ?? 0), 0);
+
+      // A parte do planeado que a ausencia aprovada do dia cobre (so uma ausencia PARCIAL chega ao calculo da lacuna).
+      const minutosCobertosPorAusencia = ausenciaDoDia
+        ? Math.round(planeadoMinutos * Math.min(ausenciaDoDia.fraccao_dia, 1))
+        : 0;
+      const ausenciaPaga = ausenciaDoDia ? remuneradaPorTipoId.get(ausenciaDoDia.tipo_id) !== false : false;
 
       let estado: EstadoDiaRelatorio = "normal";
       let categoriaAusencia: CategoriaAusencia | null = null;
@@ -640,13 +672,11 @@ export function useRelatorioAssiduidadeMensal(
         // buraco por esclarecer. Um dia com dois blocos planeados em que so
         // um foi picado (realizado > 0 mas < planeado) e tao "sem registo"
         // quanto um dia sem nenhuma picagem: falta o resto, e nada o explica.
-        realizadoMinutos < planeadoMinutos &&
+        // Uma ausencia aprovada PARCIAL (ex. fraccao_dia 0.5) nao cai no ramo "ausencia" acima (que so substitui o dia
+        // inteiro) e explica so a sua parte: o que fica por explicar e o planeado menos a parte coberta.
+        realizadoMinutos < planeadoMinutos - minutosCobertosPorAusencia &&
         minutosEmFalta === 0 &&
-        // Uma ausencia aprovada PARCIAL (ex. fraccao_dia 0.5) nao cai no ramo
-        // "ausencia" acima (que so substitui o dia inteiro), mas ja explica
-        // parte do buraco -- nao deve ficar "por esclarecer" so porque a
-        // fraccao nao chega a 1.
-        !ausenciaDoDia &&
+        !diasComFaltaAnulada.has(iso) &&
         // Hoje e o futuro ainda podem vir a ter picagem -- so um dia que ja
         // passou e um buraco por esclarecer.
         iso < hoje
@@ -679,6 +709,56 @@ export function useRelatorioAssiduidadeMensal(
         extraAprovadoMin: 0,
       });
       const horasExtraMinutos = extraValidadoMinutos;
+      // Desconto por falta: as faltas marcadas e, num dia sem registo (sem falta e sem picagem), uma falta nao justificada
+      // com o defice do dia (desconta ate o RH aprovar uma justificacao do dia).
+      const faltasParaDesconto: (FaltaDoPeriodo & { semRegisto?: boolean })[] = faltasDoDia.map((falta) => ({
+        data: iso,
+        minutos: falta.minutos ?? 0,
+        estado: falta.estado,
+        justificacao_estado: falta.justificacao_estado,
+        remunerada: falta.remunerada,
+        motivo_codigo: falta.motivo_codigo,
+      }));
+      if (estado === "sem_registo") {
+        faltasParaDesconto.push({
+          data: iso,
+          // O que falta depois do picado e da parte que a ausencia (parcial) cobre. Com picagem parcial e um atraso
+          // (a tolerancia aplica-se); sem picagem nenhuma e um dia sem registo (conta no aviso).
+          minutos: Math.max(planeadoMinutos - minutosCobertosPorAusencia - contadoMinutos, 0),
+          estado: "activa",
+          justificacao_estado: "sem_justificacao",
+          remunerada: false,
+          motivo_codigo: realizadoMinutos > 0 ? "atraso" : "ausencia_nao_comunicada",
+          semRegisto: realizadoMinutos === 0,
+        });
+      }
+      // Ausencia NAO remunerada (licenca sem vencimento): desconta o planeado coberto (o dia inteiro, ou a fraccao nao
+      // paga), como falta sintetica nao justificada. Vai primeiro, para o limite do dia a consumir antes das marcadas.
+      if (ausenciaDoDia && !ausenciaPaga) {
+        const naoPagos =
+          ausenciaDoDia.fraccao_dia >= 1 ? Math.max(planeadoMinutos - realizadoMinutos, 0) : minutosCobertosPorAusencia;
+        if (naoPagos > 0) {
+          faltasParaDesconto.unshift({
+            data: iso,
+            minutos: naoPagos,
+            estado: "activa",
+            justificacao_estado: "sem_justificacao",
+            remunerada: false,
+            motivo_codigo: "outro",
+            ausenciaNaoPaga: true,
+          });
+        }
+      }
+      // Limite diario de minutos de falta. Ausencia remunerada: dia inteiro cobre tudo (0); parcial cobre a sua parte.
+      // Ausencia nao remunerada: nunca mais do que o planeado do dia (a sintetica e uma falta marcada nao somam a dobrar).
+      let limiteFaltaMinutos: number | undefined;
+      if (ausenciaDoDia) {
+        limiteFaltaMinutos = !ausenciaPaga
+          ? planeadoMinutos
+          : ausenciaDoDia.fraccao_dia >= 1
+            ? 0
+            : Math.max(planeadoMinutos - minutosCobertosPorAusencia, 0);
+      }
       const excedenteIntervalos = subtrairIntervalos(
         realizadoIntervalosDoDia,
         planeadoIntervalosRelatorio,
@@ -714,6 +794,8 @@ export function useRelatorioAssiduidadeMensal(
         extraValidadoMinutos,
         desvio,
         horasExtraNoturnasMinutos: Math.min(horasExtraMinutos, minutosNoturnosDoExcedente),
+        faltasParaDesconto,
+        ...(limiteFaltaMinutos !== undefined ? { limiteFaltaMinutos } : {}),
         ...(noturnosPorFaixa ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
       });
     }
@@ -854,8 +936,17 @@ export function useRelatorioAssiduidadeMensal(
         ),
       );
 
+      const faltasParaDesconto = dias.flatMap((dia) => dia.faltasParaDesconto ?? []);
+      const limiteFaltaPorDia: Record<string, number> = {};
+      for (const dia of dias) {
+        if (dia.limiteFaltaMinutos !== undefined) limiteFaltaPorDia[dia.iso] = dia.limiteFaltaMinutos;
+      }
+
       return {
         ...acumulado,
+        faltasParaDesconto,
+        limiteFaltaPorDia,
+        faltasChave: chaveDeAssiduidade({ faltas: faltas.linhas, realizado: realizado.linhas, ausencias: ausenciasDias.linhas }),
         minutosExtraNormal,
         margemConfigurada: temMargemLigada(desviosDoPeriodo.versoes),
         desviosNaoLidos: desviosDoPeriodo.naoLidos,
@@ -864,7 +955,7 @@ export function useRelatorioAssiduidadeMensal(
         ...(faixasNoturnas.length ? { minutosNoturnosPorFaixa: noturnosPorFaixa } : {}),
       };
     },
-    [dias, faixasNoturnas, desviosDoPeriodo],
+    [dias, faixasNoturnas, desviosDoPeriodo, faltas.linhas, realizado.linhas, ausenciasDias.linhas],
   );
 
   const executar = useCallback(
@@ -911,6 +1002,10 @@ export function useRelatorioAssiduidadeMensal(
     obrasRecusadas: obras.recusado,
     realizadoRecusado: realizado.recusado,
     faltasRecusadas: faltas.recusado,
+    /** As ausencias aprovadas, os feriados ou os tipos de ausencia nao se leram por permissao: o calculo estaria errado. */
+    ausenciasRecusadas: ausenciasDias.recusado,
+    feriadosRecusados,
+    tiposRecusados: ausenciasTipos.recusado,
     planeadoRecusado: planeado.recusado,
     /** Alguma leitura falhou (nao por permissao): os totais podem estar incompletos. */
     erro: erroDeLeitura,

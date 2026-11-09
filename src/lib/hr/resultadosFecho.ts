@@ -34,6 +34,8 @@ const AVISOS_CONHECIDOS: ReadonlySet<string> = new Set<AvisoProcessamento>([
   "duodecimos_por_decidir",
   "sem_regra_salarial",
   "sem_horas_planeadas_no_mes",
+  "faltas_provisorias",
+  "dias_sem_picagem_descontados",
 ]);
 
 export interface TotaisGravados {

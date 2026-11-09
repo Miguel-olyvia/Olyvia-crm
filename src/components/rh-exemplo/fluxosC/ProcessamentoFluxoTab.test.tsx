@@ -16,6 +16,7 @@ const fn = vi.hoisted(() => ({
   sucesso: vi.fn(),
   erro: vi.fn(),
   preparar: vi.fn(),
+  faltas: vi.fn(),
   recalcular: vi.fn(),
 }));
 const estado = vi.hoisted(() => ({
@@ -31,6 +32,8 @@ const SEM_REGRAS_PERIODO: never[] = [];
 vi.mock("@/hooks/usePeriodoFolhaRegras", () => ({ usePeriodoFolhaRegras: () => ({ regras: SEM_REGRAS_PERIODO, estado: "ok", isLoading: false }) }));
 vi.mock("@/lib/toast", () => ({ toast: { success: fn.sucesso, error: fn.erro } }));
 // A preparacao do fecho (detetar desvios e ler as assinaturas) entra simulada: aqui nao ha base.
+// A conferencia das faltas do periodo (le `pessoas_faltas`) entra simulada: aqui nao ha base.
+vi.mock("@/lib/hr/faltasFecho", () => ({ conferirFaltasDoFecho: (...args: unknown[]) => fn.faltas(...args) }));
 vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", () => ({ prepararFechoComDesvios: (...args: unknown[]) => fn.preparar(...args) }));
 vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
   usePermissions: () => ({ hasPermission: (chave: string) => estado.permissoes.has(chave), loading: false }),
@@ -141,6 +144,7 @@ beforeEach(() => {
   fn.anular.mockResolvedValue(null);
   fn.criarPorQuantidade.mockResolvedValue(null);
   fn.preparar.mockResolvedValue({ ok: true, assinaturas: new Map() });
+  fn.faltas.mockResolvedValue({ ok: true });
   estado.permissoes = new Set(TUDO);
   estado.calculo = calculo();
   estado.fecho = { obrigatorias: ["p1", "p2"], estado: "ok" };
@@ -345,6 +349,32 @@ describe("fechar grava o resultado de cada pessoa", () => {
     await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
     expect(fn.fechar).not.toHaveBeenCalled();
     await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("mudou 3 dia(s)")));
+  });
+
+  it("antes de gravar confere as faltas com as que o calculo usou (a chave de cada pessoa)", async () => {
+    estado.calculo = calculo({ chaveDeFaltasUsada: (id: string) => (id === "p1" ? "faltas-p1" : "") });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+    expect(fn.faltas).toHaveBeenCalledWith({ organizationId: "org-1", de: "2026-10-01", ate: "2026-10-31", calculadas: new Map([["p1", "faltas-p1"], ["p2", ""]]) });
+    expect(fn.faltas.mock.invocationCallOrder[0]).toBeLessThan(fn.fechar.mock.invocationCallOrder[0]);
+  });
+
+  it("se as faltas mudaram depois do calculo (justificacao aprovada, falta anulada), nao fecha: relê o calculo e di-lo", async () => {
+    fn.faltas.mockResolvedValue({ ok: false, motivo: "mudaram", mudou: 2 });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.recalcular).toHaveBeenCalledTimes(1));
+    expect(fn.fechar).not.toHaveBeenCalled();
+    await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("2 pessoa(s)")));
+  });
+
+  it("um erro a ler as faltas impede o fecho", async () => {
+    fn.faltas.mockResolvedValue({ ok: false, motivo: "erro" });
+    abrir();
+    await fechar();
+    await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(expect.stringContaining("faltas")));
+    expect(fn.fechar).not.toHaveBeenCalled();
   });
 
   it("um erro a detetar os desvios ou a ler as assinaturas impede o fecho e aparece escrito", async () => {
