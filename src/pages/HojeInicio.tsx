@@ -13,8 +13,11 @@ export default function HojeInicio() {
   const { hasPermission, loading } = usePermissions();
   const negocios = useNegociosAtivos({ habilitado: !loading && hasPermission("pessoas.view") });
   // 30/10 (20270101340000): quem tem um papel no Negócio pelo RH (o técnico, o Financeiro…) também abre no Hoje, sem pessoas.view
-  const papel = useTemPapelNegocio({ habilitado: !loading && !hasPermission("pessoas.view") });
+  // 09/11: o perfil «Ser técnico de obra» (negocios.obra.tecnico) abre sempre no Hoje do técnico (sem a conta ligada ao RH, o aviso).
+  // O código vai literal: a guarda do editor (garantiaPermissoes.test.ts) procura-o nas chamadas a hasPermission.
+  const tecnicoPorPerfil = hasPermission("negocios.obra.tecnico");
+  const papel = useTemPapelNegocio({ habilitado: !loading && (!hasPermission("pessoas.view") || tecnicoPorPerfil) });
   if (loading || negocios.isLoading || papel.loading) return aCarregar;
-  const hojeV1 = (negocios.ativo && hasPermission("pessoas.view")) || papel.tem;
+  const hojeV1 = (negocios.ativo && hasPermission("pessoas.view")) || papel.tem || tecnicoPorPerfil;
   return <Suspense fallback={aCarregar}>{hojeV1 ? <NegociosEmylia vistaInicial="hoje" /> : <Home />}</Suspense>;
 }

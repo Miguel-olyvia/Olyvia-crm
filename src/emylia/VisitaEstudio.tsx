@@ -233,7 +233,7 @@ export function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; lin
         else { const prod = (K.produtos ?? []).find((x) => x.id === g.alvo!.id); if (prod) { ctx.A.produto(d.id, prod, g.q); pr++; } }
       }
     });
-    feito(`Nas necessidades: ${s} ${s === 1 ? "serviço" : "serviços"} e ${pr} ${pr === 1 ? "produto" : "produtos"} do Estúdio. Confira-os em «Fechar a visita».`);
+    feito(`Nas necessidades: ${s} ${s === 1 ? "serviço" : "serviços"} e ${pr} ${pr === 1 ? "produto" : "produtos"} do Estúdio. Confira-os mais abaixo, em «Necessidades do cliente».`);
   };
   return (
     <section data-do-estudio aria-labelledby={`do-estudio-${d.id}`} className="space-y-3 rounded-2xl border-2 border-primary/40 bg-card p-4 shadow-[var(--shadow-sm)]">

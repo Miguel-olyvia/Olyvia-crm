@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, nfmt, type Negocio } from "./motor";
+import { rotuloOficios } from "./equipa/tecnicos";
 import { hfmt } from "./horasFmt";
 import type { Ctx } from "./pecas";
 import { COR_FASE } from "./planoObra";
@@ -36,16 +37,18 @@ const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Bo
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
 const RAPIDAS = ["Correu como previsto.", "Falta acabar amanhã.", "Faltou material.", "O cliente pediu uma alteração."];
 
-/** 23/10: o técnico real sem técnico de obra ligado à conta: em vez de ver (e poder trocar para) a agenda de outro técnico, o aviso. */
-function SemTecnicoLigado() {
+/** 23/10: o técnico real sem técnico de obra ligado à conta: em vez de ver (e poder trocar para) a agenda de outro técnico, o aviso.
+ *  09/11: também o perfil «Ser técnico de obra» sem a conta ligada a uma pessoa do RH (NegociosEmylia). */
+export function SemTecnicoLigado() {
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pb-28 pt-8 sm:px-8">
       <div className={cn(CARTAO, "p-6")} role="note">
         <HardHat className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">A sua conta não está ligada a um técnico</h1>
         <p className="mt-2 text-[15px] text-muted-foreground">
-          Sem essa ligação, a Olyvia não sabe que tarefas e que agenda são suas. Peça à Direção para ligar a sua conta ao seu técnico de obra
-          em Utilizadores (campo "Técnico de obra") e volte a entrar.
+          Sem essa ligação, a Olyvia não sabe que tarefas e que agenda são suas. Peça a quem gere os utilizadores para ligar a sua conta à
+          sua ficha do RH (Utilizadores e perfis › o seu utilizador › campo "Pessoa do RH"). Essa pessoa tem de ter um cargo técnico de obra
+          ou o perfil "Técnico de obra".
         </p>
       </div>
     </div>
@@ -59,7 +62,9 @@ function SemTecnicos() {
       <div className={cn(CARTAO, "p-6")} role="note">
         <HardHat className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">Ainda não há técnicos de obra</h1>
-        <p className="mt-2 text-[15px] text-muted-foreground">Crie-os em Utilizadores (campo "Técnico de obra") para ver aqui o dia de cada um.</p>
+        <p className="mt-2 text-[15px] text-muted-foreground">
+          Dê a uma pessoa do RH um cargo técnico de obra, ou ligue um utilizador com o perfil "Técnico de obra" à sua ficha do RH.
+        </p>
       </div>
     </div>
   );
@@ -106,7 +111,7 @@ export function HojeTecnico(ctx: Ctx) {
         <div className="min-w-0">
           <h1 className="text-3xl font-semibold tracking-tight">{saudacao(agora.getHours())}, {tec.n.split(" ")[0]}</h1>
           {/* 30/10: o ofício das tarefas de hoje (um técnico do RH com vários ofícios); sem tarefas, o da ficha */}
-          <p className="text-[15px] text-muted-foreground">{[...new Set(hoje.map((x) => x.t.sk).filter(Boolean))].join(" · ") || tec.sk}</p>
+          <p className="text-[15px] text-muted-foreground">{[...new Set(hoje.map((x) => x.t.sk).filter(Boolean))].join(" · ") || rotuloOficios(tec)}</p>
         </div>
       </div>
       <p className="mt-3 text-lg text-muted-foreground">

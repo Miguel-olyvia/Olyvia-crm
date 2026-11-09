@@ -101,7 +101,7 @@ describe("permissões em uso: a lista", () => {
       "pessoas.view", "pessoas.create", "pessoas.edit", "pessoas.delete", "pessoas.reopen", "pessoas.config",
       "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.orcamento.editar", "negocios.margem.aprovar",
       "negocios.proposta.enviar", "negocios.contrato.editar", "negocios.obra.planear", "negocios.obra.executar", "negocios.obra.materiais",
-      "negocios.contacto.registar", "negocios.visita.gerir", "negocios.proposta.decidir", "negocios.obra.imprevistos", "negocios.obra.fechar",
+      "negocios.obra.tecnico", "negocios.contacto.registar", "negocios.visita.gerir", "negocios.proposta.decidir", "negocios.obra.imprevistos", "negocios.obra.fechar",
       "negocios.perder",
       "platform.support_access.view", "platform.auth_audit_log.view",
     ].forEach((c) => expect(CODIGOS_EM_USO).toContain(c));
@@ -124,7 +124,7 @@ describe("permissões em uso: a lista", () => {
     expect(negocios?.subgrupos.map((s) => s.rotulo)).toEqual([
       "Geral", "Pessoas: leads e clientes", "Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra",
     ]);
-    expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(15);
+    expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(16);
     const codigosDe = (rotulo: string) => negocios?.subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo).sort();
     expect(codigosDe("Geral")).toContain("negocios.perder");
     expect(codigosDe("Por contactar")).toEqual(["leads.assign", "leads.create", "leads.view"]);
@@ -136,6 +136,7 @@ describe("permissões em uso: a lista", () => {
     ]);
     expect(codigosDe("Obra")).toEqual([
       "negocios.obra.executar", "negocios.obra.fechar", "negocios.obra.imprevistos", "negocios.obra.materiais", "negocios.obra.planear",
+      "negocios.obra.tecnico",
     ]);
     expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("pessoas."))).toHaveLength(6);
   });

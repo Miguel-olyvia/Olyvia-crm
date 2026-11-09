@@ -402,18 +402,25 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     if (simples && comEstudio) {
       const pr = projetoDoNegocio(d.f);
       const ePecas = E(PECAS_WC), eDecisao = E(DECISAO);
+      // 9/11 (Rúben: «o fluxo simplificado, com tudo preenchido automaticamente: apenas exterior, interior, depois o Estúdio»): sem
+      // «Visitas» nem «Área de intervenção» na lista; a área (a gravação preenche-a) e o fecho ficam dentro do passo Estúdio, dobrados
       const ate = passos.findIndex((x) => x.id === "medidas" || x.id === "nec");
+      const areaId = E(AREA).titulo, passoArea = passos.find((x) => x.id === areaId);
+      const faltaArea = (aValidar(d, AREA.titulo) ? emFalta(GA, d.f).length : 0) + (aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim" ? 1 : 0);
+      const faltaMed = aValidar(d, "medidas") ? nMed - medOk : 0;
+      const faltaNec = aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0;
       passos = [
-        ...passos.slice(0, ate),
-        { id: "estudio", titulo: "Estúdio", icone: Sparkles, feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0,
-          resumo: pr ? ["projeto guardado"] : ["por abrir"], corpo: <EstudioNaVisita ctx={ctx} d={d} /> },
-        { id: "fecho", titulo: "Fechar a visita", icone: CalendarCheck, feito: medOk === nMed && passoNec.feito === true,
-          resumo: [d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : "", d.f.decisao_ate ? `decide até ${d.f.decisao_ate}` : ""].filter(Boolean),
-          corpo: <FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
-            ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: aValidar(d, "medidas") ? nMed - medOk : 0 }]),
-            { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0 },
+        ...passos.slice(0, ate).filter((x) => x.id !== "visitas" && x.id !== areaId),
+        { id: "estudio", titulo: "Estúdio", icone: Sparkles,
+          feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0 && medOk === nMed && passoNec.feito === true,
+          falta: faltaArea + faltaMed + faltaNec || undefined,
+          resumo: [pr ? "projeto guardado" : "por abrir", d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : ""].filter(Boolean),
+          corpo: <div className="space-y-10"><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+            ...(passoArea ? [{ id: "area", titulo: passoArea.titulo, resumo: passoArea.resumo.join(" · ") || "por preencher", corpo: passoArea.corpo, falta: faltaArea }] : []),
+            ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: faltaMed }]),
+            { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: faltaNec },
             ...(ePecas.oculto || !comWC ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
-          ]} /> },
+          ]} /></div> },
       ];
     }
   } else if (fase === 3 && o) {
@@ -475,7 +482,6 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     const gr = TODOS.find((x) => x.titulo === ps.id);
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta(gr === AREA ? gruposArea(S.campos, d.f).map(E) : [E(gr)], d.f).length;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
-    if (ps.id === "fecho") ps.falta = ((aValidar(d, "medidas") ? camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length : 0) + (aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0)) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;
     if (ps.id === "nec" && simples && aValidar(d, ESCOLHAS.titulo) && !E(ESCOLHAS).oculto) ps.falta = (ps.falta || 0) + emFalta([E(ESCOLHAS)], d.f).length || undefined;

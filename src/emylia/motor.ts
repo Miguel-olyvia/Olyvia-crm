@@ -409,7 +409,9 @@ export interface Negocio {
   /** prod: produtos do Catálogo escolhidos na visita; manter / clienteCompra: as respostas por serviço que obriga a produto (produtosVisita.ts). */
   visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean;
     /** As fotografias por etapa da visita (fotos é o total). Em falta: reparte-se o total (fotosPor). */
-    fotosPor?: Partial<Record<"exterior" | "interior" | "area", number>> } & NecVisita;
+    fotosPor?: Partial<Record<"exterior" | "interior" | "area", number>>;
+    /** 9/11: as imagens das fotografias por etapa, só no protótipo (dataURL pequeno); com a base ligada vivem em negocio_visita_fotos. */
+    fotosImg?: Partial<Record<"exterior" | "interior" | "area", string[]>> } & NecVisita;
   orc: Orcamento | null;
   fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null;
     /** 22/10: a fatura emitida no Eticadata e registada aqui (V1): a última leitura do ERP (erpEticadata.ts). Sem ela, a fatura é a simulada. */
@@ -3727,7 +3729,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (q > 0) { garantirServico(S, sid); d.visita.extra[sid] = q; } else delete d.visita.extra[sid];
     },
     /** Uma fotografia numa etapa da visita (por omissão, a área); o total sobe também. */
-    foto(id: number, etapa: EtapaFotos = "area") { if (!exigePerm("visita.gerir")) return; const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++; },
+    foto(id: number, etapa: EtapaFotos = "area", img?: string) {
+      if (!exigePerm("visita.gerir")) return;
+      const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++;
+      // 9/11: no protótipo a imagem fica no estado (com a base ligada, grava-se à parte e aqui só sobe a contagem)
+      if (img) { v.fotosImg ??= {}; (v.fotosImg[etapa] ??= []).push(img); }
+    },
+    /** 9/11: apagar uma fotografia de uma etapa (k: a posição da imagem no protótipo; sem k, só desce a contagem). */
+    tirarFoto(id: number, etapa: EtapaFotos, k?: number) {
+      if (!exigePerm("visita.gerir")) return;
+      const v = deal(id).visita; v.fotosPor = fotosPor(v);
+      if (!(v.fotosPor[etapa]! > 0)) return;
+      v.fotosPor[etapa] = v.fotosPor[etapa]! - 1; v.fotos = Math.max(0, v.fotos - 1);
+      if (k != null) v.fotosImg?.[etapa]?.splice(k, 1);
+    },
     recalc(id: number, i: number) {
       const d = deal(id), l = d.orc!.linhas[i];
       // 22/10 (fase 2): depois de enviada, o custo da proposta está congelado (como o preço)

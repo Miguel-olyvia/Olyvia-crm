@@ -16,6 +16,10 @@
  * desactivados ("do cargo X"); aqui escolhem-se so os extras, e e so isso que se
  * grava. O custo/hora diz de onde vem: a retribuicao ou, sem ela, o salario do
  * cargo.
+ *
+ * 09/11: tambem quem tem uma conta ligada com o perfil "Ser tecnico de obra"
+ * (negocios.obra.tecnico; `tecnico_por_perfil` de rh_ler_oficios_pessoa) tem
+ * oficios: so os extras, sem cargo.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -40,6 +44,8 @@ interface Oficio {
 interface Lido {
   /** Cargo vigente tecnico de obra. Sem o campo (base antiga): conta como tecnica. */
   tecnica: boolean;
+  /** 09/11: tecnico de obra pelo perfil "Ser tecnico de obra" da conta ligada. Sem o campo (base antiga): nao. */
+  tecnico_por_perfil: boolean;
   cargo: { id: string; nome: string } | null;
   oficios: Oficio[];
   custo_hora: number | null;
@@ -73,7 +79,7 @@ export function PessoaOficiosObraCard({ pessoaId, organizationId, podeEditar }: 
       return;
     }
     const l: Lido = {
-      tecnica: true, cargo: null, oficios: [], custo_hora: null, origem_custo: null, ve_custo: false,
+      tecnica: true, tecnico_por_perfil: false, cargo: null, oficios: [], custo_hora: null, origem_custo: null, ve_custo: false,
       ...(data as Partial<Lido> | null),
     };
     setErro(null);
@@ -85,8 +91,8 @@ export function PessoaOficiosObraCard({ pessoaId, organizationId, podeEditar }: 
     void carregar();
   }, [carregar]);
 
-  // So para colaboradores com cargo tecnico de obra: os outros nao tem oficios.
-  if (lido && !lido.tecnica) return null;
+  // So para colaboradores com cargo tecnico de obra ou o perfil de tecnico de obra: os outros nao tem oficios.
+  if (lido && !lido.tecnica && !lido.tecnico_por_perfil) return null;
 
   const extrasAntes = extrasDe(lido);
   const alterado = extrasAntes.size !== escolhidos.size || [...escolhidos].some((id) => !extrasAntes.has(id));
