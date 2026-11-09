@@ -110,13 +110,15 @@ export function deBase(j: unknown, ids: IdsServico): NegocioLido {
 
 /** `campos`: os ajustes da organização (S.campos), para traduzir as respostas do formulário para as perguntas da fase. A foto e o conflito()
  *  passam por aqui, por isso veem as mesmas sugestões que o ecrã. */
-export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico, campos?: CfgCampos): Promise<NegocioLido[]> {
+export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico, campos?: CfgCampos,
+  opcoes: { semSugestoes?: boolean } = {}): Promise<NegocioLido[]> {
   const [neg, obras, autores, sugestoes] = await Promise.all([
     sb.rpc("neg_ler_negocios" as never, { p_org: org } as never),
     sb.rpc("obra_ler_negocios" as never, { p_org: org } as never),
     // 3/11 (20270105100000): quem fez cada entrada do histórico; sem a função (ou com erro), o histórico fica sem nomes
     sb.rpc("neg_historico_autores" as never, { p_org: org } as never),
-    lerSugestoes(sb, org),
+    // 09/11 (20270111100000): quem só lê as obras (sem pessoas.view, com negocios.obra.executar) não pode ler as sugestões: nem se pedem
+    opcoes.semSugestoes ? Promise.resolve([] as SugestaoBase[]) : lerSugestoes(sb, org),
   ]);
   if (neg.error) throw new Error(neg.error.message || "Não foi possível ler os negócios.");
   if (obras.error && !semFuncao(obras.error)) throw new Error(obras.error.message || "Não foi possível ler as obras.");

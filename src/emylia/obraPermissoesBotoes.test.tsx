@@ -203,11 +203,17 @@ describe("o motor: as ações de obra que não pediam permissão", () => {
     expect(avisos.some((a) => a.msg === SEM_PERM["obra.imprevistos"].msg)).toBe(false);
   });
 
-  it("o papel continua a contar: com as permissões mas no papel Comercial, os problemas recusam", () => {
-    const { S, d, A, avisos } = montar([]);
-    S.role = "comercial";
-    A.descartarProblema(d.id, origem, "");
-    expect(d.obra.problemas ?? []).toHaveLength(0);
-    expect(avisos.some((a) => /gestor da obra/.test(a.msg))).toBe(true);
+  // 9/11 (Lote 1, C, aprovado): fora do papel do gestor, os problemas passam a ser de quem tem o que o servidor exige (imprevistos E
+  // planear); sem planear, no papel Comercial, continuam a recusar
+  it("no papel Comercial: sem negocios.obra.planear os problemas recusam; com ela (e imprevistos) passam", () => {
+    const sem = montar(["obra.planear"]);
+    sem.S.role = "comercial";
+    sem.A.descartarProblema(sem.d.id, origem, "");
+    expect(sem.d.obra.problemas ?? []).toHaveLength(0);
+    expect(sem.avisos.some((a) => /gestor da obra/.test(a.msg))).toBe(true);
+    const com = montar([]);
+    com.S.role = "comercial";
+    com.A.descartarProblema(com.d.id, origem, "");
+    expect(com.d.obra.problemas?.find((x) => x.msg === "local-0")?.estado).toBe("descartado");
   });
 });

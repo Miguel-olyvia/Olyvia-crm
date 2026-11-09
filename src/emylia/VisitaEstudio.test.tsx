@@ -2,7 +2,7 @@
 // peças e as necessidades (com revisão); o fecho mostra o plano de obra estimado.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACaminho, EstudioNaVisita, PlanoEstimado } from "./VisitaEstudio";
+import { ACaminho, EstudioNaVisita } from "./VisitaEstudio";
 import { PLANTA_VAZIA, retangulo, type Planta } from "./planta";
 import type { Ctx } from "./pecas";
 import type { Negocio } from "./motor";
@@ -51,46 +51,11 @@ describe("o Estúdio na Visita", () => {
     expect(run).toHaveBeenCalled();
   });
 
-  it("a volta traz a planta, as medidas, as respostas das peças e as necessidades para rever", () => {
-    localStorage.setItem("olyvia.estudio.v1", JSON.stringify(projeto()));
-    localStorage.setItem("olyvia.estudio.volta", JSON.stringify({ negocio: 3, em: Date.now(), antes: projeto().antes }));
-    const d = negocio();
-    const { ctx, campo, extra } = contexto(d);
-    render(<EstudioNaVisita ctx={ctx} d={d} />);
-    expect(campo).toHaveBeenCalledWith(3, "planta", expect.any(String));
-    expect(d.visita.med.pav).toBe(5);
-    expect(d.visita.med.pcs).toBe(1);
-    expect(campo).toHaveBeenCalledWith(3, "pc_base_cor", "Preto");
-    expect(screen.getByText(/As medidas da área saíram da planta/)).toBeInTheDocument();
-    // as necessidades: a impermeabilização tem par no Catálogo
-    expect(screen.getByRole("heading", { name: "Do Estúdio para as necessidades" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Juntar às necessidades/ }));
-    expect(extra).toHaveBeenCalledWith(3, "imp", 4.6);
-    expect(localStorage.getItem("olyvia.estudio.pendentes.3")).toBeNull();
-  });
-
+  // 9/11: a volta (com os serviços e os produtos juntos logo, e o plano) testa-se no motor verdadeiro: VisitaEstudioFluxo.test.tsx
   it("sem projeto, convida a abrir o Estúdio", () => {
     const d = negocio();
     render(<EstudioNaVisita ctx={contexto(d).ctx} d={d} />);
     expect(screen.getByRole("button", { name: /Abrir o Estúdio/ })).toBeInTheDocument();
-  });
-});
-
-describe("o plano de obra estimado", () => {
-  it("as etapas com os dias e as datas; guardar põe a duração e o plano no negócio", () => {
-    const d = negocio({ estudio: JSON.stringify(projeto()), plano_inicio: "2026-11-16" });
-    const { ctx, campo } = contexto(d);
-    render(<PlanoEstimado ctx={ctx} d={d} />);
-    expect(screen.getByText(/1\. Proteções e retirar|1\. Canalização/)).toBeInTheDocument();
-    expect(screen.getByText(/Revestimento/, { selector: "b" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Guardar no negócio/ }));
-    expect(campo).toHaveBeenCalledWith(3, "duracao_obra", expect.stringMatching(/dias? úte?is|dia útil/));
-    expect(campo).toHaveBeenCalledWith(3, "plano_estimado", expect.stringContaining('"inicio":"2026-11-16"'));
-  });
-  it("sem Estúdio, diz o que falta", () => {
-    const d = negocio();
-    render(<PlanoEstimado ctx={contexto(d).ctx} d={d} />);
-    expect(screen.getByText(/Decida as peças no Estúdio/)).toBeInTheDocument();
   });
 });
 

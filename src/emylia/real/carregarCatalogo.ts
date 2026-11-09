@@ -37,7 +37,8 @@ export function aplicarCatalogo(org: string, M: CatalogoMontado, produtos: Linha
 }
 
 /** Lê da base e aplica. 29/10: também as linhas de negócio (linhasModelo.ts); se falharem, ficam as do código. */
-export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estado): Promise<CatalogoCarregado> {
-  const [L] = await Promise.all([lerCatalogo(sb, org), carregarLinhasModelo(sb, org).catch(() => [])]);
+export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estado, opcoes: { semLinhasModelo?: boolean } = {}): Promise<CatalogoCarregado> {
+  // 09/11 (20270111100000): quem só lê as obras não pode ler as linhas de negócio (neg_ler_linhas_modelo): ficam as do código
+  const [L] = await Promise.all([lerCatalogo(sb, org), opcoes.semLinhasModelo ? Promise.resolve([]) : carregarLinhasModelo(sb, org).catch(() => [])]);
   return aplicarCatalogo(org, montarCatalogo(L, catalogo0(), seed().svc), L.produtos, S);
 }

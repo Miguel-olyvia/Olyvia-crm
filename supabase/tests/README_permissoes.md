@@ -54,3 +54,14 @@ A partir das tabelas, não das funções testadas:
    5b. Simulado: a sonda fica `viewer` aqui e ganha, só dentro do sub-bloco, `super_admin` noutra organização (criada e
    desfeita se só houver uma) → tem de ser bloqueada (antes de 20270110200000 passava).
 6. Custos iguais nas duas vias: quando 3a e 3b leem linhas, dão ambas "com custos" ou ambas "custos a null".
+
+## `permissoes_ambito.sql` — o âmbito no servidor (20270110900000)
+
+Mesmo estilo (`BEGIN … ROLLBACK`, sessão impersonada, esperado calculado das tabelas). Cria os seus dados na transação: o Rafael
+passa a `comercial` (OWNED), fica dono de um negócio/orçamento/proposta/contrato, ganha uma tarefa na obra de outro negócio, e
+lidera uma equipa de teste. Verifica: `neg_ler_negocios`/`obra_ler_negocios` (dono + tarefas; ORG; TEAM; NONE), as guardas de
+`neg_guardar_negocio`/`obra_guardar_negocio`, quem entra só pelo Papel no Negócio e os técnicos (veem tudo, sem guarda de âmbito),
+o super_admin, `rpc_save_quote` (permissão + âmbito), o SELECT de `quotes`/`proposals`/`client_contracts` (OWNED = a cadeia do
+negócio comercial e contém o "meu" de cada ecrã; ORG = tudo), o UPDATE com as chaves de `quotes.edit`, NONE em
+`crm_scope_keys`/`get_schedule_item_scope_context`/`get_proposal_edit_scope`, e o âmbito em `soft_delete_business_entity` e
+`cancel_and_replace_contract`. O 3b de `permissoes_papeis.sql` passou a contar com o âmbito (sem negócios no âmbito = "sem linhas").

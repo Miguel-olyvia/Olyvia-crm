@@ -24,7 +24,7 @@ import {
 } from "./obraOps";
 import { custoObra } from "./custoObra";
 import type { Ctx } from "./pecas";
-import { SEM_PERM, podeNeg } from "./permissoes";
+import { SEM_PERM, pelaPermissao, podeNeg, semEnvioNaConversa } from "./permissoes";
 import { AutoNoNegocio } from "./AutoRececao";
 import { pontosEncerrar, type PontoEncerrar } from "./encerrarObra";
 import { ViaturasObra } from "./frota/ViaturasObra";
@@ -250,7 +250,8 @@ const ABA_DE: Record<Seccao, Aba | null> = {
 export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go } = ctx;
   // 3/11: quem planeia a obra é quem tem negocios.obra.planear ("obra.planear"; 4/11: antes "equipa.edit", que passou a ser a ficha do técnico no RH), e não só o papel das Operações; encerrá-la pede negocios.obra.fechar
-  const p = d.obra.plano!, C = conflitos(p), pode = podeNeg(S.role, "obra.planear"), direcao = S.role === "direcao", podeFechar = podeNeg(S.role, "obra.fechar");
+  // 9/11 (Lote 1, F): encerrar pede também negocios.obra.planear, como o servidor (muda o estado da obra) e o motor (A.fimObra)
+  const p = d.obra.plano!, C = conflitos(p), pode = podeNeg(S.role, "obra.planear"), direcao = S.role === "direcao", podeFechar = podeNeg(S.role, "obra.fechar") && pode;
   // 19/10: os materiais lidos ao vivo do Inventário (o arranque espera por eles)
   const db = useInventario();
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
@@ -383,10 +384,11 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       {p.estado === "concluída" && d.obra.auto && <div className="mt-4"><AutoNoNegocio S={ctx.S} d={d} /></div>}
 
       {/* 3/11: os problemas que o cliente reportou na conversa (com fotografias): o gestor cria as tarefas e decide se gera orçamento */}
-      <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={problemaAberto} setAbrir={setProblemaAberto} />
+      {/* 09/11 (20270111100000): com a leitura reduzida (sem pessoas.view) a conversa não é de quem entrou (neg_mensagens_ler recusa) */}
+      {!ctx.leituraReduzida && <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={problemaAberto} setAbrir={setProblemaAberto} />}
 
       {/* ------------------------------------------------ 3. a conversa com o cliente, sempre à vista (27/10) */}
-      <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrirProblema} />
+      {!ctx.leituraReduzida && <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrirProblema} />}
 
       {/* ------------------------------------------------ 4. o resto, uma parte de cada vez */}
       <div role="tablist" aria-label="Partes da obra" className="sticky top-0 z-10 -mx-4 mt-8 flex gap-1 overflow-x-auto border-b border-border bg-background/95 px-4 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden">
@@ -413,7 +415,8 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <EquipamentosObra d={d} />
         </>}
         {aba === "registos" && <>
-          <DiarioObra ctx={ctx} d={d} pode={pode || direcao} />
+          {/* 9/11 (Lote 1, J): como o servidor, também quem regista a execução (negocios.obra.executar) */}
+          <DiarioObra ctx={ctx} d={d} pode={pode || direcao || podeNeg(S.role, "obra.executar")} />
           <SegurancaObra ctx={ctx} d={d} pode={pode} />
           {(direcao || pode) && <CustosObra d={d} S={S} />}
         </>}
@@ -690,7 +693,7 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
           <ValidarVarias ctx={ctx} d={d} PV={PV} />
         </div>
       )}
-      {cli.length > 0 && (
+      {cli.length > 0 && !ctx.leituraReduzida && (
         <LinhaAgora I={MessageCircle} tom="aviso" titulo={`${d.nome.split(" ")[0]} escreveu${cli.length > 1 ? ` (${cli.length} mensagens)` : ""}`} texto={`«${cli[cli.length - 1].t}»`} acao="Responder" fazer={() => irPara("chat")} />
       )}
       {ocorr.map((x, k) => <LinhaAgora key={"o" + k} I={AlertTriangle} tom="mau" titulo={`${x.quem.split(" ")[0]} reportou um problema`} texto={x.t} acao="Ver o dia" fazer={() => verDia(p.dia)} />)}
@@ -701,7 +704,8 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
       {corr.map((t) => <LinhaAgora key={"c" + p.tasks.indexOf(t)} I={FileWarning} tom="mau" titulo={`${nomeCurtoTarefa(t.nome)}: correção pedida`} texto={`À espera de ${primeiro(t.tec)}${t.exec?.motivo ? ` · ${t.exec.motivo}` : ""}`} />)}
       {nada && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Nada à espera de si.</p>}
       {/* 6/11 (permissões): o papel E a permissão (negocios.obra.executar ou negocios.obra.imprevistos, como no motor) */}
-      {ctx.S.role === "operacoes" && (podeNeg(ctx.S.role, "obra.executar") || podeNeg(ctx.S.role, "obra.imprevistos")) && (registar
+      {/* 9/11 (Lote 1, C): o papel, ou (conta real) quem planeia a obra (negocios.obra.planear), como no motor */}
+      {(ctx.S.role === "operacoes" || pelaPermissao(ctx.S.role, ["obra.planear"])) && (podeNeg(ctx.S.role, "obra.executar") || podeNeg(ctx.S.role, "obra.imprevistos")) && (registar
         ? <RegistarImprevisto ctx={ctx} d={d} fechar={() => setRegistar(false)} />
         : <button type="button" onClick={() => setRegistar(true)} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Registar imprevisto</button>)}
       {/* 27/10: no ecrã largo o painel ao lado já mostra as próximas tarefas */}
@@ -726,7 +730,8 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
 /** 23/10: validar várias de uma vez: a lista das tarefas feitas, todas marcadas, e um botão. Só as Operações. */
 function ValidarVarias({ ctx, d, PV }: { ctx: Ctx; d: Negocio; PV: number[] }) {
   // 6/11 (permissões): o papel E negocios.obra.planear (validar é de quem planeia, como no motor e no servidor)
-  const p = d.obra.plano!, pode = ctx.S.role === "operacoes" && podeNeg(ctx.S.role, "obra.planear");
+  // 9/11 (Lote 1, C): ou o papel, ou (conta real) só a permissão
+  const p = d.obra.plano!, pode = (ctx.S.role === "operacoes" || pelaPermissao(ctx.S.role, ["obra.planear"])) && podeNeg(ctx.S.role, "obra.planear");
   const feitas = PV.filter((ti) => estadoDe(p.tasks[ti]) === "feita");
   const [aberto, setAberto] = useState(false);
   const [marc, setMarc] = useState<number[]>(feitas);
@@ -785,7 +790,8 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
   const { S, A, run } = ctx;
   // 21/10: com a obra em curso, as Operações ajustam ao vivo (AjustarAoVivo), com o motivo e o aviso ao cliente
   // 6/11 (permissões): o papel E negocios.obra.planear (A.ajustarAoVivo pede-a); sem ela, a tarefa abre só para ver
-  const vivo = d.obra.plano!.estado === "em curso" && S.role === "operacoes" && podeNeg(S.role, "obra.planear");
+  // 9/11 (Lote 1, C): ou o papel, ou (conta real) só a permissão
+  const vivo = d.obra.plano!.estado === "em curso" && (S.role === "operacoes" || pelaPermissao(S.role, ["obra.planear"])) && podeNeg(S.role, "obra.planear");
   const p = d.obra.plano!, C = conflitos(p), novo = p.origem === "orcamento";
   const fim = Math.max(1, fimDe(p.tasks)), nd = fim;
   const caixa = useRef<HTMLDivElement>(null);
@@ -1205,7 +1211,8 @@ function Registo({ ctx, d, ti, compacto }: { ctx: Ctx; d: Negocio; ti: number; c
 function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio; sel: number; setSel: (k: number) => void; ajustar: (ti: number) => void }) {
   const { S, A, run, go } = ctx;
   // 6/11 (permissões): ajustar o plano, mudar o dia e dar por feita pedem o papel E negocios.obra.planear; validar (o Registo) só a permissão
-  const p = d.obra.plano!, fim = fimDe(p.tasks), pode = S.role === "operacoes" && podeNeg(S.role, "obra.planear"), podeValidar = podeNeg(S.role, "obra.planear");
+  // 9/11 (Lote 1, C): ou o papel, ou (conta real) só a permissão
+  const p = d.obra.plano!, fim = fimDe(p.tasks), pode = (S.role === "operacoes" || pelaPermissao(S.role, ["obra.planear"])) && podeNeg(S.role, "obra.planear"), podeValidar = podeNeg(S.role, "obra.planear");
   // 23/10: na 2.0 o dia é o do calendário (motor: diaReal); no protótipo, o relógio à mão
   const real = comRelogioReal() ? diaReal(p) : null;
   const [hist, setHist] = useState<number | null>(null);
@@ -1539,10 +1546,12 @@ function useConversaObra(ctx: Ctx, d: Negocio) {
   const { A, run } = ctx;
   // 30/10 (2.0): com a base ligada a conversa é a da base, a mesma do portal do cliente (o autor é o utilizador com sessão); no protótipo de
   // sempre continua a do estado local do negócio.
-  const org = orgDoModoReal();
+  // 09/11 (20270111100000): com a leitura reduzida (sem pessoas.view) não se lê a conversa (neg_mensagens_ler recusa) nem se mostra
+  const reduzida = !!ctx.leituraReduzida;
+  const org = reduzida ? null : orgDoModoReal();
   const real = useConversaReal(org, d.id);
   const fotoDe = useMemo(() => (org ? fotoDaEquipa(org) : undefined), [org]);
-  const msgs = org ? real.msgs : (d.obra.chat ?? []);
+  const msgs = reduzida ? [] : org ? real.msgs : (d.obra.chat ?? []);
   const marcarLidas = () => (org ? void real.marcarComoLidas() : run(() => A.lerChat(d.id)));
   const enviar = (t: string): void | Promise<boolean> => (org ? real.enviar(t) : run(() => A.mensagemObra(d.id, "empresa", t)));
   // 3/11: a resposta a um problema do cliente: devolve se seguiu (no protótipo, segue sempre)
@@ -1554,6 +1563,9 @@ function useConversaObra(ctx: Ctx, d: Negocio) {
 /** 21/10: a conversa com o cliente (o mesmo fio do portal do cliente). Ao abrir, as mensagens do cliente ficam lidas. */
 function ConversaNaObra({ ctx, d, conversa, abrirProblema }: { ctx: Ctx; d: Negocio; conversa: ReturnType<typeof useConversaObra>; abrirProblema: (k: string) => void }) {
   const { org, msgs, marcarLidas, enviar } = conversa, porLer = msgs.filter((m) => m.de === "cliente" && !m.lida).length;
+  // 9/11 (Lote 1, I): com conta real, escrever ao cliente pede pessoas.edit (neg_mensagem_enviar); sem ela a caixa fica desligada.
+  // Sem conta real, como sempre.
+  const semEnvio = semEnvioNaConversa();
   return (
     <section id="obra-chat" aria-labelledby="obra-chat-t" className={cn(CARTAO, "mt-4 scroll-mt-16 p-5", porLer > 0 && "border-warning/50")}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -1562,7 +1574,7 @@ function ConversaNaObra({ ctx, d, conversa, abrirProblema }: { ctx: Ctx; d: Nego
         {porLer > 0 && <button type="button" onClick={marcarLidas} className="min-h-10 text-sm font-medium text-primary underline-offset-4 hover:underline">Marcar {porLer === 1 ? "1 mensagem" : `${porLer} mensagens`} como lida{porLer === 1 ? "" : "s"}</button>}
       </div>
       <div className="mt-3">
-        <Conversa msgs={msgs} eu="empresa" enviar={enviar} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal." fotoDe={conversa.fotoDe}
+        <Conversa msgs={msgs} eu="empresa" enviar={enviar} semEnvio={semEnvio} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal." fotoDe={conversa.fotoDe}
           acao={(m, i) => <AcaoMensagemCliente ctx={ctx} d={d} m={m} chave={m.id ?? `local-${i}`} abrir={abrirProblema} />}
           rapidas={["Bom dia! A equipa já está na obra.", "Já pode ver as fotografias de hoje no portal.", "Vou confirmar e respondo ainda hoje."]} />
         {org && conversa.erro && <p role="alert" className="mt-2 text-[15px] text-destructive">{conversa.erro}</p>}
@@ -1613,14 +1625,17 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       )}
       <ProximoRececaoNegocio d={d} A={A} go={go} />
       <div className="mt-2 flex flex-wrap gap-x-5">
-        {d.obra.ec?.ref && (
+        {/* 09/11: só as ligações às páginas que quem entrou pode abrir (client_orders.view; pessoas.view) */}
+        {d.obra.ec?.ref && ctx.podeVerInventario !== false && (
           <button type="button" onClick={go(() => A.abrirInv(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
             Abrir a encomenda no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
           </button>
         )}
-        <button type="button" onClick={go(() => A.abrir(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
-          Ver o negócio, do contrato à obra<ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </button>
+        {ctx.podeVerNegocio !== false && (
+          <button type="button" onClick={go(() => A.abrir(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+            Ver o negócio, do contrato à obra<ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
       </div>
     </section>
   );

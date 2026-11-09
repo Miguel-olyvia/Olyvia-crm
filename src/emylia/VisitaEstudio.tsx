@@ -11,26 +11,25 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CalendarCheck, Check, ChevronDown, MapPin, Navigation, Phone, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CHAVE_ESTUDIO, CHAVE_VOLTA, abrirEstudio, lerVolta, medidasDoEstudio, projetoDoEstudioPara, projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
-import { linhasParaLevar } from "@/pages/prototipo-estudio/levarParaNegocio";
-import { respostasDoEstudio } from "@/pages/prototipo-estudio/respostasDoEstudio";
+import { CHAVE_ESTUDIO, CHAVE_VOLTA, abrirEstudio, lerVolta, projetoDoEstudioPara, projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { produtosEscolhidos } from "@/pages/prototipo-estudio/sugestoesServicos";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
 import { acertarPosicoes } from "@/pages/prototipo-estudio/posicoesDepois";
 import { produto } from "@/pages/prototipo-estudio/catalogoFake";
-import { calendario, duracaoEmPalavras, etapasDaObra, primeiroUtil } from "@/pages/prototipo-estudio/planoEstimado";
+import { duracaoEmPalavras } from "@/pages/prototipo-estudio/planoEstimado";
+import { planoDaVisita, planoParaGuardar } from "./planoDaVisita";
+import { levarEstudio } from "./estudioNoNegocio";
+import { MapaDatasObra, inicioPorOmissao } from "./MapaDatasObra";
+import { lerCatalogo } from "./v2/catalogoStore";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { useCatalogo } from "./v2/catalogoStore";
 import { ligarAoCatalogo, type LinhaLevada } from "./ligarEstudio";
-import { LINHAS, camposMedida, porMedida, type Negocio } from "./motor";
+import { porMedida, type Negocio } from "./motor";
 import { areaChaoM2, gravarPlanta } from "./planta";
 import type { Ctx } from "./pecas";
 
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 const dataCurta = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "long" });
-/** «sex., 20 nov.»: para a coluna estreita das etapas */
-const dataEtapa = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "short" });
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 /** A visita que segue o Estúdio: a de uma casa de banho (o que o Estúdio sabe fazer hoje). */
 export const visitaComEstudio = (d: Negocio, divisoes: string[]) => d.linha === "wc" || d.linha === "coz" || divisoes.includes("Casa de banho") || divisoes.includes("Cozinha");
@@ -69,27 +68,42 @@ export function ACaminho({ d }: { d: Negocio }) {
 
 // ------------------------------------------------------------------------------------------------ o Estúdio na Visita
 
-/** O que o Estúdio passa ao negócio: a planta, as medidas da área, as respostas das peças e (para rever) as necessidades. */
+/**
+ * O que o Estúdio passa ao negócio: a planta, as medidas da área, as respostas das peças, os serviços e os produtos do Catálogo e o dia de
+ * início (estudioNoNegocio.ts). 9/11: os serviços e os produtos entram logo nas necessidades (já foram vistos no Estúdio, ligados ao
+ * Catálogo verdadeiro); antes ficavam numa lista para rever aqui. O plano da obra guarda-se com o técnico e as datas.
+ */
 export function aplicarDoEstudio(ctx: Ctx, d: Negocio, p: Projeto): { avisos: string[]; linhas: LinhaLevada[] } {
-  const avisos: string[] = [];
+  const produtos = lerCatalogo().produtos ?? [];
+  let r: ReturnType<typeof levarEstudio> | null = null;
   // tudo numa só gravação (o run grava no negócio e redesenha)
   ctx.run(() => {
-    if (p.antes.paredes.length) { ctx.A.campo(d.id, "planta", gravarPlanta(p.antes)); avisos.push("A planta ficou no negócio."); }
-    // as medidas: só as que a linha pede (os vasos sanitários só numa linha que os conta)
-    const pede = camposMedida(LINHAS[d.linha]);
-    // os «pcs» da linha são os vasos sanitários (casa de banho) ou os módulos (cozinha)
-  const m = medidasDoEstudio(p), rotuloPcs = pede.find(([c]) => c === "pcs")?.[1] ?? "";
-  const pcs = /sanit/i.test(rotuloPcs) ? m.pcs : /m[oó]dulo/i.test(rotuloPcs) ? m.modulos : undefined;
-  const med = Object.entries({ pav: m.pav, par: m.par, ptf: m.ptf, ptq: m.ptq, pcs }).filter(([k, n]) => n !== undefined && pede.some(([c]) => c === k));
-    if (med.length) {
-      for (const [k, n] of med) porMedida(d.visita.med, k as Parameters<typeof porMedida>[1], n as number);
-      avisos.push("As medidas da área saíram da planta.");
-    }
-    const novas = Object.entries(respostasDoEstudio(p)).filter(([k, v]) => v && d.f[k] !== v);
-    for (const [k, v] of novas) ctx.A.campo(d.id, k, v);
-    if (novas.length) avisos.push(`As peças da casa de banho ficaram com ${novas.length} ${novas.length === 1 ? "resposta" : "respostas"}.`);
+    r = levarEstudio(d, p, ctx.S, produtos, {
+      campo: (k, v) => ctx.A.campo(d.id, k, v),
+      medida: (k, n) => porMedida(d.visita.med, k, n),
+      extra: (sid, q) => ctx.A.extra(d.id, sid, q),
+      produto: (pr, q) => ctx.A.produto(d.id, pr, q),
+      produtoQtd: (pid, q) => ctx.A.produtoQtd(d.id, pid, q),
+      tirarProduto: (pid) => ctx.A.tirarProduto(d.id, pid),
+    });
+    guardarPlano(ctx, d, d.f.plano_inicio || inicioPorOmissao());
   });
-  return { avisos, linhas: linhasParaLevar(p) };
+  const res = r as ReturnType<typeof levarEstudio> | null;
+  const avisos = [...(res?.avisos ?? [])];
+  if (res?.semPar.length) avisos.push(`Sem par no Catálogo (junte à mão nas Necessidades): ${res.semPar.join("; ")}.`);
+  return { avisos, linhas: [] };
+}
+
+/** Guarda no negócio o plano da obra da visita (o dia de início, a duração, as tarefas com o técnico e as datas). Dentro de um ctx.run. */
+function guardarPlano(ctx: Ctx, d: Negocio, inicio: string): ReturnType<typeof planoDaVisita> {
+  const P = planoDaVisita(d, ctx.S, inicio);
+  if (d.f.plano_inicio !== inicio) ctx.A.campo(d.id, "plano_inicio", inicio);
+  if (P.tarefas.length) {
+    const dur = duracaoEmPalavras(P.dias), json = planoParaGuardar(P);
+    if (d.f.duracao_obra !== dur) ctx.A.campo(d.id, "duracao_obra", dur);
+    if (d.f.plano_estimado !== json) ctx.A.campo(d.id, "plano_estimado", json);
+  }
+  return P;
 }
 
 /** O passo «Estúdio» da Visita: abrir, continuar, e o que voltou (as necessidades para rever). */
@@ -132,8 +146,14 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       const v = lerVolta(ref.current.d.id);
       if (!v) return;
       const p = local ?? projetoDoNegocio(ref.current.d.f);
-      if (p) trazer(p);
-      else if (v.antes.paredes.length) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, "planta", gravarPlanta(v.antes))); setFeito("A planta ficou no negócio."); }
+      if (!p) {
+        if (v.antes.paredes.length) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, "planta", gravarPlanta(v.antes))); setFeito("A planta ficou no negócio."); }
+        return;
+      }
+      trazer(p);
+      // 9/11: «Fechar a visita» no Estúdio: com tudo levado, a visita fecha (o orçamento nasce com o plano e as datas). Se faltar alguma
+      // resposta obrigatória, o motor diz qual e a visita fica aberta.
+      if (v.fechar) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.fecharVisita(n.id)); }
     };
     aoVoltar();
     const aoMudar = (e: StorageEvent) => {
@@ -314,55 +334,31 @@ export function FecharVisita({ ctx, d, blocos, decisao }: { ctx: Ctx; d: Negocio
   );
 }
 
-/** O plano de obra estimado a partir do Estúdio: as etapas, os dias e as datas a partir de um dia de início. Guarda-se no negócio. */
+/** 9/11: o plano da obra da visita (planoDaVisita.ts): o mesmo que o orçamento e a obra vão ter, com a equipa do RH e o mapa de datas. */
 export function PlanoEstimado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const p = projetoDoNegocio(d.f);
-  const padrao = useMemo(() => { const x = new Date(); x.setDate(x.getDate() + 14); return iso(primeiroUtil(x)); }, []);
-  const [inicio, setInicio] = useState(d.f.plano_inicio || padrao);
+  const [inicio, setInicio] = useState(() => inicioPorOmissao(d.f.plano_inicio));
   const [guardado, setGuardado] = useState("");
-  const etapas = useMemo(() => (p ? etapasDaObra(p) : []), [p]);
-  const [a, m, dia] = inicio.split("-").map(Number);
-  const cal = calendario(etapas, new Date(a, (m || 1) - 1, dia || 1));
+  const P = useMemo(() => planoDaVisita(d, ctx.S, inicio), [d, ctx.S, inicio, d.visita.extra, d.visita.prod, d.visita.med]); // eslint-disable-line react-hooks/exhaustive-deps
   const guardar = () => {
-    ctx.run(() => {
-      ctx.A.campo(d.id, "plano_inicio", inicio);
-      ctx.A.campo(d.id, "duracao_obra", duracaoEmPalavras(cal.dias));
-      ctx.A.campo(d.id, "plano_estimado", JSON.stringify(cal.etapas.map((e) => ({ n: e.n, dias: e.dias, inicio: iso(e.inicio!), fim: iso(e.fim!), oQue: e.oQue }))));
-    });
-    setGuardado(`Guardado: ${duracaoEmPalavras(cal.dias)}, de ${dataCurta(cal.etapas[0].inicio!)} a ${dataCurta(cal.fim!)}.`);
+    let x: ReturnType<typeof planoDaVisita> | null = null;
+    ctx.run(() => { x = guardarPlano(ctx, d, inicio); });
+    const y = x as ReturnType<typeof planoDaVisita> | null;
+    if (y?.inicio && y.fim) setGuardado(`Guardado: ${duracaoEmPalavras(y.dias)}, de ${dataCurta(y.inicio)} a ${dataCurta(y.fim)}.`);
   };
   return (
     <section aria-labelledby={`plano-${d.id}`} className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
       <div>
-        <h3 id={`plano-${d.id}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><CalendarCheck className="h-5 w-5 text-primary" aria-hidden="true" />Plano de obra estimado</h3>
-        <p className="text-sm text-muted-foreground">Sai do Estúdio: as etapas pela ordem e os dias úteis de cada uma. As datas da equipa marcam-se quando a obra abrir.</p>
+        <h3 id={`plano-${d.id}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><CalendarCheck className="h-5 w-5 text-primary" aria-hidden="true" />O plano da obra</h3>
+        <p className="text-sm text-muted-foreground">Sai dos serviços das necessidades: as tarefas, o técnico livre de cada ofício e as datas. Ao fechar a visita, o orçamento e a obra seguem com ele.</p>
       </div>
-      {!etapas.length ? (
-        <p className="text-[15px] text-muted-foreground">Decida as peças no Estúdio para ter o plano.</p>
-      ) : <>
-        <label className="grid max-w-xs gap-2 text-sm font-medium">Começar a
-          <input type="date" value={inicio} onChange={(e) => e.target.value && setInicio(e.target.value)} className="h-11 rounded-lg border border-input bg-background px-3 text-[15px]" />
-        </label>
-        <ol className="divide-y divide-border rounded-xl border border-border">
-          {cal.etapas.map((e, i) => (
-            <li key={e.n} className="grid gap-1 p-3 sm:grid-cols-[minmax(0,1fr)_8.5rem] sm:gap-4">
-              <span className="min-w-0 text-[15px]"><b className="font-medium">{i + 1}. {e.n}</b>
-                <span className="block text-xs text-muted-foreground">{e.oQue.join("; ")}</span>
-              </span>
-              <span className="text-sm tabular-nums text-muted-foreground sm:text-right">
-                <b className="font-medium text-foreground">{e.dias} {e.dias === 1 ? "dia" : "dias"}</b>
-                <span className="block">{dataEtapa(e.inicio!)}</span>
-                {e.dias > 1 && <span className="block">a {dataEtapa(e.fim!)}</span>}
-              </span>
-            </li>
-          ))}
-        </ol>
+      <MapaDatasObra P={P} inicio={inicio} mudarInicio={setInicio} />
+      {P.tarefas.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[15px]">Duração: <b className="font-semibold">{duracaoEmPalavras(cal.dias)}</b>{cal.fim && <> · pronta a {dataCurta(cal.fim)}</>}</p>
+          <p className="text-[15px]">Duração: <b className="font-semibold">{duracaoEmPalavras(P.dias)}</b>{P.fim && <> · pronta a {dataCurta(P.fim)}</>}</p>
           <Button type="button" className="min-h-11" onClick={guardar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Guardar no negócio</Button>
         </div>
-        <p role="status" className="min-h-5 text-sm text-success">{guardado}</p>
-      </>}
+      )}
+      <p role="status" className="min-h-5 text-sm text-success">{guardado}</p>
     </section>
   );
 }

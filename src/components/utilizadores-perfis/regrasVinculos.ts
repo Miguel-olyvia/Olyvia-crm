@@ -61,9 +61,16 @@ export function organizacoesLivres(
 export const haOrganizacaoLivre = (organizacoes: readonly Organizacao[], vinculos: readonly Pick<Vinculo, "organizacaoId">[]): boolean =>
   organizacoes.some((o) => !vinculos.some((v) => v.organizacaoId === o.id));
 
-/** As permissões com âmbito configurável que a role dá (as que se mostram por vínculo). */
+/**
+ * 09/11/2026 (Lote 1 de permissões): os âmbitos que a base guarda mas que nada usa. Nos Agendamentos, só os itens (scheduling.items.*)
+ * respeitam o âmbito; os quadros, os recursos e as regras (scheduling.boards.*, scheduling.resources.*, scheduling.rules.*) não. Deixam
+ * de se mostrar no ecrã; o que já está gravado fica (não se apaga nem se reescreve: o registo dos âmbitos do vínculo vai inteiro).
+ */
+export const ambitoSemEfeito = (codigo: string): boolean => /^scheduling\.(boards|resources|rules)\./.test(codigo);
+
+/** As permissões com âmbito configurável que a role dá (as que se mostram por vínculo), sem as de âmbito sem efeito. */
 export const permissoesComAmbito = (role: Pick<Role, "permissoes"> | undefined, catalogo: readonly Permissao[]): Permissao[] =>
-  catalogo.filter((p) => p.comAmbito && role?.permissoes.includes(p.codigo));
+  catalogo.filter((p) => p.comAmbito && !ambitoSemEfeito(p.codigo) && role?.permissoes.includes(p.codigo));
 
 /**
  * Muda o âmbito de uma permissão com a regra de MembershipScopesDialog: subir uma que não é "ver" sobe a de ver do módulo

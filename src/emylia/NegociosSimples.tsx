@@ -16,7 +16,7 @@ import { SEM_FILTROS_H, type FiltrosH } from "./historicoNegocios";
 const POR_COLUNA = 10;
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
 
-export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
+export function NegociosSimples({ S, A, go, run, q, setQ, podeCriarNegocio }: Ctx) {
   const f = S.filtro, ql = q.toLowerCase();
   let ds = aberto(S).filter((d) => !ql || (d.nome + " " + d.tel + " " + d.servico + " " + d.local).toLowerCase().includes(ql));
   if (f === "meus") ds = ds.filter((d) => d.dono === "comercial");
@@ -83,7 +83,8 @@ export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <SeletorModo modo={modo} mudar={setModo} />
-          <Button size="lg" onClick={go(() => { A.novo(); setFaseMovel(0); setModo("quadro"); })}><Plus className="mr-2 h-4 w-4" />Novo negócio</Button>
+          {/* 09/11: só a quem pode criar negócios (pessoas.create) */}
+          {podeCriarNegocio !== false && <Button size="lg" onClick={go(() => { A.novo(); setFaseMovel(0); setModo("quadro"); })}><Plus className="mr-2 h-4 w-4" />Novo negócio</Button>}
         </div>
       </header>
 

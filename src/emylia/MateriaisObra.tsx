@@ -15,6 +15,7 @@ import { ecDaAdenda, linhasDaEc, linhasDaObra, porEncomendarDe, totaisDaEc } fro
 import { assinadas, primeiraPaga } from "./adendas";
 import { aprovadorPo } from "./real/encomendaReal";
 import { useModoTeste } from "./real/modoTeste";
+import { podeAprovarPo } from "./permissoes";
 
 type Grupo = "resolver" | "caminho" | "ok";
 const GRUPOS: { k: Grupo; t: string; vazio?: string }[] = [
@@ -48,7 +49,8 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   const aprovar = aprovadorPo();
   // 9/11: no modo de teste, o super admin aprova sem mudar para Compras e armazém e confirma pelo fornecedor
   const teste = useModoTeste();
-  const podeAprovar = !!aprovar && (S.role === "armazem" || !!teste);
+  // 9/11 (Lote 1, D): com conta real, quem tem purchase_orders.approve, seja qual for o papel (podeAprovarPo, permissoes.ts)
+  const podeAprovar = !!aprovar && podeAprovarPo(S.role, !!teste);
   const [aAprovar, setAAprovar] = useState<string | null>(null);
   const [aConfirmar, setAConfirmar] = useState<string | null>(null);
   const db = useInventario();

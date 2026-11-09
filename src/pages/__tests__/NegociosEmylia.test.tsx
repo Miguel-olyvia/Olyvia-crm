@@ -18,7 +18,9 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: ORG }, isLoading: false }) }));
 // 04/11/2026: a página lê a permissão real de mandar ao portal (PermPortalNegocios); aqui tem-na toda (portal.manage)
-vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => true, loading: false }) }));
+// 09/11: `perfil` null: todas; senão, só essas (o técnico só pelo papel não tem nenhuma no perfil)
+const perfil = vi.hoisted(() => ({ codigos: null as string[] | null }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: (c: string) => !perfil.codigos || perfil.codigos.includes(c), loading: false }) }));
 vi.mock("@/hooks/pessoas/novaLead/gravarNovaLead", () => ({ gravarNovaLead: (...a: unknown[]) => gravarNovaLead(...a) }));
 vi.mock("@/hooks/pessoas/novaLead/comerciaisNovaLead", () => ({ resolverOrgRaiz: async () => ORG, lerComerciais: async () => ({ users: [], tree: [] }) }));
 const minha = vi.hoisted(() => ({ pessoaId: null as string | null, nome: "Rúben Carvalho" }));
@@ -43,7 +45,7 @@ const NEGOCIO = {
 
 describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
   beforeEach(() => {
-    rpc.mockReset(); gravarNovaLead.mockReset();
+    rpc.mockReset(); gravarNovaLead.mockReset(); perfil.codigos = null;
     rpc.mockImplementation(async (fn: string) => {
       // 30/10 (20270101340000): os papéis do RH; aqui, quem vê todos (pessoas.edit pelo perfil da Olyvia)
       if (fn === "neg_meus_papeis") return { data: { papeis: [], pessoa: null, todos: true }, error: null };
@@ -126,6 +128,32 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     expect(args).toMatchObject({ p_org: ORG, p_negocio_id: "55555555-5555-4555-a555-555555555555" });
     expect((args as { p_linhas: { negocio: { numero: number; titulo: string } } }).p_linhas.negocio).toMatchObject({ numero: 1201, titulo: "Rui Costa" });
   });
+  // 09/11 (20270111100000): o técnico só com negocios.obra.executar e negocios.obra.materiais (sem pessoas.view): só o Hoje e as Operações,
+  // sem as ligações, e sem pedir o que a base lhe recusa
+  it("só com executar: separadores Hoje e Operações, sem ligações, sem as RPCs recusadas e sem gravar o negócio", async () => {
+    perfil.codigos = [];
+    const antes = rpc.getMockImplementation()!;
+    rpc.mockImplementation(async (fn: string, ...r: unknown[]) => {
+      if (fn === "neg_meus_papeis") return { data: { papeis: ["tecnico"], pessoa: { id: "p3", nome: "Hugo Neves" }, todos: false }, error: null };
+      if (fn === "fn_cat_pode") return { data: ["negocios.obra.executar", "negocios.obra.materiais"].includes((r[0] as { p_perm: string }).p_perm), error: null };
+      if (fn === "neg_historico_autores" || fn === "neg_rececoes_ler" || fn === "neg_respostas_ler" || fn === "neg_gestores_obra") return { data: [], error: null };
+      return antes(fn, ...r);
+    });
+    render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Hoje" }).getAttribute("aria-current")).toBe("page"), { timeout: 8000 });
+    await waitFor(() => expect(rpc.mock.calls.some(([fn]) => fn === "neg_ler_negocios")).toBe(true), { timeout: 8000 });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByRole("button", { name: "Negócios" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Operações" })).toBeTruthy();
+    for (const n of ["Pessoas", "Inventário", "Catálogo e custos"]) expect(screen.queryByRole("button", { name: n })).toBeNull();
+    const recusadas = ["neg_dados_pagamento_ler", "neg_sugestoes_formulario", "neg_ler_campos_config", "rpc_client_order_list_readiness",
+      "neg_ler_linhas_modelo", "neg_guardar_negocio", "neg_vista_cliente_guardar"];
+    expect(rpc.mock.calls.filter(([fn]) => recusadas.includes(fn as string)).map(([fn]) => fn)).toEqual([]);
+    expect(screen.queryByText(/Não gravou/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Operações" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Operações" }).getAttribute("aria-current")).toBe("page"));
+  });
+
   // 5/11: em /negocios as ações decidem-se pelas permissões reais (fn_cat_pode, como o servidor), e não pela tabela fixa do papel escolhido
   describe("permissões reais (fn_cat_pode)", () => {
     // o jsdom não tem scrollIntoView (o passo seguinte da fase rola até ao título)

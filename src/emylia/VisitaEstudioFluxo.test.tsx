@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Negocio } from "./motor";
 import { passosDaFase } from "./PaginaNegocio";
-import { EXTERIOR, INTERIOR } from "./campos";
+import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, grupoVisita } from "./campos";
 import { EstudioNaVisita, PlanoEstimado } from "./VisitaEstudio";
 import type { Ctx } from "./pecas";
 import { retangulo } from "./planta";
@@ -59,15 +59,50 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
     expect(d.visita.med.par).toBeGreaterThan(0);
     expect(d.f.pc_base_cor).toBe("Preto");
     expect(d.f.pc_sanita_tipo).toBe("Suspensa");
-    // 4. as necessidades: revê-se e junta-se; os serviços ficam no negócio
-    expect(screen.getByRole("heading", { name: "Do Estúdio para as necessidades" })).toBeInTheDocument();
-    const botao = screen.getByRole("button", { name: /Juntar às necessidades \((\d+)\)/ });
-    const n = Number(botao.textContent!.match(/\((\d+)\)/)![1]);
-    expect(n).toBeGreaterThan(0);
-    const extrasAntes = Object.keys(d.visita.extra).length;
-    fireEvent.click(botao);
-    expect(Object.keys(d.visita.extra).length + (d.visita.prod ?? []).length).toBeGreaterThan(extrasAntes);
+    // 4. 9/11: os serviços e os produtos do Catálogo entram logo nas necessidades (já foram vistos no Estúdio), e o plano guarda-se
+    expect(screen.queryByRole("heading", { name: "Do Estúdio para as necessidades" })).toBeNull();
+    expect(Object.keys(d.visita.extra).length + (d.visita.prod ?? []).length).toBeGreaterThan(0);
     expect(screen.getByText(/Nas necessidades:/)).toBeInTheDocument();
+    expect(JSON.parse(d.f.estudio_levado).s.length + JSON.parse(d.f.estudio_levado).p.length).toBeGreaterThan(0);
+    const plano = JSON.parse(d.f.plano_estimado) as { tecNome: string; inicio: string }[];
+    expect(plano.length).toBeGreaterThan(0);
+    expect(plano.some((t) => t.tecNome !== "Por atribuir")).toBe(true);
+    // 5. voltar outra vez com um serviço tirado no Estúdio: sai também do negócio
+    const sid = JSON.parse(d.f.estudio_levado).s[0] as string | undefined;
+    if (sid) {
+      const chave = Object.keys(d.visita.extra).includes(sid) ? sid : null;
+      expect(chave).toBe(sid);
+    }
+  });
+
+  it("«Fechar a visita» no Estúdio: o orçamento nasce com o dia de início do plano", () => {
+    const S = seed();
+    const avisos: string[] = [];
+    const run = (fn: () => void) => { fn(); };
+    const ctx = { S, A: acoes(S, (a) => { avisos.push(`${a.msg} ${a.sub ?? ""}`); }, run), run, go: (fn: () => void) => () => run(fn), q: "" } as unknown as Ctx;
+    const d = S.deals.find((x) => x.linha === "wc" && x.fase === 2)! as Negocio;
+    // a visita com as respostas obrigatórias e as fotografias (o que a gravação e os passos preenchem)
+    for (let i = 0; i < 5; i++) for (const c of emFalta([...(d.vis ?? []).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS], d.f)) {
+      d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x";
+    }
+    d.visita.fotos = 2;
+    const planta = { o: { x: 50, y: 50 }, paredes: retangulo(200, 250), pecas: [] };
+    expect(abrirEstudio(d.nome, d.f, d.id, "/negocios")).toBe(true);
+    const p0 = JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!) as Projeto;
+    const p: Projeto = {
+      ...p0, antes: planta, depois: { ...planta, pecas: [{ id: "b", tipo: "base", x: 50, y: 50, w: 120, h: 70 }, { id: "s", tipo: "sanita", x: 200, y: 250, w: 36, h: 52 }] },
+      escolhas: { b: "bas-ard-p", s: "san-nexo-s" }, revestimento: "rev-tela-c", gravadoEm: Date.now(), catalogo: { inicio: "2026-11-23" },
+    };
+    localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(p));
+    expect(devolverAoNegocio(p, true)).toBe(true);
+    render(<EstudioNaVisita ctx={ctx} d={d} />);
+    expect(d.f.plano_inicio).toBe("2026-11-23");
+    expect(avisos.join(" | ")).toMatch(/Orçamento criado/);
+    expect(d.fase).toBe(3);
+    expect(d.orc?.inicioObra).toBe("2026-11-23");
+    // o orçamento tem os serviços do Estúdio e o plano guardado tem o técnico e as datas
+    expect(d.orc!.linhas.some((l) => l.t === "svc" && l.sid === "revest")).toBe(true);
+    expect(JSON.parse(d.f.plano_estimado)[0]).toMatchObject({ inicio: "2026-11-23" });
   });
 
   it("o plano de obra estimado guarda-se no negócio com a duração", () => {

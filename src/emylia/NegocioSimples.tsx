@@ -34,6 +34,7 @@ import { GuiaPassoCtx } from "./guiaPasso";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
 import { useParamUrl } from "./usarParamUrl";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
+import { passoDe } from "./permissoes";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
@@ -413,7 +414,8 @@ function Lateral({ d, passos, ativo, setAtivo, comFim }: { d: Negocio; passos: P
 
 function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio; lateral: Lat; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[] }) {
   const { S } = ctx;
-  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  // 9/11 (Lote 1, B): o passo é do papel atual OU quem entrou tem as permissões que ele pede (passoDe, só com conta real)
+  const p = proximo(d, S), meu = passoDe(S.role, p.who, p.act);
   const passosBase = passosDaFase(ctx, d, true);
   const passos = ajustarPassos ? ajustarPassos(passosBase, d) : passosBase;
   // abre no primeiro passo por fazer; se está tudo feito, abre logo no passo do negócio

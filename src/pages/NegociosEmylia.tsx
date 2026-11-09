@@ -42,7 +42,7 @@ import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
-import { usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
+import { lerPermissoesReais, usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
@@ -58,12 +58,13 @@ import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
-import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, comPapeisDasPermissoes, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
+import { definirEstadoVivo } from "@/emylia/estadoVivo";
 import { aplicarFaturacao, lerFaturacaoDaFicha, precisaDaFicha } from "@/emylia/real/faturacaoDaFicha";
 import { definirDadosPagamento, lerDadosPagamento } from "@/emylia/pagamentoCliente";
 import "@/emylia/prototipo.css";
@@ -72,14 +73,15 @@ import "@/emylia/blocosPagina.css";
 interface Toast extends Aviso { id: number }
 type Gravacao = { k: "parado" } | { k: "a-gravar" } | { k: "gravado"; n: number } | { k: "erro"; t: string };
 const VISTAS = new Set(["negocios", "negocio", "hoje", "operacoes"]);
-/** As vistas que se escolhem no topo (a ficha do negócio abre-se a partir da lista). */
+/** As vistas que se escolhem no topo (a ficha do negócio abre-se a partir da lista). 09/11: cada uma só aparece a quem a pode ver (vistaPermitida). */
 const SEPARADORES: [Vista, string][] = [["hoje", "Hoje"], ["negocios", "Negócios"], ["operacoes", "Operações"]];
 /** As vistas da Emylia que abrem uma página da Olyvia: as Pessoas do CRM, as encomendas de cliente do Inventário e o Catálogo e custos. */
 const PAGINA_REAL: Partial<Record<Vista, string>> = {
   pessoas: "/pessoas", leads: "/pessoas", clientes: "/pessoas", inventario: "/client-orders", catalogo: "/catalogo-custos",
 };
-/** As mesmas ligações, ao lado dos separadores (como o menu do protótipo). */
-const LIGACOES: [string, string][] = [["Pessoas", "/pessoas"], ["Inventário", "/client-orders"], ["Catálogo e custos", "/catalogo-custos"]];
+/** As mesmas ligações, ao lado dos separadores (como o menu do protótipo). 09/11: com a permissão de cada página; sem ela, não aparece. */
+const LIGACOES: [string, string, string][] = [["Pessoas", "/pessoas", "pessoas.view"], ["Inventário", "/client-orders", "client_orders.view"],
+  ["Catálogo e custos", "/catalogo-custos", "services.view"]];
 
 /** 09/11: os papéis do Negócio que veem a encomenda de cliente do negócio (neg_papeis_permissoes com client_orders.view). */
 const PAPEIS_VEEM_ENCOMENDAS: readonly Papel[] = ["comercial", "direcao", "financeiro", "armazem", "operacoes"];
@@ -106,6 +108,23 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // que guardam a primeira versão da função; a ler as permissões, conta como sim (o servidor decide na mesma).
   const verEncomendasPerfil = useRef(true);
   verEncomendasPerfil.current = permsPerfilALer || hasPermission("client_orders.view");
+  // 09/11: o que quem entrou pode ver: fn_cat_pode (o perfil, os Papéis no Negócio e o admin, como a base decide; lido em
+  // usePermissoesReaisNegocio) OU o perfil da Olyvia (usePermissions). Enquanto se lê, só o perfil.
+  const codigosLidos = perms.leitura.k === "lidas" ? perms.leitura.codigos : null;
+  const pode = (c: string): boolean => !!codigosLidos?.has(c) || (!permsPerfilALer && hasPermission(c));
+  // 09/11 (20270111100000): a leitura reduzida da base (fn_neg_so_execucao): sem pessoas.view, com negocios.obra.executar. Só as obras onde
+  // trabalha, sem dinheiro; as funções do negócio inteiro recusam-no, por isso nem se chamam. Num ref, para os efeitos e o gravar.
+  const soExecucao = !!codigosLidos && !pode("pessoas.view") && pode("negocios.obra.executar");
+  const soExecucaoRef = useRef(soExecucao);
+  soExecucaoRef.current = soExecucao;
+  // espera pela leitura das permissões (o que se lê ao abrir depende de soExecucao); resolve logo se já estão lidas
+  const leituraRef = useRef(perms.leitura);
+  leituraRef.current = perms.leitura;
+  const esperasPerms = useRef<(() => void)[]>([]);
+  useEffect(() => { if (perms.leitura.k === "lidas") for (const f of esperasPerms.current.splice(0)) f(); }, [perms.leitura]);
+  const permsLidas = useCallback(() => new Promise<void>((ok) => {
+    if (leituraRef.current.k === "lidas") ok(); else esperasPerms.current.push(ok);
+  }), []);
   /** 09/11: os papéis lidos (neg_meus_papeis), também num ref pela mesma razão; null enquanto não se leem. */
   const meusRef = useRef<MeusPapeis | null>(null);
   // 5/11: leads.assign para o comercial da lead (ComercialDaLead), da mesma maneira
@@ -179,7 +198,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // as respostas do cliente no portal já aplicadas ao negócio, à espera de a gravação acabar bem para se marcarem
   const respostasAplicadas = useRef<string[]>([]);
   const publicarVistasCliente = useCallback(async () => {
-    if (!org) return;
+    // 09/11 (20270111100000): com a leitura reduzida a base recusa neg_vista_cliente_guardar (CT001): não se publica
+    if (!org || soExecucaoRef.current) return;
     try {
       const erros = await publicarVistas(supabase, org, S, refs.current, vistas.current);
       if (erros.length) console.warn("[portal] vistas do cliente por gravar:", erros);
@@ -209,7 +229,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     try {
       do {
         deNovo.current = false;
-        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current);
+        // 09/11 (20270111100000): com a leitura reduzida só se grava a obra (neg_guardar_negocio recusa-o; sem o «Não gravou»)
+        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current, { soObra: soExecucaoRef.current });
         if (r.reler) relerFinanceiro = true;
         if (relerPedido.current) { relerPedido.current = false; relerFinanceiro = true; }
         if (r.erros.length) { semErros = false; setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
@@ -238,10 +259,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       }
       // F3: com fatura, pagamento ou anulação no servidor, relê-se: a encomenda de cliente da base (contrato e número), a fase e a prontidão
       if (relerFinanceiro) {
-        const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
+        const relidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: soExecucaoRef.current });
         aplicarLidos(relidos);
         await carregarEncomendas(relidos);
-        await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
+        if (!soExecucaoRef.current) await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       }
       await publicarVistasCliente();
       await avisarClientes();
@@ -313,11 +334,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   useEffect(() => {
     let desfazer = definirDadosPagamento(null);
     let vivo = true;
-    if (org) void (supabase as unknown as { rpc: (f: string, a: unknown) => Promise<{ data: unknown; error: unknown }> })
-      .rpc("neg_dados_pagamento_ler", { p_org: org })
-      .then(({ data, error }) => { if (vivo && !error) { desfazer(); desfazer = definirDadosPagamento(lerDadosPagamento(data)); } });
+    // 09/11 (20270111100000): depois de ler as permissões; com a leitura reduzida a base recusa-o, por isso não se pede
+    if (org) void permsLidas().then(() => {
+      if (!vivo || soExecucaoRef.current) return;
+      return (supabase as unknown as { rpc: (f: string, a: unknown) => Promise<{ data: unknown; error: unknown }> })
+        .rpc("neg_dados_pagamento_ler", { p_org: org })
+        .then(({ data, error }) => { if (vivo && !error) { desfazer(); desfazer = definirDadosPagamento(lerDadosPagamento(data)); } });
+    });
     return () => { vivo = false; desfazer(); };
-  }, [org]);
+  }, [org, permsLidas]);
   useEffect(() => aoMudarProntidao(redesenhar), [redesenhar]);
 
   useEffect(() => {
@@ -326,17 +351,28 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     setPronto(false); setErroLer(null);
     (async () => {
       // 30/10: os papéis do RH primeiro: sem nenhum (e sem o perfil da Olyvia que vê todos), não há nada a fazer aqui
-      const mp = await lerMeusPapeis(supabase, org);
+      let mp = await lerMeusPapeis(supabase, org);
       if (!vivo) return;
+      // 9/11 (Lote 1, A): sem Papel no Negócio no RH (nem pessoas.edit), os papéis vêm das permissões negocios.* do perfil (fn_cat_pode):
+      // entra e vê os passos para que tem permissão, em vez de «Não tem nenhum papel»
+      if (!mp.todos && !papelInicial(mp, S.role)) {
+        mp = comPapeisDasPermissoes(mp, await lerPermissoesReais(org));
+        if (!vivo) return;
+      }
       aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
       const papel = papelInicial(mp, S.role);
       meusRef.current = mp;
       setMeus(mp);
       if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), um cargo técnico de obra ou o perfil de técnico de obra."); return; }
       S.role = papel;
-      const cat = await carregarCatalogo(supabase, org, S);
+      // 09/11 (20270111100000): quem vê todos (admin, pessoas.edit) nunca tem a leitura reduzida e segue logo; os outros esperam pelas
+      // permissões, para não pedir o que a base lhes recusa (as linhas de negócio, os ajustes dos campos, as sugestões, a prontidão)
+      if (!mp.todos) await permsLidas();
+      if (!vivo) return;
+      const so = !mp.todos && soExecucaoRef.current;
+      const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so });
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
-      await carregarCamposConfig(supabase, org, S);
+      await carregarCamposConfig(supabase, org, S, { semLer: so });
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
       aplicarGestoresObra(await lerGestoresObra(supabase, org));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)
@@ -353,7 +389,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const vc = await carregarVisitasCrm(supabase, org);
       if (vc.erro) avisar({ msg: "As visitas da agenda do CRM não carregaram", sub: vc.erro, kind: "bad" });
       ids.current = idsServico(cat.M.ids.servico);
-      const lidos = await lerNegocios(supabase, org, ids.current, S.campos);
+      const lidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: so });
       if (!vivo) return;
       aplicarLidos(lidos);
       // 4/11: a morada que a lead já trazia (a da ficha da pessoa), para o passo «Morada da obra»; um erro a ler não para nada
@@ -390,8 +426,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       // 30/10: os planos por aprovar com tarefas por atribuir (o RH não tinha técnicos do ofício quando se geraram) ficam com os técnicos
       // que o RH já tem; grava-se a obra a seguir. Só quem grava a obra (o Gestor de obra; ou quem vê todos) o faz.
       const atribuidas = mp.todos || mp.papeis.includes("operacoes") ? S.deals.reduce((a, d) => a + atribuirPorAtribuir(d.obra.plano), 0) : 0;
-      // F3: a prontidão das encomendas de cliente emitidas (o passo «À espera dos materiais»)
-      await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
+      // F3: a prontidão das encomendas de cliente emitidas (o passo «À espera dos materiais»); 09/11: não com a leitura reduzida (recusa-a)
+      if (!so) await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       if (!vivo) return;
       // 3/11: a obra pedida no endereço (a notificação de uma mensagem do cliente), se o negócio já tem plano
       const op = obraPedida.current;
@@ -399,6 +435,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const np = negocioPedido.current;
       if (np && S.deals.some((x) => x.id === np)) { S.view = "negocio"; S.deal = np; S.op = null; }
       setPronto(true);
+      // 9/11: o Estúdio (no mesmo separador) lê daqui o Catálogo, os técnicos e as obras marcadas, para o plano da obra da visita
+      definirEstadoVivo(S, org);
       preencherDaFicha();
       // 2/11: a vista do cliente grava-se depois de as encomendas carregarem (leva o estado dos materiais) e só depois os avisos
       void carregarEncomendas(lidos).catch(() => undefined).then(() => publicarVistasCliente()).then(avisarClientes);
@@ -407,7 +445,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (atribuidas || recebidas || respostasAplicadas.current.length) void gravar();
     })().catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
-  }, [org, S, avisar, carregarEncomendas, aplicarLidos]); // eslint-disable-line react-hooks/exhaustive-deps -- gravar só depois de ler
+  }, [org, S, avisar, carregarEncomendas, aplicarLidos, permsLidas]); // eslint-disable-line react-hooks/exhaustive-deps -- gravar só depois de ler
   useEffect(() => () => reporNomesPapeis(), []);
   // 3/11 (20270105200000): perder e anular a perda gravam-se pelas funções da base (neg_guardar_negocio ignora o estado e o motivo); depois,
   // com sucesso ou não, grava-se o resto e relê-se o negócio (a base é que diz se ficou perdido). A base pede negocios.perder.
@@ -439,7 +477,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     if (!org) return;
     let vivo = true;
     const reler = async () => {
-      const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
+      const relidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: soExecucaoRef.current });
       aplicarLidos(relidos);
       await carregarEncomendas(relidos);
     };
@@ -484,7 +522,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         const r = await aprovarPoReal(supabase, uuid);
         avisar(r.publicada ? { msg: "Encomenda aprovada", sub: "Já está no portal do fornecedor.", kind: "ok" }
           : { msg: "Encomenda aprovada", sub: r.aviso ?? "O fornecedor não tem portal: envie-lhe a encomenda por email.", kind: "ok" });
-        const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
+        const relidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: soExecucaoRef.current });
         await carregarEncomendas(relidos);
       } catch (e) {
         avisar({ msg: "A encomenda não foi aprovada", sub: (e as Error).message, kind: "bad" });
@@ -513,7 +551,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
             avisar({ msg: "Materiais sem fornecedor", sub: `${fora.map((x) => `${x.n} (${x.motivo})`).join(" · ")}. Ligue um fornecedor preferido no Catálogo.`, kind: "bad", atraso: 300 });
             run(() => desfazerAjusteReal(d, linhas.filter((l) => fora.some((x) => x.n === l.n))));
           }
-          const relidos = await lerNegocios(supabase, org, ids.current, S.campos);
+          const relidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: soExecucaoRef.current });
           await carregarEncomendas(relidos);
         } catch (e) {
           avisar({ msg: "Os materiais novos não foram pedidos", sub: (e as Error).message, kind: "bad" });
@@ -647,7 +685,17 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   if (tecConta && S.tec !== tecConta) S.tec = tecConta;
   // 09/11: quem só pode ser o técnico (sem ver todos) fica sempre fixo no seu, mesmo sem técnico ligado (null: o aviso), e nunca vê o de outro
   const fixarTecnico = !!tecConta || (!!meus && !meus.todos && S.role === "tecnico");
-  const ctx: Ctx = { S, A, run, go, q, setQ, ...(fixarTecnico ? { tecnicoFixo: { ref: tecConta } } : {}) };
+  // 09/11: cada separador só aparece a quem tem a permissão dele (perfil OU papel OU admin): o Hoje sempre; os Negócios (e a ficha) com
+  // pessoas.view; as Operações com negocios.obra.executar ou negocios.obra.planear. As outras vistas (que abrem páginas reais) não se tocam.
+  const vistaPermitida = (v: Vista): boolean =>
+    v === "negocios" || v === "negocio" ? pode("pessoas.view")
+      : v === "operacoes" ? pode("negocios.obra.executar") || pode("negocios.obra.planear")
+      : true;
+  // numa vista que não pode ver (o endereço, o menu, uma ligação dentro de um ecrã), fica no Hoje; só com as permissões lidas
+  if (codigosLidos && !permsPerfilALer && !vistaPermitida(S.view)) { S.view = "hoje"; S.deal = null; S.op = null; }
+  const ctx: Ctx = { S, A, run, go, q, setQ, ...(fixarTecnico ? { tecnicoFixo: { ref: tecConta } } : {}),
+    podeCriarNegocio: pode("pessoas.create"), podeVerNegocio: pode("pessoas.view"), podeVerInventario: pode("client_orders.view"),
+    ...(soExecucao ? { leituraReduzida: true } : {}) };
   // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
   const semContaLigada = !!meus && !meus.todos && !meus.pessoa && meus.papeis.length === 0 && tecnicoPorPerfil;
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
@@ -669,7 +717,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
           </select>
         </label>
         <nav aria-label="Vistas" className="order-last -mx-4 flex w-[calc(100%+2rem)] gap-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:order-none sm:mx-0 sm:w-auto sm:overflow-visible sm:px-0">
-          {SEPARADORES.map(([v, nome]) => {
+          {SEPARADORES.filter(([v]) => vistaPermitida(v)).map(([v, nome]) => {
             const ativo = S.view === v || (v === "negocios" && S.view === "negocio");
             return (
               <button key={v} type="button" aria-current={ativo ? "page" : undefined} onClick={go(() => A.nav(v))}
@@ -678,7 +726,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
               </button>
             );
           })}
-          {LIGACOES.map(([nome, para]) => (
+          {LIGACOES.filter(([, , codigo]) => pode(codigo)).map(([nome, para]) => (
             <button key={para} type="button" onClick={() => navigate(para)} className="min-h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-muted-foreground hover:bg-muted">{nome}</button>
           ))}
         </nav>
