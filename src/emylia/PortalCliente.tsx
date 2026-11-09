@@ -8,6 +8,7 @@
 import { useState, type ReactNode } from "react";
 import { ArrowLeft, Armchair, Check, ChevronRight, ClipboardCheck, Clock, Copy, Eye, FileText, Grid3x3, Hammer, MessageSquareText, PenLine, Plug, Scale, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NaFrente } from "./NaFrente";
 import { MOTIVOS_RECUSA, MOTIVOS_VERSAO, eur, versaoAtual, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { ContratoDoc, FaturaDoc, NotaEncomendaDoc, PropostaDoc, TITULOS_CLAUSULAS, totais, tranches } from "./DocsCliente";
@@ -686,6 +687,7 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
   ) : null;
 
   return (
+    <NaFrente>
     <div className="fixed inset-0 z-[90] overflow-y-auto bg-slate-100 text-slate-900 animate-in fade-in-0 duration-200" role="dialog" aria-modal="true" aria-label={`Portal do cliente: ${d.nome}`}>
       <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-2 backdrop-blur">
         <p className="text-sm font-semibold tracking-[0.18em] text-slate-900">{nomeEmpresa().toUpperCase()}</p>
@@ -838,6 +840,7 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
         </div>
       )}
     </div>
+    </NaFrente>
   );
 }
 

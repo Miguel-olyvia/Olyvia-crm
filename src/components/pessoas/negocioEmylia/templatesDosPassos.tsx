@@ -73,9 +73,11 @@ function AvisosDaGravacao({ t }: { t: UseTemplatesDoNegocio }) {
 const podeEscolher = (t: UseTemplatesDoNegocio, c: ContextoDosTemplates): boolean => c.podeEditar && t.estado === "pronto" && !t.aGuardar && c.negocioId !== null;
 
 /* ------------------------------------------------------------------------------------------------ passo Orçamento */
-/** O documento do orçamento (PDF), logo por baixo do seletor do template: aberto por omissão; o PDF só se gera enquanto está aberto. */
+/** O documento do orçamento (PDF), logo por baixo do seletor do template: aberto por omissão; o PDF só se gera enquanto está aberto.
+ *  9/11 (Rúben, telemóvel): num ecrã estreito começa fechado (o leitor de PDF ocupava o ecrã todo e no telemóvel nem sempre mostra o PDF). */
+const ecraLargo = () => typeof window === "undefined" || typeof window.matchMedia !== "function" || window.matchMedia("(min-width: 640px)").matches;
 function DocumentoPdfRecolhido(props: Parameters<typeof OrcamentoPdf>[0]) {
-  const [aberto, setAberto] = useState(true);
+  const [aberto, setAberto] = useState(ecraLargo);
   return (
     <details className="rounded-2xl border border-border bg-card p-4 text-[15px]" open={aberto} onToggle={(e) => setAberto((e.currentTarget as HTMLDetailsElement).open)}>
       <summary className={cn("min-h-11 cursor-pointer py-2 font-medium", FOCO)}>Ver o documento do orçamento (PDF)</summary>

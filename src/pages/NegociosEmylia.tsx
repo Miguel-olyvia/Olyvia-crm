@@ -630,29 +630,31 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     // 04/11/2026: a permissão real de mandar a proposta / o contrato ao portal, para os botões dos passos (permPortalPasso.tsx)
     <PermPortalNegocios>
     <div className="pn calma pg-root min-h-full bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-3 text-[15px]">
-        <label className="flex items-center gap-2">
-          <span className="text-muted-foreground">A ver como</span>
-          <select className="min-h-10 rounded-lg border border-input bg-card px-3" value={S.role}
+      {/* 9/11 (Rúben, telemóvel): o papel e o estado da gravação numa linha; as vistas numa fila que desliza na sua própria largura
+          (antes alargavam a página toda para 563 px e o ecrã fugia para o lado ao arrastar) */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 text-[15px] sm:justify-between sm:gap-3">
+        <label className="flex min-w-0 items-center gap-2">
+          <span className="hidden text-muted-foreground sm:inline">A ver como</span>
+          <select aria-label="A ver como" className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={S.role}
             onChange={(e) => run(() => { S.role = e.target.value as Papel; })}>
             {(meus ? papeisPermitidos(meus) : (Object.keys(PAPEIS) as Papel[])).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
           </select>
         </label>
-        <nav aria-label="Vistas" className="flex gap-1">
+        <nav aria-label="Vistas" className="order-last -mx-4 flex w-[calc(100%+2rem)] gap-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:order-none sm:mx-0 sm:w-auto sm:overflow-visible sm:px-0">
           {SEPARADORES.map(([v, nome]) => {
             const ativo = S.view === v || (v === "negocios" && S.view === "negocio");
             return (
               <button key={v} type="button" aria-current={ativo ? "page" : undefined} onClick={go(() => A.nav(v))}
-                className={"min-h-10 rounded-lg px-3 " + (ativo ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted")}>
+                className={"min-h-10 shrink-0 whitespace-nowrap rounded-lg px-3 " + (ativo ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted")}>
                 {nome}
               </button>
             );
           })}
           {LIGACOES.map(([nome, para]) => (
-            <button key={para} type="button" onClick={() => navigate(para)} className="min-h-10 rounded-lg px-3 text-muted-foreground hover:bg-muted">{nome}</button>
+            <button key={para} type="button" onClick={() => navigate(para)} className="min-h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-muted-foreground hover:bg-muted">{nome}</button>
           ))}
         </nav>
-        <span role="status" aria-live="polite">
+        <span role="status" aria-live="polite" className="ml-auto min-w-0 text-sm sm:ml-0 sm:text-[15px]">
           {gravacao.k === "a-gravar" && <span className="text-muted-foreground">A gravar…</span>}
           {gravacao.k === "gravado" && <span className="text-muted-foreground">Gravado</span>}
           {gravacao.k === "erro" && <span className="text-destructive">Não gravou: {gravacao.t}</span>}

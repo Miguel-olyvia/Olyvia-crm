@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { Check, MessageSquareText, Scale, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { NaFrente } from "./NaFrente";
 import { PAPEIS, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { clausulasContrato } from "./DocsCliente";
@@ -30,6 +31,7 @@ export function RevisaoContrato({ ctx, d, a }: { ctx: Ctx; d: Negocio; a?: Adend
   });
 
   return (
+    <NaFrente>
     <div className="fixed inset-0 z-[85] overflow-y-auto bg-background animate-in fade-in-0 duration-200" role="dialog" aria-modal="true" aria-label={`Rever ${doc}`}>
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
         <p className="flex items-center gap-2 text-sm font-semibold"><Scale className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Jurídico · {a ? `adenda ${a.n} ao contrato CT 2026/${d.id}` : `contrato CT 2026/${d.id}`}</p>
@@ -87,5 +89,6 @@ export function RevisaoContrato({ ctx, d, a }: { ctx: Ctx; d: Negocio; a?: Adend
         </div>
       </div>
     </div>
+    </NaFrente>
   );
 }

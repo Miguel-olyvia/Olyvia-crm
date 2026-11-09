@@ -40,3 +40,6 @@
 .pg-root .cartaoq.f-financeiro{border-left-color:var(--g-vio)}
 /* Chips rápidos (ListaTopo): no telemóvel, uma só linha que rola para o lado, de ponta a ponta e a esbater à direita (como em Negócios); a partir de 640 px voltam a quebrar em linhas. */
 @media (max-width:639px){.pg-root .chips-rolam,.pg-root .chips-rolam [role=group]{flex-wrap:nowrap;flex-shrink:0}.pg-root .chips-rolam{overflow-x:auto;margin-inline:-1rem;padding-inline:1rem;scrollbar-width:none;mask-image:linear-gradient(to right,#000 calc(100% - 2rem),transparent)}.pg-root .abas-inv [role=tab]{padding-inline:10px}}
+/* 9/11 (Rúben, telemóvel): uma grelha sem colunas definidas tinha uma coluna "auto", que cresce até ao texto mais largo e empurrava os cartões
+   para fora do ecrã (o Painel dos negócios). Sem peso (:where), para qualquer grid-cols-* ganhar. */
+:where(.pg-root .grid){grid-template-columns:minmax(0,1fr)}

@@ -299,14 +299,14 @@ export function CompanySwitcher() {
             {activeCompany.name.charAt(0).toUpperCase()}
           </AvatarFallback>
         </Avatar>
-        <div className="flex flex-col items-start">
-          <span className="font-medium text-sm leading-tight">{activeCompany.name}</span>
+        <div className="flex min-w-0 flex-col items-start">
+          <span className="max-w-[8rem] truncate font-medium text-sm leading-tight sm:max-w-none">{activeCompany.name}</span>
           {activeCompany.parent_name && (
             <span className="text-muted-foreground text-[10px] leading-tight">{activeCompany.parent_name}</span>
           )}
         </div>
         {activeOrgRole && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{activeOrgRole}</Badge>
+          <Badge variant="secondary" className="hidden sm:inline-flex text-[10px] px-1.5 py-0">{activeOrgRole}</Badge>
         )}
       </div>
     );
@@ -317,9 +317,9 @@ export function CompanySwitcher() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          className="flex items-center gap-2 h-auto py-1.5 px-2 text-sidebar-foreground hover:bg-sidebar-accent"
+          className="flex min-w-0 max-w-full items-center gap-2 h-auto py-1.5 px-2 text-sidebar-foreground hover:bg-sidebar-accent"
         >
-          <div className="relative">
+          <div className="relative shrink-0">
             <Avatar className="h-7 w-7">
               {activeCompany.logo_url && <AvatarImage src={activeCompany.logo_url} alt={activeCompany.name} />}
               <AvatarFallback className="bg-primary/10 text-primary text-xs">
@@ -330,18 +330,18 @@ export function CompanySwitcher() {
               {companies.length}
             </span>
           </div>
-          <div className="flex flex-col items-start">
-            <div className="flex items-center gap-1.5">
-              <span className="font-medium text-sm leading-tight">{activeCompany.name}</span>
+          <div className="flex min-w-0 flex-col items-start">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="max-w-[8rem] truncate font-medium text-sm leading-tight sm:max-w-none">{activeCompany.name}</span>
               {activeOrgRole && (
-                <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">{activeOrgRole}</Badge>
+                <Badge variant="secondary" className="hidden sm:inline-flex text-[9px] px-1 py-0 h-4">{activeOrgRole}</Badge>
               )}
             </div>
             {activeCompany.parent_name && (
               <span className="text-muted-foreground text-[10px] leading-tight">{activeCompany.parent_name}</span>
             )}
           </div>
-          <ChevronDown className="h-4 w-4 opacity-50" />
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[360px] max-w-[90vw] p-0">

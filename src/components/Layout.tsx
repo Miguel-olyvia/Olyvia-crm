@@ -158,7 +158,19 @@ const LayoutContent = memo(function LayoutContent({
       <SupportAccessBanner />
 
       {/* Top Header - Fixed */}
-      <TopHeader userName={userName} userRole={displayRole} />
+      <TopHeader userName={userName} userRole={displayRole} menuMovel={
+        /* Mobile Menu: 9/11, no cabeçalho (antes flutuava em baixo à esquerda, por cima dos cartões e dos botões) */
+        <Sheet>
+          <SheetTrigger asChild className="md:hidden shrink-0">
+            <Button variant="ghost" size="icon" aria-label="Menu" className="text-sidebar-foreground hover:bg-sidebar-accent">
+              <Menu className="w-5 h-5" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="p-0 w-72">
+            <AppSidebar userName={userName} userRole={displayRole} />
+          </SheetContent>
+        </Sheet>
+      } />
 
       {/* Spacer for fixed header */}
       <div className="h-14 shrink-0" />
@@ -167,18 +179,6 @@ const LayoutContent = memo(function LayoutContent({
       <div className="hidden md:block">
         <AppSidebar userName={userName} userRole={displayRole} />
       </div>
-
-      {/* Mobile Menu */}
-      <Sheet>
-        <SheetTrigger asChild className="md:hidden fixed bottom-4 left-4 z-50">
-          <Button variant="outline" size="icon">
-            <Menu className="w-5 h-5" />
-          </Button>
-        </SheetTrigger>
-        <SheetContent side="left" className="p-0 w-72">
-          <AppSidebar userName={userName} userRole={displayRole} />
-        </SheetContent>
-      </Sheet>
 
       {/* Main Content - fixed, left edge shifts with sidebar */}
       <main className={cn(
