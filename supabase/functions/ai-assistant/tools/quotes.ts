@@ -1,6 +1,7 @@
 // Quote tools — extracted verbatim from index.ts.
 
 import { requireWrite, requireActionPermission, requirePermission } from "../shared/authz.ts";
+import { filterVisible, scopeWindow } from "../shared/scope.ts";
 
 // Estados em que um orçamento aceita escrita populadora (linhas, descontos, fees básicos).
 // Fonte: schema `quotes.estado` — apenas 'rascunho' é mutável sem efeito externo.
@@ -393,15 +394,17 @@ const listQuotes: Handler = async (ctx, args): Promise<ToolResult> => {
     .select("id, quote_number, estado, total, title, entity_id, created_at")
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .limit(scopeWindow(limit));
   if (args?.estado) q = q.eq("estado", args.estado);
   if (entityIds) q = q.in("entity_id", entityIds);
   if (quoteNumber) q = q.ilike("quote_number", `%${quoteNumber}%`);
   if (title) q = q.ilike("title", `%${title}%`);
   if (dateFrom) q = q.gte("created_at", dateFrom);
   if (dateTo) q = q.lte("created_at", dateTo);
-  const { data, error } = await q;
+  const { data: rawData, error } = await q;
   if (error) throw error;
+  // Âmbito do utilizador (RLS) — auditoria Administração F6.
+  const data = (await filterVisible(ctx, "quotes", rawData)).slice(0, Number(limit) || 10);
   const baseMsg = `${data?.length || 0} orçamento(s).`;
   const message = reinterpretedNote ? `${reinterpretedNote} ${baseMsg}` : baseMsg;
   return { success: true, message, data: data || [] };

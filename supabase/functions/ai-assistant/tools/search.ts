@@ -4,6 +4,7 @@
 // Read-only; RLS controla visibilidade. Org-scoping via <table>.organization_id directo.
 
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
+import { rlsVisibleIds, scopeWindow, type ScopedTable } from "../shared/scope.ts";
 
 type Kind = "lead" | "client" | "deal" | "quote" | "proposal" | "contract";
 
@@ -69,7 +70,8 @@ const search_entities: Handler = async (ctx, args): Promise<ToolResult> => {
   }
 
   const pattern = `%${escapeIlike(rawQuery)}%`;
-  const PER = limit;
+  // Âmbito (auditoria Administração F6): lê-se uma janela maior e ficam até `limit` visíveis por tipo.
+  const PER = scopeWindow(limit);
 
   const tasks: Promise<Item[]>[] = [];
 
@@ -210,8 +212,24 @@ const search_entities: Handler = async (ctx, args): Promise<ToolResult> => {
   const groups = await Promise.all(tasks);
   const qLower = rawQuery.toLowerCase();
 
-  const items: Item[] = ([] as Item[])
-    .concat(...groups)
+  // Só o que o utilizador vê pela RLS (permissão, organização e âmbito), até `limit` por tipo.
+  const KIND_TABLE: Record<Kind, ScopedTable> = {
+    lead: "anew_leads",
+    client: "anew_clients",
+    deal: "deals",
+    quote: "quotes",
+    proposal: "proposals",
+    contract: "client_contracts",
+  };
+  const found = ([] as Item[]).concat(...groups);
+  const visibleItems: Item[] = [];
+  for (const k of Array.from(new Set(found.map((it) => it.kind)))) {
+    const ofKind = found.filter((it) => it.kind === k);
+    const visible = await rlsVisibleIds(ctx, KIND_TABLE[k], ofKind.map((it) => it.id));
+    visibleItems.push(...ofKind.filter((it) => visible.has(it.id)).slice(0, limit));
+  }
+
+  const items: Item[] = visibleItems
     .map((it) => ({ it, score: scoreLabel(it.label, qLower) }))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
