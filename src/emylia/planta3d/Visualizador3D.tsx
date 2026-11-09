@@ -730,8 +730,36 @@ function GuiaParede({ espaco, x, y, altura }: { espaco: Espaco; x: number; y: nu
   );
 }
 
-interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void }
-function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, setArrasto }: PropsPeca) {
+/**
+ * O que o toque precisa de saber ANTES da câmara: o OrbitControls ouve o canvas e reage ao toque antes dos eventos do three; por isso o
+ * contentor do 3D vê, na fase de captura, se o dedo (ou o rato) cai na peça escolhida e, se cair, desliga a câmara para o arrasto.
+ */
+interface AlvoArrasto { grupo: THREE.Object3D | null; camera: THREE.Camera | null; controls: { enabled: boolean } | null }
+// (passa por props, não por contexto: o contexto do React não atravessa o <Canvas> do react-three-fiber 8)
+function PonteCamara({ alvo }: { alvo: { current: AlvoArrasto } }) {
+  const camera = useThree((s) => s.camera), controls = useThree((s) => s.controls) as { enabled: boolean } | null;
+  useEffect(() => { alvo.current.camera = camera; alvo.current.controls = controls; }, [alvo, camera, controls]);
+  return null;
+}
+const raio = new THREE.Raycaster();
+/** Na fase de captura do contentor: o ponteiro cai na peça escolhida? Então a câmara fica parada (o arrasto é da peça). */
+function travarCamaraSeNaPeca(e: React.PointerEvent<HTMLDivElement>, alvo: AlvoArrasto): void {
+  const { grupo, camera, controls } = alvo, cv = e.currentTarget.querySelector("canvas");
+  if (!grupo || !camera || !controls || !cv) return;
+  const r = cv.getBoundingClientRect();
+  raio.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  if (raio.intersectObject(grupo, true).length) controls.enabled = false;
+}
+
+interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto } }
+function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, setArrasto, alvo }: PropsPeca) {
+  const grupoRef = useRef<THREE.Group>(null);
+  useEffect(() => {
+    if (!selecionada || !mover) return;
+    const a = alvo.current, g = grupoRef.current;
+    a.grupo = g;
+    return () => { if (a.grupo === g) a.grupo = null; };
+  }, [alvo, selecionada, mover]);
   // durante o arrasto desta peça, o sítio é o que as regras dão para o ponto do rato
   const lugar = arrasto?.id === original.id ? arrasto.lugar : null;
   const p = lugar ? { ...original, x: lugar.x, y: lugar.y, rotacao: lugar.rot, altura: lugar.altura } : original;
@@ -746,7 +774,8 @@ function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, s
   const eventos = selecionada && mover ? {
     onPointerDown: (e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation();
-      (e.target as unknown as Element).setPointerCapture?.(e.pointerId);
+      // a captura do ponteiro pode falhar (ponteiro já inactivo): o arrasto continua sem ela
+      try { (e.target as unknown as Element).setPointerCapture?.(e.pointerId); } catch { /* sem captura */ }
       if (controls) controls.enabled = false; // a câmara não roda enquanto se arrasta
       setArrasto({ id: original.id, parede: original.montagem === "parede", x0: original.x, y0: original.y, alt0: original.altura, py0: e.clientY, ultimo: { x: original.x, y: original.y }, lugar: { x: original.x, y: original.y, rot: original.rotacao, altura: original.altura } });
     },
@@ -761,7 +790,7 @@ function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, s
       setArrasto({ ...arrasto, ultimo, lugar: l ?? arrasto.lugar });
       invalidate();
     },
-    onPointerUp: (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); (e.target as unknown as Element).releasePointerCapture?.(e.pointerId); largar(true); },
+    onPointerUp: (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); try { (e.target as unknown as Element).releasePointerCapture?.(e.pointerId); } catch { /* sem captura */ } largar(true); },
     onPointerCancel: () => largar(false),
   } : {};
   // Esc cancela o arrasto (a peça volta ao sítio)
@@ -784,7 +813,7 @@ function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, s
   const avisar = useCallback((chave: string, fonte: string) => setFontes((f) => (f[chave] === fonte ? f : { ...f, [chave]: fonte })), []);
   const fonte = [...new Set(Object.values(fontes))].join(" + ");
   return (
-    <group position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }} {...eventos}>
+    <group ref={grupoRef} position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }} {...eventos}>
       <group ref={corpo} scale={[p.espelhada ? -1 : 1, 1, 1]}>
         <AvisarFonte.Provider value={avisar}>
           {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
@@ -968,8 +997,10 @@ function EstudioAmbiente() {
 
 export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
+  const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
   return (
-    <div role="img" aria-label={descricao} className="h-full w-full touch-none">
+    <div role="img" aria-label={descricao} className="h-full w-full touch-none" onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
+      onPointerUpCapture={() => { if (!arrasto && alvo.current.controls) alvo.current.controls.enabled = true; }}>
       {/* como o HTML: ACES com exposição 1,08, sombras suaves (PCF), ambiente de estúdio e fundo claro neutro */}
       <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }} onPointerMissed={() => onSelecionar(null)}>
         <color attach="background" args={["#ecebe7"]} />
@@ -979,8 +1010,9 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />
-        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} /> : null; })}
+        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} /> : null; })}
         {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
+        <PonteCamara alvo={alvo} />
       </Canvas>
     </div>
   );

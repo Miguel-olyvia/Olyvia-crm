@@ -282,13 +282,17 @@ export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], ur
     d = { larguraCm: t.base / 10, profundidadeCm: (t.alcance + t.base / 2) / 10, alturaCm: t.altura / 10, deNome: true };
   }
   const cg = !params || (params.k === "torneira" && !params.html) ? categoriaDoTipo(tipo, p.n) : undefined;
+  // os genéricos presos à parede (armário de parede, exaustor, prateleira): a profundidade típica quando o nome só dá largura × altura
+  const nomeTemTres = /\d+\s*[x×]\s*\d+\s*[x×]\s*\d+/i.test(p.n);
+  if (cg?.parede?.prof && !p.dim && !nomeTemTres) d = { ...d, profundidadeCm: cg.parede.prof * 100 };
   const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(urls[p.id] ? { url: urls[p.id] } : {}),
     ...(cg ? { generico: { id: cg.id, o: opcoesComOmissao(cg, tipo, {}, p.n) } } : {}) };
   // a altura ao chão: o lava-loiça fica com o rebordo por baixo do tampo (a 88,8 cm), a placa e a torneira em cima dele (90 cm)
-  const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : e.alt;
+  // e as peças de parede genéricas ficam à altura da categoria (armário de parede 145 cm, exaustor 150, prateleira 140)
+  const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : cg?.parede ? cg.parede.alt : e.alt;
   return {
     produtoId: p.id, nome: p.n, tipo, dimensoes: d, mockup3d, marca: p.marca, fornecedor: p.fornecedor, custo: p.custo, categoria: p.sub || caminhoDe(arvore, p.no) || e.rotulo,
-    montagem: e.mont, alturaOmissao: alt, demo: !!p.demo,
+    montagem: cg?.parede ? "parede" : e.mont, alturaOmissao: alt, demo: !!p.demo,
   };
 }
 

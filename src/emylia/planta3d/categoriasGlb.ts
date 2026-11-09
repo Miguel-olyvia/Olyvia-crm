@@ -22,7 +22,11 @@ export type OpcaoGlb =
   | { id: string; rotulo: string; tipo: "sim"; omissao: OmissaoGlb<boolean> }
   | { id: string; rotulo: string; tipo: "lista"; valores: { id: string; rotulo: string }[]; omissao: OmissaoGlb<string> };
 /** `nome`: só os produtos cujo nome casa (para separar, no mesmo tipo, o armário superior da cozinha do armário de casa de banho, o forno do exaustor…). */
-export interface CategoriaGlb { id: string; rotulo: string; tipos: TipoMockup[]; nome?: RegExp; partes: ParteGlb[]; opcoes: OpcaoGlb[] }
+export interface CategoriaGlb {
+  id: string; rotulo: string; tipos: TipoMockup[]; nome?: RegExp; partes: ParteGlb[]; opcoes: OpcaoGlb[];
+  /** Presa à parede e no ar: a altura da base ao chão por omissão (m) e, se o nome não a der, a profundidade (m). */
+  parede?: { alt: number; prof?: number };
+}
 
 /** Interruptor único dos genéricos em GLB: `false` volta aos mockups paramétricos de sempre (Visualizador3D, `Parametrico`). */
 export const USAR_GLB_GENERICOS = true;
@@ -72,7 +76,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     ],
   },
   {
-    id: "armario_parede", rotulo: "Armário de parede (cozinha)", tipos: ["armario_alto"], nome: /superior|parede|suspens/i,
+    id: "armario_parede", rotulo: "Armário de parede (cozinha)", tipos: ["armario_alto"], nome: /superior|parede|suspens/i, parede: { alt: 1.45, prof: 0.35 },
     opcoes: [{ id: "duas", rotulo: "Duas portas", tipo: "sim", omissao: true }, { id: "vidro", rotulo: "Portas de vidro", tipo: "sim", omissao: false }],
     partes: [
       caixa("corpo", "corpo", ({ w, d, h }) => ({ pos: [0, h / 2, -0.01], esc: [w, h, d - 0.02] })),
@@ -123,7 +127,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     ],
   },
   {
-    id: "extrator", rotulo: "Exaustor (de parede ou de ilha)", tipos: ["eletro"], nome: /exaustor|extrator/i,
+    id: "extrator", rotulo: "Exaustor (de parede ou de ilha)", tipos: ["eletro"], nome: /exaustor|extrator/i, parede: { alt: 1.5 },
     opcoes: [
       { id: "ilha", rotulo: "De ilha", tipo: "sim", omissao: (_t, n) => /ilha/i.test(n) },
       { id: "chamine", rotulo: "Com chaminé", tipo: "sim", omissao: (_t, n) => !/encastre|integr|convencional/i.test(n) },
@@ -202,7 +206,7 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     ],
   },
   {
-    id: "prateleira", rotulo: "Prateleira ou estante", tipos: ["prateleira"], opcoes: [{ id: "suportes", rotulo: "Com suportes à vista", tipo: "sim", omissao: true }],
+    id: "prateleira", rotulo: "Prateleira ou estante", tipos: ["prateleira"], parede: { alt: 1.4 }, opcoes: [{ id: "suportes", rotulo: "Com suportes à vista", tipo: "sim", omissao: true }],
     partes: [
       caixa("tabua", "corpo", ({ w, d, h }) => ({ pos: [0, h - 0.0125, 0], esc: [w, min(0.025, h), d] })),
       caixa("suporte_esq", "metal", ({ w, d, h }) => ({ pos: [-w / 2 + 0.1, h - 0.06, -d / 2 + 0.01], esc: [0.02, 0.1, 0.02] }), (p) => sim(p, "suportes")),
