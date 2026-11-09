@@ -35,6 +35,7 @@ import { DiaDaObra, FitaDias, HistoricoTarefa, Miniaturas, nomeTec } from "./Aco
 import { Conversa } from "./ConversaObra";
 import { orgDoModoReal } from "./acessosPortal";
 import { fotoDaEquipa, useConversaReal } from "./real/conversaReal";
+import { useMateriaisDaObra } from "./real/materiaisObraReal";
 import { AcaoMensagemCliente, ProblemasDoCliente, type ConversaDaObra } from "./ProblemasObra";
 import { pedirFrota } from "./frota/pontes";
 import { BarraTarefa, ExtrasTarefa, TarefasDoPlano } from "./PlanoInterativo";
@@ -1593,13 +1594,18 @@ const minuscula = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { A, go } = ctx;
   const db = useInventario();
-  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
-  const G = materiaisPorFase(d, inv);
+  // 09/11 (20270111870000): sem client_orders.view, com negocios.obra.materiais: as linhas vêm de obra_materiais_ler (sem dinheiro nem fornecedores)
+  const lida = useMateriaisDaObra(ctx, d);
+  const inv = lida.k === "lidos" ? lida.m.inv : d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const G = lida.k === "lidos" ? materiaisPorFase(d, inv, lida.m.linhas) : lida.k === "fora" ? materiaisPorFase(d, inv) : [];
   return (
     <section id="obra-mat" aria-labelledby="obra-mat-t" className="mt-10 scroll-mt-16">
       <h2 id="obra-mat-t" className={H2}>Materiais</h2>
       <p className="mt-1 text-[15px]">
-        {!d.obra.ec ? (d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.")
+        {lida.k === "a ler" ? <span className="text-muted-foreground">A ler os materiais…</span>
+          : lida.k === "erro" ? <span className="text-muted-foreground">Não foi possível ler os materiais.</span>
+          : lida.k === "lidos" && lida.m.ecs.length ? `Encomenda de cliente ${lida.m.ecs.join(", ")}: ${lida.m.linhas.length ? minuscula(textoResumoEc(inv!)) : "sem materiais."}`
+          : !d.obra.ec ? (d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.")
           : d.obra.ec.ref ? (inv ? `Encomenda de cliente ${inv.id} no Inventário: ${minuscula(textoResumoEc(inv))}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`)
           : "Obra do exemplo: os materiais já estão na obra."}
       </p>
@@ -1609,8 +1615,8 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             <div key={g.fase}>
               <p className="inline-flex items-center gap-2 text-sm font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[g.fase] }} aria-hidden="true" />Fase {g.fase} · {FASES_OBRA[g.fase - 1].curto}</p>
               <ul className={cn(CARTAO, "mt-2 divide-y divide-border px-4 sm:px-5")}>
-                {g.itens.map((m) => (
-                  <li key={m.n} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-3">
+                {g.itens.map((m, k) => (
+                  <li key={`${m.n}:${k}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-3">
                     <span className="min-w-[10rem] flex-1">
                       <span className="block text-[15px]">{m.n}</span>
                       <span className="block text-sm tabular-nums text-muted-foreground">{nfmt(m.q)} {m.un}{m.forn ? ` · ${m.forn}` : ""}</span>

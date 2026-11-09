@@ -211,12 +211,14 @@ export function faseNaObra(F: FasesDaObra | null, m: { id?: string | null; n: st
 
 /** Os materiais da obra por fase. `inv`: o estado da encomenda no Inventário novo (16/10); sem ele, o das obras antigas do exemplo.
  *  02/11: a fase é a da regra única (faseNaObra: o serviço da obra que instala o produto, a receita que o gasta, ou o nome). */
-export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null): { fase: number; itens: Mat[] }[] {
-  const linhas = d.obra.ec?.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? d.obra.mats?.map((x) => ({ id: undefined, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
+export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null, lidas?: readonly { id?: string | null; n: string; q: number; un: string; falta: number; ec?: string }[] | null): { fase: number; itens: Mat[] }[] {
+  // 09/11: `lidas`: as linhas de obra_materiais_ler (real/materiaisObraReal.ts), para quem não vê as encomendas de cliente; `inv` é o resumo delas
+  const linhas: { id?: string | null; n: string; q: number; un: string; falta: number; ec?: string }[] = lidas ? [...lidas]
+    : d.obra.ec?.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? d.obra.mats?.map((x) => ({ id: undefined, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
   const F = fasesDaObra(servicosDaObra(d));
   const itens: (Mat & { fase: number })[] = linhas.map((x) => {
     let estado: EstadoMat = "reservado", quando: string | undefined, forn: string | undefined;
-    const li = linhaDoResumo(inv, x.n);
+    const li = linhaDoResumo(inv, x.n, x.ec);
     if (li) {
       const pr = li.pos.find((p) => p.prometida)?.prometida ?? null;
       forn = li.pos[0]?.forn;
