@@ -31,6 +31,9 @@
 --   5b. purge_business_entity simulado: a sonda fica viewer aqui e ganha, só dentro do sub-bloco, uma associação
 --      super_admin (com deals.delete) noutra organização fora da cadeia desta → tem de ser bloqueada
 --   6. custos iguais nas duas vias: onde 3a e 3b leem linhas, ambas dão "com custos" ou ambas "custos a null"
+--   3b desde 20270110400000: neg_ler_negocios só devolve os negócios no âmbito de pessoas.view (dono, equipa com TEAM, tarefas na
+--      obra; tudo para admin, quem entra pelo papel ou tem um Papel no Negócio explícito, ou com linha ORG). Sem nenhum orçamento
+--      Emylia nesse âmbito, o esperado é "sem linhas". Esperado calculado das tabelas (v_neg_tudo / v_neg_vis).
 -- ============================================================
 
 BEGIN;
@@ -98,6 +101,8 @@ DECLARE
   v_role_vw    uuid;      -- 5b: papel viewer desta organização
   v_sonda_auth uuid;
   v_fase       text;
+  v_neg_tudo   boolean;   -- 3b (20270110400000): vê todos os negócios (admin, sem pessoas.view no perfil, ou Papel no Negócio explícito)
+  v_neg_vis    int;       -- 3b: orçamentos Emylia dos negócios que a conta vê com o âmbito de pessoas.view
 BEGIN
   -- Guardas: objetos que o teste usa têm de existir (base RH com a migration 20270110100000).
   IF to_regclass('public.neg_papeis_permissoes') IS NULL
@@ -169,6 +174,36 @@ BEGIN
               WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active' AND am.role_is_client IS NOT TRUE),
       EXISTS (SELECT 1 FROM neg_papeis_permissoes m WHERE m.permission_code = c AND m.papel = ANY (v_papeis))
     FROM unnest(c_codes || c_extra) c;
+
+    -- 3b (20270110400000): o âmbito de pessoas.view nos Negócios, a partir das tabelas. Vê tudo: admin (system_admin, super_admin
+    -- aqui ou acima), quem não tem pessoas.view no perfil (entra pelo papel), quem tem um Papel no Negócio explícito
+    -- (pessoas_papeis_negocio) que dá pessoas.view, ou uma linha ORG. Senão: os negócios de que é dono (assigned_to/created_by), os da
+    -- equipa que lidera com uma linha TEAM, e aqueles em cuja obra tem tarefas.
+    v_neg_tudo := v_sa
+      OR EXISTS (WITH RECURSIVE cad(org) AS (SELECT c_org UNION SELECT h.parent_org_id FROM anew_hierarchy h JOIN cad ON h.child_org_id = cad.org)
+                 SELECT 1 FROM anew_memberships am JOIN anew_roles r ON r.id = am.role_id
+                 WHERE am.user_id = a.user_id AND am.status = 'active'
+                   AND (r.code = 'system_admin' OR (r.code = 'super_admin' AND am.organization_id IN (SELECT org FROM cad))))
+      OR NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND e.perfil)
+      OR EXISTS (SELECT 1 FROM pessoas_papeis_negocio pp JOIN neg_papeis_permissoes m ON m.papel = pp.papel AND m.permission_code = 'pessoas.view'
+                 WHERE pp.pessoa_id = v_pessoa_neg AND pp.organization_id = c_org)
+      OR EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_membership_permission_scopes s ON s.membership_id = am.id
+                 WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active'
+                   AND s.permission_code = 'pessoas.view' AND s.scope_level = 'ORG');
+    SELECT count(*) INTO v_neg_vis FROM quotes q JOIN negocios n ON n.id = q.negocio_id
+    WHERE n.organization_id = c_org AND n.deleted_at IS NULL AND n.numero IS NOT NULL AND q.fluxo_emylia AND q.deleted_at IS NULL
+      AND (v_neg_tudo
+           OR n.assigned_to IN (a.user_id, a.auth_id) OR n.created_by IN (a.user_id, a.auth_id)
+           OR (EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_membership_permission_scopes s ON s.membership_id = am.id
+                       WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active'
+                         AND s.permission_code = 'pessoas.view' AND s.scope_level = 'TEAM')
+               AND EXISTS (SELECT 1 FROM organization_teams t JOIN organization_team_members tm ON tm.team_id = t.id
+                           WHERE t.organization_id = c_org AND t.leader_id = a.user_id AND tm.user_id IN (n.assigned_to, n.created_by)))
+           OR EXISTS (SELECT 1 FROM ops_obra o WHERE o.negocio_id = n.id AND v_pessoa_neg IS NOT NULL
+                        AND (EXISTS (SELECT 1 FROM ops_obra_tarefa_rh r WHERE r.obra_id = o.id AND r.pessoa_id = v_pessoa_neg)
+                             OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.estado_emylia->'plano'->'tasks') = 'array'
+                                                                               THEN o.estado_emylia->'plano'->'tasks' ELSE '[]'::jsonb END) t
+                                        WHERE t->>'tec' = v_pessoa_neg::text))));
 
     a.rotulo := a.rotulo || CASE WHEN cardinality(v_papeis) > 0 THEN ' [neg: ' || array_to_string(v_papeis, ',') || ']' ELSE '' END
                          || CASE WHEN v_ficha IS NULL THEN ' [sem ficha]' ELSE '' END;
@@ -267,6 +302,7 @@ BEGIN
     ELSE
       v_exp := CASE
         WHEN NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND (v_sa OR e.perfil OR e.papel)) THEN 'bloqueado'
+        WHEN v_neg_vis = 0 THEN 'sem linhas'   -- 20270110400000: nenhum negócio com orçamento Emylia no âmbito dela
         WHEN EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code IN ('quotes.view_costs', 'quotes.manage') AND (v_sa OR e.perfil OR e.papel)) THEN 'com custos'
         ELSE 'custos a null' END;
       v_n := NULL; v_nc := NULL; v_msg := NULL; v_j := NULL;
