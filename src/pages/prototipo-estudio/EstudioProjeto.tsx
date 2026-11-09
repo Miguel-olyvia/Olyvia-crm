@@ -7,7 +7,7 @@
 //  5. Proposta: as necessidades e o orçamento saem das duas plantas; o comercial ajusta.
 // «Mostrar ao cliente» abre a apresentação (tablet): o projeto mostra-se e não se envia (é propriedade da empresa); o projeto só vai para o
 // portal depois de a proposta ser aceite. Tudo fica neste browser (localStorage).
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, Component, Suspense, lazy, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sair
 import { Amostra, Areas, Cartao, Numero, PainelMateriais, PainelPeca, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
 import { PassoEstilo } from "./PassoEstilo";
 import { PROJETO_EXEMPLO, copiaPlanta, depoisDaVisita } from "./exemploEstudio";
+import { espacoDoEstudio } from "./estudioNo3D";
 import { Vista3D } from "./Vista3D";
 import { PlantaVista } from "./PlantaVista";
 import { alturasEmPalavras, materiais, tarefas } from "./fichaObra";
@@ -26,6 +27,7 @@ import type { Cena } from "./geometria3d";
 
 import { totalDaCozinha } from "./cozinha/modelo";
 import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
+const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Obra"] as const;
 type Passo = (typeof PASSOS)[number];
@@ -283,20 +285,55 @@ export default function EstudioProjeto() {
 
 function AntesDepois3D({ p, escuro = false, sozinha = false }: { p: Projeto; escuro?: boolean; sozinha?: boolean }) {
   const [qual, setQual] = useState<"antes" | "depois">("depois");
+  // 9/11 (Rúben): o 3D do Miguel (modelos, materiais, câmara); o nosso, simples, fica como alternativa (e se o do Miguel falhar)
+  const [motor, setMotor] = useState<"miguel" | "simples">("miguel");
+  const [vista, setVista] = useState<"3d" | "cima" | "pessoa">("3d");
+  const [sel, setSel] = useState<string | null>(null);
   const cena = qual === "antes" ? cenaDe(p.antes, p, false) : cenaDe(p.depois, p, true);
+  const res = useMemo(() => (motor === "miguel" ? espacoDoEstudio(p, qual) : null), [motor, p, qual]);
+  const simples = <Vista3D cena={cena} escuro={escuro} sozinha={sozinha} titulo={qual === "antes" ? "Como está hoje" : "Como vai ficar"} />;
+  const grupo = cn("inline-flex rounded-full p-1", escuro ? "bg-white/10" : "bg-muted");
+  const opcao = (ativo: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", ativo ? (escuro ? "bg-white text-slate-950" : "bg-background shadow-sm") : (escuro ? "text-white/70" : "text-muted-foreground"));
   return (
     <div className="space-y-3">
-      <div role="group" aria-label="Antes ou depois" className={cn("inline-flex rounded-full p-1", escuro ? "bg-white/10" : "bg-muted")}>
-        {(["antes", "depois"] as const).map((q) => (
-          <button key={q} type="button" aria-pressed={qual === q} onClick={() => setQual(q)}
-            className={cn("min-h-11 rounded-full px-5 text-[15px] font-medium transition-colors", qual === q ? (escuro ? "bg-white text-slate-950" : "bg-background shadow-sm") : (escuro ? "text-white/70" : "text-muted-foreground"))}>
-            {q === "antes" ? "Antes" : "Depois"}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="group" aria-label="Antes ou depois" className={grupo}>
+          {(["antes", "depois"] as const).map((q) => (
+            <button key={q} type="button" aria-pressed={qual === q} onClick={() => setQual(q)} className={opcao(qual === q)}>{q === "antes" ? "Antes" : "Depois"}</button>
+          ))}
+        </div>
+        {motor === "miguel" && (
+          <div role="group" aria-label="A vista" className={grupo}>
+            {([["3d", "3D"], ["cima", "De cima"], ["pessoa", "Pessoa"]] as const).map(([v, n]) => (
+              <button key={v} type="button" aria-pressed={vista === v} onClick={() => setVista(v)} className={opcao(vista === v)}>{n}</button>
+            ))}
+          </div>
+        )}
+        <button type="button" className={cn("ml-auto min-h-11 rounded-full px-3 text-sm underline-offset-4 hover:underline", escuro ? "text-white/70" : "text-muted-foreground")}
+          onClick={() => setMotor((m) => (m === "miguel" ? "simples" : "miguel"))}>{motor === "miguel" ? "Ver o 3D simples" : "Ver o 3D com modelos"}</button>
       </div>
-      <Vista3D cena={cena} escuro={escuro} sozinha={sozinha} titulo={qual === "antes" ? "Como está hoje" : "Como vai ficar"} />
+      {motor === "simples" ? simples : !res?.ok ? (
+        <p className={cn("rounded-2xl border border-dashed p-6 text-center text-[15px]", escuro ? "border-white/20 text-white/70" : "border-border text-muted-foreground")}>{res && "erro" in res ? res.erro : ""}</p>
+      ) : (
+        <div className={cn("h-[62vh] min-h-[420px] overflow-hidden rounded-2xl border", escuro ? "border-white/10" : "border-border")}>
+          <Falha3D alternativa={simples}>
+            <Suspense fallback={<p className="grid h-full place-items-center text-[15px] text-muted-foreground">A abrir o 3D…</p>}>
+              <Visualizador3D espaco={res.espaco} modelos={res.modelos} vista={vista} teto={false} etiquetas={false}
+                descricao={qual === "antes" ? "Como está hoje" : "Como vai ficar"} selecionada={sel} onSelecionar={setSel} />
+            </Suspense>
+          </Falha3D>
+        </div>
+      )}
     </div>
   );
+}
+
+/** Se o 3D com modelos falhar (sem WebGL, um modelo que não abre), mostra o 3D simples em vez de partir a página. */
+class Falha3D extends Component<{ alternativa: ReactNode; children: ReactNode }, { erro: boolean }> {
+  state = { erro: false };
+  static getDerivedStateFromError() { return { erro: true }; }
+  componentDidCatch(e: unknown) { console.warn("[estudio] o 3D com modelos falhou; fica o simples:", e); }
+  render() { return this.state.erro ? this.props.alternativa : this.props.children; }
 }
 
 function Escolhidos({ p, escuro = false }: { p: Projeto; escuro?: boolean }) {
