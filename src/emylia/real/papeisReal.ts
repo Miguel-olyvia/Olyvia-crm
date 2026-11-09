@@ -4,7 +4,7 @@
 // Gestor de obra e o Técnico gravam a obra. Quem tem o perfil da Olyvia com pessoas.edit (ou é admin do sistema) continua a ver todos.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PAPEIS, type Papel } from "../motor";
-import { PERMS_DIRECAO_EXTRA, PERMS_FASES, PERMS_PAPEL } from "../permissoes";
+import { CODIGO_APROVAR_PO, CODIGO_BASE, PERMS_DIRECAO_EXTRA, PERMS_FASES, PERMS_PAPEL } from "../permissoes";
 import { RESPONSAVEL_OBRA, definirViaturaObra } from "../obraOps";
 import { definirResponsaveisObra } from "../campos";
 
@@ -58,6 +58,28 @@ export async function lerMeusPapeis(sb: SupabaseClient, org: string): Promise<Me
 /** Os papéis do "A ver como": todos, ou só os da pessoa (pela ordem do circuito). */
 export const papeisPermitidos = (m: MeusPapeis): Papel[] =>
   m.todos ? (Object.keys(PAPEIS) as Papel[]) : (Object.keys(PAPEIS) as Papel[]).filter((p) => m.papeis.includes(p));
+
+/** 9/11 (Lote 1, A): os papéis que as permissões do perfil dão a quem não tem nenhum Papel no Negócio no RH (nem pessoas.edit): cada
+ *  papel pelo trabalho que faz no Negócio. Os códigos são os lidos por fn_cat_pode (CODIGOS_NEGOCIOS). */
+const PAPEL_PELAS_PERMISSOES: readonly [Papel, readonly string[]][] = [
+  ["comercial", [CODIGO_BASE["contacto.registar"], CODIGO_BASE["visita.gerir"], CODIGO_BASE["orcamento.editar"], CODIGO_BASE["proposta.enviar"]]],
+  ["direcao", [CODIGO_BASE["margin.approve"]]],
+  ["financeiro", [CODIGO_BASE["finance.validate_payment"], CODIGO_BASE["finance.invoice"]]],
+  ["armazem", [CODIGO_APROVAR_PO]],
+  ["operacoes", [CODIGO_BASE["obra.planear"]]],
+];
+/** Os papéis (pela ordem do circuito, a de PAPEIS) a que basta uma das permissões de PAPEL_PELAS_PERMISSOES. */
+export function papeisDasPermissoes(codigos: ReadonlySet<string>): Papel[] {
+  const dados = new Set(PAPEL_PELAS_PERMISSOES.filter(([, cs]) => cs.some((c) => codigos.has(c))).map(([p]) => p));
+  return (Object.keys(PAPEIS) as Papel[]).filter((p) => dados.has(p));
+}
+/** Quem não tem papel nenhum (nem vê todos) passa a ter os que as permissões dão; quem já tem papel (ou vê todos) fica como está.
+ *  `codigos` null (a leitura falhou): fica como está. */
+export function comPapeisDasPermissoes(m: MeusPapeis, codigos: ReadonlySet<string> | null): MeusPapeis {
+  if (m.todos || m.papeis.length > 0 || !codigos) return m;
+  const papeis = papeisDasPermissoes(codigos);
+  return papeis.length ? { ...m, papeis } : m;
+}
 
 /** O papel com que a página abre: o que já estava, se é permitido; senão o primeiro da pessoa (o Técnico só se não tiver outro). */
 export function papelInicial(m: MeusPapeis, atual: Papel): Papel | null {

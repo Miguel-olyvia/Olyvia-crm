@@ -44,7 +44,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, permEmFaltaDoPasso } from "./permissoes";
+import { SEM_PERM, passoDe, permEmFaltaDoPasso } from "./permissoes";
 import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -498,7 +498,8 @@ export { permEmFaltaDoPasso };
 export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
   const { S, A, go } = ctx;
   const idSemPerm = useId();
-  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  // 9/11 (Lote 1, B): o passo é do papel atual OU quem entrou tem as permissões que ele pede (passoDe, só com conta real)
+  const p = proximo(d, S), meu = passoDe(S.role, p.who, p.act);
   const falta = meu && p.btn ? permEmFaltaDoPasso(S, p.act) : null;
   // 9/11: o super admin, numa base de teste, age pelo cliente (aceitar a proposta, assinar o contrato)
   const teste = useModoTeste();
@@ -542,7 +543,8 @@ export const temBotaoFase = (ctx: Ctx, d: Negocio) => { const p = proximo(d, ctx
 
 function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S } = ctx;
-  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  // 9/11 (Lote 1, B): o passo é do papel atual OU quem entrou tem as permissões que ele pede (passoDe, só com conta real)
+  const p = proximo(d, S), meu = passoDe(S.role, p.who, p.act);
   const passos = passosDaFase(ctx, d);
   const primeiro = Math.max(0, passos.findIndex((x) => (x.conta ? x.conta.f < x.conta.n : !x.feito)));
   const [ativo, setAtivo] = useState(primeiro);

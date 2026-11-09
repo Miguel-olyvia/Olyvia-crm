@@ -20,6 +20,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { ambitoSemEfeito } from "@/components/utilizadores-perfis/regrasVinculos";
 
 interface Permission {
   code: string;
@@ -133,7 +134,8 @@ export function MembershipScopesDialog({
           .order("name");
 
         if (permsError) throw permsError;
-        setPermissions(permsData || []);
+        // 09/11/2026 (Lote 1): sem os âmbitos que nada usa (scheduling.boards/resources/rules); os gravados ficam
+        setPermissions((permsData || []).filter((p) => !ambitoSemEfeito(p.code)));
       } else {
         setPermissions([]);
       }

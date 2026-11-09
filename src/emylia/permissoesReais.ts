@@ -4,12 +4,15 @@
 // os chama e perguntam `tem_permissao(org, perm)`, que não existe nesta base. Ficam só para não mexer no que não é preciso; não usar.
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { ALTERNATIVAS, CODIGO_BASE } from "./permissoes";
+import { ALTERNATIVAS, CODIGO_APROVAR_PO, CODIGO_BASE, CODIGO_ESCREVER_CONVERSA, CODIGO_GERIR_ORCAMENTOS } from "./permissoes";
 
 /** Os códigos que o protótipo pergunta: os das ações (CODIGO_BASE), o de ver custos e (24/10) o de ver salários (a ponte do RH).
  *  2/11: os códigos reais da base (quotes.view_costs; o salário é a retribuição do RH, hr.pessoas.retribuicao.view). */
 export const CODIGOS_NEGOCIOS: readonly string[] = [...new Set([...Object.values(CODIGO_BASE), ...Object.values(ALTERNATIVAS).flat(),
-  "quotes.view_costs", "hr.pessoas.retribuicao.view"])];
+  "quotes.view_costs", "hr.pessoas.retribuicao.view",
+  // 9/11 (Lote 1): quotes.manage (ver custos, como fn_quote_custos_pode), purchase_orders.approve (aprovar a encomenda a fornecedor,
+  // fn_po_crm_load) e pessoas.edit (escrever na conversa da obra, neg_mensagem_enviar)
+  CODIGO_GERIR_ORCAMENTOS, CODIGO_APROVAR_PO, CODIGO_ESCREVER_CONVERSA])];
 
 export type LeituraPermissoes = { org: string; codigos: ReadonlySet<string> | null };
 

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { eur, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { lerFaturaErp, resumoErp } from "./erpEticadata";
+import { SEM_PERM, pelaPermissao, podeNeg } from "./permissoes";
 
 /** De quanto em quanto tempo a Olyvia volta a ler o ERP enquanto a fatura está por pagar e o negócio está aberto. */
 const INTERVALO_MS = 60_000;
@@ -14,12 +15,16 @@ const dmy = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "—");
 
 /** O passo «Registar a fatura do ERP»: o número da fatura emitida no Eticadata; confirma-a no ERP antes de a registar. */
 export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default"; aEsquerda?: boolean }) {
-  const { A, go } = ctx;
+  const { A, go, S } = ctx;
   const [numero, setNumero] = useState("");
   const [aLer, setALer] = useState(false);
   const [erro, setErro] = useState<{ msg: string; semLigacao: boolean } | null>(null);
+  // 9/11 (Lote 1, L): registar a fatura pede negocios.registar_fatura (A.registarFaturaErp, neg_registar_fatura); sem ela, nem se pergunta
+  // ao Eticadata: o botão fica desligado e diz porquê
+  const pode = podeNeg(S.role, "finance.invoice");
   const registar = async (e: FormEvent) => {
     e.preventDefault();
+    if (!pode) return;
     const n = numero.trim().replace(/\s+/g, " ");
     if (!n) { setErro({ msg: "Escreva o número da fatura, como aparece no Eticadata.", semLigacao: false }); return; }
     setALer(true); setErro(null);
@@ -28,6 +33,12 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
     if ("info" in r) { go(() => A.registarFaturaErp(d.id, n, r.info))(); return; }
     setErro({ msg: r.msg, semLigacao: r.motivo === "sem_ligacao" });
   };
+  if (!pode) return (
+    <div className={cn("grid w-full gap-1.5 sm:w-auto", !aEsquerda && "sm:justify-items-end")}>
+      <Button size={tamanho} disabled aria-describedby={`fat-erp-semperm-${d.id}`}>Registar fatura<ArrowRight className="ml-2 h-4 w-4" /></Button>
+      <p id={`fat-erp-semperm-${d.id}`} className="max-w-sm text-sm text-muted-foreground">{SEM_PERM["finance.invoice"].sub}</p>
+    </div>
+  );
   return (
     <form onSubmit={registar} className={cn("grid w-full gap-1.5 sm:w-auto", !aEsquerda && "sm:justify-items-end")} aria-label="Registar a fatura do ERP">
       <div className="flex w-full flex-wrap gap-2 sm:w-auto">
@@ -51,7 +62,10 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
 export function EstadoFaturaErp({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { A, go, S } = ctx;
   const i = d.fin.erp, ft = d.fin.fatura, porPagar = !!ft && !d.fin.pago;
-  const financeiro = S.role === "financeiro";
+  // 9/11 (Lote 1, L): «Verificar no ERP» e «Validar à mão» pedem negocios.validar_pagamento (A.verificarErp, A.validar): o Financeiro
+  // continua a vê-los, mas só com ela (sem ela o servidor recusa sempre); com conta real, também quem a tem noutro papel. Verificado antes
+  // de qualquer leitura do Eticadata (o intervalo também)
+  const financeiro = (S.role === "financeiro" || pelaPermissao(S.role, ["finance.validate_payment"])) && podeNeg(S.role, "finance.validate_payment");
   // enquanto o negócio está aberto e a fatura por pagar: lê já e depois a cada minuto (sem avisos, a não ser que o estado mude)
   useEffect(() => {
     if (!porPagar || !i || !financeiro) return;

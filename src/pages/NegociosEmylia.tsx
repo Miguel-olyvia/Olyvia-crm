@@ -42,7 +42,7 @@ import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
-import { usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
+import { lerPermissoesReais, usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
@@ -58,7 +58,7 @@ import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
-import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, comPapeisDasPermissoes, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
@@ -326,8 +326,14 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     setPronto(false); setErroLer(null);
     (async () => {
       // 30/10: os papéis do RH primeiro: sem nenhum (e sem o perfil da Olyvia que vê todos), não há nada a fazer aqui
-      const mp = await lerMeusPapeis(supabase, org);
+      let mp = await lerMeusPapeis(supabase, org);
       if (!vivo) return;
+      // 9/11 (Lote 1, A): sem Papel no Negócio no RH (nem pessoas.edit), os papéis vêm das permissões negocios.* do perfil (fn_cat_pode):
+      // entra e vê os passos para que tem permissão, em vez de «Não tem nenhum papel»
+      if (!mp.todos && !papelInicial(mp, S.role)) {
+        mp = comPapeisDasPermissoes(mp, await lerPermissoesReais(org));
+        if (!vivo) return;
+      }
       aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
       const papel = papelInicial(mp, S.role);
       meusRef.current = mp;
