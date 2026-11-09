@@ -447,6 +447,14 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
             <ContratoDoc S={S} d={d} />
           </Partilhar>
+          {/* 9/11 (Rúben: «enviámos a proposta sem querer»): aceite, mas com o contrato por assinar, a proposta ainda se refaz (o motor já o
+              permitia: novaVersao); a versão aceite fica guardada como substituída */}
+          {o.aceite && o.contrato !== "assinado" && (
+            <div className="space-y-3 rounded-2xl border border-border bg-muted/40 p-4">
+              <p className="text-[15px]">Precisa de mudar a proposta? Enquanto o contrato não está assinado, faz-se uma nova versão: a aceite fica guardada.</p>
+              <NovaVersao ctx={ctx} d={d} texto="Refazer a proposta (nova versão)" />
+            </div>
+          )}
         </div>
       ) }, !!o.contrato) : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
     ];
