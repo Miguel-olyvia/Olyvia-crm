@@ -18,6 +18,8 @@ export interface Volta {
   linhas?: LinhaLevada[];
   /** 6/11: as respostas das «Peças da casa de banho» que saem das escolhas do Estúdio (campo → valor). */
   respostas?: Record<string, string>;
+  /** 9/11: «Fechar a visita» no Estúdio: a Visita leva tudo ao negócio e fecha-a (o orçamento e o plano nascem logo). */
+  fechar?: boolean;
 }
 
 const PALAVRAS: [RegExp, Cor][] = [
@@ -110,9 +112,9 @@ export function medidasDoEstudio(p: Projeto): Partial<Record<"pav" | "par" | "pt
 }
 
 /** O Estúdio devolve a planta do antes ao negócio de onde veio. */
-export function devolverAoNegocio(p: Projeto): boolean {
+export function devolverAoNegocio(p: Projeto, fechar = false): boolean {
   if (p.negocio === undefined) return false;
-  try { localStorage.setItem(CHAVE_VOLTA, JSON.stringify({ negocio: p.negocio, antes: p.antes, em: Date.now(), linhas: linhasParaLevar(p), respostas: respostasDoEstudio(p) } satisfies Volta)); return true; } catch { return false; }
+  try { localStorage.setItem(CHAVE_VOLTA, JSON.stringify({ negocio: p.negocio, antes: p.antes, em: Date.now(), linhas: linhasParaLevar(p), respostas: respostasDoEstudio(p), ...(fechar ? { fechar } : {}) } satisfies Volta)); return true; } catch { return false; }
 }
 
 /** A volta pendente para este negócio (recente: menos de 30 min), ou null. Ler apaga-a. */

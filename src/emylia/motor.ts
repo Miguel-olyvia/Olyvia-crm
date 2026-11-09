@@ -2084,6 +2084,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const L = LINHAS[d.linha];
       d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S);
       if (antes) preservarManuais(antes, d.orc, L);
+      // 9/11: o dia de início escolhido na visita (o plano da obra da visita, planoDaVisita.ts) passa ao orçamento: o fluxo segue com as datas
+      if (!d.orc.inicioObra && d.f.plano_inicio && d.f.plano_inicio >= isoDia(new Date())) d.orc.inicioObra = d.f.plano_inicio;
       // a demolição calcula-se nos orçamentos novos (com o Catálogo ligado); os artigos e ajustes à mão de antes ficam
       // 26/10: com um «MO Modelo» do Catálogo a demolição já está nele: não se liga sozinha (a não ser que já estivesse ligada)
       if (!temModeloDeObra(d.orc) || antes?.demolicao) ligarDemolicao(d.orc, antes?.demolicao);

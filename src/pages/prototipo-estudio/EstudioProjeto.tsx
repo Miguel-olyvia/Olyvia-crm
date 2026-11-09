@@ -23,6 +23,7 @@ import { PROJETO_EXEMPLO, copiaPlanta, depoisDaVisita } from "./exemploEstudio";
 import { espacoDoEstudio } from "./estudioNo3D";
 import { Vista3D } from "./Vista3D";
 import { PlantaVista } from "./PlantaVista";
+import { PlanoDoEstudio } from "./PlanoDoEstudio";
 import { alturasEmPalavras, materiais, tarefas } from "./fichaObra";
 import type { Cena } from "./geometria3d";
 
@@ -30,7 +31,8 @@ import { totalDaCozinha } from "./cozinha/modelo";
 import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
 const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
-const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Obra"] as const;
+// 9/11 (Rúben: «o Estúdio é o passo final da visita»): o último passo fecha a visita (os serviços do Catálogo, o plano e o orçamento)
+const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Fechar"] as const;
 type Passo = (typeof PASSOS)[number];
 /** Cores e alturas no 3D de cada peça, sem produto escolhido. */
 const SEM_PRODUTO: Record<TipoPeca, { cor: string; z0: number; z1: number }> = {
@@ -128,6 +130,15 @@ export default function EstudioProjeto() {
   const pecaAberta = p.depois.pecas.find((x) => x.id === aberta) ?? null;
   const porEscolher = linhas.filter((l) => l.porEscolher && !l.fora).length;
 
+  // 9/11: aberto pela Visita no mesmo separador: volta sem recarregar a app (a gravação da visita continua). Um endereço completo de outra
+  // versão (projetos antigos) ou de outro sítio abre como antes. `fechar`: a Visita leva tudo e fecha a visita (o orçamento e o plano nascem)
+  const voltar = (fechar: boolean) => {
+    devolverAoNegocio(p, fechar);
+    const destino = p.origem ?? "/negocios";
+    if (destino.startsWith("/")) { irPara(destino); return; }
+    if (window.opener) window.close();
+    window.location.href = destino;
+  };
   const ir = (q: Passo) => { setPasso(q); setAberta(null); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
   const reduzir = useReducedMotion();
 
@@ -142,15 +153,7 @@ export default function EstudioProjeto() {
           </div>
           <div className="flex flex-wrap gap-2">
             {p.negocio !== undefined && (
-              <Button type="button" variant="outline" className="min-h-11" onClick={() => {
-                devolverAoNegocio(p);
-                // 9/11: aberto pela Visita no mesmo separador: volta sem recarregar a app (a gravação da visita continua). Um endereço
-                // completo de outra versão (projetos antigos) ou de outro sítio abre como antes.
-                const destino = p.origem ?? "/negocios";
-                if (destino.startsWith("/")) { irPara(destino); return; }
-                if (window.opener) window.close();
-                window.location.href = destino;
-              }}><ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />Voltar ao negócio</Button>
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => voltar(false)}><ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />Voltar ao negócio</Button>
             )}
             <Button type="button" className="min-h-11" onClick={() => setMostrar(true)}><Monitor className="mr-2 h-4 w-4" aria-hidden="true" />Mostrar ao cliente</Button>
           </div>
@@ -267,11 +270,11 @@ export default function EstudioProjeto() {
           <aside className="space-y-6">
             <Resumo t={t} porEscolher={porEscolher} grande />
             <Button type="button" className="min-h-12 w-full text-base" onClick={() => setMostrar(true)}><Monitor className="mr-2 h-5 w-5" aria-hidden="true" />Mostrar ao cliente</Button>
-            <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => ir("Obra")}><HardHat className="mr-2 h-4 w-4" aria-hidden="true" />A ficha para a obra</Button>
+            <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => ir("Fechar")}><HardHat className="mr-2 h-4 w-4" aria-hidden="true" />O plano da obra e fechar</Button>
           </aside>
         </>}
 
-        {passo === "Obra" && <FichaObra p={p} linhas={linhas} />}
+        {passo === "Fechar" && <PlanoDoEstudio p={p} setP={setP} fechar={voltar} semCatalogo={<FichaObra p={p} linhas={linhas} />} />}
       </motion.div>
       </AnimatePresence>
 

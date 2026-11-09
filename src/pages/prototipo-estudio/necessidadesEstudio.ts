@@ -44,6 +44,8 @@ export interface Projeto {
   cozinha?: Cozinha;
   /** 6/11: as peças mudadas de sítio no próprio depois (deixam de seguir o antes). Sem o campo: projeto de antes da regra. */
   movidasNoDepois?: string[];
+  /** 9/11: a ligação ao Catálogo verdadeiro (servicosDoCatalogo.ts): as trocas, os serviços juntados à mão e o dia de início da obra. */
+  catalogo?: import("./servicosDoCatalogo").EscolhasCatalogo;
 }
 export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 

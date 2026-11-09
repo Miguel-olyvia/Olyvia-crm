@@ -64,6 +64,7 @@ import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
+import { definirEstadoVivo } from "@/emylia/estadoVivo";
 import { aplicarFaturacao, lerFaturacaoDaFicha, precisaDaFicha } from "@/emylia/real/faturacaoDaFicha";
 import { definirDadosPagamento, lerDadosPagamento } from "@/emylia/pagamentoCliente";
 import "@/emylia/prototipo.css";
@@ -399,6 +400,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       const np = negocioPedido.current;
       if (np && S.deals.some((x) => x.id === np)) { S.view = "negocio"; S.deal = np; S.op = null; }
       setPronto(true);
+      // 9/11: o Estúdio (no mesmo separador) lê daqui o Catálogo, os técnicos e as obras marcadas, para o plano da obra da visita
+      definirEstadoVivo(S, org);
       preencherDaFicha();
       // 2/11: a vista do cliente grava-se depois de as encomendas carregarem (leva o estado dos materiais) e só depois os avisos
       void carregarEncomendas(lidos).catch(() => undefined).then(() => publicarVistasCliente()).then(avisarClientes);

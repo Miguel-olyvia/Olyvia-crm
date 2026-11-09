@@ -12,7 +12,7 @@ import { itemCatalogo, normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
-import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
+import { dataCurta, deIso, diasDaObra, iniciosRapidos, isoDia, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
 import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { lerInventario } from "./inventario/loja";
@@ -162,7 +162,65 @@ export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
     const tec = tecnicoDoOficio(of, plano, dia, dur0);
     plano.tasks.push({ nome: t.nome, svcs: t.chave === "demolicao" ? [] : [sid], dia, dur: dur0, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase });
   }
+  // 9/11: com o dia de início, os técnicos livres (sem outra obra nesses dias, nem outra tarefa desta)
+  if (plano.inicio) escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id));
   return plano;
+}
+
+/* 9/11 (Rúben: «gerar logo o plano da obra com tudo direitinho, técnicos etc.»): o técnico de cada tarefa é o do ofício livre nesses dias:
+   sem férias e sem outra obra (antes só se viam as férias). O plano da visita (planoDaVisita.ts) e o da obra usam esta mesma regra. */
+/** Os dias (aaaa-mm-dd) em que cada técnico já está noutra obra (os planos dos outros negócios com datas reais e por acabar). */
+export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const d of S.deals ?? []) {
+    const p = d.obra?.plano;
+    if (d.id === exceto || !p || p.estado === "concluída" || !p.inicio) continue;
+    const fim = p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
+    if (!fim) continue;
+    const ds = diasDaObra(deIso(p.inicio), fim);
+    for (const t of p.tasks) {
+      if (!t.tec || t.exec?.estado === "validada") continue;
+      const s = out.get(t.tec) ?? new Set<string>();
+      for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) s.add(isoDia(ds[k]));
+      out.set(t.tec, s);
+    }
+  }
+  return out;
+}
+
+/**
+ * Os técnicos das tarefas: o do ofício livre nesses dias, sem férias (as do RH) e sem outra obra (as outras obras e as tarefas deste
+ * plano que já têm o técnico nesses dias). Sem nenhum livre, o primeiro do ofício (marcado como ocupado); sem ninguém do ofício, null.
+ */
+export function escolherTecnicos(plano: Plano, ocupados: Map<string, Set<string>>): Map<Tarefa, string> {
+  const avisos = new Map<Tarefa, string>();
+  if (!plano.inicio) return avisos;
+  const fim = plano.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
+  const ds = diasDaObra(deIso(plano.inicio), Math.max(1, fim));
+  const destePlano = new Map<string, Set<number>>();
+  const diasDe = (t: Tarefa) => Array.from({ length: t.dur }, (_, i) => t.dia + i);
+  for (const t of [...plano.tasks].sort((a, b) => a.dia - b.dia)) {
+    if (t.exec?.estado === "validada") continue;
+    const doOficio = tecnicosDoOficio(t);
+    if (!doOficio.length) { t.tec = null; continue; }
+    const motivo = (id: string): string | null => {
+      const tec = doOficio.find((x) => x.id === id)!;
+      if (diaDeFerias(tec, plano, t.dia, t.dur) != null) return "de férias";
+      const fora = ocupados.get(id);
+      if (fora && diasDe(t).some((k) => ds[k] && fora.has(isoDia(ds[k])))) return "noutra obra";
+      const aqui = destePlano.get(id);
+      if (aqui && diasDe(t).some((k) => aqui.has(k))) return "noutra tarefa desta obra";
+      return null;
+    };
+    const livre = doOficio.find((x) => motivo(x.id) == null);
+    const escolhido = livre ?? doOficio[0];
+    t.tec = escolhido.id;
+    if (!livre) avisos.set(t, motivo(escolhido.id) ?? "ocupado");
+    const s = destePlano.get(escolhido.id) ?? new Set<number>();
+    for (const k of diasDe(t)) s.add(k);
+    destePlano.set(escolhido.id, s);
+  }
+  return avisos;
 }
 
 /** 26/10: mudou para ganttOrcamento.ts (o plano do orçamento já parte o «MO Modelo»). */
