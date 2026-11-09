@@ -29,6 +29,12 @@ export interface LimitesHE {
   minimoMin: number;
 }
 
+/**
+ * O que a organizacao guarda na base (`hr_horas_extra_config`): o limite ANUAL ja nao esta aqui, vem da regra salarial
+ * em vigor. `LimitesHE.anoMin` so serve o motor local do prototipo.
+ */
+export type ConfigHE = Omit<LimitesHE, "anoMin">;
+
 export const LIMITES_OMISSAO: LimitesHE = { diaMin: 120, anoMin: 150 * 60, alertaPct: 80, minimoMin: MINIMO_HORA_EXTRA_MIN };
 
 export interface HoraExtra {

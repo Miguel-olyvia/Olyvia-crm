@@ -12,7 +12,7 @@
  */
 import { useMemo, useSyncExternalStore } from "react";
 import {
-  LIMITES_OMISSAO, type EstadoHoraExtra, type HoraExtra, type LimitesHE,
+  LIMITES_OMISSAO, type ConfigHE, type EstadoHoraExtra, type HoraExtra, type LimitesHE,
 } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import type { ResultadoDeteccao, ResultadoRegisto } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { chaveDoErroDesvios, codigoDeErroDesvios, podeSerHoraExtra } from "@/lib/hr/desviosBase";
@@ -146,9 +146,10 @@ export function wrapperFalso() {
         aCarregar: false,
         aGuardar: false,
         erro: enabled ? baseFalsa.erroDeLeitura : null,
-        guardar: async (n: LimitesHE): Promise<ResultadoHE> => {
+        guardar: async (n: ConfigHE): Promise<ResultadoHE> => {
           if (baseFalsa.erroDeEscrita) return recusa(baseFalsa.erroDeEscrita);
-          baseFalsa.limites = n;
+          // O limite anual (regra salarial) nao faz parte do que se guarda: mantem-se o que la esta.
+          baseFalsa.limites = { ...baseFalsa.limites, ...n };
           baseFalsa.omissao = false;
           avisar();
           return ok;

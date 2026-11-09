@@ -68,8 +68,8 @@ export const CATALOGO_VARIAVEIS_RH: readonly VariavelDocumentoRH[] = [
   { token: "retribuicao_valor_base", rotulo: "Retribuicao base", grupo: "retribuicao" },
   { token: "retribuicao_periodicidade", rotulo: "Periodicidade da retribuicao", grupo: "retribuicao" },
   { token: "retribuicao_moeda", rotulo: "Moeda", grupo: "retribuicao" },
-  { token: "retribuicao_subsidio_alimentacao", rotulo: "Subsidio de alimentacao (valor da regra salarial da organizacao)", grupo: "retribuicao" },
-  { token: "retribuicao_subsidio_alimentacao_modo", rotulo: "Modo do subsidio de alimentacao", grupo: "retribuicao" },
+  { token: "retribuicao_subsidio_alimentacao", rotulo: "Subsidio de alimentacao (valor por dia da regra salarial em vigor na data de emissao)", grupo: "retribuicao" },
+  { token: "retribuicao_subsidio_alimentacao_modo", rotulo: "Modo de pagamento do subsidio de alimentacao (da pessoa: dinheiro ou cartao)", grupo: "retribuicao" },
   { token: "empresa_nome", rotulo: "Nome da empresa", grupo: "empresa" },
   { token: "documento_titulo", rotulo: "Titulo do documento", grupo: "documento" },
   { token: "documento_tipo", rotulo: "Tipo de documento", grupo: "documento" },
@@ -111,7 +111,7 @@ export const DADOS_EXEMPLO_RH: Readonly<Record<string, string>> = {
   retribuicao_valor_base: "1200.00",
   retribuicao_periodicidade: "Mensal",
   retribuicao_moeda: "EUR",
-  // retribuicao_subsidio_alimentacao de proposito AUSENTE: na emissao real le a regra salarial da organizacao, nao a pessoa;
+  // retribuicao_subsidio_alimentacao de proposito AUSENTE: na emissao real e o valor por dia da regra salarial em vigor na data de emissao (nao um valor da pessoa);
   // a pre-visualizacao nao tem regra, por isso mostra-o em falta.
   empresa_nome: "Empresa Exemplo, Lda.",
   documento_titulo: "Contrato de Trabalho",

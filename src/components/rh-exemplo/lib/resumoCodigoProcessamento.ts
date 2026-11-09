@@ -1,7 +1,7 @@
 /**
  * Resumo em linguagem de negocio de um codigo de processamento, para a linha
- * da lista em `ConfiguracaoVencimento.tsx` -- ex.: "150% da hora normal ·
- * horas extra", "12,50 € por dia de feriado trabalhado", "50,00 € por mes",
+ * da lista em `ConfiguracaoVencimento.tsx` -- ex.: "Ao valor da regra
+ * salarial · horas extra", "12,50 € por dia de feriado trabalhado", "50,00 € por mes",
  * "aplicado a mao". Funcao pura: recebe so os campos de calculo e a funcao
  * `t` de traducao, para ser reutilizavel e testavel sem montar o componente.
  */
@@ -13,12 +13,6 @@ export type CodigoParaResumo = Pick<
 >;
 
 type FuncaoTraducao = (key: string, params?: Record<string, string | number>) => string;
-
-/** "150" em vez de "150.000" -- so as casas decimais que existirem a serio. */
-function formatarPercentagem(valor: number | null): string {
-  if (valor === null) return "";
-  return valor.toLocaleString("pt-PT", { maximumFractionDigits: 3 });
-}
 
 /** "12,50 €" -- sempre com as duas casas decimais do euro. */
 function formatarEuro(valor: number | null): string {
@@ -35,9 +29,8 @@ export function resumoCodigoProcessamento(codigo: CodigoParaResumo, t: FuncaoTra
       return t("hr.vencimento.codigos.resumo.manual");
 
     case "percentagem_hora_normal": {
-      const base = t("hr.vencimento.codigos.resumo.percentagem", {
-        percentagem: formatarPercentagem(codigo.percentagem),
-      });
+      // A percentagem guardada ja nao conta: o calculo paga ao valor da regra salarial da origem.
+      const base = t("hr.vencimento.codigos.resumo.regraOrigem");
       if (!codigo.origem_automatica) return base;
       return `${base} · ${t(`hr.vencimento.codigos.origem.${codigo.origem_automatica}`)}`;
     }

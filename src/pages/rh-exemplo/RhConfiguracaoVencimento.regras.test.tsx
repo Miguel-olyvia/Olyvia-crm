@@ -1,6 +1,6 @@
 /**
  * O caminho REAL (/rh-exemplo/processamento-salarial > Configuracao): o separador «Regras salariais» existe, abre a seccao ligada
- * pelo wrapper `regrasSalariaisReal`, e a seccao do subsidio antigo diz que o valor passa a vir da regra da organizacao.
+ * pelo wrapper `regrasSalariaisReal`, e o separador do subsidio antigo ja nao existe.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -23,17 +23,6 @@ const hasPermission = vi.fn((_p: string) => false);
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission, loading: false }) }));
 vi.mock("@/hooks/useCodigosProcessamento", () => ({
   useCodigosProcessamento: () => ({ codigos: [], isLoading: false, isSaving: false, criar: vi.fn(), actualizar: vi.fn(), definirActivo: vi.fn() }),
-}));
-vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
-  useRegrasSubsidioAlimentacao: () => ({
-    regra: { minutosMinimosDia: 300 },
-    temRegraGravada: true,
-    isLoading: false,
-    isFetched: true,
-    error: null,
-    isSaving: false,
-    gravar: vi.fn(),
-  }),
 }));
 let estadoRegras: "ok" | "indisponivel" = "indisponivel";
 vi.mock("@/hooks/useRegrasSalariais", () => ({
@@ -69,10 +58,11 @@ describe("RhConfiguracaoVencimento: regras salariais (rota real)", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   }, 30000);
 
-  it("a seccao do subsidio antigo diz que o valor passa a vir da regra da organizacao", async () => {
+  it("ja nao ha separador do subsidio de alimentacao: o valor e o limite vêm da regra salarial", async () => {
     await abrir();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Subsídio de alimentação" }), { button: 0 });
-    expect(await screen.findByTestId("subsidio-nota-regra-organizacao")).toHaveTextContent("passa a vir da regra da organização");
+    expect(screen.queryByRole("tab", { name: "Subsídio de alimentação" })).toBeNull();
+    expect(screen.queryByTestId("subsidio-nota-regra-organizacao")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Regras salariais" })).toBeInTheDocument();
   }, 30000);
 
   it("com a base atualizada e permissao para gerir mostra o formulario com o botao de gravar", async () => {

@@ -4,10 +4,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 
-// A regra do subsidio vem do wrapper do hook real (`hr_regras_subsidio_alimentacao`); aqui entra por argumento.
-const regraSubsidio = vi.hoisted(() => ({ minutosMinimosDia: 1, error: null as unknown }));
-vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => ({
-  useRegrasSubsidioAlimentacao: () => ({ regra: { minutosMinimosDia: regraSubsidio.minutosMinimosDia }, error: regraSubsidio.error }),
+// O limite do subsidio vem da REGRA SALARIAL em vigor (wrapper do hook real `useRegrasSalariais`); aqui entra por argumento.
+// `limiteMin: null` = sem regra em vigor.
+const regraSubsidio = vi.hoisted(() => ({ limiteMin: 1 as number | null, estado: "ok" as string }));
+vi.mock("@/components/rh-exemplo/hooks/useRegrasSalariais", () => ({
+  useRegrasSalariais: () => ({
+    emVigor: regraSubsidio.limiteMin === null ? null : { subsidio_limite_min: regraSubsidio.limiteMin },
+    estado: regraSubsidio.estado,
+    isLoading: false,
+  }),
 }));
 
 vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
@@ -47,8 +52,8 @@ const planeada = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
-  regraSubsidio.minutosMinimosDia = 1;
-  regraSubsidio.error = null;
+  regraSubsidio.limiteMin = 1;
+  regraSubsidio.estado = "ok";
 });
 
 const base = { ano: 2026, mes: 10, hoje: "2026-10-20", contrato: null, tiposAusencia: [], horario: undefined, horasExtra: [], banco: [], podeHE: false };
@@ -177,23 +182,33 @@ describe("useMesDaPessoa com o horario planeado real", () => {
   });
 });
 
-describe("useMesDaPessoa com a regra real do subsidio de alimentacao", () => {
+describe("useMesDaPessoa com o limite do subsidio da regra salarial em vigor", () => {
   const horas = [realizado("r1", "2026-02-04")] as never;
   const elegiveis = () =>
     renderHook(() => useMesDaPessoa(PESSOA, 2026, 2, { assiduidade: assiduidade({ realizado: horas }), dataAdmissao: null })).result.current;
 
-  it("conta o dia quando as horas feitas atingem o minimo da organizacao", () => {
-    regraSubsidio.minutosMinimosDia = 240;
+  it("conta o dia quando as horas feitas atingem o limite da regra salarial", () => {
+    regraSubsidio.limiteMin = 240;
     expect(elegiveis().totais.diasElegiveisSubsidio).toBe(1);
   });
 
-  it("nao conta o dia quando o minimo da organizacao e superior ao que se fez", () => {
-    regraSubsidio.minutosMinimosDia = 241;
+  it("nao conta o dia quando o limite da regra e superior ao que se fez", () => {
+    regraSubsidio.limiteMin = 241;
     expect(elegiveis().totais.diasElegiveisSubsidio).toBe(0);
   });
 
-  it("avisa quando a regra nao se conseguiu ler", () => {
-    regraSubsidio.error = new Error("falhou");
-    expect(elegiveis().erroRegraSubsidio).toBe(true);
+  it("sem regra salarial em vigor esconde o numero (null) e nao avisa de erro", () => {
+    regraSubsidio.limiteMin = null;
+    const mes = elegiveis();
+    expect(mes.totais.diasElegiveisSubsidio).toBeNull();
+    expect(mes.erroRegraSubsidio).toBe(false);
+  });
+
+  it("avisa quando a regra nao se conseguiu ler e esconde o numero", () => {
+    regraSubsidio.limiteMin = null;
+    regraSubsidio.estado = "erro";
+    const mes = elegiveis();
+    expect(mes.erroRegraSubsidio).toBe(true);
+    expect(mes.totais.diasElegiveisSubsidio).toBeNull();
   });
 });

@@ -81,7 +81,7 @@ export function entradaSalarioDaFicha(ficha: FichaRh, c: EstadoFluxosC, ano: num
     diasUteisMes: diasUteisDoMes(ano, mes),
     horasPlaneadasMes: horasPlaneadasMin / 60,
     minutosEmFalta,
-    diasElegiveisSubsidio: totais.diasElegiveisSubsidio,
+    diasElegiveisSubsidio: totais.diasElegiveisSubsidio ?? 0,
     horasExtra: c.horasExtra.filter((h) => h.pessoaId === id && h.data.startsWith(chaveMes)),
     regrasHE: c.regras,
     subsidioFerias: 0,

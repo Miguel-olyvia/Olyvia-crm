@@ -623,7 +623,6 @@ describe("usePessoas", () => {
     expect(chamada?.args).toEqual({
       p_pessoa_id: "pessoa-nova",
       p_desde: "2026-02-01",
-      p_subsidio: null,
       p_subsidio_modo: null,
       p_duodecimos_pct: 50,
       p_motivo: null,
