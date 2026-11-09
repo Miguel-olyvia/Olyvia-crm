@@ -25,7 +25,9 @@ export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; 
   coz?: import("./planta3d/composicaoCozinha").ComposicaoCozinha }
 export interface Ponto { x: number; y: number }
 /** `o`: onde começa a primeira parede (o primeiro toque no desenho). */
-export interface Planta { o: Ponto; paredes: Parede[]; pecas: PecaPlanta[] }
+export interface Planta {
+  /** Os revestimentos escolhidos como produtos (pavimento, todas as paredes e as de destaque por parede): ficam com a planta (desfazer/refazer). */
+  rev?: Partial<import("./planta3d/modelo").Revestimentos>; o: Ponto; paredes: Parede[]; pecas: PecaPlanta[] }
 
 export const PECAS: Record<TipoPeca, { n: string; w: number; h: number; abertura?: boolean }> = {
   base: { n: "Base de duche", w: 120, h: 70 },
@@ -174,7 +176,11 @@ export function lerPlanta(json: string | undefined): Planta | null {
       return !!q && typeof q.id === "string" && !!q.tipo && q.tipo in PECAS && [q.x, q.y, q.w, q.h].every((n) => Number.isFinite(n));
     });
     const o = p.o && Number.isFinite(p.o.x) && Number.isFinite(p.o.y) ? { x: p.o.x, y: p.o.y } : { x: 0, y: 0 };
-    return paredes.length || pecas.length ? { o, paredes, pecas } : null;
+    // os revestimentos escolhidos como produtos (protótipo 3D): só textos, por superfície e por parede
+    const r = (p as { rev?: Record<string, unknown> }).rev, txt = (v: unknown) => (typeof v === "string" ? v : undefined);
+    const porParede = r && typeof r.porParede === "object" && r.porParede ? Object.fromEntries(Object.entries(r.porParede as Record<string, unknown>).filter(([, v]) => typeof v === "string")) as Record<string, string> : undefined;
+    const rev = r ? { ...(txt(r.pavimento) ? { pavimento: txt(r.pavimento) } : {}), ...(txt(r.parede) ? { parede: txt(r.parede) } : {}), ...(porParede ? { porParede } : {}) } : undefined;
+    return paredes.length || pecas.length ? { o, paredes, pecas, ...(rev && Object.keys(rev).length ? { rev } : {}) } : null;
   } catch {
     return null;
   }

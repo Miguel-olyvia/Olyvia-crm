@@ -25,7 +25,8 @@ export interface PecaProduto {
   recortes?: { x: number; z: number; w: number; d: number }[];
   opc?: OpcoesPeca;
 }
-export interface Revestimentos { pavimento: string; parede: string }
+/** O revestimento do chão, o de todas as paredes e, por parede (id da parede), o de destaque. */
+export interface Revestimentos { pavimento: string; parede: string; porParede?: Record<string, string> }
 export interface Espaco {
   tipo: TipoEspaco; nome: string; peDireito: number; unidade: "m";
   paredes: Parede[]; aberturas: Abertura[]; pecas: PecaProduto[]; revestimentos: Revestimentos;

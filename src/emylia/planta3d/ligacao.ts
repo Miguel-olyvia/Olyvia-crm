@@ -110,5 +110,7 @@ export function deLegado(planta: Planta, o: OpcoesLegado): ResLegado {
     });
   }
   const base = espacoVazio(o.tipo, o.nome);
-  return { ok: true, modelos, espaco: { ...base, peDireito: o.peDireito, paredes, aberturas, pecas, revestimentos: o.revestimentos ?? base.revestimentos } };
+  // os revestimentos escolhidos como produtos (na planta) ganham aos das preferências antigas (os selectores)
+  const revestimentos = { ...(o.revestimentos ?? base.revestimentos), ...planta.rev } as Espaco["revestimentos"];
+  return { ok: true, modelos, espaco: { ...base, peDireito: o.peDireito, paredes, aberturas, pecas, revestimentos } };
 }

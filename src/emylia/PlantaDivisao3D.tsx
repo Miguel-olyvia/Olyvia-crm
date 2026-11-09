@@ -9,6 +9,8 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type P
 import { Box } from "lucide-react";
 import { useCatalogo } from "./v2/catalogoStore";
 import { BarraProdutos } from "./planta3d/BarraProdutos";
+import { BarraRevestimentos } from "./planta3d/BarraRevestimentos";
+import { PE_DIREITO_OMISSAO, areaPavimento, areaParedes } from "./planta3d/modelo";
 import { Planta3DPainel } from "./planta3d/Planta3DPainel";
 import { comDemonstracao, produtosParaEspaco, type ProdutoModelo3D } from "./planta3d/catalogo3d";
 import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede, encostarParede, moverPara, normalizarAngulo, poligonoDe, rodarPeca } from "./planta3d/pecas3d";
@@ -22,7 +24,7 @@ import { aplicarComposicao, composicaoDe, modeloDaComposicao, pecaComposicao, pr
 import { PainelBancada } from "./planta3d/PainelBancada";
 import { BANCADA_OMISSAO, aplicarConfig, modeloDaBancada, pecaBancada, type ConfigBancada } from "./planta3d/bancada";
 import { ListaPecas, nomeDaPeca } from "./planta3d/ListaPecas";
-import { pecaDeProduto } from "./planta3d/ligacao";
+import { deLegado, pecaDeProduto } from "./planta3d/ligacao";
 import { useProto3d } from "./planta3d/usarProto3d";
 import { Check, Copy, FlipHorizontal, Redo2, RotateCcw, RotateCw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -69,6 +71,12 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
   const produtosTodos = useMemo(() => comDemonstracao(K.produtos, K.arvore), [K]);
   const produtosCat = useMemo(() => produtosParaEspaco(produtosTodos, K.arvore, proto.pref.tipo, { max: 100000 }), [produtosTodos, K, proto.pref.tipo]);
   const [aviso, setAviso] = useState("");
+  // os revestimentos como produtos: os da planta por cima das preferências (os selectores do 3D), as paredes e as áreas da divisão
+  const revInfo = useMemo(() => {
+    const r = deLegado(p, { tipo: proto.pref.tipo, nome: divisao ?? "Espaço", peDireito: PE_DIREITO_OMISSAO, produtos: {}, revestimentos: proto.pref.rev });
+    if (!r.ok) return null;
+    return { rev: r.espaco.revestimentos, paredes: r.espaco.paredes.map((w, i) => ({ id: w.id, nome: `${i + 1}` })), chao: areaPavimento(r.espaco), paredesM2: areaParedes(r.espaco) };
+  }, [p, proto.pref.tipo, proto.pref.rev, divisao]);
   const origem = useRef<PecaPlanta | null>(null);
   const [ver3d, setVer3d] = useState(false);
   const [genericas, setGenericas] = useState(false);
@@ -461,6 +469,15 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
       <div className="space-y-2">
         <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo}
           onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} onComposicao={adicionarComposicao} />
+        {/* pavimentos e revestimentos de parede como produtos: ficam na planta (desfazer/refazer); os selectores do 3D são um atalho para o mesmo */}
+        {revInfo && (
+          <details className="rounded-2xl border border-border p-3">
+            <summary className="min-h-11 cursor-pointer text-[15px] font-semibold">Pavimentos e revestimentos de parede</summary>
+            <BarraRevestimentos rev={revInfo.rev} paredes={revInfo.paredes} areaChao={revInfo.chao} areaParedes={revInfo.paredesM2}
+              onPavimento={(id) => gravar({ ...p, rev: { ...p.rev, pavimento: id } })} onParedes={(id) => gravar({ ...p, rev: { ...p.rev, parede: id } })}
+              onParede={(w, id) => { const pp = { ...p.rev?.porParede }; if (id) pp[w] = id; else delete pp[w]; gravar({ ...p, rev: { ...p.rev, porParede: pp } }); }} />
+          </details>
+        )}
         <p className="text-sm text-muted-foreground">Portas e janelas (arraste para a planta, ou toque, e fica ao meio):</p>
         {produtosCat.length > 0 && (
           <button type="button" className="min-h-11 text-sm underline underline-offset-2" aria-expanded={genericas} onClick={() => setGenericas(!genericas)}>

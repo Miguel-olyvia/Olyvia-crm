@@ -19,7 +19,7 @@ import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, 
 import { USAR_GLB, criarMaterialEspelho, lerGlb, montarGenerico, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
-import { revestimentoDe, type Revestimento } from "./revestimentos";
+import { revestimentoDaParede, revestimentoDe, type Revestimento } from "./revestimentos";
 
 export type Vista3D = "cima" | "3d" | "pessoa" | "andar";
 export interface Visualizador3DProps {
@@ -50,7 +50,48 @@ const MATERIAL_ESPELHO = criarMaterialEspelho();
 /* ------------------------------------------------------------------ texturas procedurais (canvas, sem ficheiros) */
 const cacheTexturas = new Map<string, THREE.CanvasTexture>();
 /** O lado, em metros, que uma repetição da textura cobre. */
-const ladoTextura = (r: Revestimento): number => (r.tipo === "madeira" ? r.modulo * 4 : r.modulo);
+const ladoTextura = (r: Revestimento): number => {
+  // quantos módulos cabem numa repetição do canvas (à escala real: 4 tábuas, 4 fiadas de azulejo metro, 2 × 2 pedras…)
+  const n: Partial<Record<Revestimento["tipo"], number>> = { madeira: 4, ripado: 4, espinha: 4, metro: 4, riscas: 2, geometrico: 2, hexagonal: 2, pedra: 2 };
+  return r.modulo * (n[r.tipo] ?? 1);
+};
+/** Ruído leve (salpicos claros e escuros): o «veio» do microcimento e da pedra. */
+function ruido(g: CanvasRenderingContext2D, n: number, a: number): void {
+  for (let i = 0; i < n; i++) { const x = (i * 73) % 256, y = (i * 151 + i * i) % 256, k = (i * 37) % 7; g.fillStyle = k % 2 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`; g.fillRect(x, y, 2 + k, 1 + (k % 3)); }
+}
+/** As texturas dos revestimentos novos (catálogo de pavimentos e paredes): espinha, metro, hexagonal, pedra, microcimento, riscas, geométrico, ripado. */
+function desenharNovo(g: CanvasRenderingContext2D, r: Revestimento): boolean {
+  const j = r.junta ?? "rgba(0,0,0,0.35)";
+  switch (r.tipo) {
+    case "metro": // 4 fiadas de 7,5 cm, peças de 15 cm desencontradas
+      g.strokeStyle = j; g.lineWidth = 3;
+      for (let i = 0; i < 4; i++) { const y = i * 64; g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke(); for (let x = (i % 2) * 64; x < 256; x += 128) { g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + 64); g.stroke(); } }
+      return true;
+    case "espinha": // tábuas a 45°, alternadas
+      g.strokeStyle = "rgba(0,0,0,0.3)"; g.lineWidth = 2;
+      for (let i = -8; i < 16; i++) { g.beginPath(); g.moveTo(i * 32, 0); g.lineTo(i * 32 + 128, 128); g.lineTo(i * 32, 256); g.stroke(); }
+      for (let k = 0; k < 20; k++) { g.fillStyle = k % 2 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)"; g.fillRect((k * 53) % 256, (k * 97) % 256, 30, 8); }
+      return true;
+    case "hexagonal": {
+      g.strokeStyle = j; g.lineWidth = 3; const R = 37;
+      for (let row = -1; row < 5; row++) for (let col = -1; col < 5; col++) {
+        const cx = col * R * 1.73 + (row % 2) * R * 0.866, cy = row * R * 1.5;
+        g.beginPath(); for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + (k * Math.PI) / 3; g[k ? "lineTo" : "moveTo"](cx + R * Math.cos(a), cy + R * Math.sin(a)); } g.closePath(); g.stroke();
+      }
+      return true;
+    }
+    case "pedra": // 2 × 2 peças com veio
+      ruido(g, 260, 0.08); g.strokeStyle = j; g.lineWidth = 3; g.strokeRect(0, 0, 128, 128); g.strokeRect(128, 0, 128, 128); g.strokeRect(0, 128, 128, 128); g.strokeRect(128, 128, 128, 128);
+      return true;
+    case "microcimento": ruido(g, 420, 0.05); return true;
+    case "riscas": g.fillStyle = j; for (let x = 0; x < 256; x += 64) g.fillRect(x, 0, 22, 256); return true;
+    case "geometrico": g.strokeStyle = j; g.lineWidth = 4; for (let k = -2; k < 6; k++) { g.beginPath(); g.moveTo(k * 64, 0); g.lineTo(k * 64 + 128, 128); g.lineTo(k * 64, 256); g.stroke(); } return true;
+    case "ripado": // ripas verticais com sombra entre elas
+      for (let x = 0; x < 256; x += 64) { g.fillStyle = "rgba(0,0,0,0.45)"; g.fillRect(x, 0, 8, 256); g.fillStyle = "rgba(255,255,255,0.08)"; g.fillRect(x + 10, 0, 6, 256); }
+      return true;
+    default: return false;
+  }
+}
 
 function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
   if (r.tipo === "tinta") return null;
@@ -62,7 +103,7 @@ function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
   if (!g) return null;
   g.fillStyle = r.cor;
   g.fillRect(0, 0, 256, 256);
-  if (r.tipo === "azulejo") {
+  if (desenharNovo(g, r)) { /* desenhado acima */ } else if (r.tipo === "azulejo") {
     // juntas finas e meio apagadas: o revestimento é fundo, as peças é que se destacam
     g.globalAlpha = 0.45;
     g.strokeStyle = r.junta ?? "#bbb";
@@ -862,7 +903,8 @@ function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, s
 /* ------------------------------------------------------------------ paredes, aberturas, chão e tecto */
 function ParedeCena({ parede, indice, espaco, semEsconder = false }: { parede: Parede; indice: number; espaco: Espaco; /** modo Andar: vê-se de dentro, nenhuma parede se esconde */ semEsconder?: boolean }) {
   const c = comprimento(parede), esp = parede.espessura;
-  const rev = revestimentoDe("parede", espaco.revestimentos.parede);
+  // a parede de destaque (revestimento só desta parede) ou o de todas
+  const rev = revestimentoDe("parede", revestimentoDaParede(espaco.revestimentos, parede.id));
   const mat = useRevestimento(rev, c, espaco.peDireito);
   const trocos = useMemo(() => trocosDeParede(parede, espaco.aberturas, espaco.peDireito), [parede, espaco.aberturas, espaco.peDireito]);
   const n = normalInterior(espaco.paredes, indice);

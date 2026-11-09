@@ -7,6 +7,7 @@ import { ESPEC, TIPO_LEGADO, type ProdutoModelo3D } from "./catalogo3d";
 import { FAMILIAS, alturaLavaLoicaCm, familiaPorId, modeloDaFamilia, resolverVariante, type Familia } from "./familias";
 import { linhasDaBancada, nomeDaBancada } from "./bancada";
 import { linhasDaComposicao, precoComposicao } from "./composicaoCozinha";
+import { linhasDosRevestimentos } from "./revestimentosCatalogo";
 import type { TipoEspaco } from "./modelo";
 
 export interface ComponenteConj {
@@ -201,6 +202,11 @@ export interface LinhaVenda {
 }
 /** Uma linha vendável por peça com produto: o preço e o SKU da variante, e o conjunto a que pertence (ou se foi retirada dele). Portas e janelas contam como peças. */
 export function linhasVendaveis(planta: Planta): LinhaVenda[] {
+  // os revestimentos escolhidos como produtos: uma linha por produto, com os m² no nome
+  const rev = linhasDosRevestimentos(planta).map((l): LinhaVenda => ({ id: `rev-${l.id}`, nome: `${l.nome} · ${l.m2.toLocaleString("pt-PT")} m²`, preco: l.preco, categoria: "Revestimento", retirado: false, vendivelSeparado: true }));
+  return [...rev, ...linhasDasPecas(planta)];
+}
+function linhasDasPecas(planta: Planta): LinhaVenda[] {
   return planta.pecas.filter((p) => p.fam || p.produto || p.banc || p.coz).flatMap((p): LinhaVenda[] => {
     // a composição modular de cozinha: cada módulo (e cada armário de parede) numa linha à parte
     if (p.coz) return linhasDaComposicao(p.coz).map((l) => ({ id: `${p.id}-${l.id}`, nome: l.nome, preco: l.preco, categoria: "Módulo de cozinha", conjId: p.id, conjNome: p.coz?.nome, papel: l.id, retirado: false, vendivelSeparado: true }));
@@ -222,5 +228,6 @@ export function totalDasLinhas(planta: Planta): number {
   const soltas = planta.pecas.filter((p) => !p.conj && !p.ret && p.fam).reduce((s, p) => { const f = familiaPorId(p.fam as string); return s + (f ? resolverVariante(f, p.med, p.acab).preco : 0); }, 0);
   const bancadas = planta.pecas.filter((p) => p.banc).reduce((s, p) => s + linhasDaBancada(p.banc!).reduce((t, l) => t + (l.preco ?? 0), 0), 0);
   const cozinhas = planta.pecas.filter((p) => p.coz).reduce((s, p) => s + precoComposicao(p.coz!).total, 0);
-  return arred2(soltas + bancadas + cozinhas + conjs.reduce((s, id) => s + (precoConjunto(planta, id)?.total ?? 0), 0));
+  const revestimentos = linhasDosRevestimentos(planta).reduce((s, l) => s + l.preco, 0);
+  return arred2(soltas + bancadas + cozinhas + revestimentos + conjs.reduce((s, id) => s + (precoConjunto(planta, id)?.total ?? 0), 0));
 }

@@ -1,6 +1,7 @@
 // Protótipo (visualizador 3D): os revestimentos por superfície (pavimento e parede), escolhidos numa lista. Só dados: a textura procedural
 // (azulejo com juntas, madeira, tinta) desenha-se no visualizador, num canvas, sem ficheiros externos.
-export type TipoRevestimento = "azulejo" | "madeira" | "tinta";
+import { revestimentoDoCatalogo } from "./revestimentosCatalogo";
+export type TipoRevestimento = "azulejo" | "madeira" | "tinta" | "espinha" | "microcimento" | "pedra" | "hexagonal" | "metro" | "riscas" | "geometrico" | "ripado";
 export interface Revestimento { id: string; nome: string; tipo: TipoRevestimento; cor: string; junta?: string; /** Lado de uma peça de azulejo, ou largura de uma tábua (m). */ modulo: number }
 export type Superficie = "pavimento" | "parede";
 
@@ -22,5 +23,11 @@ export const PAREDES: Revestimento[] = [
 
 export const REVESTIMENTOS: Record<Superficie, Revestimento[]> = { pavimento: PAVIMENTOS, parede: PAREDES };
 
-/** O revestimento pelo id; um id desconhecido (um gravado antes de a lista mudar) dá o primeiro da lista. */
-export const revestimentoDe = (superficie: Superficie, id: string): Revestimento => REVESTIMENTOS[superficie].find((r) => r.id === id) ?? REVESTIMENTOS[superficie][0];
+/**
+ * O revestimento pelo id: os antigos desta lista ou um produto do catálogo («família:variante», revestimentosCatalogo.ts); um id desconhecido
+ * (um gravado antes de a lista mudar) dá o primeiro da lista.
+ */
+export const revestimentoDe = (superficie: Superficie, id: string): Revestimento =>
+  REVESTIMENTOS[superficie].find((r) => r.id === id) ?? revestimentoDoCatalogo(id) ?? REVESTIMENTOS[superficie][0];
+/** O revestimento de uma parede: o desta parede (parede de destaque) ou, sem ele, o de todas as paredes. */
+export const revestimentoDaParede = (r: { parede: string; porParede?: Readonly<Record<string, string>> }, paredeId: string): string => r.porParede?.[paredeId] ?? r.parede;
