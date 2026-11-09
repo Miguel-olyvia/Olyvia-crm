@@ -6,6 +6,7 @@ import { Hammer, Lock, Package, UserRound, Building2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { custoUn, estruturaHora, eur, nfmt, pct, type CustoCongelado, type Estado, type Servico } from "./motor";
 import { RECEITAS, amortHora, amortUn, consUn } from "./receitas";
+import { NaFrente } from "./NaFrente";
 import { anoPerfil, custoReceita, custosDe, horaPerfil, origemHora, perfilIdDe, receitaDe, type HoraPerfil } from "./v2/custosModelo";
 
 function Bloco({ icone, cor, titulo, total, children }: { icone: ReactNode; cor: string; titulo: string; total: string; children: ReactNode }) {
@@ -61,6 +62,7 @@ export function CustoServico({ S, sid, s, q, pu, det, onClose, children }: { S: 
   ];
 
   return (
+    <NaFrente>
     <div className="fixed inset-0 z-[80] flex justify-end bg-foreground/25 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200" onClick={onClose}>
       <div ref={caixa} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="custo-t" onClick={(e) => e.stopPropagation()}
         className="flex h-full w-full max-w-lg flex-col overflow-y-auto bg-background shadow-2xl outline-none motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
@@ -149,5 +151,6 @@ export function CustoServico({ S, sid, s, q, pu, det, onClose, children }: { S: 
         </div>
       </div>
     </div>
+    </NaFrente>
   );
 }

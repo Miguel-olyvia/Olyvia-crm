@@ -311,7 +311,8 @@ html:has(.calma), html:has(.pn){scroll-behavior:auto!important}
 @container (min-width:640px){.negocios-md{grid-template-columns:minmax(13rem,15rem) minmax(0,1fr)}.negocios-vazio{display:block}}
 
 /* 27/10 (Rúben): as barras de scroll na cor da app (roxo), finas, sem o cinzento do sistema. Também a da página. */
-html:has(.calma), .calma, .calma *{ scrollbar-width:thin; scrollbar-color:hsl(256 56% 48% / .55) transparent; }
+/* 9/11: em :where (sem peso), para as filas que escondem a barra ([scrollbar-width:none], ex.: as fases do quadro no telemóvel) a esconderem mesmo */
+:where(html:has(.calma), .calma, .calma *){ scrollbar-width:thin; scrollbar-color:hsl(256 56% 48% / .55) transparent; }
 html:has(.calma)::-webkit-scrollbar, .calma ::-webkit-scrollbar{ width:8px; height:8px; }
 html:has(.calma)::-webkit-scrollbar-track, .calma ::-webkit-scrollbar-track{ background:transparent; }
 html:has(.calma)::-webkit-scrollbar-thumb, .calma ::-webkit-scrollbar-thumb{ background:hsl(256 56% 48% / .55); border-radius:999px; }
