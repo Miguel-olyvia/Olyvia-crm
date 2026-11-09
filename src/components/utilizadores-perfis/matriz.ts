@@ -1,55 +1,92 @@
-// Edição da matriz de permissões de uma role (puro e imutável). Regras copiadas de Roles.tsx: uma permissão que não é "ver"
-// só se concede se a de ver do mesmo módulo estiver concedida; tirar "ver" tira as restantes desse módulo.
+// Edição da matriz de permissões de uma role (puro e imutável). 06/11/2026: as dependências deixaram de ser automáticas («tudo depende
+// do Ver do módulo») e passaram a ser declaradas em dependenciasPermissoes.ts (DEPENDE_DE, «qualquer de»). Uma permissão só se marca
+// com a de que depende; tirar uma tira em cascata as que dependiam dela (e já não têm outra alternativa marcada).
+import { dependenciasDe } from "./dependenciasPermissoes";
 import type { Permissao } from "./tipos";
 
 /** O módulo de uma permissão: o que vem antes do ponto do código (leads.edit -> leads). */
 export const moduloDe = (codigo: string): string => codigo.split(".")[0];
-const ehVer = (codigo: string): boolean => codigo.endsWith(".view");
-const codigoVer = (codigo: string): string => `${moduloDe(codigo)}.view`;
-/** A permissão de ver do MÓDULO (leads.view), a única de que as outras dependem; hr.pessoas.saude.view não o é. */
-export const ehVerDoModulo = (codigo: string): boolean => codigo === codigoVer(codigo);
 
-/** Uma permissão que não é "ver" fica bloqueada enquanto a de ver do módulo (se existir no catálogo) não estiver concedida. */
+/**
+ * As dependências de `codigo` que quem edita vê (estão no catálogo do editor). Uma dependência fora do catálogo não se pode marcar
+ * aqui, por isso não bloqueia (como antes, quando o Ver do módulo não estava no catálogo).
+ */
+export function dependenciasNoCatalogo(codigo: string, catalogo: readonly Permissao[]): string[] {
+  const deps = dependenciasDe(codigo);
+  if (deps.length === 0) return [];
+  const noCatalogo = new Set(catalogo.map((p) => p.codigo));
+  return deps.filter((d) => noCatalogo.has(d));
+}
+
+const satisfeita = (deps: readonly string[], tem: ReadonlySet<string>): boolean => deps.length === 0 || deps.some((d) => tem.has(d));
+
+/** Uma permissão fica bloqueada enquanto nenhuma das de que depende (no catálogo) estiver concedida; a já concedida tira-se sempre. */
 export function podeAlterar(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): boolean {
-  if (ehVer(codigo)) return true;
-  const ver = codigoVer(codigo);
-  if (!catalogo.some((p) => p.codigo === ver)) return true;
-  return concedidas.includes(ver) || concedidas.includes(codigo);
+  if (concedidas.includes(codigo)) return true;
+  return satisfeita(dependenciasNoCatalogo(codigo, catalogo), new Set(concedidas));
+}
+
+/** O que falta para se poder marcar `codigo` (as alternativas, «qualquer de»); vazio se não está bloqueada. */
+export function emFaltaPara(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): string[] {
+  return podeAlterar(codigo, concedidas, catalogo) ? [] : dependenciasNoCatalogo(codigo, catalogo);
 }
 
 /**
- * Concede ou tira uma permissão. Tirar o "ver" do módulo (leads.view) tira também as outras do módulo. Uma bloqueada não muda.
- * 03/11: só o ver DO MÓDULO arrasta as outras (é o único de que podeAlterar as faz depender); antes, tirar hr.pessoas.saude.view
- * tirava todas as hr.*, sem que nenhuma delas dependesse dele.
+ * Tira `retirar` e, em cascata, as concedidas que dependiam de alguma delas e ficam sem nenhuma alternativa marcada. Só arrasta
+ * dependentes do que se tirou: uma concedida que já estava sem a dependência (papel antigo) não sai por se mexer noutra coisa.
  */
+function tirarEmCascata(concedidas: readonly string[], retirar: readonly string[], catalogo: readonly Permissao[]): string[] {
+  const saem = new Set(retirar);
+  let mudou = true;
+  while (mudou) {
+    mudou = false;
+    const ficam = new Set(concedidas.filter((c) => !saem.has(c)));
+    for (const c of ficam) {
+      const deps = dependenciasNoCatalogo(c, catalogo);
+      if (deps.some((d) => saem.has(d)) && !satisfeita(deps, ficam)) {
+        saem.add(c);
+        mudou = true;
+      }
+    }
+  }
+  return concedidas.filter((c) => !saem.has(c));
+}
+
+/** Concede ou tira uma permissão. Tirar arrasta as que dependiam dela (em cascata). Uma bloqueada não muda. */
 export function alternarPermissao(
   concedidas: readonly string[], codigo: string, catalogo: readonly Permissao[],
 ): string[] {
   if (!podeAlterar(codigo, concedidas, catalogo)) return [...concedidas];
   if (!concedidas.includes(codigo)) return [...concedidas, codigo];
-  const modulo = moduloDe(codigo);
-  return concedidas.filter((c) => c !== codigo && !(ehVerDoModulo(codigo) && moduloDe(c) === modulo));
+  return tirarEmCascata(concedidas, [codigo], catalogo);
 }
 
 /**
  * Marca ou desmarca um conjunto qualquer (uma linha ou uma coluna da grelha), com as MESMAS regras de alternarPermissao:
- * - marcar concede as do conjunto que se podem conceder; o "ver" do módulo que vier no próprio conjunto conta (marcar a linha
- *   Leads concede leads.view e, com ele, as restantes); as que continuam bloqueadas (sem o ver do módulo) ficam por marcar;
- * - desmarcar tira as do conjunto e, se tirar o ver do módulo, também as outras desse módulo.
+ * - marcar concede as do conjunto que se podem conceder; uma dependência que vier no próprio conjunto conta (o «Tudo» da linha
+ *   Leads marca leads.view e, com ele, as restantes; o da linha Ficha marca a ficha e depois as partes). As que continuam bloqueadas
+ *   ficam por marcar;
+ * - desmarcar tira as do conjunto e, em cascata, as que dependiam delas.
  */
 export function definirConjunto(
   concedidas: readonly string[], conjunto: readonly Permissao[], marcar: boolean, catalogo: readonly Permissao[],
 ): string[] {
   const codigos = conjunto.map((p) => p.codigo);
-  if (marcar) {
-    const tem = new Set(concedidas);
-    const comVer = [...concedidas, ...codigos.filter(ehVerDoModulo)];
-    const novas = codigos.filter((c) => !tem.has(c) && podeAlterar(c, comVer, catalogo));
-    return [...concedidas, ...new Set(novas)];
+  if (!marcar) return tirarEmCascata(concedidas, codigos, catalogo);
+  const tem = new Set(concedidas);
+  // Em voltas, até não mudar: cada volta pode desbloquear as que dependem das marcadas na anterior (a ordem do conjunto não importa).
+  let mudou = true;
+  while (mudou) {
+    mudou = false;
+    for (const c of codigos) {
+      if (!tem.has(c) && satisfeita(dependenciasNoCatalogo(c, catalogo), tem)) {
+        tem.add(c);
+        mudou = true;
+      }
+    }
   }
-  const tirar = new Set(codigos);
-  const modulosSemVer = new Set(codigos.filter((c) => ehVerDoModulo(c) && concedidas.includes(c)).map(moduloDe));
-  return concedidas.filter((c) => !tirar.has(c) && !modulosSemVer.has(moduloDe(c)));
+  const novas = codigos.filter((c) => tem.has(c) && !concedidas.includes(c));
+  return [...concedidas, ...new Set(novas)];
 }
 
 /** Marca tudo ou limpa tudo num conjunto de permissões (um módulo do menu), sem tocar nas restantes. */

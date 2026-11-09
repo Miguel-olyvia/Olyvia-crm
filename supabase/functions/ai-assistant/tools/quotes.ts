@@ -1184,7 +1184,8 @@ const getQuoteDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 
   const { data: lines, error: lErr } = await supabase
     .from("quote_lines")
-    .select("id, ordem, section_name, descricao_snapshot, item_description, qt, custo_material_unit, discount_percent, iva_percent, total_sem_iva, total_com_iva, total_com_desconto, product_id, service_id, bundle_id, categoria")
+    // 20270109100000: sem custo_material_unit — o preço mostrado é o de venda (o custo é só para quotes.view_costs).
+    .select("id, ordem, section_name, descricao_snapshot, item_description, qt, retail_price_unit, discount_percent, iva_percent, total_sem_iva, total_com_iva, total_com_desconto, product_id, service_id, bundle_id, categoria")
     .eq("quote_id", args.quote_id)
     .order("ordem", { ascending: true });
   if (lErr) throw lErr;
@@ -1232,7 +1233,13 @@ const getQuoteDetails: Handler = async (ctx, args): Promise<ToolResult> => {
     descricao: l.descricao_snapshot,
     item_description: l.item_description,
     qt: Number(l.qt),
-    unit_price: Number(l.custo_material_unit),
+    // Preço unitário de VENDA: o definido, senão o que o total da linha dá (antes do desconto da linha). Antes era
+    // custo_material_unit, que nas linhas do construtor é o custo de compra.
+    unit_price: l.retail_price_unit != null && Number(l.retail_price_unit) > 0
+      ? Number(l.retail_price_unit)
+      : (Number(l.qt) > 0 && Number(l.discount_percent ?? 0) < 100
+        ? Math.round((Number(l.total_sem_iva) / Number(l.qt) / (1 - Number(l.discount_percent ?? 0) / 100) + Number.EPSILON) * 100) / 100
+        : 0),
     discount_percent: Number(l.discount_percent),
     iva_percent: Number(l.iva_percent),
     total_sem_iva: Number(l.total_sem_iva),
@@ -1509,7 +1516,8 @@ const deleteQuote: Handler = async (ctx, args): Promise<ToolResult> => {
   if (args?.confirm !== true) {
     return { success: false, message: "Confirmação obrigatória — pede ao utilizador para confirmar e volta a chamar com confirm=true." };
   }
-  const perm = requireWrite(ctx, "quotes.edit", "cancelar orçamentos");
+  // Cancelar = soft_delete_business_entity('quote'), que exige quotes.delete (na organização ou acima).
+  const perm = requireWrite(ctx, "quotes.delete", "cancelar orçamentos");
   if (perm) return perm;
 
   const { data: quote, error: qErr } = await supabase

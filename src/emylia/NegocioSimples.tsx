@@ -10,6 +10,7 @@ import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { EditarCliente } from "./EditarCliente";
 import { DadosAoLado } from "./DadosAoLado";
 import { ChamadaDireto } from "./ChamadaDireto";
+import { ACaminho } from "./VisitaEstudio";
 import { modoReal } from "./acessosPortal";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
@@ -115,19 +116,20 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   // 27/10: no orçamento, a página usa a largura do ecrã (as linhas e o plano precisam dela); o cartão do cliente sai da direita
   const largo = ver === null && d.fase === 3 && !!d.orc;
   return (
-    <div className={cn("mx-auto w-full px-4 pb-24 pt-6 sm:px-8 sm:pt-10", largo ? "max-w-[1760px]" : "max-w-6xl")}>
+    <div className={cn("mx-auto w-full px-4 pb-24 pt-2 sm:px-8 sm:pt-10", largo ? "max-w-[1760px]" : "max-w-6xl")}>
       {/* aberto a partir da ficha de uma pessoa (proposta do V1, 16/10): o voltar leva de volta a ela */}
       <button type="button" onClick={go(() => A.nav(origem ? "pessoas" : cliente ? "clientes" : "negocios"))}
         className="inline-flex min-h-11 items-center gap-2 rounded-lg text-[15px] text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" aria-hidden="true" /> {origem ?? cliente ?? "Negócios"}
       </button>
 
-      <header className="mt-2 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      {/* 9/11 (Rúben, telemóvel): o cabeçalho mais baixo: sem o ícone grande da fase e com o "Mais" ao lado do nome (era uma linha só para ele) */}
+      <header className="mt-1 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:mt-2 sm:p-6">
+        <div className="flex items-start justify-between gap-3 sm:gap-4">
           <div className="flex min-w-0 items-center gap-4">
-            <IconeFase fase={d.fase} tam="lg" />
+            <IconeFase fase={d.fase} tam="lg" className="hidden sm:grid" />
             <div className="min-w-0">
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{d.nome}</h1>
+              <h1 className="break-words text-xl font-semibold tracking-tight text-foreground sm:text-3xl">{d.nome}</h1>
               <p className="text-base text-muted-foreground">{d.servico}{!d.linhaPorDefinir && d.servico !== nomeLinha(d) ? " · " + nomeLinha(d) : ""}</p>
               <ContactosCliente d={d} />
             </div>
@@ -170,12 +172,12 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
             </div>
         </div>
         {T && (
-          <dl className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[15px]">
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[15px] sm:mt-5">
             <div className="inline-flex items-center gap-2"><dt><Euro className="h-4 w-4 text-muted-foreground" aria-label="Total sem IVA" /></dt><dd className="font-semibold tabular-nums">{eur0(T.pf)} € s/ IVA</dd></div>
             <div className="inline-flex items-center gap-2"><dt><TrendingUp className="h-4 w-4 text-muted-foreground" aria-label="Margem" /></dt><dd className={cn("tabular-nums", T.m < S.cfg.min / 100 ? "text-destructive" : T.m < S.cfg.alvo / 100 - 0.005 ? "text-warning" : "text-success")}>margem {pct(T.m)}</dd></div>
           </dl>
         )}
-        <div className="mt-6">
+        <div className="mt-4 sm:mt-6">
           {/* 27/10: as fases já feitas abrem-se na própria barra (só leitura) */}
           <ol className="grid grid-cols-6 gap-1.5" aria-label="Fases do negócio">
             {FASES.map((f, i) => {
@@ -256,6 +258,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
 
       {/* 5/11 (Rúben, a visita real): gravar a conversa da visita; no fim propõe os campos da Visita. Fica por cima dos passos para
           continuar a gravar enquanto se anda entre eles. */}
+      {/* 6/11 (Rúben): ao abrir o negócio na Visita, a morada para o Waze e o Google Maps */}
+      {d.fase === 2 && !d.perdido && ver === null && <div className="mt-6"><ACaminho d={d} /></div>}
       {d.fase === 2 && !d.perdido && ver === null && (
         <div className="mt-6"><ChamadaDireto ctx={ctx} d={d} modo="visita" grupos={[
           EXTERIOR, INTERIOR, ...gruposArea(ctx.S.campos, d.f), ESCOLHAS,
@@ -263,7 +267,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
         ].map((g) => efetivo(ctx.S.campos, g))} /></div>
       )}
 
-      <div className={cn("mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)]", !largo && "2xl:grid-cols-[260px_minmax(0,1fr)_240px]")}>
+      <div className={cn("mt-6 grid items-start gap-6 sm:mt-8 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-10", !largo && "2xl:grid-cols-[260px_minmax(0,1fr)_240px]")}>
         {naChamada && d.fase <= 1 && ver === null
           ? <TudoNaChamada ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} />
           : ver === null
@@ -497,7 +501,7 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
       {lateral(passos, ativo, setAtivo, temBotaoFase(ctx, d))}
       <section className="min-w-0" aria-labelledby="passo-titulo">
         {/* Telemóvel: os passos numa linha (a lista completa fica no computador) */}
-        <ol className="mb-6 flex flex-wrap gap-1.5 lg:hidden" aria-label="Passos desta fase">
+        <ol className="mb-4 flex flex-wrap gap-1.5 sm:mb-6 lg:hidden" aria-label="Passos desta fase">
           {passos.map((x, i) => (
             <li key={x.id}>
               <button type="button" onClick={() => setAtivo(i)} aria-current={i === ativo ? "step" : undefined} aria-label={curto(x)}
@@ -523,10 +527,10 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
                 </div>
               )}
               <div className="mt-2 flex items-center gap-3">
-                <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl [&_svg]:h-5 [&_svg]:w-5", FASE_COR[d.fase])} aria-hidden="true"><atual.icone /></span>
-                <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none">{curto(atual)}</h2>
+                <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl [&_svg]:h-5 [&_svg]:w-5 sm:h-11 sm:w-11", FASE_COR[d.fase])} aria-hidden="true"><atual.icone /></span>
+                <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="text-xl font-semibold tracking-tight outline-none sm:text-2xl">{curto(atual)}</h2>
               </div>
-              <div id="passo-corpo" className="mt-6"><GuiaPassoCtx.Provider value={guia}>{atual.corpo}</GuiaPassoCtx.Provider></div>
+              <div id="passo-corpo" className="mt-4 sm:mt-6"><GuiaPassoCtx.Provider value={guia}>{atual.corpo}</GuiaPassoCtx.Provider></div>
             </>
           ) : (
             <>
@@ -540,13 +544,15 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
           )}
         </div>
 
-        {/* Um só botão primário: Continuar, ou o passo do negócio no fim (o passo guiado tem o seu) */}
+        {/* Um só botão primário: Continuar, ou o passo do negócio no fim (o passo guiado tem o seu).
+            9/11 (Rúben, telemóvel): fica preso ao fundo do ecrã enquanto se percorre o passo (o Orçamento tem 8 000 px e o botão só se via no fim);
+            à direita fica espaço para o botão das conversas. No computador, como antes. */}
         {!(guiado && !fim) && (
-        <div className="mt-10 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>{ativo > 0 && <Button variant="ghost" size="lg" onClick={() => setAtivo(ativo - 1)}>Anterior</Button>}</div>
+        <div data-acoes-passo className="sticky bottom-0 z-30 -mx-4 mt-8 flex items-center gap-2 border-t border-border bg-background/95 py-3 pl-4 pr-[4.5rem] backdrop-blur [&:not(:has(button))]:hidden sm:static sm:mx-0 sm:mt-10 sm:justify-between sm:gap-3 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-6 sm:backdrop-blur-none">
+          <div className="shrink-0 empty:hidden sm:empty:block">{ativo > 0 && <Button variant="ghost" size="lg" className="px-3 sm:px-8" onClick={() => setAtivo(ativo - 1)}>Anterior</Button>}</div>
           {fim || enviar
-            ? (temBotaoFase(ctx, d) ? <div className="[&_button]:w-full sm:[&_button]:w-auto"><BotaoFase ctx={ctx} d={d} /></div> : null)
-            : <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            ? (temBotaoFase(ctx, d) ? <div className="min-w-0 flex-1 sm:flex-none [&_button]:w-full sm:[&_button]:w-auto"><BotaoFase ctx={ctx} d={d} /></div> : null)
+            : <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-none sm:flex-row sm:items-center">
               {/* no passo Orçamento por verificar, o botão é verificar: sem bloqueios o passo fica feito e avança sozinho;
                   com bloqueios, leva-os à vista (antes, o "Continuar" passava à Proposta com o orçamento por aprovar) */}
               {atual?.id === "orc" && d.orc && !d.orc.enviada && !completo(atual)

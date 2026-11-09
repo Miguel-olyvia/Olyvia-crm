@@ -42,13 +42,29 @@
 // operations.costs.view, lists.view, clients.import e leads.import saem do editor. Só se esconde: os códigos ficam na base, os papéis
 // que as têm mantêm-nas ao gravar (fundirPermissoes) e nenhuma guarda/policy/RPC muda — ver os comentários em PERMISSOES_ESCONDIDAS.
 // Desfaz a decisão de 04/11 que mantinha as três de Operações por causa do Frota (Ligações).
+//
+// 05/11/2026 (ronda 2, aprovado): operations.view também sai do editor (sem ação própria: o item «Operação» do menu abre o /negocios,
+// guardado por pessoas.view/Papel no Negócio). A guarda do menu fica (ESCONDIDAS_COM_GUARDA); o grupo Operação desaparece do editor.
+//
+// 06/11/2026 (aprovado, auditoria de uso real): saem do editor api_keys.copy/create/delete/toggle (só /technical-settings, sem ligação
+// viva), leads.config (só a guarda de /lead-contact-results, sem ligação viva) e quote_templates.duplicate (o servidor aceita create).
+// Voltam ao editor quotes.export, quotes.export_sensitive, proposals.export e client_contracts.export (/quotes, /proposals e
+// /client-contracts abrem-se pela ficha do /pessoas e o botão Exportar pede-as) e direct_sales.view (o número da venda direta de
+// origem nas Encomendas de Cliente). Nenhuma guarda/policy/RPC muda.
+//
+// 06/11/2026 (aprovado): os Pedidos de Proposta (deals) são do CRM antigo — nenhum ecrã alcançável cria nem lista pedidos (/deals e
+// /negocio-metas redirecionam para /negocios). deals.view, deals.create e deals.edit saem do editor; deals.delete fica, em Definições
+// › Lixo, com o rótulo «Eliminar definitivamente do Lixo». As guardas que ainda as citam não mudam — ver ESCONDIDAS_COM_GUARDA.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
+  // 06/11: só api_keys.view (rota /api-keys e policy de leitura, com settings.update); criar/copiar/ativar/apagar só a página morta
+  // /technical-settings as verificava — em /api-keys essas ações pedem settings.update.
   api_keys: [
-    "api_keys.copy", "api_keys.create", "api_keys.delete", "api_keys.toggle", "api_keys.view",
+    "api_keys.view",
   ],
+  // 06/11: client_contracts.export volta (o botão Exportar de /client-contracts, que a ficha do /pessoas abre).
   client_contracts: [
-    "client_contracts.cancel", "client_contracts.create", "client_contracts.delete", "client_contracts.edit",
+    "client_contracts.cancel", "client_contracts.create", "client_contracts.delete", "client_contracts.edit", "client_contracts.export",
     "client_contracts.manage_templates",
     "client_contracts.send_signature", "client_contracts.view",
   ],
@@ -57,7 +73,7 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "client_orders.view",
   ],
   // clients.view tem ação na app viva: o âmbito dela filtra os clientes do campo Cliente (EntitySearchInput) na «Nova encomenda manual»
-  // de /client-orders (e em /deals).
+  // de /client-orders (e em /deals, que a 06/11 passou a redirecionar para /negocios).
   // clients.edit é a segunda chave, junto com pessoas.edit, para mexer em quem já é cliente: fn_neg_pessoa_no_ambito
   // (neg_guardar_identidade_pessoa, neg_substituir_contacto, neg_guardar_contacto_pessoa, neg_guardar_nif_pessoa, neg_atribuir_pessoa,
   // rpc_resolve_form_submission), as visitas (fn_neg_pode_mudar_dono_lead), as moradas de entrega (fn_entity_delivery_address_access) e
@@ -71,10 +87,17 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   dashboard: [
     "dashboard.view",
   ],
+  // 06/11: só deals.delete fica — é a chave do «Eliminar definitivamente» de qualquer documento no Lixo (lib/lixo/permissoesRestauro.ts,
+  // Trash.tsx e purge_business_entity no servidor); no editor aparece em Definições › Lixo (gruposPermissoes.ts). view/create/edit
+  // passaram para as escondidas.
   deals: [
-    "deals.create", "deals.delete", "deals.edit", "deals.view",
+    "deals.delete",
   ],
-  // 05/11: direct_sales.view passou para as escondidas (sem ação na app viva); a categoria deixou de ter permissões no editor.
+  // 05/11: direct_sales.view passou para as escondidas. 06/11 (aprovado): volta — rpc_list_client_order_documents e
+  // rpc_get_client_order_document só devolvem o número da venda direta de origem com ela (Encomendas de Cliente, Compras, Movimentos).
+  direct_sales: [
+    "direct_sales.view",
+  ],
   email_templates: [
     "email_templates.create", "email_templates.delete", "email_templates.duplicate", "email_templates.edit",
     "email_templates.view",
@@ -126,12 +149,13 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // 05/11: leads.assign (neg_atribuir_pessoa, quando a pessoa ainda não é cliente; gatilho trg_00_negocios_comercial_leads_assign em
   // negocios.assigned_to) já se pergunta no ecrã, por usePodeAtribuirComercial: o seletor do comercial em «Editar negócio»
   // (EditarNegocioDialogo), no passo Chamada de /negocios (ComercialDaLead, só se a pessoa não é cliente) e na «Nova lead» (ComercialNovaLead).
-  // Só verificadas no servidor (policies/RPCs/edge functions): leads.config (policies das tabelas de
-  // configuração de leads, incluindo lead_contact_results que a rota viva /lead-contact-results grava), leads.delete (policies anew_leads
+  // 06/11: leads.config saiu do editor — a rota /lead-contact-results não tem ligação de nenhum ecrã vivo e as policies das tabelas de
+  // configuração de leads só são escritas por componentes mortos (ver ESCONDIDAS_COM_GUARDA).
+  // Só verificadas no servidor (policies/RPCs/edge functions): leads.delete (policies anew_leads
   // e anew_entity_*), leads.edit (policies, ai-assistant, execute-workflow). 05/11: leads.import passou para as escondidas.
   // platform.pending_submissions.view está na categoria leads da base mas aparece em Marketing › Formulários (gruposPermissoes.ts).
   leads: [
-    "leads.assign", "leads.config", "leads.convert", "leads.create", "leads.delete", "leads.edit", "leads.view",
+    "leads.assign", "leads.convert", "leads.create", "leads.delete", "leads.edit", "leads.view",
     "platform.pending_submissions.view",
   ],
   // 03/11: trash.view guarda /trash (rota, menu e atalho); lead_sources.view guarda /lead-sources. 05/11: lists.view passou para as
@@ -140,10 +164,8 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "campaigns.create", "campaigns.delete", "campaigns.edit", "campaigns.view", "lead_sources.create",
     "lead_sources.delete", "lead_sources.edit", "lead_sources.view",
   ],
-  // 05/11: operations.orders.view/view_all e operations.costs.view passaram para as escondidas; fica operations.view.
-  operations: [
-    "operations.view",
-  ],
+  // 05/11: operations.orders.view/view_all e operations.costs.view passaram para as escondidas. 05/11 (ronda 2): operations.view também
+  // (ver PERMISSOES_ESCONDIDAS.operations) — o grupo Operação sai do editor.
   organizations: [
     "organizations.create", "organizations.delete", "organizations.edit", "organizations.view",
   ],
@@ -171,8 +193,10 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "brands.view", "product_attributes.view", "product_categories.view", "products.create", "products.edit",
     "products.manage_prices", "products.view", "products.view_cost",
   ],
+  // 06/11: proposals.export volta (o botão Exportar de /proposals, que a ficha do /pessoas abre).
   proposals: [
-    "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.manage", "proposals.view",
+    "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.export", "proposals.manage",
+    "proposals.view",
   ],
   purchase_orders: [
     "purchase_orders.approve", "purchase_orders.create", "purchase_orders.delete", "purchase_orders.edit",
@@ -180,15 +204,18 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "purchase_orders.view",
   ],
   quote_templates: [
-    "quote_templates.create", "quote_templates.delete", "quote_templates.duplicate", "quote_templates.edit",
-    "quote_templates.view",
+    "quote_templates.create", "quote_templates.delete", "quote_templates.edit", "quote_templates.view",
   ],
   // 05/11: quotes.view_costs também no Negócio: fn_neg_ler_orcamento, neg_ler_negocios e fn_neg_ler_adendas devolvem os custos a null
   // sem fn_cat_pode(org, 'quotes.view_costs'), e o ecrã pergunta o mesmo (podeVerCustos em emylia/permissoes.ts: na ficha pela leitura de
   // permissoesPosContrato.ts, em /negocios por usePodeVerCustos) para esconder a margem e o custo (OrcamentoSimples, LinhasOrcamento,
   // PlanoObraOrcamento, DemolicaoOrcamento e os valores no texto dos bloqueios do motor).
+  // 05/11: quotes.delete volta ao editor: soft_delete_business_entity('deal'), restore_business_entity e o botão Restaurar do Lixo
+  // (lib/lixo/permissoesRestauro.ts) exigem-na para mandar/tirar orçamentos do Lixo.
+  // 06/11: quotes.export/export_sensitive voltam (o botão Exportar de /quotes, que a ficha do /pessoas abre).
   quotes: [
-    "quotes.create", "quotes.edit", "quotes.manage", "quotes.view", "quotes.view_costs",
+    "quotes.create", "quotes.delete", "quotes.edit", "quotes.export", "quotes.export_sensitive", "quotes.manage", "quotes.view",
+    "quotes.view_costs",
   ],
   receiving: [
     "receiving.download_proof", "receiving.learn_codes", "receiving.manage_delivery_notes", "receiving.receive",
@@ -244,8 +271,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   activities: [
     "activities.create", "activities.delete", "activities.edit", "activities.view",
   ],
+  // 06/11: copy/create/delete/toggle só em TechnicalSettings.tsx (/technical-settings, só ligada pelo WelcomeGuide, que nada abre).
   api_keys: [
-    "api_keys.edit",
+    "api_keys.copy", "api_keys.create", "api_keys.delete", "api_keys.edit", "api_keys.toggle",
   ],
   assets: [
     "assets.create", "assets.delete", "assets.edit", "assets.export", "assets.import", "assets.view",
@@ -275,7 +303,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   // Só ClientContracts.tsx (FORA_DO_MENU) e o pedido dela a export-data. client_contracts.manage: sem ação na app viva, 04/11 (só a
   // policy client_templates_manage, que aceita também client_contracts.manage_templates — essa fica no editor).
   client_contracts: [
-    "client_contracts.export", "client_contracts.manage",
+    "client_contracts.manage",
   ],
   companies: [
     "companies.create", "companies.delete", "companies.edit", "companies.upload_logo", "companies.view",
@@ -292,6 +320,13 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "contacts.create", "contacts.delete", "contacts.edit", "contacts.export", "contacts.export_sensitive", "contacts.import",
     "contacts.view", "contacts.view_details",
   ],
+  // 06/11: os Pedidos de Proposta são do CRM antigo (Deals.tsx em LEGADO; /deals e /negocio-metas redirecionam para /negocios). Ainda
+  // as citam, sem ecrã para as dar sentido: o âmbito de deals.view na pesquisa para ligar orçamento/proposta a um pedido antigo
+  // (QuoteBuilder, scopedEntitySearch — sem ela a pesquisa de pedidos devolve vazio), no Lixo (pedidos apagados) e no Hoje, e o
+  // assistente IA (edge function). deals.delete fica em uso (Definições › Lixo).
+  deals: [
+    "deals.create", "deals.edit", "deals.view",
+  ],
   departments: [
     "departments.create", "departments.delete", "departments.edit", "departments.view",
   ],
@@ -300,7 +335,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   // verificá-la para mostrar o número da venda direta de origem — a verificação não muda, só sai do editor).
   direct_sales: [
     "direct_sales.confirm", "direct_sales.create", "direct_sales.delete", "direct_sales.edit", "direct_sales.register_invoice",
-    "direct_sales.view", "direct_sales.view_costs",
+    "direct_sales.view_costs",
   ],
   drivers: [
     "drivers.create", "drivers.delete", "drivers.edit", "drivers.export", "drivers.import", "drivers.view",
@@ -323,7 +358,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   // leads.contact: só LeadTableRow.tsx; leads.export(_sensitive): só AnewLeads.tsx (rota /leads redireciona) e o módulo leads de export-data.
   // leads.import: sem ação na app viva, 05/11 (só AnewLeads.tsx e as policies de anew_entity_roles, 20270102130000).
   leads: [
-    "leads.contact", "leads.export", "leads.export_sensitive", "leads.import", "leads.manage",
+    "leads.config", "leads.contact", "leads.export", "leads.export_sensitive", "leads.import", "leads.manage",
   ],
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   // channels.view: sem ação na app viva, 04/11 (o menu e a rota de Origens pedem lead_sources.view; nenhuma função/policy a verifica).
@@ -335,8 +370,12 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
   // operations.orders.view/view_all e operations.costs.view: sem ação na app viva, 05/11 (as policies/RPCs de ops_* e as do Frota
   // continuam a verificá-las; só saem do editor).
+  // operations.view: sem ação própria na app viva, 05/11 (ronda 2). O item «Operação» do menu abre /negocios?vista=operacoes, que é
+  // guardado por pessoas.view ou pelo Papel no Negócio (RotaNegocios) e lê as obras por obra_ler_negocios (pessoas.view); as ligações
+  // do Frota levam a /operacao (operacao-app desativada). No servidor só ops_pode a pede, com um perfil de operações (0 na base).
+  // Esconde-se só: a guarda do menu e as ligações do Frota não mudam (ESCONDIDAS_COM_GUARDA) e os papéis mantêm-na ao gravar.
   operations: [
-    "operations.checklists.manage", "operations.costs.view", "operations.orders.view", "operations.orders.view_all", "operations.locations.manage", "operations.locations.view", "operations.orders.approve",
+    "operations.checklists.manage", "operations.costs.view", "operations.view", "operations.orders.view", "operations.orders.view_all", "operations.locations.manage", "operations.locations.view", "operations.orders.approve",
     "operations.orders.cancel", "operations.orders.confirm", "operations.orders.create", "operations.orders.edit",
     "operations.orders.execute", "operations.plans.manage", "operations.settings.manage",
   ],
@@ -359,13 +398,13 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   purchase_orders: [
     "purchase_orders.manage", "purchase_orders.view_prices",
   ],
-  // Só Proposals.tsx (FORA_DO_MENU) e o pedido dela a export-data.
-  proposals: [
-    "proposals.export",
+  // 06/11: quote_templates.duplicate — duplicate_quote_template aceita create OU duplicate e o botão Duplicar de /quote-models passou a
+  // pedir quote_templates.create (nenhum papel tinha duplicate sem create).
+  quote_templates: [
+    "quote_templates.duplicate",
   ],
-  // quotes.delete/export/export_sensitive: só Quotes.tsx (FORA_DO_MENU) e o pedido dela a export-data.
   quotes: [
-    "quotes.delete", "quotes.export", "quotes.export_sensitive", "quotes.generate_pdf",
+    "quotes.generate_pdf",
   ],
   roles: [
     "roles.clone",
@@ -429,6 +468,13 @@ export const CODIGOS_SEM_CATALOGO: readonly string[] = [
 export const ESCONDIDAS_COM_GUARDA: Readonly<Record<string, readonly string[]>> = {
   // 04/11: /rh-exemplo/denuncias (ProtectedRoute em App.tsx e PERMISSOES_RH.denuncias em menuConfig.ts); as RPCs da página não existem.
   "hr.denuncias.gerir": ["App.tsx", "components/sidebar/menuConfig.ts"],
+  // 05/11 (ronda 2): o item «Operação» do menu (com pessoas.view) e as ligações do Frota a /operacao; useOficiosObra só a cita num comentário.
+  "operations.view": ["components/sidebar/menuConfig.ts", "components/frota/contexto.ts", "hooks/useOficiosObra.ts"],
+  // 06/11: a guarda da rota /lead-contact-results (sem ligação de nenhum ecrã vivo; a rota fica por agora).
+  "leads.config": ["App.tsx"],
+  // 06/11: o âmbito de deals.view na pesquisa para ligar orçamento/proposta a um pedido de proposta antigo (QuoteBuilder,
+  // scopedEntitySearch — sem ela devolve vazio), nos pedidos apagados do Lixo (Trash) e na ação «Abrir pedido» do Hoje (today).
+  "deals.view": ["components/QuoteBuilder.tsx", "lib/search/scopedEntitySearch.ts", "pages/Trash.tsx", "lib/agenda/today.ts"],
 };
 
 const todas = (r: Readonly<Record<string, readonly string[]>>): string[] => Object.values(r).flat();

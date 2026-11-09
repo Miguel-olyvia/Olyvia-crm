@@ -65,11 +65,13 @@ const NOMES_PT: Record<string, string> = {
  * os papéis não mudam.
  */
 export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descricao: string }>> = {
-  // 05/11/2026: product_categories.view não guarda nenhum ecrã de categorias vivo; o que dá é leitura ao audit log da organização
-  // (separador Histórico das encomendas a fornecedor: PurchaseOrders → usePoAuditLog → poHistory) e aos atributos das categorias globais.
+  // 05/11/2026: product_categories.view não guarda nenhum ecrã de categorias vivo. 20270109520000: é A chave do registo de alterações
+  // (entity_audit_log) na organização da linha — as outras permissões do catálogo deixaram de o abrir; os custos continuam a pedir a
+  // permissão de custo. O separador Histórico da encomenda a fornecedor lê por rpc_po_historico (purchase_orders.view) e só cai na
+  // leitura direta (esta permissão) se essa recusar. Dá também os atributos das categorias globais.
   "product_categories.view": {
     nome: "Ver histórico de alterações",
-    descricao: "Ver o histórico das encomendas a fornecedor e os atributos das categorias",
+    descricao: "Ler o registo de alterações da organização (sem os custos, que pedem a permissão de custo) e os atributos das categorias",
   },
   // 05/11/2026: clients.edit é a segunda chave (com pessoas.edit) para mexer em quem já é cliente; clients.create só a usa o convert_lead
   // do assistente IA. Os nomes «Converter Leads» e «Editar negócios de pessoas» são os de leads.convert e pessoas.edit na base.
@@ -82,6 +84,13 @@ export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descric
   "users.change_password": {
     nome: "Alterar palavras-passe",
     descricao: "Definir uma nova palavra-passe para outro utilizador na ficha dele. A própria palavra-passe muda-se sempre, sem esta permissão.",
+  },
+  // 06/11/2026: deals.delete é a chave do «Eliminar definitivamente» dos documentos no Lixo (PURGE_PERMISSION em Trash.tsx,
+  // purge_business_entity no servidor; leads/clientes pedem organizations.delete) e de restaurar pedidos de proposta antigos
+  // (lib/lixo/permissoesRestauro.ts). No editor está em Definições › Lixo.
+  "deals.delete": {
+    nome: "Eliminar definitivamente do Lixo",
+    descricao: "Apagar para sempre, no Lixo, orçamentos, propostas, contratos, encomendas e pedidos de proposta já eliminados (não se pode desfazer). Restaura também pedidos de proposta antigos.",
   },
   "clients.create": {
     nome: "Converter em cliente (assistente IA)",

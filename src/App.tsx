@@ -29,8 +29,6 @@ import NotFound from "./pages/NotFound";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 
 
-const Deals = lazy(() => import("./pages/Deals"));
-const NegocioMetas = lazy(() => import("./pages/NegocioMetas"));
 const Proposals = lazy(() => import("./pages/Proposals"));
 
 
@@ -153,6 +151,9 @@ const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/Prototip
 // 4/11: a chamada em direto sem conta (o painel do «Tudo na chamada» com um negócio de exemplo)
 const PrototipoChamada = lazy(() => import("./pages/prototipo-negocios/PrototipoChamada"));
 const PrototipoPlanta3D = lazy(() => import("./pages/PrototipoPlanta3D"));
+// 5/11 (Rúben): o Estúdio do projeto (o antes, o estilo, o depois, o 3D e a proposta), com um catálogo de teste, sem conta
+const EstudioProjeto = lazy(() => import("./pages/prototipo-estudio/EstudioProjeto"));
+const PlaneadorCozinha = lazy(() => import("./pages/prototipo-estudio/cozinha/PlaneadorCozinha"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
 const ClientPortalNegocios = lazy(() => import("./pages/ClientPortalNegocios"));
@@ -232,6 +233,9 @@ const App = () => (
                   <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
                   <Route path="/prototipo/chamada" element={<PrototipoChamada />} />
                   <Route path="/prototipo/planta-3d" element={<PrototipoPlanta3D />} />
+                  <Route path="/prototipo/estudio" element={<EstudioProjeto />} />
+                  <Route path="/prototipo/cozinha" element={<PlaneadorCozinha />} />
+
                   {/* Portal do colaborador de exemplo (página pública, sem sessão: acesso temporário pelo link) */}
                   <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
                   {/* O endereço antigo do link de admissão redireciona para o portal */}
@@ -309,10 +313,11 @@ const App = () => (
                       <Route path="/rh-exemplo/denuncias" element={<ProtectedRoute permission="hr.denuncias.gerir"><RhDenuncias /></ProtectedRoute>} />
                       <Route path="/canal-denuncias/gestao" element={<Navigate to="/rh-exemplo/denuncias" replace />} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
-                      <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
-                      <Route path="/negocio-metas" element={<ProtectedRoute permission="deals.view"><NegocioMetas /></ProtectedRoute>} />
+                      {/* 06/11: os Pedidos de Proposta são do CRM antigo; /deals e /negocio-metas levam para /negocios (as páginas ficam em disco). */}
+                      <Route path="/deals" element={<Navigate to="/negocios" replace />} />
+                      <Route path="/negocio-metas" element={<Navigate to="/negocios" replace />} />
                       <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
-                      {/* 03/11: a Aquisição saiu do menu (o Negócios substitui-a). A ajuda e a Venda Direta antiga levam para /negocios; /deals, /quotes, /proposals e /client-contracts ficam vivas (a ficha do /pessoas ainda as usa). */}
+                      {/* 03/11: a Aquisição saiu do menu (o Negócios substitui-a). A ajuda e a Venda Direta antiga levam para /negocios; /quotes, /proposals e /client-contracts ficam vivas (a ficha do /pessoas ainda as usa). */}
                       <Route path="/acquisition-help" element={<Navigate to="/negocios" replace />} />
                       <Route path="/quotes" element={<ProtectedRoute permission="quotes.view"><Quotes /></ProtectedRoute>} />
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />

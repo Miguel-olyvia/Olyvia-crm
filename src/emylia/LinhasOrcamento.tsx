@@ -170,9 +170,10 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
               }}
               className="flex min-h-12 w-full items-center gap-3 rounded-xl border-l-4 border-primary bg-primary/[0.07] px-3 py-2 text-left shadow-[var(--shadow-sm)] transition-colors hover:bg-primary/[0.11] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <ChevronDown className={cn("h-5 w-5 shrink-0 text-primary motion-safe:transition-transform", fechadoG && "-rotate-90")} aria-hidden="true" />
-              <span className="text-lg font-semibold tracking-tight text-foreground">{g.t}</span>
-              <span className="rounded-full bg-card px-2 py-0.5 text-sm font-medium tabular-nums text-muted-foreground">{g.idx.length} {g.idx.length === 1 ? "linha" : "linhas"}</span>
-              <span className="ml-auto text-lg font-semibold tabular-nums text-foreground">{eur(soma)} €</span>
+              {/* 9/11 (telemóvel): o nome encolhe e o total e o número de linhas não partem a meio */}
+              <span className="min-w-0 text-base font-semibold leading-tight tracking-tight text-foreground sm:text-lg">{g.t}</span>
+              <span className="shrink-0 whitespace-nowrap rounded-full bg-card px-2 py-0.5 text-sm font-medium tabular-nums text-muted-foreground"><span aria-hidden="true" className="sm:hidden">{g.idx.length}</span><span className="sr-only sm:not-sr-only">{g.idx.length} {g.idx.length === 1 ? "linha" : "linhas"}</span></span>
+              <span className="ml-auto shrink-0 whitespace-nowrap text-base font-semibold tabular-nums text-foreground sm:text-lg">{eur(soma)} €</span>
             </button>
           </h3>
         )}
@@ -212,8 +213,9 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
         return (
           <li key={i} className={cn("rounded-xl border border-border bg-card px-3 shadow-[var(--shadow-sm)] transition-colors hover:border-primary/40 sm:px-4", tabela ? "py-2" : "py-3")}>
             <div className={cn("flex gap-3", tabela ? "flex-wrap items-center" : "items-start")}>
-              <span className={cn("grid shrink-0 place-items-center rounded-xl", tabela ? "h-8 w-8" : "h-10 w-10", l.t === "svc" ? "bg-primary/10 text-primary" : O.cls)} aria-hidden="true"><Ic className={tabela ? "h-4 w-4" : "h-5 w-5"} /></span>
-              <div className="min-w-0 flex-1">
+              <span className={cn("hidden shrink-0 place-items-center rounded-xl sm:grid", tabela ? "h-8 w-8" : "h-10 w-10", l.t === "svc" ? "bg-primary/10 text-primary" : O.cls)} aria-hidden="true"><Ic className={tabela ? "h-4 w-4" : "h-5 w-5"} /></span>
+              {/* 9/11 (telemóvel): tocar no nome de um serviço abre o detalhe, como a seta (era só a seta, pequena, à direita) */}
+              <div className={cn("min-w-0 flex-1", (l.t === "svc" || dem) && "cursor-pointer")} onClick={l.t === "svc" || dem ? () => setAberta(aberta === i && dem ? null : i) : undefined}>
                 <p className={cn("font-medium leading-snug text-foreground", t)}>{nome}</p>
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   {/* 27/10: a zona no mesmo texto da quantidade (era uma linha à parte); uma zona só diz o nome, várias dizem as quantidades */}
@@ -262,12 +264,12 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
             {/* com a proposta enviada, a zona vai na linha da quantidade (acima); antes, a escolha da zona */}
             {!tabela && !fechado && <ZonaDaLinha ctx={ctx} d={d} i={i} nome={nome} />}
             {l.t === "mat" && l.livre && !fechado && (
-              <button type="button" onClick={() => run(() => A.tirarLinha(d.id, i))} aria-label={`Tirar a linha ${nome}`} className="ml-[52px] mt-1 inline-flex min-h-9 items-center gap-1 text-sm font-medium text-destructive">
+              <button type="button" onClick={() => run(() => A.tirarLinha(d.id, i))} aria-label={`Tirar a linha ${nome}`} className="mt-1 sm:ml-[52px] inline-flex min-h-9 items-center gap-1 text-sm font-medium text-destructive">
                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />Tirar a linha
               </button>
             )}
             {ajustado && !fechado && !(l.t === "mat" && l.livre) && (
-              <button type="button" onClick={() => run(() => A.reporPreco(d.id, i))} className="ml-[52px] mt-1 inline-flex min-h-9 items-center gap-1 text-sm font-medium text-primary">
+              <button type="button" onClick={() => run(() => A.reporPreco(d.id, i))} className="mt-1 sm:ml-[52px] inline-flex min-h-9 items-center gap-1 text-sm font-medium text-primary">
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Repor o preço calculado
               </button>
             )}

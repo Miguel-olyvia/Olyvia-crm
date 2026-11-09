@@ -41,6 +41,8 @@ type Props = {
 
 export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto" }: Props) {
   const cons = tipo === "consumivel";
+  // 05/11: sem products.view_cost não se mostra o custo de compra (nem a margem, nem o preço dos fornecedores)
+  const verCusto = real?.podeVerCusto !== false;
   const titulo = useRef<HTMLHeadingElement>(null);
   useEffect(() => { titulo.current?.focus(); }, []);
   const topo = (
@@ -73,14 +75,18 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       {cons
         ? (
           <Seccao id="fp-preco" titulo="Custo">
-            <p className="mt-3 text-2xl font-semibold tabular-nums">{eur(p.custo)} €/{p.un}</p>
-            <p className={NOTA}>{p.data ? `de ${dataPT(p.data)} · ` : ""}entra no custo dos serviços que o usam; o custo vem do fornecedor.</p>
+            {verCusto
+              ? <>
+                <p className="mt-3 text-2xl font-semibold tabular-nums">{eur(p.custo)} €/{p.un}</p>
+                <p className={NOTA}>{p.data ? `de ${dataPT(p.data)} · ` : ""}entra no custo dos serviços que o usam; o custo vem do fornecedor.</p>
+              </>
+              : <p className={cn(NOTA, "mt-3")} data-testid="sem-custo">Sem permissão para ver o custo de compra (products.view_cost).</p>}
           </Seccao>
         )
-        : <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} />}
+        : <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} verCusto={verCusto} />}
 
       {real && eUuid(p.id)
-        ? <Fornecedores key={p.id} p={p} real={real} anunciar={anunciar} />
+        ? <Fornecedores key={p.id} p={p} real={real} anunciar={anunciar} verCusto={verCusto} />
         : <Seccao id="fp-forn" titulo="Fornecedores"><p className={cn(NOTA, "mt-3")}>{p.fornecedor || "Sem fornecedor indicado."}</p></Seccao>}
       {real && eUuid(p.id) && <StockArmazens key={`stock-${p.id}`} productId={p.id} nome={p.n} real={real} anunciar={anunciar} />}
     </article>
@@ -112,7 +118,7 @@ function FotosProduto({ fotos, nome }: { fotos?: string[]; nome: string }) {
 // Gravar vai direto a cat_definir_pvp (não pelo autosave do Catálogo, que também grava custo).
 const texto = (v: number | undefined) => (v == null ? "" : String(v).replace(".", ","));
 
-function Preco({ p, min, alvo, real, anunciar }: { p: Produto; min: number; alvo: number; real?: FichaProdutoReal; anunciar: (msg: string) => void }) {
+function Preco({ p, min, alvo, real, anunciar, verCusto = true }: { p: Produto; min: number; alvo: number; real?: FichaProdutoReal; anunciar: (msg: string) => void; verCusto?: boolean }) {
   const pode = !!real && real.podeEditar && real.podeMudarPrecos && eUuid(p.id);
   const [t, setT] = useState(texto(p.pvp));
   const [aGravar, setAGravar] = useState(false);
@@ -125,7 +131,7 @@ function Preco({ p, min, alvo, real, anunciar }: { p: Produto; min: number; alvo
   const baixa = m < min / 100 - 0.005;
   const cor = baixa ? "text-destructive" : m < alvo / 100 - 0.005 ? "text-warning" : "text-success";
   const mudou = !invalido && (lido ?? null) !== (p.pvp ?? null);
-  const avisos = !semPvp && !invalido ? [venda < p.custo ? "Abaixo do custo: vende-se com prejuízo." : baixa ? `Abaixo da margem mínima (${min}%).` : ""].filter(Boolean) : [];
+  const avisos = verCusto && !semPvp && !invalido ? [venda < p.custo ? "Abaixo do custo: vende-se com prejuízo." : baixa ? `Abaixo da margem mínima (${min}%).` : ""].filter(Boolean) : [];
 
   const gravar = async (v: number | null) => {
     if (!real) return;
@@ -139,19 +145,22 @@ function Preco({ p, min, alvo, real, anunciar }: { p: Produto; min: number; alvo
 
   return (
     <Seccao id="fp-preco" titulo="Preço">
-      <dl className="mt-4 grid grid-cols-3 gap-3">
-        <div><dt className={NOTA}>Custo por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums">{eur(p.custo)} €</dd>{p.data && <dd className={NOTA}>de {dataPT(p.data)}</dd>}</div>
+      <dl className={cn("mt-4 grid gap-3", verCusto ? "grid-cols-3" : "grid-cols-1")}>
+        {verCusto && <div><dt className={NOTA}>Custo por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums">{eur(p.custo)} €</dd>{p.data && <dd className={NOTA}>de {dataPT(p.data)}</dd>}</div>}
         <div><dt className={NOTA}>{semPvp ? "Preço" : "PVP"} por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums" data-testid="venda-produto">{eur(venda)} €</dd></div>
+        {verCusto && (
         <div>
           <dt className={NOTA}>Margem</dt>
           <dd className={cn("text-2xl font-semibold tabular-nums", cor)} data-testid="margem-produto">{pct(m)}</dd>
           <dd className={NOTA}>{margemEmPalavras(m, min, alvo)} · mínimo {min}%</dd>
         </div>
+        )}
       </dl>
-      <BarraMargem m={m} min={min} alvo={alvo} />
+      {verCusto && <BarraMargem m={m} min={min} alvo={alvo} />}
       <p className={cn(NOTA, "mt-3")}>
-        {semPvp ? `Sem PVP: custo + ${alvo}% de margem (alvo).` : "Margem = (PVP − custo) ÷ PVP."}
-        {p.fornecedor ? ` Fornecedor: ${p.fornecedor}.` : ""} O custo vem do fornecedor.
+        {verCusto
+          ? <>{semPvp ? `Sem PVP: custo + ${alvo}% de margem (alvo).` : "Margem = (PVP − custo) ÷ PVP."}{p.fornecedor ? ` Fornecedor: ${p.fornecedor}.` : ""} O custo vem do fornecedor.</>
+          : <>{p.fornecedor ? `Fornecedor: ${p.fornecedor}. ` : ""}Sem permissão para ver o custo de compra e a margem (products.view_cost).</>}
       </p>
       {pode && (
         <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -175,7 +184,7 @@ function Preco({ p, min, alvo, real, anunciar }: { p: Produto; min: number; alvo
 /* ------------------------------------------------------------------ fornecedores ligados */
 type Leitura = { k: "a-ler" } | { k: "erro"; t: string } | { k: "ok"; L: FornecedorLigado[] };
 
-function Fornecedores({ p, real, anunciar }: { p: Produto; real: FichaProdutoReal; anunciar: (msg: string) => void }) {
+function Fornecedores({ p, real, anunciar, verCusto = true }: { p: Produto; real: FichaProdutoReal; anunciar: (msg: string) => void; verCusto?: boolean }) {
   const [l, setL] = useState<Leitura>({ k: "a-ler" });
   const [aMudar, setAMudar] = useState<string | null>(null);
   const [ligar, setLigar] = useState<{ q: string } | null>(null);
@@ -242,7 +251,7 @@ function Fornecedores({ p, real, anunciar }: { p: Produto; real: FichaProdutoRea
                       {f.catalogo && <span className={cn(NOTA, "block")}>portal: {f.catalogo.nome}</span>}
                     </td>
                     <td className="py-2 pr-3">{f.supplier_sku || f.catalogo?.supplier_ref || "—"}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{moeda(f.purchase_price, f.currency, eur)}{f.preco_data && <span className={cn(NOTA, "block")}>{dataPT(f.preco_data.slice(0, 10))}</span>}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{verCusto ? <>{moeda(f.purchase_price, f.currency, eur)}{f.preco_data && <span className={cn(NOTA, "block")}>{dataPT(f.preco_data.slice(0, 10))}</span>}</> : <span title="Sem permissão: products.view_cost">—</span>}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{f.lead_time_days != null ? `${f.lead_time_days} d` : "—"}</td>
                     <td className="py-2 text-right tabular-nums">{f.catalogo?.units_per_pack ? `× ${f.catalogo.units_per_pack}` : "—"}</td>
                   </tr>
@@ -394,7 +403,7 @@ function Ligar({ p, real, q0, fechar, anunciar, ligado }: { p: Produto; real: Fi
               {escolher.rows.map((r) => (
                 <label key={r.id} className="flex min-h-11 items-center gap-2 text-[15px]">
                   <input type="radio" name="fp-linha" checked={escolher.sel === r.id} onChange={() => setEscolher({ ...escolher, sel: r.id })} />
-                  {[r.uom_code ?? "sem unidade", r.supplier_sku ? `ref. ${r.supplier_sku}` : "", r.purchase_price != null ? moeda(r.purchase_price, r.currency, eur) : ""].filter(Boolean).join(" · ")}
+                  {[r.uom_code ?? "sem unidade", r.supplier_sku ? `ref. ${r.supplier_sku}` : "", r.purchase_price != null && real.podeVerCusto !== false ? moeda(r.purchase_price, r.currency, eur) : ""].filter(Boolean).join(" · ")}
                 </label>
               ))}
               <Button className="mt-2 min-h-11 text-[15px]" disabled={!escolher.sel || !!aLigar}

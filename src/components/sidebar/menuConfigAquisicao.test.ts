@@ -1,5 +1,5 @@
 // 03/11/2026: o grupo Aquisição saiu do menu (o Negócios em /pessoas e /negocios substitui-o). Os templates e modelos dos documentos
-// passam para Definições, com a permissão da rota; /acquisition-help e /direct-sales levam para /negocios; /deals, /negocio-metas,
+// passam para Definições, com a permissão da rota; /acquisition-help e /direct-sales levam para /negocios (06/11: também /deals e /negocio-metas);
 // /quotes, /proposals e /client-contracts continuam vivas (a ficha do /pessoas ainda as abre).
 import { describe, expect, it } from "vitest";
 import appSource from "@/App.tsx?raw";
@@ -88,9 +88,14 @@ describe("App.tsx: redirecionamentos da Aquisição", () => {
     expect(appSource).not.toMatch(/import\("\.\/pages\/AcquisitionHelp"\)/);
   });
 
-  it("/deals, /negocio-metas, /quotes, /proposals e /client-contracts continuam com a página e a permissão", () => {
-    expect(linhaDaRota("/deals")).toContain('<ProtectedRoute permission="deals.view"><Deals />');
-    expect(linhaDaRota("/negocio-metas")).toContain('<ProtectedRoute permission="deals.view"><NegocioMetas />');
+  it("06/11: /deals e /negocio-metas levam para /negocios (Pedidos de Proposta, CRM antigo) e as páginas deixam de ser carregadas", () => {
+    expect(linhaDaRota("/deals")).toMatch(/element=\{<Navigate to="\/negocios" replace \/>\}/);
+    expect(linhaDaRota("/negocio-metas")).toMatch(/element=\{<Navigate to="\/negocios" replace \/>\}/);
+    expect(appSource).not.toMatch(/import\("\.\/pages\/Deals"\)/);
+    expect(appSource).not.toMatch(/import\("\.\/pages\/NegocioMetas"\)/);
+  });
+
+  it("/quotes, /proposals e /client-contracts continuam com a página e a permissão", () => {
     expect(linhaDaRota("/quotes")).toContain('<ProtectedRoute permission="quotes.view"><Quotes />');
     expect(linhaDaRota("/proposals")).toContain('<ProtectedRoute permission="proposals.view"><Proposals />');
     expect(linhaDaRota("/client-contracts")).toContain('<ProtectedRoute permission="client_contracts.view"><ClientContracts />');

@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { ClipboardCheck, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NaFrente } from "./NaFrente";
 import { cn } from "@/lib/utils";
 import { eur, type Assinatura, type Estado, type Negocio } from "./motor";
 import { Cliente, Folha } from "./DocsCliente";
@@ -107,6 +108,7 @@ export function AutoNoNegocio({ S, d }: { S: Estado; d: Negocio }) {
         </div>
       </div>
       {ver && (
+        <NaFrente>
         <div className="fixed inset-0 z-[80] overflow-y-auto bg-slate-100 animate-in fade-in-0" role="dialog" aria-modal="true" aria-label={ver === "auto" ? `Auto de receção ${au.n}` : "Relatório da obra"}>
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-2 backdrop-blur">
             <p className="text-sm font-semibold">{ver === "auto" ? `Auto de receção ${au.n}` : "Relatório da obra"}</p>
@@ -114,6 +116,7 @@ export function AutoNoNegocio({ S, d }: { S: Estado; d: Negocio }) {
           </div>
           <div className="mx-auto max-w-3xl px-3 py-6">{ver === "auto" ? <AutoRececaoDoc d={d} /> : <RelatorioObra S={S} d={d} />}</div>
         </div>
+        </NaFrente>
       )}
     </section>
   );

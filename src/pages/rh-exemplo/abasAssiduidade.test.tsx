@@ -8,11 +8,6 @@ vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await
 vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 
-// O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
-vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
-  useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
-}));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";

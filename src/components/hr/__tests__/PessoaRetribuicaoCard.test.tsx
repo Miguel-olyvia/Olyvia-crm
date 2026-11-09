@@ -31,6 +31,18 @@ vi.mock("@/lib/toast", () => ({
 
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
+// A regra salarial em vigor (o valor do subsidio de alimentacao vem dela, nao da pessoa).
+const regra = vi.hoisted(() => ({
+  valor: {
+    subsidio_limite_min: 300,
+    subsidio_valor_hora: 0.76,
+    subsidio_valor_dia: 6.15,
+  } as Record<string, unknown> | null,
+}));
+vi.mock("@/hooks/useRegrasSalariais", () => ({
+  useRegrasSalariais: () => ({ emVigor: regra.valor, versoes: [], estado: "ok", isLoading: false }),
+}));
+
 const dados = vi.hoisted(() => ({
   versoes: [] as Array<Record<string, unknown>>,
   rpc: vi.fn(),
@@ -286,11 +298,12 @@ describe("PessoaRetribuicaoCard: o dialogo de subsidio e duodecimos", () => {
     return screen.findByRole("dialog");
   }
 
-  it("so tem subsidio, modo, duodecimos, data e motivo -- nada de valor, moeda ou periodicidade", async () => {
+  it("so tem modo do subsidio, duodecimos, data e motivo -- nada de valor do subsidio, moeda ou periodicidade", async () => {
     montar();
     const dialogo = await abrirDialogo();
 
-    expect(within(dialogo).getByLabelText("hr.retribuicaoCartao.subsidioAlimentacao")).toBeInTheDocument();
+    // O valor do subsidio nao se escreve: aparece so em leitura, vindo da regra da organizacao.
+    expect(within(dialogo).queryByLabelText("hr.retribuicaoCartao.subsidioAlimentacao")).not.toBeInTheDocument();
     expect(within(dialogo).getByLabelText("hr.retribuicaoCartao.subsidioAlimentacaoModo")).toBeInTheDocument();
     expect(within(dialogo).getByLabelText("hr.contrato.duodecimos")).toBeInTheDocument();
     expect(within(dialogo).getByLabelText("hr.retribuicaoCartao.dataEfeito")).toBeInTheDocument();
@@ -299,6 +312,28 @@ describe("PessoaRetribuicaoCard: o dialogo de subsidio e duodecimos", () => {
     expect(within(dialogo).queryByLabelText("hr.retribuicaoCartao.valor")).not.toBeInTheDocument();
     expect(within(dialogo).queryByLabelText("hr.retribuicaoCartao.moeda")).not.toBeInTheDocument();
     expect(within(dialogo).queryByLabelText("hr.contrato.periodicidade")).not.toBeInTheDocument();
+  });
+
+  it("o subsidio aparece em leitura com os valores da regra da organizacao (dia, hora e limite em horas)", async () => {
+    montar();
+    const dialogo = await abrirDialogo();
+    const nota = within(dialogo).getByText(/hr\.retribuicaoCartao\.subsidioDaRegra/);
+    const parametros = JSON.parse(/\{.*\}/.exec(nota.textContent!)![0]);
+    expect(parametros.dia).toContain("6,15");
+    expect(parametros.hora).toContain("0,76");
+    expect(parametros.limite).toBe("5");
+  });
+
+  it("sem regra em vigor diz que a organizacao ainda nao a definiu, sem inventar valores", async () => {
+    const antes = regra.valor;
+    regra.valor = null;
+    try {
+      montar();
+      const dialogo = await abrirDialogo();
+      expect(within(dialogo).getByText("hr.retribuicaoCartao.subsidioSemRegra")).toBeInTheDocument();
+    } finally {
+      regra.valor = antes;
+    }
   });
 
   it("o valor base do cargo aparece em leitura", async () => {
@@ -337,9 +372,6 @@ describe("PessoaRetribuicaoCard: o dialogo de subsidio e duodecimos", () => {
     montar();
     const dialogo = await abrirDialogo();
 
-    fireEvent.change(within(dialogo).getByLabelText("hr.retribuicaoCartao.subsidioAlimentacao"), {
-      target: { value: "7.5" },
-    });
     fireEvent.change(within(dialogo).getByLabelText("hr.retribuicaoCartao.dataEfeito"), {
       target: { value: "2099-03-01" },
     });
@@ -351,7 +383,8 @@ describe("PessoaRetribuicaoCard: o dialogo de subsidio e duodecimos", () => {
     expect(args).toMatchObject({
       p_pessoa_id: "p1",
       p_desde: "2099-03-01",
-      p_subsidio: 7.5,
+      // O valor do subsidio ja nao e da pessoa: nunca se envia.
+      p_subsidio: null,
       p_duodecimos_pct: 100,
     });
     expect(args).not.toHaveProperty("p_valor_base");
@@ -369,19 +402,6 @@ describe("PessoaRetribuicaoCard: o dialogo de subsidio e duodecimos", () => {
     fireEvent.click(within(dialogo).getByText("employees.form.update"));
 
     expect(toastError).toHaveBeenCalledWith("hr.retribuicaoCartao.erroDataAnterior");
-    expect(dados.rpc).not.toHaveBeenCalled();
-  });
-
-  it("recusa um subsidio negativo", async () => {
-    montar();
-    const dialogo = await abrirDialogo();
-
-    fireEvent.change(within(dialogo).getByLabelText("hr.retribuicaoCartao.subsidioAlimentacao"), {
-      target: { value: "-3" },
-    });
-    fireEvent.click(within(dialogo).getByText("employees.form.update"));
-
-    expect(toastError).toHaveBeenCalledWith("hr.retribuicaoCartao.erroSubsidioInvalido");
     expect(dados.rpc).not.toHaveBeenCalled();
   });
 

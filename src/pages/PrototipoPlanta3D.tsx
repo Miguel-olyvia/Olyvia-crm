@@ -2,7 +2,7 @@
 // o «negócio» vive em memória (e a planta no estado desta página); as escolhas de espaço e revestimento ficam no localStorage deste aparelho.
 // A mesma planta, dentro do negócio real, está no passo «Medidas da área» da Visita (/negocios).
 import { useState } from "react";
-import { PlantaDivisao } from "@/emylia/PlantaDivisao";
+import { PlantaDivisao3D } from "@/emylia/PlantaDivisao3D";
 import type { Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 
@@ -17,7 +17,7 @@ function Pagina({ divisao, id }: { divisao: string; id: number }) {
   const med = d.visita.med as unknown as Record<string, number>;
   return (
     <>
-      <PlantaDivisao ctx={ctx} d={d} divisao={divisao} />
+      <PlantaDivisao3D ctx={ctx} d={d} divisao={divisao} />
       <p className="mt-4 text-sm text-muted-foreground">Medidas preenchidas: pavimento {med.pav || 0} m², paredes {med.par || 0} m² (só aparecem depois de «Usar nas medidas»).</p>
     </>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -28,6 +29,8 @@ interface DealQuotesPanelProps {
 export function DealQuotesPanel({ dealId }: DealQuotesPanelProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // 05/11 (ronda 2): as ligações para as outras páginas fora do menu pedem a permissão da rota (lib/rotasForaDoMenu.ts).
+  const podeAbrir = usePodeAbrirDestino();
   const [quotes, setQuotes] = useState<DealQuoteRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -85,7 +88,8 @@ export function DealQuotesPanel({ dealId }: DealQuotesPanelProps) {
             <li key={q.id}>
               <button
                 type="button"
-                className="w-full flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-left hover:bg-muted"
+                className="w-full flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-left hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
+                disabled={!podeAbrir("/quotes")}
                 onClick={() => navigate(buildOpenQuoteUrl(q.id))}
                 title={t("deals.quotes.open")}
               >

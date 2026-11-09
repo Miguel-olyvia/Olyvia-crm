@@ -60,7 +60,6 @@ export function ContratoHoras() {
         </LinhaCampo>
         <CampoS g="contrato" k="politica_feriados" id="hr-novo-politica-feriados" rotulo={t("hr.contrato.politicaFeriados")} opcoes={opcoes(t, "hr.politicaFeriados", POLITICAS_FERIADOS)} />
         <CampoT g="contrato" k="horas_semanais_maximas" id="hr-novo-horas-semanais-maximas" rotulo={t("hr.contrato.horasSemanaisMaximas")} />
-        <CampoT g="contrato" k="horas_anuais_maximas" id="hr-novo-horas-anuais-maximas" rotulo={t("hr.contrato.horasAnuaisMaximas")} />
         <CampoI g="extra" k="isencao_horario" id="hr-novo-isencao-horario" rotulo={t("hr.contrato.isencaoHorario")} />
         <DiasDeTrabalho />
       </div>

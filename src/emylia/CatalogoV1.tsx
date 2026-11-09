@@ -317,7 +317,8 @@ function Consumiveis({ todos, C, nomeServico, novo, onAbrirConsumivel, real, anu
               <span className={cn(NOTA, "block")}>{x.fornecedor} · {x.servicos.length === 0 ? "ainda em nenhum serviço" : `em ${x.servicos.length === 1 ? nomeServico(x.servicos[0]) : `${x.servicos.length} serviços`}`}{x.opcionalEm ? ` · opcional em ${x.opcionalEm}` : ""}</span>
             </span>
             <span className={VALORES}>
-              <span className="block text-[15px] font-medium tabular-nums">{eur(x.preco)} €/{x.un}</span>
+              {/* 05/11: o custo de compra do consumível só com products.view_cost */}
+              <span className="block text-[15px] font-medium tabular-nums">{real?.podeVerCusto === false ? <span title="Sem permissão: products.view_cost">—</span> : <>{eur(x.preco)} €/{x.un}</>}</span>
               <span className={cn("flex items-center gap-1 sm:justify-end text-[15px] tabular-nums", x.desatualizado ? "text-foreground" : "text-muted-foreground")}>
                 {x.desatualizado && <Clock className="h-4 w-4 text-warning" aria-hidden="true" />}{dataPT(x.data)}{x.desatualizado ? " · desatualizado" : ""}
               </span>

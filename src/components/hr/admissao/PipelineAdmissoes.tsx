@@ -3,7 +3,7 @@
  * a `rpc_hr_admissao_listar` por `useAdmissoesPipeline`. Uma linha por processo (`CartaoAdmissao`: dois selos, validade,
  * faixa de progresso), filtros por estado (grupos que viram `p_estados`) e «Mostrar mais» (paginacao por cursor).
  *
- * «Rever» abre a revisao (`RevisaoAdmissaoDialog`, so de consulta na V3a) e so existe com `hr.onboarding.approve`. A
+ * «Rever» abre a revisao (`RevisaoAdmissaoDialog`, so de consulta na V3a) e so existe com `hr.onboarding.approve` e `hr.pessoas.view`. A
  * organizacao e a ativa no ecra: quem monta este componente deve dar-lhe `key` com o id da organizacao, para uma troca de
  * organizacao fechar a revisao e recomecar o filtro.
  */
@@ -72,7 +72,9 @@ function ErroDoPipeline({ erro, aoTentar }: { erro: ErroPipeline; aoTentar: () =
 export function PipelineAdmissoes({ aoAbrirFicha }: { aoAbrirFicha: (pessoaId: string) => void }) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const podeRever = hasPermission("hr.onboarding.approve");
+  // Rever também pede hr.pessoas.view: `rpc_hr_admissao_rever_ler` lê as pendências da pessoa (`hr_admissao_pendencias`), que
+  // exigem hr.pessoas.view — só com approve a revisão de um processo em curso é recusada (auditoria de permissões 05/11/2026, B1).
+  const podeRever = hasPermission("hr.onboarding.approve") && hasPermission("hr.pessoas.view");
   const [grupoId, setGrupoId] = useState<GrupoPipelineId | null>(null);
   const [emRevisao, setEmRevisao] = useState<ItemPipeline | null>(null);
 

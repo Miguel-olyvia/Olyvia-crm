@@ -19,6 +19,9 @@ const estado = vi.hoisted(() => ({
   lancamentos: [] as unknown[],
   retribuicoes: new Map<string, unknown[]>(),
   retribuicoesRecusadas: false,
+  // A regra salarial em vigor (`null` = sem regra) e os direitos por pessoa.
+  regra: null as null | Record<string, unknown>,
+  direitos: new Map<string, { iht: boolean; km: boolean; ajudas: boolean }>(),
   relatorio: {
     loading: false,
     totais: { planeadoMinutos: 9600, realizadoMinutos: 9600, minutosExtraNormal: 0, minutosFeriadoTrabalhado: 0, minutosDescansoTrabalhado: 0, horasExtraNoturnasMinutos: 0, minutosAusenciaRemunerada: 0, diasFeriadoTrabalhados: 0 },
@@ -26,6 +29,7 @@ const estado = vi.hoisted(() => ({
     realizadoRecusado: false,
     faltasRecusadas: false,
     planeadoRecusado: false,
+    erro: false,
   },
 }));
 
@@ -40,8 +44,14 @@ vi.mock("@/components/rh-exemplo/hooks/useProcessamentoPeriodo", () => ({
 vi.mock("@/components/rh-exemplo/hooks/useProcessamentoLancamentos", () => ({
   useProcessamentoLancamentos: () => ({ lancamentos: estado.lancamentos, loading: false, saving: false, recusado: false, criar: vi.fn(), anular: vi.fn() }),
 }));
-vi.mock("@/components/rh-exemplo/hooks/useRegrasSubsidioAlimentacao", () => ({
-  useRegrasSubsidioAlimentacao: () => ({ regra: { minutosMinimosDia: 240 }, isLoading: false }),
+vi.mock("@/components/rh-exemplo/hooks/useRegrasSalariais", () => ({
+  useRegrasSalariais: () => ({ versoes: [], emVigor: estado.regra, estado: "ok", isLoading: false }),
+  regraEmVigorNoDia: () => estado.regra,
+}));
+vi.mock("@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao", () => ({
+  useDireitosSalariaisDaOrganizacao: () => ({ porPessoa: estado.direitos, estado: "ok", isLoading: false }),
+  direitosDaPessoa: (mapa: Map<string, unknown>, id: string) => mapa.get(id) ?? { iht: false, km: false, ajudas: false },
+  SEM_DIREITOS_SALARIAIS: { iht: false, km: false, ajudas: false },
 }));
 vi.mock("@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal", () => ({ useRelatorioAssiduidadeMensal: () => estado.relatorio }));
 vi.mock("@/components/rh-exemplo/hooks/useRetribuicoesVigentesDaOrganizacao", async (original) => ({
@@ -55,7 +65,7 @@ import { RecolhaDeAssiduidade, useCalculoRealDaPessoa, useCalculoRealDoMes, type
 
 const pessoa = (id: string, estadoRegisto = "activo") => ({ id, nome_completo: `Pessoa ${id}`, estado_registo: estadoRegisto });
 const retribuicao = (pessoaId: string, valor = 1200) => ({
-  pessoa_id: pessoaId, valor_base: valor, periodicidade: "mensal", duodecimos_pct: 0, subsidio_alimentacao: 5, valido_de: "2026-01-01", valido_ate: null,
+  pessoa_id: pessoaId, valor_base: valor, periodicidade: "mensal", duodecimos_pct: 0, valido_de: "2026-01-01", valido_ate: null,
 });
 const recolha = (extra: Partial<RecolhaAssiduidade> = {}): RecolhaAssiduidade =>
   ({ totais: estado.relatorio.totais, dias: [], incompleta: false, ...extra }) as unknown as RecolhaAssiduidade;
@@ -69,10 +79,13 @@ beforeEach(() => {
   estado.lancamentos = [];
   estado.retribuicoes = new Map([["p1", [retribuicao("p1")]], ["p2", [retribuicao("p2", 9999)]]]);
   estado.retribuicoesRecusadas = false;
+  estado.regra = null;
+  estado.direitos = new Map();
   estado.relatorio.loading = false;
   estado.relatorio.realizadoRecusado = false;
   estado.relatorio.faltasRecusadas = false;
   estado.relatorio.planeadoRecusado = false;
+  estado.relatorio.erro = false;
 });
 
 describe("useCalculoRealDoMes", () => {
@@ -89,6 +102,24 @@ describe("useCalculoRealDoMes", () => {
     expect(result.current.pendentes).toBe(0);
     // 1200 de base, sem faltas, sem dias para o subsidio: 1200. A retribuicao de p2 (9999) nunca entra em p1.
     expect(result.current.resultados.get("p1")?.resultado.totalBrutoEstimado).toBeCloseTo(1200, 6);
+  });
+
+  it("com regra, o subsidio vem dela dia a dia e o IHT so entra para quem tem o direito", () => {
+    estado.regra = {
+      subsidio_limite_min: 300, subsidio_valor_hora: 0.76, subsidio_valor_dia: 6.15,
+      he_pct_dia_util: 50, he_pct_feriado: 75, he_pct_descanso: 100, iht_pct: 25, noturnas: [],
+    };
+    estado.pessoas = [pessoa("p1"), pessoa("p3")];
+    estado.retribuicoes = new Map([["p1", [retribuicao("p1")]], ["p3", [retribuicao("p3")]]]);
+    estado.direitos = new Map([["p1", { iht: true, km: false, ajudas: false }]]);
+    const dias = [{ estado: "normal", realizadoMinutos: 480 }, { estado: "normal", realizadoMinutos: 270 }];
+    const { result } = renderHook(() => useCalculoRealDoMes(2026, 10));
+    act(() => result.current.registar("p1", recolha({ dias: dias as never })));
+    act(() => result.current.registar("p3", recolha({ dias: dias as never })));
+    // Um dia de 8 h = 6,15 EUR; um de 4 h 30 = 3,42 EUR.
+    expect(result.current.resultados.get("p1")?.resultado.subsidioAlimentacao).toBeCloseTo(6.15 + 3.42, 6);
+    expect(result.current.resultados.get("p1")?.resultado.linhasRegra.find((l) => l.tipo === "iht")?.valor).toBeCloseTo(300, 6);
+    expect(result.current.resultados.get("p3")?.resultado.linhasRegra.some((l) => l.tipo === "iht")).toBe(false);
   });
 
   it("os valores pontuais so contam os do periodo deste mes e os da pessoa, e os anulados ficam de fora", () => {
@@ -129,6 +160,24 @@ describe("useCalculoRealDoMes", () => {
     expect(result.current.resultados.get("p1")?.resultado.totalBrutoEstimado).toBeNull();
   });
 
+  it("um cargo com salario semanal (300 por semana) dá a base 300 x 52 / 12 = 1300, o valor hora e o IHT sobre essa base", () => {
+    estado.regra = {
+      subsidio_limite_min: 300, subsidio_valor_hora: 0.76, subsidio_valor_dia: 6.15,
+      he_pct_dia_util: 50, he_pct_feriado: 75, he_pct_descanso: 100, iht_pct: 25, noturnas: [],
+    };
+    estado.retribuicoes = new Map([["p1", [{ ...retribuicao("p1", 300), periodicidade: "semanal" }]]]);
+    estado.direitos = new Map([["p1", { iht: true, km: false, ajudas: false }]]);
+    const { result } = renderHook(() => useCalculoRealDoMes(2026, 10));
+    act(() => result.current.registar("p1", recolha()));
+    const calculo = result.current.resultados.get("p1");
+    expect(calculo?.periodicidade).toBe("semanal");
+    expect(calculo?.resultado.avisos).not.toContain("periodicidade_nao_convertivel");
+    expect(calculo?.resultado.baseMes).toBeCloseTo(1300, 6);
+    expect(calculo?.resultado.valorHoraReal).toBeCloseTo(8.125, 6); // 1300 / 160 h
+    expect(calculo?.resultado.linhasRegra.find((l) => l.tipo === "iht")?.valor).toBeCloseTo(325, 6);
+    expect(calculo?.resultado.totalBrutoEstimado).toBeCloseTo(1300 + 325, 6);
+  });
+
   it("devolve o erro de carregar as pessoas em vez de uma lista vazia calada", () => {
     estado.pessoas = [];
     estado.pessoasErro = "falha ao ler";
@@ -164,6 +213,30 @@ describe("RecolhaDeAssiduidade", () => {
   });
 });
 
+describe("leitura falhada da assiduidade (erro, nao permissao)", () => {
+  it("uma leitura que falhou chega marcada como incompleta (nunca como linhas vazias boas)", () => {
+    estado.relatorio.erro = true;
+    const registar = vi.fn();
+    render(<RecolhaDeAssiduidade calculo={{ pessoasActivas: [pessoa("p1")], registar, intervalo: { de: "2026-10-01", ate: "2026-10-31", estimado: false } } as never} ano={2026} mes={10} />);
+    expect(registar).toHaveBeenCalledWith("p1", expect.objectContaining({ incompleta: true }));
+  });
+
+  it("a ficha da pessoa tambem a marca incompleta", () => {
+    estado.relatorio.erro = true;
+    const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10));
+    expect(result.current.incompleta).toBe(true);
+  });
+
+  it("assiduidadeIncompleta(id) diz que pessoas ficaram incompletas (bloqueia o fecho)", () => {
+    const { result } = renderHook(() => useCalculoRealDoMes(2026, 10));
+    act(() => {
+      result.current.registar("p1", recolha({ incompleta: true }));
+    });
+    expect(result.current.assiduidadeIncompleta("p1")).toBe(true);
+    expect(result.current.assiduidadeIncompleta("p2")).toBe(false);
+  });
+});
+
 describe("useCalculoRealDaPessoa", () => {
   it("calcula o total da pessoa quando tudo chegou", () => {
     const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10));
@@ -171,6 +244,13 @@ describe("useCalculoRealDaPessoa", () => {
     expect(result.current.resultado?.resultado.totalBrutoEstimado).toBeCloseTo(1200, 6);
     expect(result.current.temPeriodo).toBe(true);
     expect(result.current.periodoAberto).toBe(true);
+  });
+
+  it("a pessoa com cargo semanal tem o total pela conversao semanal x 52 / 12", () => {
+    estado.retribuicoes = new Map([["p1", [{ ...retribuicao("p1", 300), periodicidade: "semanal" }]]]);
+    const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10));
+    expect(result.current.resultado?.periodicidade).toBe("semanal");
+    expect(result.current.resultado?.resultado.totalBrutoEstimado).toBeCloseTo(1300, 6);
   });
 
   it("enquanto a assiduidade carrega nao ha resultado", () => {

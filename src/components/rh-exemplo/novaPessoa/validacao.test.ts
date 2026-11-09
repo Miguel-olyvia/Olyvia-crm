@@ -15,7 +15,7 @@ function minimo(): ValoresNovaPessoa {
   v = comPatch(v, "geral", { primeiro_nome: "Ana", apelido: "Sousa" });
   v = comPatch(v, "laborais", { cargo_id: "cargo-1" });
   v = comPatch(v, "pessoais", { telefone_pessoal: "+351912345678" });
-  return comPatch(v, "contrato", { tipo_contrato: "sem_termo", subsidio: "0", duodecimos_pct: "50" });
+  return comPatch(v, "contrato", { tipo_contrato: "sem_termo", duodecimos_pct: "50" });
 }
 
 const ids = (v: ValoresNovaPessoa, o: OpcoesValidacao = SEM_CONFIG): string[] => problemasDaNova(v, o).map((p) => p.campoId);
@@ -25,9 +25,9 @@ describe("problemasDaNova: campos do RH e nome", () => {
     expect(ids(minimo())).toEqual([]);
   });
 
-  it("pede o nome, o cargo e os campos só do RH (tipo de contrato, subsídio e duodécimos)", () => {
+  it("pede o nome, o cargo e os campos só do RH (tipo de contrato e duodécimos; o subsídio vem da regra da organização)", () => {
     expect(ids(valoresIniciais(HOJE))).toEqual([
-      "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-tipo-contrato", "hr-novo-subsidio", "hr-novo-duodecimos",
+      "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-tipo-contrato", "hr-novo-duodecimos",
     ]);
   });
 
@@ -36,9 +36,9 @@ describe("problemasDaNova: campos do RH e nome", () => {
     expect(ids(comPatch(minimo(), "laborais", { data_admissao: "2026-02-31" }))).toEqual(["hr-novo-data-admissao"]);
   });
 
-  it("o subsídio 0 conta como resposta, e um subsídio negativo é erro", () => {
+  it("o subsídio já não é campo do formulário", () => {
+    expect(ids(valoresIniciais(HOJE))).not.toContain("hr-novo-subsidio");
     expect(ids(minimo())).not.toContain("hr-novo-subsidio");
-    expect(ids(comPatch(minimo(), "contrato", { subsidio: "-3" }))).toContain("hr-novo-subsidio");
   });
 
   it("num contrato a termo certo o fim é obrigatório e não pode ser antes do início", () => {
@@ -162,7 +162,7 @@ describe("resumo e foco", () => {
     const problemas = problemasDaNova(v, SEM_CONFIG);
     const resumo = resumoDeProblemas(problemas);
     expect(resumo.total).toBe(problemas.length);
-    expect(resumo.porAba).toMatchObject({ dados: 2, contacto: 1, contrato: 2, retribuicao: 2, outros: 1, acesso: 0 });
+    expect(resumo.porAba).toMatchObject({ dados: 2, contacto: 1, contrato: 2, retribuicao: 1, outros: 1, acesso: 0 });
     expect(primeiroProblema(problemas)?.campoId).toBe("hr-novo-primeiro-nome");
     expect(abaDoCampo("hr-novo-iban-que-nao-existe")).toBe("dados");
   });
@@ -171,7 +171,7 @@ describe("resumo e foco", () => {
 describe("idsObrigatorios", () => {
   it("o RH preenche: os fixos mais os da configuração; a enviar convite: só os fixos e o e-mail pessoal", () => {
     const agora = idsObrigatorios(minimo(), COM_CONFIG);
-    expect(agora.has("hr-novo-cargo") && agora.has("hr-novo-data-admissao") && agora.has("hr-novo-subsidio")).toBe(true);
+    expect(agora.has("hr-novo-cargo") && agora.has("hr-novo-data-admissao") && agora.has("hr-novo-duodecimos")).toBe(true);
     expect(agora.has("hr-novo-nif") && agora.has("hr-novo-genero")).toBe(true);
     const convite = idsObrigatorios(minimo(), { ...COM_CONFIG, comConvite: true });
     expect(convite.has("hr-novo-genero")).toBe(false);

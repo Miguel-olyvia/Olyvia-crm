@@ -111,6 +111,7 @@ import { useFimDoContratoPorMeses } from "@/hooks/useFimDoContratoPorMeses";
 import { problemasDosNumerosDoContrato } from "@/lib/hr/contrato";
 import { PessoaVinculoHorasCard } from "@/components/hr/PessoaVinculoHorasCard";
 import { PessoaRetribuicaoCard } from "@/components/hr/PessoaRetribuicaoCard";
+import { CartaoDireitosSalariais } from "@/components/hr/ficha/CartaoDireitosSalariais";
 import type { PessoaRetribuicao, PessoaVinculo, TipoTrabalho } from "@/types/hr";
 import type { HrCargo } from "@/hooks/useCargos";
 import type { HrCargoPeriodo } from "@/lib/hr/cargosPeriodos";
@@ -257,7 +258,6 @@ export function PessoaContratoTab({
         horas: rascunho.horas_periodo,
         horas_frequencia: rascunho.horas_frequencia,
         horas_semanais_maximas: rascunho.horas_semanais_maximas,
-        horas_anuais_maximas: rascunho.horas_anuais_maximas,
         tempo_trabalho_pct: rascunho.tempo_trabalho_pct,
         periodo_experimental_dias: rascunho.periodo_experimental_dias,
       }),
@@ -335,7 +335,6 @@ export function PessoaContratoTab({
       // antigo, de antes desta regra), a partir do primeiro guardar.
       tempo_trabalho_pct: 100,
       politica_feriados: rascunho.politica_feriados,
-      horas_anuais_maximas: numeroOuNull(rascunho.horas_anuais_maximas),
       horas_semanais_maximas: numeroOuNull(rascunho.horas_semanais_maximas),
       dias_uteis: rascunho.dias_uteis.length > 0 ? rascunho.dias_uteis : null,
       categoria_profissional: textoOuNull(rascunho.categoria_profissional),
@@ -422,6 +421,10 @@ export function PessoaContratoTab({
           periodosError={periodosError}
           onMudou={onRetribuicaoMudou}
         />
+      )}
+
+      {podeVerRetribuicao && (
+        <CartaoDireitosSalariais pessoaId={pessoaId} organizationId={organizationId} podeAlterar={podeEditarRetribuicao} />
       )}
 
       <PessoaVinculoHorasCard

@@ -9,11 +9,6 @@ vi.mock("@/components/rh-exemplo/hooks/usePrazoJustificacao", async () => (await
 vi.mock("@/components/rh-exemplo/hooks/horasExtraReal", async () => (await import("@/test/horasExtraFalso")).wrapperFalso());
 vi.mock("@/components/rh-exemplo/hooks/usePermissoesAssiduidade", async () => (await import("@/test/horasExtraFalso")).permissoesFalsas());
 
-// O limite anual da pessoa vem do contrato real; aqui, sem base, vale o limite por omissão da organização.
-vi.mock("@/components/rh-exemplo/fluxosC/limitePessoa", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/components/rh-exemplo/fluxosC/limitePessoa")>()),
-  useLimiteAnualMin: (_pessoaId: string, omissaoMin: number) => omissaoMin,
-}));
 // A base e simulada como nos outros testes do rh-exemplo (mesmo conjunto do justificacaoDia.test): sem CompanyProvider e sem chamadas.
 vi.mock("@/contexts/CompanyContext", async () => (await import("@/test/rhExemploProviders")).moduloCompanyFalso());
 vi.mock("@/contexts/PermissionsContext", async () => (await import("@/test/rhExemploProviders")).moduloPermissoesFalso());

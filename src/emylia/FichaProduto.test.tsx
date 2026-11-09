@@ -238,3 +238,27 @@ describe("FichaProduto · fotos (03/11)", () => {
     expect(screen.queryByRole("list", { name: /^Fotos de/ })).toBeNull();
   });
 });
+
+describe("FichaProduto · sem products.view_cost (05/11)", () => {
+  it("mostra o PVP mas não o custo, a margem nem o preço dos fornecedores", async () => {
+    base.respostas.cat_produto_fornecedores = { data: [LIGADO], error: null };
+    ficha(PROD, { ...real(), podeVerCusto: false });
+    expect(screen.getByTestId("venda-produto")).toHaveTextContent("100");
+    expect(screen.queryByTestId("margem-produto")).toBeNull();
+    expect(screen.queryByText(/Custo por un/)).toBeNull();
+    expect(screen.getByText(/Sem permissão para ver o custo de compra e a margem/)).toBeInTheDocument();
+    const linha = (await screen.findByText("Fornecedor A")).closest("tr") as HTMLElement;
+    expect(within(linha).queryByText(/60/)).toBeNull();
+    expect(within(linha).getByTitle("Sem permissão: products.view_cost")).toHaveTextContent("—");
+  });
+  it("com a permissão (ou sem valor, como antes) mostra o custo e a margem", async () => {
+    ficha(PROD, { ...real(), podeVerCusto: true });
+    expect(screen.getByTestId("margem-produto")).toBeInTheDocument();
+    expect(screen.getByText(/Custo por un/)).toBeInTheDocument();
+  });
+  it("consumível sem a permissão não mostra o custo", () => {
+    render(<FichaProduto tipo="consumivel" p={PROD} min={28} alvo={35} voltar={vi.fn()} anunciar={vi.fn()} nomeServico={(s) => s} onAbrirServico={vi.fn()} real={{ ...real(), podeVerCusto: false }} />);
+    expect(screen.getByTestId("sem-custo")).toBeInTheDocument();
+    expect(screen.queryByText(/60,00 €\/un|60 €\/un/)).toBeNull();
+  });
+});

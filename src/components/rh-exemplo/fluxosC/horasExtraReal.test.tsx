@@ -1,11 +1,10 @@
 // Horas extra ligadas à base (Supabase simulado nos wrappers): os coeficientes de pagamento são os códigos de
-// processamento da organização e o limite anual da pessoa é o «Horas anuais máximas» do contrato.
+// processamento da organização (o limite anual é da regra salarial, não é testado aqui).
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { rhExemploHorasExtraRealTranslations } from "@/translations/rhExemploHorasExtraReal";
 import { CoeficientesHorasExtraReais, codigoDaOrigem, percentagemValida } from "./CoeficientesHorasExtraReais";
-import { limiteAnualMin, useLimiteAnualDaPessoa, useLimiteAnualMin } from "./limitePessoa";
 
 const m = vi.hoisted(() => ({
   codigos: [] as unknown[],
@@ -14,7 +13,6 @@ const m = vi.hoisted(() => ({
   actualizar: vi.fn(),
   permissoes: new Set<string>(),
   permissoesALoad: false,
-  pessoa: { vinculos: [] as unknown[], loading: false, error: null as string | null },
   toastErro: vi.fn(),
   toastSucesso: vi.fn(),
 }));
@@ -29,7 +27,6 @@ vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
     hasPermission: (p: string) => m.permissoes.has(p), hasAnyPermission: () => true, permissions: [], loading: m.permissoesALoad,
   }),
 }));
-vi.mock("@/components/rh-exemplo/hooks/usePessoa", () => ({ usePessoa: () => m.pessoa }));
 vi.mock("@/lib/toast", () => ({ toast: { error: (...a: unknown[]) => m.toastErro(...a), success: (...a: unknown[]) => m.toastSucesso(...a) } }));
 vi.mock("@/utils/friendlyError", () => ({ getFriendlyErrorMessage: async () => "mensagem amigavel" }));
 
@@ -48,7 +45,6 @@ beforeEach(() => {
   m.actualizar = vi.fn().mockResolvedValue(undefined);
   m.permissoes = new Set(["hr.vencimento.codigos.view", "hr.vencimento.codigos.gerir"]);
   m.permissoesALoad = false;
-  m.pessoa = { vinculos: [], loading: false, error: null };
   m.toastErro.mockClear();
   m.toastSucesso.mockClear();
 });
@@ -163,42 +159,4 @@ describe("coeficientes das horas extra: códigos de processamento reais", () => 
   });
 });
 
-describe("limite anual da pessoa: o «Horas anuais máximas» do contrato", () => {
-  const v = (over: Record<string, unknown>) => ({ data_inicio: "2026-01-01", estado: "activo", horas_anuais_maximas: 100, ...over });
 
-  it("a regra pura continua: vigente activo, senão o mais recente, senão a omissão", () => {
-    expect(limiteAnualMin(undefined, 9000)).toBe(9000);
-    expect(limiteAnualMin(null, 9000)).toBe(9000);
-    expect(limiteAnualMin({ vinculos: [] }, 9000)).toBe(9000);
-    expect(limiteAnualMin({ vinculos: [v({ horas_anuais_maximas: null })] as never }, 9000)).toBe(9000);
-    expect(limiteAnualMin({ vinculos: [v({ horas_anuais_maximas: 0 })] as never }, 9000)).toBe(9000);
-    expect(limiteAnualMin({ vinculos: [v({})] as never }, 9000)).toBe(6000);
-    expect(limiteAnualMin({ vinculos: [v({ estado: "terminado", data_inicio: "2027-01-01", horas_anuais_maximas: 50 }), v({})] as never }, 9000)).toBe(6000);
-    expect(limiteAnualMin({ vinculos: [v({ estado: "terminado", horas_anuais_maximas: 50 })] as never }, 9000)).toBe(3000);
-  });
-
-  it("lê o limite do contrato real da pessoa", () => {
-    m.pessoa = { vinculos: [v({})], loading: false, error: null };
-    const { result } = renderHook(() => useLimiteAnualDaPessoa("p1", 9000));
-    expect(result.current).toEqual({ limiteMin: 6000, origem: "contrato", aCarregar: false, erro: null });
-    expect(renderHook(() => useLimiteAnualMin("p1", 9000)).result.current).toBe(6000);
-  });
-
-  it("sem limite no contrato vale a omissão da organização e diz que veio dela", () => {
-    m.pessoa = { vinculos: [v({ horas_anuais_maximas: null })], loading: false, error: null };
-    const { result } = renderHook(() => useLimiteAnualDaPessoa("p1", 9000));
-    expect(result.current).toMatchObject({ limiteMin: 9000, origem: "omissao", erro: null });
-  });
-
-  it("enquanto carrega não finge um limite do contrato", () => {
-    m.pessoa = { vinculos: [v({})], loading: true, error: null };
-    const { result } = renderHook(() => useLimiteAnualDaPessoa("p1", 9000));
-    expect(result.current).toMatchObject({ limiteMin: 9000, origem: "omissao", aCarregar: true });
-  });
-
-  it("se a leitura da ficha falhar devolve o erro para o ecrã o mostrar", () => {
-    m.pessoa = { vinculos: [], loading: false, error: "falhou a ler" };
-    const { result } = renderHook(() => useLimiteAnualDaPessoa("p1", 9000));
-    expect(result.current).toMatchObject({ limiteMin: 9000, origem: "omissao", erro: "falhou a ler" });
-  });
-});

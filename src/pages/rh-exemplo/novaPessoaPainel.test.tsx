@@ -100,9 +100,24 @@ async function preencherMinimo() {
   await escolher(/^Cargo/, /Vendedor/);
   await escolher(/^Tipo de contrato/, /Sem termo/);
   irParaAba(/Retribuição e bancário/);
-  escrever("hr-novo-subsidio", "7,63");
   await escolher(/^Subsidios em duodecimos/, /^50 %/);
 }
+
+describe("Nova pessoa: permissões do botão", () => {
+  it("só com hr.pessoas.create (sem hr.pessoas.view) não há «Nova pessoa»: a base não devolve o id da pessoa criada", () => {
+    rhTeste.isSystemAdmin = false;
+    rhTeste.permissoes = new Set(["hr.pessoas.create", "hr.pessoas.view.own"]);
+    renderLista();
+    expect(screen.queryByRole("button", { name: "Nova pessoa" })).not.toBeInTheDocument();
+  });
+
+  it("com hr.pessoas.create e hr.pessoas.view há «Nova pessoa»", () => {
+    rhTeste.isSystemAdmin = false;
+    rhTeste.permissoes = new Set(["hr.pessoas.create", "hr.pessoas.view"]);
+    renderLista();
+    expect(screen.getByRole("button", { name: "Nova pessoa" })).toBeInTheDocument();
+  });
+});
 
 describe("RH de exemplo: Nova pessoa em painel lateral", () => {
   it("abre o painel com migalhas, selo, seis abas e o rodapé com um só botão primário", () => {
@@ -143,7 +158,7 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
       [/Dados pessoais/, ["hr-novo-nome-tratamento", "hr-novo-genero", "hr-novo-nacionalidade", "hr-novo-estado-civil", "hr-novo-dependentes", "hr-novo-data-nascimento", "hr-novo-naturalidade-concelho", "hr-novo-tipo-documento", "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero", "hr-novo-conta"]],
       [/Contacto e morada/, ["hr-novo-email-pessoal", "hr-novo-telefone-pessoal", "hr-novo-morada-linha2", "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-telefone-alt"]],
       [/Contrato e local/, ["hr-novo-local", "hr-novo-reporta-a", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-horas-trabalho", "hr-novo-politica-feriados"]],
-      [/Retribuição e bancário/, ["hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic"]],
+      [/Retribuição e bancário/, ["hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic"]],
       [/Outros dados/, ["hr-novo-habilitacao", "hr-novo-saude-incapacidade", "hr-novo-sindicalizado", "hr-novo-tamanho-cima", "hr-novo-tamanho-calcado"]],
       [/Acesso e convite/, ["hr-novo-criar-acesso", "hr-novo-papel", "hr-novo-email-acesso"]],
     ];

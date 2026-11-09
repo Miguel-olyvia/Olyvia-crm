@@ -105,7 +105,8 @@ export function InternalChatWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 z-[500] h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all duration-200 hover:scale-105 flex items-center justify-center"
+          aria-label="Conversas da equipa"
+          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[500] h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all duration-200 hover:scale-105 flex items-center justify-center"
         >
           <MessageCircle className="h-6 w-6" />
           {totalUnread > 0 && (
@@ -118,7 +119,7 @@ export function InternalChatWidget() {
 
       {/* Chat Panel */}
       {open && (
-        <div className="fixed bottom-6 right-6 z-[500] w-[360px] h-[500px] rounded-2xl bg-background border border-border shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
+        <div className="fixed inset-x-2 bottom-2 top-16 sm:inset-auto sm:bottom-6 sm:right-6 z-[500] sm:w-[360px] sm:h-[500px] rounded-2xl bg-background border border-border shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
           {/* Header */}
           <div className="flex items-center gap-2 p-3 border-b bg-primary text-primary-foreground rounded-t-2xl">
             {view === "conversation" && (

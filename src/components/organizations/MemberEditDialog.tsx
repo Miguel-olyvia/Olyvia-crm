@@ -92,6 +92,8 @@ export function MemberEditDialog({
   const { hasPermission } = usePermissions();
   // O que o servidor pede para gravar o membro: users.edit (anew_users_update e anew_memberships_update).
   const canManage = hasPermission("users.edit");
+  // Mudar o papel pede users.manage_roles (o servidor exige-a desde 20270109400000); sem ela o papel só se vê.
+  const podeMudarPapel = hasPermission("users.manage_roles");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
@@ -749,7 +751,7 @@ export function MemberEditDialog({
                     </div>
                     <div className="space-y-2">
                       <Label>{t("organizations.role")}</Label>
-                      <Select value={selectedRoleId} onValueChange={setSelectedRoleId} disabled={isSelfMember}>
+                      <Select value={selectedRoleId} onValueChange={setSelectedRoleId} disabled={isSelfMember || !podeMudarPapel}>
                         <SelectTrigger>
                           <SelectValue placeholder={t("users.selectRole")} />
                         </SelectTrigger>

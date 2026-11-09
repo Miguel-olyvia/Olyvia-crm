@@ -76,7 +76,6 @@ const DINAMICAS: string[] = [
   ...comPrefixo("hr.horasFrequencia", HORAS_FREQUENCIAS),
   ...comPrefixo("hr.politicaFeriados", POLITICAS_FERIADOS),
   ...comPrefixo("rhNova.simNao", ["sim", "nao"]),
-  ...comPrefixo("rhNova.modo", ["dinheiro", "cartao"]),
   ...comPrefixo("rhNova.duodecimos", ["0", "50", "100"]),
   ...comPrefixo("hr.form.seccoes", ["saude", "sindicalizacao", "anexos", "bancarios", "emergencia", "vinculo", "retribuicao", "conta"]),
   ...comPrefixo("hr.fimContrato.resposta", ["pretendo_continuar", "nao_pretendo_continuar", "ainda_por_decidir"]),

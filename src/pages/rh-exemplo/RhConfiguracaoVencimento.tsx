@@ -59,6 +59,7 @@ import type {
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { ConfiguracaoHorasExtra } from "@/components/rh-exemplo/fluxosC/ConfiguracaoHorasExtra";
+import { SeccaoRegrasSalariais } from "@/components/rh-exemplo/hooks/regrasSalariaisReal";
 import { Ban, Loader2, Pencil, Plus, RotateCcw, Tag } from "lucide-react";
 
 /** Os 4 modos, na ordem em que aparecem no Select. */
@@ -636,6 +637,9 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
                   : "hr.vencimento.subsidio.minutosMinimosAjuda",
               )}
             </p>
+            <p className="text-sm text-muted-foreground" data-testid="subsidio-nota-regra-organizacao">
+              {t("hr.vencimento.subsidio.notaRegraOrganizacao")}
+            </p>
 
             {podeGerir && (
               <div className="flex justify-end">
@@ -656,6 +660,8 @@ export default function RhConfiguracaoVencimento() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
+  // A aba escolhida: `null` = a de omissão. Controlada para a ligação das horas extra poder levar às regras salariais.
+  const [aba, setAba] = useState<string | null>(null);
 
   const podeVerCodigos = hasPermission("hr.vencimento.codigos.view");
   const podeGerirCodigos = hasPermission("hr.vencimento.codigos.gerir");
@@ -675,7 +681,7 @@ export default function RhConfiguracaoVencimento() {
         <p className="text-muted-foreground">{t("hr.vencimento.subtituloPagina")}</p>
       </div>
 
-      <Tabs defaultValue={abaOmissao}>
+      <Tabs value={aba ?? abaOmissao} onValueChange={setAba}>
         <TabsList>
           {podeVerCodigos && (
             <TabsTrigger value="codigos">{t("hr.vencimento.abaCodigos")}</TabsTrigger>
@@ -683,6 +689,7 @@ export default function RhConfiguracaoVencimento() {
           {podeVerSubsidio && (
             <TabsTrigger value="subsidio">{t("hr.vencimento.abaSubsidio")}</TabsTrigger>
           )}
+          <TabsTrigger value="regras">{t("hr.vencimento.abaRegrasSalariais")}</TabsTrigger>
           <TabsTrigger value="horas-extra">{t("rhFluxosD.cfg.aba")}</TabsTrigger>
         </TabsList>
 
@@ -697,8 +704,12 @@ export default function RhConfiguracaoVencimento() {
           </TabsContent>
         )}
 
+        <TabsContent value="regras" className="mt-4">
+          <SeccaoRegrasSalariais podeGerir={podeGerirCodigos} />
+        </TabsContent>
+
         <TabsContent value="horas-extra" className="mt-4">
-          <ConfiguracaoHorasExtra />
+          <ConfiguracaoHorasExtra aoIrParaRegrasSalariais={() => setAba("regras")} />
         </TabsContent>
       </Tabs>
     </div>

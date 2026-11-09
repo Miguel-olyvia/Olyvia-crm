@@ -40,15 +40,24 @@ export interface ValorHora {
 
 const VALOR_DO_DOCUMENTO = 6.25;
 
+/** O ordenado mensal equivalente de uma retribuicao em aberto: mensal, semanal (x 52 / 12) ou anual (/ 12); as outras nao se convertem aqui. */
+function valorMensalDe(r: { valor_base: number; periodicidade: string }): number | null {
+  if (r.periodicidade === "mensal") return r.valor_base;
+  if (r.periodicidade === "semanal") return (r.valor_base * 52) / 12;
+  if (r.periodicidade === "anual") return r.valor_base / 12;
+  return null;
+}
+
 export function valorHoraDaFicha(ficha: FichaRh | null | undefined): ValorHora {
-  const retribuicao = ficha?.retribuicoes.find((r) => r.valido_ate === null && r.periodicidade === "mensal");
+  const aberta = ficha?.retribuicoes.find((r) => r.valido_ate === null);
+  const valorMensal = aberta ? valorMensalDe(aberta) : null;
   const horas = ficha?.horasVersoes.find((h) => h.valido_ate === null)?.horas_semanais_equivalentes ?? null;
-  if (!retribuicao || !horas || horas <= 0) {
+  if (valorMensal === null || !horas || horas <= 0) {
     return { valorHora: VALOR_DO_DOCUMENTO, valorMensal: null, horasSemanais: null, porOmissao: true };
   }
   return {
-    valorHora: valorHoraDeExemplo(retribuicao.valor_base, horas),
-    valorMensal: retribuicao.valor_base,
+    valorHora: valorHoraDeExemplo(valorMensal, horas),
+    valorMensal,
     horasSemanais: horas,
     porOmissao: false,
   };

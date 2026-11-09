@@ -700,7 +700,8 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
       ))}
       {corr.map((t) => <LinhaAgora key={"c" + p.tasks.indexOf(t)} I={FileWarning} tom="mau" titulo={`${nomeCurtoTarefa(t.nome)}: correção pedida`} texto={`À espera de ${primeiro(t.tec)}${t.exec?.motivo ? ` · ${t.exec.motivo}` : ""}`} />)}
       {nada && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Nada à espera de si.</p>}
-      {ctx.S.role === "operacoes" && (registar
+      {/* 6/11 (permissões): o papel E a permissão (negocios.obra.executar ou negocios.obra.imprevistos, como no motor) */}
+      {ctx.S.role === "operacoes" && (podeNeg(ctx.S.role, "obra.executar") || podeNeg(ctx.S.role, "obra.imprevistos")) && (registar
         ? <RegistarImprevisto ctx={ctx} d={d} fechar={() => setRegistar(false)} />
         : <button type="button" onClick={() => setRegistar(true)} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Registar imprevisto</button>)}
       {/* 27/10: no ecrã largo o painel ao lado já mostra as próximas tarefas */}
@@ -724,7 +725,8 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
 
 /** 23/10: validar várias de uma vez: a lista das tarefas feitas, todas marcadas, e um botão. Só as Operações. */
 function ValidarVarias({ ctx, d, PV }: { ctx: Ctx; d: Negocio; PV: number[] }) {
-  const p = d.obra.plano!, pode = ctx.S.role === "operacoes";
+  // 6/11 (permissões): o papel E negocios.obra.planear (validar é de quem planeia, como no motor e no servidor)
+  const p = d.obra.plano!, pode = ctx.S.role === "operacoes" && podeNeg(ctx.S.role, "obra.planear");
   const feitas = PV.filter((ti) => estadoDe(p.tasks[ti]) === "feita");
   const [aberto, setAberto] = useState(false);
   const [marc, setMarc] = useState<number[]>(feitas);
@@ -782,7 +784,8 @@ function LinhaAgora({ I, tom, titulo, texto, acao, fazer }: { I: typeof Check; t
 function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx; d: Negocio; aberta: number | null; setAberta: (i: number | null) => void; muda: boolean; sel?: number | null; setSel?: (k: number) => void }) {
   const { S, A, run } = ctx;
   // 21/10: com a obra em curso, as Operações ajustam ao vivo (AjustarAoVivo), com o motivo e o aviso ao cliente
-  const vivo = d.obra.plano!.estado === "em curso" && S.role === "operacoes";
+  // 6/11 (permissões): o papel E negocios.obra.planear (A.ajustarAoVivo pede-a); sem ela, a tarefa abre só para ver
+  const vivo = d.obra.plano!.estado === "em curso" && S.role === "operacoes" && podeNeg(S.role, "obra.planear");
   const p = d.obra.plano!, C = conflitos(p), novo = p.origem === "orcamento";
   const fim = Math.max(1, fimDe(p.tasks)), nd = fim;
   const caixa = useRef<HTMLDivElement>(null);
@@ -1201,7 +1204,8 @@ function Registo({ ctx, d, ti, compacto }: { ctx: Ctx; d: Negocio; ti: number; c
 /* ------------------------------------------------------------------ 21/10: o acompanhamento (o gestor vê tudo aqui; o técnico faz pelo Hoje dele) */
 function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio; sel: number; setSel: (k: number) => void; ajustar: (ti: number) => void }) {
   const { S, A, run, go } = ctx;
-  const p = d.obra.plano!, fim = fimDe(p.tasks), pode = S.role === "operacoes";
+  // 6/11 (permissões): ajustar o plano, mudar o dia e dar por feita pedem o papel E negocios.obra.planear; validar (o Registo) só a permissão
+  const p = d.obra.plano!, fim = fimDe(p.tasks), pode = S.role === "operacoes" && podeNeg(S.role, "obra.planear"), podeValidar = podeNeg(S.role, "obra.planear");
   // 23/10: na 2.0 o dia é o do calendário (motor: diaReal); no protótipo, o relógio à mão
   const real = comRelogioReal() ? diaReal(p) : null;
   const [hist, setHist] = useState<number | null>(null);
@@ -1259,7 +1263,7 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
             <>
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2">
                 <button type="button" onClick={() => setHist(aberto ? null : ti)} aria-expanded={aberto} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
-                  {aberto ? "Fechar" : ex === "feita" ? "Rever e validar" : `Histórico (${enviosDe(t).length})`}
+                  {aberto ? "Fechar" : ex === "feita" ? (podeValidar ? "Rever e validar" : "Ver registo") : `Histórico (${enviosDe(t).length})`}
                 </button>
               </div>
               {/* 27/10: à vista só a 1.ª ação; as outras ficam dentro do bloco aberto */}

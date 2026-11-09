@@ -6,6 +6,15 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { Eye, Lock, Plus, TriangleAlert } from "lucide-react";
+import type { ResultadoProcessamentoPessoa } from "@/components/rh-exemplo/lib/processamentoTotais";
+import {
+  construirResultadosDoFecho,
+  motivoDeBloqueioDoFecho,
+  resultadoDeLinhaGravada,
+  usePessoasObrigatoriasDoFecho,
+  useProcessamentoResultados,
+} from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
+import { BannerFechoGravado } from "@/components/rh-exemplo/hooks/BannerFechoGravado";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -18,18 +27,31 @@ import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { euros, dataCurta, nomeDoMes } from "./formatosC";
 import { FecharReabrirMes } from "./FecharReabrirMes";
+import { KmAjudasDialog } from "./KmAjudasDialog";
 import { AnularLancamentoDialog, PontualDialog } from "./PontualDialog";
+import { direitosDaPessoa } from "@/components/rh-exemplo/hooks/useDireitosSalariaisDaOrganizacao";
 import { ProcessamentoDetalheDialog } from "./ProcessamentoDetalheDialog";
 
-const COLUNAS_NUMERICAS = ["base", "codigos", "faltas", "subsidios", "pontuais", "total"] as const;
+const COLUNAS_NUMERICAS = ["base", "codigos", "faltas", "subsidios", "regras", "pontuais", "total"] as const;
 const CHAVE_COLUNA: Record<(typeof COLUNAS_NUMERICAS)[number], string> = {
   base: "rhFluxosC.proc.coluna.base",
   codigos: "rhProcReal.coluna.codigos",
   faltas: "rhProcReal.coluna.faltas",
   subsidios: "rhFluxosC.proc.coluna.subsidios",
+  regras: "rhFluxosC.proc.coluna.regras",
   pontuais: "rhFluxosC.proc.coluna.pontuais",
   total: "rhFluxosC.proc.coluna.total",
 };
+
+/** O que a tabela e o detalhe mostram de uma pessoa: o calculo de agora (periodo aberto) ou o resultado gravado (fechado). */
+interface LinhaMostrada {
+  resultado: ResultadoProcessamentoPessoa;
+  valorBase: number | null;
+  periodicidade: string | null;
+  mudouAMeioDoMes: boolean;
+  /** So existe no calculo de agora; o resultado gravado nao guarda os totais da assiduidade. */
+  totais?: { planeadoMinutos: number };
+}
 
 export function ProcessamentoFluxoTab() {
   const { t } = useTranslation();
@@ -40,6 +62,7 @@ export function ProcessamentoFluxoTab() {
   const calculo = useCalculoRealDoMes(ano, mesNum);
   const [detalhe, setDetalhe] = useState<{ id: string; nome: string } | null>(null);
   const [pontual, setPontual] = useState<{ id: string; nome: string } | null>(null);
+  const [kmAjudas, setKmAjudas] = useState<{ id: string; nome: string } | null>(null);
   const [paraAnular, setParaAnular] = useState<HrProcessamentoLancamento | null>(null);
   const estadoDoMesRef = useRef<HTMLParagraphElement>(null);
 
@@ -50,8 +73,64 @@ export function ProcessamentoFluxoTab() {
   const { periodoHook, lancamentosHook, retribuicoesHook, resultados, pessoasActivas } = calculo;
   const { periodo } = periodoHook;
   const fechado = periodo?.estado === "fechado";
-  const semRetribuicoes = retribuicoesHook.recusado;
-  const total = useMemo(() => totalDoMes(resultados.values()), [resultados]);
+  // Um periodo fechado LE o que ficou gravado e nao recalcula (nem pede a assiduidade).
+  const leitura = useProcessamentoResultados(periodo?.id, fechado);
+  const semRetribuicoes = fechado ? leitura.estado === "recusado" : retribuicoesHook.recusado;
+  // Os valores gravados sao definitivos: os direitos de agora nao os tornam provisorios.
+  const direitosLidos = fechado || calculo.direitosLidos;
+  const idAvisoDireitos = "proc-aviso-direitos";
+  const idsActivas = useMemo(() => pessoasActivas.map((p) => p.id), [pessoasActivas]);
+  const { obrigatorias, estado: estadoVinculos } = usePessoasObrigatoriasDoFecho(idsActivas, calculo.intervalo.de, calculo.intervalo.ate);
+
+  const gravados = useMemo(() => {
+    const mapa = new Map<string, LinhaMostrada>();
+    for (const [id, linha] of leitura.porPessoa) {
+      mapa.set(id, { resultado: resultadoDeLinhaGravada(linha), valorBase: null, periodicidade: null, mudouAMeioDoMes: false });
+    }
+    return mapa;
+  }, [leitura.porPessoa]);
+  const resultadosMostrados: ReadonlyMap<string, LinhaMostrada> = fechado ? gravados : resultados;
+  const total = useMemo(() => totalDoMes(resultadosMostrados.values()), [resultadosMostrados]);
+  const pendentes = fechado ? 0 : calculo.pendentes;
+  const incompletas = fechado ? 0 : calculo.incompletas;
+  const semValoresGravados = fechado && (leitura.estado !== "ok" || leitura.antesDoRegisto);
+  const pessoasDaTabela = useMemo(() => {
+    if (!fechado) return pessoasActivas.map((p) => ({ id: p.id, nome_completo: p.nome_completo }));
+    const nomes = new Map((calculo.todasAsPessoas ?? pessoasActivas).map((p) => [p.id, p.nome_completo]));
+    return [...gravados.keys()]
+      .map((id) => ({ id, nome_completo: nomes.get(id) ?? t("rhProcReal.pessoaRemovida") }))
+      .sort((a, b) => a.nome_completo.localeCompare(b.nome_completo));
+  }, [fechado, pessoasActivas, calculo.todasAsPessoas, gravados, t]);
+
+  const motivoBloqueio = motivoDeBloqueioDoFecho({
+    direitosLidos: calculo.direitosLidos,
+    // O fecho grava para sempre: so avanca com as retribuicoes, os codigos e a assiduidade lidos por inteiro.
+    retribuicoes: retribuicoesHook.estado,
+    codigos: calculo.codigosEstado,
+    regras: calculo.regrasHook.isLoading ? "a_carregar" : calculo.regrasHook.estado,
+    vinculos: estadoVinculos,
+    pessoasObrigatorias: obrigatorias,
+    comCalculo: (id) => resultados.has(id),
+    assiduidadeIncompleta: calculo.assiduidadeIncompleta,
+  });
+  const textoBloqueio = motivoBloqueio
+    ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
+    : null;
+  // Fecha e GRAVA o resultado de cada pessoa obrigatoria, tal como o ecra o mostra agora.
+  const fecharComResultados = async (): Promise<string | null> => {
+    // Mesma porta do botao: o botao so e `aria-disabled`, por isso o clique nunca fecha com o motivo por resolver.
+    if (textoBloqueio) return textoBloqueio;
+    const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
+      pessoasObrigatorias: obrigatorias,
+      resultadoDe: (id) => resultados.get(id)?.resultado,
+      versoesDe: (id) => retribuicoesHook.porPessoa.get(id) ?? [],
+      lancamentosDe: (id) => calculo.lancamentosPorPessoa.get(id) ?? [],
+      dataFim: calculo.intervalo.ate,
+      regraSalarialId: calculo.regra?.id ?? null,
+    });
+    if (semCalculo.length > 0) return t("rhProcReal.fecho.bloqueio.calculo", { n: semCalculo.length });
+    return periodoHook.fechar(paraGravar);
+  };
 
   if (!podeVerPeriodo) return <SemAcessoCard className="m-0" />;
 
@@ -78,7 +157,8 @@ export function ProcessamentoFluxoTab() {
         {!aCarregar && (
           <FecharReabrirMes
             mes={mes} periodo={periodo} podeGerir={podeGerirPeriodo} aGravar={periodoHook.saving}
-            aoAbrir={depoisDeGravar(periodoHook.abrir)} aoFechar={depoisDeGravar(periodoHook.fechar)}
+            aoAbrir={depoisDeGravar(periodoHook.abrir)} aoFechar={depoisDeGravar(fecharComResultados)}
+            motivoBloqueio={textoBloqueio}
           />
         )}
       </div>
@@ -92,8 +172,14 @@ export function ProcessamentoFluxoTab() {
       {periodoHook.recusado && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.periodoRecusado")}</p>}
       {semRetribuicoes && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.retribuicaoRecusada")}</p>}
       {lancamentosHook.recusado && <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.lancamentosRecusados")}</p>}
-      {calculo.incompletas > 0 && (
-        <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: calculo.incompletas })}</p>
+      {!direitosLidos && (
+        <p id={idAvisoDireitos} role={calculo.direitosHook.estado === "erro" ? "alert" : "status"} className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
+        </p>
+      )}
+      {incompletas > 0 && (
+        <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: incompletas })}</p>
       )}
 
       {aCarregar ? (
@@ -107,7 +193,7 @@ export function ProcessamentoFluxoTab() {
         </Card>
       ) : (
         <>
-          <RecolhaDeAssiduidade calculo={calculo} ano={ano} mes={mesNum} />
+          {!fechado && <RecolhaDeAssiduidade calculo={calculo} ano={ano} mes={mesNum} />}
 
           {fechado ? (
             <p ref={estadoDoMesRef} tabIndex={-1} role="status" className="flex items-start gap-2 rounded-md border bg-muted/50 p-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -118,8 +204,12 @@ export function ProcessamentoFluxoTab() {
           ) : (
             <p ref={estadoDoMesRef} tabIndex={-1} className="text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("rhProcReal.periodoAberto", { mes: nomeDoMes(mes) })}</p>
           )}
-          {calculo.pendentes > 0 && <p role="status" className="text-sm text-muted-foreground">{t("rhProcReal.aCalcular", { n: calculo.pendentes })}</p>}
+          {fechado && (
+            <BannerFechoGravado estado={leitura.estado} fechadoEm={leitura.fechadoEm} fechadoPorNome={leitura.fechadoPorNome} antesDoRegisto={leitura.antesDoRegisto} aoTentarDeNovo={leitura.recarregar} />
+          )}
+          {pendentes > 0 && <p role="status" className="text-sm text-muted-foreground">{t("rhProcReal.aCalcular", { n: pendentes })}</p>}
 
+          {!semValoresGravados && (<>
           <Card>
             <CardContent className="overflow-x-auto p-0">
               <table className="w-full text-sm">
@@ -134,8 +224,8 @@ export function ProcessamentoFluxoTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pessoasActivas.map((pessoa) => {
-                    const r = resultados.get(pessoa.id);
+                  {pessoasDaTabela.map((pessoa) => {
+                    const r = resultadosMostrados.get(pessoa.id);
                     const res = r?.resultado;
                     const semValor = !semRetribuicoes && res?.totalBrutoEstimado === null;
                     return (
@@ -157,9 +247,13 @@ export function ProcessamentoFluxoTab() {
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.totalCodigosAutomaticos, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.descontoFaltas > 0 ? -res.descontoFaltas : 0, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.subsidioAlimentacao, !semRetribuicoes)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums">{celula(res.totalRegras, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{euros(res.lancamentosPontuais)}</td>
                             <td className="px-4 py-3 text-right font-semibold tabular-nums">
                               {semValor ? t("rhFluxosC.proc.semValor") : celula(res.totalBrutoEstimado, !semRetribuicoes)}
+                              {!direitosLidos && !semValor && !semRetribuicoes && (
+                                <span className="block text-xs font-normal text-amber-800 dark:text-amber-300">{t("hr.vencimento.visaoGeral.totalProvisorio")}</span>
+                              )}
                             </td>
                           </>
                         )}
@@ -169,6 +263,18 @@ export function ProcessamentoFluxoTab() {
                               <Eye className="mr-1 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.proc.comoChegamos")}
                               <span className="sr-only"> {pessoa.nome_completo}</span>
                             </Button>
+                            {podeGerirLancamentos && !fechado && (!direitosLidos || direitosDaPessoa(calculo.direitosHook.porPessoa, pessoa.id).km || direitosDaPessoa(calculo.direitosHook.porPessoa, pessoa.id).ajudas) && (
+                              <Button
+                                type="button" size="sm" variant="outline" className="min-h-11"
+                                disabled={!direitosLidos}
+                                aria-describedby={!direitosLidos ? idAvisoDireitos : undefined}
+                                title={!direitosLidos ? t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis") : undefined}
+                                onClick={() => setKmAjudas({ id: pessoa.id, nome: pessoa.nome_completo })}
+                              >
+                                <Plus className="mr-1 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.lanc.abrir")}
+                                <span className="sr-only"> {pessoa.nome_completo}</span>
+                              </Button>
+                            )}
                             {podeGerirLancamentos && !fechado && (
                               <Button type="button" size="sm" variant="outline" className="min-h-11" onClick={() => setPontual({ id: pessoa.id, nome: pessoa.nome_completo })}>
                                 <Plus className="mr-1 h-4 w-4" aria-hidden="true" />{t("rhFluxosC.proc.pontual.abrir")}
@@ -185,7 +291,10 @@ export function ProcessamentoFluxoTab() {
                   <tr className="border-t bg-muted/30">
                     <th scope="row" colSpan={COLUNAS_NUMERICAS.length} className="px-4 py-3 text-left text-sm">{t("rhFluxosC.proc.totalMes")}</th>
                     <td className="px-4 py-3 text-right font-bold tabular-nums">
-                      {semRetribuicoes || calculo.pendentes > 0 ? "—" : euros(total.total)}
+                      {semRetribuicoes || pendentes > 0 ? "—" : euros(total.total)}
+                      {!direitosLidos && !semRetribuicoes && pendentes === 0 && (
+                        <span className="block text-xs font-normal text-amber-800 dark:text-amber-300">{t("hr.vencimento.visaoGeral.totalProvisorio")}</span>
+                      )}
                     </td>
                     <td />
                   </tr>
@@ -193,15 +302,16 @@ export function ProcessamentoFluxoTab() {
               </table>
             </CardContent>
           </Card>
-          {!semRetribuicoes && calculo.pendentes === 0 && total.semValor > 0 && (
+          {!semRetribuicoes && pendentes === 0 && total.semValor > 0 && (
             <p className="text-xs text-muted-foreground">{t("rhProcReal.totalSemValor", { n: total.semValor })}</p>
           )}
+          </>)}
         </>
       )}
 
       <ProcessamentoDetalheDialog
         pessoa={detalhe}
-        calculo={detalhe ? resultados.get(detalhe.id) ?? null : null}
+        calculo={detalhe ? resultadosMostrados.get(detalhe.id) ?? null : null}
         lancamentos={detalhe ? calculo.lancamentosPorPessoa.get(detalhe.id) ?? [] : []}
         retribuicaoRecusada={semRetribuicoes}
         podeAnular={podeGerirLancamentos && !fechado}
@@ -214,6 +324,14 @@ export function ProcessamentoFluxoTab() {
         aGravar={lancamentosHook.saving}
         aoGuardar={lancamentosHook.criar}
         aoFechar={() => setPontual(null)}
+      />
+      <KmAjudasDialog
+        pessoa={kmAjudas}
+        direitos={kmAjudas ? direitosDaPessoa(calculo.direitosHook.porPessoa, kmAjudas.id) : { km: false, ajudas: false }}
+        regra={calculo.regra}
+        aGravar={lancamentosHook.saving}
+        aoGuardar={lancamentosHook.criarPorQuantidade}
+        aoFechar={() => setKmAjudas(null)}
       />
       <AnularLancamentoDialog
         lancamento={paraAnular}

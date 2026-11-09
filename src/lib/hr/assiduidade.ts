@@ -403,6 +403,50 @@ export function minutosNoturnosDoPeriodo(periodo: Periodo): number {
   return total;
 }
 
+/** "HH:MM" em minutos do dia; como FIM de faixa, "24:00" e o fim do dia (1440). `null` se nao for uma hora. */
+function minutosDaFaixa(hora: string, comoFim: boolean): number | null {
+  const encaixe = /^(\d{1,2}):(\d{2})/.exec(hora.trim());
+  if (!encaixe) return null;
+  const h = Number(encaixe[1]);
+  const m = Number(encaixe[2]);
+  if (comoFim && h === 24 && m === 0) return 1440;
+  return h <= 23 && m <= 59 ? h * 60 + m : null;
+}
+
+/**
+ * Quantos minutos de um periodo `HH:MM`-`HH:MM` caem em CADA faixa noturna da regra salarial (substitui a
+ * janela fixa 22:00-07:00). Devolve um numero por faixa, pela ordem recebida; uma faixa invalida da 0.
+ *
+ * Uma faixa pode atravessar a meia-noite (fim <= inicio). Tal como em `minutosNoturnosDoPeriodo`, o periodo
+ * que atravessa a meia-noite le-se somando 24 h ao fim, e a faixa repete-se em tres ciclos (ontem, hoje, amanha)
+ * para apanhar as duas fronteiras.
+ */
+export function minutosNoturnosPorFaixa(
+  periodo: Periodo,
+  faixas: ReadonlyArray<{ hora_inicio: string; hora_fim: string }>,
+): number[] {
+  const inicioBruto = minutosDe(periodo.hora_inicio);
+  const fimBruto = minutosDe(periodo.hora_fim);
+  if (inicioBruto === null || fimBruto === null) return faixas.map(() => 0);
+  const inicio = inicioBruto;
+  const fim = fimBruto > inicio ? fimBruto : fimBruto + 24 * 60;
+
+  return faixas.map((faixa) => {
+    const ini = minutosDaFaixa(faixa.hora_inicio, false);
+    const fimFaixa = minutosDaFaixa(faixa.hora_fim, true);
+    if (ini === null || fimFaixa === null || ini === fimFaixa) return 0;
+    const duracao = fimFaixa > ini ? fimFaixa - ini : 24 * 60 - ini + fimFaixa;
+    let total = 0;
+    for (const ciclo of [-1, 0, 1]) {
+      const inicioFaixa = ini + ciclo * 24 * 60;
+      const sobreposicaoInicio = Math.max(inicio, inicioFaixa);
+      const sobreposicaoFim = Math.min(fim, inicioFaixa + duracao);
+      if (sobreposicaoFim > sobreposicaoInicio) total += sobreposicaoFim - sobreposicaoInicio;
+    }
+    return total;
+  });
+}
+
 /** Totais por local, para o rodape do dia. `null` = sem local atribuido. */
 export function totaisPorLocal(
   intervalos: readonly (Periodo & { local_id: string | null })[],
@@ -527,6 +571,7 @@ const PREFIXOS: ReadonlyArray<[string, string]> = [
   ["picagem_ja_anulada", "hr.assiduidade.erroRpc.picagemJaAnulada"],
   ["picagem_corrige_a_si_mesma", "hr.assiduidade.erroRpc.picagemCorrigeASiMesma"],
   ["picagem_anulacao_sem_motivo", "hr.assiduidade.erroRpc.semMotivo"],
+  ["conta_sem_ficha_rh", "hr.assiduidade.erroRpc.contaSemFicha"],
   ["picagem_pessoa_invalida", "hr.assiduidade.erroRpc.pessoaInvalida"],
   ["falta_sem_sessao", "hr.assiduidade.erroRpc.semSessao"],
   ["falta_horas_invalidas", "hr.assiduidade.erroRpc.horasInvalidas"],

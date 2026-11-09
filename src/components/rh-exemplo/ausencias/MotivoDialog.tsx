@@ -45,6 +45,8 @@ interface MotivoDialogProps {
   datasIniciais?: { inicio: string; fim: string };
   destrutivo?: boolean;
   aGravar?: boolean;
+  /** O erro da ultima tentativa (a decisao falhou): fica DENTRO do dialogo, que continua aberto, para o motivo escrito nao se perder. */
+  erro?: string | null;
   onFechar: () => void;
   onConfirmar: (resultado: ResultadoMotivo) => void;
   idPrefixo?: string;
@@ -59,6 +61,7 @@ export function MotivoDialog({
   datasIniciais,
   destrutivo,
   aGravar,
+  erro,
   onFechar,
   onConfirmar,
   idPrefixo = "hr-motivo",
@@ -125,8 +128,12 @@ export function MotivoDialog({
               rows={3}
               value={motivo}
               onChange={(evento) => setMotivo(evento.target.value)}
+              aria-describedby={erro ? `${idMotivo}-erro` : undefined}
             />
           </div>
+          {erro && (
+            <p id={`${idMotivo}-erro`} role="alert" className="text-sm text-destructive">{erro}</p>
+          )}
         </div>
 
         <AlertDialogFooter>

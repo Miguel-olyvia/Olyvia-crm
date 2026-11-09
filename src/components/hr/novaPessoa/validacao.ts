@@ -40,7 +40,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Os campos que são sempre obrigatórios: os do RH (fixos) e o nome. */
 export const OBRIGATORIOS_FIXOS: ReadonlySet<string> = new Set([
   "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato",
-  "hr-novo-subsidio", "hr-novo-duodecimos",
+  "hr-novo-duodecimos",
 ]);
 
 /** Uma data ISO que existe de verdade (31 de fevereiro não passa). */
@@ -124,7 +124,6 @@ function problemasDoRh(v: ValoresNovaPessoa, hoje: string): ProblemaNova[] {
   lista.push(...problemaDeData("hr-novo-data-antiguidade", v.laborais.data_antiguidade, hoje, false));
   lista.push(...problemaDeData("hr-novo-data-inicio", v.contrato.data_inicio, hoje, false));
   if (v.contrato.tipo_contrato === "") acrescentar(lista, "hr-novo-tipo-contrato", OBRIGATORIO);
-  if (v.contrato.subsidio.trim() === "") acrescentar(lista, "hr-novo-subsidio", OBRIGATORIO);
   if (v.contrato.duodecimos_pct === "") acrescentar(lista, "hr-novo-duodecimos", OBRIGATORIO);
   if (v.contrato.tipo_contrato === "termo_certo" && v.contrato.data_fim.trim() === "") {
     acrescentar(lista, "hr-novo-data-fim", OBRIGATORIO);

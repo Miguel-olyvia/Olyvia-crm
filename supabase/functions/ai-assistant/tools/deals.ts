@@ -368,7 +368,8 @@ const cancelDeal: Handler = async (ctx, args): Promise<ToolResult> => {
   if (args?.confirm !== true) {
     return { success: false, message: "Confirmação obrigatória — pede ao utilizador para confirmar e volta a chamar com confirm=true." };
   }
-  const perm = requireWrite(ctx, "deals.edit", "cancelar PP");
+  // Cancelar = soft_delete_business_entity('deal'), que exige deals.delete (na organização ou acima).
+  const perm = requireWrite(ctx, "deals.delete", "cancelar PP");
   if (perm) return perm;
 
   const { data: deal, error } = await supabase

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Camera, ImageOff, Send, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NaFrente } from "./NaFrente";
 import type { MensagemObra } from "./motor";
 
 const iniciais = (n: string) => n.split(" ").filter(Boolean).map((x) => x[0]).slice(0, 2).join("").toUpperCase();
@@ -37,11 +38,13 @@ export function FotoMensagem({ id, fotoDe, tam = "h-24 w-32", rotulo }: { id: st
         <img src={src} alt="" className={cn("object-cover", tam)} />
       </button>
       {aberta && (
+        <NaFrente>
         <div role="dialog" aria-modal="true" aria-label={rotulo} className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4" onClick={() => setAberta(false)}
           onKeyDown={(e) => { if (e.key === "Escape") setAberta(false); }}>
           <img src={src} alt={rotulo} className="max-h-[85vh] max-w-full rounded-lg object-contain" />
           <button type="button" autoFocus onClick={() => setAberta(false)} aria-label="Fechar" className="absolute right-4 top-4 grid h-11 w-11 place-items-center rounded-full bg-white/90 text-black"><X className="h-5 w-5" /></button>
         </div>
+        </NaFrente>
       )}
     </>
   );

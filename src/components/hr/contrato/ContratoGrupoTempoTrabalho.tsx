@@ -153,17 +153,10 @@ export function ContratoGrupoTempoTrabalho({
           }))}
           onChange={(v) => definir("politica_feriados", v as PoliticaFeriados)}
         />
-        <CampoTexto
-          id="hr-contrato-horas-anuais-maximas"
-          label={t("hr.contrato.horasAnuaisMaximas")}
-          erro={erroDe("hr-contrato-horas-anuais-maximas")}
-          tipo="number"
-          min={0}
-          max={4000}
-          valor={rascunho.horas_anuais_maximas}
-          disabled={!podeEditar}
-          onChange={(v) => definir("horas_anuais_maximas", v)}
-        />
+        <div className="flex flex-col justify-end gap-1 pb-2" id="hr-contrato-horas-anuais-regra">
+          <p className="text-sm font-medium">{t("hr.contrato.horasAnuaisMaximas")}</p>
+          <p className="text-xs text-muted-foreground">{t("hr.contrato.horasAnuaisDaRegra")}</p>
+        </div>
         <CampoTexto
           id="hr-contrato-horas-semanais-maximas"
           label={t("hr.contrato.horasSemanaisMaximas")}

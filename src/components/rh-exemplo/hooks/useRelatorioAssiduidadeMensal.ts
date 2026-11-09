@@ -14,6 +14,7 @@ export type {
   IntervaloRelatorio,
   DiaRelatorioMensal,
   TotaisRelatorioMensal,
+  FaixaNoturnaDoRelatorio,
   RelatorioAssiduidadeMensal,
 } from "@/hooks/useRelatorioAssiduidadeMensal";
 
@@ -22,6 +23,8 @@ export function useRelatorioAssiduidadeMensal(
   ano: number,
   mes: number,
   intervalo?: { de: string; ate: string },
+  /** As faixas noturnas da regra salarial (memoizadas por quem chama): sem elas nao ha minutos noturnos por faixa. */
+  faixasNoturnas?: readonly { hora_inicio: string; hora_fim: string }[],
 ) {
-  return useRelatorioAssiduidadeMensalReal(pessoaId, ano, mes - 1, intervalo);
+  return useRelatorioAssiduidadeMensalReal(pessoaId, ano, mes - 1, intervalo, faixasNoturnas);
 }

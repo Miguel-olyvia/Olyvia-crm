@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
+import { SEM_PERM, permEmFaltaDoPasso } from "./permissoes";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { ContratoDoc, NotaEncomendaDoc, Partilhar } from "./DocsCliente";
 import { SeloAssinatura } from "./AssinaturaContrato";
@@ -97,8 +98,11 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
   const feitos = P.filter((x) => x.estado === "feito").length;
   const falta = faltaParaArrancar(d, db);
   const go1 = P.find((x) => x.trilho === "obra")!;
+  // 6/11 (permissões): o passo é do papel atual E quem entrou tem as permissões que ele pede (permEmFaltaDoPasso); sem elas, o botão
+  // fica desligado e diz qual falta (como o BotaoFase)
+  const semPerm = (x: PassoPrep) => permEmFaltaDoPasso(S, x.act);
   // um só botão primário: o primeiro passo que é do papel atual
-  const meu = P.find((x) => x.estado === "agora" && x.who === S.role && x.act);
+  const meu = P.find((x) => x.estado === "agora" && x.who === S.role && x.act && !semPerm(x));
   const verComo = (who: Papel) => run(() => { S.role = who; });
 
   const passo = (x: PassoPrep, ultimo: boolean) => (
@@ -113,6 +117,8 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
           // 22/10: a fatura do Eticadata: o número escreve-se aqui mesmo (FaturaErp.tsx)
           x.who === S.role && x.act === "registarFaturaErp"
             ? <div className="mt-2"><RegistarFaturaErp ctx={ctx} d={d} tamanho="default" aEsquerda /></div>
+            : x.who === S.role && semPerm(x)
+            ? <div className="mt-2"><Button size="sm" variant="outline" className="min-h-10" disabled>{x.btn}</Button><p className="mt-1 text-sm text-muted-foreground">{SEM_PERM[semPerm(x)!].sub}</p></div>
             : x.who === S.role
             ? <Button size="sm" variant={meu?.id === x.id ? "default" : "outline"} className="mt-2 min-h-10" onClick={go(() => fazer(A, x.act!, d.id, x.arg))}>{x.btn}</Button>
             : <button type="button" onClick={() => verComo(x.who!)} className="mt-1 inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Ver como {PAPEIS[x.who].nome}</button>
@@ -162,7 +168,9 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
               {viaturas.length > 0 && <p className="mt-1 text-sm text-muted-foreground">Viatura ligada: {viaturas.join(", ")} (Frota).</p>}
             </div>
           </div>
-          {go1.estado === "agora" && (go1.who === S.role
+          {go1.estado === "agora" && (go1.who === S.role && permEmFaltaDoPasso(S, "arrancar")
+            ? <div className="grid justify-items-start gap-1 sm:justify-items-end"><Button className="min-h-11" variant="outline" disabled>Arrancar a obra</Button><p className="max-w-sm text-sm text-muted-foreground sm:text-right">{SEM_PERM[permEmFaltaDoPasso(S, "arrancar")!].sub}</p></div>
+            : go1.who === S.role
             ? <Button className="min-h-11" variant={meu?.id === go1.id ? "default" : "outline"} onClick={go(() => fazer(A, "arrancar", d.id))}>Arrancar a obra</Button>
             : <button type="button" onClick={() => verComo("operacoes")} className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Ver como {PAPEIS.operacoes.nome}</button>)}
         </div>

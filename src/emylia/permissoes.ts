@@ -92,6 +92,20 @@ export const podeNeg = (p: Papel, x: PermNeg): boolean => {
   return reais.simular ? naBase && doPapel(p, x) : naBase;
 };
 
+/** 4/11: as permissões que o servidor pede ao passo de cada botão (neg_guardar_negocio, neg_validar_pagamento, neg_registar_fatura): sem
+ *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
+const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
+  contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.gerir", "orcamento.editar"],
+  pedidoCliente: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
+  enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
+  aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
+  // 6/11: os passos da obra (as Operações) pedem negocios.obra.planear, como o motor (A.aprovarPlano, A.arrancar)
+  gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"],
+};
+/** A primeira permissão que falta a quem está no ecrã para o passo `act` (null: tem todas, ou o passo não pede nenhuma). */
+export const permEmFaltaDoPasso = (S: { role: Papel }, act: string | undefined): PermNeg | null =>
+  (act ? PERM_DO_PASSO[act] ?? [] : []).find((x) => !podeNeg(S.role, x)) ?? null;
+
 /** 5/11: o código com que o servidor decide se devolve os custos do orçamento (fn_neg_ler_orcamento, neg_ler_negocios, fn_neg_ler_adendas:
  *  fn_cat_pode(org, 'quotes.view_costs'), que também conta com o Papel no Negócio). Sem ele a base manda os custos a null. */
 export const CODIGO_VER_CUSTOS = "quotes.view_costs";

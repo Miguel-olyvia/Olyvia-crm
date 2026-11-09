@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, Search, User, LogOut, Beaker, CheckCheck, CalendarClock, Phone, Send, RefreshCw, X, Settings, Mail, MessageCircle } from "lucide-react";
 import { LanguageSelector } from "@/components/LanguageSelector";
@@ -34,6 +34,7 @@ import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { useCompany } from "@/contexts/CompanyContext";
 import { ContratosDaEquipaDialog } from "@/components/hr/fimContrato/ContratosDaEquipaDialog";
 import { getNotificationRoute, openNotificationRoute, notificationPriorityDotColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,8 @@ import type { WhatsAppContext } from "@/hooks/useWhatsApp";
 interface TopHeaderProps {
   userName: string;
   userRole: string;
+  /** 9/11: no telemóvel, o botão do menu (antes flutuava no canto de baixo, por cima do conteúdo) */
+  menuMovel?: ReactNode;
 }
 
 const actionLabels: Record<string, { label: string; icon: typeof Send }> = {
@@ -63,8 +66,9 @@ const actionLabels: Record<string, { label: string; icon: typeof Send }> = {
   call_now: { label: "Ligar", icon: Phone },
 };
 
-export function TopHeader({ userName, userRole }: TopHeaderProps) {
+export function TopHeader({ userName, userRole, menuMovel }: TopHeaderProps) {
   const navigate = useNavigate();
+  const podeAbrir = usePodeAbrirDestino();
   const { toast } = useToast();
   const { t, language } = useTranslation();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -279,7 +283,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
     setNotificationsOpen(false);
     const route = await getNotificationRoute(notification);
     if (route) {
-      openNotificationRoute(navigate, route);
+      openNotificationRoute(navigate, route, podeAbrir);
     }
   };
 
@@ -291,7 +295,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
       const withAction = notification.action_type
         ? `${baseRoute}${baseRoute.includes("?") ? "&" : "?"}action=${notification.action_type}`
         : baseRoute;
-      openNotificationRoute(navigate, withAction);
+      openNotificationRoute(navigate, withAction, podeAbrir);
     }
   };
 
@@ -371,13 +375,15 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
 
   return (
     <>
-      <header className="h-14 border-b border-sidebar-border bg-sidebar fixed top-0 right-0 left-0 md:left-16 z-[450] px-4 flex items-center justify-between gap-4">
-        <CompanySwitcher />
+      <header className="h-14 border-b border-sidebar-border bg-sidebar fixed top-0 right-0 left-0 md:left-16 z-[450] px-2 sm:px-4 flex items-center justify-between gap-2 sm:gap-4">
+        {/* 9/11 (telemóvel): o menu à esquerda; a barra cabe nos 360 px (sem idioma, Beta e agenda, que ficam no menu e no computador) */}
+        {menuMovel}
+        <div className="min-w-0 shrink"><CompanySwitcher /></div>
 
         {globalSearchEnabled ? (
-          <GlobalSearch hasPermission={hasPermission} className="flex-1 max-w-xl" />
+          <GlobalSearch hasPermission={hasPermission} className="flex-1 min-w-0 max-w-xl" />
         ) : (
-          <div className="flex-1 max-w-xl" aria-label="Pesquisa global (sem permissões de pesquisa)" aria-disabled="true">
+          <div className="flex-1 min-w-0 max-w-xl" aria-label="Pesquisa global (sem permissões de pesquisa)" aria-disabled="true">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sidebar-foreground/70" aria-hidden="true" />
               <Input
@@ -392,12 +398,12 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          <LanguageSelector />
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <div className="hidden sm:block"><LanguageSelector /></div>
 
           <Button
             variant="ghost" size="sm" onClick={() => navigate("/team-hub")}
-            className="text-sidebar-foreground hover:bg-sidebar-accent gap-1.5"
+            className="hidden sm:inline-flex text-sidebar-foreground hover:bg-sidebar-accent gap-1.5"
           >
             <Beaker className="h-4 w-4" />
             <span className="font-medium">Beta</span>
@@ -406,7 +412,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
 
           <Button
             variant="ghost" size="icon" onClick={() => navigate("/scheduling")}
-            className="text-sidebar-foreground hover:bg-sidebar-accent"
+            className="hidden sm:inline-flex text-sidebar-foreground hover:bg-sidebar-accent"
             title={t('sidebar.scheduling')}
           >
             <CalendarClock className="w-5 h-5" />
@@ -501,6 +507,15 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              {/* 9/11: no telemóvel a agenda e o Beta HUB saem da barra (não cabem): ficam aqui */}
+              <DropdownMenuItem className="sm:hidden" onClick={() => navigate("/scheduling")}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                <span>{t('sidebar.scheduling')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="sm:hidden" onClick={() => navigate("/team-hub")}>
+                <Beaker className="mr-2 h-4 w-4" />
+                <span>Beta HUB</span>
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setEditProfileOpen(true)}>
                 <User className="mr-2 h-4 w-4" />
                 <span>{t('header.editProfile')}</span>
@@ -556,7 +571,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
                 const target = messageDialog.link || route;
                 setMessageDialog(null);
                 setNotificationsOpen(false);
-                if (target) openNotificationRoute(navigate, target);
+                if (target) openNotificationRoute(navigate, target, podeAbrir);
               }}
             >
               Ver documento

@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { PERMISSOES } from "./permissoesExemplo";
 import { agruparPorMenu, categoriaVirtual, distintivoAcao, GRUPOS_MENU, permissoesForaDoMenu, ROTULOS_CATEGORIA } from "./gruposPermissoes";
+import { CODIGOS_ESCONDIDOS } from "./permissoesEmUso";
 import type { Permissao } from "./tipos";
 
 const perm = (codigo: string, categoria: string): Permissao => ({ codigo, categoria, nome: codigo, fonte: "codigo", perigosa: false, comAmbito: false });
+
+/**
+ * 06/11: deals.view/create/edit (Pedidos de Proposta, CRM antigo) estão escondidas e o subgrupo deles saiu do editor, por isso ficam
+ * fora dos grupos de propósito. O catálogo de exemplo ainda as tem; os testes de "nenhuma fora do menu" contam sem elas.
+ */
+const SEM_GRUPO_DE_PROPOSITO = ["deals.view", "deals.create", "deals.edit"];
+const PERMISSOES_COM_GRUPO = PERMISSOES.filter((p) => !SEM_GRUPO_DE_PROPOSITO.includes(p.codigo));
 
 describe("catálogo de permissões de exemplo", () => {
   it("tem códigos únicos, nome e categoria em todas, e uma origem conhecida", () => {
@@ -18,7 +26,10 @@ describe("catálogo de permissões de exemplo", () => {
   });
 
   it("não deixa nenhuma permissão fora dos grupos do menu (como o ecrã de Roles, que esconderia o resto)", () => {
-    expect(permissoesForaDoMenu(PERMISSOES)).toEqual([]);
+    expect(permissoesForaDoMenu(PERMISSOES_COM_GRUPO)).toEqual([]);
+    // As únicas fora do menu são as deals.* escondidas a 06/11 (e estão mesmo escondidas).
+    expect(permissoesForaDoMenu(PERMISSOES).map((p) => p.codigo).sort()).toEqual([...SEM_GRUPO_DE_PROPOSITO].sort());
+    SEM_GRUPO_DE_PROPOSITO.forEach((c) => expect(CODIGOS_ESCONDIDOS, c).toContain(c));
   });
 
   it("tem as permissões que vêm das migrations, com as marcas lidas de lá", () => {
@@ -38,10 +49,10 @@ describe("catálogo de permissões de exemplo", () => {
 
 describe("agruparPorMenu", () => {
   it("agrupa a lista completa pelos grupos do menu, sem perder nem repetir nenhuma permissão", () => {
-    const grupos = agruparPorMenu(PERMISSOES);
+    const grupos = agruparPorMenu(PERMISSOES_COM_GRUPO);
     const todas = grupos.flatMap((g) => g.permissoes.map((p) => p.codigo));
-    expect(todas).toHaveLength(PERMISSOES.length);
-    expect(new Set(todas).size).toBe(PERMISSOES.length);
+    expect(todas).toHaveLength(PERMISSOES_COM_GRUPO.length);
+    expect(new Set(todas).size).toBe(PERMISSOES_COM_GRUPO.length);
     // O catálogo de exemplo não tem hr.*, operations.*, pessoas.*, fleet.* nem platform.* (além de pending_submissions, que vai para
     // Formulários), por isso esses grupos não aparecem (grupos sem permissões omitem-se); Negócios aparece pelos leads.*/clients.*/contacts.*
     // (03/11: o grupo CRM deixou de existir), e os outros saem pela ordem de GRUPOS_MENU.
@@ -80,8 +91,9 @@ describe("agruparPorMenu", () => {
     ]);
     expect(grupos.map((g) => g.rotulo)).toEqual(["Documentos do negócio"]);
     const sub = (r: string) => grupos[0].subgrupos.find((s) => s.rotulo === r)?.permissoes.map((p) => p.codigo);
-    expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Pedidos de Proposta", "Propostas e orçamentos", "Venda Direta", "Contratos", "Configuração"]);
-    expect(sub("Pedidos de Proposta")).toEqual(["deals.view"]);
+    // 06/11: o subgrupo «Pedidos de Proposta» saiu; um deals.* que não seja deals.delete fica fora do menu (escondido).
+    expect(grupos[0].subgrupos.map((s) => s.rotulo)).toEqual(["Propostas e orçamentos", "Venda Direta", "Contratos", "Configuração"]);
+    expect(grupos[0].permissoes.map((p) => p.codigo)).not.toContain("deals.view");
     expect(sub("Propostas e orçamentos")).toEqual(["proposals.view", "quotes.view", "quotes.manage"]);
     expect(sub("Venda Direta")).toEqual(["direct_sales.view"]);
     expect(sub("Contratos")).toEqual(["client_contracts.view", "portal.manage"]);
@@ -220,5 +232,21 @@ describe("distintivoAcao", () => {
     expect(distintivoAcao("scheduling.boards.edit").rotulo).toBe("Editar");
     expect(distintivoAcao("receiving.download_proof").rotulo).toBe("PDF");
     expect(distintivoAcao("direct_sales.register_invoice")).toEqual({ rotulo: "Register invoice", classes: "" });
+  });
+});
+
+describe("06/11: Pedidos de Proposta saem dos Documentos do negócio; deals.delete vai para Definições › Lixo", () => {
+  it("não há subgrupo «Pedidos de Proposta» nem a categoria deals nos grupos do menu", () => {
+    const doc = GRUPOS_MENU.find((g) => g.rotulo === "Documentos do negócio")!;
+    expect(doc.subgrupos?.map((s) => s.rotulo)).not.toContain("Pedidos de Proposta");
+    expect(GRUPOS_MENU.flatMap((g) => [...g.categorias, ...(g.subgrupos ?? []).flatMap((s) => s.categorias)])).not.toContain("deals");
+  });
+
+  it("deals.delete cai na categoria trash e no bloco Lixo de Definições, ao lado de trash.view", () => {
+    expect(categoriaVirtual(perm("deals.delete", "deals"))).toBe("trash");
+    const grupos = agruparPorMenu([perm("deals.delete", "deals"), perm("trash.view", "trash")]);
+    expect(grupos.map((g) => g.rotulo)).toEqual(["Definições"]);
+    expect(grupos[0].blocos.map((b) => [b.rotulo, b.permissoes.map((p) => p.codigo)])).toEqual([["Lixo", ["deals.delete", "trash.view"]]]);
+    expect(permissoesForaDoMenu([perm("deals.view", "deals")]).map((p) => p.codigo)).toEqual(["deals.view"]);
   });
 });

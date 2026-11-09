@@ -19,6 +19,7 @@ import type { FichaDb, NegocioFichaDb } from "@/hooks/pessoas/fichaTipos";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 import { enderecoDeRegresso, ligacaoComVoltar } from "@/lib/voltarParaPessoas";
 import { useFechoV4 } from "@/components/negocio-metas/bandeiraFecho";
 import { useMutacoesDaFicha } from "@/components/negocio-metas/mutacoesNegocio";
@@ -51,7 +52,8 @@ const visitaViva = (v: { status: string; cancelada?: boolean }): boolean => v.ca
 
 /** O plano do passo de um item, ou `null` se a ficha real não o sabe executar (ou falta o documento ou a permissão que ele pede). */
 // `fechoV4`: o contrato nasce dentro do negócio (`&negocio=` no endereço) e um negócio que fecha na proposta não oferece contratos.
-function planear(item: ItemProcesso, ficha: FichaDb | null, permissoes?: readonly string[], fechoV4 = false): Plano | null {
+// `podeAbrir`: a guarda da rota do destino (05/11, ronda 2: as páginas fora do menu pedem a permissão «ver» em todas as entradas).
+function planear(item: ItemProcesso, ficha: FichaDb | null, permissoes?: readonly string[], fechoV4 = false, podeAbrir: (destino: string) => boolean = () => true): Plano | null {
   if (!ficha || item.tipo !== "negocio") return null;
   const negocio = ficha.negocios?.itens.find((n) => n.id === item.id);
   if (!negocio) return null;
@@ -66,17 +68,17 @@ function planear(item: ItemProcesso, ficha: FichaDb | null, permissoes?: readonl
     case "enviarProposta":
     case "registarRespostaCliente": {
       const proposta = propostaViva(negocio);
-      return proposta ? { tipo: "ir", destino: `/proposals?open=${codificar(proposta.id)}`, negocio } : null;
+      return proposta && podeAbrir("/proposals") ? { tipo: "ir", destino: `/proposals?open=${codificar(proposta.id)}`, negocio } : null;
     }
     case "criarContrato": {
       const proposta = propostaAceite(negocio);
       if (fechoV4 && negocio.fecho === "proposta") return null;
       const nasceLigado = fechoV4 ? `&negocio=${codificar(negocio.id)}` : "";
-      return podeCriar("client_contracts.create") && proposta ? { tipo: "ir", destino: `/client-contracts?newContract=true&proposalId=${codificar(proposta.id)}${nasceLigado}`, negocio } : null;
+      return podeCriar("client_contracts.create") && proposta && podeAbrir("/client-contracts") ? { tipo: "ir", destino: `/client-contracts?newContract=true&proposalId=${codificar(proposta.id)}${nasceLigado}`, negocio } : null;
     }
     case "registarAssinatura": {
       const contrato = contratoVivo(negocio);
-      return contrato ? { tipo: "ir", destino: `/client-contracts?open=${codificar(contrato.id)}`, negocio } : null;
+      return contrato && podeAbrir("/client-contracts") ? { tipo: "ir", destino: `/client-contracts?open=${codificar(contrato.id)}`, negocio } : null;
     }
     default:
       return null;
@@ -119,6 +121,7 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
   const mutacoes = useMutacoesDaFicha();
   const navegar = useNavigate();
   const fechoV4 = useFechoV4();
+  const podeAbrir = usePodeAbrirDestino();
   const [aberto, setAberto] = useState<{ painel: Painel; negocio: string; pessoa: string } | null>(null);
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   // As permissões do fecho (criar orçamento, proposta e contrato): sem a lista nada se restringe; a base decide.
@@ -159,14 +162,14 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
       if (ficha) navegar(ligacaoComVoltar(destino, enderecoDeRegresso(ficha.pessoa.id, negocio)));
     };
     const podeExecutar = (item: ItemProcesso): boolean => {
-      const plano = planear(item, ficha, permissoesFecho, fechoV4);
+      const plano = planear(item, ficha, permissoesFecho, fechoV4, podeAbrir);
       if (!plano || !organizationId) return false;
       return plano.tipo === "ir" || plano.painel !== "orcamento" || !!(ficha && origemDoOrcamento(ficha));
     };
     return {
       podeExecutar,
       executar: (item) => {
-        const plano = planear(item, ficha, permissoesFecho, fechoV4);
+        const plano = planear(item, ficha, permissoesFecho, fechoV4, podeAbrir);
         if (!plano || !ficha || !podeExecutar(item)) return;
         if (plano.tipo === "ir") ir(plano.destino, plano.negocio.id);
         else setAberto({ painel: plano.painel, negocio: plano.negocio.id, pessoa: ficha.pessoa.id });
@@ -180,10 +183,10 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
       abrirDocumento: (tipo, negocioId) => {
         const negocio = ficha?.negocios?.itens.find((n) => n.id === negocioId);
         const destino = negocio ? destinoDoDocumento(tipo, negocio) : null;
-        if (destino) ir(destino, negocioId);
+        if (destino && podeAbrir(destino)) ir(destino, negocioId);
       },
     };
-  }, [ficha, navegar, organizationId, podeVisita, permissoesFecho, fechoV4]);
+  }, [ficha, navegar, organizationId, podeVisita, permissoesFecho, fechoV4, podeAbrir]);
 
   if (!mutacoes) return <>{children}</>;
 

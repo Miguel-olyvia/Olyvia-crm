@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agruparPorMenu } from "./gruposPermissoes";
 import { encurtarNome, estadoConjunto, secoesDoGrupo, separarCodigo } from "./grelhaPermissoes";
-import { alternarPermissao, definirConjunto } from "./matriz";
+import { alternarPermissao, definirConjunto, podeAlterar } from "./matriz";
 import { permissoesDoMenu } from "./rolesReais";
 import { PERMISSOES_EM_USO } from "./permissoesEmUso";
 import type { Permissao } from "./tipos";
@@ -128,9 +128,9 @@ describe("secoesDoGrupo", () => {
     ]);
   });
 
-  it("leads.config diz o quê: 'Configurar workflows e IA'", () => {
-    const [s] = grupo("Negócios", [p("leads.config", "leads.config")]);
-    expect(s.linhas[0].outras[0].rotulo).toBe("Configurar workflows e IA");
+  it("client_contracts.cancel diz o quê: 'Anular contrato' (06/11: leads.config saiu do editor e do rótulo à mão)", () => {
+    const [s] = grupo("Negócios", [p("client_contracts.cancel", "client_contracts.cancel")]);
+    expect(s.linhas[0].outras[0].rotulo).toBe("Anular contrato");
   });
 
   it("estado de conjunto (indeterminado)", () => {
@@ -154,7 +154,36 @@ describe("definirConjunto (linha/secção) com as regras de 'ver'", () => {
     expect(definirConjunto(["leads.view", "leads.edit", "clients.view"], de("leads.view"), false, CAT)).toEqual(["clients.view"]);
   });
 
-  it("só o 'ver' DO MÓDULO arrasta as outras: hr.pessoas.view não é hr.view", () => {
-    expect(alternarPermissao(["hr.pessoas.view", "hr.pessoas.edit"], "hr.pessoas.view", CAT)).toEqual(["hr.pessoas.edit"]);
+  it("06/11: as dependências são as declaradas (hr.pessoas.edit depende da ficha: hr.pessoas.view, ou a própria quando está no catálogo)", () => {
+    expect(alternarPermissao(["hr.pessoas.view", "hr.pessoas.edit"], "hr.pessoas.view", CAT)).toEqual([]);
+    const comPropria = [...CAT, p("hr.pessoas.view.own")];
+    expect(alternarPermissao(["hr.pessoas.view", "hr.pessoas.view.own", "hr.pessoas.edit"], "hr.pessoas.view", comPropria))
+      .toEqual(["hr.pessoas.view.own", "hr.pessoas.edit"]);
+  });
+});
+
+describe("06/11: deals.delete na linha Lixo (Definições), com rótulo próprio e sem depender de deals.view", () => {
+  it("fica na linha Lixo como chip «Eliminar definitivamente do Lixo» (não na coluna Eliminar nem numa linha Pedidos de Proposta)", () => {
+    const secoes = grupo("Definições", [p("trash.view", "Ver lixo"), p("deals.delete", "Eliminar definitivamente do Lixo", "deals")]);
+    const linhas = secoes.flatMap((s) => s.linhas);
+    expect(linhas.map((l) => l.rotulo)).toEqual(["Lixo"]);
+    expect(linhas[0].fixas.ver?.codigo).toBe("trash.view");
+    expect(linhas[0].fixas.eliminar).toBeUndefined();
+    expect(linhas[0].outras.map((c) => [c.permissao.codigo, c.rotulo])).toEqual([["deals.delete", "Eliminar definitivamente do Lixo"]]);
+  });
+
+  it("o nome no editor vem do rótulo à mão (rolesReais), mesmo com o nome antigo da base", () => {
+    const [delecao] = permissoesDoMenu([{ code: "deals.delete", name: "Eliminar pedidos de proposta", category: "deals", is_dangerous: true }]);
+    expect(delecao?.nome).toBe("Eliminar definitivamente do Lixo");
+  });
+
+  it("com o catálogo real, deals.delete marca-se sem deals.view (escondida) e tirar trash.view não a arrasta", () => {
+    const cat = catalogoReal();
+    expect(cat.some((x) => x.codigo === "deals.view")).toBe(false);
+    expect(podeAlterar("deals.delete", [], cat)).toBe(true);
+    expect(alternarPermissao([], "deals.delete", cat)).toEqual(["deals.delete"]);
+    expect(alternarPermissao(["trash.view", "deals.delete"], "trash.view", cat)).toEqual(["deals.delete"]);
+    expect(definirConjunto(["trash.view", "deals.delete"], cat.filter((x) => x.codigo === "trash.view"), false, cat)).toEqual(["deals.delete"]);
+    expect(definirConjunto([], cat.filter((x) => x.codigo === "deals.delete"), true, cat)).toEqual(["deals.delete"]);
   });
 });

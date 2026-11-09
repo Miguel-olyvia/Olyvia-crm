@@ -3,8 +3,8 @@
 //  - uma permissão em uso não couber em nenhum grupo do editor (ficaria invisível sem ninguém dar por isso).
 // Quem acrescentar uma permissão nova ao código acrescenta-a a PERMISSOES_EM_USO (com a categoria de anew_permissions) e, se for
 // uma categoria nova, dá-lhe grupo em GRUPOS_MENU. Quem voltar a usar uma escondida passa-a de PERMISSOES_ESCONDIDAS para EM_USO.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { agruparPorMenu, permissoesForaDoMenu } from "./gruposPermissoes";
 import { fundirPermissoes } from "./matriz";
@@ -14,105 +14,10 @@ import {
 import { permissoesDoMenu, type LinhaPermissao } from "./rolesReais";
 import { menuSections, topLevelItems } from "@/components/sidebar/menuConfig";
 import type { Permissao } from "./tipos";
-
-const SRC = join(process.cwd(), "src");
-
-/**
- * Ficheiros que não verificam permissões: testes e dados de exemplo, documentação, traduções, tipos gerados, esta própria lista,
- * e os pares de sinónimos de lib/permissionAliases.ts (mapeiam nomes, não verificam nada; employees.edit só aparece lá).
- */
-const IGNORAR = /\.test\.tsx?$|__tests__\/|\/test\/|supabaseFalso\.ts$|Exemplo\.ts$|permissoesExemplo\.ts$|catalogoExemplo\.ts$|utilizadoresPerfisFalso\.ts$|^pages\/docs\/|^translations\/|^integrations\/supabase\/types\.ts$|^lib\/permissionAliases\.ts$|^components\/utilizadores-perfis\/permissoesEmUso\.ts$/;
-
-/**
- * Páginas LEGADAS: existem em disco mas nada vivo as importa, porque as rotas /leads, /clients e /contacts só redirecionam para /pessoas
- * (RedirectPreservandoPesquisa em App.tsx). As permissões que só elas verificam foram escondidas (03/11/2026) — por isso o scan não
- * as conta. Lista fechada e explícita: o teste «as páginas legadas não são importadas por nada vivo» falha se alguma voltar a ser
- * importada (aí sai daqui e as permissões dela voltam a estar em uso) ou se o ficheiro desaparecer (aí sai da lista).
- * ClientDetailsDialog/ClientDetailHeader (só importados por AnewClients) não precisam de estar aqui: só verificam clients.edit, em uso.
- */
-const LEGADO = [
-  "pages/AnewLeads.tsx", "pages/AnewClients.tsx", "components/leads/LeadTableRow.tsx",
-  // 03/11/2026 (aprovado): as rotas antigas do catálogo redirecionam para /catalogo-custos (App.tsx); estas páginas já não montam e as
-  // permissões que só elas verificavam esconderam-se (criar/eliminar serviços, marcas, categorias, subcategorias, atributos, taxas,
-  // itens de catálogo, exportar/importar produtos...). Ficam as que o Catálogo novo, a receção, os fornecedores e o assistente usam.
-  "pages/Products.tsx", "pages/Services.tsx", "pages/Brands.tsx", "pages/Bundles.tsx", "pages/CatalogItems.tsx",
-  "pages/ProductAttributes.tsx", "pages/ProductCategories.tsx", "pages/ProductSubcategories.tsx", "pages/ServiceCatalogItems.tsx",
-  "pages/ServiceCategories.tsx", "pages/ServiceFees.tsx", "pages/ServiceSubcategories.tsx",
-] as const;
-const NOMES_LEGADO = LEGADO.map((f) => f.split("/").pop()!.replace(/\.tsx$/, "")).join("|");
-/** Um import (estático ou lazy) de uma página legada: `from "@/pages/AnewLeads"`, `import("./pages/AnewLeads")`. */
-const IMPORT_LEGADO = new RegExp(`\\b(?:from|import)\\s*\\(?\\s*["'\`][^"'\`\\n]*/(?:${NOMES_LEGADO})(?:\\.tsx)?["'\`]`);
-
-/**
- * Páginas FORA DO MENU (03/11/2026): o grupo Aquisição saiu do menu (o Negócios em /pessoas e /negocios substitui-o), mas /quotes,
- * /proposals e /client-contracts continuam com rota, porque a ficha do /pessoas ainda as abre (ProcessoProviderReal, notificações,
- * Hoje...). /direct-sales redireciona para /negocios e DirectSales.tsx fica em disco sem rota. As permissões que só estas páginas
- * verificam foram escondidas (exportar, eliminar orçamentos, criar/editar/confirmar/faturar vendas diretas, ver custos da venda direta).
- * Ao contrário de LEGADO, estes ficheiros CONTINUAM no scan: uma permissão fora da lista em uso continua a falhar; só se tolera que
- * usem as escondidas. `paginas`: não podem voltar ao menu (teste abaixo). `soDelas`: componentes/utilitários importados só por
- * ficheiros desta lista (teste abaixo) — se outro ficheiro vivo os passar a importar, saem daqui e a permissão volta a estar em uso.
- */
-const FORA_DO_MENU = {
-  paginas: [
-    { ficheiro: "pages/Quotes.tsx", rota: "/quotes" },
-    { ficheiro: "pages/Proposals.tsx", rota: "/proposals" },
-    { ficheiro: "pages/ClientContracts.tsx", rota: "/client-contracts" },
-    { ficheiro: "pages/DirectSales.tsx", rota: "/direct-sales" },
-  ],
-  soDelas: [
-    "components/directSales/DirectSaleEditor.tsx",
-    "utils/generateInternalSalePdfBlob.ts",
-    "components/directSales/InternalSaleDocumentPDF.tsx",
-  ],
-} as const;
-const FICHEIROS_FORA_DO_MENU: readonly string[] = [...FORA_DO_MENU.paginas.map((p) => p.ficheiro), ...FORA_DO_MENU.soDelas];
-
-/**
- * PROTÓTIPO (03/11/2026): o Inventário nativo de exemplo (src/emylia/inventario, e a cópia em pages/prototipo-negocios) trabalha numa
- * base em memória com perfis de demonstração (perfil.ts) e verifica os códigos com `exigir`/`can` contra esse perfil, nunca contra a
- * base. Pode usar códigos escondidos (purchase_orders.manage, purchase_orders.view_prices...) sem que isso os torne «em uso»: continuam
- * no scan (um código desconhecido continua a falhar), só se tolera que usem as escondidas.
- */
-const PROTOTIPO = /^(?:emylia\/inventario\/|pages\/prototipo-negocios\/)/;
-const toleraEscondidas = (ficheiro: string): boolean => FICHEIROS_FORA_DO_MENU.includes(ficheiro) || PROTOTIPO.test(ficheiro);
-/** Uma escondida que uma guarda viva ainda pede, no ficheiro dessa guarda (ESCONDIDAS_COM_GUARDA). */
-const guardaEscondida = (u: { codigo: string; ficheiro: string }): boolean =>
-  CODIGOS_ESCONDIDOS.has(u.codigo) && (ESCONDIDAS_COM_GUARDA[u.codigo] ?? []).includes(u.ficheiro);
-
-/** Um literal com forma de código de permissão: "modulo.acao", "modulo.sub.acao". */
-const LITERAL = /["'`]([a-z_]+(?:\.[a-z_]+)+)["'`]/g;
-/** Chaves de tradução ("t('leads.view')", "labelKey: 'x.y'") não são permissões, mesmo com o mesmo texto. */
-const TRADUCAO = /(?:\b(?:t|txt|tx|translate)\(\s*|[kK]ey\s*[:=]\s*|i18nKey=\{?)$/;
-/**
- * O literal está num contexto de verificação de permissão: argumento de hasPermission/hasAnyPermission/getPermissionScope/has/can…
- * ou valor de uma propriedade/atributo permission(s) (PermissionGate, ProtectedRoute, menuConfig), também dentro de uma lista.
- */
-const CONTEXTO = /(?:\b(?:hasPermission|hasAnyPermission|hasAllPermissions|getPermissionScope|usePermissionScope|exigir|exigePerm|permissionGate|has|can|tem|perm)\s*\(|\b\w*[pP]ermissions?\w*\s*[:=]\s*\{?)[\s[(,]*(?:["'`][a-z_.]+["'`][\s,]*)*$/;
-
-function ficheiros(pasta: string): string[] {
-  return readdirSync(pasta).flatMap((nome) => {
-    const caminho = join(pasta, nome);
-    if (statSync(caminho).isDirectory()) return ficheiros(caminho);
-    return /\.tsx?$/.test(nome) ? [caminho] : [];
-  });
-}
-
-interface Uso { codigo: string; ficheiro: string; contexto: boolean }
-
-const caminhoRelativo = (caminho: string): string => relative(SRC, caminho).split(sep).join("/");
-
-function usosNoCodigo(): Uso[] {
-  return ficheiros(SRC).flatMap((caminho) => {
-    const ficheiro = caminhoRelativo(caminho);
-    if (IGNORAR.test(ficheiro) || (LEGADO as readonly string[]).includes(ficheiro)) return [];
-    const texto = readFileSync(caminho, "utf8");
-    return [...texto.matchAll(LITERAL)].flatMap((m): Uso[] => {
-      const antes = texto.slice(Math.max(0, (m.index ?? 0) - 400), m.index ?? 0);
-      if (TRADUCAO.test(antes)) return [];
-      return [{ codigo: m[1] ?? "", ficheiro, contexto: CONTEXTO.test(antes) }];
-    });
-  });
-}
+import {
+  caminhoRelativo, FICHEIROS_FORA_DO_MENU, FORA_DO_MENU, ficheiros, guardaEscondida, IGNORAR, IMPORT_LEGADO, LEGADO, SRC,
+  toleraEscondidas, usosNoCodigo,
+} from "./__tests__/varrimentoPermissoes";
 
 const permissao = (codigo: string, categoria: string): Permissao => ({ codigo, categoria, nome: codigo, perigosa: false, comAmbito: false });
 const emUso: Permissao[] = Object.entries(PERMISSOES_EM_USO).flatMap(([categoria, codigos]) => codigos.map((c) => permissao(c, categoria)));
@@ -211,7 +116,7 @@ describe("permissões em uso: a lista", () => {
   it("os grupos seguem a ordem do menu, com Negócios e Frota", () => {
     const rotulos = agruparPorMenu(emUso).map((g) => g.rotulo);
     expect(rotulos).toEqual([
-      "Dashboard", "Agendamentos", "Operação", "Catálogo e custos", "Organizações", "Negócios", "Documentos do negócio", "Marketing",
+      "Dashboard", "Agendamentos", "Catálogo e custos", "Organizações", "Negócios", "Documentos do negócio", "Marketing",
       "Inventário", "Frota", "Recursos Humanos", "Utilizadores", "Definições", "Plataforma",
     ]);
     const negocios = agruparPorMenu(emUso).find((g) => g.rotulo === "Negócios");
@@ -242,7 +147,7 @@ describe("permissões em uso: a lista", () => {
     const porContactar = negocios.subgrupos.find((s) => s.rotulo === "Por contactar")!;
     expect(pessoas.permissoes.map((p) => p.codigo).sort()).toEqual([
       "clients.create", "clients.delete", "clients.edit", "clients.view",
-      "leads.config", "leads.convert", "leads.delete", "leads.edit",
+      "leads.convert", "leads.delete", "leads.edit",
     ]);
     expect(grupos.find((g) => g.rotulo === "CRM")).toBeUndefined();
     const foraDeNegocios = grupos
@@ -285,8 +190,8 @@ describe("permissões em uso: a lista", () => {
 });
 
 describe("03/11: a Aquisição saiu do menu", () => {
+  // 06/11: as exportações de /quotes, /proposals e /client-contracts voltaram ao editor (as páginas abrem-se pela ficha do /pessoas).
   const ESCONDIDAS_AQUISICAO = [
-    "proposals.export", "quotes.delete", "quotes.export", "quotes.export_sensitive", "client_contracts.export",
     "direct_sales.create", "direct_sales.edit", "direct_sales.confirm", "direct_sales.register_invoice", "direct_sales.view_costs",
     "contacts.delete",
   ];
@@ -300,24 +205,37 @@ describe("03/11: a Aquisição saiu do menu", () => {
     ESCONDIDAS_AQUISICAO.forEach((c) => expect(noEditor, c).not.toContain(c));
   });
 
-  it("05/11: direct_sales.view também saiu do editor (sem ação na app viva)", () => {
-    expect(CODIGOS_EM_USO).not.toContain("direct_sales.view");
-    expect(CODIGOS_ESCONDIDOS).toContain("direct_sales.view");
+  it("06/11: direct_sales.view volta ao editor (o número da venda direta de origem nas Encomendas de Cliente)", () => {
+    expect(CODIGOS_EM_USO).toContain("direct_sales.view");
+    expect(CODIGOS_ESCONDIDOS).not.toContain("direct_sales.view");
   });
 
-  it("o grupo chama-se «Documentos do negócio», com Pedidos de Proposta, Propostas e orçamentos, Contratos e Configuração (Venda Direta ficou vazia, 05/11)", () => {
+  it("06/11: as exportações das páginas abertas pela ficha voltam ao editor; as sem ligação viva saem", () => {
+    ["quotes.export", "quotes.export_sensitive", "proposals.export", "client_contracts.export"].forEach((c) => {
+      expect(CODIGOS_EM_USO, c).toContain(c);
+      expect(CODIGOS_ESCONDIDOS, c).not.toContain(c);
+    });
+    ["api_keys.copy", "api_keys.create", "api_keys.delete", "api_keys.toggle", "leads.config", "quote_templates.duplicate"].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+    });
+    expect(CODIGOS_EM_USO).toContain("api_keys.view");
+  });
+
+  it("o grupo chama-se «Documentos do negócio», com Propostas e orçamentos, Venda Direta (só ver, 06/11), Contratos e Configuração (sem Pedidos de Proposta, 06/11)", () => {
     const grupos = agruparPorMenu(emUso);
     const grupo = grupos.find((g) => g.rotulo === "Documentos do negócio")!;
     expect(grupos.find((g) => g.rotulo === "Aquisição")).toBeUndefined();
     expect(grupo.blocos).toEqual([]);
-    expect(grupo.subgrupos.map((s) => s.rotulo)).toEqual(["Pedidos de Proposta", "Propostas e orçamentos", "Contratos", "Configuração"]);
+    expect(grupo.subgrupos.map((s) => s.rotulo)).toEqual(["Propostas e orçamentos", "Venda Direta", "Contratos", "Configuração"]);
     const codigosDe = (r: string) => grupo.subgrupos.find((s) => s.rotulo === r)!.permissoes.map((p) => p.codigo).sort();
     expect(codigosDe("Configuração")).toEqual([
       "client_contracts.manage_templates", "proposals.manage",
-      "quote_templates.create", "quote_templates.delete", "quote_templates.duplicate", "quote_templates.edit", "quote_templates.view",
+      "quote_templates.create", "quote_templates.delete", "quote_templates.edit", "quote_templates.view",
     ]);
+    expect(codigosDe("Venda Direta")).toEqual(["direct_sales.view"]);
     expect(codigosDe("Propostas e orçamentos")).toContain("quotes.manage");
-    expect(codigosDe("Pedidos de Proposta")).toEqual(["deals.create", "deals.delete", "deals.edit", "deals.view"]);
+    expect(grupo.permissoes.some((p) => p.codigo.startsWith("deals."))).toBe(false);
   });
 });
 
@@ -510,19 +428,25 @@ describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contra
     expect(noEditor()).toContain("client_contracts.manage_templates");
   });
 
-  it("05/11: as ordens e custos de Operações saíram do editor (desfaz a decisão de 04/11); o grupo Operação fica com operations.view", () => {
-    ["operations.orders.view", "operations.orders.view_all", "operations.costs.view"].forEach((c) => {
+  it("05/11: as ordens e custos de Operações saíram do editor (desfaz a decisão de 04/11); ronda 2: operations.view também, e o grupo Operação sai", () => {
+    ["operations.orders.view", "operations.orders.view_all", "operations.costs.view", "operations.view"].forEach((c) => {
       expect(CODIGOS_EM_USO, c).not.toContain(c);
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
       expect(noEditor(), c).not.toContain(c);
     });
-    expect(agruparPorMenu(emUso).find((g) => g.rotulo === "Operação")?.permissoes.map((p) => p.codigo)).toEqual(["operations.view"]);
+    expect(agruparPorMenu(emUso).find((g) => g.rotulo === "Operação")).toBeUndefined();
+  });
+
+  it("05/11 (ronda 2): a guarda do item «Operação» do menu não muda (operations.view E pessoas.view)", () => {
+    expect(readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8")).toContain('permissions: ["operations.view", "pessoas.view"]');
+    expect(ESCONDIDAS_COM_GUARDA["operations.view"]).toContain("components/sidebar/menuConfig.ts");
   });
 
   it("a guarda da página de Denúncias não muda: rota e menu continuam a pedir hr.denuncias.gerir", () => {
     const app = readFileSync(join(SRC, "App.tsx"), "utf8");
     expect(app).toMatch(/path="\/rh-exemplo\/denuncias"[^\n]*permission="hr\.denuncias\.gerir"/);
     expect(readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8")).toContain('denuncias: ["hr.denuncias.gerir"]');
-    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["hr.denuncias.gerir"]);
+    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["hr.denuncias.gerir", "operations.view", "leads.config", "deals.view"]);
   });
 
   it("uma role que as tem não as perde ao gravar", () => {
@@ -570,8 +494,9 @@ describe("04/11: a linha Contactos sai do editor (os contactos vivem em Pessoas)
 });
 
 describe("05/11: escondidas sem ação na app viva (venda direta, ordens/custos de Operações, listas, importar clientes/leads)", () => {
+  // 06/11: direct_sales.view voltou ao editor (ver o teste de 06/11 na Aquisição).
   const ESCONDIDAS_05_11 = [
-    "direct_sales.view", "operations.orders.view", "operations.orders.view_all", "operations.costs.view", "lists.view", "clients.import",
+    "operations.orders.view", "operations.orders.view_all", "operations.costs.view", "lists.view", "clients.import",
     "leads.import",
   ];
   const grupos = () => agruparPorMenu(emUso);
@@ -585,14 +510,12 @@ describe("05/11: escondidas sem ação na app viva (venda direta, ordens/custos 
     });
   });
 
-  it("as linhas/subgrupos que ficaram vazios desaparecem: Venda Direta e Listas; Operação e Marketing ficam com o resto", () => {
-    expect(PERMISSOES_EM_USO.direct_sales).toBeUndefined();
-    const documentos = grupos().find((g) => g.rotulo === "Documentos do negócio")!;
-    expect(documentos.subgrupos.map((s) => s.rotulo)).not.toContain("Venda Direta");
+  it("as linhas/subgrupos que ficaram vazios desaparecem: Listas; Marketing fica com o resto; ronda 2: Operação sai (Venda Direta volta a 06/11)", () => {
+    expect(PERMISSOES_EM_USO.direct_sales).toEqual(["direct_sales.view"]);
     const marketing = grupos().find((g) => g.rotulo === "Marketing")!;
     expect(marketing.subgrupos.map((s) => s.rotulo)).not.toContain("Listas");
     expect(marketing.permissoes.some((p) => p.codigo.startsWith("lists."))).toBe(false);
-    expect(grupos().find((g) => g.rotulo === "Operação")?.permissoes.map((p) => p.codigo)).toEqual(["operations.view"]);
+    expect(grupos().find((g) => g.rotulo === "Operação")).toBeUndefined();
     // Nenhum subgrupo nem grupo do editor fica vazio.
     grupos().forEach((g) => {
       expect(g.permissoes.length, g.rotulo).toBeGreaterThan(0);
@@ -603,12 +526,66 @@ describe("05/11: escondidas sem ação na app viva (venda direta, ordens/custos 
   it("uma role que as tem não as perde ao gravar", () => {
     const linha = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
     const visiveis = permissoesDoMenu([
-      linha("operations.view", "operations"), linha("direct_sales.view", "direct_sales"), linha("operations.orders.view", "operations"),
+      linha("operations.view", "operations"), linha("operations.orders.view", "operations"),
       linha("operations.orders.view_all", "operations"), linha("operations.costs.view", "operations"), linha("lists.view", "marketing"),
       linha("clients.import", "clients"), linha("leads.import", "leads"),
     ]);
-    expect(visiveis.map((p) => p.codigo)).toEqual(["operations.view"]);
-    const gravado = fundirPermissoes(ESCONDIDAS_05_11, ["operations.view"], visiveis);
+    // ronda 2: operations.view também está escondida — o editor não mostra nenhuma, e quem as tem fica com todas ao gravar.
+    expect(visiveis.map((p) => p.codigo)).toEqual([]);
+    const gravado = fundirPermissoes([...ESCONDIDAS_05_11, "operations.view"], [], visiveis);
     expect([...gravado].sort()).toEqual([...ESCONDIDAS_05_11, "operations.view"].sort());
+  });
+});
+
+describe("06/11: Pedidos de Proposta (deals, CRM antigo) saem do editor; deals.delete fica em Definições › Lixo", () => {
+  const grupos = () => agruparPorMenu(emUso);
+  const noEditor = () => grupos().flatMap((g) => g.permissoes.map((p) => p.codigo));
+
+  it("deals.view, deals.create e deals.edit estão escondidas e fora do editor; deals.delete continua em uso", () => {
+    ["deals.view", "deals.create", "deals.edit"].forEach((c) => {
+      expect(CODIGOS_ESCONDIDOS, c).toContain(c);
+      expect(CODIGOS_EM_USO, c).not.toContain(c);
+      expect(noEditor(), c).not.toContain(c);
+    });
+    expect(PERMISSOES_EM_USO.deals).toEqual(["deals.delete"]);
+    expect(CODIGOS_ESCONDIDOS).not.toContain("deals.delete");
+  });
+
+  it("não há subgrupo «Pedidos de Proposta» em grupo nenhum", () => {
+    expect(grupos().flatMap((g) => g.subgrupos.map((s) => s.rotulo))).not.toContain("Pedidos de Proposta");
+  });
+
+  it("deals.delete está em Definições (bloco Lixo, com trash.view) e em mais lado nenhum", () => {
+    const definicoes = grupos().find((g) => g.rotulo === "Definições")!;
+    const lixo = definicoes.blocos.find((b) => b.categoria === "trash")!;
+    expect(lixo.permissoes.map((p) => p.codigo).sort()).toEqual(["deals.delete", "trash.view"]);
+    const noutros = grupos().filter((g) => g.rotulo !== "Definições").flatMap((g) => g.permissoes.map((p) => p.codigo));
+    expect(noutros).not.toContain("deals.delete");
+  });
+
+  it("as guardas que ainda citam deals.view não mudam (âmbito da pesquisa de pedidos antigos, Lixo, Hoje)", () => {
+    expect(readFileSync(join(SRC, "components/QuoteBuilder.tsx"), "utf8")).toContain('getPermissionScope("deals.view")');
+    expect(readFileSync(join(SRC, "lib/search/scopedEntitySearch.ts"), "utf8")).toContain('resolveBranchScope(viewer, "deals.view")');
+    expect(readFileSync(join(SRC, "pages/Trash.tsx"), "utf8")).toContain('getPermissionScope("deals.view")');
+    expect(ESCONDIDAS_COM_GUARDA["deals.view"]).toEqual(expect.arrayContaining(["components/QuoteBuilder.tsx", "lib/search/scopedEntitySearch.ts", "pages/Trash.tsx"]));
+  });
+
+  it("/deals e /negocio-metas redirecionam para /negocios e as páginas deixam de ser carregadas; o atalho da Home saiu", () => {
+    const app = readFileSync(join(SRC, "App.tsx"), "utf8");
+    expect(app).toMatch(/path="\/deals" element=\{<Navigate to="\/negocios" replace \/>\}/);
+    expect(app).toMatch(/path="\/negocio-metas" element=\{<Navigate to="\/negocios" replace \/>\}/);
+    expect(app).not.toMatch(/import\("\.\/pages\/(?:Deals|NegocioMetas)"\)/);
+    expect(readFileSync(join(SRC, "components/home/QuickLinks.tsx"), "utf8")).not.toContain('"/deals"');
+  });
+
+  it("um papel que já tinha deals.view/create/edit mantém-nas ao gravar", () => {
+    const linha = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
+    const visiveis = permissoesDoMenu([
+      linha("deals.view", "deals"), linha("deals.create", "deals"), linha("deals.edit", "deals"), linha("deals.delete", "deals"),
+      linha("trash.view", "trash"),
+    ]);
+    expect(visiveis.map((p) => p.codigo)).toEqual(["deals.delete", "trash.view"]);
+    const gravado = fundirPermissoes(["deals.view", "deals.create", "deals.edit", "deals.delete"], ["trash.view"], visiveis);
+    expect([...gravado].sort()).toEqual(["deals.create", "deals.edit", "deals.view", "trash.view"]);
   });
 });

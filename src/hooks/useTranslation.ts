@@ -20,6 +20,8 @@ import { rhExemploFluxosATranslations } from "@/translations/rhExemploFluxosA";
 import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
 import { rhExemploHorarioRealTranslations } from "@/translations/rhExemploHorarioReal";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
+import { rhExemploFilaTranslations } from "@/translations/rhExemploFila";
+import { hrRegrasSalariaisTranslations } from "@/translations/hrRegrasSalariais";
 import { rhExemploHorasExtraRealTranslations } from "@/translations/rhExemploHorasExtraReal";
 import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
 import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
@@ -148,6 +150,16 @@ Object.keys(rhExemploJustificacoesTranslations).forEach((lang) => {
 // Frente D: banco de horas na ficha e horas extra pendentes na fila de trabalho (`rhFluxosD.*`).
 Object.keys(rhExemploFluxosDTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosDTranslations[lang as keyof typeof rhExemploFluxosDTranslations] };
+});
+
+// Fila de trabalho do mapa de assiduidade: pessoas com pendências e painel da pessoa (`rhFila.*`).
+Object.keys(rhExemploFilaTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFilaTranslations[lang as keyof typeof rhExemploFilaTranslations] };
+});
+
+// Regras salariais da organizacao e direitos salariais da pessoa (`hr.regrasSalariais.*`, `hr.direitosSalariais.*`).
+Object.keys(hrRegrasSalariaisTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...hrRegrasSalariaisTranslations[lang as keyof typeof hrRegrasSalariaisTranslations] };
 });
 
 // Horas extra ligadas à base: coeficientes de pagamento = códigos de processamento (`rhHeReal.*`).

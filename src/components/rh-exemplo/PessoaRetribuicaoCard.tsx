@@ -11,12 +11,14 @@
  * cargo, o cartao di-lo e nao oferece nenhum botao de escrita: sem cargo nao ha
  * salario base.
  *
- * O QUE E DA PESSOA: SUBSIDIO E DUODECIMOS
- * ------------------------------------------
+ * O QUE E DA PESSOA: MODO DO SUBSIDIO E DUODECIMOS
+ * ------------------------------------------------
+ * O VALOR do subsidio de alimentacao ja NAO e da pessoa: vem da regra salarial da
+ * organizacao (obrigatorio no cargo, sem excepcoes) e o cartao mostra-o so em leitura.
  * O unico gesto de escrita e "Alterar subsidio e duodecimos" (ou "Definir ...",
  * quando ainda nao ha versao): cria uma versao nova a partir de uma data com o
- * valor base do cargo NESSA data e o subsidio (valor e modo) e os duodecimos
- * escolhidos. Vai por `rpc_hr_retribuicao_definir_pessoal`
+ * valor base do cargo NESSA data, o modo do subsidio (dinheiro ou cartao) e os
+ * duodecimos escolhidos. Vai por `rpc_hr_retribuicao_definir_pessoal`
  * (`hr.pessoas.retribuicao.edit`, a mesma permissao que ja escrevia na
  * admissao); a base recusa o INSERT directo. Os duodecimos propoem 50 quando a
  * pessoa ainda nao tem valor (decisao do fluxo 1).
@@ -65,6 +67,7 @@ import {
 } from "@/components/rh-exemplo/lib/cargosPeriodos";
 import { DUODECIMOS_PROPOSTO } from "@/components/rh-exemplo/lib/novaPessoaCargo";
 import { usePessoaRetribuicao } from "@/components/rh-exemplo/hooks/usePessoaRetribuicao";
+import { useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
 import type { HrCargo } from "@/components/rh-exemplo/hooks/useCargos";
 import type { PessoaRetribuicao, SubsidioAlimentacaoModo } from "@/components/rh-exemplo/tipos";
 
@@ -97,7 +100,6 @@ type DuodecimosEscolha = "" | "0" | "50" | "100";
 
 /** O que se escolhe ao definir o que e da pessoa. */
 type RascunhoPessoal = {
-  subsidioAlimentacao: string;
   subsidioAlimentacaoModo: SubsidioAlimentacaoModo | "";
   duodecimosPct: DuodecimosEscolha;
   validoDe: string;
@@ -113,20 +115,6 @@ function duodecimosDe(valor: number | null | undefined): DuodecimosEscolha {
 
 function duodecimosPctDe(escolha: DuodecimosEscolha): 0 | 50 | 100 | null {
   return escolha === "" ? null : (Number(escolha) as 0 | 50 | 100);
-}
-
-function subsidioDe(texto: string): number | null {
-  const limpo = texto.trim().replace(",", ".");
-  if (limpo === "") return null;
-  const n = Number(limpo);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** Subsidio escrito mas ilegivel ou negativo. Vazio nao e erro. */
-function subsidioInvalido(texto: string): boolean {
-  if (texto.trim() === "") return false;
-  const n = subsidioDe(texto);
-  return n === null || n < 0;
 }
 
 function modoDe(escolha: SubsidioAlimentacaoModo | ""): SubsidioAlimentacaoModo | null {
@@ -145,6 +133,7 @@ export function PessoaRetribuicaoCard({
   onMudou,
 }: PessoaRetribuicaoCardProps) {
   const { t } = useTranslation();
+  const { emVigor: regra } = useRegrasSalariais();
   const { versoes, aberta, loading, saving, definirPessoal, corrigir } = usePessoaRetribuicao(
     pessoaId,
     organizationId,
@@ -170,7 +159,6 @@ export function PessoaRetribuicaoCard({
   // -- Dialogo "Alterar subsidio e duodecimos" -----------------------------
   const [pessoalAberto, setPessoalAberto] = useState(false);
   const [rascunho, setRascunho] = useState<RascunhoPessoal>({
-    subsidioAlimentacao: "",
     subsidioAlimentacaoModo: "",
     duodecimosPct: "",
     validoDe: hoje,
@@ -179,8 +167,6 @@ export function PessoaRetribuicaoCard({
 
   const abrirPessoal = () => {
     setRascunho({
-      subsidioAlimentacao:
-        aberta?.subsidio_alimentacao != null ? String(aberta.subsidio_alimentacao) : "",
       subsidioAlimentacaoModo: aberta?.subsidio_alimentacao_modo ?? "",
       // Sem valor, propoe-se 50 (decisao do fluxo 1).
       duodecimosPct:
@@ -198,10 +184,6 @@ export function PessoaRetribuicaoCard({
       toast.error(t("hr.retribuicaoCartao.erroSemData"));
       return;
     }
-    if (subsidioInvalido(rascunho.subsidioAlimentacao)) {
-      toast.error(t("hr.retribuicaoCartao.erroSubsidioInvalido"));
-      return;
-    }
     // Uma versao de origem "pessoa" em vigor so se substitui com data POSTERIOR ao
     // seu inicio; as de cargo ou subida fecham-se na data que a base decidir.
     if (aberta && (aberta.origem ?? "pessoa") === "pessoa" && rascunho.validoDe <= aberta.valido_de) {
@@ -210,7 +192,6 @@ export function PessoaRetribuicaoCard({
     }
     const erro = await definirPessoal(
       rascunho.validoDe,
-      subsidioDe(rascunho.subsidioAlimentacao),
       modoDe(rascunho.subsidioAlimentacaoModo),
       duodecimosPctDe(rascunho.duodecimosPct),
       rascunho.motivo.trim() || null,
@@ -227,7 +208,6 @@ export function PessoaRetribuicaoCard({
   // -- Dialogo "Corrigir" (reescreve uma versao ja decorrida) ---------------
   const [linhaACorrigir, setLinhaACorrigir] = useState<PessoaRetribuicao | null>(null);
   const [correcao, setCorrecao] = useState<RascunhoCorrecao>({
-    subsidioAlimentacao: "",
     subsidioAlimentacaoModo: "",
     duodecimosPct: "",
     validoDe: "",
@@ -239,7 +219,6 @@ export function PessoaRetribuicaoCard({
   const abrirCorrigir = (linha: PessoaRetribuicao) => {
     setLinhaACorrigir(linha);
     setCorrecao({
-      subsidioAlimentacao: linha.subsidio_alimentacao != null ? String(linha.subsidio_alimentacao) : "",
       subsidioAlimentacaoModo: linha.subsidio_alimentacao_modo ?? "",
       duodecimosPct: duodecimosDe(linha.duodecimos_pct),
       validoDe: linha.valido_de,
@@ -255,10 +234,6 @@ export function PessoaRetribuicaoCard({
       toast.error(t("hr.retribuicaoCartao.erroSemData"));
       return;
     }
-    if (subsidioInvalido(correcao.subsidioAlimentacao)) {
-      toast.error(t("hr.retribuicaoCartao.erroSubsidioInvalido"));
-      return;
-    }
     if (correcao.moeda.trim().length !== 3) {
       toast.error(t("hr.retribuicaoCartao.erroMoedaInvalida"));
       return;
@@ -269,7 +244,6 @@ export function PessoaRetribuicaoCard({
     }
     const erro = await corrigir(linhaACorrigir.id, {
       moeda: correcao.moeda.trim().toUpperCase(),
-      subsidioAlimentacao: subsidioDe(correcao.subsidioAlimentacao),
       subsidioAlimentacaoModo: modoDe(correcao.subsidioAlimentacaoModo),
       duodecimosPct: duodecimosPctDe(correcao.duodecimosPct),
       validoDe: correcao.validoDe,
@@ -285,29 +259,33 @@ export function PessoaRetribuicaoCard({
     onMudou?.();
   };
 
+  const dinheiro = (n: number) => new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(n);
+  const textoDoSubsidioDaRegra = regra
+    ? t("hr.retribuicaoCartao.subsidioDaRegra", {
+        dia: dinheiro(regra.subsidio_valor_dia),
+        hora: dinheiro(regra.subsidio_valor_hora),
+        limite: String(Math.round((regra.subsidio_limite_min / 60) * 100) / 100).replace(".", ","),
+      })
+    : t("hr.retribuicaoCartao.subsidioSemRegra");
+
   const opcoesSubsidioModo = MODOS_SUBSIDIO.map((m) => ({
     value: m,
     label: t(`hr.subsidioAlimentacaoModo.${m}`),
   }));
   const opcoesDuodecimos = DUODECIMOS_OPCOES.map((d) => ({ value: String(d), label: `${d}%` }));
 
-  /** Os tres campos que sao da pessoa: iguais no dialogo de alterar e no de corrigir. */
+  /** O subsidio (so leitura, vem da regra da organizacao) e os campos da pessoa: iguais no dialogo de alterar e no de corrigir. */
   const camposDaPessoa = (
     prefixo: string,
     valor: RascunhoPessoal,
     mudar: (patch: Partial<RascunhoPessoal>) => void,
   ) => (
     <>
-      <div className="grid grid-cols-2 gap-3">
-        <CampoTexto
-          id={`${prefixo}-subsidio`}
-          label={t("hr.retribuicaoCartao.subsidioAlimentacao")}
-          tipo="number"
-          min={0}
-          step="0.01"
-          valor={valor.subsidioAlimentacao}
-          onChange={(v) => mudar({ subsidioAlimentacao: v })}
-        />
+      <p id={`${prefixo}-subsidio-regra`} className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{t("hr.retribuicaoCartao.subsidioAlimentacao")}: </span>
+        {textoDoSubsidioDaRegra}
+      </p>
+      <div className="grid grid-cols-1 gap-3">
         <CampoSelect
           id={`${prefixo}-subsidio-modo`}
           label={t("hr.retribuicaoCartao.subsidioAlimentacaoModo")}

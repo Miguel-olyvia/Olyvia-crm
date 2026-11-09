@@ -11,6 +11,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { resolveContractsScopeUserIds, canActOnContract } from "@/lib/contracts/scope";
 import { contractHasQuotes, contractQuotesRoute } from "@/lib/contracts/quoteNavigation";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useTranslation } from "@/hooks/useTranslation";
 import Layout from "@/components/Layout";
@@ -187,6 +188,8 @@ const ClientContracts = () => {
   } = usePermissionScope();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  // 05/11 (ronda 2): as ligações para as outras páginas fora do menu pedem a permissão da rota (lib/rotasForaDoMenu.ts).
+  const podeAbrir = usePodeAbrirDestino();
   // Abre a FICHA do cliente do contrato (a lista de clientes aceita ?open=<id do cliente ou da entidade>).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const verCliente = (c: any) => {
@@ -2090,7 +2093,7 @@ const ClientContracts = () => {
                       </TableCell>
                       <TableCell>
                         {contract.proposals ? (
-                          <Badge variant="outline" className="text-xs cursor-pointer hover:bg-primary/10" onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}>
+                          <Badge variant="outline" className={podeAbrir("/proposals") ? "text-xs cursor-pointer hover:bg-primary/10" : "text-xs"} onClick={podeAbrir("/proposals") ? () => navigate(`/proposals?open=${contract.proposal_id}`) : undefined}>
                             {contract.proposals.title || "Proposta"}
                           </Badge>
                         ) : <span className="text-xs text-muted-foreground">—</span>}
@@ -2245,11 +2248,11 @@ const ClientContracts = () => {
                                       uma lista vazia sem dizer que estava filtrada — quem lá
                                       chegava concluía que os orçamentos tinham desaparecido. */}
                                   <DropdownMenuItem
-                                    disabled={!contract.proposal_id}
+                                    disabled={!contract.proposal_id || !podeAbrir("/proposals")}
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contractHasQuotes(contract)}
+                                    disabled={!contractHasQuotes(contract) || !podeAbrir("/quotes")}
                                     onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem className="text-muted-foreground">👤 Ver cliente (não criado)</DropdownMenuItem>
@@ -2291,15 +2294,15 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => { toast.info(t('clientContracts.toast.createNewProposalHint')); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
+                                  <DropdownMenuItem disabled={!podeAbrir("/proposals")} onClick={() => { toast.info(t('clientContracts.toast.createNewProposalHint')); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem
-                                    disabled={!contract.proposal_id}
+                                    disabled={!contract.proposal_id || !podeAbrir("/proposals")}
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contractHasQuotes(contract)}
+                                    disabled={!contractHasQuotes(contract) || !podeAbrir("/quotes")}
                                     onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
@@ -2328,7 +2331,7 @@ const ClientContracts = () => {
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem
-                                    disabled={!contract.proposal_id}
+                                    disabled={!contract.proposal_id || !podeAbrir("/proposals")}
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
@@ -2344,11 +2347,11 @@ const ClientContracts = () => {
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem
-                                    disabled={!contract.proposal_id}
+                                    disabled={!contract.proposal_id || !podeAbrir("/proposals")}
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contractHasQuotes(contract)}
+                                    disabled={!contractHasQuotes(contract) || !podeAbrir("/quotes")}
                                     onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>

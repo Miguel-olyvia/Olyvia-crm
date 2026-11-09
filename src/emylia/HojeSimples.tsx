@@ -258,7 +258,8 @@ export function HojeSimples({ S, A, run, go }: Ctx) {
   );
 
   const cabecalho = (
-    <header className={cn(cols === 3 && r === "direcao" ? "grid grid-cols-[minmax(0,1fr)_minmax(0,50rem)] items-end gap-10" : "grid grid-cols-[minmax(0,1fr)_minmax(0,40rem)] items-end gap-10")}>
+    // 9/11 (Rúben, telemóvel): numa coluna só, sem a segunda coluna dos números (vazia, mas ficava com os 40rem e espremia a saudação)
+    <header className={cn(cols === 1 ? "" : cols === 3 && r === "direcao" ? "grid grid-cols-[minmax(0,1fr)_minmax(0,50rem)] items-end gap-10" : "grid grid-cols-[minmax(0,1fr)_minmax(0,40rem)] items-end gap-10")}>
       <div className="min-w-0">
         <p className="text-[15px] text-muted-foreground first-letter:uppercase">{format(agora, "EEEE, d 'de' MMMM", { locale: pt })}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">{saudacao(agora.getHours())}, {PAPEIS[r].nome}</h1>

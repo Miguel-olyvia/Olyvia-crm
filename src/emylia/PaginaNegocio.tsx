@@ -2,7 +2,7 @@
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -12,6 +12,8 @@ import {
 } from "./motor";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
+import { EstudioNaVisita, FecharVisita } from "./VisitaEstudio";
+import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RegistarFaturaErp } from "./FaturaErp";
@@ -42,7 +44,8 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
+import { SEM_PERM, permEmFaltaDoPasso } from "./permissoes";
+import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -328,28 +331,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
     const nMed = CM.length;
     const gv = visitas(d).map(grupoVisita), cv = contagem(gv, d.f);
-    passos = [
-      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) || visitas(d).some((n) => d.f[`v${n}_estado`] !== "Cancelada") ? 1 : 0), n: cv.n + 1 }, // a visita fica feita sozinha: só falta se todas estão canceladas
-        resumo: [`${visitas(d).length} ${visitas(d).length === 1 ? "visita" : "visitas"}`, visitaFeita(d) ? "feita" : "por fazer"],
-        corpo: <VisitasLista ctx={ctx} d={d} simples={simples} /> },
-      // 27/10 (Rúben): os passos com fotografias não passam sozinhos ao seguinte (saltavam antes de se poder tirar a foto)
-      { ...g(EXTERIOR, Building2), semAvancar: true, corpo: (
-        <div className="space-y-6">
-          {/* 27/10: a morada já está no cabeçalho; aqui só a confirmação no local */}
-          <UsarLocalizacao ctx={ctx} d={d} texto="Confirmar a morada pela localização" />
-          <Campos grupo={E(EXTERIOR)} {...fx} />
-          <FotosEtapa ctx={ctx} d={d} etapa="exterior" simples={simples} />
-        </div>
-      ) },
-      { ...g(INTERIOR, Home), semAvancar: true, corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
-      // várias divisões: um grupo de campos por divisão (gruposArea), contados todos no passo
-      // 27/10: as fotografias contam como uma resposta do passo: feita com fotografias ou com "o cliente não quis"
-      { ...g(AREA, Wrench), semAvancar: true, conta: (({ f, n }) => ({ f: f + (v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim" ? 1 : 0), n: n + 1 }))(contagem(GA, d.f)), corpo: <div className="space-y-6">{GA.map((ga) => <Campos key={ga.titulo} grupo={ga} {...fx} />)}<FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
-      // 28/10: uma linha sem medidas (a "geral": as quantidades escrevem-se em cada serviço) não mostra um passo vazio
-      ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
+    const corpoMedidas = (comPlanta: boolean) => (
         <div className="space-y-2">
           {/* 5/11 (Rúben, a visita real): a planta da folha, no ecrã; dá os m² do chão e das paredes */}
-          {simples && (CM.some(([k]) => k === "pav") || CM.some(([k]) => k === "par")) && (
+          {comPlanta && simples && (CM.some(([k]) => k === "pav") || CM.some(([k]) => k === "par")) && (
             <details className="group mb-6 rounded-2xl border border-border bg-card p-4" open={!!d.f.planta || undefined}>
               <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-[15px] font-semibold">
                 Desenhar a planta{divisaoPrincipal(d.f) ? ` da ${divisaoPrincipal(d.f)!.toLowerCase()}` : ""}
@@ -379,15 +364,58 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
             <Campos grupo={{ titulo: "", campos: [{ k: "obs_medidas", l: "Observações", t: "texto_longo", opcional: true }] }} {...fx} />
           </div>
         </div>
-      ) }]),
+    );
+    const resumoMedidas = CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`);
+    const comWC = d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho");
+    // 6/11: a cozinha também segue o Estúdio
+    const comEstudio = comWC || d.linha === "coz" || divisoesEscolhidas(d.f).includes("Cozinha");
+    const passoNec: Passo = { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
+      resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> };
+    passos = [
+      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) || visitas(d).some((n) => d.f[`v${n}_estado`] !== "Cancelada") ? 1 : 0), n: cv.n + 1 }, // a visita fica feita sozinha: só falta se todas estão canceladas
+        resumo: [`${visitas(d).length} ${visitas(d).length === 1 ? "visita" : "visitas"}`, visitaFeita(d) ? "feita" : "por fazer"],
+        corpo: <VisitasLista ctx={ctx} d={d} simples={simples} /> },
+      // 27/10 (Rúben): os passos com fotografias não passam sozinhos ao seguinte (saltavam antes de se poder tirar a foto)
+      { ...g(EXTERIOR, Building2), semAvancar: true, corpo: (
+        <div className="space-y-6">
+          {/* 27/10: a morada já está no cabeçalho; aqui só a confirmação no local */}
+          <UsarLocalizacao ctx={ctx} d={d} texto="Confirmar a morada pela localização" />
+          <Campos grupo={E(EXTERIOR)} {...fx} />
+          <FotosEtapa ctx={ctx} d={d} etapa="exterior" simples={simples} />
+        </div>
+      ) },
+      { ...g(INTERIOR, Home), semAvancar: true, corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
+      // várias divisões: um grupo de campos por divisão (gruposArea), contados todos no passo
+      // 27/10: as fotografias contam como uma resposta do passo: feita com fotografias ou com "o cliente não quis"
+      { ...g(AREA, Wrench), semAvancar: true, conta: (({ f, n }) => ({ f: f + (v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim" ? 1 : 0), n: n + 1 }))(contagem(GA, d.f)), corpo: <div className="space-y-6">{GA.map((ga) => <Campos key={ga.titulo} grupo={ga} {...fx} />)}<FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
+      // 28/10: uma linha sem medidas (a "geral": as quantidades escrevem-se em cada serviço) não mostra um passo vazio
+      ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: resumoMedidas, corpo: corpoMedidas(true) }]),
       // na versão Atual simples, as "Escolhas do cliente" respondem-se dentro das Necessidades (seleção guiada, 14/10/2026)
-      { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
-        resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
+      passoNec,
       ...(simples ? [] : [g(ESCOLHAS, Sparkles)]),
       // 5/11 (Rúben, a visita real): a folha da visita, peça a peça (só com casa de banho), e o prazo e a decisão do cliente
-      ...(d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho") ? [g(PECAS_WC, Bath)] : []),
+      ...(comWC ? [g(PECAS_WC, Bath)] : []),
       g(DECISAO, CalendarCheck),
     ];
+    // 6/11 (Rúben: «o Estúdio já está a fazer praticamente tudo»): numa casa de banho, depois do interior e da área vem o Estúdio; as
+    // medidas, as necessidades e as peças saem dele e ficam dobradas no fecho, com o prazo e a decisão e o plano de obra estimado
+    if (simples && comEstudio) {
+      const pr = projetoDoNegocio(d.f);
+      const ePecas = E(PECAS_WC), eDecisao = E(DECISAO);
+      const ate = passos.findIndex((x) => x.id === "medidas" || x.id === "nec");
+      passos = [
+        ...passos.slice(0, ate),
+        { id: "estudio", titulo: "Estúdio", icone: Sparkles, feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0,
+          resumo: pr ? ["projeto guardado"] : ["por abrir"], corpo: <EstudioNaVisita ctx={ctx} d={d} /> },
+        { id: "fecho", titulo: "Fechar a visita", icone: CalendarCheck, feito: medOk === nMed && passoNec.feito === true,
+          resumo: [d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : "", d.f.decisao_ate ? `decide até ${d.f.decisao_ate}` : ""].filter(Boolean),
+          corpo: <FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+            ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: aValidar(d, "medidas") ? nMed - medOk : 0 }]),
+            { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0 },
+            ...(ePecas.oculto || !comWC ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
+          ]} /> },
+      ];
+    }
   } else if (fase === 3 && o) {
     passos = [
       // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
@@ -447,6 +475,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     const gr = TODOS.find((x) => x.titulo === ps.id);
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta(gr === AREA ? gruposArea(S.campos, d.f).map(E) : [E(gr)], d.f).length;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
+    if (ps.id === "fecho") ps.falta = ((aValidar(d, "medidas") ? camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length : 0) + (aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0)) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;
     if (ps.id === "nec" && simples && aValidar(d, ESCOLHAS.titulo) && !E(ESCOLHAS).oculto) ps.falta = (ps.falta || 0) + emFalta([E(ESCOLHAS)], d.f).length || undefined;
@@ -456,17 +485,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   return passos;
 }
 
-/** 4/11: as permissões que o servidor pede ao passo de cada botão (neg_guardar_negocio, neg_validar_pagamento, neg_registar_fatura): sem
- *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
-const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
-  contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.gerir", "orcamento.editar"],
-  pedidoCliente: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
-  enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
-  aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
-};
-/** A primeira permissão que falta a quem está no ecrã para o passo `act` (null: tem todas, ou o passo não pede nenhuma). */
-export const permEmFaltaDoPasso = (S: Ctx["S"], act: string | undefined): PermNeg | null =>
-  (act ? PERM_DO_PASSO[act] ?? [] : []).find((x) => !podeNeg(S.role, x)) ?? null;
+// 6/11: PERM_DO_PASSO e permEmFaltaDoPasso passaram para permissoes.ts (o CaminhoObra também os usa, sem carregar esta página)
+export { permEmFaltaDoPasso };
 
 /** O botão do próximo passo do negócio (ou o simulador do cliente). */
 export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
@@ -474,6 +494,8 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   const idSemPerm = useId();
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
   const falta = meu && p.btn ? permEmFaltaDoPasso(S, p.act) : null;
+  // 9/11: o super admin, numa base de teste, age pelo cliente (aceitar a proposta, assinar o contrato)
+  const teste = useModoTeste();
   // 04/11/2026: enviar a proposta / o contrato ao portal pede também a permissão real de quem está ligado (permPortalPasso.tsx)
   const portal = usePermPortalDoPasso(p.act, meu && !!p.btn && !falta);
   if (falta) return (
@@ -501,7 +523,12 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
       </div>
     );
   // 27/10 (Rúben): sem o "Simular o cliente": quem aceita, recusa e assina é o cliente, no portal (o link da proposta)
-  if (p.sim) return <span className="text-sm text-muted-foreground">À espera do cliente no portal</span>;
+  if (p.sim) return (
+    <div className="grid justify-items-start gap-2 sm:justify-items-end">
+      <span className="text-sm text-muted-foreground">À espera do cliente no portal</span>
+      {teste && (p.sim === "aceitar" || p.sim === "assinar") && <BotaoTesteCliente d={d} acao={p.sim} tamanho={tamanho} />}
+    </div>
+  );
   if (p.wait && p.who === "direcao") return <Button variant="outline" size={tamanho} onClick={go(() => A.role("direcao"))}>Mudar para Direção</Button>;
   return null;
 }
@@ -747,6 +774,19 @@ function ObraResumo({ S, A, go, d }: Ctx & { d: Negocio }) {
 }
 
 /** 21/10: o passo Contrato antes de o cliente aceitar a proposta: fechado, com o porquê e o estado da proposta. */
+/** 9/11: o botão do modo de teste (só o super admin, numa base de teste): o que o cliente faz no portal, pelo mesmo caminho. */
+export function BotaoTesteCliente({ d, acao, tamanho = "default" }: { d: Negocio; acao: "aceitar" | "assinar"; tamanho?: "lg" | "default" }) {
+  const teste = useModoTeste();
+  const [aFazer, setAFazer] = useState(false);
+  if (!teste) return null;
+  const fazerTeste = () => { setAFazer(true); void (acao === "aceitar" ? teste.aceitarProposta(d) : teste.assinarContrato(d)).finally(() => setAFazer(false)); };
+  return (
+    <Button type="button" variant="outline" size={tamanho} className="border-dashed border-amber-500 text-amber-800 hover:bg-amber-50" disabled={aFazer} onClick={fazerTeste}>
+      <FlaskConical className="mr-2 h-4 w-4" aria-hidden="true" />{aFazer ? "A fazer pelo cliente…" : acao === "aceitar" ? "Aceitar a proposta pelo cliente (teste)" : "Assinar o contrato pelo cliente (teste)"}
+    </Button>
+  );
+}
+
 function ContratoBloqueado({ d }: { d: Negocio }) {
   const o = d.orc!;
   const estado = o.pedidoCliente ? `${d.nome.split(" ")[0]} pediu alterações: faça a versão nova e envie-a de novo.`
@@ -757,6 +797,7 @@ function ContratoBloqueado({ d }: { d: Negocio }) {
       <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground" aria-hidden="true"><Lock className="h-5 w-5" /></span>
       <p className="mt-3 text-lg font-semibold">O contrato abre quando o cliente aceitar a proposta</p>
       <p className="mx-auto mt-1 max-w-md text-[15px] text-muted-foreground">{estado}</p>
+      {o.enviada && !o.pedidoCliente && <div className="mt-4 flex justify-center"><BotaoTesteCliente d={d} acao="aceitar" /></div>}
     </div>
   );
 }

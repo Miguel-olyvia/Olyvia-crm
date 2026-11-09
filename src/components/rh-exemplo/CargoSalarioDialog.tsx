@@ -47,8 +47,8 @@ import type { Periodicidade } from "@/components/rh-exemplo/tipos";
 
 /** O motivo tem de ter pelo menos isto (sem contar espacos nas pontas) -- como a base. */
 const MOTIVO_MINIMO = 3;
-/** `hr_cargos_periodos` so aceita estas tres periodicidades. */
-const PERIODICIDADES_CARGO: readonly Periodicidade[] = ["mensal", "anual", "hora"];
+/** `hr_cargos_periodos` aceita estas periodicidades (a semanal desde a migration 20270107600000). */
+const PERIODICIDADES_CARGO: readonly Periodicidade[] = ["mensal", "semanal", "anual", "hora"];
 
 interface CargoSalarioDialogProps {
   cargo: HrCargo;

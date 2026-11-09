@@ -1,15 +1,11 @@
 // 5/11 (Rúben, a visita real): a planta no ecrã. Desenha-se com o dedo; tocar no número de uma parede deixa escrever a medida; as peças
 // juntam-se pela barra; «Usar nas medidas» põe os m² nas medidas. Tudo se grava em f.planta.
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlantaDivisao } from "./PlantaDivisao";
 import { lerPlanta, retangulo } from "./planta";
 import type { Ctx } from "./pecas";
 import type { Negocio } from "./motor";
-
-// estes testes usam os produtos de casa de banho (sanita, espelho…), que a lista do protótipo esconde por não terem modelo 3D do HTML:
-// aqui a lista mostra todos (o filtro tem testes próprios em planta3d/BarraProdutos.test.tsx)
-vi.mock("./planta3d/catalogo3d", async (original) => ({ ...(await original<typeof import("./planta3d/catalogo3d")>()), SO_COM_MODELO_HTML: false }));
 
 afterEach(cleanup);
 // jsdom não tem geometria: a planta mede 1 cm por píxel, a começar em (0,0)
@@ -49,15 +45,49 @@ describe("PlantaDivisao", () => {
     expect(screen.getByText("3 m²")).toBeInTheDocument();
   });
 
-  it("tocar no número de uma parede deixa escrever a medida certa; se deixa de fechar, diz quanto falta", () => {
+  it("tocar no número de uma parede deixa escrever a medida certa; a parede do outro lado acompanha e a planta continua fechada", () => {
     const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
     fireEvent.pointerDown(screen.getByRole("button", { name: "Parede 1: 200 cm. Escrever a medida." }));
     const caixa = screen.getByLabelText("Parede 1, em cm");
     fireEvent.change(caixa, { target: { value: "250" } });
     fireEvent.blur(caixa);
-    expect(lerPlanta(d.f.planta)?.paredes[0].c).toBe(250);
-    expect(screen.getByText("Faltam 50 cm até ao canto de partida.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Usar nas medidas" })).toBeDisabled();
+    expect(lerPlanta(d.f.planta)?.paredes.map((w) => w.c)).toEqual([250, 150, 250, 150]);
+    expect(screen.getByText("A planta fecha.")).toBeInTheDocument();
+    expect(screen.getByText("3,75 m²")).toBeInTheDocument();
+  });
+
+  it("tocar numa parede não põe o foco na caixa da medida (a página não desce); com o teclado, põe", async () => {
+    montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
+    const numero = screen.getByRole("button", { name: "Parede 3: 200 cm. Escrever a medida." });
+    fireEvent.pointerDown(numero);
+    expect(screen.getByLabelText("Parede 3, em cm")).not.toHaveFocus();
+    fireEvent.keyDown(numero, { key: "Enter" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByLabelText("Parede 3, em cm")).toHaveFocus();
+  });
+
+  it("arrastar uma parede muda-a de sítio: as vizinhas esticam e a planta continua fechada (5/11)", () => {
+    const { d, tela } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
+    // a parede da direita está em x = 200: agarrá-la a meio e puxar 40 cm para fora
+    const parede = tela.querySelectorAll("line[stroke='transparent']")[1];
+    fireEvent.pointerDown(parede, { clientX: 200, clientY: 75, pointerId: 2 });
+    fireEvent.pointerMove(tela, { clientX: 240, clientY: 80, pointerId: 2 });
+    fireEvent.pointerUp(tela, { clientX: 240, clientY: 80, pointerId: 2 });
+    expect(lerPlanta(d.f.planta)?.paredes.map((w) => w.c)).toEqual([240, 150, 240, 150]);
+    expect(screen.getByText("A planta fecha.")).toBeInTheDocument();
+  });
+
+  it("as peças encostadas à parede que se arrasta andam com ela", () => {
+    const { d, tela } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [
+      { id: "esp", tipo: "espelho", x: 196, y: 40, w: 4, h: 80 }, { id: "san", tipo: "sanita", x: 60, y: 40, w: 36, h: 55 },
+    ] }) });
+    const parede = tela.querySelectorAll("line[stroke='transparent']")[1];
+    fireEvent.pointerDown(parede, { clientX: 200, clientY: 20, pointerId: 3 });
+    fireEvent.pointerMove(tela, { clientX: 230, clientY: 20, pointerId: 3 });
+    fireEvent.pointerUp(tela, { clientX: 230, clientY: 20, pointerId: 3 });
+    const pecas = lerPlanta(d.f.planta)!.pecas;
+    expect(pecas.find((x) => x.id === "esp")?.x).toBe(226);
+    expect(pecas.find((x) => x.id === "san")?.x).toBe(60);
   });
 
   it("«Usar nas medidas» põe o chão e as paredes (pé-direito da visita, sem a porta) nas medidas", () => {
@@ -72,15 +102,12 @@ describe("PlantaDivisao", () => {
 
   it("uma peça junta-se pela barra, mexe-se com as setas e tira-se", () => {
     const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) });
-    // as peças genéricas ficam atrás de um botão quando o catálogo tem produtos para o espaço
-    const genericas = screen.queryByRole("button", { name: /peças genéricas/ });
-    if (genericas) fireEvent.click(genericas);
     fireEvent.keyDown(screen.getByRole("button", { name: "Sanita" }), { key: "Enter" });
     const peca = screen.getByRole("button", { name: /^Sanita, 36 por 55 cm/ });
     const x0 = lerPlanta(d.f.planta)!.pecas[0].x;
     fireEvent.keyDown(peca, { key: "ArrowRight" });
     expect(lerPlanta(d.f.planta)!.pecas[0].x).toBe(x0 + 5);
-    fireEvent.click(screen.getByRole("button", { name: "Remover" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tirar" }));
     expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
   });
 
@@ -93,226 +120,5 @@ describe("PlantaDivisao", () => {
     const ctx = { A: { campo: vi.fn() }, run: (fn: () => void) => fn() } as unknown as Ctx;
     render(<PlantaDivisao ctx={ctx} d={d} />);
     expect(screen.getByText("4,14 m²")).toBeInTheDocument();
-  });
-  it("um produto do catálogo (sanita) entra com o nome e a medida, roda 90 graus e duplica-se", () => {
-    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(300, 200), pecas: [] }) });
-    const chip = screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!;
-    fireEvent.keyDown(chip, { key: "Enter" });
-    const pc = lerPlanta(d.f.planta)!.pecas[0];
-    expect(pc.produto).toBeTruthy();
-    expect(pc.nome).toBeTruthy();
-    expect(pc.rot).toBeDefined();
-    const antes = pc.rot ?? 0;
-    fireEvent.click(screen.getByRole("button", { name: "Rodar 90° à direita" }));
-    expect(lerPlanta(d.f.planta)!.pecas[0].rot).toBe((antes + 90) % 360);
-    fireEvent.click(screen.getByRole("button", { name: "Duplicar" }));
-    expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(2);
-  });
-
-  it("um espelho do catálogo encosta-se à parede, a 1 m do chão, e fica dentro da divisão", () => {
-    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(300, 200), pecas: [] }) });
-    fireEvent.click(screen.getByRole("tab", { name: /^Espelhos/ }));
-    fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });
-    const pc = lerPlanta(d.f.planta)!.pecas[0];
-    expect(pc).toMatchObject({ mont: "parede", alt: 100 });
-    expect(pc.y).toBeGreaterThanOrEqual(-1.5);
-    expect(screen.getByLabelText("Altura ao chão (cm)")).toBeInTheDocument();
-  });
-
-  it("uma peça maior do que a divisão não entra: «Fora da divisão»", () => {
-    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(80, 80), pecas: [] }) });
-    fireEvent.click(screen.getByRole("tab", { name: /^Banheiras/ }));
-    fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });
-    expect(lerPlanta(d.f.planta)?.pecas ?? []).toEqual([]);
-    expect(screen.getByText(/^Fora da divisão/)).toBeInTheDocument();
-  });
-  it("uma família aparece uma só vez, com bolinhas de acabamento; escolher o acabamento muda a variante da peça (SKU e preço)", () => {
-    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
-    fireEvent.click(screen.getByRole("tab", { name: /^Banho \(famílias\)/ }));
-    expect(screen.getAllByText("Espelho com moldura (demo)")).toHaveLength(1);
-    fireEvent.click(screen.getAllByRole("button", { name: "Acabamento Moldura oro" })[0]);
-    fireEvent.keyDown(screen.getByRole("button", { name: /^Família Espelho com moldura 60×80 \(demo\), acabamento Moldura oro, SKU ESP-60×80-OR/ }), { key: "Enter" });
-    const pc = lerPlanta(d.f.planta)!.pecas[0];
-    expect(pc).toMatchObject({ fam: "espelho_f", med: "60×80", acab: "oro", mont: "parede", alt: 110 });
-    fireEvent.click(within(screen.getByRole("group", { name: "Variante da peça" })).getByRole("button", { name: "Acabamento Moldura alumínio" }));
-    expect(lerPlanta(d.f.planta)!.pecas[0]).toMatchObject({ acab: "aluminio" });
-  });
-
-  it("um conjunto (duche) põe as peças ligadas; retirar um componente deixa-o na lista como retirado, e repor traz-o de volta", () => {
-    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
-    fireEvent.click(screen.getByRole("tab", { name: /^Conjuntos/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Pôr o conjunto Conjunto de duche (demo) na planta" }));
-    const l = lerPlanta(d.f.planta)!.pecas;
-    expect(l.map((x) => x.papel)).toEqual(["base", "resguardo", "misturadora", "coluna"]);
-    expect(l.every((x) => x.conj === "cj1")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Retirar coluna de duche" }));
-    expect(lerPlanta(d.f.planta)!.pecas.find((x) => x.papel === "coluna")!.ret).toBe(true);
-    expect(screen.getAllByText(/retirado do conjunto/).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Repor coluna de duche" }));
-    expect(lerPlanta(d.f.planta)!.pecas.find((x) => x.papel === "coluna")!.ret).toBe(false);
-  });
-  it("na cozinha: sem conjuntos de banho; a bancada composta entra encostada e configura-se como no catálogo 3D", () => {
-    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
-    fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "cozinha" } });
-    expect(screen.queryByRole("tab", { name: /^Conjuntos/ })).toBeNull();
-    try {
-    fireEvent.click(screen.getByRole("tab", { name: /^Bancadas \(/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Pôr a bancada composta na planta" }));
-    const pc = lerPlanta(d.f.planta)!.pecas[0];
-    expect(pc).toMatchObject({ w: 240, h: 65, banc: { series: "canela-roma", sink: "velar50", hob: "ib65b60", tap: "round" } });
-    const painel = screen.getByRole("region", { name: "Configurar bancada" });
-    fireEvent.change(within(painel).getByRole("combobox", { name: "Série da bancada" }), { target: { value: "jungla" } });
-    expect(lerPlanta(d.f.planta)!.pecas[0].banc).toMatchObject({ series: "jungla", tone: "abeto", surface: "escovado" });
-    // uma posição que não serve mostra a mensagem do HTML e não se aplica
-    const placa = within(painel).getByRole("spinbutton", { name: "Placa · cm" });
-    fireEvent.change(placa, { target: { value: "90" } }); fireEvent.blur(placa);
-    expect(within(painel).getByRole("status")).toHaveTextContent(/Afasta o lava-loiça e a placa/);
-    expect(lerPlanta(d.f.planta)!.pecas[0].banc!.hobX).toBe(1800);
-    fireEvent.click(within(painel).getByRole("button", { name: "Trocar lados ⇄" }));
-    const b = lerPlanta(d.f.planta)!.pecas[0].banc!;
-    expect(b.sinkX).toBeGreaterThan(b.hobX);
-    expect(within(painel).getAllByText(/88JG42S/).length).toBeGreaterThan(0);
-    } finally {
-      // a preferência do espaço fica gravada: volta à casa de banho para os testes seguintes
-      fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "casa_banho" } });
-    }
-  });
-  describe("tirar peças da planta (sem acertar num alvo pequeno)", () => {
-    const sala = { planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) };
-    const poe = () => fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });
-    const peca = () => screen.getByRole("button", { name: /Setas para mover/ });
-    const tocar = (alvo: Element, tela: Element) => {
-      fireEvent.pointerDown(alvo, { clientX: 100, clientY: 100, pointerId: 7, pointerType: "touch" });
-      fireEvent.pointerUp(tela, { clientX: 100, clientY: 100, pointerId: 7, pointerType: "touch" });
-    };
-
-    it("tocar na peça (com o dedo) escolhe-a e mostra, logo por baixo da planta, o botão Remover com o nome", () => {
-      const { d, tela } = montar(sala);
-      poe();
-      fireEvent.click(screen.getByRole("button", { name: "Desescolher" }));
-      expect(screen.queryByRole("toolbar", { name: "Peça escolhida" })).toBeNull();
-      tocar(peca(), tela);
-      const barra = screen.getByRole("toolbar", { name: "Peça escolhida" });
-      fireEvent.click(within(barra).getByRole("button", { name: /^Remover / }));
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-    });
-    it("a lista «Peças na divisão» tem uma linha por peça, com Remover, Rodar e Duplicar de 44 px", () => {
-      const { d } = montar(sala);
-      poe(); poe();
-      const lista = screen.getByRole("list", { name: "Peças na divisão" });
-      expect(within(lista).getAllByRole("listitem")).toHaveLength(2);
-      const nome = lerPlanta(d.f.planta)!.pecas[0].nome!;
-      expect(within(lista).getAllByRole("button", { name: `Duplicar ${nome}` }).length).toBeGreaterThan(0);
-      expect(within(lista).getAllByRole("button", { name: `Remover ${nome}` })[0].className).toMatch(/min-h-11/);
-      fireEvent.click(within(lista).getAllByRole("button", { name: `Remover ${nome}` })[0]);
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(1);
-      fireEvent.click(within(screen.getByRole("list", { name: "Peças na divisão" })).getByRole("button", { name: `Rodar ${nome}` }));
-      expect(lerPlanta(d.f.planta)!.pecas[0].rot).toBeDefined();
-    });
-    it("Delete e Backspace removem a escolhida; Escape desescolhe", () => {
-      const { d } = montar(sala);
-      poe();
-      fireEvent.keyDown(document.body, { key: "Escape" });
-      expect(screen.queryByRole("toolbar", { name: "Peça escolhida" })).toBeNull();
-      fireEvent.keyDown(document.body, { key: "Delete" });
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(1); // nada escolhido: não faz nada
-      fireEvent.click(within(screen.getByRole("list", { name: "Peças na divisão" })).getAllByRole("button", { name: /^Escolher / })[0]);
-      fireEvent.keyDown(document.body, { key: "Delete" });
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-      poe();
-      fireEvent.keyDown(document.body, { key: "Backspace" });
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-    });
-    it("Delete dentro de um campo de texto não remove a peça", () => {
-      const { d } = montar(sala);
-      poe();
-      fireEvent.keyDown(screen.getByLabelText("Procurar no catálogo"), { key: "Backspace" });
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(1);
-    });
-    it("Desfazer e Refazer (botões e Ctrl+Z / Ctrl+Y) para pôr, rodar e remover", () => {
-      const { d } = montar(sala);
-      expect(screen.getByRole("button", { name: "Desfazer" })).toBeDisabled();
-      poe();
-      const nome = lerPlanta(d.f.planta)!.pecas[0].nome!;
-      fireEvent.click(within(screen.getByRole("list", { name: "Peças na divisão" })).getByRole("button", { name: `Rodar ${nome}` }));
-      const rodada = lerPlanta(d.f.planta)!.pecas[0].rot;
-      fireEvent.click(within(screen.getByRole("toolbar", { name: "Peça escolhida" })).getByRole("button", { name: /^Remover / }));
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-      fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(1);
-      fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
-      expect(lerPlanta(d.f.planta)!.pecas[0].rot).not.toBe(rodada);
-      fireEvent.keyDown(document.body, { key: "y", ctrlKey: true });
-      expect(lerPlanta(d.f.planta)!.pecas[0].rot).toBe(rodada);
-      fireEvent.click(screen.getByRole("button", { name: "Refazer" }));
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-      fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
-      fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
-      fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]); // voltou ao início
-    });
-    it("«Limpar todas as peças» pede confirmação, e Cancelar não limpa", () => {
-      const { d } = montar(sala);
-      poe(); poe();
-      fireEvent.click(screen.getByRole("button", { name: "Limpar todas as peças" }));
-      fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(2);
-      fireEvent.click(screen.getByRole("button", { name: "Limpar todas as peças" }));
-      fireEvent.click(screen.getByRole("button", { name: "Sim, limpar todas" }));
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-      fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(2);
-    });
-    it("arrastar a peça para fora da planta remove-a (e Desfazer repõe-na)", () => {
-      const { d, tela } = montar(sala);
-      Object.assign(tela, { getBoundingClientRect: () => ({ left: 0, top: 0, right: 500, bottom: 400, width: 500, height: 400, x: 0, y: 0, toJSON: () => ({}) }) });
-      poe();
-      fireEvent.pointerDown(peca(), { clientX: 100, clientY: 100, pointerId: 3 });
-      fireEvent.pointerMove(tela, { clientX: 700, clientY: 100, pointerId: 3 });
-      fireEvent.pointerUp(tela, { clientX: 700, clientY: 100, pointerId: 3 });
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-      expect(screen.getByText(/Peça removida: foi largada fora da planta/)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(1);
-    });
-    it("arrastar dentro da planta mexe a peça sem a remover; só tocar não grava nem enche o histórico", () => {
-      const { d, tela } = montar(sala);
-      Object.assign(tela, { getBoundingClientRect: () => ({ left: 0, top: 0, right: 500, bottom: 400, width: 500, height: 400, x: 0, y: 0, toJSON: () => ({}) }) });
-      poe();
-      const antes = lerPlanta(d.f.planta)!.pecas[0];
-      tocar(peca(), tela);
-      expect(lerPlanta(d.f.planta)!.pecas[0]).toEqual(antes);
-      fireEvent.pointerDown(peca(), { clientX: antes.x + 5, clientY: antes.y + 5, pointerId: 4 });
-      fireEvent.pointerMove(tela, { clientX: antes.x + 45, clientY: antes.y + 5, pointerId: 4 });
-      fireEvent.pointerUp(tela, { clientX: antes.x + 45, clientY: antes.y + 5, pointerId: 4 });
-      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(1);
-      expect(lerPlanta(d.f.planta)!.pecas[0].x).not.toBe(antes.x);
-      fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
-      expect(lerPlanta(d.f.planta)!.pecas[0].x).toBe(antes.x);
-    });
-    it("a peça escolhida desenha-se por cima de tudo (recebe o toque mesmo sob um conjunto), e as peças pequenas têm área de toque maior", () => {
-      const { tela } = montar(sala);
-      fireEvent.click(screen.getByRole("tab", { name: /^Conjuntos/ }));
-      fireEvent.click(screen.getByRole("button", { name: "Pôr o conjunto Conjunto de duche (demo) na planta" }));
-      const botoes = () => [...tela.querySelectorAll("g[role=button][aria-pressed]")].filter((g) => g.getAttribute("aria-label")?.includes("Setas para mover"));
-      const base = botoes().find((g) => g.getAttribute("aria-label")?.startsWith("Base de duche"))!;
-      fireEvent.pointerDown(base, { clientX: 5, clientY: 5, pointerId: 9 });
-      fireEvent.pointerUp(tela, { clientX: 5, clientY: 5, pointerId: 9 });
-      const ordem = botoes();
-      expect(ordem[ordem.length - 1].getAttribute("aria-label")).toMatch(/^Base de duche/);
-      expect(base.querySelector("[data-toque]")).not.toBeNull();
-      expect(tela.className.baseVal ?? tela.getAttribute("class")).toMatch(/touch-none/);
-    });
-    it("conjunto: linha do conjunto com «Remover conjunto» e componentes com «Retirar … do conjunto»", () => {
-      const { d } = montar(sala);
-      fireEvent.click(screen.getByRole("tab", { name: /^Conjuntos/ }));
-      fireEvent.click(screen.getByRole("button", { name: "Pôr o conjunto Conjunto de duche (demo) na planta" }));
-      const lista = screen.getByRole("list", { name: "Peças na divisão" });
-      expect(within(lista).getAllByRole("button", { name: /^Retirar .* do conjunto$/ }).length).toBeGreaterThanOrEqual(3);
-      fireEvent.click(within(lista).getAllByRole("button", { name: /^Retirar Coluna.* do conjunto$/ })[0]);
-      expect(lerPlanta(d.f.planta)!.pecas.find((x) => x.papel === "coluna")!.ret).toBe(true);
-      fireEvent.click(within(screen.getByRole("list", { name: "Peças na divisão" })).getByRole("button", { name: "Remover conjunto Conjunto de duche (demo)" }));
-      expect(lerPlanta(d.f.planta)!.pecas).toEqual([]);
-    });
   });
 });

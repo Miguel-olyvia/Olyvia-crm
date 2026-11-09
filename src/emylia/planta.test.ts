@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   areaChaoM2, areaParedesM2, cantos, deViragens, emL, faltaFechar, gravarPlanta, juntarParede, juntarPeca, lerPlanta, mudarComprimento,
-  paredeDoTraco, peDireitoDoCampo, perimetroM, plantaDaFolha, retangulo, type Planta,
+  encaixar, etiquetasSemSobrepor, moverParede, mudarComprimentoFechada, paredeDoTraco, peDireitoDoCampo, perimetroM, plantaDaFolha, retangulo, type Planta,
 } from "./planta";
 
 describe("planta: as contas", () => {
@@ -87,5 +87,78 @@ describe("planta: gravar e ler", () => {
   it("uma peça nova fica com o centro no ponto onde se largou, de 5 em 5 cm", () => {
     const p = juntarPeca({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }, "sanita", "s", { x: 51, y: 42 });
     expect(p.pecas[0]).toEqual({ id: "s", tipo: "sanita", w: 36, h: 55, x: 35, y: 15 });
+  });
+});
+
+describe("planta: mexer numa parede (5/11: «alterar o seu comprimento e posição»)", () => {
+  const ret = { o: { x: 0, y: 0 }, paredes: retangulo(200, 150) };
+  it("mover a parede da direita 30 cm para fora: as de cima e de baixo esticam, e continua fechada", () => {
+    const r = moverParede(ret, 1, { x: 30, y: 7 })!; // o y não conta: a parede é vertical
+    expect(r.paredes.map((w) => w.c)).toEqual([230, 150, 230, 150]);
+    expect(faltaFechar(r.paredes)).toBe(0);
+  });
+  it("mover a primeira parede mexe o ponto de partida", () => {
+    const r = moverParede(ret, 0, { x: 0, y: 20 })!;
+    expect(r.o).toEqual({ x: 0, y: 20 });
+    expect(r.paredes.map((w) => w.c)).toEqual([200, 130, 200, 130]);
+    expect(faltaFechar(r.paredes)).toBe(0);
+  });
+  it("não deixa uma vizinha ficar negativa", () => {
+    expect(moverParede(ret, 1, { x: -250, y: 0 })).toBeNull();
+  });
+  it("mudar o comprimento numa planta fechada: a parede seguinte anda e a planta não abre", () => {
+    const r = mudarComprimentoFechada(ret, 0, 250)!;
+    expect(r.paredes.map((w) => w.c)).toEqual([250, 150, 250, 150]);
+    expect(faltaFechar(r.paredes)).toBe(0);
+    const l = mudarComprimentoFechada({ o: { x: 0, y: 0 }, paredes: emL(234, 226, 63, 74) }, 3, 100)!;
+    expect(faltaFechar(l.paredes)).toBe(0);
+    expect(l.paredes[3].c).toBe(100);
+  });
+  it("numa planta ainda aberta, muda só a parede", () => {
+    const aberta = { o: { x: 0, y: 0 }, paredes: [{ c: 100, r: "E" as const }, { c: 50, r: "S" as const }] };
+    expect(mudarComprimentoFechada(aberta, 0, 120)!.paredes).toEqual([{ c: 120, r: "E" }, { c: 50, r: "S" }]);
+  });
+});
+
+describe("planta: as medidas não se sobrepõem (5/11)", () => {
+  const sobrepoem = (cs: { x: number; y: number }[], larg: number, alt: number) =>
+    cs.some((a, i) => cs.some((b, j) => j > i && Math.abs(a.x - b.x) < larg && Math.abs(a.y - b.y) < alt));
+  it("a planta com o recorte estreito da captura: nenhuma medida tapa outra", () => {
+    // 230 para a direita, 175 para baixo, 230 para a esquerda, 30 para cima, 60 para a direita, 70 para cima, 60 para a esquerda, 75 para cima
+    const paredes = [
+      { c: 230, r: "E" as const }, { c: 175, r: "S" as const }, { c: 230, r: "W" as const }, { c: 30, r: "N" as const },
+      { c: 60, r: "E" as const }, { c: 70, r: "N" as const }, { c: 60, r: "W" as const }, { c: 75, r: "N" as const },
+    ];
+    expect(faltaFechar(paredes)).toBe(0);
+    const larg = 34, alt = 12;
+    const cs = etiquetasSemSobrepor(paredes, { x: 0, y: 0 }, larg, alt);
+    expect(cs).toHaveLength(8);
+    expect(sobrepoem(cs, larg, alt)).toBe(false);
+  });
+  it("num retângulo, cada medida fica por fora da sua parede, a meio", () => {
+    const cs = etiquetasSemSobrepor(retangulo(200, 150), { x: 0, y: 0 }, 30, 10);
+    expect(cs[0].x).toBe(100); expect(cs[0].y).toBeLessThan(0);
+    expect(cs[1].x).toBeGreaterThan(200); expect(cs[1].y).toBe(75);
+    expect(cs[2].y).toBeGreaterThan(150);
+    expect(cs[3].x).toBeLessThan(0);
+  });
+});
+
+describe("planta: trocar o produto não tira a peça do sítio (5/11)", () => {
+  const sala = { o: { x: 0, y: 0 }, paredes: retangulo(234, 177) };
+  it("encostada à parede da direita: fica encostada, com a frente ao longo da parede e o mesmo meio", () => {
+    const sanita = { id: "s", tipo: "sanita" as const, x: 179, y: 100, w: 55, h: 36 }; // 55 de fundo, encostada à direita (x = 234)
+    const r = encaixar(sanita, 36, 52, sala);
+    expect(r).toMatchObject({ w: 52, h: 36, x: 234 - 52 });
+    expect(r.y + r.h / 2).toBe(118);
+  });
+  it("encostada à parede de cima: a frente na horizontal, o lado de cima no mesmo sítio", () => {
+    const base = { id: "b", tipo: "base" as const, x: 0, y: 0, w: 120, h: 70 };
+    expect(encaixar(base, 120, 80, sala)).toMatchObject({ x: 0, y: 0, w: 120, h: 80 });
+  });
+  it("solta no meio: o mesmo centro e a mesma orientação", () => {
+    const movel = { id: "m", tipo: "movel" as const, x: 100, y: 80, w: 80, h: 45 };
+    const r = encaixar(movel, 60, 46, sala);
+    expect(r.x + r.w / 2).toBe(140); expect(r.w).toBe(60);
   });
 });

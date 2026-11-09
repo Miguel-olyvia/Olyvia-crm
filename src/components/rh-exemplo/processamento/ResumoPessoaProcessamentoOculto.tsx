@@ -30,10 +30,14 @@ interface ResumoPessoaProcessamentoOcultoProps {
   /** 1-12 (o wrapper do relatorio converte). */
   mes: number;
   intervalo?: { de: string; ate: string };
+  /** As faixas noturnas da regra em vigor (memoizadas por quem chama): sem elas nao ha minutos noturnos por faixa. */
+  faixasNoturnas?: readonly { hora_inicio: string; hora_fim: string }[];
   aoTerminarCarregamento: (
     pessoaId: string,
     totais: TotaisRelatorioMensal,
     dias: readonly DiaRelatorioMensal[],
+    /** A assiduidade foi lida so em parte (recusada, com erro): o calculo desta pessoa nao pode fechar o periodo. */
+    incompleta: boolean,
   ) => void;
 }
 
@@ -42,19 +46,25 @@ export function ResumoPessoaProcessamentoOculto({
   ano,
   mes,
   intervalo,
+  faixasNoturnas,
   aoTerminarCarregamento,
 }: ResumoPessoaProcessamentoOcultoProps) {
-  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, intervalo);
+  const relatorio = useRelatorioAssiduidadeMensal(pessoaId, ano, mes, intervalo, faixasNoturnas);
   const avisouRef = useRef(false);
 
   useEffect(() => {
     avisouRef.current = false;
-  }, [pessoaId, ano, mes, intervalo?.de, intervalo?.ate]);
+  }, [pessoaId, ano, mes, intervalo?.de, intervalo?.ate, faixasNoturnas]);
 
   useEffect(() => {
     if (relatorio.loading || avisouRef.current) return;
     avisouRef.current = true;
-    aoTerminarCarregamento(pessoaId, relatorio.totais, relatorio.dias);
+    aoTerminarCarregamento(
+      pessoaId,
+      relatorio.totais,
+      relatorio.dias,
+      relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.erro,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relatorio.loading, relatorio.totais, relatorio.dias, pessoaId]);
 

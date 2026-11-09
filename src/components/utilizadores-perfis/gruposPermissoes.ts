@@ -82,10 +82,11 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   // escondida desde 04/11 (sem ação na app viva além dessa) e saiu daqui.
   // quotes.manage NÃO vai para lá: além de /quote-templates é a permissão de ver custos e margens no orçamento (canViewQuoteCosts,
   // QuoteBuilder) e das ações em massa (rpc_bulk_status_quote), por isso fica com os orçamentos.
+  // 06/11: sai o subgrupo «Pedidos de Proposta» (deals, do CRM antigo: nenhum ecrã vivo cria nem lista pedidos). deals.view/create/edit
+  // esconderam-se (permissoesEmUso.ts); deals.delete fica, mas em Definições › Lixo (MOVIDAS_POR_CODIGO).
   {
     rotulo: "Documentos do negócio", categorias: [],
     subgrupos: [
-      { rotulo: "Pedidos de Proposta", categorias: ["deals"] },
       { rotulo: "Propostas e orçamentos", categorias: ["proposals", "quotes"] },
       { rotulo: "Venda Direta", categorias: ["direct_sales"] },
       { rotulo: "Contratos", categorias: ["contracts", "client_contracts", "portal"] },
@@ -123,7 +124,7 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
   },
   // security = exports.audit.view (/export-audit vive no menu de Utilizadores).
   { rotulo: "Utilizadores", categorias: ["users", "roles", "security"] },
-  // api_keys: ecrã de configurações técnicas (/technical-settings). trash e technical_settings estão hoje escondidas (nada as verifica).
+  // api_keys: só api_keys.view (/api-keys; criar/ativar/apagar lá pedem settings.update). technical_settings está escondida (nada a verifica).
   { rotulo: "Definições", categorias: ["settings", "smtp", "email_templates", "api_keys", "technical_settings", "trash"] },
   { rotulo: "Plataforma", categorias: ["platform"] },
 ];
@@ -232,6 +233,9 @@ const MOVIDAS_POR_CODIGO = new Map<string, string>([
   // Documentos do negócio › Configuração (ver GRUPOS_MENU).
   ["proposals.manage", "documentos_config"],
   ["client_contracts.manage_templates", "documentos_config"],
+  // 06/11: deals.delete é a chave do «Eliminar definitivamente» de qualquer documento no Lixo (lib/lixo/permissoesRestauro.ts,
+  // purge_business_entity no servidor), não dos pedidos de proposta: vive em Definições, ao lado de trash.view.
+  ["deals.delete", "trash"],
 ]);
 
 /**

@@ -3371,6 +3371,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /* -------------------------------------------- 21/10: os imprevistos a meio da obra (imprevistos.ts) e a fatura das adendas */
     /** O técnico (no Hoje) ou o gestor (na página da obra) registam o que encontraram: impede (as tarefas param) ou atrasa (o plano anda). */
     registarImprevisto(id: number, m: { texto: string; onde: string; foto?: string; grav: Gravidade; tarefas: number[]; dias?: number }): string | null {
+      // 6/11 (permissões): quem executa (negocios.obra.executar: o técnico no Hoje) ou quem decide os imprevistos (negocios.obra.imprevistos: o gestor)
+      if (!podeNeg(S.role, "obra.executar") && !podeNeg(S.role, "obra.imprevistos")) {
+        avisar({ msg: "Sem permissão para registar o imprevisto", sub: "Registar um imprevisto na obra pede a permissão negocios.obra.executar ou negocios.obra.imprevistos.", kind: "bad" });
+        return null;
+      }
       const d = deal(id), p = d.obra.plano, texto = m.texto.trim();
       if (!p || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return null; }
       if (S.role !== "tecnico" && S.role !== "operacoes") { avisar({ msg: "Quem regista é a equipa da obra", sub: "O técnico no Hoje dele, ou o gestor das Operações", kind: "bad" }); return null; }
@@ -3432,6 +3437,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
      * na conversa (null se não seguiu); a página envia-a e marca-a (problemaRespondido).
      */
     tratarProblema(id: number, m: { msg: string; texto: string; fotos: string[] }, x: { tarefas: TarefaProblema[]; cobrar: boolean; motivo?: string }): string | null {
+      // 6/11 (permissões): como os imprevistos (negocios.obra.imprevistos); o papel continua a ser verificado a seguir
+      if (!exigePerm("obra.imprevistos")) return null;
       const d = deal(id), p = d.obra.plano;
       if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
       // 3/11: com a obra concluída também se trata (garantia depois da obra): a obra reabre para assistência quando as tarefas entram
@@ -3450,6 +3457,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Não era um problema (ex.: uma fotografia do que já está bem): sai da lista por tratar, com a nota no histórico. */
     descartarProblema(id: number, m: { msg: string; texto: string; fotos: string[] }, nota = "") {
+      // 6/11 (permissões): negocios.obra.imprevistos
+      if (!exigePerm("obra.imprevistos")) return;
       const d = deal(id);
       if (S.role !== "operacoes") { avisar({ msg: "Quem trata os problemas é o gestor da obra", kind: "bad" }); return; }
       if (problemaDaMensagem(d, m.msg)) return;
@@ -3461,6 +3470,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Com a proposta recusada, o gestor decide: fazer sem custo, outra proposta, ou não fazer. Devolve a resposta ao cliente (ou null). */
     decidirProblema(id: number, pid: string, k: DecisaoProblema, motivo = ""): string | null {
+      // 6/11 (permissões): negocios.obra.imprevistos
+      if (!exigePerm("obra.imprevistos")) return null;
       const d = deal(id), pr = d.obra.problemas?.find((x) => x.id === pid);
       if (!pr || pr.estado !== "recusado") return null;
       if (S.role !== "operacoes") { avisar({ msg: "Quem decide é o gestor da obra", kind: "bad" }); return null; }

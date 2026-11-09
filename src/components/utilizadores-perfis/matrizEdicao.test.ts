@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { EDITOR_EXEMPLO, PERMISSOES, ROLES_EXEMPLO } from "./catalogoExemplo";
 import {
-  alternarPermissao, contarConcedidas, definirModulo, fundirPermissoes, moduloDe, perigosasNovas, podeAlterar,
+  alternarPermissao, contarConcedidas, definirConjunto, definirModulo, fundirPermissoes, moduloDe, perigosasNovas, podeAlterar,
 } from "./matriz";
 import { aplicarOrigem, ROLE_EM_BRANCO, valoresIniciaisRole } from "./modelosRole";
 import {
@@ -149,5 +149,25 @@ describe("modelos de role", () => {
     expect(aplicarOrigem({ ...ROLE_EM_BRANCO, nome: "O meu" }, modelo)).toMatchObject({ nome: "O meu", permissoes: modelo.permissoes });
     expect(aplicarOrigem(ROLE_EM_BRANCO, null)).toEqual(ROLE_EM_BRANCO);
     expect(modelo.permissoes.length).toBeGreaterThan(0);
+  });
+});
+
+describe("matriz: permissões da linha Negócio sem dependência do Ver (06/11)", () => {
+  const CAT = [p("quotes.view"), p("quotes.edit"), p("quotes.view_costs"), p("client_contracts.view"), p("client_contracts.cancel", true)];
+
+  it("quotes.view_costs e client_contracts.cancel marcam-se sem o Ver do módulo; as outras continuam bloqueadas", () => {
+    expect(podeAlterar("quotes.view_costs", [], CAT)).toBe(true);
+    expect(podeAlterar("client_contracts.cancel", [], CAT)).toBe(true);
+    expect(podeAlterar("quotes.edit", [], CAT)).toBe(false);
+    expect(alternarPermissao([], "quotes.view_costs", CAT)).toEqual(["quotes.view_costs"]);
+    expect(definirConjunto([], [p("quotes.view_costs"), p("client_contracts.cancel", true)], true, CAT))
+      .toEqual(["quotes.view_costs", "client_contracts.cancel"]);
+  });
+
+  it("tirar o Ver do módulo não as arrasta (arrasta as outras do módulo)", () => {
+    const com = ["quotes.view", "quotes.edit", "quotes.view_costs", "client_contracts.view", "client_contracts.cancel"];
+    expect(alternarPermissao(com, "quotes.view", CAT)).toEqual(["quotes.view_costs", "client_contracts.view", "client_contracts.cancel"]);
+    expect(definirConjunto(com, [p("client_contracts.view")], false, CAT))
+      .toEqual(["quotes.view", "quotes.edit", "quotes.view_costs", "client_contracts.cancel"]);
   });
 });

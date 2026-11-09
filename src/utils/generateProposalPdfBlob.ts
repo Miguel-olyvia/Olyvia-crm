@@ -1,5 +1,6 @@
 import { PDFDocument } from 'pdf-lib';
 import { supabase } from '@/integrations/supabase/client';
+import { QUOTE_LINE_COLUNAS_SEM_CUSTO } from '@/lib/quotes/quoteLineCosts';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate, mergeProposalBranding } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
@@ -117,7 +118,8 @@ async function generateFromQuotePdfs(
             // visible_to_client=true exclui linhas internas da Fase 1 de
             // diagnóstico (sugeridas por regra/IA) — nunca podem ser vistas
             // pelo cliente.
-            supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quote.id).eq('visible_to_client', true).order('ordem'),
+            // 20270109110000: sem as colunas de custo (o PDF não as usa e já não se leem da tabela).
+            (supabase as any).from('quote_lines').select(`${QUOTE_LINE_COLUNAS_SEM_CUSTO}, products (sku), services (sku)`).eq('quote_id', quote.id).eq('visible_to_client', true).order('ordem'),
             supabase.from('quote_fees').select(`*, service_fee_types (name, calculation_type, percentage, fixed_amount)`).eq('quote_id', quote.id),
           ]);
           return {

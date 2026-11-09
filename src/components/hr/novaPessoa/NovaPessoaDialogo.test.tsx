@@ -106,7 +106,6 @@ function preencherMinimo() {
   // Com a tradução simulada a devolver a chave, `opcoes()` mostra o próprio valor como rótulo.
   escolher(/^hr\.contrato\.tipoContrato/, "sem_termo");
   irParaAba(/rhNova\.tabs\.retribuicao/);
-  escrever("hr-novo-subsidio", "7,63");
   escolher(/^hr\.contrato\.duodecimos/, "50");
 }
 
@@ -538,7 +537,7 @@ describe("NovaPessoaDialogo: cada aba tem os seus campos reais", () => {
       [/rhNova\.tabs\.dados/, ["hr-novo-primeiro-nome", "hr-novo-genero", "hr-novo-nacionalidade", "hr-novo-estado-civil", "hr-novo-dependentes", "hr-novo-data-nascimento", "hr-novo-naturalidade-concelho", "hr-novo-tipo-documento", "hr-novo-nif", "hr-novo-niss", "hr-novo-carta-numero"]],
       [/rhNova\.tabs\.contacto/, ["hr-novo-email-pessoal", "hr-novo-telefone-pessoal", "hr-novo-morada-linha2", "hr-novo-morada-distrito", "hr-novo-morada-pais", "hr-novo-emergencia-nome", "hr-novo-emergencia-telefone-alt"]],
       [/rhNova\.tabs\.contrato/, ["hr-novo-local", "hr-novo-reporta-a", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-horas-trabalho", "hr-novo-politica-feriados", "hr-novo-categoria-funcao"]],
-      [/rhNova\.tabs\.retribuicao/, ["hr-novo-subsidio", "hr-novo-subsidio-modo", "hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic"]],
+      [/rhNova\.tabs\.retribuicao/, ["hr-novo-duodecimos", "hr-novo-conta-numero", "hr-novo-conta-agencia", "hr-novo-conta-bic"]],
       [/rhNova\.tabs\.outros/, ["hr-novo-habilitacao", "hr-novo-saude-incapacidade", "hr-novo-sindicalizado", "hr-novo-tamanho-cima", "hr-novo-tamanho-calcado"]],
       [/rhNova\.tabs\.acesso/, ["hr-novo-criar-acesso", "hr-novo-papel", "hr-novo-email-acesso"]],
     ];
@@ -800,7 +799,7 @@ describe("NovaPessoaDialogo: a lista de erros leva às abas", () => {
     const grupo = within(painel()).getByRole("group", { name: "rhNova.erros.titulo" });
     fireEvent.click(within(grupo).getByRole("button", { name: /rhNova\.tabs\.retribuicao/ }));
     expect(within(painel()).getByRole("tab", { name: /rhNova\.tabs\.retribuicao/ })).toHaveAttribute("data-state", "active");
-    await waitFor(() => expect(campo("hr-novo-subsidio")).toHaveFocus());
+    await waitFor(() => expect(campo("hr-novo-duodecimos")).toHaveFocus());
   });
 });
 

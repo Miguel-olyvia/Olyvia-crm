@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveOrgSubtree } from "@/lib/orgSubtree";
 import { getNotificationRoute, openNotificationRoute, notificationPriorityColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
+import { usePodeAbrirDestino } from "@/hooks/usePodeAbrirDestino";
 
 interface NotificationRow {
   id: string;
@@ -57,6 +58,7 @@ const LIMIT = 100;
 export default function Notifications() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const podeAbrir = usePodeAbrirDestino();
   const { activeCompany } = useCompany();
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,7 +165,7 @@ export default function Notifications() {
   const handleAction = async (n: NotificationRow) => {
     await markAsRead(n.id);
     const route = await getNotificationRoute(n);
-    if (route) openNotificationRoute(navigate, route);
+    if (route) openNotificationRoute(navigate, route, podeAbrir);
   };
 
   return (

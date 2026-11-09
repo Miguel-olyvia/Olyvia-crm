@@ -3,6 +3,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "npm:zod";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse, AuthError } from "../_shared/auth.ts";
 
+// 20270109110000: quote_lines sem as colunas de custo (o mesmo que src/lib/quotes/quoteLineCosts.ts).
+const QUOTE_LINE_COLUNAS_SEM_CUSTO =
+  "id, quote_id, catalog_item_id, categoria, descricao_snapshot, qt, iva_percent, int_percent, total_sem_iva, total_com_iva, total_com_desconto, ordem, created_at, product_id, service_id, selected_attributes, discount_percent, section_name, item_description, unidade, bundle_id, item_supplier_id, retail_price_unit, visible_to_client, source_deal_need_item_id, source_deal_need_id, uom_id, units_per_uom";
+const QUOTE_LINE_COLUNAS_CUSTO = [
+  "cost_price", "custo_material_unit", "custo_mao_obra_unit", "margem_percent", "custo_un_exato", "custo_un_origem", "mao_obra_congelada",
+];
+
 const requestSchema = z.object({
   quote_id: z.string().uuid(),
   title_suffix: z.string().optional(),
@@ -162,16 +169,47 @@ serve(async (req) => {
     // This also fixes audit attribution: set_audit_context() and the INSERTs
     // now share a single transaction, so its SET LOCAL context is still in
     // effect when the audit triggers fire.
+    //
+    // 20270109110000: as colunas de custo de quote_lines já não se leem com o JWT de quem chama (só por
+    // rpc_quote_lines_custos, a quem tem quotes.view_costs/quotes.manage). A cópia tem de levar o custo verdadeiro
+    // seja quem for que duplica: as linhas leem-se com o JWT (a RLS decide quais) e os custos DESSAS linhas leem-se
+    // com a service role. Os custos não voltam para quem chama (a resposta é o orçamento novo).
     const { data: lines, error: linesErr } = await supabaseAdmin
       .from("quote_lines")
-      .select("*")
+      .select(QUOTE_LINE_COLUNAS_SEM_CUSTO)
       .eq("quote_id", quoteId);
 
     if (linesErr) {
       console.error("[duplicate-quote] read lines error", linesErr);
     }
 
-    const newLines = (lines || []).map((l: any) => {
+    const costById = new Map<string, Record<string, unknown>>();
+    const lineIds = (lines || []).map((l: any) => l.id as string);
+    if (lineIds.length > 0) {
+      const serviceClient = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        { auth: { autoRefreshToken: false, persistSession: false } },
+      );
+      const { data: costRows, error: costErr } = await serviceClient
+        .from("quote_lines")
+        .select(`id, ${QUOTE_LINE_COLUNAS_CUSTO.join(", ")}`)
+        .eq("quote_id", quoteId)
+        .in("id", lineIds);
+      if (costErr) {
+        // Sem os custos, a cópia gravava as linhas com custo 0: melhor não duplicar.
+        console.error("[duplicate-quote] read line costs error", costErr);
+        return new Response(JSON.stringify({ error: "Não foi possível ler as linhas do orçamento." }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      for (const c of (costRows || []) as Array<Record<string, unknown>>) costById.set(String(c.id), c);
+    }
+
+    const newLines = (lines || []).map((semCusto: any) => {
+      const { id: _cid, ...custos } = costById.get(semCusto.id) ?? {};
+      const l = { ...semCusto, ...custos };
       const { id: _id, created_at: _ca, quote_id: _qid, total_com_desconto: _tcd, ...rest } = l;
       // Recompute total_com_desconto if discount override changed
       const recomputed = discountOverride !== null && typeof rest.total_com_iva === "number"

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   calcularProcessamentoPessoa,
-  contarDiasElegiveisSubsidio,
+  minutosTrabalhadosPorDia,
   type EntradaProcessamentoPessoa,
+  type RegraParaCalculo,
   type RetribuicaoParaCalculo,
 } from "@/lib/hr/processamentoTotais";
 import type { HrCodigoProcessamento, HrProcessamentoLancamento } from "@/types/hr";
 import type { DiaRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+
+/** Arredonda ao centimo, como cada linha monetaria do calculo. */
+const cent = (valor: number): number => Math.round((valor + Number.EPSILON) * 100) / 100;
 
 function diaBase(
   overrides: Partial<Pick<DiaRelatorioMensal, "estado" | "realizadoMinutos">> = {},
@@ -39,12 +43,30 @@ function totaisBase(
   };
 }
 
+/** A regra de exemplo da tabela BMClean: subsidio 0,76/h e 6,15/dia a partir de 5 h; extra 50/75/100; IHT 25 %; faixas 21-24 a 25 % e 00-06 a 30 %. */
+const REGRA: RegraParaCalculo = {
+  subsidio_limite_min: 300,
+  subsidio_valor_hora: 0.76,
+  subsidio_valor_dia: 6.15,
+  he_pct_dia_util: 50,
+  he_pct_feriado: 75,
+  he_pct_descanso: 100,
+  iht_pct: 25,
+  noturnas: [
+    { percentagem: 25, preco_hora: null },
+    { percentagem: 30, preco_hora: null },
+  ],
+};
+
 function entradaBase(
   overrides: Partial<EntradaProcessamentoPessoa> = {},
 ): EntradaProcessamentoPessoa {
   return {
     totais: totaisBase(),
-    diasElegiveisSubsidio: 0,
+    minutosPorDia: [],
+    minutosNoturnosPorFaixa: [],
+    regra: REGRA,
+    direitoIht: false,
     retribuicao: null,
     codigos: [],
     lancamentos: [],
@@ -57,7 +79,6 @@ function retribuicao(overrides: Partial<RetribuicaoParaCalculo> = {}): Retribuic
     valorBase: 1000,
     periodicidade: "mensal",
     duodecimosPct: 100,
-    subsidioAlimentacaoPessoa: null,
     ...overrides,
   };
 }
@@ -127,10 +148,9 @@ describe("calcularProcessamentoPessoa", () => {
             retribuicao: retribuicao({
               valorBase: 1300,
               periodicidade: "mensal",
-              subsidioAlimentacaoPessoa: 6,
             }),
             totais: totaisBase({ planeadoMinutos, realizadoMinutos: 0, minutosExtraNormal: 120 }),
-            diasElegiveisSubsidio: 10,
+            minutosPorDia: Array(10).fill(480),
             lancamentos: [lancamento({ id: "l1", valor: 20 })],
             codigos: [
               codigo({
@@ -157,10 +177,9 @@ describe("calcularProcessamentoPessoa", () => {
           retribuicao: retribuicao({
             valorBase: 0,
             periodicidade: "mensal",
-            subsidioAlimentacaoPessoa: 6,
           }),
           totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
-          diasElegiveisSubsidio: 5,
+          minutosPorDia: Array(5).fill(480),
         }),
       );
       expect(resultado.baseMes).toBe(0);
@@ -179,12 +198,13 @@ describe("calcularProcessamentoPessoa", () => {
             realizadoMinutos: 9000, // deficit de 600 min = 10h
             minutosExtraNormal: 120, // 2h extra
           }),
+          regra: { ...REGRA, he_pct_dia_util: 100 },
           codigos: [
             codigo({
               id: "he",
               modo_calculo: "percentagem_hora_normal",
               origem_automatica: "horas_extra",
-              percentagem: 100,
+              percentagem: 7, // a percentagem do codigo ja nao conta: vale a da regra
             }),
           ],
         }),
@@ -194,8 +214,9 @@ describe("calcularProcessamentoPessoa", () => {
       const horasExtra = 120 / 60;
       const valorHoraDoDesconto = resultado.descontoFaltas / deficitHoras;
       const valorHoraDoCodigo = resultado.linhasAutomaticas[0].valor / horasExtra;
-      expect(valorHoraDoDesconto).toBeCloseTo(valorHoraDoCodigo, 6);
-      expect(valorHoraDoDesconto).toBeCloseTo(resultado.valorHoraReal as number, 6);
+      // Cada linha arredonda ao centimo, por isso a hora implicita so coincide ao centimo.
+      expect(valorHoraDoDesconto).toBeCloseTo(valorHoraDoCodigo, 2);
+      expect(valorHoraDoDesconto).toBeCloseTo(resultado.valorHoraReal as number, 2);
     });
   });
 
@@ -362,10 +383,9 @@ describe("calcularProcessamentoPessoa", () => {
             valorBase: 5.4,
             periodicidade: "hora",
             duodecimosPct: 0,
-            subsidioAlimentacaoPessoa: 6,
           }),
           totais: totaisBase({ planeadoMinutos: 0 }),
-          diasElegiveisSubsidio: 10,
+          minutosPorDia: Array(10).fill(480),
           lancamentos: [lancamento({ id: "l1", valor: 20 })],
         }),
       );
@@ -421,44 +441,208 @@ describe("calcularProcessamentoPessoa", () => {
     // baseMes = (1300*14)/12 = 1516.6666...; valorHoraReal = baseMes/(9600/60)
     // = 9.479166666666668; horas = 2; valor = 2 * 9.479166666666668 * 0.5.
     expect(resultado.linhasAutomaticas).toHaveLength(1);
-    expect(resultado.linhasAutomaticas[0].valor).toBeCloseTo(9.479166666666668, 6);
-    expect(resultado.totalCodigosAutomaticos).toBeCloseTo(9.479166666666668, 6);
+    expect(resultado.linhasAutomaticas[0].valor).toBe(9.48);
+    expect(resultado.totalCodigosAutomaticos).toBe(9.48);
   });
 
-  it("horas nocturnas empilham com feriado trabalhado -- os dois valores somam ao total", () => {
-    const resultado = calcularProcessamentoPessoa(
-      entradaBase({
-        retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-        totais: totaisBase({
-          minutosFeriadoTrabalhado: 480,
-          horasExtraNoturnasMinutos: 240,
+  describe("horas extra com as percentagens da regra", () => {
+    const he = (origem: "horas_extra" | "feriado_trabalhado" | "descanso_trabalhado", percentagemDoCodigo: number) =>
+      codigo({ id: origem, modo_calculo: "percentagem_hora_normal", origem_automatica: origem, percentagem: percentagemDoCodigo });
+    const VALOR_HORA = 9.479166666666668; // baseMes 1516,666.../160 h planeadas
+
+    it("dia de trabalho +50 %, feriado +75 %, descanso +100 %: a percentagem do codigo e ignorada", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+          totais: totaisBase({ minutosExtraNormal: 120, minutosFeriadoTrabalhado: 480, minutosDescansoTrabalhado: 240 }),
+          codigos: [he("horas_extra", 999), he("feriado_trabalhado", 200), he("descanso_trabalhado", 5)],
         }),
-        codigos: [
-          codigo({
-            id: "feriado",
-            modo_calculo: "percentagem_hora_normal",
-            origem_automatica: "feriado_trabalhado",
-            percentagem: 200,
-          }),
-          codigo({
-            id: "noturno",
-            modo_calculo: "percentagem_hora_normal",
-            origem_automatica: "horas_extra_noturnas",
-            percentagem: 25,
-          }),
-        ],
-      }),
-    );
+      );
+      const valor = (id: string) => resultado.linhasAutomaticas.find((l) => l.codigoId === id)!.valor;
+      expect(valor("horas_extra")).toBe(cent(2 * VALOR_HORA * 0.5));
+      expect(valor("feriado_trabalhado")).toBe(cent(8 * VALOR_HORA * 0.75));
+      expect(valor("descanso_trabalhado")).toBe(cent(4 * VALOR_HORA * 1));
+    });
 
-    expect(resultado.linhasAutomaticas).toHaveLength(2);
-    const valorFeriado = resultado.linhasAutomaticas.find((l) => l.codigoId === "feriado")!.valor;
-    const valorNoturno = resultado.linhasAutomaticas.find((l) => l.codigoId === "noturno")!.valor;
-    // valorHoraReal = 9.479166666666668 (baseMes 1516.6666.../160h planeadas)
-    expect(valorFeriado).toBeCloseTo((480 / 60) * 9.479166666666668 * 2, 6);
-    expect(valorNoturno).toBeCloseTo((240 / 60) * 9.479166666666668 * 0.25, 6);
-    expect(resultado.totalCodigosAutomaticos).toBeCloseTo(valorFeriado + valorNoturno, 6);
+    it("sem regra a linha existe mas vale 0 (nao se inventa a percentagem do codigo)", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+          totais: totaisBase({ minutosExtraNormal: 120 }),
+          regra: null,
+          codigos: [he("horas_extra", 50)],
+        }),
+      );
+      expect(resultado.linhasAutomaticas).toHaveLength(1);
+      expect(resultado.linhasAutomaticas[0].valor).toBe(0);
+      expect(resultado.avisos).toContain("sem_regra_salarial");
+    });
+
+    it("um codigo antigo de horas noturnas nao paga uma segunda vez: as noturnas pagam-se por faixa", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+          totais: totaisBase({ horasExtraNoturnasMinutos: 240 }),
+          codigos: [
+            codigo({ id: "noturno", modo_calculo: "percentagem_hora_normal", origem_automatica: "horas_extra_noturnas", percentagem: 25 }),
+          ],
+        }),
+      );
+      expect(resultado.linhasAutomaticas).toHaveLength(0);
+    });
   });
 
+  describe("horas noturnas por faixa", () => {
+    const VALOR_HORA = 9.479166666666668;
+
+    it("faixa a percentagem: horas x valor hora x percentagem, e as faixas somam-se ao total", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+          totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9600 }),
+          minutosNoturnosPorFaixa: [180, 360], // 3 h a 25 % e 6 h a 30 %
+        }),
+      );
+      const noturnas = resultado.linhasRegra.filter((l) => l.tipo === "noturnas");
+      expect(noturnas).toHaveLength(2);
+      expect(noturnas[0].valor).toBe(cent(3 * VALOR_HORA * 0.25));
+      expect(noturnas[1].valor).toBe(cent(6 * VALOR_HORA * 0.3));
+      expect(resultado.totalRegras).toBe(cent(cent(3 * VALOR_HORA * 0.25) + cent(6 * VALOR_HORA * 0.3)));
+      expect(resultado.totalBrutoEstimado).toBeCloseTo((resultado.baseMes as number) + resultado.totalRegras, 6);
+    });
+
+    it("faixa a preco fixo por hora: horas x preco, sem depender do valor hora", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+          regra: { ...REGRA, noturnas: [{ percentagem: null, preco_hora: 2.5 }] },
+          minutosNoturnosPorFaixa: [270], // 4 h 30
+        }),
+      );
+      expect(resultado.linhasRegra).toEqual([{ tipo: "noturnas", faixa: 0, quantidade: 4.5, valor: 11.25 }]);
+    });
+
+    it("faixa sem minutos nao gera linha, e a ordem dos minutos segue a das faixas", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+          minutosNoturnosPorFaixa: [0, 60],
+        }),
+      );
+      expect(resultado.linhasRegra.map((l) => l.faixa)).toEqual([1]);
+    });
+  });
+
+  describe("cargo com salario semanal (300 EUR por semana, sem duodecimos)", () => {
+    // 300 x 52 / 12 = 1300,00 por mes; 160 h planeadas => 8,125 EUR a hora.
+    const semanal = (): RetribuicaoParaCalculo =>
+      retribuicao({ valorBase: 300, periodicidade: "semanal", duodecimosPct: 0 });
+
+    it("o ordenado do mes e semanal x 52 / 12 e o valor hora e esse ordenado pelas horas planeadas", () => {
+      const resultado = calcularProcessamentoPessoa(entradaBase({ retribuicao: semanal() }));
+      expect(resultado.baseMes).toBeCloseTo(1300, 6);
+      expect(resultado.valorHoraReal).toBeCloseTo(8.125, 6);
+      expect(resultado.avisos).not.toContain("periodicidade_nao_convertivel");
+      expect(resultado.avisos).not.toContain("sem_retribuicao");
+    });
+
+    it("com duodecimos a 100 % a base do mes e a mesma que a de um mensal de 1300", () => {
+      const doSemanal = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: retribuicao({ valorBase: 300, periodicidade: "semanal", duodecimosPct: 100 }) }),
+      );
+      const doMensal = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }) }),
+      );
+      expect(doSemanal.baseMes).toBeCloseTo(doMensal.baseMes as number, 6);
+      expect(doSemanal.valorHoraReal).toBeCloseTo(doMensal.valorHoraReal as number, 6);
+    });
+
+    it("o IHT e 25 % do ordenado base do mes (1300 => 325,00); sem direito nao ha linha", () => {
+      const com = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: semanal(), totais: totaisBase({ realizadoMinutos: 9600 }), direitoIht: true }),
+      );
+      expect(com.linhasRegra).toEqual([{ tipo: "iht", faixa: null, quantidade: null, valor: 325 }]);
+      const sem = calcularProcessamentoPessoa(entradaBase({ retribuicao: semanal(), direitoIht: false }));
+      expect(sem.linhasRegra).toEqual([]);
+    });
+
+    it("as horas extra pagam-se sobre o valor hora do semanal com a percentagem da regra", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: semanal(),
+          totais: totaisBase({ realizadoMinutos: 9600, minutosExtraNormal: 120 }), // 2 h extra
+          codigos: [codigo({ id: "he", modo_calculo: "percentagem_hora_normal", origem_automatica: "horas_extra" })],
+        }),
+      );
+      // 2 h x 8,125 EUR x 50 % = 8,125 => 8,13 ao centimo.
+      expect(resultado.linhasAutomaticas[0].horas).toBe(2);
+      expect(resultado.linhasAutomaticas[0].valor).toBe(cent(2 * 8.125 * 0.5));
+      expect(resultado.linhasAutomaticas[0].valor).toBe(8.13);
+    });
+
+    it("cumprir o planeado paga exactamente a base do mes", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: semanal(), totais: totaisBase({ realizadoMinutos: 9600 }) }),
+      );
+      expect(resultado.descontoFaltas).toBe(0);
+      expect(resultado.totalBrutoEstimado).toBeCloseTo(1300, 6);
+    });
+  });
+
+  describe("IHT", () => {
+    it("com direito: percentagem do ordenado base (1 000 x 25 % = 250,00)", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: retribuicao({ valorBase: 1000, periodicidade: "mensal" }), totais: totaisBase({ realizadoMinutos: 9600 }), direitoIht: true }),
+      );
+      expect(resultado.linhasRegra).toEqual([{ tipo: "iht", faixa: null, quantidade: null, valor: 250 }]);
+      expect(resultado.totalBrutoEstimado).toBeCloseTo((resultado.baseMes as number) + 250, 6);
+    });
+
+    it("sem direito: nao ha linha de IHT", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: retribuicao({ valorBase: 1000, periodicidade: "mensal" }), direitoIht: false }),
+      );
+      expect(resultado.linhasRegra.filter((l) => l.tipo === "iht")).toHaveLength(0);
+    });
+
+    it("com direito mas sem regra nao inventa percentagem", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: retribuicao({ valorBase: 1000, periodicidade: "mensal" }), direitoIht: true, regra: null }),
+      );
+      expect(resultado.linhasRegra).toHaveLength(0);
+    });
+  });
+
+  describe("km e ajudas de custo a partir dos lancamentos", () => {
+    it("100 km a 0,40 = 40,00 EUR: o valor ja vem gravado e entra no total, fora dos pontuais", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1000, periodicidade: "mensal" }),
+          totais: totaisBase({ realizadoMinutos: 9600 }),
+          lancamentos: [lancamento({ id: "km", tipo: "km", quantidade: 100, valor: 40 })],
+        }),
+      );
+      expect(resultado.linhasRegra).toEqual([{ tipo: "km", faixa: null, quantidade: 100, valor: 40 }]);
+      expect(resultado.lancamentosPontuais).toBe(0);
+      expect(resultado.totalBrutoEstimado).toBeCloseTo((resultado.baseMes as number) + 40, 6);
+    });
+
+    it("ajudas de custo somam os lancamentos nao anulados; os anulados nao contam", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1000, periodicidade: "mensal" }),
+          lancamentos: [
+            lancamento({ id: "a1", tipo: "ajudas", quantidade: 2, valor: 131.78 }),
+            lancamento({ id: "a2", tipo: "ajudas", quantidade: 1, valor: 65.89 }),
+            lancamento({ id: "a3", tipo: "ajudas", quantidade: 5, valor: 329.45, anulado_em: "2026-01-05T00:00:00Z" }),
+          ],
+        }),
+      );
+      const ajudas = resultado.linhasRegra.find((l) => l.tipo === "ajudas")!;
+      expect(ajudas.quantidade).toBe(3);
+      expect(ajudas.valor).toBeCloseTo(197.67, 6);
+    });
+  });
   it("codigo valor_fixo_ocorrencia com feriado_trabalhado usa dias, nao minutos", () => {
     const resultado = calcularProcessamentoPessoa(
       entradaBase({
@@ -523,7 +707,7 @@ describe("calcularProcessamentoPessoa", () => {
       );
       // deficit = 600 min = 10h; valorHoraReal = 9.479166666666668 (baseMes
       // 1516.6666.../160h planeadas) -> desconto = 10 * 9.479166666666668.
-      expect(resultado.descontoFaltas).toBeCloseTo(94.79166666666669, 6);
+      expect(resultado.descontoFaltas).toBe(94.79);
     });
 
     it("mes com excedente da desconto 0", () => {
@@ -630,49 +814,59 @@ describe("calcularProcessamentoPessoa", () => {
     });
   });
 
-  describe("subsidio de alimentacao", () => {
-    it("usa o valor diario da pessoa vezes os dias elegiveis, sem aviso", () => {
-      const resultado = calcularProcessamentoPessoa(
-        entradaBase({
-          retribuicao: retribuicao({ subsidioAlimentacaoPessoa: 10 }),
-          diasElegiveisSubsidio: 20,
-        }),
-      );
-      expect(resultado.subsidioAlimentacao).toBe(200);
-      expect(resultado.avisos).not.toContain("sem_subsidio_pessoa");
+  describe("subsidio de alimentacao (dia a dia, pela regra)", () => {
+    const subsidio = (minutosPorDia: number[], regra: RegraParaCalculo | null = REGRA) =>
+      calcularProcessamentoPessoa(entradaBase({ minutosPorDia, regra })).subsidioAlimentacao;
+
+    it("4 h 30 trabalhadas = 4,5 x 0,76 = 3,42 EUR (minutos proporcionais)", () => {
+      expect(subsidio([270])).toBe(3.42);
     });
 
-    it("sem subsidio da pessoa da 0 com aviso", () => {
-      const resultado = calcularProcessamentoPessoa(
-        entradaBase({
-          retribuicao: retribuicao({ subsidioAlimentacaoPessoa: null }),
-          diasElegiveisSubsidio: 20,
-        }),
-      );
-      expect(resultado.subsidioAlimentacao).toBe(0);
-      expect(resultado.avisos).toContain("sem_subsidio_pessoa");
+    it("5 h trabalhadas = 6,15 EUR: exactamente 5 h conta como a partir de 5 h", () => {
+      expect(subsidio([300])).toBe(6.15);
     });
 
-    it("subsidio da pessoa a 0 e um valor definido: da 0 sem aviso", () => {
-      const resultado = calcularProcessamentoPessoa(
-        entradaBase({
-          retribuicao: retribuicao({ subsidioAlimentacaoPessoa: 0 }),
-          diasElegiveisSubsidio: 20,
-        }),
-      );
-      expect(resultado.subsidioAlimentacao).toBe(0);
-      expect(resultado.avisos).not.toContain("sem_subsidio_pessoa");
+    it("4 h 59 ainda e por hora (3,79 EUR); 5 h 01 ja e o valor por dia", () => {
+      expect(subsidio([299])).toBe(3.79); // 299 x 0,76 / 60 = 3,7873
+      expect(subsidio([301])).toBe(6.15);
     });
 
-    it("sem retribuicao nenhuma tambem da 0 com aviso", () => {
+    it("um dia de 8 h nao paga mais que o valor por dia", () => {
+      expect(subsidio([480])).toBe(6.15);
+    });
+
+    it("arredonda ao centimo POR DIA antes de somar o mes (3 dias de 1 h 20 = 3 x 1,01, nao 3,04)", () => {
+      // 80 min x 0,76 / 60 = 1,0133 -> 1,01 por dia; somar antes de arredondar daria 3,04.
+      expect(subsidio([80, 80, 80])).toBe(3.03);
+    });
+
+    it("soma o mes: 10 dias de 8 h + um de 4 h 30", () => {
+      expect(subsidio([...Array(10).fill(480), 270])).toBeCloseTo(61.5 + 3.42, 6);
+    });
+
+    it("dias sem trabalho nao contam", () => {
+      expect(subsidio([0, 480, 0])).toBe(6.15);
+    });
+
+    it("o limite e os valores sao os da regra, nao fixos no codigo", () => {
+      const regra = { ...REGRA, subsidio_limite_min: 240, subsidio_valor_hora: 1, subsidio_valor_dia: 5 };
+      expect(subsidio([180], regra)).toBe(3); // 3 h x 1,00
+      expect(subsidio([240], regra)).toBe(5);
+    });
+
+    it("sem regra da 0 com aviso, mesmo com retribuicao", () => {
       const resultado = calcularProcessamentoPessoa(
-        entradaBase({ retribuicao: null, diasElegiveisSubsidio: 20 }),
+        entradaBase({ retribuicao: retribuicao(), regra: null, minutosPorDia: [480] }),
       );
       expect(resultado.subsidioAlimentacao).toBe(0);
-      expect(resultado.avisos).toContain("sem_subsidio_pessoa");
+      expect(resultado.avisos).toContain("sem_regra_salarial");
+    });
+
+    it("com regra nao ha aviso", () => {
+      const resultado = calcularProcessamentoPessoa(entradaBase({ retribuicao: retribuicao(), minutosPorDia: [480] }));
+      expect(resultado.avisos).not.toContain("sem_regra_salarial");
     });
   });
-
   describe("lancamentos pontuais", () => {
     it("exclui anulados e inclui negativos", () => {
       const resultado = calcularProcessamentoPessoa(
@@ -721,10 +915,10 @@ describe("calcularProcessamentoPessoa", () => {
       }),
     );
     expect(resultado.baseMes).not.toBeNull();
-    expect(resultado.descontoFaltas).toBeCloseTo(resultado.baseMes as number, 6);
+    expect(resultado.descontoFaltas).toBeCloseTo(resultado.baseMes as number, 2);
     expect(resultado.totalBrutoEstimado).toBeCloseTo(
       resultado.subsidioAlimentacao + resultado.lancamentosPontuais,
-      6,
+      2,
     );
   });
 
@@ -745,7 +939,7 @@ describe("calcularProcessamentoPessoa", () => {
       entradaBase({
         retribuicao: null,
         totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
-        diasElegiveisSubsidio: 20,
+        minutosPorDia: Array(20).fill(480),
         lancamentos: [lancamento({ id: "l1", valor: 15 })],
       }),
     );
@@ -756,23 +950,23 @@ describe("calcularProcessamentoPessoa", () => {
 
     // O que nao depende da retribuicao continua a calcular-se.
     expect(resultado.descontoFaltas).toBe(0); // valorHoraReal null -> nunca null-propagar, fica 0
-    // Sem retribuicao nao ha subsidio da pessoa: 0 com aviso.
-    expect(resultado.subsidioAlimentacao).toBe(0);
-    expect(resultado.avisos).toContain("sem_subsidio_pessoa");
+    // O subsidio vem da regra, nao da retribuicao: 20 dias de 8 h x 6,15 mesmo sem retribuicao.
+    expect(resultado.subsidioAlimentacao).toBeCloseTo(123, 6);
+    expect(resultado.avisos).not.toContain("sem_regra_salarial");
     expect(resultado.lancamentosPontuais).toBe(15);
     expect(resultado.avisos).toContain("sem_retribuicao");
   });
 });
 
-describe("contarDiasElegiveisSubsidio", () => {
-  it("conta so os dias com realizadoMinutos >= minimo", () => {
+describe("minutosTrabalhadosPorDia", () => {
+  it("devolve o realizado de cada dia com trabalho, pela ordem dos dias", () => {
     const dias = [
-      diaBase({ realizadoMinutos: 500 }), // >= 300, conta
-      diaBase({ realizadoMinutos: 200 }), // < 300, nao conta
-      diaBase({ realizadoMinutos: 300 }), // == 300, conta (fronteira inclusiva)
-      diaBase({ realizadoMinutos: 0 }), // nao conta
+      diaBase({ realizadoMinutos: 500 }),
+      diaBase({ realizadoMinutos: 200 }),
+      diaBase({ realizadoMinutos: 0 }), // sem trabalho: fora
+      diaBase({ realizadoMinutos: 300 }),
     ];
-    expect(contarDiasElegiveisSubsidio(dias, 300)).toBe(2);
+    expect(minutosTrabalhadosPorDia(dias)).toEqual([500, 200, 300]);
   });
 
   it("um dia de ausencia com realizadoMinutos alto nao conta -- mesma exclusao dos outros totais", () => {
@@ -780,20 +974,86 @@ describe("contarDiasElegiveisSubsidio", () => {
       diaBase({ estado: "ausencia", realizadoMinutos: 600 }),
       diaBase({ estado: "normal", realizadoMinutos: 600 }),
     ];
-    expect(contarDiasElegiveisSubsidio(dias, 300)).toBe(1);
+    expect(minutosTrabalhadosPorDia(dias)).toEqual([600]);
   });
 
-  it("minimo a 0 conta todos os dias com qualquer minuto trabalhado", () => {
-    const dias = [
-      diaBase({ realizadoMinutos: 1 }),
-      diaBase({ realizadoMinutos: 0 }),
-      diaBase({ realizadoMinutos: 480 }),
-    ];
-    // realizadoMinutos >= 0 e sempre verdade -- os tres dias contam.
-    expect(contarDiasElegiveisSubsidio(dias, 0)).toBe(3);
+  it("array vazio da lista vazia", () => {
+    expect(minutosTrabalhadosPorDia([])).toEqual([]);
+  });
+});
+
+describe("arredondamento ao centimo de cada linha antes de somar", () => {
+  // 1 000 x 14 / 12 = 1 166,67 de base; / 150 h = 7,7778 EUR por hora: nenhuma conta dá cêntimos exactos.
+  const base = { retribuicao: retribuicao({ valorBase: 1000 }), totais: totaisBase({ planeadoMinutos: 9000, realizadoMinutos: 9000 }) };
+
+  it("horas extra: 1 h a 50 % = 3,89 (linha arredondada)", () => {
+    const resultado = calcularProcessamentoPessoa(
+      entradaBase({
+        ...base,
+        totais: totaisBase({ planeadoMinutos: 9000, realizadoMinutos: 9000, minutosExtraNormal: 60 }),
+        codigos: [codigo({ id: "he", modo_calculo: "percentagem_hora_normal", origem_automatica: "horas_extra" })],
+      }),
+    );
+    expect(resultado.linhasAutomaticas[0].valor).toBe(3.89);
+    expect(resultado.totalCodigosAutomaticos).toBe(3.89);
   });
 
-  it("array vazio da 0", () => {
-    expect(contarDiasElegiveisSubsidio([], 300)).toBe(0);
+  it("noturnas: cada faixa arredonda antes de somar (1,94 + 1,94 = 3,88, nao 3,89)", () => {
+    const resultado = calcularProcessamentoPessoa(
+      entradaBase({
+        ...base,
+        regra: { ...REGRA, noturnas: [{ percentagem: 25, preco_hora: null }, { percentagem: 25, preco_hora: null }] },
+        minutosNoturnosPorFaixa: [60, 60],
+      }),
+    );
+    expect(resultado.linhasRegra.map((l) => l.valor)).toEqual([1.94, 1.94]);
+    expect(resultado.totalRegras).toBe(3.88);
+  });
+
+  it("faltas: 20 min = 2,59", () => {
+    const resultado = calcularProcessamentoPessoa(
+      entradaBase({ ...base, totais: totaisBase({ planeadoMinutos: 9000, realizadoMinutos: 8980 }) }),
+    );
+    expect(resultado.descontoFaltas).toBe(2.59);
+  });
+
+  it("IHT: 333,33 x 25 % = 83,33", () => {
+    const resultado = calcularProcessamentoPessoa(
+      entradaBase({ ...base, retribuicao: retribuicao({ valorBase: 333.33 }), direitoIht: true }),
+    );
+    expect(resultado.linhasRegra.find((l) => l.tipo === "iht")?.valor).toBe(83.33);
+  });
+});
+
+describe("minutosTrabalhadosPorDia: turno que atravessa a meia-noite", () => {
+  const dia = (iso: string, intervalos: [string, string][]) => ({
+    iso,
+    estado: "normal" as const,
+    realizadoMinutos: intervalos.reduce((s, [i, f]) => {
+      const m = (h: string) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
+      return s + m(f) - m(i);
+    }, 0),
+    realizadoIntervalos: intervalos.map(([hora_inicio, hora_fim]) => ({ hora_inicio, hora_fim })),
+  });
+
+  it("22:00-06:00 partido em dois dias conta como UM dia: 479 min e subsidio do dia (6,15)", () => {
+    const dias = [dia("2026-03-10", [["22:00", "23:59"]]), dia("2026-03-11", [["00:00", "06:00"]])];
+    const minutos = minutosTrabalhadosPorDia(dias);
+    expect(minutos).toEqual([479]);
+    expect(calcularProcessamentoPessoa(entradaBase({ minutosPorDia: minutos })).subsidioAlimentacao).toBe(6.15);
+  });
+
+  it("o resto do dia seguinte fica como dia seu", () => {
+    const dias = [dia("2026-03-10", [["22:00", "23:59"]]), dia("2026-03-11", [["00:00", "06:00"], ["14:00", "17:00"]])];
+    expect(minutosTrabalhadosPorDia(dias)).toEqual([479, 180]);
+  });
+
+  it("nao junta dias que nao sao seguidos, nem um dia que nao comeca as 00:00", () => {
+    expect(minutosTrabalhadosPorDia([dia("2026-03-10", [["22:00", "23:59"]]), dia("2026-03-12", [["00:00", "06:00"]])])).toEqual([119, 360]);
+    expect(minutosTrabalhadosPorDia([dia("2026-03-10", [["22:00", "23:59"]]), dia("2026-03-11", [["08:00", "16:00"]])])).toEqual([119, 480]);
+  });
+
+  it("sem intervalos (fixtures antigos) cada dia conta por si", () => {
+    expect(minutosTrabalhadosPorDia([{ estado: "normal", realizadoMinutos: 119 }, { estado: "normal", realizadoMinutos: 360 }])).toEqual([119, 360]);
   });
 });

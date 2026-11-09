@@ -563,7 +563,8 @@ export interface PessoaRetribuicao {
   valor_base: number;
   moeda: string;
   periodicidade: Periodicidade;
-  subsidio_alimentacao: number | null;
+  /** @deprecated O valor vem da regra salarial da organizacao; ja nao se le nem se escreve por pessoa. */
+  subsidio_alimentacao?: number | null;
   subsidio_alimentacao_modo: SubsidioAlimentacaoModo | null;
   valido_de: string;
   valido_ate: string | null;
@@ -689,6 +690,10 @@ export interface HrProcessamentoLancamento {
   organization_id: string;
   descricao: string;
   valor: number;
+  /** `manual` (valor escrito pelo RH), `km` ou `ajudas` (valor = quantidade x valor da regra, gravado). 20270109700000. */
+  tipo?: "manual" | "km" | "ajudas";
+  /** Km (tipo km) ou dias (tipo ajudas); `null` em manual. */
+  quantidade?: number | null;
   codigo_processamento_id: string | null;
   anulado_em: string | null;
   anulado_por: string | null;
@@ -1157,4 +1162,44 @@ export interface PessoaAnexo {
   tamanho_bytes: number | null;
   promovido_em: string | null;
   criado_em: string;
+}
+
+/** Uma faixa de trabalho noturno de uma regra salarial: percentagem sobre o valor hora OU preco por hora fixo (nunca os dois). */
+export interface FaixaNoturna {
+  /** "HH:MM". Se `hora_fim` <= `hora_inicio` a faixa atravessa a meia-noite. */
+  hora_inicio: string;
+  hora_fim: string;
+  percentagem: number | null;
+  preco_hora: number | null;
+}
+
+/** Uma versao das regras salariais da organizacao (`rpc_hr_regras_salariais_ler` / `_historico`, 20270107600000). */
+export interface RegraSalarial {
+  id: string;
+  valido_de: string;
+  /** Inclusivo; `null` = em aberto (a versao mais recente). */
+  valido_ate: string | null;
+  subsidio_limite_min: number;
+  subsidio_valor_hora: number;
+  subsidio_valor_dia: number;
+  he_pct_dia_util: number;
+  he_pct_feriado: number;
+  he_pct_descanso: number;
+  he_limite_anual_min: number;
+  iht_pct: number;
+  km_valor: number;
+  ajudas_custo_dia: number;
+  criada_em: string;
+  /** So com `hr.vencimento.codigos.view` ou `.gerir`; `null` para quem so tem `subsidio.view`. */
+  criada_por_nome: string | null;
+  /** Preenchido numa versao corrigida por outra com a mesma data: fica no historico e ja nao vale. */
+  substituida_em: string | null;
+  noturnas: FaixaNoturna[];
+}
+
+/** O direito de uma pessoa a IHT, km e ajudas de custo (`rpc_hr_pessoa_direitos_ler`). Sem linha = sem direito. */
+export interface DireitosSalariais {
+  iht: boolean;
+  km: boolean;
+  ajudas: boolean;
 }
