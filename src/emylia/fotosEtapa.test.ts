@@ -20,6 +20,23 @@ describe("fotografias por etapa da visita", () => {
     A.foto(d.id);
     expect(fotosPor(d.visita).area).toBe(3);
   });
+  it("9/11: no protótipo a imagem fica na etapa; apagar tira a imagem e desce a contagem", () => {
+    const S = seed();
+    const A = acoes(S, () => {}, (fn) => fn());
+    const d = S.deals.find((x) => x.id === 1035)!; // 6 fotos: 2 + 2 + 2
+    A.foto(d.id, "interior", "data:image/jpeg;base64,AAA");
+    A.foto(d.id, "interior", "data:image/jpeg;base64,BBB");
+    expect(d.visita.fotosImg?.interior).toEqual(["data:image/jpeg;base64,AAA", "data:image/jpeg;base64,BBB"]);
+    expect(d.visita.fotos).toBe(8);
+    A.tirarFoto(d.id, "interior", 0);
+    expect(d.visita.fotosImg?.interior).toEqual(["data:image/jpeg;base64,BBB"]);
+    expect(fotosPor(d.visita)).toEqual({ exterior: 2, interior: 3, area: 2 });
+    expect(d.visita.fotos).toBe(7);
+    // com a base ligada só desce a contagem (sem posição); nunca abaixo de zero
+    for (let i = 0; i < 5; i++) A.tirarFoto(d.id, "exterior");
+    expect(fotosPor(d.visita).exterior).toBe(0);
+    expect(d.visita.fotos).toBe(5);
+  });
 });
 
 describe("pontos de água fria e quente", () => {
