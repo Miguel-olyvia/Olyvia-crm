@@ -1,5 +1,5 @@
 -- ============================================================
--- Teste: o âmbito (NONE/OWNED/TEAM/ORG) aplicado no servidor — migration 20270110400000 (base RH)
+-- Teste: o âmbito (NONE/OWNED/TEAM/ORG) aplicado no servidor — migration 20270110900000 (base RH)
 -- ============================================================
 -- SÓ para a base RH (project-ref uetjghdkwbywbftedtth). NUNCA na de produção (tzbfgwpckrfbqcolqxtm).
 -- Tudo dentro de BEGIN … ROLLBACK. Os dados de teste (o Rafael como comercial, um negócio/orçamento/proposta/contrato dele, uma
@@ -106,7 +106,7 @@ DECLARE
   v_pl_alh   jsonb;
 BEGIN
   IF to_regprocedure('public.fn_doc_no_ambito(text,uuid,uuid,text[],text[],uuid[],uuid[])') IS NULL THEN
-    RAISE EXCEPTION 'ABORTADO: esta base não tem a migration 20270110400000 (fn_doc_no_ambito)';
+    RAISE EXCEPTION 'ABORTADO: esta base não tem a migration 20270110900000 (fn_doc_no_ambito)';
   END IF;
 
   -- ── preparação (postgres, sem sessão) ─────────────────────────────────────
@@ -336,7 +336,7 @@ BEGIN
   -- ── F. editar com as chaves da ação: quotes.view=ORG, quotes.edit sem linha (OWNED) ──
   IF v_q_alh IS NOT NULL THEN
     v_obt := pg_temp.amb_exec(v_ra, format($q$WITH u AS (UPDATE quotes SET title = title WHERE id = %L RETURNING 1) SELECT count(*)::text FROM u$q$, v_q_alh));
-    PERFORM pg_temp.amb_reg('Rafael quotes.view=ORG, edit OWNED', 'F1 UPDATE direto do orçamento alheio', '0', v_obt, 'antes de 20270110400000 a policy usava as chaves de view: 1');
+    PERFORM pg_temp.amb_reg('Rafael quotes.view=ORG, edit OWNED', 'F1 UPDATE direto do orçamento alheio', '0', v_obt, 'antes de 20270110900000 a policy usava as chaves de view: 1');
   END IF;
   v_obt := pg_temp.amb_exec(v_ra, format($q$WITH u AS (UPDATE quotes SET title = title WHERE id = %L RETURNING 1) SELECT count(*)::text FROM u$q$, v_q_meu));
   PERFORM pg_temp.amb_reg('Rafael quotes.view=ORG, edit OWNED', 'F2 UPDATE direto do orçamento dele', '1', v_obt);

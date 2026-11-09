@@ -31,7 +31,7 @@
 --   5b. purge_business_entity simulado: a sonda fica viewer aqui e ganha, só dentro do sub-bloco, uma associação
 --      super_admin (com deals.delete) noutra organização fora da cadeia desta → tem de ser bloqueada
 --   6. custos iguais nas duas vias: onde 3a e 3b leem linhas, ambas dão "com custos" ou ambas "custos a null"
---   3b desde 20270110400000: neg_ler_negocios só devolve os negócios no âmbito de pessoas.view (dono, equipa com TEAM, tarefas na
+--   3b desde 20270110900000: neg_ler_negocios só devolve os negócios no âmbito de pessoas.view (dono, equipa com TEAM, tarefas na
 --      obra; tudo para admin, quem entra pelo papel ou tem um Papel no Negócio explícito, ou com linha ORG). Sem nenhum orçamento
 --      Emylia nesse âmbito, o esperado é "sem linhas". Esperado calculado das tabelas (v_neg_tudo / v_neg_vis).
 -- ============================================================
@@ -101,7 +101,7 @@ DECLARE
   v_role_vw    uuid;      -- 5b: papel viewer desta organização
   v_sonda_auth uuid;
   v_fase       text;
-  v_neg_tudo   boolean;   -- 3b (20270110400000): vê todos os negócios (admin, sem pessoas.view no perfil, ou Papel no Negócio explícito)
+  v_neg_tudo   boolean;   -- 3b (20270110900000): vê todos os negócios (admin, sem pessoas.view no perfil, ou Papel no Negócio explícito)
   v_neg_vis    int;       -- 3b: orçamentos Emylia dos negócios que a conta vê com o âmbito de pessoas.view
 BEGIN
   -- Guardas: objetos que o teste usa têm de existir (base RH com a migration 20270110100000).
@@ -175,7 +175,7 @@ BEGIN
       EXISTS (SELECT 1 FROM neg_papeis_permissoes m WHERE m.permission_code = c AND m.papel = ANY (v_papeis))
     FROM unnest(c_codes || c_extra) c;
 
-    -- 3b (20270110400000): o âmbito de pessoas.view nos Negócios, a partir das tabelas. Vê tudo: admin (system_admin, super_admin
+    -- 3b (20270110900000): o âmbito de pessoas.view nos Negócios, a partir das tabelas. Vê tudo: admin (system_admin, super_admin
     -- aqui ou acima), quem não tem pessoas.view no perfil (entra pelo papel), quem tem um Papel no Negócio explícito
     -- (pessoas_papeis_negocio) que dá pessoas.view, ou uma linha ORG. Senão: os negócios de que é dono (assigned_to/created_by), os da
     -- equipa que lidera com uma linha TEAM, e aqueles em cuja obra tem tarefas.
@@ -302,7 +302,7 @@ BEGIN
     ELSE
       v_exp := CASE
         WHEN NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND (v_sa OR e.perfil OR e.papel)) THEN 'bloqueado'
-        WHEN v_neg_vis = 0 THEN 'sem linhas'   -- 20270110400000: nenhum negócio com orçamento Emylia no âmbito dela
+        WHEN v_neg_vis = 0 THEN 'sem linhas'   -- 20270110900000: nenhum negócio com orçamento Emylia no âmbito dela
         WHEN EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code IN ('quotes.view_costs', 'quotes.manage') AND (v_sa OR e.perfil OR e.papel)) THEN 'com custos'
         ELSE 'custos a null' END;
       v_n := NULL; v_nc := NULL; v_msg := NULL; v_j := NULL;

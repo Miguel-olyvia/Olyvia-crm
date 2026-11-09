@@ -55,7 +55,7 @@ A partir das tabelas, não das funções testadas:
    desfeita se só houver uma) → tem de ser bloqueada (antes de 20270110200000 passava).
 6. Custos iguais nas duas vias: quando 3a e 3b leem linhas, dão ambas "com custos" ou ambas "custos a null".
 
-## `permissoes_ambito.sql` — o âmbito no servidor (20270110400000)
+## `permissoes_ambito.sql` — o âmbito no servidor (20270110900000)
 
 Mesmo estilo (`BEGIN … ROLLBACK`, sessão impersonada, esperado calculado das tabelas). Cria os seus dados na transação: o Rafael
 passa a `comercial` (OWNED), fica dono de um negócio/orçamento/proposta/contrato, ganha uma tarefa na obra de outro negócio, e
