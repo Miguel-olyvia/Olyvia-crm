@@ -130,6 +130,14 @@ verify_jwt = false
 [functions.convite-admissao-limpeza]
 verify_jwt = false
 
+# Anexos das justificacoes (do dia e de faltas). verify_jwt = false porque a accao
+# `limpar` e chamada por pg_cron com o segredo partilhado do cron, que nao e um JWT
+# (o gateway rejeitava-o). As accoes url/confirmar/remover/abrir validam o JWT na
+# propria funcao (resolveCallerIdentity) e recusam a chave de servico e o segredo
+# do cron; `limpar` exige o segredo do cron (requireServiceRoleOrCronSecret).
+[functions.hr-justificacao-anexo]
+verify_jwt = false
+
 # Canal de denuncias publico (Lei 93/2021): a denuncia anonima abre-se sem sessao,
 # por isso sem verify_jwt. A funcao autentica-se sozinha (service_role), limita pedidos
 # na base e falha fechada sem os segredos DENUNCIAS_PIN_PEPPER e DENUNCIAS_IP_PEPPER.
