@@ -237,7 +237,7 @@ const MOMENTO_PRESTACOES: (0 | 1 | "fim")[] = [0, 0, 0, 1, "fim"];
 
 /**
  * Leva o caso montado (montarAnabela) da proposta até à obra pronta a aprovar: as 5 prestações à medida, a proposta enviada e
- * aceite, o contrato assinado e a 1.ª prestação faturada e paga. Para ver a obra no ecrã (/sem-conta?caso=anabela-obra).
+ * aceite e a 1.ª prestação faturada e paga (9/11: o contrato assina-se depois, na Obra). Para ver a obra no ecrã (/sem-conta?caso=anabela-obra).
  */
 export function avancarAteObra(S: Estado, A: Acoes, id: number, avisos: { msg: string; sub?: string }[] = []): void {
   const d = () => S.deals.find((x) => x.id === id)!;
@@ -248,9 +248,7 @@ export function avancarAteObra(S: Estado, A: Acoes, id: number, avisos: { msg: s
   A.enviar(id);
   garantir(d().orc!.enviada, "enviar a proposta: " + JSON.stringify(avisos.slice(-2)));
   A.aceitar(id);
-  A.enviarContrato(id);
-  A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
-  garantir(d().orc!.contrato === "assinado", "assinar o contrato");
+  // 9/11 (o fluxo novo): o contrato assina-se na Obra, depois das medidas retificadas e do plano aprovado (avancarObraAMeio)
   for (const [k, v] of Object.entries({ nome_fiscal: "Anabela Maria Machado Correia Schroeder", nif_fat: "123456789", morada_fiscal_igual: "Sim", email_fat: "cliente.caso@exemplo.pt", serie: "FT 2026", vencimento: "Pronto pagamento", metodo: "Transferência", conta: "Banco A · conta à ordem", comprovativo: "Transferência adjudicação (teste)" })) A.campo(id, k, v);
   const papel = S.role;
   S.role = "financeiro";
@@ -276,8 +274,15 @@ export function avancarObraAMeio(S: Estado, A: Acoes, id: number, receber: (ref:
   S.role = "operacoes";
   preencher(d(), [OBRA[0]]);
   A.campo(id, "inicio", "2026-11-02");
+  // 9/11 (o fluxo novo): o supervisor retifica as medidas, as Operações aprovam o plano e só então se assina o contrato
+  A.retificarMedidas(id);
   A.aprovarPlano(id);
   garantir(d().obra.plano!.estado === "aprovado", "aprovar o plano");
+  S.role = "comercial";
+  A.enviarContrato(id);
+  A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
+  garantir(d().orc!.contrato === "assinado", "assinar o contrato");
+  S.role = "operacoes";
   const ref = d().obra.ec?.ref;
   if (ref) { const e = receber(ref); garantir(!e, "receber os materiais: " + e); }
   A.arrancar(id);

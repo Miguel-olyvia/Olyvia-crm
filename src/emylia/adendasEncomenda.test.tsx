@@ -32,7 +32,7 @@ function preparar() {
   render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
   cleanup();
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); A.aprovarPlano(d.id);
+  A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial"); A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu"); adendaAssinada(A, d.id, N);
   return { S, A, d };
 }
@@ -61,7 +61,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
 
   it("o gate antes do arranque inclui a adenda; o Financeiro fatura, o cliente paga no portal, o Financeiro valida e a EC-1027-A1 nasce ligada à adenda", () => {
     const { S, A, d } = preparar();
-    A.role("operacoes"); A.aprovarPlano(d.id);
+    A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     expect(receberTudo("CT 2026/1027")).toBe("");
     // com tudo o resto pronto, só a adenda segura o arranque
     expect(faltaParaArrancar(d)).toEqual([`faturar a 1.ª parcela da adenda ${N} e receber o pagamento`]);

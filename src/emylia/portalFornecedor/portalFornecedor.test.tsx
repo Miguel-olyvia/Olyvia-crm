@@ -37,7 +37,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 /** O Tiago pago pelo Financeiro: a EC-1027 no Inventário e as POs (pendentes) do que falta. */
 function pagarTiago(): { S: Estado; A: ReturnType<typeof acoes> } {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]); A.role("financeiro"); A.emitir(1027); A.validar(1027); A.role("operacoes"); A.aprovarPlano(1027); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
+  preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]); A.role("financeiro"); A.emitir(1027); A.validar(1027); A.role("operacoes"); (A.retificarMedidas(1027), A.aprovarPlano(1027)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
   return { S, A };
 }
 const po = (id: string): Po => lerInventario().pos.find((p) => p.id === id)!;
@@ -122,7 +122,7 @@ describe("Portal do Fornecedor simulado · regras da expedição (só protótipo
 
     // as Operações aprovam o plano; a carrinha carrega e entrega a primeira fase (Frota)
     A.role("operacoes");
-    A.aprovarPlano(1027);
+    (A.retificarMedidas(1027), A.aprovarPlano(1027));
     expect(d.obra.plano!.estado).toBe("aprovado");
     const o = () => obrasDoEstado(S).find((x) => x.id === 1027)!;
     const v = lerFrota().viaturas.find((x) => x.armazem && x.armazemId)!;

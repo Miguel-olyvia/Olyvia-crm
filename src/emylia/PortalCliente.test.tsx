@@ -48,9 +48,16 @@ describe("portal do cliente: o percurso guiado", () => {
     expect(screen.queryByRole("region", { name: "Próximo passo" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Assinar/ })).toBeNull();
 
-    // o comercial vê o passo claro no negócio, e gera o contrato
-    expect(proximo(d, S).t).toBe("O cliente aceitou. Gerar o contrato");
-    expect(proximo(d, S).btn).toBe("Gerar o contrato");
+    // 9/11 (o fluxo novo): a proposta aceite passa ao Financeiro; o contrato gera-se na Obra, com o pagamento, as medidas e o plano
+    expect(d.fase).toBe(4);
+    expect(proximo(d, S).t).toMatch(/Registar a fatura/);
+    A.enviarContrato(d.id);
+    expect(d.orc!.contrato).toBeFalsy(); // ainda não: falta o plano aprovado
+    d.fin.fatura = { n: "FT 2026/1", q: "hoje" }; d.f.comprovativo = "TRF 1"; d.f.conta = "Banco A"; d.f.data_pag = "2026-11-09";
+    S.role = "financeiro"; A.validar(d.id);
+    S.role = "operacoes"; A.retificarMedidas(d.id); A.aprovarPlano(d.id);
+    expect(d.obra.plano?.estado).toBe("aprovado");
+    S.role = "comercial";
     A.enviarContrato(d.id);
     expect(d.orc!.contrato).toBe("enviado");
     r.rerender(<Portal S={S} d={d} A={A} />);
@@ -69,7 +76,7 @@ describe("portal do cliente: o percurso guiado", () => {
     fireEvent.click(screen.getByRole("button", { name: /Assinar o contrato/ }));
     expect(d.orc!.contrato).toBe("assinado");
     expect(d.orc!.assinatura).toMatchObject({ tipo: "digital" });
-    expect(d.fase).toBe(4);
+    expect(d.fase).toBe(5);
 
     // depois de assinado: o plano da obra, sem custos nem margens
     expect(screen.getByRole("heading", { name: "A sua obra" })).toBeTruthy();

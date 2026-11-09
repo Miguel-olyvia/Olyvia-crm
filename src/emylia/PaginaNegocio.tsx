@@ -16,6 +16,8 @@ import { EstudioNaVisita, FecharVisita } from "./VisitaEstudio";
 import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
+import { RetificacaoMedidas } from "./RetificacaoMedidas";
+import { planoAprovadoDe, retificacaoAceite } from "./preparacaoObra";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
@@ -470,10 +472,26 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
         : g(gr, Euro)),
     ];
   } else if (fase === 5) {
+    // 9/11 (Rúben, o fluxo novo): na Obra, primeiro o supervisor retifica as medidas; o plano aprova-se depois e só então se assina o contrato
+    const semObraAMedir = !!d.orc?.vendaDireta;
+    const passoRetif: Passo = { id: "retificacao", titulo: "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d),
+      resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : d.fin.pago ? "por fazer" : "depois do pagamento"],
+      corpo: <RetificacaoMedidas ctx={ctx} d={d} /> };
+    const passoContrato: Passo | null = o && !semObraAMedir && simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
+      <div className="space-y-10">
+        {!planoAprovadoDe(d) && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">O contrato gera-se depois de as Operações aprovarem o plano (com as medidas retificadas).</p>}
+        <Campos grupo={E(PROPOSTA[1])} {...fx} ro={o.contrato === "assinado"} />
+        <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : planoAprovadoDe(d) ? "plano aprovado · pronto a gerar" : "depois do plano aprovado"}>
+          <ContratoDoc S={S} d={d} />
+        </Partilhar>
+      </div>
+    ) }, o.contrato === "assinado") : null;
     passos = [
+      ...(semObraAMedir ? [] : [passoRetif]),
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
         corpo: simples ? <ObraSimples {...ctx} d={d} /> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
+      ...(passoContrato ? [passoContrato] : []),
       ...(simples ? [(() => {
         const r = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null, c = contaMateriais(d, r);
         return { id: "materiais", titulo: "Materiais", icone: Package, feito: materiaisProntos(d, r), resumo: [c ? `${c.ok} de ${c.n} garantidos` : "por encomendar"],

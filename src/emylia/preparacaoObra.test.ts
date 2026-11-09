@@ -23,7 +23,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 const preparar = () => { const S = seed(); S.role = "operacoes"; /* 4/11: o plano pede negocios.obra.planear */ return { S, A: acoes(S, () => {}, (fn) => fn()), d: S.deals.find((x) => x.id === 1027)! }; };
 // o pagamento validado emite a encomenda de cliente no Inventário novo; o plano aprova-se depois
 // 19/10: a fatura e o pagamento são do Financeiro (permissoes.ts)
-const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.role("operacoes"); }; // 4/11: depois do pagamento, o plano é das Operações (negocios.obra.planear)
+const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.role("operacoes"); }; // 4/11: depois do pagamento, o plano é das Operações (negocios.obra.planear)
 const estados = (S: ReturnType<typeof seed>, d: ReturnType<typeof preparar>["d"]) => Object.fromEntries(passosPreparacao(d, S).map((p) => [p.id, p.estado]));
 
 describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Inventário novo)", () => {
@@ -92,7 +92,7 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     const { S, A, d } = preparar();
     pagar(A, d);
     const n = lerInventario().ecs.length;
-    A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.emitirEc(d.id);
+    A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.emitirEc(d.id);
     expect(sincronizarEcsNegocios(S.deals)).toBe(0);
     expect(lerInventario().ecs).toHaveLength(n);
     // os dados do Inventário repostos (como ao recarregar a página): volta a emiti-la, com o mesmo número
@@ -133,10 +133,10 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     preencher(d, [OBRA[0]]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("por aprovar");
-    A.aprovarPlano(d.id);
+    (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     expect(d.obra.plano!.estado).toBe("por aprovar"); // antes do pagamento não se aprova
     pagar(A, d);
-    A.aprovarPlano(d.id);
+    (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     // as encomendas a fornecedor por aprovar seguram o arranque (e dizem onde se aprovam)
     expect(estados(S, d).go).toBe("espera");
     expect(minhas(S, "operacoes").filter((x) => x.d.id === 1027)).toEqual([]);

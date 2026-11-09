@@ -13,7 +13,7 @@ describe("nota de encomenda no portal do cliente", () => {
   it("esconde «encomenda a fornecedor por aprovar» e mostra os outros estados", () => {
     const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
     for (let i = 0; i < 5; i++) for (const c of emFalta(FINANCEIRO, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x";
-    A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
+    A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
     render(<NotaEncomendaDoc d={d} />);
     const moveis = screen.getByText("Conjunto de móveis de cozinha").closest("li")!;
     expect(moveis.textContent).not.toMatch(/por aprovar/);
@@ -23,7 +23,7 @@ describe("nota de encomenda no portal do cliente", () => {
   it("21/10: as linhas das encomendas de ajuste aparecem como ajuste à obra, incluídas (não somam ao valor)", () => {
     const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
     for (let i = 0; i < 5; i++) for (const c of emFalta(FINANCEIRO, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x";
-    A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
+    A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
     A.role("operacoes"); A.novaTarefaPlano(d.id, { sid: "revest", q: 20, fase: 3 });
     render(<NotaEncomendaDoc d={d} />);
     const li = screen.getByText("Cimento-cola C2TE").closest("li")!;

@@ -154,6 +154,8 @@ describe("Hoje V2 · os outros papéis", () => {
     const S = seed();
     expect(hojeV2(S, "operacoes", [], VAZIO).map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Marta Lima", "obras", "abrirPlano"]]);
     S.deals.find((x) => x.id === 1027)!.fin.pago = true;
+    expect(hojeV2(S, "operacoes", [], VAZIO).map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Tiago Almeida", "faturas", "abrirRetificacao"], ["Marta Lima", "obras", "abrirPlano"]]); // 9/11: primeiro, a retificação das medidas
+    S.deals.find((x) => x.id === 1027)!.f.retif_aceite = "2026-10-14";
     expect(hojeV2(S, "operacoes", [], VAZIO).map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Tiago Almeida", "faturas", "aprovarPlano"], ["Marta Lima", "obras", "abrirPlano"]]);
   });
   it("Direção: as exceções à margem pedidas aparecem para aprovar", () => {

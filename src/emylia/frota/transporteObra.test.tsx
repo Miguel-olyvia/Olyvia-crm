@@ -25,7 +25,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 /** 1027 (Tiago Almeida) pago: a EC está no Inventário, com móveis a encomendar ao fornecedor; o plano por aprovar. */
 function obraPaga() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ S.role = "operacoes"; // 4/11: o plano é das Operações
+  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ S.role = "operacoes"; // 4/11: o plano é das Operações
   const o = () => obrasDoEstado(S).find((x) => x.id === 1027)!;
   return { S, A, d, o };
 }
@@ -64,7 +64,7 @@ describe("viatura ligada a uma obra e transporte por fases", () => {
     const v = carrinha();
     executarFrota((F) => ligarObra(F, v.id, 1027));
     receberTudo();
-    A.aprovarPlano(1027);
+    (A.retificarMedidas(1027), A.aprovarPlano(1027));
     expect(faltaParaCarregar(lerInventario(), o())).toEqual([]);
     const fases = fasesTransporte(lerInventario(), o());
     expect(fases.length).toBeGreaterThan(0);
