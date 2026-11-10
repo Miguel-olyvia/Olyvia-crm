@@ -87,13 +87,13 @@ describe("construirResultadoPessoa", () => {
     }
   });
 
-  it("leva EXACTAMENTE os campos do contrato, e os totais com EXACTAMENTE os sete campos", () => {
+  it("leva EXACTAMENTE os campos do contrato, e os totais com EXACTAMENTE os nove campos (os sete de sempre mais os subsidios de ferias e de Natal)", () => {
     const r = construirResultadoPessoa(entrada);
     expect(Object.keys(r).sort()).toEqual(
       ["avisos", "cargo_periodo_id", "desvios_assinatura", "linhas", "pessoa_id", "planeado_minutos", "realizado_minutos", "regra_salarial_id", "retribuicao_id", "total_bruto", "totais", "valor_hora"].sort(),
     );
     expect(Object.keys(r.totais).sort()).toEqual(
-      ["base_mes", "desconto_faltas", "divisor_duodecimos", "lancamentos_pontuais", "subsidio_alimentacao", "total_codigos_automaticos", "total_regras"],
+      ["base_mes", "desconto_faltas", "divisor_duodecimos", "lancamentos_pontuais", "subsidio_alimentacao", "subsidio_ferias", "subsidio_natal", "total_codigos_automaticos", "total_regras"],
     );
   });
 

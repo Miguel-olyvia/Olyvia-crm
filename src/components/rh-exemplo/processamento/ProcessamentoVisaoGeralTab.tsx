@@ -76,6 +76,9 @@ import { minutosDoCalculo } from "@/components/rh-exemplo/processamento/calculoR
 import { ResumoPessoaProcessamentoOculto } from "@/components/rh-exemplo/processamento/ResumoPessoaProcessamentoOculto";
 import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
 import { AvisosDeHorasExtra } from "@/components/rh-exemplo/processamento/AvisosDeHorasExtra";
+import { AvisoSubsidiosPorLer } from "@/components/rh-exemplo/processamento/AvisoSubsidiosPorLer";
+import { useSubsidiosDoPeriodo } from "@/components/rh-exemplo/processamento/useSubsidiosDoPeriodo";
+import { AVISO_SUBSIDIO_CHAVE } from "@/components/rh-exemplo/hooks/subsidiosReal";
 import { prepararFechoComDesvios, prepararFechoComHorasExtra } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { argsDoFechoDeHorasExtra, assinaturaDeHorasExtraDoCalculo } from "@/components/rh-exemplo/hooks/horasExtraFechoReal";
 import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/components/rh-exemplo/hooks/useRelatorioAssiduidadeMensal";
@@ -184,6 +187,9 @@ export function ProcessamentoVisaoGeralTab() {
 
   const intervalo = useMemo(() => intervaloEfectivo(periodo, ano, mes, regras), [periodo, ano, mes, regras]);
   const ultimoDia = intervalo.ate;
+  // Subsidios de ferias e de Natal: a configuracao da organizacao e, so no periodo que os paga, os vinculos (a proporcao).
+  // A assinatura dos subsidios vem da mesma leitura que decide o que o periodo paga: e a que segue no fecho (nunca lida de novo ao fechar).
+  const { subsidiosLeitura, subsidiosExtraDaPessoa, subsidiosAssinatura, subsidiosAReler, relerSubsidios } = useSubsidiosDoPeriodo(mes, ultimoDia, periodo?.id);
 
   const retribuicoesHook = useRetribuicoesVigentesDaOrganizacao(activeCompany?.id, ano, mes, intervalo);
   const regrasHook = useRegrasSalariais();
@@ -313,6 +319,7 @@ export function ProcessamentoVisaoGeralTab() {
           : null,
         codigos: codigosActivos,
         lancamentos: lancamentosDaPessoa,
+        subsidiosExtra: subsidiosExtraDaPessoa(pessoa.id),
       });
 
       mapa.set(pessoa.id, {
@@ -333,6 +340,7 @@ export function ProcessamentoVisaoGeralTab() {
     regra,
     direitosHook.porPessoa,
     ultimoDia,
+    subsidiosExtraDaPessoa,
   ]);
 
   const periodoFechado = periodo?.estado === "fechado";
@@ -367,6 +375,8 @@ export function ProcessamentoVisaoGeralTab() {
     codigos: codigosEstado,
     regras: regrasHook.isLoading ? "a_carregar" : regrasHook.estado,
     vinculos: estadoVinculos,
+    // A configuracao dos subsidios de ferias e de Natal (e os vinculos, no periodo que os paga): sem ela o periodo ficaria gravado sem eles.
+    subsidios: subsidiosLeitura,
     pessoasObrigatorias: obrigatorias,
     comCalculo: (id) => resultadosPorPessoa.has(id),
     assiduidadeIncompleta: (id) => incompletasPorPessoa[id] === true,
@@ -375,9 +385,12 @@ export function ProcessamentoVisaoGeralTab() {
     horasExtraNaoLidas: horasExtraNaoLidasPorPessoa,
     horasExtraPendentes: horasExtraPendentesPorPessoa,
   });
+  // Durante a releitura dos subsidios (depois de um fecho recusado) os dados antigos ainda parecem lidos: espera-se, senao um segundo clique reenviava a assinatura velha.
   const textoBloqueio = motivoBloqueio
     ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
-    : null;
+    : subsidiosAReler
+      ? t("rhProcReal.fecho.bloqueio.subsidiosAReler")
+      : null;
 
   const abrirPeriodo = async () => {
     const erro = await periodoHook.abrir();
@@ -450,6 +463,7 @@ export function ProcessamentoVisaoGeralTab() {
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
       assinaturaDeDesviosDe: (id) => preparacao.assinaturas.get(id) ?? null,
       assinaturaDeHorasExtraDe: (id) => assinaturaDeHorasExtraDoCalculo(totaisPorPessoa[id]),
+      assinaturaDeSubsidios: subsidiosAssinatura,
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultadosPorPessoa.get(id)?.resultado,
       minutosDe: (id) => minutosDoCalculo(totaisPorPessoa[id] ? { totais: totaisPorPessoa[id] } : undefined),
@@ -461,8 +475,11 @@ export function ProcessamentoVisaoGeralTab() {
     const erro = semCalculo.length > 0
       ? t("rhProcReal.fecho.bloqueio.calculo", { n: semCalculo.length })
       : await periodoHook.fechar(paraGravar);
-    if (erro) toast.error(erro);
-    else {
+    if (erro) {
+      toast.error(erro);
+      // A configuracao dos subsidios pode ter mudado depois do calculo: volta a ler, e o calculo refaz-se com a assinatura nova.
+      void relerSubsidios();
+    } else {
       toast.success(t("hr.vencimento.visaoGeral.periodoFechadoSucesso"));
       // O botao que se clicou desaparece (fechado nao tem botao): o foco passa para a mensagem de estado do periodo.
       requestAnimationFrame(() => estadoFechoRef.current?.focus());
@@ -582,6 +599,7 @@ export function ProcessamentoVisaoGeralTab() {
               {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
             </p>
           )}
+          {!periodoFechado && <AvisoSubsidiosPorLer estado={subsidiosLeitura} />}
           {!periodoFechado && <AvisosDeDesvios diasPorValidar={diasPorValidar} pessoasSemDesvios={pessoasSemDesvios} />}
           {!periodoFechado && (
             <AvisosDeHorasExtra
@@ -1047,6 +1065,18 @@ export function ProcessamentoVisaoGeralTab() {
                         </span>
                         <span className="tabular-nums">{formatarValor(resultado.subsidioAlimentacao)}</span>
                       </div>
+                      {(resultado.subsidioFerias ?? 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">{t("rhSubs.linha.ferias")}</span>
+                          <span className="tabular-nums">{formatarValor(resultado.subsidioFerias ?? 0)}</span>
+                        </div>
+                      )}
+                      {(resultado.subsidioNatal ?? 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">{t("rhSubs.linha.natal")}</span>
+                          <span className="tabular-nums">{formatarValor(resultado.subsidioNatal ?? 0)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">
                           {t("hr.vencimento.visaoGeral.detalheLancamentosPontuais")}
@@ -1067,7 +1097,7 @@ export function ProcessamentoVisaoGeralTab() {
                       </div>
                     )}
 
-                    {resultado.avisos.length > 0 && (
+                    {(resultado.avisos.length > 0 || (resultado.avisosSubsidios?.length ?? 0) > 0) && (
                       <div className="space-y-1 border-t pt-2">
                         <div className="font-medium">{t("hr.vencimento.visaoGeral.detalheAvisos")}</div>
                         <ul className="space-y-0.5 text-amber-800 dark:text-amber-300">
@@ -1075,6 +1105,12 @@ export function ProcessamentoVisaoGeralTab() {
                             <li key={aviso} className="flex items-center gap-1.5">
                               <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                               {t(AVISO_CHAVE[aviso])}
+                            </li>
+                          ))}
+                          {(resultado.avisosSubsidios ?? []).map((aviso) => (
+                            <li key={aviso} className="flex items-center gap-1.5">
+                              <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                              {t(AVISO_SUBSIDIO_CHAVE[aviso])}
                             </li>
                           ))}
                         </ul>

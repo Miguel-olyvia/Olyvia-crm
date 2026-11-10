@@ -9,6 +9,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import type { ResultadoCalculoReal } from "@/components/rh-exemplo/processamento/calculoReal";
 import type { AvisoProcessamento } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
+import { AVISO_SUBSIDIO_CHAVE } from "@/components/rh-exemplo/hooks/subsidiosReal";
 import { euros } from "./formatosC";
 
 interface Props {
@@ -54,6 +55,15 @@ export function ProcessamentoDetalheDialog({ pessoa, calculo, lancamentos, retri
   const { t } = useTranslation();
   if (!pessoa) return null;
   const resultado = calculo?.resultado ?? null;
+  /** A conta do subsidio (so o processamento vivo a traz; um periodo fechado so tem o valor gravado). */
+  const contaDoSubsidio = (d: NonNullable<typeof resultado>["subsidiosDetalhe"]): string | undefined =>
+    d
+      ? t("rhSubs.passo.conta", {
+          r: euros(d.r),
+          parte: `${num(100 - d.duodecimosPct, 0)} %`,
+          prop: d.proporcao === 1 ? "12/12" : d.diasNoAno !== undefined && d.diasDoAno !== undefined ? `${d.diasNoAno}/${d.diasDoAno}` : `${num(d.proporcao * 100)} %`,
+        })
+      : undefined;
 
   return (
     <Dialog open onOpenChange={(a) => !a && aoFechar()}>
@@ -69,11 +79,16 @@ export function ProcessamentoDetalheDialog({ pessoa, calculo, lancamentos, retri
           <p role="status" className="text-sm text-muted-foreground">{t("rhProcReal.aCalcular", { n: 1 })}</p>
         ) : (
           <>
-            {(resultado.avisos.length > 0 || calculo.mudouAMeioDoMes) && (
+            {(resultado.avisos.length > 0 || (resultado.avisosSubsidios?.length ?? 0) > 0 || calculo.mudouAMeioDoMes) && (
               <ul className="space-y-1" aria-label={t("rhFluxosC.proc.avisos")}>
                 {resultado.avisos.map((a) => (
                   <li key={a} className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
                     <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{t(AVISO_CHAVE[a])}
+                  </li>
+                ))}
+                {(resultado.avisosSubsidios ?? []).map((a) => (
+                  <li key={a} className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+                    <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{t(AVISO_SUBSIDIO_CHAVE[a])}
                   </li>
                 ))}
                 {calculo.mudouAMeioDoMes && (
@@ -127,6 +142,8 @@ export function ProcessamentoDetalheDialog({ pessoa, calculo, lancamentos, retri
                 conta={t("rhFluxosC.proc.passo.subsidioDaRegra")}
                 valor={euros(resultado.subsidioAlimentacao)}
               />
+              {(resultado.subsidioFerias ?? 0) > 0 && <Passo titulo={t("rhSubs.linha.ferias")} conta={contaDoSubsidio(resultado.subsidiosDetalhe)} valor={euros(resultado.subsidioFerias ?? 0)} />}
+              {(resultado.subsidioNatal ?? 0) > 0 && <Passo titulo={t("rhSubs.linha.natal")} conta={contaDoSubsidio(resultado.subsidiosDetalhe)} valor={euros(resultado.subsidioNatal ?? 0)} />}
               <Passo titulo={t("hr.vencimento.visaoGeral.detalheLancamentosPontuais")} valor={euros(resultado.lancamentosPontuais)} />
               <li className="flex items-baseline justify-between gap-4 pt-3">
                 <span className="text-sm font-semibold">{t("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado")}</span>

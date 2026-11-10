@@ -25,6 +25,7 @@ import { minutosDoCalculo, totalDoMes } from "@/components/rh-exemplo/processame
 import { SeletorPeriodoFolha, usePeriodoFolhaEscolhido } from "@/components/rh-exemplo/hooks/periodoFolha";
 import { RecolhaDeAssiduidade, useCalculoRealDoMes } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import { AvisosDeDesvios } from "@/components/rh-exemplo/processamento/AvisosDeDesvios";
+import { AvisoSubsidiosPorLer } from "@/components/rh-exemplo/processamento/AvisoSubsidiosPorLer";
 import { AvisosDeHorasExtra } from "@/components/rh-exemplo/processamento/AvisosDeHorasExtra";
 import { prepararFechoComDesvios, prepararFechoComHorasExtra } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { argsDoFechoDeHorasExtra, assinaturaDeHorasExtraDoCalculo } from "@/components/rh-exemplo/hooks/horasExtraFechoReal";
@@ -114,6 +115,8 @@ export function ProcessamentoFluxoTab() {
     codigos: calculo.codigosEstado,
     regras: calculo.regrasHook.isLoading ? "a_carregar" : calculo.regrasHook.estado,
     vinculos: estadoVinculos,
+    // A configuracao dos subsidios de ferias e de Natal (e os vinculos, no periodo que os paga): sem ela o periodo ficaria gravado sem eles.
+    subsidios: calculo.subsidiosLeitura,
     pessoasObrigatorias: obrigatorias,
     comCalculo: (id) => resultados.has(id),
     assiduidadeIncompleta: calculo.assiduidadeIncompleta,
@@ -123,9 +126,12 @@ export function ProcessamentoFluxoTab() {
     horasExtraNaoLidas: (id) => calculo.horasExtraNaoLidas?.(id) === true,
     horasExtraPendentes: (id) => calculo.horasExtraPendentes?.(id) ?? 0,
   });
+  // Durante a releitura dos subsidios (depois de um fecho recusado) os dados antigos ainda parecem lidos: espera-se, senao um segundo clique reenviava a assinatura velha.
   const textoBloqueio = motivoBloqueio
     ? t(`rhProcReal.fecho.bloqueio.${motivoBloqueio.codigo}`, "n" in motivoBloqueio ? { n: motivoBloqueio.n } : undefined)
-    : null;
+    : calculo.subsidiosAReler
+      ? t("rhProcReal.fecho.bloqueio.subsidiosAReler")
+      : null;
   // Fecha e GRAVA o resultado de cada pessoa obrigatoria, tal como o ecra o mostra agora.
   const fecharComResultados = async (): Promise<string | null> => {
     // Mesma porta do botao: o botao so e `aria-disabled`, por isso o clique nunca fecha com o motivo por resolver.
@@ -181,6 +187,8 @@ export function ProcessamentoFluxoTab() {
     const { resultados: paraGravar, semCalculo } = construirResultadosDoFecho({
       assinaturaDeDesviosDe: (id) => preparacao.assinaturas.get(id) ?? null,
       assinaturaDeHorasExtraDe: (id) => assinaturaDeHorasExtraDoCalculo(calculo.totaisDe?.(id)),
+      // A assinatura dos subsidios com que o calculo foi feito (a da leitura que decidiu o que o periodo paga), nunca lida de novo ao fechar.
+      assinaturaDeSubsidios: calculo.subsidiosAssinatura,
       pessoasObrigatorias: obrigatorias,
       resultadoDe: (id) => resultados.get(id)?.resultado,
       minutosDe: (id) => minutosDoCalculo(resultados.get(id)),
@@ -190,7 +198,10 @@ export function ProcessamentoFluxoTab() {
       regraSalarialId: calculo.regra?.id ?? null,
     });
     if (semCalculo.length > 0) return t("rhProcReal.fecho.bloqueio.calculo", { n: semCalculo.length });
-    return periodoHook.fechar(paraGravar);
+    const erro = await periodoHook.fechar(paraGravar);
+    // A configuracao dos subsidios pode ter mudado depois do calculo: volta a ler, e o calculo refaz-se com a assinatura nova.
+    if (erro) void calculo.relerSubsidios?.();
+    return erro;
   };
 
   if (!podeVerPeriodo) return <SemAcessoCard className="m-0" />;
@@ -239,6 +250,7 @@ export function ProcessamentoFluxoTab() {
           {t("hr.vencimento.visaoGeral.avisoDireitosIndisponiveis")}
         </p>
       )}
+      {!fechado && <AvisoSubsidiosPorLer estado={calculo.subsidiosLeitura} />}
       {incompletas > 0 && (
         <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{t("rhProcReal.aviso.assiduidadeIncompleta", { n: incompletas })}</p>
       )}
@@ -306,10 +318,10 @@ export function ProcessamentoFluxoTab() {
                       <tr key={pessoa.id} className="border-b align-top last:border-b-0">
                         <th scope="row" className="px-4 py-3 text-left font-medium">
                           {pessoa.nome_completo}
-                          {res && res.avisos.length > 0 && (
+                          {res && res.avisos.length + (res.avisosSubsidios?.length ?? 0) > 0 && (
                             <span className="mt-0.5 flex items-center gap-1 text-xs font-normal text-amber-800 dark:text-amber-300">
                               <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
-                              {t("rhFluxosC.proc.nAvisos", { n: res.avisos.length })}
+                              {t("rhFluxosC.proc.nAvisos", { n: res.avisos.length + (res.avisosSubsidios?.length ?? 0) })}
                             </span>
                           )}
                         </th>
@@ -320,7 +332,7 @@ export function ProcessamentoFluxoTab() {
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.baseMes, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.totalCodigosAutomaticos, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.descontoFaltas > 0 ? -res.descontoFaltas : 0, !semRetribuicoes)}</td>
-                            <td className="px-4 py-3 text-right tabular-nums">{celula(res.subsidioAlimentacao, !semRetribuicoes)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums">{celula(res.subsidioAlimentacao + (res.subsidioFerias ?? 0) + (res.subsidioNatal ?? 0), !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{celula(res.totalRegras, !semRetribuicoes)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{euros(res.lancamentosPontuais)}</td>
                             <td className="px-4 py-3 text-right font-semibold tabular-nums">

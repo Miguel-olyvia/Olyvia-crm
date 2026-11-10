@@ -15,5 +15,6 @@ export function useContasDoMes(custo: CustoDaPessoa): ContasDoMes {
     rotuloDeFalta: t("rhContas.rotuloDeFalta"),
     rotuloSubsidios: t("rhContas.rotuloSubsidios"),
     rotuloCalculado: t("rhContas.rotuloCalculado"),
+    rotuloParteSemDuodecimos: t("rhContas.rotuloParteSemDuodecimos"),
   });
 }

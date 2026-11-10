@@ -19,6 +19,7 @@ import {
   type ResultadoProcessamentoPessoa,
 } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrCodigoProcessamento, HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
+import { decidirSubsidios, type DecisaoDoPeriodo, type SubsidiosConfig, type VinculoParaSubsidios } from "@/components/rh-exemplo/hooks/subsidiosReal";
 
 export interface EntradaCalculoReal {
   totais: TotaisRelatorioMensal;
@@ -34,6 +35,12 @@ export interface EntradaCalculoReal {
   regra: RegraParaCalculo | null;
   /** A pessoa tem direito a IHT (os direitos a km e ajudas ja se verificaram ao lancar). */
   direitoIht: boolean;
+  /**
+   * Os subsidios de ferias e de Natal: a configuracao da organizacao (`null` = por ler, indisponivel ou desligada), o mes do periodo
+   * (1-12; o do ultimo dia, nunca o do primeiro) e o vinculo que cobre o periodo. Ausente = nenhum subsidio, como sempre.
+   * `decisao` e o que a base decidiu para o periodo (`rpc_hr_subsidios_assinatura`): quando vem, o mes vem dela e `config` nao conta.
+   */
+  subsidios?: { config: SubsidiosConfig | null; mes: number; vinculo: VinculoParaSubsidios | null; decisao?: DecisaoDoPeriodo };
 }
 
 export interface ResultadoCalculoReal {
@@ -88,6 +95,9 @@ export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCal
       : null,
     codigos: entrada.codigosActivos,
     lancamentos: entrada.lancamentos,
+    subsidiosExtra: entrada.subsidios
+      ? decidirSubsidios(entrada.subsidios.config, { mes: entrada.subsidios.mes, dataFim: entrada.ultimoDia }, entrada.subsidios.vinculo, entrada.subsidios.decisao)
+      : undefined,
   });
   return {
     resultado,

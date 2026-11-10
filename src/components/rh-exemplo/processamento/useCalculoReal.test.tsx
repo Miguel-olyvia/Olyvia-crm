@@ -24,6 +24,17 @@ const estado = vi.hoisted(() => ({
   // A regra salarial em vigor (`null` = sem regra) e os direitos por pessoa.
   regra: null as null | Record<string, unknown>,
   direitos: new Map<string, { iht: boolean; km: boolean; ajudas: boolean }>(),
+  // Os subsidios de ferias e de Natal: a configuracao (por omissao lida e desligada) e os vinculos (so se pedem nos meses que pagam).
+  subsidios: { estado: "ok", config: null } as { estado: string; config: unknown },
+  pedidosConfig: vi.fn(),
+  // A assinatura da configuracao dos subsidios do periodo (rpc_hr_subsidios_assinatura): a unica fonte do mes quando o periodo existe.
+  assinatura: { estado: "ok", leitura: null } as { estado: string; leitura: unknown; aReler?: boolean },
+  reler: vi.fn(),
+  pedidosAssinatura: vi.fn(),
+  vinculos: new Map<string, unknown[]>(),
+  vinculosCarregado: true,
+  vinculosRecusado: false,
+  pedidosVinculos: vi.fn(),
   relatorio: {
     loading: false,
     totais: { planeadoMinutos: 9600, realizadoMinutos: 9600, minutosExtraNormal: 0, minutosFeriadoTrabalhado: 0, minutosDescansoTrabalhado: 0, horasExtraNoturnasMinutos: 0, minutosAusenciaRemunerada: 0, diasFeriadoTrabalhados: 0 },
@@ -63,6 +74,26 @@ vi.mock("@/components/rh-exemplo/hooks/useRetribuicoesVigentesDaOrganizacao", as
   }),
 }));
 
+vi.mock("@/components/rh-exemplo/hooks/useSubsidiosConfig", () => ({
+  useSubsidiosConfig: (...args: unknown[]) => {
+    estado.pedidosConfig(...args);
+    return { ...estado.subsidios, aGuardar: false, guardar: vi.fn() };
+  },
+}));
+vi.mock("@/components/rh-exemplo/hooks/useSubsidiosAssinatura", () => ({
+  useSubsidiosAssinatura: (...args: unknown[]) => {
+    estado.pedidosAssinatura(...args);
+    return { ...estado.assinatura, reler: estado.reler };
+  },
+}));
+vi.mock("@/components/rh-exemplo/hooks/usePessoasVinculosVigentes", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  usePessoasVinculosVigentes: (...args: unknown[]) => {
+    estado.pedidosVinculos(...args);
+    return { vinculos: estado.vinculos, loading: false, carregado: estado.vinculosCarregado, recusado: estado.vinculosRecusado, error: null, recarregar: vi.fn() };
+  },
+}));
+
 import { RecolhaDeAssiduidade, useCalculoRealDaPessoa, useCalculoRealDoMes, type RecolhaAssiduidade } from "./useCalculoReal";
 
 const pessoa = (id: string, estadoRegisto = "activo") => ({ id, nome_completo: `Pessoa ${id}`, estado_registo: estadoRegisto });
@@ -84,6 +115,15 @@ beforeEach(() => {
   estado.retribuicoesRecusadas = false;
   estado.regra = null;
   estado.direitos = new Map();
+  estado.subsidios = { estado: "ok", config: null };
+  estado.pedidosConfig.mockClear();
+  estado.assinatura = { estado: "ok", leitura: null };
+  estado.reler.mockReset();
+  estado.pedidosAssinatura.mockClear();
+  estado.vinculos = new Map();
+  estado.vinculosCarregado = true;
+  estado.vinculosRecusado = false;
+  estado.pedidosVinculos.mockClear();
   estado.relatorio.loading = false;
   estado.relatorio.realizadoRecusado = false;
   estado.relatorio.faltasRecusadas = false;
@@ -337,6 +377,192 @@ describe("useCalculoRealDaPessoa", () => {
     it("sem a opcao, o periodo fechado calcula em vivo como sempre (outros ecras)", () => {
       estado.periodo = { id: "per", estado: "fechado" };
       expect(renderHook(() => useCalculoRealDaPessoa("p1", 2026, 10)).result.current.resultado).not.toBeNull();
+    });
+  });
+});
+
+describe("subsidios de ferias e de Natal no calculo real", () => {
+  const CONFIG = { temConfig: true, ativoDesde: "2026-01-01", feriasMes: 6, natalMes: 11, folhasFechadasDesde: null, ultimaFolhaFechadaAte: null };
+  const vinculo = (dataInicio: string, dataFim: string | null = null) => ({ tipoContrato: "sem_termo", estado: "activo", dataInicio, dataFim, horasSemanais: 40 });
+  const MD5_A = "a".repeat(32);
+  const MD5_B = "b".repeat(32);
+  // O que a base diz do periodo: pagamento ligado, ferias em junho e Natal em novembro; o periodo paga o que o seu mes pede.
+  const leitura = (mes: number, extra: Record<string, unknown> = {}) => ({
+    aplica: true, ano: 2026, mes, ativoDesde: "2026-01-01", feriasMes: 6, natalMes: 11, pagaFerias: mes === 6, pagaNatal: mes === 11, assinatura: MD5_A, ...extra,
+  });
+  const ligar = (vinculos: unknown[] = [vinculo("2020-01-01")], mes = 6) => {
+    estado.assinatura = { estado: "ok", leitura: leitura(mes) };
+    estado.vinculos = new Map([["p1", vinculos]]);
+  };
+  const calcular = (mes: number) => {
+    const { result } = renderHook(() => useCalculoRealDoMes(2026, mes));
+    act(() => result.current.registar("p1", recolha()));
+    return result;
+  };
+
+  it("no mes de ferias, com a configuracao ligada, paga o subsidio e entra no total", () => {
+    ligar();
+    const r = calcular(6).current.resultados.get("p1")?.resultado;
+    expect(r?.subsidioFerias).toBe(1200);
+    expect(r?.totalBrutoEstimado).toBeCloseTo(2400, 6);
+  });
+
+  it("noutro mes nao paga e nem pede os vinculos", () => {
+    ligar(undefined, 10);
+    const r = calcular(10).current.resultados.get("p1")?.resultado;
+    expect(r?.subsidioFerias).toBe(0);
+    expect(r?.totalBrutoEstimado).toBeCloseTo(1200, 6);
+    expect(estado.pedidosVinculos.mock.calls.every((c) => c[0] === false)).toBe(true);
+  });
+
+  it("no mes que paga, pede os vinculos", () => {
+    ligar();
+    calcular(6);
+    expect(estado.pedidosVinculos.mock.calls.at(-1)?.[0]).toBe(true);
+  });
+
+  it("desligada (ou sem configuracao): nada se paga, como sempre", () => {
+    estado.assinatura = { estado: "ok", leitura: { aplica: false, ano: 2026, mes: 6, ativoDesde: null, feriasMes: 6, natalMes: 11, pagaFerias: false, pagaNatal: false, assinatura: null } };
+    const r = calcular(6);
+    expect(r.current.resultados.get("p1")?.resultado.subsidioFerias).toBe(0);
+    expect(r.current.subsidiosAssinatura).toBeNull();
+  });
+
+  it("admitido no ano: a proporcao pelos dias do vinculo (1 de marco = 306/365)", () => {
+    ligar([vinculo("2026-03-01")]);
+    expect(calcular(6).current.resultados.get("p1")?.resultado.subsidioFerias).toBe(1006.03);
+  });
+
+  it("contrato a terminar no ano: nao paga e avisa", () => {
+    ligar([vinculo("2020-01-01", "2026-12-31")]);
+    const r = calcular(6).current.resultados.get("p1")?.resultado;
+    expect(r?.subsidioFerias).toBe(0);
+    expect(r?.avisosSubsidios).toEqual(["subsidio_cessacao_por_tratar"]);
+  });
+
+  it("contrato de 2020 renovado em 1/3/2026 sem interrupcao: conta como continuo, paga o inteiro (nunca 306/365)", () => {
+    ligar([vinculo("2020-03-01", "2026-02-28"), vinculo("2026-03-01")]);
+    const r = calcular(6).current.resultados.get("p1")?.resultado;
+    expect(r?.subsidioFerias).toBe(1200);
+    expect(r?.avisosSubsidios ?? []).toEqual([]);
+  });
+
+  it("renovacao com intervalo no ano: nao paga e avisa dos contratos com intervalo", () => {
+    ligar([vinculo("2020-03-01", "2026-02-28"), vinculo("2026-03-11")]);
+    const r = calcular(6).current.resultados.get("p1")?.resultado;
+    expect(r?.subsidioFerias).toBe(0);
+    expect(r?.avisosSubsidios).toEqual(["subsidio_contratos_com_intervalo"]);
+  });
+
+  it("sem vinculo conhecido: nao paga e avisa", () => {
+    ligar([]);
+    expect(calcular(6).current.resultados.get("p1")?.resultado.avisosSubsidios).toEqual(["subsidio_sem_vinculo"]);
+  });
+
+  it("configuracao por ler (erro, recusada, a carregar) bloqueia o fecho com a leitura, e o mes aberto nao paga a zero em silencio", () => {
+    for (const leitura of ["erro", "recusado", "a_carregar"]) {
+      estado.assinatura = { estado: leitura, leitura: null };
+      const { result } = renderHook(() => useCalculoRealDoMes(2026, 6));
+      expect(result.current.subsidiosLeitura).toBe(leitura);
+      expect(result.current.subsidiosAssinatura).toBeNull();
+    }
+    estado.assinatura = { estado: "erro", leitura: null };
+    expect(renderHook(() => useCalculoRealDoMes(2026, 6)).result.current.aCarregar).toBe(false);
+    estado.assinatura = { estado: "a_carregar", leitura: null };
+    expect(renderHook(() => useCalculoRealDoMes(2026, 6)).result.current.aCarregar).toBe(true);
+  });
+
+  it("configuracao indisponivel (a base ainda nao a tem) conta como desligada e nao bloqueia", () => {
+    estado.assinatura = { estado: "indisponivel", leitura: null };
+    const r = calcular(6);
+    expect(r.current.subsidiosLeitura).toBe("indisponivel");
+    expect(r.current.subsidiosAssinatura).toBeNull();
+    expect(r.current.resultados.get("p1")?.resultado.subsidioFerias).toBe(0);
+  });
+
+  it("vinculos ainda por ler no mes que paga: leitura a carregar (nunca «sem vinculo» a correr)", () => {
+    ligar();
+    estado.vinculosCarregado = false;
+    const { result } = renderHook(() => useCalculoRealDoMes(2026, 6));
+    expect(result.current.subsidiosLeitura).toBe("a_carregar");
+    expect(result.current.aCarregar).toBe(true);
+  });
+
+  it("vinculos recusados no mes que paga: a leitura dos subsidios fica recusada", () => {
+    ligar();
+    estado.vinculosRecusado = true;
+    expect(renderHook(() => useCalculoRealDoMes(2026, 6)).result.current.subsidiosLeitura).toBe("recusado");
+  });
+
+  it("a ficha da pessoa tambem paga o subsidio", () => {
+    ligar();
+    const { result } = renderHook(() => useCalculoRealDaPessoa("p1", 2026, 6));
+    expect(result.current.resultado?.resultado.subsidioFerias).toBe(1200);
+    expect(result.current.subsidiosLeitura).toBe("ok");
+  });
+
+  describe("a assinatura da configuracao vem com o calculo", () => {
+    it("com o pagamento ligado, o calculo expoe a assinatura que veio JUNTO com a decisao do mes", () => {
+      ligar();
+      const r = calcular(6);
+      expect(r.current.subsidiosAssinatura).toBe(MD5_A);
+      expect(estado.pedidosAssinatura).toHaveBeenCalledWith("per-out");
+    });
+
+    it("a assinatura e enviada tambem num mes que nao paga (a base exige-a em toda a folha coberta)", () => {
+      ligar(undefined, 10);
+      expect(calcular(10).current.subsidiosAssinatura).toBe(MD5_A);
+    });
+
+    it("o mes decide-se pela base, nao pela configuracao lida a parte: a base diz que julho paga ferias e paga", () => {
+      estado.subsidios = { estado: "ok", config: CONFIG };
+      estado.assinatura = { estado: "ok", leitura: leitura(7, { feriasMes: 7, pagaFerias: true }) };
+      estado.vinculos = new Map([["p1", [vinculo("2020-01-01")]]]);
+      expect(calcular(7).current.resultados.get("p1")?.resultado.subsidioFerias).toBe(1200);
+    });
+
+    it("com o periodo aberto nao se le a configuracao a parte (uma so fonte)", () => {
+      ligar();
+      calcular(6);
+      expect(estado.pedidosConfig.mock.calls.every((c) => c[0] === false)).toBe(true);
+    });
+
+    it("a configuracao muda depois do calculo: o calculo e a assinatura mudam JUNTOS (nunca a antiga com o valor novo)", () => {
+      ligar();
+      const { result, rerender } = renderHook(() => useCalculoRealDoMes(2026, 6));
+      act(() => result.current.registar("p1", recolha()));
+      expect(result.current.resultados.get("p1")?.resultado.subsidioFerias).toBe(1200);
+      expect(result.current.subsidiosAssinatura).toBe(MD5_A);
+
+      // O mes de ferias passou a julho: a base devolve outra assinatura e este periodo ja nao paga.
+      estado.assinatura = { estado: "ok", leitura: leitura(6, { feriasMes: 7, pagaFerias: false, assinatura: MD5_B }) };
+      rerender();
+      expect(result.current.resultados.get("p1")?.resultado.subsidioFerias).toBe(0);
+      expect(result.current.subsidiosAssinatura).toBe(MD5_B);
+    });
+
+    it("sem periodo (ainda nao aberto) decide-se pela configuracao, como antes, e nao ha assinatura", () => {
+      estado.periodo = null;
+      estado.subsidios = { estado: "ok", config: CONFIG };
+      estado.vinculos = new Map([["p1", [vinculo("2020-01-01")]]]);
+      const r = calcular(6);
+      expect(r.current.resultados.get("p1")?.resultado.subsidioFerias).toBe(1200);
+      expect(r.current.subsidiosAssinatura).toBeNull();
+      expect(estado.pedidosConfig.mock.calls.at(-1)?.[0]).toBe(true);
+    });
+
+    it("subsidiosAReler diz que a releitura decorre (o fecho espera por ela) e e falso quando nao decorre", () => {
+      ligar();
+      expect(calcular(6).current.subsidiosAReler).toBe(false);
+      estado.assinatura = { estado: "ok", leitura: leitura(6), aReler: true };
+      expect(calcular(6).current.subsidiosAReler).toBe(true);
+    });
+
+    it("relerSubsidios volta a ler a assinatura (para depois de o fecho ser recusado)", async () => {
+      ligar();
+      const r = calcular(6);
+      await r.current.relerSubsidios();
+      expect(estado.reler).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -36,6 +36,7 @@ import type {
 import type { DiaRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
 import { detalheDasFaltas, type FaltaDoPeriodo } from "@/lib/hr/descontoFalta";
 import type { FonteHorasExtra } from "@/lib/hr/horasExtraRelatorio";
+import type { AvisoSubsidio } from "@/lib/hr/subsidiosExtra";
 
 export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
 
@@ -43,6 +44,27 @@ export interface RetribuicaoParaCalculo {
   valorBase: number;
   periodicidade: Periodicidade;
   duodecimosPct: 0 | 50 | 100 | null;
+}
+
+/**
+ * Os subsidios de ferias e de Natal que ESTE periodo paga, ja decididos por quem chama (`decidirSubsidios`, em `subsidiosExtra.ts`):
+ * quais, a proporcao (dias de vinculo no ano / dias do ano; 1 = o inteiro) e, quando nao se pode calcular, o porque. Ausente = nada
+ * se paga e o resultado e o de sempre.
+ */
+export interface SubsidiosExtraEntrada {
+  ferias: boolean;
+  natal: boolean;
+  /** `null` = nao se sabe (sem vinculo ou cessacao): nao se paga. */
+  proporcao: number | null;
+  /** Nao ha contrato conhecido que cubra o periodo. */
+  semVinculo?: boolean;
+  /** O contrato termina no ano do periodo: o subsidio proporcional da cessacao fica fora desta versao. */
+  cessacao?: boolean;
+  /** Ha dias sem contrato, dentro do ano do periodo, entre vinculos da pessoa: nao se paga. */
+  comIntervalo?: boolean;
+  /** Para a formula das contas: os dias de vinculo no ano civil e os dias do ano (so com admissao nesse ano). */
+  diasNoAno?: number;
+  diasDoAno?: number;
 }
 
 /** O que o calculo usa da regra salarial em vigor (um subconjunto de `RegraSalarial`). */
@@ -129,6 +151,8 @@ export interface EntradaProcessamentoPessoa {
   codigos: readonly HrCodigoProcessamento[];
   /** Os lancamentos do periodo, da pessoa. */
   lancamentos: readonly HrProcessamentoLancamento[];
+  /** Os subsidios de ferias e de Natal que este periodo paga (ver `SubsidiosExtraEntrada`). Ausente = nenhum: nada muda. */
+  subsidiosExtra?: SubsidiosExtraEntrada;
 }
 
 export type AvisoProcessamento =
@@ -191,6 +215,17 @@ export interface DetalheFaltas {
   valor: number;
 }
 
+/** De onde vem o subsidio de ferias e de Natal: a retribuicao `R`, os duodecimos, a proporcao e os valores. So quando algum se paga. */
+export interface DetalheSubsidiosFeriasNatal {
+  r: number;
+  duodecimosPct: 0 | 50 | 100;
+  proporcao: number;
+  ferias: number;
+  natal: number;
+  diasNoAno?: number;
+  diasDoAno?: number;
+}
+
 export interface ResultadoProcessamentoPessoa {
   valorHoraReal: number | null;
   baseMes: number | null;
@@ -202,6 +237,16 @@ export interface ResultadoProcessamentoPessoa {
   totalRegras: number;
   descontoFaltas: number;
   subsidioAlimentacao: number;
+  /**
+   * Subsidio de ferias e de Natal pagos neste periodo (0 quando nao se pagam). Opcionais no tipo para quem monta um resultado a mao
+   * (o RH real nao os usa); o motor devolve-os SEMPRE.
+   */
+  subsidioFerias?: number;
+  subsidioNatal?: number;
+  /** Porque um subsidio nao se pagou (duodecimos por definir, sem contrato, cessacao). Separado de `avisos` para nao alterar o tipo que o RH real consome. */
+  avisosSubsidios?: readonly AvisoSubsidio[];
+  /** So quando se paga algum subsidio de ferias ou de Natal. NAO se grava no fecho. */
+  subsidiosDetalhe?: DetalheSubsidiosFeriasNatal;
   /** So quando se pediu (`diasComData`) e ha regra salarial. NAO se grava no fecho. */
   subsidioDetalhe?: DetalheSubsidio;
   /** So quando se pediu (`diasComData`) e ha valor da hora. NAO se grava no fecho. */
@@ -590,6 +635,53 @@ function calcularDescontoFaltas(
   return { valor, detalhe: { dias, minutosDescontados, valorHoraReal, valor } };
 }
 
+interface SubsidiosFeriasNatalCalculados {
+  ferias: number;
+  natal: number;
+  avisos: AvisoSubsidio[];
+  detalhe: DetalheSubsidiosFeriasNatal | null;
+}
+
+/**
+ * Cada subsidio = R x (100 - duodecimos %) / 100 x proporcao, arredondado ao centimo; R e a retribuicao mensal equivalente (o salario
+ * base, sem duodecimos nem alimentacao). Duodecimos a 100 %: ja vai tudo nos duodecimos, nada a pagar (sem aviso). Sem contrato,
+ * com cessacao ou com os duodecimos por definir nao se paga e diz-se porque.
+ */
+function calcularSubsidiosFeriasNatal(
+  extra: SubsidiosExtraEntrada | undefined,
+  retribuicao: RetribuicaoParaCalculo | null,
+  retribuicaoMensal: number | null,
+): SubsidiosFeriasNatalCalculados {
+  const nada: SubsidiosFeriasNatalCalculados = { ferias: 0, natal: 0, avisos: [], detalhe: null };
+  if (!extra || (!extra.ferias && !extra.natal)) return nada;
+  // Sem retribuicao nao ha R: o aviso de `sem_retribuicao` (ou o de periodicidade) ja la esta.
+  if (retribuicaoMensal === null || !retribuicao) return nada;
+  const avisos: AvisoSubsidio[] = [];
+  if (extra.semVinculo) avisos.push("subsidio_sem_vinculo");
+  if (extra.cessacao) avisos.push("subsidio_cessacao_por_tratar");
+  if (extra.comIntervalo) avisos.push("subsidio_contratos_com_intervalo");
+  const duodecimosPct = retribuicao.duodecimosPct;
+  if (duodecimosPct === null) avisos.push("subsidio_sem_duodecimos");
+  if (avisos.length > 0 || duodecimosPct === null || extra.proporcao === null || !Number.isFinite(extra.proporcao)) return { ...nada, avisos };
+  const valor = arredondarAoCentimo((retribuicaoMensal * (100 - duodecimosPct) * extra.proporcao) / 100);
+  const ferias = extra.ferias ? valor : 0;
+  const natal = extra.natal ? valor : 0;
+  if (ferias + natal === 0) return nada;
+  return {
+    ferias,
+    natal,
+    avisos,
+    detalhe: {
+      r: retribuicaoMensal,
+      duodecimosPct,
+      proporcao: extra.proporcao,
+      ferias,
+      natal,
+      ...(extra.diasNoAno !== undefined && extra.diasDoAno !== undefined ? { diasNoAno: extra.diasNoAno, diasDoAno: extra.diasDoAno } : {}),
+    },
+  };
+}
+
 /** Os lancamentos pontuais anulados nao contam; km e ajudas tem linha propria (`calcularLinhasRegra`). */
 function calcularLancamentosPontuais(lancamentos: readonly HrProcessamentoLancamento[]): number {
   return lancamentos.reduce(
@@ -632,6 +724,7 @@ export function calcularProcessamentoPessoa(
   const pedirDetalhe = entrada.diasComData !== undefined;
 
   const lancamentosPontuais = calcularLancamentosPontuais(entrada.lancamentos);
+  const subsidios = calcularSubsidiosFeriasNatal(entrada.subsidiosExtra, entrada.retribuicao, retribuicaoMensal);
 
   // Nunca negativo: mesmo que o desconto de faltas supere a base, o total fica 0, nao uma divida da pessoa
   // a empresa. So se aplica quando ha base para calcular -- `null` continua `null`.
@@ -645,6 +738,8 @@ export function calcularProcessamentoPessoa(
             totalRegras -
             descontoFaltas +
             subsidioAlimentacao +
+            subsidios.ferias +
+            subsidios.natal +
             lancamentosPontuais,
         );
 
@@ -658,6 +753,10 @@ export function calcularProcessamentoPessoa(
     totalRegras,
     descontoFaltas,
     subsidioAlimentacao,
+    subsidioFerias: subsidios.ferias,
+    subsidioNatal: subsidios.natal,
+    ...(subsidios.avisos.length > 0 ? { avisosSubsidios: subsidios.avisos } : {}),
+    ...(subsidios.detalhe ? { subsidiosDetalhe: subsidios.detalhe } : {}),
     ...(pedirDetalhe && subsidioDetalhe ? { subsidioDetalhe } : {}),
     ...(pedirDetalhe && faltasDetalhe ? { faltasDetalhe } : {}),
     lancamentosPontuais,

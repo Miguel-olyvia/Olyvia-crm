@@ -29,6 +29,7 @@ import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 import { rhExemploCustoFechoTranslations } from "@/translations/rhExemploCustoFecho";
 import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemploProcessamentoReal";
+import { rhExemploSubsidiosTranslations } from "@/translations/rhExemploSubsidios";
 import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
 import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
 import { rhExemploPortalTranslations } from "@/translations/rhExemploPortal";
@@ -197,6 +198,11 @@ Object.keys(rhExemploCustoFechoTranslations).forEach((lang) => {
 // Custos e das fluxos A/B de propósito: reescreve três textos que falavam do «Cálculo do mês» de exemplo.
 Object.keys(rhExemploProcessamentoRealTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploProcessamentoRealTranslations[lang as keyof typeof rhExemploProcessamentoRealTranslations] };
+});
+
+// Subsídios de férias e de Natal (`rhSubs.*`, as linhas novas de `rhContas.*` e o bloqueio do fecho).
+Object.keys(rhExemploSubsidiosTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploSubsidiosTranslations[lang as keyof typeof rhExemploSubsidiosTranslations] };
 });
 
 // Canal de denúncias de exemplo (`cd.*`) — módulo próprio, mesmo padrão.

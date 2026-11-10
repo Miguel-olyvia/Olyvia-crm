@@ -9,7 +9,7 @@
  *  - O seguro de acidentes e uma percentagem POR CARGO e incide so sobre o SALARIO BASE mensal (sem duodecimos, IHT, km nem ajudas).
  *  - Nada se inventa: so se decompoe o que o processamento devolveu; o que ele nao explica fica em «Outras componentes».
  */
-import type { DetalheFaltas, DetalheSubsidio } from "@/lib/hr/processamentoTotais";
+import type { DetalheFaltas, DetalheSubsidio, DetalheSubsidiosFeriasNatal } from "@/lib/hr/processamentoTotais";
 import { arredondar } from "./custo";
 
 /** A TSU da entidade empregadora (Portugal), em percentagem. Constante: nao se edita no ecra. */
@@ -26,6 +26,8 @@ export type ChaveConta =
   | "iht"
   | "km"
   | "ajudas"
+  | "subsidioFerias"
+  | "subsidioNatal"
   | "manuais"
   | "outras"
   | "arredondamento"
@@ -62,6 +64,11 @@ export interface ResultadoParaContas {
   linhasRegra: ReadonlyArray<{ tipo: string; faixa: number | null; quantidade: number | null; valor: number }>;
   descontoFaltas: number;
   subsidioAlimentacao: number;
+  /** Subsidio de ferias e de Natal pagos neste mes; ausentes (um gravado antigo) = 0. */
+  subsidioFerias?: number;
+  subsidioNatal?: number;
+  /** A conta por tras dos subsidios de ferias e de Natal; so o processamento vivo a traz. */
+  subsidiosDetalhe?: DetalheSubsidiosFeriasNatal;
   /** Os dias e as horas por tras do subsidio e das faltas; so o processamento vivo os traz (o fecho nao os grava). */
   subsidioDetalhe?: DetalheSubsidio;
   faltasDetalhe?: DetalheFaltas;
@@ -82,6 +89,10 @@ export interface DecomposicaoRetribuicao {
   divisor: number;
   duodecimos: number;
   subsidioAlimentacao: number;
+  /** Subsidio de ferias e de Natal pagos neste mes (0 = nao se pagam). */
+  subsidioFerias?: number;
+  subsidioNatal?: number;
+  subsidiosDetalhe?: DetalheSubsidiosFeriasNatal;
   /** Horas extra, feriados e descansos trabalhados (codigos automaticos) e noturnas. */
   horasExtra: number;
   descontoFaltas: number;
@@ -113,11 +124,14 @@ export function decomposicaoDoResultado(r: ResultadoParaContas): DecomposicaoRet
     divisor: r.divisorDuodecimos,
     duodecimos: arredondar(arredondar(r.baseMes) - salarioBase),
     subsidioAlimentacao: r.subsidioAlimentacao,
+    subsidioFerias: r.subsidioFerias ?? 0,
+    subsidioNatal: r.subsidioNatal ?? 0,
     horasExtra: soma([...codigos, ...noturnas]),
     descontoFaltas: r.descontoFaltas,
     iht: dosTipo(r.linhasRegra, "iht")?.valor ?? null,
     km: dosTipo(r.linhasRegra, "km"),
     ajudas: dosTipo(r.linhasRegra, "ajudas"),
+    ...(r.subsidiosDetalhe ? { subsidiosDetalhe: r.subsidiosDetalhe } : {}),
     ...(r.subsidioDetalhe ? { subsidioDetalhe: r.subsidioDetalhe } : {}),
     ...(r.faltasDetalhe ? { faltasDetalhe: r.faltasDetalhe } : {}),
   };
@@ -155,6 +169,8 @@ export interface OpcoesContas {
   rotuloSubsidios?: string;
   /** «calculado pelo processamento»: acompanha o valor quando preco × quantidade (ou pct × base) nao o reproduz ao centimo. */
   rotuloCalculado?: string;
+  /** «a parte que não vai em duodécimos»: a formula dos subsidios de ferias e de Natal. */
+  rotuloParteSemDuodecimos?: string;
 }
 
 export interface ContasDoMes {
@@ -203,6 +219,7 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
   const rotuloDeFalta = opcoes.rotuloDeFalta ?? "de falta";
   const rotuloSubsidios = opcoes.rotuloSubsidios ?? "subsídios";
   const rotuloCalculado = opcoes.rotuloCalculado ?? "calculado pelo processamento";
+  const rotuloParteSemDuodecimos = opcoes.rotuloParteSemDuodecimos ?? "a parte que não vai em duodécimos";
   const d = e.decomposicao;
   const marca = e.estimado ? ({ estimado: true } as const) : {};
   const parcela = (chave: ChaveConta, valor: number, formula = "", nota?: NotaConta, comMarca = true): LinhaConta => ({ chave, tipo: "parcela", valor, formula, ...(comMarca ? marca : {}), ...(nota ? { nota } : {}) });
@@ -219,7 +236,7 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
   let arredondamento = 0;
   let limiteFaltas = 0;
   if (d) {
-    const explicado = centimos(salarioBase) + centimos(duodecimos) + centimos(d.subsidioAlimentacao) + centimos(d.horasExtra) - centimos(d.descontoFaltas) + centimos(d.iht ?? 0) + centimos(kmEAjudas);
+    const explicado = centimos(salarioBase) + centimos(duodecimos) + centimos(d.subsidioAlimentacao) + centimos(d.subsidioFerias ?? 0) + centimos(d.subsidioNatal ?? 0) + centimos(d.horasExtra) - centimos(d.descontoFaltas) + centimos(d.iht ?? 0) + centimos(kmEAjudas);
     const residuo = centimos(e.retribuicaoMes) - explicado;
     // As faltas acima da retribuicao: o processamento corta o bruto a 0 (nunca uma divida da pessoa), e as partes somam menos que 0.
     const cortadoPelasFaltas = d.descontoFaltas > 0 && residuo > 0 && explicado + centimos(manuais) < 0;
@@ -249,6 +266,10 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
     }
     if (d.km) parcelas.push(parcela("km", d.km.valor, formulaUnitaria(d.km, `${numero(d.km.quantidade, 0, 2)} km`, numero, eur, calculado)));
     if (d.ajudas) parcelas.push(parcela("ajudas", d.ajudas.valor, formulaUnitaria(d.ajudas, `${numero(d.ajudas.quantidade, 0, 2)} ${dias}`, numero, eur, calculado)));
+    // Os subsidios de ferias e de Natal vem antes dos manuais: entram na soma explicada (nunca em «Outras componentes») e na base da TSU.
+    const formulaSubsidio = (valor: number): string => formulaSubsidioFeriasNatal(d.subsidiosDetalhe, valor, rotuloParteSemDuodecimos, eur, pct);
+    if ((d.subsidioFerias ?? 0) !== 0) parcelas.push(parcela("subsidioFerias", d.subsidioFerias ?? 0, formulaSubsidio(d.subsidioFerias ?? 0)));
+    if ((d.subsidioNatal ?? 0) !== 0) parcelas.push(parcela("subsidioNatal", d.subsidioNatal ?? 0, formulaSubsidio(d.subsidioNatal ?? 0)));
   }
   // Os manuais sao lancamentos reais: nunca «estimados», mesmo numa pessoa estimada.
   if (manuais !== 0) parcelas.push(parcela("manuais", manuais, "", undefined, false));
@@ -313,6 +334,26 @@ function formulaDuodecimos(
   if (pctExacta === undefined) return calculado(duodecimos);
   const reproduz = centimos(arredondar((salarioBase * 2 * pctExacta) / 100 / 12)) === centimos(duodecimos);
   return reproduz ? `2 ${rotuloSubsidios} × ${pct(pctExacta)} ÷ 12 × ${eur(salarioBase)} = ${eur(duodecimos)}` : calculado(duodecimos);
+}
+
+/**
+ * «1 500,00 € × 50 % (a parte que não vai em duodécimos) × 12/12 = 750,00 €»: R × (100 − duodecimos %) × proporcao. A proporcao e «12/12»
+ * quando e o ano inteiro e «dias/dias do ano» para quem entrou no ano. So se mostra se reproduzir o valor ao centimo; senao so o valor
+ * (formula vazia), tal como no mes fechado, que nao grava o detalhe.
+ */
+function formulaSubsidioFeriasNatal(
+  detalhe: DetalheSubsidiosFeriasNatal | undefined,
+  valor: number,
+  rotuloParteSemDuodecimos: string,
+  eur: (v: number) => string,
+  pct: (v: number) => string,
+): string {
+  if (!detalhe) return "";
+  const parteSem = 100 - detalhe.duodecimosPct;
+  if (centimos(arredondar((detalhe.r * parteSem * detalhe.proporcao) / 100)) !== centimos(valor)) return "";
+  const proporcao =
+    detalhe.proporcao === 1 ? "12/12" : detalhe.diasNoAno !== undefined && detalhe.diasDoAno !== undefined ? `${detalhe.diasNoAno}/${detalhe.diasDoAno}` : pct(detalhe.proporcao * 100);
+  return `${eur(detalhe.r)} × ${pct(parteSem)} (${rotuloParteSemDuodecimos}) × ${proporcao} = ${eur(valor)}`;
 }
 
 /** Um preco unitario com ate 4 casas (0,40 € ou 0,3333 €). */
