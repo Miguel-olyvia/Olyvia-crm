@@ -3,8 +3,8 @@
 // os equipamentos, as definicoes e as excecoes de taxa vem da base (hooks simulados aqui, junto com as permissoes) e fazem o
 // hook recalcular. Os valores avulsos sao os lancamentos pontuais do periodo (da base): vem dentro da retribuicao do
 // processamento e o custo mostra-os a parte. O tipo de contrato e as horas por semana vem dos vinculos (aqui simulados).
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, renderHook, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 
@@ -30,6 +30,9 @@ const estado = vi.hoisted(() => ({
   locais: [] as unknown[],
   filiais: [] as unknown[],
   cargos: [] as unknown[],
+  periodosCargo: [] as unknown[],
+  periodosErro: false,
+  periodosACarregar: false,
 }));
 
 // As regras do periodo da folha: sem regra (a base ainda sem as RPCs) o periodo e o mes de calendario.
@@ -62,7 +65,7 @@ vi.mock("@/components/rh-exemplo/hooks/usePessoasVinculosVigentes", async () => 
 });
 vi.mock("@/components/rh-exemplo/hooks/useLocaisTrabalho", () => ({ useLocaisTrabalho: () => ({ locais: estado.locais }) }));
 vi.mock("@/components/rh-exemplo/hooks/useFiliaisDaArvore", () => ({ useFiliaisDaArvore: () => ({ filiais: estado.filiais, loading: false }) }));
-vi.mock("@/components/rh-exemplo/hooks/useCargos", () => ({ useCargos: () => ({ cargos: estado.cargos }) }));
+vi.mock("@/components/rh-exemplo/hooks/useCargos", () => ({ useCargos: () => ({ cargos: estado.cargos, periodos: estado.periodosCargo, periodosLoading: estado.periodosACarregar, periodosError: estado.periodosErro }) }));
 // Os dados do custo (equipamentos, definicoes, excecoes) e as permissoes vem destes wrappers: aqui sao simulados.
 vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
   usePermissions: () => ({
@@ -92,7 +95,7 @@ vi.mock("@/components/rh-exemplo/hooks/useCustoExcecoes", () => ({
   },
 }));
 
-import { reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
+import { definirMesCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { useCustoDaOrganizacao, useCustoDaPessoa, dividirMes } from "./useCustoDaPessoa";
 
 const MES = "2026-09";
@@ -150,6 +153,9 @@ beforeEach(() => {
   estado.locais = [{ id: "l1", nome: "Loja Porto", organograma_node_id: "f1" }];
   estado.filiais = [{ id: "f1", name: "Filial Porto" }];
   estado.cargos = [{ id: "c1", nome: "Gerente" }];
+  estado.periodosCargo = [];
+  estado.periodosErro = false;
+  estado.periodosACarregar = false;
 });
 
 describe("dividirMes", () => {
@@ -721,5 +727,238 @@ describe("AbaCusto: mes fechado", () => {
     await renderAba();
     expect(screen.getByText(/No values saved at closing for this person/)).toBeInTheDocument();
     expect(screen.getByText(/only the hours and the pay are the ones saved/)).toBeInTheDocument();
+  });
+});
+
+// ---- Estimativa pelo salario do cargo (so nos Custos): quem nao tem retribuicao vigente mas tem cargo com salario mensal ----
+
+const PESSOA_C1 = { id: "p-tiago", nome_completo: "Tiago Pinheiro", cargo: null, cargo_id: "c1", local_id: null } as never;
+const periodoCargo = (extra: Record<string, unknown> = {}) => ({
+  id: "cp1", cargo_id: "c1", salario_base: 1500, periodicidade: "mensal", valido_de: "2026-01-01", valido_ate: null, motivo: null, ...extra,
+});
+
+// Hoje fixo (15/09/2026): a estimativa so vale para o mes corrente e futuros, por isso o relogio nao pode andar.
+const fixarHoje = () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-15T12:00:00Z"));
+};
+
+describe("useCustoDaPessoa: estimativa pelo cargo", () => {
+  beforeEach(() => {
+    fixarHoje();
+    estado.pessoa = { ...estado.pessoa, resultado: calculoReal(null) };
+    estado.periodosCargo = [periodoCargo()];
+  });
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("mes passado ainda aberto nao estima: sem valor com a razao mes_passado; o corrente estima", () => {
+    const passado = renderHook(() => useCustoDaPessoa(PESSOA_C1, "2026-08")).result.current.custo;
+    expect(passado?.retribuicaoMes).toBeNull();
+    expect(passado?.estimadoPeloCargo).toBeUndefined();
+    expect(passado?.razaoSemValor).toBe("mes_passado");
+    expect(passado?.atual.total).toBeNull();
+    expect(renderHook(() => useCustoDaPessoa(PESSOA_C1, "2026-09")).result.current.custo?.estimadoPeloCargo).toBeDefined();
+  });
+
+  it("mes anterior ao primeiro periodo do cargo nao estima", () => {
+    estado.periodosCargo = [periodoCargo({ valido_de: "2026-10-01" })];
+    const custo = renderHook(() => useCustoDaPessoa(PESSOA_C1, "2026-09")).result.current.custo;
+    expect(custo?.estimadoPeloCargo).toBeUndefined();
+    expect(custo?.razaoSemValor).toBe("sem_periodo");
+  });
+
+  it("falha a ler os periodos dos cargos: nao estima e nao diz sem_periodo, diz que nao se leu", () => {
+    estado.periodosErro = true;
+    estado.periodosCargo = [];
+    const custo = renderHook(() => useCustoDaPessoa(PESSOA_C1, MES)).result.current.custo;
+    expect(custo?.estimadoPeloCargo).toBeUndefined();
+    expect(custo?.razaoSemValor).toBe("erro_periodos");
+  });
+
+  it("com retribuicao vigente nao ha estimativa, mesmo havendo cargo com salario", () => {
+    estado.pessoa = { ...estado.pessoa, resultado: calculoReal(1200) };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA_C1, MES));
+    expect(result.current.custo?.retribuicaoMes).toBe(1200);
+    expect(result.current.custo?.estimadoPeloCargo).toBeUndefined();
+  });
+
+  it("sem retribuicao e com cargo mensal usa o salario do cargo, so o base, e marca-o", () => {
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA_C1, MES));
+    expect(result.current.custo?.retribuicaoMes).toBe(1500);
+    expect(result.current.custo?.estimadoPeloCargo).toEqual({ cargo: "Gerente", salario: 1500 });
+    expect(result.current.custo?.atual.bruto).toBe(1500);
+    expect(result.current.custo?.atual.total).not.toBeNull();
+  });
+
+  it("cargo com salario nao mensal: sem estimativa e com a razao", () => {
+    estado.periodosCargo = [periodoCargo({ periodicidade: "hora" })];
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA_C1, MES));
+    expect(result.current.custo?.retribuicaoMes).toBeNull();
+    expect(result.current.custo?.estimadoPeloCargo).toBeUndefined();
+    expect(result.current.custo?.razaoSemValor).toBe("nao_mensal");
+    expect(result.current.custo?.atual.total).toBeNull();
+  });
+
+  it("sem periodo de salario valido no mes: sem estimativa, razao sem_periodo; sem cargo: sem_cargo", () => {
+    estado.periodosCargo = [];
+    expect(renderHook(() => useCustoDaPessoa(PESSOA_C1, MES)).result.current.custo?.razaoSemValor).toBe("sem_periodo");
+    estado.periodosCargo = [periodoCargo()];
+    const semCargo = renderHook(() => useCustoDaPessoa(PESSOA, MES)).result.current.custo;
+    expect(semCargo?.razaoSemValor).toBe("sem_cargo");
+    expect(semCargo?.retribuicaoMes).toBeNull();
+  });
+
+  it("sem permissao para ver retribuicoes nao ha custo nem estimativa", () => {
+    estado.pessoa = { ...estado.pessoa, retribuicaoRecusada: true };
+    expect(renderHook(() => useCustoDaPessoa(PESSOA_C1, MES)).result.current.custo).toBeNull();
+  });
+
+  it("mes fechado nunca estima: sem linha gravada fica sem valor, e o gravado manda", () => {
+    estado.pessoa = vivoProibido({ ...estado.pessoa, dados: dadosDoMes([], FECHADO) }, "resultado") as typeof estado.pessoa;
+    estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
+    const semLinha = renderHook(() => useCustoDaPessoa(PESSOA_C1, MES)).result.current.custo;
+    expect(semLinha?.retribuicaoMes).toBeNull();
+    expect(semLinha?.estimadoPeloCargo).toBeUndefined();
+    expect(semLinha?.razaoSemValor).toBeUndefined();
+    estado.gravados = { estado: "ok", porPessoa: new Map([["p-tiago", gravada("p-tiago")]]), antesDoRegisto: false };
+    const comLinha = renderHook(() => useCustoDaPessoa(PESSOA_C1, MES)).result.current.custo;
+    expect(comLinha?.retribuicaoMes).toBe(1400);
+    expect(comLinha?.estimadoPeloCargo).toBeUndefined();
+  });
+});
+
+describe("useCustoDaOrganizacao: estimativa pelo cargo", () => {
+  const pessoaActiva = (id: string, cargoId: string | null = "c1") => ({ id, nome_completo: `Pessoa ${id}`, cargo: null, cargo_id: cargoId, local_id: "l1" });
+  const organizacao = (resultados: Map<string, unknown>) => ({
+    pessoasActivas: [pessoaActiva("p-hugo"), pessoaActiva("p-ines"), pessoaActiva("p-sem", null)],
+    resultados, retribuicoesHook: { recusado: false }, ...dadosDoMes(),
+  });
+
+  beforeEach(() => { fixarHoje(); estado.periodosCargo = [periodoCargo()]; });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("mes passado aberto nao estima ninguem; falha nos periodos diz que nao se leu; periodos a carregar contam como a carregar", () => {
+    estado.organizacao = organizacao(new Map([["p-hugo", calculoReal(null)]]));
+    const passado = renderHook(() => useCustoDaOrganizacao("2026-08")).result.current.linhas.find((l) => l.pessoaId === "p-hugo")!;
+    expect(passado).toMatchObject({ retribuicao: null, razaoSemValor: "mes_passado" });
+    expect(passado.estimadoPeloCargo).toBeUndefined();
+    estado.periodosErro = true;
+    expect(renderHook(() => useCustoDaOrganizacao(MES)).result.current.linhas.find((l) => l.pessoaId === "p-hugo")).toMatchObject({ retribuicao: null, razaoSemValor: "erro_periodos" });
+    estado.periodosErro = false;
+    expect(renderHook(() => useCustoDaOrganizacao(MES)).result.current.baseACarregar).toBe(false);
+    estado.periodosACarregar = true;
+    expect(renderHook(() => useCustoDaOrganizacao(MES)).result.current.baseACarregar).toBe(true);
+  });
+
+  it("quem nao tem retribuicao e tem cargo mensal e estimado; quem tem retribuicao nao; quem nao tem cargo fica sem valor com a razao", () => {
+    estado.organizacao = organizacao(new Map([["p-hugo", calculoReal(null)], ["p-ines", calculoReal(1100)], ["p-sem", calculoReal(null)]]));
+    const { linhas } = renderHook(() => useCustoDaOrganizacao(MES)).result.current;
+    const por = (id: string) => linhas.find((l) => l.pessoaId === id)!;
+    expect(por("p-hugo")).toMatchObject({ retribuicao: 1500, estimadoPeloCargo: { cargo: "Gerente", salario: 1500 } });
+    expect(por("p-ines").retribuicao).toBe(1100);
+    expect(por("p-ines").estimadoPeloCargo).toBeUndefined();
+    expect(por("p-sem")).toMatchObject({ retribuicao: null, total: null, razaoSemValor: "sem_cargo" });
+  });
+
+  it("mes fechado nunca estima", () => {
+    estado.organizacao = vivoProibido({ ...organizacao(new Map()), todasAsPessoas: [pessoaActiva("p-hugo")], ...dadosDoMes([], FECHADO) }, "resultados");
+    estado.gravados = { estado: "ok", antesDoRegisto: false, porPessoa: new Map() };
+    const { linhas } = renderHook(() => useCustoDaOrganizacao(MES)).result.current;
+    expect(linhas.length).toBeGreaterThan(0);
+    expect(linhas.every((l) => l.estimadoPeloCargo === undefined && l.retribuicao === null)).toBe(true);
+  });
+});
+
+describe("AbaCusto: estimativa pelo cargo", () => {
+  const renderAba = async (aoMudarAba = vi.fn(), pessoa: never = PESSOA_C1) => {
+    const { AbaCusto } = await import("./AbaCusto");
+    render(
+      <LanguageProvider>
+        <AbaCusto pessoa={pessoa} ctx={{ nomePorPessoaId: new Map(), minhaPessoaId: null } as never} ficha={null as never} aoMudarAba={aoMudarAba} />
+      </LanguageProvider>,
+    );
+    return aoMudarAba;
+  };
+
+  beforeEach(() => {
+    fixarHoje();
+    window.localStorage.setItem("language", "pt");
+    definirMesCusto(MES);
+    estado.pessoa = { ...estado.pessoa, resultado: calculoReal(null) };
+    estado.periodosCargo = [periodoCargo()];
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("sem permissao de editar a retribuicao a nota aparece mas o botao «Definir retribuição» nao", async () => {
+    estado.permissoes = [VER];
+    await renderAba();
+    expect(screen.getByText(/Estimativa pelo salário do cargo/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Definir retribuição" })).not.toBeInTheDocument();
+  });
+
+  it("o botao «Definir retribuição» tem o alvo de 44 px (min-h-11)", async () => {
+    await renderAba();
+    expect(screen.getByRole("button", { name: "Definir retribuição" }).className).toContain("min-h-11");
+  });
+
+  it("mes passado: diz porque nao se estima, sem nota de estimativa nem botao", async () => {
+    definirMesCusto("2026-08");
+    await renderAba();
+    expect(screen.getByText("Mês passado: sem retribuição registada; o salário do cargo pode ter sido outro")).toBeInTheDocument();
+    expect(screen.queryByText(/Estimativa pelo salário do cargo/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Definir retribuição" })).not.toBeInTheDocument();
+  });
+
+  it("falha a ler os periodos dos cargos: diz que nao foi possivel ler o salario, nunca «sem salário no cargo»", async () => {
+    estado.periodosErro = true;
+    estado.periodosCargo = [];
+    await renderAba();
+    expect(screen.getByText("Não foi possível ler o salário do cargo")).toBeInTheDocument();
+    expect(screen.queryByText("Sem retribuição nem salário no cargo")).not.toBeInTheDocument();
+  });
+
+  it("mostra a nota (role status, em texto) e o botao «Definir retribuição» leva a aba dos contratos", async () => {
+    const aoMudarAba = await renderAba();
+    const nota = screen.getByText(/Estimativa pelo salário do cargo \(Gerente: .*1500,00.*\)\. Esta pessoa ainda não tem retribuição definida; sem duodécimos nem subsídios\./);
+    expect(nota.closest("[role='status']")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Definir retribuição" }));
+    expect(aoMudarAba).toHaveBeenCalledWith("contratos");
+  });
+
+  it("com retribuicao nao ha nota", async () => {
+    estado.pessoa = { ...estado.pessoa, resultado: calculoReal(1200) };
+    await renderAba();
+    expect(screen.queryByText(/Estimativa pelo salário do cargo/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Definir retribuição" })).not.toBeInTheDocument();
+  });
+
+  it("sem retribuicao e sem cargo diz «Sem retribuição nem salário de cargo» e nao mostra a nota de estimativa", async () => {
+    await renderAba(vi.fn(), PESSOA);
+    expect(screen.getByText("Sem retribuição e sem cargo atribuído")).toBeInTheDocument();
+    expect(screen.queryByText(/Estimativa pelo salário do cargo/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Sem valor").length).toBeGreaterThan(0);
+  });
+
+  it("cargo nao mensal: razao em texto, sem estimativa", async () => {
+    estado.periodosCargo = [periodoCargo({ periodicidade: "semanal" })];
+    await renderAba();
+    expect(screen.getByText(/salário do cargo não é mensal/)).toBeInTheDocument();
+    expect(screen.queryByText(/Estimativa pelo salário do cargo/)).not.toBeInTheDocument();
+  });
+
+  it("mes fechado nunca mostra a nota de estimativa", async () => {
+    estado.pessoa = vivoProibido({ ...estado.pessoa, dados: dadosDoMes([], FECHADO) }, "resultado") as typeof estado.pessoa;
+    estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
+    await renderAba();
+    expect(screen.queryByText(/Estimativa pelo salário do cargo/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Sem retribuição e sem cargo atribuído")).not.toBeInTheDocument();
+  });
+
+  it("em ingles a nota e o botao", async () => {
+    window.localStorage.setItem("language", "en");
+    await renderAba();
+    expect(screen.getByText(/Estimate based on the job salary/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set pay" })).toBeInTheDocument();
   });
 });

@@ -1,9 +1,24 @@
 /** Formatação do separador Custo: euros ao cêntimo e a unidade de cada tipo de valor avulso. */
+import type { RazaoSemEstimativa } from "@/components/rh-exemplo/lib/estimativaCusto";
+
 const EUROS = new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" });
 
 /** Um valor em euros; `null` (custo sem valor) devolve `semValor`. */
 export function euros(valor: number | null, semValor: string): string {
   return valor === null ? semValor : EUROS.format(valor);
+}
+
+const CHAVE_DA_RAZAO: Record<RazaoSemEstimativa, string> = {
+  sem_cargo: "rhCustoEstimativa.semCargo",
+  sem_periodo: "rhCustoEstimativa.semPeriodo",
+  nao_mensal: "rhCustoEstimativa.naoMensal",
+  mes_passado: "rhCustoEstimativa.mesPassado",
+  erro_periodos: "rhCustoEstimativa.erroPeriodos",
+};
+
+/** A chave do texto que diz porque uma pessoa sem retribuição fica sem valor (cada razão tem o seu texto). */
+export function chaveRazaoSemValor(razao: RazaoSemEstimativa): string {
+  return CHAVE_DA_RAZAO[razao];
 }
 
 /** «2026-11» para o nome do mês, na língua dada. */

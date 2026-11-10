@@ -10,7 +10,9 @@
  *    planeadas ficam a 0 e o custo por hora fica «sem valor».
  */
 import { horasPrevistasDoMes } from "@/components/rh-exemplo/lib/custo";
+import type { HrCargoPeriodo } from "@/components/rh-exemplo/lib/cargosPeriodos";
 import type { PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
+import { estimativaPeloCargo, type EstimativaCargo } from "@/components/rh-exemplo/lib/estimativaCusto";
 import type { Pessoa } from "@/components/rh-exemplo/tipos";
 
 export interface CatalogosDoCusto {
@@ -32,6 +34,8 @@ export function horasSemanaisDoPlaneado(planeadoMinutos: number, mes: string): n
 export interface DadosRetribuicaoDoMes {
   /** O total bruto estimado do mes; `null` = sem retribuicao registada. */
   retribuicaoMes: number | null;
+  /** So em meses vivos: o que dizer de quem nao tem retribuicao (estimativa pelo cargo, ou a razao). Ausente = nada a acrescentar. */
+  estimativa?: EstimativaCargo;
   planeadoMinutos: number;
   /** O tipo do contrato em vigor; ausente/`null` = sem vinculo em vigor lido. */
   tipoContrato?: string | null;
@@ -56,6 +60,9 @@ export function pessoaParaCusto(
   const centro = catalogos.locais.find((l) => l.id === pessoa.local_id) ?? null;
   const filial = catalogos.filiais.find((f) => f.id === centro?.organograma_node_id) ?? null;
   const cargo = catalogos.cargos.find((c) => c.id === pessoa.cargo_id)?.nome ?? pessoa.cargo ?? null;
+  // A estimativa so vale para quem NAO tem retribuicao: com ela, nada muda.
+  const estimativa = dados.retribuicaoMes === null ? dados.estimativa : undefined;
+  const estimado = estimativa?.estado === "estimado" ? estimativa : null;
   return {
     pessoaId: pessoa.id,
     nome: pessoa.nome_completo,
@@ -65,9 +72,22 @@ export function pessoaParaCusto(
     filialId: filial?.id ?? null,
     filial: filial?.name ?? null,
     tipoContrato: dados.tipoContrato ?? null,
-    retribuicaoMes: dados.retribuicaoMes,
+    retribuicaoMes: estimado ? estimado.salario : dados.retribuicaoMes,
+    ...(estimado ? { estimadoPeloCargo: { cargo: estimado.cargo || (cargo ?? ""), salario: estimado.salario } } : {}),
+    ...(estimativa?.estado === "sem" ? { razaoSemValor: estimativa.razao } : {}),
     horasSemanais: horasSemanaisDaBase(dados.horasContratuais, dados.planeadoMinutos, mes),
   };
+}
+
+/** A estimativa pelo salario do cargo da pessoa no mes (cargo e nome vem da pessoa e do catalogo de cargos). */
+export function estimativaDaPessoa(
+  pessoa: Pick<PessoaDoCusto, "cargo" | "cargo_id">,
+  cargos: ReadonlyArray<{ id: string; nome: string }>,
+  periodos: readonly HrCargoPeriodo[],
+  mes: string,
+): EstimativaCargo {
+  const cargoNome = cargos.find((c) => c.id === pessoa.cargo_id)?.nome ?? pessoa.cargo ?? null;
+  return estimativaPeloCargo({ cargoId: pessoa.cargo_id ?? null, cargoNome, periodos, mes });
 }
 
 interface VersaoDeHoras {

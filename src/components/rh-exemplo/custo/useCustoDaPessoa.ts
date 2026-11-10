@@ -16,9 +16,11 @@ import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabal
 import { usePessoaVinculoHoras } from "@/components/rh-exemplo/hooks/usePessoaVinculoHoras";
 import { usePessoasVinculosVigentes, vinculoDoMes } from "@/components/rh-exemplo/hooks/usePessoasVinculosVigentes";
 import { useProcessamentoResultados } from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
+import type { HrCargoPeriodo } from "@/components/rh-exemplo/lib/cargosPeriodos";
 import type { LinhaCusto, PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import { useCalculoRealDaPessoa, useCalculoRealDoMes } from "@/components/rh-exemplo/processamento/useCalculoReal";
 import type { Pessoa } from "@/components/rh-exemplo/tipos";
+import type { EstimativaCargo } from "@/components/rh-exemplo/lib/estimativaCusto";
 import { custoDaPessoa, linhasDaOrganizacao, type CustoDaPessoa } from "./custoLido";
 import { pessoaDaLinhaGravada, valoresDoFecho } from "./custoFechado";
 import {
@@ -28,10 +30,17 @@ import {
   retribuicaoSemPontuais,
   type AcoesLancamentos,
 } from "./lancamentosCusto";
-import { horasContratuaisNoMes, pessoaParaCusto, SEM_CATALOGOS } from "./pessoaParaCusto";
+import { estimativaDaPessoa, horasContratuaisNoMes, pessoaParaCusto, SEM_CATALOGOS } from "./pessoaParaCusto";
 import { useDadosCusto } from "./useDadosCusto";
 
 export type { CustoDaPessoa } from "./custoLido";
+
+const SEM_PERIODOS: readonly HrCargoPeriodo[] = [];
+
+/** A estimativa pelo cargo; se os periodos dos cargos nao se leram, nao se sabe se ha salario: nem se estima nem se diz «sem periodo». */
+function estimativaDoMes(pessoa: Pessoa, cargos: Parameters<typeof estimativaDaPessoa>[1], periodos: readonly HrCargoPeriodo[], mes: string, periodosError: boolean): EstimativaCargo {
+  return periodosError ? { estado: "sem", razao: "erro_periodos" } : estimativaDaPessoa(pessoa, cargos, periodos, mes);
+}
 
 /** AAAA-MM -> [ano, mes]. */
 export const dividirMes = (mes: string): [number, number] => {
@@ -63,6 +72,8 @@ export function useCustoDaPessoa(pessoa: Pessoa, mes: string): CustoLidoDaPessoa
   const [ano, m] = dividirMes(mes);
   const { activeCompany } = useCompany();
   const calculo = useCalculoRealDaPessoa(pessoa.id, ano, m, { congelarSeFechado: true });
+  // O salario do cargo, so para a ESTIMATIVA de quem nao tem retribuicao (mes vivo); nunca entra no calculo real.
+  const { cargos, periodos: periodosCargo = SEM_PERIODOS, periodosLoading = false, periodosError = false } = useCargos();
   const horas = usePessoaVinculoHoras(pessoa.id, activeCompany.id);
   const base = useDadosCusto(pessoa.id);
   const { dados } = calculo;
@@ -90,15 +101,17 @@ export function useCustoDaPessoa(pessoa: Pessoa, mes: string): CustoLidoDaPessoa
     if (!resultado) return null;
     const dadosDoMes = {
       retribuicaoMes: retribuicaoSemPontuais(resultado),
+      // Enquanto os periodos dos cargos carregam nao se diz nada (nem a razao).
+      estimativa: periodosLoading ? undefined : estimativaDoMes(pessoa, cargos, periodosCargo, mes, periodosError),
       planeadoMinutos: resultado.totais.planeadoMinutos,
       horasContratuais: horasContratuaisNoMes(horas.versoes, mes),
     };
     return custoDaPessoa(pessoaParaCusto(pessoa, SEM_CATALOGOS, dadosDoMes, mes), mes, resultado.totais.realizadoMinutos / 60, dadosBase, avulsos);
-  }, [pessoa, mes, fechado, gravadosACarregar, valores, resultado, retribuicaoRecusada, lancamentosDaPessoa, horas.versoes, dadosBase]);
+  }, [pessoa, mes, fechado, gravadosACarregar, valores, resultado, retribuicaoRecusada, lancamentosDaPessoa, horas.versoes, dadosBase, cargos, periodosCargo, periodosLoading, periodosError]);
 
   return {
     custo,
-    aCarregar: calculo.aCarregar || horas.loading || gravadosACarregar || (!retribuicaoRecusada && base.aCarregar),
+    aCarregar: calculo.aCarregar || horas.loading || gravadosACarregar || (!fechado && periodosLoading) || (!retribuicaoRecusada && base.aCarregar),
     retribuicaoRecusada,
     erroBase: base.erro,
     podeEditar: base.podeEditar,
@@ -115,7 +128,7 @@ export function useCustoDaOrganizacao(mes: string) {
   const calculo = useCalculoRealDoMes(ano, m);
   const { locais } = useLocaisTrabalho();
   const { filiais } = useFiliaisDaArvore();
-  const { cargos } = useCargos();
+  const { cargos, periodos: periodosCargo = SEM_PERIODOS, periodosLoading = false, periodosError = false } = useCargos();
   const vinculosHook = usePessoasVinculosVigentes();
   const base = useDadosCusto(null);
   const dadosBase = base.dados;
@@ -143,10 +156,11 @@ export function useCustoDaOrganizacao(mes: string) {
     // Sem os dados da base (a carregar, falha ou sem permissao) nao ha linhas: nunca se calcula com valores de exemplo.
     if (!dadosBase) return [];
     const catalogos = { locais, filiais, cargos };
-    const dadosDe = (pessoaId: string, planeadoMinutos: number, retribuicaoMes: number | null) => {
+    const dadosDe = (pessoaId: string, planeadoMinutos: number, retribuicaoMes: number | null, estimativa?: EstimativaCargo) => {
       const vinculo = vinculoDoMes(vinculos.get(pessoaId), mes);
       return {
         retribuicaoMes: retribuicaoRecusada ? null : retribuicaoMes,
+        estimativa: retribuicaoRecusada ? undefined : estimativa,
         planeadoMinutos,
         tipoContrato: vinculo?.tipoContrato ?? null,
         horasContratuais: vinculo?.horasSemanais ?? null,
@@ -174,15 +188,16 @@ export function useCustoDaOrganizacao(mes: string) {
     const pessoas = pessoasActivas.flatMap((pessoa) => {
       const r = resultadosVivos?.get(pessoa.id);
       if (!r) return [];
-      return [pessoaParaCusto(pessoa, catalogos, dadosDe(pessoa.id, r.totais.planeadoMinutos, retribuicaoSemPontuais(r)), mes)];
+      const estimativa = periodosLoading ? undefined : estimativaDoMes(pessoa, cargos, periodosCargo, mes, periodosError);
+      return [pessoaParaCusto(pessoa, catalogos, dadosDe(pessoa.id, r.totais.planeadoMinutos, retribuicaoSemPontuais(r), estimativa), mes)];
     });
     return linhasDaOrganizacao(mes, pessoas, dadosBase, avulsosReais);
-  }, [mes, fechado, gravadosACarregar, gravados.porPessoa, pessoasActivas, todasAsPessoas, resultadosVivos, retribuicaoRecusada, locais, filiais, cargos, vinculos, avulsosReais, dadosBase]);
+  }, [mes, fechado, gravadosACarregar, gravados.porPessoa, pessoasActivas, todasAsPessoas, resultadosVivos, retribuicaoRecusada, locais, filiais, cargos, periodosCargo, periodosLoading, periodosError, vinculos, avulsosReais, dadosBase]);
 
   return {
     linhas,
-    /** Os dados da base ainda nao chegaram (equipamentos, taxas, excecoes). */
-    baseACarregar: !base.semPermissao && base.aCarregar,
+    /** Os dados da base ainda nao chegaram (equipamentos, taxas, excecoes), ou, num mes vivo, os periodos dos cargos (o total nao salta). */
+    baseACarregar: !base.semPermissao && (base.aCarregar || (!fechado && periodosLoading)),
     /** Ha dados da base (mesmo antigos): se uma releitura falhar, mostram-se com o aviso de erro em vez de esconder tudo. */
     baseTemDados: dadosBase !== null,
     erroBase: base.erro,
