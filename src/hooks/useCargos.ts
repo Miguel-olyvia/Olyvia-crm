@@ -41,11 +41,14 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { periodoDoCargoEm, type HrCargoPeriodo } from "@/lib/hr/cargosPeriodos";
 import {
   lerResultadoDefinirSalario,
+  lerResultadoDefinirSeguro,
   type ResultadoDefinirSalario,
+  type ResultadoDefinirSeguro,
 } from "@/lib/hr/respostasRpc";
+import { lerSeguroDaLinha } from "@/lib/hr/seguroCargo";
 import type { Periodicidade } from "@/types/hr";
 
-export type { ResultadoDefinirSalario };
+export type { ResultadoDefinirSalario, ResultadoDefinirSeguro };
 
 export interface HrCargo {
   id: string;
@@ -56,6 +59,9 @@ export interface HrCargo {
   /** Cargo tecnico de obra (20261231998000): as pessoas com ele sao tecnicos no Catalogo e no orcamento.
    *  A base devolve-o sempre; opcional para os cargos montados a mao (testes, ecras antigos). */
   tecnico_obra?: boolean;
+  /** Seguro de acidentes de trabalho: percentagem do salario base (0 a 100, 2 decimais); null = cargo sem seguro.
+   *  Grava-se so por `definirSeguroDoCargo` (rpc_hr_cargo_definir_seguro). Opcional para os cargos montados a mao. */
+  seguro_acidentes_pct?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -68,7 +74,7 @@ export interface HrCargoOficio {
 
 // Nunca `*` nem salario_base/periodicidade: ver o cabecalho.
 const COLUNAS =
-  "id, organization_id, nome, horas_referencia, activo, tecnico_obra, deleted_at, deleted_by, created_at, updated_at, created_by, updated_by";
+  "id, organization_id, nome, horas_referencia, activo, tecnico_obra, seguro_acidentes_pct, deleted_at, deleted_by, created_at, updated_at, created_by, updated_by";
 
 const COLUNAS_PERIODOS =
   "id, cargo_id, salario_base, periodicidade, valido_de, valido_ate, motivo";
@@ -107,7 +113,11 @@ export function useCargos() {
         .eq("organization_id", orgId)
         .order("nome", { ascending: true });
       if (erro) throw erro;
-      return (linhas ?? []) as HrCargo[];
+      // numeric chega como numero ou como texto: converte-se aqui, uma vez.
+      return ((linhas ?? []) as HrCargo[]).map((linha) => ({
+        ...linha,
+        seguro_acidentes_pct: lerSeguroDaLinha(linha.seguro_acidentes_pct),
+      }));
     },
     enabled: !!orgId,
   });
@@ -268,6 +278,23 @@ export function useCargos() {
     onSuccess: invalidarSalario,
   });
 
+  /** O seguro de acidentes de trabalho do cargo (null limpa = sem seguro). So por RPC: a base recusa o UPDATE directo. */
+  const definirSeguroMutation = useMutation({
+    mutationFn: async (args: { cargoId: string; pct: number | null }): Promise<ResultadoDefinirSeguro> => {
+      const { data: resultado, error: erro } = await hrRpc("rpc_hr_cargo_definir_seguro", {
+        p_cargo_id: args.cargoId,
+        p_pct: args.pct,
+      });
+      if (erro) throw erro;
+      const lido = lerResultadoDefinirSeguro(resultado);
+      if (!lido) {
+        throw new Error("rpc_hr_cargo_definir_seguro devolveu uma resposta sem o resultado esperado");
+      }
+      return lido;
+    },
+    onSuccess: invalidar,
+  });
+
   return {
     cargos: data ?? [],
     periodos,
@@ -285,7 +312,8 @@ export function useCargos() {
       editarMutation.isPending ||
       alternarActivoMutation.isPending ||
       definirTecnicoMutation.isPending ||
-      definirSalarioMutation.isPending,
+      definirSalarioMutation.isPending ||
+      definirSeguroMutation.isPending,
     /** Cria o cargo e devolve o id (null se a base nao o devolver). */
     criar: criarMutation.mutateAsync,
     editar: editarMutation.mutateAsync,
@@ -303,5 +331,8 @@ export function useCargos() {
       motivo: string,
     ) =>
       definirSalarioMutation.mutateAsync({ cargoId, salarioBase, periodicidade, validoDe, motivo }),
+    /** Define (ou, com null, limpa) o seguro de acidentes de trabalho do cargo. Lanca o erro da base para o ecra o traduzir. */
+    definirSeguroDoCargo: (cargoId: string, pct: number | null) =>
+      definirSeguroMutation.mutateAsync({ cargoId, pct }),
   };
 }

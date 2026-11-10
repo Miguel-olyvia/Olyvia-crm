@@ -9,7 +9,7 @@
  * contam de uma vez: lançamentos pontuais), o tipo de contrato e as horas por semana (vínculos), os equipamentos, as taxas
  * da organização e as exceções de taxa vêm da base. Ver o custo pede `hr.pessoas.retribuicao.view`; atribuir equipamento
  * pede também `hr.pessoas.retribuicao.edit`. Enquanto os dados da base não chegam mostra-se «a carregar», nunca valores de
- * exemplo. AINDA EM MEMÓRIA: o mês escolhido. Os acumulados não se calculam (precisam de cada mês anterior).
+ * exemplo. AINDA EM MEMÓRIA: o mês escolhido.
  */
 import { useState, useMemo } from "react";
 import { TriangleAlert } from "lucide-react";

@@ -68,7 +68,7 @@ describe("totaisDaOrganizacao: estimados", () => {
   const pessoa = (extra: Partial<PessoaParaCusto>): PessoaParaCusto => ({
     pessoaId: "p1", nome: "Ines", cargo: "Gerente", centroId: null, centro: null, filialId: null, filial: null, tipoContrato: null, retribuicaoMes: 1000, horasSemanais: 40, ...extra,
   });
-  const contexto: ContextoCusto = { mes: "2026-09", avulsos: [], equipamentos: [], definicoes: { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 }, excecoes: {} };
+  const contexto: ContextoCusto = { mes: "2026-09", avulsos: [], equipamentos: [], excecoes: {} };
 
   it("conta no total quem tem estimativa e diz quantos sao", () => {
     const linhas = [

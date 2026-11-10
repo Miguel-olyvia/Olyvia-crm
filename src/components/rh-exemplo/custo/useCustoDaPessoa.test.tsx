@@ -4,7 +4,7 @@
 // hook recalcular. Os valores avulsos sao os lancamentos pontuais do periodo (da base): vem dentro da retribuicao do
 // processamento e o custo mostra-os a parte. O tipo de contrato e as horas por semana vem dos vinculos (aqui simulados).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 
@@ -12,10 +12,8 @@ const estado = vi.hoisted(() => ({
   permissoes: [] as string[],
   permissoesACarregar: false,
   equipamentosHook: { equipamentos: null as unknown, aCarregar: false, erro: null as string | null, atribuir: vi.fn(), devolver: vi.fn(), alterarConta: vi.fn() },
-  definicoesHook: { definicoes: null as unknown, omissao: false, aCarregar: false, erro: null as string | null, guardar: vi.fn() },
   excecoesHook: { excecoes: null as unknown, aCarregar: false, erro: null as string | null, definir: vi.fn() },
   pedidoEquipamentos: vi.fn(),
-  pedidoDefinicoes: vi.fn(),
   pedidoExcecoes: vi.fn(),
   pessoa: { resultado: null as unknown, aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: true, temPeriodo: true, dados: {} as Record<string, unknown> },
   organizacao: {} as Record<string, unknown>,
@@ -66,7 +64,7 @@ vi.mock("@/components/rh-exemplo/hooks/usePessoasVinculosVigentes", async () => 
 vi.mock("@/components/rh-exemplo/hooks/useLocaisTrabalho", () => ({ useLocaisTrabalho: () => ({ locais: estado.locais }) }));
 vi.mock("@/components/rh-exemplo/hooks/useFiliaisDaArvore", () => ({ useFiliaisDaArvore: () => ({ filiais: estado.filiais, loading: false }) }));
 vi.mock("@/components/rh-exemplo/hooks/useCargos", () => ({ useCargos: () => ({ cargos: estado.cargos, periodos: estado.periodosCargo, periodosLoading: estado.periodosACarregar, periodosError: estado.periodosErro }) }));
-// Os dados do custo (equipamentos, definicoes, excecoes) e as permissoes vem destes wrappers: aqui sao simulados.
+// Os dados do custo (equipamentos, excecoes) e as permissoes vem destes wrappers: aqui sao simulados.
 vi.mock("@/components/rh-exemplo/hooks/usePermissions", () => ({
   usePermissions: () => ({
     hasPermission: (p: string) => estado.permissoes.includes(p),
@@ -81,12 +79,6 @@ vi.mock("@/components/rh-exemplo/hooks/useEquipamentosCusto", () => ({
     return estado.equipamentosHook;
   },
   useEquipamentosCustoAcoes: () => estado.equipamentosHook,
-}));
-vi.mock("@/components/rh-exemplo/hooks/useCustoDefinicoes", () => ({
-  useCustoDefinicoes: (opcoes: unknown) => {
-    estado.pedidoDefinicoes(opcoes);
-    return estado.definicoesHook;
-  },
 }));
 vi.mock("@/components/rh-exemplo/hooks/useCustoExcecoes", () => ({
   useCustoExcecoes: (opcoes: unknown) => {
@@ -123,11 +115,22 @@ const dadosDoMes = (lancamentos: ReturnType<typeof lancamento>[] = [], periodo: 
   };
 };
 
+const somaRegras = (linhas: unknown[] = []) => (linhas as { valor: number }[]).reduce((s, l) => s + l.valor, 0);
 const calculoReal = (
   totalBrutoEstimado: number | null,
-  extra: { realizadoMinutos?: number; planeadoMinutos?: number; lancamentosPontuais?: number } = {},
+  extra: { realizadoMinutos?: number; planeadoMinutos?: number; lancamentosPontuais?: number; linhasRegra?: unknown[] } = {},
 ) => ({
-  resultado: { totalBrutoEstimado, lancamentosPontuais: extra.lancamentosPontuais ?? 0 },
+  // O resultado do processamento na forma real: a base do mes e o que o total leva alem dos manuais; sem linhas nem descontos.
+  resultado: {
+    totalBrutoEstimado,
+    lancamentosPontuais: extra.lancamentosPontuais ?? 0,
+    baseMes: totalBrutoEstimado === null ? null : totalBrutoEstimado - (extra.lancamentosPontuais ?? 0) - somaRegras(extra.linhasRegra),
+    divisorDuodecimos: 14,
+    linhasAutomaticas: [],
+    linhasRegra: extra.linhasRegra ?? [],
+    descontoFaltas: 0,
+    subsidioAlimentacao: 0,
+  },
   totais: { planeadoMinutos: extra.planeadoMinutos ?? 9600, realizadoMinutos: extra.realizadoMinutos ?? 9000 },
 });
 
@@ -137,10 +140,8 @@ beforeEach(() => {
   estado.permissoes = [VER, EDITAR];
   estado.permissoesACarregar = false;
   estado.equipamentosHook = { ...estado.equipamentosHook, equipamentos: [], aCarregar: false, erro: null };
-  estado.definicoesHook = { ...estado.definicoesHook, definicoes: { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 }, aCarregar: false, erro: null };
   estado.excecoesHook = { ...estado.excecoesHook, excecoes: {}, aCarregar: false, erro: null };
   estado.pedidoEquipamentos.mockClear();
-  estado.pedidoDefinicoes.mockClear();
   estado.pedidoExcecoes.mockClear();
   estado.pessoa = { resultado: calculoReal(1200), aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: true, temPeriodo: true, dados: dadosDoMes() };
   estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
@@ -175,8 +176,26 @@ describe("useCustoDaPessoa: avulsos e horas da base", () => {
     const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
     expect(result.current.custo?.retribuicaoMes).toBe(1200);
     expect(result.current.custo?.avulsos.map((a) => a.id)).toEqual(["l1"]);
-    expect(result.current.custo?.atual.kmEAjudas).toBe(100);
+    expect(result.current.custo?.atual.avulsos).toBe(100);
     expect(result.current.custo?.atual.bruto).toBe(1300);
+  });
+
+  it("km e ajudas ja estao na retribuicao: nao voltam como avulsos e o bruto nao os conta duas vezes", () => {
+    // 1200 de base + 100 km x 0,40 = 1240 no processamento (totalRegras); o lancamento de km tambem esta na lista do periodo.
+    estado.pessoa = {
+      ...estado.pessoa,
+      resultado: calculoReal(1240, { linhasRegra: [{ tipo: "km", faixa: null, quantidade: 100, valor: 40 }] }),
+      dados: dadosDoMes([lancamento("k1", "p-tiago", 40, { tipo: "km", quantidade: 100 })]),
+    };
+    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
+    const custo = result.current.custo;
+    expect(custo?.avulsos).toEqual([]);
+    expect(custo?.atual.avulsos).toBe(0);
+    expect(custo?.atual.bruto).toBe(1240);
+    // A TSU incide so sobre os 1200 (sem os km): 285; o custo = 1240 + 285 + seguro 0 (cargo sem seguro).
+    expect(custo?.atual.encargosTaxa).toBe(285);
+    expect(custo?.atual.total).toBe(1525);
+    expect(custo?.atual.contas.linhas.find((l) => l.chave === "km")?.valor).toBe(40);
   });
 
   it("as horas por semana do contrato que cobre o mes mandam no custo por hora previsto", () => {
@@ -207,12 +226,6 @@ describe("useCustoDaPessoa", () => {
     expect(result.current.custo?.atual.bruto).toBeGreaterThanOrEqual(1200);
     expect(result.current.custo?.atual.horasFeitas).toBe(150);
     expect(result.current.aCarregar).toBe(false);
-  });
-
-  it("os acumulados ficam sem valor: nunca o mes actual repetido", () => {
-    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
-    expect(result.current.custo?.acumuladoAno).toBeNull();
-    expect(result.current.custo?.acumuladoAdmissao).toBeNull();
   });
 
   it("sem retribuicao a pessoa fica sem custo total (nao zero)", () => {
@@ -265,7 +278,6 @@ describe("useCustoDaPessoa", () => {
   it("pede os dados do custo so da pessoa, e so a quem pode ver; podeEditar exige ver e editar", () => {
     const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
     expect(estado.pedidoEquipamentos).toHaveBeenCalledWith({ pessoaId: "p-tiago", enabled: true });
-    expect(estado.pedidoDefinicoes).toHaveBeenCalledWith({ enabled: true });
     expect(estado.pedidoExcecoes).toHaveBeenCalledWith({ enabled: true });
     expect(result.current.podeEditar).toBe(true);
     estado.permissoes = [VER];
@@ -276,7 +288,6 @@ describe("useCustoDaPessoa", () => {
     estado.permissoes = [];
     const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
     expect(estado.pedidoEquipamentos).toHaveBeenCalledWith({ pessoaId: "p-tiago", enabled: false });
-    expect(estado.pedidoDefinicoes).toHaveBeenCalledWith({ enabled: false });
     expect(estado.pedidoExcecoes).toHaveBeenCalledWith({ enabled: false });
     expect(result.current.custo).toBeNull();
     expect(result.current.retribuicaoRecusada).toBe(true);
@@ -301,7 +312,7 @@ describe("useCustoDaPessoa", () => {
   });
 
   it("uma falha a ler os dados da base nao calcula o custo e devolve o texto do erro", () => {
-    estado.definicoesHook = { ...estado.definicoesHook, definicoes: null, erro: "Falha de teste" };
+    estado.excecoesHook = { ...estado.excecoesHook, excecoes: null, erro: "Falha de teste" };
     const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
     expect(result.current.custo).toBeNull();
     expect(result.current.erroBase).toBe("Falha de teste");
@@ -461,12 +472,16 @@ describe("AbaCusto", () => {
 
   beforeEach(() => window.localStorage.setItem("language", "pt"));
 
-  it("mostra o custo do mes com a retribuicao real e os acumulados sem valor", async () => {
+  it("mostra so o custo do mes: o titulo com mes e ano e a tabela das contas, sem resumo, comparacao, custo por hora nem acumulados", async () => {
     await renderAba();
-    expect(screen.getByText("Total bruto estimado do processamento salarial")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^Custo de .+ de \d{4}$/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "As contas do mês" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: /Contas do custo de/ })).toBeInTheDocument();
     expect(screen.queryByText(/A calcular a retribuição do mês/)).not.toBeInTheDocument();
-    expect(screen.getByText(/precisam do cálculo de cada mês anterior e ainda não estão ligados/)).toBeInTheDocument();
-  });
+    for (const fora of [/Para comparar/, /Acumulados/, /Custo por hora/, /Do ano/, /Desde a admissão/, /Total bruto estimado do processamento/, /Encargos da empresa/, /Bruto do mês/, /Composição do custo/, /precisam do cálculo de cada mês anterior/]) {
+      expect(screen.queryByText(fora)).not.toBeInTheDocument();
+    }
+  }, 20000);
 
   it("enquanto carrega diz que esta a calcular e nao mostra um quadro vazio como se fosse zero", async () => {
     estado.pessoa = { ...estado.pessoa, resultado: null, aCarregar: true };
@@ -490,7 +505,7 @@ describe("AbaCusto", () => {
   });
 
   it("enquanto os dados da base nao chegam diz que esta a calcular em vez de mostrar um quadro a zeros", async () => {
-    estado.definicoesHook = { ...estado.definicoesHook, definicoes: null, aCarregar: true };
+    estado.excecoesHook = { ...estado.excecoesHook, excecoes: null, aCarregar: true };
     await renderAba();
     expect(screen.getByText("A calcular a retribuição do mês…")).toBeInTheDocument();
     expect(screen.queryByText("Total bruto estimado do processamento salarial")).not.toBeInTheDocument();
@@ -561,9 +576,8 @@ describe("useCustoDaPessoa: mes fechado", () => {
     expect(result.current.semValoresGravados).toBe(true);
     expect(result.current.custo?.retribuicaoMes).toBeNull();
     expect(result.current.custo?.atual.total).toBeNull();
-    // Sem linha gravada o custo nao leva horas feitas (nem um 0 inventado) e nao ha custo por hora feita.
+    // Sem linha gravada o custo nao leva horas feitas (nem um 0 inventado).
     expect(result.current.custo?.horasFeitas).toBeNull();
-    expect(result.current.custo?.atual.porHoraFeita).toBeNull();
   });
 
   it("com linha gravada o custo leva as horas gravadas", () => {
@@ -630,6 +644,14 @@ describe("useCustoDaOrganizacao: mes fechado", () => {
     expect(linhas.find((l) => l.pessoaId === "p-hugo")?.semValoresGravados).toBeFalsy();
     expect(linhas.find((l) => l.pessoaId === "p-saiu")).toMatchObject({ nome: "Saiu Depois", retribuicao: 900 });
     expect(estado.pedidoGravados).toHaveBeenCalledWith("per", true);
+  });
+
+  it("quem so existe no gravado (ja nao vem da lista) tem o seguro desconhecido; quem esta na lista tem o do cargo de hoje", () => {
+    estado.gravados = { ...estado.gravados, porPessoa: new Map([...estado.gravados.porPessoa, ["p-fantasma", gravada("p-fantasma")]]) };
+    const { result } = renderHook(() => useCustoDaOrganizacao(MES));
+    expect(result.current.linhas.find((l) => l.pessoaId === "p-fantasma")).toMatchObject({ seguroDesconhecido: true, seguro: 0 });
+    expect(result.current.linhas.find((l) => l.pessoaId === "p-saiu")?.seguroDesconhecido).toBeUndefined();
+    expect(result.current.linhas.find((l) => l.pessoaId === "p-hugo")?.seguroDesconhecido).toBeUndefined();
   });
 
   it("uma pessoa activa sem linha gravada vem marcada e sem retribuicao", () => {
@@ -710,15 +732,15 @@ describe("AbaCusto: mes fechado", () => {
     expect(screen.getByText(/Sem valores gravados no fecho para esta pessoa/)).toBeInTheDocument();
   });
 
-  it("a pessoa sem linha gravada nao mostra «por hora feita»; com linha gravada mostra", async () => {
+  it("com ou sem linha gravada a aba nao mostra custo por hora (so o custo do mes)", async () => {
     estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
     const semLinha = await renderAba();
-    expect(screen.queryByText(/Custo por hora realmente feita/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Custo por hora prevista/)).toBeInTheDocument();
+    expect(screen.queryByText(/Custo por hora/)).not.toBeInTheDocument();
     semLinha.unmount();
     estado.gravados = { estado: "ok", porPessoa: new Map([["p-tiago", gravada("p-tiago")]]), antesDoRegisto: false };
     await renderAba();
-    expect(screen.getByText(/Custo por hora realmente feita/)).toBeInTheDocument();
+    expect(screen.queryByText(/Custo por hora/)).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: /Contas do custo de/ })).toBeInTheDocument();
   });
 
   it("em ingles os mesmos avisos", async () => {
@@ -937,7 +959,9 @@ describe("AbaCusto: estimativa pelo cargo", () => {
     await renderAba(vi.fn(), PESSOA);
     expect(screen.getByText("Sem retribuição e sem cargo atribuído")).toBeInTheDocument();
     expect(screen.queryByText(/Estimativa pelo salário do cargo/)).not.toBeInTheDocument();
-    expect(screen.getAllByText("Sem valor").length).toBeGreaterThan(0);
+    expect(screen.getByText("Sem salário registado")).toBeInTheDocument();
+    expect(screen.getByText("Sem retribuição registada: não há contas para mostrar.")).toBeInTheDocument();
+    expect(screen.queryByText("Sem valor")).not.toBeInTheDocument();
   });
 
   it("cargo nao mensal: razao em texto, sem estimativa", async () => {
@@ -960,5 +984,132 @@ describe("AbaCusto: estimativa pelo cargo", () => {
     await renderAba();
     expect(screen.getByText(/Estimate based on the job salary/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set pay" })).toBeInTheDocument();
+  });
+});
+
+// ---- As contas do mes, passo a passo, e o ecra sem valores de exemplo ----
+
+describe("AbaCusto: as contas do mes", () => {
+  const renderAba = async (pessoa: never = PESSOA_C1) => {
+    const { AbaCusto } = await import("./AbaCusto");
+    return render(
+      <LanguageProvider>
+        <AbaCusto pessoa={pessoa} ctx={{ nomePorPessoaId: new Map(), minhaPessoaId: null } as never} ficha={null as never} />
+      </LanguageProvider>,
+    );
+  };
+  const normal = (s: string | null | undefined) => (s ?? "").replace(/[\u00a0\u202f]/g, " ");
+  const linhaDe = (rotulo: string | RegExp) => screen.getByRole("rowheader", { name: rotulo }).closest("tr") as HTMLElement;
+  const KM = { tipo: "km", faixa: null, quantidade: 100, valor: 40 };
+
+  beforeEach(() => {
+    window.localStorage.setItem("language", "pt");
+    definirMesCusto(MES);
+    estado.cargos = [{ id: "c1", nome: "Gerente", seguro_acidentes_pct: 5 }];
+    estado.pessoa = { ...estado.pessoa, resultado: calculoReal(1240, { linhasRegra: [KM] }), dados: dadosDoMes() };
+  });
+
+  it("mostra uma tabela com cabecalhos, as formulas, a TSU sem os km e o seguro de 5 % sobre o salario base", async () => {
+    await renderAba();
+    const tabela = screen.getByRole("table", { name: /Contas do custo de Tiago Pinheiro/ });
+    expect(within(tabela).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Conta", "Como se calcula", "Valor"]);
+    expect(normal(linhaDe("Quilómetros").textContent)).toContain("100 km × 0,40 € = 40,00 €");
+    expect(normal(linhaDe("TSU da empresa").textContent)).toContain("23,75 % × 1 200,00 € = 285,00 €");
+    expect(normal(linhaDe(/^Seguro de acidentes de trabalho/).textContent)).toContain("5 % × 1 200,00 € = 60,00 €");
+    expect(normal(linhaDe(/Custo total/).textContent)).toContain("1585,00");
+    expect(screen.getByText("A base da TSU é a retribuição do mês sem km nem ajudas de custo (dentro dos limites legais); inclui o subsídio de alimentação, o IHT e as horas extra. Confirme com a contabilidade.")).toBeInTheDocument();
+  });
+
+  it("cargo sem seguro: a linha do seguro diz «Sem seguro neste cargo» e vale 0", async () => {
+    estado.cargos = [{ id: "c1", nome: "Gerente", seguro_acidentes_pct: null }];
+    await renderAba();
+    expect(linhaDe(/^Seguro de acidentes de trabalho/).textContent).toContain("Sem seguro neste cargo");
+  });
+
+  it("pessoa sem direito a km, ajudas e IHT: essas linhas nem aparecem", async () => {
+    estado.pessoa = { ...estado.pessoa, resultado: calculoReal(1200) };
+    await renderAba();
+    for (const rotulo of ["Quilómetros", "Ajudas de custo", /IHT/]) expect(screen.queryByRole("rowheader", { name: rotulo })).not.toBeInTheDocument();
+  });
+
+  it("a aba acaba no custo total e nao tem «Para comparar», «Acumulados» nem «Custo por hora» (o custo e so o do mes)", async () => {
+    await renderAba();
+    for (const fora of [/Para comparar/, /Acumulados/, /Custo por hora/, /repartido por 12 meses/, /exemplo/i, /banco de horas/i]) {
+      expect(screen.queryByText(fora)).not.toBeInTheDocument();
+    }
+    const ultima = screen.getByRole("table", { name: /Contas do custo de/ }).querySelectorAll("tbody tr");
+    expect(ultima[ultima.length - 1].textContent).toMatch(/Custo total/);
+  });
+
+  it("os duodecimos mostram a formula verdadeira do processamento: 2 subsidios × 50 % ÷ 12 × 1 500,00 € = 125,00 €", async () => {
+    const base = calculoReal(1625);
+    estado.pessoa = { ...estado.pessoa, resultado: { ...base, resultado: { ...base.resultado, divisorDuodecimos: 168 / 13 } } } as never;
+    await renderAba();
+    expect(normal(linhaDe("Subsídios em duodécimos").textContent)).toContain("2 subsídios × 50 % ÷ 12 × 1 500,00 € = 125,00 €");
+  });
+
+  it("o formulario so tem a taxa desta pessoa: sem taxa da empresa, seguro, km nem dia", async () => {
+    await renderAba();
+    expect(screen.getByLabelText(/Taxa desta pessoa \(%\)/)).toBeInTheDocument();
+    for (const rotulo of [/Taxa da empresa/, /Seguro de acidentes de trabalho \(%\)/, /Valor por km/, /Valor por dia/]) expect(screen.queryByLabelText(rotulo)).not.toBeInTheDocument();
+    expect(screen.queryByText(/são por organização/)).not.toBeInTheDocument();
+  });
+
+  it("mes fechado: as contas dizem que so mostram o gravado e usam as linhas gravadas (km incluidos)", async () => {
+    estado.pessoa = vivoProibido({ ...estado.pessoa, dados: dadosDoMes([], FECHADO) }, "resultado") as typeof estado.pessoa;
+    estado.gravados = {
+      estado: "ok",
+      porPessoa: new Map([["p-tiago", gravada("p-tiago", { total_bruto: 1240, totais: { base_mes: 1200, divisor_duodecimos: 14, lancamentos_pontuais: 0, total_regras: 40 }, linhas: [{ origem: "regra", valor: 40, tipo: "km", faixa: null, quantidade: 100 }] })]]),
+      antesDoRegisto: false,
+    };
+    await renderAba();
+    expect(screen.getByText("Num mês fechado só a retribuição e as horas são as gravadas no fecho; a TSU, o seguro e os equipamentos são os de hoje.")).toBeInTheDocument();
+    expect(screen.queryByText(/Nada se recalcula/)).not.toBeInTheDocument();
+    expect(normal(linhaDe("Quilómetros").textContent)).toContain("100 km × 0,40 € = 40,00 €");
+    expect(normal(linhaDe("TSU da empresa").textContent)).toContain("23,75 % × 1 200,00 € = 285,00 €");
+  });
+
+  it("mes fechado: o seguro e o do cargo de HOJE (mudar o cargo depois do fecho muda a linha) e o ecra di-lo", async () => {
+    const vivo = estado.pessoa;
+    const gravar = () => {
+      estado.pessoa = vivoProibido({ ...vivo, dados: dadosDoMes([], FECHADO) }, "resultado") as typeof estado.pessoa;
+      estado.gravados = {
+        estado: "ok",
+        porPessoa: new Map([["p-tiago", gravada("p-tiago", { total_bruto: 1200, totais: { base_mes: 1200, divisor_duodecimos: 14, lancamentos_pontuais: 0, total_regras: 0 }, linhas: [] })]]),
+        antesDoRegisto: false,
+      };
+    };
+    gravar();
+    const primeira = await renderAba();
+    expect(normal(linhaDe(/^Seguro de acidentes de trabalho/).textContent)).toContain("5 % × 1 200,00 € = 60,00 €");
+    primeira.unmount();
+    estado.cargos = [{ id: "c1", nome: "Gerente", seguro_acidentes_pct: 3 }];
+    gravar();
+    await renderAba();
+    expect(normal(linhaDe(/^Seguro de acidentes de trabalho/).textContent)).toContain("3 % × 1 200,00 € = 36,00 €");
+    expect(screen.getByText(/a TSU, o seguro e os equipamentos são os de hoje/)).toBeInTheDocument();
+  });
+
+  it("mes fechado sem valores gravados: sem contas (nada se recalcula)", async () => {
+    estado.pessoa = vivoProibido({ ...estado.pessoa, dados: dadosDoMes([], FECHADO) }, "resultado") as typeof estado.pessoa;
+    estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
+    await renderAba();
+    expect(screen.getByText("Sem retribuição registada: não há contas para mostrar.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("estimativa pelo cargo: so salario base, TSU e seguro sobre a estimativa, marcados como estimados", async () => {
+    fixarHoje();
+    estado.pessoa = { ...estado.pessoa, resultado: calculoReal(null) };
+    estado.periodosCargo = [periodoCargo()];
+    try {
+      await renderAba();
+      expect(screen.queryByRole("rowheader", { name: "Quilómetros" })).not.toBeInTheDocument();
+      expect(normal(linhaDe(/^Seguro de acidentes de trabalho/).textContent)).toContain("5 % × 1 500,00 € = 75,00 €");
+      expect(linhaDe("TSU da empresa").textContent).toContain("(estimado)");
+      expect(screen.getByText(/Contas feitas sobre o salário estimado do cargo/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

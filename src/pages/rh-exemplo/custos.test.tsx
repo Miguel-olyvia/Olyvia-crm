@@ -12,7 +12,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import type { DadosCusto } from "@/components/rh-exemplo/custo/custoLido";
 import type { PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
-import type { DefinicoesCusto } from "@/components/rh-exemplo/lib/custoMes";
 import type { ContaItem } from "@/components/rh-exemplo/lib/comoConta";
 import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 
@@ -33,14 +32,12 @@ const estado = vi.hoisted(() => ({
   baseACarregar: false,
   erroBase: null as string | null,
   equipamentos: [] as EquipamentoPessoa[],
-  definicoes: { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 } as DefinicoesCusto,
   excecoes: {} as Record<string, number | null>,
   ouvintes: new Set<() => void>(),
   acoes: {
     atribuir: vi.fn(),
     devolver: vi.fn(),
     alterarConta: vi.fn(),
-    guardarDefinicoes: vi.fn(),
     definirExcecao: vi.fn(),
   },
 }));
@@ -88,7 +85,7 @@ vi.mock("@/components/rh-exemplo/custo/useCustoDaPessoa", async () => {
       () => estado.equipamentos,
     );
   };
-  const dadosDeTeste = (): DadosCusto => ({ equipamentos: estado.equipamentos, definicoes: estado.definicoes, excecoes: estado.excecoes });
+  const dadosDeTeste = (): DadosCusto => ({ equipamentos: estado.equipamentos, excecoes: estado.excecoes });
   const semPermissao = () => !estado.permissoes.includes("hr.pessoas.retribuicao.view");
   const podeEditar = () => !semPermissao() && estado.permissoes.includes("hr.pessoas.retribuicao.edit");
   return {
@@ -133,9 +130,6 @@ vi.mock("@/components/rh-exemplo/hooks/useEquipamentosCusto", async () => {
     useEquipamentosCustoAcoes: () => ({ atribuir: estado.acoes.atribuir, devolver: estado.acoes.devolver, alterarConta: estado.acoes.alterarConta }),
   };
 });
-vi.mock("@/components/rh-exemplo/hooks/useCustoDefinicoes", () => ({
-  useCustoDefinicoes: () => ({ definicoes: estado.definicoes, omissao: false, aCarregar: false, erro: null, guardar: estado.acoes.guardarDefinicoes }),
-}));
 vi.mock("@/components/rh-exemplo/hooks/useCustoExcecoes", () => ({
   useCustoExcecoes: () => ({ excecoes: estado.excecoes, aCarregar: false, erro: null, definir: estado.acoes.definirExcecao }),
 }));
@@ -200,8 +194,8 @@ let contadorEquipamentos = 0;
 
 /** As acoes dos hooks da base, simuladas: validam como o hook verdadeiro (mesmos nomes de erro) e mudam a lista de teste. */
 function simularAcoes(): void {
-  const { atribuir, devolver, alterarConta, guardarDefinicoes, definirExcecao } = estado.acoes;
-  for (const acao of [atribuir, devolver, alterarConta, guardarDefinicoes, definirExcecao]) acao.mockReset();
+  const { atribuir, devolver, alterarConta, definirExcecao } = estado.acoes;
+  for (const acao of [atribuir, devolver, alterarConta, definirExcecao]) acao.mockReset();
   atribuir.mockImplementation(async (novo: { pessoaId: string; tipo: EquipamentoPessoa["tipo"]; descricao: string; valor: number; entrega: string; conta?: ContaItem }) => {
     const conta = novo.conta ?? contaRepartida();
     const erro = validarEquipamento({ ...novo, conta });
@@ -225,7 +219,6 @@ function simularAcoes(): void {
     mudarEquipamentos(estado.equipamentos.map((x) => (x.id === id ? { ...x, conta: normalizarConta(nova) } : x)));
     return ok;
   });
-  guardarDefinicoes.mockResolvedValue(ok);
   definirExcecao.mockResolvedValue(ok);
 }
 
@@ -269,7 +262,6 @@ beforeEach(() => {
   estado.baseACarregar = false;
   estado.erroBase = null;
   estado.equipamentos = EQUIPAMENTOS;
-  estado.definicoes = { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 };
   estado.excecoes = {};
   estado.pessoas = PESSOAS;
   estado.calculo = calculo();
@@ -401,7 +393,7 @@ describe("o módulo Custos", () => {
     noRouter();
     fireEvent.click(within(linhaDe("Tiago Pinheiro")).getByRole("button", { name: /Abrir a ficha de Tiago Pinheiro/ }));
     const ficha = screen.getByRole("dialog");
-    expect(within(ficha).getByText("Custo total do mês")).toBeInTheDocument();
+    expect(within(ficha).getByRole("rowheader", { name: /Custo total/ })).toBeInTheDocument();
     expect(within(ficha).getByRole("heading", { name: "Equipamentos" })).toBeInTheDocument();
     expect(within(ficha).getAllByText("Telemóvel").length).toBeGreaterThan(0);
   });
@@ -762,14 +754,13 @@ describe("«Como conta» no painel de atribuir e na ficha", () => {
     expect(["2026-09", "2026-10", "2027-08", "2027-09"].map((m) => valorDoEquipamentoNoMes(colete, m))).toEqual([30, 30, 30, 0]);
   });
 
-  it("guardar as taxas e a exceção da pessoa na ficha chama as ações da base com os valores escritos", async () => {
+  it("a ficha so tem a taxa desta pessoa (a TSU e fixa, o seguro e do cargo): guardá-la chama a ação da exceção com o valor escrito", async () => {
     noRouter();
     fireEvent.click(within(linhaDe("Hugo Teixeira")).getByRole("button", { name: /Abrir a ficha de Hugo Teixeira/ }));
     const ficha = screen.getByRole("dialog");
-    fireEvent.change(within(ficha).getByLabelText(/Taxa da empresa/), { target: { value: "20" } });
-    fireEvent.change(within(ficha).getByLabelText(/Taxa desta pessoa/), { target: { value: "10" } });
+    for (const rotulo of [/Taxa da empresa/, /Valor por km/, /Valor por dia/]) expect(within(ficha).queryByLabelText(rotulo)).not.toBeInTheDocument();
+    fireEvent.change(within(ficha).getByLabelText(/Taxa desta pessoa \(%\)/), { target: { value: "10" } });
     fireEvent.click(within(ficha).getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(estado.acoes.guardarDefinicoes).toHaveBeenCalledWith({ taxaEmpresa: 20, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 }));
     await waitFor(() => expect(estado.acoes.definirExcecao).toHaveBeenCalledWith("p-hugo", 10));
   });
 

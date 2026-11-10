@@ -49,6 +49,13 @@
  * A RLS bloqueia DELETE por politica RESTRICTIVE; este componente nem mostra
  * a opcao. "Desactivar" e "Reactivar" sao o UPDATE de `activo`.
  *
+ * SEGURO DE ACIDENTES DE TRABALHO POR CARGO
+ * -------------------------------------------
+ * `hr_cargos.seguro_acidentes_pct`: percentagem sobre o salario base (0 a 100, 2 decimais; vazio = cargo sem seguro).
+ * A lista mostra-o a quem ve cargos; o campo do dialogo so se edita com `hr.pessoas.laborais.edit`. Grava-se numa
+ * chamada A PARTE (`definirSeguroDoCargo`, RPC) DEPOIS de gravar o cargo, e so se mudou. Se o seguro falhar com o cargo
+ * ja gravado, o ecra diz-o em texto e o dialogo passa a editar esse cargo: tentar de novo nao cria outro.
+ *
  * Permissoes: ver = `hr.pessoas.laborais.view`; criar/editar/activar =
  * `hr.pessoas.laborais.edit`; alterar salario = `hr.cargos.salario.alterar`.
  */
@@ -104,6 +111,12 @@ import {
 import type { PessoaListItem, Periodicidade } from "@/components/rh-exemplo/tipos";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import {
+  chaveDeErroSeguro,
+  formatarPercentagemSeguro,
+  lerPercentagemSeguro,
+  paraTextoDoCampo,
+} from "@/lib/hr/seguroCargo";
 import { mensagemDeErroCargo } from "@/components/rh-exemplo/lib/errosCargo";
 import { cargoComMesmoNome } from "@/components/rh-exemplo/lib/cargosNome";
 import {
@@ -138,7 +151,7 @@ interface CargosGestaoProps {
 }
 
 export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const podeVer = hasPermission("hr.pessoas.laborais.view");
   const podeEditar = hasPermission("hr.pessoas.laborais.edit");
@@ -146,7 +159,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   const podeAlterarSalario = hasPermission("hr.cargos.salario.alterar");
   const podeVerRetribuicao = hasPermission("hr.pessoas.retribuicao.view");
 
-  const { cargos, periodos, oficios, isLoading, isSaving, criar, editar, definirActivo, definirSalario, definirTecnico } =
+  const { cargos, periodos, oficios, isLoading, isSaving, criar, editar, definirActivo, definirSalario, definirTecnico, definirSeguroDoCargo } =
     useCargos();
   const { divergencias, isLoading: divergenciasALoad } = useCargosSalariosDivergentes();
   const { divergencias: divergenciasPeriodo, isLoading: divergenciasPeriodoALoad } =
@@ -164,6 +177,10 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   // A marca de tecnico de obra e os oficios escolhidos no dialogo (gravam-se a parte: rh_guardar_cargo_tecnico).
   const [tecnico, setTecnico] = useState(false);
   const [skills, setSkills] = useState<ReadonlySet<string>>(() => new Set());
+  // O seguro de acidentes de trabalho escrito no dialogo (texto: vazio = sem seguro) e o aviso se a gravacao falhar.
+  const [seguroTexto, setSeguroTexto] = useState("");
+  const [erroSeguro, setErroSeguro] = useState<string | null>(null);
+  const seguroLido = lerPercentagemSeguro(seguroTexto);
   const { oficios: oficiosObra, semAcesso: semAcessoOficios } = useOficiosObra(dialogoAberto || oficios.length > 0);
 
   /** Os nomes dos oficios de cada cargo (os que o Catalogo nao devolver ficam de fora). */
@@ -247,6 +264,8 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
     setForm(FORM_VAZIO);
     setTecnico(false);
     setSkills(new Set());
+    setSeguroTexto("");
+    setErroSeguro(null);
     setDialogoAberto(true);
   };
 
@@ -260,6 +279,8 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
     });
     setTecnico(!!cargo.tecnico_obra);
     setSkills(skillsDoCargo(cargo.id));
+    setSeguroTexto(paraTextoDoCampo(cargo.seguro_acidentes_pct, language));
+    setErroSeguro(null);
     setDialogoAberto(true);
   };
 
@@ -269,6 +290,8 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
     setForm(FORM_VAZIO);
     setTecnico(false);
     setSkills(new Set());
+    setSeguroTexto("");
+    setErroSeguro(null);
   };
 
   const alternarSkill = (id: string, marcado: boolean) =>
@@ -291,8 +314,11 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   const submeter = async () => {
     if (!form.nome.trim() || nomeRepetido) return;
     if (!cargoAEditar && form.salario_base < 0) return;
+    if (!seguroLido.ok) return;
+    setErroSeguro(null);
     let cargoId: string | null = null;
-    const mudouTecnico = tecnicoMudou(cargoAEditar ? cargos.find((c) => c.id === cargoAEditar) : undefined);
+    const cargoEmEdicaoAoSubmeter = cargoAEditar ? cargos.find((c) => c.id === cargoAEditar) : undefined;
+    const mudouTecnico = tecnicoMudou(cargoEmEdicaoAoSubmeter);
     try {
       if (cargoAEditar) {
         // So nome e horas: o salario muda por "Alterar salario".
@@ -304,6 +330,27 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
     } catch (erro) {
       toast.error(await mensagemDeErroCargo(erro, "hr-cargo-definir-salario"));
       return;
+    }
+    // O seguro de acidentes de trabalho, depois do cargo e so se mudou (num cargo novo: so se escreveu um valor).
+    const seguroActual = cargoEmEdicaoAoSubmeter?.seguro_acidentes_pct ?? null;
+    if (podeEditar && seguroLido.valor !== seguroActual) {
+      try {
+        if (!cargoId) throw new Error("O cargo foi criado sem devolver o identificador");
+        await definirSeguroDoCargo(cargoId, seguroLido.valor);
+      } catch (erro) {
+        const chave = chaveDeErroSeguro(erro);
+        const motivo = chave ? t(chave) : await getFriendlyErrorMessage(erro);
+        const aviso = t("hr.cargos.seguro.erroGravar", { motivo });
+        toast.error(aviso);
+        if (cargoId) {
+          // O cargo ja existe: o dialogo passa a editar esse cargo, e tentar de novo nao cria outro.
+          setCargoAEditar(cargoId);
+          setErroSeguro(aviso);
+        } else {
+          fecharDialogo();
+        }
+        return;
+      }
     }
     // A marca de tecnico de obra e os oficios, depois do cargo (so se mudaram).
     if (mudouTecnico && cargoId) {
@@ -334,7 +381,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   if (!podeVer) return <SemAcessoCard />;
 
   const mostrarColunaAccoes = podeEditar || podeAlterarSalario;
-  const nColunas = 4 + (podeVerVinculos ? 1 : 0) + (mostrarColunaAccoes ? 1 : 0);
+  const nColunas = 5 + (podeVerVinculos ? 1 : 0) + (mostrarColunaAccoes ? 1 : 0);
   const cargoEmEdicao = cargoAEditar ? cargos.find((c) => c.id === cargoAEditar) : undefined;
 
   return (
@@ -502,6 +549,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                     <TableHead>{t("hr.columns.cargo")}</TableHead>
                     <TableHead>{t("hr.cargos.coluna.salario")}</TableHead>
                     <TableHead>{t("hr.cargos.tecnico.coluna")}</TableHead>
+                    <TableHead>{t("hr.cargos.seguro.coluna")}</TableHead>
                     <TableHead className="w-28">{t("hr.funcoes.pessoas")}</TableHead>
                     {podeVerVinculos && (
                       <TableHead className="w-28">{t("hr.estadoContrato.em_curso")}</TableHead>
@@ -563,6 +611,15 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                               </div>
                             ) : (
                               <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {cargo.seguro_acidentes_pct === null || cargo.seguro_acidentes_pct === undefined ? (
+                              <span className="text-muted-foreground">{t("hr.cargos.seguro.semSeguro")}</span>
+                            ) : (
+                              t("hr.cargos.seguro.valor", {
+                                valor: formatarPercentagemSeguro(cargo.seguro_acidentes_pct, language),
+                              })
                             )}
                           </TableCell>
                           <TableCell className="tabular-nums">{contagem.total}</TableCell>
@@ -638,6 +695,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                       <TableCell>
                         <span className="text-muted-foreground">{t("hr.funcoes.semCargo")}</span>
                       </TableCell>
+                      <TableCell />
                       <TableCell />
                       <TableCell />
                       <TableCell className="tabular-nums">{semCargo.total}</TableCell>
@@ -764,6 +822,33 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
               <p className="text-xs text-muted-foreground">{t("hr.cargos.horasReferenciaAjuda")}</p>
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="cargo-seguro">{t("hr.cargos.seguro.rotulo")}</Label>
+              <Input
+                id="cargo-seguro"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                className="h-11"
+                value={seguroTexto}
+                readOnly={!podeEditar}
+                onChange={(e) => setSeguroTexto(e.target.value)}
+                aria-invalid={!seguroLido.ok}
+                aria-describedby={seguroLido.ok ? "cargo-seguro-ajuda" : "cargo-seguro-ajuda cargo-seguro-invalido"}
+              />
+              <p id="cargo-seguro-ajuda" className="text-xs text-muted-foreground">{t("hr.cargos.seguro.ajuda")}</p>
+              {!seguroLido.ok && (
+                <p id="cargo-seguro-invalido" role="alert" className="text-xs text-destructive">
+                  {t("hr.cargos.seguro.invalido")}
+                </p>
+              )}
+              {erroSeguro && (
+                <p role="alert" className="text-xs text-destructive">
+                  {erroSeguro}
+                </p>
+              )}
+            </div>
+
             <div className="space-y-3 rounded-md border p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -809,7 +894,11 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
               type="button"
               onClick={submeter}
               disabled={
-                isSaving || !form.nome.trim() || nomeRepetido !== null || (!cargoAEditar && form.salario_base < 0)
+                isSaving ||
+                !form.nome.trim() ||
+                nomeRepetido !== null ||
+                !seguroLido.ok ||
+                (!cargoAEditar && form.salario_base < 0)
               }
             >
               {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

@@ -4,11 +4,12 @@
  * fichas e o cálculo batem por construção: nada aqui refaz uma conta de salário.
  */
 import { arredondar, custoPorHora, horasPrevistasDoMes, somarMeses, type MesIso } from "./custo";
-import { custoDoMes, type AvulsoCusto, type CustoDoMes, type DefinicoesCusto } from "./custoMes";
+import type { DecomposicaoRetribuicao } from "./contasDoMes";
+import { custoDoMes, type AvulsoCusto, type CustoDoMes } from "./custoMes";
 import type { EquipamentoPessoa } from "./equipamentos";
 import type { EstimadoPeloCargo, RazaoSemEstimativa } from "./estimativaCusto";
 
-/** Valores de exemplo (não vêm do banco de horas nem da assiduidade): só para mostrar a conta; não mexem no custo total. */
+/** Valores de exemplo (não vêm do banco de horas nem da assiduidade): JÁ NÃO se mostram ao utilizador nem entram em conta nenhuma; ficam exportados por compatibilidade. */
 export const SALDO_BANCO_HORAS_EXEMPLO = 3;
 export const HORAS_FEITAS_A_MAIS_EXEMPLO = 2;
 
@@ -30,13 +31,18 @@ export interface PessoaParaCusto {
   /** Porque a pessoa fica sem valor (sem retribuicao e sem estimativa possivel); ausente com retribuicao, estimativa ou mes fechado. */
   razaoSemValor?: RazaoSemEstimativa;
   horasSemanais: number;
+  /** O seguro de acidentes do CARGO (%), sobre o salario base; ausente/`null` = o cargo nao tem seguro (ou nao se leu). */
+  seguroPct?: number | null;
+  /** Nao se sabe o cargo (pessoa que so existe no gravado do fecho): o seguro nao entra e as contas dizem «cargo desconhecido». */
+  seguroDesconhecido?: boolean;
+  /** A retribuicao separada em partes (do processamento vivo ou do gravado no fecho); ausente = estimativa pelo cargo. */
+  decomposicao?: DecomposicaoRetribuicao | null;
 }
 
 export interface ContextoCusto {
   mes: MesIso;
   avulsos: readonly AvulsoCusto[];
   equipamentos: readonly EquipamentoPessoa[];
-  definicoes: DefinicoesCusto;
   excecoes: Readonly<Record<string, number | null>>;
   /** Horas realizadas GRAVADAS no fecho, por pessoa (mes fechado); sem a pessoa aqui, a conta de exemplo de sempre. */
   horasRealizadas?: ReadonlyMap<string, number>;
@@ -71,10 +77,12 @@ export function custoDaPessoaNoMes(p: PessoaParaCusto, c: ContextoCusto): CustoD
     salarioMes: p.retribuicaoMes,
     avulsos: c.avulsos.filter((a) => a.pessoaId === p.pessoaId),
     equipamentos: c.equipamentos.filter((e) => e.pessoaId === p.pessoaId),
-    definicoes: c.definicoes,
+    seguroPct: p.seguroPct ?? null,
+    seguroDesconhecido: p.seguroDesconhecido,
+    decomposicao: p.decomposicao ?? null,
+    estimado: p.estimadoPeloCargo !== undefined,
     excecaoTaxa: c.excecoes[p.pessoaId] ?? null,
     horasSemanais: p.horasSemanais,
-    saldoHoras: SALDO_BANCO_HORAS_EXEMPLO,
     // Mes fechado sem valores gravados: sem horas (nunca as de exemplo); a linha avisa.
     horasFeitas: p.semValoresGravados ? 0 : arredondar(c.horasRealizadas?.get(p.pessoaId) ?? previstas + HORAS_FEITAS_A_MAIS_EXEMPLO),
   });
@@ -92,7 +100,7 @@ export function montarLinhaCusto(p: PessoaParaCusto, c: ContextoCusto): LinhaCus
   return {
     ...p,
     retribuicao,
-    avulsosMes: r.kmEAjudas,
+    avulsosMes: r.avulsos,
     encargos: r.encargosTaxa,
     seguro: r.seguro,
     equipamentosMes: r.outrosCustos,
@@ -100,7 +108,7 @@ export function montarLinhaCusto(p: PessoaParaCusto, c: ContextoCusto): LinhaCus
     total: r.total,
     porHora: custoPorHora(r.total, r.horasPrevistas),
     composicao: composicaoDoCusto(
-      { retribuicao: retribuicao ?? 0, avulsos: r.kmEAjudas, encargos: r.encargosTaxa, seguro: r.seguro, equipamentos: r.outrosCustos },
+      { retribuicao: retribuicao ?? 0, avulsos: r.avulsos, encargos: r.encargosTaxa, seguro: r.seguro, equipamentos: r.outrosCustos },
       r.total,
     ),
   };

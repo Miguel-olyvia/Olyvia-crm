@@ -76,6 +76,32 @@ describe("pessoaParaCusto", () => {
   it("sem retribuicao fica sem retribuicao (nao zero)", () => {
     expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, retribuicaoMes: null }, "2026-09").retribuicaoMes).toBeNull();
   });
+
+  it("o seguro e o do cargo da pessoa: 5 % no cargo com seguro, sem seguro no cargo sem ele (ou sem catalogo)", () => {
+    const comSeguro = { ...CATALOGOS, cargos: [{ id: "c1", nome: "Gerente", seguro_acidentes_pct: 5 }] };
+    const semSeguro = { ...CATALOGOS, cargos: [{ id: "c1", nome: "Gerente", seguro_acidentes_pct: null }] };
+    expect(pessoaParaCusto(PESSOA, comSeguro, DADOS, "2026-09").seguroPct).toBe(5);
+    expect(pessoaParaCusto(PESSOA, semSeguro, DADOS, "2026-09").seguroPct).toBeNull();
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, DADOS, "2026-09").seguroPct).toBeNull();
+    expect(pessoaParaCusto(PESSOA, SEM_CATALOGOS, DADOS, "2026-09").seguroPct).toBeNull();
+  });
+
+  it("uma pessoa que so existe no gravado (cargo desconhecido) fica com o seguro desconhecido, nao «sem seguro»", () => {
+    const soNoGravado = { id: "p9", nome_completo: "Saiu", cargo: null, cargo_id: null, local_id: null, soNoGravado: true as const };
+    expect(pessoaParaCusto(soNoGravado, CATALOGOS, DADOS, "2026-09")).toMatchObject({ seguroPct: null, seguroDesconhecido: true });
+    // Uma pessoa da lista sem cargo atribuido e outra coisa: sabe-se que nao tem cargo, logo nao ha seguro.
+    expect(pessoaParaCusto({ ...PESSOA, cargo_id: null }, CATALOGOS, DADOS, "2026-09").seguroDesconhecido).toBeUndefined();
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, DADOS, "2026-09").seguroDesconhecido).toBeUndefined();
+  });
+
+  it("a decomposicao so vale para a retribuicao real: sem retribuicao ou com estimativa pelo cargo fica a null", () => {
+    const decomposicao = { salarioBase: 1000, divisor: 14, duodecimos: 0, subsidioAlimentacao: 0, horasExtra: 0, descontoFaltas: 0, iht: null, km: null, ajudas: null };
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, decomposicao }, "2026-09").decomposicao).toBe(decomposicao);
+    expect(pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, retribuicaoMes: null, decomposicao }, "2026-09").decomposicao).toBeNull();
+    const estimativa = { estado: "estimado" as const, cargo: "Gerente", salario: 1200 };
+    const estimada = pessoaParaCusto(PESSOA, CATALOGOS, { ...DADOS, retribuicaoMes: null, decomposicao, estimativa }, "2026-09");
+    expect(estimada).toMatchObject({ retribuicaoMes: 1200, decomposicao: null });
+  });
 });
 
 describe("horasSemanaisDaBase", () => {

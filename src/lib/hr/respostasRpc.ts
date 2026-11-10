@@ -68,6 +68,18 @@ export function lerResultadoMudarCargo(data: unknown): ResultadoMudarCargo | nul
   return o as unknown as ResultadoMudarCargo;
 }
 
+/** O que `rpc_hr_cargo_definir_seguro` devolve (`seguro_acidentes_pct` null = cargo sem seguro). */
+export interface ResultadoDefinirSeguro {
+  cargo_id: string;
+  seguro_acidentes_pct: number | null;
+}
+
+export function lerResultadoDefinirSeguro(data: unknown): ResultadoDefinirSeguro | null {
+  const o = comoObjecto(data);
+  if (!o || !cumpre(o, { cargo_id: eTexto, seguro_acidentes_pct: ouNulo(eNumero) })) return null;
+  return o as unknown as ResultadoDefinirSeguro;
+}
+
 export function lerResultadoDefinirSalario(data: unknown): ResultadoDefinirSalario | null {
   const o = comoObjecto(data);
   if (
