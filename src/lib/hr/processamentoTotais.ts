@@ -34,7 +34,7 @@ import type {
   RegraSalarial,
 } from "@/types/hr";
 import type { DiaRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
-import { descontoDasFaltas, type FaltaDoPeriodo } from "@/lib/hr/descontoFalta";
+import { detalheDasFaltas, type FaltaDoPeriodo } from "@/lib/hr/descontoFalta";
 import type { FonteHorasExtra } from "@/lib/hr/horasExtraRelatorio";
 
 export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
@@ -111,6 +111,13 @@ export interface EntradaProcessamentoPessoa {
    * almoco calcula-se dia a dia por estes minutos.
    */
   minutosPorDia: readonly number[];
+  /**
+   * PEDE O DETALHE (`subsidioDetalhe` e `faltasDetalhe` no resultado): os mesmos dias de `minutosPorDia`, mas com a data
+   * (`minutosTrabalhadosPorDiaComData`). Quando vem, o subsidio calcula-se por estes dias (que tem de ser os mesmos minutos);
+   * ausente, o resultado e identico ao de sempre e nao leva os campos novos. ATENCAO: se vierem os dois e os minutos divergirem,
+   * `diasComData` TEM PRECEDENCIA, em silencio (sem aviso): `minutosPorDia` e ignorado no subsidio. Quem chama passa os mesmos dias.
+   */
+  diasComData?: readonly { iso: string | null; minutos: number }[];
   /** Os minutos realizados dentro de cada faixa noturna da regra, pela MESMA ordem de `regra.noturnas`. */
   minutosNoturnosPorFaixa: readonly number[];
   /** A regra salarial em vigor no ultimo dia do periodo; `null` = sem regra (nada que dependa dela se calcula). */
@@ -157,6 +164,33 @@ export interface LinhaRegraSalarial {
   valor: number;
 }
 
+/** Os minutos trabalhados num dia; `data` (AAAA-MM-DD) e `null` quando o dia nao a traz. */
+export interface DiaComMinutos {
+  data: string | null;
+  minutos: number;
+}
+
+/** De onde vem o subsidio de alimentacao: os dias pagos pelo valor do dia e os pagos pelo valor da hora, com a regra usada. */
+export interface DetalheSubsidio {
+  limiteMin: number;
+  valorDia: number;
+  valorHora: number;
+  /** Dias com minutos >= limite: pagam o valor do dia. */
+  diasPeloDia: DiaComMinutos[];
+  /** Dias com minutos abaixo do limite: pagam o valor da hora (arredondado ao centimo POR DIA). */
+  diasPelaHora: DiaComMinutos[];
+  totalPeloDia: number;
+  totalPelaHora: number;
+}
+
+/** De onde vem o desconto de faltas: os dias, os minutos que descontaram e a conta. */
+export interface DetalheFaltas {
+  dias: string[];
+  minutosDescontados: number;
+  valorHoraReal: number;
+  valor: number;
+}
+
 export interface ResultadoProcessamentoPessoa {
   valorHoraReal: number | null;
   baseMes: number | null;
@@ -168,6 +202,10 @@ export interface ResultadoProcessamentoPessoa {
   totalRegras: number;
   descontoFaltas: number;
   subsidioAlimentacao: number;
+  /** So quando se pediu (`diasComData`) e ha regra salarial. NAO se grava no fecho. */
+  subsidioDetalhe?: DetalheSubsidio;
+  /** So quando se pediu (`diasComData`) e ha valor da hora. NAO se grava no fecho. */
+  faltasDetalhe?: DetalheFaltas;
   /** So os lancamentos do tipo manual (premios, valores negociados). */
   lancamentosPontuais: number;
   totalBrutoEstimado: number | null;
@@ -428,21 +466,41 @@ function calcularLinhasRegra(
  */
 function calcularSubsidioAlimentacao(
   regra: RegraParaCalculo | null,
-  minutosPorDia: readonly number[],
+  dias: readonly DiaComMinutos[],
   avisos: AvisoProcessamento[],
-): number {
+): { total: number; detalhe: DetalheSubsidio | null } {
   if (!regra) {
     avisos.push("sem_regra_salarial");
-    return 0;
+    return { total: 0, detalhe: null };
   }
   const centimosHora = Math.round(regra.subsidio_valor_hora * 100);
   const centimosDia = Math.round(regra.subsidio_valor_dia * 100);
-  const totalCentimos = minutosPorDia.reduce((soma, minutos) => {
-    if (!(minutos > 0)) return soma;
-    if (minutos >= regra.subsidio_limite_min) return soma + centimosDia;
-    return soma + Math.round((minutos * centimosHora) / 60);
-  }, 0);
-  return totalCentimos / 100;
+  const diasPeloDia: DiaComMinutos[] = [];
+  const diasPelaHora: DiaComMinutos[] = [];
+  let centimosPeloDia = 0;
+  let centimosPelaHora = 0;
+  for (const dia of dias) {
+    if (!(dia.minutos > 0)) continue;
+    if (dia.minutos >= regra.subsidio_limite_min) {
+      diasPeloDia.push(dia);
+      centimosPeloDia += centimosDia;
+    } else {
+      diasPelaHora.push(dia);
+      centimosPelaHora += Math.round((dia.minutos * centimosHora) / 60);
+    }
+  }
+  return {
+    total: (centimosPeloDia + centimosPelaHora) / 100,
+    detalhe: {
+      limiteMin: regra.subsidio_limite_min,
+      valorDia: regra.subsidio_valor_dia,
+      valorHora: regra.subsidio_valor_hora,
+      diasPeloDia,
+      diasPelaHora,
+      totalPeloDia: centimosPeloDia / 100,
+      totalPelaHora: centimosPelaHora / 100,
+    },
+  };
 }
 
 type DiaParaSubsidio = Pick<DiaRelatorioMensal, "estado" | "realizadoMinutos"> &
@@ -473,6 +531,14 @@ function diaAnteriorIso(iso: string): string {
  * Sem intervalos (fixtures antigos) nao ha como saber, e cada dia conta por si.
  */
 export function minutosTrabalhadosPorDia(dias: readonly DiaParaSubsidio[]): number[] {
+  return minutosTrabalhadosPorDiaComData(dias).map((dia) => dia.minutos);
+}
+
+/**
+ * A mesma conta de `minutosTrabalhadosPorDia` (a mesma juncao dos turnos que atravessam a meia-noite), mas com a data de cada dia:
+ * a data em que o turno COMECOU. `iso` e `null` quando o dia nao a traz (fixtures antigos).
+ */
+export function minutosTrabalhadosPorDiaComData(dias: readonly DiaParaSubsidio[]): { iso: string | null; minutos: number }[] {
   const porDia: { iso: string | undefined; minutos: number; acabaAMeiaNoite: boolean }[] = [];
   for (const dia of dias) {
     if (dia.estado === "ausencia" || !(dia.realizadoMinutos > 0)) continue;
@@ -502,7 +568,7 @@ export function minutosTrabalhadosPorDia(dias: readonly DiaParaSubsidio[]): numb
     const resto = minutosDoDia - juntos;
     if (resto > 0) porDia.push({ iso: dia.iso, minutos: resto, acabaAMeiaNoite });
   }
-  return porDia.map((dia) => dia.minutos);
+  return porDia.map((dia) => ({ iso: dia.iso ?? null, minutos: dia.minutos }));
 }
 
 /**
@@ -514,14 +580,14 @@ function calcularDescontoFaltas(
   totais: EntradaProcessamentoPessoa["totais"],
   valorHoraReal: number | null,
   avisos: AvisoProcessamento[],
-): number {
-  if (valorHoraReal === null) return 0;
+): { valor: number; detalhe: DetalheFaltas | null } {
+  if (valorHoraReal === null) return { valor: 0, detalhe: null };
   const faltas = totais.faltas ?? [];
-  const { valor, provisorio } = descontoDasFaltas(faltas, valorHoraReal, totais.limiteFaltaPorDia);
+  const { valor, provisorio, minutosDescontados, dias } = detalheDasFaltas(faltas, valorHoraReal, totais.limiteFaltaPorDia);
   if (provisorio) avisos.push("faltas_provisorias");
   const semPicagem = faltas.some((f) => f.semRegisto === true && f.minutos > 0);
   if (semPicagem) avisos.push("dias_sem_picagem_descontados");
-  return valor;
+  return { valor, detalhe: { dias, minutosDescontados, valorHoraReal, valor } };
 }
 
 /** Os lancamentos pontuais anulados nao contam; km e ajudas tem linha propria (`calcularLinhasRegra`). */
@@ -558,9 +624,12 @@ export function calcularProcessamentoPessoa(
   const linhasRegra = calcularLinhasRegra(entrada, retribuicaoMensal, valorHoraReal);
   const totalRegras = arredondarAoCentimo(linhasRegra.reduce((soma, linha) => soma + linha.valor, 0));
 
-  const descontoFaltas = calcularDescontoFaltas(entrada.totais, valorHoraReal, avisos);
+  const { valor: descontoFaltas, detalhe: faltasDetalhe } = calcularDescontoFaltas(entrada.totais, valorHoraReal, avisos);
 
-  const subsidioAlimentacao = calcularSubsidioAlimentacao(entrada.regra, entrada.minutosPorDia, avisos);
+  const diasDoSubsidio: readonly DiaComMinutos[] =
+    entrada.diasComData?.map((dia) => ({ data: dia.iso, minutos: dia.minutos })) ?? entrada.minutosPorDia.map((minutos) => ({ data: null, minutos }));
+  const { total: subsidioAlimentacao, detalhe: subsidioDetalhe } = calcularSubsidioAlimentacao(entrada.regra, diasDoSubsidio, avisos);
+  const pedirDetalhe = entrada.diasComData !== undefined;
 
   const lancamentosPontuais = calcularLancamentosPontuais(entrada.lancamentos);
 
@@ -589,6 +658,8 @@ export function calcularProcessamentoPessoa(
     totalRegras,
     descontoFaltas,
     subsidioAlimentacao,
+    ...(pedirDetalhe && subsidioDetalhe ? { subsidioDetalhe } : {}),
+    ...(pedirDetalhe && faltasDetalhe ? { faltasDetalhe } : {}),
     lancamentosPontuais,
     totalBrutoEstimado,
     avisos,

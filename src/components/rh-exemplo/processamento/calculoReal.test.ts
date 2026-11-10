@@ -173,3 +173,16 @@ describe("totalDoMes", () => {
     expect(totalDoMes([])).toEqual({ total: 0, semValor: 0 });
   });
 });
+
+describe("calcularResultadoReal: detalhe do subsidio e das faltas", () => {
+  const diaComData = (iso: string, realizadoMinutos: number): DiaRelatorioMensal => ({ iso, estado: "normal", realizadoMinutos }) as unknown as DiaRelatorioMensal;
+
+  it("passa as datas dos dias ao motor e devolve o detalhe, sem mudar nenhum valor", () => {
+    const dias = [diaComData("2026-10-01", 480), diaComData("2026-10-02", 100), diaComData("2026-10-05", 300)];
+    const r = calcularResultadoReal(entrada({ dias })).resultado;
+    expect(r.subsidioDetalhe?.diasPeloDia).toEqual([{ data: "2026-10-01", minutos: 480 }, { data: "2026-10-05", minutos: 300 }]);
+    expect(r.subsidioDetalhe?.diasPelaHora).toEqual([{ data: "2026-10-02", minutos: 100 }]);
+    expect(Math.round(((r.subsidioDetalhe?.totalPeloDia ?? 0) + (r.subsidioDetalhe?.totalPelaHora ?? 0)) * 100) / 100).toBe(r.subsidioAlimentacao);
+    expect(r.faltasDetalhe).toMatchObject({ dias: ["2026-10-15"], minutosDescontados: 120, valor: r.descontoFaltas });
+  });
+});

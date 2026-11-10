@@ -11,6 +11,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import type { CustoDaPessoa } from "./custoLido";
 import { euros, nomeDoMes } from "./formato";
+import { DiasDaConta } from "./DiasDaConta";
 import { useContasDoMes } from "./useContasDoMes";
 
 interface CustoContasProps {
@@ -28,6 +29,8 @@ export function CustoContas({ custo, nome, fechado }: CustoContasProps) {
   const { language } = useLanguage();
   const contas = useContasDoMes(custo);
   const estimado = custo.estimadoPeloCargo !== undefined;
+  // Num mes fechado o detalhe de dias e horas nao esta gravado: as linhas do subsidio e das faltas ficam com um valor so, e a nota di-lo.
+  const semDetalhe = contas.linhas.some((l) => (l.chave === "subsidioAlimentacao" || l.chave === "faltas") && !l.dias);
 
   return (
     <Seccao nivel={4} titulo={t("rhContas.titulo")}>
@@ -50,10 +53,13 @@ export function CustoContas({ custo, nome, fechado }: CustoContasProps) {
               {contas.linhas.map((l) => (
                 <tr key={l.chave} className={cn("border-b border-border/60 align-baseline", eFecho(l) && "border-t font-semibold")}>
                   <th scope="row" className="py-1.5 pr-3 text-left font-normal">
-                    <span className={cn(eFecho(l) && "font-semibold")}>{eFecho(l) ? "= " : ""}{t(`rhContas.linha.${l.chave}`)}</span>
+                    <span className={cn(eFecho(l) && "font-semibold")}>{eFecho(l) ? "= " : ""}{t(`rhContas.linha.${l.chave}`, l.rotuloParams)}</span>
                     {l.nota && <span className="block text-xs font-normal text-muted-foreground">{t(`rhContas.nota.${l.nota}`)}</span>}
                   </th>
-                  <td className="py-1.5 pr-3 text-muted-foreground tabular-nums">{l.formula}</td>
+                  <td className="py-1.5 pr-3 text-muted-foreground tabular-nums">
+                    {l.formula}
+                    {l.dias && l.dias.length > 0 && <DiasDaConta dias={l.dias} />}
+                  </td>
                   <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
                     {euros(l.valor, "")}
                     {l.estimado && <span className="ml-1 text-xs font-normal text-muted-foreground">({t("rhContas.estimado")})</span>}
@@ -68,6 +74,7 @@ export function CustoContas({ custo, nome, fechado }: CustoContasProps) {
         <div className="mt-2 space-y-1 text-xs text-muted-foreground">
           <p>{t("rhContas.notaTsu")}</p>
           {estimado && <p>{t("rhContas.notaEstimado")}</p>}
+          {fechado && semDetalhe && <p role="status">{t("rhContas.semDetalheFechado")}</p>}
         </div>
       )}
     </Seccao>
