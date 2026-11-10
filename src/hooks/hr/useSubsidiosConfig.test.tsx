@@ -92,7 +92,14 @@ describe("useSubsidiosConfig: ler", () => {
     m.semOrganizacao = true;
     const { result } = renderHook(() => useSubsidiosConfig(), { wrapper: envolver });
     expect(result.current.estado).toBe("a_carregar");
+    expect(result.current.semOrganizacao).toBe(true);
     expect(m.rpc).not.toHaveBeenCalled();
+  });
+
+  it("com organizacao activa semOrganizacao e falso", () => {
+    m.rpc.mockReturnValue(new Promise(() => undefined));
+    const { result } = renderHook(() => useSubsidiosConfig(), { wrapper: envolver });
+    expect(result.current.semOrganizacao).toBe(false);
   });
 });
 
@@ -109,10 +116,25 @@ describe("useSubsidiosConfig: guardar", () => {
     await act(async () => {
       r = await result.current.guardar({ ativoDesde: "2026-02-01", feriasMes: 6, natalMes: 11 });
     });
-    expect(r).toEqual({ ok: true });
+    expect(r).toEqual({ ok: true, alterada: true });
     expect(m.rpc).toHaveBeenCalledWith("rpc_hr_subsidios_config_guardar", { p_organization_id: "org-1", p_ativo_desde: "2026-02-01", p_ferias_mes: 6, p_natal_mes: 11 });
     // Releu depois de guardar.
     await waitFor(() => expect(m.rpc.mock.calls.filter(([fn]) => fn === "rpc_hr_subsidios_config_ler").length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("diz se a base alterou mesmo alguma coisa (alterada false = sem alteração)", async () => {
+    m.rpc.mockImplementation(async (fn: string) =>
+      fn === "rpc_hr_subsidios_config_ler"
+        ? { data: LIDA, error: null }
+        : { data: { alterada: false, ativo_desde: "2026-01-01", ferias_mes: 7, natal_mes: 12 }, error: null },
+    );
+    const { result } = renderHook(() => useSubsidiosConfig(), { wrapper: envolver });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    let r: unknown;
+    await act(async () => {
+      r = await result.current.guardar({ ativoDesde: "2026-01-01", feriasMes: 7, natalMes: 12 });
+    });
+    expect(r).toEqual({ ok: true, alterada: false });
   });
 
   it("null desliga", async () => {
@@ -150,7 +172,6 @@ describe("useSubsidiosConfig: guardar", () => {
   });
 
   it.each([
-    ["HRA88", "T:rhSubs.erro.folhaFechada"],
     ["HRA89", "T:rhSubs.erro.meses"],
     ["HRA81", "T:rhSubs.erro.configInvalida"],
   ])("o codigo %s da base tem texto proprio e nao vai para o registo", async (code, texto) => {
@@ -163,6 +184,27 @@ describe("useSubsidiosConfig: guardar", () => {
     });
     expect(r).toEqual({ ok: false, erro: texto });
     expect(m.captura).not.toHaveBeenCalled();
+  });
+
+  describe("HRA88 (folha fechada) tem um texto por accao, conforme o que se pedia", () => {
+    const SEM_CONFIG = { ...LIDA, tem_config: false, ativo_desde: null };
+    it.each([
+      ["ligar", SEM_CONFIG, "2026-12-01", "T:rhSubs.erro.folhaFechadaLigar"],
+      ["antecipar", LIDA, "2025-12-01", "T:rhSubs.erro.folhaFechadaAntecipar"],
+      ["adiar", LIDA, "2026-02-01", "T:rhSubs.erro.folhaFechadaAdiar"],
+      ["desligar", LIDA, null, "T:rhSubs.erro.folhaFechadaDesligar"],
+      ["so mudar os meses (data igual)", LIDA, "2026-01-01", "T:rhSubs.erro.folhaFechada"],
+    ])("%s", async (_nome, lida, alvo, texto) => {
+      m.rpc.mockImplementation(async (fn: string) => (fn === "rpc_hr_subsidios_config_ler" ? { data: lida, error: null } : { data: null, error: { code: "HRA88", message: "x" } }));
+      const { result } = renderHook(() => useSubsidiosConfig(), { wrapper: envolver });
+      await waitFor(() => expect(result.current.estado).toBe("ok"));
+      let r: { ok: boolean; erro?: string } | undefined;
+      await act(async () => {
+        r = await result.current.guardar({ ativoDesde: alvo as string | null, feriasMes: 6, natalMes: 11 });
+      });
+      expect(r).toEqual({ ok: false, erro: texto });
+      expect(m.captura).not.toHaveBeenCalled();
+    });
   });
 
   it("um defeito devolve o texto generico e vai para o registo", async () => {

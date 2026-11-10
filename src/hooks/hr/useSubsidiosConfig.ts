@@ -23,25 +23,49 @@ import {
 
 export const CHAVE_SUBSIDIOS_CONFIG = "hr-subsidios-config";
 
-/** Os codigos da base com texto proprio: HRA88 = folha fechada, HRA89 = mes que pagaria duas vezes ou nunca, HRA81 = configuracao invalida. */
+/** Os codigos da base com texto proprio: HRA88 = folha fechada (o texto depende da accao), HRA89 = mes que pagaria duas vezes ou nunca, HRA81 = configuracao invalida. */
 const TEXTO_DO_CODIGO: Record<string, string> = {
   HRA88: "rhSubs.erro.folhaFechada",
   HRA89: "rhSubs.erro.meses",
   HRA81: "rhSubs.erro.configInvalida",
 };
 
+/** O que o pedido faz a data de inicio: HRA88 recusa as quatro depois de uma folha fechada, e cada uma pede uma frase propria. */
+export type AccaoSubsidios = "ligar" | "antecipar" | "adiar" | "desligar" | "meses";
+
+export function accaoDoPedido(actual: string | null, alvo: string | null): AccaoSubsidios {
+  if (alvo === actual) return "meses";
+  if (actual === null) return "ligar";
+  if (alvo === null) return "desligar";
+  return alvo < actual ? "antecipar" : "adiar";
+}
+
+const TEXTO_HRA88_POR_ACCAO: Record<AccaoSubsidios, string> = {
+  ligar: "rhSubs.erro.folhaFechadaLigar",
+  antecipar: "rhSubs.erro.folhaFechadaAntecipar",
+  adiar: "rhSubs.erro.folhaFechadaAdiar",
+  desligar: "rhSubs.erro.folhaFechadaDesligar",
+  meses: "rhSubs.erro.folhaFechada",
+};
+
+function chaveDoErro(codigo: string, accao: AccaoSubsidios): string {
+  return codigo === "HRA88" ? TEXTO_HRA88_POR_ACCAO[accao] : TEXTO_DO_CODIGO[codigo];
+}
+
 function codigoDaBase(erro: unknown): string | null {
   const code = erro && typeof erro === "object" ? (erro as { code?: unknown }).code : null;
   return typeof code === "string" && code in TEXTO_DO_CODIGO ? code : null;
 }
 
-export type ResultadoGuardarSubsidios = { ok: true } | { ok: false; erro: string };
+export type ResultadoGuardarSubsidios = { ok: true; alterada: boolean } | { ok: false; erro: string };
 
 export interface SubsidiosConfigHook {
   estado: EstadoLeitura;
   /** `null` enquanto carrega, ou quando a leitura foi recusada, falhou ou a RPC ainda nao existe. */
   config: SubsidiosConfigLida | null;
   aGuardar: boolean;
+  /** Sem organizacao activa nao ha nada a ler: o estado fica `a_carregar`, e o ecra deve dizer que falta escolher uma. */
+  semOrganizacao: boolean;
   /** `ativoDesde` null desliga. Devolve o texto traduzido do erro quando nao se guarda. */
   guardar: (config: SubsidiosConfig) => Promise<ResultadoGuardarSubsidios>;
 }
@@ -79,14 +103,17 @@ export function useSubsidiosConfig(enabled = true): SubsidiosConfigHook {
       if (ocupado.current) return { ok: false, erro: getLocalizedFallback("rhSubs.erro.emCurso") };
       ocupado.current = true;
       setAGuardar(true);
+      const lida = queryClient.getQueryData<Lida>([CHAVE_SUBSIDIOS_CONFIG, organizationId]);
+      const actual = lida && typeof lida === "object" ? lida.ativoDesde : null;
+      const accao = accaoDoPedido(actual, config.ativoDesde);
       try {
-        await guardarSubsidiosConfig(organizationId, config);
+        const gravada = await guardarSubsidiosConfig(organizationId, config);
         await queryClient.invalidateQueries({ queryKey: [CHAVE_SUBSIDIOS_CONFIG, organizationId] });
-        return { ok: true };
+        return { ok: true, alterada: gravada.alterada };
       } catch (e) {
         if (subsidiosConfigRecusada(e)) return { ok: false, erro: getLocalizedFallback("rhSubs.erro.semPermissao") };
         const codigo = codigoDaBase(e);
-        if (codigo) return { ok: false, erro: getLocalizedFallback(TEXTO_DO_CODIGO[codigo]) };
+        if (codigo) return { ok: false, erro: getLocalizedFallback(chaveDoErro(codigo, accao)) };
         captureFlowError(e, "hr-subsidios-config-guardar");
         return { ok: false, erro: getLocalizedFallback("rhSubs.erro.guardar") };
       } finally {
@@ -108,5 +135,5 @@ export function useSubsidiosConfig(enabled = true): SubsidiosConfigHook {
           ? "ok"
           : "a_carregar";
   const config = dados && dados !== "indisponivel" && dados !== "recusado" ? dados : null;
-  return { estado, config, aGuardar, guardar };
+  return { estado, config, aGuardar, semOrganizacao: organizationId === null, guardar };
 }

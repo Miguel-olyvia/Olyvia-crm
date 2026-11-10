@@ -11,6 +11,11 @@ const CHAVES = [
   "rhSubs.erro.semPermissao",
   "rhSubs.erro.emCurso",
   "rhSubs.erro.folhaFechada",
+  "rhSubs.erro.folhaFechadaLigar",
+  "rhSubs.erro.folhaFechadaAntecipar",
+  "rhSubs.erro.folhaFechadaAdiar",
+  "rhSubs.erro.folhaFechadaDesligar",
+  "rhSubs.cfg.semOrganizacao",
   "rhSubs.erro.meses",
   "rhSubs.erro.configInvalida",
   "rhProcReal.fecho.bloqueio.subsidios",
@@ -52,5 +57,16 @@ describe("rhExemploSubsidiosTranslations", () => {
   it("o texto do fecho bloqueado e o da formula usam os nomes certos", () => {
     expect(textos.pt["rhProcReal.fecho.bloqueio.subsidios"]).toMatch(/^Não se pode fechar/);
     expect(textos.pt["rhContas.rotuloParteSemDuodecimos"]).toBe("a parte que não vai em duodécimos");
+  });
+
+  it("a data da configuracao cobre as folhas que TERMINAM nela ou depois, e nao «a primeira folha em que paga»", () => {
+    expect(textos.pt["rhSubs.cfg.dataAjuda"]).toBe("Aplica-se às folhas que terminam a partir desta data.");
+    expect(textos.en["rhSubs.cfg.dataAjuda"]).toMatch(/payrolls that end on or after this date/);
+    expect(textos.pt["rhSubs.cfg.data"]).not.toMatch(/primeira folha/);
+  });
+
+  it("as chaves sem uso foram retiradas", () => {
+    expect("rhSubs.cfg.ultimaFolha" in textos.pt).toBe(false);
+    expect("rhSubs.cfg.ultimaFolha" in textos.en).toBe(false);
   });
 });

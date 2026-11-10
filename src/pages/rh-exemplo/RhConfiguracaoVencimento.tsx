@@ -54,6 +54,7 @@ import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { ConfiguracaoHorasExtra } from "@/components/rh-exemplo/fluxosC/ConfiguracaoHorasExtra";
 import { ConfiguracaoMargemTempo } from "@/components/rh-exemplo/fluxosC/ConfiguracaoMargemTempo";
+import { ConfiguracaoSubsidios } from "@/components/rh-exemplo/fluxosC/ConfiguracaoSubsidios";
 import { SeccaoRegrasSalariais } from "@/components/rh-exemplo/hooks/regrasSalariaisReal";
 import { Ban, Loader2, Pencil, Plus, RotateCcw, Tag } from "lucide-react";
 
@@ -531,6 +532,7 @@ export default function RhConfiguracaoVencimento() {
           )}
           <TabsTrigger value="regras">{t("hr.vencimento.abaRegrasSalariais")}</TabsTrigger>
           <TabsTrigger value="horas-extra">{t("rhFluxosD.cfg.aba")}</TabsTrigger>
+          <TabsTrigger value="subsidios">{t("rhSubs.cfg.aba")}</TabsTrigger>
         </TabsList>
 
         {podeVerCodigos && (
@@ -545,6 +547,10 @@ export default function RhConfiguracaoVencimento() {
         <TabsContent value="horas-extra" className="mt-4 space-y-4">
           <ConfiguracaoHorasExtra aoIrParaRegrasSalariais={() => setAba("regras")} />
           <ConfiguracaoMargemTempo />
+        </TabsContent>
+
+        <TabsContent value="subsidios" className="mt-4">
+          <ConfiguracaoSubsidios podeGerir={podeGerirCodigos} />
         </TabsContent>
       </Tabs>
     </div>

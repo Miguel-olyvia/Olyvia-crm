@@ -3,7 +3,7 @@
  * (Supabase FunctionsHttpError, fetch Response, Error, string) and maps
  * known technical messages to friendly, localized messages.
  */
-import { translations } from "@/translations/index";
+import { tabelaFundida } from "@/translations/tabelaFundida";
 
 type Language = "en" | "pt" | "es" | "fr" | "de";
 
@@ -24,7 +24,8 @@ function getCurrentLanguage(): Language {
 
 function translate(key: string): string {
   const lang = getCurrentLanguage();
-  const table = translations as unknown as Record<string, Record<string, string>>;
+  // A tabela fundida (base + modulos rhSubs.*, rhHeReal.*, ...), a mesma do useTranslation: so a base deixava essas chaves em bruto.
+  const table = tabelaFundida;
   return table[lang]?.[key] || table.en?.[key] || key;
 }
 
