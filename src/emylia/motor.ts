@@ -2900,9 +2900,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (nd === t.dia + 60) { avisar({ msg: `${tec.n.split(" ")[0]} não fica livre nos próximos 60 dias úteis`, sub: "Passe a tarefa para outro técnico.", kind: "bad" }); return; }
       if (p.origem !== "orcamento") nd = Math.max(nd, 5); // o plano de exemplo: a fase seguinte não pode passar à frente
       const shift = nd - t.dia;
+      if (!shift) return;
+      guardarBase(p); // 10/11: para o «Repor» desfazer o adiamento (como os outros ajustes)
       // adia esta e as que começam depois dela (as anteriores ficam)
       p.tasks.forEach((x, i) => { if (i === ti || (i > ti && x.dia >= t.dia)) x.dia += shift; });
       log(d, `Plano: ${t.nome} adiado para ${rotuloDia(p, t.dia)}`);
+      if (A.planoMudou(d)) return;
       avisar({ msg: "Tarefa adiada", sub: "A obra acaba a " + rotuloDia(p, Math.max(...p.tasks.map((x) => x.dia + x.dur - 1))), kind: "ok" });
     },
     /** As Operações escolhem o técnico de uma tarefa (do mesmo ofício). */
