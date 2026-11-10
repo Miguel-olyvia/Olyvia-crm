@@ -2,7 +2,7 @@
 
 import { can, permissionExists, requireWrite } from "../shared/authz.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
-import { filterVisible } from "../shared/scope.ts";
+import { filterVisible, visibleLinkOrNull } from "../shared/scope.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
@@ -415,11 +415,21 @@ const getScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
     .order("created_at", { ascending: false })
     .limit(10);
 
+  // Ligações (auditoria Administração F6): ids de cliente/contacto/PP só se o utilizador os vir (RLS).
+  const [linkClientId, linkContactId, linkDealId] = await Promise.all([
+    visibleLinkOrNull(ctx, "anew_clients", item.client_id),
+    visibleLinkOrNull(ctx, "anew_contacts", item.contact_id),
+    visibleLinkOrNull(ctx, "deals", item.deal_id),
+  ]);
+
   return {
     success: true,
     message: `Item "${item.title}".`,
     data: {
       ...item,
+      client_id: linkClientId,
+      contact_id: linkContactId,
+      deal_id: linkDealId,
       assignees: (assignees ?? []).map((a: any) => ({
         resource_id: a.resource_id,
         resource_name: a.schedule_resources?.name ?? null,

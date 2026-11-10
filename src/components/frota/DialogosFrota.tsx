@@ -448,7 +448,7 @@ const DEFS: Record<Exclude<TipoDlg, "importar" | "rever">, Def> = {
         p_driver_id: nulo(x.pid), p_km: inteiro(x.km), p_notes: nulo(x.nota),
       }), {
         ok: (r) => r?.ops_custo_id
-          ? `${v.plate} ligada. Deslocação de ${fEur(r.travel_cost)} lançada na ordem.`
+          ? `${v.plate} ligada. Deslocação${r.travel_cost != null ? ` de ${fEur(r.travel_cost)}` : ""} lançada na ordem.` // travel_cost só vem com fleet.costs
           : `${v.plate} ligada. Custo da deslocação por lançar${r?.travel_cost ? ` (${fEur(r.travel_cost)})` : ""}: ${r?.cost_not_posted_reason ?? "sem motivo indicado."}`,
         link: { rotulo: "Ver nas Ligações", para: "/frota/ligacoes" },
       });

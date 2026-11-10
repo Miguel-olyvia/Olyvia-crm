@@ -1,7 +1,7 @@
 // Proposal tools — extracted verbatim from index.ts.
 
 import { requireWrite } from "../shared/authz.ts";
-import { filterVisible, scopeWindow } from "../shared/scope.ts";
+import { filterVisible, scopeWindow, visibleLinkIds, visibleLinkOrNull } from "../shared/scope.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -236,8 +236,9 @@ const getProposalDetails: Handler = async (ctx, args): Promise<ToolResult> => {
   if (error) throw error;
   if (!p) return { success: false, message: "Proposta não encontrada ou fora de scope." };
 
+  // Ligações (auditoria Administração F6): só as que o utilizador vê pela RLS de cada tabela (pessoa, orçamentos, PP).
   let client: { id: string; name: string } | null = null;
-  if (p.entity_id) {
+  if (await visibleLinkOrNull(ctx, "anew_entities", p.entity_id)) {
     const { data: e } = await supabase
       .from("anew_entities")
       .select("id, display_name")
@@ -252,6 +253,10 @@ const getProposalDetails: Handler = async (ctx, args): Promise<ToolResult> => {
     .eq("proposal_id", args.proposal_id)
     .eq("organization_id", organizationId)
     .eq("status", "active");
+  const [linkedQuoteIds, linkedDealIds] = await Promise.all([
+    visibleLinkIds(ctx, "quotes", (links ?? []).map((l: any) => l.quote_id)),
+    visibleLinkIds(ctx, "deals", (links ?? []).map((l: any) => l.deal_id)),
+  ]);
 
   const { count: sendsCount } = await supabase
     .from("proposal_sends")
@@ -281,8 +286,8 @@ const getProposalDetails: Handler = async (ctx, args): Promise<ToolResult> => {
       created_at: p.created_at,
       client,
       pipeline: {
-        quote_ids: Array.from(new Set((links ?? []).map((l: any) => l.quote_id).filter(Boolean))),
-        deal_ids: Array.from(new Set((links ?? []).map((l: any) => l.deal_id).filter(Boolean))),
+        quote_ids: linkedQuoteIds,
+        deal_ids: linkedDealIds,
       },
       sends: {
         total: sendsCount ?? 0,

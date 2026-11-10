@@ -7,7 +7,7 @@ import { findLocalEntityForOrg, ensureEntityOrgLinkSR } from "../../_shared/enti
 import { sanitizeEmail, sanitizePhone } from "../../_shared/inputSanitizers.ts";
 import { deriveKeyFromEnv, hashNif } from "../../_shared/nifCrypto.ts";
 import { requireWrite } from "../shared/authz.ts";
-import { filterVisible } from "../shared/scope.ts";
+import { filterVisible, visibleLinkOrNull } from "../shared/scope.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 /**
@@ -1264,6 +1264,11 @@ const getLeadDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 
   const entity = await loadEntityHeader(supabase, lead.entity_id);
   const pipeline = await loadPipelineForEntity(ctx, organizationId, lead.entity_id);
+  // Ligações (auditoria Administração F6): o id só sai se o utilizador vir o contacto/cliente (RLS).
+  const [convContactId, convClientId] = await Promise.all([
+    visibleLinkOrNull(ctx, "anew_contacts", lead.converted_to_contact_id),
+    visibleLinkOrNull(ctx, "anew_clients", lead.converted_to_client_id),
+  ]);
 
   return {
     success: true,
@@ -1275,8 +1280,8 @@ const getLeadDetails: Handler = async (ctx, args): Promise<ToolResult> => {
       assigned_to: lead.assigned_to,
       notes: lead.notes,
       created_at: lead.created_at,
-      converted_to_contact_id: lead.converted_to_contact_id,
-      converted_to_client_id: lead.converted_to_client_id,
+      converted_to_contact_id: convContactId,
+      converted_to_client_id: convClientId,
       entity,
       pipeline,
       link: `/leads?open=${lead.id}`,
@@ -1330,6 +1335,11 @@ const getContactDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 
   const entity = await loadEntityHeader(supabase, contact.entity_id);
   const pipeline = await loadPipelineForEntity(ctx, organizationId, contact.entity_id);
+  // Ligações (auditoria Administração F6): o id só sai se o utilizador vir o lead/cliente (RLS).
+  const [srcLeadId, convClientId] = await Promise.all([
+    visibleLinkOrNull(ctx, "anew_leads", contact.source_lead_id),
+    visibleLinkOrNull(ctx, "anew_clients", contact.converted_to_client_id),
+  ]);
 
   return {
     success: true,
@@ -1341,8 +1351,8 @@ const getContactDetails: Handler = async (ctx, args): Promise<ToolResult> => {
       assigned_to: contact.assigned_to,
       notes: contact.notes,
       created_at: contact.created_at,
-      source_lead_id: contact.source_lead_id,
-      converted_to_client_id: contact.converted_to_client_id,
+      source_lead_id: srcLeadId,
+      converted_to_client_id: convClientId,
       entity,
       pipeline,
       link: `/contacts?open=${contact.id}`,

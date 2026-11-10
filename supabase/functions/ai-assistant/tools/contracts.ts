@@ -9,7 +9,7 @@
 
 import { can, permissionExists } from "../shared/authz.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
-import { filterVisible, scopeWindow } from "../shared/scope.ts";
+import { filterVisible, scopeWindow, visibleLinkOrNull } from "../shared/scope.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v: unknown): v is string => typeof v === "string" && UUID_RE.test(v);
@@ -200,11 +200,22 @@ const getContractDetails: Handler = async (ctx, args): Promise<ToolResult> => {
     .limit(1)
     .maybeSingle();
 
+  // Ligações (auditoria Administração F6): ids de cliente/proposta/orçamento só se o utilizador os vir (RLS).
+  // O nome do cliente fica — é cabeçalho do próprio contrato, como no ecrã.
+  const [linkClientId, linkProposalId, linkQuoteId] = await Promise.all([
+    visibleLinkOrNull(ctx, "anew_clients", row.client_id),
+    visibleLinkOrNull(ctx, "proposals", row.proposal_id),
+    visibleLinkOrNull(ctx, "quotes", row.quote_id),
+  ]);
+
   return {
     success: true,
     message: `Contrato ${row.contract_number ?? row.id}.`,
     data: {
       ...row,
+      client_id: linkClientId,
+      proposal_id: linkProposalId,
+      quote_id: linkQuoteId,
       client_name: row.client_id ? (nameMap.get(row.client_id) ?? null) : null,
       parties: parties ?? [],
       last_signature_request: lastReq ?? null,

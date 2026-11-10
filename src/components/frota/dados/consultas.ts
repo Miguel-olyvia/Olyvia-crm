@@ -45,7 +45,9 @@ async function correr<T>(q: PromiseLike<{ data: unknown; error: unknown }>): Pro
   return (data ?? []) as T[];
 }
 
-/** As leituras de cada tabela (só SELECT; RLS decide o que cada um vê: fleet.view, fleet.costs, fleet.self). */
+/** As leituras de cada tabela (só SELECT; RLS decide o que cada um vê: fleet.view, fleet.costs, fleet.self).
+ *  Manutenções, ocorrências, vencimentos e ligações leem-se pelas vistas fleet_v_* (e as viaturas por fleet_v_vehicles):
+ *  as colunas de custo vêm a null sem fleet.costs e não se leem diretamente nas tabelas (20270112800000/801000). */
 export const LEITORES: Record<TabelaFrota, (org: string, hoje: string) => Promise<unknown[]>> = {
   viaturas: async (org) => comNumeros<FleetVehicleView>(
     await correr(tabela("fleet_v_vehicles").select("*").eq("organization_id", org).order("plate")),
@@ -56,12 +58,12 @@ export const LEITORES: Record<TabelaFrota, (org: string, hoje: string) => Promis
     await correr(tabela("fleet_odometer_readings").select("id, vehicle_id, read_on, km, source, is_flagged").eq("organization_id", org).gte("read_on", addDias(hoje, -400)).order("read_on").limit(5000)),
     ["km"]),
   manutencoes: async (org) => comNumeros<FleetMaintenanceEvent>(
-    await correr(tabela("fleet_maintenance_events").select("*").eq("organization_id", org).neq("status", "cancelled").order("scheduled_on", { ascending: false }).limit(2000)),
+    await correr(tabela("fleet_v_maintenance_events").select("*").eq("organization_id", org).neq("status", "cancelled").order("scheduled_on", { ascending: false }).limit(2000)),
     ["estimated_cost", "final_cost", "km"]),
   ocorrencias: async (org) => comNumeros<FleetIncident>(
-    await correr(tabela("fleet_incidents").select("*").eq("organization_id", org).order("occurred_at", { ascending: false }).limit(2000)), ["amount"]),
+    await correr(tabela("fleet_v_incidents").select("*").eq("organization_id", org).order("occurred_at", { ascending: false }).limit(2000)), ["amount"]),
   vencimentos: async (org) => comNumeros<FleetCompliance>(
-    await correr(tabela("fleet_compliance").select("*").eq("organization_id", org).eq("is_current", true)), ["amount"]),
+    await correr(tabela("fleet_v_compliance").select("*").eq("organization_id", org).eq("is_current", true)), ["amount"]),
   custos: async (org, hoje) => comNumeros<FleetExpense>(
     await correr(tabela("fleet_expenses").select("*").eq("organization_id", org).gte("spent_on", addDias(hoje, -400)).order("spent_on", { ascending: false }).limit(5000)),
     ["quantity", "amount", "odometer_km"]),
@@ -69,7 +71,7 @@ export const LEITORES: Record<TabelaFrota, (org: string, hoje: string) => Promis
   pedidos: async (org, hoje) => correr<FleetRestockRequest>(
     tabela("fleet_restock_requests").select("*").eq("organization_id", org).or(`status.eq.requested,requested_at.gte.${addDias(hoje, -90)}`).order("requested_at", { ascending: false }).limit(1000)),
   ligacoes: async (org) => comNumeros<FleetOpsLink>(
-    await correr(tabela("fleet_ops_links").select("*").eq("organization_id", org).order("used_on", { ascending: false }).limit(1000)), ["km", "cost_per_km", "travel_cost"]),
+    await correr(tabela("fleet_v_ops_links").select("*").eq("organization_id", org).order("used_on", { ascending: false }).limit(1000)), ["km", "cost_per_km", "travel_cost"]),
   atividade: async (org) => correr<FleetActivityLog>(tabela("fleet_activity_log").select("*").eq("organization_id", org).order("created_at", { ascending: false }).limit(300)),
   // o stock das carrinhas: as linhas de stocks dos armazéns móveis (is_vehicle), com o artigo
   stock: async (org) => {
