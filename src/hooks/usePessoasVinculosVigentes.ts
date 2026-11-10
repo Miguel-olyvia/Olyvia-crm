@@ -21,20 +21,29 @@ import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import { vinculosPorPessoa, type LinhaVinculo, type VinculoLido } from "@/lib/hr/vinculosDoMes";
 
-export { vinculoDoMes, vinculosPorPessoa } from "@/lib/hr/vinculosDoMes";
+export { vinculoDoMes, vinculoContinuoDoPeriodo, vinculosPorPessoa } from "@/lib/hr/vinculosDoMes";
 export type { VinculoLido } from "@/lib/hr/vinculosDoMes";
 
 const PAGINA = 1000;
 
-export function usePessoasVinculosVigentes() {
+/**
+ * `enabled` falso (omissao: ligado) nao le nada: quem so precisa dos vinculos em certos meses (os subsidios de ferias e de Natal) nao os
+ * pede nos outros. `carregado` so e verdadeiro depois de uma leitura terminada (com sucesso, recusa ou erro).
+ */
+export function usePessoasVinculosVigentes(enabled = true) {
   const { activeCompany } = useCompany();
   const [vinculos, setVinculos] = useState<Map<string, VinculoLido[]>>(() => new Map());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
+  const [carregado, setCarregado] = useState(false);
   const [recusado, setRecusado] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const orgId = activeCompany?.id;
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     if (!orgId) {
       setVinculos(new Map());
       setRecusado(false);
@@ -43,6 +52,7 @@ export function usePessoasVinculosVigentes() {
       return;
     }
     setLoading(true);
+    setCarregado(false);
     setError(null);
     try {
       const linhas: LinhaVinculo[] = [];
@@ -72,12 +82,13 @@ export function usePessoasVinculosVigentes() {
       }
     } finally {
       setLoading(false);
+      setCarregado(true);
     }
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, enabled]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  return { vinculos, loading, recusado, error, recarregar: load };
+  return { vinculos, loading, carregado, recusado, error, recarregar: load };
 }

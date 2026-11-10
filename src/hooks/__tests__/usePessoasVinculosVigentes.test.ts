@@ -110,3 +110,31 @@ describe("usePessoasVinculosVigentes", () => {
     expect(captureFlowError).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("usePessoasVinculosVigentes(enabled)", () => {
+  it("desligado nao le nada (nem a carregar) e nao diz que carregou", async () => {
+    const { result } = renderHook(() => usePessoasVinculosVigentes(false));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(intervalos).toEqual([]);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.carregado).toBe(false);
+    expect(result.current.vinculos.size).toBe(0);
+  });
+
+  it("ligado depois: le e so entao diz que carregou", async () => {
+    respostas.push({ data: [linha("p1", "2026-01-01", null, 40)], error: null });
+    const { result, rerender } = renderHook(({ ligado }) => usePessoasVinculosVigentes(ligado), { initialProps: { ligado: false } });
+    expect(result.current.carregado).toBe(false);
+    rerender({ ligado: true });
+    await waitFor(() => expect(result.current.carregado).toBe(true));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.vinculos.size).toBe(1);
+  });
+
+  it("por omissao (ligado) tambem marca carregado, mesmo com recusa", async () => {
+    respostas.push({ data: null, error: { code: "42501" } });
+    const { result } = renderHook(() => usePessoasVinculosVigentes());
+    await waitFor(() => expect(result.current.carregado).toBe(true));
+    expect(result.current.recusado).toBe(true);
+  });
+});

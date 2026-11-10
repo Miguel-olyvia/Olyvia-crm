@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { ArvorePermissoes } from "./ArvorePermissoes";
 import { ConfirmarAcao } from "./ConfirmarAcao";
 import type { EdicaoMatriz } from "./GrelhaRecursoAcao";
-import { alternarPermissao, definirConjunto, definirModulo, emFaltaPara, perigosasNovas, podeAlterar } from "./matriz";
+import { alternarPermissao, definirConjunto, definirModulo, emFaltaDetalhe, perigosasNovas, podeAlterar } from "./matriz";
 import type { Permissao } from "./tipos";
 
 interface MatrizEditavelProps {
@@ -16,8 +16,10 @@ interface MatrizEditavelProps {
   visiveis: Permissao[];
   concedidas: string[];
   aoMudar: (concedidas: string[]) => void;
-  /** Role de sistema: só se vê. */
+  /** Só se vê (role de sistema, ou quem edita não tem permissão para a alterar). */
   somenteLeitura: boolean;
+  /** Porque é só leitura, para o texto: role de sistema (por omissão) ou sem permissão para editar. */
+  motivoLeitura?: "sistema" | "semPermissao";
 }
 
 /** Uma alteração à espera de confirmação: o que se concederia e quais as perigosas. */
@@ -26,16 +28,25 @@ interface Pendente {
   perigosas: Permissao[];
 }
 
-export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura }: MatrizEditavelProps) {
+export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura, motivoLeitura = "sistema" }: MatrizEditavelProps) {
   const { t } = useTranslation();
   const [pendente, setPendente] = useState<Pendente | null>(null);
   const [aviso, setAviso] = useState("");
   const tem = useMemo(() => new Set(concedidas), [concedidas]);
   const nomes = (codigos: string[]) => codigos.map((c) => visiveis.find((p) => p.codigo === c)?.nome ?? c).join(", ");
-  /** «Precisa primeiro de «A» ou «B»»: as permissões de que `codigo` depende (qualquer delas chega), pelo nome. */
+  /**
+   * «Precisa primeiro de «A» ou «B»»: as permissões de que `codigo` depende (qualquer delas chega), pelo nome; 10/11: e «… e «C»» para
+   * as que exige também (EXIGE_TAMBEM, são precisas todas).
+   */
   const motivoBloqueio = (codigo: string) => {
-    const nomesEmFalta = emFaltaPara(codigo, concedidas, visiveis).map((c) => `«${nomes([c])}»`);
-    return t("usersProfiles.form.matrix.needs", { names: nomesEmFalta.join(` ${t("usersProfiles.form.matrix.or")} `) });
+    const { qualquerDe, todas } = emFaltaDetalhe(codigo, concedidas, visiveis);
+    const aspas = (c: string) => `«${nomes([c])}»`;
+    const alternativas = qualquerDe.map(aspas).join(` ${t("usersProfiles.form.matrix.or")} `);
+    const partes = [
+      ...(alternativas ? [qualquerDe.length > 1 && todas.length > 0 ? `(${alternativas})` : alternativas] : []),
+      ...todas.map(aspas),
+    ];
+    return t("usersProfiles.form.matrix.needs", { names: partes.join(` ${t("usersProfiles.form.matrix.and")} `) });
   };
   /** As que estavam concedidas e saem sem terem sido pedidas (dependiam de uma que saiu). */
   const arrastadas = (seguintes: string[], pedidas: string[]) => concedidas.filter((c) => !seguintes.includes(c) && !pedidas.includes(c));
@@ -81,7 +92,8 @@ export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura }
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">{t(somenteLeitura ? "usersProfiles.form.matrix.readOnly" : "usersProfiles.form.matrix.intro")}</p>
+      <p className="text-sm text-muted-foreground">{t(!somenteLeitura ? "usersProfiles.form.matrix.intro"
+        : motivoLeitura === "semPermissao" ? "usersProfiles.form.matrix.readOnlyNoPermission" : "usersProfiles.form.matrix.readOnly")}</p>
       <ArvorePermissoes permissoes={visiveis} concedida={(codigo) => tem.has(codigo)} edicao={edicao} />
       {/* Aviso discreto das dependências: fica colado ao fundo do painel enquanto se rola a grelha. */}
       <p

@@ -4,14 +4,19 @@
  * passa tudo por aqui.
  */
 export {
+  DIA_INICIO_MAX,
+  DIA_INICIO_MIN,
   formatarIntervaloPeriodo,
+  hojeEmLisboa,
   intervaloEfectivo,
   localeDaLingua,
   nomeDaFolha,
   periodoDaFolhaPorRegras,
+  periodoDoDia,
+  somarMeses,
   type IntervaloEfectivo,
 } from "@/lib/hr/periodoFolha";
 export { usePeriodoDoDia } from "@/hooks/usePeriodoDoDia";
 export { usePeriodoFolhaEscolhido } from "@/hooks/usePeriodoFolhaEscolhido";
-export { usePeriodoFolhaRegras } from "@/hooks/usePeriodoFolhaRegras";
+export { usePeriodoFolhaRegras, type RegraPeriodoFolhaLista } from "@/hooks/usePeriodoFolhaRegras";
 export { SeletorPeriodoFolha } from "@/components/hr/processamento/SeletorPeriodoFolha";

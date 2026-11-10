@@ -11,9 +11,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { menuSections, topLevelItems, type MenuItem } from "@/components/sidebar/menuConfig";
-import { construirDependencias, DEPENDE_DE, dependenciasDe, SEM_DEPENDENCIA } from "./dependenciasPermissoes";
+import { construirDependencias, DEPENDE_DE, dependenciasDe, EXIGE_TAMBEM, exigidasDe, SEM_DEPENDENCIA } from "./dependenciasPermissoes";
 import { agruparPorMenu } from "./gruposPermissoes";
-import { alternarPermissao, definirConjunto, emFaltaPara, podeAlterar } from "./matriz";
+import { alternarPermissao, definirConjunto, emFaltaDetalhe, emFaltaPara, podeAlterar } from "./matriz";
 import { CODIGOS_EM_USO, CODIGOS_ESCONDIDOS, CODIGOS_SEM_CATALOGO, PERMISSOES_EM_USO } from "./permissoesEmUso";
 import { permissoesDoMenu } from "./rolesReais";
 import type { Permissao } from "./tipos";
@@ -136,6 +136,69 @@ describe("as dependências declaradas", () => {
     const cat = catalogo();
     expect(alternarPermissao(["hr.pessoas.colocacao.view", "leads.view"], "leads.view", cat)).toEqual(["hr.pessoas.colocacao.view"]);
   });
+
+  it("10/11: configurar o canal de denúncias depende de geri-lo", () => {
+    expect(dependenciasDe("hr.denuncias.configurar")).toEqual(["hr.denuncias.gerir"]);
+    expect(dependenciasDe("hr.denuncias.gerir")).toEqual([]);
+    const cat = catalogo();
+    expect(podeAlterar("hr.denuncias.configurar", [], cat)).toBe(false);
+    expect(alternarPermissao(["hr.denuncias.gerir", "hr.denuncias.configurar"], "hr.denuncias.gerir", cat)).toEqual([]);
+  });
+});
+
+describe("10/11: EXIGE_TAMBEM («todas de»)", () => {
+  const CONTA = "hr.pessoas.conta.criar";
+
+  it("cada código do mapa e cada exigida está no editor; nenhuma se exige a si própria", () => {
+    const erradas = Object.entries(EXIGE_TAMBEM).flatMap(([codigo, exigidas]) => [
+      ...(CODIGOS_EM_USO.has(codigo) ? [] : [`${codigo} (não está no editor)`]),
+      ...exigidas.filter((d) => !CODIGOS_EM_USO.has(d) || d === codigo).map((d) => `${codigo} → ${d}`),
+    ]);
+    expect(erradas).toEqual([]);
+    expect(exigidasDe(CONTA)).toEqual(["users.create"]);
+  });
+
+  it("DEPENDE_DE fica como estava: conta.criar continua a depender só da ficha", () => {
+    expect(dependenciasDe(CONTA)).toEqual(["hr.pessoas.view"]);
+  });
+
+  it("ligar conta.criar sem users.create fica bloqueado, e diz o que falta", () => {
+    const cat = catalogo();
+    expect(podeAlterar(CONTA, ["hr.pessoas.view"], cat)).toBe(false);
+    expect(alternarPermissao(["hr.pessoas.view"], CONTA, cat)).toEqual(["hr.pessoas.view"]);
+    expect(emFaltaPara(CONTA, ["hr.pessoas.view"], cat)).toEqual(["users.create"]);
+    expect(emFaltaDetalhe(CONTA, ["hr.pessoas.view"], cat)).toEqual({ qualquerDe: [], todas: ["users.create"] });
+    // Sem nada: falta a ficha (qualquer de) E users.create (todas).
+    expect(emFaltaDetalhe(CONTA, [], cat)).toEqual({ qualquerDe: ["hr.pessoas.view"], todas: ["users.create"] });
+    expect(emFaltaPara(CONTA, ["users.create"], cat)).toEqual(["hr.pessoas.view"]);
+    expect(podeAlterar(CONTA, ["hr.pessoas.view", "users.create"], cat)).toBe(true);
+    expect(alternarPermissao(["hr.pessoas.view", "users.create"], CONTA, cat)).toEqual(["hr.pessoas.view", "users.create", CONTA]);
+  });
+
+  it("tirar users.create tira conta.criar em cascata; tirar outra coisa não", () => {
+    const cat = catalogo();
+    const tem = ["hr.pessoas.view", "users.create", CONTA, "leads.view"];
+    expect(alternarPermissao(tem, "users.create", cat)).toEqual(["hr.pessoas.view", "leads.view"]);
+    expect(alternarPermissao(tem, "leads.view", cat)).toEqual(["hr.pessoas.view", "users.create", CONTA]);
+    // A ficha continua a arrastá-la (DEPENDE_DE), como antes.
+    expect(alternarPermissao(tem, "hr.pessoas.view", cat)).toEqual(["users.create", "leads.view"]);
+    // Um papel antigo com conta.criar sem users.create não a perde por se mexer noutra coisa.
+    expect(alternarPermissao(["hr.pessoas.view", CONTA, "leads.view"], "leads.view", cat)).toEqual(["hr.pessoas.view", CONTA]);
+  });
+
+  it("marcar um conjunto respeita-o: sem users.create no conjunto nem concedida, conta.criar fica por marcar", () => {
+    const cat = catalogo();
+    const de = (...codigos: string[]) => cat.filter((p) => codigos.includes(p.codigo));
+    expect(definirConjunto([], de("hr.pessoas.view", CONTA), true, cat)).toEqual(["hr.pessoas.view"]);
+    expect(definirConjunto(["users.create"], de("hr.pessoas.view", CONTA), true, cat).sort())
+      .toEqual(["hr.pessoas.view", CONTA, "users.create"].sort());
+    expect(definirConjunto(["hr.pessoas.view", "users.create", CONTA], de("users.create"), false, cat)).toEqual(["hr.pessoas.view"]);
+  });
+
+  it("users.create fora do catálogo de quem edita não bloqueia (como as dependências)", () => {
+    const semUsers = catalogo().filter((p) => p.codigo !== "users.create");
+    expect(podeAlterar(CONTA, ["hr.pessoas.view"], semUsers)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -192,6 +255,8 @@ function verificadosIndiretamente(): Set<string> {
 const SO_NO_SERVIDOR_POR_DECIDIR: readonly string[] = [
   // 06/11: por decidir. Só policies/RPCs (permissoesEmUso.ts, categoria hr).
   "hr.ausencias.tipos.view",
+  // 10/11: só as RPCs denuncias_* (20270111300000: ligar o canal, designar responsáveis); a página de Denúncias ainda não a pergunta.
+  "hr.denuncias.configurar",
   // 06/11: por decidir. rpc_hr_admissao_listar, convite_admissao_resumo, rever_ler mascaram os processos terminados sem ela (CartaoAdmissao).
   "hr.onboarding.restrito",
   // 06/11: por decidir. A chave do registo de alterações (entity_audit_log), só na policy da leitura direta (rolesReais.ts).
@@ -287,7 +352,7 @@ function coerente(menu: Entrada, rota: Guarda): boolean {
  */
 const GUARDAS_PROPRIAS: Readonly<Record<string, { ficheiro: string; contem: string; guarda: Guarda }>> = {
   // RotaNegocios: pessoas.view, ou (sem ela) um Papel no Negócio pelo RH — o Papel não é uma permissão do editor.
-  "/negocios": { ficheiro: "components/RotaNegocios.tsx", contem: 'hasPermission("pessoas.view")', guarda: { permissoes: ["pessoas.view"], todas: false } },
+  "/negocios": { ficheiro: "components/RotaNegocios.tsx", contem: 'permissions={["pessoas.view", ...PERMS_OBRA]}', guarda: { permissoes: ["pessoas.view", "negocios.obra.executar", "negocios.obra.planear", "negocios.obra.tecnico"], todas: false } },
 };
 
 /** Rotas do menu sem guarda de permissão (basta a sessão); a entrada do menu também não pede nenhuma. */

@@ -9,11 +9,10 @@
  * usa a ficha para um separador vazio quando o separador ao lado ja tinha a
  * resposta.
  *
- * Os outros quatro (Formacoes, Tarefas, Despesas, Ativos) ficam mesmo vazios:
- * nao ha modulo nenhum por tras. `formacao_inicio`/`formacao_fim` no vinculo
- * sao so as datas do periodo de formacao inicial do contrato -- nao um
- * registo de formacoes (cursos, certificacoes, validade) -- por isso o
- * cartao de Formacoes NAO usa essas datas e continua em construcao.
+ * O cartao Ativos mostra quantos equipamentos tem a pessoa atribuidos (so a
+ * contagem, com a mesma permissao que a aba Custo) e leva a essa aba. Os
+ * cartoes Formacoes, Tarefas e Despesas foram retirados: nao havia modulo
+ * por tras e ficavam vazios.
  *
  * A barra lateral DETALHES continua a ser dados reais, lidos do nucleo
  * `pessoas`.
@@ -22,17 +21,15 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
-  Award,
   Banknote,
   CalendarClock,
   Clock,
-  GraduationCap,
   Laptop,
   ListChecks,
-  Receipt,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAusenciasDaPessoa } from "@/components/rh-exemplo/hooks/useAusenciasDaPessoa";
+import { useEquipamentosCusto } from "@/components/rh-exemplo/hooks/useEquipamentosCusto";
 import { formatarDuracao, hojeIso, minutosPrevistosNoMes } from "@/components/rh-exemplo/lib/assiduidade";
 import type { DiaSemana, HorarioRealizado, Pessoa, PessoaRetribuicao, PessoaVinculo } from "@/components/rh-exemplo/tipos";
 
@@ -184,6 +181,22 @@ export function PessoaVisaoGeralTab({
     ? pedidos.filter((pedido) => ESTADOS_PEDIDO_PENDENTE.includes(pedido.estado)).length
     : null;
 
+  /**
+   * Equipamentos atribuidos: so os desta pessoa e so com `hr.pessoas.retribuicao.view`, a mesma permissao que a base
+   * exige a `rpc_hr_equipamentos_listar` (os equipamentos tem valor). O cartao mostra so a contagem, nunca valores.
+   */
+  const equipamentos = useEquipamentosCusto({ pessoaId: pessoa.id, enabled: podeVerRetribuicao });
+  const activosAtribuidos = equipamentos.equipamentos?.filter((e) => e.estado === "atribuido" && !e.devolucao).length ?? null;
+  const valorActivos = !podeVerRetribuicao
+    ? t("hr.semAcesso")
+    : equipamentos.erro
+      ? t("hr.visaoGeral.activosErro")
+      : activosAtribuidos === null
+        ? t("hr.visaoGeral.activosACarregar")
+        : activosAtribuidos > 0
+          ? t("hr.visaoGeral.activosAtribuidos", { contagem: activosAtribuidos })
+          : t("hr.visaoGeral.semActivos");
+
   const detalhes: Array<{ labelKey: string; valor: string | null }> = [
     { labelKey: "hr.detalhes.reportaA", valor: reportaANome },
     { labelKey: "hr.laborais.emailTrabalho", valor: pessoa.email_trabalho },
@@ -254,10 +267,13 @@ export function PessoaVisaoGeralTab({
           <CartaoVazio labelKey="hr.visaoGeral.cards.folhaHoras" icon={ListChecks} />
         )}
 
-        <CartaoVazio labelKey="hr.visaoGeral.cards.formacoes" icon={GraduationCap} />
-        <CartaoVazio labelKey="hr.pessoa.tabs.tarefas" icon={Award} />
-        <CartaoVazio labelKey="hr.visaoGeral.cards.despesas" icon={Receipt} />
-        <CartaoVazio labelKey="hr.visaoGeral.cards.activos" icon={Laptop} />
+        <CartaoComDados
+          labelKey="hr.visaoGeral.cards.activos"
+          icon={Laptop}
+          valor={valorActivos}
+          ariaLabel={`${t("hr.visaoGeral.cards.activos")}: ${valorActivos}`}
+          onAbrir={() => onAbrirSeparador("custo")}
+        />
 
         <CartaoComDados
           labelKey="hr.visaoGeral.cards.compensacoes"

@@ -167,7 +167,7 @@ function Interior({ form, role, roles, catalogo, modelos, acoes, podeEditar, aoS
           <TabsContent value="permissoes" className="mt-0">
             {catalogo.carregando && <p role="status" className="text-sm text-muted-foreground">{t("usersProfiles.form.role.catalogLoading")}</p>}
             {catalogo.erro && <p role="alert" className="text-sm text-destructive">{t("usersProfiles.form.role.catalogError", { message: catalogo.erro })}</p>}
-            {catalogoPronto && <MatrizEditavel visiveis={visiveis} concedidas={valores.permissoes} somenteLeitura={bloqueado} aoMudar={(permissoes) => mudar({ permissoes })} />}
+            {catalogoPronto && <MatrizEditavel visiveis={visiveis} concedidas={valores.permissoes} somenteLeitura={bloqueado} motivoLeitura={semPermissao ? "semPermissao" : "sistema"} aoMudar={(permissoes) => mudar({ permissoes })} />}
           </TabsContent>
         </div>
       </Tabs>

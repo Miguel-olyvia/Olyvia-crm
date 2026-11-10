@@ -28,6 +28,10 @@ const rolesPerfisFalso = {
   acoes: { criar: vi.fn(), guardar: vi.fn(), eliminar: vi.fn(), restaurar: vi.fn() },
 };
 vi.mock("@/components/utilizadores-perfis/hooks/useRolesPerfis", () => ({ useRolesPerfis: () => rolesPerfisFalso }));
+// O campo «Pessoa do RH» lê a organização ativa (CompanyContext); aqui fica sem permissão, como para quem não tem hr.pessoas.conta.link.
+vi.mock("@/components/utilizadores-perfis/hooks/usePessoaRhUtilizador", () => ({
+  usePessoaRhUtilizador: () => ({ podeLigar: false, organizacaoId: null, pessoas: [], ligadaId: null, carregando: false, erro: null, ligar: vi.fn() }),
+}));
 
 vi.mock("@/hooks/useTranslation", async () => {
   const { utilizadoresPerfisTranslations } = await import("@/translations/utilizadoresPerfis");
@@ -151,10 +155,14 @@ describe("Utilizadores: lista", () => {
     expect(screen.queryByRole("button", { name: "Convidar utilizador" })).not.toBeInTheDocument();
   });
 
-  it("um utilizador que não se pode alterar mostra o cadeado", () => {
-    preparar({ autorizacoes: { ...criarDadosFalsos().autorizacoes, podeEditar: (u) => u.id !== "u1" } });
+  it("um utilizador que não se pode alterar mostra o cadeado: «super administrador» só quando o é", () => {
+    const ruiSuper: Utilizador = { ...rui, ativo: true, vinculos: [{ ...rui.vinculos[0]!, roleCodigo: "super_admin" }] };
+    preparar({ todos: [ana, ruiSuper], utilizadores: [ana, ruiSuper], autorizacoes: { ...criarDadosFalsos().autorizacoes, podeEditar: () => false } });
     renderPage();
-    expect(within(screen.getByRole("button", { name: /Ana Prata/ })).getByText("Protegido: super administrador")).toBeInTheDocument();
+    const linhaAna = within(screen.getByRole("button", { name: /Ana Prata/ }));
+    expect(linhaAna.getByText("Sem permissão para editar este utilizador")).toBeInTheDocument();
+    expect(linhaAna.queryByText("Protegido: super administrador")).toBeNull();
+    expect(within(screen.getByRole("button", { name: /Rui Pacheco/ })).getByText("Protegido: super administrador")).toBeInTheDocument();
   });
 
   it("o Portal lista os clientes do portal, sem coluna de último acesso", () => {

@@ -4,8 +4,9 @@
 // Gates:
 //  - list_workflow_rules: nenhum app-gate; RLS de workflow_automation_rules já
 //    filtra por organization_id ∈ visibleOrgIds OR organization_id IS NULL.
-//  - list_workflow_logs: workflow_execution_log NÃO tem organization_id (policy
-//    é USING(true)) — segurança é via rule_id IN visibleRuleIds calculado aqui.
+//  - list_workflow_logs: workflow_execution_log NÃO tem organization_id (a RLS só
+//    olha à organização da regra) — rule_id IN visibleRuleIds calculado aqui e,
+//    depois, âmbito pelo registo de origem/destino (scopeWorkflowLogs).
 //  - execute_workflow: <modulo>.edit do source_entity (lead/deal/quote/proposal)
 //    + Fase 2 entity-role check defensivo quando o registo tem entity_id.
 //
@@ -15,6 +16,7 @@
 
 import { can } from "../shared/authz.ts";
 import { resolveEntityRolesInOrg } from "./activities.ts";
+import { isUuid, scopeWindow, type ScopedTable, visibleIdsInActiveOrg } from "../shared/scope.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -137,6 +139,54 @@ const listWorkflowRules: Handler = async (ctx, args): Promise<ToolResult> => {
 
 // ===== list_workflow_logs =====
 
+// Tabela de cada source_entity/target_entity que aparece no log (regras: lead/deal/quote/proposal; gatilhos do
+// fecho/EC: contract/negocio/client/entity). Tipos sem tabela aqui (purchase_order, stock_movement, quote_line…)
+// não têm verificação de âmbito disponível → origem desconhecida sai, destino desconhecido fica sem id.
+const LOG_ENTITY_TABLE: Record<string, ScopedTable> = {
+  lead: "anew_leads",
+  deal: "deals",
+  quote: "quotes",
+  proposal: "proposals",
+  contract: "client_contracts",
+  client: "anew_clients",
+  contact: "anew_contacts",
+  negocio: "negocios",
+  entity: "anew_entities",
+  schedule_item: "schedule_items",
+};
+
+/**
+ * workflow_execution_log não tem organization_id e a RLS dele só olha à organização da regra (e as regras globais
+ * correm em todas as organizações). Fica uma execução só se o registo de origem estiver na organização ativa e for
+ * visível ao utilizador pela RLS da tabela (permissão + âmbito OWNED/TEAM/ORG). O id do destino só é devolvido se o
+ * utilizador também o vê; senão target_record_id = null. Falha fechado (ScopeError).
+ */
+export async function scopeWorkflowLogs(ctx: ExecCtx, rows: any[]): Promise<any[]> {
+  if (rows.length === 0) return [];
+  const byTable = new Map<ScopedTable, Set<string>>();
+  const want = (entity: unknown, id: unknown) => {
+    const t = LOG_ENTITY_TABLE[String(entity ?? "")];
+    if (!t || !isUuid(id)) return;
+    if (!byTable.has(t)) byTable.set(t, new Set());
+    byTable.get(t)!.add(id);
+  };
+  for (const r of rows) {
+    want(r?.source_entity, r?.source_record_id);
+    want(r?.target_entity, r?.target_record_id);
+  }
+  const visible = new Map<ScopedTable, Set<string>>();
+  await Promise.all(
+    Array.from(byTable.entries()).map(async ([t, ids]) => visible.set(t, await visibleIdsInActiveOrg(ctx, t, ids))),
+  );
+  const sees = (entity: unknown, id: unknown) => {
+    const t = LOG_ENTITY_TABLE[String(entity ?? "")];
+    return !!t && isUuid(id) && (visible.get(t)?.has(id) ?? false);
+  };
+  return rows
+    .filter((r) => sees(r?.source_entity, r?.source_record_id))
+    .map((r) => (r.target_record_id && !sees(r.target_entity, r.target_record_id) ? { ...r, target_record_id: null } : r));
+}
+
 export const listWorkflowLogsDef: ToolDef = {
   type: "function",
   function: {
@@ -193,7 +243,7 @@ const listWorkflowLogs: Handler = async (ctx, args): Promise<ToolResult> => {
       .select("id, rule_id, source_entity, source_record_id, target_entity, target_record_id, action_type, status, error_message, executed_at, executed_by")
       .in("rule_id", args?.rule_id ? [args.rule_id] : visibleRuleIds)
       .order("executed_at", { ascending: false })
-      .limit(limit);
+      .limit(scopeWindow(limit));
     if (args?.source_entity) q = q.eq("source_entity", args.source_entity);
     if (args?.source_record_id) q = q.eq("source_record_id", args.source_record_id);
     if (args?.status) q = q.eq("status", args.status);
@@ -203,7 +253,8 @@ const listWorkflowLogs: Handler = async (ctx, args): Promise<ToolResult> => {
       console.error("list_workflow_logs failed", error.message);
       return { success: false, message: `Não foi possível listar execuções: ${String(error.message).slice(0, 160)}` };
     }
-    const rows = logs || [];
+    // Âmbito (auditoria Administração F6): só execuções cujo registo de origem o utilizador vê (RLS) na organização ativa.
+    const rows = (await scopeWorkflowLogs(ctx, logs || [])).slice(0, limit);
 
     // Enriquecer rule_name em memória (sem JOIN sintético).
     const ruleIds = Array.from(new Set(rows.map((r: any) => r.rule_id).filter(Boolean)));

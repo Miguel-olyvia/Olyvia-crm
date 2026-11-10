@@ -10,4 +10,4 @@ export {
   motivoDeBloqueioDoFecho,
   resultadoDeLinhaGravada,
 } from "@/lib/hr/resultadosFecho";
-export type { MotivoBloqueioDoFecho, ResultadoLido } from "@/lib/hr/resultadosFecho";
+export type { EstadoLeitura, MotivoBloqueioDoFecho, ResultadoLido } from "@/lib/hr/resultadosFecho";

@@ -1,7 +1,8 @@
 // Edição da matriz de permissões de uma role (puro e imutável). 06/11/2026: as dependências deixaram de ser automáticas («tudo depende
 // do Ver do módulo») e passaram a ser declaradas em dependenciasPermissoes.ts (DEPENDE_DE, «qualquer de»). Uma permissão só se marca
 // com a de que depende; tirar uma tira em cascata as que dependiam dela (e já não têm outra alternativa marcada).
-import { dependenciasDe } from "./dependenciasPermissoes";
+// 10/11/2026: e com TODAS as de EXIGE_TAMBEM («todas de»); tirar uma dessas tira em cascata as que a exigiam.
+import { dependenciasDe, exigidasDe } from "./dependenciasPermissoes";
 import type { Permissao } from "./tipos";
 
 /** O módulo de uma permissão: o que vem antes do ponto do código (leads.edit -> leads). */
@@ -18,22 +19,55 @@ export function dependenciasNoCatalogo(codigo: string, catalogo: readonly Permis
   return deps.filter((d) => noCatalogo.has(d));
 }
 
-const satisfeita = (deps: readonly string[], tem: ReadonlySet<string>): boolean => deps.length === 0 || deps.some((d) => tem.has(d));
-
-/** Uma permissão fica bloqueada enquanto nenhuma das de que depende (no catálogo) estiver concedida; a já concedida tira-se sempre. */
-export function podeAlterar(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): boolean {
-  if (concedidas.includes(codigo)) return true;
-  return satisfeita(dependenciasNoCatalogo(codigo, catalogo), new Set(concedidas));
+/** As que `codigo` exige também («todas de», EXIGE_TAMBEM) e estão no catálogo do editor; as de fora não bloqueiam. */
+export function exigidasNoCatalogo(codigo: string, catalogo: readonly Permissao[]): string[] {
+  const exigidas = exigidasDe(codigo);
+  if (exigidas.length === 0) return [];
+  const noCatalogo = new Set(catalogo.map((p) => p.codigo));
+  return exigidas.filter((d) => noCatalogo.has(d));
 }
 
-/** O que falta para se poder marcar `codigo` (as alternativas, «qualquer de»); vazio se não está bloqueada. */
-export function emFaltaPara(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): string[] {
-  return podeAlterar(codigo, concedidas, catalogo) ? [] : dependenciasNoCatalogo(codigo, catalogo);
+const satisfeita = (deps: readonly string[], tem: ReadonlySet<string>): boolean => deps.length === 0 || deps.some((d) => tem.has(d));
+
+/** A dependência («qualquer de») e as exigidas («todas de») de `codigo` estão concedidas em `tem`. */
+const pronta = (codigo: string, tem: ReadonlySet<string>, catalogo: readonly Permissao[]): boolean =>
+  satisfeita(dependenciasNoCatalogo(codigo, catalogo), tem) && exigidasNoCatalogo(codigo, catalogo).every((d) => tem.has(d));
+
+/**
+ * Uma permissão fica bloqueada enquanto nenhuma das de que depende (no catálogo) estiver concedida, ou falte alguma das que exige
+ * também; a já concedida tira-se sempre.
+ */
+export function podeAlterar(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): boolean {
+  if (concedidas.includes(codigo)) return true;
+  return pronta(codigo, new Set(concedidas), catalogo);
 }
 
 /**
- * Tira `retirar` e, em cascata, as concedidas que dependiam de alguma delas e ficam sem nenhuma alternativa marcada. Só arrasta
- * dependentes do que se tirou: uma concedida que já estava sem a dependência (papel antigo) não sai por se mexer noutra coisa.
+ * O que falta para se poder marcar `codigo`, separado: `qualquerDe` são as alternativas da dependência (basta uma; vazio se já está
+ * satisfeita) e `todas` as exigidas que faltam (são precisas todas). Tudo vazio se não está bloqueada.
+ */
+export function emFaltaDetalhe(
+  codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[],
+): { qualquerDe: string[]; todas: string[] } {
+  if (podeAlterar(codigo, concedidas, catalogo)) return { qualquerDe: [], todas: [] };
+  const tem = new Set(concedidas);
+  const deps = dependenciasNoCatalogo(codigo, catalogo);
+  return {
+    qualquerDe: satisfeita(deps, tem) ? [] : deps,
+    todas: exigidasNoCatalogo(codigo, catalogo).filter((d) => !tem.has(d)),
+  };
+}
+
+/** O que falta para se poder marcar `codigo` (as alternativas em falta e, depois, as exigidas em falta); vazio se não está bloqueada. */
+export function emFaltaPara(codigo: string, concedidas: readonly string[], catalogo: readonly Permissao[]): string[] {
+  const { qualquerDe, todas } = emFaltaDetalhe(codigo, concedidas, catalogo);
+  return [...qualquerDe, ...todas];
+}
+
+/**
+ * Tira `retirar` e, em cascata, as concedidas que dependiam de alguma delas e ficam sem nenhuma alternativa marcada, e as que exigiam
+ * (EXIGE_TAMBEM) alguma das que saem. Só arrasta dependentes do que se tirou: uma concedida que já estava sem a dependência (papel
+ * antigo) não sai por se mexer noutra coisa.
  */
 function tirarEmCascata(concedidas: readonly string[], retirar: readonly string[], catalogo: readonly Permissao[]): string[] {
   const saem = new Set(retirar);
@@ -43,7 +77,9 @@ function tirarEmCascata(concedidas: readonly string[], retirar: readonly string[
     const ficam = new Set(concedidas.filter((c) => !saem.has(c)));
     for (const c of ficam) {
       const deps = dependenciasNoCatalogo(c, catalogo);
-      if (deps.some((d) => saem.has(d)) && !satisfeita(deps, ficam)) {
+      const perdeDependencia = deps.some((d) => saem.has(d)) && !satisfeita(deps, ficam);
+      const perdeExigida = exigidasNoCatalogo(c, catalogo).some((d) => saem.has(d));
+      if (perdeDependencia || perdeExigida) {
         saem.add(c);
         mudou = true;
       }
@@ -79,7 +115,7 @@ export function definirConjunto(
   while (mudou) {
     mudou = false;
     for (const c of codigos) {
-      if (!tem.has(c) && satisfeita(dependenciasNoCatalogo(c, catalogo), tem)) {
+      if (!tem.has(c) && pronta(c, tem, catalogo)) {
         tem.add(c);
         mudou = true;
       }

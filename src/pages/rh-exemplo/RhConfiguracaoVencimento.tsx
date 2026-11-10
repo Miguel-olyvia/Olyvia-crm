@@ -54,6 +54,8 @@ import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { ConfiguracaoHorasExtra } from "@/components/rh-exemplo/fluxosC/ConfiguracaoHorasExtra";
 import { ConfiguracaoMargemTempo } from "@/components/rh-exemplo/fluxosC/ConfiguracaoMargemTempo";
+import { ConfiguracaoSubsidios } from "@/components/rh-exemplo/fluxosC/ConfiguracaoSubsidios";
+import { ConfiguracaoPeriodoFolha } from "@/components/rh-exemplo/fluxosC/ConfiguracaoPeriodoFolha";
 import { SeccaoRegrasSalariais } from "@/components/rh-exemplo/hooks/regrasSalariaisReal";
 import { Ban, Loader2, Pencil, Plus, RotateCcw, Tag } from "lucide-react";
 
@@ -510,12 +512,17 @@ export default function RhConfiguracaoVencimento() {
   // A permissao de ver o subsidio continua a dar acesso ao ecra (o separador antigo do subsidio ja nao existe:
   // o valor e o limite vêm da regra salarial).
   const podeVerSubsidio = hasPermission("hr.vencimento.subsidio.view");
+  // As regras, as horas extra e os subsídios entram com uma das duas permissões acima (como o ecrã antigo); o período da folha tem as suas:
+  // ver dá entrada na página e o separador, gravar pede periodo.gerir.
+  const podeVerRegras = podeVerCodigos || podeVerSubsidio;
+  const podeVerPeriodo = hasPermission("hr.processamento.periodo.view");
+  const podeGerirPeriodo = hasPermission("hr.processamento.periodo.gerir");
 
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
-  if (!podeVerCodigos && !podeVerSubsidio) return <SemAcessoCard className="m-6" />;
+  if (!podeVerCodigos && !podeVerSubsidio && !podeVerPeriodo) return <SemAcessoCard className="m-6" />;
 
-  const abaOmissao = podeVerCodigos ? "codigos" : "regras";
+  const abaOmissao = podeVerCodigos ? "codigos" : podeVerRegras ? "regras" : "periodo";
 
   return (
     <div className="space-y-6">
@@ -529,8 +536,14 @@ export default function RhConfiguracaoVencimento() {
           {podeVerCodigos && (
             <TabsTrigger value="codigos">{t("hr.vencimento.abaCodigos")}</TabsTrigger>
           )}
-          <TabsTrigger value="regras">{t("hr.vencimento.abaRegrasSalariais")}</TabsTrigger>
-          <TabsTrigger value="horas-extra">{t("rhFluxosD.cfg.aba")}</TabsTrigger>
+          {podeVerRegras && (
+            <>
+              <TabsTrigger value="regras">{t("hr.vencimento.abaRegrasSalariais")}</TabsTrigger>
+              <TabsTrigger value="horas-extra">{t("rhFluxosD.cfg.aba")}</TabsTrigger>
+              <TabsTrigger value="subsidios">{t("rhSubs.cfg.aba")}</TabsTrigger>
+            </>
+          )}
+          {podeVerPeriodo && <TabsTrigger value="periodo">{t("hr.vencimento.abaPeriodoFolha")}</TabsTrigger>}
         </TabsList>
 
         {podeVerCodigos && (
@@ -538,14 +551,28 @@ export default function RhConfiguracaoVencimento() {
             <SeccaoCodigosProcessamento podeGerir={podeGerirCodigos} />
           </TabsContent>
         )}
-        <TabsContent value="regras" className="mt-4">
-          <SeccaoRegrasSalariais podeGerir={podeGerirCodigos} />
-        </TabsContent>
+        {podeVerRegras && (
+          <>
+            <TabsContent value="regras" className="mt-4">
+              <SeccaoRegrasSalariais podeGerir={podeGerirCodigos} />
+            </TabsContent>
 
-        <TabsContent value="horas-extra" className="mt-4 space-y-4">
-          <ConfiguracaoHorasExtra aoIrParaRegrasSalariais={() => setAba("regras")} />
-          <ConfiguracaoMargemTempo />
-        </TabsContent>
+            <TabsContent value="horas-extra" className="mt-4 space-y-4">
+              <ConfiguracaoHorasExtra aoIrParaRegrasSalariais={() => setAba("regras")} />
+              <ConfiguracaoMargemTempo />
+            </TabsContent>
+
+            <TabsContent value="subsidios" className="mt-4">
+              <ConfiguracaoSubsidios podeGerir={podeGerirCodigos} />
+            </TabsContent>
+          </>
+        )}
+
+        {podeVerPeriodo && (
+          <TabsContent value="periodo" className="mt-4">
+            <ConfiguracaoPeriodoFolha podeGerir={podeGerirPeriodo} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

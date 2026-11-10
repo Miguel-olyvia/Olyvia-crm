@@ -28,8 +28,8 @@
 // 04/11/2026 (aprovado), sem ação na app viva: channels.view (o menu de Origens pede lead_sources.view), products.manage e brands.edit
 // (as páginas de packs/marcas/atributos/unidades redirecionam para /catalogo-custos e nenhum ecrã vivo chama as RPCs/escritas que
 // as exigem; desfaz só a visibilidade do Lote C), client_contracts.manage (só a policy client_templates_manage, que aceita também
-// client_contracts.manage_templates; nenhum papel tinha uma sem a outra) e hr.denuncias.gerir (as RPCs da página não existem na
-// base). Só saem do editor: os códigos ficam na base, os papéis que as têm mantêm-nas e as guardas não mudam — ver
+// client_contracts.manage_templates; nenhum papel tinha uma sem a outra) e hr.denuncias.gerir (as RPCs da página ainda não existiam
+// na base; 10/11: voltou ao editor, ver abaixo). Só saem do editor: os códigos ficam na base, os papéis que as têm mantêm-nas e as guardas não mudam — ver
 // ESCONDIDAS_COM_GUARDA. operations.orders.view/view_all e operations.costs.view FICAM: o Frota (Ligações / ligar viatura a uma
 // ordem) lê ops_ordem pela policy ops_ordem_select (orders.view + ops_pode_ver_ordem, onde entra view_all) e rpc_fleet_link_order
 // só lança o custo da deslocação na ordem com operations.costs.view. (05/11: desfeito — as três saíram do editor, ver abaixo.)
@@ -55,6 +55,12 @@
 // 06/11/2026 (aprovado): os Pedidos de Proposta (deals) são do CRM antigo — nenhum ecrã alcançável cria nem lista pedidos (/deals e
 // /negocio-metas redirecionam para /negocios). deals.view, deals.create e deals.edit saem do editor; deals.delete fica, em Definições
 // › Lixo, com o rótulo «Eliminar definitivamente do Lixo». As guardas que ainda as citam não mudam — ver ESCONDIDAS_COM_GUARDA.
+//
+// 10/11/2026 (aprovado): o canal de denúncias existe na base desde a migração 20270111300000 (RPCs denuncias_*). hr.denuncias.gerir
+// volta ao editor (abre a gestão; só mostra casos a quem for designado responsável) e entra hr.denuncias.configurar (ligar o canal e
+// designar responsáveis; depende de gerir — dependenciasPermissoes.ts). workflows.edit entra em proposals (as regras de automação do
+// workflow: policy de workflow_automation_rules, RPCs de 20260904010000 e o assistente IA). system.manage fica escondida: é reservada
+// ao administrador de sistema (gatilho fn_role_permissions_reservadas), assim nenhum código do catálogo fica fora das listas.
 
 export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // 06/11: só api_keys.view (rota /api-keys e policy de leitura, com settings.update); criar/copiar/ativar/apagar só a página morta
@@ -111,8 +117,9 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   forms: [
     "forms.create", "forms.delete", "forms.edit", "forms.view",
   ],
-  // Só verificadas no servidor (policies/RPCs): hr.ausencias.tipos.view. 04/11: hr.denuncias.gerir passou para as escondidas (sem ação
-  // na app viva). Esconderam-se hr.ausencias.tipos.edit, hr.ausencias.direitos.edit, hr.pessoas.horario_realizado.edit,
+  // Só verificadas no servidor (policies/RPCs): hr.ausencias.tipos.view e hr.denuncias.configurar (RPCs denuncias_* de 20270111300000).
+  // 10/11: hr.denuncias.gerir volta (rota e menu de /rh-exemplo/denuncias; as RPCs existem desde 20270111300000) e entra
+  // hr.denuncias.configurar (subgrupo RH › Denúncias). Esconderam-se hr.ausencias.tipos.edit, hr.ausencias.direitos.edit, hr.pessoas.horario_realizado.edit,
   // hr.pessoas.duplicados.view e hr.pessoas.acessos_sensiveis.view: só policies/RPCs que nenhum ecrã vivo chama.
   // 05/11: hr.onboarding.restrito não precisa de guarda no ecrã: sem ela o servidor (rpc_hr_admissao_listar, convite_admissao_resumo,
   // rever_ler) mostra os processos cancelados ou rejeitados como «terminado», e o cartão explica-o (CartaoAdmissao.tsx, rhAdm.cartao.restrito).
@@ -123,7 +130,8 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "hr.assiduidade.view.own", "hr.ausencias.ajustar", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh",
     "hr.ausencias.direitos.view", "hr.ausencias.historico.editar", "hr.ausencias.justificacao.view", "hr.ausencias.pedir",
     "hr.ausencias.pedir.outros", "hr.ausencias.tipos.view", "hr.ausencias.view", "hr.ausencias.view.own",
-    "hr.cargos.salario.alterar", "hr.contratos.regras.gerir", "hr.locais.edit", "hr.locais.view",
+    "hr.cargos.salario.alterar", "hr.contratos.regras.gerir", "hr.denuncias.configurar", "hr.denuncias.gerir", "hr.locais.edit",
+    "hr.locais.view",
     "hr.onboarding.approve", "hr.onboarding.restrito", "hr.onboarding.sensitive", "hr.pessoas.afectacoes.corrigir",
     "hr.pessoas.afectacoes.edit", "hr.pessoas.afectacoes.view", "hr.pessoas.bancarios.edit", "hr.pessoas.bancarios.view",
     "hr.pessoas.colocacao.corrigir", "hr.pessoas.colocacao.edit", "hr.pessoas.colocacao.view", "hr.pessoas.conta.criar",
@@ -196,9 +204,11 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
     "products.manage_prices", "products.view", "products.view_cost",
   ],
   // 06/11: proposals.export volta (o botão Exportar de /proposals, que a ficha do /pessoas abre).
+  // 10/11: workflows.edit («Gerir automações do workflow», inserida em anew_permissions com a categoria proposals): a policy de
+  // workflow_automation_rules, as RPCs de 20260904010000 e o assistente IA (ai-assistant/tools/workflows.ts, stage_actions.ts).
   proposals: [
     "proposals.create", "proposals.delete", "proposals.delete_sent", "proposals.edit", "proposals.export", "proposals.manage",
-    "proposals.view",
+    "proposals.view", "workflows.edit",
   ],
   purchase_orders: [
     "purchase_orders.approve", "purchase_orders.create", "purchase_orders.delete", "purchase_orders.edit",
@@ -345,10 +355,9 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   employees: [
     "employees.create", "employees.delete", "employees.edit", "employees.export", "employees.import", "employees.view",
   ],
-  // 03/11: as cinco de cima (sem ecrã vivo que as use). hr.denuncias.gerir: sem ação na app viva, 04/11 (a rota e o menu de
-  // /rh-exemplo/denuncias continuam a pedi-la, mas as RPCs da página não existem na base; ver ESCONDIDAS_COM_GUARDA).
+  // 03/11: as cinco de cima (sem ecrã vivo que as use). 10/11: hr.denuncias.gerir voltou ao editor (PERMISSOES_EM_USO.hr).
   hr: [
-    "hr.ausencias.direitos.edit", "hr.denuncias.gerir", "hr.ausencias.tipos.edit", "hr.pessoas.acessos_sensiveis.view", "hr.pessoas.duplicados.view",
+    "hr.ausencias.direitos.edit", "hr.ausencias.tipos.edit", "hr.pessoas.acessos_sensiveis.view", "hr.pessoas.duplicados.view",
     "hr.pessoas.horario_realizado.edit",
     "hr.assiduidade.importar", "hr.module.access", "hr.onboarding.sign_employer", "hr.pessoas.archive", "vacations.create",
     "vacations.manage", "vacations.view",
@@ -382,9 +391,11 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
     "operations.orders.execute", "operations.plans.manage", "operations.settings.manage",
   ],
   // 03/11: só policies/RPCs que nenhum ecrã vivo chama (Operação vive no /negocios; listas/canais/definições de plataforma sem ecrã de escrita).
+  // 10/11: system.manage — reservada ao administrador de sistema (gatilho fn_role_permissions_reservadas recusa-a em qualquer outro
+  // papel); não se dá pelo editor. O OrgTemplates usa isSystemAdmin.
   platform: [
     "platform.dashboard.view", "platform.organizations.manage", "platform.organizations.view", "platform.security.audit",
-    "platform.settings.manage", "platform.users.manage", "platform.users.view",
+    "platform.settings.manage", "platform.users.manage", "platform.users.view", "system.manage",
   ],
   // 03/11: só as páginas antigas do catálogo (rotas redirecionam para /catalogo-custos) as verificavam. products.manage e brands.edit:
   // sem ação na app viva, 04/11 — o servidor exige-as nas RPCs/policies de packs, atributos, unidades e marcas, mas só as páginas
@@ -468,8 +479,6 @@ export const CODIGOS_SEM_CATALOGO: readonly string[] = [
  * permissoesEmUso.test.ts só tolera estes códigos nestes ficheiros.
  */
 export const ESCONDIDAS_COM_GUARDA: Readonly<Record<string, readonly string[]>> = {
-  // 04/11: /rh-exemplo/denuncias (ProtectedRoute em App.tsx e PERMISSOES_RH.denuncias em menuConfig.ts); as RPCs da página não existem.
-  "hr.denuncias.gerir": ["App.tsx", "components/sidebar/menuConfig.ts"],
   // 05/11 (ronda 2): as ligações do Frota a /operacao; useOficiosObra só a cita num comentário. 10/11: o item «Operação» do menu já não a
   // pede (negocios.obra.executar/planear).
   "operations.view": ["components/frota/contexto.ts", "hooks/useOficiosObra.ts"],

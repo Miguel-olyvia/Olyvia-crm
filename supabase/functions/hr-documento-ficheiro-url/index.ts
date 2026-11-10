@@ -24,9 +24,17 @@
  * --------------------------------------------------------------------
  * O ficheiro e so mais uma forma do "conteudo" do documento (o scan do que
  * corpo_html descreve em HTML) -- por isso usa a MESMA regra dessa RPC, nao
- * uma nova: hr.pessoas.documentos.conteudo.view NAQUELA organizacao, OU
+ * uma nova. Desde 20270112820000 a regra vive numa so funcao da base,
+ * `fn_hr_documento_pode_ver_conteudo(p_documento_id, p_auth_uid)`, que a RPC
+ * tambem usa -- esta edge NAO a repete em TypeScript (foi assim que ficou
+ * sem a exigencia de hr.pessoas.retribuicao.view de 20270112730000 e abria o
+ * PDF com o salario a quem a RPC ja recusava). A funcao decide:
+ * hr.pessoas.documentos.conteudo.view NAQUELA organizacao, OU
  * hr.pessoas.documentos.view.own + ser a propria pessoa (resolvida por
- * hr_pessoa_do_utilizador, nunca por um pessoa_id que o cliente envie).
+ * hr_pessoa_do_utilizador, nunca por um pessoa_id que o cliente envie); e,
+ * se o modelo do documento usa {{retribuicao_*}}, tambem
+ * hr.pessoas.retribuicao.view (salvo a propria pessoa). So service_role a
+ * pode executar (recebe o utilizador por parametro).
  *
  * A AUDITORIA E OBRIGATORIA, E TEM DE SUCEDER ANTES DO URL SAIR
  * -----------------------------------------------------------------
@@ -161,63 +169,42 @@ serve(async (req) => {
       );
     }
 
-    // Mesma regra de autorizacao de rpc_hr_documento_ver_conteudo (20261123030000):
-    // hr.pessoas.documentos.conteudo.view NAQUELA organizacao, OU
-    // hr.pessoas.documentos.view.own + ser a propria pessoa.
-    const { data: temConteudoView, error: erroConteudoView } = await supabase.rpc(
-      "has_anew_permission_in_org",
-      {
-        _auth_uid: caller.authUid,
-        _permission_code: "hr.pessoas.documentos.conteudo.view",
-        _organization_id: doc.organization_id,
-      },
+    // Mesma regra de rpc_hr_documento_ver_conteudo -- a decisao e da base
+    // (fn_hr_documento_pode_ver_conteudo, 20270112820000), nunca repetida aqui.
+    // Devolve 'permitido' | 'nao_encontrado' | 'sem_permissao' | 'retribuicao'.
+    const { data: decisao, error: erroDecisao } = await supabase.rpc(
+      "fn_hr_documento_pode_ver_conteudo",
+      { p_documento_id: doc.id, p_auth_uid: caller.authUid },
     );
-    if (erroConteudoView) {
-      console.error("hr-documento-ficheiro-url: has_anew_permission_in_org (conteudo.view) falhou:", erroConteudoView);
+    if (erroDecisao) {
+      console.error("hr-documento-ficheiro-url: fn_hr_documento_pode_ver_conteudo falhou:", erroDecisao);
       return new Response(
         JSON.stringify({ error: "Não foi possível confirmar a permissão." }),
         { status: 500, headers: corsHeaders },
       );
     }
 
-    let autorizado = temConteudoView === true;
-
-    if (!autorizado) {
-      const { data: temViewOwn, error: erroViewOwn } = await supabase.rpc("has_anew_permission_in_org", {
-        _auth_uid: caller.authUid,
-        _permission_code: "hr.pessoas.documentos.view.own",
-        _organization_id: doc.organization_id,
-      });
-      if (erroViewOwn) {
-        console.error("hr-documento-ficheiro-url: has_anew_permission_in_org (view.own) falhou:", erroViewOwn);
-        return new Response(
-          JSON.stringify({ error: "Não foi possível confirmar a permissão." }),
-          { status: 500, headers: corsHeaders },
-        );
-      }
-
-      if (temViewOwn === true) {
-        const { data: pessoaDoUtilizador, error: erroPessoaDoUtilizador } = await supabase.rpc(
-          "hr_pessoa_do_utilizador",
-          { _auth_uid: caller.authUid, _organization_id: doc.organization_id },
-        );
-        if (erroPessoaDoUtilizador) {
-          console.error(
-            "hr-documento-ficheiro-url: hr_pessoa_do_utilizador falhou:",
-            erroPessoaDoUtilizador,
-          );
-          return new Response(
-            JSON.stringify({ error: "Não foi possível confirmar a permissão." }),
-            { status: 500, headers: corsHeaders },
-          );
-        }
-        autorizado = pessoaDoUtilizador === doc.pessoa_id;
-      }
+    if (decisao === "nao_encontrado") {
+      return new Response(
+        JSON.stringify({ error: "Documento não encontrado." }),
+        { status: 404, headers: corsHeaders },
+      );
     }
 
-    if (!autorizado) {
+    if (decisao === "retribuicao") {
       return new Response(
-        JSON.stringify({ error: "Sem permissão para ver o ficheiro deste documento." }),
+        JSON.stringify({
+          error: "Sem permissão para ver o ficheiro deste documento: tem dados de retribuição.",
+          code: "42501",
+        }),
+        { status: 403, headers: corsHeaders },
+      );
+    }
+
+    // Falha fechada: tudo o que nao for exactamente 'permitido' e recusa.
+    if (decisao !== "permitido") {
+      return new Response(
+        JSON.stringify({ error: "Sem permissão para ver o ficheiro deste documento.", code: "42501" }),
         { status: 403, headers: corsHeaders },
       );
     }

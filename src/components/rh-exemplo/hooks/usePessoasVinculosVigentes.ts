@@ -4,9 +4,10 @@
  */
 import { usePessoasVinculosVigentes as usePessoasVinculosVigentesReal } from "@/hooks/usePessoasVinculosVigentes";
 
-export { vinculoDoMes } from "@/hooks/usePessoasVinculosVigentes";
+export { vinculoDoMes, vinculoContinuoDoPeriodo } from "@/hooks/usePessoasVinculosVigentes";
 export type { VinculoLido } from "@/hooks/usePessoasVinculosVigentes";
 
-export function usePessoasVinculosVigentes() {
-  return usePessoasVinculosVigentesReal();
+/** `enabled` falso (omissao: ligado) nao le nada; `carregado` diz que a leitura terminou. */
+export function usePessoasVinculosVigentes(enabled = true) {
+  return usePessoasVinculosVigentesReal(enabled);
 }

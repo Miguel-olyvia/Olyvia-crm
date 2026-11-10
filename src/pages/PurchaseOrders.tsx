@@ -78,6 +78,7 @@ import {
   type PoStatusFilter,
 } from "@/components/inventory/ui";
 import { PoKpis, PO_VALUE_PERMISSION } from "@/components/purchase-orders/PoKpis";
+import { poVista, PO_VISTA_ANULACOES, PO_VISTA_ENCOMENDAS, PO_VISTA_LINHAS } from "@/components/purchase-orders/poVistas";
 import { PoPortalPill, PoShippedPill, PoStatusBadge, PoStatusPills } from "@/components/purchase-orders/PoStatusPills";
 import { PoRowActions, RECEIVE_LABEL, RECEIVE_NAV_PERMS } from "@/components/purchase-orders/PoRowActions";
 // Ficha da PO como no Olyvia 2.0: linha de etapas, passo da Receção, Histórico, cartão do portal e bloqueios.
@@ -708,13 +709,23 @@ const PurchaseOrders = () => {
       }
 
       try {
-        const { data, error } = await (supabase as any)
-          .from("item_suppliers")
-          .select("product_id, service_id, purchase_price, supplier_sku")
-          .eq("organization_id", companyId)
-          .eq("supplier_id", supplierId)
-          .eq("is_active", true)
-          .is("deleted_at", null);
+        // Sem products.view_cost a política de item_suppliers não deixa ler a ligação (preço do fornecedor): lê-se a
+        // vista item_suppliers_public (que artigos o fornecedor vende, sem preço nem referência) e o preço das linhas
+        // novas é posto pela base ao gravar (rpc_create/rpc_update_purchase_order, 20270112852000).
+        const { data, error } = podeVerPrecosPo
+          ? await (supabase as any)
+              .from("item_suppliers")
+              .select("product_id, service_id, purchase_price, supplier_sku")
+              .eq("organization_id", companyId)
+              .eq("supplier_id", supplierId)
+              .eq("is_active", true)
+              .is("deleted_at", null)
+          : await (supabase as any)
+              .from("item_suppliers_public")
+              .select("product_id, service_id")
+              .eq("organization_id", companyId)
+              .eq("supplier_id", supplierId)
+              .eq("is_active", true);
 
         if (error) throw error;
 
@@ -737,7 +748,7 @@ const PurchaseOrders = () => {
     };
 
     loadSupplierItemRefs();
-  }, [organizationSelection.companyId, formData.supplier_id]);
+  }, [organizationSelection.companyId, formData.supplier_id, podeVerPrecosPo]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -857,14 +868,12 @@ const PurchaseOrders = () => {
       const [ordersRes, suppliersRes] = await Promise.all([
         fetchAllRows(() =>
           showDeleted
-            ? supabase
-                .from("purchase_orders")
+            ? poVista(PO_VISTA_ENCOMENDAS)
                 .select("*, suppliers(name)")
                 .eq("organization_id", companyId)
                 .not("deleted_at", "is", null)
                 .order("created_at", { ascending: false })
-            : supabase
-                .from("purchase_orders")
+            : poVista(PO_VISTA_ENCOMENDAS)
                 .select("*, suppliers(name)")
                 .eq("organization_id", companyId)
                 .is("deleted_at", null)
@@ -1272,8 +1281,8 @@ const PurchaseOrders = () => {
     }
 
     // Load existing items
-    const { data: items } = await supabase
-      .from("purchase_order_items")
+    // Pela vista: sem products.view_cost os preços vêm a NULL (a RPC de gravação usa os da base, pelo id da linha).
+    const { data: items } = await poVista(PO_VISTA_LINHAS)
       .select("*, products(name, uom:uom_id(code))")
       .eq("purchase_order_id", order.id);
 
@@ -1285,7 +1294,7 @@ const PurchaseOrders = () => {
         (item) => item.item_type === 'product' && Number(item.received_quantity) > 0,
       );
       setEditingOrderMeta((prev) => (prev && prev.id === order.id ? { ...prev, hasReceivedLines } : prev));
-      const loadedItems: PurchaseOrderItem[] = items.map(item => ({
+      const loadedItems: PurchaseOrderItem[] = (items as unknown as PurchaseOrderItemWithReceipt[]).map(item => ({
         id: item.id,
         item_type: item.item_type as 'product' | 'service',
         product_id: item.product_id,
@@ -1315,8 +1324,7 @@ const PurchaseOrders = () => {
   // po_published), volta a ler a PO e as linhas da BD pelo mesmo caminho do
   // handleEdit — o formulário bloqueado mostra o que foi realmente enviado.
   const reloadEditingOrder = async (orderId: string) => {
-    const { data, error } = await supabase
-      .from("purchase_orders")
+    const { data, error } = await poVista(PO_VISTA_ENCOMENDAS)
       .select("*, suppliers(name)")
       .eq("id", orderId)
       .maybeSingle();
@@ -1435,8 +1443,7 @@ const PurchaseOrders = () => {
         .eq("organization_id", activeCompany.id)
         .is("deleted_at", null)
         .order("name"),
-      supabase
-        .from("purchase_order_items")
+      poVista(PO_VISTA_LINHAS)
         .select("*, products(name, uom:uom_id(code))")
         .eq("purchase_order_id", order.id)
         .eq("item_type", "product"),
@@ -1616,8 +1623,7 @@ const PurchaseOrders = () => {
   // Best-effort na leitura: se a tabela não responder, as notas não aparecem e
   // o resto do ecrã funciona como antes.
   const fetchActivePoCancellations = async (orderId: string): Promise<PoItemCancellationRow[] | null> => {
-    const { data, error } = await poCancellationsDb()
-      .from("purchase_order_item_cancellations")
+    const { data, error } = await poVista(PO_VISTA_ANULACOES)
       .select("*")
       .eq("purchase_order_id", orderId)
       .is("undone_at", null)
@@ -1656,8 +1662,7 @@ const PurchaseOrders = () => {
   // (a quantidade encomendada muda) sem tocar no armazém/data escolhidos; o
   // "Receber agora" de cada linha nunca passa do novo pendente.
   const refreshReceiveLinesAfterCancellation = async (orderId: string) => {
-    const { data, error } = await supabase
-      .from("purchase_order_items")
+    const { data, error } = await poVista(PO_VISTA_LINHAS)
       .select("*, products(name, uom:uom_id(code))")
       .eq("purchase_order_id", orderId)
       .eq("item_type", "product");
@@ -1848,8 +1853,7 @@ const PurchaseOrders = () => {
     setRevertDialogOpen(true);
 
     // Só linhas de produto com alguma quantidade recebida podem ser revertidas.
-    const { data, error } = await supabase
-      .from("purchase_order_items")
+    const { data, error } = await poVista(PO_VISTA_LINHAS)
       .select("*, uom:uom_id(code), products(name, uom:uom_id(code))")
       .eq("purchase_order_id", order.id)
       .eq("item_type", "product")
@@ -2185,12 +2189,13 @@ const PurchaseOrders = () => {
 
     pendingClientOrderLines.forEach((line) => {
       const product = availableProductsForSupplier.find((p) => p.id === line.product_id);
-      if (!product || !product.purchase_price || product.purchase_price <= 0) {
+      // Sem products.view_cost o preço não se vê: a base põe o do fornecedor ao gravar (20270112852000).
+      if (!product || (podeVerPrecosPo && (!product.purchase_price || product.purchase_price <= 0))) {
         unmatched.push(line.product_id);
         return;
       }
       const vatRate = product.vat_rate || 23;
-      const subtotal = product.purchase_price * line.quantity;
+      const subtotal = (product.purchase_price || 0) * line.quantity;
       const vatAmount = subtotal * (vatRate / 100);
       matched.push({
         item_type: 'product',
@@ -2198,7 +2203,7 @@ const PurchaseOrders = () => {
         description: product.name,
         sku: product.sku || undefined,
         quantity: line.quantity,
-        unit_price: product.purchase_price,
+        unit_price: product.purchase_price || 0,
         vat_rate: vatRate,
         vat_amount: vatAmount,
         total_price: subtotal + vatAmount,
@@ -2245,7 +2250,7 @@ const PurchaseOrders = () => {
       const purchasePrice = item.purchase_price || 0;
       const vatRate = item.vat_rate || 23;
       
-      if (!purchasePrice || purchasePrice <= 0) {
+      if (podeVerPrecosPo && (!purchasePrice || purchasePrice <= 0)) {
         toast({
           title: t('purchaseOrders.toast.missingPrice'),
           description: t('purchaseOrders.toast.noPurchasePrice', { name: item.name }),
@@ -2302,7 +2307,9 @@ const PurchaseOrders = () => {
         total_price: totalPrice,
         selected_attributes: fullAttributes,
       };
-    }).filter(item => item.unit_price > 0);
+    // Sem products.view_cost não se filtra pelo preço (não se vê): a base põe o do fornecedor ao gravar e recusa
+    // a linha se o fornecedor não tiver preço (20270112852000).
+    }).filter(item => !podeVerPrecosPo || item.unit_price > 0);
     
     if (newItems.length === 0) {
       return;
@@ -2427,6 +2434,8 @@ const PurchaseOrders = () => {
       };
 
       const itemsPayload = orderItems.map(item => ({
+        // 20270112852000: o id da linha já gravada — sem products.view_cost a RPC mantém o preço da base por ele.
+        id: item.id ?? null,
         item_type: item.item_type,
         product_id: item.product_id || null,
         service_id: item.service_id || null,
@@ -2539,9 +2548,8 @@ const PurchaseOrders = () => {
 
   const handleGeneratePDF = async (orderId: string) => {
     try {
-      // Fetch order data with company and supplier
-      const { data: orderData, error: orderError } = await supabase
-        .from('purchase_orders')
+      // Fetch order data with company and supplier (a vista: sem valores; vêm da RPC abaixo)
+      const { data: orderHead, error: orderError } = await poVista(PO_VISTA_ENCOMENDAS)
         .select(`
           *,
           suppliers (name, tax_id, email, phone),
@@ -2552,13 +2560,17 @@ const PurchaseOrders = () => {
 
       if (orderError) throw orderError;
 
-      // Fetch order items
-      const { data: itemsData, error: itemsError } = await supabase
-        .from('purchase_order_items')
-        .select('*')
-        .eq('purchase_order_id', orderId);
+      // Encomenda e linhas (20270112852000, purchase_orders.view na organização): os valores só com products.view_cost;
+      // sem ela com_precos=false e o PDF sai só com artigos e quantidades.
+      const { data: documento, error: itemsError } = await supabase.rpc(
+        "rpc_po_documento_fornecedor" as never,
+        { p_po_id: orderId } as never,
+      );
 
       if (itemsError) throw itemsError;
+      const doc = (documento ?? {}) as { com_precos?: boolean; order?: Record<string, unknown>; items?: Record<string, unknown>[] };
+      const orderData = { ...(orderHead as Record<string, unknown>), ...(doc.order ?? {}) } as any;
+      const itemsData = doc.items ?? [];
 
       // Fetch current user
       const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -2608,6 +2620,7 @@ const PurchaseOrders = () => {
           supplier={orderData.suppliers}
           items={itemsData || []}
           user={userData}
+          semPrecos={doc.com_precos !== true}
         />
       ).toBlob();
 
@@ -3722,7 +3735,7 @@ const PurchaseOrders = () => {
                                     ) : precoPo(null)}
                                   </TableCell>
                                   <TableCell>{item.vat_rate}%</TableCell>
-                                  <TableCell className="text-right font-semibold tabular-nums">{precoPo(<>€{item.total_price.toFixed(2)}</>)}</TableCell>
+                                  <TableCell className="text-right font-semibold tabular-nums">{precoPo(<>€{Number(item.total_price ?? 0).toFixed(2)}</>)}</TableCell>
                                   <TableCell>
                                     <div className="flex gap-1">
                                       {!isStructureLocked && item.item_type === 'product' && item.product_id && (

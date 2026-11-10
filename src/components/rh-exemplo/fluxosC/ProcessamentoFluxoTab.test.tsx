@@ -20,6 +20,7 @@ const fn = vi.hoisted(() => ({
   recalcular: vi.fn(),
   horasExtra: vi.fn(),
   detetar: vi.fn(),
+  relerSubsidios: vi.fn(),
 }));
 const estado = vi.hoisted(() => ({
   permissoes: new Set<string>(),
@@ -338,6 +339,76 @@ describe("fechar grava o resultado de cada pessoa", () => {
     await fechar();
     await waitFor(() => expect(fn.erro).toHaveBeenCalledWith("O período continua aberto: as regras salariais mudaram."));
     expect(fn.sucesso).not.toHaveBeenCalled();
+  });
+
+  describe("a assinatura dos subsidios", () => {
+    const MD5_A = "a".repeat(32);
+    const MD5_B = "b".repeat(32);
+    const enviados = () => fn.fechar.mock.calls[0][0] as Array<Record<string, unknown> & { totais: Record<string, unknown> }>;
+
+    it("com o pagamento ligado, cada resultado leva a assinatura do calculo e as duas chaves dos totais", async () => {
+      estado.calculo = calculo({ subsidiosAssinatura: MD5_A, relerSubsidios: fn.relerSubsidios });
+      abrir();
+      await fechar();
+      await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+      expect(enviados().map((r) => r.subsidios_assinatura)).toEqual([MD5_A, MD5_A]);
+      expect(enviados().every((r) => r.totais.subsidio_ferias === 0 && r.totais.subsidio_natal === 0)).toBe(true);
+    });
+
+    it("com o pagamento desligado, nenhum resultado leva a chave (nunca um null explicito)", async () => {
+      estado.calculo = calculo({ subsidiosAssinatura: null, relerSubsidios: fn.relerSubsidios });
+      abrir();
+      await fechar();
+      await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+      expect(enviados().some((r) => Object.prototype.hasOwnProperty.call(r, "subsidios_assinatura"))).toBe(false);
+    });
+
+    it("a configuracao muda depois do calculo: envia a assinatura do calculo, a base recusa (HRA90 traduzido) e relê; o fecho seguinte leva a nova", async () => {
+      const texto = "A configuração dos subsídios mudou depois do cálculo. Atualize a página e feche de novo.";
+      fn.fechar.mockResolvedValueOnce(texto);
+      estado.calculo = calculo({ subsidiosAssinatura: MD5_A, relerSubsidios: fn.relerSubsidios });
+      const { rerender } = abrir();
+      await fechar();
+      await waitFor(() => expect(fn.erro).toHaveBeenCalledWith(texto));
+      expect(enviados().map((r) => r.subsidios_assinatura)).toEqual([MD5_A, MD5_A]);
+      expect(fn.relerSubsidios).toHaveBeenCalledTimes(1);
+      expect(fn.sucesso).not.toHaveBeenCalled();
+
+      // A releitura trouxe a configuracao nova (e o calculo refez-se com ela).
+      estado.calculo = calculo({ subsidiosAssinatura: MD5_B, relerSubsidios: fn.relerSubsidios });
+      rerender(<LanguageProvider><ProcessamentoFluxoTab /></LanguageProvider>);
+      await fechar();
+      await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(2));
+      expect((fn.fechar.mock.calls[1][0] as Array<{ subsidios_assinatura: string }>).map((r) => r.subsidios_assinatura)).toEqual([MD5_B, MD5_B]);
+    });
+
+    it("enquanto a releitura da configuracao decorre o botao de fechar fica desactivado, com o motivo em texto: um segundo clique nao reenvia a assinatura velha", () => {
+      estado.calculo = calculo({ subsidiosAssinatura: MD5_A, subsidiosAReler: true, relerSubsidios: fn.relerSubsidios });
+      abrir();
+      const botao = screen.getByRole("button", { name: "Fechar o mês" });
+      expect(botao).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByText(/a reler a configuração dos subsídios/i)).toBeInTheDocument();
+      fireEvent.click(botao);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(fn.fechar).not.toHaveBeenCalled();
+    });
+
+    it("acabada a releitura o botao volta a fechar, com a assinatura nova", async () => {
+      estado.calculo = calculo({ subsidiosAssinatura: MD5_B, subsidiosAReler: false, relerSubsidios: fn.relerSubsidios });
+      abrir();
+      expect(screen.getByRole("button", { name: "Fechar o mês" })).toHaveAttribute("aria-disabled", "false");
+      await fechar();
+      await waitFor(() => expect(fn.fechar).toHaveBeenCalledTimes(1));
+      expect(enviados().map((r) => r.subsidios_assinatura)).toEqual([MD5_B, MD5_B]);
+    });
+
+    it.each(["erro", "recusado", "a_carregar"])("a leitura dos subsidios em «%s» bloqueia o fecho: nada se envia", async (leitura) => {
+      estado.calculo = calculo({ subsidiosLeitura: leitura, subsidiosAssinatura: null, relerSubsidios: fn.relerSubsidios });
+      abrir();
+      fireEvent.click(screen.getByRole("button", { name: "Fechar o mês" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(fn.fechar).not.toHaveBeenCalled();
+    });
   });
 
   it("ANTES de fechar deteta os desvios do periodo e le as assinaturas; cada assinatura segue no resultado da pessoa", async () => {

@@ -3,7 +3,7 @@
 // e tirar uma tira em cascata as que dependem dela. A app e o servidor não mudam — isto não dá nem tira acesso a ninguém.
 //
 // Formato: DEPENDE_DE[código] = a lista de códigos de que depende, lida como «QUALQUER DE» (basta uma estar marcada). Um código
-// que não está no mapa não depende de nada.
+// que não está no mapa não depende de nada. 10/11: EXIGE_TAMBEM[código] = as que exige além disso, lidas como «TODAS DE».
 //
 // Como se constrói (para cada código em PERMISSOES_EM_USO, isto é, no editor):
 //  1. SEM_DEPENDENCIA → nada (as que se usam sozinhas: ver a lista e a razão de cada uma).
@@ -73,7 +73,22 @@ export const EXPLICITAS: Readonly<Record<string, readonly string[]>> = {
   "hr.pessoas.conta.criar": [FICHA],
   "hr.pessoas.conta.link": [FICHA],
   "hr.pessoas.convite.enviar": [FICHA],
+  // 10/11: configurar o canal de denúncias (ligar, designar responsáveis) só faz sentido com a gestão do canal.
+  "hr.denuncias.configurar": ["hr.denuncias.gerir"],
 };
+
+/**
+ * 10/11: as que exigem TAMBÉM outras permissões, lidas como «TODAS DE» (ao contrário de DEPENDE_DE, que é «qualquer de»). Somam-se
+ * à dependência normal: a permissão só se marca com a dependência satisfeita E todas estas marcadas; tirar uma destas tira-a em
+ * cascata. Podem estar noutro grupo do editor.
+ * - hr.pessoas.conta.criar: criar a conta a partir da ficha de RH cria um utilizador, por isso exige também Criar utilizadores.
+ */
+export const EXIGE_TAMBEM: Readonly<Record<string, readonly string[]>> = {
+  "hr.pessoas.conta.criar": ["users.create"],
+};
+
+/** O que `codigo` exige também (todas); vazio = nada. */
+export const exigidasDe = (codigo: string): readonly string[] => EXIGE_TAMBEM[codigo] ?? [];
 
 const ehVer = (codigo: string): boolean => codigo.endsWith(".view");
 

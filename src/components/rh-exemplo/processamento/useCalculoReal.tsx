@@ -29,6 +29,7 @@ import { useRetribuicoesVigentesDaOrganizacao } from "@/components/rh-exemplo/ho
 import { intervaloEfectivo, usePeriodoFolhaRegras } from "@/components/rh-exemplo/hooks/periodoFolha";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
 import { calcularResultadoReal, type ResultadoCalculoReal } from "./calculoReal";
+import { useSubsidiosDoPeriodo } from "./useSubsidiosDoPeriodo";
 
 const SEM_FAIXAS: readonly { hora_inicio: string; hora_fim: string }[] = [];
 
@@ -58,6 +59,10 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
   const faixasNoturnas = useMemo(() => regra?.noturnas ?? SEM_FAIXAS, [regra]);
   const codigosActivos = useMemo(() => codigos.filter((c) => c.activo), [codigos]);
 
+  // Subsidios de ferias e de Natal: a configuracao da organizacao e, so nos periodos que os pagam, os vinculos (a proporcao).
+  // A assinatura da configuracao (a que segue no fecho) vem da mesma leitura que decide que subsidios o periodo paga.
+  const { subsidiosLeitura, subsidiosDaPessoa, subsidiosAssinatura, subsidiosAReler, relerSubsidios } = useSubsidiosDoPeriodo(mes, ultimoDia, periodoId);
+
   // So os lancamentos do periodo deste mes: ao mudar de mes o hook ainda guarda os do anterior ate a resposta chegar.
   const lancamentosPorPessoa = useMemo(() => {
     const mapa = new Map<string, HrProcessamentoLancamento[]>();
@@ -82,6 +87,15 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
     direitosLidos: direitosHook.estado === "ok",
     /** O catalogo de codigos lido por inteiro (`ok`), a carregar, recusado ou com erro: so `ok` deixa fechar o periodo. */
     codigosEstado,
+    /** A leitura da configuracao dos subsidios (e dos vinculos, nos periodos que os pagam). */
+    subsidiosLeitura,
+    subsidiosDaPessoa,
+    /** A assinatura dos subsidios com que o calculo foi feito (`null` = pagamento desligado para a folha: nao se envia). */
+    subsidiosAssinatura,
+    /** A releitura da assinatura decorre: o fecho fica desactivado ate acabar (os dados antigos ainda se mostram como lidos). */
+    subsidiosAReler,
+    /** Volta a ler a assinatura (depois de o fecho ser recusado por a configuracao ter mudado). */
+    relerSubsidios,
     regra,
     faixasNoturnas,
     intervalo,
@@ -94,7 +108,8 @@ export function useDadosDoCalculoReal(ano: number, mes: number) {
       retribuicoesHook.loading ||
       regrasHook.isLoading ||
       direitosHook.isLoading ||
-      codigosACarregar,
+      codigosACarregar ||
+      subsidiosLeitura === "a_carregar",
   };
 }
 
@@ -118,7 +133,7 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
     [chave],
   );
 
-  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosHook } = dados;
+  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosHook, subsidiosDaPessoa } = dados;
   const direitosPorPessoa = direitosHook.porPessoa;
   const resultados = useMemo(() => {
     const mapa = new Map<string, ResultadoCalculoReal>();
@@ -136,11 +151,12 @@ export function useCalculoRealDoMes(ano: number, mes: number) {
           codigosActivos,
           regra,
           direitoIht: direitosDaPessoa(direitosPorPessoa, pessoa.id).iht,
+          subsidios: subsidiosDaPessoa(pessoa.id),
         }),
       );
     }
     return mapa;
-  }, [pessoasActivas, recolhas, chave, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosPorPessoa]);
+  }, [pessoasActivas, recolhas, chave, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosPorPessoa, subsidiosDaPessoa]);
 
   const pendentes = pessoasActivas.filter((p) => !recolhas[`${chave}:${p.id}`]).length;
   const incompletas = pessoasActivas.filter((p) => recolhas[`${chave}:${p.id}`]?.incompleta).length;
@@ -308,7 +324,7 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
   const periodoPorSaber = opcoes.congelarSeFechado === true && dados.periodoHook.loading;
   const pessoaVivaId = congelado || periodoPorSaber ? undefined : pessoaId;
   const relatorio = useRelatorioAssiduidadeMensal(pessoaVivaId, ano, mes, dados.intervalo, dados.faixasNoturnas);
-  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosHook } = dados;
+  const { retribuicoesHook, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitosHook, subsidiosDaPessoa } = dados;
   const direitoIht = pessoaVivaId ? direitosDaPessoa(direitosHook.porPessoa, pessoaVivaId).iht : false;
   // Congelado: nada vivo por esperar (o que ainda carrega e o periodo, os lancamentos, etc., pelos `dados`).
   const aCarregar = (!congelado && relatorio.loading) || dados.aCarregar;
@@ -324,8 +340,9 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
       codigosActivos,
       regra,
       direitoIht,
+      subsidios: subsidiosDaPessoa(pessoaVivaId),
     });
-  }, [pessoaVivaId, aCarregar, relatorio.totais, relatorio.dias, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitoIht]);
+  }, [pessoaVivaId, aCarregar, relatorio.totais, relatorio.dias, retribuicoesHook.porPessoa, ultimoDia, lancamentosPorPessoa, codigosActivos, regra, direitoIht, subsidiosDaPessoa]);
 
   return {
     resultado,
@@ -334,6 +351,8 @@ export function useCalculoRealDaPessoa(pessoaId: string | undefined, ano: number
     dados,
     retribuicaoRecusada: retribuicoesHook.recusado,
     direitosLidos: dados.direitosLidos,
+    /** A leitura dos subsidios de ferias e de Natal: recusada ou com erro, o ecra di-lo em vez de mostrar o total sem eles. */
+    subsidiosLeitura: dados.subsidiosLeitura,
     incompleta: !congelado && (relatorio.realizadoRecusado || relatorio.faltasRecusadas || relatorio.planeadoRecusado || relatorio.ausenciasRecusadas === true || relatorio.feriadosRecusados === true || relatorio.tiposRecusados === true || relatorio.erro === true),
     periodoAberto: dados.periodoHook.periodo?.estado === "aberto",
     temPeriodo: dados.periodoHook.periodo !== null,

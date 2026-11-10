@@ -17,6 +17,7 @@ import type {
   LinhaRegraSalarial,
   ResultadoProcessamentoPessoa,
 } from "@/lib/hr/processamentoTotais";
+import { eAvisoSubsidio, type AvisoSubsidio } from "@/lib/hr/subsidiosExtra";
 import type { HrProcessamentoLancamento } from "@/types/hr";
 
 /** Limites que a RPC impoe (migration 20270109900000). */
@@ -28,7 +29,7 @@ export const MAX_DESCRICAO_LANCAMENTO = 200;
 export const TAMANHO_PAGINA_RESULTADOS = 500;
 const PADRAO_AVISO = /^[a-z_]{1,60}$/;
 
-const AVISOS_CONHECIDOS: ReadonlySet<string> = new Set<AvisoProcessamento>([
+const AVISOS_CONHECIDOS: ReadonlySet<string> = new Set<AvisoProcessamento | AvisoSubsidio>([
   "sem_retribuicao",
   "periodicidade_nao_convertivel",
   "duodecimos_por_decidir",
@@ -36,6 +37,11 @@ const AVISOS_CONHECIDOS: ReadonlySet<string> = new Set<AvisoProcessamento>([
   "sem_horas_planeadas_no_mes",
   "faltas_provisorias",
   "dias_sem_picagem_descontados",
+  // Os avisos dos subsidios de ferias e de Natal (`avisosSubsidios` no resultado, nao em `avisos`).
+  "subsidio_sem_duodecimos",
+  "subsidio_sem_vinculo",
+  "subsidio_cessacao_por_tratar",
+  "subsidio_contratos_com_intervalo",
 ]);
 
 export interface TotaisGravados {
@@ -45,6 +51,9 @@ export interface TotaisGravados {
   total_regras: number | null;
   desconto_faltas: number | null;
   subsidio_alimentacao: number | null;
+  /** Subsidio de ferias e de Natal pagos neste periodo; 0 quando nao se pagam (migration 20270112700000). */
+  subsidio_ferias: number | null;
+  subsidio_natal: number | null;
   lancamentos_pontuais: number | null;
 }
 
@@ -85,6 +94,13 @@ export interface ResultadoParaGravar {
    * OPCIONAL: so segue quando a pessoa tem horas extra (sem assinatura nao se envia o campo; a base aceita-o ausente ou `null`).
    */
   horas_extra_assinatura?: string;
+  /**
+   * A assinatura da configuracao dos subsidios de ferias e de Natal COM QUE O CALCULO FOI FEITO (`rpc_hr_subsidios_assinatura`, lida ao
+   * mesmo tempo que os dados do calculo, nunca no momento de fechar). Com o pagamento ligado para a folha a base exige-a em cada
+   * resultado e recusa o fecho se a configuracao mudou depois (HRA90). OPCIONAL: com o pagamento desligado a chave NAO segue (a base
+   * recusa um valor nao nulo nessa folha).
+   */
+  subsidios_assinatura?: string;
 }
 
 /** Uma linha de `rpc_hr_processamento_resultados_ler`. */
@@ -204,6 +220,8 @@ export interface EntradaResultadoPessoa {
   desviosAssinatura?: string | null;
   /** A assinatura das horas extra da pessoa (ver `ResultadoParaGravar.horas_extra_assinatura`); sem ela, o campo nao segue. */
   horasExtraAssinatura?: string | null;
+  /** A assinatura dos subsidios com que o calculo foi feito (ver `ResultadoParaGravar.subsidios_assinatura`); sem ela, o campo nao segue. */
+  subsidiosAssinatura?: string | null;
 }
 
 export function construirResultadoPessoa(entrada: EntradaResultadoPessoa): ResultadoParaGravar {
@@ -223,10 +241,13 @@ export function construirResultadoPessoa(entrada: EntradaResultadoPessoa): Resul
       total_regras: arredondarOuNull(resultado.totalRegras, 2),
       desconto_faltas: arredondarOuNull(resultado.descontoFaltas, 2),
       subsidio_alimentacao: arredondarOuNull(resultado.subsidioAlimentacao, 2),
+      // 0 quando nao se paga (ou o resultado nao os traz): o contrato da base leva sempre as duas chaves.
+      subsidio_ferias: arredondarOuNull(resultado.subsidioFerias ?? 0, 2) ?? 0,
+      subsidio_natal: arredondarOuNull(resultado.subsidioNatal ?? 0, 2) ?? 0,
       lancamentos_pontuais: somaLancamentosManuais(entrada.lancamentos),
     },
     linhas: linhasParaGravar(resultado, entrada.lancamentos),
-    avisos: avisosParaGravar(resultado.avisos),
+    avisos: avisosParaGravar([...resultado.avisos, ...(resultado.avisosSubsidios ?? [])]),
     // Pessoa que saiu a meio do periodo: a versao usada no calculo pode ja nao ser a vigente em `data_fim` (ou nao
     // haver nenhuma). Nesse caso envia-se `null` de proposito: a RPC recusa um fallback para «a mais recente» e uma
     // versao que nao estava em vigor no ultimo dia nao pode ser registada como a que foi usada.
@@ -237,6 +258,7 @@ export function construirResultadoPessoa(entrada: EntradaResultadoPessoa): Resul
     realizado_minutos: Math.round(entrada.realizadoMinutos),
     desvios_assinatura: entrada.desviosAssinatura ? entrada.desviosAssinatura : null,
     ...(entrada.horasExtraAssinatura ? { horas_extra_assinatura: entrada.horasExtraAssinatura } : {}),
+    ...(entrada.subsidiosAssinatura ? { subsidios_assinatura: entrada.subsidiosAssinatura } : {}),
   };
 }
 
@@ -257,6 +279,11 @@ export interface ArgsResultadosDoFecho {
   assinaturaDeDesviosDe?: (pessoaId: string) => string | null | undefined;
   /** A assinatura das horas extra de cada pessoa, lida imediatamente antes de calcular; sem ela (sem horas extra), o campo nao segue. */
   assinaturaDeHorasExtraDe?: (pessoaId: string) => string | null | undefined;
+  /**
+   * A assinatura da configuracao dos subsidios com que o calculo foi feito (a mesma em todas as pessoas: e do periodo). `null`/ausente =
+   * pagamento desligado para a folha: nenhum resultado a leva.
+   */
+  assinaturaDeSubsidios?: string | null;
 }
 
 /** O `p_resultados` completo, ou as pessoas que ainda nao tem calculo (e entao nao se fecha). */
@@ -285,6 +312,7 @@ export function construirResultadosDoFecho(args: ArgsResultadosDoFecho): {
         realizadoMinutos: minutos.realizado,
         desviosAssinatura: args.assinaturaDeDesviosDe?.(pessoaId) ?? null,
         horasExtraAssinatura: args.assinaturaDeHorasExtraDe?.(pessoaId) ?? null,
+        subsidiosAssinatura: args.assinaturaDeSubsidios ?? null,
       }),
     );
   }
@@ -317,6 +345,12 @@ export interface ArgsBloqueioDoFecho {
   /** Estado da leitura das regras salariais; `indisponivel` = a base ainda nao as tem (sem regra, sem versao a conferir). */
   regras: EstadoLeitura;
   vinculos: EstadoLeitura;
+  /**
+   * A configuracao dos subsidios de ferias e de Natal: so `ok` deixa fechar; recusada, com erro ou a carregar bloqueia (fechar sem ela
+   * gravaria para sempre um periodo sem o subsidio). `indisponivel` (a base ainda nao a tem) conta como desligada. Opcional: sem esta
+   * leitura (ecras antigos) nao se bloqueia.
+   */
+  subsidios?: EstadoLeitura;
   pessoasObrigatorias: readonly string[];
   /** A pessoa tem calculo. */
   comCalculo: (pessoaId: string) => boolean;
@@ -337,7 +371,7 @@ export interface ArgsBloqueioDoFecho {
 }
 
 export type MotivoBloqueioDoFecho =
-  | { codigo: "direitos" | "retribuicoes" | "codigos" | "regras" | "vinculos" }
+  | { codigo: "direitos" | "retribuicoes" | "codigos" | "regras" | "subsidios" | "vinculos" }
   | { codigo: "assiduidade" | "desvios" | "horas_extra" | "calculo"; n: number };
 
 /** Porque o botao «Fechar periodo» nao pode avancar; `null` = pode. A chave de traducao e `rhProcReal.fecho.bloqueio.<codigo>`. */
@@ -347,6 +381,7 @@ export function motivoDeBloqueioDoFecho(args: ArgsBloqueioDoFecho): MotivoBloque
   if (args.retribuicoes !== "ok") return { codigo: "retribuicoes" };
   if (args.codigos !== "ok") return { codigo: "codigos" };
   if (args.regras === "recusado" || args.regras === "erro" || args.regras === "a_carregar") return { codigo: "regras" };
+  if (args.subsidios === "recusado" || args.subsidios === "erro" || args.subsidios === "a_carregar") return { codigo: "subsidios" };
   if (args.vinculos !== "ok") return { codigo: "vinculos" };
   const incompletas = args.pessoasObrigatorias.filter((id) => args.assiduidadeIncompleta(id)).length;
   if (incompletas > 0) return { codigo: "assiduidade", n: incompletas };
@@ -377,6 +412,8 @@ const ERROS_DO_FECHO: ReadonlySet<string> = new Set([
   // Horas extra aprovadas (contagem ligada): ha horas extra pendentes no periodo, ou mudaram depois do calculo.
   "processamento_fechar_horas_extra_por_decidir",
   "processamento_fechar_horas_extra_desactualizadas",
+  // Subsidios de ferias e de Natal: a configuracao mudou depois do calculo (HRA90).
+  "processamento_fechar_subsidios_desactualizados",
 ]);
 
 /** O codigo do erro da RPC (prefixo da mensagem), se for um dos que o fecho conhece. */
@@ -400,10 +437,20 @@ function textoDoErro(chave: string): string {
   return (lingua === "pt" ? pt[chave] : en[chave] ?? pt[chave]) ?? chave;
 }
 
+function mensagemDoErro(erro: unknown): string {
+  const mensagem = typeof erro === "string" ? erro : erro && typeof erro === "object" ? (erro as { message?: unknown }).message : null;
+  return typeof mensagem === "string" ? mensagem : "";
+}
+
 /** O erro em portugues claro (ou na lingua activa); `null` se nao for um erro do fecho. O periodo fica aberto. */
 export function mensagemDeErroDoFecho(erro: unknown): string | null {
   const codigo = codigoDoErroDoFecho(erro);
-  return codigo ? textoDoErro(`rhProcReal.erro.${codigo}`) : null;
+  if (!codigo) return null;
+  // Os totais dos subsidios fora do mes (22023) partilham o codigo do resultado mal formado: distinguem-se pelo texto da base.
+  if (codigo === "processamento_fechar_resultado_mal_formado" && /subsidio_(?:ferias|natal)/.test(mensagemDoErro(erro))) {
+    return textoDoErro("rhProcReal.erro.processamento_fechar_subsidios_inconsistentes");
+  }
+  return textoDoErro(`rhProcReal.erro.${codigo}`);
 }
 
 /** A operacao (abrir/fechar) JA correu na base, mas o periodo nao se conseguiu reler: nao e um sucesso nem uma falha da operacao. */
@@ -453,6 +500,8 @@ export function resultadoDeLinhaGravada(linha: ResultadoLido): ResultadoProcessa
       quantidade: numeroOuNull(l.quantidade),
       valor: numeroOuNull(l.valor) ?? 0,
     }));
+  const avisosGravados: readonly string[] = Array.isArray(linha.avisos) ? linha.avisos : [];
+  const avisosDosSubsidios: AvisoSubsidio[] = avisosGravados.filter(eAvisoSubsidio);
   return {
     valorHoraReal: numeroOuNull(linha.valor_hora),
     baseMes: numeroOuNull(totais.base_mes),
@@ -463,8 +512,12 @@ export function resultadoDeLinhaGravada(linha: ResultadoLido): ResultadoProcessa
     totalRegras: numeroOuNull(totais.total_regras) ?? 0,
     descontoFaltas: numeroOuNull(totais.desconto_faltas) ?? 0,
     subsidioAlimentacao: numeroOuNull(totais.subsidio_alimentacao) ?? 0,
+    // Um gravado antigo nao traz estas chaves: 0.
+    subsidioFerias: numeroOuNull(totais.subsidio_ferias) ?? 0,
+    subsidioNatal: numeroOuNull(totais.subsidio_natal) ?? 0,
     lancamentosPontuais: numeroOuNull(totais.lancamentos_pontuais) ?? 0,
     totalBrutoEstimado: numeroOuNull(linha.total_bruto),
-    avisos: (Array.isArray(linha.avisos) ? linha.avisos : []).filter((a): a is AvisoProcessamento => AVISOS_CONHECIDOS.has(a)),
+    avisos: avisosGravados.filter((a): a is AvisoProcessamento => AVISOS_CONHECIDOS.has(a) && !eAvisoSubsidio(a)),
+    ...(avisosDosSubsidios.length > 0 ? { avisosSubsidios: avisosDosSubsidios } : {}),
   };
 }
