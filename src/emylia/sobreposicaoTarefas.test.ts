@@ -17,9 +17,14 @@ describe("sobreposição das tarefas do plano", () => {
     const a = { dia: 0, dur: 1, ini: 0, dias: 0.75, tec }, b = { dia: 0, dur: 1, ini: 0.5, dias: 0.5, tec };
     expect(motivoOcupado(tec, b, plano, new Map(), [a])).toBe("noutra tarefa desta obra");
   });
-  it("mudada à mão (os dias inteiros já não batem com o real), conta o dia inteiro", () => {
-    expect(extensaoTarefa({ dia: 3, dur: 1, ini: 0.5, dias: 0.5 })).toEqual([3, 4]);
-    expect(sobrepostas({ dia: 3, dur: 1, ini: 0.5, dias: 0.5 }, { dia: 3, dur: 2 })).toBe(true);
+  it("mudada de dia, leva a hora do início com ela (as duas de meio dia continuam sem se sobrepor)", () => {
+    expect(extensaoTarefa({ dia: 3, dur: 1, ini: 0.5, dias: 0.5 })).toEqual([3.5, 4]);
+    expect(sobrepostas({ dia: 3, dur: 1, ini: 0, dias: 0.5 }, { dia: 3, dur: 1, ini: 0.5, dias: 0.5 })).toBe(false);
+    expect(sobrepostas({ dia: 5, dur: 3, ini: 1, dias: 2.5 }, { dia: 7, dur: 1, ini: 3.5, dias: 0.5 })).toBe(false);
+  });
+  it("com a duração mudada à mão (os dias inteiros já não batem com a real), conta o dia inteiro", () => {
+    expect(extensaoTarefa({ dia: 3, dur: 2, ini: 0.5, dias: 0.5 })).toEqual([3, 5]);
+    expect(sobrepostas({ dia: 3, dur: 2, ini: 0.5, dias: 0.5 }, { dia: 4, dur: 1 })).toBe(true);
   });
   it("sem o real, os dias inteiros", () => {
     expect(sobrepostas({ dia: 0, dur: 1 }, { dia: 1, dur: 1 })).toBe(false);

@@ -225,10 +225,14 @@ export function escolhasDoNegocio(f: Record<string, string | undefined>): Escolh
 }
 
 type Extensao = Pick<Tarefa, "dia" | "dur"> & Partial<Pick<Tarefa, "ini" | "dias">>;
-/** 10/11: onde a tarefa está no plano, em dias: o início e o fim reais (frações de dia, do plano do orçamento) enquanto batem com o dia e
- *  a duração em dias inteiros; mudados à mão (o Estúdio do plano), os dias inteiros. */
+/** 10/11: onde a tarefa está no plano, em dias: o início a meio do dia e a duração reais (frações de dia, do plano do orçamento). Mudada
+ *  de dia (adiar, arrastar, uma fase que anda), a tarefa leva a hora do início com ela; com a duração mudada à mão (os dias inteiros já
+ *  não batem com a real), contam os dias inteiros. */
 export function extensaoTarefa(t: Extensao): [number, number] {
-  if (t.ini != null && t.dias != null && Math.floor(t.ini + 1e-9) === t.dia && Math.max(1, Math.ceil(t.ini + t.dias - 1e-9) - t.dia) === t.dur) return [t.ini, t.ini + t.dias];
+  if (t.ini != null && t.dias != null) {
+    const meio = t.ini - Math.floor(t.ini + 1e-9);
+    if (Math.max(1, Math.ceil(meio + t.dias - 1e-9)) === t.dur) return [t.dia + meio, t.dia + meio + t.dias];
+  }
   return [t.dia, t.dia + t.dur];
 }
 /** 10/11: duas tarefas ao mesmo tempo (as que só se tocam, uma acaba a meio do dia e a outra começa aí, não se sobrepõem). */
