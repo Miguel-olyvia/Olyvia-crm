@@ -270,11 +270,14 @@ describe("03/11: Recursos Humanos", () => {
   const rh = () => agruparPorMenu(emUso).find((g) => g.rotulo === "Recursos Humanos")!;
   const codigosDe = (rotulo: string) => rh().subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo).sort() ?? [];
 
-  it("hr.denuncias.gerir está escondida (sem ação na app viva) e o subgrupo Denúncias desaparece", () => {
-    expect(CODIGOS_EM_USO).not.toContain("hr.denuncias.gerir");
-    expect(CODIGOS_ESCONDIDOS).toContain("hr.denuncias.gerir");
-    expect(CODIGOS_SEM_CATALOGO).not.toContain("hr.denuncias.gerir");
-    expect(codigosDe("Denúncias")).toEqual([]);
+  it("10/11: hr.denuncias.gerir e hr.denuncias.configurar estão em uso, no subgrupo Denúncias (as RPCs existem desde 20270111300000)", () => {
+    ["hr.denuncias.gerir", "hr.denuncias.configurar"].forEach((c) => {
+      expect(CODIGOS_EM_USO, c).toContain(c);
+      expect(CODIGOS_ESCONDIDOS, c).not.toContain(c);
+      expect(CODIGOS_SEM_CATALOGO, c).not.toContain(c);
+    });
+    expect(codigosDe("Denúncias")).toEqual(["hr.denuncias.configurar", "hr.denuncias.gerir"]);
+    expect(ESCONDIDAS_COM_GUARDA["hr.denuncias.gerir"]).toBeUndefined();
   });
 
   it("as cinco sem efeito vivo estão escondidas", () => {
@@ -289,7 +292,7 @@ describe("03/11: Recursos Humanos", () => {
     expect(rh().blocos).toEqual([]);
     expect(rh().subgrupos.map((s) => s.rotulo)).toEqual([
       "Pessoas: ficha", "Dados sensíveis", "Admissão", "Documentos", "Contratos, cargos e ofícios", "Retribuição e custos",
-      "Horário e assiduidade", "Ausências", "Processamento salarial", "Centros de trabalho",
+      "Horário e assiduidade", "Ausências", "Processamento salarial", "Centros de trabalho", "Denúncias",
     ]);
     expect(rh().permissoes).toHaveLength(emUso.filter((p) => p.categoria === "hr").length);
   });
@@ -412,8 +415,8 @@ describe("04/11: o editor mostra o que o servidor exige e esconde o que nada ver
   });
 });
 
-describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contratos, denúncias)", () => {
-  const ESCONDIDAS_04_11 = ["channels.view", "products.manage", "brands.edit", "client_contracts.manage", "hr.denuncias.gerir"];
+describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contratos; denúncias voltou a 10/11)", () => {
+  const ESCONDIDAS_04_11 = ["channels.view", "products.manage", "brands.edit", "client_contracts.manage"];
   const noEditor = () => agruparPorMenu(emUso).flatMap((g) => g.permissoes.map((p) => p.codigo));
 
   it("estão escondidas e fora do editor", () => {
@@ -445,18 +448,18 @@ describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contra
     expect(ESCONDIDAS_COM_GUARDA["operations.view"]).not.toContain("components/sidebar/menuConfig.ts");
   });
 
-  it("a guarda da página de Denúncias não muda: rota e menu continuam a pedir hr.denuncias.gerir", () => {
+  it("a guarda da página de Denúncias não muda: rota e menu continuam a pedir hr.denuncias.gerir (10/11: em uso, já não escondida)", () => {
     const app = readFileSync(join(SRC, "App.tsx"), "utf8");
     expect(app).toMatch(/path="\/rh-exemplo\/denuncias"[^\n]*permission="hr\.denuncias\.gerir"/);
     expect(readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8")).toContain('denuncias: ["hr.denuncias.gerir"]');
-    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["hr.denuncias.gerir", "operations.view", "leads.config", "deals.view"]);
+    expect(Object.keys(ESCONDIDAS_COM_GUARDA)).toEqual(["operations.view", "leads.config", "deals.view"]);
   });
 
   it("uma role que as tem não as perde ao gravar", () => {
     const linha = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: false });
     const visiveis = permissoesDoMenu([
       linha("lead_sources.view", "marketing"), linha("channels.view", "marketing"), linha("products.manage", "products"),
-      linha("brands.edit", "products"), linha("client_contracts.manage", "client_contracts"), linha("hr.denuncias.gerir", "hr"),
+      linha("brands.edit", "products"), linha("client_contracts.manage", "client_contracts"),
     ]);
     expect(visiveis.map((p) => p.codigo)).toEqual(["lead_sources.view"]);
     const gravado = fundirPermissoes(ESCONDIDAS_04_11, ["lead_sources.view"], visiveis);
@@ -590,5 +593,23 @@ describe("06/11: Pedidos de Proposta (deals, CRM antigo) saem do editor; deals.d
     expect(visiveis.map((p) => p.codigo)).toEqual(["deals.delete", "trash.view"]);
     const gravado = fundirPermissoes(["deals.view", "deals.create", "deals.edit", "deals.delete"], ["trash.view"], visiveis);
     expect([...gravado].sort()).toEqual(["deals.create", "deals.edit", "deals.view", "trash.view"]);
+  });
+});
+
+describe("10/11: workflows.edit no editor; system.manage escondida (reservada ao administrador de sistema)", () => {
+  it("workflows.edit está em uso, na categoria proposals, em Documentos do negócio › Propostas e orçamentos", () => {
+    expect(PERMISSOES_EM_USO.proposals).toContain("workflows.edit");
+    const grupo = agruparPorMenu(emUso).find((g) => g.rotulo === "Documentos do negócio")!;
+    const propostas = grupo.subgrupos.find((s) => s.rotulo === "Propostas e orçamentos")!;
+    expect(propostas.permissoes.map((p) => p.codigo)).toContain("workflows.edit");
+  });
+
+  it("system.manage está escondida (Plataforma) e fora do editor; um papel que a tem não a perde ao gravar", () => {
+    expect(PERMISSOES_ESCONDIDAS.platform).toContain("system.manage");
+    expect(CODIGOS_EM_USO).not.toContain("system.manage");
+    const linha = (code: string, category: string): LinhaPermissao => ({ code, name: code, category, is_dangerous: true });
+    const visiveis = permissoesDoMenu([linha("system.manage", "platform"), linha("platform.auth_audit_log.view", "platform")]);
+    expect(visiveis.map((p) => p.codigo)).toEqual(["platform.auth_audit_log.view"]);
+    expect(fundirPermissoes(["system.manage"], [], visiveis)).toEqual(["system.manage"]);
   });
 });

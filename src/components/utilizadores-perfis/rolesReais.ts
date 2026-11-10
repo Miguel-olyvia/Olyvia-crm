@@ -96,6 +96,32 @@ export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descric
     nome: "Converter em cliente (assistente IA)",
     descricao: "O assistente IA pode converter uma lead em cliente. No ecrã, a conversão pede Converter Leads.",
   },
+  // 10/11/2026: leads.edit verifica-se nas policies das pessoas/contactos, no assistente IA e no execute-workflow (permissoesEmUso.ts);
+  // o nome da base («Editar leads») não dizia o quê. Segue o padrão de clients.edit.
+  "leads.edit": {
+    nome: "Editar leads (identidade, contactos, NIF, origem, responsável)",
+    descricao: "Mudar identidade, contactos, NIF, origem e responsável de uma pessoa que ainda é lead. O assistente IA também a pede para editar, converter ou cancelar leads.",
+  },
+  // 10/11/2026: brands.view e product_attributes.view só as pede o assistente IA (ai-assistant/tools/catalog_read.ts); o Catálogo novo
+  // não as verifica. Como clients.create, o nome diz que é do assistente.
+  "brands.view": {
+    nome: "Ver marcas (assistente IA)",
+    descricao: "O assistente IA pode listar as marcas do catálogo. No ecrã, o Catálogo e custos não pede esta permissão.",
+  },
+  "product_attributes.view": {
+    nome: "Ver atributos de produto (assistente IA)",
+    descricao: "O assistente IA pode ler os atributos dos produtos e das categorias. No ecrã, o Catálogo e custos não pede esta permissão.",
+  },
+  // 10/11/2026: hr.pessoas.laborais.edit dá também papéis no Negócio (Direção, Comercial, Financeiro…), que abrem negócios de outros.
+  "hr.pessoas.laborais.edit": {
+    nome: "Editar dados laborais e papéis no Negócio",
+    descricao: "Gravar ofícios, cargo técnico e e-mail de trabalho, e dar ou tirar papéis no Negócio (Direção, Comercial, Financeiro…), que dão acesso a negócios de outros — só até às permissões do próprio perfil.",
+  },
+  // 10/11/2026: hr.pessoas.conta.criar exige também users.create (EXIGE_TAMBEM em dependenciasPermissoes.ts). O nome é o da base.
+  "hr.pessoas.conta.criar": {
+    nome: "Criar conta de acesso a uma pessoa",
+    descricao: "Criar de raiz a conta de entrada na aplicação para uma pessoa da ficha de RH, com o papel escolhido, e mandar-lhe as credenciais por e-mail. Exige também Criar utilizadores. Se o e-mail já tiver conta, é preciso Gerir papéis.",
+  },
 };
 
 export function permissaoDaBase(l: LinhaPermissao): Permissao {
