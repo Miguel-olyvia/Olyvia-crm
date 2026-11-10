@@ -28,7 +28,10 @@ export type ScopedTable =
   | "quotes"
   | "proposals"
   | "client_contracts"
-  | "schedule_items";
+  | "schedule_items"
+  // Só para filtrar ligações/ids devolvidos (rlsVisibleIds/visibleLinkIds); sem regra de edição aqui.
+  | "negocios"
+  | "anew_entities";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID_RE.test(v);
@@ -68,6 +71,41 @@ export async function filterVisible<T extends Record<string, any>>(
   if (list.length === 0) return [];
   const visible = await rlsVisibleIds(ctx, table, list.map((r) => r?.[key]));
   return list.filter((r) => visible.has(r?.[key]));
+}
+
+/**
+ * Ligações devolvidas por uma tool (ids de outros registos): só ficam as que o utilizador vê pela RLS de SELECT da
+ * tabela de destino — a mesma verdade do ecrã. Ordem preservada, sem duplicados. Erro → ScopeError (fecha).
+ */
+export async function visibleLinkIds(ctx: ExecCtx, table: ScopedTable, ids: Iterable<unknown>): Promise<string[]> {
+  const unique = Array.from(new Set(Array.from(ids).filter(isUuid)));
+  if (unique.length === 0) return [];
+  const visible = await rlsVisibleIds(ctx, table, unique);
+  return unique.filter((id) => visible.has(id));
+}
+
+/** Uma ligação simples (campo `<x>_id`): o id se o utilizador o vê, senão null. */
+export async function visibleLinkOrNull(ctx: ExecCtx, table: ScopedTable, id: unknown): Promise<string | null> {
+  if (!isUuid(id)) return null;
+  return (await rlsVisibleIds(ctx, table, [id])).has(id) ? id : null;
+}
+
+/**
+ * Como rlsVisibleIds, mas também só na organização ativa (lido com a service_role): um utilizador que vê várias
+ * organizações não recebe por aqui registos de outra. anew_entities não tem organização obrigatória → só RLS.
+ */
+export async function visibleIdsInActiveOrg(ctx: ExecCtx, table: ScopedTable, ids: Iterable<unknown>): Promise<Set<string>> {
+  const unique = Array.from(new Set(Array.from(ids).filter(isUuid)));
+  if (unique.length === 0 || !ctx.organizationId) return new Set();
+  if (table === "anew_entities") return rlsVisibleIds(ctx, table, unique);
+  const inOrg: string[] = [];
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const part = unique.slice(i, i + CHUNK);
+    const { data, error } = await ctx.supabase.from(table).select("id").in("id", part).eq("organization_id", ctx.organizationId);
+    if (error) throw new ScopeError(`não foi possível verificar o âmbito (${table}): ${String(error.message ?? error).slice(0, 120)}`);
+    for (const r of (data ?? []) as Array<{ id: string }>) if (r?.id) inOrg.push(r.id);
+  }
+  return rlsVisibleIds(ctx, table, inOrg);
 }
 
 const keysCacheSym = Symbol("crmScopeKeys");

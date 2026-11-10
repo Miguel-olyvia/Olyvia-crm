@@ -1,7 +1,7 @@
 // Deal tools — extracted verbatim from index.ts.
 
 import { requireWrite } from "../shared/authz.ts";
-import { filterVisible, scopeWindow } from "../shared/scope.ts";
+import { filterVisible, scopeWindow, visibleLinkIds, visibleLinkOrNull } from "../shared/scope.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -318,8 +318,10 @@ const getDealDetails: Handler = async (ctx, args): Promise<ToolResult> => {
   if (error) throw error;
   if (!deal) return { success: false, message: "PP não encontrado ou fora de scope." };
 
+  // Ligações (auditoria Administração F6): lidas com a service_role, devolvidas só as que o utilizador vê pela RLS
+  // de cada tabela (pessoa → anew_entities; orçamentos/propostas/contratos → a própria tabela, com permissão e âmbito).
   let client: { id: string; name: string } | null = null;
-  if (deal.entity_id) {
+  if (await visibleLinkOrNull(ctx, "anew_entities", deal.entity_id)) {
     const { data: e } = await supabase
       .from("anew_entities")
       .select("id, display_name")
@@ -335,9 +337,11 @@ const getDealDetails: Handler = async (ctx, args): Promise<ToolResult> => {
     .eq("organization_id", organizationId)
     .eq("status", "active");
 
-  const quoteIds = Array.from(new Set((links ?? []).map((l: any) => l.quote_id).filter(Boolean)));
-  const proposalIds = Array.from(new Set((links ?? []).map((l: any) => l.proposal_id).filter(Boolean)));
-  const contractIds = Array.from(new Set((links ?? []).map((l: any) => l.contract_id).filter(Boolean)));
+  const [quoteIds, proposalIds, contractIds] = await Promise.all([
+    visibleLinkIds(ctx, "quotes", (links ?? []).map((l: any) => l.quote_id)),
+    visibleLinkIds(ctx, "proposals", (links ?? []).map((l: any) => l.proposal_id)),
+    visibleLinkIds(ctx, "client_contracts", (links ?? []).map((l: any) => l.contract_id)),
+  ]);
 
   return {
     success: true,

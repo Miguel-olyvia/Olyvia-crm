@@ -74,10 +74,16 @@ function construtor(tabela: string) {
   return q;
 }
 
+const VISTAS_FROTA: Record<string, string> = {
+  fleet_v_maintenance_events: "fleet_maintenance_events", fleet_v_incidents: "fleet_incidents",
+  fleet_v_compliance: "fleet_compliance", fleet_v_ops_links: "fleet_ops_links",
+};
+
 /** O módulo "@/integrations/supabase/client" falso. */
 export const clienteFalso = {
   supabase: {
-    from: (t: string) => construtor(t),
+    // as vistas fleet_v_* das manutenções, ocorrências, vencimentos e ligações leem as mesmas linhas das tabelas
+    from: (t: string) => construtor(VISTAS_FROTA[t] ?? t),
     rpc: (nome: string, args: Record<string, unknown>) => bd.rpc(nome, args),
     auth: {
       getSession: async () => ({ data: { session: { user: { id: "auth-1", email: "ana@teste.pt" } } } }),
