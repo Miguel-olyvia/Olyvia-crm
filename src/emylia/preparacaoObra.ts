@@ -375,10 +375,11 @@ export const EC_NO_PAGAMENTO = "Emite-se com o pagamento validado, o plano aprov
  *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */
 export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] {
   const p = d.obra.plano, F: string[] = [];
-  // 10/11 (Rúben: «medidas antes da fatura»): no Negócio, as medidas e o plano vêm antes do pagamento; o contrato, depois dele. Os negócios
-  // que já estavam no Financeiro (do fluxo anterior) fazem as medidas na Obra, depois do pagamento, como antes
+  // 10/11 (Rúben: «medidas antes da fatura»; o contrato depois do plano e antes do pagamento): no Negócio, as medidas, o plano e o contrato
+  // vêm antes do pagamento. Os negócios que já estavam no Financeiro (do fluxo anterior) fazem as medidas na Obra, depois do pagamento
   const antesDoPagamento = d.fase <= 3;
   if (antesDoPagamento && !d.obra.ec && !d.orc?.vendaDireta && !retificacaoAceite(d)) F.push("retificar as medidas");
+  else if (antesDoPagamento && !d.obra.ec && !d.orc?.vendaDireta && planoAprovadoDe(d) && !contratoAssinado(d)) F.push("assinar o contrato");
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "registar a fatura do ERP e receber o pagamento");
   else if (!d.obra.ec) {
     if (!retificacaoAceite(d)) { if (!antesDoPagamento) F.push("retificar as medidas"); }
@@ -405,14 +406,14 @@ export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter
 export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parcela da adenda for validado.";
 
 /** 10/11 (o fluxo novo de 9/11): porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (as medidas, o plano,
- *  o pagamento, o contrato); com tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
+ *  o contrato, o pagamento); com tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
 export function semEncomendaCliente(d: Negocio): string {
-  // 10/11 (Rúben: «medidas antes da fatura»): a ordem é medidas, plano, pagamento, contrato
+  // 10/11 (Rúben): a ordem é medidas, plano, contrato, pagamento
   const direta = !!d.orc?.vendaDireta;
-  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado, do pagamento e do contrato assinado.";
-  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai depois do plano aprovado, do pagamento e do contrato assinado.";
-  if (!d.fin.pago) return "A encomenda de cliente emite-se depois do pagamento validado" + (direta ? "." : " e do contrato assinado.");
-  if (!contratoAssinado(d)) return "A encomenda de cliente sai quando o cliente assinar o contrato.";
+  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado, do contrato assinado e do pagamento.";
+  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai depois do plano aprovado, do contrato assinado e do pagamento.";
+  if (!contratoAssinado(d)) return "A encomenda de cliente sai depois do contrato assinado e do pagamento validado.";
+  if (!d.fin.pago) return "A encomenda de cliente emite-se quando o pagamento for validado.";
   return "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio.";
 }
 

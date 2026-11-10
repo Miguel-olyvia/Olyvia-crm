@@ -114,7 +114,7 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
         {/* «Aceitar», fixo em baixo */}
         <div className="border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">{mudadas ? `${mudadas} ${mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}. Se o preço mudar, refaz-se a proposta antes da fatura.` : "Tudo como na visita."}</p>
+            <p className="text-sm text-muted-foreground">{mudadas ? `${mudadas} ${mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}. Antes do contrato, a proposta refaz-se com o orçamento novo.` : "Tudo como na visita."}</p>
             <Button type="button" size="lg" className="min-h-12 shrink-0" disabled={feito || !podeRetificar(d)} onClick={aceitar}><Check className="mr-1.5 h-5 w-5" aria-hidden="true" />Aceitar as medidas</Button>
           </div>
         </div>

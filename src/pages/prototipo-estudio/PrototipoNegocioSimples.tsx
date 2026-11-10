@@ -1,7 +1,8 @@
 // 10/11 (Rúben: «não queremos muitos passos, queremos certezas e informação limpa nas screens»): a página do negócio, sem conta, com os
 // dados de exemplo do motor, para ver e mostrar o Negócio aceite (as medidas e o plano), o Financeiro (a fatura e o pagamento) e a Obra
 // (antes de arrancar) sem mexer em negócios reais. O negócio do Tiago Almeida (1027), refeito pelo fluxo de 10/11 («medidas antes da
-// fatura»): proposta aceite → medidas → plano aprovado → fatura e pagamento → contrato → encomenda → obra.
+// fatura»; o contrato depois do plano e antes do pagamento): proposta aceite → medidas → plano aprovado → contrato → fatura e pagamento →
+// encomenda → obra.
 import { useMemo, useReducer, useState } from "react";
 import { acoes, seed, type Estado } from "@/emylia/motor";
 import { FINANCEIRO, emFalta } from "@/emylia/campos";
@@ -24,7 +25,9 @@ function montar(etapa: Etapa): Estado {
     A.resolverConflitos(d.id);
     A.aprovarPlano(d.id);
     // o exemplo pode ter um técnico de férias que o «Resolver tudo» não muda (escolhido à mão): aprova-se na mesma, para a demonstração
-    if (d.obra.plano && d.obra.plano.estado === "por aprovar") { d.obra.plano.estado = "aprovado"; d.fase = 4; }
+    if (d.obra.plano && d.obra.plano.estado === "por aprovar") d.obra.plano.estado = "aprovado";
+    // o contrato, assinado pelo cliente (o envio ao portal tem o seu teste): passa a Financeiro
+    d.orc!.contrato = "enviado"; A.assinar(d.id);
     // os dados de faturação e da fatura, menos o NIF (para se ver o que o registo diz quando falta um dado)
     for (let i = 0; i < 4; i++) for (const c of emFalta([FINANCEIRO[0], FINANCEIRO[1]], d.f)) if (c.k !== "nif_fat") d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Sim" : "x";
     delete d.f.nif_fat;

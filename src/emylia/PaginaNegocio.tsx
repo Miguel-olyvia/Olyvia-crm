@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
-  alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
+  alertas, bloqueado, camposMedida, mudancasDeValor, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
@@ -47,7 +47,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, passoDe, permEmFaltaDoPasso } from "./permissoes";
+import { SEM_PERM, passoDe, permEmFaltaDoPasso, podeNeg } from "./permissoes";
 import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -435,7 +435,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       corpo: (
         <div className="space-y-6">
           <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">
-            {planoAprovadoDe(d) ? "Plano aprovado. Segue a fatura, no Financeiro." : retificacaoAceite(d) ? "As Operações ajustam e aprovam o plano no Estúdio. Aprovado, o negócio passa ao Financeiro." : "Primeiro, o supervisor aceita as medidas. Depois as Operações aprovam o plano e segue a fatura."}
+            {planoAprovadoDe(d) ? "Plano aprovado. Segue o contrato." : retificacaoAceite(d) ? "As Operações ajustam e aprovam o plano no Estúdio. Aprovado, segue o contrato." : "Primeiro, o supervisor aceita as medidas. Depois as Operações aprovam o plano e segue o contrato."}
           </p>
           {!d.obra.plano && retificacaoAceite(d) && <Button type="button" className="min-h-11" onClick={() => ctx.run(() => ctx.A.gerarPlano(d.id))}><CalendarClock className="mr-1.5 h-4 w-4" aria-hidden="true" />Gerar o plano</Button>}
           <AbrirEstudioPlano ctx={ctx} d={d} />
@@ -462,18 +462,21 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           )}
         </div>
       ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
-      // 10/11 (Rúben: «medidas antes da fatura»): aceite a proposta, o supervisor retifica as medidas e as Operações aprovam o plano, aqui
-      // no Negócio; com o plano aprovado passa ao Financeiro. O contrato vem depois do pagamento (passo da Obra).
-      ...(o.aceite && !o.vendaDireta ? [passoMedidas(), passoPlanoAntes()] : []),
+      // 10/11 (Rúben: «medidas antes da fatura»; «o contrato fica depois do plano da obra ser aprovado e antes do pagamento»): aceite a
+      // proposta, aqui no Negócio: o supervisor retifica as medidas, as Operações aprovam o plano e assina-se o contrato; assinado, o
+      // Financeiro. Refeita a proposta (as medidas ou o plano mudaram o valor), as medidas e o plano ficam feitos: saltam-se.
+      ...((o.aceite || d.f.retif_aceite) && !o.vendaDireta ? [passoMedidas(), passoPlanoAntes()] : []),
       // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial).
-      // 10/11 (o fluxo novo de 9/11): o contrato é um passo da Obra (depois do plano aprovado e do pagamento); aqui só fica nos negócios
-      // antigos que já o tinham gerado
-      ...(o.vendaDireta || !o.contrato ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
+      ...(o.vendaDireta || (!o.aceite && !o.contrato) ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
         <div className="space-y-10">
-          <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
-          <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
-            <ContratoDoc S={S} d={d} />
-          </Partilhar>
+          {!o.contrato && !planoAprovadoDe(d) && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">O contrato gera-se depois de as medidas serem aceites e de as Operações aprovarem o plano.</p>}
+          {/* 10/11: com o valor mudado, só o que mudou e o botão; o contrato vem depois da proposta nova aceite */}
+          {!o.contrato && planoAprovadoDe(d) && mudancasDeValor(d).length > 0 ? <RefazerComMudancas ctx={ctx} d={d} /> : <>
+            <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
+            <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : !planoAprovadoDe(d) ? "depois do plano aprovado" : "plano aprovado · pronto a gerar"}>
+              <ContratoDoc S={S} d={d} />
+            </Partilhar>
+          </>}
         </div>
       ) }, !!o.contrato) : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
     ];
@@ -523,15 +526,16 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     const passoRetif: Passo = { id: "retificacao", titulo: simples ? "Medidas" : "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d), semAvancar: true,
       resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : "por fazer"],
       corpo: <RetificacaoMedidas ctx={ctx} d={d} /> };
-    const passoContrato: Passo | null = o && !semObraAMedir && simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
+    // 10/11: o contrato assina-se no Negócio; aqui só nos negócios antigos que chegaram à Obra sem ele assinado
+    const passoContrato: Passo | null = o && !semObraAMedir && simples && o.contrato !== "assinado" ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
       <div className="space-y-10">
         {!planoAprovadoDe(d) && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">O contrato gera-se depois de as Operações aprovarem o plano (com as medidas retificadas).</p>}
-        <Campos grupo={E(PROPOSTA[1])} {...fx} ro={o.contrato === "assinado"} />
-        <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : planoAprovadoDe(d) ? "plano aprovado · pronto a gerar" : "depois do plano aprovado"}>
+        <Campos grupo={E(PROPOSTA[1])} {...fx} />
+        <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "enviado" ? "à espera da assinatura" : planoAprovadoDe(d) ? "plano aprovado · pronto a gerar" : "depois do plano aprovado"}>
           <ContratoDoc S={S} d={d} />
         </Partilhar>
       </div>
-    ) }, o.contrato === "assinado") : null;
+    ) }, false) : null;
     passos = [
       // 10/11 (Rúben: «medidas antes da fatura»): as medidas já vêm aceites do Negócio; aqui só nos negócios antigos que chegaram sem elas
       ...(semObraAMedir || retificacaoAceite(d) ? [] : [passoRetif]),
@@ -886,5 +890,23 @@ function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (sl
       <label className={ROT}>Hora<input type="time" step={900} value={hora} onChange={(e) => setHora(e.target.value)} className={cn(INP, "w-28")} /></label>
       <Button type="button" variant="outline" disabled={!dia || !hora} onClick={() => marcar(slotDe(dia, hora))}><CalendarClock className="mr-1.5 h-4 w-4" />Marcar visita</Button>
     </div>
+  );
+}
+
+/** 10/11 (Rúben: «ajustes ao plano e às medidas: a proposta tem de ser recriada com um novo orçamento, pois impacta valores»): antes do
+ *  contrato, o que mudou o valor e o botão que refaz a proposta (versão nova, com as medidas do local). Aceite a versão nova, as medidas e o
+ *  plano ficam feitos e segue o contrato. */
+function RefazerComMudancas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const R = mudancasDeValor(d), pode = podeNeg(ctx.S.role, "orcamento.editar");
+  return (
+    <section aria-labelledby="refazer-t" className="space-y-3 rounded-2xl border border-amber-300/70 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+      <h3 id="refazer-t" className="text-[17px] font-semibold tracking-tight">O valor mudou: a proposta tem de ser refeita</h3>
+      <ul className="list-disc space-y-0.5 pl-5 text-[15px]">{R.map((x) => <li key={x}>{x}</li>)}</ul>
+      <p className="text-[15px] text-muted-foreground">
+        As medidas do local passam para o orçamento e a proposta aceite fica guardada como versão.{R.some((x) => x.startsWith("Plano")) ? " As horas a mais do plano ajustam-se à mão no orçamento." : ""} O cliente aceita a versão nova; as medidas e o plano não se repetem.
+      </p>
+      <Button type="button" className="min-h-11" disabled={!pode} onClick={() => ctx.run(() => ctx.A.refazerComMudancas(d.id))}>Refazer a proposta com o orçamento novo</Button>
+      {!pode && <p className="text-sm text-muted-foreground">Quem refaz a proposta é o comercial (pede negocios.orcamento.editar).</p>}
+    </section>
   );
 }

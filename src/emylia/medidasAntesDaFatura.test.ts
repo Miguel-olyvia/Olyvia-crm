@@ -1,7 +1,8 @@
-// 10/11 (Rúben: «medidas antes da fatura»): aceite a proposta, o negócio fica no Negócio; o supervisor retifica as medidas e as Operações
-// aprovam o plano; só então passa ao Financeiro. A venda direta passa logo. Os negócios lidos da base acertam a fase pela mesma regra.
+// 10/11 (Rúben: «medidas antes da fatura»; «o contrato fica depois do plano aprovado e antes do pagamento»; «ajustes ao plano e às medidas:
+// a proposta tem de ser recriada com um novo orçamento; depois de aprovada, saltam-se o plano e as medidas»). Aceite a proposta, o negócio
+// fica no Negócio: medidas, plano, contrato; assinado, o Financeiro. A venda direta passa logo. Lidos da base, acertam a fase pela mesma regra.
 import { describe, expect, it } from "vitest";
-import { acertarFaseDasMedidas, acoes, proximo, seed, type Estado, type Negocio } from "./motor";
+import { LINHAS, acertarFaseDasMedidas, acoes, camposMedida, medida, mudancasDeValor, proximo, seed, type Estado, type Negocio } from "./motor";
 import { faltaParaArrancar, semEncomendaCliente } from "./preparacaoObra";
 
 const aceitePorMedir = () => {
@@ -35,14 +36,50 @@ describe("medidas antes da fatura (10/11)", () => {
     expect(d.obra.plano?.estado).toBe("por aprovar");
     expect(d.fase).toBe(3);
   });
-  it("com as medidas aceites e o plano aprovado, passa ao Financeiro (sem pagamento)", () => {
+  it("com as medidas aceites e o plano aprovado, segue o contrato; assinado, passa ao Financeiro (sem pagamento)", () => {
     const { S, d, A } = aceitePorMedir();
     aprovar(S, d, A);
     expect(d.f.retif_aceite).toBeTruthy();
     expect(d.obra.plano?.estado).toBe("aprovado");
-    expect(d.fin.pago).toBe(false);
+    expect(d.fase).toBe(3);
+    expect(proximo(d, S)).toMatchObject({ act: "enviarContrato", who: "comercial" });
+    d.orc!.contrato = "enviado"; A.assinar(d.id);
     expect(d.fase).toBe(4);
+    expect(d.obra.plano?.estado).toBe("aprovado"); // assinar não refaz o plano aprovado
+    expect(d.fin.pago).toBe(false);
     expect(proximo(d, S).t).toMatch(/fatura/i);
+  });
+  it("as medidas mudam o valor: refaz-se a proposta; aceite a versão nova, saltam-se as medidas e o plano", () => {
+    const { S, d, A } = aceitePorMedir();
+    const [k] = camposMedida(LINHAS[d.linha])[0];
+    const antes = medida(d.visita.med, k), v0 = d.orc!.versoes?.length ?? 0;
+    S.role = "operacoes";
+    A.retificarMedidas(d.id, { [k]: antes + 2 });
+    A.resolverConflitos(d.id); A.aprovarPlano(d.id);
+    expect(mudancasDeValor(d)[0]).toMatch(/→/);
+    expect(proximo(d, S)).toMatchObject({ act: "refazerComMudancas", who: "comercial" });
+    S.role = "comercial";
+    A.enviarContrato(d.id);
+    expect(d.orc!.contrato).toBeFalsy(); // primeiro, a proposta nova
+    A.refazerComMudancas(d.id);
+    expect(d.orc!.versoes?.length).toBe(v0 + 1);
+    expect(d.orc!.aceite).toBeFalsy();
+    expect(medida(d.visita.med, k)).toBe(antes + 2); // as medidas do local passam para o orçamento
+    expect(mudancasDeValor(d)).toEqual([]);
+    // o cliente aceita a versão nova: as medidas e o plano ficam feitos e segue o contrato
+    d.orc!.enviada = "hoje";
+    A.aceitar(d.id);
+    expect(d.fase).toBe(3);
+    expect(d.obra.plano?.estado).toBe("aprovado");
+    expect(d.f.retif_aceite).toBeTruthy();
+    expect(proximo(d, S)).toMatchObject({ act: "enviarContrato" });
+  });
+  it("uma tarefa a mais no plano também muda o valor", () => {
+    const { S, d, A } = aceitePorMedir();
+    aprovar(S, d, A);
+    const sid = d.obra.plano!.tasks.find((t) => t.svcs[0])!.svcs[0];
+    A.novaTarefaPlano(d.id, { sid, q: 1, fase: 1 });
+    expect(mudancasDeValor(d).join(" ")).toMatch(/1 tarefa a mais/);
   });
   it("o contrato não se gera antes do plano aprovado", () => {
     const { S, d, A } = aceitePorMedir();
@@ -71,9 +108,15 @@ describe("a fase lida da base (acertarFaseDasMedidas)", () => {
     expect(acertarFaseDasMedidas(d)).toBe(false);
     expect(d.fase).toBe(4);
   });
-  it("no Negócio com as medidas aceites e o plano aprovado passa ao Financeiro", () => {
+  it("no Negócio com as medidas aceites e o plano aprovado fica no Negócio (falta o contrato)", () => {
     const { d } = aceitePorMedir();
     d.f.retif_aceite = "2026-11-10"; d.obra.plano!.estado = "aprovado";
+    expect(acertarFaseDasMedidas(d)).toBe(false);
+    expect(d.fase).toBe(3);
+  });
+  it("no Negócio com o contrato assinado passa ao Financeiro", () => {
+    const { d } = aceitePorMedir();
+    d.orc!.contrato = "assinado";
     expect(acertarFaseDasMedidas(d)).toBe(true);
     expect(d.fase).toBe(4);
   });

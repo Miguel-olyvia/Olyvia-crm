@@ -96,6 +96,14 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     expect(d().orc!.contrato).toBeFalsy();
     { const papel = S.role; S.role = "operacoes"; A.retificarMedidas(id); A.aprovarPlano(id); S.role = papel; }
     expect(d().obra.plano!.estado).toBe("aprovado");
+    expect(d().fase).toBe(3);
+    // 10/11 (Rúben: «o contrato fica depois do plano aprovado e antes do pagamento»): assinado, passa ao Financeiro
+    { const papel = S.role; S.role = "comercial";
+      A.enviarContrato(id);
+      expect(d().orc!.contrato).toBe("enviado");
+      A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
+      S.role = papel; }
+    expect(d().orc!.contrato).toBe("assinado");
     expect(d().fase).toBe(4);
     expect(S.clientes.some((c) => c.deal === id)).toBe(true);
 
@@ -141,14 +149,8 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     S.role = "operacoes";
     preencher(d(), [OBRA[0]]);
     A.campo(id, "inicio", "2026-11-02");
-    // 10/11: as medidas e o plano já vêm aprovados do Negócio; depois do pagamento, o contrato (que emite a encomenda)
+    // 10/11: as medidas, o plano e o contrato vêm do Negócio; o pagamento validado emitiu a encomenda de cliente
     expect(d().obra.plano!.estado).toBe("aprovado");
-    expect(d().obra.ec, "sem contrato assinado, a encomenda espera").toBeFalsy();
-    S.role = "comercial";
-    A.enviarContrato(id);
-    expect(d().orc!.contrato).toBe("enviado");
-    A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
-    expect(d().orc!.contrato).toBe("assinado");
     expect(d().fase).toBe(5);
     S.role = "operacoes";
     const ref = d().obra.ec?.ref;

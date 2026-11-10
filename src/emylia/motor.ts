@@ -1332,16 +1332,37 @@ export interface Proximo {
   sim?: "aceitar" | "assinar" | "auto";
   done?: boolean;
 }
-/** 10/11 (Rúben: «medidas antes da fatura»): a proposta aceite (sem ser venda direta, sem contrato gerado) fica no Negócio até as medidas
- *  estarem aceites e o plano aprovado; o Financeiro vem depois (o contrato, depois do pagamento). */
+/** 10/11 (Rúben: «medidas antes da fatura»; «o contrato fica depois do plano da obra ser aprovado e antes do pagamento»): a proposta aceite
+ *  (sem ser venda direta) fica no Negócio: as medidas aceites, o plano aprovado e o contrato assinado; o Financeiro vem depois. */
 export const medidasAntesDaFatura = (d: Negocio): boolean =>
   d.fase === 3 && !!d.orc?.aceite && !d.orc.vendaDireta && d.orc.contrato !== "assinado" && !d.anulado && !d.perdido;
-/** Ao ler da base: os negócios aceites no Financeiro sem fatura nem contrato assinado (do fluxo de 9/11) voltam ao Negócio para as medidas e
- *  o plano; os do Negócio com as medidas aceites e o plano aprovado passam ao Financeiro (a base faz o mesmo: fn_neg_fase_minima). */
+/** 10/11 (Rúben: «ajustes ao plano e às medidas: a proposta tem de ser recriada com um novo orçamento, pois impacta valores; depois de
+ *  aprovada, saltam-se o plano e as medidas»): o que, nas medidas aceites ou no plano, muda o valor da proposta aceite. Vazio: segue o
+ *  contrato. As medidas comparam-se com as da visita (as do orçamento); o plano, com o que veio do orçamento (as horas e as tarefas). */
+export function mudancasDeValor(d: Negocio): string[] {
+  const R: string[] = [];
+  if (!d.f.retif_aceite || d.orc?.vendaDireta) return R;
+  for (const [k, l] of camposMedida(LINHAS[d.linha])) {
+    const r = d.f[`retif_${k}`];
+    if (r == null || r === "") continue;
+    const v = Number(r), antes = medida(d.visita.med, k);
+    if (Number.isFinite(v) && Math.abs(v - antes) > 0.001) R.push(`${l}: ${nfmt(antes)} → ${nfmt(v)}`);
+  }
+  const p = d.obra.plano;
+  if (p?.base) {
+    const dn = p.tasks.length - p.base.length, h = diferencas(p).horas;
+    if (dn > 0) R.push(`Plano: ${dn === 1 ? "1 tarefa a mais" : `${dn} tarefas a mais`}`);
+    else if (dn < 0) R.push(`Plano: ${-dn === 1 ? "1 tarefa a menos" : `${-dn} tarefas a menos`}`);
+    if (dn >= 0 && Math.abs(h) > 0.001) R.push(`Plano: ${h > 0 ? "+" : "−"}${nfmt(Math.abs(h))} h de trabalho`);
+  }
+  return R;
+}
+/** Ao ler da base: os negócios aceites no Financeiro sem fatura nem contrato assinado (do fluxo de 9/11) voltam ao Negócio para as medidas,
+ *  o plano e o contrato; os do Negócio com o contrato assinado passam ao Financeiro (a base faz o mesmo: fn_neg_fase_minima). */
 export function acertarFaseDasMedidas(d: Negocio): boolean {
-  const pronto = retificacaoAceite(d) && ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "");
-  if (medidasAntesDaFatura(d) && pronto) { d.fase = 4; d.valida = null; return true; }
-  if (d.fase !== 4 || !d.orc?.aceite || d.orc.vendaDireta || d.orc.contrato === "assinado" || d.fin.fatura || d.fin.pago || d.anulado || d.perdido || pronto) return false;
+  if (d.anulado || d.perdido || !d.orc?.aceite) return false;
+  if (d.fase === 3 && (d.orc.contrato === "assinado" || d.orc.vendaDireta)) { d.fase = 4; d.valida = null; return true; }
+  if (d.fase !== 4 || d.orc.vendaDireta || d.orc.contrato === "assinado" || d.fin.fatura || d.fin.pago) return false;
   d.fase = 3; d.valida = null;
   return true;
 }
@@ -1367,8 +1388,11 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         return { t: "O cliente pediu alterações", sub: `No portal, ${pc.q}: ${pediu || "sem detalhe"}. Faça a versão ${versaoAtual(o!) + 1}: a v${versaoAtual(o!)} fica guardada.`, btn: "Fazer a nova versão", act: "pedidoCliente", who: "comercial" };
       }
       if (!o!.aceite) return { t: "À espera do cliente", sub: "Proposta no portal desde " + o!.enviada + ".", who: "cliente", wait: true, sim: "aceitar" };
-      // 10/11 (Rúben: «medidas antes da fatura»): aceite, primeiro o supervisor retifica as medidas e as Operações aprovam o plano; depois o
-      // Financeiro. O contrato assina-se depois do pagamento (na Obra). Os negócios antigos, com o contrato já gerado, seguem como estavam.
+      // 10/11 (Rúben: «medidas antes da fatura»; «o contrato fica depois do plano aprovado e antes do pagamento»): aceite, primeiro o supervisor
+      // retifica as medidas e as Operações aprovam o plano; com eles, o contrato (o que segue, como antes); assinado, o Financeiro.
+      // 10/11 (Rúben): as medidas ou o plano mudam o valor: refaz-se a proposta (versão nova, com o orçamento novo) antes do contrato
+      if (medidasAntesDaFatura(d) && !o!.contrato && retificacaoAceite(d) && ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "") && mudancasDeValor(d).length)
+        return { t: "Refazer a proposta com o orçamento novo", sub: `Muda o valor: ${mudancasDeValor(d).join("; ")}. O cliente aceita a versão nova; as medidas e o plano ficam como estão.`, btn: "Refazer a proposta", act: "refazerComMudancas", who: "comercial" };
       if (medidasAntesDaFatura(d) && !(retificacaoAceite(d) && ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? ""))) {
         if (!d.obra.plano && retificacaoAceite(d)) return { t: "Operações: gerar o plano da obra", sub: "As medidas estão aceites. O plano nasce do orçamento.", btn: "Gerar o plano", act: "gerarPlano", who: "operacoes" };
         const a = passosAgora(d, S)[0];
@@ -1384,7 +1408,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
           ? { t: "O cliente pediu alterações ao contrato", sub: `Cláusulas: ${o!.contratoPedido.clausulas.map((x) => x.c.toLowerCase()).join(", ")}. O Jurídico revê e valida; depois o comercial envia a versão ${(o!.contratoVersoes?.length ?? 0) + 1}.`, btn: "Rever o contrato", act: "abrirRevisao", who: "juridico" }
           : o!.contratoRevisto
           ? { t: `Enviar o contrato (versão ${(o!.contratoVersoes?.length ?? 0) + 1})`, sub: `Revisto e validado pelo Jurídico (${o!.contratoRevisto.por}, ${o!.contratoRevisto.q}). Volta ao portal do cliente, por assinar.`, btn: "Enviar o contrato", act: "enviarContrato", who: "comercial" }
-          : { t: "O cliente aceitou. Gerar o contrato", sub: `Aceite ${o!.aceite === "hoje" ? "hoje" : "a " + o!.aceite}, no portal. O contrato segue a proposta e aparece no mesmo link do cliente, por assinar.`, btn: "Gerar o contrato", act: "enviarContrato", who: "comercial" };
+          : { t: "Plano aprovado. Gerar o contrato", sub: "Com as medidas certas e o plano aprovado. O contrato aparece no mesmo link do cliente, por assinar; assinado, segue a fatura.", btn: "Gerar o contrato", act: "enviarContrato", who: "comercial" };
       return { t: "—" };
     case 4:
       // 19/10: na V2 a Olyvia não emite faturas: o Financeiro regista a do programa certificado (sem botão no passo)
@@ -2175,6 +2199,27 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         avisar({ msg: `A preparar a versão ${n + 1}`, sub: "De volta à visita. Ao fechar o levantamento, o orçamento refaz-se", kind: "" });
       } else avisar({ msg: `A preparar a versão ${n + 1}`, sub: `Mude o que o cliente pediu e envie. A v${n} fica guardada`, kind: "" });
     },
+    /** 10/11 (Rúben: «ajustes ao plano e às medidas: a proposta tem de ser recriada com um novo orçamento»): as medidas retificadas passam
+     *  a ser as do orçamento, a proposta aceite fica guardada como versão e o orçamento refaz-se (os preços à mão ficam). O plano aprovado e
+     *  as medidas aceites ficam: quando o cliente aceitar a versão nova, segue o contrato. As horas a mais do plano ajustam-se à mão. */
+    refazerComMudancas(id: number) {
+      if (!exigePerm("orcamento.editar")) return;
+      const d = deal(id), o = d.orc;
+      const R = mudancasDeValor(d);
+      if (!o?.aceite || d.fase !== 3 || o.contrato === "assinado" || !R.length) return;
+      for (const [k] of camposMedida(LINHAS[d.linha])) {
+        const r = d.f[`retif_${k}`];
+        if (r != null && r !== "" && Number.isFinite(Number(r))) porMedida(d.visita.med, k, Number(r));
+      }
+      A.novaVersao(id, ["Medidas retificadas no local e plano ajustado"], R.join("; "), "orcamento");
+      if (d.orc?.enviada) return; // não refez (sem permissão ou sem proposta)
+      A.refazerOrcamento(id);
+      // o plano ajustado passa a ser a referência (o orçamento novo já o conta; o «Repor» volta a ele)
+      const p = d.obra.plano;
+      if (p) p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
+      log(d, "Proposta refeita com as medidas do local" + (R.some((x) => x.startsWith("Plano")) ? " e o plano ajustado" : "") + ": " + R.join("; "));
+      avisar({ msg: `Versão ${versaoAtual(d.orc!)} pronta a rever`, sub: R.some((x) => x.startsWith("Plano")) ? "As medidas já entram no orçamento; as horas a mais do plano ajustam-se à mão. Depois, enviar ao cliente." : "As medidas novas já entram no orçamento. Reveja e envie ao cliente.", kind: "ok" });
+    },
     /** 21/10: a versão nova faz-se num só sítio: mexer nos produtos da visita refaz o orçamento logo (sem voltar à visita);
      *  os preços, o desconto e as linhas à mão mantêm-se (preservarManuais). Só com a proposta por enviar. */
     refazerOrcamento(id: number) {
@@ -2453,13 +2498,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 10/11 (Rúben: «medidas antes da fatura»): aceite, o negócio fica no Negócio: o supervisor retifica as medidas e as Operações aprovam
       // o plano; só depois passa ao Financeiro (a fatura já com as medidas certas). A venda direta não tem obra a medir: passa logo.
       criarCliente(S, d);
-      if (d.orc!.vendaDireta) { fase(d, 4); prepararObra(d); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); return; }
-      prepararObra(d);
-      avisar({ msg: "O cliente aceitou a proposta", sub: "Segue: o supervisor retifica as medidas e as Operações aprovam o plano. Depois passa ao Financeiro.", kind: "auto" });
+      if (d.orc!.vendaDireta) { fase(d, 4); if (!d.obra.plano) prepararObra(d); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); return; }
+      // 10/11: a versão refeita depois das medidas e do plano: eles ficam (saltam-se); segue o contrato
+      if (retificacaoAceite(d) && planoAprovado(d)) { avisar({ msg: "O cliente aceitou a versão nova", sub: "As medidas e o plano já estão feitos: segue o contrato", kind: "auto" }); return; }
+      if (!d.obra.plano) prepararObra(d);
+      avisar({ msg: "O cliente aceitou a proposta", sub: "Segue: o supervisor retifica as medidas, as Operações aprovam o plano e assina-se o contrato. Depois, a fatura.", kind: "auto" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { anularPerda(d, "Recusa anulada pelo comercial"); }) } }); },
     enviarContrato(id: number) { if (!exigePerm("contrato.editar")) return; const d = deal(id);
       // 9/11: no fluxo novo o contrato vai com o plano aprovado (e as medidas retificadas)
+      if (d.fase === 3 && d.orc?.aceite && mudancasDeValor(d).length) { avisar({ msg: "Primeiro, a proposta nova", sub: "As medidas ou o plano mudam o valor: refaça a proposta com o orçamento novo", kind: "bad" }); return; }
       if ((d.fase >= 4 || d.orc?.aceite) && !planoAprovado(d)) { avisar({ msg: "Ainda não", sub: "O contrato envia-se depois de as Operações aprovarem o plano (com as medidas retificadas)", kind: "bad" }); return; }
       if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; if (!comEmail(d, "contrato")) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); acessoCliente(d, "contrato", "Contrato · " + obraDe(d)); },
     /** 23/10 (2.0): "Acesso ao portal" (o cabeçalho do negócio) e "Tentar de novo": o acesso do cliente outra vez, sem documento novo.
@@ -2498,8 +2546,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     assinar(id: number) {
       const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d);
-      // os negócios de antes (o contrato na fase Negócio) passam a Financeiro como antes; no fluxo novo já lá estão
-      if (d.fase < 4) { fase(d, 4); prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); return; }
+      // 10/11: o contrato assina-se no Negócio, depois do plano aprovado: assinado, passa a Financeiro (o plano fica como foi aprovado)
+      if (d.fase < 4) { fase(d, 4); if (!d.obra.plano) prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); return; }
       // 9/11: com o pagamento e o plano aprovado, o contrato assinado emite a encomenda de cliente (numa organização real, a base)
       avisar({ msg: "Contrato assinado", sub: "Segue a encomenda de cliente", kind: "auto" });
       if (d.fin.pago && planoAprovado(d) && !d.obra.ec && !real && emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o contrato assinado", kind: "auto", atraso: 500 });
@@ -3341,10 +3389,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // o início do plano passa para a preparação da obra (não se escreve duas vezes)
       const p = d.obra.plano!;
       if (p.origem === "orcamento" && !d.f.inicio) { const i = inicioDoPlano(p); if (i) d.f.inicio = isoDia(i); } avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
-      // 10/11 (Rúben: «medidas antes da fatura»): com as medidas aceites e o plano aprovado, o negócio passa ao Financeiro (a fatura)
-      if (d.fase === 3) { fase(d, 4); avisar({ msg: "Passou a Financeiro", sub: "Com as medidas certas e o plano aprovado, regista-se a fatura", kind: "auto", atraso: 500 }); return; }
       // 9/11: o plano aprovado (com o pagamento validado e o contrato assinado) emite a encomenda de cliente; numa organização real, a base
-      if (!d.obra.ec && d.orc?.contrato !== "assinado" && !d.orc?.vendaDireta) avisar({ msg: "Segue o contrato", sub: "Com o plano aprovado, o comercial gera e envia o contrato; assinado, sai a encomenda de cliente", kind: "auto", atraso: 500 });
+      if (!d.obra.ec && d.orc?.contrato !== "assinado" && !d.orc?.vendaDireta) avisar({ msg: "Segue o contrato", sub: d.fin.pago ? "Com o plano aprovado, o comercial gera e envia o contrato; assinado, sai a encomenda de cliente" : "Com o plano aprovado, o comercial gera e envia o contrato; assinado, segue a fatura", kind: "auto", atraso: 500 });
       else if (!d.obra.ec) {
         if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "O plano aprovado manda-a para as Encomendas de cliente: stock reservado; o que falta vai ao fornecedor", kind: "auto", atraso: 500 });
         else if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o plano aprovado", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
