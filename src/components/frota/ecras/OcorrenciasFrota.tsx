@@ -27,7 +27,8 @@ export function AcaoOcorrencia({ o }: { o: FleetIncident }) {
 }
 
 export function OcorrenciasFrota() {
-  const { F, dlg } = useFrotaCtx();
+  const { F, dlg, pode } = useFrotaCtx();
+  const verCustos = pode("custos").ok; // valores só com fleet.costs
   const [vista, setVista] = useVista();
   const base = F.ocorr;
   const l = base.filter((o) => vista === "todas" || (vista === "pend" ? pend(o) : o.kind === vista)).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
@@ -60,7 +61,7 @@ export function OcorrenciasFrota() {
                     <TableCell className="whitespace-nowrap">{fData(diaDe(o.occurred_at))}<div className="text-xs text-muted-foreground">{horaDe(o.occurred_at)}</div></TableCell>
                     <TableCell><Placa mat={viatura(F, o.vehicle_id)?.plate ?? ""} /></TableCell>
                     <TableCell><Selo tom={o.kind === "fine" ? "violet" : o.kind === "accident" ? "warn" : "neu"}>{TIPOS_OCORR[o.kind]}</Selo></TableCell>
-                    <TableCell><div className="flex flex-col"><span>{o.description}</span><span className="text-xs text-muted-foreground">{o.location}{o.amount ? " · " + fEur(o.amount) : ""}</span></div></TableCell>
+                    <TableCell><div className="flex flex-col"><span>{o.description}</span><span className="text-xs text-muted-foreground">{o.location}{o.amount ? " · " + (verCustos ? fEur(o.amount) : "—") : ""}</span></div></TableCell>
                     <TableCell>{o.driver_id ? condutor(F, o.driver_id)?.full_name : <div className="flex flex-col items-start gap-1">{o.kind === "fine" ? <Selo tom="bad">Por identificar</Selo> : "—"}{sug && o.kind === "fine" ? <span className="text-xs text-muted-foreground">Sugestão: {sug.full_name}</span> : null}</div>}</TableCell>
                     <TableCell>{pz ? <div className="flex flex-col items-start gap-1"><span>{fData(pz)}</span><Selo tom={dias(pz, F.hoje) <= 7 ? "bad" : "warn"}>{dias(pz, F.hoje) < 0 ? `Passou há ${-dias(pz, F.hoje)} d` : `Faltam ${dias(pz, F.hoje)} d`}</Selo></div> : "—"}</TableCell>
                     <TableCell><Selo tom={ESTADOS_OCORR[o.status][0]}>{ESTADOS_OCORR[o.status][1]}</Selo></TableCell>

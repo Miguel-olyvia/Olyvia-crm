@@ -72,10 +72,10 @@ describe("guardas das rotas e do menu", () => {
     expect(atalho("scheduling")?.permission).toBe("scheduling.items.view");
   });
 
-  it("Operação (menu) pede operations.view E pessoas.view (a rota /negocios exige pessoas.view)", () => {
+  it("Operação (menu) pede negocios.obra.executar OU negocios.obra.planear (as da vista Operações; a rota /negocios aceita-as)", () => {
     const op = topLevelItems.find((i) => i.id === "operacao")!;
-    expect(op.permissions).toEqual(["operations.view", "pessoas.view"]);
-    expect(op.requireAll).toBe(true);
+    expect(op.permissions).toEqual(["negocios.obra.executar", "negocios.obra.planear"]);
+    expect(op.requireAll).toBeFalsy();
     expect(linhaDe("/negocios")).toContain("<RotaNegocios>");
   });
 

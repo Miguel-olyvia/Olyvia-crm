@@ -25,6 +25,8 @@ export interface Ctx {
   podeVerNegocio?: boolean;
   /** 09/11: false: sem client_orders.view: as ligações ao Inventário («Abrir a encomenda no Inventário») não aparecem. Sem isto, aparecem. */
   podeVerInventario?: boolean;
+  /** 10/11: false: sem services.view no perfil (a rota /catalogo-custos): as ligações ao Catálogo («Abrir Catálogo») não aparecem. */
+  podeVerCatalogo?: boolean;
   /** 09/11: o id na base (negocios.id) do negócio com este número, para as leituras por negócio (obra_materiais_ler). Sem isto (o
    *  protótipo, os testes) ou null (ainda não gravado), não se lê. */
   idNegocioBase?: (numero: number) => string | null;

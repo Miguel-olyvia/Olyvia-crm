@@ -12,7 +12,8 @@ import { condutor, custoKmMedio, fData, fEur, fKm, rpcFrota, soma, useReferencia
 
 /** O estado do custo de uma deslocação e, se estiver pendente, o "Lançar custo" (com confirmação). */
 export function AcaoLigacao({ l }: { l: FleetOpsLink }) {
-  const { F, agir, confirmar } = useFrotaCtx();
+  const { F, agir, confirmar, pode } = useFrotaCtx();
+  if (!pode("custos").ok) return null; // estado e lançamento do custo só com fleet.costs
   if (l.ops_custo_id) return <Selo tom="ok">Custo lançado</Selo>;
   if (!l.ops_ordem_id) return <Selo tom="neu">Só obra: sem custo</Selo>;
   if (!((l.travel_cost ?? 0) > 0)) return <Selo tom="neu">Sem km</Selo>;
@@ -35,7 +36,8 @@ const ATALHOS: Atalho[] = [
 ];
 
 export function LigacoesFrota() {
-  const { F, dlg, tem } = useFrotaCtx();
+  const { F, dlg, tem, pode } = useFrotaCtx();
+  const verCustos = pode("custos").ok; // valores só com fleet.costs
   const obras = useReferenciaFrota("obras"), ordens = useReferenciaFrota("ordens");
   const [vista, setVista] = useVista();
   const pendente = (l: FleetOpsLink) => !l.ops_custo_id && !!l.ops_ordem_id && (l.travel_cost ?? 0) > 0;
@@ -47,9 +49,9 @@ export function LigacoesFrota() {
         acoes={<BotaoFrota variant="default" requer="gerirOuSelf" icone={Link2} aoClicar={() => dlg("ligar")}>Ligar a ordem ou obra</BotaoFrota>} />
       <KpiGrid>
         <KpiTile label="Deslocações" value={F.ligacoes.length} hint="ligadas a ordens e obras" />
-        <KpiTile label="Custo por lançar" value={fEur(soma(F.ligacoes.filter(pendente), (x) => x.travel_cost))} hint={`${F.ligacoes.filter(pendente).length} deslocação(ões)`} tone={F.ligacoes.some(pendente) ? "warn" : undefined}
-          onClick={() => setVista("pend")} active={vista === "pend"} actionLabel="Mostrar só as pendentes" />
-        <KpiTile label="Custo por km da frota" value={fEur(km ?? KM_FIXO)} hint={km != null ? "real, custos variáveis" : "sem dados: valor por omissão"} />
+        {verCustos ? <KpiTile label="Custo por lançar" value={fEur(soma(F.ligacoes.filter(pendente), (x) => x.travel_cost))} hint={`${F.ligacoes.filter(pendente).length} deslocação(ões)`} tone={F.ligacoes.some(pendente) ? "warn" : undefined}
+          onClick={() => setVista("pend")} active={vista === "pend"} actionLabel="Mostrar só as pendentes" /> : null}
+        {verCustos ? <KpiTile label="Custo por km da frota" value={fEur(km ?? KM_FIXO)} hint={km != null ? "real, custos variáveis" : "sem dados: valor por omissão"} /> : null}
       </KpiGrid>
       <Seccao titulo="Deslocações" acoes={<FilterPills ariaLabel="Vistas" value={vista} onChange={setVista} options={[{ value: "todas", label: "Todas" }, { value: "pend", label: "Custo por lançar", count: F.ligacoes.filter(pendente).length }]} />}>
         {l.length ? (
@@ -70,7 +72,7 @@ export function LigacoesFrota() {
                       <TableCell><div className="flex flex-col gap-0.5">{ordem ? <RefOps tipo="ordem" codigo={ordem.codigo} titulo={ordem.nome} /> : x.ops_ordem_id ? <span>Ordem</span> : null}{obra ? <RefOps tipo="obra" codigo={obra.codigo} titulo={obra.nome} /> : x.ops_obra_id ? <span>Obra</span> : null}</div></TableCell>
                       <TableCell>{x.driver_id ? condutor(F, x.driver_id)?.full_name : "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{x.km != null ? fKm(x.km) : "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fEur(x.travel_cost)}<div className="text-xs text-muted-foreground">{x.cost_per_km != null ? `${fEur(x.cost_per_km)}/km` : ""}</div></TableCell>
+                      <TableCell className="text-right tabular-nums">{verCustos ? <>{fEur(x.travel_cost)}<div className="text-xs text-muted-foreground">{x.cost_per_km != null ? `${fEur(x.cost_per_km)}/km` : ""}</div></> : "—"}</TableCell>
                       <TableCell className="text-right"><AcaoLigacao l={x} /></TableCell>
                     </TableRow>
                   );

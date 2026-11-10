@@ -127,7 +127,7 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
                           <p className="mt-0.5 text-sm text-muted-foreground">{a.d}</p>
                         </div>
                         <div className="flex gap-2">
-                          {a.go && <Button variant="outline" size="sm" onClick={go(() => A.nav(a.go!))}>Abrir Catálogo</Button>}
+                          {a.go && ctx.podeVerCatalogo !== false && <Button variant="outline" size="sm" onClick={go(() => A.nav(a.go!))}>Abrir Catálogo</Button>}
                           {a.key && <Button variant="ghost" size="sm" onClick={go(() => A.vistoAviso(d.id, a.key!))}>Visto</Button>}
                         </div>
                       </li>

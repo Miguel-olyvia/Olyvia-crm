@@ -165,7 +165,8 @@ export function ScheduleCalendarView({
 
   // Itens da Frota (reservas/manutenções das viaturas) são só de leitura na Agenda: não se arrastam.
   const isFleet = (item: ScheduleItem) => isFleetScheduleItem(item, boards);
-  const naoArrastavel = (item: ScheduleItem) => ehAusenciaProjectada(item) || isFleet(item);
+  const naoArrastavel = (item: ScheduleItem) =>
+    ehAusenciaProjectada(item) || isFleet(item) || !hasPermission('scheduling.items.edit');
 
   const handleDragStart = (e: React.DragEvent, item: ScheduleItem) => {
     if (naoArrastavel(item)) {

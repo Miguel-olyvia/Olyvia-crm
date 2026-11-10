@@ -470,8 +470,9 @@ export const CODIGOS_SEM_CATALOGO: readonly string[] = [
 export const ESCONDIDAS_COM_GUARDA: Readonly<Record<string, readonly string[]>> = {
   // 04/11: /rh-exemplo/denuncias (ProtectedRoute em App.tsx e PERMISSOES_RH.denuncias em menuConfig.ts); as RPCs da página não existem.
   "hr.denuncias.gerir": ["App.tsx", "components/sidebar/menuConfig.ts"],
-  // 05/11 (ronda 2): o item «Operação» do menu (com pessoas.view) e as ligações do Frota a /operacao; useOficiosObra só a cita num comentário.
-  "operations.view": ["components/sidebar/menuConfig.ts", "components/frota/contexto.ts", "hooks/useOficiosObra.ts"],
+  // 05/11 (ronda 2): as ligações do Frota a /operacao; useOficiosObra só a cita num comentário. 10/11: o item «Operação» do menu já não a
+  // pede (negocios.obra.executar/planear).
+  "operations.view": ["components/frota/contexto.ts", "hooks/useOficiosObra.ts"],
   // 06/11: a guarda da rota /lead-contact-results (sem ligação de nenhum ecrã vivo; a rota fica por agora).
   "leads.config": ["App.tsx"],
   // 06/11: o âmbito de deals.view na pesquisa para ligar orçamento/proposta a um pedido de proposta antigo (QuoteBuilder,

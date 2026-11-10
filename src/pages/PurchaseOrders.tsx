@@ -2641,7 +2641,7 @@ const PurchaseOrders = () => {
       });
       return;
     }
-    exportPurchaseOrdersToCSV(orders);
+    exportPurchaseOrdersToCSV(orders, { incluirValores: podeVerPrecosPo });
     toast({
       title: t('purchaseOrders.toast.exportSuccess'),
     });

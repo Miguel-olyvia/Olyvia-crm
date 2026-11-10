@@ -284,19 +284,10 @@ export function ScheduleItemDialog({
     return selectedUserEmployee?.reports_to === currentEmployeeId;
   }, [currentEmployeeId, formData.user_id, employees]);
 
-  // Check if current user is the owner of this item (is one of the assignees)
-  const isOwner = useMemo(() => {
-    if (!item || !currentUserId) return true; // New items - always allow
-    // Find if current user has a resource in the assignees
-    const userResourceIds = resources
-      .filter(r => r.user_id === currentUserId)
-      .map(r => r.id);
-    return item.assignees?.some(a => userResourceIds.includes(a.resource_id)) || 
-           item.created_by === currentUserId;
-  }, [item, currentUserId, resources]);
-
-  // Can edit only if owner OR has edit permission OR is system/tenant admin
-  const canEditItem = isOwner || isSystemAdmin || hasPermission('scheduling.items.edit');
+  // Editar exige scheduling.items.edit (a RLS também o exige); ser
+  // participante/criador não basta, senão o diálogo deixava editar e o
+  // servidor recusava ao gravar.
+  const canEditItem = isSystemAdmin || hasPermission('scheduling.items.edit');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
