@@ -50,7 +50,7 @@ interface Pedido {
 function accoesPermitidas(desvio: Desvio, permissoes: PermissoesAssiduidade): AccaoDesvio[] {
   return accoesDoDesvio(desvio).filter((accao) => {
     if (accao === "corrigir") return permissoes.corrigir;
-    if (accao === "lancar_picagem") return permissoes.picarOutros;
+    if (accao === "lancar_picagem" || accao === "lancar_saida") return permissoes.picarOutros;
     return permissoes.faltasEdit;
   });
 }

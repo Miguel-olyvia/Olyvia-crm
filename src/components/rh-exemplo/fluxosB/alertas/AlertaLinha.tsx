@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import { formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import { horaCurta } from "@/components/rh-exemplo/lib/assiduidade";
-import type { AccaoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
+import { textoDoDesvio, type AccaoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
 import type { Desvio } from "@/components/rh-exemplo/tiposAssiduidade";
 
 interface AlertaLinhaProps {
@@ -24,6 +24,7 @@ interface AlertaLinhaProps {
 const ROTULO_ACCAO: Record<AccaoDesvio, string> = {
   corrigir: "rhExemplo.pic.accao.corrigir",
   lancar_picagem: "rhExemplo.pic.accao.lancar_picagem",
+  lancar_saida: "rhExemplo.pic.accao.lancar_saida",
   marcar_falta: "rhExemplo.pic.accao.marcar_falta",
   anular_por_ausencia: "hr.assiduidade.accao.anularPorAusencia",
 };
@@ -35,6 +36,8 @@ export function AlertaLinha({ desvio, nome, chave, accoes, onAccao }: AlertaLinh
       ? `${horaCurta(desvio.hora_inicio)}–${horaCurta(desvio.hora_fim)}`
       : horaCurta(desvio.hora_inicio)
     : "";
+
+  const texto = textoDoDesvio(desvio, t);
 
   return (
     <li className="space-y-2 py-3 text-sm" data-testid={`rhb-alerta-${chave}`}>
@@ -48,7 +51,7 @@ export function AlertaLinha({ desvio, nome, chave, accoes, onAccao }: AlertaLinh
           {desvio.minutos ? ` · ${formatarHorasMinutos(desvio.minutos)}` : ""}
         </span>
       </div>
-      {desvio.detalhe && <p className="text-xs text-muted-foreground">{desvio.detalhe}</p>}
+      {texto && <p className="text-xs text-muted-foreground">{texto}</p>}
       {accoes.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {accoes.map((accao) => (

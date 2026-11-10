@@ -62,7 +62,7 @@ export const definicaoDoTipo = (tipo: TipoFila): DefinicaoDoTipo =>
   TIPOS_DE_ITEM.find((definicao) => definicao.tipo === tipo) ?? TIPOS_DE_ITEM[0];
 
 /** O que o RH pode fazer a um desvio (as mesmas tres accoes da fila de fim do dia). */
-export type AccaoDeDesvio = "corrigir" | "lancar_picagem" | "marcar_falta" | "anular_por_ausencia";
+export type AccaoDeDesvio = "corrigir" | "lancar_picagem" | "lancar_saida" | "marcar_falta" | "anular_por_ausencia";
 
 interface ItemComum {
   /** Estavel entre leituras: distingue itens de tipos diferentes com o mesmo id. */
@@ -318,6 +318,7 @@ export type IdDeAccao =
   | "recusar"
   | "corrigir"
   | "lancar_picagem"
+  | "lancar_saida"
   | "marcar_falta"
   | "anular_por_ausencia"
   | "aprovar_chefia"
@@ -380,10 +381,10 @@ export function accoesDoItem(item: ItemFila, permissoes: PermissoesDaFila, minha
     }
     case "alerta":
       return item.accoesPossiveis
-        // Lancar a picagem de outra pessoa so existe para quem tem `picarOutros`: sem ele a accao nao aparece (nao fica desactivada).
-        .filter((id) => id !== "lancar_picagem" || permissoes.picarOutros === true)
+        // Lancar a picagem (ou a saida) de outra pessoa so existe para quem tem `picarOutros`: sem ele a accao nao aparece (nao fica desactivada).
+        .filter((id) => !(id === "lancar_picagem" || id === "lancar_saida") || permissoes.picarOutros === true)
         .map((id) =>
-          id === "corrigir" ? accao(id, permissoes.corrigir, CHAVE_SEM_CORRIGIR) : accao(id, id === "lancar_picagem" ? true : permissoes.faltasEdit, CHAVE_SEM_FALTAS),
+          id === "corrigir" ? accao(id, permissoes.corrigir, CHAVE_SEM_CORRIGIR) : accao(id, id === "lancar_picagem" || id === "lancar_saida" ? true : permissoes.faltasEdit, CHAVE_SEM_FALTAS),
         );
     case "desvio_a_validar": {
       // Ninguem valida os proprios desvios (a base recusa); diz-se primeiro, como nas justificacoes.

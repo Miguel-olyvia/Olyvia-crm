@@ -8,7 +8,7 @@
  */
 import { diasDeCalendarioEntre, type PrazoDe } from "@/components/rh-exemplo/hooks/prazoJustificacao";
 import { minutosDeHora, motivoValido, type Resultado } from "@/components/rh-exemplo/lib/horarioTipos";
-import type { Desvio } from "@/components/rh-exemplo/tiposAssiduidade";
+import { TIPOS_DESVIO, type Desvio } from "@/components/rh-exemplo/tiposAssiduidade";
 
 export const TIPOS_ALERTA = [
   "planeado_sem_realizado",
@@ -195,11 +195,50 @@ export function alertasPorTratar(alertas: AlertaDia[]): AlertaDia[] {
 export const TOLERANCIAS_DESVIO = ["0", "5", "10", "15", "30"] as const;
 
 /** O que o RH pode fazer a um desvio, ligado a RPCs reais. Pedir justificacao e aceitar nao tem equivalente na base. */
-export type AccaoDesvio = "corrigir" | "lancar_picagem" | "marcar_falta" | "anular_por_ausencia";
+export type AccaoDesvio = "corrigir" | "lancar_picagem" | "lancar_saida" | "marcar_falta" | "anular_por_ausencia";
 
 /** Uma chave estavel para a linha: a base nao da id ao desvio. */
 export function chaveDoDesvio(desvio: Desvio, indice: number): string {
   return [desvio.pessoa_id, desvio.data, desvio.tipo, desvio.referencia_id ?? desvio.planeado_id ?? "", desvio.hora_inicio ?? "", indice].join("|");
+}
+
+/**
+ * O desvio nao traz o sentido da picagem sem par: so se le do inicio do detalhe da base («entrada sem saida: ...» ou «saida
+ * sem entrada: ...», `hr_assiduidade_desvios`, migration 20261207015900 e seguintes). E uma PISTA, nao uma garantia: se o
+ * texto da base mudar ou vier vazio, nenhuma das duas reconhece-se e o codigo falha de forma SEGURA (so «Corrigir», texto
+ * neutro; nunca «Lancar a saida»). Quem grava confirma o sentido lendo a propria picagem (`AccaoDoDesvio`).
+ * Nao ha teste que leia o texto do .sql: a regra do projecto proibe testar texto de SQL; o risco fica aqui documentado.
+ */
+export function saidaSemEntrada(desvio: Desvio): boolean {
+  return desvio.tipo === "pendente_par" && /^\s*sa[ií]da sem entrada/i.test(desvio.detalhe ?? "");
+}
+
+/** O inverso: o detalhe da base diz que a picagem sem par e uma ENTRADA. */
+export function entradaSemSaida(desvio: Desvio): boolean {
+  return desvio.tipo === "pendente_par" && /^\s*entrada sem sa[ií]da/i.test(desvio.detalhe ?? "");
+}
+
+const ACCOES_DESVIO: readonly string[] = ["corrigir", "lancar_picagem", "lancar_saida", "marcar_falta", "anular_por_ausencia"];
+
+/** Estreita um identificador de accao da fila para as accoes que o desvio admite. */
+export function ehAccaoDesvio(accao: string): accao is AccaoDesvio {
+  return ACCOES_DESVIO.includes(accao);
+}
+
+type Traduzir = (chave: string, params?: Record<string, string | number>) => string;
+
+/**
+ * O texto que o RH le sobre um desvio. E NOSSO, por tipo (pt-PT e en): o `detalhe` da base e texto tecnico em ASCII que cita
+ * RPCs e nao se mostra. Um tipo que ainda nao conhecemos usa o detalhe da base, mas so se nao citar uma RPC; senao, nada.
+ */
+export function textoDoDesvio(desvio: Desvio, t: Traduzir): string | null {
+  if (desvio.tipo === "pendente_par") {
+    const variante = saidaSemEntrada(desvio) ? "saida_sem_entrada" : entradaSemSaida(desvio) ? "pendente_par" : "pendente_par_neutro";
+    return t(`rhExemplo.pic.desvio.texto.${variante}`);
+  }
+  if ((TIPOS_DESVIO as readonly string[]).includes(desvio.tipo)) return t(`rhExemplo.pic.desvio.texto.${desvio.tipo}`);
+  const detalhe = desvio.detalhe?.trim() ?? "";
+  return detalhe !== "" && !/rpc_/i.test(detalhe) ? detalhe : null;
 }
 
 /**
@@ -218,7 +257,10 @@ export function accoesDoDesvio(desvio: Desvio): AccaoDesvio[] {
     case "realizado_sem_planeado":
       return desvio.referencia_id ? ["corrigir"] : [];
     case "pendente_par":
-      return desvio.referencia_id ? ["corrigir"] : [];
+      // «Lancar a saida» so onde o detalhe diz POSITIVAMENTE que e uma ENTRADA: lancar outra saida a uma saida orfa seria
+      // duplicar, e um texto irreconhecivel nao permite afirma-lo.
+      if (!desvio.referencia_id) return [];
+      return entradaSemSaida(desvio) ? ["corrigir", "lancar_saida"] : ["corrigir"];
     case "falta_coberta_por_ausencia":
       return ["anular_por_ausencia"];
     default:

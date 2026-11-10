@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/select";
 import { useTranslation } from "@/hooks/useTranslation";
 import { formatarDuracao, horaCurta } from "@/components/rh-exemplo/lib/assiduidade";
+import { textoDoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
 import type { Desvio } from "@/components/rh-exemplo/tiposAssiduidade";
 
 const TOLERANCIAS = ["0", "5", "10", "15", "30"] as const;
@@ -191,7 +192,9 @@ export function FilaDesvios({
                   </span>
                 </h3>
                 <ul className="divide-y">
-                  {grupo.desvios.map((desvio, indice) => (
+                  {grupo.desvios.map((desvio, indice) => {
+                    const texto = textoDoDesvio(desvio, t);
+                    return (
                     <li key={`${desvio.pessoa_id}-${desvio.data}-${desvio.tipo}-${indice}`}>
                       <button
                         type="button"
@@ -214,12 +217,11 @@ export function FilaDesvios({
                             {formatarDuracao(desvio.minutos)}
                           </span>
                         )}
-                        {desvio.detalhe && (
-                          <span className="text-xs text-muted-foreground">{desvio.detalhe}</span>
-                        )}
+                        {texto && <span className="text-xs text-muted-foreground">{texto}</span>}
                       </button>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </section>
             ))}

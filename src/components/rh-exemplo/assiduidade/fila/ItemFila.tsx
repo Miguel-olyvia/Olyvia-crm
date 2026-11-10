@@ -15,6 +15,7 @@ import { formatarHorasMinutos } from "@/components/rh-exemplo/fluxosB/horario/fo
 import type { AccaoDoItem, IdDeAccao, ItemFila } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
 import { formatarDias } from "@/components/rh-exemplo/lib/ausencias";
 import { horaCurta } from "@/components/rh-exemplo/lib/assiduidade";
+import { textoDoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { diasDesdeEnvio, resumoDoMotivo, textoEhSensivel } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { EtiquetaDoTipo } from "./aspectoTipoFila";
 
@@ -36,6 +37,7 @@ const ROTULO: Record<IdDeAccao, string> = {
   recusar: "rhJust.rh.recusar",
   corrigir: "rhExemplo.pic.accao.corrigir",
   lancar_picagem: "rhExemplo.pic.accao.lancar_picagem",
+  lancar_saida: "rhExemplo.pic.accao.lancar_saida",
   marcar_falta: "rhExemplo.pic.accao.marcar_falta",
   anular_por_ausencia: "hr.assiduidade.accao.anularPorAusencia",
   aprovar_chefia: "hr.ausencias.accao.aprovarComoChefia",
@@ -71,6 +73,7 @@ export function ItemDaFila({ item, nome, hoje, accoes, aoAccionar, aoAbrirDetalh
   const { t } = useTranslation();
   const idDom = idDoItemNoDom(item);
   const dia = dataCurta(item.data);
+  const textoAlerta = item.tipo === "alerta" ? textoDoDesvio(item.desvio, t) : null;
   const idPorque = `${idDom}-porque`;
   const razoes = [...new Set(accoes.filter((a) => !a.permitida && a.porque).map((a) => a.porque as string))];
 
@@ -174,7 +177,7 @@ export function ItemDaFila({ item, nome, hoje, accoes, aoAccionar, aoAbrirDetalh
           {textoEhSensivel(item.justificacao) ? t("rhFila.item.textoReservado") : resumoDoMotivo(item.justificacao.motivo)}
         </p>
       )}
-      {item.tipo === "alerta" && item.desvio.detalhe && <p className="text-xs text-muted-foreground">{item.desvio.detalhe}</p>}
+      {textoAlerta && <p className="text-xs text-muted-foreground">{textoAlerta}</p>}
       {item.tipo === "desvio_a_validar" && item.validacao.detalhe && <p className="text-xs text-muted-foreground">{item.validacao.detalhe}</p>}
       {item.tipo === "desvio_a_validar" && item.validacao.planeadoMin !== undefined && item.validacao.realizadoMin !== undefined && (
         <p data-testid={`${idDom}-medidas`} className="text-xs tabular-nums text-muted-foreground">
