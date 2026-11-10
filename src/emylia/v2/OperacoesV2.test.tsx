@@ -101,6 +101,7 @@ describe("Operações V2 · plano por aprovar", () => {
     S.role = "financeiro"; acoes(S, () => {}, (fn) => fn()).validar(1027); S.role = "operacoes"; // o recibo põe a obra a andar (e emite a encomenda no Inventário): plano por aprovar
     d.obra.plano = gerarPlano(d, S); // o plano de exemplo das 4 fases, com as férias do Sérgio (o conflito que este ecrã resolve)
     expect(d.obra.plano!.estado).toBe("por aprovar");
+    d.f.retif_aceite = "2026-10-14"; // 9/11: o supervisor já retificou as medidas (o plano aprova-se depois delas)
     S.op = 1027;
     const { container } = montar(S);
     const pl = sec("Plano");

@@ -34,7 +34,7 @@ function preparar(soMaoDeObra = false) {
   const avisar = vi.fn();
   const A: A_ = acoes(S, avisar, (fn) => fn());
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); A.aprovarPlano(d.id);
+  A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   if (soMaoDeObra) A.criarAdenda(d.id, [], "Surpresa em obra", { livres: [{ n: "Afinar as portas", h: 4, preco: 300, perfil: "Montador", mats: [] }] });
   else A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");

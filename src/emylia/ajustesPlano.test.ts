@@ -72,13 +72,13 @@ describe("ajustar o plano (Operações)", () => {
     p.inicio = "2026-10-19";
     A.ajustarTarefa(d.id, ti, { dia: 2 }); // quarta, 21
     expect(conflitos(p).some((c) => c.t === p.tasks[ti])).toBe(true);
-    A.aprovarPlano(d.id);
+    (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     expect(p.estado).toBe("por aprovar");
   });
 
   it("mudar um plano aprovado volta a por aprovar (e avisa); repor volta ao orçamento", () => {
     const { A, d, p, avisos } = preparar();
-    A.aprovarPlano(d.id);
+    (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     expect(p.estado).toBe("aprovado");
     const base = JSON.stringify(p.tasks.map((t) => [t.dia, t.dur, t.tec]));
     A.ajustarTarefa(d.id, 0, { dur: p.tasks[0].dur + 1 });

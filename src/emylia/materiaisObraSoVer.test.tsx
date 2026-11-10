@@ -30,7 +30,7 @@ function preparar() {
   let A!: Parameters<Parameters<typeof Montar>[0]["children"]>[0]["A"];
   render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
   cleanup();
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
+  A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
   A.role("operacoes");
   const p = d.obra.plano!, ti = p.tasks.findIndex((t) => t.svcs.includes("revest"));
   const base = materiaisDaTarefa(p.tasks[ti], S.svc).map((m) => ({ ...m }));

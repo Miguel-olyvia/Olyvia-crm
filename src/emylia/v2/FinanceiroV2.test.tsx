@@ -65,7 +65,7 @@ describe("Financeiro V2 · validar pagamentos", () => {
     // 9/11 (Rúben): a encomenda de cliente só sai com o plano aprovado: o pagamento passa à Obra e as Operações aprovam o plano
     expect(d.obra.ec).toBeUndefined();
     expect(screen.getByText(/A obra está a andar/)).toBeInTheDocument();
-    { const A = acoes(S, () => {}, (fn) => fn()); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); }
+    { const A = acoes(S, () => {}, (fn) => fn()); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); }
     expect(d.obra.ec).toMatchObject({ n: "EC-1027", estado: "emitida", ref: "CT 2026/1027" });
     const fs = faturasDe(S, d);
     expect(fs[0]).toMatchObject({ numero: "FT 2026/600", recibo: d.fin.recibo!.n, pagamento: { conta: "Banco B · conta obras", ref: "TRF 1013-221" } });

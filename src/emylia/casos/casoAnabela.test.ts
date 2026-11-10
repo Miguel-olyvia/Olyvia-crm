@@ -90,11 +90,9 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     A.enviar(id);
     expect(d().orc!.enviada, "enviar: " + JSON.stringify(avisos.slice(-2))).toBeTruthy();
     A.aceitar(id);
-    A.enviarContrato(id);
-    expect(d().orc!.contrato).toBe("enviado");
-    A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
-    expect(d().orc!.contrato).toBe("assinado");
+    // 9/11 (o fluxo novo): a proposta aceite passa logo ao Financeiro; o contrato assina-se na Obra, depois das medidas e do plano
     expect(d().fase).toBe(4);
+    expect(d().orc!.contrato).toBeFalsy();
     expect(S.clientes.some((c) => c.deal === id)).toBe(true);
 
     /* ---------------- 5. o Financeiro: a 1.ª prestação (adjudicação, 30%) põe a obra a andar */
@@ -139,8 +137,18 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     S.role = "operacoes";
     preencher(d(), [OBRA[0]]);
     A.campo(id, "inicio", "2026-11-02");
+    // 9/11: o supervisor retifica as medidas, as Operações aprovam o plano e só então o contrato (que emite a encomenda)
+    A.retificarMedidas(id);
     A.aprovarPlano(id);
     expect(d().obra.plano!.estado).toBe("aprovado");
+    expect(d().obra.ec, "sem contrato assinado, a encomenda espera").toBeFalsy();
+    S.role = "comercial";
+    A.enviarContrato(id);
+    expect(d().orc!.contrato).toBe("enviado");
+    A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
+    expect(d().orc!.contrato).toBe("assinado");
+    expect(d().fase).toBe(5);
+    S.role = "operacoes";
     const ref = d().obra.ec?.ref;
     console.log("ENCOMENDA DE CLIENTE:", d().obra.ec?.n, ref);
     if (ref) expect(receberTudo(ref)).toBe("");

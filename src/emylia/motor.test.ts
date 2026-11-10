@@ -80,20 +80,20 @@ describe("protótipo de Negócios", () => {
     expect(d().obra.plano?.origem).toBe("orcamento");
     expect(conflitos(d().obra.plano!)).toHaveLength(0); // escolhe o técnico que não está de férias
     // o pagamento primeiro: o plano não se aprova antes dele
-    A.aprovarPlano(id);
+    (A.retificarMedidas(id), A.aprovarPlano(id));
     expect(d().obra.plano!.estado).toBe("por aprovar");
     preencher(d(), FINANCEIRO);
     // 19/10: a fatura e o pagamento são do Financeiro (permissoes.ts)
     S.role = "financeiro";
     A.emitir(id);
-    A.validar(id); A.role("operacoes"); A.aprovarPlano(id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
+    A.validar(id); A.role("operacoes"); (A.retificarMedidas(id), A.aprovarPlano(id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */
     S.role = "operacoes"; // 4/11: aprovar e arrancar o plano pede negocios.obra.planear (as Operações)
     expect(d().fase).toBe(5);
     // validado o pagamento, a encomenda de cliente é emitida logo no Inventário novo (sem aprovação)
     expect(d().obra.ec).toMatchObject({ n: "EC-" + id, estado: "emitida", ref: "CT 2026/" + id });
     expect(lerInventario().ecs.some((e) => e.id === "EC-" + id && e.origin.ref === "CT 2026/" + id)).toBe(true);
     expect(d().obra.mats).toBeTruthy();
-    A.aprovarPlano(id);
+    (A.retificarMedidas(id), A.aprovarPlano(id));
     preencher(d(), [OBRA[0]]);
     // 19/10: só arranca com os materiais no armazém (as encomendas a fornecedor aprovadas e recebidas no Inventário)
     expect(receberTudo("CT 2026/" + id)).toBe("");

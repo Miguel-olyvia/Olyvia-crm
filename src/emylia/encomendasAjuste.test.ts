@@ -16,7 +16,7 @@ const preparar = () => {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   return { S, A, d };
 };
-const pagar = ({ A, d }: ReturnType<typeof preparar>) => { preencher(d); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ };
+const pagar = ({ A, d }: ReturnType<typeof preparar>) => { preencher(d); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ };
 const ecInv = (id: string) => lerInventario().ecs.find((e) => e.id === id);
 
 describe("encomendas de ajuste: os materiais novos depois da encomenda inicial", () => {

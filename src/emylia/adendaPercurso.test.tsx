@@ -31,7 +31,7 @@ function preparar() {
   render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
   cleanup();
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); A.aprovarPlano(d.id);
+  A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   return { S, A, d };
 }
@@ -187,7 +187,7 @@ describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
     // 12. o arranque: os materiais recebidos e o plano aprovado de novo (a adenda reabriu-o)
     expect(receberTudo("CT 2026/1027")).toBe("");
     expect(receberTudo("CT 2026/1027 · A1")).toBe("");
-    A.role("operacoes"); A.aprovarPlano(d.id);
+    A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     expect(faltaParaArrancar(d)).toEqual([]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("em curso");

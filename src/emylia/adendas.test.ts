@@ -10,7 +10,7 @@ describe("trabalhos a mais (adenda)", () => {
   it("a adenda nasce por verificar; vai ao cliente com o preço e os dias; assinada, as tarefas entram no plano na fase do serviço", () => {
     const { A, d } = preparar();
     const n0 = d.obra.plano!.tasks.length;
-    A.aprovarPlano(d.id);
+    (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
     const a = d.adendas![0];
     expect(a).toMatchObject({ n: "AD 2026/1027-1", estado: "rascunho", motivo: "O cliente pediu", verif: false });

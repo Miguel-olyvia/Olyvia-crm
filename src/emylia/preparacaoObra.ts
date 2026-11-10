@@ -106,6 +106,17 @@ export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string
   return { n, estado: "emitida", criada: quando, linhas, valor: r2(valor), custo: r2(custo) };
 }
 
+/* ------------------------------------------------------------------ 9/11: o fluxo novo da obra */
+// Rúben (9/11): proposta aceite → Financeiro valida o pagamento → o supervisor retifica as medidas (aceites) → as Operações validam e ajustam o
+// plano → contrato assinado → encomenda (a fornecedor) e tudo recebido → início da obra. A venda direta não tem obra a medir nem contrato.
+/** As medidas retificadas pelo supervisor e aceites (o primeiro passo da Obra). */
+// os negócios de antes, com a encomenda já emitida pelo fluxo antigo, não ficam presos a um passo que não existia
+export const retificacaoAceite = (d: Negocio): boolean => !!d.f.retif_aceite || !!d.orc?.vendaDireta || !!d.obra.ec;
+/** O contrato assinado (na venda direta não há contrato). */
+export const contratoAssinado = (d: Negocio): boolean => d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta;
+/** O plano aprovado pelas Operações (ou já em curso, ou concluído). */
+export const planoAprovadoDe = (d: Negocio): boolean => ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "");
+
 /* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
 /** O ofício de uma tarefa pelo nome (os planos e os serviços de antes, sem o perfil pelo id) → o tipo de técnico (TECS.sk).
  *  22/10: um ofício que não se reconhece fica "" (por atribuir); antes ia para o Montador. */
@@ -291,14 +302,20 @@ export const TRILHOS: { k: Trilho; t: string }[] = [
 /** O plano espera pelo pagamento confirmado. */
 export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";
 /** A encomenda de cliente nasce do pagamento validado (no Inventário novo). */
-export const EC_NO_PAGAMENTO = "Emite-se quando o plano da obra for aprovado (com o pagamento validado).";
+export const EC_NO_PAGAMENTO = "Emite-se com o pagamento validado, o plano aprovado e o contrato assinado.";
 
 /** O que falta para arrancar a obra (vazio = pode arrancar): o pagamento, a encomenda de cliente, os materiais garantidos no Inventário
  *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */
 export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] {
   const p = d.obra.plano, F: string[] = [];
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "registar a fatura do ERP e receber o pagamento");
-  else if (!d.obra.ec) F.push("emitir a encomenda de cliente");
+  // 9/11: as medidas, o plano e o contrato antes da encomenda
+  else if (!d.obra.ec) {
+    if (!retificacaoAceite(d)) F.push("retificar as medidas");
+    else if (!planoAprovadoDe(d)) { /* «aprovar o plano» entra no fim, como antes */ }
+    else if (!contratoAssinado(d)) F.push("assinar o contrato");
+    else F.push("emitir a encomenda de cliente");
+  }
   else if (usarProntidao(d.obra.ec)) F.push(...faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)));
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   // 21/10 (decisão B): as adendas assinadas antes do arranque também: o pagamento de cada uma e a encomenda dos materiais dela (como as
@@ -337,8 +354,8 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
 
   // a encomenda de cliente: nasce do pagamento validado, no Inventário novo
   if (!ec) {
-    L.push(d.fin.pago
-      ? { id: "ec", trilho: "ec", estado: "agora", who: "financeiro", t: "Emitir a encomenda de cliente", sub: "O pagamento está validado mas a encomenda não chegou ao Inventário. Emita-a de novo.", act: "emitirEc", btn: "Emitir no Inventário" }
+    L.push(d.fin.pago && planoAprovadoDe(d) && contratoAssinado(d)
+      ? { id: "ec", trilho: "ec", estado: "agora", who: "financeiro", t: "Emitir a encomenda de cliente", sub: "O pagamento, o plano e o contrato estão prontos mas a encomenda não chegou ao Inventário. Emita-a de novo.", act: "emitirEc", btn: "Emitir no Inventário" }
       : { id: "ec", trilho: "ec", estado: "espera", who: null, t: "Encomenda de cliente", sub: EC_NO_PAGAMENTO });
   } else {
     // 30/10: a da base vem sem valor no negócio: soma-se das linhas (totaisDaEc); sem o documento lido, sem valor
@@ -373,11 +390,28 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
     if (k) L.push({ id: "pl-ad-" + a.n, trilho: "plano", estado: "feito", who: null, t: `Tarefas da adenda ${a.n} juntas ao plano · +${N} ${N === 1 ? "dia" : "dias"}`,
       sub: `${k} ${k === 1 ? "tarefa" : "tarefas"} no fim da fase de cada serviço.` });
   }
+  // 9/11: o primeiro passo da Obra é o supervisor retificar as medidas no local; o plano aprova-se depois delas aceites
+  if (!d.orc?.vendaDireta) L.push(retificacaoAceite(d)
+    ? { id: "ret", trilho: "plano", estado: "feito", who: "operacoes", t: "Medidas retificadas e aceites", sub: d.f.retif_aceite ? `A ${d.f.retif_aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}.` : "" }
+    : { id: "ret", trilho: "plano", estado: d.fin.pago ? "agora" : "espera", who: "operacoes", t: "Retificar as medidas", sub: d.fin.pago ? "O supervisor confirma as medidas no local." : SO_DEPOIS_DO_PAGAMENTO, act: d.fin.pago ? "abrirRetificacao" : undefined, btn: "Retificar as medidas" });
   L.push(p.estado === "por aprovar" && !d.fin.pago
     ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DO_PAGAMENTO }
+    : p.estado === "por aprovar" && !retificacaoAceite(d)
+    ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: "Depois de as medidas serem retificadas e aceites." }
     : p.estado === "por aprovar"
     ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
     : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
+  // 9/11: o contrato assina-se com o plano aprovado (as medidas e as datas certas), antes da encomenda
+  if (!d.orc?.vendaDireta) {
+    const c = d.orc?.contrato;
+    L.push(c === "assinado"
+      ? { id: "ct", trilho: "plano", estado: "feito", who: "comercial", t: "Contrato assinado", sub: "" }
+      : !planoAprovadoDe(d)
+      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: "Depois de o plano ser aprovado." }
+      : c === "enviado"
+      ? { id: "ct", trilho: "plano", estado: "espera", who: null, t: "À espera da assinatura do contrato", sub: "No portal do cliente." }
+      : { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Gerar e enviar o contrato", sub: "Com o plano aprovado: vai ao portal do cliente, por assinar.", act: "enviarContrato", btn: "Gerar o contrato" });
+  }
 
   // o pagamento
   L.push(d.fin.fatura
