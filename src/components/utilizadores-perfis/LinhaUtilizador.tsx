@@ -32,6 +32,10 @@ function vinculosVisiveis(u: Utilizador, roles: Role[], organizacoes: Organizaca
   });
 }
 
+/** O cadeado só diz «super administrador» quando o é (super_admin/system_admin num vínculo ativo); nos outros casos é falta de permissão. */
+const ehSuperAdministrador = (u: Utilizador, roles: Role[]): boolean =>
+  u.vinculos.some((v) => v.ativo && [v.roleCodigo, roles.find((r) => r.id === v.roleId)?.codigo].some((c) => c === "super_admin" || c === "system_admin"));
+
 /** Uma linha compacta (cerca de 45 px). O nome é o botão que abre a ficha; o chip de organização e role abre a role. */
 export function LinhaUtilizador({ utilizador: u, roles, organizacoes, catalogo, protegido, aoAbrir, aoAbrirRole }: LinhaUtilizadorProps) {
   const { t } = useTranslation();
@@ -51,7 +55,7 @@ export function LinhaUtilizador({ utilizador: u, roles, organizacoes, catalogo, 
               {protegido && (
                 <>
                   <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="sr-only">{t("usersProfiles.protected")}</span>
+                  <span className="sr-only">{t(ehSuperAdministrador(u, roles) ? "usersProfiles.protected" : "usersProfiles.noPermissionToEdit")}</span>
                 </>
               )}
             </span>

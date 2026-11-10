@@ -169,6 +169,9 @@ interface PurchaseOrderPDFProps {
   supplier: any;
   items: any[];
   user?: any;
+  /** Sem products.view_cost (rpc_po_documento_fornecedor com_precos=false): só artigos e quantidades, sem colunas
+   *  de preço/IVA/total nem totais. */
+  semPrecos?: boolean;
 }
 
 // Extract unique attribute labels from all items
@@ -198,7 +201,7 @@ const getAttributeValue = (item: any, attrId: string): string => {
   return unit ? `${value} ${unit}` : value;
 };
 
-export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user }: PurchaseOrderPDFProps) => {
+export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user, semPrecos = false }: PurchaseOrderPDFProps) => {
   const brandColor = company?.brand_color || '#000000';
   
   // Extract attribute columns from items
@@ -210,7 +213,8 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
   // With 0 attributes: 15%, 35%, 10%, 12%, 10%, 18%
   // With attributes: reduce Descrição width and add attribute columns
   const baseWidth = 100;
-  const fixedColumnsWidth = 15 + 10 + 12 + 10 + 18; // SKU + Qtd + P.Unit + IVA + Total = 65%
+  // Sem preços: só SKU + Qtd (as colunas de valor saem e a Descrição fica com o espaço).
+  const fixedColumnsWidth = semPrecos ? 15 + 10 : 15 + 10 + 12 + 10 + 18; // SKU + Qtd + P.Unit + IVA + Total = 65%
   const remainingWidth = baseWidth - fixedColumnsWidth; // 35% for Descrição + attributes
   
   const attrColumnWidth = hasAttributes ? Math.min(12, remainingWidth / (attributeColumns.length + 1)) : 0;
@@ -361,9 +365,9 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
                 <Text key={attr.id} style={columnStyles.attribute}>{attr.label}</Text>
               ))}
               <Text style={columnStyles.quantity}>Qtd.</Text>
-              <Text style={columnStyles.unitPrice}>P. Unit.</Text>
-              <Text style={columnStyles.vat}>IVA</Text>
-              <Text style={columnStyles.total}>Total</Text>
+              {!semPrecos && <Text style={columnStyles.unitPrice}>P. Unit.</Text>}
+              {!semPrecos && <Text style={columnStyles.vat}>IVA</Text>}
+              {!semPrecos && <Text style={columnStyles.total}>Total</Text>}
             </View>
           </View>
         </View>
@@ -384,15 +388,16 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
                   </Text>
                 ))}
                 <Text style={columnStyles.quantity}>{item.quantity}</Text>
-                <Text style={columnStyles.unitPrice}>€{item.unit_price?.toFixed(2)}</Text>
-                <Text style={columnStyles.vat}>{item.vat_rate}%</Text>
-                <Text style={columnStyles.total}>€{lineTotal.toFixed(2)}</Text>
+                {!semPrecos && <Text style={columnStyles.unitPrice}>€{item.unit_price?.toFixed(2)}</Text>}
+                {!semPrecos && <Text style={columnStyles.vat}>{item.vat_rate}%</Text>}
+                {!semPrecos && <Text style={columnStyles.total}>€{lineTotal.toFixed(2)}</Text>}
               </View>
             );
           })}
         </View>
 
-        {/* Totals */}
+        {/* Totals (sem preços não há totais) */}
+        {!semPrecos && (
         <View fixed style={styles.totalsSection}>
           <View style={styles.totalsRow}>
             <Text style={styles.totalLabel}>Subtotal (sem IVA):</Text>
@@ -409,6 +414,7 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
             <Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{total.toFixed(2)}</Text>
           </View>
         </View>
+        )}
 
         {/* Fixed Footer */}
         <View fixed style={fixedFooterStyle}>

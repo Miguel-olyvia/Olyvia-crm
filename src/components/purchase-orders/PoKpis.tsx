@@ -4,9 +4,9 @@
 // Leitura própria, independente da lista (que pode estar a mostrar só eliminadas):
 //   1. purchase_orders não eliminadas em pending/ordered/partially_received
 //      (id, status, expected_delivery) da organização ativa;
-//   2. só com products.view_cost: purchase_order_items das POs em aberto
-//      (ordered/partially_received), filtradas pela organização através do
-//      embed purchase_orders!inner. Valor por receber = total_price (com IVA)
+//   2. só com products.view_cost: as linhas (vista po_v_purchase_order_items,
+//      20270112850000 — a tabela já não dá os preços) das POs em aberto
+//      (ordered/partially_received) lidas em 1., por lotes de ids. Valor por receber = total_price (com IVA)
 //      × (quantity − received_quantity) / quantity. "Não vou receber o resto"
 //      já baixa quantity para o recebido, por isso a parte anulada não conta.
 // Volta a ler sempre que reloadSignal muda (a lista recarregou). Em erro fica
@@ -16,10 +16,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { KpiGrid, KpiTile, type PoStatusFilter } from "@/components/inventory/ui";
 import { PO_OPEN_STATUSES, formatEur, isPoLate, todayIsoLocal } from "./poListUtils";
+import { poVista, PO_VISTA_LINHAS } from "./poVistas";
 
 export const PO_VALUE_PERMISSION = "products.view_cost";
 
 const PAGE = 1000;
+/** Ids de PO por pedido no .in() (URL curto). */
+const ID_BATCH = 200;
 
 interface PoKpiCounts {
   pending: number;
@@ -73,20 +76,22 @@ export function usePoKpis(organizationId: string | null | undefined, reloadSigna
       };
       if (canSeeValue) {
         try {
-          const items = await fetchPaged<{ quantity: number | null; received_quantity: number | null; total_price: number | null }>(
-            (from, to) =>
-              supabase
-                .from("purchase_order_items")
-                .select("id, quantity, received_quantity, total_price, purchase_orders!inner(organization_id, status, deleted_at)")
-                .eq("purchase_orders.organization_id", organizationId)
-                .is("purchase_orders.deleted_at", null)
-                .in("purchase_orders.status", [...PO_OPEN_STATUSES])
-                .order("id")
-                .range(from, to) as unknown as PromiseLike<{
-                data: { quantity: number | null; received_quantity: number | null; total_price: number | null }[] | null;
-                error: unknown;
-              }>,
-          );
+          type Linha = { quantity: number | null; received_quantity: number | null; total_price: number | null };
+          const openIds = orders.filter((o) => (PO_OPEN_STATUSES as readonly string[]).includes(o.status)).map((o) => o.id);
+          const items: Linha[] = [];
+          for (let i = 0; i < openIds.length; i += ID_BATCH) {
+            const lote = openIds.slice(i, i + ID_BATCH);
+            items.push(
+              ...(await fetchPaged<Linha>(
+                (from, to) =>
+                  poVista(PO_VISTA_LINHAS)
+                    .select("id, quantity, received_quantity, total_price")
+                    .in("purchase_order_id", lote)
+                    .order("id")
+                    .range(from, to) as PromiseLike<{ data: Linha[] | null; error: unknown }>,
+              )),
+            );
+          }
           next.openValue = items.reduce((sum, it) => {
             const qty = Number(it.quantity) || 0;
             if (qty <= 0) return sum;
