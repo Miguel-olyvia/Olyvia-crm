@@ -21,7 +21,7 @@ export function PagamentoDoCliente({ S, A, run, d }: Ctx & { d: Negocio }) {
   const idSemPerm = useId();
   const podeValidar = podeNeg(S.role, "finance.validate_payment");
   const ft = d.fin.fatura;
-  if (!ft) return <p className="text-[15px] text-muted-foreground">A fatura ainda não foi registada. Registe o número do Eticadata no passo «Fatura e recibo»: vai para o portal do cliente com os dados para pagar.</p>;
+  if (!ft) return <p className="text-[15px] text-muted-foreground">Primeiro regista-se a fatura, no passo «Fatura». Depois fica aqui o pagamento.</p>;
   const metodo = metodoDe(d.f.metodo), valor = valorSinal(d, S), avisou = !!d.f.comprovativo && !d.fin.pago;
   const linhas: [string, string][] = [
     ["Fatura", ft.n],

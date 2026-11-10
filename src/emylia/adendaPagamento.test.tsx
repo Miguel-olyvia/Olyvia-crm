@@ -49,7 +49,13 @@ function duasFaturasAntigas(A: A_, d: Negocio, a: Adenda) {
   a.faturas!.push({ n: "FT 2026/422", q: "21/10", i: 1, l: P[1].l, p: P[1].p, v: P[1].v });
   a.faturas![0].n = "FT 2026/421";
 }
-const caminho = (S: Estado, d: Negocio) => render(<Montar S={S}>{(ctx) => <CaminhoObra {...ctx} d={d} />}</Montar>);
+// 10/11: o percurso detalhado (os blocos Pagamento, Encomenda e Plano) abre-se em «Ver o percurso»
+const caminho = (S: Estado, d: Negocio) => {
+  const r = render(<Montar S={S}>{(ctx) => <CaminhoObra {...ctx} d={d} />}</Montar>);
+  const ver = screen.queryByRole("button", { name: "Ver o percurso" });
+  if (ver) fireEvent.click(ver);
+  return r;
+};
 const blocoPagamento = () => screen.getByRole("heading", { name: "Pagamento" }).closest("div.rounded-xl") as HTMLElement;
 const ecDaAdendaNoInventario = () => lerInventario().ecs.find((e) => e.id === "EC-1027-A1" && !e.deleted);
 /** A linha do Hoje com o texto (o passo e o detalhe, "t · sub"). */

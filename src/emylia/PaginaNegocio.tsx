@@ -19,7 +19,7 @@ import { NovaVersao } from "./VoltarAtras";
 import { RetificacaoMedidas } from "./RetificacaoMedidas";
 import { AbrirEstudioPlano } from "./estudioPlano/EstudioPlano";
 import { planoAprovadoDe, retificacaoAceite } from "./preparacaoObra";
-import { RegistarFaturaErp } from "./FaturaErp";
+import { EstadoFaturaErp, RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
@@ -33,7 +33,7 @@ import { OrcamentoSimples } from "./OrcamentoSimples";
 import { LinhasOrcamento } from "./LinhasOrcamento";
 import { ProdutosOrcamento } from "./ProdutosOrcamento";
 import { DocumentosSimples, ObraSimples } from "./FasesSimples";
-import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
+import { ContratoDoc, Partilhar, PropostaDoc, tranches, totais } from "./DocsCliente";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
@@ -451,7 +451,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial).
       // 10/11 (o fluxo novo de 9/11): aceite, o negócio passa ao Financeiro e o contrato é um passo da Obra (depois do plano aprovado);
       // aqui só fica nos negócios antigos que já o tinham aberto (aceites, ou com o contrato gerado, ainda no Negócio)
-      ...(o.vendaDireta || (!o.aceite && !o.contrato) ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
+      ...(o.vendaDireta || (!o.aceite && !o.contrato) ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
         <div className="space-y-10">
           <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
           <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
@@ -459,6 +459,35 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           </Partilhar>
         </div>
       ) }, !!o.contrato) : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
+    ];
+  } else if (fase === 4 && simples) {
+    // 10/11 (Rúben: «não queremos muitos passos, queremos certezas»): o Financeiro em dois passos. 1) A fatura: o valor a faturar agora,
+    // os dados de faturação e da fatura, e o registo do número, tudo no mesmo sítio (o botão diz o que falta, se faltar). 2) O pagamento.
+    const TI = totais(d, S), agora = d.orc ? tranches(d, TI.total, S)[0] : null, ft = d.fin.fatura;
+    const gF = [FINANCEIRO[0], FINANCEIRO[1]].map(E).filter((x) => !x.oculto);
+    const faltamF = emFalta(gF, d.f).length;
+    passos = [
+      { id: "fatura", titulo: "Fatura", icone: Euro, feito: !!ft, semAvancar: true,
+        resumo: [ft ? ft.n : faltamF ? `falta${faltamF === 1 ? " 1 dado" : `m ${faltamF} dados`}` : "por registar"],
+        corpo: (
+          <div className="space-y-10">
+            {agora && !ft && (
+              <p className="rounded-2xl bg-primary/[0.06] px-4 py-3 text-[15px]">
+                A faturar agora: <span className="font-semibold">{agora.l}</span> ({Math.round(agora.p * 100)}%) · <span className="font-semibold tabular-nums">{eur(agora.v)} €</span> com IVA
+              </p>
+            )}
+            {gF.map((gr) => <Campos key={gr.titulo} grupo={gr} {...fx} ro={!!ft} />)}
+            <section aria-label="Registar a fatura" className="space-y-2 rounded-2xl border border-border bg-card p-4">
+              <h3 className="text-[17px] font-semibold tracking-tight">{ft ? `Fatura ${ft.n} registada` : "Registar a fatura"}</h3>
+              {ft ? <EstadoFaturaErp ctx={ctx} d={d} />
+                : <><p className="text-[15px] text-muted-foreground">Emita-a no Eticadata e escreva aqui o número: vai para o portal do cliente, com os dados para pagar.</p>
+                  <RegistarFaturaErp ctx={ctx} d={d} aEsquerda /></>}
+            </section>
+          </div>
+        ) },
+      { id: FINANCEIRO[2].titulo, titulo: E(FINANCEIRO[2]).nome || FINANCEIRO[2].titulo, icone: Euro, feito: d.fin.pago,
+        resumo: [d.fin.pago ? "validado" : !ft ? "depois da fatura" : d.f.comprovativo ? "o cliente diz que pagou" : "à espera do cliente"],
+        corpo: <PagamentoDoCliente {...ctx} d={d} /> },
     ];
   } else if (fase === 4) {
     passos = [
@@ -474,10 +503,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   } else if (fase === 5) {
     // 9/11 (Rúben, o fluxo novo): na Obra, primeiro o supervisor retifica as medidas; o plano aprova-se depois e só então se assina o contrato
     const semObraAMedir = !!d.orc?.vendaDireta;
-    const passoRetif: Passo = { id: "retificacao", titulo: "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d),
+    const passoRetif: Passo = { id: "retificacao", titulo: simples ? "Medidas" : "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d), semAvancar: true,
       resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : d.fin.pago ? "por fazer" : "depois do pagamento"],
       corpo: <RetificacaoMedidas ctx={ctx} d={d} /> };
-    const passoContrato: Passo | null = o && !semObraAMedir && simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
+    const passoContrato: Passo | null = o && !semObraAMedir && simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
       <div className="space-y-10">
         {!planoAprovadoDe(d) && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">O contrato gera-se depois de as Operações aprovarem o plano (com as medidas retificadas).</p>}
         <Campos grupo={E(PROPOSTA[1])} {...fx} ro={o.contrato === "assinado"} />
@@ -508,6 +537,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   for (const ps of passos) {
     const gr = TODOS.find((x) => x.titulo === ps.id);
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta(gr === AREA ? gruposArea(S.campos, d.f).map(E) : [E(gr)], d.f).length;
+    if (ps.id === "fatura" && (aValidar(d, FINANCEIRO[0].titulo) || aValidar(d, FINANCEIRO[1].titulo))) ps.falta = emFalta([FINANCEIRO[0], FINANCEIRO[1]].map(E), d.f).length || undefined;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;

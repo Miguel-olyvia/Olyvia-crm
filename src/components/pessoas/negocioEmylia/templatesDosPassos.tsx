@@ -5,7 +5,7 @@
 //    e os textos do template, com o nome e o logo REAIS da organização; botão «Enviar para o portal do cliente».
 //  · Contrato:  seletor da minuta (client_contract_templates), as perguntas {{chave}} da minuta e o corpo preenchido; botão de envio ao portal.
 // A escolha guarda-se SÓ pelas RPCs neg_definir_templates_negocio / neg_ler_templates_negocio (useTemplatesDoNegocio).
-import { useLayoutEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import "./propostaComTemplate.css";
 import { totaisIva } from "@/emylia/motor";
 import { definirModoReal, nifEmpresa, nomeEmpresa, nomeFiscalEmpresa, orgDoModoReal } from "@/emylia/acessosPortal";
@@ -293,23 +293,45 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
       {soEscolher && <div key={org.chave}>{children}</div>}
       {/* 9/11 (Rúben: «falta o campo penalização, por isso não consigo gerar»): as condições do contrato da Emylia (penalização por atraso,
           modelo, assinatura, quem assina) continuam obrigatórias, mas o corpo dela não se vê aqui; respondem-se neste bloco */}
-      {!soEscolher && <CondicoesDoContrato c={c} />}
+      {!soEscolher && <CondicoesDoContrato c={c} nomeMinuta={minuta?.name ?? ""} />}
       {!soEscolher && <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar} />}
     </div>
   );
 }
 
-/** As perguntas do grupo «Contrato» da Emylia (como a empresa as ajustou), em botões: o que falta fica marcado. */
-function CondicoesDoContrato({ c }: { c: ContextoDosTemplates }) {
+/** O tipo de contrato que a minuta escolhida diz (o nome): «… Prestação de Serviços» é prestação de serviços; o resto, empreitada. */
+const modeloDaMinuta = (nome: string) => (/presta[cç][aã]o de servi/i.test(nome) ? "Prestação de serviços" : "Empreitada de remodelação");
+
+/** As perguntas do grupo «Contrato» da Emylia (como a empresa as ajustou), em botões: o que falta fica marcado.
+ *  10/11 (Rúben: «informação limpa»): com uma minuta escolhida, o «Modelo» sai (é o da minuta); o que já está respondido fica numa linha,
+ *  com «Mudar»; só se pergunta o que falta. */
+function CondicoesDoContrato({ c, nomeMinuta = "" }: { c: ContextoDosTemplates; nomeMinuta?: string }) {
   const { ctx, d } = c;
-  const g = efetivo(ctx.S.campos, PROPOSTA[1]);
+  const [mudar, setMudar] = useState(false);
+  // o modelo segue a minuta (a base pede-o para gerar o contrato): preenche-se sozinho e não se pergunta
+  const modeloAuto = nomeMinuta ? modeloDaMinuta(nomeMinuta) : null;
+  const g0 = efetivo(ctx.S.campos, PROPOSTA[1]);
+  const opModelo = g0.campos.find((x) => x.k === "modelo_contrato")?.op ?? [];
+  const usarAuto = !!modeloAuto && opModelo.includes(modeloAuto);
+  useEffect(() => {
+    if (usarAuto && c.podeEditar && d.f.modelo_contrato !== modeloAuto) ctx.run(() => ctx.A.campo(d.id, "modelo_contrato", modeloAuto!));
+  }, [usarAuto, modeloAuto, d.f.modelo_contrato]); // eslint-disable-line react-hooks/exhaustive-deps
+  const g = { ...g0, campos: g0.campos.filter((x) => !(usarAuto && x.k === "modelo_contrato")) };
   const falta = new Set(emFalta([g], d.f).map((x) => x.k));
-  const campos = g.campos.filter((x) => x.t === "sim_nao" || x.t === "escolha");
-  if (!campos.length) return null;
-  const opcoes = (x: (typeof campos)[number]) => (x.t === "sim_nao" ? ["Sim", "Não"] : x.op ?? []);
+  const todos = g.campos.filter((x) => x.t === "sim_nao" || x.t === "escolha");
+  if (!todos.length) return null;
+  const campos = mudar ? todos : todos.filter((x) => falta.has(x.k));
+  const respondidos = todos.filter((x) => !falta.has(x.k) && d.f[x.k]);
+  const opcoes = (x: (typeof todos)[number]) => (x.t === "sim_nao" ? ["Sim", "Não"] : x.op ?? []);
   return (
     <section aria-label="Condições do contrato" className="space-y-3 rounded-xl border border-border bg-card p-4">
       <h4 className="text-sm font-semibold">Condições do contrato</h4>
+      {!mudar && respondidos.length > 0 && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px]">
+          <span className="min-w-0">{[usarAuto ? `${modeloAuto} (da minuta)` : "", ...respondidos.map((x) => `${x.l}: ${d.f[x.k]}`)].filter(Boolean).join(" · ")}</span>
+          {c.podeEditar && <button type="button" onClick={() => setMudar(true)} className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Mudar</button>}
+        </p>
+      )}
       {campos.map((x) => (
         <div key={x.k} role="group" aria-label={x.l} className="space-y-1.5">
           <p className={cn("text-sm font-medium", falta.has(x.k) && "text-destructive")}>{x.l}{falta.has(x.k) ? " · falta responder" : ""}</p>

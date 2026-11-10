@@ -36,7 +36,13 @@ function preparar() {
   A.role("comercial"); A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu"); adendaAssinada(A, d.id, N);
   return { S, A, d };
 }
-const caminho = (S: Estado, d: Negocio) => render(<Montar S={S}>{(ctx) => <CaminhoObra {...ctx} d={d} />}</Montar>);
+// 10/11: o percurso detalhado (os blocos Pagamento, Encomenda e Plano) abre-se em «Ver o percurso»
+const caminho = (S: Estado, d: Negocio) => {
+  const r = render(<Montar S={S}>{(ctx) => <CaminhoObra {...ctx} d={d} />}</Montar>);
+  const ver = screen.queryByRole("button", { name: "Ver o percurso" });
+  if (ver) fireEvent.click(ver);
+  return r;
+};
 const condicoes = () => screen.getByRole("list", { name: "Condições para arrancar" });
 
 describe("adenda com encomenda própria, no pagamento dela", () => {

@@ -17,7 +17,7 @@ import { SeloAssinatura } from "./AssinaturaContrato";
 import { AutoNoNegocio } from "./AutoRececao";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { TRILHOS, faltaParaArrancar, passosPreparacao, type PassoPrep, type Trilho } from "./preparacaoObra";
+import { TRILHOS, contratoAssinado, faltaParaArrancar, passosPreparacao, planoAprovadoDe, retificacaoAceite, type PassoPrep, type Trilho } from "./preparacaoObra";
 import { useInventario } from "./inventario/loja";
 import { prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import { useFrota } from "./frota/loja";
@@ -138,11 +138,14 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
   inicio.current ??= { pag: pagFeito, arrancou: tudoArrancou };
   const contratoEPago = pagFeito && inicio.current.pag;
   const arrancou = tudoArrancou && inicio.current.arrancou;
-  const mostrarFeitos = !contratoEPago || verTudo;
-  const mostrarRamos = !arrancou || verTudo;
+  // 10/11 (Rúben: «não queremos muitos passos, queremos certezas e informação limpa»): o percurso detalhado (os trilhos, o contrato) fica
+  // fechado; à vista ficam as condições para arrancar, pela ordem do fluxo, e o passo que é de quem está no ecrã
+  const mostrarFeitos = verTudo;
+  const mostrarRamos = verTudo;
+  void contratoEPago;
   const resumoFeitos = [
-    d.orc?.contrato === "assinado" && `Contrato CT 2026/${d.id} assinado`,
-    d.fin.pago && `pagamento validado${d.fin.recibo ? ` (${d.fin.recibo.n})` : ""}`,
+    d.fin.pago && `Pagamento validado${d.fin.recibo ? ` (${d.fin.recibo.n})` : ""}`,
+    d.orc?.contrato === "assinado" && `contrato CT 2026/${d.id} assinado`,
     arrancou && "encomenda e plano prontos",
   ].filter(Boolean).join(" · ");
 
@@ -157,11 +160,13 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
             <div>
               <p className="text-[15px] font-semibold">{go1.t}</p>
               <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Condições para arrancar">
-                {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", usarProntidao(d.obra.ec) ? prontaReal(prontidaoDe(d.obra.ec.contrato)) : !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)],
+                {[["Pagamento validado", d.fin.pago],
+                  // 10/11: pela ordem do fluxo novo (9/11): as medidas, o plano e o contrato antes da encomenda
+                  ...(d.orc?.vendaDireta ? [] : [["Medidas aceites", retificacaoAceite(d)], ["Plano aprovado", planoAprovadoDe(d)], ["Contrato assinado", contratoAssinado(d)]]),
+                  ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", usarProntidao(d.obra.ec) ? prontaReal(prontidaoDe(d.obra.ec.contrato)) : !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)],
                   // 21/10 (decisão B): antes do arranque, cada adenda assinada: a 1.ª parcela paga e, com materiais, a encomenda dela (emitida com esse pagamento)
                   ...(go1.estado === "feito" ? [] : assinadas(d).flatMap((a) => [[`1.ª parcela da adenda ${a.n} paga`, primeiraPaga(a)],
-                    ...(ecDaAdenda(d, a.n) || porEncomendarDe(d, a.n).length ? [[`Encomenda da adenda ${a.n}`, !!ecDaAdenda(d, a.n)]] : [])])),
-                  ["Plano aprovado", d.obra.plano?.estado !== "por aprovar"]].map(([t, ok]) => (
+                    ...(ecDaAdenda(d, a.n) || porEncomendarDe(d, a.n).length ? [[`Encomenda da adenda ${a.n}`, !!ecDaAdenda(d, a.n)]] : [])]))].map(([t, ok]) => (
                   <li key={t as string} className={cn("inline-flex items-center gap-1.5", ok ? "text-foreground" : "text-muted-foreground")}>
                     {ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <span className="h-3.5 w-3.5 rounded-full border-2 border-input" aria-hidden="true" />}{t as string}
                     <span className="sr-only">{ok ? " (feito)" : " (por fazer)"}</span>
@@ -183,31 +188,30 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
     <section aria-labelledby={`caminho-${d.id}`} className="mt-6 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id={`caminho-${d.id}`} className="text-xl font-semibold tracking-tight">Do contrato à obra</h2>
+          <h2 id={`caminho-${d.id}`} className="text-xl font-semibold tracking-tight">{arrancou ? "A obra" : "Antes de arrancar"}</h2>
           {/* 27/10: antes de arrancar, as condições estão logo abaixo: a frase só repetia */}
           {arrancou && <p className="text-[15px] text-muted-foreground">{/* 30/10 (visto no browser): com a obra já a andar, uma encomenda de ajuste por aprovar dizia "Para arrancar, falta…" */}{go1.estado === "feito" ? go1.t + "." : falta.length ? `Para arrancar, falta ${falta.join(", ")}.` : "Está tudo pronto para arrancar."}</p>}
         </div>
-        <p className="text-sm tabular-nums text-muted-foreground">{feitos} de {P.length} passos</p>
-      </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-        <div className="h-full rounded-full bg-primary motion-safe:transition-[width] duration-500 ease-out" style={{ width: `${(feitos / P.length) * 100}%` }} />
       </div>
 
       {/* primeiro, o que falta: o arranque (as condições à vista) e o próximo passo da Receção */}
       {!arrancou && <div className="mt-4">{blocoArranque}</div>}
       {!arrancou && (d.obra.ec?.ref || d.obra.ec?.contrato) && <ProximoRececaoNegocio d={d} A={A} go={go} />}
 
+      {/* 10/11: o passo que é de quem está no ecrã (um só), quando não é o arranque (esse tem o botão em cima) */}
+      {!verTudo && meu && meu.id !== go1.id && <ol className="mt-4">{passo(meu, true)}</ol>}
+
       {/* o que já está feito, numa linha; abre-se para ver o percurso todo */}
-      {contratoEPago && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/40 px-4 py-2.5">
-          <p className="flex min-w-0 items-center gap-2 text-[15px]"><Check className="h-4 w-4 shrink-0 text-success" aria-hidden="true" /><span className="min-w-0">{resumoFeitos}</span></p>
+      {(
+        <div className={cn("mt-4 flex flex-wrap items-center gap-2", arrancou ? "justify-between rounded-xl bg-muted/40 px-4 py-2.5" : "justify-end")}>
+          {/* antes de arrancar, as condições em cima já dizem o que está feito; depois, o resumo numa linha */}
+          {arrancou && <p className="flex min-w-0 items-center gap-2 text-[15px]"><Check className="h-4 w-4 shrink-0 text-success" aria-hidden="true" /><span className="min-w-0">{resumoFeitos}</span></p>}
           <button type="button" onClick={() => setVerTudo(!verTudo)} aria-expanded={verTudo}
             className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
             {verTudo ? "Esconder o percurso" : "Ver o percurso"}<ChevronDown className={cn("h-4 w-4 transition-transform", verTudo && "rotate-180")} aria-hidden="true" />
           </button>
         </div>
       )}
-
       {/* o contrato, de onde tudo parte: com a assinatura do cliente (15/10), quem, quando e como, e o contrato à mão */}
       {mostrarFeitos && <ContratoAssinado ctx={ctx} d={d} />}
       {/* 15/10: o pagamento primeiro, a toda a largura; depois a ramificação para a encomenda e o plano, lado a lado,
