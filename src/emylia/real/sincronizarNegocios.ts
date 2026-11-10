@@ -105,6 +105,9 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
       const antes = foto.get(d.id);
       const ops = novasNoFinanceiro(antes ? (JSON.parse(antes) as Negocio) : null, d);
       if (ops.length) { out.reler = true; for (const a of await gravarFinanceiro(sb, org, refs.get(d.id)!.id, d, ops)) out.avisos.push(`${d.nome}: ${a}`); }
+      // 10/11 (teste do 1026): a base substitui as respostas todas de uma vez; um ecrã aberto há mais tempo apagava o que outra pessoa
+      // respondeu entretanto. Antes de gravar, junta-se o que está na base: ganha o que este ecrã mudou, o resto fica como está lá.
+      if (antes && await juntarRespostasDaBase(sb, refs.get(d.id)!.id, JSON.parse(antes) as Negocio, d)) out.reler = true;
       const L = paraLinhas(d);
       const atual = L.orcamentos.find((o) => o.estado !== "substituido");
       if (atual && d.orc) {
@@ -132,4 +135,29 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
     }
   }
   return out;
+}
+
+/** 10/11: junta às respostas do negócio as que estão na base e este ecrã não mudou desde que leu o negócio (`antes`): as que outra
+ *  pessoa respondeu ou mudou entretanto. As que este ecrã mudou (ou apagou) ganham. Devolve se juntou alguma. Sem ler a base, grava-se
+ *  como antes. */
+export async function juntarRespostasDaBase(sb: SupabaseClient, negocioId: string, antes: Pick<Negocio, "f">, d: Pick<Negocio, "f">): Promise<boolean> {
+  let rows: { campo_chave: string; valor: string | null; sugerido?: boolean }[] | null = null;
+  try {
+    const { data, error } = await sb.from("negocio_respostas" as never).select("campo_chave, valor, sugerido").eq("negocio_id", negocioId).eq("divisao", "");
+    if (error) return false;
+    rows = data as unknown as { campo_chave: string; valor: string | null; sugerido?: boolean }[];
+  } catch { return false; }
+  return juntarRespostas(antes.f ?? {}, d.f, (rows ?? []).filter((r) => !r.sugerido)); // as sugeridas (pela IA) não são respostas
+}
+
+/** A regra da junção (sem a base, para testar). */
+export function juntarRespostas(antes: Record<string, string | undefined>, f: Record<string, string | undefined>, daBase: readonly { campo_chave: string; valor: string | null }[]): boolean {
+  let mudou = false;
+  for (const { campo_chave: k, valor } of daBase) {
+    const v = valor ?? "";
+    const mexidaAqui = (f[k] ?? undefined) !== (antes[k] ?? undefined);
+    if (mexidaAqui || (f[k] ?? "") === v) continue;
+    f[k] = v; mudou = true;
+  }
+  return mudou;
 }

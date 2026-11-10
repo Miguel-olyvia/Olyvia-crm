@@ -1,7 +1,7 @@
 // 10/11: duas tarefas de meio dia seguidas do mesmo técnico não se sobrepõem (o plano arredonda aos dias inteiros; antes davam
 // «noutra tarefa desta obra» e o dia sugerido nunca aparecia).
 import { describe, expect, it } from "vitest";
-import { extensaoTarefa, motivoOcupado, ocupacaoDosTecnicos, sobrepostas } from "./preparacaoObra";
+import { extensaoTarefa, motivoOcupado, ocupacaoDosTecnicos, resolverConflitos, sobrepostas } from "./preparacaoObra";
 import { TECS, acoes, seed, type Plano } from "./motor";
 
 const plano: Plano = { tasks: [], estado: "por aprovar", dia: 0 };
@@ -61,5 +61,45 @@ describe("adiar e repor (10/11)", () => {
     expect(d2.obra.plano.tasks[0].dia).toBeGreaterThanOrEqual(3);
     A.reporPlano(d2.id);
     expect(d2.obra.plano.tasks[0].dia).toBe(0);
+  });
+});
+
+describe("o plano sem conflitos (10/11)", () => {
+  const montar = () => {
+    const S = seed();
+    const [d1, d2] = S.deals.filter((x) => x.obra);
+    const T = TECS[0].id, U = TECS[1].id, inicio = "2027-03-01";
+    d1.obra.plano = { tasks: [{ nome: "Outra obra", svcs: [], dia: 0, dur: 3, sk: TECS[0].sk, h: 24, tec: T }], estado: "aprovado", dia: 0, origem: "orcamento", inicio };
+    d2.obra.plano = { tasks: [
+      { nome: "Canalização", svcs: [], dia: 0, dur: 1, sk: TECS[0].sk, h: 8, tec: T },
+      { nome: "Pintura", svcs: [], dia: 1, dur: 1, sk: TECS[1].sk, h: 8, tec: U },
+    ], estado: "por aprovar", dia: 0, origem: "orcamento", inicio };
+    return { S, d2, T };
+  };
+  it("adia a tarefa até o técnico estar livre, e as seguintes com ela", () => {
+    const { S, d2, T } = montar();
+    const feitas = resolverConflitos(d2.obra.plano!, ocupacaoDosTecnicos(S, d2.id));
+    const [c, p] = d2.obra.plano!.tasks;
+    expect(feitas[0]).toMatchObject({ nome: "Canalização" });
+    expect(c.dia).toBeGreaterThanOrEqual(3);
+    expect(motivoOcupado(T, c, d2.obra.plano!, ocupacaoDosTecnicos(S, d2.id))).toBeNull();
+    expect(p.dia - c.dia).toBe(1); // a ordem fica
+  });
+  it("a escolhida à mão fica como está", () => {
+    const { S, d2 } = montar();
+    const feitas = resolverConflitos(d2.obra.plano!, ocupacaoDosTecnicos(S, d2.id), { tecnicos: { "0:Canalização": TECS[0].id } });
+    expect(feitas).toEqual([]);
+    expect(d2.obra.plano!.tasks[0].dia).toBe(0);
+  });
+  it("A.resolverConflitos no Estúdio: adia, guarda o original (Repor) e o plano aprovado volta a por aprovar", () => {
+    const { S, d2 } = montar();
+    d2.obra.plano!.estado = "aprovado";
+    S.role = "operacoes";
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.resolverConflitos(d2.id);
+    expect(d2.obra.plano!.tasks[0].dia).toBeGreaterThanOrEqual(3);
+    expect(d2.obra.plano!.estado).toBe("por aprovar");
+    A.reporPlano(d2.id);
+    expect(d2.obra.plano!.tasks[0].dia).toBe(0);
   });
 });

@@ -296,6 +296,36 @@ export function escolherTecnicos(plano: Plano, ocupados: Map<string, Set<string>
   return avisos;
 }
 
+/**
+ * 10/11 (Rúben: «queremos certezas»): o plano da obra sem conflitos. A tarefa com o técnico noutra obra ou de férias (e sem outro do ofício
+ * livre: escolherTecnicos já o tentou) adia-se até ele estar livre, com as que começam no mesmo dia ou depois (como o «Adiar»). As que
+ * as Operações escolheram à mão ficam como estão (com o aviso). Devolve o que adiou (a tarefa e os dias úteis).
+ */
+export function resolverConflitos(plano: Plano, ocupados: Map<string, Set<string>>, escolhas: EscolhasEquipa = {}): { nome: string; dias: number }[] {
+  const feitas: { nome: string; dias: number }[] = [];
+  if (!plano.inicio) return feitas;
+  const semSaida = new Set<Tarefa>();
+  for (let volta = 0; volta < plano.tasks.length * 3; volta++) {
+    const t = [...plano.tasks].sort((a, b) => a.dia - b.dia).find((x) => x.tec && !semSaida.has(x) && x.exec?.estado !== "validada"
+      && !escolhas.tecnicos?.[chaveTarefa(x)] && motivoOcupado(x.tec, x, plano, ocupados) != null);
+    if (!t) break;
+    let nd = t.dia;
+    while (motivoOcupado(t.tec!, { dia: nd, dur: t.dur }, plano, ocupados) != null && nd < t.dia + 60) nd++;
+    if (nd >= t.dia + 60) { semSaida.add(t); continue; }
+    const d0 = t.dia, dias = nd - d0;
+    for (const x of plano.tasks) if (x === t || (x.dia >= d0 && x.exec?.estado !== "validada")) x.dia += dias;
+    feitas.push({ nome: t.nome, dias });
+  }
+  return feitas;
+}
+
+/** 10/11: o plano novo da obra (do orçamento), já sem conflitos de agenda (resolverConflitos). */
+export function planoNovoDaObra(d: Negocio, S: Estado): { plano: Plano; adiadas: { nome: string; dias: number }[] } {
+  const plano = planoDoOrcamento(d, S);
+  const adiadas = plano.inicio ? resolverConflitos(plano, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {})) : [];
+  return { plano, adiadas };
+}
+
 /** 26/10: mudou para ganttOrcamento.ts (o plano do orçamento já parte o «MO Modelo»). */
 export { partesPorOficio } from "./ganttOrcamento";
 

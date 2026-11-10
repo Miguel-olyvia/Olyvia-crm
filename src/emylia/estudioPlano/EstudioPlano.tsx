@@ -216,7 +216,13 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
 
               {/* ------------------------------------------------------------ os alertas, com a correção */}
               <section aria-label="Alertas e sugestões" className="space-y-2">
-                <h2 className="text-[15px] font-semibold">Alertas e sugestões</h2>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-[15px] font-semibold">Alertas e sugestões</h2>
+                  {/* 10/11: um toque resolve os conflitos de agenda (adia o que for preciso); as escolhas à mão ficam */}
+                  {editavel && alertas.some(({ m }) => m === "noutra obra" || m === "de férias") && (
+                    <Button type="button" size="sm" className="min-h-9" onClick={() => fazer(() => A.resolverConflitos(d.id))}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Resolver tudo</Button>
+                  )}
+                </div>
                 <AnimatePresence initial={false}>
                   {!alertas.length ? (
                     <motion.p key="ok" initial={reduzir ? false : { opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}

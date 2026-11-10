@@ -23,6 +23,7 @@ import { esquecerInventario } from "./inventario/loja";
 import { BotaoFase } from "./PaginaNegocio";
 import { PaginaObra } from "./ObraOperacoes";
 import { RegistarFaturaErp } from "./FaturaErp";
+import { FINANCEIRO, emFalta } from "./campos";
 import { Conversa } from "./ConversaObra";
 import { Montar } from "./v2/testeV2";
 import { ambitoSemEfeito, permissoesComAmbito } from "@/components/utilizadores-perfis/regrasVinculos";
@@ -390,7 +391,12 @@ describe("I · a caixa de envio da conversa da obra pede pessoas.edit", () => {
 
 /* ------------------------------------------------------------------ L: a fatura do ERP */
 describe("L · RegistarFaturaErp: sem negocios.registar_fatura, nem formulário nem Eticadata", () => {
-  const negocio = () => { const { S, d } = naLead(); S.role = "financeiro"; return { S, d }; };
+  // 10/11: com os dados de faturação e da fatura preenchidos (sem eles, o formulário diz o que falta: o último caso)
+  const negocio = (comDados = true) => {
+    const { S, d } = naLead(); S.role = "financeiro";
+    if (comDados) for (const c of emFalta([FINANCEIRO[0], FINANCEIRO[1]], d.f)) d.f[c.k] = c.op ? c.op[0] : "x";
+    return { S, d };
+  };
   it("sem a permissão: o botão desligado, o porquê, e o ERP não é lido", () => {
     const { S, d } = negocio();
     reais([]);
@@ -413,6 +419,15 @@ describe("L · RegistarFaturaErp: sem negocios.registar_fatura, nem formulário 
     definirPermissoesReais(null);
     render(<Montar S={S}>{(ctx) => <RegistarFaturaErp ctx={ctx} d={d} />}</Montar>);
     expect(screen.getByRole("textbox")).toBeTruthy();
+  });
+  it("sem os dados de faturação: o botão desligado e diz o que falta (o NIF), sem perguntar ao ERP", () => {
+    const { S, d } = negocio(false);
+    for (const c of emFalta([FINANCEIRO[0], FINANCEIRO[1]], d.f)) if (c.k !== "nif_fat") d.f[c.k] = c.op ? c.op[0] : "x";
+    render(<Montar S={S}>{(ctx) => <RegistarFaturaErp ctx={ctx} d={d} />}</Montar>);
+    expect((botao(/Registar fatura/) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/falta NIF \(Dados de faturação\)/)).toBeTruthy();
+    expect(erp.ler).not.toHaveBeenCalled();
   });
 });
 

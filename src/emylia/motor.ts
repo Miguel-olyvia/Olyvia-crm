@@ -27,7 +27,7 @@ import {
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
-import { faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -1492,7 +1492,13 @@ const agora = () => {
 function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
 /** Do contrato à obra (preparacaoObra.ts): o plano do orçamento, por aprovar. A encomenda de cliente só nasce com o pagamento validado. */
 export function prepararPlanoDe(d: Negocio, S: Estado) {
-  d.obra.plano = planoDoOrcamento(d, S);
+  // 10/11: o plano nasce já sem conflitos de agenda (o que se adiou fica no histórico)
+  const { plano, adiadas } = planoNovoDaObra(d, S);
+  d.obra.plano = plano;
+  if (adiadas.length) logAdiadas(d, adiadas);
+}
+function logAdiadas(d: Negocio, adiadas: { nome: string; dias: number }[]) {
+  log(d, "Plano sem conflitos: " + adiadas.map((x) => `${x.nome} adiada ${x.dias} ${x.dias === 1 ? "dia útil" : "dias úteis"}`).join(", ") + " (técnico noutra obra ou de férias)");
 }
 function fase(d: Negocio, n: number) { d.fase = n; d.valida = null; preencher(d, n); log(d, "Passou a " + FASES[n] + " · sozinho"); }
 
@@ -1802,7 +1808,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     d.fin.pago = true; d.fin.recibo = rc;
     // 16/10: o pagamento validado emite logo a encomenda de cliente no Inventário novo (sem aprovação) e passa o negócio à Obra;
     // o plano veio do contrato (o negócio que ainda não o tenha ganha-o aqui): depois disto só pode faltar aprová-lo
-    if (!d.obra.plano) d.obra.plano = planoDoOrcamento(d, S);
+    if (!d.obra.plano) prepararPlanoDe(d, S);
     // 9/11 (Rúben: «a encomenda a cliente só acontece depois do plano de obra estar aprovado»): com o plano já aprovado emite-se agora;
     // senão, emite-se quando as Operações o aprovarem (aprovarPlano; numa organização real, a base ao gravar o plano aprovado)
     const ok = (planoAprovado(d) && d.orc?.contrato === "assinado") || d.orc?.vendaDireta ? emitirEc(d) : false; // 9/11: a venda direta não tem obra a aprovar (como na base)
@@ -2848,8 +2854,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         avisar({ ...SEM_PERM["obra.planear"], kind: "bad" });
         return;
       }
-      d.obra.plano = planoDoOrcamento(d, S);
-      log(d, "Plano da obra gerado do orçamento · " + d.obra.plano.tasks.length + " tarefas · por aprovar (Operações)");
+      prepararPlanoDe(d, S);
+      log(d, "Plano da obra gerado do orçamento · " + d.obra.plano!.tasks.length + " tarefas · por aprovar (Operações)");
     },
     abrirRececao(id: number) {
       const ec = S.deals.find((x) => x.id === id)?.obra.ec, o = origemAtual(S);
@@ -2907,6 +2913,22 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Plano: ${t.nome} adiado para ${rotuloDia(p, t.dia)}`);
       if (A.planoMudou(d)) return;
       avisar({ msg: "Tarefa adiada", sub: "A obra acaba a " + rotuloDia(p, Math.max(...p.tasks.map((x) => x.dia + x.dur - 1))), kind: "ok" });
+    },
+    /** 10/11: resolver os conflitos de agenda do plano de uma vez (adia o que for preciso, como o «Adiar»; as escolhas à mão ficam). */
+    resolverConflitos(id: number) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "em curso" || p.estado === "concluída") return;
+      const copia = p.tasks.map((t) => t.dia);
+      const base = { ...p, tasks: p.tasks.map((t) => ({ ...t })) };
+      const adiadas = resolverConflitos(base, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {}));
+      if (!adiadas.length) { avisar({ msg: "Nada a resolver", sub: "Os conflitos que ficam são de técnicos escolhidos à mão: troque-os no plano.", kind: "" }); return; }
+      guardarBase(p);
+      base.tasks.forEach((t, i) => { p.tasks[i].dia = t.dia; });
+      logAdiadas(d, adiadas);
+      const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur - 1)), antes = Math.max(...copia.map((dia, i) => dia + p.tasks[i].dur - 1));
+      if (A.planoMudou(d)) return;
+      avisar({ msg: adiadas.length === 1 ? "1 tarefa adiada" : `${adiadas.length} tarefas adiadas`, sub: `A obra acaba a ${rotuloDia(p, fim)}${fim > antes ? ` (mais ${fim - antes} ${fim - antes === 1 ? "dia útil" : "dias úteis"})` : ""}.`, kind: "ok" });
     },
     /** As Operações escolhem o técnico de uma tarefa (do mesmo ofício). */
     trocarTec(id: number, ti: number, tec: string) {

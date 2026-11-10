@@ -8,6 +8,7 @@ import { eur, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { lerFaturaErp, resumoErp } from "./erpEticadata";
 import { SEM_PERM, pelaPermissao, pelaPermissaoAlguma, podeNeg, podeVerificarErp } from "./permissoes";
+import { FINANCEIRO, efetivo, emFalta } from "./campos";
 
 /** De quanto em quanto tempo a Olyvia volta a ler o ERP enquanto a fatura está por pagar e o negócio está aberto. */
 const INTERVALO_MS = 60_000;
@@ -22,9 +23,13 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
   // 9/11 (Lote 1, L): registar a fatura pede negocios.registar_fatura (A.registarFaturaErp, neg_registar_fatura); sem ela, nem se pergunta
   // ao Eticadata: o botão fica desligado e diz porquê
   const pode = podeNeg(S.role, "finance.invoice");
+  // 10/11 (teste do 1026): sem os dados de faturação e da fatura, o motor não regista; diz-se aqui o que falta, antes de escrever o número
+  // (antes, o aviso passava em segundos e a fatura ficava por registar sem se perceber porquê)
+  const faltam = [FINANCEIRO[0], FINANCEIRO[1]].map((g) => efetivo(S.campos, g)).filter((g) => !g.oculto)
+    .flatMap((g) => emFalta([g], d.f).map((c) => ({ c: c.l, g: g.nome || g.titulo })));
   const registar = async (e: FormEvent) => {
     e.preventDefault();
-    if (!pode) return;
+    if (!pode || faltam.length) return;
     const n = numero.trim().replace(/\s+/g, " ");
     if (!n) { setErro({ msg: "Escreva o número da fatura, como aparece no Eticadata.", semLigacao: false }); return; }
     setALer(true); setErro(null);
@@ -37,6 +42,14 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
     <div className={cn("grid w-full gap-1.5 sm:w-auto", !aEsquerda && "sm:justify-items-end")}>
       <Button size={tamanho} disabled aria-describedby={`fat-erp-semperm-${d.id}`}>Registar fatura<ArrowRight className="ml-2 h-4 w-4" /></Button>
       <p id={`fat-erp-semperm-${d.id}`} className="max-w-sm text-sm text-muted-foreground">{SEM_PERM["finance.invoice"].sub}</p>
+    </div>
+  );
+  if (faltam.length) return (
+    <div className={cn("grid w-full gap-1.5 sm:w-auto", !aEsquerda && "sm:justify-items-end")}>
+      <Button size={tamanho} disabled aria-describedby={`fat-erp-falta-${d.id}`}>Registar fatura<ArrowRight className="ml-2 h-4 w-4" /></Button>
+      <p id={`fat-erp-falta-${d.id}`} className="max-w-sm text-sm text-muted-foreground">
+        Antes de registar, falta {faltam.map((x) => `${x.c} (${x.g})`).join(", ")}.
+      </p>
     </div>
   );
   return (
