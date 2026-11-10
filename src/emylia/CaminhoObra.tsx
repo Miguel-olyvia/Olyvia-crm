@@ -198,8 +198,9 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
       {!arrancou && <div className="mt-4">{blocoArranque}</div>}
       {!arrancou && (d.obra.ec?.ref || d.obra.ec?.contrato) && <ProximoRececaoNegocio d={d} A={A} go={go} />}
 
-      {/* 10/11: o passo que é de quem está no ecrã (um só), quando não é o arranque (esse tem o botão em cima) */}
-      {!verTudo && meu && meu.id !== go1.id && <ol className="mt-4">{passo(meu, true)}</ol>}
+      {/* 10/11: o passo que é de quem está no ecrã (um só), com a obra a andar (as adendas). Antes do arranque, os passos da página
+          (Fatura, Pagamento, Medidas, Plano, Contrato, Materiais) já o têm: aqui só repetia */}
+      {!verTudo && arrancou && meu && meu.id !== go1.id && <ol className="mt-4">{passo(meu, true)}</ol>}
 
       {/* o que já está feito, numa linha; abre-se para ver o percurso todo */}
       {(
