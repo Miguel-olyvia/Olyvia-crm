@@ -92,9 +92,29 @@ export function descontoDasFaltas(
   limitePorDia: Readonly<Record<string, number>> = {},
   tolerancia?: number,
 ): DescontoDasFaltas {
+  const { valor, provisorio } = detalheDasFaltas(faltas, valorHora, limitePorDia, tolerancia);
+  return { valor, provisorio };
+}
+
+export interface DetalheDasFaltas extends DescontoDasFaltas {
+  /** Os minutos de falta que de facto descontam (depois do limite por dia). */
+  minutosDescontados: number;
+  /** As datas (ISO, por ordem) em que ha desconto: so os dias com minutos descontados. */
+  dias: string[];
+}
+
+/** A mesma conta de `descontoDasFaltas` (o valor nao muda) e, alem dele, quantos minutos e em que dias descontou. */
+export function detalheDasFaltas(
+  faltas: readonly FaltaDoPeriodo[],
+  valorHora: number,
+  limitePorDia: Readonly<Record<string, number>> = {},
+  tolerancia?: number,
+): DetalheDasFaltas {
   const restante = new Map<string, number>();
+  const dias = new Set<string>();
   let valor = 0;
   let provisorio = false;
+  let minutosDescontados = 0;
   for (const falta of faltas) {
     const limite = limitePorDia[falta.data];
     let minutos = falta.minutos;
@@ -106,8 +126,12 @@ export function descontoDasFaltas(
     const desconto = descontoDaFalta({ ...falta, minutos }, valorHora, tolerancia);
     valor += desconto.valor;
     if (desconto.desconta && desconto.provisorio) provisorio = true;
+    if (desconto.desconta && desconto.minutos > 0) {
+      minutosDescontados += desconto.minutos;
+      dias.add(falta.data);
+    }
   }
-  return { valor: arredondar(valor), provisorio };
+  return { valor: arredondar(valor), provisorio, minutosDescontados, dias: [...dias].sort() };
 }
 
 /** A assinatura das faltas usadas no calculo: muda sempre que uma falta, o seu estado ou a sua justificacao mudam. */

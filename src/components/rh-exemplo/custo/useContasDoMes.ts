@@ -10,6 +10,9 @@ export function useContasDoMes(custo: CustoDaPessoa): ContasDoMes {
   return contasDoMes(custo.atual.entradaContas, {
     lingua: language === "pt" ? "pt" : "en",
     rotuloDias: t("rhContas.rotuloDias"),
+    rotuloDia: t("rhContas.rotuloDia"),
+    rotuloDiaADia: t("rhContas.rotuloDiaADia"),
+    rotuloDeFalta: t("rhContas.rotuloDeFalta"),
     rotuloSubsidios: t("rhContas.rotuloSubsidios"),
     rotuloCalculado: t("rhContas.rotuloCalculado"),
   });

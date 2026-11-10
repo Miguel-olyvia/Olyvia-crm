@@ -325,3 +325,160 @@ describe("contasDoMes: a formula dos duodecimos e a do processamento (2 subsidio
     expect(normal(linha(c, "duodecimos")?.formula)).toBe("2 allowances × 50 % ÷ 12 × 1,500.00 € = 125.00 €");
   });
 });
+
+// ---- Subsidio de alimentacao (duas regras) e desconto de faltas, com os dias e as horas que os originaram ----
+describe("contasDoMes: detalhe do subsidio de alimentacao e das faltas", () => {
+  type Dias = { data: string | null; minutos: number }[];
+  const detalheSubsidio = (diasPeloDia: Dias, diasPelaHora: Dias, totalPelaHora: number, valorHora = 0.76, valorDia = 6.15) => ({
+    limiteMin: 300,
+    valorDia,
+    valorHora,
+    diasPeloDia,
+    diasPelaHora,
+    totalPeloDia: Math.round(diasPeloDia.length * 615) / 100,
+    totalPelaHora,
+  });
+  const DIAS_DIA: Dias = [{ data: "2026-10-01", minutos: 480 }, { data: "2026-10-02", minutos: 300 }, { data: "2026-10-05", minutos: 500 }];
+  const DIAS_HORA: Dias = [{ data: "2026-10-06", minutos: 120 }, { data: "2026-10-07", minutos: 299 }];
+
+  /** Uma pessoa de 1000 de base, sem duodecimos, com o subsidio e as faltas dados; a retribuicao e exactamente a soma das partes. */
+  const contasCom = (resultado: Partial<ResultadoParaContas>, opcoes: Parameters<typeof contasDoMes>[1] = {}) => {
+    const r: ResultadoParaContas = { baseMes: 1000, divisorDuodecimos: 14, linhasAutomaticas: [], linhasRegra: [], descontoFaltas: 0, subsidioAlimentacao: 0, ...resultado };
+    const retribuicaoMes = Math.round((1000 + r.subsidioAlimentacao - r.descontoFaltas) * 100) / 100;
+    return contasDoMes(entrada({ retribuicaoMes, decomposicao: decomposicaoDoResultado(r), manuais: 0, equipamentos: 0 }), opcoes);
+  };
+  const bate = (c: Contas) => {
+    const ate = c.linhas.findIndex((l) => l.chave === "retribuicao");
+    const parcelas = c.linhas.slice(0, ate).reduce((soma, l) => soma + cent(l.valor), 0);
+    expect(parcelas).toBe(cent(c.bruto ?? 0));
+    expect(cent(c.bruto ?? 0)).toBe(cent(c.linhas[ate].valor));
+  };
+
+  it("as DUAS regras viram duas linhas, cada uma com a sua conta e os seus dias", () => {
+    const sub = detalheSubsidio(DIAS_DIA, DIAS_HORA, 5.31);
+    const c = contasCom({ subsidioAlimentacao: 23.76, subsidioDetalhe: sub });
+    expect(linha(c, "subsidioAlimentacao")).toBeUndefined();
+    const dia = linha(c, "subsidioAlimentacaoDia");
+    const hora = linha(c, "subsidioAlimentacaoHora");
+    expect(dia).toMatchObject({ tipo: "parcela", valor: 18.45, rotuloParams: { limite: "5 h" }, dias: ["2026-10-01", "2026-10-02", "2026-10-05"] });
+    expect(normal(dia?.formula)).toBe("3 dias × 6,15 € = 18,45 €");
+    expect(hora).toMatchObject({ tipo: "parcela", valor: 5.31, rotuloParams: { limite: "5 h" }, dias: ["2026-10-06", "2026-10-07"] });
+    // 120 + 299 = 419 min = 6 h 59 min
+    expect(normal(hora?.formula)).toBe("6 h 59 min × 0,76 €/h = 5,31 €");
+    bate(c);
+  });
+
+  it("o limite vem da regra e nao esta fixo a 5 h", () => {
+    const sub = { ...detalheSubsidio(DIAS_DIA, DIAS_HORA, 5.31), limiteMin: 330 };
+    const c = contasCom({ subsidioAlimentacao: 23.76, subsidioDetalhe: sub });
+    expect(linha(c, "subsidioAlimentacaoDia")?.rotuloParams).toEqual({ limite: "5 h 30 min" });
+  });
+
+  it("so dias pelo valor do dia: so a primeira linha; um unico dia diz «1 dia»", () => {
+    const c = contasCom({ subsidioAlimentacao: 6.15, subsidioDetalhe: detalheSubsidio([DIAS_DIA[0]], [], 0) });
+    expect(linha(c, "subsidioAlimentacaoHora")).toBeUndefined();
+    expect(normal(linha(c, "subsidioAlimentacaoDia")?.formula)).toBe("1 dia × 6,15 € = 6,15 €");
+    bate(c);
+  });
+
+  it("so dias pelo valor da hora: so a segunda linha", () => {
+    const c = contasCom({ subsidioAlimentacao: 5.31, subsidioDetalhe: detalheSubsidio([], DIAS_HORA, 5.31) });
+    expect(linha(c, "subsidioAlimentacaoDia")).toBeUndefined();
+    expect(linha(c, "subsidioAlimentacaoHora")?.valor).toBe(5.31);
+    bate(c);
+  });
+
+  it("sem dias de nenhuma regra, nao ha linha de subsidio", () => {
+    const c = contasCom({ subsidioAlimentacao: 0, subsidioDetalhe: detalheSubsidio([], [], 0) });
+    expect(c.linhas.some((l) => l.chave.startsWith("subsidioAlimentacao"))).toBe(false);
+  });
+
+  it("arredondamento por dia: a conta total nao reproduz ao centimo e diz «calculado dia a dia»", () => {
+    // 3 dias de 20 min a 0,76 EUR/h: cada um 0,2533 -> 0,25; soma 0,75; mas 60 min x 0,76 = 0,76
+    const tres: Dias = [{ data: "2026-10-01", minutos: 20 }, { data: "2026-10-02", minutos: 20 }, { data: "2026-10-03", minutos: 20 }];
+    const c = contasCom({ subsidioAlimentacao: 0.75, subsidioDetalhe: detalheSubsidio([], tres, 0.75) });
+    const hora = linha(c, "subsidioAlimentacaoHora");
+    expect(normal(hora?.formula)).toBe("= 0,75 €, calculado dia a dia");
+    expect(hora?.dias).toHaveLength(3);
+    bate(c);
+  });
+
+  it("valor do dia com 3 casas: se n x valor mostrado nao reproduz o total ao centimo, so «= total, calculado dia a dia»", () => {
+    // 6,145 EUR: o processamento arredonda 614,5 a 615 cêntimos (3 dias = 18,45), mas o ecra mostra 6,14 (3 x 6,14 = 18,42)
+    const tres: Dias = [{ data: "2026-10-01", minutos: 480 }, { data: "2026-10-02", minutos: 300 }, { data: "2026-10-05", minutos: 500 }];
+    const c = contasCom({ subsidioAlimentacao: 18.45, subsidioDetalhe: detalheSubsidio(tres, [], 0, 0.76, 6.145) });
+    const dia = linha(c, "subsidioAlimentacaoDia");
+    expect(normal(dia?.formula)).toBe("= 18,45 €, calculado dia a dia");
+    expect(dia?.dias).toHaveLength(3);
+    bate(c);
+  });
+
+  it("valor do dia com 3 casas que reproduz (6,154 -> 6,15): mantem a formula n x valor", () => {
+    const tres: Dias = [{ data: "2026-10-01", minutos: 480 }, { data: "2026-10-02", minutos: 300 }, { data: "2026-10-05", minutos: 500 }];
+    const c = contasCom({ subsidioAlimentacao: 18.45, subsidioDetalhe: detalheSubsidio(tres, [], 0, 0.76, 6.154) });
+    expect(normal(linha(c, "subsidioAlimentacaoDia")?.formula)).toBe("3 dias × 6,15 € = 18,45 €");
+  });
+
+  it("dias sem data: a formula diz o total de dias (a conta tem de bater) e a lista so traz as datas conhecidas", () => {
+    const sem: Dias = [{ data: "2026-10-01", minutos: 480 }, { data: null, minutos: 300 }, { data: "2026-10-05", minutos: 500 }];
+    const c = contasCom({ subsidioAlimentacao: 18.45, subsidioDetalhe: detalheSubsidio(sem, [], 0) });
+    const dia = linha(c, "subsidioAlimentacaoDia");
+    expect(normal(dia?.formula)).toBe("3 dias × 6,15 € = 18,45 €");
+    expect(dia?.dias).toEqual(["2026-10-01", "2026-10-05"]);
+  });
+
+  it("em ingles", () => {
+    const c = contasCom(
+      { subsidioAlimentacao: 23.76, subsidioDetalhe: detalheSubsidio(DIAS_DIA, DIAS_HORA, 5.31) },
+      { lingua: "en", rotuloDias: "days", rotuloDia: "day", rotuloDiaADia: "calculated day by day", rotuloDeFalta: "of absence" },
+    );
+    expect(normal(linha(c, "subsidioAlimentacaoDia")?.formula)).toBe("3 days × 6.15 € = 18.45 €");
+  });
+
+  it("sem detalhe (mes fechado): uma so linha, como antes, sem dias", () => {
+    const c = contasCom({ subsidioAlimentacao: 23.76 });
+    expect(linha(c, "subsidioAlimentacaoDia")).toBeUndefined();
+    expect(linha(c, "subsidioAlimentacaoHora")).toBeUndefined();
+    expect(linha(c, "subsidioAlimentacao")).toMatchObject({ valor: 23.76, formula: "" });
+    expect(linha(c, "subsidioAlimentacao")?.dias).toBeUndefined();
+    bate(c);
+  });
+
+  it("o detalhe que nao soma o subsidio devolvido nao e mostrado: cai na linha unica", () => {
+    const c = contasCom({ subsidioAlimentacao: 30, subsidioDetalhe: detalheSubsidio(DIAS_DIA, DIAS_HORA, 5.31) });
+    expect(linha(c, "subsidioAlimentacao")?.valor).toBe(30);
+    expect(linha(c, "subsidioAlimentacaoDia")).toBeUndefined();
+  });
+
+  it("faltas: as horas e os dias, o valor da hora e o valor; a soma continua a bater", () => {
+    // 600 min a 10 EUR/h = 100 EUR
+    const c = contasCom({ descontoFaltas: 100, faltasDetalhe: { dias: ["2026-10-05", "2026-10-09"], minutosDescontados: 600, valorHoraReal: 10, valor: 100 } });
+    const f = linha(c, "faltas");
+    expect(f).toMatchObject({ valor: -100, dias: ["2026-10-05", "2026-10-09"] });
+    expect(normal(f?.formula)).toBe("10 h de falta (2 dias) × 10,00 €/h = −100,00 €");
+    bate(c);
+  });
+
+  it("faltas: se a conta nao reproduz ao centimo, mostra so o valor e os dias", () => {
+    // 600 min a 11,6667 EUR/h daria 116,67, mas o processamento chegou a 116,66 (falta a falta)
+    const c = contasCom({ descontoFaltas: 116.66, faltasDetalhe: { dias: ["2026-10-05"], minutosDescontados: 600, valorHoraReal: 11.666666666666668, valor: 116.66 } });
+    const f = linha(c, "faltas");
+    expect(normal(f?.formula)).toBe("= −116,66 €, calculado pelo processamento");
+    expect(f).toMatchObject({ valor: -116.66, dias: ["2026-10-05"] });
+    bate(c);
+  });
+
+  it("faltas sem detalhe (mes fechado): uma linha, sem dias", () => {
+    const c = contasCom({ descontoFaltas: 100 });
+    expect(linha(c, "faltas")).toMatchObject({ valor: -100, formula: "" });
+    expect(linha(c, "faltas")?.dias).toBeUndefined();
+    bate(c);
+  });
+
+  it("decomposicaoDoResultado leva o detalhe quando o resultado o traz, e nao o inventa quando nao traz", () => {
+    const sub = detalheSubsidio(DIAS_DIA, [], 0);
+    expect(decomposicaoDoResultado({ ...RESULTADO, subsidioDetalhe: sub })?.subsidioDetalhe).toEqual(sub);
+    expect(decomposicaoDoResultado(RESULTADO)).not.toHaveProperty("subsidioDetalhe");
+    expect(decomposicaoDoResultado(RESULTADO)).not.toHaveProperty("faltasDetalhe");
+  });
+});

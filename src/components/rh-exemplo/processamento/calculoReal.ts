@@ -14,7 +14,7 @@ import {
 } from "@/components/rh-exemplo/hooks/useRetribuicoesVigentesDaOrganizacao";
 import {
   calcularProcessamentoPessoa,
-  minutosTrabalhadosPorDia,
+  minutosTrabalhadosPorDiaComData,
   type RegraParaCalculo,
   type ResultadoProcessamentoPessoa,
 } from "@/components/rh-exemplo/lib/processamentoTotais";
@@ -54,6 +54,8 @@ export function minutosDoCalculo(
 export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCalculoReal {
   const { totais } = entrada;
   const { retribuicao, mudouAMeioDoMes } = escolherRetribuicaoVigente(entrada.versoes, entrada.ultimoDia);
+  // Os dias com data: o subsidio e as faltas passam a dizer QUAIS dias (o detalhe nao se grava no fecho).
+  const diasComData = minutosTrabalhadosPorDiaComData(entrada.dias);
   const resultado = calcularProcessamentoPessoa({
     totais: {
       planeadoMinutos: totais.planeadoMinutos,
@@ -72,7 +74,8 @@ export function calcularResultadoReal(entrada: EntradaCalculoReal): ResultadoCal
       diasFeriadoTrabalhados: totais.diasFeriadoTrabalhados,
       diasDescansoTrabalhado: 0,
     },
-    minutosPorDia: minutosTrabalhadosPorDia(entrada.dias),
+    minutosPorDia: diasComData.map((dia) => dia.minutos),
+    diasComData,
     minutosNoturnosPorFaixa: totais.minutosNoturnosPorFaixa ?? [],
     regra: entrada.regra,
     direitoIht: entrada.direitoIht,

@@ -1113,3 +1113,110 @@ describe("AbaCusto: as contas do mes", () => {
     }
   });
 });
+
+// ---- As contas do mes: o subsidio de alimentacao nas duas regras e as faltas, com os dias (mes aberto) ou sem eles (mes fechado) ----
+
+describe("AbaCusto: dias e horas do subsidio de alimentacao e das faltas", () => {
+  const renderAba = async () => {
+    const { AbaCusto } = await import("./AbaCusto");
+    return render(
+      <LanguageProvider>
+        <AbaCusto pessoa={PESSOA} ctx={{ nomePorPessoaId: new Map(), minhaPessoaId: null } as never} ficha={null as never} />
+      </LanguageProvider>,
+    );
+  };
+  const dias = (...n: number[]) => n.map((d) => ({ data: `2026-09-${String(d).padStart(2, "0")}`, minutos: 480 }));
+  const diasHora = (...n: number[]) => n.map((d, i) => ({ data: `2026-09-${String(d).padStart(2, "0")}`, minutos: i === 0 ? 120 : 299 }));
+  /** Mes aberto: 1000 de base, subsidio 23,76 (3 dias x 6,15 + 6 h 59 min a 0,76) e 100 de faltas (10 h a 10 EUR/h). */
+  const vivo = (peloDia = dias(1, 2, 5), pelaHora = diasHora(6, 7), total = 1000 + 23.76 - 100) => {
+    const base = calculoReal(total);
+    estado.pessoa = {
+      ...estado.pessoa,
+      resultado: {
+        ...base,
+        resultado: {
+          ...base.resultado,
+          baseMes: 1000,
+          subsidioAlimentacao: 23.76,
+          descontoFaltas: 100,
+          subsidioDetalhe: { limiteMin: 300, valorDia: 6.15, valorHora: 0.76, diasPeloDia: peloDia, diasPelaHora: pelaHora, totalPeloDia: 18.45, totalPelaHora: 5.31 },
+          faltasDetalhe: { dias: ["2026-09-04", "2026-09-09"], minutosDescontados: 600, valorHoraReal: 10, valor: 100 },
+        },
+      },
+    };
+  };
+  const linhaDe = (rotulo: RegExp) => within(screen.getByRole("table", { name: /Contas do custo de|Cost calculation for/ })).getByRole("row", { name: rotulo });
+
+  beforeEach(() => window.localStorage.setItem("language", "pt"));
+
+  it("separa as duas regras do subsidio em duas linhas, cada uma com a conta e os dias", async () => {
+    vivo();
+    await renderAba();
+    const dia = linhaDe(/Subsídio de alimentação: dias com 5 h ou mais/);
+    expect(dia).toHaveTextContent(/3 dias × 6,15\s€ = 18,45\s€/);
+    expect(dia).toHaveTextContent("Dias: 1, 2, 5");
+    const hora = linhaDe(/Subsídio de alimentação: dias com menos de 5 h/);
+    expect(hora).toHaveTextContent(/6 h 59 min × 0,76\s€\/h = 5,31\s€/);
+    expect(hora).toHaveTextContent("Dias: 6, 7");
+  });
+
+  it("as faltas dizem as horas, os dias e o valor da hora, e mostram os dias", async () => {
+    vivo();
+    await renderAba();
+    const faltas = linhaDe(/Descontos de faltas/);
+    expect(faltas).toHaveTextContent(/10 h de falta \(2 dias\) × 10,00\s€\/h = −100,00\s€/);
+    expect(faltas).toHaveTextContent("Dias: 4, 9");
+  });
+
+  it("com muitos dias a lista fica num «ver os dias» (details/summary) que se abre", async () => {
+    vivo(dias(1, 2, 3, 4, 5, 8, 9, 10, 11, 12), diasHora(15, 16));
+    await renderAba();
+    const resumo = within(linhaDe(/dias com 5 h ou mais/)).getByText(/Ver os dias/i);
+    expect(resumo.tagName).toBe("SUMMARY");
+    expect(resumo.closest("details")).not.toBeNull();
+    fireEvent.click(resumo);
+    expect(resumo.closest("details")).toHaveAttribute("open");
+    expect(within(linhaDe(/dias com 5 h ou mais/)).getByText(/1, 2, 3, 4, 5, 8, 9, 10, 11, 12/)).toBeInTheDocument();
+  });
+
+  it("so uma regra: so essa linha aparece", async () => {
+    vivo(dias(1, 2, 5), [], 1000 + 18.45 - 100);
+    await renderAba();
+    expect(screen.getByRole("row", { name: /dias com 5 h ou mais/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /dias com menos de 5 h/ })).not.toBeInTheDocument();
+  });
+
+  it("em ingles", async () => {
+    window.localStorage.setItem("language", "en");
+    vivo();
+    await renderAba();
+    expect(linhaDe(/Meal allowance: days of 5 h or more/)).toHaveTextContent(/3 days × 6\.15\s€ = 18\.45\s€/);
+    expect(linhaDe(/Meal allowance: days under 5 h/)).toHaveTextContent("Days: 6, 7");
+  });
+
+  describe("mes fechado", () => {
+    beforeEach(() => {
+      estado.pessoa = { resultado: null, aCarregar: false, retribuicaoRecusada: false, incompleta: false, periodoAberto: false, temPeriodo: true, dados: dadosDoMes([], FECHADO) };
+      estado.gravados = {
+        estado: "ok",
+        porPessoa: new Map([["p-tiago", gravada("p-tiago", { total_bruto: 1430, totais: { base_mes: 1300, divisor_duodecimos: 14, subsidio_alimentacao: 50, desconto_faltas: 20, lancamentos_pontuais: 100 } })]]),
+        antesDoRegisto: false,
+      };
+    });
+
+    it("mostra as linhas como antes (um valor, sem dias) e di-lo numa nota, sem recalcular", async () => {
+      await renderAba();
+      const tabela = within(screen.getByRole("table", { name: /Contas do custo de/ }));
+      expect(tabela.getByRole("row", { name: /^Subsídio de alimentação/ })).not.toHaveTextContent(/dias com/);
+      expect(tabela.getByRole("row", { name: /Descontos de faltas/ })).toBeInTheDocument();
+      expect(tabela.queryByText(/Dias:/)).not.toBeInTheDocument();
+      expect(screen.getByText("O detalhe de dias e horas só existe enquanto o mês está aberto.")).toBeInTheDocument();
+    });
+  });
+
+  it("mes aberto: nao ha nota de detalhe em falta", async () => {
+    vivo();
+    await renderAba();
+    expect(screen.queryByText(/O detalhe de dias e horas só existe/)).not.toBeInTheDocument();
+  });
+});

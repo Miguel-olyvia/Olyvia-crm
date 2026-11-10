@@ -9,6 +9,14 @@ const CHAVES_NOVAS = [
   "rhContas.nota.faltasExcedem",
   "rhContas.rotuloCalculado",
   "rhContas.rotuloSubsidios",
+  "rhContas.linha.subsidioAlimentacaoDia",
+  "rhContas.linha.subsidioAlimentacaoHora",
+  "rhContas.rotuloDia",
+  "rhContas.rotuloDiaADia",
+  "rhContas.rotuloDeFalta",
+  "rhContas.dias",
+  "rhContas.verDias",
+  "rhContas.semDetalheFechado",
 ];
 
 describe("rhExemploCustoFecho", () => {

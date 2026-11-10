@@ -9,6 +9,7 @@
  *  - O seguro de acidentes e uma percentagem POR CARGO e incide so sobre o SALARIO BASE mensal (sem duodecimos, IHT, km nem ajudas).
  *  - Nada se inventa: so se decompoe o que o processamento devolveu; o que ele nao explica fica em «Outras componentes».
  */
+import type { DetalheFaltas, DetalheSubsidio } from "@/lib/hr/processamentoTotais";
 import { arredondar } from "./custo";
 
 /** A TSU da entidade empregadora (Portugal), em percentagem. Constante: nao se edita no ecra. */
@@ -18,6 +19,8 @@ export type ChaveConta =
   | "salarioBase"
   | "duodecimos"
   | "subsidioAlimentacao"
+  | "subsidioAlimentacaoDia"
+  | "subsidioAlimentacaoHora"
   | "horasExtra"
   | "faltas"
   | "iht"
@@ -45,6 +48,10 @@ export interface LinhaConta {
   /** O valor assenta numa estimativa pelo salario do cargo. */
   estimado?: true;
   nota?: NotaConta;
+  /** Parametros do rotulo da linha (o ecra traduz o rotulo com eles): o limite do subsidio, em horas, vem da regra. */
+  rotuloParams?: Record<string, string>;
+  /** Os dias (AAAA-MM-DD, por ordem) que originaram o valor; ausente = nao se sabe (mes fechado: o detalhe nao esta gravado). */
+  dias?: string[];
 }
 
 /** O que o processamento devolveu, na parte de que as contas precisam (`ResultadoProcessamentoPessoa` serve). */
@@ -55,6 +62,9 @@ export interface ResultadoParaContas {
   linhasRegra: ReadonlyArray<{ tipo: string; faixa: number | null; quantidade: number | null; valor: number }>;
   descontoFaltas: number;
   subsidioAlimentacao: number;
+  /** Os dias e as horas por tras do subsidio e das faltas; so o processamento vivo os traz (o fecho nao os grava). */
+  subsidioDetalhe?: DetalheSubsidio;
+  faltasDetalhe?: DetalheFaltas;
 }
 
 export interface QuantidadeEValor {
@@ -78,6 +88,9 @@ export interface DecomposicaoRetribuicao {
   iht: number | null;
   km: QuantidadeEValor | null;
   ajudas: QuantidadeEValor | null;
+  /** Os dias e as horas por tras do subsidio e das faltas; ausentes quando o resultado nao os traz (mes fechado). */
+  subsidioDetalhe?: DetalheSubsidio;
+  faltasDetalhe?: DetalheFaltas;
 }
 
 const soma = (valores: readonly number[]): number => arredondar(valores.reduce((s, v) => s + v, 0));
@@ -105,6 +118,8 @@ export function decomposicaoDoResultado(r: ResultadoParaContas): DecomposicaoRet
     iht: dosTipo(r.linhasRegra, "iht")?.valor ?? null,
     km: dosTipo(r.linhasRegra, "km"),
     ajudas: dosTipo(r.linhasRegra, "ajudas"),
+    ...(r.subsidioDetalhe ? { subsidioDetalhe: r.subsidioDetalhe } : {}),
+    ...(r.faltasDetalhe ? { faltasDetalhe: r.faltasDetalhe } : {}),
   };
 }
 
@@ -130,6 +145,12 @@ export interface EntradaContas {
 export interface OpcoesContas {
   lingua?: "pt" | "en";
   rotuloDias?: string;
+  /** «dia» / «day»: o singular de `rotuloDias`, para «1 dia». */
+  rotuloDia?: string;
+  /** «calculado dia a dia» / «calculated day by day»: acompanha o subsidio pela hora quando a conta total nao o reproduz ao centimo. */
+  rotuloDiaADia?: string;
+  /** «de falta» / «of absence»: «10 h de falta (2 dias) × ...». */
+  rotuloDeFalta?: string;
   /** «subsídios» / «allowances»: a palavra da formula dos duodecimos. */
   rotuloSubsidios?: string;
   /** «calculado pelo processamento»: acompanha o valor quando preco × quantidade (ou pct × base) nao o reproduz ao centimo. */
@@ -177,6 +198,9 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
   if (e.retribuicaoMes === null) return SEM_CONTAS;
   const { numero, eur, pct } = formatador(opcoes.lingua ?? "pt");
   const dias = opcoes.rotuloDias ?? "dias";
+  const rotuloDia = opcoes.rotuloDia ?? "dia";
+  const rotuloDiaADia = opcoes.rotuloDiaADia ?? "calculado dia a dia";
+  const rotuloDeFalta = opcoes.rotuloDeFalta ?? "de falta";
   const rotuloSubsidios = opcoes.rotuloSubsidios ?? "subsídios";
   const rotuloCalculado = opcoes.rotuloCalculado ?? "calculado pelo processamento";
   const d = e.decomposicao;
@@ -209,9 +233,15 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
     if (duodecimos !== 0) {
       parcelas.push(parcela("duodecimos", duodecimos, formulaDuodecimos(salarioBase, d.divisor, duodecimos, rotuloSubsidios, eur, pct, calculado)));
     }
-    if (d.subsidioAlimentacao !== 0) parcelas.push(parcela("subsidioAlimentacao", d.subsidioAlimentacao));
+    if (d.subsidioAlimentacao !== 0) {
+      const duas = linhasDoSubsidio(d.subsidioAlimentacao, d.subsidioDetalhe, { numero, eur, dias, rotuloDia, rotuloDiaADia }, parcela);
+      if (duas) parcelas.push(...duas);
+      else parcelas.push(parcela("subsidioAlimentacao", d.subsidioAlimentacao));
+    }
     if (d.horasExtra !== 0) parcelas.push(parcela("horasExtra", d.horasExtra));
-    if (d.descontoFaltas !== 0) parcelas.push(parcela("faltas", -d.descontoFaltas));
+    if (d.descontoFaltas !== 0) {
+      parcelas.push(linhaDasFaltas(d.descontoFaltas, d.faltasDetalhe, { numero, eur, dias, rotuloDia, rotuloDeFalta, rotuloCalculado }, parcela));
+    }
     if (d.iht !== null) {
       const ihtPct = salarioBase > 0 ? arredondar((d.iht / salarioBase) * 100) : null;
       const exacto = ihtPct !== null && centimos(arredondar((ihtPct * salarioBase) / 100)) === centimos(d.iht);
@@ -300,4 +330,81 @@ function formulaUnitaria(
   const preco = Number((qv.valor / qv.quantidade).toFixed(4));
   const exacto = qv.precoUnico !== false && centimos(arredondar(preco * qv.quantidade)) === centimos(qv.valor);
   return exacto ? `${quantidadeEmTexto} × ${eur4(numero, preco)} = ${eur(qv.valor)}` : calculado(qv.valor);
+}
+
+/** 330 min = «5 h 30 min»; 300 = «5 h»; 45 = «45 min». */
+function duracao(minutos: number): string {
+  const total = Math.round(minutos);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+interface FormatosDaConta {
+  numero: (v: number, min?: number, max?: number) => string;
+  eur: (v: number) => string;
+  dias: string;
+  rotuloDia: string;
+}
+
+type FazParcela = (chave: ChaveConta, valor: number, formula?: string, nota?: NotaConta, comMarca?: boolean) => LinhaConta;
+
+/** «3 dias» / «1 dia». */
+const quantosDias = (n: number, f: Pick<FormatosDaConta, "dias" | "rotuloDia">): string => `${n} ${n === 1 ? f.rotuloDia : f.dias}`;
+
+const datas = (diasDoMes: readonly { data: string | null }[]): string[] =>
+  diasDoMes.flatMap((x) => (x.data ? [x.data] : []));
+
+/**
+ * O subsidio de alimentacao nas suas DUAS regras: os dias pelo valor do dia (a partir do limite) e os dias pelo valor da hora (abaixo
+ * do limite). Cada linha so existe se houver dias dessa regra. `null` = o detalhe nao esta disponivel (mes fechado) ou nao soma o
+ * subsidio devolvido (nunca se mostra uma conta que nao bate): fica a linha unica.
+ */
+function linhasDoSubsidio(
+  subsidio: number,
+  detalhe: DetalheSubsidio | undefined,
+  f: FormatosDaConta & { rotuloDiaADia: string },
+  parcela: FazParcela,
+): LinhaConta[] | null {
+  if (!detalhe) return null;
+  const { diasPeloDia, diasPelaHora } = detalhe;
+  if (diasPeloDia.length + diasPelaHora.length === 0) return null;
+  if (centimos(detalhe.totalPeloDia) + centimos(detalhe.totalPelaHora) !== centimos(subsidio)) return null;
+  const rotuloParams = { limite: duracao(detalhe.limiteMin) };
+  const linhas: LinhaConta[] = [];
+  if (diasPeloDia.length > 0) {
+    // O valor do dia mostra-se a 2 casas mas o processamento arredonda-o a centimos: so se mostra «n × valor» se reproduzir o total.
+    const valorMostrado = Number(detalhe.valorDia.toFixed(2));
+    const reproduzDia = diasPeloDia.length * centimos(valorMostrado) === centimos(detalhe.totalPeloDia);
+    const formula = reproduzDia
+      ? `${quantosDias(diasPeloDia.length, f)} × ${f.eur(detalhe.valorDia)} = ${f.eur(detalhe.totalPeloDia)}`
+      : `= ${f.eur(detalhe.totalPeloDia)}, ${f.rotuloDiaADia}`;
+    linhas.push({ ...parcela("subsidioAlimentacaoDia", detalhe.totalPeloDia, formula), rotuloParams, dias: datas(diasPeloDia) });
+  }
+  if (diasPelaHora.length > 0) {
+    const minutos = diasPelaHora.reduce((soma, x) => soma + x.minutos, 0);
+    const reproduz = centimos(arredondar((minutos / 60) * detalhe.valorHora)) === centimos(detalhe.totalPelaHora);
+    const formula = reproduz
+      ? `${duracao(minutos)} × ${f.numero(detalhe.valorHora, 2, 4)}\u00a0€/h = ${f.eur(detalhe.totalPelaHora)}`
+      : `= ${f.eur(detalhe.totalPelaHora)}, ${f.rotuloDiaADia}`;
+    linhas.push({ ...parcela("subsidioAlimentacaoHora", detalhe.totalPelaHora, formula), rotuloParams, dias: datas(diasPelaHora) });
+  }
+  return linhas;
+}
+
+/** O desconto de faltas com as horas e os dias; se a conta (horas × valor da hora) nao reproduz o valor ao centimo, so o valor e os dias. */
+function linhaDasFaltas(
+  desconto: number,
+  detalhe: DetalheFaltas | undefined,
+  f: FormatosDaConta & { rotuloDeFalta: string; rotuloCalculado: string },
+  parcela: FazParcela,
+): LinhaConta {
+  if (!detalhe || detalhe.dias.length === 0) return parcela("faltas", -desconto);
+  const preco = Number(detalhe.valorHoraReal.toFixed(4));
+  const reproduz = centimos(arredondar((detalhe.minutosDescontados / 60) * preco)) === centimos(desconto);
+  const formula = reproduz
+    ? `${duracao(detalhe.minutosDescontados)} ${f.rotuloDeFalta} (${quantosDias(detalhe.dias.length, f)}) × ${f.numero(preco, 2, 4)}\u00a0€/h = \u2212${f.eur(desconto)}`
+    : `= \u2212${f.eur(desconto)}, ${f.rotuloCalculado}`;
+  return { ...parcela("faltas", -desconto, formula), dias: detalhe.dias };
 }
