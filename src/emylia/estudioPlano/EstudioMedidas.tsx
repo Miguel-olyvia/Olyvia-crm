@@ -13,6 +13,7 @@ import { NaFrente } from "../NaFrente";
 import { EditorPlanta } from "../EditorPlanta";
 import { areaChaoM2, areaParedesM2, gravarPlanta, lerPlanta, peDireitoDoCampo, type Planta } from "../planta";
 import { useReduzir } from "../movimento";
+import { podeRetificar } from "../preparacaoObra";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -113,8 +114,8 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
         {/* «Aceitar», fixo em baixo */}
         <div className="border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">{mudadas ? `${mudadas} ${mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}. Se o preço mudar, faz-se uma adenda.` : "Tudo como na visita."}</p>
-            <Button type="button" size="lg" className="min-h-12 shrink-0" disabled={feito || !d.fin.pago} onClick={aceitar}><Check className="mr-1.5 h-5 w-5" aria-hidden="true" />Aceitar as medidas</Button>
+            <p className="text-sm text-muted-foreground">{mudadas ? `${mudadas} ${mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}. Se o preço mudar, refaz-se a proposta antes da fatura.` : "Tudo como na visita."}</p>
+            <Button type="button" size="lg" className="min-h-12 shrink-0" disabled={feito || !podeRetificar(d)} onClick={aceitar}><Check className="mr-1.5 h-5 w-5" aria-hidden="true" />Aceitar as medidas</Button>
           </div>
         </div>
 
@@ -138,7 +139,7 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
 /** O botão que abre o Estúdio das medidas (no passo «Retificação de medidas»). */
 export function AbrirEstudioMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [aberto, setAberto] = useState(false);
-  if (d.f.retif_aceite || !d.fin.pago) return null;
+  if (d.f.retif_aceite || !podeRetificar(d)) return null;
   return (
     <>
       <Button type="button" size="lg" className="min-h-12 w-full sm:w-auto" onClick={() => setAberto(true)}><Ruler className="mr-1.5 h-5 w-5" aria-hidden="true" />Abrir o estúdio das medidas</Button>

@@ -13,12 +13,13 @@ import { acoes, type Aviso, type Estado, type Negocio } from "@/emylia/motor";
 import { estadoVazio } from "@/emylia/estadoOrganizacao";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { carregarCamposConfig } from "@/emylia/real/camposConfig";
-import { deLinhas, garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
-import { idsServico, lerNegocios, negocioDoLido, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
+import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
+import { idsServico, lerNegocios, negocioParaOEcra, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
 import { publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
-import { definirOrgErp } from "@/emylia/erpEticadata";
+import { definirOrgErp } from "@/emylia/erpEticadata";
+
 import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 
 // F3 (28/10): a encomenda de cliente é a do servidor (financeiroReal.ts grava a fatura, o pagamento e a anulação antes do negócio; depois disso
@@ -131,7 +132,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     lidos = new Map(novos.map((n) => [n.linhas.negocio.numero, n]));
     soLeitura = new Set(novos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
     docsPorId = new Set(novos.filter((n) => n.docsCrm).map((n) => n.id));
-    S.deals = novos.map(negocioDoLido);
+    S.deals = novos.map(negocioParaOEcra);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
@@ -151,7 +152,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     for (const d of mudados) {
       const lido = lidos.get(d.id);
       const i = S.deals.findIndex((x) => x.id === d.id);
-      if (lido && i >= 0) S.deals[i] = negocioDoLido(lido);
+      if (lido && i >= 0) S.deals[i] = negocioParaOEcra(lido);
     }
     avisar({ msg: "Este negócio é do CRM: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ". Faz-se em Contratos e Propostas.", kind: "bad" });
   };
@@ -164,7 +165,8 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     const porNumero = new Map(frescos.map((n) => [n.linhas.negocio.numero, n]));
     const emConflito = porGravar.filter((d) => {
       const fresco = porNumero.get(d.id);
-      return fresco !== undefined && marcaNegocio(deLinhas(fresco.linhas)) !== foto.get(d.id);
+      // 10/11: com a fase acertada como no ecrã (negocioParaOEcra), senão a fase acertada parecia uma mudança de outra pessoa
+      return fresco !== undefined && marcaNegocio(negocioParaOEcra(fresco)) !== foto.get(d.id);
     });
     if (emConflito.length === 0) return null;
     aplicarLeitura(frescos);

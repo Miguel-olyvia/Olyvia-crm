@@ -24,7 +24,8 @@ const DICA: Record<EtapaFotos, string> = {
 /** Uma fotografia mostrada: a imagem (ou como se lê, com a base ligada) e como se apaga. */
 interface Mostrada { chave: string; src?: string; carregar?: () => Promise<string>; apagar: () => void }
 
-export function FotosEtapa({ ctx, d, etapa, simples }: { ctx: Ctx; d: Negocio; etapa: EtapaFotos; simples?: boolean }) {
+/** `soVer` (10/11, o Estúdio do plano): só as fotografias, sem tirar, apagar nem «o cliente não quis». */
+export function FotosEtapa({ ctx, d, etapa, simples, soVer }: { ctx: Ctx; d: Negocio; etapa: EtapaFotos; simples?: boolean; soVer?: boolean }) {
   const { A, run } = ctx;
   const org = orgDoModoReal();
   const real = useFotosVisita(org, d.id);
@@ -82,7 +83,7 @@ export function FotosEtapa({ ctx, d, etapa, simples }: { ctx: Ctx; d: Negocio; e
                 className="block h-20 w-20 overflow-hidden rounded-lg border border-border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-24 sm:w-24">
                 <Imagem m={m} alt={`Fotografia ${k + 1}`} className="h-full w-full object-cover" />
               </button>
-              {!v.fechada && (
+              {!v.fechada && !soVer && (
                 <button type="button" aria-label={`Apagar a fotografia ${k + 1}`} onClick={m.apagar}
                   className="absolute -right-2 -top-2 grid h-8 w-8 place-items-center rounded-full border border-border bg-card shadow-sm hover:bg-muted"><X className="h-4 w-4" aria-hidden="true" /></button>
               )}
@@ -101,6 +102,7 @@ export function FotosEtapa({ ctx, d, etapa, simples }: { ctx: Ctx; d: Negocio; e
         </ul>
       )}
 
+      {!soVer && <>
       {entrada(camara, true, `Tirar fotografia: ${TITULO[etapa].toLowerCase()}`)}
       {entrada(galeria, false, `Escolher da galeria: ${TITULO[etapa].toLowerCase()}`)}
       <div className="flex flex-wrap gap-2">
@@ -111,9 +113,11 @@ export function FotosEtapa({ ctx, d, etapa, simples }: { ctx: Ctx; d: Negocio; e
           <ImagePlus className="mr-1.5 h-4 w-4" aria-hidden="true" />Da galeria
         </Button>
       </div>
+      </>}
+      {soVer && n === 0 && <p className="text-sm text-muted-foreground">Sem fotografias.</p>}
       {erro && <p role="alert" className="text-[15px] font-medium text-destructive">{erro}</p>}
 
-      {etapa === "area" && (
+      {etapa === "area" && !soVer && (
         <>
           {aValidar(d, "fotos") && semFotos && <p className="text-[15px] font-medium text-destructive motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">Tire pelo menos uma fotografia (em qualquer etapa), ou marque que o cliente não quis.</p>}
           {/* 27/10: uma só marca (o "Sim / Não" de uma pergunta negativa confundia): marcada, conta como as fotografias feitas */}

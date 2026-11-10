@@ -427,6 +427,20 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ];
     }
   } else if (fase === 3 && o) {
+    const passoMedidas = (): Passo => ({ id: "retificacao", titulo: simples ? "Medidas" : "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d), semAvancar: true,
+      resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : "o supervisor confirma no local"],
+      corpo: <RetificacaoMedidas ctx={ctx} d={d} /> });
+    const passoPlanoAntes = (): Passo => ({ id: "plano", titulo: "Plano da obra", icone: CalendarClock, feito: planoAprovadoDe(d), semAvancar: true,
+      resumo: [planoAprovadoDe(d) ? "aprovado" : !d.obra.plano ? "por gerar" : retificacaoAceite(d) ? "por aprovar" : "depois das medidas"],
+      corpo: (
+        <div className="space-y-6">
+          <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">
+            {planoAprovadoDe(d) ? "Plano aprovado. Segue a fatura, no Financeiro." : retificacaoAceite(d) ? "As Operações ajustam e aprovam o plano no Estúdio. Aprovado, o negócio passa ao Financeiro." : "Primeiro, o supervisor aceita as medidas. Depois as Operações aprovam o plano e segue a fatura."}
+          </p>
+          {!d.obra.plano && retificacaoAceite(d) && <Button type="button" className="min-h-11" onClick={() => ctx.run(() => ctx.A.gerarPlano(d.id))}><CalendarClock className="mr-1.5 h-4 w-4" aria-hidden="true" />Gerar o plano</Button>}
+          <AbrirEstudioPlano ctx={ctx} d={d} />
+        </div>
+      ) });
     passos = [
       // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
       { id: "orc", titulo: "Orçamento", icone: o.enviada && !o.aceite && !o.vendaDireta ? Lock : FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)),
@@ -448,10 +462,13 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           )}
         </div>
       ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
+      // 10/11 (Rúben: «medidas antes da fatura»): aceite a proposta, o supervisor retifica as medidas e as Operações aprovam o plano, aqui
+      // no Negócio; com o plano aprovado passa ao Financeiro. O contrato vem depois do pagamento (passo da Obra).
+      ...(o.aceite && !o.vendaDireta ? [passoMedidas(), passoPlanoAntes()] : []),
       // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial).
-      // 10/11 (o fluxo novo de 9/11): aceite, o negócio passa ao Financeiro e o contrato é um passo da Obra (depois do plano aprovado);
-      // aqui só fica nos negócios antigos que já o tinham aberto (aceites, ou com o contrato gerado, ainda no Negócio)
-      ...(o.vendaDireta || (!o.aceite && !o.contrato) ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
+      // 10/11 (o fluxo novo de 9/11): o contrato é um passo da Obra (depois do plano aprovado e do pagamento); aqui só fica nos negócios
+      // antigos que já o tinham gerado
+      ...(o.vendaDireta || !o.contrato ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
         <div className="space-y-10">
           <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
           <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
@@ -504,7 +521,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     // 9/11 (Rúben, o fluxo novo): na Obra, primeiro o supervisor retifica as medidas; o plano aprova-se depois e só então se assina o contrato
     const semObraAMedir = !!d.orc?.vendaDireta;
     const passoRetif: Passo = { id: "retificacao", titulo: simples ? "Medidas" : "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d), semAvancar: true,
-      resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : d.fin.pago ? "por fazer" : "depois do pagamento"],
+      resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : "por fazer"],
       corpo: <RetificacaoMedidas ctx={ctx} d={d} /> };
     const passoContrato: Passo | null = o && !semObraAMedir && simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), semAvancar: true, corpo: (
       <div className="space-y-10">
@@ -516,7 +533,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       </div>
     ) }, o.contrato === "assinado") : null;
     passos = [
-      ...(semObraAMedir ? [] : [passoRetif]),
+      // 10/11 (Rúben: «medidas antes da fatura»): as medidas já vêm aceites do Negócio; aqui só nos negócios antigos que chegaram sem elas
+      ...(semObraAMedir || retificacaoAceite(d) ? [] : [passoRetif]),
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
         // 9/11 (Rúben): o Estúdio do plano, por cima do negócio (o calendário por técnico, os alertas e aprovar)

@@ -24,7 +24,7 @@ function montar(act: "enviar" | "enviarContrato") {
   const A = acoes(S, () => {}, (fn) => fn());
   const d = S.deals.find((x) => x.id === 1031)!;
   Object.assign(d.orc!, { enviada: null, aceite: null, verif: true, aprov: "ok", contrato: null, vendaDireta: false });
-  if (act === "enviarContrato") Object.assign(d.orc!, { enviada: "hoje", aceite: "hoje" });
+  if (act === "enviarContrato") { Object.assign(d.orc!, { enviada: "hoje", aceite: "hoje" }); d.f.retif_aceite = "2026-11-10"; d.obra.plano = { tasks: [], estado: "aprovado", dia: 0 }; } // 10/11: o contrato só vai com as medidas aceites e o plano aprovado
   const p = proximo(d, S);
   expect(p.act).toBe(act);
   S.role = p.who as Estado["role"];

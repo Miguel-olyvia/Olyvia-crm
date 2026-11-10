@@ -115,6 +115,8 @@ export const retificacaoAceite = (d: Negocio): boolean => !!d.f.retif_aceite || 
 /** O contrato assinado (na venda direta não há contrato). */
 export const contratoAssinado = (d: Negocio): boolean => d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta;
 /** O plano aprovado pelas Operações (ou já em curso, ou concluído). */
+/** 10/11 (Rúben: «medidas antes da fatura»): as medidas retificam-se com a proposta aceite (antes, só depois do pagamento). */
+export const podeRetificar = (d: Negocio): boolean => !!d.orc?.aceite || d.fin.pago;
 export const planoAprovadoDe = (d: Negocio): boolean => ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "");
 
 /* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
@@ -202,6 +204,27 @@ export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): 
     }
   }
   return out;
+}
+
+/** 10/11 (Rúben: «dizer a obra onde está, com link para o estúdio dela»): a outra obra onde o técnico (ou alguém da equipa dele) está nos
+ *  dias da tarefa; null se não houver (ou o plano não tiver data de início). */
+export function obraQueOcupa(S: Pick<Estado, "deals">, tec: string, t: Pick<Tarefa, "dia" | "dur">, p: Plano, exceto: number): Negocio | null {
+  if (!p.inicio) return null;
+  const meus = new Set(diasDaObra(deIso(p.inicio), t.dia + t.dur).slice(t.dia).map(isoDia));
+  const alvo = new Set(equipaDe(tec)?.membros ?? [tec]);
+  for (const d of S.deals ?? []) {
+    const q = d.obra?.plano;
+    if (d.id === exceto || !q || q.estado === "concluída" || !q.inicio) continue;
+    const fim = q.tasks.reduce((a, x) => Math.max(a, x.dia + x.dur), 0);
+    if (!fim) continue;
+    const ds = diasDaObra(deIso(q.inicio), fim);
+    for (const x of q.tasks) {
+      if (!x.tec || x.exec?.estado === "validada") continue;
+      if (!(equipaDe(x.tec)?.membros ?? [x.tec]).some((m) => alvo.has(m))) continue;
+      for (let k = x.dia; k < x.dia + x.dur && k < ds.length; k++) if (meus.has(isoDia(ds[k]))) return d;
+    }
+  }
+  return null;
 }
 
 /**
@@ -352,10 +375,13 @@ export const EC_NO_PAGAMENTO = "Emite-se com o pagamento validado, o plano aprov
  *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */
 export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] {
   const p = d.obra.plano, F: string[] = [];
+  // 10/11 (Rúben: «medidas antes da fatura»): no Negócio, as medidas e o plano vêm antes do pagamento; o contrato, depois dele. Os negócios
+  // que já estavam no Financeiro (do fluxo anterior) fazem as medidas na Obra, depois do pagamento, como antes
+  const antesDoPagamento = d.fase <= 3;
+  if (antesDoPagamento && !d.obra.ec && !d.orc?.vendaDireta && !retificacaoAceite(d)) F.push("retificar as medidas");
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "registar a fatura do ERP e receber o pagamento");
-  // 9/11: as medidas, o plano e o contrato antes da encomenda
   else if (!d.obra.ec) {
-    if (!retificacaoAceite(d)) F.push("retificar as medidas");
+    if (!retificacaoAceite(d)) { if (!antesDoPagamento) F.push("retificar as medidas"); }
     else if (!planoAprovadoDe(d)) { /* «aprovar o plano» entra no fim, como antes */ }
     else if (!contratoAssinado(d)) F.push("assinar o contrato");
     else F.push("emitir a encomenda de cliente");
@@ -378,13 +404,14 @@ export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter
 /** A encomenda da adenda emite-se com o pagamento dela validado (decisão B, como no contrato). */
 export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parcela da adenda for validado.";
 
-/** 10/11 (o fluxo novo de 9/11): porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (o pagamento, as medidas,
- *  o plano, o contrato); com tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
+/** 10/11 (o fluxo novo de 9/11): porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (as medidas, o plano,
+ *  o pagamento, o contrato); com tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
 export function semEncomendaCliente(d: Negocio): string {
-  if (!d.fin.pago) return "A encomenda de cliente emite-se quando o pagamento for validado.";
+  // 10/11 (Rúben: «medidas antes da fatura»): a ordem é medidas, plano, pagamento, contrato
   const direta = !!d.orc?.vendaDireta;
-  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado e do contrato assinado.";
-  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai com o plano aprovado e o contrato assinado.";
+  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado, do pagamento e do contrato assinado.";
+  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai depois do plano aprovado, do pagamento e do contrato assinado.";
+  if (!d.fin.pago) return "A encomenda de cliente emite-se depois do pagamento validado" + (direta ? "." : " e do contrato assinado.");
   if (!contratoAssinado(d)) return "A encomenda de cliente sai quando o cliente assinar o contrato.";
   return "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio.";
 }
@@ -448,8 +475,12 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // 9/11: o primeiro passo da Obra é o supervisor retificar as medidas no local; o plano aprova-se depois delas aceites
   if (!d.orc?.vendaDireta) L.push(retificacaoAceite(d)
     ? { id: "ret", trilho: "plano", estado: "feito", who: "operacoes", t: "Medidas retificadas e aceites", sub: d.f.retif_aceite ? `A ${d.f.retif_aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}.` : "" }
-    : { id: "ret", trilho: "plano", estado: d.fin.pago ? "agora" : "espera", who: "operacoes", t: "Retificar as medidas", sub: d.fin.pago ? "O supervisor confirma as medidas no local." : SO_DEPOIS_DO_PAGAMENTO, act: d.fin.pago ? "abrirRetificacao" : undefined, btn: "Retificar as medidas" });
-  L.push(p.estado === "por aprovar" && !d.fin.pago
+    // 10/11 (Rúben: «medidas antes da fatura»): no Negócio, com a proposta aceite, já não esperam pelo pagamento. Os que já estavam no
+    // Financeiro (do fluxo anterior, sem o passo das medidas) fazem-nas na Obra, depois do pagamento
+    : d.fase === 4 && !d.fin.pago
+    ? { id: "ret", trilho: "plano", estado: "espera", who: "operacoes", t: "Retificar as medidas", sub: SO_DEPOIS_DO_PAGAMENTO }
+    : { id: "ret", trilho: "plano", estado: "agora", who: "operacoes", t: "Retificar as medidas", sub: "O supervisor confirma as medidas no local.", act: "abrirRetificacao", btn: "Retificar as medidas" });
+  L.push(p.estado === "por aprovar" && d.fase === 4 && !d.fin.pago && !retificacaoAceite(d)
     ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DO_PAGAMENTO }
     : p.estado === "por aprovar" && !retificacaoAceite(d)
     ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: "Depois de as medidas serem retificadas e aceites." }

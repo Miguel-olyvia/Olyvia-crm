@@ -4,7 +4,7 @@
 // 28/10 (20261231999000): a obra de cada negócio lê-se e grava-se ao lado (obra_ler_negocios, obra_guardar_negocio; obraReal.ts). Numa base
 // sem essas funções, a obra fica como antes (só no ecrã) e o resto lê e grava na mesma.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Negocio } from "../motor";
+import { acertarFaseDasMedidas, type Negocio } from "../motor";
 import { deLinhas, type LinhasNegocio } from "./negocioReal";
 import { obraDaBase, type ObraBase } from "./obraReal";
 import { erpLembrado } from "../erpEticadata";
@@ -36,6 +36,14 @@ export function negocioDoLido(n: NegocioLido): Negocio {
   // e a última leitura do Eticadata da fatura (não se grava na base)
   const erp = erpLembrado(d.fin.fatura?.n);
   if (erp) d.fin.erp = erp;
+  return d;
+}
+
+/** O negócio lido, para o ecrã: como negocioDoLido, com a fase que o fluxo de 10/11 pede (Rúben: «medidas antes da fatura»: as medidas e
+ *  o plano antes do Financeiro; acertarFaseDasMedidas). A fase acertada grava-se na próxima mudança do negócio. */
+export function negocioParaOEcra(n: NegocioLido): Negocio {
+  const d = negocioDoLido(n);
+  acertarFaseDasMedidas(d);
   return d;
 }
 
