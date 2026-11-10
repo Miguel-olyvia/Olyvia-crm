@@ -172,7 +172,7 @@ export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
     const sid = t.svc ?? t.chave;
     const of = t.perfilId ? { perfilId: t.perfilId, sk: C.perfis.find((x) => x.id === t.perfilId)?.n ?? t.perfil } : oficioDoServico(S, { perfil: t.perfil, n: t.nome });
     const tec = tecnicoDoOficio(of, plano, dia, dur0);
-    plano.tasks.push({ nome: t.nome, svcs: t.chave === "demolicao" ? [] : [sid], dia, dur: dur0, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase });
+    plano.tasks.push({ nome: t.nome, svcs: t.chave === "demolicao" ? [] : [sid], dia, dur: dur0, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase, ini: r2(t.inicio), dias: r2(t.dias) });
   }
   // 9/11: com o dia de início, os técnicos livres (sem outra obra nesses dias, nem outra tarefa desta)
   if (plano.inicio) escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {}));
@@ -224,8 +224,22 @@ export function escolhasDoNegocio(f: Record<string, string | undefined>): Escolh
   return { tecnicos: ler<Record<string, string>>(f.plano_tecnicos), equipa: ler<string[]>(f.plano_equipa), equipas: ler<string[]>(f.plano_equipas) };
 }
 
+type Extensao = Pick<Tarefa, "dia" | "dur"> & Partial<Pick<Tarefa, "ini" | "dias">>;
+/** 10/11: onde a tarefa está no plano, em dias: o início a meio do dia e a duração reais (frações de dia, do plano do orçamento). Mudada
+ *  de dia (adiar, arrastar, uma fase que anda), a tarefa leva a hora do início com ela; com a duração mudada à mão (os dias inteiros já
+ *  não batem com a real), contam os dias inteiros. */
+export function extensaoTarefa(t: Extensao): [number, number] {
+  if (t.ini != null && t.dias != null) {
+    const meio = t.ini - Math.floor(t.ini + 1e-9);
+    if (Math.max(1, Math.ceil(meio + t.dias - 1e-9)) === t.dur) return [t.dia + meio, t.dia + meio + t.dias];
+  }
+  return [t.dia, t.dia + t.dur];
+}
+/** 10/11: duas tarefas ao mesmo tempo (as que só se tocam, uma acaba a meio do dia e a outra começa aí, não se sobrepõem). */
+export const sobrepostas = (a: Extensao, b: Extensao) => { const [a0, a1] = extensaoTarefa(a), [b0, b1] = extensaoTarefa(b); return a0 < b1 - 1e-6 && b0 < a1 - 1e-6; };
+
 /** Porque é que um técnico não está livre para uma tarefa (null: livre). */
-export function motivoOcupado(tecId: string, t: Pick<Tarefa, "dia" | "dur">, plano: Plano, ocupados: Map<string, Set<string>>, outras: readonly Pick<Tarefa, "dia" | "dur" | "tec">[] = []): string | null {
+export function motivoOcupado(tecId: string, t: Extensao, plano: Plano, ocupados: Map<string, Set<string>>, outras: readonly (Extensao & Pick<Tarefa, "tec">)[] = []): string | null {
   const tec = TECS.find((x) => x.id === tecId);
   if (!tec) return null;
   if (diaDeFerias(tec, plano, t.dia, t.dur) != null) return "de férias";
@@ -234,7 +248,7 @@ export function motivoOcupado(tecId: string, t: Pick<Tarefa, "dia" | "dur">, pla
     const fora = ocupados.get(tecId);
     for (let k = t.dia; k < t.dia + t.dur; k++) if (fora && ds[k] && fora.has(isoDia(ds[k]))) return "noutra obra";
   }
-  if (outras.some((o) => o.tec === tecId && o.dia < t.dia + t.dur && t.dia < o.dia + o.dur)) return "noutra tarefa desta obra";
+  if (outras.some((o) => o.tec === tecId && sobrepostas(o, t))) return "noutra tarefa desta obra";
   return null;
 }
 
@@ -334,9 +348,20 @@ export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter
 /** A encomenda da adenda emite-se com o pagamento dela validado (decisão B, como no contrato). */
 export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parcela da adenda for validado.";
 
+/** 10/11 (o fluxo novo de 9/11): porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (o pagamento, as medidas,
+ *  o plano, o contrato); com tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
+export function semEncomendaCliente(d: Negocio): string {
+  if (!d.fin.pago) return "A encomenda de cliente emite-se quando o pagamento for validado.";
+  const direta = !!d.orc?.vendaDireta;
+  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado e do contrato assinado.";
+  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai com o plano aprovado e o contrato assinado.";
+  if (!contratoAssinado(d)) return "A encomenda de cliente sai quando o cliente assinar o contrato.";
+  return "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio.";
+}
+
 /** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
 export function textoMateriais(d: Negocio, r: ResumoEcNeg | null): string {
-  if (!d.obra.ec) return d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.";
+  if (!d.obra.ec) return semEncomendaCliente(d);
   if (usarProntidao(d.obra.ec)) return textoProntidaoReal(d.obra.ec.n, prontidaoDe(d.obra.ec.contrato));
   if (!d.obra.ec.ref) return "Obra do exemplo: os materiais já estão na obra.";
   return r ? `Encomenda de cliente ${r.id}: ${textoResumoEc(r)}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`;

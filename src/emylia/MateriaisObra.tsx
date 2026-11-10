@@ -102,7 +102,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
             <div className="flex flex-wrap gap-2">
               {/* 26/10: as duas portas para o Inventário, já filtradas pela obra (e com "Voltar à obra" lá) */}
               {(pos.length > 0 || !!ec.contrato) && <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirComprasObra(d.id))}>Ver as compras desta obra<ArrowRight className="ml-1.5 h-4 w-4" /></Button>}
-              <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirInv(d.id))}>Ver a encomenda de cliente<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
+              {ctx.podeVerInventario !== false && <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirInv(d.id))}>Ver a encomenda de cliente<ArrowRight className="ml-1.5 h-4 w-4" /></Button>}
             </div>
           )}
         </div>

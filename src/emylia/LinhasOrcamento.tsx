@@ -75,7 +75,7 @@ function EditarPreco({ nome, un, q, valor, gravar, fechar }: { nome: string; un:
   );
 }
 
-export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" | "run" | "go">; d: Negocio; simples?: boolean }) {
+export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" | "run" | "go" | "podeVerCatalogo">; d: Negocio; simples?: boolean }) {
   const { S, A, run, go } = ctx;
   const o = d.orc!, fechado = !!o.enviada;
   const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
@@ -322,9 +322,11 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                   </div>
                 </section>}
                 {/* a ficha do serviço (Catálogo): medida, quem faz, equipamentos, consumíveis e preço */}
-                <Button variant="outline" className="min-h-11 justify-self-start text-[15px]" onClick={() => { abrirFichaDepois(l.sid); setAberta(null); run(() => A.nav("catalogo")); }}>
-                  Abrir a ficha do serviço
-                </Button>
+                {ctx.podeVerCatalogo !== false && (
+                  <Button variant="outline" className="min-h-11 justify-self-start text-[15px]" onClick={() => { abrirFichaDepois(l.sid); setAberta(null); run(() => A.nav("catalogo")); }}>
+                    Abrir a ficha do serviço
+                  </Button>
+                )}
               </CustoServico>
             )}
           </li>

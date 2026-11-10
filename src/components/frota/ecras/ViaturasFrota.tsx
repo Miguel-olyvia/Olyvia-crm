@@ -38,7 +38,8 @@ export function filtrarViaturas(F: Frota, vista: string, fx: FiltrosViaturas): F
 const VISTAS: [string, string][] = [["todas", "Todas"], ["ativas", "Ativas"], ["livres", "Livres hoje"], ["oficina", "Em oficina ou paradas"], ["alertas", "Com alertas"], ["stock", "Stock baixo"], ["inativas", "Vendidas e inativas"]];
 
 export function ViaturasFrota() {
-  const { F, abrir, dlg } = useFrotaCtx();
+  const { F, abrir, dlg, pode } = useFrotaCtx();
+  const verCustos = pode("custos").ok; // custos só com fleet.costs
   const [vista, setVista] = useVista();
   const [fx, setFx] = useState<FiltrosViaturas>({ q: "", comb: "", posse: "" });
   const [modo, setModo] = useState<"lista" | "cartoes">("lista");
@@ -56,7 +57,7 @@ export function ViaturasFrota() {
         <TableCell className="text-right tabular-nums">{fKm(v.odometer_km)}</TableCell>
         <TableCell>{pv && ativa(v) ? <div className="flex flex-col items-start gap-1"><span>{pv.tipo} · {fData(pv.data)}</span><Selo tom={tomData(pv.data, F.hoje)}>{textoData(pv.data, F.hoje)}</Selo></div> : "—"}</TableCell>
         <TableCell>{ativa(v) && r ? <div className="flex flex-col gap-1"><Prog tom={r.tom} pct={r.pct} /><span className={cn("text-xs", r.tom === "ok" && "text-muted-foreground")}>{r.txt}</span></div> : "—"}</TableCell>
-        <TableCell className="text-right tabular-nums">{k != null ? fEur(k) : "—"}</TableCell>
+        {verCustos ? <TableCell className="text-right tabular-nums">{k != null ? fEur(k) : "—"}</TableCell> : null}
         <TableCell>{al.length ? <Selo tom={al.some((a) => a.tom === "bad") ? "bad" : "warn"}>{al.length + (al.length > 1 ? " alertas" : " alerta")}</Selo> : ativa(v) ? <Selo tom="ok">Em dia</Selo> : null}</TableCell>
       </LinhaClicavel>
     );
@@ -71,7 +72,7 @@ export function ViaturasFrota() {
         <div className="flex items-center gap-1.5 text-sm"><UserRound className="h-3.5 w-3.5" aria-hidden="true" />{c ? c.full_name : <span className="text-muted-foreground">{v.is_pool ? "Livre para reserva" : "Sem condutor"}</span>}</div>
         <div className="grid grid-cols-3 gap-2 text-center text-sm">
           <div><b className="block tabular-nums">{fNum(v.odometer_km / 1000, 1)}k</b><span className="text-xs text-muted-foreground">km</span></div>
-          <div><b className="block tabular-nums">{k != null ? fEur(k) : "—"}</b><span className="text-xs text-muted-foreground">custo/km</span></div>
+          <div><b className="block tabular-nums">{verCustos && k != null ? fEur(k) : "—"}</b><span className="text-xs text-muted-foreground">custo/km</span></div>
           <div><b className="block tabular-nums">{al.length}</b><span className="text-xs text-muted-foreground">alertas</span></div>
         </div>
         {ativa(v) && r ? <div className="flex items-center gap-2"><Prog tom={r.tom} pct={r.pct} /><span className="text-xs text-muted-foreground">Revisão · {r.txt.toLowerCase()}</span></div> : <span className="text-xs text-muted-foreground">{v.status_reason ?? ""}</span>}
@@ -90,7 +91,7 @@ export function ViaturasFrota() {
           <KpiTile label="Ativas" value={at.filter((v) => v.status === "active").length} hint={`de ${at.length} na frota`} onClick={() => setVista("ativas")} active={vista === "ativas"} actionLabel="Filtrar as ativas" />
           <KpiTile label="Em oficina ou paradas" value={paradas.length} hint={paradas.map((v) => v.plate).join(", ") || "Nenhuma"} tone="warn" onClick={() => setVista("oficina")} active={vista === "oficina"} actionLabel="Filtrar as que estão em oficina" />
           <KpiTile label="Com alertas" value={at.filter((v) => alertas(F, v).length).length} hint="vencimentos, revisões, stock" tone="bad" onClick={() => setVista("alertas")} active={vista === "alertas"} actionLabel="Filtrar as que têm alertas" />
-          <KpiTile label="Custo por km" value={kmMedio != null ? fEur(kmMedio) : "—"} hint="média da frota (custos variáveis)" />
+          {verCustos ? <KpiTile label="Custo por km" value={kmMedio != null ? fEur(kmMedio) : "—"} hint="média da frota (custos variáveis)" /> : null}
         </KpiGrid>
         <div className="space-y-3 rounded-lg border bg-card p-3 shadow-sm">
           <FilterPills ariaLabel="Vistas" value={vista} onChange={setVista}
@@ -113,7 +114,7 @@ export function ViaturasFrota() {
               <Table>
                 <TableHeader><TableRow>
                   <TableHead>Viatura</TableHead><TableHead>Estado</TableHead><TableHead>Condutor</TableHead><TableHead className="text-right">Km</TableHead>
-                  <TableHead>Próximo vencimento</TableHead><TableHead>Revisão</TableHead><TableHead className="text-right">Custo/km</TableHead><TableHead>Alertas</TableHead>
+                  <TableHead>Próximo vencimento</TableHead><TableHead>Revisão</TableHead>{verCustos ? <TableHead className="text-right">Custo/km</TableHead> : null}<TableHead>Alertas</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>{lista.map(linha)}</TableBody>
               </Table>

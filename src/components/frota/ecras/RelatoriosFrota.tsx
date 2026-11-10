@@ -18,7 +18,8 @@ const CAT: readonly (readonly [string, readonly FleetExpenseCategory[], string])
 ];
 
 export function RelatoriosFrota() {
-  const { F, abrir } = useFrotaCtx();
+  const { F, abrir, pode } = useFrotaCtx();
+  const verCustos = pode("custos").ok; // totais de custo só com fleet.costs
   const obras = useReferenciaFrota("obras");
   const [modo, setModo] = useVista("grafico");
   const tabela = modo === "tabela";
@@ -39,15 +40,16 @@ export function RelatoriosFrota() {
   return (
     <div className="space-y-6">
       <Cabecalho titulo="Relatórios" texto={`Custo total, custo por km, consumo e utilização dos últimos ${DIAS_PERIODO} dias (desde ${fData(desde)}).`}
-        acoes={vs.length ? <BotaoFrota icone={tabela ? BarChart3 : TableIcon} aoClicar={() => setModo(tabela ? "grafico" : "tabela")}>{tabela ? "Ver como gráfico" : "Ver como tabela"}</BotaoFrota> : null} />
+        acoes={vs.length && verCustos ? <BotaoFrota icone={tabela ? BarChart3 : TableIcon} aoClicar={() => setModo(tabela ? "grafico" : "tabela")}>{tabela ? "Ver como gráfico" : "Ver como tabela"}</BotaoFrota> : null} />
       {!vs.length ? <Vazio titulo="Ainda sem dados" texto="Os relatórios enchem-se com os km e os custos registados nas viaturas." /> : <>
+        {!verCustos ? <p className="text-sm text-muted-foreground">Os custos da frota só se veem com a permissão fleet.costs.</p> : null}
         <KpiGrid>
-          <KpiTile label="Custo total" value={fEur(total)} hint={`${custos.length} lançamentos`} />
+          {verCustos ? <KpiTile label="Custo total" value={fEur(total)} hint={`${custos.length} lançamentos`} /> : null}
           <KpiTile label="Km percorridos" value={fNum(totalKm)} hint="toda a frota" />
-          <KpiTile label="Custo por km" value={kmMedio != null ? fEur(kmMedio) : "—"} hint="custos variáveis, média ponderada" />
-          <KpiTile label="Custo médio por viatura/mês" value={vs.length ? fEur(total / vs.length / (DIAS_PERIODO / 30.4)) : "—"} hint={`${vs.length} viaturas com dados`} />
+          {verCustos ? <KpiTile label="Custo por km" value={kmMedio != null ? fEur(kmMedio) : "—"} hint="custos variáveis, média ponderada" /> : null}
+          {verCustos ? <KpiTile label="Custo médio por viatura/mês" value={vs.length ? fEur(total / vs.length / (DIAS_PERIODO / 30.4)) : "—"} hint={`${vs.length} viaturas com dados`} /> : null}
         </KpiGrid>
-        <div className="grid gap-6 lg:grid-cols-2">
+        {verCustos ? <div className="grid gap-6 lg:grid-cols-2">
           <Cartao>
             <Seccao titulo="Custo por viatura">
               {tabela ? (
@@ -89,13 +91,13 @@ export function RelatoriosFrota() {
               ) : <p className="text-sm text-muted-foreground">Sem custos no período.</p>}
             </Seccao>
           </Cartao>
-        </div>
+        </div> : null}
         <Seccao titulo="Eficiência por viatura">
           <Tabela>
             <Table>
               <TableHeader><TableRow>
                 <TableHead>Viatura</TableHead><TableHead>Combustível</TableHead><TableHead className="text-right">Km no período</TableHead><TableHead className="text-right">Consumo</TableHead>
-                <TableHead className="text-right">Custo/km</TableHead><TableHead className="text-right">Utilização</TableHead>
+                {verCustos ? <TableHead className="text-right">Custo/km</TableHead> : null}<TableHead className="text-right">Utilização</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {vs.map((v) => {
@@ -106,7 +108,7 @@ export function RelatoriosFrota() {
                       <TableCell>{COMBUSTIVEIS[v.fuel_type]}</TableCell>
                       <TableCell className="text-right tabular-nums">{fNum(kmPeriodo(F, v.id))}</TableCell>
                       <TableCell className="text-right tabular-nums">{c ? `${fNum(c, 1)}${eletrica(v) ? " kWh" : " L"}/100 km` : "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{k != null ? fEur(k) : "—"}</TableCell>
+                      {verCustos ? <TableCell className="text-right tabular-nums">{k != null ? fEur(k) : "—"}</TableCell> : null}
                       <TableCell className="text-right"><div className="flex items-center justify-end gap-2"><Prog tom={u < 50 ? "warn" : "ok"} pct={u} /><span className="tabular-nums">{fNum(u)}%</span></div></TableCell>
                     </LinhaClicavel>
                   );
@@ -114,10 +116,10 @@ export function RelatoriosFrota() {
               </TableBody>
             </Table>
           </Tabela>
-          <div className="flex items-start gap-2 rounded-lg border border-info/40 bg-info/10 p-3 text-sm">
+          {verCustos ? <div className="flex items-start gap-2 rounded-lg border border-info/40 bg-info/10 p-3 text-sm">
             <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-sky-700 dark:text-info" aria-hidden="true" />
             <span>A deslocação ligada a uma ordem usa o custo por km real da viatura (média da frota quando não há dados; {fEur(KM_FIXO)}/km sem dados nenhuns). Média atual: <b>{kmMedio != null ? fEur(kmMedio) : "—"}</b>/km.</span>
-          </div>
+          </div> : null}
         </Seccao>
       </>}
     </div>

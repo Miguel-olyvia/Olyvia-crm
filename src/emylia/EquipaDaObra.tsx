@@ -33,7 +33,8 @@ export interface PropsEquipa {
 export function candidatos(t: TarefaDatas, P: PlanoDatas, S: Estado, negocio?: number): { id: string; n: string; sk: string; doOficio: boolean; motivo: string | null }[] {
   const ocup = ocupacaoDosTecnicos(S, negocio);
   const outras = P.plano.tasks.filter((x) => !(x.dia === t.dia && x.nome === t.nome));
-  return TECS.map((x) => ({ id: x.id, n: x.n, sk: x.sk, doOficio: x.sk === t.oficio, motivo: motivoOcupado(x.id, t, P.plano, ocup, outras) }))
+  const doPlano = P.plano.tasks.find((x) => x.dia === t.dia && x.nome === t.nome) ?? t; // com o início e a duração reais
+  return TECS.map((x) => ({ id: x.id, n: x.n, sk: x.sk, doOficio: x.sk === t.oficio, motivo: motivoOcupado(x.id, doPlano, P.plano, ocup, outras) }))
     .sort((a, b) => Number(b.doOficio) - Number(a.doOficio) || Number(!!a.motivo) - Number(!!b.motivo) || a.n.localeCompare(b.n, "pt"));
 }
 

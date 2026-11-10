@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { 
-  Plus, Building, Briefcase, Car, Rocket, Users, Trash2, Edit, Copy, 
+  Plus, Building, Briefcase, Car, Rocket, Users, Copy, 
   ChevronRight, FolderTree, Building2, Store, Factory, GraduationCap, 
   Heart, Utensils, Plane, Wrench, Truck, ShoppingCart, Home, Stethoscope,
   Scale, Landmark, Sparkles, Filter, ArrowLeft
@@ -22,6 +22,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cn } from "@/lib/utils";
 import { TemplatesFAQSection } from "@/components/templates/TemplatesFAQSection";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface OrgTemplate {
   id: string;
@@ -116,12 +117,10 @@ function TemplateNodeTree({ nodes, parentId = null, level = 0 }: { nodes: Templa
   );
 }
 
-function TemplateCard({ template, nodes, onUseTemplate, onEdit, onDelete, t }: { 
+function TemplateCard({ template, nodes, onUseTemplate, t }: { 
   template: OrgTemplate; 
   nodes: TemplateNode[];
   onUseTemplate: (template: OrgTemplate) => void;
-  onEdit: (template: OrgTemplate) => void;
-  onDelete: (template: OrgTemplate) => void;
   t: (key: string) => string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -204,16 +203,6 @@ function TemplateCard({ template, nodes, onUseTemplate, onEdit, onDelete, t }: {
           <Building2 className="h-4 w-4" />
           {t("orgTemplates.createCompany")}
         </Button>
-        {!template.is_system && (
-          <>
-            <Button variant="outline" size="icon" onClick={() => onEdit(template)}>
-              <Edit className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" className="text-destructive hover:text-destructive" onClick={() => onDelete(template)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </>
-        )}
       </div>
     </Card>
   );
@@ -223,6 +212,9 @@ export default function OrgTemplates() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isSystemAdmin } = usePermissions();
+  // Escrever modelos (anew_org_templates*) exige system.manage, que só o administrador de sistema tem.
+  const podeGerir = isSystemAdmin;
   const [useDialogOpen, setUseDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<OrgTemplate | null>(null);
@@ -398,10 +390,12 @@ export default function OrgTemplates() {
                 ))}
               </SelectContent>
             </Select>
-            <Button size="lg" className="gap-2" onClick={() => setCreateDialogOpen(true)}>
-              <Plus className="h-5 w-5" />
-              {t('orgTemplates.newTemplate')}
-            </Button>
+            {podeGerir && (
+              <Button size="lg" className="gap-2" onClick={() => setCreateDialogOpen(true)}>
+                <Plus className="h-5 w-5" />
+                {t('orgTemplates.newTemplate')}
+              </Button>
+            )}
           </div>
         </div>
         
@@ -442,8 +436,6 @@ export default function OrgTemplates() {
                       template={template}
                       nodes={nodes}
                       onUseTemplate={handleUseTemplate}
-                      onEdit={() => {}}
-                      onDelete={() => {}}
                       t={t}
                     />
                   ))}

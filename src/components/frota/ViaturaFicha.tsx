@@ -29,7 +29,8 @@ const ID_BASE = "frota-ficha";
 const ALERTA = { ok: "border-success/40 bg-success/10", info: "border-info/40 bg-info/10", warn: "border-warning/50 bg-warning/15", bad: "border-destructive/40 bg-destructive/10", violet: "border-primary/40 bg-primary/10", neu: "border-border bg-muted" } as const;
 
 function Resumo({ v }: { v: FleetVehicleView }) {
-  const { F } = useFrotaCtx();
+  const { F, pode } = useFrotaCtx();
+  const verCustos = pode("custos").ok; // valores só com fleet.costs
   const fornecedores = useReferenciaFrota("fornecedores");
   const al = alertas(F, v), r = revisao(v, F.hoje), k = custoKm(F, v.id), c = consumo(F, v.id);
   const seguradora = fornecedores.dados.find((f) => f.id === v.insurer_supplier_id)?.nome;
@@ -52,7 +53,7 @@ function Resumo({ v }: { v: FleetVehicleView }) {
           { label: "Categoria", value: v.vehicle_category ? CATEGORIAS[v.vehicle_category] : "Por preencher (IPO a +12 meses)" },
           { label: "1.ª matrícula", value: fData(v.first_registration_on) },
           { label: "Combustível", value: COMBUSTIVEIS[v.fuel_type] }, { label: "Ano", value: v.model_year ? String(v.model_year) : "—" },
-          { label: "Posse", value: POSSES[v.ownership] + (v.monthly_rent ? ` · ${fEur(v.monthly_rent)}/mês${v.contract_ends_on ? ` até ${fData(v.contract_ends_on)}` : ""}` : "") },
+          { label: "Posse", value: POSSES[v.ownership] + (v.monthly_rent ? ` · ${verCustos ? fEur(v.monthly_rent) : "—"}/mês${v.contract_ends_on ? ` até ${fData(v.contract_ends_on)}` : ""}` : "") },
           { label: "Carta exigida", value: "Categoria " + v.required_licence },
           { label: "Centro de custo", value: v.cost_center_label ?? "—" }, { label: "Seguro", value: [seguradora, v.insurance_policy_no].filter(Boolean).join(" · ") || "—" },
           { label: "Uso pessoal", value: v.personal_use ? "Autorizado (tributação em sede de IRS)" : "Não" }, { label: "Armazém móvel", value: v.warehouse_id ? "Sim (Inventário)" : "Não tem" },
@@ -80,8 +81,8 @@ function Resumo({ v }: { v: FleetVehicleView }) {
           <DocSection title={`Últimos ${DIAS_PERIODO} dias`}>
             <ListaV>
               <div><span>Km percorridos</span><b className="tabular-nums">{fNum(kmPeriodo(F, v.id))}</b></div>
-              <div><span>Custo total</span><b className="tabular-nums">{fEur(soma(custosV(F, v.id), (x) => x.amount))}</b></div>
-              <div><span>Custo por km (variável)</span><b className="tabular-nums">{k != null ? fEur(k) : "—"}</b></div>
+              <div><span>Custo total</span><b className="tabular-nums">{verCustos ? fEur(soma(custosV(F, v.id), (x) => x.amount)) : "—"}</b></div>
+              <div><span>Custo por km (variável)</span><b className="tabular-nums">{verCustos && k != null ? fEur(k) : "—"}</b></div>
               {c ? <div><span>Consumo médio</span><b className="tabular-nums">{fNum(c, 1)} {eletrica(v) ? "kWh" : "L"}/100 km</b></div> : null}
             </ListaV>
           </DocSection>
@@ -152,7 +153,8 @@ function AbaStock({ v }: { v: FleetVehicleView }) {
 }
 
 function AbaLigacoes({ v }: { v: FleetVehicleView }) {
-  const { F, tem, dlg } = useFrotaCtx();
+  const { F, tem, dlg, pode } = useFrotaCtx();
+  const verCustos = pode("custos").ok; // valores só com fleet.costs
   const obras = useReferenciaFrota("obras"), ordens = useReferenciaFrota("ordens");
   const ligs = F.ligacoes.filter((l) => l.vehicle_id === v.id);
   const proximas = [
@@ -186,7 +188,7 @@ function AbaLigacoes({ v }: { v: FleetVehicleView }) {
                 <div key={l.id}>
                   <span className="flex flex-col">
                     <span className="flex flex-wrap gap-2">{ordem ? <RefOps tipo="ordem" codigo={ordem.codigo} titulo={ordem.nome} /> : l.ops_ordem_id ? "Ordem" : null}{obra ? <RefOps tipo="obra" codigo={obra.codigo} titulo={obra.nome} /> : null}</span>
-                    <span className="text-xs text-muted-foreground">{fData(l.used_on)} · {l.km != null ? fKm(l.km) : "sem km"} · {fEur(l.travel_cost)}</span>
+                    <span className="text-xs text-muted-foreground">{fData(l.used_on)} · {l.km != null ? fKm(l.km) : "sem km"}{verCustos ? ` · ${fEur(l.travel_cost)}` : ""}</span>
                   </span>
                   <AcaoLigacao l={l} />
                 </div>
@@ -241,7 +243,7 @@ function Corpo({ v, aba }: { v: FleetVehicleView; aba: AbaFicha }) {
             <TableRow key={m.id}>
               <TableCell className="whitespace-nowrap">{fData(m.done_on ?? m.scheduled_on)}</TableCell><TableCell>{m.title}</TableCell><TableCell>{m.supplier_label ?? "—"}</TableCell>
               <TableCell><Selo tom={ESTADOS_MANUT[m.status][0]}>{ESTADOS_MANUT[m.status][1]}</Selo></TableCell>
-              <TableCell className="text-right tabular-nums">{fEur(m.final_cost ?? m.estimated_cost)}</TableCell>
+              <TableCell className="text-right tabular-nums">{pode("custos").ok ? fEur(m.final_cost ?? m.estimated_cost) : "—"}</TableCell>
               <TableCell className="text-right">{m.status === "scheduled" || m.status === "in_progress" ? <BotaoFrota requer="gerir" aoClicar={() => dlg("concluir", { m: m.id })} aria-label={`Concluir ${m.title} de ${fData(m.scheduled_on)}`}>Concluir</BotaoFrota> : null}</TableCell>
             </TableRow>
           ))}
@@ -321,7 +323,7 @@ function Corpo({ v, aba }: { v: FleetVehicleView; aba: AbaFicha }) {
 }
 
 export function ViaturaFicha({ vid, aba, mudarAba, aoFechar }: { vid: string; aba: AbaFicha; mudarAba: (a: AbaFicha) => void; aoFechar: () => void }) {
-  const { F, dlg } = useFrotaCtx();
+  const { F, dlg, pode } = useFrotaCtx();
   // o elemento que tinha o foco ao abrir a ficha (a linha, o cartão, o resultado da pesquisa…): recebe-o de volta ao fechar
   const [origem] = useState<HTMLElement | null>(() => (typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null));
   const conteudo = useRef<HTMLDivElement>(null);
@@ -356,7 +358,7 @@ export function ViaturaFicha({ vid, aba, mudarAba, aoFechar }: { vid: string; ab
             { label: "Condutor", value: c ? c.full_name + (a?.kind === "temporary" ? " · reserva" : "") : "—" },
             { label: "Km atuais", value: fKm(v.odometer_km) },
             { label: "Próxima revisão", value: r?.nextKm != null ? fKm(r.nextKm) : "—" },
-            { label: "Custo por km", value: k != null ? fEur(k) : "—" },
+            { label: "Custo por km", value: pode("custos").ok && k != null ? fEur(k) : "—" },
           ]} />
           <DocSheetTabs label="Ficha da viatura" idBase={ID_BASE} tabs={abas} value={atual} onChange={mudarAba} />
         </>}

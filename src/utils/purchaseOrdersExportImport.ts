@@ -1,6 +1,14 @@
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
-export const exportPurchaseOrdersToCSV = (orders: any[]) => {
+export interface ExportPurchaseOrdersOptions {
+  /** Inclui a coluna "Valor total". Falso para quem não pode ver valores das POs. */
+  incluirValores?: boolean;
+}
+
+export const exportPurchaseOrdersToCSV = (
+  orders: any[],
+  { incluirValores = true }: ExportPurchaseOrdersOptions = {},
+) => {
   downloadStandardXlsx({
     sheetName: "Encomendas",
     columns: [
@@ -9,7 +17,7 @@ export const exportPurchaseOrdersToCSV = (orders: any[]) => {
       { key: "orderDate", header: "Data da encomenda", type: "date", width: 16 },
       { key: "deliveryDate", header: "Entrega esperada", type: "date", width: 16 },
       { key: "status", header: "Estado", width: 16 },
-      { key: "total", header: "Valor total", type: "number", width: 16 },
+      ...(incluirValores ? [{ key: "total", header: "Valor total", type: "number" as const, width: 16 }] : []),
       { key: "notes", header: "Notas", width: 36 },
     ],
     rows: orders.map((order) => ({
@@ -18,7 +26,7 @@ export const exportPurchaseOrdersToCSV = (orders: any[]) => {
       orderDate: order.order_date,
       deliveryDate: order.expected_delivery,
       status: order.status,
-      total: order.total_value,
+      ...(incluirValores ? { total: order.total_value } : {}),
       notes: order.notes,
     })),
   }, `encomendas_${new Date().toISOString().slice(0, 10)}.xlsx`);

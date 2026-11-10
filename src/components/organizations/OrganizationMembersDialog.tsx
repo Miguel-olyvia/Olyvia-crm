@@ -41,6 +41,7 @@ interface Member {
   user_id: string;
   relationship_type: string;
   role_id: string | null;
+  status?: string | null;
   role_name?: string | null;
   role_code?: string | null;
   profile: {
@@ -75,10 +76,12 @@ export function OrganizationMembersDialog({
   const { hasPermission } = usePermissions();
   // As mesmas permissões que o servidor pede para os membros (não organizations.edit, que é a da organização em si):
   // acrescentar = users.create (anew_memberships_insert e a Edge create-user), editar = users.edit (anew_memberships_update
-  // e anew_users_update), remover = users.delete (anew_memberships_delete).
+  // e anew_users_update), remover = users.delete (anew_memberships_delete). Retirar um membro ATIVO tira-lhe o papel,
+  // por isso o servidor exige também users.manage_roles.
   const podeAdicionar = hasPermission("users.create");
   const podeEditar = hasPermission("users.edit");
-  const podeRemover = hasPermission("users.delete");
+  const podeRemover = (member: Member) =>
+    hasPermission("users.delete") && (member.status !== "active" || hasPermission("users.manage_roles"));
   const [members, setMembers] = useState<Member[]>([]);
   const [allUsers, setAllUsers] = useState<AnewUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -153,7 +156,7 @@ export function OrganizationMembersDialog({
     // src/pages/UsersNew.tsx for this exact table pair.
     const { data: membershipsData, error: membershipsError } = await (supabase as any)
       .from("anew_memberships")
-      .select("id, user_id, relationship_type, role_id")
+      .select("id, user_id, relationship_type, role_id, status")
       .eq("organization_id", organizationId)
       .eq("status", "active");
 
@@ -436,15 +439,21 @@ export function OrganizationMembersDialog({
 
     const { data: userData } = await supabase.auth.getUser();
     const businessUserId = await resolveBusinessUserId(userData.user?.id);
-    const { error } = await withAuditContext(supabase, businessUserId, () =>
+    const { data, error } = await withAuditContext(supabase, businessUserId, () =>
       (supabase as any)
         .from("anew_memberships")
         .delete()
         .eq("id", memberToDelete.id)
+        .select("id")
     );
 
     if (error) {
       toast.error(await getFriendlyErrorMessage(error));
+      return;
+    }
+    // A RLS não dá erro quando recusa: devolve zero linhas apagadas.
+    if (!data?.length) {
+      toast.error(t("friendlyError.forbidden"));
       return;
     }
 
@@ -829,7 +838,7 @@ export function OrganizationMembersDialog({
                                     <Pencil className="w-4 h-4" />
                                   </Button>
                               )}
-                              {podeRemover && (
+                              {podeRemover(member) && (
                                   <Button
                                     variant="ghost"
                                     size="icon"

@@ -84,6 +84,14 @@ const PAGINA_REAL: Partial<Record<Vista, string>> = {
 const LIGACOES: [string, string, string][] = [["Pessoas", "/pessoas", "pessoas.view"], ["Inventário", "/client-orders", "client_orders.view"], ["Equipas de obra", "/equipas-obra", "pessoas.view"],
   ["Catálogo e custos", "/catalogo-custos", "services.view"]];
 
+/** 10/11: a permissão que a rota de cada página real pede (ProtectedRoute em App.tsx) e o nome com que se avisa. As rotas só olham para o
+ *  perfil da Olyvia (não para o Papel no Negócio): sem ela, a ligação levava a «Acesso negado». */
+const PERM_PAGINA: readonly [string, string, string][] = [["/client-orders", "client_orders.view", "as encomendas de cliente"],
+  ["/receiving", "receiving.view", "a Receção"], ["/purchase-orders", "purchase_orders.view", "as encomendas a fornecedor"],
+  ["/catalogo-custos", "services.view", "o Catálogo e custos"], ["/pessoas", "pessoas.view", "as Pessoas"]];
+const permDaPagina = (url: string): readonly [string, string, string] | null =>
+  PERM_PAGINA.find(([rota]) => url === rota || url.startsWith(rota + "?") || url.startsWith(rota + "/")) ?? null;
+
 /** 09/11: os papéis do Negócio que veem a encomenda de cliente do negócio (neg_papeis_permissoes com client_orders.view). */
 const PAPEIS_VEEM_ENCOMENDAS: readonly Papel[] = ["comercial", "direcao", "financeiro", "armazem", "operacoes"];
 
@@ -113,6 +121,13 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // usePermissoesReaisNegocio) OU o perfil da Olyvia (usePermissions). Enquanto se lê, só o perfil.
   const codigosLidos = perms.leitura.k === "lidas" ? perms.leitura.codigos : null;
   const pode = (c: string): boolean => !!codigosLidos?.has(c) || (!permsPerfilALer && hasPermission(c));
+  // 10/11: as páginas reais (rotas da Olyvia) só contam o perfil; o Papel no Negócio não abre a rota. As ligações só aparecem com ela.
+  const podeRota = (c: string): boolean => !permsPerfilALer && hasPermission(c);
+  // ao abrir uma, só se recusa com o perfil já lido (a ler, abre; a rota decide na mesma). Num ref para o `run` e as ligações ao
+  // Inventário (guardadas em useCallback/useMemo).
+  const negaRota = (c: string): boolean => !permsPerfilALer && !hasPermission(c);
+  const negaRotaRef = useRef(negaRota);
+  negaRotaRef.current = negaRota;
   // 09/11 (20270111100000): a leitura reduzida da base (fn_neg_so_execucao): sem pessoas.view, com negocios.obra.executar. Só as obras onde
   // trabalha, sem dinheiro; as funções do negócio inteiro recusam-no, por isso nem se chamam. Num ref, para os efeitos e o gravar.
   const soExecucao = !!codigosLidos && !pode("pessoas.view") && pode("negocios.obra.executar");
@@ -318,7 +333,14 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     marcarAutor(S.deals, nomeEu.current);
     preencherDaFicha();
     // 28/10: as vistas da Emylia que já têm página real na Olyvia abrem-na (o que mudou grava-se na mesma, antes de sair)
-    const fora = VISTAS.has(S.view) ? null : PAGINA_REAL[S.view] ?? null;
+    let fora = VISTAS.has(S.view) ? null : PAGINA_REAL[S.view] ?? null;
+    // 10/11: sem a permissão da rota (pelo perfil), avisa em vez de abrir a página e ficar em «Acesso negado»
+    const perm = fora ? permDaPagina(fora) : null;
+    if (fora && perm && negaRotaRef.current(perm[1])) {
+      avisar({ msg: `Não tem permissão para abrir ${perm[2]}`, sub: `Peça ao administrador a permissão «${perm[1]}» no seu perfil.`, kind: "bad" });
+      fora = null;
+      S.view = S.deal ? "negocio" : "negocios";
+    }
     if (!VISTAS.has(S.view)) {
       if (!fora) avisar({ msg: "Este ecrã ainda não está ligado", sub: "Fica no negócio.", kind: "" });
       S.view = S.deal ? "negocio" : "negocios";
@@ -329,7 +351,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   }, [S, avisar, redesenhar, gravar, navigate, preencherDaFicha]);
   const go = useCallback((fn: () => void) => () => run(fn), [run]);
   // F3: abrir a encomenda de cliente, a Receção e as compras vai às páginas reais, filtradas pela encomenda do negócio
-  const A = useMemo(() => acoes(S, avisar, run, ligacaoInventario((url) => navigate(url))), [S, avisar, run, navigate]);
+  // 10/11: as ligações ao Inventário real (abrirInv, abrirRececao, abrirInvLista…) também só abrem a página com a permissão da rota
+  const A = useMemo(() => acoes(S, avisar, run, ligacaoInventario((url) => {
+    const perm = permDaPagina(url);
+    if (perm && negaRotaRef.current(perm[1])) {
+      avisar({ msg: `Não tem permissão para abrir ${perm[2]}`, sub: `Peça ao administrador a permissão «${perm[1]}» no seu perfil.`, kind: "bad" });
+      return;
+    }
+    navigate(url);
+  })), [S, avisar, run, navigate]);
   useEffect(() => { definirOrgErp(org); return () => definirOrgErp(null); }, [org]);
   // 4/11: os dados da empresa para o cliente pagar (o passo «Pagamento» e «Ver como o cliente»); sem eles, nada de exemplo
   useEffect(() => {
@@ -697,7 +727,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // numa vista que não pode ver (o endereço, o menu, uma ligação dentro de um ecrã), fica no Hoje; só com as permissões lidas
   if (codigosLidos && !permsPerfilALer && !vistaPermitida(S.view)) { S.view = "hoje"; S.deal = null; S.op = null; }
   const ctx: Ctx = { S, A, run, go, q, setQ, ...(fixarTecnico ? { tecnicoFixo: { ref: tecConta } } : {}),
-    podeCriarNegocio: pode("pessoas.create"), podeVerNegocio: pode("pessoas.view"), podeVerInventario: pode("client_orders.view"),
+    podeCriarNegocio: pode("pessoas.create"), podeVerNegocio: pode("pessoas.view"), podeVerInventario: podeRota("client_orders.view"),
+    podeVerCatalogo: podeRota("services.view"),
     idNegocioBase: (numero) => refs.current.get(numero)?.id ?? null,
     ...(soExecucao ? { leituraReduzida: true } : {}) };
   // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
@@ -730,7 +761,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
               </button>
             );
           })}
-          {LIGACOES.filter(([, , codigo]) => pode(codigo)).map(([nome, para]) => (
+          {LIGACOES.filter(([, , codigo]) => podeRota(codigo)).map(([nome, para]) => (
             <button key={para} type="button" onClick={() => navigate(para)} className="min-h-10 shrink-0 whitespace-nowrap rounded-lg px-3 text-muted-foreground hover:bg-muted">{nome}</button>
           ))}
         </nav>

@@ -230,7 +230,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
                     className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
                     {k === "ec" ? "Ver a encomenda" : "Ver o plano"}<ChevronDown className={cn("h-4 w-4 transition-transform", aberto === k && "rotate-180")} aria-hidden="true" />
                   </button>
-                  {k === "ec" && (d.obra.ec?.ref || d.obra.ec?.contrato) && (
+                  {k === "ec" && (d.obra.ec?.ref || d.obra.ec?.contrato) && ctx.podeVerInventario !== false && (
                     <button type="button" onClick={go(() => A.abrirInv(d.id))} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
                       Abrir no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
                     </button>
@@ -321,9 +321,11 @@ function DetalheEncomenda({ ctx, inv }: { ctx: Ctx & { d: Negocio }; inv: Resumo
                 ))}
               </ul>
             ) : <p className="mt-1 text-[15px] text-muted-foreground">Nenhuma: havia tudo em stock.</p>}
-            <button type="button" onClick={go(() => A.abrirInv(d.id))} className="mt-2 inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
-              Abrir {inv.id} no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </button>
+            {ctx.podeVerInventario !== false && (
+              <button type="button" onClick={go(() => A.abrirInv(d.id))} className="mt-2 inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
+                Abrir {inv.id} no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
           </>
         )}
       </div>

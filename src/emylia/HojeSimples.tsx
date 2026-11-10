@@ -11,6 +11,7 @@ import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, MapPin } from "
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, aberto, eur, minhas, pct, tot } from "./motor";
+import { podeVerCustos } from "./permissoes";
 import { agenda, alertasDia } from "./Hoje";
 import { IconeFase, Progresso, fazer, type Ctx } from "./pecas";
 import { ComPermPortalDoPasso, SemPermissaoPortal } from "./permPortalPasso";
@@ -35,7 +36,7 @@ const LINHA = "group flex min-h-16 w-full items-center gap-4 rounded-xl py-3 tex
 const Seta = () => <ArrowRight className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden="true" />;
 
 /** 16/10: o que o Armazém tem no Inventário novo (o mesmo resumo do Hoje da V2). */
-function InventarioArmazem({ A, go, className = "mt-12" }: Pick<Ctx, "A" | "go"> & { className?: string }) {
+function InventarioArmazem({ A, go, podeVerInventario, className = "mt-12" }: Pick<Ctx, "A" | "go" | "podeVerInventario"> & { className?: string }) {
   const linhas = resumoInventario(contadoresInv(useInventario()));
   return (
     <section aria-labelledby="hoje-inv" className={className}>
@@ -50,7 +51,7 @@ function InventarioArmazem({ A, go, className = "mt-12" }: Pick<Ctx, "A" | "go">
             </button>
           </li>
         ))}</ul>}
-      <Button variant="outline" className="mt-3 min-h-11" onClick={go(() => A.nav("inventario"))}>Abrir o Inventário</Button>
+      {podeVerInventario !== false && <Button variant="outline" className="mt-3 min-h-11" onClick={go(() => A.nav("inventario"))}>Abrir o Inventário</Button>}
     </section>
   );
 }
@@ -80,7 +81,7 @@ function Numero({ v, l, tom }: { v: string; l: string; tom?: string }) {
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 
-export function HojeSimples({ S, A, run, go }: Ctx) {
+export function HojeSimples({ S, A, run, go, podeVerInventario }: Ctx) {
   const r = S.role, agora = new Date();
   // o mais urgente primeiro: atrasados, depois aprovações, depois o resto
   // 27/10: sem o que está à espera do cliente (não é trabalho de ninguém; conta em "À espera de alguém")
@@ -99,6 +100,8 @@ export function HojeSimples({ S, A, run, go }: Ctx) {
   const verDescoberto = (r === "comercial" || r === "direcao" || r === "financeiro") && descoberto.length > 0;
   const emProposta = eur(emNeg.reduce((a, d) => a + tot(d, S).pf, 0));
   const margem = pct(emNeg.length ? emNeg.reduce((a, d) => a + tot(d, S).m, 0) / emNeg.length : 0);
+  // 10/11: a margem só a vê quem vê os custos do orçamento (quotes.view_costs / quotes.manage)
+  const verMargem = podeVerCustos();
 
   const frase = L.length === 0
     ? "Não tem nada pendente. Mude de papel no menu para ver o trabalho dos outros."
@@ -268,16 +271,16 @@ export function HojeSimples({ S, A, run, go }: Ctx) {
         {exemplo}
         {r === "direcao" && cols === 1 && (
           <p className="mt-2 text-[15px] text-muted-foreground">
-            {ab.length} negócios abertos · {emProposta} € sem IVA em proposta · margem média {margem}
+            {ab.length} negócios abertos · {emProposta} € sem IVA em proposta{verMargem && ` · margem média ${margem}`}
           </p>
         )}
       </div>
       {cols > 1 && (
-        <div className={cn("grid gap-3", r === "direcao" ? "grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.5fr)]" : "grid-cols-3", cols === 2 && "mt-6")}>
+        <div className={cn("grid gap-3", r === "direcao" ? (verMargem ? "grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.5fr)]" : "grid-cols-[repeat(2,minmax(0,1fr))_minmax(0,1.5fr)]") : "grid-cols-3", cols === 2 && "mt-6")}>
           <Numero v={String(L.length)} l="para fazer" />
           <Numero v={String(atrasados)} l="com atraso" tom={atrasados ? "text-destructive" : undefined} />
           {r === "direcao"
-            ? <><Numero v={margem} l="margem média" /><Numero v={emProposta + " €"} l="em proposta, sem IVA" /></>
+            ? <>{verMargem && <Numero v={margem} l="margem média" />}<Numero v={emProposta + " €"} l="em proposta, sem IVA" /></>
             : <Numero v={String(al.reduce((a, x) => a + x.n, 0))} l="à espera de alguém" />}
         </div>
       )}
@@ -295,7 +298,7 @@ export function HojeSimples({ S, A, run, go }: Ctx) {
       {avisos}
       {compromissos}
       {pagamentos}
-      {r === "armazem" && <InventarioArmazem A={A} go={go} className={PAINEL} />}
+      {r === "armazem" && <InventarioArmazem A={A} go={go} podeVerInventario={podeVerInventario} className={PAINEL} />}
     </div>
   );
   // A agenda da equipa é uma grelha larga: com ela escolhida, sai da coluna e fica por baixo, a toda a largura
@@ -310,7 +313,7 @@ export function HojeSimples({ S, A, run, go }: Ctx) {
           {comecar}
           {depois}
           {pagamentos}
-          {r === "armazem" && <InventarioArmazem A={A} go={go} />}
+          {r === "armazem" && <InventarioArmazem A={A} go={go} podeVerInventario={podeVerInventario} />}
           {agendaEl("mt-12")}
         </>
       ) : (

@@ -27,7 +27,7 @@ import {
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
-import { faltaParaArrancar, retificacaoAceite, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -336,7 +336,9 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
-  /** 3/11: resolve um problema que o cliente reportou na conversa (o id, problemasCliente.ts) */ problema?: string }
+  /** 3/11: resolve um problema que o cliente reportou na conversa (o id, problemasCliente.ts) */ problema?: string;
+  /** 10/11: o início e a duração reais no plano do orçamento, em frações de dia (dia e dur arredondam aos dias inteiros): duas tarefas de
+   *  meio dia seguidas do mesmo técnico não se sobrepõem (preparacaoObra.ts: extensaoTarefa) */ ini?: number; dias?: number }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
 export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string;
   /** 30/10: o produto do Catálogo (products.id), na Olyvia: é por ele que a base encomenda ao fornecedor (obra_encomendar_materiais) */ produto?: string }
@@ -1378,6 +1380,10 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (!p) return { t: "Operações: gerar o plano da obra", sub: "A encomenda de cliente já foi emitida. O plano nasce do orçamento.", btn: "Gerar o plano", act: "gerarPlano", who: "operacoes" };
       // do pagamento ao arranque: o passo à espera, pela ordem (encomenda, plano, arranque)
       if (p.estado === "por aprovar" || p.estado === "aprovado") {
+        // 10/11 (o fluxo novo de 9/11): o contrato assina-se na Obra, depois do plano aprovado; enviado, espera pelo cliente no portal
+        // (com o botão de teste do super admin, como na proposta)
+        if (p.estado === "aprovado" && !o?.vendaDireta && o?.contrato === "enviado")
+          return { t: "À espera da assinatura do contrato", sub: "Contrato no portal do cliente. Assinado, emite-se a encomenda de cliente.", who: "cliente", wait: true, sim: "assinar" };
         const a = passosAgora(d, S)[0];
         if (a) return { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who! };
       }
@@ -2887,7 +2893,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano!; const t = p.tasks[ti]; const tec = TECS.find((x) => x.id === t.tec)!;
       let nd = t.dia;
-      while (diaDeFerias(tec, p, nd, t.dur) != null && nd < t.dia + 60) nd++;
+      // 10/11 (teste de ponta a ponta): até o técnico estar livre, sem férias e sem outra obra (antes, só as férias: com o técnico
+      // noutra obra, o «Adiar até estar livre» não mexia)
+      const ocup = p.inicio ? ocupacaoDosTecnicos(S, d.id) : new Map<string, Set<string>>();
+      while (motivoOcupado(tec.id, { dia: nd, dur: t.dur }, p, ocup) != null && nd < t.dia + 60) nd++;
+      if (nd === t.dia + 60) { avisar({ msg: `${tec.n.split(" ")[0]} não fica livre nos próximos 60 dias úteis`, sub: "Passe a tarefa para outro técnico.", kind: "bad" }); return; }
       if (p.origem !== "orcamento") nd = Math.max(nd, 5); // o plano de exemplo: a fase seguinte não pode passar à frente
       const shift = nd - t.dia;
       // adia esta e as que começam depois dela (as anteriores ficam)
