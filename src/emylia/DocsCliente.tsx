@@ -847,7 +847,10 @@ export function FaturaDoc({ S, d, a, ft: fa, reg, regParcela }: { S: Estado; d: 
   const p = reg ? (T.total > 0 ? reg.valor / T.total : 0) : fa && a ? fa.p : tranches(d, T.total)[0].p;
   const ft = reg ? { n: reg.numero, q: reg.data.split("-").reverse().join("/") } : a && fa ? fa : d.fin.fatura;
   const recibo = reg ? (reg.pagamento ? { n: reg.recibo || "pagamento validado" } : null) : a && fa ? fa.recibo : d.fin.recibo;
-  const objeto = a && fa ? `trabalhos a mais, conforme a adenda ${a.n} ao contrato CT 2026/${d.id}` : `${d.servico}, conforme contrato CT 2026/${d.id}`;
+  // 10/11 (o fluxo novo de 9/11): a 1.ª fatura emite-se com a proposta aceite, antes do contrato (que se assina depois do plano aprovado)
+  const comContrato = d.orc?.contrato === "assinado" || d.orc?.contrato === "enviado";
+  const objeto = a && fa ? `trabalhos a mais, conforme a adenda ${a.n} ao contrato CT 2026/${d.id}`
+    : comContrato ? `${d.servico}, conforme contrato CT 2026/${d.id}` : `${d.servico}, conforme a proposta aceite PR 2026/${d.id}`;
   const parcela = reg ? regParcela || "Prestação" : a && fa ? `${nomeParcela(fa.i)} (${fa.l.toLowerCase()})` : d.f.tranche || "1.ª tranche";
   return (
     <Folha titulo="Fatura" numero={ft ? ft.n : "por emitir"} data={ft ? `emitida ${ft.q}` : "rascunho"} carimbo={recibo ? `Paga · ${recibo.n}` : undefined}>

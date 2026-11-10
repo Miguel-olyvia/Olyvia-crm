@@ -448,11 +448,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           )}
         </div>
       ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
-      // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial)
-      ...(o.vendaDireta ? [] : [simples && !o.aceite && !o.contrato ? {
-        id: PROPOSTA[1].titulo, titulo: PROPOSTA[1].nome || PROPOSTA[1].titulo, icone: Lock, bloqueado: true, feito: false, resumo: ["à espera da aceitação"],
-        corpo: <ContratoBloqueado d={d} />,
-      } : simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
+      // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial).
+      // 10/11 (o fluxo novo de 9/11): aceite, o negócio passa ao Financeiro e o contrato é um passo da Obra (depois do plano aprovado);
+      // aqui só fica nos negócios antigos que já o tinham aberto (aceites, ou com o contrato gerado, ainda no Negócio)
+      ...(o.vendaDireta || (!o.aceite && !o.contrato) ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
         <div className="space-y-10">
           <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
           <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
@@ -820,21 +819,6 @@ export function BotaoTesteCliente({ d, acao, tamanho = "default" }: { d: Negocio
     <Button type="button" variant="outline" size={tamanho} className="border-dashed border-amber-500 text-amber-800 hover:bg-amber-50" disabled={aFazer} onClick={fazerTeste}>
       <FlaskConical className="mr-2 h-4 w-4" aria-hidden="true" />{aFazer ? "A fazer pelo cliente…" : acao === "aceitar" ? "Aceitar a proposta pelo cliente (teste)" : "Assinar o contrato pelo cliente (teste)"}
     </Button>
-  );
-}
-
-function ContratoBloqueado({ d }: { d: Negocio }) {
-  const o = d.orc!;
-  const estado = o.pedidoCliente ? `${d.nome.split(" ")[0]} pediu alterações: faça a versão nova e envie-a de novo.`
-    : o.enviada ? `Proposta enviada ${o.enviada === "hoje" ? "hoje" : "a " + o.enviada}: à espera da resposta no portal.`
-    : "A proposta ainda não foi enviada: termine o Orçamento e envie a Proposta.";
-  return (
-    <div className="rounded-2xl border border-dashed border-input bg-muted/40 p-6 text-center">
-      <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground" aria-hidden="true"><Lock className="h-5 w-5" /></span>
-      <p className="mt-3 text-lg font-semibold">O contrato abre quando o cliente aceitar a proposta</p>
-      <p className="mx-auto mt-1 max-w-md text-[15px] text-muted-foreground">{estado}</p>
-      {o.enviada && !o.pedidoCliente && <div className="mt-4 flex justify-center"><BotaoTesteCliente d={d} acao="aceitar" /></div>}
-    </div>
   );
 }
 

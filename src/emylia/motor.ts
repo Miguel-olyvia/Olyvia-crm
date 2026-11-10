@@ -336,7 +336,9 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
-  /** 3/11: resolve um problema que o cliente reportou na conversa (o id, problemasCliente.ts) */ problema?: string }
+  /** 3/11: resolve um problema que o cliente reportou na conversa (o id, problemasCliente.ts) */ problema?: string;
+  /** 10/11: o início e a duração reais no plano do orçamento, em frações de dia (dia e dur arredondam aos dias inteiros): duas tarefas de
+   *  meio dia seguidas do mesmo técnico não se sobrepõem (preparacaoObra.ts: extensaoTarefa) */ ini?: number; dias?: number }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
 export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string;
   /** 30/10: o produto do Catálogo (products.id), na Olyvia: é por ele que a base encomenda ao fornecedor (obra_encomendar_materiais) */ produto?: string }
