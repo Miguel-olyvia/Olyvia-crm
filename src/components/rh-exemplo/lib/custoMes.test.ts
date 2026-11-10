@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { contaRepartida, contaTodosMeses, contaUmaVez } from "./comoConta";
-import { acumulados, custoDoMes, mesesEntre, type AvulsoCusto } from "./custoMes";
+import { custoDoMes, mesesEntre, type AvulsoCusto } from "./custoMes";
 import type { EquipamentoPessoa } from "./equipamentos";
 
 const avulso = (parcial: Partial<AvulsoCusto>): AvulsoCusto => ({
@@ -57,10 +57,6 @@ describe("custoDoMes", () => {
     expect(r.encargos).toBe(308.75);
     expect(r.outrosCustos).toBe(25);
     expect(r.total).toBe(1633.75);
-    // salario base x 14 / 12 (1400) + TSU (332,50) + seguro (0): so para comparar, fora do custo.
-    expect(r.repartido).toBe(1732.5);
-    expect(r.porHoraPrevista).toBe(9.72);
-    expect(r.porHoraFeita).toBe(9.61);
   });
 
   it("km e ajudas ja vem na retribuicao: contam no custo uma so vez e ficam fora da base da TSU", () => {
@@ -105,7 +101,6 @@ describe("custoDoMes", () => {
     const r = custoDoMes({ ...base, salarioMes: null, avulsos: [avulso({})] });
     expect(r.bruto).toBeNull();
     expect(r.total).toBeNull();
-    expect(r.repartido).toBeNull();
     expect(r.avulsos).toBe(48);
   });
 
@@ -148,22 +143,9 @@ describe("custoDoMes: «como conta» dos avulsos e dos equipamentos", () => {
   });
 });
 
-describe("acumulados", () => {
+describe("mesesEntre", () => {
   it("lista os meses de um intervalo", () => {
     expect(mesesEntre("2026-11", "2027-02")).toEqual(["2026-11", "2026-12", "2027-01", "2027-02"]);
     expect(mesesEntre("2027-03", "2027-02")).toEqual([]);
-  });
-
-  it("o ano começa em janeiro ou no mês de admissão; desde a admissão soma tudo", () => {
-    const totais = new Map<string, number | null>([
-      ["2025-12", 100],
-      ["2026-01", 10],
-      ["2026-02", 20],
-      ["2026-03", null],
-      ["2026-04", 40],
-    ]);
-    expect(acumulados(totais, "2025-12", "2026-04")).toEqual({ ano: 70, admissao: 170 });
-    expect(acumulados(totais, "2026-03", "2026-04")).toEqual({ ano: 40, admissao: 40 });
-    expect(acumulados(totais, null, "2026-04")).toEqual({ ano: 40, admissao: 40 });
   });
 });

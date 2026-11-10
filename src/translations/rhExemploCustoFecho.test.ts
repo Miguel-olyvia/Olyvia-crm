@@ -8,6 +8,7 @@ const CHAVES_NOVAS = [
   "rhContas.nota.cargoDesconhecido",
   "rhContas.nota.faltasExcedem",
   "rhContas.rotuloCalculado",
+  "rhContas.rotuloSubsidios",
 ];
 
 describe("rhExemploCustoFecho", () => {
@@ -27,9 +28,10 @@ describe("rhExemploCustoFecho", () => {
     expect(textos.pt["rhContas.notaTsu"]).toBe("A base da TSU é a retribuição do mês sem km nem ajudas de custo (dentro dos limites legais); inclui o subsídio de alimentação, o IHT e as horas extra. Confirme com a contabilidade.");
   });
 
-  it("o rotulo da comparacao diz que e so o salario base e a ajuda diz o que fica de fora", () => {
-    expect(textos.pt["rhContas.comparar.repartido"]).toBe("Só o salário base repartido por 12 meses (14 ÷ 12) com TSU e seguro");
-    expect(textos.pt["rhContas.comparar.repartidoAjuda"]).toContain("NÃO inclui alimentação, horas extra, IHT, km, ajudas, manuais nem equipamentos");
-    expect(textos.en["rhContas.comparar.repartidoAjuda"]).toMatch(/does NOT include/);
+  it("a aba so mostra o custo do mes: ja nao ha textos de «para comparar», custo por hora nem acumulados", () => {
+    for (const lingua of ["pt", "en"] as const) {
+      expect(Object.keys(textos[lingua]).filter((c) => c.startsWith("rhContas.comparar."))).toEqual([]);
+      expect(textos[lingua]["rhContas.rotuloSubsidios"]).toBeTruthy();
+    }
   });
 });

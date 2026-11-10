@@ -66,7 +66,6 @@ describe("o custo de uma pessoa num mês", () => {
   it("mês fechado sem valores gravados não leva horas feitas de exemplo; com horas gravadas usa-as", () => {
     const sem = custoDaPessoaNoMes(pessoa({ semValoresGravados: true, retribuicaoMes: null }), contexto({ horasRealizadas: new Map() }));
     expect(sem.horasFeitas).toBe(0);
-    expect(sem.porHoraFeita).toBeNull();
     const com = custoDaPessoaNoMes(pessoa(), contexto({ horasRealizadas: new Map([["p1", 150]]) }));
     expect(com.horasFeitas).toBe(150);
   });

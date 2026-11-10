@@ -6,7 +6,7 @@
  * manuais. A TSU incide sobre a retribuição sem km nem ajudas, e o seguro só sobre o salário base: ver `contasDoMes.ts`.
  * O equipamento (lista própria, `equipamentos.ts`) nunca entra no bruto: pesa só nos outros custos, conforme «como conta».
  */
-import { arredondar, custoPorHora, horasPrevistasDoMes, somarMeses, taxaEfetiva, type MesIso } from "./custo";
+import { arredondar, horasPrevistasDoMes, somarMeses, taxaEfetiva, type MesIso } from "./custo";
 import { contasDoMes, TSU_EMPREGADOR_PCT, type ContasDoMes, type DecomposicaoRetribuicao, type EntradaContas } from "./contasDoMes";
 import { valorNoMes, type ContaItem, type ItemParaConta } from "./comoConta";
 import { equipamentosDoMes, valorDoEquipamentoNoMes, type EquipamentoPessoa } from "./equipamentos";
@@ -81,11 +81,8 @@ export interface CustoDoMes {
   outrosCustos: number;
   nEquipamentos: number;
   total: number | null;
-  repartido: number | null;
   horasPrevistas: number;
   horasFeitas: number;
-  porHoraPrevista: number | null;
-  porHoraFeita: number | null;
   /** O que cada linha da conta recebe: o ecra volta a chamar `contasDoMes` com esta entrada e a lingua. */
   entradaContas: EntradaContas;
   contas: ContasDoMes;
@@ -128,11 +125,8 @@ export function custoDoMes(e: EntradaCustoMes): CustoDoMes {
     outrosCustos,
     nEquipamentos: doMes.length,
     total: contas.total,
-    repartido: contas.repartido?.valor ?? null,
     horasPrevistas,
     horasFeitas: e.horasFeitas,
-    porHoraPrevista: custoPorHora(contas.total, horasPrevistas),
-    porHoraFeita: custoPorHora(contas.total, e.horasFeitas),
     entradaContas,
     contas,
   };
@@ -151,18 +145,4 @@ export function mesesEntre(inicio: MesIso, fim: MesIso): MesIso[] {
     }
   }
   return lista;
-}
-
-/** O acumulado do ano (desde janeiro) e desde a admissão: soma dos totais mensais a partir do mês de admissão. */
-export function acumulados(
-  totaisPorMes: ReadonlyMap<MesIso, number | null>,
-  admissao: MesIso | null,
-  mesAtual: MesIso,
-): { ano: number; admissao: number } {
-  const inicio = admissao ?? mesAtual;
-  const doAno = mesesEntre(`${mesAtual.slice(0, 4)}-01`, mesAtual).filter((m) => m >= inicio);
-  return {
-    ano: somarMeses(doAno.map((m) => totaisPorMes.get(m) ?? null)),
-    admissao: somarMeses(mesesEntre(inicio, mesAtual).map((m) => totaisPorMes.get(m) ?? null)),
-  };
 }

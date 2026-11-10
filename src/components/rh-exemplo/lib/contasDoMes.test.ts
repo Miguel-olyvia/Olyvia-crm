@@ -110,10 +110,8 @@ describe("contasDoMes: o caso completo", () => {
     expect(somaDasParcelas(c)).toBe(cent(c.total ?? Number.NaN));
   });
 
-  it("a comparacao: salario base x 14 / 12 + TSU + seguro", () => {
-    // 1000 x 14 / 12 = 1166,67; TSU 23,75 % = 277,08; seguro 50.
-    expect(c.repartido?.valor).toBe(1493.75);
-    expect(c.repartido?.formula).toContain("14 ÷ 12");
+  it("ja nao ha conta «para comparar»: so o custo do mes", () => {
+    expect(c).not.toHaveProperty("repartido");
   });
 });
 
@@ -156,7 +154,6 @@ describe("contasDoMes: casos", () => {
     const c = contasDoMes(entrada({ retribuicaoMes: null, decomposicao: null }));
     expect(c.linhas).toEqual([]);
     expect(c.total).toBeNull();
-    expect(c.repartido).toBeNull();
   });
 
   it("o que o processamento tem e as linhas nao explicam fica em «Outras componentes» (nada inventado)", () => {
@@ -177,7 +174,7 @@ describe("contasDoMes: casos", () => {
     const c = contasDoMes(entrada({ retribuicaoMes: 1646.68 }));
     expect(linha(c, "salarioBase")?.valor).toBe(1000);
     expect(linha(c, "duodecimos")?.valor).toBe(166.67);
-    expect(normal(linha(c, "duodecimos")?.formula)).toBe("1 000,00 € × 14 ÷ 12 − 1 000,00 € = 166,67 €");
+    expect(normal(linha(c, "duodecimos")?.formula)).toBe("2 subsídios × 100 % ÷ 12 × 1 000,00 € = 166,67 €");
     expect(linha(c, "seguro")?.valor).toBe(50);
     expect(normal(linha(c, "iht")?.formula)).toBe("25 % × 1 000,00 € = 250,00 €");
     expect(c.salarioBase).toBe(1000);
@@ -289,5 +286,42 @@ describe("contasDoMes: manuais e seguro desconhecido", () => {
 
   it("cargo desconhecido ganha ao pct (nao se aplica um seguro que nao se sabe)", () => {
     expect(linha(contasDoMes(entrada({ seguroPct: 5, seguroDesconhecido: true })), "seguro")).toMatchObject({ valor: 0, nota: "cargoDesconhecido" });
+  });
+});
+
+describe("contasDoMes: a formula dos duodecimos e a do processamento (2 subsidios x % ÷ 12 x retribuicao)", () => {
+  /** O processamento: divisor = 168 ÷ (12 + 2 × pct/100); baseMes = retribuicao × 14 ÷ divisor. */
+  const comDivisor = (retribuicao: number, divisor: number, opcoes?: Parameters<typeof contasDoMes>[1]) => {
+    const baseMes = (retribuicao * 14) / divisor;
+    const d = decomposicaoDoResultado({ baseMes, divisorDuodecimos: divisor, linhasAutomaticas: [], linhasRegra: [], descontoFaltas: 0, subsidioAlimentacao: 0 });
+    return contasDoMes(entrada({ retribuicaoMes: Math.round(baseMes * 100) / 100, decomposicao: d, manuais: 0, equipamentos: 0 }), opcoes);
+  };
+
+  it("50 % de 1 500 €: a formula reproduz 125,00 € (e nao a do 14 ÷ 13, que dava 115,38 €)", () => {
+    const c = comDivisor(1500, 168 / 13);
+    expect(linha(c, "duodecimos")?.valor).toBe(125);
+    expect(normal(linha(c, "duodecimos")?.formula)).toBe("2 subsídios × 50 % ÷ 12 × 1 500,00 € = 125,00 €");
+    expect(somaDasParcelas(c)).toBe(cent(c.total ?? Number.NaN));
+  });
+
+  it("100 % de 1 500 €: 250,00 €", () => {
+    const c = comDivisor(1500, 12);
+    expect(linha(c, "duodecimos")?.valor).toBe(250);
+    expect(normal(linha(c, "duodecimos")?.formula)).toBe("2 subsídios × 100 % ÷ 12 × 1 500,00 € = 250,00 €");
+  });
+
+  it("0 % (subsidios em dois meses, divisor 14): nao ha linha de duodecimos", () => {
+    expect(linha(comDivisor(1500, 14), "duodecimos")).toBeUndefined();
+  });
+
+  it("divisor que nao corresponde a 0, 50 ou 100 %: so o valor, «calculado pelo processamento»", () => {
+    const c = comDivisor(1500, 13);
+    expect(linha(c, "duodecimos")?.valor).toBe(115.38);
+    expect(normal(linha(c, "duodecimos")?.formula)).toBe("= 115,38 €, calculado pelo processamento");
+  });
+
+  it("em ingles usa a palavra dada para os subsidios", () => {
+    const c = comDivisor(1500, 168 / 13, { lingua: "en", rotuloSubsidios: "allowances" });
+    expect(normal(linha(c, "duodecimos")?.formula)).toBe("2 allowances × 50 % ÷ 12 × 1,500.00 € = 125.00 €");
   });
 });

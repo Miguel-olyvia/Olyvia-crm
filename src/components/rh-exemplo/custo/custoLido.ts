@@ -31,9 +31,6 @@ export interface CustoDaPessoa {
   razaoSemValor?: RazaoSemEstimativa;
   /** As horas feitas que entram na conta; `null` = sem horas (mes fechado sem valores gravados): nunca um 0 inventado. */
   horasFeitas: number | null;
-  /** Os acumulados precisam do calculo de cada mes anterior, que ainda nao esta ligado: `null` = sem valor. */
-  acumuladoAno: number | null;
-  acumuladoAdmissao: number | null;
   avulsos: AvulsoCusto[];
   equipamentos: EquipamentoPessoa[];
   taxaExcecao: number | null;
@@ -97,8 +94,6 @@ export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas:
     ...(pessoa.estimadoPeloCargo ? { estimadoPeloCargo: pessoa.estimadoPeloCargo } : {}),
     ...(pessoa.razaoSemValor ? { razaoSemValor: pessoa.razaoSemValor } : {}),
     horasFeitas,
-    acumuladoAno: null,
-    acumuladoAdmissao: null,
     avulsos: avulsos.filter((a) => a.pessoaId === pessoa.pessoaId),
     equipamentos: equipamentos.filter((e) => e.pessoaId === pessoa.pessoaId),
     taxaExcecao: excecoes[pessoa.pessoaId] ?? null,

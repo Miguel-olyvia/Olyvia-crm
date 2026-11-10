@@ -30,7 +30,7 @@ export function CustoContas({ custo, nome, fechado }: CustoContasProps) {
   const estimado = custo.estimadoPeloCargo !== undefined;
 
   return (
-    <Seccao titulo={t("rhContas.titulo")}>
+    <Seccao nivel={4} titulo={t("rhContas.titulo")}>
       <p className="mb-2 max-w-3xl text-sm text-muted-foreground">{t("rhContas.intro")}</p>
       {fechado && <p role="status" className="mb-2 text-sm text-muted-foreground">{t("rhContas.fechado")}</p>}
       {contas.linhas.length === 0 ? (

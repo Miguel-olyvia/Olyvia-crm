@@ -105,24 +105,14 @@ describe("a retribuicao vem de fora e o custo bate entre o modulo e a ficha", ()
     expect(t.equipamentos).toBeGreaterThan(0);
   });
 
-  it("os acumulados nao se inventam: precisam do calculo de cada mes anterior e ficam sem valor", () => {
-    const ficha = fichaDe("p-tiago", MES);
-    expect(ficha.acumuladoAno).toBeNull();
-    expect(ficha.acumuladoAdmissao).toBeNull();
-  });
-
-  it("as horas feitas do mes sao as passadas (as da assiduidade), e o custo por hora feita acompanha-as", () => {
-    const ficha = fichaDe("p-tiago", MES, 150.5);
-    expect(ficha.atual.horasFeitas).toBe(150.5);
-    expect(cent(ficha.atual.porHoraFeita)).toBe(cent((ficha.atual.total ?? 0) / 150.5));
-    expect(fichaDe("p-tiago", MES, 0).atual.porHoraFeita).toBeNull();
+  it("as horas feitas do mes sao as passadas (as da assiduidade)", () => {
+    expect(fichaDe("p-tiago", MES, 150.5).atual.horasFeitas).toBe(150.5);
   });
 
   it("as horas previstas acompanham as horas semanais dadas (derivadas das horas planeadas do mes)", () => {
     const meio = custoDaPessoa(pessoa("p-tiago", 1000, { horasSemanais: 20 }), MES, 0, DADOS);
     const inteiro = custoDaPessoa(pessoa("p-tiago", 1000, { horasSemanais: 40 }), MES, 0, DADOS);
     expect(meio.atual.horasPrevistas * 2).toBeCloseTo(inteiro.atual.horasPrevistas, 1);
-    expect(custoDaPessoa(pessoa("p-tiago", 1000, { horasSemanais: 0 }), MES, 0, DADOS).atual.porHoraPrevista).toBeNull();
   });
 });
 

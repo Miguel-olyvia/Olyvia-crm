@@ -130,7 +130,8 @@ export interface EntradaContas {
 export interface OpcoesContas {
   lingua?: "pt" | "en";
   rotuloDias?: string;
-  rotuloSeguro?: string;
+  /** «subsídios» / «allowances»: a palavra da formula dos duodecimos. */
+  rotuloSubsidios?: string;
   /** «calculado pelo processamento»: acompanha o valor quando preco × quantidade (ou pct × base) nao o reproduz ao centimo. */
   rotuloCalculado?: string;
 }
@@ -147,8 +148,6 @@ export interface ContasDoMes {
   /** O que o km e as ajudas valem (ficam fora da base da TSU). */
   kmEAjudas: number;
   total: number | null;
-  /** So o salario base repartido por 12 meses: salario base × 14 ÷ 12 + TSU + seguro. NAO inclui alimentacao, horas extra, IHT, km, ajudas, manuais nem equipamentos. So para comparar. */
-  repartido: { valor: number; formula: string } | null;
 }
 
 const centimos = (v: number): number => Math.round((v + Number.EPSILON) * 100);
@@ -172,13 +171,13 @@ function formatador(lingua: "pt" | "en") {
   };
 }
 
-const SEM_CONTAS: ContasDoMes = { linhas: [], bruto: null, baseTsu: 0, tsu: 0, seguro: 0, salarioBase: null, kmEAjudas: 0, total: null, repartido: null };
+const SEM_CONTAS: ContasDoMes = { linhas: [], bruto: null, baseTsu: 0, tsu: 0, seguro: 0, salarioBase: null, kmEAjudas: 0, total: null };
 
 export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): ContasDoMes {
   if (e.retribuicaoMes === null) return SEM_CONTAS;
   const { numero, eur, pct } = formatador(opcoes.lingua ?? "pt");
   const dias = opcoes.rotuloDias ?? "dias";
-  const rotuloSeguro = opcoes.rotuloSeguro ?? "seguro";
+  const rotuloSubsidios = opcoes.rotuloSubsidios ?? "subsídios";
   const rotuloCalculado = opcoes.rotuloCalculado ?? "calculado pelo processamento";
   const d = e.decomposicao;
   const marca = e.estimado ? ({ estimado: true } as const) : {};
@@ -187,7 +186,7 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
   const calculado = (valor: number): string => `= ${eur(valor)}, ${rotuloCalculado}`;
 
   // 1. A retribuicao do mes em partes. Sem decomposicao (estimativa pelo cargo) e tudo salario base.
-  // O salario base e os duodecimos ficam como o processamento os devolveu (o seguro, o IHT e o «para comparar» assentam neles).
+  // O salario base e os duodecimos ficam como o processamento os devolveu (o seguro e o IHT assentam neles).
   const salarioBase = d ? d.salarioBase : e.retribuicaoMes;
   const duodecimos = d ? d.duodecimos : 0;
   const kmEAjudas = d ? arredondar((d.km?.valor ?? 0) + (d.ajudas?.valor ?? 0)) : 0;
@@ -208,8 +207,7 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
   const parcelas: LinhaConta[] = [parcela("salarioBase", salarioBase)];
   if (d) {
     if (duodecimos !== 0) {
-      const exacto = centimos(arredondar((salarioBase * 14) / d.divisor - salarioBase)) === centimos(duodecimos);
-      parcelas.push(parcela("duodecimos", duodecimos, exacto ? `${eur(salarioBase)} × 14 ÷ ${numero(d.divisor, 0, 0)} − ${eur(salarioBase)} = ${eur(duodecimos)}` : calculado(duodecimos)));
+      parcelas.push(parcela("duodecimos", duodecimos, formulaDuodecimos(salarioBase, d.divisor, duodecimos, rotuloSubsidios, eur, pct, calculado)));
     }
     if (d.subsidioAlimentacao !== 0) parcelas.push(parcela("subsidioAlimentacao", d.subsidioAlimentacao));
     if (d.horasExtra !== 0) parcelas.push(parcela("horasExtra", d.horasExtra));
@@ -250,15 +248,6 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
   if (equipamentos !== 0) fecho.push(parcela("equipamentos", equipamentos));
   const total = emEuros(retribuicaoCent + centimos(tsu) + centimos(seguro) + centimos(equipamentos));
 
-  // 4. Para comparar: os subsidios repartidos por 12 meses.
-  const repartidoBase = arredondar((salarioBase * 14) / 12);
-  const tsuRepartido = arredondar((repartidoBase * e.taxaPct) / 100);
-  const valorRepartido = arredondar(repartidoBase + tsuRepartido + seguro);
-  const repartido = {
-    valor: valorRepartido,
-    formula: `${eur(salarioBase)} × 14 ÷ 12 = ${eur(repartidoBase)}; TSU ${pct(e.taxaPct)} × ${eur(repartidoBase)} = ${eur(tsuRepartido)}; ${rotuloSeguro} ${eur(seguro)}; ${eur(valorRepartido)}`,
-  };
-
   return {
     linhas: [...parcelas, ...fecho, { chave: "total", tipo: "total", valor: total, formula: "", ...marca }],
     bruto,
@@ -268,8 +257,32 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
     salarioBase,
     kmEAjudas,
     total,
-    repartido,
   };
+}
+
+/** As percentagens de subsidios em duodecimos que o processamento oferece (0 = pagos em Junho e Novembro, 50 %, 100 % = todos os meses). */
+const PCT_DUODECIMOS = [0, 50, 100] as const;
+const TOLERANCIA_PCT = 1e-6;
+
+/**
+ * A conta dos duodecimos como o processamento a faz: duodecimos = retribuicao × 2 subsidios × pct ÷ 12, com
+ * divisor = 168 ÷ (12 + 2 × pct/100). Recupera a pct do divisor e so mostra a formula se a pct for 0, 50 ou 100 e a conta
+ * reproduzir o valor ao centimo; senao «= valor, calculado pelo processamento».
+ */
+function formulaDuodecimos(
+  salarioBase: number,
+  divisor: number,
+  duodecimos: number,
+  rotuloSubsidios: string,
+  eur: (v: number) => string,
+  pct: (v: number) => string,
+  calculado: (valor: number) => string,
+): string {
+  const pctReal = (168 / divisor - 12) * 50;
+  const pctExacta = PCT_DUODECIMOS.find((p) => Math.abs(p - pctReal) < TOLERANCIA_PCT);
+  if (pctExacta === undefined) return calculado(duodecimos);
+  const reproduz = centimos(arredondar((salarioBase * 2 * pctExacta) / 100 / 12)) === centimos(duodecimos);
+  return reproduz ? `2 ${rotuloSubsidios} × ${pct(pctExacta)} ÷ 12 × ${eur(salarioBase)} = ${eur(duodecimos)}` : calculado(duodecimos);
 }
 
 /** Um preco unitario com ate 4 casas (0,40 € ou 0,3333 €). */

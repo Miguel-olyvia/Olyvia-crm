@@ -393,7 +393,7 @@ describe("o módulo Custos", () => {
     noRouter();
     fireEvent.click(within(linhaDe("Tiago Pinheiro")).getByRole("button", { name: /Abrir a ficha de Tiago Pinheiro/ }));
     const ficha = screen.getByRole("dialog");
-    expect(within(ficha).getByText("Custo total do mês")).toBeInTheDocument();
+    expect(within(ficha).getByRole("rowheader", { name: /Custo total/ })).toBeInTheDocument();
     expect(within(ficha).getByRole("heading", { name: "Equipamentos" })).toBeInTheDocument();
     expect(within(ficha).getAllByText("Telemóvel").length).toBeGreaterThan(0);
   });

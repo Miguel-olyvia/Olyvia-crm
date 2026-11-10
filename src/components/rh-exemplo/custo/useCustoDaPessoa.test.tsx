@@ -228,12 +228,6 @@ describe("useCustoDaPessoa", () => {
     expect(result.current.aCarregar).toBe(false);
   });
 
-  it("os acumulados ficam sem valor: nunca o mes actual repetido", () => {
-    const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
-    expect(result.current.custo?.acumuladoAno).toBeNull();
-    expect(result.current.custo?.acumuladoAdmissao).toBeNull();
-  });
-
   it("sem retribuicao a pessoa fica sem custo total (nao zero)", () => {
     estado.pessoa = { ...estado.pessoa, resultado: calculoReal(null) };
     const { result } = renderHook(() => useCustoDaPessoa(PESSOA, MES));
@@ -478,12 +472,16 @@ describe("AbaCusto", () => {
 
   beforeEach(() => window.localStorage.setItem("language", "pt"));
 
-  it("mostra o custo do mes com a retribuicao real e os acumulados sem valor", async () => {
+  it("mostra so o custo do mes: o titulo com mes e ano e a tabela das contas, sem resumo, comparacao, custo por hora nem acumulados", async () => {
     await renderAba();
-    expect(screen.getByText("Total bruto estimado do processamento salarial")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^Custo de .+ de \d{4}$/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "As contas do mês" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: /Contas do custo de/ })).toBeInTheDocument();
     expect(screen.queryByText(/A calcular a retribuição do mês/)).not.toBeInTheDocument();
-    expect(screen.getByText(/precisam do cálculo de cada mês anterior e ainda não estão ligados/)).toBeInTheDocument();
-  });
+    for (const fora of [/Para comparar/, /Acumulados/, /Custo por hora/, /Do ano/, /Desde a admissão/, /Total bruto estimado do processamento/, /Encargos da empresa/, /Bruto do mês/, /Composição do custo/, /precisam do cálculo de cada mês anterior/]) {
+      expect(screen.queryByText(fora)).not.toBeInTheDocument();
+    }
+  }, 20000);
 
   it("enquanto carrega diz que esta a calcular e nao mostra um quadro vazio como se fosse zero", async () => {
     estado.pessoa = { ...estado.pessoa, resultado: null, aCarregar: true };
@@ -578,9 +576,8 @@ describe("useCustoDaPessoa: mes fechado", () => {
     expect(result.current.semValoresGravados).toBe(true);
     expect(result.current.custo?.retribuicaoMes).toBeNull();
     expect(result.current.custo?.atual.total).toBeNull();
-    // Sem linha gravada o custo nao leva horas feitas (nem um 0 inventado) e nao ha custo por hora feita.
+    // Sem linha gravada o custo nao leva horas feitas (nem um 0 inventado).
     expect(result.current.custo?.horasFeitas).toBeNull();
-    expect(result.current.custo?.atual.porHoraFeita).toBeNull();
   });
 
   it("com linha gravada o custo leva as horas gravadas", () => {
@@ -735,15 +732,15 @@ describe("AbaCusto: mes fechado", () => {
     expect(screen.getByText(/Sem valores gravados no fecho para esta pessoa/)).toBeInTheDocument();
   });
 
-  it("a pessoa sem linha gravada nao mostra «por hora feita»; com linha gravada mostra", async () => {
+  it("com ou sem linha gravada a aba nao mostra custo por hora (so o custo do mes)", async () => {
     estado.gravados = { estado: "ok", porPessoa: new Map(), antesDoRegisto: false };
     const semLinha = await renderAba();
-    expect(screen.queryByText(/Custo por hora realmente feita/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Custo por hora prevista/)).toBeInTheDocument();
+    expect(screen.queryByText(/Custo por hora/)).not.toBeInTheDocument();
     semLinha.unmount();
     estado.gravados = { estado: "ok", porPessoa: new Map([["p-tiago", gravada("p-tiago")]]), antesDoRegisto: false };
     await renderAba();
-    expect(screen.getByText(/Custo por hora realmente feita/)).toBeInTheDocument();
+    expect(screen.queryByText(/Custo por hora/)).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: /Contas do custo de/ })).toBeInTheDocument();
   });
 
   it("em ingles os mesmos avisos", async () => {
@@ -962,7 +959,9 @@ describe("AbaCusto: estimativa pelo cargo", () => {
     await renderAba(vi.fn(), PESSOA);
     expect(screen.getByText("Sem retribuição e sem cargo atribuído")).toBeInTheDocument();
     expect(screen.queryByText(/Estimativa pelo salário do cargo/)).not.toBeInTheDocument();
-    expect(screen.getAllByText("Sem valor").length).toBeGreaterThan(0);
+    expect(screen.getByText("Sem salário registado")).toBeInTheDocument();
+    expect(screen.getByText("Sem retribuição registada: não há contas para mostrar.")).toBeInTheDocument();
+    expect(screen.queryByText("Sem valor")).not.toBeInTheDocument();
   });
 
   it("cargo nao mensal: razao em texto, sem estimativa", async () => {
@@ -1033,16 +1032,20 @@ describe("AbaCusto: as contas do mes", () => {
     for (const rotulo of ["Quilómetros", "Ajudas de custo", /IHT/]) expect(screen.queryByRole("rowheader", { name: rotulo })).not.toBeInTheDocument();
   });
 
-  it("«Para comparar» substitui «Ao lado»: sem saldo do banco de horas nem valores de exemplo, com a formula dos 12 meses", async () => {
+  it("a aba acaba no custo total e nao tem «Para comparar», «Acumulados» nem «Custo por hora» (o custo e so o do mes)", async () => {
     await renderAba();
-    expect(screen.getByText("Para comparar (não entra no custo do mês)")).toBeInTheDocument();
-    expect(screen.queryByText("Ao lado")).not.toBeInTheDocument();
-    expect(screen.queryByText(/banco de horas/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/exemplo/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Só o salário base repartido por 12 meses (14 ÷ 12) com TSU e seguro")).toBeInTheDocument();
-    expect(screen.queryByText("Custo com os subsídios repartidos por 12 meses")).not.toBeInTheDocument();
-    expect(screen.getByText(/salário base × 14 ÷ 12 \+ TSU \+ seguro/)).toBeInTheDocument();
-    expect(screen.getByText(/NÃO inclui alimentação, horas extra, IHT, km, ajudas, manuais nem equipamentos/)).toBeInTheDocument();
+    for (const fora of [/Para comparar/, /Acumulados/, /Custo por hora/, /repartido por 12 meses/, /exemplo/i, /banco de horas/i]) {
+      expect(screen.queryByText(fora)).not.toBeInTheDocument();
+    }
+    const ultima = screen.getByRole("table", { name: /Contas do custo de/ }).querySelectorAll("tbody tr");
+    expect(ultima[ultima.length - 1].textContent).toMatch(/Custo total/);
+  });
+
+  it("os duodecimos mostram a formula verdadeira do processamento: 2 subsidios × 50 % ÷ 12 × 1 500,00 € = 125,00 €", async () => {
+    const base = calculoReal(1625);
+    estado.pessoa = { ...estado.pessoa, resultado: { ...base, resultado: { ...base.resultado, divisorDuodecimos: 168 / 13 } } } as never;
+    await renderAba();
+    expect(normal(linhaDe("Subsídios em duodécimos").textContent)).toContain("2 subsídios × 50 % ÷ 12 × 1 500,00 € = 125,00 €");
   });
 
   it("o formulario so tem a taxa desta pessoa: sem taxa da empresa, seguro, km nem dia", async () => {
