@@ -38,6 +38,7 @@ import { rhExemploJustificacoesTranslations } from "@/translations/rhExemploJust
 import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
 import { canalDenunciasMinhaAreaTranslations } from "@/translations/canalDenunciasMinhaArea";
 import { rhOficiosObraTranslations } from "@/translations/rhOficiosObra";
+import { rhExemploCargoSeguroTranslations } from "@/translations/rhExemploCargoSeguro";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -211,6 +212,11 @@ Object.keys(canalDenunciasMinhaAreaTranslations).forEach((lang) => {
 // Ficha de RH › "Ofícios de obra" (`hr.oficiosObra.*`) — módulo próprio, mesmo padrão.
 Object.keys(rhOficiosObraTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhOficiosObraTranslations[lang as keyof typeof rhOficiosObraTranslations] };
+});
+
+// rh-exemplo › Cargos › seguro de acidentes de trabalho por cargo (`hr.cargos.seguro.*`) — módulo próprio, mesmo padrão.
+Object.keys(rhExemploCargoSeguroTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCargoSeguroTranslations[lang as keyof typeof rhExemploCargoSeguroTranslations] };
 });
 
 /**

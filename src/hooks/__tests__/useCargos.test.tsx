@@ -28,6 +28,8 @@ const estado = vi.hoisted(() => ({
   periodos: null as null | unknown[],
   falharPeriodos: null as unknown,
   intervalos: [] as Array<[number, number]>,
+  /** As linhas de `hr_cargos` que a base "tem" (vazio por omissao). */
+  cargos: [] as unknown[],
 }));
 
 const PERIODOS = [
@@ -79,7 +81,9 @@ vi.mock("@/lib/hr/hrDb", async () => {
                 ? intervalo
                   ? todos.slice(intervalo[0], intervalo[1] + 1)
                   : todos
-                : [];
+                : tabela === "hr_cargos"
+                  ? estado.cargos
+                  : [];
           return Promise.resolve({ data: dados, error: null }).then(ok, ko);
         },
       };
@@ -126,6 +130,7 @@ beforeEach(() => {
   estado.periodos = null;
   estado.falharPeriodos = null;
   estado.intervalos = [];
+  estado.cargos = [];
 });
 
 describe("useCargos (fluxo 2)", () => {
@@ -336,5 +341,96 @@ describe("useCargos (fluxo 2)", () => {
       ).rejects.toMatchObject({ code: "HRC05" });
     });
     expect(invalidar).not.toHaveBeenCalled();
+  });
+
+  describe("seguro de acidentes de trabalho do cargo", () => {
+    const LINHA = { id: "c1", organization_id: ORG, nome: "Ladrilhador", horas_referencia: 40, activo: true };
+
+    it("le a coluna seguro_acidentes_pct de hr_cargos", async () => {
+      const { result } = montar();
+      await waitFor(() => expect(result.current.periodos).toHaveLength(2));
+      const colunas = estado.selects.find((s) => s.tabela === "hr_cargos")?.colunas ?? "";
+      expect(colunas).toContain("seguro_acidentes_pct");
+      expect(colunas).not.toContain("*");
+    });
+
+    it("converte numeric (numero ou texto) em numero e deixa null e ausente como estao", async () => {
+      estado.cargos = [
+        { ...LINHA, id: "a", seguro_acidentes_pct: "1.50" },
+        { ...LINHA, id: "b", seguro_acidentes_pct: 2 },
+        { ...LINHA, id: "c", seguro_acidentes_pct: null },
+        { ...LINHA, id: "d" },
+        { ...LINHA, id: "e", seguro_acidentes_pct: "0.00" },
+        { ...LINHA, id: "f", seguro_acidentes_pct: "lixo" },
+      ];
+      const { result } = montar();
+      await waitFor(() => expect(result.current.cargos).toHaveLength(6));
+      const por = Object.fromEntries(result.current.cargos.map((c) => [c.id, c.seguro_acidentes_pct]));
+      expect(por.a).toBe(1.5);
+      expect(por.b).toBe(2);
+      expect(por.c).toBeNull();
+      expect(por.d).toBeNull();
+      expect(por.e).toBe(0);
+      expect(por.f).toBeNull();
+      expect(result.current.cargos[0].nome).toBe("Ladrilhador");
+    });
+
+    it("definirSeguroDoCargo chama a RPC com chaves nomeadas e invalida os cargos", async () => {
+      estado.rpcResposta = { data: { cargo_id: "c1", seguro_acidentes_pct: 1.5 }, error: null };
+      const { result, invalidar } = montar();
+      await waitFor(() => expect(result.current.periodos).toHaveLength(2));
+      invalidar.mockClear();
+
+      let resposta: unknown;
+      await act(async () => {
+        resposta = await result.current.definirSeguroDoCargo("c1", 1.5);
+      });
+
+      expect(estado.rpcs).toEqual([
+        { fn: "rpc_hr_cargo_definir_seguro", args: { p_cargo_id: "c1", p_pct: 1.5 } },
+      ]);
+      expect(resposta).toEqual({ cargo_id: "c1", seguro_acidentes_pct: 1.5 });
+      const chaves = invalidar.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey[0]);
+      expect(chaves).toContain("hr-cargos");
+    });
+
+    it("definirSeguroDoCargo com null limpa: envia p_pct null", async () => {
+      estado.rpcResposta = { data: { cargo_id: "c1", seguro_acidentes_pct: null }, error: null };
+      const { result } = montar();
+      await waitFor(() => expect(result.current.periodos).toHaveLength(2));
+      await act(async () => {
+        await result.current.definirSeguroDoCargo("c1", null);
+      });
+      expect(estado.rpcs).toEqual([{ fn: "rpc_hr_cargo_definir_seguro", args: { p_cargo_id: "c1", p_pct: null } }]);
+    });
+
+    it("propaga o erro da base e nao invalida nada", async () => {
+      estado.rpcResposta = { data: null, error: { code: "42501", message: "permission denied" } };
+      const { result, invalidar } = montar();
+      await waitFor(() => expect(result.current.periodos).toHaveLength(2));
+      invalidar.mockClear();
+      await act(async () => {
+        await expect(result.current.definirSeguroDoCargo("c1", 1)).rejects.toMatchObject({ code: "42501" });
+      });
+      expect(invalidar).not.toHaveBeenCalled();
+    });
+
+    it("uma resposta sem o resultado esperado nao e um sucesso", async () => {
+      estado.rpcResposta = { data: null, error: null };
+      const { result } = montar();
+      await waitFor(() => expect(result.current.periodos).toHaveLength(2));
+      await act(async () => {
+        await expect(result.current.definirSeguroDoCargo("c1", 1)).rejects.toThrow(/rpc_hr_cargo_definir_seguro/);
+      });
+    });
+
+    it("editar continua a enviar so nome, horas e autor (o seguro nao vai por UPDATE)", async () => {
+      const { result } = montar();
+      await waitFor(() => expect(result.current.periodos).toHaveLength(2));
+      await act(async () => {
+        await result.current.editar({ id: "c1", nome: "X", horas_referencia: 40 });
+      });
+      expect(Object.keys(estado.updates[0].valores).sort()).toEqual(["horas_referencia", "nome", "updated_by"]);
+    });
   });
 });
