@@ -32,6 +32,7 @@ import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 import { rhExemploCustoFechoTranslations } from "@/translations/rhExemploCustoFecho";
 import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemploProcessamentoReal";
 import { rhExemploSubsidiosTranslations } from "@/translations/rhExemploSubsidios";
+import { rhExemploPeriodoFolhaTranslations } from "@/translations/rhExemploPeriodoFolha";
 import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
 import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
 import { rhExemploPortalTranslations } from "@/translations/rhExemploPortal";
@@ -203,6 +204,11 @@ Object.keys(rhExemploProcessamentoRealTranslations).forEach((lang) => {
 // Subsídios de férias e de Natal (`rhSubs.*`, as linhas novas de `rhContas.*` e o bloqueio do fecho).
 Object.keys(rhExemploSubsidiosTranslations).forEach((lang) => {
   tabelaFundida[lang] = { ...tabelaFundida[lang], ...rhExemploSubsidiosTranslations[lang as keyof typeof rhExemploSubsidiosTranslations] };
+});
+
+// Período da folha (`rhPeriodo.cfg.*`): o separador de configuração do processamento salarial.
+Object.keys(rhExemploPeriodoFolhaTranslations).forEach((lang) => {
+  tabelaFundida[lang] = { ...tabelaFundida[lang], ...rhExemploPeriodoFolhaTranslations[lang as keyof typeof rhExemploPeriodoFolhaTranslations] };
 });
 
 // Canal de denúncias de exemplo (`cd.*`) — módulo próprio, mesmo padrão.

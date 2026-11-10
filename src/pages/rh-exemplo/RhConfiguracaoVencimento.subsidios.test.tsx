@@ -89,6 +89,7 @@ describe("RhConfiguracaoVencimento: separador dos subsídios", () => {
     permitir("hr.vencimento.codigos.view", "hr.vencimento.codigos.gerir");
     await abrir();
     for (const nome of ["Regras salariais"]) expect(screen.getByRole("tab", { name: nome })).toBeInTheDocument();
+    // Sem periodo.view o separador do período não aparece: códigos, regras salariais, horas extra e subsídios.
     expect(screen.getAllByRole("tab").length).toBe(4);
   }, 30000);
 });
