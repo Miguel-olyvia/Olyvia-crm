@@ -27,7 +27,7 @@ import {
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
-import { faltaParaArrancar, retificacaoAceite, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -2889,7 +2889,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano!; const t = p.tasks[ti]; const tec = TECS.find((x) => x.id === t.tec)!;
       let nd = t.dia;
-      while (diaDeFerias(tec, p, nd, t.dur) != null && nd < t.dia + 60) nd++;
+      // 10/11 (teste de ponta a ponta): até o técnico estar livre, sem férias e sem outra obra (antes, só as férias: com o técnico
+      // noutra obra, o «Adiar até estar livre» não mexia)
+      const ocup = p.inicio ? ocupacaoDosTecnicos(S, d.id) : new Map<string, Set<string>>();
+      while (motivoOcupado(tec.id, { dia: nd, dur: t.dur }, p, ocup) != null && nd < t.dia + 60) nd++;
+      if (nd === t.dia + 60) { avisar({ msg: `${tec.n.split(" ")[0]} não fica livre nos próximos 60 dias úteis`, sub: "Passe a tarefa para outro técnico.", kind: "bad" }); return; }
       if (p.origem !== "orcamento") nd = Math.max(nd, 5); // o plano de exemplo: a fase seguinte não pode passar à frente
       const shift = nd - t.dia;
       // adia esta e as que começam depois dela (as anteriores ficam)
