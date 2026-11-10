@@ -18,6 +18,7 @@ import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta, diasDaObra, isoDia } from "../planoObra";
 import { inicioDoPlano, motivoOcupado, ocupacaoDosTecnicos, retificacaoAceite, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisDaTarefa } from "../tarefasValidador";
+import { diferencas } from "../ajustesPlano";
 import { passosDaTarefa } from "../planoDaVisita";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { Contagem, useReduzir } from "../movimento";
@@ -42,6 +43,7 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
 
   if (!p) return null;
   const editavel = p.estado === "por aprovar" || p.estado === "aprovado";
+  const podeRepor = p.estado === "por aprovar" && diferencas(p).mexidas.length > 0;
   const motivo = (t: Tarefa, ti: number) => (t.tec ? motivoOcupado(t.tec, t, p, ocup, p.tasks.filter((_, i) => i !== ti)) : null);
   const alertas = p.tasks.map((t, ti) => ({ t, ti, m: t.tec ? motivo(t, ti) : "sem técnico" })).filter((x) => x.m);
   const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
@@ -101,7 +103,8 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
               <Estado ok={medidasOk} t={medidasOk ? "Medidas aceites" : "Medidas por aceitar"} icone={<Ruler className="h-3.5 w-3.5" aria-hidden="true" />} />
               <Estado ok={!alertas.length} t={alertas.length ? `${alertas.length} ${alertas.length === 1 ? "alerta" : "alertas"}` : "Sem alertas"} />
               <span className={cn("rounded-full px-3 py-1 text-sm font-medium", p.estado === "por aprovar" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-success/15 text-success")}>{p.estado === "por aprovar" ? "Por aprovar" : p.estado === "aprovado" ? "Aprovado" : p.estado}</span>
-              {editavel && <Button type="button" variant="ghost" className="min-h-11" title="Volta ao plano como veio do orçamento" onClick={() => fazer(() => A.reporPlano(d.id))}><RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />Repor</Button>}
+              {/* 10/11: só com o plano por aprovar e com alguma coisa mudada face ao orçamento (aprovado, mexer avisa e volta a por aprovar) */}
+              {podeRepor && <Button type="button" variant="ghost" className="min-h-11" title="Volta ao plano como veio do orçamento" onClick={() => fazer(() => A.reporPlano(d.id))}><RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />Repor</Button>}
               {p.estado === "por aprovar" && (
                 <Button type="button" className="min-h-11" disabled={!podeAprovar} title={porque || undefined} onClick={() => fazer(() => A.aprovarPlano(d.id))}>
                   <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aprovar o plano

@@ -3,6 +3,7 @@
 // O pagamento da tranche que dispara (DISPARO, em financeiro.ts) chama a ação do motor que põe a obra a andar (A.validar:
 // Inventário + plano). Sem modais: tudo na própria página. Sem botão primário: o primário do passo é o "Continuar" da página.
 import { semEncomendaCliente } from "../preparacaoObra";
+import { PAGAMENTO_MEDIDA } from "../planoObra";
 import { useId, useState } from "react";
 import { CheckCircle2, Circle, Clock, FileText, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -182,6 +183,15 @@ export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
   const tranches = tranchesDe(d), total = totalComIva(S, d), fs = faturasDe(S, d);
   const R = resumoFin(total, tranches, fs), disparo = trancheDoDisparo(tranches);
   const nomeT = (id: string) => tranches.find((t) => t.id === id)?.nome ?? id;
+  // 10/11 (teste do 1026): no resumo dentro da Obra, a tranche seguinte só se fatura quando é devida: a final com a obra acabada, a do
+  // meio com a obra em curso (antes, o formulário da «Final 50%» aparecia aberto com o plano ainda por arrancar). No Financeiro, como antes.
+  const quandoSeFatura = ((): string | null => {
+    const prox = R.porFaturar[0], i = prox ? tranches.findIndex((t) => t.id === prox.id) : -1;
+    if (!compacto || !prox || i <= 0 || d.f.pagamento?.trim() === PAGAMENTO_MEDIDA) return null;
+    const estado = d.obra.plano?.estado;
+    if (i === tranches.length - 1) return estado === "concluída" ? null : `A fatura «${prox.nome}» regista-se quando a obra acabar.`;
+    return estado === "em curso" || estado === "concluída" ? null : `A fatura «${prox.nome}» regista-se com a obra em curso.`;
+  })();
   return (
     <div className="max-w-2xl space-y-8">
       {!compacto && (
@@ -234,7 +244,9 @@ export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
           {podeVerComo("financeiro") && <button type="button" onClick={ctx.go(() => ctx.A.role("financeiro"))} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">Mudar para {PAPEIS.financeiro.nome}</button>}
         </p>
       )}
-      {R.porFaturar.length > 0 && podeRegistar && <FormRegistar key={fs.length} ctx={ctx} d={d} fs={fs} tranches={tranches} total={total} avisar={setAviso} />}
+      {R.porFaturar.length > 0 && podeRegistar && (quandoSeFatura
+        ? <p className="flex items-center gap-2 text-[15px] text-muted-foreground"><Info className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />{quandoSeFatura}</p>
+        : <FormRegistar key={fs.length} ctx={ctx} d={d} fs={fs} tranches={tranches} total={total} avisar={setAviso} />)}
       {R.completo && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Todas as tranches faturadas e pagas.</p>}
 
       {!compacto && (

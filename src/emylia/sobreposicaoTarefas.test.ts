@@ -46,3 +46,20 @@ describe("adiar até estar livre (10/11)", () => {
     expect(motivoOcupado(T, t, d2.obra.plano, ocupacaoDosTecnicos(S, d2.id))).toBeNull();
   });
 });
+
+describe("adiar e repor (10/11)", () => {
+  it("o «Repor» desfaz o adiamento; adiar um plano aprovado volta a por aprovar", () => {
+    const S = seed();
+    const [d1, d2] = S.deals.filter((x) => x.obra);
+    const T = TECS[0].id, inicio = "2027-03-01";
+    d1.obra.plano = { tasks: [{ nome: "Outra obra", svcs: [], dia: 0, dur: 3, sk: TECS[0].sk, h: 24, tec: T }], estado: "aprovado", dia: 0, origem: "orcamento", inicio };
+    d2.obra.plano = { tasks: [{ nome: "Canalização", svcs: [], dia: 0, dur: 1, sk: TECS[0].sk, h: 8, tec: T }], estado: "aprovado", dia: 0, origem: "orcamento", inicio };
+    S.role = "operacoes";
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.adiar(d2.id, 0);
+    expect(d2.obra.plano.estado).toBe("por aprovar");
+    expect(d2.obra.plano.tasks[0].dia).toBeGreaterThanOrEqual(3);
+    A.reporPlano(d2.id);
+    expect(d2.obra.plano.tasks[0].dia).toBe(0);
+  });
+});
