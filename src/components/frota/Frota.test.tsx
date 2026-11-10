@@ -162,6 +162,25 @@ describe("Frota: ecrãs e ficha com dados", () => {
     expect(screen.queryByText(/Só consulta/)).toBeNull();
   });
 
+  it("os totais dos custos: com fleet.costs e com fleet.self (os imputados) aparecem; só com fleet.view/manage, só o aviso", async () => {
+    montar("/frota/custos");
+    expect(await screen.findByText("Total no período")).toBeInTheDocument();
+    expect(screen.queryByText(/só se veem com a permissão fleet\.costs/)).toBeNull();
+    cleanup();
+
+    estado.perms = new Set(["fleet.self"]);
+    montar("/frota/custos");
+    expect(await screen.findByText("Total no período")).toBeInTheDocument();
+    expect(screen.getByText(/aqui aparecem só os que te estão imputados/)).toBeInTheDocument();
+    cleanup();
+
+    estado.perms = new Set(["fleet.view", "fleet.manage"]);
+    montar("/frota/custos");
+    expect(await screen.findByText("Os totais dos custos da frota só se veem com a permissão fleet.costs.")).toBeInTheDocument();
+    expect(screen.queryByText("Total no período")).toBeNull();
+    expect(screen.queryByText("Para rever")).toBeNull();
+  });
+
   it("enquanto as permissões carregam, os botões dizem que estão a carregar", async () => {
     estado.aCarregar = true;
     montar("/frota/hoje");

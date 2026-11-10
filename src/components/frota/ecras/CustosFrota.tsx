@@ -7,12 +7,12 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { KpiGrid, KpiTile } from "../inventarioUi";
-import { useFrotaCtx } from "../contexto";
+import { PERM, useFrotaCtx } from "../contexto";
 import { BotaoFrota, Cabecalho, LinhaClicavel, Placa, RefOps, Selo, Tabela, Vazio } from "../pecas";
 import { CATEGORIAS_CUSTO, DIAS_PERIODO, ORIGENS_CUSTO, condutor, fData, fEur, fNum, inicioPeriodo, opcoesDe, soma, useReferenciaFrota, viatura } from "../dados";
 
 export function CustosFrota() {
-  const { F, abrir, dlg, pode } = useFrotaCtx();
+  const { F, abrir, dlg, pode, tem } = useFrotaCtx();
   const obras = useReferenciaFrota("obras");
   const [tf, setTf] = useState(""), [vf, setVf] = useState(""), [q, setQ] = useState("");
   const ql = q.toLowerCase();
@@ -25,6 +25,8 @@ export function CustosFrota() {
   const doMes = todos.filter((c) => c.spent_on.startsWith(mes));
   const comb = soma(todos.filter((c) => c.category === "fuel" || c.category === "charging"), (c) => c.amount);
   const rever = todos.filter((c) => c.needs_review);
+  // Os totais veem-se com fleet.costs; o condutor (fleet.self) vê os dos custos que lhe estão imputados.
+  const comCustos = pode("custos").ok, eCondutor = tem(PERM.self);
   return (
     <div className="space-y-6">
       <Cabecalho titulo="Abastecimentos e custos" texto={`Combustível, carregamentos, portagens, estacionamento, oficina e rendas dos últimos ${DIAS_PERIODO} dias. Cada despesa fica imputada a um centro de custo ou a uma obra.`}
@@ -33,13 +35,15 @@ export function CustosFrota() {
           <BotaoFrota requer="custos" icone={FileUp} aoClicar={() => dlg("importar")}>Importar extrato</BotaoFrota>
           <BotaoFrota variant="default" requer="gerirOuCustos" icone={Plus} aoClicar={() => dlg("despesa")}>Registar despesa</BotaoFrota>
         </>} />
-      {!pode("custos").ok ? <p className="text-sm text-muted-foreground">Os custos da frota só se veem com a permissão fleet.costs; aqui aparecem só os que te estão imputados.</p> : null}
-      <KpiGrid>
+      {!comCustos ? <p className="text-sm text-muted-foreground">{eCondutor
+        ? "Os custos da frota só se veem com a permissão fleet.costs; aqui aparecem só os que te estão imputados."
+        : "Os totais dos custos da frota só se veem com a permissão fleet.costs."}</p> : null}
+      {comCustos || eCondutor ? <KpiGrid>
         <KpiTile label="Total no período" value={fEur(soma(todos, (c) => c.amount))} hint={`desde ${fData(desde)}`} />
         <KpiTile label="Este mês" value={fEur(soma(doMes, (c) => c.amount))} hint={`${doMes.length} lançamentos`} />
         <KpiTile label="Combustível e energia" value={fEur(comb)} hint={`${fNum(soma(todos.filter((c) => c.unit === "L"), (c) => c.quantity), 0)} L · ${fNum(soma(todos.filter((c) => c.unit === "kWh"), (c) => c.quantity), 0)} kWh`} />
         <KpiTile label="Para rever" value={rever.length} hint="linhas de extrato com km abaixo da última leitura" tone={rever.length ? "warn" : undefined} />
-      </KpiGrid>
+      </KpiGrid> : null}
       <div className="flex flex-wrap gap-2 rounded-lg border bg-card p-3 shadow-sm">
         <div className="relative min-w-[220px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />

@@ -16,8 +16,10 @@ interface MatrizEditavelProps {
   visiveis: Permissao[];
   concedidas: string[];
   aoMudar: (concedidas: string[]) => void;
-  /** Role de sistema: só se vê. */
+  /** Só se vê (role de sistema, ou quem edita não tem permissão para a alterar). */
   somenteLeitura: boolean;
+  /** Porque é só leitura, para o texto: role de sistema (por omissão) ou sem permissão para editar. */
+  motivoLeitura?: "sistema" | "semPermissao";
 }
 
 /** Uma alteração à espera de confirmação: o que se concederia e quais as perigosas. */
@@ -26,7 +28,7 @@ interface Pendente {
   perigosas: Permissao[];
 }
 
-export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura }: MatrizEditavelProps) {
+export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura, motivoLeitura = "sistema" }: MatrizEditavelProps) {
   const { t } = useTranslation();
   const [pendente, setPendente] = useState<Pendente | null>(null);
   const [aviso, setAviso] = useState("");
@@ -90,7 +92,8 @@ export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura }
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">{t(somenteLeitura ? "usersProfiles.form.matrix.readOnly" : "usersProfiles.form.matrix.intro")}</p>
+      <p className="text-sm text-muted-foreground">{t(!somenteLeitura ? "usersProfiles.form.matrix.intro"
+        : motivoLeitura === "semPermissao" ? "usersProfiles.form.matrix.readOnlyNoPermission" : "usersProfiles.form.matrix.readOnly")}</p>
       <ArvorePermissoes permissoes={visiveis} concedida={(codigo) => tem.has(codigo)} edicao={edicao} />
       {/* Aviso discreto das dependências: fica colado ao fundo do painel enquanto se rola a grelha. */}
       <p

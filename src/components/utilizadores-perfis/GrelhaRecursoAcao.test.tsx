@@ -22,11 +22,11 @@ const CATALOGO: Permissao[] = [
   p("negocios.orcamento.editar", "Editar o orçamento do negócio", { categoria: "pessoas" }),
 ];
 
-function Editor({ visiveis = CATALOGO, inicial = [] as string[], somenteLeitura = false }) {
+function Editor({ visiveis = CATALOGO, inicial = [] as string[], somenteLeitura = false, motivoLeitura = "sistema" as "sistema" | "semPermissao" }) {
   const [concedidas, setConcedidas] = useState(inicial);
   return (
     <LanguageProvider>
-      <MatrizEditavel visiveis={visiveis} concedidas={concedidas} aoMudar={setConcedidas} somenteLeitura={somenteLeitura} />
+      <MatrizEditavel visiveis={visiveis} concedidas={concedidas} aoMudar={setConcedidas} somenteLeitura={somenteLeitura} motivoLeitura={motivoLeitura} />
       <output data-testid="concedidas">{[...concedidas].sort().join(",")}</output>
     </LanguageProvider>
   );
@@ -160,6 +160,13 @@ describe("GrelhaRecursoAcao (editor de papéis, v2)", () => {
     abrir("Inventário");
     expect(caixa("Fornecedores: Ver")).toBeDisabled();
     expect(screen.queryByRole("button", { name: /^Marcar todas/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Role de sistema: as permissões não se alteram.")).toBeInTheDocument();
+  });
+
+  it("role que não é de sistema mas sem permissão para editar: diz só leitura, não «role de sistema»", () => {
+    render(<Editor somenteLeitura motivoLeitura="semPermissao" inicial={["suppliers.view"]} />);
+    expect(screen.getByText("Só leitura: não tem permissão para alterar as permissões desta role.")).toBeInTheDocument();
+    expect(screen.queryByText(/Role de sistema/)).toBeNull();
   });
 
   it("ficha da role (só leitura): a mesma grelha com Tem/Não tem", () => {

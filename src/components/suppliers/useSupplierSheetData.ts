@@ -11,6 +11,7 @@
 //       convidado mais recente (email e data do convite) para a faixa da ficha.
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { poVista, PO_VISTA_ENCOMENDAS } from "@/components/purchase-orders/poVistas";
 import { callRpc, type PortalUser, type SupplierPortalStatus } from "@/components/supplier-portal-crm/types";
 
 export interface SupplierItemRow {
@@ -85,7 +86,8 @@ export interface SupplierPoRow {
   order_date: string;
   expected_delivery: string | null;
   status: string;
-  total_value: number;
+  /** NULL sem products.view_cost (vista po_v_purchase_orders, 20270112850000). */
+  total_value: number | null;
 }
 
 const OPEN_PO_STATUSES = ["ordered", "partially_received"];
@@ -99,8 +101,8 @@ export function useSupplierPurchaseOrders(activeOrganizationId: string | null, s
     queryKey: ["supplier-sheet-pos", activeOrganizationId, supplierId],
     queryFn: async (): Promise<{ open: SupplierPoRow[]; recent: SupplierPoRow[] }> => {
       const orgId = activeOrganizationId as string;
-      const openQ = supabase
-        .from("purchase_orders")
+      // Pela vista: a tabela já não dá total_value (20270112851000); a vista dá-o só com products.view_cost.
+      const openQ = poVista(PO_VISTA_ENCOMENDAS)
         .select(PO_COLUMNS)
         .eq("organization_id", orgId)
         .eq("supplier_id", supplierId as string)
@@ -108,8 +110,7 @@ export function useSupplierPurchaseOrders(activeOrganizationId: string | null, s
         .is("deleted_at", null)
         .order("order_date", { ascending: false })
         .order("id", { ascending: false });
-      const recentQ = supabase
-        .from("purchase_orders")
+      const recentQ = poVista(PO_VISTA_ENCOMENDAS)
         .select(PO_COLUMNS)
         .eq("organization_id", orgId)
         .eq("supplier_id", supplierId as string)

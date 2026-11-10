@@ -38,8 +38,9 @@ const fmtDate = (iso: string | null | undefined): string => {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-PT");
 };
 
+// Sem products.view_cost o valor da encomenda vem NULL (vista po_v_purchase_orders): mostra «—», não 0 €.
 const fmtEur = (v: number | null | undefined): string =>
-  Number(v ?? 0).toLocaleString("pt-PT", { style: "currency", currency: "EUR" });
+  v == null ? "—" : Number(v).toLocaleString("pt-PT", { style: "currency", currency: "EUR" });
 
 const todayIso = (): string => {
   const d = new Date();
