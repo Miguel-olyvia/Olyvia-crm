@@ -438,9 +438,11 @@ describe("04/11: escondidas sem ação na app viva (canais, packs/marcas, contra
     expect(agruparPorMenu(emUso).find((g) => g.rotulo === "Operação")).toBeUndefined();
   });
 
-  it("05/11 (ronda 2): a guarda do item «Operação» do menu não muda (operations.view E pessoas.view)", () => {
-    expect(readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8")).toContain('permissions: ["operations.view", "pessoas.view"]');
-    expect(ESCONDIDAS_COM_GUARDA["operations.view"]).toContain("components/sidebar/menuConfig.ts");
+  it("10/11: o item «Operação» do menu pede negocios.obra.executar OU planear (já não operations.view E pessoas.view)", () => {
+    const menu = readFileSync(join(SRC, "components/sidebar/menuConfig.ts"), "utf8");
+    expect(menu).toContain('permissions: ["negocios.obra.executar", "negocios.obra.planear"]');
+    expect(menu).not.toContain('permissions: ["operations.view", "pessoas.view"]');
+    expect(ESCONDIDAS_COM_GUARDA["operations.view"]).not.toContain("components/sidebar/menuConfig.ts");
   });
 
   it("a guarda da página de Denúncias não muda: rota e menu continuam a pedir hr.denuncias.gerir", () => {

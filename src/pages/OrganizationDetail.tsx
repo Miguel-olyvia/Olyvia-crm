@@ -432,10 +432,12 @@ export default function OrganizationDetail() {
   const confirmRemoveMember = async (memberId: string) => {
     const { data: userData } = await supabase.auth.getUser();
     const businessUserId = await resolveBusinessUserId(userData.user?.id);
-    const { error } = await withAuditContext(supabase, businessUserId, () =>
-      (supabase as any).from("anew_memberships").delete().eq("id", memberId)
+    const { data, error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_memberships").delete().eq("id", memberId).select("id")
     );
     if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
+    // A RLS não dá erro quando recusa: devolve zero linhas apagadas.
+    if (!data?.length) { toast.error(t("friendlyError.forbidden")); return; }
     toast.success(t("common.deleted")); fetchMembers();
   };
 

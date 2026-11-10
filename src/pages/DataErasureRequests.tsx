@@ -23,6 +23,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { toast } from "@/lib/toast";
+import { usePermissions } from "@/hooks/usePermissions";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
 
 const PAGE_SIZE = 50;
 const MIN_REJECTION_REASON_LENGTH = 5;
@@ -84,6 +86,46 @@ export default function DataErasureRequests() {
   const [decision, setDecision] = useState<{ request: ErasureRequestRow; action: "approved" | "rejected" } | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [deciding, setDeciding] = useState(false);
+
+  // Espelha decide-data-erasure: só system_admin ou super_admin ATIVO na
+  // organização do pedido pode decidir, e nunca o próprio requerente.
+  const { isSystemAdmin } = usePermissions();
+  const { anewUserId } = usePermissionScope();
+  const [superAdminOrgIds, setSuperAdminOrgIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!anewUserId || isSystemAdmin) {
+      setSuperAdminOrgIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: roleRows } = await supabase
+        .from("anew_roles")
+        .select("id")
+        .eq("code", "super_admin");
+      const superAdminRoleIds = (roleRows || []).map((r: { id: string }) => r.id);
+      if (superAdminRoleIds.length === 0) {
+        if (!cancelled) setSuperAdminOrgIds(new Set());
+        return;
+      }
+      const { data: memberships } = await supabase
+        .from("anew_memberships")
+        .select("organization_id")
+        .eq("user_id", anewUserId)
+        .eq("status", "active")
+        .in("role_id", superAdminRoleIds);
+      if (!cancelled) {
+        setSuperAdminOrgIds(new Set((memberships || []).map((m: { organization_id: string }) => m.organization_id)));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [anewUserId, isSystemAdmin]);
+
+  const podeDecidir = (row: ErasureRequestRow): boolean =>
+    !!anewUserId &&
+    row.requested_by !== anewUserId &&
+    (isSystemAdmin || superAdminOrgIds.has(row.organization_id));
 
   const fetchRequests = useCallback(async (targetPage: number) => {
     setLoading(true);
@@ -231,7 +273,7 @@ export default function DataErasureRequests() {
                           {row.decision_mode === "deleted" ? "Eliminado" : row.decision_mode === "anonymized" ? "Anonimizado" : "—"}
                         </TableCell>
                         <TableCell className="text-right">
-                          {row.status === "pending" ? (
+                          {row.status === "pending" && podeDecidir(row) ? (
                             <div className="flex gap-2 justify-end">
                               <Button
                                 variant="ghost"

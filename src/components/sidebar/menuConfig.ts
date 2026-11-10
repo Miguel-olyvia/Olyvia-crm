@@ -174,10 +174,9 @@ export const topLevelItems: TopLevelItem[] = [
     to: "/negocios?vista=operacoes",
     icon: Wrench,
     labelKey: "sidebar.operations",
-    // 03/11: a rota /negocios (RotaNegocios) exige pessoas.view (ou um papel no Negócio pelo RH, que já abre o /negocios pelo Hoje);
-    // o item pede as duas, para não aparecer a quem tem operations.view e depois leva «Sem acesso».
-    permissions: ["operations.view", "pessoas.view"],
-    requireAll: true,
+    // 10/11: as mesmas permissões com que a vista Operações aparece no /negocios (vistaPermitida) e que a rota aceita (RotaNegocios):
+    // executar ou planear as obras (qualquer delas). Antes pedia a de operações E pessoas.view, e quem trabalha nas obras não o via.
+    permissions: ["negocios.obra.executar", "negocios.obra.planear"],
   },
   {
     // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços. 28/10: sai de Organizações para o topo, como no

@@ -70,6 +70,9 @@ describe("useCriarAcessoPessoa", () => {
     ["papel_obrigatorio", "hr.acesso.erroPapelObrigatorio"],
     ["pessoa_ja_tem_conta_activa", "hr.conta.erroPessoaJaTemConta"],
     ["conta_sem_email", "hr.acesso.erroContaSemEmail"],
+    ["papel_fora_da_organizacao", "hr.acesso.erroPapelForaDaOrganizacao"],
+    ["papel_nao_permitido", "hr.acesso.erroPapelNaoPermitido"],
+    ["conta_existente_inativa", "hr.acesso.erroContaExistenteInativa"],
   ])("%s mostra o texto proprio e nao vai para o Sentry", async (codigo, chave) => {
     invoke.mockResolvedValue({ data: null, error: erroHttp({ error: codigo }, 400) });
     const r = await criar();
@@ -78,7 +81,7 @@ describe("useCriarAcessoPessoa", () => {
     expect(captureFlowError).not.toHaveBeenCalled();
   });
 
-  it.each(["papel_fora_da_organizacao", "papel_nao_permitido", "sem_email_pessoal"])(
+  it.each(["sem_email_pessoal"])(
     "%s (recusa sem texto proprio): texto generico de criar acesso, nunca o codigo",
     async (codigo) => {
       invoke.mockResolvedValue({ data: { error: codigo }, error: null });

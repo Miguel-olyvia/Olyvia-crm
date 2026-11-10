@@ -664,7 +664,7 @@ export function Documentos({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   );
 }
 
-export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
+export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Negocio }) {
   const o = d.orc!, T = tot(d, S), locked = !!o.enviada;
   const pt = partes(d, S), mw = Math.max(0, Math.min(1, T.m / 0.5));
   const mcls = T.m < S.cfg.min / 100 ? "bad" : T.m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
@@ -685,7 +685,7 @@ export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
       </div>
       <div className="withside">
         <div className="stack">
-          <LinhasOrcamento ctx={{ S, A, go, run }} d={d} />
+          <LinhasOrcamento ctx={{ S, A, go, run, podeVerCatalogo }} d={d} />
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-[var(--shadow-sm)]">
             <label className="flex items-center gap-2 text-sm">Desconto
               <Campo id={`desc-${d.id}`} ariaLabel="Desconto em percentagem" value={nfmt(o.desconto)} readOnly={locked}
@@ -704,7 +704,7 @@ export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
                     <i>!</i><span><b>{a.t}</b><small>{a.d}</small></span>
                     <span className="acts">
                       {a.sug != null && <Btn cls="sm" onClick={go(() => A.sugerido(d.id, a.i!, a.sug!))}>Usar {eur(a.sug)} €</Btn>}
-                      {a.go && <Btn cls="sec sm" onClick={go(() => A.nav(a.go!))}>Abrir Catálogo</Btn>}
+                      {a.go && podeVerCatalogo !== false && <Btn cls="sec sm" onClick={go(() => A.nav(a.go!))}>Abrir Catálogo</Btn>}
                       {a.key && <Btn cls="sec sm" onClick={go(() => A.vistoAviso(d.id, a.key!))}>Visto</Btn>}
                     </span>
                   </div>

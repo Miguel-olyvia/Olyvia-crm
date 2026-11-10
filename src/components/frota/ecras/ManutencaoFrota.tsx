@@ -8,7 +8,8 @@ import { BotaoFrota, Cabecalho, Placa, Prog, Seccao, Selo, Tabela, VRef, Vazio, 
 import { ESTADOS_MANUT, ativa, fData, fEur, fKm, manutAbertas, revisao, soma, viatura } from "../dados";
 
 export function ManutencaoFrota() {
-  const { F, dlg } = useFrotaCtx();
+  const { F, dlg, pode } = useFrotaCtx();
+  const verCustos = pode("custos").ok; // valores só com fleet.costs
   const [vista, setVista] = useVista();
   const vs = F.viaturas.filter(ativa);
   const comRev = vs.map((v) => ({ v, r: revisao(v, F.hoje) })).filter((x) => x.r);
@@ -25,7 +26,7 @@ export function ManutencaoFrota() {
         <KpiTile label="Agendadas" value={abertas.filter((m) => m.status === "scheduled").length} hint="por fazer" />
         <KpiTile label="Em curso" value={emCurso.length} hint={emCurso.map((m) => viatura(F, m.vehicle_id)?.plate).join(", ") || "Nenhuma"} tone="warn" />
         <KpiTile label="Revisões a fazer" value={comRev.filter((x) => x.r!.tom !== "ok").length} hint="por km ou por data" tone="bad" onClick={() => setVista("rev")} active={vista === "rev"} actionLabel="Mostrar só as que precisam" />
-        <KpiTile label="Custo este mês" value={fEur(custoMes)} hint="intervenções concluídas" />
+        {verCustos ? <KpiTile label="Custo este mês" value={fEur(custoMes)} hint="intervenções concluídas" /> : null}
       </KpiGrid>
       <Seccao titulo="Plano de revisões" acoes={<FilterPills ariaLabel="Vistas" value={vista} onChange={setVista} options={[{ value: "todas", label: "Todas" }, { value: "rev", label: "Só as que precisam" }]} />}>
         {planos.length ? (
@@ -68,7 +69,7 @@ export function ManutencaoFrota() {
                     <TableCell><div className="flex flex-col"><span>{m.title}</span>{m.notes ? <span className="text-xs text-muted-foreground">{m.notes}</span> : null}</div></TableCell>
                     <TableCell>{m.supplier_label ?? "—"}</TableCell>
                     <TableCell><Selo tom={ESTADOS_MANUT[m.status][0]}>{ESTADOS_MANUT[m.status][1]}</Selo></TableCell>
-                    <TableCell className="text-right tabular-nums">{fEur(m.final_cost ?? m.estimated_cost)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{verCustos ? fEur(m.final_cost ?? m.estimated_cost) : "—"}</TableCell>
                     <TableCell className="text-right">{m.status === "scheduled" || m.status === "in_progress" ? <BotaoFrota requer="gerir" aoClicar={() => dlg("concluir", { m: m.id })} aria-label={`Concluir ${m.title} da ${viatura(F, m.vehicle_id)?.plate ?? ""}`}>Concluir</BotaoFrota> : null}</TableCell>
                   </TableRow>
                 ))}

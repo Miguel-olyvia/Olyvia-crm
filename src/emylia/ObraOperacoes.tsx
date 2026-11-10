@@ -24,7 +24,8 @@ import {
 } from "./obraOps";
 import { custoObra } from "./custoObra";
 import type { Ctx } from "./pecas";
-import { SEM_PERM, pelaPermissao, podeNeg, semEnvioNaConversa } from "./permissoes";
+import { SEM_PERM, pelaPermissao, podeNeg, podeVerCustos, semEnvioNaConversa } from "./permissoes";
+import { usePermissionsOpcional } from "@/contexts/PermissionsContext";
 import { AutoNoNegocio } from "./AutoRececao";
 import { pontosEncerrar, type PontoEncerrar } from "./encerrarObra";
 import { ViaturasObra } from "./frota/ViaturasObra";
@@ -419,7 +420,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           {/* 9/11 (Lote 1, J): como o servidor, também quem regista a execução (negocios.obra.executar) */}
           <DiarioObra ctx={ctx} d={d} pode={pode || direcao || podeNeg(S.role, "obra.executar")} />
           <SegurancaObra ctx={ctx} d={d} pode={pode} />
-          {(direcao || pode) && <CustosObra d={d} S={S} />}
+          {(direcao || pode) && podeVerCustos() && <CustosObra d={d} S={S} />}
         </>}
       </div>
       </div>
@@ -444,7 +445,7 @@ function PainelObra({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: 
   const ORDEM: EstadoExec[] = ["validada", "feita", "corrigir", "em curso", "por fazer"];
   const COR: Record<EstadoExec, string> = { validada: "bg-success", feita: "bg-primary", corrigir: "bg-destructive", "em curso": "bg-primary/50", "por fazer": "bg-muted-foreground/25" };
   const n = (e: EstadoExec) => p.tasks.filter((t) => estadoDe(t) === e).length;
-  const K = ve ? custoObra(d, S) : null, eq = equipaDaObra(p);
+  const K = ve && podeVerCustos() ? custoObra(d, S) : null, eq = equipaDaObra(p);
   const proximas = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => estadoDe(t) !== "validada" && t.corrige == null).sort((a, b) => a.t.dia - b.t.dia).slice(0, 5);
   const card = (t: string, I: typeof Check, corpo: ReactNode, acao?: ReactNode) => (
     <section aria-label={t} className={cn(CARTAO, "hidden p-5 xl:block motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200")}>
@@ -883,7 +884,7 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
         <b className="font-semibold tabular-nums">{dias(fim)} úteis</b> · acaba a {rotuloDia(p, fim - 1)}
         {D.dias !== 0 && <span className={cn("ml-1 font-medium", D.dias > 0 ? "text-warning" : "text-success")}>· {D.dias > 0 ? "+" : "−"}{dias(Math.abs(D.dias))} face ao orçamento</span>}
       </p>
-      {D.horas > 0 && <p className="mt-1 flex items-start gap-2 text-sm text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />+{nfmt(Math.round(D.horas * 10) / 10)} h de equipa: cerca de +{eur(custoMais)} € de custo. O preço ao cliente não muda.</p>}
+      {D.horas > 0 && <p className="mt-1 flex items-start gap-2 text-sm text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />+{nfmt(Math.round(D.horas * 10) / 10)} h de equipa{podeVerCustos() ? <>: cerca de +{eur(custoMais)} € de custo</> : ""}. O preço ao cliente não muda.</p>}
       {muda && (
         <p className={cn(NOTA, "mt-1")}>
           Arraste para mudar datas. Toque numa tarefa para a editar.{p.estado === "aprovado" && " Mudar o plano aprovado volta a pô-lo por aprovar."}
@@ -1443,6 +1444,10 @@ function AjustesFeitos({ d }: { d: Negocio }) {
  *  a app dela (o Hoje do técnico) e o telefone. */
 function EquipaObra({ ctx, d, direcao, verDia }: { ctx: Ctx; d: Negocio; direcao: boolean; verDia: (k: number) => void }) {
   const { A, go } = ctx;
+  // 10/11: o €/h vem do salário (RH); só o vê quem vê as retribuições (hr.pessoas.retribuicao.view, como BlocoObraPessoa). Fora do
+  // PermissionsProvider (o protótipo local e os testes, sem conta real) fica como até aqui, como podeVerCustos.
+  const permsConta = usePermissionsOpcional();
+  const verCustoHora = direcao && (permsConta ? permsConta.hasPermission("hr.pessoas.retribuicao.view") : true);
   const p = d.obra.plano!, eq = equipaDaObra(p);
   const [aberto, setAberto] = useState<string | null>(null);
   return (
@@ -1464,7 +1469,7 @@ function EquipaObra({ ctx, d, direcao, verDia }: { ctx: Ctx; d: Negocio; direcao
                   <Avatar id={m.id} n={m.n} tam="h-10 w-10" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] font-medium text-primary underline-offset-4 hover:underline">{m.n} <span className="font-normal text-muted-foreground no-underline">· {m.sk}</span></span>
-                    <span className="block text-sm text-muted-foreground">{dias(m.dias)} na obra · {hfmt(m.horas)} h · {m.tarefas.length} {m.tarefas.length === 1 ? "tarefa" : "tarefas"}{direcao ? ` · ${eur(m.custoH)} €/h` : ""}</span>
+                    <span className="block text-sm text-muted-foreground">{dias(m.dias)} na obra · {hfmt(m.horas)} h · {m.tarefas.length} {m.tarefas.length === 1 ? "tarefa" : "tarefas"}{verCustoHora ? ` · ${eur(m.custoH)} €/h` : ""}</span>
                   </span>
                   <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", on && "rotate-180")} aria-hidden="true" />
                 </button>

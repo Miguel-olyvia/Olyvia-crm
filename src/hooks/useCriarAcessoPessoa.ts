@@ -81,11 +81,46 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   erro_inesperado: "hr.acesso.erroInesperado",
   // A conta de autenticacao com este e-mail ja existia e nao e uma conta orfa de admissao.
   conta_existente_nao_reutilizavel: "hr.acesso.erroContaExistenteNaoReutilizavel",
+  // Pedido mal formado (nao devia acontecer a partir do ecra).
+  method_not_allowed: "hr.acesso.erroPedidoInvalido",
+  pedido_invalido: "hr.acesso.erroPedidoInvalido",
+  pessoa_nao_encontrada: "hr.acesso.erroPessoaNaoEncontrada",
+  // Reenvio: a conta ligada a ficha nao tem utilizador de autenticacao, ou a password nao mudou.
+  conta_sem_utilizador_de_autenticacao: "hr.acesso.erroContaSemUtilizadorAutenticacao",
+  password_nao_alterada: "hr.acesso.erroPasswordNaoAlterada",
+  // O papel escolhido.
+  papel_fora_da_organizacao: "hr.acesso.erroPapelForaDaOrganizacao",
+  papel_nao_permitido: "hr.acesso.erroPapelNaoPermitido",
+  papel_nao_encontrado: "hr.acesso.erroPapelNaoEncontrado",
+  // A conta de autenticacao com este e-mail ja existia (rpc_hr_associar_conta_existente).
+  conta_existente_nao_encontrada: "hr.acesso.erroContaExistenteNaoEncontrada",
+  conta_existente_inativa: "hr.acesso.erroContaExistenteInativa",
+  conta_existente_sem_perfil: "hr.acesso.erroContaExistenteSemPerfil",
+  // A ligacao da conta a ficha (rpc_hr_ligar_conta_por_servico).
+  conta_ja_ligada_a_outra_pessoa: "hr.conta.erroJaLigadaAOutraPessoa",
+  conta_sem_membership_na_organizacao: "hr.conta.erroSemMembershipNaOrganizacao",
+  // Passos da criacao que falharam.
+  conta_nao_criada: "hr.acesso.erroContaNaoCriada",
+  perfil_nao_criado: "hr.acesso.erroPerfilNaoCriado",
+  conta_nao_ligada_a_ficha: "hr.acesso.erroContaNaoLigadaAFicha",
 };
+
+/**
+ * As RPCs devolvem algumas recusas como texto livre (RAISE EXCEPTION com frase), que a Edge Function passa tal e qual.
+ * Reconhecem-se por padrao para nunca mostrar o texto em bruto.
+ */
+const CHAVE_POR_PADRAO: ReadonlyArray<readonly [RegExp, string]> = [
+  [/manage_roles/, "hr.acesso.erroSemGerirPapeis"],
+  [/si próprio/, "hr.acesso.erroPapelASiProprio"],
+  [/Sem permissão|insufficient|não tem permissão/i, "friendlyError.forbidden"],
+];
 
 /** Nunca o codigo em bruto: sempre texto traduzido. */
 export function mensagemDoCodigo(codigo: string | null): string {
-  const chave = (codigo ? CHAVE_POR_CODIGO[codigo] : undefined) ?? "hr.acesso.erroCriar";
+  const chave =
+    (codigo ? CHAVE_POR_CODIGO[codigo] : undefined) ??
+    (codigo ? CHAVE_POR_PADRAO.find(([padrao]) => padrao.test(codigo))?.[1] : undefined) ??
+    "hr.acesso.erroCriar";
   return getLocalizedFallback(chave);
 }
 
