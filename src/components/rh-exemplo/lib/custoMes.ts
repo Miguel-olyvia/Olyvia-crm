@@ -1,26 +1,17 @@
 /**
- * O custo de UMA pessoa num mês, montado a partir das contas puras de `custo.ts`. Sem dados de lado nenhum: recebe o salário
- * do mês, os valores avulsos da pessoa e as definições da empresa, e devolve cada linha do quadro (fluxo 11).
+ * O custo de UMA pessoa num mês, montado a partir das contas puras de `custo.ts` e `contasDoMes.ts`. Sem dados de lado
+ * nenhum: recebe a retribuição do mês, os valores avulsos (manuais) da pessoa e o seguro do cargo, e devolve cada linha do quadro (fluxo 11).
  *
- * A parte sujeita a encargos é só o salário em si; os quilómetros e as ajudas de custo ficam de fora. O equipamento
- * (lista própria, `equipamentos.ts`) nunca entra no bruto: pesa só nos outros custos, conforme «como conta».
+ * A retribuição do mês JÁ leva os quilómetros e as ajudas de custo (vêm do processamento); os avulsos são só os lançamentos
+ * manuais. A TSU incide sobre a retribuição sem km nem ajudas, e o seguro só sobre o salário base: ver `contasDoMes.ts`.
+ * O equipamento (lista própria, `equipamentos.ts`) nunca entra no bruto: pesa só nos outros custos, conforme «como conta».
  */
-import {
-  arredondar,
-  custoPorHora,
-  custoRepartido14em12,
-  custoTotalDoMes,
-  encargosDaEmpresa,
-  horasPrevistasDoMes,
-  saldoBancoEmEuros,
-  somarMeses,
-  taxaEfetiva,
-  type MesIso,
-} from "./custo";
+import { arredondar, custoPorHora, horasPrevistasDoMes, somarMeses, taxaEfetiva, type MesIso } from "./custo";
+import { contasDoMes, TSU_EMPREGADOR_PCT, type ContasDoMes, type DecomposicaoRetribuicao, type EntradaContas } from "./contasDoMes";
 import { valorNoMes, type ContaItem, type ItemParaConta } from "./comoConta";
 import { equipamentosDoMes, valorDoEquipamentoNoMes, type EquipamentoPessoa } from "./equipamentos";
 
-/** `pontual` = o lancamento pontual do processamento salarial (o unico avulso que a base guarda); km e ajuda so existem no store de exemplo. */
+/** `pontual` = o lancamento manual do processamento salarial (o unico avulso do custo); km e ajuda so existem no store de exemplo. */
 export type TipoAvulso = "km" | "ajuda" | "pontual";
 
 export interface AvulsoCusto {
@@ -41,6 +32,7 @@ export interface AvulsoCusto {
   anulado: { motivo: string; por: string; em: string } | null;
 }
 
+/** As definicoes por organizacao (`hr_custo_definicoes`): JA NAO entram no custo (a TSU e fixa, o seguro e do cargo, km e ajudas vem da regra salarial); ficam so para quem ainda as le (equipa, obra). */
 export interface DefinicoesCusto {
   /** Percentagens. */
   taxaEmpresa: number;
@@ -50,26 +42,34 @@ export interface DefinicoesCusto {
 }
 
 /** Os valores com que a base cria as definições de uma organização (`hr_custo_definicoes`): o que se usa só enquanto não há definições lidas. */
-export const DEFINICOES_OMISSAO: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 };
+export const DEFINICOES_OMISSAO: DefinicoesCusto = { taxaEmpresa: TSU_EMPREGADOR_PCT, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 };
 
 export interface EntradaCustoMes {
   mes: MesIso;
+  /** A retribuicao do mes (com km e ajudas, SEM os manuais); `null` = sem retribuicao registada. */
   salarioMes: number | null;
+  /** Os avulsos do mes: so lancamentos manuais, nunca km nem ajudas (ja estao em `salarioMes`). */
   avulsos: readonly AvulsoCusto[];
   /** Os equipamentos da pessoa (todos): só contam os que, conforme «como conta», têm valor nesse mês. */
   equipamentos: readonly EquipamentoPessoa[];
-  definicoes: DefinicoesCusto;
+  /** O seguro de acidentes do CARGO (%), sobre o salario base; `null` = o cargo nao tem seguro. */
+  seguroPct: number | null;
+  /** Cargo desconhecido (so no gravado do fecho): o seguro nao entra e a linha di-lo. */
+  seguroDesconhecido?: boolean;
+  /** A retribuicao separada em partes (so o que o processamento devolveu); ausente = estimativa pelo cargo. */
+  decomposicao?: DecomposicaoRetribuicao | null;
+  /** `salarioMes` e uma estimativa pelo salario do cargo. */
+  estimado?: boolean;
   excecaoTaxa: number | null;
   horasSemanais: number;
-  /** Horas a favor no banco de horas (valor de exemplo). */
-  saldoHoras: number;
-  /** Horas realmente feitas no mês (valor de exemplo). */
+  /** Horas realmente feitas no mês. */
   horasFeitas: number;
 }
 
 export interface CustoDoMes {
   mes: MesIso;
-  kmEAjudas: number;
+  /** Os lancamentos manuais do mes (a coluna «avulsos»). */
+  avulsos: number;
   bruto: number | null;
   parteSujeita: number | null;
   /** Encargos da empresa com o seguro incluído (taxa + seguro). */
@@ -86,7 +86,9 @@ export interface CustoDoMes {
   horasFeitas: number;
   porHoraPrevista: number | null;
   porHoraFeita: number | null;
-  saldoEuros: number | null;
+  /** O que cada linha da conta recebe: o ecra volta a chamar `contasDoMes` com esta entrada e a lingua. */
+  entradaContas: EntradaContas;
+  contas: ContasDoMes;
 }
 
 /** Os valores avulsos que contam: nunca os anulados. */
@@ -99,32 +101,40 @@ export const itemDoAvulso = (a: Pick<AvulsoCusto, "valor" | "data" | "conta">): 
 export const valorDoAvulsoNoMes = (a: AvulsoCusto, mes: MesIso): number => valorNoMes(itemDoAvulso(a), mes);
 
 export function custoDoMes(e: EntradaCustoMes): CustoDoMes {
-  const kmEAjudas = somarMeses(avulsosAtivos(e.avulsos).map((a) => valorDoAvulsoNoMes(a, e.mes)));
+  const avulsos = somarMeses(avulsosAtivos(e.avulsos).map((a) => valorDoAvulsoNoMes(a, e.mes)));
   const doMes = equipamentosDoMes(e.equipamentos, e.mes);
   const outrosCustos = somarMeses(doMes.map((x) => valorDoEquipamentoNoMes(x, e.mes)));
-  const bruto = e.salarioMes === null ? null : arredondar(e.salarioMes + kmEAjudas);
-  const taxa = taxaEfetiva(e.definicoes.taxaEmpresa, e.excecaoTaxa);
-  const encargos = e.salarioMes === null ? 0 : encargosDaEmpresa(e.salarioMes, taxa, e.definicoes.seguro);
-  const seguro = e.salarioMes === null ? 0 : arredondar((e.salarioMes * e.definicoes.seguro) / 100);
-  const total = custoTotalDoMes(bruto, encargos, outrosCustos);
+  const entradaContas: EntradaContas = {
+    retribuicaoMes: e.salarioMes,
+    decomposicao: e.decomposicao ?? null,
+    estimado: e.estimado ?? false,
+    manuais: avulsos,
+    equipamentos: outrosCustos,
+    taxaPct: taxaEfetiva(TSU_EMPREGADOR_PCT, e.excecaoTaxa),
+    taxaDaPessoa: e.excecaoTaxa !== null,
+    seguroPct: e.seguroPct,
+    ...(e.seguroDesconhecido ? { seguroDesconhecido: true } : {}),
+  };
+  const contas = contasDoMes(entradaContas);
   const horasPrevistas = horasPrevistasDoMes(e.horasSemanais, e.mes);
   return {
     mes: e.mes,
-    kmEAjudas,
-    bruto,
+    avulsos,
+    bruto: contas.bruto,
     parteSujeita: e.salarioMes,
-    encargos,
-    seguro,
-    encargosTaxa: arredondar(encargos - seguro),
+    encargos: arredondar(contas.tsu + contas.seguro),
+    seguro: contas.seguro,
+    encargosTaxa: contas.tsu,
     outrosCustos,
     nEquipamentos: doMes.length,
-    total,
-    repartido: custoRepartido14em12(e.salarioMes, encargos),
+    total: contas.total,
+    repartido: contas.repartido?.valor ?? null,
     horasPrevistas,
     horasFeitas: e.horasFeitas,
-    porHoraPrevista: custoPorHora(total, horasPrevistas),
-    porHoraFeita: custoPorHora(total, e.horasFeitas),
-    saldoEuros: saldoBancoEmEuros(e.saldoHoras, e.salarioMes, horasPrevistas),
+    porHoraPrevista: custoPorHora(contas.total, horasPrevistas),
+    porHoraFeita: custoPorHora(contas.total, e.horasFeitas),
+    entradaContas,
+    contas,
   };
 }
 

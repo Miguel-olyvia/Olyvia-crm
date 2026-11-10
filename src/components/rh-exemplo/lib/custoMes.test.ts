@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { contaRepartida, contaTodosMeses, contaUmaVez } from "./comoConta";
-import { acumulados, custoDoMes, mesesEntre, type AvulsoCusto, type DefinicoesCusto } from "./custoMes";
+import { acumulados, custoDoMes, mesesEntre, type AvulsoCusto } from "./custoMes";
 import type { EquipamentoPessoa } from "./equipamentos";
-
-const DEFINICOES: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 0, valorPorKm: 0.4, ajudaPorDia: 25 };
 
 const avulso = (parcial: Partial<AvulsoCusto>): AvulsoCusto => ({
   id: "a1",
   pessoaId: "p1",
-  tipo: "km",
+  tipo: "pontual",
   data: "2026-11-05",
   conta: contaUmaVez(),
   descricao: "Visita",
@@ -40,30 +38,55 @@ const base = {
   equipamentos: [] as EquipamentoPessoa[],
   mes: "2026-11",
   salarioMes: 1200,
-  definicoes: DEFINICOES,
+  seguroPct: null as number | null,
   excecaoTaxa: null,
   horasSemanais: 40,
-  saldoHoras: 3,
   horasFeitas: 170,
 };
 
 describe("custoDoMes", () => {
-  it("soma km e ajudas ao bruto mas não à parte sujeita; o equipamento só pesa nos outros custos", () => {
+  it("os avulsos (manuais) somam ao bruto e entram na base da TSU; o equipamento so pesa nos outros custos", () => {
     const r = custoDoMes({
       ...base,
-      avulsos: [avulso({}), avulso({ id: "a2", tipo: "ajuda", valor: 50, quantidade: 2, valorUnitario: 25 })],
+      avulsos: [avulso({ valor: 48 }), avulso({ id: "a2", valor: 52 })],
       equipamentos: [portatil()],
     });
-    expect(r.kmEAjudas).toBe(98);
-    expect(r.bruto).toBe(1298);
+    expect(r.avulsos).toBe(100);
+    expect(r.bruto).toBe(1300);
     expect(r.parteSujeita).toBe(1200);
-    expect(r.encargos).toBe(285);
+    expect(r.encargos).toBe(308.75);
     expect(r.outrosCustos).toBe(25);
-    expect(r.total).toBe(1608);
-    expect(r.repartido).toBe(1685);
-    expect(r.porHoraPrevista).toBe(9.57);
-    expect(r.porHoraFeita).toBe(9.46);
-    expect(r.saldoEuros).toBe(21.43);
+    expect(r.total).toBe(1633.75);
+    // salario base x 14 / 12 (1400) + TSU (332,50) + seguro (0): so para comparar, fora do custo.
+    expect(r.repartido).toBe(1732.5);
+    expect(r.porHoraPrevista).toBe(9.72);
+    expect(r.porHoraFeita).toBe(9.61);
+  });
+
+  it("km e ajudas ja vem na retribuicao: contam no custo uma so vez e ficam fora da base da TSU", () => {
+    const r = custoDoMes({
+      ...base,
+      salarioMes: 1240,
+      avulsos: [],
+      decomposicao: { salarioBase: 1200, divisor: 14, duodecimos: 0, subsidioAlimentacao: 0, horasExtra: 0, descontoFaltas: 0, iht: null, km: { quantidade: 100, valor: 40 }, ajudas: null },
+    });
+    expect(r.bruto).toBe(1240);
+    expect(r.avulsos).toBe(0);
+    expect(r.encargosTaxa).toBe(285);
+    expect(r.contas.kmEAjudas).toBe(40);
+  });
+
+  it("o seguro e do cargo e incide so sobre o salario base, nao sobre os duodecimos nem o IHT", () => {
+    const r = custoDoMes({
+      ...base,
+      salarioMes: 1700,
+      seguroPct: 5,
+      avulsos: [],
+      decomposicao: { salarioBase: 1200, divisor: 12, duodecimos: 200, subsidioAlimentacao: 0, horasExtra: 0, descontoFaltas: 0, iht: 300, km: null, ajudas: null },
+    });
+    expect(r.seguro).toBe(60);
+    expect(r.encargosTaxa).toBe(403.75);
+    expect(r.total).toBe(2163.75);
   });
 
   it("um valor anulado deixa de contar, e um de outro mês não conta neste", () => {
@@ -74,7 +97,7 @@ describe("custoDoMes", () => {
         avulso({ id: "a2", data: "2026-12-05" }),
       ],
     });
-    expect(r.kmEAjudas).toBe(0);
+    expect(r.avulsos).toBe(0);
     expect(r.bruto).toBe(1200);
   });
 
@@ -83,30 +106,29 @@ describe("custoDoMes", () => {
     expect(r.bruto).toBeNull();
     expect(r.total).toBeNull();
     expect(r.repartido).toBeNull();
-    expect(r.saldoEuros).toBeNull();
-    expect(r.kmEAjudas).toBe(48);
+    expect(r.avulsos).toBe(48);
   });
 
   it("a exceção por pessoa e o seguro mudam os encargos", () => {
     expect(custoDoMes({ ...base, avulsos: [], excecaoTaxa: 10 }).encargos).toBe(120);
-    expect(custoDoMes({ ...base, avulsos: [], definicoes: { ...DEFINICOES, seguro: 2 } }).encargos).toBe(309);
+    expect(custoDoMes({ ...base, avulsos: [], seguroPct: 2 }).encargos).toBe(309);
   });
 });
 
 describe("custoDoMes: «como conta» dos avulsos e dos equipamentos", () => {
   it("um avulso de Setembro conta em Setembro e não salta para Outubro", () => {
     const setembro = avulso({ data: "2026-09-09" });
-    expect(custoDoMes({ ...base, mes: "2026-09", avulsos: [setembro] }).kmEAjudas).toBe(48);
-    expect(custoDoMes({ ...base, mes: "2026-10", avulsos: [setembro] }).kmEAjudas).toBe(0);
-    expect(custoDoMes({ ...base, mes: "2026-08", avulsos: [setembro] }).kmEAjudas).toBe(0);
+    expect(custoDoMes({ ...base, mes: "2026-09", avulsos: [setembro] }).avulsos).toBe(48);
+    expect(custoDoMes({ ...base, mes: "2026-10", avulsos: [setembro] }).avulsos).toBe(0);
+    expect(custoDoMes({ ...base, mes: "2026-08", avulsos: [setembro] }).avulsos).toBe(0);
   });
 
   it("um avulso repartido por 2 meses conta metade em cada um, e um «todos os meses» repete-se", () => {
     const repartido = avulso({ id: "r", valor: 100, data: "2026-11-05", conta: contaRepartida(2) });
     const mensal = avulso({ id: "m", valor: 40, data: "2026-11-05", conta: contaTodosMeses("2026-11") });
-    expect(custoDoMes({ ...base, mes: "2026-11", avulsos: [repartido, mensal] }).kmEAjudas).toBe(90);
-    expect(custoDoMes({ ...base, mes: "2026-12", avulsos: [repartido, mensal] }).kmEAjudas).toBe(90);
-    expect(custoDoMes({ ...base, mes: "2027-01", avulsos: [repartido, mensal] }).kmEAjudas).toBe(40);
+    expect(custoDoMes({ ...base, mes: "2026-11", avulsos: [repartido, mensal] }).avulsos).toBe(90);
+    expect(custoDoMes({ ...base, mes: "2026-12", avulsos: [repartido, mensal] }).avulsos).toBe(90);
+    expect(custoDoMes({ ...base, mes: "2027-01", avulsos: [repartido, mensal] }).avulsos).toBe(40);
   });
 
   it("um equipamento pago de uma vez só pesa no mês da entrega, e um repartido todos os meses do período", () => {

@@ -1,5 +1,5 @@
 // O custo sem React: a RETRIBUICAO de cada pessoa vem de fora (o total bruto estimado do processamento salarial real), os
-// avulsos de exemplo vem do store em memoria e os equipamentos, as definicoes e as excecoes de taxa entram por parametro
+// avulsos de exemplo vem do store em memoria e os equipamentos e as excecoes de taxa entram por parametro
 // (`DadosCusto`, que na aplicacao vem da base). O modulo «Custos» e as abas Custo das fichas tem de bater, ao centimo.
 // A data e fixa (14/10/2026) para os dados de exemplo serem os mesmos.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +14,7 @@ const cent = (v: number | null): number => Math.round((v ?? 0) * 100);
 
 const pessoa = (pessoaId: string, retribuicaoMes: number | null = 1000, extra: Partial<PessoaParaCusto> = {}): PessoaParaCusto => ({
   pessoaId, nome: pessoaId, cargo: null, centroId: null, centro: null, filialId: null, filial: null, tipoContrato: null,
-  retribuicaoMes, horasSemanais: 40, ...extra,
+  retribuicaoMes, horasSemanais: 40, seguroPct: 5, ...extra,
 });
 
 /** As pessoas dos testes (os avulsos de exemplo e os equipamentos de teste estao ligados a estes ids). */
@@ -36,7 +36,6 @@ const EQUIPAMENTOS: EquipamentoPessoa[] = [
 
 const dadosDe = (equipamentos: readonly EquipamentoPessoa[] = EQUIPAMENTOS, excecoes: Record<string, number | null> = {}): DadosCusto => ({
   equipamentos,
-  definicoes: { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 },
   excecoes,
 });
 
@@ -92,7 +91,7 @@ describe("a retribuicao vem de fora e o custo bate entre o modulo e a ficha", ()
       expect(ficha.atual.total).toBe(l.total);
       expect(ficha.retribuicaoMes).toBe(l.retribuicao);
       expect(ficha.atual.outrosCustos).toBe(l.equipamentosMes);
-      expect(ficha.atual.kmEAjudas).toBe(l.avulsosMes);
+      expect(ficha.atual.avulsos).toBe(l.avulsosMes);
     }
     const somaDasFichas = linhas.reduce((s, l) => s + cent(fichaDe(l.pessoaId, MES).atual.total), 0);
     expect(cent(totaisDaOrganizacao(linhas).total)).toBe(somaDasFichas);
@@ -127,7 +126,7 @@ describe("a retribuicao vem de fora e o custo bate entre o modulo e a ficha", ()
   });
 });
 
-describe("os equipamentos, as definicoes e as excecoes vem dos dados passados", () => {
+describe("os equipamentos e as excecoes vem dos dados passados; o seguro vem do cargo da pessoa", () => {
   it("a ficha so traz os equipamentos da propria pessoa", () => {
     expect(fichaDe("p-tiago", MES).equipamentos.map((e) => e.id)).toEqual(["eq-tiago-f", "eq-tiago-u"]);
     expect(fichaDe("p-ines", MES).equipamentos.map((e) => e.id)).toEqual(["eq-ines"]);
@@ -146,10 +145,18 @@ describe("os equipamentos, as definicoes e as excecoes vem dos dados passados", 
     expect(cent(com.atual.encargosTaxa)).toBe(cent(2000 * 0.1));
   });
 
-  it("as definicoes passadas mandam: o seguro de 0 tira o seguro do custo", () => {
-    const semSeguro: DadosCusto = { ...DADOS, definicoes: { ...DADOS.definicoes, seguro: 0 } };
-    expect(fichaDe("p-marta", MES, 0, semSeguro).atual.seguro).toBe(0);
+  it("o seguro e o do cargo da pessoa: sem seguro no cargo e 0, com 5 % e 5 % do salario base", () => {
+    const semSeguro = custoDaPessoa(pessoa("p-marta", 2000, { seguroPct: null }), MES, 0, DADOS);
+    expect(semSeguro.atual.seguro).toBe(0);
     expect(cent(fichaDe("p-marta", MES).atual.seguro)).toBe(cent(2000 * 0.05));
+  });
+
+  it("cargo desconhecido (so no gravado): a linha do seguro di-lo e nao entra no total; sem seguro continua a dizer «semSeguro»", () => {
+    const desconhecido = custoDaPessoa(pessoa("p-marta", 2000, { seguroPct: null, seguroDesconhecido: true }), MES, 0, DADOS);
+    const semSeguro = custoDaPessoa(pessoa("p-marta", 2000, { seguroPct: null }), MES, 0, DADOS);
+    expect(desconhecido.atual.contas.linhas.find((l) => l.chave === "seguro")).toMatchObject({ valor: 0, nota: "cargoDesconhecido" });
+    expect(semSeguro.atual.contas.linhas.find((l) => l.chave === "seguro")).toMatchObject({ valor: 0, nota: "semSeguro" });
+    expect(desconhecido.atual.total).toBe(semSeguro.atual.total);
   });
 
   it("os avulsos de exemplo do store: km e ajudas de custo em Setembro, pagos de uma vez na sua data", () => {
@@ -162,7 +169,7 @@ describe("os equipamentos, as definicoes e as excecoes vem dos dados passados", 
   it("os avulsos passados (da base) substituem os do store", () => {
     const sem = custoDaPessoa(PESSOAS[2], MES, 0, DADOS, []);
     expect(sem.avulsos).toEqual([]);
-    expect(sem.atual.kmEAjudas).toBe(0);
+    expect(sem.atual.avulsos).toBe(0);
   });
 });
 
@@ -195,7 +202,7 @@ describe("os totais batem mês a mês, qualquer que seja o «como conta»", () =
     const out = linhasDaOrganizacao("2026-10", PESSOAS, DADOS).find((l) => l.pessoaId === "p-tiago");
     expect(set?.avulsosMes).toBeGreaterThan(0);
     expect(out?.avulsosMes).toBe(0);
-    expect(fichaDe("p-tiago", "2026-10").atual.kmEAjudas).toBe(0);
+    expect(fichaDe("p-tiago", "2026-10").atual.avulsos).toBe(0);
   });
 });
 
@@ -261,7 +268,7 @@ describe("um equipamento atribuído ou devolvido mexe no custo da pessoa e no m�
 
 describe("horas realizadas gravadas no fecho (mes fechado)", () => {
   const contexto = (horasRealizadas?: ReadonlyMap<string, number>) => ({
-    mes: MES, avulsos: [], equipamentos: [], definicoes: DADOS.definicoes, excecoes: {}, horasRealizadas,
+    mes: MES, avulsos: [], equipamentos: [], excecoes: {}, horasRealizadas,
   });
   const hugo = PESSOAS[0] as PessoaParaCusto;
 

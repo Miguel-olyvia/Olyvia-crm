@@ -10,7 +10,7 @@ import { LinhaTabelaCusto } from "./LinhaTabelaCusto";
 
 vi.mock("./ItensDoMes", () => ({ ItensDoMes: () => null }));
 
-const CONTEXTO: ContextoCusto = { mes: "2026-09", avulsos: [], equipamentos: [], definicoes: { taxaEmpresa: 23.75, seguro: 5, valorPorKm: 0.4, ajudaPorDia: 25 }, excecoes: {} };
+const CONTEXTO: ContextoCusto = { mes: "2026-09", avulsos: [], equipamentos: [], excecoes: {} };
 const pessoa = (extra: Partial<PessoaParaCusto> = {}): PessoaParaCusto => ({
   pessoaId: "p1", nome: "Ines Cardoso", cargo: "Gerente", centroId: null, centro: "Loja Porto", filialId: null, filial: "Filial Porto", tipoContrato: null, retribuicaoMes: 1500, horasSemanais: 40, ...extra,
 });

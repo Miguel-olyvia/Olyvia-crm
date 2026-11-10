@@ -1,10 +1,9 @@
 /**
- * Os dados da base que entram na conta do custo: equipamentos, definicoes (taxa, seguro, km, dia) e excecoes de taxa.
+ * Os dados da base que entram na conta do custo: equipamentos e excecoes de taxa (a TSU e fixa; o seguro vem do cargo; km e ajudas da regra salarial).
  * So se pedem a quem tem `hr.pessoas.retribuicao.view`; sem isso nada se pede e `semPermissao` e verdadeiro. Enquanto
- * algum dos tres nao chegou, `dados` e `null`: nunca se calcula com valores de exemplo.
+ * algum dos dois nao chegou, `dados` e `null`: nunca se calcula com valores de exemplo.
  */
 import { useMemo } from "react";
-import { useCustoDefinicoes } from "@/components/rh-exemplo/hooks/useCustoDefinicoes";
 import { useCustoExcecoes } from "@/components/rh-exemplo/hooks/useCustoExcecoes";
 import { useEquipamentosCusto } from "@/components/rh-exemplo/hooks/useEquipamentosCusto";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
@@ -30,18 +29,16 @@ export function useDadosCusto(pessoaId: string | null = null): DadosCustoLidos {
   const podeVer = hasPermission(PERMISSAO_VER_CUSTO);
   const podeEditar = podeVer && hasPermission(PERMISSAO_EDITAR_CUSTO);
   const equipamentos = useEquipamentosCusto({ pessoaId, enabled: podeVer });
-  const definicoes = useCustoDefinicoes({ enabled: podeVer });
   const excecoes = useCustoExcecoes({ enabled: podeVer });
 
   const lista = equipamentos.equipamentos;
-  const defs = definicoes.definicoes;
   const exc = excecoes.excecoes;
   const dados = useMemo<DadosCusto | null>(
     // Sem a permissao de ver (ou enquanto ela carrega) nao ha dados, venha o que vier dos hooks (cache de outra sessao ou organizacao).
-    () => (podeVer && lista && defs && exc ? { equipamentos: lista, definicoes: defs, excecoes: exc } : null),
-    [podeVer, lista, defs, exc],
+    () => (podeVer && lista && exc ? { equipamentos: lista, excecoes: exc } : null),
+    [podeVer, lista, exc],
   );
-  const erro = equipamentos.erro ?? definicoes.erro ?? excecoes.erro;
+  const erro = equipamentos.erro ?? excecoes.erro;
 
   return {
     dados,

@@ -6,11 +6,14 @@ import {
   acoesDosLancamentos,
   AvulsosReaisProvider,
   avulsosDosLancamentos,
+  lancamentosManuais,
   lancamentoParaAvulso,
   retribuicaoSemPontuais,
   useAvulsosReais,
 } from "./lancamentosCusto";
-import { valorDoAvulsoNoMes } from "@/components/rh-exemplo/lib/custoMes";
+import { custoDoMes, valorDoAvulsoNoMes } from "@/components/rh-exemplo/lib/custoMes";
+
+const ENTRADA = { mes: "2026-09", equipamentos: [], seguroPct: null, excecaoTaxa: null, horasSemanais: 40, horasFeitas: 160 };
 
 const lanc = (extra: Record<string, unknown> = {}) => ({
   id: "l1", periodo_id: "per", pessoa_id: "p1", organization_id: "org", descricao: "Premio", valor: 120.5, codigo_processamento_id: null,
@@ -92,5 +95,23 @@ describe("AvulsosReaisProvider", () => {
     const mapa = new Map([["p1", avulsosDosLancamentos(new Map([["p1", [lanc()]]]), "2026-09")]]);
     render(<AvulsosReaisProvider valor={mapa}><Mostra pessoa="p1" /></AvulsosReaisProvider>);
     expect(screen.getByRole("status")).toHaveTextContent("1");
+  });
+});
+
+describe("km e ajudas nao se contam duas vezes (ja estao na retribuicao, via totalRegras)", () => {
+  const km = () => lanc({ id: "k1", tipo: "km", quantidade: 100, valor: 40, descricao: "Km" });
+
+  it("os avulsos do custo so levam os lancamentos manuais", () => {
+    const mapa = new Map([["p1", [lanc(), km(), lanc({ id: "aj", tipo: "ajudas", quantidade: 2, valor: 50 })]]]);
+    expect(avulsosDosLancamentos(mapa, "2026-09").map((a) => a.id)).toEqual(["l1"]);
+    expect(lancamentosManuais([lanc(), km()]).map((l) => l.id)).toEqual(["l1"]);
+  });
+
+  it("100 km x 0,40 dentro da retribuicao nao voltam a somar-se como avulso: bruto = 1040", () => {
+    // O processamento: base 1000 + km 40 = 1040 (sem manuais: lancamentosPontuais 0).
+    const retribuicao = retribuicaoSemPontuais({ resultado: { totalBrutoEstimado: 1040, lancamentosPontuais: 0 } });
+    const avulsos = avulsosDosLancamentos(new Map([["p1", [km()]]]), "2026-09");
+    const r = custoDoMes({ ...ENTRADA, salarioMes: retribuicao, avulsos });
+    expect(r.bruto).toBe(1040);
   });
 });

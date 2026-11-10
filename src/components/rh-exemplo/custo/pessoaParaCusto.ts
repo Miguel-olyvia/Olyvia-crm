@@ -11,6 +11,7 @@
  */
 import { horasPrevistasDoMes } from "@/components/rh-exemplo/lib/custo";
 import type { HrCargoPeriodo } from "@/components/rh-exemplo/lib/cargosPeriodos";
+import type { DecomposicaoRetribuicao } from "@/components/rh-exemplo/lib/contasDoMes";
 import type { PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import { estimativaPeloCargo, type EstimativaCargo } from "@/components/rh-exemplo/lib/estimativaCusto";
 import type { Pessoa } from "@/components/rh-exemplo/tipos";
@@ -18,7 +19,8 @@ import type { Pessoa } from "@/components/rh-exemplo/tipos";
 export interface CatalogosDoCusto {
   locais: ReadonlyArray<{ id: string; nome: string; organograma_node_id: string | null }>;
   filiais: ReadonlyArray<{ id: string; name: string }>;
-  cargos: ReadonlyArray<{ id: string; nome: string }>;
+  /** `seguro_acidentes_pct`: o seguro de acidentes do cargo (%); ausente/`null` = sem seguro. */
+  cargos: ReadonlyArray<{ id: string; nome: string; seguro_acidentes_pct?: number | null }>;
 }
 
 export const SEM_CATALOGOS: CatalogosDoCusto = { locais: [], filiais: [], cargos: [] };
@@ -41,6 +43,8 @@ export interface DadosRetribuicaoDoMes {
   tipoContrato?: string | null;
   /** As horas por semana do contrato em vigor; ausente/`null`/0 = o contrato nao as fixa (ou nao se leu). */
   horasContratuais?: number | null;
+  /** A retribuicao separada em partes (do processamento vivo ou do gravado no fecho); ausente = sem decomposicao (estimativa ou sem retribuicao). */
+  decomposicao?: DecomposicaoRetribuicao | null;
 }
 
 /** As horas por semana da base do custo por hora previsto: as do contrato, se as ha; senao as derivadas do planeado. */
@@ -49,7 +53,8 @@ export function horasSemanaisDaBase(horasContratuais: number | null | undefined,
   return horasSemanaisDoPlaneado(planeadoMinutos, mes);
 }
 
-type PessoaDoCusto = Pick<Pessoa, "id" | "nome_completo" | "cargo" | "cargo_id" | "local_id">;
+/** `soNoGravado`: a pessoa so existe no gravado do fecho (ja nao vem da lista), por isso o cargo e desconhecido. */
+type PessoaDoCusto = Pick<Pessoa, "id" | "nome_completo" | "cargo" | "cargo_id" | "local_id"> & { soNoGravado?: true };
 
 export function pessoaParaCusto(
   pessoa: PessoaDoCusto,
@@ -59,7 +64,8 @@ export function pessoaParaCusto(
 ): PessoaParaCusto {
   const centro = catalogos.locais.find((l) => l.id === pessoa.local_id) ?? null;
   const filial = catalogos.filiais.find((f) => f.id === centro?.organograma_node_id) ?? null;
-  const cargo = catalogos.cargos.find((c) => c.id === pessoa.cargo_id)?.nome ?? pessoa.cargo ?? null;
+  const cargoDoCatalogo = catalogos.cargos.find((c) => c.id === pessoa.cargo_id);
+  const cargo = cargoDoCatalogo?.nome ?? pessoa.cargo ?? null;
   // A estimativa so vale para quem NAO tem retribuicao: com ela, nada muda.
   const estimativa = dados.retribuicaoMes === null ? dados.estimativa : undefined;
   const estimado = estimativa?.estado === "estimado" ? estimativa : null;
@@ -73,6 +79,11 @@ export function pessoaParaCusto(
     filial: filial?.name ?? null,
     tipoContrato: dados.tipoContrato ?? null,
     retribuicaoMes: estimado ? estimado.salario : dados.retribuicaoMes,
+    seguroPct: cargoDoCatalogo?.seguro_acidentes_pct ?? null,
+    // Num mes fechado o seguro e o do cargo de HOJE; de quem so existe no gravado nao se sabe o cargo.
+    ...(pessoa.soNoGravado ? { seguroDesconhecido: true } : {}),
+    // A decomposicao so vale para uma retribuicao real: a estimativa pelo cargo e toda salario base.
+    decomposicao: estimado || dados.retribuicaoMes === null ? null : (dados.decomposicao ?? null),
     ...(estimado ? { estimadoPeloCargo: { cargo: estimado.cargo || (cargo ?? ""), salario: estimado.salario } } : {}),
     ...(estimativa?.estado === "sem" ? { razaoSemValor: estimativa.razao } : {}),
     horasSemanais: horasSemanaisDaBase(dados.horasContratuais, dados.planeadoMinutos, mes),

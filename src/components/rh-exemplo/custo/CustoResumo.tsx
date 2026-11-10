@@ -1,6 +1,6 @@
 /**
- * O quadro do custo do mês (fluxo 11): bruto, encargos, outros custos e custo total; ao lado o custo repartido por 14 em 12,
- * o saldo do banco de horas em euros (fora do custo) e o custo por hora; e os acumulados. Só para quem vê salários.
+ * O quadro do custo do mês (fluxo 11): bruto, encargos, outros custos e custo total; «para comparar» o custo com os subsídios
+ * repartidos por 12 meses e o custo por hora (fora do custo do mês); e os acumulados. Só para quem vê salários.
  * Sem salário registado o bruto e o custo ficam «sem valor».
  */
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +8,8 @@ import { Seccao } from "@/components/ficha-comum/Seccao";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { euros, nomeDoMes } from "./formato";
-import { SALDO_BANCO_HORAS_EXEMPLO } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import type { CustoDaPessoa } from "./custoLido";
+import { useContasDoMes } from "./useContasDoMes";
 
 interface LinhaProps {
   rotulo: string;
@@ -43,6 +43,9 @@ export function CustoResumo({ custo, semValoresGravados = false }: CustoResumoPr
   const sem = t("rhA.custo.semValor");
   const eur = (v: number | null) => euros(v, sem);
   const horas = (n: number) => t("rhA.custo.horas", { n });
+  const contas = useContasDoMes(custo);
+  // «Feita» so com horas realmente realizadas: sem elas (mes fechado sem gravados) nao ha conta, nem um zero nem um exemplo.
+  const temHorasFeitas = !semValoresGravados && custo.horasFeitas !== null && c.porHoraFeita !== null;
 
   return (
     <div className="space-y-4">
@@ -56,12 +59,15 @@ export function CustoResumo({ custo, semValoresGravados = false }: CustoResumoPr
         </dl>
       </Seccao>
 
-      <Seccao titulo={t("rhA.custo.aoLado")}>
+      <Seccao titulo={t("rhContas.comparar.titulo")}>
         <dl className="max-w-xl divide-y divide-border/60">
-          <Linha rotulo={t("rhA.custo.repartido")} ajuda={t("rhA.custo.repartidoAjuda")} valor={eur(c.repartido)} />
-          <Linha rotulo={t("rhA.custo.bancoHoras", { n: SALDO_BANCO_HORAS_EXEMPLO })} ajuda={t("rhA.custo.bancoHorasAjuda")} valor={eur(c.saldoEuros)} />
-          <Linha rotulo={t("rhA.custo.porHoraPrevista", { n: horas(c.horasPrevistas) })} valor={eur(c.porHoraPrevista)} />
-          {!semValoresGravados && <Linha rotulo={t("rhA.custo.porHoraFeita", { n: horas(c.horasFeitas) })} valor={eur(c.porHoraFeita)} />}
+          <Linha
+            rotulo={t("rhContas.comparar.repartido")}
+            ajuda={[t("rhContas.comparar.repartidoAjuda"), contas.repartido?.formula].filter(Boolean).join(" ")}
+            valor={eur(c.repartido)}
+          />
+          <Linha rotulo={t("rhContas.comparar.porHoraPrevista", { n: horas(c.horasPrevistas) })} ajuda={t("rhContas.comparar.porHoraPrevistaAjuda")} valor={eur(c.porHoraPrevista)} />
+          {temHorasFeitas && <Linha rotulo={t("rhContas.comparar.porHoraFeita", { n: horas(c.horasFeitas) })} ajuda={t("rhContas.comparar.porHoraFeitaAjuda")} valor={eur(c.porHoraFeita)} />}
         </dl>
       </Seccao>
 

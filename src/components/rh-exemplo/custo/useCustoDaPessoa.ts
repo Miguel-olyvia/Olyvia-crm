@@ -1,6 +1,6 @@
 /**
  * O custo no mes escolhido, para o ecra: a retribuicao vem do processamento salarial real (a mesma conta da «Visao
- * geral»), os valores avulsos sao os lancamentos pontuais desse periodo (da base), o tipo de contrato e as horas por
+ * geral»), os valores avulsos sao os lancamentos MANUAIS desse periodo (da base; km e ajudas ja estao na retribuicao), o tipo de contrato e as horas por
  * semana vem dos vinculos da base, e os equipamentos, as taxas e as excecoes tambem vem da base (hooks `useDadosCusto`).
  *
  * MES FECHADO: as horas (planeadas e realizadas) e a retribuicao sem pontuais sao as GRAVADAS no fecho do periodo
@@ -16,6 +16,7 @@ import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabal
 import { usePessoaVinculoHoras } from "@/components/rh-exemplo/hooks/usePessoaVinculoHoras";
 import { usePessoasVinculosVigentes, vinculoDoMes } from "@/components/rh-exemplo/hooks/usePessoasVinculosVigentes";
 import { useProcessamentoResultados } from "@/components/rh-exemplo/hooks/useProcessamentoResultados";
+import { decomposicaoDoResultado, type DecomposicaoRetribuicao } from "@/components/rh-exemplo/lib/contasDoMes";
 import type { HrCargoPeriodo } from "@/components/rh-exemplo/lib/cargosPeriodos";
 import type { LinhaCusto, PessoaParaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import { useCalculoRealDaPessoa, useCalculoRealDoMes } from "@/components/rh-exemplo/processamento/useCalculoReal";
@@ -26,7 +27,7 @@ import { pessoaDaLinhaGravada, valoresDoFecho } from "./custoFechado";
 import {
   acoesDosLancamentos,
   avulsosDosLancamentos,
-  lancamentoParaAvulso,
+  avulsosDaPessoa,
   retribuicaoSemPontuais,
   type AcoesLancamentos,
 } from "./lancamentosCusto";
@@ -91,12 +92,14 @@ export function useCustoDaPessoa(pessoa: Pessoa, mes: string): CustoLidoDaPessoa
 
   const custo = useMemo(() => {
     if (retribuicaoRecusada || !dadosBase) return null;
-    const avulsos = (lancamentosDaPessoa ?? []).map((l) => lancamentoParaAvulso(l, mes));
+    const avulsos = avulsosDaPessoa(lancamentosDaPessoa, mes);
+    // O seguro e do cargo: o catalogo de cargos entra para o seguro (e a decomposicao da retribuicao) chegar a conta.
+    const catalogos = { ...SEM_CATALOGOS, cargos };
     if (fechado) {
       if (gravadosACarregar) return null;
       // Sem linha gravada: sem retribuicao e sem horas (nunca recalculadas); o custo fica «sem valor» e o ecra avisa.
-      const dadosDoMes = { retribuicaoMes: valores?.retribuicaoMes ?? null, planeadoMinutos: valores?.planeadoMinutos ?? 0, horasContratuais: horasContratuaisNoMes(horas.versoes, mes) };
-      return custoDaPessoa(pessoaParaCusto(pessoa, SEM_CATALOGOS, dadosDoMes, mes), mes, valores ? valores.realizadoMinutos / 60 : null, dadosBase, avulsos);
+      const dadosDoMes = { retribuicaoMes: valores?.retribuicaoMes ?? null, planeadoMinutos: valores?.planeadoMinutos ?? 0, horasContratuais: horasContratuaisNoMes(horas.versoes, mes), decomposicao: valores?.decomposicao ?? null };
+      return custoDaPessoa(pessoaParaCusto(pessoa, catalogos, dadosDoMes, mes), mes, valores ? valores.realizadoMinutos / 60 : null, dadosBase, avulsos);
     }
     if (!resultado) return null;
     const dadosDoMes = {
@@ -105,8 +108,9 @@ export function useCustoDaPessoa(pessoa: Pessoa, mes: string): CustoLidoDaPessoa
       estimativa: periodosLoading ? undefined : estimativaDoMes(pessoa, cargos, periodosCargo, mes, periodosError),
       planeadoMinutos: resultado.totais.planeadoMinutos,
       horasContratuais: horasContratuaisNoMes(horas.versoes, mes),
+      decomposicao: decomposicaoDoResultado(resultado.resultado),
     };
-    return custoDaPessoa(pessoaParaCusto(pessoa, SEM_CATALOGOS, dadosDoMes, mes), mes, resultado.totais.realizadoMinutos / 60, dadosBase, avulsos);
+    return custoDaPessoa(pessoaParaCusto(pessoa, catalogos, dadosDoMes, mes), mes, resultado.totais.realizadoMinutos / 60, dadosBase, avulsos);
   }, [pessoa, mes, fechado, gravadosACarregar, valores, resultado, retribuicaoRecusada, lancamentosDaPessoa, horas.versoes, dadosBase, cargos, periodosCargo, periodosLoading, periodosError]);
 
   return {
@@ -156,7 +160,7 @@ export function useCustoDaOrganizacao(mes: string) {
     // Sem os dados da base (a carregar, falha ou sem permissao) nao ha linhas: nunca se calcula com valores de exemplo.
     if (!dadosBase) return [];
     const catalogos = { locais, filiais, cargos };
-    const dadosDe = (pessoaId: string, planeadoMinutos: number, retribuicaoMes: number | null, estimativa?: EstimativaCargo) => {
+    const dadosDe = (pessoaId: string, planeadoMinutos: number, retribuicaoMes: number | null, estimativa?: EstimativaCargo, decomposicao?: DecomposicaoRetribuicao | null) => {
       const vinculo = vinculoDoMes(vinculos.get(pessoaId), mes);
       return {
         retribuicaoMes: retribuicaoRecusada ? null : retribuicaoMes,
@@ -164,6 +168,7 @@ export function useCustoDaOrganizacao(mes: string) {
         planeadoMinutos,
         tipoContrato: vinculo?.tipoContrato ?? null,
         horasContratuais: vinculo?.horasSemanais ?? null,
+        decomposicao: retribuicaoRecusada ? null : decomposicao,
       };
     };
     if (fechado) {
@@ -176,7 +181,7 @@ export function useCustoDaOrganizacao(mes: string) {
         const valores = valoresDoFecho(linha);
         const pessoa = nomes.get(id) ?? pessoaDaLinhaGravada(linha);
         if (valores) horasRealizadas.set(id, valores.realizadoMinutos / 60);
-        pessoas.push({ ...pessoaParaCusto(pessoa, catalogos, dadosDe(id, valores?.planeadoMinutos ?? 0, valores?.retribuicaoMes ?? null), mes), semValoresGravados: valores === null });
+        pessoas.push({ ...pessoaParaCusto(pessoa, catalogos, dadosDe(id, valores?.planeadoMinutos ?? 0, valores?.retribuicaoMes ?? null, undefined, valores?.decomposicao), mes), semValoresGravados: valores === null });
       }
       // As pessoas activas sem linha gravada aparecem com o aviso, nunca com um valor recalculado.
       for (const pessoa of pessoasActivas) {
@@ -189,7 +194,7 @@ export function useCustoDaOrganizacao(mes: string) {
       const r = resultadosVivos?.get(pessoa.id);
       if (!r) return [];
       const estimativa = periodosLoading ? undefined : estimativaDoMes(pessoa, cargos, periodosCargo, mes, periodosError);
-      return [pessoaParaCusto(pessoa, catalogos, dadosDe(pessoa.id, r.totais.planeadoMinutos, retribuicaoSemPontuais(r), estimativa), mes)];
+      return [pessoaParaCusto(pessoa, catalogos, dadosDe(pessoa.id, r.totais.planeadoMinutos, retribuicaoSemPontuais(r), estimativa, decomposicaoDoResultado(r.resultado)), mes)];
     });
     return linhasDaOrganizacao(mes, pessoas, dadosBase, avulsosReais);
   }, [mes, fechado, gravadosACarregar, gravados.porPessoa, pessoasActivas, todasAsPessoas, resultadosVivos, retribuicaoRecusada, locais, filiais, cargos, periodosCargo, periodosLoading, periodosError, vinculos, avulsosReais, dadosBase]);

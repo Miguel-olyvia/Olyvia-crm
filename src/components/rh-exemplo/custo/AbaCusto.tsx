@@ -1,8 +1,8 @@
 /**
  * O separador «Custo» da ficha (fluxo 11): quanto custa a pessoa à empresa, no mês escolhido. Mostra o quadro do mês (a
- * retribuição é o total bruto estimado do processamento salarial real), a composição, os equipamentos que a pessoa tem
- * (cada um conta como foi escolhido), os valores avulsos (os lançamentos pontuais do processamento salarial, da base) e os
- * encargos. Num mês fechado, as horas e a retribuição são as gravadas no fecho (sem valores gravados, avisa e não recalcula). Só para quem vê salários (`hr.pessoas.retribuicao.view`); a própria pessoa não vê o custo. Atribuir, devolver, alterar a conta
+ * retribuição é o total bruto estimado do processamento salarial real), as contas passo a passo, a composição, os equipamentos que a pessoa tem
+ * (cada um conta como foi escolhido), os valores avulsos (os lançamentos manuais do processamento salarial, da base) e a
+ * taxa desta pessoa. Num mês fechado, as horas e a retribuição são as gravadas no fecho (sem valores gravados, avisa e não recalcula). Só para quem vê salários (`hr.pessoas.retribuicao.view`); a própria pessoa não vê o custo. Atribuir, devolver, alterar a conta
  * e guardar taxas pedem também `hr.pessoas.retribuicao.edit`. Equipamentos, taxas e exceções vêm da base; enquanto não chegam mostra-se «a calcular».
  */
 import { Seccao } from "@/components/ficha-comum/Seccao";
@@ -13,6 +13,7 @@ import type { AbaProps } from "@/components/rh-exemplo/ficha/AbasPessoa";
 import { useTranslation } from "@/hooks/useTranslation";
 import { BarraComposicao } from "./BarraComposicao";
 import { CustoAvulsos } from "./CustoAvulsos";
+import { CustoContas } from "./CustoContas";
 import { CustoEncargos } from "./CustoEncargos";
 import { CustoEquipamentos } from "./CustoEquipamentos";
 import { CustoResumo } from "./CustoResumo";
@@ -50,6 +51,7 @@ export function AbaCusto({ pessoa, ctx, aoMudarAba }: AbaProps & { aoMudarAba?: 
       {custo && (
         <>
           <CustoResumo custo={custo} semValoresGravados={semValoresGravados} />
+          <CustoContas custo={custo} nome={pessoa.nome_completo} fechado={fechado} />
           <Seccao titulo={t("rhCustos.comp.fichaTitulo")}>
             <BarraComposicao partes={custo.composicao} titulo={t("rhCustos.comp.titulo", { nome: pessoa.nome_completo })} />
           </Seccao>
