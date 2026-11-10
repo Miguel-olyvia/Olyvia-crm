@@ -348,9 +348,20 @@ export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter
 /** A encomenda da adenda emite-se com o pagamento dela validado (decisão B, como no contrato). */
 export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parcela da adenda for validado.";
 
+/** 10/11 (o fluxo novo de 9/11): porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (o pagamento, as medidas,
+ *  o plano, o contrato); com tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
+export function semEncomendaCliente(d: Negocio): string {
+  if (!d.fin.pago) return "A encomenda de cliente emite-se quando o pagamento for validado.";
+  const direta = !!d.orc?.vendaDireta;
+  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado e do contrato assinado.";
+  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai com o plano aprovado e o contrato assinado.";
+  if (!contratoAssinado(d)) return "A encomenda de cliente sai quando o cliente assinar o contrato.";
+  return "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio.";
+}
+
 /** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
 export function textoMateriais(d: Negocio, r: ResumoEcNeg | null): string {
-  if (!d.obra.ec) return d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.";
+  if (!d.obra.ec) return semEncomendaCliente(d);
   if (usarProntidao(d.obra.ec)) return textoProntidaoReal(d.obra.ec.n, prontidaoDe(d.obra.ec.contrato));
   if (!d.obra.ec.ref) return "Obra do exemplo: os materiais já estão na obra.";
   return r ? `Encomenda de cliente ${r.id}: ${textoResumoEc(r)}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`;

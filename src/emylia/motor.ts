@@ -1380,6 +1380,10 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (!p) return { t: "Operações: gerar o plano da obra", sub: "A encomenda de cliente já foi emitida. O plano nasce do orçamento.", btn: "Gerar o plano", act: "gerarPlano", who: "operacoes" };
       // do pagamento ao arranque: o passo à espera, pela ordem (encomenda, plano, arranque)
       if (p.estado === "por aprovar" || p.estado === "aprovado") {
+        // 10/11 (o fluxo novo de 9/11): o contrato assina-se na Obra, depois do plano aprovado; enviado, espera pelo cliente no portal
+        // (com o botão de teste do super admin, como na proposta)
+        if (p.estado === "aprovado" && !o?.vendaDireta && o?.contrato === "enviado")
+          return { t: "À espera da assinatura do contrato", sub: "Contrato no portal do cliente. Assinado, emite-se a encomenda de cliente.", who: "cliente", wait: true, sim: "assinar" };
         const a = passosAgora(d, S)[0];
         if (a) return { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who! };
       }

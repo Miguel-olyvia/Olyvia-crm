@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { PAPEIS, TECS, aberto, comRelogioReal, conflitos, diaDeFerias, diaReal, eur, nfmt, type Estado, type Negocio, type Papel, type Tarefa } from "./motor";
 import { COR_FASE, dataCurta, iniciosRapidos, isoDia } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara } from "./preparacaoObra";
+import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, semEncomendaCliente, tecnicosPara } from "./preparacaoObra";
 import { diasDasHoras, diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
 import { HORAS_DIA } from "./ganttOrcamento";
 import {
@@ -1605,7 +1605,7 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         {lida.k === "a ler" ? <span className="text-muted-foreground">A ler os materiais…</span>
           : lida.k === "erro" ? <span className="text-muted-foreground">Não foi possível ler os materiais.</span>
           : lida.k === "lidos" && lida.m.ecs.length ? `Encomenda de cliente ${lida.m.ecs.join(", ")}: ${lida.m.linhas.length ? minuscula(textoResumoEc(inv!)) : "sem materiais."}`
-          : !d.obra.ec ? (d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.")
+          : !d.obra.ec ? semEncomendaCliente(d)
           : d.obra.ec.ref ? (inv ? `Encomenda de cliente ${inv.id} no Inventário: ${minuscula(textoResumoEc(inv))}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`)
           : "Obra do exemplo: os materiais já estão na obra."}
       </p>

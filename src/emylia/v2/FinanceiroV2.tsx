@@ -2,6 +2,7 @@
 // uma por tranche do plano de pagamento do contrato, e valida o pagamento de cada uma (sai o recibo).
 // O pagamento da tranche que dispara (DISPARO, em financeiro.ts) chama a ação do motor que põe a obra a andar (A.validar:
 // Inventário + plano). Sem modais: tudo na própria página. Sem botão primário: o primário do passo é o "Continuar" da página.
+import { semEncomendaCliente } from "../preparacaoObra";
 import { useId, useState } from "react";
 import { CheckCircle2, Circle, Clock, FileText, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -72,7 +73,7 @@ function FormPagamento({ ctx, d, f, fs, tranches, fechar, avisar }: { ctx: Ctx; 
           // 9/11: a encomenda de cliente só sai com o plano da obra aprovado
           : d.obra.plano && d.obra.plano.estado === "por aprovar"
             ? `Pagamento validado · recibo ${d.fin.recibo.n}. A obra está a andar: falta aprovar o plano; a encomenda de cliente sai com ele.`
-            : `Pagamento validado · recibo ${d.fin.recibo.n}. A encomenda de cliente não chegou ao Inventário: emita-a no negócio.`;
+            : `Pagamento validado · recibo ${d.fin.recibo.n}. ${semEncomendaCliente(d)}`;
       } else {
         const rc = A.reciboTranche(d.id, f.numero);
         if (!rc) return;
