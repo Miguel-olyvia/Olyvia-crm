@@ -37,7 +37,14 @@ describe("accoesDoDesvio", () => {
   it("horas sem turno e picagem por emparelhar: corrigir, so se houver a linha de origem", () => {
     expect(accoesDoDesvio(desvio({ tipo: "realizado_sem_planeado", referencia_id: "r1" }))).toEqual(["corrigir"]);
     expect(accoesDoDesvio(desvio({ tipo: "realizado_sem_planeado", referencia_id: null }))).toEqual([]);
-    expect(accoesDoDesvio(desvio({ tipo: "pendente_par", referencia_id: "p1", hora_fim: null }))).toEqual(["corrigir"]);
+    const entradaSemSaida = "entrada sem saida: o intervalo nao se fecha.";
+    expect(accoesDoDesvio(desvio({ tipo: "pendente_par", referencia_id: "p1", hora_fim: null, detalhe: entradaSemSaida }))).toEqual(["corrigir", "lancar_saida"]);
+    // Falha SEGURA: se o texto da base mudar ou vier vazio, nao se sabe o sentido e nunca se oferece lancar a saida.
+    for (const detalhe of [null, "", "   ", "picagem sem par: texto novo da base"]) {
+      expect(accoesDoDesvio(desvio({ tipo: "pendente_par", referencia_id: "p1", hora_fim: null, detalhe }))).toEqual(["corrigir"]);
+    }
+    // Uma saida sem entrada (o detalhe da base di-lo) so se corrige: lancar outra saida duplicava.
+    expect(accoesDoDesvio(desvio({ tipo: "pendente_par", referencia_id: "p1", hora_fim: null, detalhe: "saida sem entrada: sem par." }))).toEqual(["corrigir"]);
     expect(accoesDoDesvio(desvio({ tipo: "pendente_par", referencia_id: null }))).toEqual([]);
   });
 

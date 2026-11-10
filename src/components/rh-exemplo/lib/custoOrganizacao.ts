@@ -6,6 +6,7 @@
 import { arredondar, custoPorHora, horasPrevistasDoMes, somarMeses, type MesIso } from "./custo";
 import { custoDoMes, type AvulsoCusto, type CustoDoMes, type DefinicoesCusto } from "./custoMes";
 import type { EquipamentoPessoa } from "./equipamentos";
+import type { EstimadoPeloCargo, RazaoSemEstimativa } from "./estimativaCusto";
 
 /** Valores de exemplo (não vêm do banco de horas nem da assiduidade): só para mostrar a conta; não mexem no custo total. */
 export const SALDO_BANCO_HORAS_EXEMPLO = 3;
@@ -24,6 +25,10 @@ export interface PessoaParaCusto {
   semValoresGravados?: boolean;
   /** O total bruto da pessoa no «Cálculo do mês» (`null` = sem retribuição registada). */
   retribuicaoMes: number | null;
+  /** Sem retribuicao em vigor mas com cargo de salario mensal: `retribuicaoMes` e o salario base do cargo (so nos Custos, nunca num mes fechado). */
+  estimadoPeloCargo?: EstimadoPeloCargo;
+  /** Porque a pessoa fica sem valor (sem retribuicao e sem estimativa possivel); ausente com retribuicao, estimativa ou mes fechado. */
+  razaoSemValor?: RazaoSemEstimativa;
   horasSemanais: number;
 }
 
@@ -112,6 +117,8 @@ export interface TotaisCusto {
   total: number;
   /** Quantas pessoas ficam sem custo por não terem retribuição registada. */
   semValor: number;
+  /** Quantas pessoas contam com a estimativa pelo salário do cargo (sem retribuição definida). */
+  estimados: number;
 }
 
 export function totaisDaOrganizacao(linhas: readonly LinhaCusto[]): TotaisCusto {
@@ -125,6 +132,7 @@ export function totaisDaOrganizacao(linhas: readonly LinhaCusto[]): TotaisCusto 
     nEquipamentos: linhas.reduce((s, l) => s + l.nEquipamentos, 0),
     total: somarMeses(linhas.map((l) => l.total)),
     semValor: linhas.filter((l) => l.total === null).length,
+    estimados: linhas.filter((l) => l.estimadoPeloCargo !== undefined).length,
   };
 }
 

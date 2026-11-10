@@ -7,19 +7,26 @@ import { euros } from "@/components/rh-exemplo/custo/formato";
 interface Cartao {
   chave: string;
   valor: string;
-  nota?: string;
+  notas?: string[];
   forte?: boolean;
 }
 
 export function CabecalhoTotais({ totais }: { totais: TotaisCusto }) {
   const { t } = useTranslation();
   const eur = (v: number) => euros(v, "—");
+  const incluiEstimados = totais.estimados > 0 ? [t("rhCustoEstimativa.inclui", { n: totais.estimados })] : [];
   const cartoes: Cartao[] = [
-    { chave: "total", valor: eur(totais.total), forte: true, nota: totais.semValor > 0 ? t("rhCustos.totais.semValor", { n: totais.semValor }) : undefined },
-    { chave: "retribuicao", valor: eur(totais.retribuicao) },
-    { chave: "encargos", valor: eur(totais.encargos + totais.seguro) },
+    {
+      chave: "total", valor: eur(totais.total), forte: true,
+      notas: [
+        ...(totais.estimados > 0 ? [t("rhCustoEstimativa.totais", { n: totais.estimados })] : []),
+        ...(totais.semValor > 0 ? [t("rhCustos.totais.semValor", { n: totais.semValor })] : []),
+      ],
+    },
+    { chave: "retribuicao", valor: eur(totais.retribuicao), notas: incluiEstimados },
+    { chave: "encargos", valor: eur(totais.encargos + totais.seguro), notas: incluiEstimados },
     { chave: "avulsos", valor: eur(totais.avulsos) },
-    { chave: "equipamentos", valor: eur(totais.equipamentos), nota: t("rhCustos.totais.equipamentosN", { n: totais.nEquipamentos }) },
+    { chave: "equipamentos", valor: eur(totais.equipamentos), notas: [t("rhCustos.totais.equipamentosN", { n: totais.nEquipamentos })] },
     { chave: "pessoas", valor: String(totais.pessoas) },
   ];
   return (
@@ -30,7 +37,7 @@ export function CabecalhoTotais({ totais }: { totais: TotaisCusto }) {
             <CardContent className="space-y-0.5 p-3">
               <dt className="text-xs text-muted-foreground">{t(`rhCustos.totais.${c.chave}`)}</dt>
               <dd className={`tabular-nums ${c.forte ? "text-xl font-bold" : "text-lg font-semibold"}`} data-testid={`rhcustos-total-${c.chave}`}>{c.valor}</dd>
-              {c.nota && <dd className="text-xs text-muted-foreground">{c.nota}</dd>}
+              {c.notas?.map((nota) => <dd key={nota} className="text-xs text-muted-foreground">{nota}</dd>)}
             </CardContent>
           </Card>
         ))}

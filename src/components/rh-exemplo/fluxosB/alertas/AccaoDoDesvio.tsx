@@ -2,7 +2,9 @@
  * A accao do RH sobre UM desvio da fila, ligada as RPCs reais:
  *  - Marcar falta: o formulario de faltas abre preenchido com o periodo do desvio (`rpc_hr_falta_marcar`);
  *  - Corrigir: as horas realizadas (`rpc_hr_realizado_corrigir`) ou a picagem por emparelhar (`rpc_hr_picagem_corrigir`);
- *  - Corrigir o ponto (`lancar_picagem`): lanca a picagem em falta nesse dia (`rpc_hr_picar`, origem `manual_rh`);
+ *  - Corrigir o ponto (`lancar_picagem`): lanca a ENTRADA e a SAIDA em falta nesse dia, uma a seguir a outra
+ *    (`rpc_hr_picar`, origem `manual_rh`; a base nao tem uma RPC que grave as duas de uma vez);
+ *  - Lancar a saida (`lancar_saida`): so a saida de uma entrada sem par (`rpc_hr_picar`, origem `manual_rh`);
  *  - Anular a falta coberta por ausencia aprovada (`rpc_hr_falta_anular_por_ausencia`).
  *
  * So se le a assiduidade DESSA pessoa NESSE dia quando a accao e aberta (uma leitura, nao uma por linha da fila).
@@ -14,6 +16,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { useAssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
 import { CorrigirRealizadoSheet } from "@/components/rh-exemplo/assiduidade/CorrigirRealizadoSheet";
+import { LancarEntradaESaidaSheet } from "@/components/rh-exemplo/assiduidade/LancarEntradaESaidaSheet";
 import { PicagemSheet } from "@/components/rh-exemplo/assiduidade/PicagemSheet";
 import { MarcarFaltaForm } from "@/components/rh-exemplo/fluxosB/faltas/MarcarFaltaForm";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
@@ -42,7 +45,24 @@ function useUltimoEncontrado<T>(actual: T | null): T | null {
   return actual ?? guardado.current;
 }
 
-export function AccaoDoDesvio({ desvio, accao, nome, locais, onAlterado, onFechar }: AccaoDoDesvioProps) {
+/**
+ * Ao fechar, o foco volta ao botao que abriu a accao. A gaveta (Radix) nao o faz sozinha porque nao foi aberta por um
+ * gatilho seu, e sem isto o foco caia no inicio da pagina: quem usa teclado perdia o sitio. Se o botao ja nao existe (a
+ * lista relida tirou o desvio), nao se faz nada.
+ */
+function useFecharDevolvendoFoco(onFechar: () => void): () => void {
+  const abriu = useRef<HTMLElement | null>(typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null));
+  return () => {
+    onFechar();
+    const alvo = abriu.current;
+    window.setTimeout(() => {
+      if (alvo && alvo.isConnected && alvo !== document.body) alvo.focus();
+    }, 0);
+  };
+}
+
+export function AccaoDoDesvio({ desvio, accao, nome, locais, onAlterado, onFechar: aoFechar }: AccaoDoDesvioProps) {
+  const onFechar = useFecharDevolvendoFoco(aoFechar);
   if (accao === "marcar_falta") {
     return (
       <MarcarFaltaForm
@@ -94,26 +114,60 @@ function AccaoComLeitura({ desvio, accao, nome, locais, onAlterado, onFechar }: 
     return erro;
   };
 
-  // O dia deste desvio ja foi lido acima (useAssiduidadeDaPessoa), mas lancar uma picagem em falta nao usa nenhum registo
-  // lido (nao ha linha a corrigir): abre logo, no dia e para a pessoa do desvio, pela mesma `picar` (origem `manual_rh`)
-  // que o painel do dia usa.
+  // Lancar picagens nao usa nenhum registo lido (nao ha linha a corrigir): abre logo, no dia e para a pessoa do desvio, pela
+  // mesma `picar` (origem `manual_rh`) que o painel do dia usa. O dia ja foi lido acima (useAssiduidadeDaPessoa).
+  const lancarPicagem = (args: { sentido: "entrada" | "saida"; momento: string; localId: string | null }) =>
+    assiduidade.picar({ sentido: args.sentido, momento: args.momento, localId: args.localId, origem: "manual_rh" });
+
+  // Turno planeado sem horas, ou so parcialmente picado: a ENTRADA e a SAIDA de uma vez, com o bloco planeado como ponto
+  // de partida (o RH ajusta ao buraco real, por exemplo o almoco nao picado).
   if (accao === "lancar_picagem") {
-    // So o turno sem horas nenhumas pede, com quase certeza, a ENTRADA do bloco; no parcialmente picado o buraco pode
-    // ser a saida, e a hora e o sentido ficam ao criterio de quem lanca.
-    const semHoras = desvio.tipo === "planeado_sem_realizado" && desvio.hora_inicio;
+    return (
+      <LancarEntradaESaidaSheet
+        aberto
+        data={desvio.data}
+        horaEntradaInicial={desvio.hora_inicio ? horaCurta(desvio.hora_inicio) : undefined}
+        horaSaidaInicial={desvio.hora_fim ? horaCurta(desvio.hora_fim) : undefined}
+        locais={locais}
+        aGravar={assiduidade.saving}
+        onFechar={onFechar}
+        onPicar={lancarPicagem}
+        onAlterado={onAlterado}
+      />
+    );
+  }
+
+  const aLer = (
+    <p role="status" className="rounded-md border p-3 text-sm text-muted-foreground">
+      {t("rhExemplo.pic.real.aLer")}
+    </p>
+  );
+  const aviso = (texto: string) => (
+    <section role="alert" className="flex flex-wrap items-center gap-3 rounded-md border border-destructive p-3 text-sm text-destructive">
+      <span>{texto}</span>
+      <Button type="button" variant="outline" className="min-h-11" onClick={onFechar}>
+        {t("rhExemplo.fluxosB.fechar")}
+      </Button>
+    </section>
+  );
+
+  // Entrada sem saida: so a saida, no dia da entrada, com a hora em branco (o RH sabe quando a pessoa saiu).
+  // O texto da base e so uma pista (ver `saidaSemEntrada`): quem decide e a picagem LIDA. So se lanca a saida se ela for
+  // uma ENTRADA; uma saida orfa (ou uma picagem que ja nao existe) nunca recebe uma segunda saida.
+  if (accao === "lancar_saida") {
+    if (assiduidade.loading && !picagem) return aLer;
+    if (picagem?.sentido !== "entrada") return aviso(t("rhExemplo.pic.real.jaNaoEntrada"));
     return (
       <PicagemSheet
         aberto
         modo="lancar"
         data={desvio.data}
-        horaInicial={semHoras ? horaCurta(desvio.hora_inicio) : undefined}
-        sentidoInicial={semHoras ? "entrada" : undefined}
+        sentidoInicial="saida"
         locais={locais}
         aGravar={assiduidade.saving}
         onFechar={onFechar}
-        onLancar={(args) =>
-          depoisDeGravar(assiduidade.picar({ sentido: args.sentido, momento: args.momento, localId: args.localId, origem: "manual_rh" }))
-        }
+        // Confirma-se outra vez no momento de gravar, contra a leitura mais recente.
+        onLancar={(args) => (picagemLida?.sentido === "entrada" ? depoisDeGravar(lancarPicagem(args)) : Promise.resolve("rhExemplo.pic.real.jaNaoEntrada"))}
         // Nunca chamado no modo lancar; se alguma vez fosse, recusa em vez de gravar em silencio.
         onCorrigir={async () => "rhExemplo.pic.real.semLinha"}
         idPrefixo="rhb-desvio-picagem"
@@ -123,11 +177,7 @@ function AccaoComLeitura({ desvio, accao, nome, locais, onAlterado, onFechar }: 
 
   // So se mostra o carregamento enquanto o registo ainda nao chegou: uma releitura depois de gravar nao pode desmontar o painel.
   if (assiduidade.loading && !realizado && !picagem && !(falta && ausencia)) {
-    return (
-      <p role="status" className="rounded-md border p-3 text-sm text-muted-foreground">
-        {t("rhExemplo.pic.real.aLer")}
-      </p>
-    );
+    return aLer;
   }
 
   if (accao === "corrigir" && realizado) {
@@ -196,12 +246,5 @@ function AccaoComLeitura({ desvio, accao, nome, locais, onAlterado, onFechar }: 
     accao === "anular_por_ausencia"
       ? t(falta ? "rhExemplo.pic.real.semAusencia" : "rhExemplo.pic.real.semFalta")
       : t("rhExemplo.pic.real.semLinha");
-  return (
-    <section role="alert" className="flex flex-wrap items-center gap-3 rounded-md border border-destructive p-3 text-sm text-destructive">
-      <span>{mensagem}</span>
-      <Button type="button" variant="outline" className="min-h-11" onClick={onFechar}>
-        {t("rhExemplo.fluxosB.fechar")}
-      </Button>
-    </section>
-  );
+  return aviso(mensagem);
 }

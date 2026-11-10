@@ -11,7 +11,7 @@ import type { LinhaCusto } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { BarraComposicao } from "@/components/rh-exemplo/custo/BarraComposicao";
-import { euros } from "@/components/rh-exemplo/custo/formato";
+import { chaveRazaoSemValor, euros } from "@/components/rh-exemplo/custo/formato";
 import { ItensDoMes } from "./ItensDoMes";
 
 const CELULA = "px-3 py-1 align-middle text-sm";
@@ -97,6 +97,8 @@ export function LinhaTabelaCusto({ linha, expandida, aoAbrir, aoAlternar }: Prop
         </TableCell>
         <TableCell className={NUMERO}>
           {eur(linha.retribuicao)}
+          {linha.estimadoPeloCargo && <span className="block text-xs leading-4 text-amber-800 dark:text-amber-300">{t("rhCustoEstimativa.estimado")}</span>}
+          {linha.retribuicao === null && linha.razaoSemValor && <span className="block text-xs leading-4 text-amber-800 dark:text-amber-300">{t(chaveRazaoSemValor(linha.razaoSemValor))}</span>}
           {linha.semValoresGravados && <span className="block text-xs leading-4 text-amber-800 dark:text-amber-300">{t("rhCustoFecho.semValores")}</span>}
         </TableCell>
         <TableCell className={NUMERO}>{eur(linha.retribuicao === null ? null : linha.encargos)}</TableCell>

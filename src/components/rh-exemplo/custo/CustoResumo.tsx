@@ -48,7 +48,7 @@ export function CustoResumo({ custo, semValoresGravados = false }: CustoResumoPr
     <div className="space-y-4">
       <Seccao titulo={t("rhA.custo.mesTitulo", { mes: nomeDoMes(custo.mes, language) })} marca={c.total === null && <Badge variant="outline" className="font-normal">{t("rhA.custo.semSalario")}</Badge>}>
         <dl className="max-w-xl divide-y divide-border/60">
-          <Linha rotulo={t("rhCustos.resumo.retribuicao")} ajuda={t("rhCustos.resumo.retribuicaoAjuda")} valor={eur(custo.retribuicaoMes)} />
+          <Linha rotulo={t("rhCustos.resumo.retribuicao")} ajuda={t("rhCustos.resumo.retribuicaoAjuda")} valor={custo.estimadoPeloCargo ? `${eur(custo.retribuicaoMes)} (${t("rhCustoEstimativa.estimado")})` : eur(custo.retribuicaoMes)} />
           <Linha rotulo={t("rhA.custo.bruto")} ajuda={t("rhA.custo.brutoAjuda")} valor={eur(c.bruto)} />
           <Linha rotulo={t("rhA.custo.encargos")} ajuda={t("rhA.custo.encargosAjuda")} valor={eur(c.bruto === null ? null : c.encargos)} />
           <Linha rotulo={t("rhCustos.resumo.equipamentos")} ajuda={t("rhCustos.resumo.equipamentosAjuda", { n: c.nEquipamentos })} valor={eur(c.outrosCustos)} />

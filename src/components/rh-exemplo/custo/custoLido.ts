@@ -19,12 +19,17 @@ import {
   type PessoaParaCusto,
 } from "@/components/rh-exemplo/lib/custoOrganizacao";
 import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
+import type { EstimadoPeloCargo, RazaoSemEstimativa } from "@/components/rh-exemplo/lib/estimativaCusto";
 
 export interface CustoDaPessoa {
   mes: string;
   atual: CustoDoMes;
   /** A retribuicao do mes: o total bruto estimado do processamento (`null` = sem retribuicao registada). */
   retribuicaoMes: number | null;
+  /** `retribuicaoMes` e uma ESTIMATIVA pelo salario do cargo (a pessoa nao tem retribuicao definida); ausente quando e a retribuicao real. */
+  estimadoPeloCargo?: EstimadoPeloCargo;
+  /** Sem retribuicao e sem estimativa possivel: a razao, para o ecra a dizer em texto. */
+  razaoSemValor?: RazaoSemEstimativa;
   /** As horas feitas que entram na conta; `null` = sem horas (mes fechado sem valores gravados): nunca um 0 inventado. */
   horasFeitas: number | null;
   /** Os acumulados precisam do calculo de cada mes anterior, que ainda nao esta ligado: `null` = sem valor. */
@@ -91,6 +96,8 @@ export function custoDaPessoa(pessoa: PessoaParaCusto, mes: string, horasFeitas:
     mes,
     atual,
     retribuicaoMes,
+    ...(pessoa.estimadoPeloCargo ? { estimadoPeloCargo: pessoa.estimadoPeloCargo } : {}),
+    ...(pessoa.razaoSemValor ? { razaoSemValor: pessoa.razaoSemValor } : {}),
     horasFeitas,
     acumuladoAno: null,
     acumuladoAdmissao: null,

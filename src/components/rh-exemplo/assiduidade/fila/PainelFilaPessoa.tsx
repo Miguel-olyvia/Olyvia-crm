@@ -17,7 +17,7 @@ import { useDecisaoDoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia
 import { DecidirHoraExtraDialog, type PedidoDecisao } from "@/components/rh-exemplo/fluxosC/DecidirHoraExtraDialog";
 import { RegistarTempoAMaisDialog } from "@/components/rh-exemplo/fluxosC/RegistarTempoAMaisDialog";
 import { accoesDoItem, type FonteFila, type IdDeAccao, type ItemFila, type PessoaNaFila } from "@/components/rh-exemplo/hooks/useFilaDeTrabalho";
-import type { AccaoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
+import { ehAccaoDesvio, type AccaoDesvio } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { useDesviosAcoes } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { AceitarDesvioDialog, type PedidoAceitarDesvio } from "./AceitarDesvioDialog";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
@@ -72,7 +72,7 @@ function PainelDeAssiduidade({
   const { t } = useTranslation();
   const [pedidoHoraExtra, setPedidoHoraExtra] = useState<PedidoDecisao | null>(null);
   const [pedidoJustificacao, setPedidoJustificacao] = useState<PedidoDecisaoDia | null>(null);
-  const [pedidoAlerta, setPedidoAlerta] = useState<{ item: Extract<ItemFila, { tipo: "alerta" }>; accao: IdDeAccao } | null>(null);
+  const [pedidoAlerta, setPedidoAlerta] = useState<{ item: Extract<ItemFila, { tipo: "alerta" }>; accao: AccaoDesvio } | null>(null);
   const [registarAberto, setRegistarAberto] = useState(false);
   const [pedidoAceitar, setPedidoAceitar] = useState<PedidoAceitarDesvio | null>(null);
   const [mensagemDesvio, setMensagemDesvio] = useState<{ texto: string; erro: boolean } | null>(null);
@@ -102,7 +102,8 @@ function PainelDeAssiduidade({
     } else if (item.tipo === "justificacao") {
       setPedidoJustificacao({ justificacao: item.justificacao, tipo: accao === "aceitar" ? "aceitar" : "recusar", pessoaNome: aberta.nome });
     } else if (item.tipo === "alerta") {
-      setPedidoAlerta({ item, accao });
+      // So as accoes de desvio abrem este formulario; qualquer outra e ignorada em vez de forcada com um cast.
+      if (ehAccaoDesvio(accao)) setPedidoAlerta({ item, accao });
     } else if (item.tipo === "desvio_a_validar") {
       if (accao === "validar_aceitar_desvio") {
         // Aceitar exige um motivo: abre o dialogo.
@@ -145,7 +146,7 @@ function PainelDeAssiduidade({
             <AccaoDoDesvio
               key={`${pedidoAlerta.item.id}-${pedidoAlerta.accao}`}
               desvio={pedidoAlerta.item.desvio}
-              accao={pedidoAlerta.accao as AccaoDesvio}
+              accao={pedidoAlerta.accao}
               nome={aberta.nome}
               locais={locais}
               onAlterado={aposGravar}

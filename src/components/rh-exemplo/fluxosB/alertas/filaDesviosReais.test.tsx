@@ -75,7 +75,7 @@ const HORAS_SEM_TURNO = desvio({
 });
 const PAR = desvio({
   pessoa_id: "pessoa-b", data: "2026-10-05", tipo: "pendente_par", hora_inicio: "08:30:00", hora_fim: null, minutos: null,
-  planeado_id: null, referencia_id: "pic-1",
+  planeado_id: null, referencia_id: "pic-1", detalhe: "entrada sem saida: o intervalo nao se fecha e nao ha horas contabilizadas.",
 });
 const COBERTA = desvio({
   data: "2026-10-04", tipo: "falta_coberta_por_ausencia", hora_inicio: "09:00:00", hora_fim: "13:00:00", referencia_id: "aus-1",
@@ -206,8 +206,18 @@ describe("Marcar falta a partir de um desvio", () => {
   });
 });
 
-describe("Corrigir o ponto (lancar uma picagem em falta) a partir de um desvio", () => {
+describe("Corrigir o ponto: lancar a entrada e a saida de uma vez", () => {
   const PARCIAL = desvio({ tipo: "planeado_parcialmente_realizado", minutos: 60 });
+  const ENTRADA = () => screen.getByLabelText("Hora de entrada") as HTMLInputElement;
+  const SAIDA = () => screen.getByLabelText("Hora de saída") as HTMLInputElement;
+  const abrir = async (d: Desvio, onAlterado = vi.fn(), permissoes = COM_PICAR_OUTROS) => {
+    fila([d], permissoes, onAlterado);
+    fireEvent.click(within(linhaDe(d)).getByRole("button", { name: "Corrigir o ponto" }));
+    await screen.findByText("Lançar entrada e saída", { selector: "h2" });
+    return onAlterado;
+  };
+  const lancar = () => fireEvent.click(screen.getByRole("button", { name: "Lançar entrada e saída" }));
+  const momento = (dia: string, hora: string) => new Date(`${dia}T${hora}:00`).toISOString();
 
   it("quem pode picar por outros ve «Corrigir o ponto» antes de «Marcar falta», nos dois tipos", () => {
     fila([SEM_HORAS, PARCIAL], COM_PICAR_OUTROS);
@@ -231,40 +241,196 @@ describe("Corrigir o ponto (lancar uma picagem em falta) a partir de um desvio",
     expect(screen.queryByRole("button", { name: "Corrigir o ponto" })).not.toBeInTheDocument();
   });
 
-  it("abre o lancamento no dia e na pessoa do desvio, com a entrada do bloco planeado, grava por picar (manual_rh) e relê a fila", async () => {
-    const onAlterado = fila([SEM_HORAS], COM_PICAR_OUTROS);
-    fireEvent.click(within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Corrigir o ponto" }));
-    expect(await screen.findByText("Lancar uma picagem")).toBeInTheDocument();
-    expect(acoes.pessoaLida).toContain("pessoa-a");
-    expect((document.getElementById("rhb-desvio-picagem-dia") as HTMLInputElement).value).toBe("2026-10-06");
-    expect((document.getElementById("rhb-desvio-picagem-hora") as HTMLInputElement).value).toBe("09:00");
-    fireEvent.change(document.getElementById("rhb-desvio-picagem-hora") as HTMLInputElement, { target: { value: "09:05" } });
-    fireEvent.click(screen.getByRole("button", { name: "Lancar picagem" }));
-    await waitFor(() => expect(acoes.picar).toHaveBeenCalledTimes(1));
-    expect(acoes.picar).toHaveBeenCalledWith({
-      sentido: "entrada", momento: new Date("2026-10-06T09:05:00").toISOString(), localId: null, origem: "manual_rh",
-    });
-    await waitFor(() => expect(onAlterado).toHaveBeenCalled());
+  it("abre com o dia e o bloco planeado (entrada e saida), nos dois tipos", async () => {
+    for (const d of [SEM_HORAS, PARCIAL]) {
+      await abrir(d);
+      expect((document.getElementById("rhb-desvio-par-dia") as HTMLInputElement).value).toBe("2026-10-06");
+      expect(ENTRADA().value).toBe("09:00");
+      expect(SAIDA().value).toBe("13:00");
+      expect(acoes.pessoaLida).toContain("pessoa-a");
+      cleanup();
+    }
+  });
+
+  it("grava a entrada e depois a saida (manual_rh, por ordem) e relê a fila uma so vez", async () => {
+    const onAlterado = await abrir(SEM_HORAS);
+    fireEvent.change(ENTRADA(), { target: { value: "09:05" } });
+    lancar();
+    await waitFor(() => expect(acoes.picar).toHaveBeenCalledTimes(2));
+    expect(acoes.picar.mock.calls).toEqual([
+      [{ sentido: "entrada", momento: momento("2026-10-06", "09:05"), localId: null, origem: "manual_rh" }],
+      [{ sentido: "saida", momento: momento("2026-10-06", "13:00"), localId: null, origem: "manual_rh" }],
+    ]);
+    await waitFor(() => expect(onAlterado).toHaveBeenCalledTimes(1));
     expect(acoes.toastOk).toHaveBeenCalled();
   });
 
-  it("sem hora nao grava", async () => {
-    fila([SEM_HORAS], COM_PICAR_OUTROS);
-    fireEvent.click(within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Corrigir o ponto" }));
-    fireEvent.change(await screen.findByLabelText("Hora"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Lancar picagem" }));
+  it("valida antes de gravar: sem entrada, sem saida ou saida nao posterior nao grava nada e diz-o em texto anunciado", async () => {
+    await abrir(SEM_HORAS);
+    const casos: Array<[string, string, RegExp]> = [
+      ["", "13:00", /hora de entrada/i],
+      ["09:00", "", /hora de saída/i],
+      ["09:00", "09:00", /saída tem de ser depois da entrada/i],
+      ["09:00", "08:00", /saída tem de ser depois da entrada/i],
+    ];
+    for (const [entrada, saida, texto] of casos) {
+      fireEvent.change(ENTRADA(), { target: { value: entrada } });
+      fireEvent.change(SAIDA(), { target: { value: saida } });
+      lancar();
+      expect((await screen.findAllByRole("alert")).some((a) => texto.test(a.textContent ?? ""))).toBe(true);
+    }
     expect(acoes.picar).not.toHaveBeenCalled();
-    expect(acoes.toastErro).toHaveBeenCalled();
   });
 
-  it("uma recusa da base chega ao utilizador e nao relê a fila", async () => {
-    acoes.picar.mockResolvedValue("A base recusou a picagem.");
-    const onAlterado = fila([SEM_HORAS], COM_PICAR_OUTROS);
-    fireEvent.click(within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Corrigir o ponto" }));
-    await screen.findByText("Lancar uma picagem");
-    fireEvent.click(screen.getByRole("button", { name: "Lancar picagem" }));
-    await waitFor(() => expect(acoes.toastErro).toHaveBeenCalledWith("A base recusou a picagem."));
+  it("saida menor que a entrada oferece «A saida e no dia seguinte», desligada; ligada grava a saida no dia a seguir", async () => {
+    const onAlterado = await abrir(SEM_HORAS);
+    expect(screen.queryByRole("checkbox", { name: "A saída é no dia seguinte" })).not.toBeInTheDocument();
+    fireEvent.change(ENTRADA(), { target: { value: "22:00" } });
+    fireEvent.change(SAIDA(), { target: { value: "06:00" } });
+    const caixa = screen.getByRole("checkbox", { name: "A saída é no dia seguinte" }) as HTMLInputElement;
+    expect(caixa.checked).toBe(false);
+    lancar();
+    expect(acoes.picar).not.toHaveBeenCalled();
+    fireEvent.click(caixa);
+    lancar();
+    await waitFor(() => expect(acoes.picar).toHaveBeenCalledTimes(2));
+    expect(acoes.picar.mock.calls[1][0]).toMatchObject({ sentido: "saida", momento: momento("2026-10-07", "06:00") });
+    await waitFor(() => expect(onAlterado).toHaveBeenCalledTimes(1));
+  });
+
+  it("se a entrada falha nao tenta a saida, nao relê a fila e mostra o erro", async () => {
+    acoes.picar.mockResolvedValue("A base recusou a entrada.");
+    const onAlterado = await abrir(SEM_HORAS);
+    lancar();
+    await waitFor(() => expect(acoes.toastErro).toHaveBeenCalledWith("A base recusou a entrada."));
+    expect(acoes.picar).toHaveBeenCalledTimes(1);
     expect(onAlterado).not.toHaveBeenCalled();
+  });
+
+  it("se a saida falha depois da entrada diz «A entrada foi gravada; a saida nao» e deixa lançar so a saida, sem repetir a entrada", async () => {
+    acoes.picar.mockResolvedValueOnce(null).mockResolvedValueOnce("A base recusou a saida.");
+    const onAlterado = await abrir(SEM_HORAS);
+    lancar();
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent("A entrada foi gravada; a saída não.");
+    expect(aviso).toHaveTextContent("A base recusou a saida.");
+    expect(acoes.picar).toHaveBeenCalledTimes(2);
+    expect(onAlterado).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Lançar entrada e saída" })).not.toBeInTheDocument();
+
+    acoes.picar.mockResolvedValueOnce(null);
+    fireEvent.click(screen.getByRole("button", { name: "Lançar a saída" }));
+    await waitFor(() => expect(acoes.picar).toHaveBeenCalledTimes(3));
+    expect(acoes.picar.mock.calls[2][0]).toMatchObject({ sentido: "saida", momento: momento("2026-10-06", "13:00"), origem: "manual_rh" });
+    expect(acoes.picar.mock.calls.filter(([a]) => a.sentido === "entrada")).toHaveLength(1);
+    await waitFor(() => expect(onAlterado).toHaveBeenCalledTimes(2));
+  });
+
+  it("ao fechar o foco volta ao botao «Corrigir o ponto» que abriu o formulario", async () => {
+    fila([SEM_HORAS], COM_PICAR_OUTROS);
+    const botao = within(linhaDe(SEM_HORAS)).getByRole("button", { name: "Corrigir o ponto" });
+    botao.focus();
+    fireEvent.click(botao);
+    await screen.findByText("Lançar entrada e saída", { selector: "h2" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(botao).toHaveFocus());
+  });
+});
+
+describe("Lancar a saida em falta de uma picagem por emparelhar", () => {
+  const SAIDA_ORFA = desvio({ ...PAR, detalhe: "saida sem entrada: a consolidacao nao forma par nenhum a partir dela." });
+
+  it("«Lançar a saída» aparece ao lado de «Corrigir», por permissoes separadas", () => {
+    fila([PAR], { ...TUDO, picarOutros: true });
+    expect(within(linhaDe(PAR)).getAllByRole("button").map((b) => b.textContent)).toEqual(["Corrigir", "Lançar a saída"]);
+    cleanup();
+    fila([PAR], TUDO);
+    expect(within(linhaDe(PAR)).getAllByRole("button").map((b) => b.textContent)).toEqual(["Corrigir"]);
+    cleanup();
+    fila([PAR], SO_PICAR_OUTROS);
+    expect(within(linhaDe(PAR)).queryByRole("button", { name: "Corrigir" })).not.toBeInTheDocument();
+    expect(within(linhaDe(PAR)).getByRole("button", { name: "Lançar a saída" })).toBeInTheDocument();
+  });
+
+  it("nao se oferece numa saida sem entrada (lançar outra saida duplicava)", () => {
+    fila([SAIDA_ORFA], COM_PICAR_OUTROS);
+    expect(screen.queryByRole("button", { name: "Lançar a saída" })).not.toBeInTheDocument();
+  });
+
+  it("falha segura: com o texto da base alterado ou vazio nunca se oferece «Lançar a saída», e o texto e neutro", () => {
+    for (const detalhe of [null, "", "picagem sem par: texto novo da base"]) {
+      const sem = desvio({ ...PAR, detalhe });
+      fila([sem], { ...TUDO, picarOutros: true });
+      expect(screen.queryByRole("button", { name: "Lançar a saída" })).not.toBeInTheDocument();
+      expect(within(linhaDe(sem)).getByRole("button", { name: "Corrigir" })).toBeInTheDocument();
+      expect(screen.getByText("Picagem por emparelhar: corrija a picagem.")).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  const picagem = (sentido: "entrada" | "saida") => ({
+    id: "pic-1", pessoa_id: "pessoa-b", sentido, estado: "valida", corrige_picagem_id: null, data_local: "2026-10-05", hora_local: "08:30:00",
+  });
+
+  it("a picagem lida e uma SAIDA (o texto dizia entrada): nao abre o formulario, diz-o e nao grava", async () => {
+    acoes.picagens = [picagem("saida")];
+    fila([PAR], COM_PICAR_OUTROS);
+    fireEvent.click(within(linhaDe(PAR)).getByRole("button", { name: "Lançar a saída" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Esta picagem já não é uma entrada sem saída");
+    expect(screen.queryByText("Lancar uma picagem")).not.toBeInTheDocument();
+    expect(acoes.picar).not.toHaveBeenCalled();
+  });
+
+  it("a picagem nao se encontra: diz-o e nao grava", async () => {
+    acoes.picagens = [];
+    fila([PAR], COM_PICAR_OUTROS);
+    fireEvent.click(within(linhaDe(PAR)).getByRole("button", { name: "Lançar a saída" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Esta picagem já não é uma entrada sem saída");
+    expect(acoes.picar).not.toHaveBeenCalled();
+  });
+
+  it("a picagem ainda a carregar: mostra o estado de leitura, sem formulario nem erro", async () => {
+    acoes.picagens = [];
+    acoes.loading = true;
+    fila([PAR], COM_PICAR_OUTROS);
+    fireEvent.click(within(linhaDe(PAR)).getByRole("button", { name: "Lançar a saída" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("A ler o dia");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Lancar uma picagem")).not.toBeInTheDocument();
+  });
+
+  it("abre so com a saida: dia da entrada, hora em branco; grava uma picagem de saida e relê a fila", async () => {
+    acoes.picagens = [picagem("entrada")];
+    const onAlterado = fila([PAR], COM_PICAR_OUTROS);
+    fireEvent.click(within(linhaDe(PAR)).getByRole("button", { name: "Lançar a saída" }));
+    expect(await screen.findByText("Lancar uma picagem")).toBeInTheDocument();
+    expect(acoes.pessoaLida).toContain("pessoa-b");
+    expect((document.getElementById("rhb-desvio-picagem-dia") as HTMLInputElement).value).toBe("2026-10-05");
+    expect((document.getElementById("rhb-desvio-picagem-hora") as HTMLInputElement).value).toBe("");
+    fireEvent.change(document.getElementById("rhb-desvio-picagem-hora") as HTMLInputElement, { target: { value: "17:30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lancar picagem" }));
+    await waitFor(() => expect(acoes.picar).toHaveBeenCalledTimes(1));
+    expect(acoes.picar).toHaveBeenCalledWith({ sentido: "saida", momento: new Date("2026-10-05T17:30:00").toISOString(), localId: null, origem: "manual_rh" });
+    await waitFor(() => expect(onAlterado).toHaveBeenCalled());
+  });
+});
+
+describe("o texto cru da base nunca aparece", () => {
+  const CRU = "entrada sem saida: o intervalo nao se fecha. Corrigir com rpc_hr_picagem_corrigir, ou registar a saida em falta.";
+
+  it("nenhum nome de RPC no ecra, e cada tipo mostra o texto proprio em pt-PT", () => {
+    const todos = [SEM_HORAS, HORAS_SEM_TURNO, PAR, COBERTA, desvio({ tipo: "planeado_parcialmente_realizado", data: "2026-10-03" })].map((d) => ({ ...d, detalhe: CRU }));
+    fila(todos, COM_PICAR_OUTROS);
+    expect(document.body.textContent).not.toMatch(/rpc_/i);
+    expect(screen.getByText("Entrada sem saída: o intervalo não se fecha e não há horas contabilizadas. Corrija a picagem ou lance a saída em falta.")).toBeInTheDocument();
+    expect(screen.getByText("Havia turno planeado e não há horas registadas. Pode ser falta ou picagem esquecida: decide-se, não se infere.")).toBeInTheDocument();
+  });
+
+  it("um tipo desconhecido so mostra o detalhe se nao citar uma RPC", () => {
+    const novo = (detalhe: string, pessoa: string) => desvio({ pessoa_id: pessoa, tipo: "tipo_novo" as unknown as Desvio["tipo"], referencia_id: null, detalhe });
+    fila([novo("Texto legivel da base.", "pessoa-a"), novo(CRU, "pessoa-b")]);
+    expect(screen.getByText("Texto legivel da base.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/rpc_/i);
   });
 });
 
