@@ -9,6 +9,14 @@ export const rhExemploPeriodoFolhaTranslations: Record<"en" | "pt", Record<strin
     "rhPeriodo.cfg.exemplo": "A folha de {folha} vai de {de} a {ate}.",
     "rhPeriodo.cfg.campoDia": "Dia em que a folha começa",
     "rhPeriodo.cfg.opcaoDia1": "1 (mês de calendário)",
+    "rhPeriodo.cfg.campoFecho": "Dia em que a folha fecha",
+    "rhPeriodo.cfg.opcaoFechoUltimo": "Último dia do mês",
+    "rhPeriodo.cfg.ajudaFecho":
+      "A folha só pode abrir até ao dia 28, por isso não há fecho no dia 28 ou depois. Para fechar no fim do mês, escolha «Último dia do mês».",
+    "rhPeriodo.cfg.fechoDia": "no dia {dia}",
+    "rhPeriodo.cfg.fechoUltimo": "no último dia do mês",
+    "rhPeriodo.cfg.deduzFecho": "O fecho deduz-se da abertura: a folha que abre no dia {dia} fecha {fecho}, sem intervalo entre folhas.",
+    "rhPeriodo.cfg.deduzAbertura": "A abertura deduz-se do fecho: a folha que fecha {fecho} abre no dia {dia}, sem intervalo entre folhas.",
     "rhPeriodo.cfg.previsaoTransicao": "A folha de {folha} será de transição: vai de {de} a {ate}.",
     "rhPeriodo.cfg.mesSubsidios":
       "O mês de pagamento dos subsídios de férias e de Natal é o do nome da folha (o mês em que a folha termina): com início no dia 22, a folha de novembro termina a 21/11 e é a que paga o subsídio de novembro.",
@@ -25,6 +33,14 @@ export const rhExemploPeriodoFolhaTranslations: Record<"en" | "pt", Record<strin
     "rhPeriodo.cfg.exemplo": "The {folha} payroll runs from {de} to {ate}.",
     "rhPeriodo.cfg.campoDia": "Day the payroll starts",
     "rhPeriodo.cfg.opcaoDia1": "1 (calendar month)",
+    "rhPeriodo.cfg.campoFecho": "Day the payroll closes",
+    "rhPeriodo.cfg.opcaoFechoUltimo": "Last day of the month",
+    "rhPeriodo.cfg.ajudaFecho":
+      "A payroll can only open up to day 28, so there is no closing on day 28 or later. To close at the end of the month, choose \"Last day of the month\".",
+    "rhPeriodo.cfg.fechoDia": "on day {dia}",
+    "rhPeriodo.cfg.fechoUltimo": "on the last day of the month",
+    "rhPeriodo.cfg.deduzFecho": "The closing is worked out from the opening: the payroll that opens on day {dia} closes {fecho}, with no gap between payrolls.",
+    "rhPeriodo.cfg.deduzAbertura": "The opening is worked out from the closing: the payroll that closes {fecho} opens on day {dia}, with no gap between payrolls.",
     "rhPeriodo.cfg.previsaoTransicao": "The {folha} payroll will be a transition one: it runs from {de} to {ate}.",
     "rhPeriodo.cfg.mesSubsidios":
       "The month in which holiday and Christmas allowances are paid is the one in the payroll's name (the month the payroll ends in): starting on day 22, the November payroll ends on 21/11 and is the one that pays the November allowance.",

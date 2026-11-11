@@ -313,6 +313,101 @@ describe("ConfiguracaoPeriodoFolha: mudar o dia", () => {
   });
 });
 
+describe("ConfiguracaoPeriodoFolha: abertura e fecho, sem intervalo entre folhas", () => {
+  const campoFecho = () => screen.getByLabelText("Dia em que a folha fecha") as HTMLSelectElement;
+
+  it("mostra sempre os dois dias: abre a 22 e fecha a 21, ambos em selects com rótulo e alvos de 44 px", async () => {
+    abrir();
+    await esperarRegra();
+    expect(campoDia().value).toBe("22");
+    expect(campoFecho().value).toBe("21");
+    expect(campoFecho().className).toContain("min-h-11");
+    const opcoes = Array.from(campoFecho().options);
+    expect(opcoes).toHaveLength(28);
+    expect(opcoes[0].value).toBe("fim");
+    expect(opcoes[0]).toHaveTextContent("Último dia do mês");
+    expect(opcoes[27].value).toBe("27");
+    expect(opcoes.map((o) => o.value)).not.toContain("28");
+  });
+
+  it("abertura no dia 1 fecha no último dia do mês", async () => {
+    respostaListar = { data: [{ ...REGRA_22, dia_inicio: 1 }], error: null };
+    abrir();
+    await esperarRegra();
+    expect(campoFecho().value).toBe("fim");
+  });
+
+  it("escolher o fecho deduz a abertura (fecho 4 abre 5; último dia do mês abre 1) e grava o dia de abertura", async () => {
+    abrir();
+    await esperarRegra();
+    fireEvent.change(campoFecho(), { target: { value: "4" } });
+    expect(campoDia().value).toBe("5");
+    expect(screen.getByTestId("periodo-folha-previsao")).toHaveTextContent("vai de 22/10/2026 a 04/11/2026");
+    fireEvent.change(campoFecho(), { target: { value: "fim" } });
+    expect(campoDia().value).toBe("1");
+    fireEvent.change(campoFecho(), { target: { value: "4" } });
+    fireEvent.click(guardar());
+    await waitFor(() => expect(chamadas("rpc_hr_periodo_folha_regra_guardar")).toHaveLength(1));
+    expect(chamadas("rpc_hr_periodo_folha_regra_guardar")[0][1]).toEqual({ _organization_id: "org-nike", _dia_inicio: 5, _valido_de: "2026-11-01" });
+  });
+
+  it("escolher a abertura deduz o fecho (abre 1 fecha no último dia; abre 6 fecha 5)", async () => {
+    abrir();
+    await esperarRegra();
+    fireEvent.change(campoDia(), { target: { value: "1" } });
+    expect(campoFecho().value).toBe("fim");
+    fireEvent.change(campoDia(), { target: { value: "6" } });
+    expect(campoFecho().value).toBe("5");
+  });
+
+  it("diz em texto, anunciado, o que está a ser deduzido, e que a folha só pode abrir até ao dia 28", async () => {
+    abrir();
+    await esperarRegra();
+    const deduzido = screen.getByTestId("periodo-folha-deduzido");
+    expect(deduzido).toHaveAttribute("aria-live", "polite");
+    fireEvent.change(campoDia(), { target: { value: "6" } });
+    expect(deduzido).toHaveTextContent("O fecho deduz-se da abertura: a folha que abre no dia 6 fecha no dia 5, sem intervalo entre folhas.");
+    fireEvent.change(campoFecho(), { target: { value: "9" } });
+    expect(deduzido).toHaveTextContent("A abertura deduz-se do fecho: a folha que fecha no dia 9 abre no dia 10, sem intervalo entre folhas.");
+    fireEvent.change(campoFecho(), { target: { value: "fim" } });
+    expect(deduzido).toHaveTextContent("a folha que fecha no último dia do mês abre no dia 1");
+    expect(campoFecho().getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(campoFecho().getAttribute("aria-describedby") as string)).toHaveTextContent(
+      "A folha só pode abrir até ao dia 28",
+    );
+  });
+
+  it("extremos: abre 28 fecha 27, fecha 27 abre 28, e o contrário", async () => {
+    abrir();
+    await esperarRegra();
+    fireEvent.change(campoDia(), { target: { value: "28" } });
+    expect(campoFecho().value).toBe("27");
+    fireEvent.change(campoDia(), { target: { value: "2" } });
+    fireEvent.change(campoFecho(), { target: { value: "27" } });
+    expect(campoDia().value).toBe("28");
+    fireEvent.change(campoFecho(), { target: { value: "1" } });
+    expect(campoDia().value).toBe("2");
+    fireEvent.change(campoDia(), { target: { value: "28" } });
+    expect(campoFecho().value).toBe("27");
+  });
+
+  it("depois de gravar pelo select de fecho, o texto volta a dizer que o fecho se deduz da abertura", async () => {
+    abrir();
+    await esperarRegra();
+    fireEvent.change(campoFecho(), { target: { value: "4" } });
+    expect(screen.getByTestId("periodo-folha-deduzido")).toHaveTextContent("A abertura deduz-se do fecho");
+    fireEvent.click(guardar());
+    await screen.findByText(/Regra do período da folha guardada/);
+    expect(screen.getByTestId("periodo-folha-deduzido")).toHaveTextContent("O fecho deduz-se da abertura");
+  });
+
+  it("o exemplo mostra abertura e fecho com datas completas e o estado é só leitura sem permissão (sem o select de fecho)", async () => {
+    abrir(false);
+    expect(await esperarRegra()).toHaveTextContent("vai de 22/10/2026 a 21/11/2026");
+    expect(screen.queryByLabelText("Dia em que a folha fecha")).toBeNull();
+  });
+});
+
 describe("ConfiguracaoPeriodoFolha: sem permissão de gerir", () => {
   it("só leitura: mostra a regra e o histórico, sem controlos, com o motivo em texto", async () => {
     abrir(false);
