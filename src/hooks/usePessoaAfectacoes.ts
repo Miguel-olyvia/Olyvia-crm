@@ -19,12 +19,19 @@ import { useCallback, useEffect, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage, getLocalizedFallback } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
+import {
+  ERRO_NENHUMA_LINHA_GRAVADA,
+  exigirLinhasGravadas,
+  hrFrom,
+  isPermissionError,
+  mensagemNaoGravadoSemPermissao,
+} from "@/lib/hr/hrDb";
 import {
   ERRO_AFECTACAO_HORARIO_A_FRENTE,
   ehErroNomeado,
   mensagemDeErro,
   ordenarAfectacoes,
+  periodoDecorrido,
 } from "@/lib/hr/afectacoes";
 import type { PessoaAfectacao } from "@/types/hr";
 
@@ -58,6 +65,17 @@ const COLUNAS =
  * `precisaAparar` e o caso especial -- a base recusou por haver horario
  * planeado a frente do corte, e o ecra tem de PROPOR aparar, nao so recusar.
  */
+/**
+ * E6-2: a permissao que a RLS de UPDATE (`pessoas_afectacoes_update`) exige
+ * para mexer NESTA linha -- escolhida pelo `valido_ate` da linha ANTIGA, como
+ * o USING da politica (`hr_periodo_decorrido`). E o que se diz a quem viu o
+ * UPDATE ficar em 0 linhas.
+ */
+function permissaoDaLinha(linha: Pick<PessoaAfectacao, "valido_ate"> | undefined): string {
+  if (!linha) return "hr.pessoas.afectacoes.edit / hr.pessoas.afectacoes.corrigir";
+  return periodoDecorrido(linha.valido_ate) ? "hr.pessoas.afectacoes.corrigir" : "hr.pessoas.afectacoes.edit";
+}
+
 export type ResultadoFecho =
   | { tipo: "ok" }
   | { tipo: "erro"; mensagem: string }
@@ -102,11 +120,19 @@ export function usePessoaAfectacoes(pessoaId: string | undefined, organizationId
   /** Devolve `null` em sucesso, ou a mensagem amigavel -- para as operacoes
    *  que NAO precisam de distinguir o erro de horario a frente. */
   const executar = useCallback(
-    async (accao: (autorId: string | null) => Promise<{ error: unknown }>): Promise<string | null> => {
+    async (
+      accao: (autorId: string | null) => Promise<{ error: unknown }>,
+      permissaoExigida?: string,
+    ): Promise<string | null> => {
       setSaving(true);
       try {
         const autorId = await resolveCurrentBusinessUserId();
         const { error } = await accao(autorId);
+        // E6-2: o UPDATE que a RLS filtra devolve 0 linhas SEM erro -- e uma
+        // recusa, nunca "Alterações guardadas".
+        if (error === ERRO_NENHUMA_LINHA_GRAVADA && permissaoExigida) {
+          return mensagemNaoGravadoSemPermissao(permissaoExigida);
+        }
         if (error) throw error;
         await load();
         return null;
@@ -167,18 +193,25 @@ export function usePessoaAfectacoes(pessoaId: string | undefined, organizationId
       afectacaoId: string,
       patch: { localId: string; validoDe: string; validoAte: string; motivo: string | null },
     ) =>
-      executar(async (autorId) =>
-        hrFrom("pessoas_afectacoes")
-          .update({
-            local_id: patch.localId,
-            valido_de: patch.validoDe,
-            valido_ate: patch.validoAte,
-            motivo: patch.motivo,
-            updated_by: autorId,
-          })
-          .eq("id", afectacaoId),
+      executar(
+        async (autorId) =>
+          exigirLinhasGravadas(
+            await hrFrom("pessoas_afectacoes")
+              .update(
+                {
+                  local_id: patch.localId,
+                  valido_de: patch.validoDe,
+                  valido_ate: patch.validoAte,
+                  motivo: patch.motivo,
+                  updated_by: autorId,
+                },
+                { count: "exact" },
+              )
+              .eq("id", afectacaoId),
+          ),
+        permissaoDaLinha(afectacoes.find((a) => a.id === afectacaoId)),
       ),
-    [executar],
+    [executar, afectacoes],
   );
 
   /**
@@ -194,9 +227,13 @@ export function usePessoaAfectacoes(pessoaId: string | undefined, organizationId
       try {
         const autorId = await resolveCurrentBusinessUserId();
         const linha = afectacoes.find((a) => a.id === afectacaoId);
-        const { error } = await hrFrom("pessoas_afectacoes")
-          .update({ valido_ate: validoAte, motivo, updated_by: autorId })
+        const { error, count } = await hrFrom("pessoas_afectacoes")
+          .update({ valido_ate: validoAte, motivo, updated_by: autorId }, { count: "exact" })
           .eq("id", afectacaoId);
+        // E6-2: 0 linhas sem erro = a RLS filtrou o UPDATE; nada foi gravado.
+        if (!error && count === 0) {
+          return { tipo: "erro", mensagem: mensagemNaoGravadoSemPermissao(permissaoDaLinha(linha)) };
+        }
         if (error) {
           if (ehErroNomeado(error, ERRO_AFECTACAO_HORARIO_A_FRENTE) && linha) {
             return { tipo: "precisaAparar", localId: linha.local_id, corte: validoAte };
@@ -302,12 +339,16 @@ export function usePessoaAfectacoes(pessoaId: string | undefined, organizationId
    */
   const confirmar = useCallback(
     (afectacaoId: string) =>
-      executar(async (autorId) =>
-        hrFrom("pessoas_afectacoes")
-          .update({ confirmada_por: autorId, confirmada_em: new Date().toISOString() })
-          .eq("id", afectacaoId),
+      executar(
+        async (autorId) =>
+          exigirLinhasGravadas(
+            await hrFrom("pessoas_afectacoes")
+              .update({ confirmada_por: autorId, confirmada_em: new Date().toISOString() }, { count: "exact" })
+              .eq("id", afectacaoId),
+          ),
+        permissaoDaLinha(afectacoes.find((a) => a.id === afectacaoId)),
       ),
-    [executar],
+    [executar, afectacoes],
   );
 
   return {

@@ -2859,6 +2859,7 @@ export const translations = {
     'hr.erros.carregarLista': 'Could not load the people list',
     'hr.erros.guardar': 'Could not save the changes',
     'hr.sucesso.guardado': 'Changes saved',
+    'hr.erroNaoGravadoSemPermissao': 'Not saved: you do not have permission for this change (requires {permissao}).',
     'hr.sucesso.criada': 'Person created',
 
     // HR ronda 2 -- contratos, horario variavel por dia e local, locais
@@ -13113,6 +13114,7 @@ export const translations = {
     'hr.erros.carregarLista': 'Não foi possível carregar a lista de pessoas',
     'hr.erros.guardar': 'Não foi possível guardar as alterações',
     'hr.sucesso.guardado': 'Alterações guardadas',
+    'hr.erroNaoGravadoSemPermissao': 'Não foi gravado: não tem permissão para esta alteração (exige {permissao}).',
     'hr.sucesso.criada': 'Pessoa criada',
 
     // HR ronda 2 -- contratos, horario variavel por dia e local, locais
@@ -23646,6 +23648,7 @@ export const translations = {
     'hr.erros.carregarLista': 'No se pudo cargar la lista de personas',
     'hr.erros.guardar': 'No se pudieron guardar los cambios',
     'hr.sucesso.guardado': 'Cambios guardados',
+    'hr.erroNaoGravadoSemPermissao': 'No se ha guardado: no tiene permiso para este cambio (requiere {permissao}).',
     'hr.sucesso.criada': 'Persona creada',
 
     // HR ronda 2 -- contratos, horario variavel por dia e local, locais
@@ -32706,6 +32709,7 @@ export const translations = {
     'hr.erros.carregarLista': 'Impossible de charger la liste des personnes',
     'hr.erros.guardar': 'Impossible d\'enregistrer les modifications',
     'hr.sucesso.guardado': 'Modifications enregistrées',
+    'hr.erroNaoGravadoSemPermissao': 'Non enregistré : vous n’avez pas l’autorisation pour cette modification (nécessite {permissao}).',
     'hr.sucesso.criada': 'Personne créée',
 
     // HR ronda 2 -- contratos, horario variavel por dia e local, locais
@@ -42259,6 +42263,7 @@ export const translations = {
     'hr.erros.carregarLista': 'Die Personenliste konnte nicht geladen werden',
     'hr.erros.guardar': 'Die Änderungen konnten nicht gespeichert werden',
     'hr.sucesso.guardado': 'Änderungen gespeichert',
+    'hr.erroNaoGravadoSemPermissao': 'Nicht gespeichert: Sie haben keine Berechtigung für diese Änderung (erfordert {permissao}).',
     'hr.sucesso.criada': 'Person erstellt',
 
     // HR ronda 2 -- contratos, horario variavel por dia e local, locais

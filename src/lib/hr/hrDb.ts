@@ -18,6 +18,7 @@
  * colunas. As formas das linhas vivem em `src/types/hr.ts`.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { getLocalizedFallback } from "@/utils/friendlyError";
 
 type UntypedClient = {
   from: (table: string) => any;
@@ -70,6 +71,15 @@ export function exigirLinhasGravadas(resultado: { error: unknown; count?: number
   if (resultado.error) return { error: resultado.error };
   if (resultado.count === 0) return { error: ERRO_NENHUMA_LINHA_GRAVADA };
   return { error: null };
+}
+
+/**
+ * A mensagem para quando `exigirLinhasGravadas` apanha 0 linhas e o ecra sabe
+ * QUE permissao a linha exigia (ex.: afectacoes/colocacao, onde a RLS escolhe
+ * `.edit` ou `.corrigir` pelo periodo da linha). Nunca "Alterações guardadas".
+ */
+export function mensagemNaoGravadoSemPermissao(permissao: string): string {
+  return getLocalizedFallback("hr.erroNaoGravadoSemPermissao").replace("{permissao}", permissao);
 }
 
 /**
