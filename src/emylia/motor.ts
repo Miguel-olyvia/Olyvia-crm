@@ -31,7 +31,7 @@ import { faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnico
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
-import { CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, passoDe, pelaPermissao, podeNeg, temCodigoReal, type PermNeg } from "./permissoes";
+import { CHAVE_CONTACTO_CONCLUIDO, CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, pelaPermissao, podeNeg, soAteAoContacto, temCodigoReal, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
 import { lembrarErp, lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadata";
 import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./inventario/loja";
@@ -1438,7 +1438,13 @@ export function proximo(d: Negocio, S: Estado): Proximo {
   const o = d.orc;
   switch (d.fase) {
     case 0: return { t: "Registar a chamada", sub: "Ligar ao cliente e anotar o resultado.", btn: "Registar chamada", act: "contactar", who: "comercial" };
-    case 1: return { t: "Marcar a visita", sub: "Escolher uma vaga na agenda do comercial.", btn: "Marcar visita", act: "marcarVisita", who: "comercial" };
+    case 1:
+      // 11/11 (fim de contacto): a assistente comercial (contacto.registar sem nenhuma permissão além do contacto) acaba o Contacto com
+      // «Passar ao comercial»; depois espera. O comercial vê o negócio pronto para marcar a visita.
+      if (soAteAoContacto()) return contactoConcluido(d)
+        ? { t: "Com o comercial", sub: "Contacto concluído: o comercial marca a visita.", who: "comercial", wait: true }
+        : { t: "Passar ao comercial", sub: "Acabada a chamada, o comercial marca a visita.", btn: "Passar ao comercial", act: "passarAoComercial", who: "comercial" };
+      return { t: "Marcar a visita", sub: contactoConcluido(d) ? "Contacto concluído pela assistente: pronto para marcar a visita." : "Escolher uma vaga na agenda do comercial.", btn: "Marcar visita", act: "marcarVisita", who: "comercial" };
     case 2: return { t: "Fechar o levantamento", sub: d.orc ? "Mude o que precisa. Ao fechar, o orçamento refaz-se com o que mudou." : "Confirmar o local, as necessidades e as medidas.", btn: "Fechar levantamento", act: "fecharVisita", who: "comercial" };
     case 3:
       if (!o!.enviada) {
@@ -1833,8 +1839,9 @@ export function faseDaPerda(d: Negocio): FasePerdaBase {
  *  tentativas e o voltar a ligar são do contacto; as da agenda das visitas (v<n>_…) e as do diagnóstico (diag_…, div_<divisão>_diag_…) da
  *  visita. As outras não pedem nenhuma destas. */
 export function permDoCampo(k: string): PermNeg | null {
-  // 11/11 (F3): as medidas retificadas (retif_…) pedem negocios.obra.planear, como o passo (20270113110000)
-  if (k === "resultado" || k === "tentativas" || k === "religar") return "contacto.registar";
+  // 11/11: também a marca do contacto concluído (contacto_concluido, 20270113120000); e as medidas retificadas (retif_…) pedem
+  // negocios.obra.planear, como o passo (F3, 20270113110000)
+  if (k === "resultado" || k === "tentativas" || k === "religar" || k === CHAVE_CONTACTO_CONCLUIDO) return "contacto.registar";
   if (k.startsWith("retif_")) return "obra.planear";
   if (/^(v[0-9]+_|diag_|div_[a-z0-9]+_diag_)/.test(k)) return "visita.gerir";
   return null;
@@ -2213,6 +2220,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       return id;
     },
     contactar(id: number) { if (!exigePerm("contacto.registar")) return; const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
+    /** 11/11 (fim de contacto): a assistente comercial acaba o Contacto (as respostas da chamada, o que o cliente quer, a morada e a
+     *  qualificação) e passa o negócio ao comercial: fica em Contacto, com a marca contacto_concluido (uma resposta, sem colunas novas). */
+    passarAoComercial(id: number) {
+      if (!exigePerm("contacto.registar")) return;
+      const d = deal(id);
+      if (d.fase !== 1 || contactoConcluido(d)) return;
+      if (!portao(d, CONTACTO)) return;
+      d.f[CHAVE_CONTACTO_CONCLUIDO] = isoDia(new Date());
+      log(d, "Contacto concluído · passou ao comercial");
+      avisar({ msg: "Passou ao comercial", sub: "O comercial vê o negócio pronto para marcar a visita.", kind: "ok" });
+    },
     marcarVisita(id: number, slot?: string, quemSugerido?: string) { if (!exigePerm("visita.gerir")) return; const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
       // 23/10: com a equipa real, a visita fica na agenda de quem a marca (e não na do Rúben de exemplo)
       // 2/11: ou de quem a Olyvia sugeriu para a vaga (livre e mais perto: sugestaoVisita.ts)

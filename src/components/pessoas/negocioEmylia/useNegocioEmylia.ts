@@ -16,6 +16,8 @@ export interface NegocioEmylia {
   d: Negocio | undefined;
   /** O negócio tem documentos do CRM: a Emylia lê-o mas não o grava (a base recusa, NE005). */
   docsCrm: boolean;
+  /** 11/11 (fim de contacto): o negócio já está com o comercial e quem entrou é a assistente comercial: só de leitura. */
+  comOComercial?: boolean;
   ctx: Ctx | null;
   /** Ler outra vez; `false` se não se leu (há alterações por gravar, e diz-se nos avisos). */
   reler: () => boolean;
@@ -45,5 +47,6 @@ export function useNegocioEmylia(org: string | null, negocioId: string, aoGravar
   }, [armazem, idDoNegocio]);
   if (!armazem || !leitura) return SEM_NEGOCIO;
   const ctx: Ctx | null = d ? { S: armazem.S, A: armazem.A, run: armazem.run, go: armazem.go, q: "" } : null;
-  return { leitura, gravacao: armazem.gravacao(), avisos: armazem.avisos(), d, docsCrm: d ? armazem.docsCrm(negocioId) : false, ctx, reler: armazem.reler, regravar: armazem.regravar };
+  return { leitura, gravacao: armazem.gravacao(), avisos: armazem.avisos(), d, docsCrm: d ? armazem.docsCrm(negocioId) : false,
+    comOComercial: d ? armazem.comOComercial(negocioId) : false, ctx, reler: armazem.reler, regravar: armazem.regravar };
 }

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, aberto, eur, proximo, tot, type Negocio } from "./motor";
 import { IconeFase, type Ctx } from "./pecas";
+import { PRONTO_PARA_VISITA, contactoConcluido, soAteAoContacto } from "./permissoes";
 import { FILTROS_TRABALHO } from "./filtrosTrabalho";
 import { orgDoModoReal } from "./acessosPortal";
 import { contactoDaPessoa, emailDaPessoa, usePesquisaPessoas, type PessoaPesquisada } from "./real/pessoasReal";
@@ -43,6 +44,8 @@ export function NegociosSimples({ S, A, go, run, q, setQ, podeCriarNegocio }: Ct
             d.fresh ? "border-primary motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200" : "border-border")}>
           <span className="block text-base font-semibold text-foreground">{d.nome}</span>
           <span className="mt-0.5 block text-sm text-muted-foreground">{d.servico}{loc ? " · " + loc : ""}{d.orc ? ` · ${eur(Math.round(tot(d, S).pf)).replace(/,00$/, "")} € sem IVA` : ""}</span>
+          {/* 11/11 (fim de contacto): a assistente comercial passou-o ao comercial; quem marca a visita vê-o pronto */}
+          {contactoConcluido(d) && !soAteAoContacto() && <span className="mt-2 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary">{PRONTO_PARA_VISITA}</span>}
           <span className={cn("mt-2 block text-sm font-medium", late ? "text-destructive" : p.wait || p.done ? "text-muted-foreground" : "text-primary")}>
             {p.t}{late ? " · há 2 dias" : ""}
             {!p.wait && !p.done && <ArrowRight className="ml-1 inline h-3.5 w-3.5 align-[-2px] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />}

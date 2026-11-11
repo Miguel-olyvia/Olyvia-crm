@@ -2,7 +2,7 @@
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon, FlaskConical } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, UserCheck, Wrench, type LucideIcon, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -47,7 +47,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos } from "./permissoes";
+import { SEM_PERM, contactoConcluido, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos, soAteAoContacto } from "./permissoes";
 import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -287,6 +287,20 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ), d.f), id: "quem", titulo: "Quem pede", personalizado: false, resumo: [d.nome, d.tel, d.f.pedido || ""].filter(Boolean) },
     ];
   };
+  // 11/11 (fim de contacto): o passo final da assistente comercial
+  const passoPassarAoComercial = (): Passo => {
+    const feito = contactoConcluido(d);
+    return {
+      id: "comercial", titulo: "Passar ao comercial", icone: UserCheck, feito, resumo: feito ? ["Contacto concluído"] : [], corpo: (
+        <div className="space-y-3">
+          <p className="text-[15px] text-muted-foreground">{feito
+            ? "Contacto concluído. O negócio está com o comercial, que marca a visita."
+            : "Acabada a chamada, o negócio passa ao comercial, que marca a visita. Fica em Contacto e deixa de poder ser mudado por aqui."}</p>
+          {!feito && <Button size="lg" className="min-h-11" onClick={go(() => A.passarAoComercial(d.id))}><UserCheck className="mr-1.5 h-4 w-4" aria-hidden="true" />Passar ao comercial</Button>}
+        </div>
+      ),
+    };
+  };
   let passos: Passo[] = [];
   if (fase === 0) {
     passos = [
@@ -309,7 +323,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 4/11 (Rúben): a morada que a lead já trazia propõe-se primeiro (validar, editar ou outra): MoradaDaObra.tsx
       { ...g(CONTACTO[2], MapPin), corpo: <MoradaDaObra ctx={ctx} d={d}><Campos grupo={E(CONTACTO[2])} {...fx} /></MoradaDaObra> },
       { ...g(CONTACTO[3], Sparkles) },
-      { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
+      // 11/11 (fim de contacto): a assistente comercial (contacto.registar sem nenhuma permissão além do contacto) não marca a visita:
+      // o último passo é «Passar ao comercial» (A.passarAoComercial), e o negócio fica em Contacto, pronto para o comercial
+      ...(soAteAoContacto() ? [passoPassarAoComercial()] : [{ id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>
           {/* 2/11 (reunião): a sugestão de quem vai, pela agenda (livre a essa hora) e pela proximidade (visitas perto nesse dia) */}
@@ -327,7 +343,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           </div>
           <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot, sugerirQuemVai(S.deals, d, slot, opcoesDaVisita())?.quem))()} />
         </div>
-      ) },
+      ) } as Passo]),
     ];
   } else if (fase === 2) {
     const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);

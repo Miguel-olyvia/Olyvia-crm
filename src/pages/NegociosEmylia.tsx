@@ -40,7 +40,7 @@ import { definirMoradaDaEntidade } from "@/emylia/MoradaDeQuemPede";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
-import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
+import { AVISO_COM_O_COMERCIAL, comOComercial, definirVerCustos, podeNeg, soAteAoContacto } from "@/emylia/permissoes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import { lerPermissoesReais, usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
@@ -179,6 +179,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const refs = useRef(new Map<number, RefNegocio>());
   // os negócios do CRM (com documentos do CRM): lêem-se, mas nunca se gravam por aqui
   const soLeitura = useRef(new Set<number>());
+  // 11/11 (fim de contacto): os negócios que, lidos da base, já estão com o comercial (em Visita ou mais à frente, ou com o contacto
+  // concluído); para a assistente comercial (soAteAoContacto) ficam só de leitura, como o servidor (20270113120000)
+  const comComercial = useRef(new Set<number>());
+  const bloqueadosAssistente = (): ReadonlySet<number> => (soAteAoContacto() ? comComercial.current : new Set<number>());
   // 11/11 (F1): o Catálogo não carregou: os negócios abrem só para consulta (sem o Catálogo, gravar perdia os serviços)
   const catalogoFalhou = useRef(false);
   const foto = useRef(new Map<number, string>());
@@ -205,6 +209,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
     soLeitura.current = new Set(lidos.filter((n) => n.docsCrm || catalogoFalhou.current).map((n) => n.linhas.negocio.numero));
     S.deals = lidos.map(negocioParaOEcra);
+    comComercial.current = new Set(S.deals.filter(comOComercial).map((d) => d.id));
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
@@ -251,13 +256,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       do {
         deNovo.current = false;
         // 09/11 (20270111100000): com a leitura reduzida só se grava a obra (neg_guardar_negocio recusa-o; sem o «Não gravou»)
-        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current, { soObra: soExecucaoRef.current });
+        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, new Set([...soLeitura.current, ...bloqueadosAssistente()]), { soObra: soExecucaoRef.current });
         if (r.reler) relerFinanceiro = true;
         if (relerPedido.current) { relerPedido.current = false; relerFinanceiro = true; }
         if (r.erros.length) { semErros = false; setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
       } while (deNovo.current);
+      // 11/11 (fim de contacto): gravado sem erros, o que está no ecrã é o da base: o negócio passado agora ao comercial fica só de leitura
+      if (semErros) comComercial.current = new Set(S.deals.filter(comOComercial).map((d) => d.id));
       // 2/11 (20270103900000): as respostas do cliente aplicadas ao abrir ficam marcadas, agora que o negócio está gravado
       if (semErros && respostasAplicadas.current.length) {
         try { await marcarRespostas(supabase, org, respostasAplicadas.current.splice(0)); }
@@ -749,6 +756,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
   const semContaLigada = !!meus && !meus.todos && !meus.pessoa && meus.papeis.length === 0 && tecnicoPorPerfil;
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
+  const comOComercialAqui = S.view === "negocio" && S.deal != null && !doCrm && bloqueadosAssistente().has(S.deal);
 
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver os negócios.</div>;
@@ -804,8 +812,11 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
                   : "Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava."}
               </p>
             )}
+            {comOComercialAqui && (
+              <p role="status" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{AVISO_COM_O_COMERCIAL}</p>
+            )}
             <NegocioSimples {...ctx} ajustarPassos={(passos, d) => {
-              const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm };
+              const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm && !comOComercialAqui };
               return comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null });
             }} />
           </>
