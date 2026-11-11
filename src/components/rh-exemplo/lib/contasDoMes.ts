@@ -4,8 +4,8 @@
  *
  * Regras (decididas com o utilizador):
  *  - TSU = a taxa da entidade empregadora em Portugal, FIXA (`TSU_EMPREGADOR_PCT`); so a «taxa desta pessoa» a substitui
- *    (regimes de taxa reduzida). Incide sobre a retribuicao do mes SEM quilometros nem ajudas de custo (SUPOSICAO: dentro dos
- *    limites legais nao sao base de TSU); os valores manuais entram na base.
+ *    (regimes de taxa reduzida). Incide SO sobre o salario base e os subsidios (duodecimos, alimentacao, ferias e Natal), menos o
+ *    desconto de faltas; ficam fora horas extra, IHT, quilometros, ajudas de custo e valores manuais (decisao do utilizador).
  *  - O seguro de acidentes e uma percentagem POR CARGO e incide so sobre o SALARIO BASE mensal (sem duodecimos, IHT, km nem ajudas).
  *  - Nada se inventa: so se decompoe o que o processamento devolveu; o que ele nao explica fica em «Outras componentes».
  */
@@ -143,7 +143,7 @@ export interface EntradaContas {
   /** Sem decomposicao (estimativa pelo cargo) a retribuicao conta toda como salario base. */
   decomposicao: DecomposicaoRetribuicao | null;
   estimado: boolean;
-  /** Os lancamentos manuais do mes (premios, valores negociados): entram na retribuicao e na base da TSU. */
+  /** Os lancamentos manuais do mes (premios, valores negociados): entram na retribuicao mas nao na base da TSU. */
   manuais: number;
   /** O que os equipamentos custam no mes. */
   equipamentos: number;
@@ -177,12 +177,12 @@ export interface ContasDoMes {
   linhas: LinhaConta[];
   /** A retribuicao do mes com os manuais. `null` = sem retribuicao. */
   bruto: number | null;
-  /** A base da TSU: a retribuicao com os manuais, menos km e ajudas. */
+  /** A base da TSU: salario base + subsidios - faltas (sem horas extra, IHT, km, ajudas nem manuais). */
   baseTsu: number;
   tsu: number;
   seguro: number;
   salarioBase: number | null;
-  /** O que o km e as ajudas valem (ficam fora da base da TSU). */
+  /** O que o km e as ajudas valem (ficam fora da base da TSU, tal como as horas extra, o IHT e os manuais). */
   kmEAjudas: number;
   total: number | null;
 }
@@ -266,7 +266,7 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
     }
     if (d.km) parcelas.push(parcela("km", d.km.valor, formulaUnitaria(d.km, `${numero(d.km.quantidade, 0, 2)} km`, numero, eur, calculado)));
     if (d.ajudas) parcelas.push(parcela("ajudas", d.ajudas.valor, formulaUnitaria(d.ajudas, `${numero(d.ajudas.quantidade, 0, 2)} ${dias}`, numero, eur, calculado)));
-    // Os subsidios de ferias e de Natal vem antes dos manuais: entram na soma explicada (nunca em «Outras componentes») e na base da TSU.
+    // Os subsidios de ferias e de Natal vem antes dos manuais: entram na soma explicada (nunca em «Outras componentes») e, sendo subsidios, na base da TSU.
     const formulaSubsidio = (valor: number): string => formulaSubsidioFeriasNatal(d.subsidiosDetalhe, valor, rotuloParteSemDuodecimos, eur, pct);
     if ((d.subsidioFerias ?? 0) !== 0) parcelas.push(parcela("subsidioFerias", d.subsidioFerias ?? 0, formulaSubsidio(d.subsidioFerias ?? 0)));
     if ((d.subsidioNatal ?? 0) !== 0) parcelas.push(parcela("subsidioNatal", d.subsidioNatal ?? 0, formulaSubsidio(d.subsidioNatal ?? 0)));
@@ -283,8 +283,12 @@ export function contasDoMes(e: EntradaContas, opcoes: OpcoesContas = {}): Contas
   const retribuicaoCent = parcelas.reduce((s, l) => s + centimos(l.valor), 0);
   const bruto = emEuros(retribuicaoCent);
 
-  // 2. TSU: base = retribuicao com os manuais, sem km nem ajudas.
-  const baseTsu = Math.max(0, arredondar(bruto - kmEAjudas));
+  // 2. TSU: base = salario base + subsidios (duodecimos, alimentacao, ferias, Natal) - faltas, nunca negativa. Fora: horas extra, IHT, km, ajudas e manuais.
+  // Sem decomposicao (estimativa pelo cargo) a retribuicao e toda salario base.
+  const baseTsuCent = d
+    ? centimos(salarioBase) + centimos(duodecimos) + centimos(d.subsidioAlimentacao) + centimos(d.subsidioFerias ?? 0) + centimos(d.subsidioNatal ?? 0) - centimos(d.descontoFaltas)
+    : centimos(e.retribuicaoMes);
+  const baseTsu = Math.max(0, emEuros(baseTsuCent));
   const tsu = arredondar((baseTsu * e.taxaPct) / 100);
   // 3. Seguro do cargo, so sobre o salario base.
   const comSeguro = !e.seguroDesconhecido && e.seguroPct !== null && e.seguroPct > 0;

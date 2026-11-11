@@ -1017,7 +1017,7 @@ describe("AbaCusto: as contas do mes", () => {
     expect(normal(linhaDe("TSU da empresa").textContent)).toContain("23,75 % × 1 200,00 € = 285,00 €");
     expect(normal(linhaDe(/^Seguro de acidentes de trabalho/).textContent)).toContain("5 % × 1 200,00 € = 60,00 €");
     expect(normal(linhaDe(/Custo total/).textContent)).toContain("1585,00");
-    expect(screen.getByText("A base da TSU é a retribuição do mês sem km nem ajudas de custo (dentro dos limites legais); inclui o subsídio de alimentação, o IHT e as horas extra. Confirme com a contabilidade.")).toBeInTheDocument();
+    expect(screen.getByText("A base da TSU é o salário base mais os subsídios (alimentação, férias e Natal), menos o desconto das faltas; ficam de fora as horas extra, o IHT, os km, as ajudas de custo e os valores lançados à mão. Confirme com a contabilidade.")).toBeInTheDocument();
   });
 
   it("cargo sem seguro: a linha do seguro diz «Sem seguro neste cargo» e vale 0", async () => {

@@ -27,20 +27,20 @@ const contexto = (parcial: Partial<ContextoCusto> = {}): ContextoCusto => ({
 });
 
 describe("o custo de uma pessoa num mês", () => {
-  it("separa a TSU e o seguro do cargo sem perder um cêntimo: TSU 308,75 (sobre 1 300) + seguro 18 (1,5 % de 1 200) = 326,75", () => {
+  it("separa a TSU e o seguro do cargo sem perder um cêntimo: TSU 285 (sobre 1 200, os avulsos ficam fora) + seguro 18 (1,5 % de 1 200) = 303", () => {
     const r = custoDaPessoaNoMes(pessoa(), contexto());
-    expect(r.encargos).toBe(326.75);
+    expect(r.encargos).toBe(303);
     expect(r.seguro).toBe(18);
-    expect(r.encargosTaxa).toBe(308.75);
+    expect(r.encargosTaxa).toBe(285);
     expect(r.encargosTaxa + r.seguro).toBe(r.encargos);
   });
 
-  it("o total é retribuição + avulsos + TSU + seguro + equipamentos (1200 + 100 + 308,75 + 18 + 25 = 1651,75)", () => {
+  it("o total é retribuição + avulsos + TSU + seguro + equipamentos (1200 + 100 + 285 + 18 + 25 = 1628)", () => {
     const r = custoDaPessoaNoMes(pessoa(), contexto());
     expect(r.avulsos).toBe(100);
     expect(r.outrosCustos).toBe(25);
     expect(r.nEquipamentos).toBe(1);
-    expect(r.total).toBe(1651.75);
+    expect(r.total).toBe(1628);
   });
 
   it("só conta o que é da pessoa: avulsos e equipamentos de outra pessoa ficam de fora", () => {
@@ -50,7 +50,7 @@ describe("o custo de uma pessoa num mês", () => {
 
   it("a exceção de taxa da pessoa muda os encargos", () => {
     const r = custoDaPessoaNoMes(pessoa(), contexto({ excecoes: { p1: 10 } }));
-    expect(r.encargosTaxa).toBe(130);
+    expect(r.encargosTaxa).toBe(120);
   });
 
   it("cargo sem seguro: sem seguro e o custo so leva a TSU", () => {
@@ -79,14 +79,14 @@ describe("o custo de uma pessoa num mês", () => {
 describe("a linha e a composição", () => {
   it("o custo por hora é o total a dividir pelas horas previstas do mês", () => {
     const linha = montarLinhaCusto(pessoa(), contexto());
-    // Setembro de 2026 tem 22 dias úteis: 22 x 40 / 5 = 176 h; 1651,75 / 176 = 9,38.
-    expect(linha.porHora).toBe(9.38);
+    // Setembro de 2026 tem 22 dias úteis: 22 x 40 / 5 = 176 h; 1628 / 176 = 9,25.
+    expect(linha.porHora).toBe(9.25);
   });
 
   it("a composição tem uma percentagem por parte e fecha em 100 (com a tolerância de uma casa)", () => {
     const partes = montarLinhaCusto(pessoa(), contexto()).composicao;
     expect(partes.map((p) => p.chave)).toEqual(["retribuicao", "avulsos", "encargos", "seguro", "equipamentos"]);
-    expect(partes[0]).toMatchObject({ valor: 1200, pct: 72.7 });
+    expect(partes[0]).toMatchObject({ valor: 1200, pct: 73.7 });
     expect(Math.abs(partes.reduce((s, p) => s + p.pct, 0) - 100)).toBeLessThan(0.5);
   });
 
@@ -108,8 +108,8 @@ describe("os totais da organização", () => {
     expect(t.pessoas).toBe(3);
     expect(t.retribuicao).toBe(3200);
     expect(t.semValor).toBe(1);
-    // 1651,75 (Inês) + 2505 (Rui: 2000 + 475 de TSU + 30 de seguro); quem não tem retribuição não soma.
-    expect(t.total).toBe(4156.75);
+    // 1628 (Inês) + 2505 (Rui: 2000 + 475 de TSU + 30 de seguro); quem não tem retribuição não soma.
+    expect(t.total).toBe(4133);
   });
 
   it("a soma das partes é o total (sem contar quem não tem retribuição)", () => {
