@@ -172,3 +172,23 @@ describe("as instruções no Hoje do técnico (teste da Obra)", () => {
     expect(instrucoesDe({ nome: "Canalização", sk: "Canalizador" }).passos.join(" ")).toMatch(/pontos de água/);
   });
 });
+
+describe("arrancar a obra hoje (teste da Obra, 1026)", () => {
+  it("antes da data planeada, as tarefas e o plano do orçamento ficam nas datas em que estavam", async () => {
+    const { arrancarHoje } = await import("../motor");
+    const p = plano([T("Canalização", 1, 1, "a"), T("Louças", 3, 1, "b")], 0);
+    p.inicio = "2027-03-08"; p.estado = "aprovado"; p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
+    arrancarHoje(p, new Date(2027, 2, 3)); // qua 3/3: faltavam 3 dias úteis
+    expect(p.inicio).toBe("2027-03-03");
+    expect(p.tasks.map((t) => t.dia)).toEqual([4, 6]); // ter 9/3 e qui 11/3, como antes
+    expect(p.base!.map((b) => b.dia)).toEqual([4, 6]);
+    expect(derrapagem(p)).toBe(0);
+  });
+  it("depois da data planeada, anda tudo para hoje", async () => {
+    const { arrancarHoje } = await import("../motor");
+    const p = plano([T("Canalização", 1, 1, "a")], 0);
+    p.inicio = "2027-03-01";
+    arrancarHoje(p, new Date(2027, 2, 3));
+    expect([p.inicio, p.tasks[0].dia]).toEqual(["2027-03-03", 1]);
+  });
+});
