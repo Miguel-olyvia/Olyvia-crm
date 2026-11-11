@@ -8,6 +8,7 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { AuthError, resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { ErroGemini, gerarJson } from "../_shared/gemini.ts";
+import { ESQUEMA_INSIGHTS, INSTRUCAO_INSIGHTS, limparInsights, transcricaoNumerada } from "../_shared/conversa.ts";
 
 const RATE_LIMIT = { bucket: "chamada-campos", maxAttempts: 30, windowMinutes: 1 };
 const MODELO = Deno.env.get("CHAMADAS_GEMINI_MODELO_CAMPOS") ?? "gemini-3.8-flash";
@@ -21,8 +22,11 @@ const campoDef = z.object({
   un: z.string().max(20).optional(),
 });
 const pedido = z.object({
-  segmentos: z.array(z.object({ inicio: z.number(), texto: z.string().max(2000), falante: z.enum(["comercial", "cliente", "desconhecido"]) })).max(2000),
-  campos: z.array(campoDef).min(1).max(200),  // a visita tem muitos campos (o local, a área, as peças)
+  segmentos: z.array(z.object({ inicio: z.number(), texto: z.string().max(4000), falante: z.enum(["comercial", "cliente", "outro", "desconhecido"]) })).min(1).max(3000),
+  // 11/11: sem campos, só a análise (os insights de uma conversa já guardada)
+  campos: z.array(campoDef).max(200).default([]),  // a visita tem muitos campos (o local, a área, as peças)
+  // 11/11 (Rúben: «retirar muitos mais insights»): o que se pede; por defeito só os campos, como antes
+  pedir: z.array(z.enum(["campos", "insights"])).min(1).default(["campos"]),
   // a data de hoje no fuso da comercial (AAAA-MM-DD), para «dia 10» e «amanhã» virarem datas
   hoje: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   // 5/11: «visita» é a conversa da visita a casa do cliente (a comercial mede, mostra amostras e o cliente escolhe as peças)
@@ -101,7 +105,9 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { segmentos, campos, hoje, tipo } = parsed.data;
+    const { segmentos, campos, hoje, tipo, pedir } = parsed.data;
+    const querCampos = pedir.includes("campos") && campos.length > 0, querInsights = pedir.includes("insights");
+    if (!querCampos && !querInsights) return json({ error: "Nada a pedir: sem campos nem insights" }, 400);
 
     const limite = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
     if (!limite.allowed) return rateLimitResponse(limite, corsHeaders);
@@ -118,12 +124,27 @@ serve(async (req) => {
     const texto = (hoje ? `Hoje é ${hoje}. Datas ditas de forma relativa («dia 10», «amanhã», «para a semana») ` +
       "convertem-se para AAAA-MM-DD, assumindo a próxima ocorrência a partir de hoje.\n\n" : "") +
       "# Campos a preencher\n" + campos.map(descrever).join("\n") +
-      "\n\n# Transcrição da chamada\n" + segmentos.map((s, i) => `[${i}] ${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : "Alguém"}: ${s.texto}`).join("\n") +
+      "\n\n# Transcrição da chamada\n" + segmentos.map((s, i) => `[${i}] ${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : s.falante === "outro" ? "Outra pessoa" : "Alguém"}: ${s.texto}`).join("\n") +
       "\n\nPreenche o JSON com 'falantes' (uma entrada por linha), 'campos' (uma lista: um objeto por campo que consegues preencher, com chave, valor, confianca e excerto; os que não foram ditos ficam de fora) e 'resumo'.";
 
-    let r: Resposta;
+    // 11/11: a análise vai em paralelo, num pedido à parte (juntar tudo num só pedido piorava os campos)
+    const textoInsights = (hoje ? `Hoje é ${hoje}. Datas relativas («amanhã», «dia 10», «sexta») convertem-se a partir de hoje.\n\n` : "") +
+      `# Transcrição da ${tipo === "visita" ? "visita" : "chamada"}\n` + transcricaoNumerada(segmentos);
+    let r: Resposta = { campos: [], resumo: "" };
+    let insights: Record<string, unknown> | null = null;
     try {
-      r = await gerarJson<Resposta>({ modelo: MODELO, partes: [{ text: texto }], esquema, instrucaoSistema: tipo === "visita" ? `${INSTRUCAO}\n\n${SOBRE_A_VISITA}` : INSTRUCAO });
+      const [rc, ri] = await Promise.all([
+        querCampos
+          ? gerarJson<Resposta>({ modelo: MODELO, partes: [{ text: texto }], esquema, instrucaoSistema: tipo === "visita" ? `${INSTRUCAO}\n\n${SOBRE_A_VISITA}` : INSTRUCAO })
+          : Promise.resolve(null),
+        querInsights
+          ? gerarJson<Record<string, unknown>>({ modelo: MODELO, partes: [{ text: textoInsights }], esquema: ESQUEMA_INSIGHTS, instrucaoSistema: INSTRUCAO_INSIGHTS(tipo ?? "chamada") })
+            // sem a análise, os campos chegam na mesma (só falha tudo quando se pediram só os insights)
+            .catch((e) => { if (!querCampos) throw e; console.error("[chamada-campos] insights", e); return null; })
+          : Promise.resolve(null),
+      ]);
+      if (rc) r = rc;
+      if (ri) insights = limparInsights(ri, segmentos.length);
     } catch (e) {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;
@@ -144,7 +165,8 @@ serve(async (req) => {
     // quem disse cada linha, revisto pelo sentido; só se vier uma entrada por linha (senão fica o que a comparação de vozes deu)
     const falantes = Array.isArray(r.falantes) && r.falantes.length === segmentos.length && r.falantes.every((f) => f === "comercial" || f === "cliente")
       ? r.falantes : undefined;
-    return json({ resumo: String(r.resumo ?? "").trim(), motor: `gemini:${MODELO}`, fichas: [{ campos: saida }], ...(falantes ? { falantes } : {}) });
+    return json({ resumo: String(r.resumo ?? "").trim() || String(insights?.resumo ?? ""), motor: `gemini:${MODELO}`,
+      fichas: [{ campos: querCampos ? saida : [] }], ...(falantes ? { falantes } : {}), ...(insights ? { insights } : {}) });
   } catch (error) {
     if (error instanceof AuthError) return authErrorResponse(error, corsHeaders);
     // qualquer outro erro vai com cabeçalhos CORS e a mensagem: sem isto o browser só diz

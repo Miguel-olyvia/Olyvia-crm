@@ -8,6 +8,7 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { AuthError, resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { ErroGemini, gerarJson, type ParteGemini } from "../_shared/gemini.ts";
+import { ESQUEMA_BLOCO, INSTRUCAO_BLOCO, comContexto, frasesDoBloco } from "../_shared/conversa.ts";
 
 // Uma chamada dá uma fala a cada poucos segundos: 240 por minuto por pessoa chega para várias chamadas.
 const RATE_LIMIT = { bucket: "chamada-transcrever", maxAttempts: 240, windowMinutes: 1 };
@@ -19,9 +20,16 @@ const CONFIANCA_MIN = 0.5;
 // 20 s de WAV a 16 kHz são 640 KB; em base64 ~860 KB. Mais do que isso não é uma fala.
 const MAX_B64 = 1_200_000;
 const MAX_B64_VISITA = 1_800_000; // 9/11: na visita juntam-se falas seguidas até ~20 s
+// 11/11: a segunda passagem manda o som contínuo em blocos de 35 a 55 s (o último de um ficheiro pode ir até 65 s): ~2,8 MB em base64
+const MAX_B64_BLOCO = 3_000_000;
+// 11/11: os blocos vão ao modelo maior; nos testes com a chamada e a visita reais, quase sem erros e com quem fala certo
+const MODELO_BLOCO = Deno.env.get("CHAMADAS_GEMINI_MODELO_BLOCO") ?? "gemini-3.8-flash";
+const MODELO_BLOCO_RESERVA = "gemini-3.5-flash";
 
 const pedido = z.object({
-  audio_b64: z.string().min(100).max(MAX_B64_VISITA),
+  audio_b64: z.string().min(100).max(MAX_B64_BLOCO),
+  // 11/11: «fala» é a pré-visualização em direto (uma fala curta); «bloco» é o som contínuo de ~50 s, transcrito com quem fala
+  modo: z.enum(["fala", "bloco"]).default("fala"),
   // 9/11: «visita» (o telemóvel na mesa, em casa do cliente) ou «chamada» (o telemóvel em alta voz junto ao microfone)
   tipo: z.enum(["chamada", "visita"]).default("chamada"),
   // 9/11: o fim do que já se transcreveu, só para o modelo perceber o assunto (não se transcreve)
@@ -107,9 +115,32 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { audio_b64, deslocamento_s, referencia_b64, referencia_texto, tipo, contexto } = parsed.data;
+    const { audio_b64, deslocamento_s, referencia_b64, referencia_texto, tipo, contexto, modo: modoPedido } = parsed.data;
     const visita = tipo === "visita";
+    if (modoPedido === "bloco") {
+      const limiteB = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT, identifier: caller.anewUserId });
+      if (!limiteB.allowed) return rateLimitResponse(limiteB, corsHeaders);
+      await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT.bucket, caller.anewUserId);
+      // a duração do bloco (WAV de 16 bits a 16 kHz: 32 000 bytes por segundo), para os tempos não passarem do fim
+      const duracao = Math.max(0, (audio_b64.length * 3) / 4 - 44) / 32000;
+      const partes: ParteGemini[] = [{ inline_data: { mime_type: "audio/wav", data: audio_b64 } }, { text: comContexto(INSTRUCAO_BLOCO[tipo], contexto) }];
+      let bruto: unknown, modeloUsado = MODELO_BLOCO;
+      try {
+        bruto = await gerarJson({ modelo: MODELO_BLOCO, partes, esquema: ESQUEMA_BLOCO }).catch((e) => {
+          if (e instanceof ErroGemini && e.status >= 400 && e.status < 500 && e.status !== 429) {
+            modeloUsado = MODELO_BLOCO_RESERVA;
+            return gerarJson({ modelo: MODELO_BLOCO_RESERVA, partes, esquema: ESQUEMA_BLOCO });
+          }
+          throw e;
+        });
+      } catch (e) {
+        if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
+        throw e;
+      }
+      return json({ frases: frasesDoBloco(bruto, deslocamento_s, duracao), modelo: modeloUsado, modo: "bloco" });
+    }
     if (!visita && audio_b64.length > MAX_B64) return json({ error: "Fala longa demais" }, 400);
+    if (audio_b64.length > MAX_B64_VISITA) return json({ error: "Fala longa demais" }, 400);
     const modelo = visita ? MODELO_VISITA : MODELO;
     const instrucao = (visita ? INSTRUCAO_VISITA : INSTRUCAO_BASE) +
       (visita && contexto ? `

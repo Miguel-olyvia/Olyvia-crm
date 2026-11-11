@@ -3,7 +3,8 @@
 // Gemini. No fim, a transcrição e os campos vão à função chamada-campos. Nada corre no PC de ninguém.
 import { supabase } from "@/integrations/supabase/client";
 import type { Def, Grupo } from "./campos";
-import type { CampoExtraido, Extracao, Fala } from "./chamadaMotor";
+import { nomeFalante, type CampoExtraido, type Extracao, type Fala, type Insights } from "./chamadaMotor";
+import { cortarEmBlocos, normalizar, rmsMaximo } from "./blocosAudio";
 import type { PlantaLida } from "./planta";
 
 export const TAXA = 16000;
@@ -98,50 +99,8 @@ export async function carregarVad(): Promise<typeof import("@ricky0123/vad-web")
     throw e;
   }
 }
-export interface Ouvinte { parar: () => Promise<void> }
-
-/** Liga o microfone com o VAD Silero; chama `aoTerminarFala` com cada fala (float32 a 16 kHz) e o seu início em segundos. */
-export async function ouvirMicrofone(aoTerminarFala: (pcm: Float32Array, inicioS: number) => void, aoNivel?: (aFalar: boolean) => void): Promise<Ouvinte> {
-  const { MicVAD } = await carregarVad();
-  await semWorkers();
-  const t0 = performance.now();
-  let inicioFala = 0;
-  const vad = await MicVAD.new({
-    baseAssetPath: VAD_ASSETS,
-    onnxWASMBasePath: ONNX_BASE,
-    model: "v5",
-    positiveSpeechThreshold: 0.5,
-    negativeSpeechThreshold: 0.35,
-    redemptionMs: 400,       // ao telefone responde-se depressa: 0,4 s de silêncio fecha a fala
-    preSpeechPadMs: 300,
-    minSpeechMs: 350,
-    onSpeechStart: () => { inicioFala = (performance.now() - t0) / 1000; aoNivel?.(true); },
-    onSpeechEnd: (audio) => { aoNivel?.(false); aoTerminarFala(audio, inicioFala); },
-    onVADMisfire: () => aoNivel?.(false),
-  });
-  vad.start();
-  return { parar: async () => { try { vad.pause(); vad.destroy(); } catch { /* já parado */ } } };
-}
-
-/** O mesmo VAD sobre um ficheiro (a chamada de exemplo), para testar sem microfone. */
-export async function falasDeFicheiro(url: string): Promise<{ pcm: Float32Array; inicioS: number }[]> {
-  const { NonRealTimeVAD } = await carregarVad();
-  await semWorkers();
-  const resposta = await fetch(url);
-  const ctx = new AudioContext({ sampleRate: TAXA });
-  const dec = await ctx.decodeAudioData(await resposta.arrayBuffer());
-  const pcm = dec.getChannelData(0);
-  await ctx.close();
-  // o VAD de ficheiro tem opções próprias: só o modelo «legacy» e o runtime configurado por ortConfig
-  const vad = await NonRealTimeVAD.new({
-    modelURL: VAD_ASSETS + "silero_vad_legacy.onnx",
-    ortConfig: (ort: { env: { wasm: { numThreads: number; wasmPaths: unknown } } }) => { ort.env.wasm.numThreads = 1; ort.env.wasm.wasmPaths = ORT_FICHEIROS; },
-    positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35, redemptionMs: 400, preSpeechPadMs: 300, minSpeechMs: 350,
-  });
-  const falas: { pcm: Float32Array; inicioS: number }[] = [];
-  for await (const { audio, start } of vad.run(pcm, TAXA)) falas.push({ pcm: audio, inicioS: start / 1000 });
-  return falas;
-}
+// 11/11: o microfone é do gravador (gravador.ts) e os ficheiros transcrevem-se por blocos (transcreverAudio, em baixo); as funções
+// antigas daqui (ouvirMicrofone, falasDeFicheiro) saíram.
 
 // ---- as duas funções Supabase -------------------------------------------------------------------
 /** A mensagem útil de um erro do functions.invoke: o corpo {error} que a função devolveu, se houver. */
@@ -167,14 +126,82 @@ export async function transcreverFala(pcm: Float32Array, inicioS: number, refere
   return (data?.frases ?? []) as Frase[];
 }
 
-export async function preencherCampos(segmentos: Fala[], grupos: Grupo[], tipo: "chamada" | "visita" = "chamada"): Promise<Extracao> {
+/** 11/11: a segunda passagem. Um bloco contínuo (~50 s) volta transcrito pelo modelo maior, com quem fala em cada frase; `contexto` é o fim
+ *  do que já se reviu (com quem fala), só para o assunto e para manter as mesmas pessoas. As falas voltam marcadas como revistas. */
+export async function transcreverBloco(pcm: Float32Array, inicioS: number, tipo: "chamada" | "visita", contexto = ""): Promise<Fala[]> {
+  const { data, error } = await supabase.functions.invoke("chamada-transcrever", {
+    body: { modo: "bloco", audio_b64: wavBase64(normalizar(pcm)), deslocamento_s: inicioS, tipo, ...(contexto ? { contexto: contexto.slice(-1400) } : {}) },
+  });
+  if (error) throw new Error(await mensagemDoErro(error, "chamada-transcrever"));
+  // uma função antiga (sem o modo bloco) devolve frases sem quem fala: aí não se marcam como revistas
+  const frases = (data?.frases ?? []) as (Frase & { falante?: Fala["falante"] })[];
+  const revista = data?.modo === "bloco";
+  return frases.map((f) => ({ inicio: f.inicio, fim: f.fim, texto: f.texto, falante: f.falante ?? "cliente", confianca_falante: revista ? 1 : 0.3,
+    confianca: f.confianca, ...(revista ? { revista: true } : {}) }));
+}
+
+/** O fim do que já está revisto, com quem fala, para dar contexto ao bloco seguinte. */
+export const contextoRevisto = (falas: readonly Fala[]) =>
+  falas.filter((f) => f.revista).slice(-14).map((f) => `${nomeFalante(f.falante)}: ${f.texto}`).join("\n").slice(-1400);
+
+/** Um ficheiro de áudio (a gravação do telemóvel, m4a, mp3, wav, ogg) em PCM mono a 16 kHz. */
+export async function audioDeFicheiro(origem: Blob | string): Promise<Float32Array> {
+  const bytes = typeof origem === "string" ? await (await fetch(origem)).arrayBuffer() : await origem.arrayBuffer();
+  const ctx = new AudioContext({ sampleRate: TAXA });
+  try {
+    const dec = await ctx.decodeAudioData(bytes);
+    if (dec.numberOfChannels === 1) return dec.getChannelData(0).slice();
+    // estéreo (ou mais): a média dos canais, para não perder quem só ficou num deles
+    const out = new Float32Array(dec.length);
+    for (let c = 0; c < dec.numberOfChannels; c++) { const x = dec.getChannelData(c); for (let i = 0; i < out.length; i++) out[i] += x[i] / dec.numberOfChannels; }
+    return out;
+  } catch {
+    throw new Error("Este ficheiro de áudio não abre neste browser. Experimente m4a, mp3 ou wav.");
+  } finally {
+    void ctx.close().catch(() => undefined);
+  }
+}
+
+/** Um áudio inteiro (um ficheiro, a chamada de exemplo) transcrito por blocos, por ordem, cada um com o fim do anterior como contexto. */
+export async function transcreverAudio(pcm: Float32Array, tipo: "chamada" | "visita", aoProgredir?: (feitos: number, total: number, falas: Fala[]) => void): Promise<Fala[]> {
+  const blocos = cortarEmBlocos(pcm, TAXA);
+  let falas: Fala[] = [];
+  for (let i = 0; i < blocos.length; i++) {
+    const b = blocos[i];
+    const parte = pcm.subarray(b.ini, b.fim);
+    if (rmsMaximo(parte) < 0.004) { aoProgredir?.(i + 1, blocos.length, falas); continue; } // silêncio: não se manda
+    let novas: Fala[] = [];
+    for (let tentativa = 0; ; tentativa++) {
+      try { novas = await transcreverBloco(parte, b.ini / TAXA, tipo, contextoRevisto(falas)); break; }
+      catch (e) { if (tentativa >= 2) throw e; await new Promise((r) => setTimeout(r, 3000 * (tentativa + 1))); }
+    }
+    falas = [...falas, ...novas].sort((a, z) => a.inicio - z.inicio);
+    aoProgredir?.(i + 1, blocos.length, falas);
+  }
+  return falas;
+}
+
+const hojeLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+/** No fim da conversa: os campos propostos e (11/11) a análise da conversa, num só pedido (a função faz os dois em paralelo). */
+export async function preencherCampos(segmentos: Fala[], grupos: Grupo[], tipo: "chamada" | "visita" = "chamada", comInsights = false): Promise<Extracao> {
   const campos = grupos.filter((g) => !g.oculto).flatMap((g) => g.campos.map(({ k, l, t, op, ajuda, un }: Def) => ({ k, l, t, op, ajuda, un })));
-  const hoje = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const { data, error } = await supabase.functions.invoke("chamada-campos", {
-    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje, tipo },
+    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), campos, hoje: hojeLocal(), tipo,
+      ...(comInsights ? { pedir: ["campos", "insights"] } : {}) },
   });
   if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
   return data as Extracao & { fichas: { campos: CampoExtraido[] }[] };
+}
+
+/** 11/11: só a análise de uma conversa já guardada (sem propor campos). */
+export async function analisarConversa(segmentos: Fala[], tipo: "chamada" | "visita"): Promise<Insights> {
+  const { data, error } = await supabase.functions.invoke("chamada-campos", {
+    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), hoje: hojeLocal(), tipo, pedir: ["insights"] },
+  });
+  if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
+  if (!data?.insights) throw new Error("A análise não veio. A função chamada-campos pode ainda não ter a versão nova.");
+  return data.insights as Insights;
 }
 
 /** Junta as frases de uma fala em linhas por falante (uma linha por mudança de quem fala). */

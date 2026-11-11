@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Opcoes = { onSpeechStart: () => void; onSpeechEnd: (a: Float32Array) => void; redemptionMs: number };
-const sim = vi.hoisted(() => ({ opcoes: null as null | Opcoes, transcrever: vi.fn() }));
+const sim = vi.hoisted(() => ({ opcoes: null as null | Opcoes, transcrever: vi.fn(), bloco: vi.fn() }));
 vi.mock("./chamadaNuvem", async (importOriginal) => {
   const real = await importOriginal<typeof import("./chamadaNuvem")>();
   return {
@@ -14,6 +14,7 @@ vi.mock("./chamadaNuvem", async (importOriginal) => {
     semWorkers: async () => undefined,
     ecraAceso: async () => () => undefined,
     transcreverFala: sim.transcrever,
+    transcreverBloco: sim.bloco,
   };
 });
 
@@ -32,6 +33,8 @@ beforeEach(() => {
     async resume() { /* */ }
   });
   sim.transcrever.mockReset();
+  sim.bloco.mockReset();
+  sim.bloco.mockResolvedValue([]);
   sim.transcrever.mockImplementation(async (_pcm: Float32Array, ini: number) => [{ inicio: ini, fim: ini + 1, texto: `fala aos ${Math.round(ini)} s`, confianca: 0.9 }]);
 });
 afterEach(async () => { const g = await import("./gravador"); g._repor(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -96,6 +99,56 @@ describe("o gravador da visita (9/11)", () => {
     expect(g.gravacaoAtual().falas).toHaveLength(1);
     await g.iniciarGravacao({ negocio: 8, nome: "Eva", modo: "visita", voltar: "/x" }, true);
     expect(g.gravacaoAtual()).toMatchObject({ estado: "a_ouvir", pausas: 1 });
+    expect(g.gravacaoAtual().falas).toHaveLength(1);
+  });
+
+  // 11/11 (Rúben: «a transcrição falha muito»): o som contínuo vai em blocos; as frases revistas tomam o lugar das provisórias
+  it("o som contínuo vai em blocos cortados no silêncio, e as frases revistas substituem as provisórias desse intervalo", async () => {
+    const g = await import("./gravador");
+    sim.transcrever.mockImplementation(async (_pcm: Float32Array, ini: number) => [{ inicio: ini, fim: ini + 1, texto: "ingressos para o jogo", confianca: 0.9 }]);
+    sim.bloco.mockImplementation(async (pcm: Float32Array, ini: number) => [
+      { inicio: ini + 0.5, fim: ini + 2, texto: "Em princípio é para nivelar tudo.", falante: "cliente", confianca_falante: 1, confianca: 0.95, revista: true },
+      { inicio: ini + 3, fim: ini + 4, texto: "Muito bem.", falante: "comercial", confianca_falante: 1, confianca: 0.97, revista: true },
+      { inicio: ini + pcm.length / 16000 - 1, fim: ini + pcm.length / 16000, texto: "fim do bloco", falante: "cliente", confianca_falante: 1, revista: true },
+    ]);
+    await g.iniciarGravacao({ negocio: 11, nome: "Inês", modo: "chamada", voltar: "/x" });
+    g._ligarBlocos(0);
+    // a pré-visualização (fala a fala) chega primeiro
+    sim.opcoes!.onSpeechStart(); sim.opcoes!.onSpeechEnd(segundos(2));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(g.gravacaoAtual().falas.map((f) => f.texto)).toEqual(["ingressos para o jogo"]);
+    // 56 s de som, com uma pausa aos 41 s: o bloco corta aí
+    const som = new Int16Array(56 * 16000).map((_, i) => Math.round(3000 * Math.sin(i / 7)));
+    som.fill(0, 41 * 16000, 41.6 * 16000);
+    for (let i = 0; i < som.length; i += 1600) g._chegouAudio(som.slice(i, i + 1600));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sim.bloco).toHaveBeenCalledTimes(1);
+    const [pcm, ini, tipo] = sim.bloco.mock.calls[0];
+    expect(ini).toBe(0);
+    expect(tipo).toBe("chamada");
+    expect(pcm.length / 16000).toBeGreaterThanOrEqual(41);
+    expect(pcm.length / 16000).toBeLessThanOrEqual(41.6);
+    const falas = g.gravacaoAtual().falas;
+    expect(falas.map((f) => f.texto)).toEqual(["Em princípio é para nivelar tudo.", "Muito bem.", "fim do bloco"]);
+    expect(falas.every((f) => f.revista)).toBe(true);
+    // terminar manda o resto (o segundo bloco) e espera por ele
+    const fim = await g.terminarGravacao();
+    expect(sim.bloco).toHaveBeenCalledTimes(2);
+    expect(sim.bloco.mock.calls[1][1]).toBeCloseTo(pcm.length / 16000, 3);
+    expect(sim.bloco.mock.calls[1][3]).toMatch(/Cliente: Em princípio é para nivelar tudo\./); // o contexto, com quem fala
+    expect(fim).toHaveLength(6);
+  });
+
+  it("se a função publicada ainda não tiver o modo bloco, fica só a pré-visualização, sem avisos", async () => {
+    const g = await import("./gravador");
+    sim.bloco.mockRejectedValue(new Error("chamada-transcrever: Fala longa demais"));
+    await g.iniciarGravacao({ negocio: 12, nome: "Rui", modo: "chamada", voltar: "/x" });
+    g._ligarBlocos(0);
+    sim.opcoes!.onSpeechStart(); sim.opcoes!.onSpeechEnd(segundos(2));
+    for (let i = 0; i < 56 * 16000; i += 1600) g._chegouAudio(new Int16Array(1600).fill(3000));
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(sim.bloco).toHaveBeenCalledTimes(1);
+    expect(g.gravacaoAtual().falhadas).toBe(0);
     expect(g.gravacaoAtual().falas).toHaveLength(1);
   });
 
