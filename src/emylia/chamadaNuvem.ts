@@ -171,6 +171,9 @@ export async function transcreverAudio(pcm: Float32Array, tipo: "chamada" | "vis
   const porBloco: (Fala[] | undefined)[] = new Array(blocos.length);
   let feitos = 0;
   const juntas = () => porBloco.flatMap((x) => x ?? []).sort((a, z) => a.inicio - z.inicio);
+  // o que se mostra (e vai ao guia) enquanto corre: só os blocos seguidos desde o início, sem buracos (os blocos chegam fora de ordem;
+  // com um buraco, o guia julgava que a conversa tinha acabado a meio)
+  const seguidas = () => { const k = porBloco.findIndex((x) => x === undefined); return (k < 0 ? porBloco : porBloco.slice(0, k)).flatMap((x) => x ?? []); };
   await correrEmParalelo(blocos.length, BLOCOS_EM_PARALELO, async (i) => {
     const b = blocos[i];
     const parte = pcm.subarray(b.ini, b.fim);
@@ -185,7 +188,7 @@ export async function transcreverAudio(pcm: Float32Array, tipo: "chamada" | "vis
     }
     porBloco[i] = novas;
     feitos++;
-    aoProgredir?.(feitos, blocos.length, juntas());
+    aoProgredir?.(feitos, blocos.length, seguidas());
   });
   return juntas();
 }

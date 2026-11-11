@@ -56,6 +56,8 @@ export function juntarGuia(antes: GuiaConversa | null, novo: GuiaConversa): Guia
   const velho = new Map(antes.temas.map((t) => [t.chave, t]));
   return {
     ...novo,
+    // sem pergunta nova, fica a que estava (não se apaga o cartão a meio da conversa)
+    proxima: novo.proxima.pergunta ? novo.proxima : antes.proxima,
     temas: novo.temas.map((t) => {
       const v = velho.get(t.chave);
       return v && ORDEM[v.estado] > ORDEM[t.estado] ? v : t;

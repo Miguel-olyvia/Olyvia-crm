@@ -37,6 +37,8 @@ describe("guia ao vivo: juntar e contar", () => {
     expect(j.temas.map((t) => t.estado)).toEqual(["respondido", "respondido", "parcial"]);
     expect(j.temas[0].resposta).toBe("r orcamento");
     expect(j.proxima.pergunta).toBe("Quem decide?");
+    // sem pergunta nova, fica a anterior
+    expect(juntarGuia(j, { ...b, proxima: { pergunta: null, porque: null } }).proxima.pergunta).toBe("Quem decide?");
     expect(contasGuia(j)).toEqual({ feitos: 2, meio: 1, total: 3 });
   });
 });

@@ -224,7 +224,8 @@ cobrir. Para cada tema dizes o estado:
 - "respondido": o cliente já respondeu com clareza (põe a resposta curta, nas palavras dele, em 'resposta', e a linha);
 - "parcial": falou-se mas a resposta ficou vaga ou incompleta (diz o que se sabe em 'resposta');
 - "por_falar": ainda não se falou.
-Uma pergunta do comercial sem resposta do cliente não conta como respondido. Nunca inventes.
+Uma pergunta do comercial sem resposta do cliente não conta como respondido. Nunca inventes. A conversa AINDA ESTÁ A DECORRER: a
+transcrição acaba onde se está agora, não no fim; nunca digas que a conversa terminou nem que acabou cedo.
 Depois, em 'proxima', a pergunta que o comercial deve fazer A SEGUIR: a mais útil agora, natural no seguimento do que se está a falar,
 curta e pronta a dizer em voz alta (português de Portugal, trata o cliente por «o senhor»/«a senhora» ou pelo nome se foi dito). Se o tema
 do momento ainda está a meio, não mudes de assunto: aprofunda-o. Se tudo está coberto, propõe fechar o passo seguinte (marcar a visita,

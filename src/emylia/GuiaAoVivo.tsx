@@ -31,7 +31,7 @@ export function GuiaAoVivo({ guia, temas, aPensar, erro, tempoDaLinha, onIrPara 
 
       {/* a próxima pergunta */}
       <div className="px-4 pt-3">
-        <AnimatePresence mode="wait" initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {guia?.proxima.pergunta ? (
             <motion.div key={guia.proxima.pergunta} initial={reduzir ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.2 }}
               className="rounded-xl bg-card px-4 py-3 shadow-sm ring-1 ring-primary/20">
@@ -48,8 +48,10 @@ export function GuiaAoVivo({ guia, temas, aPensar, erro, tempoDaLinha, onIrPara 
         <AnimatePresence initial={false}>
           {guia?.alerta ? (
             <motion.p key={guia.alerta} initial={reduzir ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-              className="mt-2 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{guia.alerta}
+              className="overflow-hidden">
+              <span className="mt-2 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{guia.alerta}
+              </span>
             </motion.p>
           ) : null}
         </AnimatePresence>
