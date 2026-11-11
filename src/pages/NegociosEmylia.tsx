@@ -23,7 +23,8 @@ import { HojeTecnico, SemTecnicoLigado } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
-import { carregarCamposConfig } from "@/emylia/real/camposConfig";
+import { carregarCamposConfig, lerCamposConfig } from "@/emylia/real/camposConfig";
+import { definirEfeitosCampos, definirGravarEfeitos } from "@/emylia/efeitosLevantamento";
 import { aplicarAgenda, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
 import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
@@ -121,6 +122,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // usePermissoesReaisNegocio) OU o perfil da Olyvia (usePermissions). Enquanto se lê, só o perfil.
   const codigosLidos = perms.leitura.k === "lidas" ? perms.leitura.codigos : null;
   const pode = (c: string): boolean => !!codigosLidos?.has(c) || (!permsPerfilALer && hasPermission(c));
+  // 11/11: ao sair da página, o «Mudar» do impacto ao lado dos campos deixa de aparecer
+  useEffect(() => () => definirGravarEfeitos(null), []);
   // 10/11: as páginas reais (rotas da Olyvia) só contam o perfil; o Papel no Negócio não abre a rota. As ligações só aparecem com ela.
   const podeRota = (c: string): boolean => !permsPerfilALer && hasPermission(c);
   // ao abrir uma, só se recusa com o perfil já lido (a ler, abre; a rota decide na mesma). Num ref para o `run` e as ligações ao
@@ -406,6 +409,13 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       await carregarEquipasObra(supabase, org).catch(() => undefined);
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
       await carregarCamposConfig(supabase, org, S, { semLer: so });
+      // 11/11 (Rúben): quem configura os campos (pessoas.config) muda o impacto de uma resposta ao lado do campo
+      definirGravarEfeitos(!so && pode("pessoas.config") ? async (efeitos) => {
+        const { data, error } = await supabase.rpc("neg_guardar_campos_config" as never, { p_org: org, p_campos: null, p_efeitos: efeitos } as never);
+        if (error) return error.message || "Não foi possível gravar.";
+        definirEfeitosCampos(lerCamposConfig(data).efeitos);
+        return null;
+      } : null);
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
       aplicarGestoresObra(await lerGestoresObra(supabase, org));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)

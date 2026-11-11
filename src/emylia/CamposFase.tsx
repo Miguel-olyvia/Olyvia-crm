@@ -1,12 +1,12 @@
 // Os campos de uma fase, com o aspeto da Olyvia: um passo de cada vez.
 // O passo aberto mostra os campos e acende o próximo por preencher; quando
 // os campos do passo ficam todos preenchidos, abre sozinho o passo seguinte.
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, LayoutList, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Sun, Wind, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAPEL_ROT, alternarVarios, chaveBase, contagem, juntarOutra, listaVarios, obrigatorio, opcoesVarios, visivel, type Def, type Grupo, type Papel } from "./campos";
 import { eur, type Negocio } from "./motor";
-import { CAMPOS_COM_EFEITO, efeitosDoCampo } from "./efeitosLevantamento";
+import { CAMPOS_COM_EFEITO, efeitosCamposAtuais, efeitosDoCampo, gravarEfeitosAtualDe, ouvirGravarEfeitos, regrasDoCampo, valorParam } from "./efeitosLevantamento";
 import { Chip, type Ctx } from "./pecas";
 
 export const INPUT =
@@ -112,19 +112,76 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3, plano }: FxPro
   );
 }
 
-/** O que a resposta faz ao orçamento, logo por baixo do campo (efeitosLevantamento.ts). */
-function Impacto({ k, d, simples }: { k: string; d: Negocio; simples?: boolean }) {
+/** O que a resposta faz ao orçamento, logo por baixo do campo (efeitosLevantamento.ts). 11/11 (Rúben: «uma área onde se consegue mudar o
+ *  impacto percentual de algumas opções»): quem configura os campos (pessoas.config, na página real) muda-o aqui mesmo, em «Mudar»; vale
+ *  para a organização toda (como em Pessoas › Workflow › Levantamento) e o orçamento deste negócio refaz-se. */
+function Impacto({ k, d, simples, refazer }: { k: string; d: Negocio; simples?: boolean; refazer?: () => void }) {
+  const gravar = useSyncExternalStore(ouvirGravarEfeitos, gravarEfeitosAtualDe, gravarEfeitosAtualDe);
+  const [aEditar, setAEditar] = useState(false);
   if (!CAMPOS_COM_EFEITO.has(chaveBase(k))) return null; // os campos de cada divisão contam pela chave de base
   const ef = efeitosDoCampo(k, d.f);
   if (!ef.length) return null;
+  const regras = regrasDoCampo(chaveBase(k));
   return (
-    <p className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-success/10 px-2 py-1 font-medium text-success motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150", simples ? "mt-1.5 text-sm" : "text-[11px]")}>
-      {ef.map((e) => (
-        <span key={e.d}>
-          {e.t === "linha" ? `+ ${eur(e.preco)} € no orçamento · ${e.d}` : e.t === "percent" ? `+ ${Math.round(e.pct! * 100)}% sobre os serviços · ${e.d}` : e.d}
-        </span>
+    <div className={simples ? "mt-1.5" : undefined}>
+      <p className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-success/10 px-2 py-1 font-medium text-success motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150", simples ? "text-sm" : "text-[11px]")}>
+        {ef.map((e) => (
+          <span key={e.d}>
+            {e.t === "linha" ? `+ ${eur(e.preco)} € no orçamento · ${e.d}` : e.t === "percent" ? `+ ${Math.round(e.pct! * 100)}% sobre os serviços · ${e.d}` : e.d}
+          </span>
+        ))}
+        {gravar && regras.length > 0 && !aEditar && (
+          <button type="button" onClick={() => setAEditar(true)} className="ml-auto rounded px-1.5 font-semibold text-primary underline-offset-4 hover:underline">Mudar</button>
+        )}
+      </p>
+      {gravar && aEditar && <EditarImpacto regras={regras} gravar={gravar} fechar={(mudou) => { setAEditar(false); if (mudou) refazer?.(); }} />}
+    </div>
+  );
+}
+
+/** Os valores das regras de um campo (a percentagem, o custo, o preço…), para a organização toda. */
+function EditarImpacto({ regras, gravar, fechar }: { regras: ReturnType<typeof regrasDoCampo>; gravar: (cfg: ReturnType<typeof efeitosCamposAtuais>) => Promise<string | null>; fechar: (mudou: boolean) => void }) {
+  const cfg = efeitosCamposAtuais();
+  const [valores, setValores] = useState<Record<string, string>>(() =>
+    Object.fromEntries(regras.flatMap((r) => r.params.map((x) => [`${r.id}.${x.p}`, String(valorParam(cfg, r.id, x.p)).replace(".", ",")]))));
+  const [erro, setErro] = useState<string | null>(null);
+  const [aGravar, setAGravar] = useState(false);
+  const guardar = async () => {
+    const novo = { ...cfg };
+    for (const r of regras) {
+      const v: Record<string, number> = { ...(novo[r.id]?.v ?? {}) };
+      for (const x of r.params) { const n = Number((valores[`${r.id}.${x.p}`] ?? "").replace(",", ".")); if (Number.isFinite(n) && n >= 0) v[x.p] = n; }
+      novo[r.id] = { ...(novo[r.id] ?? {}), v };
+    }
+    setAGravar(true); setErro(null);
+    const e = await gravar(novo);
+    setAGravar(false);
+    if (e) setErro(e); else fechar(true);
+  };
+  return (
+    <div className="mt-2 space-y-3 rounded-xl border border-primary/30 bg-card p-3 text-[15px] shadow-sm">
+      {regras.map((r) => (
+        <div key={r.id} className="space-y-2">
+          <p className="font-medium">{r.nome}<span className="block text-sm font-normal text-muted-foreground">{r.como} Vale para todos os negócios.</span></p>
+          <div className="flex flex-wrap gap-3">
+            {r.params.map((x) => (
+              <label key={x.p} className="grid gap-1 text-sm font-medium">{x.l}
+                <span className="flex items-center gap-1.5">
+                  <input inputMode="decimal" value={valores[`${r.id}.${x.p}`] ?? ""} onChange={(e) => setValores((v) => ({ ...v, [`${r.id}.${x.p}`]: e.target.value }))}
+                    className="h-11 w-24 rounded-lg border border-input bg-background px-3 text-right tabular-nums outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
+                  <span className="text-muted-foreground">{x.un}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
       ))}
-    </p>
+      {erro && <p role="alert" className="text-sm font-medium text-destructive">{erro}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={() => fechar(false)} className="min-h-10 rounded-lg px-3 text-sm font-medium hover:bg-muted">Cancelar</button>
+        <button type="button" disabled={aGravar} onClick={() => void guardar()} className="min-h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-60">{aGravar ? "A gravar…" : "Guardar"}</button>
+      </div>
+    </div>
   );
 }
 
@@ -164,7 +221,7 @@ function CampoBase({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c:
   }, [seguinte, ro, c.t, c.k, d.id]);
   const id = `fx-${c.k}-${d.id}`;
   const set = (x: string) => run(() => A.campo(d.id, c.k, x));
-  const impacto = ro ? null : <Impacto k={c.k} d={d} simples={simples} />;
+  const impacto = ro ? null : <Impacto k={c.k} d={d} simples={simples} refazer={() => run(() => A.campo(d.id, c.k, d.f[c.k] ?? ""))} />;
   if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} erro={erro} seguinte={seguinte} sugerido={!!d.sug?.[c.k]} impacto={impacto} />;
   const largo = c.t === "texto_longo";
   const caixa = cn(
