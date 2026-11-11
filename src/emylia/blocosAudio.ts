@@ -90,3 +90,16 @@ export function juntarBloco<T extends ComTempo>(falas: readonly T[], novas: read
 
 /** Uma fala provisória que chega depois do seu intervalo já estar revisto não entra. */
 export const jaRevisto = (inicio: number, revistos: readonly [number, number][]) => revistos.some(([a, b]) => inicio >= a - 0.5 && inicio < b);
+
+/** 11/11 (Rúben: «aprende e melhora»): uma gravação carregada transcrevia-se bloco a bloco, um de cada vez (uma visita de 35 min levava
+ *  ~10 min). Corre `fn` para os índices 0..total-1 com até `n` ao mesmo tempo: o primeiro sozinho (dá as vozes e o assunto aos outros, como
+ *  contexto) e depois os restantes em paralelo, pela ordem. Devolve os resultados pela ordem dos índices. */
+export async function correrEmParalelo<T>(total: number, n: number, fn: (i: number) => Promise<T>): Promise<T[]> {
+  const out = new Array<T>(total);
+  if (!total) return out;
+  out[0] = await fn(0);
+  let prox = 1;
+  const trabalhador = async () => { while (prox < total) { const i = prox++; out[i] = await fn(i); } };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(n, total - 1)) }, trabalhador));
+  return out;
+}

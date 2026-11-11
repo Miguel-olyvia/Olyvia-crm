@@ -14,6 +14,7 @@ const nuvem = vi.hoisted(() => ({
   analisarConversa: vi.fn(),
   preencherCampos: vi.fn(),
   gravarMicrofone: vi.fn(),
+  pedirGuia: vi.fn(),
 }));
 vi.mock("./chamadaNuvem", async (importOriginal) => {
   const real = await importOriginal<typeof import("./chamadaNuvem")>();
@@ -219,5 +220,35 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect((dv as unknown as { visita: { med: Record<string, number> } }).visita.med.pav).toBe(4.1);
     expect(campo).toHaveBeenCalledWith(9, "notas_visita", "Tirar a banheira e pôr duche.");
     expect(campo).not.toHaveBeenCalledWith(9, "med_pav", expect.anything());
+  });
+
+  it("11/11: o guia ao vivo marca os temas e diz a próxima pergunta enquanto a conversa se transcreve; no fim sai", async () => {
+    let soltar: () => void = () => {};
+    const falas = [
+      { inicio: 1, fim: 3, texto: "Queria remodelar a casa de banho.", falante: "cliente", confianca_falante: 1, revista: true },
+      { inicio: 4, fim: 6, texto: "Tem algum valor em mente?", falante: "comercial", confianca_falante: 1, revista: true },
+      { inicio: 7, fim: 9, texto: "Até uns 6 mil euros.", falante: "cliente", confianca_falante: 1, revista: true },
+    ];
+    nuvem.transcreverAudio.mockImplementationOnce(async (_p: Float32Array, _t: string, aoProgredir?: (k: number, n: number, f: unknown[]) => void) => {
+      aoProgredir?.(1, 2, falas);
+      await new Promise<void>((ok) => { soltar = ok; });
+      return falas;
+    });
+    nuvem.pedirGuia.mockResolvedValue({
+      temas: [{ chave: "o_que_quer", estado: "respondido", resposta: "Remodelar a casa de banho", linha: 0 }, { chave: "orcamento", estado: "respondido", resposta: "Até 6 mil euros", linha: 2 }],
+      proxima: { pergunta: "Para quando gostava de ter a obra feita?", porque: "Falta o prazo." }, alerta: null,
+    });
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    const guia = await screen.findByRole("region", { name: "Guia da conversa" });
+    await waitFor(() => expect(screen.getByText("Para quando gostava de ter a obra feita?")).toBeInTheDocument());
+    expect(nuvem.pedirGuia.mock.calls[0][1]).toBe("chamada");
+    expect(nuvem.pedirGuia.mock.calls[0][2].map((t: { k: string }) => t.k)).toContain("orcamento");
+    expect(guia).toHaveTextContent("2 de 9 temas com resposta");
+    expect(screen.getByText("Até 6 mil euros")).toBeInTheDocument();
+    // tocar no tema leva à frase
+    fireEvent.click(screen.getByRole("button", { name: /Orçamento: respondido/ }));
+    await act(async () => { soltar(); });
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Guia da conversa" })).toBeNull());
   });
 });
