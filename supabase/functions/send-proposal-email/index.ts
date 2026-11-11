@@ -222,6 +222,16 @@ const handler = async (req: Request): Promise<Response> => {
     }
     const userId: string = callerUser.id;
 
+    // 11/11/2026 (auditoria de permissões): só envia quem tem proposals.edit na organização da proposta (numa proposta de negócio basta negocios.proposta.enviar).
+    // Verificado no início, antes de ler ou enviar seja o que for (fn_pode_enviar_documento, migração 20270113900000).
+    const { data: podeEnviar, error: erroPermissao } = await supabaseClient.rpc("fn_pode_enviar_documento", { p_tipo: "proposal", p_id: proposal_id });
+    if (erroPermissao || podeEnviar !== true) {
+      return new Response(JSON.stringify({ error: "Sem permissão para enviar esta proposta" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+
     // Get proposal with all related data
     const { data: proposal, error: proposalError } = await supabaseClient
       .from("proposals")

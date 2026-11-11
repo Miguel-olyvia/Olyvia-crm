@@ -39,6 +39,7 @@ import { WorkflowAutomationRules } from "@/components/workflows/WorkflowAutomati
 import { ProposalFlowchart } from "./ProposalFlowchart";
 import { ProposalStageActionsConfig } from "./ProposalStageActionsConfig";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { usePermissions } from "@/hooks/usePermissions";
 
 export interface ProposalWorkflowStage {
   id: string;
@@ -135,6 +136,9 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
   const [editingStage, setEditingStage] = useState<ProposalWorkflowStage | null>(null);
   const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [activeTab, setActiveTab] = useState("stages");
+  // 11/11/2026: as regras de automação gravam-se por rpc_save/delete_lead_workflow_automation, que exigem workflows.edit.
+  const { hasPermission } = usePermissions();
+  const podeAutomacoes = hasPermission("workflows.edit");
   const [deletingStage, setDeletingStage] = useState<ProposalWorkflowStage | null>(null);
   const [migrationTargetId, setMigrationTargetId] = useState("");
   const [proposalCountByStage, setProposalCountByStage] = useState<Record<string, number>>({});
@@ -281,7 +285,7 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
               <TabsTrigger value="stages">Fases</TabsTrigger>
               <TabsTrigger value="flow" className="gap-1.5"><ArrowRight className="w-3.5 h-3.5" />Fluxo</TabsTrigger>
               <TabsTrigger value="actions" className="gap-1.5"><Zap className="w-3.5 h-3.5" />Ações</TabsTrigger>
-              <TabsTrigger value="automations" className="gap-1.5"><Zap className="w-3.5 h-3.5" />Automações</TabsTrigger>
+              <TabsTrigger value="automations" className="gap-1.5" disabled={!podeAutomacoes} title={!podeAutomacoes ? "Sem permissão para editar automações (workflows.edit)." : undefined}><Zap className="w-3.5 h-3.5" />Automações</TabsTrigger>
             </TabsList>
 
             <TabsContent value="stages" className="space-y-4 mt-4">
@@ -343,7 +347,11 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
             <TabsContent value="flow" className="mt-4"><ProposalFlowchart stages={displayStages} companyId={companyId} /></TabsContent>
             <TabsContent value="actions" className="mt-4"><ProposalStageActionsConfig stages={allStages.length > 0 ? allStages : displayStages} companyId={companyId} /></TabsContent>
             <TabsContent value="automations" className="mt-4">
-              <WorkflowAutomationRules companyId={companyId || undefined} sourceEntity="proposal" workflowStages={workflowStagesForRules} />
+              {podeAutomacoes ? (
+                <WorkflowAutomationRules companyId={companyId || undefined} sourceEntity="proposal" workflowStages={workflowStagesForRules} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sem permissão para editar automações (workflows.edit).</p>
+              )}
             </TabsContent>
           </Tabs>
         </DialogContent>
