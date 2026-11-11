@@ -95,6 +95,18 @@ describe("Detalhes laborais (rh-exemplo): as tres datas so em leitura", () => {
     expect(screen.getByText("hr.laborais.contratacaoProvisoria")).toBeInTheDocument();
   });
 
+  it("sem contrato e sem admissao provisoria: tudo vazio e sem aviso de provisoria", () => {
+    montar({ semContrato: true }, { ...PESSOA, data_admissao: null, data_antiguidade: null, data_saida: null } as unknown as Pessoa);
+    expect(screen.queryByText("hr.laborais.contratacaoProvisoria")).toBeNull();
+    expect((document.getElementById("hr-laborais-data_admissao") as HTMLInputElement).value).toBe("hr.campos.semValor");
+  });
+
+  it("pessoa que saiu e ficou sem contratos: mostra a saida gravada e nenhum aviso de provisoria", () => {
+    montar({ semContrato: true }, { ...PESSOA, data_admissao: null, data_antiguidade: null, data_saida: "2024-05-01" } as unknown as Pessoa);
+    expect((document.getElementById("hr-laborais-data_saida") as HTMLInputElement).value).toBe("01/05/2024");
+    expect(screen.queryByText("hr.laborais.contratacaoProvisoria")).toBeNull();
+  });
+
   it("enquanto os contratos carregam, nao se diz que e provisoria (nao pisca)", () => {
     montar({ semContrato: true, contratosACarregar: true });
     expect(screen.queryByText("hr.laborais.contratacaoProvisoria")).toBeNull();

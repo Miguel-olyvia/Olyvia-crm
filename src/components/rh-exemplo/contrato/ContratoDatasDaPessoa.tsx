@@ -13,14 +13,17 @@ interface ContratoDatasDaPessoaProps {
   vinculos: readonly PessoaVinculo[];
   /** `pessoas.data_admissao` enquanto nao ha contrato: provisoria. */
   dataAdmissaoProvisoria: string | null;
+  /** `pessoas.data_saida`: sem contrato vivo a base mantem-na (barreira de acesso), por isso o resumo mostra-a. */
+  dataSaidaGravada?: string | null;
   /** Os contratos ainda a carregar: nao se sabe se falta contrato, por isso nao se avisa (nao pisca). */
   carregando?: boolean;
 }
 
-export function ContratoDatasDaPessoa({ vinculos, dataAdmissaoProvisoria, carregando = false }: ContratoDatasDaPessoaProps) {
+export function ContratoDatasDaPessoa({ vinculos, dataAdmissaoProvisoria, dataSaidaGravada = null, carregando = false }: ContratoDatasDaPessoaProps) {
   const { t } = useTranslation();
-  const datas = datasDaPessoa(vinculos);
-  const semContrato = datas.data_admissao === null && !carregando;
+  const datas = datasDaPessoa(vinculos, dataSaidaGravada);
+  // Provisoria so se ha uma admissao provisoria: pessoa nova sem contrato nem admissao mostra tudo vazio.
+  const semContrato = datas.data_admissao === null && !carregando && dataAdmissaoProvisoria !== null;
   const vazio = t("hr.campos.semValor");
   return (
     <Card data-testid="resumo-datas-pessoa">

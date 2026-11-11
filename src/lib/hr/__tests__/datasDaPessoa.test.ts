@@ -293,3 +293,31 @@ describe("eRecusaDasDatasDerivadas", () => {
     for (const x of [null, undefined, "", 42, {}]) expect(eRecusaDasDatasDerivadas(x)).toBe(false);
   });
 });
+
+describe("datasDaPessoa: saida gravada sem contrato (D8 revista)", () => {
+  it("sem contrato vivo, a saida ja gravada mantem-se (barreira de acesso); contratacao e antiguidade voltam a null", () => {
+    expect(datasDaPessoa([], "2024-05-01")).toEqual({ data_admissao: null, data_antiguidade: null, data_saida: "2024-05-01" });
+    expect(datasDaPessoa(null, "2024-05-01")).toEqual({ data_admissao: null, data_antiguidade: null, data_saida: "2024-05-01" });
+  });
+
+  it("so contratos apagados contam como sem contrato: a saida gravada mantem-se", () => {
+    const apagado = v("terminado", "2020-01-01", "2024-05-01", { deleted_at: "2024-06-01T00:00:00Z" });
+    expect(datasDaPessoa([apagado], "2024-05-01")).toEqual({ data_admissao: null, data_antiguidade: null, data_saida: "2024-05-01" });
+  });
+
+  it("sem contrato e sem saida gravada: tudo null (null, undefined e vazio)", () => {
+    expect(datasDaPessoa([], null)).toEqual(NULAS);
+    expect(datasDaPessoa([])).toEqual(NULAS);
+  });
+
+  it("com contrato vivo vale a regra normal e a saida gravada e ignorada", () => {
+    expect(datasDaPessoa([v("activo", "2024-03-01")], "2020-01-01")).toEqual({
+      data_admissao: "2024-03-01", data_antiguidade: "2024-03-01", data_saida: null,
+    });
+    expect(datasDaPessoa([v("terminado", "2020-01-01", "2022-06-30")], "1999-01-01").data_saida).toBe("2022-06-30");
+  });
+
+  it("uma saida gravada com hora fica so com a data", () => {
+    expect(datasDaPessoa([], "2024-05-01T00:00:00Z").data_saida).toBe("2024-05-01");
+  });
+});

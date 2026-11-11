@@ -303,7 +303,7 @@ export function PessoaLaboraisTab({
                 readOnly
                 aria-describedby="hr-laborais-datas-ajuda"
               />
-              {id === "data_admissao" && semContrato && !contratosACarregar && (
+              {id === "data_admissao" && semContrato && !contratosACarregar && pessoa.data_admissao && (
                 <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
                   {t("hr.laborais.contratacaoProvisoria")}
                 </p>

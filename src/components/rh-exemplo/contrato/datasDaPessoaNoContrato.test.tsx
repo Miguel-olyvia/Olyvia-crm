@@ -40,14 +40,14 @@ beforeEach(() => {
   localStorage.setItem("language", "pt");
 });
 
-function montar(vinculos: PessoaVinculo[], opcoes: { guardar?: ReturnType<typeof vi.fn>; provisoria?: string | null; podeEditar?: boolean; carregando?: boolean } = {}) {
+function montar(vinculos: PessoaVinculo[], opcoes: { guardar?: ReturnType<typeof vi.fn>; provisoria?: string | null; podeEditar?: boolean; carregando?: boolean; saida?: string | null } = {}) {
   const onGuardarVinculo = opcoes.guardar ?? vi.fn().mockResolvedValue(null);
   render(
     <PessoaContratoTab
       pessoaId="p1" organizationId="org" vinculos={vinculos} retribuicao={null} podeEditar={opcoes.podeEditar ?? true}
       podeVerRetribuicao={false} podeEditarRetribuicao={false} podeCorrigirRetribuicao={false} cargo={null} periodosDosCargos={[]}
       podeCorrigirHoras={false} podeAnexarContratoAssinado={false} vinculosOpcoesDocumento={[]} saving={false}
-      onGuardarVinculo={onGuardarVinculo} dataAdmissaoProvisoria={opcoes.provisoria ?? null} carregando={opcoes.carregando}
+      onGuardarVinculo={onGuardarVinculo} dataAdmissaoProvisoria={opcoes.provisoria ?? null} carregando={opcoes.carregando} dataSaidaGravada={opcoes.saida ?? null}
     />,
   );
   return onGuardarVinculo;
@@ -162,9 +162,24 @@ describe("Contratos (rh-exemplo): resumo so de leitura da contratacao e da saida
     expect(resumo).toHaveTextContent("2026-10-01");
   });
 
-  it("sem contrato e sem data provisoria: continua a dizer que falta contrato", () => {
+  it("pessoa nova sem contrato e sem admissao provisoria nem saida: tudo vazio e sem aviso de provisoria", () => {
     montar([]);
-    expect(screen.getByTestId("resumo-datas-pessoa")).toHaveTextContent("hr.contrato.datasPessoa.provisoria");
+    const resumo = screen.getByTestId("resumo-datas-pessoa");
+    expect(resumo).not.toHaveTextContent("hr.contrato.datasPessoa.provisoria");
+    expect(within(resumo).queryByRole("status")).toBeNull();
+    expect(resumo.textContent?.split("hr.campos.semValor").length).toBe(3);
+  });
+
+  it("pessoa que saiu e a quem se apagaram todos os contratos: mostra a saida gravada, sem contratacao e sem aviso", () => {
+    montar([], { saida: "2024-05-01" });
+    const resumo = screen.getByTestId("resumo-datas-pessoa");
+    expect(screen.getByTestId("resumo-data-saida")).toHaveTextContent("2024-05-01");
+    expect(resumo).not.toHaveTextContent("hr.contrato.datasPessoa.provisoria");
+  });
+
+  it("com contrato vivo a saida gravada e ignorada", () => {
+    montar([VINCULO], { saida: "2020-01-01" });
+    expect(screen.getByTestId("resumo-data-saida")).toHaveTextContent("hr.campos.semValor");
   });
 
   it("o aviso de provisoria e um <p role=status> fora da <dl> (a lista de definicoes so tem termos e definicoes)", () => {

@@ -110,9 +110,17 @@ export function eRecusaDasDatasDerivadas(erro: unknown): boolean {
 
 const SEM_DATAS: DatasDaPessoa = { data_admissao: null, data_antiguidade: null, data_saida: null };
 
-export function datasDaPessoa(vinculos: readonly VinculoParaDatas[] | null | undefined): DatasDaPessoa {
+/**
+ * `saidaGravada` (`pessoas.data_saida`) so conta SEM contrato vivo: a base mantem-na (D8 revista; e barreira de acesso em
+ * `fn_neg_pessoa_da_conta`, apagar o ultimo contrato nunca a limpa) e so a contratacao e a antiguidade voltam a `null`.
+ * Com contrato vivo vale a regra normal e `saidaGravada` e ignorada.
+ */
+export function datasDaPessoa(
+  vinculos: readonly VinculoParaDatas[] | null | undefined,
+  saidaGravada?: string | null,
+): DatasDaPessoa {
   const vivos = (vinculos ?? []).filter((v) => v.deleted_at === null || v.deleted_at === undefined);
-  if (vivos.length === 0) return SEM_DATAS;
+  if (vivos.length === 0) return saidaGravada ? { ...SEM_DATAS, data_saida: soData(saidaGravada) } : SEM_DATAS;
 
   const cadeia = cadeiaDeReferencia(cadeiasDe(vivos));
   const todosTerminados = cadeia.membros.every((m) => m.estado === "terminado");
