@@ -23,6 +23,7 @@ import { inicioDoPlano, motivoOcupado, obraQueOcupa, ocupacaoDosTecnicos, retifi
 import { NovaTarefa } from "../PlanoInterativo";
 import { pelaPermissao, podeNeg } from "../permissoes";
 import { InfoDoNegocio } from "./InfoDoNegocio";
+import { EscolherQuem } from "./EscolherQuem";
 import { ImpactoNoOrcamento, linhasDoImpacto, type LinhaImpacto } from "./ImpactoNoOrcamento";
 import { materiaisDaTarefa } from "../tarefasValidador";
 import { diferencas } from "../ajustesPlano";
@@ -457,12 +458,8 @@ function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abri
 
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Quem faz</p>
-        {podeAgir && !acabada ? (
-          <select value={t.tec ?? ""} onChange={(e) => e.target.value && fazer(() => A.trocarTec(d.id, ti, e.target.value))} className="h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px]">
-            {!t.tec && <option value="">Escolher…</option>}
-            {quem.map(({ x, doOficio, m }) => <option key={x.id} value={x.id}>{x.n} · {x.sk}{doOficio ? "" : " (outro ofício)"}{m ? ` · ${m}` : " · livre"}</option>)}
-          </select>
-        ) : <p className="text-[15px]">{nomeTec(t.tec)}</p>}
+        {/* 11/11 (Rúben: «as dropdowns devem ser muito mais bonitas, com pesquisa e sugestão de disponibilidade; e equipas») */}
+        <EscolherQuem t={t} p={p} ocup={ocup} outras={outras} dias={dias} desligado={!podeAgir || acabada} escolher={(tec) => fazer(() => A.trocarTec(d.id, ti, tec))} />
       </div>
 
       {editavel && (
