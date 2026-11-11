@@ -89,9 +89,10 @@ export function papelInicial(m: MeusPapeis, atual: Papel): Papel | null {
 }
 
 /** 11/11: a ordem com que se escolhe o papel de abertura quando as permissões do perfil dão vários: o mais específico primeiro (o
- *  Financeiro, Compras e armazém e o Gestor de obra fazem um trabalho só deles; a Direção e o Comercial são os mais largos). O Técnico
+ *  Financeiro, Compras e armazém e o Gestor de obra fazem um trabalho só deles; depois o Comercial, e a Direção só quando é o único papel
+ *  que as permissões dão: o perfil Comercial tem negocios.margem.aprovar, que dá a Direção, e tem de abrir no Comercial). O Técnico
  *  (e o Jurídico, que as permissões não dão) só se não houver nenhum destes. */
-export const PREFERENCIA_PAPEL_INICIAL: readonly Papel[] = ["financeiro", "armazem", "operacoes", "direcao", "comercial"];
+export const PREFERENCIA_PAPEL_INICIAL: readonly Papel[] = ["financeiro", "armazem", "operacoes", "comercial", "direcao"];
 export function papelMaisEspecifico(L: readonly Papel[]): Papel | null {
   return PREFERENCIA_PAPEL_INICIAL.find((p) => L.includes(p)) ?? L.find((p) => p !== "tecnico") ?? L[0] ?? null;
 }

@@ -91,11 +91,19 @@ describe("o papel com que a página abre", () => {
     expect(papelDeAbertura(semRH(false), fin, "comercial", "direcao").papel).toBe("financeiro");
   });
 
-  it("a ordem: financeiro, armazém, gestor de obra, direção, comercial; o técnico só se não houver outro", () => {
+  it("comercial com margem.aprovar (dá a Direção) → Comercial; só margem.aprovar → Direção", () => {
+    expect(papelDeAbertura(semRH(false), cods("contacto.registar", "visita.gerir", "margin.approve"), "financeiro").papel).toBe("comercial");
+    expect(papelDeAbertura(semRH(true), cods("contacto.registar", "margin.approve"), "direcao").papel).toBe("comercial");
+    expect(papelDeAbertura(semRH(false), cods("margin.approve"), "comercial").papel).toBe("direcao");
+  });
+
+  it("a ordem: financeiro, armazém, gestor de obra, comercial, direção; o técnico só se não houver outro", () => {
     expect(papelMaisEspecifico(["comercial", "direcao", "financeiro", "armazem", "operacoes"])).toBe("financeiro");
     expect(papelMaisEspecifico(["comercial", "direcao", "armazem", "operacoes"])).toBe("armazem");
     expect(papelMaisEspecifico(["comercial", "direcao", "operacoes"])).toBe("operacoes");
-    expect(papelMaisEspecifico(["comercial", "direcao"])).toBe("direcao");
+    expect(papelMaisEspecifico(["direcao", "comercial"])).toBe("comercial");
+    expect(papelMaisEspecifico(["direcao"])).toBe("direcao");
+    expect(papelMaisEspecifico(["tecnico", "direcao"])).toBe("direcao");
     expect(papelMaisEspecifico(["tecnico", "comercial"])).toBe("comercial");
     expect(papelMaisEspecifico(["tecnico"])).toBe("tecnico");
     expect(papelMaisEspecifico([])).toBeNull();
