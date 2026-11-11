@@ -10,11 +10,15 @@ import { porCatalogo } from "../v2/catalogoStore";
 import { substituirCatalogoTodo } from "../catalogo";
 import { usarTecnicos } from "../equipa/tecnicos";
 import { montarCatalogo, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
-import { lerCatalogo } from "./lerCatalogo";
+import { lerCatalogo, linhasDe } from "./lerCatalogo";
 import { fotografar, type FotoCatalogo } from "./gravarCatalogo";
 import { carregarLinhasModelo } from "./linhasModelo";
 
-export interface CatalogoCarregado { org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo }
+export interface CatalogoCarregado {
+  org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo;
+  /** 11/11 (F1): com `tolerante`, a leitura falhou e montou-se um Catálogo vazio; o texto do erro. */
+  erro?: string;
+}
 
 /** Põe o Catálogo montado nas stores e no Estado; devolve o "antes" das comparações. */
 export function aplicarCatalogo(org: string, M: CatalogoMontado, produtos: LinhaProduto[], S: Estado): CatalogoCarregado {
@@ -37,8 +41,14 @@ export function aplicarCatalogo(org: string, M: CatalogoMontado, produtos: Linha
 }
 
 /** Lê da base e aplica. 29/10: também as linhas de negócio (linhasModelo.ts); se falharem, ficam as do código. */
-export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estado, opcoes: { semLinhasModelo?: boolean } = {}): Promise<CatalogoCarregado> {
+export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estado,
+  opcoes: { semLinhasModelo?: boolean; tolerante?: boolean } = {}): Promise<CatalogoCarregado> {
+  // 11/11 (F1): nos Negócios (`tolerante`), um erro a ler o Catálogo não para o ecrã: monta-se vazio e devolve-se o erro (quem chama
+  // avisa e não grava os negócios, que sem o Catálogo perdiam os serviços). Na página do Catálogo o erro continua a subir.
+  let erro: string | undefined;
+  const ler = opcoes.tolerante ? lerCatalogo(sb, org).catch((e: Error) => { erro = e.message || "Não foi possível ler o Catálogo."; return linhasDe(null); }) : lerCatalogo(sb, org);
   // 09/11 (20270111100000): quem só lê as obras não pode ler as linhas de negócio (neg_ler_linhas_modelo): ficam as do código
-  const [L] = await Promise.all([lerCatalogo(sb, org), opcoes.semLinhasModelo ? Promise.resolve([]) : carregarLinhasModelo(sb, org).catch(() => [])]);
-  return aplicarCatalogo(org, montarCatalogo(L, catalogo0(), seed().svc), L.produtos, S);
+  const [L] = await Promise.all([ler, opcoes.semLinhasModelo ? Promise.resolve([]) : carregarLinhasModelo(sb, org).catch(() => [])]);
+  const c = aplicarCatalogo(org, montarCatalogo(L, catalogo0(), seed().svc), L.produtos, S);
+  return erro ? { ...c, erro } : c;
 }

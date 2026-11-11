@@ -108,6 +108,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   const vistasCliente: VistasGravadas = new Map();
   // os negócios com documentos do CRM (pelo número da Emylia, para gravarMudancas; pelo id da base, para a ficha) e a cópia lida de cada um
   let soLeitura = new Set<number>();
+  let catalogoFalhou = false;
   let docsPorId = new Set<string>();
   let lidos = new Map<number, NegocioLido>();
   let foto = new Map<number, string>();
@@ -130,7 +131,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   const aplicarLeitura = (novos: readonly NegocioLido[]): void => {
     refs = new Map(novos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
     lidos = new Map(novos.map((n) => [n.linhas.negocio.numero, n]));
-    soLeitura = new Set(novos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
+    soLeitura = new Set(novos.filter((n) => n.docsCrm || catalogoFalhou).map((n) => n.linhas.negocio.numero));
     docsPorId = new Set(novos.filter((n) => n.docsCrm).map((n) => n.id));
     S.deals = novos.map(negocioParaOEcra);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
@@ -154,7 +155,9 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
       const i = S.deals.findIndex((x) => x.id === d.id);
       if (lido && i >= 0) S.deals[i] = negocioParaOEcra(lido);
     }
-    avisar({ msg: "Este negócio é do CRM: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ". Faz-se em Contratos e Propostas.", kind: "bad" });
+    avisar(catalogoFalhou
+      ? { msg: "O Catálogo não carregou: a alteração não foi guardada", sub: "Volte a abrir a página para ler o Catálogo outra vez.", kind: "bad" }
+      : { msg: "Este negócio é do CRM: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ". Faz-se em Contratos e Propostas.", kind: "bad" });
   };
 
   /** Relê a base e vê se algum negócio por gravar mudou lá desde a última leitura. Devolve o texto do conflito, ou `null` se se pode gravar. */
@@ -230,7 +233,11 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   // a leitura que se espera (a releitura depois de uma ação no servidor)
   const lerAgora = async (catalogo: boolean): Promise<void> => {
     if (catalogo || !ids) {
-      const cat = await carregarCatalogo(sb, org, S);
+      // 11/11 (F1): um erro do Catálogo (ex.: CT001) não bloqueia a ficha: avisa, e os negócios ficam só para consulta (sem o Catálogo,
+      // gravar perdia os serviços)
+      const cat = await carregarCatalogo(sb, org, S, { tolerante: true });
+      catalogoFalhou = !!cat.erro;
+      if (cat.erro) avisar({ msg: "O Catálogo não carregou", sub: `${cat.erro} O negócio fica só para consulta.`, kind: "bad" });
       ids = idsServico(cat.M.ids.servico);
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento da organização (os mesmos de /negocios)
       await carregarCamposConfig(sb, org, S);

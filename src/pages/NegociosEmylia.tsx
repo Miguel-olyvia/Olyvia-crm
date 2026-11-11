@@ -179,6 +179,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const refs = useRef(new Map<number, RefNegocio>());
   // os negócios do CRM (com documentos do CRM): lêem-se, mas nunca se gravam por aqui
   const soLeitura = useRef(new Set<number>());
+  // 11/11 (F1): o Catálogo não carregou: os negócios abrem só para consulta (sem o Catálogo, gravar perdia os serviços)
+  const catalogoFalhou = useRef(false);
   const foto = useRef(new Map<number, string>());
   const ids = useRef<IdsServico | null>(null);
   const aGravar = useRef(false);
@@ -201,7 +203,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // o que a base devolveu passa a ser o estado (a leitura ao abrir e a releitura depois do Financeiro)
   const aplicarLidos = useCallback((lidos: Awaited<ReturnType<typeof lerNegocios>>) => {
     refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
-    soLeitura.current = new Set(lidos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
+    soLeitura.current = new Set(lidos.filter((n) => n.docsCrm || catalogoFalhou.current).map((n) => n.linhas.negocio.numero));
     S.deals = lidos.map(negocioParaOEcra);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
     garantirServicosDosNegocios(S, S.deals);
@@ -404,7 +406,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!mp.todos) await permsLidas();
       if (!vivo) return;
       const so = !mp.todos && soExecucaoRef.current;
-      const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so });
+      // 11/11 (F1): um erro do Catálogo (ex.: CT001) não bloqueia o ecrã: avisa e os negócios abrem só para consulta
+      const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so, tolerante: true });
+      catalogoFalhou.current = !!cat.erro;
+      if (cat.erro) avisar({ msg: "O Catálogo não carregou", sub: `${cat.erro} Os negócios abrem só para consulta.`, kind: "bad" });
       // 9/11: as equipas de obra da empresa (o plano escolhe a equipa toda ou nenhum membro); um erro aqui não para nada
       await carregarEquipasObra(supabase, org).catch(() => undefined);
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
@@ -794,7 +799,9 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         : S.view === "negocio" && S.deal && S.deals.some((d) => d.id === S.deal) ? <>
             {doCrm && (
               <p role="alert" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">
-                Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava.
+                {catalogoFalhou.current
+                  ? "O Catálogo não carregou: o negócio fica só para consulta; o que mudar neste ecrã não se grava. Volte a abrir a página."
+                  : "Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava."}
               </p>
             )}
             <NegocioSimples {...ctx} ajustarPassos={(passos, d) => {

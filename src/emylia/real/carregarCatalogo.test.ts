@@ -9,7 +9,7 @@ import { lerCustos } from "../v2/custosStore";
 import { TECNICOS, garantirTecnicos } from "../equipa/tecnicos";
 import { montarCatalogo } from "./catalogoReal";
 import { linhasDe } from "./lerCatalogo";
-import { aplicarCatalogo } from "./carregarCatalogo";
+import { aplicarCatalogo, carregarCatalogo } from "./carregarCatalogo";
 
 const ORG = "11111111-1111-4111-a111-111111111111";
 const PERFIL = "22222222-2222-4222-a222-222222222222";
@@ -54,5 +54,18 @@ describe("aplicarCatalogo põe a base no Estado", () => {
     garantirTecnicos(S);
     expect(S.tecnicos).toEqual([]);
     expect(TECNICOS).toEqual([]);
+  });
+});
+
+// 11/11 (F1): nos Negócios um erro a ler o Catálogo (ex.: CT001) não para o ecrã: monta-se vazio e devolve-se o erro
+describe("carregarCatalogo tolerante", () => {
+  const sbErro = { rpc: async () => ({ data: null, error: { code: "CT001", message: "Sem permissão (services.view)." } }) } as never;
+  it("com tolerante devolve o erro e um Catálogo vazio", async () => {
+    const c = await carregarCatalogo(sbErro, ORG, seed(), { tolerante: true, semLinhasModelo: true });
+    expect(c.erro).toBe("Não tem permissão para ver o Catálogo e custos desta organização.");
+    expect(c.produtos).toEqual([]);
+  });
+  it("sem tolerante (a página do Catálogo) o erro sobe como antes", async () => {
+    await expect(carregarCatalogo(sbErro, ORG, seed(), { semLinhasModelo: true })).rejects.toThrow("Não tem permissão");
   });
 });
