@@ -133,9 +133,22 @@ export function peDireitoDoCampo(v: string | undefined): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** 11/11: os quatro cantos de uma peça na planta: a caixa, rodada `rot` graus em torno do centro (sem `rot`, a caixa como está).
+ *  `recuo` encolhe a caixa (cm) antes de rodar (para os alertas não contarem um toque como sobreposição). */
+export function cantosDaPeca(pc: Pick<PecaPlanta, "x" | "y" | "w" | "h" | "rot">, recuo = 0): Ponto[] {
+  const cx = pc.x + pc.w / 2, cy = pc.y + pc.h / 2, hw = Math.max(0, pc.w / 2 - recuo), hh = Math.max(0, pc.h / 2 - recuo);
+  const a = ((pc.rot ?? 0) * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => ({ x: cx + x * c - y * s, y: cy + x * s + y * c }));
+}
+/** A caixa direita que contém a peça (rodada ou não). */
+export function caixaDaPeca(pc: Pick<PecaPlanta, "x" | "y" | "w" | "h" | "rot">, recuo = 0): { x0: number; y0: number; x1: number; y1: number } {
+  const q = cantosDaPeca(pc, recuo), xs = q.map((p) => p.x), ys = q.map((p) => p.y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
 /** O retângulo que contém as paredes e as peças (para o desenho). */
 export function limites(p: Planta): { x: number; y: number; w: number; h: number } {
-  const pts = [...cantos(p.paredes, p.o), ...p.pecas.flatMap((x) => [{ x: x.x, y: x.y }, { x: x.x + x.w, y: x.y + x.h }])];
+  const pts = [...cantos(p.paredes, p.o), ...p.pecas.flatMap((x) => cantosDaPeca(x))];
   const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
   const x = Math.min(...xs), y = Math.min(...ys);
   return { x, y, w: Math.max(1, Math.max(...xs) - x), h: Math.max(1, Math.max(...ys) - y) };
@@ -432,30 +445,57 @@ export function encaixar(pc: PecaPlanta, largura: number, fundo: number, planta:
 export const ESPACO_SANITA_BIDE = 20;
 
 /**
- * 9/11 (Rúben: «as janelas e portas grudadas à parede»): uma porta ou uma janela fica sempre na parede mais perto (só nas direitas), ao
- * longo dela e com o meio na linha da parede; o resto das peças fica como está.
+ * 9/11 (Rúben: «as janelas e portas grudadas à parede»): uma porta ou uma janela fica sempre na parede mais perto, ao longo dela e com o
+ * meio na linha da parede; o resto das peças fica como está. 11/11 (Rúben: «permitir também portas em diagonal»): também nas paredes a
+ * 45°, rodada com a parede (`rot`, em torno do centro; a caixa sem rodar é o comprimento ao longo da parede × a espessura).
  */
 export function colarAParede(pc: PecaPlanta, planta: { o: Ponto; paredes: readonly Parede[] }): PecaPlanta {
   if (!PECAS[pc.tipo]?.abertura || !planta.paredes.length) return pc;
   const pts = cantos(planta.paredes, planta.o);
   const cx = pc.x + pc.w / 2, cy = pc.y + pc.h / 2, comp = Math.max(pc.w, pc.h), esp = Math.min(pc.w, pc.h);
+  const { rot: _rot, ...semRot } = pc; void _rot;
   let melhor: { d: number; r: PecaPlanta } | null = null;
   for (let i = 0; i < planta.paredes.length; i++) {
     const a = pts[i], z = pts[i + 1];
-    if (a.x !== z.x && a.y !== z.y) continue;
+    if (a.x !== z.x && a.y !== z.y) {
+      // a diagonal: o ponto da parede mais perto do meio da peça, sem a peça sair da parede
+      const L = Math.hypot(z.x - a.x, z.y - a.y);
+      if (L < 1) continue;
+      const ux = (z.x - a.x) / L, uy = (z.y - a.y) / L;
+      const t = L <= comp ? L / 2 : Math.min(L - comp / 2, Math.max(comp / 2, (cx - a.x) * ux + (cy - a.y) * uy));
+      const tq = Math.min(L, Math.max(0, (cx - a.x) * ux + (cy - a.y) * uy));
+      const d = Math.hypot(cx - (a.x + ux * tq), cy - (a.y + uy * tq));
+      const mx = a.x + ux * t, my = a.y + uy * t;
+      // o ângulo da parede, entre -90° e 90° (a porta não fica de pernas para o ar)
+      let ang = (Math.atan2(uy, ux) * 180) / Math.PI;
+      if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+      if (!melhor || d < melhor.d) melhor = { d, r: { ...semRot, w: comp, h: esp, x: Math.round(mx - comp / 2), y: Math.round(my - esp / 2), rot: Math.round(ang) } };
+      continue;
+    }
     if (a.x === z.x) {
       const y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
       const ny = y1 - y0 <= comp ? (y0 + y1) / 2 : Math.min(y1 - comp / 2, Math.max(y0 + comp / 2, cy));
       const d = Math.hypot(cx - a.x, cy - Math.min(y1, Math.max(y0, cy)));
-      if (!melhor || d < melhor.d) melhor = { d, r: { ...pc, w: esp, h: comp, x: Math.round(a.x - esp / 2), y: Math.round(ny - comp / 2) } };
+      if (!melhor || d < melhor.d) melhor = { d, r: { ...semRot, w: esp, h: comp, x: Math.round(a.x - esp / 2), y: Math.round(ny - comp / 2) } };
     } else {
       const x0 = Math.min(a.x, z.x), x1 = Math.max(a.x, z.x);
       const nx = x1 - x0 <= comp ? (x0 + x1) / 2 : Math.min(x1 - comp / 2, Math.max(x0 + comp / 2, cx));
       const d = Math.hypot(cy - a.y, cx - Math.min(x1, Math.max(x0, cx)));
-      if (!melhor || d < melhor.d) melhor = { d, r: { ...pc, w: comp, h: esp, y: Math.round(a.y - esp / 2), x: Math.round(nx - comp / 2) } };
+      if (!melhor || d < melhor.d) melhor = { d, r: { ...semRot, w: comp, h: esp, y: Math.round(a.y - esp / 2), x: Math.round(nx - comp / 2) } };
     }
   }
   return melhor?.r ?? pc;
+}
+
+/** 11/11: o segmento a–z corta o polígono convexo `q` (uma peça rodada): uma ponta dentro, ou cruza um dos lados. */
+function cortaPoligono(a: Ponto, z: Ponto, q: readonly Ponto[]): boolean {
+  if (dentroDoPoligono(a, q) || dentroDoPoligono(z, q)) return true;
+  const lado = (p: Ponto, r: Ponto, s: Ponto) => (r.x - p.x) * (s.y - p.y) - (r.y - p.y) * (s.x - p.x);
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i], d = q[(i + 1) % q.length];
+    if (lado(a, z, c) * lado(a, z, d) < 0 && lado(c, d, a) * lado(c, d, z) < 0) return true;
+  }
+  return false;
 }
 
 /** O ponto está dentro do polígono (raio para a direita). */
@@ -481,15 +521,18 @@ export function avisosDaPlanta(planta: Planta): AvisoPlanta[] {
   if (planta.paredes.length >= 3 && faltaFechar(planta.paredes) <= 1) {
     const pts = cantos(planta.paredes, planta.o), poli = pts.slice(0, -1);
     for (const x of pecas) {
-      const c = { x0: x.x + 1, y0: x.y + 1, x1: x.x + x.w - 1, y1: x.y + x.h - 1 };
-      const fora = [{ x: c.x0, y: c.y0 }, { x: c.x1, y: c.y0 }, { x: c.x0, y: c.y1 }, { x: c.x1, y: c.y1 }].some((q) => !dentroDoPoligono(q, poli));
-      const atravessa = !fora && pts.slice(0, -1).some((a, i) => segmentoNaCaixa(a, pts[i + 1], c));
+      // 11/11: a peça rodada conta pelos cantos dela (encostada a uma diagonal, a caixa direita sairia da planta)
+      const fora = cantosDaPeca(x, 1).some((q) => !dentroDoPoligono(q, poli));
+      const atravessa = !fora && (x.rot ? pts.slice(0, -1).some((a, i) => cortaPoligono(a, pts[i + 1], cantosDaPeca(x, 1)))
+        : pts.slice(0, -1).some((a, i) => segmentoNaCaixa(a, pts[i + 1], caixaDaPeca(x, 1))));
       if (fora || atravessa) out.push({ texto: `${nome(x)} (${Math.round(x.w)} × ${Math.round(x.h)} cm) não cabe: sai da planta. Mude de sítio ou escolha uma mais pequena.`, pecas: [x.id] });
     }
   }
   for (let i = 0; i < pecas.length; i++) for (let j = i + 1; j < pecas.length; j++) {
     const a = pecas[i], b = pecas[j];
-    const dx = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w)), dy = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
+    // 11/11: com uma peça rodada, a caixa direita dela (aproximado, do lado de dentro)
+    const A = caixaDaPeca(a), Bx = caixaDaPeca(b);
+    const dx = Math.max(Bx.x0 - A.x1, A.x0 - Bx.x1), dy = Math.max(Bx.y0 - A.y1, A.y0 - Bx.y1);
     if (dx < -1 && dy < -1) { out.push({ texto: `${nome(a)} e ${nome(b)} estão uma em cima da outra.`, pecas: [a.id, b.id] }); continue; }
     const par = [a.tipo, b.tipo].sort().join("+");
     if (par === "bide+sanita") {
