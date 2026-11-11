@@ -50,6 +50,8 @@ interface SupplierDataFormProps {
   conditionsLock?: { contractLabel: string } | null;
   /** Leva ao separador Contrato (onde se faz uma nova versão). */
   onGoToContract?: () => void;
+  /** Sem suppliers.edit: os campos só se leem (readOnly, não disabled: continuam focáveis) e não se submete nada. */
+  readOnly?: boolean;
 }
 
 type TextField = Exclude<keyof SupplierFormData, "is_active">;
@@ -67,11 +69,13 @@ export function SupplierDataForm({
   onGoToPortal,
   conditionsLock = null,
   onGoToContract,
+  readOnly = false,
 }: SupplierDataFormProps) {
+  const readOnlyNoteId = `${formId}-readonly-note`;
   // Código postal completo: procura a rua e a cidade e preenche o que está vazio (reunião de 30/10).
   useMoradaPorCodigoPostal(formData.postal_code, (m) => setFormData((f) => ({
     ...f, address: seVazio(f.address, m.rua), city: seVazio(f.city, m.localidade),
-  })), ehPortugal(formData.country));
+  })), ehPortugal(formData.country) && !readOnly); // em leitura mostra-se só o que está gravado
   const field = (
     key: TextField,
     label: string,
@@ -97,11 +101,15 @@ export function SupplierDataForm({
           id={`${formId}-${key}`}
           type={opts.type ?? "text"}
           value={formData[key]}
-          onChange={(e) => setFormData((prev) => ({ ...prev, [key]: e.target.value }))}
-          required={opts.required}
+          onChange={(e) => {
+            if (readOnly) return;
+            setFormData((prev) => ({ ...prev, [key]: e.target.value }));
+          }}
+          required={opts.required && !readOnly}
           disabled={opts.disabled}
+          readOnly={readOnly}
           aria-invalid={!!err}
-          aria-describedby={[hintId, errId].filter(Boolean).join(" ") || undefined}
+          aria-describedby={[hintId, errId, readOnly ? readOnlyNoteId : undefined].filter(Boolean).join(" ") || undefined}
           className={err ? "border-destructive" : ""}
           {...opts.inputProps}
         />
@@ -120,7 +128,28 @@ export function SupplierDataForm({
   };
 
   return (
-    <form id={formId} onSubmit={onSubmit} className="space-y-4">
+    <form
+      id={formId}
+      onSubmit={(e) => {
+        if (readOnly) {
+          e.preventDefault();
+          return;
+        }
+        onSubmit(e);
+      }}
+      className="space-y-4"
+    >
+      {readOnly && (
+        <div
+          id={readOnlyNoteId}
+          role="note"
+          className="flex items-start gap-2.5 rounded-lg border border-info/30 bg-info/10 px-3.5 py-3 text-sm text-sky-900 dark:text-info"
+        >
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <p>{t("suppliers.form.readOnlyNote")}</p>
+        </div>
+      )}
+
       {portalLinked && (
         <div
           role="note"
@@ -163,12 +192,15 @@ export function SupplierDataForm({
         </div>
       )}
 
-      <OrganizationFormSection
-        value={organizationSelection}
-        onChange={onOrganizationChange}
-        showSecondaryCompanies={false}
-        multiSelectCompanies={true}
-      />
+      {/* Seletores (não têm readOnly): em modo de leitura ficam inertes, o aviso do topo já o explica. */}
+      <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
+        <OrganizationFormSection
+          value={organizationSelection}
+          onChange={onOrganizationChange}
+          showSecondaryCompanies={false}
+          multiSelectCompanies={true}
+        />
+      </fieldset>
       {fieldErrors.organization_id && (
         <p className="text-sm text-destructive" role="alert">
           {fieldErrors.organization_id}
@@ -200,7 +232,12 @@ export function SupplierDataForm({
           <Textarea
             id={`${formId}-notes`}
             value={formData.notes}
-            onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+            onChange={(e) => {
+              if (readOnly) return;
+              setFormData((prev) => ({ ...prev, notes: e.target.value }));
+            }}
+            readOnly={readOnly}
+            aria-describedby={readOnly ? readOnlyNoteId : undefined}
             rows={3}
             aria-invalid={!!fieldErrors.notes}
             className={fieldErrors.notes ? "border-destructive" : ""}
@@ -212,14 +249,23 @@ export function SupplierDataForm({
           )}
         </div>
         <div className="flex min-h-6 items-center gap-2 sm:col-span-2">
-          <Switch
-            id={`${formId}-is_active`}
-            checked={formData.is_active}
-            onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_active: !!checked }))}
-          />
-          <Label htmlFor={`${formId}-is_active`} className="cursor-pointer">
-            {t("suppliers.form.active")}
-          </Label>
+          {readOnly ? (
+            // Em leitura o estado vê-se em texto (um interruptor parece ligável, mesmo inerte).
+            <p className="text-sm">
+              {t("suppliers.form.active")}: {formData.is_active ? "Sim" : "Não"}
+            </p>
+          ) : (
+            <>
+              <Switch
+                id={`${formId}-is_active`}
+                checked={formData.is_active}
+                onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_active: !!checked }))}
+              />
+              <Label htmlFor={`${formId}-is_active`} className="cursor-pointer">
+                {t("suppliers.form.active")}
+              </Label>
+            </>
+          )}
         </div>
       </div>
     </form>

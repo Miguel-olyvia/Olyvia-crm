@@ -82,9 +82,12 @@ export const EXPLICITAS: Readonly<Record<string, readonly string[]>> = {
  * à dependência normal: a permissão só se marca com a dependência satisfeita E todas estas marcadas; tirar uma destas tira-a em
  * cascata. Podem estar noutro grupo do editor.
  * - hr.pessoas.conta.criar: criar a conta a partir da ficha de RH cria um utilizador, por isso exige também Criar utilizadores.
+ * - receiving.receive: dar entrada na Receção passa por receiving.receive, purchase_orders.receive (a PO) e inventory.edit (o stock);
+ *   sem as três juntas a entrada recusa. purchase_orders.receive NÃO exige as outras (tem uso sozinha: guias de remessa).
  */
 export const EXIGE_TAMBEM: Readonly<Record<string, readonly string[]>> = {
   "hr.pessoas.conta.criar": ["users.create"],
+  "receiving.receive": ["purchase_orders.receive", "inventory.edit"],
 };
 
 /** O que `codigo` exige também (todas); vazio = nada. */

@@ -49,6 +49,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Database } from "@/integrations/supabase/types";
 import { exportPurchaseOrdersToCSV, parsePurchaseOrdersCSV } from "@/utils/purchaseOrdersExportImport";
+import { poStatusOptions } from "@/utils/purchaseOrderStatusOptions";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import { pdf } from '@react-pdf/renderer';
@@ -3459,26 +3460,18 @@ const PurchaseOrders = () => {
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="pending">{t('purchaseOrders.status.pending')}</SelectItem>
-                                  {/* F3.2 (contrato-f32 5.2.2): "Encomendado" deixa de ser uma
-                                      escolha aqui — passa só pelo botão "Aprovar e enviar"
-                                      (rodapé), que também publica no portal do fornecedor.
-                                      Continua visível (desativado) quando já está encomendada. */}
-                                  {editingOrderMeta?.id === editingId && editingOrderMeta?.status === 'ordered' && (
-                                    <SelectItem value="ordered" disabled>{t('purchaseOrders.status.ordered')}</SelectItem>
-                                  )}
-                                  {/* "received" não é uma opção genérica — passa pela receção
-                                      (Fase 4C), que gera a entrada em stock_movements. */}
-                                  {editingId && formData.status === 'received' && (
-                                    <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
-                                  )}
-                                  {/* "partially_received" nunca é manual — derivado das receções. */}
-                                  {editingId && formData.status === 'partially_received' && (
-                                    <SelectItem value="partially_received" disabled>
-                                      {t('purchaseOrders.status.partiallyReceived')}
+                                  {/* A base só aceita criar «pendente»; «Cancelada» é só de edição. «Encomendada» passa por
+                                      «Aprovar e enviar» (rodapé) e continua visível (desativada) quando já está encomendada;
+                                      «recebida» passa pela receção; «parcialmente recebida» deriva das receções. */}
+                                  {poStatusOptions({
+                                    editing: !!editingId,
+                                    currentStatus: formData.status,
+                                    savedStatus: editingOrderMeta?.id === editingId ? editingOrderMeta?.status ?? null : null,
+                                  }).map((opt) => (
+                                    <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled}>
+                                      {t(`purchaseOrders.status.${opt.value === 'partially_received' ? 'partiallyReceived' : opt.value}`)}
                                     </SelectItem>
-                                  )}
-                                  <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
                               {formData.status === 'pending' && (

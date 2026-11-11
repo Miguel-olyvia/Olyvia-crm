@@ -46,6 +46,8 @@ export function SupplierItemsTab({ supplierId, organizationId, onOpenPortalTab, 
   const { hasPermission, loading: permLoading } = usePermissions();
   // Custo de compra e código do fornecedor exigem suppliers.view_pricing (como no diálogo antigo).
   const canViewPricing = hasPermission("suppliers.view_pricing");
+  // Remover a associação: a base (rpc_delete_item_supplier) pede products.edit ou services.edit.
+  const canRemoveLink = hasPermission("products.edit") || hasPermission("services.edit");
   const items = useSupplierItems(supplierId, canViewPricing, !permLoading);
   const [deleting, setDeleting] = useState<SupplierItemRow | null>(null);
   const [busy, setBusy] = useState(false);
@@ -149,16 +151,18 @@ export function SupplierItemsTab({ supplierId, organizationId, onOpenPortalTab, 
                       <InventoryStatusBadge tone={row.is_active ? "ok" : "neutral"}>{row.is_active ? "Sim" : "Não"}</InventoryStatusBadge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setDeleting(row)}
-                        aria-label={`Remover associação a ${itemLabel(row)}`}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
-                      </Button>
+                      {canRemoveLink ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setDeleting(row)}
+                          aria-label={`Remover associação a ${itemLabel(row)}`}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+                        </Button>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -179,6 +183,7 @@ export function SupplierItemsTab({ supplierId, organizationId, onOpenPortalTab, 
         }}
       />
 
+      {canRemoveLink ? (
       <AlertDialog
         open={!!deleting}
         onOpenChange={(v) => {
@@ -207,6 +212,7 @@ export function SupplierItemsTab({ supplierId, organizationId, onOpenPortalTab, 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      ) : null}
     </div>
   );
 }
