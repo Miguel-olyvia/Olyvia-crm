@@ -7,7 +7,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Check, Minus, Plus, Ruler, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, camposMedida, medida, nfmt, type Negocio } from "../motor";
+import { LINHAS, camposMedida, eur, impactoDasMedidas, medida, nfmt, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { EditorPlanta } from "../EditorPlanta";
@@ -31,6 +31,10 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
   const daPlanta = useMemo(() => (planta ? { pav: areaChaoM2(planta.paredes), par: areaParedesM2(planta, pe) } : null), [planta, pe]);
   const temPlanta = !!planta && planta.paredes.length >= 3;
   const mudadas = CM.filter(([k]) => Math.abs(numero(valores[k] ?? "0") - medida(d.visita.med, k)) > 0.001).length;
+  // 11/11 (Rúben): o impacto no orçamento ao vivo
+  const impacto = useMemo(() => impactoDasMedidas(d, ctx.S, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "0")]).filter(([, v]) => Number.isFinite(v as number)))),
+    [valores, d.orc]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dif = mudadas ? impacto?.dif ?? 0 : 0; // sem medidas mudadas, a proposta não se refaz
   const passo = (k: string) => (/pts|ptf|ptq|pcs/.test(k) ? 1 : 0.5);
   const mudar = (k: string, n: number) => setValores((x) => ({ ...x, [k]: String(Math.max(0, r2(n))) }));
   const usarPlanta = () => {
@@ -114,7 +118,9 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
         {/* «Aceitar», fixo em baixo */}
         <div className="border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">{mudadas ? `${mudadas} ${mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}. Antes do contrato, a proposta refaz-se com o orçamento novo.` : "Tudo como na visita."}</p>
+            <p className="text-sm text-muted-foreground" aria-live="polite">{mudadas
+              ? <>{mudadas} {mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}{Math.abs(dif) > 0.004 && <> · <span className="font-semibold text-foreground tabular-nums">{dif > 0 ? "+" : "−"}{eur(Math.abs(dif))} €</span> no orçamento</>}. Antes do contrato, a proposta refaz-se com o orçamento novo.</>
+              : "Tudo como na visita."}</p>
             <Button type="button" size="lg" className="min-h-12 shrink-0" disabled={feito || !podeRetificar(d)} onClick={aceitar}><Check className="mr-1.5 h-5 w-5" aria-hidden="true" />Aceitar as medidas</Button>
           </div>
         </div>

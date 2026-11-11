@@ -9,7 +9,7 @@
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
 import { equipaDe } from "./equipa/equipasObra";
@@ -497,6 +497,9 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
       ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: "Depois de o plano ser aprovado." }
       : c === "enviado"
       ? { id: "ct", trilho: "plano", estado: "espera", who: null, t: "À espera da assinatura do contrato", sub: "No portal do cliente." }
+      // 11/11: as medidas ou o plano mudaram o valor: o comercial refaz a proposta antes do contrato (o mesmo passo que o negócio mostra)
+      : d.fase === 3 && !c && mudancasDeValor(d).length
+      ? { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Refazer a proposta com o orçamento novo", sub: `Muda o valor: ${mudancasDeValor(d).join("; ")}.`, act: "refazerComMudancas", btn: "Refazer a proposta" }
       : { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Gerar e enviar o contrato", sub: "Com o plano aprovado: vai ao portal do cliente, por assinar.", act: "enviarContrato", btn: "Gerar o contrato" });
   }
 

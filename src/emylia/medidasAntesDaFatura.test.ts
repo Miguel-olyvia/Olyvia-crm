@@ -2,7 +2,7 @@
 // a proposta tem de ser recriada com um novo orçamento; depois de aprovada, saltam-se o plano e as medidas»). Aceite a proposta, o negócio
 // fica no Negócio: medidas, plano, contrato; assinado, o Financeiro. A venda direta passa logo. Lidos da base, acertam a fase pela mesma regra.
 import { describe, expect, it } from "vitest";
-import { LINHAS, acertarFaseDasMedidas, acoes, camposMedida, medida, mudancasDeValor, proximo, seed, type Estado, type Negocio } from "./motor";
+import { LINHAS, acertarFaseDasMedidas, acoes, camposMedida, impactoDasMedidas, impactoDoPlano, medida, minhas, mudancasDeValor, proximo, seed, tot, type Estado, type Negocio } from "./motor";
 import { faltaParaArrancar, semEncomendaCliente } from "./preparacaoObra";
 
 const aceitePorMedir = () => {
@@ -119,5 +119,42 @@ describe("a fase lida da base (acertarFaseDasMedidas)", () => {
     d.orc!.contrato = "assinado";
     expect(acertarFaseDasMedidas(d)).toBe(true);
     expect(d.fase).toBe(4);
+  });
+});
+
+describe("o impacto no orçamento, ao vivo (11/11)", () => {
+  it("as medidas: sem mudança, nada; com mais área, sobe; refeita a proposta, o valor é o que se mostrou", () => {
+    const { S, d, A } = aceitePorMedir();
+    const [k] = camposMedida(LINHAS[d.linha])[0];
+    const antes = medida(d.visita.med, k);
+    expect(impactoDasMedidas(d, S, { [k]: antes })?.medidas).toBe(0);
+    const imp = impactoDasMedidas(d, S, { [k]: antes + 2 })!;
+    expect(imp.medidas).toBeGreaterThan(0);
+    expect(imp.dif).toBeCloseTo(imp.medidas + imp.acertos, 1);
+    S.role = "operacoes";
+    A.retificarMedidas(d.id, { [k]: antes + 2 });
+    A.resolverConflitos(d.id); A.aprovarPlano(d.id);
+    S.role = "comercial";
+    A.refazerComMudancas(d.id);
+    expect(tot(d, S).pf).toBeCloseTo(imp.novo, 0);
+  });
+  it("o plano: horas a mais, ao preço por hora do serviço", () => {
+    const { S, d, A } = aceitePorMedir();
+    S.role = "operacoes";
+    const ti = d.obra.plano!.tasks.findIndex((t) => t.svcs[0] && S.svc[t.svcs[0]]?.h > 0);
+    A.ajustarTarefa(d.id, ti, { h: d.obra.plano!.tasks[ti].h + 4 });
+    const i = impactoDoPlano(d, S);
+    expect(i.horas).toBeCloseTo(4, 1);
+    expect(i.valor).toBeGreaterThan(0);
+  });
+  it("no Hoje do comercial, «Refazer a proposta» (não «Gerar o contrato») quando o valor mudou", () => {
+    const { S, d, A } = aceitePorMedir();
+    const [k] = camposMedida(LINHAS[d.linha])[0];
+    S.role = "operacoes";
+    A.retificarMedidas(d.id, { [k]: medida(d.visita.med, k) + 2 });
+    A.resolverConflitos(d.id); A.aprovarPlano(d.id);
+    const doComercial = minhas(S, "comercial").filter((x) => x.d.id === d.id).map((x) => x.p.act);
+    expect(doComercial).toContain("refazerComMudancas");
+    expect(doComercial).not.toContain("enviarContrato");
   });
 });

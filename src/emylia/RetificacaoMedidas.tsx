@@ -5,14 +5,15 @@
 // plano (e só depois se assina o contrato). O orçamento aceite não muda: se as medidas mudarem o preço, faz-se uma adenda.
 // 10/11 (Rúben: «medidas antes da fatura»): passou para antes do contrato e do Financeiro, com a proposta aceite; se o valor mudar, refaz-se
 // a proposta com o orçamento novo (refazerComMudancas) e, aceite a versão nova, as medidas e o plano não se repetem.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, RotateCcw, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, camposMedida, medida, nfmt, type Negocio } from "./motor";
+import { LINHAS, camposMedida, impactoDasMedidas, medida, nfmt, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { podeRetificar } from "./preparacaoObra";
+import { ImpactoNoOrcamento, linhasDoImpacto } from "./estudioPlano/ImpactoNoOrcamento";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 
@@ -24,6 +25,9 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [notas, setNotas] = useState(d.f.retif_notas ?? "");
   const pode = !aceite && podeRetificar(d);
   const mudadas = CM.filter(([k]) => { const v = numero(valores[k] ?? ""); return Number.isFinite(v) && Math.abs(v - medida(d.visita.med, k)) > 0.001; });
+  // 11/11 (Rúben): o impacto no orçamento ao vivo, enquanto se escreve
+  const impacto = useMemo(() => impactoDasMedidas(d, ctx.S, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "")]).filter(([, v]) => Number.isFinite(v as number)))),
+    [valores, d.orc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-5">
@@ -61,6 +65,10 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           </ul>
         </div>
       ) : <p className="text-[15px] text-muted-foreground">Esta linha não tem medidas: o supervisor só confirma o local nas notas.</p>}
+
+      {impacto && CM.length > 0 && (
+        <ImpactoNoOrcamento atual={impacto.atual} linhas={linhasDoImpacto(mudadas.length, impacto)} />
+      )}
 
       {mudadas.length > 0 && (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">

@@ -14,7 +14,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarDays, CalendarRange, Check, ChevronLeft, ChevronRight, Clock, FolderOpen, Hammer, Lightbulb, Minus, Package, Plus, RotateCcw, Ruler, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TECS, nfmt, type Negocio, type Tarefa } from "../motor";
+import { TECS, impactoDasMedidas, impactoDoPlano, medidasRetificadas, nfmt, tot, type Negocio, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
@@ -23,6 +23,7 @@ import { inicioDoPlano, motivoOcupado, obraQueOcupa, ocupacaoDosTecnicos, retifi
 import { NovaTarefa } from "../PlanoInterativo";
 import { pelaPermissao, podeNeg } from "../permissoes";
 import { InfoDoNegocio } from "./InfoDoNegocio";
+import { ImpactoNoOrcamento, linhasDoImpacto, type LinhaImpacto } from "./ImpactoNoOrcamento";
 import { materiaisDaTarefa } from "../tarefasValidador";
 import { diferencas } from "../ajustesPlano";
 import { passosDaTarefa } from "../planoDaVisita";
@@ -51,6 +52,9 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
   const fim = p ? Math.max(1, ...p.tasks.map((t) => t.dia + t.dur)) : 1;
   const dias = useMemo(() => diasDaObra(inicio, fim + 5), [isoDia(inicio), fim]); // eslint-disable-line react-hooks/exhaustive-deps
   const ocup = useMemo(() => ocupacaoDosTecnicos(S, d.id), [S, d.id, S.deals]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 11/11: o que as medidas do local mudam no orçamento (refaz o orçamento numa cópia: só quando as medidas mudam, não a cada arrasto)
+  const impMedidas = useMemo(() => (d.orc && !d.orc.vendaDireta && d.f.retif_aceite ? impactoDasMedidas(d, S, medidasRetificadas(d)) : null),
+    [d.f.retif_aceite, d.orc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!p) return null;
   const editavel = p.estado === "por aprovar" || p.estado === "aprovado";
@@ -176,6 +180,17 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
                 <Numero rotulo="Tarefas" icone={<Hammer className="h-4 w-4" />}><Contagem valor={p.tasks.length} fmt={(n) => String(Math.round(n))} de={0} /></Numero>
                 <Numero rotulo="Horas" icone={<Clock className="h-4 w-4" />}><Contagem valor={p.tasks.reduce((a, t) => a + t.h, 0)} fmt={(n) => nfmt(Math.round(n))} de={0} /></Numero>
               </section>
+
+              {/* ------------------------------------------------------------ 11/11: o impacto no orçamento, ao vivo (as medidas e o plano) */}
+              {(() => {
+                if (!d.orc || d.orc.vendaDireta) return null;
+                const mi = impMedidas, pi = impactoDoPlano(d, S);
+                const L: LinhaImpacto[] = [
+                  ...(mi ? linhasDoImpacto(Math.abs(mi.medidas) > 0.004 ? 1 : 0, mi, Math.abs(mi.medidas) > 0.004 || Math.abs(pi.horas) > 0.004).map((x) => (x.l.includes("medida") ? { ...x, l: "Medidas do local" } : x)) : []),
+                  ...(Math.abs(pi.horas) > 0.004 ? [{ l: "Ajustes ao plano", sub: `${pi.horas > 0 ? "+" : "−"}${nfmt(Math.abs(pi.horas))} h`, v: pi.semValor ? null : pi.valor }] : []),
+                ];
+                return <ImpactoNoOrcamento atual={mi?.atual ?? tot(d, S).pf} linhas={L} />;
+              })()}
 
               {/* ------------------------------------------------------------ as fases */}
               <section aria-label="As fases" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">

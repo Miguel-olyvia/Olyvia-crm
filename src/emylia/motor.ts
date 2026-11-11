@@ -1357,6 +1357,50 @@ export function mudancasDeValor(d: Negocio): string[] {
   }
   return R;
 }
+/** 11/11 (Rúben: «no plano da obra e na correção de medidas, ver o impacto no orçamento ao vivo»): o orçamento refeito numa cópia do
+ *  negócio, como o refazerComMudancas o refaria (as medidas dadas, os preços à mão mantidos). O negócio não muda. */
+function orcamentoRefeito(d: Negocio, S: Estado, med?: Partial<Record<CampoMedida, number>>): Negocio {
+  const c = structuredClone(d) as Negocio;
+  for (const [k, v] of Object.entries(med ?? {})) if (Number.isFinite(v)) porMedida(c.visita.med, k as CampoMedida, v as number);
+  const antes = c.orc!, o = criarOrc(c, S);
+  preservarManuais(antes, o, LINHAS[c.linha]);
+  ligarDemolicao(o, antes.demolicao);
+  c.orc = o;
+  sincronizarEfeitos(c, S); sincronizarDemolicao(c, S);
+  return c;
+}
+/** O que a proposta refeita com as medidas `med` vai valer (sem IVA, com o desconto), e de onde vem a diferença: `medidas` (o orçamento
+ *  refeito com as medidas da visita contra o refeito com as novas) e `acertos` (o que refazer já junta sem mudar medidas: as linhas do
+ *  levantamento, como as proteções e o transporte, que a proposta enviada não tinha). `dif` = medidas + acertos. Sem orçamento, null. */
+export function impactoDasMedidas(d: Negocio, S: Estado, med: Partial<Record<CampoMedida, number>>): { atual: number; novo: number; dif: number; medidas: number; acertos: number } | null {
+  if (!d.orc) return null;
+  try {
+    const a = tot(orcamentoRefeito(d, S), S).pf, b = tot(orcamentoRefeito(d, S, med), S).pf, atual = tot(d, S).pf;
+    return { atual: r2(atual), novo: r2(b), dif: r2(b - atual), medidas: r2(b - a), acertos: r2(a - atual) };
+  } catch { return null; }
+}
+/** As medidas retificadas que estão no negócio (aceites ou por aceitar), para o impacto. */
+export function medidasRetificadas(d: Negocio): Partial<Record<CampoMedida, number>> {
+  const out: Partial<Record<CampoMedida, number>> = {};
+  for (const [k] of camposMedida(LINHAS[d.linha])) { const r = d.f[`retif_${k}`]; if (r != null && r !== "" && Number.isFinite(Number(r))) out[k] = Number(r); }
+  return out;
+}
+/** O que os ajustes ao plano mudam no valor: as horas a mais ou a menos de cada tarefa (e as tarefas novas) ao preço por hora do serviço
+ *  dela, com o desconto da proposta. Com tarefas tiradas não dá para saber quais (a referência só guarda as horas): `semValor`. */
+export function impactoDoPlano(d: Negocio, S: Estado): { horas: number; valor: number; semValor: boolean } {
+  const p = d.obra.plano;
+  if (!p?.base) return { horas: 0, valor: 0, semValor: false };
+  if (p.base.length > p.tasks.length) return { horas: r2(p.tasks.reduce((a, t) => a + t.h, 0) - p.base.reduce((a, t) => a + t.h, 0)), valor: 0, semValor: true };
+  let h = 0, v = 0;
+  p.tasks.forEach((t, i) => {
+    const dh = t.h - (p.base![i]?.h ?? 0);
+    if (Math.abs(dh) < 0.001) return;
+    h += dh;
+    const s = S.svc[t.svcs[0]];
+    if (s && s.h > 0) v += (dh * s.preco) / s.h;
+  });
+  return { horas: r2(h), valor: r2(v * (1 - (d.orc?.desconto || 0) / 100)), semValor: false };
+}
 /** Ao ler da base: os negócios aceites no Financeiro sem fatura nem contrato assinado (do fluxo de 9/11) voltam ao Negócio para as medidas,
  *  o plano e o contrato; os do Negócio com o contrato assinado passam ao Financeiro (a base faz o mesmo: fn_neg_fase_minima). */
 export function acertarFaseDasMedidas(d: Negocio): boolean {
