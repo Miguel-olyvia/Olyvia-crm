@@ -2,13 +2,14 @@
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon, FlaskConical } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bath, Building2, CalendarCheck, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, UserCheck, Wrench, type LucideIcon, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
   alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
+  SEM_ORCAMENTO, semOrcamento,
 } from "./motor";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
@@ -18,6 +19,7 @@ import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RetificacaoMedidas } from "./RetificacaoMedidas";
 import { AbrirEstudioPlano } from "./estudioPlano/EstudioPlano";
+import { AbrirEstudioObra } from "./estudioObra/EstudioObra";
 import { motivoOcupado, ocupacaoDosTecnicos, planoAprovadoDe, retificacaoAceite, rotuloDia } from "./preparacaoObra";
 import { EstadoFaturaErp, RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
@@ -47,7 +49,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, passoDe, permEmFaltaDoPasso, podeNeg } from "./permissoes";
+import { SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos, soAteAoContacto } from "./permissoes";
 import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -96,7 +98,7 @@ export function PaginaNegocio(ctx: Ctx) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {T && <span key={eur(T.pf)} className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm text-primary animate-in fade-in-0 zoom-in-95"><span className="font-mono font-semibold tabular-nums">{eur(T.pf)} € s/ IVA</span>· margem {pct(T.m)}</span>}
+          {T && <span key={eur(T.pf)} className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm text-primary animate-in fade-in-0 zoom-in-95"><span className="font-mono font-semibold tabular-nums">{eur(T.pf)} € s/ IVA</span>{/* 11/11 (F4): a margem só com «Ver custos do orçamento» (sem ela os custos vêm a null e dava 100%) */}{podeVerCustos() && <>· margem {pct(T.m)}</>}</span>}
           {/* 23/10 (2.0): reenviar o acesso ao portal sem um documento novo, como na proposta simples */}
           <BotaoAcessoPortal ctx={ctx} d={d} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-muted" />
           {d.fase < 4 && !d.perdido && <Button variant="outline" size="sm" onClick={go(() => A.perder(d.id))}>Marcar perdido</Button>}
@@ -213,7 +215,7 @@ function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: n
   if (i === 0) resumo = [origemDoNegocio(d), d.f.email || "", d.f.tipo_cliente || ""].filter(Boolean);
   if (i === 1) resumo = [d.f.resultado || "", d.f.orc_cliente || "", d.visita.slot ? "visita " + d.visita.slot : ""].filter(Boolean);
   if (i === 2) resumo = [d.f.tipologia || "", d.f.andar ? d.f.andar + ".º andar" : "", d.f.tem_elevador === "Sim" ? "com elevador" : "", orcLinhas(d, S).length + " serviços", d.visita.fotos + " fotos"].filter(Boolean);
-  if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " € s/ IVA", "margem " + pct(T.m), d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")]; }
+  if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " € s/ IVA", podeVerCustos() ? "margem " + pct(T.m) : "", d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")].filter(Boolean); }
   if (i === 4) resumo = [d.fin.fatura?.n || "", d.fin.recibo?.n || "", d.f.metodo || ""].filter(Boolean);
   return (
     <section id={"sec-" + i} className="scroll-mt-4 overflow-hidden rounded-xl border border-border/70 bg-card animate-in fade-in-0 slide-in-from-top-2 duration-500">
@@ -287,6 +289,23 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ), d.f), id: "quem", titulo: "Quem pede", personalizado: false, resumo: [d.nome, d.tel, d.f.pedido || ""].filter(Boolean) },
     ];
   };
+  // 11/11 (fim de contacto): o passo final da assistente comercial
+  const passoPassarAoComercial = (): Passo => {
+    const feito = contactoConcluido(d);
+    return {
+      id: "comercial", titulo: "Passar ao comercial", icone: UserCheck, feito, resumo: feito ? ["Contacto concluído"] : [], corpo: (
+        <div className="space-y-3">
+          <p className="text-[15px] text-muted-foreground">{feito
+            ? "Contacto concluído. O negócio está com o comercial, que marca a visita."
+            : "Acabada a chamada, o negócio passa ao comercial, que marca a visita. Fica em Contacto e deixa de poder ser mudado por aqui."}</p>
+          {!feito && <Button size="lg" className="min-h-11" onClick={go(() => A.passarAoComercial(d.id))}><UserCheck className="mr-1.5 h-4 w-4" aria-hidden="true" />Passar ao comercial</Button>}
+        </div>
+      ),
+    };
+  };
+  // 11/11: na fase Negócio ou mais à frente sem orçamento (as versões apagadas na base), só o aviso: nenhum passo de orçamento
+  if (fase === d.fase && semOrcamento(d)) return [{ id: "sem-orcamento", titulo: "Sem orçamento", icone: FileText, feito: false, semAvancar: true, resumo: [],
+    corpo: <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{SEM_ORCAMENTO}</p> }];
   let passos: Passo[] = [];
   if (fase === 0) {
     passos = [
@@ -309,7 +328,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 4/11 (Rúben): a morada que a lead já trazia propõe-se primeiro (validar, editar ou outra): MoradaDaObra.tsx
       { ...g(CONTACTO[2], MapPin), corpo: <MoradaDaObra ctx={ctx} d={d}><Campos grupo={E(CONTACTO[2])} {...fx} /></MoradaDaObra> },
       { ...g(CONTACTO[3], Sparkles) },
-      { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
+      // 11/11 (fim de contacto): a assistente comercial (contacto.registar sem nenhuma permissão além do contacto) não marca a visita:
+      // o último passo é «Passar ao comercial» (A.passarAoComercial), e o negócio fica em Contacto, pronto para o comercial
+      ...(soAteAoContacto() ? [passoPassarAoComercial()] : [{ id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>
           {/* 2/11 (reunião): a sugestão de quem vai, pela agenda (livre a essa hora) e pela proximidade (visitas perto nesse dia) */}
@@ -327,8 +348,19 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           </div>
           <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot, sugerirQuemVai(S.deals, d, slot, opcoesDaVisita())?.quem))()} />
         </div>
-      ) },
+      ) } as Passo]),
     ];
+    // 11/11 (20270113130000): os passos do Contacto pedem negocios.contacto.registar. Sem ela (ex.: um comercial que só marca visitas)
+    // abrem só de leitura, com a permissão em falta; «Marcar a visita» continua (pede visita.gerir, e o servidor deixa-o gravar sem
+    // mexer nos dados do Contacto)
+    if (comPermissoesReais() && !podeNeg(S.role, "contacto.registar")) {
+      passos = passos.map((p) => (p.id === "vaga" || p.id === "comercial" ? p : { ...p, corpo: (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{SEM_PERM["contacto.registar"].sub}</p>
+          <fieldset disabled className="m-0 min-w-0 border-0 p-0">{p.corpo}</fieldset>
+        </div>
+      ) }));
+    }
   } else if (fase === 2) {
     const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
@@ -445,7 +477,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     passos = [
       // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
       { id: "orc", titulo: "Orçamento", icone: o.enviada && !o.aceite && !o.vendaDireta ? Lock : FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)),
-        resumo: o.enviada && !o.aceite && !o.vendaDireta ? ["fechado até o cliente aceitar"] : [eur(tot(d, S).pf) + " € s/ IVA", "margem " + pct(tot(d, S).m)],
+        resumo: o.enviada && !o.aceite && !o.vendaDireta ? ["fechado até o cliente aceitar"] : [eur(tot(d, S).pf) + " € s/ IVA", ...(podeVerCustos() ? ["margem " + pct(tot(d, S).m)] : [])],
         corpo: simples ? <OrcamentoSimples {...ctx} d={d} /> : <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
       simples ? fechadoSe({ ...g(PROPOSTA[0], FileSignature, !!o.enviada), corpo: (
         <div className="space-y-10">
@@ -557,7 +589,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
         // 9/11 (Rúben): o Estúdio do plano, por cima do negócio (o calendário por técnico, os alertas e aprovar)
-        corpo: simples ? <div className="space-y-6"><AbrirEstudioPlano ctx={ctx} d={d} /><ObraSimples {...ctx} d={d} /></div> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
+        corpo: simples ? <div className="space-y-6">{d.obra.plano && d.obra.plano.estado !== "por aprovar" ? <AbrirEstudioObra ctx={ctx} d={d} /> : <AbrirEstudioPlano ctx={ctx} d={d} />}<ObraSimples {...ctx} d={d} /></div> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
       ...(passoContrato ? [passoContrato] : []),
       ...(simples ? [(() => {
         const r = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null, c = contaMateriais(d, r);
@@ -759,7 +791,7 @@ export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Nego
                 onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %
             </label>
             <span className="text-sm text-muted-foreground">{nfmt(T.h)} h · custo {eur(T.custo)} €</span>
-            <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span></span>
+            <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € {podeVerCustos() && <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span>}</span>
           </div>
           <ProdutosOrcamento S={S} A={A} run={run} d={d} />
           {o.verif && !locked && (

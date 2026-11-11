@@ -65,7 +65,7 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo, aoAbrirContratos
       onAbrirContratos={w.podeVerVinculos === true ? aoAbrirContratos : undefined}
       saving={ficha.saving} onGuardar={ficha.savePessoa} vinculoActivoId={ctx.vinculoActivoId}
       podeVerAfectacoes={ctx.podeVerAfectacoesEfectivo} podeEditarAfectacoes={w.podeEditarAfectacoes}
-      podeCorrigirAfectacoes={w.podeCorrigirAfectacoes} podeVerColocacao={w.podeVerColocacao}
+      podeCorrigirAfectacoes={w.podeCorrigirAfectacoes} podeEditarHorario={w.podeEditarHorario} podeVerColocacao={w.podeVerColocacao}
       podeEditarColocacao={w.podeEditarColocacao} podeCorrigirColocacao={w.podeCorrigirColocacao}
     />
     {/* 28/10: os ofícios de obra da pessoa (o mesmo cartão do /rh): é daqui que o Catálogo e o orçamento tiram os técnicos.

@@ -101,6 +101,10 @@ const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
   // 6/11: os passos da obra (as Operações) pedem negocios.obra.planear, como o motor (A.aprovarPlano, A.arrancar)
   gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"], abrirRetificacao: ["obra.planear"],
+  // 11/11 (F3): aceitar as medidas (A.retificarMedidas e as respostas retif_*) pede o mesmo que o passo (neg_guardar_negocio, 20270113110000)
+  retificarMedidas: ["obra.planear"],
+  // 11/11 (fim de contacto): a assistente comercial passa o negócio ao comercial (A.passarAoComercial, a resposta contacto_concluido)
+  passarAoComercial: ["contacto.registar"],
 };
 /** 9/11 (revisão do Lote 2): os passos que pedem UMA de várias permissões. «Verificar no ERP» (A.verificarErp) só lê o Eticadata: basta
  *  negocios.registar_fatura OU negocios.validar_pagamento; sem nenhuma, o botão fica desligado antes de qualquer leitura. A primeira da
@@ -186,6 +190,58 @@ export function podeVerCustos(): boolean {
   return true;
 }
 
+/** 11/11 (fim de contacto, 20270113120000): as permissões do Negócio que vão além do contacto. A assistente comercial é quem tem
+ *  negocios.contacto.registar e nenhuma destas (não há código próprio): trabalha até ao Contacto e passa o negócio ao comercial. Num
+ *  negócio em Visita ou mais à frente, ou em Contacto já «passado ao comercial», o servidor só grava a quem tiver uma destas (a MESMA lista
+ *  de neg_guardar_negocio). Leem-se com as outras (CODIGOS_NEGOCIOS). */
+export const CODIGOS_DEPOIS_DO_CONTACTO: readonly string[] = [
+  "negocios.visita.gerir", "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "negocios.proposta.decidir",
+  "negocios.contrato.editar", "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.obra.planear", "negocios.obra.executar",
+  "negocios.obra.materiais", "negocios.obra.imprevistos", "negocios.obra.fechar", "negocios.obra.tecnico",
+];
+/** A resposta que marca o contacto concluído pela assistente (o negócio fica em Contacto, pronto para o comercial marcar a visita). */
+export const CHAVE_CONTACTO_CONCLUIDO = "contacto_concluido";
+/** Quem entrou só trabalha até ao Contacto (a assistente comercial)? Só com conta real e as permissões lidas. */
+export function soAteAoContacto(): boolean {
+  const c = reais?.codigos;
+  return !!c && c.has("negocios.contacto.registar") && !CODIGOS_DEPOIS_DO_CONTACTO.some((x) => c.has(x));
+}
+/** O negócio já está com o comercial: em Visita ou mais à frente, ou em Contacto com o contacto concluído pela assistente. */
+export const contactoConcluido = (d: { fase: number; f: Record<string, string | undefined> }): boolean => d.fase <= 1 && !!d.f[CHAVE_CONTACTO_CONCLUIDO];
+export const comOComercial = (d: { fase: number; f: Record<string, string | undefined> }): boolean => d.fase >= 2 || contactoConcluido(d);
+/** O distintivo do negócio que a assistente passou ao comercial (o quadro, a lista e o Hoje de quem marca a visita). */
+export const PRONTO_PARA_VISITA = "Pronto para marcar a visita";
+/** O aviso do negócio só de leitura para a assistente. */
+export const AVISO_COM_O_COMERCIAL = "O negócio já está com o comercial. Pode vê-lo, mas já não o muda: o que mudar neste ecrã não se grava.";
+
+/** 11/11 (20270113130000): cada fase do negócio pede a sua permissão (perfil ou Papel no Negócio). O MESMO mapa de neg_guardar_negocio:
+ *  Contacto → contacto.registar; Contacto passado ao comercial e Visita → visita.gerir; Negócio → orçamento, margem, proposta, contrato ou
+ *  obra.planear (as medidas e o plano antes do contrato); Financeiro → sem permissão de fase (pessoas.edit, como antes); Obra → as obra.* e
+ *  as do Negócio (as adendas). `null`: a fase não pede nenhuma. */
+const DO_NEGOCIO_FASE: readonly string[] = ["negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar",
+  "negocios.proposta.decidir", "negocios.contrato.editar", "negocios.obra.planear"];
+const DA_OBRA_FASE: readonly string[] = ["negocios.obra.planear", "negocios.obra.executar", "negocios.obra.materiais", "negocios.obra.imprevistos",
+  "negocios.obra.fechar", "negocios.obra.tecnico", ...DO_NEGOCIO_FASE.filter((c) => c !== "negocios.obra.planear")];
+export function codigosDaFase(d: { fase: number; f: Record<string, string | undefined> }): readonly string[] | null {
+  // em Contacto, quem só gere visitas (o comercial sem contacto.registar) também abre o negócio para marcar a visita: os passos do
+  // Contacto ficam só de leitura para ele (passosDaFase) e o servidor recusa-lhe mudar os dados do Contacto
+  if (d.fase <= 1 && !contactoConcluido(d)) return ["negocios.contacto.registar", "negocios.visita.gerir"];
+  if (d.fase <= 2) return ["negocios.visita.gerir"];
+  if (d.fase === 3) return DO_NEGOCIO_FASE;
+  if (d.fase === 4) return null;
+  return DA_OBRA_FASE;
+}
+/** A permissão da fase que falta a quem entrou (a primeira da lista), ou null (tem uma, a fase não pede, ou sem as permissões lidas). */
+export function faltaDaFase(codigos: readonly string[] | null | undefined): string | null {
+  const c = reais?.codigos;
+  if (!c || !codigos || codigos.some((x) => c.has(x))) return null;
+  return codigos[0];
+}
+/** O aviso do negócio só de leitura por falta da permissão da fase. */
+export const avisoDaFase = (codigo: string): string => (codigo === "negocios.visita.gerir" && soAteAoContacto()
+  ? AVISO_COM_O_COMERCIAL
+  : `Sem permissão para mudar este negócio na fase em que está (${codigo}). Pode vê-lo; o que mudar neste ecrã não se grava.`);
+
 /** O aviso de quem não tem a permissão (a mensagem e a explicação). */
 export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "finance.validate_payment": { msg: "Sem permissão para validar pagamentos", sub: "Só o Financeiro ou a Direção validam pagamentos (finance.validate_payment). Mude de papel em cima." },
@@ -193,7 +249,7 @@ export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "contracts.cancel": { msg: "Sem permissão para anular contratos", sub: "Só a Direção anula contratos e vendas (contracts.cancel)." },
   "equipa.edit": { msg: "Sem permissão para mudar a ficha do técnico", sub: "Mudar o ofício e as férias do técnico pede a permissão hr.pessoas.laborais.edit (dados laborais do RH)." },
   "margin.approve": { msg: "Sem permissão para aprovar a margem", sub: "Só a Direção aprova uma proposta abaixo da margem mínima (negocios.margem.aprovar)." },
-  "contacto.registar": { msg: "Sem permissão para registar o contacto", sub: "Registar a chamada, as tentativas e o voltar a ligar pede a permissão negocios.contacto.registar." },
+  "contacto.registar": { msg: "Sem permissão para registar o contacto", sub: "Registar a chamada, as tentativas, o voltar a ligar e passar o negócio ao comercial pede a permissão negocios.contacto.registar." },
   "visita.gerir": { msg: "Sem permissão para gerir as visitas", sub: "Marcar, alterar, cancelar e fechar as visitas e o diagnóstico no local pede a permissão negocios.visita.gerir." },
   "proposta.decidir": { msg: "Sem permissão para registar a decisão do cliente", sub: "Registar o pedido de alterações ou a resposta a uma adenda pede a permissão negocios.proposta.decidir." },
   "obra.imprevistos": { msg: "Sem permissão para decidir os imprevistos", sub: "Propor ao cliente o trabalho extra e decidir o imprevisto pede a permissão negocios.obra.imprevistos." },

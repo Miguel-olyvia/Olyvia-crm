@@ -21,6 +21,8 @@ export interface Imprevisto {
   /** IM-<negócio>-<n> */
   id: string; q: string; dia: number; quem: string;
   texto: string; onde: string; foto?: string;
+  /** 11/11 (Estúdio da obra): todas as fotografias (a primeira é a `foto`) e o custo estimado para o cliente (sem IVA) */
+  fotos?: string[]; custo?: number;
   grav: Gravidade;
   /** os nomes das tarefas afetadas (os índices mudam quando o plano se reordena) */
   tarefas: string[];

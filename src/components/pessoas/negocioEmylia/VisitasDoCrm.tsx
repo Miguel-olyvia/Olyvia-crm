@@ -26,6 +26,7 @@ import {
 import { MarcarVisitaNegocio, type VisitaGravada } from "./MarcarVisitaNegocio";
 import { preparadoNoNegocio } from "./preparadoDaVisita";
 import { esquecerMarcacao, marcacaoPedida, ouvirMarcacoes } from "@/emylia/marcacaoDaChamada";
+import { SEM_PERM, podeNeg } from "@/emylia/permissoes";
 
 /** O que o passo precisa de saber do negócio. `entityId` pode faltar (a ficha só sabe o negócio): lê-se da base. */
 export interface ContextoDasVisitas {
@@ -88,11 +89,17 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
   const visitasCrm = semSombras(lidas.visitas, marcasDoEspelho(d));
   const ativas = visitasCrm.filter((v) => v.estado !== "cancelada");
   const lido = !lidas.isLoading && !lidas.isError && !agenda.isLoading && c.negocioId !== null;
+  // 11/11 (F2): marcar, remarcar, cancelar e dar como feita pedem negocios.visita.gerir (neg_guardar_visita, neg_cancelar_visita; o espelho
+  // v<n>_* também, em neg_guardar_negocio). Sem ela os botões ficam desligados e diz-se a permissão em falta, como nos outros passos.
+  const podeGerir = c.podeEditar && podeNeg(ctx.S.role, "visita.gerir");
+  const semGerir = c.podeEditar && !podeGerir;
+  const idSemGerir = `sem-visita-gerir-${d.id}`;
 
   // O espelho acompanha o CRM (se discordar, o CRM ganha): só escreve quando há diferença e a pessoa pode editar; nunca em loop com o mesmo plano.
   const ultimoPlano = useRef("");
   useEffect(() => {
-    if (!lido || !c.podeEditar) return;
+    // 11/11: sem negocios.visita.gerir o espelho não se escreve: o servidor recusava a gravação toda (e com ela o contacto)
+    if (!lido || !podeGerir) return;
     const plano = calcularEspelho(d, visitasCrm, nomes);
     if (!plano) { ultimoPlano.current = ""; return; }
     const assinatura = JSON.stringify(plano);
@@ -163,7 +170,7 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
       <MarcarVisitaNegocio
         key={visita ? visita.id : `${d.f.visita_dia ?? ""}|${d.f.visita_hora ?? ""}`}
         marcarSozinha={!visita && marcarSozinha} aoDesistirSozinha={() => esquecerMarcacao(d.id)}
-        entityId={entidade.entityId as string} negocioId={c.negocioId as string} nome={d.nome} moradaLead={moradaDaVisita.morada} origemMorada={moradaDaVisita.origem} soLeitura={!c.podeEditar}
+        entityId={entidade.entityId as string} negocioId={c.negocioId as string} nome={d.nome} moradaLead={moradaDaVisita.morada} origemMorada={moradaDaVisita.origem} soLeitura={!podeGerir}
         tipoInicial={ativas.length > 0 || numerosDe(d).length > 0 ? "revisita" : "levantamento"}
         {...(visita ? { visita, presentesInicial: presentesDe(d, visita) }
           // 5/11: o dia e a hora combinados na chamada em direto (ChamadaDireto grava-os em visita_dia e visita_hora)
@@ -179,9 +186,10 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     <div className="max-w-3xl space-y-4">
       {modo === "primeira" && ativas.length > 0 && d.fase === 1 && (
         <EstadoHonesto titulo="Já há uma visita marcada no CRM para este negócio.">
-          <Button type="button" className={cn("mt-2 min-h-11", FOCO)} onClick={() => passarComAMarcada(ativas[0] as VisitaDoNegocio)}>Passar à visita</Button>
+          <Button type="button" className={cn("mt-2 min-h-11", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} onClick={() => passarComAMarcada(ativas[0] as VisitaDoNegocio)}>Passar à visita</Button>
         </EstadoHonesto>
       )}
+      {semGerir && <p id={idSemGerir} className="text-[15px] text-muted-foreground">{SEM_PERM["visita.gerir"].sub}</p>}
       {aviso && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{aviso}</p>}
       <ErroAcao chave={acao.erro} chaveExtra={acao.erroExtra} />
       {semVisitas && !aMarcar && <EstadoHonesto titulo="Ainda não há visitas marcadas neste negócio." />}
@@ -191,10 +199,10 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
             n={i + 1} tipo={v.tipo ? TEXTO_DO_TIPO[v.tipo] : "Visita"} estado={v.estado} dia={v.dia} hora={v.hora} quem={v.recursos.map((r) => nomes.get(r) ?? "").filter(Boolean).join(" e ")}
             aoLado={v.estado === "marcada" && c.podeEditar && !d.visita.fechada ? (
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar) { setAMarcar(false); setARemarcar(v.id); } }}>Remarcar</Button>
-                <Button type="button" variant="ghost" className={cn("min-h-11 text-muted-foreground", FOCO)} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar) cancelar(v); }}>Cancelar esta visita</Button>
+                <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar && podeGerir) { setAMarcar(false); setARemarcar(v.id); } }}>Remarcar</Button>
+                <Button type="button" variant="ghost" className={cn("min-h-11 text-muted-foreground", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar && podeGerir) cancelar(v); }}>Cancelar esta visita</Button>
                 {Date.parse(v.inicio) <= Date.now() && (
-                  <Button type="button" variant="ghost" className={cn("min-h-11 text-muted-foreground", FOCO)} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar) darComoFeita(v); }}>Dar como feita</Button>
+                  <Button type="button" variant="ghost" className={cn("min-h-11 text-muted-foreground", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar && podeGerir) darComoFeita(v); }}>Dar como feita</Button>
                 )}
               </div>
             ) : undefined}
@@ -211,8 +219,8 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
       {(aMarcar || (semVisitas && aRemarcar === null)) ? formulario() : (
         !d.visita.fechada && c.podeEditar && aRemarcar === null && (
           <button
-            type="button" onClick={() => setAMarcar(true)}
-            className={cn("flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-[15px] font-medium text-primary transition-colors hover:border-primary hover:bg-primary/[0.04]", FOCO)}
+            type="button" onClick={() => { if (podeGerir) setAMarcar(true); }} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined}
+            className={cn("disabled:cursor-not-allowed disabled:opacity-60 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-[15px] font-medium text-primary transition-colors hover:border-primary hover:bg-primary/[0.04]", FOCO)}
           >
             <Plus className="h-5 w-5" aria-hidden="true" />Marcar outra visita
           </button>

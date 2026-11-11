@@ -205,14 +205,15 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
                 <li key={p.id} className="flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-[15px]">
                   <span>{p.id} <span className="text-muted-foreground">· {p.forn.replace(" (exemplo)", "")}</span></span>
                   <span className={cn("text-sm", p.fase === "por aprovar" ? "text-warning" : p.fase === "recebida" ? "text-success" : "text-muted-foreground")}>
-                    {p.fase === "por aprovar" && p.uuid ? "por aprovar por Compras e armazém" : p.uuid ? FASE_PO[p.fase] ?? p.fase : p.estado.split(" · ").at(-1)}{(p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial") && p.prevista ? ` · chega a ${ddmm(p.prevista)}${p.prometida ? "" : " (prevista)"}` : ""}
+                    {p.fase === "por aprovar" && p.uuid ? "por aprovar por Compras e armazém" : p.uuid ? (p.fase === "no portal" && p.prometida ? "confirmada pelo fornecedor" : FASE_PO[p.fase] ?? p.fase) : p.estado.split(" · ").at(-1)}{(p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial") && p.prevista ? ` · chega a ${ddmm(p.prevista)}${p.prometida ? "" : " (prevista)"}` : ""}
                   </span>
                   {podeAprovar && p.fase === "por aprovar" && p.uuid && (
                     <Button size="sm" disabled={aAprovar !== null} onClick={() => { const id = p.uuid!; setAAprovar(id); void aprovar!(id).finally(() => setAAprovar(null)); }}>
                       {aAprovar === p.uuid ? "A aprovar…" : "Aprovar e enviar ao fornecedor"}
                     </Button>
                   )}
-                  {teste && p.fase === "no portal" && p.uuid && (
+                  {/* 11/11: confirmada (com a data prometida), o botão de teste sai */}
+                  {teste && p.fase === "no portal" && p.uuid && !p.prometida && (
                     <Button size="sm" variant="outline" className="border-dashed border-amber-500 text-amber-800 hover:bg-amber-50" disabled={aConfirmar !== null}
                       onClick={() => { const id = p.uuid!; setAConfirmar(id); void teste.confirmarFornecedor(id).finally(() => setAConfirmar(null)); }}>
                       <FlaskConical className="mr-1.5 h-4 w-4" aria-hidden="true" />{aConfirmar === p.uuid ? "A confirmar…" : "Confirmar pelo fornecedor (teste)"}

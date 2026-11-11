@@ -88,6 +88,33 @@ export function papelInicial(m: MeusPapeis, atual: Papel): Papel | null {
   return P.find((p) => p !== "tecnico") ?? P[0] ?? null;
 }
 
+/** 11/11: a ordem com que se escolhe o papel de abertura quando as permissões do perfil dão vários: o mais específico primeiro (o
+ *  Financeiro, Compras e armazém e o Gestor de obra fazem um trabalho só deles; a Direção e o Comercial são os mais largos). O Técnico
+ *  (e o Jurídico, que as permissões não dão) só se não houver nenhum destes. */
+export const PREFERENCIA_PAPEL_INICIAL: readonly Papel[] = ["financeiro", "armazem", "operacoes", "direcao", "comercial"];
+export function papelMaisEspecifico(L: readonly Papel[]): Papel | null {
+  return PREFERENCIA_PAPEL_INICIAL.find((p) => L.includes(p)) ?? L.find((p) => p !== "tecnico") ?? L[0] ?? null;
+}
+
+/** 11/11: o papel com que a página ABRE e os papéis da pessoa. `rh` é o que neg_meus_papeis devolveu (antes das permissões); `codigos`
+ *  as permissões negocios.* do perfil (null: não se leram ou a leitura falhou); `escolhido` o papel que a pessoa escolheu à mão no «A ver
+ *  como» enquanto está na página (null: ainda nenhum).
+ *  - escolhido e permitido: fica esse;
+ *  - com Papel no Negócio na ficha RH: como antes (papelInicial);
+ *  - sem papel no RH (com ou sem `todos`): o papel mais específico que as permissões dão (antes, quem via todos abria no Comercial);
+ *  - sem nada disso: como antes (papelInicial: com `todos`, o que já estava; sem, nenhum).
+ *  Não muda o que se pode escolher: quem vê todos continua a poder escolher qualquer papel. */
+export function papelDeAbertura(rh: MeusPapeis, codigos: ReadonlySet<string> | null, atual: Papel, escolhido: Papel | null = null): { meus: MeusPapeis; papel: Papel | null } {
+  const meus = comPapeisDasPermissoes(rh, codigos);
+  const P = papeisPermitidos(meus);
+  if (escolhido && P.includes(escolhido)) return { meus, papel: escolhido };
+  if (rh.papeis.length === 0 && codigos) {
+    const p = papelMaisEspecifico(papeisDasPermissoes(codigos).filter((x) => P.includes(x)));
+    if (p) return { meus, papel: p };
+  }
+  return { meus, papel: papelInicial(meus, atual) };
+}
+
 /** O nome de quem faz cada papel: o da pessoa do RH nos papéis dela ("Inês · Financeiro"); nos outros, só o papel. Muda o PAPEIS. */
 export function aplicarNomesPapeis(m: MeusPapeis): void {
   const nome = m.pessoa?.nome.split(/\s+/)[0] ?? "";

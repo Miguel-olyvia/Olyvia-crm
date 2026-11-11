@@ -10,7 +10,7 @@ import { Check, RotateCcw, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LINHAS, PAPEIS, camposMedida, impactoDasMedidas, medida, nfmt, type Negocio } from "./motor";
-import { podeNeg } from "./permissoes";
+import { SEM_PERM, podeNeg } from "./permissoes";
 import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { podeRetificar } from "./preparacaoObra";
@@ -48,6 +48,8 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       {meu ? <AbrirEstudioMedidas ctx={ctx} d={d} /> : !aceite && podeRetificar(d) && (
         <p className="flex flex-wrap items-center gap-x-2 rounded-xl bg-muted/60 px-4 py-3 text-[15px]">
           <span>Este passo é do supervisor, nas Operações.</span>
+          {/* 11/11 (F3): a permissão em falta, como nos outros passos (o servidor também a pede: 20270113110000) */}
+          <span className="w-full text-muted-foreground">{SEM_PERM["obra.planear"].sub}</span>
           <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("operacoes"))}>Mudar para {PAPEIS.operacoes.n}</button>
         </p>
       )}

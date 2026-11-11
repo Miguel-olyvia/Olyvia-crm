@@ -208,6 +208,9 @@ const PROPOSALS_LIST_SELECT =
   "decided_snapshot_hash, decided_published_at, negocio_id, " +
   "deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)";
 
+// 11/11/2026: a RLS de proposals que recusa um UPDATE devolve 0 linhas sem erro; é esta a mensagem nesses casos.
+const SEM_PERMISSAO_EDITAR_PROPOSTA = "Sem permissão para alterar esta proposta (proposals.edit). Nada foi gravado.";
+
 const Proposals = () => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
@@ -648,6 +651,12 @@ const Proposals = () => {
   const { pode: podeDecidirNegocio } = usePodeDecidirProposta();
   const semDecisaoNoNegocio = (proposal: { negocio_id?: string | null } | null | undefined): boolean =>
     !!proposal?.negocio_id && !podeDecidirNegocio;
+  // 11/11/2026 (auditoria de permissões): mudar etapa/estado, renovar a validade, editar e enviar por email pedem proposals.edit —
+  // a política de UPDATE de proposals recusa sem ela e devolvia 0 linhas sem erro (o ecrã dizia «sucesso»). Numa proposta de
+  // negócio o envio por email também aceita negocios.proposta.enviar (o servidor decide: send-proposal-email). Duplicar pede proposals.create.
+  const podeEditarPropostas = hasPermission("proposals.edit");
+  const podeEnviarEmailProposta = (proposal: { negocio_id?: string | null } | null | undefined): boolean =>
+    podeEditarPropostas || !!proposal?.negocio_id;
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendProposal, setSendProposal] = useState<any>(null);
@@ -1654,14 +1663,16 @@ const Proposals = () => {
       const businessUserIdBulkSt = await resolveCurrentBusinessUserId();
       if (!businessUserIdBulkSt) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdBulkSt, p_source: 'ui' });
-      const { error } = await supabase
+      const { data: movedRows, error } = await supabase
         .from("proposals")
         .update({ stage_id: bulkNewStatus })
         .in("id", selectedIds)
-        .eq("organization_id", activeCompany.id);
+        .eq("organization_id", activeCompany.id)
+        .select("id");
       if (error) throw error;
+      if (!movedRows || movedRows.length === 0) throw new Error(SEM_PERMISSAO_EDITAR_PROPOSTA);
       const changedIds = [...selectedIds];
-      toast({ title: t('common.statusUpdated'), description: `${selectedIds.length} propostas atualizadas.` });
+      toast({ title: t('common.statusUpdated'), description: `${movedRows.length} propostas atualizadas.` });
       setSelectedIds([]);
       setBulkStatusDialogOpen(false);
       setBulkNewStatus("");
@@ -2213,11 +2224,13 @@ const Proposals = () => {
         return;
       }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-      const { error } = await supabase
+      const { data: renewedRows, error } = await supabase
         .from("proposals")
         .update({ valid_until: renewDate })
-        .eq("id", renewProposalId);
+        .eq("id", renewProposalId)
+        .select("id");
       if (error) throw error;
+      if (!renewedRows || renewedRows.length === 0) throw new Error(SEM_PERMISSAO_EDITAR_PROPOSTA);
       const renewedId = renewProposalId;
       toast({ title: "Validade renovada com sucesso" });
       setRenewDialogOpen(false);
@@ -2249,11 +2262,13 @@ const Proposals = () => {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-      const { error } = await supabase
+      const { data: sentRows, error } = await supabase
         .from("proposals")
         .update({ stage_id: sentStage.id, status: "sent", sent_at: new Date().toISOString() })
-        .eq("id", proposal.id);
+        .eq("id", proposal.id)
+        .select("id");
       if (error) throw error;
+      if (!sentRows || sentRows.length === 0) throw new Error(SEM_PERMISSAO_EDITAR_PROPOSTA);
       let workflowFailed = false;
       workflowFailed = await runProposalStageWorkflow({
         entityId: proposal.id,
@@ -2294,8 +2309,9 @@ const Proposals = () => {
       const businessUserIdAccept = await resolveCurrentBusinessUserId();
       if (!businessUserIdAccept) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdAccept, p_source: 'ui' });
-      const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", targetProposal.id);
+      const { data: acceptedRows, error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", targetProposal.id).select("id");
       if (error) throw error;
+      if (!acceptedRows || acceptedRows.length === 0) throw new Error(SEM_PERMISSAO_EDITAR_PROPOSTA);
       let workflowFailed = false;
       workflowFailed = await runProposalStageWorkflow({
         entityId: targetProposal.id,
@@ -2346,7 +2362,7 @@ const Proposals = () => {
     const businessUserIdReject = await resolveCurrentBusinessUserId();
     if (!businessUserIdReject) throw new Error("Utilizador não identificado");
     await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
-    const { error } = await supabase.from("proposals").update({
+    const { data: rejectedRows, error } = await supabase.from("proposals").update({
       stage_id: rejectedStage.id,
       status: "rejected",
       rejected_at: new Date().toISOString(),
@@ -2354,8 +2370,9 @@ const Proposals = () => {
       rejection_reason_code: reason.code,
       rejection_reason: reason.label,
       rejection_notes: reason.notes,
-    }).eq("id", proposal.id);
+    }).eq("id", proposal.id).select("id");
     if (error) throw error;
+    if (!rejectedRows || rejectedRows.length === 0) throw new Error(SEM_PERMISSAO_EDITAR_PROPOSTA);
 
     // Cascata: orçamentos ligados a esta proposta que ainda estejam em
     // rascunho/enviado herdam o mesmo motivo e passam a rejeitado. Um erro
@@ -2433,7 +2450,7 @@ const Proposals = () => {
       const businessUserIdReopen = await resolveCurrentBusinessUserId();
       if (!businessUserIdReopen) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReopen, p_source: 'ui' });
-      const { error: reopenError } = await supabase.from("proposals").update({
+      const { data: reopenedRows, error: reopenError } = await supabase.from("proposals").update({
         stage_id: draftStage.id,
         status: "draft",
         accepted_at: null,
@@ -2442,8 +2459,9 @@ const Proposals = () => {
         rejection_reason_id: null,
         rejection_reason_code: null,
         rejection_notes: null,
-      }).eq("id", proposal.id);
+      }).eq("id", proposal.id).select("id");
       if (reopenError) throw reopenError;
+      if (!reopenedRows || reopenedRows.length === 0) throw new Error(SEM_PERMISSAO_EDITAR_PROPOSTA);
 
       // Reabrir só toca colunas da proposta — nenhum quote é alterado, logo o
       // trigger de sincronização não dispara aqui. Recalcular explicitamente
@@ -2759,12 +2777,16 @@ const Proposals = () => {
     if (sn === "draft" || sn === "rascunho") {
       return (
         <>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleEdit(proposal)} title="Editar">
-            <Pencil className="w-3.5 h-3.5" />
-          </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Enviar email">
-            <Mail className="w-3.5 h-3.5" />
-          </Button>
+          {podeEditarPropostas && (
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleEdit(proposal)} title="Editar">
+              <Pencil className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          {podeEnviarEmailProposta(proposal) && (
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Enviar email">
+              <Mail className="w-3.5 h-3.5" />
+            </Button>
+          )}
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
@@ -2777,12 +2799,16 @@ const Proposals = () => {
           <Button size="icon" variant={isNoResponse ? "default" : "ghost"} className={cn("h-7 w-7", isNoResponse && "animate-pulse")} onClick={() => handleQuickCall(proposal)} title="Follow-up">
             <Phone className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Reenviar">
-            <Mail className="w-3.5 h-3.5" />
-          </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleEdit(proposal)} title="Adicionar orçamento">
-            <Plus className="w-3.5 h-3.5" />
-          </Button>
+          {podeEnviarEmailProposta(proposal) && (
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Reenviar">
+              <Mail className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          {podeEditarPropostas && (
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleEdit(proposal)} title="Adicionar orçamento">
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
+          )}
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
@@ -2801,12 +2827,14 @@ const Proposals = () => {
             onClick={() => openContractPdf(pipelineLinks[proposal.id]?.contract_id)}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} disabled={semDecisaoNoNegocio(proposal)} title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : "Reabrir"}>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} disabled={semDecisaoNoNegocio(proposal) || !podeEditarPropostas} title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : !podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : "Reabrir"}>
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id} title="Duplicar">
-            <Copy className="w-3.5 h-3.5" />
-          </Button>
+          <PermissionGate permission="proposals.create">
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id} title="Duplicar">
+              <Copy className="w-3.5 h-3.5" />
+            </Button>
+          </PermissionGate>
         </>
       );
     }
@@ -2816,7 +2844,7 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} disabled={semDecisaoNoNegocio(proposal)} title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : "Reabrir"}>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} disabled={semDecisaoNoNegocio(proposal) || !podeEditarPropostas} title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : !podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : "Reabrir"}>
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleQuickCall(proposal)} title="Follow-up">
@@ -2851,9 +2879,11 @@ const Proposals = () => {
       <DropdownMenuContent align="end" className="w-56">
         {/* Communication */}
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📨 Comunicação</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }}>
-          <Mail className="w-3.5 h-3.5 mr-2" /> {sn === "sent" || sn === "enviada" ? "Reenviar email" : "Enviar por email"}
-        </DropdownMenuItem>
+        {podeEnviarEmailProposta(proposal) && (
+          <DropdownMenuItem onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }}>
+            <Mail className="w-3.5 h-3.5 mr-2" /> {sn === "sent" || sn === "enviada" ? "Reenviar email" : "Enviar por email"}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => handleQuickWhatsApp(proposal)}>
           <MessageSquare className="w-3.5 h-3.5 mr-2" /> WhatsApp
         </DropdownMenuItem>
@@ -2883,7 +2913,7 @@ const Proposals = () => {
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📊 Avançar</DropdownMenuLabel>
-        {(sn === "draft" || sn === "rascunho") && (
+        {(sn === "draft" || sn === "rascunho") && podeEditarPropostas && (
           <DropdownMenuItem onClick={() => handleMarkAsSent(proposal)}>
             <Send className="w-3.5 h-3.5 mr-2" /> Marcar como Enviada
           </DropdownMenuItem>
@@ -2891,29 +2921,33 @@ const Proposals = () => {
         {!stage?.is_won && !stage?.is_lost && (
           <DropdownMenuItem
             className="text-green-600"
-            disabled={semDecisaoNoNegocio(proposal)}
-            title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
+            disabled={semDecisaoNoNegocio(proposal) || !podeEditarPropostas}
+            title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : !podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : undefined}
             onClick={() => { setSelectedProposal(proposal); handleAcceptProposal(proposal); }}
           >
             <CheckSquare className="w-3.5 h-3.5 mr-2" /> Aceitar
-            <span className="text-[10px] text-muted-foreground ml-1">{semDecisaoNoNegocio(proposal) ? "(sem permissão)" : "⚡ cria contrato"}</span>
+            <span className="text-[10px] text-muted-foreground ml-1">{semDecisaoNoNegocio(proposal) || !podeEditarPropostas ? "(sem permissão)" : "⚡ cria contrato"}</span>
           </DropdownMenuItem>
         )}
         {!stage?.is_won && !stage?.is_lost && (
           <DropdownMenuItem
             className="text-red-500"
-            disabled={semDecisaoNoNegocio(proposal)}
-            title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
+            disabled={semDecisaoNoNegocio(proposal) || !podeEditarPropostas}
+            title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : !podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : undefined}
             onClick={() => { setSelectedProposal(proposal); setRejectReasonDialogOpen(true); }}
           >
             <X className="w-3.5 h-3.5 mr-2" /> Rejeitar (com motivo)
-            {semDecisaoNoNegocio(proposal) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
+            {(semDecisaoNoNegocio(proposal) || !podeEditarPropostas) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
           </DropdownMenuItem>
         )}
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📅 Validade</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => openRenewDialog(proposal.id)}>
+        <DropdownMenuItem
+          disabled={!podeEditarPropostas}
+          title={!podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : undefined}
+          onClick={() => openRenewDialog(proposal.id)}
+        >
           <RefreshCw className="w-3.5 h-3.5 mr-2" /> {proposal.valid_until ? "Renovar validade" : "Definir validade"}
         </DropdownMenuItem>
 
@@ -2981,9 +3015,11 @@ const Proposals = () => {
         <DropdownMenuItem onClick={() => { setVisualEditorProposalId(proposal.id); setPortalPreviewOpen(true); }}>
           <Eye className="w-3.5 h-3.5 mr-2" /> Preview Portal
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id}>
-          <Copy className="w-3.5 h-3.5 mr-2" /> Duplicar
-        </DropdownMenuItem>
+        <PermissionGate permission="proposals.create">
+          <DropdownMenuItem onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id}>
+            <Copy className="w-3.5 h-3.5 mr-2" /> Duplicar
+          </DropdownMenuItem>
+        </PermissionGate>
         <DropdownMenuItem onClick={() => { setSendHistoryProposalId(proposal.id); setSendHistoryProposalTitle(proposal.title); setSendHistoryOpen(true); }}>
           <History className="w-3.5 h-3.5 mr-2" /> Histórico
         </DropdownMenuItem>
@@ -2994,11 +3030,11 @@ const Proposals = () => {
             <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
             <DropdownMenuItem
               onClick={() => handleReopenProposal(proposal)}
-              disabled={semDecisaoNoNegocio(proposal)}
-              title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
+              disabled={semDecisaoNoNegocio(proposal) || !podeEditarPropostas}
+              title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : !podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : undefined}
             >
               <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
-              {semDecisaoNoNegocio(proposal) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
+              {(semDecisaoNoNegocio(proposal) || !podeEditarPropostas) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handleQuickCall(proposal)}>
               <Phone className="w-3.5 h-3.5 mr-2" /> Contactar cliente
@@ -3012,11 +3048,11 @@ const Proposals = () => {
             <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
             <DropdownMenuItem
               onClick={() => handleReopenProposal(proposal)}
-              disabled={semDecisaoNoNegocio(proposal)}
-              title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : undefined}
+              disabled={semDecisaoNoNegocio(proposal) || !podeEditarPropostas}
+              title={semDecisaoNoNegocio(proposal) ? SEM_PERMISSAO_DECIDIR_PROPOSTA : !podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : undefined}
             >
               <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
-              {semDecisaoNoNegocio(proposal) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
+              {(semDecisaoNoNegocio(proposal) || !podeEditarPropostas) && <span className="text-[10px] text-muted-foreground ml-1">(sem permissão)</span>}
             </DropdownMenuItem>
           </>
         )}
@@ -3819,10 +3855,16 @@ const Proposals = () => {
                 toast({ title: SEM_PERMISSAO_DECIDIR_PROPOSTA, variant: "destructive" });
                 return;
               }
-              const { error } = await supabase.from("proposals").update({ stage_id: newStageId }).eq("id", proposalId);
+              if (!podeEditarPropostas) {
+                toast({ title: SEM_PERMISSAO_EDITAR_PROPOSTA, variant: "destructive" });
+                return;
+              }
+              const { data: movedRows, error } = await supabase.from("proposals").update({ stage_id: newStageId }).eq("id", proposalId).select("id");
               if (error) {
                 captureFlowError(error, "proposal-lifecycle");
                 toast({ title: "Erro", description: error.message, variant: "destructive" });
+              } else if (!movedRows || movedRows.length === 0) {
+                toast({ title: "Erro", description: SEM_PERMISSAO_EDITAR_PROPOSTA, variant: "destructive" });
               } else {
                 toast({ title: "Proposta movida" });
                 afterProposalMutation([proposalId]);
@@ -3831,6 +3873,10 @@ const Proposals = () => {
             onLostStageDrop={(proposalId, stageId) => {
               const proposal = filteredProposals.find(p => p.id === proposalId);
               if (!proposal) return;
+              if (!podeEditarPropostas) {
+                toast({ title: SEM_PERMISSAO_EDITAR_PROPOSTA, variant: "destructive" });
+                return;
+              }
               if (semDecisaoNoNegocio(proposal)) {
                 toast({ title: SEM_PERMISSAO_DECIDIR_PROPOSTA, variant: "destructive" });
                 return;
@@ -3947,7 +3993,7 @@ const Proposals = () => {
                   <Button variant="outline" size="sm" disabled={bulkEmailSending} onClick={handleBulkSendEmail}>
                     <Mail className="w-3.5 h-3.5 mr-1" /> {bulkEmailSending ? "A enviar…" : "Enviar email"}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setBulkStatusDialogOpen(true)}>
+                  <Button variant="outline" size="sm" disabled={!podeEditarPropostas} title={!podeEditarPropostas ? SEM_PERMISSAO_EDITAR_PROPOSTA : undefined} onClick={() => setBulkStatusDialogOpen(true)}>
                     <Columns3 className="w-3.5 h-3.5 mr-1" /> Mover estado
                   </Button>
                   <Button variant="outline" size="sm" disabled={bulkPdfExporting} onClick={handleBulkExportPdf}>
@@ -4166,8 +4212,8 @@ const Proposals = () => {
       <ProposalDetailsDialog open={detailsOpen} onOpenChange={setDetailsOpen} proposal={selectedProposal}
         onSendProposal={() => { if (selectedProposal) { setSendProposal(selectedProposal); setSendDialogOpen(true); setDetailsOpen(false); } }}
         onViewHistory={() => { if (selectedProposal) { setSendHistoryProposalId(selectedProposal.id); setSendHistoryProposalTitle(selectedProposal.title); setSendHistoryOpen(true); setDetailsOpen(false); } }}
-        onAccept={semDecisaoNoNegocio(selectedProposal) ? undefined : () => handleAcceptProposal(selectedProposal ?? undefined)}
-        onReject={semDecisaoNoNegocio(selectedProposal) ? undefined : () => setRejectReasonDialogOpen(true)}
+        onAccept={semDecisaoNoNegocio(selectedProposal) || !podeEditarPropostas ? undefined : () => handleAcceptProposal(selectedProposal ?? undefined)}
+        onReject={semDecisaoNoNegocio(selectedProposal) || !podeEditarPropostas ? undefined : () => setRejectReasonDialogOpen(true)}
         isAccepting={isAcceptingProposal}
       />
 

@@ -4,7 +4,7 @@
 // os chama e perguntam `tem_permissao(org, perm)`, que não existe nesta base. Ficam só para não mexer no que não é preciso; não usar.
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { ALTERNATIVAS, CODIGO_APROVAR_PO, CODIGO_BASE, CODIGO_ESCREVER_CONVERSA, CODIGO_GERIR_ORCAMENTOS } from "./permissoes";
+import { ALTERNATIVAS, CODIGO_APROVAR_PO, CODIGO_BASE, CODIGO_ESCREVER_CONVERSA, CODIGO_GERIR_ORCAMENTOS, CODIGOS_DEPOIS_DO_CONTACTO } from "./permissoes";
 
 /** 09/11: os códigos dos separadores de /negocios (NegociosEmylia.tsx): ver os Negócios e as Pessoas, criar um negócio, ver as encomendas
  *  de cliente (Inventário) e o Catálogo e custos. negocios.obra.executar e negocios.obra.planear (as Operações) já estão em CODIGO_BASE. */
@@ -18,7 +18,9 @@ export const CODIGOS_NEGOCIOS: readonly string[] = [...new Set([...Object.values
   // fn_po_crm_load) e pessoas.edit (escrever na conversa da obra, neg_mensagem_enviar)
   CODIGO_GERIR_ORCAMENTOS, CODIGO_APROVAR_PO, CODIGO_ESCREVER_CONVERSA,
   // 09/11: os separadores e as ligações de /negocios (perfil OU papel OU admin, como a base): Negócios, Novo negócio, Inventário, Catálogo
-  ...CODIGOS_VISTAS])];
+  ...CODIGOS_VISTAS,
+  // 11/11 (fim de contacto): as que vão além do contacto (soAteAoContacto: a assistente comercial), entre elas negocios.obra.tecnico
+  ...CODIGOS_DEPOIS_DO_CONTACTO])];
 
 export type LeituraPermissoes = { org: string; codigos: ReadonlySet<string> | null };
 

@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acoes, definirPerdaReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
+import { acertarDiaDasObras, acoes, definirPerdaReal, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -40,7 +40,7 @@ import { definirMoradaDaEntidade } from "@/emylia/MoradaDeQuemPede";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
-import { definirVerCustos, podeNeg } from "@/emylia/permissoes";
+import { avisoDaFase, codigosDaFase, definirVerCustos, faltaDaFase, podeNeg } from "@/emylia/permissoes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import { lerPermissoesReais, usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
@@ -59,7 +59,7 @@ import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
-import { aplicarNomesPapeis, aplicarPermissoesReais, comPapeisDasPermissoes, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelDeAbertura, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
@@ -107,6 +107,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const verCustos = usePodeVerCustos();
   definirVerCustos(verCustos.aLer ? null : verCustos.pode);
   useEffect(() => () => definirVerCustos(undefined), []);
+  // 11/11 (teste da Obra, achado): o relógio real (motor: diaReal) nunca se ligava na app: o «hoje» das obras em curso ficava no dia em que
+  // arrancaram (o Hoje do técnico, os atrasos e o Estúdio da obra erravam) e arrancar não punha o início em hoje. Com a base, liga-se.
+  definirRelogioReal(!!org);
+  useEffect(() => () => definirRelogioReal(false), []);
   // 5/11: as permissões das ações (podeNeg) vêm de fn_cat_pode, a MESMA pergunta do servidor (o perfil, os Papéis no Negócio de todos os
   // papéis da pessoa e o admin do sistema), postas no motor com `simular: false`, como na ficha da pessoa. O «A ver como» continua a
   // escolher a vista e de quem é cada passo, mas já não muda o que se pode fazer. Com as reais postas, definirVerCustos é ignorado.
@@ -146,6 +150,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   }), []);
   /** 09/11: os papéis lidos (neg_meus_papeis), também num ref pela mesma razão; null enquanto não se leem. */
   const meusRef = useRef<MeusPapeis | null>(null);
+  /** 11/11: o papel escolhido à mão no «A ver como» nesta página (null: nenhum); respeita-se se os papéis se voltarem a ler. */
+  const escolhaRef = useRef<Papel | null>(null);
   // 5/11: leads.assign para o comercial da lead (ComercialDaLead), da mesma maneira
   const podeAtribuir = usePodeAtribuirComercial();
   definirPodeAtribuirLead(podeAtribuir);
@@ -179,6 +185,14 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const refs = useRef(new Map<number, RefNegocio>());
   // os negócios do CRM (com documentos do CRM): lêem-se, mas nunca se gravam por aqui
   const soLeitura = useRef(new Set<number>());
+  // 11/11 (20270113130000): a permissão que cada negócio pede pela fase em que está na base (codigosDaFase); sem nenhuma delas fica só
+  // de leitura, como o servidor (a assistente comercial depois de «Passar ao comercial» é um caso disto)
+  const faseLida = useRef(new Map<number, readonly string[] | null>());
+  const lerFases = (): void => { faseLida.current = new Map(S.deals.map((d) => [d.id, codigosDaFase(d)])); };
+  const faltaDoNegocio = (n: number): string | null => faltaDaFase(faseLida.current.get(n));
+  const bloqueadosAssistente = (): ReadonlySet<number> => new Set([...faseLida.current.keys()].filter((n) => faltaDoNegocio(n) !== null));
+  // 11/11 (F1): o Catálogo não carregou: os negócios abrem só para consulta (sem o Catálogo, gravar perdia os serviços)
+  const catalogoFalhou = useRef(false);
   const foto = useRef(new Map<number, string>());
   const ids = useRef<IdsServico | null>(null);
   const aGravar = useRef(false);
@@ -201,8 +215,11 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // o que a base devolveu passa a ser o estado (a leitura ao abrir e a releitura depois do Financeiro)
   const aplicarLidos = useCallback((lidos: Awaited<ReturnType<typeof lerNegocios>>) => {
     refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
-    soLeitura.current = new Set(lidos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
+    soLeitura.current = new Set(lidos.filter((n) => n.docsCrm || catalogoFalhou.current).map((n) => n.linhas.negocio.numero));
     S.deals = lidos.map(negocioParaOEcra);
+    lerFases();
+    // 11/11 (teste da Obra): numa organização real o «hoje» de cada obra em curso é o do calendário (antes da fotografia: não grava só por isso)
+    acertarDiaDasObras(S.deals);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
@@ -249,13 +266,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       do {
         deNovo.current = false;
         // 09/11 (20270111100000): com a leitura reduzida só se grava a obra (neg_guardar_negocio recusa-o; sem o «Não gravou»)
-        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, soLeitura.current, { soObra: soExecucaoRef.current });
+        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, new Set([...soLeitura.current, ...bloqueadosAssistente()]), { soObra: soExecucaoRef.current });
         if (r.reler) relerFinanceiro = true;
         if (relerPedido.current) { relerPedido.current = false; relerFinanceiro = true; }
         if (r.erros.length) { semErros = false; setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
       } while (deNovo.current);
+      // 11/11 (fim de contacto): gravado sem erros, o que está no ecrã é o da base: o negócio passado agora ao comercial fica só de leitura
+      if (semErros) lerFases();
       // 2/11 (20270103900000): as respostas do cliente aplicadas ao abrir ficam marcadas, agora que o negócio está gravado
       if (semErros && respostasAplicadas.current.length) {
         try { await marcarRespostas(supabase, org, respostasAplicadas.current.splice(0)); }
@@ -385,16 +404,16 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     setPronto(false); setErroLer(null);
     (async () => {
       // 30/10: os papéis do RH primeiro: sem nenhum (e sem o perfil da Olyvia que vê todos), não há nada a fazer aqui
-      let mp = await lerMeusPapeis(supabase, org);
+      const rh = await lerMeusPapeis(supabase, org);
       if (!vivo) return;
       // 9/11 (Lote 1, A): sem Papel no Negócio no RH (nem pessoas.edit), os papéis vêm das permissões negocios.* do perfil (fn_cat_pode):
       // entra e vê os passos para que tem permissão, em vez de «Não tem nenhum papel»
-      if (!mp.todos && !papelInicial(mp, S.role)) {
-        mp = comPapeisDasPermissoes(mp, await lerPermissoesReais(org));
-        if (!vivo) return;
-      }
+      // 11/11: sem papel no RH, também quem vê todos (pessoas.edit, admin) abre no papel que as permissões dão (o Financeiro abria no
+      // Comercial); só muda o papel de abertura, o «A ver como» continua com todos. Uma escolha à mão nesta página mantém-se.
+      const codigos = rh.papeis.length === 0 ? await lerPermissoesReais(org) : null;
+      if (!vivo) return;
+      const { meus: mp, papel } = papelDeAbertura(rh, codigos, S.role, escolhaRef.current);
       aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
-      const papel = papelInicial(mp, S.role);
       meusRef.current = mp;
       setMeus(mp);
       if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), um cargo técnico de obra ou o perfil de técnico de obra."); return; }
@@ -404,7 +423,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
       if (!mp.todos) await permsLidas();
       if (!vivo) return;
       const so = !mp.todos && soExecucaoRef.current;
-      const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so });
+      // 11/11 (F1): um erro do Catálogo (ex.: CT001) não bloqueia o ecrã: avisa e os negócios abrem só para consulta
+      const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so, tolerante: true });
+      catalogoFalhou.current = !!cat.erro;
+      if (cat.erro) avisar({ msg: "O Catálogo não carregou", sub: `${cat.erro} Os negócios abrem só para consulta.`, kind: "bad" });
       // 9/11: as equipas de obra da empresa (o plano escolhe a equipa toda ou nenhum membro); um erro aqui não para nada
       await carregarEquipasObra(supabase, org).catch(() => undefined);
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
@@ -744,6 +766,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
   const semContaLigada = !!meus && !meus.todos && !meus.pessoa && meus.papeis.length === 0 && tecnicoPorPerfil;
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
+  const faltaAqui = S.view === "negocio" && S.deal != null && !doCrm ? faltaDoNegocio(S.deal) : null;
+  const comOComercialAqui = faltaAqui !== null;
 
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver os negócios.</div>;
@@ -757,7 +781,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         <label className="flex min-w-0 items-center gap-2">
           <span className="hidden text-muted-foreground sm:inline">A ver como</span>
           <select aria-label="A ver como" className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={S.role}
-            onChange={(e) => run(() => { S.role = e.target.value as Papel; })}>
+            onChange={(e) => run(() => { S.role = escolhaRef.current = e.target.value as Papel; })}>
             {(meus ? papeisPermitidos(meus) : (Object.keys(PAPEIS) as Papel[])).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
           </select>
         </label>
@@ -794,11 +818,16 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         : S.view === "negocio" && S.deal && S.deals.some((d) => d.id === S.deal) ? <>
             {doCrm && (
               <p role="alert" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">
-                Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava.
+                {catalogoFalhou.current
+                  ? "O Catálogo não carregou: o negócio fica só para consulta; o que mudar neste ecrã não se grava. Volte a abrir a página."
+                  : "Este negócio é do CRM: abra-o em Contratos/Propostas. Aqui fica só para consulta; o que mudar neste ecrã não se grava."}
               </p>
             )}
+            {comOComercialAqui && (
+              <p role="status" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{avisoDaFase(faltaAqui as string)}</p>
+            )}
             <NegocioSimples {...ctx} ajustarPassos={(passos, d) => {
-              const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm };
+              const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm && !comOComercialAqui };
               return comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null });
             }} />
           </>

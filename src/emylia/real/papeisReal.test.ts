@@ -9,7 +9,8 @@ import { RESPONSAVEL_OBRA, equipaDaObra, equipamentosDaObra } from "../obraOps";
 import { RESPONSAVEIS_OBRA } from "../campos";
 import { TECNICOS, tecnicosIniciais, usarTecnicos, type FichaTecnico } from "../equipa/tecnicos";
 import { atribuirPorAtribuir, tecnicosDoOficio } from "../preparacaoObra";
-import { aplicarGestoresObra, aplicarNomesPapeis, aplicarPermissoesReais, definirResponsavelObra, papeisDoLido, papeisPermitidos, papelInicial, reporNomesPapeis } from "./papeisReal";
+import { CODIGO_BASE } from "../permissoes";
+import { aplicarGestoresObra, aplicarNomesPapeis, aplicarPermissoesReais, definirResponsavelObra, papeisDoLido, papeisPermitidos, papelDeAbertura, papelInicial, papelMaisEspecifico, reporNomesPapeis } from "./papeisReal";
 
 afterEach(() => { reporNomesPapeis(); usarTecnicos(tecnicosIniciais()); });
 
@@ -43,6 +44,61 @@ describe("os papéis de quem entrou", () => {
     expect(PAPEIS.operacoes.n).toBe("Gestor de obra");
     reporNomesPapeis();
     expect(PAPEIS.financeiro.n).toBe("Sandra · Financeiro");
+  });
+});
+
+// 11/11: o papel com que a página abre. O Financeiro (finance.*, pessoas.edit, sem papel na ficha RH) abria no Comercial: com `todos`
+// mantinha-se o S.role de partida. Agora, sem papel no RH, abre no papel mais específico que as permissões do perfil dão.
+describe("o papel com que a página abre", () => {
+  const cods = (...k: (keyof typeof CODIGO_BASE)[]) => new Set(k.map((x) => CODIGO_BASE[x]));
+  const semRH = (todos: boolean) => papeisDoLido({ papeis: [], todos });
+
+  it("financeiro sem papel no RH e com todos (pessoas.edit) → Financeiro; o A ver como continua com todos", () => {
+    const r = papelDeAbertura(semRH(true), cods("finance.validate_payment", "finance.invoice"), "comercial");
+    expect(r.papel).toBe("financeiro");
+    expect(papeisPermitidos(r.meus)).toHaveLength(Object.keys(PAPEIS).length);
+    // e sem todos, também
+    expect(papelDeAbertura(semRH(false), cods("finance.validate_payment"), "comercial").papel).toBe("financeiro");
+  });
+
+  it("gestor de obra (obra.planear) → Gestor de obra, mesmo com permissões do comercial", () => {
+    expect(papelDeAbertura(semRH(false), cods("obra.planear"), "comercial").papel).toBe("operacoes");
+    expect(papelDeAbertura(semRH(true), cods("obra.planear", "contacto.registar"), "comercial").papel).toBe("operacoes");
+  });
+
+  it("comercial (contacto.registar / visita.gerir) → Comercial", () => {
+    expect(papelDeAbertura(semRH(false), cods("contacto.registar"), "financeiro").papel).toBe("comercial");
+    expect(papelDeAbertura(semRH(true), cods("visita.gerir"), "financeiro").papel).toBe("comercial");
+  });
+
+  it("com papel RH «Comercial» → Comercial, as permissões não contam", () => {
+    const rh = papeisDoLido({ papeis: ["comercial"], todos: false });
+    expect(papelDeAbertura(rh, cods("finance.validate_payment"), "comercial").papel).toBe("comercial");
+    expect(papelDeAbertura({ ...rh, todos: true }, null, "comercial").papel).toBe("comercial");
+  });
+
+  it("sem nada → como hoje: sem todos, nenhum papel; com todos, o que já estava", () => {
+    expect(papelDeAbertura(semRH(false), new Set(), "comercial").papel).toBeNull();
+    expect(papelDeAbertura(semRH(false), null, "comercial").papel).toBeNull();
+    expect(papelDeAbertura(semRH(true), new Set(), "comercial").papel).toBe("comercial");
+    expect(papelDeAbertura(semRH(true), null, "direcao").papel).toBe("direcao");
+  });
+
+  it("a escolha à mão nesta página fica, se é permitida", () => {
+    const fin = cods("finance.validate_payment");
+    expect(papelDeAbertura(semRH(true), fin, "comercial", "direcao").papel).toBe("direcao");
+    // sem todos, uma escolha que deixou de ser permitida não fica
+    expect(papelDeAbertura(semRH(false), fin, "comercial", "direcao").papel).toBe("financeiro");
+  });
+
+  it("a ordem: financeiro, armazém, gestor de obra, direção, comercial; o técnico só se não houver outro", () => {
+    expect(papelMaisEspecifico(["comercial", "direcao", "financeiro", "armazem", "operacoes"])).toBe("financeiro");
+    expect(papelMaisEspecifico(["comercial", "direcao", "armazem", "operacoes"])).toBe("armazem");
+    expect(papelMaisEspecifico(["comercial", "direcao", "operacoes"])).toBe("operacoes");
+    expect(papelMaisEspecifico(["comercial", "direcao"])).toBe("direcao");
+    expect(papelMaisEspecifico(["tecnico", "comercial"])).toBe("comercial");
+    expect(papelMaisEspecifico(["tecnico"])).toBe("tecnico");
+    expect(papelMaisEspecifico([])).toBeNull();
   });
 });
 

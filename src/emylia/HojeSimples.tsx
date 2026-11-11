@@ -11,7 +11,7 @@ import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, MapPin } from "
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, aberto, eur, minhas, pct, tot } from "./motor";
-import { podeVerCustos } from "./permissoes";
+import { PRONTO_PARA_VISITA, contactoConcluido, podeVerCustos, soAteAoContacto } from "./permissoes";
 import { agenda, alertasDia } from "./Hoje";
 import { IconeFase, Progresso, fazer, type Ctx } from "./pecas";
 import { ComPermPortalDoPasso, SemPermissaoPortal } from "./permPortalPasso";
@@ -163,6 +163,8 @@ export function HojeSimples({ S, A, run, go, podeVerInventario }: Ctx) {
                 <span className="block text-[15px] text-muted-foreground">
                   {comBotao ? d.servico : `${d.nome} · ${d.servico}`}{cols > 1 && d.atraso && d.fase === 0 && <span className="text-destructive"> · atrasado 2 dias</span>}
                 </span>
+                {/* 11/11 (fim de contacto): a assistente passou-o ao comercial */}
+                {contactoConcluido(d) && !soAteAoContacto() && <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary">{PRONTO_PARA_VISITA}</span>}
               </span>
               {cols === 1 && <Seta />}
             </button>

@@ -47,7 +47,17 @@ export async function simularCliente(sb: SupabaseClient, acao: "sign_proposal" |
 }
 
 /** O fornecedor, pelo portal dele: teste_fornecedor_confirmar (a mesma confirmação de sp_confirm_order). */
-export async function simularFornecedor(sb: SupabaseClient, poUuid: string): Promise<void> {
-  const { error } = await sb.rpc("teste_fornecedor_confirmar" as never, { p_po_id: poUuid } as never);
+export async function simularFornecedor(sb: SupabaseClient, poUuid: string, hoje = new Date()): Promise<void> {
+  // 11/11 (teste da Obra): o fornecedor confirma com a data prometida (dois dias úteis), como no portal; sem ela, a encomenda ficava
+  // «à espera do fornecedor» no negócio (a base só devolve a data prometida, não o estado da confirmação)
+  const { error } = await sb.rpc("teste_fornecedor_confirmar" as never, { p_po_id: poUuid, p_promised_date: dataPrometidaTeste(hoje) } as never);
   if (error) throw new Error(error.message);
+}
+
+/** A data que o fornecedor de teste promete: daqui a dois dias úteis ("aaaa-mm-dd"). */
+export function dataPrometidaTeste(hoje = new Date()): string {
+  const d = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  let n = 0;
+  while (n < 2) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) n++; }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

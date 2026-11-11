@@ -34,7 +34,9 @@ import { GuiaPassoCtx } from "./guiaPasso";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
 import { useParamUrl } from "./usarParamUrl";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { passoDe } from "./permissoes";
+import { passoDe, podeVerCustos } from "./permissoes";
+// FERRAMENTAS-TESTE (temporário, remover antes da main)
+import { FerramentasTeste } from "./FerramentasTeste";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
@@ -175,7 +177,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
         {T && (
           <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[15px] sm:mt-5">
             <div className="inline-flex items-center gap-2"><dt><Euro className="h-4 w-4 text-muted-foreground" aria-label="Total sem IVA" /></dt><dd className="font-semibold tabular-nums">{eur0(T.pf)} € s/ IVA</dd></div>
-            <div className="inline-flex items-center gap-2"><dt><TrendingUp className="h-4 w-4 text-muted-foreground" aria-label="Margem" /></dt><dd className={cn("tabular-nums", T.m < S.cfg.min / 100 ? "text-destructive" : T.m < S.cfg.alvo / 100 - 0.005 ? "text-warning" : "text-success")}>margem {pct(T.m)}</dd></div>
+            {/* 11/11 (F4): a margem só com «Ver custos do orçamento» (sem ela os custos vêm a null e dava 100%) */}
+            {podeVerCustos() && <div className="inline-flex items-center gap-2"><dt><TrendingUp className="h-4 w-4 text-muted-foreground" aria-label="Margem" /></dt><dd className={cn("tabular-nums", T.m < S.cfg.min / 100 ? "text-destructive" : T.m < S.cfg.alvo / 100 - 0.005 ? "text-warning" : "text-success")}>margem {pct(T.m)}</dd></div>}
           </dl>
         )}
         <div className="mt-4 sm:mt-6">
@@ -201,6 +204,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
           </p>
         </div>
       </header>
+      {/* FERRAMENTAS-TESTE (temporário, remover antes da main) */}
+      <FerramentasTeste ctx={ctx} d={d} />
       {/* 23/10 (2.0): o email que falta para enviar ao portal e o estado da conta do cliente */}
       {editar && <EditarCliente ctx={ctx} d={d} fechar={() => setEditar(false)} />}
       <div className="mt-4 empty:hidden"><EstadoAcessoPortal ctx={ctx} d={d} /></div>

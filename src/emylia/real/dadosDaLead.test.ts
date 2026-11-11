@@ -53,9 +53,12 @@ describe("o que veio na lead", () => {
     });
     expect(nome).toBe("Ana Lopes Silva");
     expect(chamadas[0]).toMatchObject({ t: "anew_entities", op: "update", dados: {
-      first_name: "Ana", last_name: "Lopes Silva", display_name: "Ana Lopes Silva", origin_id: "s2",
+      first_name: "Ana", last_name: "Lopes Silva", display_name: "Ana Lopes Silva",
       extra: { notes: "Ligar à tarde", po_area: "14 m2", po_vazio: "" },
     } });
+    // F5: origin_id fora do UPDATE direto (coluna fechada); vai pela função própria
+    expect((chamadas[0].dados as Record<string, unknown>).origin_id).toBeUndefined();
+    expect((sb as unknown as { rpc: ReturnType<typeof vi.fn> }).rpc).toHaveBeenCalledWith("neg_guardar_origem_pessoa", { p_organization_id: "org", p_entity_id: "p1", p_origin_id: "s2" });
     expect((chamadas[0].dados as { extra: Record<string, unknown> }).extra.company_name).toBeUndefined();
     expect((sb as unknown as { rpc: ReturnType<typeof vi.fn> }).rpc).toHaveBeenCalledWith("neg_atribuir_pessoa", { p_organization_id: "org", p_entity_id: "p1", p_assigned_to: "u2" });
   });
