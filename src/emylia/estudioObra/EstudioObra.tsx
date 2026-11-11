@@ -34,7 +34,7 @@ import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { lerFoto } from "../ObraOperacoes";
 import { Contagem, useReduzir } from "../movimento";
 import { EstudioPlano } from "../estudioPlano/EstudioPlano";
-import { ROTULO_VIVO, conflitosNovos, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
+import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 
 const SEM = ["D", "S", "T", "Q", "Q", "S", "S"];
@@ -94,7 +94,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   };
   const agir = (a: AcaoAlerta) => {
     switch (a.k) {
-      case "prolongar": setPainel(null); setPrevia({ titulo: `Pôr ${p.tasks[a.ti]?.nome ?? "a tarefa"} em dia`, k: "replanear", adiantar: false }); break;
+      case "prolongar": setPainel(null); setPrevia({ titulo: `Pôr ${(p.tasks[a.ti]?.nome ?? "a tarefa").toLowerCase()} em dia`, k: "replanear", adiantar: false }); break;
       case "validar": fazer(() => A.validarTarefa(d.id, a.ti)); break;
       case "tarefa": setPainel({ k: "tarefa", ti: a.ti }); break;
       case "imprevisto": verImprevisto(a.id); break;
@@ -344,7 +344,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir }: {
                   <div key={ti} className={cn("flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]")}>
                     <button type="button" onClick={() => abrir(ti)} className="sticky left-0 z-10 flex w-32 shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:w-56 sm:px-4">
                       <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
-                      <span className="min-w-0"><span className="block truncate text-sm font-medium">{t.nome}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{ROTULO_VIVO[v]}{atraso ? ` · +${atraso}` : ""}</span></span>
+                      <span className="min-w-0"><span className="block truncate text-sm font-medium">{t.nome}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span></span>
                     </button>
                     <div className="relative" style={{ width: dias.length * COL, height: LINHA }}>
                       {dias.map((x, k) => x.getDay() === 1 && k > 0 && <div key={"s" + k} aria-hidden="true" className="absolute inset-y-0 border-l-2 border-l-foreground/10" style={{ left: k * COL }} />)}
@@ -514,7 +514,7 @@ function PainelTarefa({ ctx, d, ti, ocup, dias, fechar, simular, simulado, impre
         <Button type="button" variant="ghost" className="min-h-10" aria-label="Fechar a tarefa" onClick={fechar}><X className="h-4 w-4" /></Button>
       </div>
       <p className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium", v === "validada" ? "bg-success/15 text-success" : v === "atrasada" || v === "corrigir" ? "bg-destructive/10 text-destructive" : v === "feita" ? "bg-amber-100 text-amber-900" : "bg-muted")}>
-        {ROTULO_VIVO[v]}{v === "atrasada" ? ` · +${dd(diasDeAtraso(t, p))}` : ""}{t.exec?.horas ? ` · ${nfmt(t.exec.horas)} de ${nfmt(t.h)} h registadas` : ""}
+        {rotuloVivo(t, p)}{v === "atrasada" ? ` · +${dd(diasDeAtraso(t, p))}` : ""}{t.exec?.horas ? ` · ${nfmt(t.exec.horas)} de ${nfmt(t.h)} h registadas` : ""}
       </p>
 
       {vivo && (

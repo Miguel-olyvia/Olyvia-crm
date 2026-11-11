@@ -7,7 +7,7 @@ import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra
 import { materiaisPorFase } from "../obraOps";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
 import { dataCurta } from "../planoObra";
-import { dataDoDia, derrapagem, diasDeAtraso, estadoVivo, replanear } from "./planoVivo";
+import { comecada, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, replanear } from "./planoVivo";
 
 export type Nivel = "critico" | "atencao" | "oportunidade";
 export type AcaoAlerta =
@@ -38,8 +38,11 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     // atrasada: os dias dela já passaram e não está feita
     if (v === "atrasada") {
       const n = diasDeAtraso(t, p);
-      L.push({ id: `atraso-${ti}`, nivel: "critico", ti, t: `${t.nome} está atrasada ${dias(n)}`, sub: `Devia ter acabado a ${quando(p, t.dia + t.dur - 1)} · ${quem(t.tec)}. Prolongar até hoje empurra o que vem depois.`,
-        acoes: [{ rot: "Prolongar até hoje", a: { k: "prolongar", ti, dur: p.dia - t.dia + 1 } }, { rot: "Abrir", a: { k: "tarefa", ti } }] });
+      const ja = comecada(t);
+      L.push({ id: `atraso-${ti}`, nivel: "critico", ti, t: `${t.nome} está atrasada ${dias(n)}`,
+        sub: ja ? `Devia ter acabado a ${quando(p, t.dia + t.dur - 1)} · ${quem(t.tec)}. Prolongar até hoje empurra o que vem depois.`
+          : `Devia ter acabado a ${quando(p, t.dia + t.dur - 1)} e ${quem(t.tec)} ainda não a começou. Pô-la a começar hoje empurra o que vem depois.`,
+        acoes: [{ rot: ja ? "Prolongar até hoje" : "Começar hoje", a: { k: "prolongar", ti, dur: p.dia - t.dia + 1 } }, { rot: "Abrir", a: { k: "tarefa", ti } }] });
     }
     // começou ontem ou antes e ainda não há nenhum registo
     if (vivo && v === "hoje" && t.dia < p.dia) {

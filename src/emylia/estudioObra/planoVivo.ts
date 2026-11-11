@@ -34,6 +34,15 @@ export function estadoVivo(t: Tarefa, p: Plano): EstadoVivo {
   return "por começar";
 }
 
+/** Já há trabalho na tarefa (o técnico começou, registou ou deu-a por feita). */
+export const comecada = (t: Tarefa): boolean => estadoDe(t) !== "por fazer" || enviosDe(t).length > 0;
+
+/** O rótulo do estado, com o caso da que devia ter começado e ainda não tem registo. */
+export const rotuloVivo = (t: Tarefa, p: Plano): string => {
+  const v = estadoVivo(t, p);
+  return v === "hoje" && t.dia < p.dia ? "Devia ter começado" : ROTULO_VIVO[v];
+};
+
 /** Os dias úteis de atraso de uma tarefa que já devia ter acabado (0 se não está atrasada). */
 export function diasDeAtraso(t: Tarefa, p: Plano): number {
   return estadoVivo(t, p) === "atrasada" ? p.dia - (t.dia + t.dur) + 1 : 0;
@@ -79,9 +88,10 @@ export function replanear(p: Plano, ocup: Map<string, Set<string>>, o: { adianta
   for (const i of ordem) {
     const t = T[i], n = c.tasks[i], v = estadoVivo(t, p), f = o.forcar?.ti === i ? o.forcar : null;
     if (v === "validada" || v === "feita") { fim[i] = fimFeito(t); colocadas.push(i); continue; }
-    // já começou: os dias dela passaram, ou é hoje e já há registo (a de hoje sem nada ainda pode andar, mas não para antes de hoje)
-    const comecou = t.dia < hoje || (t.dia === hoje && (estadoDe(t) !== "por fazer" || enviosDe(t).length > 0));
-    if (comecou) {
+    // já começou: há registo do técnico (11/11, testarh: a que devia ter começado ontem e não tem nada ainda anda, mas não para antes de hoje)
+    // parada por um imprevisto: fica onde está até o cliente decidir (o alerta do imprevisto trata dela)
+    if (hoje >= 0 && t.bloqueio && t.dia <= hoje) { fim[i] = t.dia + t.dur; colocadas.push(i); continue; }
+    if (hoje >= 0 && t.dia <= hoje && comecada(t)) {
       // já começou: fica onde está; atrasada, conta com hoje
       n.dur = Math.max(f?.dur ?? t.dur, hoje - t.dia + 1);
       fim[i] = n.dia + n.dur; colocadas.push(i); continue;
@@ -97,7 +107,7 @@ export function replanear(p: Plano, ocup: Map<string, Set<string>>, o: { adianta
       }));
       ini = o.adiantar && !t.bloqueio ? pelasAnteriores : Math.max(t.dia, pelasAnteriores);
     }
-    ini = Math.max(ini, Math.min(t.dia, amanha), f?.dia ?? 0);
+    ini = Math.max(ini, hoje >= 0 && t.dia <= hoje ? hoje : amanha, f?.dia ?? 0);
     // o técnico livre (sem férias, sem outra obra, sem outra tarefa desta obra ao mesmo tempo)
     if (n.tec) {
       const outras = colocadas.map((j) => c.tasks[j]).filter((x) => x.tec === n.tec);
@@ -175,7 +185,7 @@ export function dataDoDia(p: Plano, k: number): Date | null {
 export function simularAtraso(p: Plano, ti: number, dias: number, ocup: Map<string, Set<string>>): Replano {
   const t = p.tasks[ti];
   if (!t || !dias) return { plano: copia(p), mudancas: [], fimAntes: fimDe(p.tasks), fimDepois: fimDe(p.tasks) };
-  const comecou = p.estado === "em curso" && (t.dia < p.dia || (t.dia === p.dia && (estadoDe(t) !== "por fazer" || enviosDe(t).length > 0)));
+  const comecou = p.estado === "em curso" && t.dia <= p.dia && comecada(t);
   const forcar = comecou ? { ti, dia: t.dia, dur: Math.max(1, Math.max(t.dur, p.dia - t.dia + 1) + dias) } : { ti, dia: t.dia + dias, dur: t.dur };
   return replanear(p, ocup, { adiantar: false, forcar });
 }

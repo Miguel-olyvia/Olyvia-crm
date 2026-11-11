@@ -11,6 +11,12 @@ const plano = (tasks: Tarefa[], dia = 2): Plano => ({ tasks, estado: "em curso",
 const sem = new Map<string, Set<string>>();
 
 describe("estadoVivo", () => {
+  it("sem nenhum registo e com os dias passados: começa hoje (não se prolonga)", () => {
+    const p = plano([T("Revestimento", 0, 2, "a", 1), T("Louças", 2, 1, "b", 2)], 2);
+    const r = replanear(p, sem, { adiantar: false });
+    expect([r.plano.tasks[0].dia, r.plano.tasks[0].dur]).toEqual([2, 2]);
+    expect(r.plano.tasks[1].dia).toBe(4);
+  });
   it("atrasada quando os dias já passaram; em curso com registo; parada com imprevisto", () => {
     const p = plano([T("A", 0, 2, "a"), T("B", 2, 2, "b", 1, { exec: { estado: "em curso", horas: 2, fotos: [] } }), T("C", 1, 3, "c", 1, { bloqueio: "IM-1" }), T("D", 5, 1, "d")]);
     expect(estadoVivo(p.tasks[0], p)).toBe("atrasada");
@@ -26,7 +32,7 @@ describe("estadoVivo", () => {
 
 describe("replanear", () => {
   it("a atrasada conta com hoje e empurra a que vinha a seguir", () => {
-    const p = plano([T("Revestimento", 0, 2, "a", 1), T("Louças", 2, 1, "b", 2)], 2);
+    const p = plano([T("Revestimento", 0, 2, "a", 1, { exec: { estado: "em curso", horas: 6, fotos: [] } }), T("Louças", 2, 1, "b", 2)], 2);
     const r = replanear(p, sem, { adiantar: false });
     expect(r.plano.tasks[0].dur).toBe(3); // dias 0, 1 e hoje (2)
     expect(r.plano.tasks[1].dia).toBe(3);
@@ -142,5 +148,18 @@ describe("o relógio real das obras (teste da Obra: «Dia 1 de 6» semanas depoi
     expect(p.dia).toBe(3);
     acertarDiaDasObras([d], new Date(2027, 3, 30)); // muito depois do fim: fica no último dia
     expect(p.dia).toBe(5);
+  });
+});
+
+describe("replanear com dados reais (testarh, 11/11)", () => {
+  it("a que devia ter começado e não tem registo anda (não antes de hoje), atrás da atrasada", () => {
+    const emCurso = { estado: "em curso" as const, horas: 4, fotos: [], envios: [{ q: "", dia: 1, quem: "x", k: "registo" as const }] };
+    // revestimento dias 1-2 (atrasado, com registo), pavimento dia 3 (sem registo), montagem dia 3 (sem registo); hoje = 4
+    const p = plano([T("Revestimento", 1, 2, "a", 3, { exec: emCurso }), T("Pavimento", 3, 1, "a", 3), T("Montagem", 3, 2, "b", 4)], 4);
+    const r = replanear(p, sem, { adiantar: false });
+    expect(r.plano.tasks[0].dur).toBe(4); // dias 1 a 4 (hoje)
+    expect(r.plano.tasks[1].dia).toBe(5); // depois do revestimento
+    expect(r.plano.tasks[2].dia).toBeGreaterThanOrEqual(5); // a montagem não fica no passado
+    expect(r.fimDepois).toBeGreaterThan(r.fimAntes);
   });
 });
