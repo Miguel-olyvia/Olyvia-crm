@@ -30,6 +30,8 @@ export interface ExecTarefa {
   envios?: Envio[];
   /** 21/10: os passos das instruções já marcados pelo técnico (índices). */
   passos?: number[];
+  /** 11/11: pausada pelo responsável (o técnico vê-o no Hoje), com o porquê; retomar tira-a. */
+  pausa?: { q: string; motivo: string };
   /** 22/10 (fase 3): o €/h do técnico quando as horas foram registadas fora de um envio (mudadas pelo responsável). */
   ch?: number;
 }

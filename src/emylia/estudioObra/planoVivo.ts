@@ -15,9 +15,9 @@ import { motivoOcupado } from "../preparacaoObra";
 import { deIso, diasDaObra, isoDia } from "../planoObra";
 import { equipaDe } from "../equipa/equipasObra";
 
-export type EstadoVivo = "validada" | "feita" | "corrigir" | "parada" | "atrasada" | "em curso" | "hoje" | "por começar";
+export type EstadoVivo = "validada" | "feita" | "corrigir" | "parada" | "pausada" | "atrasada" | "em curso" | "hoje" | "por começar";
 export const ROTULO_VIVO: Record<EstadoVivo, string> = {
-  validada: "Validada", feita: "Feita, por validar", corrigir: "A corrigir", parada: "Parada", atrasada: "Atrasada",
+  validada: "Validada", feita: "Feita, por validar", corrigir: "A corrigir", parada: "Parada", pausada: "Pausada", atrasada: "Atrasada",
   "em curso": "Em curso", hoje: "Começa hoje", "por começar": "Por começar",
 };
 
@@ -27,6 +27,7 @@ export function estadoVivo(t: Tarefa, p: Plano): EstadoVivo {
   if (p.estado === "concluída" || e === "validada") return "validada";
   if (e === "feita") return "feita";
   if (t.bloqueio) return "parada";
+  if (t.exec?.pausa) return "pausada";
   if (e === "corrigir") return "corrigir";
   if (p.estado !== "em curso") return "por começar";
   if (t.dia + t.dur <= p.dia) return "atrasada";

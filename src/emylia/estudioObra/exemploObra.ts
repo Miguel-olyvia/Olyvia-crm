@@ -6,6 +6,7 @@ import { acoes, seed, type Estado, type Negocio } from "../motor";
 import { FINANCEIRO, emFalta } from "../campos";
 import { fotoExemplo } from "../obraOps";
 import { guardarBase } from "../ajustesPlano";
+import { gerarEncCliente } from "../preparacaoObra";
 
 export const ID_EXEMPLO_OBRA = 1027;
 export const INICIO_EXEMPLO = "2026-11-04";
@@ -45,6 +46,14 @@ export function obraDeExemplo(): { S: Estado; d: Negocio } {
     op.inicio = INICIO_EXEMPLO; op.dia = 4; op.origem = "orcamento";
     const ult = op.tasks[op.tasks.length - 1];
     ult.tec = mont.tec; ult.dia = mont.dia + 3; ult.dur = 1;
+  }
+  // a encomenda de cliente: tudo reservado no armazém, menos o último produto da visita (ainda não chegou)
+  if (!d.obra.ec) {
+    const ec = gerarEncCliente(d, S, "EC-2026-0099", "sex 6/11");
+    ec.linhas.forEach((l) => { l.res = l.q; l.falta = 0; });
+    const ult = [...ec.linhas].reverse().find((l) => l.de === "produto") ?? ec.linhas[ec.linhas.length - 1];
+    if (ult) { ult.res = 0; ult.falta = ult.q; }
+    d.obra.ec = ec;
   }
   (d.obra.chat ??= []).push({ de: "cliente", quem: d.nome, t: "Bom dia! Amanhã chegam a que horas? Tenho de sair às 10h.", q: "ter 10/11 08:47" });
   return { S, d };

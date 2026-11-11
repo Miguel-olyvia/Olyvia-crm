@@ -722,7 +722,7 @@ function Festa({ fechar, fim, pessoas }: { fechar: () => void; fim?: Date; pesso
 }
 
 /** 10/11: a outra obra (o nome e o serviço), que abre o Estúdio dela. */
-function LigacaoObra({ o, abrir }: { o: Negocio; abrir: () => void }) {
+export function LigacaoObra({ o, abrir }: { o: Negocio; abrir: () => void }) {
   return (
     <button type="button" onClick={abrir} title="Abrir o Estúdio desta obra"
       className="inline-flex items-center gap-0.5 rounded font-medium text-primary underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
@@ -760,11 +760,14 @@ function Passador({ rotulo, valor, menos, mais, chave, setas }: { rotulo: string
   );
 }
 
-/** A tarefa aberta: quando (o início, os dias e a semana), o que se pode fazer, quem a faz, a fase, o que se faz, os materiais e a nota. */
-function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abrirOutra, fechar, ocup, mudar, foraDaObra }: {
+/** A tarefa aberta: quando (o início, os dias e a semana), o que se pode fazer, quem a faz, a fase, o que se faz, os materiais e a nota.
+ *  11/11: partilhado com o Estúdio da obra (obra em curso): `minDia` (não começa antes de hoje), `notaLivre` (a nota muda-se mesmo numa tarefa
+ *  já começada) e `extra` (a execução da tarefa, logo a seguir ao cabeçalho). */
+export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abrirOutra, fechar, ocup, mudar, foraDaObra, minDia = 0, notaLivre, extra }: {
   ctx: Ctx; d: Negocio; ti: number; editavel: boolean; podeAgir: boolean; dias: Date[]; motivo: string | null; onde: Negocio | null;
   abrirOutra: (o: Negocio) => void; fechar: () => void; ocup: Map<string, Set<string>>;
   mudar: (ti: number, fn: () => void) => void; foraDaObra: (tec: string, k: number) => boolean;
+  minDia?: number; notaLivre?: boolean; extra?: ReactNode;
 }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
@@ -788,7 +791,7 @@ function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abri
     ...(onde ? [{ k: "outra", t: `Abrir a obra ${onde.nome}`, sub: `Onde ${primeiro(nomeTec(t.tec))} está nestes dias`, icone: <ArrowUpRight className="h-4 w-4" />, fn: () => abrirOutra(onde) }] : []),
     ...(podeAgir && !acabada ? livres.map((y) => ({ k: "p" + y.x.id, t: `Passar para ${y.x.n}`, sub: `${y.x.sk} · livre nestes dias`, icone: <Lightbulb className="h-4 w-4" />, fn: () => mudar(ti, () => A.trocarTec(d.id, ti, y.x.id)) })) : []),
     ...(podeAgir && !acabada && t.tec && motivo && motivo !== "noutra tarefa desta obra" ? [{ k: "adiar", t: "Adiar até estar livre", sub: "Esta tarefa e as seguintes andam os dias que for preciso", icone: <CalendarDays className="h-4 w-4" />, fn: () => mudar(ti, () => A.adiar(d.id, ti)) }] : []),
-    ...(podeAgir && !acabada ? [{ k: "tirar", t: "Tirar do plano", sub: "O técnico é avisado", icone: <Trash2 className="h-4 w-4" />, fn: () => setTirar(true), perigo: true }] : []),
+    ...(podeAgir && editavel && !acabada ? [{ k: "tirar", t: "Tirar do plano", sub: "O técnico é avisado", icone: <Trash2 className="h-4 w-4" />, fn: () => setTirar(true), perigo: true }] : []),
   ];
   // a semana à volta da tarefa: tocar num dia muda o início
   const de = Math.max(0, t.dia - 2), ate = Math.min(dias.length, t.dia + t.dur + 3);
@@ -806,12 +809,13 @@ function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abri
         </div>
         {motivo && <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{nomeTec(t.tec)} {onde ? <>está na obra <LigacaoObra o={onde} abrir={() => abrirOutra(onde)} /> nestes dias.</> : `está ${motivo} nestes dias.`}</span></p>}
+        {extra}
 
         {/* 11/11: quando, à mão (o início e os dias), e a semana em quadrados */}
         <section aria-label="Quando" className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <Passador rotulo="Começa" setas chave={String(t.dia)} valor={dataCurta(dias[t.dia])}
-              menos={editavel && t.dia > 0 ? () => mudar(ti, () => A.ajustarTarefa(d.id, ti, { dia: t.dia - 1 })) : undefined}
+              menos={editavel && t.dia > minDia ? () => mudar(ti, () => A.ajustarTarefa(d.id, ti, { dia: t.dia - 1 })) : undefined}
               mais={editavel ? () => mudar(ti, () => A.ajustarTarefa(d.id, ti, { dia: t.dia + 1 })) : undefined} />
             <Passador rotulo="Dura" chave={String(t.dur)} valor={diasTxt(t.dur)}
               menos={editavel && t.dur > 1 ? () => mudar(ti, () => A.ajustarTarefa(d.id, ti, { dur: t.dur - 1 })) : undefined}
@@ -821,7 +825,7 @@ function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abri
             {Array.from({ length: ate - de }, (_, j) => {
               const k = de + j, dentro = k >= t.dia && k < t.dia + t.dur, fora = !!t.tec && foraDaObra(t.tec, k);
               return (
-                <button key={k} type="button" disabled={!editavel || dentro} onClick={() => mudar(ti, () => A.ajustarTarefa(d.id, ti, { dia: k }))}
+                <button key={k} type="button" disabled={!editavel || dentro || k < minDia} onClick={() => mudar(ti, () => A.ajustarTarefa(d.id, ti, { dia: k }))}
                   aria-label={`Começar a ${dataCurta(dias[k])}${fora ? ` (${primeiro(nomeTec(t.tec))} não está livre)` : ""}`}
                   className={cn("flex min-h-12 flex-1 flex-col items-center justify-center rounded-xl text-xs tabular-nums transition-all",
                     dentro ? "font-semibold text-white shadow-sm" : "bg-muted/60 text-muted-foreground hover:-translate-y-0.5 hover:bg-muted disabled:hover:translate-y-0",
@@ -898,7 +902,7 @@ function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abri
         )}
 
         <label className="grid gap-1.5 text-sm font-medium">Nota para a equipa
-          <textarea value={nota} disabled={!editavel} onChange={(e) => setNota(e.target.value)} onBlur={() => nota !== (t.nota ?? "") && fazer(() => A.ajustarTarefa(d.id, ti, { nota }))} rows={2}
+          <textarea value={nota} disabled={!editavel && !notaLivre} onChange={(e) => setNota(e.target.value)} onBlur={() => nota !== (t.nota ?? "") && fazer(() => A.ajustarTarefa(d.id, ti, { nota }))} rows={2}
             placeholder="Ex.: levar o andaime; a cliente está em casa de manhã" className="rounded-xl border border-input bg-background px-3 py-2 text-[15px]" />
         </label>
 

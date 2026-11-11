@@ -1828,6 +1828,26 @@ export function garantirClientes(S: Estado) {
 let relogioReal = false;
 export function definirRelogioReal(sim: boolean): void { relogioReal = sim; }
 export const comRelogioReal = (): boolean => relogioReal;
+/** 11/11 (Rúben: «gerir tudo por completo» com a obra em curso): numa obra em curso só se mexe no plano das tarefas que ainda não começaram
+ *  (sem trabalho do técnico) e nunca para antes de hoje; as que já começaram ficam onde estão. Devolve null se pode, ou o porquê. */
+export function porqueNaoMexe(p: Plano, ti: number): string | null {
+  const t = p.tasks[ti];
+  if (!t) return "A tarefa não existe.";
+  if (p.estado === "concluída") return "A obra já acabou.";
+  if (p.estado !== "em curso") return null;
+  if (t.exec) return "Já começou: mude-a pelos ajustes ao vivo (prolongar, atrasar).";
+  return null;
+}
+/** Com a obra em curso: as tarefas que já começaram voltam ao sítio onde estavam (uma mudança noutra pode tê-las empurrado); as outras ficam
+ *  onde a mudança as pôs (a mexida já não começa antes de hoje). */
+function protegerComecadas(p: Plano, antes: { dia: number; dur: number }[]): void {
+  if (p.estado !== "em curso") return;
+  p.tasks.forEach((t, i) => {
+    const a = antes[i];
+    if (a && porqueNaoMexe(p, i)) { t.dia = a.dia; t.dur = a.dur; }
+  });
+}
+
 /** 11/11 (teste da Obra, 1026): a obra arranca hoje. Antes, o início passava a hoje e as tarefas ficavam nos mesmos índices: arrancar antes
  *  da data planeada puxava tudo para trás (com conflitos noutras obras) e o fim face ao orçamento ficava errado. Agora, a começar antes
  *  da data planeada, as tarefas e o plano do orçamento (base) ficam nas datas em que estavam; a começar depois, anda tudo para hoje. */
@@ -3194,11 +3214,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     ajustarTarefa(id: number, ti: number, m: { dur?: number; h?: number; dia?: number; nota?: string }) {
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
-      if (!p || !t || p.estado === "em curso" || p.estado === "concluída") return;
-      const antes = JSON.stringify(p.tasks.map((x) => [x.dia, x.dur, x.h]));
-      if (m.dur != null) mudarDuracao(p, ti, m.dur);
-      if (m.h != null) mudarHoras(p, ti, m.h);
-      if (m.dia != null) mudarInicio(p, ti, m.dia);
+      if (!p || !t || p.estado === "concluída") return;
+      // 11/11 (Rúben: «gerir tudo por completo»): com a obra em curso, as tarefas que ainda não começaram mexem-se como antes de arrancar
+      // (não para antes de hoje; as que já começaram não andam); a nota muda-se sempre
+      const travada = p.estado === "em curso" ? porqueNaoMexe(p, ti) : null;
+      if (travada && (m.dur != null || m.h != null || m.dia != null)) { avisar({ msg: "Esta tarefa já começou", sub: travada, kind: "bad" }); if (m.nota == null) return; }
+      const antes = JSON.stringify(p.tasks.map((x) => [x.dia, x.dur, x.h])), sitio = p.tasks.map((x) => ({ dia: x.dia, dur: x.dur }));
+      if (!travada) {
+        if (m.dur != null) mudarDuracao(p, ti, m.dur);
+        if (m.h != null) mudarHoras(p, ti, m.h);
+        if (m.dia != null) mudarInicio(p, ti, p.estado === "em curso" ? Math.max(p.dia, m.dia) : m.dia);
+        protegerComecadas(p, sitio);
+      }
       if (m.nota != null) { const n = m.nota.trim(); if ((t.nota ?? "") !== n) { t.nota = n || undefined; log(d, `Plano: nota em ${t.nome}${n ? ": " + n : " apagada"}`); } }
       if (JSON.stringify(p.tasks.map((x) => [x.dia, x.dur, x.h])) === antes) return;
       const quanto = m.h != null ? `${nfmt(t.h)} h` : `${t.dur} ${t.dur === 1 ? "dia" : "dias"}`;
@@ -3213,8 +3240,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     reporTarefasPlano(id: number, snap: { dia: number; dur: number; h: number; tec: string | null }[]) {
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano;
-      if (!p || p.estado === "em curso" || p.estado === "concluída" || snap.length !== p.tasks.length) return;
-      p.tasks.forEach((t, i) => { const s = snap[i]; t.dia = s.dia; t.dur = s.dur; t.h = s.h; t.tec = s.tec; });
+      if (!p || p.estado === "concluída" || snap.length !== p.tasks.length) return;
+      // 11/11: com a obra em curso, o «Desfazer» só repõe as datas das tarefas que ainda não começaram (o técnico, nas que não estão validadas)
+      p.tasks.forEach((t, i) => { const s = snap[i]; if (p.estado === "em curso" && porqueNaoMexe(p, i)) { if (t.exec?.estado !== "validada") t.tec = s.tec; return; } t.dia = s.dia; t.dur = s.dur; t.h = s.h; t.tec = s.tec; });
       log(d, "Plano: mudança desfeita");
       A.planoMudou(d);
     },
@@ -3446,6 +3474,83 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Plano ajustado em obra: ${prev.texto} · ${motivo.trim()}${cliente ? " · cliente avisado no portal" : ""}`, prev.fimDepois > prev.fimAntes ? "w" : "a");
       avisar({ msg: "Plano ajustado", sub: `${prev.fimDepois !== prev.fimAntes ? `Acaba a ${fimDepois}` : "A data de fim mantém-se"}${cliente ? " · o cliente vê o aviso no portal" : ""}`, kind: "ok" });
     },
+    /* -------------------------------------------- 11/11 (Rúben: «o gestor tem de gerir tudo por completo»): a execução pelo Estúdio da obra */
+    /** O gestor pausa uma tarefa (o técnico não consegue avançar: material, cliente, outra frente); o técnico é avisado no Hoje. */
+    pausarTarefa(id: number, ti: number, motivo: string) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado !== "em curso" || t.exec?.estado === "validada" || t.exec?.estado === "feita") return;
+      const e: ExecTarefa = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
+      e.pausa = { q: agora(), motivo: motivo.trim() || "Pausada pelo responsável" }; t.exec = e;
+      avisarTecnico(p, ti, `${t.nome} está pausada: ${e.pausa.motivo}`, agora());
+      (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Pausou ${t.nome.toLowerCase()}: ${e.pausa.motivo}`, k: "nota" });
+      log(d, `Obra: ${t.nome} pausada · ${e.pausa.motivo}`, "w");
+      avisar({ msg: "Tarefa pausada", sub: "O técnico é avisado", kind: "ok" });
+    },
+    retomarTarefa(id: number, ti: number) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t?.exec?.pausa) return;
+      delete t.exec.pausa;
+      avisarTecnico(p, ti, `${t.nome} pode continuar`, agora());
+      log(d, `Obra: ${t.nome} retomada`);
+      avisar({ msg: "Tarefa retomada", kind: "ok" });
+    },
+    /** O gestor reabre uma tarefa feita ou validada (afinal não está bem): volta a em curso, com o motivo no histórico dela. */
+    reabrirTarefa(id: number, ti: number, motivo: string) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t?.exec || p.estado !== "em curso" || (t.exec.estado !== "validada" && t.exec.estado !== "feita")) return;
+      const eu = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, m = motivo.trim() || "Reaberta pelo responsável";
+      t.exec.estado = "em curso"; delete t.exec.validada; delete t.exec.feita; t.exec.motivo = m;
+      (t.exec.envios ??= []).push({ q: agora(), dia: p.dia, quem: eu, k: "correcao", nota: `Reaberta: ${m}` });
+      // acabada antes de hoje: fica até hoje, para o técnico a ter no Hoje
+      if (t.dia + t.dur <= p.dia) t.dur = p.dia - t.dia + 1;
+      avisarTecnico(p, ti, `${t.nome} foi reaberta: ${m}`, agora());
+      (d.obra.diario ??= []).push({ q: agora(), quem: eu, t: `Reabriu ${t.nome.toLowerCase()}: ${m}`, k: "correcao" });
+      log(d, `Obra: ${t.nome} reaberta · ${m}`, "w");
+      avisar({ msg: "Tarefa reaberta", sub: "Volta ao técnico, com o motivo", kind: "ok" });
+    },
+    /** O gestor corrige as horas registadas numa tarefa (o €/h fica o do técnico agora); fica no diário. */
+    corrigirHoras(id: number, ti: number, horas: number) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "concluída") return;
+      const h = Math.max(0, Math.round(horas * 2) / 2), e: ExecTarefa = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
+      if (t.exec && e.horas === h) return;
+      const antes = e.horas;
+      e.horas = h; e.ch = custoHoraDe(t.tec); t.exec = e;
+      (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Horas de ${t.nome.toLowerCase()}: ${nfmt(antes)} → ${nfmt(h)} h`, k: "horas" });
+      log(d, `Obra: horas de ${t.nome} corrigidas · ${nfmt(antes)} → ${nfmt(h)} h`);
+      avisar({ msg: "Horas corrigidas", sub: `${t.nome} · ${nfmt(h)} h`, kind: "ok" });
+    },
+    /** O gestor divide uma tarefa em duas (a primeira fica com `dias`, a segunda com o resto, logo a seguir; as horas repartem-se). A segunda
+     *  junta-se no fim do plano (os índices das outras não mudam); o que já foi feito fica na primeira. Devolve o índice da segunda. */
+    dividirTarefa(id: number, ti: number, dias: number): number | null {
+      if (!exigePerm("obra.planear")) return null;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "concluída" || t.exec?.estado === "validada" || t.exec?.estado === "feita" || t.dur < 2) return null;
+      const d1 = Math.max(1, Math.min(t.dur - 1, Math.round(dias))), h1 = Math.round((t.h * d1 / t.dur) * 2) / 2;
+      guardarBase(p);
+      const segunda: Tarefa = { nome: `${t.nome} · continuação`, svcs: t.svcs, dia: p.estado === "em curso" ? Math.max(p.dia, t.dia + d1) : t.dia + d1, dur: t.dur - d1, sk: t.sk, h: Math.max(0.5, t.h - h1), tec: t.tec,
+        ...(t.fase ? { fase: t.fase } : {}), ...(t.perfilId ? { perfilId: t.perfilId } : {}), ...(t.nota ? { nota: t.nota } : {}), nova: true };
+      t.dur = d1; t.h = Math.max(0.5, h1); delete t.ini; delete t.dias;
+      const nt = juntarTarefa(p, segunda);
+      avisarTecnico(p, nt, `${t.nome} foi dividida: a continuação é a ${rotuloDia(p, segunda.dia)}`, agora());
+      log(d, `Plano: ${t.nome} dividida em ${d1} + ${segunda.dur} ${segunda.dur === 1 ? "dia" : "dias"}`);
+      avisar({ msg: "Tarefa dividida", sub: `${d1} + ${segunda.dur} ${segunda.dur === 1 ? "dia" : "dias"} · pode passar a continuação a outra pessoa`, kind: "ok" });
+      return nt;
+    },
+    /** O gestor avisa o cliente no portal (um atraso, uma mudança de datas, uma novidade), sem mexer no plano. Fica nos ajustes da obra. */
+    avisarClienteObra(id: number, texto: string) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano, txt = texto.trim();
+      if (!p || !txt) return;
+      const fim = rotuloDia(p, fimDe(p.tasks) - 1), quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: "Aviso ao cliente", motivo: txt, fimAntes: fim, fimDepois: fim, cliente: true, avisoCliente: txt });
+      log(d, `Obra: aviso ao cliente no portal · ${txt}`);
+      avisar({ msg: "Aviso no portal do cliente", sub: txt, kind: "ok" });
+    },
     /** 11/11 (Estúdio da obra): o plano da obra em curso posto em dia com um clique (estudioObra/planoVivo.ts: replanear). O atrasado conta
      *  com hoje e empurra o que vem depois; com `adiantar`, o que ainda não começou puxa-se quando há folga; os técnicos noutra obra ou de
      *  férias esperam. Fica nos ajustes da obra (com o motivo), os técnicos das tarefas mexidas são avisados e, se se quiser, o cliente. */
@@ -3511,6 +3616,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 9/11 (Lote 1, C): ou o papel, ou (conta real) a permissão que o servidor pede (negocios.obra.planear, já verificada acima)
       if (S.role !== "operacoes" && !pelaPermissao(S.role, ["obra.planear"])) { avisar({ msg: "Só o gestor da obra cria tarefas", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
       const t = criarTarefa(p, s, n), ti = juntarTarefa(p, t);
+      // 11/11: com a obra em curso, a tarefa nova não começa antes de hoje
+      if (p.estado === "em curso" && t.dia < p.dia) mudarInicio(p, ti, p.dia);
       avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
       const tec = TECS.find((x) => x.id === t.tec);
       log(d, `Plano: tarefa nova · ${t.nome} (fase ${t.fase ?? "—"}, ${t.dur} ${t.dur === 1 ? "dia" : "dias"}${tec ? ", " + tec.n : ""})`);
@@ -3522,9 +3629,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     moverTarefaPlano(id: number, ti: number, m: { fase?: number; dia?: number }) {
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
-      if (!p || !t || p.estado === "em curso" || p.estado === "concluída") return;
-      const antes = `${t.fase}-${t.dia}`;
+      if (!p || !t || p.estado === "concluída") return;
+      // 11/11: com a obra em curso, só as tarefas que ainda não começaram
+      if (p.estado === "em curso") { const r = porqueNaoMexe(p, ti); if (r) { avisar({ msg: "Esta tarefa já começou", sub: r, kind: "bad" }); return; } }
+      const antes = `${t.fase}-${t.dia}`, sitio = p.tasks.map((x) => ({ dia: x.dia, dur: x.dur }));
       moverTarefa(p, ti, m);
+      protegerComecadas(p, sitio);
       if (`${t.fase}-${t.dia}` === antes) return;
       avisarTecnico(p, ti, `${t.nome} mudou: fase ${t.fase ?? "—"}, a partir de ${rotuloDia(p, t.dia)}`, agora());
       log(d, `Plano: ${t.nome} · fase ${t.fase ?? "—"}, a partir de ${rotuloDia(p, t.dia)}`);
@@ -3533,7 +3643,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     tirarTarefaPlano(id: number, ti: number) {
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
-      if (!p || !t || p.estado === "concluída" || !tirarTarefa(p, ti)) return;
+      if (!p || !t || p.estado === "concluída") return;
+      if (p.estado === "em curso" && porqueNaoMexe(p, ti)) { avisar({ msg: "Esta tarefa já começou", sub: "Já tem trabalho: não se tira do plano.", kind: "bad" }); return; }
+      if (!tirarTarefa(p, ti)) return;
       if (t.tec) avisarTecnico(p, -1, `${t.nome} saiu do plano`, agora(), t.tec);
       log(d, `Plano: tarefa ${t.nome} tirada`);
       // 21/10: a encomenda de ajuste que só servia esta tarefa anula-se (se ainda nada saiu para a obra)

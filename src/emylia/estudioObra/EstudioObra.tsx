@@ -9,17 +9,17 @@
 //  · os alertas, cada um com o próximo passo; os imprevistos (com fotografias, custo e dias, e o impacto no prazo e no orçamento antes de
 //    registar; com custo, a adenda vai logo ao cliente); a atividade (os ajustes ao plano).
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Gauge, HardHat, Lightbulb, Lock, Minus, Package, Plus, Rocket, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
-import { dataCurta, diasDaObra } from "../planoObra";
-import { faltaParaArrancar, inicioDoPlano, obraQueOcupa, ocupacaoDosTecnicos, tecnicosDoOficio, motivoOcupado } from "../preparacaoObra";
+import { dataCurta, diasDaObra, isoDia } from "../planoObra";
+import { blocosForaDaObra, faltaParaArrancar, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase, porValidar, progresso } from "../obraOps";
 import { enviosDe, MOTIVOS_AJUSTE } from "../trabalhoObra";
 import { fimDe } from "../ajustesPlano";
@@ -32,8 +32,12 @@ import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { ImprevistosNaObra } from "../ImprevistosObra";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { lerFoto } from "../ObraOperacoes";
-import { Contagem, useReduzir } from "../movimento";
-import { EstudioPlano } from "../estudioPlano/EstudioPlano";
+import { Contagem, MOLA, useReduzir } from "../movimento";
+import { EstudioPlano, PainelTarefa } from "../estudioPlano/EstudioPlano";
+import { NovaTarefa } from "../PlanoInterativo";
+import { porqueNaoMexe, TECS } from "../motor";
+import { ausenteNoRh } from "../equipa/tecnicos";
+import { Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 
@@ -45,11 +49,13 @@ const primeiro = (n: string) => n.split(" ")[0];
 const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia útil" : "dias úteis"}`;
 
 type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: string; k: "atraso"; ti: number; dias: number };
-type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number } | { k: "materiais" } | null;
+type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } } | null;
+type AbaObra = "plano" | "execucao" | "materiais" | "equipa" | "cliente" | "fecho";
+type Retrato = { dia: number; dur: number; h: number; tec: string | null }[];
 
 const COR_VIVO: Record<EstadoVivo, string> = {
   validada: "hsl(var(--success))", feita: "#d97706", corrigir: "hsl(var(--destructive))", parada: "#64748b",
-  atrasada: "", "em curso": "", hoje: "", "por começar": "",
+  pausada: "#64748b", atrasada: "", "em curso": "", hoje: "", "por começar": "",
 };
 
 export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
@@ -64,6 +70,12 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   // o imprevisto a ser registado (painel): o atraso dele mostra-se já no plano vivo, sem a caixa de aplicar
   const [fantasma, setFantasma] = useState<Plano | null>(null);
   const imprevistosRef = useRef<HTMLElement>(null);
+  // 11/11 (Rúben: «gerir tudo por completo»): os separadores, a vista do plano e o «Desfazer» das mudanças ao plano
+  const [aba, setAba] = useState<AbaObra>("plano");
+  const [vista, setVista] = useState<"gantt" | "tecnicos">("gantt");
+  const [desfazer, setDesfazer] = useState<{ snap: Retrato; ti: number; n: number } | null>(null);
+  useEffect(() => { if (!desfazer) return; const t = setTimeout(() => setDesfazer(null), 7000); return () => clearTimeout(t); }, [desfazer?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const obras = useMemo(() => obrasDosTecnicos(S, d.id), [S, d.id, S.deals, painel, desfazer]); // eslint-disable-line react-hooks/exhaustive-deps
   // Esc fecha o que está por cima: o painel, depois a pré-visualização, depois o Estúdio (com outra obra aberta, é ela que fecha)
   useEffect(() => {
     if (outra) return;
@@ -97,6 +109,24 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   const custoPend = ims.filter((i) => i.estado === "aberto" || i.estado === "proposta").reduce((a, i) => a + (i.custo ?? 0), 0);
   const validadas = p.tasks.filter((t) => acabou || estadoVivo(t, p) === "validada").length;
   const fazer = (fn: () => void) => run(fn);
+  // cada mudança ao plano guarda o retrato de antes, para «Desfazer» (só se mudou mesmo)
+  const retrato = (): Retrato => p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
+  const mudar = (ti: number, fn: () => void) => {
+    const snap = retrato(), n0 = p.tasks.length;
+    fazer(fn);
+    if (p.tasks.length === n0 && JSON.stringify(retrato()) !== JSON.stringify(snap)) setDesfazer({ snap, ti, n: Date.now() });
+  };
+  const deFerias = (tec: string, iso: string) => ausenteNoRh(tec, iso) || !!TECS.find((y) => y.id === tec)?.feriasDatas?.includes(iso);
+  const foraDaObra = (tec: string, k: number) => { const x = dias[k]; if (!x) return false; const iso = isoDia(x); return deFerias(tec, iso) || !!ocup.get(tec)?.has(iso); };
+  const podeMexer = (ti: number) => planeia && !acabou && !porqueNaoMexe(p, ti);
+  const podeCriar = planeia && !acabou;
+  const n = {
+    execucao: p.tasks.filter((t) => ["feita", "atrasada", "corrigir"].includes(estadoVivo(t, p))).length,
+    materiais: alertas.filter((x) => x.id.startsWith("mat-")).length,
+    equipa: alertas.filter((x) => x.id.startsWith("conflito-") || x.id.startsWith("sem-")).length,
+    cliente: (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length + (d.adendas ?? []).filter((a) => a.estado === "enviada" || a.estado === "recusada").length,
+    fecho: vivo ? falta.length : 0,
+  };
 
   const verImprevisto = (id: string) => {
     imprevistosRef.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" });
@@ -108,12 +138,12 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
       case "validar": fazer(() => A.validarTarefa(d.id, a.ti)); break;
       case "tarefa": setPainel({ k: "tarefa", ti: a.ti }); break;
       case "imprevisto": verImprevisto(a.id); break;
-      case "passar": fazer(() => A.trocarTec(d.id, a.ti, a.tec)); break;
+      case "passar": mudar(a.ti, () => A.trocarTec(d.id, a.ti, a.tec)); break;
       case "outra": setOutra(a.obra); break;
       case "replanear": setPainel(null); setPrevia({ titulo: "Replanear a obra", k: "replanear", adiantar: true }); break;
       case "adiantar": setPainel(null); setPrevia({ titulo: "Adiantar com a folga", k: "replanear", adiantar: true }); break;
-      case "conversa": fazer(() => A.abrirPlano(d.id)); fechar(); break;
-      case "materiais": setPainel({ k: "materiais" }); break;
+      case "conversa": setAba("cliente"); break;
+      case "materiais": setAba("materiais"); break;
     }
   };
 
@@ -180,8 +210,22 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
                 {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} />}
               </AnimatePresence>
 
+              {/* ------------------------------------------------------------ 11/11: os separadores (o plano, a execução, os materiais, a equipa, o cliente, o fecho) */}
+              <div role="tablist" aria-label="O que gerir" className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+                <Aba on={aba === "plano"} rot="Plano" n={alertas.length} aviso onClick={() => setAba("plano")} icone={<CalendarRange className="h-4 w-4" />} />
+                <Aba on={aba === "execucao"} rot="Execução" n={n.execucao} aviso onClick={() => setAba("execucao")} icone={<ListChecks className="h-4 w-4" />} />
+                <Aba on={aba === "materiais"} rot="Materiais" n={n.materiais} aviso onClick={() => setAba("materiais")} icone={<Package className="h-4 w-4" />} />
+                <Aba on={aba === "equipa"} rot="Equipa" n={n.equipa} aviso onClick={() => setAba("equipa")} icone={<Users className="h-4 w-4" />} />
+                <Aba on={aba === "cliente"} rot="Cliente" n={n.cliente} aviso onClick={() => setAba("cliente")} icone={<MessageSquare className="h-4 w-4" />} />
+                <Aba on={aba === "fecho"} rot="Fecho" n={n.fecho} onClick={() => setAba("fecho")} icone={<Flag className="h-4 w-4" />} />
+              </div>
+              {/* troca logo (sem esperar pela saída do anterior), com uma entrada curta */}
+              <motion.div key={aba} role="tabpanel" initial={reduzir ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="space-y-6">
+                  {aba === "plano" && <>
               {/* ------------------------------------------------------------ o plano vivo */}
-              <GanttVivo titulo={previa ? "O plano, se aplicar" : R ? "O plano, com o imprevisto" : "O plano vivo"} p={p} R={R} dias={dias} sel={painel?.k === "tarefa" ? painel.ti : null} abrir={(ti) => setPainel({ k: "tarefa", ti })} imprevistos={ims.map((i) => ({ id: i.id, dia: i.dia, texto: i.texto }))} reduzir={reduzir} />
+              <GanttVivo titulo={previa ? "O plano, se aplicar" : R ? "O plano, com o imprevisto" : "O plano vivo"} p={p} R={R} dias={dias} sel={painel?.k === "tarefa" ? painel.ti : null} abrir={(ti) => setPainel({ k: "tarefa", ti })} imprevistos={ims.map((i) => ({ id: i.id, dia: i.dia, texto: i.texto }))} reduzir={reduzir}
+                vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => A.ajustarTarefa(d.id, ti, m))}
+                nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra} />
 
               <div className="grid gap-6 lg:grid-cols-2">
                 {/* ------------------------------------------------------------ os alertas */}
@@ -226,23 +270,59 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
                   </ol>
                 </section>
               )}
+                  </>}
+                  {aba === "execucao" && <Execucao ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} />}
+                  {aba === "materiais" && <MateriaisDaObra ctx={ctx} d={d} />}
+                  {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}
+                  {aba === "cliente" && <ClienteDaObra ctx={ctx} d={d} />}
+                  {aba === "fecho" && <FechoDaObra ctx={ctx} d={d} irPara={setAba} />}
+              </motion.div>
             </div>
           </main>
 
           {/* ---------------------------------------------------------------- o painel da direita */}
           <AnimatePresence>
             {painel && (painel.k !== "tarefa" || p.tasks[painel.ti]) && (
-              <motion.aside key={painel.k + (painel.k === "tarefa" ? painel.ti : "")} aria-label={painel.k === "tarefa" ? "A tarefa" : painel.k === "imprevisto" ? "Registar imprevisto" : "Materiais"}
+              <motion.aside key={painel.k + (painel.k === "tarefa" ? painel.ti : "")} aria-label={painel.k === "tarefa" ? "A tarefa" : painel.k === "imprevisto" ? "Registar imprevisto" : "Nova tarefa"}
                 className="absolute inset-0 z-30 w-full overflow-y-auto border-l border-border bg-card shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:max-w-lg lg:relative lg:z-auto lg:shadow-none"
                 initial={reduzir ? false : { x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.2 }}>
-                {painel.k === "tarefa" && <PainelTarefa ctx={ctx} d={d} ti={painel.ti} ocup={ocup} dias={dias} fechar={() => setPainel(null)}
-                  simular={(dias) => setPrevia(dias ? { titulo: `${p.tasks[painel.ti].nome}: mais ${dias} ${dias === 1 ? "dia" : "dias"}`, k: "atraso", ti: painel.ti, dias } : null)}
-                  simulado={previa?.k === "atraso" && previa.ti === painel.ti ? previa.dias : 0} imprevisto={() => setPainel({ k: "imprevisto", ti: painel.ti })} />}
+                {painel.k === "tarefa" && (() => {
+                  const t = p.tasks[painel.ti], m = t.tec ? motivoOcupado(t.tec, t, p, ocup, p.tasks.filter((_, i) => i !== painel.ti)) : null;
+                  const onde = m === "noutra obra" && t.tec ? obraQueOcupa(S, t.tec, t, p, d.id) : null;
+                  return (
+                    <PainelTarefa key={painel.ti} ctx={ctx} d={d} ti={painel.ti} editavel={podeMexer(painel.ti)} podeAgir={planeia && !acabou} dias={dias} motivo={m} onde={onde}
+                      abrirOutra={setOutra} fechar={() => setPainel(null)} ocup={ocup} mudar={mudar} foraDaObra={foraDaObra} minDia={vivo ? p.dia : 0} notaLivre={planeia && !acabou}
+                      extra={<ExecucaoTarefa ctx={ctx} d={d} ti={painel.ti} imprevisto={() => setPainel({ k: "imprevisto", ti: painel.ti })}
+                        simular={(n) => setPrevia(n ? { titulo: `${t.nome}: mais ${n} ${n === 1 ? "dia" : "dias"}`, k: "atraso", ti: painel.ti, dias: n } : null)}
+                        simulado={previa?.k === "atraso" && previa.ti === painel.ti ? previa.dias : 0} />} />
+                  );
+                })()}
+                {painel.k === "nova" && <div className="p-4"><NovaTarefa key={JSON.stringify(painel.inicial ?? {})} ctx={ctx} d={d} inicial={painel.inicial} fechar={() => setPainel(null)} /></div>}
                 {painel.k === "imprevisto" && <NovoImprevisto ctx={ctx} d={d} ti={painel.ti} ocup={ocup} fechar={() => setPainel(null)} mostrar={setFantasma} />}
-                {painel.k === "materiais" && <PainelMateriais d={d} inv={inv} fechar={() => setPainel(null)} />}
               </motion.aside>
             )}
           </AnimatePresence>
+
+          {/* ---------------------------------------------------------------- «Desfazer», em baixo */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 z-40 flex justify-center px-4">
+            <AnimatePresence>
+              {desfazer && (
+                <motion.div key={desfazer.n} role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl bg-foreground py-2 pl-4 pr-2 text-sm text-background shadow-2xl"
+                  initial={reduzir ? false : { opacity: 0, y: 24, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16 }} transition={MOLA}>
+                  <span className="min-w-0">
+                    {desfazer.ti >= 0 && p.tasks[desfazer.ti]
+                      ? <><b className="font-semibold">{p.tasks[desfazer.ti].nome}</b>: {dias[p.tasks[desfazer.ti].dia] ? dataCurta(dias[p.tasks[desfazer.ti].dia]) : ""}, {p.tasks[desfazer.ti].dur} {p.tasks[desfazer.ti].dur === 1 ? "dia" : "dias"}{p.tasks[desfazer.ti].tec ? ` · ${primeiro(nomeTec(p.tasks[desfazer.ti].tec))}` : ""}</>
+                      : <>Plano mudado · fica pronta a {dias[fim - 1] ? dataCurta(dias[fim - 1]) : "—"}</>}
+                  </span>
+                  <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-background/15 px-3 font-medium hover:bg-background/25"
+                    onClick={() => { const s0 = desfazer.snap; setDesfazer(null); fazer(() => A.reporTarefasPlano(d.id, s0)); }}>
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />Desfazer
+                  </button>
+                  <button type="button" aria-label="Fechar" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-background/15" onClick={() => setDesfazer(null)}><X className="h-4 w-4" /></button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </motion.div>
       {outra && (outra.obra.plano?.estado === "em curso" || outra.obra.plano?.estado === "concluída"
@@ -304,28 +384,97 @@ function CartaoAlerta({ a, agir, reduzir }: { a: Alerta; agir: (x: AcaoAlerta) =
   );
 }
 
-/* ================================================================== o plano vivo (Gantt) */
-function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir }: {
+/* ================================================================== o plano vivo (Gantt e por técnico) */
+// 11/11 (Rúben: «gerir tudo por completo, mais ainda do que na aprovação»): as tarefas que ainda não começaram arrastam-se (o dia) e a ponta
+// muda os dias, como no Estúdio do plano; na vista por técnico, por baixo das tarefas, onde a pessoa está fora desta obra (outra obra, que
+// abre o Estúdio dela, ou férias) e, num dia vazio, «+» cria uma tarefa para essa pessoa nesse dia.
+type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number };
+function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra }: {
   titulo: string; p: Plano; R: Replano | null; dias: Date[]; sel: number | null; abrir: (ti: number) => void; imprevistos: { id: string; dia: number; texto: string }[]; reduzir: boolean;
+  vista: "gantt" | "tecnicos"; setVista: (v: "gantt" | "tecnicos") => void; podeMexer: (ti: number) => boolean;
+  mover: (ti: number, m: { dia?: number; dur?: number }) => void; nova?: (dia: number, tec: string | null) => void;
+  obras: Map<string, Map<string, Negocio>>; deFerias: (tec: string, iso: string) => boolean; abrirOutra: (o: Negocio) => void;
 }) {
   const vivo = p.estado === "em curso";
+  const [arrasto, setArrasto] = useState<Arrasto | null>(null);
+  const toque = useRef<{ x: number; ti: number; tipo: "mover" | "durar" } | null>(null);
+  const [sob, setSob] = useState<{ k: number; tec: string | null } | null>(null);
+  const largouEm = useRef(0); // o clique logo a seguir a um arrasto não abre a tarefa
   const fases = FASES_OBRA.map((f) => ({ ...f, tis: p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => (t.fase ?? 1) === f.n).sort((a, b) => a.t.dia - b.t.dia).map((x) => x.ti) })).filter((f) => f.tis.length);
   const mudou = (ti: number) => !!R && (R.plano.tasks[ti].dia !== p.tasks[ti].dia || R.plano.tasks[ti].dur !== p.tasks[ti].dur);
   const legenda: [string, string][] = [["Validada", "hsl(var(--success))"], ["Por validar", "#d97706"], ["Em curso", "#7c5ce0"], ["Atrasada", "hsl(var(--destructive))"], ["Parada", "#64748b"]];
+  const pegar = (e: React.PointerEvent, ti: number, tipo: "mover" | "durar") => {
+    if (R || !podeMexer(ti)) return;
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    toque.current = { x: e.clientX, ti, tipo };
+    setArrasto({ ti, tipo, dx: 0 });
+  };
+  const arrastar = (e: React.PointerEvent) => { if (toque.current) setArrasto({ ti: toque.current.ti, tipo: toque.current.tipo, dx: e.clientX - toque.current.x }); };
+  const largar = (e: React.PointerEvent) => {
+    const t = toque.current;
+    toque.current = null;
+    if (!t) { setArrasto(null); return; }
+    // pelo próprio evento (um arrasto rápido larga antes de o estado do arrasto mudar)
+    const passos = Math.round((e.clientX - t.x) / COL);
+    setArrasto(null);
+    if (!passos) return; // sem andar, é um clique: abre a tarefa (onClick)
+    largouEm.current = Date.now();
+    const x = p.tasks[t.ti];
+    if (t.tipo === "mover") moverTarefa(t.ti, { dia: Math.max(vivo ? p.dia : 0, x.dia + passos) });
+    else moverTarefa(t.ti, { dur: Math.max(1, x.dur + passos) });
+  };
+  const fundo = () => (
+    <>
+      {dias.map((x, k) => x.getDay() === 1 && k > 0 && <div key={"s" + k} aria-hidden="true" className="absolute inset-y-0 border-l-2 border-l-foreground/10" style={{ left: k * COL }} />)}
+      {vivo && <div aria-hidden="true" className="absolute inset-y-0 bg-primary/[0.07]" style={{ left: p.dia * COL, width: COL }} />}
+    </>
+  );
+  const barra = (ti: number, top: number) => {
+    const t = p.tasks[ti], n = R ? R.plano.tasks[ti] : t, v = estadoVivo(t, p), b = p.base?.[ti];
+    const atraso = diasDeAtraso(t, p), a = arrasto?.ti === ti ? arrasto : null;
+    return (
+      <Fragment key={ti}>
+        {b && (b.dia !== t.dia || b.dur !== t.dur) && <div aria-hidden="true" title="Previsto no orçamento" className="absolute h-[3px] rounded-full bg-foreground/30" style={{ left: b.dia * COL + 4, width: Math.max(8, b.dur * COL - 8), top: top + 31 }} />}
+        {((R && mudou(ti)) || a) && <div aria-hidden="true" className="absolute rounded-lg border-2 border-dashed border-foreground/35" style={{ left: t.dia * COL + 2, width: Math.max(COL - 4, t.dur * COL - 4), top, height: 28 }} />}
+        {!R && atraso > 0 && (
+          <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
+            style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: 28 }}>+{atraso}</div>
+        )}
+        <Barra t={t} n={n} v={v} p={p} sel={sel === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top}
+          arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} />
+      </Fragment>
+    );
+  };
+  const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
+  const linhas: (string | null)[] = [...pessoas, ...(p.tasks.some((t) => !t.tec) ? [null] : [])];
+  const rotulo = "w-32 sm:w-56";
   return (
     <section aria-label="O plano vivo" className="rounded-2xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="text-[15px] font-semibold">{titulo}</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-[15px] font-semibold">{titulo}</h2>
+          <div role="group" aria-label="Vista" className="relative inline-flex rounded-full border border-input p-0.5">
+            {([["gantt", "Gantt", CalendarRange], ["tecnicos", "Por técnico", Users]] as const).map(([k, l, I]) => (
+              <button key={k} type="button" aria-pressed={vista === k} onClick={() => setVista(k)}
+                className={cn("relative inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors", vista === k ? "text-background" : "text-muted-foreground hover:text-foreground")}>
+                {vista === k && <motion.span layoutId="vista-obra" aria-hidden="true" className="absolute inset-0 rounded-full bg-foreground" transition={reduzir ? { duration: 0 } : MOLA} />}
+                <I className="relative h-4 w-4" aria-hidden="true" /><span className="relative">{l}</span>
+              </button>
+            ))}
+          </div>
+        </div>
         <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda">
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-[3px] w-4 rounded-full bg-foreground/30" />Previsto no orçamento</li>
         </ul>
       </div>
-      <div className="overflow-x-auto">
+      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}</p>}
+      <div className="overflow-x-auto" onPointerMove={arrastar} onPointerUp={largar} onPointerCancel={() => { toque.current = null; setArrasto(null); }} onPointerLeave={() => !toque.current && setSob(null)}>
         <div className="min-w-max">
           {/* os dias */}
           <div className="sticky top-0 z-10 flex border-b border-border bg-card">
-            <div className="sticky left-0 z-20 w-32 shrink-0 bg-card px-3 py-2 text-xs font-medium text-muted-foreground sm:w-56 sm:px-4">Tarefa</div>
+            <div className={cn("sticky left-0 z-20 shrink-0 bg-card px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4", rotulo)}>{vista === "gantt" ? "Tarefa" : "Técnico"}</div>
             {dias.map((x, k) => {
               const im = imprevistos.filter((i) => i.dia === k);
               const hoje = vivo && k === p.dia;
@@ -339,64 +488,106 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir }: {
               );
             })}
           </div>
-          {fases.map((f) => (
+          {vista === "gantt" && fases.map((f) => (
             <div key={f.n} role="rowgroup" aria-label={`Fase ${f.n} · ${f.curto}`}>
               <div className="flex border-b border-border bg-muted/40">
-                <div className="sticky left-0 z-10 flex w-32 shrink-0 items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs font-semibold sm:w-56 sm:px-4">
+                <div className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs font-semibold sm:px-4", rotulo)}>
                   <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: COR_FASE[f.n] }} /><span className="truncate">{f.n} · {f.curto}</span>
                 </div>
                 <div style={{ width: dias.length * COL }} />
               </div>
               {f.tis.map((ti) => {
-                const t = p.tasks[ti], n = R ? R.plano.tasks[ti] : t, v = estadoVivo(t, p), b = p.base?.[ti];
-                const atraso = diasDeAtraso(t, p);
+                const t = p.tasks[ti], v = estadoVivo(t, p), atraso = diasDeAtraso(t, p);
                 return (
                   <div key={ti} className={cn("flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]")}>
-                    <button type="button" onClick={() => abrir(ti)} className="sticky left-0 z-10 flex w-32 shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:w-56 sm:px-4">
+                    <button type="button" onClick={() => abrir(ti)} className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:px-4", rotulo)}>
                       <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
                       <span className="min-w-0"><span className="block truncate text-sm font-medium">{t.nome}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span></span>
                     </button>
-                    <div className="relative" style={{ width: dias.length * COL, height: LINHA }}>
-                      {dias.map((x, k) => x.getDay() === 1 && k > 0 && <div key={"s" + k} aria-hidden="true" className="absolute inset-y-0 border-l-2 border-l-foreground/10" style={{ left: k * COL }} />)}
-                      {vivo && <div aria-hidden="true" className="absolute inset-y-0 bg-primary/[0.07]" style={{ left: p.dia * COL, width: COL }} />}
-                      {/* o previsto no orçamento */}
-                      {b && (b.dia !== t.dia || b.dur !== t.dur) && <div aria-hidden="true" title="Previsto no orçamento" className="absolute h-[3px] rounded-full bg-foreground/30" style={{ left: b.dia * COL + 4, width: Math.max(8, b.dur * COL - 8), top: LINHA - 7 }} />}
-                      {/* com a pré-visualização: onde está agora, a tracejado */}
-                      {R && mudou(ti) && <div aria-hidden="true" className="absolute rounded-lg border-2 border-dashed border-foreground/35" style={{ left: t.dia * COL + 2, width: Math.max(COL - 4, t.dur * COL - 4), top: 7, height: 28 }} />}
-                      {/* os dias de atraso (de quando devia ter acabado até hoje) */}
-                      {!R && atraso > 0 && (
-                        <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
-                          style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top: 7, height: 28 }}>+{atraso}</div>
-                      )}
-                      <Barra t={t} n={n} v={v} p={p} sel={sel === ti} mudou={mudou(ti)} abrir={() => abrir(ti)} reduzir={reduzir} />
-                    </div>
+                    <div className="relative" style={{ width: dias.length * COL, height: LINHA }}>{fundo()}{barra(ti, 7)}</div>
                   </div>
                 );
               })}
             </div>
           ))}
+          {vista === "tecnicos" && linhas.map((tec) => {
+            const ts = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.tec === tec).sort((a, b) => a.t.dia - b.t.dia);
+            const faixas: number[] = [];
+            const faixa = ts.map(({ t }) => { let f = 0; while (faixas[f] !== undefined && faixas[f] > t.dia) f++; faixas[f] = t.dia + t.dur; return f; });
+            const fora = tec ? blocosForaDaObra(tec, dias, obras, deFerias) : [];
+            const altura = Math.max(1, faixas.length) * 38 + 12 + (fora.length ? 28 : 0);
+            const k = sob && sob.tec === tec ? sob.k : null;
+            const ocupado = (kk: number) => ts.some(({ t }) => kk >= t.dia && kk < t.dia + t.dur) || fora.some((b) => kk >= b.ini && kk < b.fim);
+            const livre = k != null && !ocupado(k) && (!vivo || k >= p.dia);
+            return (
+              <div key={tec ?? "sem"} className="flex border-b border-border last:border-b-0">
+                <div className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-card px-3 py-2 sm:px-4", rotulo)}>
+                  <span className="hidden sm:block"><AvatarTec id={tec} tam="h-8 w-8" /></span>
+                  <span className="min-w-0"><span className="block truncate text-sm font-medium">{nomeTec(tec)}</span><span className="block truncate text-xs text-muted-foreground">{tec ? `${TECS.find((x) => x.id === tec)?.sk ?? ""} · ${ts.length} ${ts.length === 1 ? "tarefa" : "tarefas"}` : "falta escolher"}</span></span>
+                </div>
+                <div className="relative" style={{ width: dias.length * COL, height: altura }}
+                  onPointerMove={(e) => { if (toque.current) return; const r = e.currentTarget.getBoundingClientRect(); const kk = Math.floor((e.clientX - r.left) / COL); if (kk !== sob?.k || tec !== sob?.tec) setSob(kk >= 0 && kk < dias.length ? { k: kk, tec } : null); }}>
+                  {fundo()}
+                  {nova && livre && !arrasto && !R && (
+                    <button type="button" aria-label={`Nova tarefa para ${nomeTec(tec)} a ${dataCurta(dias[k!])}`} onClick={() => nova(k!, tec)}
+                      className="absolute top-1.5 grid place-items-center rounded-lg border-2 border-dashed border-primary/40 text-primary hover:bg-primary/[0.06]" style={{ left: k! * COL + 2, width: COL - 4, height: 28 }}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                  {ts.map(({ ti }, j) => barra(ti, 6 + faixa[j] * 38))}
+                  {fora.map((b) => {
+                    const largura = (b.fim - b.ini) * COL - 4, txt = b.tipo === "ferias" ? "Férias" : `${b.obra!.nome}${b.obra!.servico ? ` · ${b.obra!.servico}` : ""}`;
+                    const quando = `${dataCurta(dias[b.ini])}${b.fim - b.ini > 1 ? ` a ${dataCurta(dias[b.fim - 1])}` : ""}`;
+                    const st = { left: b.ini * COL + 2, width: largura, bottom: 4 };
+                    const cls = "absolute flex h-6 items-center gap-1 overflow-hidden whitespace-nowrap rounded-lg px-2 text-[11px] font-medium";
+                    return b.tipo === "obra" ? (
+                      <button key={`o${b.ini}`} type="button" onClick={() => abrirOutra(b.obra!)} title={`Noutra obra: ${txt} (${quando}). Abrir o Estúdio dela`}
+                        aria-label={`${nomeTec(tec)} está noutra obra, ${txt}, ${quando}. Abrir o Estúdio dela`} className={cn(cls, "bg-muted-foreground/20 text-foreground/80 hover:bg-muted-foreground/30")} style={st}>
+                        <ArrowUpRight className="h-3 w-3 shrink-0" aria-hidden="true" /><span className="truncate">{largura > 50 ? txt : ""}</span>
+                      </button>
+                    ) : (
+                      <span key={`f${b.ini}`} role="img" aria-label={`${nomeTec(tec)} de férias, ${quando}`} title={`Férias (${quando})`} className={cn(cls, "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100")} style={st}>
+                        <span className="truncate">{largura > 40 ? "Férias" : ""}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>
   );
 }
 
-function Barra({ t, n, v, p, sel, mudou, abrir, reduzir }: { t: Tarefa; n: Tarefa; v: EstadoVivo; p: Plano; sel: boolean; mudou: boolean; abrir: () => void; reduzir: boolean }) {
+function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar }: {
+  t: Tarefa; n: Tarefa; v: EstadoVivo; p: Plano; sel: boolean; mudou: boolean; abrir: () => void; reduzir: boolean; top: number;
+  arrasto: Arrasto | null; mexe: boolean; pegar: (e: React.PointerEvent, tipo: "mover" | "durar") => void;
+}) {
   const cor = COR_FASE[t.fase ?? 1];
   const feito = feitoDe(t, p);
   const fundo = COR_VIVO[v] || cor;
-  const I = v === "validada" ? Check : v === "feita" ? Clock : v === "parada" ? Lock : v === "atrasada" || v === "corrigir" ? AlertTriangle : null;
+  const I = v === "validada" ? Check : v === "feita" ? Clock : v === "parada" ? Lock : v === "pausada" ? Pause : v === "atrasada" || v === "corrigir" ? AlertTriangle : null;
   const dataIni = dataDoDia(p, n.dia);
+  const dx = arrasto?.tipo === "mover" ? arrasto.dx : 0, dw = arrasto?.tipo === "durar" ? arrasto.dx : 0;
+  const passos = arrasto ? Math.round(arrasto.dx / COL) : 0;
   return (
-    <motion.button type="button" onClick={abrir} initial={false}
-      animate={{ left: n.dia * COL + 2, width: Math.max(COL - 4, n.dur * COL - 4) }} transition={reduzir ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 30 }}
+    <motion.button type="button" onClick={abrir} onPointerDown={(e) => mexe && pegar(e, "mover")} initial={false}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
+      animate={{ left: n.dia * COL + 2 + dx, width: Math.max(COL - 4, n.dur * COL - 4 + dw), scale: arrasto ? 1.03 : 1 }}
+      transition={reduzir || arrasto ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 30 }}
       aria-label={`${t.nome}: ${ROTULO_VIVO[v].toLowerCase()}, ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a partir de ${dataCurta(dataIni)}` : ""}${mudou ? " (muda)" : ""}`}
       className={cn("absolute flex items-center gap-1 overflow-hidden rounded-lg px-2 text-left text-xs font-medium text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
+        mexe ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         sel && "ring-2 ring-foreground ring-offset-2 ring-offset-card", v === "atrasada" && "ring-2 ring-destructive ring-offset-1 ring-offset-card", mudou && "ring-2 ring-primary ring-offset-1 ring-offset-card")}
-      style={{ top: 7, height: 28, background: v === "parada" ? "repeating-linear-gradient(135deg,#64748b 0 6px,#94a3b8 6px 12px)" : (v === "em curso" || v === "hoje" || v === "atrasada") ? `color-mix(in srgb, ${fundo} 45%, transparent)` : v === "por começar" ? `color-mix(in srgb, ${fundo} 80%, white)` : fundo }}>
+      style={{ top, height: 28, touchAction: mexe ? "none" : undefined, zIndex: arrasto ? 20 : undefined,
+        background: v === "parada" || v === "pausada" ? "repeating-linear-gradient(135deg,#64748b 0 6px,#94a3b8 6px 12px)" : (v === "em curso" || v === "hoje" || v === "atrasada") ? `color-mix(in srgb, ${fundo} 45%, transparent)` : v === "por começar" ? `color-mix(in srgb, ${fundo} 80%, white)` : fundo }}>
       {(v === "em curso" || v === "hoje" || v === "atrasada") && <motion.span aria-hidden="true" className="absolute inset-y-0 left-0" style={{ background: fundo }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${Math.round(feito * 100)}%` }} transition={{ duration: 0.6, ease: "easeOut" }} />}
       {I && <I className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
       <span className="relative truncate drop-shadow-sm">{t.nome}</span>
+      {arrasto && passos !== 0 && <span className="relative ml-auto shrink-0 rounded bg-black/25 px-1 text-[10px] tabular-nums">{passos > 0 ? "+" : ""}{passos}</span>}
+      {mexe && <span onPointerDown={(e) => pegar(e, "durar")} aria-hidden="true" className="absolute inset-y-0 right-0 w-3 cursor-ew-resize bg-white/0 hover:bg-white/30" />}
     </motion.button>
   );
 }
@@ -510,88 +701,6 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
         <Button type="button" size="lg" disabled={!R.mudancas.length} onClick={aplicar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aplicar ao plano</Button>
       </div>
     </motion.section>
-  );
-}
-
-/* ================================================================== a tarefa */
-function PainelTarefa({ ctx, d, ti, ocup, dias, fechar, simular, simulado, imprevisto }: {
-  ctx: Ctx; d: Negocio; ti: number; ocup: Map<string, Set<string>>; dias: Date[]; fechar: () => void; simular: (dias: number) => void; simulado: number; imprevisto: () => void;
-}) {
-  const { S, A, run } = ctx;
-  const p = d.obra.plano!, t = p.tasks[ti], v = estadoVivo(t, p), b = p.base?.[ti];
-  const vivo = p.estado === "em curso", acabada = v === "validada" || v === "feita";
-  const quando = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
-  const resto = { dia: Math.max(t.dia, vivo ? p.dia : 0), dur: Math.max(1, t.dia + t.dur - Math.max(t.dia, vivo ? p.dia : 0)) };
-  const livres = tecnicosDoOficio(t).filter((x) => x.id !== t.tec && motivoOcupado(x.id, resto, p, ocup) == null).slice(0, 3);
-  const E = enviosDe(t);
-  const [prolongar, setProlongar] = useState(simulado || 1);
-  const planeia = podeNeg(S.role, "obra.planear");
-  return (
-    <div className="space-y-5 p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} />Fase {t.fase ?? 1} · {FASES_OBRA[(t.fase ?? 1) - 1]?.curto}</p>
-          <h2 className="text-lg font-semibold leading-snug">{t.nome}</h2>
-          <p className="text-sm text-muted-foreground">{quando(t.dia)}{t.dur > 1 ? ` a ${quando(t.dia + t.dur - 1)}` : ""} · {nfmt(t.h)} h · {nomeTec(t.tec)}</p>
-          {b && (b.dia !== t.dia || b.dur !== t.dur) && <p className="text-sm text-muted-foreground">No orçamento: {quando(b.dia)}{b.dur > 1 ? ` a ${quando(b.dia + b.dur - 1)}` : ""}</p>}
-        </div>
-        <Button type="button" variant="ghost" className="min-h-10" aria-label="Fechar a tarefa" onClick={fechar}><X className="h-4 w-4" /></Button>
-      </div>
-      <p className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium", v === "validada" ? "bg-success/15 text-success" : v === "atrasada" || v === "corrigir" ? "bg-destructive/10 text-destructive" : v === "feita" ? "bg-amber-100 text-amber-900" : "bg-muted")}>
-        {rotuloVivo(t, p)}{v === "atrasada" ? ` · +${dd(diasDeAtraso(t, p))}` : ""}{t.exec?.horas ? ` · ${nfmt(t.exec.horas)} de ${nfmt(t.h)} h registadas` : ""}
-      </p>
-
-      {vivo && (
-        <section aria-labelledby="obra-acoes" className="space-y-2">
-          <h3 id="obra-acoes" className="text-sm font-medium">O que pode fazer</h3>
-          <ul className="overflow-hidden rounded-xl border border-border">
-            {v === "feita" && planeia && <Acao icone={<CheckCircle2 className="h-4 w-4" />} t="Validar" sub="Está feita, com as fotografias" fn={() => run(() => A.validarTarefa(d.id, ti))} />}
-            {!acabada && planeia && (
-              <li className="border-b border-border px-3 py-2.5 last:border-b-0">
-                <p className="flex items-center gap-3"><span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><TrendingUp className="h-4 w-4" /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-[15px] font-medium">E se atrasar?</span><span className="block text-sm text-muted-foreground">Veja no plano o que anda, a data de fim e as outras obras</span></span></p>
-                <div className="mt-2 flex flex-wrap items-center gap-2 pl-11">
-                  <span role="group" aria-label="Dias a mais" className="inline-flex items-center rounded-full border border-input">
-                    <button type="button" aria-label="Menos um dia" disabled={prolongar <= 1} onClick={() => { setProlongar(prolongar - 1); if (simulado) simular(prolongar - 1); }} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted disabled:opacity-40"><Minus className="h-4 w-4" /></button>
-                    <span className="min-w-[4rem] text-center text-sm tabular-nums">+{prolongar} {prolongar === 1 ? "dia" : "dias"}</span>
-                    <button type="button" aria-label="Mais um dia" disabled={prolongar >= 15} onClick={() => { setProlongar(prolongar + 1); if (simulado) simular(prolongar + 1); }} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted disabled:opacity-40"><Plus className="h-4 w-4" /></button>
-                  </span>
-                  <Button type="button" size="sm" variant={simulado ? "secondary" : "outline"} className="min-h-10" onClick={() => simular(simulado ? 0 : prolongar)}>{simulado ? "Tirar a simulação" : "Ver no plano"}</Button>
-                </div>
-              </li>
-            )}
-            {!acabada && <Acao icone={<AlertTriangle className="h-4 w-4" />} t="Registar um imprevisto" sub="O que encontrou, fotografias, custo e dias" fn={imprevisto} />}
-            {!acabada && planeia && livres.map((x) => <Acao key={x.id} icone={<Lightbulb className="h-4 w-4" />} t={`Passar para ${x.n}`} sub={`${x.sk} · livre nestes dias`} fn={() => run(() => A.trocarTec(d.id, ti, x.id))} />)}
-          </ul>
-        </section>
-      )}
-
-      <section aria-labelledby="obra-registos" className="space-y-2">
-        <h3 id="obra-registos" className="text-sm font-medium">Registos</h3>
-        {!E.length ? <p className="text-sm text-muted-foreground">{v === "por começar" ? "Ainda não começou." : "Ainda sem registos do técnico."}</p> : (
-          <ol className="space-y-3">
-            {[...E].reverse().map((e, k) => (
-              <li key={k} className="rounded-xl bg-muted/50 p-3">
-                <p className="text-sm"><span className="font-medium">{e.k === "validada" ? "Validada" : e.k === "correcao" ? "Correção pedida" : e.k === "feita" ? "Dada por feita" : "Registo do dia"}</span> · {primeiro(e.quem)} · {e.q}{e.horas ? ` · ${nfmt(e.horas)} h` : ""}</p>
-                {e.nota && <p className="text-sm text-muted-foreground">{e.nota}</p>}
-                {e.fotos?.length ? <div className="mt-2"><Miniaturas fotos={e.fotos} tam="h-14 w-20" /></div> : null}
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function Acao({ icone, t, sub, fn }: { icone: React.ReactNode; t: string; sub?: string; fn: () => void }) {
-  return (
-    <li className="border-b border-border last:border-b-0">
-      <button type="button" onClick={fn} className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none">
-        <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">{icone}</span>
-        <span className="min-w-0 flex-1"><span className="block text-[15px] font-medium">{t}</span>{sub && <span className="block text-sm text-muted-foreground">{sub}</span>}</span>
-      </button>
-    </li>
   );
 }
 
@@ -744,36 +853,6 @@ function NovoImprevisto({ ctx, d, ti, ocup: _ocup, fechar, mostrar }: { ctx: Ctx
         <Button type="button" variant="ghost" size="lg" onClick={fechar}>Cancelar</Button>
         <Button type="button" size="lg" disabled={falta.length > 0} onClick={registar}>{T ? "Registar e propor ao cliente" : "Registar o imprevisto"}</Button>
       </div>
-    </div>
-  );
-}
-
-/* ================================================================== os materiais */
-function PainelMateriais({ d, inv, fechar }: { d: Negocio; inv: ReturnType<typeof resumoEcNegocio>; fechar: () => void }) {
-  const G = materiaisPorFase(d, inv);
-  return (
-    <div className="space-y-5 p-5">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-lg font-semibold"><Package className="h-5 w-5 text-primary" aria-hidden="true" />Materiais da obra</h2>
-        <Button type="button" variant="ghost" className="min-h-10" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" /></Button>
-      </div>
-      {!G.length ? <p className="text-[15px] text-muted-foreground">Sem materiais na encomenda desta obra.</p> : G.map((g) => (
-        <section key={g.fase} aria-label={`Fase ${g.fase}`} className="space-y-1.5">
-          <p className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[g.fase] }} />Fase {g.fase} · {FASES_OBRA[g.fase - 1]?.curto}</p>
-          <ul className="space-y-1">
-            {g.itens.map((m, k) => {
-              const ok = m.estado === "na obra" || m.estado === "na carrinha" || m.estado === "reservado" || m.estado === "recebido";
-              return (
-                <li key={k} className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2 text-sm">
-                  <span className="min-w-0 truncate">{m.n} <span className="text-muted-foreground">· {nfmt(m.q)} {m.un}</span></span>
-                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", ok ? "bg-success/15 text-success" : "bg-amber-100 text-amber-900")}>{m.estado}{m.quando ? ` · ${m.quando}` : ""}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-      <p className="text-sm text-muted-foreground">O detalhe e as encomendas ao fornecedor estão no passo Materiais do negócio.</p>
     </div>
   );
 }
