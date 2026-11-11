@@ -24,6 +24,7 @@ import { espacoDoEstudio } from "./estudioNo3D";
 import { Vista3D } from "./Vista3D";
 import { PlantaVista } from "./PlantaVista";
 import { PlanoDoEstudio } from "./PlanoDoEstudio";
+import { PerguntasNoEstudio } from "./PerguntasNoEstudio";
 import { alturasEmPalavras, materiais, tarefas } from "./fichaObra";
 import type { Cena } from "./geometria3d";
 
@@ -274,6 +275,8 @@ export default function EstudioProjeto() {
           </aside>
         </>}
 
+        {/* 11/11 (Rúben): as perguntas da visita que faltam, antes do plano e de fechar */}
+        {passo === "Fechar" && p.negocio !== undefined && <div className="lg:col-span-full"><PerguntasNoEstudio p={p} setP={setP} /></div>}
         {passo === "Fechar" && <PlanoDoEstudio p={p} setP={setP} fechar={voltar} semCatalogo={<FichaObra p={p} linhas={linhas} />} />}
       </motion.div>
       </AnimatePresence>

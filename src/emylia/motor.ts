@@ -1374,12 +1374,32 @@ function orcamentoRefeito(d: Negocio, S: Estado, med?: Partial<Record<CampoMedid
 /** O que a proposta refeita com as medidas `med` vai valer (sem IVA, com o desconto), e de onde vem a diferença: `medidas` (o orçamento
  *  refeito com as medidas da visita contra o refeito com as novas) e `acertos` (o que refazer já junta sem mudar medidas: as linhas do
  *  levantamento, como as proteções e o transporte, que a proposta enviada não tinha). `dif` = medidas + acertos. Sem orçamento, null. */
-export function impactoDasMedidas(d: Negocio, S: Estado, med: Partial<Record<CampoMedida, number>>): { atual: number; novo: number; dif: number; medidas: number; acertos: number } | null {
+export function impactoDasMedidas(d: Negocio, S: Estado, med: Partial<Record<CampoMedida, number>>): { atual: number; novo: number; dif: number; medidas: number; acertos: number; linhas: LinhaImpactoOrc[] } | null {
   if (!d.orc) return null;
   try {
-    const a = tot(orcamentoRefeito(d, S), S).pf, b = tot(orcamentoRefeito(d, S, med), S).pf, atual = tot(d, S).pf;
-    return { atual: r2(atual), novo: r2(b), dif: r2(b - atual), medidas: r2(b - a), acertos: r2(a - atual) };
+    const A0 = orcamentoRefeito(d, S), B0 = orcamentoRefeito(d, S, med);
+    const a = tot(A0, S).pf, b = tot(B0, S).pf, atual = tot(d, S).pf;
+    return { atual: r2(atual), novo: r2(b), dif: r2(b - atual), medidas: r2(b - a), acertos: r2(a - atual), linhas: linhasQueMudam(A0, B0, S) };
   } catch { return null; }
+}
+/** 11/11 (Rúben: «mostrar de lado o impacto no orçamento e porquê, com o custo dos produtos no caso do pavimento, do técnico, tudo bem
+ *  calculado»): uma linha do orçamento que as medidas mudam: o serviço (a quantidade, as horas e o ofício de quem o faz) ou o produto. */
+export interface LinhaImpactoOrc { k: string; n: string; tipo: "servico" | "produto" | "outro"; de: string; para: string; v: number; h: number; quem?: string }
+function linhasQueMudam(A0: Negocio, B0: Negocio, S: Estado): LinhaImpactoOrc[] {
+  const chave = (l: LinhaOrc) => (l.t === "svc" ? `s:${l.sid}` : `m:${l.d}`);
+  const desc = 1 - (B0.orc?.desconto || 0) / 100;
+  const qtd = (l: LinhaOrc | undefined) => !l ? "—" : l.t === "svc" ? `${nfmt(l.q)} ${S.svc[l.sid]?.un ?? ""}`.trim() : l.prod ? `${nfmt(l.prod.q)}` : `${eur(l.preco)} €`;
+  const A = new Map(A0.orc!.linhas.map((l) => [chave(l), l])), B = new Map(B0.orc!.linhas.map((l) => [chave(l), l]));
+  const out: LinhaImpactoOrc[] = [];
+  for (const k of new Set([...A.keys(), ...B.keys()])) {
+    const la = A.get(k), lb = B.get(k), ca = la ? linhaCalc(la, S) : null, cb = lb ? linhaCalc(lb, S) : null;
+    const v = ((cb?.preco ?? 0) - (ca?.preco ?? 0)) * desc;
+    if (Math.abs(v) < 0.005) continue;
+    const l = (lb ?? la)!;
+    out.push({ k, n: l.t === "svc" ? S.svc[l.sid]?.n ?? l.sid : l.d.replace(/^[^·]*· /, ""), tipo: l.t === "svc" ? "servico" : l.prod ? "produto" : "outro",
+      de: qtd(la), para: qtd(lb), v: r2(v), h: r2((cb?.h ?? 0) - (ca?.h ?? 0)), ...(l.t === "svc" && S.svc[l.sid]?.perfil ? { quem: S.svc[l.sid].perfil } : {}) });
+  }
+  return out.sort((x, y) => Math.abs(y.v) - Math.abs(x.v));
 }
 /** As medidas retificadas que estão no negócio (aceites ou por aceitar), para o impacto. */
 export function medidasRetificadas(d: Negocio): Partial<Record<CampoMedida, number>> {
@@ -1624,8 +1644,21 @@ export function sugerirDaLead(d: Negocio): boolean {
   return JSON.stringify(d.f) !== antes;
 }
 
+/** 11/11 (Rúben: «na proposta o início previsto já deve vir preenchido com a data definida antes»): o início do orçamento (o dia escolhido
+ *  no plano da visita, f.plano_inicio, que passa ao orçamento ao fechar a visita) vem no «Início previsto», como sugestão; acompanha-o
+ *  enquanto ninguém o mexer. Sem data escolhida antes, fica por escolher. */
+export function sugerirInicio(d: Negocio): boolean {
+  if (!d.orc || d.orc.enviada || d.fase !== 3 || (d.f.inicio_prev && !d.sug?.inicio_prev)) return false;
+  const hoje = isoDia(new Date());
+  const ini = d.orc.inicioObra ?? (d.f.plano_inicio && d.f.plano_inicio >= hoje ? d.f.plano_inicio : undefined);
+  if (!ini || d.f.inicio_prev === ini) return false;
+  d.f.inicio_prev = ini;
+  (d.sug ??= {}).inicio_prev = true;
+  return true;
+}
 /** O prazo de execução da proposta vem do prazo previsto (Gantt) e acompanha-o enquanto for sugestão (ninguém o mexeu). */
 export function sugerirPrazo(d: Negocio, S: Estado) {
+  sugerirInicio(d);
   if (!d.orc || d.orc.enviada || d.fase < 3 || (d.f.prazo_exec && !d.sug?.prazo_exec)) return;
   const T = tarefasPrevistas(d, S);
   if (!T.length) return;
@@ -2243,7 +2276,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (onde === "visita") {
         d.visita.fechada = false; d.fase = 2; d.valida = null;
         avisar({ msg: `A preparar a versão ${n + 1}`, sub: "De volta à visita. Ao fechar o levantamento, o orçamento refaz-se", kind: "" });
-      } else avisar({ msg: `A preparar a versão ${n + 1}`, sub: `Mude o que o cliente pediu e envie. A v${n} fica guardada`, kind: "" });
+      } else if (!motivos.includes(MOTIVO_MEDIDAS)) avisar({ msg: `A preparar a versão ${n + 1}`, sub: `Mude o que o cliente pediu e envie. A v${n} fica guardada`, kind: "" });
     },
     /** 10/11 (Rúben: «ajustes ao plano e às medidas: a proposta tem de ser recriada com um novo orçamento»): as medidas retificadas passam
      *  a ser as do orçamento, a proposta aceite fica guardada como versão e o orçamento refaz-se (os preços à mão ficam). O plano aprovado e
@@ -2465,7 +2498,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!o) return;
       if (iso) o.inicioObra = iso; else delete o.inicioObra;
       // 26/10: o início previsto da proposta acompanha o do plano (antes de a proposta seguir)
-      if (iso && !o.enviada) d.f.inicio_prev = iso;
+      if (iso && !o.enviada) { d.f.inicio_prev = iso; if (d.sug) delete d.sug.inicio_prev; }
     },
     usarPrazoPrevisto(id: number) {
       if (!exigePerm("orcamento.editar")) return;

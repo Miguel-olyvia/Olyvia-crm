@@ -46,6 +46,10 @@ export interface Projeto {
   movidasNoDepois?: string[];
   /** 9/11: a ligação ao Catálogo verdadeiro (servicosDoCatalogo.ts): as trocas, os serviços juntados à mão e o dia de início da obra. */
   catalogo?: import("./servicosDoCatalogo").EscolhasCatalogo;
+  /** 11/11 (perguntasDaVisita.ts): as perguntas da visita respondidas no Estúdio (chave no negócio → resposta) e o prefixo das chaves da
+   *  área (vazio na divisão principal). */
+  perguntas?: Record<string, string>;
+  prefixoPerguntas?: string;
 }
 export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 

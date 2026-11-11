@@ -8,6 +8,7 @@ import { linhasParaLevar } from "./levarParaNegocio";
 import type { Cor, Estilo } from "./catalogoFake";
 import { copiaPlanta } from "./exemploEstudio";
 import { alturaFinalCm, type Projeto } from "./necessidadesEstudio";
+import { prefixoDoEstudio, respostasDoNegocio } from "./perguntasDaVisita";
 
 export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
 /** 5/11: o que o Estúdio devolve ao negócio quando se carrega em «Voltar ao negócio» (a Visita lê-o e grava a planta). */
@@ -68,8 +69,10 @@ export function abrirEstudio(nome: string, f: Record<string, string>, negocio: n
   try { const t = localStorage.getItem(CHAVE_ESTUDIO); local = t ? (JSON.parse(t) as Projeto) : null; } catch { local = null; }
   if (local?.negocio !== negocio) local = null;
   const melhor = local && (!doNegocio || (local.gravadoEm ?? 0) >= (doNegocio.gravadoEm ?? 0)) ? local : doNegocio;
-  if (melhor) return guardarParaEstudio({ ...melhor, nome, origem, negocio });
-  return guardarParaEstudio(projetoDaVisita(nome, f, negocio, origem, divisao));
+  // 11/11: as perguntas da visita que o Estúdio faz no passo «Fechar»: com as respostas que o negócio já tem
+  const base = melhor ? { ...melhor, nome, origem, negocio } : projetoDaVisita(nome, f, negocio, origem, divisao);
+  const prefixo = prefixoDoEstudio(f, base.divisao ?? divisao);
+  return guardarParaEstudio({ ...base, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo) } });
 }
 
 /** 6/11: o projeto do Estúdio gravado no negócio (f.estudio, JSON), ou null. */

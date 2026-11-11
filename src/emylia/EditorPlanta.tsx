@@ -6,7 +6,7 @@
 // O Estúdio junta: paredes fixas (o depois tem as paredes do antes), as peças que saem a tracejado, a cor e o nome do produto escolhido
 // em cada peça, e tocar numa peça para a trocar no catálogo. A geometria está em planta.ts.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode } from "react";
-import { AlertTriangle, Check, RotateCw, Scissors, Trash2, Undo2 } from "lucide-react";
+import { AlertTriangle, Check, Maximize2, RotateCw, Scissors, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -36,6 +36,20 @@ function vistaDe(p: Planta, fantasmas: readonly PecaPlanta[] = []) {
   }
   const x = Math.min(TELA.x, b.x - m), y = Math.min(TELA.y, b.y - m);
   return { x, y, w: Math.max(TELA.x + TELA.w, b.x + b.w + m) - x, h: Math.max(TELA.y + TELA.h, b.y + b.h + m) - y };
+}
+
+type Vista = { x: number; y: number; w: number; h: number };
+/** 11/11 (Rúben: «quando mexo paredes o estúdio move o board e atrofia»): mexer numa parede ou numa peça já não volta a enquadrar o desenho
+ *  (antes, cada mudança recentrava e mudava a escala). A vista só cresce, quando o desenho sai do que se vê; volta a enquadrar ao começar,
+ *  ao fechar a planta, ao apagar as paredes e no botão «Ver a planta toda». */
+function vistaDepois(atual: Vista, antes: Planta, depois: Planta, fantasmas: readonly PecaPlanta[]): Vista {
+  const nova = vistaDe(depois, fantasmas);
+  const fechouAgora = faltaFechar(antes.paredes) > 1 && faltaFechar(depois.paredes) <= 1;
+  if (!antes.paredes.length || !depois.paredes.length || fechouAgora) return nova;
+  const x0 = Math.min(atual.x, nova.x), y0 = Math.min(atual.y, nova.y);
+  const x1 = Math.max(atual.x + atual.w, nova.x + nova.w), y1 = Math.max(atual.y + atual.h, nova.y + nova.h);
+  if (x0 === atual.x && y0 === atual.y && x1 === atual.x + atual.w && y1 === atual.y + atual.h) return atual;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /** As peças encostadas à parede `i` (a menos de 3 cm dela, e ao lado dela): andam com a parede quando se arrasta. */
@@ -87,7 +101,11 @@ export interface ItemBandeja { id: string; tipo: TipoPeca; rotulo: string; cor?:
 export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, tipos: tiposDados, fantasmas = [], aparencia, aoTocarPeca, aoJuntarPeca, acoesDaPeca, textoBarra, bandeja = [], aoColocar }: PropsEditor) {
   const tipos = tiposDados ?? tiposDeSempre(divisao);
   const id = useId();
-  const [p, setP] = useState<Planta>(planta);
+  const [p, setPEstado] = useState<Planta>(planta);
+  // 11/11: a planta mais recente também numa ref: um largar logo a seguir ao mexer (antes de o ecrã se redesenhar) grava o que se mexeu,
+  // e não a planta de antes (a parede voltava ao sítio)
+  const pRef = useRef<Planta>(planta);
+  const setP = (np: Planta) => { pRef.current = np; setPEstado(np); };
   const [vista, setVista] = useState(() => vistaDe(planta, fantasmas));
   const [sel, setSel] = useState<string | null>(null);
   const [paredeSel, setParedeSel] = useState<number | null>(null);
@@ -114,7 +132,9 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   // a planta mudada por fora (outra planta, a folha lida, o antes copiado) entra no desenho
   useEffect(() => {
     if (gravarPlanta(planta) === gravarPlanta(p)) return;
-    setP(planta); setVista(vistaDe(planta, fantasmas)); setParedeSel(null); setCantoSel(null);
+    // 11/11: a mesma planta acertada por fora (o Estúdio junta o antes ao depois, as peças escolhidas) não volta a enquadrar o desenho
+    setVista((v) => vistaDepois(v, p, planta, fantasmas)); setP(planta);
+    if (planta.paredes.length !== p.paredes.length) { setParedeSel(null); setCantoSel(null); }
     if (sel && !planta.pecas.some((x) => x.id === sel)) setSel(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só quando a planta de fora muda
   }, [gravarPlanta(planta)]);
@@ -122,9 +142,10 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   // 9/11: as portas e as janelas ficam sempre coladas à parede mais perto
   const gravar = (np0: Planta) => {
     const np = np0.pecas.some((x) => PECAS[x.tipo]?.abertura) && np0.paredes.length ? { ...np0, pecas: np0.pecas.map((x) => colarAParede(x, np0)) } : np0;
-    setP(np); setVista(vistaDe(np, fantasmas)); onMudar(np);
+    setVista((v) => vistaDepois(v, p, np, fantasmas)); setP(np); onMudar(np);
   };
   const mudarPeca = (pid: string, parcial: Partial<PecaPlanta>, guardar = true) => {
+    const p = pRef.current;
     const np = { ...p, pecas: p.pecas.map((x) => (x.id === pid ? { ...x, ...parcial } : x)) };
     if (guardar) gravar(np); else setP(np);
   };
@@ -181,7 +202,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
   };
   const largarNaTela = () => {
     const ap = arrastoParede.current;
-    if (ap) { arrastoParede.current = null; if (ap.mexeu) gravar(p); return; }
+    if (ap) { arrastoParede.current = null; if (ap.mexeu) gravar(pRef.current); return; }
     if (traco) {
       const parede = paredeDoTraco(traco.de, traco.ate, p.paredes.length >= 2 ? p.o : undefined);
       setTraco(null);
@@ -196,7 +217,7 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
     const a = arrasto.current;
     if (!a) return;
     arrasto.current = null;
-    if (a.mexeu) gravar(p);
+    if (a.mexeu) gravar(pRef.current);
     else { const pc = p.pecas.find((x) => x.id === a.id); if (pc && aoTocarPeca) aoTocarPeca(pc); }
   };
 
@@ -435,8 +456,9 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
             const ap = aparencia?.(pc) ?? {};
             const rotulo = ap.rotulo ?? PECAS[pc.tipo].n;
             return (
-              <g key={pc.id} role="button" tabIndex={0} aria-label={`${rotulo}, ${pc.w} por ${pc.h} cm.${aoTocarPeca ? " Enter para trocar." : ""} Setas para mover.`}
-                aria-pressed={sel === pc.id} onPointerDown={(e) => pegarPeca(e, pc)} onKeyDown={(e) => teclas(e, pc)} onFocus={() => setSel(pc.id)} className="cursor-grab outline-none">
+              <g key={pc.id} role="button" tabIndex={0} aria-label={`${rotulo}, ${pc.w} por ${pc.h} cm${pc.rot ? `, rodada ${Math.abs(pc.rot)}°` : ""}.${aoTocarPeca ? " Enter para trocar." : ""} Setas para mover.`}
+                aria-pressed={sel === pc.id} onPointerDown={(e) => pegarPeca(e, pc)} onKeyDown={(e) => teclas(e, pc)} onFocus={() => setSel(pc.id)} className="cursor-grab outline-none"
+                transform={pc.rot ? `rotate(${pc.rot} ${pc.x + pc.w / 2} ${pc.y + pc.h / 2})` : undefined}>
                 <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8}
                   className={ap.cor ? "stroke-foreground/70" : PECAS[pc.tipo].abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary"}
                   style={ap.cor ? { fill: ap.cor } : undefined} strokeWidth={sel === pc.id ? letra / 4 : letra / 10} />
@@ -466,6 +488,12 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
             </text>
           )}
         </svg>
+        {(p.paredes.length > 0 || p.pecas.length > 0) && (
+          <button type="button" onClick={() => setVista(vistaDe(p, fantasmas))} aria-label="Ver a planta toda" title="Ver a planta toda"
+            className="absolute bottom-2 right-2 grid h-11 w-11 place-items-center rounded-full border border-border bg-card/90 shadow-sm backdrop-blur hover:bg-accent">
+            <Maximize2 className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
         {traco && preve && (
           <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-primary px-4 py-1.5 text-lg font-semibold text-primary-foreground shadow-lg" aria-live="polite">
             {Math.round(preve.c)} cm{ehDiagonal(preve.r) ? " · 45°" : ""}
@@ -520,6 +548,13 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
           <Button type="button" variant="outline" className="min-h-11" onClick={() => mudarPeca(selecionada.id, { w: selecionada.h, h: selecionada.w })}>
             <RotateCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Rodar
           </Button>
+          {/* 11/11 (Rúben: «portas e etc em diagonal»): as portas e as janelas rodam sozinhas com a parede; as outras peças, aqui */}
+          {!PECAS[selecionada.tipo]?.abertura && (
+            <Button type="button" variant="outline" className="min-h-11" aria-pressed={!!selecionada.rot}
+              onClick={() => { const r = (((selecionada.rot ?? 0) + 45) % 180 + 180) % 180; mudarPeca(selecionada.id, { rot: r === 0 ? undefined : r === 90 ? undefined : r, ...(r === 90 ? { w: selecionada.h, h: selecionada.w } : {}) }); }}>
+              <RotateCw className="mr-1.5 h-4 w-4 -rotate-45" aria-hidden="true" />Rodar 45°
+            </Button>
+          )}
           <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar({ ...p, pecas: p.pecas.filter((x) => x.id !== selecionada.id) }); setSel(null); }}>
             <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar
           </Button>

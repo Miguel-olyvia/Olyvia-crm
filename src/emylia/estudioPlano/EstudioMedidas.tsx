@@ -14,6 +14,7 @@ import { EditorPlanta } from "../EditorPlanta";
 import { areaChaoM2, areaParedesM2, gravarPlanta, lerPlanta, peDireitoDoCampo, type Planta } from "../planta";
 import { useReduzir } from "../movimento";
 import { podeRetificar } from "../preparacaoObra";
+import { ImpactoNoOrcamento, linhasDoImpacto } from "./ImpactoNoOrcamento";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -63,7 +64,10 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-2xl space-y-6 px-4 py-5 pb-32">
+          {/* 11/11 (Rúben: «ao alterar as medidas deve logo mostrar de lado o impacto no orçamento e porquê»): as medidas à esquerda, o impacto
+              ao lado (no telemóvel, por baixo), linha a linha */}
+          <div className="mx-auto grid max-w-6xl items-start gap-6 px-4 py-5 pb-32 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="min-w-0 space-y-6">
             {temPlanta && planta && (
               <section aria-label="A planta" className="space-y-3">
                 <div className="flex flex-wrap items-end justify-between gap-2">
@@ -113,11 +117,17 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
                 className="rounded-2xl border border-input bg-background px-4 py-3 text-[15px]" />
             </label>
           </div>
+          {impacto && CM.length > 0 && (
+            <aside className="lg:sticky lg:top-4">
+              <ImpactoNoOrcamento atual={impacto.atual} linhas={linhasDoImpacto(mudadas, impacto)} detalhe={mudadas ? impacto.linhas : []} />
+            </aside>
+          )}
+          </div>
         </div>
 
         {/* «Aceitar», fixo em baixo */}
         <div className="border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
-          <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground" aria-live="polite">{mudadas
               ? <>{mudadas} {mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}{Math.abs(dif) > 0.004 && <> · <span className="font-semibold text-foreground tabular-nums">{dif > 0 ? "+" : "−"}{eur(Math.abs(dif))} €</span> no orçamento</>}. Antes do contrato, a proposta refaz-se com o orçamento novo.</>
               : "Tudo como na visita."}</p>

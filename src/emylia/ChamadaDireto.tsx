@@ -3,31 +3,36 @@
 // (Gemini) e aparece aqui com quem falou; no fim, chamada-campos propõe os campos da Lead e do Contacto e a
 // comercial confirma o que entra. Nada corre no PC de ninguém. A lógica das propostas está em chamadaMotor.ts
 // e a ligação ao Supabase em chamadaNuvem.ts.
+// 11/11 (Rúben: «a transcrição falha muito e precisamos de retirar muitos mais insights»): a transcrição em direto é só a
+// pré-visualização; o gravador revê a conversa em blocos contínuos, com quem fala (gravador.ts, blocosAudio.ts). No fim vêm os campos
+// e a análise da conversa (InsightsConversa), que fica no negócio. Uma gravação feita fora da app carrega-se e segue o mesmo caminho.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Check, Mic, PhoneOff, RotateCcw, Sparkles, Square, UserRoundCheck } from "lucide-react";
+import { Camera, Check, FileAudio, Mic, PhoneOff, RotateCcw, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Def, Grupo } from "./campos";
 import { LINHAS, camposMedida, medida, nomeLinha, porMedida, servicosPedidos, type LinhaId, type Negocio } from "./motor";
 import { mudarDadosLead } from "./DadosDaLead";
 import type { Ctx } from "./pecas";
-import { juntarExtracoes, juntarVarios, propostas, type Extracao, type Fala, type Proposta } from "./chamadaMotor";
+import { falasDoTexto, juntarExtracoes, juntarVarios, lerInsights, metricasDaConversa, nomeFalante, propostas, type Extracao, type Fala, type Insights, type InsightsGuardados, type Proposta } from "./chamadaMotor";
+import { InsightsConversa } from "./InsightsConversa";
 import { divisaoPrincipal } from "./campos";
 import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
-import { GRUPO_VISITA, falasDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, linhasDaFala, preencherCampos, transcreverFala, vozGuardada, vozTextoGuardado, wavBase64 } from "./chamadaNuvem";
+import { GRUPO_VISITA, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
 import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, useGravacao } from "./gravador";
 import { urlDoNegocio } from "./urlNegocio";
 
-/** Depois de terminar: a preencher os campos, terminado, ou erro. A gravação em si vive no gravador (gravador.ts). */
-type Fase = "livre" | "a_preencher" | "terminado" | "erro";
+/** Depois de terminar: a preencher os campos, terminado, ou erro. A gravação em si vive no gravador (gravador.ts).
+ *  11/11: «a_transcrever» é um ficheiro (uma gravação carregada, ou a chamada de exemplo) a ser transcrito por blocos. */
+type Fase = "livre" | "a_transcrever" | "a_preencher" | "terminado" | "erro";
 const EXEMPLO_URL = "/chamadas/exemplo.ogg";
 const SEGUNDOS_VOZ = 15;
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 /** 9/11: a transcrição como texto, para ficar no negócio (uma linha por fala, com o tempo e quem fala). */
 export const textoDaTranscricao = (falas: readonly Fala[]) =>
-  falas.map((f) => `${tempo(f.inicio)} ${f.falante === "comercial" ? "Comercial" : "Cliente"}: ${f.texto}`).join("\n");
+  falas.map((f) => `${tempo(f.inicio)} ${nomeFalante(f.falante)}: ${f.texto}`).join("\n");
 
 /** Chaves que não são campos do formulário: gravam-se por ações próprias do motor (ver `aplicarEspecial`). */
 const CHAVES_ESPECIAIS = new Set(["lead_primeiro", "lead_apelido", "tipo_servico", "servicos_catalogo"]);
@@ -98,7 +103,19 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const [escolhas, setEscolhas] = useState<Record<string, { incluir: boolean; valor: string }>>({});
   const [aplicadas, setAplicadas] = useState<string[] | null>(null);
   const falasRef = useRef<Fala[]>([]);
-  const fila = useRef<Promise<void>>(Promise.resolve());
+  // 11/11: a transcrição e a análise ficam no negócio; ao voltar a ele, vêem-se as guardadas
+  const chaveTranscricao = modo === "visita" ? "transcricao_visita" : "transcricao_chamada";
+  const chaveInsights = modo === "visita" ? "insights_visita" : "insights_chamada";
+  const textoGuardado = d.f[chaveTranscricao];
+  const falasGuardadas = useMemo(() => falasDoTexto(textoGuardado), [textoGuardado]);
+  const [analise, setAnalise] = useState<InsightsGuardados | null>(null);
+  const analiseVista = analise ?? lerInsights(d.f[chaveInsights]);
+  // na visita, o que se soube na chamada (para preparar e não repetir perguntas)
+  const daChamada = modo === "visita" ? lerInsights(d.f.insights_chamada) : null;
+  const [aAnalisar, setAAnalisar] = useState(false);
+  const [verGuardada, setVerGuardada] = useState(false);
+  const [destaque, setDestaque] = useState<number | null>(null);
+  const inputAudio = useRef<HTMLInputElement>(null);
   // 5/11: a foto da folha da visita (lida pela função visita-folha) e a planta que ela deu
   const inputFolha = useRef<HTMLInputElement>(null);
   const [aLerFolha, setALerFolha] = useState(false);
@@ -122,7 +139,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const segundos = minha && g.inicioEm ? Math.max(0, Math.floor((agora - g.inicioEm) / 1000)) : 0;
   const micCalado = vivo === "a_ouvir" && agora - ouviuEm.current > 12_000;
 
-  const limpar = () => { setFalasFim([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setResumoFim(""); setFase("livre"); };
+  const limpar = () => { setFalasFim([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setResumoFim(""); setFase("livre"); setAnalise(null); };
 
   async function iniciar(continuar = false) {
     if (!continuar) limpar();
@@ -134,30 +151,59 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
     }
   }
 
-  /** Para o teste com a chamada de exemplo: cada fala vai ao Gemini por ordem, sem o gravador. */
-  const tratarFala = (pcm: Float32Array, inicioS: number) => {
-    fila.current = fila.current.then(async () => {
-      try {
-        const frases = await transcreverFala(pcm, inicioS, voz, voz ? vozTextoGuardado() : "");
-        falasRef.current = [...falasRef.current, ...linhasDaFala(frases, "cliente")].sort((a, b) => a.inicio - b.inicio);
-        setFalasFim(falasRef.current);
-      } catch (e) {
-        setMsg("Uma fala ficou por transcrever: " + (e as Error).message);
-      }
-    });
-  };
-
-  async function iniciarTeste() {
-    limpar(); setFase("a_preencher"); setMsg("A carregar a chamada de exemplo...");
+  /** 11/11: um áudio inteiro (a chamada de exemplo, ou uma gravação feita fora da app) transcrito por blocos, como a segunda passagem do
+   *  gravador, e depois os campos e a análise. */
+  async function transcreverFicheiro(origem: Blob | string, nome: string) {
+    limpar(); setFase("a_transcrever"); setMsg(`A abrir ${nome}...`);
     try {
-      const falasFicheiro = await falasDeFicheiro(EXEMPLO_URL);
-      setMsg(`A ouvir a chamada de exemplo (${falasFicheiro.length} falas).`);
-      for (const f of falasFicheiro) tratarFala(f.pcm, f.inicioS);
-      await fila.current;
-      await acabar(falasRef.current, false);
+      const pcm = await audioDeFicheiro(origem);
+      const minutos = Math.max(1, Math.round(pcm.length / 16000 / 60));
+      setMsg(`A transcrever ${nome} (${minutos} min)...`);
+      const fs = await transcreverAudio(pcm, modo, (k, n, parciais) => {
+        falasRef.current = parciais; setFalasFim(parciais);
+        setMsg(`A transcrever ${nome}: parte ${k} de ${n}.`);
+      });
+      await acabar(fs, false);
     } catch (e) {
-      setFase("erro"); setMsg("A chamada de exemplo falhou: " + (e as Error).message);
+      setFase("erro"); setMsg(`${nome[0].toUpperCase()}${nome.slice(1)} não ficou transcrita: ${(e as Error).message}`);
+    } finally {
+      if (inputAudio.current) inputAudio.current.value = "";
     }
+  }
+  const iniciarTeste = () => transcreverFicheiro(EXEMPLO_URL, "a chamada de exemplo");
+
+  /** A análise da conversa fica no negócio, com o início de cada fala (as «linha» da análise apontam para elas) e as contas. */
+  function guardarAnalise(ins: Insights, fs: readonly Fala[]) {
+    const dados: InsightsGuardados = { insights: ins, tempos: fs.map((f) => f.inicio), em: new Date().toISOString(), metricas: metricasDaConversa(fs) };
+    setAnalise(dados);
+    ctx.run(() => ctx.A.campo(d.id, chaveInsights, JSON.stringify(dados)));
+  }
+
+  /** Analisar outra vez (ou pela primeira vez, numa conversa gravada antes de haver análise). */
+  async function analisar() {
+    const fs = falas.length ? falas : falasGuardadas;
+    if (!fs.length) return;
+    setAAnalisar(true); setMsg("A analisar a conversa...");
+    try {
+      guardarAnalise(await analisarConversa(fs, modo), fs);
+      setMsg("Conversa analisada. Ficou guardada no negócio.");
+    } catch (e) {
+      setMsg("Não deu para analisar a conversa: " + (e as Error).message);
+    } finally {
+      setAAnalisar(false);
+    }
+  }
+
+  /** Leva à fala que começa mais perto desse segundo (a partir dos tempos da análise). */
+  function irPara(segundos: number) {
+    const lista = falas.length ? falas : falasGuardadas;
+    if (!lista.length) return;
+    let k = 0;
+    lista.forEach((f, i) => { if (Math.abs(f.inicio - segundos) < Math.abs(lista[k].inicio - segundos)) k = i; });
+    if (!falas.length) setVerGuardada(true);
+    setDestaque(k);
+    window.setTimeout(() => document.getElementById(`fala-${modo}-${d.id}-${k}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+    window.setTimeout(() => setDestaque((x) => (x === k ? null : x)), 3000);
   }
 
   async function terminar() {
@@ -169,21 +215,24 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   /** As falas acabadas: ficam no negócio (a transcrição inteira) e vão preencher os campos. */
   async function acabar(segs: Fala[], doGravador: boolean) {
     falasRef.current = segs; setFalasFim(segs);
-    if (segs.length) ctx.run(() => ctx.A.campo(d.id, modo === "visita" ? "transcricao_visita" : "transcricao_chamada", textoDaTranscricao(segs)));
+    if (segs.length) ctx.run(() => ctx.A.campo(d.id, chaveTranscricao, textoDaTranscricao(segs)));
     if (doGravador) descartarGravacao();
     if (!segs.length) { setFase("terminado"); setMsg(modo === "visita" ? "Gravação terminada sem falas transcritas." : "Chamada terminada sem falas transcritas."); return; }
-    setFase("a_preencher"); setMsg("A preencher os campos com o que se disse...");
+    setFase("a_preencher"); setMsg("A preencher os campos e a analisar a conversa...");
     try {
-      const ext = await preencherCampos(segs, grupos, modo);
+      // 11/11: os campos e a análise da conversa no mesmo pedido (a função faz os dois em paralelo)
+      const ext = await preencherCampos(segs, grupos, modo, true);
       setExtracao(ext);
-      // 5/11 (Rúben: as falas do cliente vinham como «Comercial»): a etiqueta de cada linha passa a ser a revista pelo sentido
-      const revistas = ext.falantes && ext.falantes.length === segs.length
-        ? segs.filter((s, i) => s.falante !== ext.falantes![i]).length : 0;
-      if (ext.falantes && ext.falantes.length === segs.length) {
-        falasRef.current = segs.map((s, i) => ({ ...s, falante: ext.falantes![i], confianca_falante: 1 }));
+      // 5/11 (Rúben: as falas do cliente vinham como «Comercial»): a etiqueta de cada linha passa a ser a revista pelo sentido.
+      // 11/11: só nas linhas provisórias; nas revistas por bloco, quem fala já veio do próprio áudio e erra menos
+      const porSentido = ext.falantes && ext.falantes.length === segs.length ? ext.falantes : null;
+      const revistas = porSentido ? segs.filter((s, i) => !s.revista && s.falante !== porSentido[i]).length : 0;
+      if (porSentido && revistas) {
+        falasRef.current = segs.map((s, i) => (s.revista ? s : { ...s, falante: porSentido[i], confianca_falante: 1 }));
         setFalasFim(falasRef.current);
-        if (revistas) ctx.run(() => ctx.A.campo(d.id, modo === "visita" ? "transcricao_visita" : "transcricao_chamada", textoDaTranscricao(falasRef.current)));
+        ctx.run(() => ctx.A.campo(d.id, chaveTranscricao, textoDaTranscricao(falasRef.current)));
       }
+      if (ext.insights) guardarAnalise(ext.insights, falasRef.current);
       setResumoFim(`${segs.length} falas, guardadas no negócio.${revistas ? ` Quem fala foi corrigido em ${revistas} ${revistas === 1 ? "linha" : "linhas"}, pelo sentido da conversa.` : ""}`);
       setFase("terminado"); setMsg(`${modo === "visita" ? "Gravação terminada" : "Chamada terminada"}. Confirme o que entra nos campos.`);
     } catch (e) {
@@ -279,7 +328,9 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   };
   const aOuvir = vivo === "a_ouvir";
   const interrompida = vivo === "interrompida";
-  const ocupado = vivo === "a_ligar" || vivo === "a_terminar" || fase === "a_preencher";
+  const ocupado = vivo === "a_ligar" || vivo === "a_terminar" || fase === "a_preencher" || fase === "a_transcrever" || aAnalisar;
+  // 11/11: as falas ainda por rever (a pré-visualização em direto) vêem-se mais claras enquanto se grava
+  const comBlocos = aOuvir && falas.some((f) => f.revista);
   const outroAGravar = !minha && g.negocio !== null && (g.estado === "a_ouvir" || g.estado === "a_ligar");
   const texto = msg || (minha ? g.msg : "") || (aOuvir ? (voz ? `${T.aOuvir} A sua voz está registada.` : `${T.aOuvir} Sem voz registada: as falas ficam como do cliente até registar a sua.`)
     : vivo === "a_ligar" ? "A pedir o microfone..." : outroAGravar ? `A gravar outro negócio (${g.nome}).`
@@ -301,6 +352,16 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
           ) : null}
           {!aOuvir && !ocupado && !interrompida ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null || outroAGravar}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
           {interrompida ? <Button type="button" onClick={() => void iniciar(true)}><Mic className="h-4 w-4" aria-hidden="true" />Continuar a gravar</Button> : null}
+          {/* 11/11: uma gravação feita fora da app (o gravador do telemóvel, quando o browser não deu) transcreve-se e analisa-se igual */}
+          {!aOuvir && !ocupado && !interrompida ? (
+            <>
+              <input ref={inputAudio} type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.aac,.mp4" className="sr-only" tabIndex={-1} aria-hidden="true"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void transcreverFicheiro(f, "a gravação"); }} />
+              <Button type="button" variant="outline" disabled={aGravarVoz !== null || outroAGravar} onClick={() => inputAudio.current?.click()}>
+                <FileAudio className="h-4 w-4" aria-hidden="true" />Carregar gravação
+              </Button>
+            </>
+          ) : null}
           {modo === "visita" && !ocupado ? (
             <>
               <input ref={inputFolha} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true"
@@ -312,7 +373,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
           ) : null}
           {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciarTeste()} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
           {aOuvir || interrompida ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
-          {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{vivo === "a_ligar" ? "A ligar..." : fase === "a_preencher" ? "A preencher..." : "A terminar..."}</Button> : null}
+          {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{vivo === "a_ligar" ? "A ligar..." : fase === "a_transcrever" ? "A transcrever..." : aAnalisar ? "A analisar..." : fase === "a_preencher" ? "A preencher..." : "A terminar..."}</Button> : null}
         </div>
       </div>
 
@@ -323,6 +384,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
             <span className={cn("inline-block h-2.5 w-2.5 rounded-full", g.aFalar ? "bg-success" : "bg-muted-foreground/40")} aria-label={g.aFalar ? "a ouvir fala" : "silêncio"} />
             <span>{tempo(segundos)}</span>
             {g.pendentes > 0 ? <span>a transcrever {g.pendentes}…</span> : null}
+            {g.aRever > 0 ? <span>a rever {g.aRever === 1 ? "o último minuto" : `${g.aRever} partes`}…</span> : null}
           </>
         ) : null}
         {minha && g.falhadas > 0 ? (
@@ -340,7 +402,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
             </span>
           </div>
           <p className="text-xs text-muted-foreground">{g.microfone}{g.pausas ? ` · cortado ${g.pausas} ${g.pausas === 1 ? "vez" : "vezes"} e retomado` : ""}</p>
-          {micCalado ? <p className="text-sm text-warning-foreground">O microfone quase não ouve nada. Ponha o aparelho mais perto de quem fala{mics.length > 1 ? " ou escolha outro microfone (termine e volte a começar)" : ""}.</p> : null}
+          {micCalado ? <p className="text-sm text-amber-800">O microfone quase não ouve nada. Ponha o aparelho mais perto de quem fala{mics.length > 1 ? " ou escolha outro microfone (termine e volte a começar)" : ""}.</p> : null}
         </div>
       ) : !ocupado && mics.length > 1 ? (
         <label className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">Microfone
@@ -351,15 +413,34 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
         </label>
       ) : null}
 
+      {daChamada && !aOuvir ? <div className="mt-4"><InsightsConversa dados={daChamada} tipo="chamada" compacto /></div> : null}
+
       {falas.length ? (
-        <div className="mt-4 max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-border bg-background p-3 text-[15px]" aria-label="Transcrição">
-          {falas.map((f, i) => (
-            <p key={i} className="relative pl-12 leading-snug">
-              <span className="absolute left-0 top-0.5 text-xs text-muted-foreground">{tempo(f.inicio)}</span>
-              <b className={f.falante === "comercial" ? "text-primary" : "text-amber-800"}>{f.falante === "comercial" ? "Comercial" : "Cliente"}{f.confianca_falante < 0.3 ? " (?)" : ""}:</b> {f.texto}
-            </p>
-          ))}
+        <>
+          {comBlocos ? <p className="mt-3 text-xs text-muted-foreground">As frases mais claras são a pré-visualização. A cada minuto a Olyvia revê-as com a conversa toda e diz quem fala.</p> : null}
+          <ListaFalas falas={falas} id={(i) => `fala-${modo}-${d.id}-${i}`} destaque={destaque} provisorias={aOuvir} />
           <div ref={fimLista} />
+        </>
+      ) : falasGuardadas.length && !ocupado ? (
+        <details className="mt-4" open={verGuardada} onToggle={(e) => setVerGuardada((e.target as HTMLDetailsElement).open)}>
+          <summary className="cursor-pointer select-none text-sm font-medium text-primary underline-offset-4 hover:underline">
+            Ver a transcrição guardada ({falasGuardadas.length} falas)
+          </summary>
+          <ListaFalas falas={falasGuardadas} id={(i) => `fala-${modo}-${d.id}-${i}`} destaque={destaque} provisorias={false} />
+        </details>
+      ) : null}
+
+      {analiseVista && !aOuvir ? (
+        <div className="mt-4 space-y-2">
+          <InsightsConversa dados={analiseVista} tipo={modo} onIrPara={irPara} />
+          {!ocupado ? (
+            <button type="button" onClick={() => void analisar()} className="text-sm text-primary underline-offset-4 hover:underline">Analisar outra vez</button>
+          ) : null}
+        </div>
+      ) : !analiseVista && !aOuvir && !ocupado && fase !== "terminado" && (falas.length || falasGuardadas.length) ? (
+        <div className="mt-4 flex flex-col gap-3 rounded-xl border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[15px]">A {modo === "visita" ? "visita" : "chamada"} está gravada, mas ainda não foi analisada.</p>
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => void analisar()}><Sparkles className="h-4 w-4" aria-hidden="true" />Analisar a conversa</Button>
         </div>
       ) : null}
 
@@ -382,7 +463,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
 
       {extracao ? (
         <div className="mt-4 space-y-3">
-          {extracao.resumo ? <p className="rounded-xl bg-muted/60 p-3 text-[15px] leading-snug"><b>Resumo:</b> {extracao.resumo}</p> : null}
+          {extracao.resumo && !extracao.insights ? <p className="rounded-xl bg-muted/60 p-3 text-[15px] leading-snug"><b>Resumo:</b> {extracao.resumo}</p> : null}
           {props.length === 0 ? <p className="text-sm text-muted-foreground">{T.sem}</p> : (
             <>
               <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
@@ -412,6 +493,28 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   );
 }
 
+/** A transcrição: tempo, quem fala e o texto. 11/11: enquanto se grava, as falas ainda não revistas vêem-se mais claras; uma frase que o
+ *  modelo ouviu mal leva um traço por baixo. `destaque` é a fala para onde a análise levou. */
+function ListaFalas({ falas, id, destaque, provisorias }: { falas: readonly Fala[]; id: (i: number) => string; destaque: number | null; provisorias: boolean }) {
+  const cor = (f: Fala) => f.falante === "comercial" ? "text-primary" : f.falante === "outro" ? "text-violet-700" : "text-amber-800";
+  return (
+    <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-border bg-background p-3 text-[15px]" aria-label="Transcrição">
+      {falas.map((f, i) => {
+        const provisoria = provisorias && !f.revista;
+        return (
+          <p key={i} id={id(i)} className={cn("relative rounded pl-12 leading-snug transition-colors", provisoria && "text-muted-foreground", destaque === i && "bg-primary/10")}>
+            <span className="absolute left-0 top-0.5 text-xs tabular-nums text-muted-foreground">{tempo(f.inicio)}</span>
+            <b className={provisoria ? "font-medium" : cor(f)}>{nomeFalante(f.falante)}{!f.revista && f.confianca_falante < 0.3 ? " (?)" : ""}:</b>{" "}
+            {f.revista && f.confianca !== undefined && f.confianca < 0.6
+              ? <span className="underline decoration-warning decoration-dotted underline-offset-4" title="Pouco claro na gravação: confira">{f.texto}</span>
+              : f.texto}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 type Escolha = { incluir: boolean; valor: string };
 
 /** Uma proposta: caixa para entrar ou não, o valor editável conforme o tipo do campo, e o excerto que a justifica. */
@@ -431,7 +534,7 @@ function LinhaProposta({ p, def, escolha, bloqueada, onMudar }: { p: Proposta; d
         </button>
         <label id={`${id}-rotulo`} htmlFor={id} className="w-44 shrink-0 text-sm text-muted-foreground">{rotulo}</label>
         <div className="min-w-[200px] flex-1"><Editor id={id} def={def} valor={escolha.valor} rotulo={rotulo} bloqueado={bloqueada} onMudar={(v) => onMudar({ valor: v })} /></div>
-        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", rever ? "bg-warning/15 text-warning-foreground" : "bg-success/15 text-success")}>{rever ? "a rever" : "ouvido"} · {Math.round(p.confianca * 100)}%</span>
+        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", rever ? "bg-warning/15 text-amber-800" : "bg-success/15 text-success")}>{rever ? "a rever" : "ouvido"} · {Math.round(p.confianca * 100)}%</span>
         {p.jaTinha && p.jaTinha !== p.valor ? <span className="text-xs text-muted-foreground">já tinha «{p.jaTinha}»</span> : null}
       </div>
       {p.excerto ? <p className="mt-1 pl-9 text-xs italic text-muted-foreground">{p.excerto}</p> : null}

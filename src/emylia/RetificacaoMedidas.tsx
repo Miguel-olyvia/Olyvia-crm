@@ -75,7 +75,7 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       ) : <p className="text-[15px] text-muted-foreground">Esta linha não tem medidas: o supervisor só confirma o local nas notas.</p>}
 
       {impacto && CM.length > 0 && (
-        <ImpactoNoOrcamento atual={impacto.atual} linhas={linhasDoImpacto(mudadas.length, impacto)} />
+        <ImpactoNoOrcamento atual={impacto.atual} linhas={linhasDoImpacto(mudadas.length, impacto)} detalhe={mudadas.length ? impacto.linhas : []} />
       )}
 
       {mudadas.length > 0 && (

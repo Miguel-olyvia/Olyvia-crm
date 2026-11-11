@@ -109,6 +109,18 @@ let cfgAtual: CfgEfeitos = {};
 export function definirEfeitosCampos(cfg: CfgEfeitos | null): void { cfgAtual = cfg ?? {}; }
 export const efeitosCamposAtuais = (): CfgEfeitos => cfgAtual;
 
+/** 11/11 (Rúben: «ter também uma área onde se consegue mudar o impacto percentual de algumas opções»): quem pode mudar os ajustes
+ *  (pessoas.config), a página real dos Negócios põe aqui como se gravam (neg_guardar_campos_config); o campo mostra então «Mudar» ao
+ *  lado do impacto. Sem página real (o protótipo, os testes) ou sem a permissão, fica null e não aparece. Devolve o erro, se houver. */
+export type GravarEfeitos = (cfg: CfgEfeitos) => Promise<string | null>;
+let gravarEfeitosAtual: GravarEfeitos | null = null;
+const ouvemEditor = new Set<() => void>();
+export function definirGravarEfeitos(f: GravarEfeitos | null): void { gravarEfeitosAtual = f; ouvemEditor.forEach((o) => o()); }
+export const gravarEfeitosAtualDe = (): GravarEfeitos | null => gravarEfeitosAtual;
+export const ouvirGravarEfeitos = (f: () => void): (() => void) => { ouvemEditor.add(f); return () => { ouvemEditor.delete(f); }; };
+/** As regras com valores a mudar ligadas a um campo (pela chave de base). */
+export const regrasDoCampo = (campo: string): RegraEfeito[] => REGRAS_EFEITO.filter((r) => r.campo === campo && r.params.length > 0);
+
 /** O valor de um parâmetro: o da organização ou o de sempre. */
 export function valorParam(cfg: CfgEfeitos, id: string, p: string): number {
   const v = cfg[id]?.v?.[p];

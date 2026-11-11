@@ -9,7 +9,7 @@ import { useState } from "react";
 import { Check, MessageSquareText, Minus, Plus, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, MOTIVO_MEDIDAS, MOTIVOS_VERSAO, alertas, bloqueado, eur, nfmt, pct, tot, versaoAtual, type Negocio } from "./motor";
+import { LINHAS, MOTIVO_MEDIDAS, MOTIVOS_VERSAO, alertas, bloqueado, eur, linhaCalc, nfmt, pct, tot, versaoAtual, type Estado, type LinhaOrc, type Negocio, type VersaoProposta } from "./motor";
 import type { Ctx } from "./pecas";
 import { PROPOSTA, efetivo, emFalta } from "./campos";
 import { totais } from "./DocsCliente";
@@ -85,6 +85,9 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
       </header>
 
+      {/* 11/11 (Rúben: «na criação da nova proposta deve estar claro as diferenças face à anterior») */}
+      <DiferencasDaVersao S={S} d={d} ant={ant} />
+
       <div className="divide-y divide-border">
         {/* os produtos e os materiais */}
         <Bloco titulo="Produtos e materiais" pedido={ehPedido(pedidos, "Outros materiais") || ehPedido(pedidos, "Juntar ou tirar trabalhos")}>
@@ -103,15 +106,15 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 
         {/* o preço */}
         <Bloco titulo="Preço" pedido={ehPedido(pedidos, "Baixar o preço")}>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[15px] text-muted-foreground">Desconto</span>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="w-full text-[15px] text-muted-foreground sm:w-40">Desconto</span>
             {[0, 3, 5, 8, 10].map((x) => (
               <button key={x} type="button" aria-pressed={o.desconto === x} onClick={() => run(() => { o.desconto = x; o.aprov = null; })}
                 className={cn("min-h-10 rounded-full border px-3.5 text-[15px] transition-colors", o.desconto === x ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-foreground/40")}>{x}%</button>
             ))}
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[15px] text-muted-foreground">Ou baixar, com IVA,</span>
+          <div className="mt-5 flex flex-wrap items-center gap-2.5">
+            <span className="w-full text-[15px] text-muted-foreground sm:w-40">Ou baixar, com IVA</span>
             {[250, 500, 1000].map((x) => (
               <button key={x} type="button" onClick={() => run(() => {
                 // o desconto que deixa o total com IVA em (v anterior − x), sobre o preço sem desconto
@@ -120,7 +123,7 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
               })} className="min-h-10 rounded-full border border-input px-3.5 text-[15px] hover:border-foreground/40">{x} €</button>
             ))}
           </div>
-          <p className={cn("mt-2 text-sm", baixo ? "text-destructive" : "text-muted-foreground")}>Margem {pct(T.m)}{baixo ? ` · abaixo do mínimo de ${S.cfg.min}%: precisa da aprovação da Direção` : ` · mínimo ${S.cfg.min}%`}</p>
+          <p className={cn("mt-4 text-sm", baixo ? "text-destructive" : "text-muted-foreground")}>Margem {pct(T.m)}{baixo ? ` · abaixo do mínimo de ${S.cfg.min}%: precisa da aprovação da Direção` : ` · mínimo ${S.cfg.min}%`}</p>
         </Bloco>
 
         {/* as datas e o pagamento */}
@@ -174,8 +177,8 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 
 function Bloco({ titulo, pedido, children }: { titulo: string; pedido?: boolean; children: React.ReactNode }) {
   return (
-    <div className={cn("p-5", pedido && "bg-warning/[0.04]")}>
-      <p className="mb-3 flex items-center gap-2 text-base font-semibold">{titulo}{pedido && <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-semibold text-foreground">pedido pelo cliente</span>}</p>
+    <div className={cn("p-5 sm:p-6", pedido && "bg-warning/[0.04]")}>
+      <p className="mb-4 flex items-center gap-2 text-base font-semibold">{titulo}{pedido && <span className="rounded-full bg-warning/20 px-2 py-0.5 text-xs font-semibold text-foreground">pedido pelo cliente</span>}</p>
       {children}
     </div>
   );
@@ -202,21 +205,21 @@ function DatasPagamento({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const rot = dataCurta(base0);
   const chip = (on: boolean) => cn("min-h-10 rounded-full border px-3.5 text-[15px] transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-foreground/40");
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[15px] text-muted-foreground">Começa <b className="font-medium text-foreground">{rot}</b></span>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="w-full text-[15px] text-muted-foreground sm:w-40">Começa <b className="font-medium text-foreground">{rot}</b></span>
         {[[-7, "1 semana antes"], [7, "+1 semana"], [14, "+2 semanas"]].map(([n, t]) => <button key={t} type="button" onClick={() => run(() => A.inicioObra(d.id, mais(n as number)))} className={chip(false)}>{t}</button>)}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[15px] text-muted-foreground">Prazo</span>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="w-full text-[15px] text-muted-foreground sm:w-40">Prazo</span>
         <span className="inline-flex items-center rounded-lg border border-input">
           <button type="button" aria-label="Menos um dia" disabled={prazo <= 1} onClick={() => run(() => A.campo(d.id, "prazo_exec", String(prazo - 1)))} className="grid h-10 w-10 place-items-center hover:bg-muted disabled:opacity-30"><Minus className="h-4 w-4" /></button>
           <span className="min-w-[6.5rem] text-center text-[15px] tabular-nums">{prazo} dias úteis</span>
           <button type="button" aria-label="Mais um dia" onClick={() => run(() => A.campo(d.id, "prazo_exec", String(prazo + 1)))} className="grid h-10 w-10 place-items-center hover:bg-muted"><Plus className="h-4 w-4" /></button>
         </span>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[15px] text-muted-foreground">Pagamento</span>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="w-full text-[15px] text-muted-foreground sm:w-40">Pagamento</span>
         {["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%", "Por fases"].map((x) => (
           <button key={x} type="button" aria-pressed={pag === x} onClick={() => run(() => A.campo(d.id, "pagamento", x))} className={chip(pag === x)}>{pag === x && <Check className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />}{x}</button>
         ))}
@@ -233,5 +236,56 @@ function TextoCampo({ rotulo, guardar, sugestao }: { rotulo: string; guardar: (t
         className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
       <Button variant="outline" className="min-h-11" disabled={!t.trim()} onClick={() => guardar(t.trim())}>Guardar</Button>
     </div>
+  );
+}
+
+/** 11/11 (Rúben: «na criação da nova proposta deve estar claro as diferenças face à anterior»): linha a linha, o que mudou desde a versão
+ *  anterior (as linhas como foram enviadas): a quantidade, o preço, o que entrou e o que saiu, e o desconto. Valores sem IVA. */
+function DiferencasDaVersao({ S, d, ant }: { S: Estado; d: Negocio; ant: VersaoProposta }) {
+  const o = d.orc!;
+  if (!ant.linhas) return null;
+  const chave = (l: LinhaOrc) => (l.t === "svc" ? `s:${l.sid}` : `m:${l.d}`);
+  const nome = (l: LinhaOrc) => (l.t === "svc" ? S.svc[l.sid]?.n ?? l.sid : l.d);
+  const qtd = (l: LinhaOrc) => (l.t === "svc" ? `${nfmt(l.q)} ${S.svc[l.sid]?.un ?? ""}`.trim() : "");
+  const antes = new Map(ant.linhas.map((l) => [chave(l), l])), agora = new Map(o.linhas.map((l) => [chave(l), l]));
+  type Dif = { k: string; t: string; de?: string; para?: string; v: number; tipo: "mudou" | "entrou" | "saiu" };
+  const L: Dif[] = [];
+  for (const [k, l] of agora) {
+    const a = antes.get(k), pv = linhaCalc(l, S).preco;
+    if (!a) { L.push({ k, t: nome(l), para: qtd(l), v: pv, tipo: "entrou" }); continue; }
+    const pa = linhaCalc(a, S).preco;
+    if (Math.abs(pv - pa) > 0.004) L.push({ k, t: nome(l), de: qtd(a) || `${eur(pa)} €`, para: qtd(l) || `${eur(pv)} €`, v: pv - pa, tipo: "mudou" });
+  }
+  for (const [k, a] of antes) if (!agora.has(k)) L.push({ k, t: nome(a), de: qtd(a), v: -linhaCalc(a, S).preco, tipo: "saiu" });
+  const descAnt = ant.desconto ?? 0, desc = o.desconto ?? 0;
+  if (!L.length && descAnt === desc) return (
+    <p className="border-b border-border bg-muted/30 px-5 py-3 text-[15px] text-muted-foreground sm:px-6">Ainda igual à v{ant.n}: mude o que for preciso em baixo.</p>
+  );
+  const sinal = (v: number) => (v > 0.004 ? "+" : v < -0.004 ? "−" : "");
+  return (
+    <section aria-label={`O que muda face à v${ant.n}`} className="border-b border-border bg-primary/[0.03] px-5 py-4 sm:px-6">
+      <p className="mb-3 text-base font-semibold">O que muda face à v{ant.n}</p>
+      <ul className="space-y-2">
+        {L.map((x) => (
+          <li key={x.k} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl bg-card px-3 py-2.5 text-[15px] shadow-[var(--shadow-sm)]">
+            <span className="min-w-0">
+              <span className={cn("mr-2 rounded-full px-2 py-0.5 text-xs font-semibold", x.tipo === "entrou" ? "bg-success/15 text-success" : x.tipo === "saiu" ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary")}>
+                {x.tipo === "entrou" ? "novo" : x.tipo === "saiu" ? "saiu" : "mudou"}
+              </span>
+              <span className="font-medium first-letter:uppercase">{x.t}</span>
+              {x.tipo === "mudou" && x.de !== x.para && <span className="text-muted-foreground"> · {x.de} → <b className="font-medium text-foreground">{x.para}</b></span>}
+              {x.tipo !== "mudou" && (x.para || x.de) && <span className="text-muted-foreground"> · {x.para || x.de}</span>}
+            </span>
+            <span className={cn("shrink-0 font-semibold tabular-nums", x.v > 0 ? "text-warning" : "text-success")}>{sinal(x.v)}{eur(Math.abs(x.v))} €</span>
+          </li>
+        ))}
+        {descAnt !== desc && (
+          <li className="flex flex-wrap items-baseline justify-between gap-x-4 rounded-xl bg-card px-3 py-2.5 text-[15px] shadow-[var(--shadow-sm)]">
+            <span><span className="mr-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">mudou</span><span className="font-medium">Desconto</span><span className="text-muted-foreground"> · {descAnt}% → <b className="font-medium text-foreground">{desc}%</b></span></span>
+          </li>
+        )}
+      </ul>
+      <p className="mt-3 text-sm text-muted-foreground">Valores sem IVA. O total com IVA está em baixo, ao lado do botão.</p>
+    </section>
   );
 }
