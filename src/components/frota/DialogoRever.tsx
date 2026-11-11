@@ -1,7 +1,7 @@
 // "Rever linhas do extrato": as linhas importadas com needs_review (km abaixo da última leitura) de uma importação, de
 // uma viatura ou todas. Cada linha corrige-se (viatura, km, valor) e aceita-se ou rejeita-se pela RPC
 // rpc_fleet_review_expense; ao gravar invalidam-se os custos e a importação, e o contador "Para rever" desce.
-// NOTA: a RPC ainda não existe na BD (ver fleetTypes.ts). Enquanto não existir, a ação diz que não está disponível.
+// A RPC existe desde a migração 20270113920000 (fleet.costs). Se faltar numa base, a ação diz que não está disponível.
 import { useState } from "react";
 import { CircleAlert, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
