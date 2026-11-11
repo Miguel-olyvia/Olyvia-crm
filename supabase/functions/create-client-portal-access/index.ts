@@ -375,6 +375,17 @@ serve(async (req: Request) => {
         if (!pageData?.users || pageData.users.length < perPage) break;
         page++;
       }
+      // 11/11 (Rúben: «este erro pode desaparecer se ele já existir»): a lista paginada falhava ou não o encontrava e o createUser
+      // abaixo dava «A user with this email address has already been registered». Antes de criar, a procura direta pelo email (índice
+      // único de auth.users, só service_role); encontrada, a conta segue o caminho de quem já existe, com as mesmas verificações.
+      if (!existingUser) {
+        const { data: idPorEmail, error: porEmailErr } = await supabase.rpc("get_auth_user_id_by_email", { p_email: email });
+        if (porEmailErr) console.error("get_auth_user_id_by_email error:", porEmailErr);
+        else if (idPorEmail) {
+          const { data: porId } = await supabase.auth.admin.getUserById(idPorEmail as string);
+          existingUser = porId?.user ?? { id: idPorEmail, email };
+        }
+      }
     }
 
     let authUserId: string;

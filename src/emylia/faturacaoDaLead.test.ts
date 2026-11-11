@@ -15,6 +15,20 @@ describe("os dados de faturação vêm da Lead", () => {
     expect(herdarFaturacao(d())).toBe(false);
   });
 
+  it("11/11: o nome fiscal vem da lead (a empresa, se houver; senão o nome do cliente)", () => {
+    Object.assign(d().f, { nome_fiscal: "", nif: "", email: "" });
+    d().dadosLead = undefined;
+    expect(herdarFaturacao(d())).toBe(true);
+    expect(d().f.nome_fiscal).toBe(d().nome);
+    d().f.nome_fiscal = "";
+    d().dadosLead = { empresa: "Ribeiro & Filhos, Lda", primeiro: "Ana", apelido: "Ribeiro" } as never;
+    herdarFaturacao(d());
+    expect(d().f.nome_fiscal).toBe("Ribeiro & Filhos, Lda");
+    // escrito à mão, não se troca
+    d().f.nome_fiscal = "Outro nome";
+    expect(herdarFaturacao(d())).toBe(false);
+  });
+
   it("o que alguém escreveu na faturação não se troca; já pago, não se mexe", () => {
     Object.assign(d().f, { nif: "271576596", email: "cliente@exemplo.pt", nif_fat: "509999999", email_fat: "faturas@empresa.pt" });
     expect(herdarFaturacao(d())).toBe(false);

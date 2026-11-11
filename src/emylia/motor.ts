@@ -1777,7 +1777,9 @@ function preencher(d: Negocio, n: number) {
     // preenchidos de vez, sem pedir para confirmar; só a série, a tranche, o vencimento e o método continuam como sugestão
     for (const [k, v] of Object.entries({ nome_fiscal: d.nome, nif_fat: f.nif || "", morada_fiscal_igual: "Sim", email_fat: f.email || "" }))
       if (!f[k] && v) f[k] = v;
-    def({ serie: "FT 2026", tranche: f.pagamento === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)", vencimento: "15 dias", metodo: "Transferência" });
+    // 11/11 (Rúben): o método de pagamento saiu da fatura (escolhe-o o cliente no portal); fica a transferência por omissão, por dentro
+    def({ serie: "FT 2026", tranche: f.pagamento === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)", vencimento: "15 dias" });
+    if (!f.metodo) f.metodo = "Transferência";
   }
   if (n === 5) def({ data_pag: hojeISO(), responsavel: RESPONSAVEIS_OBRA[0] ?? "", horario: "Dias úteis 8h–17h", chaves: f.habitada_durante_obra === "Sim" ? "O cliente abre" : "Chave entregue",
     contacto_local: d.nome + " · " + d.tel, contentor: "Não", protecoes: protecoesSugeridas(f) });
@@ -1790,6 +1792,13 @@ export function herdarFaturacao(d: Negocio): boolean {
   if (d.fase !== 4 || d.fin.pago) return false;
   let mudou = false;
   for (const [fat, lead] of DA_LEAD) if (!d.f[fat]?.trim() && d.f[lead]?.trim()) { d.f[fat] = d.f[lead].trim(); mudou = true; }
+  // 11/11 (Rúben: «isto já tem de vir preenchido caso a lead tenha esses campos»): o nome fiscal é o da empresa da lead, se houver; senão o
+  // nome do cliente (os negócios que chegam ao Financeiro pela base, sem passar pela sugestão da fase, vinham com ele vazio)
+  if (!d.f.nome_fiscal?.trim()) {
+    const x = d.dadosLead;
+    const nome = x?.empresa?.trim() || [x?.primeiro, x?.apelido].filter((s) => s?.trim()).join(" ").trim() || d.nome?.trim();
+    if (nome) { d.f.nome_fiscal = nome; mudou = true; }
+  }
   return mudou;
 }
 const fichaCliente = (d: Negocio, desde: string) => ({ nome: d.nome, tel: d.tel, local: nomeLinha(d) + (d.local ? " · " + d.local : ""), desde, deal: d.id });
