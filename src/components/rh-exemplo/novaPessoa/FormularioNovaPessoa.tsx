@@ -119,7 +119,7 @@ export function FormularioNovaPessoa({ colegas, anexos, aCriar, aoCriar, aoCance
   const cargosActivos = useMemo(() => cargos.filter((c) => c.activo), [cargos]);
   const { locais } = useLocaisTrabalho();
 
-  const [valores, setValores] = useState<ValoresNovaPessoa>(() => valoresIniciais(hoje));
+  const [valores, setValores] = useState<ValoresNovaPessoa>(() => valoresIniciais());
   const [aba, setAba] = useState<AbaNova>("dados");
   const [tentou, setTentou] = useState(false);
   const [comConvite, setComConvite] = useState(false);

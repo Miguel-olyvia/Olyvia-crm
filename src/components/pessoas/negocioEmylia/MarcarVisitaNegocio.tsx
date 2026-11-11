@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { minutosDaDuracao } from "@/hooks/pessoas/visitaDb";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { TEXTO_DO_TIPO, TIPOS_DE_VISITA } from "@/hooks/pessoas/tipoVisitaChave";
-import { useAcoesVisita } from "@/hooks/pessoas/useAcoesVisita";
+import { useAcoesVisita, type ResponsavelDaVisita } from "@/hooks/pessoas/useAcoesVisita";
 import { useDestinoVisita } from "@/hooks/pessoas/useDestinoVisita";
 import { useHorarioOrganizacao } from "@/hooks/pessoas/useHorarioOrganizacao";
 import { useHorasLivresVisita } from "@/hooks/pessoas/useHorasLivresVisita";
@@ -50,6 +50,8 @@ export interface VisitaGravada {
   /** A chave de «quem vai estar» (cliente, casal, familia, outra). */
   presentes: string;
   remarcada: boolean;
+  /** 11/11: a visita passou a lead e o negócio para este comercial (a base já o gravou; o ecrã junta a linha ao histórico). */
+  responsavel: ResponsavelDaVisita | null;
 }
 
 interface Props {
@@ -188,15 +190,15 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
       ...(localVisita.destino ? { destino: localVisita.destino } : {}),
     };
     const iv = intervaloDaVisita(valor);
-    const montar = (visitaId: string | null): VisitaGravada => ({
-      visitaId, remarcada: visita !== undefined, presentes: valor.quemVaiEstar ?? "",
+    const montar = (visitaId: string | null, responsavel: ResponsavelDaVisita | null): VisitaGravada => ({
+      visitaId, remarcada: visita !== undefined, presentes: valor.quemVaiEstar ?? "", responsavel,
       visita: {
         id: visitaId ?? visita?.id ?? "", boardId: valor.boardId, inicio: iv?.inicio ?? "", fim: iv?.fim ?? "", minutos, estado: "marcada", tipo, numeroEmylia: visita?.numeroEmylia ?? null,
         titulo: entrada.titulo, notas: entrada.nota || null, local: textoMoradaVisita(entrada.morada) || null, recursos: [...valor.recursos], dia: valor.data, hora: valor.hora,
       },
     });
-    if (visita) envio.enviar(() => acoes.alterar(visita.id, entrada, visita.recursos), () => aoGuardada(montar(visita.id)));
-    else envio.enviar(() => acoes.marcar(entrada), (r) => aoGuardada(montar(r.visitaId)));
+    if (visita) envio.enviar(() => acoes.alterar(visita.id, entrada, visita.recursos), (r) => aoGuardada(montar(visita.id, r.responsavel)));
+    else envio.enviar(() => acoes.marcar(entrada), (r) => aoGuardada(montar(r.visitaId, r.responsavel)));
   };
 
   const rotuloTipo = `${id}-tipo`;

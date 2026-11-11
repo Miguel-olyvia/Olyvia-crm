@@ -108,3 +108,14 @@ describe("Negócio ↔ linhas das tabelas", () => {
     expect(idaEVolta(S.deals.find((x) => x.id === d.id)!)).toEqual(normal(S.deals.find((x) => x.id === d.id)!));
   });
 });
+
+describe("a vaga da visita (11/11, assistente sem visita.gerir)", () => {
+  it("sem vaga vai null, como a base sem medidas: senão a fotografia da visita mudava ao gravar «Quem pede»", () => {
+    const d = seed().deals[0];
+    d.visita.slot = "";
+    expect(paraLinhas(d, HOJE).medidas.slot).toBeNull();
+    expect(deLinhas(paraLinhas(d, HOJE)).visita.slot).toBe("");
+    d.visita.slot = "seg 16/11 · 09:00";
+    expect(paraLinhas(d, HOJE).medidas.slot).toBe("seg 16/11 · 09:00");
+  });
+});

@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
 import { HORARIO_POR_OMISSAO, SEM_FERIADOS } from "@/hooks/pessoas/horasLivresVisita";
-import { agruparQuemVai, QuemPodeIrVisita } from "./QuemPodeIrVisita";
+import { agruparQuemVai, diasDaAgenda, proximasVagas, QuemPodeIrVisita } from "./QuemPodeIrVisita";
 
 const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc } }));
@@ -55,7 +55,7 @@ describe("QuemPodeIrVisita", () => {
     base({});
     desenhar("");
     // 4/11: um calendário à vista (o campo de data do browser parecia desativado)
-    expect(screen.getByRole("group", { name: "Data da visita" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Ou outro dia, no calendário" })).toBeInTheDocument();
     expect(screen.getByText("Escolha o dia no calendário.")).toBeInTheDocument();
     for (const t of ["Hoje", "Amanhã", "Daqui a 1 semana"]) expect(screen.queryByRole("button", { name: t })).toBeNull();
     expect(screen.getByText(/a seguir aparecem os comerciais/)).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe("QuemPodeIrVisita", () => {
     base({ [DIA]: { ana: ["10:00"], rui: ["10:00"], to: ["10:00"] } }, null);
     desenhar(DIA, ["ana"]);
     expect(await screen.findByText("Quem vai à visita")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /Tó/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Tó ·/ })).toBeInTheDocument();
   });
 
   // 5/11 (Rúben: «deve marcar logo a visita, tudo automático»): a visita combinada na chamada escolhe quem vai sozinha
@@ -134,6 +134,31 @@ describe("QuemPodeIrVisita", () => {
       const { aoMudarRecursos } = desenhar(DIA, [], { hora: "16:00", aoEscolher });
       await waitFor(() => expect(aoEscolher).toHaveBeenCalledWith({ quem: null, motivo: "Nenhum comercial está livre às 16:00: escolha outra hora ou quem vai." }));
       expect(aoMudarRecursos).not.toHaveBeenCalled();
+    });
+  });
+
+  // 11/11 (Rúben: «ao marcar a visita, logo no topo a agenda disponível, por comercial»)
+  describe("a agenda dos comerciais, no topo", () => {
+    it("os próximos dias sem domingos; as próximas vagas (manhã e tarde de cada dia, do comercial mais cedo)", () => {
+      expect(diasDaAgenda("2030-03-01", 7)).toEqual(["2030-03-01", "2030-03-02", "2030-03-04", "2030-03-05", "2030-03-06", "2030-03-07", "2030-03-08"]);
+      const h: Record<string, Record<string, string[]>> = { "2030-03-01": { ana: ["15:00"], rui: ["09:00", "14:00"] }, "2030-03-02": { ana: ["10:00"] } };
+      expect(proximasVagas(["2030-03-01", "2030-03-02"], [{ id: "ana" }, { id: "rui" }], (d, r) => h[d]?.[r], 4)).toEqual([
+        { dia: "2030-03-01", hora: "09:00", quem: "rui" }, { dia: "2030-03-01", hora: "14:00", quem: "rui" }, { dia: "2030-03-02", hora: "10:00", quem: "ana" }]);
+    });
+    it("sem data escolhida, já mostra quem está livre; tocar numa vaga escolhe o dia, o comercial e a hora", async () => {
+      base({ "2030-03-04": { ana: ["10:00", "11:00", "15:00"] }, "2030-03-05": { rui: ["09:00"] } });
+      const { aoMudar, aoMudarRecursos } = desenhar("");
+      const agenda = await screen.findByRole("region", { name: "Agenda dos comerciais" });
+      expect(agenda).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: /Marcar segunda-feira, 4 de março às 10:00 com Ana/ }));
+      expect(aoMudar).toHaveBeenCalledWith({ data: "2030-03-04" });
+      expect(aoMudarRecursos).toHaveBeenCalledWith(["ana"]);
+      expect(aoMudar).toHaveBeenCalledWith({ hora: "10:00" });
+      // na grelha, a célula do Rui a 5 diz a manhã; a da Ana nesse dia está fechada
+      expect(screen.getByRole("button", { name: /Rui, terça-feira, 5 de março: manhã a partir das 09:00, tarde ocupada/ })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /Ana, terça-feira, 5 de março: sem horas livres/ })).toBeDisabled();
+      // só os comerciais (o técnico não entra na agenda)
+      expect(screen.queryByRole("button", { name: /^Tó,/ })).toBeNull();
     });
   });
 });

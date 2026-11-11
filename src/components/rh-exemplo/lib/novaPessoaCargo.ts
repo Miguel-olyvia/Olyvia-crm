@@ -4,8 +4,9 @@
  *
  * Moram aqui, e nao em `novaPessoa.ts`, para esse ficheiro nao engordar.
  *
- * TODA A PESSOA TEM CARGO. Sem `cargo_id` a base recusa o INSERT (HRC08), por
- * isso aqui e um PROBLEMA bloqueante e ja nao um aviso de pendencia.
+ * O CARGO E OPCIONAL NA ADMISSAO: a pessoa pode ainda nao ter passado, e o cargo
+ * atribui-se depois, na ficha ("Atribuir cargo"). Sem cargo nao ha retribuicao a
+ * definir aqui (ver `novaPessoaContrato.ts`).
  *
  * O SALARIO BASE JA NAO SE ESCREVE NO ASSISTENTE: vem do cargo. O subsidio de
  * almoco tambem nao: e obrigatorio no cargo e vem da regra salarial da
@@ -14,13 +15,8 @@
  * ficha existir. Se nada disso foi tocado, nao ha parte da pessoa e nao se cria
  * versao nenhuma -- o RH completa na ficha (e a pendencia da admissao di-lo).
  */
-import type { ProblemaCampo } from "@/components/rh-exemplo/lib/novaPessoa";
-
 /** Os duodecimos propostos quando se define a parte pessoal e nada foi escolhido. */
 export const DUODECIMOS_PROPOSTO = 50;
-
-/** O campo de cargo no assistente (o mesmo `id` de sempre: a pendencia e o resumo focam-no). */
-export const CAMPO_CARGO_NOVO = "hr-novo-cargo";
 
 export interface ContratoParteDaPessoa {
   duodecimos_pct: "" | "0" | "50" | "100";
@@ -58,17 +54,6 @@ export function dataDaPrimeiraRetribuicao(
   const cargoAbre = dataDeAberturaDoCargo(dataAdmissao, hoje);
   const desde = vinculoDataInicio ?? cargoAbre;
   return desde < cargoAbre ? cargoAbre : desde;
-}
-
-/** Sem cargo escolhido: problema bloqueante do passo das informacoes laborais. */
-export function problemaDoCargo(laborais: { cargo_id: string }): ProblemaCampo | null {
-  if (laborais.cargo_id.trim() !== "") return null;
-  return {
-    seccao: "laborais",
-    campoId: CAMPO_CARGO_NOVO,
-    rotuloKey: "hr.columns.cargo",
-    mensagemKey: "hr.form.cargoObrigatorio",
-  };
 }
 
 /** A parte da pessoa (so os duodecimos), ou `null` se ainda nao foram escolhidos. */

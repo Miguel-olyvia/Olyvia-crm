@@ -54,7 +54,6 @@ import { numeroDe } from "@/components/rh-exemplo/lib/numeros";
 import { getLocalizedFallback } from "@/utils/friendlyError";
 import {
   parteDaPessoaDoContrato,
-  problemaDoCargo,
   type ParteDaPessoa,
 } from "@/components/rh-exemplo/lib/novaPessoaCargo";
 import type {
@@ -135,7 +134,7 @@ export interface RascunhoPessoais extends RascunhoDetalhesExtra {
 }
 
 export interface RascunhoLaborais {
-  /** O cargo do catalogo (`hr_cargos`): obrigatorio. Dele vem o salario base. */
+  /** O cargo do catalogo (`hr_cargos`): OPCIONAL na admissao (atribui-se depois, na ficha). Dele vem o salario base. */
   cargo_id: string;
   local_id: string;
   reporta_a_pessoa_id: string;
@@ -295,7 +294,7 @@ const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
  *
  * O QUE BLOQUEIA
  * --------------
- * Sempre: os nomes (e o cargo, desde o fluxo 2). A enviar convite
+ * Sempre: so os nomes (o cargo e o contrato sao opcionais na admissao). A enviar convite
  * (`comConvite`): tambem o e-mail pessoal -- o destino do convite --, e mais
  * nada: os obrigatorios ficam para a pessoa preencher. Sem convite (o RH
  * preenche): os campos que a configuracao da organizacao poe na posicao
@@ -352,9 +351,7 @@ export function problemasDoRascunho(
     problemas.push(...problemasDeObrigatoriosDaConfiguracao(pessoais, config, indisponiveis));
   }
 
-  // -- Cargo (obrigatorio, fluxo 2) ------------------------------------------
-  const problemaCargo = problemaDoCargo(rascunho.laborais);
-  if (problemaCargo) problemas.push(problemaCargo);
+  // O cargo nao e obrigatorio: a pessoa pode ainda nao ter passado, e o cargo atribui-se depois.
   // Os numeros do contrato (horas e periodo experimental) estao
   // em `lib/hr/contrato.ts`, porque o separador Contratos da ficha edita
   // exactamente os mesmos e nao podem divergir. Aqui so se traduz o campo
@@ -498,7 +495,7 @@ export interface NovaPessoaPayload {
     numero_interno: string | null;
     /** O texto livre (legenda): o nome do cargo escolhido. */
     cargo: string | null;
-    /** Obrigatorio: sem ele a base recusa a ficha (HRC08). */
+    /** Vazio quando a pessoa ainda nao tem cargo (a admissao nao o obriga). */
     cargo_id: string;
     local_id: string | null;
     reporta_a_pessoa_id: string | null;
@@ -550,6 +547,8 @@ export interface NovaPessoaPayload {
   contaALigar: string | null;
 }
 
+// NOTA: o painel "Nova pessoa" NAO usa esta funcao. O payload do painel vem de `hooks/paraPayloadReal.ts` (que parte do
+// `payloadDoRascunho` real e aplica o contrato e o cargo opcionais, ver `novaPessoaContrato.ts`). Esta copia nao decide nada.
 export function payloadDoRascunho(
   rascunho: RascunhoPessoa,
   linhasDeHorario: (horario: HorarioRascunho) => LinhaPlaneadoParaGravar[],
@@ -569,8 +568,7 @@ export function payloadDoRascunho(
   // listas mostram). Com `cargo_id` mas sem o nome do catalogo (catalogo ainda
   // por carregar, ou cargo que ja nao esta nele) a ficha ficava com a legenda a
   // NULL sem aviso nenhum: falha-se aqui, com uma mensagem clara, antes de
-  // mandar seja o que for a base. Sem `cargo_id` nao ha nada a legendar (e o
-  // problema bloqueante `problemaDoCargo` ja o apanhou).
+  // mandar seja o que for a base. Sem `cargo_id` nao ha nada a legendar.
   const nomeDoCargo = cargoNome === null ? null : texto(cargoNome);
   if (laborais.cargo_id.trim() !== "" && nomeDoCargo === null) {
     throw new Error(getLocalizedFallback("hr.form.cargoObrigatorio"));

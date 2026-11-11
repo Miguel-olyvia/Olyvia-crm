@@ -111,17 +111,20 @@ interface SelectProps extends BaseProps {
   /** Com texto, o campo aceita ficar sem escolha (é o rótulo dessa opção). */
   vazio?: string;
   placeholder?: string;
+  /** Desactivado (por exemplo, os duodécimos sem cargo): continua no ecrã, vazio, com a razão na ajuda. */
+  disabled?: boolean;
 }
 
-export function CampoS({ g, k, id, rotulo, codigo, ajuda, largo, opcoes, vazio, placeholder }: SelectProps) {
+export function CampoS({ g, k, id, rotulo, codigo, ajuda, largo, opcoes, vazio, placeholder, disabled }: SelectProps) {
   const ctx = useNova();
   const { t } = useTranslation();
+  const valor = useValor(g, k);
   return (
     <LinhaCampo id={id} codigo={codigo} largo={largo}>
       <CampoSelect
-        id={id} label={rotulo} valor={useValor(g, k)} onChange={useDefinir(g, k)} opcoes={opcoes} vazioLabel={vazio}
+        id={id} label={rotulo} valor={disabled ? "" : valor} onChange={useDefinir(g, k)} opcoes={opcoes} vazioLabel={vazio}
         placeholder={placeholder ?? t("rhNova.escolher")} ajuda={ajuda} erro={ctx.erro(id)} obrigatorio={ctx.obrigatorio(id)}
-        descritoPor={posicaoDoCampo(ctx, codigo, id) ? idDaPosicao(id) : undefined}
+        descritoPor={posicaoDoCampo(ctx, codigo, id) ? idDaPosicao(id) : undefined} disabled={disabled}
       />
     </LinhaCampo>
   );

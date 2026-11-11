@@ -18,7 +18,7 @@ const COLUNAS_RETIRADAS = ["tempo_trabalho_pct", "horas_semanais_maximas", "form
 const OPCOES = { comConvite: false, config: null, cargoNome: "Vendedor/a", podeLigarConta: true, podeSaude: true, podeSindicalizacao: true };
 
 function preenchido(): ValoresNovaPessoa {
-  let v = valoresIniciais("2026-10-14");
+  let v = valoresIniciais();
   v = comPatch(v, "geral", { primeiro_nome: "Teresa", apelido: "Nogueira" });
   v = comPatch(v, "laborais", { cargo_id: "cargo-1" });
   return comPatch(v, "contrato", {
@@ -32,14 +32,14 @@ beforeAll(() => {
 
 describe("nova pessoa (rh-exemplo): os campos retirados do contrato", () => {
   it("o rascunho de partida ja nao os tem", () => {
-    const contrato = valoresIniciais("2026-10-14").contrato;
+    const contrato = valoresIniciais().contrato;
     expect(contrato).not.toHaveProperty("tempo_trabalho_pct");
     expect(contrato).not.toHaveProperty("horas_semanais_maximas");
   });
 
   it("a secao das horas ja nao os mostra", () => {
     const valor = {
-      valores: valoresIniciais("2026-10-14"), alterar: () => {}, erro: () => null, obrigatorio: () => false, config: null, colegas: [],
+      valores: valoresIniciais(), alterar: () => {}, erro: () => null, obrigatorio: () => false, config: null, colegas: [],
       conta: new Proxy({}, { get: () => () => null }), anexos: {}, aCriar: false, podeSaude: true, podeSindicalizacao: true,
     } as unknown as ContextoNova;
     render(<ProvedorNova valor={valor}><ContratoHoras /></ProvedorNova>);

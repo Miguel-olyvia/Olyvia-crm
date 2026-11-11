@@ -89,19 +89,28 @@ async function escolher(rotulo: RegExp | string, opcao: RegExp | string) {
   fireEvent.click(await screen.findByRole("option", { name: opcao }));
 }
 
-/** O mínimo para criar com convite: nome, e-mail pessoal, cargo, tipo de contrato, subsídio e duodécimos. */
-async function preencherMinimo() {
+/** O mínimo para criar com convite: o nome e o e-mail pessoal. Cargo e contrato são opcionais na admissão. */
+function preencherMinimo() {
   escrever("hr-novo-primeiro-nome", "Teresa");
   escrever("hr-novo-apelido", "Nogueira");
   irParaAba(/Contacto e morada/);
   escrever("hr-novo-email-pessoal", "teresa@exemplo.pt");
   escrever("hr-novo-telefone-pessoal", "912345678");
+}
+
+/** Se a pessoa passou: o cargo, o contrato (tipo e data de início, juntos) e os duodécimos, que só se pedem com cargo e contrato. */
+async function preencherCargoEContrato() {
   irParaAba(/Contrato e local/);
   await escolher(/^Cargo/, /Vendedor/);
   await escolher(/^Tipo de contrato/, /Sem termo/);
+  escrever("hr-novo-data-inicio", "2026-10-01");
   irParaAba(/Retribuição e bancário/);
   await escolher(/^Subsidios em duodecimos/, /^50 %/);
 }
+
+/** O que a admissão gravou por tabela (só os inserts) e as RPCs chamadas. */
+const insercoes = (tabela: string) => rhTeste.escritas.filter((e) => e.tabela === tabela && e.metodo === "insert");
+const rpcsChamadas = () => rhTeste.chamadas.flatMap((c) => (c.rpc ? [c.rpc] : []));
 
 describe("Nova pessoa: permissões do botão", () => {
   it("só com hr.pessoas.create (sem hr.pessoas.view) não há «Nova pessoa»: a base não devolve o id da pessoa criada", () => {
@@ -184,7 +193,9 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
     expect(within(nova).getByRole("status")).toHaveTextContent(/campos por corrigir/);
     const abas = within(nova).getAllByRole("tab");
     expect(abas[0]).toHaveTextContent("por corrigir");
-    expect(abas[2]).toHaveTextContent("por corrigir");
+    // Cargo e contrato são opcionais na admissão: criar vazio só falha nos nomes.
+    expect(abas[2]).not.toHaveTextContent("por corrigir");
+    expect(abas[3]).not.toHaveTextContent("por corrigir");
     expect(abas[5]).not.toHaveTextContent("por corrigir");
   });
 
@@ -221,7 +232,8 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
 
   it("preenche, cria e envia o convite: a pessoa entra na lista, a ficha abre e mostra o que se escreveu", async () => {
     const nova = abrirNovaPessoa();
-    await preencherMinimo();
+    preencherMinimo();
+    await preencherCargoEContrato();
     irParaAba(/Dados pessoais/);
     escrever("hr-novo-nome-tratamento", "Teté");
     escrever("hr-novo-nif", "123456789");
@@ -245,5 +257,109 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
     expect(await within(ficha).findByText(/^Vendedor( · .+)?$/)).toBeInTheDocument();
     fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Detalhes pessoais/ }), { button: 0 });
     expect(await within(ficha).findByDisplayValue("teresa@exemplo.pt")).toBeInTheDocument();
+  });
+
+  it("a data de início do contrato nasce vazia (nada de «hoje» por omissão) e o cargo, o tipo e os duodécimos não são obrigatórios", () => {
+    abrirNovaPessoa();
+    irParaAba(/Contrato e local/);
+    expect(campo("hr-novo-data-inicio")).toHaveValue("");
+    for (const id of ["hr-novo-cargo", "hr-novo-tipo-contrato", "hr-novo-data-inicio"]) {
+      expect(document.getElementById(id), id).not.toHaveAttribute("aria-required", "true");
+    }
+    irParaAba(/Retribuição e bancário/);
+    expect(document.getElementById("hr-novo-duodecimos")).not.toHaveAttribute("aria-required", "true");
+  });
+
+  it("só com o nome e o e-mail, cria a ficha sem cargo, sem contrato, sem retribuição e sem afectação", async () => {
+    const nova = abrirNovaPessoa();
+    preencherMinimo();
+    rhTeste.respostas["pessoas"] = [{
+      id: "pessoa-sem-contrato", organization_id: "org-teste", primeiro_nome: "Teresa", apelido: "Nogueira", nome_completo: "Teresa Nogueira",
+      email_pessoal: "teresa@exemplo.pt", cargo: null, cargo_id: null, estado_registo: "activo",
+    }];
+    fireEvent.click(within(nova).getByRole("button", { name: "Criar e enviar convite" }));
+    expect(await screen.findByText("convite:pessoa-sem-contrato:teresa@exemplo.pt")).toBeInTheDocument();
+    const [pessoa] = insercoes("pessoas");
+    expect(pessoa.payload).toMatchObject({ primeiro_nome: "Teresa", apelido: "Nogueira", cargo_id: null, cargo: null, data_admissao: null });
+    expect(insercoes("pessoas_vinculos")).toHaveLength(0);
+    expect(insercoes("pessoas_vinculos_horas")).toHaveLength(0);
+    expect(insercoes("pessoas_afectacoes")).toHaveLength(0);
+    expect(rpcsChamadas()).not.toContain("rpc_hr_retribuicao_definir_pessoal");
+    expect(toastes.error).not.toHaveBeenCalled();
+  });
+
+  it("com um campo do contrato escrito, o tipo e a data de início passam a obrigatórios juntos: nada se cria e o foco vai ao primeiro", async () => {
+    const nova = abrirNovaPessoa();
+    preencherMinimo();
+    irParaAba(/Contrato e local/);
+    escrever("hr-novo-horas-trabalho", "40");
+    expect(document.getElementById("hr-novo-tipo-contrato")).toHaveAttribute("aria-required", "true");
+    expect(campo("hr-novo-data-inicio")).toHaveAttribute("aria-required", "true");
+    fireEvent.click(within(nova).getByRole("button", { name: "Criar e enviar convite" }));
+    expect(within(nova).getByRole("tab", { name: /Contrato e local/ })).toHaveAttribute("data-state", "active");
+    await waitFor(() => expect(document.getElementById("hr-novo-tipo-contrato")).toHaveFocus());
+    expect(document.getElementById("hr-novo-tipo-contrato")).toHaveAttribute("aria-invalid", "true");
+    expect(campo("hr-novo-data-inicio")).toHaveAttribute("aria-invalid", "true");
+    expect(insercoes("pessoas")).toHaveLength(0);
+  });
+
+  it("sem cargo, os duodécimos ficam desactivados e a frase diz quando se definem", () => {
+    abrirNovaPessoa();
+    irParaAba(/Retribuição e bancário/);
+    const duodecimos = document.getElementById("hr-novo-duodecimos") as HTMLElement;
+    expect(duodecimos).toBeDisabled();
+    expect(screen.getByText(/Define-se quando atribuir o cargo/)).toBeInTheDocument();
+  });
+
+  it("ao desactivar os duodécimos (tirar o cargo) o select mostra-se vazio, sem parecer «50 %» activo", async () => {
+    abrirNovaPessoa();
+    irParaAba(/Contrato e local/);
+    await escolher(/^Cargo/, /Vendedor/);
+    await escolher(/^Tipo de contrato/, /Sem termo/);
+    escrever("hr-novo-data-inicio", "2026-10-01");
+    irParaAba(/Retribuição e bancário/);
+    await escolher(/^Subsidios em duodecimos/, /^50 %/);
+    expect(document.getElementById("hr-novo-duodecimos")).toHaveTextContent("50 %");
+    irParaAba(/Contrato e local/);
+    await escolher(/^Cargo/, /Ainda sem cargo/);
+    irParaAba(/Retribuição e bancário/);
+    const duodecimos = document.getElementById("hr-novo-duodecimos") as HTMLElement;
+    expect(duodecimos).toBeDisabled();
+    expect(duodecimos).not.toHaveTextContent("50");
+  });
+
+  it("junto às categorias do contrato (no bloco do cargo) repete-se que o contrato é opcional e o que passa a obrigatório", () => {
+    abrirNovaPessoa();
+    irParaAba(/Contrato e local/);
+    expect(screen.getAllByText(/campos do contrato: o contrato é opcional/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/tipo de contrato e a data de início passam a obrigatórios/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("com cargo e contrato, os duodécimos activam-se e passam a obrigatórios", async () => {
+    abrirNovaPessoa();
+    irParaAba(/Contrato e local/);
+    await escolher(/^Cargo/, /Vendedor/);
+    await escolher(/^Tipo de contrato/, /Sem termo/);
+    escrever("hr-novo-data-inicio", "2026-10-01");
+    irParaAba(/Retribuição e bancário/);
+    const duodecimos = document.getElementById("hr-novo-duodecimos") as HTMLElement;
+    expect(duodecimos).not.toBeDisabled();
+    expect(duodecimos).toHaveAttribute("aria-required", "true");
+  });
+
+  it("com cargo e contrato completos, cria o contrato e a retribuição; o cargo segue", async () => {
+    const nova = abrirNovaPessoa();
+    preencherMinimo();
+    await preencherCargoEContrato();
+    rhTeste.respostas["pessoas"] = [{
+      id: "pessoa-com-contrato", organization_id: "org-teste", primeiro_nome: "Teresa", apelido: "Nogueira", nome_completo: "Teresa Nogueira",
+      email_pessoal: "teresa@exemplo.pt", cargo: "Vendedor", cargo_id: "cargo-vendedor", estado_registo: "activo",
+    }];
+    rhTeste.respostas["pessoas_vinculos"] = [{ id: "vinculo-1" }];
+    fireEvent.click(within(nova).getByRole("button", { name: "Criar e enviar convite" }));
+    expect(await screen.findByText("convite:pessoa-com-contrato:teresa@exemplo.pt")).toBeInTheDocument();
+    expect(insercoes("pessoas")[0].payload).toMatchObject({ cargo_id: "cargo-vendedor", data_admissao: "2026-10-01" });
+    expect(insercoes("pessoas_vinculos")).toHaveLength(1);
+    expect(rpcsChamadas()).toContain("rpc_hr_retribuicao_definir_pessoal");
   });
 });

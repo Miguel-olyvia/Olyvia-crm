@@ -1,7 +1,8 @@
 // A aba "Contrato e local" do painel "Nova pessoa": centro de trabalho (e a filial), responsável direto, cargo, e o contrato
 // (tipo, regime, modalidade, datas, período experimental). As horas e o horário estão em `ContratoHoras`. Há UMA só data de
-// contratação: o início do contrato (a antiguidade, opcional, também é do contrato); a da pessoa deriva dos contratos. A data
-// de contratação, o cargo e o tipo de contrato são do RH e obrigatórios; centro e responsável são opcionais.
+// contratação: o início do contrato (a antiguidade, opcional, também é do contrato); a da pessoa deriva dos contratos. O cargo e
+// o contrato são OPCIONAIS na admissão (a pessoa pode não passar): se algum campo do contrato for escrito, o tipo de contrato e
+// a data de início passam a obrigatórios juntos. Centro e responsável também são opcionais.
 import { useMemo } from "react";
 import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { useCargos } from "@/components/rh-exemplo/hooks/useCargos";
@@ -55,7 +56,8 @@ function CargoEAdmissao() {
       <div className={GRELHA}>
         <CampoS
           g="laborais" k="cargo_id" id="hr-novo-cargo" codigo="cargo" rotulo={t("hr.laborais.cargoCatalogo")}
-          opcoes={cargos.filter((c) => c.activo).map((c) => ({ value: c.id, label: c.nome }))} ajuda={t("rhNova.h.cargo")}
+          opcoes={cargos.filter((c) => c.activo).map((c) => ({ value: c.id, label: c.nome }))} vazio={t("rhNova.semCargo")}
+          ajuda={t("rhNova.h.cargoOpcional")}
         />
         <CampoT g="geral" k="numero_interno" id="hr-novo-numero-interno" rotulo={t("hr.laborais.numeroInterno")} />
         <CampoT g="extra" k="categoria_profissional" id="hr-novo-categoria-profissional" rotulo={t("hr.contrato.categoriaProfissional")} ajuda={t("hr.contrato.ajudaCategoriaProfissional")} />
@@ -63,6 +65,8 @@ function CargoEAdmissao() {
           g="extra" k="categoria_funcao" id="hr-novo-categoria-funcao" rotulo={t("hr.contrato.categoriaFuncao")}
           opcoes={opcoes(t, "hr.categoriaFuncao", CATEGORIAS_FUNCAO)} vazio={t("rhNova.semIndicacao")} ajuda={t("hr.contrato.ajudaCategoriaFuncao")}
         />
+        {/* As duas categorias são do contrato, mas vivem neste bloco: diz-se aqui o que escrevê-las obriga. */}
+        <p className="text-xs text-muted-foreground sm:col-span-2">{t("rhNova.h.camposDoContrato")}</p>
       </div>
     </SeccaoNova>
   );
@@ -124,6 +128,7 @@ function Contrato() {
   const comTermo = valores.contrato.tipo_contrato !== "" && valores.contrato.tipo_contrato !== "sem_termo";
   return (
     <SeccaoNova titulo={t("rhNova.sec.contrato")}>
+      <p className="text-xs text-muted-foreground">{t("rhNova.h.contratoOpcional")}</p>
       <div className={GRELHA}>
         <CampoS g="contrato" k="tipo_contrato" id="hr-novo-tipo-contrato" codigo="tipo_contrato" rotulo={t("hr.contrato.tipoContrato")} opcoes={opcoes(t, "hr.tipoContrato", TIPOS_CONTRATO)} />
         <CampoS g="contrato" k="regime_contratual" id="hr-novo-regime-contratual" rotulo={t("hr.contrato.regimeContratual")} opcoes={opcoes(t, "hr.regimeContratual", REGIMES_CONTRATUAIS)} ajuda={t("hr.contrato.ajudaRegimeContratual")} />

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CalendarClock, Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { visitas as numerosDe, type Negocio } from "@/emylia/motor";
+import { responsavelPelaVisita, visitas as numerosDe, type Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { Button } from "@/components/ui/button";
@@ -135,12 +135,17 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     esquecerMarcacao(d.id);
     setAMarcar(false); setARemarcar(null); setAviso(null);
     const lista = [...visitasCrm.filter((v) => v.id !== g.visita.id), ...(g.visita.id ? [g.visita] : [])];
-    refletir(lista, g.visita.id ? { visitaId: g.visita.id } : null, () => passarAVisita(g), g.presentes);
+    // 11/11: a base passou a lead e o negócio para o comercial da visita; a linha do histórico entra na mesma gravação do espelho
+    refletir(lista, g.visita.id ? { visitaId: g.visita.id } : null, () => {
+      const n = passarAVisita(g);
+      if (g.responsavel) responsavelPelaVisita(d, g.responsavel);
+      return n;
+    }, g.presentes);
     if (modo === "primeira" && d.fase < 2) setAviso("A visita ficou marcada no CRM, mas o negócio ainda não passou à fase da visita: faltam respostas do Contacto (veja o aviso). Complete-as e use «Passar à visita».");
   };
   const passarComAMarcada = (v: VisitaDoNegocio): void => {
     setAviso(null);
-    refletir(visitasCrm, { visitaId: v.id }, () => passarAVisita({ visitaId: v.id, visita: v, presentes: "", remarcada: false }));
+    refletir(visitasCrm, { visitaId: v.id }, () => passarAVisita({ visitaId: v.id, visita: v, presentes: "", remarcada: false, responsavel: null }));
     if (d.fase < 2) setAviso("O negócio ainda não passou à fase da visita: faltam respostas do Contacto (veja o aviso).");
   };
   const cancelar = (v: VisitaDoNegocio): void => {

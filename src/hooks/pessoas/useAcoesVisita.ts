@@ -15,9 +15,19 @@ import { paraAlterarVisita, paraGuardarVisita, type EntradaVisita, type ErroEntr
 
 const CHAVE_VISITA_PARCIAL = "pessoasPagina.real.ficha.partialVisit";
 
+/** 11/11 (20270114310000): a visita de um negócio passou a lead e o negócio para o comercial dela. */
+export interface ResponsavelDaVisita {
+  /** O `anew_users.id` do novo responsável. */
+  id: string;
+  nome: string;
+  /** A lead mudou de responsável (um cliente fica com o seu). */
+  lead: boolean;
+}
+
 export interface ResultadoMarcar {
   visitaId: string | null;
   mudou: boolean;
+  responsavel: ResponsavelDaVisita | null;
 }
 
 export interface ResultadoAlterar {
@@ -31,6 +41,7 @@ export interface ResultadoAlterar {
   outrasVisitas: string[];
   /** Mudar as horas de uma visita confirmada deixou-a por confirmar. */
   desconfirmada: boolean;
+  responsavel: ResponsavelDaVisita | null;
 }
 
 export interface ResultadoCancelar {
@@ -71,6 +82,14 @@ const generico = (): ErroNeg => new ErroNeg(null, null, CHAVE_ERRO_GENERICO);
 const entradaInvalida = (erro: ErroEntradaVisita | "visitaNaoCarregada"): ErroNeg => new ErroNeg(null, null, CHAVES_ENTRADA_VISITA[erro]);
 
 const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
+/** O `responsavel` que neg_guardar_visita / neg_alterar_visita devolvem (null: não mudou). */
+export const responsavelDaResposta = (v: unknown): ResponsavelDaVisita | null => {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Record<string, unknown>;
+  const id = texto(r.user_id);
+  if (!id) return null;
+  return { id, nome: texto(r.nome) || "o comercial", lead: r.lead_mudou === true };
+};
 const listaDeTextos = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 export function useAcoesVisita(pessoaId: string, ficha: FichaDb | null): AcoesVisita {
@@ -132,14 +151,14 @@ function criarAcoes(c: Contexto): AcoesVisita {
     const pedido = paraGuardarVisita(org(), c.pessoaId, entrada);
     if (!pedido.ok) throw entradaInvalida(pedido.erro);
     return partilhar(`marcar:${JSON.stringify(pedido.params)}`, async () => {
-      let resposta: { visita_id?: unknown; mudou?: unknown } | null;
+      let resposta: { visita_id?: unknown; mudou?: unknown; responsavel?: unknown } | null;
       try {
         resposta = await chamarNeg("neg_guardar_visita", pedido.params);
       } catch (erro) {
         throw falha(erro, "marcar");
       }
       invalidar();
-      return { visitaId: texto(resposta?.visita_id), mudou: resposta?.mudou === true };
+      return { visitaId: texto(resposta?.visita_id), mudou: resposta?.mudou === true, responsavel: responsavelDaResposta(resposta?.responsavel) };
     });
   }
 
@@ -163,6 +182,7 @@ function criarAcoes(c: Contexto): AcoesVisita {
         novoDono: texto(r?.novo_dono),
         outrasVisitas: listaDeTextos(r?.outras_visitas),
         desconfirmada: r?.desconfirmada === true,
+        responsavel: responsavelDaResposta(r?.responsavel),
       };
     });
   }

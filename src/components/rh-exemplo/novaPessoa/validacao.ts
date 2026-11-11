@@ -1,10 +1,12 @@
 // A validação do painel "Nova pessoa": o que o assistente real já valida (nomes, NIF e NISS com dígito de controlo e basta um
 // dos dois, IBAN, BIC, números do contrato, obrigatórios pela configuração da admissão) mais as regras de interface que o
 // painel acrescenta (datas coerentes, telefones, código postal, campos só do RH). Vazio nunca é erro, salvo nos campos
-// obrigatórios; malformado é sempre erro. Funções puras.
+// obrigatórios; malformado é sempre erro. O cargo e o contrato são opcionais na admissão (a pessoa pode não passar): só se
+// exigem o tipo de contrato e a data de início, juntos, se algum campo do contrato for escrito. Funções puras.
 import type { ConfiguracaoCampo } from "@/components/rh-exemplo/lib/admissaoObrigatorios";
 import { problemasDoRascunho } from "@/components/rh-exemplo/lib/novaPessoa";
 import { codigosObrigatoriosDoFormulario, type CodigosIndisponiveis } from "@/components/rh-exemplo/lib/novaPessoaAdmissao";
+import { contratoPreenchido, retribuicaoADefinir } from "@/components/rh-exemplo/lib/novaPessoaContrato";
 import { numeroDe } from "@/components/rh-exemplo/lib/numeros";
 import { ABAS_NOVA, abaDoCampo, CAMPO_DO_CODIGO, ordemDoCampo, seccaoDoCampo, type AbaNova } from "./ids";
 import { textoOuNull, type ValoresNovaPessoa } from "./tiposNova";
@@ -37,11 +39,11 @@ const TELEFONE = /^\+?\d{9,15}$/;
 const CODIGO_POSTAL = /^\d{4}-\d{3}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Os campos que são sempre obrigatórios: os do RH (fixos) e o nome. */
-export const OBRIGATORIOS_FIXOS: ReadonlySet<string> = new Set([
-  "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-data-inicio", "hr-novo-tipo-contrato",
-  "hr-novo-duodecimos",
-]);
+/**
+ * Os campos que são sempre obrigatórios: só o nome. Cargo, tipo de contrato, data de início e duodécimos NÃO: a admissão não
+ * obriga a cargo nem a contrato (ver `idsObrigatorios` para o que se exige quando o contrato é preenchido).
+ */
+export const OBRIGATORIOS_FIXOS: ReadonlySet<string> = new Set(["hr-novo-primeiro-nome", "hr-novo-apelido"]);
 
 /** Uma data ISO que existe de verdade (31 de fevereiro não passa). */
 export function dataIsoValida(valor: string): boolean {
@@ -112,13 +114,14 @@ function problemasDeSaudeESindicato(v: ValoresNovaPessoa): ProblemaNova[] {
 }
 
 /**
- * As datas do contrato que dão as da pessoa: a de contratação (o início, obrigatória: o contrato é obrigatório na criação) e
- * a antiguidade (opcional, nunca depois do início). A contratação, a antiguidade e a saída da pessoa derivam dos contratos.
+ * As datas do contrato que dão as da pessoa: a de contratação (o início, obrigatória só se o contrato for preenchido: o contrato
+ * é opcional na admissão) e a antiguidade (opcional, nunca depois do início). A contratação, a antiguidade e a saída da pessoa
+ * derivam dos contratos.
  */
 function problemasDasDatasDoContrato(v: ValoresNovaPessoa, hoje: string): ProblemaNova[] {
   const lista: ProblemaNova[] = [];
   const inicio = v.contrato.data_inicio.trim();
-  if (inicio === "") acrescentar(lista, "hr-novo-data-inicio", OBRIGATORIO);
+  if (inicio === "" && contratoPreenchido(v)) acrescentar(lista, "hr-novo-data-inicio", OBRIGATORIO);
   else lista.push(...problemaDeData("hr-novo-data-inicio", inicio, hoje, false));
   const nasc = v.pessoais.data_nascimento.trim();
   if (inicio !== "" && dataIsoValida(inicio) && dataIsoValida(nasc) && inicio < nasc) {
@@ -133,11 +136,15 @@ function problemasDasDatasDoContrato(v: ValoresNovaPessoa, hoje: string): Proble
   return lista;
 }
 
-/** Os campos só do RH: data de contratação, tipo de contrato, subsídio e duodécimos. Nunca vão para o convite. */
+/**
+ * Os campos só do RH: data de contratação, tipo de contrato e duodécimos. Nunca vão para o convite. Todos opcionais: o tipo e a
+ * data de início exigem-se juntos se algum campo do contrato for escrito; os duodécimos só se houver cargo E contrato (só então
+ * há retribuição a definir).
+ */
 function problemasDoRh(v: ValoresNovaPessoa, hoje: string): ProblemaNova[] {
   const lista: ProblemaNova[] = [...problemasDasDatasDoContrato(v, hoje)];
-  if (v.contrato.tipo_contrato === "") acrescentar(lista, "hr-novo-tipo-contrato", OBRIGATORIO);
-  if (v.contrato.duodecimos_pct === "") acrescentar(lista, "hr-novo-duodecimos", OBRIGATORIO);
+  if (v.contrato.tipo_contrato === "" && contratoPreenchido(v)) acrescentar(lista, "hr-novo-tipo-contrato", OBRIGATORIO);
+  if (v.contrato.duodecimos_pct === "" && retribuicaoADefinir(v)) acrescentar(lista, "hr-novo-duodecimos", OBRIGATORIO);
   if (v.contrato.tipo_contrato === "termo_certo" && v.contrato.data_fim.trim() === "") {
     acrescentar(lista, "hr-novo-data-fim", OBRIGATORIO);
   }
@@ -221,8 +228,9 @@ export function primeiroProblema(problemas: readonly ProblemaNova[]): ProblemaNo
 }
 
 /**
- * Os ids dos campos que se exigem agora para a pessoa: os fixos mais os que a configuração da admissão põe na posição
- * "no convite" (só quando o RH preenche; a enviar convite, a pessoa é que os preenche), menos as secções adiadas.
+ * Os ids dos campos que se exigem agora para a pessoa: os nomes, os que a configuração da admissão põe na posição "no convite"
+ * (só quando o RH preenche; a enviar convite, a pessoa é que os preenche), menos as secções adiadas; e, se algum campo do
+ * contrato foi escrito, o tipo de contrato e a data de início (os duodécimos só com cargo e contrato).
  */
 export function idsObrigatorios(v: ValoresNovaPessoa, o: OpcoesValidacao): ReadonlySet<string> {
   const ids = new Set<string>(OBRIGATORIOS_FIXOS);
@@ -235,6 +243,11 @@ export function idsObrigatorios(v: ValoresNovaPessoa, o: OpcoesValidacao): Reado
     if (o.papelDisponivel !== false) ids.add("hr-novo-papel");
     ids.add("hr-novo-email-acesso");
   }
+  if (contratoPreenchido(v)) {
+    ids.add("hr-novo-tipo-contrato");
+    ids.add("hr-novo-data-inicio");
+  }
+  if (retribuicaoADefinir(v)) ids.add("hr-novo-duodecimos");
   if (v.contrato.tipo_contrato === "termo_certo") ids.add("hr-novo-data-fim");
   return ids;
 }
