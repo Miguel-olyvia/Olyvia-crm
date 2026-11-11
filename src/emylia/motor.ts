@@ -1624,8 +1624,21 @@ export function sugerirDaLead(d: Negocio): boolean {
   return JSON.stringify(d.f) !== antes;
 }
 
+/** 11/11 (Rúben: «na proposta o início previsto já deve vir preenchido com a data definida antes»): o início do orçamento (o dia escolhido
+ *  no plano da visita, f.plano_inicio, que passa ao orçamento ao fechar a visita) vem no «Início previsto», como sugestão; acompanha-o
+ *  enquanto ninguém o mexer. Sem data escolhida antes, fica por escolher. */
+export function sugerirInicio(d: Negocio): boolean {
+  if (!d.orc || d.orc.enviada || d.fase !== 3 || (d.f.inicio_prev && !d.sug?.inicio_prev)) return false;
+  const hoje = isoDia(new Date());
+  const ini = d.orc.inicioObra ?? (d.f.plano_inicio && d.f.plano_inicio >= hoje ? d.f.plano_inicio : undefined);
+  if (!ini || d.f.inicio_prev === ini) return false;
+  d.f.inicio_prev = ini;
+  (d.sug ??= {}).inicio_prev = true;
+  return true;
+}
 /** O prazo de execução da proposta vem do prazo previsto (Gantt) e acompanha-o enquanto for sugestão (ninguém o mexeu). */
 export function sugerirPrazo(d: Negocio, S: Estado) {
+  sugerirInicio(d);
   if (!d.orc || d.orc.enviada || d.fase < 3 || (d.f.prazo_exec && !d.sug?.prazo_exec)) return;
   const T = tarefasPrevistas(d, S);
   if (!T.length) return;
@@ -2243,7 +2256,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (onde === "visita") {
         d.visita.fechada = false; d.fase = 2; d.valida = null;
         avisar({ msg: `A preparar a versão ${n + 1}`, sub: "De volta à visita. Ao fechar o levantamento, o orçamento refaz-se", kind: "" });
-      } else avisar({ msg: `A preparar a versão ${n + 1}`, sub: `Mude o que o cliente pediu e envie. A v${n} fica guardada`, kind: "" });
+      } else if (!motivos.includes(MOTIVO_MEDIDAS)) avisar({ msg: `A preparar a versão ${n + 1}`, sub: `Mude o que o cliente pediu e envie. A v${n} fica guardada`, kind: "" });
     },
     /** 10/11 (Rúben: «ajustes ao plano e às medidas: a proposta tem de ser recriada com um novo orçamento»): as medidas retificadas passam
      *  a ser as do orçamento, a proposta aceite fica guardada como versão e o orçamento refaz-se (os preços à mão ficam). O plano aprovado e
@@ -2465,7 +2478,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!o) return;
       if (iso) o.inicioObra = iso; else delete o.inicioObra;
       // 26/10: o início previsto da proposta acompanha o do plano (antes de a proposta seguir)
-      if (iso && !o.enviada) d.f.inicio_prev = iso;
+      if (iso && !o.enviada) { d.f.inicio_prev = iso; if (d.sug) delete d.sug.inicio_prev; }
     },
     usarPrazoPrevisto(id: number) {
       if (!exigePerm("orcamento.editar")) return;

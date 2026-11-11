@@ -19,7 +19,20 @@ function FalhaAoCarregar({ aoFalhar }: PropsDoVisor) {
 // 2/11 (reunião: "está a acontecer outra vez aquele erro"): o lazy guardava a falha para sempre e «Tentar outra vez» nunca voltava a
 // pedir o gerador. Agora cada tentativa pede-o de novo. Depois de uma versão nova do site, o pacote antigo deixa de existir: aí só
 // recarregar a página resolve, e o aviso diz isso.
-const visorDaTentativa = () => lazy(() => import("./OrcamentoPdfVisor").catch(() => ({ default: FalhaAoCarregar })));
+// 11/11 (Rúben: «temos de resolver este erro»): o gerador pede-se logo que a página dos negócios abre (sem atrapalhar: quando o browser
+// está parado), e fica guardado. Assim, quando sai uma versão nova da Olyvia com a página aberta, o gerador já está no browser e o PDF
+// abre na mesma (antes só se pedia ao abrir o PDF, e o ficheiro antigo já não existia). Uma falha (sem rede) volta a pedir na tentativa seguinte.
+type ModuloVisor = typeof import("./OrcamentoPdfVisor");
+let visorPedido: Promise<ModuloVisor> | null = null;
+export function preCarregarGeradorPdf(): Promise<ModuloVisor> {
+  visorPedido ??= import("./OrcamentoPdfVisor").catch((e) => { visorPedido = null; throw e; });
+  return visorPedido;
+}
+if (typeof window !== "undefined" && import.meta.env.MODE !== "test") {
+  const quandoParado = (window as Window & { requestIdleCallback?: (f: () => void) => number }).requestIdleCallback ?? ((f: () => void) => window.setTimeout(f, 2500));
+  quandoParado(() => { void preCarregarGeradorPdf().catch(() => {}); });
+}
+const visorDaTentativa = () => lazy(() => preCarregarGeradorPdf().catch(() => ({ default: FalhaAoCarregar })));
 
 interface Props { d: Negocio; S: Ctx["S"]; tpl: TemplateDeAspeto | null; orgId: string | null; nome: string; logoOrg: string | null }
 

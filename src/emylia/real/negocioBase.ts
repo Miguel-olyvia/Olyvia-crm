@@ -4,7 +4,7 @@
 // 28/10 (20261231999000): a obra de cada negócio lê-se e grava-se ao lado (obra_ler_negocios, obra_guardar_negocio; obraReal.ts). Numa base
 // sem essas funções, a obra fica como antes (só no ecrã) e o resto lê e grava na mesma.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { acertarFaseDasMedidas, type Negocio } from "../motor";
+import { acertarFaseDasMedidas, sugerirInicio, type Negocio } from "../motor";
 import { deLinhas, type LinhasNegocio } from "./negocioReal";
 import { obraDaBase, type ObraBase } from "./obraReal";
 import { erpLembrado } from "../erpEticadata";
@@ -44,6 +44,8 @@ export function negocioDoLido(n: NegocioLido): Negocio {
 export function negocioParaOEcra(n: NegocioLido): Negocio {
   const d = negocioDoLido(n);
   acertarFaseDasMedidas(d);
+  // 11/11: a proposta por enviar já com o início previsto (o dia escolhido antes), como sugestão
+  sugerirInicio(d);
   return d;
 }
 
