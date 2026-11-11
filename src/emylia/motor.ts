@@ -1432,9 +1432,15 @@ export function acertarFaseDasMedidas(d: Negocio): boolean {
   d.fase = 3; d.valida = null;
   return true;
 }
+/** 11/11: um negócio na fase Negócio sem orçamento (ex.: as versões de `quotes` apagadas na base). Não rebenta a lista
+ *  nem o Hoje: o próximo passo é este aviso e a fase não mostra passos de orçamento. */
+export const SEM_ORCAMENTO = "Este negócio está na fase Negócio mas não tem orçamento. Peça a quem o gere para o refazer.";
+// só a fase 3: na Obra (5) o motor pode estar sem orçamento com a EC emitida no servidor (protegerObra.test.ts) e pede o plano
+export const semOrcamento = (d: Negocio): boolean => d.fase === 3 && !d.orc && !d.anulado && !d.perdido;
 export function proximo(d: Negocio, S: Estado): Proximo {
   if (d.anulado) return { t: d.orc?.vendaDireta ? "Venda anulada" : "Contrato anulado", sub: `${d.anulado.motivo} · ${d.anulado.q}`, who: null };
   if (d.perdido) return { t: "Negócio perdido", who: null };
+  if (semOrcamento(d)) return { t: SEM_ORCAMENTO, who: null, wait: true };
   const o = d.orc;
   switch (d.fase) {
     case 0: return { t: "Registar a chamada", sub: "Ligar ao cliente e anotar o resultado.", btn: "Registar chamada", act: "contactar", who: "comercial" };

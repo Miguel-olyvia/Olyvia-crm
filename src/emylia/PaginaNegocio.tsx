@@ -9,6 +9,7 @@ import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
   alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
+  SEM_ORCAMENTO, semOrcamento,
 } from "./motor";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
@@ -301,6 +302,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ),
     };
   };
+  // 11/11: na fase Negócio ou mais à frente sem orçamento (as versões apagadas na base), só o aviso: nenhum passo de orçamento
+  if (fase === d.fase && semOrcamento(d)) return [{ id: "sem-orcamento", titulo: "Sem orçamento", icone: FileText, feito: false, semAvancar: true, resumo: [],
+    corpo: <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{SEM_ORCAMENTO}</p> }];
   let passos: Passo[] = [];
   if (fase === 0) {
     passos = [
