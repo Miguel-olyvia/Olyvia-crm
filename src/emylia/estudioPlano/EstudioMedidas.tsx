@@ -144,7 +144,7 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
         <div className="border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground" aria-live="polite">{mudadas
-              ? <>{mudadas} {mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}{Math.abs(dif) > 0.004 && <> · <span className="font-semibold text-foreground">{dif > 0 ? "+" : "−"}<Contagem valor={Math.abs(dif)} fmt={eur} /> €</span><span className="sr-only">{eur(Math.abs(dif))} €</span> no orçamento</>}. Antes do contrato, a proposta refaz-se com o orçamento novo.</>
+              ? <>{mudadas} {mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}{Math.abs(dif) > 0.004 && <> · <span className="font-semibold text-foreground">{dif > 0 ? "+" : "−"}<Contagem valor={Math.abs(dif)} fmt={eur} /> €</span><span className="sr-only">{eur(Math.abs(dif))} €</span> no orçamento</>}. Antes do contrato, a proposta refaz-se com o orçamento novo.{d.obra.plano?.estado === "aprovado" && " O plano já aprovado volta a por aprovar."}</>
               : "Tudo como na visita."}</p>
             <Button type="button" size="lg" className="min-h-12 shrink-0" disabled={feito || !podeRetificar(d)} onClick={aceitar}><Check className="mr-1.5 h-5 w-5" aria-hidden="true" />Aceitar as medidas</Button>
           </div>
@@ -157,7 +157,7 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
                 className="flex flex-col items-center gap-3 rounded-3xl bg-card px-10 py-8 shadow-2xl">
                 <span className="relative grid h-16 w-16 place-items-center rounded-full bg-success/15 text-success"><Brilho ativo /><VistoDesenho on grande className="h-9 w-9" /></span>
                 <p className="text-lg font-semibold">Medidas aceites</p>
-                <p className="text-sm text-muted-foreground">As Operações já podem aprovar o plano.</p>
+                <p className="text-sm text-muted-foreground">{d.obra.plano && ["aprovado", "em curso"].includes(d.obra.plano.estado) ? "Com o plano aprovado, segue o contrato." : "Com o plano aprovado pelas Operações, segue o contrato."}</p>
               </motion.div>
             </motion.div>
           )}

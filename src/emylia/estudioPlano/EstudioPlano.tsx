@@ -100,10 +100,11 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
   const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
   const linhas: (string | null)[] = [...pessoas, ...(p.tasks.some((t) => !t.tec) ? [null] : [])];
   const medidasOk = retificacaoAceite(d);
-  // 10/11 (Rúben: «medidas antes da fatura»): o plano aprova-se antes do pagamento (com as medidas aceites)
+  // 10/11 (Rúben: «medidas antes da fatura»): o plano aprova-se antes do pagamento. 11/11 (Rúben: «os ajustes às medidas e a validação do
+  // plano devem ser em simultâneo, não tem de estar bloqueado»): já não espera pelas medidas; se elas mudarem, o plano volta a por aprovar
   const planeia = podeNeg(S.role, "obra.planear");
-  const podeAprovar = p.estado === "por aprovar" && planeia && medidasOk && !alertas.some((a) => a.m === "de férias");
-  const porque = p.estado !== "por aprovar" ? "" : !planeia ? "Quem aprova o plano são as Operações." : !medidasOk ? "Falta o supervisor aceitar as medidas." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
+  const podeAprovar = p.estado === "por aprovar" && planeia && !alertas.some((a) => a.m === "de férias");
+  const porque = p.estado !== "por aprovar" ? "" : !planeia ? "Quem aprova o plano são as Operações." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
   const fimData = dias[Math.max(0, fim - 1)];
   const fazer = (fn: () => void) => run(fn);
   const retrato = (): Retrato => p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
@@ -268,7 +269,7 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
                 onClick={() => setPainel(painel?.k === "info" ? null : { k: "info" })}><FolderOpen className="mr-1.5 h-4 w-4" aria-hidden="true" />A obra</Button>
               {/* 10/11: o plano aprova-se antes do pagamento; «Pago» só quando já está */}
               {d.fin.pago && <Estado ok t="Pago" />}
-              {!medidasOk && <Estado ok={false} t="Medidas por aceitar" icone={<Ruler className="h-3.5 w-3.5" aria-hidden="true" />} />}
+              {!medidasOk && <span title="O supervisor confirma as medidas ao mesmo tempo; se mudarem, o plano volta a por aprovar"><Estado ok={false} t="Medidas em curso" icone={<Ruler className="h-3.5 w-3.5" aria-hidden="true" />} /></span>}
               {/* os alertas levam à lista (com a correção) */}
               <button type="button" onClick={() => secAlertas.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" })}
                 className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-transform hover:-translate-y-px", alertas.length ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-success/10 text-success")}>

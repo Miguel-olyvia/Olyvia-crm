@@ -39,8 +39,8 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <div className="min-w-0 text-[15px]">
           <p className="font-semibold">{aceite ? `Medidas aceites a ${aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}` : "O supervisor confirma as medidas no local"}</p>
           <p className="text-muted-foreground">{aceite
-            ? "As Operações já podem aprovar o plano; depois segue o contrato."
-            : podeRetificar(d) ? "Compare com as da visita e corrija o que for preciso. Ao aceitar, as Operações aprovam o plano e segue o contrato." : "Depois de o cliente aceitar a proposta."}</p>
+            ? (["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "") ? "Com o plano aprovado, segue o contrato." : "Com o plano aprovado pelas Operações, segue o contrato.")
+            : podeRetificar(d) ? "Compare com as da visita e corrija o que for preciso. As Operações aprovam o plano ao mesmo tempo; se as medidas mudarem um plano já aprovado, ele volta a por aprovar. Com os dois, segue o contrato." : "Depois de o cliente aceitar a proposta."}</p>
         </div>
       </div>
 

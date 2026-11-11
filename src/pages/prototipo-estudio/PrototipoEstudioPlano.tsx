@@ -59,7 +59,7 @@ export default function PrototipoEstudioPlano() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Protótipo · dados de exemplo</p>
           <h1 className="text-2xl font-semibold tracking-tight">Os estúdios da Obra · {d.nome}</h1>
-          <p className="text-[15px] text-muted-foreground">Pago, com o plano por aprovar. Primeiro o supervisor aceita as medidas; depois as Operações validam o plano.</p>
+          <p className="text-[15px] text-muted-foreground">Pago, com o plano por aprovar. O supervisor aceita as medidas e as Operações validam o plano, ao mesmo tempo.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Button type="button" size="lg" className="min-h-14" onClick={() => setAberto("medidas")}><Ruler className="mr-2 h-5 w-5" aria-hidden="true" />Estúdio das medidas</Button>

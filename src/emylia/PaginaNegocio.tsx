@@ -478,13 +478,14 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : "o supervisor confirma no local"],
       corpo: <RetificacaoMedidas ctx={ctx} d={d} /> });
     const passoPlanoAntes = (): Passo => ({ id: "plano", titulo: "Plano da obra", icone: CalendarClock, feito: planoAprovadoDe(d), semAvancar: true,
-      resumo: [planoAprovadoDe(d) ? "aprovado" : !d.obra.plano ? "por gerar" : retificacaoAceite(d) ? "por aprovar" : "depois das medidas"],
+      resumo: [planoAprovadoDe(d) ? "aprovado" : !d.obra.plano ? "por gerar" : "por aprovar"],
       corpo: (
         <div className="space-y-6">
           <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">
-            {planoAprovadoDe(d) ? "Plano aprovado. Segue o contrato." : retificacaoAceite(d) ? "As Operações ajustam e aprovam o plano no Estúdio. Aprovado, segue o contrato." : "Primeiro, o supervisor aceita as medidas. Depois as Operações aprovam o plano e segue o contrato."}
+            {/* 11/11 (Rúben: «as medidas e o plano em simultâneo, não tem de estar bloqueado») */}
+            {planoAprovadoDe(d) ? (retificacaoAceite(d) ? "Plano aprovado. Segue o contrato." : "Plano aprovado. Falta o supervisor aceitar as medidas; se mudarem, o plano volta a por aprovar.") : retificacaoAceite(d) ? "As Operações ajustam e aprovam o plano no Estúdio. Aprovado, segue o contrato." : "As Operações ajustam e aprovam o plano no Estúdio, ao mesmo tempo que o supervisor confirma as medidas. Com os dois, segue o contrato."}
           </p>
-          {!d.obra.plano && retificacaoAceite(d) && <Button type="button" className="min-h-11" onClick={() => ctx.run(() => ctx.A.gerarPlano(d.id))}><CalendarClock className="mr-1.5 h-4 w-4" aria-hidden="true" />Gerar o plano</Button>}
+          {!d.obra.plano && <Button type="button" className="min-h-11" onClick={() => ctx.run(() => ctx.A.gerarPlano(d.id))}><CalendarClock className="mr-1.5 h-4 w-4" aria-hidden="true" />Gerar o plano</Button>}
           <AbrirEstudioPlano ctx={ctx} d={d} />
         </div>
       ) });
@@ -520,15 +521,15 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 11/11: feito só com o contrato assinado (antes, os campos preenchidos davam-no por feito); a ação está aqui dentro
       ...(o.vendaDireta || (!o.enviada && !o.contrato) ? [] : [simples ? { ...g(PROPOSTA[1], FileSignature, !!o.contrato), conta: undefined, feito: o.contrato === "assinado", semAvancar: true,
         bloqueado: !o.aceite && !o.contrato,
-        resumo: [o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : !o.aceite ? "depois de o cliente aceitar" : !planoAprovadoDe(d) ? "depois do plano" : mudancasDeValor(d).length ? "proposta nova primeiro" : "pronto a gerar"],
+        resumo: [o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : !o.aceite ? "depois de o cliente aceitar" : !planoAprovadoDe(d) || !retificacaoAceite(d) ? "depois das medidas e do plano" : mudancasDeValor(d).length ? "proposta nova primeiro" : "pronto a gerar"],
         corpo: (
         <div className="space-y-10">
-          {!o.contrato && !planoAprovadoDe(d) && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">O contrato gera-se depois de as medidas serem aceites e de as Operações aprovarem o plano.</p>}
+          {!o.contrato && (!planoAprovadoDe(d) || !retificacaoAceite(d)) && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">O contrato gera-se depois de as medidas serem aceites e de as Operações aprovarem o plano.</p>}
           {/* 10/11: com o valor mudado, só o que mudou e o botão; o contrato vem depois da proposta nova aceite */}
           {!o.contrato && planoAprovadoDe(d) && mudancasDeValor(d).length > 0 ? <RefazerComMudancas ctx={ctx} d={d} /> : <>
             <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
             {/* 11/11: gerar (ou esperar pela assinatura) aqui mesmo, antes do texto do contrato */}
-            {o.aceite && planoAprovadoDe(d) && o.contrato !== "assinado" && (
+            {o.aceite && planoAprovadoDe(d) && retificacaoAceite(d) && o.contrato !== "assinado" && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-4">
                 <p className="text-[15px]">{o.contrato === "enviado" ? "O contrato está no portal do cliente, por assinar. Assinado, segue a fatura." : "Tudo pronto: o contrato vai ao portal do cliente, por assinar."}</p>
                 <BotaoFase ctx={ctx} d={d} tamanho="default" />

@@ -29,12 +29,42 @@ describe("medidas antes da fatura (10/11)", () => {
     expect(semEncomendaCliente(d)).toMatch(/medidas aceites/);
     expect(faltaParaArrancar(d)[0]).toBe("retificar as medidas");
   });
-  it("o plano não se aprova sem as medidas", () => {
+  // 11/11 (Rúben: «os ajustes às medidas e a validação do plano de obra devem ser em simultâneo, não tem de estar bloqueado»)
+  it("o plano aprova-se sem esperar pelas medidas; o contrato espera pelas duas", () => {
     const { S, d, A } = aceitePorMedir();
     S.role = "operacoes";
+    A.resolverConflitos(d.id);
     A.aprovarPlano(d.id);
-    expect(d.obra.plano?.estado).toBe("por aprovar");
+    expect(d.obra.plano?.estado).toBe("aprovado");
     expect(d.fase).toBe(3);
+    expect(proximo(d, S).act).toBe("abrirRetificacao");
+    S.role = "comercial";
+    A.enviarContrato(d.id);
+    expect(d.orc!.contrato).toBeFalsy();
+  });
+  it("no Hoje das Operações, as medidas e o plano aparecem ao mesmo tempo", () => {
+    const { S, d } = aceitePorMedir();
+    const acts = minhas(S, "operacoes").filter((x) => x.d.id === d.id).map((x) => x.p.act);
+    expect(acts).toEqual(expect.arrayContaining(["abrirRetificacao", "aprovarPlano"]));
+  });
+  it("medidas mudadas com o plano já aprovado: o plano volta a por aprovar e diz porquê", () => {
+    const { S, d, A } = aceitePorMedir();
+    S.role = "operacoes";
+    A.resolverConflitos(d.id);
+    A.aprovarPlano(d.id);
+    const [k] = camposMedida(LINHAS[d.linha])[0];
+    A.retificarMedidas(d.id, { [k]: medida(d.visita.med, k) + 2 });
+    expect(d.obra.plano?.estado).toBe("por aprovar");
+    expect(d.hist.some((l) => /Plano volta a por aprovar: as medidas mudaram/.test(l.t))).toBe(true);
+  });
+  it("medidas iguais às da visita com o plano já aprovado: o plano fica aprovado e segue o contrato", () => {
+    const { S, d, A } = aceitePorMedir();
+    S.role = "operacoes";
+    A.resolverConflitos(d.id);
+    A.aprovarPlano(d.id);
+    A.retificarMedidas(d.id);
+    expect(d.obra.plano?.estado).toBe("aprovado");
+    expect(proximo(d, S)).toMatchObject({ act: "enviarContrato", who: "comercial" });
   });
   it("com as medidas aceites e o plano aprovado, segue o contrato; assinado, passa ao Financeiro (sem pagamento)", () => {
     const { S, d, A } = aceitePorMedir();

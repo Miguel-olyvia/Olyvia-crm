@@ -428,6 +428,7 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] 
   // 10/11 (Rúben: «medidas antes da fatura»; o contrato depois do plano e antes do pagamento): no Negócio, as medidas, o plano e o contrato
   // vêm antes do pagamento. Os negócios que já estavam no Financeiro (do fluxo anterior) fazem as medidas na Obra, depois do pagamento
   const antesDoPagamento = d.fase <= 3;
+  // 11/11 (Rúben: «medidas e plano em simultâneo»): o plano não espera pelas medidas; o contrato pede os dois
   if (antesDoPagamento && !d.obra.ec && !d.orc?.vendaDireta && !retificacaoAceite(d)) F.push("retificar as medidas");
   else if (antesDoPagamento && !d.obra.ec && !d.orc?.vendaDireta && planoAprovadoDe(d) && !contratoAssinado(d)) F.push("assinar o contrato");
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "registar a fatura do ERP e receber o pagamento");
@@ -533,8 +534,6 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
     : { id: "ret", trilho: "plano", estado: "agora", who: "operacoes", t: "Retificar as medidas", sub: "O supervisor confirma as medidas no local.", act: "abrirRetificacao", btn: "Retificar as medidas" });
   L.push(p.estado === "por aprovar" && d.fase === 4 && !d.fin.pago && !retificacaoAceite(d)
     ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DO_PAGAMENTO }
-    : p.estado === "por aprovar" && !retificacaoAceite(d)
-    ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: "Depois de as medidas serem retificadas e aceites." }
     : p.estado === "por aprovar"
     ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
     : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
@@ -543,8 +542,8 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
     const c = d.orc?.contrato;
     L.push(c === "assinado"
       ? { id: "ct", trilho: "plano", estado: "feito", who: "comercial", t: "Contrato assinado", sub: "" }
-      : !planoAprovadoDe(d)
-      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: "Depois de o plano ser aprovado." }
+      : !planoAprovadoDe(d) || !retificacaoAceite(d)
+      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: !retificacaoAceite(d) && !planoAprovadoDe(d) ? "Com as medidas aceites e o plano aprovado." : !retificacaoAceite(d) ? "Falta o supervisor aceitar as medidas." : "Falta as Operações aprovarem o plano." }
       : c === "enviado"
       ? { id: "ct", trilho: "plano", estado: "espera", who: null, t: "À espera da assinatura do contrato", sub: "No portal do cliente." }
       // 11/11: as medidas ou o plano mudaram o valor: o comercial refaz a proposta antes do contrato (o mesmo passo que o negócio mostra)
