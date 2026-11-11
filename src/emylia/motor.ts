@@ -1811,6 +1811,12 @@ export function garantirClientes(S: Estado) {
 let relogioReal = false;
 export function definirRelogioReal(sim: boolean): void { relogioReal = sim; }
 export const comRelogioReal = (): boolean => relogioReal;
+/** 11/11 (teste da Obra): o «hoje» de cada obra em curso passa a ser o do calendário (com o relógio real). Devolve quantas mudaram. */
+export function acertarDiaDasObras(deals: readonly Negocio[], hoje = new Date()): number {
+  let n = 0;
+  for (const d of deals) { const p = d.obra?.plano, r = p && diaReal(p, hoje); if (p && r && r.dia !== p.dia) { p.dia = r.dia; n++; } }
+  return n;
+}
 /** O dia de hoje no plano (0 = 1.º dia útil) e quantos dias úteis passou do fim previsto. Só planos do orçamento, em curso, com início. */
 export function diaReal(p: Plano, hoje = new Date()): { dia: number; atraso: number } | null {
   if (p.estado !== "em curso" || p.origem !== "orcamento" || !p.inicio) return null;

@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acoes, definirPerdaReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
+import { acertarDiaDasObras, acoes, definirPerdaReal, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -107,6 +107,10 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const verCustos = usePodeVerCustos();
   definirVerCustos(verCustos.aLer ? null : verCustos.pode);
   useEffect(() => () => definirVerCustos(undefined), []);
+  // 11/11 (teste da Obra, achado): o relógio real (motor: diaReal) nunca se ligava na app: o «hoje» das obras em curso ficava no dia em que
+  // arrancaram (o Hoje do técnico, os atrasos e o Estúdio da obra erravam) e arrancar não punha o início em hoje. Com a base, liga-se.
+  definirRelogioReal(!!org);
+  useEffect(() => () => definirRelogioReal(false), []);
   // 5/11: as permissões das ações (podeNeg) vêm de fn_cat_pode, a MESMA pergunta do servidor (o perfil, os Papéis no Negócio de todos os
   // papéis da pessoa e o admin do sistema), postas no motor com `simular: false`, como na ficha da pessoa. O «A ver como» continua a
   // escolher a vista e de quem é cada passo, mas já não muda o que se pode fazer. Com as reais postas, definirVerCustos é ignorado.
@@ -212,6 +216,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     soLeitura.current = new Set(lidos.filter((n) => n.docsCrm || catalogoFalhou.current).map((n) => n.linhas.negocio.numero));
     S.deals = lidos.map(negocioParaOEcra);
     lerFases();
+    // 11/11 (teste da Obra): numa organização real o «hoje» de cada obra em curso é o do calendário (antes da fotografia: não grava só por isso)
+    acertarDiaDasObras(S.deals);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;

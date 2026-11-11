@@ -132,3 +132,15 @@ describe("produtos à peça (teste da Obra, negócio 1026)", () => {
     expect(pecaInteira("kg", 7.5)).toBe(7.5);
   });
 });
+
+describe("o relógio real das obras (teste da Obra: «Dia 1 de 6» semanas depois)", () => {
+  it("acertarDiaDasObras põe o «hoje» de cada obra em curso no dia do calendário", async () => {
+    const { acertarDiaDasObras } = await import("../motor");
+    const p = plano([T("A", 0, 3, "a"), T("B", 3, 3, "b")], 0); // começa seg 1/3/2027
+    const d = { obra: { plano: p } } as unknown as import("../motor").Negocio;
+    expect(acertarDiaDasObras([d], new Date(2027, 2, 4))).toBe(1); // qui 4/3: 4.º dia útil
+    expect(p.dia).toBe(3);
+    acertarDiaDasObras([d], new Date(2027, 3, 30)); // muito depois do fim: fica no último dia
+    expect(p.dia).toBe(5);
+  });
+});
