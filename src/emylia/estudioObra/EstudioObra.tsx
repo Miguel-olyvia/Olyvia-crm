@@ -167,7 +167,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
 
               {/* ------------------------------------------------------------ «E se…?»: a pré-visualização, antes de aplicar */}
               <AnimatePresence>
-                {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} />}
+                {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} />}
               </AnimatePresence>
 
               {/* ------------------------------------------------------------ o plano vivo */}
@@ -392,12 +392,20 @@ function Barra({ t, n, v, p, sel, mudou, abrir, reduzir }: { t: Tarefa; n: Taref
 }
 
 /* ================================================================== «E se…?»: a pré-visualização */
-function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra }: {
-  ctx: Ctx; d: Negocio; previa: Previa; setPrevia: (x: Previa | null) => void; R: Replano; fora: ConflitoFora[]; dias: Date[]; abrirOutra: (o: Negocio) => void;
+function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocup }: {
+  ctx: Ctx; d: Negocio; previa: Previa; setPrevia: (x: Previa | null) => void; R: Replano; fora: ConflitoFora[]; dias: Date[]; abrirOutra: (o: Negocio) => void; ocup: Map<string, Set<string>>;
 }) {
   const { A, run } = ctx;
   const reduzir = useReduzir();
-  const [motivo, setMotivo] = useState<string>(previa.k === "atraso" ? "Imprevisto na obra" : previa.adiantar ? "Mais rápido do que previsto" : "Material atrasado");
+  // o motivo por omissão segue o que acontece: espera por um técnico, só adianta, ou um atraso (sem motivo escolhido, fica «Pôr o plano em dia»)
+  const [motivo, setMotivo] = useState<string>(previa.k === "atraso" ? "Imprevisto na obra" : R.mudancas.some((m) => m.espera) ? "Técnico indisponível"
+    : R.mudancas.length && R.mudancas.every((m) => m.tipo === "adiantada") ? "Mais rápido do que previsto" : "");
+  const p0 = d.obra.plano!;
+  // quem do mesmo ofício está livre para a tarefa que espera (a partir de quando podia começar sem esperar)
+  const livresPara = (m: Replano["mudancas"][number]) => {
+    const t = p0.tasks[m.ti], ini = Math.max(m.de.dia, p0.estado === "em curso" ? p0.dia : 0);
+    return tecnicosDoOficio(t).filter((x) => x.id !== t.tec && motivoOcupado(x.id, { dia: ini, dur: m.para.dur }, p0, ocup) == null).slice(0, 2);
+  };
   const [cliente, setCliente] = useState(true);
   const df = R.fimDepois - R.fimAntes;
   // a obra onde está o técnico por quem a tarefa espera (nos dias em que ela começaria pela ordem do plano)
@@ -446,6 +454,12 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra }: {
                 <span className="font-medium">{m.nome}</span>
                 <span className="text-muted-foreground">{m.tipo === "prolongada" ? `${m.de.dur} → ${m.para.dur} dias` : `${quando(m.de.dia)} → ${quando(m.para.dia)}`}</span>
                 {m.espera && <span className="text-amber-800 dark:text-amber-300">· espera pelo {primeiro(nomeTec(m.espera.tec))} ({m.espera.motivo === "noutra obra" && esperaObra(m) ? <>está na obra <button type="button" onClick={() => abrirOutra(esperaObra(m)!)} className="font-medium underline underline-offset-2 hover:no-underline">{esperaObra(m)!.nome}</button></> : `está ${m.espera.motivo}`})</span>}
+                {m.espera && livresPara(m).map((x) => (
+                  <button key={x.id} type="button" onClick={() => run(() => A.trocarTec(d.id, m.ti, x.id))}
+                    className="inline-flex min-h-8 items-center gap-1 rounded-full border border-primary/40 bg-card px-2.5 text-sm font-medium text-primary hover:bg-primary/[0.06]">
+                    <Lightbulb className="h-3.5 w-3.5" aria-hidden="true" />Passar para {primeiro(x.n)}, que está livre
+                  </button>
+                ))}
               </li>
             ))}
             {R.mudancas.length > 6 && <li className="text-muted-foreground">e mais {R.mudancas.length - 6}</li>}
