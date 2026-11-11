@@ -1,7 +1,7 @@
 // 10/11: duas tarefas de meio dia seguidas do mesmo técnico não se sobrepõem (o plano arredonda aos dias inteiros; antes davam
 // «noutra tarefa desta obra» e o dia sugerido nunca aparecia).
 import { describe, expect, it } from "vitest";
-import { extensaoTarefa, motivoOcupado, ocupacaoDosTecnicos, resolverConflitos, sobrepostas } from "./preparacaoObra";
+import { extensaoTarefa, motivoOcupado, obraQueOcupa, ocupacaoDosTecnicos, resolverConflitos, sobrepostas } from "./preparacaoObra";
 import { TECS, acoes, seed, type Plano } from "./motor";
 
 const plano: Plano = { tasks: [], estado: "por aprovar", dia: 0 };
@@ -44,6 +44,18 @@ describe("adiar até estar livre (10/11)", () => {
     const t = d2.obra.plano.tasks[0];
     expect(t.dia).toBeGreaterThanOrEqual(3);
     expect(motivoOcupado(T, t, d2.obra.plano, ocupacaoDosTecnicos(S, d2.id))).toBeNull();
+  });
+});
+
+describe("a obra onde o técnico está (10/11)", () => {
+  it("diz qual é a outra obra nos dias da tarefa, e nenhuma quando está livre", () => {
+    const S = seed();
+    const [d1, d2] = S.deals.filter((x) => x.obra);
+    const T = TECS[0].id, inicio = "2027-03-01";
+    d1.obra.plano = { tasks: [{ nome: "Outra obra", svcs: [], dia: 0, dur: 3, sk: TECS[0].sk, h: 24, tec: T }], estado: "aprovado", dia: 0, origem: "orcamento", inicio };
+    d2.obra.plano = { tasks: [{ nome: "Canalização", svcs: [], dia: 1, dur: 1, sk: TECS[0].sk, h: 8, tec: T }], estado: "por aprovar", dia: 0, origem: "orcamento", inicio };
+    expect(obraQueOcupa(S, T, d2.obra.plano.tasks[0], d2.obra.plano, d2.id)?.id).toBe(d1.id);
+    expect(obraQueOcupa(S, T, { dia: 5, dur: 1 }, d2.obra.plano, d2.id)).toBeNull();
   });
 });
 

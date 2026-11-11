@@ -53,6 +53,7 @@ describe("contas dos portais", () => {
     // como revisaoContrato.test.tsx: uma proposta aceite, com os campos do contrato
     const d = S.deals.find((x) => x.orc && x.orc.linhas.some((l) => l.t === "svc") && !x.orc.aceite) as Negocio;
     Object.assign(d.orc!, { enviada: "hoje", aceite: "hoje", contrato: null, vendaDireta: false });
+    d.f.retif_aceite = "2026-11-10"; d.obra.plano = { tasks: [], estado: "aprovado", dia: 0 }; // 10/11: o contrato só vai com as medidas aceites e o plano aprovado
     Object.assign(d.f, { modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben", multa: "Não" });
     expect(S.acessos?.[emailCliente(d)]).toBeUndefined();
     A.enviarContrato(d.id);

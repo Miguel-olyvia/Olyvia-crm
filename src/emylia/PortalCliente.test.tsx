@@ -48,15 +48,16 @@ describe("portal do cliente: o percurso guiado", () => {
     expect(screen.queryByRole("region", { name: "Próximo passo" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Assinar/ })).toBeNull();
 
-    // 9/11 (o fluxo novo): a proposta aceite passa ao Financeiro; o contrato gera-se na Obra, com o pagamento, as medidas e o plano
-    expect(d.fase).toBe(4);
-    expect(proximo(d, S).t).toMatch(/Registar a fatura/);
+    // 10/11 (Rúben): aceite, fica no Negócio: o supervisor retifica as medidas, as Operações aprovam o plano e assina-se o contrato; depois
+    // o Financeiro
+    expect(d.fase).toBe(3);
+    expect(proximo(d, S).t).toMatch(/medidas/i);
     A.enviarContrato(d.id);
     expect(d.orc!.contrato).toBeFalsy(); // ainda não: falta o plano aprovado
-    d.fin.fatura = { n: "FT 2026/1", q: "hoje" }; d.f.comprovativo = "TRF 1"; d.f.conta = "Banco A"; d.f.data_pag = "2026-11-09";
-    S.role = "financeiro"; A.validar(d.id);
     S.role = "operacoes"; A.retificarMedidas(d.id); A.aprovarPlano(d.id);
     expect(d.obra.plano?.estado).toBe("aprovado");
+    expect(d.fase).toBe(3);
+    expect(proximo(d, S).t).toMatch(/Gerar o contrato/);
     S.role = "comercial";
     A.enviarContrato(d.id);
     expect(d.orc!.contrato).toBe("enviado");
@@ -76,13 +77,18 @@ describe("portal do cliente: o percurso guiado", () => {
     fireEvent.click(screen.getByRole("button", { name: /Assinar o contrato/ }));
     expect(d.orc!.contrato).toBe("assinado");
     expect(d.orc!.assinatura).toMatchObject({ tipo: "digital" });
-    expect(d.fase).toBe(5);
+    expect(d.fase).toBe(4); // assinado, o Financeiro
 
     // depois de assinado: o plano da obra, sem custos nem margens
     expect(screen.getByRole("heading", { name: "A sua obra" })).toBeTruthy();
     const plano = screen.getByRole("region", { name: "O plano da obra" });
     expect(plano.textContent).not.toMatch(/€|margem|custo/i);
     expect(within(plano).getAllByRole("listitem").length).toBeGreaterThanOrEqual(2);
+
+    // o pagamento validado passa à Obra
+    d.fin.fatura = { n: "FT 2026/1", q: "hoje" }; d.f.comprovativo = "TRF 1"; d.f.conta = "Banco A"; d.f.data_pag = "2026-11-09";
+    S.role = "financeiro"; A.validar(d.id);
+    expect(d.fase).toBe(5);
   });
 
   it("pedir alterações: escolhe os motivos e diz o que mudaria; o comercial vê-o como próximo passo e a nova versão consome-o", () => {

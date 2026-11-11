@@ -265,7 +265,7 @@ export function TarefasDoPlano({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   return <NovaTarefa ctx={ctx} d={d} fechar={() => setAberto(false)} />;
 }
 
-function NovaTarefa({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
+export function NovaTarefa({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const [sid, setSid] = useState<SvcId | null>(null);

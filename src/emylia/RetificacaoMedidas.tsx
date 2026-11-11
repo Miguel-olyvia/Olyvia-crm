@@ -3,13 +3,17 @@
 // supervisor)»). O primeiro passo da Obra: o supervisor vai ao local e confirma as medidas da visita (o chão, as paredes, os pontos…). As
 // medidas retificadas ficam ao lado das da visita, com a diferença; «Aceitar as medidas» fecha o passo e deixa as Operações aprovarem o
 // plano (e só depois se assina o contrato). O orçamento aceite não muda: se as medidas mudarem o preço, faz-se uma adenda.
-import { useState } from "react";
+// 10/11 (Rúben: «medidas antes da fatura»): passou para antes do contrato e do Financeiro, com a proposta aceite; se o valor mudar, refaz-se
+// a proposta com o orçamento novo (refazerComMudancas) e, aceite a versão nova, as medidas e o plano não se repetem.
+import { useMemo, useState } from "react";
 import { Check, RotateCcw, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, camposMedida, medida, nfmt, type Negocio } from "./motor";
+import { LINHAS, camposMedida, impactoDasMedidas, medida, nfmt, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
+import { podeRetificar } from "./preparacaoObra";
+import { ImpactoNoOrcamento, linhasDoImpacto } from "./estudioPlano/ImpactoNoOrcamento";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 
@@ -19,8 +23,11 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [valores, setValores] = useState<Record<string, string>>(() =>
     Object.fromEntries(CM.map(([k]) => [k, d.f[`retif_${k}`] ?? String(medida(d.visita.med, k) || "")])));
   const [notas, setNotas] = useState(d.f.retif_notas ?? "");
-  const pode = !aceite && d.fin.pago;
+  const pode = !aceite && podeRetificar(d);
   const mudadas = CM.filter(([k]) => { const v = numero(valores[k] ?? ""); return Number.isFinite(v) && Math.abs(v - medida(d.visita.med, k)) > 0.001; });
+  // 11/11 (Rúben): o impacto no orçamento ao vivo, enquanto se escreve
+  const impacto = useMemo(() => impactoDasMedidas(d, ctx.S, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "")]).filter(([, v]) => Number.isFinite(v as number)))),
+    [valores, d.orc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-5">
@@ -29,8 +36,8 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <div className="min-w-0 text-[15px]">
           <p className="font-semibold">{aceite ? `Medidas aceites a ${aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}` : "O supervisor confirma as medidas no local"}</p>
           <p className="text-muted-foreground">{aceite
-            ? "As Operações já podem aprovar o plano; depois assina-se o contrato."
-            : d.fin.pago ? "Compare com as da visita e corrija o que for preciso. Ao aceitar, as Operações aprovam o plano e segue o contrato." : "Depois de o Financeiro validar o pagamento."}</p>
+            ? "As Operações já podem aprovar o plano; depois segue o contrato."
+            : podeRetificar(d) ? "Compare com as da visita e corrija o que for preciso. Ao aceitar, as Operações aprovam o plano e segue o contrato." : "Depois de o cliente aceitar a proposta."}</p>
         </div>
       </div>
 
@@ -59,9 +66,13 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
       ) : <p className="text-[15px] text-muted-foreground">Esta linha não tem medidas: o supervisor só confirma o local nas notas.</p>}
 
+      {impacto && CM.length > 0 && (
+        <ImpactoNoOrcamento atual={impacto.atual} linhas={linhasDoImpacto(mudadas.length, impacto)} />
+      )}
+
       {mudadas.length > 0 && (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
-          {mudadas.length} {mudadas.length === 1 ? "medida mudou" : "medidas mudaram"} em relação à visita. O orçamento aceite fica como está: se o preço mudar, faça uma adenda.
+          {mudadas.length} {mudadas.length === 1 ? "medida mudou" : "medidas mudaram"} em relação à visita. Antes do contrato, a proposta refaz-se com o orçamento novo (um botão, no passo Contrato) e o cliente aceita a versão nova.
         </p>
       )}
 

@@ -50,7 +50,7 @@ import { gravarDadosDaLead, lerDadosDasLeads, type FonteLead } from "@/emylia/re
 import { definirGuardarDadosLead, definirPodeAtribuirLead } from "@/emylia/DadosDaLead";
 import { usePodeAtribuirComercial } from "@/hooks/pessoas/usePodeAtribuirComercial";
 import { lerComerciais } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
-import { idsServico, lerNegocios, negocioDoLido, type IdsServico } from "@/emylia/real/negocioBase";
+import { idsServico, lerNegocios, negocioParaOEcra, type IdsServico } from "@/emylia/real/negocioBase";
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { avisarCliente } from "@/emylia/real/avisosCliente";
 import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
@@ -199,7 +199,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const aplicarLidos = useCallback((lidos: Awaited<ReturnType<typeof lerNegocios>>) => {
     refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
     soLeitura.current = new Set(lidos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
-    S.deals = lidos.map(negocioDoLido);
+    S.deals = lidos.map(negocioParaOEcra);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
     garantirServicosDosNegocios(S, S.deals);
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
