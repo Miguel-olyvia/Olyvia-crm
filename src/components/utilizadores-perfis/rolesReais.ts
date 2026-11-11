@@ -117,6 +117,15 @@ export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descric
     nome: "Editar dados laborais e papéis no Negócio",
     descricao: "Gravar ofícios, cargo técnico e e-mail de trabalho, e dar ou tirar papéis no Negócio (Direção, Comercial, Financeiro…), que dão acesso a negócios de outros — só até às permissões do próprio perfil.",
   },
+  // 11/11/2026 (20270114320000): a visita tem duas permissões, lado a lado na linha Visita: gerir (a agenda) e preencher (o levantamento).
+  "negocios.visita.gerir": {
+    nome: "Gerir visitas",
+    descricao: "Marcar, remarcar e cancelar as visitas do negócio: quem vai, o dia e a hora, o tipo e a morada. Marcar a visita passa o negócio a Visita e a lead e o negócio para o comercial escolhido. Não deixa preencher a visita.",
+  },
+  "negocios.visita.preencher": {
+    nome: "Preencher a visita",
+    descricao: "Preencher a visita: exterior do edifício, interior do espaço, Estúdio, medidas, fotografias, necessidades e diagnóstico; dar resultado à visita e fechar ou reabrir o levantamento. Sem ela, a Visita fica só de leitura.",
+  },
   // 11/11/2026 (fim de contacto): sem negocios.visita.gerir (nem outra permissão do Negócio além do contacto), é a assistente comercial:
   // faz os passos do Contacto e acaba com «Passar ao comercial»; depois o negócio fica só de leitura para ela (20270113120000).
   "negocios.contacto.registar": {
