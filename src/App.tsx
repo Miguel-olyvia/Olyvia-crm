@@ -154,6 +154,7 @@ const PrototipoChamada = lazy(() => import("./pages/prototipo-negocios/Prototipo
 // 5/11 (Rúben): o Estúdio do projeto (o antes, o estilo, o depois, o 3D e a proposta), com um catálogo de teste, sem conta
 const EstudioProjeto = lazy(() => import("./pages/prototipo-estudio/EstudioProjeto"));
 const PrototipoEstudioPlano = lazy(() => import("./pages/prototipo-estudio/PrototipoEstudioPlano"));
+const PrototipoEstudioObra = lazy(() => import("./pages/prototipo-estudio/PrototipoEstudioObra"));
 const PrototipoNegocioSimples = lazy(() => import("./pages/prototipo-estudio/PrototipoNegocioSimples"));
 const EquipasObra = lazy(() => import("./pages/EquipasObra"));
 const PlaneadorCozinha = lazy(() => import("./pages/prototipo-estudio/cozinha/PlaneadorCozinha"));
@@ -239,6 +240,7 @@ const App = () => (
                   <Route path="/prototipo/chamada" element={<PrototipoChamada />} />
                   <Route path="/prototipo/estudio" element={<EstudioProjeto />} />
                   <Route path="/prototipo/estudio-plano" element={<PrototipoEstudioPlano />} />
+                  <Route path="/prototipo/estudio-obra" element={<PrototipoEstudioObra />} />
                   <Route path="/prototipo/negocio-simples" element={<PrototipoNegocioSimples />} />
                   <Route path="/equipas-obra" element={<EquipasObra />} />
                   <Route path="/prototipo/cozinha" element={<PlaneadorCozinha />} />
