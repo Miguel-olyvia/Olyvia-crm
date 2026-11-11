@@ -64,3 +64,38 @@ describe("Estúdio da obra (11/11)", () => {
     expect(im.custo).toBeGreaterThan(0);
   });
 });
+
+describe("Estúdio da obra: quem está livre quando uma tarefa espera", () => {
+  it("na pré-visualização, a tarefa que espera por um técnico ocupado oferece passar a quem está livre", () => {
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!, ti = p.tasks.findIndex((t) => t.nome === "Montagem de móveis");
+    // um segundo montador, livre
+    const pm = S.tecnicos!.find((x) => x.id === p.tasks[ti].tec)!;
+    S.tecnicos!.push({ ...pm, id: "pm2", n: "Pedro Montes" });
+    const A = acoes(S, () => {}, (fn) => fn());
+    const ctx = { S, A, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "" } as unknown as Ctx;
+    render(<EstudioObra ctx={ctx} d={d} fechar={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Pavimento cerâmico: parada/ }));
+    const painel = screen.getByRole("complementary", { name: "A tarefa" });
+    fireEvent.click(within(painel).getByRole("button", { name: "Mais um dia" }));
+    fireEvent.click(within(painel).getByRole("button", { name: "Ver no plano" }));
+    const previa = screen.getByRole("region", { name: "Antes de aplicar" });
+    fireEvent.click(within(previa).getByRole("button", { name: /Passar para Pedro/ }));
+    expect(p.tasks[ti].tec).toBe("pm2");
+  });
+});
+
+describe("Estúdio da obra: o teclado", () => {
+  it("Esc fecha o painel e depois o Estúdio", () => {
+    const { S, d } = obraDeExemplo();
+    const A = acoes(S, () => {}, (fn) => fn());
+    let fechado = false;
+    const ctx = { S, A, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "" } as unknown as Ctx;
+    render(<EstudioObra ctx={ctx} d={d} fechar={() => { fechado = true; }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Registar imprevisto" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(fechado).toBe(false);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(fechado).toBe(true);
+  });
+});

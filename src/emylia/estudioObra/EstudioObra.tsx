@@ -34,7 +34,7 @@ import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { lerFoto } from "../ObraOperacoes";
 import { Contagem, useReduzir } from "../movimento";
 import { EstudioPlano } from "../estudioPlano/EstudioPlano";
-import { ROTULO_VIVO, conflitosNovos, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
+import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 
 const SEM = ["D", "S", "T", "Q", "Q", "S", "S"];
@@ -64,6 +64,16 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   // o imprevisto a ser registado (painel): o atraso dele mostra-se já no plano vivo, sem a caixa de aplicar
   const [fantasma, setFantasma] = useState<Plano | null>(null);
   const imprevistosRef = useRef<HTMLElement>(null);
+  // Esc fecha o que está por cima: o painel, depois a pré-visualização, depois o Estúdio (com outra obra aberta, é ela que fecha)
+  useEffect(() => {
+    if (outra) return;
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (painel) setPainel(null); else if (previa) setPrevia(null); else fechar();
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [painel, previa, outra, fechar]);
 
   if (!p) return null;
   // as outras obras (para os técnicos noutra obra): lê-se a cada desenho, porque o estado muda no sítio
@@ -94,7 +104,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   };
   const agir = (a: AcaoAlerta) => {
     switch (a.k) {
-      case "prolongar": setPainel(null); setPrevia({ titulo: `Pôr ${p.tasks[a.ti]?.nome ?? "a tarefa"} em dia`, k: "replanear", adiantar: false }); break;
+      case "prolongar": setPainel(null); setPrevia({ titulo: `Pôr ${(p.tasks[a.ti]?.nome ?? "a tarefa").toLowerCase()} em dia`, k: "replanear", adiantar: false }); break;
       case "validar": fazer(() => A.validarTarefa(d.id, a.ti)); break;
       case "tarefa": setPainel({ k: "tarefa", ti: a.ti }); break;
       case "imprevisto": verImprevisto(a.id); break;
@@ -167,7 +177,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
 
               {/* ------------------------------------------------------------ «E se…?»: a pré-visualização, antes de aplicar */}
               <AnimatePresence>
-                {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} />}
+                {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} />}
               </AnimatePresence>
 
               {/* ------------------------------------------------------------ o plano vivo */}
@@ -344,7 +354,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir }: {
                   <div key={ti} className={cn("flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]")}>
                     <button type="button" onClick={() => abrir(ti)} className="sticky left-0 z-10 flex w-32 shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:w-56 sm:px-4">
                       <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
-                      <span className="min-w-0"><span className="block truncate text-sm font-medium">{t.nome}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{ROTULO_VIVO[v]}{atraso ? ` · +${atraso}` : ""}</span></span>
+                      <span className="min-w-0"><span className="block truncate text-sm font-medium">{t.nome}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span></span>
                     </button>
                     <div className="relative" style={{ width: dias.length * COL, height: LINHA }}>
                       {dias.map((x, k) => x.getDay() === 1 && k > 0 && <div key={"s" + k} aria-hidden="true" className="absolute inset-y-0 border-l-2 border-l-foreground/10" style={{ left: k * COL }} />)}
@@ -392,12 +402,20 @@ function Barra({ t, n, v, p, sel, mudou, abrir, reduzir }: { t: Tarefa; n: Taref
 }
 
 /* ================================================================== «E se…?»: a pré-visualização */
-function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra }: {
-  ctx: Ctx; d: Negocio; previa: Previa; setPrevia: (x: Previa | null) => void; R: Replano; fora: ConflitoFora[]; dias: Date[]; abrirOutra: (o: Negocio) => void;
+function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocup }: {
+  ctx: Ctx; d: Negocio; previa: Previa; setPrevia: (x: Previa | null) => void; R: Replano; fora: ConflitoFora[]; dias: Date[]; abrirOutra: (o: Negocio) => void; ocup: Map<string, Set<string>>;
 }) {
   const { A, run } = ctx;
   const reduzir = useReduzir();
-  const [motivo, setMotivo] = useState<string>(previa.k === "atraso" ? "Imprevisto na obra" : previa.adiantar ? "Mais rápido do que previsto" : "Material atrasado");
+  // o motivo por omissão segue o que acontece: espera por um técnico, só adianta, ou um atraso (sem motivo escolhido, fica «Pôr o plano em dia»)
+  const [motivo, setMotivo] = useState<string>(previa.k === "atraso" ? "Imprevisto na obra" : R.mudancas.some((m) => m.espera) ? "Técnico indisponível"
+    : R.mudancas.length && R.mudancas.every((m) => m.tipo === "adiantada") ? "Mais rápido do que previsto" : "");
+  const p0 = d.obra.plano!;
+  // quem do mesmo ofício está livre para a tarefa que espera (a partir de quando podia começar sem esperar)
+  const livresPara = (m: Replano["mudancas"][number]) => {
+    const t = p0.tasks[m.ti], ini = Math.max(m.de.dia, p0.estado === "em curso" ? p0.dia : 0);
+    return tecnicosDoOficio(t).filter((x) => x.id !== t.tec && motivoOcupado(x.id, { dia: ini, dur: m.para.dur }, p0, ocup) == null).slice(0, 2);
+  };
   const [cliente, setCliente] = useState(true);
   const df = R.fimDepois - R.fimAntes;
   // a obra onde está o técnico por quem a tarefa espera (nos dias em que ela começaria pela ordem do plano)
@@ -446,6 +464,12 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra }: {
                 <span className="font-medium">{m.nome}</span>
                 <span className="text-muted-foreground">{m.tipo === "prolongada" ? `${m.de.dur} → ${m.para.dur} dias` : `${quando(m.de.dia)} → ${quando(m.para.dia)}`}</span>
                 {m.espera && <span className="text-amber-800 dark:text-amber-300">· espera pelo {primeiro(nomeTec(m.espera.tec))} ({m.espera.motivo === "noutra obra" && esperaObra(m) ? <>está na obra <button type="button" onClick={() => abrirOutra(esperaObra(m)!)} className="font-medium underline underline-offset-2 hover:no-underline">{esperaObra(m)!.nome}</button></> : `está ${m.espera.motivo}`})</span>}
+                {m.espera && livresPara(m).map((x) => (
+                  <button key={x.id} type="button" onClick={() => run(() => A.trocarTec(d.id, m.ti, x.id))}
+                    className="inline-flex min-h-8 items-center gap-1 rounded-full border border-primary/40 bg-card px-2.5 text-sm font-medium text-primary hover:bg-primary/[0.06]">
+                    <Lightbulb className="h-3.5 w-3.5" aria-hidden="true" />Passar para {primeiro(x.n)}, que está livre
+                  </button>
+                ))}
               </li>
             ))}
             {R.mudancas.length > 6 && <li className="text-muted-foreground">e mais {R.mudancas.length - 6}</li>}
@@ -514,7 +538,7 @@ function PainelTarefa({ ctx, d, ti, ocup, dias, fechar, simular, simulado, impre
         <Button type="button" variant="ghost" className="min-h-10" aria-label="Fechar a tarefa" onClick={fechar}><X className="h-4 w-4" /></Button>
       </div>
       <p className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium", v === "validada" ? "bg-success/15 text-success" : v === "atrasada" || v === "corrigir" ? "bg-destructive/10 text-destructive" : v === "feita" ? "bg-amber-100 text-amber-900" : "bg-muted")}>
-        {ROTULO_VIVO[v]}{v === "atrasada" ? ` · +${dd(diasDeAtraso(t, p))}` : ""}{t.exec?.horas ? ` · ${nfmt(t.exec.horas)} de ${nfmt(t.h)} h registadas` : ""}
+        {rotuloVivo(t, p)}{v === "atrasada" ? ` · +${dd(diasDeAtraso(t, p))}` : ""}{t.exec?.horas ? ` · ${nfmt(t.exec.horas)} de ${nfmt(t.h)} h registadas` : ""}
       </p>
 
       {vivo && (

@@ -285,6 +285,11 @@ export function PessoaColocacaoOrganogramaSeccao({
               <TableBody>
                 {colocacoes.map((linha) => {
                   const aberta = estaEmAberto(linha);
+                  // E6-2: a mesma regra da RLS (`hr_periodo_decorrido` sobre o `valido_ate`
+                  // da linha) -- so com `.corrigir`, uma linha ainda nao decorrida nao tem
+                  // «Corrigir», porque a base nao a deixaria gravar. Com `.edit` nada muda.
+                  const podeAgirNestaLinha =
+                    bucketDePermissao(linha.valido_ate) === "editar" ? podeEditar : podeCorrigir;
                   return (
                     <TableRow key={linha.id}>
                       <TableCell>{nomeDoNo(filiais, linha.organograma_node_id, t)}</TableCell>
@@ -304,7 +309,7 @@ export function PessoaColocacaoOrganogramaSeccao({
                             {t("hr.colocacao.alterar")}
                           </Button>
                         )}
-                        {!aberta && podeCorrigir && (
+                        {!aberta && podeCorrigir && podeAgirNestaLinha && (
                           <Button
                             size="sm"
                             variant="outline"

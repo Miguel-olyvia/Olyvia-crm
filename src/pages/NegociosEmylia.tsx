@@ -33,6 +33,8 @@ import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFi
 import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { documentosDoNegocio, enviarAoPortal } from "@/emylia/real/portalReal";
 import { definirModoTeste, podeModoTeste, simularCliente, simularFornecedor } from "@/emylia/real/modoTeste";
+// FERRAMENTAS-TESTE (temporário, remover antes da main)
+import { definirSimularClienteTeste, podeSimularClienteTeste } from "@/emylia/real/modoTeste";
 import { definirGuardarCliente } from "@/emylia/EditarCliente";
 import { linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { gravarMoradaPrincipal } from "@/emylia/real/gravarMoradaDaEntidade";
@@ -59,7 +61,7 @@ import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
-import { aplicarNomesPapeis, aplicarPermissoesReais, comPapeisDasPermissoes, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelInicial, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelDeAbertura, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
@@ -150,6 +152,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   }), []);
   /** 09/11: os papéis lidos (neg_meus_papeis), também num ref pela mesma razão; null enquanto não se leem. */
   const meusRef = useRef<MeusPapeis | null>(null);
+  /** 11/11: o papel escolhido à mão no «A ver como» nesta página (null: nenhum); respeita-se se os papéis se voltarem a ler. */
+  const escolhaRef = useRef<Papel | null>(null);
   // 5/11: leads.assign para o comercial da lead (ComercialDaLead), da mesma maneira
   const podeAtribuir = usePodeAtribuirComercial();
   definirPodeAtribuirLead(podeAtribuir);
@@ -402,16 +406,16 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
     setPronto(false); setErroLer(null);
     (async () => {
       // 30/10: os papéis do RH primeiro: sem nenhum (e sem o perfil da Olyvia que vê todos), não há nada a fazer aqui
-      let mp = await lerMeusPapeis(supabase, org);
+      const rh = await lerMeusPapeis(supabase, org);
       if (!vivo) return;
       // 9/11 (Lote 1, A): sem Papel no Negócio no RH (nem pessoas.edit), os papéis vêm das permissões negocios.* do perfil (fn_cat_pode):
       // entra e vê os passos para que tem permissão, em vez de «Não tem nenhum papel»
-      if (!mp.todos && !papelInicial(mp, S.role)) {
-        mp = comPapeisDasPermissoes(mp, await lerPermissoesReais(org));
-        if (!vivo) return;
-      }
+      // 11/11: sem papel no RH, também quem vê todos (pessoas.edit, admin) abre no papel que as permissões dão (o Financeiro abria no
+      // Comercial); só muda o papel de abertura, o «A ver como» continua com todos. Uma escolha à mão nesta página mantém-se.
+      const codigos = rh.papeis.length === 0 ? await lerPermissoesReais(org) : null;
+      if (!vivo) return;
+      const { meus: mp, papel } = papelDeAbertura(rh, codigos, S.role, escolhaRef.current);
       aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
-      const papel = papelInicial(mp, S.role);
       meusRef.current = mp;
       setMeus(mp);
       if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), um cargo técnico de obra ou o perfil de técnico de obra."); return; }
@@ -574,7 +578,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         },
       });
     });
-    return () => { vivo = false; definirModoTeste(null); };
+    // FERRAMENTAS-TESTE (temporário, remover antes da main): aceitar/assinar como o cliente para membros ativos (perfis normais)
+    void podeSimularClienteTeste(supabase, org).then((pode) => {
+      if (!vivo) return;
+      definirSimularClienteTeste(!pode ? null : {
+        aceitarProposta: (d) => peloCliente(d, "sign_proposal"),
+        assinarContrato: (d) => peloCliente(d, "sign_contract"),
+      });
+    });
+    return () => { vivo = false; definirModoTeste(null); definirSimularClienteTeste(null); /* FERRAMENTAS-TESTE */ };
   }, [org, S, avisar, redesenhar, aplicarLidos, carregarEncomendas]);
 
   // 30/10: Compras e armazém aprova a encomenda a fornecedor no passo dos materiais; depois relê as encomendas do negócio
@@ -779,7 +791,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         <label className="flex min-w-0 items-center gap-2">
           <span className="hidden text-muted-foreground sm:inline">A ver como</span>
           <select aria-label="A ver como" className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={S.role}
-            onChange={(e) => run(() => { S.role = e.target.value as Papel; })}>
+            onChange={(e) => run(() => { S.role = escolhaRef.current = e.target.value as Papel; })}>
             {(meus ? papeisPermitidos(meus) : (Object.keys(PAPEIS) as Papel[])).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
           </select>
         </label>

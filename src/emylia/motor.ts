@@ -1811,6 +1811,16 @@ export function garantirClientes(S: Estado) {
 let relogioReal = false;
 export function definirRelogioReal(sim: boolean): void { relogioReal = sim; }
 export const comRelogioReal = (): boolean => relogioReal;
+/** 11/11 (teste da Obra, 1026): a obra arranca hoje. Antes, o início passava a hoje e as tarefas ficavam nos mesmos índices: arrancar antes
+ *  da data planeada puxava tudo para trás (com conflitos noutras obras) e o fim face ao orçamento ficava errado. Agora, a começar antes
+ *  da data planeada, as tarefas e o plano do orçamento (base) ficam nas datas em que estavam; a começar depois, anda tudo para hoje. */
+export function arrancarHoje(p: Plano, hoje = new Date()): void {
+  const antes = p.inicio ? deIso(p.inicio) : null, h = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  let k = 0;
+  if (antes && antes > h) { const ds = diasDaObra(h, 400), alvo = isoDia(antes); k = Math.max(0, ds.findIndex((x) => isoDia(x) >= alvo)); }
+  p.inicio = isoDia(h); p.dia = 0;
+  if (k > 0) { for (const t of p.tasks) t.dia += k; for (const b of p.base ?? []) b.dia += k; }
+}
 /** 11/11 (teste da Obra): o «hoje» de cada obra em curso passa a ser o do calendário (com o relógio real). Devolve quantas mudaram. */
 export function acertarDiaDasObras(deals: readonly Negocio[], hoje = new Date()): number {
   let n = 0;
@@ -3563,7 +3573,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       { const F = faltaParaArrancar(d); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
       if (!portao(d, [OBRA[0]])) return;
       // 23/10: com o relógio real, a obra começa hoje (o plano mantém a ordem e a duração das tarefas)
-      if (relogioReal && d.obra.plano!.origem === "orcamento") { d.obra.plano!.inicio = isoDia(new Date()); d.obra.plano!.dia = 0; }
+      if (relogioReal && d.obra.plano!.origem === "orcamento") arrancarHoje(d.obra.plano!);
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
     },
     fimObra(id: number) {
@@ -3705,7 +3715,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 9/11 (Lote 1, C): ou o papel, ou (conta real) quem planeia a obra (negocios.obra.planear, o que o servidor pede a quem não é o técnico da tarefa)
       if (S.role !== "tecnico" && S.role !== "operacoes" && !pelaPermissao(S.role, ["obra.planear"])) { avisar({ msg: "Quem regista é a equipa da obra", sub: "O técnico no Hoje dele, ou o gestor das Operações", kind: "bad" }); return null; }
       if (!texto || !m.tarefas.length) { avisar({ msg: "Falta o que encontrou e as tarefas afetadas", kind: "bad" }); return null; }
-      const quem = S.role === "tecnico" ? TECS.find((x) => x.id === (S.tec ?? "hn"))?.n ?? "Técnico" : "Filipe Rocha";
+      // 11/11: o gestor é o papel de quem regista (como nos ajustes ao vivo), não o «Filipe Rocha» do protótipo
+      const quem = S.role === "tecnico" ? TECS.find((x) => x.id === (S.tec ?? "hn"))?.n ?? "Técnico" : PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
       const fotos = (m.fotos ?? (m.foto ? [m.foto] : [])).slice(0, 4);
       const im: Imprevisto = { id: novoIdImprevisto(d), q: agora(), dia: p.dia, quem, texto, onde: m.onde.trim(), foto: fotos[0] ?? m.foto, grav: m.grav, tarefas: m.tarefas.map((ti) => p.tasks[ti]?.nome).filter(Boolean), estado: "aberto",
         ...(fotos.length > 1 ? { fotos } : {}), ...(m.custo && m.custo > 0 ? { custo: Math.round(m.custo * 100) / 100 } : {}) };

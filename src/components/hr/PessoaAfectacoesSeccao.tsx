@@ -425,7 +425,10 @@ export function PessoaAfectacoesSeccao({
                             {t("hr.afectacoes.alterar")}
                           </Button>
                         )}
-                        {!aberta && podeCorrigir && (
+                        {/* E6-2: so onde a base deixa gravar -- `podeAgirNestaLinha` usa o mesmo
+                            `hr_periodo_decorrido` da RLS. So com `.corrigir`, uma linha fechada
+                            hoje/no futuro (ainda nao decorrida) nao tem botao; com `.edit` nada muda. */}
+                        {!aberta && podeCorrigir && podeAgirNestaLinha && (
                           <Button
                             size="sm"
                             variant="outline"

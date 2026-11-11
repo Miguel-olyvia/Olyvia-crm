@@ -139,8 +139,8 @@ export interface RascunhoLaborais {
   cargo_id: string;
   local_id: string;
   reporta_a_pessoa_id: string;
-  data_admissao: string;
-  data_antiguidade: string;
+  // Sem `data_admissao` nem `data_antiguidade`: a contratacao e a antiguidade da pessoa DERIVAM dos contratos
+  // (20270114100000). Pedem-se no contrato: `contrato.data_inicio` (a data de contratacao) e `contrato.data_antiguidade`.
 }
 
 export interface RascunhoContrato {
@@ -149,7 +149,10 @@ export interface RascunhoContrato {
   regime: RegimeTrabalho;
   /** "Regime contratual": individual (omissao) ou colectivo. Sem campos extra. */
   regime_contratual: RegimeContratual;
+  /** A DATA DE CONTRATACAO da pessoa: o inicio do contrato. E a unica que se pede (o servidor deriva a da pessoa daqui). */
   data_inicio: string;
+  /** A antiguidade deste contrato (`<= data_inicio`); vazio = conta a contratacao. */
+  data_antiguidade: string;
   data_fim: string;
   /**
    * UI, nao dados: so existe no termo certo e alimenta o calculo de
@@ -235,14 +238,13 @@ export function rascunhoInicial(): RascunhoPessoa {
       cargo_id: "",
       local_id: "",
       reporta_a_pessoa_id: "",
-      data_admissao: "",
-      data_antiguidade: "",
     },
     contrato: {
       tipo_contrato: "",
       regime: "tempo_inteiro",
       regime_contratual: "individual",
       data_inicio: "",
+      data_antiguidade: "",
       data_fim: "",
       duracao_meses: "",
       tem_periodo_experimental: false,
@@ -426,14 +428,14 @@ export function avisosDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
     });
   }
 
-  // Os campos so do RH (data de admissao, tipo de contrato) nao
+  // Os campos so do RH (data de contratacao, tipo de contrato) nao
   // bloqueiam a criacao -- quem tem uma admissao as pressas cria a ficha e
   // completa depois -- mas ficam como pendencia da ficha, e o ecra di-lo.
-  if (rascunho.laborais.data_admissao.trim() === "") {
+  if (rascunho.contrato.data_inicio.trim() === "") {
     avisos.push({
-      seccao: "laborais",
-      campoId: "hr-novo-data-admissao",
-      rotuloKey: "employees.form.hireDate",
+      seccao: "contrato",
+      campoId: "hr-novo-data-inicio",
+      rotuloKey: "rhNova.f.dataContratacao",
       mensagemKey: "hr.form.avisoCampoRhPendente",
     });
   }
@@ -607,7 +609,7 @@ export function payloadDoRascunho(
   // Usada tanto em `vinculo.data_inicio` como em `horasVinculo.valido_de`: as
   // duas tem de nascer com a MESMA data (a versao de horas comeca exactamente
   // quando o vinculo comeca).
-  const dataInicioVinculo = texto(contrato.data_inicio) ?? texto(laborais.data_admissao) ?? dataDeHoje();
+  const dataInicioVinculo = texto(contrato.data_inicio) ?? dataDeHoje();
 
   return {
     nucleo: {
@@ -621,8 +623,10 @@ export function payloadDoRascunho(
       cargo_id: laborais.cargo_id.trim(),
       local_id: texto(laborais.local_id),
       reporta_a_pessoa_id: texto(laborais.reporta_a_pessoa_id),
-      data_admissao: texto(laborais.data_admissao),
-      data_antiguidade: texto(laborais.data_antiguidade),
+      // A contratacao provisoria: o mesmo valor do inicio do contrato (o trigger do cargo abre a primeira linha nessa data).
+      // O servidor recalcula-a dos contratos. A antiguidade nao vai na pessoa: vai no contrato (`vinculo.data_antiguidade`).
+      data_admissao: dataInicioVinculo,
+      data_antiguidade: null,
     },
     dadosPessoais: temPessoais
       ? {
@@ -682,6 +686,7 @@ export function payloadDoRascunho(
           // directo e recusado (HR010). Ver `horasVinculo`, abaixo.
           data_inicio: dataInicioVinculo,
           data_fim: texto(contrato.data_fim),
+          data_antiguidade: texto(contrato.data_antiguidade),
           periodo_experimental_dias: experimentalDias,
           periodo_experimental_ate:
             experimentalDias === null

@@ -132,13 +132,14 @@ function dataFimDe(v: ValoresNovaPessoa): string | null {
 function vinculo(v: ValoresNovaPessoa): ExtrasNovaPessoa["vinculo"] {
   const c = v.contrato;
   const e = v.extra;
-  const inicio = texto(c.data_inicio) ?? texto(v.laborais.data_admissao);
+  const inicio = texto(c.data_inicio);
   const dias = c.tem_periodo_experimental ? numeroDe(c.periodo_experimental_dias) : null;
   return {
     tipo_contrato: c.tipo_contrato === "" ? "sem_termo" : c.tipo_contrato,
     regime: c.regime,
     regime_contratual: c.regime_contratual,
     data_fim: dataFimDe(v),
+    data_antiguidade: texto(c.data_antiguidade),
     motivo_termo: null,
     periodo_experimental_dias: dias,
     periodo_experimental_ate: dias === null || inicio === null ? null : dataDoPeriodoExperimental(inicio, dias),
@@ -225,8 +226,9 @@ export function extrasDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): ExtrasNo
       email_trabalho: texto(v.geral.email_trabalho) ?? (v.extra.criar_acesso ? texto(v.extra.email_acesso) : null),
       email_pessoal: texto(v.pessoais.email_pessoal),
       telefone_trabalho: texto(v.geral.telefone_trabalho),
-      data_admissao: texto(v.laborais.data_admissao),
-      data_antiguidade: texto(v.laborais.data_antiguidade),
+      // A contratacao provisoria e o inicio do contrato; a antiguidade da pessoa vem do contrato (nao se envia na pessoa).
+      data_admissao: texto(v.contrato.data_inicio),
+      data_antiguidade: null,
     },
     nomeTratamento: texto(v.extra.nome_tratamento),
     semLocal: v.laborais.local_id === "",
@@ -250,7 +252,7 @@ export function extrasDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): ExtrasNo
 
 /** O que `criarPessoa` recebe. Só se chama com os valores já validados. */
 export function paraNovaPessoa(v: ValoresNovaPessoa, o: OpcoesGravar): NovaPessoaExemplo {
-  const inicio = texto(v.contrato.data_inicio) ?? v.laborais.data_admissao;
+  const inicio = texto(v.contrato.data_inicio) ?? "";
   return {
     primeiro_nome: v.geral.primeiro_nome.trim(),
     apelido: v.geral.apelido.trim(),

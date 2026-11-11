@@ -3,7 +3,7 @@
 // prazo, as objeções. O resto (necessidades, quem decide, concorrência, sinais de compra, preferências, riscos, compromissos,
 // oportunidades, momentos e o que melhorar) fica em «Ver tudo». Cada ponto com o tempo da conversa leva à frase na transcrição.
 import type { ReactNode } from "react";
-import { AlertTriangle, ArrowRight, CircleHelp, Flame, ListChecks, MessageSquareWarning, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CircleHelp, Euro, Flame, ListChecks, MessageSquareWarning, Ruler, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { InsightsGuardados } from "./chamadaMotor";
 
@@ -98,6 +98,40 @@ export function InsightsConversa({ dados, tipo, compacto = false, onIrPara }: {
           </Bloco>
         )}
       </div>
+
+      {/* 11/11: na visita, o levantamento à parte (o que vai para o orçamento e para a obra): escolhas peça a peça, medidas e valores */}
+      {!compacto && (x.escolhas?.length || x.medidas?.length || x.valores?.length) ? (
+        <div className="mt-4 rounded-xl border border-border bg-card p-3">
+          <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground"><ListChecks className="h-4 w-4" aria-hidden="true" />O levantamento</h4>
+          {x.escolhas?.length ? (
+            <ul className="divide-y divide-border" aria-label="Escolhas peça a peça">
+              {x.escolhas.map((e, i) => (
+                <li key={i} className="flex items-start gap-2.5 py-2 text-[15px]">
+                  <span aria-hidden="true" className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full", e.decidida ? "bg-success text-white" : "bg-amber-400 text-white")}>
+                    {e.decidida ? <Check className="h-3.5 w-3.5" /> : <span className="text-[11px] font-bold">?</span>}
+                  </span>
+                  <span className="min-w-0 flex-1"><b className="font-medium">{e.peca}</b>: {e.escolha}{quando(e.linha)}</span>
+                  {!e.decidida ? <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">por decidir</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {x.medidas?.length ? (
+            <div className="mt-2">
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Ruler className="h-3.5 w-3.5" aria-hidden="true" />Medidas ditas</p>
+              <ul className="flex flex-wrap gap-1.5">
+                {x.medidas.map((m, i) => <li key={i} className="rounded-lg bg-muted/70 px-2.5 py-1 text-sm">{m.o_que}: <b className="font-semibold tabular-nums">{m.valor}</b>{quando(m.linha)}</li>)}
+              </ul>
+            </div>
+          ) : null}
+          {x.valores?.length ? (
+            <div className="mt-3">
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Euro className="h-3.5 w-3.5" aria-hidden="true" />Valores e condições falados</p>
+              <Lista itens={x.valores.map((v) => <>{v.texto}{quando(v.linha)}</>)} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <details className="group mt-4">
         <summary className="cursor-pointer select-none text-sm font-medium text-primary underline-offset-4 hover:underline">Ver tudo</summary>

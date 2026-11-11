@@ -16,10 +16,12 @@ import { mudarDadosLead } from "./DadosDaLead";
 import type { Ctx } from "./pecas";
 import { falasDoTexto, juntarExtracoes, juntarVarios, lerInsights, metricasDaConversa, nomeFalante, propostas, type Extracao, type Fala, type Insights, type InsightsGuardados, type Proposta } from "./chamadaMotor";
 import { InsightsConversa } from "./InsightsConversa";
+import { GuiaAoVivo } from "./GuiaAoVivo";
+import { TEMAS_GUIA, devePedirGuia, falasParaGuia, juntarGuia, type GuiaConversa } from "./guiaConversa";
 import { divisaoPrincipal } from "./campos";
 import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
-import { GRUPO_VISITA, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
+import { GRUPO_VISITA, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, pedirGuia, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
 import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, useGravacao } from "./gravador";
 import { urlDoNegocio } from "./urlNegocio";
 
@@ -122,6 +124,13 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const [plantaLida, setPlantaLida] = useState<PlantaLida | null>(null);
   const [plantaUsada, setPlantaUsada] = useState(false);
   const fimLista = useRef<HTMLDivElement>(null);
+  // 11/11 (Rúben: «aprende e melhora»): o guia ao vivo (os temas-chave e a próxima pergunta), enquanto se grava ou transcreve
+  const [guia, setGuia] = useState<GuiaConversa | null>(null);
+  const [guiaAPensar, setGuiaAPensar] = useState(false);
+  const [guiaErro, setGuiaErro] = useState<string | null>(null);
+  const guiaUltimo = useRef<{ revistas: number; em: number } | null>(null);
+  const guiaTempos = useRef<number[]>([]);
+  const guiaNoAr = useRef(false);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
 
   useEffect(() => { fimLista.current?.scrollIntoView({ block: "nearest" }); }, [falas.length]);
@@ -139,7 +148,22 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const segundos = minha && g.inicioEm ? Math.max(0, Math.floor((agora - g.inicioEm) / 1000)) : 0;
   const micCalado = vivo === "a_ouvir" && agora - ouviuEm.current > 12_000;
 
-  const limpar = () => { setFalasFim([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setResumoFim(""); setFase("livre"); setAnalise(null); };
+  const limpar = () => {
+    setFalasFim([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setResumoFim(""); setFase("livre"); setAnalise(null);
+    setGuia(null); setGuiaErro(null); guiaUltimo.current = null; guiaTempos.current = [];
+  };
+  // o guia: a cada minuto revisto (umas falas revistas novas e uns segundos desde o último), um pedido pequeno, um de cada vez
+  const guiaAtivo = vivo === "a_ouvir" || fase === "a_transcrever";
+  useEffect(() => {
+    if (!guiaAtivo || guiaNoAr.current || !devePedirGuia(falas, guiaUltimo.current, Date.now(), vivo === "a_ouvir" ? undefined : 0)) return;
+    const enviadas = falasParaGuia(falas);
+    guiaNoAr.current = true; setGuiaAPensar(true);
+    guiaUltimo.current = { revistas: falas.filter((f) => f.revista).length, em: Date.now() };
+    pedirGuia(enviadas, modo, TEMAS_GUIA[modo])
+      .then((g) => { guiaTempos.current = enviadas.map((f) => f.inicio); setGuia((antes) => juntarGuia(antes, g)); setGuiaErro(null); })
+      .catch((e) => setGuiaErro((e as Error).message))
+      .finally(() => { guiaNoAr.current = false; setGuiaAPensar(false); });
+  }, [falas, guiaAtivo, modo, vivo, guiaAPensar]);
 
   async function iniciar(continuar = false) {
     if (!continuar) limpar();
@@ -414,6 +438,11 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
       ) : null}
 
       {daChamada && !aOuvir ? <div className="mt-4"><InsightsConversa dados={daChamada} tipo="chamada" compacto /></div> : null}
+
+      {guiaAtivo ? (
+        <GuiaAoVivo guia={guia} temas={TEMAS_GUIA[modo]} aPensar={guiaAPensar} erro={guiaErro}
+          tempoDaLinha={(l) => guiaTempos.current[l]} onIrPara={irPara} />
+      ) : null}
 
       {falas.length ? (
         <>

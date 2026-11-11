@@ -34,6 +34,10 @@ export interface Insights {
   momentos: { linha: number; titulo: string }[];
   coaching: { correu_bem: string[]; a_melhorar: string[] };
   sentimento: { inicio: string; fim: string; notas?: string | null };
+  /** 11/11: só na visita, o levantamento: o que ficou escolhido peça a peça, as medidas ditas e os valores falados. */
+  escolhas?: { peca: string; escolha: string; decidida: boolean; linha?: number | null }[];
+  medidas?: { o_que: string; valor: string; linha?: number | null }[];
+  valores?: ItemInsight[];
 }
 export interface Metricas { duracaoS: number; falas: number; pctComercial: number; pctCliente: number; perguntasComercial: number; maiorFalaClienteS: number }
 /** O que fica guardado no negócio (d.f.insights_chamada / insights_visita): a análise, o início de cada fala a que as linhas se referem,

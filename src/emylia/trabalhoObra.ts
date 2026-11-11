@@ -95,8 +95,10 @@ export function instrucoesDe(t: Pick<Tarefa, "nome" | "sk"> & { corrige?: number
     const base = instrucoesDe({ nome: t.nome.replace(/^Correção · /, ""), sk: t.sk });
     return { antes: ["Ler o pedido do responsável de obra", "Ver as fotografias que enviou antes"], passos: [`Corrigir: ${t.nota ?? "o que o responsável pediu"}`, "Verificar o resultado com o que foi pedido", "Limpar a zona"], verificar: ["O pedido do responsável está resolvido", ...base.verificar.slice(0, 1), "Fotografia do resultado, no mesmo enquadramento"], epi: base.epi };
   }
-  const s = sem(t.nome + " " + t.sk);
-  return MODELOS.find((m) => m.re.test(s))?.i ?? GERAL;
+  // 11/11 (teste da Obra): primeiro pelo nome da tarefa, depois pelo ofício («Montagem de louças» de um canalizador mostrava os passos
+  // da canalização, porque «canalizador» casava antes de «louças»)
+  const n = sem(t.nome), k = sem(t.nome + " " + t.sk);
+  return MODELOS.find((m) => m.re.test(n))?.i ?? MODELOS.find((m) => m.re.test(k))?.i ?? GERAL;
 }
 
 /* ------------------------------------------------------------------ os registos (envios) */

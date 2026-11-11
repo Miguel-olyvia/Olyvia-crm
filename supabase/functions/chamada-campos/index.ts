@@ -8,10 +8,13 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { AuthError, resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { ErroGemini, gerarJson } from "../_shared/gemini.ts";
-import { ESQUEMA_INSIGHTS, INSTRUCAO_INSIGHTS, limparInsights, transcricaoNumerada } from "../_shared/conversa.ts";
+import { ESQUEMA_GUIA, INSTRUCAO_GUIA, INSTRUCAO_INSIGHTS, esquemaInsights, limparGuia, limparInsights, textoGuia, transcricaoNumerada } from "../_shared/conversa.ts";
 
 const RATE_LIMIT = { bucket: "chamada-campos", maxAttempts: 30, windowMinutes: 1 };
 const MODELO = Deno.env.get("CHAMADAS_GEMINI_MODELO_CAMPOS") ?? "gemini-3.8-flash";
+// 11/11: o guia ao vivo tem de responder em poucos segundos, a cada minuto revisto da conversa
+const MODELO_GUIA = Deno.env.get("CHAMADAS_GEMINI_MODELO_GUIA") ?? "gemini-3.1-flash-lite";
+const RATE_LIMIT_GUIA = { bucket: "chamada-guia", maxAttempts: 20, windowMinutes: 1 };
 
 const campoDef = z.object({
   k: z.string().min(1).max(60),
@@ -26,7 +29,9 @@ const pedido = z.object({
   // 11/11: sem campos, só a análise (os insights de uma conversa já guardada)
   campos: z.array(campoDef).max(200).default([]),  // a visita tem muitos campos (o local, a área, as peças)
   // 11/11 (Rúben: «retirar muitos mais insights»): o que se pede; por defeito só os campos, como antes
-  pedir: z.array(z.enum(["campos", "insights"])).min(1).default(["campos"]),
+  pedir: z.array(z.enum(["campos", "insights", "guia"])).min(1).default(["campos"]),
+  // 11/11: o guia ao vivo (pedir «guia», sozinho): os temas que o comercial tem de cobrir
+  temas: z.array(z.object({ k: z.string().min(1).max(40), l: z.string().min(1).max(120), pergunta: z.string().max(200).optional() })).max(20).default([]),
   // a data de hoje no fuso da comercial (AAAA-MM-DD), para «dia 10» e «amanhã» virarem datas
   hoje: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   // 5/11: «visita» é a conversa da visita a casa do cliente (a comercial mede, mostra amostras e o cliente escolhe as peças)
@@ -45,12 +50,11 @@ mostra amostras e o cliente escolhe as peças; muitas vezes o comercial faz o or
 const INSTRUCAO = `És um assistente de uma empresa de remodelações em Portugal. Recebes a transcrição de uma chamada entre
 um comercial e um cliente e preenches uma ficha para preparar a visita.
 
-Quem é quem: cada linha vem etiquetada "Comercial:" ou "Cliente:" por uma comparação de vozes que ERRA muitas vezes.
-Antes de preencheres, decide tu quem disse cada linha pelo sentido da conversa: o comercial é da empresa, apresenta-se,
-faz as perguntas, explica a visita e marca o dia; o cliente fala da casa dele, do que quer fazer, das dúvidas, da
-disponibilidade e responde às perguntas. Uma linha como "eu ainda estou interessado em fazer a casa de banho" é do
-cliente, mesmo que venha como "Comercial:". Devolve essa decisão em 'falantes': uma entrada por linha, pela ordem dos
-números entre parênteses retos, "comercial" ou "cliente". Preenche os campos já com essa correção.
+Quem é quem: cada linha vem etiquetada "Comercial:", "Cliente:" ou "Outra pessoa:". 11/11: as etiquetas vêm do modelo que ouviu
+o áudio com as duas vozes lado a lado e acertam quase sempre; confia nelas. Só as mudas quando o sentido não deixa dúvida (o
+comercial é da empresa, apresenta-se, faz as perguntas, explica e marca; o cliente fala da casa dele, do que quer, das dúvidas e
+responde). Devolve em 'falantes' uma entrada por linha, pela ordem dos números entre parênteses retos, "comercial" ou "cliente"
+("Outra pessoa" conta como "cliente"). Preenche os campos com essa leitura.
 O nome do cliente é o nome por que o comercial o trata (por exemplo "Dona Inês"), nunca o nome com que o comercial se
 apresenta.
 
@@ -59,7 +63,7 @@ Regras:
 - Uma pergunta do comercial não é uma resposta. "É uma moradia ou é um andar?" não diz nada; só a resposta do
   cliente conta. Se a resposta não se percebe, fica null.
 - Nunca deduzes para além do razoável. "Sexto direito" diz que é um andar; não diz nada sobre elevador.
-- A transcrição do lado do cliente vem do altifalante do telemóvel e tem frases sem sentido. Ignora-as.
+- Se uma frase não faz sentido no contexto (mal ouvida), ignora-a. Uma parte "(impercetível)" não conta como dita.
 - Para campos de escolha, usa exatamente uma das opções (o texto da opção). Para sim/não, "Sim" ou "Não".
 - Para números, só o número. Para listas (varios), as opções ditas separadas por vírgulas. Para datas, AAAA-MM-DD.
 - Numa lista de serviços do Catálogo (varios com muitas opções), inclui TODAS as opções que correspondem a algo que o
@@ -105,7 +109,21 @@ serve(async (req) => {
     const caller = await resolveCallerIdentity(req, supabase);
     const parsed = pedido.safeParse(await req.json());
     if (!parsed.success) return json({ error: "Pedido inválido", details: parsed.error.issues }, 400);
-    const { segmentos, campos, hoje, tipo, pedir } = parsed.data;
+    const { segmentos, campos, hoje, tipo, pedir, temas } = parsed.data;
+    // 11/11: o guia ao vivo, sozinho e depressa (um limite à parte, para não gastar o dos campos)
+    if (pedir.includes("guia")) {
+      if (!temas.length) return json({ error: "O guia precisa dos temas" }, 400);
+      const limiteG = await checkRateLimit(supabaseAdmin, { ...RATE_LIMIT_GUIA, identifier: caller.anewUserId });
+      if (!limiteG.allowed) return rateLimitResponse(limiteG, corsHeaders);
+      await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_GUIA.bucket, caller.anewUserId);
+      try {
+        const g = await gerarJson<Record<string, unknown>>({ modelo: MODELO_GUIA, partes: [{ text: textoGuia(temas, segmentos) }], esquema: ESQUEMA_GUIA, instrucaoSistema: INSTRUCAO_GUIA(tipo ?? "chamada") });
+        return json({ guia: limparGuia(g, temas, segmentos.length), motor: `gemini:${MODELO_GUIA}` });
+      } catch (e) {
+        if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
+        throw e;
+      }
+    }
     const querCampos = pedir.includes("campos") && campos.length > 0, querInsights = pedir.includes("insights");
     if (!querCampos && !querInsights) return json({ error: "Nada a pedir: sem campos nem insights" }, 400);
 
@@ -124,7 +142,7 @@ serve(async (req) => {
     const texto = (hoje ? `Hoje é ${hoje}. Datas ditas de forma relativa («dia 10», «amanhã», «para a semana») ` +
       "convertem-se para AAAA-MM-DD, assumindo a próxima ocorrência a partir de hoje.\n\n" : "") +
       "# Campos a preencher\n" + campos.map(descrever).join("\n") +
-      "\n\n# Transcrição da chamada\n" + segmentos.map((s, i) => `[${i}] ${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : s.falante === "outro" ? "Outra pessoa" : "Alguém"}: ${s.texto}`).join("\n") +
+      `\n\n# Transcrição da ${tipo === "visita" ? "visita" : "chamada"}\n` + segmentos.map((s, i) => `[${i}] ${s.falante === "comercial" ? "Comercial" : s.falante === "cliente" ? "Cliente" : s.falante === "outro" ? "Outra pessoa" : "Alguém"}: ${s.texto}`).join("\n") +
       "\n\nPreenche o JSON com 'falantes' (uma entrada por linha), 'campos' (uma lista: um objeto por campo que consegues preencher, com chave, valor, confianca e excerto; os que não foram ditos ficam de fora) e 'resumo'.";
 
     // 11/11: a análise vai em paralelo, num pedido à parte (juntar tudo num só pedido piorava os campos)
@@ -138,7 +156,7 @@ serve(async (req) => {
           ? gerarJson<Resposta>({ modelo: MODELO, partes: [{ text: texto }], esquema, instrucaoSistema: tipo === "visita" ? `${INSTRUCAO}\n\n${SOBRE_A_VISITA}` : INSTRUCAO })
           : Promise.resolve(null),
         querInsights
-          ? gerarJson<Record<string, unknown>>({ modelo: MODELO, partes: [{ text: textoInsights }], esquema: ESQUEMA_INSIGHTS, instrucaoSistema: INSTRUCAO_INSIGHTS(tipo ?? "chamada") })
+          ? gerarJson<Record<string, unknown>>({ modelo: MODELO, partes: [{ text: textoInsights }], esquema: esquemaInsights(tipo ?? "chamada"), instrucaoSistema: INSTRUCAO_INSIGHTS(tipo ?? "chamada") })
             // sem a análise, os campos chegam na mesma (só falha tudo quando se pediram só os insights)
             .catch((e) => { if (!querCampos) throw e; console.error("[chamada-campos] insights", e); return null; })
           : Promise.resolve(null),

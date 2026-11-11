@@ -527,6 +527,14 @@ export interface PessoaVinculo {
   isencao_horario: boolean;
   formacao_inicio: string | null;
   formacao_fim: string | null;
+
+  // -- Datas da pessoa derivadas dos contratos (20270114100000) --------------
+  /**
+   * A antiguidade DESTE contrato (`<= data_inicio`); `null` = sem valor proprio, conta o inicio da cadeia. Opcional de
+   * proposito: um contrato que chegue sem a coluna (`undefined` = "nao lida") nao se edita nem se envia a antiguidade,
+   * para nao a apagar sem a ter lido.
+   */
+  data_antiguidade?: string | null;
 }
 
 /**

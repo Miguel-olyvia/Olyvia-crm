@@ -30,9 +30,9 @@ function preenchido(): ValoresNovaPessoa {
     conta_titular: "Teresa Nogueira", conta_banco: "CGD", emergencia_nome: "Rui", emergencia_relacao: "irmão",
     emergencia_telefone: "911111111", tamanho_cima: "m",
   });
-  v = comPatch(v, "laborais", { cargo_id: "cargo-1", local_id: "local-1", reporta_a_pessoa_id: "p-chefe", data_admissao: "2026-10-01" });
+  v = comPatch(v, "laborais", { cargo_id: "cargo-1", local_id: "local-1", reporta_a_pessoa_id: "p-chefe" });
   v = comPatch(v, "contrato", {
-    tipo_contrato: "termo_certo", data_inicio: "2026-10-01", data_fim: "2027-10-01", tipo_trabalho: "presencial",
+    tipo_contrato: "termo_certo", data_inicio: "2026-10-01", data_antiguidade: "2025-03-01", data_fim: "2027-10-01", tipo_trabalho: "presencial",
     horas_trabalho: "40", horas_frequencia: "semanal", subsidio: "7,63", subsidio_modo: "cartao", duodecimos_pct: "50",
     tem_periodo_experimental: true, periodo_experimental_dias: "90", dias_uteis: ["seg", "ter", "qua", "qui", "sex"],
   });
@@ -47,12 +47,22 @@ function preenchido(): ValoresNovaPessoa {
 describe("paraNovaPessoa: cada campo do formulario chega ao payload real", () => {
   const { payload } = paraNovaPessoa(preenchido(), OPCOES);
 
-  it("nucleo: nome, emails, telefone, numero interno, cargo (id e nome), local, chefia e datas", () => {
+  it("nucleo: nome, emails, telefone, numero interno, cargo (id e nome), local, chefia e a contratacao provisoria", () => {
     expect(payload.nucleo).toMatchObject({
       primeiro_nome: "Teresa", apelido: "Nogueira", email_trabalho: "teresa@x.pt", email_pessoal: "t@pessoal.pt",
       telefone_trabalho: "912345678", numero_interno: "RH-0042", cargo: "Vendedor/a", cargo_id: "cargo-1",
       local_id: "local-1", reporta_a_pessoa_id: "p-chefe", data_admissao: "2026-10-01",
     });
+  });
+
+  it("so ha UMA data de contratacao: o nucleo leva a data de inicio do contrato como provisoria, sem antiguidade nem saida", () => {
+    expect(payload.nucleo.data_admissao).toBe(payload.vinculo?.data_inicio);
+    expect(payload.nucleo.data_antiguidade).toBeNull();
+    expect(payload.nucleo).not.toHaveProperty("data_saida");
+  });
+
+  it("a antiguidade vai no contrato, nao na pessoa", () => {
+    expect(payload.vinculo).toMatchObject({ data_inicio: "2026-10-01", data_antiguidade: "2025-03-01" });
   });
 
   it("dados pessoais, identificacao e morada", () => {
@@ -128,6 +138,42 @@ describe("paraNovaPessoa: cada campo do formulario chega ao payload real", () =>
     const v = comPatch(preenchido(), "geral", { conta_id: "conta-1" });
     expect(paraNovaPessoa(v, OPCOES).payload.contaALigar).toBe("conta-1");
     expect(paraNovaPessoa(v, { ...OPCOES, podeLigarConta: false }).payload.contaALigar).toBeNull();
+  });
+});
+
+describe("paraNovaPessoa: as datas da pessoa vem do contrato", () => {
+  it("sem antiguidade escrita, o contrato leva null (o servidor conta o inicio da cadeia)", () => {
+    const v = comPatch(preenchido(), "contrato", { data_antiguidade: "" });
+    const { payload } = paraNovaPessoa(v, OPCOES);
+    expect(payload.vinculo).toHaveProperty("data_antiguidade", null);
+    expect(payload.nucleo.data_antiguidade).toBeNull();
+  });
+
+  it("mudar a data de contratacao muda o inicio do contrato, a versao de horas e a data provisoria juntos", () => {
+    const v = comPatch(preenchido(), "contrato", { data_inicio: "2026-11-15" });
+    const { payload } = paraNovaPessoa(v, OPCOES);
+    expect(payload.vinculo?.data_inicio).toBe("2026-11-15");
+    expect(payload.horasVinculo?.valido_de).toBe("2026-11-15");
+    expect(payload.nucleo.data_admissao).toBe("2026-11-15");
+  });
+
+  it("o contrato e obrigatorio: com so o minimo valido ha sempre vinculo, com o inicio de hoje por omissao", () => {
+    let v = valoresIniciais(HOJE);
+    v = comPatch(v, "geral", { primeiro_nome: "Ana", apelido: "Sousa" });
+    v = comPatch(v, "laborais", { cargo_id: "cargo-1" });
+    v = comPatch(v, "contrato", { tipo_contrato: "sem_termo", duodecimos_pct: "50" });
+    const { payload, dataInicio } = paraNovaPessoa(v, OPCOES);
+    expect(payload.vinculo).toMatchObject({ tipo_contrato: "sem_termo", data_inicio: HOJE, estado: "activo" });
+    expect(payload.nucleo.data_admissao).toBe(HOJE);
+    expect(dataInicio).toBe(HOJE);
+  });
+
+  it("o rascunho de partida ja nao tem data de admissao nem de antiguidade na pessoa", () => {
+    const inicial = valoresIniciais(HOJE);
+    expect(inicial.laborais).not.toHaveProperty("data_admissao");
+    expect(inicial.laborais).not.toHaveProperty("data_antiguidade");
+    expect(inicial.contrato.data_inicio).toBe(HOJE);
+    expect(inicial.contrato.data_antiguidade).toBe("");
   });
 });
 

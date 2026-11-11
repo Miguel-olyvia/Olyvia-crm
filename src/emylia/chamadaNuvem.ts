@@ -4,7 +4,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Def, Grupo } from "./campos";
 import { nomeFalante, type CampoExtraido, type Extracao, type Fala, type Insights } from "./chamadaMotor";
-import { cortarEmBlocos, normalizar, rmsMaximo } from "./blocosAudio";
+import { correrEmParalelo, cortarEmBlocos, normalizar, rmsMaximo } from "./blocosAudio";
+import type { GuiaConversa, TemaGuia } from "./guiaConversa";
 import type { PlantaLida } from "./planta";
 
 export const TAXA = 16000;
@@ -162,23 +163,45 @@ export async function audioDeFicheiro(origem: Blob | string): Promise<Float32Arr
   }
 }
 
-/** Um áudio inteiro (um ficheiro, a chamada de exemplo) transcrito por blocos, por ordem, cada um com o fim do anterior como contexto. */
+/** Um áudio inteiro (um ficheiro, a chamada de exemplo) transcrito por blocos, cada um com o fim do anterior como contexto quando já chegou.
+ *  11/11: até 4 blocos ao mesmo tempo (correrEmParalelo): uma visita de 35 min passa de ~10 min para ~2 a 3 min. */
+export const BLOCOS_EM_PARALELO = 4;
 export async function transcreverAudio(pcm: Float32Array, tipo: "chamada" | "visita", aoProgredir?: (feitos: number, total: number, falas: Fala[]) => void): Promise<Fala[]> {
   const blocos = cortarEmBlocos(pcm, TAXA);
-  let falas: Fala[] = [];
-  for (let i = 0; i < blocos.length; i++) {
+  const porBloco: (Fala[] | undefined)[] = new Array(blocos.length);
+  let feitos = 0;
+  const juntas = () => porBloco.flatMap((x) => x ?? []).sort((a, z) => a.inicio - z.inicio);
+  // o que se mostra (e vai ao guia) enquanto corre: só os blocos seguidos desde o início, sem buracos (os blocos chegam fora de ordem;
+  // com um buraco, o guia julgava que a conversa tinha acabado a meio)
+  const seguidas = () => { const k = porBloco.findIndex((x) => x === undefined); return (k < 0 ? porBloco : porBloco.slice(0, k)).flatMap((x) => x ?? []); };
+  await correrEmParalelo(blocos.length, BLOCOS_EM_PARALELO, async (i) => {
     const b = blocos[i];
     const parte = pcm.subarray(b.ini, b.fim);
-    if (rmsMaximo(parte) < 0.004) { aoProgredir?.(i + 1, blocos.length, falas); continue; } // silêncio: não se manda
     let novas: Fala[] = [];
-    for (let tentativa = 0; ; tentativa++) {
-      try { novas = await transcreverBloco(parte, b.ini / TAXA, tipo, contextoRevisto(falas)); break; }
-      catch (e) { if (tentativa >= 2) throw e; await new Promise((r) => setTimeout(r, 3000 * (tentativa + 1))); }
+    if (rmsMaximo(parte) >= 0.004) { // silêncio: não se manda
+      // o contexto: o que já se sabe de antes deste bloco (o anterior, se já chegou)
+      const antes = juntas().filter((f) => f.inicio < b.ini / TAXA);
+      for (let tentativa = 0; ; tentativa++) {
+        try { novas = await transcreverBloco(parte, b.ini / TAXA, tipo, contextoRevisto(antes)); break; }
+        catch (e) { if (tentativa >= 2) throw e; await new Promise((r) => setTimeout(r, 3000 * (tentativa + 1))); }
+      }
     }
-    falas = [...falas, ...novas].sort((a, z) => a.inicio - z.inicio);
-    aoProgredir?.(i + 1, blocos.length, falas);
-  }
-  return falas;
+    porBloco[i] = novas;
+    feitos++;
+    aoProgredir?.(feitos, blocos.length, seguidas());
+  });
+  return juntas();
+}
+
+/** 11/11: o guia ao vivo (a função chamada-campos com pedir «guia»): o estado de cada tema e a próxima pergunta. */
+export async function pedirGuia(segmentos: Fala[], tipo: "chamada" | "visita", temas: TemaGuia[]): Promise<GuiaConversa> {
+  const { data, error } = await supabase.functions.invoke("chamada-campos", {
+    body: { segmentos: segmentos.map((s) => ({ inicio: s.inicio, texto: s.texto, falante: s.falante })), tipo, pedir: ["guia"], temas, hoje: hojeLocal() },
+  });
+  if (error) throw new Error(await mensagemDoErro(error, "chamada-campos"));
+  const g = (data as { guia?: GuiaConversa } | null)?.guia;
+  if (!g || !Array.isArray(g.temas)) throw new Error("O guia veio vazio.");
+  return g;
 }
 
 const hojeLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);

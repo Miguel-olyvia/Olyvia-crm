@@ -136,14 +136,25 @@ Regras:
 - coaching: para o comercial melhorar. 'correu_bem': o que fez bem, concreto. 'a_melhorar': o que faltou ou podia ter feito melhor
   (perguntas-chave que não fez, interrupções, não marcou o passo seguinte, não respondeu a uma objeção), cada ponto acionável.
 - sentimento do cliente no início e no fim da conversa, e notas (o que o fez mudar).
-- resumo: 3 a 5 frases para quem pega no negócio a seguir: quem é o cliente, o que quer, onde estamos e o que se segue.`;
+- resumo: 3 a 5 frases para quem pega no negócio a seguir: quem é o cliente, o que quer, onde estamos e o que se segue.${tipo === "visita" ? LEVANTAMENTO : ""}`;
+
+// 11/11 (Rúben: «aprende e melhora»): na visita, o que mais conta para o orçamento e para a obra é o levantamento: o que ficou escolhido
+// peça a peça, as medidas ditas e os valores falados. Ficava espalhado por «preferências» e pelo resumo; agora vem à parte, com a linha.
+const LEVANTAMENTO = `
+- escolhas: o que ficou escolhido (ou ainda em dúvida) peça a peça: base de duche, sanita, móvel, lavatório, torneiras, resguardo,
+  revestimento, pavimento, teto, iluminação, etc. Em 'peca' o nome curto da peça; em 'escolha' o que foi escolhido com os pormenores
+  ditos (cor, acabamento, medida, marca, modelo); 'decidida' é false quando o cliente ficou de pensar ou hesitou entre opções (diz as
+  opções em 'escolha'). Se mudou de ideias, vale a última escolha. Uma linha por peça.
+- medidas: todas as medidas ditas (paredes, pé-direito, base de duche, móvel, janela, porta, altura do azulejo), com 'o_que' e 'valor'
+  tal como foram ditos («2,10 m», «80 por 60», «até ao teto»).
+- valores: os preços, totais, descontos, condições de pagamento e prazos de obra falados («2 semanas de obra», «sinal de 30%»).`;
 
 const item = { type: "OBJECT", properties: { texto: { type: "STRING" }, linha: { type: "INTEGER", nullable: true } }, required: ["texto"] };
 const lista = (items: Record<string, unknown>) => ({ type: "ARRAY", items });
 const ESCALA = ["alta", "media", "baixa", "desconhecida"];
 const HUMOR = ["positivo", "neutro", "negativo", "misto"];
 
-export const ESQUEMA_INSIGHTS = {
+const ESQUEMA_INSIGHTS_BASE = {
   type: "OBJECT",
   properties: {
     resumo: { type: "STRING" },
@@ -181,6 +192,79 @@ export const ESQUEMA_INSIGHTS = {
     "objecoes", "sinais_compra", "preferencias", "riscos", "compromissos", "proximos_passos", "por_perguntar", "oportunidades", "momentos",
     "coaching", "sentimento"],
 };
+
+/** O esquema da análise: o mesmo para a chamada e a visita; a visita junta o levantamento (escolhas, medidas, valores). */
+export function esquemaInsights(tipo: Tipo) {
+  if (tipo !== "visita") return ESQUEMA_INSIGHTS_BASE;
+  return {
+    ...ESQUEMA_INSIGHTS_BASE,
+    properties: {
+      ...ESQUEMA_INSIGHTS_BASE.properties,
+      escolhas: lista({ type: "OBJECT", properties: { peca: { type: "STRING" }, escolha: { type: "STRING" }, decidida: { type: "BOOLEAN" },
+        linha: { type: "INTEGER", nullable: true } }, required: ["peca", "escolha", "decidida"] }),
+      medidas: lista({ type: "OBJECT", properties: { o_que: { type: "STRING" }, valor: { type: "STRING" }, linha: { type: "INTEGER", nullable: true } },
+        required: ["o_que", "valor"] }),
+      valores: lista(item),
+    },
+    required: [...ESQUEMA_INSIGHTS_BASE.required, "escolhas", "medidas", "valores"],
+  };
+}
+/** Compatível com quem já o usava (a chamada). */
+export const ESQUEMA_INSIGHTS = ESQUEMA_INSIGHTS_BASE;
+
+// ---- o guia ao vivo (durante a conversa) ------------------------------------------------------------------------------------------------
+// 11/11: enquanto se fala, a cada minuto revisto, o que já se sabe dos temas-chave e a próxima pergunta. Os temas vêm da app (cada
+// tema: chave, nome e a pergunta típica), para se poderem mudar sem mexer aqui. Modelo pequeno: tem de responder em segundos.
+
+export interface TemaGuia { k: string; l: string; pergunta?: string }
+
+export const INSTRUCAO_GUIA = (tipo: Tipo) => `Acompanhas ao vivo uma ${tipo === "visita" ? "visita a casa de um cliente" : "chamada de qualificação"} de uma empresa de
+remodelações em Portugal. Recebes a transcrição até agora (cada linha com número e quem fala) e a lista dos temas que o comercial tem de
+cobrir. Para cada tema dizes o estado:
+- "respondido": o cliente já respondeu com clareza (põe a resposta curta, nas palavras dele, em 'resposta', e a linha);
+- "parcial": falou-se mas a resposta ficou vaga ou incompleta (diz o que se sabe em 'resposta');
+- "por_falar": ainda não se falou.
+Uma pergunta do comercial sem resposta do cliente não conta como respondido. Nunca inventes. A conversa AINDA ESTÁ A DECORRER: a
+transcrição acaba onde se está agora, não no fim; nunca digas que a conversa terminou nem que acabou cedo.
+Depois, em 'proxima', a pergunta que o comercial deve fazer A SEGUIR: a mais útil agora, natural no seguimento do que se está a falar,
+curta e pronta a dizer em voz alta (português de Portugal, trata o cliente por «o senhor»/«a senhora» ou pelo nome se foi dito). Se o tema
+do momento ainda está a meio, não mudes de assunto: aprofunda-o. Se tudo está coberto, propõe fechar o passo seguinte (marcar a visita,
+combinar o envio da proposta). Em 'porque' uma frase curta. Em 'alerta' só algo importante que o comercial deve notar já (uma objeção sem
+resposta, uma contradição, o cliente a dizer que tem pouco tempo); senão null.`;
+
+export const ESQUEMA_GUIA = {
+  type: "OBJECT",
+  properties: {
+    temas: { type: "ARRAY", items: { type: "OBJECT", properties: {
+      chave: { type: "STRING" }, estado: { type: "STRING", enum: ["respondido", "parcial", "por_falar"] },
+      resposta: { type: "STRING", nullable: true }, linha: { type: "INTEGER", nullable: true },
+    }, required: ["chave", "estado"] } },
+    proxima: { type: "OBJECT", properties: { pergunta: { type: "STRING", nullable: true }, porque: { type: "STRING", nullable: true } }, required: ["pergunta"] },
+    alerta: { type: "STRING", nullable: true },
+  },
+  required: ["temas", "proxima"],
+};
+
+export const textoGuia = (temas: TemaGuia[], segs: Segmento[]) =>
+  "# Temas a cobrir\n" + temas.map((t) => `- ${t.k}: ${t.l}${t.pergunta ? ` (ex.: «${t.pergunta}»)` : ""}`).join("\n") +
+  "\n\n# Transcrição até agora\n" + transcricaoNumerada(segs);
+
+/** Acerta o guia: só os temas pedidos (pela ordem pedida; os que faltam ficam «por_falar»), linhas dentro da transcrição. */
+export function limparGuia(r: Record<string, unknown>, temas: TemaGuia[], nLinhas: number) {
+  const lista = Array.isArray(r?.temas) ? (r.temas as Record<string, unknown>[]) : [];
+  const porChave = new Map(lista.filter((x) => x && typeof x.chave === "string").map((x) => [x.chave as string, x]));
+  const estados = ["respondido", "parcial", "por_falar"];
+  const out = temas.map((t) => {
+    const x = porChave.get(t.k);
+    const estado = x && estados.includes(String(x.estado)) ? String(x.estado) : "por_falar";
+    const resposta = estado !== "por_falar" && typeof x?.resposta === "string" && x.resposta.trim() ? x.resposta.trim() : null;
+    const l = Number(x?.linha);
+    return { chave: t.k, estado, resposta, linha: Number.isInteger(l) && l >= 0 && l < nLinhas ? l : null };
+  });
+  const p = (r?.proxima ?? {}) as Record<string, unknown>;
+  const txt = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return { temas: out, proxima: { pergunta: txt(p.pergunta), porque: txt(p.porque) }, alerta: txt(r?.alerta) };
+}
 
 export interface Segmento { inicio: number; texto: string; falante: string }
 const rotulo = (f: string) => f === "comercial" ? "Comercial" : f === "cliente" ? "Cliente" : f === "outro" ? "Outra pessoa" : "Alguém";

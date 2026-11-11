@@ -20,7 +20,7 @@ const OPCOES = { comConvite: false, config: null, cargoNome: "Vendedor/a", podeL
 function preenchido(): ValoresNovaPessoa {
   let v = valoresIniciais("2026-10-14");
   v = comPatch(v, "geral", { primeiro_nome: "Teresa", apelido: "Nogueira" });
-  v = comPatch(v, "laborais", { cargo_id: "cargo-1", data_admissao: "2026-10-01" });
+  v = comPatch(v, "laborais", { cargo_id: "cargo-1" });
   return comPatch(v, "contrato", {
     tipo_contrato: "sem_termo", data_inicio: "2026-10-01", tipo_trabalho: "presencial", horas_trabalho: "40", horas_frequencia: "semanal",
   });

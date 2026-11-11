@@ -278,7 +278,7 @@ function ConteudoAba(p: AbaProps & { aoMudarAba: (aba: string) => void; aoMudarC
   return (
     <>
       <TabsContent value="visaoGeral" className="mt-0"><AbaVisaoGeral {...p} aoAbrirAba={p.aoMudarAba} resumoConvite={p.resumoConvite} /></TabsContent>
-      <TabsContent value="laborais" className="mt-0"><AbaLaborais {...p} aoMudarCargo={p.aoMudarCargo} /></TabsContent>
+      <TabsContent value="laborais" className="mt-0"><AbaLaborais {...p} aoMudarCargo={p.aoMudarCargo} aoAbrirContratos={() => p.aoMudarAba("contratos")} /></TabsContent>
       <TabsContent value="pessoais" className="mt-0"><AbaPessoais {...p} /></TabsContent>
       <TabsContent value="contratos" className="mt-0"><AbaContratos {...p} /></TabsContent>
       <TabsContent value="planeamento" className="mt-0"><AbaPlaneamento {...p} /></TabsContent>

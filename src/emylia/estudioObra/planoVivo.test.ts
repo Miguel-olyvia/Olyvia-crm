@@ -11,6 +11,12 @@ const plano = (tasks: Tarefa[], dia = 2): Plano => ({ tasks, estado: "em curso",
 const sem = new Map<string, Set<string>>();
 
 describe("estadoVivo", () => {
+  it("sem nenhum registo e com os dias passados: começa hoje (não se prolonga)", () => {
+    const p = plano([T("Revestimento", 0, 2, "a", 1), T("Louças", 2, 1, "b", 2)], 2);
+    const r = replanear(p, sem, { adiantar: false });
+    expect([r.plano.tasks[0].dia, r.plano.tasks[0].dur]).toEqual([2, 2]);
+    expect(r.plano.tasks[1].dia).toBe(4);
+  });
   it("atrasada quando os dias já passaram; em curso com registo; parada com imprevisto", () => {
     const p = plano([T("A", 0, 2, "a"), T("B", 2, 2, "b", 1, { exec: { estado: "em curso", horas: 2, fotos: [] } }), T("C", 1, 3, "c", 1, { bloqueio: "IM-1" }), T("D", 5, 1, "d")]);
     expect(estadoVivo(p.tasks[0], p)).toBe("atrasada");
@@ -26,7 +32,7 @@ describe("estadoVivo", () => {
 
 describe("replanear", () => {
   it("a atrasada conta com hoje e empurra a que vinha a seguir", () => {
-    const p = plano([T("Revestimento", 0, 2, "a", 1), T("Louças", 2, 1, "b", 2)], 2);
+    const p = plano([T("Revestimento", 0, 2, "a", 1, { exec: { estado: "em curso", horas: 6, fotos: [] } }), T("Louças", 2, 1, "b", 2)], 2);
     const r = replanear(p, sem, { adiantar: false });
     expect(r.plano.tasks[0].dur).toBe(3); // dias 0, 1 e hoje (2)
     expect(r.plano.tasks[1].dia).toBe(3);
@@ -142,5 +148,47 @@ describe("o relógio real das obras (teste da Obra: «Dia 1 de 6» semanas depoi
     expect(p.dia).toBe(3);
     acertarDiaDasObras([d], new Date(2027, 3, 30)); // muito depois do fim: fica no último dia
     expect(p.dia).toBe(5);
+  });
+});
+
+describe("replanear com dados reais (testarh, 11/11)", () => {
+  it("a que devia ter começado e não tem registo anda (não antes de hoje), atrás da atrasada", () => {
+    const emCurso = { estado: "em curso" as const, horas: 4, fotos: [], envios: [{ q: "", dia: 1, quem: "x", k: "registo" as const }] };
+    // revestimento dias 1-2 (atrasado, com registo), pavimento dia 3 (sem registo), montagem dia 3 (sem registo); hoje = 4
+    const p = plano([T("Revestimento", 1, 2, "a", 3, { exec: emCurso }), T("Pavimento", 3, 1, "a", 3), T("Montagem", 3, 2, "b", 4)], 4);
+    const r = replanear(p, sem, { adiantar: false });
+    expect(r.plano.tasks[0].dur).toBe(4); // dias 1 a 4 (hoje)
+    expect(r.plano.tasks[1].dia).toBe(5); // depois do revestimento
+    expect(r.plano.tasks[2].dia).toBeGreaterThanOrEqual(5); // a montagem não fica no passado
+    expect(r.fimDepois).toBeGreaterThan(r.fimAntes);
+  });
+});
+
+describe("as instruções no Hoje do técnico (teste da Obra)", () => {
+  it("«Montagem de louças» de um canalizador tem os passos das louças, não os da canalização", async () => {
+    const { instrucoesDe } = await import("../trabalhoObra");
+    const i = instrucoesDe({ nome: "Montagem de louças", sk: "Canalizador" });
+    expect(i.passos.join(" ")).toMatch(/sanita|base de duche|torneiras/i);
+    expect(instrucoesDe({ nome: "Canalização", sk: "Canalizador" }).passos.join(" ")).toMatch(/pontos de água/);
+  });
+});
+
+describe("arrancar a obra hoje (teste da Obra, 1026)", () => {
+  it("antes da data planeada, as tarefas e o plano do orçamento ficam nas datas em que estavam", async () => {
+    const { arrancarHoje } = await import("../motor");
+    const p = plano([T("Canalização", 1, 1, "a"), T("Louças", 3, 1, "b")], 0);
+    p.inicio = "2027-03-08"; p.estado = "aprovado"; p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
+    arrancarHoje(p, new Date(2027, 2, 3)); // qua 3/3: faltavam 3 dias úteis
+    expect(p.inicio).toBe("2027-03-03");
+    expect(p.tasks.map((t) => t.dia)).toEqual([4, 6]); // ter 9/3 e qui 11/3, como antes
+    expect(p.base!.map((b) => b.dia)).toEqual([4, 6]);
+    expect(derrapagem(p)).toBe(0);
+  });
+  it("depois da data planeada, anda tudo para hoje", async () => {
+    const { arrancarHoje } = await import("../motor");
+    const p = plano([T("Canalização", 1, 1, "a")], 0);
+    p.inicio = "2027-03-01";
+    arrancarHoje(p, new Date(2027, 2, 3));
+    expect([p.inicio, p.tasks[0].dia]).toEqual(["2027-03-03", 1]);
   });
 });
