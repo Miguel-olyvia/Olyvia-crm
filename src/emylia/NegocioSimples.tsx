@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pessoaDeOrigem } from "./PessoasV1";
 import { clienteDeOrigem } from "./ClientesV1";
-import { ArrowLeft, Check, Euro, Lock, Mail, MapPin, MessageCircle, MoreHorizontal, Pencil, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
+import { ArrowLeft, Check, Euro, Layers, Lock, Mail, MapPin, MessageCircle, MoreHorizontal, Pencil, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { BotaoAcessoPortal, EstadoAcessoPortal, temPortal } from "./AcessoPortalNegocio";
 import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { EditarCliente } from "./EditarCliente";
@@ -31,6 +31,7 @@ import { VisitasLista } from "./Visitas";
 import { camposMedida, medida, nfmt, nomeLinha, quandoEQuem } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 import { GuiaPassoCtx } from "./guiaPasso";
+import { TudoDoNegocio } from "./TudoDoNegocio";
 import { motion } from "framer-motion";
 import { MOLA, useReduzir } from "./movimento";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
@@ -76,6 +77,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   const d = S.deals.find((x) => x.id === S.deal)!;
   const T = d.orc ? tot(d, S) : null;
   const [ver, setVer] = useState<number | null>(null); // uma fase já feita, só para ler
+  const [tudo, setTudo] = useState(false); // 11/11: «Tudo do negócio» (todas as fases numa vista)
   const [portal, setPortal] = useState(false);
   const [anular, setAnular] = useState(false);
   // ao passar de fase: uma frase curta a dizer o que acabou e o que vem, que desaparece sozinha
@@ -129,6 +131,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       </button>
 
       {/* 9/11 (Rúben, telemóvel): o cabeçalho mais baixo: sem o ícone grande da fase e com o "Mais" ao lado do nome (era uma linha só para ele) */}
+      {tudo && <TudoDoNegocio ctx={ctx} d={d} fechar={() => setTudo(false)} irPara={(n) => { setTudo(false); setVer(n < d.fase ? n : null); window.scrollTo({ top: 0 }); }} />}
       <header className="mt-1 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:mt-2 sm:p-6">
         <div className="flex items-start justify-between gap-3 sm:gap-4">
           <div className="flex min-w-0 items-center gap-4">
@@ -137,6 +140,11 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
               <h1 className="break-words text-xl font-semibold tracking-tight text-foreground sm:text-3xl">{d.nome}</h1>
               <p className="text-base text-muted-foreground">{d.servico}{!d.linhaPorDefinir && d.servico !== nomeLinha(d) ? " · " + nomeLinha(d) : ""}</p>
               <ContactosCliente d={d} />
+              {/* 11/11 (Rúben: «ver toda a informação do negócio, de todas as fases, num sítio só»): por baixo do nome */}
+              <button type="button" onClick={() => setTudo(true)}
+                className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-input px-3 text-sm font-medium text-foreground/80 transition-colors hover:border-primary/40 hover:text-primary">
+                <Layers className="h-4 w-4" aria-hidden="true" />Ver tudo do negócio
+              </button>
             </div>
           </div>
           {/* 27/10: as ações de vez em quando ficam no "Mais"; o cabeçalho fica com o cliente e o progresso */}
