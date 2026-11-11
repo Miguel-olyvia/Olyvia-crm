@@ -45,7 +45,7 @@ const base = {
 };
 
 describe("custoDoMes", () => {
-  it("os avulsos (manuais) somam ao bruto e entram na base da TSU; o equipamento so pesa nos outros custos", () => {
+  it("os avulsos (manuais) somam ao bruto mas ficam fora da base da TSU; o equipamento so pesa nos outros custos", () => {
     const r = custoDoMes({
       ...base,
       avulsos: [avulso({ valor: 48 }), avulso({ id: "a2", valor: 52 })],
@@ -54,9 +54,9 @@ describe("custoDoMes", () => {
     expect(r.avulsos).toBe(100);
     expect(r.bruto).toBe(1300);
     expect(r.parteSujeita).toBe(1200);
-    expect(r.encargos).toBe(308.75);
+    expect(r.encargos).toBe(285);
     expect(r.outrosCustos).toBe(25);
-    expect(r.total).toBe(1633.75);
+    expect(r.total).toBe(1610);
   });
 
   it("km e ajudas ja vem na retribuicao: contam no custo uma so vez e ficam fora da base da TSU", () => {
@@ -81,8 +81,8 @@ describe("custoDoMes", () => {
       decomposicao: { salarioBase: 1200, divisor: 12, duodecimos: 200, subsidioAlimentacao: 0, horasExtra: 0, descontoFaltas: 0, iht: 300, km: null, ajudas: null },
     });
     expect(r.seguro).toBe(60);
-    expect(r.encargosTaxa).toBe(403.75);
-    expect(r.total).toBe(2163.75);
+    expect(r.encargosTaxa).toBe(332.5);
+    expect(r.total).toBe(2092.5);
   });
 
   it("um valor anulado deixa de contar, e um de outro mês não conta neste", () => {

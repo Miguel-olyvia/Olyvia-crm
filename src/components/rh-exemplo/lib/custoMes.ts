@@ -3,7 +3,7 @@
  * nenhum: recebe a retribuição do mês, os valores avulsos (manuais) da pessoa e o seguro do cargo, e devolve cada linha do quadro (fluxo 11).
  *
  * A retribuição do mês JÁ leva os quilómetros e as ajudas de custo (vêm do processamento); os avulsos são só os lançamentos
- * manuais. A TSU incide sobre a retribuição sem km nem ajudas, e o seguro só sobre o salário base: ver `contasDoMes.ts`.
+ * manuais. A TSU incide só sobre o salário base e os subsídios, e o seguro só sobre o salário base: ver `contasDoMes.ts`.
  * O equipamento (lista própria, `equipamentos.ts`) nunca entra no bruto: pesa só nos outros custos, conforme «como conta».
  */
 import { arredondar, horasPrevistasDoMes, somarMeses, taxaEfetiva, type MesIso } from "./custo";

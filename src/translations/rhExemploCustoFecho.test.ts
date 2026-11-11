@@ -32,8 +32,8 @@ describe("rhExemploCustoFecho", () => {
     }
   });
 
-  it("a nota da TSU diz que a base inclui alimentacao, IHT e horas extra e manda confirmar com a contabilidade", () => {
-    expect(textos.pt["rhContas.notaTsu"]).toBe("A base da TSU é a retribuição do mês sem km nem ajudas de custo (dentro dos limites legais); inclui o subsídio de alimentação, o IHT e as horas extra. Confirme com a contabilidade.");
+  it("a nota da TSU diz que a base e o salario base mais os subsidios, deixa de fora extras, IHT, km, ajudas e valores lancados e manda confirmar com a contabilidade", () => {
+    expect(textos.pt["rhContas.notaTsu"]).toBe("A base da TSU é o salário base mais os subsídios (alimentação, férias e Natal), menos o desconto das faltas; ficam de fora as horas extra, o IHT, os km, as ajudas de custo e os valores lançados à mão. Confirme com a contabilidade.");
   });
 
   it("a aba so mostra o custo do mes: ja nao ha textos de «para comparar», custo por hora nem acumulados", () => {

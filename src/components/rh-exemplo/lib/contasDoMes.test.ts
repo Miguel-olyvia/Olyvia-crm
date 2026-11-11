@@ -93,10 +93,11 @@ describe("contasDoMes: o caso completo", () => {
     expect(linha(c, "retribuicao")).toMatchObject({ tipo: "subtotal", valor: 1766.67 });
   });
 
-  it("a TSU incide sobre a retribuicao SEM km nem ajudas (os manuais entram): 23,75 % x 1 676,67 = 398,21", () => {
-    expect(c.baseTsu).toBe(1676.67);
-    expect(linha(c, "tsu")?.valor).toBe(398.21);
-    expect(normal(linha(c, "tsu")?.formula)).toBe("23,75 % × 1 676,67 € = 398,21 €");
+  it("a TSU incide so sobre o salario base e os subsidios (menos as faltas): 23,75 % x 1 236,67 = 293,71", () => {
+    // 1000 + 166,67 (duodecimos) + 100 (alimentacao) - 30 (faltas); ficam fora extras, IHT, km, ajudas e manuais.
+    expect(c.baseTsu).toBe(1236.67);
+    expect(linha(c, "tsu")?.valor).toBe(293.71);
+    expect(normal(linha(c, "tsu")?.formula)).toBe("23,75 % × 1 236,67 € = 293,71 €");
   });
 
   it("o seguro incide so sobre o salario base: 5 % x 1 000,00 = 50,00", () => {
@@ -104,9 +105,9 @@ describe("contasDoMes: o caso completo", () => {
     expect(normal(linha(c, "seguro")?.formula)).toBe("5 % × 1 000,00 € = 50,00 €");
   });
 
-  it("a soma das linhas bate com o total (retribuicao + TSU + seguro + equipamentos = 2 239,88)", () => {
-    expect(c.total).toBe(2239.88);
-    expect(linha(c, "total")).toMatchObject({ tipo: "total", valor: 2239.88 });
+  it("a soma das linhas bate com o total (retribuicao + TSU + seguro + equipamentos = 2 135,38)", () => {
+    expect(c.total).toBe(2135.38);
+    expect(linha(c, "total")).toMatchObject({ tipo: "total", valor: 2135.38 });
     expect(somaDasParcelas(c)).toBe(cent(c.total ?? Number.NaN));
   });
 
@@ -126,17 +127,17 @@ describe("contasDoMes: casos", () => {
     expect(linha(contasDoMes(entrada({ seguroPct: 0 })), "seguro")?.nota).toBe("semSeguro");
   });
 
-  it("pessoa sem direitos: IHT, km e ajudas nao aparecem, e a TSU incide sobre toda a retribuicao", () => {
+  it("pessoa sem direitos: IHT, km e ajudas nao aparecem, e a TSU incide sobre o salario base e os subsidios (as horas extra ficam fora)", () => {
     const d = decomposicaoDoResultado({ ...RESULTADO, linhasRegra: [] });
     const c = contasDoMes(entrada({ decomposicao: d, retribuicaoMes: 1286.67, manuais: 0, equipamentos: 0 }));
     for (const chave of ["iht", "km", "ajudas", "manuais", "equipamentos"]) expect(linha(c, chave)).toBeUndefined();
-    expect(c.baseTsu).toBe(1286.67);
+    expect(c.baseTsu).toBe(1236.67);
     expect(somaDasParcelas(c)).toBe(cent(c.total ?? Number.NaN));
   });
 
   it("a taxa desta pessoa (excecao) manda na TSU e a linha di-lo", () => {
     const c = contasDoMes(entrada({ taxaPct: 10, taxaDaPessoa: true }));
-    expect(linha(c, "tsu")?.valor).toBe(167.67);
+    expect(linha(c, "tsu")?.valor).toBe(123.67);
     expect(linha(c, "tsu")?.nota).toBe("taxaDaPessoa");
   });
 
@@ -231,6 +232,87 @@ describe("contasDoMes: formulas que so se mostram quando reproduzem o valor ao c
   });
 });
 
+describe("contasDoMes: a base da TSU e so o salario base e os subsidios", () => {
+  /** Uma pessoa de 1000 de base, sem duodecimos (divisor 14); a retribuicao e exactamente a soma das partes. */
+  const baseTsuDe = (resultado: Partial<ResultadoParaContas>, extras: Partial<EntradaContas> = {}) => {
+    const r: ResultadoParaContas = { baseMes: 1000, divisorDuodecimos: 14, linhasAutomaticas: [], linhasRegra: [], descontoFaltas: 0, subsidioAlimentacao: 0, ...resultado };
+    const partes = r.linhasAutomaticas.concat().reduce((s, l) => s + l.valor, 0) + r.linhasRegra.reduce((s, l) => s + l.valor, 0);
+    const retribuicaoMes = Math.round((1000 + partes + r.subsidioAlimentacao + (r.subsidioFerias ?? 0) + (r.subsidioNatal ?? 0) - r.descontoFaltas) * 100) / 100;
+    return contasDoMes(entrada({ retribuicaoMes, decomposicao: decomposicaoDoResultado(r), manuais: 0, equipamentos: 0, ...extras }));
+  };
+
+  it("horas extra (incluindo noturnas) ficam fora da base", () => {
+    const c = baseTsuDe({ linhasAutomaticas: [{ origem: "horas_extra", valor: 50 }], linhasRegra: [{ tipo: "noturnas", faixa: 0, quantidade: 4, valor: 20 }] });
+    expect(c.bruto).toBe(1070);
+    expect(c.baseTsu).toBe(1000);
+    expect(c.tsu).toBe(237.5);
+  });
+
+  it("IHT fica fora da base", () => {
+    const c = baseTsuDe({ linhasRegra: [{ tipo: "iht", faixa: null, quantidade: null, valor: 250 }] });
+    expect(c.bruto).toBe(1250);
+    expect(c.baseTsu).toBe(1000);
+  });
+
+  it("km e ajudas ficam fora da base", () => {
+    const c = baseTsuDe({ linhasRegra: [{ tipo: "km", faixa: null, quantidade: 100, valor: 40 }, { tipo: "ajudas", faixa: null, quantidade: 2, valor: 50 }] });
+    expect(c.bruto).toBe(1090);
+    expect(c.baseTsu).toBe(1000);
+    expect(c.kmEAjudas).toBe(90);
+  });
+
+  it("lancamentos manuais ficam fora da base (mas contam na retribuicao e no total)", () => {
+    const sem = baseTsuDe({}, { manuais: 0 });
+    const com = baseTsuDe({}, { manuais: 120 });
+    expect(com.baseTsu).toBe(1000);
+    expect(com.baseTsu).toBe(sem.baseTsu);
+    expect(com.tsu).toBe(sem.tsu);
+    expect(com.bruto).toBe(1120);
+    expect(com.total).toBe(1120 + 237.5 + 50);
+  });
+
+  it("os subsidios de alimentacao, ferias e Natal e os duodecimos entram na base", () => {
+    // 1000 de base a 100 % em duodecimos (divisor 12): duodecimos 166,67; mais 100 + 750 + 100 de subsidios.
+    const r: ResultadoParaContas = { baseMes: (1000 * 14) / 12, divisorDuodecimos: 12, linhasAutomaticas: [], linhasRegra: [], descontoFaltas: 0, subsidioAlimentacao: 100, subsidioFerias: 750, subsidioNatal: 100 };
+    const c = contasDoMes(entrada({ retribuicaoMes: 2116.67, decomposicao: decomposicaoDoResultado(r), manuais: 0, equipamentos: 0 }));
+    expect(c.baseTsu).toBe(2116.67);
+    expect(c.tsu).toBe(502.71);
+    expect(normal(linha(c, "tsu")?.formula)).toBe("23,75 % × 2 116,67 € = 502,71 €");
+  });
+
+  it("cada subsidio conta por si: so alimentacao, so ferias, so Natal", () => {
+    expect(baseTsuDe({ subsidioAlimentacao: 100 }).baseTsu).toBe(1100);
+    expect(baseTsuDe({ subsidioFerias: 500 }).baseTsu).toBe(1500);
+    expect(baseTsuDe({ subsidioNatal: 500 }).baseTsu).toBe(1500);
+  });
+
+  it("as faltas abatem a base", () => {
+    expect(baseTsuDe({ descontoFaltas: 30 }).baseTsu).toBe(970);
+  });
+
+  it("a base nunca fica negativa (faltas acima do salario)", () => {
+    const c = baseTsuDe({ baseMes: 100, descontoFaltas: 300 }, { retribuicaoMes: 0 });
+    expect(c.baseTsu).toBe(0);
+    expect(c.tsu).toBe(0);
+  });
+
+  it("estimativa pelo cargo: a base e so o salario base estimado; os manuais ficam fora", () => {
+    const c = contasDoMes(entrada({ retribuicaoMes: 1200, decomposicao: null, estimado: true, manuais: 30, equipamentos: 0 }));
+    expect(c.baseTsu).toBe(1200);
+    expect(c.tsu).toBe(285);
+    expect(c.bruto).toBe(1230);
+    expect(c.kmEAjudas).toBe(0);
+  });
+
+  it("o total continua a ser retribuicao + TSU + seguro + equipamentos e a soma das linhas bate", () => {
+    const c = baseTsuDe({ linhasAutomaticas: [{ origem: "horas_extra", valor: 50 }], subsidioAlimentacao: 100 }, { manuais: 20, equipamentos: 10, seguroPct: 5 });
+    // retribuicao 1150 + manuais 20; base 1100; TSU 261,25; seguro 50; equipamentos 10
+    expect(c.baseTsu).toBe(1100);
+    expect(c.total).toBe(1170 + 261.25 + 50 + 10);
+    expect(somaDasParcelas(c)).toBe(cent(c.total ?? Number.NaN));
+  });
+});
+
 describe("contasDoMes: faltas acima da retribuicao (o processamento corta o bruto a 0)", () => {
   /** 100 de base, sem divisor de duodecimos (14), 300 de faltas: as partes dao -200 e o processamento devolve 0. */
   const faltasAltas = (): DecomposicaoRetribuicao => {
@@ -280,7 +362,7 @@ describe("contasDoMes: manuais e seguro desconhecido", () => {
     const c = contasDoMes(entrada({ seguroPct: null, seguroDesconhecido: true }));
     expect(linha(c, "seguro")).toMatchObject({ valor: 0, nota: "cargoDesconhecido" });
     expect(c.seguro).toBe(0);
-    expect(c.total).toBe(2189.88);
+    expect(c.total).toBe(2085.38);
     expect(somaDasParcelas(c)).toBe(cent(c.total ?? Number.NaN));
   });
 
