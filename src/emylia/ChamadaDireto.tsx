@@ -155,7 +155,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   // o guia: a cada minuto revisto (umas falas revistas novas e uns segundos desde o último), um pedido pequeno, um de cada vez
   const guiaAtivo = vivo === "a_ouvir" || fase === "a_transcrever";
   useEffect(() => {
-    if (!guiaAtivo || guiaNoAr.current || !devePedirGuia(falas, guiaUltimo.current, Date.now())) return;
+    if (!guiaAtivo || guiaNoAr.current || !devePedirGuia(falas, guiaUltimo.current, Date.now(), vivo === "a_ouvir" ? undefined : 0)) return;
     const enviadas = falasParaGuia(falas);
     guiaNoAr.current = true; setGuiaAPensar(true);
     guiaUltimo.current = { revistas: falas.filter((f) => f.revista).length, em: Date.now() };
@@ -163,7 +163,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
       .then((g) => { guiaTempos.current = enviadas.map((f) => f.inicio); setGuia((antes) => juntarGuia(antes, g)); setGuiaErro(null); })
       .catch((e) => setGuiaErro((e as Error).message))
       .finally(() => { guiaNoAr.current = false; setGuiaAPensar(false); });
-  }, [falas, guiaAtivo, modo]);
+  }, [falas, guiaAtivo, modo, vivo, guiaAPensar]);
 
   async function iniciar(continuar = false) {
     if (!continuar) limpar();
@@ -439,7 +439,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
 
       {daChamada && !aOuvir ? <div className="mt-4"><InsightsConversa dados={daChamada} tipo="chamada" compacto /></div> : null}
 
-      {guiaAtivo || (guia && fase === "a_preencher") ? (
+      {guiaAtivo ? (
         <GuiaAoVivo guia={guia} temas={TEMAS_GUIA[modo]} aPensar={guiaAPensar} erro={guiaErro}
           tempoDaLinha={(l) => guiaTempos.current[l]} onIrPara={irPara} />
       ) : null}

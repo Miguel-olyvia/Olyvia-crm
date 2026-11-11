@@ -20,6 +20,8 @@ describe("guia ao vivo: quando se pede", () => {
     expect(devePedirGuia(seis, ultimo, 1000 + GUIA_INTERVALO_MS - 1)).toBe(false); // cedo demais
     expect(devePedirGuia(tres, ultimo, 1000 + GUIA_INTERVALO_MS * 2)).toBe(false); // nada de novo
     expect(devePedirGuia(seis, ultimo, 1000 + GUIA_INTERVALO_MS)).toBe(true);
+    // num ficheiro não há intervalo: só falas novas
+    expect(devePedirGuia(seis, ultimo, 1001, 0)).toBe(true);
   });
 });
 

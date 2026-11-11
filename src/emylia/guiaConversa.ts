@@ -37,12 +37,13 @@ export const TEMAS_GUIA: Record<"chamada" | "visita", TemaGuia[]> = {
 /** Quantas falas revistas novas pedem um guia novo, e de quanto em quanto tempo no mínimo (o modelo pequeno responde em ~2 a 4 s). */
 export const GUIA_FALAS_NOVAS = 3, GUIA_INTERVALO_MS = 25_000;
 
-/** Pede-se um guia novo? Só com falas revistas novas desde o último (as provisórias ainda vão mudar) e com tempo desde o último pedido. */
-export function devePedirGuia(falas: readonly Fala[], ultimo: { revistas: number; em: number } | null, agora: number): boolean {
+/** Pede-se um guia novo? Só com falas revistas novas desde o último (as provisórias ainda vão mudar) e com tempo desde o último pedido.
+ *  Num ficheiro (os blocos chegam em segundos, em paralelo) o intervalo é 0: pede-se assim que o anterior responde. */
+export function devePedirGuia(falas: readonly Fala[], ultimo: { revistas: number; em: number } | null, agora: number, intervalo = GUIA_INTERVALO_MS): boolean {
   const revistas = falas.filter((f) => f.revista).length;
   if (revistas < GUIA_FALAS_NOVAS) return false;
   if (!ultimo) return true;
-  return revistas - ultimo.revistas >= GUIA_FALAS_NOVAS && agora - ultimo.em >= GUIA_INTERVALO_MS;
+  return revistas - ultimo.revistas >= GUIA_FALAS_NOVAS && agora - ultimo.em >= intervalo;
 }
 
 /** As falas que vão ao guia: as revistas e, no fim, as provisórias que ainda não foram revistas (o que se acabou de dizer conta). */
