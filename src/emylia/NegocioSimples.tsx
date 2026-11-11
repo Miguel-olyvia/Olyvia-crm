@@ -35,6 +35,8 @@ import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
 import { useParamUrl } from "./usarParamUrl";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { passoDe, podeVerCustos } from "./permissoes";
+// FERRAMENTAS-TESTE (temporário, remover antes da main)
+import { FerramentasTeste } from "./FerramentasTeste";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
@@ -202,6 +204,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
           </p>
         </div>
       </header>
+      {/* FERRAMENTAS-TESTE (temporário, remover antes da main) */}
+      <FerramentasTeste ctx={ctx} d={d} />
       {/* 23/10 (2.0): o email que falta para enviar ao portal e o estado da conta do cliente */}
       {editar && <EditarCliente ctx={ctx} d={d} fechar={() => setEditar(false)} />}
       <div className="mt-4 empty:hidden"><EstadoAcessoPortal ctx={ctx} d={d} /></div>
