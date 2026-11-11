@@ -1042,6 +1042,9 @@ const Suppliers = () => {
     suppliers.filter((s) => s.organization_id === statsOrgId).map((s) => s.id),
   );
   const rowStats = rowStatsQuery.data ?? null;
+  // A ficha abre com suppliers.view (a base lê o fornecedor, o portal e o contrato por .view/.portal_manage/.contract_manage, nunca
+  // por .edit); suppliers.edit só decide se o separador Dados se pode alterar.
+  const canOpenSupplier = hasPermission("suppliers.view");
   const canEditSupplier = hasPermission("suppliers.edit");
 
   /** Abre a ficha pelo mesmo caminho do link do sino (?open=&tab=&prices=). */
@@ -1059,7 +1062,7 @@ const Suppliers = () => {
   };
 
   const rowMenu = (supplier: Supplier): RowActionEntry[] => [
-    { label: "Abrir ficha", icon: Eye, onSelect: () => void handleEdit(supplier), permission: "suppliers.edit" },
+    { label: "Abrir ficha", icon: Eye, onSelect: () => void handleEdit(supplier), permission: "suppliers.view" },
     {
       label: "Editar dados",
       icon: Pencil,
@@ -1076,7 +1079,9 @@ const Suppliers = () => {
       label: "Portal do fornecedor",
       icon: Users,
       onSelect: () => openSupplierVia(supplier.id, { tab: "portal" }),
-      permission: "suppliers.edit",
+      permission: ["suppliers.view", "suppliers.portal_manage"],
+      requireAllPermissions: true,
+      hideWithoutPermission: true,
     },
     {
       label: "Catálogo",
@@ -1223,7 +1228,7 @@ const Suppliers = () => {
               {awaitingList.map((s, i) => (
                 <span key={s.id}>
                   {i ? ", " : ""}
-                  {canEditSupplier ? (
+                  {canOpenSupplier ? (
                     <button
                       type="button"
                       className="rounded-sm font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1434,7 +1439,7 @@ const Suppliers = () => {
                       // undefined = sem dados (outra org / a carregar); null = sem contrato.
                       const contractState = inStatsOrg && contractStatuses ? contractStatuses.get(supplier.id) ?? null : undefined;
                       const isDeleted = !!supplier.deleted_at;
-                      const rowOpens = !isDeleted && canEditSupplier;
+                      const rowOpens = !isDeleted && canOpenSupplier;
                       const hasContact = !!(supplier.contact_person || supplier.email || supplier.phone);
                       const companyName = (supplier as Supplier & { anew_organizations?: { name?: string } | null }).anew_organizations?.name;
                       return (
@@ -1486,7 +1491,7 @@ const Suppliers = () => {
                             <SupplierPortalBadge state={portalState} />
                           </TableCell>
                           <TableCell>
-                            {contractState && canEditSupplier && !isDeleted ? (
+                            {contractState && canOpenSupplier && !isDeleted ? (
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1503,7 +1508,7 @@ const Suppliers = () => {
                             )}
                           </TableCell>
                           <TableCell>
-                            {canEditSupplier ? (
+                            {canOpenSupplier ? (
                               <SupplierPricesPending
                                 count={prices}
                                 onOpen={() => openSupplierVia(supplier.id, { tab: "portal", prices: "pending" })}
@@ -1534,7 +1539,7 @@ const Suppliers = () => {
                                 primary={{
                                   label: "Abrir",
                                   onClick: () => void handleEdit(supplier),
-                                  permission: "suppliers.edit",
+                                  permission: "suppliers.view",
                                 }}
                                 items={rowMenu(supplier)}
                                 menuLabel={`Mais ações para ${supplier.name}`}
@@ -1586,6 +1591,7 @@ const Suppliers = () => {
           submitLabel={editingId ? t("suppliers.form.update") : t("suppliers.form.create")}
           focusPriceChanges={focusPriceChanges}
           canManagePortal={canManagePortal}
+          canEdit={editingId ? canEditSupplier : hasPermission("suppliers.create")}
           fallbackOrganizationId={activeCompany?.id ?? null}
           dataForm={
             <SupplierDataForm
@@ -1597,6 +1603,7 @@ const Suppliers = () => {
               onOrganizationChange={setOrganizationSelection}
               onSubmit={handleSubmit}
               t={t}
+              readOnly={editingId ? !canEditSupplier : !hasPermission("suppliers.create")}
               portalLinked={editingPortalLinked}
               onGoToPortal={editingId ? () => setFormTab("portal") : undefined}
               conditionsLock={editingId ? editingConditionsLock : null}

@@ -47,7 +47,7 @@ function MenuLinha({ r, a }: { r: LinhaStock; a: AcoesLinha }) {
     { label: "Editar", icone: <Pencil className="ic" aria-hidden="true" />, desativado: semGerir, run: () => a.editar(r.id) },
     { label: "Registar ajuste", icone: <ClipboardList className="ic" aria-hidden="true" />, desativado: semGerir, run: () => a.mov({ type: "adjust", sku: r.sku, wh: r.wh }) },
     { label: "Ver reservas", icone: <Eye className="ic" aria-hidden="true" />, desativado: !reservadoEm(db, r.sku, r.wh) || !can("contracts.view"), run: () => ir({ aba: "ec", f: { q: r.sku } }) }, "-",
-    { label: "Eliminar", icone: <Trash2 className="ic" aria-hidden="true" />, perigo: true, desativado: semGerir, fonte: "rpc_delete_stock", run: () => a.eliminar(r.id) },
+    { label: "Eliminar", icone: <Trash2 className="ic" aria-hidden="true" />, perigo: true, desativado: semGerir || r.qty !== 0, porque: r.qty !== 0 ? "Faz primeiro o ajuste para 0" : undefined, fonte: "rpc_delete_stock", run: () => a.eliminar(r.id) },
   ]} />;
 }
 

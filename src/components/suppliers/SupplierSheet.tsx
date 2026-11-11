@@ -83,6 +83,8 @@ interface SupplierSheetProps {
   focusPriceChanges: boolean;
   /** suppliers.portal_manage — a mesma condição do separador Portal de antes. */
   canManagePortal: boolean;
+  /** suppliers.edit (ficha existente) ou suppliers.create (ficha nova). Sem ela, Dados é só de leitura e não tem «Guardar». */
+  canEdit: boolean;
   /** Organização a usar quando o fornecedor não tem uma (empresa ativa). */
   fallbackOrganizationId: string | null;
 }
@@ -99,6 +101,7 @@ export function SupplierSheet({
   submitLabel,
   focusPriceChanges,
   canManagePortal,
+  canEdit,
   fallbackOrganizationId,
 }: SupplierSheetProps) {
   const isNew = !supplier;
@@ -378,7 +381,7 @@ export function SupplierSheet({
 
         {/* Rodapé fixo */}
         <div className="flex flex-wrap justify-end gap-2 border-t bg-card px-4 py-3 sm:px-5">
-          {current === "dados" ? (
+          {current === "dados" && canEdit ? (
             <>
               <Button type="button" variant="outline" onClick={onClose}>
                 {cancelLabel}

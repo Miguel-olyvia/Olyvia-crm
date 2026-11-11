@@ -65,6 +65,7 @@ import CategorySubcategoryFilter, { UNCATEGORIZED_CATEGORY_VALUE } from "@/compo
 import { useProductCategories } from "@/hooks/useProductCategories";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { gravarDefinicoesImportadas } from "@/lib/inventario/definicoesImportacao";
+import { stockDeleteAction } from "@/lib/inventario/stockEliminar";
 import { PedidosCarrinhasPainel } from "@/components/frota/PedidosCarrinha";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
@@ -1071,6 +1072,7 @@ const Stocks = () => {
               destructive: true,
               onSelect: () => handleDelete(stock.id),
               permission: "inventory.delete",
+              ...stockDeleteAction(stock.quantity, t),
             },
           ]}
         />

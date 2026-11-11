@@ -201,6 +201,39 @@ describe("10/11: EXIGE_TAMBEM («todas de»)", () => {
   });
 });
 
+describe("11/11: receber mercadoria por leitura exige as três juntas (F13)", () => {
+  const RECEBER = "receiving.receive";
+  const RECEBER_PO = "purchase_orders.receive";
+  const EDITAR_STOCK = "inventory.edit";
+
+  it("exige purchase_orders.receive e inventory.edit, e continua a depender de receiving.view", () => {
+    expect(exigidasDe(RECEBER)).toEqual([RECEBER_PO, EDITAR_STOCK]);
+    expect(dependenciasDe(RECEBER)).toEqual(["receiving.view"]);
+  });
+
+  it("não se marca sem as outras duas, e diz quais faltam", () => {
+    const cat = catalogo();
+    const base = ["receiving.view", RECEBER_PO];
+    expect(podeAlterar(RECEBER, base, cat)).toBe(false);
+    expect(alternarPermissao(base, RECEBER, cat)).toEqual(base);
+    expect(emFaltaDetalhe(RECEBER, base, cat)).toEqual({ qualquerDe: [], todas: [EDITAR_STOCK] });
+    expect(emFaltaDetalhe(RECEBER, ["receiving.view"], cat)).toEqual({ qualquerDe: [], todas: [RECEBER_PO, EDITAR_STOCK] });
+    const completo = [...base, EDITAR_STOCK];
+    expect(podeAlterar(RECEBER, completo, cat)).toBe(true);
+    expect(alternarPermissao(completo, RECEBER, cat)).toEqual([...completo, RECEBER]);
+  });
+
+  it("tirar inventory.edit ou purchase_orders.receive arrasta receiving.receive; a outra direção não", () => {
+    const cat = catalogo();
+    const tem = ["receiving.view", RECEBER_PO, EDITAR_STOCK, RECEBER];
+    expect(alternarPermissao(tem, EDITAR_STOCK, cat)).not.toContain(RECEBER);
+    expect(alternarPermissao(tem, RECEBER_PO, cat)).not.toContain(RECEBER);
+    // Não se exige o contrário: purchase_orders.receive continua a marcar-se sozinha (âmbito inalterado).
+    expect(exigidasDe(RECEBER_PO)).toEqual([]);
+    expect(alternarPermissao(tem, RECEBER, cat)).toEqual(["receiving.view", RECEBER_PO, EDITAR_STOCK]);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // 3: em uso ⇔ verificado
 // ---------------------------------------------------------------------------------------------------------------------------------

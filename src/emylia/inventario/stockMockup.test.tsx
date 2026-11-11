@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import InventarioPagina from "./InventarioPagina";
 import MenuInventario from "./MenuInventario";
 import type { AbaInv } from "./ctxInv";
-import { esquecerInventario, lerInventario } from "./loja";
+import { esquecerInventario, executar, lerInventario } from "./loja";
 import { esquecerPerfil, mudarPerfil } from "./perfil";
 
 function Casa({ inicio }: { inicio: AbaInv }) {
@@ -63,18 +63,35 @@ describe("Existências", () => {
     expect(await screen.findByText(/O mínimo não pode ser maior que o máximo\.|Gravado\./)).toBeInTheDocument();
   });
 
-  it("o menu Mais ações tem Editar, Registar ajuste, Ver reservas e Eliminar; eliminar com stock recusa", async () => {
+  it("o menu Mais ações tem Editar, Registar ajuste, Ver reservas e Eliminar; com stock, Eliminar fica desativado e diz porquê", async () => {
     render(<Casa inicio="stock" />);
     fireEvent.click(await screen.findByRole("button", { name: "Por armazém" }));
     fireEvent.click(document.querySelectorAll<HTMLElement>('button[aria-label="Mais ações"]')[0]);
     const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitem").map((m) => m.querySelector("span")?.textContent)).toEqual(["Editar", "Registar ajuste", "Ver reservas", "Eliminar"]);
-    expect(within(menu).getByRole("menuitem", { name: /Eliminar/ })).toHaveClass("danger");
-    fireEvent.click(within(menu).getByRole("menuitem", { name: /Eliminar/ }));
-    const dlg = await screen.findByRole("dialog", { name: "Eliminar linha de stock" });
-    expect(within(dlg).getByText(/só pode ser eliminada com quantidade 0/)).toBeInTheDocument();
-    fireEvent.click(within(dlg).getByRole("button", { name: "Eliminar" }));
-    expect(await within(dlg).findByText(/Tem \d+ un\. Registe um ajuste/)).toBeInTheDocument();
+    const eliminar = within(menu).getByRole("menuitem", { name: /Eliminar/ });
+    expect(eliminar).toHaveClass("danger");
+    expect(eliminar).toBeDisabled();
+    expect(eliminar.textContent).toContain("Faz primeiro o ajuste para 0");
+  });
+
+  it("com quantidade 0, Eliminar fica ativo e abre a confirmação", async () => {
+    executar((db) => { db.stocks[0].qty = 0; });
+    render(<Casa inicio="stock" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Por armazém" }));
+    const gatilhos = [...document.querySelectorAll<HTMLElement>('button[aria-label="Mais ações"]')];
+    let ativo: HTMLElement | null = null;
+    for (const g of gatilhos) {
+      fireEvent.click(g);
+      const menu = await screen.findByRole("menu");
+      const e = within(menu).getByRole("menuitem", { name: /Eliminar/ });
+      if (!(e as HTMLButtonElement).disabled) { ativo = e; break; }
+      fireEvent.keyDown(document, { key: "Escape" });
+    }
+    expect(ativo).not.toBeNull();
+    expect(ativo!.textContent).not.toContain("Faz primeiro o ajuste para 0");
+    fireEvent.click(ativo!);
+    expect(await screen.findByRole("dialog", { name: "Eliminar linha de stock" })).toBeInTheDocument();
   });
 
   it("Adicionar stock valida o produto e Importar compara com a exportação atual", async () => {
