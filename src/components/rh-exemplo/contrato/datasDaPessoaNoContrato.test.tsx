@@ -40,14 +40,14 @@ beforeEach(() => {
   localStorage.setItem("language", "pt");
 });
 
-function montar(vinculos: PessoaVinculo[], opcoes: { guardar?: ReturnType<typeof vi.fn>; provisoria?: string | null; podeEditar?: boolean; carregando?: boolean; saida?: string | null } = {}) {
+function montar(vinculos: PessoaVinculo[], opcoes: { guardar?: ReturnType<typeof vi.fn>; provisoria?: string | null; podeEditar?: boolean; carregando?: boolean; saida?: string | null; antiguidade?: string | null } = {}) {
   const onGuardarVinculo = opcoes.guardar ?? vi.fn().mockResolvedValue(null);
   render(
     <PessoaContratoTab
       pessoaId="p1" organizationId="org" vinculos={vinculos} retribuicao={null} podeEditar={opcoes.podeEditar ?? true}
       podeVerRetribuicao={false} podeEditarRetribuicao={false} podeCorrigirRetribuicao={false} cargo={null} periodosDosCargos={[]}
       podeCorrigirHoras={false} podeAnexarContratoAssinado={false} vinculosOpcoesDocumento={[]} saving={false}
-      onGuardarVinculo={onGuardarVinculo} dataAdmissaoProvisoria={opcoes.provisoria ?? null} carregando={opcoes.carregando} dataSaidaGravada={opcoes.saida ?? null}
+      onGuardarVinculo={onGuardarVinculo} dataAdmissaoProvisoria={opcoes.provisoria ?? null} carregando={opcoes.carregando} dataSaidaGravada={opcoes.saida ?? null} dataAntiguidadeGravada={opcoes.antiguidade ?? null}
     />,
   );
   return onGuardarVinculo;
@@ -175,6 +175,15 @@ describe("Contratos (rh-exemplo): resumo so de leitura da contratacao e da saida
     const resumo = screen.getByTestId("resumo-datas-pessoa");
     expect(screen.getByTestId("resumo-data-saida")).toHaveTextContent("2024-05-01");
     expect(resumo).not.toHaveTextContent("hr.contrato.datasPessoa.provisoria");
+  });
+
+  it("pessoa que saiu e so tem um contrato futuro depois da saida: o resumo mostra as gravadas (contratacao e saida)", () => {
+    montar([{ ...VINCULO, estado: "futuro", data_inicio: "2027-01-01" } as PessoaVinculo], { provisoria: "2020-01-01", antiguidade: "2019-01-01", saida: "2024-05-01" });
+    const resumo = screen.getByTestId("resumo-datas-pessoa");
+    expect(resumo).toHaveTextContent("2020-01-01");
+    expect(resumo).not.toHaveTextContent("2027-01-01");
+    expect(screen.getByTestId("resumo-data-saida")).toHaveTextContent("2024-05-01");
+    expect(within(resumo).queryByRole("status")).toBeNull();
   });
 
   it("com contrato vivo a saida gravada e ignorada", () => {

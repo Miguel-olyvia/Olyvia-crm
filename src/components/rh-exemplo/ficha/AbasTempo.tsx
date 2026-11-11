@@ -20,7 +20,7 @@ export function AbaContratos({ ficha, pessoa, ctx }: AbaProps) {
       periodosDosCargos={ctx.periodosDosCargos} periodosLoading={ctx.cargosPorChegar} periodosError={ctx.periodosError}
       onRetribuicaoMudou={recarregar} onContratoMudou={recarregar} podeCorrigirHoras={w.podeCorrigirHorasVinculo}
       podeAnexarContratoAssinado={ctx.permissoesDocumentos.emitir} vinculosOpcoesDocumento={ctx.vinculosOpcoesDocumento}
-      dataAdmissaoProvisoria={pessoa.data_admissao} dataSaidaGravada={pessoa.data_saida} carregando={ficha.loading === true} saving={ficha.saving} onGuardarVinculo={ficha.saveVinculo}
+      dataAdmissaoProvisoria={pessoa.data_admissao} dataSaidaGravada={pessoa.data_saida} dataAntiguidadeGravada={pessoa.data_antiguidade} carregando={ficha.loading === true} saving={ficha.saving} onGuardarVinculo={ficha.saveVinculo}
     />
   );
 }

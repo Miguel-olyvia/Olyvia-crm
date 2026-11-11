@@ -15,13 +15,17 @@ interface ContratoDatasDaPessoaProps {
   dataAdmissaoProvisoria: string | null;
   /** `pessoas.data_saida`: sem contrato vivo a base mantem-na (barreira de acesso), por isso o resumo mostra-a. */
   dataSaidaGravada?: string | null;
+  /** `pessoas.data_antiguidade`: com so contratos `futuro` depois de uma saida, as tres datas ficam como estao gravadas. */
+  dataAntiguidadeGravada?: string | null;
   /** Os contratos ainda a carregar: nao se sabe se falta contrato, por isso nao se avisa (nao pisca). */
   carregando?: boolean;
 }
 
-export function ContratoDatasDaPessoa({ vinculos, dataAdmissaoProvisoria, dataSaidaGravada = null, carregando = false }: ContratoDatasDaPessoaProps) {
+export function ContratoDatasDaPessoa({ vinculos, dataAdmissaoProvisoria, dataSaidaGravada = null, dataAntiguidadeGravada = null, carregando = false }: ContratoDatasDaPessoaProps) {
   const { t } = useTranslation();
-  const datas = datasDaPessoa(vinculos, dataSaidaGravada);
+  const datas = datasDaPessoa(vinculos, {
+    contratacao: dataAdmissaoProvisoria, antiguidade: dataAntiguidadeGravada, saida: dataSaidaGravada,
+  });
   // Provisoria so se ha uma admissao provisoria: pessoa nova sem contrato nem admissao mostra tudo vazio.
   const semContrato = datas.data_admissao === null && !carregando && dataAdmissaoProvisoria !== null;
   const vazio = t("hr.campos.semValor");

@@ -173,6 +173,8 @@ interface PessoaContratoTabProps {
   dataAdmissaoProvisoria?: string | null;
   /** `pessoas.data_saida`: sem contrato vivo mantem-se (D8 revista) e o resumo mostra-a. */
   dataSaidaGravada?: string | null;
+  /** `pessoas.data_antiguidade`: ver `ContratoDatasDaPessoa`. */
+  dataAntiguidadeGravada?: string | null;
   /** Os contratos ainda a carregar: nao se sabe se falta contrato, por isso o resumo nao avisa de contratacao provisoria. */
   carregando?: boolean;
   saving: boolean;
@@ -201,6 +203,7 @@ export function PessoaContratoTab({
   vinculosOpcoesDocumento,
   dataAdmissaoProvisoria = null,
   dataSaidaGravada = null,
+  dataAntiguidadeGravada = null,
   carregando = false,
   saving,
   onGuardarVinculo,
@@ -433,7 +436,7 @@ export function PessoaContratoTab({
         </CardContent>
       </Card>
 
-      <ContratoDatasDaPessoa vinculos={vinculos} dataAdmissaoProvisoria={dataAdmissaoProvisoria} dataSaidaGravada={dataSaidaGravada} carregando={carregando} />
+      <ContratoDatasDaPessoa vinculos={vinculos} dataAdmissaoProvisoria={dataAdmissaoProvisoria} dataSaidaGravada={dataSaidaGravada} dataAntiguidadeGravada={dataAntiguidadeGravada} carregando={carregando} />
 
       {podeVerRetribuicao && (
         <PessoaRetribuicaoCard

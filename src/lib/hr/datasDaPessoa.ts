@@ -110,31 +110,50 @@ export function eRecusaDasDatasDerivadas(erro: unknown): boolean {
 
 const SEM_DATAS: DatasDaPessoa = { data_admissao: null, data_antiguidade: null, data_saida: null };
 
+/** As tres datas tal como estao gravadas em `pessoas` (`data_admissao`, `data_antiguidade`, `data_saida`). */
+export interface DatasGravadas {
+  contratacao?: string | null;
+  antiguidade?: string | null;
+  saida?: string | null;
+}
+
+const gravada = (valor: string | null | undefined): string | null => (valor ? soData(valor) : null);
+
 /**
- * `saidaGravada` (`pessoas.data_saida`) so conta SEM nenhum contrato vivo que nao seja `futuro`: a base mantem-na (D8 revista;
- * e barreira de acesso em `fn_neg_pessoa_da_conta`, apagar o ultimo contrato nunca a limpa, e um contrato `futuro` ainda nao
- * devolve acesso). Sem contratos, so a contratacao e a antiguidade voltam a `null`; com so `futuro`, seguem a cadeia mais
- * recente. Basta um contrato activo, suspenso ou terminado para valer a regra normal e `saidaGravada` ser ignorada.
+ * `gravadas` (o que `pessoas` tem hoje) so conta SEM nenhum contrato vivo que nao seja `futuro` (espelho de
+ * `hr_pessoa_datas_recalcular`, D8 revista). A saida e barreira de acesso (`fn_neg_pessoa_da_conta`): apagar o ultimo
+ * contrato, ou marcar uma readmissao futura, nunca a limpa. Entao:
+ * - sem nenhum contrato vivo: contratacao e antiguidade `null`, saida = a gravada;
+ * - so contratos `futuro`: a saida e a gravada e a contratacao e a antiguidade seguem a cadeia, SALVO se a contratacao
+ *   calculada ficasse depois da saida (o CHECK saida >= contratacao da base nao o deixa): ai ficam as gravadas;
+ * - com algum contrato activo, suspenso ou terminado: a regra normal, e `gravadas` e ignorada.
  */
 export function datasDaPessoa(
   vinculos: readonly VinculoParaDatas[] | null | undefined,
-  saidaGravada?: string | null,
+  gravadas?: DatasGravadas,
 ): DatasDaPessoa {
   const vivos = (vinculos ?? []).filter((v) => v.deleted_at === null || v.deleted_at === undefined);
-  if (vivos.length === 0) return saidaGravada ? { ...SEM_DATAS, data_saida: soData(saidaGravada) } : SEM_DATAS;
+  if (vivos.length === 0) return { ...SEM_DATAS, data_saida: gravada(gravadas?.saida) };
 
   const cadeia = cadeiaDeReferencia(cadeiasDe(vivos));
   const todosTerminados = cadeia.membros.every((m) => m.estado === "terminado");
-  // Nenhum contrato vivo e nao-futuro (a cadeia de referencia so os tem se existirem): a saida gravada mantem-se.
   const soFuturos = !cadeia.membros.some((m) => m.estado !== "futuro");
 
   const comAntiguidade = cadeia.membros.filter((m) => m.data_antiguidade).sort(porInicioEId);
   const ultimo = comAntiguidade[comAntiguidade.length - 1];
   const antiguidade = ultimo?.data_antiguidade ? soData(ultimo.data_antiguidade) : null;
 
+  if (soFuturos) {
+    const saida = gravada(gravadas?.saida);
+    if (saida !== null && cadeia.inicio > saida) {
+      return { data_admissao: gravada(gravadas?.contratacao), data_antiguidade: gravada(gravadas?.antiguidade), data_saida: saida };
+    }
+    return { data_admissao: cadeia.inicio, data_antiguidade: antiguidade ?? cadeia.inicio, data_saida: saida };
+  }
+
   return {
     data_admissao: cadeia.inicio,
     data_antiguidade: antiguidade ?? cadeia.inicio,
-    data_saida: soFuturos ? (saidaGravada ? soData(saidaGravada) : null) : todosTerminados ? cadeia.fim : null,
+    data_saida: todosTerminados ? cadeia.fim : null,
   };
 }
