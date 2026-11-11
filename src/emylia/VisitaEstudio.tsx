@@ -170,7 +170,8 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // 9/11 (Rúben: «a transcrição não corre enquanto estamos no Estúdio»): o Estúdio abre no mesmo separador, sem recarregar a app, e a
   // gravação da visita continua (num separador à parte o telemóvel suspendia-a); «Voltar ao negócio» volta a este negócio
   const abrir = () => {
-    if (abrirEstudio(d.nome, d.f, d.id, urlDoNegocio(d.id), divisaoDoEstudio(d))) irPara("/prototipo/estudio");
+    // 11/11 (Rúben: «depois de terminar o Estúdio da visita, o utilizador deve ser redirecionado para esta screen»): volta ao passo Estúdio
+    if (abrirEstudio(d.nome, d.f, d.id, `${urlDoNegocio(d.id)}&passo=estudio`, divisaoDoEstudio(d))) irPara("/prototipo/estudio");
     else setFeito("Não deu para abrir o Estúdio neste browser.");
   };
   const prods = salvo ? produtosEscolhidos(salvo) : [];

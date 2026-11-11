@@ -1,7 +1,7 @@
 // 6/11: as escolhas do Estúdio respondem ao passo «Peças da casa de banho».
 import { describe, expect, it } from "vitest";
 import { PLANTA_VAZIA, type Planta } from "@/emylia/planta";
-import { PECAS_WC } from "@/emylia/campos";
+import { AREA, ESCOLHAS, PECAS_WC } from "@/emylia/campos";
 import type { Projeto } from "./necessidadesEstudio";
 import { respostasDoEstudio } from "./respostasDoEstudio";
 
@@ -39,7 +39,8 @@ describe("o Estúdio responde às Peças da casa de banho", () => {
     });
   });
   it("só responde com valores que o passo aceita", () => {
-    const defs = new Map(PECAS_WC.campos.map((c) => [c.k, c]));
+    // 11/11: também a área de intervenção (o pé-direito, a janela, o toalheiro) e as escolhas do cliente
+    const defs = new Map([...PECAS_WC.campos, ...AREA.campos, ...ESCOLHAS.campos].map((c) => [c.k, c]));
     for (const [k, v] of Object.entries(r)) {
       if (k.endsWith("_detalhe")) continue;
       const def = defs.get(k);
@@ -48,7 +49,7 @@ describe("o Estúdio responde às Peças da casa de banho", () => {
       if (def!.t === "sim_nao") expect(["Sim", "Não"]).toContain(v);
     }
   });
-  it("sem nada escolhido, não responde a nada", () => {
-    expect(respostasDoEstudio({ ...projeto, depois: PLANTA_VAZIA, escolhas: {}, acompanha: {}, revestimento: undefined, pavimento: undefined, alturas: { peDireito: 260, tetoFalso: null }, servicos: [] })).toEqual({});
+  it("sem nada escolhido, só responde ao pé-direito (a altura do Estúdio)", () => {
+    expect(respostasDoEstudio({ ...projeto, depois: PLANTA_VAZIA, escolhas: {}, acompanha: {}, revestimento: undefined, pavimento: undefined, alturas: { peDireito: 260, tetoFalso: null }, servicos: [] })).toEqual({ diag_pe_direito_m: "2,6 m" });
   });
 });

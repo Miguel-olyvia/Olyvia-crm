@@ -132,6 +132,18 @@ export function respostasDoEstudio(p: Projeto): Record<string, string> {
   const bid = daPeca("bide");
   if (bid?.prod) out.pc_bide = /suspens/.test(limpo(bid.prod.n)) ? "Suspenso" : "Ao chão";
   else if (!bid && pecas.some((x) => x.tipo === "sanita")) out.pc_bide = "Não";
+  // 11/11 (Rúben: «já ter o pé-direito preenchido, a janela na área e o toalheiro: vêm do Estúdio»): a altura da divisão e as peças da
+  // planta respondem às perguntas da área de intervenção (com o prefixo da divisão, se o Estúdio não for a principal)
+  const pre = p.prefixoPerguntas ?? "";
+  const pe = p.alturas?.peDireito;
+  if (pe && pe > 0) out[pre + "diag_pe_direito_m"] = pe >= 295 ? "3 m ou mais" : `${String(Math.min(2.8, Math.max(2.4, Math.round(pe / 10) / 10))).replace(".", ",")} m`;
+  if (p.antes.paredes.length) out[pre + "diag_janela"] = p.antes.pecas.some((x) => x.tipo === "janela") || p.depois.pecas.some((x) => x.tipo === "janela") ? "Sim" : "Não";
+  if ((p.divisao ?? "Casa de banho") === "Casa de banho" && (p.depois.paredes.length || p.depois.pecas.length)) {
+    const toa = pecas.find((x) => x.tipo === "toalheiro");
+    out[pre + "diag_toalheiro"] = toa && !/agua|hidraul/.test(limpo(`${toa.prod?.n ?? ""} ${toa.prod?.destaque ?? ""}`)) ? "Sim" : "Não";
+  }
+  // as perguntas da visita respondidas no Estúdio (perguntasDaVisita.ts)
+  for (const [k, v] of Object.entries(p.perguntas ?? {})) if (v != null && v !== "") out[k] = v;
   // opções e extras: o teto pela altura do teto falso; o resto pelos serviços escolhidos
   const serv = new Map((p.servicos ?? []).map((s) => [s.id, s.q]));
   if (p.alturas.tetoFalso !== null) out.pc_teto = "Teto falso"; else if (serv.has("sv-pintura-teto")) out.pc_teto = "Pintar";
