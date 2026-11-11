@@ -2,7 +2,7 @@
 // Contacto com «Passar ao comercial»; quem tem negocios.visita.gerir continua a marcar a visita. F3: as respostas retif_… pedem obra.planear.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acoes, permDoCampo, proximo, seed } from "./motor";
-import { CHAVE_CONTACTO_CONCLUIDO, comOComercial, definirPermissoesReais, permEmFaltaDoPasso, soAteAoContacto } from "./permissoes";
+import { CHAVE_CONTACTO_CONCLUIDO, avisoDaFase, codigosDaFase, comOComercial, definirPermissoesReais, faltaDaFase, permEmFaltaDoPasso, soAteAoContacto } from "./permissoes";
 
 const ASSISTENTE = ["negocios.contacto.registar", "pessoas.edit", "pessoas.view"];
 const reais = (codigos: string[]) => definirPermissoesReais({ codigos: new Set(codigos), simular: false });
@@ -59,5 +59,28 @@ describe("fim de contacto", () => {
     expect(permDoCampo("retif_aceite")).toBe("obra.planear");
     expect(permDoCampo("retif_pav")).toBe("obra.planear");
     expect(permDoCampo("posse")).toBeNull();
+  });
+
+  // 20270113130000: cada fase pede a sua permissão (o mesmo mapa do servidor)
+  it("cada fase pede a sua permissão: o Gestor de obra (pessoas.edit + obra.*) só lê o Contacto e a Visita", () => {
+    const GESTOR = ["pessoas.view", "pessoas.edit", "negocios.obra.planear", "negocios.obra.executar", "negocios.obra.materiais", "negocios.obra.imprevistos", "negocios.obra.fechar"];
+    const neg = (fase: number, f: Record<string, string> = {}) => ({ fase, f });
+    expect(faltaDaFase(codigosDaFase(neg(2)))).toBeNull(); // sem conta real: o ecrã não bloqueia
+    reais(GESTOR);
+    expect(faltaDaFase(codigosDaFase(neg(1)))).toBe("negocios.contacto.registar");
+    // o comercial sem contacto.registar (só visita.gerir) abre o Contacto para marcar a visita
+    reais(["pessoas.edit", "negocios.visita.gerir", "negocios.orcamento.editar"]);
+    expect(faltaDaFase(codigosDaFase(neg(1)))).toBeNull();
+    reais(GESTOR);
+    expect(faltaDaFase(codigosDaFase(neg(2)))).toBe("negocios.visita.gerir");
+    expect(faltaDaFase(codigosDaFase(neg(3)))).toBeNull(); // obra.planear: as medidas e o plano antes do contrato
+    expect(faltaDaFase(codigosDaFase(neg(4)))).toBeNull(); // o Financeiro não pede permissão de fase
+    expect(faltaDaFase(codigosDaFase(neg(5)))).toBeNull();
+    expect(avisoDaFase("negocios.visita.gerir")).toContain("(negocios.visita.gerir)");
+    reais(ASSISTENTE);
+    expect(faltaDaFase(codigosDaFase(neg(1)))).toBeNull();
+    expect(faltaDaFase(codigosDaFase(neg(1, { [CHAVE_CONTACTO_CONCLUIDO]: "2026-11-11" })))).toBe("negocios.visita.gerir");
+    expect(avisoDaFase("negocios.visita.gerir")).toContain("já está com o comercial");
+    expect(faltaDaFase(codigosDaFase(neg(3)))).toBe("negocios.orcamento.editar");
   });
 });

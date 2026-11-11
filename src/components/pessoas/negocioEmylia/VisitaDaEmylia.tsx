@@ -25,7 +25,7 @@ import { AvisoQuestionario } from "./visitaConfiguravel/AvisoQuestionario";
 import { useCtxComEfeitos } from "./visitaConfiguravel/useCtxComEfeitos";
 import { VisitasDoCrm } from "./VisitasDoCrm";
 import { comVisitasDoCrm } from "./visitasDosPassos";
-import { AVISO_COM_O_COMERCIAL } from "@/emylia/permissoes";
+import { avisoDaFase } from "@/emylia/permissoes";
 
 const N = "pessoasPagina.real.neg.";
 /** A fase da Emylia em que se faz a visita (o motor chama-lhe Visita). */
@@ -68,7 +68,7 @@ export function VisitaDaEmylia({ e, org, podeEditar, faseRotuloChave, feitas, ao
   );
   const fasesFeitas = <FasesFeitasNav feitas={feitas} faseVista={null} aoVerFase={aoVerFase} />;
   // 11/11 (fim de contacto): a assistente comercial só vê o negócio que já está com o comercial
-  const soLeitura = e.docsCrm || !pode.gravar || !!e.comOComercial;
+  const soLeitura = e.docsCrm || !pode.gravar || !!e.faltaDaFase;
   const topo = (
     <>
       <p className="text-sm text-muted-foreground">{t(`${N}negocio`)}</p>
@@ -93,7 +93,7 @@ export function VisitaDaEmylia({ e, org, podeEditar, faseRotuloChave, feitas, ao
         </div>
       )}
       {!pode.falhou && !pode.gravar && <EstadoHonesto titulo={t(`${N}soLeitura.titulo`)}>{t(`${N}soLeitura.texto`)}</EstadoHonesto>}
-      {e.comOComercial && <EstadoHonesto titulo="O negócio já está com o comercial">{AVISO_COM_O_COMERCIAL}</EstadoHonesto>}
+      {e.faltaDaFase && <EstadoHonesto titulo="Só de leitura nesta fase">{avisoDaFase(e.faltaDaFase)}</EstadoHonesto>}
     </>
   );
 

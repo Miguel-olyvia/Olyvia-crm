@@ -15,7 +15,7 @@ const m = vi.hoisted(() => {
 });
 vi.mock("./armazemNegocioEmylia", () => {
   const armazem = {
-    S: m.estado.S, A: {}, run: vi.fn(), go: vi.fn(), abrir: m.estado.abrir, reler: vi.fn(), atualizar: m.estado.atualizar, regravar: vi.fn(), docsCrm: (id: string) => id === "uuid-crm", comOComercial: () => false,
+    S: m.estado.S, A: {}, run: vi.fn(), go: vi.fn(), abrir: m.estado.abrir, reler: vi.fn(), atualizar: m.estado.atualizar, regravar: vi.fn(), docsCrm: (id: string) => id === "uuid-crm", faltaDaFase: () => null,
     versao: () => m.estado.versao, leitura: () => m.estado.leitura, gravacao: () => ({ k: "parado" }), avisos: () => [],
     negocioDaBase: (id: string) => (id === "uuid-1" || id === "uuid-crm" ? m.estado.deal : undefined),
     subscrever: (f: () => void) => { m.ouvintes.add(f); return () => { m.ouvintes.delete(f); }; },

@@ -40,7 +40,7 @@ import { AvisoQuestionario } from "./visitaConfiguravel/AvisoQuestionario";
 import { useCtxComEfeitos } from "./visitaConfiguravel/useCtxComEfeitos";
 import { linhasDaPonte, type FactosDaAbordagem } from "./ponteDaAbordagem";
 import type { NegocioEmylia } from "./useNegocioEmylia";
-import { AVISO_COM_O_COMERCIAL } from "@/emylia/permissoes";
+import { avisoDaFase } from "@/emylia/permissoes";
 
 const P = "pessoasPagina.";
 const N = "pessoasPagina.real.neg.";
@@ -211,7 +211,7 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
   // as ações do orçamento mantêm as linhas do levantamento configurável (os efeitos que a organização definiu); sem configuração é o ctx de sempre
   const ctx = useCtxComEfeitos(e.ctx);
   // 11/11 (fim de contacto): a assistente comercial só vê o negócio que já está com o comercial
-  const soLeitura = e.docsCrm || !pode.gravar || !!e.comOComercial;
+  const soLeitura = e.docsCrm || !pode.gravar || !!e.faltaDaFase;
   const dentroDoRouter = useInRouterContext();
   const botaoTentar = (aoClicar: () => void, rotulo: string): ReactNode => (
     <button type="button" onClick={aoClicar} className={cn("min-h-11 rounded-lg border border-input px-4 font-medium", FOCO)}>{rotulo}</button>
@@ -264,7 +264,7 @@ export function NegocioEmyliaDoGuia({ fase, atual, e, org, podeEditar, feitas, f
         </div>
       )}
       {d && !e.docsCrm && !pode.falhou && !pode.gravar && !verFeita && <EstadoHonesto titulo={t(`${N}soLeitura.titulo`)}>{t(`${N}soLeitura.texto`)}</EstadoHonesto>}
-      {d && !e.docsCrm && e.comOComercial && !verFeita && <EstadoHonesto titulo="O negócio já está com o comercial">{AVISO_COM_O_COMERCIAL}</EstadoHonesto>}
+      {d && !e.docsCrm && e.faltaDaFase && !verFeita && <EstadoHonesto titulo="Só de leitura nesta fase">{avisoDaFase(e.faltaDaFase)}</EstadoHonesto>}
       {!verFeita && fase === "negocio" && <PonteDaAbordagem d={d} abordagem={abordagem} />}
     </>
   );

@@ -19,7 +19,7 @@ import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type
 import { publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
-import { comOComercial, soAteAoContacto } from "@/emylia/permissoes";
+import { codigosDaFase, faltaDaFase } from "@/emylia/permissoes";
 
 import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 
@@ -60,8 +60,8 @@ export interface ArmazemEmylia {
   negociosLidos(): { id: string; entityId: string; d: Negocio }[];
   /** O negócio tem orçamentos, contratos ou vendas diretas do CRM: lê-se, mas não se grava por aqui (a base recusa-o, NE005). */
   docsCrm(id: string): boolean;
-  /** 11/11 (fim de contacto): o negócio, como está na base, já está com o comercial e quem entrou é a assistente comercial: só de leitura. */
-  comOComercial(id: string): boolean;
+  /** 11/11 (20270113130000): a permissão da fase em que o negócio está na base que falta a quem entrou (só de leitura), ou null. */
+  faltaDaFase(id: string): string | null;
   /** Abre o negócio no motor (S.deal e S.view), para as ações que olham para S.deal. */
   abrir(d: Negocio): void;
   /** Ler outra vez a organização (depois de um erro). `false` se não se leu: há uma gravação em curso ou alterações por gravar (diz-se). */
@@ -112,10 +112,10 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   // os negócios com documentos do CRM (pelo número da Emylia, para gravarMudancas; pelo id da base, para a ficha) e a cópia lida de cada um
   let soLeitura = new Set<number>();
   // 11/11 (fim de contacto): os negócios que, como estão na base, já estão com o comercial (pelo número e pelo id da base)
-  let comComercial = new Set<number>();
+  let faseLida = new Map<number, readonly string[] | null>();
   let catalogoFalhou = false;
-  let comComercialPorId = new Set<string>();
-  const bloqueados = (): Set<number> => new Set([...soLeitura, ...(soAteAoContacto() ? comComercial : [])]);
+  let faseLidaPorId = new Map<string, readonly string[] | null>();
+  const bloqueados = (): Set<number> => new Set([...soLeitura, ...[...faseLida].filter(([, c]) => faltaDaFase(c) !== null).map(([n]) => n)]);
   let docsPorId = new Set<string>();
   let lidos = new Map<number, NegocioLido>();
   let foto = new Map<number, string>();
@@ -146,7 +146,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
     foto = fotografarNegocios(S.deals);
     lidaEm = Date.now();
-    marcarComComercial();
+    marcarFases();
     // 4/11: a morada que a lead já trazia (a da ficha da pessoa), para o passo «Morada da obra»; não se grava e um erro a ler não para nada
     void lerMoradasDasPessoas(sb, novos.map((n) => n.entityId)).then((m) => {
       sugerirMoradas(S.deals, (d) => refs.get(d.id)?.entityId, m);
@@ -155,9 +155,9 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   };
 
   /** 11/11: os negócios com o comercial, tal como estão agora (chamar só quando o ecrã é igual à base: depois de ler ou de gravar sem erros). */
-  function marcarComComercial(): void {
-    comComercial = new Set(S.deals.filter(comOComercial).map((d) => d.id));
-    comComercialPorId = new Set([...refs].filter(([n]) => comComercial.has(n)).map(([, r]) => r.id));
+  function marcarFases(): void {
+    faseLida = new Map(S.deals.map((d) => [d.id, codigosDaFase(d)]));
+    faseLidaPorId = new Map([...refs].map(([n, r]) => [r.id, faseLida.get(n) ?? null]));
   }
 
   /** Os só de leitura que mudaram em memória voltam à cópia lida (a base recusava-os; ficava o ecrã a mentir). */
@@ -175,7 +175,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
       ? { msg: "O Catálogo não carregou: a alteração não foi guardada", sub: "Volte a abrir a página para ler o Catálogo outra vez.", kind: "bad" }
       : doCrm
       ? { msg: "Este negócio é do CRM: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ". Faz-se em Contratos e Propostas.", kind: "bad" }
-      : { msg: "O negócio já está com o comercial: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ".", kind: "bad" });
+      : { msg: "Sem permissão para mudar este negócio nesta fase: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ".", kind: "bad" });
   };
 
   /** Relê a base e vê se algum negócio por gravar mudou lá desde a última leitura. Devolve o texto do conflito, ou `null` se se pode gravar. */
@@ -212,7 +212,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
         const r = await gravarMudancas(sb, org, S, refs, foto, ids, bloqueados());
         gravados += r.gravados;
         // 11/11: gravado sem erros, o ecrã é a base: o negócio passado agora ao comercial fica só de leitura para a assistente
-        if (!r.erros.length) marcarComComercial();
+        if (!r.erros.length) marcarFases();
         if (r.reler) relerFinanceiro = true;
         if (r.erros.length) { gravacao = { k: "erro", t: r.erros.join(" · ") }; avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else gravacao = { k: "gravado", n: r.gravados };
@@ -295,7 +295,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
       .flatMap(([numero, r]) => { const d = S.deals.find((x) => x.id === numero); return d ? [{ id: r.id, entityId: r.entityId, d }] : []; })
       .sort((a, b) => b.d.id - a.d.id),
     docsCrm: (id) => docsPorId.has(id),
-    comOComercial: (id) => soAteAoContacto() && comComercialPorId.has(id),
+    faltaDaFase: (id) => faltaDaFase(faseLidaPorId.get(id)),
     abrir: (d) => { S.deal = d.id; S.view = "negocio"; },
     reler: () => {
       if (porGravar()) { avisar({ msg: "Há alterações por gravar", sub: "Não se relê a organização enquanto houver alterações por gravar.", kind: "bad" }); return false; }

@@ -48,7 +48,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, contactoConcluido, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos, soAteAoContacto } from "./permissoes";
+import { SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos, soAteAoContacto } from "./permissoes";
 import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -349,6 +349,17 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
         </div>
       ) } as Passo]),
     ];
+    // 11/11 (20270113130000): os passos do Contacto pedem negocios.contacto.registar. Sem ela (ex.: um comercial que só marca visitas)
+    // abrem só de leitura, com a permissão em falta; «Marcar a visita» continua (pede visita.gerir, e o servidor deixa-o gravar sem
+    // mexer nos dados do Contacto)
+    if (comPermissoesReais() && !podeNeg(S.role, "contacto.registar")) {
+      passos = passos.map((p) => (p.id === "vaga" || p.id === "comercial" ? p : { ...p, corpo: (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{SEM_PERM["contacto.registar"].sub}</p>
+          <fieldset disabled className="m-0 min-w-0 border-0 p-0">{p.corpo}</fieldset>
+        </div>
+      ) }));
+    }
   } else if (fase === 2) {
     const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
