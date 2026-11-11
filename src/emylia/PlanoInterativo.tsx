@@ -265,14 +265,15 @@ export function TarefasDoPlano({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   return <NovaTarefa ctx={ctx} d={d} fechar={() => setAberto(false)} />;
 }
 
-export function NovaTarefa({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
+/** 11/11: `inicial` vem de tocar num dia vazio da linha de um técnico, no Estúdio do plano (começa nesse dia, com essa pessoa). */
+export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null } }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const [sid, setSid] = useState<SvcId | null>(null);
   const [procura, setProcura] = useState("");
   const [q, setQ] = useState(1);
   const [fase, setFase] = useState<number>(() => p.tasks.find((t) => t.fase)?.fase ?? 1);
-  const [tec, setTec] = useState<string | null | undefined>(undefined);
+  const [tec, setTec] = useState<string | null | undefined>(inicial?.tec ?? undefined);
   const [mats, setMats] = useState<MatTarefa[] | null>(null);
   const [delta, setDelta] = useState(0);
   const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -282,13 +283,13 @@ export function NovaTarefa({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: (
   // a pré-visualização da tarefa como fica (o início sugerido, o técnico livre), sem mexer no plano
   const min = diaMinimo(p, fase);
   const sugerido = s && sid ? criarTarefa(p, s, { sid, q, fase }).dia : 0;
-  const dia = Math.max(min, sugerido + delta);
+  const dia = Math.max(min, (inicial?.dia ?? sugerido) + delta);
   const previa = s && sid ? criarTarefa(p, s, { sid, q, fase, tec, mats: mats ?? undefined, dia }) : null;
   const of = s ? oficioDe(s) : null;
   const tecs = of ? tecnicosDoOficio(of) : [];
   const escolherSvc = (k: SvcId) => {
     const sv = S.svc[k], un1 = POR_5.test(sv.un) ? 5 : 1;
-    setSid(k); setQ(un1); setMats(null); setTec(undefined); setDelta(0);
+    setSid(k); setQ(un1); setMats(null); setTec(inicial?.tec ?? undefined); setDelta(0);
     // a fase sugerida: a de outra tarefa do mesmo ofício, se houver
     const o2 = oficioDe(sv), igual = p.tasks.find((t) => (o2.perfilId ? t.perfilId === o2.perfilId || t.sk === o2.sk : t.sk === o2.sk) && t.fase);
     if (igual?.fase) setFase(igual.fase);

@@ -31,6 +31,8 @@ import { VisitasLista } from "./Visitas";
 import { camposMedida, medida, nfmt, nomeLinha, quandoEQuem } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 import { GuiaPassoCtx } from "./guiaPasso";
+import { motion } from "framer-motion";
+import { MOLA, useReduzir } from "./movimento";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
 import { useParamUrl } from "./usarParamUrl";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
@@ -371,25 +373,37 @@ function Ouvir() {
 type Lat = (passos: Passo[], ativo: number, setAtivo: (i: number) => void, comFim: boolean) => React.ReactNode;
 
 function Lateral({ d, passos, ativo, setAtivo, comFim }: { d: Negocio; passos: Passo[]; ativo: number; setAtivo: (i: number) => void; comFim: boolean }) {
+  const reduzir = useReduzir();
   return (
     <nav aria-label="Passos desta fase" className="hidden rounded-2xl border border-border bg-card p-3 shadow-[var(--shadow-sm)] lg:sticky lg:top-6 lg:block">
       {passos.length > 0 && (
         <>
           <h2 className="px-3 text-sm font-medium text-muted-foreground">{FASES[d.fase]}</h2>
+          {/* 11/11 (Rúben: «mais dinâmico e fluido»): quantos passos estão feitos, numa barra que enche */}
+          <div className="mx-3 mt-2 h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+            <motion.div className="h-full rounded-full bg-primary" initial={false} animate={{ width: `${(passos.filter(completo).length / passos.length) * 100}%` }} transition={reduzir ? { duration: 0 } : MOLA} />
+          </div>
           <ol className="mt-2 space-y-0.5">
             {passos.map((p, i) => {
               const ok = completo(p);
               return (
-                <li key={p.id}>
-                  <button type="button" onClick={() => setAtivo(i)} aria-current={i === ativo ? "step" : undefined}
-                    className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
-                      i === ativo ? "bg-muted font-semibold text-foreground" : "text-foreground/80 hover:bg-muted/60")}>
-                    <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px]",
-                      p.falta ? "border-destructive bg-destructive text-destructive-foreground" : ok ? "border-primary bg-primary text-primary-foreground" : i === ativo ? "border-foreground" : "border-input")}>
-                      {p.falta ? "!" : ok ? <Check className="h-3 w-3" aria-hidden="true" /> : p.bloqueado && <Lock className="h-3 w-3 text-muted-foreground" aria-hidden="true" />}
+                <li key={p.id} className="relative">
+                  {/* a linha que liga os passos enche-se quando o passo fica feito */}
+                  {i < passos.length - 1 && (
+                    <span aria-hidden="true" className="absolute left-[21px] top-[31px] h-[calc(100%-18px)] w-px bg-border">
+                      <motion.span className="absolute inset-x-0 top-0 origin-top bg-primary" style={{ height: "100%" }} initial={false} animate={{ scaleY: ok ? 1 : 0 }} transition={reduzir ? { duration: 0 } : { duration: 0.35 }} />
                     </span>
-                    <span className={cn("min-w-0 flex-1", p.bloqueado && "text-muted-foreground")}>{curto(p)}{p.bloqueado && <span className="sr-only"> (fechado até o cliente aceitar)</span>}</span>
-                    {!!p.falta && <span className="text-sm font-medium text-destructive">falta{p.falta > 1 ? "m" : ""} {p.falta}</span>}
+                  )}
+                  <button type="button" onClick={() => setAtivo(i)} aria-current={i === ativo ? "step" : undefined}
+                    className={cn("relative flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
+                      i === ativo ? "font-semibold text-foreground" : "text-foreground/80 hover:bg-muted/60")}>
+                    {i === ativo && <motion.span layoutId={`passo-ativo-${d.id}`} aria-hidden="true" className="absolute inset-0 rounded-lg bg-muted" transition={reduzir ? { duration: 0 } : MOLA} />}
+                    <span className={cn("relative grid h-5 w-5 shrink-0 place-items-center rounded-full border bg-card text-[11px] transition-colors",
+                      p.falta ? "border-destructive bg-destructive text-destructive-foreground" : ok ? "border-primary bg-primary text-primary-foreground" : i === ativo ? "border-foreground" : "border-input")}>
+                      {p.falta ? "!" : ok ? <motion.span key="ok" initial={reduzir ? false : { scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} transition={MOLA}><Check className="h-3 w-3" aria-hidden="true" /></motion.span> : p.bloqueado && <Lock className="h-3 w-3 text-muted-foreground" aria-hidden="true" />}
+                    </span>
+                    <span className={cn("relative min-w-0 flex-1", p.bloqueado && "text-muted-foreground")}>{curto(p)}{p.bloqueado && <span className="sr-only"> (fechado até o cliente aceitar)</span>}</span>
+                    {!!p.falta && <span className="relative text-sm font-medium text-destructive">falta{p.falta > 1 ? "m" : ""} {p.falta}</span>}
                     {ok && <span className="sr-only">(feito)</span>}
                   </button>
                 </li>

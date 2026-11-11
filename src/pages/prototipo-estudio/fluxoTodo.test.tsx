@@ -36,9 +36,9 @@ describe("o fluxo todo, do aceite à obra (11/11)", () => {
     expect(within(screen.getByRole("region", { name: "Impacto no orçamento" })).getByText(/\+.*€ s\/ IVA/)).toBeTruthy();
     clicar("Aceitar as medidas");
 
-    // o plano: o resumo no passo; aprova-se no Estúdio
-    expect(screen.getByText("Fica pronta")).toBeTruthy();
-    clicar("Abrir o estúdio");
+    // o plano: a pré-visualização no passo (11/11: o plano em miniatura, as datas e a equipa); aprova-se no Estúdio
+    expect(screen.getByText(/dias úteis/)).toBeTruthy();
+    clicar(/Abrir o estúdio/);
     fireEvent.click(within(screen.getByRole("dialog")).getAllByRole("button", { name: /Aprovar o plano/ })[0]);
 
     // o valor mudou: a proposta nova é do comercial, com os euros à frente

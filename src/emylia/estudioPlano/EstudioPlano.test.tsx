@@ -8,13 +8,14 @@ import { EstudioPlano } from "./EstudioPlano";
 
 afterEach(cleanup);
 
-function montar() {
+function montar(antes?: (d: Negocio) => void) {
   const S: Estado = seed();
   S.role = "operacoes";
   const [d1, d2] = S.deals.filter((x) => x.obra) as Negocio[];
   const T = TECS[0].id, inicio = "2027-03-01";
   d1.obra.plano = { tasks: [{ nome: "Outra obra", svcs: [], dia: 0, dur: 3, sk: TECS[0].sk, h: 24, tec: T }], estado: "aprovado", dia: 0, origem: "orcamento", inicio };
   d2.obra.plano = { tasks: [{ nome: "Canalização", svcs: [], dia: 1, dur: 1, sk: TECS[0].sk, h: 8, tec: T, fase: 2 }], estado: "por aprovar", dia: 0, origem: "orcamento", inicio };
+  antes?.(d2);
   const A = acoes(S, () => {}, (fn) => fn());
   const ctx = { S, A, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "" } as unknown as Ctx;
   render(<EstudioPlano ctx={ctx} d={d2} fechar={() => {}} />);
@@ -51,5 +52,42 @@ describe("Estúdio do plano (10/11)", () => {
     montar();
     fireEvent.click(screen.getByRole("button", { name: "Nova tarefa" }));
     expect(screen.getByRole("complementary", { name: "Nova tarefa" })).toBeTruthy();
+  });
+});
+
+// 11/11 (Rúben: «muito mais bonito, dinâmico e interativo, nada de cartões sem interação»)
+describe("Estúdio do plano mais vivo (11/11)", () => {
+  it("mudar uma tarefa mostra «Desfazer», que repõe como estava", () => {
+    const { d2 } = montar();
+    const barra = screen.getByRole("button", { name: /^Canalização: 1 dia/ });
+    fireEvent.keyDown(barra, { key: "ArrowRight" });
+    expect(d2.obra.plano!.tasks[0].dia).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
+    expect(d2.obra.plano!.tasks[0].dia).toBe(1);
+  });
+  it("na tarefa aberta, o início e os dias mudam-se à mão", () => {
+    const { d2 } = montar();
+    fireEvent.click(within(screen.getByRole("region", { name: "Alertas e sugestões" })).getByRole("button", { name: "Abrir" }));
+    const quando = screen.getByRole("region", { name: "Quando" });
+    fireEvent.click(within(quando).getByRole("button", { name: "Dura: mais" }));
+    expect(d2.obra.plano!.tasks[0].dur).toBe(2);
+    fireEvent.click(within(quando).getByRole("button", { name: "Começa: mais" }));
+    expect(d2.obra.plano!.tasks[0].dia).toBe(2);
+  });
+  it("tocar numa fase ou numa pessoa destaca as tarefas; «Ver tudo» volta", () => {
+    montar();
+    const fase = within(screen.getByRole("region", { name: "A obra no tempo" })).getByRole("button", { name: /2 · / });
+    fireEvent.click(fase);
+    expect(fase.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Ver tudo" }));
+    expect(fase.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`Destacar as tarefas de ${TECS[0].n}`) }));
+    expect(screen.getByRole("button", { name: "Ver tudo" })).toBeTruthy();
+  });
+  it("aprovar o plano tem festa", () => {
+    const { d2 } = montar((d) => { d.f.retif_aceite = "2027-02-20"; });
+    fireEvent.click(screen.getByRole("button", { name: /Aprovar o plano/ }));
+    expect(d2.obra.plano!.estado).toBe("aprovado");
+    expect(screen.getByText("Plano aprovado")).toBeTruthy();
   });
 });

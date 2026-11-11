@@ -20,7 +20,7 @@ import { NovaVersao } from "./VoltarAtras";
 import { RetificacaoMedidas } from "./RetificacaoMedidas";
 import { AbrirEstudioPlano } from "./estudioPlano/EstudioPlano";
 import { AbrirEstudioObra } from "./estudioObra/EstudioObra";
-import { motivoOcupado, ocupacaoDosTecnicos, planoAprovadoDe, retificacaoAceite, rotuloDia } from "./preparacaoObra";
+import { planoAprovadoDe, retificacaoAceite } from "./preparacaoObra";
 import { EstadoFaturaErp, RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
@@ -470,7 +470,6 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
             {planoAprovadoDe(d) ? "Plano aprovado. Segue o contrato." : retificacaoAceite(d) ? "As Operações ajustam e aprovam o plano no Estúdio. Aprovado, segue o contrato." : "Primeiro, o supervisor aceita as medidas. Depois as Operações aprovam o plano e segue o contrato."}
           </p>
           {!d.obra.plano && retificacaoAceite(d) && <Button type="button" className="min-h-11" onClick={() => ctx.run(() => ctx.A.gerarPlano(d.id))}><CalendarClock className="mr-1.5 h-4 w-4" aria-hidden="true" />Gerar o plano</Button>}
-          {d.obra.plano && <ResumoDoPlano ctx={ctx} d={d} />}
           <AbrirEstudioPlano ctx={ctx} d={d} />
         </div>
       ) });
@@ -961,26 +960,5 @@ function RefazerComMudancas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       <Button type="button" className="min-h-11" disabled={!pode} onClick={() => ctx.run(() => ctx.A.refazerComMudancas(d.id))}>Refazer a proposta com o orçamento novo</Button>
       {!pode && <p className="text-sm text-muted-foreground">Quem refaz a proposta é o comercial. <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("comercial"))}>Mudar para {PAPEIS.comercial.n}</button></p>}
     </section>
-  );
-}
-
-/** 11/11 (Rúben: «fácil e intuitivo»): o plano num relance, no passo, sem abrir o Estúdio: quando começa e acaba, quantas pessoas e tarefas,
- *  e se há alertas (técnicos noutra obra ou de férias). */
-function ResumoDoPlano({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const p = d.obra.plano!;
-  const fim = Math.max(1, ...p.tasks.map((t) => t.dia + t.dur)), pessoas = new Set(p.tasks.map((t) => t.tec).filter(Boolean)).size;
-  // os mesmos alertas do Estúdio: o técnico noutra obra, de férias ou sem técnico
-  const ocup = ocupacaoDosTecnicos(ctx.S, d.id);
-  const nc = p.tasks.filter((t, i) => !t.tec || motivoOcupado(t.tec, t, p, ocup, p.tasks.filter((_, j) => j !== i)) != null).length;
-  const itens: [string, string][] = [
-    ["Começa", rotuloDia(p, 0)], ["Fica pronta", rotuloDia(p, fim - 1)], ["Dias úteis", String(fim)], ["Pessoas", String(pessoas)], ["Tarefas", String(p.tasks.length)],
-  ];
-  return (
-    <div className="space-y-2">
-      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {itens.map(([k, v]) => <div key={k} className="rounded-xl bg-muted/60 px-3 py-2"><dt className="text-xs text-muted-foreground">{k}</dt><dd className="text-[15px] font-semibold tabular-nums">{v}</dd></div>)}
-      </dl>
-      <p className={nc ? "text-sm text-amber-800 dark:text-amber-300" : "text-sm text-success"}>{nc ? `${nc === 1 ? "1 alerta" : `${nc} alertas`} (técnico noutra obra, de férias ou por escolher): resolve${nc === 1 ? "-se" : "m-se"} no Estúdio, num toque.` : "Toda a equipa está livre nos dias das tarefas."}</p>
-    </div>
   );
 }

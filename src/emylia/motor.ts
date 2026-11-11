@@ -3163,6 +3163,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (A.planoMudou(d)) return;
       avisar({ msg: "Plano ajustado", sub: `Acaba a ${rotuloDia(p, fim)}${dif ? ` · ${dif > 0 ? "+" : "−"}${Math.abs(dif)} ${Math.abs(dif) === 1 ? "dia" : "dias"} face ao orçamento` : ""}`, kind: "ok" });
     },
+    /** 11/11 (Estúdio do plano, «Desfazer»): repõe os dias, a duração, as horas e o técnico de cada tarefa como estavam (o retrato tirado
+     *  antes de arrastar). Só com o mesmo número de tarefas e antes de a obra arrancar. */
+    reporTarefasPlano(id: number, snap: { dia: number; dur: number; h: number; tec: string | null }[]) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "em curso" || p.estado === "concluída" || snap.length !== p.tasks.length) return;
+      p.tasks.forEach((t, i) => { const s = snap[i]; t.dia = s.dia; t.dur = s.dur; t.h = s.h; t.tec = s.tec; });
+      log(d, "Plano: mudança desfeita");
+      A.planoMudou(d);
+    },
     /* -------------------------------------------- 15/10: o ciclo da tarefa na obra (obraOps.ts): técnico → fotografia → supervisor */
     /** O técnico começa a tarefa (ou volta a ela depois de uma correção). */
     comecarTarefa(id: number, ti: number) {
