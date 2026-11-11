@@ -1,11 +1,13 @@
-// A aba "Retribuição e bancário" do painel "Nova pessoa": o salário base (que vem do cargo, só para ler), o subsídio de
-// alimentação (valor e modo) e os duodécimos, que são do RH e obrigatórios; e a conta bancária (IBAN mascarado, titular, banco,
-// agência, BIC) com o comprovativo de IBAN em anexo.
+// A aba "Retribuição e bancário" do painel "Nova pessoa": o salário base (que vem do cargo, só para ler) e os duodécimos, que
+// são do RH; e a conta bancária (IBAN mascarado, titular, banco, agência, BIC) com o comprovativo de IBAN em anexo. A retribuição
+// só existe com cargo E contrato (o salário base vem do cargo e a retribuição pendura no contrato): sem eles o grupo fica
+// desactivado, com a frase que diz quando se define, e os duodécimos não se exigem.
 import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { useCargos } from "@/components/rh-exemplo/hooks/useCargos";
 import { chaveDoRotuloDaConta, mascaraDaConta, normalizarConta } from "@/components/rh-exemplo/lib/conta";
 import { FORMATOS_CONTA } from "@/components/rh-exemplo/tipos";
 import { dataDeHojeBase } from "@/components/rh-exemplo/lib/dataBase";
+import { retribuicaoADefinir } from "@/components/rh-exemplo/lib/novaPessoaContrato";
 import { useTranslation } from "@/hooks/useTranslation";
 import { AnexosNova } from "./AnexosNova";
 import { CampoS, CampoT, GRELHA, LinhaCampo } from "./camposNova";
@@ -19,6 +21,11 @@ function Retribuicao() {
   const { salarioDoCargoEm } = useCargos();
   const periodo = valores.laborais.cargo_id === "" ? null : salarioDoCargoEm(valores.laborais.cargo_id, dataDeHojeBase());
   const euros = (n: number) => new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(n);
+  const aDefinir = retribuicaoADefinir(valores);
+  const semCargo = valores.laborais.cargo_id.trim() === "";
+  const ajudaDuodecimos = aDefinir
+    ? t("hr.admissao.duodecimosOmissao")
+    : t(semCargo ? "rhNova.h.retribuicaoSemCargo" : "rhNova.h.retribuicaoSemContrato");
   return (
     <SeccaoNova titulo={t("rhNova.sec.retribuicao")}>
       <div className={GRELHA}>
@@ -37,7 +44,7 @@ function Retribuicao() {
         </LinhaCampo>
         <CampoS
           g="contrato" k="duodecimos_pct" id="hr-novo-duodecimos" codigo="duodecimos" rotulo={t("hr.contrato.duodecimos")}
-          opcoes={opcoes(t, "rhNova.duodecimos", ["0", "50", "100"])} ajuda={t("hr.admissao.duodecimosOmissao")}
+          opcoes={opcoes(t, "rhNova.duodecimos", ["0", "50", "100"])} ajuda={ajudaDuodecimos} disabled={!aDefinir}
         />
       </div>
     </SeccaoNova>

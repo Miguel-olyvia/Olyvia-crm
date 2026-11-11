@@ -31,8 +31,11 @@ export interface NovaPessoaExemplo {
   naoGravado: NaoGravado[];
 }
 
-/** Campos do formulario sem coluna na base: o nome de tratamento. (Os ficheiros anexos seguem de verdade.) */
-export type NaoGravado = "nome_tratamento";
+/**
+ * O que o formulario recolheu e nao ficou gravado: o nome de tratamento (sem coluna) e o centro de trabalho escolhido sem
+ * contrato (a afectacao pendura no contrato). (Os ficheiros anexos seguem de verdade.)
+ */
+export type NaoGravado = "nome_tratamento" | "local_trabalho";
 
 export interface ResultadoCriacao {
   id: string;

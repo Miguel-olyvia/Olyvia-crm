@@ -10,6 +10,7 @@ import { normalizarBic, normalizarConta } from "@/components/rh-exemplo/lib/cont
 import {
   cartaConducaoDoRascunho, dadosPessoaisExtra, fardamentoDoRascunho,
 } from "@/components/rh-exemplo/lib/novaPessoaDetalhes";
+import { contratoCompleto } from "@/components/rh-exemplo/lib/novaPessoaContrato";
 import { dataDoPeriodoExperimental } from "@/components/rh-exemplo/lib/novaPessoaDatas";
 import { numeroDe } from "@/components/rh-exemplo/lib/numeros";
 import type { Pendencia } from "@/components/rh-exemplo/hooks/useAdmissaoPendencias";
@@ -197,11 +198,15 @@ export interface OpcoesGravar {
 }
 
 /**
- * O que o formulário recolhe e NÃO tem coluna onde gravar: o nome de tratamento (ainda sem coluna). Diz-se ao utilizador
- * em vez de se descartar em silêncio. (Os ficheiros anexos já seguem de verdade, depois de a ficha existir.)
+ * O que o formulário recolhe e NÃO fica gravado: o nome de tratamento (ainda sem coluna) e o centro de trabalho escolhido sem
+ * contrato (o centro grava-se como afectação, que pendura no vínculo; sem contrato define-se na ficha). Diz-se ao utilizador em
+ * vez de se descartar em silêncio. (Os ficheiros anexos já seguem de verdade, depois de a ficha existir.)
  */
 function semEquivalente(v: ValoresNovaPessoa): NaoGravado[] {
-  return texto(v.extra.nome_tratamento) !== null ? ["nome_tratamento"] : [];
+  const lista: NaoGravado[] = [];
+  if (texto(v.extra.nome_tratamento) !== null) lista.push("nome_tratamento");
+  if (texto(v.laborais.local_id) !== null && !contratoCompleto(v)) lista.push("local_trabalho");
+  return lista;
 }
 
 /**

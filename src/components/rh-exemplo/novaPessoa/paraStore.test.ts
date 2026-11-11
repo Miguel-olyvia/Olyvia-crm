@@ -16,7 +16,7 @@ const OPCOES = {
 };
 
 function preenchido(): ValoresNovaPessoa {
-  let v = valoresIniciais(HOJE);
+  let v = valoresIniciais();
   v = comPatch(v, "geral", {
     primeiro_nome: "  Teresa ", apelido: "Nogueira", email_trabalho: "teresa@x.pt", telefone_trabalho: "912345678",
     numero_interno: "RH-0042",
@@ -33,7 +33,7 @@ function preenchido(): ValoresNovaPessoa {
   v = comPatch(v, "laborais", { cargo_id: "cargo-1", local_id: "local-1", reporta_a_pessoa_id: "p-chefe" });
   v = comPatch(v, "contrato", {
     tipo_contrato: "termo_certo", data_inicio: "2026-10-01", data_antiguidade: "2025-03-01", data_fim: "2027-10-01", tipo_trabalho: "presencial",
-    horas_trabalho: "40", horas_frequencia: "semanal", subsidio: "7,63", subsidio_modo: "cartao", duodecimos_pct: "50",
+    horas_trabalho: "40", horas_frequencia: "semanal", duodecimos_pct: "50",
     tem_periodo_experimental: true, periodo_experimental_dias: "90", dias_uteis: ["seg", "ter", "qua", "qui", "sex"],
   });
   return comPatch(v, "extra", {
@@ -113,8 +113,8 @@ describe("paraNovaPessoa: cada campo do formulario chega ao payload real", () =>
     });
   });
 
-  it("retribuicao (subsidio, modo, duodecimos)", () => {
-    expect(payload.retribuicao).toEqual({ subsidio: 7.63, subsidioModo: "cartao", duodecimosPct: 50 });
+  it("retribuicao: so a parte da pessoa (os duodecimos); o salario base vem do cargo e o subsidio da regra da organizacao", () => {
+    expect(payload.retribuicao).toEqual({ duodecimosPct: 50 });
   });
 
   it("saude e sindicalizacao seguem com a permissao de as escrever", () => {
@@ -157,23 +157,120 @@ describe("paraNovaPessoa: as datas da pessoa vem do contrato", () => {
     expect(payload.nucleo.data_admissao).toBe("2026-11-15");
   });
 
-  it("o contrato e obrigatorio: com so o minimo valido ha sempre vinculo, com o inicio de hoje por omissao", () => {
-    let v = valoresIniciais(HOJE);
+  it("com contrato preenchido ha vinculo com a data de inicio escrita (nunca a de hoje por omissao)", () => {
+    let v = valoresIniciais();
     v = comPatch(v, "geral", { primeiro_nome: "Ana", apelido: "Sousa" });
     v = comPatch(v, "laborais", { cargo_id: "cargo-1" });
-    v = comPatch(v, "contrato", { tipo_contrato: "sem_termo", duodecimos_pct: "50" });
+    v = comPatch(v, "contrato", { tipo_contrato: "sem_termo", data_inicio: "2026-09-01", duodecimos_pct: "50" });
     const { payload, dataInicio } = paraNovaPessoa(v, OPCOES);
-    expect(payload.vinculo).toMatchObject({ tipo_contrato: "sem_termo", data_inicio: HOJE, estado: "activo" });
-    expect(payload.nucleo.data_admissao).toBe(HOJE);
-    expect(dataInicio).toBe(HOJE);
+    expect(payload.vinculo).toMatchObject({ tipo_contrato: "sem_termo", data_inicio: "2026-09-01", estado: "activo" });
+    expect(payload.nucleo.data_admissao).toBe("2026-09-01");
+    expect(dataInicio).toBe("2026-09-01");
   });
 
   it("o rascunho de partida ja nao tem data de admissao nem de antiguidade na pessoa", () => {
-    const inicial = valoresIniciais(HOJE);
+    const inicial = valoresIniciais();
     expect(inicial.laborais).not.toHaveProperty("data_admissao");
     expect(inicial.laborais).not.toHaveProperty("data_antiguidade");
-    expect(inicial.contrato.data_inicio).toBe(HOJE);
+    expect(inicial.contrato.data_inicio).toBe("");
     expect(inicial.contrato.data_antiguidade).toBe("");
+  });
+});
+
+describe("paraNovaPessoa: o cargo e o contrato sao opcionais na admissao", () => {
+  /** So o que a admissao obriga: os nomes. */
+  function soNomes(): ValoresNovaPessoa {
+    return comPatch(valoresIniciais(), "geral", { primeiro_nome: "Ana", apelido: "Sousa" });
+  }
+  const SEM_CARGO = { ...OPCOES, cargoNome: null };
+
+  it("so com os nomes: sem cargo, sem contrato, sem horas, sem retribuicao, sem horario e sem contratacao provisoria", () => {
+    const { payload } = paraNovaPessoa(soNomes(), SEM_CARGO);
+    expect(payload.nucleo).toMatchObject({
+      primeiro_nome: "Ana", apelido: "Sousa", cargo: null, cargo_id: null, data_admissao: null, data_antiguidade: null,
+    });
+    expect(payload.vinculo).toBeNull();
+    expect(payload.vinculoExtra).toBeNull();
+    expect(payload.horasVinculo).toBeNull();
+    expect(payload.retribuicao).toBeNull();
+    expect(payload.horario).toBeNull();
+  });
+
+  it("os duodecimos escritos antes de apagar o contrato nao seguem: sem cargo e contrato nao ha retribuicao", () => {
+    const v = comPatch(soNomes(), "contrato", { duodecimos_pct: "50" });
+    expect(paraNovaPessoa(v, SEM_CARGO).payload.retribuicao).toBeNull();
+  });
+
+  it("com cargo e sem contrato: vai o cargo (id e nome), mas nao ha vinculo, nem retribuicao, nem contratacao", () => {
+    const v = comPatch(soNomes(), "laborais", { cargo_id: "cargo-1" });
+    const { payload } = paraNovaPessoa(v, OPCOES);
+    expect(payload.nucleo).toMatchObject({ cargo_id: "cargo-1", cargo: "Vendedor/a", data_admissao: null });
+    expect(payload.vinculo).toBeNull();
+    expect(payload.retribuicao).toBeNull();
+  });
+
+  it("com contrato e sem cargo: ha vinculo e horas, o cargo segue null e nao ha retribuicao (a base recusava-a sem cargo)", () => {
+    const v = comPatch(soNomes(), "contrato", {
+      tipo_contrato: "sem_termo", data_inicio: "2026-10-01", horas_trabalho: "40", horas_frequencia: "semanal", duodecimos_pct: "50",
+    });
+    const { payload } = paraNovaPessoa(v, SEM_CARGO);
+    expect(payload.nucleo).toMatchObject({ cargo_id: null, cargo: null, data_admissao: "2026-10-01" });
+    expect(payload.vinculo).toMatchObject({ tipo_contrato: "sem_termo", data_inicio: "2026-10-01" });
+    expect(payload.horasVinculo).toEqual({ horas_periodo: 40, horas_frequencia: "semanal", valido_de: "2026-10-01" });
+    expect(payload.retribuicao).toBeNull();
+  });
+
+  it("com cargo e contrato: a retribuicao (duodecimos) segue", () => {
+    const v = comPatch(comPatch(soNomes(), "laborais", { cargo_id: "cargo-1" }), "contrato", {
+      tipo_contrato: "sem_termo", data_inicio: "2026-10-01", duodecimos_pct: "100",
+    });
+    expect(paraNovaPessoa(v, OPCOES).payload.retribuicao).toEqual({ duodecimosPct: 100 });
+  });
+
+  it("o centro de trabalho escolhido sem contrato nao grava afectacao: diz-se em naoGravado em vez de se perder em silencio", () => {
+    const v = comPatch(soNomes(), "laborais", { local_id: "local-1" });
+    const { payload, naoGravado } = paraNovaPessoa(v, SEM_CARGO);
+    expect(payload.nucleo.local_id).toBeNull();
+    expect(naoGravado).toEqual(["local_trabalho"]);
+  });
+
+  it("defesa em profundidade: um contrato a meio (sem tipo ou sem data de inicio) nao cria vinculo parcial nem retribuicao", () => {
+    const a_meio = [
+      comPatch(soNomes(), "contrato", { horas_trabalho: "40", horas_frequencia: "semanal", duodecimos_pct: "50" }),
+      comPatch(soNomes(), "contrato", { tipo_contrato: "sem_termo", duodecimos_pct: "50" }),
+      comPatch(soNomes(), "contrato", { data_inicio: "2026-10-01", duodecimos_pct: "50" }),
+      comPatch(comPatch(soNomes(), "contrato", { tipo_contrato: "sem_termo", duodecimos_pct: "50" }), "extra", { renovavel: "sim" }),
+    ].map((v) => comPatch(v, "laborais", { cargo_id: "cargo-1", local_id: "local-1" }));
+    for (const v of a_meio) {
+      const { payload, naoGravado } = paraNovaPessoa(v, OPCOES);
+      expect(payload.vinculo).toBeNull();
+      expect(payload.vinculoExtra).toBeNull();
+      expect(payload.horasVinculo).toBeNull();
+      expect(payload.retribuicao).toBeNull();
+      expect(payload.horario).toBeNull();
+      expect(payload.nucleo.data_admissao).toBeNull();
+      expect(payload.nucleo.local_id).toBeNull();
+      expect(naoGravado).toContain("local_trabalho");
+      // O cargo nao depende do contrato: segue.
+      expect(payload.nucleo.cargo_id).toBe("cargo-1");
+    }
+  });
+
+  it("o centro de trabalho com contrato segue, e nao ha aviso", () => {
+    const v = comPatch(comPatch(soNomes(), "laborais", { local_id: "local-1" }), "contrato", { tipo_contrato: "sem_termo", data_inicio: "2026-10-01" });
+    const { payload, naoGravado } = paraNovaPessoa(v, SEM_CARGO);
+    expect(payload.nucleo.local_id).toBe("local-1");
+    expect(naoGravado).toEqual([]);
+  });
+
+  it("os dados que nao sao do contrato seguem na mesma (pessoais, morada, conta, responsavel)", () => {
+    let v = comPatch(soNomes(), "pessoais", { data_nascimento: "1990-05-17", morada_linha1: "Rua A", conta_numero: "PT50 0002 0123 1234 5678 9015 4" });
+    v = comPatch(v, "laborais", { reporta_a_pessoa_id: "p-chefe" });
+    const { payload } = paraNovaPessoa(v, SEM_CARGO);
+    expect(payload.dadosPessoais).toMatchObject({ data_nascimento: "1990-05-17" });
+    expect(payload.morada).toMatchObject({ linha1: "Rua A" });
+    expect(payload.conta).toMatchObject({ numero: "PT50000201231234567890154" });
+    expect(payload.nucleo.reporta_a_pessoa_id).toBe("p-chefe");
   });
 });
 

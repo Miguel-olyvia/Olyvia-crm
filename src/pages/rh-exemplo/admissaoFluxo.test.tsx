@@ -347,7 +347,7 @@ describe("Pessoas e Nova pessoa", () => {
   });
 
   it("«Criar e enviar convite» leva o e-mail e o role previsto que o RH escolheu, e sem convite não leva nada", () => {
-    const base = valoresIniciais("2026-10-14");
+    const base = valoresIniciais();
     const valores = {
       ...base,
       geral: { ...base.geral, primeiro_nome: "Tânia", apelido: "Rocha" },
@@ -360,7 +360,7 @@ describe("Pessoas e Nova pessoa", () => {
   });
 
   it("com cargo escolhido mas sem o nome do cargo, a criação recusa-se em vez de gravar a ficha sem legenda", () => {
-    const base = valoresIniciais("2026-10-14");
+    const base = valoresIniciais();
     const valores = { ...base, laborais: { ...base.laborais, cargo_id: "cg-vendedor" } };
     expect(() => paraNovaPessoa(valores, { comConvite: false })).toThrow(/Escolha o cargo/);
   });

@@ -5,7 +5,6 @@ import { criarEstadoInicial } from "./exemplo";
 import { camposDeAdmissaoIniciais } from "./gestaoExemplo";
 import { aplicarExtras } from "./fichaNovaPessoa";
 
-const HOJE = "2026-10-14";
 const CONFIG = camposDeAdmissaoIniciais();
 
 const base = () => {
@@ -15,7 +14,7 @@ const base = () => {
 };
 
 function minimo(): ValoresNovaPessoa {
-  let v = valoresIniciais(HOJE);
+  let v = valoresIniciais();
   v = comPatch(v, "geral", { primeiro_nome: "Ana", apelido: "Sousa" });
   v = comPatch(v, "laborais", { cargo_id: "cargo-1" });
   return comPatch(v, "contrato", { tipo_contrato: "sem_termo", subsidio: "0", duodecimos_pct: "50" });
