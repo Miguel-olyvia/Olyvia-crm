@@ -1833,7 +1833,9 @@ export function faseDaPerda(d: Negocio): FasePerdaBase {
  *  tentativas e o voltar a ligar são do contacto; as da agenda das visitas (v<n>_…) e as do diagnóstico (diag_…, div_<divisão>_diag_…) da
  *  visita. As outras não pedem nenhuma destas. */
 export function permDoCampo(k: string): PermNeg | null {
+  // 11/11 (F3): as medidas retificadas (retif_…) pedem negocios.obra.planear, como o passo (20270113110000)
   if (k === "resultado" || k === "tentativas" || k === "religar") return "contacto.registar";
+  if (k.startsWith("retif_")) return "obra.planear";
   if (/^(v[0-9]+_|diag_|div_[a-z0-9]+_diag_)/.test(k)) return "visita.gerir";
   return null;
 }

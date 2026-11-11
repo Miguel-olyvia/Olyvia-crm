@@ -15,6 +15,7 @@ import { areaChaoM2, areaParedesM2, gravarPlanta, lerPlanta, peDireitoDoCampo, t
 import { useReduzir } from "../movimento";
 import { podeRetificar } from "../preparacaoObra";
 import { ImpactoNoOrcamento, linhasDoImpacto } from "./ImpactoNoOrcamento";
+import { permEmFaltaDoPasso } from "../permissoes";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -155,7 +156,8 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
 /** O botão que abre o Estúdio das medidas (no passo «Retificação de medidas»). */
 export function AbrirEstudioMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [aberto, setAberto] = useState(false);
-  if (d.f.retif_aceite || !podeRetificar(d)) return null;
+  // 11/11 (F3): sem negocios.obra.planear o estúdio não abre (aceitar as medidas pede-a; o aviso fica no passo)
+  if (d.f.retif_aceite || !podeRetificar(d) || permEmFaltaDoPasso(ctx.S, "retificarMedidas")) return null;
   return (
     <>
       <Button type="button" size="lg" className="min-h-12 w-full sm:w-auto" onClick={() => setAberto(true)}><Ruler className="mr-1.5 h-5 w-5" aria-hidden="true" />Abrir o estúdio das medidas</Button>

@@ -101,6 +101,8 @@ const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
   // 6/11: os passos da obra (as Operações) pedem negocios.obra.planear, como o motor (A.aprovarPlano, A.arrancar)
   gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"], abrirRetificacao: ["obra.planear"],
+  // 11/11 (F3): aceitar as medidas (A.retificarMedidas e as respostas retif_*) pede o mesmo que o passo (neg_guardar_negocio, 20270113110000)
+  retificarMedidas: ["obra.planear"],
 };
 /** 9/11 (revisão do Lote 2): os passos que pedem UMA de várias permissões. «Verificar no ERP» (A.verificarErp) só lê o Eticadata: basta
  *  negocios.registar_fatura OU negocios.validar_pagamento; sem nenhuma, o botão fica desligado antes de qualquer leitura. A primeira da
