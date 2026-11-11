@@ -81,6 +81,9 @@ interface PessoaAfectacoesSeccaoProps {
   podeVer: boolean;
   podeEditar: boolean;
   podeCorrigir: boolean;
+  /** 11/11/2026: aparar o horário planeado (o «aparar e fechar») grava em pessoas_horario_planeado, que exige
+   *  hr.pessoas.horario.edit. Sem ela não se propõe aparar: explica-se que é preciso tirar o horário primeiro. */
+  podeEditarHorario?: boolean;
 }
 
 function nomeDoLocal(locais: LocalTrabalho[], localId: string): string {
@@ -110,6 +113,7 @@ export function PessoaAfectacoesSeccao({
   podeVer,
   podeEditar,
   podeCorrigir,
+  podeEditarHorario = true,
 }: PessoaAfectacoesSeccaoProps) {
   const { t } = useTranslation();
   const { afectacoes, loading, saving, recarregar, criar, corrigir, fechar, apararEFechar, confirmar } =
@@ -205,6 +209,12 @@ export function PessoaAfectacoesSeccao({
     const motivo = motivoFecho.trim() || null;
     const resultado = await fechar(linhaAAlterar.id, terminaEm, motivo);
     if (resultado.tipo === "precisaAparar") {
+      if (!podeEditarHorario) {
+        toast.error(
+          `Há horário planeado depois de ${resultado.corte} neste centro. É preciso tirá-lo primeiro (permissão hr.pessoas.horario.edit) e só depois fechar a afectação.`,
+        );
+        return;
+      }
       setPropostaApara({ afectacaoId: linhaAAlterar.id, localId: resultado.localId, corte: resultado.corte });
       return;
     }
