@@ -121,6 +121,11 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /horas_contratadas_(fecha_no_passado|inicio_no_passado|versao_em_curso)/i, key: "friendlyError.horasContratadasPassado" },
   // `pessoas` (20270108420000): so hr.pessoas.laborais.edit grava apenas os campos do separador Laborais.
   { match: /pessoas_laborais_so_campos/i, key: "friendlyError.forbidden" },
+  // As datas da pessoa derivam dos contratos (20270114100000): o trigger recusa a escrita directa (23514) e os CHECKs das datas.
+  { match: /pessoas_datas_derivadas/i, key: "hr.erro.datas.calculadas" },
+  { match: /pessoas_vinculos_antiguidade_ate_inicio/i, key: "hr.erro.datas.antiguidadeDepoisInicio" },
+  { match: /pessoas_saida_depois_admissao/i, key: "hr.erro.datas.saidaAntesContratacao" },
+  { match: /pessoas_vinculos_fim_depois_inicio/i, key: "hr.erro.datas.fimAntesInicio" },
   { match: /horario_planeado_encolhe_inicio/i, key: "friendlyError.horarioPlaneadoEncolheInicio" },
   { match: /horario_planeado_altera_regra_em_curso/i, key: "friendlyError.horarioPlaneadoAlteraRegraEmCurso" },
   { match: /planeado_correccao_sem_motivo/i, key: "friendlyError.planeadoCorreccaoSemMotivo" },

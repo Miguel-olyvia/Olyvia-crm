@@ -50,7 +50,9 @@ import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos, soAteAoContacto } from "./permissoes";
-import { useModoTeste } from "./real/modoTeste";
+import { useModoTeste, useSimularClienteTeste } from "./real/modoTeste";
+// FERRAMENTAS-TESTE (temporário, remover antes da main)
+import { ambienteDeTeste } from "./FerramentasTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -629,6 +631,8 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   const falta = meu && p.btn ? permEmFaltaDoPasso(S, p.act) : null;
   // 9/11: o super admin, numa base de teste, age pelo cliente (aceitar a proposta, assinar o contrato)
   const teste = useModoTeste();
+  // FERRAMENTAS-TESTE (temporário, remover antes da main): com o botão novo, o antigo do super admin não se repete
+  const simCli = useSimularClienteTeste();
   // 04/11/2026: enviar a proposta / o contrato ao portal pede também a permissão real de quem está ligado (permPortalPasso.tsx)
   const portal = usePermPortalDoPasso(p.act, meu && !!p.btn && !falta);
   if (falta) return (
@@ -658,8 +662,12 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   // 27/10 (Rúben): sem o "Simular o cliente": quem aceita, recusa e assina é o cliente, no portal (o link da proposta)
   if (p.sim) return (
     <div className="grid justify-items-start gap-2 sm:justify-items-end">
-      <span className="text-sm text-muted-foreground">À espera do cliente no portal</span>
-      {teste && (p.sim === "aceitar" || p.sim === "assinar") && <BotaoTesteCliente d={d} acao={p.sim} tamanho={tamanho} />}
+      {/* FERRAMENTAS-TESTE (temporário, remover antes da main): o botão de teste ao lado do texto, para os perfis normais */}
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <span className="text-sm text-muted-foreground">À espera do cliente no portal</span>
+        {(p.sim === "aceitar" || p.sim === "assinar") && <BotaoTesteSimularCliente d={d} acao={p.sim} tamanho={tamanho} />}
+      </div>
+      {teste && !simCli && (p.sim === "aceitar" || p.sim === "assinar") && <BotaoTesteCliente d={d} acao={p.sim} tamanho={tamanho} />}
     </div>
   );
   if (p.wait && p.who === "direcao") return <Button variant="outline" size={tamanho} onClick={go(() => A.role("direcao"))}>Mudar para Direção</Button>;
@@ -917,6 +925,25 @@ export function BotaoTesteCliente({ d, acao, tamanho = "default" }: { d: Negocio
   return (
     <Button type="button" variant="outline" size={tamanho} className="border-dashed border-amber-500 text-amber-800 hover:bg-amber-50" disabled={aFazer} onClick={fazerTeste}>
       <FlaskConical className="mr-2 h-4 w-4" aria-hidden="true" />{aFazer ? "A fazer pelo cliente…" : acao === "aceitar" ? "Aceitar a proposta pelo cliente (teste)" : "Assinar o contrato pelo cliente (teste)"}
+    </Button>
+  );
+}
+
+// FERRAMENTAS-TESTE (temporário, remover antes da main)
+// 11/11 (Rafael): no passo «À espera do cliente», qualquer membro ativo da organização (perfis normais) aceita a proposta / assina o
+// contrato como o cliente, pela Edge Function client-portal-action («simular_cliente»), o mesmo caminho do painel de teste. Só aparece no
+// ambiente de testes (testarh, localhost ou VITE_FERRAMENTAS_TESTE=1) E quando a base diz que sim
+// (fn_modo_teste_simular_cliente_para_mim: modo de teste ligado E membro ativo); em produção o modo de teste está desligado.
+const ambienteDoBotaoTeste = () => ambienteDeTeste(import.meta.env.VITE_FERRAMENTAS_TESTE as string | undefined, typeof window === "undefined" ? undefined : window.location.hostname);
+export function BotaoTesteSimularCliente({ d, acao, tamanho = "default", ambiente = ambienteDoBotaoTeste }: { d: Negocio; acao: "aceitar" | "assinar"; tamanho?: "lg" | "default"; /** para os testes */ ambiente?: () => boolean }) {
+  const teste = useSimularClienteTeste();
+  const [aFazer, setAFazer] = useState(false);
+  if (!teste || !ambiente()) return null;
+  const fazerTeste = () => { setAFazer(true); void (acao === "aceitar" ? teste.aceitarProposta(d) : teste.assinarContrato(d)).finally(() => setAFazer(false)); };
+  return (
+    <Button type="button" size={tamanho} data-testid="botao-teste-simular-cliente"
+      className="border-2 border-dashed border-amber-500 bg-amber-100 font-semibold text-amber-950 hover:bg-amber-200" disabled={aFazer} onClick={fazerTeste}>
+      <FlaskConical className="mr-2 h-4 w-4" aria-hidden="true" />{aFazer ? (acao === "aceitar" ? "A aceitar…" : "A assinar…") : acao === "aceitar" ? "TESTE: aceitar como o cliente" : "TESTE: assinar como o cliente"}
     </Button>
   );
 }

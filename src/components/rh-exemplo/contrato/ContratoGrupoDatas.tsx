@@ -34,7 +34,15 @@ interface ContratoGrupoDatasProps {
   ) => void;
   /** O erro de formato de um campo numerico (so depois de lhe tocar). */
   erroDe: (campoId: string) => string | null;
+  /**
+   * A leitura do contrato trouxe a antiguidade (`data_antiguidade` definida)? `false`: o campo fica so de leitura e diz
+   * porque, para nao se gravar por cima de um valor que o ecra nao leu. Omissao: lida.
+   */
+  antiguidadeLida?: boolean;
 }
+
+/** O campo da antiguidade do contrato: o separador valida-o e envia-o. */
+export const CAMPO_ANTIGUIDADE = "hr-contrato-data-antiguidade";
 
 export function ContratoGrupoDatas({
   rascunho,
@@ -46,6 +54,7 @@ export function ContratoGrupoDatas({
   onAceitarSugestao,
   onDefinirCampoExperimental,
   erroDe,
+  antiguidadeLida = true,
 }: ContratoGrupoDatasProps) {
   const { t } = useTranslation();
   const temMeses = tipoTemDuracaoEmMeses(rascunho.tipo_contrato);
@@ -78,6 +87,18 @@ export function ContratoGrupoDatas({
             // Escrever a data a mao acerta os meses (vazio se nenhuma duracao a produz).
             if (temMeses) definir("duracao_meses", mesesDaDataFim(rascunho.data_inicio, v));
           }}
+        />
+        {/* A antiguidade e DESTE contrato; a da pessoa e a mais recente preenchida na cadeia de contratos (servidor). */}
+        <CampoTexto
+          id={CAMPO_ANTIGUIDADE}
+          label={t("hr.contrato.dataAntiguidade")}
+          tipo="date"
+          valor={rascunho.data_antiguidade}
+          max={rascunho.data_inicio || undefined}
+          erro={erroDe(CAMPO_ANTIGUIDADE)}
+          ajuda={antiguidadeLida ? t("hr.contrato.ajudaDataAntiguidade") : t("hr.contrato.antiguidadeNaoLida")}
+          disabled={!podeEditar || !antiguidadeLida}
+          onChange={(v) => definir("data_antiguidade", v)}
         />
         {/* So no termo certo -- nos outros tipos nao ha duracao em meses. */}
         {temMeses && (

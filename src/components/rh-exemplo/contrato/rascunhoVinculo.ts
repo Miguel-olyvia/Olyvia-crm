@@ -28,6 +28,8 @@ export type RascunhoVinculo = {
   estado: EstadoVinculo;
   data_inicio: string;
   data_fim: string;
+  /** A antiguidade deste contrato (`<= data_inicio`); vazio = sem valor proprio (conta o inicio da cadeia). */
+  data_antiguidade: string;
   /**
    * UI, nao dados: so no termo certo. Nao ha coluna: ao abrir um contrato sai
    * da data de fim (`mesesDaDataFim`, vazio se nenhuma duracao a produz) e
@@ -75,6 +77,7 @@ export function rascunhoDe(vinculo: PessoaVinculo | null): RascunhoVinculo {
     estado: vinculo?.estado ?? "activo",
     data_inicio: dataInicio,
     data_fim: dataFim,
+    data_antiguidade: vinculo?.data_antiguidade ?? "",
     duracao_meses: tipoTemDuracaoEmMeses(tipo) ? mesesDaDataFim(dataInicio, dataFim) : "",
     motivo_termo: vinculo?.motivo_termo ?? "",
     periodo_experimental_dias:

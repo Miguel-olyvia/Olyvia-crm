@@ -33,6 +33,8 @@ import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFi
 import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { documentosDoNegocio, enviarAoPortal } from "@/emylia/real/portalReal";
 import { definirModoTeste, podeModoTeste, simularCliente, simularFornecedor } from "@/emylia/real/modoTeste";
+// FERRAMENTAS-TESTE (temporário, remover antes da main)
+import { definirSimularClienteTeste, podeSimularClienteTeste } from "@/emylia/real/modoTeste";
 import { definirGuardarCliente } from "@/emylia/EditarCliente";
 import { linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { gravarMoradaPrincipal } from "@/emylia/real/gravarMoradaDaEntidade";
@@ -576,7 +578,15 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         },
       });
     });
-    return () => { vivo = false; definirModoTeste(null); };
+    // FERRAMENTAS-TESTE (temporário, remover antes da main): aceitar/assinar como o cliente para membros ativos (perfis normais)
+    void podeSimularClienteTeste(supabase, org).then((pode) => {
+      if (!vivo) return;
+      definirSimularClienteTeste(!pode ? null : {
+        aceitarProposta: (d) => peloCliente(d, "sign_proposal"),
+        assinarContrato: (d) => peloCliente(d, "sign_contract"),
+      });
+    });
+    return () => { vivo = false; definirModoTeste(null); definirSimularClienteTeste(null); /* FERRAMENTAS-TESTE */ };
   }, [org, S, avisar, redesenhar, aplicarLidos, carregarEncomendas]);
 
   // 30/10: Compras e armazém aprova a encomenda a fornecedor no passo dos materiais; depois relê as encomendas do negócio

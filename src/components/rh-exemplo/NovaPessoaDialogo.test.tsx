@@ -28,9 +28,12 @@ vi.mock("@/components/rh-exemplo/EnviarConviteDialog", () => ({
   ) : null),
 }));
 
-type Dados = { dados: { payload: { nucleo: { email_pessoal: string | null } }; naoGravado: string[] }; comConvite: boolean };
-const dados = (email: string | null, comConvite = false): Dados => ({
-  dados: { payload: { nucleo: { email_pessoal: email } }, naoGravado: [] }, comConvite,
+type Dados = {
+  dados: { payload: { nucleo: { email_pessoal: string | null }; vinculo: { data_antiguidade: string | null } | null }; naoGravado: string[] };
+  comConvite: boolean;
+};
+const dados = (email: string | null, comConvite = false, antiguidade: string | null = null): Dados => ({
+  dados: { payload: { nucleo: { email_pessoal: email }, vinculo: { data_antiguidade: antiguidade } }, naoGravado: [] }, comConvite,
 });
 
 vi.mock("@/components/rh-exemplo/novaPessoa/FormularioNovaPessoa", () => ({
@@ -41,6 +44,7 @@ vi.mock("@/components/rh-exemplo/novaPessoa/FormularioNovaPessoa", () => ({
       <button type="button" onClick={() => p.aoCriar(dados("a@x.pt"))}>criar</button>
       <button type="button" onClick={() => p.aoCriar(dados("a@x.pt", true))}>criar-convite</button>
       <button type="button" onClick={() => p.aoCriar(dados(null, true))}>criar-convite-sem-email</button>
+      <button type="button" onClick={() => p.aoCriar(dados("a@x.pt", false, "2020-01-01"))}>criar-com-antiguidade</button>
       <button type="button" onClick={p.aoSujar}>sujar</button>
       <button type="button" onClick={p.aoCancelar}>cancelar</button>
       <button type="button" onClick={() => p.aoAbrirFichaExistente("existente")}>abrir-existente</button>
@@ -98,6 +102,26 @@ describe("NovaPessoaDialogo (rh-exemplo): a falha aparece ao utilizador", () => 
     }));
     await waitFor(() => expect(onCriada).toHaveBeenCalledWith("p1"));
     expect(toast.error).toHaveBeenCalledWith("hr.form.criadaComFalhas hr.form.seccoes.niss, hr.form.seccoes.saude");
+  });
+
+  it("o contrato nao ficou gravado: diz que a contratacao e provisoria e que falta o contrato", async () => {
+    const { onCriada } = montar(async () => ({ id: "p1", falhas: [{ seccao: "vinculo", mensagem: "x" }], naoGravado: [] }));
+    await waitFor(() => expect(onCriada).toHaveBeenCalledWith("p1"));
+    expect(toast.error).toHaveBeenCalledWith("hr.form.criadaComFalhas hr.form.seccoes.vinculo");
+    expect(toast.warning).toHaveBeenCalledWith("rhNova.falhaContrato");
+    expect(toast.warning).not.toHaveBeenCalledWith("rhNova.falhaContrato.antiguidade");
+  });
+
+  it("o contrato nao ficou gravado e a antiguidade estava escrita: diz que se perdeu e que se preenche no contrato", async () => {
+    const { onCriada } = montar(async () => ({ id: "p1", falhas: [{ seccao: "vinculo", mensagem: "x" }], naoGravado: [] }), "criar-com-antiguidade");
+    await waitFor(() => expect(onCriada).toHaveBeenCalledWith("p1"));
+    expect(toast.warning).toHaveBeenCalledWith("rhNova.falhaContrato.antiguidade");
+  });
+
+  it("sem falha do contrato, nenhum desses avisos", async () => {
+    const { onCriada } = montar(SEM_FALHAS, "criar-com-antiguidade");
+    await waitFor(() => expect(onCriada).toHaveBeenCalledWith("p1"));
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 
   it("o que nao tem onde gravar e dito num aviso, mesmo sem falhas", async () => {

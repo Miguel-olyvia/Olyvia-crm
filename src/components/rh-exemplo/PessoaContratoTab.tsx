@@ -93,7 +93,8 @@ import { type OpcaoVinculoDocumento } from "@/components/rh-exemplo/AnexarContra
 import { CamposTocadosProvider } from "@/components/rh-exemplo/form/Campos";
 import { ContratoAtalhosDocumentos } from "@/components/rh-exemplo/contrato/ContratoAtalhosDocumentos";
 import { ContratoGrupoContrato } from "@/components/rh-exemplo/contrato/ContratoGrupoContrato";
-import { ContratoGrupoDatas } from "@/components/rh-exemplo/contrato/ContratoGrupoDatas";
+import { ContratoDatasDaPessoa } from "@/components/rh-exemplo/contrato/ContratoDatasDaPessoa";
+import { CAMPO_ANTIGUIDADE, ContratoGrupoDatas } from "@/components/rh-exemplo/contrato/ContratoGrupoDatas";
 import { ContratoGrupoTempoTrabalho } from "@/components/rh-exemplo/contrato/ContratoGrupoTempoTrabalho";
 import { ContratosAnterioresCard } from "@/components/rh-exemplo/contrato/ContratosAnterioresCard";
 import { FimContratoCard } from "@/components/rh-exemplo/fimContrato/FimContratoCard";
@@ -165,6 +166,17 @@ interface PessoaContratoTabProps {
   /** Vinculos desta pessoa, para o selector opcional do dialogo -- a MESMA
    *  lista que `PessoaDetail` ja calcula para `PessoaDocumentosTab`. */
   vinculosOpcoesDocumento: OpcaoVinculoDocumento[];
+  /**
+   * `pessoas.data_admissao`: so serve ao resumo das datas enquanto NAO ha contrato (contratacao provisoria, falta contrato).
+   * Com contrato, a contratacao e a saida calculam-se dos contratos (`datasDaPessoa`).
+   */
+  dataAdmissaoProvisoria?: string | null;
+  /** `pessoas.data_saida`: sem contrato vivo mantem-se (D8 revista) e o resumo mostra-a. */
+  dataSaidaGravada?: string | null;
+  /** `pessoas.data_antiguidade`: ver `ContratoDatasDaPessoa`. */
+  dataAntiguidadeGravada?: string | null;
+  /** Os contratos ainda a carregar: nao se sabe se falta contrato, por isso o resumo nao avisa de contratacao provisoria. */
+  carregando?: boolean;
   saving: boolean;
   onGuardarVinculo: (
     vinculoId: string | null,
@@ -189,6 +201,10 @@ export function PessoaContratoTab({
   podeCorrigirHoras,
   podeAnexarContratoAssinado,
   vinculosOpcoesDocumento,
+  dataAdmissaoProvisoria = null,
+  dataSaidaGravada = null,
+  dataAntiguidadeGravada = null,
+  carregando = false,
   saving,
   onGuardarVinculo,
 }: PessoaContratoTabProps) {
@@ -218,6 +234,11 @@ export function PessoaContratoTab({
    * `ContratoGrupoTempoTrabalho` e `usePessoa.saveVinculo`.
    */
   const criandoContrato = activo === null;
+  /**
+   * A antiguidade so se edita e envia se a leitura do contrato a trouxe (`undefined` = nao lida): senao gravar `null`
+   * apagava um valor que o ecra nunca viu. Um contrato novo nao tem valor a perder.
+   */
+  const antiguidadeLida = activo === null || activo.data_antiguidade !== undefined;
 
   const [rascunho, setRascunho] = useState<RascunhoVinculo>(() => rascunhoDe(activo));
   useEffect(() => {
@@ -262,7 +283,18 @@ export function PessoaContratoTab({
     [rascunho],
   );
 
+  /** A antiguidade escrita e posterior ao inicio do contrato (a base recusa-o com um CHECK). Datas ISO comparam-se como texto. */
+  const antiguidadeDepoisDoInicio =
+    antiguidadeLida &&
+    rascunho.data_antiguidade.trim() !== "" &&
+    rascunho.data_inicio.trim() !== "" &&
+    rascunho.data_antiguidade.trim() > rascunho.data_inicio.trim();
+
   const erroDe = (campoId: string): string | null => {
+    if (campoId === CAMPO_ANTIGUIDADE) {
+      if (!antiguidadeDepoisDoInicio || (!mostrarTodos && !tocados.has(campoId))) return null;
+      return t("hr.contrato.erroAntiguidadeDepoisInicio");
+    }
     const problema = problemasNumericos.find(
       (candidato) => CAMPOS_NUMERICOS[candidato.campo] === campoId,
     );
@@ -275,6 +307,11 @@ export function PessoaContratoTab({
     if (rascunho.data_inicio.trim() === "") {
       setMostrarTodos(true);
       toast.error(t("hr.contrato.erroSemDataInicio"));
+      return;
+    }
+    if (antiguidadeDepoisDoInicio) {
+      setMostrarTodos(true);
+      toast.error(t("hr.contrato.erroAntiguidadeDepoisInicio"));
       return;
     }
     // Nao se manda a base o que ela vai recusar: a mensagem de um CHECK nao
@@ -297,6 +334,8 @@ export function PessoaContratoTab({
       estado: rascunho.estado,
       data_inicio: rascunho.data_inicio,
       data_fim: textoOuNull(rascunho.data_fim),
+      // So se a leitura a trouxe (ver `antiguidadeLida`). O servidor deriva dela a antiguidade da pessoa.
+      ...(antiguidadeLida ? { data_antiguidade: textoOuNull(rascunho.data_antiguidade) } : {}),
       motivo_termo: textoOuNull(rascunho.motivo_termo),
       periodo_experimental_dias: numeroOuNull(rascunho.periodo_experimental_dias),
       periodo_experimental_ate: textoOuNull(rascunho.periodo_experimental_ate),
@@ -332,6 +371,8 @@ export function PessoaContratoTab({
       toast.error(erro);
       return;
     }
+    // Gravar recarrega a ficha inteira (`usePessoa.guardar` chama `load()`): os contratos e as datas da pessoa que o servidor
+    // acabou de recalcular chegam daqui, e o resumo abaixo recalcula-se dos contratos recarregados.
     setVersaoHistorico((v) => v + 1);
     toast.success(t("hr.sucesso.guardado"));
   };
@@ -375,6 +416,7 @@ export function PessoaContratoTab({
               onAceitarSugestao={experimental.aceitarSugestao}
               onDefinirCampoExperimental={experimental.definirCampo}
               erroDe={erroDe}
+              antiguidadeLida={antiguidadeLida}
             />
             <ContratoGrupoTempoTrabalho
               rascunho={rascunho}
@@ -393,6 +435,8 @@ export function PessoaContratoTab({
           </CamposTocadosProvider>
         </CardContent>
       </Card>
+
+      <ContratoDatasDaPessoa vinculos={vinculos} dataAdmissaoProvisoria={dataAdmissaoProvisoria} dataSaidaGravada={dataSaidaGravada} dataAntiguidadeGravada={dataAntiguidadeGravada} carregando={carregando} />
 
       {podeVerRetribuicao && (
         <PessoaRetribuicaoCard

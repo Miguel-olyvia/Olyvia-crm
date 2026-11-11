@@ -61,3 +61,22 @@ export function dataPrometidaTeste(hoje = new Date()): string {
   while (n < 2) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) n++; }
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+// FERRAMENTAS-TESTE (temporário, remover antes da main)
+// 11/11 (Rafael): aceitar a proposta / assinar o contrato como o cliente também nas contas de perfis normais (Comercial, Financeiro…),
+// no botão do passo «À espera do cliente». A base diz que sim só com o modo de teste ligado E membro ativo da organização
+// (fn_modo_teste_simular_cliente_para_mim, migração 20270114200000). As outras ferramentas do modo de teste continuam só do super admin.
+export type AcoesSimularCliente = Pick<AcoesDeTeste, "aceitarProposta" | "assinarContrato">;
+let acoesCliente: AcoesSimularCliente | null = null;
+const quemCliente = new Set<() => void>();
+export function definirSimularClienteTeste(a: AcoesSimularCliente | null) { acoesCliente = a; quemCliente.forEach((f) => f()); }
+export function useSimularClienteTeste(): AcoesSimularCliente | null {
+  return useSyncExternalStore((f) => { quemCliente.add(f); return () => quemCliente.delete(f); }, () => acoesCliente, () => null);
+}
+/** A base diz se quem entrou pode aceitar/assinar como o cliente nesta organização (modo de teste ligado E membro ativo). Um erro é «não». */
+export async function podeSimularClienteTeste(sb: SupabaseClient, org: string): Promise<boolean> {
+  try {
+    const { data, error } = await sb.rpc("fn_modo_teste_simular_cliente_para_mim" as never, { p_org: org } as never);
+    return !error && data === true;
+  } catch { return false; }
+}

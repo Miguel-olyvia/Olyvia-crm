@@ -23,7 +23,14 @@ import { useCallback, useEffect, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
+import {
+  ERRO_NENHUMA_LINHA_GRAVADA,
+  exigirLinhasGravadas,
+  hrFrom,
+  isPermissionError,
+  mensagemNaoGravadoSemPermissao,
+} from "@/lib/hr/hrDb";
+import { periodoDecorrido } from "@/lib/hr/afectacoes";
 import { ordenarColocacoes } from "@/lib/hr/colocacaoOrganograma";
 import type { PessoaColocacaoOrganograma } from "@/types/hr";
 
@@ -32,6 +39,15 @@ const COLUNAS =
 
 /** Resultado de fechar (ALTERAR) uma colocacao. `ok` cobre sucesso; `erro`
  *  cobre qualquer recusa, ja amigavel e traduzida. */
+/**
+ * E6-2: a permissao que `pessoas_colocacao_organograma_update` exige para
+ * mexer NESTA linha -- pelo `valido_ate` da linha ANTIGA, como o USING.
+ */
+function permissaoDaLinha(linha: Pick<PessoaColocacaoOrganograma, "valido_ate"> | undefined): string {
+  if (!linha) return "hr.pessoas.colocacao.edit / hr.pessoas.colocacao.corrigir";
+  return periodoDecorrido(linha.valido_ate) ? "hr.pessoas.colocacao.corrigir" : "hr.pessoas.colocacao.edit";
+}
+
 export type ResultadoColocacao = { tipo: "ok" } | { tipo: "erro"; mensagem: string };
 
 export function usePessoaColocacaoOrganograma(
@@ -75,11 +91,19 @@ export function usePessoaColocacaoOrganograma(
 
   /** Devolve `null` em sucesso, ou a mensagem amigavel. */
   const executar = useCallback(
-    async (accao: (autorId: string | null) => Promise<{ error: unknown }>): Promise<string | null> => {
+    async (
+      accao: (autorId: string | null) => Promise<{ error: unknown }>,
+      permissaoExigida?: string,
+    ): Promise<string | null> => {
       setSaving(true);
       try {
         const autorId = await resolveCurrentBusinessUserId();
         const { error } = await accao(autorId);
+        // E6-2: o UPDATE que a RLS filtra devolve 0 linhas SEM erro -- e uma
+        // recusa, nunca "Alterações guardadas".
+        if (error === ERRO_NENHUMA_LINHA_GRAVADA && permissaoExigida) {
+          return mensagemNaoGravadoSemPermissao(permissaoExigida);
+        }
         if (error) throw error;
         await load();
         return null;
@@ -145,18 +169,25 @@ export function usePessoaColocacaoOrganograma(
         motivo: string | null;
       },
     ) =>
-      executar(async (autorId) =>
-        hrFrom("pessoas_colocacao_organograma")
-          .update({
-            organograma_node_id: patch.organogramaNodeId,
-            valido_de: patch.validoDe,
-            valido_ate: patch.validoAte,
-            motivo: patch.motivo,
-            updated_by: autorId,
-          })
-          .eq("id", colocacaoId),
+      executar(
+        async (autorId) =>
+          exigirLinhasGravadas(
+            await hrFrom("pessoas_colocacao_organograma")
+              .update(
+                {
+                  organograma_node_id: patch.organogramaNodeId,
+                  valido_de: patch.validoDe,
+                  valido_ate: patch.validoAte,
+                  motivo: patch.motivo,
+                  updated_by: autorId,
+                },
+                { count: "exact" },
+              )
+              .eq("id", colocacaoId),
+          ),
+        permissaoDaLinha(colocacoes.find((c) => c.id === colocacaoId)),
       ),
-    [executar],
+    [executar, colocacoes],
   );
 
   /**
@@ -170,9 +201,16 @@ export function usePessoaColocacaoOrganograma(
       setSaving(true);
       try {
         const autorId = await resolveCurrentBusinessUserId();
-        const { error } = await hrFrom("pessoas_colocacao_organograma")
-          .update({ valido_ate: validoAte, motivo, updated_by: autorId })
+        const { error, count } = await hrFrom("pessoas_colocacao_organograma")
+          .update({ valido_ate: validoAte, motivo, updated_by: autorId }, { count: "exact" })
           .eq("id", colocacaoId);
+        // E6-2: 0 linhas sem erro = a RLS filtrou o UPDATE; nada foi gravado.
+        if (!error && count === 0) {
+          return {
+            tipo: "erro",
+            mensagem: mensagemNaoGravadoSemPermissao(permissaoDaLinha(colocacoes.find((c) => c.id === colocacaoId))),
+          };
+        }
         if (error) {
           if (!isPermissionError(error)) captureFlowError(error, "hr-colocacao-organograma-write");
           return { tipo: "erro", mensagem: await getFriendlyErrorMessage(error) };
@@ -186,7 +224,7 @@ export function usePessoaColocacaoOrganograma(
         setSaving(false);
       }
     },
-    [load],
+    [colocacoes, load],
   );
 
   return {

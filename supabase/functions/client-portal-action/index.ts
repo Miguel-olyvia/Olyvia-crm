@@ -99,7 +99,10 @@ serve(async (req) => {
       const { data: doc } = await supabase.from(coluna === "proposal_id" ? "proposals" : "client_contracts")
         .select("organization_id, entity_id").eq("id", docId).maybeSingle();
       if (!doc) return new Response(JSON.stringify({ error: "not_found", message: "Documento não encontrado." }), { status: 404, headers: corsHeaders });
-      const { data: admin } = await supabase.rpc("fn_super_admin_de", { p_auth: user.id, p_org: (doc as any).organization_id });
+      let { data: admin } = await supabase.rpc("fn_super_admin_de", { p_auth: user.id, p_org: (doc as any).organization_id });
+      // FERRAMENTAS-TESTE (temporário, remover antes da main): 11/11 (Rafael) aceitar/assinar como o cliente também para membro ativo
+      // da organização do documento (perfis normais), só com o modo de teste ligado (migração 20270114200000)
+      if (admin !== true) ({ data: admin } = await supabase.rpc("fn_modo_teste_simular_cliente_de", { p_auth: user.id, p_org: (doc as any).organization_id }));
       if (admin !== true) {
         return new Response(JSON.stringify({ error: "Forbidden", message: "Só o super admin da organização pode agir pelo cliente (teste)." }), { status: 403, headers: corsHeaders });
       }

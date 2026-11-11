@@ -63,14 +63,13 @@ export const EXTRAS_VAZIOS: Readonly<ExtrasForm> = {
 };
 
 /**
- * Os valores com que o painel abre: os do assistente real, mais a data de admissão e a de início do contrato a "hoje"
- * (visíveis e editáveis). Tudo o resto fica em branco: o RH escolhe o tipo de contrato, o subsídio e os duodécimos.
+ * Os valores com que o painel abre: os do assistente real, mais a data de início do contrato (a data de contratação, a única
+ * que se pede) a "hoje", visível e editável. Tudo o resto fica em branco: o RH escolhe o tipo de contrato e os duodécimos.
  */
 export function valoresIniciais(hoje: string): ValoresNovaPessoa {
   const base = rascunhoInicial();
   return {
     ...base,
-    laborais: { ...base.laborais, data_admissao: hoje },
     contrato: { ...base.contrato, data_inicio: hoje },
     extra: { ...EXTRAS_VAZIOS, noConvite: {} },
   };
