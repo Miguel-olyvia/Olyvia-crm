@@ -321,3 +321,41 @@ describe("datasDaPessoa: saida gravada sem contrato (D8 revista)", () => {
     expect(datasDaPessoa([], "2024-05-01T00:00:00Z").data_saida).toBe("2024-05-01");
   });
 });
+
+describe("datasDaPessoa: so contratos futuros mantem a saida gravada", () => {
+  it("pessoa que saiu e so tem um contrato futuro: a saida mantem-se; contratacao e antiguidade seguem a cadeia", () => {
+    expect(datasDaPessoa([v("futuro", "2027-01-01", "2027-12-31")], "2024-05-01")).toEqual({
+      data_admissao: "2027-01-01", data_antiguidade: "2027-01-01", data_saida: "2024-05-01",
+    });
+  });
+
+  it("varios futuros e nenhum outro: saida gravada mantida, cadeia mais recente", () => {
+    expect(datasDaPessoa([v("futuro", "2027-01-01", "2027-06-30"), v("futuro", "2029-01-01", "2029-06-30")], "2024-05-01")).toEqual({
+      data_admissao: "2029-01-01", data_antiguidade: "2029-01-01", data_saida: "2024-05-01",
+    });
+  });
+
+  it("so futuros e sem saida gravada: saida null", () => {
+    expect(datasDaPessoa([v("futuro", "2027-01-01")], null).data_saida).toBeNull();
+  });
+
+  it("pessoa que saiu e contrato novo activo: a saida segue a regra (limpa)", () => {
+    expect(datasDaPessoa([v("activo", "2026-03-01")], "2024-05-01")).toEqual({
+      data_admissao: "2026-03-01", data_antiguidade: "2026-03-01", data_saida: null,
+    });
+  });
+
+  it("um suspenso ou um terminado tambem permitem a regra: a saida gravada e ignorada", () => {
+    expect(datasDaPessoa([v("suspenso", "2026-03-01")], "2024-05-01").data_saida).toBeNull();
+    expect(datasDaPessoa([v("terminado", "2025-01-01", "2025-12-31")], "2024-05-01").data_saida).toBe("2025-12-31");
+  });
+
+  it("um futuro ligado a um contrato nao-futuro: regra normal, saida gravada ignorada", () => {
+    expect(datasDaPessoa([v("terminado", "2025-01-01", "2025-12-31"), v("futuro", "2026-01-01")], "2024-05-01").data_saida).toBeNull();
+  });
+
+  it("um nao-futuro APAGADO nao conta: com so um futuro vivo a saida gravada mantem-se", () => {
+    const apagado = v("activo", "2020-01-01", null, { deleted_at: "2024-06-01T00:00:00Z" });
+    expect(datasDaPessoa([apagado, v("futuro", "2027-01-01")], "2024-05-01").data_saida).toBe("2024-05-01");
+  });
+});

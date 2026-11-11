@@ -111,9 +111,10 @@ export function eRecusaDasDatasDerivadas(erro: unknown): boolean {
 const SEM_DATAS: DatasDaPessoa = { data_admissao: null, data_antiguidade: null, data_saida: null };
 
 /**
- * `saidaGravada` (`pessoas.data_saida`) so conta SEM contrato vivo: a base mantem-na (D8 revista; e barreira de acesso em
- * `fn_neg_pessoa_da_conta`, apagar o ultimo contrato nunca a limpa) e so a contratacao e a antiguidade voltam a `null`.
- * Com contrato vivo vale a regra normal e `saidaGravada` e ignorada.
+ * `saidaGravada` (`pessoas.data_saida`) so conta SEM nenhum contrato vivo que nao seja `futuro`: a base mantem-na (D8 revista;
+ * e barreira de acesso em `fn_neg_pessoa_da_conta`, apagar o ultimo contrato nunca a limpa, e um contrato `futuro` ainda nao
+ * devolve acesso). Sem contratos, so a contratacao e a antiguidade voltam a `null`; com so `futuro`, seguem a cadeia mais
+ * recente. Basta um contrato activo, suspenso ou terminado para valer a regra normal e `saidaGravada` ser ignorada.
  */
 export function datasDaPessoa(
   vinculos: readonly VinculoParaDatas[] | null | undefined,
@@ -124,6 +125,8 @@ export function datasDaPessoa(
 
   const cadeia = cadeiaDeReferencia(cadeiasDe(vivos));
   const todosTerminados = cadeia.membros.every((m) => m.estado === "terminado");
+  // Nenhum contrato vivo e nao-futuro (a cadeia de referencia so os tem se existirem): a saida gravada mantem-se.
+  const soFuturos = !cadeia.membros.some((m) => m.estado !== "futuro");
 
   const comAntiguidade = cadeia.membros.filter((m) => m.data_antiguidade).sort(porInicioEId);
   const ultimo = comAntiguidade[comAntiguidade.length - 1];
@@ -132,6 +135,6 @@ export function datasDaPessoa(
   return {
     data_admissao: cadeia.inicio,
     data_antiguidade: antiguidade ?? cadeia.inicio,
-    data_saida: todosTerminados ? cadeia.fim : null,
+    data_saida: soFuturos ? (saidaGravada ? soData(saidaGravada) : null) : todosTerminados ? cadeia.fim : null,
   };
 }
