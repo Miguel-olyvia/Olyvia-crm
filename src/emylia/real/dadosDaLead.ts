@@ -84,9 +84,15 @@ export async function gravarDadosDaLead(sb: SupabaseClient, org: string, antes: 
   const nome = [m.primeiro.trim(), m.apelido.trim()].filter(Boolean).join(" ");
   const { error } = await db(sb).from("anew_entities").update({
     first_name: m.primeiro.trim() || null, last_name: m.apelido.trim() || null, ...(nome ? { display_name: nome } : {}),
-    extra, origin_id: m.fonteId || null,
+    extra,
   }).eq("id", antes.entityId);
   if (error) throw new Error(error.message || "Não foi possível gravar os dados da lead.");
+  // 11/11 (F5): a fonte (origin_id) é coluna fechada ao UPDATE direto (20261228200000, 1.6.7); grava-se pela função própria,
+  // que confirma que a fonte é desta organização, pessoas.edit e o âmbito. Só se chama quando a fonte muda.
+  if ((m.fonteId || "") !== (antes.fonteId || "")) {
+    const r = await sb.rpc("neg_guardar_origem_pessoa" as never, { p_organization_id: org, p_entity_id: antes.entityId, p_origin_id: m.fonteId || null } as never);
+    if (r.error) throw new Error((r.error as { message?: string }).message || "Não foi possível mudar a fonte.");
+  }
   if (m.comercialId !== antes.comercialId) {
     const r = await sb.rpc("neg_atribuir_pessoa" as never, { p_organization_id: org, p_entity_id: antes.entityId, p_assigned_to: m.comercialId || null } as never);
     if (r.error) throw new Error((r.error as { message?: string }).message || "Não foi possível mudar o comercial.");

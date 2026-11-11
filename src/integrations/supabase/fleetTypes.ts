@@ -347,10 +347,10 @@ export interface FleetRpcs {
   };
   rpc_fleet_post_travel_cost: { args: { p_link_id: string }; returns: string };
   /**
-   * PROPOSTA (ainda NÃO existe na BD, falta a migração aprovada): resolve uma linha de extrato marcada needs_review.
+   * Migração 20270113920000 (exige fleet.costs): resolve uma linha de extrato marcada needs_review.
    * p_accept=true grava as correções (viatura, km, valor), tira o needs_review e, se os km passarem a última leitura,
    * atualiza o conta-quilómetros; p_accept=false apaga a linha. Em ambos os casos acerta rows_flagged da importação.
-   * Enquanto não existir, o PostgREST responde PGRST202 e a UI diz "ainda não está disponível na base de dados".
+   * Numa base sem a migração, o PostgREST responde PGRST202 e a UI diz "ainda não está disponível na base de dados".
    */
   rpc_fleet_review_expense: {
     args: { p_expense_id: string; p_accept: boolean; p_vehicle_id: string | null; p_km: number | null; p_amount: number | null };

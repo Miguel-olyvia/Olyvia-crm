@@ -522,6 +522,18 @@ export default function Quotes() {
   // src/lib/quotes/dealQuoteLink.ts).
   useEffect(() => {
     if (searchParams.get("new") === "1") {
+      // 11/11/2026: o builder de um orçamento novo só abre com quotes.create (rpc_save_quote recusa sem ela).
+      if (permissionsLoading) return;
+      if (!hasPermission("quotes.create")) {
+        toast({ title: "Sem permissão para criar orçamentos (quotes.create).", variant: "destructive" });
+        const semPermissao = new URLSearchParams(searchParams);
+        semPermissao.delete("new");
+        semPermissao.delete("proposal_id");
+        semPermissao.delete("deal_id");
+        semPermissao.delete(AUTO_IMPORT_PARAM);
+        setSearchParams(semPermissao, { replace: true });
+        return;
+      }
       const proposalId = searchParams.get("proposal_id");
       const dealId = searchParams.get("deal_id");
       setSelectedQuote(null);
@@ -537,7 +549,7 @@ export default function Quotes() {
       next.delete(AUTO_IMPORT_PARAM);
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, permissionsLoading, hasPermission]);
 
   // Deep-link: ?open=<quoteId> opens the details dialog (used by Olyvia chat links)
   useEffect(() => {
@@ -1316,6 +1328,9 @@ export default function Quotes() {
     setShowDetails(true);
   };
 
+  // 11/11/2026: a RLS que recusa um UPDATE devolve 0 linhas sem erro; sem esta verificação o ecrã dizia «sucesso» sem nada gravado.
+  const SEM_PERMISSAO_ORCAMENTO = "Sem permissão para alterar este orçamento (quotes.edit). Nada foi gravado.";
+
   const handleAcceptQuote = async (quote: Quote) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -1325,10 +1340,14 @@ export default function Quotes() {
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-    const { error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id);
+    const { data: acceptedRows, error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id).select("id");
     if (error) {
       captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    if (!acceptedRows || acceptedRows.length === 0) {
+      toast({ title: t('common.error'), description: SEM_PERMISSAO_ORCAMENTO, variant: "destructive" });
       return;
     }
     try {
@@ -1370,10 +1389,14 @@ export default function Quotes() {
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-    const { error } = await supabase.from("quotes").update({ estado: 'perdido', lost_reason: reason } as any).eq("id", quoteId);
+    const { data: lostRows, error } = await supabase.from("quotes").update({ estado: 'perdido', lost_reason: reason } as any).eq("id", quoteId).select("id");
     if (error) {
       captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    if (!lostRows || lostRows.length === 0) {
+      toast({ title: t('common.error'), description: SEM_PERMISSAO_ORCAMENTO, variant: "destructive" });
       return;
     }
     toast({ title: t('quotes.toast.markedAsLost') });
@@ -1391,10 +1414,14 @@ export default function Quotes() {
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-    const { error } = await supabase.from("quotes").update({ lost_reason: reason } as any).eq("id", quoteId);
+    const { data: reasonRows, error } = await supabase.from("quotes").update({ lost_reason: reason } as any).eq("id", quoteId).select("id");
     if (error) {
       captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    if (!reasonRows || reasonRows.length === 0) {
+      toast({ title: t('common.error'), description: SEM_PERMISSAO_ORCAMENTO, variant: "destructive" });
       return;
     }
     toast({ title: "Motivo guardado" });
@@ -1434,8 +1461,9 @@ export default function Quotes() {
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-    const { error } = await supabase.from("quotes").update({ estado: 'enviado' }).eq("id", quoteId);
+    const { data: sentRows, error } = await supabase.from("quotes").update({ estado: 'enviado' }).eq("id", quoteId).select("id");
     if (error) { captureFlowError(error, "quote-lifecycle"); toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    if (!sentRows || sentRows.length === 0) { toast({ title: "Erro", description: SEM_PERMISSAO_ORCAMENTO, variant: "destructive" }); return; }
 
     // Register a manual send event so it shows up in the contact/client timeline & emails tab
     try {
@@ -1812,7 +1840,7 @@ export default function Quotes() {
           <BulkActionsBar
             selectedCount={selectedIds.size} onStatusClick={() => setBulkStatusDialogOpen(true)}
             onDeleteClick={() => setBulkDeleteDialogOpen(true)} onClearSelection={clearSelection}
-            showOrgAction={false} statusPermission="quotes.edit" deletePermission="quotes.delete"
+            showOrgAction={false} statusPermission="quotes.manage" deletePermission="quotes.delete"
           />
         </div>
 
@@ -2075,13 +2103,13 @@ export default function Quotes() {
                                   <Download className="h-3.5 w-3.5" />
                                 </Button>
                                 {/* Email — all except aceite */}
-                                {quote.estado !== 'aceite' && (
+                                {quote.estado !== 'aceite' && hasPermission("quotes.edit") && (
                                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setSendQuote(quote); setSendDialogOpen(true); }} title="Enviar email">
                                     <Mail className="h-3.5 w-3.5" />
                                   </Button>
                                 )}
                                 {/* Accept — rascunho and enviado */}
-                                {(quote.estado === 'rascunho' || quote.estado === 'enviado') && (
+                                {(quote.estado === 'rascunho' || quote.estado === 'enviado') && hasPermission("quotes.edit") && (
                                   <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => handleAcceptQuote(quote)} title="Aceitar (cria proposta)">
                                     <CheckCircle2 className="h-3.5 w-3.5" />
                                   </Button>
@@ -2093,7 +2121,7 @@ export default function Quotes() {
                                   </Button>
                                 )}
                                 {/* Reopen — perdido only */}
-                                {quote.estado === 'perdido' && (
+                                {quote.estado === 'perdido' && hasPermission("quotes.create") && (
                                   <Button variant="ghost" size="icon" className="h-7 w-7 text-primary" onClick={() => handleDuplicateQuote(quote, 5)} title="Reabrir com desconto (v2)">
                                     <RotateCcw className="h-3.5 w-3.5" />
                                   </Button>
@@ -2111,14 +2139,16 @@ export default function Quotes() {
                                   >
                                     {/* COMUNICAÇÃO */}
                                     <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📨 Comunicação</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={() => { setSendQuote(quote); setSendDialogOpen(true); }}>
-                                      <Mail className="w-3.5 h-3.5 mr-2" />
-                                      {quote.estado === 'aceite' ? "Enviar confirmação ao cliente" : "Enviar por email"}
-                                    </DropdownMenuItem>
+                                    <PermissionGate permission="quotes.edit">
+                                      <DropdownMenuItem onClick={() => { setSendQuote(quote); setSendDialogOpen(true); }}>
+                                        <Mail className="w-3.5 h-3.5 mr-2" />
+                                        {quote.estado === 'aceite' ? "Enviar confirmação ao cliente" : "Enviar por email"}
+                                      </DropdownMenuItem>
+                                    </PermissionGate>
                                     <DropdownMenuSeparator />
 
                                     {/* AVANÇAR - state-dependent */}
-                                    {quote.estado !== 'aceite' && quote.estado !== 'perdido' && (
+                                    {quote.estado !== 'aceite' && quote.estado !== 'perdido' && hasPermission("quotes.edit") && (
                                       <>
                                         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📊 Avançar</DropdownMenuLabel>
                                         {quote.estado === 'rascunho' && (
@@ -2139,7 +2169,7 @@ export default function Quotes() {
 
                                     {/* Motivo em falta — normalmente porque o cliente rejeitou/perdeu este
                                         orçamento no Portal, que não pede motivo. Não muda o estado. */}
-                                    {(quote.estado === 'perdido' || quote.estado === 'rejeitado') && !(quote as any).lost_reason && (
+                                    {(quote.estado === 'perdido' || quote.estado === 'rejeitado') && !(quote as any).lost_reason && hasPermission("quotes.edit") && (
                                       <>
                                         <DropdownMenuItem onClick={() => setAddReasonDialog({ open: true, quoteId: quote.id, reason: '' })}>
                                           <FileX className="w-3.5 h-3.5 mr-2" />Adicionar motivo
@@ -2179,9 +2209,11 @@ export default function Quotes() {
                                         </DropdownMenuItem>
                                       </PermissionGate>
                                     )}
-                                    <DropdownMenuItem onClick={() => handleDuplicateQuote(quote)}>
-                                      <Copy className="w-3.5 h-3.5 mr-2" />Duplicar orçamento
-                                    </DropdownMenuItem>
+                                    <PermissionGate permission="quotes.create">
+                                      <DropdownMenuItem onClick={() => handleDuplicateQuote(quote)}>
+                                        <Copy className="w-3.5 h-3.5 mr-2" />Duplicar orçamento
+                                      </DropdownMenuItem>
+                                    </PermissionGate>
                                     <DropdownMenuItem onClick={() => handleGeneratePDF(quote.id)}>
                                       <Download className="w-3.5 h-3.5 mr-2" />Download PDF
                                     </DropdownMenuItem>
@@ -2190,7 +2222,7 @@ export default function Quotes() {
                                     </DropdownMenuItem>
                                     
                                     {/* PERDIDO special actions */}
-                                    {quote.estado === 'perdido' && (
+                                    {quote.estado === 'perdido' && hasPermission("quotes.create") && (
                                       <>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>

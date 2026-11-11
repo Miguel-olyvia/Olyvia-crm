@@ -113,6 +113,8 @@ interface PessoaLaboraisTabProps {
   podeVerAfectacoes: boolean;
   podeEditarAfectacoes: boolean;
   podeCorrigirAfectacoes: boolean;
+  /** hr.pessoas.horario.edit: decide se a secção de afectações pode propor aparar o horário ao fechar. */
+  podeEditarHorario?: boolean;
   /** Colocacao no organograma -- ver `PessoaColocacaoOrganogramaSeccao`.
    *  Classificacao INDEPENDENTE das afectacoes a centros, acima: tres
    *  permissoes proprias, tambem ver/alterar/corrigir. */
@@ -169,6 +171,7 @@ export function PessoaLaboraisTab({
   podeVerAfectacoes,
   podeEditarAfectacoes,
   podeCorrigirAfectacoes,
+  podeEditarHorario,
   podeVerColocacao,
   podeEditarColocacao,
   podeCorrigirColocacao,
@@ -381,6 +384,7 @@ export function PessoaLaboraisTab({
       podeVer={podeVerAfectacoes}
       podeEditar={podeEditarAfectacoes}
       podeCorrigir={podeCorrigirAfectacoes}
+      podeEditarHorario={podeEditarHorario}
     />
 
     <PessoaColocacaoOrganogramaSeccao

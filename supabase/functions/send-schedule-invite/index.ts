@@ -202,6 +202,16 @@ const handler = async (req: Request): Promise<Response> => {
     }
     const { schedule_item_id, invitees, organization_id } = parsed.data;
 
+    // 11/11/2026 (auditoria de permissões): só envia quem tem scheduling.items.create ou scheduling.items.edit na organização do agendamento.
+    // Verificado no início, antes de ler ou enviar seja o que for (fn_pode_enviar_documento, migração 20270113900000).
+    const { data: podeEnviar, error: erroPermissao } = await supabaseClient.rpc("fn_pode_enviar_documento", { p_tipo: "schedule_item", p_id: schedule_item_id });
+    if (erroPermissao || podeEnviar !== true) {
+      return new Response(JSON.stringify({ error: "Sem permissão para enviar convites deste agendamento" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+
     const hasAccess = await validateOrgScope(supabaseClient, caller, organization_id);
     if (!hasAccess) {
       return new Response(

@@ -19,6 +19,7 @@ import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type
 import { publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
+import { codigosDaFase, faltaDaFase } from "@/emylia/permissoes";
 
 import { lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 
@@ -59,6 +60,8 @@ export interface ArmazemEmylia {
   negociosLidos(): { id: string; entityId: string; d: Negocio }[];
   /** O negócio tem orçamentos, contratos ou vendas diretas do CRM: lê-se, mas não se grava por aqui (a base recusa-o, NE005). */
   docsCrm(id: string): boolean;
+  /** 11/11 (20270113130000): a permissão da fase em que o negócio está na base que falta a quem entrou (só de leitura), ou null. */
+  faltaDaFase(id: string): string | null;
   /** Abre o negócio no motor (S.deal e S.view), para as ações que olham para S.deal. */
   abrir(d: Negocio): void;
   /** Ler outra vez a organização (depois de um erro). `false` se não se leu: há uma gravação em curso ou alterações por gravar (diz-se). */
@@ -108,6 +111,11 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   const vistasCliente: VistasGravadas = new Map();
   // os negócios com documentos do CRM (pelo número da Emylia, para gravarMudancas; pelo id da base, para a ficha) e a cópia lida de cada um
   let soLeitura = new Set<number>();
+  // 11/11 (fim de contacto): os negócios que, como estão na base, já estão com o comercial (pelo número e pelo id da base)
+  let faseLida = new Map<number, readonly string[] | null>();
+  let catalogoFalhou = false;
+  let faseLidaPorId = new Map<string, readonly string[] | null>();
+  const bloqueados = (): Set<number> => new Set([...soLeitura, ...[...faseLida].filter(([, c]) => faltaDaFase(c) !== null).map(([n]) => n)]);
   let docsPorId = new Set<string>();
   let lidos = new Map<number, NegocioLido>();
   let foto = new Map<number, string>();
@@ -130,7 +138,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   const aplicarLeitura = (novos: readonly NegocioLido[]): void => {
     refs = new Map(novos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
     lidos = new Map(novos.map((n) => [n.linhas.negocio.numero, n]));
-    soLeitura = new Set(novos.filter((n) => n.docsCrm).map((n) => n.linhas.negocio.numero));
+    soLeitura = new Set(novos.filter((n) => n.docsCrm || catalogoFalhou).map((n) => n.linhas.negocio.numero));
     docsPorId = new Set(novos.filter((n) => n.docsCrm).map((n) => n.id));
     S.deals = novos.map(negocioParaOEcra);
     // os serviços do Catálogo fora do modelo, que os negócios já usam, entram em S.svc
@@ -138,6 +146,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     S.seq = Math.max(1000, ...S.deals.map((d) => d.id)) + 1;
     foto = fotografarNegocios(S.deals);
     lidaEm = Date.now();
+    marcarFases();
     // 4/11: a morada que a lead já trazia (a da ficha da pessoa), para o passo «Morada da obra»; não se grava e um erro a ler não para nada
     void lerMoradasDasPessoas(sb, novos.map((n) => n.entityId)).then((m) => {
       sugerirMoradas(S.deals, (d) => refs.get(d.id)?.entityId, m);
@@ -145,21 +154,34 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     });
   };
 
+  /** 11/11: os negócios com o comercial, tal como estão agora (chamar só quando o ecrã é igual à base: depois de ler ou de gravar sem erros). */
+  function marcarFases(): void {
+    faseLida = new Map(S.deals.map((d) => [d.id, codigosDaFase(d)]));
+    faseLidaPorId = new Map([...refs].map(([n, r]) => [r.id, faseLida.get(n) ?? null]));
+  }
+
   /** Os só de leitura que mudaram em memória voltam à cópia lida (a base recusava-os; ficava o ecrã a mentir). */
   const reverterSoLeitura = (): void => {
-    const mudados = negociosMudados(S.deals, foto).filter((d) => soLeitura.has(d.id));
+    const bl = bloqueados();
+    const mudados = negociosMudados(S.deals, foto).filter((d) => bl.has(d.id));
     if (mudados.length === 0) return;
     for (const d of mudados) {
       const lido = lidos.get(d.id);
       const i = S.deals.findIndex((x) => x.id === d.id);
       if (lido && i >= 0) S.deals[i] = negocioParaOEcra(lido);
     }
-    avisar({ msg: "Este negócio é do CRM: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ". Faz-se em Contratos e Propostas.", kind: "bad" });
+    const doCrm = mudados.some((d) => soLeitura.has(d.id));
+    avisar(catalogoFalhou
+      ? { msg: "O Catálogo não carregou: a alteração não foi guardada", sub: "Volte a abrir a página para ler o Catálogo outra vez.", kind: "bad" }
+      : doCrm
+      ? { msg: "Este negócio é do CRM: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ". Faz-se em Contratos e Propostas.", kind: "bad" }
+      : { msg: "Sem permissão para mudar este negócio nesta fase: a alteração não foi guardada", sub: mudados.map((d) => d.nome).join(", ") + ".", kind: "bad" });
   };
 
   /** Relê a base e vê se algum negócio por gravar mudou lá desde a última leitura. Devolve o texto do conflito, ou `null` se se pode gravar. */
   const conflito = async (): Promise<string | null> => {
-    const porGravar = negociosMudados(S.deals, foto).filter((d) => !soLeitura.has(d.id));
+    const bl = bloqueados();
+    const porGravar = negociosMudados(S.deals, foto).filter((d) => !bl.has(d.id));
     if (porGravar.length === 0 || !ids) return null;
     const frescos = await lerNegocios(sb, org, ids, S.campos);
     const porNumero = new Map(frescos.map((n) => [n.linhas.negocio.numero, n]));
@@ -187,8 +209,10 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
         reverterSoLeitura();
         const choque = await conflito();
         if (choque) { gravacao = { k: "erro", t: choque }; avisar({ msg: "Não gravou: o negócio mudou", sub: choque, kind: "bad" }); break; }
-        const r = await gravarMudancas(sb, org, S, refs, foto, ids, soLeitura);
+        const r = await gravarMudancas(sb, org, S, refs, foto, ids, bloqueados());
         gravados += r.gravados;
+        // 11/11: gravado sem erros, o ecrã é a base: o negócio passado agora ao comercial fica só de leitura para a assistente
+        if (!r.erros.length) marcarFases();
         if (r.reler) relerFinanceiro = true;
         if (r.erros.length) { gravacao = { k: "erro", t: r.erros.join(" · ") }; avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else gravacao = { k: "gravado", n: r.gravados };
@@ -230,7 +254,11 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
   // a leitura que se espera (a releitura depois de uma ação no servidor)
   const lerAgora = async (catalogo: boolean): Promise<void> => {
     if (catalogo || !ids) {
-      const cat = await carregarCatalogo(sb, org, S);
+      // 11/11 (F1): um erro do Catálogo (ex.: CT001) não bloqueia a ficha: avisa, e os negócios ficam só para consulta (sem o Catálogo,
+      // gravar perdia os serviços)
+      const cat = await carregarCatalogo(sb, org, S, { tolerante: true });
+      catalogoFalhou = !!cat.erro;
+      if (cat.erro) avisar({ msg: "O Catálogo não carregou", sub: `${cat.erro} O negócio fica só para consulta.`, kind: "bad" });
       ids = idsServico(cat.M.ids.servico);
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento da organização (os mesmos de /negocios)
       await carregarCamposConfig(sb, org, S);
@@ -267,6 +295,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
       .flatMap(([numero, r]) => { const d = S.deals.find((x) => x.id === numero); return d ? [{ id: r.id, entityId: r.entityId, d }] : []; })
       .sort((a, b) => b.d.id - a.d.id),
     docsCrm: (id) => docsPorId.has(id),
+    faltaDaFase: (id) => faltaDaFase(faseLidaPorId.get(id)),
     abrir: (d) => { S.deal = d.id; S.view = "negocio"; },
     reler: () => {
       if (porGravar()) { avisar({ msg: "Há alterações por gravar", sub: "Não se relê a organização enquanto houver alterações por gravar.", kind: "bad" }); return false; }

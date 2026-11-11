@@ -16,6 +16,8 @@ export interface NegocioEmylia {
   d: Negocio | undefined;
   /** O negócio tem documentos do CRM: a Emylia lê-o mas não o grava (a base recusa, NE005). */
   docsCrm: boolean;
+  /** 11/11 (20270113130000): falta a quem entrou a permissão da fase em que o negócio está: só de leitura (o código em falta). */
+  faltaDaFase?: string | null;
   ctx: Ctx | null;
   /** Ler outra vez; `false` se não se leu (há alterações por gravar, e diz-se nos avisos). */
   reler: () => boolean;
@@ -45,5 +47,6 @@ export function useNegocioEmylia(org: string | null, negocioId: string, aoGravar
   }, [armazem, idDoNegocio]);
   if (!armazem || !leitura) return SEM_NEGOCIO;
   const ctx: Ctx | null = d ? { S: armazem.S, A: armazem.A, run: armazem.run, go: armazem.go, q: "" } : null;
-  return { leitura, gravacao: armazem.gravacao(), avisos: armazem.avisos(), d, docsCrm: d ? armazem.docsCrm(negocioId) : false, ctx, reler: armazem.reler, regravar: armazem.regravar };
+  return { leitura, gravacao: armazem.gravacao(), avisos: armazem.avisos(), d, docsCrm: d ? armazem.docsCrm(negocioId) : false,
+    faltaDaFase: d ? armazem.faltaDaFase(negocioId) : null, ctx, reler: armazem.reler, regravar: armazem.regravar };
 }

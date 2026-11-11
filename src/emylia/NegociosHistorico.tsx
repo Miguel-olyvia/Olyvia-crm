@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES } from "./motor";
 import { IconeFase, type Ctx } from "./pecas";
+import { PRONTO_PARA_VISITA, contactoConcluido, soAteAoContacto } from "./permissoes";
 import { PainelNegocios } from "./PainelNegocios";
 import { eurosTexto } from "./graficosTipos";
 import { csvDe, descarregarCsv, valorCsv } from "./funcCsv";
@@ -214,7 +215,7 @@ function Lista({ ls, total, abrir }: { ls: LinhaH[]; total: number; abrir: (id: 
                       </td>
                       <td className="px-3 py-2.5">
                         <button type="button" onClick={abrir(l.id)} className={cn("text-left font-semibold hover:underline", FOCO)}>{l.nome}</button>
-                        <span className="block text-sm text-muted-foreground">{l.servico}{l.local ? ` · ${l.local}` : ""}</span>
+                        <span className="block text-sm text-muted-foreground">{l.servico}{l.local ? ` · ${l.local}` : ""}</span>{contactoConcluido(l.d) && !soAteAoContacto() && <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary">{PRONTO_PARA_VISITA}</span>}
                       </td>
                       <td className="px-3 py-2.5">
                         <span className="flex items-center gap-2"><IconeFase fase={l.fase} tam="sm" /><span className="whitespace-nowrap">{FASES[l.fase]}</span></span>
@@ -255,7 +256,7 @@ function Lista({ ls, total, abrir }: { ls: LinhaH[]; total: number; abrir: (id: 
                 <IconeFase fase={l.fase} tam="sm" />
                 <div className="min-w-0 flex-1">
                   <button type="button" onClick={abrir(l.id)} className={cn("text-left text-base font-semibold hover:underline", FOCO)}>{l.nome}</button>
-                  <span className="block text-sm text-muted-foreground">{l.servico}{l.local ? ` · ${l.local}` : ""}</span>
+                  <span className="block text-sm text-muted-foreground">{l.servico}{l.local ? ` · ${l.local}` : ""}</span>{contactoConcluido(l.d) && !soAteAoContacto() && <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary">{PRONTO_PARA_VISITA}</span>}
                 </div>
                 <SeloEstado e={l.estado} />
               </div>

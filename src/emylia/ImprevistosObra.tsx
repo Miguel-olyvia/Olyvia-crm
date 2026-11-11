@@ -183,7 +183,8 @@ function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: 
   const { S, A, run } = ctx;
   const [itens, setItens] = useState<{ sid: string; q: number }[]>([]);
   // 21/10: o preço sugerido da linha livre tem a margem alvo (a adenda verifica-se como o orçamento antes de ir ao cliente)
-  const [livre, setLivre] = useState<LinhaLivre | null>({ n: im.texto.replace(/^./, (c) => c.toUpperCase()), h: 4, preco: precoSugeridoLivre(S, 4), perfil: "Canalização", mats: [] });
+  // 11/11: o custo estimado ao registar (Estúdio da obra) é o preço de partida
+  const [livre, setLivre] = useState<LinhaLivre | null>({ n: im.texto.replace(/^./, (c) => c.toUpperCase()), h: 4, preco: im.custo ?? precoSugeridoLivre(S, 4), perfil: "Canalização", mats: [] });
   const opcoes = useMemo(() => {
     const vistos = new Set<string>(), out: { v: string; t: string; sub: string; valor: string }[] = [];
     for (const [sid, s] of Object.entries(S.svc)) { if (sid.startsWith("livre-")) continue; vistos.add(sid); out.push({ v: sid, t: s.n, sub: s.perfil, valor: `${eur(s.preco)} €/${s.un}` }); }

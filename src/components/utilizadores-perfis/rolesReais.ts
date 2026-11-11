@@ -117,6 +117,12 @@ export const ROTULOS_POR_CODIGO: Readonly<Record<string, { nome: string; descric
     nome: "Editar dados laborais e papéis no Negócio",
     descricao: "Gravar ofícios, cargo técnico e e-mail de trabalho, e dar ou tirar papéis no Negócio (Direção, Comercial, Financeiro…), que dão acesso a negócios de outros — só até às permissões do próprio perfil.",
   },
+  // 11/11/2026 (fim de contacto): sem negocios.visita.gerir (nem outra permissão do Negócio além do contacto), é a assistente comercial:
+  // faz os passos do Contacto e acaba com «Passar ao comercial»; depois o negócio fica só de leitura para ela (20270113120000).
+  "negocios.contacto.registar": {
+    nome: "Registar contacto",
+    descricao: "Os passos do Contacto: o resultado da chamada, as tentativas, o voltar a ligar, o que o cliente quer, a morada da obra e a qualificação; e «Passar ao comercial». Sem Gerir as visitas (nem outra permissão do Negócio além desta), o negócio passa ao comercial em vez de se marcar a visita e, depois disso, fica só de leitura. Gravar o negócio pede também Editar negócios de pessoas.",
+  },
   // 10/11/2026: hr.pessoas.conta.criar exige também users.create (EXIGE_TAMBEM em dependenciasPermissoes.ts). O nome é o da base.
   "hr.pessoas.conta.criar": {
     nome: "Criar conta de acesso a uma pessoa",

@@ -35,6 +35,12 @@ const CLASSE_SELECT =
   "flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
 const DIAS = Array.from({ length: DIA_INICIO_MAX - DIA_INICIO_MIN + 1 }, (_, i) => DIA_INICIO_MIN + i);
 
+// Sem intervalo entre folhas: o fecho é a véspera da abertura seguinte. «fim» = último dia do mês (a folha abre no dia 1).
+const FECHO_ULTIMO_DIA = "fim";
+const FECHOS = [FECHO_ULTIMO_DIA, ...DIAS.slice(0, -1).map(String)];
+const fechoDaAbertura = (abertura: number): string => (abertura === 1 ? FECHO_ULTIMO_DIA : String(abertura - 1));
+const aberturaDoFecho = (fecho: string): string => (fecho === FECHO_ULTIMO_DIA ? "1" : String(Number(fecho) + 1));
+
 const doisDigitos = (n: number): string => String(n).padStart(2, "0");
 const anoDe = (isoMes: string): number => Number(isoMes.slice(0, 4));
 const mesDe = (isoMes: string): number => Number(isoMes.slice(5, 7));
@@ -50,6 +56,8 @@ export function ConfiguracaoPeriodoFolha({ podeGerir }: Props) {
   // `null` = ainda não editado (mostra a regra em vigor).
   const [dia, setDia] = useState<string | null>(null);
   const [validoDe, setValidoDe] = useState<string | null>(null);
+  // Qual dos dois dias foi escolhido à mão: o outro é o que se deduz e se diz em texto.
+  const [escolhido, setEscolhido] = useState<"abertura" | "fecho">("abertura");
   const [erro, setErro] = useState<string | null>(null);
   // O mês (ISO, dia 1) da regra acabada de gravar, para dizer a partir de que folha vale; `null` = nada gravado.
   const [guardado, setGuardado] = useState<string | null>(null);
@@ -82,6 +90,9 @@ export function ConfiguracaoPeriodoFolha({ podeGerir }: Props) {
   const diaMostrado = dia ?? String(diaEmVigor);
   const validoDeMostrado = validoDe ?? opcoesDeMes[0];
   const diaEscolhido = Number(diaMostrado);
+  const fechoMostrado = fechoDaAbertura(diaEscolhido);
+  const fechoEmTexto =
+    fechoMostrado === FECHO_ULTIMO_DIA ? t("rhPeriodo.cfg.fechoUltimo") : t("rhPeriodo.cfg.fechoDia", { dia: fechoMostrado });
   const anoPartida = anoDe(validoDeMostrado);
   const mesPartida = mesDe(validoDeMostrado);
   // Compara com o que as regras dizem PARA O MÊS ESCOLHIDO (não com o de hoje): assim uma regra agendada pode ser desfeita.
@@ -122,6 +133,7 @@ export function ConfiguracaoPeriodoFolha({ podeGerir }: Props) {
       setGuardado(validoDeMostrado);
       setDia(null);
       setValidoDe(null);
+      setEscolhido("abertura");
     } finally {
       aGravar.current = false;
     }
@@ -184,7 +196,12 @@ export function ConfiguracaoPeriodoFolha({ podeGerir }: Props) {
                       value={diaMostrado}
                       disabled={isSaving}
                       aria-describedby="periodo-folha-dia-ajuda"
-                      onChange={(e) => aoEditar(() => setDia(e.target.value))}
+                      onChange={(e) =>
+                        aoEditar(() => {
+                          setDia(e.target.value);
+                          setEscolhido("abertura");
+                        })
+                      }
                     >
                       {DIAS.map((d) => (
                         <option key={d} value={String(d)}>
@@ -196,6 +213,37 @@ export function ConfiguracaoPeriodoFolha({ podeGerir }: Props) {
                       {t("hr.periodoFolha.ajudaDia")}
                     </p>
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="periodo-folha-fecho">{t("rhPeriodo.cfg.campoFecho")}</Label>
+                    <select
+                      id="periodo-folha-fecho"
+                      className={CLASSE_SELECT}
+                      value={fechoMostrado}
+                      disabled={isSaving}
+                      aria-describedby="periodo-folha-fecho-ajuda"
+                      onChange={(e) =>
+                        aoEditar(() => {
+                          setDia(aberturaDoFecho(e.target.value));
+                          setEscolhido("fecho");
+                        })
+                      }
+                    >
+                      {FECHOS.map((f) => (
+                        <option key={f} value={f}>
+                          {f === FECHO_ULTIMO_DIA ? t("rhPeriodo.cfg.opcaoFechoUltimo") : f}
+                        </option>
+                      ))}
+                    </select>
+                    <p id="periodo-folha-fecho-ajuda" className="text-xs text-muted-foreground">
+                      {t("rhPeriodo.cfg.ajudaFecho")}
+                    </p>
+                  </div>
+                  <p className="text-sm font-medium" aria-live="polite" data-testid="periodo-folha-deduzido">
+                    {t(escolhido === "abertura" ? "rhPeriodo.cfg.deduzFecho" : "rhPeriodo.cfg.deduzAbertura", {
+                      dia: diaMostrado,
+                      fecho: fechoEmTexto,
+                    })}
+                  </p>
                   <div className="space-y-2">
                     <Label htmlFor="periodo-folha-valido-de">{t("hr.periodoFolha.campoValidoDe")}</Label>
                     <select
