@@ -302,7 +302,8 @@ function Disponibilidade({ P, S, negocio, equipa }: { P: PlanoDatas; S: Estado; 
   return (
     <div className="space-y-2 rounded-xl border border-border bg-card p-3">
       <p className="text-sm font-semibold">As agendas, nos dias da obra <span className="font-normal text-muted-foreground">· a faixa de cima marca os dias da obra, como no Gantt</span></p>
-      <div className="overflow-x-auto">
+      {/* 11/11: «relative» prende o texto para leitores de ecrã (sr-only, absoluto) aqui dentro; sem ele, alargava a página toda */}
+      <div className="relative overflow-x-auto">
         <table className="min-w-max border-separate border-spacing-0.5 text-xs">
           <thead>
             <tr>

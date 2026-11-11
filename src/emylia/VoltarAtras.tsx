@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Calculator, Check, ClipboardList, MessageSquareText, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { MOTIVOS_DA_VISITA, MOTIVOS_VERSAO, eur, tot, versaoAtual, type Negocio } from "./motor";
+import { MOTIVO_MEDIDAS, MOTIVOS_DA_VISITA, MOTIVOS_VERSAO, eur, tot, versaoAtual, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
 type P = { ctx: Ctx; d: Negocio };
@@ -191,7 +191,7 @@ export function VersoesProposta({ ctx, d }: P) {
               <span className="block"><span className="tabular-nums text-muted-foreground line-through decoration-muted-foreground/50">{eur(v.total)} € s/ IVA</span>
                 {i > 0 && <span className="text-muted-foreground"> · {dif(v.total, o.versoes![i - 1].total)}</span>}
                 <span className="text-muted-foreground"> · enviada {quando(v.enviada)}{v.aceite ? `, aceite ${quando(v.aceite)}` : ""}, substituída {quando(v.substituida)}</span></span>
-              {(v.motivos.length > 0 || v.nota) && <span className="block text-muted-foreground">O cliente pediu: {[...v.motivos, v.nota].filter(Boolean).join(", ").toLowerCase()}</span>}
+              {(v.motivos.length > 0 || v.nota) && <span className="block text-muted-foreground">{v.motivos.includes(MOTIVO_MEDIDAS) ? "Refeita com as medidas do local" : "O cliente pediu"}: {[...v.motivos.filter((m) => m !== MOTIVO_MEDIDAS), v.nota].filter(Boolean).join(", ").toLowerCase()}</span>}
             </span>
           </li>
         ))}

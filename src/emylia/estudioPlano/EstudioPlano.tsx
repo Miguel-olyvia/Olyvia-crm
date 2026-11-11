@@ -69,8 +69,9 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
   const linhas: (string | null)[] = [...pessoas, ...(p.tasks.some((t) => !t.tec) ? [null] : [])];
   const medidasOk = retificacaoAceite(d);
   // 10/11 (Rúben: «medidas antes da fatura»): o plano aprova-se antes do pagamento (com as medidas aceites)
-  const podeAprovar = p.estado === "por aprovar" && medidasOk && !alertas.some((a) => a.m === "de férias");
-  const porque = p.estado !== "por aprovar" ? "" : !medidasOk ? "Falta o supervisor aceitar as medidas." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
+  const planeia = podeNeg(S.role, "obra.planear");
+  const podeAprovar = p.estado === "por aprovar" && planeia && medidasOk && !alertas.some((a) => a.m === "de férias");
+  const porque = p.estado !== "por aprovar" ? "" : !planeia ? "Quem aprova o plano são as Operações." : !medidasOk ? "Falta o supervisor aceitar as medidas." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
   const fimData = dias[Math.max(0, fim - 1)];
   const fazer = (fn: () => void) => run(fn);
 
@@ -223,7 +224,7 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <p className="text-xs text-muted-foreground">{editavel ? "Arraste uma barra para mudar o dia; a pega da ponta muda os dias. Riscado: férias ou outra obra." : "A obra já arrancou: toque numa tarefa para a passar a outro técnico ou adiar."}</p>
-                    {podeCriar && <Button type="button" size="sm" className="min-h-9" onClick={() => setPainel({ k: "nova" })}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Nova tarefa</Button>}
+                    {podeCriar && <Button type="button" size="sm" variant="outline" className="min-h-9" onClick={() => setPainel({ k: "nova" })}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Nova tarefa</Button>}
                   </div>
                 </div>
                 <div className="overflow-x-auto" onPointerMove={mover} onPointerUp={largar} onPointerCancel={() => { toque.current = null; setArrasto(null); }}>

@@ -9,7 +9,8 @@ import { useMemo, useState } from "react";
 import { Check, RotateCcw, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, camposMedida, impactoDasMedidas, medida, nfmt, type Negocio } from "./motor";
+import { LINHAS, PAPEIS, camposMedida, impactoDasMedidas, medida, nfmt, type Negocio } from "./motor";
+import { podeNeg } from "./permissoes";
 import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { podeRetificar } from "./preparacaoObra";
@@ -23,7 +24,9 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [valores, setValores] = useState<Record<string, string>>(() =>
     Object.fromEntries(CM.map(([k]) => [k, d.f[`retif_${k}`] ?? String(medida(d.visita.med, k) || "")])));
   const [notas, setNotas] = useState(d.f.retif_notas ?? "");
-  const pode = !aceite && podeRetificar(d);
+  // 11/11: só quem planeia a obra (o supervisor, nas Operações) as confirma; os outros veem-nas e sabem de quem é o passo
+  const meu = podeNeg(ctx.S.role, "obra.planear");
+  const pode = !aceite && podeRetificar(d) && meu;
   const mudadas = CM.filter(([k]) => { const v = numero(valores[k] ?? ""); return Number.isFinite(v) && Math.abs(v - medida(d.visita.med, k)) > 0.001; });
   // 11/11 (Rúben): o impacto no orçamento ao vivo, enquanto se escreve
   const impacto = useMemo(() => impactoDasMedidas(d, ctx.S, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "")]).filter(([, v]) => Number.isFinite(v as number)))),
@@ -42,7 +45,12 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       </div>
 
       {/* 9/11: o Estúdio das medidas, pensado para o telemóvel no local (a planta, os botões grandes, aceitar) */}
-      <AbrirEstudioMedidas ctx={ctx} d={d} />
+      {meu ? <AbrirEstudioMedidas ctx={ctx} d={d} /> : !aceite && podeRetificar(d) && (
+        <p className="flex flex-wrap items-center gap-x-2 rounded-xl bg-muted/60 px-4 py-3 text-[15px]">
+          <span>Este passo é do supervisor, nas Operações.</span>
+          <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("operacoes"))}>Mudar para {PAPEIS.operacoes.n}</button>
+        </p>
+      )}
 
       {CM.length ? (
         <div className="overflow-hidden rounded-2xl border border-border">
@@ -82,12 +90,12 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       </label>
 
       <div className="flex flex-wrap gap-2">
-        {!aceite ? (
+        {!aceite ? meu && (
           <Button type="button" className="min-h-11" disabled={!pode}
             onClick={() => ctx.run(() => ctx.A.retificarMedidas(d.id, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "")]).filter(([, v]) => Number.isFinite(v as number))), notas))}>
             <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aceitar as medidas
           </Button>
-        ) : d.obra.plano?.estado === "por aprovar" ? (
+        ) : meu && d.obra.plano?.estado === "por aprovar" ? (
           <Button type="button" variant="outline" className="min-h-11" onClick={() => ctx.run(() => ctx.A.campo(d.id, "retif_aceite", ""))}>
             <RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />Voltar a retificar
           </Button>

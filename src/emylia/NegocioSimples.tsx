@@ -219,8 +219,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       {/* 27/10: um toast por cima da página: o aviso já não empurra o passo para baixo */}
       {acabou !== null && (
         <div role="status" className="fixed bottom-4 left-1/2 z-50 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-success/30 bg-card px-4 py-3 text-[15px] shadow-[var(--shadow-lg)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-success text-white"><Check className="h-4 w-4" aria-hidden="true" /></span>
-          <span><b className="font-semibold">{FASES[acabou]} concluída.</b> Agora: {FASES[d.fase]}.</span>
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-success text-white motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:spin-in-12 motion-safe:duration-500"><Check className="h-4 w-4" aria-hidden="true" /></span>
+          <span><b className="font-semibold">Fase {FASES[acabou]} concluída.</b> Agora: {FASES[d.fase]}.</span>
         </div>
       )}
 
@@ -419,7 +419,8 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
   const passosBase = passosDaFase(ctx, d, true);
   const passos = ajustarPassos ? ajustarPassos(passosBase, d) : passosBase;
   // abre no primeiro passo por fazer; se está tudo feito, abre logo no passo do negócio
-  const idx = passos.findIndex((x) => !completo(x));
+  // 11/11: os passos fechados (o caminho que falta, à vista antes de o cliente aceitar) não abrem sozinhos
+  const idx = passos.findIndex((x) => !completo(x) && !x.bloqueado);
   const primeiro = idx === -1 ? passos.length : idx;
   // 26/10: o passo aberto vai para o endereço (?passo=orc; "fim" é o passo do negócio): o "voltar" do browser volta ao passo anterior
   const [passoUrl, setPassoUrl] = useParamUrl<string>("passo", "");
