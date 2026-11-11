@@ -43,6 +43,7 @@ import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
 import { canalDenunciasMinhaAreaTranslations } from "@/translations/canalDenunciasMinhaArea";
 import { rhOficiosObraTranslations } from "@/translations/rhOficiosObra";
 import { rhExemploCargoSeguroTranslations } from "@/translations/rhExemploCargoSeguro";
+import { rhExemploDatasContratosTranslations } from "@/translations/rhExemploDatasContratos";
 
 // Merge bundle and priceContexts translations
 export const tabelaFundida: Record<string, Record<string, string>> = { ...translations } as any;
@@ -229,4 +230,9 @@ Object.keys(rhOficiosObraTranslations).forEach((lang) => {
 // rh-exemplo › Cargos › seguro de acidentes de trabalho por cargo (`hr.cargos.seguro.*`) — módulo próprio, mesmo padrão.
 Object.keys(rhExemploCargoSeguroTranslations).forEach((lang) => {
   tabelaFundida[lang] = { ...tabelaFundida[lang], ...rhExemploCargoSeguroTranslations[lang as keyof typeof rhExemploCargoSeguroTranslations] };
+});
+
+// rh-exemplo › datas da pessoa derivadas dos contratos (`hr.contrato.datasPessoa.*`, `hr.erro.datas.*`, `rhNova.f.dataContratacao`...) — módulo próprio, mesmo padrão.
+Object.keys(rhExemploDatasContratosTranslations).forEach((lang) => {
+  tabelaFundida[lang] = { ...tabelaFundida[lang], ...rhExemploDatasContratosTranslations[lang as keyof typeof rhExemploDatasContratosTranslations] };
 });

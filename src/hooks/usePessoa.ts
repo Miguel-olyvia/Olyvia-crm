@@ -26,6 +26,7 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { exigirLinhasGravadas, hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { usePessoaConta } from "@/hooks/usePessoaConta";
 import { dataDeHojeBase } from "@/lib/hr/dataBase";
+import { eRecusaDasDatasDerivadas } from "@/lib/hr/datasDaPessoa";
 import type {
   Pessoa,
   PessoaConta,
@@ -107,7 +108,9 @@ const COLUNAS_VINCULO =
   // Regime contratual (individual | coletivo). A migration que cria a coluna
   // tem de entrar JUNTO com este codigo: pedir uma coluna que ainda nao existe
   // faz falhar TODAS as leituras de pessoas_vinculos.
-  "regime_contratual";
+  "regime_contratual, " +
+  // Antiguidade do contrato, 20270114100000. A migration tem de estar aplicada ANTES deste codigo.
+  "data_antiguidade";
 
 const COLUNAS_RETRIBUICAO =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +
@@ -398,7 +401,8 @@ export function usePessoa(pessoaId: string | undefined) {
       } catch (e) {
         // Uma recusa por permissao e resposta legitima: o utilizador ve a
         // mensagem e nao ha nada a corrigir do nosso lado.
-        if (!isPermissionError(e)) captureFlowError(e, "hr-pessoa-write");
+        // O mesmo vale para a recusa das datas derivadas (23514): um formulario aberto antes de um recalculo.
+        if (!isPermissionError(e) && !eRecusaDasDatasDerivadas(e)) captureFlowError(e, "hr-pessoa-write");
         return await getFriendlyErrorMessage(e);
       } finally {
         setSaving(false);

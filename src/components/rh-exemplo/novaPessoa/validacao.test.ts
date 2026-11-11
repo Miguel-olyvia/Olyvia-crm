@@ -31,9 +31,22 @@ describe("problemasDaNova: campos do RH e nome", () => {
     ]);
   });
 
-  it("pede a data de admissão se for apagada, e recusa uma data que não existe", () => {
-    expect(ids(comPatch(minimo(), "laborais", { data_admissao: "" }))).toEqual(["hr-novo-data-admissao"]);
-    expect(ids(comPatch(minimo(), "laborais", { data_admissao: "2026-02-31" }))).toEqual(["hr-novo-data-admissao"]);
+  it("pede a data de contratação (o início do contrato) se for apagada, e recusa uma data que não existe", () => {
+    expect(ids(comPatch(minimo(), "contrato", { data_inicio: "" }))).toEqual(["hr-novo-data-inicio"]);
+    expect(ids(comPatch(minimo(), "contrato", { data_inicio: "2026-02-31" }))).toEqual(["hr-novo-data-inicio"]);
+  });
+
+  it("já não há um campo «data de admissão» à parte", () => {
+    expect(ids(comPatch(minimo(), "contrato", { data_inicio: "" }))).not.toContain("hr-novo-data-admissao");
+    expect(idsObrigatorios(minimo(), SEM_CONFIG).has("hr-novo-data-admissao")).toBe(false);
+  });
+
+  it("a antiguidade do contrato não pode ser posterior à contratação, e tem de ser uma data que existe", () => {
+    expect(ids(comPatch(minimo(), "contrato", { data_antiguidade: "2020-01-01" }))).toEqual([]);
+    expect(ids(comPatch(minimo(), "contrato", { data_antiguidade: "2026-10-14" }))).toEqual([]);
+    const depois = problemasDaNova(comPatch(minimo(), "contrato", { data_inicio: "2026-10-01", data_antiguidade: "2026-10-02" }), SEM_CONFIG);
+    expect(depois).toEqual([{ campoId: "hr-novo-data-antiguidade", mensagemKey: "rhNova.erro.antiguidadeDepoisContratacao" }]);
+    expect(ids(comPatch(minimo(), "contrato", { data_antiguidade: "2026-02-31" }))).toEqual(["hr-novo-data-antiguidade"]);
   });
 
   it("o subsídio já não é campo do formulário", () => {
@@ -107,7 +120,7 @@ describe("problemasDaNova: configuração da admissão e convite", () => {
 describe("problemasDaNova: datas, contactos e acesso", () => {
   it("datas coerentes: nascimento no futuro, ou depois da admissão, é erro", () => {
     expect(ids(comPatch(minimo(), "pessoais", { data_nascimento: "2030-01-01" }))).toEqual(
-      expect.arrayContaining(["hr-novo-data-nascimento", "hr-novo-data-admissao"]),
+      expect.arrayContaining(["hr-novo-data-nascimento", "hr-novo-data-inicio"]),
     );
     expect(ids(comPatch(minimo(), "pessoais", { data_nascimento: "1990-05-17" }))).toEqual([]);
     expect(ids(comPatch(minimo(), "pessoais", { data_nascimento: "17/05/1990" }))).toEqual(["hr-novo-data-nascimento"]);
@@ -171,7 +184,7 @@ describe("resumo e foco", () => {
 describe("idsObrigatorios", () => {
   it("o RH preenche: os fixos mais os da configuração; a enviar convite: só os fixos e o e-mail pessoal", () => {
     const agora = idsObrigatorios(minimo(), COM_CONFIG);
-    expect(agora.has("hr-novo-cargo") && agora.has("hr-novo-data-admissao") && agora.has("hr-novo-duodecimos")).toBe(true);
+    expect(agora.has("hr-novo-cargo") && agora.has("hr-novo-data-inicio") && agora.has("hr-novo-duodecimos")).toBe(true);
     expect(agora.has("hr-novo-nif") && agora.has("hr-novo-genero")).toBe(true);
     const convite = idsObrigatorios(minimo(), { ...COM_CONFIG, comConvite: true });
     expect(convite.has("hr-novo-genero")).toBe(false);

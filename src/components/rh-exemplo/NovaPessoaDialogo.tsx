@@ -85,6 +85,7 @@ export function NovaPessoaDialogo({ open, onOpenChange, colegas, onCriar, onCria
   /** Sucesso, secções que não ficaram gravadas, e o que o formulário recolheu mas não tem onde gravar. */
   const anunciarResultado = (
     falhas: ResultadoCriacao["falhas"], falhasAnexos: ReadonlyArray<{ seccao: string }>, naoGravado: NaoGravado[],
+    antiguidadeEscrita: boolean,
   ) => {
     const pendenciaDeAcesso = falhas.some((f) => f.seccao === "acesso");
     const reais = [...falhas.filter((f) => f.seccao !== "acesso"), ...falhasAnexos];
@@ -93,6 +94,11 @@ export function NovaPessoaDialogo({ open, onOpenChange, colegas, onCriar, onCria
     else toast.error(`${t("hr.form.criadaComFalhas")} ${reais.map((f) => t(`hr.form.seccoes.${f.seccao}`)).join(", ")}`);
     // O acesso pedido não se cria aqui: conclui-se na ficha («Criar acesso»), com as pendências à vista.
     if (pendenciaDeAcesso) toast.warning(t("hr.acesso.convitePendente"));
+    // Sem contrato a contratacao fica provisoria; a antiguidade escrita vivia no contrato e perdeu-se com ele.
+    if (falhas.some((f) => f.seccao === "vinculo")) {
+      toast.warning(t("rhNova.falhaContrato"));
+      if (antiguidadeEscrita) toast.warning(t("rhNova.falhaContrato.antiguidade"));
+    }
     if (naoGravado.length > 0) {
       toast.warning(`${t("rhNova.naoGravado")} ${naoGravado.map((c) => t(`rhNova.naoGravado.${c}`)).join(", ")}`);
     }
@@ -106,7 +112,7 @@ export function NovaPessoaDialogo({ open, onOpenChange, colegas, onCriar, onCria
       const { id, falhas, naoGravado } = await onCriar(dados);
       // Os ficheiros seguem depois de a ficha existir; nunca a desfazem.
       const falhasAnexos = await anexos.enviar(id);
-      anunciarResultado(falhas, falhasAnexos, naoGravado);
+      anunciarResultado(falhas, falhasAnexos, naoGravado, Boolean(dados.payload.vinculo?.data_antiguidade));
 
       const email = dados.payload.nucleo.email_pessoal;
       if (comConvite && email === null) toast.warning(t("hr.form.conviteNaoAberto.semEmail"));

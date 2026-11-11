@@ -39,6 +39,11 @@
  * laborais o email pessoal n deve ser aqui". Nao voltar a propor este campo
  * neste separador.
  *
+ * A CONTRATACAO, A ANTIGUIDADE E A SAIDA SO SE LEEM AQUI. Sao CALCULADAS pelo servidor a partir dos contratos
+ * (20270114100000: `pessoas.data_admissao`, `data_antiguidade` e `data_saida` derivam de `pessoas_vinculos`; uma escrita directa
+ * e recusada, 23514). Editam-se no separador Contratos, e daqui ha uma ligacao «editar em Contratos». Por isso as tres saem do
+ * rascunho e do patch de gravacao: nunca se envia nenhuma das tres colunas, nem como null (`datasDaPessoa` e a regra).
+ *
  * O ESTADO DO CONTRATO SAIU DAQUI TAMBEM, mas so-leitura: e derivado do
  * vinculo (`lib/hr/estadoContrato.ts`) e o controlo real vive no separador
  * Contratos, sobre o `estado` do vinculo activo. Mudar aqui nao mudava nada
@@ -64,6 +69,7 @@ import { PessoaAfectacoesSeccao } from "@/components/rh-exemplo/PessoaAfectacoes
 import { PessoaCargoCard } from "@/components/rh-exemplo/PessoaCargoCard";
 import { PessoaColocacaoOrganogramaSeccao } from "@/components/rh-exemplo/PessoaColocacaoOrganogramaSeccao";
 import type { EstadoContratoDerivado } from "@/components/rh-exemplo/lib/estadoContrato";
+import { dataCurta } from "@/components/rh-exemplo/fluxosC/formatosC";
 import { type LocalTrabalho, type Pessoa } from "@/components/rh-exemplo/tipos";
 import type { HrCargo } from "@/components/rh-exemplo/hooks/useCargos";
 import type { HrCargoPeriodo, ValorDoSalario } from "@/components/rh-exemplo/lib/cargosPeriodos";
@@ -105,6 +111,12 @@ interface PessoaLaboraisTabProps {
    *  tem `hr.pessoas.vinculos.view`. */
   estadoContratoDerivado: EstadoContratoDerivado | null;
   podeEditar: boolean;
+  /** A pessoa ainda nao tem contrato: a contratacao que se mostra e provisoria. */
+  semContrato?: boolean;
+  /** Os contratos ainda a carregar: nao se sabe se falta contrato, por isso nao se avisa (nao pisca). */
+  contratosACarregar?: boolean;
+  /** Abre o separador Contratos, onde se editam as datas. Sem ele (sem acesso aos contratos) nao ha ligacao. */
+  onAbrirContratos?: () => void;
   saving: boolean;
   onGuardar: (patch: Partial<Pessoa>) => Promise<string | null>;
   /** Afectacoes a centros -- ver `PessoaAfectacoesSeccao`. Tres permissoes
@@ -126,9 +138,6 @@ type Rascunho = {
   telefone_trabalho: string;
   numero_interno: string;
   cargo: string;
-  data_admissao: string;
-  data_antiguidade: string;
-  data_saida: string;
   reporta_a_pessoa_id: string;
 };
 
@@ -138,9 +147,6 @@ function rascunhoDe(pessoa: Pessoa): Rascunho {
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
     numero_interno: pessoa.numero_interno ?? "",
     cargo: pessoa.cargo ?? "",
-    data_admissao: pessoa.data_admissao ?? "",
-    data_antiguidade: pessoa.data_antiguidade ?? "",
-    data_saida: pessoa.data_saida ?? "",
     reporta_a_pessoa_id: pessoa.reporta_a_pessoa_id ?? SEM_ESCOLHA,
   };
 }
@@ -163,6 +169,9 @@ export function PessoaLaboraisTab({
   entidadeLegalNome,
   estadoContratoDerivado,
   podeEditar,
+  semContrato = false,
+  contratosACarregar = false,
+  onAbrirContratos,
   saving,
   onGuardar,
   vinculoActivoId,
@@ -197,9 +206,6 @@ export function PessoaLaboraisTab({
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
       numero_interno: vazioParaNull(rascunho.numero_interno),
       cargo: vazioParaNull(rascunho.cargo),
-      data_admissao: vazioParaNull(rascunho.data_admissao),
-      data_antiguidade: vazioParaNull(rascunho.data_antiguidade),
-      data_saida: vazioParaNull(rascunho.data_saida),
       reporta_a_pessoa_id:
         rascunho.reporta_a_pessoa_id === SEM_ESCOLHA ? null : rascunho.reporta_a_pessoa_id,
     });
@@ -213,16 +219,20 @@ export function PessoaLaboraisTab({
   const campos: Array<{
     id: keyof Rascunho;
     labelKey: string;
-    tipo?: "date" | "email" | "text";
+    tipo?: "email" | "text";
     ajudaKey?: string;
   }> = [
     { id: "numero_interno", labelKey: "hr.laborais.numeroInterno" },
     { id: "cargo", labelKey: "hr.columns.cargo", ajudaKey: "hr.laborais.cargoTextoLegadoAjuda" },
     { id: "email_trabalho", labelKey: "hr.laborais.emailTrabalho", tipo: "email" },
     { id: "telefone_trabalho", labelKey: "hr.laborais.telefoneTrabalho" },
-    { id: "data_admissao", labelKey: "hr.columns.contratacao", tipo: "date" },
-    { id: "data_antiguidade", labelKey: "hr.laborais.dataAntiguidade", tipo: "date" },
-    { id: "data_saida", labelKey: "hr.laborais.dataSaida", tipo: "date" },
+  ];
+
+  /** As tres datas calculadas pelos contratos: so se leem. */
+  const datasDosContratos: Array<{ id: "data_admissao" | "data_antiguidade" | "data_saida"; labelKey: string }> = [
+    { id: "data_admissao", labelKey: "hr.columns.contratacao" },
+    { id: "data_antiguidade", labelKey: "hr.laborais.dataAntiguidade" },
+    { id: "data_saida", labelKey: "hr.laborais.dataSaida" },
   ];
 
   return (
@@ -281,6 +291,32 @@ export function PessoaLaboraisTab({
                   ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* So-leitura: calculadas pelos contratos (`datasDaPessoa` no servidor); editam-se no separador Contratos. */}
+          {datasDosContratos.map(({ id, labelKey }) => (
+            <div key={id} className="space-y-1.5">
+              <Label htmlFor={`hr-laborais-${id}`}>{t(labelKey)}</Label>
+              <Input
+                id={`hr-laborais-${id}`}
+                value={pessoa[id] ? dataCurta(pessoa[id] as string) : t("hr.campos.semValor")}
+                readOnly
+                aria-describedby="hr-laborais-datas-ajuda"
+              />
+              {id === "data_admissao" && semContrato && !contratosACarregar && (
+                <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
+                  {t("hr.laborais.contratacaoProvisoria")}
+                </p>
+              )}
+            </div>
+          ))}
+          <div className="space-y-1 self-end pb-1 sm:col-span-2 xl:col-span-3">
+            <p id="hr-laborais-datas-ajuda" className="text-xs text-muted-foreground">{t("hr.laborais.datasDosContratos")}</p>
+            {onAbrirContratos && (
+              <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={onAbrirContratos}>
+                {t("hr.laborais.editarEmContratos")}
+              </Button>
+            )}
           </div>
 
           {/* So-leitura: `local_id` e DERIVADO da afectacao em aberto mais

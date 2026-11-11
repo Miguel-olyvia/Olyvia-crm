@@ -1,6 +1,7 @@
-// A aba "Contrato e local" do painel "Nova pessoa": centro de trabalho (e a filial), responsável direto, cargo e admissão, e o
-// contrato (tipo, regime, modalidade, datas, período experimental). As horas e o horário estão em `ContratoHoras`. Data de
-// admissão, cargo e tipo de contrato são do RH e obrigatórios; centro e responsável são opcionais.
+// A aba "Contrato e local" do painel "Nova pessoa": centro de trabalho (e a filial), responsável direto, cargo, e o contrato
+// (tipo, regime, modalidade, datas, período experimental). As horas e o horário estão em `ContratoHoras`. Há UMA só data de
+// contratação: o início do contrato (a antiguidade, opcional, também é do contrato); a da pessoa deriva dos contratos. A data
+// de contratação, o cargo e o tipo de contrato são do RH e obrigatórios; centro e responsável são opcionais.
 import { useMemo } from "react";
 import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { useCargos } from "@/components/rh-exemplo/hooks/useCargos";
@@ -57,8 +58,6 @@ function CargoEAdmissao() {
           opcoes={cargos.filter((c) => c.activo).map((c) => ({ value: c.id, label: c.nome }))} ajuda={t("rhNova.h.cargo")}
         />
         <CampoT g="geral" k="numero_interno" id="hr-novo-numero-interno" rotulo={t("hr.laborais.numeroInterno")} />
-        <CampoT g="laborais" k="data_admissao" id="hr-novo-data-admissao" codigo="data_admissao" tipo="date" rotulo={t("rhNova.f.dataAdmissao")} />
-        <CampoT g="laborais" k="data_antiguidade" id="hr-novo-data-antiguidade" tipo="date" rotulo={t("hr.laborais.dataAntiguidade")} ajuda={t("rhNova.h.antiguidade")} />
         <CampoT g="extra" k="categoria_profissional" id="hr-novo-categoria-profissional" rotulo={t("hr.contrato.categoriaProfissional")} ajuda={t("hr.contrato.ajudaCategoriaProfissional")} />
         <CampoS
           g="extra" k="categoria_funcao" id="hr-novo-categoria-funcao" rotulo={t("hr.contrato.categoriaFuncao")}
@@ -130,7 +129,9 @@ function Contrato() {
         <CampoS g="contrato" k="regime_contratual" id="hr-novo-regime-contratual" rotulo={t("hr.contrato.regimeContratual")} opcoes={opcoes(t, "hr.regimeContratual", REGIMES_CONTRATUAIS)} ajuda={t("hr.contrato.ajudaRegimeContratual")} />
         <CampoS g="contrato" k="regime" id="hr-novo-regime" rotulo={t("hr.contrato.regime")} opcoes={opcoes(t, "hr.regime", REGIMES_TRABALHO)} ajuda={t("hr.contrato.ajudaRegime")} />
         <CampoS g="contrato" k="tipo_trabalho" id="hr-novo-tipo-trabalho" rotulo={t("hr.contrato.tipoTrabalho")} opcoes={opcoes(t, "hr.tipoTrabalho", TIPOS_TRABALHO)} vazio={t("rhNova.semIndicacao")} ajuda={t("hr.contrato.ajudaTipoTrabalho")} />
-        <CampoT g="contrato" k="data_inicio" id="hr-novo-data-inicio" tipo="date" rotulo={t("hr.contrato.dataInicio")} ajuda={t("rhNova.h.dataInicio")} />
+        {/* Uma so data de contratacao: o inicio do contrato. A da pessoa deriva dos contratos (o servidor calcula-a). */}
+        <CampoT g="contrato" k="data_inicio" id="hr-novo-data-inicio" codigo="data_admissao" tipo="date" rotulo={t("rhNova.f.dataContratacao")} ajuda={t("rhNova.h.dataContratacao")} />
+        <CampoT g="contrato" k="data_antiguidade" id="hr-novo-data-antiguidade" tipo="date" rotulo={t("rhNova.f.dataAntiguidadeContrato")} ajuda={t("rhNova.h.dataAntiguidadeContrato")} max={valores.contrato.data_inicio || undefined} />
         {comTermo && <DuracaoEFim />}
         <PeriodoExperimental />
       </div>

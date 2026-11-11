@@ -39,7 +39,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Os campos que são sempre obrigatórios: os do RH (fixos) e o nome. */
 export const OBRIGATORIOS_FIXOS: ReadonlySet<string> = new Set([
-  "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-data-admissao", "hr-novo-tipo-contrato",
+  "hr-novo-primeiro-nome", "hr-novo-apelido", "hr-novo-cargo", "hr-novo-data-inicio", "hr-novo-tipo-contrato",
   "hr-novo-duodecimos",
 ]);
 
@@ -111,18 +111,31 @@ function problemasDeSaudeESindicato(v: ValoresNovaPessoa): ProblemaNova[] {
   ];
 }
 
-/** Os campos só do RH: data de admissão, tipo de contrato, subsídio e duodécimos. Nunca vão para o convite. */
-function problemasDoRh(v: ValoresNovaPessoa, hoje: string): ProblemaNova[] {
+/**
+ * As datas do contrato que dão as da pessoa: a de contratação (o início, obrigatória: o contrato é obrigatório na criação) e
+ * a antiguidade (opcional, nunca depois do início). A contratação, a antiguidade e a saída da pessoa derivam dos contratos.
+ */
+function problemasDasDatasDoContrato(v: ValoresNovaPessoa, hoje: string): ProblemaNova[] {
   const lista: ProblemaNova[] = [];
-  const admissao = v.laborais.data_admissao.trim();
-  if (admissao === "") acrescentar(lista, "hr-novo-data-admissao", OBRIGATORIO);
-  else lista.push(...problemaDeData("hr-novo-data-admissao", admissao, hoje, false));
+  const inicio = v.contrato.data_inicio.trim();
+  if (inicio === "") acrescentar(lista, "hr-novo-data-inicio", OBRIGATORIO);
+  else lista.push(...problemaDeData("hr-novo-data-inicio", inicio, hoje, false));
   const nasc = v.pessoais.data_nascimento.trim();
-  if (admissao !== "" && dataIsoValida(admissao) && dataIsoValida(nasc) && admissao < nasc) {
-    acrescentar(lista, "hr-novo-data-admissao", "rhNova.erro.antesDoNascimento");
+  if (inicio !== "" && dataIsoValida(inicio) && dataIsoValida(nasc) && inicio < nasc) {
+    acrescentar(lista, "hr-novo-data-inicio", "rhNova.erro.contratacaoAntesDoNascimento");
   }
-  lista.push(...problemaDeData("hr-novo-data-antiguidade", v.laborais.data_antiguidade, hoje, false));
-  lista.push(...problemaDeData("hr-novo-data-inicio", v.contrato.data_inicio, hoje, false));
+  const antiguidade = v.contrato.data_antiguidade.trim();
+  const invalida = problemaDeData("hr-novo-data-antiguidade", antiguidade, hoje, false);
+  lista.push(...invalida);
+  if (invalida.length === 0 && antiguidade !== "" && dataIsoValida(inicio) && antiguidade > inicio) {
+    acrescentar(lista, "hr-novo-data-antiguidade", "rhNova.erro.antiguidadeDepoisContratacao");
+  }
+  return lista;
+}
+
+/** Os campos só do RH: data de contratação, tipo de contrato, subsídio e duodécimos. Nunca vão para o convite. */
+function problemasDoRh(v: ValoresNovaPessoa, hoje: string): ProblemaNova[] {
+  const lista: ProblemaNova[] = [...problemasDasDatasDoContrato(v, hoje)];
   if (v.contrato.tipo_contrato === "") acrescentar(lista, "hr-novo-tipo-contrato", OBRIGATORIO);
   if (v.contrato.duodecimos_pct === "") acrescentar(lista, "hr-novo-duodecimos", OBRIGATORIO);
   if (v.contrato.tipo_contrato === "termo_certo" && v.contrato.data_fim.trim() === "") {

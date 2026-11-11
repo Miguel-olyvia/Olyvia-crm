@@ -48,7 +48,7 @@ export function AbaVisaoGeral({ ficha, pessoa, ctx, aoAbrirAba, resumoConvite }:
   );
 }
 
-export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo }: AbaProps & { aoMudarCargo: () => void }) {
+export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo, aoAbrirContratos }: AbaProps & { aoMudarCargo: () => void; aoAbrirContratos?: () => void }) {
   const w = ctx.trabalho;
   if (!w.podeVerLaborais) return <SemAcesso />;
   return (
@@ -60,6 +60,9 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo }: AbaProps & { a
       podeVerRetribuicao={w.podeVerRetribuicao} podeEditarRetribuicao={w.podeEditarRetribuicao}
       temRetribuicao={ficha.retribuicao !== null} salarioActual={ctx.salarioActual} onCargoMudou={aoMudarCargo}
       entidadeLegalNome={ctx.entidadeLegalNome} estadoContratoDerivado={ctx.estadoContratoDerivado} podeEditar={w.podeEditarLaborais}
+      semContrato={w.podeVerVinculos === true && (ficha.vinculos ?? []).length === 0}
+      contratosACarregar={ficha.loading === true}
+      onAbrirContratos={w.podeVerVinculos === true ? aoAbrirContratos : undefined}
       saving={ficha.saving} onGuardar={ficha.savePessoa} vinculoActivoId={ctx.vinculoActivoId}
       podeVerAfectacoes={ctx.podeVerAfectacoesEfectivo} podeEditarAfectacoes={w.podeEditarAfectacoes}
       podeCorrigirAfectacoes={w.podeCorrigirAfectacoes} podeVerColocacao={w.podeVerColocacao}

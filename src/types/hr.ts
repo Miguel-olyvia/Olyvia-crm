@@ -527,6 +527,8 @@ export interface PessoaVinculo {
   isencao_horario: boolean;
   formacao_inicio: string | null;
   formacao_fim: string | null;
+  /** A antiguidade deste contrato (`<= data_inicio`); `null` = conta o inicio da cadeia de contratos. */
+  data_antiguidade: string | null;
 }
 
 /**
