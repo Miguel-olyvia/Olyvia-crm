@@ -164,12 +164,15 @@ export function useScheduling(companyId?: string) {
       if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
       await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
+        const { data: rows, error } = await supabase
           .from('schedule_boards')
           .update({ is_active: false })
-          .eq('id', id);
+          .eq('id', id)
+          .select('id');
 
         if (error) throw error;
+        // 11/11/2026: a RLS que recusa devolve 0 linhas sem erro; sem isto o ecrã dizia «eliminado».
+        if (!rows || rows.length === 0) throw new Error('Sem permissão para eliminar este quadro.');
       }, 'web_app');
 
       toast.success(t('scheduling.board.deleteSuccess'));
@@ -274,12 +277,15 @@ export function useScheduling(companyId?: string) {
       if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
       await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
+        const { data: rows, error } = await supabase
           .from('schedule_resources')
           .update(updates as any)
-          .eq('id', id);
+          .eq('id', id)
+          .select('id');
 
         if (error) throw error;
+        // 11/11/2026: a RLS que recusa devolve 0 linhas sem erro; sem isto o ecrã dizia «atualizado» (ex.: reativar).
+        if (!rows || rows.length === 0) throw new Error('Sem permissão para alterar este recurso.');
       }, 'web_app');
 
       toast.success(t('scheduling.resource.updateSuccess'));
@@ -296,12 +302,15 @@ export function useScheduling(companyId?: string) {
       if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
       await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
+        const { data: rows, error } = await supabase
           .from('schedule_resources')
           .update({ is_active: false })
-          .eq('id', id);
+          .eq('id', id)
+          .select('id');
 
         if (error) throw error;
+        // 11/11/2026: a RLS que recusa devolve 0 linhas sem erro; sem isto o ecrã dizia «eliminado».
+        if (!rows || rows.length === 0) throw new Error('Sem permissão para eliminar este recurso.');
       }, 'web_app');
 
       toast.success(t('scheduling.resource.deleteSuccess'));

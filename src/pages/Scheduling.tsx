@@ -676,7 +676,7 @@ export default function Scheduling() {
                         <CardTitle className="text-lg">{resource.name}</CardTitle>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {resource.is_active === false && hasPermission('scheduling.resources.create') && (
+                        {resource.is_active === false && hasPermission('scheduling.resources.edit') && (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -688,7 +688,7 @@ export default function Scheduling() {
                             <RotateCcw className="h-4 w-4" />
                           </Button>
                         )}
-                        {resource.is_active !== false && hasPermission('scheduling.resources.delete') && (
+                        {resource.is_active !== false && hasPermission('scheduling.resources.edit') && hasPermission('scheduling.resources.delete') && (
                           <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setResourceToDelete(resource.id); }}><Trash2 className="h-4 w-4" /></Button>
                         )}
                       </div>

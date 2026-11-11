@@ -598,7 +598,7 @@ export function ScheduleItemDialog({
                           {formData.approval_status === 'clarification_requested' && t('scheduling.timeOff.clarificationRequested')}
                         </Badge>
                       </div>
-                      {canApprove && formData.approval_status === 'pending' && (
+                      {canApprove && canEditItem && formData.approval_status === 'pending' && (
                         <div className="flex gap-2">
                           <Button 
                             type="button" 

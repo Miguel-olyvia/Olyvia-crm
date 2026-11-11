@@ -502,7 +502,7 @@ export function ScheduleBoardsTab({
               onEdit={() => onEditBoard(board)}
               onClick={() => onBoardClick?.(board)}
               onDelete={() => onDeleteBoard(board.id)}
-              canDelete={!board.is_system_board && hasPermission('scheduling.boards.delete')}
+              canDelete={!board.is_system_board && hasPermission('scheduling.boards.edit') && hasPermission('scheduling.boards.delete')}
               t={t}
             />
           ))}
@@ -536,7 +536,7 @@ export function ScheduleBoardsTab({
               onEdit={() => onEditBoard(board)}
               onClick={() => onBoardClick?.(board)}
               onDelete={() => onDeleteBoard(board.id)}
-              canDelete={!board.is_system_board && hasPermission('scheduling.boards.delete')}
+              canDelete={!board.is_system_board && hasPermission('scheduling.boards.edit') && hasPermission('scheduling.boards.delete')}
               t={t}
             />
           ))}
