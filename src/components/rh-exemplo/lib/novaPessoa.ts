@@ -170,10 +170,8 @@ export interface RascunhoContrato {
   tipo_trabalho: TipoTrabalho | "";
   horas_trabalho: string;
   horas_frequencia: HorasFrequencia;
-  tempo_trabalho_pct: string;
   dias_uteis: DiaSemana[];
   politica_feriados: PoliticaFeriados;
-  horas_semanais_maximas: string;
   /** `false` = horas iguais todas as semanas; `true` = abre o editor por dia. */
   horario_variavel: boolean;
   horario: HorarioRascunho;
@@ -253,14 +251,8 @@ export function rascunhoInicial(): RascunhoPessoa {
       tipo_trabalho: "",
       horas_trabalho: "",
       horas_frequencia: "semanal",
-      // Sempre 100%, sem excepcao -- quem precisa de tempo parcial ja o
-      // marca em `tipo_trabalho`/regime, ter os dois campos a dizer a
-      // mesma coisa de forma independente era so uma fonte de
-      // inconsistencia silenciosa. Campo bloqueado no ecra (SeccaoContrato).
-      tempo_trabalho_pct: "100",
       dias_uteis: [],
       politica_feriados: "nao_laboral",
-      horas_semanais_maximas: "",
       horario_variavel: false,
       horario: horarioVazio(),
     },
@@ -286,11 +278,6 @@ const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
   { campoId: string; rotuloKey: string }
 > = {
   horas: { campoId: "hr-novo-horas-trabalho", rotuloKey: "hr.contrato.horasTrabalho" },
-  maximoSemanal: {
-    campoId: "hr-novo-horas-semanais-maximas",
-    rotuloKey: "hr.contrato.horasSemanaisMaximas",
-  },
-  fte: { campoId: "hr-novo-tempo-trabalho-pct", rotuloKey: "hr.contrato.tempoTrabalhoPct" },
   experimental: {
     campoId: "hr-novo-periodo-experimental-dias",
     rotuloKey: "hr.contrato.periodoExperimentalDias",
@@ -366,15 +353,13 @@ export function problemasDoRascunho(
   // -- Cargo (obrigatorio, fluxo 2) ------------------------------------------
   const problemaCargo = problemaDoCargo(rascunho.laborais);
   if (problemaCargo) problemas.push(problemaCargo);
-  // Os cinco numeros do contrato -- e o cruzamento entre dois deles -- estao
+  // Os numeros do contrato (horas e periodo experimental) estao
   // em `lib/hr/contrato.ts`, porque o separador Contratos da ficha edita
   // exactamente os mesmos e nao podem divergir. Aqui so se traduz o campo
   // abstracto para o `id` deste formulario.
   for (const problema of problemasDosNumerosDoContrato({
     horas: contrato.horas_trabalho,
     horas_frequencia: contrato.horas_frequencia,
-    horas_semanais_maximas: contrato.horas_semanais_maximas,
-    tempo_trabalho_pct: contrato.tempo_trabalho_pct,
     periodo_experimental_dias: contrato.tem_periodo_experimental
       ? contrato.periodo_experimental_dias
       : "",
@@ -703,10 +688,8 @@ export function payloadDoRascunho(
               ? null
               : dataDoPeriodoExperimental(dataInicioVinculo, experimentalDias),
           tipo_trabalho: contrato.tipo_trabalho === "" ? null : contrato.tipo_trabalho,
-          tempo_trabalho_pct: numeroDe(contrato.tempo_trabalho_pct),
           dias_uteis: contrato.dias_uteis.length > 0 ? contrato.dias_uteis : null,
           politica_feriados: contrato.politica_feriados,
-          horas_semanais_maximas: numeroDe(contrato.horas_semanais_maximas),
           estado: "activo",
         }
       : null,

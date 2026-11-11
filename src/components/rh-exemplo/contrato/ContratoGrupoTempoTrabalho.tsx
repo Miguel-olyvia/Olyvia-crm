@@ -8,6 +8,10 @@
  * (presencial / remoto / hibrido). Nao confundir com o "Regime contratual"
  * (`regime_contratual`, individual / coletivo), que e do grupo do contrato.
  *
+ * «TEMPO DE TRABALHO %» E «MAXIMO DE HORAS SEMANAIS» SAIRAM DO ECRA por decisao
+ * do RH: as colunas (`tempo_trabalho_pct`, `horas_semanais_maximas`) ficam na
+ * base e este ecra nao as mostra, nao as valida e nao as envia.
+ *
  * AS HORAS (`horas_periodo`/`horas_frequencia`) SO SE ESCREVEM AQUI AO CRIAR O
  * CONTRATO (`criandoContrato`). Sao derivadas de `pessoas_vinculos_horas`
  * desde 20261130120000: ao EDITAR um contrato existente ficam em leitura e
@@ -56,10 +60,6 @@ export function ContratoGrupoTempoTrabalho({
   erroDe,
 }: ContratoGrupoTempoTrabalhoProps) {
   const { t } = useTranslation();
-  // Os máximos gravam-se em pessoas_vinculos (saveVinculo), como no RH real: só dependem de quem pode editar o contrato,
-  // e não do interruptor de horas extra, que se guarda à parte na base (`rpc_hr_pessoa_horas_extra_autorizar`).
-  const maximosAtivos = podeEditar;
-
   const horasNumero = Number(rascunho.horas_periodo.replace(",", "."));
   const horasLegiveis = rascunho.horas_periodo.trim() !== "" && Number.isFinite(horasNumero);
   const equivalente = horasLegiveis
@@ -140,15 +140,6 @@ export function ContratoGrupoTempoTrabalho({
             {t("hr.form.avisoHorasImplausiveis", { horas: equivalente ?? "" })}
           </p>
         )}
-        <CampoTexto
-          id="hr-contrato-tempo-trabalho-pct"
-          label={t("hr.contrato.tempoTrabalhoPct")}
-          ajuda={t("hr.contrato.ajudaFteFixo")}
-          tipo="number"
-          valor="100"
-          disabled
-          onChange={() => {}}
-        />
         <CampoSelect
           id="hr-contrato-politica-feriados"
           label={t("hr.contrato.politicaFeriados")}
@@ -164,18 +155,6 @@ export function ContratoGrupoTempoTrabalho({
           <p className="text-sm font-medium">{t("hr.contrato.horasAnuaisMaximas")}</p>
           <p className="text-xs text-muted-foreground">{t("hr.contrato.horasAnuaisDaRegra")}</p>
         </div>
-        <CampoTexto
-          id="hr-contrato-horas-semanais-maximas"
-          label={t("hr.contrato.horasSemanaisMaximas")}
-          erro={erroDe("hr-contrato-horas-semanais-maximas")}
-          tipo="number"
-          min={0}
-          max={80}
-          step="0.5"
-          valor={rascunho.horas_semanais_maximas}
-          disabled={!maximosAtivos}
-          onChange={(v) => definir("horas_semanais_maximas", v)}
-        />
         {pessoaId && <InterruptorHorasExtra pessoaId={pessoaId} disabled={!podeEditar} />}
         <div className="flex items-center gap-2 self-end pb-2">
           {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um

@@ -24,7 +24,7 @@ export const CAMPOS_POR_ABA: Readonly<Record<AbaNova, readonly string[]>> = {
     "hr-novo-data-antiguidade", "hr-novo-categoria-profissional", "hr-novo-categoria-funcao", "hr-novo-tipo-contrato",
     "hr-novo-regime-contratual", "hr-novo-regime", "hr-novo-tipo-trabalho", "hr-novo-data-inicio", "hr-novo-data-fim",
     "hr-novo-duracao-meses", "hr-novo-renovavel", "hr-novo-periodo-experimental-dias", "hr-novo-horas-trabalho",
-    "hr-novo-horas-frequencia", "hr-novo-tempo-trabalho-pct", "hr-novo-politica-feriados", "hr-novo-horas-semanais-maximas",
+    "hr-novo-horas-frequencia", "hr-novo-politica-feriados",
     "hr-novo-horas-anuais-maximas",
   ],
   retribuicao: [

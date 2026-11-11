@@ -190,19 +190,22 @@ describe("o banco de horas so aparece para quem tem horario de banco de horas", 
     expect(within(screen.getByTestId("rhcal-detalhe")).queryByText("Banco de horas neste dia")).not.toBeInTheDocument();
   });
 
-  it("uma pessoa com banco ve a aba do banco e os creditos e debitos do mes", () => {
+  // DECISAO 5 (RH): o banco de horas de exemplo esta escondido na ficha. Nem a aba, nem os creditos e debitos no calendario
+  // (eram movimentos inventados, em memoria). Os mesmos controlos ligados estao em fluxosC/bancoHorasVisivel.test.tsx.
+  it("mesmo uma pessoa com horario de banco nao ve a aba do banco nem creditos e debitos inventados no mes", () => {
     abrir("p-rui", "Rui Amaral");
-    expect(screen.getByRole("tab", { name: /Banco de horas/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Banco de horas/ })).not.toBeInTheDocument();
     // Regra explicita: a base so sabe representar horario padrao e repartido (nao ha tipo «banco» nas linhas planeadas),
     // por isso com o horario REAL nenhum dia do mes e de banco e o cabecalho nao mostra saldo, mesmo havendo movimentos
     // na loja de exemplo. O saldo com sinal e coberto abaixo, no cabecalho, e em calendarioLogica.test.ts.
     expect(saldoDoBanco(lerFluxosC().banco, "p-rui")).not.toBe(0);
     expect(screen.queryByTestId("rhcal-saldo")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Mês anterior" }));
-    expect(celula("2026-09-04")).toHaveTextContent("+1 h · crédito no banco de horas");
-    expect(celula("2026-09-18")).toHaveTextContent("−8 h · débito no banco de horas");
+    expect(celula("2026-09-04")).not.toHaveTextContent(/banco de horas/i);
+    expect(celula("2026-09-18")).not.toHaveTextContent(/banco de horas/i);
     fireEvent.click(celula("2026-09-18"));
-    expect(within(screen.getByTestId("rhcal-detalhe")).getByText(/Folga gozada por banco de horas/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("rhcal-detalhe")).queryByText(/Folga gozada por banco de horas/)).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("rhcal-detalhe")).queryByText("Banco de horas neste dia")).not.toBeInTheDocument();
   });
 });
 

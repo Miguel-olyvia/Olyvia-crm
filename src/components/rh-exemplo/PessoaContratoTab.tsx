@@ -257,8 +257,6 @@ export function PessoaContratoTab({
       problemasDosNumerosDoContrato({
         horas: rascunho.horas_periodo,
         horas_frequencia: rascunho.horas_frequencia,
-        horas_semanais_maximas: rascunho.horas_semanais_maximas,
-        tempo_trabalho_pct: rascunho.tempo_trabalho_pct,
         periodo_experimental_dias: rascunho.periodo_experimental_dias,
       }),
     [rascunho],
@@ -292,15 +290,6 @@ export function PessoaContratoTab({
       toast.error(t("hr.contrato.erroTerminadoSemDataFim"));
       return;
     }
-    if (
-      rascunho.formacao_inicio.trim() !== "" &&
-      rascunho.formacao_fim.trim() !== "" &&
-      rascunho.formacao_fim < rascunho.formacao_inicio
-    ) {
-      setMostrarTodos(true);
-      toast.error(t("hr.contrato.erroFormacaoFimAntesInicio"));
-      return;
-    }
     const erro = await onGuardarVinculo(activo?.id ?? null, {
       tipo_contrato: rascunho.tipo_contrato,
       regime: rascunho.regime,
@@ -330,18 +319,14 @@ export function PessoaContratoTab({
             horas_frequencia: rascunho.horas_frequencia,
           }
         : {}),
-      // Sempre 100%, sem excepcao -- ver a mesma nota em novaPessoa.ts.
-      // Grava-se 100 mesmo que o rascunho mostre outro valor (contrato
-      // antigo, de antes desta regra), a partir do primeiro guardar.
-      tempo_trabalho_pct: 100,
+      // `tempo_trabalho_pct`, `horas_semanais_maximas`, `formacao_inicio` e
+      // `formacao_fim` NAO vao no patch: deixaram de ser campos do ecra (as
+      // colunas ficam na base e um UPDATE nao lhes toca).
       politica_feriados: rascunho.politica_feriados,
-      horas_semanais_maximas: numeroOuNull(rascunho.horas_semanais_maximas),
       dias_uteis: rascunho.dias_uteis.length > 0 ? rascunho.dias_uteis : null,
       categoria_profissional: textoOuNull(rascunho.categoria_profissional),
       renovavel: rascunho.renovavel === "" ? null : rascunho.renovavel === "sim",
       isencao_horario: rascunho.isencao_horario,
-      formacao_inicio: textoOuNull(rascunho.formacao_inicio),
-      formacao_fim: textoOuNull(rascunho.formacao_fim),
     });
     if (erro) {
       toast.error(erro);

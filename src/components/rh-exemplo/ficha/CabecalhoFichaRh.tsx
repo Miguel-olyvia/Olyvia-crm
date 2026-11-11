@@ -1,4 +1,4 @@
-// O cabeçalho da ficha de RH, no padrão da ficha de Pessoas: avatar (fotografia ou iniciais), nome, a linha "Filial · Cargo",
+// O cabeçalho da ficha de RH, no padrão da ficha de Pessoas: avatar (fotografia ou iniciais), nome, a linha "Cargo · Filial",
 // os estados (acesso e contrato, sempre em texto), a navegação "n de N" e Fechar, e por baixo as ações.
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import type { TeclaNavegacao, Vizinhas } from "./navegacao";
 
 interface CabecalhoFichaRhProps {
   pessoa: Pessoa;
-  /** "Filial · Cargo", já montado. */
+  /** "Cargo · Filial do organograma", já montado. */
   subtitulo: string;
   fotografiaUrl: string | null | undefined;
   temConta: boolean;

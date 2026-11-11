@@ -144,17 +144,13 @@ function vinculo(v: ValoresNovaPessoa): ExtrasNovaPessoa["vinculo"] {
     periodo_experimental_ate: dias === null || inicio === null ? null : dataDoPeriodoExperimental(inicio, dias),
     periodo_experimental_origem: dias === null ? null : "manual",
     tipo_trabalho: c.tipo_trabalho === "" ? null : c.tipo_trabalho,
-    tempo_trabalho_pct: numeroDe(c.tempo_trabalho_pct),
     dias_uteis: c.dias_uteis.length > 0 ? c.dias_uteis : null,
     politica_feriados: c.politica_feriados,
     horas_anuais_maximas: null,
-    horas_semanais_maximas: numeroDe(c.horas_semanais_maximas),
     categoria_funcao: e.categoria_funcao === "" ? null : e.categoria_funcao,
     categoria_profissional: texto(e.categoria_profissional),
     renovavel: e.renovavel === "" ? null : e.renovavel === "sim",
     isencao_horario: e.isencao_horario,
-    formacao_inicio: null,
-    formacao_fim: null,
   };
 }
 

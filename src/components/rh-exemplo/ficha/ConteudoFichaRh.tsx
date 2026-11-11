@@ -15,6 +15,7 @@ import { useFiliaisDaArvore } from "@/components/rh-exemplo/hooks/useFiliaisDaAr
 import { podeConcluirAdmissao } from "@/components/rh-exemplo/hooks/estadoAdmissaoReal";
 import { useConcluirAdmissao } from "@/components/rh-exemplo/hooks/useConcluirAdmissao";
 import { usePessoa } from "@/components/rh-exemplo/hooks/usePessoa";
+import { usePessoaColocacaoOrganograma } from "@/components/rh-exemplo/hooks/usePessoaColocacaoOrganograma";
 import { usePessoaFotografia } from "@/components/rh-exemplo/hooks/usePessoaFotografia";
 import { podeEnviarNovoConvite } from "@/components/rh-exemplo/modoEnvioConvite";
 import type { Pessoa } from "@/components/rh-exemplo/tipos";
@@ -113,14 +114,20 @@ function useDialogosFicha() {
   return { conviteAberto, setConviteAberto, acessoAberto, setAcessoAberto };
 }
 
-/** A linha "Filial · Cargo" do cabeçalho: a filial é a do centro de trabalho da pessoa. */
+/**
+ * A linha "Cargo · Filial" do cabeçalho. A filial é a da ESTRUTURA DA EMPRESA: a colocação em vigor da pessoa no organograma
+ * (`pessoas_colocacao_organograma`, sem data de fim) e NÃO a do centro de trabalho, que continua visível em Detalhes laborais.
+ * Enquanto a colocação carrega, ou se a leitura foi recusada, não se sabe a filial: mostra-se só o cargo (nem «Sem filial»).
+ */
 function useSubtitulo(pessoa: Pessoa, ctx: ContextoFicha): string {
   const { t } = useTranslation();
   const { filiais } = useFiliaisDaArvore();
-  const noDoLocal = ctx.locais.find((l) => l.id === pessoa.local_id)?.organograma_node_id;
-  const filial = filiais.find((f) => f.id === noDoLocal)?.name ?? t("rhForm.ficha.semFilial");
+  const { colocacoes, loading, recusado } = usePessoaColocacaoOrganograma(pessoa.id, pessoa.organization_id);
   const cargo = ctx.cargos.find((c) => c.id === pessoa.cargo_id)?.nome ?? pessoa.cargo ?? t("rhForm.ficha.semCargo");
-  return `${filial} · ${cargo}`;
+  if (loading || recusado) return cargo;
+  const noDoOrganograma = colocacoes.find((c) => c.valido_ate === null)?.organograma_node_id;
+  const filial = filiais.find((f) => f.id === noDoOrganograma)?.name ?? t("rhForm.ficha.semFilial");
+  return `${cargo} · ${filial}`;
 }
 
 /**
