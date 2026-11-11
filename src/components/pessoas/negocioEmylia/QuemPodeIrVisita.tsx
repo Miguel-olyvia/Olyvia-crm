@@ -4,7 +4,7 @@
 // (neg_papeis_dos_recursos, 20270106410000); sem essa função na base, «Quem vai» mostra toda a gente, como antes.
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check } from "lucide-react";
+import { CalendarClock, Check, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { format } from "date-fns";
@@ -249,11 +249,22 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
     );
   };
   const idData = `${a.id}-data`, idErroRec = `${a.id}-recursos-erro`;
+  // 11/11 (Rúben: «ao marcar a visita, ter logo no topo a agenda disponível, por comercial, para poder dizer quando se pode visitar»)
+  const escolherVaga = (d: string, quem: string, h?: string) => {
+    if (a.somenteLeitura) return;
+    if (d !== dia) a.aoMudar({ data: d });
+    a.aoMudarRecursos([quem]);
+    if (h) a.aoMudar({ hora: h });
+  };
   return (
     <div className="space-y-5">
+      {!a.somenteLeitura && (
+        <AgendaDosComerciais quem={g.conhecido ? comerciais : g.principais} hoje={a.hoje} dia={dia} escolhidos={a.escolhidos} hora={a.hora}
+          base={base} escolher={escolherVaga} />
+      )}
       {/* 4/11 (Rúben: «parece desativo e o picking deve ser mais bonito»): um calendário à vista, em vez do campo de data do browser */}
       <div className="space-y-2">
-        <p id={idData} className="text-sm font-semibold text-foreground">Data da visita</p>
+        <p id={idData} className="text-sm font-semibold text-foreground">{a.somenteLeitura ? "Data da visita" : "Ou outro dia, no calendário"}</p>
         <div
           ref={a.campoData as never} tabIndex={-1} role="group" aria-labelledby={idData} aria-describedby={a.erroData ? `${idData}-erro` : undefined}
           className={cn("inline-block rounded-2xl border bg-card p-1 shadow-[var(--shadow-sm)]", FOCO, a.erroData ? "border-destructive" : "border-border")}
@@ -334,5 +345,142 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
         </>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ 11/11: a agenda dos comerciais, no topo */
+/** Quantos dias (sem os domingos) a agenda mostra, a partir de hoje. */
+export const DIAS_NA_AGENDA = 10;
+/** As horas de trabalho que contam (as livres vêm do dia todo, 00:00 incluído). */
+const MANHA: [string, string] = ["08:00", "13:00"], TARDE: [string, string] = ["13:00", "20:00"];
+const entre = (h: string, [de, ate]: [string, string]) => h >= de && h < ate;
+
+/** Os próximos dias da agenda: a partir de hoje, sem domingos. */
+export function diasDaAgenda(hoje: string, n = DIAS_NA_AGENDA): string[] {
+  const out: string[] = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(hoje ?? "")) return out; // sem «hoje» certo (ainda a ler), sem agenda
+  for (let i = 0; out.length < n && i < n * 2; i++) {
+    const d = somarDias(hoje, i);
+    if (diaComoData(d).getDay() !== 0) out.push(d);
+  }
+  return out;
+}
+
+/** As próximas vagas a oferecer ao cliente: por dia, a primeira hora livre da manhã e a da tarde (do comercial que a tem mais cedo),
+ *  pela ordem, até `n`. */
+export function proximasVagas(dias: readonly string[], quem: readonly { id: string }[], horas: (d: string, r: string) => string[] | undefined, n = 4) {
+  const out: { dia: string; hora: string; quem: string }[] = [];
+  for (const d of dias) {
+    for (const parte of [MANHA, TARDE]) {
+      let melhor: { hora: string; quem: string } | null = null;
+      for (const r of quem) {
+        const h = (horas(d, r.id) ?? []).find((x) => entre(x, parte));
+        if (h && (!melhor || h < melhor.hora)) melhor = { hora: h, quem: r.id };
+      }
+      if (melhor) out.push({ dia: d, ...melhor });
+      if (out.length >= n) return out;
+    }
+  }
+  return out;
+}
+
+const DIA_CURTO = (d: string) => format(diaComoData(d), "EEE d", { locale: pt }).replace(".", "");
+const DIA_LONGO = (d: string) => format(diaComoData(d), "EEEE, d 'de' MMMM", { locale: pt });
+
+function AgendaDosComerciais({ quem, hoje, dia, escolhidos, hora, base, escolher }: {
+  quem: readonly RecursoVisita[]; hoje: string; dia: string; escolhidos: readonly string[]; hora: string;
+  base: { duracaoMin: number; horario: HorarioOrg; feriados: FeriadosOrg; horarioPronto: boolean; excluirId: string | null };
+  escolher: (dia: string, quem: string, hora?: string) => void;
+}) {
+  const dias = useMemo(() => diasDaAgenda(hoje), [hoje]);
+  const lidas = useHorasPorRecurso({ ...base, recursos: quem.map((r) => r.id), dias, ativo: quem.length > 0 });
+  const horasDe = (d: string, r: string) => lidas.horas(d, r)?.filter((h) => h >= MANHA[0] && h < TARDE[1]);
+  const vagas = proximasVagas(dias, quem, horasDe);
+  const nome = (id: string) => quem.find((r) => r.id === id)?.name?.trim() || "(sem nome)";
+  if (!quem.length || !dias.length) return null;
+  return (
+    <section aria-label="Agenda dos comerciais" className="space-y-3 rounded-2xl border border-primary/25 bg-primary/[0.03] p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-[15px] font-semibold"><CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />Agenda dos comerciais</h3>
+        <p className="text-sm text-muted-foreground">{lidas.aLer ? "A ler as agendas…" : "Toque numa vaga para a marcar."}</p>
+      </div>
+
+      {/* as próximas vagas, prontas a dizer ao cliente */}
+      {vagas.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="flex items-center gap-1.5 text-sm font-medium"><Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Próximas vagas</p>
+          <div className="flex flex-wrap gap-2">
+            {vagas.map((v) => {
+              const ligada = v.dia === dia && v.hora === hora && escolhidos.includes(v.quem);
+              return (
+                <button key={`${v.dia}|${v.hora}`} type="button" aria-pressed={ligada} onClick={() => escolher(v.dia, v.quem, v.hora)}
+                  aria-label={`Marcar ${DIA_LONGO(v.dia)} às ${v.hora} com ${nome(v.quem)}`}
+                  className={cn("inline-flex min-h-11 flex-col items-start justify-center rounded-xl border px-3 py-1.5 text-left transition-colors", FOCO,
+                    ligada ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-primary/50 hover:bg-primary/[0.05]")}>
+                  <span className="text-[15px] font-semibold capitalize leading-tight">{DIA_CURTO(v.dia)} · {v.hora}</span>
+                  <span className={cn("text-xs", ligada ? "text-primary-foreground/80" : "text-muted-foreground")}>{nome(v.quem)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* a grelha: um comercial por linha, os dias em colunas; manhã (barra de cima) e tarde (de baixo) em cada dia */}
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="w-full border-collapse text-sm">
+          <caption className="sr-only">Horas livres de cada comercial nos próximos dias, de manhã e à tarde</caption>
+          <thead>
+            <tr>
+              <th scope="col" className="sticky left-0 z-10 bg-card px-3 py-2 text-left text-xs font-medium text-muted-foreground">Comercial</th>
+              {dias.map((d) => (
+                <th key={d} scope="col" className={cn("px-1 py-2 text-center text-xs font-medium capitalize", d === dia ? "text-primary" : "text-muted-foreground")}>
+                  {d === hoje ? "hoje" : DIA_CURTO(d)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {quem.map((r) => {
+              const n = r.name?.trim() || "(sem nome)";
+              return (
+                <tr key={r.id} className="border-t border-border">
+                  <th scope="row" className="sticky left-0 z-10 max-w-[9rem] truncate bg-card px-3 py-2 text-left text-[15px] font-medium">{n}</th>
+                  {dias.map((d) => {
+                    const h = horasDe(d, r.id);
+                    const m = h?.filter((x) => entre(x, MANHA)) ?? [], t = h?.filter((x) => entre(x, TARDE)) ?? [];
+                    const ligada = d === dia && escolhidos.includes(r.id);
+                    const livre = (h?.length ?? 0) > 0;
+                    const texto = h === undefined ? "a ler" : !livre ? "sem horas livres"
+                      : `${m.length ? `manhã a partir das ${m[0]}` : "manhã ocupada"}, ${t.length ? `tarde a partir das ${t[0]}` : "tarde ocupada"}`;
+                    return (
+                      <td key={d} className="px-1 py-1.5 text-center">
+                        <button type="button" disabled={!livre} onClick={() => escolher(d, r.id)} aria-label={`${n}, ${DIA_LONGO(d)}: ${texto}`} aria-pressed={ligada}
+                          className={cn("mx-auto flex h-11 w-12 flex-col items-stretch justify-center gap-1 rounded-lg px-1.5 transition-colors", FOCO,
+                            ligada ? "bg-primary/15 ring-2 ring-primary" : livre ? "hover:bg-primary/[0.08]" : "cursor-default opacity-40")}>
+                          {h === undefined ? <span className="mx-auto h-2 w-6 animate-pulse rounded-full bg-muted motion-reduce:animate-none" /> : (
+                            <>
+                              <span className={cn("h-2 rounded-full", m.length >= 3 ? "bg-success" : m.length ? "bg-success/50" : "bg-muted")} />
+                              <span className={cn("h-2 rounded-full", t.length >= 3 ? "bg-success" : t.length ? "bg-success/50" : "bg-muted")} />
+                            </>
+                          )}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-success" />livre</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-success/50" />poucas horas</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-muted" />ocupado</span>
+        <span>Em cada dia, a barra de cima é a manhã e a de baixo a tarde. A viagem até à obra confirma-se ao escolher a hora.</span>
+      </p>
+      {lidas.comErro && <p role="alert" className="text-sm text-foreground">Não foi possível ler a agenda de toda a gente. Tente outra vez.</p>}
+    </section>
   );
 }
