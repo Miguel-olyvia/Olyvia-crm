@@ -8,10 +8,11 @@ import type { Ctx } from "./pecas";
 import type { Negocio } from "./motor";
 
 const nuvem = vi.hoisted(() => ({
-  falasDeFicheiro: vi.fn(),
+  audioDeFicheiro: vi.fn(),
+  transcreverAudio: vi.fn(),
   transcreverFala: vi.fn(),
+  analisarConversa: vi.fn(),
   preencherCampos: vi.fn(),
-  ouvirMicrofone: vi.fn(),
   gravarMicrofone: vi.fn(),
 }));
 vi.mock("./chamadaNuvem", async (importOriginal) => {
@@ -42,17 +43,29 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   window.history.replaceState({}, "", "/negocios?teste=1");
   localStorage.clear();
-  nuvem.falasDeFicheiro.mockResolvedValue([
-    { pcm: new Float32Array(16000), inicioS: 3 },
-    { pcm: new Float32Array(16000), inicioS: 7 },
-  ]);
-  nuvem.transcreverFala.mockImplementation(async (_pcm: Float32Array, inicioS: number) =>
-    inicioS === 3
-      ? [{ inicio: 3, fim: 5, texto: "É um apartamento no terceiro andar.", confianca: 0.9, falante: "cliente" }]
-      : [{ inicio: 7, fim: 8, texto: "Muito bem.", confianca: 0.9, falante: "comercial" }]);
+  // 11/11: o ficheiro (a chamada de exemplo ou uma gravação carregada) é transcrito por blocos, já com quem fala
+  nuvem.audioDeFicheiro.mockResolvedValue(new Float32Array(16000 * 10));
+  nuvem.transcreverAudio.mockImplementation(async (_pcm: Float32Array, _tipo: string, aoProgredir?: (k: number, n: number, f: unknown[]) => void) => {
+    const falas = [
+      { inicio: 3, fim: 5, texto: "É um apartamento no terceiro andar.", falante: "cliente", confianca_falante: 1, confianca: 0.9, revista: true },
+      { inicio: 7, fim: 8, texto: "Muito bem.", falante: "comercial", confianca_falante: 1, confianca: 0.95, revista: true },
+    ];
+    aoProgredir?.(1, 1, falas);
+    return falas;
+  });
   nuvem.preencherCampos.mockResolvedValue(extracao);
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+const INSIGHTS = {
+  resumo: "A Dona Inês quer remodelar a casa de banho.", temperatura: "quente", pontuacao: 82, porque_temperatura: "Quer começar já.",
+  motivacao: null, necessidades: [{ texto: "Trocar a banheira por duche", linha: 0 }],
+  orcamento: { valor: null, sensibilidade: "desconhecida", notas: null }, prazo: { quando: "janeiro", urgencia: "alta", data_decisao: null, notas: null },
+  decisores: [], concorrencia: { outros_orcamentos: "desconhecido", notas: null }, objecoes: [], sinais_compra: [], preferencias: [], riscos: [],
+  compromissos: [], proximos_passos: [{ texto: "Ligar na véspera da visita", responsavel: "Comercial", quando: null }],
+  por_perguntar: ["Perguntar qual é o orçamento."], oportunidades: [], momentos: [{ linha: 1, titulo: "Combinam a visita" }],
+  coaching: { correu_bem: [], a_melhorar: [] }, sentimento: { inicio: "neutro", fim: "positivo", notas: null },
+};
 
 const campo = vi.fn();
 const servicoDaChamada = vi.fn();
@@ -68,12 +81,14 @@ async function correrExemplo() {
 }
 
 describe("ChamadaDireto (4/11, na nuvem)", () => {
-  it("corre a chamada de exemplo: transcreve cada fala e manda os campos do negócio mais a visita combinada", async () => {
+  it("corre a chamada de exemplo: transcreve-a por blocos e manda os campos do negócio mais a visita combinada, com a análise", async () => {
     await correrExemplo();
     expect(screen.getByText("É um apartamento no terceiro andar.")).toBeInTheDocument();
     expect(screen.getByText("Cliente:")).toBeInTheDocument();
-    expect(nuvem.transcreverFala).toHaveBeenCalledTimes(2);
-    expect(nuvem.transcreverFala.mock.calls[0][2]).toBeNull();  // sem voz registada
+    expect(nuvem.audioDeFicheiro).toHaveBeenCalledWith("/chamadas/exemplo.ogg");
+    expect(nuvem.transcreverAudio.mock.calls[0][1]).toBe("chamada");
+    expect(nuvem.transcreverFala).not.toHaveBeenCalled();
+    expect(nuvem.preencherCampos.mock.calls[0][3]).toBe(true);  // 11/11: com a análise
     const [segs, grupos] = nuvem.preencherCampos.mock.calls[0];
     expect(segs.map((s: { falante: string }) => s.falante)).toEqual(["cliente", "comercial"]);
     expect(grupos.map((g: Grupo) => g.titulo)).toEqual(["Qualificação", "Serviço", "Da chamada"]);
@@ -114,7 +129,11 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect(screen.getByText(/Preenchidos: Tipo de imóvel, O cliente é, Tipo de serviço, Serviços do Catálogo, Visita: dia combinado, Visita: hora combinada\./)).toBeInTheDocument();
   });
 
-  it("no fim, quem fala passa a ser o revisto pelo sentido da conversa (5/11: o cliente vinha como «Comercial»)", async () => {
+  it("no fim, quem fala passa a ser o revisto pelo sentido da conversa nas falas provisórias (5/11: o cliente vinha como «Comercial»)", async () => {
+    nuvem.transcreverAudio.mockResolvedValueOnce([
+      { inicio: 3, fim: 5, texto: "É um apartamento no terceiro andar.", falante: "cliente", confianca_falante: 0.3 },
+      { inicio: 7, fim: 8, texto: "Muito bem.", falante: "comercial", confianca_falante: 0.3 },
+    ]);
     nuvem.preencherCampos.mockResolvedValueOnce({ ...extracao, falantes: ["cliente", "cliente"] });
     await correrExemplo();
     expect(screen.queryByText("Comercial:")).toBeNull();
@@ -122,21 +141,63 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     expect(screen.getByText(/Quem fala foi corrigido em 1 linha, pelo sentido da conversa\./)).toBeInTheDocument();
   });
 
-  it("se a revisão não trouxer uma entrada por linha, ficam as etiquetas da comparação de vozes", async () => {
+  it("se a revisão não trouxer uma entrada por linha, ficam as etiquetas que vieram", async () => {
     nuvem.preencherCampos.mockResolvedValueOnce({ ...extracao, falantes: ["cliente"] });
     await correrExemplo();
     expect(screen.getByText("Comercial:")).toBeInTheDocument();
   });
 
-  it("com a voz registada manda a amostra e o que ela diz em cada fala", async () => {
-    localStorage.setItem("olyvia.chamadas.voz", "UklGRg==");
-    localStorage.setItem("olyvia.chamadas.voz_texto", "Esta é a minha voz");
+  it("11/11: nas falas revistas por bloco, quem fala fica como veio do áudio (a revisão pelo sentido não lhes mexe)", async () => {
+    nuvem.preencherCampos.mockResolvedValueOnce({ ...extracao, falantes: ["cliente", "cliente"] });
+    await correrExemplo();
+    expect(screen.getByText("Comercial:")).toBeInTheDocument();
+    expect(screen.queryByText(/Quem fala foi corrigido/)).toBeNull();
+  });
+
+  it("11/11: a análise da conversa aparece e fica guardada no negócio, com o tempo de cada fala", async () => {
+    nuvem.preencherCampos.mockResolvedValueOnce({ ...extracao, insights: INSIGHTS });
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    expect(screen.getByText("Pronto. A sua voz está registada.")).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
-    await waitFor(() => expect(nuvem.transcreverFala).toHaveBeenCalledTimes(2));
-    expect(nuvem.transcreverFala.mock.calls[0][2]).toBe("UklGRg==");
-    expect(nuvem.transcreverFala.mock.calls[0][3]).toBe("Esta é a minha voz");
+    await waitFor(() => expect(screen.getByRole("region", { name: "O que a Olyvia percebeu da chamada" })).toBeInTheDocument());
+    expect(screen.getByText(/Quente · 82/)).toBeInTheDocument();
+    expect(screen.getByText("Perguntar qual é o orçamento.")).toBeInTheDocument();
+    expect(screen.getByText(/Ligar na véspera da visita/)).toBeInTheDocument();
+    const guardada = campo.mock.calls.find((c) => c[1] === "insights_chamada");
+    expect(guardada).toBeTruthy();
+    const dados = JSON.parse(guardada![2]);
+    expect(dados.tempos).toEqual([3, 7]);
+    expect(dados.metricas).toMatchObject({ falas: 2, perguntasComercial: 0 });
+    // o resumo da extração não se repete: está na análise
+    expect(screen.queryByText(/Resumo:/)).toBeNull();
+  });
+
+  it("11/11: uma gravação carregada transcreve-se pelo mesmo caminho", async () => {
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    const ficheiro = new File(["x"], "chamada.m4a", { type: "audio/mp4" });
+    const input = document.querySelector('input[type="file"][accept^="audio"]') as HTMLInputElement;
+    await act(async () => { fireEvent.change(input, { target: { files: [ficheiro] } }); });
+    await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
+    expect(nuvem.audioDeFicheiro).toHaveBeenCalledWith(ficheiro);
+    expect(campo).toHaveBeenCalledWith(7, "transcricao_chamada", expect.stringContaining("Comercial: Muito bem."));
+  });
+
+  it("11/11: uma conversa guardada sem análise pode ser analisada; a análise guardada vê-se ao voltar", async () => {
+    const dg = { id: 8, linhaPorDefinir: true, linha: "wc", f: { transcricao_chamada: "0:03 Cliente: Quero mudar a banheira.\n0:09 Comercial: Para quando?" } } as unknown as Negocio;
+    nuvem.analisarConversa.mockResolvedValueOnce(INSIGHTS);
+    render(<ChamadaDireto ctx={ctx} d={dg} grupos={GRUPOS} />);
+    expect(screen.getByText(/Ver a transcrição guardada \(2 falas\)/)).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Analisar a conversa" })); });
+    const [segs, tipo] = nuvem.analisarConversa.mock.calls[0];
+    expect(tipo).toBe("chamada");
+    expect(segs.map((s: { falante: string; inicio: number }) => [s.falante, s.inicio])).toEqual([["cliente", 3], ["comercial", 9]]);
+    expect(screen.getByText(/Quente · 82/)).toBeInTheDocument();
+    expect(campo).toHaveBeenCalledWith(8, "insights_chamada", expect.stringContaining('"pontuacao":82'));
+    // e numa visita, o que se soube na chamada aparece para preparar
+    cleanup();
+    const guardada = campo.mock.calls.find((c) => c[1] === "insights_chamada")![2];
+    const dv = { id: 8, f: { insights_chamada: guardada }, linha: "wc", visita: { med: {} } } as unknown as Negocio;
+    render(<ChamadaDireto ctx={ctx} d={dv} grupos={GRUPOS} modo="visita" />);
+    expect(screen.getByRole("region", { name: "O que se soube na chamada" })).toBeInTheDocument();
   });
 
   // 5/11 (Rúben, a visita real): o mesmo painel grava a visita; no fim propõe os campos da Visita, com as medidas ditas

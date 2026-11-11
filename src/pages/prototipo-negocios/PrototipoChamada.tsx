@@ -1,6 +1,6 @@
 // 4/11 (Rúben): a «Chamada em direto» sem conta, para experimentar e mostrar: o mesmo painel do «Tudo na chamada» do
 // Negócio, com um negócio de exemplo em memória. O que o motor propõe e se aceita fica na lista em baixo, só nesta página.
-// Precisa do motor a correr no PC (python tools/chamadas/servidor.py). Com ?teste=1 usa a chamada de exemplo, sem microfone.
+// As funções Supabase (chamada-transcrever, chamada-campos) pedem sessão iniciada. Com ?teste=1 usa a chamada de exemplo, sem microfone.
 import { useMemo, useState } from "react";
 import { ChamadaDireto } from "@/emylia/ChamadaDireto";
 import { CONTACTO, LEAD, type Def } from "@/emylia/campos";
@@ -15,8 +15,10 @@ export default function PrototipoChamada() {
     S: {}, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "",
     A: { campo: (_id: number, k: string, v: string) => setF((x) => ({ ...x, [k]: v })) },
   }) as unknown as Ctx, []);
-  const d = { id: 1, f, nome: "Cliente de exemplo", tel: "", fase: 1 } as unknown as Negocio;
-  const preenchidos = Object.entries(f).filter(([, v]) => v.trim() !== "");
+  // 11/11: com a linha por definir (sem ela, o painel não abria: o nome da linha lia-se de uma linha que não existe)
+  const d = { id: 1, f, nome: "Cliente de exemplo", tel: "", fase: 1, linha: "wc", linhaPorDefinir: true } as unknown as Negocio;
+  // a transcrição e a análise gravam-se no negócio mas vêem-se no painel, não nesta lista
+  const preenchidos = Object.entries(f).filter(([k, v]) => v.trim() !== "" && !/^(transcricao|insights)_/.test(k));
   return (
     <main className="mx-auto w-full max-w-4xl px-4 pb-24 pt-8 sm:px-8">
       <div className="mb-6">
@@ -32,7 +34,7 @@ export default function PrototipoChamada() {
             {preenchidos.map(([k, v]) => (
               <div key={k} className="text-[15px] leading-snug">
                 <dt className="text-sm text-muted-foreground">{defs.get(k)?.l ?? k}</dt>
-                <dd className="font-medium">{v}</dd>
+                <dd className="break-words font-medium">{v}</dd>
               </div>
             ))}
           </dl>
