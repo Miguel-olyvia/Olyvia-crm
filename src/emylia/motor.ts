@@ -319,6 +319,8 @@ export interface VersaoProposta { n: number; enviada: string; /** se o cliente j
   prod?: ProdVisita[]; semParte?: string[];
   /** 22/10 (fase 2): as linhas enviadas nesta versão, com o custo congelado de cada uma, e o desconto. */
   linhas?: LinhaOrc[]; desconto?: number }
+/** 11/11: o motivo das versões refeitas pelas medidas do local e pelo plano (não foi o cliente que pediu). */
+export const MOTIVO_MEDIDAS = "Medidas retificadas no local e plano ajustado";
 /** O que o cliente costuma pedir quando quer mudar a proposta (os botões da "Nova versão"). */
 export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
 /** Porque o cliente recusa a proposta por completo (no portal). */
@@ -2237,7 +2239,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
       o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
-      log(d, `Proposta v${n} substituída${porque ? ": o cliente pediu " + porque : ""}`, "w");
+      log(d, `Proposta v${n} substituída${!porque ? "" : motivos.includes(MOTIVO_MEDIDAS) ? ": " + porque : ": o cliente pediu " + porque}`, "w");
       if (onde === "visita") {
         d.visita.fechada = false; d.fase = 2; d.valida = null;
         avisar({ msg: `A preparar a versão ${n + 1}`, sub: "De volta à visita. Ao fechar o levantamento, o orçamento refaz-se", kind: "" });
@@ -2255,7 +2257,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         const r = d.f[`retif_${k}`];
         if (r != null && r !== "" && Number.isFinite(Number(r))) porMedida(d.visita.med, k, Number(r));
       }
-      A.novaVersao(id, ["Medidas retificadas no local e plano ajustado"], R.join("; "), "orcamento");
+      A.novaVersao(id, [MOTIVO_MEDIDAS], R.join("; "), "orcamento");
       if (d.orc?.enviada) return; // não refez (sem permissão ou sem proposta)
       A.refazerOrcamento(id);
       // o plano ajustado passa a ser a referência (o orçamento novo já o conta; o «Repor» volta a ele)
@@ -3434,7 +3436,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const p = d.obra.plano!;
       if (p.origem === "orcamento" && !d.f.inicio) { const i = inicioDoPlano(p); if (i) d.f.inicio = isoDia(i); } avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
       // 9/11: o plano aprovado (com o pagamento validado e o contrato assinado) emite a encomenda de cliente; numa organização real, a base
-      if (!d.obra.ec && d.orc?.contrato !== "assinado" && !d.orc?.vendaDireta) avisar({ msg: "Segue o contrato", sub: d.fin.pago ? "Com o plano aprovado, o comercial gera e envia o contrato; assinado, sai a encomenda de cliente" : "Com o plano aprovado, o comercial gera e envia o contrato; assinado, segue a fatura", kind: "auto", atraso: 500 });
+      // 11/11: as medidas ou o plano mudaram o valor: antes do contrato, a proposta nova (é o comercial)
+      if (!d.obra.ec && !d.orc?.contrato && !d.orc?.vendaDireta && d.fase === 3 && mudancasDeValor(d).length) avisar({ msg: "Segue a proposta nova", sub: "As medidas ou o plano mudam o valor: o comercial refaz a proposta e o cliente aceita a versão nova. Depois, o contrato.", kind: "auto", atraso: 500 });
+      else if (!d.obra.ec && d.orc?.contrato !== "assinado" && !d.orc?.vendaDireta) avisar({ msg: "Segue o contrato", sub: d.fin.pago ? "Com o plano aprovado, o comercial gera e envia o contrato; assinado, sai a encomenda de cliente" : "Com o plano aprovado, o comercial gera e envia o contrato; assinado, segue a fatura", kind: "auto", atraso: 500 });
       else if (!d.obra.ec) {
         if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "O plano aprovado manda-a para as Encomendas de cliente: stock reservado; o que falta vai ao fornecedor", kind: "auto", atraso: 500 });
         else if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o plano aprovado", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });

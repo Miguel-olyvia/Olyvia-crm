@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ArrowRight, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { eur, type Negocio } from "./motor";
+import { PAPEIS, eur, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { lerFaturaErp, resumoErp } from "./erpEticadata";
 import { SEM_PERM, pelaPermissao, pelaPermissaoAlguma, podeNeg, podeVerificarErp } from "./permissoes";
@@ -42,6 +42,8 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
     <div className={cn("grid w-full gap-1.5 sm:w-auto", !aEsquerda && "sm:justify-items-end")}>
       <Button size={tamanho} disabled aria-describedby={`fat-erp-semperm-${d.id}`}>Registar fatura<ArrowRight className="ml-2 h-4 w-4" /></Button>
       <p id={`fat-erp-semperm-${d.id}`} className="max-w-sm text-sm text-muted-foreground">{SEM_PERM["finance.invoice"].sub}</p>
+      {/* 11/11: o caminho para quem pode, num toque (como o «Mudar para …» do próximo passo) */}
+      <button type="button" className="justify-self-start text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.role("financeiro"))}>Mudar para {PAPEIS.financeiro.n}</button>
     </div>
   );
   if (faltam.length) return (

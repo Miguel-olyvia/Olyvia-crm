@@ -9,7 +9,7 @@ import { useState } from "react";
 import { Check, MessageSquareText, Minus, Plus, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, MOTIVOS_VERSAO, alertas, bloqueado, eur, nfmt, pct, tot, versaoAtual, type Negocio } from "./motor";
+import { LINHAS, MOTIVO_MEDIDAS, MOTIVOS_VERSAO, alertas, bloqueado, eur, nfmt, pct, tot, versaoAtual, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { PROPOSTA, efetivo, emFalta } from "./campos";
 import { totais } from "./DocsCliente";
@@ -79,7 +79,7 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             <p className="text-lg font-semibold">Versão {v} para {nome}</p>
             <p className="text-sm text-muted-foreground">Mude aqui o que for preciso: a visita e o orçamento atualizam-se sozinhos.</p>
             {(pedidos.length > 0 || ant.nota) && (
-              <p className="mt-2 text-[15px]"><span className="text-muted-foreground">{nome} pediu:</span> <b className="font-medium">{pedidos.join(" · ")}</b>{ant.nota ? <> · «{ant.nota}»</> : null}</p>
+              <p className="mt-2 text-[15px]"><span className="text-muted-foreground">{pedidos.includes(MOTIVO_MEDIDAS) ? "Refeita com as medidas do local:" : `${nome} pediu:`}</span> <b className="font-medium">{pedidos.filter((m) => m !== MOTIVO_MEDIDAS).join(" · ")}</b>{ant.nota ? <>{pedidos.some((m) => m !== MOTIVO_MEDIDAS) ? " · " : ""}«{ant.nota}»</> : null}</p>
             )}
           </div>
         </div>
