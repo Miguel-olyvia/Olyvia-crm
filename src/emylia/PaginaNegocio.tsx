@@ -47,7 +47,7 @@ import { PagamentoDoCliente } from "./PagamentoDoCliente";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
-import { SEM_PERM, passoDe, permEmFaltaDoPasso, podeNeg } from "./permissoes";
+import { SEM_PERM, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos } from "./permissoes";
 import { useModoTeste } from "./real/modoTeste";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -96,7 +96,7 @@ export function PaginaNegocio(ctx: Ctx) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {T && <span key={eur(T.pf)} className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm text-primary animate-in fade-in-0 zoom-in-95"><span className="font-mono font-semibold tabular-nums">{eur(T.pf)} € s/ IVA</span>· margem {pct(T.m)}</span>}
+          {T && <span key={eur(T.pf)} className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm text-primary animate-in fade-in-0 zoom-in-95"><span className="font-mono font-semibold tabular-nums">{eur(T.pf)} € s/ IVA</span>{/* 11/11 (F4): a margem só com «Ver custos do orçamento» (sem ela os custos vêm a null e dava 100%) */}{podeVerCustos() && <>· margem {pct(T.m)}</>}</span>}
           {/* 23/10 (2.0): reenviar o acesso ao portal sem um documento novo, como na proposta simples */}
           <BotaoAcessoPortal ctx={ctx} d={d} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-muted" />
           {d.fase < 4 && !d.perdido && <Button variant="outline" size="sm" onClick={go(() => A.perder(d.id))}>Marcar perdido</Button>}
@@ -213,7 +213,7 @@ function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: n
   if (i === 0) resumo = [origemDoNegocio(d), d.f.email || "", d.f.tipo_cliente || ""].filter(Boolean);
   if (i === 1) resumo = [d.f.resultado || "", d.f.orc_cliente || "", d.visita.slot ? "visita " + d.visita.slot : ""].filter(Boolean);
   if (i === 2) resumo = [d.f.tipologia || "", d.f.andar ? d.f.andar + ".º andar" : "", d.f.tem_elevador === "Sim" ? "com elevador" : "", orcLinhas(d, S).length + " serviços", d.visita.fotos + " fotos"].filter(Boolean);
-  if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " € s/ IVA", "margem " + pct(T.m), d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")]; }
+  if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " € s/ IVA", podeVerCustos() ? "margem " + pct(T.m) : "", d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")].filter(Boolean); }
   if (i === 4) resumo = [d.fin.fatura?.n || "", d.fin.recibo?.n || "", d.f.metodo || ""].filter(Boolean);
   return (
     <section id={"sec-" + i} className="scroll-mt-4 overflow-hidden rounded-xl border border-border/70 bg-card animate-in fade-in-0 slide-in-from-top-2 duration-500">
@@ -445,7 +445,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     passos = [
       // 27/10 (Rúben): enviada a proposta, o orçamento fica fechado (só de leitura) até o cliente aceitar; o cadeado diz porquê
       { id: "orc", titulo: "Orçamento", icone: o.enviada && !o.aceite && !o.vendaDireta ? Lock : FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)),
-        resumo: o.enviada && !o.aceite && !o.vendaDireta ? ["fechado até o cliente aceitar"] : [eur(tot(d, S).pf) + " € s/ IVA", "margem " + pct(tot(d, S).m)],
+        resumo: o.enviada && !o.aceite && !o.vendaDireta ? ["fechado até o cliente aceitar"] : [eur(tot(d, S).pf) + " € s/ IVA", ...(podeVerCustos() ? ["margem " + pct(tot(d, S).m)] : [])],
         corpo: simples ? <OrcamentoSimples {...ctx} d={d} /> : <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
       simples ? fechadoSe({ ...g(PROPOSTA[0], FileSignature, !!o.enviada), corpo: (
         <div className="space-y-10">
@@ -759,7 +759,7 @@ export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Nego
                 onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %
             </label>
             <span className="text-sm text-muted-foreground">{nfmt(T.h)} h · custo {eur(T.custo)} €</span>
-            <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span></span>
+            <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € {podeVerCustos() && <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span>}</span>
           </div>
           <ProdutosOrcamento S={S} A={A} run={run} d={d} />
           {o.verif && !locked && (
