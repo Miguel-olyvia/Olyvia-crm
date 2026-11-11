@@ -181,12 +181,13 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   // 03/11/2026 (20270105200000): as seis por fase, exigidas no servidor (neg_guardar_negocio, obra_guardar_negocio, neg_perder_negocio,
   // neg_anular_perda, neg_guardar_visita, …): negocios.contacto.registar, negocios.visita.gerir, negocios.proposta.decidir,
   // negocios.obra.imprevistos, negocios.obra.fechar, negocios.perder.
+  // 11/11/2026 (20270114320000): negocios.visita.preencher («Preencher a visita»): o levantamento; negocios.visita.gerir fica só a agenda.
   // 09/11: negocios.obra.tecnico («Ser técnico de obra»): o perfil faz de quem a tem técnico de obra no Negócio (fn_neg_papeis), como o cargo.
   pessoas: [
     "negocios.contacto.registar", "negocios.contrato.editar", "negocios.margem.aprovar", "negocios.obra.executar",
     "negocios.obra.fechar", "negocios.obra.imprevistos", "negocios.obra.materiais", "negocios.obra.planear",
     "negocios.obra.tecnico", "negocios.orcamento.editar", "negocios.perder", "negocios.proposta.decidir", "negocios.proposta.enviar",
-    "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.visita.gerir", "pessoas.config", "pessoas.create",
+    "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.visita.gerir", "negocios.visita.preencher", "pessoas.config", "pessoas.create",
     "pessoas.delete", "pessoas.edit", "pessoas.reopen", "pessoas.view",
   ],
   // Só verificadas no servidor (policies/RPCs): platform.settings.manage
@@ -470,7 +471,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
 export const CODIGOS_SEM_CATALOGO: readonly string[] = [
   "contacto.registar", "contracts.cancel", "contracts.view", "contrato.editar", "equipa.edit", "finance.invoice", "finance.validate_payment",
   "inventory.manage", "inventory.receive", "margin.approve", "negocio.perder", "obra.encomendar", "obra.executar", "obra.fechar", "obra.imprevistos",
-  "obra.materiais", "obra.planear", "orcamento.editar", "proposta.decidir", "proposta.enviar", "suppliers.manage", "visita.gerir",
+  "obra.materiais", "obra.planear", "orcamento.editar", "proposta.decidir", "proposta.enviar", "suppliers.manage", "visita.gerir", "visita.preencher",
 ];
 
 /**

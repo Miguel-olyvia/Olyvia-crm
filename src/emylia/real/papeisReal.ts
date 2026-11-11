@@ -62,7 +62,7 @@ export const papeisPermitidos = (m: MeusPapeis): Papel[] =>
 /** 9/11 (Lote 1, A): os papéis que as permissões do perfil dão a quem não tem nenhum Papel no Negócio no RH (nem pessoas.edit): cada
  *  papel pelo trabalho que faz no Negócio. Os códigos são os lidos por fn_cat_pode (CODIGOS_NEGOCIOS). */
 const PAPEL_PELAS_PERMISSOES: readonly [Papel, readonly string[]][] = [
-  ["comercial", [CODIGO_BASE["contacto.registar"], CODIGO_BASE["visita.gerir"], CODIGO_BASE["orcamento.editar"], CODIGO_BASE["proposta.enviar"]]],
+  ["comercial", [CODIGO_BASE["contacto.registar"], CODIGO_BASE["visita.gerir"], CODIGO_BASE["visita.preencher"], CODIGO_BASE["orcamento.editar"], CODIGO_BASE["proposta.enviar"]]],
   ["direcao", [CODIGO_BASE["margin.approve"]]],
   ["financeiro", [CODIGO_BASE["finance.validate_payment"], CODIGO_BASE["finance.invoice"]]],
   ["armazem", [CODIGO_APROVAR_PO]],

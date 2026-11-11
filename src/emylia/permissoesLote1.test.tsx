@@ -61,9 +61,9 @@ describe("B · passoDe: o papel continua; com conta real, a permissão do passo 
   });
 
   it("um passo com várias permissões pede todas; passos sem permissão, sem ação ou do cliente ficam só do papel", () => {
-    reais(["visita.gerir"]);
+    reais(["visita.preencher"]);
     expect(passoDe("financeiro", "comercial", "fecharVisita")).toBe(false);
-    reais(["visita.gerir", "orcamento.editar"]);
+    reais(["visita.preencher", "orcamento.editar"]);
     expect(passoDe("financeiro", "comercial", "fecharVisita")).toBe(true);
     reais(Object.keys(CODIGO_BASE) as PermNeg[]);
     expect(passoDe("financeiro", "comercial", "irObra")).toBe(false);

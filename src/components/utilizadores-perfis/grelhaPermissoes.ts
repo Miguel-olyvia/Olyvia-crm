@@ -149,7 +149,7 @@ function rotuloChip(p: Permissao, rotuloLinha: string, soAcoes: boolean): string
 
 /** Ordem explícita dos chips das fases do Negócio, pelo fluxo (um índice global serve todas as linhas das fases). */
 const FLUXO_NEGOCIO: readonly string[] = [
-  "negocios.contacto.registar", "negocios.visita.gerir",
+  "negocios.contacto.registar", "negocios.visita.gerir", "negocios.visita.preencher",
   "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "negocios.proposta.decidir",
   "negocios.contrato.editar", "client_contracts.cancel", "quotes.view_costs",
   "negocios.registar_fatura", "negocios.validar_pagamento",
