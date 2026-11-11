@@ -1,9 +1,11 @@
 -- ============================================================
 -- Testes: 20270114500000_hr_pessoa_datas_derivadas_dos_contratos.sql (base RH)
 -- ============================================================
--- Corre DEPOIS de aplicar a migration, NA NIKE, e tudo dentro de BEGIN ... ROLLBACK: cria pessoas, contratos, dois utilizadores
--- e dois papeis de teste na organizacao nike (b6ffce4f-f630-4933-833a-008649757a33) e desfaz tudo no fim. Nao toca em dados de
--- nenhuma outra organizacao. SQL simples (o pgTAP nao esta instalado na base).
+-- Corre DEPOIS de aplicar a migration, NA NIKE, e tudo dentro de BEGIN ... ROLLBACK: cria pessoas (com um cargo activo do
+-- catalogo da nike), contratos e dois papeis de teste na organizacao nike (b6ffce4f-f630-4933-833a-008649757a33), empresta duas
+-- memberships activas da nike (troca-lhes o papel so dentro da transaccao; nao se criam memberships novas por causa do limite de
+-- lugares da subscricao) e desfaz tudo no fim. Nao toca em dados de nenhuma outra organizacao. SQL simples (sem pgTAP).
+-- Cada recusa so passa se a mensagem (SQLERRM) for a esperada.
 --
 -- Correr (qualquer falha rebenta com 'FALHOU: ...'; o resultado util e o ultimo SELECT):
 --   supabase db query --linked -f supabase/tests/hr_pessoa_datas_derivadas.test.sql   (a partir do worktree ligado a RH)
@@ -39,22 +41,76 @@ BEGIN
 END
 $f$;
 
+-- Uma recusa so vale se a mensagem for a esperada (p_padrao e um padrao LIKE).
+CREATE FUNCTION pg_temp.t_erro(p_mensagem text, p_padrao text, p_caso text) RETURNS void LANGUAGE plpgsql AS $f$
+BEGIN
+  IF p_mensagem IS NULL OR p_mensagem NOT LIKE p_padrao THEN
+    RAISE EXCEPTION 'FALHOU: % -- recusado, mas com outra mensagem: %', p_caso, coalesce(p_mensagem, 'NULL');
+  END IF;
+END
+$f$;
+
 -- ─── Fixtures (como postgres), so na nike ────────────────────────────────────
+-- Guardas lidas nas definicoes VIVAS (11/11) que a fixture tem de cumprir:
+--   - hr_pessoas_cargo_guarda (BEFORE INSERT em pessoas): cargo_id obrigatorio, da mesma organizacao, activo e nao apagado
+--     (HRC08/HRC02/HRC09). Corre ANTES de trg_pessoas_datas_derivadas (ordem alfabetica), por isso ate o INSERT que se espera
+--     recusado por causa da saida (1.4) leva cargo. hr_pessoas_cargo_primeira_linha abre pessoas_cargos em
+--     coalesce(data_admissao, hoje); hr_pessoas_cargos_sem_sobreposicao: uma so linha por pessoa, sem conflito.
+--   - pessoas_vinculos: hr_pessoas_vinculos_horas_e_derivado recusa horas no INSERT (nao se mandam); hr_vinculos_proteger_ciclo
+--     recusa renovacoes/decisao de fim (nao se mandam); idx_pessoas_vinculos_um_em_vigor: um activo/suspenso por pessoa.
+--   - anew_memberships: fn_enforce_user_seat_limit conta lugares a cada membership NOVA activa (a nike tem subscricao) -- por
+--     isso NAO se criam utilizadores nem memberships: reaproveitam-se duas memberships activas da nike (utilizadores nao
+--     system admin, com uma so membership activa na nike) e troca-se-lhes o role_id para os papeis de teste. Trocar o papel
+--     de uma membership activa nao consome lugar (o trigger sai cedo). Tudo desfeito no ROLLBACK.
+--   - anew_role_permissions: trg_protect_system_role_perms le request.jwt.claims como jsonb -- as claims nunca ficam ''.
 DO $fx$
 DECLARE
-  v_org uuid := 'b6ffce4f-f630-4933-833a-008649757a33';
+  v_org   uuid := 'b6ffce4f-f630-4933-833a-008649757a33';
+  v_cargo uuid;
+  v_m1    uuid;
+  v_m2    uuid;
+  v_a1    uuid;
+  v_a2    uuid;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.anew_organizations o WHERE o.id = v_org) THEN
     RAISE EXCEPTION 'FALHOU: organizacao nike nao encontrada';
   END IF;
 
-  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  SELECT c.id INTO v_cargo
+    FROM public.hr_cargos c
+   WHERE c.organization_id = v_org AND c.activo IS TRUE AND c.deleted_at IS NULL
+   ORDER BY c.id
+   LIMIT 1;
+  IF v_cargo IS NULL THEN
+    RAISE EXCEPTION 'FALHOU: fixture -- a nike nao tem nenhum cargo activo no catalogo';
+  END IF;
+  PERFORM set_config('teste.cargo', v_cargo::text, true);
 
-  INSERT INTO public.anew_users (id, email, name, auth_user_id) VALUES
-    ('d8a70000-0000-4000-8000-000000000101', 'teste-datas-contratos@example.test', 'Teste Datas So Contratos',
-     'd8a70000-0000-4000-8000-000000000201'),
-    ('d8a70000-0000-4000-8000-000000000102', 'teste-datas-laborais@example.test', 'Teste Datas So Laborais',
-     'd8a70000-0000-4000-8000-000000000202');
+  -- Duas memberships activas da nike para emprestar (ver nota acima).
+  WITH elegiveis AS (
+    SELECT am.id AS membership_id, u.auth_user_id
+      FROM public.anew_memberships am
+      JOIN public.anew_users u ON u.id = am.user_id
+     WHERE am.organization_id = v_org
+       AND am.status = 'active'
+       AND am.role_is_client IS NOT TRUE
+       AND u.auth_user_id IS NOT NULL
+       AND u.deleted_at IS NULL
+       AND NOT public.is_system_admin_user(u.auth_user_id)
+       AND (SELECT count(*) FROM public.anew_memberships x
+             WHERE x.user_id = am.user_id AND x.organization_id = v_org AND x.status = 'active') = 1
+     ORDER BY am.id
+     LIMIT 2
+  )
+  SELECT (array_agg(e.membership_id ORDER BY e.membership_id))[1], (array_agg(e.membership_id ORDER BY e.membership_id))[2],
+         (array_agg(e.auth_user_id ORDER BY e.membership_id))[1], (array_agg(e.auth_user_id ORDER BY e.membership_id))[2]
+    INTO v_m1, v_m2, v_a1, v_a2
+    FROM elegiveis e;
+  IF v_m2 IS NULL THEN
+    RAISE EXCEPTION 'FALHOU: fixture -- a nike nao tem duas memberships activas elegiveis para emprestar';
+  END IF;
+
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
   INSERT INTO public.anew_roles (id, code, name, organization_id, is_system) VALUES
     ('d8a70000-0000-4000-8000-000000000301', 'teste_datas_so_contratos', 'Teste datas so contratos', v_org, false),
@@ -66,15 +122,27 @@ BEGIN
     ('d8a70000-0000-4000-8000-000000000302', 'hr.pessoas.view'),
     ('d8a70000-0000-4000-8000-000000000302', 'hr.pessoas.laborais.edit');
 
-  INSERT INTO public.anew_memberships (user_id, organization_id, role_id, status) VALUES
-    ('d8a70000-0000-4000-8000-000000000101', v_org, 'd8a70000-0000-4000-8000-000000000301', 'active'),
-    ('d8a70000-0000-4000-8000-000000000102', v_org, 'd8a70000-0000-4000-8000-000000000302', 'active');
+  UPDATE public.anew_memberships SET role_id = 'd8a70000-0000-4000-8000-000000000301' WHERE id = v_m1;
+  UPDATE public.anew_memberships SET role_id = 'd8a70000-0000-4000-8000-000000000302' WHERE id = v_m2;
 
-  PERFORM set_config('request.jwt.claims', '', true);
+  PERFORM set_config('request.jwt.claims', '{}', true);
 
-  -- Uma pessoa por cenario, todas sem datas.
-  INSERT INTO public.pessoas (id, organization_id, primeiro_nome, apelido)
-  SELECT ('d8a70000-0000-4000-8000-0000000010' || lpad(n::text, 2, '0'))::uuid, v_org, 'TesteDatas' || n, 'Teste'
+  -- Claims de cada utilizador emprestado (usadas antes de SET LOCAL ROLE authenticated).
+  PERFORM set_config('teste.claims_contratos', json_build_object('sub', v_a1, 'role', 'authenticated')::text, true);
+  PERFORM set_config('teste.claims_laborais',  json_build_object('sub', v_a2, 'role', 'authenticated')::text, true);
+
+  -- Confirmar que as permissoes ficaram como o teste precisa.
+  IF NOT public.has_anew_permission_in_org(v_a1, 'hr.pessoas.vinculos.edit', v_org)
+     OR public.has_anew_permission_in_org(v_a1, 'hr.pessoas.laborais.edit', v_org)
+     OR NOT public.has_anew_permission_in_org(v_a2, 'hr.pessoas.laborais.edit', v_org)
+     OR public.has_anew_permission_in_org(v_a2, 'hr.pessoas.edit', v_org)
+     OR public.has_anew_permission_in_org(v_a2, 'hr.pessoas.vinculos.edit', v_org) THEN
+    RAISE EXCEPTION 'FALHOU: fixture -- as permissoes dos utilizadores emprestados nao ficaram so as de teste';
+  END IF;
+
+  -- Uma pessoa por cenario, todas sem datas, com um cargo activo da nike.
+  INSERT INTO public.pessoas (id, organization_id, primeiro_nome, apelido, cargo_id)
+  SELECT ('d8a70000-0000-4000-8000-0000000010' || lpad(n::text, 2, '0'))::uuid, v_org, 'TesteDatas' || n, 'Teste', v_cargo
     FROM generate_series(1, 21) AS n;
 END $fx$;
 
@@ -88,13 +156,17 @@ BEGIN
   BEGIN
     UPDATE public.pessoas SET data_admissao = '2020-01-01' WHERE id = 'd8a70000-0000-4000-8000-000000001001';
     RAISE EXCEPTION 'FALHOU: 1.1 UPDATE directo de data_admissao com valor diferente devia ser recusado';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    PERFORM pg_temp.t_erro(SQLERRM, 'pessoas_datas_derivadas: a data de contratacao, a de antiguidade e a de saida derivam dos contratos%',
+                           '1.1 UPDATE directo de data_admissao');
   END;
 
   BEGIN
     UPDATE public.pessoas SET data_saida = '2030-01-01' WHERE id = 'd8a70000-0000-4000-8000-000000001001';
     RAISE EXCEPTION 'FALHOU: 1.2 UPDATE directo de data_saida devia ser recusado';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    PERFORM pg_temp.t_erro(SQLERRM, 'pessoas_datas_derivadas: a data de contratacao, a de antiguidade e a de saida derivam dos contratos%',
+                           '1.2 UPDATE directo de data_saida');
   END;
 
   -- 1.3 reenviar os mesmos valores passa
@@ -102,15 +174,17 @@ BEGIN
    WHERE id = 'd8a70000-0000-4000-8000-000000001001';
 
   BEGIN
-    INSERT INTO public.pessoas (organization_id, primeiro_nome, apelido, data_saida)
-    VALUES ('b6ffce4f-f630-4933-833a-008649757a33', 'TesteDatas', 'ComSaida', '2025-01-01');
+    INSERT INTO public.pessoas (organization_id, primeiro_nome, apelido, cargo_id, data_saida)
+    VALUES ('b6ffce4f-f630-4933-833a-008649757a33', 'TesteDatas', 'ComSaida', current_setting('teste.cargo')::uuid, '2025-01-01');
     RAISE EXCEPTION 'FALHOU: 1.4 INSERT de pessoa com data_saida devia ser recusado';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    PERFORM pg_temp.t_erro(SQLERRM, 'pessoas_datas_derivadas: pessoas.data_saida nao se preenche ao criar a pessoa%',
+                           '1.4 INSERT com data_saida');
   END;
 
-  INSERT INTO public.pessoas (id, organization_id, primeiro_nome, apelido, data_admissao, data_antiguidade)
+  INSERT INTO public.pessoas (id, organization_id, primeiro_nome, apelido, cargo_id, data_admissao, data_antiguidade)
   VALUES ('d8a70000-0000-4000-8000-000000001099', 'b6ffce4f-f630-4933-833a-008649757a33', 'TesteDatas', 'Nova',
-          '2025-05-01', '2019-01-01');
+          current_setting('teste.cargo')::uuid, '2025-05-01', '2019-01-01');
   PERFORM pg_temp.t_igual(pg_temp.t_datas('d8a70000-0000-4000-8000-000000001099'), '(2025-05-01,,)',
                           '1.5 INSERT: antiguidade anulada (H2), contratacao provisoria aceite');
 
@@ -121,9 +195,9 @@ BEGIN
 END $t$;
 
 -- ─── 2. Permissoes ───────────────────────────────────────────────────────────
--- 2.1-2.2 so com hr.pessoas.vinculos.edit
+-- 2.1-2.2 so com hr.pessoas.vinculos.edit (membership emprestada 1)
+DO $t$ BEGIN PERFORM set_config('request.jwt.claims', current_setting('teste.claims_contratos'), true); END $t$;
 SET LOCAL ROLE authenticated;
-SET LOCAL request.jwt.claims = '{"sub":"d8a70000-0000-4000-8000-000000000201","role":"authenticated"}';
 
 DO $t$
 BEGIN
@@ -133,12 +207,16 @@ BEGIN
   BEGIN
     PERFORM public.hr_pessoa_datas_recalcular('d8a70000-0000-4000-8000-000000001002');
     RAISE EXCEPTION 'FALHOU: 2.2 authenticated nao devia ter EXECUTE em hr_pessoa_datas_recalcular';
-  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  EXCEPTION WHEN insufficient_privilege THEN
+    -- verificacao em linha (sem pg_temp: este bloco corre como authenticated)
+    IF SQLERRM NOT LIKE 'permission denied for function hr_pessoa_datas_recalcular%' THEN
+      RAISE EXCEPTION 'FALHOU: 2.2 EXECUTE de hr_pessoa_datas_recalcular -- recusado, mas com outra mensagem: %', SQLERRM;
+    END IF;
   END;
 END $t$;
 
 RESET ROLE;
-SET LOCAL request.jwt.claims = '';
+DO $t$ BEGIN PERFORM set_config('request.jwt.claims', '{}', true); END $t$;
 
 DO $t$
 BEGIN
@@ -146,23 +224,33 @@ BEGIN
                           '2.1 vinculos.edit sem laborais.edit grava o contrato e as datas acompanham');
 END $t$;
 
--- 2.3-2.4 so com hr.pessoas.laborais.edit
+-- 2.3-2.4 so com hr.pessoas.laborais.edit (membership emprestada 2)
+DO $t$ BEGIN PERFORM set_config('request.jwt.claims', current_setting('teste.claims_laborais'), true); END $t$;
 SET LOCAL ROLE authenticated;
-SET LOCAL request.jwt.claims = '{"sub":"d8a70000-0000-4000-8000-000000000202","role":"authenticated"}';
 
 DO $t$
+DECLARE
+  v_n integer;
 BEGIN
   BEGIN
     UPDATE public.pessoas SET data_admissao = '2000-01-01' WHERE id = 'd8a70000-0000-4000-8000-000000001001';
     RAISE EXCEPTION 'FALHOU: 2.3 com so laborais.edit, mudar a contratacao devia dar 23514';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    -- verificacao em linha (sem pg_temp: este bloco corre como authenticated)
+    IF SQLERRM NOT LIKE 'pessoas_datas_derivadas: a data de contratacao, a de antiguidade e a de saida derivam dos contratos%' THEN
+      RAISE EXCEPTION 'FALHOU: 2.3 so laborais.edit a mudar a contratacao -- recusado, mas com outra mensagem: %', SQLERRM;
+    END IF;
   END;
 
   UPDATE public.pessoas SET cargo = 'Cargo de teste datas' WHERE id = 'd8a70000-0000-4000-8000-000000001001';
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'FALHOU: 2.4 o UPDATE do cargo nao encontrou a pessoa (RLS?): % linhas', v_n;
+  END IF;
 END $t$;
 
 RESET ROLE;
-SET LOCAL request.jwt.claims = '';
+DO $t$ BEGIN PERFORM set_config('request.jwt.claims', '{}', true); END $t$;
 
 DO $t$
 BEGIN
@@ -275,7 +363,8 @@ BEGIN
     INSERT INTO public.pessoas_vinculos (pessoa_id, organization_id, tipo_contrato, data_inicio, estado, data_antiguidade) VALUES
       ('d8a70000-0000-4000-8000-000000001012', v_org, 'sem_termo', '2024-01-01', 'activo', '2024-01-02');
     RAISE EXCEPTION 'FALHOU: 4.2 antiguidade posterior ao inicio do contrato devia ser recusada pelo CHECK';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    PERFORM pg_temp.t_erro(SQLERRM, '%pessoas_vinculos_antiguidade_ate_inicio%', '4.2 CHECK antiguidade <= inicio');
   END;
 
   UPDATE public.pessoas_vinculos SET data_antiguidade = '2010-01-01'
@@ -374,8 +463,9 @@ BEGIN
   INSERT INTO public.pessoas_vinculos (pessoa_id, organization_id, tipo_contrato, data_inicio, estado) VALUES
     ('d8a70000-0000-4000-8000-000000001021', v_org, 'sem_termo', '2099-03-01', 'futuro');
   -- pessoa nova criada como o assistente a cria (opcao B): contratacao provisoria, sem contrato ainda
-  INSERT INTO public.pessoas (id, organization_id, primeiro_nome, apelido, data_admissao)
-  VALUES ('d8a70000-0000-4000-8000-000000001022', v_org, 'TesteDatas', 'Provisoria', '2026-12-01');
+  INSERT INTO public.pessoas (id, organization_id, primeiro_nome, apelido, cargo_id, data_admissao)
+  VALUES ('d8a70000-0000-4000-8000-000000001022', v_org, 'TesteDatas', 'Provisoria',
+          current_setting('teste.cargo')::uuid, '2026-12-01');
   PERFORM pg_temp.t_igual(pg_temp.t_datas('d8a70000-0000-4000-8000-000000001022'), '(2026-12-01,,)', '7.2c contratacao provisoria');
 
   PERFORM pg_temp.t_igual(pg_temp.t_datas('d8a70000-0000-4000-8000-000000001020'), '(,,2017-12-31)', '7.2a saida mantida');
