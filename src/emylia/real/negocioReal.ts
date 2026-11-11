@@ -50,7 +50,7 @@ export interface LinhaNegocioBase {
 }
 export interface LinhaResposta { campo_chave: string; valor: string; sugerido: boolean }
 export interface LinhaMedidas {
-  pav: number; par: number; pts: number; pcs: number; ptf: number | null; ptq: number | null; necessidades: string[]; slot: string;
+  pav: number; par: number; pts: number; pcs: number; ptf: number | null; ptq: number | null; necessidades: string[]; /** 11/11: sem vaga vai null (a base sem medidas também a tem a null; '' contava como mudança da visita) */ slot: string | null;
   fotos_total: number; fotos_exterior: number | null; fotos_interior: number | null; fotos_area: number | null; fechada: boolean;
 }
 export interface LinhaServicoVisita { servico: string; inclusao: "pacote" | "fora" | "extra"; quantidade: number | null; mantem: boolean | null; cliente_compra: string | null; ordem: number }
@@ -372,7 +372,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
     respostas: [...new Set([...Object.keys(d.f), ...Object.keys(d.sug ?? {})])].map((k) => ({ campo_chave: k, valor: d.f[k] ?? "", sugerido: !!d.sug?.[k] })),
     visitas: d.vis ?? [],
     medidas: {
-      pav: v.med.pav, par: v.med.par, pts: v.med.pts, pcs: v.med.pcs, ptf: v.med.ptf ?? null, ptq: v.med.ptq ?? null, necessidades: v.nec, slot: v.slot,
+      pav: v.med.pav, par: v.med.par, pts: v.med.pts, pcs: v.med.pcs, ptf: v.med.ptf ?? null, ptq: v.med.ptq ?? null, necessidades: v.nec, slot: v.slot || null,
       fotos_total: v.fotos, fotos_exterior: v.fotosPor?.exterior ?? null, fotos_interior: v.fotosPor?.interior ?? null, fotos_area: v.fotosPor?.area ?? null, fechada: v.fechada,
     },
     servicos: [...svcs.values()],
@@ -490,7 +490,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
     ...(n.anulado_em ? { anulado: { q: deIso(n.anulado_em), por: n.anulado_por ?? "", motivo: n.anulado_motivo ?? "", origem: (n.anulado_origem ?? "negocio") as "negocio" | "inventario" } } : {}),
     f, ...(Object.keys(sug).length ? { sug } : {}), ...(L.visitas.length ? { vis: L.visitas } : {}),
     visita: {
-      slot: m.slot, nec: m.necessidades, med: { pav: m.pav, par: m.par, pts: m.pts, pcs: m.pcs, ...(m.ptf != null ? { ptf: m.ptf } : {}), ...(m.ptq != null ? { ptq: m.ptq } : {}) },
+      slot: m.slot ?? "", nec: m.necessidades, med: { pav: m.pav, par: m.par, pts: m.pts, pcs: m.pcs, ...(m.ptf != null ? { ptf: m.ptf } : {}), ...(m.ptq != null ? { ptq: m.ptq } : {}) },
       off, extra, fotos: m.fotos_total, fechada: m.fechada, ...fotosPor,
       ...(L.produtos ? { prod: L.produtos.sort((x, y) => x.ordem - y.ordem).map(linhaParaProd) } : {}),
       ...(Object.keys(manter).length ? { manter } : {}), ...(Object.keys(clienteCompra).length ? { clienteCompra } : {}),
