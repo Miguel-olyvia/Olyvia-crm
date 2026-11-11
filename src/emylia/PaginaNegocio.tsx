@@ -299,7 +299,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
         <div className="space-y-3">
           <p className="text-[15px] text-muted-foreground">{feito
             ? "Contacto concluído. O negócio está com o comercial, que marca a visita."
-            : "Acabada a chamada, o negócio passa ao comercial, que marca a visita. Fica em Contacto e deixa de poder ser mudado por aqui."}</p>
+            : "Acabada a chamada, o negócio passa ao comercial, que marca a visita. Fica em Contacto e deixa de poder ser mudado por aqui. Quando a visita for marcada, o negócio e a lead passam para o comercial da visita."}</p>
           {!feito && <Button size="lg" className="min-h-11" onClick={go(() => A.passarAoComercial(d.id))}><UserCheck className="mr-1.5 h-4 w-4" aria-hidden="true" />Passar ao comercial</Button>}
         </div>
       ),
@@ -332,7 +332,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       { ...g(CONTACTO[3], Sparkles) },
       // 11/11 (fim de contacto): a assistente comercial (contacto.registar sem nenhuma permissão além do contacto) não marca a visita:
       // o último passo é «Passar ao comercial» (A.passarAoComercial), e o negócio fica em Contacto, pronto para o comercial
-      ...(soAteAoContacto() ? [passoPassarAoComercial()] : [{ id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
+      // 11/11: o passo «vaga» é a agenda do CRM (VisitasDoCrm: tipo, dia, os comerciais livres, hora e morada); marcar a visita passa o
+      // negócio a Visita e a lead e o negócio para o comercial escolhido (20270114310000)
+      ...(soAteAoContacto() ? [passoPassarAoComercial()] : [{ id: "vaga", titulo: "Marcar a visita com o comercial", icone: CalendarClock,
+        feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>
           {/* 2/11 (reunião): a sugestão de quem vai, pela agenda (livre a essa hora) e pela proximidade (visitas perto nesse dia) */}
@@ -459,6 +462,16 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
             ...(ePecas.oculto || !comWC ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
           ]} /></div> },
       ];
+    }
+    // 11/11: a Visita (Exterior, Interior, Estúdio, Fim) é do comercial: sem negocios.visita.gerir (a assistente comercial) fica só de
+    // leitura, com a permissão em falta; o servidor recusa o mesmo (neg_guardar_negocio, 20270113130000)
+    if (comPermissoesReais() && !podeNeg(S.role, "visita.gerir")) {
+      passos = passos.map((p) => ({ ...p, corpo: (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{SEM_PERM["visita.gerir"].sub}</p>
+          <fieldset disabled className="m-0 min-w-0 border-0 p-0">{p.corpo}</fieldset>
+        </div>
+      ) }));
     }
   } else if (fase === 3 && o) {
     const passoMedidas = (): Passo => ({ id: "retificacao", titulo: simples ? "Medidas" : "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d), semAvancar: true,

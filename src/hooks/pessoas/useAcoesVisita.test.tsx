@@ -7,7 +7,7 @@ import { ErroNeg } from "./chamarNeg";
 import { fichaDb, PESSOA_ID, seccaoDb, visitaDb } from "./fichaFabrica";
 import { captureMock, fonteReal, montarHook, nomeChamado, parametros, respostaErro, respostaOk, rpcMock } from "./fichaTestUtil";
 import { recursoEmConflito } from "./errosVisita";
-import { useAcoesVisita } from "./useAcoesVisita";
+import { responsavelDaResposta, useAcoesVisita } from "./useAcoesVisita";
 import type { EntradaVisita } from "./visitaDb";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...args: unknown[]) => rpcMock(...args) } }));
@@ -53,7 +53,7 @@ describe("marcar", () => {
       p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_board_id: "quadro-1", p_inicio: "2026-10-24T09:00:00.000Z", p_fim: "2026-10-24T10:00:00.000Z",
       p_recursos: ["rec-1"], p_lat: null, p_lng: null, p_negocio_id: "neg-1", p_visit_kind: "levantamento",
     });
-    expect(r).toEqual({ visitaId: "v-novo", mudou: true });
+    expect(r).toEqual({ visitaId: "v-novo", mudou: true, responsavel: null });
     expect(invalidadas(client)).toEqual([true, true]);
   });
 
@@ -104,7 +104,7 @@ describe("marcar", () => {
       [a, b] = await Promise.all([pa, pb]);
     });
     expect(rpcMock).toHaveBeenCalledTimes(1);
-    expect(a).toEqual({ visitaId: "v-1", mudou: true });
+    expect(a).toEqual({ visitaId: "v-1", mudou: true, responsavel: null });
     expect(b).toBe(a);
   });
 
@@ -154,7 +154,7 @@ describe("alterar", () => {
       "p_board_id", "p_detalhes", "p_fim", "p_inicio", "p_local", "p_notas", "p_recursos", "p_titulo", "p_visit_kind", "p_visita_id",
     ]);
     expect(parametros(0)).toMatchObject({ p_visita_id: "futura", p_notas: "n", p_recursos: ["rec-1"], p_visit_kind: "levantamento" });
-    expect(r).toEqual({ mudou: true, recursosMudaram: true, donoAlterado: true, novoDono: "u9", outrasVisitas: ["x", "y"], desconfirmada: true });
+    expect(r).toEqual({ mudou: true, recursosMudaram: true, donoAlterado: true, novoDono: "u9", outrasVisitas: ["x", "y"], desconfirmada: true, responsavel: null });
     expect(invalidadas(client)).toEqual([true, true]);
   });
 
@@ -163,7 +163,7 @@ describe("alterar", () => {
     rpcMock.mockReturnValueOnce(respostaOk({ visita_id: "futura", mudou: false }));
     const r = await act(async () => result.current.alterar("futura", entrada({ recursos: ["rec-1"] }), ["rec-1"]));
     expect(parametros(0).p_recursos).toBeNull();
-    expect(r).toEqual({ mudou: false, recursosMudaram: false, donoAlterado: false, novoDono: null, outrasVisitas: [], desconfirmada: false });
+    expect(r).toEqual({ mudou: false, recursosMudaram: false, donoAlterado: false, novoDono: null, outrasVisitas: [], desconfirmada: false, responsavel: null });
   });
 
   it("42501 ao trocar recursos: a mensagem própria de quem não pode mudar o responsável; sem invalidar", async () => {
@@ -383,5 +383,14 @@ describe("resultado", () => {
     rpcMock.mockReturnValue(respostaOk({ mudou: true }));
     await act(async () => { await result.current.resultado("nova", { resultado: "aPensar" }); });
     expect(chamadas()).toEqual(["neg_resultado_visita"]);
+  });
+});
+
+describe("responsavelDaResposta (11/11, a visita passa o negócio ao comercial)", () => {
+  it("lê o responsável que a base devolve e ignora o resto", () => {
+    expect(responsavelDaResposta({ user_id: "u1", nome: "Rúben", lead_mudou: true, negocio_mudou: true })).toEqual({ id: "u1", nome: "Rúben", lead: true });
+    expect(responsavelDaResposta({ user_id: "u1", nome: null, lead_mudou: false })).toEqual({ id: "u1", nome: "o comercial", lead: false });
+    expect(responsavelDaResposta(null)).toBeNull();
+    expect(responsavelDaResposta({ nome: "x" })).toBeNull();
   });
 });

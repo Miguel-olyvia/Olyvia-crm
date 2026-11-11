@@ -1615,6 +1615,13 @@ const agora = () => {
   return "hoje " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
 };
 function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
+/** 11/11 (20270114310000): marcar a visita passou a lead e o negócio para o comercial dela. A base já o gravou (e a linha no histórico); aqui
+ *  junta-se a mesma linha ao histórico do ecrã (neg_guardar_negocio substitui o histórico pelo do ecrã) e o comercial da lead. */
+export function responsavelPelaVisita(d: Negocio, r: { id: string; nome: string; lead: boolean }): void {
+  const t = `Responsável: ${r.nome} (visita marcada)`;
+  if (d.hist[0]?.t !== t) log(d, t);
+  if (r.lead && d.dadosLead) d.dadosLead = { ...d.dadosLead, comercialId: r.id, comercial: r.nome };
+}
 /** Do contrato à obra (preparacaoObra.ts): o plano do orçamento, por aprovar. A encomenda de cliente só nasce com o pagamento validado. */
 export function prepararPlanoDe(d: Negocio, S: Estado) {
   // 10/11: o plano nasce já sem conflitos de agenda (o que se adiou fica no histórico)
@@ -2267,9 +2274,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!portao(d, CONTACTO)) return;
       d.f[CHAVE_CONTACTO_CONCLUIDO] = isoDia(new Date());
       log(d, "Contacto concluído · passou ao comercial");
-      avisar({ msg: "Passou ao comercial", sub: "O comercial vê o negócio pronto para marcar a visita.", kind: "ok" });
+      avisar({ msg: "Passou ao comercial", sub: "O comercial vê o negócio pronto para marcar a visita. Quando a visita for marcada, o negócio e a lead passam para esse comercial.", kind: "ok" });
     },
-    marcarVisita(id: number, slot?: string, quemSugerido?: string) { if (!exigePerm("visita.gerir")) return; const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
+    marcarVisita(id: number, slot?: string, quemSugerido?: string) {
+      if (!exigePerm("visita.gerir")) return;
+      const d = deal(id);
+      // 11/11: com conta real nunca se marca sem a vaga escolhida na agenda (o SLOTS[0] do protótipo deu uma visita no passado, sem comercial)
+      if (!slot && comPermissoesReais()) { avisar({ msg: "Escolha o comercial e o dia", sub: "Marque a visita na agenda: o comercial, o dia e a hora.", kind: "bad" }); return; }
+      if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
       // 23/10: com a equipa real, a visita fica na agenda de quem a marca (e não na do Rúben de exemplo)
       // 2/11: ou de quem a Olyvia sugeriu para a vaga (livre e mais perto: sugestaoVisita.ts)
       const quem = quemSugerido || quemVaiPorOmissao();
