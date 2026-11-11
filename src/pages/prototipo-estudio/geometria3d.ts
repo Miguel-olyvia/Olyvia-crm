@@ -4,7 +4,8 @@
 import type { Ponto } from "@/emylia/planta";
 
 /** `naParede`: está numa parede (porta, janela, espelho, toalheiro): nas paredes da frente, cortadas, também se corta. */
-export interface Caixa { id: string; x: number; y: number; w: number; h: number; z0: number; z1: number; cor: string; nome: string; vidro?: boolean; naParede?: boolean }
+/** `rot`: graus em torno do centro (x, y, w, h é a caixa sem rodar), como as peças da planta (planta.ts). */
+export interface Caixa { id: string; x: number; y: number; w: number; h: number; z0: number; z1: number; cor: string; nome: string; vidro?: boolean; naParede?: boolean; rot?: number }
 export interface Cena { chao: Ponto[]; altura: number; corParede: string; corChao: string; caixas: Caixa[] }
 export interface Face { pts: [number, number][]; cor: string; prof: number; tipo: "chao" | "parede" | "peca"; id?: string; nome?: string; opacidade?: number }
 
@@ -58,10 +59,13 @@ export function projetar(cena: Cena, rumo: number, inclinacao: number, cortar = 
       if (b.z0 >= 25) continue;
       b = { ...b, z1: Math.min(b.z1, 25) };
     }
-    const c = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]] as const;
+    // 11/11: as peças rodadas (nas paredes em diagonal) rodam os cantos e as normais dos lados em torno do centro
+    const ra = ((b.rot ?? 0) * Math.PI) / 180, rc = Math.cos(ra), rs = Math.sin(ra), mx = b.x + b.w / 2, my = b.y + b.h / 2;
+    const girar = (x: number, y: number): [number, number] => [mx + (x - mx) * rc - (y - my) * rs, my + (x - mx) * rs + (y - my) * rc];
+    const c = [girar(b.x, b.y), girar(b.x + b.w, b.y), girar(b.x + b.w, b.y + b.h), girar(b.x, b.y + b.h)] as const;
     const lados: { i: number; j: number; nx: number; ny: number }[] = [
       { i: 0, j: 1, nx: 0, ny: -1 }, { i: 1, j: 2, nx: 1, ny: 0 }, { i: 2, j: 3, nx: 0, ny: 1 }, { i: 3, j: 0, nx: -1, ny: 0 },
-    ];
+    ].map((l) => ({ ...l, nx: l.nx * rc - l.ny * rs, ny: l.nx * rs + l.ny * rc }));
     for (const l of lados) {
       const nyr = l.nx * sr + l.ny * cr; // a normal rodada: > 0 está virada para quem vê
       if (nyr <= 0.001) continue;

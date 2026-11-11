@@ -184,14 +184,20 @@ export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
 /* 9/11 (Rúben: «gerar logo o plano da obra com tudo direitinho, técnicos etc.»): o técnico de cada tarefa é o do ofício livre nesses dias:
    sem férias e sem outra obra (antes só se viam as férias). O plano da visita (planoDaVisita.ts) e o da obra usam esta mesma regra. */
 /** Os dias (aaaa-mm-dd) em que cada técnico já está noutra obra (os planos dos outros negócios com datas reais e por acabar). */
+/** 11/11 (Rúben: «no print, obra de 16 a 29 dez, não aparecia nada riscado»): o dia em que a obra de outro negócio começa, para a
+ *  ocupação. Aprovar o plano grava o início no negócio (f.inicio), não no plano: antes só contava o plano com p.inicio e as obras aprovadas
+ *  sem a data mexida à mão não ocupavam ninguém. */
+const inicioDaOutra = (d: Pick<Negocio, "f" | "obra">): string | null => d.obra?.plano?.inicio || (d.f?.inicio && /^\d{4}-\d{2}-\d{2}/.test(d.f.inicio) ? d.f.inicio.slice(0, 10) : null);
+
 export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   for (const d of S.deals ?? []) {
     const p = d.obra?.plano;
-    if (d.id === exceto || !p || p.estado === "concluída" || !p.inicio) continue;
+    const ini = inicioDaOutra(d);
+    if (d.id === exceto || !p || p.estado === "concluída" || !ini) continue;
     const fim = p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
     if (!fim) continue;
-    const ds = diasDaObra(deIso(p.inicio), fim);
+    const ds = diasDaObra(deIso(ini), fim);
     for (const t of p.tasks) {
       if (!t.tec || t.exec?.estado === "validada") continue;
       // 9/11: a equipa vem toda (ou nenhum membro): um membro numa obra ocupa a equipa inteira nesses dias
@@ -206,18 +212,60 @@ export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): 
   return out;
 }
 
+/** 11/11 (Rúben: «falta ver quando os técnicos estão ocupados»): como ocupacaoDosTecnicos, mas cada dia diz em que obra está (a primeira
+ *  que o ocupa), para o Estúdio do plano mostrar a barra com o nome da obra. */
+export function obrasDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): Map<string, Map<string, Negocio>> {
+  const out = new Map<string, Map<string, Negocio>>();
+  for (const d of S.deals ?? []) {
+    const p = d.obra?.plano;
+    const ini = inicioDaOutra(d);
+    if (d.id === exceto || !p || p.estado === "concluída" || !ini) continue;
+    const fim = p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
+    if (!fim) continue;
+    const ds = diasDaObra(deIso(ini), fim);
+    for (const t of p.tasks) {
+      if (!t.tec || t.exec?.estado === "validada") continue;
+      for (const id of equipaDe(t.tec)?.membros ?? [t.tec]) {
+        const m = out.get(id) ?? new Map<string, Negocio>();
+        for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) { const iso = isoDia(ds[k]); if (!m.has(iso)) m.set(iso, d as Negocio); }
+        out.set(id, m);
+      }
+    }
+  }
+  return out;
+}
+
+/** 11/11: os dias (índices de `dias`) em que o técnico está fora desta obra, juntos em blocos seguidos: de férias (as do RH e as da ficha)
+ *  ou noutra obra (com a obra). */
+export interface BlocoFora { ini: number; fim: number; tipo: "ferias" | "obra"; obra?: Negocio }
+export function blocosForaDaObra(tec: string, dias: readonly Date[], obras: Map<string, Map<string, Negocio>>, deFerias: (tec: string, iso: string) => boolean): BlocoFora[] {
+  const out: BlocoFora[] = [];
+  dias.forEach((x, k) => {
+    const iso = isoDia(x);
+    const o = obras.get(tec)?.get(iso);
+    const tipo = deFerias(tec, iso) ? "ferias" : o ? "obra" : null;
+    if (!tipo) return;
+    const ult = out[out.length - 1];
+    if (ult && ult.fim === k && ult.tipo === tipo && (tipo === "ferias" || ult.obra?.id === o?.id)) ult.fim = k + 1;
+    else out.push({ ini: k, fim: k + 1, tipo, ...(tipo === "obra" ? { obra: o } : {}) });
+  });
+  return out;
+}
+
 /** 10/11 (Rúben: «dizer a obra onde está, com link para o estúdio dela»): a outra obra onde o técnico (ou alguém da equipa dele) está nos
  *  dias da tarefa; null se não houver (ou o plano não tiver data de início). */
 export function obraQueOcupa(S: Pick<Estado, "deals">, tec: string, t: Pick<Tarefa, "dia" | "dur">, p: Plano, exceto: number): Negocio | null {
-  if (!p.inicio) return null;
-  const meus = new Set(diasDaObra(deIso(p.inicio), t.dia + t.dur).slice(t.dia).map(isoDia));
+  const i0 = inicioDoPlano(p);
+  if (!i0) return null;
+  const meus = new Set(diasDaObra(i0, t.dia + t.dur).slice(t.dia).map(isoDia));
   const alvo = new Set(equipaDe(tec)?.membros ?? [tec]);
   for (const d of S.deals ?? []) {
     const q = d.obra?.plano;
-    if (d.id === exceto || !q || q.estado === "concluída" || !q.inicio) continue;
+    const qi = inicioDaOutra(d);
+    if (d.id === exceto || !q || q.estado === "concluída" || !qi) continue;
     const fim = q.tasks.reduce((a, x) => Math.max(a, x.dia + x.dur), 0);
     if (!fim) continue;
-    const ds = diasDaObra(deIso(q.inicio), fim);
+    const ds = diasDaObra(deIso(qi), fim);
     for (const x of q.tasks) {
       if (!x.tec || x.exec?.estado === "validada") continue;
       if (!(equipaDe(x.tec)?.membros ?? [x.tec]).some((m) => alvo.has(m))) continue;
@@ -266,8 +314,10 @@ export function motivoOcupado(tecId: string, t: Extensao, plano: Plano, ocupados
   const tec = TECS.find((x) => x.id === tecId);
   if (!tec) return null;
   if (diaDeFerias(tec, plano, t.dia, t.dur) != null) return "de férias";
-  if (plano.inicio) {
-    const ds = diasDaObra(deIso(plano.inicio), t.dia + t.dur);
+  // 11/11: o plano sem data mexida à mão começa no primeiro início possível (como o Estúdio o mostra)
+  const i0 = inicioDoPlano(plano);
+  if (i0) {
+    const ds = diasDaObra(i0, t.dia + t.dur);
     const fora = ocupados.get(tecId);
     for (let k = t.dia; k < t.dia + t.dur; k++) if (fora && ds[k] && fora.has(isoDia(ds[k]))) return "noutra obra";
   }

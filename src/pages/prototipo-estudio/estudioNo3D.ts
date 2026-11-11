@@ -2,7 +2,8 @@
 // (emylia/planta3d): a ponte dele (deLegado) passa a planta para o espaço 3D; aqui cada peça com produto escolhido leva um modelo do tipo
 // dela com a medida e a cor do produto, e o revestimento e o pavimento escolhidos dão o das paredes e do chão (o mais parecido da lista
 // dele). Os modelos detalhados (torneiras, lava-loiças, placas) entram quando os produtos do Estúdio forem os do Catálogo verdadeiro.
-import type { Planta } from "@/emylia/planta";
+import type { PecaPlanta, Planta } from "@/emylia/planta";
+import { centroPeca, normalInteriorCm, paredeMaisPertoCm, poligonoDe } from "@/emylia/planta3d/pecas3d";
 import { deLegado, modeloGenerico, type ResLegado } from "@/emylia/planta3d/ligacao";
 import { ESPEC, type ProdutoModelo3D } from "@/emylia/planta3d/catalogo3d";
 import type { Revestimentos } from "@/emylia/planta3d/modelo";
@@ -41,7 +42,7 @@ export function espacoDoEstudio(p: Projeto, qual: "antes" | "depois"): ResLegado
     return { ...pc, produto: m.produtoId };
   });
   const pe = alturaFinalCm(qual === "antes" ? { peDireito: p.alturas.peDireito, tetoFalso: null } : p.alturas) / 100;
-  const res = deLegado({ ...planta, pecas }, {
+  const res = deLegado({ ...planta, pecas: pecas.map((pc) => rodadaNo3D(pc, planta)) }, {
     tipo: p.divisao === "Cozinha" ? "cozinha" : "casa_banho", nome: p.nome ?? "Estúdio", peDireito: pe, produtos,
     revestimentos: qual === "depois" ? revestimentosDe(p) : undefined,
   });
@@ -55,6 +56,30 @@ export function espacoDoEstudio(p: Projeto, qual: "antes" | "depois"): ResLegado
     return [];
   }));
   return { ...res, espaco: { ...res.espaco, pecas: res.espaco.pecas.map((x) => (naParede.has(x.id) ? { ...x, montagem: "parede", altura: naParede.get(x.id)! } : x)) } };
+}
+
+/**
+ * 11/11 (Rúben: «as peças rodadas nas paredes em diagonal aparecem direitas no 3D»). No desenho do Estúdio (EditorPlanta), `rot` roda a
+ * caixa como está desenhada (SVG rotate: a caixa gira `rot` graus em torno do meio) e a frente pode ser qualquer um dos 4 lados. O 3D do
+ * Miguel lê `rot` como a direção da frente (sin, cos) e gira a caixa ao contrário (three.js). Aqui passa-se uma à outra: o ângulo do 3D é
+ * −rot mais o quarto de volta que deixa a frente virada para dentro da divisão (pela parede mais perto), e a largura e a profundidade
+ * trocam quando é um quarto ímpar (o meio da peça fica onde está). As portas e as janelas não mudam (o 3D põe-nas pela parede).
+ */
+export function rodadaNo3D(pc: PecaPlanta, planta: Planta): PecaPlanta {
+  if (pc.rot === undefined || pc.tipo === "porta" || pc.tipo === "janela") return pc;
+  const poly = poligonoDe(planta);
+  const c = centroPeca(pc);
+  let k = 0;
+  if (poly) {
+    const n = normalInteriorCm(poly, paredeMaisPertoCm(poly, c).i);
+    k = [0, 1, 2, 3].reduce((b, q) => {
+      const a = ((-pc.rot! + 90 * q) * Math.PI) / 180, s = Math.sin(a) * n.x + Math.cos(a) * n.y;
+      return s > b.s + 1e-6 ? { q, s } : b;
+    }, { q: 0, s: -Infinity }).q;
+  }
+  const rot = (((Math.round(-pc.rot + 90 * k)) % 360) + 360) % 360;
+  const [w, h] = k % 2 ? [pc.h, pc.w] : [pc.w, pc.h];
+  return { ...pc, rot, w, h, x: c.x - w / 2, y: c.y - h / 2 };
 }
 
 /** A altura ao chão (cm) das peças de parede sem produto escolhido. */

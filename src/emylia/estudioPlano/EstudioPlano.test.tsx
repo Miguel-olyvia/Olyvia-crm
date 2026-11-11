@@ -91,3 +91,18 @@ describe("Estúdio do plano mais vivo (11/11)", () => {
     expect(screen.getByText("Plano aprovado")).toBeTruthy();
   });
 });
+
+// 11/11 (Rúben: «falta ver quando os técnicos estão ocupados»)
+describe("Estúdio do plano: quando os técnicos estão ocupados (11/11)", () => {
+  it("na linha do técnico, a barra da outra obra (com o nome) abre o Estúdio dela", () => {
+    const { d1 } = montar();
+    const barra = screen.getByRole("button", { name: new RegExp(`${TECS[0].n} está noutra obra, ${d1.nome}`) });
+    fireEvent.click(barra);
+    expect(screen.getAllByRole("heading", { name: new RegExp(d1.nome) }).length).toBeGreaterThan(0);
+  });
+  it("as férias da ficha aparecem como uma barra «Férias»", () => {
+    let nome = "";
+    montar(() => { const T = TECS[0]; nome = T.n; T.feriasDatas = ["2027-03-08", "2027-03-09"]; });
+    expect(screen.getByRole("img", { name: new RegExp(`${nome} de férias`) })).toBeTruthy();
+  });
+});

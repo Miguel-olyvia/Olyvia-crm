@@ -67,11 +67,19 @@ function cenaDe(pl: Planta, p: Projeto, comProdutos: boolean): Cena {
     caixas: pl.pecas.flatMap((pc) => {
       const prod = comProdutos ? produto(p.escolhas[pc.id]) : undefined, s = SEM_PRODUTO[pc.tipo];
       const caixa = { id: pc.id, x: pc.x, y: pc.y, w: pc.w, h: pc.h, z0: prod?.z0 ?? s.z0, z1: prod?.z1 ?? s.z1, cor: prod?.hex ?? s.cor, nome: prod?.n ?? PECAS[pc.tipo].n,
-        vidro: pc.tipo === "janela", naParede: ["porta", "janela", "espelho", "toalheiro"].includes(pc.tipo) };
+        vidro: pc.tipo === "janela", naParede: ["porta", "janela", "espelho", "toalheiro"].includes(pc.tipo), rot: pc.rot };
       const resguardo = comProdutos && pc.tipo === "base" ? produto(p.acompanha[pc.id]?.resguardo) : undefined;
-      return resguardo ? [caixa, { ...ladoAberto(pc, pl), id: `${pc.id}-resguardo`, z0: 3, z1: 200, cor: "#cfe9f3", nome: resguardo.n, vidro: true }] : [caixa];
+      return resguardo ? [caixa, { ...resguardoRodado(pc, ladoAberto(pc, pl)), id: `${pc.id}-resguardo`, z0: 3, z1: 200, cor: "#cfe9f3", nome: resguardo.n, vidro: true }] : [caixa];
     }),
   };
+}
+
+/** 11/11: numa base rodada, o resguardo roda com ela (o meio da placa gira em torno do meio da base). */
+function resguardoRodado(pc: PecaPlanta, r: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number; rot?: number } {
+  if (!pc.rot) return r;
+  const a = (pc.rot * Math.PI) / 180, cx = pc.x + pc.w / 2, cy = pc.y + pc.h / 2, mx = r.x + r.w / 2 - cx, my = r.y + r.h / 2 - cy;
+  const nx = cx + mx * Math.cos(a) - my * Math.sin(a), ny = cy + mx * Math.sin(a) + my * Math.cos(a);
+  return { x: nx - r.w / 2, y: ny - r.h / 2, w: r.w, h: r.h, rot: pc.rot };
 }
 
 /** O lado da base virado para o meio da divisão (onde fica o resguardo), como uma placa de 2 cm. */

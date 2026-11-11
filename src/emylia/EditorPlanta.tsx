@@ -152,6 +152,8 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
 
   const avisos = useMemo(() => avisosDaPlanta(p), [p]);
   const comAviso = new Set(avisos.flatMap((a) => a.pecas));
+  // a mexer numa peça ou numa parede (lido a cada render: cada movimento muda a planta e volta a desenhar)
+  const aArrastar = !!arrasto.current?.mexeu || !!arrastoParede.current?.mexeu;
   const pts = cantos(p.paredes, p.o);
   const fim = pts[pts.length - 1];
   const falta = faltaFechar(p.paredes);
@@ -374,15 +376,6 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
         </div>
       )}
 
-      {avisos.length > 0 && (
-        <ul role="status" aria-label="Alertas da planta" className="space-y-1.5">
-          {avisos.map((a, i) => (
-            <li key={i} className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />{a.texto}
-            </li>
-          ))}
-        </ul>
-      )}
       <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
         <svg ref={svg} viewBox={`${vista.x} ${vista.y} ${vista.w} ${vista.h}`} className="block h-auto max-h-[65vh] w-full touch-none select-none"
           role="img" aria-label={`Planta: ${p.paredes.map((x) => `${Math.round(x.c)} cm`).join(", ") || "por desenhar"}`}
@@ -500,6 +493,17 @@ export function EditorPlanta({ planta, onMudar, divisao, paredesFixas = false, t
           </div>
         )}
       </div>
+      {/* 11/11 (Rúben: «ao arrastar um objeto o quadro salta para cima e para baixo»): os alertas ficam por baixo do quadro (o que muda de
+          altura em baixo não mexe no quadro) e só aparecem com a peça largada (a arrastar, a peça a vermelho já diz que não cabe) */}
+      {avisos.length > 0 && !aArrastar && (
+        <ul role="status" aria-label="Alertas da planta" className="space-y-1.5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
+          {avisos.map((a, i) => (
+            <li key={i} className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />{a.texto}
+            </li>
+          ))}
+        </ul>
+      )}
       {/* a peça a ser arrastada da barra, debaixo do dedo */}
       {nova && (
         <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border-2 border-primary bg-primary/15 px-3 py-2 text-sm font-medium shadow-lg"

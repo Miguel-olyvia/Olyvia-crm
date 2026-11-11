@@ -31,3 +31,15 @@ describe("vista3d", () => {
     expect(sombrear("#000000", 1.5)).toBe("#808080");
   });
 });
+
+// 11/11: as caixas rodadas (as peças nas paredes em diagonal) giram em torno do meio
+describe("caixas rodadas (11/11)", () => {
+  it("a tampa de uma caixa rodada a 45° é um losango, não um retângulo direito", () => {
+    const direita = projetar(CENA, 0, Math.PI / 2, false).faces.find((f) => f.id === "s" && f.pts.length === 4 && f.prof === Math.max(...projetar(CENA, 0, Math.PI / 2, false).faces.filter((g) => g.id === "s").map((g) => g.prof)))!;
+    const rodada = projetar({ ...CENA, caixas: [{ ...CENA.caixas[0], rot: 45 }] }, 0, Math.PI / 2, false).faces.filter((f) => f.id === "s");
+    const tampa = rodada.reduce((a, b) => (b.prof > a.prof ? b : a));
+    const xs = (pts: [number, number][]) => new Set(pts.map(([x]) => Math.round(x))).size;
+    expect(xs(direita.pts)).toBe(2);
+    expect(xs(tampa.pts)).toBeGreaterThan(2);
+  });
+});

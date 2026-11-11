@@ -115,3 +115,18 @@ describe("o plano sem conflitos (10/11)", () => {
     expect(d2.obra.plano!.tasks[0].dia).toBe(0);
   });
 });
+
+// 11/11 (Rúben: «obra de 16 a 29 dez e não aparecia nada riscado»): aprovar grava o início no negócio (f.inicio), não no plano
+describe("a ocupação das obras aprovadas sem data no plano (11/11)", () => {
+  it("a outra obra conta pelo f.inicio; o plano aberto sem data começa no primeiro início possível", () => {
+    const S = seed();
+    const [d1, d2] = S.deals.filter((x) => x.obra);
+    const T = TECS[0].id;
+    d1.f.inicio = "2027-03-01";
+    d1.obra.plano = { tasks: [{ nome: "Outra", svcs: [], dia: 0, dur: 3, sk: TECS[0].sk, h: 24, tec: T }], estado: "aprovado", dia: 0, origem: "orcamento" } as Plano;
+    expect([...(ocupacaoDosTecnicos(S, d2.id).get(T) ?? [])]).toEqual(["2027-03-01", "2027-03-02", "2027-03-03"]);
+    d2.obra.plano = { tasks: [{ nome: "Aqui", svcs: [], dia: 1, dur: 1, sk: TECS[0].sk, h: 8, tec: T }], estado: "por aprovar", dia: 0, origem: "orcamento", inicio: "2027-03-01" } as Plano;
+    expect(obraQueOcupa(S, T, d2.obra.plano.tasks[0], d2.obra.plano, d2.id)?.id).toBe(d1.id);
+    expect(motivoOcupado(T, d2.obra.plano.tasks[0], d2.obra.plano, ocupacaoDosTecnicos(S, d2.id))).toBe("noutra obra");
+  });
+});

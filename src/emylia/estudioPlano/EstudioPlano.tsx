@@ -27,7 +27,7 @@ import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta, diasDaObra, isoDia } from "../planoObra";
-import { inicioDoPlano, motivoOcupado, obraQueOcupa, ocupacaoDosTecnicos, retificacaoAceite, tecnicosDoOficio } from "../preparacaoObra";
+import { blocosForaDaObra, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, retificacaoAceite, tecnicosDoOficio } from "../preparacaoObra";
 import { NovaTarefa } from "../PlanoInterativo";
 import { pelaPermissao, podeNeg } from "../permissoes";
 import { InfoDoNegocio } from "./InfoDoNegocio";
@@ -80,6 +80,7 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
   const fim = p ? Math.max(1, ...p.tasks.map((t) => t.dia + t.dur)) : 1;
   const dias = useMemo(() => diasDaObra(inicio, fim + 5), [isoDia(inicio), fim]); // eslint-disable-line react-hooks/exhaustive-deps
   const ocup = useMemo(() => ocupacaoDosTecnicos(S, d.id), [S, d.id, S.deals]); // eslint-disable-line react-hooks/exhaustive-deps
+  const obrasOcup = useMemo(() => obrasDosTecnicos(S, d.id), [S, d.id, S.deals]); // eslint-disable-line react-hooks/exhaustive-deps
   // 11/11: o que as medidas do local mudam no orçamento (refaz o orçamento numa cópia: só quando as medidas mudam, não a cada arrasto)
   const impMedidas = useMemo(() => (d.orc && !d.orc.vendaDireta && d.f.retif_aceite ? impactoDasMedidas(d, S, medidasRetificadas(d)) : null),
     [d.f.retif_aceite, d.orc]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -113,6 +114,7 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
     if (JSON.stringify(retrato()) !== JSON.stringify(snap)) setDesfazer({ snap, ti, n: Date.now() });
   };
 
+  const deFerias = (tec: string, iso: string) => ausenteNoRh(tec, iso) || !!TECS.find((y) => y.id === tec)?.feriasDatas?.includes(iso);
   // o dia (índice) está ocupado para o técnico fora desta obra (férias do RH, da ficha, ou outra obra)
   const foraDaObra = (tec: string, k: number) => {
     const x = dias[k];
@@ -447,7 +449,10 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
                       // as tarefas da pessoa empilham-se quando se sobrepõem (cada uma na sua faixa)
                       const faixas: number[] = [];
                       const faixa = ts.map(({ t }) => { let f = 0; while (faixas[f] !== undefined && faixas[f] > t.dia) f++; faixas[f] = t.dia + t.dur; return f; });
-                      const altura = Math.max(1, faixas.length) * 40 + 12;
+                      // 11/11 (Rúben: «falta ver quando os técnicos estão ocupados»): por baixo das tarefas, as barras de quando a pessoa
+                      // está fora desta obra: noutra obra (cinzenta, com o nome; abre o Estúdio dela) ou de férias
+                      const fora = tec ? blocosForaDaObra(tec, dias, obrasOcup, deFerias) : [];
+                      const altura = Math.max(1, faixas.length) * 40 + 12 + (fora.length ? 30 : 0);
                       const esbatida = foco?.k === "tec" && foco.id !== tec;
                       // «+» num dia vazio da linha (por baixo do rato)
                       const k = sob && sob.tec === tec ? sob.k : null;
@@ -468,6 +473,24 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
                               </button>
                             )}
                             {ts.map(({ t, ti }, j) => barra(t, ti, 6 + faixa[j] * 40))}
+                            {fora.map((b) => {
+                              const largura = (b.fim - b.ini) * col - 4, txt = b.tipo === "ferias" ? "Férias" : `${b.obra!.nome}${b.obra!.servico ? ` · ${b.obra!.servico}` : ""}`;
+                              const quando = `${dataCurta(dias[b.ini])}${b.fim - b.ini > 1 ? ` a ${dataCurta(dias[b.fim - 1])}` : ""}`;
+                              const cls = "absolute flex h-6 items-center gap-1 overflow-hidden whitespace-nowrap rounded-lg px-2 text-[11px] font-medium";
+                              const st = { left: b.ini * col + 2, width: largura, bottom: 4 };
+                              return b.tipo === "obra" ? (
+                                <button key={`o${b.ini}`} type="button" onClick={() => setOutra(b.obra!)} title={`Noutra obra: ${txt} (${quando}). Abrir o Estúdio dela`}
+                                  aria-label={`${nomeTec(tec)} está noutra obra, ${txt}, ${quando}. Abrir o Estúdio dela`}
+                                  className={cn(cls, "bg-muted-foreground/20 text-foreground/80 hover:bg-muted-foreground/30")} style={st}>
+                                  <ArrowUpRight className="h-3 w-3 shrink-0" aria-hidden="true" /><span className="truncate">{largura > 50 ? txt : ""}</span>
+                                </button>
+                              ) : (
+                                <span key={`f${b.ini}`} role="img" aria-label={`${nomeTec(tec)} de férias, ${quando}`} title={`Férias (${quando})`}
+                                  className={cn(cls, "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100")} style={st}>
+                                  <span className="truncate">{largura > 40 ? "Férias" : ""}</span>
+                                </span>
+                              );
+                            })}
                             {p.estado === "em curso" && <div aria-hidden="true" className="absolute inset-y-0 w-0.5 bg-primary/70" style={{ left: p.dia * col + col / 2 }} />}
                           </div>
                         </div>

@@ -41,9 +41,12 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
   const mudar = (k: string, n: number) => setValores((x) => ({ ...x, [k]: String(Math.max(0, r2(n))) }));
   // 11/11: − e + somam a partir do valor atual (manter o dedo carregado repete)
   const somar = (k: string, delta: number) => setValores((x) => { const v = numero(x[k] ?? "0"); return { ...x, [k]: String(Math.max(0, r2((Number.isFinite(v) ? v : 0) + delta))) }; });
-  const usarPlanta = () => {
-    if (!daPlanta) return;
-    setValores((x) => ({ ...x, ...(daPlanta.pav != null && "pav" in x ? { pav: String(daPlanta.pav) } : {}), ...(daPlanta.par != null && "par" in x ? { par: String(daPlanta.par) } : {}) }));
+  // 11/11 (Rúben: «ao ajustar paredes na planta, os campos de baixo não acompanham e o impacto fica "Sem impacto"»): cada mudança na planta
+  // passa logo o chão e as paredes (m²) para as medidas; as outras medidas (os pontos de água, os módulos…) ficam como se escreveram
+  const mudarPlanta = (np: Planta) => {
+    setPlanta(np);
+    const pav = np.paredes.length >= 3 ? areaChaoM2(np.paredes) : null, par = np.paredes.length >= 3 ? areaParedesM2(np, pe) : null;
+    setValores((x) => ({ ...x, ...(pav != null && "pav" in x ? { pav: String(r2(pav)) } : {}), ...(par != null && "par" in x ? { par: String(r2(par)) } : {}) }));
   };
   const aceitar = () => {
     ctx.run(() => {
@@ -79,11 +82,10 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
                     <p className="text-sm text-muted-foreground">Toque numa parede para corrigir a medida.</p>
                   </div>
                   {daPlanta && (daPlanta.pav != null || daPlanta.par != null) && (
-                    <p className="text-sm text-muted-foreground">Dá {daPlanta.pav != null ? `${nfmt(daPlanta.pav)} m² de chão` : ""}{daPlanta.pav != null && daPlanta.par != null ? " e " : ""}{daPlanta.par != null ? `${nfmt(daPlanta.par)} m² de paredes` : ""}</p>
+                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><Wand2 className="h-4 w-4 text-primary" aria-hidden="true" />Dá {daPlanta.pav != null ? `${nfmt(daPlanta.pav)} m² de chão` : ""}{daPlanta.pav != null && daPlanta.par != null ? " e " : ""}{daPlanta.par != null ? `${nfmt(daPlanta.par)} m² de paredes` : ""}: as medidas em baixo seguem a planta</p>
                   )}
                 </div>
-                <EditorPlanta planta={planta} onMudar={setPlanta} divisao={d.f.diag_tipo_area?.split(",")[0]} />
-                {daPlanta && <Button type="button" variant="outline" className="min-h-11" onClick={usarPlanta}><Wand2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Usar as medidas da planta</Button>}
+                <EditorPlanta planta={planta} onMudar={mudarPlanta} divisao={d.f.diag_tipo_area?.split(",")[0]} />
               </section>
             )}
 
