@@ -193,21 +193,20 @@ describe("a ficha: sub-abas da Assiduidade", () => {
     return ficha;
   };
 
-  it("com horário de banco de horas há Calendário, Horas extra e Banco de horas, e as horas extra saem de baixo do calendário", () => {
+  // DECISÃO 5 (RH): a sub-aba «Banco de horas» está escondida (mostrava valores de exemplo). Com o interruptor ligado
+  // (fluxosC/bancoHorasVisivel.test.tsx) volta a existir; as regras de quem a vê continuam em `abasVisiveis` (abaixo).
+  it("mesmo com horário de banco de horas há só Calendário e Horas extra (sem Banco de horas), e as horas extra saem de baixo do calendário", () => {
     const ficha = abrirAssiduidade("p-rui");
     const grupo = within(ficha).getByRole("tablist", { name: "Secções da assiduidade" });
     expect(within(grupo).getByRole("tab", { name: /^Calendário/ })).toBeInTheDocument();
     expect(within(grupo).getByRole("tab", { name: /^Horas extra/ })).toBeInTheDocument();
-    expect(within(grupo).getByRole("tab", { name: /^Banco de horas/ })).toBeInTheDocument();
+    expect(within(grupo).queryByRole("tab", { name: /Banco de horas/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rhd-banco-ficha")).not.toBeInTheDocument();
     const painel = (nome: RegExp) => document.getElementById(within(grupo).getByRole("tab", { name: nome }).getAttribute("aria-controls") ?? "") as HTMLElement;
     expect(painel(/^Horas extra/)).not.toBeVisible();
     fireEvent.mouseDown(within(grupo).getByRole("tab", { name: /^Horas extra/ }), { button: 0 });
     expect(painel(/^Horas extra/)).toBeVisible();
     expect(within(painel(/^Horas extra/)).getByRole("progressbar")).toBeInTheDocument();
-    expect(painel(/^Banco de horas/)).not.toBeVisible();
-    fireEvent.mouseDown(within(grupo).getByRole("tab", { name: /^Banco de horas/ }), { button: 0 });
-    expect(painel(/^Banco de horas/)).toBeVisible();
-    expect(within(painel(/^Banco de horas/)).getByTestId("rhd-banco-ficha")).toBeInTheDocument();
   });
 
   it("com horário padrão não existe a sub-aba de banco de horas", () => {
@@ -224,7 +223,7 @@ describe("a ficha: sub-abas da Assiduidade", () => {
         <MemoryRouter><PessoaAssiduidadeTab pessoaId="p-rui" pessoaNome="Rui Amaral" souAPessoa={false} permissoes={TUDO} /></MemoryRouter>
       </LanguageProvider>,
     );
-    expect(screen.getAllByRole("tab").map((a) => a.textContent)).toEqual([expect.stringMatching(/^Calendário/), expect.stringMatching(/^Horas extra/), expect.stringMatching(/^Banco de horas/)]);
+    expect(screen.getAllByRole("tab").map((a) => a.textContent)).toEqual([expect.stringMatching(/^Calendário/), expect.stringMatching(/^Horas extra/)]);
   });
 });
 

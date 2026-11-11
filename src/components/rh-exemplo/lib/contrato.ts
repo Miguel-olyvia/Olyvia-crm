@@ -3,21 +3,23 @@
  *
  * PORQUE ISTO SAIU DE novaPessoa.ts
  * ---------------------------------
- * Os mesmos cinco numeros -- horas, maximo semanal, maximo anual, FTE e dias
- * de periodo experimental -- sao editaveis em dois ecras: o assistente de
- * criacao e o separador Contratos da ficha. Estavam validados apenas no
- * primeiro; o segundo tinha `max=80` no atributo do input e mais nada, e um
- * atributo HTML nao impede colagem nem entrada programatica. A unica barreira
- * real nesse ecra era o CHECK da base.
+ * Os mesmos numeros -- horas e dias de periodo experimental -- sao editaveis
+ * em dois ecras: o assistente de criacao e o separador Contratos da ficha.
+ * Estavam validados apenas no primeiro; o segundo tinha `max` no atributo do
+ * input e mais nada, e um atributo HTML nao impede colagem nem entrada
+ * programatica. A unica barreira real nesse ecra era o CHECK da base.
+ *
+ * O MAXIMO SEMANAL E O FTE (`tempo_trabalho_pct`) SAIRAM DOS ECRAS por decisao
+ * do RH: as colunas ficam na base, mas nada aqui as le, valida ou envia. O
+ * CHECK cruzado da base (`pessoas_vinculos_maximo_acima_do_contratado`) so nao
+ * tem o que comparar quando `horas_semanais_maximas` esta NULL (contratos novos).
+ * Um contrato que JA tem maximo continua a ser comparado, e agora o ecra nao o
+ * deixa mudar: subir as horas acima desse maximo e recusado pela base.
  *
  * Os limites vem dos CHECK e nao de opiniao:
  *   - horas: tecto de 80h no EQUIVALENTE SEMANAL
  *     (`pessoas_vinculos_horas_equivalentes_validas`, 20261120190000);
- *   - maximo semanal: 0..80 (`..._horas_semanais_maximas_validas`);
- *   - FTE: 0..100 (`..._tempo_trabalho_pct_valido`);
- *   - experimental: 0..1095 (`..._periodo_experimental_dias_valido`);
- *   - e o cruzamento maximo semanal >= equivalente semanal
- *     (`..._maximo_acima_do_contratado`).
+ *   - experimental: 0..1095 (`..._periodo_experimental_dias_valido`).
  *
  * Devolve campos abstractos, nao `id` de DOM: cada ecra tem os seus proprios
  * identificadores e e ele que os mapeia.
@@ -26,11 +28,7 @@ import { equivalenteSemanal, TECTO_SEMANAL_EQUIVALENTE } from "@/components/rh-e
 import { numeroDe } from "@/components/rh-exemplo/lib/numeros";
 import { TIPOS_CONTRATO, type HorasFrequencia, type TipoContrato } from "@/components/rh-exemplo/tipos";
 
-export type CampoNumericoContrato =
-  | "horas"
-  | "maximoSemanal"
-  | "fte"
-  | "experimental";
+export type CampoNumericoContrato = "horas" | "experimental";
 
 export interface ProblemaNumerico {
   campo: CampoNumericoContrato;
@@ -41,8 +39,6 @@ export interface ProblemaNumerico {
 export interface NumerosDoContrato {
   horas: string;
   horas_frequencia: HorasFrequencia;
-  horas_semanais_maximas: string;
-  tempo_trabalho_pct: string;
   /** Vazio quando o contrato nao tem periodo experimental. */
   periodo_experimental_dias: string;
 }
@@ -64,37 +60,12 @@ export function problemasDosNumerosDoContrato(
     problemas.push({ campo: "horas", mensagemKey: "hr.form.erroHoras" });
   }
 
-  const maxSemanal = numeroDe(valores.horas_semanais_maximas);
-  if (
-    valores.horas_semanais_maximas.trim() !== "" &&
-    (maxSemanal === null || maxSemanal < 0 || maxSemanal > 80)
-  ) {
-    problemas.push({ campo: "maximoSemanal", mensagemKey: "hr.form.erroHoras" });
-  }
-
-  const pct = numeroDe(valores.tempo_trabalho_pct);
-  if (
-    valores.tempo_trabalho_pct.trim() !== "" &&
-    (pct === null || pct < 0 || pct > 100)
-  ) {
-    problemas.push({ campo: "fte", mensagemKey: "hr.form.erroPercentagem" });
-  }
-
   const experimental = numeroDe(valores.periodo_experimental_dias);
   if (
     valores.periodo_experimental_dias.trim() !== "" &&
     (experimental === null || experimental < 0 || experimental > 1095)
   ) {
     problemas.push({ campo: "experimental", mensagemKey: "hr.form.erroDias" });
-  }
-
-  // O maximo semanal nao tem frequencia propria -- e sempre semanal -- por isso
-  // compara-se com o equivalente e nunca com a quantidade crua.
-  if (maxSemanal !== null && equivalente !== null && maxSemanal < equivalente) {
-    problemas.push({
-      campo: "maximoSemanal",
-      mensagemKey: "hr.form.erroMaximoSemanal",
-    });
   }
 
   return problemas;

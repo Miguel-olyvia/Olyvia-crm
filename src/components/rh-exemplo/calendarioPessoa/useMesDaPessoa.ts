@@ -9,7 +9,8 @@ import { useMemo } from "react";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { useRegrasSalariais } from "@/components/rh-exemplo/hooks/useRegrasSalariais";
 import { horarioPessoaDeLinhas } from "@/components/rh-exemplo/lib/horarioReal";
-import { saldoDoBanco } from "@/components/rh-exemplo/fluxosC/bancoHorasRegras";
+import { saldoDoBanco, type MovimentoBanco } from "@/components/rh-exemplo/fluxosC/bancoHorasRegras";
+import { BANCO_DE_HORAS_VISIVEL } from "@/components/rh-exemplo/fluxosC/bancoHorasVisivel";
 import { useFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
 import { limitesDoMes, useHorasExtraAutorizacoes, useHorasExtraListar } from "@/components/rh-exemplo/hooks/horasExtraReal";
 import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
@@ -41,13 +42,16 @@ export interface FonteRealDoMes {
 
 const SEM_TIPOS: readonly Pick<AusenciaTipo, "id" | "nome">[] = [];
 const SEM_LOCAIS: readonly LocalTrabalho[] = [];
+/** Banco de horas escondido (`bancoHorasVisivel.ts`): o calendario nao desenha creditos, debitos nem saldo de exemplo. */
+const SEM_BANCO: MovimentoBanco[] = [];
 
 export function useMesDaPessoa(pessoaId: string, ano: number, mes: number, fonte: FonteRealDoMes): MesDaPessoa {
   // O limite do subsidio e o da REGRA SALARIAL em vigor (`subsidio_limite_min`); sem regra em vigor (ou ainda por ler) nao ha numero.
   const { emVigor, estado: estadoRegras } = useRegrasSalariais();
   const minimo: number | null = emVigor ? emVigor.subsidio_limite_min : null;
   const erroRegra = estadoRegras === "erro";
-  const banco = useFluxosC((e) => e.banco);
+  const bancoEmMemoria = useFluxosC((e) => e.banco);
+  const banco = BANCO_DE_HORAS_VISIVEL ? bancoEmMemoria : SEM_BANCO;
   const { permissoes } = usePermissoesAssiduidade();
   const periodo = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);
   // Sem permissao de ver (ou se a leitura falha) o mes fica sem horas extra, em vez de acusar a pessoa.

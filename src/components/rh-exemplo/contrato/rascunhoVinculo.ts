@@ -45,17 +45,13 @@ export type RascunhoVinculo = {
   /** A quantidade, na unidade de `horas_frequencia`. Nao necessariamente semanal. */
   horas_periodo: string;
   horas_frequencia: HorasFrequencia;
-  tempo_trabalho_pct: string;
   politica_feriados: PoliticaFeriados;
-  horas_semanais_maximas: string;
   dias_uteis: DiaSemana[];
   // -- Admissao, 20261124080000 ---------------------------------------------
   categoria_profissional: string;
   /** "" = por decidir (`null` na base); nao e o mesmo que um booleano falso. */
   renovavel: "" | "sim" | "nao";
   isencao_horario: boolean;
-  formacao_inicio: string;
-  formacao_fim: string;
 };
 
 /** Um contrato "tem periodo experimental" se algum dos dois campos vier
@@ -89,11 +85,7 @@ export function rascunhoDe(vinculo: PessoaVinculo | null): RascunhoVinculo {
     tipo_trabalho: vinculo?.tipo_trabalho ?? "",
     horas_periodo: vinculo?.horas_periodo == null ? "" : String(vinculo.horas_periodo),
     horas_frequencia: vinculo?.horas_frequencia ?? "semanal",
-    tempo_trabalho_pct:
-      vinculo?.tempo_trabalho_pct == null ? "" : String(vinculo.tempo_trabalho_pct),
     politica_feriados: vinculo?.politica_feriados ?? "nao_laboral",
-    horas_semanais_maximas:
-      vinculo?.horas_semanais_maximas == null ? "" : String(vinculo.horas_semanais_maximas),
     dias_uteis: vinculo?.dias_uteis ?? [],
     categoria_profissional: vinculo?.categoria_profissional ?? "",
     renovavel:
@@ -103,16 +95,12 @@ export function rascunhoDe(vinculo: PessoaVinculo | null): RascunhoVinculo {
           ? "sim"
           : "nao",
     isencao_horario: vinculo?.isencao_horario ?? false,
-    formacao_inicio: vinculo?.formacao_inicio ?? "",
-    formacao_fim: vinculo?.formacao_fim ?? "",
   };
 }
 
 /** Onde vive, NESTE ecra, cada numero validado por `lib/hr/contrato`. */
 export const CAMPOS_NUMERICOS: Record<CampoNumericoContrato, string> = {
   horas: "hr-contrato-horas-periodo",
-  maximoSemanal: "hr-contrato-horas-semanais-maximas",
-  fte: "hr-contrato-tempo-trabalho-pct",
   experimental: "hr-contrato-periodo-experimental-dias",
 };
 

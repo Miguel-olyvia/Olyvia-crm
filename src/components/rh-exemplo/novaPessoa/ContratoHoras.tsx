@@ -1,7 +1,6 @@
-// Horas e horário do contrato, na aba "Contrato e local": horas contratadas e a sua unidade, tempo de trabalho (sempre 100%),
-// dias de trabalho, política de feriados, máximos e isenção. O horário por dia define-se na aba Planeamento da ficha: aqui não
+// Horas e horário do contrato, na aba "Contrato e local": horas contratadas e a sua unidade, dias de trabalho, política de
+// feriados e isenção. O tempo de trabalho (%) e o máximo semanal saíram do formulário por decisão do RH. O horário por dia define-se na aba Planeamento da ficha: aqui não
 // há «tipo de horário» (fixo ou variável), porque a base não o recebe na criação da pessoa.
-import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { equivalenteSemanal } from "@/components/rh-exemplo/lib/horas";
 import { numeroDe } from "@/components/rh-exemplo/lib/numeros";
 import { DIAS_SEMANA, HORAS_FREQUENCIAS, POLITICAS_FERIADOS, type DiaSemana } from "@/components/rh-exemplo/tipos";
@@ -52,14 +51,7 @@ export function ContratoHoras() {
           ajuda={equivalente === null ? t("hr.contrato.ajudaHorasNovoContrato") : t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })}
         />
         <CampoS g="contrato" k="horas_frequencia" id="hr-novo-horas-frequencia" rotulo={t("hr.contrato.horasFrequencia")} opcoes={opcoes(t, "hr.horasFrequencia", HORAS_FREQUENCIAS)} />
-        <LinhaCampo id="hr-novo-tempo-trabalho-pct">
-          <CampoTexto
-            id="hr-novo-tempo-trabalho-pct" label={t("hr.contrato.tempoTrabalhoPct")} valor={c.tempo_trabalho_pct}
-            onChange={() => undefined} disabled ajuda={t("hr.contrato.ajudaFteFixo")}
-          />
-        </LinhaCampo>
         <CampoS g="contrato" k="politica_feriados" id="hr-novo-politica-feriados" rotulo={t("hr.contrato.politicaFeriados")} opcoes={opcoes(t, "hr.politicaFeriados", POLITICAS_FERIADOS)} />
-        <CampoT g="contrato" k="horas_semanais_maximas" id="hr-novo-horas-semanais-maximas" rotulo={t("hr.contrato.horasSemanaisMaximas")} />
         <CampoI g="extra" k="isencao_horario" id="hr-novo-isencao-horario" rotulo={t("hr.contrato.isencaoHorario")} />
         <DiasDeTrabalho />
       </div>

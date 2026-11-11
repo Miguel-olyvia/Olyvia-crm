@@ -77,12 +77,14 @@ describe("traduções da frente D", () => {
   });
 });
 
-describe("banco de horas na ficha", () => {
-  it("aparece para quem tem horário de banco de horas, com ajustes para o RH", () => {
+// DECISÃO 5 (RH): o cartão do banco de horas está ESCONDIDO na ficha (mostrava valores de exemplo, guardados em memória).
+// Os testes do cartão ligado (saldo, ajustes, movimentos) vivem em fluxosC/bancoHorasVisivel.test.tsx, com o interruptor ligado.
+describe("banco de horas na ficha (escondido)", () => {
+  it("não aparece nem para quem tem horário de banco de horas: sem cartão, sem saldo, sem movimentos de exemplo", () => {
     noRouter(<BancoHorasDaFicha pessoaId="p-rui" podeAjustar />);
-    expect(screen.getByRole("heading", { name: /Banco de horas/i })).toBeInTheDocument();
-    expect(screen.getByText("Folga gozada por banco de horas")).toBeInTheDocument();
-    expect(screen.getAllByRole("button").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByTestId("rhd-banco-ficha")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Banco de horas/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Folga gozada por banco de horas")).not.toBeInTheDocument();
   });
 
   it("não aparece para quem tem outro tipo de horário", () => {
@@ -90,7 +92,7 @@ describe("banco de horas na ficha", () => {
     expect(screen.queryByTestId("rhd-banco-ficha")).not.toBeInTheDocument();
   });
 
-  it("está montado na aba Horário da ficha da pessoa com banco de horas", () => {
+  it("a aba Horário da ficha da pessoa com banco de horas não mostra o cartão", () => {
     const ficha = lerEstado().fichas["p-rui"];
     noRouter(
       <PessoaHorarioTab
@@ -106,7 +108,8 @@ describe("banco de horas na ficha", () => {
         onGuardarPlaneado={async () => null}
       />,
     );
-    expect(screen.getByTestId("rhd-banco-ficha")).toBeInTheDocument();
+    expect(screen.queryByTestId("rhd-banco-ficha")).not.toBeInTheDocument();
+    expect(document.getElementById("bh-titulo-p-rui")).toBeNull();
   });
 });
 
@@ -205,19 +208,19 @@ describe("horas extra: limites, configuração e histórico", () => {
     expect(grupo?.paths).not.toContain("/rh-exemplo/horas-extra");
   });
 
-  it("o interruptor está no grupo «Tempo de trabalho» do Contrato, grava na base, e os máximos dependem só de quem pode editar", async () => {
-    const rascunho = { horas_anuais_maximas: "", horas_semanais_maximas: "", regime: "tempo_inteiro", tipo_trabalho: "", horas_periodo: "40", horas_frequencia: "semanal", politica_feriados: "nao_laboral", isencao_horario: false, dias_uteis: [1] } as unknown as Parameters<typeof ContratoGrupoTempoTrabalho>[0]["rascunho"];
+  it("o interruptor está no grupo «Tempo de trabalho» do Contrato e grava na base; o máximo semanal já não é campo do contrato", async () => {
+    const rascunho = { horas_anuais_maximas: "", regime: "tempo_inteiro", tipo_trabalho: "", horas_periodo: "40", horas_frequencia: "semanal", politica_feriados: "nao_laboral", isencao_horario: false, dias_uteis: [1] } as unknown as Parameters<typeof ContratoGrupoTempoTrabalho>[0]["rascunho"];
     noRouter(<ContratoGrupoTempoTrabalho rascunho={rascunho} definir={() => {}} podeEditar criandoContrato={false} pessoaId="p-marta" erroDe={() => null} />);
     const interruptor = screen.getByRole("switch", { name: "Pode fazer horas extra" });
     expect(interruptor).toHaveAttribute("aria-checked", "false");
-    // O máximo semanal grava-se no contrato: só depende de `podeEditar`, não do interruptor (que se guarda à parte, na base).
     // O limite ANUAL já não é do contrato: vem da regra salarial da organização e aparece só em leitura.
+    // O MÁXIMO SEMANAL saiu do ecrã (decisão 4 do RH): a coluna fica na base, o contrato não o mostra nem o envia.
     expect(screen.queryByLabelText(/Horas anuais máximas/i)).not.toBeInTheDocument();
     expect(screen.getByText(/vem da regra salarial da organização/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Máximo de horas semanais/i)).toBeEnabled();
+    expect(screen.queryByLabelText(/Máximo de horas semanais/i)).not.toBeInTheDocument();
     fireEvent.click(interruptor);
     await waitFor(() => expect(baseFalsa.autorizacoes["p-marta"]).toBe(true));
-    expect(screen.getByLabelText(/Máximo de horas semanais/i)).toBeEnabled();
+    expect(screen.queryByLabelText(/Máximo de horas semanais/i)).not.toBeInTheDocument();
   });
 
   it("o alerta configura-se em Processamento salarial > Configuração (os coeficientes são da base, ver horasExtraReal.test)", async () => {

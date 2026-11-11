@@ -45,7 +45,19 @@ vi.mock("@/components/rh-exemplo/hooks/useConviteAdmissaoResumo", () => ({
   useConviteAdmissaoResumo: () => ({ resumo: null, recarregar: recarregarConvite }),
 }));
 vi.mock("@/components/rh-exemplo/hooks/usePessoaFotografia", () => ({ usePessoaFotografia: () => null }));
-vi.mock("@/components/rh-exemplo/hooks/useFiliaisDaArvore", () => ({ useFiliaisDaArvore: () => ({ filiais: [] }) }));
+// A filial do cabeçalho vem da COLOCAÇÃO NO ORGANOGRAMA da pessoa (não do centro de trabalho): os dois hooks são simulados aqui.
+const { filiaisFalsas, colocacoesFalsas } = vi.hoisted(() => ({
+  filiaisFalsas: { lista: [] as Array<{ id: string; name: string }> },
+  colocacoesFalsas: {
+    lista: [] as Array<{ id: string; organograma_node_id: string | null; valido_ate: string | null }>,
+    loading: false,
+    recusado: false,
+  },
+}));
+vi.mock("@/components/rh-exemplo/hooks/useFiliaisDaArvore", () => ({ useFiliaisDaArvore: () => ({ filiais: filiaisFalsas.lista, loading: false }) }));
+vi.mock("@/components/rh-exemplo/hooks/usePessoaColocacaoOrganograma", () => ({
+  usePessoaColocacaoOrganograma: () => ({ colocacoes: colocacoesFalsas.lista, loading: colocacoesFalsas.loading, recusado: colocacoesFalsas.recusado }),
+}));
 
 // O conteúdo das abas e os cartões têm os seus próprios testes: aqui interessa só o painel.
 vi.mock("./AbasPessoa", () => ({
@@ -92,6 +104,10 @@ beforeEach(() => {
   recarregarConvite.mockReset();
   recarregarPendencias.mockReset();
   estadoFicha = { loading: false, notFound: false, pessoa: PESSOA, conta: null, vinculos: [], refresh: vi.fn().mockResolvedValue(undefined) };
+  filiaisFalsas.lista = [];
+  colocacoesFalsas.lista = [];
+  colocacoesFalsas.loading = false;
+  colocacoesFalsas.recusado = false;
   usarContexto.mockReset();
   usarContexto.mockReturnValue({
     hasPermission: () => true,
@@ -174,5 +190,62 @@ describe("ConteudoFichaRh (rh-exemplo): foco e releitura", () => {
     rerender(arvore());
     expect(recarregarPendencias).toHaveBeenCalledTimes(1);
     expect(recarregarConvite).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ConteudoFichaRh (rh-exemplo): a linha por baixo do nome é «Cargo · Filial do organograma»", () => {
+  const LOCAIS = [{ id: "l1", nome: "Loja do Porto", organograma_node_id: "no-centro" }];
+
+  it("a filial é a da colocação no organograma e NÃO a do centro de trabalho", () => {
+    filiaisFalsas.lista = [{ id: "no-organograma", name: "Filial Lisboa" }, { id: "no-centro", name: "Filial do centro" }];
+    colocacoesFalsas.lista = [{ id: "c1", organograma_node_id: "no-organograma", valido_ate: null }];
+    estadoFicha = { ...estadoFicha, pessoa: { ...PESSOA, local_id: "l1" } };
+    usarContexto.mockReturnValue({ ...usarContexto(), locais: LOCAIS });
+    render(arvore());
+    const linha = screen.getByRole("heading", { level: 1 }).parentElement as HTMLElement;
+    expect(linha).toHaveTextContent("Gerente · Filial Lisboa");
+    expect(linha).not.toHaveTextContent("Filial do centro");
+  });
+
+  it("usa só a colocação em vigor (sem data de fim), não uma já fechada", () => {
+    filiaisFalsas.lista = [{ id: "antiga", name: "Filial Antiga" }, { id: "actual", name: "Filial Actual" }];
+    colocacoesFalsas.lista = [
+      { id: "c0", organograma_node_id: "antiga", valido_ate: "2026-01-31" },
+      { id: "c1", organograma_node_id: "actual", valido_ate: null },
+    ];
+    render(arvore());
+    expect(screen.getByRole("heading", { level: 1 }).parentElement).toHaveTextContent("Gerente · Filial Actual");
+  });
+
+  it("enquanto a colocação carrega mostra só o cargo: nem «sem filial» nem filial inventada", () => {
+    filiaisFalsas.lista = [{ id: "no-centro", name: "Filial do centro" }];
+    colocacoesFalsas.loading = true;
+    render(arvore());
+    const linha = screen.getByRole("heading", { level: 1 }).parentElement as HTMLElement;
+    expect(linha).toHaveTextContent("Gerente");
+    expect(linha).not.toHaveTextContent("·");
+    expect(linha).not.toHaveTextContent("rhForm.ficha.semFilial");
+  });
+
+  it("se a leitura da colocação foi recusada mostra só o cargo, não afirma «sem filial»", () => {
+    filiaisFalsas.lista = [{ id: "actual", name: "Filial Actual" }];
+    colocacoesFalsas.recusado = true;
+    colocacoesFalsas.lista = [];
+    render(arvore());
+    const linha = screen.getByRole("heading", { level: 1 }).parentElement as HTMLElement;
+    expect(linha).toHaveTextContent("Gerente");
+    expect(linha).not.toHaveTextContent("·");
+    expect(linha).not.toHaveTextContent("rhForm.ficha.semFilial");
+  });
+
+  it("sem colocação em vigor diz «sem filial», mesmo que o centro de trabalho tenha filial", () => {
+    filiaisFalsas.lista = [{ id: "no-centro", name: "Filial do centro" }];
+    colocacoesFalsas.lista = [];
+    estadoFicha = { ...estadoFicha, pessoa: { ...PESSOA, local_id: "l1" } };
+    usarContexto.mockReturnValue({ ...usarContexto(), locais: LOCAIS });
+    render(arvore());
+    const linha = screen.getByRole("heading", { level: 1 }).parentElement as HTMLElement;
+    expect(linha).toHaveTextContent("Gerente · rhForm.ficha.semFilial");
+    expect(linha).not.toHaveTextContent("Filial do centro");
   });
 });

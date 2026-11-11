@@ -1,6 +1,8 @@
 /**
  * Grupo 2 do separador Contratos -- Datas e prazos: quando comeca, quando
- * acaba, e o que lhe da forma entretanto (periodo experimental, formacao).
+ * acaba, e o que lhe da forma entretanto (periodo experimental). A formacao
+ * (`formacao_inicio`/`formacao_fim`) saiu do ecra por decisao do RH: as colunas
+ * ficam na base e nada as le nem escreve daqui.
  *
  * Termo certo: a DURACAO EM MESES vive aqui, ao lado da data de fim. Mudar os
  * meses ou o inicio recalcula a data de fim (a vespera do dia correspondente;
@@ -168,29 +170,6 @@ export function ContratoGrupoDatas({
             />
           </>
         )}
-        <CampoTexto
-          id="hr-contrato-formacao-inicio"
-          label={t("hr.contrato.formacaoInicio")}
-          tipo="date"
-          valor={rascunho.formacao_inicio}
-          disabled={!podeEditar}
-          onChange={(v) => definir("formacao_inicio", v)}
-        />
-        <CampoTexto
-          id="hr-contrato-formacao-fim"
-          label={t("hr.contrato.formacaoFim")}
-          erro={
-            rascunho.formacao_fim.trim() !== "" &&
-            rascunho.formacao_inicio.trim() !== "" &&
-            rascunho.formacao_fim < rascunho.formacao_inicio
-              ? t("hr.contrato.erroFormacaoFimAntesInicio")
-              : null
-          }
-          tipo="date"
-          valor={rascunho.formacao_fim}
-          disabled={!podeEditar}
-          onChange={(v) => definir("formacao_fim", v)}
-        />
       </div>
     </div>
   );
