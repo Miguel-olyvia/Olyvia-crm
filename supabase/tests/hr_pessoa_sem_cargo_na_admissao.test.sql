@@ -27,11 +27,10 @@
 --      linha em pessoas_cargos e pessoas.cargo_id fica sincronizado
 --   6. Voltar um cargo preenchido a NULL -> HRC08; mudar o cargo sem a GUC -> HRC10; INSERT com cargo continua a abrir
 --      a primeira linha
---   7. REGISTA o limite da rpc_hr_pessoa_mudar_cargo numa ficha sem cargo (documentado na migration; a RPC nao muda):
+--   7. A rpc_hr_pessoa_mudar_cargo numa ficha sem cargo:
 --      7a data_admissao NULL -> atribuir cargo com p_desde = hoje passa;
---      7b data_admissao futura -> HRC04 com p_desde = hoje ("antes da data de admissao") e com p_desde = admissao
---         ("so pode comecar ate hoje"); a ficha fica sem cargo e sem linhas. Por isso o assistente so pede o cargo
---         quando a data de inicio e hoje ou ja passou.
+--      7b data_admissao futura -> HRC04 com p_desde = hoje ("antes da data de admissao"); com p_desde = admissao
+--         passa desde 20270114800000 (antes dava HRC04 "so pode comecar ate hoje") e abre a linha nessa data.
 -- ============================================================
 
 BEGIN;
@@ -277,10 +276,10 @@ BEGIN
                           '1', '6.3 INSERT com cargo abre a primeira linha na admissao');
 END $t$;
 
--- ─── 7. Limite da RPC numa ficha sem cargo (REGISTA o comportamento; a RPC nao muda) ──
+-- ─── 7. A RPC numa ficha sem cargo ───────────────────────────────────────────
 -- 7a data_admissao NULL: atribuir cargo com p_desde = hoje passa.
--- 7b data_admissao FUTURA: nao se atribui cargo antes dessa data (HRC04), nem com p_desde = hoje (antes da admissao)
---    nem com p_desde = data de admissao (depois de hoje).
+-- 7b data_admissao FUTURA: p_desde = hoje (antes da admissao) continua HRC04; p_desde = data de admissao passa
+--    desde 20270114800000.
 INSERT INTO public.pessoas (id, organization_id, primeiro_nome, apelido, data_admissao) VALUES
   ('d8a70000-0000-4000-8000-000000002003', 'b6ffce4f-f630-4933-833a-008649757a33', 'TesteSemCargo', 'AdmissaoNula', NULL),
   ('d8a70000-0000-4000-8000-000000002004', 'b6ffce4f-f630-4933-833a-008649757a33', 'TesteSemCargo', 'AdmissaoFutura', current_date + 30);
@@ -304,15 +303,9 @@ BEGIN
     END IF;
   END;
 
-  BEGIN
-    PERFORM public.rpc_hr_pessoa_mudar_cargo('d8a70000-0000-4000-8000-000000002004',
-                                             current_setting('teste.cargo_a')::uuid, current_date + 30, 'Passou a admissao');
-    RAISE EXCEPTION 'FALHOU: 7b.2 cargo com p_desde = admissao futura devia dar HRC04';
-  EXCEPTION WHEN SQLSTATE 'HRC04' THEN
-    IF SQLERRM NOT LIKE 'data_invalida: o cargo so pode comecar ate hoje (%' THEN
-      RAISE EXCEPTION 'FALHOU: 7b.2 admissao futura, p_desde = admissao -- recusado, mas com outra mensagem: %', SQLERRM;
-    END IF;
-  END;
+  -- 7b.2 desde 20270114800000: p_desde = admissao futura passa (ver hr_cargo_com_admissao_futura.test.sql).
+  PERFORM public.rpc_hr_pessoa_mudar_cargo('d8a70000-0000-4000-8000-000000002004',
+                                           current_setting('teste.cargo_a')::uuid, current_date + 30, 'Passou a admissao');
 END $t$;
 
 RESET ROLE;
@@ -326,12 +319,13 @@ BEGIN
                             WHERE c.pessoa_id = 'd8a70000-0000-4000-8000-000000002003'
                               AND c.valido_de = current_date AND c.valido_ate IS NULL),
                           '1', '7a admissao NULL: linha aberta desde hoje');
-  PERFORM pg_temp.t_igual((SELECT coalesce(pe.cargo_id::text, 'NULL') FROM public.pessoas pe
+  PERFORM pg_temp.t_igual((SELECT pe.cargo_id::text FROM public.pessoas pe
                             WHERE pe.id = 'd8a70000-0000-4000-8000-000000002004'),
-                          'NULL', '7b admissao futura: continua sem cargo');
+                          current_setting('teste.cargo_a'), '7b admissao futura: cargo atribuido com p_desde = admissao');
   PERFORM pg_temp.t_igual((SELECT count(*)::text FROM public.pessoas_cargos c
-                            WHERE c.pessoa_id = 'd8a70000-0000-4000-8000-000000002004'),
-                          '0', '7b admissao futura: nenhuma linha em pessoas_cargos');
+                            WHERE c.pessoa_id = 'd8a70000-0000-4000-8000-000000002004'
+                              AND c.valido_de = current_date + 30 AND c.valido_ate IS NULL),
+                          '1', '7b admissao futura: uma linha aberta desde a admissao');
 END $t$;
 
 SELECT 'OK: hr_pessoa_sem_cargo_na_admissao -- todos os casos passaram (tudo desfeito no ROLLBACK)' AS resultado,
