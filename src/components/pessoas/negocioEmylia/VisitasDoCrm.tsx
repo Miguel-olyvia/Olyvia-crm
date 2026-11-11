@@ -92,6 +92,8 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
   // 11/11 (F2): marcar, remarcar, cancelar e dar como feita pedem negocios.visita.gerir (neg_guardar_visita, neg_cancelar_visita; o espelho
   // v<n>_* também, em neg_guardar_negocio). Sem ela os botões ficam desligados e diz-se a permissão em falta, como nos outros passos.
   const podeGerir = c.podeEditar && podeNeg(ctx.S.role, "visita.gerir");
+  // 11/11 (20270114320000): dar a visita como feita é preencher a visita (neg_resultado_visita)
+  const podePreencher = c.podeEditar && podeNeg(ctx.S.role, "visita.preencher");
   const semGerir = c.podeEditar && !podeGerir;
   const idSemGerir = `sem-visita-gerir-${d.id}`;
 
@@ -207,7 +209,7 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
                 <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar && podeGerir) { setAMarcar(false); setARemarcar(v.id); } }}>Remarcar</Button>
                 <Button type="button" variant="ghost" className={cn("min-h-11 text-muted-foreground", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar && podeGerir) cancelar(v); }}>Cancelar esta visita</Button>
                 {Date.parse(v.inicio) <= Date.now() && (
-                  <Button type="button" variant="ghost" className={cn("min-h-11 text-muted-foreground", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar && podeGerir) darComoFeita(v); }}>Dar como feita</Button>
+                  <Button type="button" variant="ghost" className={cn("min-h-11 text-muted-foreground", FOCO)} disabled={!podePreencher} aria-disabled={acao.aGuardar || undefined} title={podePreencher ? undefined : SEM_PERM["visita.preencher"].sub} onClick={() => { if (!acao.aGuardar && podePreencher) darComoFeita(v); }}>Dar como feita</Button>
                 )}
               </div>
             ) : undefined}

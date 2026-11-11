@@ -13,7 +13,7 @@ import { acoes, definirPerdaReal, faseDaPerda, permDoCampo, seed, type Aviso, ty
 import { aplicarResposta, type RespostaCliente } from "./real/vistaCliente";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "./real/perdaReal";
 
-const NOVAS: PermNeg[] = ["contacto.registar", "visita.gerir", "proposta.decidir", "obra.imprevistos", "obra.fechar", "negocio.perder"];
+const NOVAS: PermNeg[] = ["contacto.registar", "visita.gerir", "visita.preencher", "proposta.decidir", "obra.imprevistos", "obra.fechar", "negocio.perder"];
 const TODOS = Object.values(CODIGO_BASE);
 
 afterEach(() => { definirPermissoesReais(null); definirPerdaReal(null); rpc.mockReset(); });
@@ -31,10 +31,10 @@ const algum = (S: Estado, f: (d: Negocio) => boolean = () => true): Negocio => S
 
 describe("o quadro por papel bate com neg_papeis_permissoes (20270105200000)", () => {
   const ESPERADO: Record<Papel, PermNeg[]> = {
-    comercial: ["contacto.registar", "visita.gerir", "proposta.decidir", "negocio.perder"],
-    armazem: ["contacto.registar", "visita.gerir", "proposta.decidir", "negocio.perder"],
-    financeiro: ["contacto.registar", "visita.gerir", "proposta.decidir", "negocio.perder"],
-    juridico: ["contacto.registar", "visita.gerir", "proposta.decidir", "negocio.perder"],
+    comercial: ["contacto.registar", "visita.gerir", "visita.preencher", "proposta.decidir", "negocio.perder"],
+    armazem: ["contacto.registar", "visita.gerir", "visita.preencher", "proposta.decidir", "negocio.perder"],
+    financeiro: ["contacto.registar", "visita.gerir", "visita.preencher", "proposta.decidir", "negocio.perder"],
+    juridico: ["contacto.registar", "visita.gerir", "visita.preencher", "proposta.decidir", "negocio.perder"],
     operacoes: NOVAS, direcao: NOVAS, tecnico: [],
   };
   it.each(Object.keys(ESPERADO) as Papel[])("%s", (papel) => {
@@ -42,7 +42,7 @@ describe("o quadro por papel bate com neg_papeis_permissoes (20270105200000)", (
   });
   it("os códigos são os da base, e a leitura das permissões pergunta-os", () => {
     expect(NOVAS.map((p) => CODIGO_BASE[p])).toEqual([
-      "negocios.contacto.registar", "negocios.visita.gerir", "negocios.proposta.decidir", "negocios.obra.imprevistos", "negocios.obra.fechar", "negocios.perder",
+      "negocios.contacto.registar", "negocios.visita.gerir", "negocios.visita.preencher", "negocios.proposta.decidir", "negocios.obra.imprevistos", "negocios.obra.fechar", "negocios.perder",
     ]);
     NOVAS.forEach((p) => expect(CODIGOS_NEGOCIOS).toContain(CODIGO_BASE[p]));
     NOVAS.forEach((p) => expect(SEM_PERM[p].sub).toContain(CODIGO_BASE[p]));
@@ -57,7 +57,9 @@ describe("o quadro por papel bate com neg_papeis_permissoes (20270105200000)", (
 describe("permDoCampo: a permissão de cada resposta, como fn_neg_marcas_permissoes", () => {
   it("contacto, visita e as outras", () => {
     ["resultado", "tentativas", "religar"].forEach((k) => expect(permDoCampo(k)).toBe("contacto.registar"));
-    ["v1_estado", "v12_quem", "diag_humidade", "div_cozinha_diag_bancada"].forEach((k) => expect(permDoCampo(k)).toBe("visita.gerir"));
+    ["v1_estado", "v12_quem"].forEach((k) => expect(permDoCampo(k)).toBe("visita.gerir"));
+    // 11/11 (20270114320000): o combinado e o diagnóstico são preencher a visita
+    ["v1_combinado", "diag_humidade", "div_cozinha_diag_bancada"].forEach((k) => expect(permDoCampo(k)).toBe("visita.preencher"));
     ["notas", "morada", "pagamento", "nif_fat", "div_cozinha_medida", "visita", "diagnostico"].forEach((k) => expect(permDoCampo(k)).toBeNull());
   });
 });
@@ -71,17 +73,17 @@ const CASOS: Caso[] = [
   ["campo religar", "contacto.registar", (A, S) => A.campo(algum(S).id, "religar", "2026-11-10")],
   ["confirmar resultado", "contacto.registar", (A, S) => A.confirmar(algum(S).id, ["resultado"])],
   ["marcarVisita", "visita.gerir", (A, S) => A.marcarVisita(algum(S, (d) => d.fase === 1).id)],
-  ["fecharVisita", "visita.gerir", (A, S) => A.fecharVisita(algum(S, (d) => d.fase === 2).id)],
-  ["reabrirVisita", "visita.gerir", (A, S) => A.reabrirVisita(algum(S, (d) => d.fase === 3 && !!d.orc && !d.orc.enviada).id)],
-  ["desistirVisita", "visita.gerir", (A, S) => A.desistirVisita(algum(S).id)],
+  ["fecharVisita", "visita.preencher", (A, S) => A.fecharVisita(algum(S, (d) => d.fase === 2).id)],
+  ["reabrirVisita", "visita.preencher", (A, S) => A.reabrirVisita(algum(S, (d) => d.fase === 3 && !!d.orc && !d.orc.enviada).id)],
+  ["desistirVisita", "visita.preencher", (A, S) => A.desistirVisita(algum(S).id)],
   ["novaVisita", "visita.gerir", (A, S) => A.novaVisita(algum(S).id)],
   ["cancelarVisita", "visita.gerir", (A, S) => A.cancelarVisita(algum(S).id, 1)],
   ["apagarVisita", "visita.gerir", (A, S) => A.apagarVisita(algum(S).id, 1)],
   ["campo v1_", "visita.gerir", (A, S) => A.campo(algum(S).id, "v1_estado", "Feita")],
-  ["campo diag_", "visita.gerir", (A, S) => A.campo(algum(S).id, "diag_humidade", "Sim")],
-  ["campo div_*_diag_", "visita.gerir", (A, S) => A.campo(algum(S).id, "div_cozinha_diag_humidade", "Sim")],
-  ["confirmar diag_", "visita.gerir", (A, S) => A.confirmar(algum(S).id, ["diag_humidade"])],
-  ["foto", "visita.gerir", (A, S) => A.foto(algum(S).id)],
+  ["campo diag_", "visita.preencher", (A, S) => A.campo(algum(S).id, "diag_humidade", "Sim")],
+  ["campo div_*_diag_", "visita.preencher", (A, S) => A.campo(algum(S).id, "div_cozinha_diag_humidade", "Sim")],
+  ["confirmar diag_", "visita.preencher", (A, S) => A.confirmar(algum(S).id, ["diag_humidade"])],
+  ["foto", "visita.preencher", (A, S) => A.foto(algum(S).id)],
   ["proporImprevisto", "obra.imprevistos", (A, S) => A.proporImprevisto(comImprevisto(S).id, "IMP-T", [], [])],
   ["decidirImprevisto", "obra.imprevistos", (A, S) => A.decidirImprevisto(comImprevisto(S).id, "IMP-T", "seguir")],
   ["fimObra", "obra.fechar", (A, S) => A.fimObra(algum(S, (d) => d.obra.plano?.estado === "em curso").id)],

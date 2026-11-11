@@ -1882,7 +1882,9 @@ export function permDoCampo(k: string): PermNeg | null {
   // negocios.obra.planear, como o passo (F3, 20270113110000)
   if (k === "resultado" || k === "tentativas" || k === "religar" || k === CHAVE_CONTACTO_CONCLUIDO) return "contacto.registar";
   if (k.startsWith("retif_")) return "obra.planear";
-  if (/^(v[0-9]+_|diag_|div_[a-z0-9]+_diag_)/.test(k)) return "visita.gerir";
+  // 11/11 (20270114320000): o combinado e o diagnóstico são preencher a visita; o resto de v<n>_ é a agenda (gerir)
+  if (/^(v[0-9]+_combinado$|diag_|div_[a-z0-9]+_diag_)/.test(k)) return "visita.preencher";
+  if (/^v[0-9]+_/.test(k)) return "visita.gerir";
   return null;
 }
 
@@ -2289,7 +2291,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     fecharVisita(id: number) {
       // 3/11: fechar o levantamento é da visita; o orçamento que nasce aqui o servidor só o deixa mudar com negocios.orcamento.editar (sem
       // ela, neg_guardar_negocio repõe os totais da base e recusa se o orçamento mudar)
-      if (!exigePerm("visita.gerir") || !exigePerm("orcamento.editar")) return;
+      if (!exigePerm("visita.preencher") || !exigePerm("orcamento.editar")) return;
       const d = deal(id);
       sincronizarVisita(d);
       if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, ...gruposArea(S.campos, d.f), ESCOLHAS], extrasVisita(d))) return;
@@ -2311,7 +2313,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Volta a abrir o levantamento (só antes de a proposta ser enviada): a visita fica editável e o negócio volta à Visita. */
     reabrirVisita(id: number) {
-      if (!exigePerm("visita.gerir")) return;
+      if (!exigePerm("visita.preencher")) return;
       const d = deal(id);
       if (d.fase !== 3 || !d.orc || d.orc.enviada) { avisar({ msg: "Já não se pode reabrir", sub: "A proposta já foi enviada ao cliente", kind: "bad" }); return; }
       d.visita.fechada = false; d.fase = 2; d.valida = null; d.orc.verif = false; d.orc.aprov = null;
@@ -2320,7 +2322,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Voltou à visita mas afinal não muda nada: o orçamento fica exatamente como estava (sem o refazer nem pedir os campos). */
     desistirVisita(id: number) {
-      if (!exigePerm("visita.gerir")) return;
+      if (!exigePerm("visita.preencher")) return;
       const d = deal(id);
       if (d.fase !== 2 || !d.orc) return;
       d.visita.fechada = true; d.fase = 3; d.valida = null; S.pulse = null;
@@ -4090,14 +4092,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Uma fotografia numa etapa da visita (por omissão, a área); o total sobe também. */
     foto(id: number, etapa: EtapaFotos = "area", img?: string) {
-      if (!exigePerm("visita.gerir")) return;
+      if (!exigePerm("visita.preencher")) return;
       const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++;
       // 9/11: no protótipo a imagem fica no estado (com a base ligada, grava-se à parte e aqui só sobe a contagem)
       if (img) { v.fotosImg ??= {}; (v.fotosImg[etapa] ??= []).push(img); }
     },
     /** 9/11: apagar uma fotografia de uma etapa (k: a posição da imagem no protótipo; sem k, só desce a contagem). */
     tirarFoto(id: number, etapa: EtapaFotos, k?: number) {
-      if (!exigePerm("visita.gerir")) return;
+      if (!exigePerm("visita.preencher")) return;
       const v = deal(id).visita; v.fotosPor = fotosPor(v);
       if (!(v.fotosPor[etapa]! > 0)) return;
       v.fotosPor[etapa] = v.fotosPor[etapa]! - 1; v.fotos = Math.max(0, v.fotos - 1);

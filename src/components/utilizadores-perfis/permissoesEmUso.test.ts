@@ -124,12 +124,12 @@ describe("permissões em uso: a lista", () => {
     expect(negocios?.subgrupos.map((s) => s.rotulo)).toEqual([
       "Geral", "Pessoas: leads e clientes", "Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra",
     ]);
-    expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(16);
+    expect(negocios?.permissoes.filter((p) => p.codigo.startsWith("negocios."))).toHaveLength(17);
     const codigosDe = (rotulo: string) => negocios?.subgrupos.find((s) => s.rotulo === rotulo)?.permissoes.map((p) => p.codigo).sort();
     expect(codigosDe("Geral")).toContain("negocios.perder");
     expect(codigosDe("Por contactar")).toEqual(["leads.assign", "leads.create", "leads.view"]);
     expect(codigosDe("Contacto")).toEqual(["negocios.contacto.registar"]);
-    expect(codigosDe("Visita")).toEqual(["negocios.visita.gerir"]);
+    expect(codigosDe("Visita")).toEqual(["negocios.visita.gerir", "negocios.visita.preencher"]);
     expect(codigosDe("Negócio")).toEqual([
       "client_contracts.cancel", "negocios.contrato.editar", "negocios.margem.aprovar", "negocios.orcamento.editar", "negocios.proposta.decidir",
       "negocios.proposta.enviar", "quotes.view_costs",

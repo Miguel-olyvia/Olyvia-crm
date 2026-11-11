@@ -22,11 +22,12 @@ import type { Papel } from "./motor";
 // purchase_orders.create; na obra já não há botão de encomendar (20270106500000). 4/11 (20270106650000): quem planeia a obra
 // (negocios.obra.planear) também pede: é o pedido automático dos materiais da tarefa nova (novaTarefaPlano → ajustar).
 export type PermNeg = "finance.validate_payment" | "finance.invoice" | "contracts.cancel" | "equipa.edit" | "margin.approve"
-  | "contacto.registar" | "visita.gerir" | "proposta.decidir" | "obra.imprevistos" | "obra.fechar" | "negocio.perder"
+  | "contacto.registar" | "visita.gerir" | "visita.preencher" | "proposta.decidir" | "obra.imprevistos" | "obra.fechar" | "negocio.perder"
   | "orcamento.editar" | "proposta.enviar" | "contrato.editar" | "obra.planear" | "obra.executar" | "obra.materiais" | "obra.encomendar";
 
 /** As quatro que a migração deu a quem grava o negócio (pessoas.edit): contacto, visita, decisão do cliente e perder. */
-const DO_NEGOCIO: readonly PermNeg[] = ["contacto.registar", "visita.gerir", "proposta.decidir", "negocio.perder"];
+// 11/11 (20270114320000): a visita tem duas: gerir (marcar, remarcar, cancelar) e preencher (o levantamento); quem tinha uma ficou com as duas
+const DO_NEGOCIO: readonly PermNeg[] = ["contacto.registar", "visita.gerir", "visita.preencher", "proposta.decidir", "negocio.perder"];
 /** As duas da obra (negocios.obra.planear). */
 const DA_OBRA: readonly PermNeg[] = ["obra.imprevistos", "obra.fechar"];
 /** 4/11: as do orçamento, da proposta e do contrato (neg_papeis_permissoes: o comercial e a Direção; o Jurídico só o contrato). */
@@ -54,6 +55,7 @@ export const CODIGO_BASE: Record<PermNeg, string> = {
   "margin.approve": "negocios.margem.aprovar",
   "contacto.registar": "negocios.contacto.registar",
   "visita.gerir": "negocios.visita.gerir",
+  "visita.preencher": "negocios.visita.preencher",
   "proposta.decidir": "negocios.proposta.decidir",
   "obra.imprevistos": "negocios.obra.imprevistos",
   "obra.fechar": "negocios.obra.fechar",
@@ -95,7 +97,7 @@ export const podeNeg = (p: Papel, x: PermNeg): boolean => {
 /** 4/11: as permissões que o servidor pede ao passo de cada botão (neg_guardar_negocio, neg_validar_pagamento, neg_registar_fatura): sem
  *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
 const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
-  contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.gerir", "orcamento.editar"],
+  contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.preencher", "orcamento.editar"],
   pedidoCliente: ["orcamento.editar"], refazerComMudancas: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
   enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
   aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
@@ -195,7 +197,7 @@ export function podeVerCustos(): boolean {
  *  negócio em Visita ou mais à frente, ou em Contacto já «passado ao comercial», o servidor só grava a quem tiver uma destas (a MESMA lista
  *  de neg_guardar_negocio). Leem-se com as outras (CODIGOS_NEGOCIOS). */
 export const CODIGOS_DEPOIS_DO_CONTACTO: readonly string[] = [
-  "negocios.visita.gerir", "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "negocios.proposta.decidir",
+  "negocios.visita.gerir", "negocios.visita.preencher", "negocios.orcamento.editar", "negocios.margem.aprovar", "negocios.proposta.enviar", "negocios.proposta.decidir",
   "negocios.contrato.editar", "negocios.registar_fatura", "negocios.validar_pagamento", "negocios.obra.planear", "negocios.obra.executar",
   "negocios.obra.materiais", "negocios.obra.imprevistos", "negocios.obra.fechar", "negocios.obra.tecnico",
 ];
@@ -250,7 +252,8 @@ export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "equipa.edit": { msg: "Sem permissão para mudar a ficha do técnico", sub: "Mudar o ofício e as férias do técnico pede a permissão hr.pessoas.laborais.edit (dados laborais do RH)." },
   "margin.approve": { msg: "Sem permissão para aprovar a margem", sub: "Só a Direção aprova uma proposta abaixo da margem mínima (negocios.margem.aprovar)." },
   "contacto.registar": { msg: "Sem permissão para registar o contacto", sub: "Registar a chamada, as tentativas, o voltar a ligar e passar o negócio ao comercial pede a permissão negocios.contacto.registar." },
-  "visita.gerir": { msg: "Sem permissão para gerir as visitas", sub: "Marcar, alterar, cancelar e fechar as visitas e o diagnóstico no local pede a permissão negocios.visita.gerir." },
+  "visita.gerir": { msg: "Sem permissão para gerir as visitas", sub: "Marcar, remarcar e cancelar as visitas (quem vai, o dia e a hora, o tipo e a morada) pede a permissão negocios.visita.gerir." },
+  "visita.preencher": { msg: "Sem permissão para preencher a visita", sub: "Preencher a visita (exterior, interior, Estúdio, medidas, fotografias, diagnóstico), dar-lhe resultado e fechar o levantamento pede a permissão negocios.visita.preencher. Pode vê-la." },
   "proposta.decidir": { msg: "Sem permissão para registar a decisão do cliente", sub: "Registar o pedido de alterações ou a resposta a uma adenda pede a permissão negocios.proposta.decidir." },
   "obra.imprevistos": { msg: "Sem permissão para decidir os imprevistos", sub: "Propor ao cliente o trabalho extra e decidir o imprevisto pede a permissão negocios.obra.imprevistos." },
   "obra.fechar": { msg: "Sem permissão para encerrar a obra", sub: "Dar a obra por concluída e enviar o auto de receção pede a permissão negocios.obra.fechar." },

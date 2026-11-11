@@ -463,12 +463,13 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           ]} /></div> },
       ];
     }
-    // 11/11: a Visita (Exterior, Interior, Estúdio, Fim) é do comercial: sem negocios.visita.gerir (a assistente comercial) fica só de
-    // leitura, com a permissão em falta; o servidor recusa o mesmo (neg_guardar_negocio, 20270113130000)
-    if (comPermissoesReais() && !podeNeg(S.role, "visita.gerir")) {
-      passos = passos.map((p) => ({ ...p, corpo: (
+    // 11/11: a Visita (Exterior, Interior, Estúdio, Fim) é do comercial: sem negocios.visita.preencher (a assistente comercial, que só
+    // marca) fica só de leitura, com a permissão em falta; o servidor recusa o mesmo (neg_guardar_negocio, 20270114320000). As visitas da
+    // agenda (o passo «visitas», VisitasDoCrm) seguem negocios.visita.gerir.
+    if (comPermissoesReais() && !podeNeg(S.role, "visita.preencher")) {
+      passos = passos.map((p) => (p.id === "visitas" ? p : { ...p, corpo: (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">{SEM_PERM["visita.gerir"].sub}</p>
+          <p className="text-sm text-muted-foreground">{SEM_PERM["visita.preencher"].sub}</p>
           <fieldset disabled className="m-0 min-w-0 border-0 p-0">{p.corpo}</fieldset>
         </div>
       ) }));
