@@ -163,3 +163,12 @@ describe("replanear com dados reais (testarh, 11/11)", () => {
     expect(r.fimDepois).toBeGreaterThan(r.fimAntes);
   });
 });
+
+describe("as instruções no Hoje do técnico (teste da Obra)", () => {
+  it("«Montagem de louças» de um canalizador tem os passos das louças, não os da canalização", async () => {
+    const { instrucoesDe } = await import("../trabalhoObra");
+    const i = instrucoesDe({ nome: "Montagem de louças", sk: "Canalizador" });
+    expect(i.passos.join(" ")).toMatch(/sanita|base de duche|torneiras/i);
+    expect(instrucoesDe({ nome: "Canalização", sk: "Canalizador" }).passos.join(" ")).toMatch(/pontos de água/);
+  });
+});

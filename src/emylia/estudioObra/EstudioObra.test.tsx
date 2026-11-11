@@ -84,3 +84,18 @@ describe("Estúdio da obra: quem está livre quando uma tarefa espera", () => {
     expect(p.tasks[ti].tec).toBe("pm2");
   });
 });
+
+describe("Estúdio da obra: o teclado", () => {
+  it("Esc fecha o painel e depois o Estúdio", () => {
+    const { S, d } = obraDeExemplo();
+    const A = acoes(S, () => {}, (fn) => fn());
+    let fechado = false;
+    const ctx = { S, A, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "" } as unknown as Ctx;
+    render(<EstudioObra ctx={ctx} d={d} fechar={() => { fechado = true; }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Registar imprevisto" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(fechado).toBe(false);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(fechado).toBe(true);
+  });
+});

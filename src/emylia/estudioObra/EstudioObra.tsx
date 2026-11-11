@@ -64,6 +64,16 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   // o imprevisto a ser registado (painel): o atraso dele mostra-se já no plano vivo, sem a caixa de aplicar
   const [fantasma, setFantasma] = useState<Plano | null>(null);
   const imprevistosRef = useRef<HTMLElement>(null);
+  // Esc fecha o que está por cima: o painel, depois a pré-visualização, depois o Estúdio (com outra obra aberta, é ela que fecha)
+  useEffect(() => {
+    if (outra) return;
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (painel) setPainel(null); else if (previa) setPrevia(null); else fechar();
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [painel, previa, outra, fechar]);
 
   if (!p) return null;
   // as outras obras (para os técnicos noutra obra): lê-se a cada desenho, porque o estado muda no sítio
