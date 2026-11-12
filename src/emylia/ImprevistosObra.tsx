@@ -113,13 +113,14 @@ const ESTADO: Record<Imprevisto["estado"], [string, string]> = {
   aberto: ["por propor ao cliente", "bg-destructive/10 text-destructive"], proposta: ["à espera do cliente", "bg-warning/15"],
   recusado: ["o cliente não aceitou", "bg-destructive/10 text-destructive"], aprovado: ["aprovado pelo cliente", "bg-success/15"], fechado: ["fechado", "bg-muted text-muted-foreground"],
 };
-export function ImprevistosNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+/** `porDisparar` (12/11, Estúdio da obra): a proposta prepara a adenda sem a enviar; o gestor dispara-a do alerta das adendas, em cima. */
+export function ImprevistosNaObra({ ctx, d, porDisparar }: { ctx: Ctx; d: Negocio; porDisparar?: boolean }) {
   const L = imprevistosDe(d).filter((i) => i.estado !== "fechado");
   if (!L.length) return null;
-  return <div className="space-y-3">{L.map((im) => <CartaoImprevisto key={im.id} ctx={ctx} d={d} im={im} />)}</div>;
+  return <div className="space-y-3">{L.map((im) => <CartaoImprevisto key={im.id} ctx={ctx} d={d} im={im} porDisparar={porDisparar} />)}</div>;
 }
 
-function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto }) {
+function CartaoImprevisto({ ctx, d, im, porDisparar }: { ctx: Ctx; d: Negocio; im: Imprevisto; porDisparar?: boolean }) {
   const { S, A, run, go } = ctx;
   const [propor, setPropor] = useState(false);
   const [nota, setNota] = useState("");
@@ -137,7 +138,7 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
             <p className="text-sm text-muted-foreground">{im.quem.split(" ")[0]} · {im.q}{im.onde ? ` · ${im.onde}` : ""} · {im.grav === "impede" ? (par.length ? `parad${par.length === 1 ? "a" : "as"}: ${par.map((t) => nomeCurtoTarefa(t.nome)).join(", ")}` : "impedia de continuar") : `atrasou ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}</p>
           </div>
         </div>
-        <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", ESTADO[im.estado][1])}>{ESTADO[im.estado][0]}</span>
+        <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", ESTADO[im.estado][1])}>{im.estado === "proposta" && a?.estado === "rascunho" ? "adenda por disparar" : ESTADO[im.estado][0]}</span>
       </div>
 
       {im.estado === "aberto" && !propor && (
@@ -146,8 +147,12 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
           {pode && <button type="button" onClick={go(() => A.decidirImprevisto(d.id, im.id, "seguir", "sem custo para o cliente"))} className="min-h-11 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Resolver sem custo para o cliente</button>}
         </div>
       )}
-      {im.estado === "aberto" && propor && <PropostaImprevisto ctx={ctx} d={d} im={im} fechar={() => setPropor(false)} />}
-      {im.estado === "proposta" && a && (
+      {im.estado === "aberto" && propor && <PropostaImprevisto ctx={ctx} d={d} im={im} fechar={() => setPropor(false)} porDisparar={porDisparar} />}
+      {/* 12/11: no Estúdio da obra, a adenda por disparar trata-se no alerta das adendas, em cima */}
+      {im.estado === "proposta" && a && porDisparar && a.estado === "rascunho" && (
+        <p className="mt-3 text-[15px]">Adenda {a.n} · {eur(totaisAdenda(a).total)} € · por disparar no alerta das adendas, em cima.</p>
+      )}
+      {im.estado === "proposta" && a && !(porDisparar && a.estado === "rascunho") && (
         <div className="mt-3 flex flex-wrap items-center gap-3 text-[15px]">
           {/* 21/10: a adenda do imprevisto segue o percurso da proposta (verificação, aceitação, contrato da adenda, assinatura) */}
           {/* 27/10: o estado já está na pastilha do cartão; aqui só a adenda, o valor e os dias */}
@@ -179,7 +184,7 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
 }
 
 /* ================================================================== a proposta: serviços do Catálogo e/ou uma linha livre */
-function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: Imprevisto; fechar: () => void }) {
+function PropostaImprevisto({ ctx, d, im, fechar, porDisparar }: { ctx: Ctx; d: Negocio; im: Imprevisto; fechar: () => void; porDisparar?: boolean }) {
   const { S, A, run } = ctx;
   const [itens, setItens] = useState<{ sid: string; q: number }[]>([]);
   // 21/10: o preço sugerido da linha livre tem a margem alvo (a adenda verifica-se como o orçamento antes de ir ao cliente)
@@ -249,7 +254,7 @@ function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: 
       </div>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button variant="ghost" size="lg" onClick={fechar}>Cancelar</Button>
-        <Button size="lg" disabled={!todas.length || todas.some((x) => !(x.q > 0))} onClick={() => { run(() => A.proporImprevisto(d.id, im.id, itens, livres)); fechar(); }}>Enviar ao cliente para aprovar</Button>
+        <Button size="lg" disabled={!todas.length || todas.some((x) => !(x.q > 0))} onClick={() => { run(() => A.proporImprevisto(d.id, im.id, itens, livres, { enviar: !porDisparar })); fechar(); }}>{porDisparar ? "Preparar a adenda" : "Enviar ao cliente para aprovar"}</Button>
       </div>
     </div>
   );

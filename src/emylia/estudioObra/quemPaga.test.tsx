@@ -202,4 +202,18 @@ describe("o alerta das adendas por disparar, em cima do Estúdio (sem sair dele)
     expect(a.estado).toBe("anulada");
     expect(im.estado).toBe("aberto");
   });
+  it("no bloco Imprevistos do Estúdio, «Fazer a proposta» também prepara a adenda por disparar", () => {
+    const { d } = montar();
+    const im = d.obra.imprevistos!.find((x) => x.estado === "aberto")!;
+    const cartaoIm = screen.getByRole("article", { name: `Imprevisto ${im.id}` });
+    fireEvent.click(within(cartaoIm).getByRole("button", { name: "Fazer a proposta ao cliente" }));
+    fireEvent.click(within(screen.getByRole("article", { name: `Imprevisto ${im.id}` })).getByRole("button", { name: "Preparar a adenda" }));
+    expect(im.estado).toBe("proposta");
+    const a = d.adendas!.find((x) => x.n === im.adenda)!;
+    expect(a.estado).toBe("rascunho");
+    expect(within(screen.getByRole("article", { name: `Imprevisto ${im.id}` })).getByText("adenda por disparar")).toBeTruthy();
+    const al = screen.getByRole("region", { name: "Adendas da obra" });
+    fireEvent.click(within(within(al).getByRole("article", { name: `Adenda ${a.n}` })).getByRole("button", { name: "Enviar ao cliente" }));
+    expect(a.estado).toBe("enviada");
+  });
 });
