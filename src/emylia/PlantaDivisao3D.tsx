@@ -21,6 +21,7 @@ import { ListaVendavel, PainelConjunto, PainelVariante } from "./planta3d/Painel
 import { PainelGenerico } from "./planta3d/PainelGenerico";
 import { PainelComposicao } from "./planta3d/PainelComposicao";
 import { aplicarComposicao, composicaoDe, modeloDaComposicao, pecaComposicao, predefinido, type ComposicaoCozinha } from "./planta3d/composicaoCozinha";
+import { pecasDaComposicao, type ParteLivre } from "./planta3d/composicaoLivre";
 import { PainelBancada } from "./planta3d/PainelBancada";
 import { BANCADA_OMISSAO, aplicarConfig, modeloDaBancada, pecaBancada, type ConfigBancada } from "./planta3d/bancada";
 import { ListaPecas, nomeDaPeca } from "./planta3d/ListaPecas";
@@ -277,6 +278,16 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
     const novas = expandirConjunto(c, inst, r.peca);
     gravar({ ...p, pecas: [...p.pecas, ...novas] }); setSel(`${inst}-${c.ancora}`); setAviso("");
   };
+  /** Põe a «Composição livre» (protótipo): as partes em fila, ligadas como um conjunto; a primeira (âncora) ajusta-se à divisão e as outras vão atrás dela. */
+  const adicionarComposicaoLivre = (partes: ParteLivre[]) => {
+    if (partes.length === 0) return;
+    const inst = (() => { let n = 1; while (p.pecas.some((x) => x.conj === `cl${n}`)) n++; return `cl${n}`; })();
+    const b = p.paredes.length || p.pecas.length ? limites(p) : { x: p.o.x, y: p.o.y, w: 300, h: 200 };
+    const novas = pecasDaComposicao(partes, inst, { x: b.x + b.w / 2, y: b.y + b.h / 2 }), poly = poligonoDe(p);
+    const r = ajustarPeca(p, poly && !ehDeParede(novas[0]) ? encostarParede(poly, novas[0]).peca : novas[0], { orientar: true });
+    if (!r.ok) { setAviso(r.erro); return; }
+    gravar(reposicionarConjunto({ ...p, pecas: [...p.pecas, r.peca, ...novas.slice(1)] }, inst)); setSel(r.peca.id); setAviso("");
+  };
   /** Põe a bancada composta na planta: ao meio, com as costas na parede mais próxima (como os conjuntos). */
   const adicionarBancada = () => {
     const nid = novoId(), cfg = BANCADA_OMISSAO;
@@ -468,7 +479,7 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
       {/* as peças: arrastar para a planta, ou tocar */}
       <div className="space-y-2">
         <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo}
-          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} onComposicao={adicionarComposicao} />
+          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} onComposicao={adicionarComposicao} onComposicaoLivre={adicionarComposicaoLivre} />
         {/* pavimentos e revestimentos de parede como produtos: ficam na planta (desfazer/refazer); os selectores do 3D são um atalho para o mesmo */}
         {revInfo && (
           <details className="rounded-2xl border border-border p-3">

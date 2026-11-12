@@ -25,7 +25,10 @@ export const CONJUNTOS: Conjunto[] = [
   { id: "movel_lavatorio", nome: "Móvel de lavatório (demo)", descricao: "Móvel, lavatório de pousar, torneira e espelho.", espacos: ["casa_banho"], ancora: "movel", desconto: 0.05, componentes: [
     C("movel", "Móvel", "movel_lav_f", true, "w80", "blanco"), C("lavatorio", "Lavatório", "lavatorio_f", true, "w60", "blanco"), C("torneira", "Torneira", "torneira_lav", true, "unica", "chrome"), C("espelho", "Espelho", "espelho_f", false, "80×80", "negro")] },
 ];
-export const conjuntoPorId = (id: string): Conjunto | undefined => CONJUNTOS.find((c) => c.id === id);
+/** A «Composição livre» (composicaoLivre.ts): um conjunto sem componentes fixos e sem desconto, só para as peças se moverem e somarem juntas. Fora de CONJUNTOS: nunca aparece na barra. */
+export const ID_COMPOSICAO_LIVRE = "composicao_livre";
+const CONJUNTO_LIVRE: Conjunto = { id: ID_COMPOSICAO_LIVRE, nome: "Composição livre (protótipo)", descricao: "Produtos juntos à escolha.", espacos: [], ancora: "p1", componentes: [], desconto: 0 };
+export const conjuntoPorId = (id: string): Conjunto | undefined => (id === ID_COMPOSICAO_LIVRE ? CONJUNTO_LIVRE : CONJUNTOS.find((c) => c.id === id));
 
 /* ------------------------------------------------------------------ posicionamento relativo (no referencial da peça âncora) */
 export interface Ancora { x: number; y: number; w: number; h: number; rot: number }

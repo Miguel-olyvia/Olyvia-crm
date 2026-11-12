@@ -177,6 +177,33 @@ describe("PlantaDivisao3D", () => {
       fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "casa_banho" } });
     }
   });
+  it("na cozinha: a composição livre põe as partes ligadas como um conjunto, e sai tudo junto", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
+    fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "cozinha" } });
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: /^Bancadas \(/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Montar uma composição livre" }));
+      const painel = screen.getByRole("region", { name: "Composição livre" });
+      const juntar = (cat: RegExp) => {
+        const sel = within(painel).getByLabelText("Família") as HTMLSelectElement;
+        const grupo = [...sel.querySelectorAll("optgroup")].find((g) => cat.test(g.label))!;
+        fireEvent.change(sel, { target: { value: (grupo.querySelector("option") as HTMLOptionElement).value } });
+        fireEvent.click(within(painel).getByRole("button", { name: /^Juntar a família/ }));
+      };
+      juntar(/Lava-loiças/); juntar(/Torneiras/);
+      fireEvent.click(within(painel).getByRole("button", { name: "Pôr a composição na planta" }));
+      const pecas = lerPlanta(d.f.planta)!.pecas;
+      expect(pecas).toHaveLength(2);
+      expect(pecas.every((x) => x.conj === "cl1" && x.conjId === "composicao_livre")).toBe(true);
+      expect(pecas.filter((x) => x.ancora)).toHaveLength(1);
+      expect(screen.queryByRole("region", { name: "Composição livre" })).toBeNull();
+      expect(screen.getByText(/Conjunto: Composição livre \(protótipo\)/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Remover conjunto Composição livre (protótipo)" }));
+      expect(lerPlanta(d.f.planta)!.pecas).toHaveLength(0);
+    } finally {
+      fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "casa_banho" } });
+    }
+  });
   describe("tirar peças da planta (sem acertar num alvo pequeno)", () => {
     const sala = { planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) };
     const poe = () => fireEvent.keyDown(screen.getByRole("list", { name: "Produtos do catálogo" }).querySelector("button")!, { key: "Enter" });

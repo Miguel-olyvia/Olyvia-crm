@@ -158,3 +158,29 @@ describe("filtro «Modelo 3D»", () => {
     expect(screen.getAllByText("3D do fabricante").length).toBeGreaterThan(0);
   });
 });
+
+describe("Composição livre (protótipo)", () => {
+  const produtos = produtosParaEspaco(todos, K.arvore, "cozinha", { max: 100000 });
+  const f = vi.fn();
+  const montarLivre = (onLivre?: (p: unknown[]) => void) => render(<BarraProdutos produtos={produtos} espaco="cozinha" onEspaco={f} onPegar={f} onMover={f} onLargar={f} onCancelar={f} onJuntar={f} onConjunto={f} onBancada={f} onComposicaoLivre={onLivre} />);
+  it("sem o callback o cartão não aparece", () => {
+    montarLivre();
+    fireEvent.click(screen.getByRole("tab", { name: "Bancadas (1)" }));
+    expect(screen.queryByText("Composição livre (protótipo)")).toBeNull();
+  });
+  it("com o callback, o cartão fica junto ao da bancada, abre o painel e fecha-o ao pôr na planta", () => {
+    const onLivre = vi.fn();
+    montarLivre(onLivre);
+    fireEvent.click(screen.getByRole("tab", { name: "Bancadas (1)" }));
+    expect(screen.getByText("Bancada Coverlam Top 12 mm (composição)")).toBeInTheDocument();
+    const abrir = screen.getByRole("button", { name: "Montar uma composição livre" });
+    expect(abrir).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(abrir);
+    expect(screen.getByRole("button", { name: "Fechar a composição livre" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: /^Juntar a família/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Pôr a composição na planta" }));
+    expect(onLivre).toHaveBeenCalledTimes(1);
+    expect(onLivre.mock.calls[0][0]).toHaveLength(1);
+    expect(screen.queryByRole("region", { name: "Composição livre" })).toBeNull();
+  });
+});

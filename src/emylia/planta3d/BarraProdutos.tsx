@@ -8,6 +8,8 @@ import { categoriaDoTipo, genericoServe } from "./categoriasGlb";
 import { GRUPOS_ESPACO, MOSTRAR_GENERICOS, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import { CONJUNTOS, type Conjunto } from "./conjuntos";
 import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, temGlbDoFabricante, variantesDe, type Familia } from "./familias";
+import type { ParteLivre } from "./composicaoLivre";
+import { PainelComposicaoLivre } from "./PainelComposicaoLivre";
 import { temFicheiro } from "./modelosHtml/ficheiros";
 import type { TipoEspaco } from "./modelo";
 
@@ -34,6 +36,8 @@ export interface BarraProdutosProps {
   onBancada: () => void;
   /** Pôr uma composição modular de cozinha (o id do predefinido, composicaoCozinha.ts). */
   onComposicao?: (predefinido: string) => void;
+  /** Põe a «Composição livre» (composicaoLivre.ts): as partes juntas no painel, por ordem, a primeira é a âncora. */
+  onComposicaoLivre?: (partes: ParteLivre[]) => void;
 }
 
 /** O cartão de uma família: UM produto no ecrã, com as variantes (acabamento e medida) escolhidas à parte. */
@@ -88,8 +92,9 @@ function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | n
 /** As famílias que a lista mostra: com SO_COM_MODELO_HTML, só as que têm o modelo do HTML. */
 const familiasVisiveis = (c: Familia["categoria"]): Familia[] => familiasDaCategoria(c).filter((f) => !SO_COM_MODELO_HTML || !!f.htmlModelo);
 
-export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao }: BarraProdutosProps) {
+export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao, onComposicaoLivre }: BarraProdutosProps) {
   const [q, setQ] = useState("");
+  const [livreAberta, setLivreAberta] = useState(false);
   const [grupoEscolhido, setGrupo] = useState<string>("");
   const [quantos, setQuantos] = useState(PASSO_VISIVEIS);
   const [filtro, setFiltro] = useState<FiltroModelo>("todos");
@@ -193,6 +198,18 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
           <div className="mt-2 flex flex-wrap gap-2">
             {PREDEFINIDOS.map((p) => <button key={p.id} type="button" className={CHIP} onClick={() => onComposicao(p.id)}>{p.nome}</button>)}
           </div>
+        </div>
+      )}
+      {ativo === "fam:tampos" && onComposicaoLivre && (
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-3">
+          <p className="text-[15px] font-semibold">Composição livre (protótipo)</p>
+          <p className="text-sm text-muted-foreground">Junta produtos diferentes (lava-loiça, torneira, placa e produtos do catálogo) numa só composição e põe-na na planta de uma vez: as partes ficam lado a lado e movem-se como uma peça. Cada parte vende-se à parte.</p>
+          <button type="button" className={`${CHIP} mt-2`} aria-expanded={livreAberta} aria-controls="painel-composicao-livre" onClick={() => setLivreAberta(!livreAberta)}>{livreAberta ? "Fechar a composição livre" : "Montar uma composição livre"}</button>
+          {livreAberta && (
+            <div id="painel-composicao-livre" className="mt-3">
+              <PainelComposicaoLivre produtos={produtos} onPor={(partes) => { onComposicaoLivre(partes); setLivreAberta(false); }} />
+            </div>
+          )}
         </div>
       )}
       {ehFamilia && ativo !== "fam:tampos" && (
