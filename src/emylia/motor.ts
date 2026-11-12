@@ -356,6 +356,9 @@ export interface Plano {
   origem?: "orcamento"; inicio?: string;
   /** 15/10: o plano como veio do orçamento, guardado antes do primeiro ajuste das Operações (ajustesPlano.ts) */
   base?: BaseTarefa[];
+  /** 12/11 (Rúben: «deve ser só um "está certo?"»): o gestor confirmou que a obra acaba `dias` úteis depois do orçamento (quem e quando).
+   *  O alerta do fim só volta se o atraso crescer. */
+  fimAceite?: { dias: number; quem: string; q: string };
   /** 21/10: os avisos aos técnicos quando o gestor cria ou muda uma tarefa (tarefasValidador.ts: avisarTecnico); aparecem no Hoje do técnico. */
   avisos?: AvisoTec[];
 }
@@ -3705,6 +3708,19 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (aj.k === "nova") ajustar(d, "tarefa nova " + t.nome);
       avisar({ msg: "Plano ajustado", sub: `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`, kind: "ok" });
       return true;
+    },
+    /** 12/11 (Rúben: «isto deve ser só um "está certo?" e ele clica ok ou reagenda»): o gestor confirma o fim da obra como está (`dias` úteis
+     *  depois do orçamento). Fica quem e quando; o alerta só volta se o atraso crescer. */
+    aceitarFimObra(id: number, dias: number) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída" || !(dias > 0)) return;
+      const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      p.fimAceite = { dias, quem, q: agora() };
+      const fim = rotuloDia(p, fimDe(p.tasks) - 1);
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `Fim da obra confirmado: ${fim}, ${dias} ${dias === 1 ? "dia útil" : "dias úteis"} depois do orçamento`, k: "marco" });
+      log(d, `Fim da obra confirmado por ${quem}: ${fim} (+${dias} ${dias === 1 ? "dia útil" : "dias úteis"} face ao orçamento)`);
+      avisar({ msg: "Fim da obra confirmado", sub: `${fim} · o alerta só volta se atrasar mais`, kind: "ok" });
     },
     /** 21/10: uma mensagem na conversa da obra (do cliente no portal, ou da empresa na página da obra). */
     mensagemObra(id: number, de: "cliente" | "empresa", texto: string) {

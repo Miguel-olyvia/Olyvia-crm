@@ -20,6 +20,7 @@ export type AcaoAlerta =
   | { k: "replanear" }
   | { k: "adiantar" }
   | { k: "conversa" }
+  | { k: "aceitarFim"; dias: number }
   | { k: "materiais" };
 export interface Alerta { id: string; nivel: Nivel; t: string; sub: string; acoes: { rot: string; a: AcaoAlerta }[]; ti?: number }
 
@@ -96,7 +97,9 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
   // o fim face ao orçamento, e a folga
   if (vivo) {
     const der = derrapagem(p);
-    if (der > 0) L.push({ id: "derrapagem", nivel: "atencao", t: `A obra acaba ${dias(der)} depois do previsto`, sub: "Face ao plano que veio do orçamento. Veja se dá para adiantar alguma coisa.", acoes: [{ rot: "Replanear", a: { k: "replanear" } }] });
+    // 12/11 (Rúben: «isto deve ser só um "está certo?" e ele clica ok ou reagenda»): confirmado uma vez, só volta se o atraso crescer
+    if (der > 0 && der > (p.fimAceite?.dias ?? 0)) L.push({ id: "derrapagem", nivel: "atencao", t: `A obra acaba ${dias(der)} depois do previsto. Está certo?`, sub: "",
+      acoes: [{ rot: "OK", a: { k: "aceitarFim", dias: der } }, { rot: "Reagendar", a: { k: "replanear" } }] });
     // a folga: o que o plano ganha se se adiantar (face a só o pôr em dia)
     const so = replanear(p, ocup, { adiantar: false }), r = replanear(p, ocup, { adiantar: true });
     const adiantadas = r.mudancas.filter((m) => m.para.dia < so.plano.tasks[m.ti].dia);

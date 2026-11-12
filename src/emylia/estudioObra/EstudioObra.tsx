@@ -251,6 +251,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
       case "replanear": setPainel(null); setPrevia({ titulo: "Replanear a obra", k: "replanear", adiantar: true }); break;
       case "adiantar": setPainel(null); setPrevia({ titulo: "Adiantar com a folga", k: "replanear", adiantar: true }); break;
       case "conversa": setAba("cliente"); break;
+      case "aceitarFim": fazer(() => A.aceitarFimObra(d.id, a.dias)); break;
       case "materiais": setAba("materiais"); break;
     }
   };
