@@ -21,6 +21,7 @@ import { contadores as contadoresInv } from "./inventario/contadores";
 import { DESTINO_LINHA, resumoInventario } from "./v2/hojeArmazem";
 import { useLargura } from "./largura";
 import type { AmbitoAgenda } from "./equipa/pontes";
+import { LigacaoNegocio } from "./LigacaoNegocio";
 
 // 22/10: "A minha agenda" (a semana da pessoa do RH deste papel, a mesma da RH › Agenda; equipa/MinhaAgenda.tsx), carregada à parte
 const MinhaAgenda = lazy(() => import("./equipa/MinhaAgenda"));
@@ -156,7 +157,7 @@ export function HojeSimples({ S, A, run, go, podeVerInventario }: Ctx) {
           const comBotao = cols > 1 && (dir || !!p.btn);
           return (
           <li key={d.id + ":" + p.t} className={cn(cols > 1 && "flex items-center gap-3")}>
-            <button type="button" onClick={go(() => A.abrir(d.id))} className={cn(LINHA, cols > 1 && "min-w-0 flex-1")}>
+            <LigacaoNegocio negocio={d.id} abrir={go(() => A.abrir(d.id))} className={cn(LINHA, cols > 1 && "min-w-0 flex-1")}>
               <IconeFase fase={d.fase} />
               <span className="min-w-0 flex-1">
                 <span className="block text-base font-medium text-foreground">{comBotao ? d.nome : dir ? "Aprovar a exceção à margem" : p.t}</span>
@@ -167,7 +168,7 @@ export function HojeSimples({ S, A, run, go, podeVerInventario }: Ctx) {
                 {contactoConcluido(d) && !soAteAoContacto() && <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary">{PRONTO_PARA_VISITA}</span>}
               </span>
               {cols === 1 && <Seta />}
-            </button>
+            </LigacaoNegocio>
             {cols > 1 && (dir
               ? <Button variant="ghost" className="shrink-0" onClick={go(() => A.aprovar(d.id))}>Aprovar a margem</Button>
               : p.btn
@@ -198,14 +199,14 @@ export function HojeSimples({ S, A, run, go, podeVerInventario }: Ctx) {
       <ul className={cn("mt-3", cols === 1 ? CAIXA : LISTA_PAINEL)}>
         {descoberto.map(({ d, pior, pagamento }) => (
           <li key={d.id}>
-            <button type="button" onClick={go(() => A.abrir(d.id))} className={LINHA}>
+            <LigacaoNegocio negocio={d.id} abrir={go(() => A.abrir(d.id))} className={LINHA}>
               <AlertTriangle className="h-5 w-5 shrink-0 text-warning" aria-hidden="true" />
               <span className="min-w-0 flex-1">
                 <span className="block text-base font-medium text-foreground">A descoberto até {eur(pior)} €</span>
                 <span className="block text-[15px] text-muted-foreground">{d.nome} · {d.servico} · {pagamento}</span>
               </span>
               <Seta />
-            </button>
+            </LigacaoNegocio>
           </li>
         ))}
       </ul>
@@ -234,7 +235,7 @@ export function HojeSimples({ S, A, run, go, podeVerInventario }: Ctx) {
     <Bloco id="hoje-compromissos" titulo="Compromissos" n={ag.length}>
       <ul className={LISTA_PAINEL}>{ag.map((c) => (
         <li key={c.id}>
-          <button type="button" onClick={go(() => A.abrir(c.d.id))} className={LINHA}>
+          <LigacaoNegocio negocio={c.d.id} abrir={go(() => A.abrir(c.d.id))} className={LINHA}>
             <span className="w-[4.5rem] shrink-0 self-start pt-0.5 text-right">
               <span className={cn("block text-base font-semibold tabular-nums", c.atrasado ? "text-destructive" : "text-foreground")}>{c.hora}</span>
               {c.dia && <span className={cn("block text-xs", c.atrasado ? "text-destructive" : "text-muted-foreground")}>{c.dia}</span>}
@@ -247,7 +248,7 @@ export function HojeSimples({ S, A, run, go, podeVerInventario }: Ctx) {
               </span>
             </span>
             <span className="shrink-0 text-[15px] font-medium text-primary">{c.acao}</span>
-          </button>
+          </LigacaoNegocio>
         </li>
       ))}</ul>
     </Bloco>

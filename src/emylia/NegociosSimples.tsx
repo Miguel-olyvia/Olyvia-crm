@@ -12,6 +12,7 @@ import { orgDoModoReal } from "./acessosPortal";
 import { contactoDaPessoa, emailDaPessoa, usePesquisaPessoas, type PessoaPesquisada } from "./real/pessoasReal";
 import { NegociosHistorico, SeletorModo, type ModoNegocios } from "./NegociosHistorico";
 import { SEM_FILTROS_H, type FiltrosH } from "./historicoNegocios";
+import { LigacaoNegocio } from "./LigacaoNegocio";
 
 // 27/10: cada coluna mostra 10 cartões; o resto atrás de «Ver mais»
 const POR_COLUNA = 10;
@@ -39,7 +40,7 @@ export function NegociosSimples({ S, A, go, run, q, setQ, podeCriarNegocio }: Ct
     const loc = d.f.localidade || d.local.split(",").pop()!.trim();
     return (
       <li key={d.id}>
-        <button type="button" onClick={go(() => A.abrir(d.id))}
+        <LigacaoNegocio negocio={d.id} abrir={go(() => A.abrir(d.id))}
           className={cn("group block w-full rounded-xl border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]",
             d.fresh ? "border-primary motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200" : "border-border")}>
           <span className="block text-base font-semibold text-foreground">{d.nome}</span>
@@ -50,7 +51,7 @@ export function NegociosSimples({ S, A, go, run, q, setQ, podeCriarNegocio }: Ct
             {p.t}{late ? " · há 2 dias" : ""}
             {!p.wait && !p.done && <ArrowRight className="ml-1 inline h-3.5 w-3.5 align-[-2px] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />}
           </span>
-        </button>
+        </LigacaoNegocio>
       </li>
     );
   };

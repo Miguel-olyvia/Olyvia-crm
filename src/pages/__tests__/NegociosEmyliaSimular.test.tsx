@@ -3,6 +3,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+// 12/11: a página lê as visitas do negócio aberto com o React Query (useVisitasDoNegocio, eb14c0bd)
+const cliente = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const comQuery = (ui: ReactNode) => <QueryClientProvider client={cliente}>{ui}</QueryClientProvider>;
 
 const ORG = "11111111-1111-4111-a111-111111111111";
 const ORG2 = "22222222-aaaa-4222-a222-222222222222";
@@ -80,7 +85,7 @@ const ASSISTENTE = ["negocios.contacto.registar", "pessoas.view", "pessoas.edit"
 const COMERCIAL = [...ASSISTENTE, "negocios.visita.gerir", "negocios.visita.preencher", "negocios.orcamento.editar", "negocios.proposta.enviar"];
 
 const abrir = async () => {
-  render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+  render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
   await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
   await screen.findByLabelText("Simular função");
 };
@@ -209,18 +214,18 @@ describe("Simular função (só no ecrã)", { timeout: 20000 }, () => {
   });
 
   it("quando a organização muda, a simulação repõe-se", async () => {
-    const { rerender } = render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    const { rerender } = render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
     await screen.findByLabelText("Simular função", undefined, { timeout: 8000 });
     await simular("Assistente comercial");
     await screen.findByText(/A simular a função/);
     empresa.id = ORG2;
-    rerender(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    rerender(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
     await waitFor(() => expect(screen.queryByText(/A simular a função/)).toBeNull());
     expect(soAteAoContacto()).toBe(false);
   });
 
   it("ao sair da página tira as permissões postas no motor", async () => {
-    const { unmount } = render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    const { unmount } = render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
     await screen.findByLabelText("Simular função", undefined, { timeout: 8000 });
     await simular("Assistente comercial");
     await screen.findByText(/A simular a função/);
@@ -231,7 +236,7 @@ describe("Simular função (só no ecrã)", { timeout: 20000 }, () => {
 
   it("se a lista de funções falhar: erro curto junto ao seletor e a página continua igual", async () => {
     funcoesBase.roles = { data: null, error: { message: "sem rede" } };
-    render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
     await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
     const erro = await screen.findByText(/Não foi possível ler as funções/);
     expect(erro.textContent).toContain("sem rede");
@@ -269,7 +274,7 @@ describe("Simular função (só no ecrã)", { timeout: 20000 }, () => {
     real.negocios = [NEGOCIO_COM_EC];
     funcoesBase.roles = { data: [{ id: "r2", code: "comercial", name: "Comercial" }], error: null };
     funcoesBase.codigos = { r2: [...COMERCIAL, "client_orders.view"] };
-    render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
     await screen.findByLabelText("Simular função", undefined, { timeout: 8000 });
     expect(lerEncomendas()).toBe(0);
     await simular("Comercial");
@@ -283,7 +288,7 @@ describe("Simular função (só no ecrã)", { timeout: 20000 }, () => {
     real.papeis = { papeis: ["tecnico"], pessoa: { id: "p3", nome: "Hugo Neves" }, todos: false };
     funcoesBase.roles = { data: [{ id: "r2", code: "comercial", name: "Comercial" }], error: null };
     funcoesBase.codigos = { r2: COMERCIAL };
-    render(<MemoryRouter><NegociosEmylia /></MemoryRouter>);
+    render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
     await screen.findByLabelText("Simular função", undefined, { timeout: 8000 });
     await waitFor(() => expect(hoje.tecnico?.leituraReduzida).toBe(true));
     await simular("Comercial");
