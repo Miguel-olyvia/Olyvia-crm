@@ -93,4 +93,13 @@ describe("o Estúdio ouve a conversa e muda o estilo", () => {
     expect(screen.getByText("Nicho embutido no duche: juntar")).toBeInTheDocument();
     // dito outra vez (a frase revista), não volta a aplicar: o bidé que se pôs de volta à mão fica
   });
+
+  it("«banheira preta» com a banheira em «Fica» passa a «Trocar» com a preta; vale também para o que já se tinha dito antes", () => {
+    const ban = PROJETO_EXEMPLO.antes.pecas.find((x) => x.tipo === "banheira")!;
+    vivo.g = { ...vivo.g, falas: [fala(10, "cliente", "Quero a banheira preta.")] };
+    // como num projeto de antes desta regra: a cor já foi vista, a troca ainda não
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: [], porCategoria: { banheira: ["preto"] } }, ditosVistos: ["preto|banheira|0|0#1"] }} />);
+    expect(atual.escolhas[ban.id]).toBe("ban-lago-p");
+    expect(atual.depois.pecas.some((x) => x.id === ban.id)).toBe(true);
+  });
 });

@@ -77,20 +77,28 @@ export function OuvidoDoCliente({ p, setP, ouvido, pedidos = { pecas: [], servic
   // mesmo depois de o comercial ter mexido nas cores (antes, depois de um toque à mão, ficava só como sugestão)
   const chaves = ouvido ? chavesDosDitos(ouvido.ditos) : [];
   const chavesP = chavesDosPedidos(pedidos);
-  const todas = [...chaves, ...chavesP.pecas, ...chavesP.servicos];
+  // 12/11 (Rúben: «ao dizer que quer, por exemplo, banheira preta, se ainda estiver em "Fica", meter em "Trocar" e escolher
+  // automaticamente»): uma cor dita para uma peça que há hoje troca essa peça. Chave própria (troca|peça|cor), para valer também para o
+  // que já se tinha dito antes desta regra (nessa altura só mudava a cor e a peça ficava em «Fica»).
+  const trocasCor = (ouvido?.ditos ?? []).flatMap((d) => (d.evitar ? [] : d.cats.filter((c) => c in PECAS).map((c) => ({ tipo: c as TipoPeca, cor: d.cor }))));
+  const nTroca = new Map<string, number>();
+  const chavesTroca = trocasCor.map((t) => { const k = `troca|${t.tipo}|${t.cor}`; const i = (nTroca.get(k) ?? 0) + 1; nTroca.set(k, i); return `${k}#${i}`; });
+  const todas = [...chaves, ...chavesP.pecas, ...chavesP.servicos, ...chavesTroca];
   const vistos = new Set(p.ditosVistos ?? []);
   const novos = ouvido ? ouvido.ditos.filter((_, i) => !vistos.has(chaves[i])) : [];
   const pecasNovas = pedidos.pecas.filter((_, i) => !vistos.has(chavesP.pecas[i]));
   const servicosNovos = pedidos.servicos.filter((_, i) => !vistos.has(chavesP.servicos[i]));
+  const trocasNovas = trocasCor.filter((_, i) => !vistos.has(chavesTroca[i]));
 
   useEffect(() => {
-    if (!novos.length && !pecasNovas.length && !servicosNovos.length) return;
+    if (!novos.length && !pecasNovas.length && !servicosNovos.length && !trocasNovas.length) return;
     const o = novos.length ? estiloDosDitos(novos) : null;
     setP((x) => {
       antesDoAuto.current = x;
       let r = o ? comEstilo(x, juntarEstilo(x.estilo, o), false) : x;
-      // «quero uma sanita preta»: a sanita que há troca-se (pela preta)
-      if (o) for (const d of novos) if (!d.evitar) for (const c of d.cats) if (c in PECAS && r.antes.pecas.some((pc) => pc.tipo === c)) r = aplicarPeca(r, c as TipoPeca, "troca");
+      // «quero uma banheira preta»: a banheira que há (em «Fica» ou já trocada) passa a «Trocar», com a preta escolhida
+      for (const t of trocasNovas) if (r.antes.pecas.some((pc) => pc.tipo === t.tipo)) r = aplicarPeca(r, t.tipo, "troca");
+      if (trocasNovas.length) r = aplicarEstilo(r, (cat) => melhorPara(cat, r.estilo)?.id);
       for (const d of pecasNovas) r = aplicarPeca(r, d.tipo, d.acao);
       for (const d of servicosNovos) r = d.quer ? juntarServico(r, d.id) : recusarSugestao(tirarServico(r, d.id), d.id);
       return { ...r, ditosVistos: [...new Set([...(x.ditosVistos ?? []), ...todas])] };

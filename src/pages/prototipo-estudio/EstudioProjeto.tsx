@@ -20,6 +20,7 @@ import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sair
 import { Amostra, Areas, Cartao, Numero, PainelMateriais, PainelPeca, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
 import { PassoEstilo } from "./PassoEstilo";
 import { GravarNoEstudio } from "./GravarNoEstudio";
+import { LinhasProposta, ResumoProposta } from "./OrcamentoProposta";
 import { PROJETO_EXEMPLO, copiaPlanta, depoisDaVisita } from "./exemploEstudio";
 import { espacoDoEstudio } from "./estudioNo3D";
 import { Vista3D } from "./Vista3D";
@@ -228,10 +229,10 @@ export default function EstudioProjeto() {
               <h2 id="t-prop" className="text-2xl font-semibold tracking-tight">As necessidades e o orçamento</h2>
               <p className="text-[15px] text-muted-foreground">Saem das duas plantas. Mude a quantidade ou tire o que não entra; o que mudar fica marcado.</p>
             </div>
-            <Linhas linhas={linhas} setP={setP} irParaPeca={(id) => { ir("Depois"); setTimeout(() => setAberta(id), 0); }} />
+            <LinhasProposta linhas={linhas} setP={setP} irParaPeca={(id) => { ir("Depois"); setTimeout(() => setAberta(id), 0); }} />
           </section>
-          <aside className="space-y-6">
-            <Resumo t={t} porEscolher={porEscolher} grande />
+          <aside className="space-y-4 lg:sticky lg:top-36 lg:self-start">
+            <ResumoProposta linhas={linhas} porEscolher={porEscolher} />
             <Button type="button" className="min-h-12 w-full text-base" onClick={() => setMostrar(true)}><Monitor className="mr-2 h-5 w-5" aria-hidden="true" />Mostrar ao cliente</Button>
             <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => ir("Fechar")}><HardHat className="mr-2 h-4 w-4" aria-hidden="true" />O plano da obra e fechar</Button>
           </aside>
@@ -329,46 +330,6 @@ function Escolhidos({ p, escuro = false }: { p: Projeto; escuro?: boolean }) {
         </ul>
       )}
     </section>
-  );
-}
-
-function Linhas({ linhas, setP, irParaPeca }: { linhas: Linha[]; setP: React.Dispatch<React.SetStateAction<Projeto>>; irParaPeca: (pecaId: string) => void }) {
-  const grupos = ["Peças", "Materiais", "Trabalhos"] as const;
-  const ajustar = (id: string, a: { q?: number; fora?: boolean }) => setP((x) => ({ ...x, ajustes: { ...x.ajustes, [id]: { ...(x.ajustes[id] ?? {}), ...a } } }));
-  if (!linhas.length) return <p className="rounded-2xl border border-dashed border-border p-6 text-[15px] text-muted-foreground">Sem necessidades: a planta do depois ainda é igual à do antes. Troque, tire ou junte peças, ou escolha o revestimento e o pavimento.</p>;
-  return (
-    <div className="space-y-6">
-      {grupos.map((g) => {
-        const ls = linhas.filter((l) => l.grupo === g);
-        if (!ls.length) return null;
-        return (
-          <section key={g} aria-label={g} className="rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]">
-            <h3 className="border-b border-border px-5 py-3 text-[15px] font-semibold">{g}</h3>
-            <ul className="divide-y divide-border">
-              {ls.map((l) => (
-                <li key={l.id} className={cn("flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3", l.fora && "opacity-50")}>
-                  <div className="min-w-[220px] flex-1">
-                    <p className={cn("text-[15px] font-medium", l.fora && "line-through")}>{l.n}{l.ajustada && <span className="ml-2 rounded-full bg-primary/10 px-2 text-xs text-primary">ajustado</span>}</p>
-                    <p className="text-xs text-muted-foreground">{l.porque}</p>
-                    {l.porEscolher && <button type="button" className="min-h-11 text-sm text-primary underline-offset-4 hover:underline" onClick={() => irParaPeca(l.id.replace(/^prod-/, ""))}>Escolher no catálogo</button>}
-                  </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <span className="sr-only">Quantidade de {l.n}</span>
-                    <input key={`${l.id}-${l.q}`} type="number" step="any" min={0} defaultValue={l.q} disabled={l.fora} className="h-10 w-20 rounded-lg border border-input bg-background px-2 text-right"
-                      onBlur={(e) => { const q = Number(e.target.value); if (Number.isFinite(q) && q >= 0 && q !== l.q) ajustar(l.id, { q }); }} />
-                    <span className="w-6 text-muted-foreground">{l.un}</span>
-                  </label>
-                  <span className="w-28 text-right text-[15px] font-semibold tabular-nums">{eur(l.total)}</span>
-                  <Button type="button" variant="ghost" className="min-h-11" aria-label={l.fora ? `Repor ${l.n}` : `Tirar ${l.n}`} onClick={() => ajustar(l.id, { fora: !l.fora })}>
-                    {l.fora ? "Repor" : <X className="h-4 w-4" aria-hidden="true" />}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        );
-      })}
-    </div>
   );
 }
 
