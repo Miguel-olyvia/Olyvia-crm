@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { tecnicosComTrabalho } from "@/emylia/trabalhoObra";
 import { TECS, acertarDiaDasObras, acoes, definirPerdaReal, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
@@ -856,7 +857,10 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
     if (S.role !== "tecnico") S.role = "tecnico";
     if (S.view !== "hoje") { S.view = "hoje"; S.deal = null; S.op = null; }
     const tecPedido = params.get("tec");
-    if (tecPedido && TECS.some((x) => x.id === tecPedido) && S.tec !== tecPedido) S.tec = tecPedido;
+    // sem ?tec= (a primeira vez, ou o «voltar» até lá), o de omissão do Hoje do técnico (o primeiro com trabalho hoje)
+    // (o mesmo que HojeTecnico mostra; o motor usa S.tec para quem regista, por isso nunca fica vazio)
+    const tecValido = tecPedido && TECS.some((x) => x.id === tecPedido) ? tecPedido : tecnicosComTrabalho(S.deals)[0] ?? TECS[0]?.id;
+    if (S.tec !== tecValido) S.tec = tecValido;
   } else if (tecConta && S.tec !== tecConta) S.tec = tecConta;
   // 09/11: quem só pode ser o técnico (sem ver todos) fica sempre fixo no seu, mesmo sem técnico ligado (null: o aviso), e nunca vê o de outro
   const fixarTecnico = !verTecnicos && (!!tecConta || (!!meus && !meus.todos && S.role === "tecnico"));
