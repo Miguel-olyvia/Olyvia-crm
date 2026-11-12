@@ -112,6 +112,8 @@ export function precisaDeTi(ctx: Ctx, d: Negocio, ir: Ir): Pedido[] {
   }
   const atr = p.tasks.filter((t) => estadoVivo(t, p) === "atrasada");
   if (atr.length) L.push({ k: "atr", t: `${atr.length} ${atr.length === 1 ? "tarefa atrasada" : "tarefas atrasadas"}`, sub: atr.map((t) => t.nome).join(", "), rot: "Pôr em dia", fn: ir.replanear, nivel: "critico" });
+  // devia ter começado e ainda não tem nada do técnico
+  p.tasks.forEach((t, ti) => { if (estadoVivo(t, p) === "hoje" && t.dia < p.dia && !t.exec) L.push({ k: "c" + ti, t: `${t.nome} ainda não começou`, sub: `Era para ${t.dia === p.dia - 1 ? "ontem" : "dias atrás"} · ${primeiro(nomeTec(t.tec))}`, rot: "Ver", fn: () => ir.tarefa(ti), nivel: "atencao" }); });
   const porLer = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length;
   if (porLer) L.push({ k: "chat", t: `${porLer} ${porLer === 1 ? "mensagem do cliente" : "mensagens do cliente"}`, sub: (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).slice(-1)[0]?.t, rot: "Responder", fn: () => ir.aba("cliente"), nivel: "atencao" });
   const pend = porEncomendarDe(d);

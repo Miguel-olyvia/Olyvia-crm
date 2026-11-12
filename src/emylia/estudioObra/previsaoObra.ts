@@ -75,14 +75,19 @@ export function margemAoVivo(d: Negocio, S: Estado): MargemViva | null {
   try { T = tot(d, S); } catch { return null; }
   const ads = assinadas(d);
   const valor = r2(T.pf + ads.reduce((a, x) => a + totaisAdenda(x).base, 0));
-  const K = custoObra(d, S);
-  const ritmo = K.prevFeito > 0 ? K.desvio / K.prevFeito : 0;
-  const projecao = r2(Math.max(0, K.prev - K.prevFeito) * ritmo);
+  const K = custoObra(d, S), p = d.obra.plano;
+  // só as tarefas acabadas contam para o ritmo (uma a meio tem poucas horas contra o previsto inteiro e parecia uma poupança)
+  const acabada = (ti: number) => { const v = estadoVivo(p.tasks[ti], p); return v === "feita" || v === "validada"; };
+  const feitas = K.linhas.filter((l) => acabada(l.ti) && l.real != null);
+  const prevFeitas = feitas.reduce((a, l) => a + l.prev, 0), desvioMO = r2(feitas.reduce((a, l) => a + (l.desvio ?? 0), 0));
+  const ritmo = prevFeitas > 0 ? desvioMO / prevFeitas : 0;
+  const prevResto = K.linhas.filter((l) => !acabada(l.ti)).reduce((a, l) => a + l.prev, 0);
+  const projecao = r2(prevResto * ritmo);
   const pend = porEncomendarDe(d);
   const materiais = r2(pend.reduce((a, x) => a + x.q * (x.m.preco ?? custosDosMateriais(d, [{ n: x.m.n, q: x.q }])[0]?.custo ?? 0), 0));
   const custoOrc = r2(T.custo);
-  const custoVivo = r2(custoOrc + K.desvio + projecao + materiais);
-  return { valor, custoOrc, margemOrc: valor > 0 ? (valor - custoOrc) / valor : 0, desvioMO: r2(K.desvio), projecao, materiais, custoVivo, margemViva: valor > 0 ? (valor - custoVivo) / valor : 0 };
+  const custoVivo = r2(custoOrc + desvioMO + projecao + materiais);
+  return { valor, custoOrc, margemOrc: valor > 0 ? (valor - custoOrc) / valor : 0, desvioMO, projecao, materiais, custoVivo, margemViva: valor > 0 ? (valor - custoVivo) / valor : 0 };
 }
 
 /* ------------------------------------------------------------------ o caminho crítico */
