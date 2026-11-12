@@ -35,7 +35,7 @@ import { TudoDoNegocio } from "./TudoDoNegocio";
 import { motion } from "framer-motion";
 import { MOLA, useReduzir } from "./movimento";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
-import { useParamUrl } from "./usarParamUrl";
+import { useParamUrl, usePainelUrl } from "./usarParamUrl";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { passoDe, podeVerCustos } from "./permissoes";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
@@ -76,8 +76,13 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   const { S, A, go } = ctx;
   const d = S.deals.find((x) => x.id === S.deal)!;
   const T = d.orc ? tot(d, S) : null;
-  const [ver, setVer] = useState<number | null>(null); // uma fase já feita, só para ler
-  const [tudo, setTudo] = useState(false); // 11/11: «Tudo do negócio» (todas as fases numa vista)
+  // uma fase já feita, só para ler; 12/11: no endereço (?fase=1), para o «voltar» do browser voltar à fase aberta
+  const [faseUrl, setFaseUrl] = useParamUrl<string>("fase", "");
+  const verPedida = faseUrl === "" ? null : Number(faseUrl);
+  const ver = verPedida != null && Number.isInteger(verPedida) && verPedida >= 0 && verPedida < d.fase ? verPedida : null;
+  const setVer = useCallback((n: number | null, substituir = false) => setFaseUrl(n == null ? "" : String(n), { substituir }), [setFaseUrl]);
+  // 11/11: «Tudo do negócio» (todas as fases numa vista); 12/11: no endereço (?tudo=1), o «voltar» fecha-o
+  const [tudo, setTudo] = usePainelUrl("tudo", "1");
   const [portal, setPortal] = useState(false);
   const [anular, setAnular] = useState(false);
   // ao passar de fase: uma frase curta a dizer o que acabou e o que vem, que desaparece sozinha
@@ -85,12 +90,12 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   const [acabou, setAcabou] = useState<number | null>(null);
   useEffect(() => {
     if (d.fase > faseAntes.current) {
-      setAcabou(faseAntes.current); setVer(null);
+      setAcabou(faseAntes.current); setVer(null, true);
       const t = setTimeout(() => setAcabou(null), 5000);
       faseAntes.current = d.fase;
       return () => clearTimeout(t);
     }
-    if (d.fase < faseAntes.current) setVer(null); // voltou atrás (à visita): mostra logo a fase aberta
+    if (d.fase < faseAntes.current) setVer(null, true); // voltou atrás (à visita): mostra logo a fase aberta
     faseAntes.current = d.fase;
   }, [d.fase]);
   // o menu "Mais" do cabeçalho: fecha ao clicar fora
@@ -131,7 +136,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       </button>
 
       {/* 9/11 (Rúben, telemóvel): o cabeçalho mais baixo: sem o ícone grande da fase e com o "Mais" ao lado do nome (era uma linha só para ele) */}
-      {tudo && <TudoDoNegocio ctx={ctx} d={d} fechar={() => setTudo(false)} irPara={(n) => { setTudo(false); setVer(n < d.fase ? n : null); window.scrollTo({ top: 0 }); }} />}
+      {tudo && <TudoDoNegocio ctx={ctx} d={d} fechar={() => setTudo(false)} irPara={(n) => { setTudo(false, { substituir: true }); setVer(n < d.fase ? n : null); window.scrollTo({ top: 0 }); }} />}
       <header className="mt-1 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:mt-2 sm:p-6">
         <div className="flex items-start justify-between gap-3 sm:gap-4">
           <div className="flex min-w-0 items-center gap-4">

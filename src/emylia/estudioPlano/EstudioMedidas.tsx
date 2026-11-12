@@ -3,6 +3,7 @@
 // o valor da visita ao lado e botões grandes de − e +, as notas, e «Aceitar as medidas» fixo em baixo (A.retificarMedidas; a planta
 // corrigida fica em f.retif_planta). As Operações aprovam o plano depois.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePainelUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check, Minus, Plus, RotateCcw, Ruler, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -187,7 +188,8 @@ function BotaoRepete({ rotulo, fazer, children }: { rotulo: string; fazer: () =>
 
 /** O que abre o Estúdio das medidas (no passo «Medidas»): as medidas da visita, a conferir; tocar abre o Estúdio. 11/11: um cartão vivo. */
 export function AbrirEstudioMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const [aberto, setAberto] = useState(false);
+  // 12/11: o Estúdio aberto vai para o endereço (?estudio=medidas): o «voltar» do browser fecha-o em vez de sair do negócio
+  const [aberto, setAberto] = usePainelUrl("estudio", "medidas");
   const reduzir = useReduzir();
   // 11/11 (F3): sem negocios.obra.planear o estúdio não abre (aceitar as medidas pede-a; o aviso fica no passo)
   if (d.f.retif_aceite || !podeRetificar(d) || permEmFaltaDoPasso(ctx.S, "retificarMedidas")) return null;

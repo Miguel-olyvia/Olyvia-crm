@@ -2,7 +2,7 @@
 // "Nova lead" do CRM, fica com o número da base e grava as partes da Emylia com neg_guardar_negocio.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 
 const ORG = "11111111-1111-4111-a111-111111111111";
 const rpc = vi.fn();
@@ -73,6 +73,34 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(rpc.mock.calls.filter(([fn]) => fn === "neg_guardar_negocio")).toHaveLength(0);
     expect(rpc.mock.calls.filter(([fn]) => fn === "obra_guardar_negocio")).toHaveLength(0);
+  });
+
+  // 12/11 (Rúben: «quero voltar atrás e manda para a página inicial»): o ecrã vai para o endereço, e o «voltar» volta ao ecrã anterior
+  it("abrir um negócio põe-no no endereço; voltar atrás volta à lista; o endereço abre o negócio", async () => {
+    const onde = { pesquisa: "", voltar: () => {} };
+    function Espia() { const l = useLocation(), n = useNavigate(); onde.pesquisa = l.search; onde.voltar = () => n(-1); return null; }
+    render(<MemoryRouter initialEntries={["/negocios"]}><NegociosEmylia /><Espia /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+    fireEvent.click(screen.getAllByText("Marta Lima")[0]);
+    await waitFor(() => expect(onde.pesquisa).toBe("?negocio=1101"));
+    expect(screen.getByRole("heading", { level: 1, name: "Marta Lima" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Operações" }));
+    await waitFor(() => expect(onde.pesquisa).toBe("?vista=operacoes"));
+    onde.voltar();
+    await waitFor(() => expect(screen.queryByRole("heading", { level: 1, name: "Marta Lima" })).toBeTruthy());
+    expect(onde.pesquisa).toBe("?negocio=1101");
+    onde.voltar();
+    await waitFor(() => expect(screen.queryByRole("heading", { level: 1, name: "Marta Lima" })).toBeNull());
+    expect(onde.pesquisa).toBe("");
+    expect(rpc.mock.calls.filter(([fn]) => fn === "neg_guardar_negocio")).toHaveLength(0);
+  });
+
+  it("um endereço com um negócio que não existe abre a lista e limpa o endereço", async () => {
+    const onde = { pesquisa: "" };
+    function Espia() { onde.pesquisa = useLocation().search; return null; }
+    render(<MemoryRouter initialEntries={["/negocios?negocio=999&passo=orc"]}><NegociosEmylia /><Espia /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+    await waitFor(() => expect(onde.pesquisa).toBe(""));
   });
 
   // 30/10 (20270101340000): os papéis vêm do RH. A Inês, só Financeiro, vê-se a si própria e não escolhe os outros papéis

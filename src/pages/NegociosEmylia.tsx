@@ -7,6 +7,8 @@
 // aqui, com o mesmo Estado: o que se faz na obra grava-se pela obra_guardar_negocio, como o resto. O Inventário ainda não.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { EnderecoAtivo } from "@/lib/paramUrl";
+import { ecraDoEndereco, ecraDoEstado, ecraValido, irParaEcra, mesmoEcra, pesquisaDoEcra } from "@/emylia/enderecoNegocios";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
@@ -100,7 +102,9 @@ const PAPEIS_VEEM_ENCOMENDAS: readonly Papel[] = ["comercial", "direcao", "finan
 
 /** `vistaInicial`: a vista ao abrir sem ?vista= (a primeira página, /home, abre no Hoje). */
 
-export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje" | "operacoes" } = {}) {
+/** `enderecoNoUrl` (12/11): o passo, a fase e os Estúdios abertos vão para o endereço; nos testes fica em memória (o jsdom partilha o
+ *  histórico entre testes, e um ?passo= de um teste abria o seguinte noutro passo). */
+export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.meta.env.MODE !== "test" }: { vistaInicial?: "hoje" | "operacoes"; enderecoNoUrl?: boolean } = {}) {
   usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
@@ -173,11 +177,31 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- a vista do endereço só conta ao abrir
   const [, setTique] = useState(0);
   const redesenhar = useCallback(() => setTique((t) => t + 1), []);
-  // o menu volta a pedir a vista com a página já aberta (ex.: "Operações" estando nos Negócios)
-  useEffect(() => {
-    if ((vistaPedida === "operacoes" || vistaPedida === "hoje") && S.view !== vistaPedida) { S.view = vistaPedida; S.deal = null; S.op = null; redesenhar(); }
-  }, [vistaPedida, S, redesenhar]);
   const [pronto, setPronto] = useState(false);
+  // 12/11 (Rúben: «quero voltar atrás e manda para a página inicial»): o ecrã vai para o endereço (enderecoNegocios.ts). O endereço manda
+  // quando muda por fora (as setas do browser, o menu «Operações», uma ligação); o estado manda quando muda cá dentro (abrir um negócio).
+  const omissao = vistaInicial ?? "negocios";
+  const pesquisa = params.toString();
+  const pelaSeta = useRef(false), primeiraVez = useRef(true);
+  useEffect(() => {
+    if (!pronto) {
+      // antes de ler os negócios, só a vista (o menu volta a pedir «Operações» ou «Hoje» com a página já aberta)
+      if ((vistaPedida === "operacoes" || vistaPedida === "hoje") && S.view !== vistaPedida) { S.view = vistaPedida; S.deal = null; S.op = null; redesenhar(); }
+      return;
+    }
+    // o endereço do router (o mesmo do browser na app; nos testes, o MemoryRouter)
+    const pedido = ecraValido(ecraDoEndereco(params, omissao), S), agora = ecraDoEstado(S);
+    if (agora && mesmoEcra(agora, pedido)) return;
+    irParaEcra(S, pedido); pelaSeta.current = true; redesenhar();
+  }, [pesquisa, pronto]); // eslint-disable-line react-hooks/exhaustive-deps -- só quando o endereço muda
+  useEffect(() => {
+    if (!pronto) return;
+    const e = ecraDoEstado(S), atual = params;
+    if (!e || mesmoEcra(e, ecraDoEndereco(atual, omissao))) { pelaSeta.current = primeiraVez.current = false; return; }
+    navigate({ search: pesquisaDoEcra(e, atual, omissao) }, { replace: pelaSeta.current || primeiraVez.current });
+    pelaSeta.current = primeiraVez.current = false;
+    if (e.view === "negocio" || e.op != null) window.scrollTo({ top: 0 });
+  });
   const [erroLer, setErroLer] = useState<string | null>(null);
   // 30/10 (20270101340000): os papéis de quem entrou, do RH; null enquanto se leem
   const [meus, setMeus] = useState<MeusPapeis | null>(null);
@@ -784,6 +808,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   return (
     // 04/11/2026: a permissão real de mandar a proposta / o contrato ao portal, para os botões dos passos (permPortalPasso.tsx)
     <PermPortalNegocios>
+    {/* 12/11: o passo, a fase que se lê e os Estúdios abertos também vão para o endereço (?passo=, ?fase=, ?estudio=) */}
+    <EnderecoAtivo.Provider value={enderecoNoUrl ? "pesquisa" : false}>
     <div className="pn calma pg-root min-h-full bg-background">
       {/* 9/11 (Rúben, telemóvel): o papel e o estado da gravação numa linha; as vistas numa fila que desliza na sua própria largura
           (antes alargavam a página toda para 563 px e o ecrã fugia para o lado ao arrastar) */}
@@ -836,7 +862,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
             {comOComercialAqui && (
               <p role="status" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{avisoDaFase(faltaAqui as string)}</p>
             )}
-            <NegocioSimples {...ctx} ajustarPassos={(passos, d) => {
+            <NegocioSimples key={S.deal} {...ctx} ajustarPassos={(passos, d) => {
               const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm && !comOComercialAqui };
               return comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null });
             }} />
@@ -852,6 +878,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
         ))}
       </div>
     </div>
+    </EnderecoAtivo.Provider>
     </PermPortalNegocios>
   );
 }

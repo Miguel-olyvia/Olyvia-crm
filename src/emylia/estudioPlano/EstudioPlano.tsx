@@ -13,6 +13,7 @@
 //  · cada mudança pode desfazer-se («Desfazer», em baixo); aprovar o plano tem festa;
 //  · a tarefa aberta: «Quando» com o início e os dias à mão, e a semana em quadrados (tocar num dia muda o início).
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
+import { usePainelUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -924,7 +925,8 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
 /** O que abre o Estúdio do plano (no passo «Plano da obra»): o plano em miniatura (as barras pelas fases), as datas, a equipa e os alertas.
  *  Tocar em qualquer sítio abre o Estúdio. 11/11: substitui os números soltos (ResumoDoPlano) por uma pré-visualização viva. */
 export function AbrirEstudioPlano({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const [aberto, setAberto] = useState(false);
+  // 12/11: o Estúdio aberto vai para o endereço (?estudio=plano): o «voltar» do browser fecha-o em vez de sair do negócio
+  const [aberto, setAberto] = usePainelUrl("estudio", "plano");
   const reduzir = useReduzir();
   const p = d.obra.plano;
   if (!p) return null;

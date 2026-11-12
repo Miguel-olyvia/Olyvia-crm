@@ -10,6 +10,7 @@
 //    registar; com custo, a adenda vai logo ao cliente); a atividade (os ajustes ao plano).
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { usePainelUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Flame, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -873,7 +874,8 @@ function NovoImprevisto({ ctx, d, ti, ocup: _ocup, fechar, mostrar }: { ctx: Ctx
 
 /* ================================================================== o cartão que abre o Estúdio (no passo «Plano da obra») */
 export function AbrirEstudioObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const [aberto, setAberto] = useState(false);
+  // 12/11: o Estúdio aberto vai para o endereço (?estudio=obra): o «voltar» do browser fecha-o em vez de sair do negócio
+  const [aberto, setAberto] = usePainelUrl("estudio", "obra");
   const p = d.obra.plano;
   if (!p || p.estado === "por aprovar") return null;
   const ocup = ocupacaoDosTecnicos(ctx.S, d.id);
