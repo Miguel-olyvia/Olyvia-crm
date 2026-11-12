@@ -72,7 +72,12 @@ describe("fim de contacto", () => {
     reais(["pessoas.edit", "negocios.visita.gerir", "negocios.orcamento.editar"]);
     expect(faltaDaFase(codigosDaFase(neg(1)))).toBeNull();
     reais(GESTOR);
-    expect(faltaDaFase(codigosDaFase(neg(2)))).toBe("negocios.visita.gerir");
+    expect(faltaDaFase(codigosDaFase(neg(2)))).toBe("negocios.visita.preencher");
+    // 12/11: o comercial só com visita.preencher (sem visita.gerir) trabalha a Visita
+    reais(["pessoas.edit", "negocios.visita.preencher"]);
+    expect(faltaDaFase(codigosDaFase(neg(2)))).toBeNull();
+    expect(faltaDaFase(codigosDaFase(neg(1, { [CHAVE_CONTACTO_CONCLUIDO]: "2026-11-11" })))).toBe("negocios.visita.gerir");
+    reais(GESTOR);
     expect(faltaDaFase(codigosDaFase(neg(3)))).toBeNull(); // obra.planear: as medidas e o plano antes do contrato
     expect(faltaDaFase(codigosDaFase(neg(4)))).toBeNull(); // o Financeiro não pede permissão de fase
     expect(faltaDaFase(codigosDaFase(neg(5)))).toBeNull();

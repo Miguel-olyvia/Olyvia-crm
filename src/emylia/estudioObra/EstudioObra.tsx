@@ -12,7 +12,7 @@
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Flame, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Flame, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -45,6 +45,11 @@ import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
 import { AdendasDaObra } from "./AdendasObra";
+import { definirQuemAssina } from "./quemAssina";
+import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
+import { modoReal } from "../acessosPortal";
+import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
+import { documentosEnviados, porResponder } from "./enviadosAoCliente";
 
 const SEM = ["D", "S", "T", "Q", "Q", "S", "S"];
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -57,8 +62,8 @@ type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: 
 type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inicial?: ImprevistoInicial } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } }
   /** 12/11 (quem paga): o «Porquê?» de uma mudança com a obra em curso (volta: a tarefa aberta antes) */
   | { k: "porque"; aj: AjusteObra; volta?: number } | null;
-type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "fecho";
-const ABAS_OBRA: readonly AbaObra[] = ["plano", "execucao", "diario", "materiais", "equipa", "cliente", "fecho"];
+type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "documentos" | "3d" | "fecho";
+const ABAS_OBRA: readonly AbaObra[] = ["plano", "execucao", "diario", "materiais", "equipa", "cliente", "documentos", "3d", "fecho"];
 
 /* 12/11 (o «voltar» do browser): o separador (?aba=equipa) e o painel aberto (?painel=tarefa-3) vivem no endereço. O painel em texto:
    tarefa-<i>, imprevisto[-<i>], nova, porque-<o ajuste em JSON>. O que não cabe (o dia e o técnico da tarefa nova, de onde veio o
@@ -95,6 +100,13 @@ const COR_VIVO: Record<EstadoVivo, string> = {
 
 /** `fechar(mexeu)`: mexeu = o separador ou o painel mudaram no endereço (quem abriu fecha sem recuar no histórico).
  *  `endereco` false: o Estúdio de outra obra, aberto por cima deste, não toca no endereço. */
+/** 12/11: numa conta real, o nome de quem está ligado assina pela empresa as adendas que saem daqui (quemAssina.ts). */
+function LerQuemAssina() {
+  const nome = useNomeParaMarcaDagua();
+  useEffect(() => { if (nome) definirQuemAssina(nome); }, [nome]);
+  return null;
+}
+
 export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: Negocio; fechar: (mexeu?: boolean) => void; endereco?: boolean }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
@@ -135,7 +147,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
     if (noEndereco) {
       setPainelUrl("", { substituir: true }); setAbaUrl("plano", { substituir: true });
       // e o documento ou a adenda aberta (AdendasObra.tsx)
-      for (const n of ["adenda", "editar"]) escreverParamUrl(n, "", true, ativo === "pesquisa" ? "pesquisa" : "hash");
+      for (const n of ["adenda", "editar", "doc"]) escreverParamUrl(n, "", true, ativo === "pesquisa" ? "pesquisa" : "hash");
     }
     fechar(mexeu.current);
   };
@@ -177,6 +189,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
   const val = (() => { try { return valorContrato(d, S); } catch { return null; } })();
   const custoPend = ims.filter((i) => i.estado === "aberto" || i.estado === "proposta").reduce((a, i) => a + (i.custo ?? 0), 0);
   const nossos = custoDosNossos(d);
+  const nDocs = porResponder(documentosEnviados(d, S));
   const validadas = p.tasks.filter((t) => acabou || estadoVivo(t, p) === "validada").length;
   const fazer = (fn: () => void) => run(fn);
   // cada mudança ao plano guarda o retrato de antes, para «Desfazer» (só se mudou mesmo)
@@ -263,6 +276,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
     <NaFrente>
       <motion.div className="fixed inset-0 flex flex-col overflow-hidden bg-background" role="dialog" aria-modal="true" aria-labelledby="estudio-obra-titulo"
         initial={reduzir ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: "easeOut" }}>
+        {modoReal() && <LerQuemAssina />}
         {/* ---------------------------------------------------------------- o cabeçalho */}
         <header className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
@@ -312,6 +326,9 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
                 <Aba on={aba === "materiais"} rot="Materiais" n={n.materiais} aviso onClick={() => setAba("materiais")} icone={<Package className="h-4 w-4" />} />
                 <Aba on={aba === "equipa"} rot="Equipa" n={n.equipa} aviso onClick={() => setAba("equipa")} icone={<Users className="h-4 w-4" />} />
                 <Aba on={aba === "cliente"} rot="Cliente" n={n.cliente} aviso onClick={() => setAba("cliente")} icone={<MessageSquare className="h-4 w-4" />} />
+                {/* 12/11 (Rúben): os documentos enviados ao cliente e o projeto em 3D */}
+                <Aba on={aba === "documentos"} rot="Documentos" n={nDocs} onClick={() => setAba("documentos")} icone={<FileText className="h-4 w-4" />} />
+                <Aba on={aba === "3d"} rot="3D" onClick={() => setAba("3d")} icone={<Box className="h-4 w-4" />} />
                 <Aba on={aba === "fecho"} rot="Fecho" n={n.fecho} onClick={() => setAba("fecho")} icone={<Flag className="h-4 w-4" />} />
               </div>
               {/* troca logo (sem esperar pela saída do anterior), com uma entrada curta */}
@@ -377,6 +394,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
                   {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}
                   {aba === "cliente" && <>{vivo && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></>}
+                  {aba === "documentos" && <DocumentosDaObra ctx={ctx} d={d} />}
+                  {aba === "3d" && <ProjetoEm3D d={d} />}
                   {aba === "fecho" && <><FechoDaObra ctx={ctx} d={d} irPara={setAba} /><FechoVivo d={d} ir={ir} /></>}
               </motion.div>
             </div>

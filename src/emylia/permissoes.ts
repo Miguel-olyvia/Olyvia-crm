@@ -228,7 +228,10 @@ export function codigosDaFase(d: { fase: number; f: Record<string, string | unde
   // em Contacto, quem só gere visitas (o comercial sem contacto.registar) também abre o negócio para marcar a visita: os passos do
   // Contacto ficam só de leitura para ele (passosDaFase) e o servidor recusa-lhe mudar os dados do Contacto
   if (d.fase <= 1 && !contactoConcluido(d)) return ["negocios.contacto.registar", "negocios.visita.gerir"];
-  if (d.fase <= 2) return ["negocios.visita.gerir"];
+  if (d.fase <= 1) return ["negocios.visita.gerir"];
+  // 12/11: na Visita basta preencher a visita (o comercial não precisa de gerir visitas, que é só agendar e atribuir); como o servidor
+  // (neg_guardar_negocio: uma das duas), quem só gere visitas também entra, mas o servidor só o deixa mexer na agenda
+  if (d.fase === 2) return ["negocios.visita.preencher", "negocios.visita.gerir"];
   if (d.fase === 3) return DO_NEGOCIO_FASE;
   if (d.fase === 4) return null;
   return DA_OBRA_FASE;

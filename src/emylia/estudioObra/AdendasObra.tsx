@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
+import { NaFrente } from "../NaFrente";
 import { adendaBloqueada, diasAdenda, estadoAdenda, totaisAdenda, totaisLinhas, type Adenda, type LinhaAdenda } from "../adendas";
 import { podeNeg } from "../permissoes";
 import { useReduzir } from "../movimento";
@@ -156,6 +157,7 @@ function DocumentoAdenda({ ctx, d, a, p, fechar }: { ctx: Ctx; d: Negocio; a: Ad
   }, [fechar]);
   const e = estadoAdenda(a);
   return (
+    <NaFrente>
     <div className="fixed inset-0 z-[60] flex justify-center bg-black/40 sm:items-center sm:p-6" onClick={fechar}>
       <div role="dialog" aria-modal="true" aria-label={`Documento da adenda ${a.n}`} onClick={(ev) => ev.stopPropagation()}
         className="flex h-full w-full max-w-4xl flex-col bg-card shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl">
@@ -185,6 +187,7 @@ function DocumentoAdenda({ ctx, d, a, p, fechar }: { ctx: Ctx; d: Negocio; a: Ad
         </div>
       </div>
     </div>
+    </NaFrente>
   );
 }
 
@@ -202,6 +205,7 @@ function EditarAdenda({ ctx, d, a, fechar }: { ctx: Ctx; d: Negocio; a: Adenda; 
   const mudar = (sid: string, m: Partial<LinhaAdenda>) => setL((X) => X.map((x) => (x.sid === sid ? { ...x, ...m } : x)));
   const guardar = () => { run(() => { A.mudarAdendaDaObra(d.id, a.n, L.map((x) => ({ sid: x.sid, q: x.q, h: x.h, pu: x.pu }))); }); };
   return (
+    <NaFrente>
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-6" onClick={fechar}>
       <div role="dialog" aria-modal="true" aria-label={`Adenda ${a.n}`} onClick={(e) => e.stopPropagation()}
         className="max-h-[92vh] w-full max-w-xl space-y-4 overflow-y-auto rounded-t-2xl bg-card p-5 shadow-2xl sm:rounded-2xl">
@@ -238,5 +242,6 @@ function EditarAdenda({ ctx, d, a, fechar }: { ctx: Ctx; d: Negocio; a: Adenda; 
         </div>
       </div>
     </div>
+    </NaFrente>
   );
 }

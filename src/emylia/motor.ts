@@ -8,6 +8,7 @@ import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } 
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { replanear, simularAtraso } from "./estudioObra/planoVivo";
+import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo, normal as normalUn } from "./catalogo";
@@ -2737,6 +2738,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!comEmail(d, "acesso")) return;
       acessoCliente(d, d.orc?.contrato ? "contrato" : "proposta", "Acesso ao portal · " + obraDe(d));
     },
+    /** 12/11 (Estúdio da obra, Documentos): reenvia ao cliente o aviso com um documento que já está no portal (o acesso ao portal com
+     *  esse documento). Sem email (ou telefone) na ficha, pede-os como os outros envios. */
+    reenviarDocumento(id: number, doc: DocPortal, titulo: string) {
+      const d = deal(id);
+      if (!comEmail(d, "acesso")) return;
+      acessoCliente(d, doc, `${titulo} · ${obraDe(d)}`);
+      log(d, `Reenviado ao cliente: ${titulo}`);
+      avisar({ msg: "Reenviado ao cliente", sub: titulo, kind: "ok" });
+    },
     /** 23/10 (2.0): o email pedido no envio ao portal: fica na ficha do cliente e o envio que esperava por ele segue. */
     emailPortal(id: number, email: string, telefone?: string): boolean {
       const d = deal(id), e = email.trim().toLowerCase();
@@ -2845,6 +2855,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!comEmail(d, "adenda", a.n)) return;
       const v = versaoAdenda(a);
       a.estado = "enviada"; a.enviada = agora(); a.aceite = null; a.pedidoCliente = null;
+      // 12/11 (Rúben): as do Estúdio da obra (um pedido do cliente, um imprevisto ou um problema) vão já assinadas pela empresa: quem a emite
+      if (a.ajuste || a.origem) a.empresa = { nome: lerQuemAssina() || (PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome), q: a.enviada };
       congelarAdenda(S, a); // 22/10 (fase 2): o custo das linhas fica o do envio
       log(d, `Proposta da adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada ao portal do cliente: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")} · +${eur(totaisAdenda(a).total)} € com IVA · +${diasAdenda(a.linhas)} dias`);
       avisar({ msg: `Adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada`, sub: v > 1 ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente, para aceitar", kind: "ok" });

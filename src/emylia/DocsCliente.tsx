@@ -526,12 +526,19 @@ function TabelaPrestacoes({ tr }: { tr: { l: string; p: number; v: number; quand
   );
 }
 /** As linhas de aceitação (a empresa e o cliente) e como se aceita. */
-function Aceitacao({ d, comercial, aceite }: { d: Negocio; comercial: string; aceite?: string | null }) {
+function Aceitacao({ d, comercial, aceite, empresa, n }: { d: Negocio; comercial: string; aceite?: string | null;
+  /** 12/11: a adenda do Estúdio da obra já assinada pela empresa (quem a emitiu e quando) */
+  empresa?: { nome: string; q: string }; n?: string }) {
   return (
     <>
-      <div className="grid gap-6 sm:grid-cols-2">
-        {[["Pela " + EMPRESA.nome, comercial], ["O cliente", d.f.nome_fiscal || d.nome]].map(([q, nome]) => (
-          <div key={q} className="pt-10">
+      <div className={cn("grid gap-6 sm:grid-cols-2", empresa && "sm:items-end")}>
+        {[["Pela " + EMPRESA.nome, comercial], ["O cliente", d.f.nome_fiscal || d.nome]].map(([q, nome], k) => (
+          <div key={q} className={k === 0 && empresa ? "pt-2" : "pt-10"}>
+            {k === 0 && empresa && (
+              <div className="pb-1">
+                <SeloAssinatura a={{ tipo: "digital", nome: `${empresa.nome} (${EMPRESA.nome})`, q: empresa.q, ...(n ? { id: `MDL-${n.replace(/\D+/g, "")}` } : {}) }} compacto meio="Certificado qualificado" />
+              </div>
+            )}
             <div className="border-t border-slate-400 pt-2">
               <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{q}</p>
               <p className="font-medium text-slate-900">{nome}</p>
@@ -539,7 +546,7 @@ function Aceitacao({ d, comercial, aceite }: { d: Negocio; comercial: string; ac
           </div>
         ))}
       </div>
-      <p className="text-sm text-slate-600">{aceite ? `Aceite no portal do cliente a ${aceite}.` : "Pode aceitar no portal do cliente, com um toque: fica registado quem, quando e de onde."}</p>
+      <p className="text-sm text-slate-600">{aceite ? `Aceite no portal do cliente a ${aceite}.` : empresa ? `Assinada pela ${EMPRESA.nome}. Só falta a sua aceitação: pode aceitar no portal do cliente, com um toque.` : "Pode aceitar no portal do cliente, com um toque: fica registado quem, quando e de onde."}</p>
     </>
   );
 }
@@ -669,7 +676,7 @@ function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
         </section>
         <section className="space-y-4">
           <Titulo n={7}>Aceitação</Titulo>
-          <Aceitacao d={d} comercial={comercial} aceite={a.aceite} />
+          <Aceitacao d={d} comercial={a.empresa?.nome ?? comercial} aceite={a.aceite} empresa={a.empresa} n={a.n} />
         </section>
       </Pagina>
     </div>
