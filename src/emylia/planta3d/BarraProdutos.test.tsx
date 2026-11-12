@@ -177,7 +177,10 @@ describe("Composição livre (protótipo)", () => {
     expect(abrir).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(abrir);
     expect(screen.getByRole("button", { name: "Fechar a composição livre" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Lava-loiças" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
     fireEvent.click(screen.getByRole("button", { name: /^Juntar a família/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
     fireEvent.click(screen.getByRole("button", { name: "Pôr a composição na planta" }));
     expect(onLivre).toHaveBeenCalledTimes(1);
     expect(onLivre.mock.calls[0][0]).toHaveLength(1);

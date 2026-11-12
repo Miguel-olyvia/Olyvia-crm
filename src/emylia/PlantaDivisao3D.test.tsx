@@ -184,13 +184,15 @@ describe("PlantaDivisao3D", () => {
       fireEvent.click(screen.getByRole("tab", { name: /^Bancadas \(/ }));
       fireEvent.click(screen.getByRole("button", { name: "Montar uma composição livre" }));
       const painel = screen.getByRole("region", { name: "Composição livre" });
-      const juntar = (cat: RegExp) => {
-        const sel = within(painel).getByLabelText("Família") as HTMLSelectElement;
-        const grupo = [...sel.querySelectorAll("optgroup")].find((g) => cat.test(g.label))!;
-        fireEvent.change(sel, { target: { value: (grupo.querySelector("option") as HTMLOptionElement).value } });
+      const juntar = (cat: string) => {
+        fireEvent.click(within(painel).getByRole("button", { name: cat }));
+        fireEvent.click(within(painel).getByRole("button", { name: "Seguinte" }));
         fireEvent.click(within(painel).getByRole("button", { name: /^Juntar a família/ }));
       };
-      juntar(/Lava-loiças/); juntar(/Torneiras/);
+      juntar("Lava-loiças");
+      fireEvent.click(within(painel).getByRole("button", { name: "Juntar mais um produto" }));
+      juntar("Torneiras");
+      fireEvent.click(within(painel).getByRole("button", { name: "Seguinte" }));
       fireEvent.click(within(painel).getByRole("button", { name: "Pôr a composição na planta" }));
       const pecas = lerPlanta(d.f.planta)!.pecas;
       expect(pecas).toHaveLength(2);
