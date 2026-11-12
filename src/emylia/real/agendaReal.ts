@@ -8,7 +8,10 @@ import type { Papel } from "../motor";
 import { definirAusenciasRh, type FichaTecnico } from "../equipa/tecnicos";
 import { definirRhDaAgenda, TIPO_AUSENCIA_REAL, type PessoaAgendaRh } from "../equipa/rhDaAgenda";
 import type { EquipaReal, MembroAgenda } from "../equipa/membros";
-import { definirVisitasCrm, type VisitaCrm } from "../equipa/visitasCrm";
+import { definirVisitasCrm, lerVisitasCrm, type VisitaCrm } from "../equipa/visitasCrm";
+import { definirAgendaExtra, type CompromissoAgenda } from "../preparacaoObra";
+import { HORAS_DIA } from "../ganttOrcamento";
+import { diasUteis, estadoTarefaObra, mesmoNome, tarefaObraConcluida, type TarefaObraRpc } from "@/lib/agenda/obraTarefas";
 
 /** O nome de cada papel na agenda ("Comercial", "Técnico"…). */
 export const NOME_PAPEL: Record<Papel, string> = {
@@ -21,7 +24,7 @@ export function janelaAgenda(hoje: Date): { de: string; ate: string } {
   return { de: d(-30), ate: d(365) };
 }
 
-interface LinhaAgendaRh { pessoa_id: string; nome: string | null; indisponivel?: { data: string }[] | null }
+interface LinhaAgendaRh { pessoa_id: string; nome: string | null; indisponivel?: { data: string }[] | null; tarefas?: TarefaObraRpc[] | null }
 
 /** As pessoas da rh_agenda_tecnicos, com os dias de ausência aprovada. */
 export const pessoasDaAgenda = (linhas: readonly LinhaAgendaRh[]): PessoaAgendaRh[] =>
@@ -33,11 +36,67 @@ export function aplicarAgenda(pessoas: readonly PessoaAgendaRh[]): void {
   definirRhDaAgenda(pessoas);
 }
 
+/* 12/11 (Rúben: «a validação da obra devia ter agendas disponíveis»): o plano da obra conta também o que a agenda real já tem marcado aos
+   técnicos e que não vem do plano de um negócio carregado: as tarefas de obra da rh_agenda_tecnicos (as de negócios carregados contam pelo
+   plano do negócio, preparacaoObra.cargaDosTecnicos) e as visitas do CRM em que vai um técnico (pelo nome do recurso). */
+let linhasDaAgenda: readonly LinhaAgendaRh[] = [];
+
+/** O máximo de compromissos (um por técnico e por dia útil): a agenda nunca pesa no ecrã, mesmo com milhares de tarefas de teste. */
+export const MAX_COMPROMISSOS = 3000;
+
+/** As tarefas de obra por fazer da rh_agenda_tecnicos, uma por dia útil de `de` a `ate`, com as horas desse dia (sem horas, o dia inteiro).
+ *  As de negócios carregados (`carregados`) não entram: contam pelo plano do negócio. Pára no máximo. */
+export function tarefasDaAgendaRh(linhas: readonly LinhaAgendaRh[], de: string, ate: string, carregados: ReadonlySet<number> = new Set(), max = MAX_COMPROMISSOS): CompromissoAgenda[] {
+  const out: CompromissoAgenda[] = [];
+  for (const l of linhas) for (const t of Array.isArray(l.tarefas) ? l.tarefas : []) {
+    if (out.length >= max) return out;
+    if (tarefaObraConcluida(estadoTarefaObra(t.estado))) continue;
+    if (t.negocio_numero != null && carregados.has(Number(t.negocio_numero))) continue;
+    const h = Math.min(HORAS_DIA, Number(t.horas_dia) || (t.minutos ? Number(t.minutos) / 60 : HORAS_DIA));
+    const nome = t.obra_titulo || t.obra_codigo || "Obra";
+    for (const data of diasUteis(t.inicio, t.fim, de, ate)) {
+      out.push({ tec: l.pessoa_id, data, h, nome, tarefa: t.nome, ...(t.negocio_numero != null ? { negocio: Number(t.negocio_numero) } : {}) });
+      if (out.length >= max) return out;
+    }
+  }
+  return out;
+}
+
+/** As visitas do CRM (por fazer) em que vai um técnico (o recurso com o nome dele). */
+export function visitasDosTecnicos(visitas: readonly VisitaCrm[], tecnicos: readonly { id: string; n: string }[]): CompromissoAgenda[] {
+  const out: CompromissoAgenda[] = [];
+  for (const v of visitas) {
+    if (v.feito) continue;
+    const tec = tecnicos.find((t) => mesmoNome(v.nome, t.n));
+    if (tec) out.push({ tec: tec.id, data: v.data, h: Math.min(HORAS_DIA, v.horas || 1.5), nome: v.titulo, tarefa: v.hora ? `Visita às ${v.hora}` : "Visita" });
+  }
+  return out;
+}
+
+const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** Junta as tarefas da agenda do RH e as visitas dos técnicos e põe-nas no plano da obra (definirAgendaExtra). Chama-se depois de ler os
+ *  negócios: só o que vem de hoje a um ano e só as tarefas de obras sem negócio carregado (`carregados`, os números). Devolve quantos. */
+export function aplicarCompromissos(tecnicos: readonly { id: string; n: string }[], carregados: ReadonlySet<number> = new Set(), hoje = new Date()): number {
+  try {
+    const de = isoLocal(hoje), ate = isoLocal(new Date(hoje.getFullYear() + 1, hoje.getMonth(), hoje.getDate()));
+    const L = [...visitasDosTecnicos(lerVisitasCrm(), tecnicos).filter((c) => c.data >= de && c.data <= ate), ...tarefasDaAgendaRh(linhasDaAgenda, de, ate, carregados)]
+      .slice(0, MAX_COMPROMISSOS);
+    definirAgendaExtra(L);
+    return L.length;
+  } catch {
+    // a agenda extra nunca impede os negócios de abrir: sem ela, o plano conta só as obras dos negócios e as férias
+    definirAgendaExtra(null);
+    return 0;
+  }
+}
+
 /** Lê e aplica. Sem a função ou sem permissão, a agenda fica sem ausências (nunca com as de exemplo) e devolve o motivo. */
 export async function carregarAgendaReal(sb: SupabaseClient, org: string, hoje = new Date()): Promise<{ pessoas: PessoaAgendaRh[]; erro: string | null }> {
   const { de, ate } = janelaAgenda(hoje);
   const { data, error } = await sb.rpc("rh_agenda_tecnicos" as never, { p_org: org, p_de: de, p_ate: ate } as never);
-  if (error) { aplicarAgenda([]); return { pessoas: [], erro: error.message || "Não foi possível ler a agenda do RH." }; }
+  if (error) { aplicarAgenda([]); linhasDaAgenda = []; return { pessoas: [], erro: error.message || "Não foi possível ler a agenda do RH." }; }
+  // 12/11: as tarefas de obra ficam por expandir até os negócios estarem lidos (aplicarCompromissos)
+  linhasDaAgenda = Array.isArray(data) ? (data as LinhaAgendaRh[]) : [];
   const pessoas = pessoasDaAgenda((data as LinhaAgendaRh[] | null) ?? []);
   aplicarAgenda(pessoas);
   return { pessoas, erro: null };

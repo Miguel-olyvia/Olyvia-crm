@@ -30,7 +30,7 @@ import {
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
-import { agendaDaProposta, textoAgenda, faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -3830,6 +3830,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (a && !a.lido) a.lido = agora();
     },
     /** Volta ao plano que veio do orçamento (datas, dias e técnicos; as notas ficam). */
+    /** 12/11: refaz o plano por aprovar com a agenda de hoje (preparacaoObra.planoComAgendaDeHoje), no mesmo início. */
+    refazerPlanoComAgenda(id: number) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), r = planoComAgendaDeHoje(d, S);
+      if (!r) return;
+      d.obra.plano = r.plano;
+      log(d, `Plano refeito com a agenda de hoje: ${r.dias} dias úteis em vez de ${r.antes}`);
+      avisar({ msg: "Plano refeito", sub: `Com a agenda de hoje: ${r.dias} dias úteis em vez de ${r.antes}`, kind: "ok" });
+    },
     reporPlano(id: number) {
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano;

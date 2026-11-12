@@ -28,7 +28,7 @@ import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta, diasDaObra, isoDia } from "../planoObra";
-import { blocosForaDaObra, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, retificacaoAceite, tecnicosDoOficio } from "../preparacaoObra";
+import { blocosForaDaObra, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, planoComAgendaDeHoje, retificacaoAceite, tecnicosDoOficio } from "../preparacaoObra";
 import { NovaTarefa } from "../PlanoInterativo";
 import { pelaPermissao, podeNeg } from "../permissoes";
 import { InfoDoNegocio } from "./InfoDoNegocio";
@@ -82,6 +82,9 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
   const dias = useMemo(() => diasDaObra(inicio, fim + 5), [isoDia(inicio), fim]); // eslint-disable-line react-hooks/exhaustive-deps
   const ocup = useMemo(() => ocupacaoDosTecnicos(S, d.id), [S, d.id, S.deals]); // eslint-disable-line react-hooks/exhaustive-deps
   const obrasOcup = useMemo(() => obrasDosTecnicos(S, d.id), [S, d.id, S.deals]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 12/11: o plano por aprovar que nasceu com a agenda antiga (empurrado semanas): o refeito com a agenda de hoje, se ficar mais curto
+  const comAgenda = useMemo(() => (d.obra.plano?.estado === "por aprovar" ? planoComAgendaDeHoje(d, S) : null),
+    [d.obra.plano, d.obra.plano?.tasks.length, S.deals]); // eslint-disable-line react-hooks/exhaustive-deps
   // 11/11: o que as medidas do local mudam no orçamento (refaz o orçamento numa cópia: só quando as medidas mudam, não a cada arrasto)
   const impMedidas = useMemo(() => (d.orc && !d.orc.vendaDireta && d.f.retif_aceite ? impactoDasMedidas(d, S, medidasRetificadas(d)) : null),
     [d.f.retif_aceite, d.orc]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -297,6 +300,13 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
             </div>
           </div>
           {porque && <p className="mx-auto max-w-[1500px] px-4 pb-2 text-sm text-amber-800 dark:text-amber-300 sm:px-6">{porque}</p>}
+          {comAgenda && !dif.mexidas.length && planeia && (
+            <div role="status" className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-3 px-4 pb-3 sm:px-6">
+              <p className="min-w-0 flex-1 text-[15px]"><Sparkles className="mr-1.5 inline h-4 w-4 text-primary" aria-hidden="true" />
+                Com a agenda dos técnicos de hoje, a obra fica em <b className="font-semibold">{comAgenda.dias} dias úteis</b> em vez de {comAgenda.antes}.</p>
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => mudar(-1, () => A.refazerPlanoComAgenda(d.id))}>Refazer o plano</Button>
+            </div>
+          )}
         </header>
 
         <div className="relative flex min-h-0 flex-1">

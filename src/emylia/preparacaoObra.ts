@@ -534,6 +534,21 @@ export function planoNovoDaObra(d: Negocio, S: Estado): { plano: Plano; adiadas:
   return { plano, adiadas };
 }
 
+/** 12/11: os dias úteis de um plano (do primeiro ao último dia com tarefas). */
+const diasDoPlano = (p: Plano): number => p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
+/** 12/11 (Rúben: «a validação da obra está com as agendas todas lixadas»): um plano por aprovar gerado com a agenda antiga (que contava os
+ *  rascunhos e o dia inteiro por qualquer tarefa) ficou empurrado semanas. O plano refeito do orçamento com a agenda de hoje, no mesmo
+ *  início, quando fica mais curto; null se não há o que ganhar (ou o plano já foi mexido à mão: aí as mudanças valem mais). */
+export function planoComAgendaDeHoje(d: Negocio, S: Estado): { plano: Plano; dias: number; antes: number } | null {
+  const p = d.obra?.plano;
+  if (!p || p.estado !== "por aprovar" || p.origem !== "orcamento" || !d.orc || p.tasks.some((t) => t.nova || t.exec)) return null;
+  const inicio = p.inicio ?? d.orc.inicioObra;
+  if (!inicio) return null;
+  const { plano } = planoNovoDaObra({ ...d, orc: { ...d.orc, inicioObra: inicio } } as Negocio, S);
+  const dias = diasDoPlano(plano), antes = diasDoPlano(p);
+  return plano.tasks.length && dias < antes ? { plano: { ...plano, inicio }, dias, antes } : null;
+}
+
 /** 26/10: mudou para ganttOrcamento.ts (o plano do orçamento já parte o «MO Modelo»). */
 export { partesPorOficio } from "./ganttOrcamento";
 

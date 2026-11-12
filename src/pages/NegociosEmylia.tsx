@@ -29,7 +29,7 @@ import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { carregarCamposConfig, lerCamposConfig } from "@/emylia/real/camposConfig";
 import { definirEfeitosCampos, definirGravarEfeitos } from "@/emylia/efeitosLevantamento";
-import { aplicarAgenda, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
+import { aplicarAgenda, aplicarCompromissos, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
 import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
 import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
@@ -555,6 +555,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       const lidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: so });
       if (!vivo) return;
       aplicarLidos(lidos);
+      // 12/11: o plano da obra conta também o que a agenda real já tem marcado aos técnicos fora dos negócios lidos (tarefas de obra, visitas)
+      aplicarCompromissos(TECS, new Set(S.deals.map((d) => d.id)));
       // 4/11: a morada que a lead já trazia (a da ficha da pessoa), para o passo «Morada da obra»; um erro a ler não para nada
       void lerMoradasDasPessoas(supabase, [...refs.current.values()].map((r) => r.entityId)).then((m) => {
         if (!vivo) return;
