@@ -453,7 +453,7 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
                       const faixa = ts.map(({ t }) => { let f = 0; while (faixas[f] !== undefined && faixas[f] > t.dia) f++; faixas[f] = t.dia + t.dur; return f; });
                       // 11/11 (Rúben: «falta ver quando os técnicos estão ocupados»): por baixo das tarefas, as barras de quando a pessoa
                       // está fora desta obra: noutra obra (cinzenta, com o nome; abre o Estúdio dela) ou de férias
-                      const fora = tec ? blocosForaDaObra(tec, dias, obrasOcup, deFerias) : [];
+                      const fora = tec ? blocosForaDaObra(tec, dias, obrasOcup, deFerias, (x, iso) => ocup.cheio(x, iso)) : [];
                       const altura = Math.max(1, faixas.length) * 40 + 12 + (fora.length ? 30 : 0);
                       const esbatida = foco?.k === "tec" && foco.id !== tec;
                       // «+» num dia vazio da linha (por baixo do rato)
@@ -476,14 +476,14 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
                             )}
                             {ts.map(({ t, ti }, j) => barra(t, ti, 6 + faixa[j] * 40))}
                             {fora.map((b) => {
-                              const largura = (b.fim - b.ini) * col - 4, txt = b.tipo === "ferias" ? "Férias" : `${b.obra!.nome}${b.obra!.servico ? ` · ${b.obra!.servico}` : ""}`;
+                              const largura = (b.fim - b.ini) * col - 4, txt = b.tipo === "ferias" ? "Férias" : `${b.parcial ? "Parte do dia · " : ""}${b.obra!.nome}${b.obra!.servico ? ` · ${b.obra!.servico}` : ""}`;
                               const quando = `${dataCurta(dias[b.ini])}${b.fim - b.ini > 1 ? ` a ${dataCurta(dias[b.fim - 1])}` : ""}`;
                               const cls = "absolute flex h-6 items-center gap-1 overflow-hidden whitespace-nowrap rounded-lg px-2 text-[11px] font-medium";
                               const st = { left: b.ini * col + 2, width: largura, bottom: 4 };
                               return b.tipo === "obra" ? (
                                 <button key={`o${b.ini}`} type="button" onClick={() => setOutra(b.obra!)} title={`Noutra obra: ${txt} (${quando}). Abrir o Estúdio dela`}
                                   aria-label={`${nomeTec(tec)} está noutra obra, ${txt}, ${quando}. Abrir o Estúdio dela`}
-                                  className={cn(cls, "bg-muted-foreground/20 text-foreground/80 hover:bg-muted-foreground/30")} style={st}>
+                                  className={cn(cls, b.parcial ? "border border-dashed border-muted-foreground/40 bg-card text-muted-foreground hover:bg-muted/60" : "bg-muted-foreground/20 text-foreground/80 hover:bg-muted-foreground/30")} style={st}>
                                   <ArrowUpRight className="h-3 w-3 shrink-0" aria-hidden="true" /><span className="truncate">{largura > 50 ? txt : ""}</span>
                                 </button>
                               ) : (

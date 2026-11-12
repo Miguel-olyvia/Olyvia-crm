@@ -42,9 +42,9 @@ describe("o plano da obra na visita", () => {
     const P0 = planoDaVisita(dc, S, "2026-11-16");
     const t0 = P0.tarefas.find((t) => t.tec && TECS.filter((x) => x.sk === TECS.find((y) => y.id === t.tec)?.sk).length > 1);
     if (!t0) return; // o exemplo não tem dois técnicos do mesmo ofício
-    // outra obra, com esse técnico ocupado na semana toda
+    // outra obra, com esse técnico ocupado na semana toda (12/11: a agenda conta em horas: 15 dias de 8 h)
     const outro = S.deals.find((x) => x.id !== d.id)!;
-    outro.obra.plano = { tasks: [{ nome: "Outra obra", svcs: [], dia: 0, dur: 15, sk: "", h: 8, tec: t0.tec }], estado: "aprovado", dia: 0, origem: "orcamento", inicio: "2026-11-16" };
+    outro.obra.plano = { tasks: [{ nome: "Outra obra", svcs: [], dia: 0, dur: 15, sk: "", h: 120, tec: t0.tec }], estado: "aprovado", dia: 0, origem: "orcamento", inicio: "2026-11-16" };
     const P1 = planoDaVisita(dc, S, "2026-11-16");
     const t1 = P1.tarefas.find((t) => t.nome === t0.nome)!;
     expect(t1.tec).not.toBe(t0.tec);
