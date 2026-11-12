@@ -476,6 +476,19 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
         <p className="mt-1 text-[15px] text-slate-600">Ficamos à disposição. Se mudar de ideias, fale connosco: preparamos uma nova proposta.</p>
       </>
     );
+  } else if (P.estado === "preparar" && !ad && !o?.contratoVersoes?.length && (outros.some((x) => x.id === "pag" || x.id.startsWith("tr-")) || d.fin.pago || faturasReais.some((f) => f.pagamento))) {
+    // 12/11 (ordem nova do Rúben): proposta aceite → fatura e pagamento → medidas e plano da obra → contrato. Com a fatura emitida, o
+    // contrato já não fica «pronto no mesmo dia»: primeiro paga-se, depois mede-se e fecha-se o plano, e só então se assina.
+    const porPagar = outros.some((x) => x.id === "pag" || x.id.startsWith("tr-"));
+    agora = (
+      <>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{porPagar ? "Proposta aceite" : "Pagamento recebido"}</p>
+        <h2 className="mt-2 text-xl font-semibold">{porPagar ? "Primeiro, o pagamento do adiantamento" : "Estamos a preparar a sua obra"}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{porPagar
+          ? "A fatura está aqui em baixo, em «Também precisa de si». Com o pagamento confirmado, medimos o local e fechamos o plano da obra. Depois, o contrato aparece aqui, neste mesmo link, para assinar."
+          : "Agora medimos o local e fechamos o plano da obra. Depois, o contrato aparece aqui, neste mesmo link, para assinar. Não precisa de fazer nada agora."}</p>
+      </>
+    );
   } else if (P.estado === "preparar") {
     agora = (
       <>

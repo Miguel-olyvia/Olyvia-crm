@@ -222,3 +222,27 @@ describe("no portal", () => {
     expect(screen.getByRole("dialog").textContent).not.toMatch(/paga a empresa|Falta o técnico/);
   });
 });
+
+describe("a ordem nova (12/11): pagamento → medidas e plano → contrato", () => {
+  const portal = (pago: boolean) => {
+    const { S, d } = emObra();
+    Object.assign(d.orc!, { contrato: null, contratoPedido: null, contratoVersoes: undefined });
+    d.obra.plano = null;
+    d.fin = { fatura: { n: "FT 2026/12", q: "11/11 09:00" }, pago, recibo: pago ? { n: "RC 2026/7", q: "11/11 10:00" } : null };
+    S.deals = [d];
+    const A = acoes(S, () => {}, (fn) => fn());
+    render(<PortalCliente ctx={{ S, A, run: (fn: () => void) => fn() } as unknown as Ctx} d={d} fechar={() => {}} previa />);
+    return screen.getByRole("region", { name: "Agora" });
+  };
+  it("com a fatura por pagar, o passo é pagar, e o contrato vem depois das medidas e do plano", () => {
+    const agora = portal(false);
+    expect(within(agora).getByText("Primeiro, o pagamento do adiantamento")).toBeInTheDocument();
+    expect(agora.textContent).not.toMatch(/mesmo dia/);
+    expect(screen.getByText("Pagar a fatura FT 2026/12")).toBeInTheDocument();
+  });
+  it("paga, diz que estamos a medir e a fechar o plano, sem nada para fazer", () => {
+    const agora = portal(true);
+    expect(within(agora).getByText("Estamos a preparar a sua obra")).toBeInTheDocument();
+    expect(agora.textContent).toMatch(/medimos o local e fechamos o plano/);
+  });
+});
