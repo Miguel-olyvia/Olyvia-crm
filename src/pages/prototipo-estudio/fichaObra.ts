@@ -1,11 +1,12 @@
 // 5/11 (Rúben: «a informação que vai passar para a operação já é a obra a fazer… a equipa tem que ter as duas informações»). A ficha da
 // obra sai do projeto: o que se retira, o que se instala e onde (a que distância das paredes), o que muda de sítio, os materiais com as
 // quantidades e as alturas. Só regras (o ecrã é o passo «Obra» do Estúdio).
-import { PECAS, cantos, limites, type PecaPlanta, type Planta } from "@/emylia/planta";
+import { PECAS, cantos, limites, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
 import { ACOMPANHA, produto } from "./catalogoFake";
 import { alturaFinalCm, entraram, estadoDaPeca, mudaramDeSitio, sairam, type Linha, type Projeto } from "./necessidadesEstudio";
 
-export interface Tarefa { tipo: "retirar" | "instalar" | "mudar" | "fica"; peca: string; produto?: string; onde?: string; acompanha?: string[] }
+export interface Tarefa { tipo: "retirar" | "instalar" | "mudar" | "fica"; peca: string; produto?: string; onde?: string; acompanha?: string[];
+  /** 12/11: para o desenho da peça na ficha (na cor do produto, quando há). */ desenho?: TipoPeca; hex?: string }
 
 /** Onde fica a peça, em palavras: a que distância da parede da esquerda e da de cima (as paredes do retângulo que contém a planta). */
 export function ondeFica(pc: PecaPlanta, pl: Planta): string {
@@ -19,14 +20,14 @@ export function ondeFica(pc: PecaPlanta, pl: Planta): string {
 
 export function tarefas(p: Projeto): Tarefa[] {
   const out: Tarefa[] = [];
-  for (const x of sairam(p).filter((y) => !PECAS[y.tipo].abertura)) out.push({ tipo: "retirar", peca: PECAS[x.tipo].n });
+  for (const x of sairam(p).filter((y) => !PECAS[y.tipo].abertura)) out.push({ tipo: "retirar", peca: PECAS[x.tipo].n, desenho: x.tipo });
   const mudaram = new Set(mudaramDeSitio(p).map((x) => x.id));
   for (const x of p.depois.pecas.filter((y) => !PECAS[y.tipo].abertura)) {
     const e = estadoDaPeca(p, x), prod = produto(p.escolhas[x.id]);
     const acompanha = (ACOMPANHA[x.tipo] ?? []).map((cat) => produto(p.acompanha[x.id]?.[cat])?.n).filter((n): n is string => !!n);
-    if (e === "troca") out.push({ tipo: "retirar", peca: `${PECAS[x.tipo].n} (${["base", "banheira", "sanita"].includes(x.tipo) ? "a antiga" : "o antigo"})` });
-    if (e !== "fica") out.push({ tipo: "instalar", peca: PECAS[x.tipo].n, produto: prod?.n ?? "por escolher", onde: ondeFica(x, p.depois), acompanha });
-    else if (mudaram.has(x.id)) out.push({ tipo: "mudar", peca: PECAS[x.tipo].n, onde: ondeFica(x, p.depois) });
+    if (e === "troca") out.push({ tipo: "retirar", peca: `${PECAS[x.tipo].n} (${["base", "banheira", "sanita"].includes(x.tipo) ? "a antiga" : "o antigo"})`, desenho: x.tipo });
+    if (e !== "fica") out.push({ tipo: "instalar", peca: PECAS[x.tipo].n, produto: prod?.n ?? "por escolher", onde: ondeFica(x, p.depois), acompanha, desenho: x.tipo, hex: prod?.hex });
+    else if (mudaram.has(x.id)) out.push({ tipo: "mudar", peca: PECAS[x.tipo].n, onde: ondeFica(x, p.depois), desenho: x.tipo });
     else out.push({ tipo: "fica", peca: PECAS[x.tipo].n });
   }
   // as que retiram vêm primeiro (é a ordem da obra)

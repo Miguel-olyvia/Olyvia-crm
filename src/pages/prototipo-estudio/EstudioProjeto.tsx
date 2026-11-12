@@ -9,7 +9,7 @@
 // portal depois de a proposta ser aceite. Tudo fica neste browser (localStorage).
 import { useEffect, useMemo, useState, useRef, Component, Suspense, lazy, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, Printer, RotateCcw, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorPlanta } from "@/emylia/EditorPlanta";
@@ -17,10 +17,11 @@ import { irPara } from "@/emylia/urlNegocio";
 import { PECAS, cantos, tiposDaDivisao, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
 import { NOME_CATEGORIA, melhorPara, produto, type Categoria, type Produto } from "./catalogoFake";
 import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sairam, totais, type Linha, type Projeto } from "./necessidadesEstudio";
-import { Amostra, Areas, Cartao, Numero, PainelMateriais, PainelPeca, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
+import { Amostra, Areas, Cartao, Numero, PainelMateriais, PainelPeca, Resumo, Seguinte, chip, eur } from "./pecasEstudio";
 import { PassoEstilo } from "./PassoEstilo";
 import { GravarNoEstudio } from "./GravarNoEstudio";
 import { LinhasProposta, ResumoProposta } from "./OrcamentoProposta";
+import { FichaDaObra } from "./FichaDaObra";
 import { PROJETO_EXEMPLO, copiaPlanta, depoisDaVisita } from "./exemploEstudio";
 import { espacoDoEstudio } from "./estudioNo3D";
 import { Vista3D } from "./Vista3D";
@@ -28,7 +29,6 @@ import { cenaDe } from "./cenaDoProjeto";
 import { PlantaVista } from "./PlantaVista";
 import { PlanoDoEstudio } from "./PlanoDoEstudio";
 import { PerguntasNoEstudio } from "./PerguntasNoEstudio";
-import { alturasEmPalavras, materiais, tarefas } from "./fichaObra";
 import type { Cena } from "./geometria3d";
 
 import { totalDaCozinha } from "./cozinha/modelo";
@@ -240,7 +240,7 @@ export default function EstudioProjeto() {
 
         {/* 11/11 (Rúben): as perguntas da visita que faltam, antes do plano e de fechar */}
         {passo === "Fechar" && p.negocio !== undefined && <div className="lg:col-span-full"><PerguntasNoEstudio p={p} setP={setP} /></div>}
-        {passo === "Fechar" && <PlanoDoEstudio p={p} setP={setP} fechar={voltar} semCatalogo={<FichaObra p={p} linhas={linhas} />} />}
+        {passo === "Fechar" && <PlanoDoEstudio p={p} setP={setP} fechar={voltar} semCatalogo={<FichaDaObra p={p} linhas={linhas} />} />}
       </motion.div>
       </AnimatePresence>
 
@@ -389,60 +389,6 @@ function MostrarAoCliente({ p, t, fechar }: { p: Projeto; t: ReturnType<typeof t
         </section>
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------- a ficha para a obra (operações)
-
-function FichaObra({ p, linhas }: { p: Projeto; linhas: Linha[] }) {
-  const ts = tarefas(p);
-  const mats = materiais(linhas);
-  const NOME = { retirar: "Retirar", mudar: "Mudar de sítio", instalar: "Instalar", fica: "Fica" } as const;
-  const COR = { retirar: "bg-destructive/10 text-destructive", mudar: "bg-warning/15 text-warning-foreground", instalar: "bg-primary/10 text-primary", fica: "bg-muted text-muted-foreground" } as const;
-  return (
-    <section aria-labelledby="t-obra" className="min-w-0 space-y-6 lg:col-span-2 print:space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 id="t-obra" className="text-2xl font-semibold tracking-tight">A ficha para a obra</h2>
-          <p className="text-[15px] text-muted-foreground">O que a equipa precisa: as duas plantas, o que se retira e o que se instala onde, os materiais e as alturas.</p>
-        </div>
-        <Button type="button" variant="outline" className="min-h-11 print:hidden" onClick={() => window.print()}><Printer className="mr-2 h-4 w-4" aria-hidden="true" />Imprimir ou guardar em PDF</Button>
-      </div>
-      <div className="grid gap-6 md:grid-cols-2">
-        <PlantaVista planta={p.antes} titulo="Antes: como está hoje" />
-        <PlantaVista planta={p.depois} titulo="Depois: como vai ficar (a tracejado, o que sai)" fantasmas={sairam(p)}
-          cor={(pc) => produto(p.escolhas[pc.id])?.hex} rotulo={(pc) => produto(p.escolhas[pc.id])?.colecao} />
-      </div>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <Cartao titulo="Tarefas, pela ordem da obra">
-          <ol className="space-y-2">
-            {ts.filter((x) => x.tipo !== "fica").map((x, i) => (
-              <li key={i} className="flex gap-3 rounded-xl border border-border p-3">
-                <span className={cn("h-fit shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold", COR[x.tipo])}>{NOME[x.tipo]}</span>
-                <span className="min-w-0 text-[15px]">
-                  <b className="font-medium">{x.peca}</b>{x.produto ? `: ${x.produto}` : ""}
-                  {x.onde && <span className="block text-sm text-muted-foreground">{x.onde}</span>}
-                  {x.acompanha?.length ? <span className="block text-sm text-muted-foreground">Com {x.acompanha.join(" e ")}.</span> : null}
-                </span>
-              </li>
-            ))}
-          </ol>
-          {ts.some((x) => x.tipo === "fica") && <p className="text-sm text-muted-foreground">Ficam como estão: {ts.filter((x) => x.tipo === "fica").map((x) => x.peca.toLowerCase()).join(", ")}.</p>}
-        </Cartao>
-        <div className="space-y-6">
-          <Cartao titulo="Alturas">
-            <ul className="space-y-1 text-[15px]">{alturasEmPalavras(p).map((x) => <li key={x}>{x}</li>)}</ul>
-          </Cartao>
-          <Cartao titulo="Materiais">
-            {mats.length ? <ul className="space-y-2 text-[15px]">{mats.map((l) => <li key={l.id}><b className="font-medium">{nf(l.q)} {l.un}</b> de {l.n}<span className="block text-xs text-muted-foreground">{l.porque}</span></li>)}</ul>
-              : <p className="text-sm text-muted-foreground">Sem revestimento nem pavimento escolhidos.</p>}
-          </Cartao>
-          <Cartao titulo="Paredes, para conferir">
-            <p className="text-[15px]">{p.depois.paredes.map((w) => `${Math.round(w.c)} cm`).join(" · ")}</p>
-          </Cartao>
-        </div>
-      </div>
-    </section>
   );
 }
 
