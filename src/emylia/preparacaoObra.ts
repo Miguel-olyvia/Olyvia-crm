@@ -198,8 +198,11 @@ const inicioDaOutra = (d: Pick<Negocio, "f" | "obra">): string | null => d.obra?
    Agora a agenda de cada técnico conta-se em HORAS por dia útil (HORAS_DIA): só as obras com o plano aprovado ou em curso, só as tarefas por
    fazer, mais os compromissos da agenda real (as visitas do CRM e as tarefas de obras fora dos negócios, definirAgendaExtra). O técnico
    está ocupado para uma tarefa quando as horas que já tem nesse dia mais as da tarefa passam o dia de trabalho. */
-/** Os planos que reservam a agenda: aprovados ou em curso (o «por aprovar» é um rascunho; a «concluída» já acabou). */
-export const planoOcupa = (p: Pick<Plano, "estado"> | null | undefined): boolean => p?.estado === "aprovado" || p?.estado === "em curso";
+/** Os planos que reservam a agenda: aprovados ou em curso (a «concluída» já acabou). O «por aprovar» é um rascunho, exceto com o
+ *  pagamento validado: 12/11 (Rúben: medidas e plano só depois do Financeiro) o cliente já pagou e a obra vai acontecer; o plano espera
+ *  só pela validação das Operações e os técnicos ficam reservados. */
+export const planoOcupa = (p: Pick<Plano, "estado"> | null | undefined, d?: { fin?: { pago?: boolean } }): boolean =>
+  p?.estado === "aprovado" || p?.estado === "em curso" || (p?.estado === "por aprovar" && !!d?.fin?.pago);
 /** A tarefa ainda ocupa o técnico (não está feita nem validada). */
 const tarefaOcupa = (t: Pick<Tarefa, "tec" | "exec">): boolean => !!t.tec && t.exec?.estado !== "validada" && t.exec?.estado !== "feita";
 /** As horas por dia de uma tarefa: as horas a dividir pelos dias (sem horas, o dia inteiro). */
@@ -230,7 +233,7 @@ export function cargaDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): Car
     ids.add(d.id);
     const p = d.obra?.plano;
     const ini = inicioDaOutra(d);
-    if (d.id === exceto || d.perdido || !p || !planoOcupa(p) || !ini) continue;
+    if (d.id === exceto || d.perdido || !p || !planoOcupa(p, d) || !ini) continue;
     const fim = p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
     if (!fim) continue;
     const ds = diasDaObra(deIso(ini), fim);
@@ -313,7 +316,7 @@ export function obraQueOcupa(S: Pick<Estado, "deals">, tec: string, t: Pick<Tare
   for (const d of S.deals ?? []) {
     const q = d.obra?.plano;
     const qi = inicioDaOutra(d);
-    if (d.id === exceto || d.perdido || !q || !planoOcupa(q) || !qi) continue;
+    if (d.id === exceto || d.perdido || !q || !planoOcupa(q, d) || !qi) continue;
     const fim = q.tasks.reduce((a, x) => Math.max(a, x.dia + x.dur), 0);
     if (!fim) continue;
     const ds = diasDaObra(deIso(qi), fim);

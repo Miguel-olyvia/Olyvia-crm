@@ -31,6 +31,15 @@ describe("a agenda dos técnicos no plano da obra", () => {
     expect(ocupacaoDosTecnicos(S, d2.id).get(T)?.size).toBe(3);
   });
 
+  it("12/11 (medidas e plano depois do Financeiro): o plano por aprovar de um negócio já pago reserva a agenda", () => {
+    const { S, d1, d2, T } = dois();
+    d1.obra.plano = planoDe("por aprovar", [tarefa(T, 0, 3, 24)]);
+    d1.fin.pago = false;
+    expect(ocupacaoDosTecnicos(S, d2.id).get(T)).toBeUndefined();
+    d1.fin.pago = true;
+    expect(ocupacaoDosTecnicos(S, d2.id).get(T)?.size).toBe(3);
+  });
+
   it("um negócio perdido e as tarefas já feitas não ocupam", () => {
     const { S, d1, d2, T } = dois();
     d1.obra.plano = planoDe("aprovado", [tarefa(T, 0, 1, 8), tarefa(T, 1, 1, 8)]);
