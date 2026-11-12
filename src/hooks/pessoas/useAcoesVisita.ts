@@ -28,6 +28,8 @@ export interface ResultadoMarcar {
   visitaId: string | null;
   mudou: boolean;
   responsavel: ResponsavelDaVisita | null;
+  /** 12/11: a primeira visita passou o negócio de Contacto a Visita na base (`passou_a_visita`: a vaga, «qui 12/11 · 08:00»); null: não passou. */
+  passouAVisita: string | null;
 }
 
 export interface ResultadoAlterar {
@@ -151,14 +153,17 @@ function criarAcoes(c: Contexto): AcoesVisita {
     const pedido = paraGuardarVisita(org(), c.pessoaId, entrada);
     if (!pedido.ok) throw entradaInvalida(pedido.erro);
     return partilhar(`marcar:${JSON.stringify(pedido.params)}`, async () => {
-      let resposta: { visita_id?: unknown; mudou?: unknown; responsavel?: unknown } | null;
+      let resposta: { visita_id?: unknown; mudou?: unknown; responsavel?: unknown; passou_a_visita?: unknown } | null;
       try {
         resposta = await chamarNeg("neg_guardar_visita", pedido.params);
       } catch (erro) {
         throw falha(erro, "marcar");
       }
       invalidar();
-      return { visitaId: texto(resposta?.visita_id), mudou: resposta?.mudou === true, responsavel: responsavelDaResposta(resposta?.responsavel) };
+      return {
+        visitaId: texto(resposta?.visita_id), mudou: resposta?.mudou === true, responsavel: responsavelDaResposta(resposta?.responsavel),
+        passouAVisita: texto(resposta?.passou_a_visita) || null,
+      };
     });
   }
 

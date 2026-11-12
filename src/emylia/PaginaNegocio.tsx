@@ -25,6 +25,7 @@ import { EstadoFaturaErp, RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
+import { oQueQuerFeito } from "./passosContacto";
 import { ComercialDaLead, TextoDaLead, comDadosLead } from "./DadosDaLead";
 import { MoradaDeQuemPede } from "./MoradaDeQuemPede";
 import { vagasVisita } from "./vagasVisita";
@@ -318,6 +319,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ...passosDaLead(),
     ];
   } else if (fase === 1) {
+    // 12/11: «O que o cliente quer» só tem textos longos (opcionais): a contagem era {n:0,f:0} e o passo nunca ficava feito. Fica feito com
+    // o tipo de serviço confirmado na chamada e pelo menos um serviço do Catálogo (passosContacto.ts); os textos continuam opcionais.
+    const pQuer = g(CONTACTO[1], ClipboardList);
     passos = [
       // 27/10: no contacto ainda não se está no local: a localização fica para a visita (Exterior)
       // 28/10 (Rúben): a morada da obra também se preenche pela localização do dispositivo (quem está no local)
@@ -325,7 +329,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 4/11 (Rúben, o levantamento da chamada): Chamada (e quem liga), O que o cliente quer (o tipo de serviço e o que quer fazer), a Morada
       // da obra, a Qualificação e Marcar a visita. «Preparar a visita» saiu (nada disso se pergunta na chamada).
       { ...g(CONTACTO[0], Phone), corpo: <div className="space-y-5"><Campos grupo={E(CONTACTO[0])} {...fx} />{comDadosLead(d) && <ComercialDaLead ctx={ctx} d={d} />}</div> },
-      { ...g(CONTACTO[1], ClipboardList), corpo: <div className="space-y-4"><ServicoDaChamada ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[1])} {...fx} /></div>,
+      { ...pQuer, conta: undefined, feito: oQueQuerFeito(d, S, pQuer.conta), corpo: <div className="space-y-4"><ServicoDaChamada ctx={ctx} d={d} /><Campos grupo={E(CONTACTO[1])} {...fx} /></div>,
         resumo: [nomeLinha(d), ...resumoGrupos([E(CONTACTO[1])], d.f)].filter(Boolean) },
       // 4/11 (Rúben): a morada que a lead já trazia propõe-se primeiro (validar, editar ou outra): MoradaDaObra.tsx
       { ...g(CONTACTO[2], MapPin), corpo: <MoradaDaObra ctx={ctx} d={d}><Campos grupo={E(CONTACTO[2])} {...fx} /></MoradaDaObra> },

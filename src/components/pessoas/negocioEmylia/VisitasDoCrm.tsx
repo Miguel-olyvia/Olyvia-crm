@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CalendarClock, Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { responsavelPelaVisita, visitas as numerosDe, type Negocio } from "@/emylia/motor";
+import { responsavelPelaVisita, visitaPassadaPeloServidor, visitas as numerosDe, type Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,8 @@ export interface ContextoDasVisitas {
   ctx: Ctx;
   d: Negocio;
   podeEditar: boolean;
+  /** 12/11: as visitas do CRM já lidas por quem monta os passos (useVisitasDoNegocio): «Marcar a visita» fica feito com uma ativa. Sem elas, como antes. */
+  visitasCrm?: readonly VisitaDoNegocio[] | undefined;
 }
 
 type Modo = "visitas" | "primeira";
@@ -122,6 +124,9 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
   };
   // a primeira visita leva o negócio da fase Contacto para a Visita: o motor aplica os portões dele (as respostas do Contacto) e a visita fica no CRM de qualquer forma
   const passarAVisita = (g: VisitaGravada): number | undefined => {
+    // 12/11: a base já passou o negócio a Visita (passou_a_visita): o ecrã acompanha-a, sem o portão do Contacto; senão a gravação seguinte
+    // mandava a fase 1 e desfazia a passagem. A visita do motor não se cria: o espelho põe a do CRM no número seguinte.
+    if (g.passouAVisita) { visitaPassadaPeloServidor(d, g.passouAVisita); return undefined; }
     if (modo !== "primeira" || d.fase !== 1 || g.remarcada) return undefined;
     const antes = numerosDe(d).length;
     // 4/11: a visita fica com quem foi escolhido na agenda (e não com quem está ligado)

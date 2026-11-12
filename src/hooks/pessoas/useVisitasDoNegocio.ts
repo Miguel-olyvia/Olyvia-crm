@@ -82,9 +82,11 @@ export interface VisitasLidas {
   refetch: () => void;
 }
 
-export function useVisitasDoNegocio(negocioId: string | null): VisitasLidas {
+/** `orgFora` (12/11): a organização ativa, para quem lê fora de uma fonte real (a página dos Negócios, que monta os passos); a mesma chave do
+ *  passo das visitas (que liga a fonte à organização ativa), por isso partilham a cache e a invalidação. Com uma fonte real, ganha a fonte. */
+export function useVisitasDoNegocio(negocioId: string | null, orgFora: string | null = null): VisitasLidas {
   const fonte = useFontePessoas();
-  const org = fonte.modo === "real" ? fonte.organizationId : null;
+  const org = fonte.modo === "real" ? fonte.organizationId : orgFora;
   const consulta = useQuery({
     queryKey: visitasDoNegocioQueryKey(org, negocioId), queryFn: () => lerVisitas(org as string, negocioId as string),
     enabled: org !== null && negocioId !== null, staleTime: STALE_TIME_MS,

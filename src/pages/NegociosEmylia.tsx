@@ -52,6 +52,7 @@ import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emy
 import { gravarDadosDaLead, lerDadosDasLeads, type FonteLead } from "@/emylia/real/dadosDaLead";
 import { definirGuardarDadosLead, definirPodeAtribuirLead } from "@/emylia/DadosDaLead";
 import { usePodeAtribuirComercial } from "@/hooks/pessoas/usePodeAtribuirComercial";
+import { useVisitasDoNegocio } from "@/hooks/pessoas/useVisitasDoNegocio";
 import { lerComerciais } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { idsServico, lerNegocios, negocioParaOEcra, type IdsServico } from "@/emylia/real/negocioBase";
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
@@ -185,6 +186,8 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
   const [toasts, setToasts] = useState<Toast[]>([]);
   const tid = useRef(0);
   const refs = useRef(new Map<number, RefNegocio>());
+  // 12/11: as visitas do CRM do negócio aberto (a mesma leitura e cache do passo das visitas): «Marcar a visita» fica feito com uma ativa
+  const visitasAberto = useVisitasDoNegocio(S.view === "negocio" && S.deal !== null ? refs.current.get(S.deal)?.id ?? null : null, org);
   // os negócios do CRM (com documentos do CRM): lêem-se, mas nunca se gravam por aqui
   const soLeitura = useRef(new Set<number>());
   // 11/11 (20270113130000): a permissão que cada negócio pede pela fase em que está na base (codigosDaFase); sem nenhuma delas fica só
@@ -838,7 +841,7 @@ export default function NegociosEmylia({ vistaInicial }: { vistaInicial?: "hoje"
             )}
             <NegocioSimples {...ctx} ajustarPassos={(passos, d) => {
               const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm && !comOComercialAqui };
-              return comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null });
+              return comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null, visitasCrm: r?.id ? visitasAberto.visitas : undefined });
             }} />
           </>
         : <NegociosSimples {...ctx} />}

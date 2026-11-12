@@ -1623,6 +1623,15 @@ export function responsavelPelaVisita(d: Negocio, r: { id: string; nome: string;
   if (d.hist[0]?.t !== t) log(d, t);
   if (r.lead && d.dadosLead) d.dadosLead = { ...d.dadosLead, comercialId: r.id, comercial: r.nome };
 }
+/** 12/11: a base (neg_guardar_visita, a primeira visita num negócio em Contacto) já passou o negócio a Visita: gravou a fase 2, a vaga
+ *  (negocio_medidas.slot) e a linha «Visita marcada para <vaga>», e devolveu a vaga em `passou_a_visita`. Aqui o ecrã fica igual, sem o
+ *  portão do Contacto nem as permissões (o servidor já validou): senão a gravação seguinte mandava a fase 1 e desfazia a passagem. Nunca baixa a fase. */
+export function visitaPassadaPeloServidor(d: Negocio, vaga: string): void {
+  d.visita.slot = vaga;
+  const t = "Visita marcada para " + vaga;
+  if (!d.hist.slice(0, 3).some((h) => h.t === t)) log(d, t);
+  if (d.fase < 2) { d.fase = 2; d.valida = null; preencher(d, 2); }
+}
 /** Do contrato à obra (preparacaoObra.ts): o plano do orçamento, por aprovar. A encomenda de cliente só nasce com o pagamento validado. */
 export function prepararPlanoDe(d: Negocio, S: Estado) {
   // 10/11: o plano nasce já sem conflitos de agenda (o que se adiou fica no histórico)
