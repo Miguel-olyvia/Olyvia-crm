@@ -85,7 +85,7 @@ describe("Estúdio do plano mais vivo (11/11)", () => {
     expect(screen.getByRole("button", { name: "Ver tudo" })).toBeTruthy();
   });
   it("aprovar o plano tem festa", () => {
-    const { d2 } = montar((d) => { d.f.retif_aceite = "2027-02-20"; });
+    const { d2 } = montar((d) => { d.f.retif_aceite = "2027-02-20"; d.fin.pago = true; }); // 12/11: o plano aprova-se depois do pagamento
     fireEvent.click(screen.getByRole("button", { name: /Aprovar o plano/ }));
     expect(d2.obra.plano!.estado).toBe("aprovado");
     expect(screen.getByText("Plano aprovado")).toBeTruthy();

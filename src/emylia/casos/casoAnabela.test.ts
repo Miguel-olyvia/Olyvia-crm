@@ -90,21 +90,10 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     A.enviar(id);
     expect(d().orc!.enviada, "enviar: " + JSON.stringify(avisos.slice(-2))).toBeTruthy();
     A.aceitar(id);
-    // 10/11 (Rúben: «medidas antes da fatura»): aceite, fica no Negócio; o supervisor retifica as medidas e as Operações aprovam o plano;
-    // só então passa ao Financeiro. O contrato assina-se na Obra, depois do pagamento
-    expect(d().fase).toBe(3);
-    expect(d().orc!.contrato).toBeFalsy();
-    { const papel = S.role; S.role = "operacoes"; A.retificarMedidas(id); A.aprovarPlano(id); S.role = papel; }
-    expect(d().obra.plano!.estado).toBe("aprovado");
-    expect(d().fase).toBe(3);
-    // 10/11 (Rúben: «o contrato fica depois do plano aprovado e antes do pagamento»): assinado, passa ao Financeiro
-    { const papel = S.role; S.role = "comercial";
-      A.enviarContrato(id);
-      expect(d().orc!.contrato).toBe("enviado");
-      A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
-      S.role = papel; }
-    expect(d().orc!.contrato).toBe("assinado");
+    // 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): aceite, passa logo a Financeiro; as medidas,
+    // o plano e o contrato fazem-se na Obra, depois do pagamento
     expect(d().fase).toBe(4);
+    expect(d().orc!.contrato).toBeFalsy();
     expect(S.clientes.some((c) => c.deal === id)).toBe(true);
 
     /* ---------------- 5. o Financeiro: a 1.ª prestação (adjudicação, 30%) põe a obra a andar */
@@ -121,6 +110,17 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     // a fatura da adjudicação fica gravada no negócio, como a 1.ª prestação
     guardarFaturas(S, id, faturasDe(S, d()));
     expect(d().fin.tranches?.map((f) => [f.tranche, !!f.pagamento])).toEqual([[TR[0].id, true]]);
+
+    /* ---------------- 5b. na Obra: as medidas e o plano; com os dois, o contrato (o valor da proposta); assinado, a encomenda */
+    { const papel = S.role; S.role = "operacoes"; A.retificarMedidas(id); A.aprovarPlano(id); S.role = papel; }
+    expect(d().obra.plano!.estado).toBe("aprovado");
+    { const papel = S.role; S.role = "comercial";
+      A.enviarContrato(id);
+      expect(d().orc!.contrato).toBe("enviado");
+      A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
+      S.role = papel; }
+    expect(d().orc!.contrato).toBe("assinado");
+    expect(d().fase).toBe(5);
 
     /* ---------------- 6. a obra: plano, materiais, arranque, tarefas, fim e auto de receção */
     const p = d().obra.plano!;
