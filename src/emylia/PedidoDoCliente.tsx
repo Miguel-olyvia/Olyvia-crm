@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LINHAS, MOTIVO_MEDIDAS, MOTIVOS_VERSAO, alertas, bloqueado, eur, linhaCalc, nfmt, pct, tot, versaoAtual, type Estado, type LinhaOrc, type Negocio, type VersaoProposta } from "./motor";
 import type { Ctx } from "./pecas";
+import { AgendaDaPropostaCartao } from "./AgendaDaProposta";
 import { PROPOSTA, efetivo, emFalta } from "./campos";
 import { totais } from "./DocsCliente";
 import { PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
@@ -132,10 +133,12 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </Bloco>
       </div>
 
+      {/* 12/11: sem técnicos livres para a obra, a versão não sai: quem está ocupado e os dias de início com todos livres */}
+      {bloq && alertas(d, S).some((a) => a.agenda) && <div className="border-t border-border p-4 sm:px-5"><AgendaDaPropostaCartao S={S} A={A} run={run} d={d} /></div>}
       {/* o que impede o envio, com a correção num toque quando a há */}
-      {bloq && (
+      {bloq && alertas(d, S).some((a) => a.k === "x" && !a.agenda) && (
         <ul className="space-y-2 border-t border-border bg-destructive/[0.04] p-4 sm:px-5" aria-label="O que impede o envio">
-          {alertas(d, S).filter((a) => a.k === "x").map((a, k) => (
+          {alertas(d, S).filter((a) => a.k === "x" && !a.agenda).map((a, k) => (
             <li key={k} className="flex flex-wrap items-center justify-between gap-2 text-[15px]">
               <span className="min-w-0"><b className="font-medium">{a.t}</b><span className="block text-sm text-muted-foreground">{a.d}</span></span>
               {a.fix && a.i != null && a.sug != null && <Button variant="outline" className="min-h-10" onClick={() => run(() => A.sugerido(d.id, a.i!, a.sug!))}>Corrigir para {eur(a.sug)} €</Button>}
@@ -167,7 +170,7 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <p className="text-2xl font-semibold tabular-nums tracking-tight">{eur(TI.total)} € <span className={cn("text-base font-medium", dif < -0.005 ? "text-success" : dif > 0.005 ? "text-warning" : "text-muted-foreground")}>{Math.abs(dif) < 0.005 ? "igual" : `${dif < 0 ? "−" : "+"}${eur(Math.abs(dif))} €`}</span></p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {bloq && <Button variant="outline" size="lg" onClick={() => run(() => A.pedirAprov(d.id))} disabled={o.aprov === "pedida"}>{o.aprov === "pedida" ? "Aprovação pedida" : "Pedir aprovação"}</Button>}
+          {bloq && alertas(d, S).some((a) => a.k === "x" && a.aprov) && <Button variant="outline" size="lg" onClick={() => run(() => A.pedirAprov(d.id))} disabled={o.aprov === "pedida"}>{o.aprov === "pedida" ? "Aprovação pedida" : "Pedir aprovação"}</Button>}
           <Button size="lg" disabled={bloq || faltam.length > 0} onClick={() => run(() => { A.enviarVersao(d.id); })}><Send className="mr-2 h-4 w-4" aria-hidden="true" />Enviar a versão {v} a {nome}</Button>
         </div>
       </footer>

@@ -67,11 +67,11 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
   const conflitos = P.tarefas.filter((t) => t.tec && t.ocupado);
   const semNinguem = P.tarefas.filter((t) => !t.tec);
   const oficiosSem = [...new Set(semNinguem.map((t) => t.oficio))];
-  // a sugestão de dia: o primeiro início, nas 8 semanas seguintes, em que nenhum técnico fica ocupado (os ofícios sem ninguém no RH não
+  // a sugestão de dia: o primeiro início, nas 10 semanas seguintes (12/11: como a proposta), em que nenhum técnico fica ocupado (os ofícios sem ninguém no RH não
   // dependem do dia, por isso não contam)
   const diaLivre = useMemo(() => {
     if (!conflitos.length || !calcular || !P.inicio) return null;
-    for (const d of diasDaObra(P.inicio, 41).slice(1)) {
+    for (const d of diasDaObra(P.inicio, 51).slice(1)) {
       const Q = calcular(isoDia(d));
       if (Q.tarefas.length && !Q.tarefas.some((t) => t.ocupado)) return { iso: isoDia(d), Q };
     }
@@ -103,7 +103,7 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
             <Button type="button" className="min-h-11" onClick={() => mudarInicio(diaLivre.iso)}>Começar nesse dia</Button>
           </div>
         )}
-        {conflitos.length > 0 && !diaLivre && calcular && <p className="mt-2 text-sm text-muted-foreground">Nas próximas 8 semanas não há um dia em que fiquem todos livres: troque o técnico das tarefas abaixo.</p>}
+        {conflitos.length > 0 && !diaLivre && calcular && <p className="mt-2 text-sm text-muted-foreground">Nas próximas 10 semanas não há um dia em que fiquem todos livres: troque o técnico das tarefas abaixo.</p>}
         {oficiosSem.length > 0 && (
           <p className="mt-2 text-sm text-muted-foreground">Sem ninguém no RH para {oficiosSem.join(", ")} ({semNinguem.length} {semNinguem.length === 1 ? "tarefa" : "tarefas"}): escolha alguém de outro ofício na tarefa, ou fica para as Operações.</p>
         )}
