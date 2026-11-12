@@ -284,7 +284,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
                     <h2 className="text-[15px] font-semibold">Imprevistos</h2>
                     {vivo && <Button type="button" size="sm" variant="outline" className="min-h-9" onClick={() => setPainel({ k: "imprevisto" })}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Registar</Button>}
                   </div>
-                  {imsAbertos.length ? <ImprevistosNaObra ctx={ctx} d={d} /> : <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">{ims.length ? "Os imprevistos estão todos tratados." : "Sem imprevistos. Se aparecer um problema na obra, registe-o aqui: vê logo o impacto no prazo e no valor."}</p>}
+                  {imsAbertos.length ? <ImprevistosNaObra ctx={ctx} d={d} porDisparar /> : <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">{ims.length ? "Os imprevistos estão todos tratados." : "Sem imprevistos. Se aparecer um problema na obra, registe-o aqui: vê logo o impacto no prazo e no valor."}</p>}
                   {ims.filter((i) => i.estado === "fechado" || i.estado === "aprovado").length > 0 && (
                     <ul className="space-y-1 text-sm text-muted-foreground">
                       {ims.filter((i) => i.estado === "fechado" || i.estado === "aprovado").map((i) => <li key={i.id} className="flex items-center gap-2"><Check className="h-4 w-4 text-success" aria-hidden="true" />{i.texto} · {i.estado === "aprovado" ? `aprovado (${i.adenda})` : i.decisao ?? "fechado"}</li>)}
