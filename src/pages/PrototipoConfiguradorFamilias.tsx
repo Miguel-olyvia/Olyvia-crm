@@ -10,7 +10,7 @@ export default function PrototipoConfiguradorFamilias() {
     <main className="mx-auto max-w-3xl space-y-4 p-4">
       <h1 className="text-xl font-semibold">Protótipo: configurador de famílias</h1>
       <p className="text-[15px] text-muted-foreground">
-        Crie famílias de produto com acabamentos, medidas e um preço e um SKU por combinação. Nada se grava na base de dados.
+        Crie famílias de produto: cada produto (medida e referência) tem os seus acabamentos, e cada acabamento um preço e um SKU próprios. Nada se grava na base de dados.
       </p>
       <p role="note" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
         As famílias guardadas ficam só nesta sessão do navegador: recarregar a página perde as famílias. Para as ver na barra de produtos, use a ligação abaixo (não recarregue).

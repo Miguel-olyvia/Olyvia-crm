@@ -37,7 +37,7 @@ const tracar = (de: [number, number], ate: [number, number]) => {
 };
 const guardarExemplo = () => {
   fireEvent.click(screen.getByRole("button", { name: "Começar pelo exemplo" }));
-  for (let i = 0; i < 5; i++) fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+  for (let i = 0; i < 2; i++) fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
   fireEvent.click(screen.getByRole("button", { name: "Guardar na sessão" }));
 };
 
@@ -55,10 +55,10 @@ describe("PrototipoConfiguradorFamilias", () => {
     expect(volta.className).toContain("min-h-11");
   });
 
-  it("«Nova família» abre o assistente de 6 passos", () => {
+  it("«Nova família» abre o assistente de 3 passos", () => {
     montar();
     fireEvent.click(screen.getByRole("button", { name: "Nova família" }));
-    expect(screen.getByText("Passo 1 de 6 · Família")).toBeInTheDocument();
+    expect(screen.getByText("Passo 1 de 3 · Família")).toBeInTheDocument();
   });
 
   it("guardar na sessão põe a família na lista da página e no armazém (e em familias.ts)", () => {
