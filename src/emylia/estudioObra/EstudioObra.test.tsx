@@ -57,7 +57,7 @@ describe("Estúdio da obra (11/11)", () => {
     const imp = within(painel).getByRole("region", { name: "O impacto" });
     expect(within(imp).getByText(/^\+[\d.,]+ €$/)).toBeTruthy();
     expect(within(imp).getByText(/Acaba a/)).toBeTruthy();
-    fireEvent.click(within(painel).getByRole("button", { name: "Registar e propor ao cliente" }));
+    fireEvent.click(within(painel).getByRole("button", { name: /Registar e preparar a adenda/ }));
     const im = d.obra.imprevistos!.find((x) => x.texto === "Tubo partido na parede")!;
     expect(im.estado).toBe("proposta");
     expect(im.adenda).toBeTruthy();

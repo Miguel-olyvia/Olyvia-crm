@@ -2,7 +2,7 @@
 // de cada resposta à vista antes de escolher: + € para o cliente (a adenda), − € de margem (se pagar a empresa) e + dias no fim da obra.
 // As contas estão em quemPaga.ts; as mudanças vão pelo motor (A.ajusteDoCliente, A.ajusteNosso) ou pelo registo do imprevisto.
 import { useMemo, useState } from "react";
-import { AlertTriangle, Building2, Check, Clock, Send, User, X } from "lucide-react";
+import { AlertTriangle, Building2, Check, Clock, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "../motor";
@@ -66,7 +66,7 @@ export function PorqueAjuste({ ctx, d, aj, fechar, feito, imprevisto, embutido }
     });
     if (ok) (feito ?? fechar)();
   };
-  const botao = escolha === "cliente" ? (linha ? "Enviar a adenda ao cliente" : "Aplicar a pedido do cliente")
+  const botao = escolha === "cliente" ? (linha ? "Preparar a adenda" : "Aplicar a pedido do cliente")
     : escolha === "empresa" ? "Aplicar: paga a empresa" : escolha === "imprevisto" ? "Registar o imprevisto" : "Escolha porquê";
 
   return (
@@ -124,7 +124,7 @@ export function PorqueAjuste({ ctx, d, aj, fechar, feito, imprevisto, embutido }
               {aj.k === "nova" && <span className="text-muted-foreground"> · com os materiais do serviço</span>}
             </p>
           ) : <p className="text-sm text-muted-foreground">Sem horas a mais, não há nada a cobrar: o plano muda já, registado como pedido do cliente.</p>}
-          {linha && <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"><Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Fica à espera do cliente: o plano só muda quando ele aceitar e assinar a adenda no portal.{pend ? ` Já há ${pend} ${pend === 1 ? "pedido" : "pedidos"} à espera.` : ""}</p>}
+          {linha && <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"><Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />A adenda fica por disparar no alerta em cima: nada vai ao cliente sem enviar. O plano só muda quando ele aceitar e assinar.{pend ? ` Já há ${pend} ${pend === 1 ? "pedido" : "pedidos"} a andar.` : ""}</p>}
           <label className="block space-y-1"><span className="text-sm font-medium">O que o cliente pediu <span className="font-normal text-muted-foreground">(opcional)</span></span>
             <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ex.: quer o nicho do duche mais largo" className={ENTRADA} /></label>
           {!linha && I.dias > 0 && <label className="flex min-h-10 cursor-pointer items-center gap-2 text-[15px]"><input type="checkbox" checked={avisar} onChange={(e) => setAvisar(e.target.checked)} className="h-4 w-4 accent-[hsl(var(--primary))]" />Avisar o cliente da data nova no portal</label>}
@@ -151,7 +151,7 @@ export function PorqueAjuste({ ctx, d, aj, fechar, feito, imprevisto, embutido }
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button type="button" variant="ghost" size="lg" onClick={fechar}>Cancelar</Button>
         <Button type="button" size="lg" disabled={!escolha} onClick={aplicar}>
-          {escolha === "cliente" && linha ? <Send className="mr-1.5 h-4 w-4" aria-hidden="true" /> : <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />}{botao}
+          <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />{botao}
         </Button>
       </div>
     </section>

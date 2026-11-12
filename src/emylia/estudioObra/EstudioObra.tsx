@@ -44,6 +44,7 @@ import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeA
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
+import { AdendasDaObra } from "./AdendasObra";
 
 const SEM = ["D", "S", "T", "Q", "Q", "S", "S"];
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -234,6 +235,8 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
           <main className="min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto max-w-[1500px] space-y-6 px-4 py-5 sm:px-6">
               {/* ------------------------------------------------------------ 12/11: o pulso (os números, que se tocam) e o comando de hoje */}
+              {/* 12/11 (Rúben): as adendas por disparar e o percurso das que andam, em cima, sem sair do Estúdio */}
+              {(vivo || acabou) && <AdendasDaObra ctx={ctx} d={d} />}
               {viva.prev && <Pulso d={d} S={S} dias={dias} prev={viva.prev} margem={viva.margem} precisa={pedidos.length} ir={ir} />}
               {(vivo || p.estado === "aprovado") && <ComandoHoje ctx={ctx} d={d} dias={dias} pedidos={pedidos} ir={ir} comandoRef={comandoRef} />}
 
@@ -808,7 +811,8 @@ function NovoImprevisto({ ctx, d, ti, inicial, ocup: _ocup, fechar, mostrar }: {
   const falta = [!texto.trim() && "o que encontrou", !tarefas.length && "as tarefas afetadas"].filter(Boolean) as string[];
   const registar = () => run(() => {
     const id = A.registarImprevisto(d.id, { texto, onde, grav, tarefas, dias, fotos, ...(linha ? { custo: linha.pu } : {}) });
-    if (id && linha) A.proporImprevisto(d.id, id, [], [{ n: linha.n, h: linha.h, preco: linha.pu, perfil: linha.perfil, mats: [] }]);
+    // 12/11 (Rúben): a adenda fica por disparar no alerta em cima do Estúdio (não vai já ao cliente)
+    if (id && linha) A.proporImprevisto(d.id, id, [], [{ n: linha.n, h: linha.h, preco: linha.pu, perfil: linha.perfil, mats: [] }], { enviar: false });
     fechar();
   });
   return (
@@ -910,7 +914,7 @@ function NovoImprevisto({ ctx, d, ti, inicial, ocup: _ocup, fechar, mostrar }: {
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
         {falta.length > 0 && <p className="text-sm text-muted-foreground sm:mr-auto">Falta {falta.join(" e ")}.</p>}
         <Button type="button" variant="ghost" size="lg" onClick={fechar}>Cancelar</Button>
-        <Button type="button" size="lg" disabled={falta.length > 0} onClick={registar}>{T ? "Registar e propor ao cliente" : "Registar o imprevisto"}</Button>
+        <Button type="button" size="lg" disabled={falta.length > 0} onClick={registar}>{T ? "Registar e preparar a adenda" : "Registar o imprevisto"}</Button>
       </div>
     </div>
   );

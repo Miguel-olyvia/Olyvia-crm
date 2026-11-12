@@ -8,7 +8,7 @@ import { adendaPorAssinar } from "../testeAdenda";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
 import { margemAoVivo } from "./previsaoObra";
-import { custoDosNossos, impactoAjuste, pedePorque } from "./quemPaga";
+import { custoDosNossos, impactoAjuste, pedePorque, percursoAdenda } from "./quemPaga";
 import { ocupacaoDosTecnicos } from "../preparacaoObra";
 
 afterEach(cleanup);
@@ -46,23 +46,37 @@ describe("quem paga: o impacto antes de escolher", () => {
 });
 
 describe("1. «O cliente pediu»: paga o cliente", () => {
-  it("vai uma adenda já preenchida; o plano só muda quando ele assinar", () => {
+  it("prepara uma adenda já preenchida, por disparar; o plano só muda quando ele assinar; depois, o seu percurso até paga", () => {
     const { d, A, p, ix } = obra();
     const rev = ix("Revestimento de parede"), dur0 = p.tasks[rev].dur, h0 = p.tasks[rev].h;
     const n = A.ajusteDoCliente(d.id, { k: "atraso", ti: rev, dias: 2 }, { nota: "quer mais um nicho" })!;
     expect(n).toMatch(/^AD 2026\/1027-/);
     const a = d.adendas!.find((x) => x.n === n)!;
-    expect(a.estado).toBe("enviada");
+    // por disparar: nada foi ao cliente
+    expect(a.estado).toBe("rascunho");
+    expect(a.verif).toBe(true);
+    expect(percursoAdenda(d, a).t).toBe("Por disparar");
     expect(a.motivo).toBe("O cliente pediu");
     expect(a.ajuste).toMatchObject({ k: "atraso", tarefa: "Revestimento de parede", dias: 2 });
     expect(a.linhas[0]).toMatchObject({ livre: true, perfil: p.tasks[rev].sk });
     expect(a.linhas[0].h).toBeGreaterThan(0);
     // à espera do cliente: nada mudou no plano
     expect(p.tasks[rev].dur).toBe(dur0);
-    expect(d.obra.diario!.at(-1)!.t).toMatch(/fica à espera do cliente/);
+    expect(d.obra.diario!.at(-1)!.t).toMatch(/por disparar/);
+    expect(A.verificarEnviarAdenda(d.id, n)).toBe(true);
+    expect(percursoAdenda(d, a).t).toBe("À espera do cliente");
     adendaPorAssinar(A, d.id, n);
+    expect(percursoAdenda(d, a).t).toBe("Aceite · contrato por assinar");
     A.assinarAdenda(d.id, n);
     expect(a.estado).toBe("assinada");
+    expect(percursoAdenda(d, a)).toMatchObject({ t: "Assinada · fatura por emitir", quem: "Financeiro" });
+    // o fluxo de pagamento da adenda: a 1.ª parcela faturada e paga
+    A.role("financeiro");
+    A.faturarParcelaAdenda(d.id, n);
+    expect(percursoAdenda(d, a).t).toMatch(/por pagar \(1\.ª parcela\)/);
+    A.validarPagamentosAdenda(d.id, n);
+    expect(percursoAdenda(d, a).i).toBeGreaterThanOrEqual(3);
+    A.role("operacoes");
     const t = p.tasks.find((x) => x.nome === "Revestimento de parede")!;
     expect(t.dur).toBeGreaterThan(dur0);
     expect(t.h).toBeGreaterThan(h0);
@@ -73,6 +87,7 @@ describe("1. «O cliente pediu»: paga o cliente", () => {
     const n0 = p.tasks.length;
     const n = A.ajusteDoCliente(d.id, { k: "nova", n: { sid: "pint", q: 10, fase: 4 } })!;
     expect(p.tasks).toHaveLength(n0);
+    expect(d.adendas!.find((x) => x.n === n)!.estado).toBe("rascunho");
     expect(d.adendas!.find((x) => x.n === n)!.linhas[0].sid).toBe("pint");
     adendaPorAssinar(A, d.id, n);
     A.assinarAdenda(d.id, n);
@@ -132,5 +147,59 @@ describe("3. «Atraso ou erro nosso»: paga a empresa", () => {
     fireEvent.click(within(previa).getByRole("button", { name: "Aplicar: paga a empresa" }));
     expect(d.obra.alteracoes![0]).toMatchObject({ paga: "empresa", tarefa: "Revestimento de parede" });
     expect(screen.getByText(/Atrasos e erros nossos: 1 mudança/)).toBeTruthy();
+  });
+});
+
+describe("o alerta das adendas por disparar, em cima do Estúdio (sem sair dele)", () => {
+  it("o pedido do cliente fica no alerta: ver ou mudar, enviar ao cliente; o percurso segue lá", () => {
+    const { d, p } = montar();
+    const mont = p.tasks.findIndex((t) => t.nome === "Montagem de móveis");
+    fireEvent.click(screen.getByRole("button", { name: /^Montagem de móveis:/ }));
+    fireEvent.click(within(screen.getByRole("complementary", { name: "A tarefa" })).getByRole("button", { name: "Dura: mais" }));
+    const porque = screen.getByRole("complementary", { name: "Quem paga a mudança" });
+    fireEvent.click(within(porque).getByRole("radio", { name: /O cliente pediu/ }));
+    fireEvent.click(within(porque).getByRole("button", { name: "Preparar a adenda" }));
+    const al = screen.getByRole("region", { name: "Adendas da obra" });
+    expect(within(al).getByText("1 adenda por disparar")).toBeTruthy();
+    const a = d.adendas!.find((x) => x.ajuste)!;
+    const cartao = within(al).getByRole("article", { name: `Adenda ${a.n}` });
+    expect(within(cartao).getByText(/Pedido do cliente · Montagem de móveis/)).toBeTruthy();
+    expect(within(cartao).getByText(/com IVA/)).toBeTruthy();
+    // ver ou mudar, por cima: mais horas, o total sobe
+    const antes = a.linhas[0].h;
+    fireEvent.click(within(cartao).getByRole("button", { name: "Ver ou mudar" }));
+    const dlg = screen.getByRole("dialog", { name: `Adenda ${a.n}` });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: `Adenda ${a.n}` })).toBeNull();
+    expect(screen.getByRole("region", { name: "Adendas da obra" })).toBeTruthy(); // o Estúdio ficou
+    fireEvent.click(within(screen.getByRole("article", { name: `Adenda ${a.n}` })).getByRole("button", { name: "Ver ou mudar" }));
+    const dlg2 = screen.getByRole("dialog", { name: `Adenda ${a.n}` });
+    void dlg;
+    fireEvent.change(within(dlg2).getByLabelText(/^Horas de/), { target: { value: String(antes + 2) } });
+    fireEvent.click(within(dlg2).getByRole("button", { name: "Guardar" }));
+    expect(a.linhas[0].h).toBe(antes + 2);
+    expect(a.ajuste!.k !== "nova" && a.ajuste!.horas).toBe(antes + 2);
+    // disparar: vai ao cliente; o alerta mostra o percurso
+    fireEvent.click(within(screen.getByRole("article", { name: `Adenda ${a.n}` })).getByRole("button", { name: "Enviar ao cliente" }));
+    expect(a.estado).toBe("enviada");
+    expect(within(screen.getByRole("region", { name: "Adendas da obra" })).getByRole("listitem", { name: `Adenda ${a.n}: À espera do cliente` })).toBeTruthy();
+    expect(p.tasks[mont].dur).toBe(p.tasks[mont].dur); // o plano não mexeu
+  });
+  it("descartar tira a adenda (nada foi ao cliente) e o imprevisto com custo fica por disparar", () => {
+    const { d } = montar();
+    fireEvent.click(screen.getByRole("button", { name: "Registar imprevisto" }));
+    const painel = screen.getByRole("complementary", { name: "Registar imprevisto" });
+    fireEvent.change(within(painel).getByPlaceholderText(/cano de esgoto/), { target: { value: "Tubo partido na parede" } });
+    fireEvent.click(within(painel).getByRole("button", { name: "Revestimento de parede" }));
+    fireEvent.click(within(painel).getByRole("button", { name: "Sim, vai numa adenda" }));
+    fireEvent.click(within(painel).getByRole("button", { name: /Registar e preparar a adenda/ }));
+    const im = d.obra.imprevistos!.find((x) => x.texto === "Tubo partido na parede")!;
+    const a = d.adendas!.find((x) => x.n === im.adenda)!;
+    expect(a.estado).toBe("rascunho");
+    const cartao = within(screen.getByRole("region", { name: "Adendas da obra" })).getByRole("article", { name: `Adenda ${a.n}` });
+    expect(within(cartao).getByText(/Imprevisto · Tubo partido na parede/)).toBeTruthy();
+    fireEvent.click(within(cartao).getByRole("button", { name: "Descartar" }));
+    expect(a.estado).toBe("anulada");
+    expect(im.estado).toBe("aberto");
   });
 });

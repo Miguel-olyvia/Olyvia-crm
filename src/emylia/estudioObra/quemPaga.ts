@@ -8,7 +8,7 @@ import { fimDe, mudarInicio } from "../ajustesPlano";
 import { aplicarAjuste } from "../trabalhoObra";
 import { criarTarefa, juntarTarefa, materiaisDoServico, type NovaTarefa } from "../tarefasValidador";
 import { custoHoraDe } from "../equipa/tecnicos";
-import { precoSugeridoLivre, previsaoLinha, totaisLinhas, type LinhaAdenda } from "../adendas";
+import { adendaBloqueada, nomeParcela, parcelasAdenda, precoSugeridoLivre, previsaoLinha, totaisLinhas, type Adenda, type LinhaAdenda } from "../adendas";
 import { comecada, estadoVivo, simularAtraso } from "./planoVivo";
 
 /** O que o gestor quer mudar (a tarefa vai pelo índice no plano de agora). */
@@ -24,7 +24,7 @@ export type AjusteAdenda =
 
 export type QuemPaga = "cliente" | "imprevisto" | "empresa";
 export const PORQUE = [
-  { k: "cliente" as const, t: "O cliente pediu", sub: "Paga o cliente: vai uma adenda ao portal. Só entra no plano quando ele a assinar." },
+  { k: "cliente" as const, t: "O cliente pediu", sub: "Paga o cliente: prepara a adenda, por disparar no alerta em cima. Só entra no plano quando ele a assinar." },
   { k: "imprevisto" as const, t: "Imprevisto em obra", sub: "Abre o registo do imprevisto, com fotos. Se tiver custo, o cliente decide." },
   { k: "empresa" as const, t: "Atraso ou erro nosso", sub: "Paga a empresa: entra já no plano. O custo fica registado e sai da margem." },
 ];
@@ -141,4 +141,53 @@ export function custoDosNossos(d: Negocio, aoVivo = false): { n: number; custo: 
     return v !== "feita" && v !== "validada";
   });
   return { n: L.length, custo: r2(L.reduce((a, x) => a + (x.custo ?? 0), 0)), horas: r2(L.reduce((a, x) => a + (x.horas ?? 0), 0)) };
+}
+
+/* ------------------------------------------------------------------ 12/11: o percurso da adenda, do disparo ao pagamento */
+/** Os passos que a adenda faz, pela ordem (o gestor dispara; o cliente aceita e assina; o Financeiro fatura e valida o pagamento). */
+export const PASSOS_ADENDA = ["Por disparar", "O cliente aceita", "Assina", "Fatura", "Paga"] as const;
+export interface PercursoAdenda {
+  /** o passo em que está (0 a 4; 5 = paga; −1 = recusada ou descartada) */
+  i: number;
+  /** em frase, para o alerta e o separador Cliente */
+  t: string;
+  /** de quem é a vez */
+  quem: "Gestor de obra" | "Cliente" | "Financeiro" | "Direção" | null;
+  /** o que o gestor pode fazer daqui (o Estúdio liga-o) */
+  acao?: "disparar" | "contrato" | "aprovacao";
+}
+export function percursoAdenda(d: Negocio, a: Adenda, bloqueada = false): PercursoAdenda {
+  if (a.estado === "anulada") return { i: -1, t: "Descartada", quem: null };
+  if (a.estado === "recusada") return { i: -1, t: "O cliente não aceitou", quem: "Gestor de obra" };
+  if (a.estado === "rascunho") {
+    if (a.aprov === "pedida") return { i: 0, t: "À espera da Direção (margem abaixo do mínimo)", quem: "Direção" };
+    if (bloqueada) return { i: 0, t: "Margem abaixo do mínimo: corrija o preço ou peça aprovação", quem: "Gestor de obra", acao: "aprovacao" };
+    return { i: 0, t: a.versoes?.length ? "Versão nova por disparar" : "Por disparar", quem: "Gestor de obra", acao: "disparar" };
+  }
+  if (a.estado === "enviada") return { i: 1, t: a.pedidoCliente ? "O cliente pediu alterações" : "À espera do cliente", quem: a.pedidoCliente ? "Gestor de obra" : "Cliente" };
+  if (a.estado === "aceite") {
+    if (a.contratoPedido) return { i: 2, t: "Aceite · contrato no Jurídico", quem: null };
+    return a.contrato === "enviado" ? { i: 2, t: "Aceite · contrato por assinar", quem: "Cliente" } : { i: 2, t: "Aceite · contrato por enviar", quem: "Gestor de obra", acao: "contrato" };
+  }
+  // assinada: as parcelas (as faturas e os recibos)
+  const P = parcelasAdenda(d, a);
+  if (P.length && P.every((x) => x.ft?.recibo)) return { i: 5, t: "Paga", quem: null };
+  const porPagar = P.find((x) => x.ft && !x.ft.recibo);
+  if (porPagar) return { i: 4, t: `Assinada · ${porPagar.ft!.n} por pagar (${nomeParcela(porPagar.i)})`, quem: "Financeiro" };
+  const pagas = P.filter((x) => x.ft?.recibo).length;
+  const seguinte = P.find((x) => !x.ft);
+  return { i: 3, t: pagas ? `${pagas} de ${P.length} parcelas pagas · ${seguinte ? nomeParcela(seguinte.i) : "fatura"} por emitir` : "Assinada · fatura por emitir", quem: "Financeiro" };
+}
+/** As adendas da obra que ainda andam (por disparar, no cliente, por faturar ou por pagar), as por disparar primeiro. */
+export function adendasAAndar(d: Negocio, S: Estado): { a: Adenda; p: PercursoAdenda }[] {
+  return (d.adendas ?? []).map((a) => ({ a, p: percursoAdenda(d, a, a.estado === "rascunho" && adendaBloqueada(d, S, a)) }))
+    .filter((x) => x.p.i >= 0 && x.p.i < 5)
+    .sort((x, y) => x.p.i - y.p.i);
+}
+/** De onde veio a adenda, numa frase: o pedido do cliente (a tarefa) ou o imprevisto. */
+export function deOndeVem(S: Estado, a: Adenda): string {
+  const aj = a.ajuste;
+  if (aj) return aj.k === "nova" ? `Pedido do cliente · tarefa nova: ${S.svc[aj.n.sid]?.n ?? "tarefa"}` : `Pedido do cliente · ${aj.tarefa}: ${aj.k === "atraso" ? `mais ${aj.dias} ${aj.dias === 1 ? "dia" : "dias"}` : "mais tempo"}`;
+  if (a.origem?.texto) return `Imprevisto · ${a.origem.texto}`;
+  return a.motivo;
 }

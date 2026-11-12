@@ -20,7 +20,8 @@ import { blocosForaDaObra, motivoOcupado, obrasDosTecnicos, ocupacaoDosTecnicos,
 import { materiaisPorFase, seguranca } from "../obraOps";
 import { enviosDe, TEMPOS_CORRECAO } from "../trabalhoObra";
 import { pontosEncerrar } from "../encerrarObra";
-import { emCurso, estadoAdenda, totaisAdenda } from "../adendas";
+import { emCurso } from "../adendas";
+import { AdendasDaObra } from "./AdendasObra";
 import { aMais, porEncomendarDe } from "../encomendasAjuste";
 import { materiaisDaTarefa } from "../tarefasValidador";
 import { custosDosMateriais } from "../preparacaoObra";
@@ -98,7 +99,7 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
       {t.bloqueio && <p className="text-sm text-muted-foreground">Parada por um imprevisto, à espera do cliente.</p>}
       {/* 12/11 (quem paga): um pedido do cliente para esta tarefa à espera da assinatura da adenda */}
       {(d.adendas ?? []).filter((a) => a.ajuste && a.ajuste.k !== "nova" && a.ajuste.tarefa === t.nome && emCurso(a)).map((a) => (
-        <p key={a.n} className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">À espera do cliente: {a.ajuste!.k === "atraso" ? `mais ${a.ajuste!.dias} ${a.ajuste!.dias === 1 ? "dia" : "dias"}` : "mais tempo"}{a.ajuste!.k !== "nova" && a.ajuste!.horas ? ` (+${nfmt(a.ajuste!.horas)} h)` : ""} na adenda {a.n}. Muda quando ele assinar.</p>
+        <p key={a.n} className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">{a.estado === "rascunho" ? "Por disparar" : "À espera do cliente"}: {a.ajuste!.k === "atraso" ? `mais ${a.ajuste!.dias} ${a.ajuste!.dias === 1 ? "dia" : "dias"}` : "mais tempo"}{a.ajuste!.k !== "nova" && a.ajuste!.horas ? ` (+${nfmt(a.ajuste!.horas)} h)` : ""} na adenda {a.n}. Muda quando ele assinar.</p>
       ))}
 
       {/* os toques: o principal e os outros, pelo estado */}
@@ -427,14 +428,9 @@ export function ClienteDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
       </section>
       <section aria-label="As adendas" className="space-y-2 rounded-2xl border border-border bg-card p-4">
-        <p className="text-sm font-semibold">O que o cliente aprovou ou recusou</p>
-        {!ads.length ? <p className="text-sm text-muted-foreground">Sem adendas. Um imprevisto com custo manda a proposta ao cliente.</p> : (
-          <ul className="space-y-1.5">{ads.map((a) => { const e = estadoAdenda(a); return (
-            <li key={a.n} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <span className="min-w-0">Adenda {a.n}{a.origem?.texto ? ` · ${a.origem.texto}` : ""} <span className="text-muted-foreground">· {eur(totaisAdenda(a).total)} €</span></span>
-              <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", e.cor)}>{e.t}</span>
-            </li>
-          ); })}</ul>
+        <p className="text-sm font-semibold">As adendas: do disparo ao pagamento</p>
+        {!ads.length ? <p className="text-sm text-muted-foreground">Sem adendas. Um pedido do cliente ou um imprevisto com custo prepara uma, por disparar.</p> : (
+          <AdendasDaObra ctx={ctx} d={d} todas />
         )}
       </section>
       <section aria-label="O que o cliente já viu" className="space-y-2 rounded-2xl border border-border bg-card p-4 lg:col-span-2">

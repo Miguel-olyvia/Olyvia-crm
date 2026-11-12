@@ -3,7 +3,6 @@
 // ainda não chegaram para a fase que vem, a conversa por ler, o fim que derrapou e a folga para adiantar.
 import { TECS, type Estado, type Negocio, type Plano } from "../motor";
 import { imprevistosDe } from "../imprevistos";
-import { emCurso } from "../adendas";
 import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase } from "../obraOps";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
@@ -70,13 +69,9 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
   for (const im of imprevistosDe(d)) {
     if (im.estado === "aberto") L.push({ id: `im-${im.id}`, nivel: "critico", t: `Imprevisto: ${im.texto}`, sub: im.grav === "impede" ? "As tarefas afetadas estão paradas. Faça a proposta ao cliente, ou resolva sem custo." : `Atrasou ${dias(im.atraso ?? 1)}. Falta decidir se tem custo para o cliente.`, acoes: [{ rot: "Tratar", a: { k: "imprevisto", id: im.id } }] });
     if (im.estado === "recusado") L.push({ id: `im-${im.id}`, nivel: "critico", t: `O cliente não aceitou: ${im.texto}`, sub: "Decida: seguir sem esse trabalho, fazer outra proposta ou suspender.", acoes: [{ rot: "Decidir", a: { k: "imprevisto", id: im.id } }] });
+    // 12/11: a adenda por disparar está no alerta das adendas, em cima
+    if (im.estado === "proposta" && d.adendas?.find((a) => a.n === im.adenda)?.estado === "rascunho") continue;
     if (im.estado === "proposta") L.push({ id: `im-${im.id}`, nivel: "atencao", t: `À espera do cliente: ${im.texto}`, sub: `Adenda ${im.adenda ?? ""} no portal.`, acoes: [{ rot: "Ver", a: { k: "imprevisto", id: im.id } }] });
-  }
-  // 12/11 (quem paga): os pedidos do cliente com a obra em curso que esperam pela assinatura da adenda (o plano muda quando ele assinar)
-  for (const a of d.adendas ?? []) {
-    if (!a.ajuste || !emCurso(a)) continue;
-    const o = a.ajuste.k === "nova" ? "Tarefa nova" : a.ajuste.tarefa;
-    L.push({ id: `ad-${a.n}`, nivel: "atencao", t: `À espera do cliente: ${o}`, sub: `Adenda ${a.n} ${a.estado === "rascunho" ? "por enviar (margem abaixo do mínimo)" : a.estado === "aceite" ? "aceite, falta assinar" : "no portal"}. O plano muda quando ele assinar.`, acoes: [{ rot: "Ver", a: { k: "conversa" } }] });
   }
 
   // os materiais da fase que vem (nos próximos 3 dias úteis) que ainda não estão garantidos

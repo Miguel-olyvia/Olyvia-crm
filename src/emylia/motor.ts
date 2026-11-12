@@ -3628,8 +3628,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       return n;
     },
     /** 12/11 (Rúben: «quem paga?»): o cliente pediu o ajuste (juntar uma tarefa, prolongar, atrasar) com a obra em curso. Vai numa adenda já
-     *  preenchida (as horas a mais ao preço do ofício, ou o serviço da tarefa nova), verificada e enviada ao portal; só entra no plano quando
-     *  o cliente a assinar. Sem nada a cobrar (um atraso numa tarefa por começar), entra já, registado como pedido do cliente.
+     *  preenchida (as horas a mais ao preço do ofício, ou o serviço da tarefa nova), verificada e por disparar (Rúben: «não deve ser
+     *  redirecionado, apenas gera um alerta em cima… com uma adenda por disparar»): o gestor envia-a do alerta (verificarEnviarAdenda).
+     *  Só entra no plano quando o cliente a assinar. Sem nada a cobrar (um atraso numa tarefa por começar), entra já, como pedido do cliente.
      *  Devolve o número da adenda ("" quando entrou sem adenda; null se não deu). */
     ajusteDoCliente(id: number, aj: AjusteObra, m: { horas?: number; preco?: number; nota?: string; cliente?: boolean } = {}): string | null {
       if (!exigePerm("obra.planear")) return null;
@@ -3646,12 +3647,34 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const livres: LinhaLivre[] = aj.k === "nova" ? [] : [{ n: I.linha?.n ?? `Mais tempo em ${I.nome.toLowerCase()}`, h: horas, preco: r2(m.preco ?? precoSugeridoLivre(S, horas, I.perfil)), perfil: I.perfil, mats: [] }];
       const n = A.criarAdenda(id, aj.k === "nova" ? [{ sid: aj.n.sid, q: aj.n.q }] : [], MOTIVOS_ADENDA[0], { livres, ajuste: guardarAjuste(p, aj, horas) });
       if (!n) return null;
-      const foi = A.verificarEnviarAdenda(id, n);
+      A.verificarAdenda(id, n);
       const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
-      (d.obra.diario ??= []).push({ q: agora(), quem, t: `Pedido do cliente: ${I.texto}${m.nota?.trim() ? ` (${m.nota.trim()})` : ""} · adenda ${n} ${foi ? "enviada" : "por enviar"} · fica à espera do cliente`, k: "marco" });
-      log(d, `Pedido do cliente na obra: ${I.texto} · adenda ${n} ${foi ? "enviada ao cliente" : "por enviar (margem abaixo do mínimo)"} · o plano muda quando ele assinar`, foi ? "a" : "w");
-      avisar({ msg: foi ? `Adenda ${n} enviada ao cliente` : `Adenda ${n} por enviar`, sub: foi ? "Fica à espera do cliente: o plano muda quando ele assinar" : "A margem ficou abaixo do mínimo: peça aprovação à Direção", kind: foi ? "ok" : "" });
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `Pedido do cliente: ${I.texto}${m.nota?.trim() ? ` (${m.nota.trim()})` : ""} · adenda ${n} por disparar`, k: "marco" });
+      log(d, `Pedido do cliente na obra: ${I.texto} · adenda ${n} preparada, por disparar · o plano muda quando ele assinar`);
+      avisar({ msg: `Adenda ${n} por disparar`, sub: "Está no alerta, em cima: envie-a ao cliente quando quiser", kind: "ok" });
       return n;
+    },
+    /** 12/11 (quem paga): o gestor muda a adenda da obra antes de a disparar (a de um pedido do cliente ou de um imprevisto): a quantidade
+     *  dos serviços, as horas e o preço das linhas livres. Volta a verificar as margens. */
+    mudarAdendaDaObra(id: number, n: string, linhas: { sid: string; q?: number; h?: number; pu?: number }[]): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
+      if (!a || a.estado !== "rascunho" || !(a.ajuste || a.origem)) return false;
+      let mudou = false;
+      for (const m of linhas) {
+        const x = a.linhas.find((y) => y.sid === m.sid);
+        if (!x) continue;
+        if (m.q != null && m.q > 0 && !x.livre && m.q !== x.q) { x.q = r2(m.q); mudou = true; }
+        if (x.livre && m.h != null && m.h > 0 && m.h !== x.h) { x.h = r2(m.h); if (S.svc[x.sid]) S.svc[x.sid].h = x.h; mudou = true; }
+        if (m.pu != null && m.pu >= 0 && m.pu !== x.pu) { x.pu = r2(m.pu); if (x.livre && S.svc[x.sid]) S.svc[x.sid].preco = x.pu; mudou = true; }
+      }
+      if (!mudou) return false;
+      if (a.ajuste && a.ajuste.k !== "nova") a.ajuste.horas = r2(a.linhas.filter((x) => x.livre).reduce((s2, x) => s2 + x.h * x.q, 0));
+      if (a.ajuste?.k === "nova") { const x = a.linhas[0]; if (x) a.ajuste.n.q = x.q; }
+      a.verif = false; a.aprov = null;
+      A.verificarAdenda(id, n);
+      log(d, `Adenda ${n} mudada antes de disparar: ${a.linhas.map((x) => `${x.n.toLowerCase()} ${eur(x.q * x.pu)} €`).join(", ")}`);
+      return true;
     },
     /** 12/11 (quem paga): o ajuste é um atraso ou um erro nosso. Entra já no plano; paga a empresa: o custo (as horas a mais ao €/h do técnico,
      *  e os materiais da tarefa nova) fica registado nas mudanças do plano e no diário, e a margem ao vivo mostra-o. Ao cliente, só um aviso
@@ -3977,7 +4000,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       return im.id;
     },
     /** O gestor transforma o imprevisto em trabalho extra: uma adenda (origem «imprevisto na obra») que vai ao portal do cliente. */
-    proporImprevisto(id: number, imId: string, itens: { sid: string; q: number }[], livres: LinhaLivre[]): string | null {
+    proporImprevisto(id: number, imId: string, itens: { sid: string; q: number }[], livres: LinhaLivre[], m: { enviar?: boolean } = {}): string | null {
       const d = deal(id), im = d.obra.imprevistos?.find((x) => x.id === imId);
       if (!im || (im.estado !== "aberto" && im.estado !== "recusado")) return null;
       // 3/11 (20270105200000): era por papel (operações, comercial, direção); passa a ser a permissão que o servidor pede
@@ -3987,6 +4010,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!n) return null;
       Object.assign(im, { estado: "proposta", adenda: n });
       delete im.decisao;
+      // 12/11: no Estúdio da obra a adenda fica por disparar (o gestor envia-a do alerta em cima)
+      if (m.enviar === false) { A.verificarAdenda(id, n); log(d, `Imprevisto ${im.id}: proposta ${n} preparada, por disparar`); return n; }
       // 21/10 (decisão D): como qualquer adenda, verifica-se antes de ir ao cliente; com a margem abaixo do mínimo fica à espera da Direção
       const foi = A.verificarEnviarAdenda(id, n);
       log(d, `Imprevisto ${im.id}: proposta ${n} ${foi ? "enviada ao cliente" : "por enviar (margem abaixo do mínimo)"}`, foi ? "a" : "w");

@@ -91,7 +91,7 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
         sub={ims.length ? `${ims.length} no total` : "nenhum"}>
         <Contagem valor={abertos.length} fmt={(n) => String(Math.round(n))} de={0} />
       </Mosaico>
-      <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={[val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA", (d.adendas ?? []).filter(emCurso).length ? `${(d.adendas ?? []).filter(emCurso).length} à espera do cliente` : ""].filter(Boolean).join(" · ")}>
+      <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={[val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA", (d.adendas ?? []).filter((a) => a.estado === "rascunho").length ? `${(d.adendas ?? []).filter((a) => a.estado === "rascunho").length} por disparar` : "", (d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length ? `${(d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length} à espera do cliente` : ""].filter(Boolean).join(" · ")}>
         {val ? `${eur(val.total)} €` : "—"}
       </Mosaico>
     </section>
