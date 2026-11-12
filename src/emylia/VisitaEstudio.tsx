@@ -12,6 +12,8 @@ import { CalendarCheck, Check, ChevronDown, MapPin, Navigation, Phone, Sparkles,
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CHAVE_ESTUDIO, CHAVE_VOLTA, abrirEstudio, lerVolta, projetoDoEstudioPara, projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { gruposParaEstudio } from "@/pages/prototipo-estudio/perguntasDaVisita";
+import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, efetivo } from "./campos";
 import { produtosEscolhidos } from "@/pages/prototipo-estudio/sugestoesServicos";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
 import { acertarPosicoes } from "@/pages/prototipo-estudio/posicoesDepois";
@@ -171,7 +173,9 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // gravação da visita continua (num separador à parte o telemóvel suspendia-a); «Voltar ao negócio» volta a este negócio
   const abrir = () => {
     // 11/11 (Rúben: «depois de terminar o Estúdio da visita, o utilizador deve ser redirecionado para esta screen»): volta ao passo Estúdio
-    if (abrirEstudio(d.nome, d.f, d.id, `${urlDoNegocio(d.id)}&passo=estudio`, divisaoDoEstudio(d))) irPara("/prototipo/estudio");
+    // 12/11 (Rúben: «o que faltar preencher da visita tem de ser preenchido na última fase do Estúdio»): os campos da empresa
+    const campos = gruposParaEstudio({ exterior: efetivo(ctx.S.campos, EXTERIOR), interior: efetivo(ctx.S.campos, INTERIOR), area: efetivo(ctx.S.campos, AREA), escolhas: efetivo(ctx.S.campos, ESCOLHAS) });
+    if (abrirEstudio(d.nome, d.f, d.id, `${urlDoNegocio(d.id)}&passo=estudio`, divisaoDoEstudio(d), campos)) irPara("/prototipo/estudio");
     else setFeito("Não deu para abrir o Estúdio neste browser.");
   };
   const prods = salvo ? produtosEscolhidos(salvo) : [];

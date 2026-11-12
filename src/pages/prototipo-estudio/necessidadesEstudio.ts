@@ -50,6 +50,8 @@ export interface Projeto {
    *  área (vazio na divisão principal). */
   perguntas?: Record<string, string>;
   prefixoPerguntas?: string;
+  /** 12/11: os campos da visita da empresa (exterior, interior, área, escolhas) que o passo «Fechar» pergunta (perguntasDaVisita.ts). */
+  camposVisita?: import("./perguntasDaVisita").GrupoVisita[];
   /** 12/11 (estiloDaConversa.ts): as cores ditas na chamada e na visita já gravadas no negócio quando o Estúdio abriu. */
   ditosAntes?: import("./estiloDaConversa").DitoEstilo[];
   /** 12/11: o comercial mexeu nas cores à mão; o que o cliente disser a seguir já não as muda sozinho (fica como sugestão). */

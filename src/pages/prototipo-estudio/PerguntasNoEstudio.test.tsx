@@ -30,4 +30,11 @@ describe("as perguntas para fechar a visita", () => {
     expect(screen.getByRole("button", { name: "Varanda" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("progressbar", { name: "Respostas" })).toHaveAttribute("aria-valuenow", "2");
   });
+
+  it("pergunta também o exterior e o interior que faltam; as respostas vão para as chaves do negócio", () => {
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 3, perguntas: {} }} />);
+    expect(screen.getAllByRole("heading", { name: /^Exterior do edifício/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("heading", { name: /^Interior do espaço/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Acesso").length).toBeGreaterThan(0);
+  });
 });

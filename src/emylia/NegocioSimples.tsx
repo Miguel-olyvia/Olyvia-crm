@@ -10,6 +10,7 @@ import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { EditarCliente } from "./EditarCliente";
 import { DadosAoLado } from "./DadosAoLado";
 import { ChamadaDireto } from "./ChamadaDireto";
+import { useFecharGravacao } from "./fecharGravacao";
 import { ACaminho } from "./VisitaEstudio";
 import { modoReal } from "./acessosPortal";
 import { PortalCliente } from "./PortalCliente";
@@ -80,6 +81,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   const { S, A, go } = ctx;
   const d = S.deals.find((x) => x.id === S.deal)!;
   const T = d.orc ? tot(d, S) : null;
+  // 12/11: a gravação da visita (ou da chamada) acaba quando a fase dela fecha; a transcrição fica no negócio
+  useFecharGravacao(ctx, d);
   // uma fase já feita, só para ler; 12/11: no endereço (?fase=1), para o «voltar» do browser voltar à fase aberta
   const [faseUrl, setFaseUrl] = useParamUrl<string>("fase", "");
   const verPedida = faseUrl === "" ? null : Number(faseUrl);

@@ -8,7 +8,7 @@ import { linhasParaLevar } from "./levarParaNegocio";
 import type { Cor, Estilo } from "./catalogoFake";
 import { copiaPlanta } from "./exemploEstudio";
 import { alturaFinalCm, type Projeto } from "./necessidadesEstudio";
-import { prefixoDoEstudio, respostasDoNegocio } from "./perguntasDaVisita";
+import { prefixoDoEstudio, respostasDoNegocio, type GrupoVisita } from "./perguntasDaVisita";
 import { falasDoTexto } from "@/emylia/chamadaMotor";
 import { ditosDaConversa, type DitoEstilo } from "./estiloDaConversa";
 import { pedidosDaConversa, type Pedidos } from "./pedidosDaConversa";
@@ -65,7 +65,7 @@ export function guardarParaEstudio(p: Projeto): boolean {
 }
 
 /** Abrir o Estúdio de um negócio: se o projeto guardado é deste negócio, continua-se (não se perde o depois); senão começa um novo. */
-export function abrirEstudio(nome: string, f: Record<string, string>, negocio: number, origem: string, divisao?: Projeto["divisao"]): boolean {
+export function abrirEstudio(nome: string, f: Record<string, string>, negocio: number, origem: string, divisao?: Projeto["divisao"], camposVisita?: GrupoVisita[]): boolean {
   // 6/11: o projeto vive no negócio (f.estudio); o deste browser só ganha se for do mesmo negócio e mais recente
   const doNegocio = projetoDoNegocio(f);
   let local: Projeto | null = null;
@@ -75,7 +75,8 @@ export function abrirEstudio(nome: string, f: Record<string, string>, negocio: n
   // 11/11: as perguntas da visita que o Estúdio faz no passo «Fechar»: com as respostas que o negócio já tem
   const base = melhor ? { ...melhor, nome, origem, negocio } : projetoDaVisita(nome, f, negocio, origem, divisao);
   const prefixo = prefixoDoEstudio(f, base.divisao ?? divisao);
-  return guardarParaEstudio({ ...base, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) });
+  const campos = camposVisita?.length ? camposVisita : base.camposVisita;
+  return guardarParaEstudio({ ...base, camposVisita: campos, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo, { camposVisita: campos }) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) });
 }
 
 /** 12/11: as cores ditas nas conversas já gravadas no negócio (a transcrição da chamada e a da visita). */
