@@ -39,8 +39,8 @@ export function negocioDoLido(n: NegocioLido): Negocio {
   return d;
 }
 
-/** O negócio lido, para o ecrã: como negocioDoLido, com a fase que o fluxo de 10/11 pede (Rúben: «medidas antes da fatura»: as medidas e
- *  o plano antes do Financeiro; acertarFaseDasMedidas). A fase acertada grava-se na próxima mudança do negócio. */
+/** O negócio lido, para o ecrã: como negocioDoLido, com a fase que o fluxo de 12/11 pede (Rúben: as medidas e o plano depois do
+ *  Financeiro: a proposta aceite que ficou no Negócio passa a Financeiro; acertarFaseDasMedidas). Grava-se na próxima mudança do negócio. */
 export function negocioParaOEcra(n: NegocioLido): Negocio {
   const d = negocioDoLido(n);
   acertarFaseDasMedidas(d);

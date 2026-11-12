@@ -3,8 +3,8 @@
 // supervisor)»). O primeiro passo da Obra: o supervisor vai ao local e confirma as medidas da visita (o chão, as paredes, os pontos…). As
 // medidas retificadas ficam ao lado das da visita, com a diferença; «Aceitar as medidas» fecha o passo e deixa as Operações aprovarem o
 // plano (e só depois se assina o contrato). O orçamento aceite não muda: se as medidas mudarem o preço, faz-se uma adenda.
-// 10/11 (Rúben: «medidas antes da fatura»): passou para antes do contrato e do Financeiro, com a proposta aceite; se o valor mudar, refaz-se
-// a proposta com o orçamento novo (refazerComMudancas) e, aceite a versão nova, as medidas e o plano não se repetem.
+// 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): na Obra, depois do pagamento validado; se o valor
+// mudar, o acerto faz-se numa adenda depois do contrato (motor: adendaDoValor).
 import { useMemo, useState } from "react";
 import { Check, RotateCcw, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";

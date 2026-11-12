@@ -108,8 +108,7 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
       // 10/11 (teste do 1026): a base substitui as respostas todas de uma vez; um ecrã aberto há mais tempo apagava o que outra pessoa
       // respondeu entretanto. Antes de gravar, junta-se o que está na base: ganha o que este ecrã mudou, o resto fica como está lá.
       if (antes && await juntarRespostasDaBase(sb, refs.get(d.id)!.id, JSON.parse(antes) as Negocio, d)) out.reler = true;
-      // 10/11 (Rúben: «medidas antes da fatura»): na passagem ao Financeiro a obra grava-se antes do negócio, para a base já ter o plano
-      // aprovado quando o negócio chega com a fase 4
+      // 10/11: na passagem ao Financeiro a obra grava-se antes do negócio (12/11: o plano nasce com a proposta aceite, por aprovar)
       if (antes && (JSON.parse(antes) as Negocio).fase < 4 && d.fase >= 4 && obraMudou(d, foto)) {
         for (const a of await gravarObra(sb, org, refs.get(d.id)!.id, paraObra(d))) out.avisos.push(`${d.nome}: ${a}`);
         fotoObraDe(foto).set(d.id, marcaObra(d));

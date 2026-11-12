@@ -160,9 +160,9 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
             <div>
               <p className="text-[15px] font-semibold">{go1.t}</p>
               <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Condições para arrancar">
-                {[// 10/11 (Rúben): pela ordem do fluxo: as medidas, o plano, o contrato e o pagamento antes da encomenda
-                  ...(d.orc?.vendaDireta ? [] : [["Medidas aceites", retificacaoAceite(d)], ["Plano aprovado", planoAprovadoDe(d)], ["Contrato assinado", contratoAssinado(d)]]),
+                {[// 12/11 (Rúben): pela ordem do fluxo: o pagamento, as medidas e o plano, o contrato, e só então a encomenda
                   ["Pagamento validado", d.fin.pago],
+                  ...(d.orc?.vendaDireta ? [] : [["Medidas aceites", retificacaoAceite(d)], ["Plano aprovado", planoAprovadoDe(d)], ["Contrato assinado", contratoAssinado(d)]]),
                   ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", usarProntidao(d.obra.ec) ? prontaReal(prontidaoDe(d.obra.ec.contrato)) : !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)],
                   // 21/10 (decisão B): antes do arranque, cada adenda assinada: a 1.ª parcela paga e, com materiais, a encomenda dela (emitida com esse pagamento)
                   ...(go1.estado === "feito" ? [] : assinadas(d).flatMap((a) => [[`1.ª parcela da adenda ${a.n} paga`, primeiraPaga(a)],

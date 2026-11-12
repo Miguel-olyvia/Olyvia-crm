@@ -16,7 +16,7 @@ function comContrato() {
   const S = seed(), A = acoes(S, vi.fn(), (fn) => fn());
   const d = S.deals.find((x) => x.orc && x.orc.linhas.some((l) => l.t === "svc") && !x.orc.aceite) as Negocio;
   Object.assign(d.orc!, { enviada: "hoje", aceite: "hoje", contrato: null, vendaDireta: false });
-  d.f.retif_aceite = "2026-11-10"; d.obra.plano = { tasks: [], estado: "aprovado", dia: 0 }; // 10/11: o contrato só vai com as medidas aceites e o plano aprovado
+  d.f.retif_aceite = "2026-11-10"; d.obra.plano = { tasks: [], estado: "aprovado", dia: 0 }; d.fin.pago = true; d.fase = 5; // 12/11: o contrato só vai depois do pagamento, com as medidas aceites e o plano aprovado
   Object.assign(d.f, { modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben", multa: "Não" });
   A.enviarContrato(d.id);
   expect(d.orc!.contrato).toBe("enviado");

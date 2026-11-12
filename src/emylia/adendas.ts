@@ -82,6 +82,15 @@ export function previsaoLinha(S: Estado, sid: string, q: number): LinhaAdenda | 
   const s = S.svc[sid] ?? servicoDoCatalogo(sid, S);
   return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}) } : null;
 }
+/** 12/11 (Rúben: as medidas e o plano depois do Financeiro; se mudarem o valor, uma adenda): o motivo da adenda do acerto. */
+export const MOTIVO_ACERTO = "Acerto das medidas e do plano da obra";
+/** A linha da adenda do acerto com as horas a mais do plano: já estão no plano aprovado, não entram outra vez como tarefa. */
+export const LINHA_ACERTO_PLANO = "Horas a mais no plano da obra";
+/** A linha da adenda do acerto com o resto que as medidas mudam (produtos e valores que não são serviços): só o valor, sem tarefa no plano. */
+export const LINHA_ACERTO_PRODUTOS = "Materiais e outros valores (medidas do local)";
+/** As linhas da adenda que viram tarefas no plano (as do acerto com as horas e os produtos a mais não: já estão no plano, ou são só valor). */
+export const linhasComTarefa = (a: Pick<Adenda, "motivo" | "linhas">): LinhaAdenda[] =>
+  a.motivo !== MOTIVO_ACERTO ? a.linhas : a.linhas.filter((x) => !(x.livre && (x.n === LINHA_ACERTO_PLANO || x.n.startsWith(LINHA_ACERTO_PRODUTOS))));
 export const assinadas = (d: Negocio) => (d.adendas ?? []).filter((a) => a.estado === "assinada");
 /** A versão da proposta da adenda em cima da mesa (1 se nunca se refez). */
 export const versaoAdenda = (a: Adenda) => (a.versoes?.length ?? 0) + 1;
@@ -254,7 +263,7 @@ export function migrarAdendas(S: Estado): boolean {
 /** As tarefas da adenda no plano: cada uma no fim da sua fase (as tarefas seguintes empurram-se), com um técnico do ofício livre. */
 export function juntarAoPlano(p: Plano, a: Adenda): Tarefa[] {
   const novas: Tarefa[] = [];
-  for (const x of a.linhas) {
+  for (const x of linhasComTarefa(a)) {
     const fase: FaseObra = fasesPadrao(x.n, x.perfil)[0];
     const dur = Math.max(1, Math.ceil(diasDeHoras(x.h * x.q) - 1e-9));
     // começa quando acaba a última tarefa desta fase (ou das anteriores); as das fases seguintes andam `dur` dias

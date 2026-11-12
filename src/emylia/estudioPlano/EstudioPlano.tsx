@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TECS, impactoDasMedidas, impactoDoPlano, medidasRetificadas, nfmt, tot, type Negocio, type Tarefa } from "../motor";
+import { TECS, impactoDasMedidas, medidasEPlanoAbertos, impactoDoPlano, medidasRetificadas, nfmt, tot, type Negocio, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
@@ -104,11 +104,11 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
   const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
   const linhas: (string | null)[] = [...pessoas, ...(p.tasks.some((t) => !t.tec) ? [null] : [])];
   const medidasOk = retificacaoAceite(d);
-  // 10/11 (Rúben: «medidas antes da fatura»): o plano aprova-se antes do pagamento. 11/11 (Rúben: «os ajustes às medidas e a validação do
-  // plano devem ser em simultâneo, não tem de estar bloqueado»): já não espera pelas medidas; se elas mudarem, o plano volta a por aprovar
-  const planeia = podeNeg(S.role, "obra.planear");
-  const podeAprovar = p.estado === "por aprovar" && planeia && !alertas.some((a) => a.m === "de férias");
-  const porque = p.estado !== "por aprovar" ? "" : !planeia ? "Quem aprova o plano são as Operações." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
+  // 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): o plano ajusta-se antes, mas aprova-se depois
+  // do pagamento validado. 11/11 (Rúben: «em simultâneo»): não espera pelas medidas; se elas mudarem, o plano volta a por aprovar
+  const planeia = podeNeg(S.role, "obra.planear"), pago = medidasEPlanoAbertos(d);
+  const podeAprovar = p.estado === "por aprovar" && planeia && pago && !alertas.some((a) => a.m === "de férias");
+  const porque = p.estado !== "por aprovar" ? "" : !pago ? "O plano aprova-se depois de o Financeiro validar o pagamento." : !planeia ? "Quem aprova o plano são as Operações." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
   const fimData = dias[Math.max(0, fim - 1)];
   const fazer = (fn: () => void) => run(fn);
   const retrato = (): Retrato => p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
@@ -271,8 +271,8 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
             <div className="flex flex-wrap items-center gap-2">
               <Button type="button" variant={painel?.k === "info" ? "secondary" : "outline"} className="min-h-11" aria-pressed={painel?.k === "info"}
                 onClick={() => setPainel(painel?.k === "info" ? null : { k: "info" })}><FolderOpen className="mr-1.5 h-4 w-4" aria-hidden="true" />A obra</Button>
-              {/* 10/11: o plano aprova-se antes do pagamento; «Pago» só quando já está */}
-              {d.fin.pago && <Estado ok t="Pago" />}
+              {/* 12/11: o plano aprova-se depois do pagamento */}
+              {d.fin.pago ? <Estado ok t="Pago" /> : !pago && <Estado ok={false} t="À espera do pagamento" />}
               {!medidasOk && <span title="O supervisor confirma as medidas ao mesmo tempo; se mudarem, o plano volta a por aprovar"><Estado ok={false} t="Medidas em curso" icone={<Ruler className="h-3.5 w-3.5" aria-hidden="true" />} /></span>}
               {/* os alertas levam à lista (com a correção) */}
               <button type="button" onClick={() => secAlertas.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" })}

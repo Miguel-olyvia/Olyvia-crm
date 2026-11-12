@@ -9,7 +9,7 @@
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, diaDeFerias, eur, medidasEPlanoAbertos, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { HORAS_DIA } from "./ganttOrcamento";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
@@ -108,16 +108,18 @@ export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string
 }
 
 /* ------------------------------------------------------------------ 9/11: o fluxo novo da obra */
-// Rúben (9/11): proposta aceite → Financeiro valida o pagamento → o supervisor retifica as medidas (aceites) → as Operações validam e ajustam o
-// plano → contrato assinado → encomenda (a fornecedor) e tudo recebido → início da obra. A venda direta não tem obra a medir nem contrato.
+// Rúben (9/11, e de novo a 12/11: «a validação das medidas das obras e a validação do plano da obra só vêm depois do Financeiro»): proposta
+// aceite → Financeiro (fatura e pagamento validado) → o supervisor retifica as medidas e as Operações validam e ajustam o plano (ao mesmo
+// tempo) → contrato assinado → encomenda de cliente (e a fornecedor) e tudo recebido → início da obra. Se as medidas ou o plano mudarem o
+// valor, uma adenda depois do contrato (o acerto). A venda direta não tem obra a medir nem contrato.
 /** As medidas retificadas pelo supervisor e aceites (o primeiro passo da Obra). */
 // os negócios de antes, com a encomenda já emitida pelo fluxo antigo, não ficam presos a um passo que não existia
 export const retificacaoAceite = (d: Negocio): boolean => !!d.f.retif_aceite || !!d.orc?.vendaDireta || !!d.obra.ec;
 /** O contrato assinado (na venda direta não há contrato). */
 export const contratoAssinado = (d: Negocio): boolean => d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta;
 /** O plano aprovado pelas Operações (ou já em curso, ou concluído). */
-/** 10/11 (Rúben: «medidas antes da fatura»): as medidas retificam-se com a proposta aceite (antes, só depois do pagamento). */
-export const podeRetificar = (d: Negocio): boolean => !!d.orc?.aceite || d.fin.pago;
+/** 12/11 (Rúben): as medidas retificam-se depois do pagamento validado (de 10/11 a 12/11 foi com a proposta aceite). */
+export const podeRetificar = (d: Negocio): boolean => medidasEPlanoAbertos(d);
 export const planoAprovadoDe = (d: Negocio): boolean => ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "");
 
 /* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
@@ -578,21 +580,19 @@ export const EC_NO_PAGAMENTO = "Emite-se com o pagamento validado, o plano aprov
  *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */
 export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] {
   const p = d.obra.plano, F: string[] = [];
-  // 10/11 (Rúben: «medidas antes da fatura»; o contrato depois do plano e antes do pagamento): no Negócio, as medidas, o plano e o contrato
-  // vêm antes do pagamento. Os negócios que já estavam no Financeiro (do fluxo anterior) fazem as medidas na Obra, depois do pagamento
-  const antesDoPagamento = d.fase <= 3;
-  // 11/11 (Rúben: «medidas e plano em simultâneo»): o plano não espera pelas medidas; o contrato pede os dois
-  if (antesDoPagamento && !d.obra.ec && !d.orc?.vendaDireta && !retificacaoAceite(d)) F.push("retificar as medidas");
-  else if (antesDoPagamento && !d.obra.ec && !d.orc?.vendaDireta && planoAprovadoDe(d) && !contratoAssinado(d)) F.push("assinar o contrato");
+  // 12/11 (Rúben: as medidas e o plano depois do Financeiro): primeiro o pagamento; depois, ao mesmo tempo, as medidas e o plano
+  // (11/11: «em simultâneo»); com os dois, o contrato; assinado, a encomenda de cliente
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "registar a fatura do ERP e receber o pagamento");
   else if (!d.obra.ec) {
-    if (!retificacaoAceite(d)) { if (!antesDoPagamento) F.push("retificar as medidas"); }
+    if (!retificacaoAceite(d)) F.push("retificar as medidas");
     else if (!planoAprovadoDe(d)) { /* «aprovar o plano» entra no fim, como antes */ }
     else if (!contratoAssinado(d)) F.push("assinar o contrato");
     else F.push("emitir a encomenda de cliente");
   }
   else if (usarProntidao(d.obra.ec)) F.push(...faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)));
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
+  // 12/11: o valor que as medidas ou o plano mudaram acerta-se antes de arrancar (a adenda, ou seguir sem ela)
+  if (acertoDoValorPendente(d)) F.push("decidir o acerto do valor (a adenda)");
   // 21/10 (decisão B): as adendas assinadas antes do arranque também: o pagamento de cada uma e a encomenda dos materiais dela (como as
   // outras de ajuste, as encomendas a fornecedor dela não seguram o arranque: as tarefas esperam no plano). Com a obra a andar, não bloqueiam nada.
   // 21/10 (decisão C): basta a 1.ª parcela da adenda paga (e a encomenda dela emitida); as outras parcelas não seguram o arranque
@@ -609,15 +609,14 @@ export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter
 /** A encomenda da adenda emite-se com o pagamento dela validado (decisão B, como no contrato). */
 export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parcela da adenda for validado.";
 
-/** 10/11 (o fluxo novo de 9/11): porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (as medidas, o plano,
- *  o contrato, o pagamento); com tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
+/** Porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (12/11: o pagamento, as medidas e o plano, o contrato); com
+ *  tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
 export function semEncomendaCliente(d: Negocio): string {
-  // 10/11 (Rúben): a ordem é medidas, plano, contrato, pagamento
   const direta = !!d.orc?.vendaDireta;
-  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado, do contrato assinado e do pagamento.";
-  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai depois do plano aprovado, do contrato assinado e do pagamento.";
-  if (!contratoAssinado(d)) return "A encomenda de cliente sai depois do contrato assinado e do pagamento validado.";
-  if (!d.fin.pago) return "A encomenda de cliente emite-se quando o pagamento for validado.";
+  if (!d.fin.pago) return direta ? "A encomenda de cliente emite-se quando o pagamento for validado." : "A encomenda de cliente sai depois do pagamento validado, das medidas aceites, do plano aprovado e do contrato assinado.";
+  if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado e do contrato assinado.";
+  if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai depois do plano aprovado e do contrato assinado.";
+  if (!contratoAssinado(d)) return "A encomenda de cliente sai depois do contrato assinado.";
   return "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio.";
 }
 
@@ -677,32 +676,40 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
     if (k) L.push({ id: "pl-ad-" + a.n, trilho: "plano", estado: "feito", who: null, t: `Tarefas da adenda ${a.n} juntas ao plano · +${N} ${N === 1 ? "dia" : "dias"}`,
       sub: `${k} ${k === 1 ? "tarefa" : "tarefas"} no fim da fase de cada serviço.` });
   }
-  // 9/11: o primeiro passo da Obra é o supervisor retificar as medidas no local; o plano aprova-se depois delas aceites
+  // 9/11: o supervisor retifica as medidas no local (11/11: ao mesmo tempo que as Operações aprovam o plano). 12/11 (Rúben: «só vêm
+  // depois do Financeiro»): os dois esperam pelo pagamento validado
+  const abertos = medidasEPlanoAbertos(d);
   if (!d.orc?.vendaDireta) L.push(retificacaoAceite(d)
     ? { id: "ret", trilho: "plano", estado: "feito", who: "operacoes", t: "Medidas retificadas e aceites", sub: d.f.retif_aceite ? `A ${d.f.retif_aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}.` : "" }
-    // 10/11 (Rúben: «medidas antes da fatura»): no Negócio, com a proposta aceite, já não esperam pelo pagamento. Os que já estavam no
-    // Financeiro (do fluxo anterior, sem o passo das medidas) fazem-nas na Obra, depois do pagamento
-    : d.fase === 4 && !d.fin.pago
+    : !abertos
     ? { id: "ret", trilho: "plano", estado: "espera", who: "operacoes", t: "Retificar as medidas", sub: SO_DEPOIS_DO_PAGAMENTO }
     : { id: "ret", trilho: "plano", estado: "agora", who: "operacoes", t: "Retificar as medidas", sub: "O supervisor confirma as medidas no local.", act: "abrirRetificacao", btn: "Retificar as medidas" });
-  L.push(p.estado === "por aprovar" && d.fase === 4 && !d.fin.pago && !retificacaoAceite(d)
+  L.push(p.estado === "por aprovar" && !abertos
     ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DO_PAGAMENTO }
     : p.estado === "por aprovar"
     ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
     : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
-  // 9/11: o contrato assina-se com o plano aprovado (as medidas e as datas certas), antes da encomenda
+  // 9/11: o contrato assina-se com o plano aprovado (as medidas e as datas certas), antes da encomenda (12/11: e depois do pagamento)
   if (!d.orc?.vendaDireta) {
     const c = d.orc?.contrato;
     L.push(c === "assinado"
       ? { id: "ct", trilho: "plano", estado: "feito", who: "comercial", t: "Contrato assinado", sub: "" }
-      : !planoAprovadoDe(d) || !retificacaoAceite(d)
-      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: !retificacaoAceite(d) && !planoAprovadoDe(d) ? "Com as medidas aceites e o plano aprovado." : !retificacaoAceite(d) ? "Falta o supervisor aceitar as medidas." : "Falta as Operações aprovarem o plano." }
       : c === "enviado"
       ? { id: "ct", trilho: "plano", estado: "espera", who: null, t: "À espera da assinatura do contrato", sub: "No portal do cliente." }
-      // 11/11: as medidas ou o plano mudaram o valor: o comercial refaz a proposta antes do contrato (o mesmo passo que o negócio mostra)
-      : d.fase === 3 && !c && mudancasDeValor(d).length
-      ? { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Refazer a proposta com o orçamento novo", sub: `Muda o valor: ${mudancasDeValor(d).join("; ")}.`, act: "refazerComMudancas", btn: "Refazer a proposta" }
-      : { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Gerar e enviar o contrato", sub: "Com o plano aprovado: vai ao portal do cliente, por assinar.", act: "enviarContrato", btn: "Gerar o contrato" });
+      : !abertos
+      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: "Depois do pagamento, das medidas aceites e do plano aprovado." }
+      : !planoAprovadoDe(d) || !retificacaoAceite(d)
+      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: !retificacaoAceite(d) && !planoAprovadoDe(d) ? "Com as medidas aceites e o plano aprovado." : !retificacaoAceite(d) ? "Falta o supervisor aceitar as medidas." : "Falta as Operações aprovarem o plano." }
+      // 15/10: o cliente pediu alterações ao contrato no portal: o Jurídico revê; validado, o comercial envia a versão seguinte
+      : d.orc?.contratoPedido
+      ? { id: "ct", trilho: "plano", estado: "agora", who: "juridico", t: "O cliente pediu alterações ao contrato", sub: `Cláusulas: ${d.orc.contratoPedido.clausulas.map((x) => x.c.toLowerCase()).join(", ")}. O Jurídico revê e valida; depois o comercial envia a versão ${(d.orc.contratoVersoes?.length ?? 0) + 1}.`, act: "abrirRevisao", btn: "Rever o contrato" }
+      : d.orc?.contratoRevisto
+      ? { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: `Enviar o contrato (versão ${(d.orc.contratoVersoes?.length ?? 0) + 1})`, sub: `Revisto e validado pelo Jurídico (${d.orc.contratoRevisto.por}, ${d.orc.contratoRevisto.q}). Volta ao portal do cliente, por assinar.`, act: "enviarContrato", btn: "Enviar o contrato" }
+      : { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Gerar e enviar o contrato", sub: "Com as medidas e o plano: vai ao portal do cliente, por assinar.", act: "enviarContrato", btn: "Gerar o contrato" });
+    // 12/11 (Rúben: se as medidas ou o plano mudarem o valor, uma adenda): com o contrato assinado, o comercial prepara a adenda do acerto
+    const ac = d.f.acerto_valor;
+    if (ac) L.push({ id: "ac", trilho: "plano", estado: "feito", who: "comercial", t: ac === "sem adenda" ? "Acerto do valor: sem adenda" : `Acerto do valor: adenda ${ac}`, sub: "" });
+    else if (acertoDoValorPendente(d)) L.push({ id: "ac", trilho: "plano", estado: "agora", who: "comercial", t: "O valor mudou: preparar a adenda", sub: `${mudancasDeValor(d).join("; ")}.`, act: "adendaDoValor", btn: "Preparar a adenda" });
   }
 
   // o pagamento
