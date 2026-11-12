@@ -4,6 +4,7 @@
 // recortes), como dados de demonstração marcados «(demo)»; os preços são de demonstração. Funções puras: sem React, sem three.
 import { ESPEC, type MaterialMockup, type Mockup3D, type ParamsMockup, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
 import type { TipoEspaco } from "./modelo";
+import { temFicheiro } from "./modelosHtml/ficheiros";
 
 export interface AcabFam { id: string; nome: string; cor: string; metalness: number; roughness: number; codigo: string; /** diferença de preço (€) */ delta: number }
 /** Dados próprios de uma medida/modelo (tudo em mm, como no catálogo de origem, salvo indicação). */
@@ -192,6 +193,9 @@ export function variantesDe(f: Familia): VarianteResolvida[] {
   return f.medidas.flatMap((m) => acabamentosDaMedida(f, m.id).map((a) => resolverVariante(f, m.id, a.id)));
 }
 export const chaveModelo = (familiaId: string, medidaId: string, acabId: string): string => `${familiaId}|${medidaId}|${acabId}`;
+/** A variante tem o GLB completo do fabricante (modelosHtml/ficheiros.ts)? Torneira: o modelo é o id da família; lava-loiça: o id da medida. */
+export const temGlbDoFabricante = (v: VarianteResolvida): boolean =>
+  v.familia.categoria === "torneiras" ? temFicheiro("torneira", v.familia.id, v.acabamento.id) : v.familia.categoria === "lavaloicas" && temFicheiro("lava_loica", v.medida.id, v.acabamento.id);
 
 const M = 1 / 1000;
 /** Os parâmetros do mockup 3D (metros) da variante, a partir dos dados da medida. */

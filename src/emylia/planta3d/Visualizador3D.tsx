@@ -217,7 +217,7 @@ function ModeloProcedural({ familia, modelo, acab, opc, fonte }: PropsHtml & { f
 }
 /** O GLB do modelo (suspende enquanto carrega): a geometria fica partilhada entre peças iguais; os materiais são os do acabamento. */
 function ModeloGlbHtml({ familia, modelo, acab, opc }: PropsHtml) {
-  const url = urlDoModeloHtml(familia, modelo);
+  const url = urlDoModeloHtml(familia, modelo, acab);
   useEffect(() => { reterGlb(url); return () => soltarGlb(url); }, [url]);
   const cena = lerGlb(url);
   const { bica, extraido, tampas, reverso } = opc ?? {};

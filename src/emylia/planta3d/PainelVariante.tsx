@@ -3,7 +3,7 @@
 import type { PecaPlanta, Planta } from "../planta";
 import type { OpcoesPeca } from "./modelo";
 import { conjuntoPorId, familiasSubstitutas, linhasVendaveis, precoConjunto, totalDasLinhas } from "./conjuntos";
-import { acabamentosDaMedida, familiaPorId, resolverVariante } from "./familias";
+import { acabamentosDaMedida, familiaPorId, resolverVariante, temGlbDoFabricante } from "./familias";
 import { Button } from "@/components/ui/button";
 
 const SEL = "h-11 min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
@@ -21,6 +21,8 @@ export function PainelVariante({ peca, onMudar, onMontagem, onOpcao }: PainelVar
   const f = peca.fam ? familiaPorId(peca.fam) : undefined;
   if (!f) return null;
   const v = resolverVariante(f, peca.med, peca.acab), acabs = acabamentosDaMedida(f, v.medida.id), subs = familiasSubstitutas(peca);
+  // o GLB completo do fabricante não traz dock/direcção (sem bica extraída) e a Cira não tem bica giratória (a bica é fixa)
+  const doFabricante = temGlbDoFabricante(v), podeExtrair = !doFabricante, podeRodarBica = !(doFabricante && f.id === "cira");
   return (
     <div role="group" aria-label="Variante da peça" className="w-full space-y-2 rounded-xl border border-border bg-card p-3">
       <p className="text-[15px] font-medium">{v.nome}</p>
@@ -44,12 +46,12 @@ export function PainelVariante({ peca, onMudar, onMontagem, onOpcao }: PainelVar
             <select className={SEL} value={f.id} onChange={(e) => onMudar(e.target.value)}>{subs.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}</select>
           </label>
         )}
-        {onOpcao && f.opcoes?.includes("bica") && (
+        {onOpcao && podeRodarBica && f.opcoes?.includes("bica") && (
           <label className="grid gap-1 text-sm font-medium">Rodar a bica: {peca.opc?.bica ?? 0}°
             <input type="range" min={0} max={360} step={5} value={peca.opc?.bica ?? 0} aria-label="Rodar a bica, em graus" className="h-11 w-40" onChange={(e) => onOpcao({ bica: Number(e.target.value) })} />
           </label>
         )}
-        {onOpcao && f.opcoes?.includes("extraida") && (
+        {onOpcao && podeExtrair && f.opcoes?.includes("extraida") && (
           <label className="flex min-h-11 items-center gap-2 text-[15px]"><input type="checkbox" className="h-5 w-5" checked={!!peca.opc?.extraido} onChange={(e) => onOpcao({ extraido: e.target.checked })} />Bica extraída (com o flexível)</label>
         )}
         {onOpcao && f.opcoes?.includes("tampas") && (

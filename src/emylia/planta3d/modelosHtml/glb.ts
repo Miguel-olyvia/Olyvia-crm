@@ -10,14 +10,19 @@ import { aplicarExtracao, criarFlexivel, materiaisDaTorneira, type ModeloTorneir
 import { materiaisDaLavaLoica } from "./index";
 import { materiaisDaPlaca } from "./placas";
 import { KERAN_SPECS } from "./specs";
+import { urlDoFicheiro } from "./ficheiros";
 import { V, nomearMateriais } from "./util";
 import type { CategoriaGlb, MaterialGlb, ParamsGenerico } from "../categoriasGlb";
 
 /** O interruptor único: `false` volta aos construtores procedurais em todo o lado (peças soltas e bancada). */
 export const USAR_GLB = true;
 export type FamiliaGlb = "torneira" | "lava_loica" | "placa";
-/** O GLB de um modelo do HTML (servido pelo Vite a partir de public/modelos3d, URL estável). */
-export const urlDoModeloHtml = (familia: FamiliaGlb, modelo: string): string => `/modelos3d/${familia}-${modelo}.glb`;
+/**
+ * O GLB de um modelo do HTML (servido pelo Vite a partir de public/modelos3d, URL estável). Com o acabamento, e se o fabricante tem o GLB
+ * completo dessa variante (ficheiros.ts, public/modelos3d/completos: materiais embutidos), devolve esse; senão o GLB antigo do modelo.
+ */
+export const urlDoModeloHtml = (familia: FamiliaGlb, modelo: string, acab?: string): string =>
+  (familia === "placa" ? undefined : urlDoFicheiro(familia, modelo, acab)) ?? `/modelos3d/${familia}-${modelo}.glb`;
 /** Quanto tempo um GLB fica em memória depois de a última peça que o usa sair (para voltar a pôr a peça sem o recarregar). */
 export const LIBERTAR_APOS_MS = 30_000;
 
@@ -29,11 +34,32 @@ const obterCarregador = (): GLTFLoader => {
   if (!carregador) { carregador = new GLTFLoader(); carregador.setMeshoptDecoder(MeshoptDecoder); }
   return carregador;
 };
+/**
+ * Um GLB «completo» do fabricante traz os materiais embutidos e o nó raiz com `userData.units === "metres"` e escala 0,001 (a cena fica em metros).
+ * O visualizador usa mm (o grupo pai escala 0,001, como com os GLB antigos): põe o nó raiz a escala 1 e marca a cena (`userData.completo`).
+ * Devolve `false`, sem tocar em nada, se a cena não for completa.
+ */
+export function prepararCena(cena: THREE.Group): boolean {
+  const raiz = cena.children.find((c) => c.userData?.units === "metres");
+  if (!raiz) return false;
+  raiz.scale.setScalar(1);
+  cena.userData.completo = true;
+  return true;
+}
+/** Liberta a geometria de uma cena da cache; numa cena completa também os materiais (as peças só os partilham, a cache é a dona). */
+export function libertarCena(cena: THREE.Object3D): void {
+  const completa = cena.userData.completo === true;
+  cena.traverse((o) => {
+    const m = o as THREE.Mesh;
+    m.geometry?.dispose();
+    if (completa && m.material) (Array.isArray(m.material) ? m.material : [m.material]).forEach((x) => x.dispose());
+  });
+}
 function entradaDe(url: string): Entrada {
   const tida = cache.get(url);
   if (tida) return tida;
   const nova: Entrada = { pecas: 0, promessa: Promise.resolve() };
-  nova.promessa = obterCarregador().loadAsync(url).then((g) => { nova.cena = g.scene; }, (e: unknown) => { nova.erro = e; });
+  nova.promessa = obterCarregador().loadAsync(url).then((g) => { prepararCena(g.scene); nova.cena = g.scene; }, (e: unknown) => { nova.erro = e; });
   cache.set(url, nova);
   return nova;
 }
@@ -61,7 +87,7 @@ export function soltarGlb(url: string, esperaMs = LIBERTAR_APOS_MS): void {
   if (e.pecas > 0) return;
   e.temporizador = setTimeout(() => {
     if (e.pecas > 0 || cache.get(url) !== e) return;
-    e.cena?.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    if (e.cena) libertarCena(e.cena);
     cache.delete(url);
   }, esperaMs);
 }
@@ -152,8 +178,32 @@ export function montarGenerico(cena: THREE.Object3D, c: CategoriaGlb, p: ParamsG
   return { grupo, libertar: () => Object.values(mats).forEach((m) => m.dispose()) };
 }
 
+/** O nome original do nó no GLB (o carregador troca os espaços por «_» em `name`; `userData.name` guarda o original). */
+const nomeDoNo = (o: THREE.Object3D): string => (typeof o.userData.name === "string" ? o.userData.name : o.name);
+const NO_TAMPA = /tampa[ _]remov[ií]vel[ _]do[ _]ralo/i, NO_BICA = /bica[ _]girat/i;
+
+/**
+ * Monta uma cena completa do fabricante (`prepararCena`): clona a cena partilhando a geometria e os materiais embutidos (não há `vestir`: o GLB não
+ * pede materiais do acabamento). As opções ligam-se aos nós pelo nome: as tampas dos ralos (todas as malhas que casam, Ambar), a bica giratória
+ * (Smooth, Stick, Granada; a Cira não tem) e o escorredor reverso da Keran. Estes GLB não trazem dock/direcção: não há bica extraída.
+ */
+function montarCompleto(familia: FamiliaGlb, cena: THREE.Object3D, modelo: string, o: OpcoesGlb): ModeloMontado {
+  const grupo = cena.clone(true) as THREE.Group;
+  grupo.traverse((x) => {
+    const m = x as THREE.Mesh, nome = nomeDoNo(x);
+    if (m.isMesh) {
+      m.castShadow = true; m.receiveShadow = true;
+      if (familia === "lava_loica" && NO_TAMPA.test(nome)) m.visible = !o.tampas;
+    }
+    if (familia === "torneira" && NO_BICA.test(nome)) x.rotation.y = ((o.bica ?? 0) * Math.PI) / 180;
+  });
+  if (familia === "lava_loica" && o.reverso && KERAN_SPECS.some((s) => s.id === modelo)) grupo.rotation.y = Math.PI;
+  return { grupo, libertar: () => undefined }; // geometria e materiais são da cache (libertarCena)
+}
+
 /** Monta um modelo do HTML a partir do GLB, com os materiais do acabamento e as opções da peça. Em mm, como o construtor procedural. */
 export function montarModelo(familia: FamiliaGlb, cena: THREE.Object3D, modelo: string, acab: string, o: OpcoesGlb = {}): ModeloMontado {
+  if (cena.userData.completo === true) return montarCompleto(familia, cena, modelo, o);
   if (familia === "torneira") {
     const mats = materiaisDaTorneira(modelo as ModeloTorneira, acab), grupo = vestir(cena, { ...mats });
     const bica = grupo.getObjectByName("bica"), cabeca = grupo.getObjectByName("cabeca");

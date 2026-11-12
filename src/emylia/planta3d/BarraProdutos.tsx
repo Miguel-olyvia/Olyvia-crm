@@ -7,13 +7,17 @@ import { PREDEFINIDOS } from "./composicaoCozinha";
 import { categoriaDoTipo, genericoServe } from "./categoriasGlb";
 import { GRUPOS_ESPACO, MOSTRAR_GENERICOS, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import { CONJUNTOS, type Conjunto } from "./conjuntos";
-import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, variantesDe, type Familia } from "./familias";
+import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, temGlbDoFabricante, variantesDe, type Familia } from "./familias";
+import { temFicheiro } from "./modelosHtml/ficheiros";
 import type { TipoEspaco } from "./modelo";
 
 const INP = "h-11 min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const CHIP = "inline-flex min-h-11 touch-none select-none items-center gap-1.5 rounded-full border border-input bg-background px-4 py-2 text-left text-[15px] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40";
 const TAB = "inline-flex min-h-11 items-center rounded-full border px-4 py-2 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40";
 const PASSO_VISIVEIS = 24;
+/** O filtro «Modelo 3D»: todos, só os que têm o modelo 3D do HTML/fabricante (temModeloHtml) ou só os de modelo genérico (temModeloGenerico); nunca se sobrepõem. */
+type FiltroModelo = "todos" | "com" | "generico";
+const FILTROS_MODELO: readonly { id: FiltroModelo; rotulo: string }[] = [{ id: "todos", rotulo: "Todos" }, { id: "com", rotulo: "Com modelo 3D" }, { id: "generico", rotulo: "Genérico" }];
 const eur = (n: number) => n.toLocaleString("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
 export interface BarraProdutosProps {
@@ -42,7 +46,7 @@ function CartaoFamilia({ f, escolha, onEscolha, onPegar, onMover, onLargar, onCa
   const todas = variantesDe(f), desde = Math.min(...todas.map((x) => x.preco));
   return (
     <li className="w-full max-w-sm rounded-2xl border border-border bg-card p-3 sm:w-80">
-      <p className="text-[15px] font-semibold">{f.nome}</p>
+      <p className="flex flex-wrap items-center gap-2 text-[15px] font-semibold">{f.nome}{temGlbDoFabricante(v) && <span className="rounded bg-muted px-1.5 text-xs font-normal text-muted-foreground" title="Modelo 3D do fabricante (GLB), com os materiais dele">3D do fabricante</span>}</p>
       <p className="text-sm text-muted-foreground">{f.marca} · {todas.length} {todas.length === 1 ? "variante" : "variantes"} · desde {eur(desde)}</p>
       <div role="group" aria-label={`Acabamento de ${f.nome}`} className="mt-2 flex flex-wrap gap-1">
         {acabs.map((a) => (
@@ -73,6 +77,8 @@ function CartaoFamilia({ f, escolha, onEscolha, onPegar, onMover, onLargar, onCa
 /** O modelo 3D do HTML que o produto usa (o mesmo do catálogo 3D), para se ver na lista antes de o pôr na planta. */
 function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | null {
   const pr = m.mockup3d.params;
+  if (pr && "html" in pr && pr.html && pr.html.exacto !== false && temFicheiro(m.tipo === "lava_loica" ? "lava_loica" : "torneira", pr.html.modelo, pr.html.acab) && (m.tipo === "lava_loica" || m.tipo === "torneira_cozinha"))
+    return { curto: "3D do fabricante", titulo: `Modelo 3D do fabricante (GLB) ${pr.html.modelo} · ${pr.html.acab}` };
   if (pr && "html" in pr && pr.html) return pr.html.exacto === false ? { curto: "3D parecido", titulo: `O HTML não tem este produto: usa o modelo ${pr.html.modelo}` } : { curto: "3D do catálogo", titulo: `Modelo ${pr.html.modelo} · ${pr.html.acab}` };
   if (pr?.k === "chapa") return { curto: "3D do catálogo", titulo: `Chapa ${pr.series} · ${pr.tone}` };
   if (temModeloGenerico(m)) return { curto: "3D genérico", titulo: "Modelo genérico da categoria, com as medidas e a cor deste produto" };
@@ -86,24 +92,29 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
   const [q, setQ] = useState("");
   const [grupoEscolhido, setGrupo] = useState<string>("");
   const [quantos, setQuantos] = useState(PASSO_VISIVEIS);
+  const [filtro, setFiltro] = useState<FiltroModelo>("todos");
   const [escolhas, setEscolhas] = useState<Record<string, { med?: string; acab?: string }>>({});
   // protótipo: só os produtos com o modelo 3D do HTML (catalogo3d.ts, SO_COM_MODELO_HTML); separadores, contagens e pesquisa contam só esses
   // o catálogo 3D do HTML é de cozinha: os tampos Coverlam de cozinha não aparecem na casa de banho, no quarto nem na sala
   // e, com MOSTRAR_GENERICOS, depois deles os que têm o modelo genérico da categoria (selo «3D genérico»)
   const produtos = useMemo(() => {
-    if (!SO_COM_MODELO_HTML) return todosProdutos;
-    const html = espaco === "cozinha" || espaco === "outro" ? todosProdutos.filter(temModeloHtml) : [];
+    if (!SO_COM_MODELO_HTML) return filtro === "com" ? todosProdutos.filter(temModeloHtml) : filtro === "generico" ? todosProdutos.filter(temModeloGenerico) : todosProdutos;
+    const html = filtro !== "generico" && (espaco === "cozinha" || espaco === "outro") ? todosProdutos.filter(temModeloHtml) : [];
     // só os genéricos desta divisão (o armário de cozinha não aparece na casa de banho)
-    return MOSTRAR_GENERICOS ? [...html, ...todosProdutos.filter((m) => temModeloGenerico(m) && genericoServe(m.mockup3d.generico?.id ?? categoriaDoTipo(m.tipo, m.nome)?.id, espaco))] : html;
-  }, [todosProdutos, espaco]);
+    const genericos = filtro !== "com" && MOSTRAR_GENERICOS ? todosProdutos.filter((m) => temModeloGenerico(m) && genericoServe(m.mockup3d.generico?.id ?? categoriaDoTipo(m.tipo, m.nome)?.id, espaco)) : [];
+    return [...html, ...genericos];
+  }, [todosProdutos, espaco, filtro]);
   const grupos = useMemo(() => GRUPOS_ESPACO[espaco].map((g) => ({ g, n: produtosDoGrupo(produtos, g).length })).filter((x) => x.n > 0), [produtos, espaco]);
   // o separador «Bancadas» tem a bancada composta (que é o modelo do HTML), mesmo sem famílias de tampo visíveis
-  const categorias = useMemo(() => CATEGORIAS_FAMILIA.filter((c) => c.espacos.includes(espaco)).map((c) => ({ c, n: c.id === "tampos" ? 1 : familiasVisiveis(c.id).length })).filter((x) => x.n > 0), [espaco]);
+  // as famílias (e a bancada composta) têm todas o modelo do HTML: com «Genérico» os separadores de famílias desaparecem
+  const categorias = useMemo(() => (filtro === "generico" ? [] : CATEGORIAS_FAMILIA.filter((c) => c.espacos.includes(espaco)).map((c) => ({ c, n: c.id === "tampos" ? 1 : familiasVisiveis(c.id).length })).filter((x) => x.n > 0)), [espaco, filtro]);
   const conjuntos = useMemo(() => (SO_COM_MODELO_HTML ? [] : CONJUNTOS.filter((c) => c.espacos.includes(espaco))), [espaco]);
   const vazio = grupos.length === 0 && categorias.length === 0 && conjuntos.length === 0;
   // o separador de omissão: a cozinha abre nas famílias (torneiras), o resto no primeiro grupo do catálogo
   const omissao = espaco === "cozinha" && categorias[0] ? `fam:${categorias[0].c.id}` : grupos[0]?.g.id ?? "todos";
-  const ativo = grupoEscolhido || omissao;
+  // o separador escolhido que deixou de existir (por exemplo as famílias com «Genérico») cai no de omissão
+  const existe = (id: string) => (id === "conjuntos" ? conjuntos.length > 0 : id === "todos" ? produtos.length > 0 : id.startsWith("fam:") ? categorias.some((x) => `fam:${x.c.id}` === id) : grupos.some((x) => x.g.id === id));
+  const ativo = grupoEscolhido && existe(grupoEscolhido) ? grupoEscolhido : omissao;
   const ehFamilia = ativo.startsWith("fam:"), ehConjuntos = ativo === "conjuntos";
   const atual = grupos.find((x) => x.g.id === ativo) ?? null;
   const familias = useMemo(() => {
@@ -118,6 +129,7 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
     return base.filter((m) => !s || sem(`${m.nome} ${m.marca ?? ""} ${m.categoria}`).includes(s));
   }, [produtos, atual, q, ehFamilia, ehConjuntos]);
   const escolher = (id: string) => { setGrupo(id); setQuantos(PASSO_VISIVEIS); };
+  const escolherFiltro = (f: FiltroModelo) => { setFiltro(f); setQuantos(PASSO_VISIVEIS); };
   const tab = (id: string, rotulo: string) => (
     <button key={id} type="button" role="tab" aria-selected={ativo === id} className={`${TAB} ${ativo === id ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background hover:bg-accent"}`} onClick={() => escolher(id)}>{rotulo}</button>
   );
@@ -133,9 +145,19 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
         <label className="grid min-w-40 flex-1 gap-1 text-sm font-medium">Procurar no catálogo
           <input type="search" className={INP} value={q} onChange={(e) => { setQ(e.target.value); setQuantos(PASSO_VISIVEIS); }} placeholder="Nome, marca ou categoria" />
         </label>
+        <div role="group" aria-label="Modelo 3D" className="grid gap-1 text-sm font-medium">
+          <span aria-hidden="true">Modelo 3D</span>
+          <div className="flex flex-wrap gap-2">
+            {FILTROS_MODELO.map(({ id, rotulo }) => (
+              <button key={id} type="button" aria-pressed={filtro === id} className={`${TAB} ${filtro === id ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background hover:bg-accent"}`} onClick={() => escolherFiltro(id)}>{rotulo}</button>
+            ))}
+          </div>
+        </div>
       </div>
       {vazio ? (
-        <p role="status" className="rounded-xl border border-border bg-muted/30 p-3 text-[15px]">Ainda sem produtos com modelo 3D neste espaço.</p>
+        <p role="status" className="rounded-xl border border-border bg-muted/30 p-3 text-[15px]">
+          {filtro === "todos" ? "Ainda sem produtos com modelo 3D neste espaço." : `Nenhum produto serve o filtro «${FILTROS_MODELO.find((x) => x.id === filtro)?.rotulo}» neste espaço.`}
+        </p>
       ) : (
         <div role="tablist" aria-label="Grupos de produtos" className="flex flex-wrap gap-2">
           {conjuntos.length > 0 && tab("conjuntos", `Conjuntos (${conjuntos.length})`)}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GRUPOS_ESPACO, PRODUTOS_DEMO, comDemonstracao, dimensoesDoNome, extrairDimensoes, modeloDoProduto, produtosDoGrupo, produtosParaEspaco, tipoEspacoDeDivisao, tipoMockupDe, type NoCat, type ProdutoCat } from "./catalogo3d";
+import { GRUPOS_ESPACO, PRODUTOS_DEMO, comDemonstracao, dimensoesDoNome, extrairDimensoes, modeloDoProduto, produtosDoGrupo, produtosParaEspaco, tipoEspacoDeDivisao, tipoMockupDe, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoCat } from "./catalogo3d";
+import { FAMILIAS, modeloDaFamilia, variantesDe } from "./familias";
 import { lerCatalogo } from "../v2/catalogoStore";
 
 const arvore: NoCat[] = [
@@ -122,5 +123,19 @@ describe("produtos de demonstração e grupos", () => {
     for (const g of GRUPOS_ESPACO.casa_banho) expect(produtosDoGrupo(lista, g).length).toBeGreaterThan(0);
     const alt = Object.fromEntries(lista.map((m) => [m.tipo, m.alturaOmissao]));
     expect(alt).toMatchObject({ espelho: 1, armario_espelho: 1.2, prateleira: 1.5, quadro: 1.4, sanita_suspensa: 0 });
+  });
+});
+describe("modelo 3D do produto: «do HTML» e «genérico» nunca são ambos verdadeiros (o filtro «Modelo 3D» da barra depende disto)", () => {
+  it("em todas as variantes das famílias e em todos os produtos do catálogo e da demonstração", () => {
+    const K = lerCatalogo();
+    const produtos = [
+      ...FAMILIAS.flatMap((f) => variantesDe(f).map((v) => modeloDaFamilia(f, v.medida.id, v.acabamento.id))),
+      ...(["cozinha", "casa_banho", "quarto", "sala", "outro"] as const).flatMap((e) => produtosParaEspaco(comDemonstracao(K.produtos, K.arvore), K.arvore, e, { max: 100000 })),
+    ];
+    expect(produtos.length).toBeGreaterThan(200);
+    for (const m of produtos) expect(temModeloHtml(m) && temModeloGenerico(m), m.nome).toBe(false);
+    // e há de cada lado (o filtro não pode ser trivial)
+    expect(produtos.some(temModeloHtml)).toBe(true);
+    expect(produtos.some(temModeloGenerico)).toBe(true);
   });
 });
