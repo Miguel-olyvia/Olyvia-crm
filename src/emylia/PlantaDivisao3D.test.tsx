@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlantaDivisao3D } from "./PlantaDivisao3D";
 import { lerPlanta, retangulo } from "./planta";
-import { exemploKeran } from "./planta3d/configurador";
+import { familiaKeranDeTeste } from "./planta3d/familiaDeTeste";
 import { familiaPorId } from "./planta3d/familias";
 import { definirFamiliasConfiguradas, familiasConfiguradas, limparFamiliasConfiguradas } from "./planta3d/familiasConfiguradas";
 import type { Ctx } from "./pecas";
@@ -171,7 +171,7 @@ describe("PlantaDivisao3D", () => {
   });
 
   it("uma família do armazém aparece no passo 4, na categoria certa, e põe-se na planta com o SKU e o preço da célula; desmontar a planta não a apaga", () => {
-    definirFamiliasConfiguradas([exemploKeran()]);
+    definirFamiliasConfiguradas([familiaKeranDeTeste()]);
     try {
       const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
       fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "cozinha" } });
@@ -182,7 +182,7 @@ describe("PlantaDivisao3D", () => {
       const lista = screen.getByRole("list", { name: "Famílias de produtos" });
       expect(within(lista).getByText("Lava-loiça Keran")).toBeInTheDocument();
       fireEvent.keyDown(within(lista).getByRole("button", { name: /^Família Lava-loiça Keran 80 cm, acabamento Inox escovado, SKU KER-80-IX, 149/ }), { key: "Enter" });
-      expect(lerPlanta(d.f.planta)!.pecas[0]).toMatchObject({ fam: "cfg:lava-loica-keran", acab: "inox" });
+      expect(lerPlanta(d.f.planta)!.pecas[0]).toMatchObject({ fam: "cfg:lava-loica-keran", acab: "a1" });
       // a preferência do espaço fica gravada: volta à casa de banho para os testes seguintes
       irPara(1);
       fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "casa_banho" } });

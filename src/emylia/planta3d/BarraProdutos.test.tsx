@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogo0 } from "../v2/catalogoModelo";
 import { BarraProdutos } from "./BarraProdutos";
-import { exemploKeran, paraFamilia } from "./configurador";
+import { paraFamilia } from "./configurador";
+import { familiaKeranDeTeste } from "./familiaDeTeste";
 import { registarFamilias } from "./familias";
 import { categoriaDoTipo, genericoServe } from "./categoriasGlb";
 import { MOSTRAR_GENERICOS, SO_COM_MODELO_HTML, comDemonstracao, produtosParaEspaco, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
@@ -192,7 +193,7 @@ describe("Composição livre (protótipo)", () => {
 
 describe("famílias do Configurador (só em memória)", () => {
   it("uma família configurada (sem modelo do HTML) passa o filtro e aparece no separador da categoria; ao limpar o registo desaparece", () => {
-    const fam = paraFamilia(exemploKeran());
+    const fam = paraFamilia(familiaKeranDeTeste());
     expect(fam.htmlModelo).toBeUndefined();
     registarFamilias([fam]);
     try {

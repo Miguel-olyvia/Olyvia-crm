@@ -36,7 +36,7 @@ const tracar = (de: [number, number], ate: [number, number]) => {
   fireEvent.pointerUp(tela, { clientX: ate[0], clientY: ate[1], pointerId: 1 });
 };
 const guardarExemplo = () => {
-  fireEvent.click(screen.getByRole("button", { name: "Começar pelo exemplo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Exemplo: agrupar as lava-loiças Velar do catálogo" }));
   for (let i = 0; i < 2; i++) fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
   fireEvent.click(screen.getByRole("button", { name: "Guardar na sessão" }));
 };
@@ -49,34 +49,35 @@ describe("PrototipoConfiguradorFamilias", () => {
     expect(screen.getByText(/recarregar a página perde as famílias/i)).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Configurador de famílias (protótipo)" })).toBeInTheDocument();
     expect(screen.getByText("Ainda sem famílias configuradas.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Nova família" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nova família (juntar produtos do catálogo)" })).toBeInTheDocument();
     const volta = screen.getByRole("link", { name: "Ver na planta 3D" });
     expect(volta).toHaveAttribute("href", "/prototipo/planta-3d");
     expect(volta.className).toContain("min-h-11");
   });
 
-  it("«Nova família» abre o assistente de 3 passos", () => {
+  it("«Nova família» abre o assistente de 3 passos, a começar pela escolha de produtos do catálogo (sem «Do zero»)", () => {
     montar();
-    fireEvent.click(screen.getByRole("button", { name: "Nova família" }));
-    expect(screen.getByText("Passo 1 de 3 · Família")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Nova família (juntar produtos do catálogo)" }));
+    expect(screen.getByText("Passo 1 de 3 · Escolher produtos")).toBeInTheDocument();
+    expect(screen.queryByText(/Do zero/)).not.toBeInTheDocument();
   });
 
   it("guardar na sessão põe a família na lista da página e no armazém (e em familias.ts)", () => {
     montar();
     guardarExemplo();
     const lista = screen.getByRole("list", { name: "Famílias configuradas" });
-    expect(within(lista).getByText(/Lava-loiça Keran/)).toBeInTheDocument();
-    expect(familiasConfiguradas().map((f) => f.id)).toEqual(["cfg:lava-loica-keran"]);
-    expect(familiaPorId("cfg:lava-loica-keran")?.origem).toBe("configurada");
+    expect(within(lista).getByText(/Lava-louças VELAR/)).toBeInTheDocument();
+    expect(familiasConfiguradas().map((f) => f.id)).toEqual(["cfg:lava-loucas-velar"]);
+    expect(familiaPorId("cfg:lava-loucas-velar")?.origem).toBe("configurada");
   });
 
   it("ao voltar à página (desmontar e montar) as famílias da sessão continuam na lista", () => {
     const { unmount } = montar();
     guardarExemplo();
     unmount();
-    expect(familiaPorId("cfg:lava-loica-keran")).toBeDefined();
+    expect(familiaPorId("cfg:lava-loucas-velar")).toBeDefined();
     montar();
-    expect(within(screen.getByRole("list", { name: "Famílias configuradas" })).getByText(/Lava-loiça Keran/)).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Famílias configuradas" })).getByText(/Lava-louças VELAR/)).toBeInTheDocument();
   });
 
   it("navegando (sem recarregar) para a planta 3D, a família guardada aparece na barra de produtos do passo 4", () => {
@@ -91,6 +92,6 @@ describe("PrototipoConfiguradorFamilias", () => {
     tracar([50, 50], [250, 55]); tracar([0, 0], [250, 200]); tracar([0, 0], [50, 200]); tracar([0, 0], [50, 60]);
     seguinte(); seguinte();
     fireEvent.click(screen.getAllByRole("tab", { name: /^Lava-loiças \(/ })[0]);
-    expect(within(screen.getByRole("list", { name: "Famílias de produtos" })).getByText("Lava-loiça Keran")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Famílias de produtos" })).getByText("Lava-louças VELAR")).toBeInTheDocument();
   });
 });

@@ -1,9 +1,9 @@
-// Protótipo (visualizador 3D): os passos «Escolher produtos» e «Atribuir medidas e acabamentos» do Configurador de famílias, para criar uma família A PARTIR DE
+// Protótipo (visualizador 3D): os passos «Escolher produtos» e «Atribuir atributos» do Configurador de famílias, para criar uma família A PARTIR DE
 // PRODUTOS QUE JÁ EXISTEM no catálogo (só leitura: nada se escreve no catalogoStore). O assistente (PainelConfigurador.tsx) guarda o estado; aqui só se desenha.
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { No, Produto } from "../v2/catalogoModelo";
 import { sem } from "./catalogo3d";
-import { ALVO_PROTO, ficheirosCompativeis, refDoProduto, type AtribuicaoProduto, type FamiliaCfg } from "./configurador";
+import { ALVO_PROTO, erroNomeAtributo, ficheirosCompativeis, refDoProduto, type AtribuicaoProduto, type FamiliaCfg } from "./configurador";
 import { BTN, CAMPO, INP, eur } from "./estilosPainel";
 import { chaveFicheiro } from "./modelosHtml/ficheiros";
 
@@ -62,14 +62,45 @@ export function PassoEscolher({ catalogo, escolhidos, onAlternar, onLimpar }: { 
   );
 }
 
-export function PassoAtribuir({ familia, produtos, atribuicoes, conflitos, onAtribuir, onTirar }: {
-  familia: FamiliaCfg; produtos: readonly Produto[]; atribuicoes: Readonly<Record<string, AtribuicaoProduto>>; conflitos: readonly string[];
-  onAtribuir: (id: string, p: Partial<AtribuicaoProduto>) => void; onTirar: (id: string) => void;
+export function PassoAtribuir({ familia, produtos, atribuicoes, conflitos, atributos, onAtribuir, onTirar, onAcrescentarAtributo, onTirarAtributo }: {
+  familia: FamiliaCfg; produtos: readonly Produto[]; atribuicoes: Readonly<Record<string, AtribuicaoProduto>>; conflitos: readonly string[]; atributos: readonly string[];
+  onAtribuir: (id: string, p: Partial<AtribuicaoProduto>) => void; onTirar: (id: string) => void; onAcrescentarAtributo: (nome: string) => void; onTirarAtributo: (nome: string) => void;
 }) {
-  const ficheiros = ficheirosCompativeis(familia.tipo);
+  const ficheiros = ficheirosCompativeis(familia.tipo), idLista = useId();
+  const [novo, setNovo] = useState(""), [erroNovo, setErroNovo] = useState("");
+  const acrescentar = () => {
+    const erro = erroNomeAtributo(novo, atributos);
+    setErroNovo(erro);
+    if (erro) return;
+    onAcrescentarAtributo(novo.trim()); setNovo("");
+  };
+  /** os valores que já foram usados num atributo (sugestões para os outros produtos) */
+  const usados = (nome: string): string[] => [...new Set(Object.values(atribuicoes).map((x) => x.extras?.[nome]?.trim() ?? "").filter(Boolean))];
   return (
     <div className="grid gap-3">
-      <p className="text-sm text-muted-foreground">Diga a que medida e a que acabamento corresponde cada produto. A sugestão vem do nome e pode corrigir-se. Produtos com a mesma medida juntam-se num só produto da família; o SKU e o preço são os do catálogo e não se editam aqui.</p>
+      <p className="text-sm text-muted-foreground">Os produtos de uma família são iguais e só mudam nos atributos. Diga o valor de cada atributo em cada produto: a medida e a cor/acabamento (a sugestão vem do nome) e os atributos extra que acrescentar. Cada produto fica definido pela combinação dos seus valores, que não pode repetir-se. O SKU e o preço são os do catálogo e não se editam aqui.</p>
+      <fieldset className="grid min-w-0 gap-2 rounded-xl border border-border p-2">
+        <legend className="px-1 text-sm font-semibold">Atributos extra da família</legend>
+        {atributos.length === 0
+          ? <p className="text-sm text-muted-foreground">Sem atributos extra: cada produto só tem medida e cor/acabamento. Acrescente, por exemplo, «Nº de cubas», «Material» ou «Acabamento da aresta».</p>
+          : (
+            <ul aria-label="Atributos extra" className="flex flex-wrap gap-2">
+              {atributos.map((n) => (
+                <li key={n} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-input bg-background pl-4 pr-1 text-[15px]">
+                  <span className="break-words">{n}</span>
+                  <button type="button" className={BTN} aria-label={`Remover o atributo ${n}`} onClick={() => onTirarAtributo(n)}>Remover</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        <div className="flex flex-wrap items-end gap-2">
+          <label className={`${CAMPO} min-w-40 flex-1`}>Nome do novo atributo
+            <input className={INP} value={novo} onChange={(e) => { setNovo(e.target.value); setErroNovo(""); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); acrescentar(); } }} placeholder="Por exemplo, Nº de cubas" />
+          </label>
+          <button type="button" className={BTN} onClick={acrescentar}>Acrescentar atributo</button>
+        </div>
+        {erroNovo && <p role="alert" className="text-sm text-destructive">Erro: {erroNovo}</p>}
+      </fieldset>
       <p role="status" aria-label="Resumo da atribuição" className="text-[15px] font-semibold">{plural(produtos.length, "produto", "produtos")} = {plural(familia.medidas.length, "medida", "medidas")} × {plural(familia.acabamentos.length, "acabamento", "acabamentos")}</p>
       {conflitos.length > 0 && (
         <ul role="alert" className="grid gap-1 rounded-lg border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -95,9 +126,15 @@ export function PassoAtribuir({ familia, produtos, atribuicoes, conflitos, onAtr
                   </label>
                 ))}
               </div>
-              <label className={CAMPO}>Acabamento<input aria-label={`Acabamento do ${nome}`} className={INP} value={a.acabamento} onChange={(e) => onAtribuir(p.id, { acabamento: e.target.value })} /></label>
+              <label className={CAMPO}>Acabamento (cor)<input aria-label={`Acabamento do ${nome}`} className={INP} value={a.acabamento} onChange={(e) => onAtribuir(p.id, { acabamento: e.target.value })} /></label>
               <label className={CAMPO}>Código do acabamento<input aria-label={`Código do acabamento do ${nome}`} className={INP} value={a.codigo} onChange={(e) => onAtribuir(p.id, { codigo: e.target.value })} /></label>
               <label className={CAMPO}>Cor<input aria-label={`Cor do acabamento do ${nome}`} type="color" className="h-11 w-16 rounded-lg border border-input bg-card p-1" value={a.cor} onChange={(e) => onAtribuir(p.id, { cor: e.target.value })} /></label>
+              {atributos.map((x, k) => (
+                <label key={x} className={CAMPO}>{x}
+                  <input aria-label={`${x} do ${nome}`} className={INP} list={`${idLista}-${k}`} value={a.extras?.[x] ?? ""} onChange={(e) => onAtribuir(p.id, { extras: { ...a.extras, [x]: e.target.value } })} />
+                  <datalist id={`${idLista}-${k}`}>{usados(x).map((v) => <option key={v} value={v} />)}</datalist>
+                </label>
+              ))}
               {ficheiros.length === 0
                 ? <p className="self-end text-sm text-muted-foreground">Modelo genérico: este tipo de produto não tem 3D do fabricante.</p>
                 : (

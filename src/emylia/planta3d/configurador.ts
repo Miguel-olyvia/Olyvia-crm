@@ -1,5 +1,6 @@
 // Protótipo (visualizador 3D): o CONFIGURADOR DE FAMÍLIAS, só em memória (estado React; recarregar perde tudo; nada vai para a base nem para o armazenamento).
-// Uma família configurada = acabamentos × medidas + uma MATRIZ de células (activa, preço e SKU próprios) + o GLB do fabricante por célula. `paraFamilia`
+// Uma família é SEMPRE um agrupamento de produtos que já existem no catálogo (só se diferenciam em atributos: medida, cor/acabamento e atributos extra livres).
+// Modelo: acabamentos × medidas + uma MATRIZ de células (uma por produto: SKU e preço vêm dele) + o GLB do fabricante por célula. `paraFamilia`
 // converte-a numa `Familia` do catálogo (familias.ts), para o resto do ecrã a tratar como as outras. Funções puras: sem React, sem three.
 import { CATEGORIAS_FAMILIA, FAMILIAS, PREFIXO_CFG, type AcabFam, type CategoriaFam, type Familia, type MedidaFam } from "./familias";
 import type { TipoMockup } from "./catalogo3d";
@@ -11,7 +12,11 @@ export interface AcabCfg { id: string; nome: string; cor: string; metalness: num
 export interface MedidaCfg { id: string; rotulo: string; ref: string; /** largura, profundidade, altura (cm) */ dim: [number, number, number]; /** preço base (€) */ preco: number }
 /** Uma célula da matriz: o acabamento existe nesta medida? `preco`/`sku` próprios sobrepõem o da medida / o automático.
  * Com `produtoId` a variante É um produto que já existe no catálogo: `sku` e `preco` são uma cópia do produto (só leitura, não se editam aqui) e `produtoNome` o nome dele. */
-export interface CelulaCfg { ativo: boolean; sku?: string; preco?: number; produtoId?: string; produtoNome?: string }
+export interface CelulaCfg {
+  ativo: boolean; sku?: string; preco?: number; produtoId?: string; produtoNome?: string;
+  /** a medida base do produto («50 cm», sem os atributos extra) e os valores dos atributos extra (`FamiliaCfg.atributos`); só nas células de produtos do catálogo */
+  medida?: string; valores?: Record<string, string>;
+}
 export interface RegraSku { modo: "auto" | "manual"; sep: string }
 export interface FamiliaCfg {
   id: string; marca: string; nome: string; categoria: CategoriaFam; tipo: TipoMockup; espacos: TipoEspaco[];
@@ -21,9 +26,11 @@ export interface FamiliaCfg {
   regraSku: RegraSku;
   /** chave da célula → chave do ficheiro GLB («familia|modelo|acab», modelosHtml/ficheiros.ts); sem entrada, modelo genérico */
   glb?: Record<string, string>;
+  /** os nomes dos atributos extra da família («Nº de cubas», «Material»…), além da medida e da cor/acabamento; cada produto tem um valor para cada (`CelulaCfg.valores`). Sem eles, a família só tem medida e cor. */
+  atributos?: string[];
 }
-/** Um problema da família e o GRUPO onde se corrige: 1 Família; 2 acabamentos, 3 medidas e 4 combinações. No assistente por produto (PainelConfigurador) o grupo 1 é o passo
- * «Família» e os grupos 2, 3 e 4 são todos o passo «Produtos e acabamentos» (cada produto tem a sua medida e os seus acabamentos). */
+/** Um problema da família e o GRUPO onde se corrige: 1 Família; 2 acabamentos, 3 medidas e 4 combinações. No assistente (PainelConfigurador) o grupo 1 corrige-se no passo
+ * «Resumo e pré-visualização» (nome, marca, tipo) e os grupos 2, 3 e 4 no passo «Atribuir atributos» (a atribuição de cada produto). */
 export interface Problema { passo: 1 | 2 | 3 | 4; msg: string }
 
 export const celulaKey = (medidaId: string, acabId: string): string => `${medidaId}|${acabId}`;
@@ -138,183 +145,34 @@ export function paraFamilia(f: FamiliaCfg): Familia {
   };
 }
 
-/* ------------------------------------------------------------------ edição (funções puras: devolvem uma cópia) */
-/** Garante uma célula por medida × acabamento (as novas nascem activas) e tira as de medidas/acabamentos que já não existem. */
-export function sincronizar(f: FamiliaCfg): FamiliaCfg {
-  const celulas: Record<string, CelulaCfg> = {}, glb: Record<string, string> = {};
-  for (const m of f.medidas) for (const a of f.acabamentos) {
-    const k = celulaKey(m.id, a.id);
-    celulas[k] = f.celulas[k] ?? { ativo: true };
-    if (f.glb?.[k]) glb[k] = f.glb[k];
-  }
-  return { ...f, celulas, glb };
-}
+/* ------------------------------------------------------------------ construção (uma família é sempre um agrupamento de produtos do catálogo) */
 export const comNome = (f: FamiliaCfg, nome: string): FamiliaCfg => ({ ...f, nome, id: idDoNome(nome) });
-const proximoId = (prefixo: string, ids: readonly string[]): string => { let n = ids.length + 1; while (ids.includes(`${prefixo}${n}`)) n++; return `${prefixo}${n}`; };
-export function juntarAcabamento(f: FamiliaCfg): FamiliaCfg {
-  const id = proximoId("a", f.acabamentos.map((a) => a.id)), n = f.acabamentos.length + 1;
-  return sincronizar({ ...f, acabamentos: [...f.acabamentos, { id, nome: `Acabamento ${n}`, cor: "#b7b9ba", metalness: 0.5, roughness: 0.4, codigo: `A${n}` }] });
-}
-export const tirarAcabamento = (f: FamiliaCfg, id: string): FamiliaCfg => sincronizar({ ...f, acabamentos: f.acabamentos.filter((a) => a.id !== id) });
-export function juntarMedida(f: FamiliaCfg): FamiliaCfg {
-  const id = proximoId("m", f.medidas.map((m) => m.id)), n = f.medidas.length + 1;
-  return sincronizar({ ...f, medidas: [...f.medidas, { id, rotulo: `Medida ${n}`, ref: `REF-${n}`, dim: [60, 50, 20], preco: 0 }] });
-}
-export const tirarMedida = (f: FamiliaCfg, id: string): FamiliaCfg => sincronizar({ ...f, medidas: f.medidas.filter((m) => m.id !== id) });
+const norm = (s: string): string => s.trim().toLowerCase();
 
+/** A família de partida do assistente: só o cabeçalho. As medidas, os acabamentos e as células saem sempre dos produtos escolhidos (`familiaDeProdutos`). */
 export function criarFamiliaVazia(): FamiliaCfg {
-  return juntarMedida(juntarAcabamento({
+  return {
     id: PREFIXO_CFG, marca: "", nome: "", categoria: "lavaloicas", tipo: "lava_loica", espacos: CATEGORIAS_FAMILIA.find((c) => c.id === "lavaloicas")?.espacos ?? ["cozinha", "outro"],
     acabamentos: [], medidas: [], celulas: {}, regraSku: { modo: "auto", sep: "-" },
-  }));
-}
-
-/* ------------------------------------------------------------------ POR PRODUTO
- * Na vida real cada medida × acabamento é um produto diferente (referência e preço próprios). O modelo de dados é o mesmo (acabamentos da família + medidas +
- * matriz de células), mas aqui pensa-se por produto: um PRODUTO é uma medida/referência-base; os seus acabamentos são as células que EXISTEM para ele
- * (a chave está em `celulas`; `ativo: false` é uma variante que existe mas está desligada); sem chave, o acabamento não faz parte do produto.
- * Um acabamento é único na família (por código ou nome): juntá-lo a outro produto reutiliza-o. */
-export interface DadosAcab { nome?: string; cor?: string; codigo?: string; metalness?: number; roughness?: number }
-const norm = (s: string): string => s.trim().toLowerCase();
-const existeCelula = (f: FamiliaCfg, medidaId: string, acabId: string): boolean => Object.prototype.hasOwnProperty.call(f.celulas, celulaKey(medidaId, acabId));
-
-/** Os acabamentos que fazem parte de um produto (ativos ou desligados), pela ordem da família. */
-export const acabamentosDoProduto = (f: FamiliaCfg, medidaId: string): AcabCfg[] => f.acabamentos.filter((a) => existeCelula(f, medidaId, a.id));
-
-/** Tira as células e os GLB de produtos/acabamentos que já não existem e os acabamentos que já nenhum produto tem. */
-function limpar(f: FamiliaCfg): FamiliaCfg {
-  const medidas = new Set(f.medidas.map((m) => m.id)), acabs = new Set(f.acabamentos.map((a) => a.id)), usados = new Set<string>();
-  const celulas: Record<string, CelulaCfg> = {}, glb: Record<string, string> = {};
-  for (const [k, c] of Object.entries(f.celulas)) {
-    const i = k.indexOf("|"), mid = k.slice(0, i), aid = k.slice(i + 1);
-    if (!medidas.has(mid) || !acabs.has(aid)) continue;
-    celulas[k] = c; usados.add(aid);
-    if (f.glb?.[k]) glb[k] = f.glb[k];
-  }
-  return { ...f, acabamentos: f.acabamentos.filter((a) => usados.has(a.id)), celulas, glb };
-}
-
-/** Um produto novo (medida/referência-base) sem acabamentos: junta-se-lhe cada um depois. */
-export function juntarProduto(f: FamiliaCfg): FamiliaCfg {
-  const id = proximoId("m", f.medidas.map((m) => m.id)), n = f.medidas.length + 1;
-  return { ...f, medidas: [...f.medidas, { id, rotulo: `Produto ${n}`, ref: `REF-${n}`, dim: [60, 50, 20], preco: 0 }] };
-}
-export const tirarProduto = (f: FamiliaCfg, id: string): FamiliaCfg => limpar({ ...f, medidas: f.medidas.filter((m) => m.id !== id) });
-
-const ativarNoProduto = (f: FamiliaCfg, medidaId: string, acabId: string): FamiliaCfg => {
-  const k = celulaKey(medidaId, acabId);
-  return f.celulas[k]?.ativo === true ? f : { ...f, celulas: { ...f.celulas, [k]: { ...f.celulas[k], ativo: true } } };
-};
-
-/** Junta um acabamento a um produto. Se a família já tem um com o mesmo código ou nome (sem distinguir maiúsculas) reutiliza-o; senão cria-o. */
-export function juntarAcabamentoAoProduto(f: FamiliaCfg, medidaId: string, dados: DadosAcab = {}): FamiliaCfg {
-  if (!f.medidas.some((m) => m.id === medidaId)) return f;
-  const cod = norm(dados.codigo ?? ""), nom = norm(dados.nome ?? "");
-  const existente = f.acabamentos.find((a) => (cod !== "" && norm(a.codigo) === cod) || (nom !== "" && norm(a.nome) === nom));
-  if (existente) return ativarNoProduto(f, medidaId, existente.id);
-  let n = f.acabamentos.length + 1;
-  while (f.acabamentos.some((a) => norm(a.codigo) === `a${n}` || norm(a.nome) === `acabamento ${n}`)) n++;
-  const novo: AcabCfg = {
-    id: proximoId("a", f.acabamentos.map((a) => a.id)), nome: dados.nome?.trim() || `Acabamento ${n}`, cor: dados.cor ?? "#b7b9ba",
-    metalness: dados.metalness ?? 0.5, roughness: dados.roughness ?? 0.4, codigo: dados.codigo?.trim() || `A${n}`,
   };
-  return { ...f, acabamentos: [...f.acabamentos, novo], celulas: { ...f.celulas, [celulaKey(medidaId, novo.id)]: { ativo: true } } };
 }
 
-/** Junta a um produto um acabamento que a família já tem (pelo id). */
-export const juntarAcabamentoExistente = (f: FamiliaCfg, medidaId: string, acabId: string): FamiliaCfg =>
-  f.medidas.some((m) => m.id === medidaId) && f.acabamentos.some((a) => a.id === acabId) ? ativarNoProduto(f, medidaId, acabId) : f;
-
-/** Tira um acabamento de UM produto (a célula e o 3D); o acabamento só sai da família se já nenhum produto o tem. */
-export function tirarAcabamentoDoProduto(f: FamiliaCfg, medidaId: string, acabId: string): FamiliaCfg {
-  const k = celulaKey(medidaId, acabId), celulas = { ...f.celulas }, glb = { ...f.glb };
-  delete celulas[k]; delete glb[k];
-  return limpar({ ...f, celulas, glb });
+/** Uma linha do resumo: uma variante ativa = um produto real do catálogo. `produto` é o nome dele; `medida` é a medida base (sem os atributos extra) e `valores` os atributos extra. */
+export interface LinhaVariante {
+  chave: string; medidaId: string; acabId: string; produto: string; medida: string; valores: Record<string, string>; acabamento: string; sku: string; preco: number; tem3d: boolean;
+  /** o produto do catálogo de onde vêm o SKU e o preço */ produtoId?: string;
 }
-
-/** «Copiar os acabamentos deste produto para os outros»: junta aos outros os acabamentos ativos deste que lhes faltam (sem tirar nenhum, sem copiar preços, SKU nem 3D). */
-export function copiarAcabamentosParaOutros(f: FamiliaCfg, deMedidaId: string): FamiliaCfg {
-  const dele = acabamentosDoProduto(f, deMedidaId).filter((a) => f.celulas[celulaKey(deMedidaId, a.id)]?.ativo === true);
-  return f.medidas.filter((m) => m.id !== deMedidaId).reduce((r, m) => dele.reduce((g, a) => ativarNoProduto(g, m.id, a.id), r), f);
-}
-/** «Aplicar o mesmo acabamento a todos os produtos». */
-export const aplicarAcabamentoATodos = (f: FamiliaCfg, acabId: string): FamiliaCfg =>
-  f.acabamentos.some((a) => a.id === acabId) ? f.medidas.reduce((r, m) => ativarNoProduto(r, m.id, acabId), f) : f;
-
-/** Muda a variante-produto (célula): ativo, preço ou SKU próprios. Só se o acabamento já faz parte do produto. */
-export function alterarVariante(f: FamiliaCfg, medidaId: string, acabId: string, p: Partial<CelulaCfg>): FamiliaCfg {
-  if (!existeCelula(f, medidaId, acabId)) return f;
-  const k = celulaKey(medidaId, acabId), atual = f.celulas[k];
-  // um produto do catálogo manda no seu SKU e no seu preço: aqui só se liga ou desliga
-  const permitido: Partial<CelulaCfg> = atual.produtoId ? (p.ativo === undefined ? {} : { ativo: p.ativo }) : p;
-  return { ...f, celulas: { ...f.celulas, [k]: { ...atual, ...permitido } } };
-}
-/** Escolhe (ou, com chave vazia, tira) o GLB do fabricante de uma variante. */
-export function definirGlbDaVariante(f: FamiliaCfg, medidaId: string, acabId: string, chave: string): FamiliaCfg {
-  const k = celulaKey(medidaId, acabId), glb = { ...f.glb };
-  if (chave) glb[k] = chave; else delete glb[k];
-  return { ...f, glb };
-}
-/** Muda nome, cor ou código de um acabamento: vale para todos os produtos que o têm (é o mesmo acabamento da família). */
-export const alterarAcabamento = (f: FamiliaCfg, acabId: string, p: DadosAcab): FamiliaCfg =>
-  ({ ...f, acabamentos: f.acabamentos.map((a) => (a.id === acabId ? { ...a, ...p } : a)) });
-
-/** Uma linha do resumo: uma variante ativa, ou seja, um produto real com a sua referência. */
-export interface LinhaVariante { chave: string; medidaId: string; acabId: string; produto: string; ref: string; acabamento: string; sku: string; preco: number; tem3d: boolean; /** o produto do catálogo de onde vêm o SKU e o preço */ produtoId?: string }
 export const linhasDeVariantes = (f: FamiliaCfg): LinhaVariante[] => celulasAtivas(f).map(({ m, a }) => {
-  const chave = celulaKey(m.id, a.id);
-  return { chave, medidaId: m.id, acabId: a.id, produto: nomeMedida(m), ref: m.ref, acabamento: a.nome.trim() || a.id, sku: skuDaCelula(f, m.id, a.id), preco: precoDaCelula(f, m.id, a.id), tem3d: Boolean(f.glb?.[chave]), ...(f.celulas[chave]?.produtoId ? { produtoId: f.celulas[chave].produtoId } : {}) };
+  const chave = celulaKey(m.id, a.id), c = f.celulas[chave];
+  return {
+    chave, medidaId: m.id, acabId: a.id, produto: c?.produtoNome || nomeMedida(m), medida: c?.medida ?? nomeMedida(m), valores: { ...c?.valores }, acabamento: a.nome.trim() || a.id,
+    sku: skuDaCelula(f, m.id, a.id), preco: precoDaCelula(f, m.id, a.id), tem3d: Boolean(f.glb?.[chave]), ...(c?.produtoId ? { produtoId: c.produtoId } : {}),
+  };
 });
-/** «N produtos = N referências»: produtos = variantes ativas; referências = SKUs distintos (se divergem, há SKUs repetidos). */
-export function resumoDeProdutos(f: FamiliaCfg): { produtos: number; referencias: number; texto: string } {
-  const linhas = linhasDeVariantes(f), produtos = linhas.length, referencias = new Set(linhas.map((l) => l.sku)).size;
-  return { produtos, referencias, texto: `${produtos} ${produtos === 1 ? "produto" : "produtos"} = ${referencias} ${referencias === 1 ? "referência" : "referências"}` };
-}
-/** Prepara uma família (nova, guardada ou do exemplo) para a UI por produto: o SKU passa a «automático, editável» (modo manual: o escrito à mão ou, se vazio, ref+sep+código).
- * Em modo automático os SKUs escritos eram ignorados, por isso descartam-se; nenhum SKU efetivo muda. Devolve uma cópia. */
-export function prepararParaEdicao(f: FamiliaCfg): FamiliaCfg {
-  const c = structuredClone(f);
-  if (c.regraSku.modo === "auto") for (const k of Object.keys(c.celulas)) if (!c.celulas[k].produtoId) delete c.celulas[k].sku;
-  return { ...c, regraSku: { ...c.regraSku, modo: "manual" } };
-}
-
-/** O caso do utilizador: uma lava-loiça Frasa Lody são 9 PRODUTOS (3 medidas × 3 acabamentos), cada um com a sua referência, o seu preço e o seu GLB. */
-export function exemploLodyFrasa(): FamiliaCfg {
-  const acab = (id: string, nome: string, cor: string, roughness: number, codigo: string): AcabCfg => ({ id, nome, cor, metalness: 1, roughness, codigo });
-  const preco = { "40": [139, 149, 134], "50": [159, 169, 154], "70": [199, 209, 194] } as const, ids = ["cobre", "oro", "gunmetal"] as const;
-  const celulas: Record<string, CelulaCfg> = {}, glb: Record<string, string> = {};
-  for (const tam of ["40", "50", "70"] as const) ids.forEach((a, i) => {
-    celulas[celulaKey(`lody${tam}`, a)] = { ativo: true, preco: preco[tam][i] };
-    glb[celulaKey(`lody${tam}`, a)] = chaveFicheiro("lava_loica", `lody${tam}`, a);
-  });
-  return {
-    id: "cfg:lava-loica-lody-frasa-exemplo", marca: "FRASA", nome: "Lava-loiça Lody, FRASA (exemplo: 9 produtos)", categoria: "lavaloicas", tipo: "lava_loica", espacos: ["cozinha", "outro"],
-    acabamentos: [acab("cobre", "Cobre", "#bc825b", 0.3, "CO"), acab("oro", "Gold", "#c9ad68", 0.3, "GO"), acab("gunmetal", "Gunmetal", "#62605e", 0.29, "GM")],
-    medidas: [
-      { id: "lody40", rotulo: "40 cm", ref: "LOD-40", dim: [44, 44, 20], preco: 139 },
-      { id: "lody50", rotulo: "50 cm", ref: "LOD-50", dim: [54, 44, 20], preco: 159 },
-      { id: "lody70", rotulo: "70 cm", ref: "LOD-70", dim: [74, 44, 20], preco: 199 },
-    ],
-    celulas, regraSku: { modo: "auto", sep: "-" }, glb,
-  };
-}
-
-/** O exemplo para ver logo algo: Lava-loiça Keran (RODI HOME), 2 acabamentos × 2 medidas, uma combinação inactiva e um preço próprio. */
-export function exemploKeran(): FamiliaCfg {
-  return {
-    id: "cfg:lava-loica-keran", marca: "RODI HOME", nome: "Lava-loiça Keran", categoria: "lavaloicas", tipo: "lava_loica", espacos: ["cozinha", "outro"],
-    acabamentos: [
-      { id: "inox", nome: "Inox escovado", cor: "#c3c7ca", metalness: 1, roughness: 0.3, codigo: "IX" },
-      { id: "gunmetal", nome: "Gun Metal", cor: "#62605e", metalness: 1, roughness: 0.29, codigo: "GM" },
-    ],
-    medidas: [
-      { id: "m80", rotulo: "80 cm", ref: "KER-80", dim: [80, 50, 16], preco: 149 },
-      { id: "m100", rotulo: "100 cm (1 cuba e meia)", ref: "KER-100", dim: [100, 50, 16], preco: 189 },
-    ],
-    celulas: { "m80|inox": { ativo: true }, "m80|gunmetal": { ativo: false }, "m100|inox": { ativo: true }, "m100|gunmetal": { ativo: true, preco: 199 } },
-    regraSku: { modo: "auto", sep: "-" },
-    glb: { "m80|inox": chaveFicheiro("lava_loica", "keran80", "inox"), "m100|inox": chaveFicheiro("lava_loica", "keran100", "inox") },
-  };
+/** «N produtos = N variantes»: cada variante ativa é um produto do catálogo. */
+export function resumoDeProdutos(f: FamiliaCfg): { produtos: number; texto: string } {
+  const produtos = linhasDeVariantes(f).length;
+  return { produtos, texto: `${produtos} ${produtos === 1 ? "produto" : "produtos"} = ${produtos} ${produtos === 1 ? "variante" : "variantes"}` };
 }
 
 /* ------------------------------------------------------------------ JUNTAR PRODUTOS QUE JÁ EXISTEM NO CATÁLOGO
@@ -441,27 +299,51 @@ export function ficheiroSugerido(tipo: TipoMockup, nome: string, palpite: Pick<P
   return melhor ? chaveFicheiro(melhor.x.familia, melhor.x.modelo, melhor.x.acab) : "";
 }
 
-/** O que o utilizador atribui a cada produto escolhido: a medida e o acabamento (e, se quiser, o GLB do fabricante). */
-export interface AtribuicaoProduto { produtoId: string; medida: string; dim: [number, number, number]; acabamento: string; cor: string; codigo: string; metalness?: number; roughness?: number; glb?: string }
+/** O que o utilizador atribui a cada produto escolhido: a medida, o acabamento/cor, os atributos extra (`extras`: nome do atributo → valor) e, se quiser, o GLB do fabricante. */
+export interface AtribuicaoProduto { produtoId: string; medida: string; dim: [number, number, number]; acabamento: string; cor: string; codigo: string; metalness?: number; roughness?: number; glb?: string; extras?: Record<string, string> }
 
-/** Monta a família a partir dos produtos escolhidos e das atribuições (mantém o nome, a marca, a categoria, o tipo e os espaços de `base`).
- * Produtos com a mesma medida (rótulo) juntam-se num mesmo «produto» da família, com as dimensões do primeiro; o mesmo acabamento (nome) é um só. Se dois produtos
- * pedem a mesma medida × acabamento, o segundo fica de fora e há um conflito para corrigir. */
+/** Os nomes que um atributo extra não pode ter (já existem como atributos de cada produto). */
+const ATRIBUTOS_RESERVADOS = ["medida", "cor", "acabamento", "cor/acabamento"];
+/** Porque é que `nome` não serve de novo atributo extra («» se serve): vazio, repetido (sem distinguir maiúsculas) ou um dos que já existem (medida, cor, acabamento). */
+export function erroNomeAtributo(nome: string, existentes: readonly string[]): string {
+  const n = norm(nome);
+  if (!n) return "Escreva o nome do atributo (por exemplo «Nº de cubas»).";
+  if (ATRIBUTOS_RESERVADOS.includes(n)) return `«${nome.trim()}» já existe em cada produto: use outro nome para o atributo extra.`;
+  if (existentes.some((x) => norm(x) === n)) return `Já há um atributo «${nome.trim()}».`;
+  return "";
+}
+
+/** O rótulo da medida no cartão: a medida + os valores dos atributos extra que o produto tem («50 cm · 2 cubas»). Uma medida «Única» só aparece se não houver extras. */
+export function rotuloDaMedida(medida: string, extras: readonly string[]): string {
+  const m = medida.trim(), v = extras.map((x) => x.trim()).filter(Boolean), base = m && !(m === "Única" && v.length > 0) ? [m] : [];
+  return [...base, ...v].join(" · ") || "Única";
+}
+
+/** Monta a família a partir dos produtos escolhidos e das atribuições (mantém o nome, a marca, a categoria, o tipo, os espaços e os atributos extra de `base`).
+ * O rótulo de cada «produto» da família é a medida + os valores dos atributos extra: produtos com o mesmo rótulo juntam-se, com as dimensões do primeiro; o mesmo acabamento (nome) é um só.
+ * Se dois produtos têm os mesmos valores em TODOS os atributos (medida, extras e cor/acabamento), o segundo fica de fora e há um conflito para corrigir. */
 export function familiaDeProdutos(base: FamiliaCfg, refs: readonly ProdutoRef[], atribuicoes: readonly AtribuicaoProduto[]): { familia: FamiliaCfg; conflitos: string[] } {
   const porId = new Map(refs.map((r) => [r.id, r] as const)), compativeis = new Set(ficheirosCompativeis(base.tipo).map((x) => chaveFicheiro(x.familia, x.modelo, x.acab)));
+  const nomesExtra = base.atributos ?? [];
   const medidas: MedidaCfg[] = [], acabamentos: AcabCfg[] = [], celulas: Record<string, CelulaCfg> = {}, glb: Record<string, string> = {}, ocupado = new Map<string, string>(), conflitos: string[] = [];
   for (const a of atribuicoes) {
     const r = porId.get(a.produtoId);
     if (!r) continue;
-    const rotulo = a.medida.trim() || "Única", nomeAcab = a.acabamento.trim() || "Padrão";
+    const valores: Record<string, string> = {};
+    for (const n of nomesExtra) { const v = a.extras?.[n]?.trim(); if (v) valores[n] = v; }
+    const medidaBase = a.medida.trim() || "Única", rotulo = rotuloDaMedida(a.medida, nomesExtra.map((n) => valores[n] ?? "")), nomeAcab = a.acabamento.trim() || "Padrão";
     let m = medidas.find((x) => norm(x.rotulo) === norm(rotulo));
     if (!m) { m = { id: `m${medidas.length + 1}`, rotulo, ref: r.sku?.trim() || r.id, dim: [...a.dim], preco: 0 }; medidas.push(m); }
     let c = acabamentos.find((x) => norm(x.nome) === norm(nomeAcab));
     if (!c) { c = { id: `a${acabamentos.length + 1}`, nome: nomeAcab, cor: a.cor, metalness: a.metalness ?? 0.5, roughness: a.roughness ?? 0.4, codigo: a.codigo.trim() || `A${acabamentos.length + 1}` }; acabamentos.push(c); }
     const k = celulaKey(m.id, c.id);
-    if (ocupado.has(k)) { conflitos.push(`Os produtos «${ocupado.get(k)}» e «${r.n}» têm a mesma medida (${m.rotulo}) e o mesmo acabamento (${c.nome}): mude a medida ou o acabamento de um deles.`); continue; }
+    if (ocupado.has(k)) {
+      const todos = [`Medida: ${medidaBase}`, ...nomesExtra.map((n) => `${n}: ${valores[n] ?? "—"}`), `Cor: ${c.nome}`].join("; ");
+      conflitos.push(`Os produtos «${ocupado.get(k)}» e «${r.n}» têm os mesmos valores em todos os atributos (${todos}): mude pelo menos um valor num deles.`);
+      continue;
+    }
     ocupado.set(k, r.n);
-    celulas[k] = { ativo: true, produtoId: r.id, produtoNome: r.n, sku: r.sku?.trim() || r.id, ...(r.preco > 0 ? { preco: r.preco } : {}) };
+    celulas[k] = { ativo: true, produtoId: r.id, produtoNome: r.n, sku: r.sku?.trim() || r.id, ...(r.preco > 0 ? { preco: r.preco } : {}), medida: medidaBase, ...(Object.keys(valores).length ? { valores } : {}) };
     if (a.glb && compativeis.has(a.glb)) glb[k] = a.glb;
   }
   for (const m of medidas) {
@@ -469,4 +351,16 @@ export function familiaDeProdutos(base: FamiliaCfg, refs: readonly ProdutoRef[],
     m.preco = precos.length ? Math.min(...precos) : 0;
   }
   return { familia: { ...base, acabamentos, medidas, celulas, glb, regraSku: { ...base.regraSku, modo: "manual" } }, conflitos };
+}
+
+/** O inverso de `familiaDeProdutos`: as atribuições (pela ordem dos produtos) de uma família guardada, para a voltar a editar. */
+export function atribuicoesDaFamilia(f: FamiliaCfg): AtribuicaoProduto[] {
+  return f.medidas.flatMap((m) => f.acabamentos.flatMap((a): AtribuicaoProduto[] => {
+    const k = celulaKey(m.id, a.id), c = f.celulas[k];
+    if (!c?.produtoId) return [];
+    return [{
+      produtoId: c.produtoId, medida: c.medida ?? m.rotulo, dim: [...m.dim], acabamento: a.nome, cor: a.cor, codigo: a.codigo, metalness: a.metalness, roughness: a.roughness,
+      ...(f.glb?.[k] ? { glb: f.glb[k] } : {}), ...(c.valores ? { extras: { ...c.valores } } : {}),
+    }];
+  }));
 }

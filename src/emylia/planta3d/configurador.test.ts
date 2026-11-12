@@ -3,14 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FAMILIAS, acabamentosDaMedida, familiaPorId, familiasDaCategoria, modeloDaFamilia, resolverVariante, temGlbDoFabricante, variantesDe } from "./familias";
 import { registarFamilias, todasAsFamilias } from "./familias";
 import {
-  acabamentosDoProduto, alterarVariante, aplicarAcabamentoATodos, celulaKey, copiarAcabamentosParaOutros, criarFamiliaVazia, exemploKeran, exemploLodyFrasa, ficheirosCompativeis,
-  juntarAcabamentoAoProduto, juntarProduto, linhasDeVariantes, paraFamilia, prepararParaEdicao, resumoDeProdutos, skuDaCelula, tirarAcabamentoDoProduto, tirarProduto, validar, type FamiliaCfg,
+  ALVO_PROTO, TIPOS_DA_CATEGORIA, atribuicoesDaFamilia, categoriaSugerida, celulaKey, criarFamiliaVazia, erroNomeAtributo, familiaDeProdutos, ficheiroSugerido, ficheirosCompativeis,
+  linhasDeVariantes, palpiteDoProduto, paraFamilia, refDoProduto, resumoDeProdutos, rotuloDaMedida, skuDaCelula, sugerirFamilia, validar,
+  type AtribuicaoProduto, type FamiliaCfg, type ProdutoRef,
 } from "./configurador";
-import { FICHEIROS_3D, chaveFicheiro } from "./modelosHtml/ficheiros";
-import {
-  ALVO_PROTO, TIPOS_DA_CATEGORIA, alterarVariante as alterarVarianteCat, categoriaSugerida, familiaDeProdutos, ficheiroSugerido, palpiteDoProduto, refDoProduto, sugerirFamilia,
-  type AtribuicaoProduto, type ProdutoRef,
-} from "./configurador";
+import { familiaKeranDeTeste } from "./familiaDeTeste";
+import { chaveFicheiro } from "./modelosHtml/ficheiros";
 import { produtoIdsAgrupados } from "./familias";
 
 afterEach(() => registarFamilias([]));
@@ -84,12 +82,12 @@ describe("SKU", () => {
 describe("validar", () => {
   it("uma família certa não tem erros", () => expect(validar(base())).toEqual([]));
 
-  it("o exemplo (Lava-loiça Keran, RODI HOME) é válido e tem uma célula inactiva", () => {
-    const e = exemploKeran();
+  it("uma família feita de produtos do catálogo (Keran, RODI HOME: 3 produtos) é válida e gera as 3 variantes", () => {
+    const e = familiaKeranDeTeste();
     expect(e.marca).toBe("RODI HOME");
     expect(e.acabamentos).toHaveLength(2); expect(e.medidas).toHaveLength(2);
     expect(validar(e)).toEqual([]);
-    expect(variantesDe(paraFamilia(e)).length).toBeGreaterThanOrEqual(3);
+    expect(variantesDe(paraFamilia(e))).toHaveLength(3);
   });
 
   it("medida sem preço: erro em português com o nome da medida", () => {
@@ -125,7 +123,7 @@ describe("validar", () => {
     expect(e).toMatch(/nome/i); expect(e).toMatch(/acabamento/i); expect(e).toMatch(/medida/i);
   });
 
-  it("a família vazia criada pelo botão ainda não é válida", () => expect(validar(criarFamiliaVazia()).length).toBeGreaterThan(0));
+  it("a família de partida (sem produtos) ainda não é válida", () => expect(validar(criarFamiliaVazia()).length).toBeGreaterThan(0));
 });
 
 describe("modelo 3D por célula", () => {
@@ -184,182 +182,6 @@ describe("registo", () => {
   });
 
   it("celulaKey junta medida e acabamento", () => expect(celulaKey("m1", "a2")).toBe("m1|a2"));
-});
-
-/* ------------------------------------------------------------------ acabamentos POR PRODUTO (cada medida é um produto com os seus acabamentos) */
-/** uma família sem produtos nem acabamentos: tudo se constrói por produto */
-const vazia = (): FamiliaCfg => ({ ...base(), acabamentos: [], medidas: [], celulas: {}, glb: {} });
-/** produto 1 (T-80) com Inox e Negro; produto 2 (T-100) só com Cobre */
-function doisProdutos(): FamiliaCfg {
-  let f = juntarProduto(juntarProduto(vazia()));
-  f = { ...f, medidas: [{ ...f.medidas[0], rotulo: "80 cm", ref: "T-80", preco: 100 }, { ...f.medidas[1], rotulo: "100 cm", ref: "T-100", preco: 150 }] };
-  f = juntarAcabamentoAoProduto(f, "m1", { nome: "Inox", codigo: "IX", cor: "#c3c7ca" });
-  f = juntarAcabamentoAoProduto(f, "m1", { nome: "Negro", codigo: "NE" });
-  return juntarAcabamentoAoProduto(f, "m2", { nome: "Cobre", codigo: "CO" });
-}
-
-describe("produtos com acabamentos próprios", () => {
-  it("um produto novo nasce sem acabamentos e sem células", () => {
-    const f = juntarProduto(vazia());
-    expect(f.medidas).toHaveLength(1);
-    expect(acabamentosDoProduto(f, f.medidas[0].id)).toEqual([]);
-    expect(f.celulas).toEqual({});
-  });
-
-  it("2 produtos com acabamentos diferentes geram só as variantes certas, com SKUs e preços distintos", () => {
-    const f = alterarVariante(doisProdutos(), "m1", "a2", { preco: 110 });
-    const linhas = linhasDeVariantes(f);
-    expect(linhas.map((l) => [l.produto, l.acabamento, l.sku, l.preco])).toEqual([
-      ["80 cm", "Inox", "T-80-IX", 100], ["80 cm", "Negro", "T-80-NE", 110], ["100 cm", "Cobre", "T-100-CO", 150],
-    ]);
-    expect(validar(f)).toEqual([]);
-    const fam = paraFamilia(f);
-    expect(acabamentosDaMedida(fam, "m1").map((a) => a.nome)).toEqual(["Inox", "Negro"]);
-    expect(acabamentosDaMedida(fam, "m2").map((a) => a.nome)).toEqual(["Cobre"]);
-    expect(variantesDe(fam)).toHaveLength(3);
-  });
-
-  it("um acabamento pode existir só num produto: o outro produto não o tem", () => {
-    const f = doisProdutos();
-    expect(acabamentosDoProduto(f, "m1").map((a) => a.nome)).toEqual(["Inox", "Negro"]);
-    expect(acabamentosDoProduto(f, "m2").map((a) => a.nome)).toEqual(["Cobre"]);
-  });
-
-  it("juntar um acabamento que já existe na família (mesmo código ou nome, sem distinguir maiúsculas) reutiliza-o em vez de criar outro", () => {
-    let f = doisProdutos();
-    f = juntarAcabamentoAoProduto(f, "m2", { codigo: "ix" });
-    f = juntarAcabamentoAoProduto(f, "m2", { nome: "NEGRO" });
-    expect(f.acabamentos).toHaveLength(3);
-    expect(acabamentosDoProduto(f, "m2").map((a) => a.id)).toEqual(["a1", "a2", "a3"]);
-    expect(resumoDeProdutos(f).produtos).toBe(5);
-  });
-
-  it("juntar sem dados cria um acabamento novo com nome e código que ainda não existem", () => {
-    let f = doisProdutos();
-    f = juntarAcabamentoAoProduto(f, "m1");
-    f = juntarAcabamentoAoProduto(f, "m1");
-    const codigos = f.acabamentos.map((a) => a.codigo), nomes = f.acabamentos.map((a) => a.nome);
-    expect(new Set(codigos).size).toBe(codigos.length);
-    expect(new Set(nomes).size).toBe(nomes.length);
-    expect(acabamentosDoProduto(f, "m2")).toHaveLength(1);
-  });
-
-  it("copiar os acabamentos de um produto para os outros junta os que faltam, sem tirar os que já tem nem copiar preços", () => {
-    let f = alterarVariante(doisProdutos(), "m1", "a1", { preco: 120 });
-    f = copiarAcabamentosParaOutros(f, "m1");
-    expect(acabamentosDoProduto(f, "m2").map((a) => a.nome)).toEqual(["Inox", "Negro", "Cobre"]);
-    expect(skuDaCelula(f, "m2", "a1")).toBe("T-100-IX");
-    expect(f.celulas[celulaKey("m2", "a1")].preco).toBeUndefined();
-    expect(acabamentosDoProduto(f, "m1").map((a) => a.nome)).toEqual(["Inox", "Negro"]);
-  });
-
-  it("aplicar um acabamento a todos os produtos ativa-o em cada um", () => {
-    const f = aplicarAcabamentoATodos(doisProdutos(), "a3");
-    expect(acabamentosDoProduto(f, "m1").map((a) => a.nome)).toEqual(["Inox", "Negro", "Cobre"]);
-    expect(linhasDeVariantes(f).filter((l) => l.acabamento === "Cobre").map((l) => l.sku)).toEqual(["T-80-CO", "T-100-CO"]);
-  });
-
-  it("tirar um acabamento de um produto apaga a sua célula e o seu 3D; o acabamento só desaparece da família se já ninguém o usa", () => {
-    let f = aplicarAcabamentoATodos(doisProdutos(), "a1");
-    f = { ...f, glb: { "m1|a1": chaveFicheiro("lava_loica", "keran80", "inox") } };
-    f = tirarAcabamentoDoProduto(f, "m1", "a1");
-    expect(acabamentosDoProduto(f, "m1").map((a) => a.id)).toEqual(["a2"]);
-    expect(f.glb).toEqual({});
-    expect(f.acabamentos.map((a) => a.id)).toContain("a1");
-    f = tirarAcabamentoDoProduto(f, "m2", "a1");
-    expect(f.acabamentos.map((a) => a.id)).not.toContain("a1");
-  });
-
-  it("tirar um produto leva as suas células e os acabamentos que só ele tinha", () => {
-    const f = tirarProduto(doisProdutos(), "m2");
-    expect(f.medidas.map((m) => m.id)).toEqual(["m1"]);
-    expect(Object.keys(f.celulas)).toEqual(["m1|a1", "m1|a2"]);
-    expect(f.acabamentos.map((a) => a.nome)).toEqual(["Inox", "Negro"]);
-  });
-
-  it("SKU duplicado dentro de um produto (dois acabamentos com o mesmo código) é erro", () => {
-    let f = doisProdutos();
-    f = juntarAcabamentoAoProduto(f, "m1", { nome: "Outro", codigo: "X" });
-    f = { ...f, acabamentos: f.acabamentos.map((a) => (a.nome === "Outro" ? { ...a, codigo: "IX" } : a)) };
-    expect(validar(f).join(" ")).toMatch(/SKU «T-80-IX»/);
-  });
-
-  it("SKU escrito à mão igual ao de outro produto é erro; vazio volta ao automático", () => {
-    let f = prepararParaEdicao(doisProdutos());
-    f = alterarVariante(f, "m2", "a3", { sku: "T-80-IX" });
-    expect(validar(f).join(" ")).toMatch(/SKU «T-80-IX»/);
-    f = alterarVariante(f, "m2", "a3", { sku: "  " });
-    expect(skuDaCelula(f, "m2", "a3")).toBe("T-100-CO");
-    expect(validar(f)).toEqual([]);
-  });
-
-  it("produto sem preço continua a ser erro", () => {
-    const f = doisProdutos(); f.medidas[1] = { ...f.medidas[1], preco: 0 };
-    expect(validar(f)).toEqual([expect.stringContaining("100 cm")]);
-  });
-
-  it("um produto sem nenhum acabamento ativo é erro (senão desaparecia da família em silêncio)", () => {
-    const f = juntarProduto(doisProdutos());
-    f.medidas[2] = { ...f.medidas[2], rotulo: "Vazio", preco: 90 };
-    expect(validar(f).join(" ")).toMatch(/produto «Vazio» não tem nenhum acabamento/);
-  });
-
-  it("família sem variantes: erro", () => expect(validar(juntarProduto(vazia())).join(" ")).toMatch(/acabamento/i));
-
-  it("prepararParaEdicao: em modo automático descarta SKUs antigos (eram ignorados) e passa a manual sem mudar nenhum SKU", () => {
-    const f = doisProdutos();
-    f.celulas["m1|a1"] = { ativo: true, sku: "ANTIGO" };
-    const antes = linhasDeVariantes(f).map((l) => l.sku);
-    const g = prepararParaEdicao(f);
-    expect(g.regraSku.modo).toBe("manual");
-    expect(linhasDeVariantes(g).map((l) => l.sku)).toEqual(antes);
-    expect(f.regraSku.modo).toBe("auto");
-  });
-
-  it("prepararParaEdicao mantém uma família vinda da matriz antiga (todas as células existem, uma inativa)", () => {
-    const g = prepararParaEdicao(exemploKeran());
-    expect(acabamentosDoProduto(g, "m80").map((a) => a.id)).toEqual(["inox", "gunmetal"]);
-    expect(g.celulas["m80|gunmetal"].ativo).toBe(false);
-    expect(linhasDeVariantes(g)).toHaveLength(3);
-  });
-});
-
-describe("semente Lava-loiça Lody, FRASA: 9 produtos = 9 referências", () => {
-  it("3 medidas × 3 acabamentos, cada um com o seu SKU e o seu preço, e o GLB Frasa de cada um", () => {
-    const f = exemploLodyFrasa(), linhas = linhasDeVariantes(f);
-    expect(f.id.startsWith("cfg:")).toBe(true);
-    expect(f.id).not.toBe("lody");
-    expect(f.nome).toMatch(/Lody, FRASA/);
-    expect(f.medidas.map((m) => m.ref)).toEqual(["LOD-40", "LOD-50", "LOD-70"]);
-    expect(f.acabamentos.map((a) => a.nome)).toEqual(["Cobre", "Gold", "Gunmetal"]);
-    expect(linhas).toHaveLength(9);
-    expect(new Set(linhas.map((l) => l.sku)).size).toBe(9);
-    expect(new Set(linhas.map((l) => l.preco)).size).toBe(9);
-    expect(linhas.map((l) => l.sku)).toContain("LOD-50-GO");
-    expect(linhas.every((l) => l.tem3d)).toBe(true);
-    expect(resumoDeProdutos(f)).toMatchObject({ produtos: 9, referencias: 9, texto: "9 produtos = 9 referências" });
-    expect(validar(f)).toEqual([]);
-  });
-
-  it("os GLB da semente existem mesmo em modelosHtml/ficheiros.ts", () => {
-    const f = exemploLodyFrasa();
-    const chaves = new Set(FICHEIROS_3D.map((x) => chaveFicheiro(x.familia, x.modelo, x.acab)));
-    for (const g of Object.values(f.glb ?? {})) { expect(chaves.has(g)).toBe(true); expect(g.startsWith("lava_loica|lody")).toBe(true); }
-    expect(Object.keys(f.glb ?? {})).toHaveLength(9);
-  });
-
-  it("gera uma Familia com 3 medidas e 9 variantes", () => expect(variantesDe(paraFamilia(exemploLodyFrasa()))).toHaveLength(9));
-
-  it("o resumo conta referências distintas: dois produtos com o mesmo SKU dão «9 produtos = 8 referências»", () => {
-    const f = prepararParaEdicao(exemploLodyFrasa());
-    const g = alterarVariante(f, "lody50", "oro", { sku: "LOD-40-CO" });
-    expect(resumoDeProdutos(g).texto).toBe("9 produtos = 8 referências");
-  });
-
-  it("singular: 1 produto = 1 referência", () => {
-    const f = juntarAcabamentoAoProduto(juntarProduto(vazia()), "m1", { nome: "Inox", codigo: "IX" });
-    expect(resumoDeProdutos(f).texto).toBe("1 produto = 1 referência");
-  });
 });
 
 /* ------------------------------------------------------------------ juntar produtos que já existem no catálogo */
@@ -469,7 +291,7 @@ describe("familiaDeProdutos: agrupar produtos reais numa família", () => {
     expect(f.acabamentos.map((a) => a.nome)).toEqual(["Cobre", "Gold", "Gunmetal"]);
     expect(Object.values(f.celulas).filter((c) => c.ativo && c.produtoId)).toHaveLength(9);
     expect(validar(f)).toEqual([]);
-    expect(resumoDeProdutos(f).texto).toBe("9 produtos = 9 referências");
+    expect(resumoDeProdutos(f).texto).toBe("9 produtos = 9 variantes");
   });
   it("o SKU e o preço de cada variante vêm do produto (não da regra ref+código nem do preço da medida)", () => {
     const { familia: f } = familiaDeProdutos(nova(), refs9, atrib9);
@@ -492,7 +314,7 @@ describe("familiaDeProdutos: agrupar produtos reais numa família", () => {
   it("produtos com a mesma medida juntam-se no mesmo «produto» da família (e as dimensões são as do primeiro)", () => {
     const { familia: f } = familiaDeProdutos(nova(), refs9.slice(0, 3), atrib9.slice(0, 3));
     expect(f.medidas).toHaveLength(1);
-    expect(acabamentosDoProduto(f, "m1")).toHaveLength(3);
+    expect(Object.keys(f.celulas)).toEqual(["m1|a1", "m1|a2", "m1|a3"]);
     expect(f.medidas[0].dim).toEqual([44, 44, 20]);
   });
   it("duas atribuições na mesma medida × acabamento: a segunda fica de fora e há um conflito legível", () => {
@@ -500,7 +322,7 @@ describe("familiaDeProdutos: agrupar produtos reais numa família", () => {
     const { familia: f, conflitos } = familiaDeProdutos(nova(), [...refs9.slice(0, 1), { ...refs9[0], id: "p-40-CO2", n: "Lava-louças Lody 40 - Cobre (bis)" }], [atrib9[0], dup]);
     expect(Object.values(f.celulas)).toHaveLength(1);
     expect(conflitos).toHaveLength(1);
-    expect(conflitos[0]).toMatch(/mesma medida .*40 cm.* e o mesmo acabamento .*Cobre/);
+    expect(conflitos[0]).toMatch(/mesmos valores em todos os atributos \(Medida: 40 cm; Cor: Cobre\)/);
   });
   it("produto sem preço de venda: a família deixa de validar, com o nome do produto", () => {
     const refs = refs9.map((r, i) => (i === 0 ? { ...r, preco: 0 } : r));
@@ -523,14 +345,88 @@ describe("familiaDeProdutos: agrupar produtos reais numa família", () => {
     const outro = familiaDeProdutos({ ...nova(), tipo: "movel", categoria: "cozinha" }, refs9.slice(0, 1), [{ ...atrib9[0], glb: g }]).familia;
     expect(outro.glb).toEqual({});
   });
-  it("SKU e preço de uma célula de produto são só de leitura: alterarVariante ignora-os mas aceita ativo", () => {
+
+  it("o SKU de cada produto do catálogo prevalece sobre a regra ref + código (mesmo com a regra em modo automático)", () => {
     const { familia: f } = familiaDeProdutos(nova(), refs9, atrib9);
-    const g = alterarVarianteCat(f, "m1", "a1", { sku: "OUTRO", preco: 1, ativo: false });
-    expect(g.celulas["m1|a1"]).toMatchObject({ sku: "LLCCI-40CO", preco: 140, ativo: false, produtoId: "p-40-CO" });
+    expect(skuDaCelula({ ...f, regraSku: { modo: "auto", sep: "-" } }, "m1", "a1")).toBe("LLCCI-40CO");
   });
-  it("prepararParaEdicao não apaga o SKU de um produto do catálogo", () => {
-    const { familia: f } = familiaDeProdutos(nova(), refs9, atrib9);
-    const g = prepararParaEdicao({ ...f, regraSku: { modo: "auto", sep: "-" } });
-    expect(skuDaCelula(g, "m1", "a1")).toBe("LLCCI-40CO");
+});
+
+/* ------------------------------------------------------------------ atributos livres */
+describe("atributos extra: juntam-se ao rótulo da medida", () => {
+  const nova = (atributos: string[]): FamiliaCfg => ({ ...criarFamiliaVazia(), id: "cfg:velar", nome: "Velar", marca: "FRASA", atributos });
+  const ref = (id: string, n: string, preco: number): ProdutoRef => ({ id, n, marca: "FRASA", sku: id.toUpperCase(), preco, semPvp: false });
+  const atr = (produtoId: string, medida: string, acabamento: string, extras?: Record<string, string>): AtribuicaoProduto =>
+    ({ produtoId, medida, dim: [54, 44, 20], acabamento, cor: "#c3c7ca", codigo: acabamento.slice(0, 2).toUpperCase(), ...(extras ? { extras } : {}) });
+  const refs = [ref("a", "Velar 50 1 cuba", 100), ref("b", "Velar 50 2 cubas", 120), ref("c", "Velar 70 2 cubas", 150), ref("d", "Velar 70 2 cubas Negro", 160)];
+  const atrs = [atr("a", "50 cm", "Inox", { "Nº de cubas": "1 cuba" }), atr("b", "50 cm", "Inox", { "Nº de cubas": "2 cubas" }), atr("c", "70 cm", "Inox", { "Nº de cubas": "2 cubas" }), atr("d", "70 cm", "Negro", { "Nº de cubas": "2 cubas" })];
+
+  it("rotuloDaMedida: medida + valores extra não vazios, separados por « · »; «Única» some se há extras", () => {
+    expect(rotuloDaMedida("50 cm", ["2 cubas"])).toBe("50 cm · 2 cubas");
+    expect(rotuloDaMedida("50 cm", ["2 cubas", "  ", "Inox"])).toBe("50 cm · 2 cubas · Inox");
+    expect(rotuloDaMedida("50 cm", [])).toBe("50 cm");
+    expect(rotuloDaMedida("Única", ["2 cubas"])).toBe("2 cubas");
+    expect(rotuloDaMedida("", [])).toBe("Única");
+  });
+
+  it("o rótulo do «produto» da família é medida + extras, e só existem as combinações dos produtos reais", () => {
+    const { familia: f, conflitos } = familiaDeProdutos(nova(["Nº de cubas"]), refs, atrs);
+    expect(conflitos).toEqual([]);
+    expect(f.medidas.map((m) => m.rotulo)).toEqual(["50 cm · 1 cuba", "50 cm · 2 cubas", "70 cm · 2 cubas"]);
+    expect(f.atributos).toEqual(["Nº de cubas"]);
+    // 4 produtos, 3 medidas × 2 acabamentos = 6 combinações possíveis, mas só 4 existem
+    expect(Object.keys(f.celulas)).toHaveLength(4);
+    const fam = paraFamilia(f);
+    expect(variantesDe(fam)).toHaveLength(4);
+    expect(acabamentosDaMedida(fam, "m1").map((a) => a.nome)).toEqual(["Inox"]);
+    expect(acabamentosDaMedida(fam, "m3").map((a) => a.nome)).toEqual(["Inox", "Negro"]);
+    expect(validar(f)).toEqual([]);
+  });
+
+  it("cada produto fica com a medida base e os valores extra na célula; as linhas do resumo trazem-nos, com o SKU e o preço do produto", () => {
+    const { familia: f } = familiaDeProdutos(nova(["Nº de cubas"]), refs, atrs);
+    expect(f.celulas["m2|a1"]).toMatchObject({ produtoId: "b", medida: "50 cm", valores: { "Nº de cubas": "2 cubas" }, sku: "B", preco: 120 });
+    const l = linhasDeVariantes(f).find((x) => x.produtoId === "b")!;
+    expect(l).toMatchObject({ produto: "Velar 50 2 cubas", medida: "50 cm", acabamento: "Inox", valores: { "Nº de cubas": "2 cubas" }, sku: "B", preco: 120 });
+    expect(resumoDeProdutos(f).texto).toBe("4 produtos = 4 variantes");
+  });
+
+  it("dois produtos com os mesmos valores em TODOS os atributos: erro legível; mudar um dos valores resolve", () => {
+    const dup = [atr("a", "50 cm", "Inox", { "Nº de cubas": "2 cubas" }), atr("b", "50 cm", "Inox", { "Nº de cubas": "2 cubas" })];
+    const r = familiaDeProdutos(nova(["Nº de cubas"]), refs.slice(0, 2), dup);
+    expect(r.conflitos).toHaveLength(1);
+    expect(r.conflitos[0]).toMatch(/«Velar 50 1 cuba» e «Velar 50 2 cubas» têm os mesmos valores em todos os atributos \(Medida: 50 cm; Nº de cubas: 2 cubas; Cor: Inox\)/);
+    expect(Object.keys(r.familia.celulas)).toHaveLength(1);
+    expect(familiaDeProdutos(nova(["Nº de cubas"]), refs.slice(0, 2), [dup[0], atr("b", "50 cm", "Inox", { "Nº de cubas": "1 cuba" })]).conflitos).toEqual([]);
+  });
+
+  it("sem o atributo extra, os mesmos dois produtos colidem; com ele, distinguem-se (o atributo é o que os separa)", () => {
+    const duas = [atr("a", "50 cm", "Inox", { "Nº de cubas": "1 cuba" }), atr("b", "50 cm", "Inox", { "Nº de cubas": "2 cubas" })];
+    expect(familiaDeProdutos(nova([]), refs.slice(0, 2), duas).conflitos).toHaveLength(1);
+    expect(familiaDeProdutos(nova(["Nº de cubas"]), refs.slice(0, 2), duas).conflitos).toEqual([]);
+  });
+
+  it("um valor em branco não entra no rótulo; valores de atributos que já não existem são ignorados", () => {
+    const r = familiaDeProdutos(nova(["Material"]), refs.slice(0, 1), [atr("a", "50 cm", "Inox", { Material: "  ", "Nº de cubas": "1 cuba" })]);
+    expect(r.familia.medidas.map((m) => m.rotulo)).toEqual(["50 cm"]);
+    expect(r.familia.celulas["m1|a1"].valores).toBeUndefined();
+  });
+
+  it("erroNomeAtributo: vazio, repetido (sem distinguir maiúsculas) e os que já existem são recusados", () => {
+    expect(erroNomeAtributo("Material", [])).toBe("");
+    expect(erroNomeAtributo("  ", [])).toMatch(/Escreva o nome/);
+    expect(erroNomeAtributo("material", ["Material"])).toMatch(/Já há um atributo/);
+    for (const n of ["Medida", "cor", "Acabamento", "Cor/Acabamento"]) expect(erroNomeAtributo(n, [])).toMatch(/já existe em cada produto/);
+  });
+
+  it("atribuicoesDaFamilia é o inverso de familiaDeProdutos (para voltar a editar): refaz a mesma família", () => {
+    const { familia: f } = familiaDeProdutos(nova(["Nº de cubas"]), refs, atrs);
+    const volta = atribuicoesDaFamilia(f);
+    expect(volta.map((a) => [a.produtoId, a.medida, a.acabamento, a.extras?.["Nº de cubas"]])).toEqual([
+      ["a", "50 cm", "Inox", "1 cuba"], ["b", "50 cm", "Inox", "2 cubas"], ["c", "70 cm", "Inox", "2 cubas"], ["d", "70 cm", "Negro", "2 cubas"],
+    ]);
+    const refeita = familiaDeProdutos(nova(["Nº de cubas"]), refs, volta).familia;
+    expect(refeita.medidas.map((m) => m.rotulo)).toEqual(f.medidas.map((m) => m.rotulo));
+    expect(Object.keys(refeita.celulas)).toEqual(Object.keys(f.celulas));
   });
 });

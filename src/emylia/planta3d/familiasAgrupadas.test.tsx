@@ -77,3 +77,32 @@ describe("barra de produtos: família agrupada de produtos do catálogo", () => 
     expect(nomesSoltos().length).toBeGreaterThan(5);
   });
 });
+
+describe("barra de produtos: atributos extra no cartão da família", () => {
+  const ref = (id: string, n: string, preco: number) => ({ id, n, marca: "FRASA", sku: id.toUpperCase(), preco, semPvp: false });
+  const atr = (produtoId: string, medida: string, acabamento: string, cubas: string) =>
+    ({ produtoId, medida, dim: [54, 44, 20] as [number, number, number], acabamento, cor: acabamento === "Inox" ? "#c3c7ca" : "#151617", codigo: acabamento.slice(0, 2).toUpperCase(), extras: { "Nº de cubas": cubas } });
+  const registarComCubas = () => {
+    const refs = [ref("a", "Velar 50 1 cuba", 100), ref("b", "Velar 50 2 cubas", 120), ref("c", "Velar 50 2 cubas Negro", 130)];
+    const atrs = [atr("a", "50 cm", "Inox", "1 cuba"), atr("b", "50 cm", "Inox", "2 cubas"), atr("c", "50 cm", "Negro", "2 cubas")];
+    const { familia, conflitos } = familiaDeProdutos({ ...comNome(criarFamiliaVazia(), "Velar com cubas"), marca: "FRASA", atributos: ["Nº de cubas"] }, refs, atrs);
+    expect(conflitos).toEqual([]);
+    registarFamilias([paraFamilia(familia)]);
+    return familia;
+  };
+
+  it("o seletor de medida mostra «50 cm · 2 cubas» e só as combinações que existem (as bolinhas são a cor)", () => {
+    const { rerenderComVersao } = montar();
+    rerenderComVersao(registarComCubas());
+    verFamilias();
+    const cartao = within(screen.getByRole("list", { name: "Famílias de produtos" })).getAllByRole("listitem").find((li) => within(li).queryByText("Velar com cubas"))!;
+    const select = within(cartao).getByRole("combobox", { name: "Medida" });
+    expect(within(cartao).getAllByRole("option").map((o) => o.textContent)).toEqual(["50 cm · 1 cuba · A", "50 cm · 2 cubas · B"]);
+    // «1 cuba» só existe em Inox; «2 cubas» existe em Inox e Negro
+    expect(within(cartao).getAllByRole("button", { name: /^Acabamento / })).toHaveLength(1);
+    fireEvent.change(select, { target: { value: (within(cartao).getAllByRole("option")[1] as HTMLOptionElement).value } });
+    expect(within(cartao).getAllByRole("button", { name: /^Acabamento / }).map((b) => b.getAttribute("aria-label"))).toEqual(["Acabamento Inox", "Acabamento Negro"]);
+    fireEvent.click(within(cartao).getByRole("button", { name: "Acabamento Negro" }));
+    expect(within(cartao).getByText(/SKU C\b/)).toBeInTheDocument();
+  });
+});
