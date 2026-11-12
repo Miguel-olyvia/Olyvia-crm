@@ -45,6 +45,9 @@ import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
 import { AdendasDaObra } from "./AdendasObra";
+import { definirQuemAssina } from "./quemAssina";
+import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
+import { modoReal } from "../acessosPortal";
 import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
 import { documentosEnviados, porResponder } from "./enviadosAoCliente";
 
@@ -97,6 +100,13 @@ const COR_VIVO: Record<EstadoVivo, string> = {
 
 /** `fechar(mexeu)`: mexeu = o separador ou o painel mudaram no endereço (quem abriu fecha sem recuar no histórico).
  *  `endereco` false: o Estúdio de outra obra, aberto por cima deste, não toca no endereço. */
+/** 12/11: numa conta real, o nome de quem está ligado assina pela empresa as adendas que saem daqui (quemAssina.ts). */
+function LerQuemAssina() {
+  const nome = useNomeParaMarcaDagua();
+  useEffect(() => { if (nome) definirQuemAssina(nome); }, [nome]);
+  return null;
+}
+
 export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: Negocio; fechar: (mexeu?: boolean) => void; endereco?: boolean }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
@@ -266,6 +276,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
     <NaFrente>
       <motion.div className="fixed inset-0 flex flex-col overflow-hidden bg-background" role="dialog" aria-modal="true" aria-labelledby="estudio-obra-titulo"
         initial={reduzir ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: "easeOut" }}>
+        {modoReal() && <LerQuemAssina />}
         {/* ---------------------------------------------------------------- o cabeçalho */}
         <header className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">

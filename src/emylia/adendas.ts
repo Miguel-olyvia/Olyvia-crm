@@ -61,6 +61,9 @@ export interface Adenda {
   /** 12/11 (quem paga): nasceu de um ajuste ao plano com a obra em curso, a pedido do cliente (prolongar, atrasar, tarefa nova): entra no
    *  plano quando ele a assinar (motor.assinarAdenda), em vez de juntar as linhas como tarefas novas */
   ajuste?: AjusteAdenda;
+  /** 12/11 (Rúben: «deve já vir assinado pela empresa»): a assinatura da empresa na proposta da adenda (as do Estúdio da obra: um pedido do
+   *  cliente ou um imprevisto), posta ao enviar: quem a emitiu e quando. Ao cliente só falta aceitar. */
+  empresa?: { nome: string; q: string };
 }
 export const MOTIVOS_ADENDA = ["O cliente pediu", "Surpresa em obra", "Erro de medição"] as const;
 /** 21/10: o motivo das adendas que nascem de um imprevisto registado na obra. */
