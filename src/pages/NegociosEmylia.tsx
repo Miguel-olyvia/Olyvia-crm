@@ -13,7 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { acertarDiaDasObras, acoes, definirPerdaReal, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
+import { TECS, acertarDiaDasObras, acoes, definirPerdaReal, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -106,7 +106,9 @@ const PAPEIS_VEEM_ENCOMENDAS: readonly Papel[] = ["comercial", "direcao", "finan
 
 /** `enderecoNoUrl` (12/11): o passo, a fase e os Estúdios abertos vão para o endereço; nos testes fica em memória (o jsdom partilha o
  *  histórico entre testes, e um ?passo= de um teste abria o seguinte noutro passo). */
-export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.meta.env.MODE !== "test" }: { vistaInicial?: "hoje" | "operacoes"; enderecoNoUrl?: boolean } = {}) {
+/** `verTecnicos` (12/11, /tecnicos, só o super admin): o ecrã de cada técnico, como ele o vê, sem entrar na conta dele (?tec=). */
+export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUrl = import.meta.env.MODE !== "test", verTecnicos = false }: { vistaInicial?: "hoje" | "operacoes"; enderecoNoUrl?: boolean; verTecnicos?: boolean } = {}) {
+  const vistaInicial = verTecnicos ? "hoje" : vistaDaRota;
   usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
@@ -849,9 +851,15 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
     });
     return () => { desligar(); definirModoReal(null); };
   }, [org, activeCompany?.name, S]);
-  if (tecConta && S.tec !== tecConta) S.tec = tecConta;
+  // 12/11 (/tecnicos): o super admin vê o ecrã do técnico escolhido (?tec=), mesmo que a conta dele seja de um técnico
+  if (verTecnicos) {
+    if (S.role !== "tecnico") S.role = "tecnico";
+    if (S.view !== "hoje") { S.view = "hoje"; S.deal = null; S.op = null; }
+    const tecPedido = params.get("tec");
+    if (tecPedido && TECS.some((x) => x.id === tecPedido) && S.tec !== tecPedido) S.tec = tecPedido;
+  } else if (tecConta && S.tec !== tecConta) S.tec = tecConta;
   // 09/11: quem só pode ser o técnico (sem ver todos) fica sempre fixo no seu, mesmo sem técnico ligado (null: o aviso), e nunca vê o de outro
-  const fixarTecnico = !!tecConta || (!!meus && !meus.todos && S.role === "tecnico");
+  const fixarTecnico = !verTecnicos && (!!tecConta || (!!meus && !meus.todos && S.role === "tecnico"));
   // 09/11: cada separador só aparece a quem tem a permissão dele (perfil OU papel OU admin): o Hoje sempre; os Negócios (e a ficha) com
   // pessoas.view; as Operações com negocios.obra.executar ou negocios.obra.planear. As outras vistas (que abrem páginas reais) não se tocam.
   const vistaPermitida = (v: Vista): boolean =>
@@ -861,6 +869,7 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
   // numa vista que não pode ver (o endereço, o menu, uma ligação dentro de um ecrã), fica no Hoje; só com as permissões lidas
   if (codigosLidos && !permsPerfilALer && !vistaPermitida(S.view)) { S.view = "hoje"; S.deal = null; S.op = null; }
   const ctx: Ctx = { S, A, run, go, q, setQ, ...(fixarTecnico ? { tecnicoFixo: { ref: tecConta } } : {}),
+    ...(verTecnicos ? { verTecnicos: { escolher: (id: string) => navigate({ search: "?tec=" + encodeURIComponent(id) }) } } : {}),
     podeCriarNegocio: pode("pessoas.create"), podeVerNegocio: pode("pessoas.view"), podeVerInventario: podeRota("client_orders.view"),
     podeVerCatalogo: podeRota("services.view"),
     idNegocioBase: (numero) => refs.current.get(numero)?.id ?? null,
@@ -882,7 +891,7 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
     <div className="pn calma pg-root min-h-full bg-background">
       {/* 9/11 (Rúben, telemóvel): o papel e o estado da gravação numa linha; as vistas numa fila que desliza na sua própria largura
           (antes alargavam a página toda para 563 px e o ecrã fugia para o lado ao arrastar) */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 text-[15px] sm:justify-between sm:gap-3">
+      {!verTecnicos && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 text-[15px] sm:justify-between sm:gap-3">
         <label className="flex min-w-0 items-center gap-2">
           <span className="hidden text-muted-foreground sm:inline">A ver como</span>
           <select aria-label="A ver como" className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={S.role}
@@ -922,7 +931,15 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
           {gravacao.k === "gravado" && <span className="text-muted-foreground">Gravado</span>}
           {gravacao.k === "erro" && <span className="text-destructive">Não gravou: {gravacao.t}</span>}
         </span>
-      </div>
+      </div>}
+      {/* 12/11 (/tecnicos): sem a barra de cima, o estado da gravação fica num canto (o que se regista no ecrã do técnico grava) */}
+      {verTecnicos && (
+        <span role="status" aria-live="polite" className="block px-4 pt-3 text-right text-sm sm:px-8">
+          {gravacao.k === "a-gravar" && <span className="text-muted-foreground">A gravar…</span>}
+          {gravacao.k === "gravado" && <span className="text-muted-foreground">Gravado</span>}
+          {gravacao.k === "erro" && <span className="text-destructive">Não gravou: {gravacao.t}</span>}
+        </span>
+      )}
       {/* o contentor existe sempre (para o leitor de ecrã anunciar a mudança) e só se preenche ao simular */}
       <div role="status" aria-label="Simulação de função"
         className={simular.simulacao ? "mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px] text-foreground" : undefined}>

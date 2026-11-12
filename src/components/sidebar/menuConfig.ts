@@ -47,6 +47,7 @@ import {
   CarFront,
   History as HistoryIcon,
   Eye,
+  HardHat,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -186,6 +187,16 @@ export const topLevelItems: TopLevelItem[] = [
     icon: Package,
     labelKey: "sidebar.catalogoCustos",
     permissions: ["services.view"],
+  },
+  {
+    // 12/11 (Rúben: «o super admin precisa de, no menu inicial, conseguir ver a screen de todos os técnicos sem fazer login na conta
+    // deles»): o ecrã de cada técnico, tal como ele o vê, escolhido numa lista. Só o super admin (a rota também: adminOnly).
+    id: "tecnicos",
+    to: "/tecnicos",
+    icon: HardHat,
+    labelKey: "sidebar.tecnicos",
+    permissions: [],
+    adminOnly: true,
   },
 ];
 

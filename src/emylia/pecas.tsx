@@ -16,6 +16,9 @@ export interface Ctx {
   /** 23/10 (2.0): quem entrou é um técnico de obra que não troca de papel: o Hoje do técnico fica no técnico ligado à conta (ref_v1);
    *  `ref` null: a conta ainda não está ligada a nenhum técnico. Sem isto (a Direção, os testes), o técnico escolhe-se no Hoje. */
   tecnicoFixo?: { ref: string | null };
+  /** 12/11 (página /tecnicos, só o super admin): ver o ecrã de qualquer técnico como ele o vê. `escolher` muda o técnico (vai para o
+   *  endereço, ?tec=). Sem isto, o Hoje do técnico é o de sempre. */
+  verTecnicos?: { escolher: (id: string) => void };
   /** 09/11: false: quem entrou não pode criar negócios (pessoas.create): o «Novo negócio» não aparece. Sem isto (o protótipo, os testes), aparece. */
   podeCriarNegocio?: boolean;
   /** 09/11 (20270111100000): quem entrou só lê as obras (sem pessoas.view, com negocios.obra.executar): o negócio vem reduzido (sem dinheiro)

@@ -71,6 +71,64 @@ function SemTecnicos() {
   );
 }
 
+/** 12/11 (Rúben: «o super admin precisa de, no menu inicial, conseguir ver a screen de todos os técnicos sem fazer login na conta deles»).
+ *  Na página /tecnicos: todos os técnicos do RH, os que têm trabalho hoje primeiro; escolher um mostra o ecrã dele, como ele o vê. */
+function EscolherTecnico({ ctx, eu }: { ctx: Ctx; eu: string }) {
+  const { S } = ctx;
+  const [q, setQ] = useState("");
+  const linhas = TECS.map((x) => {
+    const hoje = trabalhoDoTecnico(S.deals, x.id);
+    return { x, n: hoje.length, obras: new Set(hoje.map((h) => h.d.id)).size, seguir: aSeguirDoTecnico(S.deals, x.id).length };
+  }).sort((a, b) => Number(b.n > 0) - Number(a.n > 0) || a.x.n.localeCompare(b.x.n, "pt"));
+  const termo = q.trim().toLowerCase();
+  const vistos = termo ? linhas.filter((l) => l.x.n.toLowerCase().includes(termo) || rotuloOficios(l.x).toLowerCase().includes(termo)) : linhas;
+  const escolhido = TECS.find((x) => x.id === eu);
+  const aTrabalhar = linhas.filter((l) => l.n > 0).length;
+  return (
+    <section aria-labelledby="ver-tecnicos" className="mx-auto max-w-5xl px-4 pt-4 sm:px-0 sm:pt-0">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="ver-tecnicos" className="text-2xl font-semibold tracking-tight">O ecrã de cada técnico</h2>
+          <p className="text-[15px] text-muted-foreground">
+            {TECS.length} {TECS.length === 1 ? "técnico" : "técnicos"} · {aTrabalhar ? `${aTrabalhar} com trabalho hoje` : "nenhum com trabalho hoje"}. Escolha um para ver o ecrã dele, como ele o vê.
+          </p>
+        </div>
+        {TECS.length > 6 && (
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar técnico ou ofício" aria-label="Procurar técnico ou ofício"
+            className="min-h-11 w-full rounded-xl border border-input bg-card px-3 text-[15px] sm:w-72" />
+        )}
+      </div>
+      <ul className="mt-4 flex snap-x gap-2 overflow-x-auto pb-2 [scrollbar-width:thin] sm:grid sm:grid-cols-3 sm:overflow-visible lg:grid-cols-4">
+        {vistos.map(({ x, n, obras, seguir }) => {
+          const ativo = x.id === eu;
+          return (
+            <li key={x.id} className="w-56 shrink-0 snap-start sm:w-auto">
+              <button type="button" aria-pressed={ativo} onClick={() => ctx.verTecnicos?.escolher(x.id)}
+                className={cn("flex min-h-16 w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors",
+                  ativo ? "border-primary bg-primary/[0.06] shadow-[var(--shadow-sm)]" : "border-border bg-card hover:border-foreground/30")}>
+                <AvatarTec id={x.id} tam="h-10 w-10 text-sm" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-medium text-foreground">{x.n}</span>
+                  <span className="block truncate text-sm text-muted-foreground">{rotuloOficios(x)}</span>
+                  <span className={cn("block text-sm", n ? "font-medium text-primary" : "text-muted-foreground")}>
+                    {n ? `${n} ${n === 1 ? "tarefa" : "tarefas"} hoje · ${obras} ${obras === 1 ? "obra" : "obras"}` : seguir ? `Sem tarefas hoje · ${seguir} a seguir` : "Sem tarefas"}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+        {!vistos.length && <li className="text-[15px] text-muted-foreground">Nenhum técnico com «{q}».</li>}
+      </ul>
+      {escolhido && (
+        <p role="note" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">
+          Está a ver o ecrã de <b>{escolhido.n}</b>, tal como ele o vê. O que registar aqui conta como trabalho dele.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function HojeTecnico(ctx: Ctx) {
   const { S, A, run } = ctx;
   const comTrabalho = tecnicosComTrabalho(S.deals);
@@ -90,7 +148,8 @@ export function HojeTecnico(ctx: Ctx) {
   return (
     <div className="mx-auto w-full pb-28 sm:px-8 sm:pt-6">
       {/* fora do telemóvel: o controlo do protótipo (que técnico se vê); 23/10: o técnico real não troca */}
-      {!fixo && <div role="group" aria-label="Ver como (no protótipo)" className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2 px-4 pt-4 sm:pt-0">
+      {ctx.verTecnicos && <EscolherTecnico ctx={ctx} eu={eu} />}
+      {!fixo && !ctx.verTecnicos && <div role="group" aria-label="Ver como (no protótipo)" className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2 px-4 pt-4 sm:pt-0">
         <span className="text-sm text-muted-foreground">A app do técnico · ver como</span>
         {TECS.map((x) => {
           const n = trabalhoDoTecnico(S.deals, x.id).length;
