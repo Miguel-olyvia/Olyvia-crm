@@ -4,7 +4,7 @@
 // ou trocado (outra torneira, outro acabamento) e a lista de peças mostra cada componente como linha vendável. Funções puras (cm, como planta.ts).
 import type { PecaPlanta, Planta } from "../planta";
 import { ESPEC, TIPO_LEGADO, type ProdutoModelo3D } from "./catalogo3d";
-import { FAMILIAS, alturaLavaLoicaCm, familiaPorId, modeloDaFamilia, resolverVariante, type Familia } from "./familias";
+import { alturaLavaLoicaCm, familiaPorId, modeloDaFamilia, resolverVariante, todasAsFamilias, type Familia } from "./familias";
 import { linhasDaBancada, nomeDaBancada } from "./bancada";
 import { linhasDaComposicao, precoComposicao } from "./composicaoCozinha";
 import { linhasDosRevestimentos } from "./revestimentosCatalogo";
@@ -157,7 +157,7 @@ export const familiasSubstitutas = (p: PecaPlanta): Familia[] => {
   // só as do mesmo tipo E de um espaço em comum: nunca um móvel de lavatório a substituir um móvel de cozinha
   return f ? FAMILIAS_DO_TIPO(f.tipo).filter((x) => x.espacos.some((e) => e !== "outro" && f.espacos.includes(e))) : [];
 };
-const FAMILIAS_DO_TIPO = (tipo: Familia["tipo"]): Familia[] => FAMILIAS.filter((f) => f.tipo === tipo);
+const FAMILIAS_DO_TIPO = (tipo: Familia["tipo"]): Familia[] => todasAsFamilias().filter((f) => f.tipo === tipo);
 
 /* ------------------------------------------------------------------ recortes do tampo */
 export interface Recorte { x: number; z: number; w: number; d: number }

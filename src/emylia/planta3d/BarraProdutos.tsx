@@ -40,10 +40,12 @@ export interface BarraProdutosProps {
   onComposicao?: (predefinido: string) => void;
   /** Põe a «Composição livre» (composicaoLivre.ts): as partes juntas no painel, por ordem, a primeira é a âncora. */
   onComposicaoLivre?: (partes: ParteLivre[]) => void;
+  /** Muda quando o registo das famílias do Configurador muda (a lista de famílias recalcula-se). */
+  versaoFamilias?: unknown;
 }
 
 /** O cartão de uma família: UM produto no ecrã, com as variantes (acabamento e medida) escolhidas à parte. */
-function CartaoFamilia({ f, escolha, onEscolha, onPegar, onMover, onLargar, onCancelar, onJuntar }: {
+export function CartaoFamilia({ f, escolha, onEscolha, onPegar, onMover, onLargar, onCancelar, onJuntar }: {
   f: Familia; escolha: { med?: string; acab?: string }; onEscolha: (e: { med?: string; acab?: string }) => void;
 } & Pick<BarraProdutosProps, "onPegar" | "onMover" | "onLargar" | "onCancelar" | "onJuntar">) {
   const v = resolverVariante(f, escolha.med, escolha.acab);
@@ -91,10 +93,10 @@ function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | n
   return null;
 }
 
-/** As famílias que a lista mostra: com SO_COM_MODELO_HTML, só as que têm o modelo do HTML. */
-const familiasVisiveis = (c: Familia["categoria"]): Familia[] => familiasDaCategoria(c).filter((f) => !SO_COM_MODELO_HTML || !!f.htmlModelo);
+/** As famílias que a lista mostra: com SO_COM_MODELO_HTML, só as que têm o modelo do HTML, mais as criadas no Configurador (origem «configurada»). */
+const familiasVisiveis = (c: Familia["categoria"]): Familia[] => familiasDaCategoria(c).filter((f) => !SO_COM_MODELO_HTML || !!f.htmlModelo || f.origem === "configurada");
 
-export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, semSeletorEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao, onComposicaoLivre }: BarraProdutosProps) {
+export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, semSeletorEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao, onComposicaoLivre, versaoFamilias }: BarraProdutosProps) {
   const [q, setQ] = useState("");
   const [livreAberta, setLivreAberta] = useState(false);
   const [grupoEscolhido, setGrupo] = useState<string>("");
@@ -114,7 +116,8 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, semSe
   const grupos = useMemo(() => GRUPOS_ESPACO[espaco].map((g) => ({ g, n: produtosDoGrupo(produtos, g).length })).filter((x) => x.n > 0), [produtos, espaco]);
   // o separador «Bancadas» tem a bancada composta (que é o modelo do HTML), mesmo sem famílias de tampo visíveis
   // as famílias (e a bancada composta) têm todas o modelo do HTML: com «Genérico» os separadores de famílias desaparecem
-  const categorias = useMemo(() => (filtro === "generico" ? [] : CATEGORIAS_FAMILIA.filter((c) => c.espacos.includes(espaco)).map((c) => ({ c, n: c.id === "tampos" ? 1 : familiasVisiveis(c.id).length })).filter((x) => x.n > 0)), [espaco, filtro]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- versaoFamilias só serve para recalcular quando o registo do Configurador muda
+  const categorias = useMemo(() => (filtro === "generico" ? [] : CATEGORIAS_FAMILIA.filter((c) => c.espacos.includes(espaco)).map((c) => ({ c, n: c.id === "tampos" ? 1 : familiasVisiveis(c.id).length })).filter((x) => x.n > 0)), [espaco, filtro, versaoFamilias]);
   const conjuntos = useMemo(() => (SO_COM_MODELO_HTML ? [] : CONJUNTOS.filter((c) => c.espacos.includes(espaco))), [espaco]);
   const vazio = grupos.length === 0 && categorias.length === 0 && conjuntos.length === 0;
   // o separador de omissão: a cozinha abre nas famílias (torneiras), o resto no primeiro grupo do catálogo
@@ -128,7 +131,8 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, semSe
     if (!ehFamilia) return [];
     const s = sem(q.trim());
     return familiasVisiveis(ativo.slice(4) as Familia["categoria"]).filter((f) => !s || sem(`${f.nome} ${f.marca}`).includes(s));
-  }, [ehFamilia, ativo, q]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- versaoFamilias só serve para recalcular quando o registo do Configurador muda
+  }, [ehFamilia, ativo, q, versaoFamilias]);
   const lista = useMemo(() => {
     if (ehFamilia || ehConjuntos) return [];
     const s = sem(q.trim());

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlantaDivisao3D } from "./PlantaDivisao3D";
 import { lerPlanta, retangulo } from "./planta";
+import { familiaPorId } from "./planta3d/familias";
 import type { Ctx } from "./pecas";
 import type { Negocio } from "./motor";
 
@@ -154,6 +155,44 @@ describe("PlantaDivisao3D", () => {
     expect(pc).toMatchObject({ fam: "espelho_f", med: "60×80", acab: "oro", mont: "parede", alt: 110 });
     fireEvent.click(within(screen.getByRole("group", { name: "Variante da peça" })).getByRole("button", { name: "Acabamento Moldura alumínio" }));
     expect(lerPlanta(d.f.planta)!.pecas[0]).toMatchObject({ acab: "aluminio" });
+  });
+
+  it("Configurador de famílias: a família guardada aparece no passo 4, na categoria certa, e põe-se na planta com o SKU e o preço da célula", () => {
+    const { d } = montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [] }) });
+    fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "cozinha" } });
+    try {
+      irPara(4);
+      const separadorFamilias = () => screen.getAllByRole("tab", { name: /^Lava-loiças \(/ })[0];
+      expect(separadorFamilias()).toHaveTextContent("Lava-loiças (6)");
+      fireEvent.click(separadorFamilias());
+      expect(screen.queryByText("Lava-loiça Keran")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Configurador de famílias" }));
+      fireEvent.click(screen.getByRole("button", { name: "Começar pelo exemplo" }));
+      const painel = within(screen.getByRole("region", { name: "Configurador de famílias (protótipo)" }));
+      for (let i = 0; i < 5; i++) fireEvent.click(painel.getByRole("button", { name: "Seguinte" }));
+      fireEvent.click(painel.getByRole("button", { name: "Guardar na sessão" }));
+      // o separador passa a contar mais uma família e o cartão aparece na lista de famílias
+      expect(separadorFamilias()).toHaveTextContent("Lava-loiças (7)");
+      const lista = screen.getByRole("list", { name: "Famílias de produtos" });
+      expect(within(lista).getByText("Lava-loiça Keran")).toBeInTheDocument();
+      fireEvent.keyDown(within(lista).getByRole("button", { name: /^Família Lava-loiça Keran 80 cm, acabamento Inox escovado, SKU KER-80-IX, 149/ }), { key: "Enter" });
+      expect(lerPlanta(d.f.planta)!.pecas[0]).toMatchObject({ fam: "cfg:lava-loica-keran", acab: "inox" });
+    } finally {
+      // a preferência do espaço fica gravada: volta à casa de banho para os testes seguintes
+      irPara(1);
+      fireEvent.change(screen.getByRole("combobox", { name: "Espaço" }), { target: { value: "casa_banho" } });
+    }
+    // ao desmontar a página o registo limpa-se: a família configurada deixa de existir
+    expect(familiaPorId("cfg:lava-loica-keran")).toBeDefined();
+    cleanup();
+    expect(familiaPorId("cfg:lava-loica-keran")).toBeUndefined();
+  });
+
+  it("uma peça de uma família configurada que já não existe (página recarregada) não rebenta a página", () => {
+    const peca = { id: "p1", tipo: "movel", x: 200, y: 150, w: 60, h: 60, rot: 0, fam: "cfg:desaparecida", med: "m1", acab: "a1", nome: "Lava-loiça Keran" };
+    montar({ planta: JSON.stringify({ o: { x: 0, y: 0 }, paredes: retangulo(400, 300), pecas: [peca] }) });
+    expect(() => irPara(5)).not.toThrow();
+    expect(screen.getByText(/^Passo 5 de 5/)).toBeInTheDocument();
   });
 
   it("um conjunto (duche) põe as peças ligadas; retirar um componente deixa-o na lista como retirado, e repor traz-o de volta", () => {

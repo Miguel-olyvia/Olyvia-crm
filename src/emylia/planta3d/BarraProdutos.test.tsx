@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogo0 } from "../v2/catalogoModelo";
 import { BarraProdutos } from "./BarraProdutos";
+import { exemploKeran, paraFamilia } from "./configurador";
+import { registarFamilias } from "./familias";
 import { categoriaDoTipo, genericoServe } from "./categoriasGlb";
 import { MOSTRAR_GENERICOS, SO_COM_MODELO_HTML, comDemonstracao, produtosParaEspaco, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import type { TipoEspaco } from "./modelo";
@@ -185,5 +187,22 @@ describe("Composição livre (protótipo)", () => {
     expect(onLivre).toHaveBeenCalledTimes(1);
     expect(onLivre.mock.calls[0][0]).toHaveLength(1);
     expect(screen.queryByRole("region", { name: "Composição livre" })).toBeNull();
+  });
+});
+
+describe("famílias do Configurador (só em memória)", () => {
+  it("uma família configurada (sem modelo do HTML) passa o filtro e aparece no separador da categoria; ao limpar o registo desaparece", () => {
+    const fam = paraFamilia(exemploKeran());
+    expect(fam.htmlModelo).toBeUndefined();
+    registarFamilias([fam]);
+    try {
+      montar("cozinha");
+      expect(separadores()).toContain("Lava-loiças (7)");
+      fireEvent.click(screen.getByRole("tab", { name: "Lava-loiças (7)" }));
+      expect(within(screen.getByRole("list", { name: "Famílias de produtos" })).getByText("Lava-loiça Keran")).toBeInTheDocument();
+    } finally { registarFamilias([]); }
+    cleanup();
+    montar("cozinha");
+    expect(separadores()).toContain("Lava-loiças (6)");
   });
 });

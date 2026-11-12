@@ -6,7 +6,7 @@
 // Medidas em mm, como no HTML: +Z é a frente, o topo da chapa é Y0, o centro da chapa é a origem. Cada equipamento vende-se à parte (`linhasDaBancada`).
 import type { PecaPlanta } from "../planta";
 import type { ProdutoModelo3D } from "./catalogo3d";
-import { FAMILIAS, acabamentosDaMedida, resolverVariante, type Familia } from "./familias";
+import { FAMILIAS, acabamentosDaMedida, resolverVariante, todasAsFamilias, type Familia } from "./familias";
 import { AMBAR_SPECS, CUBAS_SPECS, HOB_SPECS, KERAN_SPECS, LODY_SPECS, UNA_SPECS, VELAR_SPECS, ehModeloTorneira, roundLoop, type SpecPlaca } from "./modelosHtml/specs";
 
 /* ------------------------------------------------------------------ as chapas (cópia de `counterMaterials` do HTML) */
@@ -58,7 +58,7 @@ export interface InfoLavaLoica {
   bowls?: Cuba[]; duo: boolean; drainer: boolean; tapLedge: boolean; keran: boolean; una: boolean; ambar: boolean; reversible: boolean; tapAlignment?: "sink" | "bowls";
 }
 const ALINHAMENTO: Record<string, "sink" | "bowls"> = { keran116: "bowls", ambar116: "bowls", una75: "sink", duo80: "sink" };
-const familiaDaMedida = (tipo: Familia["tipo"], medida: string): Familia | undefined => FAMILIAS.find((f) => f.tipo === tipo && f.medidas.some((m) => m.id === medida));
+const familiaDaMedida = (tipo: Familia["tipo"], medida: string): Familia | undefined => todasAsFamilias().find((f) => f.tipo === tipo && f.medidas.some((m) => m.id === medida));
 
 export function infoLavaLoica(id: string): InfoLavaLoica | null {
   const familia = familiaDaMedida("lava_loica", id);

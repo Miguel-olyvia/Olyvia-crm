@@ -15,6 +15,8 @@ export interface SpecMedida {
   placa?: { tipo: "induction" | "radiant" | "gas"; espessura: number; acima: number; recorte: [number, number]; queimadores?: [number, number, number][]; manipulos?: number[]; vidro?: boolean };
   /** só estes acabamentos servem esta medida (por omissão, todos os da família) */
   acabamentos?: string[]; nota?: string;
+  /** só das famílias do Configurador (configurador.ts): preço e SKU por acabamento NESTA medida; sem entrada valem o preço da medida + diferença e ref-código */
+  precos?: Record<string, number>; skus?: Record<string, string>;
 }
 export interface MedidaFam { id: string; rotulo: string; ref: string; preco: number; /** largura, profundidade, altura (cm) */ dim: [number, number, number]; spec?: SpecMedida }
 export type CategoriaFam = "torneiras" | "lavaloicas" | "placas" | "tampos" | "cozinha" | "banho";
@@ -24,6 +26,10 @@ export interface Familia {
   mont?: "chao" | "parede"; alt?: number; geo?: boolean;
   /** o modelo detalhado portado do HTML (modelosHtml/) e as opções que ele tem (mostradas no painel da peça) */
   htmlModelo?: string; opcoes?: OpcaoFamilia[];
+  /** `configurada`: criada no Configurador de famílias (só em memória, configurador.ts); as demo não têm esta marca */
+  origem?: "configurada";
+  /** só das configuradas: o GLB do fabricante de cada célula («medidaId|acabId» → chave de modelosHtml/ficheiros.ts: «familia|modelo|acab») */
+  glbCelulas?: Record<string, string>;
 }
 export type OpcaoFamilia = "bica" | "extraida" | "tampas" | "reverso" | "articulacao";
 export interface CategoriaFamilia { id: CategoriaFam; rotulo: string; espacos: TipoEspaco[] }
@@ -167,8 +173,16 @@ for (const f of PLACAS) f.htmlModelo = f.id;
 for (const f of LAVALOICAS) { f.htmlModelo = f.id; if (f.id === "ambar") f.opcoes = ["tampas"]; if (f.id === "keran") f.opcoes = ["reverso"]; }
 
 export const FAMILIAS: Familia[] = [...TORNEIRAS, ...LAVALOICAS, ...PLACAS, ...OUTRAS];
-export const familiaPorId = (id: string): Familia | undefined => FAMILIAS.find((f) => f.id === id);
-export const familiasDaCategoria = (c: CategoriaFam): Familia[] => FAMILIAS.filter((f) => f.categoria === c);
+/** O registo das famílias do Configurador (protótipo: só em memória; a página limpa-o ao desmontar). Só entram ids `cfg:`, nunca sobrepõem uma demo. */
+let configuradas: readonly Familia[] = [];
+export const PREFIXO_CFG = "cfg:";
+export function registarFamilias(lista: readonly Familia[]): void {
+  configuradas = lista.filter((f) => f.id.startsWith(PREFIXO_CFG) && !FAMILIAS.some((d) => d.id === f.id));
+}
+/** As demo e, a seguir, as do Configurador. Um id desconhecido (por exemplo `cfg:` depois de recarregar a página) dá `undefined`, nunca lança. */
+export const todasAsFamilias = (): Familia[] => (configuradas.length ? [...FAMILIAS, ...configuradas] : FAMILIAS);
+export const familiaPorId = (id: string): Familia | undefined => todasAsFamilias().find((f) => f.id === id);
+export const familiasDaCategoria = (c: CategoriaFam): Familia[] => todasAsFamilias().filter((f) => f.categoria === c);
 
 /* ------------------------------------------------------------------ variantes: medida × acabamento, geradas dos dados */
 export interface VarianteResolvida {
@@ -185,8 +199,9 @@ export function resolverVariante(f: Familia, medidaId?: string, acabId?: string)
   const medida = f.medidas.find((x) => x.id === medidaId) ?? f.medidas[0];
   const lista = acabamentosDaMedida(f, medida.id);
   const acabamento = lista.find((a) => a.id === acabId) ?? lista[0];
-  const nome = medida.rotulo ? `${f.nome.replace(/ \(demo\)$/, "")} ${medida.rotulo} (demo)` : f.nome;
-  return { familia: f, medida, acabamento, sku: `${medida.ref}-${acabamento.codigo}`, preco: medida.preco + acabamento.delta, nome, material: { cor: acabamento.cor, metalness: acabamento.metalness, roughness: acabamento.roughness } };
+  const nome = medida.rotulo ? `${f.nome.replace(/ \(demo\)$/, "")} ${medida.rotulo}${f.origem === "configurada" ? "" : " (demo)"}` : f.nome;
+  const sku = medida.spec?.skus?.[acabamento.id] ?? `${medida.ref}-${acabamento.codigo}`, preco = medida.spec?.precos?.[acabamento.id] ?? medida.preco + acabamento.delta;
+  return { familia: f, medida, acabamento, sku, preco, nome, material: { cor: acabamento.cor, metalness: acabamento.metalness, roughness: acabamento.roughness } };
 }
 /** Todas as variantes de uma família (geradas: nada de uma linha por cor). */
 export function variantesDe(f: Familia): VarianteResolvida[] {
@@ -194,18 +209,33 @@ export function variantesDe(f: Familia): VarianteResolvida[] {
 }
 export const chaveModelo = (familiaId: string, medidaId: string, acabId: string): string => `${familiaId}|${medidaId}|${acabId}`;
 /** A variante tem o GLB completo do fabricante (modelosHtml/ficheiros.ts)? Torneira: o modelo é o id da família; lava-loiça: o id da medida. */
-export const temGlbDoFabricante = (v: VarianteResolvida): boolean =>
-  v.familia.categoria === "torneiras" ? temFicheiro("torneira", v.familia.id, v.acabamento.id) : v.familia.categoria === "lavaloicas" && temFicheiro("lava_loica", v.medida.id, v.acabamento.id);
+export const temGlbDoFabricante = (v: VarianteResolvida): boolean => {
+  const g = glbDaCelula(v);
+  if (v.familia.origem === "configurada") return !!g && temFicheiro(g.familia, g.modelo, g.acab);
+  return v.familia.categoria === "torneiras" ? temFicheiro("torneira", v.familia.id, v.acabamento.id) : v.familia.categoria === "lavaloicas" && temFicheiro("lava_loica", v.medida.id, v.acabamento.id);
+};
+/** O GLB escolhido para a célula (medida × acabamento) de uma família do Configurador. */
+function glbDaCelula(v: VarianteResolvida): { familia: string; modelo: string; acab: string } | undefined {
+  const chave = v.familia.glbCelulas?.[`${v.medida.id}|${v.acabamento.id}`];
+  const [familia, modelo, acab] = chave ? chave.split("|") : [];
+  return familia && modelo && acab ? { familia, modelo, acab } : undefined;
+}
+/** O `html` dos parâmetros: o GLB da célula (configuradas) ou o modelo detalhado da família (demo). */
+function htmlDaVariante(v: VarianteResolvida, modeloOmissao: string): { html?: { modelo: string; acab: string } } {
+  const g = glbDaCelula(v);
+  if (g && temFicheiro(g.familia, g.modelo, g.acab)) return { html: { modelo: g.modelo, acab: g.acab } };
+  return v.familia.htmlModelo ? { html: { modelo: modeloOmissao, acab: v.acabamento.id } } : {};
+}
 
 const M = 1 / 1000;
 /** Os parâmetros do mockup 3D (metros) da variante, a partir dos dados da medida. */
 export function paramsDaVariante(v: VarianteResolvida): ParamsMockup | undefined {
   const s = v.medida.spec;
-  if (s?.torneira) return { k: "torneira", estilo: s.torneira.estilo, altura: s.torneira.altura * M, saida: s.torneira.saida * M, alcance: s.torneira.alcance * M, base: s.torneira.base * M, ...(v.familia.htmlModelo ? { html: { modelo: v.familia.htmlModelo, acab: v.acabamento.id } } : {}) };
-  if (s?.cubas) return { k: "lava_loica", cubas: s.cubas.map((c) => ({ x: c.left * M, z: c.top * M, w: c.w * M, d: c.d * M, prof: c.prof * M })), escorredor: !!s.escorredor, degrau: !!s.degrau, ...(v.familia.htmlModelo ? { html: { modelo: v.medida.id, acab: v.acabamento.id } } : {}) };
+  if (s?.torneira) return { k: "torneira", estilo: s.torneira.estilo, altura: s.torneira.altura * M, saida: s.torneira.saida * M, alcance: s.torneira.alcance * M, base: s.torneira.base * M, ...htmlDaVariante(v, v.familia.htmlModelo ?? v.familia.id) };
+  if (s?.cubas) return { k: "lava_loica", cubas: s.cubas.map((c) => ({ x: c.left * M, z: c.top * M, w: c.w * M, d: c.d * M, prof: c.prof * M })), escorredor: !!s.escorredor, degrau: !!s.degrau, ...htmlDaVariante(v, v.medida.id) };
   if (s?.placa) {
     const p = s.placa;
-    return { k: "placa", tipo: p.tipo, recorte: [p.recorte[0] * M, p.recorte[1] * M], espessura: p.espessura * M, acima: p.acima * M, queimadores: (p.queimadores ?? []).map(([x, z, r]) => [x * M, z * M, r * M] as [number, number, number]), manipulos: (p.manipulos ?? []).map((x) => x * M), vidro: !!p.vidro, ...(v.familia.htmlModelo ? { html: { modelo: v.medida.id, acab: v.acabamento.id } } : {}) };
+    return { k: "placa", tipo: p.tipo, recorte: [p.recorte[0] * M, p.recorte[1] * M], espessura: p.espessura * M, acima: p.acima * M, queimadores: (p.queimadores ?? []).map(([x, z, r]) => [x * M, z * M, r * M] as [number, number, number]), manipulos: (p.manipulos ?? []).map((x) => x * M), vidro: !!p.vidro, ...htmlDaVariante(v, v.medida.id) };
   }
   if (v.familia.tipo === "tampo") return { k: "tampo", espessura: 0.012 };
   return undefined;
