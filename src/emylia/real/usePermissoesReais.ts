@@ -31,7 +31,7 @@ export type LeituraDePermissoes = { k: "a-ler" } | { k: "falhou" } | { k: "lidas
 
 /** Lê as permissões de `org`, põe-nas no motor enquanto o componente está montado (e tira-as ao sair: `null`) e devolve a leitura e como
  *  repetir. O papel da Emylia (`S.role`) não se toca aqui: na ficha fixa-o permissoesPosContrato.ts; em /negocios escolhe-o o «A ver como». */
-export function usePermissoesReaisNegocio(org: string | null): { leitura: LeituraDePermissoes; repetir: () => void } {
+export function usePermissoesReaisNegocio(org: string | null, simulados: ReadonlySet<string> | null = null): { leitura: LeituraDePermissoes; repetir: () => void } {
   const [lida, setLida] = useState<{ org: string; tentativa: number; leitura: LeituraDePermissoes } | null>(null);
   const [tentativa, setTentativa] = useState(0);
   useEffect(() => {
@@ -45,12 +45,15 @@ export function usePermissoesReaisNegocio(org: string | null): { leitura: Leitur
   const leitura: LeituraDePermissoes = lida && lida.org === org && lida.tentativa === tentativa ? lida.leitura : { k: "a-ler" };
   // 5/11: também já no render, para que o que se desenha nesta passagem (podeVerCustos, podeNeg) use a leitura que acabou de chegar e
   // não a anterior; o efeito abaixo continua a ser quem a deixa posta (e a tira ao sair)
-  definirPermissoesReais({ codigos: leitura.k === "lidas" ? leitura.codigos : new Set(), simular: false });
+  // 12/11 («Simular função», só no ecrã): com `simulados` o motor recebe esses códigos no lugar dos lidos (a leitura devolvida, e quem a
+  // usa para ler e gravar, continua a ser a real). Sem ele (a ficha da pessoa, e /negocios sem simular) nada muda.
+  const noMotor = (): ReadonlySet<string> => simulados ?? (leitura.k === "lidas" ? leitura.codigos : new Set<string>());
+  definirPermissoesReais({ codigos: noMotor(), simular: false });
   useEffect(() => {
     // sem leitura bem-sucedida fica um conjunto vazio: a Emylia não dá nada por concedido
-    definirPermissoesReais({ codigos: leitura.k === "lidas" ? leitura.codigos : new Set(), simular: false });
+    definirPermissoesReais({ codigos: noMotor(), simular: false });
     return () => definirPermissoesReais(null);
-  }, [leitura]);
+  }, [leitura, simulados]); // eslint-disable-line react-hooks/exhaustive-deps -- noMotor só lê leitura e simulados
   const repetir = useCallback(() => { setTentativa((n) => n + 1); }, []);
   return { leitura, repetir };
 }

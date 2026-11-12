@@ -48,6 +48,7 @@ import { avisoDaFase, codigosDaFase, definirVerCustos, faltaDaFase, podeNeg } fr
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import { lerPermissoesReais, usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
+import { useSimularFuncao } from "@/emylia/real/simularFuncao";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
@@ -121,32 +122,45 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
   // 5/11: as permissões das ações (podeNeg) vêm de fn_cat_pode, a MESMA pergunta do servidor (o perfil, os Papéis no Negócio de todos os
   // papéis da pessoa e o admin do sistema), postas no motor com `simular: false`, como na ficha da pessoa. O «A ver como» continua a
   // escolher a vista e de quem é cada passo, mas já não muda o que se pode fazer. Com as reais postas, definirVerCustos é ignorado.
-  const perms = usePermissoesReaisNegocio(org);
+  // 12/11 («Simular função»): `simulados` são os códigos da função escolhida (null: as minhas, reais). Põe-nos no motor no lugar dos lidos
+  // e `pode`, as rotas e o resto abaixo respondem só por eles; o que se lê e se grava na base segue as permissões reais.
+  const simular = useSimularFuncao(org);
+  const simulados = simular.simulacao?.codigos ?? null;
+  const simularRef = useRef<HTMLSelectElement>(null);
+  const simuladosRef = useRef(simulados);
+  simuladosRef.current = simulados;
+  const perms = usePermissoesReaisNegocio(org, simulados);
   // 09/11: o perfil «Ser técnico de obra» (negocios.obra.tecnico) só dá o papel com a conta ligada a uma pessoa do RH; sem ela, o aviso
   const { hasPermission, loading: permsPerfilALer } = usePermissions();
-  const tecnicoPorPerfil = hasPermission("negocios.obra.tecnico");
+  const tecnicoPorPerfil = simulados ? simulados.has("negocios.obra.tecnico") : hasPermission("negocios.obra.tecnico");
   // 09/11: ver as encomendas de cliente pelo perfil (client_orders.view). Num ref, porque carregarEncomendas corre dentro de efeitos
   // que guardam a primeira versão da função; a ler as permissões, conta como sim (o servidor decide na mesma).
   const verEncomendasPerfil = useRef(true);
+  // LEITURA (carregarEncomendas): sempre a conta real, nunca a função simulada
   verEncomendasPerfil.current = permsPerfilALer || hasPermission("client_orders.view");
   // 09/11: o que quem entrou pode ver: fn_cat_pode (o perfil, os Papéis no Negócio e o admin, como a base decide; lido em
   // usePermissoesReaisNegocio) OU o perfil da Olyvia (usePermissions). Enquanto se lê, só o perfil.
-  const codigosLidos = perms.leitura.k === "lidas" ? perms.leitura.codigos : null;
-  const pode = (c: string): boolean => !!codigosLidos?.has(c) || (!permsPerfilALer && hasPermission(c));
+  const codigosReais = perms.leitura.k === "lidas" ? perms.leitura.codigos : null;
+  const codigosLidos = simulados ?? codigosReais;
+  const podeReal = (c: string): boolean => !!codigosReais?.has(c) || (!permsPerfilALer && hasPermission(c));
+  // simulando, só contam os códigos da função (sem o `|| hasPermission` do perfil real)
+  const pode = (c: string): boolean => (simulados ? simulados.has(c) : podeReal(c));
   // 11/11: ao sair da página, o «Mudar» do impacto ao lado dos campos deixa de aparecer
   useEffect(() => () => definirGravarEfeitos(null), []);
   // 10/11: as páginas reais (rotas da Olyvia) só contam o perfil; o Papel no Negócio não abre a rota. As ligações só aparecem com ela.
-  const podeRota = (c: string): boolean => !permsPerfilALer && hasPermission(c);
+  const podeRota = (c: string): boolean => (simulados ? simulados.has(c) : !permsPerfilALer && hasPermission(c));
   // ao abrir uma, só se recusa com o perfil já lido (a ler, abre; a rota decide na mesma). Num ref para o `run` e as ligações ao
   // Inventário (guardadas em useCallback/useMemo).
-  const negaRota = (c: string): boolean => !permsPerfilALer && !hasPermission(c);
+  const negaRota = (c: string): boolean => (simulados ? !simulados.has(c) : !permsPerfilALer && !hasPermission(c));
   const negaRotaRef = useRef(negaRota);
   negaRotaRef.current = negaRota;
   // 09/11 (20270111100000): a leitura reduzida da base (fn_neg_so_execucao): sem pessoas.view, com negocios.obra.executar. Só as obras onde
   // trabalha, sem dinheiro; as funções do negócio inteiro recusam-no, por isso nem se chamam. Num ref, para os efeitos e o gravar.
   const soExecucao = !!codigosLidos && !pode("pessoas.view") && pode("negocios.obra.executar");
-  const soExecucaoRef = useRef(soExecucao);
-  soExecucaoRef.current = soExecucao;
+  // o que se lê e se grava decide-se pelas permissões REAIS (a leitura reduzida da base é a da conta real, não a da função simulada)
+  const soExecucaoReal = !!codigosReais && !podeReal("pessoas.view") && podeReal("negocios.obra.executar");
+  const soExecucaoRef = useRef(soExecucaoReal);
+  soExecucaoRef.current = soExecucaoReal;
   // espera pela leitura das permissões (o que se lê ao abrir depende de soExecucao); resolve logo se já estão lidas
   const leituraRef = useRef(perms.leitura);
   leituraRef.current = perms.leitura;
@@ -427,10 +441,53 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
   }, [org, permsLidas]);
   useEffect(() => aoMudarProntidao(redesenhar), [redesenhar]);
 
+  // 12/11 («Simular função»): os papéis lidos ao abrir (os do RH e, sem eles, as permissões reais), guardados para recalcular o papel de
+  // abertura e os papéis escolhíveis quando muda a simulação, SEM recarregar o catálogo e os campos. null enquanto não se leram.
+  const papeisBase = useRef<{ rh: MeusPapeis; codigos: ReadonlySet<string> | null } | null>(null);
+  /** Aplica os papéis (nomes, escolhíveis, `meus`) e devolve o papel de abertura. Simulando, o RH fica neutro (sem papéis, sem «todos») para
+   *  que os códigos da função decidam (comPapeisDasPermissoes não os ignora), e o Técnico vem de negocios.obra.tecnico. */
+  const aplicarPapeis = useCallback((base: { rh: MeusPapeis; codigos: ReadonlySet<string> | null }, sim: ReadonlySet<string> | null): { mp: MeusPapeis; papel: Papel | null } => {
+    const rh: MeusPapeis = sim ? { papeis: [], pessoa: base.rh.pessoa, todos: false } : base.rh;
+    const r = papelDeAbertura(rh, sim ?? base.codigos, S.role, escolhaRef.current);
+    let mp = r.meus, papel = r.papel;
+    if (sim && sim.has("negocios.obra.tecnico") && !mp.papeis.includes("tecnico")) { mp = { ...mp, papeis: [...mp.papeis, "tecnico"] }; papel = papel ?? "tecnico"; }
+    aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
+    // meusRef (o que decide as LEITURAS, carregarEncomendas) fica sempre com os papéis reais, nunca os simulados
+    if (!sim) meusRef.current = mp;
+    setMeus(mp);
+    return { mp, papel };
+  }, [S]);
+  /** A escolha à mão do «A ver como» e o papel de antes de simular, para o «Voltar à minha» os repor; null: não se simula. */
+  const antesDeSimular = useRef<{ escolha: Papel | null; role: Papel } | null>(null);
+  // muda a simulação (escolher, trocar, repor): recalcula só os papéis. Ao simular, a escolha à mão do «A ver como» deixa de valer (fica
+  // guardada, uma só vez: trocar de função não a perde) e ao repor volta, com o papel que se via.
+  useEffect(() => {
+    const base = papeisBase.current;
+    if (!base) { antesDeSimular.current = null; return; }
+    const antes = antesDeSimular.current;
+    if (simulados) {
+      if (!antes) antesDeSimular.current = { escolha: escolhaRef.current, role: S.role };
+      escolhaRef.current = null;
+    } else if (antes) {
+      escolhaRef.current = antes.escolha;
+      antesDeSimular.current = null;
+    }
+    const { mp, papel } = aplicarPapeis(base, simulados);
+    if (!simulados && antes && papeisPermitidos(mp).includes(antes.role)) S.role = antes.role;
+    else if (papel) S.role = papel;
+    redesenhar();
+  }, [simulados]); // eslint-disable-line react-hooks/exhaustive-deps -- só quando muda a simulação
+  // o «Mudar» do impacto dos campos (pessoas.config) segue a simulação; a função de gravar fica guardada ao abrir (null: não se pode)
+  const gravarEfeitosRef = useRef<Parameters<typeof definirGravarEfeitos>[0]>(null);
+  useEffect(() => {
+    if (gravarEfeitosRef.current) definirGravarEfeitos(pode("pessoas.config") ? gravarEfeitosRef.current : null);
+  }, [simulados]); // eslint-disable-line react-hooks/exhaustive-deps -- só quando muda a simulação
+
   useEffect(() => {
     if (!org) return;
     let vivo = true;
     setPronto(false); setErroLer(null);
+    papeisBase.current = null; gravarEfeitosRef.current = null;
     (async () => {
       // 30/10: os papéis do RH primeiro: sem nenhum (e sem o perfil da Olyvia que vê todos), não há nada a fazer aqui
       const rh = await lerMeusPapeis(supabase, org);
@@ -441,12 +498,18 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
       // Comercial); só muda o papel de abertura, o «A ver como» continua com todos. Uma escolha à mão nesta página mantém-se.
       const codigos = rh.papeis.length === 0 ? await lerPermissoesReais(org) : null;
       if (!vivo) return;
-      const { meus: mp, papel } = papelDeAbertura(rh, codigos, S.role, escolhaRef.current);
-      aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
-      meusRef.current = mp;
-      setMeus(mp);
+      // 12/11: guarda o que se leu (para a simulação recalcular os papéis). O que se lê e grava aqui decide-se pelos papéis REAIS (mp);
+      // se já se simula (a lista de funções chegou durante a abertura), a simulação aplica-se por cima, só no ecrã.
+      papeisBase.current = { rh, codigos };
+      const { mp, papel } = aplicarPapeis(papeisBase.current, null);
       if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), um cargo técnico de obra ou o perfil de técnico de obra."); return; }
       S.role = papel;
+      if (simuladosRef.current) {
+        antesDeSimular.current = { escolha: escolhaRef.current, role: S.role };
+        escolhaRef.current = null;
+        const s = aplicarPapeis(papeisBase.current, simuladosRef.current);
+        if (s.papel) S.role = s.papel;
+      }
       // 09/11 (20270111100000): quem vê todos (admin, pessoas.edit) nunca tem a leitura reduzida e segue logo; os outros esperam pelas
       // permissões, para não pedir o que a base lhes recusa (as linhas de negócio, os ajustes dos campos, as sugestões, a prontidão)
       if (!mp.todos) await permsLidas();
@@ -461,12 +524,14 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
       await carregarCamposConfig(supabase, org, S, { semLer: so });
       // 11/11 (Rúben): quem configura os campos (pessoas.config) muda o impacto de uma resposta ao lado do campo
-      definirGravarEfeitos(!so && pode("pessoas.config") ? async (efeitos) => {
+      const gravarEfeitos: NonNullable<typeof gravarEfeitosRef.current> = async (efeitos) => {
         const { data, error } = await supabase.rpc("neg_guardar_campos_config" as never, { p_org: org, p_campos: null, p_efeitos: efeitos } as never);
         if (error) return error.message || "Não foi possível gravar.";
         definirEfeitosCampos(lerCamposConfig(data).efeitos);
         return null;
-      } : null);
+      };
+      gravarEfeitosRef.current = so ? null : gravarEfeitos;
+      definirGravarEfeitos(!so && pode("pessoas.config") ? gravarEfeitos : null);
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
       aplicarGestoresObra(await lerGestoresObra(supabase, org));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)
@@ -799,7 +864,8 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
     podeCriarNegocio: pode("pessoas.create"), podeVerNegocio: pode("pessoas.view"), podeVerInventario: podeRota("client_orders.view"),
     podeVerCatalogo: podeRota("services.view"),
     idNegocioBase: (numero) => refs.current.get(numero)?.id ?? null,
-    ...(soExecucao ? { leituraReduzida: true } : {}) };
+    // a leitura reduzida também quando é a da conta REAL: os dados que a base não devolveu não se desenham como se existissem
+    ...(soExecucao || soExecucaoReal ? { leituraReduzida: true } : {}) };
   // 09/11: o perfil de técnico de obra sem a conta ligada a uma pessoa do RH: sem papel, o aviso de ligar a conta em vez do erro
   const semContaLigada = !!meus && !meus.todos && !meus.pessoa && meus.papeis.length === 0 && tecnicoPorPerfil;
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
@@ -824,6 +890,19 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
             {(meus ? papeisPermitidos(meus) : (Object.keys(PAPEIS) as Papel[])).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
           </select>
         </label>
+        {/* 12/11: «Simular função» (só no ecrã): escolhe uma função da organização e o ecrã responde só com as permissões dela. Só depois de a
+            página abrir (os papéis e os dados ao abrir são os reais). */}
+        {simular.funcoes && simular.funcoes.length > 0 && (
+          <label className="flex min-w-0 items-center gap-2">
+            <span className="hidden text-muted-foreground sm:inline">Simular função</span>
+            <select ref={simularRef} aria-label="Simular função" aria-busy={simular.aLer} className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={simular.simulacao?.id ?? ""}
+              disabled={!pronto} onChange={(e) => { if (!simular.aLer) void simular.escolher(e.target.value); }}>
+              <option value="">A minha (real)</option>
+              {simular.funcoes.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </label>
+        )}
+        {simular.erro && <span role="alert" className="min-w-0 text-sm text-destructive">{simular.erro}</span>}
         <nav aria-label="Vistas" className="order-last -mx-4 flex w-[calc(100%+2rem)] gap-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:order-none sm:mx-0 sm:w-auto sm:overflow-visible sm:px-0">
           {SEPARADORES.filter(([v]) => vistaPermitida(v)).map(([v, nome]) => {
             const ativo = S.view === v || (v === "negocios" && S.view === "negocio");
@@ -843,6 +922,16 @@ export default function NegociosEmylia({ vistaInicial, enderecoNoUrl = import.me
           {gravacao.k === "gravado" && <span className="text-muted-foreground">Gravado</span>}
           {gravacao.k === "erro" && <span className="text-destructive">Não gravou: {gravacao.t}</span>}
         </span>
+      </div>
+      {/* o contentor existe sempre (para o leitor de ecrã anunciar a mudança) e só se preenche ao simular */}
+      <div role="status" aria-label="Simulação de função"
+        className={simular.simulacao ? "mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px] text-foreground" : undefined}>
+        {simular.simulacao && (
+          <>
+            <span className="min-w-0">A simular a função {simular.simulacao.nome}. Só muda o que vê: os dados e as gravações seguem as suas permissões reais (um botão que a sua conta não permite será recusado); custos, retribuições e atribuição de comercial seguem a sua conta real.</span>
+            <button type="button" onClick={() => { simular.voltar(); simularRef.current?.focus(); }} className="min-h-10 rounded-lg border border-input bg-card px-3 font-medium text-foreground hover:bg-muted">Voltar à minha</button>
+          </>
+        )}
       </div>
       {erroLer ? (semContaLigada ? <SemTecnicoLigado /> : <p className="p-6 text-destructive">{erroLer}</p>)
         : perms.leitura.k === "falhou" ? (
