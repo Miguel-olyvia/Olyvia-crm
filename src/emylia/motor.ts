@@ -2737,6 +2737,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!comEmail(d, "acesso")) return;
       acessoCliente(d, d.orc?.contrato ? "contrato" : "proposta", "Acesso ao portal · " + obraDe(d));
     },
+    /** 12/11 (Estúdio da obra, Documentos): reenvia ao cliente o aviso com um documento que já está no portal (o acesso ao portal com
+     *  esse documento). Sem email (ou telefone) na ficha, pede-os como os outros envios. */
+    reenviarDocumento(id: number, doc: DocPortal, titulo: string) {
+      const d = deal(id);
+      if (!comEmail(d, "acesso")) return;
+      acessoCliente(d, doc, `${titulo} · ${obraDe(d)}`);
+      log(d, `Reenviado ao cliente: ${titulo}`);
+      avisar({ msg: "Reenviado ao cliente", sub: titulo, kind: "ok" });
+    },
     /** 23/10 (2.0): o email pedido no envio ao portal: fica na ficha do cliente e o envio que esperava por ele segue. */
     emailPortal(id: number, email: string, telefone?: string): boolean {
       const d = deal(id), e = email.trim().toLowerCase();

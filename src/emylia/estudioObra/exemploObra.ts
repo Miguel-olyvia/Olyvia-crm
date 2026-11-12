@@ -7,6 +7,7 @@ import { FINANCEIRO, emFalta } from "../campos";
 import { fotoExemplo } from "../obraOps";
 import { guardarBase } from "../ajustesPlano";
 import { gerarEncCliente } from "../preparacaoObra";
+import { PROJETO_EXEMPLO } from "@/pages/prototipo-estudio/exemploEstudio";
 
 export const ID_EXEMPLO_OBRA = 1027;
 export const INICIO_EXEMPLO = "2026-11-04";
@@ -55,6 +56,8 @@ export function obraDeExemplo(): { S: Estado; d: Negocio } {
     if (ult) { ult.res = 0; ult.falta = ult.q; }
     d.obra.ec = ec;
   }
+  // 12/11: o projeto do Estúdio do projeto (o de exemplo), para o 3D do Estúdio da obra
+  if (!d.f.estudio) d.f.estudio = JSON.stringify({ ...PROJETO_EXEMPLO, nome: d.nome, negocio: d.id });
   (d.obra.chat ??= []).push({ de: "cliente", quem: d.nome, t: "Bom dia! Amanhã chegam a que horas? Tenho de sair às 10h.", q: "ter 10/11 08:47" });
   return { S, d };
 }
