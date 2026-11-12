@@ -1,10 +1,11 @@
 // 9/11 (Rúben: «a transcrição não corre enquanto estamos no Estúdio»): enquanto a visita grava, em qualquer página da app (o Estúdio,
 // outro negócio) fica em baixo um indicador: a gravar, há quanto tempo, o nível do microfone, e voltar ao negócio. Se o microfone foi
 // cortado e não voltou, diz e deixa continuar. Não aparece quando o painel da gravação está à vista.
+// 12/11: «Parar» (fica parada, com as falas) e «Continuar»; o «Gravar a visita» do Estúdio está em prototipo-estudio/GravarNoEstudio.tsx.
 import { useEffect, useState } from "react";
-import { Mic, MicOff } from "lucide-react";
+import { Mic, MicOff, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { iniciarGravacao, useGravacao, usePainelAberto } from "./gravador";
+import { iniciarGravacao, pausarGravacao, useGravacao, usePainelAberto } from "./gravador";
 import { irPara } from "./urlNegocio";
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -43,6 +44,12 @@ export function IndicadorGravacao() {
         <button type="button" className="min-h-9 shrink-0 rounded-full bg-primary px-3 text-sm font-medium text-primary-foreground"
           onClick={() => void iniciarGravacao({ negocio: g.negocio!, nome: g.nome, modo: g.modo, voltar: g.voltar }, true).catch(() => undefined)}>
           <Mic className="mr-1 inline h-4 w-4" aria-hidden="true" />Continuar
+        </button>
+      ) : g.estado === "a_ouvir" || g.estado === "a_ligar" ? (
+        // 12/11 (Rúben: «ter aqui o botão para iniciar gravação e o botão para parar»): parar sem terminar (o Continuar retoma)
+        <button type="button" className="min-h-9 shrink-0 rounded-full border border-destructive/40 px-3 text-sm font-medium text-destructive hover:bg-destructive/10"
+          onClick={() => void pausarGravacao()}>
+          <Square className="mr-1 inline h-3.5 w-3.5 fill-current" aria-hidden="true" />Parar
         </button>
       ) : null}
       <button type="button" className="min-h-9 shrink-0 rounded-full border border-input px-3 text-sm font-medium hover:bg-accent" onClick={() => irPara(g.voltar)}>

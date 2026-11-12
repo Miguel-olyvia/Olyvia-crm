@@ -34,7 +34,7 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
   const hoje = p.antes.pecas.filter((x) => !PECAS[x.tipo].abertura);
   const porColocar = p.porColocar ?? [];
   // 12/11: o que o cliente disse das cores (ao vivo) e as combinações para a cor principal
-  const { ouvido, aOuvir } = useEstiloOuvido(p);
+  const { ouvido, pedidos, aOuvir } = useEstiloOuvido(p);
   const [corEscolhida, setCorEscolhida] = useState<Cor | undefined>(undefined);
   const corBase = corEscolhida ?? ouvido?.estilo.cores[0] ?? p.estilo.cores[0];
   // mexer nas cores à mão: o que o cliente disser a seguir fica como sugestão
@@ -48,7 +48,7 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
           <p className="text-[15px] text-muted-foreground">A Olyvia vai buscar ao catálogo o que combina com o cliente. Decida peça a peça; o que juntar fica por colocar na planta.</p>
         </div>
 
-        <OuvidoDoCliente p={p} setP={setP} ouvido={ouvido} aOuvir={aOuvir} />
+        <OuvidoDoCliente p={p} setP={setP} ouvido={ouvido} pedidos={pedidos} aOuvir={aOuvir} />
 
         <Cartao titulo="As cores do cliente">
           <Cores escolhidas={p.estilo.cores} onMudar={(cores) => { setCorEscolhida(cores[0]); mudarEstilo((e) => ({ ...e, cores })); }} />

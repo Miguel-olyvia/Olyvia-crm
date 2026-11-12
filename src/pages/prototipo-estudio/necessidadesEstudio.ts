@@ -56,6 +56,8 @@ export interface Projeto {
   estiloManual?: boolean;
   /** 12/11: as coisas ditas na conversa que já se aplicaram ao estilo (chavesDosDitos); só as novas se aplicam. */
   ditosVistos?: string[];
+  /** 12/11 (pedidosDaConversa.ts): as decisões ditas sobre as peças e os serviços na chamada e na visita já gravadas no negócio. */
+  pedidosAntes?: import("./pedidosDaConversa").Pedidos;
 }
 export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 

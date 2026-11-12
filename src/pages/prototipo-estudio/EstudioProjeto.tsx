@@ -19,6 +19,7 @@ import { NOME_CATEGORIA, melhorPara, produto, type Categoria, type Produto } fro
 import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sairam, totais, type Linha, type Projeto } from "./necessidadesEstudio";
 import { Amostra, Areas, Cartao, Numero, PainelMateriais, PainelPeca, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
 import { PassoEstilo } from "./PassoEstilo";
+import { GravarNoEstudio } from "./GravarNoEstudio";
 import { PROJETO_EXEMPLO, copiaPlanta, depoisDaVisita } from "./exemploEstudio";
 import { espacoDoEstudio } from "./estudioNo3D";
 import { Vista3D } from "./Vista3D";
@@ -242,12 +243,13 @@ export default function EstudioProjeto() {
       </motion.div>
       </AnimatePresence>
 
-      <footer className="mx-auto max-w-7xl px-4 pb-10 sm:px-8">
+      <footer className="mx-auto max-w-7xl px-4 pb-24 sm:px-8">
         <button type="button" className="inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground underline-offset-4 hover:underline"
           onClick={() => { setP(PROJETO_EXEMPLO); setPasso("Antes"); setAviso(""); }}><RotateCcw className="h-4 w-4" aria-hidden="true" />Recomeçar com o exemplo</button>
       </footer>
 
       {mostrar && <MostrarAoCliente p={p} t={t} fechar={() => setMostrar(false)} />}
+      {!mostrar && <GravarNoEstudio p={p} />}
     </main>
   );
 }

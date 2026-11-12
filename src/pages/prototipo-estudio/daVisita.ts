@@ -11,6 +11,7 @@ import { alturaFinalCm, type Projeto } from "./necessidadesEstudio";
 import { prefixoDoEstudio, respostasDoNegocio } from "./perguntasDaVisita";
 import { falasDoTexto } from "@/emylia/chamadaMotor";
 import { ditosDaConversa, type DitoEstilo } from "./estiloDaConversa";
+import { pedidosDaConversa, type Pedidos } from "./pedidosDaConversa";
 
 export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
 /** 5/11: o que o Estúdio devolve ao negócio quando se carrega em «Voltar ao negócio» (a Visita lê-o e grava a planta). */
@@ -74,7 +75,7 @@ export function abrirEstudio(nome: string, f: Record<string, string>, negocio: n
   // 11/11: as perguntas da visita que o Estúdio faz no passo «Fechar»: com as respostas que o negócio já tem
   const base = melhor ? { ...melhor, nome, origem, negocio } : projetoDaVisita(nome, f, negocio, origem, divisao);
   const prefixo = prefixoDoEstudio(f, base.divisao ?? divisao);
-  return guardarParaEstudio({ ...base, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo) }, ditosAntes: ditosDoNegocio(f) });
+  return guardarParaEstudio({ ...base, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) });
 }
 
 /** 12/11: as cores ditas nas conversas já gravadas no negócio (a transcrição da chamada e a da visita). */
@@ -137,4 +138,10 @@ export function lerVolta(negocio: number): Volta | null {
     localStorage.removeItem(CHAVE_VOLTA);
     return v;
   } catch { return null; }
+}
+
+/** 12/11: as decisões ditas sobre as peças e os serviços nas conversas já gravadas no negócio. */
+export function pedidosDoNegocio(f: Record<string, string | undefined>): Pedidos {
+  const a = pedidosDaConversa(falasDoTexto(f.transcricao_chamada), "chamada"), b = pedidosDaConversa(falasDoTexto(f.transcricao_visita), "visita");
+  return { pecas: [...a.pecas, ...b.pecas], servicos: [...a.servicos, ...b.servicos] };
 }

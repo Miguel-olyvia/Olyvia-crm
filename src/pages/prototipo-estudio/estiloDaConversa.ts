@@ -32,7 +32,7 @@ const COR_PALAVRA: [RegExp, Cor][] = [
   [/^(madeiras?|carvalho|nogueira|pinho|faia|oak)$/, "madeira"],
   [/^(bege|beges|creme|marfim|dourad[oa]s?)$/, "bege"],
 ];
-const corDe = (w: string): Cor | null => COR_PALAVRA.find(([rx]) => rx.test(w))?.[1] ?? null;
+export const corDe = (w: string): Cor | null => COR_PALAVRA.find(([rx]) => rx.test(w))?.[1] ?? null;
 
 const PECA_PALAVRA: [RegExp, Categoria[]][] = [
   [/^(m[oó]veis|m[oó]vel|gavetas?|gaveteiros?)$/, ["movel"]],
@@ -61,12 +61,12 @@ const PECA_PALAVRA: [RegExp, Categoria[]][] = [
 const pecasDe = (w: string): Categoria[] | null => PECA_PALAVRA.find(([rx]) => rx.test(w))?.[1] ?? null;
 
 const TUDO = /^(tudo|tod[oa]s?|tudinho|total|inteir[oa])$/;
-const NEGA = /^(n[aã]o|nada|nunca|sem|detesto|odeio|evitar|evito|evitava|menos)$/;
-const VONTADE = /\b(quer(o|ia|emos|[ií]amos)?|gosta(va|ria|mos)?|gosto|prefir(o|a|am)|prefer(e|em|ia|imos|[ií]amos|ência)|adoro|adoramos|apetece|sonho|tudo|tod[oa]s?|pode ser|a ideia|pensei|pens[aá]mos|imagino|escolh(o|i|emos)|vamos|fica(r|va)?|seja)\b/;
+export const NEGA = /^(n[aã]o|nada|nunca|sem|detesto|odeio|evitar|evito|evitava|menos)$/;
+export const VONTADE = /\b(quer(o|ia|emos|[ií]amos)?|gosta(va|ria|mos)?|gosto|prefir(o|a|am)|prefer(e|em|ia|imos|[ií]amos|ência)|adoro|adoramos|apetece|sonho|tudo|tod[oa]s?|pode ser|a ideia|pensei|pens[aá]mos|imagino|escolh(o|i|emos)|vamos|fica(r|va)?|seja|p[oô]r|p[oõ]e|ponha|pomos|mete|meter|leva|levar|trocar|troca)\b/;
 const NAO_SEI = /^(sei|tenho|sabemos)$/;
-const SIM = /^\s*(sim|isso|exato|exatamente|claro|pode ser|perfeito|é isso|gosto|adoro|era isso|tal e qual|sem dúvida)\b/i;
+export const SIM = /^\s*(sim|isso|exato|exatamente|claro|pode ser|perfeito|é isso|gosto|adoro|era isso|tal e qual|sem dúvida)\b/i;
 
-const palavras = (t: string) => [...t.toLowerCase().matchAll(/[\p{L}\d-]+/gu)].map((m) => m[0]);
+export const palavras = (t: string) => [...t.toLowerCase().matchAll(/[\p{L}\d-]+/gu)].map((m) => m[0]);
 
 /** Uma escolha ditada sem verbo («Sanita preta, torneiras pretas.»): frase curta com peça e cor, sem descrever o que há («está», «é»). */
 const DESCREVE = /^(est[aá]|est[aã]o|é|s[aã]o|era|eram|tem|t[eê]m|tinha|ficou|temos|tenho|h[aá]|existe|existem|vendemos|trabalhamos|costuma|costumam)$/;

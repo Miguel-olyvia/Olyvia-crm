@@ -19,8 +19,8 @@ let atual: Projeto;
 function Ecra({ inicio }: { inicio: Projeto }) {
   const [p, setP] = useState(inicio);
   atual = p;
-  const { ouvido, aOuvir } = useEstiloOuvido(p);
-  return <><OuvidoDoCliente p={p} setP={setP} ouvido={ouvido} aOuvir={aOuvir} /><Combinacoes p={p} setP={setP} cor={ouvido?.estilo.cores[0] ?? p.estilo.cores[0]} evitar={ouvido?.evitar ?? []} /></>;
+  const { ouvido, pedidos, aOuvir } = useEstiloOuvido(p);
+  return <><OuvidoDoCliente p={p} setP={setP} ouvido={ouvido} pedidos={pedidos} aOuvir={aOuvir} /><Combinacoes p={p} setP={setP} cor={ouvido?.estilo.cores[0] ?? p.estilo.cores[0]} evitar={ouvido?.evitar ?? []} /></>;
 }
 const fala = (inicio: number, falante: Fala["falante"], texto: string): Fala => ({ inicio, fim: inicio + 3, texto, falante, confianca_falante: 0.6 });
 
@@ -38,7 +38,7 @@ describe("o Estúdio ouve a conversa e muda o estilo", () => {
     expect(screen.getByText("Eu quero tudo preto.")).toBeInTheDocument();
     expect(atual.estilo.cores[0]).toBe("preto");
     expect(atual.revestimento).toBe("rev-tela-a");
-    expect(screen.getByText("Aplicado às cores e às peças a trocar.")).toBeInTheDocument();
+    expect(screen.getByText("Aplicado às cores, às peças e aos serviços.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Combinações para o preto" })).toBeInTheDocument();
 
     // desfazer: volta ao de antes; o que se disser a seguir aplica-se por cima (só o novo)
@@ -74,5 +74,23 @@ describe("o Estúdio ouve a conversa e muda o estilo", () => {
     render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["branco"], porCategoria: {} } }} />);
     expect(screen.queryByText("Pelo que se disse na conversa")).not.toBeInTheDocument();
     expect(atual.estilo.cores).toEqual(["branco"]);
+  });
+
+  it("«quero tirar o bidé» tira o bidé; «quero uma sanita preta» troca-a pela preta; «um nicho no duche» junta o serviço", () => {
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: [], porCategoria: {} }, servicos: [] }} />);
+    const bide = PROJETO_EXEMPLO.antes.pecas.find((x) => x.tipo === "bide")!;
+    const sanita = PROJETO_EXEMPLO.antes.pecas.find((x) => x.tipo === "sanita")!;
+    chega(fala(20, "comercial", "O cliente quer tirar o bidé."));
+    expect(atual.depois.pecas.some((x) => x.id === bide.id)).toBe(false);
+    chega(fala(30, "cliente", "Quero uma sanita preta."));
+    expect(atual.escolhas[sanita.id]).toBe("san-douro-p");
+    chega(fala(40, "cliente", "E queria um nicho no duche."));
+    expect((atual.servicos ?? []).map((x) => x.id)).toContain("sv-nicho");
+    chega(fala(50, "cliente", "A limpeza não é precisa."));
+    expect((atual.servicos ?? []).map((x) => x.id)).not.toContain("sv-limpeza");
+    expect(atual.servicosRecusados).toContain("sv-limpeza");
+    expect(screen.getByText("Bidé: tirar")).toBeInTheDocument();
+    expect(screen.getByText("Nicho embutido no duche: juntar")).toBeInTheDocument();
+    // dito outra vez (a frase revista), não volta a aplicar: o bidé que se pôs de volta à mão fica
   });
 });

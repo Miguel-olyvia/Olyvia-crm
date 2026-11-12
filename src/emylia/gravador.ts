@@ -440,6 +440,17 @@ export async function terminarGravacao(): Promise<Fala[]> {
   return g.falas;
 }
 
+/** 12/11 (Rúben: «ter aqui o botão para iniciar gravação e o botão para parar»): parar o microfone sem terminar a gravação. As falas
+ *  ficam, o que já se ouviu acaba de ser transcrito, e o «Continuar» retoma a mesma gravação. O «Terminar» continua no painel do negócio. */
+export async function pausarGravacao(): Promise<void> {
+  if (g.estado !== "a_ouvir" && g.estado !== "a_ligar") return;
+  document.removeEventListener("visibilitychange", aoMudarVisibilidade);
+  soltarEcra?.(); soltarEcra = null;
+  // o estado muda antes de desligar: o «ended» das pistas não volta a ligar o microfone
+  mudar({ estado: "interrompida", aFalar: false, nivel: 0, msg: "Gravação parada. As falas estão guardadas: carregue em Continuar para gravar mais." }, true);
+  await desligarMicrofone(true);
+}
+
 /** As falas que falharam (sem rede): mandar outra vez. */
 export function repetirFalhadas() {
   const lista = porRepetir; porRepetir = [];
