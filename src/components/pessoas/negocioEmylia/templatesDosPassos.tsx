@@ -5,7 +5,7 @@
 //    e os textos do template, com o nome e o logo REAIS da organização; botão «Enviar para o portal do cliente».
 //  · Contrato:  seletor da minuta (client_contract_templates), as perguntas {{chave}} da minuta e o corpo preenchido; botão de envio ao portal.
 // A escolha guarda-se SÓ pelas RPCs neg_definir_templates_negocio / neg_ler_templates_negocio (useTemplatesDoNegocio).
-import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import "./propostaComTemplate.css";
 import { totaisIva } from "@/emylia/motor";
 import { definirModoReal, nifEmpresa, nomeEmpresa, nomeFiscalEmpresa, orgDoModoReal } from "@/emylia/acessosPortal";
@@ -20,6 +20,8 @@ import { extractPromptTokens, substituteVariables, type ContractVariableData } f
 import { sanitizeRichHtml } from "@/utils/sanitize";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { cn } from "@/lib/utils";
+import { planoAprovadoDe, retificacaoAceite } from "@/emylia/preparacaoObra";
+import { ContratoNoPasso } from "./ContratoNoPasso";
 import { EnviarParaPortal } from "./EnviarParaPortal";
 import { SeletorDeTemplate } from "./SeletorDeTemplate";
 import { OrcamentoPdf } from "./OrcamentoPdf";
@@ -184,13 +186,14 @@ function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valore
   return { ...base, ...valores } as ContractVariableData;
 }
 
-function MinutaDoContrato({ minuta, valores, aoEscrever, aoGuardar, desativado, d, c, nome, proposta }: {
-  minuta: MinutaDeContrato; valores: Record<string, string>; aoEscrever: (k: string, v: string) => void; aoGuardar: () => void; desativado: boolean; d: Negocio; c: ContextoDosTemplates; nome: string; proposta?: DadosDaProposta;
+/** As perguntas {{chave}} da minuta. 12/11: o corpo preenchido já não se mostra aqui: vê-se no contrato montado (ContratoNoPasso), mais abaixo. */
+function MinutaDoContrato({ minuta, valores, aoEscrever, aoGuardar, desativado }: {
+  minuta: MinutaDeContrato; valores: Record<string, string>; aoEscrever: (k: string, v: string) => void; aoGuardar: () => void; desativado: boolean;
 }) {
   const perguntas = usePerguntasDeContrato();
   const chaves = useMemo(() => extractPromptTokens(minuta.body_html), [minuta.body_html]);
   const rotulo = new Map((perguntas.data ?? []).map((p) => [p.key, p]));
-  const html = useMemo(() => sanitizeRichHtml(substituteVariables(minuta.body_html, dadosDaMinuta(d, c, nome, valores, proposta), true)), [minuta.body_html, d, c, nome, valores, proposta]);
+  if (chaves.length === 0 && !(perguntas.error instanceof Error)) return null;
   return (
     <div className="space-y-4">
       {perguntas.error instanceof Error && <p role="alert" className="text-[15px] text-destructive">Não foi possível ler as perguntas da minuta: {perguntas.error.message}</p>}
@@ -213,10 +216,6 @@ function MinutaDoContrato({ minuta, valores, aoEscrever, aoGuardar, desativado, 
           })}
         </fieldset>
       )}
-      <section aria-label="Minuta preenchida" className="rounded-xl border border-border bg-white p-4 text-[15px] text-slate-900">
-        <p className="mb-2 text-sm font-semibold text-slate-600">Minuta «{minuta.name}» preenchida (o que falta aparece a amarelo)</p>
-        <div dangerouslySetInnerHTML={{ __html: html }} />
-      </section>
     </div>
   );
 }
@@ -251,7 +250,8 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
   const [chaveVista, setChaveVista] = useState("");
   const chave = `${c.negocioId ?? ""}|${neg.estado}|${neg.dados.minuta_id ?? ""}`;
   if (chave !== chaveVista) { setChaveVista(chave); setValores(neg.dados.minuta_respostas); }
-  const omissao = lista.data?.find((m) => m.is_default) ?? null;
+  // a minuta por omissão: a marcada como tal ou, havendo uma só minuta ativa, essa
+  const omissao = lista.data?.find((m) => m.is_default) ?? (lista.data?.length === 1 ? lista.data[0] : null);
   const proposta = useDadosDaProposta(c.negocioId).data;
   const corpoPreenchido = (m: MinutaDeContrato, v: Record<string, string>): string =>
     sanitizeRichHtml(substituteVariables(m.body_html, dadosDaMinuta(c.d, c, org.nome, v, proposta)));
@@ -264,6 +264,25 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
     const ok = await neg.guardar({ minuta_respostas: valores, contrato_corpo_html: corpoPreenchido(minuta, valores) });
     if (!ok) setValores(guardado);
   };
+  const escolherMinuta = (id: string | null): void => {
+    const m = id ? lista.data?.find((x) => x.id === id) ?? null : null;
+    void neg.guardar({ minuta_id: id, minuta_respostas: {}, contrato_corpo_html: m ? corpoPreenchido(m, {}) : null });
+  };
+  // 12/11 (Rúben: a minuta estava em «Nenhum» e o contrato não se via): sem minuta escolhida, a por omissão escolhe-se sozinha, uma vez por
+  // negócio (quem a tirar de propósito fica com «Nenhum» até sair do passo)
+  const pode = !bloqueado && podeEscolher(neg, c);
+  const jaEscolhida = useRef<string | null>(null);
+  useEffect(() => {
+    if (soEscolher || !pode || neg.dados.minuta_id || !omissao || jaEscolhida.current === c.negocioId) return;
+    jaEscolhida.current = c.negocioId;
+    escolherMinuta(omissao.id);
+  }, [soEscolher, pode, neg.dados.minuta_id, omissao?.id, c.negocioId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // o corpo da minuta preenchido, com o que falta a amarelo (o que se grava vai sem o amarelo: corpoPreenchido)
+  const minutaHtml = useMemo(
+    () => (minuta ? sanitizeRichHtml(substituteVariables(minuta.body_html, dadosDaMinuta(c.d, c, org.nome, valores, proposta), true)) : null),
+    [minuta, c, org.nome, valores, proposta],
+  );
+  const falta = oQueFaltaNoContrato({ c, minuta, valores, nMinutas: lista.data?.length ?? 0, aLer: lista.isLoading });
   return (
     <div className="space-y-6">
       <section aria-label="Minuta do contrato" className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -271,18 +290,15 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
           rotulo="Minuta do contrato" valor={neg.dados.minuta_id} opcoes={opcoesDe(lista.data)}
           ajuda={omissao && !neg.dados.minuta_id ?`A minuta por omissão é «${omissao.name}».` : "O corpo do contrato; as cláusulas do negócio (prestações, adendas) seguem no fim."}
           aLer={lista.isLoading} erro={lista.error instanceof Error ? lista.error.message : null} aoTentar={() => { void lista.refetch(); }}
-          aoEscolher={(id) => {
-            const m = id ? lista.data?.find((x) => x.id === id) ?? null : null;
-            void neg.guardar({ minuta_id: id, minuta_respostas: {}, contrato_corpo_html: m ? corpoPreenchido(m, {}) : null });
-          }}
-          desativado={bloqueado || !podeEscolher(neg, c)}
+          aoEscolher={escolherMinuta}
+          desativado={!pode}
           paginaDeCriacao={{ para: "/contract-templates", texto: "Criar minutas de contrato" }} vazio="Ainda não há minutas de contrato ativas nesta organização."
         />
         <AvisosDaGravacao t={neg} />
         {minuta && <AssinaturaDaMinuta minuta={minuta} />}
         {minuta && !soEscolher && (
           <MinutaDoContrato
-            minuta={minuta} valores={valores} d={c.d} c={c} nome={org.nome} proposta={proposta} desativado={bloqueado || !podeEscolher(neg, c)}
+            minuta={minuta} valores={valores} desativado={!pode}
             aoEscrever={(k, v) => setValores((x) => ({ ...x, [k]: v }))}
             aoGuardar={() => { void guardarRespostas(); }}
           />
@@ -294,6 +310,8 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
       {/* 9/11 (Rúben: «falta o campo penalização, por isso não consigo gerar»): as condições do contrato da Emylia (penalização por atraso,
           modelo, assinatura, quem assina) continuam obrigatórias, mas o corpo dela não se vê aqui; respondem-se neste bloco */}
       {!soEscolher && <CondicoesDoContrato c={c} nomeMinuta={minuta?.name ?? ""} />}
+      {/* 12/11 (Rúben: «falta ver aqui o contrato»): o contrato montado, antes do envio ao portal */}
+      {!soEscolher && <div key={org.chave}><ContratoNoPasso S={c.ctx.S} d={c.d} minutaHtml={minutaHtml} nomeMinuta={minuta?.name ?? null} falta={falta} /></div>}
       {!soEscolher && <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar} />}
     </div>
   );
@@ -305,18 +323,40 @@ const modeloDaMinuta = (nome: string) => (/presta[cç][aã]o de servi/i.test(nom
 /** As perguntas do grupo «Contrato» da Emylia (como a empresa as ajustou), em botões: o que falta fica marcado.
  *  10/11 (Rúben: «informação limpa»): com uma minuta escolhida, o «Modelo» sai (é o da minuta); o que já está respondido fica numa linha,
  *  com «Mudar»; só se pergunta o que falta. */
+function grupoDasCondicoes(c: ContextoDosTemplates, nomeMinuta: string) {
+  // o modelo segue a minuta (a base pede-o para gerar o contrato): preenche-se sozinho e não se pergunta
+  const modeloAuto = nomeMinuta ? modeloDaMinuta(nomeMinuta) : null;
+  const g0 = efetivo(c.ctx.S.campos, PROPOSTA[1]);
+  const opModelo = g0.campos.find((x) => x.k === "modelo_contrato")?.op ?? [];
+  const usarAuto = !!modeloAuto && opModelo.includes(modeloAuto);
+  const g = { ...g0, campos: g0.campos.filter((x) => !(usarAuto && x.k === "modelo_contrato")) };
+  return { g, modeloAuto, usarAuto };
+}
+
+/** O que falta para haver contrato (12/11), pela ordem do ecrã: a minuta, as perguntas dela, as condições, as medidas e o plano. */
+export function oQueFaltaNoContrato({ c, minuta, valores, nMinutas, aLer }: {
+  c: ContextoDosTemplates; minuta: MinutaDeContrato | null; valores: Record<string, string>; nMinutas: number; aLer: boolean;
+}): string[] {
+  const falta: string[] = [];
+  if (!minuta && !aLer) falta.push(nMinutas === 0 ? "Criar uma minuta de contrato, em «Minutas de contrato»." : "Escolher a minuta do contrato, na lista em cima.");
+  if (minuta) {
+    const n = extractPromptTokens(minuta.body_html).filter((k) => !(valores[k] ?? "").trim()).length;
+    if (n) falta.push(n === 1 ? "Responder a 1 pergunta da minuta." : `Responder a ${n} perguntas da minuta.`);
+  }
+  const { g } = grupoDasCondicoes(c, minuta?.name ?? "");
+  for (const x of emFalta([g], c.d.f)) falta.push(`Responder: ${x.l}.`);
+  if (!retificacaoAceite(c.d)) falta.push("As medidas aceites.");
+  if (!planoAprovadoDe(c.d)) falta.push("O plano da obra aprovado pelas Operações.");
+  return falta;
+}
+
 function CondicoesDoContrato({ c, nomeMinuta = "" }: { c: ContextoDosTemplates; nomeMinuta?: string }) {
   const { ctx, d } = c;
   const [mudar, setMudar] = useState(false);
-  // o modelo segue a minuta (a base pede-o para gerar o contrato): preenche-se sozinho e não se pergunta
-  const modeloAuto = nomeMinuta ? modeloDaMinuta(nomeMinuta) : null;
-  const g0 = efetivo(ctx.S.campos, PROPOSTA[1]);
-  const opModelo = g0.campos.find((x) => x.k === "modelo_contrato")?.op ?? [];
-  const usarAuto = !!modeloAuto && opModelo.includes(modeloAuto);
+  const { g, modeloAuto, usarAuto } = grupoDasCondicoes(c, nomeMinuta);
   useEffect(() => {
     if (usarAuto && c.podeEditar && d.f.modelo_contrato !== modeloAuto) ctx.run(() => ctx.A.campo(d.id, "modelo_contrato", modeloAuto!));
   }, [usarAuto, modeloAuto, d.f.modelo_contrato]); // eslint-disable-line react-hooks/exhaustive-deps
-  const g = { ...g0, campos: g0.campos.filter((x) => !(usarAuto && x.k === "modelo_contrato")) };
   const falta = new Set(emFalta([g], d.f).map((x) => x.k));
   const todos = g.campos.filter((x) => x.t === "sim_nao" || x.t === "escolha");
   if (!todos.length) return null;

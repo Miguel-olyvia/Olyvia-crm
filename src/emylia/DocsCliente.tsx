@@ -737,16 +737,21 @@ function Assinaturas({ linhas, quandoCliente = true }: { linhas: [string, string
   );
 }
 
-/** O contrato. 21/10: com `a`, o contrato da adenda (as mesmas cláusulas e assinaturas, com o que é dela). */
-export function ContratoDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) {
+/** O contrato. 21/10: com `a`, o contrato da adenda (as mesmas cláusulas e assinaturas, com o que é dela).
+ *  12/11 (Rúben: «falta ver aqui o contrato»): com `corpo`, o contrato montado no passo Contrato do CRM: os dados do cliente e da obra,
+ *  o corpo da minuta escolhida (em vez da frase de abertura) e, no fim, as cláusulas do negócio (prestações, prazo, adendas). */
+export function ContratoDoc({ S, d, a, corpo }: { S: Estado; d: Negocio; a?: Adenda; corpo?: ReactNode }) {
   if (a) return <ContratoAdenda S={S} d={d} a={a} />;
-  const o = d.orc!, versao = (o.contratoVersoes?.length ?? 0) + 1;
+  const o = d.orc!, versao = (o.contratoVersoes?.length ?? 0) + 1, comCorpo = corpo !== undefined;
   return (
     <Folha titulo={d.f.modelo_contrato || "Contrato de empreitada"} numero={`CT 2026/${d.id}`} data={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : "rascunho"} carimbo={o.contrato === "assinado" ? "Assinado" : undefined}>
-      <p className="text-slate-700">
-        Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}{EMPRESA.morada ? `, com sede em ${EMPRESA.morada}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
-      </p>
+      {comCorpo ? <><Cliente d={d} />{corpo}</> : (
+        <p className="text-slate-700">
+          Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}{EMPRESA.morada ? `, com sede em ${EMPRESA.morada}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
+        </p>
+      )}
       {o.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({o.contratoRevisto.por}) a {o.contratoRevisto.q}, a pedido do cliente.</p>}
+      {comCorpo && <h2 className="border-t border-slate-200 pt-5 text-base font-semibold">Cláusulas do negócio</h2>}
       {clausulasContrato(d, S).map((c, i) => <Clausula key={i + 1} k={i + 1} titulo={c.titulo} corpo={c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto} revista={c.revista} />)}
       <AdendasDoContrato S={S} d={d} />
       <Assinaturas linhas={[
