@@ -6,7 +6,7 @@
 // 11/11 (Rúben: «a transcrição falha muito e precisamos de retirar muitos mais insights»): a transcrição em direto é só a
 // pré-visualização; o gravador revê a conversa em blocos contínuos, com quem fala (gravador.ts, blocosAudio.ts). No fim vêm os campos
 // e a análise da conversa (InsightsConversa), que fica no negócio. Uma gravação feita fora da app carrega-se e segue o mesmo caminho.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Camera, Check, FileAudio, Mic, PhoneOff, RotateCcw, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -123,7 +123,6 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const [aLerFolha, setALerFolha] = useState(false);
   const [plantaLida, setPlantaLida] = useState<PlantaLida | null>(null);
   const [plantaUsada, setPlantaUsada] = useState(false);
-  const fimLista = useRef<HTMLDivElement>(null);
   // 11/11 (Rúben: «aprende e melhora»): o guia ao vivo (os temas-chave e a próxima pergunta), enquanto se grava ou transcreve
   const [guia, setGuia] = useState<GuiaConversa | null>(null);
   const [guiaAPensar, setGuiaAPensar] = useState(false);
@@ -133,7 +132,6 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const guiaNoAr = useRef(false);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
 
-  useEffect(() => { fimLista.current?.scrollIntoView({ block: "nearest" }); }, [falas.length]);
   // o painel à vista: o indicador de baixo esconde-se
   useEffect(() => painelAberto(), []);
   useEffect(() => { void microfones().then(setMics); }, [vivo]);
@@ -447,8 +445,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
       {falas.length ? (
         <>
           {comBlocos ? <p className="mt-3 text-xs text-muted-foreground">As frases mais claras são a pré-visualização. A cada minuto a Olyvia revê-as com a conversa toda e diz quem fala.</p> : null}
-          <ListaFalas falas={falas} id={(i) => `fala-${modo}-${d.id}-${i}`} destaque={destaque} provisorias={aOuvir} />
-          <div ref={fimLista} />
+          <ListaFalas falas={falas} id={(i) => `fala-${modo}-${d.id}-${i}`} destaque={destaque} provisorias={aOuvir} seguir />
         </>
       ) : falasGuardadas.length && !ocupado ? (
         <details className="mt-4" open={verGuardada} onToggle={(e) => setVerGuardada((e.target as HTMLDetailsElement).open)}>
@@ -524,10 +521,19 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
 
 /** A transcrição: tempo, quem fala e o texto. 11/11: enquanto se grava, as falas ainda não revistas vêem-se mais claras; uma frase que o
  *  modelo ouviu mal leva um traço por baixo. `destaque` é a fala para onde a análise levou. */
-function ListaFalas({ falas, id, destaque, provisorias }: { falas: readonly Fala[]; id: (i: number) => string; destaque: number | null; provisorias: boolean }) {
+/** 12/11 (Rúben: «quando transcreve, a página faz scroll para cima e é chato»): com «seguir», a lista desce sozinha até à última fala, mas
+ *  só ela (antes um scrollIntoView depois da lista mexia na página toda) e só se já se estava no fundo (quem subiu para reler não é puxado). */
+function ListaFalas({ falas, id, destaque, provisorias, seguir = false }: { falas: readonly Fala[]; id: (i: number) => string; destaque: number | null; provisorias: boolean; seguir?: boolean }) {
   const cor = (f: Fala) => f.falante === "comercial" ? "text-primary" : f.falante === "outro" ? "text-violet-700" : "text-amber-800";
+  const caixa = useRef<HTMLDivElement>(null);
+  const noFundo = useRef(true);
+  useLayoutEffect(() => {
+    const el = caixa.current;
+    if (seguir && el && noFundo.current) el.scrollTop = el.scrollHeight;
+  }, [falas, seguir]);
   return (
-    <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-border bg-background p-3 text-[15px]" aria-label="Transcrição">
+    <div ref={caixa} onScroll={(e) => { const el = e.currentTarget; noFundo.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}
+      className="mt-2 max-h-72 space-y-1.5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-background p-3 text-[15px]" aria-label="Transcrição">
       {falas.map((f, i) => {
         const provisoria = provisorias && !f.revista;
         return (
