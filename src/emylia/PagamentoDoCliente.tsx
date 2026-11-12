@@ -30,7 +30,7 @@ export function PagamentoDoCliente({ S, A, run, d }: Ctx & { d: Negocio }) {
     ...(metodo === "Referência MB" ? [["Entidade · referência", `${empresa?.mbEntidade ?? "sem entidade"} · ${em3(referenciaMb(d.id, ft.n))}`] as [string, string]] : []),
     ...(metodo === "MB Way" ? [["MB Way para", empresa?.mbway ?? "sem número"] as [string, string]] : []),
     ...(metodo === "Transferência" ? [["IBAN", empresa?.iban ? ibanAVista(empresa.iban) : "ainda não indicado"] as [string, string]] : []),
-    ["No Eticadata", d.fin.erp ? resumoErp(d.fin.erp) : "ainda não lido (a Olyvia verifica sozinha com o CRM aberto)"],
+    ["No Eticadata", d.fin.erp ? resumoErp(d.fin.erp) : "ainda não lido aqui (a Olyvia verifica sozinha de 10 em 10 minutos)"],
   ];
   return (
     <div className="max-w-xl space-y-6">

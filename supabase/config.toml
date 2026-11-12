@@ -159,3 +159,6 @@ verify_jwt = true
 # Valida o JWT dentro da função (auth.getUser); publicada sem verificação no gateway.
 [functions.create-supplier-portal-access]
 verify_jwt = false
+
+[functions.erp-verificar-pagamentos]
+verify_jwt = false

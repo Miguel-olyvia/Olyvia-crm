@@ -93,7 +93,7 @@ export function EstadoFaturaErp({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   if (!ft) return null;
   if (!i) return porPagar ? (
     <p className="rounded-xl border border-border bg-muted/40 p-4 text-[15px] text-muted-foreground">
-      A {ft.n} foi registada sem ligação ao Eticadata. A Olyvia vai verificando sozinha se já foi paga, sempre que um PC na rede da empresa tiver a Olyvia aberta; até lá, pode validar o pagamento à mão no passo seguinte.
+      A {ft.n} foi registada sem ligação ao Eticadata. A Olyvia verifica sozinha no Eticadata, de 10 em 10 minutos, se já foi paga; quando estiver paga, o negócio avança. Até lá, pode validar o pagamento à mão no passo seguinte.
       {verificar && <> <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.verificarErp(d.id))}>Verificar no ERP</button></>}
     </p>
   ) : null;
