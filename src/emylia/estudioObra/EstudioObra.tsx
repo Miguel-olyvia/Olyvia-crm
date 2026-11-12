@@ -11,7 +11,7 @@
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Flame, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -38,6 +38,7 @@ import { NovaTarefa } from "../PlanoInterativo";
 import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
+import { AgendaEquipa, ComandoHoje, DiarioObra, Entregas, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
 import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 
@@ -50,7 +51,7 @@ const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia útil" : "dias úteis
 
 type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: string; k: "atraso"; ti: number; dias: number };
 type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } } | null;
-type AbaObra = "plano" | "execucao" | "materiais" | "equipa" | "cliente" | "fecho";
+type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "fecho";
 type Retrato = { dia: number; dur: number; h: number; tec: string | null }[];
 
 const COR_VIVO: Record<EstadoVivo, string> = {
@@ -70,6 +71,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   // o imprevisto a ser registado (painel): o atraso dele mostra-se já no plano vivo, sem a caixa de aplicar
   const [fantasma, setFantasma] = useState<Plano | null>(null);
   const imprevistosRef = useRef<HTMLElement>(null);
+  const comandoRef = useRef<HTMLElement>(null), previsaoRef = useRef<HTMLElement>(null);
   // 11/11 (Rúben: «gerir tudo por completo»): os separadores, a vista do plano e o «Desfazer» das mudanças ao plano
   const [aba, setAba] = useState<AbaObra>("plano");
   const [vista, setVista] = useState<"gantt" | "tecnicos">("gantt");
@@ -99,7 +101,9 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   const fim = Math.max(1, fimDe(p.tasks)), der = derrapagem(p);
   const fimR = R ? R.fimDepois : fim;
   const inicio = inicioDoPlano(p) ?? new Date();
-  const nDias = Math.max(fim, fimR, p.base ? fimDe(p.base) : 0) + 3;
+  // 12/11: os números vivos (a previsão vai além do fim do plano: as datas têm de chegar lá)
+  const viva = obraViva(d, S);
+  const nDias = Math.max(fim, fimR, p.base ? fimDe(p.base) : 0, viva.prev ? viva.prev.ate : 0) + 3;
   const dias = diasDaObra(inicio, nDias);
   const PV = porValidar(p);
   const falta = vivo ? faltaParaEncerrar(d, S, db) : [];
@@ -147,6 +151,15 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
     }
   };
 
+  // 12/11: o que as peças vivas (pulso, comando, previsão, agenda, diário) usam para levar cada coisa ao sítio dela
+  const rolar = (r: React.RefObject<HTMLElement>) => window.setTimeout(() => r.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" }), 60);
+  const ir: Ir = {
+    tarefa: (ti) => setPainel({ k: "tarefa", ti }), aba: (x) => setAba(x), outra: setOutra,
+    replanear: () => { setPainel(null); setAba("plano"); setPrevia({ titulo: "Pôr a obra em dia", k: "replanear", adiantar: true }); },
+    imprevisto: (id) => { setAba("plano"); if (id) window.setTimeout(() => verImprevisto(id), 80); else rolar(imprevistosRef); },
+    previsao: () => { setAba("plano"); rolar(previsaoRef); }, comando: () => rolar(comandoRef),
+  };
+  const pedidos = precisaDeTi(ctx, d, ir);
   // o botão principal: um só, pelo momento da obra
   const principal = p.estado === "aprovado"
     ? { t: "Arrancar a obra", icone: Rocket, desligado: faltaArrancar.length > 0 || !planeia, porque: faltaArrancar.length ? `Falta ${faltaArrancar.join(", ")}.` : !planeia ? "Quem arranca a obra são as Operações." : "", fn: () => fazer(() => A.arrancar(d.id)) }
@@ -189,21 +202,9 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
         <div className="relative flex min-h-0 flex-1">
           <main className="min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto max-w-[1500px] space-y-6 px-4 py-5 sm:px-6">
-              {/* ------------------------------------------------------------ os números */}
-              <section aria-label="A obra em números" className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
-                <Numero rotulo="Feito" icone={<Gauge className="h-4 w-4" />}><Contagem valor={Math.round(progresso(p) * 100)} fmt={(n) => `${Math.round(n)}%`} de={0} /></Numero>
-                <Numero rotulo={vivo ? "Dia da obra" : "Começa"} icone={<Clock className="h-4 w-4" />}>{vivo ? <span>{p.dia + 1} <span className="text-base font-normal text-muted-foreground">de {fimR}</span></span> : dataCurta(inicio)}</Numero>
-                <Numero rotulo="Fica pronta" icone={<CalendarCheck className="h-4 w-4" />}
-                  sub={R ? (R.fimDepois === R.fimAntes ? "mantém-se" : `${R.fimDepois > R.fimAntes ? "+" : "−"}${dd(Math.abs(R.fimDepois - R.fimAntes))}`) : der > 0 ? `+${dd(der)} face ao orçamento` : der < 0 ? `${dd(-der)} mais cedo` : "como no orçamento"}
-                  tom={R ? (R.fimDepois > R.fimAntes ? "mau" : R.fimDepois < R.fimAntes ? "bom" : undefined) : der > 0 ? "mau" : der < 0 ? "bom" : undefined}>
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    <motion.span key={fimR} initial={reduzir ? false : { y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} className="inline-block">{dias[fimR - 1] ? dataCurta(dias[fimR - 1]) : "—"}</motion.span>
-                  </AnimatePresence>
-                </Numero>
-                <Numero rotulo="Tarefas validadas" icone={<CheckCircle2 className="h-4 w-4" />}><span>{validadas} <span className="text-base font-normal text-muted-foreground">de {p.tasks.length}</span></span></Numero>
-                <Numero rotulo="Imprevistos" icone={<AlertTriangle className="h-4 w-4" />} sub={imsAbertos.length ? `por resolver · ${ims.length} no total` : ims.length ? `${ims.length} no total, resolvidos` : "nenhum"} tom={ims.some((i) => i.estado === "aberto" || i.estado === "recusado") ? "mau" : undefined}><Contagem valor={imsAbertos.length} fmt={(n) => String(Math.round(n))} de={0} /></Numero>
-                <Numero rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} sub={custoPend ? `+${eur(custoPend)} € s/ IVA em imprevistos por aprovar` : val?.adendas ? `inclui ${eur(val.adendas)} € de adendas` : "com IVA"}>{val ? `${eur(val.total)} €` : "—"}</Numero>
-              </section>
+              {/* ------------------------------------------------------------ 12/11: o pulso (os números, que se tocam) e o comando de hoje */}
+              {viva.prev && <Pulso d={d} S={S} dias={dias} prev={viva.prev} margem={viva.margem} precisa={pedidos.length} ir={ir} />}
+              {(vivo || p.estado === "aprovado") && <ComandoHoje ctx={ctx} d={d} dias={dias} pedidos={pedidos} ir={ir} comandoRef={comandoRef} />}
 
               {/* ------------------------------------------------------------ «E se…?»: a pré-visualização, antes de aplicar */}
               <AnimatePresence>
@@ -214,6 +215,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
               <div role="tablist" aria-label="O que gerir" className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
                 <Aba on={aba === "plano"} rot="Plano" n={alertas.length} aviso onClick={() => setAba("plano")} icone={<CalendarRange className="h-4 w-4" />} />
                 <Aba on={aba === "execucao"} rot="Execução" n={n.execucao} aviso onClick={() => setAba("execucao")} icone={<ListChecks className="h-4 w-4" />} />
+                <Aba on={aba === "diario"} rot="Diário" onClick={() => setAba("diario")} icone={<Camera className="h-4 w-4" />} />
                 <Aba on={aba === "materiais"} rot="Materiais" n={n.materiais} aviso onClick={() => setAba("materiais")} icone={<Package className="h-4 w-4" />} />
                 <Aba on={aba === "equipa"} rot="Equipa" n={n.equipa} aviso onClick={() => setAba("equipa")} icone={<Users className="h-4 w-4" />} />
                 <Aba on={aba === "cliente"} rot="Cliente" n={n.cliente} aviso onClick={() => setAba("cliente")} icone={<MessageSquare className="h-4 w-4" />} />
@@ -222,10 +224,12 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
               {/* troca logo (sem esperar pela saída do anterior), com uma entrada curta */}
               <motion.div key={aba} role="tabpanel" initial={reduzir ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="space-y-6">
                   {aba === "plano" && <>
+                  {viva.prev && !previa && <PrevisaoViva d={d} dias={dias} prev={viva.prev} margem={viva.margem} critico={viva.critico} ir={ir} previsaoRef={previsaoRef} />}
               {/* ------------------------------------------------------------ o plano vivo */}
               <GanttVivo titulo={previa ? "O plano, se aplicar" : R ? "O plano, com o imprevisto" : "O plano vivo"} p={p} R={R} dias={dias} sel={painel?.k === "tarefa" ? painel.ti : null} abrir={(ti) => setPainel({ k: "tarefa", ti })} imprevistos={ims.map((i) => ({ id: i.id, dia: i.dia, texto: i.texto }))} reduzir={reduzir}
                 vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => A.ajustarTarefa(d.id, ti, m))}
-                nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra} />
+                nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra}
+                critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined} />
 
               <div className="grid gap-6 lg:grid-cols-2">
                 {/* ------------------------------------------------------------ os alertas */}
@@ -272,10 +276,12 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
               )}
                   </>}
                   {aba === "execucao" && <Execucao ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} />}
-                  {aba === "materiais" && <MateriaisDaObra ctx={ctx} d={d} />}
+                  {aba === "diario" && <DiarioObra d={d} ir={ir} />}
+                  {aba === "materiais" && <><Entregas d={d} /><MateriaisDaObra ctx={ctx} d={d} /></>}
+                  {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}
-                  {aba === "cliente" && <ClienteDaObra ctx={ctx} d={d} />}
-                  {aba === "fecho" && <FechoDaObra ctx={ctx} d={d} irPara={setAba} />}
+                  {aba === "cliente" && <>{vivo && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></>}
+                  {aba === "fecho" && <><FechoDaObra ctx={ctx} d={d} irPara={setAba} /><FechoVivo d={d} ir={ir} /></>}
               </motion.div>
             </div>
           </main>
@@ -388,16 +394,18 @@ function CartaoAlerta({ a, agir, reduzir }: { a: Alerta; agir: (x: AcaoAlerta) =
 // 11/11 (Rúben: «gerir tudo por completo, mais ainda do que na aprovação»): as tarefas que ainda não começaram arrastam-se (o dia) e a ponta
 // muda os dias, como no Estúdio do plano; na vista por técnico, por baixo das tarefas, onde a pessoa está fora desta obra (outra obra, que
 // abre o Estúdio dela, ou férias) e, num dia vazio, «+» cria uma tarefa para essa pessoa nesse dia.
-type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number };
-function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra }: {
+type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number; dy: number };
+function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra, critico, passar }: {
   titulo: string; p: Plano; R: Replano | null; dias: Date[]; sel: number | null; abrir: (ti: number) => void; imprevistos: { id: string; dia: number; texto: string }[]; reduzir: boolean;
   vista: "gantt" | "tecnicos"; setVista: (v: "gantt" | "tecnicos") => void; podeMexer: (ti: number) => boolean;
   mover: (ti: number, m: { dia?: number; dur?: number }) => void; nova?: (dia: number, tec: string | null) => void;
   obras: Map<string, Map<string, Negocio>>; deFerias: (tec: string, iso: string) => boolean; abrirOutra: (o: Negocio) => void;
+  /** 12/11: as tarefas sem folga (realçadas) e passar uma tarefa a outra pessoa (arrastar para a linha dela, na vista por técnico) */
+  critico: Set<number>; passar?: (ti: number, tec: string) => void;
 }) {
   const vivo = p.estado === "em curso";
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
-  const toque = useRef<{ x: number; ti: number; tipo: "mover" | "durar" } | null>(null);
+  const toque = useRef<{ x: number; y: number; ti: number; tipo: "mover" | "durar" } | null>(null);
   const [sob, setSob] = useState<{ k: number; tec: string | null } | null>(null);
   const largouEm = useRef(0); // o clique logo a seguir a um arrasto não abre a tarefa
   const fases = FASES_OBRA.map((f) => ({ ...f, tis: p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => (t.fase ?? 1) === f.n).sort((a, b) => a.t.dia - b.t.dia).map((x) => x.ti) })).filter((f) => f.tis.length);
@@ -407,10 +415,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     if (R || !podeMexer(ti)) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    toque.current = { x: e.clientX, ti, tipo };
-    setArrasto({ ti, tipo, dx: 0 });
+    toque.current = { x: e.clientX, y: e.clientY, ti, tipo };
+    setArrasto({ ti, tipo, dx: 0, dy: 0 });
   };
-  const arrastar = (e: React.PointerEvent) => { if (toque.current) setArrasto({ ti: toque.current.ti, tipo: toque.current.tipo, dx: e.clientX - toque.current.x }); };
+  const arrastar = (e: React.PointerEvent) => { if (toque.current) setArrasto({ ti: toque.current.ti, tipo: toque.current.tipo, dx: e.clientX - toque.current.x, dy: vista === "tecnicos" ? e.clientY - toque.current.y : 0 }); };
   const largar = (e: React.PointerEvent) => {
     const t = toque.current;
     toque.current = null;
@@ -418,9 +426,12 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     // pelo próprio evento (um arrasto rápido larga antes de o estado do arrasto mudar)
     const passos = Math.round((e.clientX - t.x) / COL);
     setArrasto(null);
+    // 12/11: na vista por técnico, largar noutra linha passa a tarefa a essa pessoa
+    const linha = vista === "tecnicos" && passar && Math.abs(e.clientY - t.y) > 18 ? (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest?.("[data-tec]")?.getAttribute("data-tec") : null;
+    const x = p.tasks[t.ti];
+    if (linha && linha !== x.tec) { largouEm.current = Date.now(); passar!(t.ti, linha); if (passos && t.tipo === "mover") moverTarefa(t.ti, { dia: Math.max(vivo ? p.dia : 0, x.dia + passos) }); return; }
     if (!passos) return; // sem andar, é um clique: abre a tarefa (onClick)
     largouEm.current = Date.now();
-    const x = p.tasks[t.ti];
     if (t.tipo === "mover") moverTarefa(t.ti, { dia: Math.max(vivo ? p.dia : 0, x.dia + passos) });
     else moverTarefa(t.ti, { dur: Math.max(1, x.dur + passos) });
   };
@@ -441,7 +452,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
             style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: 28 }}>+{atraso}</div>
         )}
-        <Barra t={t} n={n} v={v} p={p} sel={sel === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top}
+        <Barra t={t} n={n} v={v} p={p} sel={sel === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)}
           arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} />
       </Fragment>
     );
@@ -467,9 +478,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda">
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-[3px] w-4 rounded-full bg-foreground/30" />Previsto no orçamento</li>
+          <li className="flex items-center gap-1.5"><Flame className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />Caminho crítico</li>
         </ul>
       </div>
-      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}</p>}
+      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}</p>}
       <div className="overflow-x-auto" onPointerMove={arrastar} onPointerUp={largar} onPointerCancel={() => { toque.current = null; setArrasto(null); }} onPointerLeave={() => !toque.current && setSob(null)}>
         <div className="min-w-max">
           {/* os dias */}
@@ -525,7 +537,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                   <span className="hidden sm:block"><AvatarTec id={tec} tam="h-8 w-8" /></span>
                   <span className="min-w-0"><span className="block truncate text-sm font-medium">{nomeTec(tec)}</span><span className="block truncate text-xs text-muted-foreground">{tec ? `${TECS.find((x) => x.id === tec)?.sk ?? ""} · ${ts.length} ${ts.length === 1 ? "tarefa" : "tarefas"}` : "falta escolher"}</span></span>
                 </div>
-                <div className="relative" style={{ width: dias.length * COL, height: altura }}
+                <div className="relative" style={{ width: dias.length * COL, height: altura }} data-tec={tec ?? undefined}
                   onPointerMove={(e) => { if (toque.current) return; const r = e.currentTarget.getBoundingClientRect(); const kk = Math.floor((e.clientX - r.left) / COL); if (kk !== sob?.k || tec !== sob?.tec) setSob(kk >= 0 && kk < dias.length ? { k: kk, tec } : null); }}>
                   {fundo()}
                   {nova && livre && !arrasto && !R && (
@@ -561,8 +573,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   );
 }
 
-function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar }: {
-  t: Tarefa; n: Tarefa; v: EstadoVivo; p: Plano; sel: boolean; mudou: boolean; abrir: () => void; reduzir: boolean; top: number;
+function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar, critica }: {
+  t: Tarefa; n: Tarefa; v: EstadoVivo; p: Plano; sel: boolean; mudou: boolean; abrir: () => void; reduzir: boolean; top: number; critica?: boolean;
   arrasto: Arrasto | null; mexe: boolean; pegar: (e: React.PointerEvent, tipo: "mover" | "durar") => void;
 }) {
   const cor = COR_FASE[t.fase ?? 1];
@@ -575,16 +587,18 @@ function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, peg
   return (
     <motion.button type="button" onClick={abrir} onPointerDown={(e) => mexe && pegar(e, "mover")} initial={false}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
-      animate={{ left: n.dia * COL + 2 + dx, width: Math.max(COL - 4, n.dur * COL - 4 + dw), scale: arrasto ? 1.03 : 1 }}
+      animate={{ left: n.dia * COL + 2 + dx, width: Math.max(COL - 4, n.dur * COL - 4 + dw), scale: arrasto ? 1.03 : 1, y: arrasto?.dy ?? 0 }}
       transition={reduzir || arrasto ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 30 }}
       aria-label={`${t.nome}: ${ROTULO_VIVO[v].toLowerCase()}, ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a partir de ${dataCurta(dataIni)}` : ""}${mudou ? " (muda)" : ""}`}
       className={cn("absolute flex items-center gap-1 overflow-hidden rounded-lg px-2 text-left text-xs font-medium text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
         mexe ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+        critica && !sel && v !== "atrasada" && "ring-2 ring-amber-500/80 ring-offset-1 ring-offset-card",
         sel && "ring-2 ring-foreground ring-offset-2 ring-offset-card", v === "atrasada" && "ring-2 ring-destructive ring-offset-1 ring-offset-card", mudou && "ring-2 ring-primary ring-offset-1 ring-offset-card")}
       style={{ top, height: 28, touchAction: mexe ? "none" : undefined, zIndex: arrasto ? 20 : undefined,
         background: v === "parada" || v === "pausada" ? "repeating-linear-gradient(135deg,#64748b 0 6px,#94a3b8 6px 12px)" : (v === "em curso" || v === "hoje" || v === "atrasada") ? `color-mix(in srgb, ${fundo} 45%, transparent)` : v === "por começar" ? `color-mix(in srgb, ${fundo} 80%, white)` : fundo }}>
       {(v === "em curso" || v === "hoje" || v === "atrasada") && <motion.span aria-hidden="true" className="absolute inset-y-0 left-0" style={{ background: fundo }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${Math.round(feito * 100)}%` }} transition={{ duration: 0.6, ease: "easeOut" }} />}
       {I && <I className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+      {critica && !I && <Flame className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
       <span className="relative truncate drop-shadow-sm">{t.nome}</span>
       {arrasto && passos !== 0 && <span className="relative ml-auto shrink-0 rounded bg-black/25 px-1 text-[10px] tabular-nums">{passos > 0 ? "+" : ""}{passos}</span>}
       {mexe && <span onPointerDown={(e) => pegar(e, "durar")} aria-hidden="true" className="absolute inset-y-0 right-0 w-3 cursor-ew-resize bg-white/0 hover:bg-white/30" />}

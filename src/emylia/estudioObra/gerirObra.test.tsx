@@ -109,7 +109,8 @@ describe("o Estúdio da obra: gerir tudo", () => {
     expect(screen.getByRole("region", { name: "Pedir mais ou devolver" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: /Equipa/ }));
     expect(screen.getByRole("article", { name: "Paulo Mota" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /noutra obra|Marta Lima/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Semana seguinte" }));
+    expect(screen.getAllByRole("button", { name: /Marta Lima/ }).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("tab", { name: /Cliente/ }));
     fireEvent.click(screen.getByRole("button", { name: "Amanhã a equipa chega às 9h." }));
     fireEvent.click(screen.getByRole("button", { name: /Avisar no portal/ }));

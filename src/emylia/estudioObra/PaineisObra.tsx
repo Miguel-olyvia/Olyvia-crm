@@ -358,7 +358,7 @@ export function EquipaDaObra({ ctx, d, dias, abrirOutra, novaPara, abrir }: {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">Quem está nesta obra, o que tem por fazer e onde está nos próximos dias.</p>
+        <p className="text-sm font-semibold">Quem está nesta obra e o que tem por fazer</p>
         {planeia && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => novaPara(null)}><Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar uma pessoa</Button>}
       </div>
       {pessoas.map((tec) => {
@@ -377,27 +377,6 @@ export function EquipaDaObra({ ctx, d, dias, abrirOutra, novaPara, abrir }: {
               </div>
               {planeia && porFazer.length > 0 && <Button type="button" size="sm" variant="ghost" className="min-h-9 rounded-full" onClick={() => setPassar(passar === tec ? null : tec)}><Users className="mr-1 h-4 w-4" aria-hidden="true" />Passar as tarefas</Button>}
             </div>
-            {/* os próximos 10 dias úteis: nesta obra, noutra obra (abre o Estúdio dela) ou de férias */}
-            <div className="mt-3 flex gap-1" role="list" aria-label={`Os próximos dias de ${nomeTec(tec)}`}>
-              {janela.map((x, j) => {
-                const k = hoje + j, aqui = ts.some(({ t }) => k >= t.dia && k < t.dia + t.dur);
-                const b = fora.find((y) => j >= y.ini && j < y.fim);
-                const txt = b ? (b.tipo === "ferias" ? "férias" : b.obra!.nome) : aqui ? "nesta obra" : "livre";
-                return (
-                  <button key={k} type="button" role="listitem" disabled={!b || b.tipo !== "obra"} onClick={() => b?.obra && abrirOutra(b.obra)} title={`${dataCurta(x)}: ${txt}`}
-                    aria-label={`${dataCurta(x)}: ${txt}`}
-                    className={cn("flex min-h-12 flex-1 flex-col items-center justify-center rounded-lg text-[11px] tabular-nums",
-                      b?.tipo === "ferias" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100" : b ? "bg-muted-foreground/20 hover:bg-muted-foreground/30" : aqui ? "bg-primary/15 text-primary" : "bg-muted/50 text-muted-foreground")}>
-                    <span>{x.getDate()}</span>{b?.tipo === "obra" && <ArrowUpRight className="h-3 w-3" aria-hidden="true" />}
-                  </button>
-                );
-              })}
-            </div>
-            {fora.filter((b) => b.tipo === "obra").length > 0 && (
-              <p className="mt-2 text-sm text-muted-foreground">Também em: {[...new Map(fora.filter((b) => b.obra).map((b) => [b.obra!.id, b.obra!])).values()].map((o) => (
-                <button key={o.id} type="button" onClick={() => abrirOutra(o)} className="mr-2 inline-flex items-center gap-0.5 font-medium text-primary underline underline-offset-2 hover:no-underline">{o.nome}<ArrowUpRight className="h-3 w-3" aria-hidden="true" /></button>
-              ))}</p>
-            )}
             <ul className="mt-2 flex flex-wrap gap-1.5">
               {ts.map(({ t, ti }) => <li key={ti}><button type="button" onClick={() => abrir(ti)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm hover:bg-muted"><span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} />{t.nome}<ChipVivo t={t} p={p} /></button></li>)}
             </ul>
