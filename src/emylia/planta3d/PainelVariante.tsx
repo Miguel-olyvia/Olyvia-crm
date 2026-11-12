@@ -107,11 +107,11 @@ export function PainelConjunto({ planta, peca, onEscolher, onRetirar, onRepor }:
 }
 
 /** A lista de peças do espaço como linhas vendáveis: cada componente de um conjunto é uma linha por si, com a indicação do conjunto. */
-export function ListaVendavel({ planta }: { planta: Planta }) {
+export function ListaVendavel({ planta, aberta = false }: { planta: Planta; aberta?: boolean }) {
   const linhas = linhasVendaveis(planta);
   if (linhas.length === 0) return null;
   return (
-    <details className="rounded-xl border border-border p-3">
+    <details open={aberta || undefined} className="rounded-xl border border-border p-3">
       <summary className="min-h-11 cursor-pointer content-center text-[15px] font-medium">Lista de peças para venda ({linhas.filter((l) => !l.retirado).length})</summary>
       <ul className="space-y-1 pt-2 text-[15px]">
         {linhas.map((l) => (

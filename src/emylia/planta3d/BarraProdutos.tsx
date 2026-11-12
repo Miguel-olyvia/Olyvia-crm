@@ -26,6 +26,8 @@ export interface BarraProdutosProps {
   produtos: readonly ProdutoModelo3D[];
   espaco: TipoEspaco;
   onEspaco: (t: TipoEspaco) => void;
+  /** O selector «Espaço» vive noutro sítio (o passo «Divisão» da planta): aqui não se repete. */
+  semSeletorEspaco?: boolean;
   onPegar: (e: RPointerEvent<HTMLButtonElement>, m: ProdutoModelo3D) => void;
   onMover: (e: RPointerEvent<HTMLButtonElement>) => void;
   onLargar: (e: RPointerEvent<HTMLButtonElement>) => void;
@@ -92,7 +94,7 @@ function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | n
 /** As famílias que a lista mostra: com SO_COM_MODELO_HTML, só as que têm o modelo do HTML. */
 const familiasVisiveis = (c: Familia["categoria"]): Familia[] => familiasDaCategoria(c).filter((f) => !SO_COM_MODELO_HTML || !!f.htmlModelo);
 
-export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao, onComposicaoLivre }: BarraProdutosProps) {
+export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, semSeletorEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao, onComposicaoLivre }: BarraProdutosProps) {
   const [q, setQ] = useState("");
   const [livreAberta, setLivreAberta] = useState(false);
   const [grupoEscolhido, setGrupo] = useState<string>("");
@@ -142,11 +144,13 @@ export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, onPeg
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="grid gap-1 text-sm font-medium">Espaço
-          <select className={INP} value={espaco} onChange={(e) => { onEspaco(e.target.value as TipoEspaco); escolher(""); }}>
-            {(Object.keys(ROTULO_ESPACO) as TipoEspaco[]).map((t) => <option key={t} value={t}>{ROTULO_ESPACO[t]}</option>)}
-          </select>
-        </label>
+        {!semSeletorEspaco && (
+          <label className="grid gap-1 text-sm font-medium">Espaço
+            <select className={INP} value={espaco} onChange={(e) => { onEspaco(e.target.value as TipoEspaco); escolher(""); }}>
+              {(Object.keys(ROTULO_ESPACO) as TipoEspaco[]).map((t) => <option key={t} value={t}>{ROTULO_ESPACO[t]}</option>)}
+            </select>
+          </label>
+        )}
         <label className="grid min-w-40 flex-1 gap-1 text-sm font-medium">Procurar no catálogo
           <input type="search" className={INP} value={q} onChange={(e) => { setQ(e.target.value); setQuantos(PASSO_VISIVEIS); }} placeholder="Nome, marca ou categoria" />
         </label>

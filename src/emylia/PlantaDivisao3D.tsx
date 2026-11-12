@@ -10,9 +10,9 @@ import { Box } from "lucide-react";
 import { useCatalogo } from "./v2/catalogoStore";
 import { BarraProdutos } from "./planta3d/BarraProdutos";
 import { BarraRevestimentos } from "./planta3d/BarraRevestimentos";
-import { PE_DIREITO_OMISSAO, areaPavimento, areaParedes } from "./planta3d/modelo";
+import { PE_DIREITO_OMISSAO, areaPavimento, areaParedes, type TipoEspaco } from "./planta3d/modelo";
 import { Planta3DPainel } from "./planta3d/Planta3DPainel";
-import { comDemonstracao, produtosParaEspaco, type ProdutoModelo3D } from "./planta3d/catalogo3d";
+import { ROTULO_ESPACO, comDemonstracao, produtosParaEspaco, type ProdutoModelo3D } from "./planta3d/catalogo3d";
 import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede, encostarParede, moverPara, normalizarAngulo, poligonoDe, rodarPeca } from "./planta3d/pecas3d";
 import type { Mover3D } from "./planta3d/Visualizador3D";
 import { aplicarVariante, expandirConjunto, guardarLugarLocal, mudarMontagem, reporComponente, reposicionarConjunto, retirarComponente, type Conjunto } from "./planta3d/conjuntos";
@@ -40,6 +40,10 @@ import {
 const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const CHIP = "inline-flex min-h-11 touch-none select-none items-center gap-1.5 rounded-full border border-input bg-background px-4 py-2 text-[15px] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40";
 const PE_DIREITO_SEM_RESPOSTA = 2.5;
+/** Os cinco passos da página, um visível de cada vez. A planta é o palco dos passos 2 a 4; o estado vive todo neste componente, por isso andar entre passos nunca o perde. */
+const PASSOS = ["Divisão", "Paredes", "Portas e janelas", "Produtos", "Rever e ver em 3D"] as const;
+/** Porque é que «Seguinte» está desactivado no passo 2. */
+const MOTIVO_SEM_PAREDES = "Desenhe pelo menos uma parede";
 /** A tela sem nada desenhado: 5 m por 4 m. */
 const TELA = { x: 0, y: 0, w: 500, h: 400 };
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
@@ -82,6 +86,9 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
   const [ver3d, setVer3d] = useState(false);
   const [genericas, setGenericas] = useState(false);
   const [feito, setFeito] = useState("");
+  const [passo, setPasso] = useState(1);
+  const [alcancado, setAlcancado] = useState(1);
+  const tituloPasso = useRef<HTMLHeadingElement>(null), primeiraVez = useRef(true);
   const svg = useRef<SVGSVGElement>(null);
   const arrasto = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const contador = useRef(p.pecas.length);
@@ -354,164 +361,166 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
     return horiz ? { x: (a.x + z.x) / 2, y: a.y - sinal * letra * 1.1 } : { x: a.x + sinal * letra * 2.4, y: (a.y + z.y) / 2 };
   };
 
+  // ---- os passos: sem paredes só se chega ao 2; os marcadores já alcançados voltam atrás ou avançam sem perder nada ----
+  const temParedes = p.paredes.length > 0;
+  const passoAtual = !temParedes && passo > 2 ? 2 : passo;
+  const motivo = passoAtual === 2 && !temParedes ? MOTIVO_SEM_PAREDES : "";
+  const irParaPasso = (n: number) => { setPasso(n); setAlcancado((a) => Math.max(a, n)); };
+  const marcadorAberto = (n: number) => n === passoAtual || (n <= alcancado && (n < 3 || temParedes));
+  useEffect(() => {
+    if (primeiraVez.current) { primeiraVez.current = false; return; }
+    tituloPasso.current?.focus();
+  }, [passoAtual]);
+  const chipPeca = (t: TipoPeca) => (
+    <button key={t} type="button" className={CHIP} onPointerDown={(e) => pegarNova(e, t)} onPointerMove={moverNova} onPointerUp={largarNova}
+      onPointerCancel={() => setNova(null)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); juntarAoMeio(t); } }}>
+      {PECAS[t].n}
+    </button>
+  );
+  const tiposPeca = Object.keys(PECAS) as TipoPeca[];
+  const tiposAbertura = tiposPeca.filter((t) => PECAS[t].abertura);
+  const tiposGenericos = tiposPeca.filter((t) => !PECAS[t].abertura && (genericas || produtosCat.length === 0));
+  const barraSelVisivel = passoAtual > 1 && !(passoAtual === 5 && ver3d);
+
   return (
     <div className="space-y-4">
-      <p className="text-[15px] text-muted-foreground">
-        {!p.paredes.length ? `Arraste o dedo para desenhar as paredes${divisao ? ` da ${divisao.toLowerCase()}` : ""}, uma a uma, como na folha.`
-          : fechada ? "A planta fecha. Arraste as peças da barra para a planta, e toque num número para escrever a medida certa."
-          : "Continue a desenhar a partir do ponto. Toque num número para escrever a medida certa."}
-      </p>
-
-      <div className="overflow-hidden rounded-2xl border border-border bg-card">
-        <svg ref={svg} viewBox={`${vista.x} ${vista.y} ${vista.w} ${vista.h}`} className="block h-auto max-h-[65vh] w-full touch-none select-none"
-          role="img" aria-label={`Planta: ${p.paredes.map((x) => `${x.c} cm`).join(", ") || "por desenhar"}${chao !== null ? `; chão ${nf(chao)} m²` : ""}`}
-          onPointerDown={tocarTela} onPointerMove={moverNaTela} onPointerUp={largarNaTela} onPointerCancel={largarNaTela}>
-          <defs>
-            <pattern id={`${id}-grelha`} width="10" height="10" patternUnits="userSpaceOnUse">
-              <path d="M 10 0 L 0 0 0 10" fill="none" className="stroke-border" strokeWidth="0.4" />
-            </pattern>
-            <pattern id={`${id}-metro`} width="100" height="100" patternUnits="userSpaceOnUse">
-              <rect width="100" height="100" fill={`url(#${id}-grelha)`} />
-              <path d="M 100 0 L 0 0 0 100" fill="none" className="stroke-muted-foreground/40" strokeWidth="0.8" />
-            </pattern>
-          </defs>
-          <rect data-tela="" x={vista.x - 1000} y={vista.y - 1000} width={vista.w + 2000} height={vista.h + 2000} fill={`url(#${id}-metro)`} />
-
-          {/* as paredes */}
-          {p.paredes.length > 0 && (fechada
-            ? <polygon points={pts.slice(0, -1).map((q) => `${q.x},${q.y}`).join(" ")} className="pointer-events-none fill-primary/[0.06] stroke-foreground" strokeWidth={letra / 3.5} strokeLinejoin="round" />
-            : <polyline points={pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" className="pointer-events-none stroke-foreground" strokeWidth={letra / 3.5} strokeLinejoin="round" strokeLinecap="round" />)}
-          {/* o traço a desenhar, com a medida junto ao dedo */}
-          {traco && preve && (() => {
-            const z = cantos([preve], traco.de)[1];
+      <nav aria-label="Passos">
+        <ol className="grid grid-cols-5 gap-1">
+          {PASSOS.map((nome, i) => {
+            const n = i + 1, atual = n === passoAtual, feitoN = n < passoAtual && marcadorAberto(n);
             return (
-              <g className="pointer-events-none">
-                <line x1={traco.de.x} y1={traco.de.y} x2={z.x} y2={z.y} className="stroke-primary" strokeWidth={letra / 3} strokeLinecap="round" />
-                <rect x={traco.ate.x + letra * 0.6} y={traco.ate.y - letra * 2} width={letra * 4.6} height={letra * 1.5} rx={letra * 0.4} className="fill-primary" />
-                <text x={traco.ate.x + letra * 2.9} y={traco.ate.y - letra * 0.9} textAnchor="middle" fontSize={letra} className="fill-primary-foreground font-semibold">{preve.c} cm</text>
-              </g>
-            );
-          })()}
-          {/* onde continuar, e o canto de partida */}
-          {!fechada && p.paredes.length > 0 && !traco && <circle cx={fim.x} cy={fim.y} r={letra * 0.6} className="pointer-events-none fill-primary" />}
-          {!fechada && p.paredes.length > 1 && <circle cx={p.o.x} cy={p.o.y} r={letra * 0.45} className="pointer-events-none fill-none stroke-primary" strokeWidth={letra / 6} strokeDasharray={`${letra / 4} ${letra / 4}`} />}
-
-          {/* as medidas por cima de cada parede: tocar para escrever a certa */}
-          {p.paredes.map((w, i) => {
-            const e = etiqueta(pts[i], pts[i + 1]);
-            const ativa = paredeSel === i;
-            return (
-              <g key={i} role="button" tabIndex={0} aria-label={`Parede ${i + 1}: ${w.c} cm. Escrever a medida.`} className="cursor-pointer outline-none"
-                onPointerDown={(ev) => { ev.stopPropagation(); setParedeSel(i); setSel(null); }}
-                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setParedeSel(i); } }}>
-                <rect x={e.x - letra * 2.1} y={e.y - letra * 0.8} width={letra * 4.2} height={letra * 1.5} rx={letra * 0.4}
-                  className={ativa ? "fill-primary" : "fill-card stroke-border"} strokeWidth={letra / 12} />
-                <text x={e.x} y={e.y + letra * 0.3} textAnchor="middle" fontSize={letra * 0.95} className={cn("font-semibold", ativa ? "fill-primary-foreground" : "fill-foreground")}>{w.c}</text>
-              </g>
+              <li key={nome} className="min-w-0">
+                <button type="button" aria-label={`Passo ${n}: ${nome}`} aria-current={atual ? "step" : undefined} disabled={!marcadorAberto(n)} onClick={() => irParaPasso(n)}
+                  className={cn("flex min-h-11 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border px-1 py-1 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50",
+                    atual ? "border-primary bg-primary text-primary-foreground" : feitoN ? "border-primary/50 bg-primary/[0.06] text-foreground hover:bg-accent" : "border-input bg-background text-muted-foreground")}>
+                  <span className="text-[15px] font-semibold leading-none">{feitoN ? <Check className="h-4 w-4" aria-hidden="true" /> : n}</span>
+                  <span className="w-full break-words text-[11px] leading-tight sm:text-sm">{nome}</span>
+                </button>
+              </li>
             );
           })}
-
-          {/* as peças: arrastar com o dedo; com o teclado, as setas */}
-          {ordemDeDesenho(p.pecas.filter(ativa), sel).map((pc) => {
-            const c = centroPeca(pc), nome = pc.nome ?? PECAS[pc.tipo].n;
-            const cor = ehDeParede(pc) ? "fill-sky-100 stroke-sky-700" : PECAS[pc.tipo].abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary";
-            return (
-              <g key={pc.id} role="button" tabIndex={0} aria-label={`${nome}, ${pc.w} por ${pc.h} cm${ehDeParede(pc) && !ehAbertura(pc) ? `, na parede a ${pc.alt ?? 0} cm do chão` : ""}. Setas para mover${ehAbertura(pc) ? "" : ", R para rodar"}.`} aria-pressed={sel === pc.id}
-                onPointerDown={(e) => pegarPeca(e, pc)} onKeyDown={(e) => teclas(e, pc)} onFocus={() => setSel(pc.id)} className="cursor-grab outline-none">
-                <g transform={pc.rot ? `rotate(${pc.rot} ${c.x} ${c.y})` : undefined}>
-                  {/* área de toque maior do que a peça (as pequenas, como uma torneira, também se tocam com o dedo) */}
-                  <rect data-toque="" x={pc.x - letra * 1.2} y={pc.y - letra * 1.2} width={pc.w + letra * 2.4} height={pc.h + letra * 2.4} fill="transparent" />
-                  <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8} className={cor} strokeWidth={sel === pc.id ? letra / 4 : letra / 10} />
-                  {pc.rot !== undefined && <line x1={pc.x} y1={pc.y + pc.h} x2={pc.x + pc.w} y2={pc.y + pc.h} className="stroke-foreground" strokeWidth={letra / 5} />}
-                </g>
-                <text x={c.x} y={c.y + letra / 3} textAnchor="middle" fontSize={letra * 0.7} className="pointer-events-none fill-foreground">{nome.length > 18 ? `${nome.slice(0, 17)}…` : nome}</text>
-              </g>
-            );
-          })}
-
-          {!p.paredes.length && !traco && (
-            <text x={vista.x + vista.w / 2} y={vista.y + vista.h / 2} textAnchor="middle" fontSize={letra} className="pointer-events-none fill-muted-foreground">
-              Arraste o dedo para desenhar a primeira parede
-            </text>
-          )}
-        </svg>
+        </ol>
+      </nav>
+      <div role="status">
+        <h2 ref={tituloPasso} tabIndex={-1} className="text-lg font-semibold outline-none">Passo {passoAtual} de 5 · {PASSOS[passoAtual - 1]}</h2>
       </div>
-      {/* a peça a ser arrastada da barra, debaixo do dedo */}
-      {nova && (
-        <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border-2 border-primary bg-primary/15 px-3 py-2 text-sm font-medium shadow-lg"
-          style={{ left: nova.x, top: nova.y }}>{nova.produto?.nome ?? PECAS[nova.tipo].n}</div>
-      )}
 
-      {barraSel}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" className="min-h-11" disabled={passado.current.length === 0} onClick={desfazer}><Undo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Desfazer</Button>
-        <Button type="button" variant="outline" className="min-h-11" disabled={futuro.current.length === 0} onClick={refazer}><Redo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Refazer</Button>
-        {p.pecas.length > 0 && !confirmarLimpar && <Button type="button" variant="ghost" className="min-h-11" onClick={() => setConfirmarLimpar(true)}>Limpar todas as peças</Button>}
-        {confirmarLimpar && (
-          <span role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1 text-[15px]">
-            Tirar as {p.pecas.length} peças da divisão?
-            <Button type="button" variant="destructive" className="min-h-11" onClick={limparTudo}>Sim, limpar todas</Button>
-            <Button type="button" variant="ghost" className="min-h-11" onClick={() => setConfirmarLimpar(false)}>Cancelar</Button>
-          </span>
-        )}
-      </div>
-      <section aria-label="Peças na divisão" className="space-y-2">
-        <h3 className="text-[15px] font-semibold">Peças na divisão ({p.pecas.filter((x) => !x.ret).length})</h3>
-        <ListaPecas planta={p} sel={sel} onSel={setSel} onRemover={removerPeca} onRodar={rodarPorId} onDuplicar={duplicarPorId} onRemoverConjunto={removerConjunto} onRetirar={(id) => gravar(retirarComponente(p, id))} onRepor={(id) => gravar(reporComponente(p, id))} />
+      {/* passo 1: a divisão */}
+      <section hidden={passoAtual !== 1} aria-label="Divisão" className="space-y-3">
+        <p className="text-[15px] text-muted-foreground">
+          Divisão: <b className="text-foreground">{divisao ?? "Espaço"}</b>. Diga que tipo de espaço é; os produtos do catálogo que lhe servem aparecem no passo «Produtos».
+          Depois desenha as paredes, como na folha.
+        </p>
+        <label className="grid max-w-xs gap-1 text-sm font-medium">Espaço
+          <select className={INP} value={proto.pref.tipo} onChange={(e) => proto.setTipo(e.target.value as TipoEspaco)}>
+            {(Object.keys(ROTULO_ESPACO) as TipoEspaco[]).map((t) => <option key={t} value={t}>{ROTULO_ESPACO[t]}</option>)}
+          </select>
+        </label>
       </section>
-      <p role="status" className={cn("text-[15px]", !p.paredes.length ? "text-muted-foreground" : fechada ? "text-success" : "text-foreground")}>
-        {!p.paredes.length ? "Ainda sem paredes." : fechada ? "A planta fecha."
-          : falta === Infinity ? `${p.paredes.length} ${p.paredes.length === 1 ? "parede" : "paredes"}.` : `Faltam ${falta} cm até ao canto de partida.`}
-      </p>
 
-      {/* a medida certa da parede tocada */}
-      {paredeSel !== null && p.paredes[paredeSel] && (
-        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3">
-          <label className="grid w-40 gap-1 text-sm font-medium" htmlFor={`${id}-medida`}>Parede {paredeSel + 1}, em cm
-            <input id={`${id}-medida`} key={`${paredeSel}-${p.paredes[paredeSel].c}`} type="number" inputMode="numeric" min={0} autoFocus defaultValue={p.paredes[paredeSel].c} className={INP}
-              onBlur={(e) => { const c = Math.round(Number(e.target.value) || 0); if (c > 0 && c !== p.paredes[paredeSel].c) gravar({ ...p, paredes: mudarComprimento(p.paredes, paredeSel, c) }); }}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-          </label>
-          <Button type="button" variant="ghost" className="min-h-11" onClick={() => setParedeSel(null)}>Feito</Button>
-        </div>
-      )}
+      {/* a planta: o palco dos passos 2 a 4 (em miniatura no 5); escondida no 1, mas sempre montada para não perder o desenho */}
+      <div hidden={passoAtual === 1} className="space-y-4">
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <svg ref={svg} viewBox={`${vista.x} ${vista.y} ${vista.w} ${vista.h}`} className={`block h-auto ${passoAtual === 5 ? "max-h-44" : "max-h-[65vh]"} w-full touch-none select-none`}
+            role="img" aria-label={`Planta: ${p.paredes.map((x) => `${x.c} cm`).join(", ") || "por desenhar"}${chao !== null ? `; chão ${nf(chao)} m²` : ""}`}
+            onPointerDown={tocarTela} onPointerMove={moverNaTela} onPointerUp={largarNaTela} onPointerCancel={largarNaTela}>
+            <defs>
+              <pattern id={`${id}-grelha`} width="10" height="10" patternUnits="userSpaceOnUse">
+                <path d="M 10 0 L 0 0 0 10" fill="none" className="stroke-border" strokeWidth="0.4" />
+              </pattern>
+              <pattern id={`${id}-metro`} width="100" height="100" patternUnits="userSpaceOnUse">
+                <rect width="100" height="100" fill={`url(#${id}-grelha)`} />
+                <path d="M 100 0 L 0 0 0 100" fill="none" className="stroke-muted-foreground/40" strokeWidth="0.8" />
+              </pattern>
+            </defs>
+            <rect data-tela="" x={vista.x - 1000} y={vista.y - 1000} width={vista.w + 2000} height={vista.h + 2000} fill={`url(#${id}-metro)`} />
 
-      {/* as peças: arrastar para a planta, ou tocar */}
-      <div className="space-y-2">
-        <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo}
-          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} onComposicao={adicionarComposicao} onComposicaoLivre={adicionarComposicaoLivre} />
-        {/* pavimentos e revestimentos de parede como produtos: ficam na planta (desfazer/refazer); os selectores do 3D são um atalho para o mesmo */}
-        {revInfo && (
-          <details className="rounded-2xl border border-border p-3">
-            <summary className="min-h-11 cursor-pointer text-[15px] font-semibold">Pavimentos e revestimentos de parede</summary>
-            <BarraRevestimentos rev={revInfo.rev} paredes={revInfo.paredes} areaChao={revInfo.chao} areaParedes={revInfo.paredesM2}
-              onPavimento={(id) => gravar({ ...p, rev: { ...p.rev, pavimento: id } })} onParedes={(id) => gravar({ ...p, rev: { ...p.rev, parede: id } })}
-              onParede={(w, id) => { const pp = { ...p.rev?.porParede }; if (id) pp[w] = id; else delete pp[w]; gravar({ ...p, rev: { ...p.rev, porParede: pp } }); }} />
-          </details>
-        )}
-        <p className="text-sm text-muted-foreground">Portas e janelas (arraste para a planta, ou toque, e fica ao meio):</p>
-        {produtosCat.length > 0 && (
-          <button type="button" className="min-h-11 text-sm underline underline-offset-2" aria-expanded={genericas} onClick={() => setGenericas(!genericas)}>
-            {genericas ? "Esconder" : "Mostrar"} as peças genéricas (sem produto do catálogo)
-          </button>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {(Object.keys(PECAS) as TipoPeca[]).filter((t) => PECAS[t].abertura || genericas || produtosCat.length === 0).map((t) => (
-            <button key={t} type="button" className={CHIP} onPointerDown={(e) => pegarNova(e, t)} onPointerMove={moverNova} onPointerUp={largarNova}
-              onPointerCancel={() => setNova(null)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); juntarAoMeio(t); } }}>
-              {PECAS[t].n}
-            </button>
-          ))}
+            {/* as paredes */}
+            {p.paredes.length > 0 && (fechada
+              ? <polygon points={pts.slice(0, -1).map((q) => `${q.x},${q.y}`).join(" ")} className="pointer-events-none fill-primary/[0.06] stroke-foreground" strokeWidth={letra / 3.5} strokeLinejoin="round" />
+              : <polyline points={pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" className="pointer-events-none stroke-foreground" strokeWidth={letra / 3.5} strokeLinejoin="round" strokeLinecap="round" />)}
+            {/* o traço a desenhar, com a medida junto ao dedo */}
+            {traco && preve && (() => {
+              const z = cantos([preve], traco.de)[1];
+              return (
+                <g className="pointer-events-none">
+                  <line x1={traco.de.x} y1={traco.de.y} x2={z.x} y2={z.y} className="stroke-primary" strokeWidth={letra / 3} strokeLinecap="round" />
+                  <rect x={traco.ate.x + letra * 0.6} y={traco.ate.y - letra * 2} width={letra * 4.6} height={letra * 1.5} rx={letra * 0.4} className="fill-primary" />
+                  <text x={traco.ate.x + letra * 2.9} y={traco.ate.y - letra * 0.9} textAnchor="middle" fontSize={letra} className="fill-primary-foreground font-semibold">{preve.c} cm</text>
+                </g>
+              );
+            })()}
+            {/* onde continuar, e o canto de partida */}
+            {!fechada && p.paredes.length > 0 && !traco && <circle cx={fim.x} cy={fim.y} r={letra * 0.6} className="pointer-events-none fill-primary" />}
+            {!fechada && p.paredes.length > 1 && <circle cx={p.o.x} cy={p.o.y} r={letra * 0.45} className="pointer-events-none fill-none stroke-primary" strokeWidth={letra / 6} strokeDasharray={`${letra / 4} ${letra / 4}`} />}
+
+            {/* as medidas por cima de cada parede: tocar para escrever a certa */}
+            {p.paredes.map((w, i) => {
+              const e = etiqueta(pts[i], pts[i + 1]);
+              const ativa = paredeSel === i;
+              return (
+                <g key={i} role="button" tabIndex={0} aria-label={`Parede ${i + 1}: ${w.c} cm. Escrever a medida.`} className="cursor-pointer outline-none"
+                  onPointerDown={(ev) => { ev.stopPropagation(); setParedeSel(i); setSel(null); }}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setParedeSel(i); } }}>
+                  <rect x={e.x - letra * 2.1} y={e.y - letra * 0.8} width={letra * 4.2} height={letra * 1.5} rx={letra * 0.4}
+                    className={ativa ? "fill-primary" : "fill-card stroke-border"} strokeWidth={letra / 12} />
+                  <text x={e.x} y={e.y + letra * 0.3} textAnchor="middle" fontSize={letra * 0.95} className={cn("font-semibold", ativa ? "fill-primary-foreground" : "fill-foreground")}>{w.c}</text>
+                </g>
+              );
+            })}
+
+            {/* as peças: arrastar com o dedo; com o teclado, as setas */}
+            {ordemDeDesenho(p.pecas.filter(ativa), sel).map((pc) => {
+              const c = centroPeca(pc), nome = pc.nome ?? PECAS[pc.tipo].n;
+              const cor = ehDeParede(pc) ? "fill-sky-100 stroke-sky-700" : PECAS[pc.tipo].abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary";
+              return (
+                <g key={pc.id} role="button" tabIndex={0} aria-label={`${nome}, ${pc.w} por ${pc.h} cm${ehDeParede(pc) && !ehAbertura(pc) ? `, na parede a ${pc.alt ?? 0} cm do chão` : ""}. Setas para mover${ehAbertura(pc) ? "" : ", R para rodar"}.`} aria-pressed={sel === pc.id}
+                  onPointerDown={(e) => pegarPeca(e, pc)} onKeyDown={(e) => teclas(e, pc)} onFocus={() => setSel(pc.id)} className="cursor-grab outline-none">
+                  <g transform={pc.rot ? `rotate(${pc.rot} ${c.x} ${c.y})` : undefined}>
+                    {/* área de toque maior do que a peça (as pequenas, como uma torneira, também se tocam com o dedo) */}
+                    <rect data-toque="" x={pc.x - letra * 1.2} y={pc.y - letra * 1.2} width={pc.w + letra * 2.4} height={pc.h + letra * 2.4} fill="transparent" />
+                    <rect x={pc.x} y={pc.y} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8} className={cor} strokeWidth={sel === pc.id ? letra / 4 : letra / 10} />
+                    {pc.rot !== undefined && <line x1={pc.x} y1={pc.y + pc.h} x2={pc.x + pc.w} y2={pc.y + pc.h} className="stroke-foreground" strokeWidth={letra / 5} />}
+                  </g>
+                  <text x={c.x} y={c.y + letra / 3} textAnchor="middle" fontSize={letra * 0.7} className="pointer-events-none fill-foreground">{nome.length > 18 ? `${nome.slice(0, 17)}…` : nome}</text>
+                </g>
+              );
+            })}
+
+            {!p.paredes.length && !traco && (
+              <text x={vista.x + vista.w / 2} y={vista.y + vista.h / 2} textAnchor="middle" fontSize={letra} className="pointer-events-none fill-muted-foreground">
+                Arraste o dedo para desenhar a primeira parede
+              </text>
+            )}
+          </svg>
         </div>
+        {/* a peça a ser arrastada da barra, debaixo do dedo */}
+        {nova && (
+          <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border-2 border-primary bg-primary/15 px-3 py-2 text-sm font-medium shadow-lg"
+            style={{ left: nova.x, top: nova.y }}>{nova.produto?.nome ?? PECAS[nova.tipo].n}</div>
+        )}
+
+        {barraSelVisivel && barraSel}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" className="min-h-11" disabled={passado.current.length === 0} onClick={desfazer}><Undo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Desfazer</Button>
+          <Button type="button" variant="outline" className="min-h-11" disabled={futuro.current.length === 0} onClick={refazer}><Redo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Refazer</Button>
+          {p.pecas.length > 0 && !confirmarLimpar && <Button type="button" variant="ghost" className="min-h-11" onClick={() => setConfirmarLimpar(true)}>Limpar todas as peças</Button>}
+          {confirmarLimpar && (
+            <span role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1 text-[15px]">
+              Tirar as {p.pecas.length} peças da divisão?
+              <Button type="button" variant="destructive" className="min-h-11" onClick={limparTudo}>Sim, limpar todas</Button>
+              <Button type="button" variant="ghost" className="min-h-11" onClick={() => setConfirmarLimpar(false)}>Cancelar</Button>
+            </span>
+          )}
+        </div>
+        {(aviso || avisosPlanta.length > 0) && (
+          <ul role="status" className="space-y-1 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-900">
+            {aviso && <li>{aviso}</li>}
+            {avisosPlanta.map((a) => <li key={a}>{a}</li>)}
+          </ul>
+        )}
       </div>
-
-      {(aviso || avisosPlanta.length > 0) && (
-        <ul role="status" className="space-y-1 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-900">
-          {aviso && <li>{aviso}</li>}
-          {avisosPlanta.map((a) => <li key={a}>{a}</li>)}
-        </ul>
-      )}
-      {selecionada && (() => {
+      {passoAtual > 1 && selecionada && (() => {
         const novaPeca = selecionada.rot !== undefined && !ehAbertura(selecionada);
         const parede = ehDeParede(selecionada) && novaPeca;
         const poly = poligonoDe(p);
@@ -588,61 +597,129 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
         );
       })()}
 
-      {/* desfazer, recomeçar, ou escrever as medidas à mão */}
-      {p.paredes.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => { gravar({ ...p, paredes: p.paredes.slice(0, -1) }); setParedeSel(null); }}>
-            <Undo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Desfazer a última parede
-          </Button>
-          <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar({ ...PLANTA_VAZIA, pecas: p.pecas }); setParedeSel(null); }}>Apagar as paredes</Button>
-        </div>
-      )}
-      <details className="rounded-xl border border-border p-3">
-        <summary className="min-h-11 cursor-pointer content-center text-[15px] font-medium">Escrever as medidas em vez de desenhar</summary>
-        <div className="space-y-3 pt-3">
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className={CHIP} onClick={() => gravar({ ...p, o: { x: 0, y: 0 }, paredes: retangulo(p.paredes[0]?.c || 200, p.paredes[1]?.c || 150) })}>Retângulo</button>
-            <button type="button" className={CHIP} onClick={() => { const a = p.paredes[0]?.c || 200, b = p.paredes[1]?.c || 150; gravar({ ...p, o: { x: 0, y: 0 }, paredes: emL(a, b, Math.round(a / 3), Math.round(b / 3)) }); }}>Em L</button>
-          </div>
-          {p.paredes.map((w, i) => (
-            <div key={i} className="flex items-center gap-3 text-sm font-medium">
-              <label htmlFor={`${id}-p${i}`} className="w-20">Parede {i + 1}</label>
-              <input id={`${id}-p${i}`} key={`${i}-${w.c}`} type="number" inputMode="numeric" min={0} defaultValue={w.c} className={cn(INP, "w-32")}
-                onBlur={(e) => { const c = Math.max(0, Math.round(Number(e.target.value) || 0)); if (c !== w.c) gravar({ ...p, paredes: mudarComprimento(p.paredes, i, c) }); }}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-              <span className="text-muted-foreground">cm</span>
-            </div>
-          ))}
-        </div>
-      </details>
-
-      {/* o que a planta dá, e passá-lo às medidas */}
-      <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[15px]">
-          {chao === null ? "Feche a planta para ver os m²." : <>
-            Chão <b>{nf(chao)} m²</b>{paredes !== null && <> · paredes <b>{nf(paredes)} m²</b></>}
-            <span className="block text-sm text-muted-foreground">
-              Paredes com {nf(pe)} m de pé-direito{peCampo === null ? " (o pé-direito ainda não foi respondido)" : ""}, sem as portas e as janelas da planta.
-            </span>
-          </>}
+      {/* passo 2: desenhar as paredes */}
+      <section hidden={passoAtual !== 2} aria-label="Paredes" className="space-y-4">
+        <p className="text-[15px] text-muted-foreground">
+          {!p.paredes.length ? `Arraste o dedo para desenhar as paredes${divisao ? ` da ${divisao.toLowerCase()}` : ""}, uma a uma, como na folha.`
+            : fechada ? "A planta fecha. Arraste as peças da barra para a planta, e toque num número para escrever a medida certa."
+            : "Continue a desenhar a partir do ponto. Toque num número para escrever a medida certa."}
         </p>
-        <Button type="button" className="min-h-11 shrink-0" disabled={chao === null} onClick={usarNasMedidas}>
-          <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Usar nas medidas
-        </Button>
-      </div>
-      <p role="status" className="min-h-5 text-sm text-success">{feito}</p>
-
-      <ListaVendavel planta={p} />
-
-      {/* protótipo: ver o que está desenhado em 3D */}
-      <div className="space-y-3">
-        <Button type="button" variant="outline" className="min-h-11" aria-expanded={ver3d} onClick={() => setVer3d(!ver3d)}>
-          <Box className="mr-1.5 h-4 w-4" aria-hidden="true" />{ver3d ? "Fechar o 3D" : "Ver em 3D"}
-        </Button>
-        {ver3d && (
-          <Planta3DPainel planta={p} tipo={proto.pref.tipo} nome={divisao ?? "Espaço"} peDireito={pe} produtos={produtosTodos} arvore={K.arvore}
-            rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} selecionada={sel} onSelecionar={setSel} acoes={barraSel} mover={mover3D} />
+        <p role="status" className={cn("text-[15px]", !p.paredes.length ? "text-muted-foreground" : fechada ? "text-success" : "text-foreground")}>
+          {!p.paredes.length ? "Ainda sem paredes." : fechada ? "A planta fecha."
+            : falta === Infinity ? `${p.paredes.length} ${p.paredes.length === 1 ? "parede" : "paredes"}.` : `Faltam ${falta} cm até ao canto de partida.`}
+        </p>
+        {/* a medida certa da parede tocada */}
+        {paredeSel !== null && p.paredes[paredeSel] && (
+          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3">
+            <label className="grid w-40 gap-1 text-sm font-medium" htmlFor={`${id}-medida`}>Parede {paredeSel + 1}, em cm
+              <input id={`${id}-medida`} key={`${paredeSel}-${p.paredes[paredeSel].c}`} type="number" inputMode="numeric" min={0} autoFocus defaultValue={p.paredes[paredeSel].c} className={INP}
+                onBlur={(e) => { const c = Math.round(Number(e.target.value) || 0); if (c > 0 && c !== p.paredes[paredeSel].c) gravar({ ...p, paredes: mudarComprimento(p.paredes, paredeSel, c) }); }}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+            </label>
+            <Button type="button" variant="ghost" className="min-h-11" onClick={() => setParedeSel(null)}>Feito</Button>
+          </div>
         )}
+        {/* desfazer, recomeçar, ou escrever as medidas à mão */}
+        {p.paredes.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => { gravar({ ...p, paredes: p.paredes.slice(0, -1) }); setParedeSel(null); }}>
+              <Undo2 className="mr-1.5 h-4 w-4" aria-hidden="true" />Desfazer a última parede
+            </Button>
+            <Button type="button" variant="ghost" className="min-h-11" onClick={() => { gravar({ ...PLANTA_VAZIA, pecas: p.pecas }); setParedeSel(null); }}>Apagar as paredes</Button>
+          </div>
+        )}
+        <details className="rounded-xl border border-border p-3">
+          <summary className="min-h-11 cursor-pointer content-center text-[15px] font-medium">Escrever as medidas em vez de desenhar</summary>
+          <div className="space-y-3 pt-3">
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={CHIP} onClick={() => gravar({ ...p, o: { x: 0, y: 0 }, paredes: retangulo(p.paredes[0]?.c || 200, p.paredes[1]?.c || 150) })}>Retângulo</button>
+              <button type="button" className={CHIP} onClick={() => { const a = p.paredes[0]?.c || 200, b = p.paredes[1]?.c || 150; gravar({ ...p, o: { x: 0, y: 0 }, paredes: emL(a, b, Math.round(a / 3), Math.round(b / 3)) }); }}>Em L</button>
+            </div>
+            {p.paredes.map((w, i) => (
+              <div key={i} className="flex items-center gap-3 text-sm font-medium">
+                <label htmlFor={`${id}-p${i}`} className="w-20">Parede {i + 1}</label>
+                <input id={`${id}-p${i}`} key={`${i}-${w.c}`} type="number" inputMode="numeric" min={0} defaultValue={w.c} className={cn(INP, "w-32")}
+                  onBlur={(e) => { const c = Math.max(0, Math.round(Number(e.target.value) || 0)); if (c !== w.c) gravar({ ...p, paredes: mudarComprimento(p.paredes, i, c) }); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                <span className="text-muted-foreground">cm</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      </section>
+
+      {/* passo 3: portas e janelas */}
+      <section hidden={passoAtual !== 3} aria-label="Portas e janelas" className="space-y-2">
+        <p className="text-sm text-muted-foreground">Portas e janelas (arraste para a planta, ou toque, e fica ao meio):</p>
+        <div className="flex flex-wrap gap-2">{tiposAbertura.map(chipPeca)}</div>
+      </section>
+
+      {/* passo 4: produtos (a barra com o filtro «Modelo 3D» e a composição livre, mais os revestimentos) */}
+      <section hidden={passoAtual !== 4} aria-label="Produtos" className="space-y-2">
+        <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo} semSeletorEspaco
+          onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} onComposicao={adicionarComposicao} onComposicaoLivre={adicionarComposicaoLivre} />
+        {/* pavimentos e revestimentos de parede como produtos: ficam na planta (desfazer/refazer); os selectores do 3D são um atalho para o mesmo */}
+        {revInfo && (
+          <details className="rounded-2xl border border-border p-3">
+            <summary className="min-h-11 cursor-pointer text-[15px] font-semibold">Pavimentos e revestimentos de parede</summary>
+            <BarraRevestimentos rev={revInfo.rev} paredes={revInfo.paredes} areaChao={revInfo.chao} areaParedes={revInfo.paredesM2}
+              onPavimento={(id) => gravar({ ...p, rev: { ...p.rev, pavimento: id } })} onParedes={(id) => gravar({ ...p, rev: { ...p.rev, parede: id } })}
+              onParede={(w, id) => { const pp = { ...p.rev?.porParede }; if (id) pp[w] = id; else delete pp[w]; gravar({ ...p, rev: { ...p.rev, porParede: pp } }); }} />
+          </details>
+        )}
+        {produtosCat.length > 0 && (
+          <button type="button" className="min-h-11 text-sm underline underline-offset-2" aria-expanded={genericas} onClick={() => setGenericas(!genericas)}>
+            {genericas ? "Esconder" : "Mostrar"} as peças genéricas (sem produto do catálogo)
+          </button>
+        )}
+        {tiposGenericos.length > 0 && <div className="flex flex-wrap gap-2">{tiposGenericos.map(chipPeca)}</div>}
+      </section>
+
+      {/* passo 5: rever (peças, linhas de venda, total) e ver em 3D */}
+      <section hidden={passoAtual !== 5} aria-label="Rever e ver em 3D" className="space-y-4">
+        <section aria-label="Peças na divisão" className="space-y-2">
+          <h3 className="text-[15px] font-semibold">Peças na divisão ({p.pecas.filter((x) => !x.ret).length})</h3>
+          <ListaPecas planta={p} sel={sel} onSel={setSel} onRemover={removerPeca} onRodar={rodarPorId} onDuplicar={duplicarPorId} onRemoverConjunto={removerConjunto} onRetirar={(id) => gravar(retirarComponente(p, id))} onRepor={(id) => gravar(reporComponente(p, id))} />
+        </section>
+        {/* o que a planta dá, e passá-lo às medidas */}
+        <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[15px]">
+            {chao === null ? "Feche a planta para ver os m²." : <>
+              Chão <b>{nf(chao)} m²</b>{paredes !== null && <> · paredes <b>{nf(paredes)} m²</b></>}
+              <span className="block text-sm text-muted-foreground">
+                Paredes com {nf(pe)} m de pé-direito{peCampo === null ? " (o pé-direito ainda não foi respondido)" : ""}, sem as portas e as janelas da planta.
+              </span>
+            </>}
+          </p>
+          <Button type="button" className="min-h-11 shrink-0" disabled={chao === null} onClick={usarNasMedidas}>
+            <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Usar nas medidas
+          </Button>
+        </div>
+        <p role="status" className="min-h-5 text-sm text-success">{feito}</p>
+
+        <ListaVendavel planta={p} aberta />
+
+        {/* protótipo: ver o que está desenhado em 3D (só neste passo) */}
+        <div className="space-y-3">
+          <Button type="button" variant="outline" className="min-h-11" aria-expanded={ver3d} onClick={() => setVer3d(!ver3d)}>
+            <Box className="mr-1.5 h-4 w-4" aria-hidden="true" />{ver3d ? "Fechar o 3D" : "Ver em 3D"}
+          </Button>
+          {ver3d && passoAtual === 5 && (
+            <Planta3DPainel planta={p} tipo={proto.pref.tipo} nome={divisao ?? "Espaço"} peDireito={pe} produtos={produtosTodos} arvore={K.arvore}
+              rev={proto.pref.rev} onRev={proto.setRev} teto={proto.pref.teto} onTeto={proto.setTeto} selecionada={sel} onSelecionar={setSel} acoes={barraSel} mover={mover3D} />
+          )}
+        </div>
+      </section>
+
+      {/* o rodapé: Anterior e UM botão primário, com o motivo escrito quando não se pode avançar */}
+      <div role="group" aria-label="Navegação entre passos" className="sticky bottom-0 z-10 -mx-1 space-y-1 border-t border-border bg-background/95 px-1 py-2 backdrop-blur">
+        {motivo && <p id={`${id}-motivo`} className="text-[15px] text-muted-foreground">{motivo}</p>}
+        <div className="flex gap-2">
+          {passoAtual > 1 && <Button type="button" variant="outline" className="min-h-11" onClick={() => irParaPasso(passoAtual - 1)}>Anterior</Button>}
+          {passoAtual < 5 && (
+            <Button type="button" className="min-h-11 flex-1 sm:flex-none" disabled={!!motivo} aria-describedby={motivo ? `${id}-motivo` : undefined} onClick={() => irParaPasso(passoAtual + 1)}>Seguinte</Button>
+          )}
+        </div>
       </div>
     </div>
   );
