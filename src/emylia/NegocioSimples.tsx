@@ -38,6 +38,7 @@ import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
 import { useParamUrl, usePainelUrl } from "./usarParamUrl";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { passoDe, podeVerCustos } from "./permissoes";
+import { SoLeitura } from "./passosSoLeitura";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 import { FerramentasTeste } from "./FerramentasTeste";
 
@@ -71,8 +72,11 @@ function ContactosCliente({ d }: { d: Negocio }) {
   );
 }
 
-/** `ajustarPassos` (opcional): muda a lista de passos antes de se desenhar (a página de Negócios liga aqui os templates); sem ele, é como sempre. */
-export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[] }) {
+/** `ajustarPassos` (opcional): muda a lista de passos antes de se desenhar (a página de Negócios liga aqui os templates); sem ele, é como sempre.
+ *  `soLeitura` (opcional, 12/11): sem a permissão da fase, os botões que mudam o negócio fora dos passos (o do passo/fim, verificar o orçamento,
+ *  as Ferramentas de teste) ficam desativados; a navegação entre passos e o menu «Mais» continuam. Os corpos dos passos desativa-os quem chama
+ *  (ajustarPassos + passosSoLeitura). Sem ele (ou false), é como sempre. */
+export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[]; soLeitura?: boolean }) {
   const { S, A, go } = ctx;
   const d = S.deals.find((x) => x.id === S.deal)!;
   const T = d.orc ? tot(d, S) : null;
@@ -220,7 +224,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
         </div>
       </header>
       {/* FERRAMENTAS-TESTE (temporário, remover antes da main) */}
-      <FerramentasTeste ctx={ctx} d={d} />
+      <SoLeitura ativo={ctx.soLeitura}><FerramentasTeste ctx={ctx} d={d} /></SoLeitura>
       {/* 23/10 (2.0): o email que falta para enviar ao portal e o estado da conta do cliente */}
       {editar && <EditarCliente ctx={ctx} d={d} fechar={() => setEditar(false)} />}
       <div className="mt-4 empty:hidden"><EstadoAcessoPortal ctx={ctx} d={d} /></div>
@@ -292,7 +296,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
         {naChamada && d.fase <= 1 && ver === null
           ? <TudoNaChamada ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} />
           : ver === null
-          ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} lateral={(passos, ativo, setAtivo, comFim) => (
+          ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} soLeitura={ctx.soLeitura} lateral={(passos, ativo, setAtivo, comFim) => (
             <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} comFim={comFim} />
           )} />
           : <>
@@ -444,7 +448,7 @@ function Lateral({ d, passos, ativo, setAtivo, comFim }: { d: Negocio; passos: P
   );
 }
 
-function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio; lateral: Lat; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[] }) {
+function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; d: Negocio; lateral: Lat; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[]; soLeitura?: boolean }) {
   const { S } = ctx;
   // 9/11 (Lote 1, B): o passo é do papel atual OU quem entrou tem as permissões que ele pede (passoDe, só com conta real)
   const p = proximo(d, S), meu = passoDe(S.role, p.who, p.act);
@@ -558,7 +562,7 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
               {(!guiado || enviar) && (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   {!guiado && <p className="text-sm text-muted-foreground">Passo {ativo + 1} de {passos.length}</p>}
-                  <div className="ml-auto flex items-center gap-2">{!guiado && <Ouvir />}{enviar && <BotaoFase ctx={ctx} d={d} tamanho="default" />}</div>
+                  <div className="ml-auto flex items-center gap-2">{!guiado && <Ouvir />}{enviar && <SoLeitura ativo={soLeitura}><BotaoFase ctx={ctx} d={d} tamanho="default" /></SoLeitura>}</div>
                 </div>
               )}
               <div className="mt-2 flex items-center gap-3">
@@ -586,12 +590,12 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos }: { ctx: Ctx; d: Negocio;
         <div data-acoes-passo className="sticky bottom-0 z-30 -mx-4 mt-8 flex items-center gap-2 border-t border-border bg-background/95 py-3 pl-4 pr-[4.5rem] backdrop-blur [&:not(:has(button))]:hidden sm:static sm:mx-0 sm:mt-10 sm:justify-between sm:gap-3 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-6 sm:backdrop-blur-none">
           <div className="shrink-0 empty:hidden sm:empty:block">{ativo > 0 && <Button variant="ghost" size="lg" className="px-3 sm:px-8" onClick={() => setAtivo(ativo - 1)}>Anterior</Button>}</div>
           {fim || enviar
-            ? (temBotaoFase(ctx, d) ? <div className="min-w-0 flex-1 sm:flex-none [&_button]:w-full sm:[&_button]:w-auto"><BotaoFase ctx={ctx} d={d} /></div> : null)
+            ? (temBotaoFase(ctx, d) ? <div className="min-w-0 flex-1 sm:flex-none [&_button]:w-full sm:[&_button]:w-auto"><SoLeitura ativo={soLeitura}><BotaoFase ctx={ctx} d={d} /></SoLeitura></div> : null)
             : <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-none sm:flex-row sm:items-center">
               {/* no passo Orçamento por verificar, o botão é verificar: sem bloqueios o passo fica feito e avança sozinho;
                   com bloqueios, leva-os à vista (antes, o "Continuar" passava à Proposta com o orçamento por aprovar) */}
               {atual?.id === "orc" && d.orc && !d.orc.enviada && !completo(atual)
-                ? <Button size="lg" className="w-full sm:w-auto" onClick={ctx.go(() => (d.orc!.verif ? ctx.A.irVerif() : ctx.A.verificar(d.id)))}>{d.orc.verif ? "Ver o que falta resolver" : "Verificar o orçamento"}</Button>
+                ? <Button size="lg" className="w-full sm:w-auto" disabled={soLeitura && !d.orc.verif} onClick={ctx.go(() => (d.orc!.verif ? ctx.A.irVerif() : ctx.A.verificar(d.id)))}>{d.orc.verif ? "Ver o que falta resolver" : "Verificar o orçamento"}</Button>
                 : atual?.bloqueado ? null : <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>}
             </div>}
         </div>

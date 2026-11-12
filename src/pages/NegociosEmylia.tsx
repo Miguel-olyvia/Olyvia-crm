@@ -21,6 +21,7 @@ import { NegocioSimples } from "@/emylia/NegocioSimples";
 import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
 import { PermPortalNegocios } from "@/emylia/PermPortalNegocios";
 import { comVisitasDoCrm } from "@/components/pessoas/negocioEmylia/visitasDosPassos";
+import { passosSoLeitura } from "@/emylia/passosSoLeitura";
 import { HojeSimples } from "@/emylia/HojeSimples";
 import { HojeTecnico, SemTecnicoLigado } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
@@ -975,9 +976,11 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
             {comOComercialAqui && (
               <p role="status" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{avisoDaFase(faltaAqui as string)}</p>
             )}
-            <NegocioSimples key={S.deal} {...ctx} ajustarPassos={(passos, d) => {
+            {/* 12/11: sem a permissão da fase (e não sendo do CRM), os passos e os botões que mudam o negócio ficam desativados: nada se grava */}
+            <NegocioSimples key={S.deal} {...ctx} soLeitura={comOComercialAqui} ajustarPassos={(passos, d) => {
               const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm && !comOComercialAqui };
-              return comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null, visitasCrm: r?.id ? visitasAberto.visitas : undefined });
+              const ajustados = comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null, visitasCrm: r?.id ? visitasAberto.visitas : undefined });
+              return comOComercialAqui ? passosSoLeitura(ajustados) : ajustados;
             }} />
           </>
         : <NegociosSimples {...ctx} />}
