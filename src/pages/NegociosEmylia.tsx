@@ -29,7 +29,7 @@ import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { carregarCamposConfig, lerCamposConfig } from "@/emylia/real/camposConfig";
 import { definirEfeitosCampos, definirGravarEfeitos } from "@/emylia/efeitosLevantamento";
-import { aplicarAgenda, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
+import { aplicarAgenda, aplicarCompromissos, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
 import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
 import { definirEquipaReal } from "@/emylia/equipa/membros";
 import { definirRhDaAgenda } from "@/emylia/equipa/rhDaAgenda";
@@ -551,6 +551,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       // 29/10: as visitas marcadas no CRM (Pipeline, agenda) também na agenda da Emylia
       const vc = await carregarVisitasCrm(supabase, org);
       if (vc.erro) avisar({ msg: "As visitas da agenda do CRM não carregaram", sub: vc.erro, kind: "bad" });
+      // 12/11: o plano da obra conta o que a agenda real já tem marcado aos técnicos (tarefas de outras obras, visitas)
+      aplicarCompromissos(TECS);
       ids.current = idsServico(cat.M.ids.servico);
       const lidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: so });
       if (!vivo) return;

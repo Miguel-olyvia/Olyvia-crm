@@ -30,7 +30,7 @@ import {
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
-import { faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { agendaDaProposta, textoAgenda, faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -1092,7 +1092,8 @@ function oficiosSemCusto(S: Estado, sid: SvcId, s: Servico): string[] {
   const nomes = rec ? custoReceita(rec, C, false).semCustoHora : [];
   return nomes.length ? nomes : [s.perfil];
 }
-export interface Alerta { k: "x" | "w"; t: string; d: string; fix?: boolean; i?: number; sug?: number; aprov?: boolean; go?: Vista; key?: string }
+export interface Alerta { k: "x" | "w"; t: string; d: string; fix?: boolean; i?: number; sug?: number; aprov?: boolean; go?: Vista; key?: string;
+  /** 12/11: o bloqueio da agenda dos técnicos (o ecrã sugere os dias de início com todos livres) */ agenda?: true }
 export function alertas(d: Negocio, S: Estado): Alerta[] {
   const A: Alerta[] = [], min = S.cfg.min / 100, alvo = S.cfg.alvo / 100, o = d.orc!, vistos = o.avisosVistos || {};
   // 5/11: sem quotes.view_costs o texto não diz os valores do custo nem da margem; as regras e o que bloqueia ficam iguais
@@ -1126,6 +1127,11 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
   const T = tot(d, S);
   if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: vc ? `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}` : `O desconto de ${nfmt(o.desconto)}% deixa a margem abaixo do mínimo`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true });
   else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: vc ? `Margem total de ${pct(T.m)}` : "Margem total abaixo do mínimo", d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });
+  // 12/11 (Rúben: «o comercial não deve conseguir terminar a proposta sem ter os técnicos disponíveis para a obra»): os técnicos de cada
+  // ofício livres nos dias da obra; senão bloqueia (a Direção não aprova por cima: muda-se o dia ou o técnico)
+  const AG = agendaDaProposta(d, S);
+  if (AG?.ocupadas.length) A.push({ k: "x", t: "Técnicos sem agenda para a obra", d: `${textoAgenda(AG)}. Escolha um início com todos livres.`, aprov: false, agenda: true });
+  if (AG?.semNinguem.length && !vistos["agsem"]) A.push({ k: "w", t: "Ofícios sem técnicos no RH", d: `Ninguém no RH faz ${AG.semNinguem.join(", ")}: essas tarefas ficam por atribuir até as Operações escolherem quem as faz.`, key: "agsem" });
   return A;
 }
 /** 2/11 (reunião: "não deu, porquê? Ah, é por causa da margem"): o que bloqueia a proposta, dito pelo nome do produto ou do serviço.
@@ -1464,7 +1470,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         if (bloqueado(d, S))
           return o!.aprov === "pedida"
             ? { t: "À espera da aprovação da Direção", sub: "Pedido de exceção à margem mínima.", who: "direcao", wait: true }
-            : { t: "Resolver os bloqueios", sub: `${textoBloqueios(d, S) || "Ver a verificação"}. Corrigir o preço ou pedir aprovação à Direção.`, btn: "Ver bloqueios", act: "irVerif", who: "comercial" };
+            : { t: "Resolver os bloqueios", sub: `${textoBloqueios(d, S) || "Ver a verificação"}. ${alertas(d, S).some((a) => a.agenda) ? "Escolher um início com os técnicos livres" : "Corrigir o preço ou pedir aprovação à Direção"}.`, btn: "Ver bloqueios", act: "irVerif", who: "comercial" };
         return { t: o!.versoes?.length ? `Enviar a versão ${versaoAtual(o!)}` : "Enviar a proposta", sub: o!.vendaDireta ? "Venda direta: a proposta aceite dispensa o contrato." : "Vai para o portal do cliente.", btn: "Enviar proposta", act: "enviar", who: "comercial" };
       }
       if (!o!.aceite && o!.pedidoCliente) {
@@ -2459,7 +2465,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // o início previsto da proposta é o do plano (o editor muda-o lá); sem ele, o primeiro dia útil possível
       if (!d.f.inicio_prev) d.f.inicio_prev = o.inicioObra ?? isoDia(iniciosRapidos(new Date())[0].data);
       o.verif = true;
-      if (bloqueado(d, S)) { avisar({ msg: "Ainda não dá para enviar", sub: `${textoBloqueios(d, S)}. Corrija o preço ou peça aprovação à Direção.`, kind: "bad" }); return false; }
+      if (bloqueado(d, S)) { avisar({ msg: "Ainda não dá para enviar", sub: `${textoBloqueios(d, S)}. ${alertas(d, S).some((a) => a.agenda) ? "Escolha um início com os técnicos livres." : "Corrija o preço ou peça aprovação à Direção."}`, kind: "bad" }); return false; }
       A.enviar(id);
       return !!o.enviada;
     },
@@ -2705,6 +2711,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     enviar(id: number) {
       if (!exigePerm("proposta.enviar")) return;
       const d = deal(id); if (!portao(d, [PROPOSTA[0]])) return;
+      // 12/11: sem os técnicos livres para a obra, a proposta não sai (o dia de início muda-se no orçamento)
+      const AG = agendaDaProposta(d, S);
+      if (AG?.ocupadas.length) { avisar({ msg: "Ainda não dá para enviar", sub: `${textoAgenda(AG)}. Escolha um início com os técnicos livres.`, kind: "bad" }); return; }
       if (!comEmail(d, "proposta")) return;
       const A2 = alertas(d, S).filter((a) => a.k === "w"); d.orc!.enviada = "hoje";
       // 22/10 (fase 2): o custo de cada linha fica congelado (ofícios × €/h de hoje, equipamento, consumíveis, estrutura; produtos com o fornecedor)
@@ -3222,7 +3231,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 10/11 (teste de ponta a ponta): até o técnico estar livre, sem férias e sem outra obra (antes, só as férias: com o técnico
       // noutra obra, o «Adiar até estar livre» não mexia)
       const ocup = p.inicio ? ocupacaoDosTecnicos(S, d.id) : new Map<string, Set<string>>();
-      while (motivoOcupado(tec.id, { dia: nd, dur: t.dur }, p, ocup) != null && nd < t.dia + 60) nd++;
+      while (motivoOcupado(tec.id, { dia: nd, dur: t.dur, h: t.h }, p, ocup) != null && nd < t.dia + 60) nd++;
       if (nd === t.dia + 60) { avisar({ msg: `${tec.n.split(" ")[0]} não fica livre nos próximos 60 dias úteis`, sub: "Passe a tarefa para outro técnico.", kind: "bad" }); return; }
       if (p.origem !== "orcamento") nd = Math.max(nd, 5); // o plano de exemplo: a fase seguinte não pode passar à frente
       const shift = nd - t.dia;

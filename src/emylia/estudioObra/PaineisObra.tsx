@@ -371,7 +371,7 @@ export function EquipaDaObra({ ctx, d, dias, abrirOutra, novaPara, abrir }: {
         const porFazer = ts.filter(({ t }) => { const v = estadoVivo(t, p); return v !== "validada" && v !== "feita"; });
         const fora = blocosForaDaObra(tec, janela, obras, deFerias);
         const tx = TECS.find((x) => x.id === tec);
-        const livres = porFazer.length ? tecnicosDoOficio(porFazer[0].t).filter((x) => x.id !== tec && porFazer.every(({ t }) => motivoOcupado(x.id, { dia: Math.max(t.dia, hoje), dur: t.dur }, p, ocup) == null)) : [];
+        const livres = porFazer.length ? tecnicosDoOficio(porFazer[0].t).filter((x) => x.id !== tec && porFazer.every(({ t }) => motivoOcupado(x.id, { dia: Math.max(t.dia, hoje), dur: t.dur, h: t.h }, p, ocup) == null)) : [];
         return (
           <article key={tec} aria-label={nomeTec(tec)} className="rounded-2xl border border-border bg-card p-4">
             <div className="flex flex-wrap items-center gap-3">

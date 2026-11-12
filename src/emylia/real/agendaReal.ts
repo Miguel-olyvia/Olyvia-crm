@@ -8,7 +8,11 @@ import type { Papel } from "../motor";
 import { definirAusenciasRh, type FichaTecnico } from "../equipa/tecnicos";
 import { definirRhDaAgenda, TIPO_AUSENCIA_REAL, type PessoaAgendaRh } from "../equipa/rhDaAgenda";
 import type { EquipaReal, MembroAgenda } from "../equipa/membros";
-import { definirVisitasCrm, type VisitaCrm } from "../equipa/visitasCrm";
+import { definirVisitasCrm, lerVisitasCrm, type VisitaCrm } from "../equipa/visitasCrm";
+import { mesmoNome } from "../equipa/pontes";
+import { definirAgendaExtra, type CompromissoAgenda } from "../preparacaoObra";
+import { HORAS_DIA } from "../ganttOrcamento";
+import { diasUteis, estadoTarefaObra, tarefaObraConcluida, type TarefaObraRpc } from "@/lib/agenda/obraTarefas";
 
 /** O nome de cada papel na agenda ("Comercial", "Técnico"…). */
 export const NOME_PAPEL: Record<Papel, string> = {
@@ -21,7 +25,7 @@ export function janelaAgenda(hoje: Date): { de: string; ate: string } {
   return { de: d(-30), ate: d(365) };
 }
 
-interface LinhaAgendaRh { pessoa_id: string; nome: string | null; indisponivel?: { data: string }[] | null }
+interface LinhaAgendaRh { pessoa_id: string; nome: string | null; indisponivel?: { data: string }[] | null; tarefas?: TarefaObraRpc[] | null }
 
 /** As pessoas da rh_agenda_tecnicos, com os dias de ausência aprovada. */
 export const pessoasDaAgenda = (linhas: readonly LinhaAgendaRh[]): PessoaAgendaRh[] =>
@@ -33,11 +37,46 @@ export function aplicarAgenda(pessoas: readonly PessoaAgendaRh[]): void {
   definirRhDaAgenda(pessoas);
 }
 
+/* 12/11 (Rúben: «a validação da obra devia ter agendas disponíveis»): o plano da obra conta também o que a agenda real já tem marcado aos
+   técnicos e que não vem do plano de um negócio carregado: as tarefas de obra da rh_agenda_tecnicos (as de negócios carregados contam pelo
+   plano do negócio, preparacaoObra.cargaDosTecnicos) e as visitas do CRM em que vai um técnico (pelo nome do recurso). */
+let tarefasDaAgenda: CompromissoAgenda[] = [];
+
+/** As tarefas de obra por fazer da rh_agenda_tecnicos, uma por dia útil, com as horas desse dia (sem horas, o dia inteiro). */
+export function tarefasDaAgendaRh(linhas: readonly LinhaAgendaRh[], de: string, ate: string): CompromissoAgenda[] {
+  const out: CompromissoAgenda[] = [];
+  for (const l of linhas) for (const t of l.tarefas ?? []) {
+    if (tarefaObraConcluida(estadoTarefaObra(t.estado))) continue;
+    const h = Math.min(HORAS_DIA, t.horas_dia ?? (t.minutos ? t.minutos / 60 : HORAS_DIA));
+    const nome = t.obra_titulo || t.obra_codigo || "Obra";
+    for (const data of diasUteis(t.inicio, t.fim, de, ate))
+      out.push({ tec: l.pessoa_id, data, h, nome, tarefa: t.nome, ...(t.negocio_numero != null ? { negocio: Number(t.negocio_numero) } : {}) });
+  }
+  return out;
+}
+
+/** As visitas do CRM (por fazer) em que vai um técnico (o recurso com o nome dele). */
+export function visitasDosTecnicos(visitas: readonly VisitaCrm[], tecnicos: readonly { id: string; n: string }[]): CompromissoAgenda[] {
+  const out: CompromissoAgenda[] = [];
+  for (const v of visitas) {
+    if (v.feito) continue;
+    const tec = tecnicos.find((t) => mesmoNome(v.nome, t.n));
+    if (tec) out.push({ tec: tec.id, data: v.data, h: Math.min(HORAS_DIA, v.horas || 1.5), nome: v.titulo, tarefa: v.hora ? `Visita às ${v.hora}` : "Visita" });
+  }
+  return out;
+}
+
+/** Junta as tarefas da agenda do RH e as visitas dos técnicos e põe-nas no plano da obra (definirAgendaExtra). */
+export function aplicarCompromissos(tecnicos: readonly { id: string; n: string }[]): void {
+  definirAgendaExtra([...tarefasDaAgenda, ...visitasDosTecnicos(lerVisitasCrm(), tecnicos)]);
+}
+
 /** Lê e aplica. Sem a função ou sem permissão, a agenda fica sem ausências (nunca com as de exemplo) e devolve o motivo. */
 export async function carregarAgendaReal(sb: SupabaseClient, org: string, hoje = new Date()): Promise<{ pessoas: PessoaAgendaRh[]; erro: string | null }> {
   const { de, ate } = janelaAgenda(hoje);
   const { data, error } = await sb.rpc("rh_agenda_tecnicos" as never, { p_org: org, p_de: de, p_ate: ate } as never);
-  if (error) { aplicarAgenda([]); return { pessoas: [], erro: error.message || "Não foi possível ler a agenda do RH." }; }
+  if (error) { aplicarAgenda([]); tarefasDaAgenda = []; return { pessoas: [], erro: error.message || "Não foi possível ler a agenda do RH." }; }
+  tarefasDaAgenda = tarefasDaAgendaRh((data as LinhaAgendaRh[] | null) ?? [], de, ate);
   const pessoas = pessoasDaAgenda((data as LinhaAgendaRh[] | null) ?? []);
   aplicarAgenda(pessoas);
   return { pessoas, erro: null };
