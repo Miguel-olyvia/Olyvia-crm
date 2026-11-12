@@ -214,6 +214,8 @@ export interface Alteracao {
   cliente: boolean;
   /** O texto que o cliente vê no portal. */
   avisoCliente?: string;
+  /** 12/11 (quem paga): quem paga a mudança, a tarefa, as horas a mais, o custo para a empresa e a adenda (se foi ao cliente) */
+  paga?: "cliente" | "imprevisto" | "empresa"; tarefa?: string; horas?: number; custo?: number; adenda?: string;
 }
 /** dur em dias úteis, ou h em horas úteis (21/10: as tarefas curtas ajustam-se à hora). */
 export interface AjusteVivo { dur?: number; h?: number; dia?: number; tec?: string }

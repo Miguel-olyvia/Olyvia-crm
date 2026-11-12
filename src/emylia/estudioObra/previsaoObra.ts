@@ -7,6 +7,7 @@
 //  · hojeNaObra: quem está na obra hoje e o que faz, o que acabou, o que está atrasado;
 //  · diarioDaObra: o que se passou, do mais recente para o mais antigo, com as fotografias; antesEDepois: a primeira e a última fotografia;
 //  · pontoDaSemana: o resumo da semana para o cliente.
+import { custoDosNossos } from "./quemPaga";
 import { tot, type Estado, type Negocio, type Plano, type Tarefa } from "../motor";
 import { custoObra } from "../custoObra";
 import { assinadas, totaisAdenda } from "../adendas";
@@ -67,6 +68,8 @@ export interface MargemViva {
   valor: number; custoOrc: number; margemOrc: number;
   /** o desvio da mão de obra até hoje (real − previsto das tarefas com horas), a projeção do resto ao mesmo ritmo e os materiais a mais */
   desvioMO: number; projecao: number; materiais: number;
+  /** 12/11 (quem paga): os atrasos e erros nossos ainda por acabar (as horas a mais pagas pela empresa; as acabadas já estão no desvio) */
+  nossos: number;
   custoVivo: number; margemViva: number;
 }
 export function margemAoVivo(d: Negocio, S: Estado): MargemViva | null {
@@ -86,8 +89,9 @@ export function margemAoVivo(d: Negocio, S: Estado): MargemViva | null {
   const pend = porEncomendarDe(d);
   const materiais = r2(pend.reduce((a, x) => a + x.q * (x.m.preco ?? custosDosMateriais(d, [{ n: x.m.n, q: x.q }])[0]?.custo ?? 0), 0));
   const custoOrc = r2(T.custo);
-  const custoVivo = r2(custoOrc + desvioMO + projecao + materiais);
-  return { valor, custoOrc, margemOrc: valor > 0 ? (valor - custoOrc) / valor : 0, desvioMO, projecao, materiais, custoVivo, margemViva: valor > 0 ? (valor - custoVivo) / valor : 0 };
+  const nossos = custoDosNossos(d, true).custo;
+  const custoVivo = r2(custoOrc + desvioMO + projecao + materiais + nossos);
+  return { valor, custoOrc, margemOrc: valor > 0 ? (valor - custoOrc) / valor : 0, desvioMO, projecao, materiais, nossos, custoVivo, margemViva: valor > 0 ? (valor - custoVivo) / valor : 0 };
 }
 
 /* ------------------------------------------------------------------ o caminho crítico */

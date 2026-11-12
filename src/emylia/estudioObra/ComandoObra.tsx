@@ -21,7 +21,7 @@ import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
 import { porEncomendarDe } from "../encomendasAjuste";
 import { imprevistosDe } from "../imprevistos";
-import { valorContrato } from "../adendas";
+import { emCurso, valorContrato } from "../adendas";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
@@ -91,7 +91,7 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
         sub={ims.length ? `${ims.length} no total` : "nenhum"}>
         <Contagem valor={abertos.length} fmt={(n) => String(Math.round(n))} de={0} />
       </Mosaico>
-      <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA"}>
+      <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={[val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA", (d.adendas ?? []).filter(emCurso).length ? `${(d.adendas ?? []).filter(emCurso).length} à espera do cliente` : ""].filter(Boolean).join(" · ")}>
         {val ? `${eur(val.total)} €` : "—"}
       </Mosaico>
     </section>
@@ -254,6 +254,7 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
               { l: "Mão de obra até hoje", v: -margem.desvioMO },
               { l: "O resto, a este ritmo", v: -margem.projecao },
               { l: "Materiais a mais", v: -margem.materiais },
+              ...(margem.nossos ? [{ l: "Atrasos e erros nossos", v: -margem.nossos }] : []),
               { l: "Ao vivo", v: margem.valor - margem.custoVivo, m: margem.margemViva, base: true },
             ].filter((x) => x.base || Math.abs(x.v) > 0.5).map((x, k) => {
               const larg = Math.min(100, (Math.abs(x.v) / Math.max(1, margem.valor - margem.custoOrc)) * 100);

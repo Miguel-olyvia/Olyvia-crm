@@ -42,6 +42,8 @@ import { Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra
 import { AgendaEquipa, ComandoHoje, DiarioObra, Entregas, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
 import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
+import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
+import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
 
 const SEM = ["D", "S", "T", "Q", "Q", "S", "S"];
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -51,7 +53,9 @@ const primeiro = (n: string) => n.split(" ")[0];
 const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia útil" : "dias úteis"}`;
 
 type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: string; k: "atraso"; ti: number; dias: number };
-type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } } | null;
+type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inicial?: ImprevistoInicial } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } }
+  /** 12/11 (quem paga): o «Porquê?» de uma mudança com a obra em curso (volta: a tarefa aberta antes) */
+  | { k: "porque"; aj: AjusteObra; volta?: number } | null;
 type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "fecho";
 type Retrato = { dia: number; dur: number; h: number; tec: string | null }[];
 
@@ -112,6 +116,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   const ims = imprevistosDe(d), imsAbertos = ims.filter((i) => i.estado !== "fechado" && i.estado !== "aprovado");
   const val = (() => { try { return valorContrato(d, S); } catch { return null; } })();
   const custoPend = ims.filter((i) => i.estado === "aberto" || i.estado === "proposta").reduce((a, i) => a + (i.custo ?? 0), 0);
+  const nossos = custoDosNossos(d);
   const validadas = p.tasks.filter((t) => acabou || estadoVivo(t, p) === "validada").length;
   const fazer = (fn: () => void) => run(fn);
   // cada mudança ao plano guarda o retrato de antes, para «Desfazer» (só se mudou mesmo)
@@ -125,6 +130,31 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   const foraDaObra = (tec: string, k: number) => { const x = dias[k]; if (!x) return false; const iso = isoDia(x); return deFerias(tec, iso) || !!ocup.get(tec)?.has(iso); };
   const podeMexer = (ti: number) => planeia && !acabou && !porqueNaoMexe(p, ti);
   const podeCriar = planeia && !acabou;
+  // 12/11 (Rúben: «quem paga?»): com a obra em curso, juntar uma tarefa, prolongá-la (dias ou horas) ou dar-lhe um atraso pergunta porquê
+  // antes de mudar o plano. As peças partilhadas (o painel da tarefa, a tarefa nova, o Gantt) mudam pelo `ctxObra`, que desvia essas mudanças.
+  const pedir = (aj: AjusteObra): boolean => {
+    if (!pedePorque(p, aj)) return false;
+    setPrevia(null);
+    setPainel((x) => ({ k: "porque", aj, ...(x?.k === "tarefa" ? { volta: x.ti } : x?.k === "porque" && x.volta != null ? { volta: x.volta } : {}) }));
+    return true;
+  };
+  const ctxObra: Ctx = !vivo ? ctx : {
+    ...ctx,
+    A: new Proxy(A, {
+      get(o, k, r) {
+        if (k === "ajustarTarefa") return (id: number, ti: number, m: Parameters<typeof A.ajustarTarefa>[2]) => {
+          if ((m.dur != null || m.h != null) && pedir({ k: "prolongar", ti, ...(m.dur != null ? { dur: m.dur } : {}), ...(m.h != null ? { h: m.h } : {}) })) {
+            if (m.nota != null) o.ajustarTarefa(id, ti, { nota: m.nota });
+            return;
+          }
+          return o.ajustarTarefa(id, ti, m);
+        };
+        if (k === "novaTarefaPlano") return (id: number, n: Parameters<typeof A.novaTarefaPlano>[1]) => (pedir({ k: "nova", n }) ? null : o.novaTarefaPlano(id, n));
+        return Reflect.get(o, k, r);
+      },
+    }),
+  };
+  const abrirImprevisto = (x: ImprevistoInicial) => { setPrevia(null); setPainel({ k: "imprevisto", ti: x.ti, inicial: x }); };
   const n = {
     execucao: p.tasks.filter((t) => ["feita", "atrasada", "corrigir"].includes(estadoVivo(t, p))).length,
     materiais: alertas.filter((x) => x.id.startsWith("mat-")).length,
@@ -139,7 +169,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   };
   const agir = (a: AcaoAlerta) => {
     switch (a.k) {
-      case "prolongar": setPainel(null); setPrevia({ titulo: `Pôr ${(p.tasks[a.ti]?.nome ?? "a tarefa").toLowerCase()} em dia`, k: "replanear", adiantar: false }); break;
+      case "prolongar": setPainel(null); if (!pedir({ k: "prolongar", ti: a.ti, dur: a.dur })) setPrevia({ titulo: `Pôr ${(p.tasks[a.ti]?.nome ?? "a tarefa").toLowerCase()} em dia`, k: "replanear", adiantar: false }); break;
       case "validar": fazer(() => A.validarTarefa(d.id, a.ti)); break;
       case "tarefa": setPainel({ k: "tarefa", ti: a.ti }); break;
       case "imprevisto": verImprevisto(a.id); break;
@@ -209,7 +239,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
 
               {/* ------------------------------------------------------------ «E se…?»: a pré-visualização, antes de aplicar */}
               <AnimatePresence>
-                {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} />}
+                {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} abrirImprevisto={abrirImprevisto} />}
               </AnimatePresence>
 
               {/* ------------------------------------------------------------ 11/11: os separadores (o plano, a execução, os materiais, a equipa, o cliente, o fecho) */}
@@ -228,7 +258,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
                   {viva.prev && !previa && <PrevisaoViva d={d} dias={dias} prev={viva.prev} margem={viva.margem} critico={viva.critico} ir={ir} previsaoRef={previsaoRef} />}
               {/* ------------------------------------------------------------ o plano vivo */}
               <GanttVivo titulo={previa ? "O plano, se aplicar" : R ? "O plano, com o imprevisto" : "O plano vivo"} p={p} R={R} dias={dias} sel={painel?.k === "tarefa" ? painel.ti : null} abrir={(ti) => setPainel({ k: "tarefa", ti })} imprevistos={ims.map((i) => ({ id: i.id, dia: i.dia, texto: i.texto }))} reduzir={reduzir}
-                vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => A.ajustarTarefa(d.id, ti, m))}
+                vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => ctxObra.A.ajustarTarefa(d.id, ti, m))}
                 nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra}
                 critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined} />
 
@@ -264,12 +294,15 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
               {(d.obra.alteracoes ?? []).length > 0 && (
                 <section aria-label="O que mudou no plano" className="space-y-2">
                   <h2 className="text-[15px] font-semibold">O que mudou no plano</h2>
+                  {nossos.n > 0 && <p className="text-sm text-amber-800 dark:text-amber-300">Atrasos e erros nossos: {nossos.n} {nossos.n === 1 ? "mudança" : "mudanças"}, {nfmt(nossos.horas)} h, <b className="tabular-nums">{eur(nossos.custo)} €</b> pagos pela empresa.</p>}
                   <ol className="relative space-y-3 border-l-2 border-border pl-5">
                     {(d.obra.alteracoes ?? []).slice(0, 8).map((x, k) => (
                       <li key={k} className="relative">
                         <span aria-hidden="true" className={cn("absolute -left-[27px] top-1.5 h-3 w-3 rounded-full ring-4 ring-background", x.fimAntes === x.fimDepois ? "bg-muted-foreground/50" : "bg-amber-500")} />
                         <p className="text-[15px]">{x.t} <span className="text-muted-foreground">· {x.motivo}</span></p>
-                        <p className="text-sm text-muted-foreground">{x.q} · {x.quem} · {x.fimAntes === x.fimDepois ? "o fim mantém-se" : `fim: ${x.fimAntes} → ${x.fimDepois}`}{x.cliente ? " · cliente avisado" : ""}</p>
+                        <p className="text-sm text-muted-foreground">{x.q} · {x.quem} · {x.fimAntes === x.fimDepois ? "o fim mantém-se" : `fim: ${x.fimAntes} → ${x.fimDepois}`}{x.cliente ? " · cliente avisado" : ""}
+                          {x.paga === "empresa" && <span className="font-medium text-amber-800 dark:text-amber-300"> · paga a empresa{x.custo ? `: ${eur(x.custo)} €` : ""}</span>}
+                          {x.paga === "cliente" && <span className="font-medium text-success"> · paga o cliente{x.adenda ? ` (${x.adenda})` : ""}</span>}</p>
                       </li>
                     ))}
                   </ol>
@@ -290,22 +323,26 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
           {/* ---------------------------------------------------------------- o painel da direita */}
           <AnimatePresence>
             {painel && (painel.k !== "tarefa" || p.tasks[painel.ti]) && (
-              <motion.aside key={painel.k + (painel.k === "tarefa" ? painel.ti : "")} aria-label={painel.k === "tarefa" ? "A tarefa" : painel.k === "imprevisto" ? "Registar imprevisto" : "Nova tarefa"}
+              <motion.aside key={painel.k + (painel.k === "tarefa" ? painel.ti : "")} aria-label={painel.k === "tarefa" ? "A tarefa" : painel.k === "imprevisto" ? "Registar imprevisto" : painel.k === "porque" ? "Quem paga a mudança" : "Nova tarefa"}
                 className="absolute inset-0 z-30 w-full overflow-y-auto border-l border-border bg-card shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:max-w-lg lg:relative lg:z-auto lg:shadow-none"
                 initial={reduzir ? false : { x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.2 }}>
                 {painel.k === "tarefa" && (() => {
                   const t = p.tasks[painel.ti], m = t.tec ? motivoOcupado(t.tec, t, p, ocup, p.tasks.filter((_, i) => i !== painel.ti)) : null;
                   const onde = m === "noutra obra" && t.tec ? obraQueOcupa(S, t.tec, t, p, d.id) : null;
                   return (
-                    <PainelTarefa key={painel.ti} ctx={ctx} d={d} ti={painel.ti} editavel={podeMexer(painel.ti)} podeAgir={planeia && !acabou} dias={dias} motivo={m} onde={onde}
+                    <PainelTarefa key={painel.ti} ctx={ctxObra} d={d} ti={painel.ti} editavel={podeMexer(painel.ti)} podeAgir={planeia && !acabou} dias={dias} motivo={m} onde={onde}
                       abrirOutra={setOutra} fechar={() => setPainel(null)} ocup={ocup} mudar={mudar} foraDaObra={foraDaObra} minDia={vivo ? p.dia : 0} notaLivre={planeia && !acabou}
                       extra={<ExecucaoTarefa ctx={ctx} d={d} ti={painel.ti} imprevisto={() => setPainel({ k: "imprevisto", ti: painel.ti })}
                         simular={(n) => setPrevia(n ? { titulo: `${t.nome}: mais ${n} ${n === 1 ? "dia" : "dias"}`, k: "atraso", ti: painel.ti, dias: n } : null)}
                         simulado={previa?.k === "atraso" && previa.ti === painel.ti ? previa.dias : 0} />} />
                   );
                 })()}
-                {painel.k === "nova" && <div className="p-4"><NovaTarefa key={JSON.stringify(painel.inicial ?? {})} ctx={ctx} d={d} inicial={painel.inicial} fechar={() => setPainel(null)} /></div>}
-                {painel.k === "imprevisto" && <NovoImprevisto ctx={ctx} d={d} ti={painel.ti} ocup={ocup} fechar={() => setPainel(null)} mostrar={setFantasma} />}
+                {painel.k === "nova" && <div className="p-4"><NovaTarefa key={JSON.stringify(painel.inicial ?? {})} ctx={ctxObra} d={d} inicial={painel.inicial} fechar={() => setPainel((x) => (x?.k === "porque" ? x : null))} /></div>}
+                {painel.k === "imprevisto" && <NovoImprevisto key={JSON.stringify(painel.inicial ?? {})} ctx={ctx} d={d} ti={painel.ti} inicial={painel.inicial} ocup={ocup} fechar={() => setPainel(null)} mostrar={setFantasma} />}
+                {painel.k === "porque" && (() => {
+                  const voltar = () => setPainel(painel.volta != null && p.tasks[painel.volta] ? { k: "tarefa", ti: painel.volta } : null);
+                  return <PorqueAjuste key={JSON.stringify(painel.aj)} ctx={ctx} d={d} aj={painel.aj} fechar={voltar} feito={voltar} imprevisto={abrirImprevisto} />;
+                })()}
               </motion.aside>
             )}
           </AnimatePresence>
@@ -608,8 +645,9 @@ function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, peg
 }
 
 /* ================================================================== «E se…?»: a pré-visualização */
-function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocup }: {
+function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocup, abrirImprevisto }: {
   ctx: Ctx; d: Negocio; previa: Previa; setPrevia: (x: Previa | null) => void; R: Replano; fora: ConflitoFora[]; dias: Date[]; abrirOutra: (o: Negocio) => void; ocup: Map<string, Set<string>>;
+  abrirImprevisto: (x: ImprevistoInicial) => void;
 }) {
   const { A, run } = ctx;
   const reduzir = useReduzir();
@@ -700,6 +738,10 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
         ) : <p className="flex items-center gap-1.5"><Check className="h-4 w-4" aria-hidden="true" />{R.mudancas.some((m) => m.espera) ? "As outras obras não mudam: as tarefas desta esperam pelos técnicos." : "Não mexe nas outras obras: os técnicos continuam livres nos dias novos."}</p>}
       </div>
 
+      {/* 12/11 (quem paga): o atraso numa tarefa pergunta quem paga (o cliente, um imprevisto, ou nós) */}
+      {previa.k === "atraso" && R.mudancas.length > 0 && d.obra.plano?.estado === "em curso" ? (
+        <PorqueAjuste ctx={ctx} d={d} aj={{ k: "atraso", ti: previa.ti, dias: previa.dias }} embutido fechar={() => setPrevia(null)} feito={() => setPrevia(null)} imprevisto={abrirImprevisto} />
+      ) : <>
       {R.mudancas.length > 0 && (
         <div className="space-y-3">
           <div>
@@ -715,6 +757,7 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
         <Button type="button" variant="ghost" size="lg" onClick={() => setPrevia(null)}>Cancelar</Button>
         <Button type="button" size="lg" disabled={!R.mudancas.length} onClick={aplicar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aplicar ao plano</Button>
       </div>
+      </>}
     </motion.section>
   );
 }
@@ -724,7 +767,7 @@ const OFICIOS = ["Canalização", "Eletricidade", "Revestimentos", "Carpintaria"
 const chip = (on: boolean) => cn("inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40");
 const ENTRADA = "h-12 w-full rounded-xl border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-function NovoImprevisto({ ctx, d, ti, ocup: _ocup, fechar, mostrar }: { ctx: Ctx; d: Negocio; ti?: number; ocup: Map<string, Set<string>>; fechar: () => void; mostrar: (c: Plano | null) => void }) {
+function NovoImprevisto({ ctx, d, ti, inicial, ocup: _ocup, fechar, mostrar }: { ctx: Ctx; d: Negocio; ti?: number; inicial?: ImprevistoInicial; ocup: Map<string, Set<string>>; fechar: () => void; mostrar: (c: Plano | null) => void }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const afetaveis = tarefasAfetaveis(p);
@@ -733,11 +776,12 @@ function NovoImprevisto({ ctx, d, ti, ocup: _ocup, fechar, mostrar }: { ctx: Ctx
   const [fotos, setFotos] = useState<string[]>([]);
   const [grav, setGrav] = useState<Gravidade>("atrasa");
   const [tarefas, setTarefas] = useState<number[]>(ti != null && afetaveis.includes(ti) ? [ti] : []);
-  const [dias, setDias] = useState(1);
+  // 12/11 (quem paga): vindo do «Porquê?», já com os dias, as horas e o ofício da mudança
+  const [dias, setDias] = useState(inicial?.dias ?? 1);
   const [custo, setCusto] = useState(false);
-  const [horas, setHoras] = useState(4);
+  const [horas, setHoras] = useState(inicial?.horas ?? 4);
   const [preco, setPreco] = useState<number | null>(null);
-  const [oficio, setOficio] = useState("Canalização");
+  const [oficio, setOficio] = useState(inicial && OFICIOS.includes(inicial.perfil) ? inicial.perfil : "Canalização");
   const input = useRef<HTMLInputElement>(null);
   const juntar = async (L?: FileList | null) => {
     if (!L) return;

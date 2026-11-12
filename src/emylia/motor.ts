@@ -8,6 +8,7 @@ import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } 
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { replanear, simularAtraso } from "./estudioObra/planoVivo";
+import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo, normal as normalUn } from "./catalogo";
 import {
@@ -23,7 +24,7 @@ import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, PAGAMENTO_MEDIDA, deIso, erroPrestacoes, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import {
   MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
-  juntarAoPlano, linhaAdenda, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
+  MOTIVOS_ADENDA, juntarAoPlano, linhaAdenda, precoSugeridoLivre, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
@@ -2115,6 +2116,40 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     });
     return linhas;
   };
+  /** 12/11 (quem paga): faz no plano um ajuste com a obra em curso e regista-o (quem paga, as horas, o custo). Devolve a tarefa mexida. */
+  const fazerAjuste = (d: Negocio, aj: AjusteObra | AjusteAdenda, I: Pick<ImpactoAjuste, "texto">, m: { horas: number; paga: "cliente" | "empresa"; custo: number; nota?: string; cliente?: boolean; adenda?: string }): Tarefa | null => {
+    const p = d.obra.plano!;
+    guardarBase(p);
+    const fimAntes = rotuloDia(p, fimDe(p.tasks) - 1), dias0 = p.tasks.map((t) => [t, t.dia, t.dur] as const);
+    const ti = aplicarNoPlano(S, p, aj, ocupacaoDosTecnicos(S, d.id), m.horas), t = p.tasks[ti];
+    if (!t) return null;
+    if (aj.k === "nova") avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+    else avisarTecnico(p, ti, `${t.nome}: ${aj.k === "atraso" ? "mais " + aj.dias + (aj.dias === 1 ? " dia" : " dias") : `${t.dur} ${t.dur === 1 ? "dia" : "dias"}`}, até ${rotuloDia(p, t.dia + t.dur - 1)}`, agora());
+    // as outras tarefas que andaram ficam a saber
+    for (const [x, dia, dur] of dias0) if (x !== t && (x.dia !== dia || x.dur !== dur)) avisarTecnico(p, p.tasks.indexOf(x), `${x.nome}: passa a ${rotuloDia(p, x.dia)}`, agora());
+    const fimDepois = rotuloDia(p, fimDe(p.tasks) - 1), quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+    const motivo = MOTIVO_QUEM_PAGA[m.paga] + (m.nota?.trim() ? `: ${m.nota.trim()}` : "");
+    const alt: Alteracao = { q: agora(), dia: p.dia, quem, t: I.texto, motivo, fimAntes, fimDepois, cliente: !!m.cliente, paga: m.paga, tarefa: t.nome, horas: m.horas, custo: m.custo, ...(m.adenda ? { adenda: m.adenda } : {}) };
+    if (m.cliente) alt.avisoCliente = fimAntes === fimDepois ? `Ajustámos o plano da obra. A data de fim mantém-se: ${fimDepois}.` : `Ajustámos o plano da obra. A obra passa a acabar a ${fimDepois} (antes: ${fimAntes}).`;
+    (d.obra.alteracoes ??= []).unshift(alt);
+    const pagaTxt = m.paga === "empresa" ? `paga a empresa${m.custo ? `: ${eur(m.custo)} €` : ""}` : `paga o cliente${m.adenda ? ` (${m.adenda})` : ""}`;
+    (d.obra.diario ??= []).push({ q: agora(), quem, t: `${I.texto} · ${motivo} · ${pagaTxt} · fim: ${fimAntes === fimDepois ? "mantém-se" : `${fimAntes} → ${fimDepois}`}`, k: "marco" });
+    log(d, `Plano em obra: ${I.texto} · ${pagaTxt} · acaba a ${fimDepois}${fimAntes !== fimDepois ? ` (era ${fimAntes})` : ""}`, m.paga === "empresa" ? "w" : "a");
+    return t;
+  };
+  /** 12/11 (quem paga): o cliente assinou a adenda de um ajuste: o ajuste entra no plano. */
+  const entrarAjusteDaAdenda = (d: Negocio, a: Adenda): void => {
+    const aj = a.ajuste!;
+    const horas = aj.k === "nova" ? 0 : aj.horas;
+    const texto = aj.k === "nova" ? `Tarefa nova: ${S.svc[aj.n.sid]?.n ?? "tarefa"}` : aj.k === "atraso" ? `${aj.tarefa}: mais ${aj.dias} ${aj.dias === 1 ? "dia" : "dias"}` : `${aj.tarefa}: mais tempo`;
+    const t = fazerAjuste(d, aj, { texto: `${texto} (adenda ${a.n})` }, { horas, paga: "cliente", custo: 0, adenda: a.n });
+    if (t && aj.k === "nova") {
+      // como as tarefas das outras adendas: os materiais encomendam-se quando o Financeiro validar o pagamento desta adenda
+      t.adenda = a.n; t.encomendado = [];
+      if (porEncomendarDe(d, a.n).length) log(d, "Materiais da adenda " + a.n + " por encomendar: a encomenda emite-se quando o pagamento da adenda for validado");
+    }
+    avisar({ msg: "Adenda assinada", sub: t ? `${texto}: entrou no plano da obra` : "A tarefa já não está no plano: veja o Estúdio da obra", kind: t ? "ok" : "bad" });
+  };
   /** 3/11: a obra concluída volta a «em curso» para as tarefas de um problema do cliente (a assistência, ex.: garantia): começam hoje.
    *  O auto de receção assinado fica; ao encerrar de novo, o real da obra conta também a assistência. */
   const reabrirParaAssistencia = (d: Negocio, pr: Pick<ProblemaCliente, "id">): void => {
@@ -2771,11 +2806,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** Trabalhos a mais (contrato assinado, obra por acabar): a adenda nasce em rascunho; verifica-se (as margens) e envia-se ao cliente
      *  como o orçamento (verificarEnviarAdenda). */
-    criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"]; desconto?: number }): string | null {
+    criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"]; desconto?: number; ajuste?: AjusteAdenda }): string | null {
       // 4/11: a adenda de um imprevisto ou de um problema do cliente é do Gestor de obra (negocios.obra.imprevistos, pedida em proporImprevisto);
       // as outras pedem negocios.orcamento.editar, como neg_guardar_negocio. ATENÇÃO: o servidor pede orcamento.editar a todas (e a
       // proposta.enviar ao envio), e as Operações não as têm em neg_papeis_permissoes: decisão pendente, não se esconde aqui o fluxo da obra
-      if (!extra?.origem?.imprevisto && !exigePerm("orcamento.editar")) return null;
+      // 12/11 (quem paga): a de um ajuste ao plano pedido pelo cliente com a obra em curso é também do Gestor de obra (como a do imprevisto)
+      if (extra?.ajuste ? !exigePerm("obra.planear") : !extra?.origem?.imprevisto && !exigePerm("orcamento.editar")) return null;
       const d = deal(id);
       if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return null; }
       // 3/11: a de um problema do cliente faz-se mesmo com a obra concluída (a assistência depois da obra; reabre quando for assinada)
@@ -2785,7 +2821,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!linhas.length) return null;
       const n = "AD 2026/" + d.id + "-" + k, desconto = descontoValido(extra?.desconto);
       (d.adendas ??= []).push({ n, estado: "rascunho", criada: agora(), motivo, linhas, enviada: null, aceite: null, verif: false, aprov: null,
-        ...(desconto ? { desconto } : {}), ...(extra?.origem ? { origem: extra.origem } : {}) });
+        ...(desconto ? { desconto } : {}), ...(extra?.origem ? { origem: extra.origem } : {}), ...(extra?.ajuste ? { ajuste: extra.ajuste } : {}) });
       log(d, "Adenda " + n + " preparada: " + linhas.map((x) => x.n.toLowerCase()).join(", ") + " · +" + eur(totalAdenda(linhas, desconto)) + " € sem IVA · +" + diasAdenda(linhas) + " dias · por verificar e enviar");
       avisar({ msg: "Adenda " + n + " preparada", sub: "Verifique as margens e envie ao cliente", kind: "" });
       return n;
@@ -2803,7 +2839,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && !!x.verif && !adendaBloqueada(d, S, x));
       if (!a || a.estado !== "rascunho") return;
       // 4/11: como criarAdenda, a de um imprevisto/problema do cliente segue com a obra; as outras pedem negocios.proposta.enviar
-      if (!a.origem?.imprevisto && !exigePerm("proposta.enviar")) return;
+      if (!a.origem?.imprevisto && !a.ajuste && !exigePerm("proposta.enviar")) return;
       if (!a.verif) { avisar({ msg: "Primeiro, verifique a adenda", sub: "A Olyvia verifica as margens antes de enviar", kind: "bad" }); return; }
       if (adendaBloqueada(d, S, a)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: corrija o preço ou peça aprovação à Direção", kind: "bad" }); return; }
       if (!comEmail(d, "adenda", a.n)) return;
@@ -2818,7 +2854,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     verificarEnviarAdenda(id: number, n?: string): boolean {
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho");
       if (!a) return false;
-      if (!a.origem?.imprevisto && !exigePerm("proposta.enviar")) return false;
+      if (!a.origem?.imprevisto && !a.ajuste && !exigePerm("proposta.enviar")) return false;
       if (!a.verif) A.verificarAdenda(id, a.n);
       if (adendaBloqueada(d, S, a)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: corrija o preço ou peça aprovação à Direção", kind: "bad" }); return false; }
       A.enviarAdenda(id, a.n);
@@ -2904,7 +2940,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "aceite" && !x.contrato && !x.contratoPedido);
       if (!a || a.estado !== "aceite") return;
       // 4/11: como criarAdenda, o contrato da adenda de um imprevisto/problema segue com a obra; os outros pedem negocios.contrato.editar
-      if (!a.origem?.imprevisto && !exigePerm("contrato.editar")) return;
+      if (!a.origem?.imprevisto && !a.ajuste && !exigePerm("contrato.editar")) return;
       if (a.contratoPedido) { avisar({ msg: "O contrato da adenda está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; }
       if (!comEmail(d, "contratoAdenda", a.n)) return;
       a.contrato = "enviado";
@@ -2941,6 +2977,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, "Adenda " + n + " assinada pelo cliente");
       // 3/11: a de um problema do cliente com a obra já concluída reabre-a para a assistência
       { const pr = problemaDaAdenda(d, a); if (pr) reabrirParaAssistencia(d, pr); }
+      // 12/11 (quem paga): a de um ajuste pedido pelo cliente faz o ajuste que ficou à espera (prolongar, atrasar, a tarefa nova)
+      if (p && p.estado !== "concluída" && a.ajuste) { entrarAjusteDaAdenda(d, a); return; }
       if (p && p.estado !== "concluída") {
         const antes = new Map(p.tasks.map((t) => [t, t.dia] as const));
         const novas = juntarAoPlano(p, a);
@@ -3588,6 +3626,50 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Plano em obra: ${texto} · acaba a ${fimDepois}${fimAntes !== fimDepois ? ` (era ${fimAntes})` : ""}`, r.fimDepois > r.fimAntes ? "w" : "a");
       avisar({ msg: r.fimDepois < r.fimAntes ? "Obra adiantada" : r.fimDepois > r.fimAntes ? "Plano posto em dia" : "Plano reorganizado", sub: `${fimAntes === fimDepois ? "A data de fim mantém-se" : `Acaba a ${fimDepois} (era ${fimAntes})`}${m.cliente ? " · o cliente vê o aviso no portal" : ""}`, kind: "ok" });
       return n;
+    },
+    /** 12/11 (Rúben: «quem paga?»): o cliente pediu o ajuste (juntar uma tarefa, prolongar, atrasar) com a obra em curso. Vai numa adenda já
+     *  preenchida (as horas a mais ao preço do ofício, ou o serviço da tarefa nova), verificada e enviada ao portal; só entra no plano quando
+     *  o cliente a assinar. Sem nada a cobrar (um atraso numa tarefa por começar), entra já, registado como pedido do cliente.
+     *  Devolve o número da adenda ("" quando entrou sem adenda; null se não deu). */
+    ajusteDoCliente(id: number, aj: AjusteObra, m: { horas?: number; preco?: number; nota?: string; cliente?: boolean } = {}): string | null {
+      if (!exigePerm("obra.planear")) return null;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return null; }
+      const I = impactoAjuste(S, p, aj, ocupacaoDosTecnicos(S, d.id), aj.k === "atraso" ? m.horas : undefined);
+      if (!I) return null;
+      const horas = aj.k === "nova" ? I.horas : Math.max(0, r2(m.horas ?? I.horas));
+      if (aj.k !== "nova" && !(horas > 0)) {
+        fazerAjuste(d, aj, I, { horas: 0, paga: "cliente", custo: 0, nota: m.nota, cliente: m.cliente });
+        avisar({ msg: "Plano ajustado a pedido do cliente", sub: "Sem custo: não há adenda", kind: "ok" });
+        return "";
+      }
+      const livres: LinhaLivre[] = aj.k === "nova" ? [] : [{ n: I.linha?.n ?? `Mais tempo em ${I.nome.toLowerCase()}`, h: horas, preco: r2(m.preco ?? precoSugeridoLivre(S, horas, I.perfil)), perfil: I.perfil, mats: [] }];
+      const n = A.criarAdenda(id, aj.k === "nova" ? [{ sid: aj.n.sid, q: aj.n.q }] : [], MOTIVOS_ADENDA[0], { livres, ajuste: guardarAjuste(p, aj, horas) });
+      if (!n) return null;
+      const foi = A.verificarEnviarAdenda(id, n);
+      const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `Pedido do cliente: ${I.texto}${m.nota?.trim() ? ` (${m.nota.trim()})` : ""} · adenda ${n} ${foi ? "enviada" : "por enviar"} · fica à espera do cliente`, k: "marco" });
+      log(d, `Pedido do cliente na obra: ${I.texto} · adenda ${n} ${foi ? "enviada ao cliente" : "por enviar (margem abaixo do mínimo)"} · o plano muda quando ele assinar`, foi ? "a" : "w");
+      avisar({ msg: foi ? `Adenda ${n} enviada ao cliente` : `Adenda ${n} por enviar`, sub: foi ? "Fica à espera do cliente: o plano muda quando ele assinar" : "A margem ficou abaixo do mínimo: peça aprovação à Direção", kind: foi ? "ok" : "" });
+      return n;
+    },
+    /** 12/11 (quem paga): o ajuste é um atraso ou um erro nosso. Entra já no plano; paga a empresa: o custo (as horas a mais ao €/h do técnico,
+     *  e os materiais da tarefa nova) fica registado nas mudanças do plano e no diário, e a margem ao vivo mostra-o. Ao cliente, só um aviso
+     *  da data, se o gestor quiser. */
+    ajusteNosso(id: number, aj: AjusteObra, m: { horas?: number; nota?: string; cliente?: boolean } = {}): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return false; }
+      const I = impactoAjuste(S, p, aj, ocupacaoDosTecnicos(S, d.id), aj.k === "atraso" ? m.horas : undefined);
+      if (!I) return false;
+      const horas = aj.k === "nova" ? I.horas : Math.max(0, r2(m.horas ?? I.horas));
+      const custo = aj.k === "nova" ? I.custo : r2(horas * custoDaHora(S, p.tasks[aj.ti]));
+      const t = fazerAjuste(d, aj, I, { horas, paga: "empresa", custo, nota: m.nota, cliente: m.cliente });
+      if (!t) return false;
+      // a tarefa nova paga por nós: os materiais vão já numa encomenda de ajuste (como as tarefas novas do gestor)
+      if (aj.k === "nova") ajustar(d, "tarefa nova " + t.nome);
+      avisar({ msg: "Plano ajustado", sub: `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`, kind: "ok" });
+      return true;
     },
     /** 21/10: uma mensagem na conversa da obra (do cliente no portal, ou da empresa na página da obra). */
     mensagemObra(id: number, de: "cliente" | "empresa", texto: string) {

@@ -20,7 +20,7 @@ import { blocosForaDaObra, motivoOcupado, obrasDosTecnicos, ocupacaoDosTecnicos,
 import { materiaisPorFase, seguranca } from "../obraOps";
 import { enviosDe, TEMPOS_CORRECAO } from "../trabalhoObra";
 import { pontosEncerrar } from "../encerrarObra";
-import { estadoAdenda, totaisAdenda } from "../adendas";
+import { emCurso, estadoAdenda, totaisAdenda } from "../adendas";
 import { aMais, porEncomendarDe } from "../encomendasAjuste";
 import { materiaisDaTarefa } from "../tarefasValidador";
 import { custosDosMateriais } from "../preparacaoObra";
@@ -96,6 +96,10 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
       {t.exec?.pausa && <p className="text-sm text-muted-foreground">Pausada {t.exec.pausa.q}: {t.exec.pausa.motivo}</p>}
       {t.exec?.motivo && (v === "corrigir" || v === "em curso") && <p className="text-sm text-destructive">Pedido: {t.exec.motivo}</p>}
       {t.bloqueio && <p className="text-sm text-muted-foreground">Parada por um imprevisto, à espera do cliente.</p>}
+      {/* 12/11 (quem paga): um pedido do cliente para esta tarefa à espera da assinatura da adenda */}
+      {(d.adendas ?? []).filter((a) => a.ajuste && a.ajuste.k !== "nova" && a.ajuste.tarefa === t.nome && emCurso(a)).map((a) => (
+        <p key={a.n} className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">À espera do cliente: {a.ajuste!.k === "atraso" ? `mais ${a.ajuste!.dias} ${a.ajuste!.dias === 1 ? "dia" : "dias"}` : "mais tempo"}{a.ajuste!.k !== "nova" && a.ajuste!.horas ? ` (+${nfmt(a.ajuste!.horas)} h)` : ""} na adenda {a.n}. Muda quando ele assinar.</p>
+      ))}
 
       {/* os toques: o principal e os outros, pelo estado */}
       {planeia && (

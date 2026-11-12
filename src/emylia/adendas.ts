@@ -14,6 +14,7 @@ import { fasesPadrao, type FaseObra } from "./fasesObra";
 import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
 import { tecnicosDoPerfil } from "./equipa/tecnicos";
 import { prestacoes } from "./planoObra";
+import type { AjusteAdenda } from "./estudioObra/quemPaga";
 
 export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu: number; h: number; perfil: string;
   /** 22/10: o perfil do Catálogo pelo id (o técnico do plano escolhe-se por ele) */ perfilId?: string;
@@ -57,6 +58,9 @@ export interface Adenda {
   fatura?: { n: string; q: string }; recibo?: { n: string; q: string }; pag?: Record<string, string>;
   /** 21/10: o comercial já viu a recusa (sai do Hoje dele) */
   vista?: true;
+  /** 12/11 (quem paga): nasceu de um ajuste ao plano com a obra em curso, a pedido do cliente (prolongar, atrasar, tarefa nova): entra no
+   *  plano quando ele a assinar (motor.assinarAdenda), em vez de juntar as linhas como tarefas novas */
+  ajuste?: AjusteAdenda;
 }
 export const MOTIVOS_ADENDA = ["O cliente pediu", "Surpresa em obra", "Erro de medição"] as const;
 /** 21/10: o motivo das adendas que nascem de um imprevisto registado na obra. */

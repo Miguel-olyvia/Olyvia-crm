@@ -44,7 +44,7 @@ describe("Estúdio da obra (11/11)", () => {
     fireEvent.click(within(painel).getByRole("button", { name: "Mais um dia" }));
     fireEvent.click(within(painel).getByRole("button", { name: "Ver no plano" }));
     const previa = screen.getByRole("region", { name: "Antes de aplicar" });
-    expect(within(previa).getByText(/mais 2 dias/)).toBeTruthy();
+    expect(within(previa).getAllByText(/mais 2 dias/).length).toBeGreaterThan(0);
     expect(within(previa).getByText(/espera pelo Paulo/)).toBeTruthy();
   });
   it("o imprevisto com custo: o impacto no prazo e no valor, e a adenda vai ao cliente", () => {
