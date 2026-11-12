@@ -1,0 +1,68 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import type { Fala } from "@/emylia/chamadaMotor";
+import type { Projeto } from "./necessidadesEstudio";
+import { PROJETO_EXEMPLO } from "./exemploEstudio";
+
+// a gravação ao vivo, que o teste muda a meio (como as falas que chegam enquanto o cliente fala)
+const vivo = vi.hoisted(() => ({ g: { negocio: 7, modo: "visita", estado: "a_ouvir", falas: [] as unknown[] }, ouvir: new Set<() => void>() }));
+vi.mock("@/emylia/gravador", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return { useGravacao: () => useSyncExternalStore((f: () => void) => { vivo.ouvir.add(f); return () => vivo.ouvir.delete(f); }, () => vivo.g) };
+});
+const chega = (f: Fala) => act(() => { vivo.g = { ...vivo.g, falas: [...vivo.g.falas, f] }; vivo.ouvir.forEach((x) => x()); });
+
+import { OuvidoDoCliente, useEstiloOuvido, Combinacoes } from "./EstiloOuvido";
+
+let atual: Projeto;
+function Ecra({ inicio }: { inicio: Projeto }) {
+  const [p, setP] = useState(inicio);
+  atual = p;
+  const { ouvido, aOuvir } = useEstiloOuvido(p);
+  return <><OuvidoDoCliente p={p} setP={setP} ouvido={ouvido} aOuvir={aOuvir} /><Combinacoes p={p} setP={setP} cor={ouvido?.estilo.cores[0] ?? p.estilo.cores[0]} evitar={ouvido?.evitar ?? []} /></>;
+}
+const fala = (inicio: number, falante: Fala["falante"], texto: string): Fala => ({ inicio, fim: inicio + 3, texto, falante, confianca_falante: 0.6 });
+
+describe("o Estúdio ouve a conversa e muda o estilo", () => {
+  beforeEach(() => { vivo.g = { negocio: 7, modo: "visita", estado: "a_ouvir", falas: [] }; });
+
+  it("quando o cliente diz «quero tudo preto», o estilo e as paredes passam a preto, com as combinações para o preto", () => {
+    const inicio: Projeto = { ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["branco"], porCategoria: {} }, revestimento: undefined, pavimento: undefined };
+    render(<Ecra inicio={inicio} />);
+    expect(screen.getByText("A ouvir a conversa")).toBeInTheDocument();
+    expect(atual.estilo.cores).toEqual(["branco"]);
+
+    chega(fala(60, "comercial", "E de cores, o que gostava?"));
+    chega(fala(64, "cliente", "Eu quero tudo preto."));
+    expect(screen.getByText("Eu quero tudo preto.")).toBeInTheDocument();
+    expect(atual.estilo.cores[0]).toBe("preto");
+    expect(atual.revestimento).toBe("rev-tela-a");
+    expect(screen.getByText("Aplicado às cores e às peças a trocar.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Combinações para o preto" })).toBeInTheDocument();
+
+    // desfazer: volta ao de antes e o que se disser a seguir fica como sugestão
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
+    expect(atual.estilo.cores).toEqual(["branco"]);
+    chega(fala(80, "cliente", "E o móvel quero em madeira."));
+    expect(atual.estilo.porCategoria.movel).toBeUndefined();
+    fireEvent.click(screen.getByRole("button", { name: "Usar o que o cliente disse" }));
+    expect(atual.estilo.cores[0]).toBe("preto");
+    expect(atual.estilo.porCategoria.movel).toEqual(["madeira"]);
+  });
+
+  it("uma combinação aplica-se com um toque", () => {
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["preto"], porCategoria: {} } }} />);
+    fireEvent.click(screen.getByRole("button", { name: /Preto e madeira/ }));
+    expect(atual.estilo.porCategoria.movel).toEqual(["madeira"]);
+    expect(atual.pavimento).toBe("pav-madeira");
+    expect(screen.getByRole("button", { name: /Preto e madeira/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("a gravação de outro negócio não conta", () => {
+    vivo.g = { ...vivo.g, negocio: 99, falas: [fala(5, "cliente", "Quero tudo preto.")] };
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["branco"], porCategoria: {} } }} />);
+    expect(screen.queryByText("Pelo que o cliente disse")).not.toBeInTheDocument();
+    expect(atual.estilo.cores).toEqual(["branco"]);
+  });
+});

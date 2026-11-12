@@ -14,6 +14,8 @@ import { decidir, decisaoDe, escolherProduto, juntarPorColocar, juntarServico, m
 import { juntarSugestoes, recusarSugestao, sugestoesDeServicos, type Sugestao } from "./sugestoesServicos";
 import { Cartao, Cores, ListaProdutos, Resumo, Seguinte, chip, eur, nf } from "./pecasEstudio";
 import { Ilustracao } from "./Ilustracao";
+import { Combinacoes, OuvidoDoCliente, useEstiloOuvido } from "./EstiloOuvido";
+import type { Cor } from "./catalogoFake";
 
 type SetP = React.Dispatch<React.SetStateAction<Projeto>>;
 const FEMININO: TipoPeca[] = ["base", "banheira", "sanita", "bancada", "placa", "maquina"];
@@ -31,6 +33,12 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
   const [juntado, setJuntado] = useState("");
   const hoje = p.antes.pecas.filter((x) => !PECAS[x.tipo].abertura);
   const porColocar = p.porColocar ?? [];
+  // 12/11: o que o cliente disse das cores (ao vivo) e as combinações para a cor principal
+  const { ouvido, aOuvir } = useEstiloOuvido(p);
+  const [corEscolhida, setCorEscolhida] = useState<Cor | undefined>(undefined);
+  const corBase = corEscolhida ?? ouvido?.estilo.cores[0] ?? p.estilo.cores[0];
+  // mexer nas cores à mão: o que o cliente disser a seguir fica como sugestão
+  const mudarEstilo = (f: (e: Projeto["estilo"]) => Projeto["estilo"]) => setP((x) => ({ ...x, estilo: f(x.estilo), estiloManual: true }));
 
   return (
     <>
@@ -40,8 +48,10 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
           <p className="text-[15px] text-muted-foreground">A Olyvia vai buscar ao catálogo o que combina com o cliente. Decida peça a peça; o que juntar fica por colocar na planta.</p>
         </div>
 
+        <OuvidoDoCliente p={p} setP={setP} ouvido={ouvido} aOuvir={aOuvir} />
+
         <Cartao titulo="As cores do cliente">
-          <Cores escolhidas={p.estilo.cores} onMudar={(cores) => setP((x) => ({ ...x, estilo: { ...x.estilo, cores } }))} />
+          <Cores escolhidas={p.estilo.cores} onMudar={(cores) => { setCorEscolhida(cores[0]); mudarEstilo((e) => ({ ...e, cores })); }} />
           <details className="group rounded-xl border border-border p-3">
             <summary className="min-h-11 cursor-pointer content-center text-[15px] font-medium">Exceções por peça{Object.keys(p.estilo.porCategoria).length ? ` (${Object.keys(p.estilo.porCategoria).length})` : ""}</summary>
             <ul className="divide-y divide-border pt-2">
@@ -52,8 +62,8 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
                     <span className="text-[15px] font-medium">{NOME_CATEGORIA[c]}</span>
                     <div className="flex flex-wrap items-center gap-2">
                       <button type="button" className={chip(!exc?.length)} aria-pressed={!exc?.length}
-                        onClick={() => setP((x) => { const pc = { ...x.estilo.porCategoria }; delete pc[c]; return { ...x, estilo: { ...x.estilo, porCategoria: pc } }; })}>Como o resto</button>
-                      <Cores pequeno escolhidas={exc ?? []} onMudar={(cores) => setP((x) => ({ ...x, estilo: { ...x.estilo, porCategoria: { ...x.estilo.porCategoria, [c]: cores } } }))} />
+                        onClick={() => mudarEstilo((e) => { const pc = { ...e.porCategoria }; delete pc[c]; return { ...e, porCategoria: pc }; })}>Como o resto</button>
+                      <Cores pequeno escolhidas={exc ?? []} onMudar={(cores) => mudarEstilo((e) => ({ ...e, porCategoria: { ...e.porCategoria, [c]: cores } }))} />
                     </div>
                   </li>
                 );
@@ -61,6 +71,8 @@ export function PassoEstilo({ p, setP, t, porEscolher, seguinte }: { p: Projeto;
             </ul>
           </details>
         </Cartao>
+
+        <Combinacoes p={p} setP={setP} cor={corBase} evitar={ouvido?.evitar ?? []} />
 
         <section aria-labelledby="t-hoje" className="space-y-3">
           <h3 id="t-hoje" className="text-[17px] font-semibold tracking-tight">O que há hoje</h3>
