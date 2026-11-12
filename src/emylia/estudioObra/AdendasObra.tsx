@@ -3,6 +3,7 @@
 // por disparar (o motivo, a tarefa, as linhas, o total com IVA, os dias, o estado e os botões) e as que já andam, com o percurso até ao
 // pagamento (o cliente aceita, assina, a fatura, paga). Tudo sem sair do Estúdio. O percurso está em quemPaga.ts (percursoAdenda).
 import { useEffect, useState } from "react";
+import { useParamUrl } from "../usarParamUrl";
 import { motion } from "framer-motion";
 import { Check, FileText, Pencil, Send, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,10 @@ export function AdendasDaObra({ ctx, d, todas }: { ctx: Ctx; d: Negocio; todas?:
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
   const planeia = podeNeg(S.role, "obra.planear");
-  const [aberta, setAberta] = useState<string | null>(null);
+  // 12/11: a adenda aberta («Ver ou mudar») no endereço (?adenda=AD …), como os outros painéis do Estúdio (só a do alerta, não a do separador Cliente)
+  const [abertaUrl, setAbertaUrl] = useParamUrl<string>("adenda", "", undefined, todas ? false : undefined);
+  const aberta = abertaUrl || null;
+  const setAberta = (n: string | null) => setAbertaUrl(n ?? "", { substituir: !n });
   const L = todas
     ? (d.adendas ?? []).map((a) => ({ a, p: percursoAdenda(d, a, a.estado === "rascunho" && adendaBloqueada(d, S, a)) }))
     : adendasAAndar(d, S);
