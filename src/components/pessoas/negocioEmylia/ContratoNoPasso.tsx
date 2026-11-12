@@ -2,6 +2,7 @@
 // documento inteiro: os dados do cliente e da obra, o corpo da minuta escolhida (já preenchido) e, no fim, as cláusulas do negócio
 // (preço, prestações, prazo, garantia, adendas) e as assinaturas. É a folha do contrato da Emylia (ContratoDoc, a mesma do portal), com a minuta
 // no lugar da frase de abertura. Sem minuta, o documento continua à vista e diz, em cima e no sítio do corpo, o que falta para haver contrato.
+import { hasSignatoryHook } from "@/components/contracts/contractDocument";
 import { ContratoDoc } from "@/emylia/DocsCliente";
 import type { Estado, Negocio } from "@/emylia/motor";
 
@@ -48,7 +49,7 @@ export function ContratoNoPasso({ S, d, minutaHtml, nomeMinuta, falta }: Contrat
       <div className="space-y-1">
         <h4 id="contrato-no-passo" className="text-[15px] font-semibold">O contrato</h4>
         <p className="text-sm text-muted-foreground">
-          Como o cliente o vai ler.{minutaHtml !== null ? " Os dados que faltam na minuta aparecem a amarelo." : ""}
+          Como o cliente o vai ler.{minutaHtml !== null ? " A verde, os dados que vêm do negócio; entre chavetas, o que falta preencher." : ""}
         </p>
       </div>
       {falta.length > 0 && (
@@ -57,7 +58,8 @@ export function ContratoNoPasso({ S, d, minutaHtml, nomeMinuta, falta }: Contrat
           <ul className="mt-1 list-disc space-y-0.5 pl-5">{falta.map((x) => <li key={x}>{x}</li>)}</ul>
         </div>
       )}
-      <ContratoDoc S={S} d={d} corpo={corpo} />
+      {/* a minuta com as suas linhas de assinatura: a folha não as repete no fim */}
+      <ContratoDoc S={S} d={d} corpo={corpo} semAssinaturas={minutaHtml !== null && hasSignatoryHook(minutaHtml)} />
     </section>
   );
 }

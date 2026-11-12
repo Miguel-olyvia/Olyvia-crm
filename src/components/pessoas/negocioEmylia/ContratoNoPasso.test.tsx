@@ -71,6 +71,15 @@ describe("o contrato montado (ContratoNoPasso)", () => {
     expect(screen.queryByText(/Para haver contrato, falta/)).toBeNull();
   });
 
+  it("assinaturas uma vez só: a minuta com as suas linhas de assinatura dispensa as da folha; sem elas, a folha põe-nas", () => {
+    const { S, d } = negocioPronto();
+    const { unmount } = render(<ContratoNoPasso S={S} d={d} minutaHtml="<p>Texto.</p><p>A PRIMEIRA CONTRATANTE ____ O SEGUNDO CONTRATANTE</p>" nomeMinuta="Com assinaturas" falta={[]} />);
+    expect(screen.queryByRole("region", { name: "Assinaturas" })).toBeNull();
+    unmount();
+    render(<ContratoNoPasso S={S} d={d} minutaHtml="<p>Texto sem linhas de assinatura.</p>" nomeMinuta="Sem assinaturas" falta={[]} />);
+    expect(screen.getByRole("region", { name: "Assinaturas" })).toBeTruthy();
+  });
+
   it("sem minuta: o documento continua à vista e diz o que falta, em cima e no lugar do corpo", () => {
     const { S, d } = negocioPronto();
     render(<ContratoNoPasso S={S} d={d} minutaHtml={null} nomeMinuta={null} falta={["Escolher a minuta do contrato, na lista em cima."]} />);

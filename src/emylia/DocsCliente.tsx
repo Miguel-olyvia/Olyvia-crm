@@ -739,8 +739,9 @@ function Assinaturas({ linhas, quandoCliente = true }: { linhas: [string, string
 
 /** O contrato. 21/10: com `a`, o contrato da adenda (as mesmas cláusulas e assinaturas, com o que é dela).
  *  12/11 (Rúben: «falta ver aqui o contrato»): com `corpo`, o contrato montado no passo Contrato do CRM: os dados do cliente e da obra,
- *  o corpo da minuta escolhida (em vez da frase de abertura) e, no fim, as cláusulas do negócio (prestações, prazo, adendas). */
-export function ContratoDoc({ S, d, a, corpo }: { S: Estado; d: Negocio; a?: Adenda; corpo?: ReactNode }) {
+ *  o corpo da minuta escolhida (em vez da frase de abertura) e, no fim, as cláusulas do negócio (prestações, prazo, adendas).
+ *  `semAssinaturas`: a minuta já traz as linhas de assinatura, e a folha não as repete. */
+export function ContratoDoc({ S, d, a, corpo, semAssinaturas = false }: { S: Estado; d: Negocio; a?: Adenda; corpo?: ReactNode; semAssinaturas?: boolean }) {
   if (a) return <ContratoAdenda S={S} d={d} a={a} />;
   const o = d.orc!, versao = (o.contratoVersoes?.length ?? 0) + 1, comCorpo = corpo !== undefined;
   return (
@@ -754,13 +755,13 @@ export function ContratoDoc({ S, d, a, corpo }: { S: Estado; d: Negocio; a?: Ade
       {comCorpo && <h2 className="border-t border-slate-200 pt-5 text-base font-semibold">Cláusulas do negócio</h2>}
       {clausulasContrato(d, S).map((c, i) => <Clausula key={i + 1} k={i + 1} titulo={c.titulo} corpo={c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto} revista={c.revista} />)}
       <AdendasDoContrato S={S} d={d} />
-      <Assinaturas linhas={[
+      {!semAssinaturas && <Assinaturas linhas={[
         ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
           o.contrato ? { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: o.assinatura?.q ?? "", id: `MDL-${d.id}` } as Assinatura : null,
           o.contrato ? "Assinado" : ""],
         ["O cliente", d.f.nome_fiscal || d.nome, o.contrato === "assinado" ? o.assinatura ?? null : null,
           o.contrato === "assinado" ? comoAssinado(o.assinatura) : o.contrato === "enviado" ? "À espera da assinatura" : ""],
-      ]} />
+      ]} />}
     </Folha>
   );
 }
