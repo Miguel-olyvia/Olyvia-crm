@@ -12,14 +12,13 @@ import { cn } from "@/lib/utils";
 import { TECS, type Estado } from "./motor";
 import { ausenteNoRh } from "./equipa/tecnicos";
 import { dataCurta, deIso, diasDaObra, isoDia } from "./planoObra";
-import { cargaDosTecnicos, motivoOcupado, ocupacaoDosTecnicos, type EscolhasEquipa } from "./preparacaoObra";
+import { motivoOcupado, ocupacaoDosTecnicos, type EscolhasEquipa } from "./preparacaoObra";
 import { equipaDe, useEquipasObra, type EquipaObra } from "./equipa/equipasObra";
 import { irPara } from "./urlNegocio";
 import type { PlanoDatas, TarefaDatas } from "./planoDaVisita";
 
 const nomeTec = (id: string | null) => TECS.find((x) => x.id === id)?.n ?? "Por atribuir";
 const primeiro = (n: string) => n.split(" ")[0];
-const nfh = (h: number) => h.toLocaleString("pt-PT", { maximumFractionDigits: 1 });
 
 export interface PropsEquipa {
   P: PlanoDatas; S: Estado; negocio?: number; escolhas: EscolhasEquipa;
@@ -160,12 +159,20 @@ export function EquipaDaObra({ P, S, negocio, escolhas, mudar, calcular, mudarIn
 function AgendaTecnico({ id, P, S, negocio, fechar }: { id: string; P: PlanoDatas; S: Estado; negocio?: number; fechar: () => void }) {
   const tec = TECS.find((x) => x.id === id);
   const dias = P.inicio ? diasDaObra(P.inicio, Math.max(1, P.dias) + 10) : [];
-  // 12/11: a mesma agenda que decide quem está livre (preparacaoObra.cargaDosTecnicos): só as obras aprovadas ou em curso, com as horas
   const outras = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const [iso, c] of cargaDosTecnicos(S, negocio).get(id) ?? []) m.set(iso, c.itens.map((x) => `${x.nome}: ${x.tarefa} (${nfh(x.h)} h)`));
+    for (const d of S.deals ?? []) {
+      const p = d.obra?.plano;
+      if (d.id === negocio || !p?.inicio || p.estado === "concluída") continue;
+      const fim = p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
+      const ds = diasDaObra(deIso(p.inicio), Math.max(1, fim));
+      for (const t of p.tasks) if (t.tec === id) for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) {
+        const iso = isoDia(ds[k]);
+        m.set(iso, [...(m.get(iso) ?? []), `${d.nome}: ${t.nome}`]);
+      }
+    }
     return m;
-  }, [S, S.deals, id, negocio]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [S.deals, id, negocio]);
   if (!tec) return null;
   return (
     <div className="rounded-xl border border-border bg-card p-3">
@@ -278,7 +285,7 @@ function Disponibilidade({ P, S, negocio, equipa }: { P: PlanoDatas; S: Estado; 
     const c = `${t.tec}|${isoDia(dias[k])}`;
     nestaObra.set(c, [...(nestaObra.get(c) ?? []), t.nome]);
   }
-  type E = "esta" | "conflito" | "outra" | "parte" | "ausente" | "livre";
+  type E = "esta" | "conflito" | "outra" | "ausente" | "livre";
   const estado = (id: string, iso: string): E => {
     const tec = TECS.find((x) => x.id === id);
     const aqui = nestaObra.has(`${id}|${iso}`), fora = !!ocup.get(id)?.has(iso), aus = ausenteNoRh(id, iso) || !!tec?.feriasDatas?.includes(iso);
@@ -286,11 +293,10 @@ function Disponibilidade({ P, S, negocio, equipa }: { P: PlanoDatas; S: Estado; 
     if (aqui) return "esta";
     if (aus) return "ausente";
     if (fora) return "outra";
-    // 12/11: com horas noutra obra mas ainda com tempo livre nesse dia
-    return ocup.horas(id, iso) > 0 ? "parte" : "livre";
+    return "livre";
   };
-  const COR: Record<E, string> = { esta: "bg-primary", conflito: "bg-destructive", outra: "bg-warning/70", parte: "bg-warning/25", ausente: "bg-muted-foreground/40", livre: "bg-success/20" };
-  const TXT: Record<E, string> = { esta: "Esta obra", conflito: "Conflito: esta obra e outra (ou ausente)", outra: "Noutra obra", parte: "Parte do dia noutra obra", ausente: "Ausente (RH)", livre: "Livre" };
+  const COR: Record<E, string> = { esta: "bg-primary", conflito: "bg-destructive", outra: "bg-warning/70", ausente: "bg-muted-foreground/40", livre: "bg-success/20" };
+  const TXT: Record<E, string> = { esta: "Esta obra", conflito: "Conflito: esta obra e outra (ou ausente)", outra: "Noutra obra", ausente: "Ausente (RH)", livre: "Livre" };
   const LETRA = ["d", "s", "t", "q", "q", "s", "s"];
   const naObra = (k: number) => k < P.dias;
   return (
@@ -318,7 +324,7 @@ function Disponibilidade({ P, S, negocio, equipa }: { P: PlanoDatas; S: Estado; 
                 </th>
                 {dias.map((d, k) => {
                   const iso = isoDia(d), e = estado(x.id, iso);
-                  const txt = e === "esta" || e === "conflito" ? `${TXT[e]}: ${(nestaObra.get(`${x.id}|${iso}`) ?? []).join(", ")}` : e === "parte" ? `${TXT[e]} (${nfh(ocup.horas(x.id, iso))} h ocupadas)` : TXT[e];
+                  const txt = e === "esta" || e === "conflito" ? `${TXT[e]}: ${(nestaObra.get(`${x.id}|${iso}`) ?? []).join(", ")}` : TXT[e];
                   return <td key={iso} title={`${dataCurta(d)} · ${txt}`} className={cn("h-8 w-8 rounded", COR[e], d.getDay() === 1 && k > 0 && "border-l-2 border-l-foreground/20")}><span className="sr-only">{dataCurta(d)}: {txt}</span></td>;
                 })}
               </tr>

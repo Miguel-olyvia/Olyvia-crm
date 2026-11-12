@@ -9,7 +9,6 @@ import { COR_FASE } from "./fasesObra";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, isoDia } from "./planoObra";
 import { nomeFaseCurto, type PlanoDatas } from "./planoDaVisita";
 import { EquipaDaObra, TrocarTecnico, type PropsEquipa } from "./EquipaDaObra";
-import { SugestaoDatasObra } from "./SugestaoDatasObra";
 import type { FaseObra } from "./fasesObra";
 
 const dataLonga = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" });
@@ -47,8 +46,6 @@ export function MapaDatasObra({ P, inicio, mudarInicio, escuro = false, equipa }
             <input type="date" value={inicio} min={hojeIso} onChange={(e) => e.target.value && mudarInicio(e.target.value)} className="bg-transparent outline-none" />
           </label>
         </div>
-        {/* 12/11 (Rúben: «a plataforma deve sugerir no fim da fase da visita»): os dias de início com a equipa toda livre */}
-        {equipa?.calcular && <SugestaoDatasObra P={P} inicio={inicio} calcular={equipa.calcular} mudarInicio={mudarInicio} />}
       </div>
 
       {!P.tarefas.length ? (

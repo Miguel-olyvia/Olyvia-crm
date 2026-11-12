@@ -11,7 +11,6 @@ import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
-import { HORAS_DIA } from "./ganttOrcamento";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
 import { equipaDe } from "./equipa/equipasObra";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, isoDia, planoObra, proximoUtil } from "./planoObra";
@@ -190,115 +189,65 @@ export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
  *  sem a data mexida à mão não ocupavam ninguém. */
 const inicioDaOutra = (d: Pick<Negocio, "f" | "obra">): string | null => d.obra?.plano?.inicio || (d.f?.inicio && /^\d{4}-\d{2}-\d{2}/.test(d.f.inicio) ? d.f.inicio.slice(0, 10) : null);
 
-/* 12/11 (Rúben: «a validação da obra está com as agendas todas lixadas, devia ter agendas disponíveis»). No testarh o plano de uma obra
-   de 50 horas ficava com 46 dias úteis: cada técnico aparecia riscado quase todos os dias. Três causas:
-   1. contavam os planos ainda «por aprovar» de outros negócios (um rascunho de 70 dias ocupava a equipa toda);
-   2. qualquer tarefa ocupava o dia inteiro (20 minutos a montar um espelho tiravam o dia ao técnico);
-   3. contavam as tarefas já feitas à espera de validação.
-   Agora a agenda de cada técnico conta-se em HORAS por dia útil (HORAS_DIA): só as obras com o plano aprovado ou em curso, só as tarefas por
-   fazer, mais os compromissos da agenda real (as visitas do CRM e as tarefas de obras fora dos negócios, definirAgendaExtra). O técnico
-   está ocupado para uma tarefa quando as horas que já tem nesse dia mais as da tarefa passam o dia de trabalho. */
-/** Os planos que reservam a agenda: aprovados ou em curso (o «por aprovar» é um rascunho; a «concluída» já acabou). */
-export const planoOcupa = (p: Pick<Plano, "estado"> | null | undefined): boolean => p?.estado === "aprovado" || p?.estado === "em curso";
-/** A tarefa ainda ocupa o técnico (não está feita nem validada). */
-const tarefaOcupa = (t: Pick<Tarefa, "tec" | "exec">): boolean => !!t.tec && t.exec?.estado !== "validada" && t.exec?.estado !== "feita";
-/** As horas por dia de uma tarefa: as horas a dividir pelos dias (sem horas, o dia inteiro). */
-export const horasPorDia = (t: { h?: number; dur: number }): number => (t.h != null && t.h > 0 && t.dur > 0 ? Math.min(HORAS_DIA, t.h / t.dur) : HORAS_DIA);
-
-/** Um compromisso da agenda real que não vem do plano de um negócio: uma visita do CRM ou uma tarefa de uma obra (rh_agenda_tecnicos). */
-export interface CompromissoAgenda { tec: string; data: string; h: number; nome: string; tarefa: string;
-  /** O número do negócio da obra: se o negócio está carregado, conta o plano dele (não se conta duas vezes). */ negocio?: number }
-let agendaExtra: readonly CompromissoAgenda[] = [];
-export function definirAgendaExtra(c: readonly CompromissoAgenda[] | null): void { agendaExtra = c ?? []; }
-export const lerAgendaExtra = (): readonly CompromissoAgenda[] => agendaExtra;
-
-/** O que um técnico tem num dia, fora desta obra: as horas e de onde vêm. */
-export interface CargaDia { h: number; itens: { h: number; nome: string; tarefa: string; negocio?: Negocio }[] }
-export type CargaTecnicos = Map<string, Map<string, CargaDia>>;
-
-/** A agenda de cada técnico, dia a dia (aaaa-mm-dd), em horas, fora do negócio `exceto`. */
-export function cargaDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): CargaTecnicos {
-  const out: CargaTecnicos = new Map();
-  const juntar = (id: string, iso: string, h: number, nome: string, tarefa: string, negocio?: Negocio) => {
-    const m = out.get(id) ?? new Map<string, CargaDia>();
-    const c = m.get(iso) ?? { h: 0, itens: [] };
-    c.h += h; c.itens.push({ h, nome, tarefa, ...(negocio ? { negocio } : {}) });
-    m.set(iso, c); out.set(id, m);
-  };
-  const ids = new Set<number>();
+export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
   for (const d of S.deals ?? []) {
-    ids.add(d.id);
     const p = d.obra?.plano;
     const ini = inicioDaOutra(d);
-    if (d.id === exceto || d.perdido || !p || !planoOcupa(p) || !ini) continue;
+    if (d.id === exceto || !p || p.estado === "concluída" || !ini) continue;
     const fim = p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
     if (!fim) continue;
     const ds = diasDaObra(deIso(ini), fim);
     for (const t of p.tasks) {
-      if (!t.tec || !tarefaOcupa(t)) continue;
-      const h = horasPorDia(t);
+      if (!t.tec || t.exec?.estado === "validada") continue;
       // 9/11: a equipa vem toda (ou nenhum membro): um membro numa obra ocupa a equipa inteira nesses dias
-      for (const id of equipaDe(t.tec)?.membros ?? [t.tec])
-        for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) juntar(id, isoDia(ds[k]), h, d.nome, t.nome, d as Negocio);
+      const quem = equipaDe(t.tec)?.membros ?? [t.tec];
+      for (const id of quem) {
+        const s = out.get(id) ?? new Set<string>();
+        for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) s.add(isoDia(ds[k]));
+        out.set(id, s);
+      }
     }
   }
-  for (const c of agendaExtra) if (c.negocio == null || (c.negocio !== exceto && !ids.has(c.negocio))) juntar(c.tec, c.data, c.h, c.nome, c.tarefa);
   return out;
 }
 
-/** O dia está cheio (sem horas livres). */
-export const diaCheio = (c: CargaDia | undefined): boolean => !!c && c.h >= HORAS_DIA - 0.01;
-
-/** A ocupação dos técnicos: os dias CHEIOS de cada um (o conjunto, como antes) e as horas de cada dia (`carga`), para as tarefas que só
- *  ocupam parte do dia caberem ao lado das de outra obra. */
-export class Ocupacao extends Map<string, Set<string>> {
-  readonly carga: CargaTecnicos;
-  constructor(carga: CargaTecnicos = new Map()) {
-    super();
-    this.carga = carga;
-    for (const [id, m] of carga) this.set(id, new Set([...m].filter(([, c]) => diaCheio(c)).map(([iso]) => iso)));
-  }
-  /** As horas que o técnico já tem nesse dia (fora desta obra). */
-  horas(id: string, iso: string): number { return this.carga.get(id)?.get(iso)?.h ?? 0; }
-  /** O dia do técnico está cheio. */
-  cheio(id: string, iso: string): boolean { return diaCheio(this.carga.get(id)?.get(iso)); }
-}
-
-/** Os dias (aaaa-mm-dd) em que cada técnico já está cheio noutra obra (Ocupacao: com as horas de cada dia). */
-export function ocupacaoDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): Ocupacao {
-  return new Ocupacao(cargaDosTecnicos(S, exceto));
-}
-
-/** 11/11 (Rúben: «falta ver quando os técnicos estão ocupados»): cada dia diz em que obra está o técnico (a que lhe ocupa mais horas), para
- *  o Estúdio do plano mostrar a barra com o nome da obra. 12/11: só as obras que reservam a agenda (planoOcupa) e as tarefas por fazer. */
+/** 11/11 (Rúben: «falta ver quando os técnicos estão ocupados»): como ocupacaoDosTecnicos, mas cada dia diz em que obra está (a primeira
+ *  que o ocupa), para o Estúdio do plano mostrar a barra com o nome da obra. */
 export function obrasDosTecnicos(S: Pick<Estado, "deals">, exceto?: number): Map<string, Map<string, Negocio>> {
   const out = new Map<string, Map<string, Negocio>>();
-  for (const [id, m] of cargaDosTecnicos(S, exceto)) {
-    const r = new Map<string, Negocio>();
-    for (const [iso, c] of m) {
-      const n = [...c.itens].filter((x) => x.negocio).sort((a, b) => b.h - a.h)[0]?.negocio;
-      if (n) r.set(iso, n);
+  for (const d of S.deals ?? []) {
+    const p = d.obra?.plano;
+    const ini = inicioDaOutra(d);
+    if (d.id === exceto || !p || p.estado === "concluída" || !ini) continue;
+    const fim = p.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
+    if (!fim) continue;
+    const ds = diasDaObra(deIso(ini), fim);
+    for (const t of p.tasks) {
+      if (!t.tec || t.exec?.estado === "validada") continue;
+      for (const id of equipaDe(t.tec)?.membros ?? [t.tec]) {
+        const m = out.get(id) ?? new Map<string, Negocio>();
+        for (let k = t.dia; k < t.dia + t.dur && k < ds.length; k++) { const iso = isoDia(ds[k]); if (!m.has(iso)) m.set(iso, d as Negocio); }
+        out.set(id, m);
+      }
     }
-    if (r.size) out.set(id, r);
   }
   return out;
 }
 
 /** 11/11: os dias (índices de `dias`) em que o técnico está fora desta obra, juntos em blocos seguidos: de férias (as do RH e as da ficha)
  *  ou noutra obra (com a obra). */
-export interface BlocoFora { ini: number; fim: number; tipo: "ferias" | "obra"; obra?: Negocio;
-  /** 12/11: só parte do dia está ocupada (ainda cabe trabalho desta obra): mostra-se mais leve e sem riscado */ parcial?: boolean }
-export function blocosForaDaObra(tec: string, dias: readonly Date[], obras: Map<string, Map<string, Negocio>>, deFerias: (tec: string, iso: string) => boolean, cheio?: (tec: string, iso: string) => boolean): BlocoFora[] {
+export interface BlocoFora { ini: number; fim: number; tipo: "ferias" | "obra"; obra?: Negocio }
+export function blocosForaDaObra(tec: string, dias: readonly Date[], obras: Map<string, Map<string, Negocio>>, deFerias: (tec: string, iso: string) => boolean): BlocoFora[] {
   const out: BlocoFora[] = [];
   dias.forEach((x, k) => {
     const iso = isoDia(x);
     const o = obras.get(tec)?.get(iso);
     const tipo = deFerias(tec, iso) ? "ferias" : o ? "obra" : null;
     if (!tipo) return;
-    const parcial = tipo === "obra" && !!cheio && !cheio(tec, iso);
     const ult = out[out.length - 1];
-    if (ult && ult.fim === k && ult.tipo === tipo && !!ult.parcial === parcial && (tipo === "ferias" || ult.obra?.id === o?.id)) ult.fim = k + 1;
-    else out.push({ ini: k, fim: k + 1, tipo, ...(tipo === "obra" ? { obra: o } : {}), ...(parcial ? { parcial } : {}) });
+    if (ult && ult.fim === k && ult.tipo === tipo && (tipo === "ferias" || ult.obra?.id === o?.id)) ult.fim = k + 1;
+    else out.push({ ini: k, fim: k + 1, tipo, ...(tipo === "obra" ? { obra: o } : {}) });
   });
   return out;
 }
@@ -313,12 +262,12 @@ export function obraQueOcupa(S: Pick<Estado, "deals">, tec: string, t: Pick<Tare
   for (const d of S.deals ?? []) {
     const q = d.obra?.plano;
     const qi = inicioDaOutra(d);
-    if (d.id === exceto || d.perdido || !q || !planoOcupa(q) || !qi) continue;
+    if (d.id === exceto || !q || q.estado === "concluída" || !qi) continue;
     const fim = q.tasks.reduce((a, x) => Math.max(a, x.dia + x.dur), 0);
     if (!fim) continue;
     const ds = diasDaObra(deIso(qi), fim);
     for (const x of q.tasks) {
-      if (!x.tec || !tarefaOcupa(x)) continue;
+      if (!x.tec || x.exec?.estado === "validada") continue;
       if (!(equipaDe(x.tec)?.membros ?? [x.tec]).some((m) => alvo.has(m))) continue;
       for (let k = x.dia; k < x.dia + x.dur && k < ds.length; k++) if (meus.has(isoDia(ds[k]))) return d;
     }
@@ -346,7 +295,7 @@ export function escolhasDoNegocio(f: Record<string, string | undefined>): Escolh
   return { tecnicos: ler<Record<string, string>>(f.plano_tecnicos), equipa: ler<string[]>(f.plano_equipa), equipas: ler<string[]>(f.plano_equipas) };
 }
 
-type Extensao = Pick<Tarefa, "dia" | "dur"> & Partial<Pick<Tarefa, "ini" | "dias" | "h">>;
+type Extensao = Pick<Tarefa, "dia" | "dur"> & Partial<Pick<Tarefa, "ini" | "dias">>;
 /** 10/11: onde a tarefa está no plano, em dias: o início a meio do dia e a duração reais (frações de dia, do plano do orçamento). Mudada
  *  de dia (adiar, arrastar, uma fase que anda), a tarefa leva a hora do início com ela; com a duração mudada à mão (os dias inteiros já
  *  não batem com a real), contam os dias inteiros. */
@@ -370,13 +319,7 @@ export function motivoOcupado(tecId: string, t: Extensao, plano: Plano, ocupados
   if (i0) {
     const ds = diasDaObra(i0, t.dia + t.dur);
     const fora = ocupados.get(tecId);
-    // 12/11: com as horas (Ocupacao), a tarefa cabe ao lado de outra obra enquanto o dia não passar das HORAS_DIA
-    const carga = ocupados instanceof Ocupacao ? ocupados : null, h = horasPorDia(t);
-    for (let k = t.dia; k < t.dia + t.dur; k++) {
-      if (!ds[k]) continue;
-      const iso = isoDia(ds[k]);
-      if (carga ? carga.horas(tecId, iso) > 0 && carga.horas(tecId, iso) + h > HORAS_DIA + 0.01 : fora?.has(iso)) return "noutra obra";
-    }
+    for (let k = t.dia; k < t.dia + t.dur; k++) if (fora && ds[k] && fora.has(isoDia(ds[k]))) return "noutra obra";
   }
   if (outras.some((o) => o.tec === tecId && sobrepostas(o, t))) return "noutra tarefa desta obra";
   return null;
@@ -440,91 +383,13 @@ export function resolverConflitos(plano: Plano, ocupados: Map<string, Set<string
       && !escolhas.tecnicos?.[chaveTarefa(x)] && motivoOcupado(x.tec, x, plano, ocupados) != null);
     if (!t) break;
     let nd = t.dia;
-    while (motivoOcupado(t.tec!, { dia: nd, dur: t.dur, h: t.h }, plano, ocupados) != null && nd < t.dia + 60) nd++;
+    while (motivoOcupado(t.tec!, { dia: nd, dur: t.dur }, plano, ocupados) != null && nd < t.dia + 60) nd++;
     if (nd >= t.dia + 60) { semSaida.add(t); continue; }
     const d0 = t.dia, dias = nd - d0;
     for (const x of plano.tasks) if (x === t || (x.dia >= d0 && x.exec?.estado !== "validada")) x.dia += dias;
     feitas.push({ nome: t.nome, dias });
   }
   return feitas;
-}
-
-/* ------------------------------------------------------------------ 12/11: a agenda da proposta
-   Rúben: «o comercial não deve conseguir terminar a proposta/orçamento sem ter os técnicos disponíveis para a obra». Antes de enviar, a
-   Olyvia faz o plano da obra no dia de início da proposta (o mesmo que a obra vai ter: planoDoOrcamento, com os técnicos livres de cada
-   ofício) e vê se cada tarefa tem quem a faça nesses dias. Uma tarefa com técnicos do ofício, mas nenhum livre (outra obra, férias, ou o
-   escolhido à mão ocupado), bloqueia o envio; a Olyvia procura o primeiro dia de início com todos livres. Um ofício sem ninguém no RH não
-   depende do dia: fica um aviso (as Operações atribuem, ou é subempreitada). */
-export interface AgendaProposta {
-  /** O dia de início que se verificou (aaaa-mm-dd) e se foi escolhido (no orçamento ou no «Início previsto») ou é o de omissão. */
-  inicio: string; escolhido: boolean;
-  /** As tarefas sem ninguém livre do ofício nesses dias: a tarefa, quem seria e porquê. */
-  ocupadas: { nome: string; tec: string; motivo: string }[];
-  /** Os ofícios sem ninguém no RH (as tarefas ficam por atribuir). */
-  semNinguem: string[];
-  /** Os dias úteis da obra e o último dia. */
-  dias: number; fim: Date | null;
-}
-
-/** O dia de início que a proposta tem: o do orçamento, senão o «Início previsto», senão a próxima segunda-feira (como no envio). */
-export function inicioDaProposta(d: Negocio, hoje = new Date()): { iso: string; escolhido: boolean } {
-  const h = isoDia(hoje);
-  const ini = [d.orc?.inicioObra, d.f?.inicio_prev].find((x) => !!x && /^\d{4}-\d{2}-\d{2}$/.test(x) && x >= h);
-  return ini ? { iso: isoDia(proximoUtil(deIso(ini))), escolhido: true } : { iso: isoDia(iniciosRapidos(hoje)[0].data), escolhido: false };
-}
-
-/** O plano da obra deste orçamento começando em `iso`, com os técnicos escolhidos e porque é que algum não está livre. */
-export function agendaNoInicio(d: Negocio, S: Estado, iso: string, ocup = ocupacaoDosTecnicos(S, d.id)): AgendaProposta | null {
-  if (!d.orc) return null;
-  const dx = { ...d, orc: { ...d.orc, inicioObra: iso } } as Negocio;
-  const plano = planoDoOrcamento(dx, S);
-  if (!plano.tasks.length) return null;
-  plano.inicio = iso;
-  const avisos = escolherTecnicos(plano, ocup, escolhasDoNegocio(d.f ?? {}));
-  const fim = plano.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
-  const ds = diasDaObra(deIso(iso), Math.max(1, fim));
-  return {
-    inicio: iso, escolhido: true,
-    ocupadas: plano.tasks.filter((t) => t.tec && avisos.has(t)).map((t) => ({ nome: t.nome, tec: t.tec!, motivo: avisos.get(t)! })),
-    semNinguem: [...new Set(plano.tasks.filter((t) => !t.tec).map((t) => t.sk || "Por definir"))],
-    dias: fim, fim: ds[Math.max(0, fim - 1)] ?? null,
-  };
-}
-
-/** A agenda da proposta por enviar (null: não há o que verificar: enviada, aceite, venda direta, sem tarefas, ou uma adenda). */
-export function agendaDaProposta(d: Negocio, S: Estado, hoje = new Date()): AgendaProposta | null {
-  const o = d.orc;
-  if (!o || o.enviada || o.aceite || o.vendaDireta || d.fase !== 3 || o.modelo?.startsWith("Adenda ")) return null;
-  const { iso, escolhido } = inicioDaProposta(d, hoje);
-  const A = agendaNoInicio(d, S, iso);
-  return A ? { ...A, escolhido } : null;
-}
-
-/** O texto do bloqueio: quem não está livre, numa frase. */
-export function textoAgenda(A: AgendaProposta): string {
-  const nomes = A.ocupadas.slice(0, 3).map((x) => `${TECS.find((y) => y.id === x.tec)?.n ?? "o técnico"} ${x.motivo} (${x.nome})`);
-  return `${A.escolhido ? "A começar" : "Sem início escolhido; a começar"} a ${dataCurta(deIso(A.inicio))}: ${nomes.join("; ")}${A.ocupadas.length > 3 ? ` e mais ${A.ocupadas.length - 3}` : ""}`;
-}
-
-/** Os próximos dias de início com todos os técnicos livres (até `n`, nas `semanas` seguintes), com o fim e a equipa, para escolher. */
-export function iniciosLivres(d: Negocio, S: Estado, opts: { n?: number; semanas?: number; hoje?: Date; desde?: string } = {}): { iso: string; fim: Date | null; dias: number; tecs: string[] }[] {
-  const hoje = opts.hoje ?? new Date(), n = opts.n ?? 3;
-  const ocup = ocupacaoDosTecnicos(S, d.id);
-  const out: { iso: string; fim: Date | null; dias: number; tecs: string[] }[] = [];
-  const primeiro = opts.desde && opts.desde > isoDia(hoje) ? deIso(opts.desde) : proximoUtil(new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + 1));
-  for (const dia of diasDaObra(proximoUtil(primeiro), (opts.semanas ?? 10) * 5)) {
-    const iso = isoDia(dia);
-    const dx = { ...d, orc: { ...d.orc!, inicioObra: iso } } as Negocio;
-    const plano = planoDoOrcamento(dx, S);
-    if (!plano.tasks.length) break;
-    plano.inicio = iso;
-    const avisos = escolherTecnicos(plano, ocup, escolhasDoNegocio(d.f ?? {}));
-    if (avisos.size) continue;
-    const fim = plano.tasks.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
-    out.push({ iso, fim: diasDaObra(dia, Math.max(1, fim))[Math.max(0, fim - 1)] ?? null, dias: fim, tecs: [...new Set(plano.tasks.map((t) => t.tec).filter((x): x is string => !!x))] });
-    if (out.length >= n) break;
-  }
-  return out;
 }
 
 /** 10/11: o plano novo da obra (do orçamento), já sem conflitos de agenda (resolverConflitos). */

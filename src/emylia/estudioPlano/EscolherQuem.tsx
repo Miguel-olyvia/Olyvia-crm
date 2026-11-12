@@ -33,7 +33,7 @@ export function EscolherQuem({ t, p, ocup, outras, dias, desligado, escolher }: 
 
   // quando fica livre quem está ocupado: o primeiro dia (até 60 dias úteis) em que a tarefa cabe
   const livreA = (tec: string): string | undefined => {
-    for (let nd = t.dia + 1; nd < t.dia + 60; nd++) if (motivoOcupado(tec, { dia: nd, dur: t.dur, h: t.h }, p, ocup, outras) == null) return dias[nd] ? dataCurta(dias[nd]) : `daqui a ${nd - t.dia} dias úteis`;
+    for (let nd = t.dia + 1; nd < t.dia + 60; nd++) if (motivoOcupado(tec, { dia: nd, dur: t.dur }, p, ocup, outras) == null) return dias[nd] ? dataCurta(dias[nd]) : `daqui a ${nd - t.dia} dias úteis`;
     return undefined;
   };
   const opcoes = useMemo<Opcao[]>(() => {

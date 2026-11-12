@@ -740,7 +740,7 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
   // quem do mesmo ofício está livre para a tarefa que espera (a partir de quando podia começar sem esperar)
   const livresPara = (m: Replano["mudancas"][number]) => {
     const t = p0.tasks[m.ti], ini = Math.max(m.de.dia, p0.estado === "em curso" ? p0.dia : 0);
-    return tecnicosDoOficio(t).filter((x) => x.id !== t.tec && motivoOcupado(x.id, { dia: ini, dur: m.para.dur, h: t.h }, p0, ocup) == null).slice(0, 2);
+    return tecnicosDoOficio(t).filter((x) => x.id !== t.tec && motivoOcupado(x.id, { dia: ini, dur: m.para.dur }, p0, ocup) == null).slice(0, 2);
   };
   const [cliente, setCliente] = useState(true);
   const df = R.fimDepois - R.fimAntes;

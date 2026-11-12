@@ -13,7 +13,6 @@ import {
 } from "./motor";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
-import { AgendaDaPropostaCartao } from "./AgendaDaProposta";
 import { EstudioNaVisita, FecharVisita } from "./VisitaEstudio";
 import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { VisitasLista } from "./Visitas";
@@ -821,8 +820,6 @@ export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Nego
             <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € {podeVerCustos() && <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span>}</span>
           </div>
           <ProdutosOrcamento S={S} A={A} run={run} d={d} />
-          {/* 12/11: a agenda dos técnicos para a obra (bloqueia o envio sem ninguém livre) */}
-          {!locked && <AgendaDaPropostaCartao S={S} A={A} run={run} d={d} />}
           {o.verif && !locked && (
             <div className={"card " + (S.pulse === "verif" ? "sec pulse" : "")} id="verif" style={{ borderColor: "var(--pri-line)" }}>
               <h3>Verificar antes de enviar <span>{nX} bloqueio(s) · {nW} aviso(s)</span></h3>

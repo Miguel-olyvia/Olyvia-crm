@@ -14,7 +14,6 @@ import { PlanoObra } from "./PlanoObraOrcamento";
 import { CaminhoOrcamento, VersoesProposta } from "./VoltarAtras";
 import { useLargura } from "./largura";
 import { SEM_VER_CUSTOS, podeVerCustos } from "./permissoes";
-import { AgendaDaPropostaCartao } from "./AgendaDaProposta";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -85,8 +84,6 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
 
   </>);
   const verifEl = (<>
-      {/* 12/11: a agenda dos técnicos para a obra, sempre à vista antes de enviar (bloqueia o envio quando não há ninguém livre) */}
-      {!fechado && <AgendaDaPropostaCartao S={S} A={A} run={run} d={d} />}
       {/* Antes de enviar */}
       {o.verif && !fechado && (
         <section id="verif" aria-labelledby="verif-t" className="scroll-mt-6">
