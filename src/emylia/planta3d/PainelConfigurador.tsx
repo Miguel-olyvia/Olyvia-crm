@@ -1,6 +1,6 @@
 // Protótipo (visualizador 3D): o painel «Configurador de famílias», como assistente de 6 passos (um visível de cada vez):
 // 1 Família, 2 Acabamentos, 3 Medidas, 4 Combinações (matriz cor × medida), 5 Modelo 3D, 6 Pré-visualização e guardar.
-// Só em memória: a lista vive no estado de quem o usa e no registo de familias.ts; recarregar perde tudo. A lógica está em configurador.ts.
+// Só em memória: a lista é de quem usa o painel (a página do configurador guarda-a em familiasConfiguradas.ts, que a regista em familias.ts); recarregar perde tudo. A lógica está em configurador.ts.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CartaoFamilia } from "./BarraProdutos";
 import { ESPEC, ROTULO_ESPACO } from "./catalogo3d";
@@ -8,7 +8,7 @@ import {
   TIPOS_DA_CATEGORIA, celulaKey, comNome, criarFamiliaVazia, exemploKeran, ficheirosCompativeis, juntarAcabamento, juntarMedida, paraFamilia, problemas,
   sincronizar, skuDaCelula, tirarAcabamento, tirarMedida, type FamiliaCfg,
 } from "./configurador";
-import { CATEGORIAS_FAMILIA, registarFamilias, variantesDe, type CategoriaFam } from "./familias";
+import { CATEGORIAS_FAMILIA, variantesDe, type CategoriaFam } from "./familias";
 import { chaveFicheiro } from "./modelosHtml/ficheiros";
 import type { TipoEspaco } from "./modelo";
 
@@ -23,7 +23,7 @@ const SEM_GLB = "";
 const semAcao = () => undefined;
 
 export interface PainelConfiguradorProps {
-  /** As famílias configuradas nesta sessão (quem usa o painel guarda-as no estado). */
+  /** As famílias configuradas nesta sessão (quem usa o painel guarda-as e regista-as). */
   familias: readonly FamiliaCfg[];
   onFamilias: (lista: FamiliaCfg[]) => void;
 }
@@ -45,7 +45,7 @@ export function PainelConfigurador({ familias, onFamilias }: PainelConfiguradorP
   }, [passo, emLista]);
 
   const abrir = (f: FamiliaCfg, idOriginal: string | null) => { setRascunho(sincronizar(copia(f))); setOriginal(idOriginal); setPasso(1); setEscolha({}); };
-  const guardarLista = (lista: FamiliaCfg[]) => { registarFamilias(lista.map(paraFamilia)); onFamilias(lista); };
+  const guardarLista = (lista: FamiliaCfg[]) => onFamilias(lista);
   const mudar = (f: FamiliaCfg) => setRascunho(f);
 
   const aviso = (

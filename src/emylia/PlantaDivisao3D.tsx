@@ -16,9 +16,9 @@ import { ROTULO_ESPACO, comDemonstracao, produtosParaEspaco, type ProdutoModelo3
 import { ajustarPeca, ativa, avisosDaPlanta, centroPeca, ehAbertura, ehDeParede, encostarParede, moverPara, normalizarAngulo, poligonoDe, rodarPeca } from "./planta3d/pecas3d";
 import type { Mover3D } from "./planta3d/Visualizador3D";
 import { aplicarVariante, expandirConjunto, guardarLugarLocal, mudarMontagem, reporComponente, reposicionarConjunto, retirarComponente, type Conjunto } from "./planta3d/conjuntos";
-import { familiaPorId, modeloDaFamilia, registarFamilias } from "./planta3d/familias";
-import { PainelConfigurador } from "./planta3d/PainelConfigurador";
-import type { FamiliaCfg } from "./planta3d/configurador";
+import { familiaPorId, modeloDaFamilia } from "./planta3d/familias";
+import { ROTA_CONFIGURADOR, useFamiliasConfiguradas } from "./planta3d/familiasConfiguradas";
+import { LigacaoProto } from "./planta3d/LigacaoProto";
 import { ListaVendavel, PainelConjunto, PainelVariante } from "./planta3d/PainelVariante";
 import { PainelGenerico } from "./planta3d/PainelGenerico";
 import { PainelComposicao } from "./planta3d/PainelComposicao";
@@ -89,10 +89,8 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
   const [genericas, setGenericas] = useState(false);
   const [feito, setFeito] = useState("");
   const [passo, setPasso] = useState(1);
-  // Configurador de famílias (protótipo): só em memória; o registo limpa-se ao desmontar a página
-  const [famCfg, setFamCfg] = useState<FamiliaCfg[]>([]);
-  const [cfgAberto, setCfgAberto] = useState(false);
-  useEffect(() => () => registarFamilias([]), []);
+  // famílias criadas na página do configurador (protótipo, só em memória): a planta só as lê; ficam registadas em familias.ts pelo armazém
+  const famCfg = useFamiliasConfiguradas();
   const [alcancado, setAlcancado] = useState(1);
   const tituloPasso = useRef<HTMLHeadingElement>(null), primeiraVez = useRef(true);
   const svg = useRef<SVGSVGElement>(null);
@@ -662,10 +660,7 @@ export function PlantaDivisao3D({ ctx, d, divisao }: { ctx: Ctx; d: Negocio; div
 
       {/* passo 4: produtos (a barra com o filtro «Modelo 3D» e a composição livre, mais os revestimentos) */}
       <section hidden={passoAtual !== 4} aria-label="Produtos" className="space-y-2">
-        <div className="space-y-2">
-          <button type="button" className="inline-flex min-h-11 items-center rounded-full border border-input bg-background px-4 py-2 text-[15px] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40" aria-expanded={cfgAberto} aria-controls="painel-configurador-familias" onClick={() => setCfgAberto(!cfgAberto)}>Configurador de famílias</button>
-          {cfgAberto && <div id="painel-configurador-familias"><PainelConfigurador familias={famCfg} onFamilias={setFamCfg} /></div>}
-        </div>
+        <div><LigacaoProto para={ROTA_CONFIGURADOR}>Criar ou editar famílias no configurador</LigacaoProto></div>
         <BarraProdutos produtos={produtosCat} espaco={proto.pref.tipo} onEspaco={proto.setTipo} semSeletorEspaco
           onPegar={(e, m) => pegarNova(e, "movel", m)} onMover={moverNova} onLargar={largarNova} onCancelar={() => setNova(null)} onJuntar={juntarProdutoAoMeio} onConjunto={adicionarConjunto} onBancada={adicionarBancada} onComposicao={adicionarComposicao} onComposicaoLivre={adicionarComposicaoLivre} versaoFamilias={famCfg} />
         {/* pavimentos e revestimentos de parede como produtos: ficam na planta (desfazer/refazer); os selectores do 3D são um atalho para o mesmo */}

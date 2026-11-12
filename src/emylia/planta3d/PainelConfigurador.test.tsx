@@ -4,9 +4,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it } from "vitest";
 import { PainelConfigurador } from "./PainelConfigurador";
 import type { FamiliaCfg } from "./configurador";
-import { familiaPorId, registarFamilias } from "./familias";
 
-afterEach(() => { cleanup(); registarFamilias([]); });
+afterEach(cleanup);
 
 let ultima: FamiliaCfg[] = [];
 function Casa({ inicial = [] }: { inicial?: FamiliaCfg[] }) {
@@ -115,21 +114,19 @@ describe("PainelConfigurador", () => {
     expect(screen.getAllByText("3D do fabricante").length).toBeGreaterThan(0);
   });
 
-  it("Guardar na sessão regista a família (aparece em familiaPorId) e fica na lista com Editar e Remover", () => {
+  it("Guardar na sessão entrega a família a quem usa o painel (onFamilias) e fica na lista com Editar e Remover", () => {
     abrirExemplo();
     ir(5);
     expect(estado()).toBe("Passo 6 de 6 · Pré-visualização");
     expect(screen.getByRole("list", { name: "Pré-visualização da família" })).toBeInTheDocument();
-    expect(familiaPorId("cfg:lava-loica-keran")).toBeUndefined();
+    expect(ultima).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Guardar na sessão" }));
     expect(ultima.map((f) => f.id)).toEqual(["cfg:lava-loica-keran"]);
-    expect(familiaPorId("cfg:lava-loica-keran")?.origem).toBe("configurada");
     const lista = screen.getByRole("list", { name: "Famílias configuradas" });
     expect(within(lista).getByText(/Lava-loiça Keran/)).toBeInTheDocument();
     expect(within(lista).getByRole("button", { name: /^Editar/ })).toBeInTheDocument();
     fireEvent.click(within(lista).getByRole("button", { name: /^Remover/ }));
     expect(ultima).toEqual([]);
-    expect(familiaPorId("cfg:lava-loica-keran")).toBeUndefined();
   });
 
   it("editar e guardar substitui a família (não duplica); guardar uma segunda com o mesmo nome é recusado", () => {

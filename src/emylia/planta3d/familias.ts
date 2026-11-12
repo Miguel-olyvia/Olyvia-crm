@@ -173,7 +173,7 @@ for (const f of PLACAS) f.htmlModelo = f.id;
 for (const f of LAVALOICAS) { f.htmlModelo = f.id; if (f.id === "ambar") f.opcoes = ["tampas"]; if (f.id === "keran") f.opcoes = ["reverso"]; }
 
 export const FAMILIAS: Familia[] = [...TORNEIRAS, ...LAVALOICAS, ...PLACAS, ...OUTRAS];
-/** O registo das famílias do Configurador (protótipo: só em memória; a página limpa-o ao desmontar). Só entram ids `cfg:`, nunca sobrepõem uma demo. */
+/** O registo das famílias do Configurador (protótipo: só em memória; quem o preenche é familiasConfiguradas.ts e não se limpa ao desmontar páginas). Só entram ids `cfg:`, nunca sobrepõem uma demo. */
 let configuradas: readonly Familia[] = [];
 export const PREFIXO_CFG = "cfg:";
 export function registarFamilias(lista: readonly Familia[]): void {

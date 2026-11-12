@@ -151,6 +151,7 @@ const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/Prototip
 // 4/11: a chamada em direto sem conta (o painel do «Tudo na chamada» com um negócio de exemplo)
 const PrototipoChamada = lazy(() => import("./pages/prototipo-negocios/PrototipoChamada"));
 const PrototipoPlanta3D = lazy(() => import("./pages/PrototipoPlanta3D"));
+const PrototipoConfiguradorFamilias = lazy(() => import("./pages/PrototipoConfiguradorFamilias"));
 // 5/11 (Rúben): o Estúdio do projeto (o antes, o estilo, o depois, o 3D e a proposta), com um catálogo de teste, sem conta
 const EstudioProjeto = lazy(() => import("./pages/prototipo-estudio/EstudioProjeto"));
 const PlaneadorCozinha = lazy(() => import("./pages/prototipo-estudio/cozinha/PlaneadorCozinha"));
@@ -233,6 +234,7 @@ const App = () => (
                   <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
                   <Route path="/prototipo/chamada" element={<PrototipoChamada />} />
                   <Route path="/prototipo/planta-3d" element={<PrototipoPlanta3D />} />
+                  <Route path="/prototipo/configurador-familias" element={<PrototipoConfiguradorFamilias />} />
                   <Route path="/prototipo/estudio" element={<EstudioProjeto />} />
                   <Route path="/prototipo/cozinha" element={<PlaneadorCozinha />} />
 
