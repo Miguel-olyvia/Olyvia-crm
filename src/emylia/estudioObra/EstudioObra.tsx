@@ -9,8 +9,8 @@
 //  · os alertas, cada um com o próximo passo; os imprevistos (com fotografias, custo e dias, e o impacto no prazo e no orçamento antes de
 //    registar; com custo, a adenda vai logo ao cliente); a atividade (os ajustes ao plano).
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { usePainelUrl } from "../usarParamUrl";
+import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { EnderecoAtivo, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Flame, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,34 @@ type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inic
   /** 12/11 (quem paga): o «Porquê?» de uma mudança com a obra em curso (volta: a tarefa aberta antes) */
   | { k: "porque"; aj: AjusteObra; volta?: number } | null;
 type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "fecho";
+const ABAS_OBRA: readonly AbaObra[] = ["plano", "execucao", "diario", "materiais", "equipa", "cliente", "fecho"];
+
+/* 12/11 (o «voltar» do browser): o separador (?aba=equipa) e o painel aberto (?painel=tarefa-3) vivem no endereço. O painel em texto:
+   tarefa-<i>, imprevisto[-<i>], nova, porque-<o ajuste em JSON>. O que não cabe (o dia e o técnico da tarefa nova, de onde veio o
+   «Porquê?») fica em memória: ao recarregar, abre sem isso. */
+function codificarPainel(x: Painel): string {
+  if (!x) return "";
+  if (x.k === "tarefa") return `tarefa-${x.ti}`;
+  if (x.k === "imprevisto") return x.ti != null ? `imprevisto-${x.ti}` : "imprevisto";
+  if (x.k === "nova") return "nova";
+  return "porque-" + JSON.stringify(x.aj);
+}
+function descodificarPainel(s: string, p: Plano | null | undefined): Painel {
+  if (!s || !p) return null;
+  let m = /^tarefa-(\d+)$/.exec(s);
+  if (m) return p.tasks[+m[1]] ? { k: "tarefa", ti: +m[1] } : null;
+  if (s === "imprevisto") return { k: "imprevisto" };
+  m = /^imprevisto-(\d+)$/.exec(s);
+  if (m) return { k: "imprevisto", ...(p.tasks[+m[1]] ? { ti: +m[1] } : {}) };
+  if (s === "nova") return { k: "nova" };
+  if (s.startsWith("porque-")) {
+    try {
+      const aj = JSON.parse(s.slice(7)) as AjusteObra;
+      if (aj.k === "nova" ? !!aj.n?.sid : !!p.tasks[aj.ti]) return { k: "porque", aj };
+    } catch { /* um endereço estragado: sem painel */ }
+  }
+  return null;
+}
 type Retrato = { dia: number; dur: number; h: number; tec: string | null }[];
 
 const COR_VIVO: Record<EstadoVivo, string> = {
@@ -65,13 +93,34 @@ const COR_VIVO: Record<EstadoVivo, string> = {
   pausada: "#64748b", atrasada: "", "em curso": "", hoje: "", "por começar": "",
 };
 
-export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
+/** `fechar(mexeu)`: mexeu = o separador ou o painel mudaram no endereço (quem abriu fecha sem recuar no histórico).
+ *  `endereco` false: o Estúdio de outra obra, aberto por cima deste, não toca no endereço. */
+export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: Negocio; fechar: (mexeu?: boolean) => void; endereco?: boolean }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
   const p = d.obra.plano;
   const db = useInventario();
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
-  const [painel, setPainel] = useState<Painel>(null);
+  // 12/11: o separador e o painel no endereço (o «voltar» do browser fecha o painel ou volta ao separador anterior; recarregar volta aqui)
+  const ativo = useContext(EnderecoAtivo);
+  const noEndereco = endereco && !!ativo;
+  const mexeu = useRef(false), entrouPainel = useRef(false);
+  const [painelUrl, setPainelUrl] = useParamUrl<string>("painel", "", undefined, noEndereco ? undefined : false);
+  const [painel, setPainelM] = useState<Painel>(() => descodificarPainel(painelUrl, d.obra.plano));
+  const painelRef = useRef(painel);
+  painelRef.current = painel;
+  // as setas do browser mudaram o painel no endereço: segue-o
+  useEffect(() => { if (codificarPainel(painelRef.current) !== painelUrl) setPainelM(descodificarPainel(painelUrl, d.obra.plano)); }, [painelUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setPainel = (x: Painel | ((y: Painel) => Painel)) => {
+    const antes = painelRef.current, n = typeof x === "function" ? x(antes) : x;
+    painelRef.current = n; setPainelM(n);
+    const k = codificarPainel(n);
+    if (k === codificarPainel(antes)) return;
+    // abrir (sem nenhum aberto) junta uma entrada; trocar de painel substitui-a; fechar recua (o «voltar» a seguir não o reabre)
+    if (!k && noEndereco && entrouPainel.current) { entrouPainel.current = false; try { window.history.back(); return; } catch { /* sem window */ } }
+    if (k && !antes) { entrouPainel.current = noEndereco; mexeu.current = true; }
+    setPainelUrl(k, { substituir: !!antes || !k });
+  };
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [outra, setOutra] = useState<Negocio | null>(null);
   // o imprevisto a ser registado (painel): o atraso dele mostra-se já no plano vivo, sem a caixa de aplicar
@@ -79,7 +128,10 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
   const imprevistosRef = useRef<HTMLElement>(null);
   const comandoRef = useRef<HTMLElement>(null), previsaoRef = useRef<HTMLElement>(null);
   // 11/11 (Rúben: «gerir tudo por completo»): os separadores, a vista do plano e o «Desfazer» das mudanças ao plano
-  const [aba, setAba] = useState<AbaObra>("plano");
+  const [aba, setAbaUrl] = useParamUrl<AbaObra>("aba", "plano", ABAS_OBRA, noEndereco ? undefined : false);
+  const setAba = (x: AbaObra) => { if (x === aba) return; mexeu.current = true; setAbaUrl(x); };
+  // sair do Estúdio: o separador e o painel saem do endereço (não ficam na página do negócio)
+  const sair = () => { if (noEndereco) { setPainelUrl("", { substituir: true }); setAbaUrl("plano", { substituir: true }); } fechar(mexeu.current); };
   const [vista, setVista] = useState<"gantt" | "tecnicos">("gantt");
   const [desfazer, setDesfazer] = useState<{ snap: Retrato; ti: number; n: number } | null>(null);
   useEffect(() => { if (!desfazer) return; const t = setTimeout(() => setDesfazer(null), 7000); return () => clearTimeout(t); }, [desfazer?.n]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,11 +141,11 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
     if (outra) return;
     const tecla = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (painel) setPainel(null); else if (previa) setPrevia(null); else fechar();
+      if (painel) setPainel(null); else if (previa) setPrevia(null); else sair();
     };
     window.addEventListener("keydown", tecla);
     return () => window.removeEventListener("keydown", tecla);
-  }, [painel, previa, outra, fechar]);
+  }, [painel, previa, outra, fechar]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!p) return null;
   // as outras obras (para os técnicos noutra obra): lê-se a cada desenho, porque o estado muda no sítio
@@ -208,7 +260,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
         <header className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={fechar} aria-label="Voltar ao negócio"><ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Voltar ao negócio</span></Button>
+              <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={sair} aria-label="Voltar ao negócio"><ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Voltar ao negócio</span></Button>
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Estúdio da obra</p>
                 <h1 id="estudio-obra-titulo" className="truncate text-xl font-semibold tracking-tight">{d.nome} · {d.servico || "Obra"}</h1>
@@ -373,7 +425,7 @@ export function EstudioObra({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: 
         </div>
       </motion.div>
       {outra && (outra.obra.plano?.estado === "em curso" || outra.obra.plano?.estado === "concluída"
-        ? <EstudioObra ctx={ctx} d={outra} fechar={() => setOutra(null)} />
+        ? <EstudioObra ctx={ctx} d={outra} fechar={() => setOutra(null)} endereco={false} />
         : <EstudioPlano ctx={ctx} d={outra} fechar={() => setOutra(null)} />)}
     </NaFrente>
   );
@@ -941,7 +993,7 @@ export function AbrirEstudioObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
         <Button type="button" className="min-h-11 shrink-0" onClick={() => setAberto(true)}><HardHat className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir o estúdio</Button>
       </div>
-      {aberto && <EstudioObra ctx={ctx} d={d} fechar={() => setAberto(false)} />}
+      {aberto && <EstudioObra ctx={ctx} d={d} fechar={(mexeu) => setAberto(false, mexeu ? { substituir: true } : undefined)} />}
     </>
   );
 }
