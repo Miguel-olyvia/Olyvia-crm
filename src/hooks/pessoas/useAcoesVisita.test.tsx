@@ -53,8 +53,21 @@ describe("marcar", () => {
       p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_board_id: "quadro-1", p_inicio: "2026-10-24T09:00:00.000Z", p_fim: "2026-10-24T10:00:00.000Z",
       p_recursos: ["rec-1"], p_lat: null, p_lng: null, p_negocio_id: "neg-1", p_visit_kind: "levantamento",
     });
-    expect(r).toEqual({ visitaId: "v-novo", mudou: true, responsavel: null });
+    expect(r).toEqual({ visitaId: "v-novo", mudou: true, responsavel: null, passouAVisita: null });
     expect(invalidadas(client)).toEqual([true, true]);
+  });
+
+  it("12/11: a primeira visita que passou o negócio a Visita devolve a vaga (passou_a_visita); vazio ou outro tipo conta como não passou", async () => {
+    const { result } = montar();
+    rpcMock.mockReturnValueOnce(respostaOk({ visita_id: "v-novo", mudou: true, passou_a_visita: "qui 12/11 · 08:00" }));
+    const r = await act(async () => result.current.marcar(entrada({ negocioId: "neg-1" })));
+    expect(r).toEqual({ visitaId: "v-novo", mudou: true, responsavel: null, passouAVisita: "qui 12/11 · 08:00" });
+    rpcMock.mockReturnValueOnce(respostaOk({ visita_id: "v-2", mudou: true, passou_a_visita: "" }));
+    const vazio = await act(async () => result.current.marcar(entrada({ hora: "11:00" })));
+    expect(vazio.passouAVisita).toBeNull();
+    rpcMock.mockReturnValueOnce(respostaOk({ visita_id: "v-3", mudou: true, passou_a_visita: true }));
+    const outro = await act(async () => result.current.marcar(entrada({ hora: "12:00" })));
+    expect(outro.passouAVisita).toBeNull();
   });
 
   it("sem recursos (ou sem hora) não chama a base e lança o erro traduzido, sem invalidar", async () => {
@@ -104,7 +117,7 @@ describe("marcar", () => {
       [a, b] = await Promise.all([pa, pb]);
     });
     expect(rpcMock).toHaveBeenCalledTimes(1);
-    expect(a).toEqual({ visitaId: "v-1", mudou: true, responsavel: null });
+    expect(a).toEqual({ visitaId: "v-1", mudou: true, responsavel: null, passouAVisita: null });
     expect(b).toBe(a);
   });
 

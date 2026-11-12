@@ -52,6 +52,8 @@ export interface VisitaGravada {
   remarcada: boolean;
   /** 11/11: a visita passou a lead e o negócio para este comercial (a base já o gravou; o ecrã junta a linha ao histórico). */
   responsavel: ResponsavelDaVisita | null;
+  /** 12/11: a base passou o negócio a Visita com esta vaga (neg_guardar_visita: `passou_a_visita`); null/ausente: não passou. */
+  passouAVisita?: string | null;
 }
 
 interface Props {
@@ -190,15 +192,15 @@ export function MarcarVisitaNegocio({ entityId, negocioId, nome, moradaLead, ori
       ...(localVisita.destino ? { destino: localVisita.destino } : {}),
     };
     const iv = intervaloDaVisita(valor);
-    const montar = (visitaId: string | null, responsavel: ResponsavelDaVisita | null): VisitaGravada => ({
-      visitaId, remarcada: visita !== undefined, presentes: valor.quemVaiEstar ?? "", responsavel,
+    const montar = (visitaId: string | null, responsavel: ResponsavelDaVisita | null, passouAVisita: string | null = null): VisitaGravada => ({
+      visitaId, remarcada: visita !== undefined, presentes: valor.quemVaiEstar ?? "", responsavel, passouAVisita,
       visita: {
         id: visitaId ?? visita?.id ?? "", boardId: valor.boardId, inicio: iv?.inicio ?? "", fim: iv?.fim ?? "", minutos, estado: "marcada", tipo, numeroEmylia: visita?.numeroEmylia ?? null,
         titulo: entrada.titulo, notas: entrada.nota || null, local: textoMoradaVisita(entrada.morada) || null, recursos: [...valor.recursos], dia: valor.data, hora: valor.hora,
       },
     });
     if (visita) envio.enviar(() => acoes.alterar(visita.id, entrada, visita.recursos), (r) => aoGuardada(montar(visita.id, r.responsavel)));
-    else envio.enviar(() => acoes.marcar(entrada), (r) => aoGuardada(montar(r.visitaId, r.responsavel)));
+    else envio.enviar(() => acoes.marcar(entrada), (r) => aoGuardada(montar(r.visitaId, r.responsavel, r.passouAVisita)));
   };
 
   const rotuloTipo = `${id}-tipo`;
